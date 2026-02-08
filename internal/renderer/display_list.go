@@ -19,34 +19,40 @@ const (
 	PaintLink
 	// PaintBorder represents a border paint command
 	PaintBorder
+	// PaintButton represents a button paint command
+	PaintButton
 )
 
 // PaintCommand represents a single paint operation
 type PaintCommand struct {
 	Type   PaintCommandType
-	NodeID int64   // ID of the node this command is for
+	NodeID int64       // ID of the node this command is for
 	Node   *RenderNode // Direct reference to the render node
-	Box    Rect    // Position and size for the command
-	
+	Box    Rect        // Position and size for the command
+
 	// Text-specific fields
-	Text      string
-	FontSize  float32
-	Bold      bool
-	Italic    bool
-	
+	Text     string
+	FontSize float32
+	Bold     bool
+	Italic   bool
+
 	// Rectangle-specific fields
 	FillColor   color.Color
 	StrokeColor color.Color
 	StrokeWidth float32
-	
+
 	// Image-specific fields
 	ImageSrc string
 	ImageAlt string
-	
+
 	// Link-specific fields
 	LinkURL  string
 	LinkText string
-	
+
+	// Button-specific fields
+	ButtonText string
+	OnClick    string // onclick attribute value
+
 	// Border-specific fields
 	BorderTopWidth    float32
 	BorderRightWidth  float32
@@ -102,17 +108,17 @@ func NewDisplayListBuilder() *DisplayListBuilder {
 // Build builds a display list from a layout tree and render tree
 func (dlb *DisplayListBuilder) Build(layoutRoot *LayoutBox, renderRoot *RenderNode) *DisplayList {
 	displayList := NewDisplayList()
-	
+
 	if layoutRoot == nil || renderRoot == nil {
 		return displayList
 	}
-	
+
 	// Build a map of render nodes by ID for quick lookup
 	renderMap := dlb.buildRenderMap(renderRoot)
-	
+
 	// Walk the layout tree and generate paint commands
 	dlb.buildRecursive(layoutRoot, renderMap, displayList)
-	
+
 	return displayList
 }
 
@@ -128,9 +134,9 @@ func (dlb *DisplayListBuilder) buildRenderMapRecursive(node *RenderNode, nodeMap
 	if node == nil {
 		return
 	}
-	
+
 	nodeMap[node.ID] = node
-	
+
 	for _, child := range node.Children {
 		dlb.buildRenderMapRecursive(child, nodeMap)
 	}
@@ -141,21 +147,32 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	if layoutBox == nil {
 		return
 	}
-	
+
 	// Get the corresponding render node
 	renderNode, exists := renderMap[layoutBox.NodeID]
 	if !exists {
 		return
 	}
-	
+
 	// Add border paint command if the element has borders
 	dlb.addBorderCommand(layoutBox, renderNode, displayList)
-	
+
+	// Special handling for button elements - they should be rendered as buttons, not as text
+	if renderNode.Type == NodeTypeElement && renderNode.TagName == "button" {
+		dlb.addElementCommand(layoutBox, renderNode, displayList)
+		// Don't process children for buttons - the button text is extracted in addElementCommand
+		// Process children layout boxes for nested elements if any
+		for _, child := range layoutBox.Children {
+			dlb.buildRecursive(child, renderMap, displayList)
+		}
+		return
+	}
+
 	// Check if this layout box has inline content (LineBoxes)
 	if len(layoutBox.LineBoxes) > 0 {
 		// Group inline boxes by NodeID to avoid duplicates
 		processedNodes := make(map[int64]bool)
-		
+
 		// Process inline boxes from LineBoxes
 		for _, lineBox := range layoutBox.LineBoxes {
 			for _, inlineBox := range lineBox.InlineBoxes {
@@ -164,23 +181,23 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 					continue
 				}
 				processedNodes[inlineBox.NodeID] = true
-				
+
 				if inlineBox.IsText {
 					// Get the render node for this inline box
 					inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]
 					if !inlineExists {
 						continue
 					}
-					
+
 					// Get text style from node hierarchy
 					style := dlb.fontMetrics.GetTextStyleFromNode(inlineRenderNode)
-					
+
 					// Get font size from parent
 					fontSize := dlb.defaultFontSize
 					if inlineRenderNode.Parent != nil {
 						fontSize = dlb.fontMetrics.GetFontSize(inlineRenderNode.Parent.TagName)
 					}
-					
+
 					// Create paint command for the full text of the node
 					// Use the layout box dimensions for the entire element
 					cmd := &PaintCommand{
@@ -193,7 +210,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 						Bold:     style.Bold,
 						Italic:   style.Italic,
 					}
-					
+
 					displayList.AddCommand(cmd)
 				} else {
 					// Handle inline-block elements if needed
@@ -209,7 +226,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 			dlb.addElementCommand(layoutBox, renderNode, displayList)
 		}
 	}
-	
+
 	// Process children
 	for _, child := range layoutBox.Children {
 		dlb.buildRecursive(child, renderMap, displayList)
@@ -222,16 +239,16 @@ func (dlb *DisplayListBuilder) addTextCommand(layoutBox *LayoutBox, renderNode *
 	if text == "" {
 		return
 	}
-	
+
 	// Get text style from node hierarchy
 	style := dlb.fontMetrics.GetTextStyleFromNode(renderNode)
-	
+
 	// Get font size from parent
 	fontSize := dlb.defaultFontSize
 	if renderNode.Parent != nil {
 		fontSize = dlb.fontMetrics.GetFontSize(renderNode.Parent.TagName)
 	}
-	
+
 	cmd := &PaintCommand{
 		Type:     PaintText,
 		NodeID:   layoutBox.NodeID,
@@ -242,7 +259,7 @@ func (dlb *DisplayListBuilder) addTextCommand(layoutBox *LayoutBox, renderNode *
 		Bold:     style.Bold,
 		Italic:   style.Italic,
 	}
-	
+
 	displayList.AddCommand(cmd)
 }
 
@@ -268,7 +285,7 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 		}
 		return
 	}
-	
+
 	// For image elements, add a rectangle placeholder and text
 	if renderNode.TagName == "img" {
 		// Add background rectangle
@@ -282,11 +299,11 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 			StrokeWidth: 1.0,
 		}
 		displayList.AddCommand(cmd)
-		
+
 		// Add image info text if available
 		src, _ := renderNode.GetAttribute("src")
 		alt, _ := renderNode.GetAttribute("alt")
-		
+
 		if src != "" || alt != "" {
 			textCmd := &PaintCommand{
 				Type:     PaintImage,
@@ -298,8 +315,26 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 			}
 			displayList.AddCommand(textCmd)
 		}
+		return
 	}
-	
+
+	// For button elements, add a button paint command
+	if renderNode.TagName == "button" {
+		buttonText := dlb.extractText(renderNode)
+		onclick, _ := renderNode.GetAttribute("onclick")
+
+		cmd := &PaintCommand{
+			Type:       PaintButton,
+			NodeID:     layoutBox.NodeID,
+			Node:       renderNode,
+			Box:        layoutBox.Box,
+			ButtonText: buttonText,
+			OnClick:    onclick,
+		}
+		displayList.AddCommand(cmd)
+		return
+	}
+
 	// For other elements, we primarily rely on their children for rendering
 	// but we could add background colors, borders, etc. here in the future
 }
@@ -309,11 +344,11 @@ func (dlb *DisplayListBuilder) extractText(node *RenderNode) string {
 	if node == nil {
 		return ""
 	}
-	
+
 	if node.Type == NodeTypeText {
 		return strings.TrimSpace(node.Text)
 	}
-	
+
 	var result strings.Builder
 	for _, child := range node.Children {
 		text := dlb.extractText(child)
@@ -324,7 +359,7 @@ func (dlb *DisplayListBuilder) extractText(node *RenderNode) string {
 			result.WriteString(text)
 		}
 	}
-	
+
 	return strings.TrimSpace(result.String())
 }
 
@@ -332,7 +367,7 @@ func (dlb *DisplayListBuilder) extractText(node *RenderNode) string {
 func (dlb *DisplayListBuilder) addBorderCommand(layoutBox *LayoutBox, renderNode *RenderNode, displayList *DisplayList) {
 	// Check if any border is present
 	hasBorder := false
-	
+
 	// Check if any border width is set and style is not "none" or empty
 	if (layoutBox.BorderTopWidth > 0 && layoutBox.BorderTopStyle != "" && layoutBox.BorderTopStyle != "none") ||
 		(layoutBox.BorderRightWidth > 0 && layoutBox.BorderRightStyle != "" && layoutBox.BorderRightStyle != "none") ||
@@ -340,33 +375,33 @@ func (dlb *DisplayListBuilder) addBorderCommand(layoutBox *LayoutBox, renderNode
 		(layoutBox.BorderLeftWidth > 0 && layoutBox.BorderLeftStyle != "" && layoutBox.BorderLeftStyle != "none") {
 		hasBorder = true
 	}
-	
+
 	if !hasBorder {
 		return
 	}
-	
+
 	// Create border paint command
 	cmd := &PaintCommand{
 		Type:   PaintBorder,
 		NodeID: layoutBox.NodeID,
 		Node:   renderNode,
 		Box:    layoutBox.Box,
-		
+
 		BorderTopWidth:    layoutBox.BorderTopWidth,
 		BorderRightWidth:  layoutBox.BorderRightWidth,
 		BorderBottomWidth: layoutBox.BorderBottomWidth,
 		BorderLeftWidth:   layoutBox.BorderLeftWidth,
-		
+
 		BorderTopStyle:    layoutBox.BorderTopStyle,
 		BorderRightStyle:  layoutBox.BorderRightStyle,
 		BorderBottomStyle: layoutBox.BorderBottomStyle,
 		BorderLeftStyle:   layoutBox.BorderLeftStyle,
-		
+
 		BorderTopColor:    layoutBox.BorderTopColor,
 		BorderRightColor:  layoutBox.BorderRightColor,
 		BorderBottomColor: layoutBox.BorderBottomColor,
 		BorderLeftColor:   layoutBox.BorderLeftColor,
 	}
-	
+
 	displayList.AddCommand(cmd)
 }

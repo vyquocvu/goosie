@@ -21,6 +21,9 @@ type LayoutEngine struct {
 	
 	// inlineLayoutEngine handles inline layout
 	inlineLayoutEngine *InlineLayoutEngine
+	
+	// flexLayoutEngine handles flexbox layout
+	flexLayoutEngine *FlexLayoutEngine
 }
 
 // NewLayoutEngine creates a new layout engine
@@ -35,6 +38,7 @@ func NewLayoutEngine(width, height float32) *LayoutEngine {
 		nodeMap:            make(map[int64]*LayoutBox),
 		fontMetrics:        fontMetrics,
 		inlineLayoutEngine: NewInlineLayoutEngine(fontMetrics, defaultSize),
+		flexLayoutEngine:   NewFlexLayoutEngine(fontMetrics),
 	}
 }
 
@@ -73,6 +77,12 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		case "none":
 			layoutBox.Display = DisplayNone
 			return nil // Don't layout non-displayed elements
+		case "flex":
+			layoutBox.Display = DisplayFlex
+		case "grid":
+			layoutBox.Display = DisplayGrid
+		case "inline-block":
+			layoutBox.Display = DisplayInlineBlock
 		default:
 			layoutBox.Display = DisplayInline // Default for unknown values
 		}
@@ -217,7 +227,18 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 	
 	// Check if this block element contains inline content
 	// Block elements like p, div can contain inline content
-	if node.IsBlock() && le.hasInlineContent(node) {
+	if layoutBox.Display == DisplayFlex {
+		// Use flexbox layout engine for flex containers
+		le.flexLayoutEngine.LayoutFlexContainer(node, layoutBox, le.buildLayoutBox)
+		
+		// Calculate childY based on laid out flex items
+		for _, child := range layoutBox.Children {
+			endY := child.Box.Y + child.Box.Height + child.MarginBottom
+			if endY > childY {
+				childY = endY
+			}
+		}
+	} else if node.IsBlock() && le.hasInlineContent(node) {
 		// Use inline layout for the children
 		lines, totalHeight := le.inlineLayoutEngine.LayoutInlineContent(
 			node, childX, currentY, contentWidth, WhiteSpaceNormal,

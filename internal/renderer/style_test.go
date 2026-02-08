@@ -205,3 +205,122 @@ func TestNamedColorApplication(t *testing.T) {
 		t.Errorf("expected background color %v, got %v", expectedBgColor, divNode.ComputedStyle.BackgroundColor)
 	}
 }
+
+func TestMediaQueryStyleApplication(t *testing.T) {
+	htmlContent := `
+		<html>
+			<head>
+				<style>
+					.box {
+						background-color: red;
+					}
+					@media (max-width: 600px) {
+						.box {
+							background-color: blue;
+						}
+					}
+				</style>
+			</head>
+			<body>
+				<div class="box">Responsive box</div>
+			</body>
+		</html>
+	`
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("html.Parse failed: %v", err)
+	}
+
+	stylesheet := extractAndParseCSS(doc)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	if renderTree == nil {
+		t.Fatal("BuildRenderTree returned nil")
+	}
+
+	// Test with large viewport (media query should NOT apply)
+	largeViewportSM := NewStyleManagerWithViewport(stylesheet, 800, 600)
+	largeViewportSM.ApplyStyles(renderTree)
+
+	boxNode := findNodeByClass(renderTree, "box")
+	if boxNode == nil {
+		t.Fatal("box node not found in render tree")
+	}
+
+	expectedRed := color.RGBA{R: 0xff, A: 0xff}
+	if boxNode.ComputedStyle.BackgroundColor != expectedRed {
+		t.Errorf("large viewport: expected background color %v (red), got %v", expectedRed, boxNode.ComputedStyle.BackgroundColor)
+	}
+
+	// Rebuild render tree for second test
+	renderTree2 := BuildRenderTree(findBodyNode(doc))
+	if renderTree2 == nil {
+		t.Fatal("BuildRenderTree returned nil")
+	}
+
+	// Test with small viewport (media query SHOULD apply)
+	smallViewportSM := NewStyleManagerWithViewport(stylesheet, 500, 400)
+	smallViewportSM.ApplyStyles(renderTree2)
+
+	boxNode2 := findNodeByClass(renderTree2, "box")
+	if boxNode2 == nil {
+		t.Fatal("box node not found in render tree")
+	}
+
+	expectedBlue := color.RGBA{B: 0xff, A: 0xff}
+	if boxNode2.ComputedStyle.BackgroundColor != expectedBlue {
+		t.Errorf("small viewport: expected background color %v (blue), got %v", expectedBlue, boxNode2.ComputedStyle.BackgroundColor)
+	}
+}
+
+func TestSetViewportDynamic(t *testing.T) {
+	htmlContent := `
+		<html>
+			<head>
+				<style>
+					.responsive {
+						color: black;
+					}
+					@media (max-width: 768px) {
+						.responsive {
+							color: red;
+						}
+					}
+				</style>
+			</head>
+			<body>
+				<div class="responsive">Dynamic viewport</div>
+			</body>
+		</html>
+	`
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("html.Parse failed: %v", err)
+	}
+
+	stylesheet := extractAndParseCSS(doc)
+	sm := NewStyleManagerWithViewport(stylesheet, 1024, 768)
+
+	// First apply with large viewport
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	sm.ApplyStyles(renderTree)
+
+	node := findNodeByClass(renderTree, "responsive")
+	expectedBlack := color.RGBA{A: 0xff}
+	if node.ComputedStyle.Color != expectedBlack {
+		t.Errorf("before resize: expected color %v (black), got %v", expectedBlack, node.ComputedStyle.Color)
+	}
+
+	// Update viewport to smaller size
+	sm.SetViewport(600, 400)
+
+	// Reapply styles (in real browser this would happen on resize)
+	renderTree2 := BuildRenderTree(findBodyNode(doc))
+	sm.ApplyStyles(renderTree2)
+
+	node2 := findNodeByClass(renderTree2, "responsive")
+	expectedRed := color.RGBA{R: 0xff, A: 0xff}
+	if node2.ComputedStyle.Color != expectedRed {
+		t.Errorf("after resize: expected color %v (red), got %v", expectedRed, node2.ComputedStyle.Color)
+	}
+}
+
