@@ -21,6 +21,12 @@ const (
 	PaintBorder
 	// PaintButton represents a button paint command
 	PaintButton
+	// PaintInput represents an input field paint command
+	PaintInput
+	// PaintTextarea represents a textarea paint command
+	PaintTextarea
+	// PaintTable represents a table paint command
+	PaintTable
 )
 
 // PaintCommand represents a single paint operation
@@ -52,6 +58,17 @@ type PaintCommand struct {
 	// Button-specific fields
 	ButtonText string
 	OnClick    string // onclick attribute value
+
+	// Input-specific fields
+	InputPlaceholder string
+	InputType        string
+
+	// Textarea-specific fields
+	TextareaPlaceholder string
+
+	// Table-specific fields
+	TableData    [][]string
+	TableMaxCols int
 
 	// Border-specific fields
 	BorderTopWidth    float32
@@ -161,10 +178,25 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	if renderNode.Type == NodeTypeElement && renderNode.TagName == "button" {
 		dlb.addElementCommand(layoutBox, renderNode, displayList)
 		// Don't process children for buttons - the button text is extracted in addElementCommand
-		// Process children layout boxes for nested elements if any
-		for _, child := range layoutBox.Children {
-			dlb.buildRecursive(child, renderMap, displayList)
-		}
+		return
+	}
+
+	// Special handling for input elements - self-contained, no children to process
+	if renderNode.Type == NodeTypeElement && renderNode.TagName == "input" {
+		dlb.addElementCommand(layoutBox, renderNode, displayList)
+		return
+	}
+
+	// Special handling for textarea elements - self-contained, no children to process
+	if renderNode.Type == NodeTypeElement && renderNode.TagName == "textarea" {
+		dlb.addElementCommand(layoutBox, renderNode, displayList)
+		return
+	}
+
+	// Special handling for table elements - content is extracted and rendered as a single table widget
+	if renderNode.Type == NodeTypeElement && renderNode.TagName == "table" {
+		dlb.addElementCommand(layoutBox, renderNode, displayList)
+		// Don't process children for tables - the table data is extracted in addElementCommand
 		return
 	}
 
@@ -332,6 +364,83 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 			OnClick:    onclick,
 		}
 		displayList.AddCommand(cmd)
+		return
+	}
+
+	// For input elements, add an input paint command
+	if renderNode.TagName == "input" {
+		placeholder, _ := renderNode.GetAttribute("placeholder")
+		inputType, _ := renderNode.GetAttribute("type")
+		if inputType == "" {
+			inputType = "text"
+		}
+
+		cmd := &PaintCommand{
+			Type:             PaintInput,
+			NodeID:           layoutBox.NodeID,
+			Node:             renderNode,
+			Box:              layoutBox.Box,
+			InputPlaceholder: placeholder,
+			InputType:        inputType,
+		}
+		displayList.AddCommand(cmd)
+		return
+	}
+
+	// For textarea elements, add a textarea paint command
+	if renderNode.TagName == "textarea" {
+		placeholder, _ := renderNode.GetAttribute("placeholder")
+
+		cmd := &PaintCommand{
+			Type:                PaintTextarea,
+			NodeID:              layoutBox.NodeID,
+			Node:                renderNode,
+			Box:                 layoutBox.Box,
+			TextareaPlaceholder: placeholder,
+		}
+		displayList.AddCommand(cmd)
+		return
+	}
+
+	// For table elements, add a table paint command
+	if renderNode.TagName == "table" {
+		data := [][]string{}
+		var maxCols int
+
+		// Helper function to extract rows from a node (handles tbody, thead, tfoot)
+		var extractRows func(*RenderNode)
+		extractRows = func(n *RenderNode) {
+			for _, child := range n.Children {
+				if child.TagName == "tr" {
+					row := []string{}
+					for _, td := range child.Children {
+						if td.TagName == "td" || td.TagName == "th" {
+							row = append(row, dlb.extractText(td))
+						}
+					}
+					if len(row) > maxCols {
+						maxCols = len(row)
+					}
+					data = append(data, row)
+				} else if child.TagName == "tbody" || child.TagName == "thead" || child.TagName == "tfoot" {
+					extractRows(child)
+				}
+			}
+		}
+
+		extractRows(renderNode)
+
+		if len(data) > 0 && maxCols > 0 {
+			cmd := &PaintCommand{
+				Type:         PaintTable,
+				NodeID:       layoutBox.NodeID,
+				Node:         renderNode,
+				Box:          layoutBox.Box,
+				TableData:    data,
+				TableMaxCols: maxCols,
+			}
+			displayList.AddCommand(cmd)
+		}
 		return
 	}
 

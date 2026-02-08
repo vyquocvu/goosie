@@ -3,6 +3,8 @@ package ui
 import (
     "fmt"
     "image/color"
+    "os"
+    "path/filepath"
     "fyne.io/fyne/v2"
     "fyne.io/fyne/v2/app"
     "fyne.io/fyne/v2/canvas"
@@ -65,6 +67,7 @@ type Browser struct {
 	inspectVisible      bool
 	inspectContainer    *fyne.Container
 	inspectButton       *widget.Button
+	screenshotButton    *widget.Button
 	RendererFactory     func() HTMLRenderer
 }
 
@@ -296,7 +299,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -407,6 +410,11 @@ func (b *Browser) createNavigationControls() {
 	// Settings button
 	b.settingsButton = widget.NewButton("⚙", func() {
 		b.showSettings()
+	})
+
+	// Screenshot button
+	b.screenshotButton = widget.NewButton("📷", func() {
+		b.takeScreenshot()
 	})
 }
 
@@ -609,4 +617,25 @@ func (b *Browser) updateConsoleFromActiveTab() {
 // GetConsolePanel returns the console panel
 func (b *Browser) GetConsolePanel() *ConsolePanel {
 	return b.consolePanel
+}
+
+// takeScreenshot captures the browser window and saves it as a PNG
+func (b *Browser) takeScreenshot() {
+	options := DefaultScreenshotOptions()
+	
+	// Try to get the user's home directory for a sensible default
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		options.Directory = filepath.Join(homeDir, "Pictures")
+		// Create directory if it doesn't exist
+		os.MkdirAll(options.Directory, 0755)
+	}
+	
+	filepath, err := TakeScreenshot(b.window, options)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("Failed to take screenshot: %w", err), b.window)
+		return
+	}
+	
+	dialog.ShowInformation("Screenshot Saved", fmt.Sprintf("Screenshot saved to:\n%s", filepath), b.window)
 }

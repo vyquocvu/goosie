@@ -2,10 +2,15 @@ package main
 
 import (
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/renderer"
+	"github.com/vyquocvu/goosie/internal/testutil"
 )
 
 func main() {
@@ -77,7 +82,69 @@ func main() {
 	}
 	log.Println("✓ document.getElementById works correctly")
 
+	// Test 6: Renderer and Screenshot for all examples
+	log.Println("\n6. Testing Renderer and Screenshots...")
+	screenshotDir := "./screenshots"
+	if err := os.MkdirAll(screenshotDir, 0755); err != nil {
+		log.Printf("Warning: Could not create screenshot directory: %v", err)
+	} else {
+		r := renderer.NewRenderer(800, 600)
+		
+		// Define all example HTML files to render
+		exampleFiles := []string{
+			"examples/console_demo.html",
+			"examples/enhanced_html_demo.html",
+			"examples/long_page.html",
+			"examples/html/css_demo.html",
+			"examples/html/forms.html",
+			"examples/html/full_css_demo.html",
+			"examples/html/tables.html",
+		}
+		
+		// Render fetched content first
+		obj, err := r.RenderHTML(html)
+		if err != nil {
+			log.Printf("  ✗ Failed to render example.com: %v", err)
+		} else {
+			filePath := filepath.Join(screenshotDir, "example_com.png")
+			if err := testutil.SaveRenderedScreenshot(obj, filePath, 800, 600); err != nil {
+				log.Printf("  ✗ Failed to save screenshot example.com: %v", err)
+			} else {
+				log.Printf("  ✓ Saved screenshot: %s", filePath)
+			}
+		}
+		
+		// Render all example files
+		for _, examplePath := range exampleFiles {
+			content, err := os.ReadFile(examplePath)
+			if err != nil {
+				log.Printf("  ✗ Failed to read %s: %v", examplePath, err)
+				continue
+			}
+			
+			obj, err := r.RenderHTML(string(content))
+			if err != nil {
+				log.Printf("  ✗ Failed to render %s: %v", examplePath, err)
+				continue
+			}
+			
+			// Generate screenshot filename from path
+			baseName := filepath.Base(examplePath)
+			baseName = strings.TrimSuffix(baseName, ".html")
+			filePath := filepath.Join(screenshotDir, baseName+".png")
+			
+			if err := testutil.SaveRenderedScreenshot(obj, filePath, 800, 600); err != nil {
+				log.Printf("  ✗ Failed to save screenshot %s: %v", baseName, err)
+			} else {
+				log.Printf("  ✓ Saved screenshot: %s", filePath)
+			}
+		}
+		log.Printf("✓ Renderer and screenshots work correctly")
+	}
+
 	log.Println("\n=== All Tests Passed ===")
 	log.Println("\nNote: To see the full GUI browser window with 'Goja Browser' title,")
 	log.Println("run 'go run ./cmd/browser' on a system with X11/Wayland display support.")
+	log.Printf("\nScreenshots saved to: %s/", screenshotDir)
 }
+

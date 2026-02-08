@@ -954,6 +954,79 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			// The onclick attribute would need to be executed via JavaScript runtime
 		})
 		*objects = append(*objects, button)
+
+	case PaintInput:
+		// Render input field widget
+		entry := widget.NewEntry()
+		if cmd.InputPlaceholder != "" {
+			entry.SetPlaceHolder(cmd.InputPlaceholder)
+		}
+		*objects = append(*objects, entry)
+
+	case PaintTextarea:
+		// Render textarea widget
+		entry := widget.NewMultiLineEntry()
+		if cmd.TextareaPlaceholder != "" {
+			entry.SetPlaceHolder(cmd.TextareaPlaceholder)
+		}
+		*objects = append(*objects, entry)
+
+	case PaintTable:
+		// Render table widget
+		if len(cmd.TableData) == 0 || cmd.TableMaxCols == 0 {
+			return
+		}
+
+		data := cmd.TableData
+		maxCols := cmd.TableMaxCols
+
+		table := widget.NewTable(
+			func() (int, int) {
+				return len(data), maxCols
+			},
+			func() fyne.CanvasObject {
+				return widget.NewLabel("")
+			},
+			func(i widget.TableCellID, o fyne.CanvasObject) {
+				if i.Row < len(data) && i.Col < len(data[i.Row]) {
+					o.(*widget.Label).SetText(data[i.Row][i.Col])
+				}
+			},
+		)
+
+		// Calculate column widths based on content
+		colWidths := make([]float32, maxCols)
+		for col := 0; col < maxCols; col++ {
+			maxWidth := float32(80)
+			for row := 0; row < len(data); row++ {
+				if col < len(data[row]) {
+					textWidth := float32(len(data[row][col])) * 8
+					if textWidth > maxWidth {
+						maxWidth = textWidth
+					}
+				}
+			}
+			if maxWidth > 200 {
+				maxWidth = 200
+			}
+			colWidths[col] = maxWidth
+		}
+
+		var totalWidth float32
+		for i := 0; i < maxCols; i++ {
+			table.SetColumnWidth(i, colWidths[i])
+			totalWidth += colWidths[i]
+		}
+
+		// Resize to ensure the table is visible
+		rowHeight := float32(30)
+		tableHeight := float32(len(data)) * rowHeight
+		if tableHeight < 60 {
+			tableHeight = 60
+		}
+		table.Resize(fyne.NewSize(totalWidth, tableHeight))
+
+		*objects = append(*objects, table)
 	}
 }
 
@@ -969,6 +1042,8 @@ func (cr *CanvasRenderer) renderInput(node *RenderNode, objects *[]fyne.CanvasOb
 	if placeholder, ok := node.GetAttribute("placeholder"); ok {
 		entry.SetPlaceHolder(placeholder)
 	}
+	// Resize to ensure the input is visible
+	entry.Resize(fyne.NewSize(200, 36))
 	*objects = append(*objects, entry)
 }
 
@@ -1004,6 +1079,26 @@ func (cr *CanvasRenderer) renderTable(node *RenderNode, objects *[]fyne.CanvasOb
 		return
 	}
 
+	// Calculate column widths based on content
+	colWidths := make([]float32, maxCols)
+	for col := 0; col < maxCols; col++ {
+		maxWidth := float32(80) // Minimum column width
+		for row := 0; row < len(data); row++ {
+			if col < len(data[row]) {
+				// Estimate width based on text length (approx 8 pixels per character)
+				textWidth := float32(len(data[row][col])) * 8
+				if textWidth > maxWidth {
+					maxWidth = textWidth
+				}
+			}
+		}
+		// Cap at reasonable maximum
+		if maxWidth > 200 {
+			maxWidth = 200
+		}
+		colWidths[col] = maxWidth
+	}
+
 	table := widget.NewTable(
 		func() (int, int) {
 			return len(data), maxCols
@@ -1018,9 +1113,21 @@ func (cr *CanvasRenderer) renderTable(node *RenderNode, objects *[]fyne.CanvasOb
 		},
 	)
 
+	// Set column widths
+	var totalWidth float32
 	for i := 0; i < maxCols; i++ {
-		table.SetColumnWidth(i, 100)
+		table.SetColumnWidth(i, colWidths[i])
+		totalWidth += colWidths[i]
 	}
+
+	// Resize to ensure the table is visible
+	// Row height is approximately 30 pixels
+	rowHeight := float32(30)
+	tableHeight := float32(len(data)) * rowHeight
+	if tableHeight < 60 {
+		tableHeight = 60
+	}
+	table.Resize(fyne.NewSize(totalWidth, tableHeight))
 
 	*objects = append(*objects, table)
 }
@@ -1028,6 +1135,8 @@ func (cr *CanvasRenderer) renderTable(node *RenderNode, objects *[]fyne.CanvasOb
 func (cr *CanvasRenderer) renderButton(node *RenderNode, objects *[]fyne.CanvasObject) {
 	text := cr.extractText(node)
 	button := widget.NewButton(text, func() {})
+	// Resize to ensure the button is visible
+	button.Resize(fyne.NewSize(100, 36))
 	*objects = append(*objects, button)
 }
 
@@ -1036,6 +1145,8 @@ func (cr *CanvasRenderer) renderTextarea(node *RenderNode, objects *[]fyne.Canva
 	if placeholder, ok := node.GetAttribute("placeholder"); ok {
 		entry.SetPlaceHolder(placeholder)
 	}
+	// Resize to ensure the textarea is visible
+	entry.Resize(fyne.NewSize(200, 100))
 	*objects = append(*objects, entry)
 }
 

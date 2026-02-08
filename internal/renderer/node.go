@@ -142,6 +142,8 @@ func (n *RenderNode) IsBlock() bool {
 		"li": true, "body": true, "html": true, "header": true,
 		"footer": true, "section": true, "article": true, "aside": true,
 		"nav": true, "main": true, "pre": true, "blockquote": true,
+		// Form elements and tables should be treated as block-level for proper layout
+		"input": true, "textarea": true, "button": true, "table": true, "form": true,
 	}
 	return blockElements[n.TagName]
 }
