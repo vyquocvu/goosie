@@ -539,6 +539,40 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "column-gap":
 		style.ColumnGap = decl.Value
 	
+	// Grid Container properties
+	case "grid-template-columns":
+		style.GridTemplateColumns = decl.Value
+	case "grid-template-rows":
+		style.GridTemplateRows = decl.Value
+	
+	// Grid Item properties
+	case "grid-column-start":
+		style.GridColumnStart = decl.Value
+	case "grid-column-end":
+		style.GridColumnEnd = decl.Value
+	case "grid-row-start":
+		style.GridRowStart = decl.Value
+	case "grid-row-end":
+		style.GridRowEnd = decl.Value
+	case "grid-column":
+		// Shorthand: start / end
+		parts := strings.Split(decl.Value, "/")
+		if len(parts) > 0 {
+			style.GridColumnStart = strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 {
+			style.GridColumnEnd = strings.TrimSpace(parts[1])
+		}
+	case "grid-row":
+		// Shorthand: start / end
+		parts := strings.Split(decl.Value, "/")
+		if len(parts) > 0 {
+			style.GridRowStart = strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 {
+			style.GridRowEnd = strings.TrimSpace(parts[1])
+		}
+	
 	// Flexbox item properties
 	case "flex-grow":
 		if val, err := strconv.ParseFloat(decl.Value, 32); err == nil {

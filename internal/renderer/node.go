@@ -85,6 +85,16 @@ type Style struct {
 	RowGap          string // Row gap for grid/flex
 	ColumnGap       string // Column gap for grid/flex
 	
+	// Grid Container properties
+	GridTemplateColumns string
+	GridTemplateRows    string
+	
+	// Grid Item properties
+	GridColumnStart string
+	GridColumnEnd   string
+	GridRowStart    string
+	GridRowEnd      string
+	
 	// Flexbox item properties
 	FlexGrow   float32 // How much item should grow
 	FlexShrink float32 // How much item should shrink (default 1)

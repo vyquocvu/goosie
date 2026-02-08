@@ -73,7 +73,17 @@ type LayoutBox struct {
 	JustifyContent  string  // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
 	AlignItems      string  // "flex-start", "flex-end", "center", "stretch", "baseline"
 	AlignContent    string  // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
-	Gap             float32 // Gap between flex items
+	Gap             float32 // Gap between flex/grid items
+	
+	// Grid container properties
+	GridTemplateColumns string
+	GridTemplateRows    string
+	
+	// Grid item properties
+	GridColumnStart int
+	GridColumnEnd   int
+	GridRowStart    int
+	GridRowEnd      int
 	
 	// Flexbox item properties
 	FlexGrow   float32 // How much item should grow relative to others

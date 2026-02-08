@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .grid-container {
+            display: grid;
+            grid-template-columns: 100px 100px;
+            grid-template-rows: 100px 100px;
+            gap: 10px;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border: 2px solid #ccc;
+        }
+        .grid-item {
+            background-color: #4CAF50;
+            color: white;
+            padding: 20px;
+            font-size: 30px;
+            text-align: center;
+        }
+        .item1 { background-color: #FF5722; }
+        .item2 { background-color: #2196F3; }
+        .item3 { background-color: #FFC107; color: black; }
+        .item4 { background-color: #9C27B0; }
+    </style>
+</head>
+<body>
+    <h1>Grid Layout Test</h1>
+    <p>This page tests CSS Grid Layout rendering.</p>
+    
+    <div class="grid-container">
+        <div class="grid-item item1">1</div>
+        <div class="grid-item item2">2</div>
+        <div class="grid-item item3">3</div>
+        <div class="grid-item item4">4</div>
+    </div>
+</body>
+</html>

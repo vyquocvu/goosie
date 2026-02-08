@@ -24,6 +24,9 @@ type LayoutEngine struct {
 	
 	// flexLayoutEngine handles flexbox layout
 	flexLayoutEngine *FlexLayoutEngine
+	
+	// gridLayoutEngine handles grid layout
+	gridLayoutEngine *GridLayoutEngine
 }
 
 // NewLayoutEngine creates a new layout engine
@@ -39,6 +42,7 @@ func NewLayoutEngine(width, height float32) *LayoutEngine {
 		fontMetrics:        fontMetrics,
 		inlineLayoutEngine: NewInlineLayoutEngine(fontMetrics, defaultSize),
 		flexLayoutEngine:   NewFlexLayoutEngine(fontMetrics),
+		gridLayoutEngine:   NewGridLayoutEngine(fontMetrics),
 	}
 }
 
@@ -232,6 +236,18 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		le.flexLayoutEngine.LayoutFlexContainer(node, layoutBox, le.buildLayoutBox)
 		
 		// Calculate childY based on laid out flex items
+		for _, child := range layoutBox.Children {
+			endY := child.Box.Y + child.Box.Height + child.MarginBottom
+			if endY > childY {
+				childY = endY
+			}
+		}
+	} else if layoutBox.Display == DisplayGrid {
+		// Use grid layout engine for grid containers
+		le.gridLayoutEngine.LayoutGridContainer(node, layoutBox, le.buildLayoutBox)
+
+		// Calculate childY based on laid out items (similar to Block/Flex)
+		// Grid layout sets height on parentBox too, but let's ensure childY reflects content
 		for _, child := range layoutBox.Children {
 			endY := child.Box.Y + child.Box.Height + child.MarginBottom
 			if endY > childY {

@@ -79,10 +79,10 @@ This document outlines the planned features and improvements for the Goosie proj
 ### CSS Support
 - [x] Full CSS parser
 - [x] Box model implementation (margin, padding, border)
-- [ ] Flexbox layout
-- [ ] Grid layout
+- [x] Flexbox layout
+- [x] Grid layout
 - [ ] CSS animations and transitions
-- [ ] Media queries for responsive design
+- [x] Media queries for responsive design
 
 ### Security & Privacy
 - [ ] HTTPS/TLS support
@@ -113,6 +113,7 @@ This document outlines the planned features and improvements for the Goosie proj
 - [ ] Performance profiler
 
 ### Developer Features
+- [x] Screenshot capability
 - [ ] View page source
 - [ ] View rendered HTML
 - [ ] CSS inspector and live editing
@@ -215,4 +216,4 @@ Have suggestions for the roadmap? Please:
 
 ---
 
-*Last updated: October 2025 - v0.7.0 includes box model, viewport rendering, and performance optimizations*
+*Last updated: February 2026 - v0.8.0 includes Flexbox, Media Queries, and Screenshot capabilities*
