@@ -29,6 +29,9 @@ type Renderer struct {
 
 	// Current page URL for resolving relative links
 	currentURL string
+
+	// Inspect callback for element inspection
+	onInspect func(node *RenderNode, layout *LayoutBox)
 }
 
 // NewRenderer creates a new HTML renderer
@@ -204,6 +207,72 @@ func (r *Renderer) ResolveURL(href string) string {
 // SetWindow sets the Fyne window for the renderer
 func (r *Renderer) SetWindow(w fyne.Window) {
 	r.canvasRenderer.SetWindow(w)
+}
+
+// SetInspectCallback sets the callback for element inspection
+func (r *Renderer) SetInspectCallback(callback func(node *RenderNode, layout *LayoutBox)) {
+	r.onInspect = callback
+	r.canvasRenderer.SetInspectCallback(callback, r)
+}
+
+// HitTest finds the element at the given coordinates (relative to the content)
+// Returns the render node and layout box if found, or nil if not found
+func (r *Renderer) HitTest(x, y float32) (*RenderNode, *LayoutBox) {
+	if r.currentLayoutTree == nil || r.currentRenderTree == nil {
+		return nil, nil
+	}
+
+	// Find the deepest layout box that contains the point
+	layoutBox := r.hitTestLayout(r.currentLayoutTree, x, y)
+	if layoutBox == nil {
+		return nil, nil
+	}
+
+	// Find the corresponding render node
+	renderNode := r.findRenderNodeByID(r.currentRenderTree, layoutBox.NodeID)
+	return renderNode, layoutBox
+}
+
+// hitTestLayout recursively finds the deepest layout box containing the point
+func (r *Renderer) hitTestLayout(layoutBox *LayoutBox, x, y float32) *LayoutBox {
+	if layoutBox == nil {
+		return nil
+	}
+
+	// Check if this box contains the point
+	if !layoutBox.Contains(x, y) {
+		return nil
+	}
+
+	// Check children (in reverse order to get the topmost element)
+	for i := len(layoutBox.Children) - 1; i >= 0; i-- {
+		child := layoutBox.Children[i]
+		if result := r.hitTestLayout(child, x, y); result != nil {
+			return result
+		}
+	}
+
+	// This is the deepest box containing the point
+	return layoutBox
+}
+
+// findRenderNodeByID finds a render node by its ID
+func (r *Renderer) findRenderNodeByID(node *RenderNode, id int64) *RenderNode {
+	if node == nil {
+		return nil
+	}
+
+	if node.ID == id {
+		return node
+	}
+
+	for _, child := range node.Children {
+		if result := r.findRenderNodeByID(child, id); result != nil {
+			return result
+		}
+	}
+
+	return nil
 }
 
 func (r *Renderer) loadImages(node *RenderNode) {

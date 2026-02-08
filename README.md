@@ -57,35 +57,12 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
 
 ## Architecture
 
-The project follows a clean architecture with the following structure:
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
 
-```
-goosie/
-├── cmd/
-│   ├── browser/          # Main GUI browser application
-│   │   └── main.go
-│   ├── renderer-demo/    # Renderer demo (no GUI)
-│   │   └── main.go
-│   └── test/             # Test/demo program (no GUI required)
-│       └── main.go
-├── internal/
-│   ├── net/              # HTTP fetching
-│   │   └── fetcher.go
-│   ├── dom/              # HTML parsing
-│   │   └── parser.go
-│   ├── renderer/         # HTML canvas renderer
-│   │   ├── node.go       # Render tree nodes
-│   │   ├── layout.go     # Layout engine
-│   │   ├── canvas.go     # Canvas rendering
-│   │   ├── renderer.go   # Main renderer
-│   │   └── README.md     # Renderer documentation
-│   ├── js/               # JavaScript runtime (Goja)
-│   │   └── runtime.go
-│   └── ui/               # GUI rendering (Fyne)
-│       └── browser.go
-├── go.mod
-└── README.md
-```
+The project follows a clean architecture:
+- **cmd/**: Command-line applications (browser, renderer-demo, test, server)
+- **internal/**: Core library code (net, dom, renderer, js, ui, css, image)
+- **examples/**: Demo files and HTML examples
 
 ## Dependencies
 
@@ -254,10 +231,9 @@ The browser demonstrates web functionality by:
 - **[DOM_API_DOCUMENTATION.md](DOM_API_DOCUMENTATION.md)**: Comprehensive DOM API reference and examples
 - **[BROWSER_API_DOCUMENTATION.md](BROWSER_API_DOCUMENTATION.md)**: Browser APIs (location, history, timers, fetch, storage)
 - **[CONSOLE_DOCUMENTATION.md](CONSOLE_DOCUMENTATION.md)**: Enhanced console features and debugging tools
-- **[ASYNC_ARCHITECTURE.md](ASYNC_ARCHITECTURE.md)**: Async fetch/render architecture
-- **[PERFORMANCE.md](PERFORMANCE.md)**: Viewport culling and display list caching
-- **[RENDER_ARCHITECTURE.md](RENDER_ARCHITECTURE.md)**: Multi-tree rendering system
-- **[SCROLL_PERFORMANCE_SUMMARY.md](SCROLL_PERFORMANCE_SUMMARY.md)**: Scroll optimizations
+- **[ARCHITECTURE.md](ARCHITECTURE.md)**: System architecture and component flow
+- **[PERFORMANCE.md](PERFORMANCE.md)**: Performance optimizations and benchmarks
+- **[ROADMAP.md](ROADMAP.md)**: Planned features and development roadmap
 
 ### Adding Features
 

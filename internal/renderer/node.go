@@ -74,6 +74,23 @@ type Style struct {
 	BorderRightColor   color.Color
 	BorderBottomColor  color.Color
 	BorderLeftColor    color.Color
+	
+	// Flexbox container properties
+	FlexDirection   string // "row", "row-reverse", "column", "column-reverse"
+	FlexWrap        string // "nowrap", "wrap", "wrap-reverse"
+	JustifyContent  string // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
+	AlignItems      string // "flex-start", "flex-end", "center", "stretch", "baseline"
+	AlignContent    string // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
+	Gap             string // Gap between flex/grid items
+	RowGap          string // Row gap for grid/flex
+	ColumnGap       string // Column gap for grid/flex
+	
+	// Flexbox item properties
+	FlexGrow   float32 // How much item should grow
+	FlexShrink float32 // How much item should shrink (default 1)
+	FlexBasis  string  // Initial main size ("auto", length, percentage)
+	AlignSelf  string  // Override align-items for this item
+	Order      int     // Order of flex item
 }
 
 // Box represents the layout box for a render node
@@ -125,6 +142,8 @@ func (n *RenderNode) IsBlock() bool {
 		"li": true, "body": true, "html": true, "header": true,
 		"footer": true, "section": true, "article": true, "aside": true,
 		"nav": true, "main": true, "pre": true, "blockquote": true,
+		// Form elements and tables should be treated as block-level for proper layout
+		"input": true, "textarea": true, "button": true, "table": true, "form": true,
 	}
 	return blockElements[n.TagName]
 }

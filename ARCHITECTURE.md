@@ -141,52 +141,11 @@ User enters URL → Add to History → Fetch Page → Parse HTML → Render
 - **URL Entry**: Enter web addresses, press Enter to navigate
 - **☆/★ (Bookmark)**: Toggle bookmark for current page
 
-## Console Output
-
-```
-2025/10/19 18:04:49 Fetching https://example.com...
-2025/10/19 18:04:49 Parsed body text: Example Domain This domain...
-2025/10/19 18:04:49 Running test JavaScript...
-JS runtime initialized
-```
-
-## Key Features Demonstrated
-
-✓ HTTP fetching with Go's net/http
-✓ HTML parsing with golang.org/x/net/html  
-✓ JavaScript execution with Goja
-✓ console.log() implementation
-✓ document.getElementById() implementation
-✓ GUI rendering with Fyne
-✓ Window titled "Goosie"
-✓ Body text extraction and markdown rendering
-✓ JavaScript runtime initialization
-✓ URL bar with navigation
-✓ Back/Forward navigation with history management
-✓ Refresh/Reload functionality
-✓ Bookmark management with visual indicators
-✓ Thread-safe state management
-
-## Testing
-
-Run without GUI (headless testing):
-```bash
-go run ./cmd/test
-```
-
-Run with GUI (requires X11/Wayland):
-```bash
-go run ./cmd/browser
-```
-
-Unit tests:
-```bash
-go test -v -cover ./internal/...
-```
-
 ## Test Coverage
 
 - internal/net: 36.4%
 - internal/dom: 95.0%
 - internal/renderer: 100% (65+ tests, including benchmarks)
 - internal/js: 92.9%
+
+See [README.md](README.md) for usage and testing instructions.

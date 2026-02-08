@@ -2,7 +2,7 @@
 
 This document outlines the planned features and improvements for the Goosie project. The roadmap is organized into phases based on priority and complexity.
 
-## Current Status (v0.4.0)
+## Current Status (v0.7.0)
 
 ✅ **Core Foundation**
 - HTTP fetching with Go's net/http
@@ -78,7 +78,7 @@ This document outlines the planned features and improvements for the Goosie proj
 
 ### CSS Support
 - [x] Full CSS parser
-- [ ] Box model implementation
+- [x] Box model implementation (margin, padding, border)
 - [ ] Flexbox layout
 - [ ] Grid layout
 - [ ] CSS animations and transitions
@@ -93,6 +93,9 @@ This document outlines the planned features and improvements for the Goosie proj
 - [ ] Pop-up blocker
 
 ### Performance
+- [x] Viewport-based rendering (30-65x faster)
+- [x] Display list caching
+- [x] Scroll optimization
 - [ ] Page caching
 - [ ] Concurrent page loading
 - [ ] Resource prefetching
@@ -212,4 +215,4 @@ Have suggestions for the roadmap? Please:
 
 ---
 
-*Last updated: October 2025 - v0.4.0 includes comprehensive browser APIs*
+*Last updated: October 2025 - v0.7.0 includes box model, viewport rendering, and performance optimizations*

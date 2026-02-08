@@ -11,12 +11,36 @@ import (
 
 // StyleManager applies styles from a stylesheet to a render tree.
 type StyleManager struct {
-	stylesheet *css.StyleSheet
+	stylesheet     *css.StyleSheet
+	viewportWidth  float32
+	viewportHeight float32
+	mediaEvaluator *MediaQueryEvaluator
 }
 
 // NewStyleManager creates a new StyleManager.
 func NewStyleManager(stylesheet *css.StyleSheet) *StyleManager {
 	return &StyleManager{stylesheet: stylesheet}
+}
+
+// NewStyleManagerWithViewport creates a StyleManager with viewport dimensions for media query support.
+func NewStyleManagerWithViewport(stylesheet *css.StyleSheet, viewportWidth, viewportHeight float32) *StyleManager {
+	return &StyleManager{
+		stylesheet:     stylesheet,
+		viewportWidth:  viewportWidth,
+		viewportHeight: viewportHeight,
+		mediaEvaluator: NewMediaQueryEvaluator(viewportWidth, viewportHeight),
+	}
+}
+
+// SetViewport updates the viewport dimensions for media query evaluation.
+func (sm *StyleManager) SetViewport(width, height float32) {
+	sm.viewportWidth = width
+	sm.viewportHeight = height
+	if sm.mediaEvaluator != nil {
+		sm.mediaEvaluator.UpdateViewport(width, height)
+	} else {
+		sm.mediaEvaluator = NewMediaQueryEvaluator(width, height)
+	}
 }
 
 // ApplyStyles applies the styles to the given render tree.
@@ -36,9 +60,38 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	}
 
 	sm.applyMatchingRules(node)
+	
+	// Apply @media rules if viewport is set
+	if sm.mediaEvaluator != nil {
+		sm.applyMediaRules(node)
+	}
 
 	for _, child := range node.Children {
 		sm.ApplyStyles(child)
+	}
+}
+
+// applyMediaRules applies styles from @media rules that match current viewport.
+func (sm *StyleManager) applyMediaRules(node *RenderNode) {
+	if sm.stylesheet == nil || sm.mediaEvaluator == nil {
+		return
+	}
+	
+	for _, atRule := range sm.stylesheet.AtRules {
+		if atRule.Name == "media" {
+			if sm.mediaEvaluator.Evaluate(atRule.Prelude) {
+				// Apply rules from this @media block
+				for _, rule := range atRule.Rules {
+					for _, selectorSeq := range rule.Selectors {
+						if sm.matchesSequence(selectorSeq, node) {
+							for _, decl := range rule.Declarations {
+								sm.applyDeclaration(node, decl)
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -456,6 +509,56 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		parseBorderShorthand(decl.Value, style, "bottom")
 	case "border-left":
 		parseBorderShorthand(decl.Value, style, "left")
+	
+	// Flexbox container properties
+	case "flex-direction":
+		style.FlexDirection = decl.Value
+	case "flex-wrap":
+		style.FlexWrap = decl.Value
+	case "flex-flow":
+		// Shorthand for flex-direction and flex-wrap
+		parts := strings.Fields(decl.Value)
+		for _, part := range parts {
+			switch part {
+			case "row", "row-reverse", "column", "column-reverse":
+				style.FlexDirection = part
+			case "nowrap", "wrap", "wrap-reverse":
+				style.FlexWrap = part
+			}
+		}
+	case "justify-content":
+		style.JustifyContent = decl.Value
+	case "align-items":
+		style.AlignItems = decl.Value
+	case "align-content":
+		style.AlignContent = decl.Value
+	case "gap":
+		style.Gap = decl.Value
+	case "row-gap":
+		style.RowGap = decl.Value
+	case "column-gap":
+		style.ColumnGap = decl.Value
+	
+	// Flexbox item properties
+	case "flex-grow":
+		if val, err := strconv.ParseFloat(decl.Value, 32); err == nil {
+			style.FlexGrow = float32(val)
+		}
+	case "flex-shrink":
+		if val, err := strconv.ParseFloat(decl.Value, 32); err == nil {
+			style.FlexShrink = float32(val)
+		}
+	case "flex-basis":
+		style.FlexBasis = decl.Value
+	case "flex":
+		// Shorthand: flex-grow [flex-shrink] [flex-basis]
+		parseFlexShorthand(decl.Value, style)
+	case "align-self":
+		style.AlignSelf = decl.Value
+	case "order":
+		if val, err := strconv.Atoi(decl.Value); err == nil {
+			style.Order = val
+		}
 	}
 }
 
@@ -774,4 +877,55 @@ func isBorderStyle(s string) bool {
 		}
 	}
 	return false
+}
+
+// parseFlexShorthand parses the flex shorthand property
+// flex: none | [ <flex-grow> <flex-shrink>? || <flex-basis> ]
+// Examples: "1", "1 1", "1 1 auto", "0 0 auto", "none", "auto"
+func parseFlexShorthand(value string, style *Style) {
+	value = strings.TrimSpace(value)
+	
+	// Handle special values
+	switch value {
+	case "none":
+		style.FlexGrow = 0
+		style.FlexShrink = 0
+		style.FlexBasis = "auto"
+		return
+	case "auto":
+		style.FlexGrow = 1
+		style.FlexShrink = 1
+		style.FlexBasis = "auto"
+		return
+	case "initial":
+		style.FlexGrow = 0
+		style.FlexShrink = 1
+		style.FlexBasis = "auto"
+		return
+	}
+	
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		return
+	}
+	
+	// First value is always flex-grow
+	if val, err := strconv.ParseFloat(parts[0], 32); err == nil {
+		style.FlexGrow = float32(val)
+	}
+	
+	if len(parts) >= 2 {
+		// Second value could be flex-shrink or flex-basis
+		if val, err := strconv.ParseFloat(parts[1], 32); err == nil {
+			style.FlexShrink = float32(val)
+		} else {
+			// It's a flex-basis
+			style.FlexBasis = parts[1]
+		}
+	}
+	
+	if len(parts) >= 3 {
+		// Third value is flex-basis
+		style.FlexBasis = parts[2]
+	}
 }

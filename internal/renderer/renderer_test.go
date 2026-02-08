@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	
+	"github.com/vyquocvu/goosie/internal/testutil"
 	"golang.org/x/net/html"
 )
 
@@ -65,6 +66,13 @@ func TestRenderHTML(t *testing.T) {
 			if obj == nil {
 				t.Error("RenderHTML() returned nil canvas object")
 			}
+			
+			// Save screenshot if enabled
+			if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTML_"+tt.name, 800, 600); err != nil {
+				t.Logf("Warning: failed to save screenshot: %v", err)
+			} else if path != "" {
+				t.Logf("Saved screenshot: %s", path)
+			}
 		})
 	}
 }
@@ -79,6 +87,13 @@ func TestRenderHTMLWithAttributes(t *testing.T) {
 	}
 	if obj == nil {
 		t.Fatal("RenderHTML() returned nil")
+	}
+	
+	// Save screenshot if enabled
+	if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTMLWithAttributes", 800, 600); err != nil {
+		t.Logf("Warning: failed to save screenshot: %v", err)
+	} else if path != "" {
+		t.Logf("Saved screenshot: %s", path)
 	}
 }
 
@@ -106,6 +121,13 @@ func TestRenderHTMLHeadings(t *testing.T) {
 			if obj == nil {
 				t.Error("RenderHTML() returned nil")
 			}
+			
+			// Save screenshot if enabled
+			if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTMLHeadings_"+tt.name, 800, 600); err != nil {
+				t.Logf("Warning: failed to save screenshot: %v", err)
+			} else if path != "" {
+				t.Logf("Saved screenshot: %s", path)
+			}
 		})
 	}
 }
@@ -131,6 +153,13 @@ func TestRenderHTMLLists(t *testing.T) {
 	}
 	if obj == nil {
 		t.Fatal("RenderHTML() returned nil")
+	}
+	
+	// Save screenshot if enabled
+	if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTMLLists", 800, 600); err != nil {
+		t.Logf("Warning: failed to save screenshot: %v", err)
+	} else if path != "" {
+		t.Logf("Saved screenshot: %s", path)
 	}
 }
 

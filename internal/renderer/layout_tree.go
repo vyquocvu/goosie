@@ -12,6 +12,12 @@ const (
 	DisplayInline DisplayType = "inline"
 	// DisplayNone represents a box that should not be rendered
 	DisplayNone DisplayType = "none"
+	// DisplayFlex represents a flex container
+	DisplayFlex DisplayType = "flex"
+	// DisplayGrid represents a grid container
+	DisplayGrid DisplayType = "grid"
+	// DisplayInlineBlock represents an inline-block box
+	DisplayInlineBlock DisplayType = "inline-block"
 )
 
 // Rect represents a rectangular box with position and dimensions
@@ -60,6 +66,21 @@ type LayoutBox struct {
 	
 	// Inline layout information
 	LineBoxes []*LineBox // Line boxes for inline content (if this contains inline children)
+	
+	// Flexbox container properties
+	FlexDirection   string  // "row", "row-reverse", "column", "column-reverse"
+	FlexWrap        string  // "nowrap", "wrap", "wrap-reverse"
+	JustifyContent  string  // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
+	AlignItems      string  // "flex-start", "flex-end", "center", "stretch", "baseline"
+	AlignContent    string  // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
+	Gap             float32 // Gap between flex items
+	
+	// Flexbox item properties
+	FlexGrow   float32 // How much item should grow relative to others
+	FlexShrink float32 // How much item should shrink relative to others
+	FlexBasis  float32 // Initial main size (0 means auto)
+	AlignSelf  string  // Override align-items for this item
+	Order      int     // Order of flex item
 }
 
 // NewLayoutBox creates a new layout box

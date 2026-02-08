@@ -2,12 +2,17 @@ package ui
 
 import (
     "fmt"
+    "image/color"
+    "os"
+    "path/filepath"
     "fyne.io/fyne/v2"
     "fyne.io/fyne/v2/app"
+    "fyne.io/fyne/v2/canvas"
     "fyne.io/fyne/v2/container"
     "fyne.io/fyne/v2/dialog"
     "fyne.io/fyne/v2/widget"
     "github.com/vyquocvu/goosie/internal/js"
+    "github.com/vyquocvu/goosie/internal/renderer"
 )
 
 // fixedHeightLayout is a custom layout that sets a fixed height for a widget
@@ -58,6 +63,11 @@ type Browser struct {
 	consoleSplit        *container.Split
 	consoleVisible      bool
 	consoleContainer    *fyne.Container
+	inspectPanel        *InspectPanel
+	inspectVisible      bool
+	inspectContainer    *fyne.Container
+	inspectButton       *widget.Button
+	screenshotButton    *widget.Button
 	RendererFactory     func() HTMLRenderer
 }
 
@@ -109,6 +119,7 @@ func NewBrowser() *Browser {
 		loadingBarContainer: loadingBarContainer,
 		tabItems:            []*Tab{},
 		consoleVisible:      false,
+		inspectVisible:      false,
 	}
 
 	// Create console panel
@@ -120,6 +131,9 @@ func NewBrowser() *Browser {
 			tab.jsRuntime.ClearJavaScriptErrors()
 		}
 	})
+
+	// Create inspect panel
+	browser.inspectPanel = NewInspectPanel(browser.toggleInspect)
 
 	firstTab := browser.newTabInternal()
 	browser.tabItems = append(browser.tabItems, firstTab)
@@ -148,6 +162,17 @@ func (b *Browser) toggleConsole() {
 		b.consoleContainer.Show()
 	}
 	b.consoleVisible = !b.consoleVisible
+	b.window.Content().Refresh()
+}
+
+// toggleInspect toggles the visibility of the inspect panel
+func (b *Browser) toggleInspect() {
+	if b.inspectVisible {
+		b.inspectContainer.Hide()
+	} else {
+		b.inspectContainer.Show()
+	}
+	b.inspectVisible = !b.inspectVisible
 	b.window.Content().Refresh()
 }
 
@@ -241,6 +266,15 @@ func (b *Browser) RenderHTMLContent(htmlContent string) error {
     currentURL := tab.state.GetCurrentURL()
     tab.htmlRenderer.SetCurrentURL(currentURL)
 
+	// Set up inspect callback
+	tab.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+		fyne.Do(func() {
+			if b.inspectVisible {
+				b.inspectPanel.SetElement(node, layout)
+			}
+		})
+	})
+
 	canvasObject, err := tab.htmlRenderer.RenderHTML(htmlContent)
 	if err != nil {
 		return err
@@ -265,7 +299,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.consoleButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -291,10 +325,24 @@ func (b *Browser) Show() {
 	b.consoleContainer = container.NewMax(b.consolePanel.CanvasObject())
 	b.consoleContainer.Hide()
 
-	// Combine the main content and the console container
-	contentWithConsole := container.NewBorder(navBar, nil, nil, nil, container.NewVSplit(b.tabs, b.consoleContainer))
+	// Create a container for the inspect panel and hide it initially
+	b.inspectContainer = container.NewMax(b.inspectPanel.CanvasObject())
+	b.inspectContainer.Hide()
 
-	b.window.SetContent(contentWithConsole)
+	// Create a horizontal split for inspect panel (on the right)
+	mainWithInspect := container.NewHSplit(b.tabs, b.inspectContainer)
+	mainWithInspect.Offset = 1.0 // Initially hide inspect panel (all space to tabs)
+
+	// Combine the main content with console and inspect panels
+	contentWithConsole := container.NewBorder(navBar, nil, nil, nil, container.NewVSplit(mainWithInspect, b.consoleContainer))
+
+	// Create white background rectangle
+	whiteBg := canvas.NewRectangle(color.White)
+	
+	// Wrap content with white background
+	contentWithBg := container.NewMax(whiteBg, contentWithConsole)
+
+	b.window.SetContent(contentWithBg)
 	b.window.ShowAndRun()
 }
 
@@ -354,9 +402,19 @@ func (b *Browser) createNavigationControls() {
 		b.toggleConsole()
 	})
 
+	// Inspect button
+	b.inspectButton = widget.NewButton("🔍", func() {
+		b.toggleInspect()
+	})
+
 	// Settings button
 	b.settingsButton = widget.NewButton("⚙", func() {
 		b.showSettings()
+	})
+
+	// Screenshot button
+	b.screenshotButton = widget.NewButton("📷", func() {
+		b.takeScreenshot()
 	})
 }
 
@@ -559,4 +617,25 @@ func (b *Browser) updateConsoleFromActiveTab() {
 // GetConsolePanel returns the console panel
 func (b *Browser) GetConsolePanel() *ConsolePanel {
 	return b.consolePanel
+}
+
+// takeScreenshot captures the browser window and saves it as a PNG
+func (b *Browser) takeScreenshot() {
+	options := DefaultScreenshotOptions()
+	
+	// Try to get the user's home directory for a sensible default
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		options.Directory = filepath.Join(homeDir, "Pictures")
+		// Create directory if it doesn't exist
+		os.MkdirAll(options.Directory, 0755)
+	}
+	
+	filepath, err := TakeScreenshot(b.window, options)
+	if err != nil {
+		dialog.ShowError(fmt.Errorf("Failed to take screenshot: %w", err), b.window)
+		return
+	}
+	
+	dialog.ShowInformation("Screenshot Saved", fmt.Sprintf("Screenshot saved to:\n%s", filepath), b.window)
 }
