@@ -104,14 +104,128 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	le.applyBoxModel(node, layoutBox)
 	
 	// Compute layout
-	currentY := le.computeLayoutBox(node, layoutBox, x, y, availableWidth)
+	var currentY float32
+	if node.TagName == "table" {
+		layoutBox.Display = DisplayGrid
+		currentY = le.buildTableLayoutBox(node, layoutBox, x, y, availableWidth)
+	} else {
+		currentY = le.computeLayoutBox(node, layoutBox, x, y, availableWidth)
+	}
 	
 	// Update height based on children
-	// currentY includes the top margin, so we need to subtract it to get the actual content+padding height
-	// Bottom margin is also external and should not be included in height
-	layoutBox.Box.Height = currentY - (y + layoutBox.MarginTop)
+	// Update height based on children
+	// currentY tracks the bottom edge of content/padding
+	// layoutBox.Box.Y is the top edge
+	layoutBox.Box.Height = currentY - layoutBox.Box.Y
+	if layoutBox.Box.Height < 0 {
+		layoutBox.Box.Height = 0
+	}
 	
 	return layoutBox
+}
+
+// buildTableLayoutBox creates a LayoutBox for a table node and computes its layout
+func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32) float32 {
+	// x, y and availableWidth already account for margins from computeLayoutBox
+	// availableWidth here is the border-box width
+
+	// Reduce available width by borders (if we supported them fully) - for now just assume availableWidth is content width
+	contentWidth := availableWidth
+	
+	// Ensure we don't proceed with negative width
+	if contentWidth < 0 {
+		contentWidth = 0
+	}
+
+	layoutBox.Box.X = x
+	layoutBox.Box.Y = y
+	layoutBox.Box.Width = contentWidth
+
+	// 1. Flatten table to find cells and max columns
+	maxCols := 0
+
+	// Helper to traverse
+	var traverse func(n *RenderNode)
+	traverse = func(n *RenderNode) {
+		for _, child := range n.Children {
+			if child.TagName == "tr" {
+				colCount := 0
+				for _, cell := range child.Children {
+					if cell.TagName == "td" || cell.TagName == "th" {
+						colCount++
+					}
+				}
+				if colCount > maxCols {
+					maxCols = colCount
+				}
+			} else if child.TagName == "thead" || child.TagName == "tbody" || child.TagName == "tfoot" {
+				traverse(child)
+			}
+		}
+	}
+	traverse(node)
+
+	if maxCols == 0 {
+		return y + layoutBox.PaddingTop + layoutBox.PaddingBottom
+	}
+
+	// 2. Set grid template columns
+	var colsBuilder strings.Builder
+	for i := 0; i < maxCols; i++ {
+		if i > 0 {
+			colsBuilder.WriteString(" ")
+		}
+		colsBuilder.WriteString("auto")
+	}
+	layoutBox.GridTemplateColumns = colsBuilder.String()
+
+	// 3. Create layout boxes for cells
+	currentRow := 1
+
+	var buildCells func(n *RenderNode)
+	buildCells = func(n *RenderNode) {
+		for _, child := range n.Children {
+			if child.TagName == "tr" {
+				currentCol := 1
+				for _, cell := range child.Children {
+					if cell.TagName == "td" || cell.TagName == "th" {
+						// Create cell box
+						cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth)
+
+						if cellBox != nil {
+							cellBox.GridColumnStart = currentCol
+							cellBox.GridColumnEnd = currentCol + 1
+							cellBox.GridRowStart = currentRow
+							cellBox.GridRowEnd = currentRow + 1
+
+							layoutBox.AddChild(cellBox)
+						}
+						currentCol++
+					}
+				}
+				currentRow++
+			} else if child.TagName == "thead" || child.TagName == "tbody" || child.TagName == "tfoot" {
+				buildCells(child)
+			}
+		}
+	}
+	buildCells(node)
+
+	// 4. Run grid layout
+	le.gridLayoutEngine.LayoutTable(layoutBox)
+
+	// Calculate height
+	maxY := y + layoutBox.PaddingTop
+	for _, child := range layoutBox.Children {
+		childBottom := child.Box.Y + child.Box.Height + child.MarginBottom
+		if childBottom > maxY {
+			maxY = childBottom
+		}
+	}
+	
+	// Ensure we account for explicit height if set (ignoring for now to allow auto-height)
+	
+	return maxY + layoutBox.PaddingBottom
 }
 
 // applyBoxModel applies box model properties (margin, padding, border) from computed style to layout box
@@ -163,6 +277,9 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 	
 	// Reduce available width by horizontal margins
 	availableWidth -= (layoutBox.MarginLeft + layoutBox.MarginRight)
+	if availableWidth < 0 {
+		availableWidth = 0
+	}
 	
 	layoutBox.Box.X = x
 	layoutBox.Box.Y = y
@@ -225,6 +342,9 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 	
 	// Reduce available width by horizontal padding
 	contentWidth := availableWidth - layoutBox.PaddingLeft - layoutBox.PaddingRight
+	if contentWidth < 0 {
+		contentWidth = 0
+	}
 	
 	// Layout children
 	childY := currentY
@@ -281,11 +401,26 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		childY = currentY + totalHeight
 	} else if node.IsBlock() {
 		// Block elements: stack children vertically (when no inline content)
-		for _, child := range node.Children {
-			childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
-			if childLayoutBox != nil {
-				layoutBox.AddChild(childLayoutBox)
-				childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+		// Check if element has intrinsic dimensions (e.g. input, button, textarea)
+		if node.TagName == "input" {
+			// Default height for input
+			inputHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
+			childY = currentY + inputHeight
+		} else if node.TagName == "button" && !le.hasInlineContent(node) {
+			// Default height for empty button
+			buttonHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
+			childY = currentY + buttonHeight
+		} else if node.TagName == "textarea" {
+			// Default height for textarea
+			textareaHeight := float32(60) + layoutBox.PaddingTop + layoutBox.PaddingBottom
+			childY = currentY + textareaHeight
+		} else {
+			for _, child := range node.Children {
+				childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
+				if childLayoutBox != nil {
+					layoutBox.AddChild(childLayoutBox)
+					childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+				}
 			}
 		}
 	} else {
@@ -315,12 +450,28 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 			
 			childY = currentY + totalHeight
 		} else {
-			// Fallback to old behavior for empty inline elements
-			for _, child := range node.Children {
-				childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
-				if childLayoutBox != nil {
-					layoutBox.AddChild(childLayoutBox)
-					childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+			// Check if element has intrinsic dimensions (e.g. input, button, textarea)
+			// These might have no children (void tags or empty) but need rendering size
+			if node.TagName == "input" {
+				// Default height for input
+				inputHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
+				childY = currentY + inputHeight
+			} else if node.TagName == "button" {
+				// Default height for button if empty (though usually has text)
+				buttonHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
+				childY = currentY + buttonHeight
+			} else if node.TagName == "textarea" {
+				// Default height for textarea
+				textareaHeight := float32(60) + layoutBox.PaddingTop + layoutBox.PaddingBottom
+				childY = currentY + textareaHeight
+			} else {
+				// Fallback to old behavior for empty inline elements using Block layout (e.g. empty div)
+				for _, child := range node.Children {
+					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
+					if childLayoutBox != nil {
+						layoutBox.AddChild(childLayoutBox)
+						childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+					}
 				}
 			}
 		}

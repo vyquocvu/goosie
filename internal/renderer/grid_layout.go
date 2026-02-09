@@ -292,6 +292,131 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 	}
 }
 
+// LayoutTable performs layout for a table layout box (which has flattened structure)
+func (gle *GridLayoutEngine) LayoutTable(layoutBox *LayoutBox) {
+	if layoutBox == nil || len(layoutBox.Children) == 0 {
+		return
+	}
+
+	// 1. Parse Grid Properties
+	gridTemplateColumns := parseTrackList(layoutBox.GridTemplateColumns)
+
+	// Since we construct the string manually, we expect correct format.
+	// Rows are implicit/auto based on content.
+
+	columnGap := layoutBox.Gap
+	rowGap := layoutBox.Gap // Assume same gap for now
+
+	// 2. Determine container dimensions
+	containerWidth := layoutBox.Box.Width - layoutBox.PaddingLeft - layoutBox.PaddingRight
+
+	// 3. Create grid items from existing children
+	items := make([]*gridItem, len(layoutBox.Children))
+	maxColumnIndex := len(gridTemplateColumns)
+	maxRowIndex := 0
+
+	for i, childBox := range layoutBox.Children {
+		items[i] = &gridItem{
+			layoutBox: childBox,
+			colStart:  childBox.GridColumnStart,
+			colEnd:    childBox.GridColumnEnd,
+			rowStart:  childBox.GridRowStart,
+			rowEnd:    childBox.GridRowEnd,
+		}
+
+		if childBox.GridColumnEnd-1 > maxColumnIndex {
+			maxColumnIndex = childBox.GridColumnEnd - 1
+		}
+		if childBox.GridRowEnd-1 > maxRowIndex {
+			maxRowIndex = childBox.GridRowEnd - 1
+		}
+	}
+
+	// 4. Expand tracks for implicit items
+	for len(gridTemplateColumns) < maxColumnIndex {
+		gridTemplateColumns = append(gridTemplateColumns, TrackSize{Type: TrackTypeAuto, Value: 0})
+	}
+
+	// 5. Calculate Track Sizes
+	colWidths := gle.calculateTrackSizes(gridTemplateColumns, containerWidth, columnGap)
+
+	// 6. Set Item Widths and Calculate Row Heights
+	// For table cells, we want them to take the width of the column
+	for _, item := range items {
+		colStartIdx := item.colStart - 1
+		colEndIdx := item.colEnd - 1
+
+		if colStartIdx < 0 {
+			colStartIdx = 0
+		}
+		if colEndIdx > len(colWidths) {
+			colEndIdx = len(colWidths)
+		}
+
+		itemWidth := float32(0)
+		for i := colStartIdx; i < colEndIdx; i++ {
+			itemWidth += colWidths[i]
+		}
+		// Add gaps between spanned tracks
+		if colEndIdx > colStartIdx+1 {
+			itemWidth += float32(colEndIdx-colStartIdx-1) * columnGap
+		}
+
+		// Update item box width
+		if item.layoutBox != nil {
+			item.layoutBox.Box.Width = itemWidth
+		}
+	}
+
+	// Generate row tracks (all auto)
+	rowTracks := make([]TrackSize, maxRowIndex)
+	for i := range rowTracks {
+		rowTracks[i] = TrackSize{Type: TrackTypeAuto}
+	}
+
+	// Calculate row heights based on item heights
+	rowHeights := gle.calculateRowHeights(rowTracks, items, 0, rowGap) // 0 height for auto calculation
+
+	// 7. Position items
+	colPositions := make([]float32, len(colWidths)+1)
+	currentX := layoutBox.Box.X + layoutBox.PaddingLeft
+	for i, w := range colWidths {
+		colPositions[i] = currentX
+		currentX += w + columnGap
+	}
+	colPositions[len(colWidths)] = currentX
+
+	rowPositions := make([]float32, len(rowHeights)+1)
+	currentY := layoutBox.Box.Y + layoutBox.PaddingTop
+	for i, h := range rowHeights {
+		rowPositions[i] = currentY
+		currentY += h + rowGap
+	}
+	rowPositions[len(rowHeights)] = currentY
+
+	// Assign final geometry
+	for _, item := range items {
+		if item.layoutBox == nil {
+			continue
+		}
+
+		cStart := item.colStart - 1
+		rStart := item.rowStart - 1
+
+		if cStart >= 0 && cStart < len(colPositions) {
+			item.layoutBox.Box.X = colPositions[cStart]
+		}
+		if rStart >= 0 && rStart < len(rowPositions) {
+			item.layoutBox.Box.Y = rowPositions[rStart]
+		}
+		
+		// Ensure items stretch to fill their cell height (default table behavior)
+		if rStart >= 0 && rStart < len(rowHeights) {
+			item.layoutBox.Box.Height = rowHeights[rStart]
+		}
+	}
+}
+
 // calculateTrackSizes resolves track sizes to pixels
 func (gle *GridLayoutEngine) calculateTrackSizes(tracks []TrackSize, availableSpace float32, gap float32) []float32 {
 	sizes := make([]float32, len(tracks))

@@ -193,12 +193,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 		return
 	}
 
-	// Special handling for table elements - content is extracted and rendered as a single table widget
-	if renderNode.Type == NodeTypeElement && renderNode.TagName == "table" {
-		dlb.addElementCommand(layoutBox, renderNode, displayList)
-		// Don't process children for tables - the table data is extracted in addElementCommand
-		return
-	}
+
 
 	// Check if this layout box has inline content (LineBoxes)
 	if len(layoutBox.LineBoxes) > 0 {
@@ -403,46 +398,7 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 	}
 
 	// For table elements, add a table paint command
-	if renderNode.TagName == "table" {
-		data := [][]string{}
-		var maxCols int
 
-		// Helper function to extract rows from a node (handles tbody, thead, tfoot)
-		var extractRows func(*RenderNode)
-		extractRows = func(n *RenderNode) {
-			for _, child := range n.Children {
-				if child.TagName == "tr" {
-					row := []string{}
-					for _, td := range child.Children {
-						if td.TagName == "td" || td.TagName == "th" {
-							row = append(row, dlb.extractText(td))
-						}
-					}
-					if len(row) > maxCols {
-						maxCols = len(row)
-					}
-					data = append(data, row)
-				} else if child.TagName == "tbody" || child.TagName == "thead" || child.TagName == "tfoot" {
-					extractRows(child)
-				}
-			}
-		}
-
-		extractRows(renderNode)
-
-		if len(data) > 0 && maxCols > 0 {
-			cmd := &PaintCommand{
-				Type:         PaintTable,
-				NodeID:       layoutBox.NodeID,
-				Node:         renderNode,
-				Box:          layoutBox.Box,
-				TableData:    data,
-				TableMaxCols: maxCols,
-			}
-			displayList.AddCommand(cmd)
-		}
-		return
-	}
 
 	// For other elements, we primarily rely on their children for rendering
 	// but we could add background colors, borders, etc. here in the future

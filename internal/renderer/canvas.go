@@ -728,10 +728,10 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	}
 
 	if len(objects) == 0 {
-		return container.NewVBox()
+		return container.NewWithoutLayout()
 	}
 
-	content := container.NewVBox(objects...)
+	content := container.NewWithoutLayout(objects...)
 
 	// Wrap in a mouse-aware container if inspect callback is set
 	if cr.onInspect != nil && cr.renderer != nil {
@@ -741,6 +741,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	return content
 }
 
+// renderCommand renders a single paint command to canvas objects
 // renderCommand renders a single paint command to canvas objects
 func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
 	switch cmd.Type {
@@ -775,7 +776,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			}
 			textObj.TextStyle = textStyle
 
-			*objects = append(*objects, textObj)
+			cr.addObjectToDisplay(textObj, cmd, objects)
 		} else {
 			// Use standard label widget
 			label := widget.NewLabel(cmd.Text)
@@ -789,13 +790,12 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 				label.TextStyle = fyne.TextStyle{Italic: true}
 			}
 
-			*objects = append(*objects, label)
+			cr.addObjectToDisplay(label, cmd, objects)
 		}
 
 	case PaintRect:
 		rect := canvas.NewRectangle(cmd.FillColor)
-		rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-		*objects = append(*objects, rect)
+		cr.addObjectToDisplay(rect, cmd, objects)
 
 	case PaintImage:
 		// Try to load and render the actual image if loader is available
@@ -814,9 +814,9 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					if cmd.ImageAlt != "" {
 						altLabel := widget.NewLabel(cmd.ImageAlt)
 						altLabel.Wrapping = fyne.TextWrapWord
-						*objects = append(*objects, container.NewVBox(img, altLabel))
+						cr.addObjectToDisplay(container.NewVBox(img, altLabel), cmd, objects)
 					} else {
-						*objects = append(*objects, img)
+						cr.addObjectToDisplay(img, cmd, objects)
 					}
 					return
 
@@ -829,7 +829,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					displayText += "]"
 					label := widget.NewLabel(displayText)
 					label.Wrapping = fyne.TextWrapWord
-					*objects = append(*objects, label)
+					cr.addObjectToDisplay(label, cmd, objects)
 					return
 
 				case imageloader.StateLoading:
@@ -845,7 +845,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 					rect.SetMinSize(fyne.NewSize(100, 100))
 
-					*objects = append(*objects, container.NewVBox(rect, label))
+					cr.addObjectToDisplay(container.NewVBox(rect, label), cmd, objects)
 					return
 				}
 			}
@@ -867,7 +867,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 		rect.SetMinSize(fyne.NewSize(100, 100))
 
-		*objects = append(*objects, container.NewVBox(rect, label))
+		cr.addObjectToDisplay(container.NewVBox(rect, label), cmd, objects)
 
 	case PaintLink:
 		// Render clickable link
@@ -882,19 +882,19 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		if cr.onNavigate != nil {
 			// Create a custom tappable widget
 			tappableLink := newTappableHyperlink(cmd.LinkText, resolvedURL, cr.onNavigate)
-			*objects = append(*objects, tappableLink)
+			cr.addObjectToDisplay(tappableLink, cmd, objects)
 		} else {
 			// Fallback to default hyperlink behavior
 			parsedURL, err := url.Parse(resolvedURL)
 			if err == nil {
 				link := widget.NewHyperlink(cmd.LinkText, parsedURL)
 				link.Wrapping = fyne.TextWrapWord
-				*objects = append(*objects, link)
+				cr.addObjectToDisplay(link, cmd, objects)
 			} else {
 				// If URL parsing fails, display as text
 				label := widget.NewLabel(cmd.LinkText)
 				label.Wrapping = fyne.TextWrapWord
-				*objects = append(*objects, label)
+				cr.addObjectToDisplay(label, cmd, objects)
 			}
 		}
 
@@ -938,8 +938,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		}
 
 		if len(borderContainer.Objects) > 0 {
-			borderContainer.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-			*objects = append(*objects, borderContainer)
+			cr.addObjectToDisplay(borderContainer, cmd, objects)
 		}
 	
 	case PaintButton:
@@ -953,7 +952,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			// For now, we'll just create an empty handler
 			// The onclick attribute would need to be executed via JavaScript runtime
 		})
-		*objects = append(*objects, button)
+		cr.addObjectToDisplay(button, cmd, objects)
 
 	case PaintInput:
 		// Render input field widget
@@ -961,7 +960,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		if cmd.InputPlaceholder != "" {
 			entry.SetPlaceHolder(cmd.InputPlaceholder)
 		}
-		*objects = append(*objects, entry)
+		cr.addObjectToDisplay(entry, cmd, objects)
 
 	case PaintTextarea:
 		// Render textarea widget
@@ -969,7 +968,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		if cmd.TextareaPlaceholder != "" {
 			entry.SetPlaceHolder(cmd.TextareaPlaceholder)
 		}
-		*objects = append(*objects, entry)
+		cr.addObjectToDisplay(entry, cmd, objects)
 
 	case PaintTable:
 		// Render table widget
@@ -1018,15 +1017,12 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			totalWidth += colWidths[i]
 		}
 
-		// Resize to ensure the table is visible
-		rowHeight := float32(30)
-		tableHeight := float32(len(data)) * rowHeight
-		if tableHeight < 60 {
-			tableHeight = 60
-		}
-		table.Resize(fyne.NewSize(totalWidth, tableHeight))
-
-		*objects = append(*objects, table)
+		// Resize happens in addObjectToDisplay
+		// But table content size needs to be set separately?
+		// widget.Table calculates content size based on Length/CreateCell/UpdateCell.
+		// LayoutEngine sets cmd.Box.Height.
+		// addObjectToDisplay calls Resize on table.
+		cr.addObjectToDisplay(table, cmd, objects)
 	}
 }
 
@@ -1196,4 +1192,30 @@ func (cr *CanvasRenderer) applyStylesToLabel(node *RenderNode, text string) fyne
 	}
 
 	return textObj
+}
+
+// addObjectToDisplay adds an object to the display list with correct positioning and sizing
+func (cr *CanvasRenderer) addObjectToDisplay(obj fyne.CanvasObject, cmd *PaintCommand, objects *[]fyne.CanvasObject) {
+	if obj == nil {
+		return
+	}
+	// Calculate size and position
+	width := cmd.Box.Width
+	height := cmd.Box.Height
+	x := cmd.Box.X
+	y := cmd.Box.Y - cr.viewportY
+	
+	// Ensure no negative dimensions
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
+
+	// Set size and position
+	obj.Resize(fyne.NewSize(width, height))
+	obj.Move(fyne.NewPos(x, y))
+
+	*objects = append(*objects, obj)
 }

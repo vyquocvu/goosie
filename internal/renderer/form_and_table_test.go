@@ -66,52 +66,45 @@ func TestTableElementRendering(t *testing.T) {
 		</html>
 	`
 	r := NewRenderer(800, 600)
-	doc, err := html.Parse(strings.NewReader(htmlContent))
+	obj, err := r.RenderHTML(htmlContent)
 	if err != nil {
-		t.Fatalf("html.Parse failed: %v", err)
+		t.Fatalf("RenderHTML failed: %v", err)
 	}
-	renderTree := BuildRenderTree(findBodyNode(doc))
-	
-	// Debug: print render tree
-	t.Logf("Render tree structure:")
-	var printTree func(*RenderNode, int)
-	printTree = func(node *RenderNode, level int) {
-		if node == nil {
-			return
-		}
-		indent := strings.Repeat("  ", level)
-		if node.Type == NodeTypeElement {
-			t.Logf("%sElement: %s (children: %d)", indent, node.TagName, len(node.Children))
-		} else {
-			t.Logf("%sText: %s", indent, node.Text)
-		}
-		for _, child := range node.Children {
-			printTree(child, level+1)
-		}
-	}
-	printTree(renderTree, 0)
-	
-	obj := r.canvasRenderer.Render(renderTree)
 
-	topContainer, ok := obj.(*fyne.Container)
+	// Result should be a container
+	containerObj, ok := obj.(*fyne.Container)
 	if !ok {
 		t.Fatalf("Expected a container, but got %T", obj)
 	}
 
-	if len(topContainer.Objects) != 1 {
-		t.Fatalf("Expected 1 object, got %d", len(topContainer.Objects))
+	// Inspect children
+	// We expect paint commands for:
+	// - Cell 1
+	// - Cell 2
+	// - Cell 3
+	// - Cell 4
+	// Plus potentially backgrounds/borders if any (none in this simple html)
+	
+	// Print children types for debugging
+	t.Logf("Container has %d children", len(containerObj.Objects))
+	foundCells := 0
+	expectedTexts := []string{"Cell 1", "Cell 2", "Cell 3", "Cell 4"}
+	
+	for i, child := range containerObj.Objects {
+		if label, ok := child.(*widget.Label); ok {
+			t.Logf("Child %d is Label: %s", i, label.Text)
+			// Check if it matches one of our expected cells
+			for _, expected := range expectedTexts {
+				if label.Text == expected {
+					foundCells++
+				}
+			}
+		} else {
+			t.Logf("Child %d is %T", i, child)
+		}
 	}
 
-	table, ok := topContainer.Objects[0].(*widget.Table)
-	if !ok {
-		t.Fatalf("Expected a Table widget, but got %T", topContainer.Objects[0])
-	}
-
-	rows, cols := table.Length()
-	if rows != 2 {
-		t.Errorf("Expected 2 rows, but got %d", rows)
-	}
-	if cols != 2 {
-		t.Errorf("Expected 2 columns, but got %d", cols)
+	if foundCells < 4 {
+		t.Errorf("Expected at least 4 cell labels, found %d matching labels", foundCells)
 	}
 }
