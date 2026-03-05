@@ -13,4 +13,7 @@ type HTMLRenderer interface {
 	SetNavigationCallback(callback func(url string))
 	HitTest(x, y float32) (*renderer.RenderNode, *renderer.LayoutBox)
 	SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox))
+	GetRoot() *renderer.RenderNode
+	Refresh()
+	SetRefreshCallback(callback func())
 }

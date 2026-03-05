@@ -2,60 +2,460 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/widget"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
-// InspectPanel represents the element inspector panel
+// InspectPanel represents the comprehensive element inspector panel
 type InspectPanel struct {
 	container      *fyne.Container
-	elementInfo    *widget.RichText
+	tree           *widget.Tree
+	detailsTabs    *container.AppTabs
 	closeButton    *widget.Button
 	onClose        func()
+	
 	selectedNode   *renderer.RenderNode
 	selectedLayout *renderer.LayoutBox
+	
+	htmlRenderer   HTMLRenderer
+	rootNode       *renderer.RenderNode
+	nodeMap        map[string]*renderer.RenderNode // Map UID (string ID) to RenderNode
+	
+	// Details View Components
+	propertiesContainer  *fyne.Container
+	stylesContainer      *fyne.Container
+	layoutContainer      *fyne.Container
+	performanceContainer *fyne.Container
+	
+	// Search
+	searchEntry *widget.Entry
+	
+	// State to prevent recursive updates
+	updatingUI bool
 }
 
 // NewInspectPanel creates a new inspect panel
 func NewInspectPanel(onClose func()) *InspectPanel {
 	panel := &InspectPanel{
 		onClose: onClose,
+		nodeMap: make(map[string]*renderer.RenderNode),
 	}
 
 	// Create close button
-	panel.closeButton = widget.NewButton("X", func() {
+	panel.closeButton = widget.NewButton("✕", func() {
 		if panel.onClose != nil {
 			panel.onClose()
 		}
 	})
 
-	// Create element info display
-	panel.elementInfo = widget.NewRichText()
-	panel.elementInfo.Wrapping = fyne.TextWrapWord
-	panel.elementInfo.Scroll = container.ScrollBoth
+	// Create Tree View
+	panel.tree = widget.NewTree(
+		func(id widget.TreeNodeID) []widget.TreeNodeID {
+			node, ok := panel.nodeMap[id]
+			if !ok {
+				// If root
+				if id == "" && panel.rootNode != nil {
+					return []string{fmt.Sprintf("%d", panel.rootNode.ID)}
+				}
+				return nil
+			}
+			
+			var children []string
+			for _, child := range node.Children {
+				children = append(children, fmt.Sprintf("%d", child.ID))
+			}
+			return children
+		},
+		func(id widget.TreeNodeID) bool {
+			node, ok := panel.nodeMap[id]
+			if !ok {
+				return false
+			}
+			return len(node.Children) > 0
+		},
+		func(branch bool) fyne.CanvasObject {
+			return widget.NewLabel("Node")
+		},
+		func(id widget.TreeNodeID, branch bool, o fyne.CanvasObject) {
+			node, ok := panel.nodeMap[id]
+			if !ok {
+				return
+			}
+			label := o.(*widget.Label)
+			if node.Type == renderer.NodeTypeElement {
+				txt := "<" + node.TagName
+				if idAttr, ok := node.GetAttribute("id"); ok {
+					txt += " #" + idAttr
+				}
+				if classAttr, ok := node.GetAttribute("class"); ok {
+					// Truncate class if too long
+					if len(classAttr) > 15 {
+						classAttr = classAttr[:12] + "..."
+					}
+					txt += " ." + strings.ReplaceAll(classAttr, " ", ".")
+				}
+				txt += ">"
+				label.SetText(txt)
+				label.TextStyle = fyne.TextStyle{Bold: true}
+			} else {
+				text := strings.TrimSpace(node.Text)
+				if len(text) > 20 {
+					text = text[:17] + "..."
+				}
+				label.SetText("Text: " + text)
+				label.TextStyle = fyne.TextStyle{Italic: true}
+			}
+		},
+	)
+	
+	panel.tree.OnSelected = func(id widget.TreeNodeID) {
+		if node, ok := panel.nodeMap[id]; ok {
+			panel.selectNode(node)
+		}
+	}
 
-	// Create scroll container for element info
-	infoScroll := container.NewScroll(panel.elementInfo)
-	infoScroll.SetMinSize(fyne.NewSize(300, 200))
+	// Create Details View
+	panel.createDetailsView()
 
-	// Create top bar with controls
+	// Search Bar
+	panel.searchEntry = widget.NewEntry()
+	panel.searchEntry.SetPlaceHolder("Search (tag, #id, .class)")
+	panel.searchEntry.OnSubmitted = func(query string) {
+		panel.PerformSearch(query)
+	}
+	searchBtn := widget.NewButton("Find", func() {
+		panel.PerformSearch(panel.searchEntry.Text)
+	})
+	
+	searchContainer := container.NewBorder(nil, nil, nil, searchBtn, panel.searchEntry)
+
+	// Create Split Container
+	// Left: Tree with search, Right: Details
+	leftSide := container.NewBorder(searchContainer, nil, nil, nil, panel.tree)
+	
+	split := container.NewHSplit(
+		leftSide,
+		panel.detailsTabs,
+	)
+	split.Offset = 0.4
+
+	// Top Bar
 	topBar := container.NewBorder(
 		nil, nil,
+		widget.NewLabel("DOM Inspector"),
 		container.NewHBox(panel.closeButton),
-		widget.NewLabel("Element Inspector"),
 	)
 
-	// Create main container
 	panel.container = container.NewBorder(
 		topBar, nil, nil, nil,
-		infoScroll,
+		split,
 	)
 
 	return panel
+}
+
+func (ip *InspectPanel) PerformSearch(query string) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return
+	}
+	
+	// Simple search: iterate all nodes
+	for id, node := range ip.nodeMap {
+		match := false
+		if strings.HasPrefix(query, "#") {
+			if val, ok := node.GetAttribute("id"); ok && val == query[1:] {
+				match = true
+			}
+		} else if strings.HasPrefix(query, ".") {
+			if val, ok := node.GetAttribute("class"); ok && strings.Contains(val, query[1:]) {
+				match = true
+			}
+		} else {
+			if strings.EqualFold(node.TagName, query) {
+				match = true
+			}
+		}
+		
+		if match {
+			ip.tree.Select(id)
+			// Note: Fyne tree scrolling to item is not easily exposed yet, 
+			// but selection will update the details view
+			return // Stop after first match for now
+		}
+	}
+}
+
+func (ip *InspectPanel) createDetailsView() {
+	// Properties Tab
+	ip.propertiesContainer = container.NewVBox()
+	
+	// Styles Tab
+	ip.stylesContainer = container.NewVBox()
+	
+	// Layout Tab
+	ip.layoutContainer = container.NewVBox()
+	
+	// Performance Tab
+	ip.performanceContainer = container.NewVBox()
+	
+	ip.detailsTabs = container.NewAppTabs(
+		container.NewTabItem("Properties", container.NewVScroll(ip.propertiesContainer)),
+		container.NewTabItem("Styles", container.NewVScroll(ip.stylesContainer)),
+		container.NewTabItem("Layout", container.NewVScroll(ip.layoutContainer)),
+		container.NewTabItem("Performance", container.NewVScroll(ip.performanceContainer)),
+	)
+}
+
+// SetRenderer sets the HTML renderer and refreshes the tree
+func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
+	ip.htmlRenderer = r
+	if r != nil {
+		ip.rootNode = r.GetRoot()
+		ip.rebuildNodeMap()
+		ip.tree.Refresh()
+		// Also update details if selection exists but might be stale
+		if ip.selectedNode != nil {
+			// Check if node still exists in new map
+			if _, ok := ip.nodeMap[fmt.Sprintf("%d", ip.selectedNode.ID)]; ok {
+				ip.updateDetails()
+			} else {
+				ip.selectedNode = nil
+				ip.selectedLayout = nil
+				ip.updateDetails()
+			}
+		}
+	}
+}
+
+// SetElement sets the element to inspect (called from renderer hit test)
+func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	// Update tree selection
+	if node != nil {
+		id := fmt.Sprintf("%d", node.ID)
+		ip.tree.Select(id)
+	}
+	
+	ip.selectedNode = node
+	ip.selectedLayout = layout
+	ip.updateDetails()
+}
+
+func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
+	ip.selectedNode = node
+	// Note: selectedLayout might be stale if we just clicked tree node
+	// In a real implementation we'd ask renderer for layout box of this node
+	ip.updateDetails()
+}
+
+func (ip *InspectPanel) updateDetails() {
+	if ip.selectedNode == nil {
+		ip.propertiesContainer.Objects = nil
+		ip.stylesContainer.Objects = nil
+		ip.layoutContainer.Objects = nil
+		ip.performanceContainer.Objects = nil
+		
+		ip.propertiesContainer.Refresh()
+		ip.stylesContainer.Refresh()
+		ip.layoutContainer.Refresh()
+		ip.performanceContainer.Refresh()
+		return
+	}
+	
+	ip.updatePropertiesTab()
+	ip.updateStylesTab()
+	ip.updateLayoutTab()
+	ip.updatePerformanceTab()
+}
+
+func (ip *InspectPanel) updatePropertiesTab() {
+	ip.propertiesContainer.Objects = nil
+	
+	node := ip.selectedNode
+	
+	// Tag Name
+	ip.propertiesContainer.Add(widget.NewLabelWithStyle("Tag Name", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	ip.propertiesContainer.Add(widget.NewLabel(node.TagName))
+	
+	// ID
+	ip.propertiesContainer.Add(widget.NewLabelWithStyle("ID", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	idEntry := widget.NewEntry()
+	if val, ok := node.GetAttribute("id"); ok {
+		idEntry.SetText(val)
+	}
+	idEntry.OnSubmitted = func(s string) {
+		node.SetAttribute("id", s)
+		ip.refreshRenderer()
+	}
+	ip.propertiesContainer.Add(idEntry)
+	
+	// Classes
+	ip.propertiesContainer.Add(widget.NewLabelWithStyle("Classes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	classEntry := widget.NewEntry()
+	if val, ok := node.GetAttribute("class"); ok {
+		classEntry.SetText(val)
+	}
+	classEntry.OnSubmitted = func(s string) {
+		node.SetAttribute("class", s)
+		ip.refreshRenderer()
+	}
+	ip.propertiesContainer.Add(classEntry)
+	
+	// Text Content (if applicable)
+	if node.Type == renderer.NodeTypeText || (len(node.Children) == 1 && node.Children[0].Type == renderer.NodeTypeText) {
+		ip.propertiesContainer.Add(widget.NewLabelWithStyle("Text Content", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		textEntry := widget.NewMultiLineEntry()
+		
+		targetNode := node
+		if node.Type == renderer.NodeTypeElement && len(node.Children) > 0 {
+			targetNode = node.Children[0]
+		}
+		
+		textEntry.SetText(targetNode.Text)
+		// Add an "Update" button for text since multiline entry submission is tricky
+		updateBtn := widget.NewButton("Update Text", func() {
+			targetNode.Text = textEntry.Text
+			ip.refreshRenderer()
+		})
+		
+		ip.propertiesContainer.Add(textEntry)
+		ip.propertiesContainer.Add(updateBtn)
+	}
+	
+	// Other Attributes
+	ip.propertiesContainer.Add(widget.NewLabelWithStyle("Attributes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	
+	// Filter out id and class as they are handled above
+	for k, v := range node.Attrs {
+		if k == "id" || k == "class" {
+			continue
+		}
+		
+		key := k // capture loop var
+		val := v
+		
+		box := container.NewBorder(nil, nil, widget.NewLabel(key+":"), nil, 
+			container.NewHBox(
+				widget.NewEntryWithData(bindingString(val, func(s string) {
+					node.SetAttribute(key, s)
+				})),
+				widget.NewButton("✓", func() { ip.refreshRenderer() }),
+			),
+		)
+		ip.propertiesContainer.Add(box)
+	}
+	
+	ip.propertiesContainer.Refresh()
+}
+
+func (ip *InspectPanel) updateStylesTab() {
+	ip.stylesContainer.Objects = nil
+	node := ip.selectedNode
+	if node.ComputedStyle == nil {
+		ip.stylesContainer.Add(widget.NewLabel("No computed styles"))
+		ip.stylesContainer.Refresh()
+		return
+	}
+	
+	style := node.ComputedStyle
+	
+	// Helper to add style row
+	addStyleRow := func(label string, value string, onUpdate func(string)) {
+		entry := widget.NewEntry()
+		entry.SetText(value)
+		entry.OnSubmitted = func(s string) {
+			onUpdate(s)
+			ip.refreshRenderer()
+		}
+		
+		row := container.NewBorder(nil, nil, widget.NewLabel(label), nil, entry)
+		ip.stylesContainer.Add(row)
+	}
+	
+	ip.stylesContainer.Add(widget.NewLabelWithStyle("Computed Styles", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
+	
+	addStyleRow("Display", style.Display, func(s string) { style.Display = s })
+	addStyleRow("Font Size", fmt.Sprintf("%.1fpx", style.FontSize), func(s string) { 
+		if f, err := strconv.ParseFloat(strings.TrimSuffix(s, "px"), 32); err == nil {
+			style.FontSize = float32(f)
+		}
+	})
+	addStyleRow("Width", style.Width, func(s string) { style.Width = s })
+	addStyleRow("Height", style.Height, func(s string) { style.Height = s })
+	addStyleRow("Color", fmt.Sprintf("%v", style.Color), func(s string) {
+		// Read-only for now
+	})
+	
+	ip.stylesContainer.Refresh()
+}
+
+func (ip *InspectPanel) updateLayoutTab() {
+	ip.layoutContainer.Objects = nil
+	if ip.selectedLayout == nil {
+		ip.layoutContainer.Add(widget.NewLabel("No layout information available"))
+		ip.layoutContainer.Refresh()
+		return
+	}
+	
+	box := ip.selectedLayout
+	
+	ip.layoutContainer.Add(widget.NewLabelWithStyle("Box Model", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
+	
+	grid := container.NewGridWithColumns(2,
+		widget.NewLabel("X:"), widget.NewLabel(fmt.Sprintf("%.2f", box.Box.X)),
+		widget.NewLabel("Y:"), widget.NewLabel(fmt.Sprintf("%.2f", box.Box.Y)),
+		widget.NewLabel("Width:"), widget.NewLabel(fmt.Sprintf("%.2f", box.Box.Width)),
+		widget.NewLabel("Height:"), widget.NewLabel(fmt.Sprintf("%.2f", box.Box.Height)),
+	)
+	
+	ip.layoutContainer.Add(grid)
+	
+	ip.layoutContainer.Add(widget.NewLabelWithStyle("Margins", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	ip.layoutContainer.Add(widget.NewLabel(fmt.Sprintf("Top: %.1f, Right: %.1f, Bottom: %.1f, Left: %.1f", 
+		box.MarginTop, box.MarginRight, box.MarginBottom, box.MarginLeft)))
+		
+	ip.layoutContainer.Add(widget.NewLabelWithStyle("Padding", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	ip.layoutContainer.Add(widget.NewLabel(fmt.Sprintf("Top: %.1f, Right: %.1f, Bottom: %.1f, Left: %.1f", 
+		box.PaddingTop, box.PaddingRight, box.PaddingBottom, box.PaddingLeft)))
+	
+	ip.layoutContainer.Refresh()
+}
+
+func (ip *InspectPanel) updatePerformanceTab() {
+	ip.performanceContainer.Objects = nil
+	
+	nodeCount := len(ip.nodeMap)
+	
+	ip.performanceContainer.Add(widget.NewLabelWithStyle("Metrics", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
+	ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Total Nodes: %d", nodeCount)))
+	
+	ip.performanceContainer.Refresh()
+}
+
+func (ip *InspectPanel) refreshRenderer() {
+	if ip.htmlRenderer != nil {
+		ip.htmlRenderer.Refresh()
+	}
+}
+
+func (ip *InspectPanel) rebuildNodeMap() {
+	ip.nodeMap = make(map[string]*renderer.RenderNode)
+	if ip.rootNode != nil {
+		ip.traverseAndMap(ip.rootNode)
+	}
+}
+
+func (ip *InspectPanel) traverseAndMap(node *renderer.RenderNode) {
+	ip.nodeMap[fmt.Sprintf("%d", node.ID)] = node
+	for _, child := range node.Children {
+		ip.traverseAndMap(child)
+	}
 }
 
 // GetContainer returns the inspect panel's container
@@ -63,134 +463,26 @@ func (ip *InspectPanel) GetContainer() *fyne.Container {
 	return ip.container
 }
 
-// SetElement sets the element to inspect
-func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
-	ip.selectedNode = node
-	ip.selectedLayout = layout
-	ip.updateElementInfo()
-}
-
-// Clear clears the inspected element
-func (ip *InspectPanel) Clear() {
-	ip.selectedNode = nil
-	ip.selectedLayout = nil
-	ip.elementInfo.ParseMarkdown("No element selected. Hover over an element to inspect it.")
-}
-
-// updateElementInfo updates the displayed element information
-func (ip *InspectPanel) updateElementInfo() {
-	if ip.selectedNode == nil {
-		ip.elementInfo.ParseMarkdown("No element selected.")
-		return
-	}
-
-	var info strings.Builder
-
-	// Element tag/type
-	if ip.selectedNode.Type == renderer.NodeTypeElement {
-		info.WriteString(fmt.Sprintf("**Tag:** `<%s>`\n\n", ip.selectedNode.TagName))
-	} else if ip.selectedNode.Type == renderer.NodeTypeText {
-		info.WriteString("**Type:** Text Node\n\n")
-	}
-
-	// Node ID
-	info.WriteString(fmt.Sprintf("**Node ID:** %d\n\n", ip.selectedNode.ID))
-
-	// Attributes
-	if len(ip.selectedNode.Attrs) > 0 {
-		info.WriteString("**Attributes:**\n")
-		for key, value := range ip.selectedNode.Attrs {
-			info.WriteString(fmt.Sprintf("- `%s` = `%s`\n", key, value))
-		}
-		info.WriteString("\n")
-	}
-
-	// Text content (for text nodes or elements with text)
-	if ip.selectedNode.Type == renderer.NodeTypeText {
-		text := strings.TrimSpace(ip.selectedNode.Text)
-		if text != "" {
-			// Truncate long text
-			if len(text) > 100 {
-				text = text[:100] + "..."
-			}
-			info.WriteString(fmt.Sprintf("**Text:** `%s`\n\n", text))
-		}
-	}
-
-	// Layout information
-	if ip.selectedLayout != nil {
-		info.WriteString("**Layout:**\n")
-		info.WriteString(fmt.Sprintf("- Position: (%.1f, %.1f)\n", ip.selectedLayout.Box.X, ip.selectedLayout.Box.Y))
-		info.WriteString(fmt.Sprintf("- Size: %.1f × %.1f\n", ip.selectedLayout.Box.Width, ip.selectedLayout.Box.Height))
-		info.WriteString(fmt.Sprintf("- Display: %s\n", ip.selectedLayout.Display))
-		info.WriteString("\n")
-	}
-
-	// Computed styles
-	if ip.selectedNode.ComputedStyle != nil {
-		style := ip.selectedNode.ComputedStyle
-		hasStyles := false
-		info.WriteString("**Computed Styles:**\n")
-
-		if style.Color != nil {
-			info.WriteString(fmt.Sprintf("- Color: %v\n", style.Color))
-			hasStyles = true
-		}
-		if style.BackgroundColor != nil {
-			info.WriteString(fmt.Sprintf("- Background: %v\n", style.BackgroundColor))
-			hasStyles = true
-		}
-		if style.FontSize > 0 {
-			info.WriteString(fmt.Sprintf("- Font Size: %.1fpx\n", style.FontSize))
-			hasStyles = true
-		}
-		if style.FontWeight != "" {
-			info.WriteString(fmt.Sprintf("- Font Weight: %s\n", style.FontWeight))
-			hasStyles = true
-		}
-		if style.FontFamily != "" {
-			info.WriteString(fmt.Sprintf("- Font Family: %s\n", style.FontFamily))
-			hasStyles = true
-		}
-		if style.Display != "" {
-			info.WriteString(fmt.Sprintf("- Display: %s\n", style.Display))
-			hasStyles = true
-		}
-		if style.Width != "" {
-			info.WriteString(fmt.Sprintf("- Width: %s\n", style.Width))
-			hasStyles = true
-		}
-		if style.Height != "" {
-			info.WriteString(fmt.Sprintf("- Height: %s\n", style.Height))
-			hasStyles = true
-		}
-
-		// Box model
-		if style.MarginTop != "" || style.MarginRight != "" || style.MarginBottom != "" || style.MarginLeft != "" {
-			info.WriteString(fmt.Sprintf("- Margin: %s %s %s %s\n", style.MarginTop, style.MarginRight, style.MarginBottom, style.MarginLeft))
-			hasStyles = true
-		}
-		if style.PaddingTop != "" || style.PaddingRight != "" || style.PaddingBottom != "" || style.PaddingLeft != "" {
-			info.WriteString(fmt.Sprintf("- Padding: %s %s %s %s\n", style.PaddingTop, style.PaddingRight, style.PaddingBottom, style.PaddingLeft))
-			hasStyles = true
-		}
-
-		if !hasStyles {
-			info.WriteString("(none)\n")
-		}
-		info.WriteString("\n")
-	}
-
-	// Children count
-	if len(ip.selectedNode.Children) > 0 {
-		info.WriteString(fmt.Sprintf("**Children:** %d\n\n", len(ip.selectedNode.Children)))
-	}
-
-	ip.elementInfo.ParseMarkdown(info.String())
-}
-
 // CanvasObject returns the underlying canvas object for the panel
 func (ip *InspectPanel) CanvasObject() fyne.CanvasObject {
 	return ip.container
 }
 
+// Helper for binding
+func bindingString(val string, onChange func(string)) bindingStringImpl {
+	return bindingStringImpl{val: val, onChange: onChange}
+}
+
+type bindingStringImpl struct {
+	val      string
+	onChange func(string)
+}
+
+func (b bindingStringImpl) Get() (string, error) { return b.val, nil }
+func (b bindingStringImpl) Set(s string) error {
+	b.val = s
+	b.onChange(s)
+	return nil
+}
+func (b bindingStringImpl) AddListener(l binding.DataListener) {}
+func (b bindingStringImpl) RemoveListener(l binding.DataListener) {}

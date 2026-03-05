@@ -171,6 +171,10 @@ func (b *Browser) toggleInspect() {
 		b.inspectContainer.Hide()
 	} else {
 		b.inspectContainer.Show()
+		// Initialize with current renderer if available
+		if tab := b.ActiveTab(); tab != nil && tab.htmlRenderer != nil {
+			b.inspectPanel.SetRenderer(tab.htmlRenderer)
+		}
 	}
 	b.inspectVisible = !b.inspectVisible
 	b.window.Content().Refresh()
@@ -270,7 +274,20 @@ func (b *Browser) RenderHTMLContent(htmlContent string) error {
 	tab.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
 		fyne.Do(func() {
 			if b.inspectVisible {
+				b.inspectPanel.SetRenderer(tab.htmlRenderer)
 				b.inspectPanel.SetElement(node, layout)
+			}
+		})
+	})
+
+	// Set up refresh callback for the renderer
+	tab.htmlRenderer.SetRefreshCallback(func() {
+		fyne.Do(func() {
+			// Trigger a refresh of the scroll container to show changes
+			tab.contentScroll.Refresh()
+			// Also refresh inspector if visible
+			if b.inspectVisible {
+				b.inspectPanel.SetRenderer(tab.htmlRenderer)
 			}
 		})
 	})

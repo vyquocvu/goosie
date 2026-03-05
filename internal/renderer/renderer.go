@@ -32,6 +32,9 @@ type Renderer struct {
 
 	// Inspect callback for element inspection
 	onInspect func(node *RenderNode, layout *LayoutBox)
+
+	// Refresh callback for UI updates
+	onRefresh func()
 }
 
 // NewRenderer creates a new HTML renderer
@@ -213,6 +216,42 @@ func (r *Renderer) SetWindow(w fyne.Window) {
 func (r *Renderer) SetInspectCallback(callback func(node *RenderNode, layout *LayoutBox)) {
 	r.onInspect = callback
 	r.canvasRenderer.SetInspectCallback(callback, r)
+}
+
+// GetRoot returns the current render tree root
+func (r *Renderer) GetRoot() *RenderNode {
+	return r.currentRenderTree
+}
+
+// Refresh re-calculates styles and layout, then triggers a refresh
+func (r *Renderer) Refresh() {
+	if r.currentRenderTree == nil {
+		return
+	}
+
+	// Apply styles (in case attributes changed)
+	if r.stylesheet != nil {
+		styleManager := NewStyleManager(r.stylesheet)
+		styleManager.ApplyStyles(r.currentRenderTree)
+	}
+
+	// Perform layout
+	r.currentLayoutTree = r.layoutEngine.ComputeLayout(r.currentRenderTree)
+
+	// Clear canvas cache
+	r.canvasRenderer.ClearCache()
+	r.canvasRenderer.cachedRenderRoot = nil
+	r.canvasRenderer.cachedLayoutRoot = nil
+
+	// Trigger refresh callback
+	if r.onRefresh != nil {
+		r.onRefresh()
+	}
+}
+
+// SetRefreshCallback sets the callback for refresh events
+func (r *Renderer) SetRefreshCallback(callback func()) {
+	r.onRefresh = callback
 }
 
 // HitTest finds the element at the given coordinates (relative to the content)
