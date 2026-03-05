@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-14 # macOS Apple Silicon runner
+    permissions:
+      contents: write # Needed to create a GitHub Release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build macOS Apple Silicon binary
+        run: |
+          mkdir -p build
+          GOOS=darwin GOARCH=arm64 go build -o build/goosie-macos-arm64 ./cmd/browser
+          cd build && tar -czvf goosie-macos-arm64.tar.gz goosie-macos-arm64
+
+      - name: Create GitHub Release and Upload Artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/goosie-macos-arm64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
