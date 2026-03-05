@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	imageloader "github.com/vyquocvu/goosie/internal/image"
@@ -611,7 +612,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 				label.Wrapping = fyne.TextWrapWord
 
 				// Show a gray rectangle as loading indicator
-				rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+				rect := canvas.NewRectangle(theme.DisabledButtonColor())
 				rect.SetMinSize(fyne.NewSize(100, 100))
 
 				*objects = append(*objects, container.NewVBox(rect, label))
@@ -630,7 +631,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	label := widget.NewLabel(displayText)
 	label.Wrapping = fyne.TextWrapWord
 
-	rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+	rect := canvas.NewRectangle(theme.DisabledButtonColor())
 	rect.SetMinSize(fyne.NewSize(100, 100))
 	*objects = append(*objects, container.NewVBox(rect, label))
 }
@@ -753,7 +754,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		// Check if the node has CSS styles that require custom rendering
 		if cr.hasCustomStyles(cmd.Node) {
 			// Create a canvas.Text object with CSS styles
-			textObj := canvas.NewText(cmd.Text, color.Black)
+			textObj := canvas.NewText(cmd.Text, theme.ForegroundColor())
 			textObj.TextSize = cr.defaultSize
 
 			style := cmd.Node.ComputedStyle
@@ -842,7 +843,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					label := widget.NewLabel(displayText)
 					label.Wrapping = fyne.TextWrapWord
 
-					rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+					rect := canvas.NewRectangle(theme.DisabledButtonColor())
 					rect.SetMinSize(fyne.NewSize(100, 100))
 
 					cr.addObjectToDisplay(container.NewVBox(rect, label), cmd, objects)
@@ -864,7 +865,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		label := widget.NewLabel(displayText)
 		label.Wrapping = fyne.TextWrapWord
 
-		rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+		rect := canvas.NewRectangle(theme.DisabledButtonColor())
 		rect.SetMinSize(fyne.NewSize(100, 100))
 
 		cr.addObjectToDisplay(container.NewVBox(rect, label), cmd, objects)
@@ -903,9 +904,16 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		// Borders meet at corners without overlapping
 		borderContainer := container.NewWithoutLayout()
 
+		getBorderColor := func(c color.Color) color.Color {
+			if c == nil {
+				return theme.ForegroundColor()
+			}
+			return c
+		}
+
 		// Top border (full width)
 		if cmd.BorderTopWidth > 0 && cmd.BorderTopStyle != "" && cmd.BorderTopStyle != "none" {
-			topBorder := canvas.NewRectangle(cmd.BorderTopColor)
+			topBorder := canvas.NewRectangle(getBorderColor(cmd.BorderTopColor))
 			topBorder.Resize(fyne.NewSize(cmd.Box.Width, cmd.BorderTopWidth))
 			topBorder.Move(fyne.NewPos(0, 0))
 			borderContainer.Add(topBorder)
@@ -913,7 +921,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		// Right border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderRightWidth > 0 && cmd.BorderRightStyle != "" && cmd.BorderRightStyle != "none" {
-			rightBorder := canvas.NewRectangle(cmd.BorderRightColor)
+			rightBorder := canvas.NewRectangle(getBorderColor(cmd.BorderRightColor))
 			rightHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
 			rightBorder.Resize(fyne.NewSize(cmd.BorderRightWidth, rightHeight))
 			rightBorder.Move(fyne.NewPos(cmd.Box.Width-cmd.BorderRightWidth, cmd.BorderTopWidth))
@@ -922,7 +930,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		// Bottom border (full width)
 		if cmd.BorderBottomWidth > 0 && cmd.BorderBottomStyle != "" && cmd.BorderBottomStyle != "none" {
-			bottomBorder := canvas.NewRectangle(cmd.BorderBottomColor)
+			bottomBorder := canvas.NewRectangle(getBorderColor(cmd.BorderBottomColor))
 			bottomBorder.Resize(fyne.NewSize(cmd.Box.Width, cmd.BorderBottomWidth))
 			bottomBorder.Move(fyne.NewPos(0, cmd.Box.Height-cmd.BorderBottomWidth))
 			borderContainer.Add(bottomBorder)
@@ -930,7 +938,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		// Left border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderLeftWidth > 0 && cmd.BorderLeftStyle != "" && cmd.BorderLeftStyle != "none" {
-			leftBorder := canvas.NewRectangle(cmd.BorderLeftColor)
+			leftBorder := canvas.NewRectangle(getBorderColor(cmd.BorderLeftColor))
 			leftHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
 			leftBorder.Resize(fyne.NewSize(cmd.BorderLeftWidth, leftHeight))
 			leftBorder.Move(fyne.NewPos(0, cmd.BorderTopWidth))
@@ -1173,7 +1181,7 @@ func (cr *CanvasRenderer) applyStylesToLabel(node *RenderNode, text string) fyne
 
 	// Create a styled canvas.Text object for custom colors/sizes
 	// Note: canvas.Text doesn't support selection, but we need it for custom colors
-	textObj := canvas.NewText(text, color.Black)
+	textObj := canvas.NewText(text, theme.ForegroundColor())
 	textObj.TextSize = cr.defaultSize
 
 	// Apply computed styles

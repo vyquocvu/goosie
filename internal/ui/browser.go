@@ -2,15 +2,15 @@ package ui
 
 import (
     "fmt"
-    "image/color"
-    "os"
-    "path/filepath"
-    "fyne.io/fyne/v2"
-    "fyne.io/fyne/v2/app"
-    "fyne.io/fyne/v2/canvas"
-    "fyne.io/fyne/v2/container"
-    "fyne.io/fyne/v2/dialog"
-    "fyne.io/fyne/v2/widget"
+	"os"
+	"path/filepath"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
     "github.com/vyquocvu/goosie/internal/js"
     "github.com/vyquocvu/goosie/internal/renderer"
 )
@@ -47,6 +47,7 @@ type Browser struct {
 	window              fyne.Window
 	state               *BrowserState
 	settings            *Settings
+	themeManager        *ThemeManager
 	urlEntry            *widget.Entry
 	backButton          *widget.Button
 	forwardButton       *widget.Button
@@ -93,7 +94,7 @@ type window interface {
 
 // NewBrowser creates a new browser UI
 func NewBrowser() *Browser {
-	a := app.New()
+	a := app.NewWithID("com.github.vyquocvu.goosie")
 	w := a.NewWindow("Goosie")
 
 	// Set window size
@@ -101,6 +102,7 @@ func NewBrowser() *Browser {
 
 	state := NewBrowserState()
 	settings := NewSettings()
+	themeManager := NewThemeManager(a)
 
 	// Create thin, full-width loading progress bar with 5px height (initially hidden)
 	loadingBar := widget.NewProgressBarInfinite()
@@ -115,6 +117,7 @@ func NewBrowser() *Browser {
 		window:              w,
 		state:               state,
 		settings:            settings,
+		themeManager:        themeManager,
 		loadingBar:          loadingBar,
 		loadingBarContainer: loadingBarContainer,
 		tabItems:            []*Tab{},
@@ -353,11 +356,19 @@ func (b *Browser) Show() {
 	// Combine the main content with console and inspect panels
 	contentWithConsole := container.NewBorder(navBar, nil, nil, nil, container.NewVSplit(mainWithInspect, b.consoleContainer))
 
-	// Create white background rectangle
-	whiteBg := canvas.NewRectangle(color.White)
+	// Create background rectangle
+	bg := canvas.NewRectangle(theme.BackgroundColor())
 	
-	// Wrap content with white background
-	contentWithBg := container.NewMax(whiteBg, contentWithConsole)
+	// Listen for theme changes to update background color
+	// Note: We need to use a goroutine or delay because theme changes might take a moment to propagate
+	// through Fyne's internal state
+	b.themeManager.AddListener(func(_ ThemeType) {
+		bg.FillColor = theme.BackgroundColor()
+		bg.Refresh()
+	})
+
+	// Wrap content with background
+	contentWithBg := container.NewMax(bg, contentWithConsole)
 
 	b.window.SetContent(contentWithBg)
 	b.window.ShowAndRun()
@@ -594,11 +605,25 @@ func (b *Browser) showSettings() {
 	})
 	imagesCheck.SetChecked(b.settings.GetEnableImages())
 
+	// Theme selection
+	themeSelect := widget.NewSelect([]string{"System", "Light", "Dark"}, func(selected string) {
+		switch selected {
+		case "Light":
+			b.themeManager.SetTheme(ThemeLight)
+		case "Dark":
+			b.themeManager.SetTheme(ThemeDark)
+		default:
+			b.themeManager.SetTheme(ThemeSystem)
+		}
+	})
+	themeSelect.SetSelected(b.themeManager.Current().String())
+
 	// Create form
 	form := &widget.Form{
 		Items: []*widget.FormItem{
 			{Text: "Homepage", Widget: homepageEntry},
 			{Text: "Search Engine", Widget: searchEngineEntry},
+			{Text: "Theme", Widget: themeSelect},
 			{Text: "", Widget: jsCheck},
 			{Text: "", Widget: imagesCheck},
 		},

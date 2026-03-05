@@ -669,7 +669,7 @@ func parseColor(value string) (color.Color, error) {
 		return parseHexColor(lowerValue)
 	}
 	// Add support for other color formats like rgb() later
-	return color.Black, fmt.Errorf("unsupported color format: %s", value)
+	return nil, fmt.Errorf("unsupported color format: %s", value)
 }
 
 func parseHexColor(hex string) (color.Color, error) {
@@ -737,7 +737,7 @@ func parseBoxShorthand(value string) [4]string {
 
 // parseBoxShorthandColors parses color values for box model shorthand
 func parseBoxShorthandColors(values []string) [4]color.Color {
-	defaultColor := color.Black
+	var defaultColor color.Color // nil
 	var result [4]color.Color
 	
 	switch len(values) {
