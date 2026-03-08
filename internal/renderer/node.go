@@ -48,6 +48,7 @@ type Style struct {
 	Height          string
 	FontFamily      string
 	Opacity         float32
+	TextAlign       string // "left", "right", "center", "justify"
 	
 	// Box model properties
 	MarginTop       string

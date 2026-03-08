@@ -66,8 +66,26 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		sm.applyMediaRules(node)
 	}
 
+	// Apply inline styles from style attribute
+	if styleAttr, ok := node.GetAttribute("style"); ok && styleAttr != "" {
+		sm.applyInlineStyles(node, styleAttr)
+	}
+
 	for _, child := range node.Children {
 		sm.ApplyStyles(child)
+	}
+}
+
+// applyInlineStyles parses and applies inline styles from the style attribute
+func (sm *StyleManager) applyInlineStyles(node *RenderNode, styleAttr string) {
+	declarations, err := css.ParseStyleAttribute(styleAttr)
+	if err != nil {
+		// Just ignore parsing errors for now
+		return
+	}
+
+	for _, decl := range declarations {
+		sm.applyDeclaration(node, decl)
 	}
 }
 
@@ -402,6 +420,8 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		if val, err := strconv.ParseFloat(decl.Value, 32); err == nil {
 			style.Opacity = float32(val)
 		}
+	case "text-align":
+		style.TextAlign = decl.Value
 	
 	// Margin properties
 	case "margin":

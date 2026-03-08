@@ -16,6 +16,15 @@ func NewParser(input string) *Parser {
 	return &Parser{input: input}
 }
 
+// ParseStyleAttribute parses the content of a style attribute (e.g., "color: red; margin: 10px")
+func ParseStyleAttribute(input string) ([]Declaration, error) {
+	parser := NewParser(input)
+	// parseDeclarations expects to consume until '}' or EOF
+	// It doesn't require a starting '{'
+	declarations := parser.parseDeclarations()
+	return declarations, nil
+}
+
 // Parse parses the CSS input and returns a StyleSheet.
 func (p *Parser) Parse() (*StyleSheet, error) {
 	stylesheet := &StyleSheet{}

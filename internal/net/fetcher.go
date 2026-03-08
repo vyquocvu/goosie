@@ -36,6 +36,9 @@ func (f *Fetcher) FetchWithContext(ctx context.Context, url string, onProgress P
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Set a modern User-Agent to ensure we get the full desktop version of websites
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
 	resp, err := f.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %w", err)

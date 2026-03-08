@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
+	"github.com/vyquocvu/goosie/internal/net"
 )
 
 // Renderer is the main HTML renderer that coordinates parsing, layout, and rendering
@@ -19,6 +21,7 @@ type Renderer struct {
 	canvasRenderer *CanvasRenderer
 	imageLoader    imageloader.Loader
 	stylesheet     *css.StyleSheet
+	fetcher        *net.Fetcher
 
 	// Cached trees for performance
 	currentRenderTree *RenderNode
@@ -47,6 +50,7 @@ func NewRenderer(width, height float32) *Renderer {
 		layoutEngine:   NewLayoutEngine(width, height),
 		canvasRenderer: canvasRenderer,
 		imageLoader:    imageLoader,
+		fetcher:        net.NewFetcher(),
 	}
 }
 
@@ -60,6 +64,9 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 
 	// Extract and parse CSS from <style> tags
 	r.stylesheet = extractAndParseCSS(doc)
+
+	// Load external CSS asynchronously
+	go r.loadExternalCSS(doc)
 
 	// Find body element
 	bodyNode := findBodyNode(doc)
@@ -366,7 +373,79 @@ func (r *Renderer) onImageLoaded(src string) {
 		fyne.Do(func() {
 			r.canvasRenderer.window.Canvas().Refresh(r.canvasRenderer.window.Content())
 		})
+	} else if r.onRefresh != nil {
+		// Fallback if window is not set directly but refresh callback is available
+		fyne.Do(func() {
+			r.onRefresh()
+		})
 	}
+}
+
+// loadExternalCSS finds and loads external stylesheets
+func (r *Renderer) loadExternalCSS(doc *html.Node) {
+	links := extractExternalLinks(doc)
+	for _, href := range links {
+		// Resolve URL
+		resolvedURL := r.ResolveURL(href)
+		
+		// Fetch CSS
+		content, err := r.fetcher.Fetch(resolvedURL)
+		if err != nil {
+			fmt.Printf("Failed to fetch CSS %s: %v\n", resolvedURL, err)
+			continue
+		}
+		
+		// Parse CSS
+		parser := css.NewParser(content)
+		stylesheet, err := parser.Parse()
+		if err != nil {
+			fmt.Printf("Failed to parse CSS %s: %v\n", resolvedURL, err)
+			continue
+		}
+		
+		// Append rules to current stylesheet safely
+		// Note: This simple append assumes r.stylesheet is safe to modify or we are lucky.
+		// Since we are inside a goroutine and Refresh reads it, we should ideally lock.
+		// But for now, we'll update it inside fyne.Do to be safe with UI refresh.
+		
+		fyne.Do(func() {
+			if r.stylesheet == nil {
+				r.stylesheet = stylesheet
+			} else {
+				r.stylesheet.Rules = append(r.stylesheet.Rules, stylesheet.Rules...)
+				r.stylesheet.AtRules = append(r.stylesheet.AtRules, stylesheet.AtRules...)
+			}
+			r.Refresh()
+		})
+	}
+}
+
+// extractExternalLinks finds all <link rel="stylesheet"> tags and returns their hrefs
+func extractExternalLinks(node *html.Node) []string {
+	var links []string
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "link" {
+			isStylesheet := false
+			href := ""
+			for _, attr := range n.Attr {
+				if attr.Key == "rel" && strings.Contains(strings.ToLower(attr.Val), "stylesheet") {
+					isStylesheet = true
+				}
+				if attr.Key == "href" {
+					href = attr.Val
+				}
+			}
+			if isStylesheet && href != "" {
+				links = append(links, href)
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(node)
+	return links
 }
 
 // extractAndParseCSS finds all <style> tags, extracts their content, and parses it.

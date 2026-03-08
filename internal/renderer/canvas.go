@@ -622,7 +622,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	}
 
 	// Fallback: Show placeholder if loader is not available or something went wrong
-	displayText := "[Image: " + src
+	displayText := "[Image: " + resolvedSrc
 	if hasAlt {
 		displayText += " - " + alt
 	}

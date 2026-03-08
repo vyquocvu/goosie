@@ -272,27 +272,67 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 // computeLayoutBox computes the layout for a single box
 func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32) float32 {
 	// Account for margins
-	x += layoutBox.MarginLeft
+	marginLeft := layoutBox.MarginLeft
+	marginRight := layoutBox.MarginRight
+	
+	// Check for explicit width
+	explicitWidth := float32(-1)
+	if node.ComputedStyle != nil && node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto" {
+		fontSize := le.defaultFontSize
+		if node.ComputedStyle.FontSize > 0 {
+			fontSize = node.ComputedStyle.FontSize
+		}
+		explicitWidth = parseLength(node.ComputedStyle.Width, fontSize)
+	}
+
+	// Handle margin: auto for block-level elements
+	if node.IsBlock() && explicitWidth >= 0 && explicitWidth < availableWidth {
+		if node.ComputedStyle != nil && (node.ComputedStyle.MarginLeft == "auto" || node.ComputedStyle.MarginRight == "auto") {
+			remainingSpace := availableWidth - explicitWidth
+			if node.ComputedStyle.MarginLeft == "auto" && node.ComputedStyle.MarginRight == "auto" {
+				// Center
+				marginLeft = remainingSpace / 2
+				marginRight = remainingSpace / 2
+			} else if node.ComputedStyle.MarginLeft == "auto" {
+				// Align right
+				marginLeft = remainingSpace
+				marginRight = 0
+			} else {
+				// Align left (default)
+				marginLeft = 0
+				marginRight = remainingSpace
+			}
+			// Update layout box margins
+			layoutBox.MarginLeft = marginLeft
+			layoutBox.MarginRight = marginRight
+		}
+	}
+
+	x += marginLeft
 	y += layoutBox.MarginTop
 	
-	// Reduce available width by horizontal margins
-	availableWidth -= (layoutBox.MarginLeft + layoutBox.MarginRight)
-	if availableWidth < 0 {
-		availableWidth = 0
+	// Calculate width
+	width := availableWidth - (marginLeft + marginRight)
+	if explicitWidth >= 0 {
+		width = explicitWidth
+	}
+	
+	if width < 0 {
+		width = 0
 	}
 	
 	layoutBox.Box.X = x
 	layoutBox.Box.Y = y
-	layoutBox.Box.Width = availableWidth
+	layoutBox.Box.Width = width
 	
 	currentY := y
 	
 	if node.Type == NodeTypeText {
 		// Layout text node
-		currentY = le.computeTextLayout(node, layoutBox, x, y, availableWidth)
+		currentY = le.computeTextLayout(node, layoutBox, x, y, width)
 	} else if node.Type == NodeTypeElement {
 		// Layout element node
-		currentY = le.computeElementLayout(node, layoutBox, x, y, availableWidth)
+		currentY = le.computeElementLayout(node, layoutBox, x, y, width)
 	}
 	
 	return currentY

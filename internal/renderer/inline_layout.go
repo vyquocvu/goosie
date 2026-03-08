@@ -55,6 +55,7 @@ type LineBox struct {
 	Descent        float32        // Distance from baseline to bottom
 	InlineBoxes    []*InlineBox   // Inline boxes in this line
 	AvailableWidth float32        // Available width for line
+	TextAlign      string         // Text alignment for this line
 }
 
 // InlineBox represents an inline-level box (text or inline element)
@@ -95,7 +96,13 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 ) ([]*LineBox, float32) {
 	
 	lines := make([]*LineBox, 0)
-	currentLine := ile.newLineBox(x, y, availableWidth)
+	
+	textAlign := ""
+	if node.ComputedStyle != nil {
+		textAlign = node.ComputedStyle.TextAlign
+	}
+	
+	currentLine := ile.newLineBox(x, y, availableWidth, textAlign)
 	
 	// Process all inline children and text nodes
 	for _, child := range node.Children {
@@ -215,8 +222,9 @@ func (ile *InlineLayoutEngine) addTextPiece(
 		ile.finalizeLine(*currentLine)
 		*lines = append(*lines, *currentLine)
 		
+		textAlign := (*currentLine).TextAlign
 		nextY := (*currentLine).Y + (*currentLine).Height
-		*currentLine = ile.newLineBox(lineX, nextY, availableWidth)
+		*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign)
 		spaceWidth = 0 // No space at start of new line
 		
 		// Re-measure for new line
@@ -309,8 +317,9 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 			ile.finalizeLine(*currentLine)
 			*lines = append(*lines, *currentLine)
 			
+			textAlign := (*currentLine).TextAlign
 			nextY := (*currentLine).Y + (*currentLine).Height
-			*currentLine = ile.newLineBox(lineX, nextY, availableWidth)
+			*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign)
 			
 			// Start new piece with current character
 			currentPiece.Reset()
@@ -369,8 +378,9 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		ile.finalizeLine(*currentLine)
 		*lines = append(*lines, *currentLine)
 		
+		textAlign := (*currentLine).TextAlign
 		nextY := (*currentLine).Y + (*currentLine).Height
-		*currentLine = ile.newLineBox(lineX, nextY, availableWidth)
+		*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign)
 	}
 	
 	// Create inline box for inline-block
@@ -432,10 +442,30 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 			box.Y = line.Ascent - box.Ascent - box.Height*0.3
 		}
 	}
+	
+	// Horizontal alignment
+	remainingWidth := line.AvailableWidth - line.Width
+	if remainingWidth > 0 {
+		var startX float32
+		switch line.TextAlign {
+		case "center":
+			startX = remainingWidth / 2
+		case "right":
+			startX = remainingWidth
+		default:
+			startX = 0
+		}
+		
+		if startX > 0 {
+			for _, box := range line.InlineBoxes {
+				box.X += startX
+			}
+		}
+	}
 }
 
 // newLineBox creates a new line box
-func (ile *InlineLayoutEngine) newLineBox(x, y, availableWidth float32) *LineBox {
+func (ile *InlineLayoutEngine) newLineBox(x, y, availableWidth float32, textAlign string) *LineBox {
 	return &LineBox{
 		X:              x,
 		Y:              y,
@@ -445,6 +475,7 @@ func (ile *InlineLayoutEngine) newLineBox(x, y, availableWidth float32) *LineBox
 		Descent:        0,
 		InlineBoxes:    make([]*InlineBox, 0),
 		AvailableWidth: availableWidth,
+		TextAlign:      textAlign,
 	}
 }
 
