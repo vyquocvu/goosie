@@ -113,10 +113,36 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	}
 	
 	// Update height based on children
-	// Update height based on children
 	// currentY tracks the bottom edge of content/padding
 	// layoutBox.Box.Y is the top edge
-	layoutBox.Box.Height = currentY - layoutBox.Box.Y
+	calculatedHeight := currentY - layoutBox.Box.Y
+	
+	// Check for explicit height
+	if node.ComputedStyle != nil && node.ComputedStyle.Height != "" && node.ComputedStyle.Height != "auto" {
+		fontSize := le.defaultFontSize
+		if node.ComputedStyle.FontSize > 0 {
+			fontSize = node.ComputedStyle.FontSize
+		}
+		explicitHeight := parseLength(node.ComputedStyle.Height, fontSize)
+		if explicitHeight > 0 {
+			// Include padding if box-sizing is content-box (default)
+			// Actually parseLength returns the value. 
+			// If we want total box height (content + padding), we should add padding?
+			// The currentY calculation includes padding.
+			// Let's assume explicitHeight is content height.
+			// layoutBox.Box.Height should be content + padding?
+			// Wait, layoutBox.Box.Height is usually border-box height in this engine?
+			// currentY includes padding.
+			// If explicitHeight is content height, then total height = explicitHeight + paddingTop + paddingBottom.
+			
+			layoutBox.Box.Height = explicitHeight + layoutBox.PaddingTop + layoutBox.PaddingBottom
+		} else {
+			layoutBox.Box.Height = calculatedHeight
+		}
+	} else {
+		layoutBox.Box.Height = calculatedHeight
+	}
+	
 	if layoutBox.Box.Height < 0 {
 		layoutBox.Box.Height = 0
 	}

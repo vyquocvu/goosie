@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        check-latest: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev xorg-dev
+        go mod download
+
+    - name: Run Unit & Integration Tests
+      run: |
+        go test -v ./internal/... ./cmd/...
+
+    - name: Run Security Tests
+      run: |
+        go test -v ./internal/test_suite/security/...
+
+    - name: Run Performance Benchmarks
+      run: |
+        go test -bench=. -benchmem ./internal/test_suite/performance/...
+
+    - name: Calculate Coverage
+      run: |
+        go test -coverprofile=coverage.out ./internal/...
+        go tool cover -func=coverage.out
+        
+        # Simple check for total coverage (grep for total, extract percentage, compare)
+        TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | grep -o '[0-9.]*%' | tr -d '%')
+        echo "Total Coverage: $TOTAL_COVERAGE%"
+        
+        # Fail if coverage is below 80%
+        if (( $(echo "$TOTAL_COVERAGE < 80.0" | bc -l) )); then
+          echo "Coverage is below 80%"
+          exit 1
+        fi

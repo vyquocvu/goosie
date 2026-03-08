@@ -8,7 +8,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	imageloader "github.com/vyquocvu/goosie/internal/image"
@@ -612,7 +611,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 				label.Wrapping = fyne.TextWrapWord
 
 				// Show a gray rectangle as loading indicator
-				rect := canvas.NewRectangle(theme.DisabledButtonColor())
+				rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 				rect.SetMinSize(fyne.NewSize(100, 100))
 
 				*objects = append(*objects, container.NewVBox(rect, label))
@@ -622,7 +621,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	}
 
 	// Fallback: Show placeholder if loader is not available or something went wrong
-	displayText := "[Image: " + resolvedSrc
+	displayText := "[Image: " + src
 	if hasAlt {
 		displayText += " - " + alt
 	}
@@ -631,7 +630,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	label := widget.NewLabel(displayText)
 	label.Wrapping = fyne.TextWrapWord
 
-	rect := canvas.NewRectangle(theme.DisabledButtonColor())
+	rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 	rect.SetMinSize(fyne.NewSize(100, 100))
 	*objects = append(*objects, container.NewVBox(rect, label))
 }
@@ -729,10 +728,10 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	}
 
 	if len(objects) == 0 {
-		return container.NewWithoutLayout()
+		return container.NewVBox()
 	}
 
-	content := container.NewWithoutLayout(objects...)
+	content := container.NewVBox(objects...)
 
 	// Wrap in a mouse-aware container if inspect callback is set
 	if cr.onInspect != nil && cr.renderer != nil {
@@ -742,7 +741,6 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	return content
 }
 
-// renderCommand renders a single paint command to canvas objects
 // renderCommand renders a single paint command to canvas objects
 func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
 	switch cmd.Type {
@@ -754,7 +752,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		// Check if the node has CSS styles that require custom rendering
 		if cr.hasCustomStyles(cmd.Node) {
 			// Create a canvas.Text object with CSS styles
-			textObj := canvas.NewText(cmd.Text, theme.ForegroundColor())
+			textObj := canvas.NewText(cmd.Text, color.Black)
 			textObj.TextSize = cr.defaultSize
 
 			style := cmd.Node.ComputedStyle
@@ -777,7 +775,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			}
 			textObj.TextStyle = textStyle
 
-			cr.addObjectToDisplay(textObj, cmd, objects)
+			*objects = append(*objects, textObj)
 		} else {
 			// Use standard label widget
 			label := widget.NewLabel(cmd.Text)
@@ -791,12 +789,13 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 				label.TextStyle = fyne.TextStyle{Italic: true}
 			}
 
-			cr.addObjectToDisplay(label, cmd, objects)
+			*objects = append(*objects, label)
 		}
 
 	case PaintRect:
 		rect := canvas.NewRectangle(cmd.FillColor)
-		cr.addObjectToDisplay(rect, cmd, objects)
+		rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		*objects = append(*objects, rect)
 
 	case PaintImage:
 		// Try to load and render the actual image if loader is available
@@ -815,9 +814,9 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					if cmd.ImageAlt != "" {
 						altLabel := widget.NewLabel(cmd.ImageAlt)
 						altLabel.Wrapping = fyne.TextWrapWord
-						cr.addObjectToDisplay(container.NewVBox(img, altLabel), cmd, objects)
+						*objects = append(*objects, container.NewVBox(img, altLabel))
 					} else {
-						cr.addObjectToDisplay(img, cmd, objects)
+						*objects = append(*objects, img)
 					}
 					return
 
@@ -830,7 +829,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					displayText += "]"
 					label := widget.NewLabel(displayText)
 					label.Wrapping = fyne.TextWrapWord
-					cr.addObjectToDisplay(label, cmd, objects)
+					*objects = append(*objects, label)
 					return
 
 				case imageloader.StateLoading:
@@ -843,10 +842,10 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					label := widget.NewLabel(displayText)
 					label.Wrapping = fyne.TextWrapWord
 
-					rect := canvas.NewRectangle(theme.DisabledButtonColor())
+					rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 					rect.SetMinSize(fyne.NewSize(100, 100))
 
-					cr.addObjectToDisplay(container.NewVBox(rect, label), cmd, objects)
+					*objects = append(*objects, container.NewVBox(rect, label))
 					return
 				}
 			}
@@ -865,10 +864,10 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		label := widget.NewLabel(displayText)
 		label.Wrapping = fyne.TextWrapWord
 
-		rect := canvas.NewRectangle(theme.DisabledButtonColor())
+		rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 		rect.SetMinSize(fyne.NewSize(100, 100))
 
-		cr.addObjectToDisplay(container.NewVBox(rect, label), cmd, objects)
+		*objects = append(*objects, container.NewVBox(rect, label))
 
 	case PaintLink:
 		// Render clickable link
@@ -883,19 +882,19 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		if cr.onNavigate != nil {
 			// Create a custom tappable widget
 			tappableLink := newTappableHyperlink(cmd.LinkText, resolvedURL, cr.onNavigate)
-			cr.addObjectToDisplay(tappableLink, cmd, objects)
+			*objects = append(*objects, tappableLink)
 		} else {
 			// Fallback to default hyperlink behavior
 			parsedURL, err := url.Parse(resolvedURL)
 			if err == nil {
 				link := widget.NewHyperlink(cmd.LinkText, parsedURL)
 				link.Wrapping = fyne.TextWrapWord
-				cr.addObjectToDisplay(link, cmd, objects)
+				*objects = append(*objects, link)
 			} else {
 				// If URL parsing fails, display as text
 				label := widget.NewLabel(cmd.LinkText)
 				label.Wrapping = fyne.TextWrapWord
-				cr.addObjectToDisplay(label, cmd, objects)
+				*objects = append(*objects, label)
 			}
 		}
 
@@ -904,16 +903,9 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		// Borders meet at corners without overlapping
 		borderContainer := container.NewWithoutLayout()
 
-		getBorderColor := func(c color.Color) color.Color {
-			if c == nil {
-				return theme.ForegroundColor()
-			}
-			return c
-		}
-
 		// Top border (full width)
 		if cmd.BorderTopWidth > 0 && cmd.BorderTopStyle != "" && cmd.BorderTopStyle != "none" {
-			topBorder := canvas.NewRectangle(getBorderColor(cmd.BorderTopColor))
+			topBorder := canvas.NewRectangle(cmd.BorderTopColor)
 			topBorder.Resize(fyne.NewSize(cmd.Box.Width, cmd.BorderTopWidth))
 			topBorder.Move(fyne.NewPos(0, 0))
 			borderContainer.Add(topBorder)
@@ -921,7 +913,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		// Right border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderRightWidth > 0 && cmd.BorderRightStyle != "" && cmd.BorderRightStyle != "none" {
-			rightBorder := canvas.NewRectangle(getBorderColor(cmd.BorderRightColor))
+			rightBorder := canvas.NewRectangle(cmd.BorderRightColor)
 			rightHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
 			rightBorder.Resize(fyne.NewSize(cmd.BorderRightWidth, rightHeight))
 			rightBorder.Move(fyne.NewPos(cmd.Box.Width-cmd.BorderRightWidth, cmd.BorderTopWidth))
@@ -930,7 +922,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		// Bottom border (full width)
 		if cmd.BorderBottomWidth > 0 && cmd.BorderBottomStyle != "" && cmd.BorderBottomStyle != "none" {
-			bottomBorder := canvas.NewRectangle(getBorderColor(cmd.BorderBottomColor))
+			bottomBorder := canvas.NewRectangle(cmd.BorderBottomColor)
 			bottomBorder.Resize(fyne.NewSize(cmd.Box.Width, cmd.BorderBottomWidth))
 			bottomBorder.Move(fyne.NewPos(0, cmd.Box.Height-cmd.BorderBottomWidth))
 			borderContainer.Add(bottomBorder)
@@ -938,7 +930,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		// Left border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderLeftWidth > 0 && cmd.BorderLeftStyle != "" && cmd.BorderLeftStyle != "none" {
-			leftBorder := canvas.NewRectangle(getBorderColor(cmd.BorderLeftColor))
+			leftBorder := canvas.NewRectangle(cmd.BorderLeftColor)
 			leftHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
 			leftBorder.Resize(fyne.NewSize(cmd.BorderLeftWidth, leftHeight))
 			leftBorder.Move(fyne.NewPos(0, cmd.BorderTopWidth))
@@ -946,7 +938,8 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		}
 
 		if len(borderContainer.Objects) > 0 {
-			cr.addObjectToDisplay(borderContainer, cmd, objects)
+			borderContainer.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			*objects = append(*objects, borderContainer)
 		}
 	
 	case PaintButton:
@@ -960,77 +953,7 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			// For now, we'll just create an empty handler
 			// The onclick attribute would need to be executed via JavaScript runtime
 		})
-		cr.addObjectToDisplay(button, cmd, objects)
-
-	case PaintInput:
-		// Render input field widget
-		entry := widget.NewEntry()
-		if cmd.InputPlaceholder != "" {
-			entry.SetPlaceHolder(cmd.InputPlaceholder)
-		}
-		cr.addObjectToDisplay(entry, cmd, objects)
-
-	case PaintTextarea:
-		// Render textarea widget
-		entry := widget.NewMultiLineEntry()
-		if cmd.TextareaPlaceholder != "" {
-			entry.SetPlaceHolder(cmd.TextareaPlaceholder)
-		}
-		cr.addObjectToDisplay(entry, cmd, objects)
-
-	case PaintTable:
-		// Render table widget
-		if len(cmd.TableData) == 0 || cmd.TableMaxCols == 0 {
-			return
-		}
-
-		data := cmd.TableData
-		maxCols := cmd.TableMaxCols
-
-		table := widget.NewTable(
-			func() (int, int) {
-				return len(data), maxCols
-			},
-			func() fyne.CanvasObject {
-				return widget.NewLabel("")
-			},
-			func(i widget.TableCellID, o fyne.CanvasObject) {
-				if i.Row < len(data) && i.Col < len(data[i.Row]) {
-					o.(*widget.Label).SetText(data[i.Row][i.Col])
-				}
-			},
-		)
-
-		// Calculate column widths based on content
-		colWidths := make([]float32, maxCols)
-		for col := 0; col < maxCols; col++ {
-			maxWidth := float32(80)
-			for row := 0; row < len(data); row++ {
-				if col < len(data[row]) {
-					textWidth := float32(len(data[row][col])) * 8
-					if textWidth > maxWidth {
-						maxWidth = textWidth
-					}
-				}
-			}
-			if maxWidth > 200 {
-				maxWidth = 200
-			}
-			colWidths[col] = maxWidth
-		}
-
-		var totalWidth float32
-		for i := 0; i < maxCols; i++ {
-			table.SetColumnWidth(i, colWidths[i])
-			totalWidth += colWidths[i]
-		}
-
-		// Resize happens in addObjectToDisplay
-		// But table content size needs to be set separately?
-		// widget.Table calculates content size based on Length/CreateCell/UpdateCell.
-		// LayoutEngine sets cmd.Box.Height.
-		// addObjectToDisplay calls Resize on table.
-		cr.addObjectToDisplay(table, cmd, objects)
+		*objects = append(*objects, button)
 	}
 }
 
@@ -1046,8 +969,6 @@ func (cr *CanvasRenderer) renderInput(node *RenderNode, objects *[]fyne.CanvasOb
 	if placeholder, ok := node.GetAttribute("placeholder"); ok {
 		entry.SetPlaceHolder(placeholder)
 	}
-	// Resize to ensure the input is visible
-	entry.Resize(fyne.NewSize(200, 36))
 	*objects = append(*objects, entry)
 }
 
@@ -1083,26 +1004,6 @@ func (cr *CanvasRenderer) renderTable(node *RenderNode, objects *[]fyne.CanvasOb
 		return
 	}
 
-	// Calculate column widths based on content
-	colWidths := make([]float32, maxCols)
-	for col := 0; col < maxCols; col++ {
-		maxWidth := float32(80) // Minimum column width
-		for row := 0; row < len(data); row++ {
-			if col < len(data[row]) {
-				// Estimate width based on text length (approx 8 pixels per character)
-				textWidth := float32(len(data[row][col])) * 8
-				if textWidth > maxWidth {
-					maxWidth = textWidth
-				}
-			}
-		}
-		// Cap at reasonable maximum
-		if maxWidth > 200 {
-			maxWidth = 200
-		}
-		colWidths[col] = maxWidth
-	}
-
 	table := widget.NewTable(
 		func() (int, int) {
 			return len(data), maxCols
@@ -1117,21 +1018,9 @@ func (cr *CanvasRenderer) renderTable(node *RenderNode, objects *[]fyne.CanvasOb
 		},
 	)
 
-	// Set column widths
-	var totalWidth float32
 	for i := 0; i < maxCols; i++ {
-		table.SetColumnWidth(i, colWidths[i])
-		totalWidth += colWidths[i]
+		table.SetColumnWidth(i, 100)
 	}
-
-	// Resize to ensure the table is visible
-	// Row height is approximately 30 pixels
-	rowHeight := float32(30)
-	tableHeight := float32(len(data)) * rowHeight
-	if tableHeight < 60 {
-		tableHeight = 60
-	}
-	table.Resize(fyne.NewSize(totalWidth, tableHeight))
 
 	*objects = append(*objects, table)
 }
@@ -1139,8 +1028,6 @@ func (cr *CanvasRenderer) renderTable(node *RenderNode, objects *[]fyne.CanvasOb
 func (cr *CanvasRenderer) renderButton(node *RenderNode, objects *[]fyne.CanvasObject) {
 	text := cr.extractText(node)
 	button := widget.NewButton(text, func() {})
-	// Resize to ensure the button is visible
-	button.Resize(fyne.NewSize(100, 36))
 	*objects = append(*objects, button)
 }
 
@@ -1149,8 +1036,6 @@ func (cr *CanvasRenderer) renderTextarea(node *RenderNode, objects *[]fyne.Canva
 	if placeholder, ok := node.GetAttribute("placeholder"); ok {
 		entry.SetPlaceHolder(placeholder)
 	}
-	// Resize to ensure the textarea is visible
-	entry.Resize(fyne.NewSize(200, 100))
 	*objects = append(*objects, entry)
 }
 
@@ -1181,7 +1066,7 @@ func (cr *CanvasRenderer) applyStylesToLabel(node *RenderNode, text string) fyne
 
 	// Create a styled canvas.Text object for custom colors/sizes
 	// Note: canvas.Text doesn't support selection, but we need it for custom colors
-	textObj := canvas.NewText(text, theme.ForegroundColor())
+	textObj := canvas.NewText(text, color.Black)
 	textObj.TextSize = cr.defaultSize
 
 	// Apply computed styles
@@ -1200,30 +1085,4 @@ func (cr *CanvasRenderer) applyStylesToLabel(node *RenderNode, text string) fyne
 	}
 
 	return textObj
-}
-
-// addObjectToDisplay adds an object to the display list with correct positioning and sizing
-func (cr *CanvasRenderer) addObjectToDisplay(obj fyne.CanvasObject, cmd *PaintCommand, objects *[]fyne.CanvasObject) {
-	if obj == nil {
-		return
-	}
-	// Calculate size and position
-	width := cmd.Box.Width
-	height := cmd.Box.Height
-	x := cmd.Box.X
-	y := cmd.Box.Y - cr.viewportY
-	
-	// Ensure no negative dimensions
-	if width < 0 {
-		width = 0
-	}
-	if height < 0 {
-		height = 0
-	}
-
-	// Set size and position
-	obj.Resize(fyne.NewSize(width, height))
-	obj.Move(fyne.NewPos(x, y))
-
-	*objects = append(*objects, obj)
 }

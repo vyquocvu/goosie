@@ -902,6 +902,11 @@ func (r *Runtime) setupLocalStorageAPI() {
 			return goja.Null()
 		}
 		
+		// Strip version prefix
+		if strings.HasPrefix(value, "v1:") {
+			return r.vm.ToValue(strings.TrimPrefix(value, "v1:"))
+		}
+		
 		return r.vm.ToValue(value)
 	})
 	
@@ -994,6 +999,11 @@ func (r *Runtime) setupSessionStorageAPI() {
 			// Format: exp:timestamp:value
 			// For now, we don't implement actual expiration
 			return r.vm.ToValue(parts[2])
+		}
+		
+		// Strip session prefix if present
+		if strings.HasPrefix(value, "session:") {
+			return r.vm.ToValue(strings.TrimPrefix(value, "session:"))
 		}
 		
 		return r.vm.ToValue(value)

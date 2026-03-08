@@ -19,8 +19,13 @@ type Fetcher struct {
 
 // NewFetcher creates a new Fetcher instance
 func NewFetcher() *Fetcher {
+	return NewFetcherWithClient(&http.Client{})
+}
+
+// NewFetcherWithClient creates a new Fetcher instance with a custom HTTP client
+func NewFetcherWithClient(client *http.Client) *Fetcher {
 	return &Fetcher{
-		client: &http.Client{},
+		client: client,
 	}
 }
 

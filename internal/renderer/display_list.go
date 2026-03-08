@@ -21,12 +21,6 @@ const (
 	PaintBorder
 	// PaintButton represents a button paint command
 	PaintButton
-	// PaintInput represents an input field paint command
-	PaintInput
-	// PaintTextarea represents a textarea paint command
-	PaintTextarea
-	// PaintTable represents a table paint command
-	PaintTable
 )
 
 // PaintCommand represents a single paint operation
@@ -58,17 +52,6 @@ type PaintCommand struct {
 	// Button-specific fields
 	ButtonText string
 	OnClick    string // onclick attribute value
-
-	// Input-specific fields
-	InputPlaceholder string
-	InputType        string
-
-	// Textarea-specific fields
-	TextareaPlaceholder string
-
-	// Table-specific fields
-	TableData    [][]string
-	TableMaxCols int
 
 	// Border-specific fields
 	BorderTopWidth    float32
@@ -178,22 +161,12 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	if renderNode.Type == NodeTypeElement && renderNode.TagName == "button" {
 		dlb.addElementCommand(layoutBox, renderNode, displayList)
 		// Don't process children for buttons - the button text is extracted in addElementCommand
+		// Process children layout boxes for nested elements if any
+		for _, child := range layoutBox.Children {
+			dlb.buildRecursive(child, renderMap, displayList)
+		}
 		return
 	}
-
-	// Special handling for input elements - self-contained, no children to process
-	if renderNode.Type == NodeTypeElement && renderNode.TagName == "input" {
-		dlb.addElementCommand(layoutBox, renderNode, displayList)
-		return
-	}
-
-	// Special handling for textarea elements - self-contained, no children to process
-	if renderNode.Type == NodeTypeElement && renderNode.TagName == "textarea" {
-		dlb.addElementCommand(layoutBox, renderNode, displayList)
-		return
-	}
-
-
 
 	// Check if this layout box has inline content (LineBoxes)
 	if len(layoutBox.LineBoxes) > 0 {
@@ -361,44 +334,6 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 		displayList.AddCommand(cmd)
 		return
 	}
-
-	// For input elements, add an input paint command
-	if renderNode.TagName == "input" {
-		placeholder, _ := renderNode.GetAttribute("placeholder")
-		inputType, _ := renderNode.GetAttribute("type")
-		if inputType == "" {
-			inputType = "text"
-		}
-
-		cmd := &PaintCommand{
-			Type:             PaintInput,
-			NodeID:           layoutBox.NodeID,
-			Node:             renderNode,
-			Box:              layoutBox.Box,
-			InputPlaceholder: placeholder,
-			InputType:        inputType,
-		}
-		displayList.AddCommand(cmd)
-		return
-	}
-
-	// For textarea elements, add a textarea paint command
-	if renderNode.TagName == "textarea" {
-		placeholder, _ := renderNode.GetAttribute("placeholder")
-
-		cmd := &PaintCommand{
-			Type:                PaintTextarea,
-			NodeID:              layoutBox.NodeID,
-			Node:                renderNode,
-			Box:                 layoutBox.Box,
-			TextareaPlaceholder: placeholder,
-		}
-		displayList.AddCommand(cmd)
-		return
-	}
-
-	// For table elements, add a table paint command
-
 
 	// For other elements, we primarily rely on their children for rendering
 	// but we could add background colors, borders, etc. here in the future

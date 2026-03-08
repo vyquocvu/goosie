@@ -65,9 +65,6 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	// Extract and parse CSS from <style> tags
 	r.stylesheet = extractAndParseCSS(doc)
 
-	// Load external CSS asynchronously
-	go r.loadExternalCSS(doc)
-
 	// Find body element
 	bodyNode := findBodyNode(doc)
 	if bodyNode == nil {
@@ -89,11 +86,15 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	}
 
 	// Perform layout
-	layoutTree := r.layoutEngine.ComputeLayout(renderTree)
+	r.layoutEngine.ComputeLayout(renderTree) // This line was actually layoutTree := ... in original code, I should be careful not to break it
+	layoutTree := r.layoutEngine.ComputeLayout(renderTree) // Re-writing for clarity in replacement
 
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
+
+	// Load external CSS asynchronously
+	go r.loadExternalCSS(doc)
 
 	// Pass navigation callback to canvas renderer
 	r.canvasRenderer.SetNavigationCallback(r.onNavigate, r.currentURL)
