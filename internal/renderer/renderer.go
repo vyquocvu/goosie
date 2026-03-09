@@ -382,6 +382,21 @@ func (r *Renderer) onImageLoaded(src string) {
 	}
 }
 
+func shouldAttemptParseExternalCSS(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "<") {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "not found") && !strings.Contains(trimmed, "{") && !strings.HasPrefix(trimmed, "@") {
+		return false
+	}
+	return true
+}
+
 // loadExternalCSS finds and loads external stylesheets
 func (r *Renderer) loadExternalCSS(doc *html.Node) {
 	links := extractExternalLinks(doc)
@@ -393,6 +408,9 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 		content, err := r.fetcher.Fetch(resolvedURL)
 		if err != nil {
 			fmt.Printf("Failed to fetch CSS %s: %v\n", resolvedURL, err)
+			continue
+		}
+		if !shouldAttemptParseExternalCSS(content) {
 			continue
 		}
 		

@@ -41,6 +41,66 @@ func TestParser(t *testing.T) {
 	}
 }
 
+func TestParserKeyframes(t *testing.T) {
+	css := `
+@keyframes my-animation {
+	from { opacity: 0; }
+	50% { opacity: 0.5; }
+	to { opacity: 1; }
+}
+.class { color: red; }
+`
+	p := NewParser(css)
+	stylesheet, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse() failed: %v", err)
+	}
+	if len(stylesheet.AtRules) != 1 {
+		t.Fatalf("expected 1 at-rule, got %d", len(stylesheet.AtRules))
+	}
+	if len(stylesheet.Rules) != 1 {
+		t.Fatalf("expected 1 rule (after keyframes), got %d", len(stylesheet.Rules))
+	}
+
+	kf := stylesheet.AtRules[0]
+	if kf.Name != "keyframes" {
+		t.Errorf("expected keyframes, got %s", kf.Name)
+	}
+	// We expect 3 rules inside keyframes: from, 50%, to
+	if len(kf.Rules) != 3 {
+		t.Errorf("expected 3 keyframe rules, got %d", len(kf.Rules))
+	}
+	// Check first rule selector (from)
+	if len(kf.Rules[0].Selectors) > 0 {
+		if kf.Rules[0].Selectors[0].Simple.TagName != "from" {
+			t.Errorf("expected 'from', got '%s'", kf.Rules[0].Selectors[0].Simple.TagName)
+		}
+	}
+}
+
+func TestParserEscapedIdentifier(t *testing.T) {
+	css := `.w-3\/4 { width: 75%; }`
+	p := NewParser(css)
+	stylesheet, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse() failed: %v", err)
+	}
+	if len(stylesheet.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(stylesheet.Rules))
+	}
+	rule := stylesheet.Rules[0]
+	if len(rule.Selectors) != 1 {
+		t.Fatalf("expected 1 selector, got %d", len(rule.Selectors))
+	}
+	if len(rule.Selectors[0].Simple.Classes) != 1 {
+		t.Fatalf("expected 1 class, got %d", len(rule.Selectors[0].Simple.Classes))
+	}
+	className := rule.Selectors[0].Simple.Classes[0]
+	if className != "w-3/4" {
+		t.Errorf("expected class 'w-3/4', got '%s'", className)
+	}
+}
+
 func TestParserCombinedSelector(t *testing.T) {
 	css := `
 		h1.title {
@@ -459,7 +519,7 @@ func TestParserComplexSelector(t *testing.T) {
 	}
 	rule := stylesheet.Rules[0]
 	seq := rule.Selectors[0]
-	
+
 	// Check leftmost selector (div.container)
 	if seq.Simple.TagName != "div" {
 		t.Errorf("expected tag 'div', got '%s'", seq.Simple.TagName)
@@ -467,12 +527,12 @@ func TestParserComplexSelector(t *testing.T) {
 	if len(seq.Simple.Classes) != 1 || seq.Simple.Classes[0] != "container" {
 		t.Errorf("expected class 'container', got %v", seq.Simple.Classes)
 	}
-	
+
 	// Check combinator
 	if seq.Combinator != ">" {
 		t.Errorf("expected child combinator, got '%s'", seq.Combinator)
 	}
-	
+
 	// Check rightmost selector (p#intro.highlight:first-child)
 	if seq.Next == nil {
 		t.Fatal("expected next selector")
@@ -510,12 +570,12 @@ func TestParserValueWithFunction(t *testing.T) {
 	if len(rule.Declarations) != 2 {
 		t.Fatalf("expected 2 declarations, got %d", len(rule.Declarations))
 	}
-	
+
 	// Check url() function
 	if !strings.Contains(rule.Declarations[0].Value, "url(") {
 		t.Errorf("expected value to contain 'url(', got '%s'", rule.Declarations[0].Value)
 	}
-	
+
 	// Check calc() function
 	if !strings.Contains(rule.Declarations[1].Value, "calc(") {
 		t.Errorf("expected value to contain 'calc(', got '%s'", rule.Declarations[1].Value)

@@ -1,8 +1,11 @@
 package e2e
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +14,27 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	originalStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	os.Stdout = w
+
+	fn()
+
+	_ = w.Close()
+	os.Stdout = originalStdout
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	_ = r.Close()
+	return buf.String()
+}
 
 func TestRealPageLoad(t *testing.T) {
 	// 1. Start Test Server
@@ -100,4 +124,57 @@ func findNodeByID(node *renderer.RenderNode, id string) *renderer.RenderNode {
 		}
 	}
 	return nil
+}
+
+func TestExternalCSSNonCSSResponseIsIgnored(t *testing.T) {
+	stylesheetRequested := make(chan struct{}, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/style.css" {
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte("<!doctype html><html><body>Not Found</body></html>"))
+			select {
+			case stylesheetRequested <- struct{}{}:
+			default:
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`
+			<html>
+				<head>
+					<link rel="stylesheet" href="/style.css">
+				</head>
+				<body>
+					<h1 id="title">Hello World</h1>
+				</body>
+			</html>
+		`))
+	}))
+	defer ts.Close()
+
+	out := captureStdout(t, func() {
+		testApp := test.NewApp()
+		defer testApp.Quit()
+
+		fetcher := net.NewFetcher()
+		r := renderer.NewRenderer(800, 600)
+
+		content, err := fetcher.Fetch(ts.URL)
+		assert.NoError(t, err)
+
+		r.SetCurrentURL(ts.URL)
+		_, err = r.RenderHTML(content)
+		assert.NoError(t, err)
+
+		select {
+		case <-stylesheetRequested:
+		case <-time.After(1 * time.Second):
+			t.Fatalf("timed out waiting for stylesheet request")
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	})
+
+	assert.NotContains(t, out, "Failed to parse CSS", "Non-CSS responses should not be parsed as CSS")
 }

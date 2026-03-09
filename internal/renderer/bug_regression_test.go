@@ -38,6 +38,7 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 
 	// Create renderer and render the HTML
 	htmlRenderer := NewRenderer(800, 600)
+	htmlRenderer.SetViewport(0, 100000)
 	canvasObject, err := htmlRenderer.RenderHTML(htmlContent)
 	if err != nil {
 		t.Fatalf("Error rendering HTML: %v", err)
@@ -48,12 +49,12 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected canvasObject to be *fyne.Container, got %T", canvasObject)
 	}
-	
+
 	// Expected: 3 objects (h1, p, link)
 	// Before fix: 19 objects (each word rendered separately, causing duplication)
 	expectedCount := 3
 	actualCount := len(vbox.Objects)
-	
+
 	if actualCount != expectedCount {
 		t.Errorf("Expected %d rendered objects, got %d", expectedCount, actualCount)
 		for i, obj := range vbox.Objects {
@@ -62,7 +63,7 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 			}
 		}
 	}
-	
+
 	// Verify the content is correct
 	if actualCount >= 3 {
 		// Check h1
@@ -71,7 +72,7 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 				t.Errorf("Expected h1 text 'Example Domain', got '%s'", label.Text)
 			}
 		}
-		
+
 		// Check paragraph
 		if label, ok := vbox.Objects[1].(*widget.Label); ok {
 			expectedText := "This domain is for use in documentation examples without needing permission. Avoid use in operations."
@@ -79,7 +80,7 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 				t.Errorf("Expected paragraph text, got '%s'", label.Text)
 			}
 		}
-		
+
 		// Check link
 		if label, ok := vbox.Objects[2].(*widget.Label); ok {
 			if label.Text != "Learn more" {

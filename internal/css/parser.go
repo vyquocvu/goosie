@@ -29,7 +29,7 @@ func ParseStyleAttribute(input string) ([]Declaration, error) {
 func (p *Parser) Parse() (*StyleSheet, error) {
 	stylesheet := &StyleSheet{}
 	p.consumeWhitespaceAndComments()
-	
+
 	for p.pos < len(p.input) {
 		// Check for at-rules
 		if p.peek() == '@' {
@@ -41,7 +41,7 @@ func (p *Parser) Parse() (*StyleSheet, error) {
 			p.consumeWhitespaceAndComments()
 			continue
 		}
-		
+
 		// Parse regular rules
 		selectors, err := p.parseSelectorSequences()
 		if err != nil {
@@ -66,14 +66,14 @@ func (p *Parser) Parse() (*StyleSheet, error) {
 // parseAtRule parses an at-rule like @media, @import, @keyframes
 func (p *Parser) parseAtRule() (AtRule, error) {
 	atRule := AtRule{}
-	
+
 	if !p.consumeChar('@') {
 		return atRule, fmt.Errorf("expected '@'")
 	}
-	
+
 	atRule.Name = p.consumeIdentifier()
 	p.consumeWhitespaceAndComments()
-	
+
 	// Parse prelude (everything before { or ;)
 	prelude := ""
 	for p.pos < len(p.input) && p.peek() != '{' && p.peek() != ';' {
@@ -81,14 +81,14 @@ func (p *Parser) parseAtRule() (AtRule, error) {
 		p.pos++
 	}
 	atRule.Prelude = strings.TrimSpace(prelude)
-	
+
 	p.consumeWhitespaceAndComments()
-	
+
 	// If it has a block, parse it
 	if p.peek() == '{' {
 		p.consumeChar('{')
 		p.consumeWhitespaceAndComments()
-		
+
 		// For @media and similar, parse nested rules
 		if atRule.Name == "media" || atRule.Name == "supports" {
 			for p.peek() != '}' && p.pos < len(p.input) {
@@ -109,11 +109,63 @@ func (p *Parser) parseAtRule() (AtRule, error) {
 				atRule.Rules = append(atRule.Rules, Rule{Selectors: selectors, Declarations: declarations})
 				p.consumeWhitespaceAndComments()
 			}
+		} else if atRule.Name == "keyframes" || strings.HasSuffix(atRule.Name, "keyframes") {
+			// For @keyframes, parse nested rules with simple selectors (identifiers or percentages)
+			for p.peek() != '}' && p.pos < len(p.input) {
+				p.consumeWhitespaceAndComments()
+				if p.peek() == '}' {
+					break
+				}
+
+				var selectors []SelectorSequence
+
+				// Parse comma-separated selectors
+				for {
+					// Consume until comma or open brace
+					var selectorPart string
+					for p.pos < len(p.input) {
+						ch := p.peek()
+						if ch == ',' || ch == '{' {
+							break
+						}
+						selectorPart += string(ch)
+						p.pos++
+					}
+					selectorPart = strings.TrimSpace(selectorPart)
+					if selectorPart != "" {
+						selectors = append(selectors, SelectorSequence{
+							Simple: SimpleSelector{TagName: selectorPart},
+						})
+					}
+
+					p.consumeWhitespaceAndComments()
+					if p.peek() == ',' {
+						p.pos++ // consume comma
+						p.consumeWhitespaceAndComments()
+					} else {
+						break
+					}
+				}
+
+				if !p.consumeChar('{') {
+					return atRule, fmt.Errorf("expected '{' in keyframe rule")
+				}
+
+				p.consumeWhitespaceAndComments()
+				declarations := p.parseDeclarations()
+				p.consumeWhitespaceAndComments()
+				if !p.consumeChar('}') {
+					return atRule, fmt.Errorf("expected '}' in keyframe rule")
+				}
+
+				atRule.Rules = append(atRule.Rules, Rule{Selectors: selectors, Declarations: declarations})
+				p.consumeWhitespaceAndComments()
+			}
 		} else {
-			// For @keyframes and others, just parse declarations
+			// For others, just parse declarations
 			atRule.Declarations = p.parseDeclarations()
 		}
-		
+
 		p.consumeWhitespaceAndComments()
 		if !p.consumeChar('}') {
 			return atRule, fmt.Errorf("expected '}'")
@@ -121,7 +173,7 @@ func (p *Parser) parseAtRule() (AtRule, error) {
 	} else if p.peek() == ';' {
 		p.consumeChar(';')
 	}
-	
+
 	return atRule, nil
 }
 
@@ -134,7 +186,7 @@ func (p *Parser) parseSelectorSequences() ([]SelectorSequence, error) {
 			return nil, err
 		}
 		sequences = append(sequences, seq)
-		
+
 		p.consumeWhitespaceAndComments()
 		if p.peek() == ',' {
 			p.consumeChar(',')
@@ -151,29 +203,29 @@ func (p *Parser) parseSelectorSequences() ([]SelectorSequence, error) {
 func (p *Parser) parseSelectorSequence() (SelectorSequence, error) {
 	var root SelectorSequence
 	current := &root
-	
+
 	for {
 		simple, err := p.parseSimpleSelector()
 		if err != nil {
 			return root, err
 		}
 		current.Simple = simple
-		
+
 		// Save position before consuming whitespace
 		savedPos := p.pos
 		p.consumeWhitespace() // Don't consume comments here to detect combinators
 		hadWhitespace := p.pos > savedPos
-		
+
 		// Check for combinator
 		if p.pos >= len(p.input) {
 			break
 		}
-		
+
 		ch := p.peek()
 		if ch == ',' || ch == '{' || ch == ')' {
 			break
 		}
-		
+
 		combinator := ""
 		if ch == '>' {
 			combinator = ">"
@@ -190,7 +242,7 @@ func (p *Parser) parseSelectorSequence() (SelectorSequence, error) {
 		} else {
 			break
 		}
-		
+
 		if combinator != "" {
 			p.consumeWhitespaceAndComments()
 			current.Combinator = combinator
@@ -200,7 +252,7 @@ func (p *Parser) parseSelectorSequence() (SelectorSequence, error) {
 			break
 		}
 	}
-	
+
 	return root, nil
 }
 
@@ -208,7 +260,7 @@ func (p *Parser) parseSelectorSequence() (SelectorSequence, error) {
 func (p *Parser) parseSimpleSelector() (SimpleSelector, error) {
 	selector := SimpleSelector{}
 	p.consumeWhitespaceAndComments()
-	
+
 	// Check for universal selector
 	if p.peek() == '*' {
 		p.consumeChar('*')
@@ -217,7 +269,7 @@ func (p *Parser) parseSimpleSelector() (SimpleSelector, error) {
 		// Parse tag name
 		selector.TagName = p.consumeIdentifier()
 	}
-	
+
 	// Parse classes, IDs, pseudo-classes, pseudo-elements, and attributes
 	for {
 		ch := p.peek()
@@ -257,22 +309,22 @@ func (p *Parser) parseSimpleSelector() (SimpleSelector, error) {
 			break
 		}
 	}
-	
+
 	return selector, nil
 }
 
 // parseAttributeSelector parses an attribute selector like [type="text"]
 func (p *Parser) parseAttributeSelector() (AttributeSelector, error) {
 	attr := AttributeSelector{}
-	
+
 	if !p.consumeChar('[') {
 		return attr, fmt.Errorf("expected '['")
 	}
-	
+
 	p.consumeWhitespaceAndComments()
 	attr.Name = p.consumeIdentifier()
 	p.consumeWhitespaceAndComments()
-	
+
 	// Check for operator
 	if p.peek() == '=' {
 		attr.Operator = "="
@@ -285,7 +337,7 @@ func (p *Parser) parseAttributeSelector() (AttributeSelector, error) {
 			p.consumeChar('=')
 		}
 	}
-	
+
 	if attr.Operator != "" {
 		p.consumeWhitespaceAndComments()
 		// Parse value (can be quoted or unquoted)
@@ -298,12 +350,12 @@ func (p *Parser) parseAttributeSelector() (AttributeSelector, error) {
 			attr.Value = p.consumeIdentifier()
 		}
 	}
-	
+
 	p.consumeWhitespaceAndComments()
 	if !p.consumeChar(']') {
 		return attr, fmt.Errorf("expected ']'")
 	}
-	
+
 	return attr, nil
 }
 
@@ -312,11 +364,11 @@ func (p *Parser) consumeFunctionArgs() string {
 	if p.peek() != '(' {
 		return ""
 	}
-	
+
 	result := "("
 	p.pos++
 	depth := 1
-	
+
 	for p.pos < len(p.input) && depth > 0 {
 		ch := p.peek()
 		if ch == '(' {
@@ -327,7 +379,7 @@ func (p *Parser) consumeFunctionArgs() string {
 		result += string(ch)
 		p.pos++
 	}
-	
+
 	return result
 }
 
@@ -338,7 +390,7 @@ func (p *Parser) parseDeclarations() []Declaration {
 		if p.peek() == '}' || p.pos >= len(p.input) {
 			break
 		}
-		
+
 		property := p.consumeIdentifier()
 		if property == "" {
 			// Skip malformed declaration
@@ -351,7 +403,7 @@ func (p *Parser) parseDeclarations() []Declaration {
 			}
 			continue
 		}
-		
+
 		p.consumeWhitespaceAndComments()
 		if !p.consumeChar(':') {
 			// Skip malformed declaration
@@ -364,22 +416,22 @@ func (p *Parser) parseDeclarations() []Declaration {
 			continue
 		}
 		p.consumeWhitespaceAndComments()
-		
+
 		value := p.consumeDeclarationValue()
 		important := false
-		
+
 		// Check for !important
 		trimmedValue := strings.TrimSpace(value)
 		if strings.HasSuffix(trimmedValue, "!important") {
 			important = true
 			value = strings.TrimSpace(strings.TrimSuffix(trimmedValue, "!important"))
 		}
-		
+
 		p.consumeWhitespaceAndComments()
 		if p.peek() == ';' {
 			p.consumeChar(';')
 		}
-		
+
 		declarations = append(declarations, Declaration{
 			Property:  property,
 			Value:     value,
@@ -397,15 +449,15 @@ func (p *Parser) parseDeclarations() []Declaration {
 func (p *Parser) consumeDeclarationValue() string {
 	var result string
 	depth := 0
-	
+
 	for p.pos < len(p.input) {
 		ch := p.peek()
-		
+
 		// Stop at ; or } if not inside parentheses or quotes
 		if depth == 0 && (ch == ';' || ch == '}') {
 			break
 		}
-		
+
 		if ch == '(' {
 			depth++
 		} else if ch == ')' {
@@ -430,19 +482,33 @@ func (p *Parser) consumeDeclarationValue() string {
 			}
 			continue
 		}
-		
+
 		result += string(ch)
 		p.pos++
 	}
-	
+
 	return strings.TrimSpace(result)
 }
 
 func (p *Parser) consumeIdentifier() string {
 	var result string
-	for p.pos < len(p.input) && isIdentifierChar(p.peek()) {
-		result += string(p.input[p.pos])
-		p.pos++
+	for p.pos < len(p.input) {
+		ch := p.peek()
+		if isIdentifierChar(ch) {
+			result += string(p.input[p.pos])
+			p.pos++
+		} else if ch == '\\' {
+			// Handle escape sequence
+			p.pos++ // consume backslash
+			if p.pos < len(p.input) {
+				// For now, just consume the next character literally
+				// This handles cases like .w-1\/2 -> class "w-1/2"
+				result += string(p.input[p.pos])
+				p.pos++
+			}
+		} else {
+			break
+		}
 	}
 	return result
 }
@@ -485,7 +551,7 @@ func (p *Parser) consumeWhitespaceAndComments() {
 		for p.pos < len(p.input) && isWhitespace(p.peek()) {
 			p.pos++
 		}
-		
+
 		// Check for comment
 		if p.pos < len(p.input)-1 && p.input[p.pos] == '/' && p.input[p.pos+1] == '*' {
 			// Consume comment
