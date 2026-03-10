@@ -53,6 +53,12 @@ func TestComprehensiveSuite(t *testing.T) {
 				// Typography varies across platforms; relax threshold for these tests
 				localConfig.DiffThreshold = 0.08
 			}
+			if strings.Contains(testName, "_layout") {
+				// Layout rendering involves font metrics and border styling differences
+				// between Goosie/Fyne and Chromium; dashed/dotted border patterns
+				// differ visually between renderers, requiring a relaxed threshold
+				localConfig.DiffThreshold = 0.20
+			}
 			page := newPage(t)
 			defer page.Close()
 
