@@ -1,6 +1,8 @@
 package renderer
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -387,4 +389,65 @@ func findLayoutByClass(t *testing.T, le *LayoutEngine, renderTree *RenderNode, c
 		return nil
 	}
 	return le.GetLayoutBox(node.ID)
+}
+
+func TestComprehensiveGeneratedFlexboxFiles(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd failed: %v", err)
+	}
+
+	flexboxFiles, err := filepath.Glob(filepath.Join(cwd, "..", "..", "testdata", "test_*_flexbox.html"))
+	if err != nil {
+		t.Fatalf("filepath.Glob failed: %v", err)
+	}
+	if len(flexboxFiles) == 0 {
+		t.Fatal("no generated flexbox files found in testdata")
+	}
+
+	for _, file := range flexboxFiles {
+		file := file
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			content, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("os.ReadFile failed: %v", err)
+			}
+
+			r := NewRenderer(800, 600)
+			obj, err := r.RenderHTML(string(content))
+			if err != nil {
+				t.Fatalf("RenderHTML failed for %s: %v", file, err)
+			}
+			if obj == nil {
+				t.Fatalf("RenderHTML returned nil object for %s", file)
+			}
+			if r.currentLayoutTree == nil {
+				t.Fatalf("layout tree is nil for %s", file)
+			}
+			if r.GetContentHeight() <= 0 {
+				t.Fatalf("expected positive content height for %s, got %f", file, r.GetContentHeight())
+			}
+
+			if countFlexNodes(r.currentRenderTree) == 0 {
+				t.Fatalf("expected at least one flex node in render tree for %s", file)
+			}
+		})
+	}
+}
+
+func countFlexNodes(node *RenderNode) int {
+	if node == nil {
+		return 0
+	}
+
+	count := 0
+	if node.ComputedStyle.Display == "flex" {
+		count++
+	}
+
+	for _, child := range node.Children {
+		count += countFlexNodes(child)
+	}
+
+	return count
 }
