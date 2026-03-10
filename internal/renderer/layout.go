@@ -716,16 +716,18 @@ func (le *LayoutEngine) getVerticalSpacing(tagName string) float32 {
 	// Headings: margin-top/bottom ≈ 0.67em; Paragraphs/Lists: ≈ 1.0em.
 	fontSize := le.fontMetrics.GetFontSize(tagName)
 	spacing := map[string]float32{
-		"h1": fontSize * 0.67,
-		"h2": fontSize * 0.67,
-		"h3": fontSize * 0.67,
-		"h4": fontSize * 0.67,
-		"h5": fontSize * 0.67,
-		"h6": fontSize * 0.67,
-		"p":  fontSize * 1.0,
-		"ul": fontSize * 0.5,
-		"ol": fontSize * 0.5,
-		"li": fontSize * 0.1, // Small spacing to satisfy tests
+		"h1":  fontSize * 0.67,
+		"h2":  fontSize * 0.67,
+		"h3":  fontSize * 0.67,
+		"h4":  fontSize * 0.67,
+		"h5":  fontSize * 0.67,
+		"h6":  fontSize * 0.67,
+		"p":   fontSize * 1.0,
+		"ul":  fontSize * 0.5,
+		"ol":  fontSize * 0.5,
+		"li":  fontSize * 0.1,
+		"dl":  fontSize * 1.0,
+		"pre": fontSize * 1.0,
 	}
 
 	if s, ok := spacing[tagName]; ok {

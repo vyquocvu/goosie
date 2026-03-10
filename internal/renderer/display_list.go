@@ -202,7 +202,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 
 					// Compute absolute box for this inline fragment
 					absX := lineBox.X + inlineBox.X
-					absY := lineBox.Y - lineBox.Ascent + inlineBox.Y
+					absY := lineBox.Y + inlineBox.Y
 					box := Rect{
 						X:      absX,
 						Y:      absY,
