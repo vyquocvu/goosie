@@ -406,7 +406,6 @@ func TestComprehensiveGeneratedFlexboxFiles(t *testing.T) {
 	}
 
 	for _, file := range flexboxFiles {
-		file := file
 		t.Run(filepath.Base(file), func(t *testing.T) {
 			content, err := os.ReadFile(file)
 			if err != nil {
