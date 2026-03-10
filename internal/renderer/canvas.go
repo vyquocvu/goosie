@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"image/color"
+	"log"
 	"net/url"
 	"strings"
 
@@ -101,6 +102,14 @@ func (cr *CanvasRenderer) SetNavigationCallback(callback NavigationCallback, bas
 	cr.baseURL = baseURL
 }
 
+// SetImageLoader sets the image loader for the canvas renderer
+func (cr *CanvasRenderer) SetImageLoader(loader imageloader.Loader) {
+	cr.imageLoader = loader
+	if cr.window != nil {
+		loader.SetOnLoadCallback(cr.onImageLoaded)
+	}
+}
+
 // SetInspectCallback sets the inspect callback for element inspection
 func (cr *CanvasRenderer) SetInspectCallback(callback func(node *RenderNode, layout *LayoutBox), renderer *Renderer) {
 	cr.onInspect = callback
@@ -135,6 +144,13 @@ func (cr *CanvasRenderer) Render(root *RenderNode) fyne.CanvasObject {
 // renderNode renders a single node and its children
 func (cr *CanvasRenderer) renderNode(node *RenderNode, objects *[]fyne.CanvasObject) {
 	if node == nil {
+		return
+	}
+
+	log.Printf("DEBUG: renderNode processing %s (Type: %d)\n", node.TagName, node.Type)
+
+	// Apply display: none
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
 		return
 	}
 
@@ -550,6 +566,30 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	alt, hasAlt := node.GetAttribute("alt")
 	src, hasSrc := node.GetAttribute("src")
 
+	// Check visibility and opacity from styles
+	isHidden := false
+	opacity := float64(1.0)
+	if node.ComputedStyle != nil {
+		if node.ComputedStyle.Visibility == "hidden" {
+			isHidden = true
+		}
+		opacity = float64(node.ComputedStyle.Opacity)
+	} else {
+		log.Printf("DEBUG: ComputedStyle is nil for %s\n", node.TagName)
+	}
+
+	log.Printf("DEBUG: renderImage %s, visibility=%s, isHidden=%v, opacity=%f\n", node.TagName, node.ComputedStyle.Visibility, isHidden, opacity)
+
+	// If hidden, render transparent placeholder
+	if isHidden {
+		rect := canvas.NewRectangle(color.Transparent)
+		// Use default size or try to get from attributes/style
+		// TODO: Parse width/height attributes or style
+		rect.SetMinSize(fyne.NewSize(100, 100))
+		*objects = append(*objects, rect)
+		return
+	}
+
 	if !hasSrc || src == "" {
 		// No source - show alt text or placeholder
 		displayText := "[Image"
@@ -570,13 +610,40 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	if cr.imageLoader != nil {
 		imageData, err := cr.imageLoader.Load(resolvedSrc)
 
-		if err == nil && imageData != nil {
+		log.Printf("DEBUG: renderImage %s loaded state: %v, err: %v\n", node.TagName, imageData, err)
+		if imageData != nil {
+			log.Printf("DEBUG: renderImage %s state: %d\n", node.TagName, imageData.State)
+		}
+
+		if err != nil {
+			// Image failed to load - show error with alt text
+			displayText := "[Image Load Error"
+			if hasAlt {
+				displayText += ": " + alt
+			}
+			displayText += "]"
+			label := widget.NewLabel(displayText)
+			label.Wrapping = fyne.TextWrapWord
+
+			// Create a placeholder rectangle
+			rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+			rect.SetMinSize(fyne.NewSize(100, 100))
+
+			*objects = append(*objects, container.NewVBox(rect, label))
+			return
+		}
+
+		if imageData != nil {
 			switch imageData.State {
 			case imageloader.StateLoaded:
 				// Image loaded successfully - render it
 				img := canvas.NewImageFromImage(imageData.Image)
 				img.FillMode = canvas.ImageFillOriginal
 				img.SetMinSize(fyne.NewSize(float32(imageData.Width), float32(imageData.Height)))
+
+				// Apply opacity
+				// Use Translucency (0 = opaque, 1 = transparent)
+				img.Translucency = 1.0 - opacity
 
 				// Add alt text below the image if available
 				if hasAlt && alt != "" {
@@ -597,7 +664,12 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 				displayText += "]"
 				label := widget.NewLabel(displayText)
 				label.Wrapping = fyne.TextWrapWord
-				*objects = append(*objects, label)
+
+				// Show a gray rectangle as placeholder
+				rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
+				rect.SetMinSize(fyne.NewSize(100, 100))
+
+				*objects = append(*objects, container.NewVBox(rect, label))
 				return
 
 			case imageloader.StateLoading:
@@ -700,7 +772,7 @@ func (cr *CanvasRenderer) getTextStyle(tagName string) fyne.TextStyle {
 // RenderWithViewport renders the render tree with viewport culling for better performance
 func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *LayoutBox) fyne.CanvasObject {
 	if root == nil || layoutRoot == nil {
-		return container.NewVBox()
+		return container.NewWithoutLayout()
 	}
 
 	// Build or reuse display list
@@ -719,19 +791,115 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		cr.cachedLayoutRoot = layoutRoot
 	}
 
-	// Filter commands based on viewport
-	objects := make([]fyne.CanvasObject, 0)
+	// Stack of object lists for hierarchy (handling clipping)
+	// Level 0 is the root container
+	objectStack := [][]fyne.CanvasObject{make([]fyne.CanvasObject, 0)}
+
+	// Stack of clip info (absolute coordinates and overflow type)
+	type ClipInfo struct {
+		Box      Rect
+		Overflow string
+	}
+	// Level 0 is the entire canvas
+	clipStack := []ClipInfo{{Box: Rect{X: 0, Y: 0, Width: cr.canvasWidth, Height: cr.canvasHeight}, Overflow: "visible"}}
+
+	// Helper to get current object list
+	getCurrentList := func() *[]fyne.CanvasObject {
+		return &objectStack[len(objectStack)-1]
+	}
+
 	for _, cmd := range displayList.Commands {
-		if cr.isInViewport(cmd.Box) {
-			cr.renderCommand(cmd, &objects)
+		// Handle Clip Commands
+		if cmd.Type == PushClip {
+			// Start new object list
+			objectStack = append(objectStack, make([]fyne.CanvasObject, 0))
+			// Push new clip info
+			clipStack = append(clipStack, ClipInfo{Box: cmd.Box, Overflow: cmd.ClipOverflow})
+			continue
+		} else if cmd.Type == PopClip {
+			if len(objectStack) <= 1 {
+				continue // Should not happen if balanced
+			}
+
+			// Pop objects
+			poppedObjects := objectStack[len(objectStack)-1]
+			objectStack = objectStack[:len(objectStack)-1]
+
+			// Pop clip info
+			clipInfo := clipStack[len(clipStack)-1]
+			clipStack = clipStack[:len(clipStack)-1]
+
+			// If no objects, nothing to add
+			if len(poppedObjects) == 0 {
+				continue
+			}
+
+			// Create content container
+			content := container.NewWithoutLayout(poppedObjects...)
+
+			// Calculate content size (union of children) to support scrolling
+			maxX, maxY := float32(0), float32(0)
+			for _, obj := range poppedObjects {
+				pos := obj.Position()
+				size := obj.Size()
+				if right := pos.X + size.Width; right > maxX {
+					maxX = right
+				}
+				if bottom := pos.Y + size.Height; bottom > maxY {
+					maxY = bottom
+				}
+			}
+			content.Resize(fyne.NewSize(maxX, maxY))
+
+			// Create scroll container
+			// TODO: If overflow is "hidden", we should ideally disable scrolling/scrollbars.
+			// Fyne's container.Scroll always allows scrolling if content is larger.
+			// For now, we use Scroll for both "hidden" and "scroll" to ensure clipping.
+			scroll := container.NewScroll(content)
+			scroll.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
+			scroll.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
+
+			// Add to parent list
+			*getCurrentList() = append(*getCurrentList(), scroll)
+			continue
 		}
+
+		// Viewport Culling
+		// Check if command is in viewport
+		// We use the command's absolute box
+		if !cr.isInViewport(cmd.Box) {
+			continue
+		}
+
+		// Create object
+		obj := cr.createCanvasObject(cmd)
+		if obj == nil {
+			continue
+		}
+
+		// Position object
+		// Coordinates in DisplayList are absolute.
+		// If we are inside a clip (ScrollContainer), we need to adjust coordinates
+		// to be relative to the clip container's top-left.
+		currentClip := clipStack[len(clipStack)-1]
+
+		// For root level (len=1), currentClip starts at 0,0, so no adjustment needed.
+		// For nested levels, we subtract the current clip's origin.
+		relX := cmd.Box.X - currentClip.Box.X
+		relY := cmd.Box.Y - currentClip.Box.Y
+
+		obj.Move(fyne.NewPos(relX, relY))
+
+		// Add to current list
+		*getCurrentList() = append(*getCurrentList(), obj)
 	}
 
-	if len(objects) == 0 {
-		return container.NewVBox()
+	rootObjects := objectStack[0]
+	if len(rootObjects) == 0 {
+		return container.NewWithoutLayout()
 	}
 
-	content := container.NewVBox(objects...)
+	content := container.NewWithoutLayout(rootObjects...)
 
 	// Wrap in a mouse-aware container if inspect callback is set
 	if cr.onInspect != nil && cr.renderer != nil {
@@ -741,12 +909,12 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	return content
 }
 
-// renderCommand renders a single paint command to canvas objects
-func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
+// createCanvasObject creates a Fyne object from a paint command
+func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObject {
 	switch cmd.Type {
 	case PaintText:
 		if strings.TrimSpace(cmd.Text) == "" {
-			return
+			return nil
 		}
 
 		// Check if the node has CSS styles that require custom rendering
@@ -775,7 +943,9 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 			}
 			textObj.TextStyle = textStyle
 
-			*objects = append(*objects, textObj)
+			// Note: canvas.Text does not support wrapping easily without layout
+			// For now, we assume text fits or is handled by layout engine
+			return textObj
 		} else {
 			// Use standard label widget
 			label := widget.NewLabel(cmd.Text)
@@ -789,13 +959,14 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 				label.TextStyle = fyne.TextStyle{Italic: true}
 			}
 
-			*objects = append(*objects, label)
+			label.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return label
 		}
 
 	case PaintRect:
 		rect := canvas.NewRectangle(cmd.FillColor)
-		rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-		*objects = append(*objects, rect)
+		rect.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		return rect
 
 	case PaintImage:
 		// Try to load and render the actual image if loader is available
@@ -808,17 +979,27 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					// Image loaded successfully - render it
 					img := canvas.NewImageFromImage(imageData.Image)
 					img.FillMode = canvas.ImageFillOriginal
-					img.SetMinSize(fyne.NewSize(float32(imageData.Width), float32(imageData.Height)))
+					img.Resize(fyne.NewSize(float32(imageData.Width), float32(imageData.Height)))
+					// Override size with box size to fit layout
+					img.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+
+					// Apply opacity
+					if cmd.Node.ComputedStyle != nil {
+						img.Translucency = 1.0 - float64(cmd.Node.ComputedStyle.Opacity)
+					}
 
 					// Add alt text below the image if available
 					if cmd.ImageAlt != "" {
 						altLabel := widget.NewLabel(cmd.ImageAlt)
 						altLabel.Wrapping = fyne.TextWrapWord
-						*objects = append(*objects, container.NewVBox(img, altLabel))
+
+						// VBox for Image + Alt
+						vbox := container.NewVBox(img, altLabel)
+						vbox.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height)) // VBox might ignore this for children?
+						return vbox
 					} else {
-						*objects = append(*objects, img)
+						return img
 					}
-					return
 
 				case imageloader.StateError:
 					// Image failed to load - show error with alt text
@@ -829,8 +1010,8 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					displayText += "]"
 					label := widget.NewLabel(displayText)
 					label.Wrapping = fyne.TextWrapWord
-					*objects = append(*objects, label)
-					return
+					label.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+					return label
 
 				case imageloader.StateLoading:
 					// Image is loading - show loading placeholder
@@ -845,8 +1026,9 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 					rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 					rect.SetMinSize(fyne.NewSize(100, 100))
 
-					*objects = append(*objects, container.NewVBox(rect, label))
-					return
+					vbox := container.NewVBox(rect, label)
+					vbox.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+					return vbox
 				}
 			}
 		}
@@ -867,12 +1049,14 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
 		rect.SetMinSize(fyne.NewSize(100, 100))
 
-		*objects = append(*objects, container.NewVBox(rect, label))
+		vbox := container.NewVBox(rect, label)
+		vbox.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		return vbox
 
 	case PaintLink:
 		// Render clickable link
 		if cmd.LinkText == "" {
-			return
+			return nil
 		}
 
 		// Resolve URL (absolute or relative)
@@ -882,19 +1066,22 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 		if cr.onNavigate != nil {
 			// Create a custom tappable widget
 			tappableLink := newTappableHyperlink(cmd.LinkText, resolvedURL, cr.onNavigate)
-			*objects = append(*objects, tappableLink)
+			tappableLink.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return tappableLink
 		} else {
 			// Fallback to default hyperlink behavior
 			parsedURL, err := url.Parse(resolvedURL)
 			if err == nil {
 				link := widget.NewHyperlink(cmd.LinkText, parsedURL)
 				link.Wrapping = fyne.TextWrapWord
-				*objects = append(*objects, link)
+				link.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+				return link
 			} else {
 				// If URL parsing fails, display as text
 				label := widget.NewLabel(cmd.LinkText)
 				label.Wrapping = fyne.TextWrapWord
-				*objects = append(*objects, label)
+				label.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+				return label
 			}
 		}
 
@@ -939,21 +1126,34 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 		if len(borderContainer.Objects) > 0 {
 			borderContainer.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-			*objects = append(*objects, borderContainer)
+			return borderContainer
 		}
-	
+		return nil
+
 	case PaintButton:
 		// Render button widget
 		if cmd.ButtonText == "" {
-			return
+			return nil
 		}
-		
+
 		button := widget.NewButton(cmd.ButtonText, func() {
 			// Handle onclick if JavaScript runtime is available
 			// For now, we'll just create an empty handler
 			// The onclick attribute would need to be executed via JavaScript runtime
 		})
-		*objects = append(*objects, button)
+		button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		return button
+	}
+
+	return nil
+}
+
+// renderCommand renders a single paint command to canvas objects
+// Deprecated: Use createCanvasObject instead
+func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
+	obj := cr.createCanvasObject(cmd)
+	if obj != nil {
+		*objects = append(*objects, obj)
 	}
 }
 

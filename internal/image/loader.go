@@ -2,14 +2,18 @@ package image
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,15 +82,10 @@ func (l *loader) Load(source string) (*ImageData, error) {
 
 	// Check if already loading this image
 	l.mu.Lock()
-	if wg, exists := l.inProgress[source]; exists {
+	if _, exists := l.inProgress[source]; exists {
 		l.mu.Unlock()
-		// Wait for the in-progress load to complete
-		wg.Wait()
-		// Try cache again after waiting
-		if cached := l.cache.Get(source); cached != nil {
-			return cached, nil
-		}
-		// If still not in cache, it failed - return loading state
+		// Already loading - return loading state immediately
+		// Do not wait here to avoid blocking the UI thread
 		return &ImageData{State: StateLoading}, nil
 	}
 
@@ -135,10 +134,13 @@ func (l *loader) loadAsync(source string, wg *sync.WaitGroup) {
 
 	data, err := l.loadImage(source)
 	if err != nil {
+		log.Printf("Failed to load image %s: %v", source, err)
 		data = &ImageData{
 			State: StateError,
 			Error: err,
 		}
+	} else {
+		log.Printf("Successfully loaded image %s", source)
 	}
 
 	// Cache the result
@@ -153,10 +155,42 @@ func (l *loader) loadAsync(source string, wg *sync.WaitGroup) {
 // loadImage loads an image from a source (URL or file path)
 func (l *loader) loadImage(source string) (*ImageData, error) {
 	// Determine if it's a URL or file path
+	if strings.HasPrefix(source, "data:") {
+		return l.loadFromDataURI(source)
+	}
 	if isURL(source) {
 		return l.loadFromURL(source)
 	}
 	return l.loadFromFile(source)
+}
+
+// loadFromDataURI loads an image from a data URI
+func (l *loader) loadFromDataURI(dataURI string) (*ImageData, error) {
+	// Format: data:[<mediatype>][;base64],<data>
+	parts := strings.SplitN(dataURI, ",", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid data URI format")
+	}
+
+	meta := parts[0]
+	data := parts[1]
+
+	isBase64 := strings.Contains(meta, ";base64")
+
+	if isBase64 {
+		decoded, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode base64 data: %w", err)
+		}
+		return l.decodeImage(bytes.NewReader(decoded))
+	}
+
+	// URL encoded
+	decoded, err := url.QueryUnescape(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unescape data URI: %w", err)
+	}
+	return l.decodeImage(strings.NewReader(decoded))
 }
 
 // loadFromURL loads an image from a remote URL

@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"image/color"
+	"sort"
 	"strings"
 )
 
@@ -21,6 +22,10 @@ const (
 	PaintBorder
 	// PaintButton represents a button paint command
 	PaintButton
+	// PushClip represents a command to start a clipping region
+	PushClip
+	// PopClip represents a command to end a clipping region
+	PopClip
 )
 
 // PaintCommand represents a single paint operation
@@ -66,6 +71,9 @@ type PaintCommand struct {
 	BorderRightStyle  string
 	BorderBottomStyle string
 	BorderLeftStyle   string
+
+	// Clip-specific fields
+	ClipOverflow string // "hidden", "scroll", "auto"
 }
 
 // DisplayList represents a list of paint commands
@@ -227,10 +235,68 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 		}
 	}
 
+	// Check for overflow property
+	isOverflow := false
+	if renderNode.ComputedStyle != nil && (renderNode.ComputedStyle.Overflow == "hidden" || renderNode.ComputedStyle.Overflow == "scroll" || renderNode.ComputedStyle.Overflow == "auto") {
+		isOverflow = true
+		// Push clip command
+		dlb.addPushClipCommand(layoutBox, renderNode, displayList)
+	}
+
 	// Process children
-	for _, child := range layoutBox.Children {
+	// Create a copy of children to sort by z-index
+	children := make([]*LayoutBox, len(layoutBox.Children))
+	copy(children, layoutBox.Children)
+
+	// Sort children by z-index
+	sort.SliceStable(children, func(i, j int) bool {
+		nodeI := renderMap[children[i].NodeID]
+		nodeJ := renderMap[children[j].NodeID]
+
+		zIndexI := 0
+		if nodeI != nil && nodeI.ComputedStyle != nil {
+			zIndexI = nodeI.ComputedStyle.ZIndex
+		}
+
+		zIndexJ := 0
+		if nodeJ != nil && nodeJ.ComputedStyle != nil {
+			zIndexJ = nodeJ.ComputedStyle.ZIndex
+		}
+
+		return zIndexI < zIndexJ
+	})
+
+	for _, child := range children {
 		dlb.buildRecursive(child, renderMap, displayList)
 	}
+
+	// Pop clip command if needed
+	if isOverflow {
+		dlb.addPopClipCommand(layoutBox, renderNode, displayList)
+	}
+}
+
+// addPushClipCommand adds a push clip command
+func (dlb *DisplayListBuilder) addPushClipCommand(layoutBox *LayoutBox, renderNode *RenderNode, displayList *DisplayList) {
+	cmd := &PaintCommand{
+		Type:         PushClip,
+		NodeID:       layoutBox.NodeID,
+		Node:         renderNode,
+		Box:          layoutBox.Box,
+		ClipOverflow: renderNode.ComputedStyle.Overflow,
+	}
+	displayList.AddCommand(cmd)
+}
+
+// addPopClipCommand adds a pop clip command
+func (dlb *DisplayListBuilder) addPopClipCommand(layoutBox *LayoutBox, renderNode *RenderNode, displayList *DisplayList) {
+	cmd := &PaintCommand{
+		Type:   PopClip,
+		NodeID: layoutBox.NodeID,
+		Node:   renderNode,
+		Box:    layoutBox.Box,
+	}
+	displayList.AddCommand(cmd)
 }
 
 // addTextCommand adds a text paint command
@@ -288,17 +354,19 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 
 	// For image elements, add a rectangle placeholder and text
 	if renderNode.TagName == "img" {
-		// Add background rectangle
-		cmd := &PaintCommand{
-			Type:        PaintRect,
-			NodeID:      layoutBox.NodeID,
-			Node:        renderNode,
-			Box:         layoutBox.Box,
-			FillColor:   color.RGBA{R: 200, G: 200, B: 200, A: 255},
-			StrokeColor: color.RGBA{R: 150, G: 150, B: 150, A: 255},
-			StrokeWidth: 1.0,
+		// Check visibility
+		if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == "hidden" {
+			// Add transparent placeholder to maintain layout space
+			cmd := &PaintCommand{
+				Type:      PaintRect,
+				NodeID:    layoutBox.NodeID,
+				Node:      renderNode,
+				Box:       layoutBox.Box,
+				FillColor: color.Transparent,
+			}
+			displayList.AddCommand(cmd)
+			return
 		}
-		displayList.AddCommand(cmd)
 
 		// Add image info text if available
 		src, _ := renderNode.GetAttribute("src")

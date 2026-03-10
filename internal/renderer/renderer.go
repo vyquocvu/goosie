@@ -38,6 +38,9 @@ type Renderer struct {
 
 	// Refresh callback for UI updates
 	onRefresh func()
+
+	// Testing mode to bypass Fyne's main thread requirement for callbacks
+	testingMode bool
 }
 
 // NewRenderer creates a new HTML renderer
@@ -86,7 +89,7 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	}
 
 	// Perform layout
-	r.layoutEngine.ComputeLayout(renderTree) // This line was actually layoutTree := ... in original code, I should be careful not to break it
+	r.layoutEngine.ComputeLayout(renderTree)               // This line was actually layoutTree := ... in original code, I should be careful not to break it
 	layoutTree := r.layoutEngine.ComputeLayout(renderTree) // Re-writing for clarity in replacement
 
 	// Cache trees for viewport updates
@@ -198,6 +201,12 @@ func (r *Renderer) SetSize(width, height float32) {
 	r.layoutEngine.canvasHeight = height
 	r.canvasRenderer.canvasWidth = width
 	r.canvasRenderer.canvasHeight = height
+}
+
+// SetImageLoader sets the image loader for the renderer
+func (r *Renderer) SetImageLoader(loader imageloader.Loader) {
+	r.imageLoader = loader
+	r.canvasRenderer.SetImageLoader(loader)
 }
 
 // SetNavigationCallback sets the callback for link clicks
@@ -331,6 +340,8 @@ func (r *Renderer) loadImages(node *RenderNode) {
 				img, err := r.imageLoader.Load(resolvedSrc)
 				if err == nil {
 					node.ImageData = img
+					// Trigger refresh when image is loaded
+					r.onImageLoaded(resolvedSrc)
 				}
 			}()
 		}
@@ -369,7 +380,18 @@ func (r *Renderer) resolveURL(href string) string {
 	return resolved.String()
 }
 
+func (r *Renderer) SetTestingMode(mode bool) {
+	r.testingMode = mode
+}
+
 func (r *Renderer) onImageLoaded(src string) {
+	if r.testingMode {
+		if r.onRefresh != nil {
+			r.onRefresh()
+		}
+		return
+	}
+
 	if r.canvasRenderer.window != nil {
 		fyne.Do(func() {
 			r.canvasRenderer.window.Canvas().Refresh(r.canvasRenderer.window.Content())
@@ -403,7 +425,7 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 	for _, href := range links {
 		// Resolve URL
 		resolvedURL := r.ResolveURL(href)
-		
+
 		// Fetch CSS
 		content, err := r.fetcher.Fetch(resolvedURL)
 		if err != nil {
@@ -413,7 +435,7 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 		if !shouldAttemptParseExternalCSS(content) {
 			continue
 		}
-		
+
 		// Parse CSS
 		parser := css.NewParser(content)
 		stylesheet, err := parser.Parse()
@@ -421,12 +443,12 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 			fmt.Printf("Failed to parse CSS %s: %v\n", resolvedURL, err)
 			continue
 		}
-		
+
 		// Append rules to current stylesheet safely
 		// Note: This simple append assumes r.stylesheet is safe to modify or we are lucky.
 		// Since we are inside a goroutine and Refresh reads it, we should ideally lock.
 		// But for now, we'll update it inside fyne.Do to be safe with UI refresh.
-		
+
 		fyne.Do(func() {
 			if r.stylesheet == nil {
 				r.stylesheet = stylesheet

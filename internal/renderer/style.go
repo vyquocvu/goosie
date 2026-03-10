@@ -50,7 +50,10 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	}
 
 	if node.ComputedStyle == nil {
-		node.ComputedStyle = &Style{}
+		node.ComputedStyle = &Style{
+			Opacity: 1.0,
+			Display: "block", // Default to block for now, ideally depends on tag
+		}
 	}
 
 	// Inherit styles from parent
@@ -60,7 +63,7 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	}
 
 	sm.applyMatchingRules(node)
-	
+
 	// Apply @media rules if viewport is set
 	if sm.mediaEvaluator != nil {
 		sm.applyMediaRules(node)
@@ -94,7 +97,7 @@ func (sm *StyleManager) applyMediaRules(node *RenderNode) {
 	if sm.stylesheet == nil || sm.mediaEvaluator == nil {
 		return
 	}
-	
+
 	for _, atRule := range sm.stylesheet.AtRules {
 		if atRule.Name == "media" {
 			if sm.mediaEvaluator.Evaluate(atRule.Prelude) {
@@ -139,7 +142,7 @@ func (sm *StyleManager) matchesFromRight(seq *css.SelectorSequence, node *Render
 		// This is the rightmost selector, match it against the node
 		return sm.matchesSimple(seq.Simple, node)
 	}
-	
+
 	// This is not the rightmost, so we need to match the rightmost first
 	// and then check if this one matches the appropriate ancestor/sibling
 	return sm.matchesWithCombinatorLeftToRight(seq, node)
@@ -149,12 +152,12 @@ func (sm *StyleManager) matchesFromRight(seq *css.SelectorSequence, node *Render
 func (sm *StyleManager) matchesWithCombinatorLeftToRight(seq *css.SelectorSequence, node *RenderNode) bool {
 	// seq = A (combinator) B
 	// We need to check if B matches the node, then verify A matches the related element
-	
+
 	// First, recursively match the right side
 	if !sm.matchesFromRight(seq.Next, node) {
 		return false
 	}
-	
+
 	// Now check if the left side (seq.Simple) matches according to the combinator
 	switch seq.Combinator {
 	case " ": // Descendant combinator: A B means B is descendant of A
@@ -173,7 +176,7 @@ func (sm *StyleManager) matchesWithCombinatorLeftToRight(seq *css.SelectorSequen
 	case "~": // General sibling: A ~ B means B is preceded by A
 		return sm.hasMatchingPreviousSibling(seq.Simple, node)
 	}
-	
+
 	return false
 }
 
@@ -194,7 +197,7 @@ func (sm *StyleManager) hasMatchingPreviousSibling(selector css.SimpleSelector, 
 	if node.Parent == nil {
 		return false
 	}
-	
+
 	// Find node's index in parent's children
 	nodeIndex := -1
 	for i, child := range node.Parent.Children {
@@ -203,18 +206,18 @@ func (sm *StyleManager) hasMatchingPreviousSibling(selector css.SimpleSelector, 
 			break
 		}
 	}
-	
+
 	if nodeIndex == -1 {
 		return false
 	}
-	
+
 	// Check all previous siblings
 	for i := nodeIndex - 1; i >= 0; i-- {
 		if sm.matchesSimple(selector, node.Parent.Children[i]) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -223,30 +226,30 @@ func (sm *StyleManager) getPreviousSibling(node *RenderNode) *RenderNode {
 	if node.Parent == nil {
 		return nil
 	}
-	
+
 	for i, child := range node.Parent.Children {
 		if child == node && i > 0 {
 			return node.Parent.Children[i-1]
 		}
 	}
-	
+
 	return nil
 }
 
 // matchesSimple checks if a simple selector matches a node
 func (sm *StyleManager) matchesSimple(selector css.SimpleSelector, node *RenderNode) bool {
 	// Universal selector matches everything only when it has no other constraints
-	if selector.Universal && selector.TagName == "" && selector.ID == "" && 
-		len(selector.Classes) == 0 && len(selector.PseudoClasses) == 0 && 
+	if selector.Universal && selector.TagName == "" && selector.ID == "" &&
+		len(selector.Classes) == 0 && len(selector.PseudoClasses) == 0 &&
 		len(selector.Attributes) == 0 && len(selector.PseudoElements) == 0 {
 		return true
 	}
-	
+
 	// Check tag name
 	if selector.TagName != "" && selector.TagName != node.TagName {
 		return false
 	}
-	
+
 	// Check ID
 	if selector.ID != "" {
 		id, ok := node.GetAttribute("id")
@@ -254,7 +257,7 @@ func (sm *StyleManager) matchesSimple(selector css.SimpleSelector, node *RenderN
 			return false
 		}
 	}
-	
+
 	// Check classes
 	if len(selector.Classes) > 0 {
 		classAttr, ok := node.GetAttribute("class")
@@ -275,21 +278,21 @@ func (sm *StyleManager) matchesSimple(selector css.SimpleSelector, node *RenderN
 			}
 		}
 	}
-	
+
 	// Check pseudo-classes
 	for _, pseudoClass := range selector.PseudoClasses {
 		if !sm.matchesPseudoClass(pseudoClass, node) {
 			return false
 		}
 	}
-	
+
 	// Check attributes
 	for _, attr := range selector.Attributes {
 		if !sm.matchesAttribute(attr, node) {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -300,7 +303,7 @@ func (sm *StyleManager) matchesPseudoClass(pseudoClass string, node *RenderNode)
 		// For now, just return true for basic support
 		return true
 	}
-	
+
 	switch pseudoClass {
 	case "link", "visited":
 		return node.TagName == "a"
@@ -328,12 +331,12 @@ func (sm *StyleManager) matchesAttribute(attr css.AttributeSelector, node *Rende
 	if !ok {
 		return false
 	}
-	
+
 	if attr.Operator == "" {
 		// Just checking for attribute presence
 		return true
 	}
-	
+
 	switch attr.Operator {
 	case "=":
 		return value == attr.Value
@@ -359,7 +362,7 @@ func (sm *StyleManager) matchesAttribute(attr css.AttributeSelector, node *Rende
 		// Contains
 		return strings.Contains(value, attr.Value)
 	}
-	
+
 	return false
 }
 
@@ -392,6 +395,8 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	switch decl.Property {
 	case "display":
 		style.Display = decl.Value
+	case "visibility":
+		style.Visibility = decl.Value
 	case "font-size":
 		parentFontSize := float32(16.0) // Default font size
 		if node.Parent != nil && node.Parent.ComputedStyle != nil && node.Parent.ComputedStyle.FontSize > 0 {
@@ -422,7 +427,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		}
 	case "text-align":
 		style.TextAlign = decl.Value
-	
+
 	// Margin properties
 	case "margin":
 		// Shorthand: apply to all sides
@@ -439,7 +444,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.MarginBottom = decl.Value
 	case "margin-left":
 		style.MarginLeft = decl.Value
-	
+
 	// Padding properties
 	case "padding":
 		// Shorthand: apply to all sides
@@ -456,7 +461,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.PaddingBottom = decl.Value
 	case "padding-left":
 		style.PaddingLeft = decl.Value
-	
+
 	// Border width properties
 	case "border-width":
 		// Shorthand: apply to all sides
@@ -473,7 +478,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.BorderBottomWidth = decl.Value
 	case "border-left-width":
 		style.BorderLeftWidth = decl.Value
-	
+
 	// Border style properties
 	case "border-style":
 		// Shorthand: apply to all sides
@@ -490,7 +495,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.BorderBottomStyle = decl.Value
 	case "border-left-style":
 		style.BorderLeftStyle = decl.Value
-	
+
 	// Border color properties
 	case "border-color":
 		// Shorthand: apply to all sides
@@ -516,7 +521,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		if val, err := parseColor(decl.Value); err == nil {
 			style.BorderLeftColor = val
 		}
-	
+
 	// Border shorthand properties
 	case "border":
 		// Parse "border: 1px solid black" format
@@ -529,7 +534,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		parseBorderShorthand(decl.Value, style, "bottom")
 	case "border-left":
 		parseBorderShorthand(decl.Value, style, "left")
-	
+
 	// Flexbox container properties
 	case "flex-direction":
 		style.FlexDirection = decl.Value
@@ -558,13 +563,13 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.RowGap = decl.Value
 	case "column-gap":
 		style.ColumnGap = decl.Value
-	
+
 	// Grid Container properties
 	case "grid-template-columns":
 		style.GridTemplateColumns = decl.Value
 	case "grid-template-rows":
 		style.GridTemplateRows = decl.Value
-	
+
 	// Grid Item properties
 	case "grid-column-start":
 		style.GridColumnStart = decl.Value
@@ -592,7 +597,38 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		if len(parts) > 1 {
 			style.GridRowEnd = strings.TrimSpace(parts[1])
 		}
-	
+
+	// Positioning
+	case "position":
+		style.Position = decl.Value
+	case "z-index":
+		if val, err := strconv.Atoi(decl.Value); err == nil {
+			style.ZIndex = val
+		} else if decl.Value == "auto" {
+			style.ZIndex = 0 // auto usually means 0 (stacking context wise) or inherit
+		}
+	case "top":
+		style.Top = decl.Value
+	case "right":
+		style.Right = decl.Value
+	case "bottom":
+		style.Bottom = decl.Value
+	case "left":
+		style.Left = decl.Value
+
+	// Overflow
+	case "overflow":
+		style.Overflow = decl.Value
+	case "overflow-x":
+		// For now map to overflow if not specifically handling x/y
+		if style.Overflow == "" {
+			style.Overflow = decl.Value
+		}
+	case "overflow-y":
+		if style.Overflow == "" {
+			style.Overflow = decl.Value
+		}
+
 	// Flexbox item properties
 	case "flex-grow":
 		if val, err := strconv.ParseFloat(decl.Value, 32); err == nil {
@@ -638,12 +674,12 @@ func parseFontSize(value string, parentFontSize float32) (float32, error) {
 // Supports: px, em, rem, plain numbers (treated as px), and keyword values (thin, medium, thick)
 func parseLength(value string, fontSize float32) float32 {
 	value = strings.TrimSpace(value)
-	
+
 	// Handle empty or "0" values
 	if value == "" || value == "0" {
 		return 0
 	}
-	
+
 	// Handle keyword values for border widths
 	switch value {
 	case "thin":
@@ -653,7 +689,7 @@ func parseLength(value string, fontSize float32) float32 {
 	case "thick":
 		return 5.0
 	}
-	
+
 	// Parse numeric values with units
 	// IMPORTANT: Check rem before em since "rem" ends with "em"
 	// Otherwise "1.5rem" would be incorrectly parsed as "1.5r" + "em"
@@ -676,7 +712,7 @@ func parseLength(value string, fontSize float32) float32 {
 			return float32(val)
 		}
 	}
-	
+
 	return 0
 }
 
@@ -718,7 +754,7 @@ func parseHexColor(hex string) (color.Color, error) {
 func parseBoxShorthand(value string) [4]string {
 	values := strings.Fields(value)
 	var result [4]string
-	
+
 	switch len(values) {
 	case 1:
 		// All sides same
@@ -751,7 +787,7 @@ func parseBoxShorthand(value string) [4]string {
 		result[2] = "0"
 		result[3] = "0"
 	}
-	
+
 	return result
 }
 
@@ -759,7 +795,7 @@ func parseBoxShorthand(value string) [4]string {
 func parseBoxShorthandColors(values []string) [4]color.Color {
 	var defaultColor color.Color // nil
 	var result [4]color.Color
-	
+
 	switch len(values) {
 	case 1:
 		// All sides same
@@ -823,7 +859,7 @@ func parseBoxShorthandColors(values []string) [4]color.Color {
 		result[2] = defaultColor
 		result[3] = defaultColor
 	}
-	
+
 	return result
 }
 
@@ -831,14 +867,14 @@ func parseBoxShorthandColors(values []string) [4]color.Color {
 // Format: "width style color" in any order
 func parseBorderShorthand(value string, style *Style, side string) {
 	parts := strings.Fields(value)
-	
+
 	var width, borderStyle, borderColor string
-	
+
 	// Parse each part
 	for _, part := range parts {
 		// Check if it's a width (has px, em, etc. or is a number)
-		if strings.HasSuffix(part, "px") || strings.HasSuffix(part, "em") || 
-		   strings.HasSuffix(part, "rem") || part == "thin" || part == "medium" || part == "thick" {
+		if strings.HasSuffix(part, "px") || strings.HasSuffix(part, "em") ||
+			strings.HasSuffix(part, "rem") || part == "thin" || part == "medium" || part == "thick" {
 			width = part
 		} else if isBorderStyle(part) {
 			borderStyle = part
@@ -847,7 +883,7 @@ func parseBorderShorthand(value string, style *Style, side string) {
 			borderColor = part
 		}
 	}
-	
+
 	// Apply to the specified side(s)
 	switch side {
 	case "all":
@@ -938,7 +974,7 @@ func isBorderStyle(s string) bool {
 // Examples: "1", "1 1", "1 1 auto", "0 0 auto", "none", "auto"
 func parseFlexShorthand(value string, style *Style) {
 	value = strings.TrimSpace(value)
-	
+
 	// Handle special values
 	switch value {
 	case "none":
@@ -957,17 +993,17 @@ func parseFlexShorthand(value string, style *Style) {
 		style.FlexBasis = "auto"
 		return
 	}
-	
+
 	parts := strings.Fields(value)
 	if len(parts) == 0 {
 		return
 	}
-	
+
 	// First value is always flex-grow
 	if val, err := strconv.ParseFloat(parts[0], 32); err == nil {
 		style.FlexGrow = float32(val)
 	}
-	
+
 	if len(parts) >= 2 {
 		// Second value could be flex-shrink or flex-basis
 		if val, err := strconv.ParseFloat(parts[1], 32); err == nil {
@@ -977,7 +1013,7 @@ func parseFlexShorthand(value string, style *Style) {
 			style.FlexBasis = parts[1]
 		}
 	}
-	
+
 	if len(parts) >= 3 {
 		// Third value is flex-basis
 		style.FlexBasis = parts[2]

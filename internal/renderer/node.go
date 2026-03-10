@@ -40,6 +40,7 @@ type RenderNode struct {
 // Style represents computed styles for a node (placeholder for future CSS support)
 type Style struct {
 	Display         string      // "block", "inline", "none", etc.
+	Visibility      string      // "visible", "hidden", "collapse"
 	FontSize        float32
 	FontWeight      string
 	Color           color.Color
@@ -50,6 +51,17 @@ type Style struct {
 	Opacity         float32
 	TextAlign       string // "left", "right", "center", "justify"
 	
+	// Positioning
+	Position string // "static", "relative", "absolute", "fixed", "sticky"
+	Top      string
+	Right    string
+	Bottom   string
+	Left     string
+	ZIndex   int
+
+	// Overflow
+	Overflow string // "visible", "hidden", "scroll", "auto"
+
 	// Box model properties
 	MarginTop       string
 	MarginRight     string
