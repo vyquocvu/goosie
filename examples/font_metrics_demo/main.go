@@ -24,7 +24,7 @@ func RunDemo() {
 	fmt.Println("----------------------------------")
 	
 	text1 := "Hello, World!"
-	metrics1 := fm.MeasureText(text1, 16.0, fyne.TextStyle{})
+	metrics1 := fm.MeasureText(text1, 16.0, fyne.TextStyle{}, 0)
 	fmt.Printf("Text: %q\n", text1)
 	fmt.Printf("Width: %.2f pixels\n", metrics1.Width)
 	fmt.Printf("Height: %.2f pixels\n", metrics1.Height)
@@ -37,7 +37,7 @@ func RunDemo() {
 	fmt.Println("--------------------")
 	
 	text2 := "Bold Text"
-	metrics2 := fm.MeasureText(text2, 16.0, fyne.TextStyle{Bold: true})
+	metrics2 := fm.MeasureText(text2, 16.0, fyne.TextStyle{Bold: true}, 0)
 	fmt.Printf("Text: %q (bold)\n", text2)
 	fmt.Printf("Width: %.2f pixels\n", metrics2.Width)
 	fmt.Printf("Height: %.2f pixels\n", metrics2.Height)
@@ -59,7 +59,7 @@ func RunDemo() {
 	
 	text3 := "Sample Text"
 	for _, elem := range elements {
-		metrics := fm.MeasureText(text3, elem.fontSize, fyne.TextStyle{})
+		metrics := fm.MeasureText(text3, elem.fontSize, fyne.TextStyle{}, 0)
 		fmt.Printf("<%s> font size: %.2f px, text width: %.2f px\n", 
 			elem.tag, elem.fontSize, metrics.Width)
 	}
@@ -72,8 +72,8 @@ func RunDemo() {
 	longText := "This is a long text that will wrap across multiple lines when constrained by width"
 	maxWidth := float32(200.0)
 	
-	singleLine := fm.MeasureText(longText, 16.0, fyne.TextStyle{})
-	wrapped := fm.MeasureTextWithWrapping(longText, 16.0, fyne.TextStyle{}, maxWidth)
+	singleLine := fm.MeasureText(longText, 16.0, fyne.TextStyle{}, 0)
+	wrapped := fm.MeasureTextWithWrapping(longText, 16.0, fyne.TextStyle{}, 0, maxWidth)
 	
 	fmt.Printf("Text: %q\n", longText)
 	fmt.Printf("Single line width: %.2f pixels\n", singleLine.Width)

@@ -50,6 +50,11 @@ type Style struct {
 	FontFamily      string
 	Opacity         float32
 	TextAlign       string // "left", "right", "center", "justify"
+	LetterSpacing   float32
+	LineHeight      float32
+	FontStyle       string // "normal", "italic"
+	TextDecoration  string // "none", "underline", "line-through"
+	TextTransform   string // "none", "uppercase", "lowercase", "capitalize"
 	
 	// Positioning
 	Position string // "static", "relative", "absolute", "fixed", "sticky"

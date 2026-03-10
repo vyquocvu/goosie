@@ -34,7 +34,7 @@ func TestMeasureText(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			metrics := fm.MeasureText(tt.text, tt.fontSize, tt.style)
+			metrics := fm.MeasureText(tt.text, tt.fontSize, tt.style, 0)
 			
 			// Width should be greater than 0 for non-empty text
 			if metrics.Width <= 0 {
@@ -69,7 +69,7 @@ func TestMeasureText(t *testing.T) {
 func TestMeasureTextEmpty(t *testing.T) {
 	fm := NewFontMetrics(16.0)
 	
-	metrics := fm.MeasureText("", 16.0, fyne.TextStyle{})
+	metrics := fm.MeasureText("", 16.0, fyne.TextStyle{}, 0)
 	
 	if metrics.Width != 0 {
 		t.Errorf("Expected width 0 for empty text, got %f", metrics.Width)
@@ -86,7 +86,7 @@ func TestMeasureTextWithWrapping(t *testing.T) {
 	text := "This is a long text that should wrap to multiple lines when constrained by width"
 	maxWidth := float32(200.0)
 	
-	metrics := fm.MeasureTextWithWrapping(text, 16.0, fyne.TextStyle{}, maxWidth)
+	metrics := fm.MeasureTextWithWrapping(text, 16.0, fyne.TextStyle{}, 0, maxWidth)
 	
 	// Width should not exceed maxWidth
 	if metrics.Width > maxWidth {
@@ -94,7 +94,7 @@ func TestMeasureTextWithWrapping(t *testing.T) {
 	}
 	
 	// Height should be greater than single line height (indicating wrapping occurred)
-	singleLine := fm.MeasureText(text, 16.0, fyne.TextStyle{})
+	singleLine := fm.MeasureText(text, 16.0, fyne.TextStyle{}, 0)
 	if singleLine.Width > maxWidth && metrics.Height <= singleLine.Height {
 		t.Error("Text should wrap to multiple lines and have greater height")
 	}
@@ -107,8 +107,8 @@ func TestMeasureTextWithWrappingShortText(t *testing.T) {
 	text := "Short"
 	maxWidth := float32(500.0)
 	
-	metrics := fm.MeasureTextWithWrapping(text, 16.0, fyne.TextStyle{}, maxWidth)
-	singleLine := fm.MeasureText(text, 16.0, fyne.TextStyle{})
+	metrics := fm.MeasureTextWithWrapping(text, 16.0, fyne.TextStyle{}, 0, maxWidth)
+	singleLine := fm.MeasureText(text, 16.0, fyne.TextStyle{}, 0)
 	
 	// Should be the same as single line measurement
 	if metrics.Width != singleLine.Width {
@@ -122,7 +122,7 @@ func TestMeasureTextWithWrappingShortText(t *testing.T) {
 func TestMeasureTextWithWrappingEmpty(t *testing.T) {
 	fm := NewFontMetrics(16.0)
 	
-	metrics := fm.MeasureTextWithWrapping("", 16.0, fyne.TextStyle{}, 200.0)
+	metrics := fm.MeasureTextWithWrapping("", 16.0, fyne.TextStyle{}, 0, 200.0)
 	
 	if metrics.Width != 0 {
 		t.Errorf("Expected width 0 for empty text, got %f", metrics.Width)
@@ -289,8 +289,8 @@ func TestFontMetricsConsistency(t *testing.T) {
 	fontSize := float32(16.0)
 	style := fyne.TextStyle{}
 	
-	m1 := fm.MeasureText(text, fontSize, style)
-	m2 := fm.MeasureText(text, fontSize, style)
+	m1 := fm.MeasureText(text, fontSize, style, 0)
+	m2 := fm.MeasureText(text, fontSize, style, 0)
 	
 	if m1.Width != m2.Width {
 		t.Errorf("Inconsistent width measurements: %f vs %f", m1.Width, m2.Width)
@@ -307,8 +307,8 @@ func TestFontSizeScaling(t *testing.T) {
 	style := fyne.TextStyle{}
 	
 	// Measure at different font sizes
-	m1 := fm.MeasureText(text, 16.0, style)
-	m2 := fm.MeasureText(text, 32.0, style)
+	m1 := fm.MeasureText(text, 16.0, style, 0)
+	m2 := fm.MeasureText(text, 32.0, style, 0)
 	
 	// Larger font should have larger dimensions
 	if m2.Width <= m1.Width {

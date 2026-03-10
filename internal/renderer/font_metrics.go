@@ -31,7 +31,7 @@ type TextMetrics struct {
 
 // MeasureText measures text using actual font metrics
 // Returns accurate width, height, ascent, and descent values
-func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.TextStyle) TextMetrics {
+func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.TextStyle, letterSpacing float32) TextMetrics {
 	if text == "" {
 		return TextMetrics{}
 	}
@@ -48,12 +48,17 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 		// Use Fyne's accurate measurement when app is running
 		size := fyne.MeasureText(text, fontSize, style)
 		width = size.Width
-		height = size.Height
 	} else {
 		// Fallback to improved estimation for tests
 		width = fm.estimateTextWidth(text, fontSize, style)
-		height = fontSize * 1.2 // Line height with spacing
 	}
+	
+	// Add letter spacing
+	if len(text) > 0 {
+		width += float32(len([]rune(text))) * letterSpacing
+	}
+	
+	height = fontSize * 1.2 // Line height with spacing
 	
 	// Calculate ascent and descent based on font metrics
 	// For most fonts, ascent is about 75-80% of font size, descent is about 20-25%
@@ -138,13 +143,13 @@ func isFyneAppAvailable() bool {
 
 // MeasureTextWithWrapping measures text with word wrapping
 // Returns the dimensions when text is wrapped to fit within maxWidth
-func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, style fyne.TextStyle, maxWidth float32) TextMetrics {
+func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, style fyne.TextStyle, letterSpacing float32, maxWidth float32) TextMetrics {
 	if text == "" {
 		return TextMetrics{}
 	}
 	
 	// Measure single line
-	singleLine := fm.MeasureText(text, fontSize, style)
+	singleLine := fm.MeasureText(text, fontSize, style, letterSpacing)
 	
 	// If text fits on one line, return as-is
 	if singleLine.Width <= maxWidth {
@@ -168,7 +173,7 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 		}
 		testLine += word
 		
-		testMetrics := fm.MeasureText(testLine, fontSize, style)
+		testMetrics := fm.MeasureText(testLine, fontSize, style, letterSpacing)
 		
 		if testMetrics.Width <= maxWidth {
 			// Word fits on current line
@@ -199,7 +204,7 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 	maxLineWidth := float32(0)
 	for _, line := range lines {
 		if line != "" {
-			lineMetrics := fm.MeasureText(line, fontSize, style)
+			lineMetrics := fm.MeasureText(line, fontSize, style, letterSpacing)
 			if lineMetrics.Width > maxLineWidth {
 				maxLineWidth = lineMetrics.Width
 			}
@@ -224,6 +229,7 @@ func (fm *FontMetrics) GetFontSize(tagName string) float32 {
 		"h5": fm.defaultFontSize * 0.83,
 		"h6": fm.defaultFontSize * 0.67,
 		"p":  fm.defaultFontSize,
+		"small": fm.defaultFontSize * 0.83,
 	}
 	
 	if size, ok := fontSizes[tagName]; ok {
@@ -239,9 +245,11 @@ func (fm *FontMetrics) GetTextStyle(tagName string) fyne.TextStyle {
 		return fyne.TextStyle{Bold: true}
 	case "strong", "b":
 		return fyne.TextStyle{Bold: true}
+	case "dt":
+		return fyne.TextStyle{Bold: true}
 	case "em", "i":
 		return fyne.TextStyle{Italic: true}
-	case "code", "pre":
+	case "code", "pre", "tt":
 		return fyne.TextStyle{Monospace: true}
 	default:
 		return fyne.TextStyle{}
@@ -256,11 +264,11 @@ func (fm *FontMetrics) GetTextStyleFromNode(node *RenderNode) fyne.TextStyle {
 	current := node
 	for current != nil {
 		switch current.TagName {
-		case "h1", "h2", "h3", "h4", "h5", "h6", "strong", "b":
+		case "h1", "h2", "h3", "h4", "h5", "h6", "strong", "b", "dt":
 			style.Bold = true
 		case "em", "i":
 			style.Italic = true
-		case "code", "pre":
+		case "code", "pre", "tt":
 			style.Monospace = true
 		}
 		current = current.Parent

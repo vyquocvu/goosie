@@ -37,9 +37,11 @@ type PaintCommand struct {
 
 	// Text-specific fields
 	Text     string
-	FontSize float32
-	Bold     bool
-	Italic   bool
+	FontSize      float32
+	Bold          bool
+	Italic        bool
+	Underline     bool
+	Strikethrough bool
 
 	// Rectangle-specific fields
 	FillColor   color.Color
@@ -178,17 +180,9 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 
 	// Check if this layout box has inline content (LineBoxes)
 	if len(layoutBox.LineBoxes) > 0 {
-		// Group inline boxes by NodeID to avoid duplicates
-		processedNodes := make(map[int64]bool)
-
-		// Process inline boxes from LineBoxes
+		// Process every inline box fragment
 		for _, lineBox := range layoutBox.LineBoxes {
 			for _, inlineBox := range lineBox.InlineBoxes {
-				// Skip if we've already processed this node
-				if processedNodes[inlineBox.NodeID] {
-					continue
-				}
-				processedNodes[inlineBox.NodeID] = true
 
 				if inlineBox.IsText {
 					// Get the render node for this inline box
@@ -206,17 +200,28 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 						fontSize = dlb.fontMetrics.GetFontSize(inlineRenderNode.Parent.TagName)
 					}
 
-					// Create paint command for the full text of the node
-					// Use the layout box dimensions for the entire element
+					// Compute absolute box for this inline fragment
+					absX := lineBox.X + inlineBox.X
+					absY := lineBox.Y - lineBox.Ascent + inlineBox.Y
+					box := Rect{
+						X:      absX,
+						Y:      absY,
+						Width:  inlineBox.Width,
+						Height: inlineBox.Height,
+					}
+
+					// Create paint command for this inline fragment
 					cmd := &PaintCommand{
 						Type:     PaintText,
 						NodeID:   inlineBox.NodeID,
 						Node:     inlineRenderNode,
-						Box:      layoutBox.Box,
-						Text:     inlineRenderNode.Text,
-						FontSize: fontSize,
-						Bold:     style.Bold,
-						Italic:   style.Italic,
+						Box:      box,
+						Text:     inlineBox.Text,
+						FontSize:      fontSize,
+						Bold:          style.Bold,
+						Italic:        style.Italic,
+						Underline:     inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "underline"),
+						Strikethrough: inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "line-through"),
 					}
 
 					displayList.AddCommand(cmd)
@@ -321,9 +326,11 @@ func (dlb *DisplayListBuilder) addTextCommand(layoutBox *LayoutBox, renderNode *
 		Node:     renderNode,
 		Box:      layoutBox.Box,
 		Text:     text,
-		FontSize: fontSize,
-		Bold:     style.Bold,
-		Italic:   style.Italic,
+		FontSize:      fontSize,
+		Bold:          style.Bold,
+		Italic:        style.Italic,
+		Underline:     renderNode.ComputedStyle != nil && strings.Contains(renderNode.ComputedStyle.TextDecoration, "underline"),
+		Strikethrough: renderNode.ComputedStyle != nil && strings.Contains(renderNode.ComputedStyle.TextDecoration, "line-through"),
 	}
 
 	displayList.AddCommand(cmd)

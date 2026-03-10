@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"image/color"
 	"log"
 	"net/url"
@@ -553,10 +554,8 @@ func (cr *CanvasRenderer) renderBlockquote(node *RenderNode, objects *[]fyne.Can
 		return
 	}
 
-	// Add visual indication of quote (e.g., with prefix)
-	label := widget.NewLabel("❝ " + text)
+	label := widget.NewLabel(text)
 	label.Wrapping = fyne.TextWrapWord
-	label.TextStyle = fyne.TextStyle{Italic: true}
 
 	*objects = append(*objects, label)
 }
@@ -775,6 +774,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		return container.NewWithoutLayout()
 	}
 
+	log.Printf("DEBUG: RenderWithViewport start")
 	// Build or reuse display list
 	var displayList *DisplayList
 	if cr.cachedDisplayList != nil && cr.cachedRenderRoot == root && cr.cachedLayoutRoot == layoutRoot {
@@ -791,6 +791,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		cr.cachedLayoutRoot = layoutRoot
 	}
 
+	log.Printf("DEBUG: DisplayList commands: %d", len(displayList.Commands))
 	// Stack of object lists for hierarchy (handling clipping)
 	// Level 0 is the root container
 	objectStack := [][]fyne.CanvasObject{make([]fyne.CanvasObject, 0)}
@@ -877,6 +878,9 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 			continue
 		}
 
+		if cmd.Type == PaintText {
+			log.Printf("DEBUG: PaintText NodeID=%d Text=\"%s\" Box=(%.1f,%.1f,%.1f,%.1f)", cmd.NodeID, cmd.Text, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		}
 		// Position object
 		// Coordinates in DisplayList are absolute.
 		// If we are inside a clip (ScrollContainer), we need to adjust coordinates
@@ -903,9 +907,11 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 
 	// Wrap in a mouse-aware container if inspect callback is set
 	if cr.onInspect != nil && cr.renderer != nil {
+		log.Printf("DEBUG: RenderWithViewport end (inspectable)")
 		return newInspectableContainer(content, cr)
 	}
 
+	log.Printf("DEBUG: RenderWithViewport end")
 	return content
 }
 
@@ -917,10 +923,35 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			return nil
 		}
 
+		// List marker prefix for list items
+		prefix := ""
+		if cmd.Node != nil && cmd.Node.Parent != nil {
+			parent := cmd.Node.Parent
+			if parent.TagName == "li" && parent.Parent != nil {
+				gp := parent.Parent
+				if gp.TagName == "ul" {
+					prefix = "• "
+				} else if gp.TagName == "ol" {
+					// Determine index of this li among siblings
+					index := 1
+					for _, c := range gp.Children {
+						if c.TagName == "li" {
+							if c == parent {
+								break
+							}
+							index++
+						}
+					}
+					prefix = fmt.Sprintf("%d. ", index)
+				}
+			}
+		}
+		textContent := prefix + cmd.Text
+
 		// Check if the node has CSS styles that require custom rendering
 		if cr.hasCustomStyles(cmd.Node) {
 			// Create a canvas.Text object with CSS styles
-			textObj := canvas.NewText(cmd.Text, color.Black)
+			textObj := canvas.NewText(textContent, color.Black)
 			textObj.TextSize = cr.defaultSize
 
 			style := cmd.Node.ComputedStyle
@@ -945,10 +976,15 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 
 			// Note: canvas.Text does not support wrapping easily without layout
 			// For now, we assume text fits or is handled by layout engine
+			
+			// Add underline/strikethrough if needed
+			if cmd.Underline || cmd.Strikethrough {
+				return cr.addDecorations(textObj, cmd)
+			}
 			return textObj
 		} else {
 			if cmd.FontSize > 0 && cmd.FontSize != cr.defaultSize {
-				textObj := canvas.NewText(cmd.Text, color.Black)
+				textObj := canvas.NewText(textContent, color.Black)
 				textObj.TextSize = cmd.FontSize
 				if cmd.Bold && cmd.Italic {
 					textObj.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
@@ -957,10 +993,14 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 				} else if cmd.Italic {
 					textObj.TextStyle = fyne.TextStyle{Italic: true}
 				}
+
+				if cmd.Underline || cmd.Strikethrough {
+					return cr.addDecorations(textObj, cmd)
+				}
 				return textObj
 			}
 
-			label := widget.NewLabel(cmd.Text)
+			label := widget.NewLabel(textContent)
 			label.Wrapping = fyne.TextWrapWord
 
 			if cmd.Bold && cmd.Italic {
@@ -972,6 +1012,11 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			}
 
 			label.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+
+			// Add underline/strikethrough if needed
+			if cmd.Underline || cmd.Strikethrough {
+				return cr.addDecorations(label, cmd)
+			}
 			return label
 		}
 
@@ -1297,4 +1342,44 @@ func (cr *CanvasRenderer) applyStylesToLabel(node *RenderNode, text string) fyne
 	}
 
 	return textObj
+}
+
+// addDecorations adds underline or strikethrough lines to a text object
+func (cr *CanvasRenderer) addDecorations(obj fyne.CanvasObject, cmd *PaintCommand) fyne.CanvasObject {
+	if !cmd.Underline && !cmd.Strikethrough {
+		return obj
+	}
+
+	var textColor color.Color = color.Black
+	if cmd.Node != nil && cmd.Node.ComputedStyle != nil && cmd.Node.ComputedStyle.Color != nil {
+		textColor = cmd.Node.ComputedStyle.Color
+	}
+
+	decoContainer := container.NewWithoutLayout(obj)
+	
+	// Width and height of the decoration lines
+	lineThickness := float32(1.0)
+	if cmd.FontSize > 24 {
+		lineThickness = 2.0
+	}
+
+	if cmd.Underline {
+		underline := canvas.NewRectangle(textColor)
+		// Position at bottom of text
+		// Note: obj.Size() might not be accurate yet if it's a label, but cmd.Box has the dimensions
+		underline.Resize(fyne.NewSize(cmd.Box.Width, lineThickness))
+		underline.Move(fyne.NewPos(0, cmd.Box.Height-lineThickness))
+		decoContainer.Add(underline)
+	}
+
+	if cmd.Strikethrough {
+		strikethrough := canvas.NewRectangle(textColor)
+		// Position at middle of text
+		strikethrough.Resize(fyne.NewSize(cmd.Box.Width, lineThickness))
+		strikethrough.Move(fyne.NewPos(0, cmd.Box.Height/2))
+		decoContainer.Add(strikethrough)
+	}
+
+	decoContainer.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+	return decoContainer
 }

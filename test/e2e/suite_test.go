@@ -1,0 +1,84 @@
+package e2e
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestComprehensiveSuite runs the full test suite over all generated HTML files
+func TestComprehensiveSuite(t *testing.T) {
+	// Configuration
+	config := VisualTestConfig{
+		DiffThreshold:  0.001, // 0.1% tolerance
+		UpdateBase:     os.Getenv("UPDATE_SNAPSHOTS") == "true",
+		OutputDir:      filepath.Join("testdata", "results"),
+		ViewportWidth:  1280,
+		ViewportHeight: 800,
+	}
+
+	// Ensure we have test data
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	projectRoot := filepath.Dir(filepath.Dir(cwd))
+	testDataDir := filepath.Join(projectRoot, "testdata")
+
+	// Verify testdata exists; if not, suggest running make generate-test-data
+	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
+		t.Fatalf("testdata directory not found at %s. Run 'make generate-test-data' first.", testDataDir)
+	}
+
+	// Find all generated test files
+	files, err := filepath.Glob(filepath.Join(testDataDir, "test_*.html"))
+	require.NoError(t, err)
+
+	if len(files) == 0 {
+		t.Fatal("No test_*.html files found. Run 'make generate-test-data' first.")
+	}
+
+	t.Logf("Found %d test cases", len(files))
+
+	// Run subtest for each file
+	for _, file := range files {
+		baseName := filepath.Base(file)
+		testName := strings.TrimSuffix(baseName, ".html")
+
+		t.Run(testName, func(t *testing.T) {
+			// Allow per-test overrides where exact pixel matching is unrealistic
+			localConfig := config
+			if strings.Contains(testName, "_typography") {
+				// Typography varies across platforms; relax threshold for these tests
+				localConfig.DiffThreshold = 0.08
+			}
+			page := newPage(t)
+			defer page.Close()
+
+			// Navigate to file
+			fileURL := "file://" + file
+			_, err := page.Goto(fileURL)
+			require.NoError(t, err, "failed to load page")
+
+			// Handle potential timeout issues with external resources
+			// For media tests that load external images, we might need to wait for network idle
+			// or just ensure the page load event has fired (which Goto does by default)
+
+			// Visual Regression Test
+			t.Run("Visual", func(t *testing.T) {
+				CompareScreenshot(t, page, testName, localConfig)
+			})
+
+			// DOM Snapshot Test
+			t.Run("DOM", func(t *testing.T) {
+				ValidateDOMSnapshot(t, page, testName, localConfig)
+			})
+
+			// Goosie vs Browser Comparison
+			t.Run("GoosieVsBrowser", func(t *testing.T) {
+				CompareGoosieVsBrowser(t, page, file, testName, localConfig)
+			})
+		})
+	}
+}

@@ -19,7 +19,7 @@ func TestTextAlignment(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			line := ile.newLineBox(0, 0, 400, tt.textAlign)
+			line := ile.newLineBox(0, 0, 400, tt.textAlign, 0)
 			
 			box := &InlineBox{
 				X:             0,

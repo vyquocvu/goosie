@@ -60,6 +60,14 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	if node.Parent != nil && node.Parent.ComputedStyle != nil {
 		node.ComputedStyle.Color = node.Parent.ComputedStyle.Color
 		node.ComputedStyle.FontSize = node.Parent.ComputedStyle.FontSize
+		node.ComputedStyle.FontWeight = node.Parent.ComputedStyle.FontWeight
+		node.ComputedStyle.FontFamily = node.Parent.ComputedStyle.FontFamily
+		node.ComputedStyle.LetterSpacing = node.Parent.ComputedStyle.LetterSpacing
+		node.ComputedStyle.LineHeight = node.Parent.ComputedStyle.LineHeight
+		node.ComputedStyle.FontStyle = node.Parent.ComputedStyle.FontStyle
+		node.ComputedStyle.TextDecoration = node.Parent.ComputedStyle.TextDecoration
+		node.ComputedStyle.TextTransform = node.Parent.ComputedStyle.TextTransform
+		node.ComputedStyle.TextAlign = node.Parent.ComputedStyle.TextAlign
 	}
 
 	sm.applyMatchingRules(node)
@@ -427,6 +435,20 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		}
 	case "text-align":
 		style.TextAlign = decl.Value
+	case "letter-spacing":
+		if decl.Value == "normal" {
+			style.LetterSpacing = 0
+		} else {
+			style.LetterSpacing = parseLength(decl.Value, style.FontSize)
+		}
+	case "line-height":
+		style.LineHeight = parseLineHeight(decl.Value, style.FontSize)
+	case "font-style":
+		style.FontStyle = decl.Value
+	case "text-decoration":
+		style.TextDecoration = decl.Value
+	case "text-transform":
+		style.TextTransform = decl.Value
 
 	// Margin properties
 	case "margin":
@@ -672,6 +694,20 @@ func parseFontSize(value string, parentFontSize float32) (float32, error) {
 
 // parseLength parses a CSS length value and returns its numeric value in pixels
 // Supports: px, em, rem, plain numbers (treated as px), and keyword values (thin, medium, thick)
+func parseLineHeight(value string, fontSize float32) float32 {
+	if value == "normal" || value == "" {
+		return 0
+	}
+
+	// Try parsing as a unitless number (e.g., "1.5")
+	if f, err := strconv.ParseFloat(value, 32); err == nil {
+		return float32(f) * fontSize
+	}
+
+	// Try parsing as a length (px, em, etc.)
+	return parseLength(value, fontSize)
+}
+
 func parseLength(value string, fontSize float32) float32 {
 	value = strings.TrimSpace(value)
 

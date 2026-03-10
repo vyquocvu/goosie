@@ -278,7 +278,7 @@ func TestLayoutInlineContentWithInlineElements(t *testing.T) {
 func TestFinalizeLine(t *testing.T) {
 	ile := NewInlineLayoutEngine(NewFontMetrics(16.0), 16.0)
 	
-	line := ile.newLineBox(0, 0, 400, "left")
+	line := ile.newLineBox(0, 0, 400, "left", 0)
 	
 	// Add some inline boxes with different metrics
 	box1 := &InlineBox{
@@ -337,7 +337,7 @@ func TestVerticalAlignment(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			line := ile.newLineBox(0, 0, 400, "left")
+			line := ile.newLineBox(0, 0, 400, "left", 0)
 			line.Ascent = 15
 			line.Descent = 5
 			
