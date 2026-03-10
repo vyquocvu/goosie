@@ -14,20 +14,22 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 )
 
 // ScreenshotDir is the environment variable name for specifying screenshot output directory.
 const ScreenshotDir = "GOOSIE_SCREENSHOT_DIR"
 
 // RenderToImage renders a Fyne canvas object to an image.
-// It creates a test canvas and captures it.
+// It creates a test canvas and captures it, cropping to the requested dimensions.
 func RenderToImage(obj fyne.CanvasObject, width, height int) (image.Image, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("canvas object is nil")
 	}
 
-	// Create a test app and window
+	// Create a test app and window with light theme for white background
 	a := test.NewApp()
+	a.Settings().SetTheme(theme.LightTheme())
 	defer a.Quit()
 
 	w := a.NewWindow("Screenshot")
@@ -43,6 +45,28 @@ func RenderToImage(obj fyne.CanvasObject, width, height int) (image.Image, error
 	img := w.Canvas().Capture()
 	if img == nil {
 		return nil, fmt.Errorf("failed to capture canvas")
+	}
+
+	// Crop the captured image to the requested dimensions.
+	// The Fyne test canvas may expand beyond the requested size due to widget
+	// minimum size constraints, so we clip to the expected content area.
+	bounds := img.Bounds()
+	capW, capH := bounds.Max.X, bounds.Max.Y
+	if capW > width || capH > height {
+		cropW := capW
+		if cropW > width {
+			cropW = width
+		}
+		cropH := capH
+		if cropH > height {
+			cropH = height
+		}
+		type subImager interface {
+			SubImage(r image.Rectangle) image.Image
+		}
+		if si, ok := img.(subImager); ok {
+			img = si.SubImage(image.Rect(0, 0, cropW, cropH))
+		}
 	}
 
 	return img, nil
