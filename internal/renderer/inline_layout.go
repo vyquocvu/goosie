@@ -517,7 +517,15 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 
 	// Set line height based on maximum ascent and descent
 	lineHeight := line.Ascent + line.Descent
-	
+
+	// Also consider the maximum inline box height (includes leading/line-height)
+	// so that the line height matches the visual height of the tallest inline box
+	for _, box := range line.InlineBoxes {
+		if box.Height > lineHeight {
+			lineHeight = box.Height
+		}
+	}
+
 	// If we have a preferred line height, use it if it's larger or if explicitly set
 	if line.LineHeight > 0 {
 		if line.LineHeight > lineHeight {

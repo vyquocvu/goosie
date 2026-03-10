@@ -125,17 +125,8 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		}
 		explicitHeight := parseLength(node.ComputedStyle.Height, fontSize)
 		if explicitHeight > 0 {
-			// Include padding if box-sizing is content-box (default)
-			// Actually parseLength returns the value.
-			// If we want total box height (content + padding), we should add padding?
-			// The currentY calculation includes padding.
-			// Let's assume explicitHeight is content height.
-			// layoutBox.Box.Height should be content + padding?
-			// Wait, layoutBox.Box.Height is usually border-box height in this engine?
-			// currentY includes padding.
-			// If explicitHeight is content height, then total height = explicitHeight + paddingTop + paddingBottom.
-
-			layoutBox.Box.Height = explicitHeight + layoutBox.PaddingTop + layoutBox.PaddingBottom
+			// Include padding and borders if box-sizing is content-box (default)
+			layoutBox.Box.Height = explicitHeight + layoutBox.PaddingTop + layoutBox.PaddingBottom + layoutBox.BorderTopWidth + layoutBox.BorderBottomWidth
 		} else {
 			layoutBox.Box.Height = calculatedHeight
 		}
@@ -406,12 +397,15 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		currentY += verticalSpacing
 	}
 
+	// Add border top offset before padding
+	currentY += layoutBox.BorderTopWidth
+
 	// Add padding to the starting position
 	currentY += layoutBox.PaddingTop
-	childX := x + layoutBox.PaddingLeft
+	childX := x + layoutBox.BorderLeftWidth + layoutBox.PaddingLeft
 
-	// Reduce available width by horizontal padding
-	contentWidth := availableWidth - layoutBox.PaddingLeft - layoutBox.PaddingRight
+	// Reduce available width by horizontal borders and padding
+	contentWidth := availableWidth - layoutBox.BorderLeftWidth - layoutBox.PaddingLeft - layoutBox.PaddingRight - layoutBox.BorderRightWidth
 	if contentWidth < 0 {
 		contentWidth = 0
 	}
@@ -551,6 +545,9 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 
 	// Add bottom padding
 	childY += layoutBox.PaddingBottom
+
+	// Add border bottom offset after padding
+	childY += layoutBox.BorderBottomWidth
 
 	// Add bottom spacing for certain elements
 	if verticalSpacing > 0 {

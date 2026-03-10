@@ -1149,36 +1149,28 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 
 		// Top border (full width)
 		if cmd.BorderTopWidth > 0 && cmd.BorderTopStyle != "" && cmd.BorderTopStyle != "none" {
-			topBorder := canvas.NewRectangle(cmd.BorderTopColor)
-			topBorder.Resize(fyne.NewSize(cmd.Box.Width, cmd.BorderTopWidth))
-			topBorder.Move(fyne.NewPos(0, 0))
-			borderContainer.Add(topBorder)
+			addHorizontalBorderSegments(borderContainer, cmd.BorderTopStyle, cmd.BorderTopColor,
+				0, 0, cmd.Box.Width, cmd.BorderTopWidth)
 		}
 
 		// Right border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderRightWidth > 0 && cmd.BorderRightStyle != "" && cmd.BorderRightStyle != "none" {
-			rightBorder := canvas.NewRectangle(cmd.BorderRightColor)
 			rightHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
-			rightBorder.Resize(fyne.NewSize(cmd.BorderRightWidth, rightHeight))
-			rightBorder.Move(fyne.NewPos(cmd.Box.Width-cmd.BorderRightWidth, cmd.BorderTopWidth))
-			borderContainer.Add(rightBorder)
+			addVerticalBorderSegments(borderContainer, cmd.BorderRightStyle, cmd.BorderRightColor,
+				cmd.Box.Width-cmd.BorderRightWidth, cmd.BorderTopWidth, cmd.BorderRightWidth, rightHeight)
 		}
 
 		// Bottom border (full width)
 		if cmd.BorderBottomWidth > 0 && cmd.BorderBottomStyle != "" && cmd.BorderBottomStyle != "none" {
-			bottomBorder := canvas.NewRectangle(cmd.BorderBottomColor)
-			bottomBorder.Resize(fyne.NewSize(cmd.Box.Width, cmd.BorderBottomWidth))
-			bottomBorder.Move(fyne.NewPos(0, cmd.Box.Height-cmd.BorderBottomWidth))
-			borderContainer.Add(bottomBorder)
+			addHorizontalBorderSegments(borderContainer, cmd.BorderBottomStyle, cmd.BorderBottomColor,
+				0, cmd.Box.Height-cmd.BorderBottomWidth, cmd.Box.Width, cmd.BorderBottomWidth)
 		}
 
 		// Left border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderLeftWidth > 0 && cmd.BorderLeftStyle != "" && cmd.BorderLeftStyle != "none" {
-			leftBorder := canvas.NewRectangle(cmd.BorderLeftColor)
 			leftHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
-			leftBorder.Resize(fyne.NewSize(cmd.BorderLeftWidth, leftHeight))
-			leftBorder.Move(fyne.NewPos(0, cmd.BorderTopWidth))
-			borderContainer.Add(leftBorder)
+			addVerticalBorderSegments(borderContainer, cmd.BorderLeftStyle, cmd.BorderLeftColor,
+				0, cmd.BorderTopWidth, cmd.BorderLeftWidth, leftHeight)
 		}
 
 		if len(borderContainer.Objects) > 0 {
@@ -1382,4 +1374,91 @@ func (cr *CanvasRenderer) addDecorations(obj fyne.CanvasObject, cmd *PaintComman
 
 	decoContainer.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 	return decoContainer
+}
+
+// minDashLength is the minimum length (in pixels) for a dashed border segment.
+const minDashLength = float32(6)
+
+// addHorizontalBorderSegments adds horizontal border segments (dashed/dotted/solid) to a container.
+// x, y define the top-left corner; totalWidth and height define the area.
+func addHorizontalBorderSegments(c *fyne.Container, style string, col color.Color, x, y, totalWidth, height float32) {
+	if style == "solid" || style == "double" || style == "" {
+		rect := canvas.NewRectangle(col)
+		rect.Resize(fyne.NewSize(totalWidth, height))
+		rect.Move(fyne.NewPos(x, y))
+		c.Add(rect)
+		return
+	}
+
+	// Calculate dash and gap lengths
+	var dashLen, gapLen float32
+	switch style {
+	case "dotted":
+		dashLen = height // square dots
+		gapLen = height
+	default: // dashed
+		dashLen = height * 3
+		if dashLen < minDashLength {
+			dashLen = minDashLength
+		}
+		gapLen = dashLen
+	}
+
+	pos := x
+	for pos < x+totalWidth {
+		w := dashLen
+		if pos+w > x+totalWidth {
+			w = x + totalWidth - pos
+		}
+		if w <= 0 {
+			break
+		}
+		seg := canvas.NewRectangle(col)
+		seg.Resize(fyne.NewSize(w, height))
+		seg.Move(fyne.NewPos(pos, y))
+		c.Add(seg)
+		pos += dashLen + gapLen
+	}
+}
+
+// addVerticalBorderSegments adds vertical border segments (dashed/dotted/solid) to a container.
+// x, y define the top-left corner; width and totalHeight define the area.
+func addVerticalBorderSegments(c *fyne.Container, style string, col color.Color, x, y, width, totalHeight float32) {
+	if style == "solid" || style == "double" || style == "" {
+		rect := canvas.NewRectangle(col)
+		rect.Resize(fyne.NewSize(width, totalHeight))
+		rect.Move(fyne.NewPos(x, y))
+		c.Add(rect)
+		return
+	}
+
+	// Calculate dash and gap lengths
+	var dashLen, gapLen float32
+	switch style {
+	case "dotted":
+		dashLen = width // square dots
+		gapLen = width
+	default: // dashed
+		dashLen = width * 3
+		if dashLen < minDashLength {
+			dashLen = minDashLength
+		}
+		gapLen = dashLen
+	}
+
+	pos := y
+	for pos < y+totalHeight {
+		h := dashLen
+		if pos+h > y+totalHeight {
+			h = y + totalHeight - pos
+		}
+		if h <= 0 {
+			break
+		}
+		seg := canvas.NewRectangle(col)
+		seg.Resize(fyne.NewSize(width, h))
+		seg.Move(fyne.NewPos(x, pos))
+		c.Add(seg)
+		pos += dashLen + gapLen
+	}
 }
