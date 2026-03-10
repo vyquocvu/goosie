@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 )
 
 // ScreenshotDir is the environment variable name for specifying screenshot output directory.
@@ -26,8 +27,9 @@ func RenderToImage(obj fyne.CanvasObject, width, height int) (image.Image, error
 		return nil, fmt.Errorf("canvas object is nil")
 	}
 
-	// Create a test app and window
+	// Create a test app and window with light theme for white background
 	a := test.NewApp()
+	a.Settings().SetTheme(theme.LightTheme())
 	defer a.Quit()
 
 	w := a.NewWindow("Screenshot")
