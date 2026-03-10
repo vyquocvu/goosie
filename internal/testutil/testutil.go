@@ -8,7 +8,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"image/color"
+
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 )
 
@@ -25,10 +29,12 @@ func RenderToImage(obj fyne.CanvasObject, width, height int) (image.Image, error
 	// Create a test app and window
 	a := test.NewApp()
 	defer a.Quit()
-	
+
 	w := a.NewWindow("Screenshot")
 	w.Resize(fyne.NewSize(float32(width), float32(height)))
-	w.SetContent(obj)
+	bg := canvas.NewRectangle(color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	bg.Resize(fyne.NewSize(float32(width), float32(height)))
+	w.SetContent(container.NewMax(bg, obj))
 
 	// Force layout calculation
 	w.Content().Refresh()

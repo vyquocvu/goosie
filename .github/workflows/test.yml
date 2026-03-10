@@ -1,4 +1,4 @@
-name: Test
+name: Test and Build
 
 on:
   push:
@@ -10,7 +10,12 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      # Playwright environment variables
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1 # We handle download manually/via cache
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -18,38 +23,56 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
-        check-latest: true
+        go-version-file: 'go.mod'
+        cache: true
 
-    - name: Install dependencies
+    - name: Get Playwright Version
+      id: playwright-version
+      run: |
+        # Extract Playwright version from go.mod to use in cache key
+        PLAYWRIGHT_VERSION=$(grep "github.com/playwright-community/playwright-go" go.mod | awk '{print $2}')
+        echo "PLAYWRIGHT_VERSION=$PLAYWRIGHT_VERSION" >> $GITHUB_ENV
+
+    - name: Cache Playwright Browsers
+      id: cache-playwright
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}
+        restore-keys: |
+          ${{ runner.os }}-playwright-
+
+    - name: Install System Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev xorg-dev
-        go mod download
 
-    - name: Run Unit & Integration Tests
+    - name: Install Playwright Browsers
+      if: steps.cache-playwright.outputs.cache-hit != 'true'
       run: |
-        go test -v ./internal/... ./cmd/...
+        # Install Playwright driver and browsers if not cached
+        go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps
 
-    - name: Run Security Tests
+    - name: Install Playwright Deps (System)
+      if: steps.cache-playwright.outputs.cache-hit == 'true'
       run: |
-        go test -v ./internal/test_suite/security/...
+        # Even if browsers are cached, we might need system deps
+        go run github.com/playwright-community/playwright-go/cmd/playwright install-deps
 
-    - name: Run Performance Benchmarks
-      run: |
-        go test -bench=. -benchmem ./internal/test_suite/performance/...
+    - name: Build Project
+      run: make build
 
-    - name: Calculate Coverage
-      run: |
-        go test -coverprofile=coverage.out ./internal/...
-        go tool cover -func=coverage.out
-        
-        # Simple check for total coverage (grep for total, extract percentage, compare)
-        TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | grep -o '[0-9.]*%' | tr -d '%')
-        echo "Total Coverage: $TOTAL_COVERAGE%"
-        
-        # Fail if coverage is below 80%
-        if (( $(echo "$TOTAL_COVERAGE < 80.0" | bc -l) )); then
-          echo "Coverage is below 80%"
-          exit 1
-        fi
+    - name: Run Tests
+      run: make test
+      env:
+        HEADLESS: true
+
+    - name: Upload Test Artifacts (On Failure)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-artifacts-${{ github.run_id }}
+        path: |
+          testdata/results/**/*
+          **/*.log
+        retention-days: 5

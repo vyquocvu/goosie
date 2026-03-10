@@ -947,7 +947,19 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			// For now, we assume text fits or is handled by layout engine
 			return textObj
 		} else {
-			// Use standard label widget
+			if cmd.FontSize > 0 && cmd.FontSize != cr.defaultSize {
+				textObj := canvas.NewText(cmd.Text, color.Black)
+				textObj.TextSize = cmd.FontSize
+				if cmd.Bold && cmd.Italic {
+					textObj.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
+				} else if cmd.Bold {
+					textObj.TextStyle = fyne.TextStyle{Bold: true}
+				} else if cmd.Italic {
+					textObj.TextStyle = fyne.TextStyle{Italic: true}
+				}
+				return textObj
+			}
+
 			label := widget.NewLabel(cmd.Text)
 			label.Wrapping = fyne.TextWrapWord
 
