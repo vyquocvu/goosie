@@ -64,6 +64,9 @@ type LayoutBox struct {
 	BorderBottomColor color.Color
 	BorderLeftColor   color.Color
 	
+	// Background
+	BackgroundColor color.Color
+	
 	// Inline layout information
 	LineBoxes []*LineBox // Line boxes for inline content (if this contains inline children)
 	

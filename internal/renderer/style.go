@@ -11,24 +11,29 @@ import (
 
 // StyleManager applies styles from a stylesheet to a render tree.
 type StyleManager struct {
-	stylesheet     *css.StyleSheet
-	viewportWidth  float32
-	viewportHeight float32
-	mediaEvaluator *MediaQueryEvaluator
+	defaultStylesheet *css.StyleSheet
+	stylesheet        *css.StyleSheet
+	viewportWidth     float32
+	viewportHeight    float32
+	mediaEvaluator    *MediaQueryEvaluator
 }
 
 // NewStyleManager creates a new StyleManager.
 func NewStyleManager(stylesheet *css.StyleSheet) *StyleManager {
-	return &StyleManager{stylesheet: stylesheet}
+	return &StyleManager{
+		stylesheet:        stylesheet,
+		defaultStylesheet: GetDefaultStyleSheet(),
+	}
 }
 
 // NewStyleManagerWithViewport creates a StyleManager with viewport dimensions for media query support.
 func NewStyleManagerWithViewport(stylesheet *css.StyleSheet, viewportWidth, viewportHeight float32) *StyleManager {
 	return &StyleManager{
-		stylesheet:     stylesheet,
-		viewportWidth:  viewportWidth,
-		viewportHeight: viewportHeight,
-		mediaEvaluator: NewMediaQueryEvaluator(viewportWidth, viewportHeight),
+		defaultStylesheet: GetDefaultStyleSheet(),
+		stylesheet:        stylesheet,
+		viewportWidth:     viewportWidth,
+		viewportHeight:    viewportHeight,
+		mediaEvaluator:    NewMediaQueryEvaluator(viewportWidth, viewportHeight),
 	}
 }
 
@@ -70,7 +75,8 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		node.ComputedStyle.TextAlign = node.Parent.ComputedStyle.TextAlign
 	}
 
-	sm.applyMatchingRules(node)
+	sm.applyMatchingRules(sm.defaultStylesheet, node)
+	sm.applyMatchingRules(sm.stylesheet, node)
 
 	// Apply @media rules if viewport is set
 	if sm.mediaEvaluator != nil {
@@ -102,11 +108,16 @@ func (sm *StyleManager) applyInlineStyles(node *RenderNode, styleAttr string) {
 
 // applyMediaRules applies styles from @media rules that match current viewport.
 func (sm *StyleManager) applyMediaRules(node *RenderNode) {
-	if sm.stylesheet == nil || sm.mediaEvaluator == nil {
+	sm.applyMediaRulesForStylesheet(sm.defaultStylesheet, node)
+	sm.applyMediaRulesForStylesheet(sm.stylesheet, node)
+}
+
+func (sm *StyleManager) applyMediaRulesForStylesheet(stylesheet *css.StyleSheet, node *RenderNode) {
+	if stylesheet == nil || sm.mediaEvaluator == nil {
 		return
 	}
 
-	for _, atRule := range sm.stylesheet.AtRules {
+	for _, atRule := range stylesheet.AtRules {
 		if atRule.Name == "media" {
 			if sm.mediaEvaluator.Evaluate(atRule.Prelude) {
 				// Apply rules from this @media block
@@ -124,8 +135,11 @@ func (sm *StyleManager) applyMediaRules(node *RenderNode) {
 	}
 }
 
-func (sm *StyleManager) applyMatchingRules(node *RenderNode) {
-	for _, rule := range sm.stylesheet.Rules {
+func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *RenderNode) {
+	if stylesheet == nil {
+		return
+	}
+	for _, rule := range stylesheet.Rules {
 		for _, selectorSeq := range rule.Selectors {
 			if sm.matchesSequence(selectorSeq, node) {
 				for _, decl := range rule.Declarations {
@@ -307,9 +321,37 @@ func (sm *StyleManager) matchesSimple(selector css.SimpleSelector, node *RenderN
 // matchesPseudoClass checks if a pseudo-class matches a node
 func (sm *StyleManager) matchesPseudoClass(pseudoClass string, node *RenderNode) bool {
 	// Handle functional pseudo-classes
-	if strings.HasPrefix(pseudoClass, "nth-child(") {
-		// For now, just return true for basic support
-		return true
+	if strings.HasPrefix(pseudoClass, "nth-child(") && strings.HasSuffix(pseudoClass, ")") {
+		arg := pseudoClass[len("nth-child("):len(pseudoClass)-1]
+		if node.Parent == nil {
+			return false
+		}
+		
+		// Find node's index (1-based)
+		index := -1
+		for i, child := range node.Parent.Children {
+			if child == node {
+				index = i + 1
+				break
+			}
+		}
+		
+		if index == -1 {
+			return false
+		}
+		
+		if arg == "even" {
+			return index%2 == 0
+		} else if arg == "odd" {
+			return index%2 != 0
+		}
+		
+		// Handle numeric values
+		if n, err := strconv.Atoi(arg); err == nil {
+			return index == n
+		}
+		
+		return false
 	}
 
 	switch pseudoClass {

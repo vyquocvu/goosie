@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"image/color"
 	"strings"
 )
 
@@ -204,6 +205,12 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		for _, child := range n.Children {
 			if child.TagName == "tr" {
 				currentCol := 1
+				// Try to get row background color
+				var trBgColor color.Color
+				if child.ComputedStyle != nil {
+					trBgColor = child.ComputedStyle.BackgroundColor
+				}
+
 				for _, cell := range child.Children {
 					if cell.TagName == "td" || cell.TagName == "th" {
 						// Create cell box
@@ -214,6 +221,11 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 							cellBox.GridColumnEnd = currentCol + 1
 							cellBox.GridRowStart = currentRow
 							cellBox.GridRowEnd = currentRow + 1
+
+							// Transmit TR background to cell if cell has none
+							if trBgColor != nil && (cellBox.BackgroundColor == nil || cellBox.BackgroundColor == color.Transparent) {
+								cellBox.BackgroundColor = trBgColor
+							}
 
 							layoutBox.AddChild(cellBox)
 						}
@@ -284,6 +296,9 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.BorderRightColor = node.ComputedStyle.BorderRightColor
 	layoutBox.BorderBottomColor = node.ComputedStyle.BorderBottomColor
 	layoutBox.BorderLeftColor = node.ComputedStyle.BorderLeftColor
+	
+	// Apply background color
+	layoutBox.BackgroundColor = node.ComputedStyle.BackgroundColor
 }
 
 // computeLayoutBox computes the layout for a single box

@@ -160,6 +160,10 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 		return r.canvasRenderer.Render(nil), nil
 	}
 
+	// Apply styles
+	styleManager := NewStyleManager(r.stylesheet)
+	styleManager.ApplyStyles(renderTree)
+
 	// Perform layout.
 	layoutTree := r.layoutEngine.ComputeLayout(renderTree)
 
@@ -247,10 +251,8 @@ func (r *Renderer) Refresh() {
 	}
 
 	// Apply styles (in case attributes changed)
-	if r.stylesheet != nil {
-		styleManager := NewStyleManager(r.stylesheet)
-		styleManager.ApplyStyles(r.currentRenderTree)
-	}
+	styleManager := NewStyleManager(r.stylesheet)
+	styleManager.ApplyStyles(r.currentRenderTree)
 
 	// Perform layout
 	r.currentLayoutTree = r.layoutEngine.ComputeLayout(r.currentRenderTree)

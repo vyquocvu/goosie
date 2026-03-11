@@ -412,6 +412,21 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 
 	// For other elements, we primarily rely on their children for rendering
 	// but we could add background colors, borders, etc. here in the future
+	if layoutBox.BackgroundColor != nil && layoutBox.BackgroundColor != color.Transparent {
+		cmd := &PaintCommand{
+			Type:      PaintRect,
+			NodeID:    layoutBox.NodeID,
+			Node:      renderNode,
+			Box:       layoutBox.Box,
+			FillColor: layoutBox.BackgroundColor,
+		}
+		// Insert background at the beginning so it's drawn behind children
+		// Actually, we should probably add it and then ensure it's drawn first?
+		// DisplayList is already a flat list. We should add it BEFORE processing children if we want it behind.
+		// Wait, addElementCommand is called BEFORE processing children in buildRecursive.
+		// So adding it here is correct as long as we add it BEFORE children.
+		displayList.AddCommand(cmd)
+	}
 }
 
 // extractText extracts text content from a render node
