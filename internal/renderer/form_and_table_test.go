@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/widget"
 	"golang.org/x/net/html"
 )
@@ -84,18 +85,18 @@ func TestTableElementRendering(t *testing.T) {
 	// - Cell 3
 	// - Cell 4
 	// Plus potentially backgrounds/borders if any (none in this simple html)
-	
+
 	// Print children types for debugging
 	t.Logf("Container has %d children", len(containerObj.Objects))
 	foundCells := 0
 	expectedTexts := []string{"Cell 1", "Cell 2", "Cell 3", "Cell 4"}
-	
+
 	for i, child := range containerObj.Objects {
-		if label, ok := child.(*widget.Label); ok {
-			t.Logf("Child %d is Label: %s", i, label.Text)
+		if textObj, ok := child.(*canvas.Text); ok {
+			t.Logf("Child %d is canvas.Text: %s", i, textObj.Text)
 			// Check if it matches one of our expected cells
 			for _, expected := range expectedTexts {
-				if label.Text == expected {
+				if textObj.Text == expected {
 					foundCells++
 				}
 			}

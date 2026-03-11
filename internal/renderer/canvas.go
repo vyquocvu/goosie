@@ -879,7 +879,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		}
 
 		if cmd.Type == PaintText {
-			log.Printf("DEBUG: PaintText NodeID=%d Text=\"%s\" Box=(%.1f,%.1f,%.1f,%.1f)", cmd.NodeID, cmd.Text, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+			// log.Printf("DEBUG: PaintText NodeID=%d Text=\"%s\" Box=(%.1f,%.1f,%.1f,%.1f)", cmd.NodeID, cmd.Text, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
 		}
 		// Position object
 		// Coordinates in DisplayList are absolute.
@@ -976,48 +976,30 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 
 			// Note: canvas.Text does not support wrapping easily without layout
 			// For now, we assume text fits or is handled by layout engine
-			
+
 			// Add underline/strikethrough if needed
 			if cmd.Underline || cmd.Strikethrough {
 				return cr.addDecorations(textObj, cmd)
 			}
 			return textObj
 		} else {
-			if cmd.FontSize > 0 && cmd.FontSize != cr.defaultSize {
-				textObj := canvas.NewText(textContent, color.Black)
+			textObj := canvas.NewText(textContent, color.Black)
+			if cmd.FontSize > 0 {
 				textObj.TextSize = cmd.FontSize
-				if cmd.Bold && cmd.Italic {
-					textObj.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
-				} else if cmd.Bold {
-					textObj.TextStyle = fyne.TextStyle{Bold: true}
-				} else if cmd.Italic {
-					textObj.TextStyle = fyne.TextStyle{Italic: true}
-				}
-
-				if cmd.Underline || cmd.Strikethrough {
-					return cr.addDecorations(textObj, cmd)
-				}
-				return textObj
+			} else {
+				textObj.TextSize = cr.defaultSize
 			}
-
-			label := widget.NewLabel(textContent)
-			label.Wrapping = fyne.TextWrapWord
-
 			if cmd.Bold && cmd.Italic {
-				label.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
+				textObj.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
 			} else if cmd.Bold {
-				label.TextStyle = fyne.TextStyle{Bold: true}
+				textObj.TextStyle = fyne.TextStyle{Bold: true}
 			} else if cmd.Italic {
-				label.TextStyle = fyne.TextStyle{Italic: true}
+				textObj.TextStyle = fyne.TextStyle{Italic: true}
 			}
-
-			label.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-
-			// Add underline/strikethrough if needed
 			if cmd.Underline || cmd.Strikethrough {
-				return cr.addDecorations(label, cmd)
+				return cr.addDecorations(textObj, cmd)
 			}
-			return label
+			return textObj
 		}
 
 	case PaintRect:
@@ -1348,7 +1330,7 @@ func (cr *CanvasRenderer) addDecorations(obj fyne.CanvasObject, cmd *PaintComman
 	}
 
 	decoContainer := container.NewWithoutLayout(obj)
-	
+
 	// Width and height of the decoration lines
 	lineThickness := float32(1.0)
 	if cmd.FontSize > 24 {

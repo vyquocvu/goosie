@@ -10,7 +10,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/test"
-	"fyne.io/fyne/v2/widget"
 
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
@@ -84,11 +83,11 @@ func TestCSSDisplayNone(t *testing.T) {
 
 	// Verify the one object is the visible text
 	obj := container.Objects[0]
-	label, ok := obj.(*widget.Label)
+	textObj, ok := obj.(*canvas.Text)
 	if !ok {
-		t.Errorf("Expected widget.Label, got %T", obj)
-	} else if !strings.Contains(label.Text, "Visible text") {
-		t.Errorf("Expected 'Visible text', got '%q'", label.Text)
+		t.Errorf("Expected *canvas.Text, got %T", obj)
+	} else if !strings.Contains(textObj.Text, "Visible text") {
+		t.Errorf("Expected 'Visible text', got '%q'", textObj.Text)
 	}
 }
 
@@ -157,7 +156,7 @@ func TestCSSVisibilityHidden(t *testing.T) {
 	// Find the visible text
 	foundText := false
 	for _, obj := range container.Objects {
-		if label, ok := obj.(*widget.Label); ok && strings.Contains(label.Text, "Visible text") {
+		if textObj, ok := obj.(*canvas.Text); ok && strings.Contains(textObj.Text, "Visible") {
 			foundText = true
 			break
 		}

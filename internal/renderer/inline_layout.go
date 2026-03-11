@@ -1,7 +1,6 @@
 package renderer
 
 import (
-	"log"
 	"strings"
 	"unicode"
 
@@ -178,12 +177,12 @@ func (ile *InlineLayoutEngine) addTextToLines(
 	// Get font properties
 	fontSize := ile.getFontSizeForNode(node)
 	style := ile.fontMetrics.GetTextStyleFromNode(node)
-	
+
 	// Apply FontStyle
 	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
 		style.Italic = true
 	}
-	
+
 	// Apply TextTransform
 	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != "" {
 		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform)
@@ -494,7 +493,7 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 
 	// Coalesce inline boxes with same NodeID and 0 letter-spacing on same line
 	if len(line.InlineBoxes) > 1 {
-		log.Printf("DEBUG: finalizeLine before coalescing: %d boxes", len(line.InlineBoxes))
+		// log.Printf("DEBUG: finalizeLine before coalescing: %d boxes", len(line.InlineBoxes))
 		coalesced := make([]*InlineBox, 0, len(line.InlineBoxes))
 		for _, box := range line.InlineBoxes {
 			if len(coalesced) > 0 {
@@ -512,7 +511,7 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 			coalesced = append(coalesced, box)
 		}
 		line.InlineBoxes = coalesced
-		log.Printf("DEBUG: finalizeLine after coalescing: %d boxes", len(line.InlineBoxes))
+		// log.Printf("DEBUG: finalizeLine after coalescing: %d boxes", len(line.InlineBoxes))
 	}
 
 	// Set line height based on maximum ascent and descent
@@ -540,7 +539,7 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 	// Adjust vertical positions of inline boxes based on vertical alignment
 	// and center them if we have extra line height
 	verticalOffset := (line.Height - (line.Ascent + line.Descent)) / 2
-	
+
 	for _, box := range line.InlineBoxes {
 		boxY := float32(0)
 		switch box.VerticalAlign {
@@ -701,7 +700,7 @@ func (ile *InlineLayoutEngine) getFontSizeForNode(node *RenderNode) float32 {
 		}
 		return ile.getFontSizeForNode(node.Parent)
 	}
-	
+
 	return ile.defaultFontSize
 }
 
