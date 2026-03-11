@@ -13,8 +13,6 @@ jobs:
     env:
       GOOS: linux
       GOARCH: amd64
-      # Playwright environment variables
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1 # We handle download manually/via cache
 
     steps:
     - name: Checkout code
@@ -47,17 +45,18 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev xorg-dev
 
-    - name: Install Playwright Browsers
+    - name: Install Playwright (browsers + driver + system deps)
       if: steps.cache-playwright.outputs.cache-hit != 'true'
       run: |
-        # Install Playwright driver and browsers if not cached
+        # Install Playwright driver, browsers, and system dependencies on a cache miss
         go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps
 
-    - name: Install Playwright Deps (System)
+    - name: Install Playwright driver and system deps (cache hit)
       if: steps.cache-playwright.outputs.cache-hit == 'true'
       run: |
-        # Even if browsers are cached, we might need system deps
-        go run github.com/playwright-community/playwright-go/cmd/playwright install-deps
+        # Browsers are cached, but the driver binary must still be installed.
+        # install-deps ensures OS-level library dependencies are present.
+        go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps chromium
 
     - name: Build Project
       run: make build

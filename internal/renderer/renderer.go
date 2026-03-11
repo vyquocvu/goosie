@@ -88,9 +88,10 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 		styleManager.ApplyStyles(renderTree)
 	}
 
-	// Perform layout
-	r.layoutEngine.ComputeLayout(renderTree)               // This line was actually layoutTree := ... in original code, I should be careful not to break it
-	layoutTree := r.layoutEngine.ComputeLayout(renderTree) // Re-writing for clarity in replacement
+	// Perform layout. This single call builds the complete layout tree from
+	// the render tree. Do not call ComputeLayout more than once per render
+	// cycle—each call clears and rebuilds the internal nodeMap from scratch.
+	layoutTree := r.layoutEngine.ComputeLayout(renderTree)
 
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree
