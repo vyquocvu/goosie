@@ -15,14 +15,16 @@ func TestComprehensiveSuite(t *testing.T) {
 
 	// Configuration
 	config := VisualTestConfig{
-		DiffThreshold:  1.0,
+		// DiffThreshold is max allowed differing pixels (0.0-1.0). A high default
+		// keeps this broad cross-renderer suite stable in normal runs.
+		DiffThreshold:  0.98,
 		UpdateBase:     os.Getenv("UPDATE_SNAPSHOTS") == "true",
 		OutputDir:      filepath.Join("testdata", "results"),
 		ViewportWidth:  1280,
 		ViewportHeight: 800,
 	}
 	if strictVisual {
-		config.DiffThreshold = 0.001 // 0.1% tolerance
+		config.DiffThreshold = 0.001 // Allow only 0.1% differing pixels in strict mode.
 	}
 
 	// Ensure we have test data
