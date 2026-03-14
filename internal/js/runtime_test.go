@@ -1,6 +1,7 @@
 package js
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1070,6 +1071,119 @@ func TestClearJavaScriptErrors(t *testing.T) {
 	errors = runtime.GetJavaScriptErrors()
 	if len(errors) != 0 {
 		t.Errorf("Expected 0 errors after clear, got %d", len(errors))
+	}
+}
+
+// mockFetcher implements HTTPFetcher for testing.
+type mockFetcher struct {
+	body string
+	err  error
+}
+
+func (m *mockFetcher) Fetch(url string) (string, error) {
+	return m.body, m.err
+}
+
+func TestSetFetcher(t *testing.T) {
+	runtime := NewRuntime()
+	mock := &mockFetcher{body: "hello world"}
+	runtime.SetFetcher(mock)
+	if runtime.fetcher != mock {
+		t.Errorf("SetFetcher did not set the fetcher")
+	}
+}
+
+func TestFetchAPIWithRealFetcher_Text(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetFetcher(&mockFetcher{body: "hello from server"})
+
+	_, err := runtime.RunScript(`
+var textResult = "";
+fetch("https://example.com/api")
+  .then(function(response) {
+    response.text().then(function(text) {
+      textResult = text;
+    });
+  });
+`)
+	if err != nil {
+		t.Fatalf("fetch script failed: %v", err)
+	}
+
+	// Allow goroutine to complete
+	time.Sleep(100 * time.Millisecond)
+
+	val, err := runtime.RunScript(`textResult`)
+	if err != nil {
+		t.Fatalf("reading textResult failed: %v", err)
+	}
+	if val.String() != "hello from server" {
+		t.Errorf("expected 'hello from server', got %q", val.String())
+	}
+}
+
+func TestFetchAPIWithRealFetcher_JSON(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetFetcher(&mockFetcher{body: `{"name":"goosie","version":1}`})
+
+	_, err := runtime.RunScript(`
+var jsonResult = null;
+fetch("https://example.com/api")
+  .then(function(response) {
+    response.json().then(function(data) {
+      jsonResult = data;
+    });
+  });
+`)
+	if err != nil {
+		t.Fatalf("fetch script failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	val, err := runtime.RunScript(`jsonResult !== null && jsonResult.name === "goosie"`)
+	if err != nil {
+		t.Fatalf("reading jsonResult failed: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected jsonResult.name to be 'goosie'")
+	}
+}
+
+func TestFetchAPIWithRealFetcher_ErrorPropagation(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetFetcher(&mockFetcher{err: fmt.Errorf("connection refused")})
+
+	_, err := runtime.RunScript(`
+var catchCalled = false;
+var catchMsg = "";
+fetch("https://example.com/api")
+  .then(function(response) {})
+  .catch(function(err) {
+    catchCalled = true;
+    catchMsg = err.message;
+  });
+`)
+	if err != nil {
+		t.Fatalf("fetch script failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	val, err := runtime.RunScript(`catchCalled`)
+	if err != nil {
+		t.Fatalf("reading catchCalled failed: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected catch callback to be called on fetch error")
+	}
+
+	val, err = runtime.RunScript(`catchMsg`)
+	if err != nil {
+		t.Fatalf("reading catchMsg failed: %v", err)
+	}
+	if !strings.Contains(val.String(), "connection refused") {
+		t.Errorf("expected error message to contain 'connection refused', got %q", val.String())
 	}
 }
 

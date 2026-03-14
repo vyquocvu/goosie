@@ -12,7 +12,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/ui"
-	"golang.org/x/net/html"
+	ghtml "golang.org/x/net/html"
 )
 
 func main() {
@@ -114,7 +114,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 		}
 
 		// Update UI on main thread with content
-		updateUIWithContent(browser, html, resolvedURL)
+		updateUIWithContent(browser, fetcher, html, resolvedURL)
 	}()
 }
 
@@ -136,7 +136,7 @@ func updateUIWithError(browser *ui.Browser, err error, url string) {
 }
 
 // updateUIWithContent updates the UI with HTML content
-func updateUIWithContent(browser *ui.Browser, html string, url string) {
+func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, html string, url string) {
 	log.Printf("Rendering page content")
 
 	// Fyne widgets are thread-safe and can be updated from any goroutine
@@ -170,20 +170,41 @@ func updateUIWithContent(browser *ui.Browser, html string, url string) {
 			jsRuntime := js.NewRuntime()
 			tab.SetJSRuntime(jsRuntime)
 		}
-		
+
 		jsRuntime := tab.GetJSRuntime()
-		
-		// Set HTML content for JS runtime
+
+		// Wire up the real HTTP fetcher so fetch() makes actual network requests
+		jsRuntime.SetFetcher(fetcher)
+
+		// Set HTML content for JS runtime (enables document.getElementById etc.)
 		jsRuntime.SetHTMLContent(html)
 
-		// Run any JavaScript on the page
-		testScript := `
-			console.log("Page loaded: " + document.title);
-			console.info("JavaScript runtime is active");
-		`
-		_, err = jsRuntime.RunScript(testScript)
-		if err != nil {
-			log.Printf("Error running JavaScript: %v", err)
+		// Execute inline <script> tags found in the page
+		scripts := extractInlineScripts(html)
+		for _, script := range scripts {
+			if _, err := jsRuntime.RunScript(script); err != nil {
+				log.Printf("Error running page script: %v", err)
+			}
+		}
+
+		// Fetch and execute external scripts (<script src="...">)
+		doc, htmlParseErr := ghtml.Parse(strings.NewReader(html))
+		if htmlParseErr == nil {
+			for _, src := range extractExternalScriptSrcs(doc) {
+				// Only fetch scripts with a valid HTTP/HTTPS URL
+				if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
+					log.Printf("Skipping external script with non-HTTP src: %s", src)
+					continue
+				}
+				scriptContent, fetchErr := fetcher.Fetch(src)
+				if fetchErr != nil {
+					log.Printf("Failed to fetch external script %s: %v", src, fetchErr)
+					continue
+				}
+				if _, runErr := jsRuntime.RunScript(scriptContent); runErr != nil {
+					log.Printf("Error running external script %s: %v", src, runErr)
+				}
+			}
 		}
 	}
 }
@@ -195,14 +216,14 @@ func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url
 
 // extractTitle parses the HTML and returns the content of the <title> tag.
 func extractTitle(htmlContent string) (string, bool) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
+	doc, err := ghtml.Parse(strings.NewReader(htmlContent))
 	if err != nil {
 		return "", false
 	}
 
-	var crawler func(*html.Node) (string, bool)
-	crawler = func(node *html.Node) (string, bool) {
-		if node.Type == html.ElementNode && node.Data == "title" {
+	var crawler func(*ghtml.Node) (string, bool)
+	crawler = func(node *ghtml.Node) (string, bool) {
+		if node.Type == ghtml.ElementNode && node.Data == "title" {
 			if node.FirstChild != nil {
 				return node.FirstChild.Data, true
 			}
@@ -216,4 +237,63 @@ func extractTitle(htmlContent string) (string, bool) {
 	}
 
 	return crawler(doc)
+}
+
+// extractInlineScripts extracts the content of all inline <script> tags (no src attr).
+func extractInlineScripts(htmlContent string) []string {
+	doc, err := ghtml.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil
+	}
+
+	var scripts []string
+	var walk func(*ghtml.Node)
+	walk = func(n *ghtml.Node) {
+		if n.Type == ghtml.ElementNode && n.Data == "script" {
+			hasSrc := false
+			for _, attr := range n.Attr {
+				if attr.Key == "src" {
+					hasSrc = true
+					break
+				}
+			}
+			if !hasSrc {
+				var sb strings.Builder
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if c.Type == ghtml.TextNode {
+						sb.WriteString(c.Data)
+					}
+				}
+				if sb.Len() > 0 {
+					scripts = append(scripts, sb.String())
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return scripts
+}
+
+// extractExternalScriptSrcs returns the src attributes of all <script src="..."> tags.
+func extractExternalScriptSrcs(doc *ghtml.Node) []string {
+	var srcs []string
+	var walk func(*ghtml.Node)
+	walk = func(n *ghtml.Node) {
+		if n.Type == ghtml.ElementNode && n.Data == "script" {
+			for _, attr := range n.Attr {
+				if attr.Key == "src" && attr.Val != "" {
+					srcs = append(srcs, attr.Val)
+					break
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return srcs
 }
