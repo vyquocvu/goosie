@@ -751,6 +751,12 @@ func parseLineHeight(value string, fontSize float32) float32 {
 }
 
 func parseLength(value string, fontSize float32) float32 {
+	return parseLengthWithViewport(value, fontSize, 0, 0)
+}
+
+// parseLengthWithViewport parses a CSS length value with viewport-relative unit support.
+// viewportWidth and viewportHeight are used for vw/vh/% resolution; pass 0 to skip.
+func parseLengthWithViewport(value string, fontSize, viewportWidth, viewportHeight float32) float32 {
 	value = strings.TrimSpace(value)
 
 	// Handle empty or "0" values
@@ -768,13 +774,19 @@ func parseLength(value string, fontSize float32) float32 {
 		return 5.0
 	}
 
-	// Parse numeric values with units
-	// IMPORTANT: Check rem before em since "rem" ends with "em"
-	// Otherwise "1.5rem" would be incorrectly parsed as "1.5r" + "em"
+	// Parse numeric values with units.
+	// Check rem before em: "rem" ends with "em" so order matters.
 	if strings.HasSuffix(value, "rem") {
 		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "rem"), 32); err == nil {
-			// rem is relative to root font size (typically 16px)
 			return float32(val) * 16.0
+		}
+	} else if strings.HasSuffix(value, "vw") {
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "vw"), 32); err == nil {
+			return float32(val) / 100.0 * viewportWidth
+		}
+	} else if strings.HasSuffix(value, "vh") {
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "vh"), 32); err == nil {
+			return float32(val) / 100.0 * viewportHeight
 		}
 	} else if strings.HasSuffix(value, "px") {
 		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "px"), 32); err == nil {
@@ -784,8 +796,14 @@ func parseLength(value string, fontSize float32) float32 {
 		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "em"), 32); err == nil {
 			return float32(val) * fontSize
 		}
+	} else if strings.HasSuffix(value, "%") {
+		// Percentage is resolved against the containing block width by default.
+		// Pass viewportWidth as the reference dimension for top-level usage.
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 32); err == nil {
+			return float32(val) / 100.0 * viewportWidth
+		}
 	} else {
-		// Try to parse as plain number (treated as px)
+		// Plain number treated as px
 		if val, err := strconv.ParseFloat(value, 32); err == nil {
 			return float32(val)
 		}

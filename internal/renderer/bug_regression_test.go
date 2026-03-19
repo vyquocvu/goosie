@@ -1,21 +1,22 @@
 package renderer
 
 import (
+	"strings"
 	"testing"
-
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/widget"
 )
 
-// TestBugFixDuplicateRendering is a regression test for the bug where
-// HTML content was being rendered multiple times due to duplicate LayoutBox
-// instances being created for inline content.
+// TestBugFixDuplicateRendering is a regression test for the bug where HTML content
+// was rendered multiple times due to duplicate LayoutBox instances for inline content.
 //
-// The issue was that when text wrapped across multiple lines, each word
-// got its own LayoutBox with the same NodeID, causing the display list
-// builder to render the text multiple times.
+// The original issue: when text wrapped across multiple lines, each word got its own
+// LayoutBox with the same NodeID, causing the display list to render the text multiple
+// times. The fix ensures each text node produces exactly one InlineBox per word/run,
+// not one per character.
+//
+// This test also covers vw/vh viewport-unit resolution: the test HTML uses
+// `width:60vw` and `margin:15vh auto`. Before the fix, parseLength returned 0 for
+// these units, collapsing the available width to 0 and triggering per-character layout.
 func TestBugFixDuplicateRendering(t *testing.T) {
-	// This is the exact HTML from the bug report
 	htmlContent := `<!doctype html>
 <html lang="en">
 <head>
@@ -36,56 +37,65 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 </body>
 </html>`
 
-	// Create renderer and render the HTML
-	htmlRenderer := NewRenderer(800, 600)
-	htmlRenderer.SetViewport(0, 100000)
-	canvasObject, err := htmlRenderer.RenderHTML(htmlContent)
+	r := NewRenderer(800, 600)
+	r.SetViewport(0, 100000)
+	_, err := r.RenderHTML(htmlContent)
 	if err != nil {
-		t.Fatalf("Error rendering HTML: %v", err)
+		t.Fatalf("RenderHTML error: %v", err)
 	}
 
-	// Count the number of rendered objects
-	vbox, ok := canvasObject.(*fyne.Container)
-	if !ok {
-		t.Fatalf("Expected canvasObject to be *fyne.Container, got %T", canvasObject)
+	dl := r.canvasRenderer.cachedDisplayList
+	if dl == nil {
+		t.Fatal("no display list produced")
 	}
 
-	// Expected: 3 objects (h1, p, link)
-	// Before fix: 19 objects (each word rendered separately, causing duplication)
-	expectedCount := 3
-	actualCount := len(vbox.Objects)
-
-	if actualCount != expectedCount {
-		t.Errorf("Expected %d rendered objects, got %d", expectedCount, actualCount)
-		for i, obj := range vbox.Objects {
-			if label, isLabel := obj.(*widget.Label); isLabel {
-				t.Logf("  Object %d: Text=%q", i, label.Text)
-			}
+	// Collect all PaintText commands
+	var textCmds []string
+	for _, cmd := range dl.Commands {
+		if cmd.Type == PaintText {
+			textCmds = append(textCmds, cmd.Text)
 		}
 	}
 
-	// Verify the content is correct
-	if actualCount >= 3 {
-		// Check h1
-		if label, ok := vbox.Objects[0].(*widget.Label); ok {
-			if label.Text != "Example Domain" {
-				t.Errorf("Expected h1 text 'Example Domain', got '%s'", label.Text)
-			}
+	// h1 "Example Domain" must appear as a single run (fits on one line at 800px viewport)
+	h1Found := false
+	for _, cmd := range dl.Commands {
+		if cmd.Type == PaintText && cmd.Text == "Example Domain" {
+			h1Found = true
 		}
+	}
+	if !h1Found {
+		t.Errorf("expected a single PaintText with text %q; got: %v", "Example Domain", textCmds)
+	}
 
-		// Check paragraph
-		if label, ok := vbox.Objects[1].(*widget.Label); ok {
-			expectedText := "This domain is for use in documentation examples without needing permission. Avoid use in operations."
-			if label.Text != expectedText {
-				t.Errorf("Expected paragraph text, got '%s'", label.Text)
-			}
+	// "Learn more" link must appear exactly once
+	learnMoreCount := 0
+	for _, cmd := range dl.Commands {
+		if cmd.Type == PaintText && strings.TrimSpace(cmd.Text) == "Learn more" {
+			learnMoreCount++
 		}
+	}
+	if learnMoreCount != 1 {
+		t.Errorf("expected exactly 1 PaintText for %q, got %d; commands: %v", "Learn more", learnMoreCount, textCmds)
+	}
 
-		// Check link
-		if label, ok := vbox.Objects[2].(*widget.Label); ok {
-			if label.Text != "Learn more" {
-				t.Errorf("Expected link text 'Learn more', got '%s'", label.Text)
-			}
+	// No single text node should produce more PaintText commands than the number of
+	// wrapped lines (<=10 is generous). Before the fix, a single node produced 100+
+	// commands -- one per character -- due to vw/vh units resolving to 0.
+	nodeIDCount := make(map[int64]int)
+	for _, cmd := range dl.Commands {
+		if cmd.Type == PaintText {
+			nodeIDCount[cmd.NodeID]++
 		}
+	}
+	for nodeID, count := range nodeIDCount {
+		if count > 10 {
+			t.Errorf("nodeID %d produced %d PaintText commands -- per-character rendering regression", nodeID, count)
+		}
+	}
+
+	// Total PaintText commands must be word-level, not character-level (<=10 for this HTML)
+	if len(textCmds) > 10 {
+		t.Errorf("expected <=10 PaintText commands (word-level), got %d", len(textCmds))
 	}
 }

@@ -40,6 +40,37 @@ func TestParseLengthValues(t *testing.T) {
 	}
 }
 
+// TestParseLengthWithViewport tests viewport-relative unit resolution (vw, vh, %).
+func TestParseLengthWithViewport(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		vw, vh   float32
+		expected float32
+	}{
+		{"60vw of 800", "60vw", 800, 600, 480},
+		{"15vh of 600", "15vh", 800, 600, 90},
+		{"100vw", "100vw", 1024, 768, 1024},
+		{"50%", "50%", 800, 600, 400},
+		{"vw zero viewport", "60vw", 0, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseLengthWithViewport(tt.input, 16, tt.vw, tt.vh)
+			// Allow 0.1px tolerance for float32 arithmetic
+			diff := result - tt.expected
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 0.1 {
+				t.Errorf("parseLengthWithViewport(%q, vw=%g, vh=%g) = %g; want %g",
+					tt.input, tt.vw, tt.vh, result, tt.expected)
+			}
+		})
+	}
+}
+
 // TestParseBoxShorthand tests the parseBoxShorthand function
 func TestParseBoxShorthand(t *testing.T) {
 	tests := []struct {
