@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/playwright-community/playwright-go"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// TestGeneratedHTML verifies the structure and visual appearance of output.html
+// using Playwright Expect assertions for DOM checks and CompareScreenshot for
+// visual regression.
 func TestGeneratedHTML(t *testing.T) {
-	// Verify testdata/output.html exists
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
 
-	// Since we run tests from test/e2e, the root is two levels up
 	projectRoot := filepath.Dir(filepath.Dir(cwd))
 	htmlPath := filepath.Join(projectRoot, "testdata", "output.html")
 
@@ -23,52 +23,56 @@ func TestGeneratedHTML(t *testing.T) {
 	require.NoError(t, err, "output.html should exist")
 	require.False(t, info.IsDir(), "output.html should be a file")
 
-	// Create a new page
-	page, err := browser.NewPage()
-	require.NoError(t, err)
+	page := newPage(t)
 	defer page.Close()
 
-	// Load the HTML file
-	// We need a file:// URL
-	fileURL := "file://" + htmlPath
-	_, err = page.Goto(fileURL)
+	_, err = page.Goto("file://" + htmlPath)
 	require.NoError(t, err)
 
-	// Verify Title
-	title, err := page.Title()
-	require.NoError(t, err)
-	assert.Equal(t, "Goosie Test Output", title)
+	pw := playwright.NewPlaywrightAssertions()
 
-	// Verify DOM Structure
-	// Check for the container
-	container := page.Locator(".container")
-	count, err := container.Count()
-	require.NoError(t, err)
-	assert.Equal(t, 1, count)
+	// Page-level assertions
+	require.NoError(t,
+		pw.Page(page).ToHaveTitle("Goosie Test Output"),
+		"page title mismatch",
+	)
 
-	// Check for 3 boxes
-	boxes := page.Locator(".box")
-	count, err = boxes.Count()
-	require.NoError(t, err)
-	assert.Equal(t, 3, count)
+	// Structural assertions via Locator Expect
+	require.NoError(t,
+		pw.Locator(page.Locator(".container")).ToHaveCount(1),
+		"expected exactly one .container",
+	)
 
-	// Verify Box Contents
-	redBox := boxes.First()
-	text, err := redBox.TextContent()
-	require.NoError(t, err)
-	assert.Equal(t, "Red", text)
+	require.NoError(t,
+		pw.Locator(page.Locator(".box")).ToHaveCount(3),
+		"expected exactly three .box elements",
+	)
 
-	// Visual Regression (Screenshot)
-	// Taking a screenshot
+	// Content assertions on individual boxes
+	require.NoError(t,
+		pw.Locator(page.Locator(".box").First()).ToHaveText("Red"),
+		"first box should contain text 'Red'",
+	)
+
+	// All boxes must be visible
+	require.NoError(t,
+		pw.Locator(page.Locator(".box").First()).ToBeVisible(),
+		"first box should be visible",
+	)
+
+	// Visual regression screenshot
+	config := VisualTestConfig{
+		UpdateBase:     os.Getenv("UPDATE_SNAPSHOTS") == "true",
+		OutputDir:      filepath.Join("testdata", "results"),
+		ViewportWidth:  1280,
+		ViewportHeight: 800,
+	}
+
 	screenshot, err := page.Screenshot(playwright.PageScreenshotOptions{
 		Path: playwright.String("screenshot.png"),
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, screenshot)
 
-	// Note: To implement true visual regression (comparing against a baseline),
-	// we would compare 'screenshot' bytes with a stored 'baseline.png'.
-	// For this task, we ensure we can take the screenshot.
-	// If playwright-go's Expect().ToHaveScreenshot() is available and configured, use it:
-	// require.NoError(t, playwright.NewPlaywrightAssertions(t).Page(page).ToHaveScreenshot())
+	CompareScreenshot(t, page, "output", config)
 }

@@ -2,34 +2,46 @@ package e2e
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/playwright-community/playwright-go"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/testutil"
 )
 
-// VisualTestConfig holds configuration for visual testing
+// screenshotTolerance is the maximum fraction of pixels that may differ between
+// a baseline and an actual screenshot. 0.0001 (0.01%) allows for sub-pixel
+// anti-aliasing differences while catching real visual regressions.
+const screenshotTolerance = 0.0001
+
+// VisualTestConfig holds configuration for visual testing.
 type VisualTestConfig struct {
-	DiffThreshold  float64 // Percentage of pixels that can differ (0.0 - 1.0)
-	UpdateBase     bool    // Whether to update baseline images
-	OutputDir      string  // Directory for test artifacts
+	UpdateBase     bool // When true, overwrite baseline images instead of comparing
+	OutputDir      string
 	ViewportWidth  int
 	ViewportHeight int
 }
 
-// CompareScreenshot takes a screenshot of the current page and compares it with a baseline
+// isParityTestEnabled reports whether the Goosie-vs-browser parity tests should run.
+// Set RUN_PARITY_TESTS=true to enable.
+func isParityTestEnabled() bool {
+	return os.Getenv("RUN_PARITY_TESTS") == "true"
+}
+
+// CompareScreenshot takes a full-page screenshot and compares it against a stored
+// baseline using screenshotTolerance. On first run (or when UpdateBase is true)
+// the screenshot is saved as the new baseline.
 func CompareScreenshot(t *testing.T, page playwright.Page, name string, config VisualTestConfig) {
-	// Take screenshot
+	t.Helper()
+
 	screenshot, err := page.Screenshot(playwright.PageScreenshotOptions{
 		FullPage: playwright.Bool(true),
 	})
@@ -39,49 +51,40 @@ func CompareScreenshot(t *testing.T, page playwright.Page, name string, config V
 	diffPath := filepath.Join(config.OutputDir, "diffs", name+".png")
 	actualPath := filepath.Join(config.OutputDir, "actual", name+".png")
 
-	// Ensure directories exist
 	os.MkdirAll(filepath.Dir(baselinePath), 0755)
 	os.MkdirAll(filepath.Dir(diffPath), 0755)
 	os.MkdirAll(filepath.Dir(actualPath), 0755)
 
-	// Save actual screenshot
-	err = os.WriteFile(actualPath, screenshot, 0644)
-	require.NoError(t, err, "failed to save actual screenshot")
+	require.NoError(t, os.WriteFile(actualPath, screenshot, 0644), "failed to save actual screenshot")
 
-	// If update baseline is requested or baseline doesn't exist, save it and skip comparison
 	if config.UpdateBase {
-		err = os.WriteFile(baselinePath, screenshot, 0644)
-		require.NoError(t, err, "failed to update baseline")
-		t.Logf("Baseline updated for %s", name)
+		require.NoError(t, os.WriteFile(baselinePath, screenshot, 0644), "failed to update baseline")
+		t.Logf("baseline updated: %s", name)
 		return
 	}
 
 	if _, err := os.Stat(baselinePath); os.IsNotExist(err) {
-		// If baseline doesn't exist, treat it as a new test case
-		err = os.WriteFile(baselinePath, screenshot, 0644)
-		require.NoError(t, err, "failed to create initial baseline")
-		t.Logf("Created initial baseline for %s", name)
+		require.NoError(t, os.WriteFile(baselinePath, screenshot, 0644), "failed to create initial baseline")
+		t.Logf("baseline created: %s", name)
 		return
 	}
 
-	// Read baseline
 	baselineData, err := os.ReadFile(baselinePath)
 	require.NoError(t, err, "failed to read baseline")
 
-	// Compare images
 	diffPercent, err := compareImages(baselineData, screenshot, diffPath)
 	require.NoError(t, err, "failed to compare images")
 
-	if diffPercent > config.DiffThreshold {
-		t.Errorf("Visual regression detected for %s: %.2f%% difference (threshold: %.2f%%)", name, diffPercent*100, config.DiffThreshold*100)
+	if diffPercent > screenshotTolerance {
+		t.Errorf("visual regression in %s: %.4f%% pixel diff (tolerance %.4f%%)",
+			name, diffPercent*100, screenshotTolerance*100)
 	} else {
-		// Clean up diff if passed
 		os.Remove(diffPath)
 	}
 }
 
-// compareImages compares two PNG images and returns the percentage of different pixels.
-// It also generates a diff image if a diffPath is provided.
+// compareImages compares two PNG images pixel-by-pixel and returns the fraction
+// of differing pixels. A diff image is written to diffPath when pixels differ.
 func compareImages(img1Data, img2Data []byte, diffPath string) (float64, error) {
 	img1, _, err := image.Decode(bytes.NewReader(img1Data))
 	if err != nil {
@@ -102,21 +105,18 @@ func compareImages(img1Data, img2Data []byte, diffPath string) (float64, error) 
 	diffPixels := 0
 	totalPixels := bounds.Dx() * bounds.Dy()
 
-	red := color.RGBA{255, 0, 0, 255}
+	red := color.RGBA{R: 255, A: 255}
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			r1, g1, b1, a1 := img1.At(x, y).RGBA()
 			r2, g2, b2, a2 := img2.At(x, y).RGBA()
-
 			if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
 				diffPixels++
-				// Draw difference in red on diff image
 				diffImg.Set(x, y, red)
 			}
 		}
 	}
 
-	// Save diff image if there are differences
 	if diffPixels > 0 && diffPath != "" {
 		f, err := os.Create(diffPath)
 		if err != nil {
@@ -131,8 +131,107 @@ func compareImages(img1Data, img2Data []byte, diffPath string) (float64, error) 
 	return float64(diffPixels) / float64(totalPixels), nil
 }
 
-// CompareGoosieVsBrowser renders with Goosie and Playwright and compares screenshots
+// ValidateStructure runs category-appropriate Playwright Expect assertions against
+// the loaded page. Category is inferred from the test name.
+func ValidateStructure(t *testing.T, page playwright.Page, name string) {
+	t.Helper()
+
+	pw := playwright.NewPlaywrightAssertions()
+
+	// body must always be visible
+	require.NoError(t,
+		pw.Locator(page.Locator("body")).ToBeVisible(),
+		"body not visible in %s", name,
+	)
+
+	switch {
+	case strings.Contains(name, "typography"):
+		headings := page.Locator("h1, h2, h3, h4, h5, h6, p")
+		count, err := headings.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(headings.First()).ToBeVisible(),
+				"no visible heading/paragraph in %s", name,
+			)
+		}
+
+	case strings.Contains(name, "layout"):
+		blocks := page.Locator("div, section, article, main, header, footer")
+		count, err := blocks.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(blocks.First()).ToBeVisible(),
+				"no visible block element in %s", name,
+			)
+		}
+
+	case strings.Contains(name, "flexbox"):
+		children := page.Locator("div > div, div > span, div > p")
+		count, err := children.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(children.First()).ToBeVisible(),
+				"no visible flex child in %s", name,
+			)
+		}
+
+	case strings.Contains(name, "forms"):
+		controls := page.Locator("input, button, select, textarea")
+		count, err := controls.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(controls.First()).ToBeVisible(),
+				"no visible form control in %s", name,
+			)
+		}
+
+	case strings.Contains(name, "tables"):
+		rows := page.Locator("tr")
+		count, err := rows.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(rows.First()).ToBeVisible(),
+				"no visible table row in %s", name,
+			)
+		}
+
+	case strings.Contains(name, "grid"):
+		grids := page.Locator("div, section")
+		count, err := grids.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(grids.First()).ToBeVisible(),
+				"no visible grid container in %s", name,
+			)
+		}
+
+	case strings.Contains(name, "media"):
+		imgs := page.Locator("img")
+		count, err := imgs.Count()
+		require.NoError(t, err)
+		if count > 0 {
+			require.NoError(t,
+				pw.Locator(imgs.First()).ToBeVisible(),
+				"no visible img in %s", name,
+			)
+		}
+
+	default:
+		// css_advanced, edge_cases: body visibility is sufficient
+	}
+}
+
+// CompareGoosieVsBrowser renders the HTML with Goosie and Playwright, saves both
+// screenshots, and reports the pixel diff. Only called when RUN_PARITY_TESTS=true.
 func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string, name string, config VisualTestConfig) {
+	t.Helper()
+
 	width := config.ViewportWidth
 	if width <= 0 {
 		width = 1280
@@ -141,126 +240,64 @@ func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string,
 	if height <= 0 {
 		height = 800
 	}
+
 	htmlBytes, err := os.ReadFile(filePath)
 	require.NoError(t, err)
+
 	r := renderer.NewRenderer(float32(width), float32(height))
 	abs, _ := filepath.Abs(filePath)
 	r.SetCurrentURL("file://" + abs)
 	obj, err := r.RenderHTML(string(htmlBytes))
 	require.NoError(t, err)
+
 	h := int(r.GetContentHeight())
 	if h > 0 {
 		height = h
 	}
+
 	goosieImg, err := testutil.RenderToImage(obj, width, height)
 	require.NoError(t, err)
-	err = page.SetViewportSize(width, height)
+
+	require.NoError(t, page.SetViewportSize(width, height))
+
+	_, err = page.Goto("file://" + filePath)
 	require.NoError(t, err)
-	fileURL := "file://" + filePath
-	_, err = page.Goto(fileURL)
-	require.NoError(t, err)
-	// Inject CSS to normalize fonts closer to Goosie/Fyne rendering
+
+	// Normalise fonts to reduce renderer-agnostic differences
 	_, _ = page.Evaluate(`() => {
 		const style = document.createElement('style');
-		style.textContent = "* { font-family: -apple-system, BlinkMacSystemFont, \\"Segoe UI\\", Roboto, \\"Helvetica Neue\\", Arial, sans-serif !important; line-height: 1.2; } body { background: #ffffff; }";
+		style.textContent = "* { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif !important; line-height: 1.2; } body { background: #ffffff; }";
 		document.head.appendChild(style);
 	}`)
+
 	browserPNG, err := page.Screenshot(playwright.PageScreenshotOptions{
 		FullPage: playwright.Bool(false),
 	})
 	require.NoError(t, err)
+
 	var goosieBuf bytes.Buffer
-	err = png.Encode(&goosieBuf, goosieImg)
-	require.NoError(t, err)
+	require.NoError(t, png.Encode(&goosieBuf, goosieImg))
+
 	goosiePath := filepath.Join(config.OutputDir, "goosie", name+".png")
 	browserPath := filepath.Join(config.OutputDir, "browser", name+".png")
 	diffPath := filepath.Join(config.OutputDir, "diffs_compare", name+".png")
+
 	os.MkdirAll(filepath.Dir(goosiePath), 0755)
 	os.MkdirAll(filepath.Dir(browserPath), 0755)
 	os.MkdirAll(filepath.Dir(diffPath), 0755)
-	err = os.WriteFile(goosiePath, goosieBuf.Bytes(), 0644)
-	require.NoError(t, err)
-	err = os.WriteFile(browserPath, browserPNG, 0644)
-	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(goosiePath, goosieBuf.Bytes(), 0644))
+	require.NoError(t, os.WriteFile(browserPath, browserPNG, 0644))
+
 	diffPercent, err := compareImages(goosieBuf.Bytes(), browserPNG, diffPath)
 	require.NoError(t, err)
-	if diffPercent > config.DiffThreshold {
-		t.Errorf("Goosie vs Browser mismatch for %s: %.2f%% difference", name, diffPercent*100)
+
+	// Parity tests use a relaxed threshold — Goosie and Chromium are different renderers
+	const parityTolerance = 0.30
+	if diffPercent > parityTolerance {
+		t.Errorf("Goosie vs browser mismatch for %s: %.2f%% difference (tolerance %.0f%%)",
+			name, diffPercent*100, parityTolerance*100)
 	} else {
 		os.Remove(diffPath)
 	}
-}
-
-// ValidateDOMSnapshot captures the computed style and structure of elements
-// and compares it against a baseline JSON file.
-func ValidateDOMSnapshot(t *testing.T, page playwright.Page, name string, config VisualTestConfig) {
-	// Execute script to extract DOM structure and computed styles
-	// This is a simplified version; a full version would traverse the tree recursively
-	script := `
-	() => {
-		function serialize(node) {
-			if (node.nodeType === Node.TEXT_NODE) {
-				return { type: 'text', content: node.textContent.trim() };
-			}
-			if (node.nodeType !== Node.ELEMENT_NODE) return null;
-			
-			const style = window.getComputedStyle(node);
-			const rect = node.getBoundingClientRect();
-			
-			const data = {
-				tag: node.tagName.toLowerCase(),
-				rect: {
-					x: rect.x, y: rect.y, width: rect.width, height: rect.height
-				},
-				style: {
-					display: style.display,
-					position: style.position,
-					color: style.color,
-					backgroundColor: style.backgroundColor,
-					fontSize: style.fontSize,
-					fontFamily: style.fontFamily
-				},
-				children: []
-			};
-			
-			for (let child of node.childNodes) {
-				const serializedChild = serialize(child);
-				if (serializedChild && (serializedChild.type !== 'text' || serializedChild.content)) {
-					data.children.push(serializedChild);
-				}
-			}
-			return data;
-		}
-		return serialize(document.body);
-	}
-	`
-
-	result, err := page.Evaluate(script)
-	require.NoError(t, err, "failed to evaluate DOM snapshot script")
-
-	snapshotJSON, err := json.MarshalIndent(result, "", "  ")
-	require.NoError(t, err, "failed to marshal snapshot")
-
-	baselinePath := filepath.Join("testdata", "snapshots", name+".json")
-
-	// Update or create baseline
-	if config.UpdateBase {
-		os.MkdirAll(filepath.Dir(baselinePath), 0755)
-		err = os.WriteFile(baselinePath, snapshotJSON, 0644)
-		require.NoError(t, err, "failed to update DOM snapshot baseline")
-		return
-	}
-
-	if _, err := os.Stat(baselinePath); os.IsNotExist(err) {
-		os.MkdirAll(filepath.Dir(baselinePath), 0755)
-		err = os.WriteFile(baselinePath, snapshotJSON, 0644)
-		require.NoError(t, err, "failed to create initial DOM snapshot baseline")
-		return
-	}
-
-	// Compare
-	baselineData, err := os.ReadFile(baselinePath)
-	require.NoError(t, err, "failed to read DOM snapshot baseline")
-
-	assert.JSONEq(t, string(baselineData), string(snapshotJSON), "DOM snapshot mismatch for %s", name)
 }

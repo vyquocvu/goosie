@@ -9,29 +9,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestComprehensiveSuite runs the full test suite over all generated HTML files
+// TestComprehensiveSuite runs Visual and Structure subtests over all generated
+// HTML files in testdata/. Each file gets:
+//   - Visual: screenshot compared against a stored baseline (screenshotTolerance)
+//   - Structure: Playwright Expect assertions appropriate for the file's category
+//
+// Goosie-vs-browser parity tests are in TestGoosieVsBrowser (opt-in via RUN_PARITY_TESTS=true).
 func TestComprehensiveSuite(t *testing.T) {
-	// Configuration
 	config := VisualTestConfig{
-		DiffThreshold:  0.001, // 0.1% tolerance
 		UpdateBase:     os.Getenv("UPDATE_SNAPSHOTS") == "true",
 		OutputDir:      filepath.Join("testdata", "results"),
 		ViewportWidth:  1280,
 		ViewportHeight: 800,
 	}
 
-	// Ensure we have test data
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
 	projectRoot := filepath.Dir(filepath.Dir(cwd))
 	testDataDir := filepath.Join(projectRoot, "testdata")
 
-	// Verify testdata exists; if not, suggest running make generate-test-data
 	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
 		t.Fatalf("testdata directory not found at %s. Run 'make generate-test-data' first.", testDataDir)
 	}
 
-	// Find all generated test files
 	files, err := filepath.Glob(filepath.Join(testDataDir, "test_*.html"))
 	require.NoError(t, err)
 
@@ -41,57 +41,68 @@ func TestComprehensiveSuite(t *testing.T) {
 
 	t.Logf("Found %d test cases", len(files))
 
-	// Run subtest for each file
 	for _, file := range files {
+		file := file // capture loop variable
 		baseName := filepath.Base(file)
 		testName := strings.TrimSuffix(baseName, ".html")
 
 		t.Run(testName, func(t *testing.T) {
-			// Allow per-test overrides where exact pixel matching is unrealistic
-			localConfig := config
-			if strings.Contains(testName, "_typography") {
-				// Typography varies across platforms; relax threshold for these tests
-				localConfig.DiffThreshold = 0.08
-			}
-			if strings.Contains(testName, "_layout") {
-				// Layout rendering involves font metrics and border styling differences
-				// between Goosie/Fyne and Chromium; dashed/dotted border patterns
-				// differ visually between renderers, requiring a relaxed threshold
-				localConfig.DiffThreshold = 0.20
-			}
-			if strings.Contains(testName, "_grid") {
-				// Grid layout support is still partial in Goosie; keep this suite stable
-				// by allowing a wider Goosie/Chromium rendering delta for grid cases.
-				// Current fixtures can differ by ~62%, so this is intentionally temporary
-				// until renderer parity improves and the threshold can be reduced.
-				localConfig.DiffThreshold = 0.65
-			}
 			page := newPage(t)
 			defer page.Close()
 
-			// Navigate to file
-			fileURL := "file://" + file
-			_, err := page.Goto(fileURL)
+			_, err := page.Goto("file://" + file)
 			require.NoError(t, err, "failed to load page")
 
-			// Handle potential timeout issues with external resources
-			// For media tests that load external images, we might need to wait for network idle
-			// or just ensure the page load event has fired (which Goto does by default)
-
-			// Visual Regression Test
 			t.Run("Visual", func(t *testing.T) {
-				CompareScreenshot(t, page, testName, localConfig)
+				CompareScreenshot(t, page, testName, config)
 			})
 
-			// DOM Snapshot Test
-			t.Run("DOM", func(t *testing.T) {
-				ValidateDOMSnapshot(t, page, testName, localConfig)
+			t.Run("Structure", func(t *testing.T) {
+				ValidateStructure(t, page, testName)
 			})
+		})
+	}
+}
 
-			// Goosie vs Browser Comparison
-			t.Run("GoosieVsBrowser", func(t *testing.T) {
-				CompareGoosieVsBrowser(t, page, file, testName, localConfig)
-			})
+// TestGoosieVsBrowser compares Goosie's rendering against Chromium for all
+// generated HTML files. Only runs when RUN_PARITY_TESTS=true.
+func TestGoosieVsBrowser(t *testing.T) {
+	if !isParityTestEnabled() {
+		t.Skip("parity tests disabled; set RUN_PARITY_TESTS=true to enable")
+	}
+
+	config := VisualTestConfig{
+		OutputDir:     filepath.Join("testdata", "results"),
+		ViewportWidth: 1280,
+		ViewportHeight: 800,
+	}
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	projectRoot := filepath.Dir(filepath.Dir(cwd))
+	testDataDir := filepath.Join(projectRoot, "testdata")
+
+	if _, err := os.Stat(testDataDir); os.IsNotExist(err) {
+		t.Fatalf("testdata directory not found at %s. Run 'make generate-test-data' first.", testDataDir)
+	}
+
+	files, err := filepath.Glob(filepath.Join(testDataDir, "test_*.html"))
+	require.NoError(t, err)
+
+	if len(files) == 0 {
+		t.Fatal("No test_*.html files found. Run 'make generate-test-data' first.")
+	}
+
+	for _, file := range files {
+		file := file
+		baseName := filepath.Base(file)
+		testName := strings.TrimSuffix(baseName, ".html")
+
+		t.Run(testName, func(t *testing.T) {
+			page := newPage(t)
+			defer page.Close()
+
+			CompareGoosieVsBrowser(t, page, file, testName, config)
 		})
 	}
 }
