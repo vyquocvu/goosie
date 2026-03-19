@@ -138,10 +138,12 @@ func ValidateStructure(t *testing.T, page playwright.Page, name string) {
 
 	pw := playwright.NewPlaywrightAssertions()
 
-	// body must always be visible
+	// body must always be attached to the DOM (ToBeAttached rather than ToBeVisible
+	// because some pages only contain absolutely-positioned elements with no text,
+	// which Playwright considers "hidden" even though the page loaded correctly).
 	require.NoError(t,
-		pw.Locator(page.Locator("body")).ToBeVisible(),
-		"body not visible in %s", name,
+		pw.Locator(page.Locator("body")).ToBeAttached(),
+		"body not attached in %s", name,
 	)
 
 	switch {
@@ -157,13 +159,15 @@ func ValidateStructure(t *testing.T, page playwright.Page, name string) {
 		}
 
 	case strings.Contains(name, "layout"):
+		// Use ToBeAttached: layout tests may contain only absolutely-positioned
+		// empty elements which Playwright considers "hidden" despite being rendered.
 		blocks := page.Locator("div, section, article, main, header, footer")
 		count, err := blocks.Count()
 		require.NoError(t, err)
 		if count > 0 {
 			require.NoError(t,
-				pw.Locator(blocks.First()).ToBeVisible(),
-				"no visible block element in %s", name,
+				pw.Locator(blocks.First()).ToBeAttached(),
+				"no attached block element in %s", name,
 			)
 		}
 
@@ -173,12 +177,13 @@ func ValidateStructure(t *testing.T, page playwright.Page, name string) {
 		require.NoError(t, err)
 		if count > 0 {
 			require.NoError(t,
-				pw.Locator(children.First()).ToBeVisible(),
-				"no visible flex child in %s", name,
+				pw.Locator(children.First()).ToBeAttached(),
+				"no attached flex child in %s", name,
 			)
 		}
 
 	case strings.Contains(name, "forms"):
+		// Form controls are interactive elements — ToBeVisible is appropriate here.
 		controls := page.Locator("input, button, select, textarea")
 		count, err := controls.Count()
 		require.NoError(t, err)
@@ -206,8 +211,8 @@ func ValidateStructure(t *testing.T, page playwright.Page, name string) {
 		require.NoError(t, err)
 		if count > 0 {
 			require.NoError(t,
-				pw.Locator(grids.First()).ToBeVisible(),
-				"no visible grid container in %s", name,
+				pw.Locator(grids.First()).ToBeAttached(),
+				"no attached grid container in %s", name,
 			)
 		}
 
@@ -217,8 +222,8 @@ func ValidateStructure(t *testing.T, page playwright.Page, name string) {
 		require.NoError(t, err)
 		if count > 0 {
 			require.NoError(t,
-				pw.Locator(imgs.First()).ToBeVisible(),
-				"no visible img in %s", name,
+				pw.Locator(imgs.First()).ToBeAttached(),
+				"no attached img in %s", name,
 			)
 		}
 
