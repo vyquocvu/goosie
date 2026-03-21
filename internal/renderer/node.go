@@ -30,6 +30,7 @@ type RenderNode struct {
 	TagName       string            // HTML tag name (e.g., "div", "p", "h1")
 	Text          string            // Text content for text nodes
 	Attrs         map[string]string // HTML attributes
+	Styles        map[string]string // CSS styles
 	Children      []*RenderNode     // Child nodes
 	Parent        *RenderNode       // Parent node
 	ComputedStyle *Style
@@ -139,6 +140,7 @@ func NewRenderNode(nodeType NodeType) *RenderNode {
 		ID:            atomic.AddInt64(&nodeIDCounter, 1),
 		Type:          nodeType,
 		Attrs:         make(map[string]string),
+		Styles:        make(map[string]string),
 		Children:      make([]*RenderNode, 0),
 		Box:           &Box{},
 		ComputedStyle: &Style{},

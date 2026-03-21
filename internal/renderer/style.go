@@ -441,6 +441,11 @@ var colorNameToHex = map[string]string{
 }
 
 func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration) {
+	if node.Styles == nil {
+		node.Styles = make(map[string]string)
+	}
+	node.Styles[decl.Property] = decl.Value
+
 	style := node.ComputedStyle
 	switch decl.Property {
 	case "display":
