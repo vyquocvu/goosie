@@ -94,6 +94,9 @@ type LayoutBox struct {
 	FlexBasis  float32 // Initial main size (0 means auto)
 	AlignSelf  string  // Override align-items for this item
 	Order      int     // Order of flex item
+
+	// CSS positioning
+	Position string // "static", "relative", "absolute", "fixed", "sticky"
 }
 
 // NewLayoutBox creates a new layout box

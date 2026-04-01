@@ -180,56 +180,74 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 
 	// Check if this layout box has inline content (LineBoxes)
 	if len(layoutBox.LineBoxes) > 0 {
-		// Process every inline box fragment
+		// Coalesce all inline text fragments with the same NodeID across all lines
+		// into a single PaintText command. This allows Fyne's word-wrap label to
+		// handle the text naturally, and avoids duplicate/fragmented rendering.
+		type textAccum struct {
+			node      *RenderNode
+			text      strings.Builder
+			box       Rect // top-left of first fragment
+			fontSize  float32
+			bold      bool
+			italic    bool
+			underline bool
+			strike    bool
+		}
+		seen := make(map[int64]*textAccum)
+		order := make([]int64, 0) // preserve insertion order
+
 		for _, lineBox := range layoutBox.LineBoxes {
 			for _, inlineBox := range lineBox.InlineBoxes {
+				if !inlineBox.IsText {
+					continue
+				}
+				inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]
+				if !inlineExists {
+					continue
+				}
 
-				if inlineBox.IsText {
-					// Get the render node for this inline box
-					inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]
-					if !inlineExists {
-						continue
-					}
-
-					// Get text style from node hierarchy
+				accum, exists := seen[inlineBox.NodeID]
+				if !exists {
 					style := dlb.fontMetrics.GetTextStyleFromNode(inlineRenderNode)
-
-					// Get font size from parent
 					fontSize := dlb.defaultFontSize
 					if inlineRenderNode.Parent != nil {
 						fontSize = dlb.fontMetrics.GetFontSize(inlineRenderNode.Parent.TagName)
 					}
-
-					// Compute absolute box for this inline fragment
-					absX := lineBox.X + inlineBox.X
-					absY := lineBox.Y + inlineBox.Y
-					box := Rect{
-						X:      absX,
-						Y:      absY,
-						Width:  inlineBox.Width,
-						Height: inlineBox.Height,
+					accum = &textAccum{
+						node:      inlineRenderNode,
+						box:       Rect{X: lineBox.X + inlineBox.X, Y: lineBox.Y + inlineBox.Y, Width: inlineBox.Width, Height: inlineBox.Height},
+						fontSize:  fontSize,
+						bold:      style.Bold,
+						italic:    style.Italic,
+						underline: inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "underline"),
+						strike:    inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "line-through"),
 					}
-
-					// Create paint command for this inline fragment
-					cmd := &PaintCommand{
-						Type:     PaintText,
-						NodeID:   inlineBox.NodeID,
-						Node:     inlineRenderNode,
-						Box:      box,
-						Text:     inlineBox.Text,
-						FontSize:      fontSize,
-						Bold:          style.Bold,
-						Italic:        style.Italic,
-						Underline:     inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "underline"),
-						Strikethrough: inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "line-through"),
-					}
-
-					displayList.AddCommand(cmd)
-				} else {
-					// Handle inline-block elements if needed
-					// For now, skip them as they should have their own LayoutBox
+					seen[inlineBox.NodeID] = accum
+					order = append(order, inlineBox.NodeID)
 				}
+				accum.text.WriteString(inlineBox.Text)
 			}
+		}
+
+		for _, nodeID := range order {
+			accum := seen[nodeID]
+			text := strings.TrimSpace(accum.text.String())
+			if text == "" {
+				continue
+			}
+			cmd := &PaintCommand{
+				Type:          PaintText,
+				NodeID:        nodeID,
+				Node:          accum.node,
+				Box:           accum.box,
+				Text:          text,
+				FontSize:      accum.fontSize,
+				Bold:          accum.bold,
+				Italic:        accum.italic,
+				Underline:     accum.underline,
+				Strikethrough: accum.strike,
+			}
+			displayList.AddCommand(cmd)
 		}
 	} else {
 		// No inline content - generate paint command based on node type
@@ -272,6 +290,14 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	})
 
 	for _, child := range children {
+		// If this box used inline layout (LineBoxes), text node children were already
+		// rendered as inline fragments above. Skip them to avoid double rendering.
+		if len(layoutBox.LineBoxes) > 0 {
+			childNode := renderMap[child.NodeID]
+			if childNode != nil && childNode.Type == NodeTypeText {
+				continue
+			}
+		}
 		dlb.buildRecursive(child, renderMap, displayList)
 	}
 
