@@ -1,6 +1,7 @@
 package js
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -10,6 +11,11 @@ import (
 	"github.com/dop251/goja"
 	"github.com/vyquocvu/goosie/internal/dom"
 )
+
+// HTTPFetcher is the interface for making HTTP GET requests used by the fetch() JS API.
+type HTTPFetcher interface {
+	Fetch(url string) (string, error)
+}
 
 // Timer represents a scheduled timer
 type Timer struct {
@@ -62,6 +68,8 @@ type Runtime struct {
 	// JavaScript errors
 	jsErrors        []string
 	jsErrorsMu      sync.Mutex
+	// HTTP fetcher for the fetch() API
+	fetcher HTTPFetcher
 }
 
 // NewRuntime creates a new JavaScript runtime with console.log and document APIs
@@ -575,6 +583,12 @@ func (r *Runtime) addEventMethods(obj *goja.Object) {
 // SetHTMLContent sets the HTML content for document operations
 func (r *Runtime) SetHTMLContent(html string) {
 	r.htmlCache = html
+}
+
+// SetFetcher sets the HTTP fetcher used by the fetch() JS API.
+// When set, fetch() makes real HTTP requests instead of returning mock data.
+func (r *Runtime) SetFetcher(f HTTPFetcher) {
+	r.fetcher = f
 }
 
 // RunScript executes JavaScript code and catches errors
@@ -1213,70 +1227,151 @@ func (r *Runtime) setupTimerAPIs() {
 	})
 }
 
-// setupFetchAPI configures fetch API with error handling
+// setupFetchAPI configures fetch API with real HTTP support when a fetcher is set
 func (r *Runtime) setupFetchAPI() {
 	r.vm.Set("fetch", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return r.vm.ToValue(r.createRejectedPromise("fetch requires a URL"))
 		}
-		
+
 		urlStr := call.Arguments[0].String()
-		
+
 		// Create a promise-like object
 		promise := r.vm.NewObject()
-		
+		var catchCallback goja.Callable
+
 		// then method
 		promise.Set("then", func(thenCall goja.FunctionCall) goja.Value {
 			if len(thenCall.Arguments) == 0 {
 				return promise
 			}
-			
+
 			onSuccess, ok := goja.AssertFunction(thenCall.Arguments[0])
 			if !ok {
 				return promise
 			}
-			
-			// Simulate async fetch (in real implementation, would use net/http)
+
 			go func() {
-				// Create response object
-				response := r.vm.NewObject()
-				response.Set("ok", true)
-				response.Set("status", 200)
-				response.Set("statusText", "OK")
-				response.Set("url", urlStr)
-				
-				// json method
-				response.Set("json", func(jsonCall goja.FunctionCall) goja.Value {
-					jsonPromise := r.vm.NewObject()
-					jsonPromise.Set("then", func(jsonThenCall goja.FunctionCall) goja.Value {
-						// Return mock data
-						return r.vm.ToValue(map[string]interface{}{"data": "mock"})
+				if r.fetcher != nil {
+					// Real HTTP fetch
+					body, err := r.fetcher.Fetch(urlStr)
+					if err != nil {
+						if catchCallback != nil {
+							errObj := r.vm.NewObject()
+							errObj.Set("message", err.Error())
+							catchCallback(goja.Undefined(), errObj) //nolint:errcheck
+						}
+						return
+					}
+
+					response := r.createFetchResponse(urlStr, body)
+					onSuccess(goja.Undefined(), response) //nolint:errcheck
+				} else {
+					// Mock fetch (no fetcher set – used in tests without a live server)
+					response := r.vm.NewObject()
+					response.Set("ok", true)
+					response.Set("status", 200)
+					response.Set("statusText", "OK")
+					response.Set("url", urlStr)
+
+					// json method
+					response.Set("json", func(jsonCall goja.FunctionCall) goja.Value {
+						jsonPromise := r.vm.NewObject()
+						jsonPromise.Set("then", func(jsonThenCall goja.FunctionCall) goja.Value {
+							// Return mock data
+							return r.vm.ToValue(map[string]interface{}{"data": "mock"})
+						})
+						return jsonPromise
 					})
-					return jsonPromise
-				})
-				
-				// text method
-				response.Set("text", func(textCall goja.FunctionCall) goja.Value {
-					textPromise := r.vm.NewObject()
-					textPromise.Set("then", func(textThenCall goja.FunctionCall) goja.Value {
-						return r.vm.ToValue("mock response text")
+
+					// text method
+					response.Set("text", func(textCall goja.FunctionCall) goja.Value {
+						textPromise := r.vm.NewObject()
+						textPromise.Set("then", func(textThenCall goja.FunctionCall) goja.Value {
+							return r.vm.ToValue("mock response text")
+						})
+						return textPromise
 					})
-					return textPromise
-				})
-				
-				onSuccess(goja.Undefined(), response)
+
+					onSuccess(goja.Undefined(), response) //nolint:errcheck
+				}
 			}()
-			
+
 			return promise
 		})
-		
+
 		// catch method
 		promise.Set("catch", func(catchCall goja.FunctionCall) goja.Value {
+			if len(catchCall.Arguments) > 0 {
+				if fn, ok := goja.AssertFunction(catchCall.Arguments[0]); ok {
+					catchCallback = fn
+				}
+			}
 			return promise
 		})
-		
+
 		return promise
 	})
+}
+
+// createFetchResponse builds a JS response object from a real HTTP response body.
+func (r *Runtime) createFetchResponse(urlStr, body string) *goja.Object {
+	response := r.vm.NewObject()
+	response.Set("ok", true)
+	response.Set("status", 200)
+	response.Set("statusText", "OK")
+	response.Set("url", urlStr)
+
+	bodyStr := body
+
+	// text() method – returns a promise that resolves to the raw response string
+	response.Set("text", func(textCall goja.FunctionCall) goja.Value {
+		textPromise := r.vm.NewObject()
+		textPromise.Set("then", func(thenCall goja.FunctionCall) goja.Value {
+			if len(thenCall.Arguments) > 0 {
+				if fn, ok := goja.AssertFunction(thenCall.Arguments[0]); ok {
+					fn(goja.Undefined(), r.vm.ToValue(bodyStr)) //nolint:errcheck
+				}
+			}
+			return textPromise
+		})
+		textPromise.Set("catch", func(catchCall goja.FunctionCall) goja.Value {
+			return textPromise
+		})
+		return textPromise
+	})
+
+	// json() method – parses the response body as JSON
+	response.Set("json", func(jsonCall goja.FunctionCall) goja.Value {
+		jsonPromise := r.vm.NewObject()
+		var jsonCatchCallback goja.Callable
+		jsonPromise.Set("then", func(thenCall goja.FunctionCall) goja.Value {
+			if len(thenCall.Arguments) > 0 {
+				if fn, ok := goja.AssertFunction(thenCall.Arguments[0]); ok {
+					var result interface{}
+					if err := json.Unmarshal([]byte(bodyStr), &result); err == nil {
+						fn(goja.Undefined(), r.vm.ToValue(result)) //nolint:errcheck
+					} else if jsonCatchCallback != nil {
+						errObj := r.vm.NewObject()
+						errObj.Set("message", "JSON parse error: "+err.Error())
+						jsonCatchCallback(goja.Undefined(), errObj) //nolint:errcheck
+					}
+				}
+			}
+			return jsonPromise
+		})
+		jsonPromise.Set("catch", func(catchCall goja.FunctionCall) goja.Value {
+			if len(catchCall.Arguments) > 0 {
+				if fn, ok := goja.AssertFunction(catchCall.Arguments[0]); ok {
+					jsonCatchCallback = fn
+				}
+			}
+			return jsonPromise
+		})
+		return jsonPromise
+	})
+
+	return response
 }
 
 // createRejectedPromise creates a rejected promise with an error message
