@@ -47,7 +47,8 @@ func TestFetcher(t *testing.T) {
 }
 
 func TestFetcherError(t *testing.T) {
-	// Create a mock client that returns 404
+	// 4xx responses now return HTML error page content instead of an error,
+	// so the browser can display a meaningful error page rather than a blank page.
 	mockResponse := &http.Response{
 		StatusCode: 404,
 		Body:       io.NopCloser(bytes.NewBufferString("Not Found")),
@@ -62,7 +63,7 @@ func TestFetcherError(t *testing.T) {
 
 	fetcher := net.NewFetcherWithClient(mockClient)
 
-	_, err := fetcher.Fetch("https://example.com/404")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "404")
+	content, err := fetcher.Fetch("https://example.com/404")
+	assert.NoError(t, err)
+	assert.Contains(t, content, "Not Found")
 }

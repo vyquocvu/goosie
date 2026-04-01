@@ -124,10 +124,21 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		if node.ComputedStyle.FontSize > 0 {
 			fontSize = node.ComputedStyle.FontSize
 		}
-		explicitHeight := parseLength(node.ComputedStyle.Height, fontSize)
+		explicitHeight := parseLengthWithViewport(node.ComputedStyle.Height, fontSize, le.canvasWidth, le.canvasHeight, le.canvasHeight)
 		if explicitHeight > 0 {
 			// Include padding and borders if box-sizing is content-box (default)
 			layoutBox.Box.Height = explicitHeight + layoutBox.PaddingTop + layoutBox.PaddingBottom + layoutBox.BorderTopWidth + layoutBox.BorderBottomWidth
+		} else {
+			layoutBox.Box.Height = calculatedHeight
+		}
+	} else if node.TagName == "img" {
+		// For img elements, fall back to HTML height attribute if CSS height is not set
+		if hAttr, ok := node.GetAttribute("height"); ok && hAttr != "" {
+			if v := parseLength(hAttr, le.defaultFontSize); v > 0 {
+				layoutBox.Box.Height = v
+			} else {
+				layoutBox.Box.Height = calculatedHeight
+			}
 		} else {
 			layoutBox.Box.Height = calculatedHeight
 		}
@@ -137,6 +148,24 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 
 	if layoutBox.Box.Height < 0 {
 		layoutBox.Box.Height = 0
+	}
+
+	// Apply CSS positioning: copy position value and override coordinates for absolute/fixed
+	if node.ComputedStyle != nil && node.ComputedStyle.Position != "" {
+		layoutBox.Position = node.ComputedStyle.Position
+		pos := node.ComputedStyle.Position
+		if pos == "absolute" || pos == "fixed" {
+			fontSize := le.defaultFontSize
+			if node.ComputedStyle.FontSize > 0 {
+				fontSize = node.ComputedStyle.FontSize
+			}
+			if node.ComputedStyle.Top != "" && node.ComputedStyle.Top != "auto" {
+				layoutBox.Box.Y = parseLength(node.ComputedStyle.Top, fontSize)
+			}
+			if node.ComputedStyle.Left != "" && node.ComputedStyle.Left != "auto" {
+				layoutBox.Box.X = parseLength(node.ComputedStyle.Left, fontSize)
+			}
+		}
 	}
 
 	return layoutBox
@@ -314,7 +343,15 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		if node.ComputedStyle.FontSize > 0 {
 			fontSize = node.ComputedStyle.FontSize
 		}
-		explicitWidth = parseLength(node.ComputedStyle.Width, fontSize)
+		explicitWidth = parseLengthWithViewport(node.ComputedStyle.Width, fontSize, le.canvasWidth, le.canvasHeight, availableWidth)
+	}
+	// For img elements, fall back to HTML width attribute if CSS width is not set
+	if node.TagName == "img" && explicitWidth < 0 {
+		if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
+			if v := parseLength(wAttr, le.defaultFontSize); v > 0 {
+				explicitWidth = v
+			}
+		}
 	}
 
 	// Handle margin: auto for block-level elements

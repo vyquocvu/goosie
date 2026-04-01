@@ -750,6 +750,37 @@ func parseLineHeight(value string, fontSize float32) float32 {
 	return parseLength(value, fontSize)
 }
 
+// parseLengthWithViewport parses a CSS length value with support for vw/vh/% units.
+// Returns -1 if the value is empty, "auto", or uses an unsupported unit (so callers
+// can detect "unset" vs 0).
+func parseLengthWithViewport(value string, fontSize, viewportWidth, viewportHeight, percentBase float32) float32 {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "auto" {
+		return -1
+	}
+	if value == "0" {
+		return 0
+	}
+	if strings.HasSuffix(value, "vw") {
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "vw"), 32); err == nil {
+			return float32(val) / 100.0 * viewportWidth
+		}
+	} else if strings.HasSuffix(value, "vh") {
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "vh"), 32); err == nil {
+			return float32(val) / 100.0 * viewportHeight
+		}
+	} else if strings.HasSuffix(value, "%") {
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 32); err == nil {
+			return float32(val) / 100.0 * percentBase
+		}
+	}
+	v := parseLength(value, fontSize)
+	if v == 0 && value != "0" {
+		return -1 // unsupported unit, treat as unset
+	}
+	return v
+}
+
 func parseLength(value string, fontSize float32) float32 {
 	value = strings.TrimSpace(value)
 

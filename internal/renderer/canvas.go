@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"log"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -582,9 +583,8 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	// If hidden, render transparent placeholder
 	if isHidden {
 		rect := canvas.NewRectangle(color.Transparent)
-		// Use default size or try to get from attributes/style
-		// TODO: Parse width/height attributes or style
-		rect.SetMinSize(fyne.NewSize(100, 100))
+		w, h := cr.imageAttrSize(node)
+		rect.SetMinSize(fyne.NewSize(w, h))
 		*objects = append(*objects, rect)
 		return
 	}
@@ -626,7 +626,8 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 
 			// Create a placeholder rectangle
 			rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
-			rect.SetMinSize(fyne.NewSize(100, 100))
+			w, h := cr.imageAttrSize(node)
+			rect.SetMinSize(fyne.NewSize(w, h))
 
 			*objects = append(*objects, container.NewVBox(rect, label))
 			return
@@ -666,7 +667,8 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 
 				// Show a gray rectangle as placeholder
 				rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
-				rect.SetMinSize(fyne.NewSize(100, 100))
+				w, h := cr.imageAttrSize(node)
+				rect.SetMinSize(fyne.NewSize(w, h))
 
 				*objects = append(*objects, container.NewVBox(rect, label))
 				return
@@ -683,7 +685,8 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 
 				// Show a gray rectangle as loading indicator
 				rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
-				rect.SetMinSize(fyne.NewSize(100, 100))
+				w, h := cr.imageAttrSize(node)
+				rect.SetMinSize(fyne.NewSize(w, h))
 
 				*objects = append(*objects, container.NewVBox(rect, label))
 				return
@@ -702,8 +705,30 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	label.Wrapping = fyne.TextWrapWord
 
 	rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
-	rect.SetMinSize(fyne.NewSize(100, 100))
+	w, h := cr.imageAttrSize(node)
+	rect.SetMinSize(fyne.NewSize(w, h))
 	*objects = append(*objects, container.NewVBox(rect, label))
+}
+
+// imageAttrSize returns width and height from an img node's HTML attributes,
+// falling back to 100x100 if not present or unparseable.
+func (cr *CanvasRenderer) imageAttrSize(node *RenderNode) (float32, float32) {
+	w := float32(100)
+	h := float32(100)
+	if node == nil {
+		return w, h
+	}
+	if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
+		if v, err := strconv.ParseFloat(wAttr, 32); err == nil && v > 0 {
+			w = float32(v)
+		}
+	}
+	if hAttr, ok := node.GetAttribute("height"); ok && hAttr != "" {
+		if v, err := strconv.ParseFloat(hAttr, 32); err == nil && v > 0 {
+			h = float32(v)
+		}
+	}
+	return w, h
 }
 
 // extractText extracts all text content from a node and its children
@@ -1063,7 +1088,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 					label.Wrapping = fyne.TextWrapWord
 
 					rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
-					rect.SetMinSize(fyne.NewSize(100, 100))
+					rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 
 					vbox := container.NewVBox(rect, label)
 					vbox.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
@@ -1086,7 +1111,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		label.Wrapping = fyne.TextWrapWord
 
 		rect := canvas.NewRectangle(color.RGBA{R: 200, G: 200, B: 200, A: 255})
-		rect.SetMinSize(fyne.NewSize(100, 100))
+		rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 
 		vbox := container.NewVBox(rect, label)
 		vbox.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))

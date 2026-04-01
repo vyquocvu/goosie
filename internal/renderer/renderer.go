@@ -89,8 +89,7 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	}
 
 	// Perform layout
-	r.layoutEngine.ComputeLayout(renderTree)               // This line was actually layoutTree := ... in original code, I should be careful not to break it
-	layoutTree := r.layoutEngine.ComputeLayout(renderTree) // Re-writing for clarity in replacement
+	layoutTree := r.layoutEngine.ComputeLayout(renderTree)
 
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strconv"
+	"strings"
 )
 
 // ProgressCallback is a function that can be used to report download progress.
@@ -19,7 +21,8 @@ type Fetcher struct {
 
 // NewFetcher creates a new Fetcher instance
 func NewFetcher() *Fetcher {
-	return NewFetcherWithClient(&http.Client{})
+	jar, _ := cookiejar.New(nil)
+	return NewFetcherWithClient(&http.Client{Jar: jar})
 }
 
 // NewFetcherWithClient creates a new Fetcher instance with a custom HTTP client
@@ -50,8 +53,17 @@ func (f *Fetcher) FetchWithContext(ctx context.Context, url string, onProgress P
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		var errBuf bytes.Buffer
+		io.Copy(&errBuf, resp.Body)
+		body := errBuf.String()
+		if strings.TrimSpace(body) == "" {
+			body = fmt.Sprintf(
+				"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
+				resp.StatusCode, http.StatusText(resp.StatusCode),
+			)
+		}
+		return body, nil
 	}
 
 	// Try to get content length for progress calculation
