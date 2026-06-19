@@ -13,9 +13,13 @@ import (
 type DownloadStatus string
 
 const (
-	DownloadStatusRunning  DownloadStatus = "running"
-	DownloadStatusComplete DownloadStatus = "complete"
-	DownloadStatusFailed   DownloadStatus = "failed"
+	DownloadRunning  DownloadStatus = "running"
+	DownloadComplete DownloadStatus = "complete"
+	DownloadFailed   DownloadStatus = "failed"
+
+	DownloadStatusRunning  = DownloadRunning
+	DownloadStatusComplete = DownloadComplete
+	DownloadStatusFailed   = DownloadFailed
 )
 
 type DownloadRecord struct {
@@ -39,15 +43,15 @@ func NewDownloadManager(client *http.Client) *DownloadManager {
 	return &DownloadManager{client: client}
 }
 
-func (m *DownloadManager) Download(rawURL, targetPath string) DownloadRecord {
+func (m *DownloadManager) Download(rawURL, targetPath string) (DownloadRecord, error) {
 	return m.DownloadWithContext(context.Background(), rawURL, targetPath)
 }
 
-func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targetPath string) (record DownloadRecord) {
+func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targetPath string) (record DownloadRecord, resultErr error) {
 	record = DownloadRecord{
 		URL:        rawURL,
 		TargetPath: targetPath,
-		Status:     DownloadStatusRunning,
+		Status:     DownloadRunning,
 		StartedAt:  time.Now(),
 	}
 	defer func() {
@@ -56,15 +60,15 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	resp, err := m.client.Do(req)
 	if err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	bodyClosed := false
 	defer func() {
@@ -74,17 +78,18 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		record.Status = DownloadStatusFailed
-		record.Error = fmt.Sprintf("download failed: HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
-		return record
+		resultErr = fmt.Errorf("download failed: HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		record.Status = DownloadFailed
+		record.Error = resultErr.Error()
+		return record, resultErr
 	}
 
 	targetDir := filepath.Dir(targetPath)
 	temp, err := os.CreateTemp(targetDir, "."+filepath.Base(targetPath)+".*.tmp")
 	if err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	tempPath := temp.Name()
 	tempClosed := false
@@ -101,34 +106,34 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 	written, err := io.Copy(temp, resp.Body)
 	record.BytesWritten = written
 	if err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	if err := ctx.Err(); err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	bodyClosed = true
 	if err := resp.Body.Close(); err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	if err := temp.Close(); err != nil {
 		tempClosed = true
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	tempClosed = true
 	if err := os.Rename(tempPath, targetPath); err != nil {
-		record.Status = DownloadStatusFailed
+		record.Status = DownloadFailed
 		record.Error = err.Error()
-		return record
+		return record, err
 	}
 	committed = true
-	record.Status = DownloadStatusComplete
-	return record
+	record.Status = DownloadComplete
+	return record, nil
 }

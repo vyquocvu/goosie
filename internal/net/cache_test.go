@@ -1,6 +1,7 @@
 package net
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -167,5 +168,25 @@ func TestHTTPCacheVetoesSeparateCacheControlHeaderValues(t *testing.T) {
 				t.Fatalf("cached response with separate Cache-Control veto %q", veto)
 			}
 		})
+	}
+}
+
+func TestHTTPCacheEntryJSONSchema(t *testing.T) {
+	data, err := json.Marshal(CacheEntry{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"url", "status", "content_type", "stored_at", "expires_at", "body_file"}
+	if len(fields) != len(want) {
+		t.Fatalf("JSON fields = %v, want %v", fields, want)
+	}
+	for _, name := range want {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("JSON field %q missing from %s", name, data)
+		}
 	}
 }

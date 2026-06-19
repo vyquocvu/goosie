@@ -45,6 +45,15 @@ func (r *cancelingDownloadReader) Close() error {
 	return nil
 }
 
+var _ func(*DownloadManager, string, string) (DownloadRecord, error) = (*DownloadManager).Download
+var _ func(*DownloadManager, context.Context, string, string) (DownloadRecord, error) = (*DownloadManager).DownloadWithContext
+
+func TestDownloadManagerStatusConstantsMatchContract(t *testing.T) {
+	if DownloadRunning != DownloadStatusRunning || DownloadComplete != DownloadStatusComplete || DownloadFailed != DownloadStatusFailed {
+		t.Fatalf("download status aliases = %q/%q/%q", DownloadRunning, DownloadComplete, DownloadFailed)
+	}
+}
+
 func TestDownloadManagerWritesFileAndRecordsCompleteStatus(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return newTestResponse(req, http.StatusOK, "download body"), nil
@@ -52,8 +61,11 @@ func TestDownloadManagerWritesFileAndRecordsCompleteStatus(t *testing.T) {
 	manager := NewDownloadManager(client)
 	target := filepath.Join(t.TempDir(), "download.txt")
 
-	record := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
+	record, err := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
 
+	if err != nil {
+		t.Fatalf("DownloadWithContext returned error: %v", err)
+	}
 	if record.Status != DownloadStatusComplete {
 		t.Fatalf("Status = %q, want complete: %s", record.Status, record.Error)
 	}
@@ -89,8 +101,11 @@ func TestDownloadManagerFailsHTTPErrorWithoutOverwritingTarget(t *testing.T) {
 		t.Fatalf("seed target: %v", err)
 	}
 
-	record := manager.DownloadWithContext(context.Background(), "https://example.test/missing", target)
+	record, downloadErr := manager.DownloadWithContext(context.Background(), "https://example.test/missing", target)
 
+	if downloadErr == nil {
+		t.Fatal("DownloadWithContext error was nil")
+	}
 	if record.Status != DownloadStatusFailed {
 		t.Fatalf("Status = %q, want failed", record.Status)
 	}
@@ -127,8 +142,11 @@ func TestDownloadManagerReadFailurePreservesTargetAndRemovesTemporaryFile(t *tes
 		t.Fatalf("seed target: %v", err)
 	}
 
-	record := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
+	record, downloadErr := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
 
+	if !errors.Is(downloadErr, errRead) {
+		t.Fatalf("DownloadWithContext error = %v, want %v", downloadErr, errRead)
+	}
 	if record.Status != DownloadStatusFailed {
 		t.Fatalf("Status = %q, want failed", record.Status)
 	}
@@ -165,8 +183,11 @@ func TestDownloadManagerCancellationBeforeCommitPreservesTarget(t *testing.T) {
 		t.Fatalf("seed target: %v", err)
 	}
 
-	record := manager.DownloadWithContext(ctx, "https://example.test/file", target)
+	record, downloadErr := manager.DownloadWithContext(ctx, "https://example.test/file", target)
 
+	if !errors.Is(downloadErr, context.Canceled) {
+		t.Fatalf("DownloadWithContext error = %v, want cancellation", downloadErr)
+	}
 	if record.Status != DownloadStatusFailed {
 		t.Fatalf("Status = %q, want failed", record.Status)
 	}
@@ -199,8 +220,11 @@ func TestDownloadManagerFailsRedirectResponseWithoutOverwritingTarget(t *testing
 		t.Fatalf("seed target: %v", err)
 	}
 
-	record := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
+	record, downloadErr := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
 
+	if downloadErr == nil {
+		t.Fatal("DownloadWithContext error was nil")
+	}
 	if record.Status != DownloadStatusFailed {
 		t.Fatalf("Status = %q, want failed", record.Status)
 	}

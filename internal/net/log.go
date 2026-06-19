@@ -24,6 +24,10 @@ type RequestLog struct {
 	entries []RequestLogEntry
 }
 
+func NewRequestLog() *RequestLog {
+	return &RequestLog{entries: make([]RequestLogEntry, 0)}
+}
+
 func (l *RequestLog) Add(entry RequestLogEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

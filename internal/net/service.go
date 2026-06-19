@@ -44,7 +44,7 @@ func NewService(options ServiceOptions) *Service {
 		client:    client,
 		cache:     options.Cache,
 		userAgent: userAgent,
-		log:       &RequestLog{},
+		log:       NewRequestLog(),
 	}
 }
 

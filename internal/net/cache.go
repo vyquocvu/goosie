@@ -19,12 +19,12 @@ type HTTPCache struct {
 }
 
 type CacheEntry struct {
-	URL         string
-	Status      int
-	ContentType string
-	StoredAt    time.Time
-	ExpiresAt   time.Time
-	BodyFile    string
+	URL         string    `json:"url"`
+	Status      int       `json:"status"`
+	ContentType string    `json:"content_type"`
+	StoredAt    time.Time `json:"stored_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	BodyFile    string    `json:"body_file"`
 }
 
 func NewHTTPCache(root string, private bool) *HTTPCache {
