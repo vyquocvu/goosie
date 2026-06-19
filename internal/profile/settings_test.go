@@ -50,3 +50,22 @@ func TestSettingsStoreLoadsSnakeCaseSchema(t *testing.T) {
 	require.False(t, settings.EnableJavaScript)
 	require.False(t, settings.EnableImages)
 }
+
+func TestSettingsStoreLoadsPartialFileOverDefaults(t *testing.T) {
+	root := t.TempDir()
+	err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{
+  "homepage": "https://go.dev"
+}`), 0o600)
+	require.NoError(t, err)
+
+	p, err := Open(Options{Root: root})
+	require.NoError(t, err)
+
+	store, err := NewSettingsStore(p)
+	require.NoError(t, err)
+	settings := store.Get()
+	require.Equal(t, "https://go.dev", settings.Homepage)
+	require.Equal(t, DefaultSettings().DefaultSearchEngine, settings.DefaultSearchEngine)
+	require.Equal(t, DefaultSettings().EnableJavaScript, settings.EnableJavaScript)
+	require.Equal(t, DefaultSettings().EnableImages, settings.EnableImages)
+}
