@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"testing"
 )
@@ -115,6 +116,20 @@ func TestServiceFetchUsesHTTPMaxAgeCacheOnSecondRequest(t *testing.T) {
 	}
 	if !entries[1].CacheHit {
 		t.Error("second request should be cache hit")
+	}
+}
+
+func TestServiceDefaultClientHasCookieJar(t *testing.T) {
+	service := NewService(ServiceOptions{})
+
+	if service.client == nil {
+		t.Fatal("default client was nil")
+	}
+	if service.client.Jar == nil {
+		t.Fatal("default client Jar was nil")
+	}
+	if _, ok := service.client.Jar.(*cookiejar.Jar); !ok {
+		t.Fatalf("default client Jar = %T, want *cookiejar.Jar", service.client.Jar)
 	}
 }
 

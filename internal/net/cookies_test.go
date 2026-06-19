@@ -39,3 +39,31 @@ func TestCookieRecordsFromJar(t *testing.T) {
 		t.Errorf("Expires = %v, want %v", record.Expires, expires)
 	}
 }
+
+func TestCookieRecordsRootPathMatchesEmptyURLPath(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:   "root",
+		Value:  "1",
+		Path:   "/",
+		Domain: "example.test",
+		Secure: true,
+	}})
+	target, err := url.Parse("https://example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	records := CookieRecordsForURL(jar, target)
+
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if records[0].Name != "root" {
+		t.Fatalf("record = %#v", records[0])
+	}
+}

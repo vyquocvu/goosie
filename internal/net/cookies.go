@@ -83,6 +83,7 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	now := time.Now()
+	requestPath := cookieRequestPath(u)
 	var records []CookieRecord
 	for _, record := range j.records {
 		if !record.Expires.IsZero() && now.After(record.Expires) {
@@ -94,7 +95,7 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 		if !domainMatches(u.Hostname(), record.Domain) {
 			continue
 		}
-		if !strings.HasPrefix(u.EscapedPath(), record.Path) {
+		if !strings.HasPrefix(requestPath, record.Path) {
 			continue
 		}
 		records = append(records, record)
@@ -125,4 +126,12 @@ func cookieRecordFromCookie(u *url.URL, cookie *http.Cookie) CookieRecord {
 func domainMatches(host, domain string) bool {
 	domain = strings.TrimPrefix(domain, ".")
 	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+func cookieRequestPath(u *url.URL) string {
+	path := u.EscapedPath()
+	if path == "" {
+		return "/"
+	}
+	return path
 }

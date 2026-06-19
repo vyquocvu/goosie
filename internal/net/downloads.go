@@ -2,6 +2,7 @@ package net
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -65,6 +66,12 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 		return record
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		record.Status = DownloadStatusFailed
+		record.Error = fmt.Sprintf("download failed: HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return record
+	}
 
 	file, err := os.Create(targetPath)
 	if err != nil {

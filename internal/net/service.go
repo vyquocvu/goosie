@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +33,8 @@ type Service struct {
 func NewService(options ServiceOptions) *Service {
 	client := options.Client
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		jar, _ := cookiejar.New(nil)
+		client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
 	}
 	userAgent := options.UserAgent
 	if userAgent == "" {
