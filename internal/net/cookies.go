@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 type CookieRecord struct {
@@ -14,6 +16,7 @@ type CookieRecord struct {
 	Domain   string
 	Path     string
 	Expires  time.Time
+	MaxAge   int
 	Secure   bool
 	HttpOnly bool
 	HostOnly bool
@@ -34,11 +37,19 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	now := time.Now()
 	for _, cookie := range cookies {
 		if cookie == nil {
 			continue
 		}
+		if cookie.Domain != "" && !validCookieDomain(u.Hostname(), cookie.Domain) {
+			continue
+		}
 		record := cookieRecordFromCookie(u, cookie)
+		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && !cookie.Expires.After(now)) {
+			j.remove(record)
+			continue
+		}
 		replaced := false
 		for i := range j.records {
 			if j.records[i].Name == record.Name && j.records[i].Domain == record.Domain && j.records[i].Path == record.Path {
@@ -51,6 +62,17 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			j.records = append(j.records, record)
 		}
 	}
+}
+
+func (j *CookieJar) remove(record CookieRecord) {
+	kept := j.records[:0]
+	for _, existing := range j.records {
+		if existing.Name == record.Name && existing.Domain == record.Domain && existing.Path == record.Path {
+			continue
+		}
+		kept = append(kept, existing)
+	}
+	j.records = kept
 }
 
 func (j *CookieJar) Cookies(u *url.URL) []*http.Cookie {
@@ -120,14 +142,29 @@ func cookieRecordFromCookie(u *url.URL, cookie *http.Cookie) CookieRecord {
 		Domain:   strings.TrimPrefix(domain, "."),
 		Path:     path,
 		Expires:  cookie.Expires,
+		MaxAge:   cookie.MaxAge,
 		Secure:   cookie.Secure,
 		HttpOnly: cookie.HttpOnly,
 		HostOnly: hostOnly,
 	}
 }
 
+func validCookieDomain(host, domain string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	domain = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(domain, "."), "."))
+	if host == "" || domain == "" {
+		return false
+	}
+	if host != domain && !strings.HasSuffix(host, "."+domain) {
+		return false
+	}
+	publicSuffix, _ := publicsuffix.PublicSuffix(domain)
+	return publicSuffix != domain
+}
+
 func domainMatches(host, domain string, hostOnly bool) bool {
-	domain = strings.TrimPrefix(domain, ".")
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	domain = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(domain, "."), "."))
 	if hostOnly {
 		return host == domain
 	}

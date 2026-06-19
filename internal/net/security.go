@@ -2,6 +2,7 @@ package net
 
 import (
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -14,6 +15,17 @@ type SecuritySummary struct {
 	NotBefore time.Time
 	NotAfter  time.Time
 	Error     string
+}
+
+func securitySummaryFromURL(u *url.URL) SecuritySummary {
+	if u == nil {
+		return SecuritySummary{}
+	}
+	return SecuritySummary{
+		URL:    u.String(),
+		Scheme: u.Scheme,
+		Secure: u.Scheme == "https",
+	}
 }
 
 func SecuritySummaryFromResponse(resp *http.Response, fetchErr error) SecuritySummary {

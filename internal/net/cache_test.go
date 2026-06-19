@@ -90,6 +90,8 @@ func TestHTTPCacheVetoDirectivesOverrideMaxAge(t *testing.T) {
 		{name: "no-store after max-age", cacheControl: "max-age=60, no-store"},
 		{name: "private before max-age", cacheControl: "private, max-age=60"},
 		{name: "private after max-age", cacheControl: "max-age=60, private"},
+		{name: "no-cache before max-age", cacheControl: "no-cache, max-age=60"},
+		{name: "no-cache after max-age", cacheControl: "max-age=60, no-cache"},
 	}
 
 	for _, tt := range tests {
@@ -106,6 +108,42 @@ func TestHTTPCacheVetoDirectivesOverrideMaxAge(t *testing.T) {
 
 			if _, _, ok := cache.Get(req.URL.String()); ok {
 				t.Fatalf("cached response with Cache-Control %q", tt.cacheControl)
+			}
+		})
+	}
+}
+
+func TestHTTPCacheRejectsUnsafeResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		header string
+		value  string
+	}{
+		{name: "partial response", status: http.StatusPartialContent},
+		{name: "redirect response", status: http.StatusFound},
+		{name: "not modified response", status: http.StatusNotModified},
+		{name: "vary response", status: http.StatusOK, header: "Vary", value: "Accept-Encoding"},
+		{name: "set-cookie response", status: http.StatusOK, header: "Set-Cookie", value: "session=abc; Path=/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := NewHTTPCache(t.TempDir(), false)
+			req, err := http.NewRequest(http.MethodGet, "https://example.test/"+tt.name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := newTestResponse(req, tt.status, "body")
+			resp.Header.Set("Cache-Control", "max-age=60")
+			if tt.header != "" {
+				resp.Header.Set(tt.header, tt.value)
+			}
+
+			cache.Put(req.URL.String(), resp, "body")
+
+			if _, _, ok := cache.Get(req.URL.String()); ok {
+				t.Fatalf("cached unsafe response: status=%d %s=%q", tt.status, tt.header, tt.value)
 			}
 		})
 	}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -65,7 +66,12 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 		record.Error = err.Error()
 		return record
 	}
-	defer resp.Body.Close()
+	bodyClosed := false
+	defer func() {
+		if !bodyClosed {
+			_ = resp.Body.Close()
+		}
+	}()
 
 	if resp.StatusCode >= 400 {
 		record.Status = DownloadStatusFailed
@@ -73,21 +79,56 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 		return record
 	}
 
-	file, err := os.Create(targetPath)
+	targetDir := filepath.Dir(targetPath)
+	temp, err := os.CreateTemp(targetDir, "."+filepath.Base(targetPath)+".*.tmp")
 	if err != nil {
 		record.Status = DownloadStatusFailed
 		record.Error = err.Error()
 		return record
 	}
-	defer file.Close()
+	tempPath := temp.Name()
+	tempClosed := false
+	committed := false
+	defer func() {
+		if !tempClosed {
+			_ = temp.Close()
+		}
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
-	written, err := io.Copy(file, resp.Body)
+	written, err := io.Copy(temp, resp.Body)
 	record.BytesWritten = written
 	if err != nil {
 		record.Status = DownloadStatusFailed
 		record.Error = err.Error()
 		return record
 	}
+	if err := ctx.Err(); err != nil {
+		record.Status = DownloadStatusFailed
+		record.Error = err.Error()
+		return record
+	}
+	bodyClosed = true
+	if err := resp.Body.Close(); err != nil {
+		record.Status = DownloadStatusFailed
+		record.Error = err.Error()
+		return record
+	}
+	if err := temp.Close(); err != nil {
+		tempClosed = true
+		record.Status = DownloadStatusFailed
+		record.Error = err.Error()
+		return record
+	}
+	tempClosed = true
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		record.Status = DownloadStatusFailed
+		record.Error = err.Error()
+		return record
+	}
+	committed = true
 	record.Status = DownloadStatusComplete
 	return record
 }

@@ -75,9 +75,10 @@ func TestCookieRecordsHostOnlyCookieDoesNotMatchSubdomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	jar.SetCookies(origin, []*http.Cookie{{
-		Name:  "hostonly",
-		Value: "1",
-		Path:  "/",
+		Name:   "hostonly",
+		Value:  "1",
+		Path:   "/",
+		MaxAge: 300,
 	}})
 
 	sameHost, err := url.Parse("https://example.test/settings")
@@ -86,6 +87,8 @@ func TestCookieRecordsHostOnlyCookieDoesNotMatchSubdomain(t *testing.T) {
 	}
 	if records := CookieRecordsForURL(jar, sameHost); len(records) != 1 {
 		t.Fatalf("same-host records = %d, want 1", len(records))
+	} else if records[0].MaxAge != 300 {
+		t.Fatalf("MaxAge = %d, want 300", records[0].MaxAge)
 	}
 
 	subdomain, err := url.Parse("https://sub.example.test/settings")
@@ -155,5 +158,110 @@ func TestCookieRecordsDefaultPathUsesRequestDirectory(t *testing.T) {
 	}
 	if records := CookieRecordsForURL(jar, nonMatching); len(records) != 0 {
 		t.Fatalf("parent directory records = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsRejectUnrelatedDomain(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:   "session",
+		Value:  "bad",
+		Domain: "other.test",
+		Path:   "/",
+	}})
+
+	other, err := url.Parse("https://other.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, other); len(records) != 0 {
+		t.Fatalf("unrelated-domain records = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsAcceptParentDomain(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://foo.example.com/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:   "shared",
+		Value:  "1",
+		Domain: "example.com",
+		Path:   "/",
+	}})
+
+	sibling, err := url.Parse("https://bar.example.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, sibling); len(records) != 1 {
+		t.Fatalf("parent-domain records = %d, want 1", len(records))
+	}
+}
+
+func TestCookieRecordsRejectPublicSuffixDomain(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://foo.example.com/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:   "too-broad",
+		Value:  "1",
+		Domain: "com",
+		Path:   "/",
+	}})
+
+	target, err := url.Parse("https://bar.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, target); len(records) != 0 {
+		t.Fatalf("public-suffix records = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsDeleteCookieWithNegativeMaxAge(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{Name: "session", Value: "live", Path: "/"}})
+	jar.SetCookies(origin, []*http.Cookie{{Name: "session", Value: "", Path: "/", MaxAge: -1}})
+
+	if records := CookieRecordsForURL(jar, origin); len(records) != 0 {
+		t.Fatalf("records after deletion = %d, want 0", len(records))
+	}
+	if len(jar.records) != 0 {
+		t.Fatalf("stored records after deletion = %d, want 0", len(jar.records))
+	}
+}
+
+func TestCookieRecordsDeleteCookieWithPastExpiry(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{Name: "session", Value: "live", Path: "/"}})
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:    "session",
+		Value:   "",
+		Path:    "/",
+		Expires: time.Now().Add(-time.Minute),
+	}})
+
+	if records := CookieRecordsForURL(jar, origin); len(records) != 0 {
+		t.Fatalf("records after expiry = %d, want 0", len(records))
+	}
+	if len(jar.records) != 0 {
+		t.Fatalf("stored records after expiry = %d, want 0", len(jar.records))
 	}
 }

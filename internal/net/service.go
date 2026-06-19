@@ -54,20 +54,6 @@ func (s *Service) Fetch(rawURL string) (string, error) {
 
 func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgress ProgressCallback) (string, error) {
 	startedAt := time.Now()
-	if body, entry, ok := s.cache.Get(rawURL); ok {
-		s.log.Add(RequestLogEntry{
-			Method:      http.MethodGet,
-			URL:         rawURL,
-			Status:      entry.Status,
-			ContentType: entry.ContentType,
-			Bytes:       int64(len(body)),
-			CacheHit:    true,
-			StartedAt:   startedAt,
-			Duration:    time.Since(startedAt),
-		})
-		return body, nil
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("failed to create request: %w", err)
@@ -76,6 +62,23 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 		return "", wrapped
 	}
 	req.Header.Set("User-Agent", s.userAgent)
+	hasCookies := s.client.Jar != nil && len(s.client.Jar.Cookies(req.URL)) > 0
+	if !hasCookies {
+		if body, entry, ok := s.cache.Get(rawURL); ok {
+			s.setSecurity(securitySummaryFromURL(req.URL))
+			s.log.Add(RequestLogEntry{
+				Method:      http.MethodGet,
+				URL:         rawURL,
+				Status:      entry.Status,
+				ContentType: entry.ContentType,
+				Bytes:       int64(len(body)),
+				CacheHit:    true,
+				StartedAt:   startedAt,
+				Duration:    time.Since(startedAt),
+			})
+			return body, nil
+		}
+	}
 
 	resp, err := s.client.Do(req)
 	s.setSecurity(SecuritySummaryFromResponse(resp, err))
@@ -116,7 +119,9 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 		return body, nil
 	}
 
-	s.cache.Put(rawURL, resp, body)
+	if !hasCookies {
+		s.cache.Put(rawURL, resp, body)
+	}
 	entry.Duration = time.Since(startedAt)
 	s.log.Add(entry)
 	return body, nil

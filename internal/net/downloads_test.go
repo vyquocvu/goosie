@@ -2,11 +2,48 @@ package net
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+type failingDownloadReader struct {
+	reader io.Reader
+	err    error
+}
+
+func (r *failingDownloadReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if err == io.EOF {
+		return n, r.err
+	}
+	return n, err
+}
+
+func (r *failingDownloadReader) Close() error {
+	return nil
+}
+
+type cancelingDownloadReader struct {
+	reader io.Reader
+	cancel context.CancelFunc
+}
+
+func (r *cancelingDownloadReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if err == io.EOF {
+		r.cancel()
+	}
+	return n, err
+}
+
+func (r *cancelingDownloadReader) Close() error {
+	return nil
+}
 
 func TestDownloadManagerWritesFileAndRecordsCompleteStatus(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -73,5 +110,81 @@ func TestDownloadManagerFailsHTTPErrorWithoutOverwritingTarget(t *testing.T) {
 	}
 	if string(data) != "existing" {
 		t.Fatalf("target data = %q, want existing", data)
+	}
+}
+
+func TestDownloadManagerReadFailurePreservesTargetAndRemovesTemporaryFile(t *testing.T) {
+	errRead := errors.New("stream interrupted")
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "")
+		resp.Body = &failingDownloadReader{reader: strings.NewReader("partial"), err: errRead}
+		return resp, nil
+	})}
+	manager := NewDownloadManager(client)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "download.txt")
+	if err := os.WriteFile(target, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	record := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
+
+	if record.Status != DownloadStatusFailed {
+		t.Fatalf("Status = %q, want failed", record.Status)
+	}
+	if !strings.Contains(record.Error, errRead.Error()) {
+		t.Fatalf("Error = %q, want %q", record.Error, errRead)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "existing" {
+		t.Fatalf("target data = %q, want existing", data)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read target directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(target) {
+		t.Fatalf("target directory entries = %v, want only %q", entries, filepath.Base(target))
+	}
+}
+
+func TestDownloadManagerCancellationBeforeCommitPreservesTarget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "")
+		resp.Body = &cancelingDownloadReader{reader: strings.NewReader("replacement"), cancel: cancel}
+		return resp, nil
+	})}
+	manager := NewDownloadManager(client)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "download.txt")
+	if err := os.WriteFile(target, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	record := manager.DownloadWithContext(ctx, "https://example.test/file", target)
+
+	if record.Status != DownloadStatusFailed {
+		t.Fatalf("Status = %q, want failed", record.Status)
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) || !strings.Contains(record.Error, context.Canceled.Error()) {
+		t.Fatalf("context/error = %v/%q, want cancellation", ctx.Err(), record.Error)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "existing" {
+		t.Fatalf("target data = %q, want existing", data)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read target directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(target) {
+		t.Fatalf("target directory entries = %v, want only %q", entries, filepath.Base(target))
 	}
 }

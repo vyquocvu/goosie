@@ -192,3 +192,106 @@ func TestServiceSecuritySummaryFromTLSResponse(t *testing.T) {
 		t.Error("certificate validity dates were not copied")
 	}
 }
+
+func TestServiceCookieBearingRequestBypassesCacheLookup(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := http.NewRequest(http.MethodGet, "https://example.test/private", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(u.URL, []*http.Cookie{{Name: "session", Value: "abc", Path: "/"}})
+
+	cache := NewHTTPCache(t.TempDir(), false)
+	cachedResp := newTestResponse(u, http.StatusOK, "stale")
+	cachedResp.Header.Set("Cache-Control", "max-age=60")
+	cache.Put(u.URL.String(), cachedResp, "stale")
+	calls := 0
+	client := &http.Client{Jar: jar, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return newTestResponse(req, http.StatusOK, "fresh"), nil
+	})}
+	service := NewService(ServiceOptions{Client: client, Cache: cache})
+
+	body, err := service.Fetch(u.URL.String())
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if body != "fresh" {
+		t.Fatalf("body = %q, want fresh", body)
+	}
+	if calls != 1 {
+		t.Fatalf("transport calls = %d, want 1", calls)
+	}
+}
+
+func TestServiceCookieBearingRequestDoesNotPopulateCache(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := http.NewRequest(http.MethodGet, "https://example.test/private", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(u.URL, []*http.Cookie{{Name: "session", Value: "abc", Path: "/"}})
+
+	cache := NewHTTPCache(t.TempDir(), false)
+	client := &http.Client{Jar: jar, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "private")
+		resp.Header.Set("Cache-Control", "max-age=60")
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, Cache: cache})
+
+	if _, err := service.Fetch(u.URL.String()); err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	if _, _, ok := cache.Get(u.URL.String()); ok {
+		t.Fatal("cookie-bearing response populated persistent cache")
+	}
+}
+
+func TestServiceCacheHitReplacesSecuritySummary(t *testing.T) {
+	cache := NewHTTPCache(t.TempDir(), false)
+	cachedReq, err := http.NewRequest(http.MethodGet, "http://cached.example.test/page", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cachedResp := newTestResponse(cachedReq, http.StatusOK, "cached")
+	cachedResp.Header.Set("Cache-Control", "max-age=60")
+	cache.Put(cachedReq.URL.String(), cachedResp, "cached")
+
+	cert := syntheticCertificate("Origin A", "Issuer A")
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		resp := newTestResponse(req, http.StatusOK, "origin-a")
+		resp.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, Cache: cache})
+
+	if _, err := service.Fetch("https://origin-a.example.test/"); err != nil {
+		t.Fatalf("origin A Fetch returned error: %v", err)
+	}
+	if _, err := service.Fetch(cachedReq.URL.String()); err != nil {
+		t.Fatalf("cached Fetch returned error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("transport calls = %d, want 1", calls)
+	}
+
+	summary := service.Security()
+	if summary.URL != cachedReq.URL.String() {
+		t.Errorf("URL = %q, want %q", summary.URL, cachedReq.URL.String())
+	}
+	if summary.Scheme != "http" || summary.Secure {
+		t.Errorf("scheme/secure = %q/%v, want http/false", summary.Scheme, summary.Secure)
+	}
+	if summary.Subject != "" || summary.Issuer != "" || !summary.NotBefore.IsZero() || !summary.NotAfter.IsZero() {
+		t.Fatalf("cached summary retained certificate data: %#v", summary)
+	}
+}

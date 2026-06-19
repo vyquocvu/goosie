@@ -62,6 +62,9 @@ func (c *HTTPCache) Put(rawURL string, resp *http.Response, body string) {
 	if c == nil || c.private || resp == nil {
 		return
 	}
+	if resp.StatusCode != http.StatusOK || hasNonEmptyHeader(resp.Header, "Vary") || len(resp.Header.Values("Set-Cookie")) > 0 {
+		return
+	}
 	maxAge, ok := cacheMaxAge(resp.Header.Get("Cache-Control"))
 	if !ok {
 		return
@@ -92,6 +95,15 @@ func (c *HTTPCache) Put(rawURL string, resp *http.Response, body string) {
 	_ = os.WriteFile(entryPath, data, 0o644)
 }
 
+func hasNonEmptyHeader(header http.Header, name string) bool {
+	for _, value := range header.Values(name) {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *HTTPCache) paths(rawURL string) (string, string) {
 	key := c.key(rawURL)
 	return filepath.Join(c.root, key+".json"), filepath.Join(c.root, key+".body")
@@ -115,11 +127,16 @@ func cacheMaxAge(header string) (int, bool) {
 	hasMaxAge := false
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(strings.ToLower(part))
-		if part == "private" || part == "no-store" {
+		name, value, hasValue := strings.Cut(part, "=")
+		name = strings.TrimSpace(name)
+		if name == "private" || name == "no-store" || name == "no-cache" {
 			return 0, false
 		}
-		if strings.HasPrefix(part, "max-age=") {
-			seconds, err := strconv.Atoi(strings.TrimPrefix(part, "max-age="))
+		if name == "max-age" {
+			if !hasValue {
+				return 0, false
+			}
+			seconds, err := strconv.Atoi(strings.TrimSpace(value))
 			if err != nil || seconds < 0 {
 				return 0, false
 			}
