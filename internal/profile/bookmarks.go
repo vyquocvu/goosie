@@ -23,11 +23,8 @@ func NewBookmarkStore(p *Profile) (*BookmarkStore, error) {
 		profile:   p,
 		bookmarks: []Bookmark{},
 	}
-	if err := p.LoadJSON("bookmarks.json", &store.bookmarks); err != nil {
+	if err := store.reloadLocked(); err != nil {
 		return nil, err
-	}
-	if store.bookmarks == nil {
-		store.bookmarks = []Bookmark{}
 	}
 
 	return store, nil
@@ -36,6 +33,10 @@ func NewBookmarkStore(p *Profile) (*BookmarkStore, error) {
 func (s *BookmarkStore) Add(url, title string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
 	for i := range s.bookmarks {
@@ -58,6 +59,10 @@ func (s *BookmarkStore) Add(url, title string) error {
 func (s *BookmarkStore) Remove(url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
 
 	for i := range s.bookmarks {
 		if s.bookmarks[i].URL == url {
@@ -87,6 +92,23 @@ func (s *BookmarkStore) List() []Bookmark {
 	defer s.mu.Unlock()
 
 	return append([]Bookmark(nil), s.bookmarks...)
+}
+
+func (s *BookmarkStore) reloadLocked() error {
+	if s.profile.Private() {
+		return nil
+	}
+
+	bookmarks := []Bookmark{}
+	if err := s.profile.LoadJSON("bookmarks.json", &bookmarks); err != nil {
+		return err
+	}
+	if bookmarks == nil {
+		bookmarks = []Bookmark{}
+	}
+	s.bookmarks = bookmarks
+
+	return nil
 }
 
 func (s *BookmarkStore) persist() error {

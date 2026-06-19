@@ -36,14 +36,8 @@ func NewHistoryStore(p *Profile) (*HistoryStore, error) {
 			Session: []SessionTab{},
 		},
 	}
-	if err := p.LoadJSON("history.json", &store.doc); err != nil {
+	if err := store.reloadLocked(); err != nil {
 		return nil, err
-	}
-	if store.doc.Visits == nil {
-		store.doc.Visits = []Visit{}
-	}
-	if store.doc.Session == nil {
-		store.doc.Session = []SessionTab{}
 	}
 
 	return store, nil
@@ -52,6 +46,10 @@ func NewHistoryStore(p *Profile) (*HistoryStore, error) {
 func (s *HistoryStore) AddVisit(url, title string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
 
 	s.doc.Visits = append(s.doc.Visits, Visit{
 		URL:       url,
@@ -77,6 +75,10 @@ func (s *HistoryStore) SaveSession(tabs []SessionTab) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
+
 	s.doc.Session = append([]SessionTab(nil), tabs...)
 	return s.persist()
 }
@@ -86,6 +88,29 @@ func (s *HistoryStore) SessionTabs() []SessionTab {
 	defer s.mu.Unlock()
 
 	return append([]SessionTab(nil), s.doc.Session...)
+}
+
+func (s *HistoryStore) reloadLocked() error {
+	if s.profile.Private() {
+		return nil
+	}
+
+	doc := historyDocument{
+		Visits:  []Visit{},
+		Session: []SessionTab{},
+	}
+	if err := s.profile.LoadJSON("history.json", &doc); err != nil {
+		return err
+	}
+	if doc.Visits == nil {
+		doc.Visits = []Visit{}
+	}
+	if doc.Session == nil {
+		doc.Session = []SessionTab{}
+	}
+	s.doc = doc
+
+	return nil
 }
 
 func (s *HistoryStore) persist() error {

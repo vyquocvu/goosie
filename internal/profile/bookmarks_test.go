@@ -69,3 +69,38 @@ func TestBookmarkStoreListReturnsCopy(t *testing.T) {
 
 	require.Equal(t, "Example", store.List()[0].Title)
 }
+
+func TestBookmarkStoreConcurrentInstancesMergeAdds(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	second, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.Add("https://one.test", "One"))
+	require.NoError(t, second.Add("https://two.test", "Two"))
+
+	reloaded, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	require.True(t, reloaded.Contains("https://one.test"))
+	require.True(t, reloaded.Contains("https://two.test"))
+}
+
+func TestBookmarkStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	second, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.Add("https://one.test", "One"))
+	require.NoError(t, second.Remove("https://one.test"))
+
+	reloaded, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	require.False(t, reloaded.Contains("https://one.test"))
+}

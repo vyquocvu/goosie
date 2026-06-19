@@ -77,6 +77,65 @@ func TestStorageStoreRemoveClearKeysAndSnapshot(t *testing.T) {
 	require.Equal(t, []string{"theme"}, reloaded.Keys("https://two.test"))
 }
 
+func TestStorageStoreConcurrentInstancesMergeSets(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewStorageStore(p)
+	require.NoError(t, err)
+	second, err := NewStorageStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.Set("https://one.test", "theme", "dark"))
+	require.NoError(t, second.Set("https://one.test", "token", "secret"))
+
+	reloaded, err := NewStorageStore(p)
+	require.NoError(t, err)
+	require.Equal(t, []string{"theme", "token"}, reloaded.Keys("https://one.test"))
+	theme, ok := reloaded.Get("https://one.test", "theme")
+	require.True(t, ok)
+	require.Equal(t, "dark", theme)
+	token, ok := reloaded.Get("https://one.test", "token")
+	require.True(t, ok)
+	require.Equal(t, "secret", token)
+}
+
+func TestStorageStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewStorageStore(p)
+	require.NoError(t, err)
+	second, err := NewStorageStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.Set("https://one.test", "theme", "dark"))
+	require.NoError(t, second.Remove("https://one.test", "theme"))
+
+	reloaded, err := NewStorageStore(p)
+	require.NoError(t, err)
+	require.Empty(t, reloaded.Keys("https://one.test"))
+}
+
+func TestStorageStoreConcurrentInstanceClearReloadsBeforePersist(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewStorageStore(p)
+	require.NoError(t, err)
+	second, err := NewStorageStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.Set("https://one.test", "theme", "dark"))
+	require.NoError(t, first.Set("https://two.test", "theme", "light"))
+	require.NoError(t, second.Clear("https://one.test"))
+
+	reloaded, err := NewStorageStore(p)
+	require.NoError(t, err)
+	require.Empty(t, reloaded.Keys("https://one.test"))
+	require.Equal(t, []string{"theme"}, reloaded.Keys("https://two.test"))
+}
+
 func TestStorageStorePrivateDoesNotPersist(t *testing.T) {
 	root := t.TempDir()
 	p, err := Open(Options{Root: root, Private: true})

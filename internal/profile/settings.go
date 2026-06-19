@@ -47,6 +47,9 @@ func (s *SettingsStore) Set(settings Settings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Settings are a whole-document write. Empty strings and false booleans are
+	// meaningful values, so concurrent SettingsStore writers are intentionally
+	// last-writer-wins instead of merging field-by-field.
 	s.settings = settings
 	return s.profile.SaveJSON("settings.json", s.settings)
 }

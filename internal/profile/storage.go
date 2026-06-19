@@ -16,11 +16,8 @@ func NewStorageStore(p *Profile) (*StorageStore, error) {
 		profile: p,
 		data:    map[string]map[string]string{},
 	}
-	if err := p.LoadJSON("storage.json", &store.data); err != nil {
+	if err := store.reloadLocked(); err != nil {
 		return nil, err
-	}
-	if store.data == nil {
-		store.data = map[string]map[string]string{}
 	}
 
 	return store, nil
@@ -42,6 +39,10 @@ func (s *StorageStore) Set(origin, key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
+
 	if s.data[origin] == nil {
 		s.data[origin] = map[string]string{}
 	}
@@ -52,6 +53,10 @@ func (s *StorageStore) Set(origin, key, value string) error {
 func (s *StorageStore) Remove(origin, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
 
 	values, ok := s.data[origin]
 	if !ok {
@@ -68,6 +73,10 @@ func (s *StorageStore) Remove(origin, key string) error {
 func (s *StorageStore) Clear(origin string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
 
 	delete(s.data, origin)
 	return s.persist()
@@ -101,6 +110,28 @@ func (s *StorageStore) Snapshot() map[string]map[string]string {
 	}
 
 	return snapshot
+}
+
+func (s *StorageStore) reloadLocked() error {
+	if s.profile.Private() {
+		return nil
+	}
+
+	data := map[string]map[string]string{}
+	if err := s.profile.LoadJSON("storage.json", &data); err != nil {
+		return err
+	}
+	if data == nil {
+		data = map[string]map[string]string{}
+	}
+	for origin, values := range data {
+		if values == nil {
+			data[origin] = map[string]string{}
+		}
+	}
+	s.data = data
+
+	return nil
 }
 
 func (s *StorageStore) persist() error {

@@ -79,3 +79,40 @@ func TestHistoryStoreSessionTabsAreCopied(t *testing.T) {
 
 	require.Equal(t, []SessionTab{{URL: "https://one.test", Title: "One", Active: true}}, store.SessionTabs())
 }
+
+func TestHistoryStoreConcurrentInstancesMergeVisits(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewHistoryStore(p)
+	require.NoError(t, err)
+	second, err := NewHistoryStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.AddVisit("https://one.test", "One"))
+	require.NoError(t, second.AddVisit("https://two.test", "Two"))
+
+	reloaded, err := NewHistoryStore(p)
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://one.test", "https://two.test"}, reloaded.VisitURLs())
+}
+
+func TestHistoryStoreConcurrentInstanceSaveSessionPreservesVisits(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	first, err := NewHistoryStore(p)
+	require.NoError(t, err)
+	second, err := NewHistoryStore(p)
+	require.NoError(t, err)
+
+	require.NoError(t, first.AddVisit("https://one.test", "One"))
+	require.NoError(t, second.SaveSession([]SessionTab{
+		{URL: "https://two.test", Title: "Two", Active: true},
+	}))
+
+	reloaded, err := NewHistoryStore(p)
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://one.test"}, reloaded.VisitURLs())
+	require.Equal(t, []SessionTab{{URL: "https://two.test", Title: "Two", Active: true}}, reloaded.SessionTabs())
+}
