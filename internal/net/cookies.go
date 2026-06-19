@@ -16,6 +16,7 @@ type CookieRecord struct {
 	Expires  time.Time
 	Secure   bool
 	HttpOnly bool
+	HostOnly bool
 }
 
 type CookieJar struct {
@@ -92,10 +93,10 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 		if record.Secure && u.Scheme != "https" {
 			continue
 		}
-		if !domainMatches(u.Hostname(), record.Domain) {
+		if !domainMatches(u.Hostname(), record.Domain, record.HostOnly) {
 			continue
 		}
-		if !strings.HasPrefix(requestPath, record.Path) {
+		if !pathMatches(requestPath, record.Path) {
 			continue
 		}
 		records = append(records, record)
@@ -105,12 +106,13 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 
 func cookieRecordFromCookie(u *url.URL, cookie *http.Cookie) CookieRecord {
 	domain := cookie.Domain
+	hostOnly := domain == ""
 	if domain == "" && u != nil {
 		domain = u.Hostname()
 	}
 	path := cookie.Path
 	if path == "" {
-		path = "/"
+		path = defaultCookiePath(u)
 	}
 	return CookieRecord{
 		Name:     cookie.Name,
@@ -120,11 +122,15 @@ func cookieRecordFromCookie(u *url.URL, cookie *http.Cookie) CookieRecord {
 		Expires:  cookie.Expires,
 		Secure:   cookie.Secure,
 		HttpOnly: cookie.HttpOnly,
+		HostOnly: hostOnly,
 	}
 }
 
-func domainMatches(host, domain string) bool {
+func domainMatches(host, domain string, hostOnly bool) bool {
 	domain = strings.TrimPrefix(domain, ".")
+	if hostOnly {
+		return host == domain
+	}
 	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
@@ -134,4 +140,35 @@ func cookieRequestPath(u *url.URL) string {
 		return "/"
 	}
 	return path
+}
+
+func defaultCookiePath(u *url.URL) string {
+	if u == nil {
+		return "/"
+	}
+	path := cookieRequestPath(u)
+	if path == "/" {
+		return "/"
+	}
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash <= 0 {
+		return "/"
+	}
+	return path[:lastSlash]
+}
+
+func pathMatches(requestPath, cookiePath string) bool {
+	if cookiePath == "" {
+		cookiePath = "/"
+	}
+	if requestPath == cookiePath {
+		return true
+	}
+	if !strings.HasPrefix(requestPath, cookiePath) {
+		return false
+	}
+	if strings.HasSuffix(cookiePath, "/") {
+		return true
+	}
+	return len(requestPath) > len(cookiePath) && requestPath[len(cookiePath)] == '/'
 }

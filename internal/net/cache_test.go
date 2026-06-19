@@ -80,3 +80,33 @@ func TestHTTPCacheDoesNotStoreWithoutMaxAge(t *testing.T) {
 		t.Fatal("response without max-age was cached")
 	}
 }
+
+func TestHTTPCacheVetoDirectivesOverrideMaxAge(t *testing.T) {
+	tests := []struct {
+		name         string
+		cacheControl string
+	}{
+		{name: "no-store before max-age", cacheControl: "no-store, max-age=60"},
+		{name: "no-store after max-age", cacheControl: "max-age=60, no-store"},
+		{name: "private before max-age", cacheControl: "private, max-age=60"},
+		{name: "private after max-age", cacheControl: "max-age=60, private"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := NewHTTPCache(t.TempDir(), false)
+			req, err := http.NewRequest(http.MethodGet, "https://example.test/"+tt.name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := newTestResponse(req, http.StatusOK, "body")
+			resp.Header.Set("Cache-Control", tt.cacheControl)
+
+			cache.Put(req.URL.String(), resp, "body")
+
+			if _, _, ok := cache.Get(req.URL.String()); ok {
+				t.Fatalf("cached response with Cache-Control %q", tt.cacheControl)
+			}
+		})
+	}
+}

@@ -111,6 +111,8 @@ func normalizeCacheURL(rawURL string) string {
 }
 
 func cacheMaxAge(header string) (int, bool) {
+	maxAge := 0
+	hasMaxAge := false
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(strings.ToLower(part))
 		if part == "private" || part == "no-store" {
@@ -121,8 +123,9 @@ func cacheMaxAge(header string) (int, bool) {
 			if err != nil || seconds < 0 {
 				return 0, false
 			}
-			return seconds, true
+			maxAge = seconds
+			hasMaxAge = true
 		}
 	}
-	return 0, false
+	return maxAge, hasMaxAge
 }

@@ -67,3 +67,93 @@ func TestCookieRecordsRootPathMatchesEmptyURLPath(t *testing.T) {
 		t.Fatalf("record = %#v", records[0])
 	}
 }
+
+func TestCookieRecordsHostOnlyCookieDoesNotMatchSubdomain(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:  "hostonly",
+		Value: "1",
+		Path:  "/",
+	}})
+
+	sameHost, err := url.Parse("https://example.test/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, sameHost); len(records) != 1 {
+		t.Fatalf("same-host records = %d, want 1", len(records))
+	}
+
+	subdomain, err := url.Parse("https://sub.example.test/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, subdomain); len(records) != 0 {
+		t.Fatalf("subdomain records = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsPathBoundaryMatching(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/foo/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:   "scoped",
+		Value:  "1",
+		Path:   "/foo",
+		Domain: "example.test",
+	}})
+
+	for _, rawURL := range []string{"https://example.test/foo", "https://example.test/foo/bar"} {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if records := CookieRecordsForURL(jar, u); len(records) != 1 {
+			t.Fatalf("%s records = %d, want 1", rawURL, len(records))
+		}
+	}
+
+	u, err := url.Parse("https://example.test/foobar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, u); len(records) != 0 {
+		t.Fatalf("/foobar records = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsDefaultPathUsesRequestDirectory(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/foo/bar/page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:   "implicit-path",
+		Value:  "1",
+		Domain: "example.test",
+	}})
+
+	matching, err := url.Parse("https://example.test/foo/bar/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, matching); len(records) != 1 {
+		t.Fatalf("directory records = %d, want 1", len(records))
+	}
+
+	nonMatching, err := url.Parse("https://example.test/foo/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := CookieRecordsForURL(jar, nonMatching); len(records) != 0 {
+		t.Fatalf("parent directory records = %d, want 0", len(records))
+	}
+}
