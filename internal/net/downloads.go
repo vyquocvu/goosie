@@ -73,7 +73,7 @@ func (m *DownloadManager) DownloadWithContext(ctx context.Context, rawURL, targe
 		}
 	}()
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		record.Status = DownloadStatusFailed
 		record.Error = fmt.Sprintf("download failed: HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 		return record

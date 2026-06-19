@@ -295,3 +295,39 @@ func TestServiceCacheHitReplacesSecuritySummary(t *testing.T) {
 		t.Fatalf("cached summary retained certificate data: %#v", summary)
 	}
 }
+
+func TestServiceRedirectedResponseDoesNotPopulateOriginalURLCache(t *testing.T) {
+	const rawURL = "https://example.test/start"
+	finalReq, err := http.NewRequest(http.MethodGet, "https://example.test/final", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		resp := newTestResponse(finalReq, http.StatusOK, "redirected body")
+		resp.Header.Set("Cache-Control", "max-age=60")
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, Cache: NewHTTPCache(t.TempDir(), false)})
+
+	for i := 0; i < 2; i++ {
+		body, err := service.Fetch(rawURL)
+		if err != nil {
+			t.Fatalf("Fetch %d returned error: %v", i+1, err)
+		}
+		if body != "redirected body" {
+			t.Fatalf("Fetch %d body = %q", i+1, body)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("transport calls = %d, want 2", calls)
+	}
+	if summary := service.Security(); summary.URL != finalReq.URL.String() {
+		t.Fatalf("security URL = %q, want final URL %q", summary.URL, finalReq.URL)
+	}
+	entries := service.Log().Entries()
+	if entries[0].CacheHit || entries[1].CacheHit {
+		t.Fatalf("redirected request log contained cache hit: %#v", entries)
+	}
+}

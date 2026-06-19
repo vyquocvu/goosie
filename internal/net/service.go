@@ -119,12 +119,19 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 		return body, nil
 	}
 
-	if !hasCookies {
+	if !hasCookies && responseMatchesOriginalURL(rawURL, resp) {
 		s.cache.Put(rawURL, resp, body)
 	}
 	entry.Duration = time.Since(startedAt)
 	s.log.Add(entry)
 	return body, nil
+}
+
+func responseMatchesOriginalURL(rawURL string, resp *http.Response) bool {
+	if resp == nil || resp.Request == nil || resp.Request.URL == nil {
+		return false
+	}
+	return normalizeCacheURL(resp.Request.URL.String()) == normalizeCacheURL(rawURL)
 }
 
 func (s *Service) Log() *RequestLog {

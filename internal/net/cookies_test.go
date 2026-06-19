@@ -299,3 +299,77 @@ func TestCookieRecordsPositiveMaxAgeExpiresAndIsRemoved(t *testing.T) {
 		t.Fatalf("stored records after Max-Age expiry = %d, want 0", len(jar.records))
 	}
 }
+
+func TestCookieRecordsCanonicalDomainReplacementAndDeletion(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://Example.COM./account/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{Name: "session", Value: "old", Domain: "EXAMPLE.COM.", Path: "/"}})
+	jar.SetCookies(origin, []*http.Cookie{{Name: "session", Value: "new", Domain: ".example.com", Path: "/"}})
+
+	target, err := url.Parse("https://example.com/account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := CookieRecordsForURL(jar, target)
+	if len(records) != 1 {
+		t.Fatalf("records after replacement = %d, want 1", len(records))
+	}
+	if records[0].Value != "new" || records[0].Domain != "example.com" {
+		t.Fatalf("canonical replacement record = %#v", records[0])
+	}
+
+	jar.SetCookies(origin, []*http.Cookie{{Name: "session", Domain: "Example.Com.", Path: "/", MaxAge: -1}})
+	if records := CookieRecordsForURL(jar, target); len(records) != 0 {
+		t.Fatalf("records after canonical deletion = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsMalformedPathUsesDefaultForReplacementAndDeletion(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("https://example.test/foo/bar/page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{Name: "scoped", Value: "old", Path: "foo"}})
+	jar.SetCookies(origin, []*http.Cookie{{Name: "scoped", Value: "new"}})
+
+	target, err := url.Parse("https://example.test/foo/bar/next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := CookieRecordsForURL(jar, target)
+	if len(records) != 1 {
+		t.Fatalf("records after default-path replacement = %d, want 1", len(records))
+	}
+	if records[0].Value != "new" || records[0].Path != "/foo/bar" {
+		t.Fatalf("default-path replacement record = %#v", records[0])
+	}
+
+	jar.SetCookies(origin, []*http.Cookie{{Name: "scoped", Path: "bar", MaxAge: -1}})
+	if records := CookieRecordsForURL(jar, target); len(records) != 0 {
+		t.Fatalf("records after default-path deletion = %d, want 0", len(records))
+	}
+}
+
+func TestCookieRecordsIPHostRejectsDomainAttribute(t *testing.T) {
+	jar := NewCookieJar()
+	origin, err := url.Parse("http://127.0.0.1/account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{
+		{Name: "domain", Value: "bad", Domain: "127.0.0.1", Path: "/"},
+		{Name: "host-only", Value: "good", Path: "/"},
+	})
+
+	records := CookieRecordsForURL(jar, origin)
+	if len(records) != 1 {
+		t.Fatalf("IP-host records = %d, want 1 host-only cookie", len(records))
+	}
+	if records[0].Name != "host-only" || !records[0].HostOnly {
+		t.Fatalf("IP-host record = %#v, want host-only cookie", records[0])
+	}
+}

@@ -1,6 +1,7 @@
 package net
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -144,16 +145,18 @@ func cookieRecordFromCookie(u *url.URL, cookie *http.Cookie) CookieRecord {
 	domain := cookie.Domain
 	hostOnly := domain == ""
 	if domain == "" && u != nil {
-		domain = u.Hostname()
+		domain = canonicalCookieHost(u.Hostname())
+	} else {
+		domain = canonicalCookieDomain(domain)
 	}
 	path := cookie.Path
-	if path == "" {
+	if !strings.HasPrefix(path, "/") {
 		path = defaultCookiePath(u)
 	}
 	return CookieRecord{
 		Name:     cookie.Name,
 		Value:    cookie.Value,
-		Domain:   strings.TrimPrefix(domain, "."),
+		Domain:   domain,
 		Path:     path,
 		Expires:  cookie.Expires,
 		MaxAge:   cookie.MaxAge,
@@ -163,10 +166,21 @@ func cookieRecordFromCookie(u *url.URL, cookie *http.Cookie) CookieRecord {
 	}
 }
 
+func canonicalCookieHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+func canonicalCookieDomain(domain string) string {
+	return canonicalCookieHost(strings.TrimPrefix(domain, "."))
+}
+
 func validCookieDomain(host, domain string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	domain = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(domain, "."), "."))
+	host = canonicalCookieHost(host)
+	domain = canonicalCookieDomain(domain)
 	if host == "" || domain == "" {
+		return false
+	}
+	if net.ParseIP(host) != nil || net.ParseIP(domain) != nil {
 		return false
 	}
 	if host != domain && !strings.HasSuffix(host, "."+domain) {
@@ -177,8 +191,8 @@ func validCookieDomain(host, domain string) bool {
 }
 
 func domainMatches(host, domain string, hostOnly bool) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	domain = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(domain, "."), "."))
+	host = canonicalCookieHost(host)
+	domain = canonicalCookieDomain(domain)
 	if hostOnly {
 		return host == domain
 	}

@@ -188,3 +188,33 @@ func TestDownloadManagerCancellationBeforeCommitPreservesTarget(t *testing.T) {
 		t.Fatalf("target directory entries = %v, want only %q", entries, filepath.Base(target))
 	}
 }
+
+func TestDownloadManagerFailsRedirectResponseWithoutOverwritingTarget(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusFound, "redirect"), nil
+	})}
+	manager := NewDownloadManager(client)
+	target := filepath.Join(t.TempDir(), "download.txt")
+	if err := os.WriteFile(target, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	record := manager.DownloadWithContext(context.Background(), "https://example.test/file", target)
+
+	if record.Status != DownloadStatusFailed {
+		t.Fatalf("Status = %q, want failed", record.Status)
+	}
+	if record.Error == "" {
+		t.Fatal("Error was empty")
+	}
+	if record.BytesWritten != 0 {
+		t.Fatalf("BytesWritten = %d, want 0", record.BytesWritten)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "existing" {
+		t.Fatalf("target data = %q, want existing", data)
+	}
+}
