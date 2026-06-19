@@ -148,3 +148,24 @@ func TestHTTPCacheRejectsUnsafeResponses(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPCacheVetoesSeparateCacheControlHeaderValues(t *testing.T) {
+	for _, veto := range []string{"no-store", "private", "no-cache"} {
+		t.Run(veto, func(t *testing.T) {
+			cache := NewHTTPCache(t.TempDir(), false)
+			req, err := http.NewRequest(http.MethodGet, "https://example.test/"+veto, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := newTestResponse(req, http.StatusOK, "body")
+			resp.Header.Add("Cache-Control", "max-age=60")
+			resp.Header.Add("Cache-Control", veto)
+
+			cache.Put(req.URL.String(), resp, "body")
+
+			if _, _, ok := cache.Get(req.URL.String()); ok {
+				t.Fatalf("cached response with separate Cache-Control veto %q", veto)
+			}
+		})
+	}
+}

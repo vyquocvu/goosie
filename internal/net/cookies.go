@@ -25,10 +25,11 @@ type CookieRecord struct {
 type CookieJar struct {
 	mu      sync.Mutex
 	records []CookieRecord
+	now     func() time.Time
 }
 
 func NewCookieJar() *CookieJar {
-	return &CookieJar{}
+	return &CookieJar{now: time.Now}
 }
 
 func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
@@ -37,7 +38,7 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	now := time.Now()
+	now := j.currentTime()
 	for _, cookie := range cookies {
 		if cookie == nil {
 			continue
@@ -46,9 +47,12 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			continue
 		}
 		record := cookieRecordFromCookie(u, cookie)
-		if cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && !cookie.Expires.After(now)) {
+		if cookie.MaxAge < 0 || (cookie.MaxAge == 0 && !cookie.Expires.IsZero() && !cookie.Expires.After(now)) {
 			j.remove(record)
 			continue
+		}
+		if cookie.MaxAge > 0 {
+			record.Expires = now.Add(time.Duration(cookie.MaxAge) * time.Second)
 		}
 		replaced := false
 		for i := range j.records {
@@ -62,6 +66,13 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			j.records = append(j.records, record)
 		}
 	}
+}
+
+func (j *CookieJar) currentTime() time.Time {
+	if j.now != nil {
+		return j.now()
+	}
+	return time.Now()
 }
 
 func (j *CookieJar) remove(record CookieRecord) {
@@ -105,13 +116,15 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	now := time.Now()
+	now := j.currentTime()
 	requestPath := cookieRequestPath(u)
 	var records []CookieRecord
+	active := j.records[:0]
 	for _, record := range j.records {
-		if !record.Expires.IsZero() && now.After(record.Expires) {
+		if !record.Expires.IsZero() && !record.Expires.After(now) {
 			continue
 		}
+		active = append(active, record)
 		if record.Secure && u.Scheme != "https" {
 			continue
 		}
@@ -123,6 +136,7 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 		}
 		records = append(records, record)
 	}
+	j.records = active
 	return records
 }
 

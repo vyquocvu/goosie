@@ -265,3 +265,37 @@ func TestCookieRecordsDeleteCookieWithPastExpiry(t *testing.T) {
 		t.Fatalf("stored records after expiry = %d, want 0", len(jar.records))
 	}
 }
+
+func TestCookieRecordsPositiveMaxAgeExpiresAndIsRemoved(t *testing.T) {
+	jar := NewCookieJar()
+	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
+	jar.now = func() time.Time { return now }
+	origin, err := url.Parse("https://example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar.SetCookies(origin, []*http.Cookie{{
+		Name:    "short-lived",
+		Value:   "1",
+		Path:    "/",
+		MaxAge:  10,
+		Expires: now.Add(time.Hour),
+	}})
+
+	records := CookieRecordsForURL(jar, origin)
+	if len(records) != 1 {
+		t.Fatalf("records at t0 = %d, want 1", len(records))
+	}
+	wantExpiry := now.Add(10 * time.Second)
+	if !records[0].Expires.Equal(wantExpiry) {
+		t.Fatalf("Expires = %v, want Max-Age expiry %v", records[0].Expires, wantExpiry)
+	}
+
+	now = now.Add(11 * time.Second)
+	if cookies := jar.Cookies(origin); len(cookies) != 0 {
+		t.Fatalf("cookies after Max-Age expiry = %d, want 0", len(cookies))
+	}
+	if len(jar.records) != 0 {
+		t.Fatalf("stored records after Max-Age expiry = %d, want 0", len(jar.records))
+	}
+}

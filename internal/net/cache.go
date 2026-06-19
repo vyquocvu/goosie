@@ -65,7 +65,7 @@ func (c *HTTPCache) Put(rawURL string, resp *http.Response, body string) {
 	if resp.StatusCode != http.StatusOK || hasNonEmptyHeader(resp.Header, "Vary") || len(resp.Header.Values("Set-Cookie")) > 0 {
 		return
 	}
-	maxAge, ok := cacheMaxAge(resp.Header.Get("Cache-Control"))
+	maxAge, ok := cacheMaxAge(strings.Join(resp.Header.Values("Cache-Control"), ","))
 	if !ok {
 		return
 	}
