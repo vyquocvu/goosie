@@ -31,47 +31,51 @@ func NewBookmarkStore(p *Profile) (*BookmarkStore, error) {
 }
 
 func (s *BookmarkStore) Add(url, title string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("bookmarks.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
-
-	now := time.Now().UTC()
-	for i := range s.bookmarks {
-		if s.bookmarks[i].URL == url {
-			s.bookmarks[i].Title = title
-			s.bookmarks[i].UpdatedAt = now
-			return s.persist()
+		if err := s.reloadLocked(); err != nil {
+			return err
 		}
-	}
 
-	s.bookmarks = append(s.bookmarks, Bookmark{
-		URL:       url,
-		Title:     title,
-		CreatedAt: now,
-		UpdatedAt: now,
+		now := time.Now().UTC()
+		for i := range s.bookmarks {
+			if s.bookmarks[i].URL == url {
+				s.bookmarks[i].Title = title
+				s.bookmarks[i].UpdatedAt = now
+				return s.persist()
+			}
+		}
+
+		s.bookmarks = append(s.bookmarks, Bookmark{
+			URL:       url,
+			Title:     title,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		return s.persist()
 	})
-	return s.persist()
 }
 
 func (s *BookmarkStore) Remove(url string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("bookmarks.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
-
-	for i := range s.bookmarks {
-		if s.bookmarks[i].URL == url {
-			s.bookmarks = append(s.bookmarks[:i], s.bookmarks[i+1:]...)
-			return s.persist()
+		if err := s.reloadLocked(); err != nil {
+			return err
 		}
-	}
 
-	return nil
+		for i := range s.bookmarks {
+			if s.bookmarks[i].URL == url {
+				s.bookmarks = append(s.bookmarks[:i], s.bookmarks[i+1:]...)
+				return s.persist()
+			}
+		}
+
+		return nil
+	})
 }
 
 func (s *BookmarkStore) Contains(url string) bool {

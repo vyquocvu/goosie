@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type Options struct {
@@ -15,8 +16,10 @@ type Options struct {
 }
 
 type Profile struct {
-	root    string
-	private bool
+	root      string
+	private   bool
+	locksMu   sync.Mutex
+	fileLocks map[string]*sync.Mutex
 }
 
 func Open(options Options) (*Profile, error) {
@@ -32,8 +35,9 @@ func Open(options Options) (*Profile, error) {
 	}
 
 	return &Profile{
-		root:    root,
-		private: options.Private,
+		root:      root,
+		private:   options.Private,
+		fileLocks: map[string]*sync.Mutex{},
 	}, nil
 }
 
@@ -52,6 +56,29 @@ func (p *Profile) Root() string {
 
 func (p *Profile) Private() bool {
 	return p.private
+}
+
+func (p *Profile) withFileLock(name string, fn func() error) error {
+	lock := p.fileLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	return fn()
+}
+
+func (p *Profile) fileLock(name string) *sync.Mutex {
+	cleanName := filepath.Clean(name)
+
+	p.locksMu.Lock()
+	defer p.locksMu.Unlock()
+
+	lock := p.fileLocks[cleanName]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		p.fileLocks[cleanName] = lock
+	}
+
+	return lock
 }
 
 func (p *Profile) LoadJSON(name string, target any) error {

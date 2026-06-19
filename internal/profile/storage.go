@@ -36,50 +36,56 @@ func (s *StorageStore) Get(origin, key string) (string, bool) {
 }
 
 func (s *StorageStore) Set(origin, key, value string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("storage.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
+		if err := s.reloadLocked(); err != nil {
+			return err
+		}
 
-	if s.data[origin] == nil {
-		s.data[origin] = map[string]string{}
-	}
-	s.data[origin][key] = value
-	return s.persist()
+		if s.data[origin] == nil {
+			s.data[origin] = map[string]string{}
+		}
+		s.data[origin][key] = value
+		return s.persist()
+	})
 }
 
 func (s *StorageStore) Remove(origin, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("storage.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
+		if err := s.reloadLocked(); err != nil {
+			return err
+		}
 
-	values, ok := s.data[origin]
-	if !ok {
-		return nil
-	}
-	delete(values, key)
-	if len(values) == 0 {
-		delete(s.data, origin)
-	}
+		values, ok := s.data[origin]
+		if !ok {
+			return nil
+		}
+		delete(values, key)
+		if len(values) == 0 {
+			delete(s.data, origin)
+		}
 
-	return s.persist()
+		return s.persist()
+	})
 }
 
 func (s *StorageStore) Clear(origin string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("storage.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
+		if err := s.reloadLocked(); err != nil {
+			return err
+		}
 
-	delete(s.data, origin)
-	return s.persist()
+		delete(s.data, origin)
+		return s.persist()
+	})
 }
 
 func (s *StorageStore) Keys(origin string) []string {

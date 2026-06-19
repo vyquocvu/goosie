@@ -1,8 +1,10 @@
 package profile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,4 +105,41 @@ func TestBookmarkStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T)
 	reloaded, err := NewBookmarkStore(p)
 	require.NoError(t, err)
 	require.False(t, reloaded.Contains("https://one.test"))
+}
+
+func TestBookmarkStoreConcurrentIndependentInstancesMergeAdds(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	const count = 20
+	stores := make([]*BookmarkStore, count)
+	for i := range stores {
+		stores[i], err = NewBookmarkStore(p)
+		require.NoError(t, err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+	for i, store := range stores {
+		wg.Add(1)
+		go func(i int, store *BookmarkStore) {
+			defer wg.Done()
+			<-start
+			errs <- store.Add(fmt.Sprintf("https://%02d.test", i), fmt.Sprintf("Title %02d", i))
+		}(i, store)
+	}
+
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	reloaded, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	for i := 0; i < count; i++ {
+		require.True(t, reloaded.Contains(fmt.Sprintf("https://%02d.test", i)))
+	}
 }

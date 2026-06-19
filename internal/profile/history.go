@@ -44,19 +44,21 @@ func NewHistoryStore(p *Profile) (*HistoryStore, error) {
 }
 
 func (s *HistoryStore) AddVisit(url, title string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("history.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
+		if err := s.reloadLocked(); err != nil {
+			return err
+		}
 
-	s.doc.Visits = append(s.doc.Visits, Visit{
-		URL:       url,
-		Title:     title,
-		VisitedAt: time.Now().UTC(),
+		s.doc.Visits = append(s.doc.Visits, Visit{
+			URL:       url,
+			Title:     title,
+			VisitedAt: time.Now().UTC(),
+		})
+		return s.persist()
 	})
-	return s.persist()
 }
 
 func (s *HistoryStore) VisitURLs() []string {
@@ -72,15 +74,17 @@ func (s *HistoryStore) VisitURLs() []string {
 }
 
 func (s *HistoryStore) SaveSession(tabs []SessionTab) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.profile.withFileLock("history.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if err := s.reloadLocked(); err != nil {
-		return err
-	}
+		if err := s.reloadLocked(); err != nil {
+			return err
+		}
 
-	s.doc.Session = append([]SessionTab(nil), tabs...)
-	return s.persist()
+		s.doc.Session = append([]SessionTab(nil), tabs...)
+		return s.persist()
+	})
 }
 
 func (s *HistoryStore) SessionTabs() []SessionTab {
