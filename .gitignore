@@ -19,6 +19,7 @@ go.work.sum
 /cmd/browser/browser
 /browser
 /test/e2e/testdata/*
+.worktrees/
 
 # IDE
 .vscode/
