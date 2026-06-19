@@ -54,3 +54,18 @@ func TestBookmarkStoreLoadsSnakeCaseTimestampSchema(t *testing.T) {
 	require.Equal(t, time.Date(2026, 6, 19, 1, 2, 3, 0, time.UTC), bookmarks[0].CreatedAt)
 	require.Equal(t, time.Date(2026, 6, 19, 4, 5, 6, 0, time.UTC), bookmarks[0].UpdatedAt)
 }
+
+func TestBookmarkStoreListReturnsCopy(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	store, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	require.NoError(t, store.Add("https://example.com", "Example"))
+
+	bookmarks := store.List()
+	require.Len(t, bookmarks, 1)
+	bookmarks[0].Title = "Changed"
+
+	require.Equal(t, "Example", store.List()[0].Title)
+}

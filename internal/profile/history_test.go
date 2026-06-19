@@ -56,3 +56,26 @@ func TestHistoryStoreLoadsSnakeCaseTimestampSchema(t *testing.T) {
 	require.Equal(t, time.Date(2026, 6, 19, 7, 8, 9, 0, time.UTC), store.doc.Visits[0].VisitedAt)
 	require.Equal(t, []SessionTab{{URL: "https://one.test", Title: "One", Active: true}}, store.SessionTabs())
 }
+
+func TestHistoryStoreSessionTabsAreCopied(t *testing.T) {
+	p, err := Open(Options{Root: t.TempDir()})
+	require.NoError(t, err)
+
+	store, err := NewHistoryStore(p)
+	require.NoError(t, err)
+
+	tabs := []SessionTab{
+		{URL: "https://one.test", Title: "One", Active: true},
+	}
+	require.NoError(t, store.SaveSession(tabs))
+	tabs[0].Title = "Changed"
+	tabs[0].Active = false
+
+	require.Equal(t, []SessionTab{{URL: "https://one.test", Title: "One", Active: true}}, store.SessionTabs())
+
+	saved := store.SessionTabs()
+	saved[0].Title = "Changed Again"
+	saved[0].Active = false
+
+	require.Equal(t, []SessionTab{{URL: "https://one.test", Title: "One", Active: true}}, store.SessionTabs())
+}
