@@ -74,6 +74,22 @@ func TestCorruptJSONIsBackedUp(t *testing.T) {
 	require.NoFileExists(t, path)
 }
 
+func TestJSONWithTrailingGarbageIsBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Open(Options{Root: dir})
+	require.NoError(t, err)
+
+	path := filepath.Join(dir, "state.json")
+	err = os.WriteFile(path, []byte(`{"name":"ok"} nope`), 0o600)
+	require.NoError(t, err)
+
+	var loaded sampleDocument
+	err = p.LoadJSON("state.json", &loaded)
+	require.Error(t, err)
+	require.FileExists(t, path+".corrupt")
+	require.NoFileExists(t, path)
+}
+
 func TestCorruptJSONBackupFailureIsReturned(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Open(Options{Root: dir})

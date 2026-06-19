@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -63,7 +64,15 @@ func (p *Profile) LoadJSON(name string, target any) error {
 		return err
 	}
 
-	decodeErr := json.NewDecoder(file).Decode(target)
+	decoder := json.NewDecoder(file)
+	decodeErr := decoder.Decode(target)
+	if decodeErr == nil {
+		if err := decoder.Decode(new(struct{})); err == nil {
+			decodeErr = fmt.Errorf("decode JSON %q trailing data: %w", name, errors.New("unexpected trailing JSON value"))
+		} else if !errors.Is(err, io.EOF) {
+			decodeErr = fmt.Errorf("decode JSON %q trailing data: %w", name, err)
+		}
+	}
 	closeErr := file.Close()
 	if decodeErr != nil {
 		if closeErr != nil {
