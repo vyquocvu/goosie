@@ -88,33 +88,6 @@ func TestLayoutHeading(t *testing.T) {
 	}
 }
 
-func TestLayoutVerticalSpacing(t *testing.T) {
-	le := NewLayoutEngine(800, 600)
-	
-	tests := []struct {
-		tagName string
-		hasSpacing bool
-	}{
-		{"h1", true},
-		{"h2", true},
-		{"p", true},
-		{"ul", true},
-		{"li", true},
-		{"span", false},
-	}
-	
-	for _, tt := range tests {
-		t.Run(tt.tagName, func(t *testing.T) {
-			spacing := le.getVerticalSpacing(tt.tagName)
-			if tt.hasSpacing && spacing <= 0 {
-				t.Errorf("Expected spacing > 0 for %s, got %f", tt.tagName, spacing)
-			}
-			if !tt.hasSpacing && spacing != 0 {
-				t.Errorf("Expected spacing = 0 for %s, got %f", tt.tagName, spacing)
-			}
-		})
-	}
-}
 
 func TestLayoutMultipleChildren(t *testing.T) {
 	le := NewLayoutEngine(800, 600)
@@ -133,11 +106,11 @@ func TestLayoutMultipleChildren(t *testing.T) {
 	
 	le.Layout(parent)
 	
-	// Verify children are stacked vertically
+	// Verify children are stacked vertically (non-overlapping)
 	prevY := float32(0)
 	for i, child := range parent.Children {
-		if i > 0 && child.Box.Y <= prevY {
-			t.Errorf("Child %d should be positioned below previous child", i)
+		if i > 0 && child.Box.Y < prevY {
+			t.Errorf("Child %d overlaps previous child: Box.Y=%f < prevY=%f", i, child.Box.Y, prevY)
 		}
 		prevY = child.Box.Y + child.Box.Height
 	}

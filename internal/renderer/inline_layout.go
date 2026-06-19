@@ -514,11 +514,21 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 		// log.Printf("DEBUG: finalizeLine after coalescing: %d boxes", len(line.InlineBoxes))
 	}
 
+	// Guard: ensure line ascent/descent reflect the tallest inline box before computing offsets.
+	// This prevents negative boxY values when line.Ascent is still 0.
+	for _, box := range line.InlineBoxes {
+		if box.Ascent > line.Ascent {
+			line.Ascent = box.Ascent
+		}
+		if box.Descent > line.Descent {
+			line.Descent = box.Descent
+		}
+	}
+
 	// Set line height based on maximum ascent and descent
 	lineHeight := line.Ascent + line.Descent
 
 	// Also consider the maximum inline box height (includes leading/line-height)
-	// so that the line height matches the visual height of the tallest inline box
 	for _, box := range line.InlineBoxes {
 		if box.Height > lineHeight {
 			lineHeight = box.Height

@@ -77,15 +77,15 @@ func (cr *CanvasRenderer) SetWindow(w fyne.Window) {
 }
 
 func (cr *CanvasRenderer) onImageLoaded(source string) {
-	if cr.window == nil {
-		return
-	}
-
-	// Use fyne.Do to safely update the UI from any thread
+	// Always go through fyne.Do so that when SetWindow is called later,
+	// the callback already holds the refresh and it runs on the main thread.
+	// If window is nil at call time, we queue the refresh anyway — it will
+	// be a no-op inside the callback but the cache clear still happens.
 	fyne.Do(func() {
 		cr.ClearCache()
-		cr.window.Canvas().Refresh(cr.window.Content())
-
+		if cr.window != nil {
+			cr.window.Canvas().Refresh(cr.window.Content())
+		}
 		if cr.OnRefresh != nil {
 			cr.OnRefresh()
 		}

@@ -1,0 +1,207 @@
+# github.com/vyquocvu/goosie/internal/renderer.test
+ld: warning: ignoring duplicate libraries: '-lobjc'
+=== RUN   TestBugFixDuplicateRendering
+2026/03/10 17:35:12 DEBUG: RenderWithViewport start
+2026/03/10 17:35:12 DEBUG: DisplayList commands: 109
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="E" Box=(400.0,3.4,13.4,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="x" Box=(400.0,27.4,13.9,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="a" Box=(400.0,51.4,14.5,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="m" Box=(400.0,75.4,23.6,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="p" Box=(400.0,99.4,15.2,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="l" Box=(400.0,123.4,7.3,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="e" Box=(400.0,147.4,14.2,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="D" Box=(400.0,171.4,17.8,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="o" Box=(400.0,195.4,14.9,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="m" Box=(400.0,219.4,23.6,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="a" Box=(400.0,243.4,14.5,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="i" Box=(400.0,267.4,7.3,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=4 Text="n" Box=(400.0,291.4,15.8,28.8)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="T" Box=(400.0,358.9,8.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="h" Box=(400.0,374.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,390.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,406.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="d" Box=(400.0,422.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,438.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="m" Box=(400.0,454.9,15.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="a" Box=(400.0,470.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,486.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,502.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,518.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,534.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="f" Box=(400.0,550.9,5.5,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,566.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="r" Box=(400.0,582.9,6.6,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="u" Box=(400.0,598.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,614.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,630.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,646.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,662.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="d" Box=(400.0,678.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,694.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="c" Box=(400.0,710.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="u" Box=(400.0,726.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="m" Box=(400.0,742.9,15.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,758.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,774.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="t" Box=(400.0,790.9,5.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="a" Box=(400.0,806.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="t" Box=(400.0,822.9,5.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,838.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,854.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,870.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,886.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="x" Box=(400.0,902.9,8.5,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="a" Box=(400.0,918.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="m" Box=(400.0,934.9,15.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="p" Box=(400.0,950.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="l" Box=(400.0,966.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,982.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,998.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="w" Box=(400.0,1014.9,12.6,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1030.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="t" Box=(400.0,1046.9,5.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="h" Box=(400.0,1062.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,1078.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="u" Box=(400.0,1094.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="t" Box=(400.0,1110.9,5.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,1126.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,1142.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,1158.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="d" Box=(400.0,1174.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1190.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,1206.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="g" Box=(400.0,1222.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="p" Box=(400.0,1238.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,1254.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="r" Box=(400.0,1270.9,6.6,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="m" Box=(400.0,1286.9,15.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1302.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,1318.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,1334.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1350.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,1366.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,1382.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="." Box=(400.0,1398.9,4.3,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="A" Box=(400.0,1414.9,10.2,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="v" Box=(400.0,1430.9,8.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,1446.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1462.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="d" Box=(400.0,1478.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="u" Box=(400.0,1494.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,1510.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,1526.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1542.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,1558.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,1574.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="p" Box=(400.0,1590.9,9.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="e" Box=(400.0,1606.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="r" Box=(400.0,1622.9,6.6,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="a" Box=(400.0,1638.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="t" Box=(400.0,1654.9,5.8,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="i" Box=(400.0,1670.9,4.1,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="o" Box=(400.0,1686.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="n" Box=(400.0,1702.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="s" Box=(400.0,1718.9,7.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=6 Text="." Box=(400.0,1734.9,4.3,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="L" Box=(400.0,1782.9,8.4,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="e" Box=(400.0,1798.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="a" Box=(400.0,1814.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="r" Box=(400.0,1830.9,6.6,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="n" Box=(400.0,1846.9,9.9,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="m" Box=(400.0,1862.9,15.0,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="o" Box=(400.0,1878.9,9.7,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="r" Box=(400.0,1894.9,6.6,19.2)
+2026/03/10 17:35:12 DEBUG: PaintText NodeID=9 Text="e" Box=(400.0,1910.9,9.0,19.2)
+2026/03/10 17:35:12 DEBUG: RenderWithViewport end
+    bug_regression_test.go:59: Expected 3 rendered objects, got 109
+    bug_regression_test.go:62:   Object 13: Text="T"
+    bug_regression_test.go:62:   Object 14: Text="h"
+    bug_regression_test.go:62:   Object 15: Text="i"
+    bug_regression_test.go:62:   Object 16: Text="s"
+    bug_regression_test.go:62:   Object 17: Text="d"
+    bug_regression_test.go:62:   Object 18: Text="o"
+    bug_regression_test.go:62:   Object 19: Text="m"
+    bug_regression_test.go:62:   Object 20: Text="a"
+    bug_regression_test.go:62:   Object 21: Text="i"
+    bug_regression_test.go:62:   Object 22: Text="n"
+    bug_regression_test.go:62:   Object 23: Text="i"
+    bug_regression_test.go:62:   Object 24: Text="s"
+    bug_regression_test.go:62:   Object 25: Text="f"
+    bug_regression_test.go:62:   Object 26: Text="o"
+    bug_regression_test.go:62:   Object 27: Text="r"
+    bug_regression_test.go:62:   Object 28: Text="u"
+    bug_regression_test.go:62:   Object 29: Text="s"
+    bug_regression_test.go:62:   Object 30: Text="e"
+    bug_regression_test.go:62:   Object 31: Text="i"
+    bug_regression_test.go:62:   Object 32: Text="n"
+    bug_regression_test.go:62:   Object 33: Text="d"
+    bug_regression_test.go:62:   Object 34: Text="o"
+    bug_regression_test.go:62:   Object 35: Text="c"
+    bug_regression_test.go:62:   Object 36: Text="u"
+    bug_regression_test.go:62:   Object 37: Text="m"
+    bug_regression_test.go:62:   Object 38: Text="e"
+    bug_regression_test.go:62:   Object 39: Text="n"
+    bug_regression_test.go:62:   Object 40: Text="t"
+    bug_regression_test.go:62:   Object 41: Text="a"
+    bug_regression_test.go:62:   Object 42: Text="t"
+    bug_regression_test.go:62:   Object 43: Text="i"
+    bug_regression_test.go:62:   Object 44: Text="o"
+    bug_regression_test.go:62:   Object 45: Text="n"
+    bug_regression_test.go:62:   Object 46: Text="e"
+    bug_regression_test.go:62:   Object 47: Text="x"
+    bug_regression_test.go:62:   Object 48: Text="a"
+    bug_regression_test.go:62:   Object 49: Text="m"
+    bug_regression_test.go:62:   Object 50: Text="p"
+    bug_regression_test.go:62:   Object 51: Text="l"
+    bug_regression_test.go:62:   Object 52: Text="e"
+    bug_regression_test.go:62:   Object 53: Text="s"
+    bug_regression_test.go:62:   Object 54: Text="w"
+    bug_regression_test.go:62:   Object 55: Text="i"
+    bug_regression_test.go:62:   Object 56: Text="t"
+    bug_regression_test.go:62:   Object 57: Text="h"
+    bug_regression_test.go:62:   Object 58: Text="o"
+    bug_regression_test.go:62:   Object 59: Text="u"
+    bug_regression_test.go:62:   Object 60: Text="t"
+    bug_regression_test.go:62:   Object 61: Text="n"
+    bug_regression_test.go:62:   Object 62: Text="e"
+    bug_regression_test.go:62:   Object 63: Text="e"
+    bug_regression_test.go:62:   Object 64: Text="d"
+    bug_regression_test.go:62:   Object 65: Text="i"
+    bug_regression_test.go:62:   Object 66: Text="n"
+    bug_regression_test.go:62:   Object 67: Text="g"
+    bug_regression_test.go:62:   Object 68: Text="p"
+    bug_regression_test.go:62:   Object 69: Text="e"
+    bug_regression_test.go:62:   Object 70: Text="r"
+    bug_regression_test.go:62:   Object 71: Text="m"
+    bug_regression_test.go:62:   Object 72: Text="i"
+    bug_regression_test.go:62:   Object 73: Text="s"
+    bug_regression_test.go:62:   Object 74: Text="s"
+    bug_regression_test.go:62:   Object 75: Text="i"
+    bug_regression_test.go:62:   Object 76: Text="o"
+    bug_regression_test.go:62:   Object 77: Text="n"
+    bug_regression_test.go:62:   Object 78: Text="."
+    bug_regression_test.go:62:   Object 79: Text="A"
+    bug_regression_test.go:62:   Object 80: Text="v"
+    bug_regression_test.go:62:   Object 81: Text="o"
+    bug_regression_test.go:62:   Object 82: Text="i"
+    bug_regression_test.go:62:   Object 83: Text="d"
+    bug_regression_test.go:62:   Object 84: Text="u"
+    bug_regression_test.go:62:   Object 85: Text="s"
+    bug_regression_test.go:62:   Object 86: Text="e"
+    bug_regression_test.go:62:   Object 87: Text="i"
+    bug_regression_test.go:62:   Object 88: Text="n"
+    bug_regression_test.go:62:   Object 89: Text="o"
+    bug_regression_test.go:62:   Object 90: Text="p"
+    bug_regression_test.go:62:   Object 91: Text="e"
+    bug_regression_test.go:62:   Object 92: Text="r"
+    bug_regression_test.go:62:   Object 93: Text="a"
+    bug_regression_test.go:62:   Object 94: Text="t"
+    bug_regression_test.go:62:   Object 95: Text="i"
+    bug_regression_test.go:62:   Object 96: Text="o"
+    bug_regression_test.go:62:   Object 97: Text="n"
+    bug_regression_test.go:62:   Object 98: Text="s"
+    bug_regression_test.go:62:   Object 99: Text="."
+--- FAIL: TestBugFixDuplicateRendering (0.24s)
+FAIL
+FAIL	github.com/vyquocvu/goosie/internal/renderer	1.407s
+FAIL

@@ -5,6 +5,7 @@ import (
 )
 
 const defaultUAStyle = `
+body { display: block; margin: 8px; }
 b, strong { font-weight: bold; }
 i, em { font-style: italic; }
 u { text-decoration: underline; }
@@ -22,7 +23,13 @@ h6 { font-size: 0.67em; font-weight: bold; display: block; margin: 2.33em 0; }
 p { display: block; margin: 1em 0; }
 ul { display: block; list-style-type: disc; margin: 1em 0; padding-left: 40px; }
 ol { display: block; list-style-type: decimal; margin: 1em 0; padding-left: 40px; }
-li { display: list-item; }
+li { display: list-item; margin: 0.1em 0; }
+dl { display: block; margin: 1em 0; }
+dt { display: block; font-weight: bold; }
+dd { display: block; margin-left: 40px; }
+blockquote { display: block; margin: 1em 40px; }
+pre { display: block; margin: 1em 0; white-space: pre; }
+hr { display: block; margin: 0.5em 0; border: 1px solid; }
 table { display: table; border-collapse: separate; border-spacing: 2px; border-color: gray; }
 tr { display: table-row; }
 td, th { display: table-cell; vertical-align: inherit; }
@@ -32,20 +39,12 @@ tbody { display: table-row-group; }
 tfoot { display: table-footer-group; }
 `
 
-var defaultStyleSheet *css.StyleSheet
-
 // GetDefaultStyleSheet returns the default user-agent stylesheet.
 func GetDefaultStyleSheet() *css.StyleSheet {
-	if defaultStyleSheet != nil {
-		return defaultStyleSheet
-	}
-
 	parser := css.NewParser(defaultUAStyle)
 	sheet, err := parser.Parse()
 	if err != nil {
-		// Should not happen with hardcoded CSS
 		return &css.StyleSheet{}
 	}
-	defaultStyleSheet = sheet
-	return defaultStyleSheet
+	return sheet
 }

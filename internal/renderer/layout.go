@@ -439,15 +439,7 @@ func (le *LayoutEngine) computeTextLayout(node *RenderNode, layoutBox *LayoutBox
 
 // computeElementLayout computes layout for element nodes
 func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32) float32 {
-	// Calculate spacing based on element type
-	verticalSpacing := le.getVerticalSpacing(node.TagName)
-
 	currentY := y
-
-	// Add top spacing for certain elements
-	if verticalSpacing > 0 {
-		currentY += verticalSpacing
-	}
 
 	// Add border top offset before padding
 	currentY += layoutBox.BorderTopWidth
@@ -583,7 +575,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 				textareaHeight := float32(60) + layoutBox.PaddingTop + layoutBox.PaddingBottom
 				childY = currentY + textareaHeight
 			} else {
-				// Fallback to old behavior for empty inline elements using Block layout (e.g. empty div)
+				// Fallback for empty inline elements using Block layout (e.g. empty div)
 				for _, child := range node.Children {
 					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
 					if childLayoutBox != nil {
@@ -600,11 +592,6 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 
 	// Add border bottom offset after padding
 	childY += layoutBox.BorderBottomWidth
-
-	// Add bottom spacing for certain elements
-	if verticalSpacing > 0 {
-		childY += verticalSpacing
-	}
 
 	return childY
 }
@@ -704,53 +691,31 @@ func (le *LayoutEngine) layoutTextNode(node *RenderNode, x, y, availableWidth fl
 	return y + metrics.Height
 }
 
-// layoutElementNode handles layout for element nodes
+// layoutElementNode handles layout for element nodes (legacy path used by layoutNode)
 func (le *LayoutEngine) layoutElementNode(node *RenderNode, x, y, availableWidth float32) float32 {
-	// Set initial position
 	node.Box.X = x
 	node.Box.Y = y
 	node.Box.Width = availableWidth
 
-	// Calculate spacing based on element type
-	verticalSpacing := le.getVerticalSpacing(node.TagName)
-
 	currentY := y
-
-	// Add top spacing for certain elements
-	if verticalSpacing > 0 {
-		currentY += verticalSpacing
-	}
-
-	// Layout children
 	childY := currentY
 
 	if node.IsBlock() {
-		// Block elements: stack children vertically
 		for _, child := range node.Children {
 			childY = le.layoutNode(child, x, childY, availableWidth)
 		}
 	} else {
-		// Inline elements: layout children inline (simplified - just horizontal for now)
 		childX := x
 		for _, child := range node.Children {
 			if child.Type == NodeTypeText {
 				childY = le.layoutTextNode(child, childX, currentY, availableWidth-childX+x)
-				// For inline layout, we'd advance childX here
-				// For simplicity, we're just doing basic vertical stacking
 			} else {
 				childY = le.layoutNode(child, childX, childY, availableWidth)
 			}
 		}
 	}
 
-	// Calculate total height
 	node.Box.Height = childY - currentY
-
-	// Add bottom spacing for certain elements
-	if verticalSpacing > 0 {
-		childY += verticalSpacing
-	}
-
 	return childY
 }
 
@@ -759,31 +724,6 @@ func (le *LayoutEngine) getFontSize(tagName string) float32 {
 	return le.fontMetrics.GetFontSize(tagName)
 }
 
-// getVerticalSpacing returns the vertical spacing (margin) for an element
-func (le *LayoutEngine) getVerticalSpacing(tagName string) float32 {
-	// Base spacing on the element's font size to approximate UA defaults.
-	// Headings: margin-top/bottom ≈ 0.67em; Paragraphs/Lists: ≈ 1.0em.
-	fontSize := le.fontMetrics.GetFontSize(tagName)
-	spacing := map[string]float32{
-		"h1":  fontSize * 0.67,
-		"h2":  fontSize * 0.67,
-		"h3":  fontSize * 0.67,
-		"h4":  fontSize * 0.67,
-		"h5":  fontSize * 0.67,
-		"h6":  fontSize * 0.67,
-		"p":   fontSize * 1.0,
-		"ul":  fontSize * 0.5,
-		"ol":  fontSize * 0.5,
-		"li":  fontSize * 0.1,
-		"dl":  fontSize * 1.0,
-		"pre": fontSize * 1.0,
-	}
-
-	if s, ok := spacing[tagName]; ok {
-		return s
-	}
-	return 0
-}
 
 // whiteSpaceModeForNode selects white space handling based on element type
 func (le *LayoutEngine) whiteSpaceModeForNode(node *RenderNode) WhiteSpaceMode {

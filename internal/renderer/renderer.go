@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -41,6 +42,9 @@ type Renderer struct {
 
 	// Testing mode to bypass Fyne's main thread requirement for callbacks
 	testingMode bool
+
+	// Mutex protects stylesheet during concurrent CSS loading
+	stylesheetMu sync.RWMutex
 }
 
 // NewRenderer creates a new HTML renderer
@@ -66,7 +70,9 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	}
 
 	// Extract and parse CSS from <style> tags
+	r.stylesheetMu.Lock()
 	r.stylesheet = extractAndParseCSS(doc)
+	r.stylesheetMu.Unlock()
 
 	// Find body element
 	bodyNode := findBodyNode(doc)
@@ -250,7 +256,9 @@ func (r *Renderer) Refresh() {
 	}
 
 	// Apply styles (in case attributes changed)
+	r.stylesheetMu.RLock()
 	styleManager := NewStyleManager(r.stylesheet)
+	r.stylesheetMu.RUnlock()
 	styleManager.ApplyStyles(r.currentRenderTree)
 
 	// Perform layout
@@ -451,12 +459,14 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 		// But for now, we'll update it inside fyne.Do to be safe with UI refresh.
 
 		fyne.Do(func() {
+			r.stylesheetMu.Lock()
 			if r.stylesheet == nil {
 				r.stylesheet = stylesheet
 			} else {
 				r.stylesheet.Rules = append(r.stylesheet.Rules, stylesheet.Rules...)
 				r.stylesheet.AtRules = append(r.stylesheet.AtRules, stylesheet.AtRules...)
 			}
+			r.stylesheetMu.Unlock()
 			r.Refresh()
 		})
 	}

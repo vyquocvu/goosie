@@ -7,9 +7,27 @@ on:
 
 jobs:
   build-and-release:
-    runs-on: macos-14 # macOS Apple Silicon runner
+    strategy:
+      matrix:
+        platform:
+          - goos: darwin
+            goarch: arm64
+            artifact: goosie-darwin-arm64
+          - goos: darwin
+            goarch: amd64
+            artifact: goosie-darwin-amd64
+          - goos: linux
+            goarch: amd64
+            artifact: goosie-linux-amd64
+          - goos: linux
+            goarch: arm64
+            artifact: goosie-linux-arm64
+          - goos: windows
+            goarch: amd64
+            artifact: goosie-windows-amd64.exe
+    runs-on: ubuntu-latest
     permissions:
-      contents: write # Needed to create a GitHub Release
+      contents: write
 
     steps:
       - name: Checkout code
@@ -24,15 +42,22 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Build macOS Apple Silicon binary
+      - name: Build ${{ matrix.platform.goos }} ${{ matrix.platform.goarch }}
         run: |
           mkdir -p build
-          GOOS=darwin GOARCH=arm64 go build -o build/goosie-macos-arm64 ./cmd/browser
-          cd build && tar -czvf goosie-macos-arm64.tar.gz goosie-macos-arm64
+          GOOS=${{ matrix.platform.goos }} GOARCH=${{ matrix.platform.goarch }} go build -o build/${{ matrix.platform.artifact }} ./cmd/browser
 
-      - name: Create GitHub Release and Upload Artifact
+      - name: Package
+        if: matrix.platform.goos != 'windows'
+        run: |
+          cd build
+          tar -czvf ${{ matrix.platform.artifact }}.tar.gz ${{ matrix.platform.artifact }}
+
+      - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: build/goosie-macos-arm64.tar.gz
+          files: |
+            build/${{ matrix.platform.artifact }}
+            ${{ matrix.platform.goos != 'windows' && format('build/{0}.tar.gz', matrix.platform.artifact) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

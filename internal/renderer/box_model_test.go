@@ -392,10 +392,10 @@ func TestBoxModelLayout(t *testing.T) {
 		t.Errorf("BorderTopStyle = %s; want solid", layoutBox.BorderTopStyle)
 	}
 
-	// The box should be positioned with margin offset
-	// Initial x=0, y=0, but with 10px margin, box should start at x=10, y=10
-	if layoutBox.Box.X != 10.0 {
-		t.Errorf("Box.X = %f; want 10.0", layoutBox.Box.X)
+	// The box should be positioned with margin offset.
+	// body has 8px margin (UA default), div has 10px margin: Box.X = 8 + 10 = 18
+	if layoutBox.Box.X != 18.0 {
+		t.Errorf("Box.X = %f; want 18.0 (body 8px margin + div 10px margin)", layoutBox.Box.X)
 	}
 	
 	// Verify layout root was created
