@@ -73,3 +73,22 @@ func TestCorruptJSONIsBackedUp(t *testing.T) {
 	require.FileExists(t, path+".corrupt")
 	require.NoFileExists(t, path)
 }
+
+func TestCorruptJSONBackupFailureIsReturned(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Open(Options{Root: dir})
+	require.NoError(t, err)
+
+	path := filepath.Join(dir, "state.json")
+	err = os.WriteFile(path, []byte("{not-json"), 0o600)
+	require.NoError(t, err)
+	err = os.Mkdir(path+".corrupt", 0o700)
+	require.NoError(t, err)
+
+	var loaded sampleDocument
+	err = p.LoadJSON("state.json", &loaded)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "decode")
+	require.ErrorContains(t, err, "back up corrupt JSON")
+	require.FileExists(t, path)
+}

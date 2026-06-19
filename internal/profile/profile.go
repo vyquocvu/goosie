@@ -2,6 +2,8 @@ package profile
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -64,8 +66,13 @@ func (p *Profile) LoadJSON(name string, target any) error {
 	decodeErr := json.NewDecoder(file).Decode(target)
 	closeErr := file.Close()
 	if decodeErr != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return decodeErr
+		if closeErr != nil {
+			return fmt.Errorf("decode JSON %q and close corrupt JSON before backup: %w", name, errors.Join(decodeErr, closeErr))
+		}
+		if backupErr := os.Rename(path, path+".corrupt"); backupErr != nil {
+			return fmt.Errorf("decode JSON %q and back up corrupt JSON: %w", name, errors.Join(decodeErr, backupErr))
+		}
+		return fmt.Errorf("decode JSON %q: %w", name, decodeErr)
 	}
 	if closeErr != nil {
 		return closeErr
