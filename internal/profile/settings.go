@@ -4,9 +4,9 @@ import "sync"
 
 type Settings struct {
 	Homepage            string `json:"homepage"`
-	DefaultSearchEngine string `json:"defaultSearchEngine"`
-	EnableJavaScript    bool   `json:"enableJavaScript"`
-	EnableImages        bool   `json:"enableImages"`
+	DefaultSearchEngine string `json:"default_search_engine"`
+	EnableJavaScript    bool   `json:"enable_javascript"`
+	EnableImages        bool   `json:"enable_images"`
 }
 
 func DefaultSettings() Settings {

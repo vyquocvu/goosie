@@ -8,7 +8,7 @@ import (
 type Visit struct {
 	URL       string    `json:"url"`
 	Title     string    `json:"title"`
-	VisitedAt time.Time `json:"visitedAt"`
+	VisitedAt time.Time `json:"visited_at"`
 }
 
 type SessionTab struct {

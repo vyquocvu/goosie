@@ -8,8 +8,8 @@ import (
 type Bookmark struct {
 	URL       string    `json:"url"`
 	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type BookmarkStore struct {
