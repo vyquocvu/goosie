@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -148,6 +149,16 @@ func NewBrowser() *Browser {
 		if tab := browser.ActiveTab(); tab != nil && tab.jsRuntime != nil {
 			tab.jsRuntime.ClearConsoleMessages()
 			tab.jsRuntime.ClearJavaScriptErrors()
+		}
+	})
+	browser.consolePanel.SetExecuteCallback(func(source string) {
+		if tab := browser.ActiveTab(); tab != nil && tab.jsRuntime != nil {
+			value, err := tab.jsRuntime.RunScript(source)
+			if err != nil {
+				browser.consolePanel.AddMessage(js.ConsoleMessage{Level: "error", Message: err.Error(), Timestamp: time.Now(), Data: err.Error()})
+				return
+			}
+			browser.consolePanel.AddMessage(js.ConsoleMessage{Level: "log", Message: value.String(), Timestamp: time.Now(), Data: value.String()})
 		}
 	})
 
