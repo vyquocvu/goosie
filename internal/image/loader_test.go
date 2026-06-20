@@ -5,13 +5,25 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
+
+func requireLoopbackListener(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("loopback listener unavailable in this environment: %v", err)
+	}
+	require.NoError(t, ln.Close())
+}
 
 func TestNewLoader(t *testing.T) {
 	l := NewLoader(10)
@@ -98,6 +110,7 @@ func TestLoadFromFile(t *testing.T) {
 }
 
 func TestLoadFromURL(t *testing.T) {
+	requireLoopbackListener(t)
 	// Create a test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a simple 10x10 blue image
@@ -133,6 +146,7 @@ func TestLoadFromURL(t *testing.T) {
 }
 
 func TestLoadFromURLError(t *testing.T) {
+	requireLoopbackListener(t)
 	// Create a test HTTP server that returns 404
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

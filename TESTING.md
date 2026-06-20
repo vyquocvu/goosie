@@ -2,6 +2,16 @@
 
 This document outlines the comprehensive Test-Driven Development (TDD) approach for the Goosie browser project.
 
+## Test Tiers
+
+Use `go test ./... -short` for sandbox-safe checks. These tests do not require external network access, loopback listeners, GUI launch permissions, or Playwright.
+
+Use `go test ./...` for the normal local suite. Tests that require `httptest` loopback servers skip themselves when the host environment forbids opening a listener.
+
+Use `go test -tags=e2e ./test/e2e` for Playwright-driven browser tests. This tier requires Playwright browsers and host permissions to launch Chromium.
+
+Use package-specific commands such as `go test ./internal/net -run TestServiceFetchRecordsRequestLog` while developing a focused subsystem.
+
 ## 1. Testing Philosophy
 
 We follow a strict **Test-Driven Development (TDD)** process:

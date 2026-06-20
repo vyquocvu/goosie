@@ -2,6 +2,7 @@ package net
 
 import (
 	"context"
+	stdnet "net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -9,8 +10,20 @@ import (
 	"time"
 )
 
+func requireLoopbackListener(t *testing.T) {
+	t.Helper()
+	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("loopback listener unavailable in this environment: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close loopback listener: %v", err)
+	}
+}
+
 // TestAsyncFetchCancellation verifies that fetch can be cancelled mid-flight
 func TestAsyncFetchCancellation(t *testing.T) {
+	requireLoopbackListener(t)
 	// Create a server that delays response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate slow response
@@ -47,6 +60,7 @@ func TestAsyncFetchCancellation(t *testing.T) {
 
 // TestConcurrentFetches verifies multiple concurrent fetches work correctly
 func TestConcurrentFetches(t *testing.T) {
+	requireLoopbackListener(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("test response"))
@@ -55,10 +69,10 @@ func TestConcurrentFetches(t *testing.T) {
 
 	fetcher := NewFetcher()
 	const numFetches = 10
-	
+
 	var wg sync.WaitGroup
 	errors := make(chan error, numFetches)
-	
+
 	for i := 0; i < numFetches; i++ {
 		wg.Add(1)
 		go func() {
@@ -70,10 +84,10 @@ func TestConcurrentFetches(t *testing.T) {
 			}
 		}()
 	}
-	
+
 	wg.Wait()
 	close(errors)
-	
+
 	for err := range errors {
 		t.Errorf("Concurrent fetch failed: %v", err)
 	}
@@ -81,6 +95,7 @@ func TestConcurrentFetches(t *testing.T) {
 
 // TestAsyncFetchWithTimeout verifies that timeout context works correctly
 func TestAsyncFetchWithTimeout(t *testing.T) {
+	requireLoopbackListener(t)
 	// Create a server that never responds
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Second) // Very long delay
@@ -107,6 +122,7 @@ func TestAsyncFetchWithTimeout(t *testing.T) {
 
 // TestMultipleNavigationCancellation simulates user rapidly navigating between pages
 func TestMultipleNavigationCancellation(t *testing.T) {
+	requireLoopbackListener(t)
 	// Create multiple test servers
 	servers := make([]*httptest.Server, 3)
 	for i := range servers {
@@ -120,20 +136,20 @@ func TestMultipleNavigationCancellation(t *testing.T) {
 	}
 
 	fetcher := NewFetcher()
-	
+
 	// Simulate rapid navigation - each navigation cancels previous one
 	var ctx context.Context
 	var cancel context.CancelFunc
-	
+
 	for i, server := range servers {
 		// Cancel previous request
 		if cancel != nil {
 			cancel()
 		}
-		
+
 		// Start new request
 		ctx, cancel = context.WithCancel(context.Background())
-		
+
 		if i < len(servers)-1 {
 			// For all but last, start fetch and immediately move to next
 			go func(url string, c context.Context) {
@@ -147,7 +163,7 @@ func TestMultipleNavigationCancellation(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if cancel != nil {
 		cancel()
 	}
