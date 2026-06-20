@@ -1,6 +1,9 @@
 package form
 
 import (
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -8,6 +11,29 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/html"
 )
+
+type fakeSubmitClient struct {
+	requests []*http.Request
+	body     string
+	status   int
+	err      error
+}
+
+func (c *fakeSubmitClient) Do(req *http.Request) (*http.Response, error) {
+	c.requests = append(c.requests, req)
+	if c.err != nil {
+		return nil, c.err
+	}
+	status := c.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(c.body)),
+		Request:    req,
+	}, nil
+}
 
 func TestFormSubmission_SubmitButton_Click(t *testing.T) {
 	htmlContent := `<html><body><form id="test-form"><input name="username" value="testuser"><button type="submit">Submit</button></form></body></html>`
@@ -61,6 +87,9 @@ func TestFormSubmission_MultiSubmit_Prevention(t *testing.T) {
 	state.Submit()
 	state.Submit()
 	assert.Equal(t, 1, submissionCount, "Only one submission should occur (double-click prevention)")
+	state.ResetSubmission()
+	state.Submit()
+	assert.Equal(t, 2, submissionCount, "Reset should allow a later submission")
 }
 
 func TestFormData_TextInput(t *testing.T) {
@@ -176,34 +205,43 @@ func TestFormData_UncheckedCheckbox(t *testing.T) {
 	assert.Equal(t, "John", data.Get("name"))
 }
 
-func TestHTTPGet_Submission(t *testing.T) {
+func TestHTTPGet_SubmissionResolvesRelativeAction(t *testing.T) {
 	htmlContent := `<html><body><form method="GET" action="/api/search"><input name="q" value="test"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	client := &fakeSubmitClient{}
+	submitter.SetClient(client)
+	submitter.SetDocumentURL("https://example.com/page")
 	state := NewFormState(formNode)
-	data := state.GetFormData()
-	result, err := submitter.Submit(formNode, data)
+	result, err := submitter.Submit(formNode, state.GetFormData())
 	require.NoError(t, err)
-	assert.Equal(t, "GET", result.Method)
-	assert.Contains(t, result.URL, "/api/search?q=test")
+	require.Equal(t, "GET", result.Method)
+	require.Equal(t, "https://example.com/api/search?q=test", result.URL)
+	require.Len(t, client.requests, 1)
 }
 
-func TestHTTPPost_Submission(t *testing.T) {
+func TestHTTPPost_SubmissionEncodesFormBody(t *testing.T) {
 	htmlContent := `<html><body><form method="POST" action="/api/user"><input name="name" value="John"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	client := &fakeSubmitClient{}
+	submitter.SetClient(client)
+	submitter.SetDocumentURL("https://example.com/profile")
 	state := NewFormState(formNode)
-	data := state.GetFormData()
-	result, err := submitter.Submit(formNode, data)
+	result, err := submitter.Submit(formNode, state.GetFormData())
 	require.NoError(t, err)
-	assert.Equal(t, "POST", result.Method)
-	assert.Equal(t, "John", result.Body.Get("name"))
+	require.Equal(t, "POST", result.Method)
+	require.Equal(t, "John", result.Body.Get("name"))
+	require.Equal(t, "application/x-www-form-urlencoded", client.requests[0].Header.Get("Content-Type"))
+	encoded, err := io.ReadAll(client.requests[0].Body)
+	require.NoError(t, err)
+	require.Equal(t, "name=John", string(encoded))
 }
 
 func TestHTTPResponse_Success(t *testing.T) {
@@ -213,11 +251,12 @@ func TestHTTPResponse_Success(t *testing.T) {
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.SetClient(&fakeSubmitClient{status: http.StatusOK})
+	submitter.SetDocumentURL("https://example.com/form")
 	state := NewFormState(formNode)
-	data := state.GetFormData()
 	onSuccess := false
 	submitter.SetSuccessCallback(func(r *SubmissionResult) { onSuccess = true })
-	_, err = submitter.Submit(formNode, data)
+	_, err = submitter.Submit(formNode, state.GetFormData())
 	require.NoError(t, err)
 	assert.True(t, onSuccess, "Success callback should be called on 200 OK")
 }
@@ -229,6 +268,8 @@ func TestHTTPResponse_Error(t *testing.T) {
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.SetClient(&fakeSubmitClient{status: http.StatusBadRequest})
+	submitter.SetDocumentURL("https://example.com/form")
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	onError := false
@@ -245,6 +286,7 @@ func TestHTTPTimeout(t *testing.T) {
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.SetClient(&fakeSubmitClient{err: errors.New("request timeout")})
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	_, err = submitter.Submit(formNode, data)

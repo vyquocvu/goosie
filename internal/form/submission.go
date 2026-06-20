@@ -20,11 +20,16 @@ type SubmissionResult struct {
 	Status int
 }
 
+type SubmitClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 type FormSubmitter struct {
-	onSuccess SuccessCallback
-	onError   ErrorCallback
-	timeoutMs int
-	client    *http.Client
+	onSuccess   SuccessCallback
+	onError     ErrorCallback
+	timeoutMs   int
+	client      SubmitClient
+	documentURL string
 }
 
 func NewFormSubmitter() *FormSubmitter {
@@ -44,6 +49,45 @@ func (s *FormSubmitter) SetErrorCallback(callback ErrorCallback) {
 	s.onError = callback
 }
 
+func (s *FormSubmitter) SetClient(client SubmitClient) {
+	if client != nil {
+		s.client = client
+	}
+}
+
+func (s *FormSubmitter) SetDocumentURL(rawURL string) {
+	s.documentURL = rawURL
+}
+
+func EscapeForDisplay(value string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&#34;",
+		"'", "&#39;",
+	)
+	return replacer.Replace(value)
+}
+
+func (s *FormSubmitter) resolveAction(action string) (string, error) {
+	parsed, err := url.Parse(action)
+	if err != nil {
+		return "", err
+	}
+	if parsed.IsAbs() || s.documentURL == "" {
+		return parsed.String(), nil
+	}
+	base, err := url.Parse(s.documentURL)
+	if err != nil {
+		return "", err
+	}
+	if !base.IsAbs() {
+		return "", fmt.Errorf("document URL must be absolute")
+	}
+	return base.ResolveReference(parsed).String(), nil
+}
+
 func (s *FormSubmitter) Submit(formNode *html.Node, data FormData) (*SubmissionResult, error) {
 	action := getAttrValue(formNode, "action")
 	method := strings.ToUpper(getAttrValue(formNode, "method"))
@@ -53,6 +97,13 @@ func (s *FormSubmitter) Submit(formNode *html.Node, data FormData) (*SubmissionR
 
 	if action == "" {
 		return nil, fmt.Errorf("no action URL specified")
+	}
+	action, err := s.resolveAction(action)
+	if err != nil {
+		if s.onError != nil {
+			s.onError(err)
+		}
+		return nil, err
 	}
 
 	var body io.Reader
@@ -107,7 +158,7 @@ func (s *FormSubmitter) Submit(formNode *html.Node, data FormData) (*SubmissionR
 			strings.Contains(errMsg, "timeout") ||
 			strings.Contains(errMsg, "no such host") ||
 			strings.Contains(errMsg, "network is unreachable") {
-			return nil, fmt.Errorf("connection error: %v", err)
+			return nil, fmt.Errorf("connection error: %w", err)
 		}
 		return nil, err
 	}
@@ -124,6 +175,7 @@ func (s *FormSubmitter) Submit(formNode *html.Node, data FormData) (*SubmissionR
 		if s.onError != nil {
 			s.onError(err)
 		}
+		return result, err
 	}
 
 	return result, nil
