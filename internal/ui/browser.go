@@ -1,9 +1,12 @@
 package ui
 
 import (
-    "fmt"
+	"fmt"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -11,8 +14,10 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-    "github.com/vyquocvu/goosie/internal/js"
-    "github.com/vyquocvu/goosie/internal/renderer"
+	"github.com/vyquocvu/goosie/internal/js"
+	goosienet "github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/profile"
+	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 // fixedHeightLayout is a custom layout that sets a fixed height for a widget
@@ -40,6 +45,15 @@ func (l *fixedHeightLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) 
 
 // NavigationCallback is a function that is called when navigation is requested
 type NavigationCallback func(url string)
+
+type BrowserDependencies struct {
+	Profile       *profile.Profile
+	Bookmarks     *profile.BookmarkStore
+	History       *profile.HistoryStore
+	SettingsStore *profile.SettingsStore
+	Storage       *profile.StorageStore
+	Network       *goosienet.Service
+}
 
 // Browser represents the browser UI
 type Browser struct {
@@ -70,6 +84,8 @@ type Browser struct {
 	inspectButton       *widget.Button
 	screenshotButton    *widget.Button
 	RendererFactory     func() HTMLRenderer
+	deps                BrowserDependencies
+	shortcuts           *ShortcutRegistry
 }
 
 // Tab represents a single browser tab
@@ -155,6 +171,38 @@ func NewBrowser() *Browser {
 	browser.createNavigationControls()
 
 	return browser
+}
+
+func NewBrowserWithDependencies(deps BrowserDependencies) *Browser {
+	browser := NewBrowser()
+	browser.deps = deps
+	browser.shortcuts = NewShortcutRegistry()
+	browser.registerDefaultShortcuts()
+	if deps.SettingsStore != nil {
+		browser.settings.ApplyProfileSettings(deps.SettingsStore.Get())
+	}
+	if deps.Bookmarks != nil {
+		for _, bookmark := range deps.Bookmarks.List() {
+			browser.state.AddBookmark(bookmark.URL)
+		}
+	}
+	return browser
+}
+
+func (b *Browser) registerDefaultShortcuts() {
+	if b.shortcuts == nil {
+		return
+	}
+	b.shortcuts.Register("focus-address", func() {
+		if b.urlEntry != nil && b.window != nil {
+			b.window.Canvas().Focus(b.urlEntry)
+		}
+	})
+	b.shortcuts.Register("new-tab", func() {
+		if b.tabs != nil {
+			b.tabs.Append(b.NewTab().AsTabItem())
+		}
+	})
 }
 
 // toggleConsole toggles the visibility of the console panel
@@ -379,9 +427,9 @@ func (b *Browser) createNavigationControls() {
 	// URL entry
 	b.urlEntry = widget.NewEntry()
 	b.urlEntry.SetPlaceHolder("Enter URL (e.g., https://example.com)")
-	b.urlEntry.OnSubmitted = func(url string) {
-		if b.onNavigate != nil && url != "" {
-			b.onNavigate(url)
+	b.urlEntry.OnSubmitted = func(input string) {
+		if b.onNavigate != nil && strings.TrimSpace(input) != "" {
+			b.onNavigate(ResolveAddressInput(input, b.settings.GetDefaultSearchEngine()))
 		}
 	}
 
@@ -459,6 +507,15 @@ func (t *Tab) GetJSRuntime() *js.Runtime {
 // SetJSRuntime sets the tab's JavaScript runtime
 func (t *Tab) SetJSRuntime(runtime *js.Runtime) {
 	t.jsRuntime = runtime
+	if runtime == nil || t.browser == nil {
+		return
+	}
+	if t.browser.deps.Storage != nil {
+		runtime.SetLocalStorageAdapter(t.browser.deps.Storage)
+	}
+	if current, err := urlpkg.Parse(t.state.GetCurrentURL()); err == nil && current.Scheme != "" && current.Host != "" {
+		runtime.SetOrigin(current.Scheme + "://" + current.Host)
+	}
 }
 
 // GetRenderer returns the tab's HTML renderer
@@ -476,9 +533,15 @@ func (b *Browser) toggleBookmark() {
 
 		if b.state.IsBookmarked(currentURL) {
 			b.state.RemoveBookmark(currentURL)
+			if b.deps.Bookmarks != nil {
+				_ = b.deps.Bookmarks.Remove(currentURL)
+			}
 			b.bookmarkButton.SetText("☆")
 		} else {
 			b.state.AddBookmark(currentURL)
+			if b.deps.Bookmarks != nil {
+				_ = b.deps.Bookmarks.Add(currentURL, tab.title)
+			}
 			b.bookmarkButton.SetText("★")
 		}
 		b.bookmarkButton.Refresh()
@@ -489,6 +552,14 @@ func (b *Browser) toggleBookmark() {
 func (b *Browser) NavigateTo(url string) {
 	if tab := b.ActiveTab(); tab != nil {
 		tab.state.AddToHistory(url)
+		if tab.jsRuntime != nil {
+			if current, err := urlpkg.Parse(url); err == nil && current.Scheme != "" && current.Host != "" {
+				tab.jsRuntime.SetOrigin(current.Scheme + "://" + current.Host)
+			}
+		}
+		if b.deps.History != nil {
+			_ = b.deps.History.AddVisit(url, tab.title)
+		}
 		b.urlEntry.SetText(url)
 		b.updateNavigationButtons()
 	}
@@ -631,6 +702,9 @@ func (b *Browser) showSettings() {
 			// Save settings
 			b.settings.SetHomepage(homepageEntry.Text)
 			b.settings.SetDefaultSearchEngine(searchEngineEntry.Text)
+			if b.deps.SettingsStore != nil {
+				_ = b.deps.SettingsStore.Set(b.settings.ToProfileSettings())
+			}
 		},
 		OnCancel: func() {
 			// Do nothing, just close

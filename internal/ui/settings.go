@@ -1,23 +1,27 @@
 package ui
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/vyquocvu/goosie/internal/profile"
+)
 
 // Settings represents browser preferences/settings
 type Settings struct {
-	mu              sync.RWMutex
-	homepage        string
+	mu                  sync.RWMutex
+	homepage            string
 	defaultSearchEngine string
-	enableJavaScript bool
-	enableImages     bool
+	enableJavaScript    bool
+	enableImages        bool
 }
 
 // NewSettings creates a new Settings instance with default values
 func NewSettings() *Settings {
 	return &Settings{
-		homepage:        "https://example.com",
+		homepage:            "https://example.com",
 		defaultSearchEngine: "https://www.google.com/search?q=",
-		enableJavaScript: true,
-		enableImages:     true,
+		enableJavaScript:    true,
+		enableImages:        true,
 	}
 }
 
@@ -75,4 +79,20 @@ func (s *Settings) SetEnableImages(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.enableImages = enabled
+}
+
+func (s *Settings) ApplyProfileSettings(settings profile.Settings) {
+	s.SetHomepage(settings.Homepage)
+	s.SetDefaultSearchEngine(settings.DefaultSearchEngine)
+	s.SetEnableJavaScript(settings.EnableJavaScript)
+	s.SetEnableImages(settings.EnableImages)
+}
+
+func (s *Settings) ToProfileSettings() profile.Settings {
+	return profile.Settings{
+		Homepage:            s.GetHomepage(),
+		DefaultSearchEngine: s.GetDefaultSearchEngine(),
+		EnableJavaScript:    s.GetEnableJavaScript(),
+		EnableImages:        s.GetEnableImages(),
+	}
 }
