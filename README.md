@@ -4,6 +4,10 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
 
 ## Features
 
+- **Persistent Profile Foundation**: Browser data can be stored in a profile directory, including bookmarks, history, settings, origin-scoped localStorage, cookies, and cache metadata.
+- **Private Browsing Foundation**: Ephemeral profile mode keeps browsing state in memory and avoids writing profile data to disk.
+- **Developer Tools Foundation**: Console execution, DOM inspection, network log, storage view, security summary, and downloads panels.
+- **Release Builds**: Tag-based GitHub Actions workflow builds cross-platform browser binaries.
 - **HTTP Fetching**: Async fetch with cancellation support using context
 - **HTML Parsing**: Parse HTML and extract body text using golang.org/x/net/html
 - **HTML Rendering**: Canvas-based renderer with layout engine
@@ -110,6 +114,16 @@ go run ./cmd/browser
 ```
 
 ## Usage
+
+### Test Tiers
+
+```bash
+go test ./... -short
+go test ./...
+go test -tags=e2e ./test/e2e
+```
+
+Use the short tier for sandbox-safe checks and the e2e tier for Playwright-driven browser tests.
 
 ### GUI Browser
 

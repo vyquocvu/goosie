@@ -121,7 +121,15 @@ This document outlines the planned features and improvements for the Goosie proj
 - [ ] Network waterfall chart
 - [ ] Storage inspector (cookies, localStorage)
 
-## Phase 5: Modern Web Standards (v1.0.0)
+## Phase 5: Browser Foundation (v1.0.0)
+
+- [x] Persistent profile stores for bookmarks, history, settings, session state, and origin-scoped localStorage
+- [x] Shared network service with cookies, HTTP cache, request log, downloads, and TLS summaries
+- [x] Correct form submission behavior with relative action resolution and duplicate-submit prevention
+- [x] Developer tools panels for console execution, network, storage, security, and downloads
+- [x] Sandbox-safe test tier and release workflow
+
+## Phase 6: Modern Web Standards
 
 ### HTML5 Features
 - [ ] Canvas API support
