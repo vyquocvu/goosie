@@ -345,8 +345,7 @@ func (b *Browser) RenderHTMLContent(htmlContent string) error {
 	// Set up refresh callback for the renderer
 	tab.htmlRenderer.SetRefreshCallback(func() {
 		fyne.Do(func() {
-			// Trigger a refresh of the scroll container to show changes
-			tab.contentScroll.Refresh()
+			refreshTabContent(tab)
 			// Also refresh inspector if visible
 			if b.inspectVisible {
 				b.inspectPanel.SetRenderer(tab.htmlRenderer)
@@ -366,6 +365,18 @@ func (b *Browser) RenderHTMLContent(htmlContent string) error {
 	})
 
 	return nil
+}
+
+func refreshTabContent(tab *Tab) {
+	if tab == nil || tab.htmlRenderer == nil || tab.contentScroll == nil {
+		return
+	}
+	content := tab.htmlRenderer.UpdateViewport()
+	if content == nil {
+		return
+	}
+	tab.contentScroll.Content = content
+	tab.contentScroll.Refresh()
 }
 
 // SetNavigationCallback sets the callback for when navigation is requested

@@ -13,7 +13,7 @@ type Parser struct {
 
 // NewParser creates a new Parser.
 func NewParser(input string) *Parser {
-	return &Parser{input: input}
+	return &Parser{input: strings.TrimPrefix(input, "\ufeff")}
 }
 
 // ParseStyleAttribute parses the content of a style attribute (e.g., "color: red; margin: 10px")
@@ -92,6 +92,15 @@ func (p *Parser) parseAtRule() (AtRule, error) {
 		// For @media and similar, parse nested rules
 		if atRule.Name == "media" || atRule.Name == "supports" {
 			for p.peek() != '}' && p.pos < len(p.input) {
+				if p.peek() == '@' {
+					nested, err := p.parseAtRule()
+					if err != nil {
+						return atRule, fmt.Errorf("error parsing nested at-rule: %w", err)
+					}
+					atRule.AtRules = append(atRule.AtRules, nested)
+					p.consumeWhitespaceAndComments()
+					continue
+				}
 				selectors, err := p.parseSelectorSequences()
 				if err != nil {
 					return atRule, fmt.Errorf("error parsing nested rule selectors: %w", err)
