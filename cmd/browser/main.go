@@ -176,6 +176,14 @@ func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, html string,
 		// Wire up the real HTTP fetcher so fetch() makes actual network requests
 		jsRuntime.SetFetcher(fetcher)
 
+		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
+		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
+			log.Printf("DOM mutated by JS, triggering UI re-render")
+			if err := tab.RenderHTML(mutatedHTML); err != nil {
+				log.Printf("Error rendering mutated HTML: %v", err)
+			}
+		})
+
 		// Set HTML content for JS runtime (enables document.getElementById etc.)
 		jsRuntime.SetHTMLContent(html)
 

@@ -1,7 +1,9 @@
 package form
 
 import (
+	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -49,7 +51,11 @@ func (s *FormState) Submit() {
 		return
 	}
 	s.submitEnabled = false
-	defer func() { s.submitEnabled = true }()
+	
+	// Re-enable after 500ms delay to prevent double-clicks
+	time.AfterFunc(500*time.Millisecond, func() {
+		s.submitEnabled = true
+	})
 
 	if s.onSubmit != nil {
 		s.onSubmit(s.GetFormData())
@@ -113,7 +119,7 @@ func collectFormData(node *html.Node, data FormData) {
 				data[name] = getAttrValue(node, "value")
 			}
 		default:
-			data[name] = getAttrValue(node, "value")
+			data[name] = sanitizeInput(getAttrValue(node, "value"))
 		}
 
 	case "select":
@@ -145,7 +151,7 @@ func collectFormData(node *html.Node, data FormData) {
 		if hasAttr(node, "disabled") {
 			return
 		}
-		data[name] = extractTextContent(node)
+		data[name] = sanitizeInput(extractTextContent(node))
 	}
 
 	for c := node.FirstChild; c != nil; c = c.NextSibling {
@@ -161,4 +167,9 @@ func extractTextContent(node *html.Node) string {
 		}
 	}
 	return sb.String()
+}
+
+func sanitizeInput(val string) string {
+	re := regexp.MustCompile(`(?i)<script.*?>.*?</script>|<script.*?>|.*?</script>`)
+	return re.ReplaceAllString(val, "")
 }

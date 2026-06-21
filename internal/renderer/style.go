@@ -465,6 +465,10 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		if val, err := parseColor(decl.Value); err == nil {
 			style.BackgroundColor = val
 		}
+	case "background":
+		if val, ok := parseBackgroundShorthandColor(decl.Value); ok {
+			style.BackgroundColor = val
+		}
 	case "width":
 		style.Width = decl.Value
 	case "height":
@@ -717,6 +721,43 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 }
 
 func parseFontSize(value string, parentFontSize float32) (float32, error) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return parentFontSize, nil
+	}
+
+	// Keywords
+	switch value {
+	case "xx-small":
+		return 9, nil
+	case "x-small":
+		return 10, nil
+	case "small":
+		return 13, nil
+	case "medium":
+		return 16, nil
+	case "large":
+		return 18, nil
+	case "x-large":
+		return 24, nil
+	case "xx-large":
+		return 32, nil
+	case "smaller":
+		return parentFontSize / 1.2, nil
+	case "larger":
+		return parentFontSize * 1.2, nil
+	case "inherit":
+		return parentFontSize, nil
+	}
+
+	// IMPORTANT: check rem before em
+	if strings.HasSuffix(value, "rem") {
+		val, err := strconv.ParseFloat(strings.TrimSuffix(value, "rem"), 32)
+		if err != nil {
+			return 0, err
+		}
+		return float32(val) * 16.0, nil
+	}
 	if strings.HasSuffix(value, "px") {
 		val, err := strconv.ParseFloat(strings.TrimSuffix(value, "px"), 32)
 		if err != nil {
@@ -731,7 +772,27 @@ func parseFontSize(value string, parentFontSize float32) (float32, error) {
 		}
 		return float32(val) * parentFontSize, nil
 	}
-	return 0, fmt.Errorf("unsupported font size unit")
+	if strings.HasSuffix(value, "%") {
+		val, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 32)
+		if err != nil {
+			return 0, err
+		}
+		return (float32(val) / 100.0) * parentFontSize, nil
+	}
+	if strings.HasSuffix(value, "pt") {
+		val, err := strconv.ParseFloat(strings.TrimSuffix(value, "pt"), 32)
+		if err != nil {
+			return 0, err
+		}
+		return float32(val) * 4.0 / 3.0, nil
+	}
+
+	// Try to parse as plain number
+	if val, err := strconv.ParseFloat(value, 32); err == nil {
+		return float32(val), nil
+	}
+
+	return 0, fmt.Errorf("unsupported font size unit: %s", value)
 }
 
 // parseLength parses a CSS length value and returns its numeric value in pixels
@@ -826,16 +887,184 @@ func parseLength(value string, fontSize float32) float32 {
 }
 
 func parseColor(value string) (color.Color, error) {
-	lowerValue := strings.ToLower(value)
+	lowerValue := strings.ToLower(strings.TrimSpace(value))
+	if lowerValue == "transparent" {
+		return color.Transparent, nil
+	}
 	if hex, ok := colorNameToHex[lowerValue]; ok {
 		return parseHexColor(hex)
 	}
 	if strings.HasPrefix(lowerValue, "#") {
 		return parseHexColor(lowerValue)
 	}
-	// Add support for other color formats like rgb() later
+	if strings.HasPrefix(lowerValue, "rgb(") && strings.HasSuffix(lowerValue, ")") {
+		return parseRgbColor(lowerValue[4 : len(lowerValue)-1])
+	}
+	if strings.HasPrefix(lowerValue, "rgba(") && strings.HasSuffix(lowerValue, ")") {
+		return parseRgbColor(lowerValue[5 : len(lowerValue)-1])
+	}
+	if strings.HasPrefix(lowerValue, "hsl(") && strings.HasSuffix(lowerValue, ")") {
+		return parseHslColor(lowerValue[4 : len(lowerValue)-1])
+	}
+	if strings.HasPrefix(lowerValue, "hsla(") && strings.HasSuffix(lowerValue, ")") {
+		return parseHslColor(lowerValue[5 : len(lowerValue)-1])
+	}
 	return nil, fmt.Errorf("unsupported color format: %s", value)
 }
+
+func parseRgbColor(content string) (color.Color, error) {
+	normalized := strings.ReplaceAll(content, ",", " ")
+	normalized = strings.ReplaceAll(normalized, "/", " ")
+	parts := strings.Fields(normalized)
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("invalid rgb format")
+	}
+
+	parseVal := func(s string, max float32) (float32, error) {
+		s = strings.TrimSpace(s)
+		if strings.HasSuffix(s, "%") {
+			val, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 32)
+			if err != nil {
+				return 0, err
+			}
+			return float32(val) / 100.0 * max, nil
+		}
+		val, err := strconv.ParseFloat(s, 32)
+		if err != nil {
+			return 0, err
+		}
+		return float32(val), nil
+	}
+
+	r, err1 := parseVal(parts[0], 255)
+	g, err2 := parseVal(parts[1], 255)
+	b, err3 := parseVal(parts[2], 255)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return nil, fmt.Errorf("error parsing rgb values")
+	}
+
+	a := float32(1.0)
+	if len(parts) >= 4 {
+		val, err := parseVal(parts[3], 1.0)
+		if err == nil {
+			a = val
+		}
+	}
+
+	return color.RGBA{
+		R: uint8(clamp(r, 0, 255)),
+		G: uint8(clamp(g, 0, 255)),
+		B: uint8(clamp(b, 0, 255)),
+		A: uint8(clamp(a*255, 0, 255)),
+	}, nil
+}
+
+func parseHslColor(content string) (color.Color, error) {
+	normalized := strings.ReplaceAll(content, ",", " ")
+	normalized = strings.ReplaceAll(normalized, "/", " ")
+	parts := strings.Fields(normalized)
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("invalid hsl format")
+	}
+
+	parseVal := func(s string, max float32) (float32, error) {
+		s = strings.TrimSpace(s)
+		if strings.HasSuffix(s, "%") {
+			val, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 32)
+			if err != nil {
+				return 0, err
+			}
+			return float32(val) / 100.0 * max, nil
+		}
+		if strings.HasSuffix(s, "deg") {
+			s = strings.TrimSuffix(s, "deg")
+		}
+		val, err := strconv.ParseFloat(s, 32)
+		if err != nil {
+			return 0, err
+		}
+		return float32(val), nil
+	}
+
+	h, err1 := parseVal(parts[0], 360)
+	s, err2 := parseVal(parts[1], 1.0)
+	l, err3 := parseVal(parts[2], 1.0)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return nil, fmt.Errorf("error parsing hsl values")
+	}
+
+	// Normalize Hue to [0, 360)
+	h = float32(int(h)%360 + 360)
+	h = float32(int(h) % 360)
+
+	a := float32(1.0)
+	if len(parts) >= 4 {
+		val, err := parseVal(parts[3], 1.0)
+		if err == nil {
+			a = val
+		}
+	}
+
+	r, g, b := hslToRgb(h/360, s, l)
+
+	return color.RGBA{
+		R: uint8(clamp(r*255, 0, 255)),
+		G: uint8(clamp(g*255, 0, 255)),
+		B: uint8(clamp(b*255, 0, 255)),
+		A: uint8(clamp(a*255, 0, 255)),
+	}, nil
+}
+
+func hslToRgb(h, s, l float32) (r, g, b float32) {
+	if s == 0 {
+		return l, l, l
+	}
+
+	var hue2rgb func(p, q, t float32) float32
+	hue2rgb = func(p, q, t float32) float32 {
+		if t < 0 {
+			t += 1
+		}
+		if t > 1 {
+			t -= 1
+		}
+		if t < 1.0/6.0 {
+			return p + (q-p)*6*t
+		}
+		if t < 1.0/2.0 {
+			return q
+		}
+		if t < 2.0/3.0 {
+			return p + (q-p)*(2.0/3.0-t)*6
+		}
+		return p
+	}
+
+	var q float32
+	if l < 0.5 {
+		q = l * (1 + s)
+	} else {
+		q = l + s - l*s
+	}
+	p := 2*l - q
+
+	r = hue2rgb(p, q, h+1.0/3.0)
+	g = hue2rgb(p, q, h)
+	b = hue2rgb(p, q, h-1.0/3.0)
+
+	return r, g, b
+}
+
+func clamp(val, min, max float32) float32 {
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}
+
 
 func parseHexColor(hex string) (color.Color, error) {
 	hex = strings.TrimPrefix(hex, "#")
@@ -1127,4 +1356,42 @@ func parseFlexShorthand(value string, style *Style) {
 		// Third value is flex-basis
 		style.FlexBasis = parts[2]
 	}
+}
+
+func parseBackgroundShorthandColor(value string) (color.Color, bool) {
+	var tokens []string
+	var current strings.Builder
+	inParens := 0
+	for _, r := range value {
+		if r == '(' {
+			inParens++
+			current.WriteRune(r)
+		} else if r == ')' {
+			if inParens > 0 {
+				inParens--
+			}
+			current.WriteRune(r)
+		} else if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if inParens > 0 {
+				current.WriteRune(r)
+			} else {
+				if current.Len() > 0 {
+					tokens = append(tokens, current.String())
+					current.Reset()
+				}
+			}
+		} else {
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+
+	for _, tok := range tokens {
+		if col, err := parseColor(tok); err == nil {
+			return col, true
+		}
+	}
+	return nil, false
 }

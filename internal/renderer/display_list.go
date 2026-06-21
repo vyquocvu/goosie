@@ -36,8 +36,9 @@ type PaintCommand struct {
 	Box    Rect        // Position and size for the command
 
 	// Text-specific fields
-	Text     string
+	Text          string
 	FontSize      float32
+	Color         color.Color // Text color from CSS
 	Bold          bool
 	Italic        bool
 	Underline     bool
@@ -164,11 +165,35 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 		return
 	}
 
-	// Add border paint command if the element has borders
-	dlb.addBorderCommand(layoutBox, renderNode, displayList)
+	// Skip elements with display:none (already excluded from layout tree, but guard here too)
+	if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Display == "none" {
+		return
+	}
+
+	// For visibility:hidden, skip paint commands but still process children (they maintain space in layout)
+	isHidden := renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == "hidden"
+
+	// Paint background color if present (drawn behind borders and content)
+	if !isHidden && renderNode.Type == NodeTypeElement && layoutBox.BackgroundColor != nil && layoutBox.BackgroundColor != color.Transparent {
+		if renderNode.TagName != "button" {
+			cmd := &PaintCommand{
+				Type:      PaintRect,
+				NodeID:    layoutBox.NodeID,
+				Node:      renderNode,
+				Box:       layoutBox.Box,
+				FillColor: layoutBox.BackgroundColor,
+			}
+			displayList.AddCommand(cmd)
+		}
+	}
+
+	// Add border paint command if the element has borders (skip if hidden)
+	if !isHidden {
+		dlb.addBorderCommand(layoutBox, renderNode, displayList)
+	}
 
 	// Special handling for button elements - they should be rendered as buttons, not as text
-	if renderNode.Type == NodeTypeElement && renderNode.TagName == "button" {
+	if !isHidden && renderNode.Type == NodeTypeElement && renderNode.TagName == "button" {
 		dlb.addElementCommand(layoutBox, renderNode, displayList)
 		// Don't process children for buttons - the button text is extracted in addElementCommand
 		// Process children layout boxes for nested elements if any
@@ -179,24 +204,24 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	}
 
 	// Check if this layout box has inline content (LineBoxes)
-	if len(layoutBox.LineBoxes) > 0 {
-		// Coalesce all inline text fragments with the same NodeID across all lines
-		// into a single PaintText command. This allows Fyne's word-wrap label to
-		// handle the text naturally, and avoids duplicate/fragmented rendering.
-		type textAccum struct {
-			node      *RenderNode
-			text      strings.Builder
-			box       Rect // top-left of first fragment
-			fontSize  float32
-			bold      bool
-			italic    bool
-			underline bool
-			strike    bool
-		}
-		seen := make(map[int64]*textAccum)
-		order := make([]int64, 0) // preserve insertion order
-
+	// (skip rendering text if element is hidden)
+	if !isHidden && len(layoutBox.LineBoxes) > 0 {
 		for _, lineBox := range layoutBox.LineBoxes {
+			// Coalesce inline text fragments with the same NodeID per line
+			type textAccum struct {
+				node      *RenderNode
+				text      strings.Builder
+				box       Rect // top-left of first fragment
+				fontSize  float32
+				color     color.Color
+				bold      bool
+				italic    bool
+				underline bool
+				strike    bool
+			}
+			seen := make(map[int64]*textAccum)
+			order := make([]int64, 0) // preserve insertion order
+
 			for _, inlineBox := range lineBox.InlineBoxes {
 				if !inlineBox.IsText {
 					continue
@@ -209,14 +234,25 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 				accum, exists := seen[inlineBox.NodeID]
 				if !exists {
 					style := dlb.fontMetrics.GetTextStyleFromNode(inlineRenderNode)
+					// Get font size from computed style (prefer this over tag heuristic)
 					fontSize := dlb.defaultFontSize
-					if inlineRenderNode.Parent != nil {
-						fontSize = dlb.fontMetrics.GetFontSize(inlineRenderNode.Parent.TagName)
+					var textColor color.Color
+					if inlineRenderNode.ComputedStyle != nil && inlineRenderNode.ComputedStyle.FontSize > 0 {
+						fontSize = inlineRenderNode.ComputedStyle.FontSize
+						textColor = inlineRenderNode.ComputedStyle.Color
+					} else if inlineRenderNode.Parent != nil {
+						if inlineRenderNode.Parent.ComputedStyle != nil && inlineRenderNode.Parent.ComputedStyle.FontSize > 0 {
+							fontSize = inlineRenderNode.Parent.ComputedStyle.FontSize
+							textColor = inlineRenderNode.Parent.ComputedStyle.Color
+						} else {
+							fontSize = dlb.fontMetrics.GetFontSize(inlineRenderNode.Parent.TagName)
+						}
 					}
 					accum = &textAccum{
 						node:      inlineRenderNode,
 						box:       Rect{X: lineBox.X + inlineBox.X, Y: lineBox.Y + inlineBox.Y, Width: inlineBox.Width, Height: inlineBox.Height},
 						fontSize:  fontSize,
+						color:     textColor,
 						bold:      style.Bold,
 						italic:    style.Italic,
 						underline: inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "underline"),
@@ -224,38 +260,46 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 					}
 					seen[inlineBox.NodeID] = accum
 					order = append(order, inlineBox.NodeID)
+				} else {
+					// Extend width to include this fragment on the same line
+					accum.box.Width = (inlineBox.X + inlineBox.Width) - (accum.box.X - lineBox.X)
 				}
 				accum.text.WriteString(inlineBox.Text)
 			}
-		}
 
-		for _, nodeID := range order {
-			accum := seen[nodeID]
-			text := strings.TrimSpace(accum.text.String())
-			if text == "" {
-				continue
+			for _, nodeID := range order {
+				accum := seen[nodeID]
+				text := strings.TrimSpace(accum.text.String())
+				if text == "" {
+					continue
+				}
+				cmd := &PaintCommand{
+					Type:          PaintText,
+					NodeID:        nodeID,
+					Node:          accum.node,
+					Box:           accum.box,
+					Text:          text,
+					FontSize:      accum.fontSize,
+					Color:         accum.color,
+					Bold:          accum.bold,
+					Italic:        accum.italic,
+					Underline:     accum.underline,
+					Strikethrough: accum.strike,
+				}
+				displayList.AddCommand(cmd)
 			}
-			cmd := &PaintCommand{
-				Type:          PaintText,
-				NodeID:        nodeID,
-				Node:          accum.node,
-				Box:           accum.box,
-				Text:          text,
-				FontSize:      accum.fontSize,
-				Bold:          accum.bold,
-				Italic:        accum.italic,
-				Underline:     accum.underline,
-				Strikethrough: accum.strike,
-			}
-			displayList.AddCommand(cmd)
 		}
-	} else {
+	} else if !isHidden {
 		// No inline content - generate paint command based on node type
 		if renderNode.Type == NodeTypeText {
 			dlb.addTextCommand(layoutBox, renderNode, displayList)
 		} else if renderNode.Type == NodeTypeElement {
 			dlb.addElementCommand(layoutBox, renderNode, displayList)
 		}
+	} else if isHidden && renderNode.Type == NodeTypeElement && renderNode.TagName == "img" {
+		// For visibility:hidden images, still add transparent placeholder to preserve layout space
+		// This is correct CSS behavior: visibility:hidden elements occupy space but are invisible
+		dlb.addElementCommand(layoutBox, renderNode, displayList)
 	}
 
 	// Check for overflow property
@@ -340,19 +384,26 @@ func (dlb *DisplayListBuilder) addTextCommand(layoutBox *LayoutBox, renderNode *
 	// Get text style from node hierarchy
 	style := dlb.fontMetrics.GetTextStyleFromNode(renderNode)
 
-	// Get font size from parent
+	// Get font size and color - prefer computed style values
 	fontSize := dlb.defaultFontSize
+	var textColor color.Color
 	if renderNode.Parent != nil {
-		fontSize = dlb.fontMetrics.GetFontSize(renderNode.Parent.TagName)
+		if renderNode.Parent.ComputedStyle != nil && renderNode.Parent.ComputedStyle.FontSize > 0 {
+			fontSize = renderNode.Parent.ComputedStyle.FontSize
+			textColor = renderNode.Parent.ComputedStyle.Color
+		} else {
+			fontSize = dlb.fontMetrics.GetFontSize(renderNode.Parent.TagName)
+		}
 	}
 
 	cmd := &PaintCommand{
-		Type:     PaintText,
-		NodeID:   layoutBox.NodeID,
-		Node:     renderNode,
-		Box:      layoutBox.Box,
-		Text:     text,
+		Type:          PaintText,
+		NodeID:        layoutBox.NodeID,
+		Node:          renderNode,
+		Box:           layoutBox.Box,
+		Text:          text,
 		FontSize:      fontSize,
+		Color:         textColor,
 		Bold:          style.Bold,
 		Italic:        style.Italic,
 		Underline:     renderNode.ComputedStyle != nil && strings.Contains(renderNode.ComputedStyle.TextDecoration, "underline"),
@@ -434,24 +485,6 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 		}
 		displayList.AddCommand(cmd)
 		return
-	}
-
-	// For other elements, we primarily rely on their children for rendering
-	// but we could add background colors, borders, etc. here in the future
-	if layoutBox.BackgroundColor != nil && layoutBox.BackgroundColor != color.Transparent {
-		cmd := &PaintCommand{
-			Type:      PaintRect,
-			NodeID:    layoutBox.NodeID,
-			Node:      renderNode,
-			Box:       layoutBox.Box,
-			FillColor: layoutBox.BackgroundColor,
-		}
-		// Insert background at the beginning so it's drawn behind children
-		// Actually, we should probably add it and then ensure it's drawn first?
-		// DisplayList is already a flat list. We should add it BEFORE processing children if we want it behind.
-		// Wait, addElementCommand is called BEFORE processing children in buildRecursive.
-		// So adding it here is correct as long as we add it BEFORE children.
-		displayList.AddCommand(cmd)
 	}
 }
 

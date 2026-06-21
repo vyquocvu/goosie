@@ -10,6 +10,8 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // HTTPFetcher is the interface for making HTTP GET requests used by the fetch() JS API.
@@ -70,6 +72,8 @@ type Runtime struct {
 	jsErrorsMu      sync.Mutex
 	// HTTP fetcher for the fetch() API
 	fetcher HTTPFetcher
+	isPopulatingJSDOM bool
+	onDOMMutation     func(string)
 }
 
 // NewRuntime creates a new JavaScript runtime with console.log and document APIs
@@ -93,12 +97,12 @@ func NewRuntime() *Runtime {
 
 	// Setup enhanced console API
 	runtime.setupConsoleAPI()
-
-	// Setup document object with all DOM APIs
-	runtime.setupDocumentAPI()
 	
 	// Setup window object with browser APIs
 	runtime.setupWindowAPI()
+
+	// Setup document object with all DOM APIs
+	runtime.setupDocumentAPI()
 
 	return runtime
 }
@@ -223,124 +227,527 @@ func (r *Runtime) setupConsoleAPI() {
 	r.vm.Set("console", console)
 }
 
-// setupDocumentAPI configures all document-related APIs
+// setupDocumentAPI configures all document-related APIs using a full JS DOM system
 func (r *Runtime) setupDocumentAPI() {
-	document := r.vm.NewObject()
-	
-	// document.getElementById
-	document.Set("getElementById", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return goja.Null()
-		}
-		id := call.Arguments[0].String()
-		
+	jsDOMScript := `
+(function() {
+  class Node {
+    constructor(nodeType, nodeName) {
+      this.nodeType = nodeType;
+      this.nodeName = nodeName;
+      this.parentNode = null;
+      this.childNodes = [];
+      this._listeners = {};
+    }
+    
+    get firstChild() { return this.childNodes[0] || null; }
+    get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
+    
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode.childNodes.indexOf(this);
+      return this.parentNode.childNodes[idx + 1] || null;
+    }
+    
+    get previousSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode.childNodes.indexOf(this);
+      return this.parentNode.childNodes[idx - 1] || null;
+    }
+    
+    appendChild(child) {
+      if (child.parentNode) {
+        child.parentNode.removeChild(child);
+      }
+      child.parentNode = this;
+      this.childNodes.push(child);
+      if (window.__onDOMChanged) window.__onDOMChanged();
+      return child;
+    }
+    
+    removeChild(child) {
+      const idx = this.childNodes.indexOf(child);
+      if (idx !== -1) {
+        this.childNodes.splice(idx, 1);
+        child.parentNode = null;
+        if (window.__onDOMChanged) window.__onDOMChanged();
+        return child;
+      }
+      throw new Error("NotFoundErr");
+    }
+    
+    insertBefore(newChild, refChild) {
+      if (!refChild) {
+        return this.appendChild(newChild);
+      }
+      const idx = this.childNodes.indexOf(refChild);
+      if (idx === -1) throw new Error("NotFoundErr");
+      
+      if (newChild.parentNode) {
+        newChild.parentNode.removeChild(newChild);
+      }
+      newChild.parentNode = this;
+      this.childNodes.splice(idx, 0, newChild);
+      if (window.__onDOMChanged) window.__onDOMChanged();
+      return newChild;
+    }
+    
+    replaceChild(newChild, oldChild) {
+      const idx = this.childNodes.indexOf(oldChild);
+      if (idx === -1) throw new Error("NotFoundErr");
+      
+      if (newChild.parentNode) {
+        newChild.parentNode.removeChild(newChild);
+      }
+      oldChild.parentNode = null;
+      newChild.parentNode = this;
+      this.childNodes[idx] = newChild;
+      if (window.__onDOMChanged) window.__onDOMChanged();
+      return oldChild;
+    }
+    
+    addEventListener(type, listener) {
+      if (!this._listeners[type]) this._listeners[type] = [];
+      this._listeners[type].push(listener);
+    }
+    
+    removeEventListener(type, listener) {
+      if (!this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(l => l !== listener);
+    }
+    
+    dispatchEvent(event) {
+      const listeners = this._listeners[event.type] || [];
+      listeners.forEach(l => {
+        try {
+          if (typeof l === "function") l.call(this, event);
+          else if (l.handleEvent) l.handleEvent(event);
+        } catch(e) {
+          console.error(e);
+        }
+      });
+      if (this.parentNode && event.bubbles) {
+        this.parentNode.dispatchEvent(event);
+      }
+    }
+  }
+  
+  class TextNode extends Node {
+    constructor(text) {
+      super(3, "#text");
+      this._textContent = text;
+    }
+    get textContent() { return this._textContent; }
+    set textContent(val) {
+      this._textContent = val;
+      if (window.__onDOMChanged) window.__onDOMChanged();
+    }
+    get nodeValue() { return this._textContent; }
+    set nodeValue(val) {
+      this._textContent = val;
+      if (window.__onDOMChanged) window.__onDOMChanged();
+    }
+  }
+  
+  class Element extends Node {
+    constructor(tagName) {
+      super(1, tagName);
+      this.tagName = tagName;
+      this.attributes = {};
+      if (window.__goosieIdCounter) {
+        this.attributes["__goosie_id"] = String(window.__goosieIdCounter++);
+      }
+      
+      const self = this;
+      this.style = new Proxy({
+        _element: self,
+        get cssText() {
+          return this._element.getAttribute("style") || "";
+        },
+        set cssText(val) {
+          this._element.setAttribute("style", val);
+          for (const k in this) {
+            if (!k.startsWith("_") && k !== "cssText") delete this[k];
+          }
+          val.split(";").forEach(pair => {
+            const parts = pair.split(":");
+            if (parts.length === 2) {
+              const prop = parts[0].trim().replace(/-([a-z])/g, g => g[1].toUpperCase());
+              this[prop] = parts[1].trim();
+            }
+          });
+        }
+      }, {
+        set(target, prop, value) {
+          if (prop === "cssText") {
+            target.cssText = value;
+            return true;
+          }
+          target[prop] = value;
+          const styleStr = Object.keys(target)
+            .filter(k => !k.startsWith("_") && k !== "cssText")
+            .map(k => k.replace(/([A-Z])/g, "-$1").toLowerCase() + ": " + target[k])
+            .join("; ");
+          target._element.setAttribute("style", styleStr);
+          return true;
+        },
+        get(target, prop) {
+          if (prop === "cssText") return target.cssText;
+          return target[prop];
+        }
+      });
+    }
+    
+    get id() { return this.getAttribute("id") || ""; }
+    set id(val) { this.setAttribute("id", val); }
+    
+    get className() { return this.getAttribute("class") || ""; }
+    set className(val) { this.setAttribute("class", val); }
+    
+    get classList() {
+      const self = this;
+      return {
+        add(...classes) {
+          const current = self.className ? self.className.split(/\\s+/) : [];
+          classes.forEach(c => {
+            if (current.indexOf(c) === -1) current.push(c);
+          });
+          self.className = current.join(" ");
+        },
+        remove(...classes) {
+          let current = self.className ? self.className.split(/\\s+/) : [];
+          current = current.filter(c => classes.indexOf(c) === -1);
+          self.className = current.join(" ");
+        },
+        contains(c) {
+          const current = self.className ? self.className.split(/\\s+/) : [];
+          return current.indexOf(c) !== -1;
+        },
+        toggle(c) {
+          const current = self.className ? self.className.split(/\\s+/) : [];
+          const idx = current.indexOf(c);
+          if (idx === -1) {
+            current.push(c);
+          } else {
+            current.splice(idx, 1);
+          }
+          self.className = current.join(" ");
+        }
+      };
+    }
+    
+    getAttribute(name) {
+      const val = this.attributes[name.toLowerCase()];
+      return val !== undefined ? String(val) : null;
+    }
+    
+    setAttribute(name, value) {
+      this.attributes[name.toLowerCase()] = String(value);
+      if (window.__onDOMChanged) window.__onDOMChanged();
+    }
+    
+    removeAttribute(name) {
+      delete this.attributes[name.toLowerCase()];
+      if (window.__onDOMChanged) window.__onDOMChanged();
+    }
+    
+    get children() {
+      return this.childNodes.filter(n => n.nodeType === 1);
+    }
+    
+    get firstElementChild() {
+      return this.children[0] || null;
+    }
+    
+    get lastElementChild() {
+      const c = this.children;
+      return c[c.length - 1] || null;
+    }
+    
+    get nextElementSibling() {
+      if (!this.parentNode) return null;
+      const sibs = this.parentNode.children;
+      const idx = sibs.indexOf(this);
+      return sibs[idx + 1] || null;
+    }
+    
+    get previousElementSibling() {
+      if (!this.parentNode) return null;
+      const sibs = this.parentNode.children;
+      const idx = sibs.indexOf(this);
+      return sibs[idx - 1] || null;
+    }
+    
+    get textContent() {
+      return this.childNodes.map(n => n.textContent).join("");
+    }
+    
+    set textContent(val) {
+      this.childNodes = [new TextNode(val)];
+      this.childNodes[0].parentNode = this;
+      if (window.__onDOMChanged) window.__onDOMChanged();
+    }
+    
+    get innerHTML() {
+      return this.childNodes.map(n => window.__serialize(n)).join("");
+    }
+    
+    set innerHTML(htmlStr) {
+      const parsedNodes = window.__parseHTMLFragment(htmlStr);
+      this.childNodes = [];
+      parsedNodes.forEach(n => {
+        n.parentNode = this;
+        this.childNodes.push(n);
+      });
+      if (window.__onDOMChanged) window.__onDOMChanged();
+    }
+    
+    getElementById(id) {
+      if (this.id === id) return this;
+      for (const child of this.children) {
+        const found = child.getElementById(id);
+        if (found) return found;
+      }
+      return null;
+    }
+    
+    getElementsByClassName(className) {
+      let results = [];
+      if (this.classList.contains(className)) results.push(this);
+      for (const child of this.children) {
+        results = results.concat(child.getElementsByClassName(className));
+      }
+      return results;
+    }
+    
+    getElementsByTagName(tagName) {
+      let results = [];
+      const tagUpper = tagName.toUpperCase();
+      const searchTag = tagName.toUpperCase();
+      if (this.tagName.toUpperCase() === searchTag || tagName === "*") results.push(this);
+      for (const child of this.children) {
+        results = results.concat(child.getElementsByTagName(tagName));
+      }
+      return results;
+    }
+  }
+  
+  class Document extends Node {
+    constructor() {
+      super(9, "#document");
+      this.documentElement = new Element("html");
+      this.documentElement.parentNode = this;
+      this.childNodes.push(this.documentElement);
+      
+      this.head = new Element("head");
+      this.body = new Element("body");
+      
+      this.documentElement.appendChild(this.head);
+      this.documentElement.appendChild(this.body);
+    }
+    
+    createElement(tagName) {
+      return new Element(tagName);
+    }
+    
+    createTextNode(text) {
+      return new TextNode(text);
+    }
+    
+    getElementById(id) {
+      return this.documentElement.getElementById(id);
+    }
+    
+    getElementsByClassName(className) {
+      return this.documentElement.getElementsByClassName(className);
+    }
+    
+    getElementsByTagName(tagName) {
+      return this.documentElement.getElementsByTagName(tagName);
+    }
+    
+    querySelector(sel) {
+      return window.__querySelectorHelper(sel);
+    }
+    
+    querySelectorAll(sel) {
+      return window.__querySelectorAllHelper(sel);
+    }
+  }
+  
+  class Event {
+    constructor(type, options = {}) {
+      this.type = type;
+      this.bubbles = !!options.bubbles;
+      this.cancelable = !!options.cancelable;
+    }
+  }
+  
+  class CustomEvent extends Event {
+    constructor(type, options = {}) {
+      super(type, options);
+      this.detail = options.detail || null;
+    }
+  }
+  
+  window.Event = Event;
+  window.CustomEvent = CustomEvent;
+  globalThis.Event = Event;
+  globalThis.CustomEvent = CustomEvent;
+  
+  window.Node = Node;
+  window.Element = Element;
+  window.TextNode = TextNode;
+  window.Document = Document;
+  
+  globalThis.Node = Node;
+  globalThis.Element = Element;
+  globalThis.TextNode = TextNode;
+  globalThis.Document = Document;
+  
+  window.__goosieIdCounter = 1;
+  
+  const document = new Document();
+  window.document = document;
+  globalThis.document = document;
+  
+  window.__serialize = function(node) {
+    if (!node) return "";
+    if (node.nodeType === 3) {
+      return node.textContent;
+    }
+    if (node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase();
+      let html = "<" + tag;
+      for (const key in node.attributes) {
+        html += " " + key + '="' + node.attributes[key] + '"';
+      }
+      html += ">";
+      
+      const selfClosing = ["img", "input", "br", "hr", "link", "meta"];
+      if (selfClosing.indexOf(tag) !== -1) {
+        return html;
+      }
+      
+      html += node.childNodes.map(n => window.__serialize(n)).join("");
+      html += "</" + tag + ">";
+      return html;
+    }
+    if (node.nodeType === 9) {
+      return window.__serialize(node.documentElement);
+    }
+    return "";
+  };
+  
+  window.__onDOMChanged = function() {
+    if (typeof __onDOMChangedGo === "function") {
+      __onDOMChangedGo();
+    }
+  };
+  
+  window.__parseHTMLFragment = function(htmlStr) {
+    if (typeof __parseHTMLFragmentGo === "function") {
+      return __parseHTMLFragmentGo(htmlStr);
+    }
+    return [];
+  };
+  
+  window.__findElementByGoosieId = function(root, id) {
+    if (!root) return null;
+    if (root.nodeType === 1 && root.getAttribute("__goosie_id") === id) return root;
+    for (const child of root.childNodes) {
+      const found = window.__findElementByGoosieId(child, id);
+      if (found) return found;
+    }
+    return null;
+  };
+  
+  window.__querySelectorHelper = function(selector) {
+    const foundGoosieId = __querySelectorGo(selector);
+    if (!foundGoosieId) return null;
+    return window.__findElementByGoosieId(document.documentElement, foundGoosieId);
+  };
+  
+  window.__querySelectorAllHelper = function(selector) {
+    const ids = __querySelectorAllGo(selector);
+    if (!ids) return [];
+    const results = [];
+    for (let i = 0; i < ids.length; i++) {
+      const found = window.__findElementByGoosieId(document.documentElement, ids[i]);
+      if (found) results.push(found);
+    }
+    return results;
+  };
+})();
+`
+
+	_, err := r.vm.RunString(jsDOMScript)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to initialize JS DOM: %v", err))
+	}
+
+	// Register Go helpers
+	r.vm.Set("__querySelectorGo", func(selector string) string {
 		if r.htmlCache == "" {
-			return goja.Null()
+			return ""
 		}
-		
-		element, err := r.parser.GetElementByIDFull(r.htmlCache, id)
-		if err != nil || element == nil {
-			return goja.Null()
+		r.serializeJSDOMToCache()
+		elem, err := r.parser.QuerySelector(r.htmlCache, selector)
+		if err != nil || elem == nil {
+			return ""
 		}
-		
-		return r.createElementObject(element.ID, element.TextContent, element.TagName, element)
+		if id, ok := elem.Attributes["__goosie_id"]; ok {
+			return id
+		}
+		return ""
 	})
-	
-	// document.getElementsByClassName
-	document.Set("getElementsByClassName", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return r.vm.NewArray()
-		}
-		className := call.Arguments[0].String()
-		
+
+	r.vm.Set("__querySelectorAllGo", func(selector string) []string {
 		if r.htmlCache == "" {
-			return r.vm.NewArray()
+			return nil
 		}
-		
-		elements, err := r.parser.GetElementsByClassName(r.htmlCache, className)
+		r.serializeJSDOMToCache()
+		elems, err := r.parser.QuerySelectorAll(r.htmlCache, selector)
+		if err != nil {
+			return nil
+		}
+		ids := make([]string, 0, len(elems))
+		for _, elem := range elems {
+			if id, ok := elem.Attributes["__goosie_id"]; ok {
+				ids = append(ids, id)
+			}
+		}
+		return ids
+	})
+
+	r.vm.Set("__parseHTMLFragmentGo", func(htmlStr string) goja.Value {
+		nodes, err := html.ParseFragment(strings.NewReader(htmlStr), &html.Node{
+			Type:     html.ElementNode,
+			Data:     "body",
+			DataAtom: atom.Body,
+		})
 		if err != nil {
 			return r.vm.NewArray()
 		}
-		
-		return r.createElementArray(elements)
+		jsNodes := make([]goja.Value, 0)
+		for _, n := range nodes {
+			jsNode := r.convertGoNodeToJS(n)
+			if jsNode != nil {
+				jsNodes = append(jsNodes, jsNode)
+			}
+		}
+		return r.vm.ToValue(jsNodes)
 	})
-	
-	// document.getElementsByTagName
-	document.Set("getElementsByTagName", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return r.vm.NewArray()
+
+	r.vm.Set("__onDOMChangedGo", func() {
+		if r.isPopulatingJSDOM {
+			return
 		}
-		tagName := call.Arguments[0].String()
-		
-		if r.htmlCache == "" {
-			return r.vm.NewArray()
+		r.serializeJSDOMToCache()
+		if r.onDOMMutation != nil {
+			r.onDOMMutation(r.htmlCache)
 		}
-		
-		elements, err := r.parser.GetElementsByTagName(r.htmlCache, tagName)
-		if err != nil {
-			return r.vm.NewArray()
-		}
-		
-		return r.createElementArray(elements)
 	})
-	
-	// document.querySelector
-	document.Set("querySelector", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return goja.Null()
-		}
-		selector := call.Arguments[0].String()
-		
-		if r.htmlCache == "" {
-			return goja.Null()
-		}
-		
-		element, err := r.parser.QuerySelector(r.htmlCache, selector)
-		if err != nil || element == nil {
-			return goja.Null()
-		}
-		
-		return r.createElementObject(element.ID, element.TextContent, element.TagName, element)
-	})
-	
-	// document.querySelectorAll
-	document.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return r.vm.NewArray()
-		}
-		selector := call.Arguments[0].String()
-		
-		if r.htmlCache == "" {
-			return r.vm.NewArray()
-		}
-		
-		elements, err := r.parser.QuerySelectorAll(r.htmlCache, selector)
-		if err != nil {
-			return r.vm.NewArray()
-		}
-		
-		return r.createElementArray(elements)
-	})
-	
-	// document.createElement
-	document.Set("createElement", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return goja.Null()
-		}
-		tagName := call.Arguments[0].String()
-		
-		obj := r.vm.NewObject()
-		obj.Set("tagName", tagName)
-		obj.Set("textContent", "")
-		obj.Set("children", r.vm.NewArray())
-		
-		// Add manipulation methods
-		r.addManipulationMethods(obj)
-		
-		return obj
-	})
-	
-	r.vm.Set("document", document)
 }
 
 // createElementObject creates a JavaScript object representing a DOM element
@@ -580,9 +987,77 @@ func (r *Runtime) addEventMethods(obj *goja.Object) {
 	})
 }
 
-// SetHTMLContent sets the HTML content for document operations
-func (r *Runtime) SetHTMLContent(html string) {
-	r.htmlCache = html
+// SetHTMLContent sets the HTML content and populates the JS DOM tree
+func (r *Runtime) SetHTMLContent(htmlStr string) {
+	r.htmlCache = htmlStr
+
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	if err != nil {
+		return
+	}
+
+	r.isPopulatingJSDOM = true
+	defer func() { r.isPopulatingJSDOM = false }()
+
+	jsDoc := r.vm.Get("document").ToObject(r.vm)
+	jsHead := jsDoc.Get("head").ToObject(r.vm)
+	jsBody := jsDoc.Get("body").ToObject(r.vm)
+
+	jsHead.Set("childNodes", r.vm.NewArray())
+	jsBody.Set("childNodes", r.vm.NewArray())
+
+	var findNodes func(*html.Node) (*html.Node, *html.Node, *html.Node)
+	findNodes = func(n *html.Node) (*html.Node, *html.Node, *html.Node) {
+		var htmlN, head, body *html.Node
+		if n.Type == html.ElementNode {
+			if n.Data == "html" {
+				htmlN = n
+			} else if n.Data == "head" {
+				head = n
+			} else if n.Data == "body" {
+				body = n
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			hn, h, b := findNodes(c)
+			if hn != nil {
+				htmlN = hn
+			}
+			if h != nil {
+				head = h
+			}
+			if b != nil {
+				body = b
+			}
+		}
+		return htmlN, head, body
+	}
+
+	htmlNode, headNode, bodyNode := findNodes(doc)
+
+	if htmlNode != nil {
+		jsDocElement := jsDoc.Get("documentElement").ToObject(r.vm)
+		for _, attr := range htmlNode.Attr {
+			setAttribute, _ := goja.AssertFunction(jsDocElement.Get("setAttribute"))
+			setAttribute(jsDocElement, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+		}
+	}
+
+	if headNode != nil {
+		for _, attr := range headNode.Attr {
+			setAttribute, _ := goja.AssertFunction(jsHead.Get("setAttribute"))
+			setAttribute(jsHead, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+		}
+		r.populateJSNode(headNode, jsHead)
+	}
+
+	if bodyNode != nil {
+		for _, attr := range bodyNode.Attr {
+			setAttribute, _ := goja.AssertFunction(jsBody.Get("setAttribute"))
+			setAttribute(jsBody, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+		}
+		r.populateJSNode(bodyNode, jsBody)
+	}
 }
 
 // SetFetcher sets the HTTP fetcher used by the fetch() JS API.
@@ -1414,4 +1889,79 @@ func (r *Runtime) Cleanup() {
 		timer.mu.Unlock()
 	}
 	r.timers = make(map[int]*Timer)
+}
+
+// SetDOMMutationCallback sets a callback for when the JS DOM tree is mutated
+func (r *Runtime) SetDOMMutationCallback(callback func(string)) {
+	r.onDOMMutation = callback
+}
+
+func (r *Runtime) serializeJSDOMToCache() {
+	serializeFunc, _ := goja.AssertFunction(r.vm.Get("window").ToObject(r.vm).Get("__serialize"))
+	htmlVal, err := serializeFunc(goja.Undefined(), r.vm.Get("document"))
+	if err == nil {
+		r.htmlCache = htmlVal.String()
+	}
+}
+
+func (r *Runtime) populateJSNode(goNode *html.Node, jsNode *goja.Object) {
+	for c := goNode.FirstChild; c != nil; c = c.NextSibling {
+		var jsChild goja.Value
+		jsDoc := r.vm.Get("document").ToObject(r.vm)
+		
+		if c.Type == html.TextNode {
+			createTextNode, _ := goja.AssertFunction(jsDoc.Get("createTextNode"))
+			jsChild, _ = createTextNode(jsDoc, r.vm.ToValue(c.Data))
+		} else if c.Type == html.ElementNode {
+			createElement, _ := goja.AssertFunction(jsDoc.Get("createElement"))
+			jsChild, _ = createElement(jsDoc, r.vm.ToValue(c.Data))
+			
+			jsChildObj := jsChild.ToObject(r.vm)
+			for _, attr := range c.Attr {
+				setAttribute, _ := goja.AssertFunction(jsChildObj.Get("setAttribute"))
+				setAttribute(jsChildObj, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
+			
+			// Recurse
+			r.populateJSNode(c, jsChildObj)
+		}
+		
+		if jsChild != nil && jsChild != goja.Null() {
+			appendChild, _ := goja.AssertFunction(jsNode.Get("appendChild"))
+			appendChild(jsNode, jsChild)
+		}
+	}
+}
+
+func (r *Runtime) convertGoNodeToJS(n *html.Node) goja.Value {
+	if n == nil {
+		return goja.Null()
+	}
+	
+	jsDoc := r.vm.Get("document").ToObject(r.vm)
+	if n.Type == html.TextNode {
+		createTextNode, _ := goja.AssertFunction(jsDoc.Get("createTextNode"))
+		jsNode, _ := createTextNode(jsDoc, r.vm.ToValue(n.Data))
+		return jsNode
+	} else if n.Type == html.ElementNode {
+		createElement, _ := goja.AssertFunction(jsDoc.Get("createElement"))
+		jsNode, _ := createElement(jsDoc, r.vm.ToValue(n.Data))
+		jsNodeObj := jsNode.ToObject(r.vm)
+		
+		for _, attr := range n.Attr {
+			setAttribute, _ := goja.AssertFunction(jsNodeObj.Get("setAttribute"))
+			setAttribute(jsNodeObj, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+		}
+		
+		// Recursively populate children
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			childJS := r.convertGoNodeToJS(c)
+			if childJS != nil && childJS != goja.Null() {
+				appendChild, _ := goja.AssertFunction(jsNodeObj.Get("appendChild"))
+				appendChild(jsNodeObj, childJS)
+			}
+		}
+		return jsNode
+	}
+	return goja.Null()
 }

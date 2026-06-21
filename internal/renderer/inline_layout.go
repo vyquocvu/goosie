@@ -140,6 +140,21 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 		return
 	}
 
+	// Skip elements that should not participate in normal text flow
+	if node.ComputedStyle != nil {
+		// Skip display:none elements
+		if node.ComputedStyle.Display == "none" {
+			return
+		}
+		// Skip absolute and fixed positioned elements - they don't participate in inline flow
+		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" {
+			return
+		}
+		// Skip visibility:hidden elements (they take up space but don't render)
+		// Actually visibility:hidden still takes space in inline flow, so we still process text
+		// but the text node text should still flow (hidden from rendering, not from layout)
+	}
+
 	if node.Type == NodeTypeText {
 		ile.addTextToLines(node, currentLine, lines, lineX, availableWidth, whiteSpaceMode)
 	} else if node.Type == NodeTypeElement {
@@ -169,23 +184,39 @@ func (ile *InlineLayoutEngine) addTextToLines(
 	}
 
 	// Process white space according to mode
-	text = ile.processWhiteSpace(text, whiteSpaceMode)
-	if text == "" {
+	if whiteSpaceMode == WhiteSpacePre || whiteSpaceMode == WhiteSpaceNoWrap {
+		text = ile.processWhiteSpace(text, whiteSpaceMode)
+		if text == "" {
+			return
+		}
+		fontSize := ile.getFontSizeForNode(node)
+		style := ile.fontMetrics.GetTextStyleFromNode(node)
+		if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
+			style.Italic = true
+		}
+		letterSpacing := float32(0)
+		if node != nil && node.ComputedStyle != nil {
+			letterSpacing = node.ComputedStyle.LetterSpacing
+		}
+		ile.addTextPiece(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, false)
 		return
 	}
 
-	// Get font properties
-	fontSize := ile.getFontSizeForNode(node)
-	style := ile.fontMetrics.GetTextStyleFromNode(node)
-
-	// Apply FontStyle
-	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
-		style.Italic = true
+	// Determine if text starts/ends with whitespace or is only whitespace
+	hasLeadingSpace := unicode.IsSpace(rune(text[0]))
+	hasTrailingSpace := unicode.IsSpace(rune(text[len(text)-1]))
+	isOnlyWhitespace := true
+	for _, r := range text {
+		if !unicode.IsSpace(r) {
+			isOnlyWhitespace = false
+			break
+		}
 	}
 
-	// Apply TextTransform
-	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != "" {
-		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform)
+	fontSize := ile.getFontSizeForNode(node)
+	style := ile.fontMetrics.GetTextStyleFromNode(node)
+	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
+		style.Italic = true
 	}
 
 	letterSpacing := float32(0)
@@ -193,17 +224,42 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		letterSpacing = node.ComputedStyle.LetterSpacing
 	}
 
-	// Split text into words or characters based on white space mode
-	if whiteSpaceMode == WhiteSpacePre || whiteSpaceMode == WhiteSpaceNoWrap {
-		// No wrapping - add as single piece
-		ile.addTextPiece(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, false)
-	} else {
-		// Word wrapping
-		words := ile.splitTextForWrapping(text, whiteSpaceMode)
-		for i, word := range words {
-			// Add space before word if not first word
-			addSpace := i > 0 && !strings.HasPrefix(word, " ")
-			ile.addTextPiece(word, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, addSpace)
+	if isOnlyWhitespace {
+		if len((*currentLine).InlineBoxes) > 0 {
+			lastBox := (*currentLine).InlineBoxes[len((*currentLine).InlineBoxes)-1]
+			if lastBox.IsText && !strings.HasSuffix(lastBox.Text, " ") {
+				ile.addTextPiece("", node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, true)
+			}
+		}
+		return
+	}
+
+	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != "" {
+		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform)
+	}
+
+	// Split text into words
+	words := ile.splitTextForWrapping(text, whiteSpaceMode)
+	for i, word := range words {
+		addSpace := i > 0
+		if i == 0 && hasLeadingSpace {
+			addSpace = true
+		}
+
+		if addSpace && len((*currentLine).InlineBoxes) > 0 {
+			lastBox := (*currentLine).InlineBoxes[len((*currentLine).InlineBoxes)-1]
+			if lastBox.IsText && strings.HasSuffix(lastBox.Text, " ") {
+				addSpace = false
+			}
+		}
+
+		ile.addTextPiece(word, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, addSpace)
+	}
+
+	if hasTrailingSpace && len((*currentLine).InlineBoxes) > 0 {
+		lastBox := (*currentLine).InlineBoxes[len((*currentLine).InlineBoxes)-1]
+		if lastBox.IsText && !strings.HasSuffix(lastBox.Text, " ") {
+			ile.addTextPiece("", node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, true)
 		}
 	}
 }
@@ -220,7 +276,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	letterSpacing float32,
 	addSpaceBefore bool,
 ) {
-	if text == "" {
+	if text == "" && !addSpaceBefore {
 		return
 	}
 
@@ -730,8 +786,12 @@ func (ile *InlineLayoutEngine) applyTextTransform(text string, transform string)
 
 // isInlineBlock checks if a node should be treated as inline-block
 func (ile *InlineLayoutEngine) isInlineBlock(node *RenderNode) bool {
-	// In a real implementation, this would check computed styles
-	// For now, we'll treat certain elements as inline-block
+	if node.ComputedStyle != nil {
+		disp := node.ComputedStyle.Display
+		if disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
+			return true
+		}
+	}
 	inlineBlockElements := map[string]bool{
 		"img":    true,
 		"button": true,

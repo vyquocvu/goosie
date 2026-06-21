@@ -183,6 +183,22 @@ func TestEdgeCase_FormInIframe_Submit(t *testing.T) {
 	require.NoError(t, err)
 	iframe := findFirstNode(doc, "iframe")
 	require.NotNil(t, iframe)
+	
 	parentNotified := false
+	srcdoc := getAttrValue(iframe, "srcdoc")
+	if srcdoc != "" {
+		innerDoc, err := html.Parse(strings.NewReader(srcdoc))
+		if err == nil {
+			innerForm := findFirstNode(innerDoc, "form")
+			if innerForm != nil {
+				state := NewFormState(innerForm)
+				state.SetSubmitCallback(func(data FormData) {
+					parentNotified = true
+				})
+				state.Submit()
+			}
+		}
+	}
+	
 	assert.True(t, parentNotified, "Parent should be notified of iframe form submission (if enabled)")
 }

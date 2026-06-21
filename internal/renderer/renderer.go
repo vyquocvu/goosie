@@ -101,8 +101,14 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
 
-	// Load external CSS asynchronously
-	go r.loadExternalCSS(doc)
+	// Load external CSS asynchronously (synchronously in testing mode)
+	if r.testingMode {
+		r.loadExternalCSS(doc)
+		// Re-read current layout tree since Refresh() updated it
+		layoutTree = r.currentLayoutTree
+	} else {
+		go r.loadExternalCSS(doc)
+	}
 
 	// Pass navigation callback to canvas renderer
 	r.canvasRenderer.SetNavigationCallback(r.onNavigate, r.currentURL)
@@ -458,7 +464,7 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 		// Since we are inside a goroutine and Refresh reads it, we should ideally lock.
 		// But for now, we'll update it inside fyne.Do to be safe with UI refresh.
 
-		fyne.Do(func() {
+		updateCSS := func() {
 			r.stylesheetMu.Lock()
 			if r.stylesheet == nil {
 				r.stylesheet = stylesheet
@@ -468,7 +474,13 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 			}
 			r.stylesheetMu.Unlock()
 			r.Refresh()
-		})
+		}
+
+		if r.testingMode {
+			updateCSS()
+		} else {
+			fyne.Do(updateCSS)
+		}
 	}
 }
 

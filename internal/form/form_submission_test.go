@@ -1,8 +1,11 @@
 package form
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -177,7 +180,14 @@ func TestFormData_UncheckedCheckbox(t *testing.T) {
 }
 
 func TestHTTPGet_Submission(t *testing.T) {
-	htmlContent := `<html><body><form method="GET" action="/api/search"><input name="q" value="test"></form></body></html>`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "GET", r.Method)
+		assert.Equal(t, "test", r.URL.Query().Get("q"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	htmlContent := `<html><body><form method="GET" action="` + ts.URL + `/api/search"><input name="q" value="test"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
@@ -192,7 +202,16 @@ func TestHTTPGet_Submission(t *testing.T) {
 }
 
 func TestHTTPPost_Submission(t *testing.T) {
-	htmlContent := `<html><body><form method="POST" action="/api/user"><input name="name" value="John"></form></body></html>`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "John", r.Form.Get("name"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	htmlContent := `<html><body><form method="POST" action="` + ts.URL + `/api/user"><input name="name" value="John"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
@@ -207,7 +226,12 @@ func TestHTTPPost_Submission(t *testing.T) {
 }
 
 func TestHTTPResponse_Success(t *testing.T) {
-	htmlContent := `<html><body><form method="POST" action="/api/submit"><input name="data" value="test"></form></body></html>`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	htmlContent := `<html><body><form method="POST" action="` + ts.URL + `/api/submit"><input name="data" value="test"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
@@ -223,7 +247,12 @@ func TestHTTPResponse_Success(t *testing.T) {
 }
 
 func TestHTTPResponse_Error(t *testing.T) {
-	htmlContent := `<html><body><form method="POST" action="/api/invalid"><input name="data" value="test"></form></body></html>`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer ts.Close()
+
+	htmlContent := `<html><body><form method="POST" action="` + ts.URL + `/api/invalid"><input name="data" value="test"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
@@ -239,15 +268,22 @@ func TestHTTPResponse_Error(t *testing.T) {
 }
 
 func TestHTTPTimeout(t *testing.T) {
-	htmlContent := `<html><body><form method="POST" action="http://slow-server.example.com/api"><input name="data" value="test"></form></body></html>`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	htmlContent := `<html><body><form method="POST" action="` + ts.URL + `/api"><input name="data" value="test"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.client.Timeout = 10 * time.Millisecond
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	_, err = submitter.Submit(formNode, data)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "timeout")
+	assert.Contains(t, strings.ToLower(err.Error()), "timeout")
 }

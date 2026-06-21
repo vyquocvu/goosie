@@ -67,6 +67,9 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
 			continue
 		}
+		if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
+			continue
+		}
 		
 		item := &gridItem{
 			node: child,

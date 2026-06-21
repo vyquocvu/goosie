@@ -973,59 +973,46 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		}
 		textContent := prefix + cmd.Text
 
-		// Check if the node has CSS styles that require custom rendering
-		if cr.hasCustomStyles(cmd.Node) {
-			// Create a canvas.Text object with CSS styles
-			textObj := canvas.NewText(textContent, color.Black)
-			textObj.TextSize = cr.defaultSize
-
-			style := cmd.Node.ComputedStyle
-
-			if style.Color != nil {
-				textObj.Color = style.Color
-			}
-
-			if style.FontSize > 0 {
-				textObj.TextSize = style.FontSize
-			}
-
-			// Apply text style
-			textStyle := fyne.TextStyle{}
-			if style.FontWeight == "bold" || cmd.Bold {
-				textStyle.Bold = true
-			}
-			if cmd.Italic {
-				textStyle.Italic = true
-			}
-			textObj.TextStyle = textStyle
-
-			// Note: canvas.Text does not support wrapping easily without layout
-			// For now, we assume text fits or is handled by layout engine
-
-			// Add underline/strikethrough if needed
-			if cmd.Underline || cmd.Strikethrough {
-				return cr.addDecorations(textObj, cmd)
-			}
-			return textObj
-		} else {
-			textObj := canvas.NewText(textContent, color.Black)
-			if cmd.FontSize > 0 {
-				textObj.TextSize = cmd.FontSize
-			} else {
-				textObj.TextSize = cr.defaultSize
-			}
-			if cmd.Bold && cmd.Italic {
-				textObj.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
-			} else if cmd.Bold {
-				textObj.TextStyle = fyne.TextStyle{Bold: true}
-			} else if cmd.Italic {
-				textObj.TextStyle = fyne.TextStyle{Italic: true}
-			}
-			if cmd.Underline || cmd.Strikethrough {
-				return cr.addDecorations(textObj, cmd)
-			}
-			return textObj
+		// Determine text color: prefer explicit Color in command, fall back to ComputedStyle, then black
+		textColor := color.Color(color.Black)
+		if cmd.Color != nil {
+			textColor = cmd.Color
+		} else if cmd.Node != nil && cmd.Node.ComputedStyle != nil && cmd.Node.ComputedStyle.Color != nil {
+			textColor = cmd.Node.ComputedStyle.Color
 		}
+
+		textObj := canvas.NewText(textContent, textColor)
+
+		// Apply font size
+		if cmd.FontSize > 0 {
+			textObj.TextSize = cmd.FontSize
+		} else if cmd.Node != nil && cmd.Node.ComputedStyle != nil && cmd.Node.ComputedStyle.FontSize > 0 {
+			textObj.TextSize = cmd.Node.ComputedStyle.FontSize
+		} else {
+			textObj.TextSize = cr.defaultSize
+		}
+
+		// Apply text style
+		bold := cmd.Bold
+		italic := cmd.Italic
+		if cmd.Node != nil && cmd.Node.ComputedStyle != nil {
+			if cmd.Node.ComputedStyle.FontWeight == "bold" || cmd.Node.ComputedStyle.FontWeight == "700" || cmd.Node.ComputedStyle.FontWeight == "800" || cmd.Node.ComputedStyle.FontWeight == "900" {
+				bold = true
+			}
+		}
+		if bold && italic {
+			textObj.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
+		} else if bold {
+			textObj.TextStyle = fyne.TextStyle{Bold: true}
+		} else if italic {
+			textObj.TextStyle = fyne.TextStyle{Italic: true}
+		}
+
+		// Add underline/strikethrough if needed
+		if cmd.Underline || cmd.Strikethrough {
+			return cr.addDecorations(textObj, cmd)
+		}
+		return textObj
 
 	case PaintRect:
 		rect := canvas.NewRectangle(cmd.FillColor)
@@ -1389,6 +1376,9 @@ const minDashLength = float32(6)
 // addHorizontalBorderSegments adds horizontal border segments (dashed/dotted/solid) to a container.
 // x, y define the top-left corner; totalWidth and height define the area.
 func addHorizontalBorderSegments(c *fyne.Container, style string, col color.Color, x, y, totalWidth, height float32) {
+	if col == nil {
+		col = color.Black
+	}
 	if style == "solid" || style == "double" || style == "" {
 		rect := canvas.NewRectangle(col)
 		rect.Resize(fyne.NewSize(totalWidth, height))
@@ -1431,6 +1421,9 @@ func addHorizontalBorderSegments(c *fyne.Container, style string, col color.Colo
 // addVerticalBorderSegments adds vertical border segments (dashed/dotted/solid) to a container.
 // x, y define the top-left corner; width and totalHeight define the area.
 func addVerticalBorderSegments(c *fyne.Container, style string, col color.Color, x, y, width, totalHeight float32) {
+	if col == nil {
+		col = color.Black
+	}
 	if style == "solid" || style == "double" || style == "" {
 		rect := canvas.NewRectangle(col)
 		rect.Resize(fyne.NewSize(width, totalHeight))

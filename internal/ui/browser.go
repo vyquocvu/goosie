@@ -247,63 +247,68 @@ func (b *Browser) SetHTMLContent(content string) {
 	}
 }
 
-// RenderHTMLContent renders HTML content using the canvas-based renderer
+// RenderHTMLContent renders HTML content using the canvas-based renderer on the active tab
 func (b *Browser) RenderHTMLContent(htmlContent string) error {
-    tab := b.ActiveTab()
-    if tab == nil {
-        return nil
-    }
-    // Lazily initialize the renderer if needed
-    if tab.htmlRenderer == nil {
-        if b.RendererFactory == nil {
-            return fmt.Errorf("RendererFactory is not set")
-        }
-        tab.htmlRenderer = b.RendererFactory()
-        if tab.htmlRenderer == nil {
-            return fmt.Errorf("RendererFactory returned nil renderer")
-        }
-        tab.htmlRenderer.SetWindow(b.window)
-        tab.htmlRenderer.SetNavigationCallback(func(url string) {
-            if b.onNavigate != nil {
-                b.onNavigate(url)
-            }
-        })
-    }
-    // Set the current URL for resolving relative links
-    currentURL := tab.state.GetCurrentURL()
-    tab.htmlRenderer.SetCurrentURL(currentURL)
+	tab := b.ActiveTab()
+	if tab == nil {
+		return nil
+	}
+	return tab.RenderHTML(htmlContent)
+}
+
+// RenderHTML renders HTML content using the canvas-based renderer for this specific tab
+func (t *Tab) RenderHTML(htmlContent string) error {
+	// Lazily initialize the renderer if needed
+	if t.htmlRenderer == nil {
+		if t.browser.RendererFactory == nil {
+			return fmt.Errorf("RendererFactory is not set")
+		}
+		t.htmlRenderer = t.browser.RendererFactory()
+		if t.htmlRenderer == nil {
+			return fmt.Errorf("RendererFactory returned nil renderer")
+		}
+		t.htmlRenderer.SetWindow(t.browser.window)
+		t.htmlRenderer.SetNavigationCallback(func(url string) {
+			if t.browser.onNavigate != nil {
+				t.browser.onNavigate(url)
+			}
+		})
+	}
+	// Set the current URL for resolving relative links
+	currentURL := t.state.GetCurrentURL()
+	t.htmlRenderer.SetCurrentURL(currentURL)
 
 	// Set up inspect callback
-	tab.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	t.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
 		fyne.Do(func() {
-			if b.inspectVisible {
-				b.inspectPanel.SetRenderer(tab.htmlRenderer)
-				b.inspectPanel.SetElement(node, layout)
+			if t.browser.inspectVisible {
+				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
+				t.browser.inspectPanel.SetElement(node, layout)
 			}
 		})
 	})
 
 	// Set up refresh callback for the renderer
-	tab.htmlRenderer.SetRefreshCallback(func() {
+	t.htmlRenderer.SetRefreshCallback(func() {
 		fyne.Do(func() {
 			// Trigger a refresh of the scroll container to show changes
-			tab.contentScroll.Refresh()
+			t.contentScroll.Refresh()
 			// Also refresh inspector if visible
-			if b.inspectVisible {
-				b.inspectPanel.SetRenderer(tab.htmlRenderer)
+			if t.browser.inspectVisible {
+				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 			}
 		})
 	})
 
-	canvasObject, err := tab.htmlRenderer.RenderHTML(htmlContent)
+	canvasObject, err := t.htmlRenderer.RenderHTML(htmlContent)
 	if err != nil {
 		return err
 	}
 
 	// Update the scroll container with the rendered content on the main thread
 	fyne.Do(func() {
-		tab.contentScroll.Content = canvasObject
-		tab.contentScroll.Refresh()
+		t.contentScroll.Content = canvasObject
+		t.contentScroll.Refresh()
 	})
 
 	return nil

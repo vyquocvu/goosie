@@ -35,7 +35,10 @@ func (p *Parser) Parse() (*StyleSheet, error) {
 		if p.peek() == '@' {
 			atRule, err := p.parseAtRule()
 			if err != nil {
-				return nil, err
+				// Skip this at-rule on error
+				p.skipToNextRule()
+				p.consumeWhitespaceAndComments()
+				continue
 			}
 			stylesheet.AtRules = append(stylesheet.AtRules, atRule)
 			p.consumeWhitespaceAndComments()
@@ -45,22 +48,51 @@ func (p *Parser) Parse() (*StyleSheet, error) {
 		// Parse regular rules
 		selectors, err := p.parseSelectorSequences()
 		if err != nil {
-			return nil, err
+			p.skipToNextRule()
+			p.consumeWhitespaceAndComments()
+			continue
 		}
 		p.consumeWhitespaceAndComments()
 		if !p.consumeChar('{') {
-			return nil, fmt.Errorf("expected '{'")
+			p.skipToNextRule()
+			p.consumeWhitespaceAndComments()
+			continue
 		}
 		p.consumeWhitespaceAndComments()
 		declarations := p.parseDeclarations()
 		p.consumeWhitespaceAndComments()
 		if !p.consumeChar('}') {
-			return nil, fmt.Errorf("expected '}'")
+			p.skipToNextRule()
+			p.consumeWhitespaceAndComments()
+			continue
 		}
 		stylesheet.Rules = append(stylesheet.Rules, Rule{Selectors: selectors, Declarations: declarations})
 		p.consumeWhitespaceAndComments()
 	}
 	return stylesheet, nil
+}
+
+// skipToNextRule skips input until it finds a point where a new rule or at-rule can start.
+func (p *Parser) skipToNextRule() {
+	braceCount := 0
+	for p.pos < len(p.input) {
+		ch := p.peek()
+		if ch == '{' {
+			braceCount++
+			p.pos++
+		} else if ch == '}' {
+			braceCount--
+			p.pos++
+			if braceCount <= 0 {
+				break
+			}
+		} else if ch == ';' && braceCount == 0 {
+			p.pos++
+			break
+		} else {
+			p.pos++
+		}
+	}
 }
 
 // parseAtRule parses an at-rule like @media, @import, @keyframes

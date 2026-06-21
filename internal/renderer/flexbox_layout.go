@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"sort"
+	"strings"
 )
 
 // FlexLayoutEngine handles flexbox layout calculations
@@ -154,6 +155,9 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 
 	for _, child := range container.Children {
 		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			continue
+		}
+		if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 			continue
 		}
 

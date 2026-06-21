@@ -98,13 +98,14 @@ func (s *FormSubmitter) Submit(formNode *html.Node, data FormData) (*SubmissionR
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		errMsg := err.Error()
+		errMsg := strings.ToLower(err.Error())
 		if s.onError != nil {
 			s.onError(err)
 		}
 		if strings.Contains(errMsg, "connection refused") ||
 			strings.Contains(errMsg, "connection reset") ||
 			strings.Contains(errMsg, "timeout") ||
+			strings.Contains(errMsg, "deadline exceeded") ||
 			strings.Contains(errMsg, "no such host") ||
 			strings.Contains(errMsg, "network is unreachable") {
 			return nil, fmt.Errorf("connection error: %v", err)
@@ -126,7 +127,7 @@ func (s *FormSubmitter) Submit(formNode *html.Node, data FormData) (*SubmissionR
 		}
 	}
 
-	return result, nil
+	return result, err
 }
 
 func submitterJSONEncode(data FormData) string {

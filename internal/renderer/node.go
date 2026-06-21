@@ -164,6 +164,15 @@ func (n *RenderNode) SetAttribute(key, value string) {
 
 // IsBlock returns true if the element is a block-level element
 func (n *RenderNode) IsBlock() bool {
+	if n.ComputedStyle != nil && n.ComputedStyle.Display != "" {
+		disp := n.ComputedStyle.Display
+		if disp == "block" || disp == "flex" || disp == "grid" || disp == "table" {
+			return true
+		}
+		if disp == "inline" || disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
+			return false
+		}
+	}
 	blockElements := map[string]bool{
 		"div": true, "p": true, "h1": true, "h2": true, "h3": true,
 		"h4": true, "h5": true, "h6": true, "ul": true, "ol": true,
@@ -197,13 +206,22 @@ func BuildRenderTree(htmlNode *html.Node) *RenderNode {
 
 // processTextNode handles text node processing
 func processTextNode(htmlNode *html.Node) *RenderNode {
-	trimmedText := strings.TrimSpace(htmlNode.Data)
-	if trimmedText == "" {
+	if htmlNode.Data == "" {
 		return nil
 	}
 	node := NewRenderNode(NodeTypeText)
-	normalizedText := strings.Join(strings.Fields(htmlNode.Data), " ")
-	node.Text = normalizedText
+	isOnlyWhitespace := true
+	for _, r := range htmlNode.Data {
+		if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
+			isOnlyWhitespace = false
+			break
+		}
+	}
+	if isOnlyWhitespace {
+		node.Text = " "
+	} else {
+		node.Text = strings.Join(strings.Fields(htmlNode.Data), " ")
+	}
 	return node
 }
 

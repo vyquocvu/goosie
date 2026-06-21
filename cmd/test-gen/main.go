@@ -49,8 +49,36 @@ func main() {
 
 	// Also generate the index file for easy navigation
 	generateIndexFile(*outputDir, testCases)
+	generateOutputHTMLFile(*outputDir)
 
 	fmt.Println("All test cases generated successfully.")
+}
+
+func generateOutputHTMLFile(dir string) {
+	content := `<!DOCTYPE html>
+<html>
+<head>
+	<title>Goosie Test Output</title>
+	<style>
+		body { font-family: sans-serif; margin: 20px; }
+		.container { display: flex; gap: 10px; }
+		.box { width: 100px; height: 100px; border: 1px solid black; display: flex; align-items: center; justify-content: center; }
+		.red { background-color: red; color: white; }
+		.green { background-color: green; color: white; }
+		.blue { background-color: blue; color: white; }
+	</style>
+</head>
+<body>
+	<h1>Goosie Generated Output</h1>
+	<p>This file is generated for visual regression testing.</p>
+	<div class="container" id="boxes">
+		<div class="box red">Red</div>
+		<div class="box green">Green</div>
+		<div class="box blue">Blue</div>
+	</div>
+</body>
+</html>`
+	os.WriteFile(filepath.Join(dir, "output.html"), []byte(content), 0644)
 }
 
 func generateIndexFile(dir string, cases []TestCase) {

@@ -324,3 +324,143 @@ func TestSetViewportDynamic(t *testing.T) {
 	}
 }
 
+func TestParsedColorAndFontSizeExtensions(t *testing.T) {
+	htmlContent := `
+		<html>
+			<head>
+				<style>
+					body { font-size: 16px; }
+					.item-rem { font-size: 1.5rem; color: rgb(255, 0, 0); }
+					.item-percent { font-size: 50%; color: rgba(0, 255, 0, 0.5); }
+					.item-keyword { font-size: large; color: hsl(240, 100%, 50%); }
+					.item-transparent { color: transparent; }
+					.item-pt { font-size: 12pt; }
+				</style>
+			</head>
+			<body>
+				<div class="item-rem">Rem</div>
+				<div class="item-percent">Percent</div>
+				<div class="item-keyword">Keyword</div>
+				<div class="item-transparent">Transparent</div>
+				<div class="item-pt">Pt</div>
+			</body>
+		</html>
+	`
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("html.Parse failed: %v", err)
+	}
+	stylesheet := extractAndParseCSS(doc)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	sm := NewStyleManager(stylesheet)
+	sm.ApplyStyles(renderTree)
+
+	// Test rem and rgb
+	nodeRem := findNodeByClass(renderTree, "item-rem")
+	if nodeRem == nil {
+		t.Fatal("item-rem node not found")
+	}
+	if nodeRem.ComputedStyle.FontSize != 24.0 {
+		t.Errorf("expected rem font-size 24.0, got %f", nodeRem.ComputedStyle.FontSize)
+	}
+	expectedRed := color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	if nodeRem.ComputedStyle.Color != expectedRed {
+		t.Errorf("expected rgb color %v, got %v", expectedRed, nodeRem.ComputedStyle.Color)
+	}
+
+	// Test percent and rgba
+	nodePercent := findNodeByClass(renderTree, "item-percent")
+	if nodePercent == nil {
+		t.Fatal("item-percent node not found")
+	}
+	if nodePercent.ComputedStyle.FontSize != 8.0 {
+		t.Errorf("expected percent font-size 8.0, got %f", nodePercent.ComputedStyle.FontSize)
+	}
+	expectedGreenHalf := color.RGBA{R: 0, G: 255, B: 0, A: 127}
+	if nodePercent.ComputedStyle.Color != expectedGreenHalf {
+		t.Errorf("expected rgba color %v, got %v", expectedGreenHalf, nodePercent.ComputedStyle.Color)
+	}
+
+	// Test keyword and hsl
+	nodeKeyword := findNodeByClass(renderTree, "item-keyword")
+	if nodeKeyword == nil {
+		t.Fatal("item-keyword node not found")
+	}
+	if nodeKeyword.ComputedStyle.FontSize != 18.0 {
+		t.Errorf("expected large font-size 18.0, got %f", nodeKeyword.ComputedStyle.FontSize)
+	}
+	expectedBlue := color.RGBA{R: 0, G: 0, B: 255, A: 255}
+	if nodeKeyword.ComputedStyle.Color != expectedBlue {
+		t.Errorf("expected hsl color %v, got %v", expectedBlue, nodeKeyword.ComputedStyle.Color)
+	}
+
+	// Test transparent
+	nodeTrans := findNodeByClass(renderTree, "item-transparent")
+	if nodeTrans == nil {
+		t.Fatal("item-transparent node not found")
+	}
+	if nodeTrans.ComputedStyle.Color != color.Transparent {
+		t.Errorf("expected transparent color, got %v", nodeTrans.ComputedStyle.Color)
+	}
+
+	// Test pt
+	nodePt := findNodeByClass(renderTree, "item-pt")
+	if nodePt == nil {
+		t.Fatal("item-pt node not found")
+	}
+	if nodePt.ComputedStyle.FontSize != 16.0 {
+		t.Errorf("expected pt font-size 16.0, got %f", nodePt.ComputedStyle.FontSize)
+	}
+}
+
+func TestBackgroundShorthand(t *testing.T) {
+	htmlContent := `
+		<html>
+			<head>
+				<style>
+					.box1 { background: #123456; }
+					.box2 { background: url("bg.png") no-repeat center rgb(10, 20, 30); }
+					.box3 { background: transparent; }
+					.box4 { background: red none; }
+				</style>
+			</head>
+			<body>
+				<div class="box1"></div>
+				<div class="box2"></div>
+				<div class="box3"></div>
+				<div class="box4"></div>
+			</body>
+		</html>
+	`
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("html.Parse failed: %v", err)
+	}
+
+	stylesheet := extractAndParseCSS(doc)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	styleManager := NewStyleManager(stylesheet)
+	styleManager.ApplyStyles(renderTree)
+
+	b1 := findNodeByClass(renderTree, "box1")
+	if b1.ComputedStyle.BackgroundColor != (color.RGBA{R: 0x12, G: 0x34, B: 0x56, A: 0xff}) {
+		t.Errorf("box1 expected color 123456, got %v", b1.ComputedStyle.BackgroundColor)
+	}
+
+	b2 := findNodeByClass(renderTree, "box2")
+	if b2.ComputedStyle.BackgroundColor != (color.RGBA{R: 10, G: 20, B: 30, A: 255}) {
+		t.Errorf("box2 expected rgb(10,20,30), got %v", b2.ComputedStyle.BackgroundColor)
+	}
+
+	b3 := findNodeByClass(renderTree, "box3")
+	if b3.ComputedStyle.BackgroundColor != color.Transparent {
+		t.Errorf("box3 expected transparent, got %v", b3.ComputedStyle.BackgroundColor)
+	}
+
+	b4 := findNodeByClass(renderTree, "box4")
+	if b4.ComputedStyle.BackgroundColor != (color.RGBA{R: 0xff, A: 0xff}) {
+		t.Errorf("box4 expected red, got %v", b4.ComputedStyle.BackgroundColor)
+	}
+}
+
+

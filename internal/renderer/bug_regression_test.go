@@ -1,10 +1,11 @@
 package renderer
 
 import (
+	"image/color"
 	"testing"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/widget"
+	"fyne.io/fyne/v2/canvas"
 )
 
 // TestBugFixDuplicateRendering is a regression test for the bug where
@@ -50,42 +51,67 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 		t.Fatalf("Expected canvasObject to be *fyne.Container, got %T", canvasObject)
 	}
 
-	// Expected: 3 objects (h1, p, link)
-	// Before fix: 19 objects (each word rendered separately, causing duplication)
-	expectedCount := 3
+	// Expected: 5 objects (1 background rectangle, 1 h1 text, 2 paragraph lines, 1 link text)
+	// Before fix: many objects (each word rendered separately, causing duplication)
+	expectedCount := 5
 	actualCount := len(vbox.Objects)
 
 	if actualCount != expectedCount {
 		t.Errorf("Expected %d rendered objects, got %d", expectedCount, actualCount)
 		for i, obj := range vbox.Objects {
-			if label, isLabel := obj.(*widget.Label); isLabel {
-				t.Logf("  Object %d: Text=%q", i, label.Text)
-			}
+			t.Logf("  Object %d Type=%T Value=%#v", i, obj, obj)
 		}
 	}
 
 	// Verify the content is correct
-	if actualCount >= 3 {
-		// Check h1
-		if label, ok := vbox.Objects[0].(*widget.Label); ok {
-			if label.Text != "Example Domain" {
-				t.Errorf("Expected h1 text 'Example Domain', got '%s'", label.Text)
+	if actualCount >= 5 {
+		// Import "fyne.io/fyne/v2/canvas" if not present, but it should be
+		// Check background
+		if rect, ok := vbox.Objects[0].(*canvas.Rectangle); ok {
+			expectedBgColor := color.RGBA{R: 0xee, G: 0xee, B: 0xee, A: 0xff}
+			if rect.FillColor != expectedBgColor {
+				t.Errorf("Expected background color %v, got %v", expectedBgColor, rect.FillColor)
 			}
+		} else {
+			t.Errorf("Expected Object 0 to be *canvas.Rectangle, got %T", vbox.Objects[0])
 		}
 
-		// Check paragraph
-		if label, ok := vbox.Objects[1].(*widget.Label); ok {
-			expectedText := "This domain is for use in documentation examples without needing permission. Avoid use in operations."
-			if label.Text != expectedText {
-				t.Errorf("Expected paragraph text, got '%s'", label.Text)
+		// Check h1
+		if txt, ok := vbox.Objects[1].(*canvas.Text); ok {
+			if txt.Text != "Example Domain" {
+				t.Errorf("Expected h1 text 'Example Domain', got '%s'", txt.Text)
 			}
+		} else {
+			t.Errorf("Expected Object 1 to be *canvas.Text, got %T", vbox.Objects[1])
+		}
+
+		// Check paragraph line 1
+		if txt, ok := vbox.Objects[2].(*canvas.Text); ok {
+			expectedText := "This domain is for use in documentation examples without"
+			if txt.Text != expectedText {
+				t.Errorf("Expected paragraph line 1 text, got '%s'", txt.Text)
+			}
+		} else {
+			t.Errorf("Expected Object 2 to be *canvas.Text, got %T", vbox.Objects[2])
+		}
+
+		// Check paragraph line 2
+		if txt, ok := vbox.Objects[3].(*canvas.Text); ok {
+			expectedText := "needing permission. Avoid use in operations."
+			if txt.Text != expectedText {
+				t.Errorf("Expected paragraph line 2 text, got '%s'", txt.Text)
+			}
+		} else {
+			t.Errorf("Expected Object 3 to be *canvas.Text, got %T", vbox.Objects[3])
 		}
 
 		// Check link
-		if label, ok := vbox.Objects[2].(*widget.Label); ok {
-			if label.Text != "Learn more" {
-				t.Errorf("Expected link text 'Learn more', got '%s'", label.Text)
+		if txt, ok := vbox.Objects[4].(*canvas.Text); ok {
+			if txt.Text != "Learn more" {
+				t.Errorf("Expected link text 'Learn more', got '%s'", txt.Text)
 			}
+		} else {
+			t.Errorf("Expected Object 4 to be *canvas.Text, got %T", vbox.Objects[4])
 		}
 	}
 }

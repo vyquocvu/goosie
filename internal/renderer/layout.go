@@ -159,16 +159,76 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			if node.ComputedStyle.FontSize > 0 {
 				fontSize = node.ComputedStyle.FontSize
 			}
-			if node.ComputedStyle.Top != "" && node.ComputedStyle.Top != "auto" {
-				layoutBox.Box.Y = parseLength(node.ComputedStyle.Top, fontSize)
+
+			var ancestorX, ancestorY float32
+			containerWidth := le.canvasWidth
+			containerHeight := le.canvasHeight
+
+			if pos == "absolute" {
+				curr := node.Parent
+				for curr != nil {
+					if curr.ComputedStyle != nil && curr.ComputedStyle.Position != "" && curr.ComputedStyle.Position != "static" {
+						if ancestorBox, ok := le.nodeMap[curr.ID]; ok {
+							ancestorX = ancestorBox.Box.X
+							ancestorY = ancestorBox.Box.Y
+							containerWidth = ancestorBox.Box.Width
+							containerHeight = ancestorBox.Box.Height
+							break
+						}
+					}
+					curr = curr.Parent
+				}
 			}
+
+			// Store old coordinates to calculate delta
+			oldX := layoutBox.Box.X
+			oldY := layoutBox.Box.Y
+
+			newY := oldY
+			newX := oldX
+
+			if node.ComputedStyle.Top != "" && node.ComputedStyle.Top != "auto" {
+				newY = ancestorY + parseLength(node.ComputedStyle.Top, fontSize)
+			} else if node.ComputedStyle.Bottom != "" && node.ComputedStyle.Bottom != "auto" {
+				newY = ancestorY + containerHeight - layoutBox.Box.Height - parseLength(node.ComputedStyle.Bottom, fontSize)
+			}
+
 			if node.ComputedStyle.Left != "" && node.ComputedStyle.Left != "auto" {
-				layoutBox.Box.X = parseLength(node.ComputedStyle.Left, fontSize)
+				newX = ancestorX + parseLength(node.ComputedStyle.Left, fontSize)
+			} else if node.ComputedStyle.Right != "" && node.ComputedStyle.Right != "auto" {
+				newX = ancestorX + containerWidth - layoutBox.Box.Width - parseLength(node.ComputedStyle.Right, fontSize)
+			}
+
+			deltaX := newX - oldX
+			deltaY := newY - oldY
+
+			if deltaX != 0 || deltaY != 0 {
+				layoutBox.Box.X = newX
+				layoutBox.Box.Y = newY
+				le.shiftLayoutBox(layoutBox, deltaX, deltaY)
 			}
 		}
 	}
 
 	return layoutBox
+}
+
+// shiftLayoutBox recursively offsets the coordinates of a layout box, its children, and its inline line boxes.
+func (le *LayoutEngine) shiftLayoutBox(box *LayoutBox, deltaX, deltaY float32) {
+	if box == nil || (deltaX == 0 && deltaY == 0) {
+		return
+	}
+
+	for _, child := range box.Children {
+		child.Box.X += deltaX
+		child.Box.Y += deltaY
+		le.shiftLayoutBox(child, deltaX, deltaY)
+	}
+
+	for _, line := range box.LineBoxes {
+		line.X += deltaX
+		line.Y += deltaY
+	}
 }
 
 // buildTableLayoutBox creates a LayoutBox for a table node and computes its layout
@@ -528,7 +588,9 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 				childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
 				if childLayoutBox != nil {
 					layoutBox.AddChild(childLayoutBox)
-					childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+					if childLayoutBox.Position != "absolute" && childLayoutBox.Position != "fixed" {
+						childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+					}
 				}
 			}
 		}
@@ -580,7 +642,9 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth)
 					if childLayoutBox != nil {
 						layoutBox.AddChild(childLayoutBox)
-						childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+						if childLayoutBox.Position != "absolute" && childLayoutBox.Position != "fixed" {
+							childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
+						}
 					}
 				}
 			}
@@ -748,6 +812,15 @@ func (le *LayoutEngine) hasInlineContent(node *RenderNode) bool {
 // hasInlineContentRecursive recursively checks for inline content
 func (le *LayoutEngine) hasInlineContentRecursive(node *RenderNode) bool {
 	for _, child := range node.Children {
+		// Skip display:none elements
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			continue
+		}
+		// Skip absolute/fixed positioned elements from inline content check
+		if child.ComputedStyle != nil && (child.ComputedStyle.Position == "absolute" || child.ComputedStyle.Position == "fixed") {
+			continue
+		}
+
 		if child.Type == NodeTypeText {
 			// Check if text is not empty after trimming
 			if strings.TrimSpace(child.Text) != "" {
