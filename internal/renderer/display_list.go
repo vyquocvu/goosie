@@ -101,6 +101,20 @@ func (dl *DisplayList) Clear() {
 	dl.Commands = make([]*PaintCommand, 0)
 }
 
+// SortByZIndex reorders PaintCommands so lower z-index paints before higher z-index.
+func SortByZIndex(dl *DisplayList) {
+	sort.SliceStable(dl.Commands, func(i, j int) bool {
+		return zIndexOf(dl.Commands[i]) < zIndexOf(dl.Commands[j])
+	})
+}
+
+func zIndexOf(cmd *PaintCommand) int {
+	if cmd.Node != nil && cmd.Node.ComputedStyle != nil {
+		return cmd.Node.ComputedStyle.ZIndex
+	}
+	return 0
+}
+
 // DisplayListBuilder builds a display list from a layout tree and render tree
 type DisplayListBuilder struct {
 	defaultFontSize float32

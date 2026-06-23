@@ -271,11 +271,11 @@ func TestOverflowDisplayList(t *testing.T) {
 	}
 
 	// canvasObj is the root container.
-	// Structure should be: Root Container -> [ ... -> Scroll Container -> Content ]
-	// Because "clip" div has overflow:hidden, it should be rendered as a Scroll container (or similar).
+	// For overflow:hidden, the clip div should be rendered as a plain (non-scrollable)
+	// fyne.Container, NOT a container.Scroll — so users see clipped content without scrollbars.
 
-	// Let's traverse and look for a Scroll container
 	foundScroll := false
+	foundContainer := false
 	var traverse func(obj fyne.CanvasObject)
 	traverse = func(obj fyne.CanvasObject) {
 		if _, ok := obj.(*widget.RichText); ok {
@@ -286,6 +286,7 @@ func TestOverflowDisplayList(t *testing.T) {
 			return
 		}
 		if cont, ok := obj.(*fyne.Container); ok {
+			foundContainer = true
 			for _, child := range cont.Objects {
 				traverse(child)
 			}
@@ -294,8 +295,13 @@ func TestOverflowDisplayList(t *testing.T) {
 
 	traverse(canvasObj)
 
-	if !foundScroll {
-		t.Errorf("Expected to find a Scroll container for overflow:hidden element")
+	// overflow:hidden must NOT produce a scroll container.
+	if foundScroll {
+		t.Errorf("overflow:hidden should not produce a Scroll container (no user-visible scrollbars)")
+	}
+	// The render output should still contain at least the root container.
+	if !foundContainer {
+		t.Errorf("Expected at least one plain container in the render output")
 	}
 }
 

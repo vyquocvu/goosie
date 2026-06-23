@@ -139,3 +139,16 @@ func (lb *LayoutBox) Contains(x, y float32) bool {
 	return x >= lb.Box.X && x <= lb.Box.X+lb.Box.Width &&
 		y >= lb.Box.Y && y <= lb.Box.Y+lb.Box.Height
 }
+
+// collectFixed recursively collects all layout boxes with position:fixed.
+func collectFixed(box *LayoutBox, out *[]*LayoutBox) {
+	if box == nil {
+		return
+	}
+	if box.Position == "fixed" {
+		*out = append(*out, box)
+	}
+	for _, child := range box.Children {
+		collectFixed(child, out)
+	}
+}
