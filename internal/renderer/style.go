@@ -850,6 +850,9 @@ func parseLengthWithViewport(value string, fontSize, viewportWidth, viewportHeig
 	if value == "" || value == "auto" {
 		return -1
 	}
+	if isCalcExpr(value) {
+		return evalCalcExpr(value, fontSize, viewportWidth, viewportHeight, percentBase)
+	}
 	if value == "0" {
 		return 0
 	}
@@ -879,6 +882,11 @@ func parseLength(value string, fontSize float32) float32 {
 	// Handle empty or "0" values
 	if value == "" || value == "0" {
 		return 0
+	}
+
+	if isCalcExpr(value) {
+		// For parseLength without viewport context, use defaults for vw/vh
+		return evalCalcExpr(value, fontSize, 1280, 800, fontSize)
 	}
 
 	// Handle keyword values for border widths
