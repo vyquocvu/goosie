@@ -73,6 +73,16 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		node.ComputedStyle.TextDecoration = node.Parent.ComputedStyle.TextDecoration
 		node.ComputedStyle.TextTransform = node.Parent.ComputedStyle.TextTransform
 		node.ComputedStyle.TextAlign = node.Parent.ComputedStyle.TextAlign
+
+		// Inherit custom properties from parent
+		if node.Parent.ComputedStyle.CustomProperties != nil {
+			if node.ComputedStyle.CustomProperties == nil {
+				node.ComputedStyle.CustomProperties = make(map[string]string)
+			}
+			for k, v := range node.Parent.ComputedStyle.CustomProperties {
+				node.ComputedStyle.CustomProperties[k] = v
+			}
+		}
 	}
 
 	sm.applyMatchingRules(sm.defaultStylesheet, node)
@@ -355,6 +365,8 @@ func (sm *StyleManager) matchesPseudoClass(pseudoClass string, node *RenderNode)
 	}
 
 	switch pseudoClass {
+	case "root":
+		return node.Parent == nil
 	case "link", "visited":
 		return node.TagName == "a"
 	case "hover", "focus", "active":
@@ -442,6 +454,16 @@ var colorNameToHex = map[string]string{
 
 func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration) {
 	style := node.ComputedStyle
+
+	// CSS custom property declaration (e.g. --color-base: #ff0000)
+	if strings.HasPrefix(decl.Property, "--") {
+		if node.ComputedStyle.CustomProperties == nil {
+			node.ComputedStyle.CustomProperties = make(map[string]string)
+		}
+		node.ComputedStyle.CustomProperties[decl.Property] = strings.TrimSpace(decl.Value)
+		return
+	}
+
 	switch decl.Property {
 	case "display":
 		style.Display = decl.Value

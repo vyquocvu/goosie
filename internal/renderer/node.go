@@ -119,6 +119,9 @@ type Style struct {
 	FlexBasis  string  // Initial main size ("auto", length, percentage)
 	AlignSelf  string  // Override align-items for this item
 	Order      int     // Order of flex item
+
+	// CSS custom properties (variables) inherited from this element's cascade
+	CustomProperties map[string]string
 }
 
 // Box represents the layout box for a render node
