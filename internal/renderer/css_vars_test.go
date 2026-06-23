@@ -43,6 +43,35 @@ func TestCSSCustomPropertyStorage(t *testing.T) {
 	// CustomProperties should be inherited from :root
 	assert.NotNil(t, div.ComputedStyle.CustomProperties, "CustomProperties should be inherited from :root")
 	assert.Equal(t, "#ff0000", div.ComputedStyle.CustomProperties["--primary"])
+
+	// Task 2: verify var() resolution actually applied the color
+	// The div has color: var(--primary) which resolves to #ff0000 (red)
+	r, g, b, _ := div.ComputedStyle.Color.RGBA()
+	assert.Greater(t, r, uint32(0xAAAA), "color should be resolved to red from var(--primary)")
+	assert.Less(t, g, uint32(0x1000), "green channel should be near 0")
+	assert.Less(t, b, uint32(0x1000), "blue channel should be near 0")
+}
+
+func TestResolveVarTokens(t *testing.T) {
+	style := &Style{
+		CustomProperties: map[string]string{
+			"--color": "red",
+			"--size":  "16px",
+			"--chain": "var(--color)",
+		},
+	}
+
+	assert.Equal(t, "red", resolveVarTokens("var(--color)", style))
+	assert.Equal(t, "16px", resolveVarTokens("var(--size)", style))
+	assert.Equal(t, "1px solid red", resolveVarTokens("1px solid var(--color)", style))
+	assert.Equal(t, "blue", resolveVarTokens("var(--missing, blue)", style))
+	assert.Equal(t, "red", resolveVarTokens("var(--chain)", style)) // chained var
+	assert.Equal(t, "", resolveVarTokens("var(--undefined)", style))
+
+	// Malformed var() should not panic
+	assert.NotPanics(t, func() {
+		resolveVarTokens("var(--color", style) // missing closing paren
+	})
 }
 
 func TestCSSCustomPropertyStorageOnly(t *testing.T) {

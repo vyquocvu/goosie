@@ -464,6 +464,15 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		return
 	}
 
+	// Resolve var() tokens using this element's custom properties
+	if strings.Contains(decl.Value, "var(") {
+		resolved := resolveVarTokens(decl.Value, node.ComputedStyle)
+		if resolved == "" {
+			return // unresolved variable with no fallback, skip
+		}
+		decl.Value = resolved
+	}
+
 	switch decl.Property {
 	case "display":
 		style.Display = decl.Value
