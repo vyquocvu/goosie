@@ -95,6 +95,12 @@ func NewRuntime() *Runtime {
 		jsErrors:        make([]string, 0),
 	}
 
+	// Inject ES6+ polyfills before any other setup
+	if _, err := vm.RunString(polyfillsJS); err != nil {
+		// Log but don't panic — partial polyfill is better than no runtime
+		fmt.Printf("polyfill injection failed: %v\n", err)
+	}
+
 	// Setup enhanced console API
 	runtime.setupConsoleAPI()
 	
@@ -1069,6 +1075,12 @@ func (r *Runtime) SetFetcher(f HTTPFetcher) {
 // RunScript executes JavaScript code and catches errors
 func (r *Runtime) RunScript(script string) (goja.Value, error) {
 	val, err := r.vm.RunString(script)
+	// Flush microtask queue (drives Promise .then callbacks synchronously)
+	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
+		if fn, ok := goja.AssertFunction(flush); ok {
+			fn(goja.Undefined()) //nolint:errcheck
+		}
+	}
 	if err != nil {
 		// Log JavaScript error
 		errorMsg := fmt.Sprintf("JavaScript Error: %v", err)
