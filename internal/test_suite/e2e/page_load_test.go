@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"io"
+	stdnet "net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +12,19 @@ import (
 
 	"fyne.io/fyne/v2/test"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
+
+func requireLoopbackListener(t *testing.T) {
+	t.Helper()
+	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("loopback listener unavailable in this environment: %v", err)
+	}
+	require.NoError(t, ln.Close())
+}
 
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
@@ -37,6 +48,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestRealPageLoad(t *testing.T) {
+	requireLoopbackListener(t)
 	// 1. Start Test Server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/style.css" {
@@ -127,6 +139,7 @@ func findNodeByID(node *renderer.RenderNode, id string) *renderer.RenderNode {
 }
 
 func TestExternalCSSNonCSSResponseIsIgnored(t *testing.T) {
+	requireLoopbackListener(t)
 	stylesheetRequested := make(chan struct{}, 1)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

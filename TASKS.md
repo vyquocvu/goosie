@@ -26,7 +26,7 @@ Branch: main
 **Fix:** Add GitHub Actions workflow that builds and attaches binaries to GitHub Releases on tag push.
 **Effort:** S (2 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done (2026-06-20) — implemented in Goosie Browser Foundation milestone
 
 ## Security Issues
 
@@ -87,14 +87,14 @@ Branch: main
 **Fix:** Add `.github/workflows/release.yml` that triggers on version tags, builds for linux/darwin/windows (amd64/arm64), and attaches binaries to GitHub Releases.
 **Effort:** S (2 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done (2026-06-20) — implemented in Goosie Browser Foundation milestone
 
 ## Deferred (Roadmap items, not in current scope)
 
 ### [P3] HTTPS/TLS support — certificate verification UI
 **Roadmap:** Phase 3, Security & Privacy
 **What:** While basic HTTPS works via `http.DefaultTransport`, there's no user-facing TLS certificate info or verification UI.
-**Status:** deferred
+**Status:** done (2026-06-20) — TLS certificate summaries implemented in Goosie Browser Foundation milestone; advanced pinning remains deferred
 
 ### [P3] Pop-up blocker
 **Roadmap:** Phase 3, Security & Privacy

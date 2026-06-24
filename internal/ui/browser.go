@@ -1,9 +1,13 @@
 package ui
 
 import (
-    "fmt"
+	"fmt"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -11,8 +15,10 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-    "github.com/vyquocvu/goosie/internal/js"
-    "github.com/vyquocvu/goosie/internal/renderer"
+	"github.com/vyquocvu/goosie/internal/js"
+	goosienet "github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/profile"
+	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 // fixedHeightLayout is a custom layout that sets a fixed height for a widget
@@ -40,6 +46,15 @@ func (l *fixedHeightLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) 
 
 // NavigationCallback is a function that is called when navigation is requested
 type NavigationCallback func(url string)
+
+type BrowserDependencies struct {
+	Profile       *profile.Profile
+	Bookmarks     *profile.BookmarkStore
+	History       *profile.HistoryStore
+	SettingsStore *profile.SettingsStore
+	Storage       *profile.StorageStore
+	Network       *goosienet.Service
+}
 
 // Browser represents the browser UI
 type Browser struct {
@@ -70,6 +85,8 @@ type Browser struct {
 	inspectButton       *widget.Button
 	screenshotButton    *widget.Button
 	RendererFactory     func() HTMLRenderer
+	deps                BrowserDependencies
+	shortcuts           *ShortcutRegistry
 }
 
 // Tab represents a single browser tab
@@ -134,6 +151,16 @@ func NewBrowser() *Browser {
 			tab.jsRuntime.ClearJavaScriptErrors()
 		}
 	})
+	browser.consolePanel.SetExecuteCallback(func(source string) {
+		if tab := browser.ActiveTab(); tab != nil && tab.jsRuntime != nil {
+			value, err := tab.jsRuntime.RunScript(source)
+			if err != nil {
+				browser.consolePanel.AddMessage(js.ConsoleMessage{Level: "error", Message: err.Error(), Timestamp: time.Now(), Data: err.Error()})
+				return
+			}
+			browser.consolePanel.AddMessage(js.ConsoleMessage{Level: "log", Message: value.String(), Timestamp: time.Now(), Data: value.String()})
+		}
+	})
 
 	// Create inspect panel
 	browser.inspectPanel = NewInspectPanel(browser.toggleInspect)
@@ -155,6 +182,38 @@ func NewBrowser() *Browser {
 	browser.createNavigationControls()
 
 	return browser
+}
+
+func NewBrowserWithDependencies(deps BrowserDependencies) *Browser {
+	browser := NewBrowser()
+	browser.deps = deps
+	browser.shortcuts = NewShortcutRegistry()
+	browser.registerDefaultShortcuts()
+	if deps.SettingsStore != nil {
+		browser.settings.ApplyProfileSettings(deps.SettingsStore.Get())
+	}
+	if deps.Bookmarks != nil {
+		for _, bookmark := range deps.Bookmarks.List() {
+			browser.state.AddBookmark(bookmark.URL)
+		}
+	}
+	return browser
+}
+
+func (b *Browser) registerDefaultShortcuts() {
+	if b.shortcuts == nil {
+		return
+	}
+	b.shortcuts.Register("focus-address", func() {
+		if b.urlEntry != nil && b.window != nil {
+			b.window.Canvas().Focus(b.urlEntry)
+		}
+	})
+	b.shortcuts.Register("new-tab", func() {
+		if b.tabs != nil {
+			b.tabs.Append(b.NewTab().AsTabItem())
+		}
+	})
 }
 
 // toggleConsole toggles the visibility of the console panel
@@ -185,21 +244,21 @@ func (b *Browser) toggleInspect() {
 
 // newTabInternal creates a new tab without adding it to the tab container
 func (b *Browser) newTabInternal() *Tab {
-    contentBox := widget.NewRichTextFromMarkdown("Welcome to Goosie! Enter a URL above to start browsing.")
-    contentBox.Wrapping = fyne.TextWrapWord
-    contentScroll := container.NewScroll(contentBox)
-    var htmlRenderer HTMLRenderer
-    if b.RendererFactory != nil {
-        htmlRenderer = b.RendererFactory()
-        if htmlRenderer != nil {
-            htmlRenderer.SetWindow(b.window)
-            htmlRenderer.SetNavigationCallback(func(url string) {
-                if b.onNavigate != nil {
-                    b.onNavigate(url)
-                }
-            })
-        }
-    }
+	contentBox := widget.NewRichTextFromMarkdown("Welcome to Goosie! Enter a URL above to start browsing.")
+	contentBox.Wrapping = fyne.TextWrapWord
+	contentScroll := container.NewScroll(contentBox)
+	var htmlRenderer HTMLRenderer
+	if b.RendererFactory != nil {
+		htmlRenderer = b.RendererFactory()
+		if htmlRenderer != nil {
+			htmlRenderer.SetWindow(b.window)
+			htmlRenderer.SetNavigationCallback(func(url string) {
+				if b.onNavigate != nil {
+					b.onNavigate(url)
+				}
+			})
+		}
+	}
 
 	tabState := NewBrowserState()
 
@@ -314,6 +373,18 @@ func (t *Tab) RenderHTML(htmlContent string) error {
 	return nil
 }
 
+func refreshTabContent(tab *Tab) {
+	if tab == nil || tab.htmlRenderer == nil || tab.contentScroll == nil {
+		return
+	}
+	content := tab.htmlRenderer.UpdateViewport()
+	if content == nil {
+		return
+	}
+	tab.contentScroll.Content = content
+	tab.contentScroll.Refresh()
+}
+
 // SetNavigationCallback sets the callback for when navigation is requested
 func (b *Browser) SetNavigationCallback(callback NavigationCallback) {
 	b.onNavigate = callback
@@ -363,7 +434,7 @@ func (b *Browser) Show() {
 
 	// Create background rectangle
 	bg := canvas.NewRectangle(theme.BackgroundColor())
-	
+
 	// Listen for theme changes to update background color
 	// Note: We need to use a goroutine or delay because theme changes might take a moment to propagate
 	// through Fyne's internal state
@@ -384,9 +455,9 @@ func (b *Browser) createNavigationControls() {
 	// URL entry
 	b.urlEntry = widget.NewEntry()
 	b.urlEntry.SetPlaceHolder("Enter URL (e.g., https://example.com)")
-	b.urlEntry.OnSubmitted = func(url string) {
-		if b.onNavigate != nil && url != "" {
-			b.onNavigate(url)
+	b.urlEntry.OnSubmitted = func(input string) {
+		if b.onNavigate != nil && strings.TrimSpace(input) != "" {
+			b.onNavigate(ResolveAddressInput(input, b.settings.GetDefaultSearchEngine()))
 		}
 	}
 
@@ -464,6 +535,15 @@ func (t *Tab) GetJSRuntime() *js.Runtime {
 // SetJSRuntime sets the tab's JavaScript runtime
 func (t *Tab) SetJSRuntime(runtime *js.Runtime) {
 	t.jsRuntime = runtime
+	if runtime == nil || t.browser == nil {
+		return
+	}
+	if t.browser.deps.Storage != nil {
+		runtime.SetLocalStorageAdapter(t.browser.deps.Storage)
+	}
+	if current, err := urlpkg.Parse(t.state.GetCurrentURL()); err == nil && current.Scheme != "" && current.Host != "" {
+		runtime.SetOrigin(current.Scheme + "://" + current.Host)
+	}
 }
 
 // GetRenderer returns the tab's HTML renderer
@@ -481,9 +561,15 @@ func (b *Browser) toggleBookmark() {
 
 		if b.state.IsBookmarked(currentURL) {
 			b.state.RemoveBookmark(currentURL)
+			if b.deps.Bookmarks != nil {
+				_ = b.deps.Bookmarks.Remove(currentURL)
+			}
 			b.bookmarkButton.SetText("☆")
 		} else {
 			b.state.AddBookmark(currentURL)
+			if b.deps.Bookmarks != nil {
+				_ = b.deps.Bookmarks.Add(currentURL, tab.title)
+			}
 			b.bookmarkButton.SetText("★")
 		}
 		b.bookmarkButton.Refresh()
@@ -494,6 +580,14 @@ func (b *Browser) toggleBookmark() {
 func (b *Browser) NavigateTo(url string) {
 	if tab := b.ActiveTab(); tab != nil {
 		tab.state.AddToHistory(url)
+		if tab.jsRuntime != nil {
+			if current, err := urlpkg.Parse(url); err == nil && current.Scheme != "" && current.Host != "" {
+				tab.jsRuntime.SetOrigin(current.Scheme + "://" + current.Host)
+			}
+		}
+		if b.deps.History != nil {
+			_ = b.deps.History.AddVisit(url, tab.title)
+		}
 		b.urlEntry.SetText(url)
 		b.updateNavigationButtons()
 	}
@@ -636,6 +730,9 @@ func (b *Browser) showSettings() {
 			// Save settings
 			b.settings.SetHomepage(homepageEntry.Text)
 			b.settings.SetDefaultSearchEngine(searchEngineEntry.Text)
+			if b.deps.SettingsStore != nil {
+				_ = b.deps.SettingsStore.Set(b.settings.ToProfileSettings())
+			}
 		},
 		OnCancel: func() {
 			// Do nothing, just close
@@ -655,7 +752,7 @@ func (b *Browser) updateConsoleFromActiveTab() {
 		b.consolePanel.Clear()
 		return
 	}
-	
+
 	// Get console messages from the tab's runtime
 	messages := tab.jsRuntime.GetConsoleMessages()
 	b.consolePanel.SetMessages(messages)
@@ -669,7 +766,7 @@ func (b *Browser) GetConsolePanel() *ConsolePanel {
 // takeScreenshot captures the browser window and saves it as a PNG
 func (b *Browser) takeScreenshot() {
 	options := DefaultScreenshotOptions()
-	
+
 	// Try to get the user's home directory for a sensible default
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
@@ -677,12 +774,12 @@ func (b *Browser) takeScreenshot() {
 		// Create directory if it doesn't exist
 		os.MkdirAll(options.Directory, 0755)
 	}
-	
+
 	filepath, err := TakeScreenshot(b.window, options)
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("Failed to take screenshot: %w", err), b.window)
 		return
 	}
-	
+
 	dialog.ShowInformation("Screenshot Saved", fmt.Sprintf("Screenshot saved to:\n%s", filepath), b.window)
 }

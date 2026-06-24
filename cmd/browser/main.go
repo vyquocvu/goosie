@@ -4,22 +4,53 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/profile"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/ui"
 	ghtml "golang.org/x/net/html"
 )
 
 func main() {
-	// Initialize components
-	fetcher := net.NewFetcher()
+	prof, err := profile.Open(profile.Options{})
+	if err != nil {
+		log.Fatalf("failed to open profile: %v", err)
+	}
+	bookmarks, err := profile.NewBookmarkStore(prof)
+	if err != nil {
+		log.Fatalf("failed to open bookmarks: %v", err)
+	}
+	history, err := profile.NewHistoryStore(prof)
+	if err != nil {
+		log.Fatalf("failed to open history: %v", err)
+	}
+	settingsStore, err := profile.NewSettingsStore(prof)
+	if err != nil {
+		log.Fatalf("failed to open settings: %v", err)
+	}
+	storage, err := profile.NewStorageStore(prof)
+	if err != nil {
+		log.Fatalf("failed to open storage: %v", err)
+	}
+	networkService := net.NewService(net.ServiceOptions{
+		Cache: net.NewHTTPCache(filepath.Join(prof.Root(), "cache"), prof.Private()),
+	})
+	fetcher := net.NewFetcherWithService(networkService)
 	parser := dom.NewParser()
-	browser := ui.NewBrowser()
+	browser := ui.NewBrowserWithDependencies(ui.BrowserDependencies{
+		Profile:       prof,
+		Bookmarks:     bookmarks,
+		History:       history,
+		SettingsStore: settingsStore,
+		Storage:       storage,
+		Network:       networkService,
+	})
 	browser.RendererFactory = func() ui.HTMLRenderer {
 		return renderer.NewRenderer(1000, 700)
 	}

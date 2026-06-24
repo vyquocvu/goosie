@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,14 @@ import (
 // HTTPFetcher is the interface for making HTTP GET requests used by the fetch() JS API.
 type HTTPFetcher interface {
 	Fetch(url string) (string, error)
+}
+
+type LocalStorageAdapter interface {
+	Get(origin, key string) (string, bool)
+	Set(origin, key, value string) error
+	Remove(origin, key string) error
+	Clear(origin string) error
+	Keys(origin string) []string
 }
 
 // Timer represents a scheduled timer
@@ -59,6 +68,8 @@ type Runtime struct {
 	// Browser API storage
 	localStorage   map[string]string
 	sessionStorage map[string]string
+	localStorageAdapter LocalStorageAdapter
+	origin              string
 	timers         map[int]*Timer
 	timerIDCounter int
 	// History tracking
@@ -87,6 +98,7 @@ func NewRuntime() *Runtime {
 		eventListeners:  make(map[string][]goja.Callable),
 		localStorage:    make(map[string]string),
 		sessionStorage:  make(map[string]string),
+		origin:          "about:blank",
 		timers:          make(map[int]*Timer),
 		timerIDCounter:  1,
 		historyStack:    []string{},
@@ -111,6 +123,15 @@ func NewRuntime() *Runtime {
 	runtime.setupDocumentAPI()
 
 	return runtime
+}
+
+func (r *Runtime) SetOrigin(origin string) {
+	r.origin = origin
+}
+
+func (r *Runtime) SetLocalStorageAdapter(adapter LocalStorageAdapter) {
+	r.localStorageAdapter = adapter
+	r.setupLocalStorageAPI()
 }
 
 // setupConsoleAPI configures all console methods with message tracking
@@ -1601,13 +1622,13 @@ func (r *Runtime) setupLocalStorageAPI() {
 		}
 		
 		key := call.Arguments[0].String()
-		value, exists := r.localStorage[key]
+		value, exists := r.localStorageGet(key)
 		if !exists {
 			return goja.Null()
 		}
 		
-		// Strip version prefix
-		if strings.HasPrefix(value, "v1:") {
+		// The in-memory fallback retains its legacy version prefix.
+		if r.localStorageAdapter == nil && strings.HasPrefix(value, "v1:") {
 			return r.vm.ToValue(strings.TrimPrefix(value, "v1:"))
 		}
 		
@@ -1629,9 +1650,7 @@ func (r *Runtime) setupLocalStorageAPI() {
 			return goja.Undefined()
 		}
 		
-		// Store with version prefix for versioning support
-		versionedValue := "v1:" + value
-		r.localStorage[key] = versionedValue
+		r.localStorageSet(key, value)
 		
 		return goja.Undefined()
 	})
@@ -1643,14 +1662,14 @@ func (r *Runtime) setupLocalStorageAPI() {
 		}
 		
 		key := call.Arguments[0].String()
-		delete(r.localStorage, key)
+		r.localStorageRemove(key)
 		
 		return goja.Undefined()
 	})
 	
 	// clear - remove all items
 	localStorage.Set("clear", func(call goja.FunctionCall) goja.Value {
-		r.localStorage = make(map[string]string)
+		r.localStorageClear()
 		return goja.Undefined()
 	})
 	
@@ -1661,10 +1680,7 @@ func (r *Runtime) setupLocalStorageAPI() {
 		}
 		
 		index := int(call.Arguments[0].ToInteger())
-		keys := make([]string, 0, len(r.localStorage))
-		for k := range r.localStorage {
-			keys = append(keys, k)
-		}
+		keys := r.localStorageKeys()
 		
 		if index < 0 || index >= len(keys) {
 			return goja.Null()
@@ -1675,10 +1691,54 @@ func (r *Runtime) setupLocalStorageAPI() {
 	
 	// length property
 	localStorage.Set("length", func(call goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(len(r.localStorage))
+		return r.vm.ToValue(len(r.localStorageKeys()))
 	})
 	
 	r.vm.Set("localStorage", localStorage)
+}
+
+func (r *Runtime) localStorageGet(key string) (string, bool) {
+	if r.localStorageAdapter != nil {
+		return r.localStorageAdapter.Get(r.origin, key)
+	}
+	value, ok := r.localStorage[key]
+	return value, ok
+}
+
+func (r *Runtime) localStorageSet(key, value string) {
+	if r.localStorageAdapter != nil {
+		_ = r.localStorageAdapter.Set(r.origin, key, value)
+		return
+	}
+	r.localStorage[key] = "v1:" + value
+}
+
+func (r *Runtime) localStorageRemove(key string) {
+	if r.localStorageAdapter != nil {
+		_ = r.localStorageAdapter.Remove(r.origin, key)
+		return
+	}
+	delete(r.localStorage, key)
+}
+
+func (r *Runtime) localStorageClear() {
+	if r.localStorageAdapter != nil {
+		_ = r.localStorageAdapter.Clear(r.origin)
+		return
+	}
+	r.localStorage = make(map[string]string)
+}
+
+func (r *Runtime) localStorageKeys() []string {
+	if r.localStorageAdapter != nil {
+		return r.localStorageAdapter.Keys(r.origin)
+	}
+	keys := make([]string, 0, len(r.localStorage))
+	for key := range r.localStorage {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // setupSessionStorageAPI configures sessionStorage

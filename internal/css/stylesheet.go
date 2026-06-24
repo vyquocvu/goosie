@@ -17,6 +17,7 @@ type AtRule struct {
 	Name         string
 	Prelude      string
 	Rules        []Rule
+	AtRules      []AtRule
 	Declarations []Declaration
 }
 

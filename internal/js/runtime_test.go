@@ -2,10 +2,80 @@ package js
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
+
+type memoryStorageAdapter struct {
+	values map[string]map[string]string
+}
+
+func newMemoryStorageAdapter() *memoryStorageAdapter {
+	return &memoryStorageAdapter{values: map[string]map[string]string{}}
+}
+
+func (s *memoryStorageAdapter) Get(origin, key string) (string, bool) {
+	if s.values[origin] == nil {
+		return "", false
+	}
+	value, ok := s.values[origin][key]
+	return value, ok
+}
+
+func (s *memoryStorageAdapter) Set(origin, key, value string) error {
+	if s.values[origin] == nil {
+		s.values[origin] = map[string]string{}
+	}
+	s.values[origin][key] = value
+	return nil
+}
+
+func (s *memoryStorageAdapter) Remove(origin, key string) error {
+	delete(s.values[origin], key)
+	return nil
+}
+
+func (s *memoryStorageAdapter) Clear(origin string) error {
+	delete(s.values, origin)
+	return nil
+}
+
+func (s *memoryStorageAdapter) Keys(origin string) []string {
+	keys := make([]string, 0, len(s.values[origin]))
+	for key := range s.values[origin] {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func TestLocalStorageUsesOriginScopedAdapter(t *testing.T) {
+	store := newMemoryStorageAdapter()
+
+	first := NewRuntime()
+	first.SetOrigin("https://one.test")
+	first.SetLocalStorageAdapter(store)
+	_, err := first.RunScript(`localStorage.setItem("theme", "dark")`)
+	require.NoError(t, err)
+
+	second := NewRuntime()
+	second.SetOrigin("https://one.test")
+	second.SetLocalStorageAdapter(store)
+	value, err := second.RunScript(`localStorage.getItem("theme")`)
+	require.NoError(t, err)
+	require.Equal(t, "dark", value.String())
+
+	third := NewRuntime()
+	third.SetOrigin("https://two.test")
+	third.SetLocalStorageAdapter(store)
+	missing, err := third.RunScript(`localStorage.getItem("theme")`)
+	require.NoError(t, err)
+	require.Equal(t, "null", missing.String())
+}
 
 func TestNewRuntime(t *testing.T) {
 	runtime := NewRuntime()
@@ -1186,4 +1256,3 @@ fetch("https://example.com/api")
 		t.Errorf("expected error message to contain 'connection refused', got %q", val.String())
 	}
 }
-

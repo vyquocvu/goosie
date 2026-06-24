@@ -7,6 +7,7 @@ import (
 
 type HTMLRenderer interface {
 	RenderHTML(htmlContent string) (fyne.CanvasObject, error)
+	UpdateViewport() fyne.CanvasObject
 	SetCurrentURL(url string)
 	ResolveURL(url string) string
 	SetWindow(w fyne.Window)

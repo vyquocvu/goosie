@@ -1,6 +1,7 @@
 package form
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ func TestErrorScenario_NetworkError_NoInternet(t *testing.T) {
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.SetClient(&fakeSubmitClient{err: errors.New("network is unreachable")})
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	_, err = submitter.Submit(formNode, data)
@@ -30,6 +32,7 @@ func TestErrorScenario_NetworkError_DNSFailure(t *testing.T) {
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.SetClient(&fakeSubmitClient{err: errors.New("no such host")})
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	_, err = submitter.Submit(formNode, data)
@@ -43,6 +46,7 @@ func TestErrorScenario_NetworkError_ConnectionRefused(t *testing.T) {
 	formNode := findFirstNode(doc, "form")
 	require.NotNil(t, formNode)
 	submitter := NewFormSubmitter()
+	submitter.SetClient(&fakeSubmitClient{err: errors.New("connection refused")})
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	_, err = submitter.Submit(formNode, data)
@@ -117,7 +121,7 @@ func TestErrorScenario_VeryLongInput_Submit(t *testing.T) {
 	assert.Equal(t, longString, data.Get("data"), "Very long input should be preserved")
 }
 
-func TestErrorScenario_SpecialCharacters_Input(t *testing.T) {
+func TestErrorScenario_SpecialCharacters_InputPreservedAndEscapedForDisplay(t *testing.T) {
 	htmlContent := `<html><body><form><input type="text" name="comment" value="<script>alert('xss')</script>"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
@@ -125,8 +129,9 @@ func TestErrorScenario_SpecialCharacters_Input(t *testing.T) {
 	require.NotNil(t, formNode)
 	state := NewFormState(formNode)
 	data := state.GetFormData()
-	val := data.Get("comment")
-	assert.NotContains(t, val, "<script>", "XSS content should be sanitized")
+	raw := data.Get("comment")
+	require.Equal(t, "<script>alert('xss')</script>", raw)
+	require.Equal(t, "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;", EscapeForDisplay(raw))
 }
 
 func TestErrorScenario_DynamicForm_AddField(t *testing.T) {
@@ -183,7 +188,7 @@ func TestEdgeCase_FormInIframe_Submit(t *testing.T) {
 	require.NoError(t, err)
 	iframe := findFirstNode(doc, "iframe")
 	require.NotNil(t, iframe)
-	
+
 	parentNotified := false
 	srcdoc := getAttrValue(iframe, "srcdoc")
 	if srcdoc != "" {
@@ -199,6 +204,6 @@ func TestEdgeCase_FormInIframe_Submit(t *testing.T) {
 			}
 		}
 	}
-	
+
 	assert.True(t, parentNotified, "Parent should be notified of iframe form submission (if enabled)")
 }

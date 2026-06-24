@@ -18,6 +18,8 @@ type ConsolePanel struct {
 	closeButton     *widget.Button
 	filterSelect    *widget.Select
 	filterLevel     string
+	commandEntry    *widget.Entry
+	onExecute       func(string)
 	onRefresh       func()
 	onClose         func()
 	errorCountLabel *widget.Label
@@ -128,10 +130,18 @@ func NewConsolePanel(onClose func()) *ConsolePanel {
 		container.NewHBox(panel.clearButton, panel.closeButton),
 		container.NewHBox(widget.NewLabel("Filter:"), panel.filterSelect, panel.errorCountLabel),
 	)
+	panel.commandEntry = widget.NewEntry()
+	panel.commandEntry.SetPlaceHolder("Execute JavaScript")
+	panel.commandEntry.OnSubmitted = func(source string) {
+		if panel.onExecute != nil && source != "" {
+			panel.onExecute(source)
+			panel.commandEntry.SetText("")
+		}
+	}
 
 	// Create main container
 	panel.container = container.NewBorder(
-		topBar, nil, nil, nil,
+		topBar, panel.commandEntry, nil, nil,
 		panel.messageList,
 	)
 
@@ -184,6 +194,8 @@ func (cp *ConsolePanel) Clear() {
 func (cp *ConsolePanel) SetRefreshCallback(callback func()) {
 	cp.onRefresh = callback
 }
+
+func (cp *ConsolePanel) SetExecuteCallback(callback func(string)) { cp.onExecute = callback }
 
 // getFilteredMessageCount returns the count of messages matching the current filter
 func (cp *ConsolePanel) getFilteredMessageCount() int {

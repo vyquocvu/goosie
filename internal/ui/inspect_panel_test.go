@@ -19,6 +19,7 @@ type MockHTMLRenderer struct {
 func (m *MockHTMLRenderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	return nil, nil
 }
+func (m *MockHTMLRenderer) UpdateViewport() fyne.CanvasObject { return nil }
 func (m *MockHTMLRenderer) SetCurrentURL(url string) {}
 func (m *MockHTMLRenderer) ResolveURL(url string) string { return url }
 func (m *MockHTMLRenderer) SetWindow(w fyne.Window) {}

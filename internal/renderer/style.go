@@ -127,21 +127,34 @@ func (sm *StyleManager) applyMediaRulesForStylesheet(stylesheet *css.StyleSheet,
 		return
 	}
 
-	for _, atRule := range stylesheet.AtRules {
-		if atRule.Name == "media" {
-			if sm.mediaEvaluator.Evaluate(atRule.Prelude) {
-				// Apply rules from this @media block
-				for _, rule := range atRule.Rules {
-					for _, selectorSeq := range rule.Selectors {
-						if sm.matchesSequence(selectorSeq, node) {
-							for _, decl := range rule.Declarations {
-								sm.applyDeclaration(node, decl)
-							}
-						}
+	sm.applyConditionalAtRules(stylesheet.AtRules, node, true)
+}
+
+func (sm *StyleManager) applyConditionalAtRules(atRules []css.AtRule, node *RenderNode, parentMatches bool) {
+	for _, atRule := range atRules {
+		matches := parentMatches
+		switch atRule.Name {
+		case "media":
+			matches = matches && sm.mediaEvaluator.Evaluate(atRule.Prelude)
+		case "supports":
+			// Unsupported feature tests are treated permissively until capability
+			// detection is modeled explicitly.
+		default:
+			matches = false
+		}
+		if !matches {
+			continue
+		}
+		for _, rule := range atRule.Rules {
+			for _, selectorSeq := range rule.Selectors {
+				if sm.matchesSequence(selectorSeq, node) {
+					for _, decl := range rule.Declarations {
+						sm.applyDeclaration(node, decl)
 					}
 				}
 			}
 		}
+		sm.applyConditionalAtRules(atRule.AtRules, node, matches)
 	}
 }
 
@@ -332,11 +345,11 @@ func (sm *StyleManager) matchesSimple(selector css.SimpleSelector, node *RenderN
 func (sm *StyleManager) matchesPseudoClass(pseudoClass string, node *RenderNode) bool {
 	// Handle functional pseudo-classes
 	if strings.HasPrefix(pseudoClass, "nth-child(") && strings.HasSuffix(pseudoClass, ")") {
-		arg := pseudoClass[len("nth-child("):len(pseudoClass)-1]
+		arg := pseudoClass[len("nth-child(") : len(pseudoClass)-1]
 		if node.Parent == nil {
 			return false
 		}
-		
+
 		// Find node's index (1-based)
 		index := -1
 		for i, child := range node.Parent.Children {
@@ -345,22 +358,22 @@ func (sm *StyleManager) matchesPseudoClass(pseudoClass string, node *RenderNode)
 				break
 			}
 		}
-		
+
 		if index == -1 {
 			return false
 		}
-		
+
 		if arg == "even" {
 			return index%2 == 0
 		} else if arg == "odd" {
 			return index%2 != 0
 		}
-		
+
 		// Handle numeric values
 		if n, err := strconv.Atoi(arg); err == nil {
 			return index == n
 		}
-		
+
 		return false
 	}
 

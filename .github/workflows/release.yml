@@ -3,61 +3,48 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
-  build-and-release:
+  build:
+    name: Build ${{ matrix.goos }} ${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        platform:
-          - goos: darwin
-            goarch: arm64
-            artifact: goosie-darwin-arm64
-          - goos: darwin
-            goarch: amd64
-            artifact: goosie-darwin-amd64
-          - goos: linux
-            goarch: amd64
-            artifact: goosie-linux-amd64
-          - goos: linux
-            goarch: arm64
-            artifact: goosie-linux-arm64
-          - goos: windows
-            goarch: amd64
-            artifact: goosie-windows-amd64.exe
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+        include:
+          - {goos: darwin, goarch: arm64, runner: macos-latest}
+          - {goos: darwin, goarch: amd64, runner: macos-13}
+          - {goos: linux, goarch: amd64, runner: ubuntu-latest}
+          - {goos: windows, goarch: amd64, runner: windows-latest}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Build ${{ matrix.platform.goos }} ${{ matrix.platform.goarch }}
+      - name: Install Linux Fyne dependencies
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+      - name: Test
+        run: go test ./... -short
+      - name: Build and package
+        shell: bash
         run: |
-          mkdir -p build
-          GOOS=${{ matrix.platform.goos }} GOARCH=${{ matrix.platform.goarch }} go build -o build/${{ matrix.platform.artifact }} ./cmd/browser
-
-      - name: Package
-        if: matrix.platform.goos != 'windows'
-        run: |
-          cd build
-          tar -czvf ${{ matrix.platform.artifact }}.tar.gz ${{ matrix.platform.artifact }}
-
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+          mkdir -p dist
+          name="goosie-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          go build -o "dist/${name}${ext}" ./cmd/browser
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            powershell Compress-Archive -Path "${name}${ext}" -DestinationPath "${name}.zip"
+          else
+            tar -czf "${name}.tar.gz" "${name}${ext}"
+          fi
+          shasum -a 256 * > "${name}.sha256"
+      - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build/${{ matrix.platform.artifact }}
-            ${{ matrix.platform.goos != 'windows' && format('build/{0}.tar.gz', matrix.platform.artifact) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: dist/*

@@ -90,7 +90,7 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 
 	// Apply styles
 	if r.stylesheet != nil {
-		styleManager := NewStyleManager(r.stylesheet)
+		styleManager := NewStyleManagerWithViewport(r.stylesheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
 		styleManager.ApplyStyles(renderTree)
 	}
 
@@ -172,7 +172,7 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 	}
 
 	// Apply styles
-	styleManager := NewStyleManager(r.stylesheet)
+	styleManager := NewStyleManagerWithViewport(r.stylesheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
 	styleManager.ApplyStyles(renderTree)
 
 	// Perform layout.
@@ -263,7 +263,7 @@ func (r *Renderer) Refresh() {
 
 	// Apply styles (in case attributes changed)
 	r.stylesheetMu.RLock()
-	styleManager := NewStyleManager(r.stylesheet)
+	styleManager := NewStyleManagerWithViewport(r.stylesheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
 	r.stylesheetMu.RUnlock()
 	styleManager.ApplyStyles(r.currentRenderTree)
 

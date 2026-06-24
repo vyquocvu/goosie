@@ -3,7 +3,6 @@ package form
 import (
 	"regexp"
 	"strings"
-	"time"
 
 	"golang.org/x/net/html"
 )
@@ -26,6 +25,7 @@ type FormState struct {
 	formNode      *html.Node
 	submitEnabled bool
 	cancelEnabled bool
+	submitting    bool
 	onSubmit      SubmitCallback
 	onCancel      CancelCallback
 }
@@ -47,19 +47,19 @@ func (s *FormState) SetCancelCallback(callback CancelCallback) {
 }
 
 func (s *FormState) Submit() {
-	if !s.submitEnabled {
+	if !s.submitEnabled || s.submitting {
 		return
 	}
-	s.submitEnabled = false
-	
-	// Re-enable after 500ms delay to prevent double-clicks
-	time.AfterFunc(500*time.Millisecond, func() {
-		s.submitEnabled = true
-	})
+	s.submitting = true
 
 	if s.onSubmit != nil {
 		s.onSubmit(s.GetFormData())
 	}
+}
+
+func (s *FormState) ResetSubmission() {
+	s.submitting = false
+	s.submitEnabled = true
 }
 
 func (s *FormState) CancelSubmission() {

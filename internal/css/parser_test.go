@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+func TestParserAcceptsUTF8BOM(t *testing.T) {
+	sheet, err := NewParser("\ufeff.hidden { display: none; }").Parse()
+	if err != nil {
+		t.Fatalf("Parse() returned error for UTF-8 BOM: %v", err)
+	}
+	if len(sheet.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(sheet.Rules))
+	}
+}
+
+func TestParserPreservesNestedMediaRules(t *testing.T) {
+	sheet, err := NewParser(`
+		@media screen {
+			.base { display: block; }
+			@media (max-width: 600px) {
+				.narrow { display: block; }
+			}
+		}`).Parse()
+	if err != nil {
+		t.Fatalf("Parse() returned error for nested media: %v", err)
+	}
+	if len(sheet.AtRules) != 1 || len(sheet.AtRules[0].AtRules) != 1 {
+		t.Fatalf("expected one nested at-rule, got %#v", sheet.AtRules)
+	}
+}
+
 func TestParser(t *testing.T) {
 	css := `
 		h1 {
