@@ -247,3 +247,84 @@ func TestBuildRenderTreeTextNode(t *testing.T) {
 		t.Error("Text node has empty text")
 	}
 }
+
+func TestBuildRenderTreeWhitespace(t *testing.T) {
+	tests := []struct {
+		name     string
+		html     string
+		expected []string
+	}{
+		{
+			name:     "leading and trailing spaces preserved",
+			html:     "<p> Hello <span>World</span> </p>",
+			expected: []string{" Hello ", "World", " "},
+		},
+		{
+			name:     "multiple spaces collapsed",
+			html:     "<p>  Hello   World  </p>",
+			expected: []string{" Hello World "},
+		},
+		{
+			name:     "newlines converted to spaces",
+			html:     "<p>\nHello\nWorld\n</p>",
+			expected: []string{" Hello World "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc, err := html.Parse(strings.NewReader(tt.html))
+			if err != nil {
+				t.Fatalf("Failed to parse HTML: %v", err)
+			}
+
+			var pNode *html.Node
+			var findP func(*html.Node)
+			findP = func(n *html.Node) {
+				if n.Type == html.ElementNode && n.Data == "p" {
+					pNode = n
+					return
+				}
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if pNode == nil {
+						findP(c)
+					}
+				}
+			}
+			findP(doc)
+
+			if pNode == nil {
+				t.Fatal("Could not find p node")
+			}
+
+			renderTree := BuildRenderTree(pNode)
+			if renderTree == nil {
+				t.Fatal("BuildRenderTree returned nil")
+			}
+
+			// Collect all text nodes
+			var texts []string
+			var collectTexts func(*RenderNode)
+			collectTexts = func(n *RenderNode) {
+				if n.Type == NodeTypeText {
+					texts = append(texts, n.Text)
+				}
+				for _, child := range n.Children {
+					collectTexts(child)
+				}
+			}
+			collectTexts(renderTree)
+
+			if len(texts) != len(tt.expected) {
+				t.Fatalf("Expected %d text nodes, got %d. Texts: %v", len(tt.expected), len(texts), texts)
+			}
+
+			for i, text := range texts {
+				if text != tt.expected[i] {
+					t.Errorf("At index %d: expected '%s', got '%s'", i, tt.expected[i], text)
+				}
+			}
+		})
+	}
+}
+

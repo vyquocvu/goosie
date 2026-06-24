@@ -246,18 +246,22 @@ func processTextNode(htmlNode *html.Node) *RenderNode {
 		return nil
 	}
 	node := NewRenderNode(NodeTypeText)
-	isOnlyWhitespace := true
+	
+	var builder strings.Builder
+	inWhitespace := false
 	for _, r := range htmlNode.Data {
-		if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
-			isOnlyWhitespace = false
-			break
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !inWhitespace {
+				builder.WriteByte(' ')
+				inWhitespace = true
+			}
+		} else {
+			builder.WriteRune(r)
+			inWhitespace = false
 		}
 	}
-	if isOnlyWhitespace {
-		node.Text = " "
-	} else {
-		node.Text = strings.Join(strings.Fields(htmlNode.Data), " ")
-	}
+	node.Text = builder.String()
+	
 	return node
 }
 

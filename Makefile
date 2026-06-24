@@ -59,9 +59,9 @@ test: clean generate-test-data
 	
 	# Run E2E tests with Playwright
 	@echo "Running E2E tests..."
-	go test -v ./$(E2E_TEST_DIR)
+	go test -v -tags=e2e ./$(E2E_TEST_DIR)
 
 # Update test snapshots
 update-snapshots: clean generate-test-data
 	@echo "Updating test snapshots..."
-	UPDATE_SNAPSHOTS=true go test -v ./$(E2E_TEST_DIR)
+	UPDATE_SNAPSHOTS=true go test -v -tags=e2e ./$(E2E_TEST_DIR)

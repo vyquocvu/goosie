@@ -1,4 +1,7 @@
+//go:build e2e
+
 package e2e
+
 
 import (
 	"net/http"
@@ -92,6 +95,7 @@ func TestWikipediaMainPageLoads(t *testing.T) {
 
 	r := renderer.NewRenderer(1280, 800)
 	r.SetTestingMode(true)
+	r.SetCurrentURL("https://en.wikipedia.org/wiki/Main_Page")
 
 	obj, err := r.RenderHTML(html)
 	assert.NoError(t, err)

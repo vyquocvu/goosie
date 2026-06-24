@@ -122,7 +122,7 @@ func TestErrorScenario_VeryLongInput_Submit(t *testing.T) {
 }
 
 func TestErrorScenario_SpecialCharacters_InputPreservedAndEscapedForDisplay(t *testing.T) {
-	htmlContent := `<html><body><form><input type="text" name="comment" value="<script>alert('xss')</script>"></form></body></html>`
+	htmlContent := `<html><body><form><input type="text" name="comment" value="<b>bold & 'special'</b>"></form></body></html>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	require.NoError(t, err)
 	formNode := findFirstNode(doc, "form")
@@ -130,8 +130,8 @@ func TestErrorScenario_SpecialCharacters_InputPreservedAndEscapedForDisplay(t *t
 	state := NewFormState(formNode)
 	data := state.GetFormData()
 	raw := data.Get("comment")
-	require.Equal(t, "<script>alert('xss')</script>", raw)
-	require.Equal(t, "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;", EscapeForDisplay(raw))
+	require.Equal(t, "<b>bold & 'special'</b>", raw)
+	require.Equal(t, "&lt;b&gt;bold &amp; &#39;special&#39;&lt;/b&gt;", EscapeForDisplay(raw))
 }
 
 func TestErrorScenario_DynamicForm_AddField(t *testing.T) {

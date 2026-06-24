@@ -242,7 +242,13 @@ func (l *loader) loadFromDataURI(dataURI string) (*ImageData, error) {
 
 // loadFromURL loads an image from a remote URL
 func (l *loader) loadFromURL(url string) (*ImageData, error) {
-	resp, err := l.httpClient.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create image request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := l.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch image: %w", err)
 	}

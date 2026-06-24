@@ -373,6 +373,16 @@ func (r *Renderer) resolveURL(href string) string {
 		return href
 	}
 
+	if strings.HasPrefix(href, "//") {
+		scheme := "https:"
+		if r.currentURL != "" {
+			if parsed, err := url.Parse(r.currentURL); err == nil && parsed.Scheme != "" {
+				scheme = parsed.Scheme + ":"
+			}
+		}
+		return scheme + href
+	}
+
 	// If no current URL, return href as-is
 	if r.currentURL == "" {
 		return href
