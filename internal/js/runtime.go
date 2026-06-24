@@ -95,6 +95,12 @@ func NewRuntime() *Runtime {
 		jsErrors:        make([]string, 0),
 	}
 
+	// Inject ES6+ polyfills before any other setup
+	if _, err := vm.RunString(polyfillsJS); err != nil {
+		// Log but don't panic — partial polyfill is better than no runtime
+		fmt.Printf("polyfill injection failed: %v\n", err)
+	}
+
 	// Setup enhanced console API
 	runtime.setupConsoleAPI()
 	
@@ -396,6 +402,18 @@ func (r *Runtime) setupDocumentAPI() {
           return target[prop];
         }
       });
+      this.style.setProperty = (name, value) => {
+        const camel = name.startsWith('--') ? name : name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        this.style[camel] = value;
+      };
+      this.style.getPropertyValue = (name) => {
+        const camel = name.startsWith('--') ? name : name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        return this.style[camel] || '';
+      };
+      this.style.removeProperty = (name) => {
+        const camel = name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        delete this.style[camel];
+      };
     }
     
     get id() { return this.getAttribute("id") || ""; }
@@ -530,6 +548,73 @@ func (r *Runtime) setupDocumentAPI() {
       }
       return results;
     }
+
+    get dataset() {
+      const self = this;
+      return new Proxy({}, {
+        get(_, prop) {
+          const attr = 'data-' + prop.replace(/([A-Z])/g, '-$1').toLowerCase();
+          return self.getAttribute(attr);
+        },
+        set(_, prop, value) {
+          const attr = 'data-' + prop.replace(/([A-Z])/g, '-$1').toLowerCase();
+          self.setAttribute(attr, String(value));
+          return true;
+        }
+      });
+    }
+
+    hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name.toLowerCase()); }
+
+    closest(selector) {
+      let el = this;
+      while (el) {
+        if (el.matches && el.matches(selector)) return el;
+        el = el.parentNode;
+      }
+      return null;
+    }
+
+    matches(selector) {
+      if (!selector) return false;
+      selector = selector.trim();
+      if (selector.startsWith('#')) return this.getAttribute('id') === selector.slice(1);
+      if (selector.startsWith('.')) return (this.classList && this.classList.contains(selector.slice(1)));
+      if (/^[a-zA-Z]/.test(selector)) return this.tagName && this.tagName.toLowerCase() === selector.toLowerCase();
+      if (selector.includes('.')) return selector.split('.').filter(Boolean).every(cls => this.classList && this.classList.contains(cls));
+      return false;
+    }
+
+    get outerHTML() {
+      return '<' + (this.tagName || 'div') + '>' + this.innerHTML + '</' + (this.tagName || 'div') + '>';
+    }
+
+    insertAdjacentHTML(position, html) {
+      const textNode = document.createTextNode(html);
+      switch(position) {
+        case 'beforebegin': if (this.parentNode) this.parentNode.insertBefore(textNode, this); break;
+        case 'afterbegin':  this.insertBefore(textNode, this.childNodes[0]); break;
+        case 'beforeend':   this.appendChild(textNode); break;
+        case 'afterend':    if (this.parentNode) this.parentNode.insertBefore(textNode, this.nextSibling); break;
+      }
+    }
+
+    getBoundingClientRect() {
+      return { top:0, right:0, bottom:0, left:0, width:0, height:0, x:0, y:0,
+               toJSON: function() { return this; } };
+    }
+    get offsetWidth()  { return 0; }
+    get offsetHeight() { return 0; }
+    get offsetTop()    { return 0; }
+    get offsetLeft()   { return 0; }
+    get scrollWidth()  { return 0; }
+    get scrollHeight() { return 0; }
+    get scrollTop()    { return 0; }
+    set scrollTop(_)   {}
+    get scrollLeft()   { return 0; }
+    set scrollLeft(_)  {}
+    get clientWidth()  { return 0; }
+    get clientHeight() { return 0; }
   }
   
   class Document extends Node {
@@ -678,6 +763,125 @@ func (r *Runtime) setupDocumentAPI() {
     }
     return results;
   };
+
+  // Window geometry
+  window.innerWidth  = 1280;
+  window.innerHeight = 800;
+  window.outerWidth  = 1280;
+  window.outerHeight = 800;
+  window.pageXOffset = 0;
+  window.pageYOffset = 0;
+  window.scrollX     = 0;
+  window.scrollY     = 0;
+  window.scrollTo    = function(x, y) { window.scrollX = x || 0; window.scrollY = y || 0; };
+  window.scrollBy    = function(dx, dy) { window.scrollX += dx || 0; window.scrollY += dy || 0; };
+  window.devicePixelRatio = 1;
+  window.screen = { width: 1280, height: 800, availWidth: 1280, availHeight: 800 };
+
+  // getComputedStyle — returns inline styles
+  window.getComputedStyle = function(el) {
+    var inline = el && el.getAttribute ? (el.getAttribute('style') || '') : '';
+    var styleMap = {};
+    inline.split(';').forEach(function(pair) {
+      var idx = pair.indexOf(':');
+      if (idx !== -1) styleMap[pair.slice(0,idx).trim()] = pair.slice(idx+1).trim();
+    });
+    return {
+      getPropertyValue: function(name) { return styleMap[name] || ''; },
+      setProperty: function() {},
+      removeProperty: function() {}
+    };
+  };
+
+  // document additions
+  document.readyState = 'complete';
+  document.cookie = '';
+  Object.defineProperty(document, 'title', {
+    configurable: true,
+    get: function() { return document._title || ''; },
+    set: function(v) { document._title = v; }
+  });
+  document.createDocumentFragment = function() {
+    var frag = new Element('fragment');
+    frag.nodeType = 11;
+    return frag;
+  };
+
+  // MutationObserver stub
+  window.MutationObserver = function(callback) {
+    this._callback = callback;
+  };
+  window.MutationObserver.prototype.observe = function(target, options) {
+    var self = this;
+    var prev = window.__onDOMChanged;
+    window.__onDOMChanged = function() {
+      if (prev) prev();
+      self._callback([{ type: 'childList', target: target, addedNodes: [], removedNodes: [] }]);
+    };
+  };
+  window.MutationObserver.prototype.disconnect = function() {};
+  window.MutationObserver.prototype.takeRecords = function() { return []; };
+  globalThis.MutationObserver = window.MutationObserver;
+
+  // IntersectionObserver stub — fires immediately with isIntersecting: true
+  window.IntersectionObserver = function(callback) { this._callback = callback; };
+  window.IntersectionObserver.prototype.observe = function(target) {
+    var self = this;
+    queueMicrotask(function() {
+      self._callback([{
+        isIntersecting: true, intersectionRatio: 1, target: target,
+        boundingClientRect: {top:0,left:0,width:0,height:0,bottom:0,right:0},
+        intersectionRect: {top:0,left:0,width:0,height:0,bottom:0,right:0},
+        rootBounds: null, time: 0
+      }]);
+    });
+    if (typeof __flushMicrotasks === "function") __flushMicrotasks();
+  };
+  window.IntersectionObserver.prototype.unobserve = function() {};
+  window.IntersectionObserver.prototype.disconnect = function() {};
+  globalThis.IntersectionObserver = window.IntersectionObserver;
+
+  // ResizeObserver stub
+  window.ResizeObserver = function(callback) { this._callback = callback; };
+  window.ResizeObserver.prototype.observe = function(target) {
+    var self = this;
+    queueMicrotask(function() {
+      self._callback([{ target: target, contentRect: {width:0,height:0,top:0,left:0} }]);
+    });
+    if (typeof __flushMicrotasks === "function") __flushMicrotasks();
+  };
+  window.ResizeObserver.prototype.unobserve = function() {};
+  window.ResizeObserver.prototype.disconnect = function() {};
+  globalThis.ResizeObserver = window.ResizeObserver;
+
+  // requestAnimationFrame / cancelAnimationFrame
+  var _rafId = 0;
+  window.requestAnimationFrame = function(fn) {
+    var id = ++_rafId;
+    queueMicrotask(function() { try { fn(Date.now()); } catch(e) {} });
+    if (typeof __flushMicrotasks === "function") __flushMicrotasks();
+    return id;
+  };
+  window.cancelAnimationFrame = function() {};
+  globalThis.requestAnimationFrame = window.requestAnimationFrame;
+  globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
+
+  // CustomEvent / Event override (more complete implementation)
+  window.CustomEvent = function(type, options) {
+    this.type = type || '';
+    this.detail = options && options.detail;
+    this.bubbles = (options && options.bubbles) || false;
+    this.cancelable = (options && options.cancelable) || false;
+    this.defaultPrevented = false;
+    this.target = null;
+    this.currentTarget = null;
+  };
+  window.CustomEvent.prototype.preventDefault = function() { this.defaultPrevented = true; };
+  window.CustomEvent.prototype.stopPropagation = function() {};
+  window.CustomEvent.prototype.stopImmediatePropagation = function() {};
+  window.Event = window.CustomEvent;
+  globalThis.CustomEvent = window.CustomEvent;
+  globalThis.Event = window.Event;
 })();
 `
 
@@ -1060,6 +1264,11 @@ func (r *Runtime) SetHTMLContent(htmlStr string) {
 	}
 }
 
+// LoadHTML is an alias for SetHTMLContent, provided for test convenience.
+func (r *Runtime) LoadHTML(htmlStr string) {
+	r.SetHTMLContent(htmlStr)
+}
+
 // SetFetcher sets the HTTP fetcher used by the fetch() JS API.
 // When set, fetch() makes real HTTP requests instead of returning mock data.
 func (r *Runtime) SetFetcher(f HTTPFetcher) {
@@ -1069,6 +1278,12 @@ func (r *Runtime) SetFetcher(f HTTPFetcher) {
 // RunScript executes JavaScript code and catches errors
 func (r *Runtime) RunScript(script string) (goja.Value, error) {
 	val, err := r.vm.RunString(script)
+	// Flush microtask queue (drives Promise .then callbacks synchronously)
+	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
+		if fn, ok := goja.AssertFunction(flush); ok {
+			fn(goja.Undefined()) //nolint:errcheck
+		}
+	}
 	if err != nil {
 		// Log JavaScript error
 		errorMsg := fmt.Sprintf("JavaScript Error: %v", err)

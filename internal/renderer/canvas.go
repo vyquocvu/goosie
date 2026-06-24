@@ -810,6 +810,9 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		dlb := NewDisplayListBuilder()
 		displayList = dlb.Build(layoutRoot, root)
 
+		// Sort by z-index so lower stacking contexts paint first
+		SortByZIndex(displayList)
+
 		// Cache for next time
 		cr.cachedDisplayList = displayList
 		cr.cachedRenderRoot = root
@@ -877,16 +880,23 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 			}
 			content.Resize(fyne.NewSize(maxX, maxY))
 
-			// Create scroll container
-			// TODO: If overflow is "hidden", we should ideally disable scrolling/scrollbars.
-			// Fyne's container.Scroll always allows scrolling if content is larger.
-			// For now, we use Scroll for both "hidden" and "scroll" to ensure clipping.
-			scroll := container.NewScroll(content)
-			scroll.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
-			scroll.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
+			// Create clip container — for overflow:hidden use a plain (non-scrollable) container
+			// so Fyne clips to the container bounds without showing scrollbars.
+			// For scroll/auto keep using container.NewScroll.
+			var clipped fyne.CanvasObject
+			if clipInfo.Overflow == "hidden" {
+				clipped = container.NewWithoutLayout(poppedObjects...)
+				clipped.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
+				clipped.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
+			} else {
+				scroll := container.NewScroll(content)
+				scroll.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
+				scroll.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
+				clipped = scroll
+			}
 
 			// Add to parent list
-			*getCurrentList() = append(*getCurrentList(), scroll)
+			*getCurrentList() = append(*getCurrentList(), clipped)
 			continue
 		}
 

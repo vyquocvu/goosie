@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/draw"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -17,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/srwiley/oksvg"
+	"github.com/srwiley/rasterx"
 	_ "golang.org/x/image/webp"
 )
 
@@ -164,6 +167,50 @@ func (l *loader) loadImage(source string) (*ImageData, error) {
 	return l.loadFromFile(source)
 }
 
+// isSVGSource returns true if the source URL or path ends in .svg (case-insensitive).
+func isSVGSource(source string) bool {
+	lower := strings.ToLower(source)
+	// Strip query string for URL-based sources
+	if idx := strings.Index(lower, "?"); idx != -1 {
+		lower = lower[:idx]
+	}
+	return strings.HasSuffix(lower, ".svg")
+}
+
+// decodeSVG rasterizes SVG bytes into an ImageData using oksvg/rasterx.
+func decodeSVG(data []byte) (*ImageData, error) {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(data), oksvg.WarnErrorMode)
+	if err != nil {
+		return nil, fmt.Errorf("svg parse: %w", err)
+	}
+
+	w := int(icon.ViewBox.W)
+	h := int(icon.ViewBox.H)
+	if w <= 0 {
+		w = 100
+	}
+	if h <= 0 {
+		h = 100
+	}
+
+	icon.SetTarget(0, 0, float64(w), float64(h))
+
+	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(rgba, rgba.Bounds(), image.White, image.Point{}, draw.Src)
+
+	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
+	raster := rasterx.NewDasher(w, h, scanner)
+	icon.Draw(raster, 1.0)
+
+	return &ImageData{
+		Image:  rgba,
+		Width:  w,
+		Height: h,
+		Format: "svg",
+		State:  StateLoaded,
+	}, nil
+}
+
 // loadFromDataURI loads an image from a data URI
 func (l *loader) loadFromDataURI(dataURI string) (*ImageData, error) {
 	// Format: data:[<mediatype>][;base64],<data>
@@ -211,6 +258,12 @@ func (l *loader) loadFromURL(url string) (*ImageData, error) {
 		return nil, fmt.Errorf("failed to read image data: %w", err)
 	}
 
+	// Detect SVG by URL suffix or Content-Type header
+	ct := resp.Header.Get("Content-Type")
+	if isSVGSource(url) || strings.Contains(ct, "image/svg") {
+		return decodeSVG(data)
+	}
+
 	return l.decodeImage(bytes.NewReader(data))
 }
 
@@ -221,6 +274,15 @@ func (l *loader) loadFromFile(path string) (*ImageData, error) {
 		return nil, fmt.Errorf("failed to open image file: %w", err)
 	}
 	defer file.Close()
+
+	// Detect SVG by file extension
+	if isSVGSource(path) {
+		data, err := io.ReadAll(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read svg file: %w", err)
+		}
+		return decodeSVG(data)
+	}
 
 	return l.decodeImage(file)
 }

@@ -25,7 +25,7 @@ var nodeIDCounter int64
 
 // RenderNode represents a node in the render tree
 type RenderNode struct {
-	ID            int64             // Unique node identifier
+	ID            int64 // Unique node identifier
 	Type          NodeType
 	TagName       string            // HTML tag name (e.g., "div", "p", "h1")
 	Text          string            // Text content for text nodes
@@ -39,8 +39,8 @@ type RenderNode struct {
 
 // Style represents computed styles for a node (placeholder for future CSS support)
 type Style struct {
-	Display         string      // "block", "inline", "none", etc.
-	Visibility      string      // "visible", "hidden", "collapse"
+	Display         string // "block", "inline", "none", etc.
+	Visibility      string // "visible", "hidden", "collapse"
 	FontSize        float32
 	FontWeight      string
 	Color           color.Color
@@ -55,7 +55,7 @@ type Style struct {
 	FontStyle       string // "normal", "italic"
 	TextDecoration  string // "none", "underline", "line-through"
 	TextTransform   string // "none", "uppercase", "lowercase", "capitalize"
-	
+
 	// Positioning
 	Position string // "static", "relative", "absolute", "fixed", "sticky"
 	Top      string
@@ -84,51 +84,51 @@ type Style struct {
 	MaxHeight string
 
 	// Box model properties
-	MarginTop       string
-	MarginRight     string
-	MarginBottom    string
-	MarginLeft      string
-	
-	PaddingTop      string
-	PaddingRight    string
-	PaddingBottom   string
-	PaddingLeft     string
-	
-	BorderTopWidth     string
-	BorderRightWidth   string
-	BorderBottomWidth  string
-	BorderLeftWidth    string
-	
-	BorderTopStyle     string
-	BorderRightStyle   string
-	BorderBottomStyle  string
-	BorderLeftStyle    string
-	
-	BorderTopColor     color.Color
-	BorderRightColor   color.Color
-	BorderBottomColor  color.Color
-	BorderLeftColor    color.Color
-	
+	MarginTop    string
+	MarginRight  string
+	MarginBottom string
+	MarginLeft   string
+
+	PaddingTop    string
+	PaddingRight  string
+	PaddingBottom string
+	PaddingLeft   string
+
+	BorderTopWidth    string
+	BorderRightWidth  string
+	BorderBottomWidth string
+	BorderLeftWidth   string
+
+	BorderTopStyle    string
+	BorderRightStyle  string
+	BorderBottomStyle string
+	BorderLeftStyle   string
+
+	BorderTopColor    color.Color
+	BorderRightColor  color.Color
+	BorderBottomColor color.Color
+	BorderLeftColor   color.Color
+
 	// Flexbox container properties
-	FlexDirection   string // "row", "row-reverse", "column", "column-reverse"
-	FlexWrap        string // "nowrap", "wrap", "wrap-reverse"
-	JustifyContent  string // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
-	AlignItems      string // "flex-start", "flex-end", "center", "stretch", "baseline"
-	AlignContent    string // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
-	Gap             string // Gap between flex/grid items
-	RowGap          string // Row gap for grid/flex
-	ColumnGap       string // Column gap for grid/flex
-	
+	FlexDirection  string // "row", "row-reverse", "column", "column-reverse"
+	FlexWrap       string // "nowrap", "wrap", "wrap-reverse"
+	JustifyContent string // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
+	AlignItems     string // "flex-start", "flex-end", "center", "stretch", "baseline"
+	AlignContent   string // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
+	Gap            string // Gap between flex/grid items
+	RowGap         string // Row gap for grid/flex
+	ColumnGap      string // Column gap for grid/flex
+
 	// Grid Container properties
 	GridTemplateColumns string
 	GridTemplateRows    string
-	
+
 	// Grid Item properties
 	GridColumnStart string
 	GridColumnEnd   string
 	GridRowStart    string
 	GridRowEnd      string
-	
+
 	// Flexbox item properties
 	FlexGrow   float32 // How much item should grow
 	FlexShrink float32 // How much item should shrink (default 1)
@@ -136,22 +136,25 @@ type Style struct {
 	AlignSelf  string  // Override align-items for this item
 	Order      int     // Order of flex item
 
+	// CSS custom properties (variables) inherited from this element's cascade
+	CustomProperties map[string]string
+
 	// Visual properties
-	BorderRadius    string // Shorthand or individual corner radii
-	BoxShadow       string // Box shadow specification
-	TextShadow      string // Text shadow specification
-	Transform       string // CSS transform functions
-	TransformOrigin string // Transform origin point
-	Transition      string // CSS transition specification
-	Cursor          string // Cursor type
-	VerticalAlign   string // "baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super"
-	WhiteSpace      string // "normal", "nowrap", "pre", "pre-wrap", "pre-line"
-	WordBreak       string // "normal", "break-all", "keep-all", "break-word"
-	ListStyleType   string // "disc", "circle", "square", "decimal", "none"
+	BorderRadius      string // Shorthand or individual corner radii
+	BoxShadow         string // Box shadow specification
+	TextShadow        string // Text shadow specification
+	Transform         string // CSS transform functions
+	TransformOrigin   string // Transform origin point
+	Transition        string // CSS transition specification
+	Cursor            string // Cursor type
+	VerticalAlign     string // "baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super"
+	WhiteSpace        string // "normal", "nowrap", "pre", "pre-wrap", "pre-line"
+	WordBreak         string // "normal", "break-all", "keep-all", "break-word"
+	ListStyleType     string // "disc", "circle", "square", "decimal", "none"
 	ListStylePosition string // "inside", "outside"
-	TableLayout     string // "auto", "fixed"
-	BorderCollapse  string // "collapse", "separate"
-	BorderSpacing   string // Length value for collapsed borders
+	TableLayout       string // "auto", "fixed"
+	BorderCollapse    string // "collapse", "separate"
+	BorderSpacing     string // Length value for collapsed borders
 }
 
 // Box represents the layout box for a render node

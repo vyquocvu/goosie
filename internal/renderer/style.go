@@ -73,6 +73,16 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		node.ComputedStyle.TextDecoration = node.Parent.ComputedStyle.TextDecoration
 		node.ComputedStyle.TextTransform = node.Parent.ComputedStyle.TextTransform
 		node.ComputedStyle.TextAlign = node.Parent.ComputedStyle.TextAlign
+
+		// Inherit custom properties from parent
+		if node.Parent.ComputedStyle.CustomProperties != nil {
+			if node.ComputedStyle.CustomProperties == nil {
+				node.ComputedStyle.CustomProperties = make(map[string]string)
+			}
+			for k, v := range node.Parent.ComputedStyle.CustomProperties {
+				node.ComputedStyle.CustomProperties[k] = v
+			}
+		}
 	}
 
 	sm.applyMatchingRules(sm.defaultStylesheet, node)
@@ -355,6 +365,8 @@ func (sm *StyleManager) matchesPseudoClass(pseudoClass string, node *RenderNode)
 	}
 
 	switch pseudoClass {
+	case "root":
+		return node.Parent == nil
 	case "link", "visited":
 		return node.TagName == "a"
 	case "hover", "focus", "active":
@@ -442,6 +454,25 @@ var colorNameToHex = map[string]string{
 
 func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration) {
 	style := node.ComputedStyle
+
+	// CSS custom property declaration (e.g. --color-base: #ff0000)
+	if strings.HasPrefix(decl.Property, "--") {
+		if node.ComputedStyle.CustomProperties == nil {
+			node.ComputedStyle.CustomProperties = make(map[string]string)
+		}
+		node.ComputedStyle.CustomProperties[decl.Property] = strings.TrimSpace(decl.Value)
+		return
+	}
+
+	// Resolve var() tokens using this element's custom properties
+	if strings.Contains(decl.Value, "var(") {
+		resolved := resolveVarTokens(decl.Value, node.ComputedStyle)
+		if resolved == "" {
+			return // unresolved variable with no fallback, skip
+		}
+		decl.Value = resolved
+	}
+
 	switch decl.Property {
 	case "display":
 		style.Display = decl.Value
@@ -874,6 +905,9 @@ func parseLengthWithViewport(value string, fontSize, viewportWidth, viewportHeig
 	if value == "" || value == "auto" {
 		return -1
 	}
+	if isCalcExpr(value) {
+		return evalCalcExpr(value, fontSize, viewportWidth, viewportHeight, percentBase)
+	}
 	if value == "0" {
 		return 0
 	}
@@ -903,6 +937,11 @@ func parseLength(value string, fontSize float32) float32 {
 	// Handle empty or "0" values
 	if value == "" || value == "0" {
 		return 0
+	}
+
+	if isCalcExpr(value) {
+		// For parseLength without viewport context, use defaults for vw/vh
+		return evalCalcExpr(value, fontSize, 1280, 800, fontSize)
 	}
 
 	// Handle keyword values for border widths
