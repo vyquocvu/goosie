@@ -97,6 +97,8 @@ type LayoutBox struct {
 
 	// CSS positioning
 	Position string // "static", "relative", "absolute", "fixed", "sticky"
+	Float    string // "none", "left", "right"
+	Clear    string // "none", "left", "right", "both"
 }
 
 // NewLayoutBox creates a new layout box

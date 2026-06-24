@@ -141,7 +141,7 @@ func TestLayoutInlineContentSimple(t *testing.T) {
 	p.AddChild(text)
 	
 	// Layout inline content
-	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal)
+	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal, nil)
 	
 	if len(lines) == 0 {
 		t.Fatal("Expected at least one line")
@@ -173,7 +173,7 @@ func TestLayoutInlineContentWithWrapping(t *testing.T) {
 	p.AddChild(text)
 	
 	// Layout with narrow width to force wrapping
-	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 100, WhiteSpaceNormal)
+	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 100, WhiteSpaceNormal, nil)
 	
 	if len(lines) <= 1 {
 		t.Errorf("Expected multiple lines due to wrapping, got %d", len(lines))
@@ -213,7 +213,7 @@ func TestLayoutInlineContentMultipleTextNodes(t *testing.T) {
 	p.AddChild(text3)
 	
 	// Layout inline content
-	lines, _ := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal)
+	lines, _ := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal, nil)
 	
 	if len(lines) == 0 {
 		t.Fatal("Expected at least one line")
@@ -258,7 +258,7 @@ func TestLayoutInlineContentWithInlineElements(t *testing.T) {
 	p.AddChild(text2)
 	
 	// Layout inline content
-	lines, _ := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal)
+	lines, _ := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal, nil)
 	
 	if len(lines) == 0 {
 		t.Fatal("Expected at least one line")
@@ -405,7 +405,7 @@ func TestLayoutInlineContentEmptyText(t *testing.T) {
 	p.AddChild(text)
 	
 	// Layout inline content
-	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal)
+	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 400, WhiteSpaceNormal, nil)
 	
 	// Should collapse to nothing
 	if totalHeight > 0 {
@@ -465,7 +465,7 @@ func TestCharacterBreaking(t *testing.T) {
 	p.AddChild(text)
 	
 	// Layout with narrow width to force character breaking
-	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 50, WhiteSpaceNormal)
+	lines, totalHeight := ile.LayoutInlineContent(p, 0, 0, 50, WhiteSpaceNormal, nil)
 	
 	if len(lines) <= 1 {
 		t.Errorf("Expected multiple lines due to character breaking, got %d", len(lines))

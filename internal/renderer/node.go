@@ -64,8 +64,24 @@ type Style struct {
 	Left     string
 	ZIndex   int
 
+	// Float and Clear
+	Float string // "none", "left", "right"
+	Clear string // "none", "left", "right", "both"
+
 	// Overflow
-	Overflow string // "visible", "hidden", "scroll", "auto"
+	Overflow     string // "visible", "hidden", "scroll", "auto"
+	OverflowX    string // "visible", "hidden", "scroll", "auto"
+	OverflowY    string // "visible", "hidden", "scroll", "auto"
+	TextOverflow string // "clip", "ellipsis"
+
+	// Box sizing
+	BoxSizing string // "content-box", "border-box"
+
+	// Min/Max constraints
+	MinWidth  string
+	MaxWidth  string
+	MinHeight string
+	MaxHeight string
 
 	// Box model properties
 	MarginTop       string
@@ -119,6 +135,23 @@ type Style struct {
 	FlexBasis  string  // Initial main size ("auto", length, percentage)
 	AlignSelf  string  // Override align-items for this item
 	Order      int     // Order of flex item
+
+	// Visual properties
+	BorderRadius    string // Shorthand or individual corner radii
+	BoxShadow       string // Box shadow specification
+	TextShadow      string // Text shadow specification
+	Transform       string // CSS transform functions
+	TransformOrigin string // Transform origin point
+	Transition      string // CSS transition specification
+	Cursor          string // Cursor type
+	VerticalAlign   string // "baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super"
+	WhiteSpace      string // "normal", "nowrap", "pre", "pre-wrap", "pre-line"
+	WordBreak       string // "normal", "break-all", "keep-all", "break-word"
+	ListStyleType   string // "disc", "circle", "square", "decimal", "none"
+	ListStylePosition string // "inside", "outside"
+	TableLayout     string // "auto", "fixed"
+	BorderCollapse  string // "collapse", "separate"
+	BorderSpacing   string // Length value for collapsed borders
 }
 
 // Box represents the layout box for a render node

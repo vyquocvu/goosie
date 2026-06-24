@@ -687,15 +687,70 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	// Overflow
 	case "overflow":
 		style.Overflow = decl.Value
+		if style.OverflowX == "" {
+			style.OverflowX = decl.Value
+		}
+		if style.OverflowY == "" {
+			style.OverflowY = decl.Value
+		}
 	case "overflow-x":
-		// For now map to overflow if not specifically handling x/y
-		if style.Overflow == "" {
-			style.Overflow = decl.Value
-		}
+		style.OverflowX = decl.Value
 	case "overflow-y":
-		if style.Overflow == "" {
-			style.Overflow = decl.Value
-		}
+		style.OverflowY = decl.Value
+	case "text-overflow":
+		style.TextOverflow = decl.Value
+
+	// Float and Clear
+	case "float":
+		style.Float = decl.Value
+	case "clear":
+		style.Clear = decl.Value
+
+	// Box Sizing
+	case "box-sizing":
+		style.BoxSizing = decl.Value
+
+	// Min/Max constraints
+	case "min-width":
+		style.MinWidth = decl.Value
+	case "max-width":
+		style.MaxWidth = decl.Value
+	case "min-height":
+		style.MinHeight = decl.Value
+	case "max-height":
+		style.MaxHeight = decl.Value
+
+	// Visual and other properties
+	case "border-radius":
+		style.BorderRadius = decl.Value
+	case "box-shadow":
+		style.BoxShadow = decl.Value
+	case "text-shadow":
+		style.TextShadow = decl.Value
+	case "transform":
+		style.Transform = decl.Value
+	case "transform-origin":
+		style.TransformOrigin = decl.Value
+	case "transition":
+		style.Transition = decl.Value
+	case "cursor":
+		style.Cursor = decl.Value
+	case "vertical-align":
+		style.VerticalAlign = decl.Value
+	case "white-space":
+		style.WhiteSpace = decl.Value
+	case "word-break":
+		style.WordBreak = decl.Value
+	case "list-style-type":
+		style.ListStyleType = decl.Value
+	case "list-style-position":
+		style.ListStylePosition = decl.Value
+	case "table-layout":
+		style.TableLayout = decl.Value
+	case "border-collapse":
+		style.BorderCollapse = decl.Value
+	case "border-spacing":
+		style.BorderSpacing = decl.Value
 
 	// Flexbox item properties
 	case "flex-grow":

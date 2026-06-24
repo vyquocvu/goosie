@@ -79,6 +79,7 @@ type InlineBox struct {
 type InlineLayoutEngine struct {
 	fontMetrics     *FontMetrics
 	defaultFontSize float32
+	floatCtx        *FloatContext
 }
 
 // NewInlineLayoutEngine creates a new inline layout engine
@@ -95,7 +96,10 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 	node *RenderNode,
 	x, y, availableWidth float32,
 	whiteSpaceMode WhiteSpaceMode,
+	floatCtx *FloatContext,
 ) ([]*LineBox, float32) {
+	ile.floatCtx = floatCtx
+	defer func() { ile.floatCtx = nil }()
 
 	lines := make([]*LineBox, 0)
 
@@ -106,7 +110,8 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 		lineHeight = node.ComputedStyle.LineHeight
 	}
 
-	currentLine := ile.newLineBox(x, y, availableWidth, textAlign, lineHeight)
+	lineX, widthForLine := ile.getLineXAndWidth(x, y, availableWidth, lineHeight)
+	currentLine := ile.newLineBox(lineX, y, widthForLine, textAlign, lineHeight)
 
 	// Process all inline children and text nodes
 	for _, child := range node.Children {
@@ -126,6 +131,29 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 	}
 
 	return lines, totalHeight
+}
+
+func (ile *InlineLayoutEngine) getLineXAndWidth(x, y, availableWidth, lineHeight float32) (float32, float32) {
+	if ile.floatCtx == nil {
+		return x, availableWidth
+	}
+	expectedHeight := lineHeight
+	if expectedHeight <= 0 {
+		expectedHeight = 16.0 * 1.2
+	}
+	leftOffset, bfcAvailableWidth := ile.floatCtx.GetAvailableWidth(y, expectedHeight)
+
+	bfcLeft := ile.floatCtx.containerX + leftOffset
+	bfcRight := bfcLeft + bfcAvailableWidth
+
+	lineLeft := maxFloat32(x, bfcLeft)
+	lineRight := minFloat32(x+availableWidth, bfcRight)
+
+	lineWidth := lineRight - lineLeft
+	if lineWidth < 0 {
+		lineWidth = 0
+	}
+	return lineLeft, lineWidth
 }
 
 // addNodeToLines adds a render node to the line boxes
@@ -305,8 +333,10 @@ func (ile *InlineLayoutEngine) addTextPiece(
 		*lines = append(*lines, *currentLine)
 
 		textAlign := (*currentLine).TextAlign
+		lineHeight := (*currentLine).LineHeight
 		nextY := (*currentLine).Y + (*currentLine).Height
-		*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign, (*currentLine).LineHeight)
+		newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, lineHeight)
+		*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
 		spaceWidth = 0 // No space at start of new line
 
 		// Re-measure for new line
@@ -383,7 +413,8 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 				textAlign := (*currentLine).TextAlign
 				lineHeight := (*currentLine).LineHeight
 				nextY := (*currentLine).Y + (*currentLine).Height
-				*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign, lineHeight)
+				newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, lineHeight)
+				*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
 			}
 
 			box := &InlineBox{
@@ -456,7 +487,8 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 				textAlign := (*currentLine).TextAlign
 				lineHeight := (*currentLine).LineHeight
 				nextY := (*currentLine).Y + (*currentLine).Height
-				*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign, lineHeight)
+				newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, lineHeight)
+				*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
 			}
 		}
 		currentPiece.WriteRune(ch)
@@ -511,8 +543,10 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		*lines = append(*lines, *currentLine)
 
 		textAlign := (*currentLine).TextAlign
+		lineHeight := (*currentLine).LineHeight
 		nextY := (*currentLine).Y + (*currentLine).Height
-		*currentLine = ile.newLineBox(lineX, nextY, availableWidth, textAlign, (*currentLine).LineHeight)
+		newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, lineHeight)
+		*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
 	}
 
 	// Create inline box for inline-block
