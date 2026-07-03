@@ -287,6 +287,18 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 				if text == "" {
 					continue
 				}
+				if linkNode, href, ok := dlb.linkAncestor(accum.node); ok {
+					cmd := &PaintCommand{
+						Type:     PaintLink,
+						NodeID:   linkNode.ID,
+						Node:     linkNode,
+						Box:      accum.box,
+						LinkURL:  href,
+						LinkText: text,
+					}
+					displayList.AddCommand(cmd)
+					continue
+				}
 				cmd := &PaintCommand{
 					Type:          PaintText,
 					NodeID:        nodeID,
@@ -306,9 +318,15 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	} else if !isHidden {
 		// No inline content - generate paint command based on node type
 		if renderNode.Type == NodeTypeText {
+			if _, _, ok := dlb.linkAncestor(renderNode); ok {
+				return
+			}
 			dlb.addTextCommand(layoutBox, renderNode, displayList)
 		} else if renderNode.Type == NodeTypeElement {
 			dlb.addElementCommand(layoutBox, renderNode, displayList)
+			if dlb.isLinkWithHref(renderNode) {
+				return
+			}
 		}
 	} else if isHidden && renderNode.Type == NodeTypeElement && renderNode.TagName == "img" {
 		// For visibility:hidden images, still add transparent placeholder to preserve layout space
@@ -363,6 +381,24 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	if isOverflow {
 		dlb.addPopClipCommand(layoutBox, renderNode, displayList)
 	}
+}
+
+func (dlb *DisplayListBuilder) isLinkWithHref(node *RenderNode) bool {
+	if node == nil || node.Type != NodeTypeElement || node.TagName != "a" {
+		return false
+	}
+	href, ok := node.GetAttribute("href")
+	return ok && href != ""
+}
+
+func (dlb *DisplayListBuilder) linkAncestor(node *RenderNode) (*RenderNode, string, bool) {
+	for current := node; current != nil; current = current.Parent {
+		if dlb.isLinkWithHref(current) {
+			href, _ := current.GetAttribute("href")
+			return current, href, true
+		}
+	}
+	return nil, "", false
 }
 
 // addPushClipCommand adds a push clip command

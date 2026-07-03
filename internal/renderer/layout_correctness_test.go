@@ -263,3 +263,149 @@ func TestFloatsAndWrapping(t *testing.T) {
 		t.Errorf("First line X = %f; expected >= 118 to wrap around the float", firstLine.X)
 	}
 }
+
+func TestBlockAutoHeightIncludesFloatedChildren(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+	<html>
+	<body>
+		<header class="site-header">
+			<div class="header-inner">
+				<div class="logo">Logo</div>
+				<nav class="navigation">Domains Protocols Numbers About</nav>
+			</div>
+		</header>
+		<main class="content">Example Domains</main>
+	</body>
+	</html>`
+
+	cssStr := `
+		.site-header {
+			width: 100%;
+		}
+		.header-inner {
+			padding: 25px 50px;
+		}
+		.logo {
+			float: left;
+			width: 220px;
+			height: 80px;
+		}
+		.navigation {
+			float: right;
+			width: 360px;
+			height: 32px;
+		}
+		.content {
+			height: 40px;
+		}
+	`
+
+	le, _, renderTree := runLayout(t, htmlStr, cssStr)
+	headerInnerNode := findNodeByClass(renderTree, "header-inner")
+	contentNode := findNodeByClass(renderTree, "content")
+	if headerInnerNode == nil || contentNode == nil {
+		t.Fatal("nodes not found")
+	}
+
+	headerInnerBox := le.GetLayoutBox(headerInnerNode.ID)
+	contentBox := le.GetLayoutBox(contentNode.ID)
+	if headerInnerBox.Box.Height < 130 {
+		t.Fatalf("header wrapper height = %f; want at least 130 to include floated children plus padding", headerInnerBox.Box.Height)
+	}
+	if contentBox.Box.Y < headerInnerBox.Box.Y+headerInnerBox.Box.Height {
+		t.Fatalf("content Y = %f overlaps header bottom %f", contentBox.Box.Y, headerInnerBox.Box.Y+headerInnerBox.Box.Height)
+	}
+}
+
+func TestIANAInlineLinksStayOnSameLineWithSurroundingText(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+	<html>
+	<body>
+		<p class="lede">As described in <a href="/go/rfc2606">RFC 2606</a> and <a href="/go/rfc6761">RFC 6761</a>, a number of domains are maintained.</p>
+	</body>
+	</html>`
+
+	cssStr := `
+		.lede {
+			width: 760px;
+			font-size: 16px;
+			margin: 0;
+		}
+		a {
+			display: inline;
+		}
+	`
+
+	_, layoutRoot, renderTree := runLayout(t, htmlStr, cssStr)
+	displayList := NewDisplayListBuilder().Build(layoutRoot, renderTree)
+
+	var firstLink, secondLink *PaintCommand
+	for _, cmd := range displayList.Commands {
+		if cmd.Type != PaintLink {
+			continue
+		}
+		switch cmd.LinkText {
+		case "RFC 2606":
+			firstLink = cmd
+		case "RFC 6761":
+			secondLink = cmd
+		}
+	}
+
+	if firstLink == nil || secondLink == nil {
+		t.Fatalf("expected both RFC links in display list, got first=%v second=%v", firstLink != nil, secondLink != nil)
+	}
+	if firstLink.Box.Y != secondLink.Box.Y {
+		t.Fatalf("expected RFC links to stay on same line, got y=%f and y=%f", firstLink.Box.Y, secondLink.Box.Y)
+	}
+	if secondLink.Box.X <= firstLink.Box.X+firstLink.Box.Width {
+		t.Fatalf("expected second link to appear after first link with intervening text, first=%+v second=%+v", firstLink.Box, secondLink.Box)
+	}
+}
+
+func TestTableCellInlineContentKeepsTableOffset(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+	<html>
+	<body>
+		<main class="content">Example Domains</main>
+		<footer class="site-footer">
+			<table class="navigation">
+				<tr>
+					<td><a href="/domains">Domain Names</a></td>
+					<td><a href="/domains/root">Root Zone Registry</a></td>
+				</tr>
+			</table>
+		</footer>
+	</body>
+	</html>`
+
+	cssStr := `
+		.content {
+			height: 240px;
+		}
+		.site-footer {
+			padding: 25px 0;
+		}
+	`
+
+	le, layoutRoot, renderTree := runLayout(t, htmlStr, cssStr)
+	footerNode := findNodeByClass(renderTree, "site-footer")
+	if footerNode == nil {
+		t.Fatal("footer node not found")
+	}
+	footerBox := le.GetLayoutBox(footerNode.ID)
+	if footerBox == nil {
+		t.Fatal("footer layout box not found")
+	}
+
+	displayList := NewDisplayListBuilder().Build(layoutRoot, renderTree)
+	for _, cmd := range displayList.Commands {
+		if cmd.Type == PaintLink && cmd.LinkText == "Domain Names" {
+			if cmd.Box.Y < footerBox.Box.Y {
+				t.Fatalf("footer table link Y = %f; want >= footer Y %f", cmd.Box.Y, footerBox.Box.Y)
+			}
+			return
+		}
+	}
+	t.Fatal("Domain Names footer link not found")
+}

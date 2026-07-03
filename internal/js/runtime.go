@@ -357,6 +357,44 @@ func (r *Runtime) setupDocumentAPI() {
         this.parentNode.dispatchEvent(event);
       }
     }
+
+    cloneNode(deep) {
+      let clone;
+      if (this.nodeType === 1) {
+        clone = new Element(this.tagName);
+        for (const key in this.attributes) {
+          if (Object.prototype.hasOwnProperty.call(this.attributes, key) && key !== "__goosie_id") {
+            clone.attributes[key] = this.attributes[key];
+          }
+        }
+      } else if (this.nodeType === 3) {
+        clone = new TextNode(this.textContent);
+      } else if (this.nodeType === 9) {
+        clone = new Document();
+        clone.childNodes = [];
+        clone.documentElement = null;
+        clone.head = null;
+        clone.body = null;
+      } else {
+        clone = new Node(this.nodeType, this.nodeName);
+      }
+
+      if (deep) {
+        this.childNodes.forEach(child => {
+          const childClone = child.cloneNode(true);
+          childClone.parentNode = clone;
+          clone.childNodes.push(childClone);
+          if (childClone.nodeType === 1) {
+            const tag = childClone.tagName.toLowerCase();
+            if (tag === "html") clone.documentElement = childClone;
+            if (tag === "head") clone.head = childClone;
+            if (tag === "body") clone.body = childClone;
+          }
+        });
+      }
+
+      return clone;
+    }
   }
   
   class TextNode extends Node {
@@ -1381,11 +1419,25 @@ func (r *Runtime) setupWindowAPI() {
 	
 	// Setup setTimeout and setInterval
 	r.setupTimerAPIs()
+	r.attachWindowTimerAPIs(window)
 	
 	// Setup fetch API
 	r.setupFetchAPI()
 	
 	r.vm.Set("window", window)
+	r.vm.Set("self", window)
+	r.vm.Set("top", window)
+	r.vm.Set("parent", window)
+	window.Set("window", window)
+	window.Set("self", window)
+	window.Set("top", window)
+	window.Set("parent", window)
+}
+
+func (r *Runtime) attachWindowTimerAPIs(window *goja.Object) {
+	for _, name := range []string{"setTimeout", "clearTimeout", "setInterval", "clearInterval"} {
+		window.Set(name, r.vm.Get(name))
+	}
 }
 
 // setupLocationAPI configures window.location object

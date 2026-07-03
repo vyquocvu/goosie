@@ -117,3 +117,44 @@ func TestGetComputedStyle(t *testing.T) {
 		t.Errorf("expected 'red', got %q", val.String())
 	}
 }
+
+func TestCloneNodeShallowAndDeep(t *testing.T) {
+	rt := NewRuntime()
+	rt.LoadHTML(`<html><body><div id="a" class="box" data-kind="source"><span>child</span></div></body></html>`)
+
+	val, err := rt.RunScript(`
+		var original = document.getElementById("a");
+		var shallow = original.cloneNode(false);
+		var deep = original.cloneNode(true);
+		shallow.id === "a" &&
+			shallow.className === "box" &&
+			shallow.getAttribute("data-kind") === "source" &&
+			shallow.childNodes.length === 0 &&
+			deep.childNodes.length === 1 &&
+			deep.childNodes[0].tagName.toLowerCase() === "span" &&
+			deep.textContent === "child" &&
+			deep.parentNode === null &&
+			deep.childNodes[0].parentNode === deep;
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val.String() != "true" {
+		t.Errorf("expected cloneNode checks to pass, got %q", val.String())
+	}
+}
+
+func TestCloneNodeTextNode(t *testing.T) {
+	rt := NewRuntime()
+	val, err := rt.RunScript(`
+		var text = document.createTextNode("hello");
+		var clone = text.cloneNode();
+		clone !== text && clone.nodeType === 3 && clone.textContent === "hello" && clone.parentNode === null;
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val.String() != "true" {
+		t.Errorf("expected text cloneNode checks to pass, got %q", val.String())
+	}
+}

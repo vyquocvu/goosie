@@ -258,10 +258,12 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 		
 		// Set position
 		if cStart >= 0 && cStart < len(colPositions) {
-			item.layoutBox.Box.X = colPositions[cStart]
+			dx := colPositions[cStart] - item.layoutBox.Box.X
+			shiftLayoutBoxTree(item.layoutBox, dx, 0)
 		}
 		if rStart >= 0 && rStart < len(rowPositions) {
-			item.layoutBox.Box.Y = rowPositions[rStart]
+			dy := rowPositions[rStart] - item.layoutBox.Box.Y
+			shiftLayoutBoxTree(item.layoutBox, 0, dy)
 		}
 		
 		parentBox.AddChild(item.layoutBox)
@@ -407,16 +409,33 @@ func (gle *GridLayoutEngine) LayoutTable(layoutBox *LayoutBox) {
 		rStart := item.rowStart - 1
 
 		if cStart >= 0 && cStart < len(colPositions) {
-			item.layoutBox.Box.X = colPositions[cStart]
+			dx := colPositions[cStart] - item.layoutBox.Box.X
+			shiftLayoutBoxTree(item.layoutBox, dx, 0)
 		}
 		if rStart >= 0 && rStart < len(rowPositions) {
-			item.layoutBox.Box.Y = rowPositions[rStart]
+			dy := rowPositions[rStart] - item.layoutBox.Box.Y
+			shiftLayoutBoxTree(item.layoutBox, 0, dy)
 		}
 		
 		// Ensure items stretch to fill their cell height (default table behavior)
 		if rStart >= 0 && rStart < len(rowHeights) {
 			item.layoutBox.Box.Height = rowHeights[rStart]
 		}
+	}
+}
+
+func shiftLayoutBoxTree(box *LayoutBox, deltaX, deltaY float32) {
+	if box == nil || (deltaX == 0 && deltaY == 0) {
+		return
+	}
+	box.Box.X += deltaX
+	box.Box.Y += deltaY
+	for _, child := range box.Children {
+		shiftLayoutBoxTree(child, deltaX, deltaY)
+	}
+	for _, line := range box.LineBoxes {
+		line.X += deltaX
+		line.Y += deltaY
 	}
 }
 

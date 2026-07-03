@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	urlpkg "net/url"
 	"path/filepath"
 	"strings"
 
@@ -230,18 +231,23 @@ func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, html string,
 		doc, htmlParseErr := ghtml.Parse(strings.NewReader(html))
 		if htmlParseErr == nil {
 			for _, src := range extractExternalScriptSrcs(doc) {
-				// Only fetch scripts with a valid HTTP/HTTPS URL
-				if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
-					log.Printf("Skipping external script with non-HTTP src: %s", src)
+				resolvedSrc, resolveErr := resolveScriptURL(src, url)
+				if resolveErr != nil {
+					log.Printf("Skipping external script with invalid src %s: %v", src, resolveErr)
 					continue
 				}
-				scriptContent, fetchErr := fetcher.Fetch(src)
+				// Only fetch scripts with a valid HTTP/HTTPS URL
+				if !strings.HasPrefix(resolvedSrc, "http://") && !strings.HasPrefix(resolvedSrc, "https://") {
+					log.Printf("Skipping external script with non-HTTP src: %s", resolvedSrc)
+					continue
+				}
+				scriptContent, fetchErr := fetcher.Fetch(resolvedSrc)
 				if fetchErr != nil {
-					log.Printf("Failed to fetch external script %s: %v", src, fetchErr)
+					log.Printf("Failed to fetch external script %s: %v", resolvedSrc, fetchErr)
 					continue
 				}
 				if _, runErr := jsRuntime.RunScript(scriptContent); runErr != nil {
-					log.Printf("Error running external script %s: %v", src, runErr)
+					log.Printf("Error running external script %s: %v", resolvedSrc, runErr)
 				}
 			}
 		}
@@ -335,4 +341,23 @@ func extractExternalScriptSrcs(doc *ghtml.Node) []string {
 	}
 	walk(doc)
 	return srcs
+}
+
+func resolveScriptURL(src, pageURL string) (string, error) {
+	parsedSrc, err := urlpkg.Parse(src)
+	if err != nil {
+		return "", err
+	}
+	if parsedSrc.IsAbs() {
+		return parsedSrc.String(), nil
+	}
+
+	base, err := urlpkg.Parse(pageURL)
+	if err != nil {
+		return "", err
+	}
+	if base.Scheme == "" || base.Host == "" {
+		return src, nil
+	}
+	return base.ResolveReference(parsedSrc).String(), nil
 }

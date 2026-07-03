@@ -6,6 +6,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/widget"
 )
 
 // TestBugFixDuplicateRendering is a regression test for the bug where
@@ -106,12 +107,17 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 		}
 
 		// Check link
-		if txt, ok := vbox.Objects[4].(*canvas.Text); ok {
-			if txt.Text != "Learn more" {
-				t.Errorf("Expected link text 'Learn more', got '%s'", txt.Text)
+		switch link := vbox.Objects[4].(type) {
+		case *TappableHyperlink:
+			if link.Text != "Learn more" {
+				t.Errorf("Expected link text 'Learn more', got '%s'", link.Text)
 			}
-		} else {
-			t.Errorf("Expected Object 4 to be *canvas.Text, got %T", vbox.Objects[4])
+		case *widget.Hyperlink:
+			if link.Text != "Learn more" {
+				t.Errorf("Expected link text 'Learn more', got '%s'", link.Text)
+			}
+		default:
+			t.Errorf("Expected Object 4 to be a hyperlink, got %T", vbox.Objects[4])
 		}
 	}
 }

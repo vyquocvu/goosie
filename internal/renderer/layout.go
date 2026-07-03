@@ -609,6 +609,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 	if floatCtx == nil || establishesBFC(node, layoutBox) {
 		floatCtx = NewFloatContext(childX, currentY, contentWidth)
 	}
+	floatStart := len(floatCtx.floats)
 
 	// Layout children
 	childY := currentY
@@ -813,6 +814,11 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 	// Enclose floats if BFC or overflow is not visible
 	if node.ComputedStyle != nil && (node.ComputedStyle.Overflow == "hidden" || node.ComputedStyle.Overflow == "auto" || node.ComputedStyle.Overflow == "scroll") {
 		childY = floatCtx.ClearFloat("both", childY)
+	}
+	for _, f := range floatCtx.floats[floatStart:] {
+		if bottom := f.Box.Y + f.Box.Height; bottom > childY {
+			childY = bottom
+		}
 	}
 
 	// Add bottom padding

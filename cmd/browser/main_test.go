@@ -118,6 +118,46 @@ func TestExtractExternalScriptSrcs(t *testing.T) {
 	}
 }
 
+func TestResolveScriptURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		pageURL string
+		want    string
+	}{
+		{
+			name:    "absolute URL",
+			src:     "https://cdn.example.test/app.js",
+			pageURL: "https://www.iana.org/help/example-domains",
+			want:    "https://cdn.example.test/app.js",
+		},
+		{
+			name:    "root relative URL",
+			src:     "/static/_js/jquery.js",
+			pageURL: "https://www.iana.org/help/example-domains",
+			want:    "https://www.iana.org/static/_js/jquery.js",
+		},
+		{
+			name:    "page relative URL",
+			src:     "app.js",
+			pageURL: "https://www.iana.org/help/example-domains",
+			want:    "https://www.iana.org/help/app.js",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveScriptURL(tt.src, tt.pageURL)
+			if err != nil {
+				t.Fatalf("resolveScriptURL returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveScriptURL() = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // parseHTMLForTest is a helper that calls ghtml.Parse for test use.
 func parseHTMLForTest(htmlContent string) (*ghtml.Node, error) {
 	return ghtml.Parse(strings.NewReader(htmlContent))

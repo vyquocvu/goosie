@@ -2,6 +2,8 @@ package renderer
 
 import (
 	"testing"
+
+	"fyne.io/fyne/v2"
 )
 
 func TestResolveURL(t *testing.T) {
@@ -85,5 +87,12 @@ func TestNavigationCallbackIntegration(t *testing.T) {
 	renderer.onNavigate("https://example.com/test")
 	if navigatedTo != "https://example.com/test" {
 		t.Errorf("Navigation callback not invoked correctly, got %v", navigatedTo)
+	}
+}
+
+func TestTappableHyperlinkDoesNotWrapInlineText(t *testing.T) {
+	link := newTappableHyperlink("RFC 2606", "https://example.com/rfc2606", func(string) {})
+	if link.Wrapping != fyne.TextWrapOff {
+		t.Fatalf("hyperlink wrapping = %v; want TextWrapOff", link.Wrapping)
 	}
 }

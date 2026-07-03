@@ -627,6 +627,31 @@ t.Errorf("setTimeout callback was not executed")
 }
 }
 
+func TestWindowTimerAliasesAndFrameGlobals(t *testing.T) {
+runtime := NewRuntime()
+defer runtime.Cleanup()
+
+_, err := runtime.RunScript(`
+var windowExecuted = false;
+var timerId = window.setTimeout(function() {
+windowExecuted = true;
+}, 10);
+`)
+if err != nil {
+t.Fatalf("window.setTimeout failed: %v", err)
+}
+
+time.Sleep(50 * time.Millisecond)
+
+val, err := runtime.RunScript(`windowExecuted && top === window && parent === window && self === window`)
+if err != nil {
+t.Fatalf("failed to check browser globals: %v", err)
+}
+if !val.ToBoolean() {
+t.Fatalf("expected window timer aliases and frame globals to be available")
+}
+}
+
 func TestClearTimeout(t *testing.T) {
 runtime := NewRuntime()
 defer runtime.Cleanup()

@@ -303,7 +303,7 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 
 		// Create a clickable hyperlink widget
 		link := widget.NewHyperlink(text, parsedURL)
-		link.Wrapping = fyne.TextWrapWord
+		link.Wrapping = fyne.TextWrapOff
 
 		// Override the default tap handler to use our navigation callback
 		if cr.onNavigate != nil {
@@ -369,7 +369,7 @@ func newTappableHyperlink(text, urlStr string, onNavigate NavigationCallback) *T
 	link.ExtendBaseWidget(link)
 	link.Text = text
 	link.URL = parsedURL
-	link.Wrapping = fyne.TextWrapWord
+	link.Wrapping = fyne.TextWrapOff
 	return link
 }
 
@@ -1145,7 +1145,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			parsedURL, err := url.Parse(resolvedURL)
 			if err == nil {
 				link := widget.NewHyperlink(cmd.LinkText, parsedURL)
-				link.Wrapping = fyne.TextWrapWord
+				link.Wrapping = fyne.TextWrapOff
 				link.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 				return link
 			} else {

@@ -102,3 +102,43 @@ func TestDisplayListUsesInlineFragmentText_NoDuplicates(t *testing.T) {
 		}
 	}
 }
+
+func TestDisplayListLinkDoesNotPaintOverlappingText(t *testing.T) {
+	content := `<!DOCTYPE html><html><body>
+		<a href="https://example.com">Click me</a>
+	</body></html>`
+
+	r := NewRenderer(800, 600)
+	doc, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("parseHTML failed: %v", err)
+	}
+	body := findBodyNode(doc)
+	renderRoot := BuildRenderTree(body)
+	layoutRoot := r.layoutEngine.ComputeLayout(renderRoot)
+
+	dlb := NewDisplayListBuilder()
+	displayList := dlb.Build(layoutRoot, renderRoot)
+
+	linkCount := 0
+	overlappingTextCount := 0
+	for _, cmd := range displayList.Commands {
+		switch cmd.Type {
+		case PaintLink:
+			if cmd.LinkURL == "https://example.com" && cmd.LinkText == "Click me" {
+				linkCount++
+			}
+		case PaintText:
+			if strings.TrimSpace(cmd.Text) == "Click me" {
+				overlappingTextCount++
+			}
+		}
+	}
+
+	if linkCount != 1 {
+		t.Fatalf("expected one clickable link command, got %d", linkCount)
+	}
+	if overlappingTextCount != 0 {
+		t.Fatalf("expected link text to be painted only by PaintLink, got %d overlapping text commands", overlappingTextCount)
+	}
+}
