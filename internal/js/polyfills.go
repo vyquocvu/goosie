@@ -185,5 +185,335 @@ const polyfillsJS = `
   global.globalThis = global;
   global.structuredClone = function(v){ try{return JSON.parse(JSON.stringify(v));}catch(e){return v;} };
 
+  // ─── Browser APIs ─────────────────────────────────────────────────────────
+
+  // navigator
+  global.navigator = {
+    userAgent: "Goosie/1.0 (like Chrome/100.0)",
+    language: "en-US",
+    languages: ["en-US", "en"],
+    cookieEnabled: true,
+    onLine: true,
+    platform: "GoosieOS",
+    hardwareConcurrency: 4,
+    deviceMemory: 8
+  };
+
+  // Base64
+  var b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  global.btoa = function(input) {
+    var str = String(input);
+    for (var block, charCode, idx = 0, map = b64chars, output = ''; str.charAt(idx | 0) || (map = '=', idx % 1); output += map.charAt(63 & block >> 8 - idx % 1 * 8)) {
+      charCode = str.charCodeAt(idx += 3/4);
+      if (charCode > 0xFF) throw new Error("'btoa' failed: The string to be encoded contains characters outside of the Latin1 range.");
+      block = block << 8 | charCode;
+    }
+    return output;
+  };
+  global.atob = function(input) {
+    var str = String(input).replace(/[=]+$/, '');
+    if (str.length % 4 == 1) throw new Error("'atob' failed: The string to be decoded is not correctly encoded.");
+    for (var bc = 0, bs, buffer, idx = 0, output = ''; buffer = str.charAt(idx++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+      buffer = b64chars.indexOf(buffer);
+    }
+    return output;
+  };
+
+  // Dialogs
+  global.alert = function(msg) { console.log("ALERT: " + msg); };
+  global.prompt = function(msg, defaultText) { console.log("PROMPT: " + msg); return defaultText || ""; };
+  global.confirm = function(msg) { console.log("CONFIRM: " + msg); return true; };
+
+  // URLSearchParams
+  global.URLSearchParams = function(init) {
+    this._params = [];
+    if (typeof init === 'string') {
+      if (init.startsWith('?')) init = init.slice(1);
+      var pairs = init.split('&');
+      for (var i = 0; i < pairs.length; i++) {
+        if (!pairs[i]) continue;
+        var idx = pairs[i].indexOf('=');
+        if (idx === -1) this.append(decodeURIComponent(pairs[i]), '');
+        else this.append(decodeURIComponent(pairs[i].slice(0, idx)), decodeURIComponent(pairs[i].slice(idx + 1)));
+      }
+    }
+  };
+  global.URLSearchParams.prototype.append = function(name, value) { this._params.push([String(name), String(value)]); };
+  global.URLSearchParams.prototype.delete = function(name) {
+    name = String(name);
+    this._params = this._params.filter(function(p) { return p[0] !== name; });
+  };
+  global.URLSearchParams.prototype.get = function(name) {
+    name = String(name);
+    for (var i = 0; i < this._params.length; i++) if (this._params[i][0] === name) return this._params[i][1];
+    return null;
+  };
+  global.URLSearchParams.prototype.getAll = function(name) {
+    name = String(name);
+    return this._params.filter(function(p) { return p[0] === name; }).map(function(p) { return p[1]; });
+  };
+  global.URLSearchParams.prototype.has = function(name) { return this.get(name) !== null; };
+  global.URLSearchParams.prototype.set = function(name, value) {
+    this.delete(name);
+    this.append(name, value);
+  };
+  global.URLSearchParams.prototype.toString = function() {
+    return this._params.map(function(p) { return encodeURIComponent(p[0]) + '=' + encodeURIComponent(p[1]); }).join('&');
+  };
+
+  // FormData (Mock)
+  global.FormData = function(form) {
+    this._data = [];
+    // Note: populating from HTMLFormElement is not fully implemented in this mock
+  };
+  global.FormData.prototype.append = function(name, value) { this._data.push([name, value]); };
+  global.FormData.prototype.delete = function(name) { this._data = this._data.filter(function(p) { return p[0] !== name; }); };
+  global.FormData.prototype.get = function(name) {
+    for (var i = 0; i < this._data.length; i++) if (this._data[i][0] === name) return this._data[i][1];
+    return null;
+  };
+  global.FormData.prototype.getAll = function(name) {
+    return this._data.filter(function(p) { return p[0] === name; }).map(function(p) { return p[1]; });
+  };
+  global.FormData.prototype.has = function(name) { return this.get(name) !== null; };
+  global.FormData.prototype.set = function(name, value) { this.delete(name); this.append(name, value); };
+
+  // URL (basic implementation based on document.createElement('a'))
+  global.URL = function(url, base) {
+    if (base) {
+      if (base.endsWith('/')) url = base + url.replace(/^\//, '');
+      else url = base + '/' + url.replace(/^\//, '');
+    }
+    this.href = url;
+    // Very basic parsing for properties
+    var match = url.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^?]*)?(\?[^#]*)?(#.*)?$/);
+    if (match) {
+      this.protocol = match[1] || "";
+      this.hostname = match[2] || "";
+      this.port = (match[3] || "").substring(1);
+      this.host = this.hostname + (this.port ? ":" + this.port : "");
+      this.pathname = match[4] || "/";
+      this.search = match[5] || "";
+      this.hash = match[6] || "";
+      this.searchParams = new global.URLSearchParams(this.search);
+    } else {
+      this.pathname = url;
+    }
+  };
+  global.URL.prototype.toString = function() { return this.href; };
+
+  // Headers (Mock)
+  global.Headers = function(init) {
+    this._map = {};
+    if (init instanceof global.Headers) {
+      var self = this;
+      init.forEach(function(v, k) { self.append(k, v); });
+    } else if (init && typeof init === 'object') {
+      for (var k in init) this.append(k, init[k]);
+    }
+  };
+  global.Headers.prototype.append = function(n, v) { var k = n.toLowerCase(); this._map[k] = this._map[k] ? this._map[k] + ', ' + v : v; };
+  global.Headers.prototype.delete = function(n) { delete this._map[n.toLowerCase()]; };
+  global.Headers.prototype.get = function(n) { return this._map[n.toLowerCase()] || null; };
+  global.Headers.prototype.has = function(n) { return this._map[n.toLowerCase()] !== undefined; };
+  global.Headers.prototype.set = function(n, v) { this._map[n.toLowerCase()] = v; };
+  global.Headers.prototype.forEach = function(cb, thisArg) {
+    for (var k in this._map) cb.call(thisArg, this._map[k], k, this);
+  };
+
+  // Blob / File / FileReader (Stubs)
+  global.Blob = function(parts, options) {
+    this.size = parts ? parts.join('').length : 0;
+    this.type = options && options.type ? options.type : "";
+  };
+  global.File = function(parts, filename, options) {
+    global.Blob.call(this, parts, options);
+    this.name = filename;
+  };
+  global.FileReader = function() {};
+  global.FileReader.prototype.readAsText = function(blob) {
+    var self = this;
+    setTimeout(function() {
+      self.result = "[Blob Data]";
+      if (self.onload) self.onload({ target: self });
+    }, 10);
+  };
+
+  // Image
+  global.Image = function(w, h) {
+    if (typeof document !== "undefined") {
+      var img = document.createElement("img");
+      if (w !== undefined) img.width = w;
+      if (h !== undefined) img.height = h;
+      return img;
+    }
+    return { width: w, height: h };
+  };
+
+  // ─── Browser APIs ─────────────────────────────────────────────────────────
+
+  // navigator
+  global.navigator = {
+    userAgent: "Goosie/1.0 (like Chrome/100.0)",
+    language: "en-US",
+    languages: ["en-US", "en"],
+    cookieEnabled: true,
+    onLine: true,
+    platform: "GoosieOS",
+    hardwareConcurrency: 4,
+    deviceMemory: 8
+  };
+
+  // Base64
+  var b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  global.btoa = function(input) {
+    var str = String(input);
+    for (var block, charCode, idx = 0, map = b64chars, output = ''; str.charAt(idx | 0) || (map = '=', idx % 1); output += map.charAt(63 & block >> 8 - idx % 1 * 8)) {
+      charCode = str.charCodeAt(idx += 3/4);
+      if (charCode > 0xFF) throw new Error("'btoa' failed: The string to be encoded contains characters outside of the Latin1 range.");
+      block = block << 8 | charCode;
+    }
+    return output;
+  };
+  global.atob = function(input) {
+    var str = String(input).replace(/[=]+$/, '');
+    if (str.length % 4 == 1) throw new Error("'atob' failed: The string to be decoded is not correctly encoded.");
+    for (var bc = 0, bs, buffer, idx = 0, output = ''; buffer = str.charAt(idx++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+      buffer = b64chars.indexOf(buffer);
+    }
+    return output;
+  };
+
+  // Dialogs
+  global.alert = function(msg) { console.log("ALERT: " + msg); };
+  global.prompt = function(msg, defaultText) { console.log("PROMPT: " + msg); return defaultText || ""; };
+  global.confirm = function(msg) { console.log("CONFIRM: " + msg); return true; };
+
+  // URLSearchParams
+  global.URLSearchParams = function(init) {
+    this._params = [];
+    if (typeof init === 'string') {
+      if (init.startsWith('?')) init = init.slice(1);
+      var pairs = init.split('&');
+      for (var i = 0; i < pairs.length; i++) {
+        if (!pairs[i]) continue;
+        var idx = pairs[i].indexOf('=');
+        if (idx === -1) this.append(decodeURIComponent(pairs[i]), '');
+        else this.append(decodeURIComponent(pairs[i].slice(0, idx)), decodeURIComponent(pairs[i].slice(idx + 1)));
+      }
+    }
+  };
+  global.URLSearchParams.prototype.append = function(name, value) { this._params.push([String(name), String(value)]); };
+  global.URLSearchParams.prototype.delete = function(name) {
+    name = String(name);
+    this._params = this._params.filter(function(p) { return p[0] !== name; });
+  };
+  global.URLSearchParams.prototype.get = function(name) {
+    name = String(name);
+    for (var i = 0; i < this._params.length; i++) if (this._params[i][0] === name) return this._params[i][1];
+    return null;
+  };
+  global.URLSearchParams.prototype.getAll = function(name) {
+    name = String(name);
+    return this._params.filter(function(p) { return p[0] === name; }).map(function(p) { return p[1]; });
+  };
+  global.URLSearchParams.prototype.has = function(name) { return this.get(name) !== null; };
+  global.URLSearchParams.prototype.set = function(name, value) {
+    this.delete(name);
+    this.append(name, value);
+  };
+  global.URLSearchParams.prototype.toString = function() {
+    return this._params.map(function(p) { return encodeURIComponent(p[0]) + '=' + encodeURIComponent(p[1]); }).join('&');
+  };
+
+  // FormData (Mock)
+  global.FormData = function(form) {
+    this._data = [];
+    // Note: populating from HTMLFormElement is not fully implemented in this mock
+  };
+  global.FormData.prototype.append = function(name, value) { this._data.push([name, value]); };
+  global.FormData.prototype.delete = function(name) { this._data = this._data.filter(function(p) { return p[0] !== name; }); };
+  global.FormData.prototype.get = function(name) {
+    for (var i = 0; i < this._data.length; i++) if (this._data[i][0] === name) return this._data[i][1];
+    return null;
+  };
+  global.FormData.prototype.getAll = function(name) {
+    return this._data.filter(function(p) { return p[0] === name; }).map(function(p) { return p[1]; });
+  };
+  global.FormData.prototype.has = function(name) { return this.get(name) !== null; };
+  global.FormData.prototype.set = function(name, value) { this.delete(name); this.append(name, value); };
+
+  // URL (basic implementation based on document.createElement('a'))
+  global.URL = function(url, base) {
+    if (base) {
+      if (base.endsWith('/')) url = base + url.replace(/^\//, '');
+      else url = base + '/' + url.replace(/^\//, '');
+    }
+    this.href = url;
+    // Very basic parsing for properties
+    var match = url.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^?]*)?(\?[^#]*)?(#.*)?$/);
+    if (match) {
+      this.protocol = match[1] || "";
+      this.hostname = match[2] || "";
+      this.port = (match[3] || "").substring(1);
+      this.host = this.hostname + (this.port ? ":" + this.port : "");
+      this.pathname = match[4] || "/";
+      this.search = match[5] || "";
+      this.hash = match[6] || "";
+      this.searchParams = new global.URLSearchParams(this.search);
+    } else {
+      this.pathname = url;
+    }
+  };
+  global.URL.prototype.toString = function() { return this.href; };
+
+  // Headers (Mock)
+  global.Headers = function(init) {
+    this._map = {};
+    if (init instanceof global.Headers) {
+      var self = this;
+      init.forEach(function(v, k) { self.append(k, v); });
+    } else if (init && typeof init === 'object') {
+      for (var k in init) this.append(k, init[k]);
+    }
+  };
+  global.Headers.prototype.append = function(n, v) { var k = n.toLowerCase(); this._map[k] = this._map[k] ? this._map[k] + ', ' + v : v; };
+  global.Headers.prototype.delete = function(n) { delete this._map[n.toLowerCase()]; };
+  global.Headers.prototype.get = function(n) { return this._map[n.toLowerCase()] || null; };
+  global.Headers.prototype.has = function(n) { return this._map[n.toLowerCase()] !== undefined; };
+  global.Headers.prototype.set = function(n, v) { this._map[n.toLowerCase()] = v; };
+  global.Headers.prototype.forEach = function(cb, thisArg) {
+    for (var k in this._map) cb.call(thisArg, this._map[k], k, this);
+  };
+
+  // Blob / File / FileReader (Stubs)
+  global.Blob = function(parts, options) {
+    this.size = parts ? parts.join('').length : 0;
+    this.type = options && options.type ? options.type : "";
+  };
+  global.File = function(parts, filename, options) {
+    global.Blob.call(this, parts, options);
+    this.name = filename;
+  };
+  global.FileReader = function() {};
+  global.FileReader.prototype.readAsText = function(blob) {
+    var self = this;
+    setTimeout(function() {
+      self.result = "[Blob Data]";
+      if (self.onload) self.onload({ target: self });
+    }, 10);
+  };
+
+  // Image
+  global.Image = function(w, h) {
+    if (typeof document !== "undefined") {
+      var img = document.createElement("img");
+      if (w !== undefined) img.width = w;
+      if (h !== undefined) img.height = h;
+      return img;
+    }
+    return { width: w, height: h };
+  };
+
 })(this);
 `
