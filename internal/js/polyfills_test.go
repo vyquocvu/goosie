@@ -74,3 +74,49 @@ func TestStringIncludes(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "true", val.String())
 }
+
+func TestBrowserAPIs(t *testing.T) {
+	rt := NewRuntime()
+
+	// navigator
+	val, err := rt.RunScript(`navigator.userAgent.includes("Goosie")`)
+	assert.NoError(t, err)
+	assert.Equal(t, "true", val.String())
+
+	// btoa / atob
+	val, err = rt.RunScript(`btoa("hello") === "aGVsbG8="`)
+	assert.NoError(t, err)
+	assert.Equal(t, "true", val.String())
+
+	val, err = rt.RunScript(`atob("aGVsbG8=") === "hello"`)
+	assert.NoError(t, err)
+	assert.Equal(t, "true", val.String())
+
+	// URLSearchParams
+	val, err = rt.RunScript(`new URLSearchParams("?a=1&b=2").get("a")`)
+	assert.NoError(t, err)
+	assert.Equal(t, "1", val.String())
+
+	// URL
+	val, err = rt.RunScript(`new URL("https://example.com/path?query=1#hash").hostname`)
+	assert.NoError(t, err)
+	assert.Equal(t, "example.com", val.String())
+
+	// Headers
+	val, err = rt.RunScript(`
+		var h = new Headers({"X-Test": "1"});
+		h.get("x-test");
+	`)
+	assert.NoError(t, err)
+	assert.Equal(t, "1", val.String())
+
+	// Blob
+	val, err = rt.RunScript(`new Blob(["hello"]).size > 0`)
+	assert.NoError(t, err)
+	assert.Equal(t, "true", val.String())
+
+	// File
+	val, err = rt.RunScript(`new File(["hello"], "test.txt").name === "test.txt"`)
+	assert.NoError(t, err)
+	assert.Equal(t, "true", val.String())
+}
