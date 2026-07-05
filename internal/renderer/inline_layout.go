@@ -3,6 +3,7 @@ package renderer
 import (
 	"strings"
 	"unicode"
+	"sync"
 
 	"fyne.io/fyne/v2"
 )
@@ -80,6 +81,7 @@ type InlineLayoutEngine struct {
 	fontMetrics     *FontMetrics
 	defaultFontSize float32
 	floatCtx        *FloatContext
+	mu              sync.RWMutex
 }
 
 // NewInlineLayoutEngine creates a new inline layout engine
@@ -98,8 +100,14 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 	whiteSpaceMode WhiteSpaceMode,
 	floatCtx *FloatContext,
 ) ([]*LineBox, float32) {
+	ile.mu.Lock()
 	ile.floatCtx = floatCtx
-	defer func() { ile.floatCtx = nil }()
+	ile.mu.Unlock()
+	defer func() {
+		ile.mu.Lock()
+		ile.floatCtx = nil
+		ile.mu.Unlock()
+	}()
 
 	lines := make([]*LineBox, 0)
 
@@ -134,16 +142,19 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 }
 
 func (ile *InlineLayoutEngine) getLineXAndWidth(x, y, availableWidth, lineHeight float32) (float32, float32) {
-	if ile.floatCtx == nil {
+	ile.mu.RLock()
+	floatCtx := ile.floatCtx
+	ile.mu.RUnlock()
+	if floatCtx == nil {
 		return x, availableWidth
 	}
 	expectedHeight := lineHeight
 	if expectedHeight <= 0 {
 		expectedHeight = 16.0 * 1.2
 	}
-	leftOffset, bfcAvailableWidth := ile.floatCtx.GetAvailableWidth(y, expectedHeight)
+	leftOffset, bfcAvailableWidth := floatCtx.GetAvailableWidth(y, expectedHeight)
 
-	bfcLeft := ile.floatCtx.containerX + leftOffset
+	bfcLeft := floatCtx.containerX + leftOffset
 	bfcRight := bfcLeft + bfcAvailableWidth
 
 	lineLeft := maxFloat32(x, bfcLeft)

@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"fyne.io/fyne/v2"
+	"sync"
 )
 
 // FontMetrics provides accurate text measurement using font metrics
@@ -10,6 +11,7 @@ type FontMetrics struct {
 	// Cache for Fyne app availability
 	fyneAvailable bool
 	checkedFyne   bool
+	mu            sync.RWMutex
 }
 
 // NewFontMetrics creates a new FontMetrics instance
@@ -37,14 +39,24 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 	}
 	
 	// Try to use Fyne's MeasureText if available (runtime environment)
-	if !fm.checkedFyne {
-		fm.fyneAvailable = isFyneAppAvailable()
-		fm.checkedFyne = true
+	fm.mu.RLock()
+	checked := fm.checkedFyne
+	available := fm.fyneAvailable
+	fm.mu.RUnlock()
+
+	if !checked {
+		fm.mu.Lock()
+		if !fm.checkedFyne {
+			fm.fyneAvailable = isFyneAppAvailable()
+			fm.checkedFyne = true
+		}
+		available = fm.fyneAvailable
+		fm.mu.Unlock()
 	}
 	
 	var width, height float32
 	
-	if fm.fyneAvailable {
+	if available {
 		// Use Fyne's accurate measurement when app is running
 		size := fyne.MeasureText(text, fontSize, style)
 		width = size.Width

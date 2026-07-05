@@ -72,7 +72,9 @@ func NewLoader(cacheSize int) Loader {
 
 // SetOnLoadCallback sets the callback for when an image is loaded
 func (l *loader) SetOnLoadCallback(callback OnLoadCallback) {
+	l.mu.Lock()
 	l.OnLoad = callback
+	l.mu.Unlock()
 }
 
 // Load loads an image from a URL or file path

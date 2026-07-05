@@ -79,7 +79,12 @@ func TestRendererWithImages(t *testing.T) {
 	if imgNode == nil {
 		t.Fatal("img node not found in render tree")
 	}
-	if imgNode.ImageData == nil {
+
+	// Use the getter which we should probably introduce, or since it's a test, just lock
+	r.treeMu.RLock()
+	hasImageData := imgNode.ImageData != nil
+	r.treeMu.RUnlock()
+	if !hasImageData {
 		t.Error("Expected ImageData to be attached to the render node")
 	}
 }
