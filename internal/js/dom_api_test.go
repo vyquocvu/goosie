@@ -158,3 +158,20 @@ func TestCloneNodeTextNode(t *testing.T) {
 		t.Errorf("expected text cloneNode checks to pass, got %q", val.String())
 	}
 }
+
+func TestCreateHTMLDocument(t *testing.T) {
+	rt := NewRuntime()
+
+	val, err := rt.RunScript(`
+		var doc = document.implementation.createHTMLDocument("test title");
+		doc.head.childNodes[0].tagName === "title" && doc.head.childNodes[0].textContent === "test title" && doc.nodeType === 9;
+	`)
+
+	if err != nil {
+		t.Fatalf("Failed to run script: %v", err)
+	}
+
+	if !val.ToBoolean() {
+		t.Errorf("createHTMLDocument did not create the expected structure")
+	}
+}

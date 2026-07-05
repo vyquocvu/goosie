@@ -5,7 +5,7 @@ go 1.24.9
 require (
 	fyne.io/fyne/v2 v2.7.0
 	github.com/dop251/goja v0.0.0-20251008123653-cf18d89f3cf6
-	github.com/playwright-community/playwright-go v0.5700.1
+	github.com/playwright-community/playwright-go v0.5200.1
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
 	github.com/stretchr/testify v1.11.1
