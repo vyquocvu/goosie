@@ -676,9 +676,22 @@ func (r *Runtime) setupDocumentAPI() {
     get clientHeight() { return 0; }
   }
   
+  class DOMImplementation {
+    createHTMLDocument(title) {
+      const doc = new Document();
+      if (title !== undefined) {
+        const titleEl = doc.createElement("title");
+        titleEl.textContent = title;
+        doc.head.appendChild(titleEl);
+      }
+      return doc;
+    }
+  }
+
   class Document extends Node {
     constructor() {
       super(9, "#document");
+      this.implementation = new DOMImplementation();
       this.documentElement = new Element("html");
       this.documentElement.parentNode = this;
       this.childNodes.push(this.documentElement);
