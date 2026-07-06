@@ -197,7 +197,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 ### M0.2 Build a deterministic benchmark corpus
 
 - [x] Add small HTML fixtures for parser microbenchmarks.
-- [ ] Add long article and documentation pages.
+- [x] Add long article and documentation pages.
 - [x] Add selector-heavy pages.
 - [ ] Add table-heavy and form-heavy pages.
 - [ ] Add image-heavy pages using local deterministic assets.
