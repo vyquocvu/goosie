@@ -27,6 +27,7 @@ type Renderer struct {
 	// Cached trees for performance
 	currentRenderTree *RenderNode
 	currentLayoutTree *LayoutBox
+	treeMu            sync.RWMutex
 
 	// Navigation callback for link clicks
 	onNavigate func(url string)
@@ -88,30 +89,47 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 		return r.canvasRenderer.Render(nil), nil
 	}
 
+	r.treeMu.RLock()
+	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
+	r.treeMu.RUnlock()
+
+	r.treeMu.Lock()
 	// Apply styles
+	renderTreeCopy := renderTree.Clone()
+	r.stylesheetMu.RLock()
 	if r.stylesheet != nil {
-		styleManager := NewStyleManagerWithViewport(r.stylesheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
-		styleManager.ApplyStyles(renderTree)
+		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
+		styleManager.ApplyStyles(renderTreeCopy)
 	}
+	r.stylesheetMu.RUnlock()
 
 	// Perform layout
-	layoutTree := r.layoutEngine.ComputeLayout(renderTree)
+	layoutEngine := NewLayoutEngine(width, height)
+	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
+	renderTree = renderTreeCopy
 
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
+	r.treeMu.Unlock()
 
 	// Load external CSS asynchronously (synchronously in testing mode)
 	if r.testingMode {
 		r.loadExternalCSS(doc)
 		// Re-read current layout tree since Refresh() updated it
-		layoutTree = r.currentLayoutTree
+		r.treeMu.RLock()
+			layoutTree = r.currentLayoutTree
+			r.treeMu.RUnlock()
 	} else {
 		go r.loadExternalCSS(doc)
 	}
 
 	// Pass navigation callback to canvas renderer
-	r.canvasRenderer.SetNavigationCallback(r.onNavigate, r.currentURL)
+	r.treeMu.RLock()
+	onNav := r.onNavigate
+	curURL := r.currentURL
+	r.treeMu.RUnlock()
+	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
 
 	// Render to canvas with viewport optimization
 	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
@@ -128,6 +146,8 @@ func (r *Renderer) SetViewport(y, height float32) {
 
 // UpdateViewport re-renders with the current viewport (for scroll updates)
 func (r *Renderer) UpdateViewport() fyne.CanvasObject {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
 	if r.currentRenderTree == nil || r.currentLayoutTree == nil {
 		return container.NewVBox()
 	}
@@ -136,6 +156,8 @@ func (r *Renderer) UpdateViewport() fyne.CanvasObject {
 
 // GetContentHeight returns the total height of the rendered content
 func (r *Renderer) GetContentHeight() float32 {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
 	if r.currentLayoutTree == nil {
 		return 0
 	}
@@ -171,19 +193,34 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 		return r.canvasRenderer.Render(nil), nil
 	}
 
+	r.treeMu.RLock()
+	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
+	r.treeMu.RUnlock()
+
+	r.treeMu.Lock()
 	// Apply styles
-	styleManager := NewStyleManagerWithViewport(r.stylesheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
-	styleManager.ApplyStyles(renderTree)
+	renderTreeCopy := renderTree.Clone()
+	r.stylesheetMu.RLock()
+	styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
+	styleManager.ApplyStyles(renderTreeCopy)
+	r.stylesheetMu.RUnlock()
 
 	// Perform layout.
-	layoutTree := r.layoutEngine.ComputeLayout(renderTree)
+	layoutEngine := NewLayoutEngine(width, height)
+	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
+	renderTree = renderTreeCopy
 
 	// Cache trees for viewport updates.
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
+	r.treeMu.Unlock()
 
 	// Pass navigation callback to canvas renderer.
-	r.canvasRenderer.SetNavigationCallback(r.onNavigate, r.currentURL)
+	r.treeMu.RLock()
+	onNav := r.onNavigate
+	curURL := r.currentURL
+	r.treeMu.RUnlock()
+	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
 
 	// Render to canvas with viewport optimization.
 	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
@@ -212,6 +249,8 @@ func findBodyNode(node *html.Node) *html.Node {
 
 // SetSize updates the renderer dimensions
 func (r *Renderer) SetSize(width, height float32) {
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
 	r.layoutEngine.canvasWidth = width
 	r.layoutEngine.canvasHeight = height
 	r.canvasRenderer.canvasWidth = width
@@ -252,23 +291,32 @@ func (r *Renderer) SetInspectCallback(callback func(node *RenderNode, layout *La
 
 // GetRoot returns the current render tree root
 func (r *Renderer) GetRoot() *RenderNode {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
 	return r.currentRenderTree
 }
 
 // Refresh re-calculates styles and layout, then triggers a refresh
 func (r *Renderer) Refresh() {
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
 	if r.currentRenderTree == nil {
 		return
 	}
 
+	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
+
 	// Apply styles (in case attributes changed)
 	r.stylesheetMu.RLock()
-	styleManager := NewStyleManagerWithViewport(r.stylesheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
+	styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
 	r.stylesheetMu.RUnlock()
-	styleManager.ApplyStyles(r.currentRenderTree)
+	renderTreeCopy := r.currentRenderTree.Clone()
+	styleManager.ApplyStyles(renderTreeCopy)
 
 	// Perform layout
-	r.currentLayoutTree = r.layoutEngine.ComputeLayout(r.currentRenderTree)
+	layoutEngine := NewLayoutEngine(width, height)
+	r.currentLayoutTree = layoutEngine.ComputeLayout(renderTreeCopy)
+	r.currentRenderTree = renderTreeCopy
 
 	// Clear canvas cache
 	r.canvasRenderer.ClearCache()
@@ -289,6 +337,8 @@ func (r *Renderer) SetRefreshCallback(callback func()) {
 // HitTest finds the element at the given coordinates (relative to the content)
 // Returns the render node and layout box if found, or nil if not found
 func (r *Renderer) HitTest(x, y float32) (*RenderNode, *LayoutBox) {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
 	if r.currentLayoutTree == nil || r.currentRenderTree == nil {
 		return nil, nil
 	}
@@ -354,7 +404,10 @@ func (r *Renderer) loadImages(node *RenderNode) {
 			go func() {
 				img, err := r.imageLoader.Load(resolvedSrc)
 				if err == nil {
+					// Need to lock when updating the node directly since we might be cloning/re-rendering
+					r.treeMu.Lock()
 					node.ImageData = img
+					r.treeMu.Unlock()
 					// Trigger refresh when image is loaded
 					r.onImageLoaded(resolvedSrc)
 				}
@@ -479,8 +532,12 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 			if r.stylesheet == nil {
 				r.stylesheet = stylesheet
 			} else {
-				r.stylesheet.Rules = append(r.stylesheet.Rules, stylesheet.Rules...)
-				r.stylesheet.AtRules = append(r.stylesheet.AtRules, stylesheet.AtRules...)
+				newStylesheet := &css.StyleSheet{
+						Rules:   append(append([]css.Rule(nil), r.stylesheet.Rules...), stylesheet.Rules...),
+						AtRules: append(append([]css.AtRule(nil), r.stylesheet.AtRules...), stylesheet.AtRules...),
+					}
+					r.stylesheet = newStylesheet
+				// r.stylesheet.AtRules = append(r.stylesheet.AtRules, stylesheet.AtRules...)
 			}
 			r.stylesheetMu.Unlock()
 			r.Refresh()
@@ -489,7 +546,7 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 		if r.testingMode {
 			updateCSS()
 		} else {
-			fyne.Do(updateCSS)
+			updateCSS()
 		}
 	}
 }

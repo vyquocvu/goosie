@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -55,6 +56,7 @@ type CanvasRenderer struct {
 	// Inspect callback for element inspection
 	onInspect func(node *RenderNode, layout *LayoutBox)
 	renderer  *Renderer // Reference to main renderer for hit testing
+	mu        sync.RWMutex
 }
 
 // NewCanvasRenderer creates a new canvas renderer
@@ -102,13 +104,17 @@ func (cr *CanvasRenderer) SetViewport(y, height float32) {
 
 // SetNavigationCallback sets the navigation callback for link clicks
 func (cr *CanvasRenderer) SetNavigationCallback(callback NavigationCallback, baseURL string) {
+	cr.mu.Lock()
 	cr.onNavigate = callback
 	cr.baseURL = baseURL
+	cr.mu.Unlock()
 }
 
 // SetImageLoader sets the image loader for the canvas renderer
 func (cr *CanvasRenderer) SetImageLoader(loader imageloader.Loader) {
+	cr.mu.Lock()
 	cr.imageLoader = loader
+	cr.mu.Unlock()
 	if cr.window != nil {
 		loader.SetOnLoadCallback(cr.onImageLoaded)
 	}
@@ -819,10 +825,13 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	log.Printf("DEBUG: RenderWithViewport start")
 	// Build or reuse display list
 	var displayList *DisplayList
+	cr.mu.RLock()
 	if cr.cachedDisplayList != nil && cr.cachedRenderRoot == root && cr.cachedLayoutRoot == layoutRoot {
 		// Reuse cached display list
 		displayList = cr.cachedDisplayList
+		cr.mu.RUnlock()
 	} else {
+		cr.mu.RUnlock()
 		// Build new display list
 		dlb := NewDisplayListBuilder()
 		displayList = dlb.Build(layoutRoot, root)
@@ -831,9 +840,11 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		SortByZIndex(displayList)
 
 		// Cache for next time
+		cr.mu.Lock()
 		cr.cachedDisplayList = displayList
 		cr.cachedRenderRoot = root
 		cr.cachedLayoutRoot = layoutRoot
+		cr.mu.Unlock()
 	}
 
 	log.Printf("DEBUG: DisplayList commands: %d", len(displayList.Commands))
@@ -1239,6 +1250,8 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 
 // ClearCache clears the cached display list to force re-rendering
 func (cr *CanvasRenderer) ClearCache() {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
 	cr.cachedDisplayList = nil
 	cr.cachedLayoutRoot = nil
 	cr.cachedRenderRoot = nil

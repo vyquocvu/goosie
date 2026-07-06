@@ -290,3 +290,41 @@ func processElementNode(htmlNode *html.Node) *RenderNode {
 	}
 	return node
 }
+
+// Clone creates a deep copy of the RenderNode tree
+func (n *RenderNode) Clone() *RenderNode {
+	if n == nil {
+		return nil
+	}
+
+	clone := &RenderNode{
+		ID:            n.ID,
+		Type:          n.Type,
+		TagName:       n.TagName,
+		Text:          n.Text,
+		Attrs:    make(map[string]string),
+		Styles:        make(map[string]string),
+		ImageData:     n.ImageData,
+	}
+
+	for k, v := range n.Attrs {
+		clone.Attrs[k] = v
+	}
+
+	for k, v := range n.Styles {
+		clone.Styles[k] = v
+	}
+
+	if n.ComputedStyle != nil {
+		computedStyle := *n.ComputedStyle
+		clone.ComputedStyle = &computedStyle
+	}
+
+	for _, child := range n.Children {
+		childClone := child.Clone()
+		childClone.Parent = clone
+		clone.Children = append(clone.Children, childClone)
+	}
+
+	return clone
+}
