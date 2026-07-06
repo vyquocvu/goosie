@@ -255,6 +255,7 @@ The browser demonstrates web functionality by:
 
 ### Key Documentation
 
+- **[SUPPORTED_WEB_PLATFORM.md](docs/SUPPORTED_WEB_PLATFORM.md)**: v2 supported web-platform scope, fallbacks, out-of-scope features, and resource limits
 - **[DOM_API_DOCUMENTATION.md](DOM_API_DOCUMENTATION.md)**: Comprehensive DOM API reference and examples
 - **[BROWSER_API_DOCUMENTATION.md](BROWSER_API_DOCUMENTATION.md)**: Browser APIs (location, history, timers, fetch, storage)
 - **[CONSOLE_DOCUMENTATION.md](CONSOLE_DOCUMENTATION.md)**: Enhanced console features and debugging tools
