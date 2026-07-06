@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -394,6 +395,9 @@ type InspectableContainer struct {
 	widget.BaseWidget
 	container      *fyne.Container
 	canvasRenderer *CanvasRenderer
+
+	lastHitNodeID int64
+	lastHitTest   time.Time
 }
 
 // newInspectableContainer creates a new inspectable container
@@ -430,8 +434,15 @@ func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
 		return
 	}
 
+	// Throttle hit tests to avoid freezing the UI on complex pages.
+	// MouseMoved fires at display refresh rate (~60fps), and each hit test
+	// does a full recursive traversal of the layout tree.
+	if time.Since(ic.lastHitTest) < 80*time.Millisecond {
+		return
+	}
+	ic.lastHitTest = time.Now()
+
 	// Get the scroll offset if we're in a scroll container
-	// For now, we'll use the viewport Y as the scroll offset
 	scrollY := ic.canvasRenderer.viewportY
 
 	// Convert mouse position to content coordinates
@@ -441,10 +452,15 @@ func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
 	// Perform hit test
 	node, layout := ic.canvasRenderer.renderer.HitTest(contentX, contentY)
 	if node != nil && layout != nil {
-		// Call inspect callback on hover
-		if ic.canvasRenderer.onInspect != nil {
-			ic.canvasRenderer.onInspect(node, layout)
+		// Only trigger callback if hovering a different element
+		if node.ID != ic.lastHitNodeID {
+			ic.lastHitNodeID = node.ID
+			if ic.canvasRenderer.onInspect != nil {
+				ic.canvasRenderer.onInspect(node, layout)
+			}
 		}
+	} else {
+		ic.lastHitNodeID = 0
 	}
 }
 

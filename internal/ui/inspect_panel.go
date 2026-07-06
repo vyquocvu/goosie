@@ -236,6 +236,11 @@ func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 
 // SetElement sets the element to inspect (called from renderer hit test)
 func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	// Skip redundant updates when hovering the same element
+	if ip.selectedNode != nil && node != nil && ip.selectedNode.ID == node.ID {
+		return
+	}
+
 	// Update tree selection
 	if node != nil {
 		id := fmt.Sprintf("%d", node.ID)

@@ -3,10 +3,12 @@ package renderer
 import (
 	"image/color"
 	"strings"
+	"sync"
 )
 
 // LayoutEngine handles layout calculations for render nodes
 type LayoutEngine struct {
+	mu           sync.Mutex
 	canvasWidth  float32
 	canvasHeight float32
 
@@ -50,6 +52,9 @@ func NewLayoutEngine(width, height float32) *LayoutEngine {
 // Layout performs layout calculations on the render tree and returns a layout tree
 // This is the new API that produces a separate layout tree
 func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
+	le.mu.Lock()
+	defer le.mu.Unlock()
+
 	if root == nil {
 		return nil
 	}
@@ -870,6 +875,8 @@ func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
 
 // GetLayoutBox returns the LayoutBox for a given RenderNode ID
 func (le *LayoutEngine) GetLayoutBox(nodeID int64) *LayoutBox {
+	le.mu.Lock()
+	defer le.mu.Unlock()
 	return le.nodeMap[nodeID]
 }
 
