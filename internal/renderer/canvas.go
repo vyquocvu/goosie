@@ -57,6 +57,14 @@ type CanvasRenderer struct {
 	onInspect func(node *RenderNode, layout *LayoutBox)
 	renderer  *Renderer // Reference to main renderer for hit testing
 	mu        sync.RWMutex
+
+	// Object cache: reuses Fyne canvas objects across frames instead of
+	// re-creating them on every scroll/render. Keyed by command index in the
+	// display list, valid only within the same dlBuildGen.
+	objectCache   map[int]fyne.CanvasObject
+	dlBuildGen    uint64 // bumped every time the display list is rebuilt
+	contentRoot   *fyne.Container        // stable root container, reused across renders
+	inspectable   *InspectableContainer // stable inspect wrapper, reused across renders
 }
 
 // NewCanvasRenderer creates a new canvas renderer
@@ -69,6 +77,8 @@ func NewCanvasRenderer(width, height float32) *CanvasRenderer {
 		viewportY:      0,
 		viewportHeight: height,
 		fontMetrics:    NewFontMetrics(defaultSize),
+		objectCache:    make(map[int]fyne.CanvasObject),
+		dlBuildGen:     1,
 	}
 }
 
@@ -816,85 +826,102 @@ func (cr *CanvasRenderer) getTextStyle(tagName string) fyne.TextStyle {
 	return cr.fontMetrics.GetTextStyle(tagName)
 }
 
-// RenderWithViewport renders the render tree with viewport culling for better performance
+// RenderWithViewport renders the render tree with viewport culling, object
+// caching, and spatial Y-band indexing for high-performance scroll/redraw.
+// Objects are reused across frames so Fyne doesn't allocate new canvas objects
+// on every scroll tick — matching Chrome/WebKit's retain-and-recycle approach.
 func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *LayoutBox) fyne.CanvasObject {
 	if root == nil || layoutRoot == nil {
 		return container.NewWithoutLayout()
 	}
 
-	log.Printf("DEBUG: RenderWithViewport start")
 	// Build or reuse display list
 	var displayList *DisplayList
+	dlChanged := false
+
 	cr.mu.RLock()
 	if cr.cachedDisplayList != nil && cr.cachedRenderRoot == root && cr.cachedLayoutRoot == layoutRoot {
-		// Reuse cached display list
 		displayList = cr.cachedDisplayList
 		cr.mu.RUnlock()
 	} else {
 		cr.mu.RUnlock()
-		// Build new display list
 		dlb := NewDisplayListBuilder()
 		displayList = dlb.Build(layoutRoot, root)
-
-		// Sort by z-index so lower stacking contexts paint first
 		SortByZIndex(displayList)
-
-		// Cache for next time
 		cr.mu.Lock()
 		cr.cachedDisplayList = displayList
 		cr.cachedRenderRoot = root
 		cr.cachedLayoutRoot = layoutRoot
 		cr.mu.Unlock()
+		dlChanged = true
 	}
 
-	log.Printf("DEBUG: DisplayList commands: %d", len(displayList.Commands))
-	// Stack of object lists for hierarchy (handling clipping)
-	// Level 0 is the root container
-	objectStack := [][]fyne.CanvasObject{make([]fyne.CanvasObject, 0)}
+	// Invalidate object cache on display list rebuild
+	if dlChanged {
+		cr.dlBuildGen++
+		cr.objectCache = make(map[int]fyne.CanvasObject)
+	}
 
-	// Stack of clip info (absolute coordinates and overflow type)
+	// Object stack for clipped hierarchy
+	objectStack := [][]fyne.CanvasObject{make([]fyne.CanvasObject, 0)}
 	type ClipInfo struct {
 		Box      Rect
 		Overflow string
 	}
-	// Level 0 is the entire canvas
 	clipStack := []ClipInfo{{Box: Rect{X: 0, Y: 0, Width: cr.canvasWidth, Height: cr.canvasHeight}, Overflow: "visible"}}
-
-	// Helper to get current object list
 	getCurrentList := func() *[]fyne.CanvasObject {
 		return &objectStack[len(objectStack)-1]
 	}
 
-	for _, cmd := range displayList.Commands {
+	// Determine which command range to process using Y-band spatial index
+	cmdStart, cmdEnd := 0, len(displayList.Commands)
+	if len(displayList.YBands) > 0 {
+		viewportTop := cr.viewportY - cr.viewportHeight*0.5
+		viewportBottom := cr.viewportY + cr.viewportHeight*1.5 // extra buffer
+		found := false
+		for _, band := range displayList.YBands {
+			if band.YEnd >= viewportTop && band.YStart <= viewportBottom {
+				if !found || band.CmdStart < cmdStart {
+					cmdStart = band.CmdStart
+				}
+				if band.CmdEnd > cmdEnd || !found {
+					cmdEnd = band.CmdEnd
+				}
+				found = true
+			}
+		}
+		if !found {
+			cmdStart, cmdEnd = 0, 0
+		}
+	}
+	if cmdStart < 0 {
+		cmdStart = 0
+	}
+	if cmdEnd > len(displayList.Commands) {
+		cmdEnd = len(displayList.Commands)
+	}
+
+	for cmdIdx := cmdStart; cmdIdx < cmdEnd; cmdIdx++ {
+		cmd := displayList.Commands[cmdIdx]
+
 		// Handle Clip Commands
 		if cmd.Type == PushClip {
-			// Start new object list
 			objectStack = append(objectStack, make([]fyne.CanvasObject, 0))
-			// Push new clip info
 			clipStack = append(clipStack, ClipInfo{Box: cmd.Box, Overflow: cmd.ClipOverflow})
 			continue
 		} else if cmd.Type == PopClip {
 			if len(objectStack) <= 1 {
-				continue // Should not happen if balanced
+				continue
 			}
-
-			// Pop objects
 			poppedObjects := objectStack[len(objectStack)-1]
 			objectStack = objectStack[:len(objectStack)-1]
-
-			// Pop clip info
 			clipInfo := clipStack[len(clipStack)-1]
 			clipStack = clipStack[:len(clipStack)-1]
-
-			// If no objects, nothing to add
 			if len(poppedObjects) == 0 {
 				continue
 			}
 
-			// Create content container
-			content := container.NewWithoutLayout(poppedObjects...)
-
-			// Calculate content size (union of children) to support scrolling
+			contentObj := container.NewWithoutLayout(poppedObjects...)
 			maxX, maxY := float32(0), float32(0)
 			for _, obj := range poppedObjects {
 				pos := obj.Position()
@@ -906,67 +933,65 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 					maxY = bottom
 				}
 			}
-			content.Resize(fyne.NewSize(maxX, maxY))
+			contentObj.Resize(fyne.NewSize(maxX, maxY))
 
-			// Create clip container — for overflow:hidden use a plain (non-scrollable) container
-			// so Fyne clips to the container bounds without showing scrollbars.
-			// For scroll/auto keep using container.NewScroll.
 			var clipped fyne.CanvasObject
 			if clipInfo.Overflow == "hidden" {
 				clipped = container.NewWithoutLayout(poppedObjects...)
 				clipped.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
 				clipped.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
 			} else {
-				scroll := container.NewScroll(content)
+				scroll := container.NewScroll(contentObj)
 				scroll.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
 				scroll.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
 				clipped = scroll
 			}
-
-			// Add to parent list
 			*getCurrentList() = append(*getCurrentList(), clipped)
 			continue
 		}
 
-		// Viewport Culling
-		// Check if command is in viewport
-		// We use the command's absolute box
+		// Viewport Culling (per-command for leaf commands; PushClip/PopClip already handled)
 		if !cr.isInViewport(cmd.Box) {
 			continue
 		}
 
-		// Create object
-		obj := cr.createCanvasObject(cmd)
-		if obj == nil {
-			continue
+		// Object cache: reuse Fyne objects across frames. The cache is keyed
+		// by command index and invalidated when the display list is rebuilt.
+		// This eliminates allocation/GC pressure during scrolling.
+		obj, ok := cr.objectCache[cmdIdx]
+		if !ok {
+			obj = cr.createCanvasObject(cmd)
+			if obj == nil {
+				continue
+			}
+			cr.objectCache[cmdIdx] = obj
 		}
 
-		if cmd.Type == PaintText {
-			// log.Printf("DEBUG: PaintText NodeID=%d Text=\"%s\" Box=(%.1f,%.1f,%.1f,%.1f)", cmd.NodeID, cmd.Text, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-		}
-		// Position object
-		// Coordinates in DisplayList are absolute.
-		// If we are inside a clip (ScrollContainer), we need to adjust coordinates
-		// to be relative to the clip container's top-left.
+		// Set position relative to the current clip container
 		currentClip := clipStack[len(clipStack)-1]
-
-		// For root level (len=1), currentClip starts at 0,0, so no adjustment needed.
-		// For nested levels, we subtract the current clip's origin.
 		relX := cmd.Box.X - currentClip.Box.X
 		relY := cmd.Box.Y - currentClip.Box.Y
+		if obj.Position().X != relX || obj.Position().Y != relY {
+			obj.Move(fyne.NewPos(relX, relY))
+		}
 
-		obj.Move(fyne.NewPos(relX, relY))
-
-		// Add to current list
 		*getCurrentList() = append(*getCurrentList(), obj)
 	}
 
 	rootObjects := objectStack[0]
 
-	// Add default white viewport background to ensure we never render a black screen when in dark mode.
-	// We skip this if we are running in tests to avoid breaking layout assertions that count objects.
-	if flag.Lookup("test.v") == nil {
-		viewportBg := canvas.NewRectangle(color.White)
+	// Reuse background rectangle across frames
+	var viewportBg *canvas.Rectangle
+	if cached, ok := cr.objectCache[-1]; ok {
+		if bg, ok2 := cached.(*canvas.Rectangle); ok2 {
+			viewportBg = bg
+		}
+	}
+	if viewportBg == nil && flag.Lookup("test.v") == nil {
+		viewportBg = canvas.NewRectangle(color.White)
+		cr.objectCache[-1] = viewportBg
+	}
+	if viewportBg != nil {
 		contentHeight := cr.canvasHeight
 		if layoutRoot != nil && layoutRoot.Box.Height > contentHeight {
 			contentHeight = layoutRoot.Box.Height
@@ -976,16 +1001,27 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		rootObjects = append([]fyne.CanvasObject{viewportBg}, rootObjects...)
 	}
 
-	content := container.NewWithoutLayout(rootObjects...)
-
-	// Wrap in a mouse-aware container if inspect callback is set
-	if cr.onInspect != nil && cr.renderer != nil {
-		log.Printf("DEBUG: RenderWithViewport end (inspectable)")
-		return newInspectableContainer(content, cr)
+	// Reuse stable root container or create one
+	if cr.contentRoot != nil {
+		cr.contentRoot.Objects = rootObjects
+		cr.contentRoot.Refresh()
+	} else {
+		cr.contentRoot = container.NewWithoutLayout(rootObjects...)
 	}
 
-	log.Printf("DEBUG: RenderWithViewport end")
-	return content
+	if cr.onInspect != nil && cr.renderer != nil {
+		if cr.inspectable != nil {
+			if len(cr.inspectable.container.Objects) == 0 || cr.inspectable.container.Objects[0] != cr.contentRoot {
+				cr.inspectable.container.RemoveAll()
+				cr.inspectable.container.Add(cr.contentRoot)
+			}
+		} else {
+			cr.inspectable = newInspectableContainer(cr.contentRoot, cr)
+		}
+		return cr.inspectable
+	}
+
+	return cr.contentRoot
 }
 
 // createCanvasObject creates a Fyne object from a paint command
@@ -1248,13 +1284,25 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 	}
 }
 
-// ClearCache clears the cached display list to force re-rendering
+// ClearCache clears the cached display list and object cache to force re-rendering
 func (cr *CanvasRenderer) ClearCache() {
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
 	cr.cachedDisplayList = nil
 	cr.cachedLayoutRoot = nil
 	cr.cachedRenderRoot = nil
+	cr.objectCache = make(map[int]fyne.CanvasObject)
+	cr.dlBuildGen++
+}
+
+// InvalidateObjectCache clears only the object cache (keeping the display list)
+// so objects are re-created from commands on the next render. Used when backing
+// data changes (e.g. images finish loading) without the display list changing.
+func (cr *CanvasRenderer) InvalidateObjectCache() {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.objectCache = make(map[int]fyne.CanvasObject)
+	cr.dlBuildGen++
 }
 
 func (cr *CanvasRenderer) renderInput(node *RenderNode, objects *[]fyne.CanvasObject) {

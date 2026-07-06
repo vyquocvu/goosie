@@ -79,9 +79,19 @@ type PaintCommand struct {
 	ClipOverflow string // "hidden", "scroll", "auto"
 }
 
+// YBand represents a horizontal band of the display list at a given Y-range.
+// Commands between cmdStart and cmdEnd fall within this Y range.
+type YBand struct {
+	YStart   float32
+	YEnd     float32
+	CmdStart int
+	CmdEnd   int
+}
+
 // DisplayList represents a list of paint commands
 type DisplayList struct {
 	Commands []*PaintCommand
+	YBands   []YBand // Spatial index — commands grouped by Y-range (~200px bands)
 }
 
 // NewDisplayList creates a new display list
@@ -130,6 +140,8 @@ func NewDisplayListBuilder() *DisplayListBuilder {
 	}
 }
 
+const yBandHeight = float32(200)
+
 // Build builds a display list from a layout tree and render tree
 func (dlb *DisplayListBuilder) Build(layoutRoot *LayoutBox, renderRoot *RenderNode) *DisplayList {
 	displayList := NewDisplayList()
@@ -144,7 +156,89 @@ func (dlb *DisplayListBuilder) Build(layoutRoot *LayoutBox, renderRoot *RenderNo
 	// Walk the layout tree and generate paint commands
 	dlb.buildRecursive(layoutRoot, renderMap, displayList)
 
+	// Build spatial Y-band index for viewport culling
+	buildYBands(displayList)
+
 	return displayList
+}
+
+// buildYBands partitions display list leaf commands into spatial Y-bands for
+// efficient viewport culling. Each band groups ~200px of vertical space so
+// that RenderWithViewport can skip entire groups of off-screen commands.
+func buildYBands(dl *DisplayList) {
+	if len(dl.Commands) == 0 {
+		return
+	}
+
+	// Find Y range of non-clip commands
+	minY := float32(0)
+	maxY := float32(0)
+	first := true
+	for _, cmd := range dl.Commands {
+		if cmd.Type == PushClip || cmd.Type == PopClip {
+			continue
+		}
+		cmdBottom := cmd.Box.Y + cmd.Box.Height
+		if first {
+			minY = cmd.Box.Y
+			maxY = cmdBottom
+			first = false
+		} else {
+			if cmd.Box.Y < minY {
+				minY = cmd.Box.Y
+			}
+			if cmdBottom > maxY {
+				maxY = cmdBottom
+			}
+		}
+	}
+	if first {
+		return
+	}
+
+	bandH := yBandHeight
+	numBands := int((maxY-minY)/bandH) + 1
+	bands := make([]YBand, numBands)
+	for b := 0; b < numBands; b++ {
+		bands[b] = YBand{
+			YStart:   minY + float32(b)*bandH,
+			YEnd:     minY + float32(b+1)*bandH,
+			CmdStart: -1,
+			CmdEnd:   -1,
+		}
+	}
+
+	currentBand := 0
+	for i, cmd := range dl.Commands {
+		if cmd.Type == PushClip || cmd.Type == PopClip {
+			continue
+		}
+		for currentBand < numBands-1 && cmd.Box.Y >= bands[currentBand+1].YStart {
+			if bands[currentBand].CmdEnd < 0 {
+				bands[currentBand].CmdEnd = i
+			}
+			currentBand++
+		}
+		if bands[currentBand].CmdStart < 0 {
+			bands[currentBand].CmdStart = i
+		}
+		bands[currentBand].CmdEnd = i + 1
+	}
+
+	// Fill empty trailing bands with their predecessor's CmdEnd (marks them as empty)
+	for b := numBands - 1; b >= 0; b-- {
+		if bands[b].CmdStart < 0 {
+			if b == 0 {
+				bands[b].CmdStart = 0
+				bands[b].CmdEnd = 0
+			} else {
+				bands[b].CmdStart = bands[b-1].CmdEnd
+				bands[b].CmdEnd = bands[b-1].CmdEnd
+			}
+		}
+	}
+
+	dl.YBands = bands
 }
 
 // buildRenderMap builds a map of render nodes indexed by their ID

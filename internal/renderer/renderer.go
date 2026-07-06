@@ -463,6 +463,8 @@ func (r *Renderer) SetTestingMode(mode bool) {
 }
 
 func (r *Renderer) onImageLoaded(src string) {
+	r.canvasRenderer.InvalidateObjectCache()
+
 	if r.testingMode {
 		if r.onRefresh != nil {
 			r.onRefresh()
