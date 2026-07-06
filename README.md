@@ -134,6 +134,9 @@ go test -bench=. -benchmem ./internal/css/
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/
 
+# Deterministic engine corpus benchmarks
+go test -bench=. -benchmem ./internal/engine/testpages/
+
 # Full renderer benchmarks (layout, display list, viewport, scroll)
 go test -bench=. -benchmem ./internal/renderer/
 ```
