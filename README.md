@@ -125,6 +125,19 @@ go test -tags=e2e ./test/e2e
 
 Use the short tier for sandbox-safe checks and the e2e tier for Playwright-driven browser tests.
 
+### Benchmarks
+
+```bash
+# CSS parser benchmarks
+go test -bench=. -benchmem ./internal/css/
+
+# DOM parser benchmarks
+go test -bench=. -benchmem ./internal/dom/
+
+# Full renderer benchmarks (layout, display list, viewport, scroll)
+go test -bench=. -benchmem ./internal/renderer/
+```
+
 ### GUI Browser
 
 Run the full browser with GUI:
@@ -278,6 +291,8 @@ Goosie includes advanced performance optimizations for smooth scrolling and high
 - **Display list caching**: Eliminates repeated DOM traversal
 - **Scroll optimization**: 65x faster scroll updates
 - **Scales to thousands of elements**: Constant-time rendering regardless of page size
+
+Microbenchmarks exist for the CSS parser, DOM parser, and the full rendering pipeline (layout, display list, viewport culling, scroll). All benchmarks include allocation tracking with `-benchmem`.
 
 See [PERFORMANCE.md](PERFORMANCE.md) for detailed benchmarks and technical information.
 

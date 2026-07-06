@@ -211,8 +211,14 @@ Even at 60 FPS, the optimized renderer uses:
 ### Run Benchmarks
 
 ```bash
-# All benchmarks
-go test ./internal/renderer -bench=. -benchmem
+# CSS parser benchmarks (all sizes and selector types)
+go test -bench=. -benchmem ./internal/css/
+
+# DOM parser benchmarks (text extraction, markdown, queries, selectors)
+go test -bench=. -benchmem ./internal/dom/
+
+# Renderer benchmarks (layout, display list, viewport, scroll)
+go test -bench=. -benchmem ./internal/renderer/
 
 # Viewport-specific benchmarks
 go test ./internal/renderer -bench=Viewport -benchmem
@@ -255,4 +261,4 @@ go tool pprof mem.prof
 
 ---
 
-*Last updated: October 2025*
+*Last updated: July 2026*

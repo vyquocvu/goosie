@@ -196,9 +196,9 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.2 Build a deterministic benchmark corpus
 
-- [ ] Add small HTML fixtures for parser microbenchmarks.
+- [x] Add small HTML fixtures for parser microbenchmarks.
 - [ ] Add long article and documentation pages.
-- [ ] Add selector-heavy pages.
+- [x] Add selector-heavy pages.
 - [ ] Add table-heavy and form-heavy pages.
 - [ ] Add image-heavy pages using local deterministic assets.
 - [ ] Add JavaScript-light interactive pages.
@@ -972,8 +972,8 @@ These may be handled through future dedicated milestones, optional backends, or 
 The first sprint after this roadmap is accepted should contain only the following work:
 
 - [ ] Add `docs/SUPPORTED_WEB_PLATFORM.md`.
-- [ ] Add deterministic benchmark fixtures.
-- [ ] Add parser, style, layout, paint, and scroll benchmarks.
+- [x] Add deterministic benchmark fixtures.
+- [x] Add parser, style, layout, paint, and scroll benchmarks.
 - [ ] Add navigation IDs and phase timings.
 - [ ] Add CPU, heap, and trace capture commands.
 - [ ] Add benchmark comparison documentation.
