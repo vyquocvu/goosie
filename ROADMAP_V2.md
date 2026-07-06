@@ -181,13 +181,13 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.1 Define supported engine scope
 
-- [ ] Create `docs/SUPPORTED_WEB_PLATFORM.md`.
-- [ ] Separate features into `supported`, `partial`, `planned`, `fallback`, and `out of scope`.
-- [ ] Define supported HTML elements.
-- [ ] Define supported CSS properties and selector types.
-- [ ] Define supported DOM and browser APIs.
-- [ ] State that full modern web application compatibility is not a v2 goal.
-- [ ] Define maximum document, stylesheet, image, and script limits.
+- [x] Create `docs/SUPPORTED_WEB_PLATFORM.md`.
+- [x] Separate features into `supported`, `partial`, `planned`, `fallback`, and `out of scope`.
+- [x] Define supported HTML elements.
+- [x] Define supported CSS properties and selector types.
+- [x] Define supported DOM and browser APIs.
+- [x] State that full modern web application compatibility is not a v2 goal.
+- [x] Define maximum document, stylesheet, image, and script limits.
 
 **Acceptance criteria**
 
