@@ -228,7 +228,7 @@ go test -bench=. -benchmem ./internal/css/
 # DOM parser benchmarks (text extraction, markdown, queries, selectors)
 go test -bench=. -benchmem ./internal/dom/
 
-# Deterministic engine corpus benchmarks (article, documentation, table, form, image, scrolling pages)
+# Deterministic engine corpus benchmarks (article, documentation, table, form, image, JavaScript-light, scrolling pages)
 go test -bench=. -benchmem ./internal/engine/testpages/
 
 # Renderer benchmarks (layout, display list, viewport, scroll)

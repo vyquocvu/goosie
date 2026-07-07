@@ -35,6 +35,10 @@ func BenchmarkGetImageHeavy(b *testing.B) {
 	benchmarkGet(b, "image_heavy")
 }
 
+func BenchmarkGetJavaScriptLightTodo(b *testing.B) {
+	benchmarkGet(b, "javascript_light_todo")
+}
+
 func BenchmarkGetScrollingShort(b *testing.B) {
 	benchmarkGet(b, "scrolling_short")
 }
@@ -90,6 +94,20 @@ func BenchmarkGetContextImageHeavy(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		page, err := GetContext(ctx, "image_heavy")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if page.Name == "" {
+			b.Fatal("empty page")
+		}
+	}
+}
+
+func BenchmarkGetContextJavaScriptLightTodo(b *testing.B) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		page, err := GetContext(ctx, "javascript_light_todo")
 		if err != nil {
 			b.Fatal(err)
 		}

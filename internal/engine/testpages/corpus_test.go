@@ -9,18 +9,19 @@ import (
 
 func TestListIncludesLongArticleAndDocumentationPages(t *testing.T) {
 	pages := List()
-	if len(pages) != 7 {
-		t.Fatalf("List() returned %d pages, want 7", len(pages))
+	if len(pages) != 8 {
+		t.Fatalf("List() returned %d pages, want 8", len(pages))
 	}
 
 	want := map[string]string{
-		"long_article":    "Long Article",
-		"documentation":   "Documentation Page",
-		"table_heavy":     "Table-Heavy Data Grid",
-		"form_heavy":      "Form-Heavy Settings Page",
-		"image_heavy":     "Image-Heavy Page",
-		"scrolling_short": "Short Document",
-		"scrolling_long":  "Scrolling-Long Document Benchmark",
+		"long_article":          "Long Article",
+		"documentation":         "Documentation Page",
+		"table_heavy":           "Table-Heavy Data Grid",
+		"form_heavy":            "Form-Heavy Settings Page",
+		"image_heavy":           "Image-Heavy Page",
+		"javascript_light_todo": "JavaScript-Light Todo Dashboard",
+		"scrolling_short":       "Short Document",
+		"scrolling_long":        "Scrolling-Long Document Benchmark",
 	}
 	for _, page := range pages {
 		title, ok := want[page.Name]
@@ -184,6 +185,38 @@ func TestImageHeavyPageExercisesReferenceLayout(t *testing.T) {
 	}
 	if !strings.Contains(page.CSS, ".gallery") {
 		t.Fatalf("image_heavy CSS missing gallery selector")
+	}
+}
+
+func TestJavaScriptLightInteractivePageExercisesSupportedAPIs(t *testing.T) {
+	page, ok := Get("javascript_light_todo")
+	if !ok {
+		t.Fatal("Get(javascript_light_todo) did not find page")
+	}
+
+	for _, fragment := range []string{
+		`<section id="todo-app"`,
+		`<form id="todo-form"`,
+		`<input type="text" id="todo-input"`,
+		`<button type="submit"`,
+		`<ul id="todo-list"`,
+		`<script>`,
+		`document.getElementById("todo-form")`,
+		`addEventListener("submit"`,
+		`document.createElement("li")`,
+		`appendChild`,
+		`textContent`,
+		`localStorage.setItem("goosie.todo.count"`,
+	} {
+		if !strings.Contains(page.HTML, fragment) {
+			t.Fatalf("javascript_light_todo HTML missing %q", fragment)
+		}
+	}
+	if strings.Contains(page.HTML, "fetch(") || strings.Contains(page.HTML, "setInterval(") {
+		t.Fatalf("javascript_light_todo must stay JavaScript-light without network fetches or repeating timers")
+	}
+	if !strings.Contains(page.CSS, ".todo-shell") {
+		t.Fatalf("javascript_light_todo CSS missing todo shell selector")
 	}
 }
 

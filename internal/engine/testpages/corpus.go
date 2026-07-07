@@ -34,6 +34,7 @@ var pages = []Page{
 	newPage("table_heavy", "Table-Heavy Data Grid", tableHeavyHTML, tableHeavyCSS),
 	newPage("form_heavy", "Form-Heavy Settings Page", formHeavyHTML, formHeavyCSS),
 	newPage("image_heavy", "Image-Heavy Page", imageHeavyHTML, imageHeavyCSS),
+	newPage("javascript_light_todo", "JavaScript-Light Todo Dashboard", javascriptLightTodoHTML, javascriptLightTodoCSS),
 	newPage("scrolling_short", "Short Document", scrollingShortHTML, scrollingShortCSS),
 	newPage("scrolling_long", "Scrolling-Long Document Benchmark", scrollingLongHTML, scrollingLongCSS),
 }
@@ -591,6 +592,131 @@ body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #111
 .gallery-item img { width: 80px; height: 80px; border-radius: 4px; object-fit: cover; }
 .gallery-item p.label { margin: 8px 0 0; font-size: 0.85rem; font-weight: 500; color: #374151; }
 .gallery-footer { padding: 24px 32px; background: #f3f4f6; text-align: center; font-size: 0.85rem; color: #6b7280; margin-top: 48px; border-top: 1px solid #e5e7eb; }
+`
+
+const javascriptLightTodoHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>JavaScript-Light Todo Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<section id="todo-app" class="todo-shell">
+<header class="todo-header">
+<p class="eyebrow">Interactive fixture</p>
+<h1>JavaScript-Light Todo Dashboard</h1>
+<p class="summary">A deterministic page with a small inline script for DOM queries, event handling, node creation, class toggles, and localStorage writes.</p>
+</header>
+<main class="todo-layout">
+<form id="todo-form" class="todo-form" action="/todo" method="post">
+<label for="todo-input">New task</label>
+<div class="entry-row">
+<input type="text" id="todo-input" name="todo" value="Review benchmark output" autocomplete="off">
+<button type="submit">Add task</button>
+</div>
+<p id="todo-status" class="status" aria-live="polite">3 tasks ready</p>
+</form>
+<ul id="todo-list" class="todo-list">
+<li class="todo-item is-complete"><span class="checkmark">Done</span><span>Read roadmap scope</span></li>
+<li class="todo-item"><span class="checkmark">Todo</span><span>Run deterministic benchmarks</span></li>
+<li class="todo-item"><span class="checkmark">Todo</span><span>Record benchmark variance</span></li>
+</ul>
+<aside class="metrics-panel">
+<h2>Session Metrics</h2>
+<dl>
+<div><dt>DOM mutations</dt><dd id="mutation-count">0</dd></div>
+<div><dt>Stored count</dt><dd id="stored-count">3</dd></div>
+<div><dt>Mode</dt><dd id="mode-label">manual</dd></div>
+</dl>
+<button type="button" id="toggle-mode">Toggle mode</button>
+</aside>
+</main>
+</section>
+<script>
+(function () {
+  var form = document.getElementById("todo-form");
+  var input = document.getElementById("todo-input");
+  var list = document.getElementById("todo-list");
+  var status = document.getElementById("todo-status");
+  var mutations = document.getElementById("mutation-count");
+  var stored = document.getElementById("stored-count");
+  var modeLabel = document.getElementById("mode-label");
+  var toggle = document.getElementById("toggle-mode");
+  var mutationCount = 0;
+
+  function updateCount() {
+    var count = list.children.length;
+    status.textContent = count + " tasks ready";
+    stored.textContent = String(count);
+    localStorage.setItem("goosie.todo.count", String(count));
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var value = input.value.trim();
+    if (value === "") {
+      status.textContent = "Task text is required";
+      return;
+    }
+    var item = document.createElement("li");
+    var marker = document.createElement("span");
+    var label = document.createElement("span");
+    item.className = "todo-item";
+    marker.className = "checkmark";
+    marker.textContent = "Todo";
+    label.textContent = value;
+    item.appendChild(marker);
+    item.appendChild(label);
+    list.appendChild(item);
+    input.value = "";
+    mutationCount = mutationCount + 1;
+    mutations.textContent = String(mutationCount);
+    updateCount();
+  });
+
+  toggle.addEventListener("click", function () {
+    document.getElementById("todo-app").classList.toggle("is-automatic");
+    modeLabel.textContent = modeLabel.textContent === "manual" ? "automatic" : "manual";
+  });
+
+  updateCount();
+}());
+</script>
+</body>
+</html>`
+
+const javascriptLightTodoCSS = `
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #172033; background: #eef3f7; }
+.todo-shell { max-width: 960px; margin: 0 auto; padding: 28px; }
+.todo-header { padding: 24px 0 18px; border-bottom: 1px solid #c8d2dc; }
+.todo-header h1 { margin: 0 0 10px; font-size: 2rem; color: #172033; }
+.eyebrow { margin: 0 0 8px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0; text-transform: uppercase; color: #5a6d80; }
+.summary { max-width: 720px; margin: 0; line-height: 1.55; color: #394b5f; }
+.todo-layout { display: grid; grid-template-columns: 1fr 280px; gap: 24px; align-items: start; padding-top: 24px; }
+.todo-form { grid-column: 1 / 2; display: grid; gap: 10px; }
+.todo-form label { font-size: 0.9rem; font-weight: 700; color: #24364a; }
+.entry-row { display: flex; gap: 10px; }
+.entry-row input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #9fb0c2; border-radius: 6px; font-size: 1rem; background: #ffffff; color: #172033; }
+button { padding: 10px 14px; border: 1px solid #315e7d; border-radius: 6px; background: #315e7d; color: #ffffff; font-weight: 700; cursor: pointer; }
+.status { margin: 0; min-height: 24px; color: #3b5268; }
+.todo-list { grid-column: 1 / 2; display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.todo-item { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid #d4dde6; border-radius: 8px; background: #ffffff; }
+.todo-item.is-complete { color: #426239; background: #f0f7ed; border-color: #bfd6b4; }
+.checkmark { flex: 0 0 auto; min-width: 48px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #5a6d80; }
+.metrics-panel { grid-column: 2 / 3; grid-row: 1 / span 2; padding: 18px; border: 1px solid #c8d2dc; border-radius: 8px; background: #ffffff; }
+.metrics-panel h2 { margin: 0 0 14px; font-size: 1.1rem; }
+.metrics-panel dl { display: grid; gap: 8px; margin: 0 0 16px; }
+.metrics-panel div { display: flex; justify-content: space-between; gap: 16px; }
+.metrics-panel dt { color: #5a6d80; }
+.metrics-panel dd { margin: 0; font-weight: 700; color: #172033; }
+.is-automatic .todo-header { border-bottom-color: #7aa06f; }
+@media (max-width: 720px) {
+  .todo-shell { padding: 20px; }
+  .todo-layout { grid-template-columns: 1fr; }
+  .todo-form, .todo-list, .metrics-panel { grid-column: 1 / 2; grid-row: auto; }
+  .entry-row { flex-direction: column; }
+}
 `
 
 const scrollingShortHTML = `<!doctype html>
