@@ -120,6 +120,17 @@ Performance measurements on AMD EPYC 7763 64-Core Processor:
 | 100 nodes | 355 ns  | 788 B     | 5         |
 | 1000 nodes| 350 ns  | 788 B     | 5         |
 
+### Mutation Baselines
+
+These benchmarks establish the performance footprint of mutating the tree structure before flat DOM store implementation in Milestone 2. Measured on the `form_heavy` document:
+
+| Mutation Scenario | Time/op | Memory/op | Allocs/op |
+|-------------------|---------|-----------|-----------|
+| Class Toggle      | 342 μs  | 47.5 KB   | 650       |
+| Append Node       | 332 μs  | 47.6 KB   | 651       |
+| Replace Text      | 328 μs  | 47.5 KB   | 650       |
+| Resize Viewport   | 139 μs  | 48.0 KB   | 641       |
+
 ### Performance Improvements
 
 - **Viewport Rendering**: 30x faster than full pipeline (746 ns vs 23 μs)
@@ -228,6 +239,9 @@ go test ./internal/renderer -bench=Viewport -benchmem
 
 # Scroll-specific benchmarks
 go test ./internal/renderer -bench=Scroll -benchmem
+
+# Mutation-specific benchmarks
+go test ./internal/renderer -bench=Mutation -benchmem
 ```
 
 ### Profiling
