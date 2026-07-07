@@ -61,7 +61,7 @@ Modify:
 - `internal/ui/inspect_panel.go`: expose source integration hooks where possible.
 - `internal/ui/state.go`: keep in-memory navigation state but emit sync events to profile.
 - `TESTING.md`: document short, normal, network, and e2e test tiers.
-- `ROADMAP.md`: mark foundation items and move standards features to the next milestone.
+- `ROADMAP_V2.md`: mark foundation items and move standards features to the next milestone.
 - `README.md`: document profile, private mode, downloads, security/devtools, and release usage.
 - `TASKS.md`: close or update items addressed by this milestone.
 
@@ -2601,7 +2601,7 @@ git commit -m "test: split sandbox-safe browser test tiers"
 **Files:**
 - Create: `.github/workflows/release.yml`
 - Modify: `README.md`
-- Modify: `ROADMAP.md`
+- Modify: `ROADMAP_V2.md`
 - Modify: `TASKS.md`
 
 - [ ] **Step 1: Add release workflow**
@@ -2705,7 +2705,7 @@ Use the short tier for sandbox-safe checks and the e2e tier for Playwright-drive
 
 - [ ] **Step 3: Update ROADMAP and TASKS**
 
-In `ROADMAP.md`, add a v1.0 Browser Foundation section marking these as completed once implementation is merged:
+In `ROADMAP_V2.md`, add a v1.0 Browser Foundation section marking these as completed once implementation is merged:
 
 ```markdown
 ## Phase 5: Browser Foundation (v1.0.0)
@@ -2746,7 +2746,7 @@ Expected: no output.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .github/workflows/release.yml README.md ROADMAP.md TASKS.md TESTING.md
+git add .github/workflows/release.yml README.md ROADMAP_V2.md TASKS.md TESTING.md
 git commit -m "docs: document browser foundation release"
 ```
 
@@ -2814,7 +2814,7 @@ Expected: `git diff --check` has no output. `git status --short` shows only inte
 If Step 5 shows tracked changes from verification fixes:
 
 ```bash
-git add internal/profile internal/net internal/form internal/js internal/ui cmd/browser README.md ROADMAP.md TASKS.md TESTING.md .github/workflows/release.yml
+git add internal/profile internal/net internal/form internal/js internal/ui cmd/browser README.md ROADMAP_V2.md TASKS.md TESTING.md .github/workflows/release.yml
 git commit -m "fix: stabilize browser foundation verification"
 ```
 

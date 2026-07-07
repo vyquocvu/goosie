@@ -387,6 +387,7 @@ Make CSS parsing streaming-friendly, selector matching indexed, and style invali
 - [ ] Store rare properties in a secondary structure.
 - [ ] Preserve source order, origin, specificity, and `!important`.
 - [ ] Bound imported stylesheet depth and total bytes.
+- [ ] Preserve unsupported animations and transitions with documented fallback behavior.
 
 ### M3.2 Compile selectors
 
@@ -493,6 +494,7 @@ Make the display list the stable contract between layout and rendering.
 ### M5.1 Define backend-neutral display commands
 
 - [ ] Add commands for rectangles, borders, text runs, images, clips, transforms, opacity, and stacking contexts.
+- [ ] Add path and vector-image command support for the documented SVG subset.
 - [ ] Use compact typed structures.
 - [ ] Avoid interface values in the hottest display-list storage where possible.
 - [ ] Add serialization support for debugging and future IPC.
@@ -555,6 +557,7 @@ type RasterBackend interface {
 
 - [ ] Support solid fills and borders.
 - [ ] Support clipped images.
+- [ ] Support rasterizing the documented SVG subset.
 - [ ] Support shaped text runs.
 - [ ] Support opacity and basic transforms.
 - [ ] Raster only dirty tiles.
@@ -622,6 +625,7 @@ Make scrolling and simple visual updates independent from full repaint work.
 
 - [ ] Render visible tiles first.
 - [ ] Prefetch a bounded margin in the scroll direction.
+- [ ] Define page-cache and resource-prefetch limits for supported documents.
 - [ ] Deprioritize hidden tab raster work.
 - [ ] Pause animations and timers in hidden tabs according to policy.
 
@@ -667,6 +671,7 @@ Keep Goja useful for lightweight interaction without allowing scripts to corrupt
 - [ ] Add configurable timer limits.
 - [ ] Add maximum task queue size.
 - [ ] Add document mode that disables remote scripts.
+- [ ] Define fallback behavior for unsupported ES modules and advanced Web APIs.
 - [ ] Add per-origin permissions for selected APIs.
 
 ### M8.5 Add race and stress tests
@@ -701,6 +706,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 ### M9.2 Bound every cache
 
 - [ ] HTTP response cache.
+- [ ] Page cache.
 - [ ] Decoded image cache.
 - [ ] Glyph cache.
 - [ ] Text shaping cache.
@@ -717,6 +723,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [ ] Add schema versioning and migrations.
 - [ ] Add corruption recovery tests.
 - [ ] Preserve private mode as fully ephemeral.
+- [ ] Add import and export paths for profile settings.
 
 ### M9.4 Tune the Go runtime only after structural work
 
@@ -747,6 +754,8 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [ ] Enforce redirect limits.
 - [ ] Enforce response and decompression size limits.
 - [ ] Validate MIME handling.
+- [ ] Enforce the documented Content Security Policy subset.
+- [ ] Add pop-up blocking policy at the navigation boundary.
 - [ ] Prevent local file access from remote origins by default.
 
 ### M10.2 Add capability-based browser APIs
@@ -755,6 +764,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [ ] Deny unsupported capabilities by default.
 - [ ] Add per-session policy.
 - [ ] Add auditable permission decisions.
+- [ ] Gate geolocation, notifications, and other advanced APIs behind explicit capabilities.
 
 ### M10.3 Define serializable engine messages
 
@@ -828,6 +838,9 @@ Provide a product path for sites outside the Go engine's supported subset withou
 ### M12.1 Define fallback triggers
 
 - [ ] Unsupported mandatory feature detected.
+- [ ] Canvas API required by page behavior.
+- [ ] Video, audio, WebSocket, Web Worker, Service Worker, or full PWA feature required.
+- [ ] ES module graph required beyond the supported script subset.
 - [ ] User requests compatibility mode.
 - [ ] Site allowlist or policy selects embedded engine.
 - [ ] Repeated render or script failure exceeds a threshold.
@@ -840,6 +853,7 @@ Provide a product path for sites outside the Go engine's supported subset withou
 - [ ] Download and permission events.
 - [ ] Profile and private-mode behavior.
 - [ ] Developer-tools handoff.
+- [ ] Media playback and advanced API handoff.
 
 ### M12.3 Prototype platform WebView integration
 
@@ -862,6 +876,7 @@ Provide a product path for sites outside the Go engine's supported subset withou
 - [ ] Parser and selector fuzz tests.
 - [ ] Golden layout tests.
 - [ ] Golden image tests.
+- [ ] Accessibility regression tests for keyboard navigation, ARIA behavior, high contrast, and text zoom.
 - [ ] Navigation cancellation integration tests.
 - [ ] Race tests.
 - [ ] Memory growth tests.
@@ -877,6 +892,11 @@ Provide a product path for sites outside the Go engine's supported subset withou
 - [ ] Tile-cache inspector.
 - [ ] Memory budget view.
 - [ ] Network priority and cancellation view.
+- [ ] Network waterfall view.
+- [ ] Storage inspector for cookies, localStorage, and sessionStorage.
+- [ ] View page source and rendered HTML views.
+- [ ] CSS inspector with live editing.
+- [ ] JavaScript console autocomplete and history persistence.
 - [ ] Script task queue view.
 
 ## C. Documentation
@@ -887,9 +907,14 @@ Provide a product path for sites outside the Go engine's supported subset withou
 - [ ] Performance methodology.
 - [ ] Memory model and cache budgets.
 - [ ] Rendering pipeline deep dive.
+- [ ] Contributor API documentation.
+- [ ] Contributing guide.
+- [ ] Code of conduct.
 - [ ] Contribution guide for adding CSS properties.
 - [ ] Contribution guide for adding DOM APIs.
 - [ ] Backend integration guide.
+- [ ] Tutorial series for extending the browser.
+- [ ] Architecture deep-dive articles.
 
 ## D. Release Engineering
 
@@ -899,6 +924,8 @@ Provide a product path for sites outside the Go engine's supported subset withou
 - [ ] Release benchmark report.
 - [ ] Binary size tracking.
 - [ ] Startup time tracking.
+- [ ] Security audit workflow.
+- [ ] Command-line interface for browser automation.
 
 # Recommended Execution Order
 
@@ -962,6 +989,9 @@ The following are not required for the lightweight engine release:
 - WebRTC
 - Service workers and full PWA compatibility
 - Browser extensions compatible with Chrome or Firefox
+- Built-in ad blocking, translation, password manager, PDF viewer, reader mode, sync, or cloud bookmarks
+- Mobile Android and iOS applications
+- A general theme, extension, plugin, or custom user-script ecosystem
 - Complete site isolation in the initial single-process release
 - Reimplementing mature platform WebViews inside Go
 

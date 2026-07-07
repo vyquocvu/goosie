@@ -13,7 +13,7 @@ This milestone is not a full modern web platform implementation. Canvas, SVG, me
 - `internal/net/fetcher.go` uses `http.Client` with an in-memory cookie jar and progress callbacks.
 - `internal/js/runtime.go` exposes browser-like APIs including location, history, timers, fetch, localStorage, and sessionStorage, but storage is currently in memory.
 - `internal/form` has validation/submission logic, but baseline tests expose gaps in duplicate-submit handling, relative action URLs, testable submissions, and sanitization policy.
-- `ROADMAP.md` and `TASKS.md` still list cookies, TLS UI, caching, downloads, devtools, release pipeline, and test gaps as open or deferred.
+- `ROADMAP_V2.md` and `TASKS.md` track cookies, TLS UI, caching, downloads, devtools, release pipeline, and test gaps.
 
 ## Design Goals
 
@@ -200,7 +200,7 @@ Form submission:
 ## Documentation Requirements
 
 - Update `README.md` with profile, private mode, downloads, security, devtools, and release usage.
-- Update `ROADMAP.md` to mark completed foundation items and move modern standards features into the next milestone.
+- Update `ROADMAP_V2.md` to mark completed foundation items and move modern standards features into the next milestone.
 - Update `TESTING.md` with the split test tiers and commands.
 - Add developer notes for profile file formats and network cache behavior.
 

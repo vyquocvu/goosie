@@ -264,7 +264,7 @@ The browser demonstrates web functionality by:
 - **[CONSOLE_DOCUMENTATION.md](CONSOLE_DOCUMENTATION.md)**: Enhanced console features and debugging tools
 - **[ARCHITECTURE.md](ARCHITECTURE.md)**: System architecture and component flow
 - **[PERFORMANCE.md](PERFORMANCE.md)**: Performance optimizations and benchmarks
-- **[ROADMAP.md](ROADMAP.md)**: Planned features and development roadmap
+- **[ROADMAP_V2.md](ROADMAP_V2.md)**: Planned engine milestones, product backlog, and development roadmap
 
 ### Adding Features
 
@@ -302,7 +302,7 @@ See [PERFORMANCE.md](PERFORMANCE.md) for detailed benchmarks and technical infor
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features and future development goals.
+See [ROADMAP_V2.md](ROADMAP_V2.md) for planned features and future development goals.
 
 ## License
 
