@@ -218,7 +218,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 - [ ] Instrument engine phases: DNS, connect, first byte, body read, parse, style, layout, paint, raster, present.
 - [ ] Record node, rule, selector, box, fragment, display item, tile, and image counts.
 - [ ] Record bytes downloaded, decoded image bytes, cache hits, and cache misses.
-- [ ] Add structured logs behind a debug flag.
+- [x] Add structured logs behind a debug flag.
 
 **Acceptance criteria**
 

@@ -1,6 +1,10 @@
 package metrics
 
-import "testing"
+import (
+	"io"
+	"log/slog"
+	"testing"
+)
 
 func BenchmarkRecorderBeginEndPhase(b *testing.B) {
 	r := NewRecorder(1, "https://example.com/bench")
@@ -69,4 +73,41 @@ func BenchmarkRecorderParallel(b *testing.B) {
 			r.AddCounters(Counters{NodeCount: 1})
 		}
 	})
+}
+
+// BenchmarkRecorderDebugLogDisabled measures the cost when debug logging is
+// off (the common path). It must allocate near zero.
+func BenchmarkRecorderDebugLogDisabled(b *testing.B) {
+	r := NewRecorder(1, "https://example.com/bench")
+	r.BeginPhase(PhaseParse)
+	r.EndPhase(PhaseParse)
+	r.AddCounters(Counters{NodeCount: 500})
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r.Finalize()
+		r = NewRecorder(1, "https://example.com/bench")
+		r.BeginPhase(PhaseParse)
+		r.EndPhase(PhaseParse)
+	}
+}
+
+// BenchmarkRecorderDebugLogEnabled measures the structured-logging cost when
+// enabled. It reuses one logger writing to a discard buffer.
+func BenchmarkRecorderDebugLogEnabled(b *testing.B) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	r := NewRecorder(1, "https://example.com/bench")
+	r.SetDebugLog(logger)
+	r.BeginPhase(PhaseParse)
+	r.EndPhase(PhaseParse)
+	r.AddCounters(Counters{NodeCount: 500})
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r.Finalize()
+		r = NewRecorder(1, "https://example.com/bench")
+		r.SetDebugLog(logger)
+		r.BeginPhase(PhaseParse)
+		r.EndPhase(PhaseParse)
+	}
 }
