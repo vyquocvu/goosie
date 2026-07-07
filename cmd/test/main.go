@@ -89,7 +89,7 @@ func main() {
 		log.Printf("Warning: Could not create screenshot directory: %v", err)
 	} else {
 		r := renderer.NewRenderer(800, 600)
-		
+
 		// Define all example HTML files to render
 		exampleFiles := []string{
 			"examples/console_demo.html",
@@ -100,7 +100,7 @@ func main() {
 			"examples/html/full_css_demo.html",
 			"examples/html/tables.html",
 		}
-		
+
 		// Render fetched content first
 		obj, err := r.RenderHTML(html)
 		if err != nil {
@@ -113,7 +113,7 @@ func main() {
 				log.Printf("  ✓ Saved screenshot: %s", filePath)
 			}
 		}
-		
+
 		// Render all example files
 		for _, examplePath := range exampleFiles {
 			content, err := os.ReadFile(examplePath)
@@ -121,18 +121,18 @@ func main() {
 				log.Printf("  ✗ Failed to read %s: %v", examplePath, err)
 				continue
 			}
-			
+
 			obj, err := r.RenderHTML(string(content))
 			if err != nil {
 				log.Printf("  ✗ Failed to render %s: %v", examplePath, err)
 				continue
 			}
-			
+
 			// Generate screenshot filename from path
 			baseName := filepath.Base(examplePath)
 			baseName = strings.TrimSuffix(baseName, ".html")
 			filePath := filepath.Join(screenshotDir, baseName+".png")
-			
+
 			if err := testutil.SaveRenderedScreenshot(obj, filePath, 800, 600); err != nil {
 				log.Printf("  ✗ Failed to save screenshot %s: %v", baseName, err)
 			} else {
@@ -147,4 +147,3 @@ func main() {
 	log.Println("run 'go run ./cmd/browser' on a system with X11/Wayland display support.")
 	log.Printf("\nScreenshots saved to: %s/", screenshotDir)
 }
-

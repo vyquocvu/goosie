@@ -17,7 +17,7 @@ type LayoutEngine struct {
 	lineHeight      float32
 
 	// nodeMap maps RenderNode IDs to their corresponding LayoutBoxes
-	nodeMap map[int64]*LayoutBox
+	nodeMap   map[int64]*LayoutBox
 	nodeMapMu sync.RWMutex
 
 	// fontMetrics provides accurate text measurement
@@ -32,13 +32,12 @@ func NewLayoutEngine(width, height float32) *LayoutEngine {
 	defaultSize := float32(16.0)
 	fontMetrics := NewFontMetrics(defaultSize)
 	return &LayoutEngine{
-		canvasWidth:        width,
-		canvasHeight:       height,
-		defaultFontSize:    defaultSize,
-		lineHeight:         1.5,
-		nodeMap:            make(map[int64]*LayoutBox),
-		fontMetrics:        fontMetrics,
-
+		canvasWidth:     width,
+		canvasHeight:    height,
+		defaultFontSize: defaultSize,
+		lineHeight:      1.5,
+		nodeMap:         make(map[int64]*LayoutBox),
+		fontMetrics:     fontMetrics,
 	}
 }
 
@@ -58,7 +57,7 @@ func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
 	le.nodeMapMu.Unlock()
 
 	// Build layout tree from render tree
-		inlineLayoutEngine := NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize)
+	inlineLayoutEngine := NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize)
 	flexLayoutEngine := NewFlexLayoutEngine(le.fontMetrics)
 	gridLayoutEngine := NewGridLayoutEngine(le.fontMetrics)
 	layoutRoot := le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
@@ -449,7 +448,7 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.BorderRightColor = node.ComputedStyle.BorderRightColor
 	layoutBox.BorderBottomColor = node.ComputedStyle.BorderBottomColor
 	layoutBox.BorderLeftColor = node.ComputedStyle.BorderLeftColor
-	
+
 	// Apply background color
 	layoutBox.BackgroundColor = node.ComputedStyle.BackgroundColor
 }
@@ -712,7 +711,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 				// 2. Handle float
 				if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
 					floatDir := child.ComputedStyle.Float
-					
+
 					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
 					if childLayoutBox != nil {
 						fx, fy := floatCtx.PlaceFloat(childLayoutBox, floatDir, childY, childX, contentWidth)
@@ -721,7 +720,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 						childLayoutBox.Box.X = fx
 						childLayoutBox.Box.Y = fy
 						le.shiftLayoutBox(childLayoutBox, dx, dy)
-						
+
 						floatCtx.AddFloat(childLayoutBox, floatDir)
 						layoutBox.AddChild(childLayoutBox)
 					}
@@ -736,14 +735,14 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 					if isBlock1 && isBlock2 &&
 						lastChild.Position != "absolute" && lastChild.Position != "fixed" && lastChild.Float == "" &&
 						child.ComputedStyle != nil && child.ComputedStyle.Position != "absolute" && child.ComputedStyle.Position != "fixed" && child.ComputedStyle.Float == "" {
-						
+
 						fontSize := le.defaultFontSize
 						if child.ComputedStyle.FontSize > 0 {
 							fontSize = child.ComputedStyle.FontSize
 						}
 						childMarginTop := parseLength(child.ComputedStyle.MarginTop, fontSize)
 						collapsedMargin := maxFloat32(lastChild.MarginBottom, childMarginTop)
-						
+
 						lastChildBottom := lastChild.Box.Y + lastChild.Box.Height
 						nextChildY = lastChildBottom + collapsedMargin - childMarginTop
 					}
@@ -1004,7 +1003,6 @@ func (le *LayoutEngine) layoutElementNode(node *RenderNode, x, y, availableWidth
 func (le *LayoutEngine) getFontSize(tagName string) float32 {
 	return le.fontMetrics.GetFontSize(tagName)
 }
-
 
 // whiteSpaceModeForNode selects white space handling based on element type
 func (le *LayoutEngine) whiteSpaceModeForNode(node *RenderNode) WhiteSpaceMode {

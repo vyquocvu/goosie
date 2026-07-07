@@ -12,8 +12,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
-	imageloader "github.com/vyquocvu/goosie/internal/image"
 	"github.com/stretchr/testify/assert"
+	imageloader "github.com/vyquocvu/goosie/internal/image"
 	"golang.org/x/net/html"
 )
 

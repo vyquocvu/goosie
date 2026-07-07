@@ -14,8 +14,8 @@ func TestExtractInlineScripts(t *testing.T) {
 		expected []string
 	}{
 		{
-			name: "single inline script",
-			html: `<html><body><script>console.log("hello");</script></body></html>`,
+			name:     "single inline script",
+			html:     `<html><body><script>console.log("hello");</script></body></html>`,
 			expected: []string{`console.log("hello");`},
 		},
 		{
@@ -27,8 +27,8 @@ func TestExtractInlineScripts(t *testing.T) {
 			expected: []string{"var a = 1;", "var b = 2;"},
 		},
 		{
-			name: "external script is ignored",
-			html: `<html><body><script src="app.js"></script></body></html>`,
+			name:     "external script is ignored",
+			html:     `<html><body><script src="app.js"></script></body></html>`,
 			expected: nil,
 		},
 		{
@@ -40,13 +40,13 @@ func TestExtractInlineScripts(t *testing.T) {
 			expected: []string{"var x = 42;"},
 		},
 		{
-			name: "no scripts",
-			html: `<html><body><p>Hello</p></body></html>`,
+			name:     "no scripts",
+			html:     `<html><body><p>Hello</p></body></html>`,
 			expected: nil,
 		},
 		{
-			name: "empty script tag",
-			html: `<html><body><script></script></body></html>`,
+			name:     "empty script tag",
+			html:     `<html><body><script></script></body></html>`,
 			expected: nil,
 		},
 	}

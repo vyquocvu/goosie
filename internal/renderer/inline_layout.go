@@ -2,8 +2,8 @@ package renderer
 
 import (
 	"strings"
-	"unicode"
 	"sync"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 )

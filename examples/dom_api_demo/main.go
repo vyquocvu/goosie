@@ -7,10 +7,10 @@ import (
 
 func main() {
 	fmt.Println("=== Goosie DOM API Examples ===")
-	
+
 	// Create a new JavaScript runtime
 	runtime := js.NewRuntime()
-	
+
 	// Set up HTML content for testing
 	html := `
 		<html>
@@ -28,7 +28,7 @@ func main() {
 		</html>
 	`
 	runtime.SetHTMLContent(html)
-	
+
 	// Example 1: Query by ID
 	fmt.Println("Example 1: document.getElementById()")
 	_, err := runtime.RunScript(`
@@ -42,7 +42,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 2: Query by class name
 	fmt.Println("Example 2: document.getElementsByClassName()")
 	_, err = runtime.RunScript(`
@@ -56,7 +56,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 3: Query by tag name
 	fmt.Println("Example 3: document.getElementsByTagName()")
 	_, err = runtime.RunScript(`
@@ -67,7 +67,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 4: CSS Selector queries
 	fmt.Println("Example 4: document.querySelector() and querySelectorAll()")
 	_, err = runtime.RunScript(`
@@ -87,7 +87,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 5: Create and manipulate elements
 	fmt.Println("Example 5: createElement() and appendChild()")
 	_, err = runtime.RunScript(`
@@ -107,7 +107,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 6: Replace and remove children
 	fmt.Println("Example 6: replaceChild() and removeChild()")
 	_, err = runtime.RunScript(`
@@ -129,7 +129,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 7: Event listeners
 	fmt.Println("Example 7: addEventListener()")
 	_, err = runtime.RunScript(`
@@ -146,7 +146,7 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	// Example 8: Access element properties
 	fmt.Println("Example 8: Element properties")
 	_, err = runtime.RunScript(`
@@ -167,6 +167,6 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 	}
 	fmt.Println()
-	
+
 	fmt.Println("=== Examples Complete ===")
 }

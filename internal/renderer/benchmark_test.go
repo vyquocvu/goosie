@@ -3,6 +3,9 @@ package renderer
 import (
 	"fmt"
 	"testing"
+
+	"github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/engine/testpages"
 )
 
 // BenchmarkLayoutSmall benchmarks layout of 10 nodes
@@ -29,7 +32,7 @@ func BenchmarkLayoutVeryLarge(b *testing.B) {
 func benchmarkLayout(b *testing.B, n int) {
 	// Create a tree structure with n nodes
 	root := createBenchmarkTree(n)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		le := NewLayoutEngine(800, 600)
@@ -42,14 +45,14 @@ func createBenchmarkTree(n int) *RenderNode {
 	if n <= 0 {
 		return nil
 	}
-	
+
 	root := NewRenderNode(NodeTypeElement)
 	root.TagName = "div"
-	
+
 	// Create a tree structure
 	// Each div has 3-4 children (mix of divs and text nodes)
 	createBenchmarkTreeRecursive(root, n-1, 3)
-	
+
 	return root
 }
 
@@ -58,18 +61,18 @@ func createBenchmarkTreeRecursive(parent *RenderNode, remaining int, depth int) 
 	if remaining <= 0 || depth <= 0 {
 		return 0
 	}
-	
+
 	created := 0
 	childrenCount := 3 // 3 children per node
-	
+
 	for i := 0; i < childrenCount && remaining > 0; i++ {
 		var child *RenderNode
-		
+
 		// Alternate between element and text nodes
 		if i%2 == 0 {
 			child = NewRenderNode(NodeTypeElement)
 			child.TagName = "p"
-			
+
 			// Add text node to the paragraph
 			if remaining > 1 {
 				text := NewRenderNode(NodeTypeText)
@@ -81,18 +84,18 @@ func createBenchmarkTreeRecursive(parent *RenderNode, remaining int, depth int) 
 		} else {
 			child = NewRenderNode(NodeTypeElement)
 			child.TagName = "div"
-			
+
 			// Recursively add children
 			added := createBenchmarkTreeRecursive(child, remaining-1, depth-1)
 			remaining -= added
 			created += added
 		}
-		
+
 		parent.AddChild(child)
 		remaining--
 		created++
 	}
-	
+
 	return created
 }
 
@@ -115,7 +118,7 @@ func benchmarkHitTest(b *testing.B, n int) {
 	root := createBenchmarkTree(n)
 	le := NewLayoutEngine(800, 600)
 	layoutRoot := le.ComputeLayout(root)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Test hit at various positions
@@ -145,7 +148,7 @@ func benchmarkDisplayListBuild(b *testing.B, n int) {
 	le := NewLayoutEngine(800, 600)
 	layoutRoot := le.ComputeLayout(root)
 	dlb := NewDisplayListBuilder()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		dlb.Build(layoutRoot, root)
@@ -168,13 +171,13 @@ func BenchmarkFullPipelineLarge(b *testing.B) {
 // benchmarkFullPipeline benchmarks the entire rendering pipeline
 func benchmarkFullPipeline(b *testing.B, n int) {
 	root := createBenchmarkTree(n)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Layout phase
 		le := NewLayoutEngine(800, 600)
 		layoutRoot := le.ComputeLayout(root)
-		
+
 		// Display list building phase
 		dlb := NewDisplayListBuilder()
 		dlb.Build(layoutRoot, root)
@@ -190,17 +193,17 @@ func TestBenchmarkTreeCreation(t *testing.T) {
 		{100},
 		{1000},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("n=%d", tt.n), func(t *testing.T) {
 			root := createBenchmarkTree(tt.n)
 			if root == nil {
 				t.Fatal("createBenchmarkTree returned nil")
 			}
-			
+
 			// Count nodes
 			count := countNodes(root)
-			
+
 			// Should be approximately n nodes (within reasonable range)
 			if count < tt.n/2 || count > tt.n*2 {
 				t.Logf("Created %d nodes (requested %d)", count, tt.n)
@@ -214,12 +217,12 @@ func countNodes(node *RenderNode) int {
 	if node == nil {
 		return 0
 	}
-	
+
 	count := 1
 	for _, child := range node.Children {
 		count += countNodes(child)
 	}
-	
+
 	return count
 }
 
@@ -244,15 +247,15 @@ func BenchmarkViewportRenderingVeryLarge(b *testing.B) {
 func benchmarkViewportRendering(b *testing.B, n int) {
 	// Create a tree structure with n nodes
 	root := createBenchmarkTree(n)
-	
+
 	// Create layout tree
 	le := NewLayoutEngine(800, 600)
 	layoutRoot := le.ComputeLayout(root)
-	
+
 	// Create canvas renderer with viewport
 	cr := NewCanvasRenderer(800, 600)
 	cr.SetViewport(0, 600)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cr.RenderWithViewport(root, layoutRoot)
@@ -276,19 +279,75 @@ func BenchmarkViewportScrollLarge(b *testing.B) {
 func benchmarkViewportScroll(b *testing.B, n int) {
 	// Create a tree structure with n nodes
 	root := createBenchmarkTree(n)
-	
+
 	// Create layout tree
 	le := NewLayoutEngine(800, 600)
 	layoutRoot := le.ComputeLayout(root)
-	
+
 	// Create canvas renderer
 	cr := NewCanvasRenderer(800, 600)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Simulate scrolling by updating viewport
 		scrollPos := float32(i % 1000)
 		cr.SetViewport(scrollPos, 600)
 		cr.RenderWithViewport(root, layoutRoot)
+	}
+}
+
+func BenchmarkLayoutImageHeavy(b *testing.B) {
+	page, ok := testpages.Get("image_heavy")
+	if !ok {
+		b.Fatal("image_heavy page not found")
+	}
+
+	parser := css.NewParser(page.CSS)
+	stylesheet, err := parser.Parse()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	renderTree, err := parseHTMLToRenderTree(page.HTML)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	styleManager := NewStyleManager(stylesheet)
+	styleManager.ApplyStyles(renderTree)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		le := NewLayoutEngine(800, 600)
+		le.ComputeLayout(renderTree)
+	}
+}
+
+func BenchmarkFullPipelineImageHeavy(b *testing.B) {
+	page, ok := testpages.Get("image_heavy")
+	if !ok {
+		b.Fatal("image_heavy page not found")
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		parser := css.NewParser(page.CSS)
+		stylesheet, err := parser.Parse()
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		renderTree, err := parseHTMLToRenderTree(page.HTML)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		styleManager := NewStyleManager(stylesheet)
+		styleManager.ApplyStyles(renderTree)
+
+		le := NewLayoutEngine(800, 600)
+		le.ComputeLayout(renderTree)
 	}
 }

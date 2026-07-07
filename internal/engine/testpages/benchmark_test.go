@@ -23,11 +23,29 @@ func BenchmarkGetDocumentation(b *testing.B) {
 	benchmarkGet(b, "documentation")
 }
 
+func BenchmarkGetImageHeavy(b *testing.B) {
+	benchmarkGet(b, "image_heavy")
+}
+
 func BenchmarkGetContextDocumentation(b *testing.B) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		page, err := GetContext(ctx, "documentation")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if page.Name == "" {
+			b.Fatal("empty page")
+		}
+	}
+}
+
+func BenchmarkGetContextImageHeavy(b *testing.B) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		page, err := GetContext(ctx, "image_heavy")
 		if err != nil {
 			b.Fatal(err)
 		}

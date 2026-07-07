@@ -53,15 +53,15 @@ func TestBrowserNavigationWorkflow(t *testing.T) {
 	state.GoBack() // At Home
 	page2URL := "https://page2.com"
 	state.AddToHistory(page2URL) // At Page 2
-	
+
 	assert.Equal(t, page2URL, state.GetCurrentURL())
-	assert.True(t, state.CanGoBack()) // Can go back to Home
+	assert.True(t, state.CanGoBack())     // Can go back to Home
 	assert.False(t, state.CanGoForward()) // Forward history (Page 1) should be cleared
-	
+
 	// Verify we can't go forward to Page 1
 	_, ok = state.GoForward()
 	assert.False(t, ok)
-	
+
 	// Verify back goes to Home
 	url, ok = state.GoBack()
 	assert.Equal(t, homeURL, url)
@@ -70,16 +70,16 @@ func TestBrowserNavigationWorkflow(t *testing.T) {
 func TestBookmarkWorkflow(t *testing.T) {
 	state := ui.NewBrowserState()
 	url := "https://example.com"
-	
+
 	// 1. Add Bookmark
 	state.AddBookmark(url)
 	assert.True(t, state.IsBookmarked(url))
-	
+
 	// 2. Verify List
 	bookmarks := state.GetBookmarks()
 	assert.Contains(t, bookmarks, url)
 	assert.Equal(t, 1, len(bookmarks))
-	
+
 	// 3. Remove Bookmark
 	state.RemoveBookmark(url)
 	assert.False(t, state.IsBookmarked(url))

@@ -18,7 +18,7 @@ func TestNewFontMetrics(t *testing.T) {
 
 func TestMeasureText(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	tests := []struct {
 		name     string
 		text     string
@@ -31,31 +31,31 @@ func TestMeasureText(t *testing.T) {
 		{"larger font", "Large", 24.0, fyne.TextStyle{}},
 		{"smaller font", "Small", 12.0, fyne.TextStyle{}},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			metrics := fm.MeasureText(tt.text, tt.fontSize, tt.style, 0)
-			
+
 			// Width should be greater than 0 for non-empty text
 			if metrics.Width <= 0 {
 				t.Errorf("Expected width > 0, got %f", metrics.Width)
 			}
-			
+
 			// Height should be greater than 0
 			if metrics.Height <= 0 {
 				t.Errorf("Expected height > 0, got %f", metrics.Height)
 			}
-			
+
 			// Ascent should be positive
 			if metrics.Ascent <= 0 {
 				t.Errorf("Expected ascent > 0, got %f", metrics.Ascent)
 			}
-			
+
 			// Descent should be positive
 			if metrics.Descent <= 0 {
 				t.Errorf("Expected descent > 0, got %f", metrics.Descent)
 			}
-			
+
 			// Ascent + Descent should approximately equal font size
 			expectedHeight := tt.fontSize
 			actualHeight := metrics.Ascent + metrics.Descent
@@ -68,9 +68,9 @@ func TestMeasureText(t *testing.T) {
 
 func TestMeasureTextEmpty(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	metrics := fm.MeasureText("", 16.0, fyne.TextStyle{}, 0)
-	
+
 	if metrics.Width != 0 {
 		t.Errorf("Expected width 0 for empty text, got %f", metrics.Width)
 	}
@@ -81,18 +81,18 @@ func TestMeasureTextEmpty(t *testing.T) {
 
 func TestMeasureTextWithWrapping(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	// Test with text that should wrap
 	text := "This is a long text that should wrap to multiple lines when constrained by width"
 	maxWidth := float32(200.0)
-	
+
 	metrics := fm.MeasureTextWithWrapping(text, 16.0, fyne.TextStyle{}, 0, maxWidth)
-	
+
 	// Width should not exceed maxWidth
 	if metrics.Width > maxWidth {
 		t.Errorf("Wrapped width (%f) should not exceed maxWidth (%f)", metrics.Width, maxWidth)
 	}
-	
+
 	// Height should be greater than single line height (indicating wrapping occurred)
 	singleLine := fm.MeasureText(text, 16.0, fyne.TextStyle{}, 0)
 	if singleLine.Width > maxWidth && metrics.Height <= singleLine.Height {
@@ -102,14 +102,14 @@ func TestMeasureTextWithWrapping(t *testing.T) {
 
 func TestMeasureTextWithWrappingShortText(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	// Test with text that fits on one line
 	text := "Short"
 	maxWidth := float32(500.0)
-	
+
 	metrics := fm.MeasureTextWithWrapping(text, 16.0, fyne.TextStyle{}, 0, maxWidth)
 	singleLine := fm.MeasureText(text, 16.0, fyne.TextStyle{}, 0)
-	
+
 	// Should be the same as single line measurement
 	if metrics.Width != singleLine.Width {
 		t.Errorf("Expected width %f, got %f", singleLine.Width, metrics.Width)
@@ -121,9 +121,9 @@ func TestMeasureTextWithWrappingShortText(t *testing.T) {
 
 func TestMeasureTextWithWrappingEmpty(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	metrics := fm.MeasureTextWithWrapping("", 16.0, fyne.TextStyle{}, 0, 200.0)
-	
+
 	if metrics.Width != 0 {
 		t.Errorf("Expected width 0 for empty text, got %f", metrics.Width)
 	}
@@ -134,7 +134,7 @@ func TestMeasureTextWithWrappingEmpty(t *testing.T) {
 
 func TestGetFontSize(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	tests := []struct {
 		tagName      string
 		expectedSize float32
@@ -149,7 +149,7 @@ func TestGetFontSize(t *testing.T) {
 		{"div", 16.0},
 		{"span", 16.0},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.tagName, func(t *testing.T) {
 			size := fm.GetFontSize(tt.tagName)
@@ -162,12 +162,12 @@ func TestGetFontSize(t *testing.T) {
 
 func TestGetTextStyle(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	tests := []struct {
-		tagName      string
-		expectedBold bool
+		tagName        string
+		expectedBold   bool
 		expectedItalic bool
-		expectedMono bool
+		expectedMono   bool
 	}{
 		{"h1", true, false, false},
 		{"h2", true, false, false},
@@ -181,7 +181,7 @@ func TestGetTextStyle(t *testing.T) {
 		{"p", false, false, false},
 		{"div", false, false, false},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.tagName, func(t *testing.T) {
 			style := fm.GetTextStyle(tt.tagName)
@@ -200,27 +200,27 @@ func TestGetTextStyle(t *testing.T) {
 
 func TestGetTextStyleFromNode(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	// Test simple node
 	t.Run("simple bold", func(t *testing.T) {
 		node := NewRenderNode(NodeTypeElement)
 		node.TagName = "strong"
-		
+
 		style := fm.GetTextStyleFromNode(node)
 		if !style.Bold {
 			t.Error("Expected bold style for strong element")
 		}
 	})
-	
+
 	// Test nested nodes
 	t.Run("nested bold and italic", func(t *testing.T) {
 		parent := NewRenderNode(NodeTypeElement)
 		parent.TagName = "strong"
-		
+
 		child := NewRenderNode(NodeTypeElement)
 		child.TagName = "em"
 		parent.AddChild(child)
-		
+
 		style := fm.GetTextStyleFromNode(child)
 		if !style.Bold {
 			t.Error("Expected bold style from parent strong element")
@@ -229,16 +229,16 @@ func TestGetTextStyleFromNode(t *testing.T) {
 			t.Error("Expected italic style from em element")
 		}
 	})
-	
+
 	// Test text node with styled parent
 	t.Run("text in bold parent", func(t *testing.T) {
 		parent := NewRenderNode(NodeTypeElement)
 		parent.TagName = "b"
-		
+
 		textNode := NewRenderNode(NodeTypeText)
 		textNode.Text = "Bold text"
 		parent.AddChild(textNode)
-		
+
 		style := fm.GetTextStyleFromNode(textNode)
 		if !style.Bold {
 			t.Error("Expected bold style inherited from parent")
@@ -262,16 +262,16 @@ func TestSplitIntoWords(t *testing.T) {
 		{"trailing space", "hello ", []string{"hello"}},
 		{"leading space", " hello", []string{"hello"}},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := splitIntoWords(tt.text)
-			
+
 			if len(result) != len(tt.expected) {
 				t.Errorf("Expected %d words, got %d", len(tt.expected), len(result))
 				return
 			}
-			
+
 			for i, word := range result {
 				if word != tt.expected[i] {
 					t.Errorf("Word %d: expected %q, got %q", i, tt.expected[i], word)
@@ -283,15 +283,15 @@ func TestSplitIntoWords(t *testing.T) {
 
 func TestFontMetricsConsistency(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	// Measure the same text multiple times - should get consistent results
 	text := "Test Text"
 	fontSize := float32(16.0)
 	style := fyne.TextStyle{}
-	
+
 	m1 := fm.MeasureText(text, fontSize, style, 0)
 	m2 := fm.MeasureText(text, fontSize, style, 0)
-	
+
 	if m1.Width != m2.Width {
 		t.Errorf("Inconsistent width measurements: %f vs %f", m1.Width, m2.Width)
 	}
@@ -302,14 +302,14 @@ func TestFontMetricsConsistency(t *testing.T) {
 
 func TestFontSizeScaling(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	text := "Test"
 	style := fyne.TextStyle{}
-	
+
 	// Measure at different font sizes
 	m1 := fm.MeasureText(text, 16.0, style, 0)
 	m2 := fm.MeasureText(text, 32.0, style, 0)
-	
+
 	// Larger font should have larger dimensions
 	if m2.Width <= m1.Width {
 		t.Errorf("32pt text width (%f) should be > 16pt text width (%f)", m2.Width, m1.Width)
@@ -317,7 +317,7 @@ func TestFontSizeScaling(t *testing.T) {
 	if m2.Height <= m1.Height {
 		t.Errorf("32pt text height (%f) should be > 16pt text height (%f)", m2.Height, m1.Height)
 	}
-	
+
 	// Ascent and descent should scale with font size
 	if m2.Ascent <= m1.Ascent {
 		t.Errorf("32pt ascent (%f) should be > 16pt ascent (%f)", m2.Ascent, m1.Ascent)

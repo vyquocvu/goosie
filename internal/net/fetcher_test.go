@@ -26,11 +26,11 @@ func TestFetchInvalidURL(t *testing.T) {
 
 func TestFetchWithContextCancellation(t *testing.T) {
 	fetcher := NewFetcher()
-	
+
 	// Create a context that's immediately cancelled
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	
+
 	_, err := fetcher.FetchWithContext(ctx, "https://example.com", nil)
 	if err == nil {
 		t.Error("Expected error for cancelled context, got nil")
@@ -39,14 +39,14 @@ func TestFetchWithContextCancellation(t *testing.T) {
 
 func TestFetchWithContextTimeout(t *testing.T) {
 	fetcher := NewFetcher()
-	
+
 	// Create a context with a very short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
-	
+
 	// Wait a moment to ensure timeout
 	time.Sleep(10 * time.Millisecond)
-	
+
 	_, err := fetcher.FetchWithContext(ctx, "https://example.com", nil)
 	if err == nil {
 		t.Error("Expected error for timed out context, got nil")

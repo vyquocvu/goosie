@@ -18,16 +18,16 @@ func NewSelectableText(text string) *SelectableText {
 		Entry: widget.NewMultiLineEntry(),
 		text:  text,
 	}
-	
+
 	// Set the text
 	st.Entry.SetText(text)
-	
+
 	// Make it appear as read-only but still selectable
 	st.Entry.Disable()
-	
+
 	// Configure appearance to look more like a label
 	st.Entry.Wrapping = fyne.TextWrapWord
-	
+
 	return st
 }
 

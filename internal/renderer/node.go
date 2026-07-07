@@ -248,7 +248,7 @@ func processTextNode(htmlNode *html.Node) *RenderNode {
 		return nil
 	}
 	node := NewRenderNode(NodeTypeText)
-	
+
 	var builder strings.Builder
 	inWhitespace := false
 	for _, r := range htmlNode.Data {
@@ -263,7 +263,7 @@ func processTextNode(htmlNode *html.Node) *RenderNode {
 		}
 	}
 	node.Text = builder.String()
-	
+
 	return node
 }
 
@@ -298,13 +298,13 @@ func (n *RenderNode) Clone() *RenderNode {
 	}
 
 	clone := &RenderNode{
-		ID:            n.ID,
-		Type:          n.Type,
-		TagName:       n.TagName,
-		Text:          n.Text,
-		Attrs:    make(map[string]string),
-		Styles:        make(map[string]string),
-		ImageData:     n.ImageData,
+		ID:        n.ID,
+		Type:      n.Type,
+		TagName:   n.TagName,
+		Text:      n.Text,
+		Attrs:     make(map[string]string),
+		Styles:    make(map[string]string),
+		ImageData: n.ImageData,
 	}
 
 	for k, v := range n.Attrs {

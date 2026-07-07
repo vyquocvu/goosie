@@ -2,7 +2,6 @@
 
 package e2e
 
-
 import (
 	"bytes"
 	"image/png"
@@ -49,7 +48,7 @@ func TestOnlinePagesRendering(t *testing.T) {
 			req, err := http.NewRequest("GET", p.URL, nil)
 			require.NoError(t, err)
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-			
+
 			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Do(req)
 			if err != nil {

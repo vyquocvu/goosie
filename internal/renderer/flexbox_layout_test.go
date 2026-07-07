@@ -200,7 +200,7 @@ func TestFlexLayoutFlexGrow(t *testing.T) {
 	// item2 should get 2x the extra space compared to item1
 	// Their final widths should reflect this ratio when starting from 0 base size
 	if item1.Box.Width <= 0 || item2.Box.Width <= 0 {
-		t.Errorf("both items should have positive widths (item1: %f, item2: %f)", 
+		t.Errorf("both items should have positive widths (item1: %f, item2: %f)",
 			item1.Box.Width, item2.Box.Width)
 	}
 

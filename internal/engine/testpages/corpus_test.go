@@ -9,13 +9,14 @@ import (
 
 func TestListIncludesLongArticleAndDocumentationPages(t *testing.T) {
 	pages := List()
-	if len(pages) != 2 {
-		t.Fatalf("List() returned %d pages, want 2", len(pages))
+	if len(pages) != 3 {
+		t.Fatalf("List() returned %d pages, want 3", len(pages))
 	}
 
 	want := map[string]string{
 		"long_article":  "Long Article",
 		"documentation": "Documentation Page",
+		"image_heavy":   "Image-Heavy Page",
 	}
 	for _, page := range pages {
 		title, ok := want[page.Name]
@@ -103,6 +104,28 @@ func TestDocumentationPageExercisesReferenceLayout(t *testing.T) {
 	}
 	if !strings.Contains(page.CSS, ".docs-shell") {
 		t.Fatalf("documentation CSS missing docs shell selector")
+	}
+}
+
+func TestImageHeavyPageExercisesReferenceLayout(t *testing.T) {
+	page, ok := Get("image_heavy")
+	if !ok {
+		t.Fatal("Get(image_heavy) did not find page")
+	}
+
+	for _, fragment := range []string{
+		`<div class="gallery"`,
+		`<div class="gallery-item"`,
+		`<img src="data:image/png;base64,`,
+		`alt="Blue Image"`,
+		`alt="Red Image"`,
+	} {
+		if !strings.Contains(page.HTML, fragment) {
+			t.Fatalf("image_heavy HTML missing %q", fragment)
+		}
+	}
+	if !strings.Contains(page.CSS, ".gallery") {
+		t.Fatalf("image_heavy CSS missing gallery selector")
 	}
 }
 
