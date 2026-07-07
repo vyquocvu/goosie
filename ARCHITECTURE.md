@@ -4,6 +4,27 @@
 
 Goosie's browser architecture uses a modern multi-tree rendering system that separates concerns between DOM parsing, styling, layout computation, and painting. This design enables maintainable, testable, and performant rendering with support for incremental updates.
 
+## Navigation ID Flow
+
+Every page load receives a monotonic navigation ID from `internal/engine/navigation`. The browser shell uses a `Scheduler` to:
+
+1. Cancel the previous load context when a new navigation starts
+2. Assign a unique `navigation.ID` to the new load
+3. Attach the ID to the load's `context.Context` for downstream phases
+4. Reject stale load callbacks when a superseded navigation completes
+
+```
+User enters URL
+  -> Scheduler.Begin(url)
+       -> navigation ID assigned
+       -> previous context cancelled
+  -> Fetch (ctx carries navigation ID)
+  -> Parse / Render
+  -> UI update only if Scheduler.IsActive(id)
+```
+
+This keeps navigation tracing UI-independent and prepares phase-level metrics in Milestone 0.3.
+
 ## Component Flow
 
 ```

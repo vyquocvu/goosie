@@ -212,7 +212,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.3 Add phase-level metrics
 
-- [ ] Assign a navigation ID to every load.
+- [x] Assign a navigation ID to every load.
 - [ ] Record DNS, connection, first byte, body read, parse, style, layout, paint, raster, and present durations.
 - [ ] Record node, rule, selector, box, fragment, display item, tile, and image counts.
 - [ ] Record bytes downloaded, decoded image bytes, cache hits, and cache misses.

@@ -246,6 +246,7 @@ The browser demonstrates web functionality by:
 
 ### Project Structure
 
+- **internal/engine/navigation**: Monotonic navigation IDs, cancellable load contexts, and stale-callback rejection
 - **internal/net**: Async HTTP client with context support for fetching web pages
 - **internal/dom**: HTML parser for extracting content
 - **internal/renderer**: Canvas-based HTML renderer with layout engine
