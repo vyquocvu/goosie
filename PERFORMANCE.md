@@ -279,3 +279,50 @@ go tool pprof mem.prof
 ---
 
 *Last updated: July 2026*
+
+## Running Benchmarks and Profiling
+
+The repository includes a script to simplify running benchmarks, capturing profiles, and comparing results.
+
+### Using `scripts/bench.sh`
+
+The `bench.sh` script provides the following commands:
+
+*   **`run [package]`**: Runs all `testing.B` benchmarks in the specified package (or `./...` by default) with `-benchmem` enabled to report allocations.
+    ```bash
+    ./scripts/bench.sh run ./internal/renderer
+    ```
+
+*   **`suite`**: Runs the full local performance suite across the entire repository and saves the output to `perf-suite.txt`.
+    ```bash
+    ./scripts/bench.sh suite
+    ```
+
+*   **`profile-cpu <package> [regex]`**: Runs benchmarks matching the regex and captures a CPU profile to `cpu.prof`.
+    ```bash
+    ./scripts/bench.sh profile-cpu ./internal/renderer ViewportScroll
+    # To view: go tool pprof cpu.prof
+    ```
+
+*   **`profile-mem <package> [regex]`**: Runs benchmarks matching the regex and captures a memory profile to `mem.prof`.
+    ```bash
+    ./scripts/bench.sh profile-mem ./internal/renderer ViewportScroll
+    # To view: go tool pprof mem.prof
+    ```
+
+*   **`trace <package> [regex]`**: Captures a runtime execution trace for scenario benchmarks to `trace.out`.
+    ```bash
+    ./scripts/bench.sh trace ./internal/engine/testpages BenchmarkGetLongArticle
+    # To view: go tool trace trace.out
+    ```
+
+*   **`compare <old.txt> <new.txt>`**: Compares two benchmark result files using `benchstat`. This is essential for verifying performance improvements or regressions before merging. (Automatically installs `benchstat` if missing).
+    ```bash
+    # On main branch
+    ./scripts/bench.sh suite
+    mv perf-suite.txt main-perf.txt
+
+    # On feature branch
+    ./scripts/bench.sh suite
+    ./scripts/bench.sh compare main-perf.txt perf-suite.txt
+    ```

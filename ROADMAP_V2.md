@@ -226,12 +226,12 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.4 Add benchmark and profiling commands
 
-- [ ] Add package-level `testing.B` benchmarks.
-- [ ] Add `-benchmem` documentation.
-- [ ] Add optional CPU and heap profile output.
-- [ ] Add runtime trace capture for scenario benchmarks.
-- [ ] Add a command that runs the full local performance suite.
-- [ ] Add a benchmark comparison script using `benchstat`.
+- [x] Add package-level `testing.B` benchmarks.
+- [x] Add `-benchmem` documentation.
+- [x] Add optional CPU and heap profile output.
+- [x] Add runtime trace capture for scenario benchmarks.
+- [x] Add a command that runs the full local performance suite.
+- [x] Add a benchmark comparison script using `benchstat`.
 
 **Acceptance criteria**
 
