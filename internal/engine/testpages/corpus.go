@@ -34,6 +34,8 @@ var pages = []Page{
 	newPage("table_heavy", "Table-Heavy Data Grid", tableHeavyHTML, tableHeavyCSS),
 	newPage("form_heavy", "Form-Heavy Settings Page", formHeavyHTML, formHeavyCSS),
 	newPage("image_heavy", "Image-Heavy Page", imageHeavyHTML, imageHeavyCSS),
+	newPage("scrolling_short", "Short Document", scrollingShortHTML, scrollingShortCSS),
+	newPage("scrolling_long", "Scrolling-Long Document Benchmark", scrollingLongHTML, scrollingLongCSS),
 }
 
 func newPage(name, title, html, css string) Page {
@@ -589,4 +591,133 @@ body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #111
 .gallery-item img { width: 80px; height: 80px; border-radius: 4px; object-fit: cover; }
 .gallery-item p.label { margin: 8px 0 0; font-size: 0.85rem; font-weight: 500; color: #374151; }
 .gallery-footer { padding: 24px 32px; background: #f3f4f6; text-align: center; font-size: 0.85rem; color: #6b7280; margin-top: 48px; border-top: 1px solid #e5e7eb; }
+`
+
+const scrollingShortHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Short Document</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<header class="page-header">
+<h1>Short Document</h1>
+</header>
+<main>
+<article>
+<section>
+<h2>Summary</h2>
+<p>This short document fits within a single viewport at standard sizes. It is designed for scroll-benchmark scenarios where the content does not overflow the visible area.</p>
+<p>Scrolling a page whose content fits the viewport should produce no visible movement and no new rendering work. This fixture makes that behavior measurable.</p>
+</section>
+<section>
+<h2>Specifications</h2>
+<ul>
+<li>Total height below 600px at default font size</li>
+<li>No images, no external resources</li>
+<li>Stable deterministic content</li>
+</ul>
+</section>
+</article>
+</main>
+<footer class="page-footer">
+<p>Goosie deterministic short document fixture.</p>
+</footer>
+</body>
+</html>`
+
+const scrollingShortCSS = `
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: #fff; }
+.page-header { padding: 16px 24px; background: #f3f4f6; }
+.page-header h1 { margin: 0; font-size: 1.5rem; }
+main { max-width: 640px; margin: 0 auto; padding: 16px 24px; }
+section { margin-bottom: 16px; }
+h2 { margin: 0 0 8px; font-size: 1.2rem; }
+p { margin: 0 0 8px; line-height: 1.5; }
+ul { margin: 0 0 0 20px; padding: 0; }
+li { margin-bottom: 4px; }
+.page-footer { padding: 12px 24px; background: #f3f4f6; text-align: center; font-size: 0.85rem; color: #6b7280; }
+`
+
+const scrollingLongHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scrolling-Long Document Benchmark</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<header class="doc-header">
+<h1>Scrolling-Long Document Benchmark</h1>
+<p class="subtitle">A very long deterministic document for scroll-performance measurements across 50+ content sections.</p>
+</header>
+<main class="doc-body">
+<section id="sect-001" class="content-block"><h2>Section 001</h2><p>This is the first of many repeated sections. Each section contains a heading and a short paragraph so the page reaches a height that requires scrolling on any standard viewport.</p></section>
+<section id="sect-002" class="content-block"><h2>Section 002</h2><p>Benchmark engines use long documents to measure scroll latency, display-list caching, viewport culling, and tile eviction policies under sustained scrolling.</p></section>
+<section id="sect-003" class="content-block"><h2>Section 003</h2><p>Each section varies text slightly to prevent content-fingerprint deduplication from hiding traversal or layout costs during measurement.</p></section>
+<section id="sect-004" class="content-block"><h2>Section 004</h2><p>Deterministic fixtures make scroll benchmarks reproducible across machines and Go versions without requiring network access or generated content.</p></section>
+<section id="sect-005" class="content-block"><h2>Section 005</h2><p>Viewport-based renderers built display lists from content nodes and reuse them across frames when no DOM, style, or layout changes occur.</p></section>
+<section id="sect-006" class="content-block"><h2>Section 006</h2><p>Scrolling an unchanged page should require no style resolution, no layout recalculation, and no display-list rebuild in a well-architected engine.</p></section>
+<section id="sect-007" class="content-block"><h2>Section 007</h2><p>Long pages stress the renderers ability to skip off-screen content during display-list traversal and viewport-culling phases.</p></section>
+<section id="sect-008" class="content-block"><h2>Section 008</h2><p>Repeated sections with consistent structure allow profilers to identify allocation hot spots in layout and paint code paths.</p></section>
+<section id="sect-009" class="content-block"><h2>Section 009</h2><p>A page should not become slower to scroll as its content grows when the engine correctly separates retained state from per-frame work.</p></section>
+<section id="sect-010" class="content-block"><h2>Section 010</h2><p>Benchmarks using this fixture should report allocations with benchmem and record both timing and allocation output for PR reviews.</p></section>
+<section id="sect-011" class="content-block"><h2>Section 011</h2><p>Memory behavior is easier to review when the corpus has explicit byte counts and stable section counts for every page in the suite.</p></section>
+<section id="sect-012" class="content-block"><h2>Section 012</h2><p>Display list builders must generate paint commands for every visible layout box without traversing off-screen subtrees redundantly.</p></section>
+<section id="sect-013" class="content-block"><h2>Section 013</h2><p>Text wrapping and line breaking are among the most allocation-intensive operations in block-layout engines and benefit from stable test fixtures.</p></section>
+<section id="sect-014" class="content-block"><h2>Section 014</h2><p>CSS cascade and selector matching for many identical elements can be benchmarked with this fixture by varying the selector specificity patterns.</p></section>
+<section id="sect-015" class="content-block"><h2>Section 015</h2><p>Repeated navigation between different sections of a long page should not leak layout or display-list memory across navigations.</p></section>
+<section id="sect-016" class="content-block"><h2>Section 016</h2><p>The engine should treat scrolling as a viewport-only operation that reuses the existing display list without re-entering style or layout phases.</p></section>
+<section id="sect-017" class="content-block"><h2>Section 017</h2><p>Renderers that cache display lists must still correctly paint elements that cross viewport boundaries as the user scrolls through the document.</p></section>
+<section id="sect-018" class="content-block"><h2>Section 018</h2><p>Text content in this fixture uses common English prose without special Unicode ranges, keeping font shaping benchmarks focused on Latin text.</p></section>
+<section id="sect-019" class="content-block"><h2>Section 019</h2><p>Block layout for repeated section elements exercises the engines ability to calculate vertical margins, padding, and stacking efficiently.</p></section>
+<section id="sect-020" class="content-block"><h2>Section 020</h2><p>Incremental layout algorithms mark subtrees as dirty and reflow only the affected region instead of recomputing the entire document tree.</p></section>
+<section id="sect-021" class="content-block"><h2>Section 021</h2><p>Section identifiers with zero-padded numbers let automated tests verify that every section in the fixture was loaded and processed correctly.</p></section>
+<section id="sect-022" class="content-block"><h2>Section 022</h2><p>DOM traversal benchmarks measure how quickly the parser can build a tree for pages at the upper end of the supported document size.</p></section>
+<section id="sect-023" class="content-block"><h2>Section 023</h2><p>Selector matching performance for long documents depends on rule bucketing strategies that avoid scanning all rules for every element.</p></section>
+<section id="sect-024" class="content-block"><h2>Section 024</h2><p>Canvas renderers that use viewport culling still need to compute accurate bounding boxes for every layout box in the display list.</p></section>
+<section id="sect-025" class="content-block"><h2>Section 025</h2><p>Hit testing on long documents must navigate the layout tree efficiently without allocating intermediate data structures for off-screen nodes.</p></section>
+<section id="sect-026" class="content-block"><h2>Section 026</h2><p>This fixture provides a repeatable workload for profiling CPU usage during the full rendering pipeline from HTML bytes to paint commands.</p></section>
+<section id="sect-027" class="content-block"><h2>Section 027</h2><p>Heap profiles captured while rendering this document help identify hot allocation sites that should be optimized for the v2 engine targets.</p></section>
+<section id="sect-028" class="content-block"><h2>Section 028</h2><p>Repeated content blocks with uniform structure allow benchmark comparisons between the current pointer-based DOM and a future compact index-based store.</p></section>
+<section id="sect-029" class="content-block"><h2>Section 029</h2><p>Garbage collection overhead during repeated navigation can be isolated when the fixture content, size, and structure remain constant across runs.</p></section>
+<section id="sect-030" class="content-block"><h2>Section 030</h2><p>Display list builders should not allocate per-frame scratch memory for text measurement if font metrics and line dimensions are cached.</p></section>
+<section id="sect-031" class="content-block"><h2>Section 031</h2><p>Scroll benchmarks that simulate rapid up-and-down movement measure the effectiveness of tile prefetch and eviction policies in the compositor.</p></section>
+<section id="sect-032" class="content-block"><h2>Section 032</h2><p>Avoiding allocations in the scroll-hot path is critical for maintaining consistent frame timing on lower-end hardware without GPU acceleration.</p></section>
+<section id="sect-033" class="content-block"><h2>Section 033</h2><p>Style resolution for pages with many identical elements benefits from computed-style deduplication when inherited property groups match exactly.</p></section>
+<section id="sect-034" class="content-block"><h2>Section 034</h2><p>This fixture builds on the patterns established by the long-article corpus page but scales to a size that forces the scroll-bar to become very small.</p></section>
+<section id="sect-035" class="content-block"><h2>Section 035</h2><p>Layout intrinsic-size caching reduces repeated measurement work for elements whose dimensions are stable across style recalculations.</p></section>
+<section id="sect-036" class="content-block"><h2>Section 036</h2><p>Block containers that contain only inline content create anonymous line boxes whose dimensions must be computed during layout processing.</p></section>
+<section id="sect-037" class="content-block"><h2>Section 037</h2><p>The number of sections in this fixture was chosen to approximate a mid-length documentation article of roughly 8 to 12 printed pages.</p></section>
+<section id="sect-038" class="content-block"><h2>Section 038</h2><p>Rendering pipeline benchmarks should measure each phase independently to identify whether parsing, style, layout, or paint dominates the frame cost.</p></section>
+<section id="sect-039" class="content-block"><h2>Section 039</h2><p>Text-heavy pages like this one stress the line-breaking algorithm more than image-heavy pages where replaced elements dominate layout cost.</p></section>
+<section id="sect-040" class="content-block"><h2>Section 040</h2><p>Pseudo-class selectors that depend on element position such as nth-child can be benchmarked against the uniform structure of this fixture.</p></section>
+<section id="sect-041" class="content-block"><h2>Section 041</h2><p>Each section heading is an h2 element which creates a predictable block formatting context that layout engines can optimize during flow processing.</p></section>
+<section id="sect-042" class="content-block"><h2>Section 042</h2><p>Display list serialization for developer tools can be tested by comparing the before-and-after state of commands for a fixed viewport region.</p></section>
+<section id="sect-043" class="content-block"><h2>Section 043</h2><p>Document fixture diversity across short medium and long sizes allows performance CI to detect regressions at every content-length threshold.</p></section>
+<section id="sect-044" class="content-block"><h2>Section 044</h2><p>When the engine introduces a new layout feature such as flexbox or grid support this fixture provides a baseline for regression testing.</p></section>
+<section id="sect-045" class="content-block"><h2>Section 045</h2><p>Repeated content sections help validate that the render tree cloning path does not introduce quadratic memory growth for deeply nested structures.</p></section>
+<section id="sect-046" class="content-block"><h2>Section 046</h2><p>This fixture is intentionally free of script tags because script execution benchmarks belong in a separate JavaScript-light corpus fixture.</p></section>
+<section id="sect-047" class="content-block"><h2>Section 047</h2><p>Golden rendering tests for the scrolling-long page at fixed viewport sizes can detect unintended visual regressions in the layout engine.</p></section>
+<section id="sect-048" class="content-block"><h2>Section 048</h2><p>The page uses semantic HTML elements such as header main section and footer to ensure the fixture exercises the full element-detection logic.</p></section>
+<section id="sect-049" class="content-block"><h2>Section 049</h2><p>Padding and margin values in the accompanying CSS create enough inter-element space to make scroll-distance calculations predictable.</p></section>
+<section id="sect-050" class="content-block"><h2>Section 050</h2><p>This is the final content section. The footer that follows provides a stable terminal marker for end-of-document detection in tests and parsers.</p></section>
+</main>
+<footer class="doc-footer">
+<p>End of scrolling-long document. Confirmed 050 sections present.</p>
+</footer>
+</body>
+</html>`
+
+const scrollingLongCSS = `
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1e293b; background: #ffffff; }
+.doc-header { padding: 24px 32px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+.doc-header h1 { margin: 0 0 6px; font-size: 1.6rem; color: #0f172a; }
+.subtitle { margin: 0; color: #64748b; font-size: 0.95rem; }
+.doc-body { max-width: 720px; margin: 0 auto; padding: 16px 32px 48px; }
+.content-block { margin-bottom: 2px; padding: 8px 0; }
+.content-block h2 { margin: 0 0 6px; font-size: 1.1rem; color: #1e293b; }
+.content-block p { margin: 0; line-height: 1.55; color: #475569; font-size: 0.92rem; }
+.doc-footer { padding: 20px 32px; background: #f1f5f9; text-align: center; font-size: 0.85rem; color: #64748b; border-top: 1px solid #e2e8f0; }
 `

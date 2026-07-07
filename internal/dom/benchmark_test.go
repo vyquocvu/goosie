@@ -36,6 +36,38 @@ func BenchmarkParseBodyTextImageHeavy(b *testing.B) {
 	benchmarkParseBodyText(b, page.HTML)
 }
 
+func BenchmarkParseBodyTextScrollingShort(b *testing.B) {
+	page, ok := testpages.Get("scrolling_short")
+	if !ok {
+		b.Fatal("scrolling_short page not found")
+	}
+	benchmarkParseBodyText(b, page.HTML)
+}
+
+func BenchmarkParseBodyTextScrollingLong(b *testing.B) {
+	page, ok := testpages.Get("scrolling_long")
+	if !ok {
+		b.Fatal("scrolling_long page not found")
+	}
+	benchmarkParseBodyText(b, page.HTML)
+}
+
+func BenchmarkParseBodyHTMLScrollingShort(b *testing.B) {
+	page, ok := testpages.Get("scrolling_short")
+	if !ok {
+		b.Fatal("scrolling_short page not found")
+	}
+	benchmarkParseBodyHTML(b, page.HTML)
+}
+
+func BenchmarkParseBodyHTMLScrollingLong(b *testing.B) {
+	page, ok := testpages.Get("scrolling_long")
+	if !ok {
+		b.Fatal("scrolling_long page not found")
+	}
+	benchmarkParseBodyHTML(b, page.HTML)
+}
+
 func BenchmarkParseBodyHTMLSmall(b *testing.B) { benchmarkParseBodyHTML(b, smallHTML) }
 
 func BenchmarkParseBodyHTMLMedium(b *testing.B) { benchmarkParseBodyHTML(b, mediumHTML) }
