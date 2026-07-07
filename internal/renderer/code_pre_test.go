@@ -3,7 +3,7 @@ package renderer
 import (
 	"strings"
 	"testing"
-	
+
 	"golang.org/x/net/html"
 )
 
@@ -30,17 +30,17 @@ func TestRenderCodeElement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	
+
 	codeHTMLNode := findElementByTag(doc, "code")
 	if codeHTMLNode == nil {
 		t.Fatal("Code HTML node not found")
 	}
-	
+
 	tree := BuildRenderTree(codeHTMLNode)
 	if tree == nil {
 		t.Fatal("BuildRenderTree returned nil")
 	}
-	
+
 	if tree.TagName != "code" {
 		t.Errorf("Expected tag name 'code', got '%s'", tree.TagName)
 	}
@@ -54,21 +54,21 @@ func TestRenderPreElement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	
+
 	preHTMLNode := findElementByTag(doc, "pre")
 	if preHTMLNode == nil {
 		t.Fatal("Pre HTML node not found")
 	}
-	
+
 	tree := BuildRenderTree(preHTMLNode)
 	if tree == nil {
 		t.Fatal("BuildRenderTree returned nil")
 	}
-	
+
 	if tree.TagName != "pre" {
 		t.Errorf("Expected tag name 'pre', got '%s'", tree.TagName)
 	}
-	
+
 	// Pre should be a block element
 	if !tree.IsBlock() {
 		t.Error("Pre element should be a block element")
@@ -81,21 +81,21 @@ func TestRenderBlockquoteElement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	
+
 	blockquoteHTMLNode := findElementByTag(doc, "blockquote")
 	if blockquoteHTMLNode == nil {
 		t.Fatal("Blockquote HTML node not found")
 	}
-	
+
 	tree := BuildRenderTree(blockquoteHTMLNode)
 	if tree == nil {
 		t.Fatal("BuildRenderTree returned nil")
 	}
-	
+
 	if tree.TagName != "blockquote" {
 		t.Errorf("Expected tag name 'blockquote', got '%s'", tree.TagName)
 	}
-	
+
 	// Blockquote should be a block element
 	if !tree.IsBlock() {
 		t.Error("Blockquote element should be a block element")
@@ -104,13 +104,13 @@ func TestRenderBlockquoteElement(t *testing.T) {
 
 func TestFontMetricsCodeStyle(t *testing.T) {
 	fm := NewFontMetrics(16.0)
-	
+
 	// Test code element style
 	codeStyle := fm.GetTextStyle("code")
 	if !codeStyle.Monospace {
 		t.Error("Code element should have monospace style")
 	}
-	
+
 	// Test pre element style
 	preStyle := fm.GetTextStyle("pre")
 	if !preStyle.Monospace {
@@ -120,24 +120,24 @@ func TestFontMetricsCodeStyle(t *testing.T) {
 
 func TestCanvasRendererCodeElements(t *testing.T) {
 	cr := NewCanvasRenderer(800, 600)
-	
+
 	// Test rendering code element
 	htmlContent := `<code>const x = 42;</code>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	
+
 	codeHTMLNode := findElementByTag(doc, "code")
 	if codeHTMLNode == nil {
 		t.Fatal("Code HTML node not found")
 	}
-	
+
 	tree := BuildRenderTree(codeHTMLNode)
 	if tree == nil {
 		t.Fatal("BuildRenderTree returned nil")
 	}
-	
+
 	// Render should not panic
 	obj := cr.Render(tree)
 	if obj == nil {
@@ -147,7 +147,7 @@ func TestCanvasRendererCodeElements(t *testing.T) {
 
 func TestCanvasRendererPreElements(t *testing.T) {
 	cr := NewCanvasRenderer(800, 600)
-	
+
 	// Test rendering pre element
 	htmlContent := `<pre>Line 1
 Line 2</pre>`
@@ -155,17 +155,17 @@ Line 2</pre>`
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	
+
 	preHTMLNode := findElementByTag(doc, "pre")
 	if preHTMLNode == nil {
 		t.Fatal("Pre HTML node not found")
 	}
-	
+
 	tree := BuildRenderTree(preHTMLNode)
 	if tree == nil {
 		t.Fatal("BuildRenderTree returned nil")
 	}
-	
+
 	// Render should not panic
 	obj := cr.Render(tree)
 	if obj == nil {
@@ -175,24 +175,24 @@ Line 2</pre>`
 
 func TestCanvasRendererBlockquoteElements(t *testing.T) {
 	cr := NewCanvasRenderer(800, 600)
-	
+
 	// Test rendering blockquote element
 	htmlContent := `<blockquote>This is a quote</blockquote>`
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	
+
 	blockquoteHTMLNode := findElementByTag(doc, "blockquote")
 	if blockquoteHTMLNode == nil {
 		t.Fatal("Blockquote HTML node not found")
 	}
-	
+
 	tree := BuildRenderTree(blockquoteHTMLNode)
 	if tree == nil {
 		t.Fatal("BuildRenderTree returned nil")
 	}
-	
+
 	// Render should not panic
 	obj := cr.Render(tree)
 	if obj == nil {

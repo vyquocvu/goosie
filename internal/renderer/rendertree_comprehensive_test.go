@@ -11,10 +11,10 @@ import (
 // with 50 test cases covering various HTML structures, edge cases, and scenarios
 func TestBuildRenderTree_ComprehensiveSuite(t *testing.T) {
 	tests := []struct {
-		name             string
-		html             string
-		validate         func(t *testing.T, tree *RenderNode)
-		expectNil        bool
+		name              string
+		html              string
+		validate          func(t *testing.T, tree *RenderNode)
+		expectNil         bool
 		skipChildrenCheck bool
 	}{
 		// Basic HTML Elements (1-10)
@@ -586,7 +586,7 @@ func TestBuildRenderTree_EdgeCases(t *testing.T) {
 	t.Run("comment node", func(t *testing.T) {
 		htmlContent := "<!-- This is a comment --><div>Content</div>"
 		doc, _ := html.Parse(strings.NewReader(htmlContent))
-		
+
 		var commentNode *html.Node
 		var findComment func(*html.Node)
 		findComment = func(n *html.Node) {
@@ -613,7 +613,7 @@ func TestBuildRenderTree_EdgeCases(t *testing.T) {
 	t.Run("doctype node", func(t *testing.T) {
 		htmlContent := "<!DOCTYPE html><div>Content</div>"
 		doc, _ := html.Parse(strings.NewReader(htmlContent))
-		
+
 		var doctypeNode *html.Node
 		var findDoctype func(*html.Node)
 		findDoctype = func(n *html.Node) {

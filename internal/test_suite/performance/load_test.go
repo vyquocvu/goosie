@@ -25,7 +25,7 @@ func generateLargeHTML(numItems int) string {
 func BenchmarkRenderLargeHTML(b *testing.B) {
 	testApp := test.NewApp()
 	defer testApp.Quit()
-	
+
 	html := generateLargeHTML(1000)
 	r := renderer.NewRenderer(800, 600)
 

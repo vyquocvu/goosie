@@ -45,7 +45,7 @@ func (h *DOMHelper) CreateDocument(bodyChildren ...*html.Node) *html.Node {
 	doc := &html.Node{Type: html.DocumentNode}
 	htmlNode := h.CreateElement("html", nil)
 	doc.AppendChild(htmlNode)
-	
+
 	body := h.CreateElement("body", nil)
 	htmlNode.AppendChild(body)
 

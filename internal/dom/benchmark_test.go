@@ -2,6 +2,8 @@ package dom
 
 import (
 	"testing"
+
+	"github.com/vyquocvu/goosie/internal/engine/testpages"
 )
 
 func BenchmarkParseBodyTextSmall(b *testing.B) { benchmarkParseBodyText(b, smallHTML) }
@@ -10,11 +12,43 @@ func BenchmarkParseBodyTextMedium(b *testing.B) { benchmarkParseBodyText(b, medi
 
 func BenchmarkParseBodyTextLarge(b *testing.B) { benchmarkParseBodyText(b, longFormHTML) }
 
+func BenchmarkParseBodyTextTableHeavy(b *testing.B) {
+	page, ok := testpages.Get("table_heavy")
+	if !ok {
+		b.Fatal("table_heavy page not found")
+	}
+	benchmarkParseBodyText(b, page.HTML)
+}
+
+func BenchmarkParseBodyTextFormHeavy(b *testing.B) {
+	page, ok := testpages.Get("form_heavy")
+	if !ok {
+		b.Fatal("form_heavy page not found")
+	}
+	benchmarkParseBodyText(b, page.HTML)
+}
+
 func BenchmarkParseBodyHTMLSmall(b *testing.B) { benchmarkParseBodyHTML(b, smallHTML) }
 
 func BenchmarkParseBodyHTMLMedium(b *testing.B) { benchmarkParseBodyHTML(b, mediumHTML) }
 
 func BenchmarkParseBodyHTMLLarge(b *testing.B) { benchmarkParseBodyHTML(b, longFormHTML) }
+
+func BenchmarkParseBodyHTMLTableHeavy(b *testing.B) {
+	page, ok := testpages.Get("table_heavy")
+	if !ok {
+		b.Fatal("table_heavy page not found")
+	}
+	benchmarkParseBodyHTML(b, page.HTML)
+}
+
+func BenchmarkParseBodyHTMLFormHeavy(b *testing.B) {
+	page, ok := testpages.Get("form_heavy")
+	if !ok {
+		b.Fatal("form_heavy page not found")
+	}
+	benchmarkParseBodyHTML(b, page.HTML)
+}
 
 func BenchmarkGetElementByIDFound(b *testing.B) {
 	p := NewParser()

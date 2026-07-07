@@ -2,15 +2,15 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/testutil"
+	"log"
+	"os"
+	"path/filepath"
 )
 
 var (
@@ -157,7 +157,7 @@ func testPhase3() {
 		</body>
 		</html>
 	`
-	
+
 	// Create renderer and build layout
 	r := renderer.NewRenderer(800, 600)
 	layoutRoot, err := r.RenderHTML(html)
@@ -171,7 +171,7 @@ func testPhase3() {
 	// This is a simplified check assuming the renderer correctly laid out the items
 	if layoutRoot != nil {
 		report("Layout Engine", true, "Layout tree generated successfully")
-		
+
 		// In a real deep verify, we would check:
 		// - Container width is 500
 		// - Item widths are 250 (since flex: 1 and count is 2)

@@ -2,7 +2,6 @@
 
 package e2e
 
-
 import (
 	"net/http"
 	"testing"

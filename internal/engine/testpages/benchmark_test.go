@@ -23,11 +23,47 @@ func BenchmarkGetDocumentation(b *testing.B) {
 	benchmarkGet(b, "documentation")
 }
 
+func BenchmarkGetTableHeavy(b *testing.B) {
+	benchmarkGet(b, "table_heavy")
+}
+
+func BenchmarkGetFormHeavy(b *testing.B) {
+	benchmarkGet(b, "form_heavy")
+}
+
 func BenchmarkGetContextDocumentation(b *testing.B) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		page, err := GetContext(ctx, "documentation")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if page.Name == "" {
+			b.Fatal("empty page")
+		}
+	}
+}
+
+func BenchmarkGetContextTableHeavy(b *testing.B) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		page, err := GetContext(ctx, "table_heavy")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if page.Name == "" {
+			b.Fatal("empty page")
+		}
+	}
+}
+
+func BenchmarkGetContextFormHeavy(b *testing.B) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		page, err := GetContext(ctx, "form_heavy")
 		if err != nil {
 			b.Fatal(err)
 		}

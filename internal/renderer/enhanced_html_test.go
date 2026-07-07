@@ -195,7 +195,7 @@ func TestLinkClickability(t *testing.T) {
 		</html>
 	`
 	r := NewRenderer(800, 600)
-	
+
 	r.SetNavigationCallback(func(url string) {
 		if url != "https://example.com" {
 			t.Errorf("Expected URL https://example.com, got %s", url)
@@ -252,7 +252,7 @@ func TestCSSRenderingWithColors(t *testing.T) {
 	`
 	r := NewRenderer(800, 600)
 	r.SetCurrentURL("https://example.com")
-	
+
 	canvasObj, err := r.RenderHTML(htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
@@ -281,7 +281,7 @@ func TestCSSRenderingWithColors(t *testing.T) {
 	// Check if canvas.Text objects with colors are present
 	foundRed := false
 	foundBlue := false
-	
+
 	for _, obj := range container.Objects {
 		if text, ok := obj.(*canvas.Text); ok {
 			// Check for red color
@@ -323,7 +323,7 @@ func TestCSSRenderingWithFontSize(t *testing.T) {
 	`
 	r := NewRenderer(800, 600)
 	r.SetCurrentURL("https://example.com")
-	
+
 	canvasObj, err := r.RenderHTML(htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
@@ -336,7 +336,7 @@ func TestCSSRenderingWithFontSize(t *testing.T) {
 
 	foundLarge := false
 	foundSmall := false
-	
+
 	for _, obj := range container.Objects {
 		if text, ok := obj.(*canvas.Text); ok {
 			if text.TextSize == 24.0 {

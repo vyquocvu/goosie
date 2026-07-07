@@ -238,8 +238,6 @@ func TestFloatsAndWrapping(t *testing.T) {
 	boxFloat := le.GetLayoutBox(floatNode.ID)
 	boxP := le.GetLayoutBox(pNode.ID)
 
-
-
 	// Float is placed at childX (8 UA body margin)
 	if boxFloat.Box.X != 8 {
 		t.Errorf("Float X = %f; want 8", boxFloat.Box.X)
