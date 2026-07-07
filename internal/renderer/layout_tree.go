@@ -31,63 +31,63 @@ type Rect struct {
 // LayoutBox represents a node in the layout tree
 // Each LayoutBox corresponds to a RenderNode and contains computed layout information
 type LayoutBox struct {
-	NodeID   int64       // ID of the corresponding RenderNode
-	Box      Rect        // Computed box dimensions and position
-	Display  DisplayType // Display type (block, inline, none)
+	NodeID   int64        // ID of the corresponding RenderNode
+	Box      Rect         // Computed box dimensions and position
+	Display  DisplayType  // Display type (block, inline, none)
 	Children []*LayoutBox // Child layout boxes
-	
+
 	// Padding (for future CSS support)
 	PaddingTop    float32
 	PaddingRight  float32
 	PaddingBottom float32
 	PaddingLeft   float32
-	
+
 	// Margin (for future CSS support)
 	MarginTop    float32
 	MarginRight  float32
 	MarginBottom float32
 	MarginLeft   float32
-	
+
 	// Border (for box model support)
 	BorderTopWidth    float32
 	BorderRightWidth  float32
 	BorderBottomWidth float32
 	BorderLeftWidth   float32
-	
+
 	BorderTopStyle    string
 	BorderRightStyle  string
 	BorderBottomStyle string
 	BorderLeftStyle   string
-	
+
 	BorderTopColor    color.Color
 	BorderRightColor  color.Color
 	BorderBottomColor color.Color
 	BorderLeftColor   color.Color
-	
+
 	// Background
 	BackgroundColor color.Color
-	
+
 	// Inline layout information
 	LineBoxes []*LineBox // Line boxes for inline content (if this contains inline children)
-	
+
 	// Flexbox container properties
-	FlexDirection   string  // "row", "row-reverse", "column", "column-reverse"
-	FlexWrap        string  // "nowrap", "wrap", "wrap-reverse"
-	JustifyContent  string  // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
-	AlignItems      string  // "flex-start", "flex-end", "center", "stretch", "baseline"
-	AlignContent    string  // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
-	Gap             float32 // Gap between flex/grid items
-	
+	FlexDirection  string  // "row", "row-reverse", "column", "column-reverse"
+	FlexWrap       string  // "nowrap", "wrap", "wrap-reverse"
+	JustifyContent string  // "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
+	AlignItems     string  // "flex-start", "flex-end", "center", "stretch", "baseline"
+	AlignContent   string  // "flex-start", "flex-end", "center", "stretch", "space-between", "space-around"
+	Gap            float32 // Gap between flex/grid items
+
 	// Grid container properties
 	GridTemplateColumns string
 	GridTemplateRows    string
-	
+
 	// Grid item properties
 	GridColumnStart int
 	GridColumnEnd   int
 	GridRowStart    int
 	GridRowEnd      int
-	
+
 	// Flexbox item properties
 	FlexGrow   float32 // How much item should grow relative to others
 	FlexShrink float32 // How much item should shrink relative to others

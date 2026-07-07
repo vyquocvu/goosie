@@ -30,10 +30,10 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 	// 1. Parse Grid Properties
 	gridTemplateColumns := parseTrackList(container.ComputedStyle.GridTemplateColumns)
 	gridTemplateRows := parseTrackList(container.ComputedStyle.GridTemplateRows)
-	
+
 	columnGap := float32(0)
 	rowGap := float32(0)
-	
+
 	if container.ComputedStyle.Gap != "" {
 		gap := parseLength(container.ComputedStyle.Gap, 16)
 		columnGap = gap
@@ -45,12 +45,12 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 	if container.ComputedStyle.RowGap != "" {
 		rowGap = parseLength(container.ComputedStyle.RowGap, 16)
 	}
-	
-	parentBox.Gap = columnGap 
+
+	parentBox.Gap = columnGap
 
 	// 2. Determine container dimensions
 	containerWidth := parentBox.Box.Width - parentBox.PaddingLeft - parentBox.PaddingRight
-	
+
 	// 3. Resolve explicit grid tracks
 	if len(gridTemplateColumns) == 0 {
 		gridTemplateColumns = []TrackSize{{Type: TrackTypeAuto, Value: 0}}
@@ -61,7 +61,9 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 	items := make([]*gridItem, 0, len(container.Children))
 	maxColumnIndex := len(gridTemplateColumns)
 	maxRowIndex := len(gridTemplateRows)
-	if maxRowIndex == 0 { maxRowIndex = 1 }
+	if maxRowIndex == 0 {
+		maxRowIndex = 1
+	}
 
 	for _, child := range container.Children {
 		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
@@ -70,11 +72,11 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 		if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 			continue
 		}
-		
+
 		item := &gridItem{
 			node: child,
 		}
-		
+
 		// Parse item placement
 		if child.ComputedStyle != nil {
 			var err error
@@ -83,10 +85,10 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 				child.ComputedStyle.GridColumnEnd,
 			)
 			if err != nil {
-				item.colStart = 0 
-				item.colEnd = 0   
+				item.colStart = 0
+				item.colEnd = 0
 			}
-			
+
 			item.rowStart, item.rowEnd, err = parseGridPlacement(
 				child.ComputedStyle.GridRowStart,
 				child.ComputedStyle.GridRowEnd,
@@ -101,16 +103,16 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 			item.rowStart = 0
 			item.rowEnd = 0
 		}
-		
+
 		items = append(items, item)
 	}
 
 	// Simple Auto-Placement Algorithm
 	occupied := make(map[int]map[int]bool)
-	
+
 	nextRow := 1
 	nextCol := 1
-	
+
 	for _, item := range items {
 		// If both are auto, place in next available cell
 		if item.colStart == 0 && item.rowStart == 0 {
@@ -120,9 +122,9 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 					item.colEnd = nextCol + 1
 					item.rowStart = nextRow
 					item.rowEnd = nextRow + 1
-					
+
 					markOccupied(occupied, nextRow, nextCol)
-					
+
 					// Advance pointer
 					nextCol++
 					if nextCol > len(gridTemplateColumns) {
@@ -146,7 +148,9 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 					if !isOccupied(occupied, r, item.colStart) {
 						item.rowStart = r
 						item.rowEnd = r + 1
-						if item.colEnd == 0 { item.colEnd = item.colStart + 1 }
+						if item.colEnd == 0 {
+							item.colEnd = item.colStart + 1
+						}
 						markOccupied(occupied, r, item.colStart)
 						break
 					}
@@ -159,7 +163,9 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 					if !isOccupied(occupied, item.rowStart, c) {
 						item.colStart = c
 						item.colEnd = c + 1
-						if item.rowEnd == 0 { item.rowEnd = item.rowStart + 1 }
+						if item.rowEnd == 0 {
+							item.rowEnd = item.rowStart + 1
+						}
 						markOccupied(occupied, item.rowStart, c)
 						break
 					}
@@ -167,8 +173,12 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 				}
 			} else {
 				// Fully defined
-				if item.colEnd == 0 { item.colEnd = item.colStart + 1 }
-				if item.rowEnd == 0 { item.rowEnd = item.rowStart + 1 }
+				if item.colEnd == 0 {
+					item.colEnd = item.colStart + 1
+				}
+				if item.rowEnd == 0 {
+					item.rowEnd = item.rowStart + 1
+				}
 				markOccupied(occupied, item.rowStart, item.colStart)
 			}
 		}
@@ -192,28 +202,32 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 
 	// 6. Calculate Track Sizes
 	colWidths := gle.calculateTrackSizes(gridTemplateColumns, containerWidth, columnGap)
-	
+
 	// Pre-layout items to determine heights for auto rows
 	for _, item := range items {
 		colStartIdx := item.colStart - 1
 		colEndIdx := item.colEnd - 1
-		
+
 		// Safety check
-		if colStartIdx < 0 { colStartIdx = 0 }
-		if colEndIdx > len(colWidths) { colEndIdx = len(colWidths) }
-		
+		if colStartIdx < 0 {
+			colStartIdx = 0
+		}
+		if colEndIdx > len(colWidths) {
+			colEndIdx = len(colWidths)
+		}
+
 		itemWidth := float32(0)
 		for i := colStartIdx; i < colEndIdx; i++ {
 			itemWidth += colWidths[i]
 		}
 		// Add gaps between spanned tracks
-		if colEndIdx > colStartIdx + 1 {
-			itemWidth += float32(colEndIdx - colStartIdx - 1) * columnGap
+		if colEndIdx > colStartIdx+1 {
+			itemWidth += float32(colEndIdx-colStartIdx-1) * columnGap
 		}
-		
+
 		// Build box to get content height
 		item.layoutBox = buildLayoutBox(item.node, 0, 0, itemWidth)
-		
+
 		if item.layoutBox != nil {
 			item.layoutBox.GridColumnStart = item.colStart
 			item.layoutBox.GridColumnEnd = item.colEnd
@@ -221,10 +235,10 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 			item.layoutBox.GridRowEnd = item.rowEnd
 		}
 	}
-	
+
 	// Now calculate row heights based on item heights
-	rowHeights := gle.calculateRowHeights(gridTemplateRows, items, parentBox.Box.Height, rowGap) 
-	
+	rowHeights := gle.calculateRowHeights(gridTemplateRows, items, parentBox.Box.Height, rowGap)
+
 	// 7. Position items
 	// Calculate accumulated positions
 	colPositions := make([]float32, len(colWidths)+1)
@@ -233,8 +247,8 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 		colPositions[i] = currentX
 		currentX += w + columnGap
 	}
-	colPositions[len(colWidths)] = currentX 
-	
+	colPositions[len(colWidths)] = currentX
+
 	rowPositions := make([]float32, len(rowHeights)+1)
 	currentY := parentBox.Box.Y + parentBox.PaddingTop
 	for i, h := range rowHeights {
@@ -242,20 +256,22 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 		currentY += h + rowGap
 	}
 	rowPositions[len(rowHeights)] = currentY
-	
+
 	// Assign final geometry
 	for _, item := range items {
-		if item.layoutBox == nil { continue }
-		
+		if item.layoutBox == nil {
+			continue
+		}
+
 		cStart := item.colStart - 1
 		// cEnd := item.colEnd - 1
 		rStart := item.rowStart - 1
 		// rEnd := item.rowEnd - 1
-		
+
 		// Calculate width again or just take from cache
-		// Correct logic: layoutbox width is content width. 
+		// Correct logic: layoutbox width is content width.
 		// If stretched, we force it? For now, we trust buildLayoutBox.
-		
+
 		// Set position
 		if cStart >= 0 && cStart < len(colPositions) {
 			dx := colPositions[cStart] - item.layoutBox.Box.X
@@ -265,10 +281,10 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 			dy := rowPositions[rStart] - item.layoutBox.Box.Y
 			shiftLayoutBoxTree(item.layoutBox, 0, dy)
 		}
-		
+
 		parentBox.AddChild(item.layoutBox)
 	}
-	
+
 	// Update container height
 	if len(rowHeights) > 0 {
 		totalH := float32(0)
@@ -276,19 +292,19 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 			totalH += h
 		}
 		totalH += float32(len(rowHeights)-1) * rowGap
-		
+
 		// This sets the content height of the grid container
 		// We add padding, but usually the outer layout (buildLayoutBox caller) handles adding padding to total height?
 		// In layout.go: layoutBox.Box.Height = currentY - (y + layoutBox.MarginTop)
 		// Here we set the childY effectively.
 		// parentBox.Box.Height should reflect content size + padding.
-		// LayoutEngine expects us to return the CHILD Y... wait. 
+		// LayoutEngine expects us to return the CHILD Y... wait.
 		// LayoutFlexContainer returns nothing, it modifies parentBox directly?
 		// No, let's check layout.go usage.
 		// In computeElementLayout:
 		// le.flexLayoutEngine.LayoutFlexContainer(node, layoutBox, le.buildLayoutBox)
 		// then it iterates children to find max Y.
-		
+
 		// So we just need to set children Y correctly.
 		// We don't need to perform layoutBox.Box.Height assignment, layout.go does it based on children?
 		// Wait, flex layout does:
@@ -416,7 +432,7 @@ func (gle *GridLayoutEngine) LayoutTable(layoutBox *LayoutBox) {
 			dy := rowPositions[rStart] - item.layoutBox.Box.Y
 			shiftLayoutBoxTree(item.layoutBox, 0, dy)
 		}
-		
+
 		// Ensure items stretch to fill their cell height (default table behavior)
 		if rStart >= 0 && rStart < len(rowHeights) {
 			item.layoutBox.Box.Height = rowHeights[rStart]
@@ -442,16 +458,16 @@ func shiftLayoutBoxTree(box *LayoutBox, deltaX, deltaY float32) {
 // calculateTrackSizes resolves track sizes to pixels
 func (gle *GridLayoutEngine) calculateTrackSizes(tracks []TrackSize, availableSpace float32, gap float32) []float32 {
 	sizes := make([]float32, len(tracks))
-	
+
 	remainingSpace := availableSpace
 	totalGapSpace := float32(0)
 	if len(tracks) > 1 {
 		totalGapSpace = float32(len(tracks)-1) * gap
 	}
 	remainingSpace -= totalGapSpace
-	
+
 	totalFr := float32(0)
-	
+
 	for i, t := range tracks {
 		if t.Type == TrackTypePx {
 			sizes[i] = t.Value
@@ -464,7 +480,7 @@ func (gle *GridLayoutEngine) calculateTrackSizes(tracks []TrackSize, availableSp
 			totalFr += t.Value
 		}
 	}
-	
+
 	if totalFr > 0 && remainingSpace > 0 {
 		frUnit := remainingSpace / totalFr
 		for i, t := range tracks {
@@ -479,11 +495,15 @@ func (gle *GridLayoutEngine) calculateTrackSizes(tracks []TrackSize, availableSp
 			}
 		}
 	}
-	
+
 	// Handle auto tracks (simplified)
 	autoCount := float32(0)
-	for _, t := range tracks { if t.Type == TrackTypeAuto { autoCount++ } }
-	
+	for _, t := range tracks {
+		if t.Type == TrackTypeAuto {
+			autoCount++
+		}
+	}
+
 	if autoCount > 0 {
 		if totalFr == 0 && remainingSpace > 0 {
 			autoWidth := remainingSpace / autoCount
@@ -501,14 +521,14 @@ func (gle *GridLayoutEngine) calculateTrackSizes(tracks []TrackSize, availableSp
 			}
 		}
 	}
-	
+
 	return sizes
 }
 
 // calculateRowHeights calculates row heights based on template and content
 func (gle *GridLayoutEngine) calculateRowHeights(tracks []TrackSize, items []*gridItem, containerHeight float32, gap float32) []float32 {
 	heights := make([]float32, len(tracks))
-	
+
 	for i, t := range tracks {
 		if t.Type == TrackTypePx {
 			heights[i] = t.Value
@@ -521,17 +541,17 @@ func (gle *GridLayoutEngine) calculateRowHeights(tracks []TrackSize, items []*gr
 			}
 		}
 	}
-	
+
 	// Auto/Content heights
 	for i, t := range tracks {
 		if t.Type == TrackTypeAuto || (t.Type == TrackTypePercent && containerHeight <= 0) {
 			maxH := float32(0)
-			rowIdx := i + 1 
-			
+			rowIdx := i + 1
+
 			for _, item := range items {
 				if item.rowStart <= rowIdx && item.rowEnd > rowIdx {
 					// Single row span for simplicity
-					if item.rowEnd - item.rowStart == 1 {
+					if item.rowEnd-item.rowStart == 1 {
 						if item.layoutBox != nil && item.layoutBox.Box.Height > maxH {
 							maxH = item.layoutBox.Box.Height
 						}
@@ -539,18 +559,20 @@ func (gle *GridLayoutEngine) calculateRowHeights(tracks []TrackSize, items []*gr
 				}
 			}
 			// ensure min height
-			if maxH == 0 { maxH = 20 } // minimal row height?
+			if maxH == 0 {
+				maxH = 20
+			} // minimal row height?
 			heights[i] = maxH
 		}
 	}
-	
+
 	return heights
 }
-
 
 // --- Helper Types & Functions ---
 
 type TrackType int
+
 const (
 	TrackTypePx TrackType = iota
 	TrackTypePercent
@@ -578,7 +600,7 @@ func parseTrackList(value string) []TrackSize {
 	}
 	parts := strings.Fields(value)
 	tracks := make([]TrackSize, 0, len(parts))
-	
+
 	for _, part := range parts {
 		if part == "auto" {
 			tracks = append(tracks, TrackSize{Type: TrackTypeAuto})
@@ -589,7 +611,7 @@ func parseTrackList(value string) []TrackSize {
 			val, _ := strconv.ParseFloat(strings.TrimSuffix(part, "%"), 32)
 			tracks = append(tracks, TrackSize{Type: TrackTypePercent, Value: float32(val)})
 		} else {
-			val := parseLength(part, 16) 
+			val := parseLength(part, 16)
 			tracks = append(tracks, TrackSize{Type: TrackTypePx, Value: val})
 		}
 	}
@@ -598,26 +620,26 @@ func parseTrackList(value string) []TrackSize {
 
 func parseGridPlacement(startVal, endVal string) (int, int, error) {
 	start := 0
-	end := 0 
-	
+	end := 0
+
 	// Handle "span X" future logic here
-	
+
 	if s, err := strconv.Atoi(startVal); err == nil {
 		start = s
 	}
-	
+
 	if e, err := strconv.Atoi(endVal); err == nil {
 		end = e
 	}
-	
+
 	if start == 0 && end != 0 {
 		start = end - 1
 	}
-	
+
 	if start != 0 && end == 0 {
 		end = start + 1
 	}
-	
+
 	return start, end, nil
 }
 

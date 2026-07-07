@@ -69,17 +69,17 @@ func (it *InvalidationTracker) PropagateInvalidation(node *RenderNode, flags Dir
 	if node == nil {
 		return
 	}
-	
+
 	// Mark this node dirty
 	it.MarkDirty(node.ID, flags)
-	
+
 	// If layout is dirty, parent's layout may need updating too
 	if flags&DirtyLayout != 0 {
 		if node.Parent != nil {
 			it.PropagateInvalidation(node.Parent, DirtyLayout)
 		}
 	}
-	
+
 	// If subtree is dirty, mark all children recursively
 	if flags&DirtySubtree != 0 {
 		it.markSubtreeDirty(node)
@@ -91,9 +91,9 @@ func (it *InvalidationTracker) markSubtreeDirty(node *RenderNode) {
 	if node == nil {
 		return
 	}
-	
+
 	it.MarkDirty(node.ID, DirtyLayout|DirtyPaint)
-	
+
 	for _, child := range node.Children {
 		it.markSubtreeDirty(child)
 	}
@@ -123,20 +123,20 @@ func (ile *IncrementalLayoutEngine) ComputeIncrementalLayout(root *RenderNode, p
 	if root == nil {
 		return nil
 	}
-	
+
 	// If no nodes are dirty, return the previous layout
 	dirtyNodes := ile.invalidation.GetDirtyNodes()
 	if len(dirtyNodes) == 0 && previousLayout != nil {
 		return previousLayout
 	}
-	
+
 	// For now, do a full recompute if any node is dirty
 	// A more sophisticated implementation would only recompute dirty subtrees
 	layoutRoot := ile.LayoutEngine.ComputeLayout(root)
-	
+
 	// Clear dirty flags after layout
 	ile.invalidation.ClearAll()
-	
+
 	return layoutRoot
 }
 

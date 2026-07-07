@@ -118,8 +118,8 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 		r.loadExternalCSS(doc)
 		// Re-read current layout tree since Refresh() updated it
 		r.treeMu.RLock()
-			layoutTree = r.currentLayoutTree
-			r.treeMu.RUnlock()
+		layoutTree = r.currentLayoutTree
+		r.treeMu.RUnlock()
 	} else {
 		go r.loadExternalCSS(doc)
 	}
@@ -535,10 +535,10 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 				r.stylesheet = stylesheet
 			} else {
 				newStylesheet := &css.StyleSheet{
-						Rules:   append(append([]css.Rule(nil), r.stylesheet.Rules...), stylesheet.Rules...),
-						AtRules: append(append([]css.AtRule(nil), r.stylesheet.AtRules...), stylesheet.AtRules...),
-					}
-					r.stylesheet = newStylesheet
+					Rules:   append(append([]css.Rule(nil), r.stylesheet.Rules...), stylesheet.Rules...),
+					AtRules: append(append([]css.AtRule(nil), r.stylesheet.AtRules...), stylesheet.AtRules...),
+				}
+				r.stylesheet = newStylesheet
 				// r.stylesheet.AtRules = append(r.stylesheet.AtRules, stylesheet.AtRules...)
 			}
 			r.stylesheetMu.Unlock()

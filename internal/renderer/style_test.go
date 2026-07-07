@@ -462,5 +462,3 @@ func TestBackgroundShorthand(t *testing.T) {
 		t.Errorf("box4 expected red, got %v", b4.ComputedStyle.BackgroundColor)
 	}
 }
-
-

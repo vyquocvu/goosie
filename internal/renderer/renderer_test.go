@@ -3,7 +3,7 @@ package renderer
 import (
 	"strings"
 	"testing"
-	
+
 	"github.com/vyquocvu/goosie/internal/testutil"
 	"golang.org/x/net/html"
 )
@@ -23,7 +23,7 @@ func TestNewRenderer(t *testing.T) {
 
 func TestRenderHTML(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	tests := []struct {
 		name    string
 		html    string
@@ -55,7 +55,7 @@ func TestRenderHTML(t *testing.T) {
 			wantErr: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			obj, err := r.RenderHTML(tt.html)
@@ -66,7 +66,7 @@ func TestRenderHTML(t *testing.T) {
 			if obj == nil {
 				t.Error("RenderHTML() returned nil canvas object")
 			}
-			
+
 			// Save screenshot if enabled
 			if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTML_"+tt.name, 800, 600); err != nil {
 				t.Logf("Warning: failed to save screenshot: %v", err)
@@ -80,7 +80,7 @@ func TestRenderHTML(t *testing.T) {
 func TestRenderHTMLWithAttributes(t *testing.T) {
 	r := NewRenderer(800, 600)
 	html := `<html><body><div id="main" class="container"><p>Content</p></div></body></html>`
-	
+
 	obj, err := r.RenderHTML(html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
@@ -88,7 +88,7 @@ func TestRenderHTMLWithAttributes(t *testing.T) {
 	if obj == nil {
 		t.Fatal("RenderHTML() returned nil")
 	}
-	
+
 	// Save screenshot if enabled
 	if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTMLWithAttributes", 800, 600); err != nil {
 		t.Logf("Warning: failed to save screenshot: %v", err)
@@ -99,7 +99,7 @@ func TestRenderHTMLWithAttributes(t *testing.T) {
 
 func TestRenderHTMLHeadings(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	tests := []struct {
 		name string
 		html string
@@ -111,7 +111,7 @@ func TestRenderHTMLHeadings(t *testing.T) {
 		{"h5", "<html><body><h5>Heading 5</h5></body></html>"},
 		{"h6", "<html><body><h6>Heading 6</h6></body></html>"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			obj, err := r.RenderHTML(tt.html)
@@ -121,7 +121,7 @@ func TestRenderHTMLHeadings(t *testing.T) {
 			if obj == nil {
 				t.Error("RenderHTML() returned nil")
 			}
-			
+
 			// Save screenshot if enabled
 			if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTMLHeadings_"+tt.name, 800, 600); err != nil {
 				t.Logf("Warning: failed to save screenshot: %v", err)
@@ -134,7 +134,7 @@ func TestRenderHTMLHeadings(t *testing.T) {
 
 func TestRenderHTMLLists(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	html := `
 		<html>
 		<body>
@@ -146,7 +146,7 @@ func TestRenderHTMLLists(t *testing.T) {
 		</body>
 		</html>
 	`
-	
+
 	obj, err := r.RenderHTML(html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
@@ -154,7 +154,7 @@ func TestRenderHTMLLists(t *testing.T) {
 	if obj == nil {
 		t.Fatal("RenderHTML() returned nil")
 	}
-	
+
 	// Save screenshot if enabled
 	if path, err := testutil.SaveTestScreenshot(obj, "TestRenderHTMLLists", 800, 600); err != nil {
 		t.Logf("Warning: failed to save screenshot: %v", err)
@@ -165,7 +165,7 @@ func TestRenderHTMLLists(t *testing.T) {
 
 func TestRenderHTMLLinks(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	html := `
 		<html>
 		<body>
@@ -173,7 +173,7 @@ func TestRenderHTMLLinks(t *testing.T) {
 		</body>
 		</html>
 	`
-	
+
 	obj, err := r.RenderHTML(html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
@@ -185,7 +185,7 @@ func TestRenderHTMLLinks(t *testing.T) {
 
 func TestRenderHTMLImages(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	html := `
 		<html>
 		<body>
@@ -193,7 +193,7 @@ func TestRenderHTMLImages(t *testing.T) {
 		</body>
 		</html>
 	`
-	
+
 	obj, err := r.RenderHTML(html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
@@ -205,7 +205,7 @@ func TestRenderHTMLImages(t *testing.T) {
 
 func TestRenderHTMLComplexStructure(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	html := `
 		<html>
 		<head><title>Test Page</title></head>
@@ -227,7 +227,7 @@ func TestRenderHTMLComplexStructure(t *testing.T) {
 		</body>
 		</html>
 	`
-	
+
 	obj, err := r.RenderHTML(html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
@@ -239,10 +239,10 @@ func TestRenderHTMLComplexStructure(t *testing.T) {
 
 func TestRenderHTMLInvalidHTML(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	// Even malformed HTML should be parsed (html.Parse is lenient)
 	html := "<div><p>Unclosed tags"
-	
+
 	obj, err := r.RenderHTML(html)
 	// html.Parse is very forgiving and won't error on malformed HTML
 	if err != nil {
@@ -255,9 +255,9 @@ func TestRenderHTMLInvalidHTML(t *testing.T) {
 
 func TestSetSize(t *testing.T) {
 	r := NewRenderer(800, 600)
-	
+
 	r.SetSize(1024, 768)
-	
+
 	if r.layoutEngine.canvasWidth != 1024 {
 		t.Errorf("Expected layout engine width 1024, got %f", r.layoutEngine.canvasWidth)
 	}
@@ -274,29 +274,29 @@ func TestSetSize(t *testing.T) {
 
 func TestFindBodyNode(t *testing.T) {
 	tests := []struct {
-		name      string
-		html      string
+		name       string
+		html       string
 		shouldFind bool
 	}{
 		{
-			name:      "explicit body",
-			html:      "<html><body><p>Content</p></body></html>",
+			name:       "explicit body",
+			html:       "<html><body><p>Content</p></body></html>",
 			shouldFind: true,
 		},
 		{
-			name:      "implicit body (parser adds it)",
-			html:      "<div>Content</div>",
+			name:       "implicit body (parser adds it)",
+			html:       "<div>Content</div>",
 			shouldFind: true, // html.Parse automatically adds body element
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			doc, err := html.Parse(strings.NewReader(tt.html))
 			if err != nil {
 				t.Fatalf("Failed to parse HTML: %v", err)
 			}
-			
+
 			bodyNode := findBodyNode(doc)
 			if tt.shouldFind && bodyNode == nil {
 				t.Error("Expected to find body node, but got nil")

@@ -37,7 +37,7 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 	if text == "" {
 		return TextMetrics{}
 	}
-	
+
 	// Try to use Fyne's MeasureText if available (runtime environment)
 	fm.mu.RLock()
 	checked := fm.checkedFyne
@@ -53,9 +53,9 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 		available = fm.fyneAvailable
 		fm.mu.Unlock()
 	}
-	
+
 	var width, height float32
-	
+
 	if available {
 		// Use Fyne's accurate measurement when app is running
 		size := fyne.MeasureText(text, fontSize, style)
@@ -64,19 +64,19 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 		// Fallback to improved estimation for tests
 		width = fm.estimateTextWidth(text, fontSize, style)
 	}
-	
+
 	// Add letter spacing
 	if len(text) > 0 {
 		width += float32(len([]rune(text))) * letterSpacing
 	}
-	
+
 	height = fontSize * 1.2 // Line height with spacing
-	
+
 	// Calculate ascent and descent based on font metrics
 	// For most fonts, ascent is about 75-80% of font size, descent is about 20-25%
 	ascent := fontSize * 0.75
 	descent := fontSize * 0.25
-	
+
 	return TextMetrics{
 		Width:   width,
 		Height:  height,
@@ -91,10 +91,10 @@ func (fm *FontMetrics) estimateTextWidth(text string, fontSize float32, style fy
 	if text == "" {
 		return 0
 	}
-	
+
 	// Base character width (average for proportional fonts)
 	baseCharWidth := fontSize * 0.5
-	
+
 	// Adjust for font style
 	if style.Bold {
 		baseCharWidth *= 1.1 // Bold is slightly wider
@@ -102,13 +102,13 @@ func (fm *FontMetrics) estimateTextWidth(text string, fontSize float32, style fy
 	if style.Monospace {
 		baseCharWidth = fontSize * 0.6 // Monospace has uniform width
 	}
-	
+
 	// Simple estimation: count characters and multiply by average width
 	// This is more accurate than using a fixed multiplier
 	totalWidth := float32(0)
 	for _, ch := range text {
 		charWidth := baseCharWidth
-		
+
 		// Adjust for specific character types
 		switch {
 		case ch >= 'A' && ch <= 'Z':
@@ -133,10 +133,10 @@ func (fm *FontMetrics) estimateTextWidth(text string, fontSize float32, style fy
 			// Other characters (punctuation, etc.)
 			charWidth *= 0.8
 		}
-		
+
 		totalWidth += charWidth
 	}
-	
+
 	return totalWidth
 }
 
@@ -147,7 +147,7 @@ func isFyneAppAvailable() bool {
 			// Fyne panicked, app not available
 		}
 	}()
-	
+
 	// Try to get current app - if it fails, Fyne is not initialized
 	app := fyne.CurrentApp()
 	return app != nil
@@ -159,24 +159,24 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 	if text == "" {
 		return TextMetrics{}
 	}
-	
+
 	// Measure single line
 	singleLine := fm.MeasureText(text, fontSize, style, letterSpacing)
-	
+
 	// If text fits on one line, return as-is
 	if singleLine.Width <= maxWidth {
 		return singleLine
 	}
-	
+
 	// Calculate number of lines needed using word wrapping
 	words := splitIntoWords(text)
 	if len(words) == 0 {
 		return TextMetrics{}
 	}
-	
+
 	lines := []string{""}
 	currentLine := 0
-	
+
 	for _, word := range words {
 		// Try adding word to current line
 		testLine := lines[currentLine]
@@ -184,9 +184,9 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 			testLine += " "
 		}
 		testLine += word
-		
+
 		testMetrics := fm.MeasureText(testLine, fontSize, style, letterSpacing)
-		
+
 		if testMetrics.Width <= maxWidth {
 			// Word fits on current line
 			lines[currentLine] = testLine
@@ -202,16 +202,16 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 			}
 		}
 	}
-	
+
 	// Calculate total height (number of lines * line height)
 	lineHeight := singleLine.Height
 	if lineHeight == 0 {
 		// Fallback to font size if height measurement is zero
 		lineHeight = fontSize * 1.2
 	}
-	
+
 	totalHeight := float32(len(lines)) * lineHeight
-	
+
 	// Width is the maximum of all line widths
 	maxLineWidth := float32(0)
 	for _, line := range lines {
@@ -222,7 +222,7 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 			}
 		}
 	}
-	
+
 	return TextMetrics{
 		Width:   maxLineWidth,
 		Height:  totalHeight,
@@ -234,16 +234,16 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 // GetFontSize returns the appropriate font size for a given HTML element
 func (fm *FontMetrics) GetFontSize(tagName string) float32 {
 	fontSizes := map[string]float32{
-		"h1": fm.defaultFontSize * 2.0,
-		"h2": fm.defaultFontSize * 1.5,
-		"h3": fm.defaultFontSize * 1.17,
-		"h4": fm.defaultFontSize * 1.0,
-		"h5": fm.defaultFontSize * 0.83,
-		"h6": fm.defaultFontSize * 0.67,
-		"p":  fm.defaultFontSize,
+		"h1":    fm.defaultFontSize * 2.0,
+		"h2":    fm.defaultFontSize * 1.5,
+		"h3":    fm.defaultFontSize * 1.17,
+		"h4":    fm.defaultFontSize * 1.0,
+		"h5":    fm.defaultFontSize * 0.83,
+		"h6":    fm.defaultFontSize * 0.67,
+		"p":     fm.defaultFontSize,
 		"small": fm.defaultFontSize * 0.83,
 	}
-	
+
 	if size, ok := fontSizes[tagName]; ok {
 		return size
 	}
@@ -271,7 +271,7 @@ func (fm *FontMetrics) GetTextStyle(tagName string) fyne.TextStyle {
 // GetTextStyleFromNode returns the text style based on the node and its parents
 func (fm *FontMetrics) GetTextStyleFromNode(node *RenderNode) fyne.TextStyle {
 	style := fyne.TextStyle{}
-	
+
 	// Traverse up the tree to collect style properties
 	current := node
 	for current != nil {
@@ -285,7 +285,7 @@ func (fm *FontMetrics) GetTextStyleFromNode(node *RenderNode) fyne.TextStyle {
 		}
 		current = current.Parent
 	}
-	
+
 	return style
 }
 
@@ -293,7 +293,7 @@ func (fm *FontMetrics) GetTextStyleFromNode(node *RenderNode) fyne.TextStyle {
 func splitIntoWords(text string) []string {
 	words := []string{}
 	currentWord := ""
-	
+
 	for _, ch := range text {
 		if ch == ' ' || ch == '\t' || ch == '\n' {
 			if currentWord != "" {
@@ -304,10 +304,10 @@ func splitIntoWords(text string) []string {
 			currentWord += string(ch)
 		}
 	}
-	
+
 	if currentWord != "" {
 		words = append(words, currentWord)
 	}
-	
+
 	return words
 }

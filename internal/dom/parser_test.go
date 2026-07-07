@@ -14,7 +14,7 @@ func TestNewParser(t *testing.T) {
 
 func TestParseBodyText(t *testing.T) {
 	parser := NewParser()
-	
+
 	tests := []struct {
 		name     string
 		html     string
@@ -22,25 +22,25 @@ func TestParseBodyText(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name: "simple body",
-			html: `<html><body>Hello World</body></html>`,
+			name:     "simple body",
+			html:     `<html><body>Hello World</body></html>`,
 			wantText: "Hello World",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "body with nested elements",
-			html: `<html><body><h1>Title</h1><p>Paragraph</p></body></html>`,
+			name:     "body with nested elements",
+			html:     `<html><body><h1>Title</h1><p>Paragraph</p></body></html>`,
 			wantText: "Title Paragraph",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "empty body",
-			html: `<html><body></body></html>`,
+			name:     "empty body",
+			html:     `<html><body></body></html>`,
 			wantText: "",
-			wantErr: false,
+			wantErr:  false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.ParseBodyText(tt.html)
@@ -57,9 +57,9 @@ func TestParseBodyText(t *testing.T) {
 
 func TestGetElementByID(t *testing.T) {
 	parser := NewParser()
-	
+
 	html := `<html><body><div id="test">Test Content</div><p id="para">Paragraph</p></body></html>`
-	
+
 	tests := []struct {
 		name     string
 		id       string
@@ -67,25 +67,25 @@ func TestGetElementByID(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name: "existing id",
-			id: "test",
+			name:     "existing id",
+			id:       "test",
 			wantText: "Test Content",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "another existing id",
-			id: "para",
+			name:     "another existing id",
+			id:       "para",
 			wantText: "Paragraph",
-			wantErr: false,
+			wantErr:  false,
 		},
 		{
-			name: "non-existing id",
-			id: "nonexistent",
+			name:     "non-existing id",
+			id:       "nonexistent",
 			wantText: "",
-			wantErr: false,
+			wantErr:  false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.GetElementByID(html, tt.id)
@@ -102,45 +102,45 @@ func TestGetElementByID(t *testing.T) {
 
 func TestParseBodyHTML(t *testing.T) {
 	parser := NewParser()
-	
+
 	tests := []struct {
-		name     string
-		html     string
+		name         string
+		html         string
 		wantContains []string
-		wantErr  bool
+		wantErr      bool
 	}{
 		{
-			name: "simple body with h1",
-			html: `<html><body><h1>Hello World</h1></body></html>`,
+			name:         "simple body with h1",
+			html:         `<html><body><h1>Hello World</h1></body></html>`,
 			wantContains: []string{"# Hello World"},
-			wantErr: false,
+			wantErr:      false,
 		},
 		{
-			name: "body with heading and paragraph",
-			html: `<html><body><h1>Title</h1><p>Paragraph text</p></body></html>`,
+			name:         "body with heading and paragraph",
+			html:         `<html><body><h1>Title</h1><p>Paragraph text</p></body></html>`,
 			wantContains: []string{"# Title", "Paragraph text"},
-			wantErr: false,
+			wantErr:      false,
 		},
 		{
-			name: "body with link",
-			html: `<html><body><p><a href="https://example.com">Link text</a></p></body></html>`,
+			name:         "body with link",
+			html:         `<html><body><p><a href="https://example.com">Link text</a></p></body></html>`,
 			wantContains: []string{"[Link text](https://example.com)"},
-			wantErr: false,
+			wantErr:      false,
 		},
 		{
-			name: "body with bold and italic",
-			html: `<html><body><p><strong>Bold</strong> and <em>italic</em></p></body></html>`,
+			name:         "body with bold and italic",
+			html:         `<html><body><p><strong>Bold</strong> and <em>italic</em></p></body></html>`,
 			wantContains: []string{"**Bold**", "*italic*"},
-			wantErr: false,
+			wantErr:      false,
 		},
 		{
-			name: "empty body",
-			html: `<html><body></body></html>`,
+			name:         "empty body",
+			html:         `<html><body></body></html>`,
 			wantContains: []string{},
-			wantErr: false,
+			wantErr:      false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.ParseBodyHTML(tt.html)
@@ -159,14 +159,14 @@ func TestParseBodyHTML(t *testing.T) {
 
 func TestGetElementsByClassName(t *testing.T) {
 	parser := NewParser()
-	
+
 	html := `<html><body>
 		<div class="item">Item 1</div>
 		<p class="item special">Item 2</p>
 		<div class="other">Other</div>
 		<span class="item">Item 3</span>
 	</body></html>`
-	
+
 	tests := []struct {
 		name      string
 		className string
@@ -192,7 +192,7 @@ func TestGetElementsByClassName(t *testing.T) {
 			wantErr:   false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.GetElementsByClassName(html, tt.className)
@@ -209,7 +209,7 @@ func TestGetElementsByClassName(t *testing.T) {
 
 func TestGetElementsByTagName(t *testing.T) {
 	parser := NewParser()
-	
+
 	html := `<html><body>
 		<div>Div 1</div>
 		<p>Paragraph 1</p>
@@ -217,7 +217,7 @@ func TestGetElementsByTagName(t *testing.T) {
 		<span>Span 1</span>
 		<p>Paragraph 2</p>
 	</body></html>`
-	
+
 	tests := []struct {
 		name      string
 		tagName   string
@@ -249,7 +249,7 @@ func TestGetElementsByTagName(t *testing.T) {
 			wantErr:   false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.GetElementsByTagName(html, tt.tagName)
@@ -266,7 +266,7 @@ func TestGetElementsByTagName(t *testing.T) {
 
 func TestQuerySelector(t *testing.T) {
 	parser := NewParser()
-	
+
 	html := `<html><body>
 		<div id="main" class="container">
 			<p class="text">Paragraph 1</p>
@@ -274,7 +274,7 @@ func TestQuerySelector(t *testing.T) {
 			<span data-test="value">Span 1</span>
 		</div>
 	</body></html>`
-	
+
 	tests := []struct {
 		name     string
 		selector string
@@ -317,7 +317,7 @@ func TestQuerySelector(t *testing.T) {
 			wantErr:  false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.QuerySelector(html, tt.selector)
@@ -340,13 +340,13 @@ func TestQuerySelector(t *testing.T) {
 
 func TestQuerySelectorAll(t *testing.T) {
 	parser := NewParser()
-	
+
 	html := `<html><body>
 		<div class="item">Item 1</div>
 		<p class="item">Item 2</p>
 		<div class="item">Item 3</div>
 	</body></html>`
-	
+
 	tests := []struct {
 		name      string
 		selector  string
@@ -372,7 +372,7 @@ func TestQuerySelectorAll(t *testing.T) {
 			wantErr:   false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parser.QuerySelectorAll(html, tt.selector)

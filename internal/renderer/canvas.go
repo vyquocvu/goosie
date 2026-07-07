@@ -61,10 +61,10 @@ type CanvasRenderer struct {
 	// Object cache: reuses Fyne canvas objects across frames instead of
 	// re-creating them on every scroll/render. Keyed by command index in the
 	// display list, valid only within the same dlBuildGen.
-	objectCache   map[int]fyne.CanvasObject
-	dlBuildGen    uint64 // bumped every time the display list is rebuilt
-	contentRoot   *fyne.Container        // stable root container, reused across renders
-	inspectable   *InspectableContainer // stable inspect wrapper, reused across renders
+	objectCache map[int]fyne.CanvasObject
+	dlBuildGen  uint64                // bumped every time the display list is rebuilt
+	contentRoot *fyne.Container       // stable root container, reused across renders
+	inspectable *InspectableContainer // stable inspect wrapper, reused across renders
 }
 
 // NewCanvasRenderer creates a new canvas renderer

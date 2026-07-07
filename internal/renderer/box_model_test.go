@@ -116,7 +116,7 @@ func TestMarginParsing(t *testing.T) {
 	if renderTree == nil {
 		t.Fatal("renderTree is nil")
 	}
-	
+
 	styleManager := NewStyleManager(stylesheet)
 	styleManager.ApplyStyles(renderTree)
 
@@ -397,7 +397,7 @@ func TestBoxModelLayout(t *testing.T) {
 	if layoutBox.Box.X != 18.0 {
 		t.Errorf("Box.X = %f; want 18.0 (body 8px margin + div 10px margin)", layoutBox.Box.X)
 	}
-	
+
 	// Verify layout root was created
 	if layoutRoot == nil {
 		t.Error("Layout root should not be nil")

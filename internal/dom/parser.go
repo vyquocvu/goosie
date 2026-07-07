@@ -55,12 +55,12 @@ func (p *Parser) getTextFromNode(n *html.Node, builder *strings.Builder) {
 
 // Element represents a DOM element with its properties
 type Element struct {
-	TagName    string
-	ID         string
-	Classes    []string
-	Attributes map[string]string
+	TagName     string
+	ID          string
+	Classes     []string
+	Attributes  map[string]string
 	TextContent string
-	Node       *html.Node
+	Node        *html.Node
 }
 
 // GetElementByID searches for an element by ID (basic implementation)
@@ -215,7 +215,7 @@ func (p *Parser) QuerySelectorAll(htmlContent, selector string) ([]*Element, err
 // matchesSelector checks if a node matches a CSS selector (basic implementation)
 func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
 	selector = strings.TrimSpace(selector)
-	
+
 	// Handle ID selector (#id)
 	if strings.HasPrefix(selector, "#") {
 		id := selector[1:]
@@ -226,7 +226,7 @@ func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
 		}
 		return false
 	}
-	
+
 	// Handle class selector (.class)
 	if strings.HasPrefix(selector, ".") {
 		className := selector[1:]
@@ -242,7 +242,7 @@ func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
 		}
 		return false
 	}
-	
+
 	// Handle attribute selector ([attr=value])
 	if strings.HasPrefix(selector, "[") && strings.HasSuffix(selector, "]") {
 		attrSelector := selector[1 : len(selector)-1]
@@ -258,7 +258,7 @@ func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
 		}
 		return false
 	}
-	
+
 	// Handle tag selector
 	return strings.ToLower(n.Data) == strings.ToLower(selector)
 }
@@ -270,7 +270,7 @@ func (p *Parser) nodeToElement(n *html.Node) *Element {
 		Attributes: make(map[string]string),
 		Node:       n,
 	}
-	
+
 	for _, attr := range n.Attr {
 		elem.Attributes[attr.Key] = attr.Val
 		if attr.Key == "id" {
@@ -279,11 +279,11 @@ func (p *Parser) nodeToElement(n *html.Node) *Element {
 			elem.Classes = strings.Fields(attr.Val)
 		}
 	}
-	
+
 	var textBuilder strings.Builder
 	p.getTextFromNode(n, &textBuilder)
 	elem.TextContent = textBuilder.String()
-	
+
 	return elem
 }
 

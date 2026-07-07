@@ -68,13 +68,13 @@ func main() {
 	fmt.Println("-----------------------------------")
 	messages := runtime.GetConsoleMessages()
 	fmt.Printf("Total console messages: %d\n", len(messages))
-	
+
 	// Display messages by level
 	levelCount := make(map[string]int)
 	for _, msg := range messages {
 		levelCount[msg.Level]++
 	}
-	
+
 	fmt.Println("\nMessages by level:")
 	for level, count := range levelCount {
 		fmt.Printf("  %s: %d\n", level, count)
@@ -86,9 +86,9 @@ func main() {
 	fmt.Println("----------------------------")
 	for _, msg := range messages {
 		if msg.Level == "error" {
-			fmt.Printf("[%s] %s - %s\n", 
-				msg.Timestamp.Format("15:04:05"), 
-				msg.Level, 
+			fmt.Printf("[%s] %s - %s\n",
+				msg.Timestamp.Format("15:04:05"),
+				msg.Level,
 				msg.Message)
 		}
 	}

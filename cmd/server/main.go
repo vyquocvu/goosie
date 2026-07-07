@@ -16,10 +16,10 @@ func main() {
 		if path == "/" || path == "" {
 			path = "/console_demo.html"
 		}
-		
+
 		// Remove leading slash for file path
 		filePath := strings.TrimPrefix(path, "/")
-		
+
 		// Set content type based on file extension
 		ext := strings.ToLower(filepath.Ext(filePath))
 		switch ext {
@@ -38,11 +38,11 @@ func main() {
 		case ".svg":
 			w.Header().Set("Content-Type", "image/svg+xml")
 		}
-		
+
 		// Serve the file
 		http.ServeFile(w, r, "./examples/"+filePath)
 	})
-	
+
 	// Create a simple directory listing page
 	http.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -97,10 +97,10 @@ func main() {
 </body>
 </html>`)
 	})
-	
+
 	// Handle static files
 	http.Handle("/", handler)
-	
+
 	port := ":8080"
 	fmt.Printf("Server starting on http://localhost%s\n", port)
 	fmt.Println("Available endpoints:")
@@ -110,6 +110,6 @@ func main() {
 	fmt.Println("  /html/*    - Serves files from examples/html subdirectory")
 	fmt.Println("")
 	fmt.Println("Press Ctrl+C to stop the server")
-	
+
 	log.Fatal(http.ListenAndServe(port, nil))
 }

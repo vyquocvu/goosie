@@ -1177,7 +1177,6 @@ func clamp(val, min, max float32) float32 {
 	return val
 }
 
-
 func parseHexColor(hex string) (color.Color, error) {
 	hex = strings.TrimPrefix(hex, "#")
 	if len(hex) == 3 {

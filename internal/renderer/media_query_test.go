@@ -182,7 +182,7 @@ func TestMediaQueryEvaluator_Units(t *testing.T) {
 		prelude  string
 		expected bool
 	}{
-		{"em units", "(max-width: 60em)", true},   // 60 * 16 = 960px
+		{"em units", "(max-width: 60em)", true},    // 60 * 16 = 960px
 		{"rem units", "(max-width: 40rem)", false}, // 40 * 16 = 640px
 		{"plain number", "(max-width: 1000)", true},
 	}

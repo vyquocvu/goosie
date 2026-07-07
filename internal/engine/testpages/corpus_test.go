@@ -9,13 +9,15 @@ import (
 
 func TestListIncludesLongArticleAndDocumentationPages(t *testing.T) {
 	pages := List()
-	if len(pages) != 2 {
-		t.Fatalf("List() returned %d pages, want 2", len(pages))
+	if len(pages) != 4 {
+		t.Fatalf("List() returned %d pages, want 4", len(pages))
 	}
 
 	want := map[string]string{
 		"long_article":  "Long Article",
 		"documentation": "Documentation Page",
+		"table_heavy":   "Table-Heavy Data Grid",
+		"form_heavy":    "Form-Heavy Settings Page",
 	}
 	for _, page := range pages {
 		title, ok := want[page.Name]
@@ -103,6 +105,60 @@ func TestDocumentationPageExercisesReferenceLayout(t *testing.T) {
 	}
 	if !strings.Contains(page.CSS, ".docs-shell") {
 		t.Fatalf("documentation CSS missing docs shell selector")
+	}
+}
+
+func TestTableHeavyPageExercisesReferenceLayout(t *testing.T) {
+	page, ok := Get("table_heavy")
+	if !ok {
+		t.Fatal("Get(table_heavy) did not find page")
+	}
+
+	for _, fragment := range []string{
+		`<table`,
+		`<thead>`,
+		`<tbody>`,
+		`<tfoot>`,
+		`colspan=`,
+		`rowspan=`,
+		`<th`,
+		`<td`,
+	} {
+		if !strings.Contains(page.HTML, fragment) {
+			t.Fatalf("table_heavy HTML missing %q", fragment)
+		}
+	}
+	if !strings.Contains(page.CSS, "table") {
+		t.Fatalf("table_heavy CSS missing table selector")
+	}
+}
+
+func TestFormHeavyPageExercisesReferenceLayout(t *testing.T) {
+	page, ok := Get("form_heavy")
+	if !ok {
+		t.Fatal("Get(form_heavy) did not find page")
+	}
+
+	for _, fragment := range []string{
+		`<form`,
+		`<fieldset`,
+		`<legend`,
+		`<label`,
+		`<input type="text"`,
+		`<input type="email"`,
+		`<input type="checkbox"`,
+		`<input type="radio"`,
+		`<select`,
+		`<option`,
+		`<textarea`,
+		`<button type="submit"`,
+	} {
+		if !strings.Contains(page.HTML, fragment) {
+			t.Fatalf("form_heavy HTML missing %q", fragment)
+		}
+	}
+	if !strings.Contains(page.CSS, "form") {
+		t.Fatalf("form_heavy CSS missing form selector")
 	}
 }
 

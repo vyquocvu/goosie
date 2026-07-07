@@ -155,7 +155,7 @@ func TestImageCacheEviction(t *testing.T) {
 
 	// Create 3 test images
 	for i := 1; i <= 3; i++ {
-		imgPath := filepath.Join(tmpDir, strings.Join([]string{"test", string(rune('0'+i)), ".png"}, ""))
+		imgPath := filepath.Join(tmpDir, strings.Join([]string{"test", string(rune('0' + i)), ".png"}, ""))
 		img := image.NewRGBA(image.Rect(0, 0, 10, 10))
 		f, _ := os.Create(imgPath)
 		png.Encode(f, img)

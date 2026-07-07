@@ -34,7 +34,7 @@ func TestJSDOMIntegration(t *testing.T) {
 
 	// Track rendered HTML updates
 	var latestRenderedHTML string
-	
+
 	// Wire up mutation callback to update Goosie renderer
 	jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
 		latestRenderedHTML = mutatedHTML
@@ -86,7 +86,7 @@ func TestJSDOMIntegration(t *testing.T) {
 	jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
 		latestRenderedHTML = mutatedHTML
 	})
-	
+
 	_, err = jsRuntime.RunScript(`
 		var btn = document.createElement("button");
 		btn.id = "btn";
@@ -99,7 +99,7 @@ func TestJSDOMIntegration(t *testing.T) {
 		});
 	`)
 	assert.NoError(t, err)
-	
+
 	// Verify button was added
 	assert.Contains(t, latestRenderedHTML, "Click Me")
 
@@ -127,7 +127,7 @@ func TestJSDOMIntegration(t *testing.T) {
 	assert.Contains(t, latestRenderedHTML, "react-title")
 	assert.Contains(t, latestRenderedHTML, "React App")
 	assert.Contains(t, latestRenderedHTML, "State: active")
-	
+
 	// Verify that the old target contents (like child-elem) are replaced and gone
 	assert.NotContains(t, latestRenderedHTML, "child-elem")
 	assert.NotContains(t, latestRenderedHTML, "Dynamic Child")
