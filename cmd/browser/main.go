@@ -10,6 +10,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/profile"
@@ -56,22 +57,12 @@ func main() {
 		return renderer.NewRenderer(1000, 700)
 	}
 
-	// Create a cancellable context for page loads
-	var currentLoadCtx context.Context
-	var currentLoadCancel context.CancelFunc
+	navScheduler := navigation.NewScheduler()
 
 	// Set up navigation callback
 	browser.SetNavigationCallback(func(url string) {
-		// Cancel any ongoing page load
-		if currentLoadCancel != nil {
-			currentLoadCancel()
-		}
-
-		// Create new context for this load
-		currentLoadCtx, currentLoadCancel = context.WithCancel(context.Background())
-
-		// Load page asynchronously
-		loadPageAsync(browser, fetcher, parser, url, currentLoadCtx)
+		load, ctx := navScheduler.Begin(context.Background(), url)
+		loadPageAsync(browser, fetcher, parser, load, ctx, navScheduler)
 	})
 
 	// Show browser window
@@ -84,18 +75,25 @@ type pageLoadResult struct {
 	err  error
 }
 
-// loadPageAsync fetches and displays a web page asynchronously
-func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url string, ctx context.Context) {
-	log.Printf("Navigating to: %s", url)
+// loadPageAsync fetches and displays a web page asynchronously.
+func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, scheduler *navigation.Scheduler) {
+	log.Printf("Navigation %s started: %s", load.ID, load.URL)
 
 	// Update browser state on main thread
-	browser.NavigateTo(url)
+	browser.NavigateTo(load.URL)
 
 	// Show loading indicator on main thread
 	browser.ShowLoading()
 
+	navID := load.ID
+	url := load.URL
+
 	// Launch background goroutine for fetch and render
 	go func() {
+		if !scheduler.IsActive(navID) {
+			return
+		}
+
 		// Resolve URL if it's relative or needs resolution
 		resolvedURL := url
 		if activeTab := browser.ActiveTab(); activeTab != nil {
@@ -106,24 +104,30 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 
 		// Handle anchor links (scroll within current page)
 		if strings.HasPrefix(url, "#") {
-			log.Printf("Anchor link detected: %s - scrolling within current page", url)
-			// For now, just hide loading and return (anchor scrolling can be implemented later)
-			browser.HideLoading()
+			log.Printf("Navigation %s anchor link: %s", navID, url)
+			if scheduler.IsActive(navID) {
+				browser.HideLoading()
+			}
 			return
 		}
 
 		// Fetch the page in background
 		html, err := fetcher.FetchWithContext(ctx, resolvedURL, nil)
 
+		if !scheduler.IsActive(navID) {
+			log.Printf("Navigation %s stale after fetch: %s", navID, url)
+			return
+		}
+
 		// Check if context was cancelled
 		if ctx.Err() != nil {
-			log.Printf("Page load cancelled for: %s", url)
+			log.Printf("Navigation %s cancelled: %s", navID, url)
 			return
 		}
 
 		if err != nil {
 			// Fallback to mock HTML for example.com if network is unavailable
-			log.Printf("Network error (%v), checking if example.com for mock HTML", err)
+			log.Printf("Navigation %s network error (%v), checking if example.com for mock HTML", navID, err)
 			if resolvedURL == "https://example.com" {
 				html = `<!DOCTYPE html>
 <html>
@@ -139,20 +143,21 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 </body>
 </html>`
 			} else {
-				// Update UI on main thread with error
-				updateUIWithError(browser, err, resolvedURL)
+				updateUIWithError(browser, scheduler, navID, err, resolvedURL)
 				return
 			}
 		}
 
-		// Update UI on main thread with content
-		updateUIWithContent(browser, fetcher, html, resolvedURL)
+		updateUIWithContent(browser, fetcher, scheduler, navID, html, resolvedURL)
 	}()
 }
 
-// updateUIWithError updates the UI with an error message
-func updateUIWithError(browser *ui.Browser, err error, url string) {
-	log.Printf("Error loading page %s: %v", url, err)
+// updateUIWithError updates the UI with an error message.
+func updateUIWithError(browser *ui.Browser, scheduler *navigation.Scheduler, navID navigation.ID, err error, url string) {
+	if !scheduler.IsActive(navID) {
+		return
+	}
+	log.Printf("Navigation %s error loading %s: %v", navID, url, err)
 	errorHTML := fmt.Sprintf(`
 		<!DOCTYPE html>
 		<html>
@@ -167,9 +172,12 @@ func updateUIWithError(browser *ui.Browser, err error, url string) {
 	browser.HideLoading()
 }
 
-// updateUIWithContent updates the UI with HTML content
-func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, html string, url string) {
-	log.Printf("Rendering page content")
+// updateUIWithContent updates the UI with HTML content.
+func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, scheduler *navigation.Scheduler, navID navigation.ID, html string, url string) {
+	if !scheduler.IsActive(navID) {
+		return
+	}
+	log.Printf("Navigation %s rendering page content", navID)
 
 	// Fyne widgets are thread-safe and can be updated from any goroutine
 	// Render HTML using the canvas-based renderer
@@ -254,9 +262,11 @@ func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, html string,
 	}
 }
 
-// loadPage fetches and displays a web page (deprecated - use loadPageAsync)
+// loadPage fetches and displays a web page (deprecated - use loadPageAsync).
 func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url string) {
-	loadPageAsync(browser, fetcher, parser, url, context.Background())
+	scheduler := navigation.NewScheduler()
+	load, ctx := scheduler.Begin(context.Background(), url)
+	loadPageAsync(browser, fetcher, parser, load, ctx, scheduler)
 }
 
 // extractTitle parses the HTML and returns the content of the <title> tag.
