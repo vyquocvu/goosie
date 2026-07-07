@@ -28,6 +28,14 @@ func BenchmarkParseBodyTextFormHeavy(b *testing.B) {
 	benchmarkParseBodyText(b, page.HTML)
 }
 
+func BenchmarkParseBodyTextImageHeavy(b *testing.B) {
+	page, ok := testpages.Get("image_heavy")
+	if !ok {
+		b.Fatal("image_heavy page not found")
+	}
+	benchmarkParseBodyText(b, page.HTML)
+}
+
 func BenchmarkParseBodyHTMLSmall(b *testing.B) { benchmarkParseBodyHTML(b, smallHTML) }
 
 func BenchmarkParseBodyHTMLMedium(b *testing.B) { benchmarkParseBodyHTML(b, mediumHTML) }
@@ -46,6 +54,14 @@ func BenchmarkParseBodyHTMLFormHeavy(b *testing.B) {
 	page, ok := testpages.Get("form_heavy")
 	if !ok {
 		b.Fatal("form_heavy page not found")
+	}
+	benchmarkParseBodyHTML(b, page.HTML)
+}
+
+func BenchmarkParseBodyHTMLImageHeavy(b *testing.B) {
+	page, ok := testpages.Get("image_heavy")
+	if !ok {
+		b.Fatal("image_heavy page not found")
 	}
 	benchmarkParseBodyHTML(b, page.HTML)
 }

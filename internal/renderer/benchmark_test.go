@@ -3,6 +3,9 @@ package renderer
 import (
 	"fmt"
 	"testing"
+
+	"github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/engine/testpages"
 )
 
 // BenchmarkLayoutSmall benchmarks layout of 10 nodes
@@ -290,5 +293,61 @@ func benchmarkViewportScroll(b *testing.B, n int) {
 		scrollPos := float32(i % 1000)
 		cr.SetViewport(scrollPos, 600)
 		cr.RenderWithViewport(root, layoutRoot)
+	}
+}
+
+func BenchmarkLayoutImageHeavy(b *testing.B) {
+	page, ok := testpages.Get("image_heavy")
+	if !ok {
+		b.Fatal("image_heavy page not found")
+	}
+
+	parser := css.NewParser(page.CSS)
+	stylesheet, err := parser.Parse()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	renderTree, err := parseHTMLToRenderTree(page.HTML)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	styleManager := NewStyleManager(stylesheet)
+	styleManager.ApplyStyles(renderTree)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		le := NewLayoutEngine(800, 600)
+		le.ComputeLayout(renderTree)
+	}
+}
+
+func BenchmarkFullPipelineImageHeavy(b *testing.B) {
+	page, ok := testpages.Get("image_heavy")
+	if !ok {
+		b.Fatal("image_heavy page not found")
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		parser := css.NewParser(page.CSS)
+		stylesheet, err := parser.Parse()
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		renderTree, err := parseHTMLToRenderTree(page.HTML)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		styleManager := NewStyleManager(stylesheet)
+		styleManager.ApplyStyles(renderTree)
+
+		le := NewLayoutEngine(800, 600)
+		le.ComputeLayout(renderTree)
 	}
 }

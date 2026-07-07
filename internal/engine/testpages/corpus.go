@@ -33,6 +33,7 @@ var pages = []Page{
 	newPage("documentation", "Documentation Page", documentationHTML, documentationCSS),
 	newPage("table_heavy", "Table-Heavy Data Grid", tableHeavyHTML, tableHeavyCSS),
 	newPage("form_heavy", "Form-Heavy Settings Page", formHeavyHTML, formHeavyCSS),
+	newPage("image_heavy", "Image-Heavy Page", imageHeavyHTML, imageHeavyCSS),
 }
 
 func newPage(name, title, html, css string) Page {
@@ -541,4 +542,51 @@ button { padding: 10px 20px; border-radius: 6px; font-size: 0.95rem; font-weight
 .btn-cancel { background: #ffffff; border-color: #cbd5e1; color: #475569; }
 .btn-cancel:hover { background: #f1f5f9; }
 .form-footer { padding: 32px; text-align: center; font-size: 0.85rem; color: #64748b; }
+`
+
+const imageHeavyHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Image-Heavy Page</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<header class="gallery-header">
+<h1>Deterministic Image Gallery</h1>
+<p class="description">A page populated with multiple local deterministic images (using base64 PNG data URIs) to benchmark image loading, layout, and rendering pipelines.</p>
+</header>
+<main class="gallery-container">
+<div class="gallery">
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGJhYPjPgBsw4ZEbwdKAAAAA//9C0AEWskL5ggAAAABJRU5ErkJggg==" alt="Blue Image"><p class="label">Blue Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGElEQVR4nGL5/58BD2DCJzlypQEBAAD//3epAhVNqa1uAAAAAElFTkSuQmCC" alt="Yellow Image"><p class="label">Yellow Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGL5z/CfATdgwiM3gqUBAQAA//92qgIVlts9cQAAAABJRU5ErkJggg==" alt="Magenta Image"><p class="label">Magenta Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAF0lEQVR4nGL5z4APMOGVHbHSgAAAAP//RM4BFjLZ0j4AAAAASUVORK5CYII=" alt="Red Image"><p class="label">Red Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGJh+P+fATdgwiM3gqUBAQAA//91qwIVE6EUawAAAABJRU5ErkJggg==" alt="Cyan Image"><p class="label">Cyan Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGL5//8/A27AhEduBEsDAgAA//+phQMU+N7ExgAAAABJRU5ErkJggg==" alt="White Image"><p class="label">White Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAFElEQVR4nGJiwAtGpbECQAAAAP//DogAFaNSFa8AAAAASUVORK5CYII=" alt="Black Image"><p class="label">Black Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGJpaGhgwA2Y8MiNYGlAAAAA///fAwGXFadweQAAAABJRU5ErkJggg==" alt="Gray Image"><p class="label">Gray Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGElEQVR4nGL5v5QBD2DCJzlypQEBAAD//wthAbt2sJOkAAAAAElFTkSuQmCC" alt="Orange Image"><p class="label">Orange Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGJpYGhgwA2Y8MiNYGlAAAAA//9FAwEXDxD77wAAAABJRU5ErkJggg==" alt="Purple Image"><p class="label">Purple Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGUlEQVR4nGL5f+A0A27AhEduBEsDAgAA//8fXQKh5VAawQAAAABJRU5ErkJggg==" alt="Pink Image"><p class="label">Pink Item</p></div>
+  <div class="gallery-item"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAGBhEQVR4nGL5z4APMOGVHbHSgAAAAP//RM4BFjLZ0j4AAAAASUVORK5CYII=" alt="Green Image"><p class="label">Green Item</p></div>
+</div>
+</main>
+<footer class="gallery-footer">
+<p>End of deterministic image gallery. Confirmed 12 test assets.</p>
+</footer>
+</body>
+</html>`
+
+const imageHeavyCSS = `
+body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #111827; background: #f9fafb; }
+.gallery-header { padding: 32px; background: #ffffff; border-bottom: 1px solid #e5e7eb; }
+.gallery-header h1 { margin: 0 0 8px; font-size: 1.75rem; color: #111827; }
+.description { margin: 0; color: #4b5563; font-size: 0.95rem; line-height: 1.5; }
+.gallery-container { padding: 32px; max-width: 1000px; margin: 0 auto; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px; }
+.gallery-item { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.gallery-item img { width: 80px; height: 80px; border-radius: 4px; object-fit: cover; }
+.gallery-item p.label { margin: 8px 0 0; font-size: 0.85rem; font-weight: 500; color: #374151; }
+.gallery-footer { padding: 24px 32px; background: #f3f4f6; text-align: center; font-size: 0.85rem; color: #6b7280; margin-top: 48px; border-top: 1px solid #e5e7eb; }
 `
