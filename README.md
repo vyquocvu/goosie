@@ -308,3 +308,25 @@ See [ROADMAP_V2.md](ROADMAP_V2.md) for planned features and future development g
 ## License
 
 This project is provided as-is for educational purposes.
+
+### Profiling and Tracing
+We provide a convenient bash script at `scripts/bench.sh` to quickly run performance tools:
+```bash
+# Run all benchmarks across the project
+./scripts/bench.sh run
+
+# Capture CPU profile
+./scripts/bench.sh profile-cpu ./internal/renderer
+
+# Capture Memory profile
+./scripts/bench.sh profile-mem ./internal/renderer
+
+# Capture runtime trace
+./scripts/bench.sh trace ./internal/engine/testpages
+
+# Run the full benchmark suite
+./scripts/bench.sh suite
+
+# Compare benchmark results with benchstat
+./scripts/bench.sh compare main-perf.txt feature-perf.txt
+```
