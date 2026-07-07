@@ -203,7 +203,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 - [x] Add image-heavy pages using local deterministic assets.
 - [ ] Add JavaScript-light interactive pages.
 - [ ] Add mutation scenarios: class toggle, append node, replace text, resize viewport.
-- [ ] Add scrolling scenarios for short and long documents.
+- [x] Add scrolling scenarios for short and long documents.
 
 **Acceptance criteria**
 

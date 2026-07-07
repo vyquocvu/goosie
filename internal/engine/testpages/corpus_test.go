@@ -9,16 +9,18 @@ import (
 
 func TestListIncludesLongArticleAndDocumentationPages(t *testing.T) {
 	pages := List()
-	if len(pages) != 5 {
-		t.Fatalf("List() returned %d pages, want 5", len(pages))
+	if len(pages) != 7 {
+		t.Fatalf("List() returned %d pages, want 7", len(pages))
 	}
 
 	want := map[string]string{
-		"long_article":  "Long Article",
-		"documentation": "Documentation Page",
-		"table_heavy":   "Table-Heavy Data Grid",
-		"form_heavy":    "Form-Heavy Settings Page",
-		"image_heavy":   "Image-Heavy Page",
+		"long_article":    "Long Article",
+		"documentation":   "Documentation Page",
+		"table_heavy":     "Table-Heavy Data Grid",
+		"form_heavy":      "Form-Heavy Settings Page",
+		"image_heavy":     "Image-Heavy Page",
+		"scrolling_short": "Short Document",
+		"scrolling_long":  "Scrolling-Long Document Benchmark",
 	}
 	for _, page := range pages {
 		title, ok := want[page.Name]
@@ -182,6 +184,58 @@ func TestImageHeavyPageExercisesReferenceLayout(t *testing.T) {
 	}
 	if !strings.Contains(page.CSS, ".gallery") {
 		t.Fatalf("image_heavy CSS missing gallery selector")
+	}
+}
+
+func TestScrollingShortPageFitsInViewport(t *testing.T) {
+	page, ok := Get("scrolling_short")
+	if !ok {
+		t.Fatal("Get(scrolling_short) did not find page")
+	}
+
+	if !strings.Contains(page.HTML, `<h1>Short Document</h1>`) {
+		t.Fatalf("scrolling_short HTML missing short document title")
+	}
+	if !strings.Contains(page.HTML, `<footer`) {
+		t.Fatalf("scrolling_short HTML missing footer")
+	}
+	if len(page.HTML) < 200 {
+		t.Fatalf("scrolling_short HTML too short (%d bytes)", len(page.HTML))
+	}
+	if len(page.HTML) > 5000 {
+		t.Fatalf("scrolling_short HTML too long (%d bytes) to fit one viewport", len(page.HTML))
+	}
+	if !strings.Contains(page.CSS, "page-header") {
+		t.Fatalf("scrolling_short CSS missing expected selector")
+	}
+}
+
+func TestScrollingLongPageExceedsViewport(t *testing.T) {
+	page, ok := Get("scrolling_long")
+	if !ok {
+		t.Fatal("Get(scrolling_long) did not find page")
+	}
+
+	if !strings.Contains(page.HTML, `<h1>Scrolling-Long Document Benchmark</h1>`) {
+		t.Fatalf("scrolling_long HTML missing page title")
+	}
+	if !strings.Contains(page.HTML, `<footer`) {
+		t.Fatalf("scrolling_long HTML missing footer")
+	}
+
+	// Count sections - expect at least 40 to ensure document is long enough
+	sectionCount := strings.Count(page.HTML, `class="content-block"`)
+	if sectionCount < 40 {
+		t.Fatalf("scrolling_long has %d sections, want at least 40", sectionCount)
+	}
+
+	// Verify final section exists
+	if !strings.Contains(page.HTML, "Section 050") {
+		t.Fatalf("scrolling_long HTML missing final section marker")
+	}
+
+	if !strings.Contains(page.CSS, "content-block") {
+		t.Fatalf("scrolling_long CSS missing content-block selector")
 	}
 }
 
