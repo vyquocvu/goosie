@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 )
 
 // ID uniquely identifies one page load within a browser session.
@@ -65,6 +67,7 @@ type Load struct {
 	ID        ID
 	URL       string
 	StartedAt time.Time
+	Recorder  *metrics.Recorder
 }
 
 // Scheduler assigns navigation IDs and owns the active load context.
@@ -93,10 +96,12 @@ func (s *Scheduler) Begin(parent context.Context, url string) (Load, context.Con
 		s.activeCancel = nil
 	}
 
+	navID := s.generator.Next()
 	load := Load{
-		ID:        s.generator.Next(),
+		ID:        navID,
 		URL:       url,
 		StartedAt: time.Now(),
+		Recorder:  metrics.NewRecorder(uint64(navID), url),
 	}
 	s.activeID = load.ID
 

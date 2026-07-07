@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 )
 
 func TestInvalidID(t *testing.T) {
@@ -201,5 +203,43 @@ func TestSchedulerRepeatedBeginSameURLGetsNewIDs(t *testing.T) {
 
 	if first.ID == second.ID {
 		t.Fatalf("repeated navigation to %q reused ID %d", url, first.ID)
+	}
+}
+
+func TestLoadHasRecorder(t *testing.T) {
+	sched := NewScheduler()
+	load, _ := sched.Begin(context.Background(), "https://example.com/metrics")
+
+	if load.Recorder == nil {
+		t.Fatal("Load.Recorder is nil, expected a metrics.Recorder")
+	}
+
+	snap := load.Recorder.Snapshot()
+	if snap.NavID != uint64(load.ID) {
+		t.Fatalf("Recorder NavID = %d, want %d", snap.NavID, load.ID)
+	}
+	if snap.URL != load.URL {
+		t.Fatalf("Recorder URL = %q, want %q", snap.URL, load.URL)
+	}
+}
+
+func TestLoadRecorderRecordsPhases(t *testing.T) {
+	sched := NewScheduler()
+	load, _ := sched.Begin(context.Background(), "https://example.com/phases")
+
+	load.Recorder.BeginPhase(metrics.PhaseParse)
+	load.Recorder.EndPhase(metrics.PhaseParse)
+	load.Recorder.BeginPhase(metrics.PhaseLayout)
+	load.Recorder.EndPhase(metrics.PhaseLayout)
+
+	m := load.Recorder.Finalize()
+	if len(m.Timings) != 2 {
+		t.Fatalf("got %d timings, want 2", len(m.Timings))
+	}
+	if m.Timings[0].Phase != metrics.PhaseParse {
+		t.Fatalf("timing[0] Phase = %v, want PhaseParse", m.Timings[0].Phase)
+	}
+	if m.Timings[1].Phase != metrics.PhaseLayout {
+		t.Fatalf("timing[1] Phase = %v, want PhaseLayout", m.Timings[1].Phase)
 	}
 }
