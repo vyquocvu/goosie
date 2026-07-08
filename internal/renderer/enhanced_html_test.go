@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -253,7 +254,7 @@ func TestCSSRenderingWithColors(t *testing.T) {
 	r := NewRenderer(800, 600)
 	r.SetCurrentURL("https://example.com")
 
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -324,7 +325,7 @@ func TestCSSRenderingWithFontSize(t *testing.T) {
 	r := NewRenderer(800, 600)
 	r.SetCurrentURL("https://example.com")
 
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}

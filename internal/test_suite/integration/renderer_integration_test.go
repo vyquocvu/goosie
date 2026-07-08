@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"fyne.io/fyne/v2/test"
@@ -34,7 +35,7 @@ func TestRendererIntegration(t *testing.T) {
 
 	// 2. Parse HTML & CSS (Implicitly handled by Renderer)
 	r := renderer.NewRenderer(800, 600)
-	canvasObj, err := r.RenderHTML(html)
+	canvasObj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("Failed to render HTML: %v", err)
 	}

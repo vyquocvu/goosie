@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"fyne.io/fyne/v2/test"
@@ -38,14 +39,14 @@ func TestJSDOMIntegration(t *testing.T) {
 	// Wire up mutation callback to update Goosie renderer
 	jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
 		latestRenderedHTML = mutatedHTML
-		_, err := r.RenderHTML(mutatedHTML)
+		_, err := r.RenderHTML(context.Background(), mutatedHTML)
 		if err != nil {
 			t.Errorf("Failed to render mutated HTML: %v", err)
 		}
 	})
 
 	// Initial render
-	_, err := r.RenderHTML(initialHTML)
+	_, err := r.RenderHTML(context.Background(), initialHTML)
 	assert.NoError(t, err)
 	jsRuntime.SetHTMLContent(initialHTML)
 

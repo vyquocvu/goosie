@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -103,7 +104,7 @@ func main() {
 		fmt.Printf("Test: %s\n", tc.name)
 		fmt.Println("-------------------")
 
-		canvasObject, err := htmlRenderer.RenderHTML(tc.html)
+		canvasObject, err := htmlRenderer.RenderHTML(context.Background(), tc.html)
 		if err != nil {
 			log.Printf("Error rendering HTML: %v\n", err)
 			fmt.Println()
@@ -123,7 +124,7 @@ func main() {
 	fmt.Println("Test: Invalid HTML")
 	fmt.Println("-------------------")
 	invalidHTML := "<div><p>Unclosed tags"
-	canvasObject, err := htmlRenderer.RenderHTML(invalidHTML)
+	canvasObject, err := htmlRenderer.RenderHTML(context.Background(), invalidHTML)
 	if err != nil {
 		fmt.Printf("✓ Properly handled error: %v\n", err)
 	} else if canvasObject != nil {

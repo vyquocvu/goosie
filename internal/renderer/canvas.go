@@ -840,6 +840,9 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	dlChanged := false
 
 	cr.mu.RLock()
+	dlBuildGen := cr.dlBuildGen
+	_ = dlBuildGen
+
 	if cr.cachedDisplayList != nil && cr.cachedRenderRoot == root && cr.cachedLayoutRoot == layoutRoot {
 		displayList = cr.cachedDisplayList
 		cr.mu.RUnlock()
@@ -858,8 +861,10 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 
 	// Invalidate object cache on display list rebuild
 	if dlChanged {
+		cr.mu.Lock()
 		cr.dlBuildGen++
 		cr.objectCache = make(map[int]fyne.CanvasObject)
+		cr.mu.Unlock()
 	}
 
 	// Object stack for clipped hierarchy

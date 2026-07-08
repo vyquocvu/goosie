@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -160,7 +161,7 @@ func testPhase3() {
 
 	// Create renderer and build layout
 	r := renderer.NewRenderer(800, 600)
-	layoutRoot, err := r.RenderHTML(html)
+	layoutRoot, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		report("Layout Engine", false, fmt.Sprintf("Failed to render: %v", err))
 		return
@@ -199,7 +200,7 @@ func testPhase4(outputDir string) {
 	`
 
 	r := renderer.NewRenderer(800, 600)
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		report("Renderer", false, fmt.Sprintf("Failed to render HTML for screenshot: %v", err))
 		return

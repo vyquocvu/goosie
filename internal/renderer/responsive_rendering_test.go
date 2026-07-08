@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,7 +11,7 @@ func TestRenderHTMLAppliesMediaQueriesForViewport(t *testing.T) {
 	r := NewRenderer(1000, 700)
 	r.SetTestingMode(true)
 
-	_, err := r.RenderHTML(`
+	_, err := r.RenderHTML(context.Background(), `
 		<style>
 			.desktop { display: none; }
 			.mobile { display: block; }
@@ -46,13 +47,13 @@ func TestRenderHTMLAppliesNestedMediaQueriesOnlyWhenBothMatch(t *testing.T) {
 
 	wide := NewRenderer(1000, 700)
 	wide.SetTestingMode(true)
-	_, err := wide.RenderHTML(html)
+	_, err := wide.RenderHTML(context.Background(), html)
 	require.NoError(t, err)
 	require.Equal(t, "none", findRenderNodeByClass(wide.currentRenderTree, "narrow").ComputedStyle.Display)
 
 	narrow := NewRenderer(500, 700)
 	narrow.SetTestingMode(true)
-	_, err = narrow.RenderHTML(html)
+	_, err = narrow.RenderHTML(context.Background(), html)
 	require.NoError(t, err)
 	require.Equal(t, "block", findRenderNodeByClass(narrow.currentRenderTree, "narrow").ComputedStyle.Display)
 }

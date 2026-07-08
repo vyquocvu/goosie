@@ -1,6 +1,7 @@
 package performance
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func BenchmarkRenderLargeHTML(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := r.RenderHTML(html)
+		_, err := r.RenderHTML(context.Background(), html)
 		if err != nil {
 			b.Fatalf("RenderHTML failed: %v", err)
 		}
@@ -47,7 +48,7 @@ func BenchmarkRenderVeryLargeHTML(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := r.RenderHTML(html)
+		_, err := r.RenderHTML(context.Background(), html)
 		if err != nil {
 			b.Fatalf("RenderHTML failed: %v", err)
 		}

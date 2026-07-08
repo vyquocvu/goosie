@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -16,7 +17,7 @@ type MockHTMLRenderer struct {
 	refreshCalled bool
 }
 
-func (m *MockHTMLRenderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
+func (m *MockHTMLRenderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
 	return nil, nil
 }
 func (m *MockHTMLRenderer) UpdateViewport() fyne.CanvasObject               { return nil }

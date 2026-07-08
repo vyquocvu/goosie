@@ -220,3 +220,16 @@ func logMetrics(l *slog.Logger, m Metrics, ctx context.Context) {
 
 	l.LogAttrs(ctx, slog.LevelInfo, "navigation complete", attrs...)
 }
+
+type recorderContextKey struct{}
+
+// WithRecorder returns a child context that carries the given Recorder.
+func WithRecorder(ctx context.Context, r *Recorder) context.Context {
+	return context.WithValue(ctx, recorderContextKey{}, r)
+}
+
+// RecorderFromContext returns the Recorder stored in ctx, if present.
+func RecorderFromContext(ctx context.Context) *Recorder {
+	r, _ := ctx.Value(recorderContextKey{}).(*Recorder)
+	return r
+}

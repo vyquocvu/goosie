@@ -215,16 +215,16 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 - [x] Assign a navigation ID to every load.
 - [x] Define Phase enum and Metrics/Recorder in `internal/engine/metrics` — phase durations, counters, runtime state, concurrency-safe.
 - [x] Wire Recorder into `navigation.Load` — every `Scheduler.Begin()` creates a recorder.
-- [ ] Instrument engine phases: DNS, connect, first byte, body read, parse, style, layout, paint, raster, present.
+- [x] Instrument engine phases: DNS, connect, first byte, body read, parse, style, layout, paint, raster, present.
 - [ ] Record node, rule, selector, box, fragment, display item, tile, and image counts.
-- [ ] Record bytes downloaded, decoded image bytes, cache hits, and cache misses.
+- [x] Record bytes downloaded, decoded image bytes, cache hits, and cache misses.
 - [x] Add structured logs behind a debug flag.
 
 **Acceptance criteria**
 
 - [x] A single navigation can be traced from URL entry to first presented frame. (Recorder created at navigation start, finalized at end.)
 - [x] Metrics can be exported without importing UI packages. (Package has no Fyne or UI dependencies.)
-- [ ] Phase timings are actually stamped by engine subsystems.
+- [x] Phase timings are actually stamped by engine subsystems.
 
 ### M0.4 Add benchmark and profiling commands
 

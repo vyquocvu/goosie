@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	urlpkg "net/url"
 	"os"
@@ -307,16 +308,16 @@ func (b *Browser) SetHTMLContent(content string) {
 }
 
 // RenderHTMLContent renders HTML content using the canvas-based renderer on the active tab
-func (b *Browser) RenderHTMLContent(htmlContent string) error {
+func (b *Browser) RenderHTMLContent(ctx context.Context, htmlContent string) error {
 	tab := b.ActiveTab()
 	if tab == nil {
 		return nil
 	}
-	return tab.RenderHTML(htmlContent)
+	return tab.RenderHTML(ctx, htmlContent)
 }
 
 // RenderHTML renders HTML content using the canvas-based renderer for this specific tab
-func (t *Tab) RenderHTML(htmlContent string) error {
+func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	// Lazily initialize the renderer if needed
 	if t.htmlRenderer == nil {
 		if t.browser.RendererFactory == nil {
@@ -359,7 +360,7 @@ func (t *Tab) RenderHTML(htmlContent string) error {
 		})
 	})
 
-	canvasObject, err := t.htmlRenderer.RenderHTML(htmlContent)
+	canvasObject, err := t.htmlRenderer.RenderHTML(ctx, htmlContent)
 	if err != nil {
 		return err
 	}

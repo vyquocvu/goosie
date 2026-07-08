@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -25,7 +26,7 @@ func main() {
 
 	// Measure initial render time
 	start := time.Now()
-	canvasObj, err := r.RenderHTML(string(htmlContent))
+	canvasObj, err := r.RenderHTML(context.Background(), string(htmlContent))
 	if err != nil {
 		fmt.Printf("Error rendering HTML: %v\n", err)
 		return

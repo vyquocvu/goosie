@@ -1,12 +1,13 @@
 package ui
 
 import (
+	"context"
 	"fyne.io/fyne/v2"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 type HTMLRenderer interface {
-	RenderHTML(htmlContent string) (fyne.CanvasObject, error)
+	RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error)
 	UpdateViewport() fyne.CanvasObject
 	SetCurrentURL(url string)
 	ResolveURL(url string) string

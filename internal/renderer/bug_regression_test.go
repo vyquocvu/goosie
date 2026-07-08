@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"image/color"
 	"testing"
 
@@ -41,7 +42,7 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 	// Create renderer and render the HTML
 	htmlRenderer := NewRenderer(800, 600)
 	htmlRenderer.SetViewport(0, 100000)
-	canvasObject, err := htmlRenderer.RenderHTML(htmlContent)
+	canvasObject, err := htmlRenderer.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("Error rendering HTML: %v", err)
 	}
