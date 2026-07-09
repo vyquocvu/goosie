@@ -3,6 +3,7 @@ package net
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,19 +13,52 @@ import (
 	"time"
 )
 
+// ErrBodyTooLarge is returned when the response body exceeds the configured
+// MaxBodySize. Callers can check it with errors.Is.
+var ErrBodyTooLarge = errors.New("response body exceeds size limit")
+
+// limitedContextReader wraps an io.Reader with context cancellation awareness
+// and optional byte limit enforcement. A limit of 0 means unlimited.
+type limitedContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+	limit  int64 // max bytes to read; 0 = unlimited
+	read   int64 // bytes read so far
+}
+
+func (r *limitedContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if r.limit > 0 {
+		remaining := r.limit - r.read
+		if remaining <= 0 {
+			return 0, ErrBodyTooLarge
+		}
+		if int64(len(p)) > remaining {
+			p = p[:remaining]
+		}
+	}
+	n, err := r.reader.Read(p)
+	r.read += int64(n)
+	return n, err
+}
+
 const defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 type ServiceOptions struct {
-	Client    *http.Client
-	Cache     *HTTPCache
-	UserAgent string
+	Client      *http.Client
+	Cache       *HTTPCache
+	UserAgent   string
+	MaxBodySize int64 // maximum response body size in bytes; 0 = unlimited
 }
 
 type Service struct {
-	client    *http.Client
-	cache     *HTTPCache
-	userAgent string
-	log       *RequestLog
+	client      *http.Client
+	cache       *HTTPCache
+	userAgent   string
+	log         *RequestLog
+	maxBodySize int64
 
 	securityMu sync.Mutex
 	security   SecuritySummary
@@ -41,10 +75,11 @@ func NewService(options ServiceOptions) *Service {
 		userAgent = defaultUserAgent
 	}
 	return &Service{
-		client:    client,
-		cache:     options.Cache,
-		userAgent: userAgent,
-		log:       NewRequestLog(),
+		client:      client,
+		cache:       options.Cache,
+		userAgent:   userAgent,
+		log:         NewRequestLog(),
+		maxBodySize: options.MaxBodySize,
 	}
 }
 
@@ -89,7 +124,7 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 	}
 	defer resp.Body.Close()
 
-	body, readErr := readResponseBody(resp, onProgress)
+	body, readErr := readResponseBody(ctx, resp, onProgress, s.maxBodySize)
 	entry := RequestLogEntry{
 		Method:      http.MethodGet,
 		URL:         rawURL,
@@ -150,11 +185,15 @@ func (s *Service) setSecurity(summary SecuritySummary) {
 	s.security = summary
 }
 
-func readResponseBody(resp *http.Response, onProgress ProgressCallback) (string, error) {
-	var reader io.Reader = resp.Body
+func readResponseBody(ctx context.Context, resp *http.Response, onProgress ProgressCallback, maxBodySize int64) (string, error) {
+	reader := io.Reader(&limitedContextReader{
+		ctx:    ctx,
+		reader: resp.Body,
+		limit:  maxBodySize,
+	})
 	if onProgress != nil && resp.ContentLength > 0 {
 		reader = &progressReader{
-			Reader:   resp.Body,
+			Reader:   reader,
 			total:    resp.ContentLength,
 			callback: onProgress,
 		}

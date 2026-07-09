@@ -282,8 +282,8 @@ Decouple the engine from the browser UI and make navigation, cancellation, and r
 
 - [ ] Remove unnecessary full-body copies from the main document path.
 - [ ] Feed the HTML tokenizer directly from the response stream.
-- [ ] Apply body size limits.
-- [ ] Support cancellation while reading.
+- [x] Apply body size limits.
+- [x] Support cancellation while reading.
 - [ ] Preserve response metadata for security and developer tools.
 
 ### M1.4 Formalize engine-to-shell events

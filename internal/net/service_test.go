@@ -4,11 +4,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -293,6 +297,430 @@ func TestServiceCacheHitReplacesSecuritySummary(t *testing.T) {
 	}
 	if summary.Subject != "" || summary.Issuer != "" || !summary.NotBefore.IsZero() || !summary.NotAfter.IsZero() {
 		t.Fatalf("cached summary retained certificate data: %#v", summary)
+	}
+}
+
+// --- limitedContextReader tests ---
+
+func TestLimitedContextReaderReadsNormally(t *testing.T) {
+	body := "hello, world"
+	reader := &limitedContextReader{
+		ctx:    context.Background(),
+		reader: strings.NewReader(body),
+		limit:  100,
+	}
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if string(out) != body {
+		t.Fatalf("read %q, want %q", string(out), body)
+	}
+}
+
+func TestLimitedContextReaderExceedsLimit(t *testing.T) {
+	reader := &limitedContextReader{
+		ctx:    context.Background(),
+		reader: strings.NewReader("this body is too long"),
+		limit:  5,
+	}
+	_, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("expected error for exceeded limit, got nil")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestLimitedContextReaderExactLimit(t *testing.T) {
+	// A body that's exactly the limit should fail — we can't distinguish
+	// between "body equals limit" and "body exceeds limit" without reading more.
+	body := "exactly"
+	reader := &limitedContextReader{
+		ctx:    context.Background(),
+		reader: strings.NewReader(body),
+		limit:  int64(len(body)),
+	}
+	_, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("expected error when body == limit, got nil")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestLimitedContextReaderContextCancelledBeforeRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	reader := &limitedContextReader{
+		ctx:    ctx,
+		reader: strings.NewReader("data"),
+		limit:  100,
+	}
+	_, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestLimitedContextReaderContextCancelledDuringRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	reader := &limitedContextReader{
+		ctx:    ctx,
+		reader: strings.NewReader(strings.Repeat("x", 1000)),
+		limit:  0,
+	}
+
+	buf := make([]byte, 100)
+	n, err := reader.Read(buf)
+	if err != nil {
+		t.Fatalf("first read failed: %v", err)
+	}
+	if n != 100 {
+		t.Fatalf("first read returned %d bytes, want 100", n)
+	}
+
+	// Cancel — next Read should detect immediately
+	cancel()
+
+	_, err = reader.Read(buf)
+	if err == nil {
+		t.Fatal("expected error after cancel, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestLimitedContextReaderUnlimited(t *testing.T) {
+	body := strings.Repeat("a", 10000)
+	reader := &limitedContextReader{
+		ctx:    context.Background(),
+		reader: strings.NewReader(body),
+		limit:  0, // unlimited
+	}
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if len(out) != len(body) {
+		t.Fatalf("read %d bytes, want %d", len(out), len(body))
+	}
+}
+
+func TestLimitedContextReaderEmptyBody(t *testing.T) {
+	reader := &limitedContextReader{
+		ctx:    context.Background(),
+		reader: strings.NewReader(""),
+		limit:  100,
+	}
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("read %d bytes, want 0", len(out))
+	}
+}
+
+func TestLimitedContextReaderZeroLimitAndCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	reader := &limitedContextReader{
+		ctx:    ctx,
+		reader: strings.NewReader("data"),
+		limit:  0, // unlimited
+	}
+	_, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+// --- Service FetchWithContext body-size-limit integration tests ---
+
+func TestServiceFetchWithContextBodyTooLarge(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, "body that is too large"), nil
+	})}
+	service := NewService(ServiceOptions{
+		Client:      client,
+		MaxBodySize: 10, // only allow 10 bytes
+	})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/page", nil)
+	if err == nil {
+		t.Fatal("expected error for body too large, got nil")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) && !strings.Contains(err.Error(), "body too large") {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestServiceFetchWithContextCancelledDuringBodyRead(t *testing.T) {
+	// Server that sends headers + partial body, then waits indefinitely
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("partial "))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		close(started)
+		// Block until client disconnects
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{Client: &http.Client{}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := service.FetchWithContext(ctx, server.URL, nil)
+		errCh <- err
+	}()
+
+	// Wait for server to start sending body
+	<-started
+
+	// Cancel while body read is in progress
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error for cancelled context during body read, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetch did not complete within timeout after cancel")
+	}
+}
+
+func TestServiceFetchWithContextBodySizeBackwardCompat(t *testing.T) {
+	// Default MaxBodySize = 0 means unlimited — existing behavior preserved
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, strings.Repeat("x", 50000)), nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/large", nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+	if len(body) != 50000 {
+		t.Fatalf("body length = %d, want 50000", len(body))
+	}
+}
+
+func TestServiceFetchWithContextBodySizePreservesProgressCallback(t *testing.T) {
+	bodyContent := "progress check"
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, bodyContent)
+		resp.ContentLength = int64(len(bodyContent))
+		resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(bodyContent)))
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 100})
+
+	var lastProgress float64
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/progress", func(p float64) {
+		lastProgress = p
+	})
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+	if body != bodyContent {
+		t.Fatalf("body = %q, want %q", body, bodyContent)
+	}
+	if lastProgress != 1 {
+		t.Fatalf("last progress = %v, want 1", lastProgress)
+	}
+}
+
+func TestServiceFetchWithContextBodySizeLogsEntryOnError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "this body exceeds the limit")
+		resp.Header.Set("Content-Type", "text/plain")
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 5})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/error", nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	entries := service.Log().Entries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Error == "" {
+		t.Fatal("expected error message in log entry")
+	}
+	if entry.Status != http.StatusOK {
+		t.Fatalf("entry.Status = %d, want %d", entry.Status, http.StatusOK)
+	}
+	if entry.Bytes != 0 {
+		t.Fatalf("entry.Bytes = %d, want 0 for failed read", entry.Bytes)
+	}
+}
+
+func TestServiceFetchWithContextBodySizeDoesNotAffectCache(t *testing.T) {
+	transportCalls := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		transportCalls++
+		resp := newTestResponse(req, http.StatusOK, "small body")
+		resp.Header.Set("Cache-Control", "max-age=60")
+		return resp, nil
+	})}
+	cache := NewHTTPCache(t.TempDir(), false)
+	service := NewService(ServiceOptions{Client: client, Cache: cache, MaxBodySize: 100})
+
+	// First fetch should succeed and populate cache
+	body, err := service.Fetch("https://example.test/cached")
+	if err != nil {
+		t.Fatalf("first Fetch returned error: %v", err)
+	}
+	if body != "small body" {
+		t.Fatalf("first body = %q", body)
+	}
+
+	// Second fetch should hit cache (not transport)
+	body, err = service.Fetch("https://example.test/cached")
+	if err != nil {
+		t.Fatalf("second Fetch returned error: %v", err)
+	}
+	if body != "small body" {
+		t.Fatalf("second body = %q", body)
+	}
+	if transportCalls != 1 {
+		t.Fatalf("transport calls = %d, want 1", transportCalls)
+	}
+}
+
+func TestServiceFetchWithContextBodySizeUnderLimitWithBinaryData(t *testing.T) {
+	bodyBytes := make([]byte, 100)
+	for i := range bodyBytes {
+		bodyBytes[i] = byte(i)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, string(bodyBytes)), nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 200})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/binary", nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+	if len(body) != 100 {
+		t.Fatalf("body length = %d, want 100", len(body))
+	}
+	for i := 0; i < 100; i++ {
+		if body[i] != byte(i) {
+			t.Fatalf("body[%d] = %d, want %d", i, body[i], i)
+		}
+	}
+}
+
+func TestServiceFetchWithContextBodySizeOneByteOverLimit(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, strings.Repeat("x", 11)), nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 10})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/overflow", nil)
+	if err == nil {
+		t.Fatal("expected error for body 1 byte over limit")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestServiceFetchWithContextBodySizeZeroLimitWithErrorResponse(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusInternalServerError, "error page body"), nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 0})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/error", nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+	// Non-empty error body is returned as-is (not wrapped in error page)
+	if body != "error page body" {
+		t.Fatalf("body = %q, want %q", body, "error page body")
+	}
+}
+
+// --- limitedContextReader benchmarks ---
+
+func BenchmarkLimitedContextReader(b *testing.B) {
+	body := strings.Repeat("hello-world-", 1000) // ~12KB
+	ctx := context.Background()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		reader := &limitedContextReader{
+			ctx:    ctx,
+			reader: strings.NewReader(body),
+			limit:  0,
+		}
+		_, err := io.ReadAll(reader)
+		if err != nil {
+			b.Fatalf("ReadAll failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkLimitedContextReaderWithLimit(b *testing.B) {
+	body := strings.Repeat("hello-world-", 1000)
+	ctx := context.Background()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		reader := &limitedContextReader{
+			ctx:    ctx,
+			reader: strings.NewReader(body),
+			limit:  10000, // smaller than body
+		}
+		_, err := io.ReadAll(reader)
+		if err == nil {
+			b.Fatal("expected ErrBodyTooLarge")
+		}
+	}
+}
+
+func BenchmarkLimitedContextReaderCancelled(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	body := strings.Repeat("hello-world-", 1000)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		reader := &limitedContextReader{
+			ctx:    ctx,
+			reader: strings.NewReader(body),
+			limit:  0,
+		}
+		_, err := io.ReadAll(reader)
+		if err == nil {
+			b.Fatal("expected error for cancelled context")
+		}
 	}
 }
 

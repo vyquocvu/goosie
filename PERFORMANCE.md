@@ -260,6 +260,22 @@ This gate verifies the parser, selector, layout, and display-list benchmark
 suites stay runnable on relevant pull requests. Timing regression thresholds
 and artifact storage are tracked as separate M0.5 tasks.
 
+### Response Body Reader Benchmarks
+
+The `internal/net` package includes benchmarks for the context-aware limited reader:
+
+```bash
+go test -bench=BenchmarkLimitedContextReader -benchmem ./internal/net/
+```
+
+Results (12KB body on Apple Virtual CPU):
+- Normal read (no limit, live context): ~5.8 μs, 13 allocs
+- With active limit: ~5.7 μs, 13 allocs
+- Cancelled context (immediate): ~0.2 μs, 3 allocs
+
+The overhead of the context and size limit check is negligible compared
+to the underlying I/O cost.
+
 ### Profiling
 
 ```bash
