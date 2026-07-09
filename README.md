@@ -141,9 +141,17 @@ go test -bench=. -benchmem ./internal/engine/testpages/
 go test -bench=. -benchmem ./internal/renderer/
 ```
 
-Pull requests that touch engine benchmark-sensitive paths run a bounded
-Performance workflow for DOM parser, CSS selector parser, layout, and
-display-list microbenchmarks with allocation reporting.
+Pull requests that touch engine benchmark-sensitive paths run a
+Performance workflow with:
+- Microbenchmarks for DOM parser, CSS selector, layout, display-list,
+  session, navigation, metrics, and scrolling
+- `go test -race` gate for concurrent engine packages
+- Allocation regression detection (fail CI on >5% allocs/op or >10% B/op)
+- Timing regression warnings (>10% ns/op)
+- Comparison against committed baseline via `benchstat`
+
+Nightly benchmarks run longer (1s benchtime) navigation, scrolling,
+and full-pipeline scenarios with artifact storage (90-day retention).
 
 ### GUI Browser
 
@@ -251,6 +259,8 @@ The browser demonstrates web functionality by:
 ### Project Structure
 
 - **internal/engine/navigation**: Monotonic navigation IDs, cancellable load contexts, and stale-callback rejection
+- **internal/engine/session**: Session lifecycle (state machine, context propagation, event callbacks) wrapping the navigation scheduler
+- **internal/engine/metrics**: Phase-timing recorder and counters for tracing navigation from URL entry to first paint
 - **internal/net**: Async HTTP client with context support for fetching web pages
 - **internal/dom**: HTML parser for extracting content
 - **internal/renderer**: Canvas-based HTML renderer with layout engine
@@ -312,6 +322,21 @@ See [ROADMAP_V2.md](ROADMAP_V2.md) for planned features and future development g
 ## License
 
 This project is provided as-is for educational purposes.
+
+### CI Benchmark Comparison
+
+A dedicated script `scripts/bench-ci.sh` powers the PR performance gates:
+
+```bash
+# Run benchmarks and compare against baseline (default)
+./scripts/bench-ci.sh check
+
+# Run benchmarks and save as new baseline
+./scripts/bench-ci.sh record
+
+# Run benchmarks without comparison
+./scripts/bench-ci.sh run-only
+```
 
 ### Profiling and Tracing
 We provide a convenient bash script at `scripts/bench.sh` to quickly run performance tools:

@@ -62,6 +62,9 @@ jobs:
     - name: Build Project
       run: make build
 
+    - name: Race detector (engine)
+      run: go test -race -count=1 -short -timeout=10m ./internal/engine/...
+
     - name: Run Tests
       run: make test
       env:

@@ -242,11 +242,11 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 ### M0.5 Add performance CI gates
 
 - [x] Run parser, selector, layout, and display-list microbenchmarks on relevant PRs.
-- [ ] Run longer navigation and scrolling scenarios nightly.
-- [ ] Store benchmark artifacts.
-- [ ] Fail CI on significant allocation regressions.
-- [ ] Warn on timing regressions above the accepted variance.
-- [ ] Run `go test -race` for concurrent engine packages.
+- [x] Run longer navigation and scrolling scenarios nightly.
+- [x] Store benchmark artifacts.
+- [x] Fail CI on significant allocation regressions.
+- [x] Warn on timing regressions above the accepted variance.
+- [x] Run `go test -race` for concurrent engine packages.
 
 **Exit gate**
 

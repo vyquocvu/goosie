@@ -1,0 +1,153 @@
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/dom
+cpu: VirtualApple @ 2.50GHz
+BenchmarkParseBodyTextSmall-10             	   51607	      2714 ns/op	    5536 B/op	      19 allocs/op
+BenchmarkParseBodyTextMedium-10            	   10000	     11875 ns/op	   10736 B/op	     100 allocs/op
+BenchmarkParseBodyTextLarge-10             	    1306	     92829 ns/op	   62128 B/op	     689 allocs/op
+BenchmarkParseBodyTextTableHeavy-10        	    1291	     91394 ns/op	   69128 B/op	     739 allocs/op
+BenchmarkParseBodyTextFormHeavy-10         	    2082	     59924 ns/op	   40832 B/op	     454 allocs/op
+BenchmarkParseBodyTextImageHeavy-10        	    3770	     34483 ns/op	   22800 B/op	     255 allocs/op
+BenchmarkParseBodyTextScrollingShort-10    	    8428	     20307 ns/op	   14136 B/op	     103 allocs/op
+BenchmarkParseBodyTextScrollingLong-10     	    1042	    113609 ns/op	   94297 B/op	     678 allocs/op
+BenchmarkParseBodyHTMLScrollingShort-10    	    7623	     15561 ns/op	   14288 B/op	     104 allocs/op
+BenchmarkParseBodyHTMLScrollingLong-10     	    1089	    115339 ns/op	   94313 B/op	     679 allocs/op
+BenchmarkParseBodyHTMLSmall-10             	   52424	      2283 ns/op	    5568 B/op	      20 allocs/op
+BenchmarkParseBodyHTMLMedium-10            	   10000	     11273 ns/op	   10736 B/op	     101 allocs/op
+BenchmarkParseBodyHTMLLarge-10             	    1369	     92009 ns/op	   62128 B/op	     690 allocs/op
+BenchmarkParseBodyHTMLTableHeavy-10        	    1314	     91417 ns/op	   69784 B/op	     741 allocs/op
+BenchmarkParseBodyHTMLFormHeavy-10         	    2022	     58126 ns/op	   40896 B/op	     455 allocs/op
+BenchmarkParseBodyHTMLImageHeavy-10        	    3710	     34211 ns/op	   22928 B/op	     256 allocs/op
+BenchmarkGetElementByIDFound-10            	   10000	     11338 ns/op	   10608 B/op	      99 allocs/op
+BenchmarkGetElementByIDNotFound-10         	   10000	     10953 ns/op	   10384 B/op	      96 allocs/op
+BenchmarkGetElementByIDFull-10             	   10000	     11512 ns/op	   10888 B/op	     101 allocs/op
+BenchmarkGetElementsByClassName-10         	    9466	     12105 ns/op	   11912 B/op	     118 allocs/op
+BenchmarkGetElementsByTagName-10           	    9528	     11161 ns/op	   10840 B/op	     101 allocs/op
+BenchmarkQuerySelectorID-10                	    9234	     11637 ns/op	   11048 B/op	     103 allocs/op
+BenchmarkQuerySelectorClass-10             	   10000	     12128 ns/op	   11912 B/op	     118 allocs/op
+BenchmarkQuerySelectorTag-10               	   10000	     11860 ns/op	   11232 B/op	     110 allocs/op
+BenchmarkQuerySelectorNotFound-10          	   10000	     10993 ns/op	   10384 B/op	      96 allocs/op
+BenchmarkQuerySelectorAllTag-10            	   10000	     12610 ns/op	   12480 B/op	     118 allocs/op
+BenchmarkParseEmpty-10                     	   91136	      1327 ns/op	    5016 B/op	      10 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/dom	4.245s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/css
+cpu: VirtualApple @ 2.50GHz
+BenchmarkParseSmall-10              	   28796	      3867 ns/op	    2112 B/op	     166 allocs/op
+BenchmarkParseMedium-10             	    2851	     44908 ns/op	   23528 B/op	    1909 allocs/op
+BenchmarkParseLarge-10              	     548	    209470 ns/op	  114177 B/op	    9066 allocs/op
+BenchmarkParseSelectorComplex-10    	    5739	     21463 ns/op	   11264 B/op	     912 allocs/op
+BenchmarkParseSelectorHeavy-10      	    2935	     39679 ns/op	   21664 B/op	    1608 allocs/op
+BenchmarkParseAtRules-10            	    3560	     36129 ns/op	   22240 B/op	    1512 allocs/op
+BenchmarkParseMalformed-10          	  131804	       928.4 ns/op	     320 B/op	      18 allocs/op
+BenchmarkParseStyleAttribute-10     	   50007	      2455 ns/op	    1232 B/op	     118 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/css	1.680s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/renderer
+cpu: VirtualApple @ 2.50GHz
+BenchmarkLayoutSmall-10                   	       1	 141732084 ns/op	67134192 B/op	  193440 allocs/op
+BenchmarkLayoutMedium-10                  	    1623	     72982 ns/op	  103406 B/op	     352 allocs/op
+BenchmarkLayoutLarge-10                   	    1684	     71736 ns/op	  103400 B/op	     352 allocs/op
+BenchmarkLayoutVeryLarge-10               	    1621	     71169 ns/op	  103400 B/op	     352 allocs/op
+BenchmarkHitTestSmall-10                  	13332406	         8.767 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHitTestMedium-10                 	 7186632	        17.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHitTestLarge-10                  	 7140696	        17.01 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDisplayListBuildSmall-10         	   44211	      2673 ns/op	    2496 B/op	      32 allocs/op
+BenchmarkDisplayListBuildMedium-10        	   24639	      4762 ns/op	    4800 B/op	      47 allocs/op
+BenchmarkDisplayListBuildLarge-10         	   23986	      4878 ns/op	    4800 B/op	      47 allocs/op
+BenchmarkFullPipelineSmall-10             	    2612	     48216 ns/op	   72816 B/op	     244 allocs/op
+BenchmarkFullPipelineMedium-10            	    1498	     77639 ns/op	  108200 B/op	     399 allocs/op
+BenchmarkFullPipelineLarge-10             	    1575	     77035 ns/op	  108200 B/op	     399 allocs/op
+BenchmarkViewportRenderingSmall-10        	  428220	       281.6 ns/op	     112 B/op	       3 allocs/op
+BenchmarkViewportRenderingMedium-10       	  273350	       446.7 ns/op	     240 B/op	       4 allocs/op
+BenchmarkViewportRenderingLarge-10        	  267289	       443.1 ns/op	     240 B/op	       4 allocs/op
+BenchmarkViewportRenderingVeryLarge-10    	  274525	       448.8 ns/op	     240 B/op	       4 allocs/op
+BenchmarkViewportScrollSmall-10           	  910153	       131.6 ns/op	      37 B/op	       1 allocs/op
+BenchmarkViewportScrollMedium-10          	  607184	       203.1 ns/op	      87 B/op	       1 allocs/op
+BenchmarkViewportScrollLarge-10           	  605869	       203.0 ns/op	      87 B/op	       1 allocs/op
+BenchmarkLayoutImageHeavy-10              	     982	    121592 ns/op	  147064 B/op	     779 allocs/op
+BenchmarkFullPipelineImageHeavy-10        	     247	    479301 ns/op	  426136 B/op	    6408 allocs/op
+BenchmarkMutationClassToggle-10           	     345	    335707 ns/op	   47585 B/op	     650 allocs/op
+BenchmarkMutationAppendNode-10            	     364	    334984 ns/op	   47617 B/op	     651 allocs/op
+BenchmarkMutationReplaceText-10           	     363	    332316 ns/op	   47584 B/op	     650 allocs/op
+BenchmarkMutationResizeViewport-10        	     886	    135483 ns/op	   47984 B/op	     642 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/renderer	5.143s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/engine/session
+cpu: VirtualApple @ 2.50GHz
+BenchmarkSessionCreate-10                	369723262	         0.3220 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSessionNavigate-10              	  192825	       542.8 ns/op	     455 B/op	       6 allocs/op
+BenchmarkSessionNavigateComplete-10      	  226858	       558.7 ns/op	     576 B/op	       9 allocs/op
+BenchmarkSessionFullLifecycle-10         	  208009	       621.9 ns/op	     576 B/op	       9 allocs/op
+BenchmarkSessionConcurrentNavigate-10    	  145707	       759.0 ns/op	     456 B/op	       6 allocs/op
+BenchmarkSessionStateAccess-10           	 1716627	        70.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSessionClose-10                 	  199809	       611.3 ns/op	     576 B/op	       9 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/engine/session	1.578s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/engine/navigation
+cpu: VirtualApple @ 2.50GHz
+BenchmarkIDGeneratorNext-10    	 8659491	        13.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSchedulerBegin-10     	  183358	       606.0 ns/op	     407 B/op	       5 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/engine/navigation	0.861s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/engine/metrics
+cpu: VirtualApple @ 2.50GHz
+BenchmarkRecorderBeginEndPhase-10              	  424740	      1789 ns/op	     299 B/op	       0 allocs/op
+BenchmarkRecorderBeginEndPhaseSequential-10    	   29689	      4117 ns/op	    3416 B/op	       0 allocs/op
+BenchmarkRecorderAddCounters-10                	 8517307	        14.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRecorderSnapshot-10                   	    5040	     24903 ns/op	      64 B/op	       1 allocs/op
+BenchmarkRecorderFinalize-10                   	    4147	     27340 ns/op	     672 B/op	       5 allocs/op
+BenchmarkRecorderParallel-10                   	  150895	       951.1 ns/op	     339 B/op	       0 allocs/op
+BenchmarkRecorderDebugLogDisabled-10           	    4447	     27175 ns/op	     672 B/op	       5 allocs/op
+BenchmarkRecorderDebugLogEnabled-10            	    3874	     33593 ns/op	    3125 B/op	      26 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/engine/metrics	2.539s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/engine/testpages
+cpu: VirtualApple @ 2.50GHz
+BenchmarkList-10                             	  797764	       147.7 ns/op	     384 B/op	       1 allocs/op
+BenchmarkGetLongArticle-10                   	15964611	         7.537 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetDocumentation-10                 	13785312	         8.891 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetTableHeavy-10                    	11140638	        10.77 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetFormHeavy-10                     	10178439	        11.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetImageHeavy-10                    	 8147076	        14.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetJavaScriptLightTodo-10           	 7871991	        15.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetScrollingShort-10                	 7164481	        16.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetScrollingLong-10                 	 6825873	        17.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextDocumentation-10          	 6330351	        18.65 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextTableHeavy-10             	 6073284	        19.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextFormHeavy-10              	 5602927	        21.28 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextImageHeavy-10             	 5045266	        23.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextJavaScriptLightTodo-10    	 4911381	        24.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextScrollingShort-10         	 4702078	        25.56 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetContextScrollingLong-10          	 4404019	        27.12 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/engine/testpages	2.934s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/js
+cpu: VirtualApple @ 2.50GHz
+BenchmarkRuntimeCreate-10             	      32	   3684190 ns/op	 2192707 B/op	   35044 allocs/op
+BenchmarkRuntimeRunScriptSimple-10    	   37628	      3140 ns/op	    3576 B/op	      44 allocs/op
+BenchmarkRuntimeRunScriptDOM-10       	     700	    168777 ns/op	  116201 B/op	    1521 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/js	1.576s
+goos: darwin
+goarch: amd64
+pkg: github.com/vyquocvu/goosie/internal/net
+cpu: VirtualApple @ 2.50GHz
+BenchmarkFetchSimple-10    	    1316	     83355 ns/op	    8313 B/op	      86 allocs/op
+BenchmarkFetchCached-10    	    2745	     43398 ns/op	    4801 B/op	      34 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/internal/net	1.264s

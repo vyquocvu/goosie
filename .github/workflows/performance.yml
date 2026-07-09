@@ -13,15 +13,40 @@ on:
       - "internal/css/**"
       - "internal/renderer/**"
       - "internal/engine/**"
+      - "internal/js/**"
+      - "internal/net/**"
       - "go.mod"
       - "go.sum"
 
+permissions:
+  contents: read
+
 jobs:
-  pr-microbenchmarks:
-    name: PR microbenchmarks
+  race-gate:
+    name: Race detector (engine)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run go test -race for concurrent engine packages
+        run: |
+          go test -race -count=1 -short -timeout=10m \
+            ./internal/engine/...
+
+  microbenchmarks:
+    name: Microbenchmarks
+    runs-on: ubuntu-latest
+    needs: [race-gate]
 
     steps:
       - name: Checkout code
@@ -38,10 +63,67 @@ jobs:
 
       - name: Run parser and selector benchmarks
         run: |
-          go test -run=^$ -bench=BenchmarkParse -benchmem -benchtime=100ms -timeout=10m ./internal/dom
-          go test -run=^$ -bench=BenchmarkParseSelector -benchmem -benchtime=100ms -timeout=10m ./internal/css
+          go test -run='^$' -bench='BenchmarkParse' -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/dom
+          go test -run='^$' -bench='BenchmarkParseSelector|BenchmarkMatch' -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/css
 
       - name: Run layout and display-list benchmarks
         run: |
-          go test -run=^$ -bench=BenchmarkLayout -benchmem -benchtime=100ms -timeout=10m ./internal/renderer
-          go test -run=^$ -bench=BenchmarkDisplayList -benchmem -benchtime=100ms -timeout=10m ./internal/renderer
+          go test -run='^$' -bench='BenchmarkLayout' -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/renderer
+          go test -run='^$' -bench='BenchmarkDisplayList' -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/renderer
+
+      - name: Run navigation and session benchmarks
+        run: |
+          go test -run='^$' -bench='BenchmarkSession|BenchmarkNav' -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/engine/...
+
+      - name: Run metrics benchmarks
+        run: |
+          go test -run='^$' -bench='Benchmark' -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/engine/metrics
+
+      - name: Run testpages benchmarks
+        run: |
+          go test -run='^$' -bench='BenchmarkGet|BenchmarkGetContext|BenchmarkList' \
+            -benchmem -benchtime=100ms -timeout=10m \
+            ./internal/engine/testpages
+
+      - name: Build benchmark comparison script
+        run: chmod +x scripts/bench-ci.sh
+
+      - name: Record baseline on push to main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          scripts/bench-ci.sh record
+          mkdir -p testdata/benchmarks
+          cp testdata/benchmarks/main.txt testdata/benchmarks/main-baseline.txt
+
+      - name: Upload baseline benchmark artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-baseline
+          path: testdata/benchmarks/main.txt
+          retention-days: 90
+
+      - name: Check allocation and timing regressions on PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          scripts/bench-ci.sh check
+        env:
+          BENCHTIME: 100ms
+          ALLOC_FAIL_THRESHOLD: 5
+          MEM_FAIL_THRESHOLD: 10
+          TIMING_WARN_THRESHOLD: 10
+
+      - name: Upload PR benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: testdata/benchmarks/
+          retention-days: 30
