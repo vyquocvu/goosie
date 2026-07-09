@@ -835,36 +835,29 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		return container.NewWithoutLayout()
 	}
 
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+
 	// Build or reuse display list
 	var displayList *DisplayList
 	dlChanged := false
 
-	cr.mu.RLock()
-	dlBuildGen := cr.dlBuildGen
-	_ = dlBuildGen
-
 	if cr.cachedDisplayList != nil && cr.cachedRenderRoot == root && cr.cachedLayoutRoot == layoutRoot {
 		displayList = cr.cachedDisplayList
-		cr.mu.RUnlock()
 	} else {
-		cr.mu.RUnlock()
 		dlb := NewDisplayListBuilder()
 		displayList = dlb.Build(layoutRoot, root)
 		SortByZIndex(displayList)
-		cr.mu.Lock()
 		cr.cachedDisplayList = displayList
 		cr.cachedRenderRoot = root
 		cr.cachedLayoutRoot = layoutRoot
-		cr.mu.Unlock()
 		dlChanged = true
 	}
 
 	// Invalidate object cache on display list rebuild
 	if dlChanged {
-		cr.mu.Lock()
 		cr.dlBuildGen++
 		cr.objectCache = make(map[int]fyne.CanvasObject)
-		cr.mu.Unlock()
 	}
 
 	// Object stack for clipped hierarchy

@@ -80,10 +80,24 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		return nil, err
 	}
 
+	if recorder != nil {
+		recorder.AddCounters(metrics.Counters{
+			NodeCount: countHTMLNodes(doc),
+		})
+	}
+
 	// Extract and parse CSS from <style> tags
 	r.stylesheetMu.Lock()
 	r.stylesheet = extractAndParseCSS(doc)
 	r.stylesheetMu.Unlock()
+
+	if recorder != nil && r.stylesheet != nil {
+		rules, selectors := countRulesAndSelectors(r.stylesheet)
+		recorder.AddCounters(metrics.Counters{
+			RuleCount:     rules,
+			SelectorCount: selectors,
+		})
+	}
 
 	// Find body element
 	bodyNode := findBodyNode(doc)
@@ -136,6 +150,14 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		recorder.EndPhase(metrics.PhaseLayout)
 	}
 
+	if recorder != nil {
+		boxes, fragments := countBoxesAndFragments(layoutTree)
+		recorder.AddCounters(metrics.Counters{
+			BoxCount:      boxes,
+			FragmentCount: fragments,
+		})
+	}
+
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
@@ -143,13 +165,13 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 
 	// Load external CSS asynchronously (synchronously in testing mode)
 	if r.testingMode {
-		r.loadExternalCSS(doc)
+		r.loadExternalCSS(ctx, doc)
 		// Re-read current layout tree since Refresh() updated it
 		r.treeMu.RLock()
 		layoutTree = r.currentLayoutTree
 		r.treeMu.RUnlock()
 	} else {
-		go r.loadExternalCSS(doc)
+		go r.loadExternalCSS(ctx, doc)
 	}
 
 	// Pass navigation callback to canvas renderer
@@ -167,6 +189,24 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseRaster)
 	}
+
+	if recorder != nil {
+		// Read cached display list command count
+		r.canvasRenderer.mu.RLock()
+		if r.canvasRenderer.cachedDisplayList != nil {
+			recorder.AddCounters(metrics.Counters{
+				DisplayItemCount: len(r.canvasRenderer.cachedDisplayList.Commands),
+			})
+		}
+		r.canvasRenderer.mu.RUnlock()
+
+		// Count images from renderTree
+		images := countImages(renderTree)
+		recorder.AddCounters(metrics.Counters{
+			ImageCount: images,
+		})
+	}
+
 	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
 	r.loadImages(renderTree)
 
@@ -534,20 +574,27 @@ func shouldAttemptParseExternalCSS(content string) bool {
 }
 
 // loadExternalCSS finds and loads external stylesheets
-func (r *Renderer) loadExternalCSS(doc *html.Node) {
+func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 	links := extractExternalLinks(doc)
 	for _, href := range links {
+		if ctx.Err() != nil {
+			return
+		}
 		// Resolve URL
 		resolvedURL := r.ResolveURL(href)
 
 		// Fetch CSS
-		content, err := r.fetcher.Fetch(resolvedURL)
+		content, err := r.fetcher.FetchWithContext(ctx, resolvedURL, nil)
 		if err != nil {
 			fmt.Printf("Failed to fetch CSS %s: %v\n", resolvedURL, err)
 			continue
 		}
 		if !shouldAttemptParseExternalCSS(content) {
 			continue
+		}
+
+		if ctx.Err() != nil {
+			return
 		}
 
 		// Parse CSS
@@ -576,6 +623,15 @@ func (r *Renderer) loadExternalCSS(doc *html.Node) {
 				// r.stylesheet.AtRules = append(r.stylesheet.AtRules, stylesheet.AtRules...)
 			}
 			r.stylesheetMu.Unlock()
+
+			if recorder := metrics.RecorderFromContext(ctx); recorder != nil {
+				rules, selectors := countRulesAndSelectors(stylesheet)
+				recorder.AddCounters(metrics.Counters{
+					RuleCount:     rules,
+					SelectorCount: selectors,
+				})
+			}
+
 			r.Refresh()
 		}
 
@@ -645,4 +701,75 @@ func extractAndParseCSS(node *html.Node) *css.StyleSheet {
 		return &css.StyleSheet{}
 	}
 	return stylesheet
+}
+
+// Helper functions for counting metrics
+
+func countHTMLNodes(n *html.Node) int {
+	if n == nil {
+		return 0
+	}
+	count := 1
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		count += countHTMLNodes(c)
+	}
+	return count
+}
+
+func countRulesAndSelectors(ss *css.StyleSheet) (rules int, selectors int) {
+	if ss == nil {
+		return 0, 0
+	}
+
+	var countRules func([]css.Rule)
+	countRules = func(rls []css.Rule) {
+		rules += len(rls)
+		for _, r := range rls {
+			selectors += len(r.Selectors)
+		}
+	}
+
+	countRules(ss.Rules)
+
+	var countAtRules func([]css.AtRule)
+	countAtRules = func(atRls []css.AtRule) {
+		for _, ar := range atRls {
+			countRules(ar.Rules)
+			countAtRules(ar.AtRules)
+		}
+	}
+
+	countAtRules(ss.AtRules)
+
+	return rules, selectors
+}
+
+func countBoxesAndFragments(box *LayoutBox) (boxes int, fragments int) {
+	if box == nil {
+		return 0, 0
+	}
+	boxes = 1
+	for _, lineBox := range box.LineBoxes {
+		fragments += len(lineBox.InlineBoxes)
+	}
+	for _, child := range box.Children {
+		cBox, cFrag := countBoxesAndFragments(child)
+		boxes += cBox
+		fragments += cFrag
+	}
+	return boxes, fragments
+}
+
+func countImages(node *RenderNode) int {
+	if node == nil {
+		return 0
+	}
+	count := 0
+	if node.TagName == "img" {
+		count = 1
+	}
+	for _, child := range node.Children {
+		count += countImages(child)
+	}
+	return count
 }

@@ -216,7 +216,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 - [x] Define Phase enum and Metrics/Recorder in `internal/engine/metrics` — phase durations, counters, runtime state, concurrency-safe.
 - [x] Wire Recorder into `navigation.Load` — every `Scheduler.Begin()` creates a recorder.
 - [x] Instrument engine phases: DNS, connect, first byte, body read, parse, style, layout, paint, raster, present.
-- [ ] Record node, rule, selector, box, fragment, display item, tile, and image counts.
+- [x] Record node, rule, selector, box, fragment, display item, tile, and image counts.
 - [x] Record bytes downloaded, decoded image bytes, cache hits, and cache misses.
 - [x] Add structured logs behind a debug flag.
 
@@ -241,7 +241,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.5 Add performance CI gates
 
-- [ ] Run parser, selector, layout, and display-list microbenchmarks on relevant PRs.
+- [x] Run parser, selector, layout, and display-list microbenchmarks on relevant PRs.
 - [ ] Run longer navigation and scrolling scenarios nightly.
 - [ ] Store benchmark artifacts.
 - [ ] Fail CI on significant allocation regressions.
