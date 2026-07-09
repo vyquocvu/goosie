@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
+	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/profile"
@@ -57,12 +58,12 @@ func main() {
 		return renderer.NewRenderer(1000, 700)
 	}
 
-	navScheduler := navigation.NewScheduler()
+	navSession := session.New()
 
 	// Set up navigation callback
 	browser.SetNavigationCallback(func(url string) {
-		load, ctx := navScheduler.Begin(context.Background(), url)
-		loadPageAsync(browser, fetcher, parser, load, ctx, navScheduler)
+		load, ctx := navSession.Navigate(context.Background(), url)
+		loadPageAsync(browser, fetcher, parser, load, ctx, navSession)
 	})
 
 	// Show browser window
@@ -76,7 +77,7 @@ type pageLoadResult struct {
 }
 
 // loadPageAsync fetches and displays a web page asynchronously.
-func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, scheduler *navigation.Scheduler) {
+func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session) {
 	log.Printf("Navigation %s started: %s", load.ID, load.URL)
 
 	// Update browser state on main thread
@@ -90,7 +91,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 
 	// Launch background goroutine for fetch and render
 	go func() {
-		if !scheduler.IsActive(navID) {
+		if !sess.IsActive(navID) {
 			return
 		}
 
@@ -105,7 +106,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 		// Handle anchor links (scroll within current page)
 		if strings.HasPrefix(url, "#") {
 			log.Printf("Navigation %s anchor link: %s", navID, url)
-			if scheduler.IsActive(navID) {
+			if sess.IsActive(navID) {
 				browser.HideLoading()
 			}
 			return
@@ -114,7 +115,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 		// Fetch the page in background
 		html, err := fetcher.FetchWithContext(ctx, resolvedURL, nil)
 
-		if !scheduler.IsActive(navID) {
+		if !sess.IsActive(navID) {
 			log.Printf("Navigation %s stale after fetch: %s", navID, url)
 			return
 		}
@@ -143,20 +144,22 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 </body>
 </html>`
 			} else {
-				updateUIWithError(browser, scheduler, navID, err, resolvedURL)
+				updateUIWithError(browser, sess, navID, err, resolvedURL)
 				return
 			}
 		}
 
-		updateUIWithContent(ctx, browser, fetcher, scheduler, navID, html, resolvedURL)
+		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, resolvedURL)
 	}()
 }
 
 // updateUIWithError updates the UI with an error message.
-func updateUIWithError(browser *ui.Browser, scheduler *navigation.Scheduler, navID navigation.ID, err error, url string) {
-	if !scheduler.IsActive(navID) {
+func updateUIWithError(browser *ui.Browser, sess *session.Session, navID navigation.ID, err error, url string) {
+	if !sess.IsActive(navID) {
+		sess.Fail(err)
 		return
 	}
+	sess.Fail(err)
 	log.Printf("Navigation %s error loading %s: %v", navID, url, err)
 	errorHTML := fmt.Sprintf(`
 		<!DOCTYPE html>
@@ -168,13 +171,13 @@ func updateUIWithError(browser *ui.Browser, scheduler *navigation.Scheduler, nav
 			<p>Error: %s</p>
 		</body>
 		</html>`, url, err.Error())
-	_ = browser.RenderHTMLContent(context.Background(), errorHTML) // Ignore error for simplicity
+	_ = browser.RenderHTMLContent(context.Background(), errorHTML)
 	browser.HideLoading()
 }
 
 // updateUIWithContent updates the UI with HTML content.
-func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, scheduler *navigation.Scheduler, navID navigation.ID, html string, url string) {
-	if !scheduler.IsActive(navID) {
+func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string) {
+	if !sess.IsActive(navID) {
 		return
 	}
 	log.Printf("Navigation %s rendering page content", navID)
@@ -186,6 +189,7 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 		log.Printf("Error rendering HTML: %v", err)
 		browser.SetContent("Error rendering HTML: " + err.Error())
 		browser.HideLoading()
+		sess.Fail(err)
 		return
 	}
 
@@ -202,6 +206,7 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 	// Hide loading indicator
 	browser.HideLoading()
+	sess.Complete()
 
 	// Get or create JS runtime for the active tab
 	tab := browser.ActiveTab()
@@ -264,9 +269,9 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 // loadPage fetches and displays a web page (deprecated - use loadPageAsync).
 func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url string) {
-	scheduler := navigation.NewScheduler()
-	load, ctx := scheduler.Begin(context.Background(), url)
-	loadPageAsync(browser, fetcher, parser, load, ctx, scheduler)
+	s := session.New()
+	load, ctx := s.Navigate(context.Background(), url)
+	loadPageAsync(browser, fetcher, parser, load, ctx, s)
 }
 
 // extractTitle parses the HTML and returns the content of the <title> tag.

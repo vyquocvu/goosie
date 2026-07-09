@@ -263,11 +263,11 @@ Decouple the engine from the browser UI and make navigation, cancellation, and r
 
 ### M1.1 Introduce `EngineSession`
 
-- [ ] Define a session that owns one active document, style state, layout state, script runtime, and rendering state.
-- [ ] Define lifecycle states: created, navigating, parsing, interactive, complete, cancelled, failed, closed.
-- [ ] Add explicit `Close()` behavior.
-- [ ] Ensure all timers, requests, decoders, and script tasks are cancelled on close.
-- [ ] Add lifecycle tests for repeated navigation and tab closure.
+- [x] Define a session that owns one active document, style state, layout state, script runtime, and rendering state.
+- [x] Define lifecycle states: created, navigating, parsing, interactive, complete, cancelled, failed, closed.
+- [x] Add explicit `Close()` behavior.
+- [x] Ensure all timers, requests, decoders, and script tasks are cancelled on close.
+- [x] Add lifecycle tests for repeated navigation and tab closure.
 
 ### M1.2 Introduce a navigation scheduler
 
