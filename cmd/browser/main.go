@@ -148,7 +148,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 			}
 		}
 
-		updateUIWithContent(browser, fetcher, scheduler, navID, html, resolvedURL)
+		updateUIWithContent(ctx, browser, fetcher, scheduler, navID, html, resolvedURL)
 	}()
 }
 
@@ -168,12 +168,12 @@ func updateUIWithError(browser *ui.Browser, scheduler *navigation.Scheduler, nav
 			<p>Error: %s</p>
 		</body>
 		</html>`, url, err.Error())
-	_ = browser.RenderHTMLContent(errorHTML) // Ignore error for simplicity
+	_ = browser.RenderHTMLContent(context.Background(), errorHTML) // Ignore error for simplicity
 	browser.HideLoading()
 }
 
 // updateUIWithContent updates the UI with HTML content.
-func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, scheduler *navigation.Scheduler, navID navigation.ID, html string, url string) {
+func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, scheduler *navigation.Scheduler, navID navigation.ID, html string, url string) {
 	if !scheduler.IsActive(navID) {
 		return
 	}
@@ -181,7 +181,7 @@ func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, scheduler *n
 
 	// Fyne widgets are thread-safe and can be updated from any goroutine
 	// Render HTML using the canvas-based renderer
-	err := browser.RenderHTMLContent(html)
+	err := browser.RenderHTMLContent(ctx, html)
 	if err != nil {
 		log.Printf("Error rendering HTML: %v", err)
 		browser.SetContent("Error rendering HTML: " + err.Error())
@@ -219,7 +219,7 @@ func updateUIWithContent(browser *ui.Browser, fetcher *net.Fetcher, scheduler *n
 		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
 		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
 			log.Printf("DOM mutated by JS, triggering UI re-render")
-			if err := tab.RenderHTML(mutatedHTML); err != nil {
+			if err := tab.RenderHTML(context.Background(), mutatedHTML); err != nil {
 				log.Printf("Error rendering mutated HTML: %v", err)
 			}
 		})

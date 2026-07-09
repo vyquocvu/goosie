@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -46,7 +47,7 @@ func TestRendererWithImages(t *testing.T) {
 	</body></html>`
 
 	// Render the HTML
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestRendererWithMissingImage(t *testing.T) {
 	</body></html>`
 
 	// Render the HTML - should not crash
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestRendererWithImageNoSrc(t *testing.T) {
 	</body></html>`
 
 	// Render the HTML - should not crash
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestImageCacheEviction(t *testing.T) {
 
 		// Load the image
 		html := `<html><body><img src="` + imgPath + `"></body></html>`
-		r.RenderHTML(html)
+		r.RenderHTML(context.Background(), html)
 	}
 
 	// Wait for async loading

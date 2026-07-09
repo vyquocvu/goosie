@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -163,7 +164,7 @@ func TestZIndexRendering(t *testing.T) {
 	r := NewRenderer(800, 600)
 	// We need layout engine to handle positioning (not implemented yet, but let's see if render handles z-index)
 
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -265,7 +266,7 @@ func TestOverflowDisplayList(t *testing.T) {
 	// should be a Scroll container (or at least wrapped in a way that handles overflow).
 
 	r := NewRenderer(800, 600)
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}

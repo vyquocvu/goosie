@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -413,7 +414,7 @@ func TestComprehensiveGeneratedFlexboxFiles(t *testing.T) {
 			}
 
 			r := NewRenderer(800, 600)
-			obj, err := r.RenderHTML(string(content))
+			obj, err := r.RenderHTML(context.Background(), string(content))
 			if err != nil {
 				t.Fatalf("RenderHTML failed for %s: %v", file, err)
 			}

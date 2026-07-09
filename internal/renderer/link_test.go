@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -72,7 +73,7 @@ func TestNavigationCallbackIntegration(t *testing.T) {
 
 	// Render HTML with a link
 	html := `<html><body><a href="/other">Link</a></body></html>`
-	_, err := renderer.RenderHTML(html)
+	_, err := renderer.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}

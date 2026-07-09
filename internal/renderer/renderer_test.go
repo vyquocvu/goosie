@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestRenderHTML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			obj, err := r.RenderHTML(tt.html)
+			obj, err := r.RenderHTML(context.Background(), tt.html)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RenderHTML() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -81,7 +82,7 @@ func TestRenderHTMLWithAttributes(t *testing.T) {
 	r := NewRenderer(800, 600)
 	html := `<html><body><div id="main" class="container"><p>Content</p></div></body></html>`
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
@@ -114,7 +115,7 @@ func TestRenderHTMLHeadings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			obj, err := r.RenderHTML(tt.html)
+			obj, err := r.RenderHTML(context.Background(), tt.html)
 			if err != nil {
 				t.Errorf("RenderHTML() error = %v", err)
 			}
@@ -147,7 +148,7 @@ func TestRenderHTMLLists(t *testing.T) {
 		</html>
 	`
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
@@ -174,7 +175,7 @@ func TestRenderHTMLLinks(t *testing.T) {
 		</html>
 	`
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
@@ -194,7 +195,7 @@ func TestRenderHTMLImages(t *testing.T) {
 		</html>
 	`
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
@@ -228,7 +229,7 @@ func TestRenderHTMLComplexStructure(t *testing.T) {
 		</html>
 	`
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}
@@ -243,7 +244,7 @@ func TestRenderHTMLInvalidHTML(t *testing.T) {
 	// Even malformed HTML should be parsed (html.Parse is lenient)
 	html := "<div><p>Unclosed tags"
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	// html.Parse is very forgiving and won't error on malformed HTML
 	if err != nil {
 		t.Logf("Note: html.Parse accepted malformed HTML: %v", err)

@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"image"
 	"image/color"
 	"strings"
@@ -64,7 +65,7 @@ func TestCSSDisplayNone(t *testing.T) {
 	// Inject mock loader
 	r.SetImageLoader(&MockImageLoader{})
 
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestCSSVisibilityHidden(t *testing.T) {
 		}
 	})
 
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -213,7 +214,7 @@ func TestCSSOpacity(t *testing.T) {
 		}
 	})
 
-	canvasObj, err := r.RenderHTML(htmlContent)
+	canvasObj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"fyne.io/fyne/v2/test"
@@ -42,7 +43,7 @@ func TestFlexboxLayout(t *testing.T) {
 		</html>
 	`
 
-	_, err := r.RenderHTML(html)
+	_, err := r.RenderHTML(context.Background(), html)
 	assert.NoError(t, err)
 
 	// Hit test logic
@@ -120,7 +121,7 @@ func TestGridLayout(t *testing.T) {
 		</html>
 	`
 
-	_, err := r.RenderHTML(html)
+	_, err := r.RenderHTML(context.Background(), html)
 	assert.NoError(t, err)
 
 	// Cell 1: 0,0 -> 50,25 (center)

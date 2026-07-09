@@ -1,6 +1,7 @@
 package security
 
 import (
+	"context"
 	"testing"
 
 	"fyne.io/fyne/v2/test"
@@ -35,7 +36,7 @@ func TestRendererDoSProtection(t *testing.T) {
 				}
 			}()
 
-			_, err := r.RenderHTML(input)
+			_, err := r.RenderHTML(context.Background(), input)
 			// We don't necessarily expect an error, but we definitely don't want a panic
 			if err != nil {
 				t.Logf("Renderer handled invalid input with error: %v", err)

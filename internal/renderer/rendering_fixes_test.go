@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,7 @@ func TestOverflowHiddenDoesNotPanic(t *testing.T) {
 	</style></head><body><div class="clip"><p>Overflowing content here</p></div></body></html>`
 	r := NewRenderer(800, 600)
 	r.SetTestingMode(true)
-	obj, err := r.RenderHTML(htmlStr)
+	obj, err := r.RenderHTML(context.Background(), htmlStr)
 	assert.NoError(t, err)
 	assert.NotNil(t, obj)
 }

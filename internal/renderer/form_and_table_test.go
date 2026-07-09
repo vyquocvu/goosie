@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestTableElementRendering(t *testing.T) {
 		</html>
 	`
 	r := NewRenderer(800, 600)
-	obj, err := r.RenderHTML(htmlContent)
+	obj, err := r.RenderHTML(context.Background(), htmlContent)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}

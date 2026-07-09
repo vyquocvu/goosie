@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestRendererWithDataURI(t *testing.T) {
 	</body></html>`
 
 	// Render the HTML
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestRendererWithImageError(t *testing.T) {
 	</body></html>`
 
 	// Render the HTML
-	_, err := r.RenderHTML(html)
+	_, err := r.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML failed: %v", err)
 	}

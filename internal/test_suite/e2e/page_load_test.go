@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"io"
 	stdnet "net"
 	"net/http"
@@ -90,7 +91,7 @@ func TestRealPageLoad(t *testing.T) {
 
 	// 4. Render
 	r.SetCurrentURL(ts.URL) // Crucial for resolving /style.css
-	_, err = r.RenderHTML(content)
+	_, err = r.RenderHTML(context.Background(), content)
 	assert.NoError(t, err)
 
 	// 5. Wait for external CSS to load (async)
@@ -177,7 +178,7 @@ func TestExternalCSSNonCSSResponseIsIgnored(t *testing.T) {
 		assert.NoError(t, err)
 
 		r.SetCurrentURL(ts.URL)
-		_, err = r.RenderHTML(content)
+		_, err = r.RenderHTML(context.Background(), content)
 		assert.NoError(t, err)
 
 		select {

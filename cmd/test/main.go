@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -102,7 +103,7 @@ func main() {
 		}
 
 		// Render fetched content first
-		obj, err := r.RenderHTML(html)
+		obj, err := r.RenderHTML(context.Background(), html)
 		if err != nil {
 			log.Printf("  ✗ Failed to render example.com: %v", err)
 		} else {
@@ -122,7 +123,7 @@ func main() {
 				continue
 			}
 
-			obj, err := r.RenderHTML(string(content))
+			obj, err := r.RenderHTML(context.Background(), string(content))
 			if err != nil {
 				log.Printf("  ✗ Failed to render %s: %v", examplePath, err)
 				continue

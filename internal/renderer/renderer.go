@@ -1,7 +1,9 @@
 package renderer
 
 import (
+	"context"
 	"fmt"
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"net/url"
 	"strings"
 	"sync"
@@ -63,10 +65,18 @@ func NewRenderer(width, height float32) *Renderer {
 }
 
 // RenderHTML renders HTML content and returns a Fyne canvas object
-func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
+func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
+	recorder := metrics.RecorderFromContext(ctx)
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseParse)
+	}
+
 	// Parse HTML
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
+		if recorder != nil {
+			recorder.EndPhase(metrics.PhaseParse)
+		}
 		return nil, err
 	}
 
@@ -84,6 +94,11 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 
 	// Build render tree
 	renderTree := BuildRenderTree(bodyNode)
+
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseParse)
+	}
+
 	if renderTree == nil {
 		// Return empty container if no content
 		return r.canvasRenderer.Render(nil), nil
@@ -94,6 +109,10 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	r.treeMu.RUnlock()
 
 	r.treeMu.Lock()
+
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseStyle)
+	}
 	// Apply styles
 	renderTreeCopy := renderTree.Clone()
 	r.stylesheetMu.RLock()
@@ -102,11 +121,20 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 		styleManager.ApplyStyles(renderTreeCopy)
 	}
 	r.stylesheetMu.RUnlock()
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseStyle)
+	}
 
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseLayout)
+	}
 	// Perform layout
 	layoutEngine := NewLayoutEngine(width, height)
 	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
 	renderTree = renderTreeCopy
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseLayout)
+	}
 
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree
@@ -131,8 +159,14 @@ func (r *Renderer) RenderHTML(htmlContent string) (fyne.CanvasObject, error) {
 	r.treeMu.RUnlock()
 	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
 
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseRaster)
+	}
 	// Render to canvas with viewport optimization
 	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseRaster)
+	}
 	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
 	r.loadImages(renderTree)
 

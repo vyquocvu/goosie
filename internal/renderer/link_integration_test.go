@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"testing"
 )
 
@@ -46,7 +47,7 @@ func TestLinkRendering(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			renderer.SetCurrentURL(tt.baseURL)
-			_, err := renderer.RenderHTML(tt.html)
+			_, err := renderer.RenderHTML(context.Background(), tt.html)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RenderHTML() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -71,7 +72,7 @@ func TestLinkClickNavigation(t *testing.T) {
 <a href="other.html">Relative</a>
 </body></html>`
 
-	_, err := renderer.RenderHTML(html)
+	_, err := renderer.RenderHTML(context.Background(), html)
 	if err != nil {
 		t.Fatalf("RenderHTML() error = %v", err)
 	}

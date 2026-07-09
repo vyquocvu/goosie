@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io/fs"
 	"log"
@@ -43,7 +44,7 @@ func main() {
 			r.SetCurrentURL("file://" + abs)
 		}
 
-		obj, err := r.RenderHTML(string(content))
+		obj, err := r.RenderHTML(context.Background(), string(content))
 		if err != nil {
 			log.Printf("render error for %s: %v", f, err)
 			continue
