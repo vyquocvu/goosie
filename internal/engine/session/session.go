@@ -9,6 +9,9 @@ package session
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/cookiejar"
 	"sync"
 	"time"
 
@@ -57,6 +60,24 @@ type Event struct {
 	Err   error
 }
 
+// defaultTransport returns a shared http.Transport configured with
+// sensible connection limits and timeouts for browser engine use.
+func defaultTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 6,
+		MaxConnsPerHost:     6,
+		IdleConnTimeout:     90 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+}
+
 // Session owns the lifecycle of one browsing context.
 // It is safe for concurrent use.
 type Session struct {
@@ -68,13 +89,17 @@ type Session struct {
 	err       error
 	onEvent   func(Event)
 	closed    bool
+
+	transport *http.Transport
 }
 
-// New creates a new Session in the Created state.
+// New creates a new Session in the Created state with a shared HTTP
+// transport configured for concurrent browser engine use.
 func New() *Session {
 	return &Session{
 		scheduler: navigation.NewScheduler(),
 		state:     StateCreated,
+		transport: defaultTransport(),
 	}
 }
 
@@ -209,6 +234,9 @@ func (s *Session) Close() {
 	s.mu.Unlock()
 
 	s.scheduler.Cancel()
+	if s.transport != nil {
+		s.transport.CloseIdleConnections()
+	}
 	s.fireEvent(Event{State: StateClosed, NavID: navID, URL: url})
 }
 
@@ -271,6 +299,27 @@ func (s *Session) StartedAt() time.Time {
 	// The scheduler doesn't expose started time; callers should track
 	// via load.StartedAt. This is provided as a convenience.
 	return time.Time{}
+}
+
+// Transport returns the session's shared HTTP transport. The transport
+// is closed by Session.Close and must not be used after the session is
+// closed.
+func (s *Session) Transport() *http.Transport {
+	return s.transport
+}
+
+// HTTPClient returns an *http.Client that shares the session's HTTP
+// transport with a fresh cookie jar. Each call returns a new client
+// so callers that need separate cookie state (e.g., per-tab) can
+// create isolated clients while sharing the underlying connection pool.
+// The client inherits the transport's concurrency limits and timeouts.
+func (s *Session) HTTPClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Transport: s.transport,
+		Jar:       jar,
+		Timeout:   30 * time.Second,
+	}
 }
 
 func (s *Session) fireEvent(ev Event) {

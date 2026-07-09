@@ -13,6 +13,20 @@ Every page load receives a monotonic navigation ID from `internal/engine/navigat
 3. Attach the ID to the load's `context.Context` for downstream phases
 4. Reject stale load callbacks when a superseded navigation completes
 
+## Shared HTTP Transport
+
+The `internal/engine/session.Session` owns one configured `http.Transport` that is reused
+across all HTTP requests within a browsing context. The transport is created with sensible
+connection limits (MaxIdleConns=100, MaxConnsPerHost=6), timeouts (dial 30s, TLS 10s),
+and HTTP/2 support. Callers obtain a client sharing the transport via `Session.HTTPClient()`
+(which provides a fresh `http.Client` with a cookie jar) or access the raw transport via
+`Session.Transport()`.
+
+The transport lifecycle matches the session lifecycle — `Session.Close()` calls
+`CloseIdleConnections()` to release pooled connections. In-flight requests complete
+normally even after Close. This prevents connection leaks across repeated navigations
+and gives the engine explicit control over network resource limits.
+
 ```
 User enters URL
   -> Scheduler.Begin(url)

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"net/http/cookiejar"
 	"sync"
 	"testing"
 	"time"
@@ -706,8 +707,8 @@ func TestSessionRecorderPhasesWorkThroughContext(t *testing.T) {
 	rec.EndPhase(metrics.PhaseParse)
 	rec.EndPhase(metrics.PhaseLayout)
 	rec.AddCounters(metrics.Counters{
-		NodeCount:    42,
-		RuleCount:    5,
+		NodeCount:     42,
+		RuleCount:     5,
 		SelectorCount: 7,
 	})
 
@@ -747,4 +748,148 @@ func TestFromContext(t *testing.T) {
 	if rec != nil {
 		t.Fatal("expected nil recorder from background context")
 	}
+}
+
+// --- Transport tests ---
+
+func TestNewSessionHasTransport(t *testing.T) {
+	s := New()
+	if s.Transport() == nil {
+		t.Fatal("New() session has nil transport")
+	}
+}
+
+func TestSessionTransportDefaults(t *testing.T) {
+	s := New()
+	tr := s.Transport()
+	if tr.MaxIdleConns != 100 {
+		t.Fatalf("MaxIdleConns = %d, want 100", tr.MaxIdleConns)
+	}
+	if tr.MaxIdleConnsPerHost != 6 {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want 6", tr.MaxIdleConnsPerHost)
+	}
+	if tr.MaxConnsPerHost != 6 {
+		t.Fatalf("MaxConnsPerHost = %d, want 6", tr.MaxConnsPerHost)
+	}
+	if tr.IdleConnTimeout != 90*time.Second {
+		t.Fatalf("IdleConnTimeout = %v, want 90s", tr.IdleConnTimeout)
+	}
+	if !tr.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 should be true")
+	}
+	if tr.TLSHandshakeTimeout != 10*time.Second {
+		t.Fatalf("TLSHandshakeTimeout = %v, want 10s", tr.TLSHandshakeTimeout)
+	}
+}
+
+func TestSessionHTTPClientUsesSharedTransport(t *testing.T) {
+	s := New()
+	c1 := s.HTTPClient()
+	c2 := s.HTTPClient()
+
+	want := s.Transport()
+	if c1.Transport != want {
+		t.Fatal("HTTPClient().Transport is not the session's transport")
+	}
+	if c2.Transport != want {
+		t.Fatal("second HTTPClient().Transport is not the session's transport")
+	}
+	if c1 == c2 {
+		t.Fatal("HTTPClient() should return a new client each call")
+	}
+}
+
+func TestSessionHTTPClientHasTimeout(t *testing.T) {
+	s := New()
+	c := s.HTTPClient()
+	if c.Timeout != 30*time.Second {
+		t.Fatalf("HTTPClient().Timeout = %v, want 30s", c.Timeout)
+	}
+}
+
+func TestSessionHTTPClientHasCookieJar(t *testing.T) {
+	s := New()
+	c := s.HTTPClient()
+	if c.Jar == nil {
+		t.Fatal("HTTPClient() missing cookie jar")
+	}
+	_, ok := c.Jar.(*cookiejar.Jar)
+	if !ok {
+		t.Fatalf("HTTPClient() Jar = %T, want *cookiejar.Jar", c.Jar)
+	}
+}
+
+func TestSessionCloseClosesTransport(t *testing.T) {
+	s := New()
+	tr := s.Transport()
+
+	// Close once — should close idle connections without panic.
+	s.Close()
+
+	// Transport should still be the same object (not nil'd) but idle
+	// connections are closed. Calling CloseIdleConnections again is safe.
+	tr.CloseIdleConnections()
+	if s.Transport() == nil {
+		t.Fatal("Transport() should not return nil after Close")
+	}
+}
+
+func TestSessionCloseIdempotentTransport(t *testing.T) {
+	s := New()
+	s.Close()
+	s.Close()         // must not panic
+	_ = s.Transport() // must not panic
+}
+
+func TestSessionTransportSurvivesNavigationCancel(t *testing.T) {
+	s := New()
+	tr := s.Transport()
+
+	// Navigate and cancel repeatedly — transport should remain intact.
+	for i := 0; i < 10; i++ {
+		s.Navigate(context.Background(), "https://example.com")
+		s.Cancel()
+		if s.Transport() == nil {
+			t.Fatal("transport became nil after Cancel")
+		}
+		if s.Transport() != tr {
+			t.Fatal("transport was replaced after Cancel")
+		}
+	}
+
+	// Transport should still be functional.
+	client := s.HTTPClient()
+	if client.Transport != tr {
+		t.Fatal("HTTPClient() uses a different transport after cancel")
+	}
+}
+
+func TestSessionTransportSameAcrossNavigations(t *testing.T) {
+	s := New()
+	tr := s.Transport()
+
+	// Run several complete navigation cycles.
+	for i := 0; i < 5; i++ {
+		s.Navigate(context.Background(), "https://example.com")
+		s.Complete()
+		if s.Transport() != tr {
+			t.Fatal("transport was replaced after navigation")
+		}
+	}
+}
+
+func TestSessionTransportHTTPClientConcurrentSafe(t *testing.T) {
+	s := New()
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := s.HTTPClient()
+			if c.Transport != s.Transport() {
+				t.Error("HTTPClient() returned client with wrong transport")
+			}
+		}()
+	}
+	wg.Wait()
 }

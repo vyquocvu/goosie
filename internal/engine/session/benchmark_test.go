@@ -81,3 +81,26 @@ func BenchmarkSessionClose(b *testing.B) {
 		s.Close()
 	}
 }
+
+func BenchmarkSessionTransportCreation(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = defaultTransport()
+	}
+}
+
+func BenchmarkSessionHTTPClient(b *testing.B) {
+	s := New()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = s.HTTPClient()
+	}
+}
+
+func BenchmarkSessionTransportAccess(b *testing.B) {
+	s := New()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = s.Transport()
+	}
+}

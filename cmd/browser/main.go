@@ -41,8 +41,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open storage: %v", err)
 	}
+
+	navSession := session.New()
 	networkService := net.NewService(net.ServiceOptions{
-		Cache: net.NewHTTPCache(filepath.Join(prof.Root(), "cache"), prof.Private()),
+		Client: navSession.HTTPClient(),
+		Cache:  net.NewHTTPCache(filepath.Join(prof.Root(), "cache"), prof.Private()),
 	})
 	fetcher := net.NewFetcherWithService(networkService)
 	parser := dom.NewParser()
@@ -57,8 +60,6 @@ func main() {
 	browser.RendererFactory = func() ui.HTMLRenderer {
 		return renderer.NewRenderer(1000, 700)
 	}
-
-	navSession := session.New()
 
 	// Set up navigation callback
 	browser.SetNavigationCallback(func(url string) {
