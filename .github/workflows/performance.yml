@@ -1,0 +1,47 @@
+name: Performance
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/performance.yml"
+      - "internal/dom/**"
+      - "internal/css/**"
+      - "internal/renderer/**"
+      - "internal/engine/**"
+      - "go.mod"
+      - "go.sum"
+
+jobs:
+  pr-microbenchmarks:
+    name: PR microbenchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run parser and selector benchmarks
+        run: |
+          go test -run=^$ -bench=BenchmarkParse -benchmem -benchtime=100ms -timeout=10m ./internal/dom
+          go test -run=^$ -bench=BenchmarkParseSelector -benchmem -benchtime=100ms -timeout=10m ./internal/css
+
+      - name: Run layout and display-list benchmarks
+        run: |
+          go test -run=^$ -bench=BenchmarkLayout -benchmem -benchtime=100ms -timeout=10m ./internal/renderer
+          go test -run=^$ -bench=BenchmarkDisplayList -benchmem -benchtime=100ms -timeout=10m ./internal/renderer

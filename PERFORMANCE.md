@@ -244,6 +244,22 @@ go test ./internal/renderer -bench=Scroll -benchmem
 go test ./internal/renderer -bench=Mutation -benchmem
 ```
 
+### Pull Request Benchmark Gate
+
+The `Performance` GitHub Actions workflow runs bounded PR microbenchmarks when
+benchmark-sensitive engine paths change:
+
+```bash
+go test -run=^$ -bench=BenchmarkParse -benchmem -benchtime=100ms -timeout=10m ./internal/dom
+go test -run=^$ -bench=BenchmarkParseSelector -benchmem -benchtime=100ms -timeout=10m ./internal/css
+go test -run=^$ -bench=BenchmarkLayout -benchmem -benchtime=100ms -timeout=10m ./internal/renderer
+go test -run=^$ -bench=BenchmarkDisplayList -benchmem -benchtime=100ms -timeout=10m ./internal/renderer
+```
+
+This gate verifies the parser, selector, layout, and display-list benchmark
+suites stay runnable on relevant pull requests. Timing regression thresholds
+and artifact storage are tracked as separate M0.5 tasks.
+
 ### Profiling
 
 ```bash

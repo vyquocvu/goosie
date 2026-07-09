@@ -141,6 +141,10 @@ go test -bench=. -benchmem ./internal/engine/testpages/
 go test -bench=. -benchmem ./internal/renderer/
 ```
 
+Pull requests that touch engine benchmark-sensitive paths run a bounded
+Performance workflow for DOM parser, CSS selector parser, layout, and
+display-list microbenchmarks with allocation reporting.
+
 ### GUI Browser
 
 Run the full browser with GUI:

@@ -241,7 +241,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.5 Add performance CI gates
 
-- [ ] Run parser, selector, layout, and display-list microbenchmarks on relevant PRs.
+- [x] Run parser, selector, layout, and display-list microbenchmarks on relevant PRs.
 - [ ] Run longer navigation and scrolling scenarios nightly.
 - [ ] Store benchmark artifacts.
 - [ ] Fail CI on significant allocation regressions.
