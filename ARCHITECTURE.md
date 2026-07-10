@@ -271,6 +271,35 @@ M5 (display list) add animation support.
 Property interning and lookup are zero-allocation operations after the
 initial table population.
 
+### Compiled Selectors (M3.2)
+
+The `internal/css` package provides selector compilation via
+`CompileStyleSheet()` which converts a `StyleSheet` into a
+`CompiledStyleSheet` with precomputed specificity and bucketed rules
+for O(1) candidate lookup.
+
+**Key features:**
+- `CompiledSelector`: flat slice-based representation of selector chains
+  (replaces linked `SelectorSequence` for matching)
+- Precomputed specificity per CSS spec: `[3]uint16` for (id, class, tag)
+- Rules bucketed by rightmost key: ID, class, tag, attribute, or universal
+- `MatchElement(Element)` uses bucket lookup to avoid scanning all rules
+- `Element` interface keeps CSS package independent from renderer
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ComputeSpecificity | 10.7 | 0 | 0 |
+| CompileStyleSheet (Medium) | 6,663 | 9,816 | 81 |
+| MatchElement (ByID) | 459 | 216 | 4 |
+| MatchElement (ByClass) | 442 | 216 | 4 |
+| MatchVsLinear (Bucketed) | 765 | 136 | 6 |
+| MatchVsLinear (Linear) | 1,578 | 2,930 | 22 |
+
+Bucketed matching is 2x faster and uses 95% less memory than linear
+scan on selector-heavy stylesheets.
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.
