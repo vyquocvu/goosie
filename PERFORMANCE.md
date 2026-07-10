@@ -397,6 +397,46 @@ go test -v -run="TestMeasure" ./internal/dom/
 go test -bench=BenchmarkMeasure -benchmem ./internal/dom/
 ```
 
+## Atom and String Interning (M2.2)
+
+The `internal/dom/atom` package provides compact uint32 handles for interned
+strings, forming the foundation for the compact DOM store (M2.3) and CSS
+pipeline (M3.1).
+
+### Static Atoms
+
+112 HTML tag names and 48 attribute names are pre-assigned as static `Atom`
+constants. Lookup is O(1) with zero allocations:
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| LookupStaticHit (10 tags) | 124 | 0 | 0 |
+| LookupStaticMiss | 9.2 | 0 | 0 |
+| StaticAtomString | 0.3 | 0 | 0 |
+
+### Dynamic Table
+
+The bounded LRU-evicted `Table` supports configurable entry count and byte
+limits. Hot-path operations achieve zero allocations:
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| TableInternHit | 37.6 | 0 | 0 |
+| TableInternStatic | 16.6 | 0 | 0 |
+| TableLookupHit | 32.1 | 0 | 0 |
+| TableLookupMiss | 21.9 | 0 | 0 |
+| TableLookupStatic | 13.3 | 0 | 0 |
+| TableEviction | 5,763 | 80 | 3 |
+| RealisticWorkload (100 names) | 9,361 | 0 | 0 |
+| CorpusClasses (17 names) | 1,116 | 0 | 0 |
+| Concurrent (parallel) | 501 | 7 | 1 |
+
+Run the benchmarks:
+
+```bash
+go test -bench=. -benchmem ./internal/dom/atom/
+```
+
 ## Known Limitations
 
 1. **Buffer Zone Trade-off**: Larger buffer zones (50% above/below viewport) use more memory but provide smoother scrolling

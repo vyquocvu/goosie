@@ -136,6 +136,9 @@ go test -bench=. -benchmem ./internal/css/
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/
 
+# Atom and string interning benchmarks (M2.2)
+go test -bench=. -benchmem ./internal/dom/atom/
+
 # Deterministic engine corpus benchmarks (article, documentation, table, form, image, JavaScript-light, scrolling)
 go test -bench=. -benchmem ./internal/engine/testpages/
 
@@ -263,8 +266,9 @@ The browser demonstrates web functionality by:
 - **internal/engine/navigation**: Monotonic navigation IDs, cancellable load contexts, and stale-callback rejection
 - **internal/engine/session**: Session lifecycle (state machine, context propagation, event callbacks) wrapping the navigation scheduler
 - **internal/engine/metrics**: Phase-timing recorder and counters for tracing navigation from URL entry to first paint
-- **internal/net**: Async HTTP client with context support for fetching web pages
 - **internal/dom**: HTML parser for extracting content
+- **internal/dom/atom**: String interning with static atoms for HTML tags/attributes and bounded LRU-evicted dynamic table (M2.2)
+- **internal/net**: Async HTTP client with context support for fetching web pages
 - **internal/renderer**: Canvas-based HTML renderer with layout engine
 - **internal/js**: JavaScript runtime wrapper around Goja with enhanced console
 - **internal/ui**: Fyne-based GUI components with loading indicator and console panel

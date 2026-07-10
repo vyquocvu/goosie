@@ -335,12 +335,12 @@ The final representation may differ, but stable IDs and contiguous storage are r
 
 ### M2.2 Implement atom and string interning
 
-- [ ] Intern tag names.
-- [ ] Intern attribute names.
-- [ ] Intern common class names and IDs where beneficial.
-- [ ] Keep document text in a compact text store.
-- [ ] Avoid interning unbounded arbitrary large strings.
-- [ ] Add memory limits and eviction rules where global interning is used.
+- [x] Intern tag names.
+- [x] Intern attribute names.
+- [x] Intern common class names and IDs where beneficial.
+- [x] Keep document text in a compact text store.
+- [x] Avoid interning unbounded arbitrary large strings.
+- [x] Add memory limits and eviction rules where global interning is used.
 
 ### M2.3 Implement the compact DOM store
 
