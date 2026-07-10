@@ -328,10 +328,10 @@ The final representation may differ, but stable IDs and contiguous storage are r
 
 ### M2.1 Measure the current DOM representation
 
-- [ ] Record bytes and allocations per node.
-- [ ] Record parse time for each corpus page.
-- [ ] Record GC behavior for repeated navigation.
-- [ ] Identify APIs that depend directly on `html.Node` pointers.
+- [x] Record bytes and allocations per node.
+- [x] Record parse time for each corpus page.
+- [x] Record GC behavior for repeated navigation.
+- [x] Identify APIs that depend directly on `html.Node` pointers.
 
 ### M2.2 Implement atom and string interning
 

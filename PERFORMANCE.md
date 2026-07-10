@@ -354,6 +354,49 @@ No regression observed in existing scheduler benchmarks.
 go test -bench=BenchmarkAcquireRelease -benchmem ./internal/engine/navigation/
 ```
 
+## DOM Representation Baseline (M2.1)
+
+Measurements of the current `*html.Node` DOM tree before compact store migration.
+
+### Struct Sizes (64-bit)
+
+| Type | Size | Pointer fields |
+|------|------|----------------|
+| `html.Node` | 104 B | 8 pointer fields (61.5% pointer density) |
+| `html.Attribute` | 48 B | 4 string headers |
+
+### Corpus Node Counts and Estimated Heap
+
+| Page | HTML (B) | Nodes | Attrs | Est Heap (KB) |
+|------|----------|-------|-------|----------------|
+| long_article | 5,064 | 184 | 22 | 19.7 |
+| documentation | 1,834 | 136 | 24 | 14.9 |
+| table_heavy | 3,998 | 498 | 48 | 52.8 |
+| form_heavy | 3,868 | 209 | 101 | 26.0 |
+| image_heavy | 3,363 | 96 | 57 | 12.4 |
+| javascript_light_todo | 3,287 | 104 | 39 | 12.4 |
+| scrolling_short | 950 | 63 | 6 | 6.7 |
+| scrolling_long | 11,694 | 333 | 108 | 38.9 |
+
+### GC Pressure (50 parse cycles, scrolling_long)
+
+- Total allocated per cycle: ~59 KB
+- GC cycles over 50 parses: ~1
+- Avg GC pause: ~69 µs
+- Retained heap growth after GC: near zero (GC reclaims fully)
+- AllocsPerRun(long_article): ~306 allocs, ~1.66 allocs/node
+
+### APIs depending on `*html.Node`
+
+See `internal/dom/api_inventory.go` for the full inventory and migration plan.
+
+Run the measurement benchmarks:
+
+```bash
+go test -v -run="TestMeasure" ./internal/dom/
+go test -bench=BenchmarkMeasure -benchmem ./internal/dom/
+```
+
 ## Known Limitations
 
 1. **Buffer Zone Trade-off**: Larger buffer zones (50% above/below viewport) use more memory but provide smoother scrolling
