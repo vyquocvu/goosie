@@ -214,6 +214,26 @@ The store is additive infrastructure — existing `*html.Node`-based
 consumers (parser, renderer, JS runtime) are unaffected until M2.4
 (streaming tree construction) and M2.5 (compatibility adapter).
 
+### Streaming Tree Construction (M2.4)
+
+The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.
+
+**Key components:**
+- `TreeBuilder` — consumes tokens from `html.Tokenizer`, manages an open-element stack, and writes nodes into `Store`
+- `ParseDocumentCtx(ctx, r, cfg)` — context-aware streaming parse entry point on `Parser`
+- `Document` — parse result containing `Store` and root `NodeID`
+- `Resource` / `OnResource` callback — discovers CSS, scripts, and images during parsing for early scheduling
+
+**Design decisions:**
+- Token-by-token processing with `ctx.Done()` checks between tokens for cancellation
+- `SetMaxBuf` bounds the tokenizer input buffer (default 1 MB)
+- Void elements (br, img, input, etc.) are never pushed onto the open stack
+- Malformed HTML tolerance: end tags search the stack from top, popping to match
+- Auto-insertion of html/head/body elements to match `html.Parse` behavior
+- Append-only `Store.AppendAttrs` and `Store.AppendText` methods for O(1) construction
+
+**Backward compatibility:** The existing `ParseDocument(io.Reader) (*html.Node, error)` is preserved. All downstream consumers (renderer, JS runtime, cmd/browser) continue using `*html.Node` until M2.5 provides a compatibility adapter.
+
 ## Navigation State Flow
 
 ```

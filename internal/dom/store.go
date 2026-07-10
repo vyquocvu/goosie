@@ -784,3 +784,67 @@ func (s *Store) HasFlag(id NodeID, flag NodeFlags) bool {
 	}
 	return s.nodes[id].Flags&flag != 0
 }
+
+// AppendAttrs appends attrs for a node during tree building.
+// If the node already has attrs, the new attrs are appended after the existing
+// ones in the global slice, and the node's AttrStart/AttrCount are updated to
+// cover the combined range. This is O(existing + new) due to relocation.
+func (s *Store) AppendAttrs(id NodeID, attrs []Attr) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == NodeNone || int(id) >= len(s.nodes) {
+		return ErrInvalidNodeID
+	}
+	rec := &s.nodes[id]
+	if rec.AttrCount == 0 {
+		// First time: simple append.
+		start := uint32(len(s.attrs))
+		s.attrs = append(s.attrs, attrs...)
+		rec.AttrStart = start
+		rec.AttrCount = uint16(len(attrs))
+		s.attrCount += len(attrs)
+		return nil
+	}
+	// Extend: relocate existing attrs to the end, then append new ones.
+	oldStart := rec.AttrStart
+	oldCount := uint32(rec.AttrCount)
+	newStart := uint32(len(s.attrs))
+	// Copy existing attrs to the new position.
+	s.attrs = append(s.attrs, s.attrs[oldStart:oldStart+oldCount]...)
+	// Append new attrs after existing.
+	s.attrs = append(s.attrs, attrs...)
+	rec.AttrStart = newStart
+	rec.AttrCount = uint16(oldCount) + uint16(len(attrs))
+	s.attrCount += len(attrs)
+	return nil
+}
+
+// AppendText appends text content for a text/comment node during tree building.
+// If the node already has text, the new text is appended to the existing content.
+func (s *Store) AppendText(id NodeID, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == NodeNone || int(id) >= len(s.nodes) {
+		return ErrInvalidNodeID
+	}
+	rec := &s.nodes[id]
+	if rec.TextLen == 0 {
+		// First time: simple append.
+		start := uint32(len(s.textData))
+		s.textData = append(s.textData, text...)
+		rec.TextStart = start
+		rec.TextLen = uint32(len(text))
+		s.textBytes += len(text)
+		return nil
+	}
+	// Extend: copy existing text to end, then append new text.
+	oldStart := rec.TextStart
+	oldLen := rec.TextLen
+	newStart := uint32(len(s.textData))
+	s.textData = append(s.textData, s.textData[oldStart:oldStart+oldLen]...)
+	s.textData = append(s.textData, text...)
+	rec.TextStart = newStart
+	rec.TextLen = oldLen + uint32(len(text))
+	s.textBytes += len(text)
+	return nil
+}
