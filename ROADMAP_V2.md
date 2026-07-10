@@ -344,13 +344,13 @@ The final representation may differ, but stable IDs and contiguous storage are r
 
 ### M2.3 Implement the compact DOM store
 
-- [ ] Store nodes in contiguous slices.
-- [ ] Use stable `NodeID` handles.
-- [ ] Store attributes in a packed attribute slice.
-- [ ] Store rare node metadata separately.
-- [ ] Implement traversal without allocating child slices.
-- [ ] Implement insertion, removal, and replacement operations.
-- [ ] Add generation checks or equivalent protection against stale handles.
+- [x] Store nodes in contiguous slices.
+- [x] Use stable `NodeID` handles.
+- [x] Store attributes in a packed attribute slice.
+- [x] Store rare node metadata separately.
+- [x] Implement traversal without allocating child slices.
+- [x] Implement insertion, removal, and replacement operations.
+- [x] Add generation checks or equivalent protection against stale handles.
 
 ### M2.4 Add streaming tree construction
 

@@ -173,6 +173,47 @@ are rejected to prevent unbounded memory growth. The default table supports
 The atom table is safe for concurrent use and is designed as foundation
 infrastructure for the compact DOM store (M2.3) and CSS pipeline (M3.1).
 
+### Compact DOM Store (M2.3)
+
+The `internal/dom` package provides a compact DOM store (`Store`) that
+replaces pointer-heavy `*html.Node` trees with index-based storage using
+stable `NodeID` handles.
+
+**Data model:**
+
+- `NodeID` (uint32) is an index into a contiguous `[]nodeRecord` slice
+- Stale handle detection via `Kind` field (Kind == 0 means freed)
+- Each node record is 32 bytes with first-child/next-sibling links
+- Attributes stored in a packed `[]Attr` slice (8 bytes per attr)
+- Text content stored in a separate `[]byte` buffer
+- Rare metadata (namespace, etc.) in a dedicated map
+
+**Traversal:**
+
+Zero-allocation iterators for children, subtree (pre-order DFS),
+reverse children, siblings, and ancestors.
+
+**Operations:**
+
+- `Allocate`, `Remove`, `Replace` for node lifecycle
+- `AppendChild`, `PrependChild`, `InsertBefore`, `RemoveChild` for tree mutation
+- `SetAttrs`, `SetText` for content with automatic offset updates
+- `SetFlag`, `ClearFlag`, `SetRareData` for metadata
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| AppendChild | 542 | 215 | 0 |
+| SetAttrs | 22 | 0 | 0 |
+| SetText | 22 | 0 | 0 |
+| ChildIterator (100 children) | 436 | 0 | 0 |
+| SubtreeIterator (111 nodes) | 746 | 0 | 0 |
+
+The store is additive infrastructure — existing `*html.Node`-based
+consumers (parser, renderer, JS runtime) are unaffected until M2.4
+(streaming tree construction) and M2.5 (compatibility adapter).
+
 ## Navigation State Flow
 
 ```
