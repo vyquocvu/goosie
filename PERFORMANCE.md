@@ -483,6 +483,36 @@ Run the benchmarks:
 go test -bench=BenchmarkStore -benchmem ./internal/dom/
 ```
 
+### Compatibility Adapter (M2.5)
+
+The `NodeAdapter` converts compact `Store` subtrees back to `*html.Node` trees
+for unmigrated consumers. This is migration-only infrastructure marked for
+removal before Milestone 5 exit.
+
+**Usage metrics:**
+
+```go
+// Track adapter usage during migration
+count := dom.AdapterUsageCount()
+```
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Small HTML (div+p) | 364 | 837 | 9 |
+| Large HTML (100 divs) | 31,351 | 62,048 | 804 |
+| Table heavy (50 rows) | 16,655 | 39,760 | 355 |
+
+The adapter allocates `*html.Node` trees by design — that's the compatibility
+cost. Usage metrics detect remaining consumers during the migration to NodeID-based APIs.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkAdapter -benchmem ./internal/dom/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |
