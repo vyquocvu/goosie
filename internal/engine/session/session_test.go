@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http/cookiejar"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
+	engineNet "github.com/vyquocvu/goosie/internal/net"
 )
 
 // testTimeout is used in concurrent tests to prevent permanent blocking.
@@ -17,6 +19,7 @@ const testTimeout = 5 * time.Second
 
 func TestNewSessionIsCreated(t *testing.T) {
 	s := New()
+	defer s.Close()
 	if s == nil {
 		t.Fatal("New returned nil")
 	}
@@ -36,6 +39,7 @@ func TestNewSessionIsCreated(t *testing.T) {
 
 func TestSessionNavigateTransitionsToNavigating(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(context.Background(), "https://example.com")
 	if !load.ID.IsValid() {
 		t.Fatal("Navigate returned invalid load ID")
@@ -59,6 +63,7 @@ func TestSessionNavigateTransitionsToNavigating(t *testing.T) {
 
 func TestSessionNavigateReturnsRecorderInContext(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(context.Background(), "https://example.com")
 	rec := metrics.RecorderFromContext(ctx)
 	if rec == nil {
@@ -75,6 +80,7 @@ func TestSessionNavigateReturnsRecorderInContext(t *testing.T) {
 
 func TestSessionCancelTransitionsToCancelled(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(context.Background(), "https://example.com")
 
 	s.Cancel()
@@ -94,6 +100,7 @@ func TestSessionCancelTransitionsToCancelled(t *testing.T) {
 
 func TestSessionCompleteTransitionsToComplete(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 	s.Complete()
 
@@ -104,6 +111,7 @@ func TestSessionCompleteTransitionsToComplete(t *testing.T) {
 
 func TestSessionFailTransitionsToFailed(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 
 	wantErr := errors.New("connection refused")
@@ -119,6 +127,7 @@ func TestSessionFailTransitionsToFailed(t *testing.T) {
 
 func TestSessionFailWithNilError(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 	s.Fail(nil)
 
@@ -183,6 +192,7 @@ func TestSessionCloseCancelsActiveNavigation(t *testing.T) {
 
 func TestSessionRepeatedNavigationAssignsNewIDs(t *testing.T) {
 	s := New()
+	defer s.Close()
 	first, _ := s.Navigate(context.Background(), "https://example.com/first")
 	s.Complete()
 
@@ -201,6 +211,7 @@ func TestSessionRepeatedNavigationAssignsNewIDs(t *testing.T) {
 
 func TestSessionNavigateCancelsPreviousNavigation(t *testing.T) {
 	s := New()
+	defer s.Close()
 	first, firstCtx := s.Navigate(context.Background(), "https://example.com/first")
 
 	second, secondCtx := s.Navigate(context.Background(), "https://example.com/second")
@@ -230,6 +241,7 @@ func TestSessionNavigateCancelsPreviousNavigation(t *testing.T) {
 
 func TestSessionIsActiveRejectsStaleID(t *testing.T) {
 	s := New()
+	defer s.Close()
 	stale, _ := s.Navigate(context.Background(), "https://example.com/stale")
 	current, _ := s.Navigate(context.Background(), "https://example.com/current")
 
@@ -243,6 +255,7 @@ func TestSessionIsActiveRejectsStaleID(t *testing.T) {
 
 func TestSessionIsActiveAfterComplete(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, _ := s.Navigate(context.Background(), "https://example.com")
 	s.Complete()
 
@@ -253,6 +266,7 @@ func TestSessionIsActiveAfterComplete(t *testing.T) {
 
 func TestSessionIsActiveAfterFailed(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, _ := s.Navigate(context.Background(), "https://example.com")
 	s.Fail(errors.New("error"))
 
@@ -263,6 +277,7 @@ func TestSessionIsActiveAfterFailed(t *testing.T) {
 
 func TestSessionEventCallbackFiredOnNavigate(t *testing.T) {
 	s := New()
+	defer s.Close()
 	events := make([]Event, 0, 8)
 	var mu sync.Mutex
 	s.SetEventCallback(func(ev Event) {
@@ -272,6 +287,7 @@ func TestSessionEventCallbackFiredOnNavigate(t *testing.T) {
 	})
 
 	load, _ := s.Navigate(context.Background(), "https://example.com")
+	s.FlushEvents()
 
 	mu.Lock()
 	if len(events) != 1 {
@@ -295,6 +311,7 @@ func TestSessionEventCallbackFiredOnNavigate(t *testing.T) {
 
 func TestSessionEventCallbackFiredOnAllTransitions(t *testing.T) {
 	s := New()
+	defer s.Close()
 	events := make([]Event, 0, 8)
 	var mu sync.Mutex
 	s.SetEventCallback(func(ev Event) {
@@ -307,6 +324,7 @@ func TestSessionEventCallbackFiredOnAllTransitions(t *testing.T) {
 	s.Parsing()
 	s.Interactive()
 	s.Complete()
+	s.FlushEvents()
 
 	mu.Lock()
 	want := []State{StateNavigating, StateParsing, StateInteractive, StateComplete}
@@ -324,50 +342,80 @@ func TestSessionEventCallbackFiredOnAllTransitions(t *testing.T) {
 
 func TestSessionEventCallbackFiredOnCancel(t *testing.T) {
 	s := New()
+	defer s.Close()
 	var got Event
+	var mu sync.Mutex
 	s.SetEventCallback(func(ev Event) {
+		mu.Lock()
 		got = ev
+		mu.Unlock()
 	})
 
 	s.Navigate(context.Background(), "https://example.com")
 	s.Cancel()
+	s.FlushEvents()
 
+	mu.Lock()
 	if got.State != StateCancelled {
 		t.Fatalf("event state = %v, want %v", got.State, StateCancelled)
 	}
+	mu.Unlock()
 }
 
 func TestSessionEventCallbackFiredOnFail(t *testing.T) {
 	s := New()
-	var got Event
+	defer s.Close()
+	events := make([]Event, 0, 8)
+	var mu sync.Mutex
 	s.SetEventCallback(func(ev Event) {
-		got = ev
+		mu.Lock()
+		events = append(events, ev)
+		mu.Unlock()
 	})
 
 	wantErr := errors.New("timeout")
 	s.Navigate(context.Background(), "https://example.com")
 	s.Fail(wantErr)
+	s.FlushEvents()
 
-	if got.State != StateFailed {
-		t.Fatalf("event state = %v, want %v", got.State, StateFailed)
+	mu.Lock()
+	// Fail triggers StateChange (StateFailed) and EventError
+	if len(events) < 2 {
+		t.Fatalf("got %d events, want at least 2", len(events))
 	}
-	if !errors.Is(got.Err, wantErr) {
-		t.Fatalf("event Err = %v, want %v", got.Err, wantErr)
+	stateEv := events[len(events)-2]
+	errEv := events[len(events)-1]
+
+	if stateEv.State != StateFailed {
+		t.Fatalf("event state = %v, want %v", stateEv.State, StateFailed)
 	}
+	if !errors.Is(stateEv.Err, wantErr) {
+		t.Fatalf("event Err = %v, want %v", stateEv.Err, wantErr)
+	}
+	if errEv.Type != EventError {
+		t.Fatalf("event type = %v, want %v", errEv.Type, EventError)
+	}
+	if !errors.Is(errEv.Err, wantErr) {
+		t.Fatalf("event Err = %v, want %v", errEv.Err, wantErr)
+	}
+	mu.Unlock()
 }
 
 func TestSessionEventCallbackRemovedWithNil(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.SetEventCallback(func(ev Event) {
 		t.Fatal("callback should not be called after being removed")
 	})
 	s.SetEventCallback(nil)
 
 	s.Navigate(context.Background(), "https://example.com")
+	s.FlushEvents()
 }
 
 func TestSessionLifecycleFullSequence(t *testing.T) {
 	s := New()
+	defer s.Close()
 
 	// Created -> Navigating -> Parsing -> Interactive -> Complete
 	if s.State() != StateCreated {
@@ -409,6 +457,7 @@ func TestSessionLifecycleFullSequence(t *testing.T) {
 
 func TestSessionLifecycleCancelledDuringParsing(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(context.Background(), "https://example.com")
 	s.Parsing()
 
@@ -429,6 +478,7 @@ func TestSessionLifecycleCancelledDuringParsing(t *testing.T) {
 
 func TestSessionLifecycleFailedDuringNavigation(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(context.Background(), "https://example.com")
 
 	err := errors.New("DNS resolution failed")
@@ -483,8 +533,6 @@ func TestSessionConcurrentNavigateSafe(t *testing.T) {
 			defer wg.Done()
 			_, ctx := s.Navigate(context.Background(), "https://example.com/page")
 			if ctx != nil {
-				// Context will be cancelled by a subsequent Navigate call,
-				// or by the session Close at test end.
 				select {
 				case <-ctx.Done():
 				case <-time.After(time.Second):
@@ -492,7 +540,6 @@ func TestSessionConcurrentNavigateSafe(t *testing.T) {
 			}
 		}()
 	}
-	// Give goroutines time to start and potentially get cancelled.
 	time.Sleep(100 * time.Millisecond)
 	s.Close()
 	wg.Wait()
@@ -500,6 +547,7 @@ func TestSessionConcurrentNavigateSafe(t *testing.T) {
 
 func TestSessionConcurrentStateAccessSafe(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 
 	var wg sync.WaitGroup
@@ -518,6 +566,7 @@ func TestSessionConcurrentStateAccessSafe(t *testing.T) {
 
 func TestSessionConcurrentTransitionsSafe(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 
 	var wg sync.WaitGroup
@@ -538,11 +587,11 @@ func TestSessionConcurrentTransitionsSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// Must not panic or deadlock
 }
 
 func TestSessionConcurrentEventCallbackSafe(t *testing.T) {
 	s := New()
+	defer s.Close()
 	var mu sync.Mutex
 	count := 0
 	s.SetEventCallback(func(ev Event) {
@@ -561,11 +610,11 @@ func TestSessionConcurrentEventCallbackSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// Must not deadlock
 }
 
 func TestSessionNavigateAfterFailed(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com/first")
 	s.Fail(errors.New("error"))
 
@@ -582,7 +631,6 @@ func TestSessionNavigateAfterFailed(t *testing.T) {
 	if s.NavID() != second.ID {
 		t.Fatalf("NavID = %d, want %d", s.NavID(), second.ID)
 	}
-	// Previous error should be cleared
 	if s.NavigationErr() != nil {
 		t.Fatalf("NavigationErr should be nil after new Navigate, got %v", s.NavigationErr())
 	}
@@ -590,6 +638,7 @@ func TestSessionNavigateAfterFailed(t *testing.T) {
 
 func TestSessionNavigateAfterCancelled(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com/first")
 	s.Cancel()
 
@@ -607,6 +656,7 @@ func TestSessionNavigateAfterCancelled(t *testing.T) {
 
 func TestSessionContextCarriesNavigationID(t *testing.T) {
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(context.Background(), "https://example.com")
 
 	id, ok := navigation.IDFromContext(ctx)
@@ -623,6 +673,7 @@ func TestSessionHonoursParentCancellation(t *testing.T) {
 	cancel()
 
 	s := New()
+	defer s.Close()
 	load, ctx := s.Navigate(parent, "https://example.com")
 	if !load.ID.IsValid() {
 		t.Fatal("Navigate with cancelled parent should still assign valid ID")
@@ -639,7 +690,6 @@ func TestSessionNoOpsAfterClose(t *testing.T) {
 	s := New()
 	s.Close()
 
-	// All these must be no-ops (no panic, no state change)
 	s.Navigate(context.Background(), "https://example.com")
 	s.Parsing()
 	s.Interactive()
@@ -654,9 +704,10 @@ func TestSessionNoOpsAfterClose(t *testing.T) {
 
 func TestSessionMultipleCompleteIsSafe(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 	s.Complete()
-	s.Complete() // second call should be safe
+	s.Complete()
 	if s.State() != StateComplete {
 		t.Fatalf("state = %v, want %v", s.State(), StateComplete)
 	}
@@ -664,9 +715,10 @@ func TestSessionMultipleCompleteIsSafe(t *testing.T) {
 
 func TestSessionMultipleCancelIsSafe(t *testing.T) {
 	s := New()
+	defer s.Close()
 	s.Navigate(context.Background(), "https://example.com")
 	s.Cancel()
-	s.Cancel() // second call should be safe
+	s.Cancel()
 	if s.State() != StateCancelled {
 		t.Fatalf("state = %v, want %v", s.State(), StateCancelled)
 	}
@@ -677,7 +729,6 @@ func TestSessionStateAfterCloseDoesNotFireTransitions(t *testing.T) {
 	s.Navigate(context.Background(), "https://example.com")
 	s.Close()
 
-	// After close, callback should not be fired for state transitions
 	var called bool
 	s.SetEventCallback(func(ev Event) {
 		called = true
@@ -686,6 +737,7 @@ func TestSessionStateAfterCloseDoesNotFireTransitions(t *testing.T) {
 	s.Parsing()
 	s.Interactive()
 	s.Complete()
+	s.FlushEvents()
 
 	if called {
 		t.Fatal("event callback was called after Close")
@@ -694,6 +746,7 @@ func TestSessionStateAfterCloseDoesNotFireTransitions(t *testing.T) {
 
 func TestSessionRecorderPhasesWorkThroughContext(t *testing.T) {
 	s := New()
+	defer s.Close()
 	_, ctx := s.Navigate(context.Background(), "https://example.com")
 
 	rec := metrics.RecorderFromContext(ctx)
@@ -701,7 +754,6 @@ func TestSessionRecorderPhasesWorkThroughContext(t *testing.T) {
 		t.Fatal("no recorder in context")
 	}
 
-	// Simulate phase recording as the renderer does
 	rec.BeginPhase(metrics.PhaseParse)
 	rec.BeginPhase(metrics.PhaseLayout)
 	rec.EndPhase(metrics.PhaseParse)
@@ -725,6 +777,7 @@ func TestSessionRecorderPhasesWorkThroughContext(t *testing.T) {
 
 func TestSessionFinalizeRecorder(t *testing.T) {
 	s := New()
+	defer s.Close()
 	_, ctx := s.Navigate(context.Background(), "https://example.com")
 
 	rec := metrics.RecorderFromContext(ctx)
@@ -742,7 +795,6 @@ func TestSessionFinalizeRecorder(t *testing.T) {
 }
 
 func TestFromContext(t *testing.T) {
-	// Verify the utility function compiles and works
 	ctx := context.Background()
 	rec := RecorderFromContext(ctx)
 	if rec != nil {
@@ -750,10 +802,9 @@ func TestFromContext(t *testing.T) {
 	}
 }
 
-// --- Transport tests ---
-
 func TestNewSessionHasTransport(t *testing.T) {
 	s := New()
+	defer s.Close()
 	if s.Transport() == nil {
 		t.Fatal("New() session has nil transport")
 	}
@@ -761,6 +812,7 @@ func TestNewSessionHasTransport(t *testing.T) {
 
 func TestSessionTransportDefaults(t *testing.T) {
 	s := New()
+	defer s.Close()
 	tr := s.Transport()
 	if tr.MaxIdleConns != 100 {
 		t.Fatalf("MaxIdleConns = %d, want 100", tr.MaxIdleConns)
@@ -784,6 +836,7 @@ func TestSessionTransportDefaults(t *testing.T) {
 
 func TestSessionHTTPClientUsesSharedTransport(t *testing.T) {
 	s := New()
+	defer s.Close()
 	c1 := s.HTTPClient()
 	c2 := s.HTTPClient()
 
@@ -801,6 +854,7 @@ func TestSessionHTTPClientUsesSharedTransport(t *testing.T) {
 
 func TestSessionHTTPClientHasTimeout(t *testing.T) {
 	s := New()
+	defer s.Close()
 	c := s.HTTPClient()
 	if c.Timeout != 30*time.Second {
 		t.Fatalf("HTTPClient().Timeout = %v, want 30s", c.Timeout)
@@ -809,6 +863,7 @@ func TestSessionHTTPClientHasTimeout(t *testing.T) {
 
 func TestSessionHTTPClientHasCookieJar(t *testing.T) {
 	s := New()
+	defer s.Close()
 	c := s.HTTPClient()
 	if c.Jar == nil {
 		t.Fatal("HTTPClient() missing cookie jar")
@@ -822,12 +877,8 @@ func TestSessionHTTPClientHasCookieJar(t *testing.T) {
 func TestSessionCloseClosesTransport(t *testing.T) {
 	s := New()
 	tr := s.Transport()
-
-	// Close once — should close idle connections without panic.
 	s.Close()
 
-	// Transport should still be the same object (not nil'd) but idle
-	// connections are closed. Calling CloseIdleConnections again is safe.
 	tr.CloseIdleConnections()
 	if s.Transport() == nil {
 		t.Fatal("Transport() should not return nil after Close")
@@ -837,15 +888,15 @@ func TestSessionCloseClosesTransport(t *testing.T) {
 func TestSessionCloseIdempotentTransport(t *testing.T) {
 	s := New()
 	s.Close()
-	s.Close()         // must not panic
-	_ = s.Transport() // must not panic
+	s.Close()
+	_ = s.Transport()
 }
 
 func TestSessionTransportSurvivesNavigationCancel(t *testing.T) {
 	s := New()
+	defer s.Close()
 	tr := s.Transport()
 
-	// Navigate and cancel repeatedly — transport should remain intact.
 	for i := 0; i < 10; i++ {
 		s.Navigate(context.Background(), "https://example.com")
 		s.Cancel()
@@ -857,7 +908,6 @@ func TestSessionTransportSurvivesNavigationCancel(t *testing.T) {
 		}
 	}
 
-	// Transport should still be functional.
 	client := s.HTTPClient()
 	if client.Transport != tr {
 		t.Fatal("HTTPClient() uses a different transport after cancel")
@@ -866,9 +916,9 @@ func TestSessionTransportSurvivesNavigationCancel(t *testing.T) {
 
 func TestSessionTransportSameAcrossNavigations(t *testing.T) {
 	s := New()
+	defer s.Close()
 	tr := s.Transport()
 
-	// Run several complete navigation cycles.
 	for i := 0; i < 5; i++ {
 		s.Navigate(context.Background(), "https://example.com")
 		s.Complete()
@@ -880,6 +930,7 @@ func TestSessionTransportSameAcrossNavigations(t *testing.T) {
 
 func TestSessionTransportHTTPClientConcurrentSafe(t *testing.T) {
 	s := New()
+	defer s.Close()
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
@@ -892,4 +943,206 @@ func TestSessionTransportHTTPClientConcurrentSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// --- Formalized Event Queue and New Events Tests ---
+
+func TestSessionEventQueueOldestDropped(t *testing.T) {
+	s := New()
+	defer s.Close()
+
+	// Register a slow callback that blocks on a channel so the dispatch loop blocks
+	blockChan := make(chan struct{})
+	processedChan := make(chan struct{})
+	eventsReceived := make([]Event, 0)
+	var mu sync.Mutex
+
+	var once sync.Once
+	s.SetEventCallback(func(ev Event) {
+		mu.Lock()
+		eventsReceived = append(eventsReceived, ev)
+		mu.Unlock()
+		once.Do(func() {
+			processedChan <- struct{}{}
+			<-blockChan
+		})
+	})
+
+	// Send an event to block the callback
+	s.Title("Initial Block Event")
+
+	// Wait until the dispatcher receives the first event and starts blocking
+	select {
+	case <-processedChan:
+	case <-time.After(testTimeout):
+		t.Fatal("timed out waiting for block callback to start")
+	}
+
+	// Now fill the queue completely.
+	// The queue has capacity 256. We'll send 260 events.
+	// Since the dispatcher is blocked, these events will sit in the queue.
+	// The queue will overflow, and we should drop the oldest of the overflowed ones.
+	for i := 1; i <= 260; i++ {
+		s.Progress(float64(i))
+	}
+
+	// Unblock the callback
+	close(blockChan)
+
+	// Wait for the dispatcher loop to process all remaining queued events.
+	// We'll queue a sync event and block on it.
+	s.FlushEvents()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Initial event is 1. The remaining capacity in queue is 256.
+	// When we wrote 260 progress events:
+	// - Event 1 is the block event (already dispatched/read from queue)
+	// - The queue can hold 256 events.
+	// - Writing 260 progress events means 4 of the earliest progress events must have been dropped.
+	// So we expect to have received:
+	// - 1 blocker event
+	// - 256 progress events (the last ones, i.e., progress values 5 to 260)
+	// Total events received should be exactly 257.
+	if len(eventsReceived) != 257 {
+		t.Fatalf("got %d events, want %d", len(eventsReceived), 257)
+	}
+
+	// The first progress event received should be 5.0 (since 1.0, 2.0, 3.0, 4.0 were dropped)
+	if eventsReceived[1].Progress != 5.0 {
+		t.Fatalf("first progress received was %f, want %f", eventsReceived[1].Progress, 5.0)
+	}
+	// The last progress event received should be 260.0
+	if eventsReceived[256].Progress != 260.0 {
+		t.Fatalf("last progress received was %f, want %f", eventsReceived[256].Progress, 260.0)
+	}
+}
+
+func TestSessionEventImmutability(t *testing.T) {
+	s := New()
+	defer s.Close()
+
+	var received []Event
+	var mu sync.Mutex
+	s.SetEventCallback(func(ev Event) {
+		mu.Lock()
+		received = append(received, ev)
+		mu.Unlock()
+	})
+
+	sec := engineNet.SecuritySummary{
+		URL:     "https://secure.com",
+		Scheme:  "https",
+		Secure:  true,
+		Subject: "CN=secure.com",
+		Issuer:  "CN=CA",
+	}
+	dl := engineNet.DownloadRecord{
+		URL:        "https://secure.com/file.zip",
+		TargetPath: "/tmp/file.zip",
+		Status:     engineNet.DownloadStatusRunning,
+	}
+
+	s.Navigate(context.Background(), "https://secure.com")
+	s.Security(sec)
+	s.Download(dl)
+	s.FlushEvents()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(received) < 3 {
+		t.Fatalf("got %d events, want at least 3", len(received))
+	}
+
+	// Check SecuritySummary event details
+	var foundSec, foundDl bool
+	for _, ev := range received {
+		if ev.Type == EventSecuritySummary {
+			foundSec = true
+			if ev.SecuritySummary.URL != sec.URL || ev.SecuritySummary.Secure != sec.Secure {
+				t.Fatalf("SecuritySummary event mismatch: %+v", ev.SecuritySummary)
+			}
+		}
+		if ev.Type == EventDownload {
+			foundDl = true
+			if ev.Download.URL != dl.URL || ev.Download.Status != dl.Status {
+				t.Fatalf("Download event mismatch: %+v", ev.Download)
+			}
+		}
+	}
+	if !foundSec {
+		t.Fatal("missing SecuritySummary event")
+	}
+	if !foundDl {
+		t.Fatal("missing Download event")
+	}
+}
+
+func TestSessionGoroutineLeakCheck(t *testing.T) {
+	// Count active goroutines before creating sessions
+	runtime.GC()
+	initialGoroutines := runtime.NumGoroutine()
+
+	sessions := make([]*Session, 10)
+	for i := 0; i < 10; i++ {
+		sessions[i] = New()
+	}
+
+	// Active goroutines should be higher now
+	activeGoroutines := runtime.NumGoroutine()
+	if activeGoroutines <= initialGoroutines {
+		t.Fatalf("expected goroutine count to increase after creating sessions, got initial=%d, active=%d", initialGoroutines, activeGoroutines)
+	}
+
+	// Close all sessions
+	for i := 0; i < 10; i++ {
+		sessions[i].Close()
+	}
+
+	// Give background threads a brief moment to exit and run GC
+	time.Sleep(50 * time.Millisecond)
+	runtime.GC()
+
+	finalGoroutines := runtime.NumGoroutine()
+	// Allow slight variance but should be close to initial
+	if finalGoroutines > initialGoroutines+2 {
+		t.Fatalf("goroutine leak detected: initial=%d, active=%d, final=%d", initialGoroutines, activeGoroutines, finalGoroutines)
+	}
+}
+
+func TestSessionNewEvents(t *testing.T) {
+	s := New()
+	defer s.Close()
+
+	events := make(map[EventType][]Event)
+	var mu sync.Mutex
+	s.SetEventCallback(func(ev Event) {
+		mu.Lock()
+		events[ev.Type] = append(events[ev.Type], ev)
+		mu.Unlock()
+	})
+
+	s.Title("Hello World")
+	s.URL("https://example.com/new")
+	s.FirstPaint()
+	s.Progress(0.75)
+	s.FlushEvents()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(events[EventTitleChange]) != 1 || events[EventTitleChange][0].Title != "Hello World" {
+		t.Fatalf("incorrect TitleChange event: %+v", events[EventTitleChange])
+	}
+	if len(events[EventURLChange]) != 1 || events[EventURLChange][0].URL != "https://example.com/new" {
+		t.Fatalf("incorrect URLChange event: %+v", events[EventURLChange])
+	}
+	if len(events[EventFirstPaint]) != 1 {
+		t.Fatalf("incorrect FirstPaint event: %+v", events[EventFirstPaint])
+	}
+	if len(events[EventProgress]) != 1 || events[EventProgress][0].Progress != 0.75 {
+		t.Fatalf("incorrect Progress event: %+v", events[EventProgress])
+	}
 }

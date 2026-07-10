@@ -17,6 +17,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
+	engineNet "github.com/vyquocvu/goosie/internal/net"
 )
 
 // State represents the lifecycle phase of an engine session.
@@ -51,13 +52,59 @@ func (s State) String() string {
 	return fmt.Sprintf("state_%d", int(s))
 }
 
-// Event describes a session state change. It is delivered synchronously
-// through the callback registered with SetEventCallback.
+// EventType defines the type of event emitted by the engine session.
+type EventType int
+
+const (
+	EventStateChange EventType = iota
+	EventTitleChange
+	EventURLChange
+	EventFirstPaint
+	EventProgress
+	EventError
+	EventSecuritySummary
+	EventDownload
+	eventSync // internal use for flushing the queue
+)
+
+func (t EventType) String() string {
+	switch t {
+	case EventStateChange:
+		return "StateChange"
+	case EventTitleChange:
+		return "TitleChange"
+	case EventURLChange:
+		return "URLChange"
+	case EventFirstPaint:
+		return "FirstPaint"
+	case EventProgress:
+		return "Progress"
+	case EventError:
+		return "Error"
+	case EventSecuritySummary:
+		return "SecuritySummary"
+	case EventDownload:
+		return "Download"
+	default:
+		return fmt.Sprintf("UnknownEvent_%d", int(t))
+	}
+}
+
+// Event describes a session or page lifecycle update.
+// All fields contain immutable values to prevent data races.
 type Event struct {
-	State State
-	NavID navigation.ID
-	URL   string
-	Err   error
+	Type            EventType
+	NavID           navigation.ID
+	State           State
+	URL             string
+	Title           string
+	Progress        float64
+	Err             error
+	SecuritySummary engineNet.SecuritySummary
+	Download        engineNet.DownloadRecord
+	Timestamp       time.Time
+
+	syncChan chan struct{} // internal synchronization channel
 }
 
 // defaultTransport returns a shared http.Transport configured with
@@ -91,25 +138,102 @@ type Session struct {
 	closed    bool
 
 	transport *http.Transport
+
+	eventQueue chan Event
+	done       chan struct{}
 }
 
 // New creates a new Session in the Created state with a shared HTTP
 // transport configured for concurrent browser engine use.
 func New() *Session {
-	return &Session{
-		scheduler: navigation.NewScheduler(),
-		state:     StateCreated,
-		transport: defaultTransport(),
+	s := &Session{
+		scheduler:  navigation.NewScheduler(),
+		state:      StateCreated,
+		transport:  defaultTransport(),
+		eventQueue: make(chan Event, 256),
+		done:       make(chan struct{}),
 	}
+	go s.dispatchLoop()
+	return s
 }
 
-// SetEventCallback registers a function that is called synchronously on every
-// state change. Passing nil removes the callback. The callback must not
-// block or call Session methods to avoid deadlock.
+// SetEventCallback registers a function that is called on every event.
+// Passing nil removes the callback. The callback is called from a background
+// goroutine. The callback must not block or call Session methods synchronously
+// to avoid deadlock.
 func (s *Session) SetEventCallback(fn func(Event)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onEvent = fn
+}
+
+// FlushEvents blocks until all events currently in the queue have been dispatched.
+// This is primarily useful in testing to ensure deterministic event assertions.
+func (s *Session) FlushEvents() {
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return
+	}
+
+	ch := make(chan struct{})
+	ev := Event{
+		Type:     eventSync,
+		syncChan: ch,
+	}
+
+	select {
+	case s.eventQueue <- ev:
+		select {
+		case <-ch:
+		case <-s.done:
+		}
+	case <-s.done:
+	}
+}
+
+func (s *Session) dispatchLoop() {
+	for {
+		select {
+		case ev, ok := <-s.eventQueue:
+			if !ok {
+				return
+			}
+			if ev.Type == eventSync {
+				close(ev.syncChan)
+				continue
+			}
+			s.mu.Lock()
+			fn := s.onEvent
+			s.mu.Unlock()
+			if fn != nil {
+				fn(ev)
+			}
+		case <-s.done:
+			// Drain remaining events in the queue non-blockingly
+			for {
+				select {
+				case ev, ok := <-s.eventQueue:
+					if !ok {
+						return
+					}
+					if ev.Type == eventSync {
+						close(ev.syncChan)
+						continue
+					}
+					s.mu.Lock()
+					fn := s.onEvent
+					s.mu.Unlock()
+					if fn != nil {
+						fn(ev)
+					}
+				default:
+					return
+				}
+			}
+		}
+	}
 }
 
 // Navigate starts a new navigation, cancelling any in-flight load.
@@ -130,7 +254,13 @@ func (s *Session) Navigate(parent context.Context, url string) (navigation.Load,
 	s.url = url
 	s.mu.Unlock()
 
-	s.fireEvent(Event{State: StateNavigating, NavID: load.ID, URL: url})
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateNavigating,
+		NavID:     load.ID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
 	return load, ctx
 }
 
@@ -146,7 +276,13 @@ func (s *Session) Parsing() {
 	url := s.url
 	s.mu.Unlock()
 
-	s.fireEvent(Event{State: StateParsing, NavID: navID, URL: url})
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateParsing,
+		NavID:     navID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
 }
 
 // Interactive transitions the session to the interactive state.
@@ -161,7 +297,13 @@ func (s *Session) Interactive() {
 	url := s.url
 	s.mu.Unlock()
 
-	s.fireEvent(Event{State: StateInteractive, NavID: navID, URL: url})
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateInteractive,
+		NavID:     navID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
 }
 
 // Complete marks the current navigation as successfully finished.
@@ -176,7 +318,13 @@ func (s *Session) Complete() {
 	url := s.url
 	s.mu.Unlock()
 
-	s.fireEvent(Event{State: StateComplete, NavID: navID, URL: url})
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateComplete,
+		NavID:     navID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
 }
 
 // Cancel transitions the session to Cancelled and cancels the active context.
@@ -194,7 +342,13 @@ func (s *Session) Cancel() {
 	s.mu.Unlock()
 
 	s.scheduler.Cancel()
-	s.fireEvent(Event{State: StateCancelled, NavID: navID, URL: url})
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateCancelled,
+		NavID:     navID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
 }
 
 // Fail transitions the session to Failed with the given error.
@@ -215,7 +369,20 @@ func (s *Session) Fail(err error) {
 	evErr := err
 	s.mu.Unlock()
 
-	s.fireEvent(Event{State: StateFailed, NavID: navID, URL: url, Err: evErr})
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateFailed,
+		NavID:     navID,
+		URL:       url,
+		Err:       evErr,
+		Timestamp: time.Now(),
+	})
+	s.fireEvent(Event{
+		Type:      EventError,
+		NavID:     navID,
+		Err:       evErr,
+		Timestamp: time.Now(),
+	})
 }
 
 // Close releases all session resources and transitions to Closed.
@@ -237,7 +404,101 @@ func (s *Session) Close() {
 	if s.transport != nil {
 		s.transport.CloseIdleConnections()
 	}
-	s.fireEvent(Event{State: StateClosed, NavID: navID, URL: url})
+
+	// Signal the dispatch loop to shut down.
+	close(s.done)
+
+	s.fireEvent(Event{
+		Type:      EventStateChange,
+		State:     StateClosed,
+		NavID:     navID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
+}
+
+// Title emits a TitleChange event.
+func (s *Session) Title(title string) {
+	s.mu.Lock()
+	navID := s.navID
+	s.mu.Unlock()
+
+	s.fireEvent(Event{
+		Type:      EventTitleChange,
+		NavID:     navID,
+		Title:     title,
+		Timestamp: time.Now(),
+	})
+}
+
+// URL emits a URLChange event and updates the session's active URL.
+func (s *Session) URL(url string) {
+	s.mu.Lock()
+	s.url = url
+	navID := s.navID
+	s.mu.Unlock()
+
+	s.fireEvent(Event{
+		Type:      EventURLChange,
+		NavID:     navID,
+		URL:       url,
+		Timestamp: time.Now(),
+	})
+}
+
+// FirstPaint emits a FirstPaint event.
+func (s *Session) FirstPaint() {
+	s.mu.Lock()
+	navID := s.navID
+	s.mu.Unlock()
+
+	s.fireEvent(Event{
+		Type:      EventFirstPaint,
+		NavID:     navID,
+		Timestamp: time.Now(),
+	})
+}
+
+// Progress emits a Progress event.
+func (s *Session) Progress(progress float64) {
+	s.mu.Lock()
+	navID := s.navID
+	s.mu.Unlock()
+
+	s.fireEvent(Event{
+		Type:      EventProgress,
+		NavID:     navID,
+		Progress:  progress,
+		Timestamp: time.Now(),
+	})
+}
+
+// Security emits a SecuritySummary event.
+func (s *Session) Security(summary engineNet.SecuritySummary) {
+	s.mu.Lock()
+	navID := s.navID
+	s.mu.Unlock()
+
+	s.fireEvent(Event{
+		Type:            EventSecuritySummary,
+		NavID:           navID,
+		SecuritySummary: summary,
+		Timestamp:       time.Now(),
+	})
+}
+
+// Download emits a Download event.
+func (s *Session) Download(record engineNet.DownloadRecord) {
+	s.mu.Lock()
+	navID := s.navID
+	s.mu.Unlock()
+
+	s.fireEvent(Event{
+		Type:      EventDownload,
+		NavID:     navID,
+		Download:  record,
+		Timestamp: time.Now(),
+	})
 }
 
 // State returns the current session lifecycle state.
@@ -296,8 +557,6 @@ func RecorderFromContext(ctx context.Context) *metrics.Recorder {
 func (s *Session) StartedAt() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// The scheduler doesn't expose started time; callers should track
-	// via load.StartedAt. This is provided as a convenience.
 	return time.Time{}
 }
 
@@ -324,9 +583,28 @@ func (s *Session) HTTPClient() *http.Client {
 
 func (s *Session) fireEvent(ev Event) {
 	s.mu.Lock()
-	fn := s.onEvent
+	closed := s.closed
 	s.mu.Unlock()
-	if fn != nil {
-		fn(ev)
+	if closed && ev.Type != EventStateChange && ev.State != StateClosed {
+		return
+	}
+
+	if ev.Timestamp.IsZero() {
+		ev.Timestamp = time.Now()
+	}
+
+	select {
+	case s.eventQueue <- ev:
+	default:
+		// Queue is full, drop the oldest event to prevent blocking the engine
+		select {
+		case <-s.eventQueue:
+		default:
+		}
+		select {
+		case s.eventQueue <- ev:
+		default:
+			// If still full due to rare race, just drop this event
+		}
 	}
 }

@@ -288,10 +288,10 @@ Decouple the engine from the browser UI and make navigation, cancellation, and r
 
 ### M1.4 Formalize engine-to-shell events
 
-- [ ] Define events for navigation state, title, URL, first paint, progress, error, security summary, and download.
-- [ ] Ensure events contain immutable values.
-- [ ] Add a bounded event queue.
-- [ ] Prevent slow UI consumers from blocking the engine.
+- [x] Define events for navigation state, title, URL, first paint, progress, error, security summary, and download.
+- [x] Ensure events contain immutable values.
+- [x] Add a bounded event queue.
+- [x] Prevent slow UI consumers from blocking the engine.
 
 **Acceptance criteria**
 

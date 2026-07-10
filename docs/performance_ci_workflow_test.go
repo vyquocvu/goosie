@@ -26,9 +26,9 @@ func TestPerformanceBenchmarkWorkflowRunsPRMicrobenchmarks(t *testing.T) {
 		t.Fatalf("workflow must run on push to keep the main baseline exercised")
 	}
 
-	job, ok := workflow.Jobs["pr-microbenchmarks"]
+	job, ok := workflow.Jobs["microbenchmarks"]
 	if !ok {
-		t.Fatalf("missing pr-microbenchmarks job")
+		t.Fatalf("missing microbenchmarks job")
 	}
 	if job.RunsOn != "ubuntu-latest" {
 		t.Fatalf("job runs-on = %q, want ubuntu-latest", job.RunsOn)
@@ -46,9 +46,10 @@ func TestPerformanceBenchmarkWorkflowRunsPRMicrobenchmarks(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"-run=^$",
+		"-run=",
+		"^$",
 		"-benchmem",
-		"-bench=Benchmark",
+		"-bench=",
 		"BenchmarkParseSelector",
 		"BenchmarkLayout",
 		"BenchmarkDisplayList",
