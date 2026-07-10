@@ -441,11 +441,11 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 
 ### M4.1 Separate layout objects from DOM nodes
 
-- [ ] Define stable `LayoutID` values.
-- [ ] Build layout objects only for rendered nodes.
-- [ ] Handle `display: none` without layout allocation.
-- [ ] Allow generated content to create layout objects without DOM nodes.
-- [ ] Track DOM-to-layout and layout-to-DOM relationships by IDs.
+- [x] Define stable `LayoutID` values.
+- [x] Build layout objects only for rendered nodes.
+- [x] Handle `display: none` without layout allocation.
+- [x] Allow generated content to create layout objects without DOM nodes.
+- [x] Track DOM-to-layout and layout-to-DOM relationships by IDs.
 
 ### M4.2 Implement fragment storage
 

@@ -38,6 +38,11 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - Descendant invalidation for inherited property changes
     - Sibling invalidation for adjacent (+) and general (~) sibling combinators
     - Mutation batching with target deduplication
+  - **Layout store** (M4.1) with compact index-based storage
+    - Stable LayoutID handles replace pointer-heavy *LayoutBox trees
+    - display:none elements receive no layout allocation
+    - Bidirectional DOM-to-layout and layout-to-DOM mappings
+    - Generated content support (::before, ::after)
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -197,6 +202,9 @@ go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
 go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
 go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
 go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
+
+# Layout store benchmarks (M4.1)
+go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

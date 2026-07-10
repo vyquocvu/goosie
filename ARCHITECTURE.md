@@ -381,6 +381,38 @@ The invalidator is conservative — it may over-invalidate rather than
 miss nodes. This is safe: extra invalidation is a performance cost,
 not a correctness issue.
 
+### Layout Store (M4.1)
+
+The `internal/renderer` package provides a `LayoutStore` that separates
+layout objects from DOM nodes using compact, index-based storage with
+stable `LayoutID` handles. This replaces the pointer-heavy `*LayoutBox`
+tree with cache-friendly contiguous storage.
+
+**Key features:**
+- `LayoutID` (uint32) is a stable handle — an index into a contiguous
+  `[]LayoutObject` slice
+- `LayoutNone` (0) is the invalid/nil layout handle
+- First-child/next-sibling links for tree traversal without pointers
+- Bidirectional DOM-to-layout and layout-to-DOM mappings
+- Generated content (`::before`, `::after`) creates layout objects
+  without corresponding DOM nodes
+- `display:none` elements map to `LayoutNone` — no allocation
+- Free-list reuse of deleted layout IDs
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 objects) | 4800 | 0 | 0 |
+| AppendChild (100 children) | 760 | 0 | 0 |
+| DOMMapping (100 set+get) | 4799 | 0 | 0 |
+| ChildCount (100 children) | 230 | 0 | 0 |
+
+The `LayoutStore` is additive infrastructure. The existing
+`LayoutBox`/`LayoutEngine` continues to work. The store provides
+the foundation for M4.2 (fragment storage) and M4.4 (incremental
+layout).
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

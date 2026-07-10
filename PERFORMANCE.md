@@ -682,6 +682,31 @@ go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
 go test -bench=BenchmarkHasSiblingCombinator -benchmem ./internal/css/
 ```
 
+### Layout Store (M4.1)
+
+The `internal/renderer` package provides a `LayoutStore` that separates
+layout objects from DOM nodes using compact, index-based storage with
+stable `LayoutID` handles.
+
+#### Store Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 objects) | 4800 | 0 | 0 |
+| AppendChild (100 children) | 760 | 0 | 0 |
+| DOMMapping (100 set+get) | 4799 | 0 | 0 |
+| ChildCount (100 children) | 230 | 0 | 0 |
+
+All layout store operations are zero-allocation. The contiguous slice
+storage provides cache-friendly access patterns. Tree operations use
+first-child/next-sibling links without pointer indirection.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |
