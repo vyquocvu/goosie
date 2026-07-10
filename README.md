@@ -26,6 +26,9 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - Pseudo-elements (::before, ::after)
     - CSS comments and at-rules (@media, @import, @keyframes)
     - !important flag support
+  - **Compiled selector engine** (M3.2) with precomputed specificity and bucketed rule lookup
+    - 2x faster matching than linear scan
+    - 95% less memory per match operation
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -135,6 +138,10 @@ Use the short tier for sandbox-safe checks and the e2e tier for Playwright-drive
 ```bash
 # CSS parser benchmarks
 go test -bench=. -benchmem ./internal/css/
+
+# Compiled selector benchmarks (M3.2)
+go test -bench=BenchmarkMatchVsLinear -benchmem ./internal/css/
+go test -bench=BenchmarkMatchElement -benchmem ./internal/css/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

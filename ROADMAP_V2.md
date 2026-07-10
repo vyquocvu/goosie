@@ -393,11 +393,11 @@ Make CSS parsing streaming-friendly, selector matching indexed, and style invali
 
 ### M3.2 Compile selectors
 
-- [ ] Convert selectors into a compact internal instruction form.
-- [ ] Precompute specificity.
-- [ ] Bucket rules by rightmost ID, class, tag, attribute, or universal selector.
-- [ ] Avoid scanning every rule for every element.
-- [ ] Add dedicated selector microbenchmarks.
+- [x] Convert selectors into a compact internal instruction form.
+- [x] Precompute specificity.
+- [x] Bucket rules by rightmost ID, class, tag, attribute, or universal selector.
+- [x] Avoid scanning every rule for every element.
+- [x] Add dedicated selector microbenchmarks.
 
 ### M3.3 Introduce computed-style storage
 

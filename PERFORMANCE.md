@@ -556,6 +556,56 @@ Run the benchmarks:
 go test -bench=. -benchmem ./internal/css/
 ```
 
+### Compiled Selectors (M3.2)
+
+The CSS package compiles selectors into a flat instruction form with
+precomputed specificity and bucketed rules for O(1) candidate lookup.
+
+#### Specificity Computation
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ComputeSpecificity | 10.7 | 0 | 0 |
+
+Specificity computation is zero-allocation.
+
+#### Stylesheet Compilation
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| CompileStyleSheet (Small) | 960 | 1,464 | 16 |
+| CompileStyleSheet (Medium) | 6,663 | 9,816 | 81 |
+| CompileStyleSheet (Large) | 30,989 | 40,776 | 314 |
+| CompileStyleSheet (SelectorComplex) | 5,560 | 7,440 | 61 |
+| CompileStyleSheet (SelectorHeavy) | 11,678 | 23,640 | 100 |
+
+Compilation is a one-time cost per stylesheet. The compiled form
+enables faster matching for all subsequent element queries.
+
+#### Element Matching: Bucketed vs Linear
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| MatchElement (ByID) | 459 | 216 | 4 |
+| MatchElement (ByClass) | 442 | 216 | 4 |
+| MatchElement (ByTag) | 466 | 216 | 4 |
+| MatchElement (Compound) | 542 | 240 | 4 |
+| MatchElement (Descendant) | 306 | 72 | 2 |
+| MatchElement (NoMatch) | 354 | 72 | 2 |
+| MatchVsLinear (Bucketed) | 765 | 136 | 6 |
+| MatchVsLinear (Linear) | 1,578 | 2,930 | 22 |
+
+Bucketed matching is **2x faster** and uses **95% less memory**
+than linear scan on selector-heavy stylesheets. The improvement
+scales with rule count: more rules = greater benefit from bucketing.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkMatchVsLinear -benchmem ./internal/css/
+go test -bench=BenchmarkMatchElement -benchmem ./internal/css/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |
