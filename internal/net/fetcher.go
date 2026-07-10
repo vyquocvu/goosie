@@ -67,6 +67,17 @@ func (f *Fetcher) Meta() ResponseMeta {
 	return f.meta
 }
 
+// FetchStreamWithContext retrieves the response body as an io.ReadCloser without
+// buffering the entire body into memory. The caller must close the returned body.
+// Response metadata is preserved for security and developer tools (M1.3).
+func (f *Fetcher) FetchStreamWithContext(ctx context.Context, url string) (io.ReadCloser, ResponseMeta, error) {
+	body, meta, err := f.service.FetchStream(ctx, url)
+	f.metaMu.Lock()
+	f.meta = meta
+	f.metaMu.Unlock()
+	return body, meta, err
+}
+
 // progressReader wraps an io.Reader to report progress.
 type progressReader struct {
 	io.Reader

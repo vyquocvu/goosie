@@ -759,3 +759,207 @@ func TestServiceRedirectedResponseDoesNotPopulateOriginalURLCache(t *testing.T) 
 		t.Fatalf("redirected request log contained cache hit: %#v", entries)
 	}
 }
+
+// --- FetchStream tests (M1.3) ---
+
+func TestFetchStreamReturnsBodyReader(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "<html><body>streaming</body></html>")
+		resp.Header.Set("Content-Type", "text/html")
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, meta, err := service.FetchStream(context.Background(), "https://example.test/page")
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll on stream returned error: %v", err)
+	}
+	if string(data) != "<html><body>streaming</body></html>" {
+		t.Fatalf("body = %q", string(data))
+	}
+	if meta.Status != http.StatusOK {
+		t.Errorf("StatusCode = %d, want %d", meta.Status, http.StatusOK)
+	}
+	if meta.ContentType != "text/html" {
+		t.Errorf("ContentType = %q, want text/html", meta.ContentType)
+	}
+}
+
+func TestFetchStreamContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	service := NewService(ServiceOptions{})
+	_, _, err := service.FetchStream(ctx, "https://example.test/page")
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestFetchStreamBodyTooLarge(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, "body that is too large for streaming"), nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 10})
+
+	body, _, err := service.FetchStream(context.Background(), "https://example.test/page")
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	defer body.Close()
+
+	_, readErr := io.ReadAll(body)
+	if readErr == nil {
+		t.Fatal("expected error when reading body that exceeds limit")
+	}
+	if !errors.Is(readErr, ErrBodyTooLarge) {
+		t.Fatalf("read error = %v, want ErrBodyTooLarge", readErr)
+	}
+}
+
+func TestFetchStreamErrorResponse(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusNotFound, "not found"), nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, meta, err := service.FetchStream(context.Background(), "https://example.test/missing")
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	defer body.Close()
+
+	if meta.Status != http.StatusNotFound {
+		t.Errorf("StatusCode = %d, want %d", meta.Status, http.StatusNotFound)
+	}
+	data, _ := io.ReadAll(body)
+	if string(data) != "not found" {
+		t.Fatalf("body = %q, want %q", string(data), "not found")
+	}
+}
+
+func TestFetchStreamPreservesMetadata(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "body")
+		resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+		resp.Header.Set("X-Custom", "value")
+		resp.ContentLength = 4
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, meta, err := service.FetchStream(context.Background(), "https://example.test/meta")
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	defer body.Close()
+
+	if meta.Status != http.StatusOK {
+		t.Errorf("StatusCode = %d", meta.Status)
+	}
+	if meta.ContentLength != 4 {
+		t.Errorf("ContentLength = %d, want 4", meta.ContentLength)
+	}
+	if meta.Header.Get("X-Custom") != "value" {
+		t.Errorf("X-Custom = %q, want value", meta.Header.Get("X-Custom"))
+	}
+}
+
+func TestFetchStreamCancellationDuringRead(t *testing.T) {
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("partial "))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{Client: &http.Client{}})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	body, _, err := service.FetchStream(ctx, server.URL)
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	defer body.Close()
+
+	<-started
+	cancel()
+
+	_, readErr := io.ReadAll(body)
+	if readErr == nil {
+		t.Fatal("expected error after cancel during stream read")
+	}
+}
+
+func TestFetchStreamLogsEntry(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "logged body")
+		resp.Header.Set("Content-Type", "text/plain")
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, _, err := service.FetchStream(context.Background(), "https://example.test/log")
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	body.Close()
+
+	entries := service.Log().Entries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want 1", len(entries))
+	}
+	if entries[0].Status != http.StatusOK {
+		t.Errorf("Status = %d, want %d", entries[0].Status, http.StatusOK)
+	}
+	if entries[0].URL != "https://example.test/log" {
+		t.Errorf("URL = %q", entries[0].URL)
+	}
+}
+
+func BenchmarkFetchStreamVsBuffered(b *testing.B) {
+	htmlBody := strings.Repeat("<p>Hello world paragraph content for streaming benchmark.</p>", 100)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, htmlBody), nil
+	})}
+
+	b.Run("FetchStream", func(b *testing.B) {
+		service := NewService(ServiceOptions{Client: client})
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			body, _, err := service.FetchStream(context.Background(), "https://example.test/bench")
+			if err != nil {
+				b.Fatal(err)
+			}
+			_, _ = io.ReadAll(body)
+			body.Close()
+		}
+	})
+
+	b.Run("FetchWithMeta", func(b *testing.B) {
+		service := NewService(ServiceOptions{Client: client})
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, err := service.FetchWithMeta(context.Background(), "https://example.test/bench", nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

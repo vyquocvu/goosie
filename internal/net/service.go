@@ -1,7 +1,6 @@
 package net
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -255,6 +254,57 @@ func (s *Service) Log() *RequestLog {
 	return s.log
 }
 
+// FetchStream retrieves the response body as an io.ReadCloser without buffering
+// the entire body into memory. The caller must close the returned body when done.
+// Response metadata is captured before the body is returned. This eliminates the
+// intermediate bytes.Buffer copy used by FetchWithMeta, enabling the HTML tokenizer
+// to consume the response stream directly (M1.3).
+//
+// Unlike FetchWithMeta, FetchStream does not populate the HTTP cache because
+// caching requires reading the full body. Error responses (status >= 400) return
+// the raw body without generating fallback HTML — callers should check
+// ResponseMeta.StatusCode.
+func (s *Service) FetchStream(ctx context.Context, rawURL string) (io.ReadCloser, ResponseMeta, error) {
+	startedAt := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to create request: %w", err)
+		s.log.Add(RequestLogEntry{Method: http.MethodGet, URL: rawURL, Error: wrapped.Error(), StartedAt: startedAt, Duration: time.Since(startedAt)})
+		s.setSecurity(SecuritySummaryFromResponse(nil, wrapped))
+		return nil, ResponseMeta{Header: make(http.Header)}, wrapped
+	}
+	req.Header.Set("User-Agent", s.userAgent)
+
+	resp, err := s.client.Do(req)
+	s.setSecurity(SecuritySummaryFromResponse(resp, err))
+	if err != nil {
+		wrapped := fmt.Errorf("failed to fetch URL: %w", err)
+		s.log.Add(RequestLogEntry{Method: http.MethodGet, URL: rawURL, Error: wrapped.Error(), StartedAt: startedAt, Duration: time.Since(startedAt)})
+		return nil, ResponseMeta{Header: make(http.Header)}, wrapped
+	}
+
+	// Capture metadata before body is consumed.
+	meta := ResponseMetaFromResponse(resp)
+
+	// Wrap body with context cancellation and optional size limit.
+	reader := io.Reader(&limitedContextReader{
+		ctx:    ctx,
+		reader: resp.Body,
+		limit:  s.maxBodySize,
+	})
+	stream := io.NopCloser(reader)
+
+	s.log.Add(RequestLogEntry{
+		Method:      http.MethodGet,
+		URL:         rawURL,
+		Status:      resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		StartedAt:   startedAt,
+	})
+
+	return stream, meta, nil
+}
+
 func (s *Service) Security() SecuritySummary {
 	s.securityMu.Lock()
 	defer s.securityMu.Unlock()
@@ -281,10 +331,12 @@ func readResponseBody(ctx context.Context, resp *http.Response, onProgress Progr
 		}
 	}
 
-	var buf bytes.Buffer
-	_, err := io.Copy(&buf, reader)
+	// Use io.ReadAll instead of bytes.Buffer to avoid the intermediate buffer
+	// growth allocations. This performs a single allocation for the body bytes
+	// plus one string conversion, instead of Buffer's repeated doubling.
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	return string(data), nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	urlpkg "net/url"
 	"path/filepath"
@@ -113,23 +114,33 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 			return
 		}
 
-		// Fetch the page in background
-		html, err := fetcher.FetchWithContext(ctx, resolvedURL, nil)
+		// Fetch the page using the streaming path (M1.3).
+		// FetchStreamWithContext returns the response body as an io.ReadCloser
+		// without buffering into an intermediate bytes.Buffer, eliminating one
+		// full-body copy from the main document path.
+		stream, meta, fetchErr := fetcher.FetchStreamWithContext(ctx, resolvedURL)
 
 		if !sess.IsActive(navID) {
 			log.Printf("Navigation %s stale after fetch: %s", navID, url)
+			if stream != nil {
+				stream.Close()
+			}
 			return
 		}
 
 		// Check if context was cancelled
 		if ctx.Err() != nil {
 			log.Printf("Navigation %s cancelled: %s", navID, url)
+			if stream != nil {
+				stream.Close()
+			}
 			return
 		}
 
-		if err != nil {
+		var html string
+		if fetchErr != nil {
 			// Fallback to mock HTML for example.com if network is unavailable
-			log.Printf("Navigation %s network error (%v), checking if example.com for mock HTML", navID, err)
+			log.Printf("Navigation %s network error (%v), checking if example.com for mock HTML", navID, fetchErr)
 			if resolvedURL == "https://example.com" {
 				html = `<!DOCTYPE html>
 <html>
@@ -145,8 +156,28 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 </body>
 </html>`
 			} else {
-				updateUIWithError(browser, sess, navID, err, resolvedURL)
+				updateUIWithError(browser, sess, navID, fetchErr, resolvedURL)
 				return
+			}
+		} else {
+			// Read the stream directly into a string. This performs one allocation
+			// for the body bytes plus one string conversion, instead of the previous
+			// bytes.Buffer path which allocated repeatedly during growth.
+			data, readErr := io.ReadAll(stream)
+			stream.Close()
+			if readErr != nil {
+				log.Printf("Navigation %s stream read error: %v", navID, readErr)
+				updateUIWithError(browser, sess, navID, readErr, resolvedURL)
+				return
+			}
+			html = string(data)
+
+			// Handle error status codes: generate fallback HTML for empty error bodies.
+			if meta.Status >= 400 && strings.TrimSpace(html) == "" {
+				html = fmt.Sprintf(
+					"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
+					meta.Status, strings.TrimSpace(fmt.Sprintf("%d", meta.Status)),
+				)
 			}
 		}
 

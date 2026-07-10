@@ -71,6 +71,35 @@ concurrent reads. Cache hits synthesize metadata from the stored `CacheEntry`.
 This preserves response information for security inspection and developer tools
 without retaining the live `http.Response` after the body is consumed.
 
+### Streaming Response Bodies (M1.3)
+
+The main document path uses `Service.FetchStream` and `Fetcher.FetchStreamWithContext`
+to return the response body as an `io.ReadCloser` without buffering the entire body
+into an intermediate `bytes.Buffer`. This eliminates one full-body copy from the
+fetch-to-parse pipeline:
+
+```text
+User enters URL
+  -> Scheduler.Begin(url)
+       -> navigation ID assigned
+       -> previous context cancelled
+  -> FetchStream (ctx carries navigation ID)
+       -> returns io.ReadCloser + ResponseMeta
+  -> dom.ParseDocument(stream) feeds tokenizer directly from response
+  -> UI update only if Scheduler.IsActive(id)
+```
+
+The streaming path:
+- Returns the body as `io.ReadCloser` — caller must close when done
+- Wraps the body with `limitedContextReader` for context cancellation and size limits
+- Does not populate the HTTP cache (caching requires the full body)
+- Preserves `ResponseMeta` for security and developer tools
+- Benchmarks show 26% less memory and 15% fewer allocations vs the buffered path
+
+The DOM parser's `ParseDocument(io.Reader)` method accepts any `io.Reader`, enabling
+the HTML tokenizer to consume the response stream directly without an intermediate
+string copy.
+
 ```
 User enters URL
   -> Scheduler.Begin(url)

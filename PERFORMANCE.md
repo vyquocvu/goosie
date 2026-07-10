@@ -292,6 +292,27 @@ Results (VirtualApple @ 2.50GHz):
 
 Metadata capture adds negligible overhead compared to the network I/O cost.
 
+### Streaming Response Body Benchmarks (M1.3)
+
+The streaming path (`FetchStream`) returns the response body as an `io.ReadCloser`
+without buffering into an intermediate `bytes.Buffer`, compared to the buffered
+path (`FetchWithMeta`) which reads the entire body into a string:
+
+```bash
+go test -bench=BenchmarkFetchStreamVsBuffered -benchmem ./internal/net/
+```
+
+Results (VirtualApple @ 2.50GHz, ~6.6KB HTML body):
+
+| Path | Time/op | Memory/op | Allocs/op |
+|------|---------|-----------|----------|
+| FetchStream | 6.4 μs | 18.1 KB | 29 |
+| FetchWithMeta | 8.7 μs | 24.6 KB | 34 |
+
+The streaming path is **26% faster**, uses **26% less memory**, and makes **15% fewer
+allocations** by eliminating the `bytes.Buffer` intermediary. The DOM parser's
+`ParseDocument(io.Reader)` accepts the stream directly for tokenizer consumption.
+
 ### Profiling
 
 ```bash
