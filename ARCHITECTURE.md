@@ -13,6 +13,40 @@ Every page load receives a monotonic navigation ID from `internal/engine/navigat
 3. Attach the ID to the load's `context.Context` for downstream phases
 4. Reject stale load callbacks when a superseded navigation completes
 
+### Resource Priorities
+
+Each navigation and sub-resource load carries a `Priority` value indicating its
+loading urgency. Priorities are ordered from highest (`PriorityDocument`) to
+lowest (`PrioritySpeculative`):
+
+- `PriorityDocument` — main document navigation (default for `Begin`)
+- `PriorityBlockingCSS` — render-blocking stylesheet
+- `PriorityVisibleImage` — image in or near the viewport
+- `PriorityScript` — synchronous or async script
+- `PriorityDeferredImage` — below-fold or lazy image
+- `PrioritySpeculative` — prefetch, prerender, dns-prefetch
+
+The `Scheduler` tracks all pending loads (main navigation + sub-resources) and
+returns a priority-sorted snapshot via `PendingLoads()`. Sub-resources are
+registered with `AddResource()` and removed with `RemoveResource()`. Each
+sub-resource receives its own cancellable context derived from its parent,
+and all are cleaned up when the main navigation is cancelled or superseded.
+
+Priority is propagated through `context.Context` and can be retrieved with
+`PriorityFromContext()` by downstream network layers for admission control.
+
+### Concurrency Bounding
+
+The `navigation.Scheduler` supports application-level concurrency bounding
+via `SchedulerOptions`. A `RateLimiter` enforces per-origin (default 6) and
+global (default 24) concurrent request limits at the application level,
+complementing the transport-level `MaxConnsPerHost`. When slots are contended,
+the limiter uses a `container/heap`-based priority queue so higher-priority
+resources (document, blocking CSS) are admitted before lower-priority ones
+(speculative, deferred images). A zero-value `SchedulerOptions` means
+unlimited, preserving backward compatibility with existing code that uses
+`NewScheduler()`.
+
 ## Shared HTTP Transport
 
 The `internal/engine/session.Session` owns one configured `http.Transport` that is reused

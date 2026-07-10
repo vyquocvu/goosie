@@ -288,6 +288,35 @@ go test ./internal/renderer -bench=ViewportScroll -memprofile=mem.prof
 go tool pprof mem.prof
 ```
 
+### Concurrency Bounding (Rate Limiter)
+
+The navigation scheduler enforces application-level concurrency limits via
+`RateLimiter`:
+
+- **Per-origin limit**: 6 concurrent requests per host
+- **Global limit**: 24 concurrent requests across all origins
+- **Priority-aware admission**: higher-priority resources (document, blocking
+  CSS) are admitted before lower-priority ones (speculative, deferred images)
+  when slots are contended
+- **Backward compatible**: zero-value `SchedulerOptions` means unlimited
+
+These application-level limits complement the transport-level
+`MaxConnsPerHost: 6` with priority-based scheduling.
+
+**Benchmark results** (`internal/engine/navigation`):
+
+| Scenario | Time/op | Allocs/op |
+|----------|---------|----------|
+| Uncontended acquire/release | ~123 ns | 1 |
+| Contended (32 goroutines) | ~4.2 µs | 4 |
+
+No regression observed in existing scheduler benchmarks.
+
+```bash
+# Rate limiter benchmarks
+go test -bench=BenchmarkAcquireRelease -benchmem ./internal/engine/navigation/
+```
+
 ## Known Limitations
 
 1. **Buffer Zone Trade-off**: Larger buffer zones (50% above/below viewport) use more memory but provide smoother scrolling

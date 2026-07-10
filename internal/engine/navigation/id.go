@@ -66,50 +66,111 @@ func IDFromContext(ctx context.Context) (ID, bool) {
 type Load struct {
 	ID        ID
 	URL       string
+	Origin    string // extracted from URL (host only); used by RateLimiter
+	Priority  Priority
 	StartedAt time.Time
 	Recorder  *metrics.Recorder
 }
 
+// SchedulerOptions configures optional concurrency bounding for the scheduler.
+// The main document load (Begin/BeginWithPriority) is always admitted
+// unconditionally and is not counted against these limits — only sub-resource
+// loads registered via AddResource are rate-limited.
+type SchedulerOptions struct {
+	MaxConnsPerOrigin int // max concurrent sub-resource requests per origin; 0 = unlimited
+	MaxConnsGlobal    int // max concurrent sub-resource requests globally; 0 = unlimited
+}
+
 // Scheduler assigns navigation IDs and owns the active load context.
 type Scheduler struct {
-	generator    *IDGenerator
-	mu           sync.Mutex
-	activeID     ID
-	activeCancel context.CancelFunc
+	generator       *IDGenerator
+	mu              sync.Mutex
+	activeID        ID
+	activeCancel    context.CancelFunc
+	pending         map[ID]Load               // all in-flight loads keyed by ID
+	resourceCancels map[ID]context.CancelFunc // sub-resource cancel funcs
+	limiter         *RateLimiter              // nil when unlimited
 }
 
 // NewScheduler creates a scheduler ready to assign navigation IDs.
+// The returned scheduler has no concurrency limits (backward compatible).
 func NewScheduler() *Scheduler {
 	return &Scheduler{
 		generator: NewIDGenerator(),
+		pending:   make(map[ID]Load),
 	}
+}
+
+// NewSchedulerWithOptions creates a scheduler with the given concurrency limits.
+// A RateLimiter is created when either option is non-zero.
+func NewSchedulerWithOptions(opts SchedulerOptions) *Scheduler {
+	s := &Scheduler{
+		generator: NewIDGenerator(),
+		pending:   make(map[ID]Load),
+	}
+	if opts.MaxConnsPerOrigin > 0 || opts.MaxConnsGlobal > 0 {
+		s.limiter = NewRateLimiter(opts.MaxConnsPerOrigin, opts.MaxConnsGlobal)
+	}
+	return s
+}
+
+// startedAtNow returns the current wall-clock time. Extracted so that
+// BeginWithPriority can share the same timestamp source.
+func startedAtNow() time.Time { return time.Now() }
+
+// newRecorder returns a metrics.Recorder wired to the given navigation.
+func newRecorder(navID ID, url string) *metrics.Recorder {
+	return metrics.NewRecorder(uint64(navID), url)
 }
 
 // Begin cancels any in-flight navigation, assigns a new ID, and returns
 // load metadata plus a cancellable context that carries the navigation ID.
+// The load is assigned PriorityDocument by default.
 func (s *Scheduler) Begin(parent context.Context, url string) (Load, context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.activeCancel != nil {
-		s.activeCancel()
-		s.activeCancel = nil
-	}
+	s.cancelPreviousLocked()
 
 	navID := s.generator.Next()
 	load := Load{
 		ID:        navID,
 		URL:       url,
-		StartedAt: time.Now(),
-		Recorder:  metrics.NewRecorder(uint64(navID), url),
+		Priority:  PriorityDocument,
+		StartedAt: startedAtNow(),
+		Recorder:  newRecorder(navID, url),
 	}
 	s.activeID = load.ID
+	s.pending[navID] = load
 
 	ctx, cancel := context.WithCancel(parent)
 	s.activeCancel = cancel
 	ctx = WithID(ctx, load.ID)
+	ctx = WithPriority(ctx, PriorityDocument)
 
 	return load, ctx
+}
+
+// cancelPreviousLocked cancels the active navigation and all associated
+// sub-resource contexts. The caller must hold s.mu.
+func (s *Scheduler) cancelPreviousLocked() {
+	if s.activeCancel != nil {
+		s.activeCancel()
+		s.activeCancel = nil
+	}
+	if s.activeID.IsValid() {
+		delete(s.pending, s.activeID)
+	}
+	for id, cancel := range s.resourceCancels {
+		cancel()
+		delete(s.resourceCancels, id)
+		if load, ok := s.pending[id]; ok {
+			delete(s.pending, id)
+			if s.limiter != nil && load.Origin != "" {
+				s.limiter.Release(load.Origin)
+			}
+		}
+	}
 }
 
 // ActiveID returns the currently active navigation ID, or Invalid if none.
@@ -127,13 +188,13 @@ func (s *Scheduler) IsActive(navID ID) bool {
 }
 
 // Cancel stops the active navigation and clears the active ID.
+// All pending loads (including sub-resources) are removed and their
+// contexts are cancelled.
 func (s *Scheduler) Cancel() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.activeCancel != nil {
-		s.activeCancel()
-		s.activeCancel = nil
-	}
+	s.cancelPreviousLocked()
 	s.activeID = Invalid
+	s.pending = make(map[ID]Load)
 }

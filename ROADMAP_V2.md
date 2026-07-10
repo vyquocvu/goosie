@@ -274,8 +274,8 @@ Decouple the engine from the browser UI and make navigation, cancellation, and r
 - [x] Create one `context.Context` per navigation.
 - [x] Cancel the previous navigation immediately when a new navigation starts.
 - [x] Reject stale callbacks by navigation ID.
-- [ ] Add resource priorities: document, blocking stylesheet, visible image, script, deferred image, speculative resource.
-- [ ] Bound concurrent resource requests per origin and globally.
+- [x] Add resource priorities: document, blocking stylesheet, visible image, script, deferred image, speculative resource.
+- [x] Bound concurrent resource requests per origin and globally.
 - [x] Reuse one configured `http.Transport`.
 
 ### M1.3 Stream response bodies
