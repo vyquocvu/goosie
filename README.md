@@ -33,6 +33,11 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - Inherited/non-inherited property separation per CSS spec
     - Fingerprint-based style deduplication via bounded StylePool
     - All operations (fingerprint, equality, inheritance, declaration apply) are zero-allocation
+  - **Style invalidation** (M3.4) with bucket-based affected rule analysis
+    - Mutation classification (class, ID, attribute, inline style, text, insertion, removal)
+    - Descendant invalidation for inherited property changes
+    - Sibling invalidation for adjacent (+) and general (~) sibling combinators
+    - Mutation batching with target deduplication
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -187,6 +192,11 @@ go test -bench=BenchmarkInheritedStyle -benchmem ./internal/css/
 go test -bench=BenchmarkStylePool -benchmem ./internal/css/
 go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
 go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
+
+# Style invalidation benchmarks (M3.4)
+go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
+go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
+go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

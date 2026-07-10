@@ -409,12 +409,12 @@ Make CSS parsing streaming-friendly, selector matching indexed, and style invali
 
 ### M3.4 Implement style invalidation
 
-- [ ] Add dirty flags at node and subtree level.
-- [ ] Invalidate descendants only when inherited values change.
-- [ ] Invalidate siblings only for selectors that require it.
-- [ ] Invalidate ancestors only for supported relational behavior.
-- [ ] Batch DOM mutations before style recalculation.
-- [ ] Add tests for class, ID, attribute, inline style, insertion, removal, and text changes.
+- [x] Add dirty flags at node and subtree level.
+- [x] Invalidate descendants only when inherited values change.
+- [x] Invalidate siblings only for selectors that require it.
+- [x] Invalidate ancestors only for supported relational behavior.
+- [x] Batch DOM mutations before style recalculation.
+- [x] Add tests for class, ID, attribute, inline style, insertion, removal, and text changes.
 
 **Acceptance criteria**
 

@@ -344,6 +344,43 @@ inherited properties (e.g., repeated `<p>` or `<li>` elements).
 This is additive infrastructure — the existing `renderer.Style` type
 remains in use until the renderer is migrated to consume `ComputedStyle`.
 
+### Style Invalidation (M3.4)
+
+The `internal/css` package provides a `StyleInvalidator` that determines
+which elements need style recalculation after DOM mutations, using the
+`CompiledStyleSheet` bucket structure for efficient affected-rule lookup.
+
+**Key features:**
+- Mutation classification: class, ID, attribute, inline style, text,
+  insertion, removal
+- Bucket-based affected rule lookup: class changes check class bucket
+  for old and new values; ID changes check ID bucket; attribute changes
+  check attr bucket
+- Descendant invalidation: when affected rules contain inherited CSS
+  properties (color, font-size, visibility, etc.), all descendants are
+  flagged for recalculation
+- Sibling invalidation: adjacent (+) and general sibling (~) combinators
+  trigger invalidation of next/following siblings
+- Mutation batching: `BeginBatch()` / `RecordMutation()` / `FlushBatch()`
+  coalesce multiple DOM changes into a single combined invalidation result
+  with deduplicated targets
+- Text changes mark layout dirty but not style (text content doesn't
+  affect CSS cascade)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ComputeInvalidation (class change) | 311 | 72 | 4 |
+| ComputeInvalidation (inherited) | 237 | 40 | 3 |
+| BatchMutations (3 mutations) | 672 | 112 | 8 |
+| AffectedRuleIndices | 189 | 56 | 3 |
+| HasSiblingCombinator | 1.5 | 0 | 0 |
+
+The invalidator is conservative — it may over-invalidate rather than
+miss nodes. This is safe: extra invalidation is a performance cost,
+not a correctness issue.
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

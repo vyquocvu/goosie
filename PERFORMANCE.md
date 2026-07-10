@@ -652,6 +652,36 @@ go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
 go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
 ```
 
+### Style Invalidation (M3.4)
+
+The `internal/css` package provides a `StyleInvalidator` that analyzes
+DOM mutations against a compiled stylesheet to determine which elements
+need style recalculation.
+
+#### Invalidation Analysis
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ComputeInvalidation (class change) | 311 | 72 | 4 |
+| ComputeInvalidation (inherited) | 237 | 40 | 3 |
+| BatchMutations (3 mutations) | 672 | 112 | 8 |
+| AffectedRuleIndices | 189 | 56 | 3 |
+| HasSiblingCombinator | 1.5 | 0 | 0 |
+
+Invalidation analysis is O(affected rules), not O(total rules). The
+bucket-based lookup ensures that only rules referencing the changed
+class, ID, or attribute are examined. Sibling combinator detection
+is cached and near-zero cost.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
+go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
+go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
+go test -bench=BenchmarkHasSiblingCombinator -benchmem ./internal/css/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |
