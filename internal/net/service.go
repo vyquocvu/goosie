@@ -87,6 +87,88 @@ func (s *Service) Fetch(rawURL string) (string, error) {
 	return s.FetchWithContext(context.Background(), rawURL, nil)
 }
 
+// FetchWithMeta retrieves the content and captures immutable response metadata.
+// The returned ResponseMeta is valid even after the response body is closed and
+// includes status, headers, protocol, and cache-hit information.
+func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress ProgressCallback) (string, ResponseMeta, error) {
+	startedAt := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		wrapped := fmt.Errorf("failed to create request: %w", err)
+		s.log.Add(RequestLogEntry{Method: http.MethodGet, URL: rawURL, Error: wrapped.Error(), StartedAt: startedAt, Duration: time.Since(startedAt)})
+		s.setSecurity(SecuritySummaryFromResponse(nil, wrapped))
+		return "", ResponseMeta{Header: make(http.Header)}, wrapped
+	}
+	req.Header.Set("User-Agent", s.userAgent)
+	hasCookies := s.client.Jar != nil && len(s.client.Jar.Cookies(req.URL)) > 0
+	if !hasCookies {
+		if body, entry, ok := s.cache.Get(rawURL); ok {
+			s.setSecurity(securitySummaryFromURL(req.URL))
+			s.log.Add(RequestLogEntry{
+				Method:      http.MethodGet,
+				URL:         rawURL,
+				Status:      entry.Status,
+				ContentType: entry.ContentType,
+				Bytes:       int64(len(body)),
+				CacheHit:    true,
+				StartedAt:   startedAt,
+				Duration:    time.Since(startedAt),
+			})
+			meta := ResponseMetaFromCacheEntry(entry)
+			return body, meta, nil
+		}
+	}
+
+	resp, err := s.client.Do(req)
+	s.setSecurity(SecuritySummaryFromResponse(resp, err))
+	if err != nil {
+		wrapped := fmt.Errorf("failed to fetch URL: %w", err)
+		s.log.Add(RequestLogEntry{Method: http.MethodGet, URL: rawURL, Error: wrapped.Error(), StartedAt: startedAt, Duration: time.Since(startedAt)})
+		return "", ResponseMeta{Header: make(http.Header)}, wrapped
+	}
+	defer resp.Body.Close()
+
+	// Capture metadata before body is consumed.
+	meta := ResponseMetaFromResponse(resp)
+
+	body, readErr := readResponseBody(ctx, resp, onProgress, s.maxBodySize)
+	entry := RequestLogEntry{
+		Method:      http.MethodGet,
+		URL:         rawURL,
+		Status:      resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		Bytes:       int64(len(body)),
+		StartedAt:   startedAt,
+	}
+	if readErr != nil {
+		wrapped := fmt.Errorf("failed to read response body: %w", readErr)
+		entry.Error = wrapped.Error()
+		entry.Duration = time.Since(startedAt)
+		s.log.Add(entry)
+		return "", meta, wrapped
+	}
+
+	if resp.StatusCode >= 400 {
+		if strings.TrimSpace(body) == "" {
+			body = fmt.Sprintf(
+				"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
+				resp.StatusCode, http.StatusText(resp.StatusCode),
+			)
+			entry.Bytes = int64(len(body))
+		}
+		entry.Duration = time.Since(startedAt)
+		s.log.Add(entry)
+		return body, meta, nil
+	}
+
+	if !hasCookies && responseMatchesOriginalURL(rawURL, resp) {
+		s.cache.Put(rawURL, resp, body)
+	}
+	entry.Duration = time.Since(startedAt)
+	s.log.Add(entry)
+	return body, meta, nil
+}
+
 func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgress ProgressCallback) (string, error) {
 	startedAt := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)

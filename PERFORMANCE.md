@@ -276,6 +276,22 @@ Results (12KB body on Apple Virtual CPU):
 The overhead of the context and size limit check is negligible compared
 to the underlying I/O cost.
 
+### Response Metadata Capture Benchmarks
+
+The `ResponseMeta` type preserves immutable HTTP response metadata for security
+and developer tools without retaining the live `http.Response`:
+
+```bash
+go test -bench=BenchmarkResponseMeta -benchmem ./internal/net/
+go test -bench=BenchmarkFetchWithMeta -benchmem ./internal/net/
+```
+
+Results (VirtualApple @ 2.50GHz):
+- `ResponseMetaFromResponse`: ~1.4 μs, 432 B/op, 4 allocs/op
+- `FetchWithMeta` (full fetch + metadata): ~3.1 μs, 5.2 KB/op, 31 allocs/op
+
+Metadata capture adds negligible overhead compared to the network I/O cost.
+
 ### Profiling
 
 ```bash

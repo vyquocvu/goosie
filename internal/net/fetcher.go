@@ -5,15 +5,19 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"sync"
 )
 
 // ProgressCallback is a function that can be used to report download progress.
 type ProgressCallback func(progress float64)
 
-// Fetcher handles HTTP requests
+// Fetcher handles HTTP requests and preserves response metadata.
 type Fetcher struct {
 	client  *http.Client
 	service *Service
+
+	metaMu sync.RWMutex
+	meta   ResponseMeta
 }
 
 // NewFetcher creates a new Fetcher instance
@@ -41,14 +45,26 @@ func (f *Fetcher) Service() *Service {
 	return f.service
 }
 
-// Fetch retrieves the content from the given URL
+// Fetch retrieves the content from the given URL and preserves response metadata.
 func (f *Fetcher) Fetch(url string) (string, error) {
 	return f.FetchWithContext(context.Background(), url, nil)
 }
 
-// FetchWithContext retrieves the content from the given URL with cancellation support
+// FetchWithContext retrieves the content with cancellation support and preserves response metadata.
 func (f *Fetcher) FetchWithContext(ctx context.Context, url string, onProgress ProgressCallback) (string, error) {
-	return f.service.FetchWithContext(ctx, url, onProgress)
+	body, meta, err := f.service.FetchWithMeta(ctx, url, onProgress)
+	f.metaMu.Lock()
+	f.meta = meta
+	f.metaMu.Unlock()
+	return body, err
+}
+
+// Meta returns the response metadata from the most recent fetch.
+// It is safe for concurrent use.
+func (f *Fetcher) Meta() ResponseMeta {
+	f.metaMu.RLock()
+	defer f.metaMu.RUnlock()
+	return f.meta
 }
 
 // progressReader wraps an io.Reader to report progress.

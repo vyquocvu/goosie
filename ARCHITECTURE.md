@@ -61,6 +61,16 @@ The transport lifecycle matches the session lifecycle — `Session.Close()` call
 normally even after Close. This prevents connection leaks across repeated navigations
 and gives the engine explicit control over network resource limits.
 
+### Response Metadata
+
+Every HTTP response captured by `Service.FetchWithMeta` produces an immutable
+`ResponseMeta` struct containing status code, headers, content type, content length,
+content encoding, protocol version, charset, and cache-hit status. The `Fetcher`
+exposes the most recent response metadata via `Fetcher.Meta()`, which is safe for
+concurrent reads. Cache hits synthesize metadata from the stored `CacheEntry`.
+This preserves response information for security inspection and developer tools
+without retaining the live `http.Response` after the body is consumed.
+
 ```
 User enters URL
   -> Scheduler.Begin(url)
