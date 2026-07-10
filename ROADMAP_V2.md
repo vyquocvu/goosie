@@ -465,11 +465,11 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 
 ### M4.4 Implement incremental layout
 
-- [ ] Add layout dirty reasons: geometry, intrinsic size, text, children, viewport, font, and style.
-- [ ] Find the smallest valid reflow root.
-- [ ] Cache intrinsic sizes.
-- [ ] Preserve unaffected layout fragments.
-- [ ] Rebuild only affected display-list chunks after reflow.
+- [x] Add layout dirty reasons: geometry, intrinsic size, text, children, viewport, font, and style.
+- [x] Find the smallest valid reflow root.
+- [x] Cache intrinsic sizes.
+- [x] Preserve unaffected layout fragments.
+- [x] Rebuild only affected display-list chunks after reflow.
 
 ### M4.5 Harden table and form layout
 
