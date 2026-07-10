@@ -214,6 +214,30 @@ The store is additive infrastructure — existing `*html.Node`-based
 consumers (parser, renderer, JS runtime) are unaffected until M2.4
 (streaming tree construction) and M2.5 (compatibility adapter).
 
+### Compatibility Adapter (M2.5)
+
+The `NodeAdapter` provides a temporary migration path that converts compact
+`Store` subtrees (rooted at `NodeID`) back to `*html.Node` trees for unmigrated
+consumers (renderer, JS runtime, cmd/browser).
+
+**Key features:**
+- Converts element, text, comment, document, and doctype nodes
+- Preserves attributes, parent links, and sibling chains
+- Tracks usage via atomic counter for migration metrics
+- Marked as deprecated migration-only infrastructure (remove before M5 exit)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Small HTML (div+p) | 364 | 837 | 9 |
+| Large HTML (100 divs) | 31,351 | 62,048 | 804 |
+| Table heavy (50 rows) | 16,655 | 39,760 | 355 |
+
+The adapter allocates `*html.Node` trees by design — that's the compatibility
+cost. Usage metrics (`AdapterUsageCount()`) detect remaining consumers during
+the migration to NodeID-based APIs.
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

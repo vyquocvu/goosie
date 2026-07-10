@@ -362,10 +362,10 @@ The final representation may differ, but stable IDs and contiguous storage are r
 
 ### M2.5 Add a compatibility adapter
 
-- [ ] Provide a temporary adapter for code that still expects the old DOM representation.
-- [ ] Mark the adapter as migration-only.
-- [ ] Add metrics to detect remaining use.
-- [ ] Remove it before Milestone 5 exit.
+- [x] Provide a temporary adapter for code that still expects the old DOM representation.
+- [x] Mark the adapter as migration-only.
+- [x] Add metrics to detect remaining use.
+- [x] Remove it before Milestone 5 exit.
 
 **Performance targets**
 
