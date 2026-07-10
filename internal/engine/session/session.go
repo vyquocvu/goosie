@@ -147,7 +147,10 @@ type Session struct {
 // transport configured for concurrent browser engine use.
 func New() *Session {
 	s := &Session{
-		scheduler:  navigation.NewScheduler(),
+		scheduler: navigation.NewSchedulerWithOptions(navigation.SchedulerOptions{
+			MaxConnsPerOrigin: 6,
+			MaxConnsGlobal:    24,
+		}),
 		state:      StateCreated,
 		transport:  defaultTransport(),
 		eventQueue: make(chan Event, 256),

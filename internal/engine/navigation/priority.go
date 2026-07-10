@@ -3,13 +3,14 @@ package navigation
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 )
 
 // Priority describes the loading urgency of a resource within a navigation.
 // Lower numeric values indicate higher priority. The scheduler uses priorities
 // to order pending loads; downstream network layers may use them to bound
-// concurrent requests per origin and globally (M1.2 follow-up).
+// concurrent requests per origin and globally.
 type Priority uint8
 
 // Resource priority levels ordered from highest (Document) to lowest
@@ -89,14 +90,29 @@ func (s *Scheduler) BeginWithPriority(parent context.Context, url string, prio P
 // context is derived from parent and carries the resource's ID and priority.
 // If no active navigation exists, the resource is still tracked but its
 // context is derived solely from parent.
-func (s *Scheduler) AddResource(parent context.Context, url string, prio Priority) (Load, context.Context) {
+//
+// If the scheduler has a RateLimiter, Acquire is called before registering the
+// resource. If the context is cancelled while waiting, a zero Load and the
+// cancelled context are returned without registering the resource.
+func (s *Scheduler) AddResource(parent context.Context, rawURL string, prio Priority) (Load, context.Context) {
+	origin := extractOrigin(rawURL)
+
+	// Admit through rate limiter before taking scheduler lock.
+	if s.limiter != nil {
+		if err := s.limiter.Acquire(parent, origin, prio); err != nil {
+			// Context cancelled while waiting — do not register.
+			return Load{}, parent
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	resID := s.generator.Next()
 	load := Load{
 		ID:        resID,
-		URL:       url,
+		URL:       rawURL,
+		Origin:    origin,
 		Priority:  prio,
 		StartedAt: startedAtNow(),
 	}
@@ -115,16 +131,31 @@ func (s *Scheduler) AddResource(parent context.Context, url string, prio Priorit
 }
 
 // RemoveResource marks a sub-resource as finished and releases its resources.
+// If the scheduler has a RateLimiter, Release is called for the resource's origin.
 // It is safe to call for IDs that have already been removed.
 func (s *Scheduler) RemoveResource(id ID) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	load, ok := s.pending[id]
 	delete(s.pending, id)
-	if cancel, ok := s.resourceCancels[id]; ok {
+	if cancel, ok2 := s.resourceCancels[id]; ok2 {
 		cancel()
 		delete(s.resourceCancels, id)
 	}
+	s.mu.Unlock()
+
+	if ok && s.limiter != nil && load.Origin != "" {
+		s.limiter.Release(load.Origin)
+	}
+}
+
+// extractOrigin returns the host portion of a URL for use as a rate-limit key.
+// If the URL cannot be parsed, the raw string is returned as-is.
+func extractOrigin(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
 }
 
 // PendingLoads returns a snapshot of all pending loads (main navigation and

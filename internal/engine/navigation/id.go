@@ -66,9 +66,19 @@ func IDFromContext(ctx context.Context) (ID, bool) {
 type Load struct {
 	ID        ID
 	URL       string
+	Origin    string // extracted from URL (host only); used by RateLimiter
 	Priority  Priority
 	StartedAt time.Time
 	Recorder  *metrics.Recorder
+}
+
+// SchedulerOptions configures optional concurrency bounding for the scheduler.
+// The main document load (Begin/BeginWithPriority) is always admitted
+// unconditionally and is not counted against these limits — only sub-resource
+// loads registered via AddResource are rate-limited.
+type SchedulerOptions struct {
+	MaxConnsPerOrigin int // max concurrent sub-resource requests per origin; 0 = unlimited
+	MaxConnsGlobal    int // max concurrent sub-resource requests globally; 0 = unlimited
 }
 
 // Scheduler assigns navigation IDs and owns the active load context.
@@ -79,14 +89,29 @@ type Scheduler struct {
 	activeCancel    context.CancelFunc
 	pending         map[ID]Load               // all in-flight loads keyed by ID
 	resourceCancels map[ID]context.CancelFunc // sub-resource cancel funcs
+	limiter         *RateLimiter              // nil when unlimited
 }
 
 // NewScheduler creates a scheduler ready to assign navigation IDs.
+// The returned scheduler has no concurrency limits (backward compatible).
 func NewScheduler() *Scheduler {
 	return &Scheduler{
 		generator: NewIDGenerator(),
 		pending:   make(map[ID]Load),
 	}
+}
+
+// NewSchedulerWithOptions creates a scheduler with the given concurrency limits.
+// A RateLimiter is created when either option is non-zero.
+func NewSchedulerWithOptions(opts SchedulerOptions) *Scheduler {
+	s := &Scheduler{
+		generator: NewIDGenerator(),
+		pending:   make(map[ID]Load),
+	}
+	if opts.MaxConnsPerOrigin > 0 || opts.MaxConnsGlobal > 0 {
+		s.limiter = NewRateLimiter(opts.MaxConnsPerOrigin, opts.MaxConnsGlobal)
+	}
+	return s
 }
 
 // startedAtNow returns the current wall-clock time. Extracted so that
@@ -139,7 +164,12 @@ func (s *Scheduler) cancelPreviousLocked() {
 	for id, cancel := range s.resourceCancels {
 		cancel()
 		delete(s.resourceCancels, id)
-		delete(s.pending, id)
+		if load, ok := s.pending[id]; ok {
+			delete(s.pending, id)
+			if s.limiter != nil && load.Origin != "" {
+				s.limiter.Release(load.Origin)
+			}
+		}
 	}
 }
 

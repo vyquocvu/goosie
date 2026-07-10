@@ -35,6 +35,18 @@ and all are cleaned up when the main navigation is cancelled or superseded.
 Priority is propagated through `context.Context` and can be retrieved with
 `PriorityFromContext()` by downstream network layers for admission control.
 
+### Concurrency Bounding
+
+The `navigation.Scheduler` supports application-level concurrency bounding
+via `SchedulerOptions`. A `RateLimiter` enforces per-origin (default 6) and
+global (default 24) concurrent request limits at the application level,
+complementing the transport-level `MaxConnsPerHost`. When slots are contended,
+the limiter uses a `container/heap`-based priority queue so higher-priority
+resources (document, blocking CSS) are admitted before lower-priority ones
+(speculative, deferred images). A zero-value `SchedulerOptions` means
+unlimited, preserving backward compatibility with existing code that uses
+`NewScheduler()`.
+
 ## Shared HTTP Transport
 
 The `internal/engine/session.Session` owns one configured `http.Transport` that is reused
