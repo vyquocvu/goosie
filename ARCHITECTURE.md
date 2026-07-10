@@ -154,6 +154,25 @@ This keeps navigation tracing UI-independent and prepares phase-level metrics in
                    └──────────────┘
 ```
 
+### Atom and String Interning (M2.2)
+
+The `internal/dom/atom` package provides compact uint32 handles (`Atom`) for
+interned strings, reducing allocation pressure and pointer density in the
+engine's hot paths.
+
+**Static atoms** are pre-assigned constants for all common HTML tag names
+(112 tags: `div`, `span`, `p`, `a`, etc.) and attribute names (48 attrs:
+`id`, `class`, `href`, `src`, etc.). Static atom lookup is O(1) with zero
+allocations.
+
+**Dynamic atoms** are interned into a bounded LRU-evicted `Table` with
+configurable entry count and byte limits. Strings exceeding the byte limit
+are rejected to prevent unbounded memory growth. The default table supports
+1024 entries and 64 KB of string data.
+
+The atom table is safe for concurrent use and is designed as foundation
+infrastructure for the compact DOM store (M2.3) and CSS pipeline (M3.1).
+
 ## Navigation State Flow
 
 ```
