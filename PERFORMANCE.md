@@ -733,6 +733,30 @@ go test -bench=BenchmarkFragment -benchmem ./internal/renderer/
 go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
 ```
 
+### Text Shaping (M4.3)
+
+The `internal/renderer` package provides a `TextShaper` that offers a
+backend-neutral interface for measuring and shaping text with caching.
+
+#### Shaping Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Shape (uncached) | 67 | 32 | 2 |
+| Shape (cached) | 67 | 32 | 2 |
+| MeasureWrapped | 1406 | 560 | 32 |
+
+The text shaper provides consistent performance through caching. Shape
+operations are O(1) for cached text. Wrapping is O(words) for paragraph
+layout.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkTextShaper -benchmem ./internal/renderer/
+go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

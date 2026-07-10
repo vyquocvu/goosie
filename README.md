@@ -48,6 +48,12 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - One layout object can produce multiple fragments (line breaks)
     - Text runs batch multiple glyphs (not one object per glyph)
     - Scratch buffer pool for zero-allocation line layout
+  - **Text shaping** (M4.3) with backend-neutral measurement
+    - FontKey identifies unique font configurations
+    - ShapedText contains glyphs with positions and metrics
+    - Cache for shaped text runs (O(1) for repeated measurements)
+    - Whitespace-aware text wrapping for line layout
+    - Direction support (LTR/RTL)
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -214,6 +220,10 @@ go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
 # Fragment store benchmarks (M4.2)
 go test -bench=BenchmarkFragment -benchmem ./internal/renderer/
 go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
+
+# Text shaping benchmarks (M4.3)
+go test -bench=BenchmarkTextShaper -benchmem ./internal/renderer/
+go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

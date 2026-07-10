@@ -456,12 +456,12 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 
 ### M4.3 Add text measurement and shaping abstraction
 
-- [ ] Define a backend-neutral font and text measurement interface.
-- [ ] Cache font resolution.
-- [ ] Cache shaped text runs by text, font, size, direction, and relevant features.
-- [ ] Support basic Latin first.
-- [ ] Add an optional advanced shaping path through `go-text/typesetting`.
-- [ ] Add tests for wrapping, whitespace modes, long words, and mixed styles.
+- [x] Define a backend-neutral font and text measurement interface.
+- [x] Cache font resolution.
+- [x] Cache shaped text runs by text, font, size, direction, and relevant features.
+- [x] Support basic Latin first.
+- [x] Add an optional advanced shaping path through `go-text/typesetting`.
+- [x] Add tests for wrapping, whitespace modes, long words, and mixed styles.
 
 ### M4.4 Implement incremental layout
 

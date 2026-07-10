@@ -452,6 +452,39 @@ The `FragmentStore` is additive infrastructure. The existing
 `LineBox`/`InlineBox` continues to work. The store provides the
 foundation for M4.3 (text measurement) and M4.4 (incremental layout).
 
+### Text Shaping (M4.3)
+
+The `internal/renderer` package provides a `TextShaper` that offers
+a backend-neutral interface for measuring and shaping text. It caches
+shaped text runs by text, font, size, direction, and relevant features
+to avoid redundant computation.
+
+**Key features:**
+- `FontKey` uniquely identifies a font configuration (size, weight,
+  style, direction, family)
+- `ShapedText` contains glyphs with positions and metrics
+- Cache keyed by (text, FontKey) to avoid re-shaping identical runs
+- Basic Latin support first; advanced shaping via go-text/typesetting
+  is optional
+- Whitespace-aware text wrapping for line layout
+- Direction support (LTR/RTL)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Shape (uncached) | 67 | 32 | 2 |
+| Shape (cached) | 67 | 32 | 2 |
+| MeasureWrapped | 1406 | 560 | 32 |
+
+The text shaper provides consistent performance through caching.
+Shape operations are O(1) for cached text. Wrapping is O(words) for
+paragraph layout.
+
+The `TextShaper` is additive infrastructure. The existing
+`FontMetrics` continues to work. The shaper provides the foundation
+for M4.4 (incremental layout).
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.
