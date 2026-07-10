@@ -130,12 +130,47 @@ go run ./cmd/browser
 ### Test Tiers
 
 ```bash
+# Tier 1: Quick unit tests (no network, no GUI)
 go test ./... -short
+
+# Tier 2: Full local suite (includes httptest loopback servers)
 go test ./...
+
+# Tier 3: End-to-end tests (requires Playwright + network)
 go test -tags=e2e ./test/e2e
+
+# Tier 4: Roadmap feature verification (live websites)
+go run ./cmd/roadmap_test/
 ```
 
 Use the short tier for sandbox-safe checks and the e2e tier for Playwright-driven browser tests.
+
+### Milestone-Gated Testing
+
+Tests are gated by roadmap milestone so they unlock automatically as features are completed. The current milestone is controlled by the `GOOSIE_MILESTONE` environment variable (default: `2`).
+
+```bash
+# Run e2e tests at current milestone (M2)
+go test -tags=e2e ./test/e2e/
+
+# Unlock M3 tests (CSS pipeline validation against real websites)
+GOOSIE_MILESTONE=3 go test -tags=e2e ./test/e2e/ -run TestRealWebsitesCSSParsing
+
+# Run roadmap verification at M3
+GOOSIE_MILESTONE=3 go run ./cmd/roadmap_test/
+```
+
+When a milestone is completed, update the default value in:
+- `test/e2e/real_websites_test.go` (`milestoneGate` function)
+- `cmd/roadmap_test/main.go` (`currentMilestone` variable)
+
+**Real website test coverage** (10 sites across 3 complexity tiers):
+
+| Milestone | Sites | Validates |
+|-----------|-------|----------|
+| M1 | example.com, iana.org, info.cern.ch, httpbin, testing.toscrape | HTTP fetch, navigation pipeline, response metadata |
+| M2 | w3schools, lipsum, quotes.toscrape | Compact DOM parsing, streaming parser, rendering |
+| M3 | wikipedia, MDN | CSS pipeline, computed styles, selector matching |
 
 ### Benchmarks
 

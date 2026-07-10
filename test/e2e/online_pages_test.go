@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"image/png"
 	"io"
 	"net/http"
@@ -87,7 +88,8 @@ func TestOnlinePagesRendering(t *testing.T) {
 			r := renderer.NewRenderer(float32(localConfig.ViewportWidth), float32(localConfig.ViewportHeight))
 			r.SetTestingMode(true)
 			r.SetCurrentURL(p.URL)
-			obj, err := r.RenderHTML(htmlContent)
+			ctx := context.Background()
+			obj, err := r.RenderHTML(ctx, htmlContent)
 			require.NoError(t, err)
 
 			goosieImg, err := testutil.RenderToImage(obj, localConfig.ViewportWidth, localConfig.ViewportHeight)
