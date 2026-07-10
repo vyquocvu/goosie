@@ -383,13 +383,13 @@ Make CSS parsing streaming-friendly, selector matching indexed, and style invali
 
 ### M3.1 Normalize stylesheet parsing
 
-- [ ] Parse CSS into compact rule and declaration stores.
-- [ ] Intern property names and common values.
-- [ ] Store common properties in typed fields.
-- [ ] Store rare properties in a secondary structure.
-- [ ] Preserve source order, origin, specificity, and `!important`.
-- [ ] Bound imported stylesheet depth and total bytes.
-- [ ] Preserve unsupported animations and transitions with documented fallback behavior.
+- [x] Parse CSS into compact rule and declaration stores.
+- [x] Intern property names and common values.
+- [x] Store common properties in typed fields.
+- [x] Store rare properties in a secondary structure.
+- [x] Preserve source order, origin, specificity, and `!important`.
+- [x] Bound imported stylesheet depth and total bytes.
+- [x] Preserve unsupported animations and transitions with documented fallback behavior.
 
 ### M3.2 Compile selectors
 
