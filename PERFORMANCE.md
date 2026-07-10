@@ -606,6 +606,52 @@ go test -bench=BenchmarkMatchVsLinear -benchmem ./internal/css/
 go test -bench=BenchmarkMatchElement -benchmem ./internal/css/
 ```
 
+### Computed-Style Storage (M3.3)
+
+The `internal/css` package provides typed computed-style storage with
+inherited/non-inherited separation, fingerprinting, and bounded
+deduplication via `StylePool`.
+
+#### Fingerprint and Equality
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| InheritedStyleFingerprint | 101 | 0 | 0 |
+| InheritedStyleEqual | 30 | 0 | 0 |
+
+Fingerprinting uses FNV-1a over all fields. Equality is a direct
+struct comparison with zero allocations.
+
+#### StylePool Deduplication
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| StylePoolInternHit | 247 | 0 | 0 |
+| StylePoolInternMiss | 279 | 0 | 0 |
+
+Pool operations are zero-allocation. The bounded LRU pool (default
+1024 entries) evicts least-recently-used styles when full.
+
+#### Declaration Application
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ApplyDeclarationsInherited | 92 | 0 | 0 |
+| ApplyDeclarationsNonInherited | 106 | 0 | 0 |
+| ComputedStyleInherit | 0.3 | 0 | 0 |
+
+Applying declarations to typed structs and inheriting from parent
+are zero-allocation operations.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkInheritedStyle -benchmem ./internal/css/
+go test -bench=BenchmarkStylePool -benchmem ./internal/css/
+go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
+go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

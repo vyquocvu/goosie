@@ -300,6 +300,50 @@ for O(1) candidate lookup.
 Bucketed matching is 2x faster and uses 95% less memory than linear
 scan on selector-heavy stylesheets.
 
+### Computed-Style Storage (M3.3)
+
+The `internal/css` package provides typed computed-style storage that
+replaces per-element property maps with compact structs separating
+inherited from non-inherited CSS properties.
+
+**Key features:**
+- `InheritedStyle` — typed struct for CSS-inherited properties (color,
+  font-size, font-weight, font-family, line-height, text-align, visibility,
+  opacity, etc.)
+- `NonInheritedStyle` — typed struct for non-inherited properties (display,
+  position, margin, padding, border, background, flexbox, grid, etc.)
+- `ComputedStyle` — combines both, accessed via `.Inherited` and
+  `.NonInherited` fields
+- `Fingerprint()` — uint64 FNV-1a hash for style deduplication
+- `StylePool` — bounded LRU cache (default 1024 entries) that deduplicates
+  identical `InheritedStyle` groups, returning the same pointer for equal
+  styles
+- `ApplyDeclarationsToInherited` / `ApplyDeclarationsToNonInherited` —
+  populate typed structs from `[]Declaration` slices
+- `IsInheritedProperty` — classifies properties per CSS spec
+- All operations are zero-allocation after initial construction
+- `StylePool` is safe for concurrent use
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| InheritedStyleFingerprint | 101 | 0 | 0 |
+| InheritedStyleEqual | 30 | 0 | 0 |
+| StylePoolInternHit | 247 | 0 | 0 |
+| StylePoolInternMiss | 279 | 0 | 0 |
+| ApplyDeclarationsInherited | 92 | 0 | 0 |
+| ApplyDeclarationsNonInherited | 106 | 0 | 0 |
+| ComputedStyleInherit | 0.3 | 0 | 0 |
+
+All computed-style operations are zero-allocation. The `StylePool`
+enables sharing identical inherited style groups across elements,
+reducing memory for documents with many elements sharing the same
+inherited properties (e.g., repeated `<p>` or `<li>` elements).
+
+This is additive infrastructure — the existing `renderer.Style` type
+remains in use until the renderer is migrated to consume `ComputedStyle`.
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

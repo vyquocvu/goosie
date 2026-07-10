@@ -29,6 +29,10 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
   - **Compiled selector engine** (M3.2) with precomputed specificity and bucketed rule lookup
     - 2x faster matching than linear scan
     - 95% less memory per match operation
+  - **Computed-style storage** (M3.3) with typed structs and zero-allocation operations
+    - Inherited/non-inherited property separation per CSS spec
+    - Fingerprint-based style deduplication via bounded StylePool
+    - All operations (fingerprint, equality, inheritance, declaration apply) are zero-allocation
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -142,6 +146,12 @@ go test -bench=. -benchmem ./internal/css/
 # Compiled selector benchmarks (M3.2)
 go test -bench=BenchmarkMatchVsLinear -benchmem ./internal/css/
 go test -bench=BenchmarkMatchElement -benchmem ./internal/css/
+
+# Computed-style storage benchmarks (M3.3)
+go test -bench=BenchmarkInheritedStyle -benchmem ./internal/css/
+go test -bench=BenchmarkStylePool -benchmem ./internal/css/
+go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
+go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

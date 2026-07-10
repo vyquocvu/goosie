@@ -401,11 +401,11 @@ Make CSS parsing streaming-friendly, selector matching indexed, and style invali
 
 ### M3.3 Introduce computed-style storage
 
-- [ ] Define a typed `ComputedStyle` for hot layout and paint properties.
-- [ ] Separate inherited and non-inherited values.
-- [ ] Deduplicate identical inherited style groups.
-- [ ] Add fingerprints for reusable computed styles.
-- [ ] Avoid a property map per element in hot paths.
+- [x] Define a typed `ComputedStyle` for hot layout and paint properties.
+- [x] Separate inherited and non-inherited values.
+- [x] Deduplicate identical inherited style groups.
+- [x] Add fingerprints for reusable computed styles.
+- [x] Avoid a property map per element in hot paths.
 
 ### M3.4 Implement style invalidation
 
