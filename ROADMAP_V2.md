@@ -280,8 +280,8 @@ Decouple the engine from the browser UI and make navigation, cancellation, and r
 
 ### M1.3 Stream response bodies
 
-- [ ] Remove unnecessary full-body copies from the main document path.
-- [ ] Feed the HTML tokenizer directly from the response stream.
+- [x] Remove unnecessary full-body copies from the main document path.
+- [x] Feed the HTML tokenizer directly from the response stream.
 - [x] Apply body size limits.
 - [x] Support cancellation while reading.
 - [x] Preserve response metadata for security and developer tools.

@@ -1,6 +1,7 @@
 package dom
 
 import (
+	"io"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -12,6 +13,14 @@ type Parser struct{}
 // NewParser creates a new Parser instance
 func NewParser() *Parser {
 	return &Parser{}
+}
+
+// ParseDocument parses HTML from an io.Reader and returns the root *html.Node.
+// This enables streaming: the caller can pass an HTTP response body directly,
+// avoiding an intermediate string copy. The reader is consumed fully before
+// return; callers should close it afterwards.
+func (p *Parser) ParseDocument(r io.Reader) (*html.Node, error) {
+	return html.Parse(r)
 }
 
 // ParseBodyText extracts text content from the body element

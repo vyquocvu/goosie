@@ -1,8 +1,11 @@
 package dom
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+
+	"golang.org/x/net/html"
 )
 
 func TestNewParser(t *testing.T) {
@@ -384,5 +387,117 @@ func TestQuerySelectorAll(t *testing.T) {
 				t.Errorf("QuerySelectorAll() returned %d elements, want %d", len(got), tt.wantCount)
 			}
 		})
+	}
+}
+
+// --- ParseDocument tests (M1.3 streaming) ---
+
+func TestParseDocumentSimpleHTML(t *testing.T) {
+	parser := NewParser()
+	htmlContent := `<html><head><title>Test</title></head><body><p>Hello</p></body></html>`
+	doc, err := parser.ParseDocument(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("ParseDocument returned error: %v", err)
+	}
+	if doc == nil {
+		t.Fatal("ParseDocument returned nil document")
+	}
+	// Verify the document has a body element
+	var foundBody bool
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "body" {
+			foundBody = true
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	if !foundBody {
+		t.Error("parsed document did not contain body element")
+	}
+}
+
+func TestParseDocumentEmptyReader(t *testing.T) {
+	parser := NewParser()
+	doc, err := parser.ParseDocument(strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("ParseDocument on empty reader returned error: %v", err)
+	}
+	if doc == nil {
+		t.Fatal("ParseDocument on empty reader returned nil")
+	}
+}
+
+func TestParseDocumentMalformedHTML(t *testing.T) {
+	parser := NewParser()
+	// Malformed HTML should still parse without error (html.Parse is lenient)
+	htmlContent := `<p>unclosed paragraph<div>nested without close`
+	doc, err := parser.ParseDocument(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("ParseDocument on malformed HTML returned error: %v", err)
+	}
+	if doc == nil {
+		t.Fatal("ParseDocument on malformed HTML returned nil")
+	}
+}
+
+func TestParseDocumentPreservesStructure(t *testing.T) {
+	parser := NewParser()
+	htmlContent := `<html><body><div id="main"><h1>Title</h1><p class="content">Text</p></div></body></html>`
+	doc, err := parser.ParseDocument(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("ParseDocument returned error: %v", err)
+	}
+
+	// Find the div with id="main"
+	var foundDiv *html.Node
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "div" {
+			for _, attr := range n.Attr {
+				if attr.Key == "id" && attr.Val == "main" {
+					foundDiv = n
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+
+	if foundDiv == nil {
+		t.Fatal("did not find div#main in parsed document")
+	}
+	// Verify children are preserved
+	if foundDiv.FirstChild == nil {
+		t.Fatal("div#main has no children")
+	}
+}
+
+func TestParseDocumentFromBytesReader(t *testing.T) {
+	parser := NewParser()
+	data := []byte(`<html><body><span>from bytes</span></body></html>`)
+	doc, err := parser.ParseDocument(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("ParseDocument from bytes.Reader returned error: %v", err)
+	}
+	if doc == nil {
+		t.Fatal("ParseDocument from bytes.Reader returned nil")
+	}
+}
+
+func BenchmarkParseDocument(b *testing.B) {
+	parser := NewParser()
+	htmlContent := strings.Repeat("<p>Paragraph content for benchmark testing.</p>", 100)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := parser.ParseDocument(strings.NewReader(htmlContent))
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }

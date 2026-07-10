@@ -35,6 +35,7 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
   - Cancellable requests (navigate away anytime)
   - Context-based timeout and cancellation support
   - Response metadata preservation for security inspection and developer tools
+  - Streaming response body path (M1.3) eliminates intermediate buffer copies
 - **JavaScript Runtime**: Execute JavaScript with Goja engine and comprehensive DOM APIs
   - Enhanced Console API: `console.log()`, `console.error()`, `console.warn()`, `console.info()`, `console.table()`
   - Console panel in browser UI with filtering and error tracking
