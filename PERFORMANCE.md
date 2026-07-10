@@ -513,6 +513,49 @@ Run the benchmarks:
 go test -bench=BenchmarkAdapter -benchmem ./internal/dom/
 ```
 
+### CSS Pipeline (M3.1)
+
+The `internal/css` package normalizes stylesheet parsing with property
+name interning via `atom.Table`, hot/cold property classification, source
+order tracking, and origin tagging.
+
+#### Property Interning Benchmarks
+
+Property names are interned into a bounded LRU table (256 entries, 16KB).
+All hot properties (~100 common CSS properties) are pre-interned at init.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| PropertyTableIntern (10 props) | 411 | 0 | 0 |
+| PropertyTableLookup (10 props) | 390 | 0 | 0 |
+
+Intern and lookup are zero-allocation after initial population.
+
+#### Parse Overhead from M3.1
+
+The property interning adds minimal overhead to parsing. Allocation counts
+remain identical because the atom table reuses existing atoms:
+
+| Benchmark | Before (ns/op) | After (ns/op) | allocs/op (unchanged) |
+|-----------|----------------|---------------|----------------------|
+| ParseSmall | 3,904 | 4,505 | 166 |
+| ParseMedium | 43,893 | 52,056 | 1,909 |
+| ParseLarge | 210,776 | 256,181 | 9,067 |
+| ParseSelectorComplex | 21,378 | 23,778 | 912 |
+| ParseSelectorHeavy | 38,233 | 42,714 | 1,609 |
+| ParseAtRules | 35,357 | 39,137 | 1,512 |
+
+The ~15% ns/op increase is from atom table lock acquisition and hash
+lookup per property. This is an acceptable trade-off for enabling
+M3.2 (selector compilation) and M3.3 (computed style storage) which
+will use property atoms for O(1) property matching.
+
+Run the benchmarks:
+
+```bash
+go test -bench=. -benchmem ./internal/css/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

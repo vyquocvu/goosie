@@ -238,6 +238,39 @@ The adapter allocates `*html.Node` trees by design — that's the compatibility
 cost. Usage metrics (`AdapterUsageCount()`) detect remaining consumers during
 the migration to NodeID-based APIs.
 
+### CSS Pipeline (M3.1)
+
+The `internal/css` package normalizes stylesheet parsing with compact
+declaration stores, property name interning, and source order tracking.
+
+**Key features:**
+- Property names interned via `atom.Table` (bounded LRU, 256 entries, 16KB)
+- Hot/cold property classification: ~100 common properties (display, color,
+  font-size, margin, padding, etc.) classified as hot; rare properties
+  (vendor prefixes, animation, transition, filter) classified as cold
+- Source order tracking: each rule receives a monotonic `SourceOrder` value
+- Origin tracking: rules tagged with `OriginUserAgent`, `OriginUser`, or
+  `OriginAuthor` for cascade resolution
+- Specificity field: `[3]uint16` for (id, class, tag) specificity
+- `ParseConfig` with `MaxBytes` and `MaxImportDepth` bounds
+- Backward compatible: `Declaration.Property` string field preserved
+
+**Unsupported animations and transitions:** `@keyframes`, `animation-*`,
+and `transition-*` properties are parsed and preserved in the declaration
+store but are not yet consumed by the style engine. They will fail
+predictably (no visual effect) until M3.4 (style invalidation) and
+M5 (display list) add animation support.
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| PropertyTableIntern (10 props) | 411 | 0 | 0 |
+| PropertyTableLookup (10 props) | 390 | 0 | 0 |
+
+Property interning and lookup are zero-allocation operations after the
+initial table population.
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

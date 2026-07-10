@@ -5,15 +5,47 @@ import (
 	"strings"
 )
 
+// ParseConfig controls parsing limits and behavior (M3.1)
+type ParseConfig struct {
+	// MaxBytes is the maximum total bytes of CSS to parse (0 = unlimited)
+	MaxBytes int
+	// MaxImportDepth is the maximum depth of @import nesting (0 = no @import following)
+	MaxImportDepth int
+	// Origin is the origin to assign to parsed rules (default: OriginAuthor)
+	Origin Origin
+}
+
+// DefaultParseConfig returns a ParseConfig with sensible defaults
+func DefaultParseConfig() ParseConfig {
+	return ParseConfig{
+		MaxBytes:       0, // unlimited for backward compatibility
+		MaxImportDepth: 0, // no @import following
+		Origin:         OriginAuthor,
+	}
+}
+
 // Parser processes CSS text and builds a StyleSheet.
 type Parser struct {
-	input string
-	pos   int
+	input       string
+	pos         int
+	config      ParseConfig // M3.1
+	sourceOrder uint32      // M3.1: tracks declaration order
 }
 
 // NewParser creates a new Parser.
 func NewParser(input string) *Parser {
-	return &Parser{input: strings.TrimPrefix(input, "\ufeff")}
+	return &Parser{
+		input:  strings.TrimPrefix(input, "\ufeff"),
+		config: DefaultParseConfig(),
+	}
+}
+
+// NewParserWithConfig creates a new Parser with custom configuration (M3.1)
+func NewParserWithConfig(input string, config ParseConfig) *Parser {
+	return &Parser{
+		input:  strings.TrimPrefix(input, "\ufeff"),
+		config: config,
+	}
 }
 
 // ParseStyleAttribute parses the content of a style attribute (e.g., "color: red; margin: 10px")
@@ -27,6 +59,13 @@ func ParseStyleAttribute(input string) ([]Declaration, error) {
 
 // Parse parses the CSS input and returns a StyleSheet.
 func (p *Parser) Parse() (*StyleSheet, error) {
+	// M3.1: Enforce MaxBytes limit
+	input := p.input
+	if p.config.MaxBytes > 0 && len(input) > p.config.MaxBytes {
+		input = input[:p.config.MaxBytes]
+		p.input = input
+	}
+
 	stylesheet := &StyleSheet{}
 	p.consumeWhitespaceAndComments()
 
@@ -66,7 +105,14 @@ func (p *Parser) Parse() (*StyleSheet, error) {
 			p.consumeWhitespaceAndComments()
 			continue
 		}
-		stylesheet.Rules = append(stylesheet.Rules, Rule{Selectors: selectors, Declarations: declarations})
+		// M3.1: Assign source order and origin
+		p.sourceOrder++
+		stylesheet.Rules = append(stylesheet.Rules, Rule{
+			Selectors:    selectors,
+			Declarations: declarations,
+			SourceOrder:  p.sourceOrder,
+			Origin:       p.config.Origin,
+		})
 		p.consumeWhitespaceAndComments()
 	}
 	return stylesheet, nil
@@ -473,10 +519,16 @@ func (p *Parser) parseDeclarations() []Declaration {
 			p.consumeChar(';')
 		}
 
+		// M3.1: Intern property name and classify as hot/cold
+		propAtom := internPropertyName(property)
+		isHot := isHotProperty(property)
+
 		declarations = append(declarations, Declaration{
-			Property:  property,
-			Value:     value,
-			Important: important,
+			Property:     property,
+			Value:        value,
+			Important:    important,
+			PropertyAtom: propAtom,
+			IsHot:        isHot,
 		})
 		p.consumeWhitespaceAndComments()
 		if p.peek() == '}' {
