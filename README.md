@@ -10,6 +10,9 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
 - **Release Builds**: Tag-based GitHub Actions workflow builds cross-platform browser binaries.
 - **HTTP Fetching**: Async fetch with cancellation support using context
 - **HTML Parsing**: Parse HTML and extract body text using golang.org/x/net/html
+  - Streaming tree construction with token-by-token parsing into a compact DOM store (M2.4)
+  - Context-aware cancellation during parsing for responsive navigation
+  - Early resource discovery (CSS, scripts, images) during parse for parallel fetching
 - **HTML Rendering**: Canvas-based renderer with layout engine
   - Render tree for optimized DOM representation
   - Layout engine with box model calculations
@@ -266,7 +269,7 @@ The browser demonstrates web functionality by:
 - **internal/engine/navigation**: Monotonic navigation IDs, cancellable load contexts, and stale-callback rejection
 - **internal/engine/session**: Session lifecycle (state machine, context propagation, event callbacks) wrapping the navigation scheduler
 - **internal/engine/metrics**: Phase-timing recorder and counters for tracing navigation from URL entry to first paint
-- **internal/dom**: HTML parser for extracting content
+- **internal/dom**: HTML parser for extracting content; compact DOM store (M2.3) with NodeID-based index storage
 - **internal/dom/atom**: String interning with static atoms for HTML tags/attributes and bounded LRU-evicted dynamic table (M2.2)
 - **internal/net**: Async HTTP client with context support for fetching web pages
 - **internal/renderer**: Canvas-based HTML renderer with layout engine

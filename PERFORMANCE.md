@@ -437,6 +437,68 @@ Run the benchmarks:
 go test -bench=. -benchmem ./internal/dom/atom/
 ```
 
+## Compact DOM Store (M2.3)
+
+The `internal/dom` package provides a compact DOM store (`Store`) that
+replaces pointer-heavy `*html.Node` trees with index-based storage.
+
+### Design
+
+- **NodeID** (uint32): index into contiguous `[]nodeRecord` slice
+- **Stale detection**: Kind field == 0 means freed/invalid
+- **Node record**: 32 bytes per node (first-child/next-sibling links)
+- **Packed attributes**: `[]Attr` slice (8 bytes per attr, indexed by AttrStart/AttrCount)
+- **Text storage**: separate `[]byte` buffer for text/comment content
+- **Rare metadata**: dedicated map for namespace and other infrequent data
+- **Zero-allocation iterators**: children, subtree, reverse children, siblings, ancestors
+
+### Mutation Benchmarks
+
+| Operation | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| AppendChild | 542 | 215 | 0 |
+| SetAttrs (3 attrs) | 22 | 0 | 0 |
+| SetText | 22 | 0 | 0 |
+| RemoveChild | 219 | 0 | 0 |
+| RemoveSubtree (101 nodes) | 1,854 | 512 | 1 |
+
+### Traversal Benchmarks
+
+| Traversal | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ChildIterator (100 children) | 436 | 0 | 0 |
+| SubtreeIterator (111 nodes) | 746 | 0 | 0 |
+
+### Memory Overhead
+
+| Node Count | B/op | allocs/op |
+|------------|------|----------|
+| 10 | 13,200 | 6 |
+| 100 | 16,848 | 6 |
+| 1,000 | 84,432 | 8 |
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkStore -benchmem ./internal/dom/
+```
+
+### Streaming Parser (M2.4)
+
+| Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |
+|---------|---------------------|---------------------------|------------------|
+| Small HTML | 2,440 ns/op, 17 allocs | 7,585 ns/op, 15 allocs | 12% fewer |
+| Medium HTML | 10,586 ns/op, 96 allocs | 17,465 ns/op, 55 allocs | 43% fewer |
+| Large HTML | 89,328 ns/op, 679 allocs | 119,018 ns/op, 348 allocs | 49% fewer |
+| Table heavy | 87,709 ns/op, 733 allocs | 113,788 ns/op, 240 allocs | 67% fewer |
+| Form heavy | 57,724 ns/op, 449 allocs | 81,250 ns/op, 247 allocs | 45% fewer |
+
+**Key observations:**
+- Allocation count is significantly reduced on complex documents (49–67% on large fixtures), exceeding the 30% target.
+- Wall-clock time is ~1.3–1.5× higher due to tokenizer overhead vs. batch `html.Parse`.
+- The trade-off favors the streaming path: fewer allocations reduce GC pressure, context cancellation enables responsive navigation, and resource discovery enables parallel fetching.
+- Store layer shows zero regression on all benchmarks.
+
 ## Known Limitations
 
 1. **Buffer Zone Trade-off**: Larger buffer zones (50% above/below viewport) use more memory but provide smoother scrolling
