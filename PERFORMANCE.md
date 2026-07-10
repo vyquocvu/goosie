@@ -707,6 +707,32 @@ Run the benchmarks:
 go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
 ```
 
+### Fragment Store (M4.2)
+
+The `internal/renderer` package provides a `FragmentStore` that represents
+line fragments, text runs, boxes, and replaced elements in contiguous
+storage using stable `FragmentID` handles.
+
+#### Fragment Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 fragments) | 4800 | 0 | 0 |
+| SetGet (100 fragments) | 242 | 0 | 0 |
+| Chain (100 fragments) | 354 | 0 | 0 |
+| ScratchBufferPool | 27 | 0 | 0 |
+
+All fragment operations are zero-allocation. The contiguous slice storage
+provides cache-friendly access patterns. The scratch buffer pool eliminates
+per-line allocations during inline layout.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkFragment -benchmem ./internal/renderer/
+go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

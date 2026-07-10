@@ -449,10 +449,10 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 
 ### M4.2 Implement fragment storage
 
-- [ ] Represent line fragments, text runs, boxes, and replaced elements in contiguous storage.
-- [ ] Support one layout object producing multiple fragments.
-- [ ] Reuse scratch buffers during line layout.
-- [ ] Avoid allocating one object per glyph.
+- [x] Represent line fragments, text runs, boxes, and replaced elements in contiguous storage.
+- [x] Support one layout object producing multiple fragments.
+- [x] Reuse scratch buffers during line layout.
+- [x] Avoid allocating one object per glyph.
 
 ### M4.3 Add text measurement and shaping abstraction
 

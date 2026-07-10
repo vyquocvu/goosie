@@ -413,6 +413,45 @@ The `LayoutStore` is additive infrastructure. The existing
 the foundation for M4.2 (fragment storage) and M4.4 (incremental
 layout).
 
+### Fragment Store (M4.2)
+
+The `internal/renderer` package provides a `FragmentStore` that
+represents line fragments, text runs, boxes, and replaced elements
+in contiguous storage using stable `FragmentID` handles. This replaces
+pointer-heavy `[]*LineBox` and `[]*InlineBox` with cache-friendly
+storage.
+
+**Key features:**
+- `FragmentID` (uint32) is a stable handle — an index into a contiguous
+  `[]Fragment` slice
+- `FragmentNone` (0) is the invalid/nil fragment handle
+- Fragment types: `FragmentLine`, `FragmentTextRun`, `FragmentBox`,
+  `FragmentReplaced`
+- One layout object can produce multiple fragments (e.g., line breaks)
+  via `NextFragment` chains
+- Layout objects reference their first fragment via `FirstFragment`
+  mapping
+- Text runs batch multiple glyphs (not one object per glyph)
+- `ScratchBufferPool` reuses buffers for line layout with bounded
+  capacity
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 fragments) | 4800 | 0 | 0 |
+| SetGet (100 fragments) | 242 | 0 | 0 |
+| Chain (100 fragments) | 354 | 0 | 0 |
+| ScratchBufferPool | 27 | 0 | 0 |
+
+All fragment operations are zero-allocation. The contiguous slice
+storage provides cache-friendly access patterns. The scratch buffer
+pool eliminates per-line allocations.
+
+The `FragmentStore` is additive infrastructure. The existing
+`LineBox`/`InlineBox` continues to work. The store provides the
+foundation for M4.3 (text measurement) and M4.4 (incremental layout).
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

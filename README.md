@@ -43,6 +43,11 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - display:none elements receive no layout allocation
     - Bidirectional DOM-to-layout and layout-to-DOM mappings
     - Generated content support (::before, ::after)
+  - **Fragment store** (M4.2) for inline layout
+    - FragmentID handles for line fragments, text runs, boxes, replaced elements
+    - One layout object can produce multiple fragments (line breaks)
+    - Text runs batch multiple glyphs (not one object per glyph)
+    - Scratch buffer pool for zero-allocation line layout
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -205,6 +210,10 @@ go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
 
 # Layout store benchmarks (M4.1)
 go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
+
+# Fragment store benchmarks (M4.2)
+go test -bench=BenchmarkFragment -benchmem ./internal/renderer/
+go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/
