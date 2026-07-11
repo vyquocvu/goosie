@@ -505,6 +505,43 @@ The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build 
 
 **Backward compatibility:** The existing `ParseDocument(io.Reader) (*html.Node, error)` is preserved. All downstream consumers (renderer, JS runtime, cmd/browser) continue using `*html.Node` until M2.5 provides a compatibility adapter.
 
+### Backend-Neutral Display Commands (M5.1)
+
+The `internal/renderer` package provides a `DisplayCommand` value type and
+`DisplayCommandList` that form the stable contract between layout and
+rendering. These are backend-neutral — they contain no references to
+`*RenderNode`, `*LayoutBox`, or any UI framework types.
+
+**Key features:**
+- `DisplayCommandKind` enum: Rect, Border, Text, Image, PushClip/PopClip,
+  PushTransform/PopTransform, PushOpacity/PopOpacity,
+  PushStackingContext/PopStackingContext
+- Per-command data structs: `RectCommand`, `BorderCommand`, `TextCommand`,
+  `ImageCommand`, `ClipCommand`, `TransformCommand`, `OpacityCommand`,
+  `StackingContextCommand`
+- `TransformMatrix`: 2D affine transform with multiply, inverse, and
+  factory functions (translate, scale, rotate)
+- `RectF`: float32 axis-aligned rectangle with Contains and Intersects
+- `BorderStyle`: enum for none, solid, dashed, dotted
+- `DisplayCommandList`: contiguous `[]DisplayCommand` value slice
+  (not `[]*DisplayCommand`) — reduces pointer density and GC pressure
+- Full JSON serialization for debugging and future IPC
+- Zero-allocation command creation (value types, no heap escapes)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| CommandCreate | 0.32 | 0 | 0 |
+| ListAdd (100 cmds) | 12,325 | 97,888 | 8 |
+| SerializeRect | 6,916 | 1,800 | 25 |
+| TransformMatrixMul | 0.72 | 0 | 0 |
+| TransformMatrixInverse | 19.6 | 24 | 1 |
+
+The `DisplayCommand` types are additive infrastructure. The existing
+`PaintCommand`/`DisplayList` continues to work. M5.2 will migrate the
+builder to produce `DisplayCommand` values and introduce paint chunks.
+
 ## Navigation State Flow
 
 ```

@@ -495,11 +495,11 @@ Make the display list the stable contract between layout and rendering.
 
 ### M5.1 Define backend-neutral display commands
 
-- [ ] Add commands for rectangles, borders, text runs, images, clips, transforms, opacity, and stacking contexts.
-- [ ] Add path and vector-image command support for the documented SVG subset.
-- [ ] Use compact typed structures.
-- [ ] Avoid interface values in the hottest display-list storage where possible.
-- [ ] Add serialization support for debugging and future IPC.
+- [x] Add commands for rectangles, borders, text runs, images, clips, transforms, opacity, and stacking contexts.
+- [x] Add path and vector-image command support for the documented SVG subset.
+- [x] Use compact typed structures.
+- [x] Avoid interface values in the hottest display-list storage where possible.
+- [x] Add serialization support for debugging and future IPC.
 
 ### M5.2 Introduce paint chunks
 
