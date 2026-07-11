@@ -604,6 +604,45 @@ DOM traversal during repainting.
 The dirty-region infrastructure is additive. The existing
 `ChunkedDisplayList.DirtyRects()` path continues to work.
 
+### Platform-Neutral Frame Types (M6.1)
+
+The `internal/renderer/frame` package defines the backend-neutral types
+that form the contract between the display list builder and any raster
+backend (CPU, GPU, or Fyne adapter). No Fyne or backend-specific types
+appear in this package.
+
+**Core types:**
+- `Color`: packed uint32 RGBA — avoids `color.Color` interface allocation
+- `Point`: float32 2D coordinate with Add/Sub/Scale/DistanceTo
+- `Rect`: float32 AABB with Contains/Intersects/Intersection/Union/Expand
+- `ImageHandle` / `FontHandle`: typed uint32 handles for backend-managed resources
+- `Glyph` / `TextRun`: shaped text with per-glyph advance and offsets
+- `PixelScale`: DPI-aware layout→device pixel conversion
+- `Viewport`: frame dimensions, scroll offset, and pixel scale
+- `FrameSnapshot`: immutable frame with generation counter and content hash
+
+**Design principles:**
+- All types are value types (no pointer indirection, no GC pressure)
+- Zero allocations on all operations (verified by benchmarks)
+- `FrameSnapshot` is immutable once created — safe for concurrent reads
+- `PixelScale` clamps invalid input (zero/negative DPI → 96 fallback)
+- `Viewport` clamps negative dimensions and scroll offsets to zero
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ColorCreation | 0.32 | 0 | 0 |
+| ColorToStd | 0.32 | 0 | 0 |
+| RectContains | 0.32 | 0 | 0 |
+| RectIntersects | 0.31 | 0 | 0 |
+| PixelScaleToPixels | 0.32 | 0 | 0 |
+| FrameSnapshotCreation | 19.1 | 0 | 0 |
+| TextRunWidth (50 glyphs) | 17.1 | 0 | 0 |
+
+All frame type operations are zero-allocation. The packed `Color`
+avoids the interface allocation of `color.Color` in hot paths.
+
 ## Navigation State Flow
 
 ```

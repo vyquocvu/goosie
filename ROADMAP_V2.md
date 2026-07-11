@@ -551,9 +551,9 @@ type RasterBackend interface {
 
 ### M6.1 Define platform-neutral frame types
 
-- [ ] Define color, point, rectangle, transform, clip, image handle, font handle, and text run types.
-- [ ] Define pixel scale and viewport behavior.
-- [ ] Define immutable frame snapshots.
+- [x] Define color, point, rectangle, transform, clip, image handle, font handle, and text run types.
+- [x] Define pixel scale and viewport behavior.
+- [x] Define immutable frame snapshots.
 
 ### M6.2 Implement a pure-Go CPU raster backend
 
