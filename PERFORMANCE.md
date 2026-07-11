@@ -606,6 +606,157 @@ go test -bench=BenchmarkMatchVsLinear -benchmem ./internal/css/
 go test -bench=BenchmarkMatchElement -benchmem ./internal/css/
 ```
 
+### Computed-Style Storage (M3.3)
+
+The `internal/css` package provides typed computed-style storage with
+inherited/non-inherited separation, fingerprinting, and bounded
+deduplication via `StylePool`.
+
+#### Fingerprint and Equality
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| InheritedStyleFingerprint | 101 | 0 | 0 |
+| InheritedStyleEqual | 30 | 0 | 0 |
+
+Fingerprinting uses FNV-1a over all fields. Equality is a direct
+struct comparison with zero allocations.
+
+#### StylePool Deduplication
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| StylePoolInternHit | 247 | 0 | 0 |
+| StylePoolInternMiss | 279 | 0 | 0 |
+
+Pool operations are zero-allocation. The bounded LRU pool (default
+1024 entries) evicts least-recently-used styles when full.
+
+#### Declaration Application
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ApplyDeclarationsInherited | 92 | 0 | 0 |
+| ApplyDeclarationsNonInherited | 106 | 0 | 0 |
+| ComputedStyleInherit | 0.3 | 0 | 0 |
+
+Applying declarations to typed structs and inheriting from parent
+are zero-allocation operations.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkInheritedStyle -benchmem ./internal/css/
+go test -bench=BenchmarkStylePool -benchmem ./internal/css/
+go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
+go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
+```
+
+### Style Invalidation (M3.4)
+
+The `internal/css` package provides a `StyleInvalidator` that analyzes
+DOM mutations against a compiled stylesheet to determine which elements
+need style recalculation.
+
+#### Invalidation Analysis
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ComputeInvalidation (class change) | 311 | 72 | 4 |
+| ComputeInvalidation (inherited) | 237 | 40 | 3 |
+| BatchMutations (3 mutations) | 672 | 112 | 8 |
+| AffectedRuleIndices | 189 | 56 | 3 |
+| HasSiblingCombinator | 1.5 | 0 | 0 |
+
+Invalidation analysis is O(affected rules), not O(total rules). The
+bucket-based lookup ensures that only rules referencing the changed
+class, ID, or attribute are examined. Sibling combinator detection
+is cached and near-zero cost.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
+go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
+go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
+go test -bench=BenchmarkHasSiblingCombinator -benchmem ./internal/css/
+```
+
+### Layout Store (M4.1)
+
+The `internal/renderer` package provides a `LayoutStore` that separates
+layout objects from DOM nodes using compact, index-based storage with
+stable `LayoutID` handles.
+
+#### Store Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 objects) | 4800 | 0 | 0 |
+| AppendChild (100 children) | 760 | 0 | 0 |
+| DOMMapping (100 set+get) | 4799 | 0 | 0 |
+| ChildCount (100 children) | 230 | 0 | 0 |
+
+All layout store operations are zero-allocation. The contiguous slice
+storage provides cache-friendly access patterns. Tree operations use
+first-child/next-sibling links without pointer indirection.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
+```
+
+### Fragment Store (M4.2)
+
+The `internal/renderer` package provides a `FragmentStore` that represents
+line fragments, text runs, boxes, and replaced elements in contiguous
+storage using stable `FragmentID` handles.
+
+#### Fragment Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 fragments) | 4800 | 0 | 0 |
+| SetGet (100 fragments) | 242 | 0 | 0 |
+| Chain (100 fragments) | 354 | 0 | 0 |
+| ScratchBufferPool | 27 | 0 | 0 |
+
+All fragment operations are zero-allocation. The contiguous slice storage
+provides cache-friendly access patterns. The scratch buffer pool eliminates
+per-line allocations during inline layout.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkFragment -benchmem ./internal/renderer/
+go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
+```
+
+### Text Shaping (M4.3)
+
+The `internal/renderer` package provides a `TextShaper` that offers a
+backend-neutral interface for measuring and shaping text with caching.
+
+#### Shaping Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Shape (uncached) | 67 | 32 | 2 |
+| Shape (cached) | 67 | 32 | 2 |
+| MeasureWrapped | 1406 | 560 | 32 |
+
+The text shaper provides consistent performance through caching. Shape
+operations are O(1) for cached text. Wrapping is O(words) for paragraph
+layout.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkTextShaper -benchmem ./internal/renderer/
+go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

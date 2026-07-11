@@ -300,6 +300,191 @@ for O(1) candidate lookup.
 Bucketed matching is 2x faster and uses 95% less memory than linear
 scan on selector-heavy stylesheets.
 
+### Computed-Style Storage (M3.3)
+
+The `internal/css` package provides typed computed-style storage that
+replaces per-element property maps with compact structs separating
+inherited from non-inherited CSS properties.
+
+**Key features:**
+- `InheritedStyle` — typed struct for CSS-inherited properties (color,
+  font-size, font-weight, font-family, line-height, text-align, visibility,
+  opacity, etc.)
+- `NonInheritedStyle` — typed struct for non-inherited properties (display,
+  position, margin, padding, border, background, flexbox, grid, etc.)
+- `ComputedStyle` — combines both, accessed via `.Inherited` and
+  `.NonInherited` fields
+- `Fingerprint()` — uint64 FNV-1a hash for style deduplication
+- `StylePool` — bounded LRU cache (default 1024 entries) that deduplicates
+  identical `InheritedStyle` groups, returning the same pointer for equal
+  styles
+- `ApplyDeclarationsToInherited` / `ApplyDeclarationsToNonInherited` —
+  populate typed structs from `[]Declaration` slices
+- `IsInheritedProperty` — classifies properties per CSS spec
+- All operations are zero-allocation after initial construction
+- `StylePool` is safe for concurrent use
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| InheritedStyleFingerprint | 101 | 0 | 0 |
+| InheritedStyleEqual | 30 | 0 | 0 |
+| StylePoolInternHit | 247 | 0 | 0 |
+| StylePoolInternMiss | 279 | 0 | 0 |
+| ApplyDeclarationsInherited | 92 | 0 | 0 |
+| ApplyDeclarationsNonInherited | 106 | 0 | 0 |
+| ComputedStyleInherit | 0.3 | 0 | 0 |
+
+All computed-style operations are zero-allocation. The `StylePool`
+enables sharing identical inherited style groups across elements,
+reducing memory for documents with many elements sharing the same
+inherited properties (e.g., repeated `<p>` or `<li>` elements).
+
+This is additive infrastructure — the existing `renderer.Style` type
+remains in use until the renderer is migrated to consume `ComputedStyle`.
+
+### Style Invalidation (M3.4)
+
+The `internal/css` package provides a `StyleInvalidator` that determines
+which elements need style recalculation after DOM mutations, using the
+`CompiledStyleSheet` bucket structure for efficient affected-rule lookup.
+
+**Key features:**
+- Mutation classification: class, ID, attribute, inline style, text,
+  insertion, removal
+- Bucket-based affected rule lookup: class changes check class bucket
+  for old and new values; ID changes check ID bucket; attribute changes
+  check attr bucket
+- Descendant invalidation: when affected rules contain inherited CSS
+  properties (color, font-size, visibility, etc.), all descendants are
+  flagged for recalculation
+- Sibling invalidation: adjacent (+) and general sibling (~) combinators
+  trigger invalidation of next/following siblings
+- Mutation batching: `BeginBatch()` / `RecordMutation()` / `FlushBatch()`
+  coalesce multiple DOM changes into a single combined invalidation result
+  with deduplicated targets
+- Text changes mark layout dirty but not style (text content doesn't
+  affect CSS cascade)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ComputeInvalidation (class change) | 311 | 72 | 4 |
+| ComputeInvalidation (inherited) | 237 | 40 | 3 |
+| BatchMutations (3 mutations) | 672 | 112 | 8 |
+| AffectedRuleIndices | 189 | 56 | 3 |
+| HasSiblingCombinator | 1.5 | 0 | 0 |
+
+The invalidator is conservative — it may over-invalidate rather than
+miss nodes. This is safe: extra invalidation is a performance cost,
+not a correctness issue.
+
+### Layout Store (M4.1)
+
+The `internal/renderer` package provides a `LayoutStore` that separates
+layout objects from DOM nodes using compact, index-based storage with
+stable `LayoutID` handles. This replaces the pointer-heavy `*LayoutBox`
+tree with cache-friendly contiguous storage.
+
+**Key features:**
+- `LayoutID` (uint32) is a stable handle — an index into a contiguous
+  `[]LayoutObject` slice
+- `LayoutNone` (0) is the invalid/nil layout handle
+- First-child/next-sibling links for tree traversal without pointers
+- Bidirectional DOM-to-layout and layout-to-DOM mappings
+- Generated content (`::before`, `::after`) creates layout objects
+  without corresponding DOM nodes
+- `display:none` elements map to `LayoutNone` — no allocation
+- Free-list reuse of deleted layout IDs
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 objects) | 4800 | 0 | 0 |
+| AppendChild (100 children) | 760 | 0 | 0 |
+| DOMMapping (100 set+get) | 4799 | 0 | 0 |
+| ChildCount (100 children) | 230 | 0 | 0 |
+
+The `LayoutStore` is additive infrastructure. The existing
+`LayoutBox`/`LayoutEngine` continues to work. The store provides
+the foundation for M4.2 (fragment storage) and M4.4 (incremental
+layout).
+
+### Fragment Store (M4.2)
+
+The `internal/renderer` package provides a `FragmentStore` that
+represents line fragments, text runs, boxes, and replaced elements
+in contiguous storage using stable `FragmentID` handles. This replaces
+pointer-heavy `[]*LineBox` and `[]*InlineBox` with cache-friendly
+storage.
+
+**Key features:**
+- `FragmentID` (uint32) is a stable handle — an index into a contiguous
+  `[]Fragment` slice
+- `FragmentNone` (0) is the invalid/nil fragment handle
+- Fragment types: `FragmentLine`, `FragmentTextRun`, `FragmentBox`,
+  `FragmentReplaced`
+- One layout object can produce multiple fragments (e.g., line breaks)
+  via `NextFragment` chains
+- Layout objects reference their first fragment via `FirstFragment`
+  mapping
+- Text runs batch multiple glyphs (not one object per glyph)
+- `ScratchBufferPool` reuses buffers for line layout with bounded
+  capacity
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Allocate (100 fragments) | 4800 | 0 | 0 |
+| SetGet (100 fragments) | 242 | 0 | 0 |
+| Chain (100 fragments) | 354 | 0 | 0 |
+| ScratchBufferPool | 27 | 0 | 0 |
+
+All fragment operations are zero-allocation. The contiguous slice
+storage provides cache-friendly access patterns. The scratch buffer
+pool eliminates per-line allocations.
+
+The `FragmentStore` is additive infrastructure. The existing
+`LineBox`/`InlineBox` continues to work. The store provides the
+foundation for M4.3 (text measurement) and M4.4 (incremental layout).
+
+### Text Shaping (M4.3)
+
+The `internal/renderer` package provides a `TextShaper` that offers
+a backend-neutral interface for measuring and shaping text. It caches
+shaped text runs by text, font, size, direction, and relevant features
+to avoid redundant computation.
+
+**Key features:**
+- `FontKey` uniquely identifies a font configuration (size, weight,
+  style, direction, family)
+- `ShapedText` contains glyphs with positions and metrics
+- Cache keyed by (text, FontKey) to avoid re-shaping identical runs
+- Basic Latin support first; advanced shaping via go-text/typesetting
+  is optional
+- Whitespace-aware text wrapping for line layout
+- Direction support (LTR/RTL)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Shape (uncached) | 67 | 32 | 2 |
+| Shape (cached) | 67 | 32 | 2 |
+| MeasureWrapped | 1406 | 560 | 32 |
+
+The text shaper provides consistent performance through caching.
+Shape operations are O(1) for cached text. Wrapping is O(words) for
+paragraph layout.
+
+The `TextShaper` is additive infrastructure. The existing
+`FontMetrics` continues to work. The shaper provides the foundation
+for M4.4 (incremental layout).
+
 ### Streaming Tree Construction (M2.4)
 
 The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build the DOM tree directly in the compact `Store`. This replaces the intermediate `*html.Node` tree for the new code path.

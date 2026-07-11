@@ -29,6 +29,31 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
   - **Compiled selector engine** (M3.2) with precomputed specificity and bucketed rule lookup
     - 2x faster matching than linear scan
     - 95% less memory per match operation
+  - **Computed-style storage** (M3.3) with typed structs and zero-allocation operations
+    - Inherited/non-inherited property separation per CSS spec
+    - Fingerprint-based style deduplication via bounded StylePool
+    - All operations (fingerprint, equality, inheritance, declaration apply) are zero-allocation
+  - **Style invalidation** (M3.4) with bucket-based affected rule analysis
+    - Mutation classification (class, ID, attribute, inline style, text, insertion, removal)
+    - Descendant invalidation for inherited property changes
+    - Sibling invalidation for adjacent (+) and general (~) sibling combinators
+    - Mutation batching with target deduplication
+  - **Layout store** (M4.1) with compact index-based storage
+    - Stable LayoutID handles replace pointer-heavy *LayoutBox trees
+    - display:none elements receive no layout allocation
+    - Bidirectional DOM-to-layout and layout-to-DOM mappings
+    - Generated content support (::before, ::after)
+  - **Fragment store** (M4.2) for inline layout
+    - FragmentID handles for line fragments, text runs, boxes, replaced elements
+    - One layout object can produce multiple fragments (line breaks)
+    - Text runs batch multiple glyphs (not one object per glyph)
+    - Scratch buffer pool for zero-allocation line layout
+  - **Text shaping** (M4.3) with backend-neutral measurement
+    - FontKey identifies unique font configurations
+    - ShapedText contains glyphs with positions and metrics
+    - Cache for shaped text runs (O(1) for repeated measurements)
+    - Whitespace-aware text wrapping for line layout
+    - Direction support (LTR/RTL)
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -126,12 +151,47 @@ go run ./cmd/browser
 ### Test Tiers
 
 ```bash
+# Tier 1: Quick unit tests (no network, no GUI)
 go test ./... -short
+
+# Tier 2: Full local suite (includes httptest loopback servers)
 go test ./...
+
+# Tier 3: End-to-end tests (requires Playwright + network)
 go test -tags=e2e ./test/e2e
+
+# Tier 4: Roadmap feature verification (live websites)
+go run ./cmd/roadmap_test/
 ```
 
 Use the short tier for sandbox-safe checks and the e2e tier for Playwright-driven browser tests.
+
+### Milestone-Gated Testing
+
+Tests are gated by roadmap milestone so they unlock automatically as features are completed. The current milestone is controlled by the `GOOSIE_MILESTONE` environment variable (default: `2`).
+
+```bash
+# Run e2e tests at current milestone (M2)
+go test -tags=e2e ./test/e2e/
+
+# Unlock M3 tests (CSS pipeline validation against real websites)
+GOOSIE_MILESTONE=3 go test -tags=e2e ./test/e2e/ -run TestRealWebsitesCSSParsing
+
+# Run roadmap verification at M3
+GOOSIE_MILESTONE=3 go run ./cmd/roadmap_test/
+```
+
+When a milestone is completed, update the default value in:
+- `test/e2e/real_websites_test.go` (`milestoneGate` function)
+- `cmd/roadmap_test/main.go` (`currentMilestone` variable)
+
+**Real website test coverage** (10 sites across 3 complexity tiers):
+
+| Milestone | Sites | Validates |
+|-----------|-------|----------|
+| M1 | example.com, iana.org, info.cern.ch, httpbin, testing.toscrape | HTTP fetch, navigation pipeline, response metadata |
+| M2 | w3schools, lipsum, quotes.toscrape | Compact DOM parsing, streaming parser, rendering |
+| M3 | wikipedia, MDN | CSS pipeline, computed styles, selector matching |
 
 ### Benchmarks
 
@@ -142,6 +202,28 @@ go test -bench=. -benchmem ./internal/css/
 # Compiled selector benchmarks (M3.2)
 go test -bench=BenchmarkMatchVsLinear -benchmem ./internal/css/
 go test -bench=BenchmarkMatchElement -benchmem ./internal/css/
+
+# Computed-style storage benchmarks (M3.3)
+go test -bench=BenchmarkInheritedStyle -benchmem ./internal/css/
+go test -bench=BenchmarkStylePool -benchmem ./internal/css/
+go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
+go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
+
+# Style invalidation benchmarks (M3.4)
+go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
+go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
+go test -bench=BenchmarkAffectedRuleIndices -benchmem ./internal/css/
+
+# Layout store benchmarks (M4.1)
+go test -bench=BenchmarkLayoutStore -benchmem ./internal/renderer/
+
+# Fragment store benchmarks (M4.2)
+go test -bench=BenchmarkFragment -benchmem ./internal/renderer/
+go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
+
+# Text shaping benchmarks (M4.3)
+go test -bench=BenchmarkTextShaper -benchmem ./internal/renderer/
+go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

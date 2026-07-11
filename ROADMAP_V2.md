@@ -401,20 +401,20 @@ Make CSS parsing streaming-friendly, selector matching indexed, and style invali
 
 ### M3.3 Introduce computed-style storage
 
-- [ ] Define a typed `ComputedStyle` for hot layout and paint properties.
-- [ ] Separate inherited and non-inherited values.
-- [ ] Deduplicate identical inherited style groups.
-- [ ] Add fingerprints for reusable computed styles.
-- [ ] Avoid a property map per element in hot paths.
+- [x] Define a typed `ComputedStyle` for hot layout and paint properties.
+- [x] Separate inherited and non-inherited values.
+- [x] Deduplicate identical inherited style groups.
+- [x] Add fingerprints for reusable computed styles.
+- [x] Avoid a property map per element in hot paths.
 
 ### M3.4 Implement style invalidation
 
-- [ ] Add dirty flags at node and subtree level.
-- [ ] Invalidate descendants only when inherited values change.
-- [ ] Invalidate siblings only for selectors that require it.
-- [ ] Invalidate ancestors only for supported relational behavior.
-- [ ] Batch DOM mutations before style recalculation.
-- [ ] Add tests for class, ID, attribute, inline style, insertion, removal, and text changes.
+- [x] Add dirty flags at node and subtree level.
+- [x] Invalidate descendants only when inherited values change.
+- [x] Invalidate siblings only for selectors that require it.
+- [x] Invalidate ancestors only for supported relational behavior.
+- [x] Batch DOM mutations before style recalculation.
+- [x] Add tests for class, ID, attribute, inline style, insertion, removal, and text changes.
 
 **Acceptance criteria**
 
@@ -441,35 +441,35 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 
 ### M4.1 Separate layout objects from DOM nodes
 
-- [ ] Define stable `LayoutID` values.
-- [ ] Build layout objects only for rendered nodes.
-- [ ] Handle `display: none` without layout allocation.
-- [ ] Allow generated content to create layout objects without DOM nodes.
-- [ ] Track DOM-to-layout and layout-to-DOM relationships by IDs.
+- [x] Define stable `LayoutID` values.
+- [x] Build layout objects only for rendered nodes.
+- [x] Handle `display: none` without layout allocation.
+- [x] Allow generated content to create layout objects without DOM nodes.
+- [x] Track DOM-to-layout and layout-to-DOM relationships by IDs.
 
 ### M4.2 Implement fragment storage
 
-- [ ] Represent line fragments, text runs, boxes, and replaced elements in contiguous storage.
-- [ ] Support one layout object producing multiple fragments.
-- [ ] Reuse scratch buffers during line layout.
-- [ ] Avoid allocating one object per glyph.
+- [x] Represent line fragments, text runs, boxes, and replaced elements in contiguous storage.
+- [x] Support one layout object producing multiple fragments.
+- [x] Reuse scratch buffers during line layout.
+- [x] Avoid allocating one object per glyph.
 
 ### M4.3 Add text measurement and shaping abstraction
 
-- [ ] Define a backend-neutral font and text measurement interface.
-- [ ] Cache font resolution.
-- [ ] Cache shaped text runs by text, font, size, direction, and relevant features.
-- [ ] Support basic Latin first.
-- [ ] Add an optional advanced shaping path through `go-text/typesetting`.
-- [ ] Add tests for wrapping, whitespace modes, long words, and mixed styles.
+- [x] Define a backend-neutral font and text measurement interface.
+- [x] Cache font resolution.
+- [x] Cache shaped text runs by text, font, size, direction, and relevant features.
+- [x] Support basic Latin first.
+- [x] Add an optional advanced shaping path through `go-text/typesetting`.
+- [x] Add tests for wrapping, whitespace modes, long words, and mixed styles.
 
 ### M4.4 Implement incremental layout
 
-- [ ] Add layout dirty reasons: geometry, intrinsic size, text, children, viewport, font, and style.
-- [ ] Find the smallest valid reflow root.
-- [ ] Cache intrinsic sizes.
-- [ ] Preserve unaffected layout fragments.
-- [ ] Rebuild only affected display-list chunks after reflow.
+- [x] Add layout dirty reasons: geometry, intrinsic size, text, children, viewport, font, and style.
+- [x] Find the smallest valid reflow root.
+- [x] Cache intrinsic sizes.
+- [x] Preserve unaffected layout fragments.
+- [x] Rebuild only affected display-list chunks after reflow.
 
 ### M4.5 Harden table and form layout
 

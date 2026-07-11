@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestCSSVariablesEndToEnd(t *testing.T) {
 
 	r := renderer.NewRenderer(1280, 800)
 	r.SetTestingMode(true)
-	_, err := r.RenderHTML(htmlWithVars)
+	_, err := r.RenderHTML(context.Background(), htmlWithVars)
 	assert.NoError(t, err)
 }
 
@@ -42,7 +43,7 @@ func TestCalcWidthsEndToEnd(t *testing.T) {
 
 	r := renderer.NewRenderer(1280, 800)
 	r.SetTestingMode(true)
-	_, err := r.RenderHTML(htmlWithCalc)
+	_, err := r.RenderHTML(context.Background(), htmlWithCalc)
 	assert.NoError(t, err)
 }
 
@@ -96,7 +97,7 @@ func TestWikipediaMainPageLoads(t *testing.T) {
 	r.SetTestingMode(true)
 	r.SetCurrentURL("https://en.wikipedia.org/wiki/Main_Page")
 
-	obj, err := r.RenderHTML(html)
+	obj, err := r.RenderHTML(context.Background(), html)
 	assert.NoError(t, err)
 	assert.NotNil(t, obj)
 

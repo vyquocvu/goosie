@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -148,7 +149,7 @@ func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string,
 	r := renderer.NewRenderer(float32(width), float32(height))
 	abs, _ := filepath.Abs(filePath)
 	r.SetCurrentURL("file://" + abs)
-	obj, err := r.RenderHTML(string(htmlBytes))
+	obj, err := r.RenderHTML(context.Background(), string(htmlBytes))
 	require.NoError(t, err)
 	h := int(r.GetContentHeight())
 	if h > 0 {

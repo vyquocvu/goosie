@@ -3,24 +3,40 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/testutil"
-	"log"
-	"os"
-	"path/filepath"
 )
 
 var (
-	passedCount int
-	failedCount int
+	passedCount      int
+	failedCount      int
+	skippedCount     int
+	currentMilestone int
 )
 
 func main() {
 	fmt.Println("=== Goosie Roadmap Feature Verification ===")
+
+	// Milestone gating: read from env or default to 2 (M0-M2 complete)
+	currentMilestone = 2
+	if v := os.Getenv("GOOSIE_MILESTONE"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			currentMilestone = parsed
+		}
+	}
+	fmt.Printf("Current milestone: M%d (set GOOSIE_MILESTONE to override)\n", currentMilestone)
 
 	// Ensure output directory exists
 	outputDir := "roadmap_test_output"
@@ -32,11 +48,13 @@ func main() {
 	testPhase2()
 	testPhase3()
 	testPhase4(outputDir)
+	testPhase5()
 
 	fmt.Println("\n=== Verification Summary ===")
 	fmt.Printf("Total Tests: %d\n", passedCount+failedCount)
 	fmt.Printf("Passed:      %d\n", passedCount)
 	fmt.Printf("Failed:      %d\n", failedCount)
+	fmt.Printf("Skipped:     %d (milestone not yet reached)\n", skippedCount)
 
 	if failedCount > 0 {
 		os.Exit(1)
@@ -51,6 +69,11 @@ func report(name string, success bool, details string) {
 		fmt.Printf("❌ %-40s: %s\n", name, details)
 		failedCount++
 	}
+}
+
+func reportSkip(name string, requiredMilestone int) {
+	fmt.Printf("🔒 %-40s: Requires M%d (current: M%d)\n", name, requiredMilestone, currentMilestone)
+	skippedCount++
 }
 
 // Phase 1: Essential Browser Features
@@ -213,4 +236,144 @@ func testPhase4(outputDir string) {
 	} else {
 		report("Screenshot", true, fmt.Sprintf("Saved to %s", filename))
 	}
+}
+
+// Phase 5: Real Website Integration Testing (validates M1-M3 pipeline)
+func testPhase5() {
+	fmt.Println("\n--- Phase 5: Real Website Integration (M1-M3 Pipeline) ---")
+
+	if currentMilestone < 1 {
+		reportSkip("Phase 5 (all)", 1)
+		return
+	}
+
+	websites := []struct {
+		Name              string
+		URL               string
+		MinHeight         float32
+		ExpectedText      []string
+		RequiredMilestone int
+	}{
+		{
+			Name:              "example.com",
+			URL:               "https://example.com/",
+			MinHeight:         100,
+			ExpectedText:      []string{"Example Domain"},
+			RequiredMilestone: 1,
+		},
+		{
+			Name:              "iana.org",
+			URL:               "https://www.iana.org/",
+			MinHeight:         200,
+			ExpectedText:      []string{"Internet Assigned Numbers Authority"},
+			RequiredMilestone: 1,
+		},
+		{
+			Name:              "info.cern.ch",
+			URL:               "https://info.cern.ch/",
+			MinHeight:         100,
+			ExpectedText:      []string{"World Wide Web"},
+			RequiredMilestone: 1,
+		},
+		{
+			Name:              "wikipedia",
+			URL:               "https://en.wikipedia.org/wiki/Main_Page",
+			MinHeight:         500,
+			ExpectedText:      []string{"Wikipedia"},
+			RequiredMilestone: 3,
+		},
+		{
+			Name:              "httpbin",
+			URL:               "https://httpbin.org/html",
+			MinHeight:         100,
+			ExpectedText:      []string{"Herman Melville"},
+			RequiredMilestone: 1,
+		},
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	for _, site := range websites {
+		if currentMilestone < site.RequiredMilestone {
+			reportSkip(fmt.Sprintf("Fetch+Render %s", site.Name), site.RequiredMilestone)
+			continue
+		}
+
+		// Step 1: Fetch via Goosie net layer (M1 navigation pipeline)
+		fetcher := net.NewFetcherWithClient(client)
+		htmlContent, err := fetcher.Fetch(site.URL)
+		if err != nil {
+			report(fmt.Sprintf("Fetch %s", site.Name), false, fmt.Sprintf("Failed: %v", err))
+			continue
+		}
+
+		meta := fetcher.Meta()
+		report(fmt.Sprintf("Fetch %s", site.Name), true,
+			fmt.Sprintf("status=%d, type=%s, %d bytes", meta.Status, meta.ContentType, len(htmlContent)))
+
+		// Step 2: Validate content (M2 DOM parsing)
+		parser := dom.NewParser()
+		bodyText, err := parser.ParseBodyText(htmlContent)
+		if err != nil {
+			report(fmt.Sprintf("Parse %s", site.Name), false, fmt.Sprintf("Failed: %v", err))
+			continue
+		}
+		report(fmt.Sprintf("Parse %s", site.Name), true, fmt.Sprintf("body text length: %d", len(bodyText)))
+
+		// Step 3: Content validation
+		textFound := true
+		for _, expected := range site.ExpectedText {
+			if !strings.Contains(bodyText, expected) && !strings.Contains(htmlContent, expected) {
+				textFound = false
+				report(fmt.Sprintf("Content %s", site.Name), false, fmt.Sprintf("Missing expected text: %q", expected))
+				break
+			}
+		}
+		if textFound {
+			report(fmt.Sprintf("Content %s", site.Name), true, "Expected text found")
+		}
+
+		// Step 4: Full render pipeline (M2 layout + M3 CSS)
+		r := renderer.NewRenderer(1280, 800)
+		r.SetTestingMode(true)
+		r.SetCurrentURL(site.URL)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		_, err = r.RenderHTML(ctx, htmlContent)
+		cancel()
+		if err != nil {
+			report(fmt.Sprintf("Render %s", site.Name), false, fmt.Sprintf("Failed: %v", err))
+			continue
+		}
+		report(fmt.Sprintf("Render %s", site.Name), true, "Render pipeline succeeded")
+
+		// Step 5: Validate content height
+		height := r.GetContentHeight()
+		if height >= site.MinHeight {
+			report(fmt.Sprintf("Layout %s", site.Name), true, fmt.Sprintf("content height: %.0fpx", height))
+		} else {
+			report(fmt.Sprintf("Layout %s", site.Name), false,
+				fmt.Sprintf("height %.0fpx < minimum %.0fpx", height, site.MinHeight))
+		}
+
+		// Step 6: Render tree validation
+		root := r.GetRoot()
+		if root != nil {
+			nodeCount := countNodes(root)
+			report(fmt.Sprintf("RenderTree %s", site.Name), true, fmt.Sprintf("%d nodes", nodeCount))
+		} else {
+			report(fmt.Sprintf("RenderTree %s", site.Name), false, "Render tree root is nil")
+		}
+	}
+}
+
+func countNodes(node *renderer.RenderNode) int {
+	if node == nil {
+		return 0
+	}
+	count := 1
+	for _, child := range node.Children {
+		count += countNodes(child)
+	}
+	return count
 }
