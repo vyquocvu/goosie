@@ -610,10 +610,10 @@ Make scrolling and simple visual updates independent from full repaint work.
 
 ### M7.2 Add compositor snapshots
 
-- [ ] Publish immutable scene snapshots.
-- [ ] Allow presentation to read snapshots without locking mutable layout state.
-- [ ] Use generation IDs to reject stale raster results.
-- [ ] Separate scroll offset from document geometry where possible.
+- [x] Publish immutable scene snapshots.
+- [x] Allow presentation to read snapshots without locking mutable layout state.
+- [x] Use generation IDs to reject stale raster results.
+- [x] Separate scroll offset from document geometry where possible.
 
 ### M7.3 Prioritize input and viewport work
 

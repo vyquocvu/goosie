@@ -763,6 +763,36 @@ viewport prefetch policies.
 The compositor package is independent of Fyne and the CPU backend.
 Tiles hold `*image.RGBA` but the cache logic is backend-neutral.
 
+### Compositor Snapshots (M7.2)
+
+The `internal/renderer/frame/compositor` package provides immutable
+`SceneSnapshot` types that capture compositor state at a point in
+time. Presentation layers read snapshots without locking mutable
+layout state.
+
+**Key features:**
+- `SceneSnapshot`: immutable struct with generation ID, viewport,
+  tile metadata, and content hash
+- `SnapshotTile`: immutable view of a single tile (shared image pointer)
+- `SnapshotPublisher`: creates snapshots from mutable TileCache with
+  atomic generation counter
+- `IsStale()` / `RejectStale()`: generation-based stale detection
+- `VisibleTiles()`: returns tiles overlapping the snapshot viewport
+- `FindTile()`: coordinate-based tile lookup in snapshot
+- Content hash from tile versions + scroll position for fast equality
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Publish (256 tiles) | 6,289 | 16,384 | 1 |
+| VisibleTiles (256 tiles) | 3,155 | 16,384 | 1 |
+| FindTile (256 tiles) | 105 | 0 | 0 |
+
+Snapshots enable lock-free presentation: the UI thread reads
+immutable data while the engine thread mutates the tile cache.
+Generation IDs reject stale raster results from cancelled jobs.
+
 ## Navigation State Flow
 
 ```
