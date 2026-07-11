@@ -503,11 +503,11 @@ Make the display list the stable contract between layout and rendering.
 
 ### M5.2 Introduce paint chunks
 
-- [ ] Group display commands by stable layout ownership.
-- [ ] Track chunk bounds.
-- [ ] Reuse unchanged chunks.
-- [ ] Rebuild chunks only for paint-dirty layout objects.
-- [ ] Keep source-to-display mappings for developer tools.
+- [x] Group display commands by stable layout ownership.
+- [x] Track chunk bounds.
+- [x] Reuse unchanged chunks.
+- [x] Rebuild chunks only for paint-dirty layout objects.
+- [x] Keep source-to-display mappings for developer tools.
 
 ### M5.3 Implement dirty-region invalidation
 

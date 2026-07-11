@@ -801,6 +801,55 @@ go test -bench=BenchmarkDisplayCommand -benchmem ./internal/renderer/
 go test -bench=BenchmarkTransformMatrix -benchmem ./internal/renderer/
 ```
 
+### Paint Chunks (M5.2)
+
+The `internal/renderer` package provides `PaintChunk` and `ChunkedDisplayList`
+that group display commands by stable layout ownership for retained display
+list invalidation.
+
+#### Chunk Building
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| BuildPaintChunks (10 cmds) | 453 | 1,512 | 6 |
+| BuildPaintChunks (100 cmds) | 3,565 | 12,264 | 9 |
+| BuildPaintChunks (1000 cmds) | 37,830 | 155,624 | 13 |
+| BuildPaintChunksSingleOwner (1000) | 8,658 | 72 | 2 |
+
+Chunk building is O(n) with a single pass over the command list.
+Single-owner documents produce one chunk with minimal allocation.
+
+#### Invalidation and Reuse
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ChunkedDisplayListInvalidate | 1,391 | 0 | 0 |
+| ChunkedDisplayListDirtyRects | 2,031 | 4,080 | 7 |
+
+Invalidation by LayoutID is zero-allocation. Only dirty chunk bounds
+are collected for repaint.
+
+#### Source Mapping and Spatial Queries
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| SourceMappingBuild (1000 chunks) | 403,892 | 77,824 | 13 |
+| SourceMappingLookup | 376 | 0 | 0 |
+| PaintChunkContains | 0.57 | 0 | 0 |
+| PaintChunkIntersects | 0.57 | 0 | 0 |
+
+Source mapping build is O(chunks). Lookup is O(chunks) linear scan
+with zero allocations. Spatial queries are near-zero cost.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkBuildPaintChunks -benchmem ./internal/renderer/
+go test -bench=BenchmarkChunkedDisplayList -benchmem ./internal/renderer/
+go test -bench=BenchmarkSourceMapping -benchmem ./internal/renderer/
+go test -bench=BenchmarkPaintChunk -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

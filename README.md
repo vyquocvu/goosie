@@ -60,6 +60,11 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - TransformMatrix with multiply, inverse, translate, scale, rotate
     - Full JSON serialization for debugging and future IPC
     - Zero-allocation command creation
+  - **Paint chunks** (M5.2) for retained display list invalidation
+    - PaintChunk groups commands by LayoutID ownership with union bounds
+    - ChunkedDisplayList supports per-chunk dirty tracking and reuse
+    - SourceMapping for developer tools (LayoutID → command range)
+    - Zero-allocation invalidation and spatial queries
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -234,6 +239,12 @@ go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
 # Display command benchmarks (M5.1)
 go test -bench=BenchmarkDisplayCommand -benchmem ./internal/renderer/
 go test -bench=BenchmarkTransformMatrix -benchmem ./internal/renderer/
+
+# Paint chunk benchmarks (M5.2)
+go test -bench=BenchmarkBuildPaintChunks -benchmem ./internal/renderer/
+go test -bench=BenchmarkChunkedDisplayList -benchmem ./internal/renderer/
+go test -bench=BenchmarkSourceMapping -benchmem ./internal/renderer/
+go test -bench=BenchmarkPaintChunk -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/
