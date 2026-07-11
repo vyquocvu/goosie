@@ -874,6 +874,35 @@ with no goroutine leaks.
 
 The Session layer is additive — the existing Runtime API is unchanged.
 
+### Explicit Event Loop (M8.2)
+
+The `internal/js` package provides an `EventLoop` type implementing
+the HTML event loop processing model with task/microtask ordering,
+timer integration, and DOM mutation batching.
+
+**Key features:**
+- `EventLoop`: task queue + microtask queue + timer set
+- `QueueTask()`: enqueue macrotask (FIFO ring buffer, bounded 256)
+- `QueueMicrotask()`: enqueue microtask (FIFO ring buffer, bounded 512)
+- `RunOnce()`: execute one macrotask → drain all microtasks → fire
+  ready timers → flush DOM mutations
+- `SetTimeout()` / `SetInterval()`: bounded timer scheduling (max 128)
+- `ClearTimer()`: cancel timer by ID
+- `RecordMutation()` / `SetMutationFlush()`: DOM mutation batching
+  with one style/layout update per task
+- Microtasks enqueued by microtasks are drained in the same cycle
+- Atomic metrics: tasks executed, microtasks executed, mutation batches
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| QueueAndRun | 146.2 | 0 | 0 |
+| MicrotaskDrain (100 micros) | 140.6 | 0 | 0 |
+
+All event loop operations are zero-allocation. Bounded ring buffers
+prevent unbounded queue growth. Timer set is bounded by MaxTimers.
+
 ## Navigation State Flow
 
 ```

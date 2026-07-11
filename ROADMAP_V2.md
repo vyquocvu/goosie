@@ -654,11 +654,11 @@ Keep Goja useful for lightweight interaction without allowing scripts to corrupt
 
 ### M8.2 Implement an explicit event loop
 
-- [ ] Define task and microtask ordering for the supported subset.
-- [ ] Integrate timers.
-- [ ] Integrate fetch completion callbacks.
-- [ ] Batch DOM mutations until the script task completes.
-- [ ] Trigger one style/layout update per mutation batch where possible.
+- [x] Define task and microtask ordering for the supported subset.
+- [x] Integrate timers.
+- [x] Integrate fetch completion callbacks.
+- [x] Batch DOM mutations until the script task completes.
+- [x] Trigger one style/layout update per mutation batch where possible.
 
 ### M8.3 Use stable DOM handles
 
