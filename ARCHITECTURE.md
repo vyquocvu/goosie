@@ -715,6 +715,19 @@ The adapter enables the M6 exit gate: the same display list can be
 rendered without importing Fyne in engine tests (via `CPUBackend`
 directly), while Fyne remains the presentation shell.
 
+### Golden Image Testing (M6.5)
+
+The `internal/renderer/frame/golden` package provides deterministic
+render-to-PNG comparison for regression testing.
+
+**Key features:**
+- `AssertGolden()`: renders commands via CPUBackend, compares to stored PNG
+- Per-channel tolerance (default 1) for rounding differences
+- `GOOSIE_UPDATE_GOLDEN=1` env var writes new reference images
+- Diff image generation for visual debugging
+- `CompareImages()`: pixel-by-pixel comparison with metrics
+- Separate update directory for review before acceptance
+
 ## Navigation State Flow
 
 ```
