@@ -54,6 +54,12 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - Cache for shaped text runs (O(1) for repeated measurements)
     - Whitespace-aware text wrapping for line layout
     - Direction support (LTR/RTL)
+  - **Backend-neutral display commands** (M5.1) with compact value-type storage
+    - DisplayCommand value types for rect, border, text, image, clip, transform, opacity, stacking context
+    - DisplayCommandList stores commands by value (not pointer) for reduced GC pressure
+    - TransformMatrix with multiply, inverse, translate, scale, rotate
+    - Full JSON serialization for debugging and future IPC
+    - Zero-allocation command creation
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -224,6 +230,10 @@ go test -bench=BenchmarkScratchBufferPool -benchmem ./internal/renderer/
 # Text shaping benchmarks (M4.3)
 go test -bench=BenchmarkTextShaper -benchmem ./internal/renderer/
 go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
+
+# Display command benchmarks (M5.1)
+go test -bench=BenchmarkDisplayCommand -benchmem ./internal/renderer/
+go test -bench=BenchmarkTransformMatrix -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

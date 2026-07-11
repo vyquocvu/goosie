@@ -757,6 +757,50 @@ go test -bench=BenchmarkTextShaper -benchmem ./internal/renderer/
 go test -bench=BenchmarkFontKeyCacheKey -benchmem ./internal/renderer/
 ```
 
+### Backend-Neutral Display Commands (M5.1)
+
+The `internal/renderer` package provides compact value-type `DisplayCommand`
+structures for the retained display list. Commands are stored by value in
+a contiguous `[]DisplayCommand` slice (not `[]*PaintCommand`).
+
+#### Command Creation and List Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| CommandCreate | 0.32 | 0 | 0 |
+| ListAdd (100 cmds) | 12,325 | 97,888 | 8 |
+| ListAddMixed (100 cmds) | 12,830 | 97,888 | 8 |
+
+Command creation is zero-allocation. List additions only allocate
+for the backing slice growth.
+
+#### Serialization
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| SerializeRect | 6,916 | 1,800 | 25 |
+| SerializeList (100 cmds) | 1,085,013 | 221,676 | 2,203 |
+| DeserializeList (100 cmds) | 2,292,808 | 340,872 | 4,921 |
+
+JSON serialization enables debugging output and future IPC between
+engine and presentation processes.
+
+#### Transform Matrix
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| MatrixMul | 0.72 | 0 | 0 |
+| MatrixInverse | 19.6 | 24 | 1 |
+
+Matrix operations are near-zero cost. Multiply is zero-allocation.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkDisplayCommand -benchmem ./internal/renderer/
+go test -bench=BenchmarkTransformMatrix -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |
