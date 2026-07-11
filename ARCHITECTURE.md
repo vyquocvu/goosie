@@ -539,8 +539,48 @@ rendering. These are backend-neutral — they contain no references to
 | TransformMatrixInverse | 19.6 | 24 | 1 |
 
 The `DisplayCommand` types are additive infrastructure. The existing
-`PaintCommand`/`DisplayList` continues to work. M5.2 will migrate the
-builder to produce `DisplayCommand` values and introduce paint chunks.
+`PaintCommand`/`DisplayList` continues to work. M5.2 builds paint chunks
+on top of this command list.
+
+### Paint Chunks (M5.2)
+
+The `internal/renderer` package provides `PaintChunk` and `ChunkedDisplayList`
+that group display commands by stable layout ownership. This enables chunk
+reuse across frames and paint-dirty invalidation.
+
+**Key features:**
+- `PaintChunk`: value type with `LayoutID` owner, command range [Start, End),
+  bounds (RectF union), and dirty flag
+- `PaintChunkList`: contiguous `[]PaintChunk` slice — zero-allocation access
+- `BuildPaintChunks()`: groups a `DisplayCommandList` by consecutive
+  `LayoutID` ownership, computing union bounds per chunk
+- `ChunkedDisplayList`: combines commands + chunks with invalidation by
+  `LayoutID`, dirty rect collection, and chunk reuse
+- `SourceMapping`: maps `LayoutID` → command range for developer tools
+- Non-contiguous same-owner commands produce separate chunks (preserving
+  display order for correct painting)
+- Zero-allocation invalidation and dirty-rect queries
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| BuildPaintChunks (10 cmds) | 453 | 1,512 | 6 |
+| BuildPaintChunks (100 cmds) | 3,565 | 12,264 | 9 |
+| BuildPaintChunks (1000 cmds) | 37,830 | 155,624 | 13 |
+| BuildPaintChunksSingleOwner (1000) | 8,658 | 72 | 2 |
+| ChunkedDisplayListInvalidate | 1,391 | 0 | 0 |
+| SourceMappingLookup | 376 | 0 | 0 |
+| PaintChunkContains | 0.57 | 0 | 0 |
+| PaintChunkIntersects | 0.57 | 0 | 0 |
+
+Chunk building is O(n) where n = command count. Invalidation and
+spatial queries (Contains, Intersects) are zero-allocation. The
+`ChunkedDisplayList` enables M5.3 (dirty-region invalidation) by
+providing per-chunk dirty tracking and bounds.
+
+The paint chunk infrastructure is additive. The existing
+`DisplayList`/`PaintCommand` path is unaffected.
 
 ## Navigation State Flow
 
