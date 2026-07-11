@@ -662,10 +662,10 @@ Keep Goja useful for lightweight interaction without allowing scripts to corrupt
 
 ### M8.3 Use stable DOM handles
 
-- [ ] Expose lazy JavaScript wrappers around `NodeID` handles.
-- [ ] Cache wrappers weakly or with bounded lifetime.
-- [ ] Reject removed or stale nodes predictably.
-- [ ] Avoid copying complete node structures into JavaScript objects.
+- [x] Expose lazy JavaScript wrappers around `NodeID` handles.
+- [x] Cache wrappers weakly or with bounded lifetime.
+- [x] Reject removed or stale nodes predictably.
+- [x] Avoid copying complete node structures into JavaScript objects.
 
 ### M8.4 Add script limits and policy controls
 

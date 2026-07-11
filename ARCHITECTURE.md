@@ -903,6 +903,34 @@ timer integration, and DOM mutation batching.
 All event loop operations are zero-allocation. Bounded ring buffers
 prevent unbounded queue growth. Timer set is bounded by MaxTimers.
 
+### Stable DOM Handles (M8.3)
+
+The `internal/js` package provides `NodeHandle` — a lazy wrapper
+around `dom.NodeID` that resolves through the DOM store on demand
+without copying node data.
+
+**Key features:**
+- `NodeHandle`: wraps `dom.NodeID` with lazy resolution through store
+- `IsValid()`: checks node liveness via store (Kind != 0)
+- `Kind()`, `Parent()`, `FirstChild()`, `NextSibling()`: lazy access
+  returning predictable errors (`ErrInvalidHandle`, `ErrNodeRemoved`)
+- `HandleCache`: bounded LRU cache (default 1024 entries) of handle
+  wrappers to avoid repeated allocations for the same node
+- `Invalidate()`: removes handle from cache on node removal
+- Atomic hit/miss metrics
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| IsValid | 0.52 | 0 | 0 |
+| HandleCache Get (hit) | 19.0 | 0 | 0 |
+| HandleCache Get (miss) | 249 | 41 | 1 |
+
+Handles are zero-copy — they store only a NodeID and store pointer.
+Cache hits are zero-allocation. Stale nodes are rejected predictably
+with typed errors.
+
 ## Navigation State Flow
 
 ```
