@@ -92,7 +92,7 @@ func TestNavigationCallbackIntegration(t *testing.T) {
 }
 
 func TestTappableHyperlinkDoesNotWrapInlineText(t *testing.T) {
-	link := newTappableHyperlink("RFC 2606", "https://example.com/rfc2606", func(string) {})
+	link := newTappableHyperlink("RFC 2606", "https://example.com/rfc2606", func(string) {}, nil, 0)
 	if link.Wrapping != fyne.TextWrapOff {
 		t.Fatalf("hyperlink wrapping = %v; want TextWrapOff", link.Wrapping)
 	}

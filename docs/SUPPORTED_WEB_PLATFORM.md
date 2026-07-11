@@ -45,7 +45,7 @@ roadmap explicitly moves them into a planned compatibility path.
 | `a` | Partial | Unsupported protocols are not navigated by the core engine. |
 | `img` | Partial | Decode failures render as missing or empty replaced content. |
 | `form`, `label`, `input`, `button`, `textarea`, `select`, `option` | Partial | Unsupported controls render as simple controls or inert boxes. |
-| `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `caption` | Partial | Unsupported table features use normal flow fallback. |
+| `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `caption` | Partial | Unsupported table features use normal flow fallback. Cell spans (colspan/rowspan) are clamped to a max of 100 to prevent DoS. Visual row order follows thead -> tbody -> tfoot. |
 | `svg` | Partial | Unsupported SVG content renders as omitted or fallback content. |
 | `canvas`, `video`, `audio`, `iframe`, `object`, `embed` | Out of Scope | Render as inert fallback content. |
 | Unknown HTML elements | Fallback | Preserve children and render as generic inline or block containers. |
@@ -88,6 +88,16 @@ roadmap explicitly moves them into a planned compatibility path.
 | `fetch` | Partial | Requests must use cancellable contexts and bounded response limits. |
 | `localStorage`, `sessionStorage` | Partial | Quota or validation failures return predictable errors. |
 | Web Components, Shadow DOM, Service Workers, WebRTC, WebGL, WebGPU, WebAudio, IndexedDB | Out of Scope | APIs are absent unless a future compatibility path adds them. |
+
+## Supported Table Layout Algorithm Subset
+
+Goosie v2 implements a simplified, lightweight table layout algorithm that maps HTML tables onto a CSS Grid structure:
+
+1. **Grid-Based Column Allocation**: Tables are treated as grid containers where each column is assigned an `auto` track sizing.
+2. **Cell Spans**: Both `colspan` and `rowspan` are supported up to a maximum clamp limit of 100 to prevent Denial of Service (DoS) and out-of-memory errors.
+3. **Visual Ordering**: Section visual ordering is strictly normalized to `thead` (first) -> `tbody` (middle) -> `tfoot` (last), regardless of source code sequence.
+4. **Column Measurement Caching**: Column widths are cached per table node ID and available container width using a bounded cache. If the table is not invalidated (e.g. by mutations), cached column sizes are reused on subsequent layout passes.
+5. **Flow Fallback**: Unsupported or malformed table structures fall back gracefully to normal inline or block layout behavior.
 
 ## Maximum Resource Limits
 

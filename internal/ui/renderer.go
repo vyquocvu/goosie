@@ -18,4 +18,5 @@ type HTMLRenderer interface {
 	GetRoot() *renderer.RenderNode
 	Refresh()
 	SetRefreshCallback(callback func())
+	SetSubmitting(submitting bool)
 }

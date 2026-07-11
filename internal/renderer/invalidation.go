@@ -116,6 +116,15 @@ func NewIncrementalLayoutEngine(width, height float32) *IncrementalLayoutEngine 
 // InvalidateNode marks a node as needing relayout
 func (ile *IncrementalLayoutEngine) InvalidateNode(node *RenderNode, flags DirtyFlag) {
 	ile.invalidation.PropagateInvalidation(node, flags)
+
+	// Walk up parent pointers to find any table ancestor and invalidate its cached column widths
+	curr := node
+	for curr != nil {
+		if curr.TagName == "table" {
+			globalTableColumnCache.Invalidate(curr.ID)
+		}
+		curr = curr.Parent
+	}
 }
 
 // ComputeIncrementalLayout performs incremental layout, only recomputing dirty subtrees

@@ -87,6 +87,11 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 
 	// Show loading indicator on main thread
 	browser.ShowLoading()
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetSubmitting(true)
+		}
+	}
 
 	navID := load.ID
 	url := load.URL
@@ -110,6 +115,11 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 			log.Printf("Navigation %s anchor link: %s", navID, url)
 			if sess.IsActive(navID) {
 				browser.HideLoading()
+				if activeTab := browser.ActiveTab(); activeTab != nil {
+					if r := activeTab.GetRenderer(); r != nil {
+						r.SetSubmitting(false)
+					}
+				}
 			}
 			return
 		}
@@ -205,6 +215,11 @@ func updateUIWithError(browser *ui.Browser, sess *session.Session, navID navigat
 		</html>`, url, err.Error())
 	_ = browser.RenderHTMLContent(context.Background(), errorHTML)
 	browser.HideLoading()
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetSubmitting(false)
+		}
+	}
 }
 
 // updateUIWithContent updates the UI with HTML content.
@@ -221,6 +236,11 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 		log.Printf("Error rendering HTML: %v", err)
 		browser.SetContent("Error rendering HTML: " + err.Error())
 		browser.HideLoading()
+		if activeTab := browser.ActiveTab(); activeTab != nil {
+			if r := activeTab.GetRenderer(); r != nil {
+				r.SetSubmitting(false)
+			}
+		}
 		sess.Fail(err)
 		return
 	}
@@ -238,6 +258,11 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 	// Hide loading indicator
 	browser.HideLoading()
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetSubmitting(false)
+		}
+	}
 	sess.Complete()
 
 	// Get or create JS runtime for the active tab
