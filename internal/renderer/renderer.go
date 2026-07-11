@@ -66,6 +66,7 @@ func NewRenderer(width, height float32) *Renderer {
 
 // RenderHTML renders HTML content and returns a Fyne canvas object
 func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
+	globalTableColumnCache.Clear()
 	recorder := metrics.RecorderFromContext(ctx)
 	if recorder != nil {
 		recorder.BeginPhase(metrics.PhaseParse)
@@ -240,6 +241,7 @@ func (r *Renderer) GetContentHeight() float32 {
 
 // RenderHTMLBody renders just the body content of an HTML document
 func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error) {
+	globalTableColumnCache.Clear()
 	// Use html.ParseFragment to handle content that is expected to be inside a <body> tag.
 	// This avoids wrapping the content in an extra <html><body>...</body></html> structure.
 	nodes, err := html.ParseFragment(strings.NewReader(htmlContent), &html.Node{

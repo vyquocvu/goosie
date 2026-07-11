@@ -359,7 +359,13 @@ func (gle *GridLayoutEngine) LayoutTable(layoutBox *LayoutBox) {
 	}
 
 	// 5. Calculate Track Sizes
-	colWidths := gle.calculateTrackSizes(gridTemplateColumns, containerWidth, columnGap)
+	var colWidths []float32
+	if cachedWidths, found := globalTableColumnCache.Get(layoutBox.NodeID, containerWidth); found {
+		colWidths = cachedWidths
+	} else {
+		colWidths = gle.calculateTrackSizes(gridTemplateColumns, containerWidth, columnGap)
+		globalTableColumnCache.Set(layoutBox.NodeID, containerWidth, colWidths)
+	}
 
 	// 6. Set Item Widths and Calculate Row Heights
 	// For table cells, we want them to take the width of the column

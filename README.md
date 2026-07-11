@@ -18,7 +18,7 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
   - Layout engine with box model calculations
   - Support for core HTML elements (headings, paragraphs, lists, links, images)
   - Form elements (input, button, textarea)
-  - Table rendering with proper tbody/thead/tfoot handling
+  - Table rendering with proper tbody/thead/tfoot handling, cell spans, and cached column measurements (M4.5)
   - **Full CSS parser** with advanced selector support
     - All combinators (descendant, child, adjacent sibling, general sibling)
     - Attribute selectors with all operators

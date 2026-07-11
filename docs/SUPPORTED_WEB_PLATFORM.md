@@ -89,6 +89,16 @@ roadmap explicitly moves them into a planned compatibility path.
 | `localStorage`, `sessionStorage` | Partial | Quota or validation failures return predictable errors. |
 | Web Components, Shadow DOM, Service Workers, WebRTC, WebGL, WebGPU, WebAudio, IndexedDB | Out of Scope | APIs are absent unless a future compatibility path adds them. |
 
+## Supported Table Layout Algorithm Subset
+
+Goosie v2 implements a simplified, lightweight table layout algorithm that maps HTML tables onto a CSS Grid structure:
+
+1. **Grid-Based Column Allocation**: Tables are treated as grid containers where each column is assigned an `auto` track sizing.
+2. **Cell Spans**: Both `colspan` and `rowspan` are supported up to a maximum clamp limit of 100 to prevent Denial of Service (DoS) and out-of-memory errors.
+3. **Visual Ordering**: Section visual ordering is strictly normalized to `thead` (first) -> `tbody` (middle) -> `tfoot` (last), regardless of source code sequence.
+4. **Column Measurement Caching**: Column widths are cached per table node ID and available container width using a bounded cache. If the table is not invalidated (e.g. by mutations), cached column sizes are reused on subsequent layout passes.
+5. **Flow Fallback**: Unsupported or malformed table structures fall back gracefully to normal inline or block layout behavior.
+
 ## Maximum Resource Limits
 
 These v2 limits define the target contract for new engine work. Existing code
