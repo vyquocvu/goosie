@@ -647,10 +647,10 @@ Keep Goja useful for lightweight interaction without allowing scripts to corrupt
 
 ### M8.1 One runtime, one owner goroutine
 
-- [ ] Create one Goja runtime per engine session or document.
-- [ ] Ensure only one goroutine calls a runtime directly.
-- [ ] Add a bounded task queue.
-- [ ] Add shutdown and navigation cancellation behavior.
+- [x] Create one Goja runtime per engine session or document.
+- [x] Ensure only one goroutine calls a runtime directly.
+- [x] Add a bounded task queue.
+- [x] Add shutdown and navigation cancellation behavior.
 
 ### M8.2 Implement an explicit event loop
 

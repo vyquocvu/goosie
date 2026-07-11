@@ -845,6 +845,35 @@ Viewport policy enables M7 exit gates: visible tiles are rasterized
 first, scroll direction drives prefetch, hidden tabs pause raster
 work, and resource limits prevent unbounded memory growth.
 
+### JavaScript Session Ownership (M8.1)
+
+The `internal/js` package provides a `Session` type that wraps the
+Goja runtime with single-owner goroutine enforcement, a bounded
+task queue, and context-based shutdown.
+
+**Key features:**
+- `Session`: wraps Runtime with ownership, task scheduling, shutdown
+- One Goja runtime per session (one per document/tab)
+- `Run()`: owner loop — blocks calling goroutine, processes tasks
+- `Submit(Task)`: enqueue work from any goroutine for owner execution
+- Bounded ring buffer task queue (default 256, configurable)
+- `Close()`: context cancellation triggers clean shutdown
+- `Navigate()`: cancels context, resets runtime for new document
+- Atomic metrics: total executed, total dropped
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Submit | 67.3 | 0 | 0 |
+| TaskExecution (drain) | ~0 | 0 | 0 |
+
+Task submission is zero-allocation. The bounded ring buffer prevents
+unbounded queue growth. Context cancellation ensures clean shutdown
+with no goroutine leaks.
+
+The Session layer is additive — the existing Runtime API is unchanged.
+
 ## Navigation State Flow
 
 ```
