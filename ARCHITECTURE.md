@@ -819,6 +819,32 @@ Frame recording is zero-allocation. Stats computation allocates
 only for latency sorting. The bounded ring buffer prevents
 unbounded memory growth.
 
+### Viewport and Prefetch Policy (M7.4)
+
+The `internal/renderer/frame/compositor` package provides scroll-
+direction-aware tile prioritization and resource prefetch limits.
+
+**Key features:**
+- `ViewportPolicy`: tracks scroll direction, computes prefetch rects,
+  prioritizes tiles (visible > near > hidden)
+- `ScrollDirection`: None/Up/Down/Left/Right estimation from scroll delta
+- `PrefetchRect()`: expanded rect in scroll direction with bounded margin
+- `PrioritizeTiles()`: sorted tile coords bounded by MaxPrefetchTiles
+- `SetHidden()`: reduces prefetch to zero for hidden tabs
+- `ResourcePrefetchLimits`: page cache (3 pages), resource prefetch
+  (16 resources, 8MB budget)
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| PrioritizeTiles (256 tiles) | 148.6 | 240 | 2 |
+| PrefetchRect | 2.9 | 0 | 0 |
+
+Viewport policy enables M7 exit gates: visible tiles are rasterized
+first, scroll direction drives prefetch, hidden tabs pause raster
+work, and resource limits prevent unbounded memory growth.
+
 ## Navigation State Flow
 
 ```
