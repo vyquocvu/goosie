@@ -477,7 +477,7 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 - [x] Cache column measurements.
 - [x] Handle `thead`, `tbody`, `tfoot`, row spans, and column spans within documented limits.
 - [x] Align native form control sizing with CSS boxes.
-- [ ] Prevent duplicate submission and stale event targets.
+- [x] Prevent duplicate submission and stale event targets.
 
 **Performance targets**
 

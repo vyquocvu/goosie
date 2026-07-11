@@ -33,6 +33,7 @@ func (m *MockHTMLRenderer) SetInspectCallback(callback func(node *renderer.Rende
 func (m *MockHTMLRenderer) GetRoot() *renderer.RenderNode      { return m.root }
 func (m *MockHTMLRenderer) Refresh()                           { m.refreshCalled = true }
 func (m *MockHTMLRenderer) SetRefreshCallback(callback func()) {}
+func (m *MockHTMLRenderer) SetSubmitting(submitting bool)      {}
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()

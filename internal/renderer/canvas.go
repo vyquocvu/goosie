@@ -65,20 +65,24 @@ type CanvasRenderer struct {
 	dlBuildGen  uint64                // bumped every time the display list is rebuilt
 	contentRoot *fyne.Container       // stable root container, reused across renders
 	inspectable *InspectableContainer // stable inspect wrapper, reused across renders
+
+	submitting      bool
+	submittingForms map[int64]bool
 }
 
 // NewCanvasRenderer creates a new canvas renderer
 func NewCanvasRenderer(width, height float32) *CanvasRenderer {
 	defaultSize := float32(16.0)
 	return &CanvasRenderer{
-		canvasWidth:    width,
-		canvasHeight:   height,
-		defaultSize:    defaultSize,
-		viewportY:      0,
-		viewportHeight: height,
-		fontMetrics:    NewFontMetrics(defaultSize),
-		objectCache:    make(map[int]fyne.CanvasObject),
-		dlBuildGen:     1,
+		canvasWidth:     width,
+		canvasHeight:    height,
+		defaultSize:     defaultSize,
+		viewportY:       0,
+		viewportHeight:  height,
+		fontMetrics:     NewFontMetrics(defaultSize),
+		objectCache:     make(map[int]fyne.CanvasObject),
+		dlBuildGen:      1,
+		submittingForms: make(map[int64]bool),
 	}
 }
 
@@ -117,6 +121,16 @@ func (cr *CanvasRenderer) SetNavigationCallback(callback NavigationCallback, bas
 	cr.mu.Lock()
 	cr.onNavigate = callback
 	cr.baseURL = baseURL
+	cr.mu.Unlock()
+}
+
+// SetSubmitting updates the submitting status of the canvas renderer
+func (cr *CanvasRenderer) SetSubmitting(submitting bool) {
+	cr.mu.Lock()
+	cr.submitting = submitting
+	if !submitting {
+		cr.submittingForms = make(map[int64]bool)
+	}
 	cr.mu.Unlock()
 }
 
@@ -325,7 +339,7 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 		// Override the default tap handler to use our navigation callback
 		if cr.onNavigate != nil {
 			// Create a custom tappable widget
-			tappableLink := newTappableHyperlink(text, resolvedURL, cr.onNavigate)
+			tappableLink := newTappableHyperlink(text, resolvedURL, cr.onNavigate, cr, cr.dlBuildGen)
 			*objects = append(*objects, tappableLink)
 		} else {
 			// Fallback to default hyperlink behavior
@@ -374,14 +388,18 @@ type TappableHyperlink struct {
 	widget.Hyperlink
 	url        string
 	onNavigate NavigationCallback
+	cr         *CanvasRenderer
+	gen        uint64
 }
 
 // newTappableHyperlink creates a new tappable hyperlink
-func newTappableHyperlink(text, urlStr string, onNavigate NavigationCallback) *TappableHyperlink {
+func newTappableHyperlink(text, urlStr string, onNavigate NavigationCallback, cr *CanvasRenderer, gen uint64) *TappableHyperlink {
 	parsedURL := urlParse(urlStr)
 	link := &TappableHyperlink{
 		url:        urlStr,
 		onNavigate: onNavigate,
+		cr:         cr,
+		gen:        gen,
 	}
 	link.ExtendBaseWidget(link)
 	link.Text = text
@@ -392,6 +410,14 @@ func newTappableHyperlink(text, urlStr string, onNavigate NavigationCallback) *T
 
 // Tapped handles tap events on the hyperlink
 func (t *TappableHyperlink) Tapped(_ *fyne.PointEvent) {
+	if t.cr != nil {
+		t.cr.mu.Lock()
+		if t.cr.dlBuildGen != t.gen || t.cr.submitting {
+			t.cr.mu.Unlock()
+			return
+		}
+		t.cr.mu.Unlock()
+	}
 	if t.onNavigate != nil {
 		t.onNavigate(t.url)
 	}
@@ -858,6 +884,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	if dlChanged {
 		cr.dlBuildGen++
 		cr.objectCache = make(map[int]fyne.CanvasObject)
+		cr.submittingForms = make(map[int64]bool)
 	}
 
 	// Object stack for clipped hierarchy
@@ -1198,7 +1225,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		// Create a clickable hyperlink widget
 		if cr.onNavigate != nil {
 			// Create a custom tappable widget
-			tappableLink := newTappableHyperlink(cmd.LinkText, resolvedURL, cr.onNavigate)
+			tappableLink := newTappableHyperlink(cmd.LinkText, resolvedURL, cr.onNavigate, cr, cr.dlBuildGen)
 			tappableLink.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 			return tappableLink
 		} else {
@@ -1261,10 +1288,61 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			return nil
 		}
 
+		gen := cr.dlBuildGen
+		isSubmit := true
+		if cmd.Node != nil {
+			if btnType, ok := cmd.Node.GetAttribute("type"); ok && btnType == "button" {
+				isSubmit = false
+			}
+		}
+
 		button := widget.NewButton(cmd.ButtonText, func() {
-			// Handle onclick if JavaScript runtime is available
-			// For now, we'll just create an empty handler
-			// The onclick attribute would need to be executed via JavaScript runtime
+			cr.mu.Lock()
+			if cr.dlBuildGen != gen || cr.submitting {
+				cr.mu.Unlock()
+				return
+			}
+			cr.mu.Unlock()
+
+			if isSubmit {
+				formNode := findFormAncestor(cmd.Node)
+				if formNode != nil {
+					cr.mu.Lock()
+					if cr.submittingForms[formNode.ID] {
+						cr.mu.Unlock()
+						return
+					}
+					cr.submittingForms[formNode.ID] = true
+					cr.mu.Unlock()
+
+					data := cr.collectFormData(formNode)
+					method, _ := formNode.GetAttribute("method")
+					method = strings.ToUpper(method)
+					if method == "" {
+						method = "GET"
+					}
+
+					if cr.onNavigate != nil {
+						action, _ := formNode.GetAttribute("action")
+						resolved := cr.resolveURL(action)
+						if method == "POST" {
+							cr.onNavigate(resolved)
+						} else {
+							parsed, err := url.Parse(resolved)
+							if err == nil {
+								query := parsed.Query()
+								for k, v := range data {
+									query.Set(k, v)
+								}
+								parsed.RawQuery = query.Encode()
+								cr.onNavigate(parsed.String())
+							} else {
+								cr.onNavigate(resolved)
+							}
+						}
+					}
+				}
+			}
 		})
 		button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 		return button
@@ -1281,7 +1359,55 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 					btnText = "Button"
 				}
 			}
-			button := widget.NewButton(btnText, func() {})
+			gen := cr.dlBuildGen
+			button := widget.NewButton(btnText, func() {
+				if cmd.InputType == "submit" {
+					cr.mu.Lock()
+					if cr.dlBuildGen != gen || cr.submitting {
+						cr.mu.Unlock()
+						return
+					}
+					cr.mu.Unlock()
+
+					formNode := findFormAncestor(cmd.Node)
+					if formNode != nil {
+						cr.mu.Lock()
+						if cr.submittingForms[formNode.ID] {
+							cr.mu.Unlock()
+							return
+						}
+						cr.submittingForms[formNode.ID] = true
+						cr.mu.Unlock()
+
+						data := cr.collectFormData(formNode)
+						method, _ := formNode.GetAttribute("method")
+						method = strings.ToUpper(method)
+						if method == "" {
+							method = "GET"
+						}
+
+						if cr.onNavigate != nil {
+							action, _ := formNode.GetAttribute("action")
+							resolved := cr.resolveURL(action)
+							if method == "POST" {
+								cr.onNavigate(resolved)
+							} else {
+								parsed, err := url.Parse(resolved)
+								if err == nil {
+									query := parsed.Query()
+									for k, v := range data {
+										query.Set(k, v)
+									}
+									parsed.RawQuery = query.Encode()
+									cr.onNavigate(parsed.String())
+								} else {
+									cr.onNavigate(resolved)
+								}
+							}
+						}
+					}
+				}
+			})
 			button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 			return button
 		}
@@ -1635,3 +1761,91 @@ func addVerticalBorderSegments(c *fyne.Container, style string, col color.Color,
 		pos += dashLen + gapLen
 	}
 }
+
+// findWidgetByNodeID finds the instantiated Fyne widget for a given Node ID in the object cache
+func (cr *CanvasRenderer) findWidgetByNodeID(nodeID int64) fyne.CanvasObject {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+	if cr.cachedDisplayList == nil {
+		return nil
+	}
+	for cmdIdx, obj := range cr.objectCache {
+		if cmdIdx < 0 || cmdIdx >= len(cr.cachedDisplayList.Commands) {
+			continue
+		}
+		cmd := cr.cachedDisplayList.Commands[cmdIdx]
+		if cmd.NodeID == nodeID {
+			return obj
+		}
+	}
+	return nil
+}
+
+// collectFormData gathers form data from form elements
+func (cr *CanvasRenderer) collectFormData(formNode *RenderNode) map[string]string {
+	data := make(map[string]string)
+	var collect func(*RenderNode)
+	collect = func(n *RenderNode) {
+		if n == nil {
+			return
+		}
+		if n.Type == NodeTypeElement {
+			// Skip disabled inputs
+			if _, disabled := n.GetAttribute("disabled"); disabled {
+				return
+			}
+			name, hasName := n.GetAttribute("name")
+			if hasName && name != "" {
+				// Find Fyne widget for this node
+				if widgetObj := cr.findWidgetByNodeID(n.ID); widgetObj != nil {
+					if entry, ok := widgetObj.(*widget.Entry); ok {
+						data[name] = entry.Text
+					} else if check, ok := widgetObj.(*widget.Check); ok {
+						if check.Checked {
+							if val, ok := n.GetAttribute("value"); ok {
+								data[name] = val
+							} else {
+								data[name] = "on"
+							}
+						}
+					}
+				} else {
+					// Fallback to value/checked attribute on RenderNode
+					if n.TagName == "input" {
+						inputType, _ := n.GetAttribute("type")
+						if inputType == "checkbox" || inputType == "radio" {
+							if _, checked := n.GetAttribute("checked"); checked {
+								if val, ok := n.GetAttribute("value"); ok {
+									data[name] = val
+								} else {
+									data[name] = "on"
+								}
+							}
+						} else {
+							val, _ := n.GetAttribute("value")
+							data[name] = val
+						}
+					} else if n.TagName == "textarea" {
+						data[name] = cr.extractText(n)
+					}
+				}
+			}
+		}
+		for _, child := range n.Children {
+			collect(child)
+		}
+	}
+	collect(formNode)
+	return data
+}
+
+// findFormAncestor walks up the parent tree to find the containing form element
+func findFormAncestor(node *RenderNode) *RenderNode {
+	for n := node; n != nil; n = n.Parent {
+		if n.TagName == "form" {
+			return n
+		}
+	}
+	return nil
+}
+

@@ -8,6 +8,8 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/widget"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/net/html"
 )
 
@@ -437,4 +439,140 @@ func findLayoutBoxInTree(root *LayoutBox, nodeID int64) *LayoutBox {
 		}
 	}
 	return nil
+}
+
+func TestFormSubmit_NormalAndDuplicatePrevention(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+	<html>
+	<body>
+		<form action="/submit-here" method="GET">
+			<input name="user" value="Bob" />
+			<textarea name="bio">developer</textarea>
+			<input type="checkbox" name="agree" checked />
+			<button class="submit-btn" type="submit">Submit</button>
+		</form>
+	</body>
+	</html>`
+
+	// 1. Render and construct widgets
+	r := NewRenderer(800, 600)
+	r.testingMode = true
+	r.SetCurrentURL("https://example.com/form-page")
+
+	var navigatedURL string
+	var navCallCount int
+	r.SetNavigationCallback(func(u string) {
+		navigatedURL = u
+		navCallCount++
+	})
+	r.canvasRenderer.SetNavigationCallback(func(u string) {
+		navigatedURL = u
+		navCallCount++
+	}, "https://example.com/form-page")
+
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	require.NoError(t, err)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	layoutEngine := NewLayoutEngine(800, 600)
+	layoutRoot := layoutEngine.ComputeLayout(renderTree)
+
+	// Call RenderWithViewport to generate and cache widgets
+	r.canvasRenderer.baseURL = "https://example.com/form-page"
+	obj := r.canvasRenderer.RenderWithViewport(renderTree, layoutRoot)
+
+	// Find the submit button in the container
+	var submitBtn *widget.Button
+	var inspect func(o fyne.CanvasObject)
+	inspect = func(o fyne.CanvasObject) {
+		if o == nil {
+			return
+		}
+		if btn, ok := o.(*widget.Button); ok {
+			submitBtn = btn
+		}
+		if containerObj, ok := o.(*fyne.Container); ok {
+			for _, child := range containerObj.Objects {
+				inspect(child)
+			}
+		}
+	}
+	inspect(obj)
+	require.NotNil(t, submitBtn, "Submit button should be rendered")
+
+	// 2. Perform normal submission
+	submitBtn.OnTapped()
+	assert.Equal(t, 1, navCallCount, "Should navigate once")
+	assert.Contains(t, navigatedURL, "https://example.com/submit-here")
+	assert.Contains(t, navigatedURL, "user=Bob")
+	assert.Contains(t, navigatedURL, "bio=developer")
+	assert.Contains(t, navigatedURL, "agree=on")
+
+	// 3. Test duplicate submission prevention
+	submitBtn.OnTapped()
+	assert.Equal(t, 1, navCallCount, "Should NOT navigate again while form submission is in progress")
+
+	// Reset submitting status
+	r.SetSubmitting(false)
+	submitBtn.OnTapped()
+	assert.Equal(t, 2, navCallCount, "Should submit again after submitting state is cleared")
+}
+
+func TestFormSubmit_StaleGenerationIgnored(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+	<html>
+	<body>
+		<form action="/submit-here" method="GET">
+			<button class="submit-btn" type="submit">Submit</button>
+		</form>
+	</body>
+	</html>`
+
+	r := NewRenderer(800, 600)
+	r.testingMode = true
+	r.SetCurrentURL("https://example.com/form-page")
+
+	var navCallCount int
+	r.SetNavigationCallback(func(u string) {
+		navCallCount++
+	})
+	r.canvasRenderer.SetNavigationCallback(func(u string) {
+		navCallCount++
+	}, "https://example.com/form-page")
+
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	require.NoError(t, err)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	layoutEngine := NewLayoutEngine(800, 600)
+	layoutRoot := layoutEngine.ComputeLayout(renderTree)
+
+	// Build widgets for the first time
+	r.canvasRenderer.baseURL = "https://example.com/form-page"
+	obj := r.canvasRenderer.RenderWithViewport(renderTree, layoutRoot)
+
+	// Find the submit button
+	var submitBtn *widget.Button
+	var inspect func(o fyne.CanvasObject)
+	inspect = func(o fyne.CanvasObject) {
+		if o == nil {
+			return
+		}
+		if btn, ok := o.(*widget.Button); ok {
+			submitBtn = btn
+		}
+		if containerObj, ok := o.(*fyne.Container); ok {
+			for _, child := range containerObj.Objects {
+				inspect(child)
+			}
+		}
+	}
+	inspect(obj)
+	require.NotNil(t, submitBtn)
+
+	// Simulate rendering a new layout tree, which bumps dlBuildGen in canvas renderer
+	newLayoutRoot := layoutEngine.ComputeLayout(renderTree)
+	r.canvasRenderer.RenderWithViewport(renderTree, newLayoutRoot)
+
+	// Click the button created in the OLD generation
+	submitBtn.OnTapped()
+	assert.Equal(t, 0, navCallCount, "Stale button should be ignored and not trigger navigation")
 }

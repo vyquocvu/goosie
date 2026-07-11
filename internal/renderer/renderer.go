@@ -775,3 +775,8 @@ func countImages(node *RenderNode) int {
 	}
 	return count
 }
+
+// SetSubmitting delegates the submitting status to CanvasRenderer
+func (r *Renderer) SetSubmitting(submitting bool) {
+	r.canvasRenderer.SetSubmitting(submitting)
+}
