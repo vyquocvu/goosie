@@ -511,11 +511,11 @@ Make the display list the stable contract between layout and rendering.
 
 ### M5.3 Implement dirty-region invalidation
 
-- [ ] Track previous and new visual bounds.
-- [ ] Invalidate both regions when an object moves.
-- [ ] Merge overlapping dirty rectangles with bounded complexity.
-- [ ] Expand dirty regions for shadows, borders, and antialiasing.
-- [ ] Add debug visualization for invalidated regions.
+- [x] Track previous and new visual bounds.
+- [x] Invalidate both regions when an object moves.
+- [x] Merge overlapping dirty rectangles with bounded complexity.
+- [x] Expand dirty regions for shadows, borders, and antialiasing.
+- [x] Add debug visualization for invalidated regions.
 
 ### M5.4 Remove renderer dependence on DOM traversal
 

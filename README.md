@@ -65,6 +65,13 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
     - ChunkedDisplayList supports per-chunk dirty tracking and reuse
     - SourceMapping for developer tools (LayoutID → command range)
     - Zero-allocation invalidation and spatial queries
+  - **Dirty-region invalidation** (M5.3) for minimal repaint regions
+    - DirtyRegion tracks bounded list of dirty rects with automatic overlap merging
+    - DirtyRegionTracker tracks per-LayoutID bounds across frames
+    - InvalidateMove marks both old and new regions dirty on object movement
+    - ExpandForEffects accounts for shadows, borders, and antialiasing
+    - DebugDirtyRegionOverlay generates display commands for dev-tools visualization
+    - Zero-allocation core operations
   - CSS styling support (colors, font-size, font-weight)
   - Text styling (bold, italic)
   - HTML hierarchy preservation
@@ -245,6 +252,11 @@ go test -bench=BenchmarkBuildPaintChunks -benchmem ./internal/renderer/
 go test -bench=BenchmarkChunkedDisplayList -benchmem ./internal/renderer/
 go test -bench=BenchmarkSourceMapping -benchmem ./internal/renderer/
 go test -bench=BenchmarkPaintChunk -benchmem ./internal/renderer/
+
+# Dirty-region benchmarks (M5.3)
+go test -bench=BenchmarkDirtyRegion -benchmem ./internal/renderer/
+go test -bench=BenchmarkExpandForEffects -benchmem ./internal/renderer/
+go test -bench=BenchmarkDebugDirtyRegionOverlay -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/

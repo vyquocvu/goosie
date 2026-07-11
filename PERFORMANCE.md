@@ -850,6 +850,45 @@ go test -bench=BenchmarkSourceMapping -benchmem ./internal/renderer/
 go test -bench=BenchmarkPaintChunk -benchmem ./internal/renderer/
 ```
 
+### Dirty-Region Invalidation (M5.3)
+
+The `internal/renderer` package provides `DirtyRegion` and
+`DirtyRegionTracker` for tracking visual bounds and computing
+minimal repaint regions.
+
+#### Dirty Region Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| DirtyRegionAdd | 4.1 | 0 | 0 |
+| MergeOverlapping (n=10) | 222 | 1,024 | 1 |
+| MergeOverlapping (n=100) | 1,351 | 3,072 | 2 |
+| MergeOverlapping (n=500) | 5,344 | 3,072 | 2 |
+| TotalArea (100 rects) | 127 | 0 | 0 |
+
+Add and area queries are zero-allocation. Merge scales with
+rect count but stays bounded by the `maxRects` limit.
+
+#### Tracker and Effects Expansion
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| TrackerInvalidateMove | 193 | 1,056 | 2 |
+| ExpandForEffects | 4.0 | 0 | 0 |
+| DebugOverlay (100 rects) | 14,514 | 99,704 | 10 |
+
+`ExpandForEffects` is zero-allocation. The tracker move
+invalidation allocates only for the new `DirtyRegion` returned
+by `Finalize()`. Debug overlay is a developer-tools path.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkDirtyRegion -benchmem ./internal/renderer/
+go test -bench=BenchmarkExpandForEffects -benchmem ./internal/renderer/
+go test -bench=BenchmarkDebugDirtyRegionOverlay -benchmem ./internal/renderer/
+```
+
 ### Streaming Parser (M2.4)
 
 | Fixture | ParseDocument (old) | ParseDocumentCtx (stream) | Alloc Reduction |

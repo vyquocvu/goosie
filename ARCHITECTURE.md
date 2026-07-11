@@ -582,6 +582,44 @@ providing per-chunk dirty tracking and bounds.
 The paint chunk infrastructure is additive. The existing
 `DisplayList`/`PaintCommand` path is unaffected.
 
+### Dirty-Region Invalidation (M5.3)
+
+The `internal/renderer` package provides a `DirtyRegion` and
+`DirtyRegionTracker` that track visual bounds across frames and
+compute minimal repaint regions.
+
+**Key features:**
+- `DirtyRegion`: bounded list of `RectF` rectangles with automatic
+  overlap merging when count exceeds `maxRects` (default 64)
+- `DirtyRegionTracker`: per-`LayoutID` bounds tracking across frames;
+  `InvalidateMove()` marks both old and new regions dirty
+- `MergeOverlapping()`: greedy O(n·k) pairwise merge that stays
+  within the bounded rect count
+- `ExpandForEffects()`: expands dirty rects to account for shadow
+  blur, border width, shadow offset, and antialiasing margins
+- `DebugDirtyRegionOverlay()`: generates `DisplayCommandList` with
+  semi-transparent rects for developer-tools visualization
+- `RectF` utility methods: `Area()`, `IsEmpty()`, `Equal()`,
+  `NearlyEqual()`, `RectUnion()`, `RectIntersection()`
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| DirtyRegionAdd | 4.1 | 0 | 0 |
+| MergeOverlapping (n=100) | 1,351 | 3,072 | 2 |
+| DirtyRegionTotalArea (100 rects) | 127 | 0 | 0 |
+| TrackerInvalidateMove | 193 | 1,056 | 2 |
+| ExpandForEffects | 4.0 | 0 | 0 |
+| DebugOverlay (100 rects) | 14,514 | 99,704 | 10 |
+
+All core dirty-region operations are zero-allocation. The tracker
+enables M5.4 by providing the bounds information needed to avoid
+DOM traversal during repainting.
+
+The dirty-region infrastructure is additive. The existing
+`ChunkedDisplayList.DirtyRects()` path continues to work.
+
 ## Navigation State Flow
 
 ```
