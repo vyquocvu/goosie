@@ -557,13 +557,13 @@ type RasterBackend interface {
 
 ### M6.2 Implement a pure-Go CPU raster backend
 
-- [ ] Support solid fills and borders.
-- [ ] Support clipped images.
+- [x] Support solid fills and borders.
+- [x] Support clipped images.
 - [ ] Support rasterizing the documented SVG subset.
 - [ ] Support shaped text runs.
-- [ ] Support opacity and basic transforms.
-- [ ] Raster only dirty tiles.
-- [ ] Reuse image buffers and raster scratch memory.
+- [x] Support opacity and basic transforms.
+- [x] Raster only dirty tiles.
+- [x] Reuse image buffers and raster scratch memory.
 
 ### M6.3 Add glyph and image caches
 

@@ -643,6 +643,37 @@ appear in this package.
 All frame type operations are zero-allocation. The packed `Color`
 avoids the interface allocation of `color.Color` in hot paths.
 
+### CPU Raster Backend (M6.2)
+
+The `internal/renderer/frame/raster` package provides a pure-Go CPU
+raster backend that consumes backend-neutral display commands and
+produces pixel frame buffers.
+
+**Key features:**
+- `Backend` interface: `BeginFrame` → `Rasterize` → `EndFrame` → `Close`
+- `CPUBackend`: pure-Go implementation with zero-allocation rasterization
+- `FrameBuffer`: reusable pixel buffer — allocated once, cleared per frame
+- Solid fill rasterization with alpha blending (source-over compositing)
+- Per-side border rasterization (top/right/bottom/left)
+- Nested clip stack with intersection-based clipping
+- Opacity stack for group transparency
+- Dirty-region-only rasterization — only pixels within dirty bounds are written
+- HiDPI support via `PixelScale` device-pixel conversion
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| FillRect 100×100 | 42,215 | 0 | 0 |
+| FillRect 800×600 | 1,480,107 | 0 | 0 |
+| FillWithClip | 137,249 | 0 | 0 |
+| BorderAllSides | 15,937 | 0 | 0 |
+| DirtyRegionSmall | 42,814 | 0 | 0 |
+| BlendPixel | 6.1 | 0 | 0 |
+
+All raster operations are zero-allocation. The frame buffer is reused
+across frames via `Reset()` (memset to zero) without reallocation.
+
 ## Navigation State Flow
 
 ```

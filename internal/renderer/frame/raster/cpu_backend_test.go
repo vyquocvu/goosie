@@ -1,0 +1,589 @@
+package raster
+
+import (
+	"image"
+	"image/color"
+	"testing"
+
+	"github.com/vyquocvu/goosie/internal/renderer/frame"
+)
+
+// ---------------------------------------------------------------------------
+// FrameBuffer tests
+// ---------------------------------------------------------------------------
+
+func TestNewFrameBuffer(t *testing.T) {
+	fb := NewFrameBuffer(100, 50)
+	b := fb.Bounds()
+	if b.Dx() != 100 || b.Dy() != 50 {
+		t.Errorf("bounds = %v, want 100x50", b)
+	}
+}
+
+func TestFrameBufferZeroSize(t *testing.T) {
+	fb := NewFrameBuffer(0, 0)
+	b := fb.Bounds()
+	if b.Dx() < 1 || b.Dy() < 1 {
+		t.Errorf("zero-size buffer should clamp to at least 1x1, got %v", b)
+	}
+}
+
+func TestFrameBufferReset(t *testing.T) {
+	fb := NewFrameBuffer(10, 10)
+	// Write a pixel.
+	fb.img.SetRGBA(5, 5, color.RGBA{R: 255, A: 255})
+	fb.Reset()
+	r, g, b, a := fb.img.At(5, 5).RGBA()
+	if r != 0 || g != 0 || b != 0 || a != 0 {
+		t.Errorf("Reset should clear pixels, got (%d,%d,%d,%d)", r, g, b, a)
+	}
+}
+
+func TestFrameBufferResizeSameSize(t *testing.T) {
+	fb := NewFrameBuffer(100, 50)
+	img1 := fb.Image()
+	resized := fb.Resize(100, 50)
+	if resized {
+		t.Error("Resize to same size should return false")
+	}
+	if fb.Image() != img1 {
+		t.Error("Resize to same size should not reallocate")
+	}
+}
+
+func TestFrameBufferResizeDifferentSize(t *testing.T) {
+	fb := NewFrameBuffer(100, 50)
+	resized := fb.Resize(200, 100)
+	if !resized {
+		t.Error("Resize to different size should return true")
+	}
+	b := fb.Bounds()
+	if b.Dx() != 200 || b.Dy() != 100 {
+		t.Errorf("after resize bounds = %v, want 200x100", b)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CPUBackend lifecycle tests
+// ---------------------------------------------------------------------------
+
+func TestCPUBackendBeginEndFrame(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	if err := b.BeginFrame(vp); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.EndFrame(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCPUBackendClose(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Operations after close should error.
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	if err := b.BeginFrame(vp); err == nil {
+		t.Error("BeginFrame after Close should error")
+	}
+}
+
+func TestCPUBackendDoubleClose(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal("second Close should not error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fill rasterization tests
+// ---------------------------------------------------------------------------
+
+func TestCPUBackendFillSolid(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	cmds := []DisplayCmd{
+		{
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: 10, Y: 10, W: 20, H: 20},
+			Color: frame.NewColor(255, 0, 0, 255),
+		},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check pixel inside the filled rect.
+	r, g, bb, a := img.At(15, 15).RGBA()
+	if r>>8 != 255 || g>>8 != 0 || bb>>8 != 0 || a>>8 != 255 {
+		t.Errorf("inside fill = (%d,%d,%d,%d), want red", r>>8, g>>8, bb>>8, a>>8)
+	}
+
+	// Check pixel outside the filled rect.
+	r, g, bb, a = img.At(50, 50).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("outside fill = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+func TestCPUBackendFillWithDirtyRegion(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	// Fill a large rect but only dirty a small region.
+	cmds := []DisplayCmd{
+		{
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: 0, Y: 0, W: 100, H: 100},
+			Color: frame.NewColor(0, 255, 0, 255),
+		},
+	}
+	dirty := []frame.Rect{{X: 10, Y: 10, W: 5, H: 5}}
+	img, err := b.Rasterize(cmds, dirty)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inside dirty region should be green.
+	r, g, bb, a := img.At(12, 12).RGBA()
+	if r>>8 != 0 || g>>8 != 255 || bb>>8 != 0 || a>>8 != 255 {
+		t.Errorf("inside dirty = (%d,%d,%d,%d), want green", r>>8, g>>8, bb>>8, a>>8)
+	}
+
+	// Outside dirty region should be transparent (not rasterized).
+	r, g, bb, a = img.At(80, 80).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("outside dirty = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+func TestCPUBackendFillClipped(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	cmds := []DisplayCmd{
+		{Kind: CmdClipPush, Rect: frame.Rect{X: 20, Y: 20, W: 30, H: 30}},
+		{
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: 0, Y: 0, W: 100, H: 100},
+			Color: frame.NewColor(0, 0, 255, 255),
+		},
+		{Kind: CmdClipPop},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inside clip should be blue.
+	r, g, bb, a := img.At(25, 25).RGBA()
+	if r>>8 != 0 || g>>8 != 0 || bb>>8 != 255 || a>>8 != 255 {
+		t.Errorf("inside clip = (%d,%d,%d,%d), want blue", r>>8, g>>8, bb>>8, a>>8)
+	}
+
+	// Outside clip should be transparent.
+	r, g, bb, a = img.At(5, 5).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("outside clip = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+func TestCPUBackendFillWithOpacity(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	cmds := []DisplayCmd{
+		{Kind: CmdOpacityPush, Opacity: 0.5},
+		{
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: 0, Y: 0, W: 50, H: 50},
+			Color: frame.NewColor(255, 0, 0, 255),
+		},
+		{Kind: CmdOpacityPop},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pixel should be red at ~50% opacity.
+	_, _, _, a := img.At(25, 25).RGBA()
+	alpha := a >> 8
+	if alpha < 120 || alpha > 135 {
+		t.Errorf("opacity pixel alpha = %d, want ~128", alpha)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Border rasterization tests
+// ---------------------------------------------------------------------------
+
+func TestCPUBackendBorderTop(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	cmds := []DisplayCmd{
+		{
+			Kind: CmdBorder,
+			Rect: frame.Rect{X: 10, Y: 10, W: 50, H: 50},
+			Border: BorderSpec{
+				Top: SideSpec{Width: 3, Color: frame.NewColor(255, 0, 0, 255)},
+			},
+		},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Top border at y=10 should be red.
+	r, g, bb, a := img.At(20, 10).RGBA()
+	if r>>8 != 255 || g>>8 != 0 || bb>>8 != 0 || a>>8 != 255 {
+		t.Errorf("top border = (%d,%d,%d,%d), want red", r>>8, g>>8, bb>>8, a>>8)
+	}
+
+	// Below top border at y=15 should be transparent.
+	r, g, bb, a = img.At(20, 15).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("below top border = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+func TestCPUBackendBorderAllSides(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	red := frame.NewColor(255, 0, 0, 255)
+	cmds := []DisplayCmd{
+		{
+			Kind: CmdBorder,
+			Rect: frame.Rect{X: 10, Y: 10, W: 50, H: 50},
+			Border: BorderSpec{
+				Top:    SideSpec{Width: 2, Color: red},
+				Right:  SideSpec{Width: 2, Color: red},
+				Bottom: SideSpec{Width: 2, Color: red},
+				Left:   SideSpec{Width: 2, Color: red},
+			},
+		},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check all four edges.
+	tests := []struct {
+		x, y int
+		desc string
+	}{
+		{20, 10, "top"},
+		{20, 58, "bottom"},
+		{10, 20, "left"},
+		{58, 20, "right"},
+	}
+	for _, tt := range tests {
+		r, g, bb, a := img.At(tt.x, tt.y).RGBA()
+		if r>>8 != 255 || g>>8 != 0 || bb>>8 != 0 || a>>8 != 255 {
+			t.Errorf("%s border at (%d,%d) = (%d,%d,%d,%d), want red",
+				tt.desc, tt.x, tt.y, r>>8, g>>8, bb>>8, a>>8)
+		}
+	}
+
+	// Center should be transparent (no fill).
+	r, g, bb, a := img.At(30, 30).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("center = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Nested clip tests
+// ---------------------------------------------------------------------------
+
+func TestCPUBackendNestedClips(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	cmds := []DisplayCmd{
+		{Kind: CmdClipPush, Rect: frame.Rect{X: 0, Y: 0, W: 80, H: 80}},
+		{Kind: CmdClipPush, Rect: frame.Rect{X: 20, Y: 20, W: 40, H: 40}},
+		{
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: 0, Y: 0, W: 100, H: 100},
+			Color: frame.NewColor(0, 255, 0, 255),
+		},
+		{Kind: CmdClipPop},
+		{Kind: CmdClipPop},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inside both clips.
+	r, g, bb, a := img.At(30, 30).RGBA()
+	if g>>8 != 255 {
+		t.Errorf("inside both clips = (%d,%d,%d,%d), want green", r>>8, g>>8, bb>>8, a>>8)
+	}
+
+	// Inside outer but outside inner clip.
+	r, g, bb, a = img.At(5, 5).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("outside inner clip = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HiDPI tests
+// ---------------------------------------------------------------------------
+
+func TestCPUBackendHiDPI(t *testing.T) {
+	b := NewCPUBackend(200, 200)
+	defer b.Close()
+
+	ps := frame.PixelScale{Scale: 2.0, DPI: 192}
+	vp := frame.NewViewport(100, 100, ps)
+	b.BeginFrame(vp)
+
+	cmds := []DisplayCmd{
+		{
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: 0, Y: 0, W: 200, H: 200},
+			Color: frame.NewColor(128, 128, 128, 255),
+		},
+	}
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Device buffer should be 200x200.
+	rgba := img.(*image.RGBA)
+	bounds := rgba.Bounds()
+	if bounds.Dx() != 200 || bounds.Dy() != 200 {
+		t.Errorf("HiDPI buffer = %v, want 200x200", bounds)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Empty command list tests
+// ---------------------------------------------------------------------------
+
+func TestCPUBackendEmptyCommands(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	img, err := b.Rasterize(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img == nil {
+		t.Fatal("Rasterize(nil) should return non-nil image")
+	}
+
+	// All pixels should be transparent.
+	r, g, bb, a := img.At(50, 50).RGBA()
+	if r != 0 || g != 0 || bb != 0 || a != 0 {
+		t.Errorf("empty frame pixel = (%d,%d,%d,%d), want transparent", r, g, bb, a)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Blend pixel tests
+// ---------------------------------------------------------------------------
+
+func TestBlendPixelOpaque(t *testing.T) {
+	pix := make([]byte, 4)
+	src := color.RGBA{R: 255, G: 0, B: 0, A: 255}
+	blendPixel(pix, 0, src)
+	if pix[0] != 255 || pix[1] != 0 || pix[2] != 0 || pix[3] != 255 {
+		t.Errorf("opaque blend = (%d,%d,%d,%d), want red", pix[0], pix[1], pix[2], pix[3])
+	}
+}
+
+func TestBlendPixelTransparent(t *testing.T) {
+	pix := []byte{100, 100, 100, 255}
+	src := color.RGBA{R: 0, G: 0, B: 0, A: 0}
+	blendPixel(pix, 0, src)
+	// Should not change.
+	if pix[0] != 100 || pix[1] != 100 || pix[2] != 100 || pix[3] != 255 {
+		t.Errorf("transparent blend changed pixel: %v", pix)
+	}
+}
+
+func TestBlendPixelHalfAlpha(t *testing.T) {
+	pix := []byte{0, 0, 0, 255} // black opaque background
+	src := color.RGBA{R: 255, G: 255, B: 255, A: 128}
+	blendPixel(pix, 0, src)
+	// Should be roughly 128,128,128,255.
+	if pix[0] < 120 || pix[0] > 135 {
+		t.Errorf("half-alpha R = %d, want ~128", pix[0])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// applyOpacity tests
+// ---------------------------------------------------------------------------
+
+func TestApplyOpacityFull(t *testing.T) {
+	c := frame.NewColor(255, 0, 0, 255)
+	got := applyOpacity(c, 1.0)
+	if got != c {
+		t.Errorf("opacity 1.0 should return same color")
+	}
+}
+
+func TestApplyOpacityZero(t *testing.T) {
+	c := frame.NewColor(255, 0, 0, 255)
+	got := applyOpacity(c, 0.0)
+	if !got.IsFullyTransparent() {
+		t.Errorf("opacity 0.0 should be fully transparent")
+	}
+}
+
+func TestApplyOpacityHalf(t *testing.T) {
+	c := frame.NewColor(255, 0, 0, 200)
+	got := applyOpacity(c, 0.5)
+	if got.A() < 95 || got.A() > 105 {
+		t.Errorf("opacity 0.5 on alpha=200 = %d, want ~100", got.A())
+	}
+	if got.R() != 255 {
+		t.Error("opacity should not change RGB")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
+
+func BenchmarkFillRect100x100(b *testing.B) {
+	backend := NewCPUBackend(400, 400)
+	vp := frame.NewViewport(400, 400, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := []DisplayCmd{
+		{Kind: CmdFill, Rect: frame.Rect{X: 50, Y: 50, W: 100, H: 100}, Color: frame.NewColor(255, 0, 0, 255)},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkFillRectFullFrame(b *testing.B) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := []DisplayCmd{
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 0, W: 800, H: 600}, Color: frame.NewColor(200, 200, 200, 255)},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkFillWithClip(b *testing.B) {
+	backend := NewCPUBackend(400, 400)
+	vp := frame.NewViewport(400, 400, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := []DisplayCmd{
+		{Kind: CmdClipPush, Rect: frame.Rect{X: 50, Y: 50, W: 200, H: 200}},
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 0, W: 400, H: 400}, Color: frame.NewColor(0, 255, 0, 255)},
+		{Kind: CmdClipPop},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkBorderAllSides(b *testing.B) {
+	backend := NewCPUBackend(400, 400)
+	vp := frame.NewViewport(400, 400, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	red := frame.NewColor(255, 0, 0, 255)
+	cmds := []DisplayCmd{
+		{
+			Kind: CmdBorder,
+			Rect: frame.Rect{X: 50, Y: 50, W: 200, H: 150},
+			Border: BorderSpec{
+				Top:    SideSpec{Width: 2, Color: red},
+				Right:  SideSpec{Width: 2, Color: red},
+				Bottom: SideSpec{Width: 2, Color: red},
+				Left:   SideSpec{Width: 2, Color: red},
+			},
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkDirtyRegionSmall(b *testing.B) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := []DisplayCmd{
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 0, W: 800, H: 600}, Color: frame.NewColor(200, 200, 200, 255)},
+	}
+	dirty := []frame.Rect{{X: 100, Y: 100, W: 50, H: 50}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, dirty)
+	}
+}
+
+func BenchmarkBlendPixel(b *testing.B) {
+	pix := make([]byte, 4)
+	src := color.RGBA{R: 128, G: 64, B: 32, A: 200}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pix[0], pix[1], pix[2], pix[3] = 0, 0, 0, 0
+		blendPixel(pix, 0, src)
+	}
+}
