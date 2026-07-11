@@ -698,6 +698,23 @@ prevention.
 Glyph cache operations are zero-allocation. Image cache Get is
 zero-allocation; Put allocates one LRU entry node.
 
+### Fyne Presentation Adapter (M6.4)
+
+The `FyneAdapter` in `internal/renderer/fyne_adapter.go` bridges the
+CPU raster backend output to Fyne's canvas system.
+
+**Key features:**
+- Presents `FrameBuffer` (image.RGBA) via a single `canvas.Image`
+- Content object is stable — never rebuilt on scroll or frame updates
+- `PresentFrame()` updates the image in-place (no widget allocation)
+- `SetViewport()` stores scroll state without triggering rebuilds
+- Thread-safe: concurrent frame production + UI-thread presentation
+- UI-thread constraint: `PresentFrame()` must be called via `fyne.Do()`
+
+The adapter enables the M6 exit gate: the same display list can be
+rendered without importing Fyne in engine tests (via `CPUBackend`
+directly), while Fyne remains the presentation shell.
+
 ## Navigation State Flow
 
 ```

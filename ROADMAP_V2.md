@@ -575,10 +575,10 @@ type RasterBackend interface {
 
 ### M6.4 Implement the Fyne presentation adapter
 
-- [ ] Present completed frame buffers through Fyne.
-- [ ] Keep Fyne object creation out of per-display-item loops.
-- [ ] Avoid rebuilding the entire widget tree for scroll updates.
-- [ ] Document UI-thread constraints.
+- [x] Present completed frame buffers through Fyne.
+- [x] Keep Fyne object creation out of per-display-item loops.
+- [x] Avoid rebuilding the entire widget tree for scroll updates.
+- [x] Document UI-thread constraints.
 
 ### M6.5 Add golden image testing
 
