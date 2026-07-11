@@ -475,7 +475,7 @@ Build a layout system that is separate from the DOM, avoids recreating all boxes
 
 - [ ] Define the supported table algorithm subset.
 - [ ] Cache column measurements.
-- [ ] Handle `thead`, `tbody`, `tfoot`, row spans, and column spans within documented limits.
+- [x] Handle `thead`, `tbody`, `tfoot`, row spans, and column spans within documented limits.
 - [ ] Align native form control sizing with CSS boxes.
 - [ ] Prevent duplicate submission and stale event targets.
 

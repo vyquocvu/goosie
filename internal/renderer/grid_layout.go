@@ -435,7 +435,15 @@ func (gle *GridLayoutEngine) LayoutTable(layoutBox *LayoutBox) {
 
 		// Ensure items stretch to fill their cell height (default table behavior)
 		if rStart >= 0 && rStart < len(rowHeights) {
-			item.layoutBox.Box.Height = rowHeights[rStart]
+			rEndIdx := item.rowEnd - 1
+			if rEndIdx > len(rowHeights) {
+				rEndIdx = len(rowHeights)
+			}
+			if rEndIdx > rStart {
+				item.layoutBox.Box.Height = rowPositions[rEndIdx-1] - rowPositions[rStart] + rowHeights[rEndIdx-1]
+			} else {
+				item.layoutBox.Box.Height = rowHeights[rStart]
+			}
 		}
 	}
 }
@@ -563,6 +571,49 @@ func (gle *GridLayoutEngine) calculateRowHeights(tracks []TrackSize, items []*gr
 				maxH = 20
 			} // minimal row height?
 			heights[i] = maxH
+		}
+	}
+
+	// Second pass: distribute heights of multi-row span items
+	for _, item := range items {
+		span := item.rowEnd - item.rowStart
+		if span > 1 {
+			// Calculate current height of spanned rows
+			currentSpannedH := float32(0)
+			autoRowsInSpan := 0
+			for r := item.rowStart - 1; r < item.rowEnd-1; r++ {
+				if r >= 0 && r < len(heights) {
+					currentSpannedH += heights[r]
+					if r < len(tracks) && (tracks[r].Type == TrackTypeAuto || (tracks[r].Type == TrackTypePercent && containerHeight <= 0)) {
+						autoRowsInSpan++
+					}
+				}
+			}
+			// Add gaps
+			currentSpannedH += float32(span-1) * gap
+
+			if item.layoutBox != nil && item.layoutBox.Box.Height > currentSpannedH {
+				diff := item.layoutBox.Box.Height - currentSpannedH
+				if autoRowsInSpan > 0 {
+					// Distribute difference among auto rows in the span
+					addPerAutoRow := diff / float32(autoRowsInSpan)
+					for r := item.rowStart - 1; r < item.rowEnd-1; r++ {
+						if r >= 0 && r < len(heights) {
+							if r < len(tracks) && (tracks[r].Type == TrackTypeAuto || (tracks[r].Type == TrackTypePercent && containerHeight <= 0)) {
+								heights[r] += addPerAutoRow
+							}
+						}
+					}
+				} else {
+					// Distribute equally among all spanned rows
+					addPerRow := diff / float32(span)
+					for r := item.rowStart - 1; r < item.rowEnd-1; r++ {
+						if r >= 0 && r < len(heights) {
+							heights[r] += addPerRow
+						}
+					}
+				}
+			}
 		}
 	}
 

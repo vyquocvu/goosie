@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"image/color"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -311,35 +312,135 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 	layoutBox.Box.Y = y
 	layoutBox.Box.Width = contentWidth
 
-	// 1. Flatten table to find cells and max columns
-	maxCols := 0
-
-	// Helper to traverse
-	var traverse func(n *RenderNode)
-	traverse = func(n *RenderNode) {
-		for _, child := range n.Children {
-			if child.TagName == "tr" {
-				colCount := 0
-				for _, cell := range child.Children {
-					if cell.TagName == "td" || cell.TagName == "th" {
-						colCount++
+	// 1. Gather all rows in correct visual order: thead -> tbody/direct-tr -> tfoot
+	var rows []*RenderNode
+	gatherRows := func(parent *RenderNode, targetTags []string) {
+		for _, child := range parent.Children {
+			isTarget := false
+			for _, tag := range targetTags {
+				if child.TagName == tag {
+					isTarget = true
+					break
+				}
+			}
+			if isTarget {
+				if child.TagName == "tr" {
+					rows = append(rows, child)
+				} else {
+					for _, subChild := range child.Children {
+						if subChild.TagName == "tr" {
+							rows = append(rows, subChild)
+						}
 					}
 				}
-				if colCount > maxCols {
-					maxCols = colCount
-				}
-			} else if child.TagName == "thead" || child.TagName == "tbody" || child.TagName == "tfoot" {
-				traverse(child)
 			}
 		}
 	}
-	traverse(node)
+
+	gatherRows(node, []string{"thead"})
+	gatherRows(node, []string{"tbody", "tr"})
+	gatherRows(node, []string{"tfoot"})
+
+	if len(rows) == 0 {
+		return y + layoutBox.PaddingTop + layoutBox.PaddingBottom
+	}
+
+	// 2. Map cells to coordinates, respecting colspan and rowspan
+	maxCols := 0
+	occupied := make(map[int]map[int]bool)
+	isOccupied := func(row, col int) bool {
+		if cols, ok := occupied[row]; ok {
+			return cols[col]
+		}
+		return false
+	}
+	markOccupied := func(row, col int) {
+		if _, ok := occupied[row]; !ok {
+			occupied[row] = make(map[int]bool)
+		}
+		occupied[row][col] = true
+	}
+
+	for r, rowNode := range rows {
+		currentRow := r + 1
+		currentCol := 1
+
+		// Try to get row background color
+		var trBgColor color.Color
+		if rowNode.ComputedStyle != nil {
+			trBgColor = rowNode.ComputedStyle.BackgroundColor
+		}
+
+		for _, cell := range rowNode.Children {
+			if cell.TagName == "td" || cell.TagName == "th" {
+				// Find next unoccupied column
+				for isOccupied(currentRow, currentCol) {
+					currentCol++
+				}
+
+				// Parse colspan and rowspan, with a clamp of 100 to prevent OOM
+				colspan := 1
+				if attr, ok := cell.GetAttribute("colspan"); ok {
+					if v, err := strconv.Atoi(attr); err == nil && v > 0 {
+						if v > 100 {
+							v = 100
+						}
+						colspan = v
+					}
+				}
+
+				rowspan := 1
+				if attr, ok := cell.GetAttribute("rowspan"); ok {
+					if v, err := strconv.Atoi(attr); err == nil && v > 0 {
+						if v > 100 {
+							v = 100
+						}
+						rowspan = v
+					}
+				}
+
+				// Mark occupied cells
+				for dr := 0; dr < rowspan; dr++ {
+					for dc := 0; dc < colspan; dc++ {
+						markOccupied(currentRow+dr, currentCol+dc)
+					}
+				}
+
+				colStart := currentCol
+				colEnd := currentCol + colspan
+				rowStart := currentRow
+				rowEnd := currentRow + rowspan
+
+				if colEnd-1 > maxCols {
+					maxCols = colEnd - 1
+				}
+
+				// Create cell box
+				cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				if cellBox != nil {
+					cellBox.GridColumnStart = colStart
+					cellBox.GridColumnEnd = colEnd
+					cellBox.GridRowStart = rowStart
+					cellBox.GridRowEnd = rowEnd
+
+					// Transmit TR background to cell if cell has none
+					if trBgColor != nil && (cellBox.BackgroundColor == nil || cellBox.BackgroundColor == color.Transparent) {
+						cellBox.BackgroundColor = trBgColor
+					}
+
+					layoutBox.AddChild(cellBox)
+				}
+
+				currentCol += colspan
+			}
+		}
+	}
 
 	if maxCols == 0 {
 		return y + layoutBox.PaddingTop + layoutBox.PaddingBottom
 	}
 
-	// 2. Set grid template columns
+	// 3. Set grid template columns
 	var colsBuilder strings.Builder
 	for i := 0; i < maxCols; i++ {
 		if i > 0 {
@@ -348,49 +449,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		colsBuilder.WriteString("auto")
 	}
 	layoutBox.GridTemplateColumns = colsBuilder.String()
-
-	// 3. Create layout boxes for cells
-	currentRow := 1
-
-	var buildCells func(n *RenderNode)
-	buildCells = func(n *RenderNode) {
-		for _, child := range n.Children {
-			if child.TagName == "tr" {
-				currentCol := 1
-				// Try to get row background color
-				var trBgColor color.Color
-				if child.ComputedStyle != nil {
-					trBgColor = child.ComputedStyle.BackgroundColor
-				}
-
-				for _, cell := range child.Children {
-					if cell.TagName == "td" || cell.TagName == "th" {
-						// Create cell box
-						cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
-
-						if cellBox != nil {
-							cellBox.GridColumnStart = currentCol
-							cellBox.GridColumnEnd = currentCol + 1
-							cellBox.GridRowStart = currentRow
-							cellBox.GridRowEnd = currentRow + 1
-
-							// Transmit TR background to cell if cell has none
-							if trBgColor != nil && (cellBox.BackgroundColor == nil || cellBox.BackgroundColor == color.Transparent) {
-								cellBox.BackgroundColor = trBgColor
-							}
-
-							layoutBox.AddChild(cellBox)
-						}
-						currentCol++
-					}
-				}
-				currentRow++
-			} else if child.TagName == "thead" || child.TagName == "tbody" || child.TagName == "tfoot" {
-				buildCells(child)
-			}
-		}
-	}
-	buildCells(node)
 
 	// 4. Run grid layout
 	gridLayoutEngine.LayoutTable(layoutBox)
@@ -403,8 +461,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 			maxY = childBottom
 		}
 	}
-
-	// Ensure we account for explicit height if set (ignoring for now to allow auto-height)
 
 	return maxY + layoutBox.PaddingBottom
 }

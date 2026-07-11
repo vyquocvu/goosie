@@ -45,7 +45,7 @@ roadmap explicitly moves them into a planned compatibility path.
 | `a` | Partial | Unsupported protocols are not navigated by the core engine. |
 | `img` | Partial | Decode failures render as missing or empty replaced content. |
 | `form`, `label`, `input`, `button`, `textarea`, `select`, `option` | Partial | Unsupported controls render as simple controls or inert boxes. |
-| `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `caption` | Partial | Unsupported table features use normal flow fallback. |
+| `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, `caption` | Partial | Unsupported table features use normal flow fallback. Cell spans (colspan/rowspan) are clamped to a max of 100 to prevent DoS. Visual row order follows thead -> tbody -> tfoot. |
 | `svg` | Partial | Unsupported SVG content renders as omitted or fallback content. |
 | `canvas`, `video`, `audio`, `iframe`, `object`, `embed` | Out of Scope | Render as inert fallback content. |
 | Unknown HTML elements | Fallback | Preserve children and render as generic inline or block containers. |
