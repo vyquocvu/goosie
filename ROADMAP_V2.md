@@ -519,7 +519,7 @@ Make the display list the stable contract between layout and rendering.
 
 ### M5.4 Remove renderer dependence on DOM traversal
 
-- [ ] The raster path must consume display commands only.
+- [x] The raster path must consume display commands only.
 - [x] Scrolling must not traverse the DOM.
 - [x] Repainting must not recompute style or layout unless explicitly dirty.
 - [x] Remove the temporary DOM compatibility adapter introduced in M2.5.
