@@ -793,6 +793,32 @@ Snapshots enable lock-free presentation: the UI thread reads
 immutable data while the engine thread mutates the tile cache.
 Generation IDs reject stale raster results from cancelled jobs.
 
+### Frame Budget and Input Prioritization (M7.3)
+
+The `internal/renderer/frame/compositor` package provides frame timing
+instrumentation and cancellable raster job queues.
+
+**Key features:**
+- `FrameBudget`: target frame duration (default 60fps) and threshold
+- `FrameBudgetTracker`: bounded ring buffer (512 frames) recording
+  per-frame timing, latency, dropped/missed counts
+- `Stats()`: computes p50/p95/p99 input-to-present latency percentiles
+- `RasterJob`: cancellable rasterization work unit with generation ID
+- `RasterJobQueue`: bounded job queue with `CancelCoord()` and
+  `CancelOutside()` for cancelling tiles that leave the priority area
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| RecordFrame | 34.0 | 0 | 0 |
+| Stats (512 records) | 5,885 | 4,152 | 3 |
+| EnqueueDequeue | 28.0 | 0 | 0 |
+
+Frame recording is zero-allocation. Stats computation allocates
+only for latency sorting. The bounded ring buffer prevents
+unbounded memory growth.
+
 ## Navigation State Flow
 
 ```

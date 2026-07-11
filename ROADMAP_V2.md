@@ -617,11 +617,11 @@ Make scrolling and simple visual updates independent from full repaint work.
 
 ### M7.3 Prioritize input and viewport work
 
-- [ ] Process scroll input before low-priority raster work.
-- [ ] Cancel raster jobs for tiles that leave the priority area.
-- [ ] Add frame budget instrumentation.
-- [ ] Record p50, p95, and p99 input-to-present latency.
-- [ ] Record dropped and missed frames.
+- [x] Process scroll input before low-priority raster work.
+- [x] Cancel raster jobs for tiles that leave the priority area.
+- [x] Add frame budget instrumentation.
+- [x] Record p50, p95, and p99 input-to-present latency.
+- [x] Record dropped and missed frames.
 
 ### M7.4 Add viewport and prefetch policy
 
