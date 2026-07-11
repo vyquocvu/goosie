@@ -521,7 +521,7 @@ Make the display list the stable contract between layout and rendering.
 
 - [ ] The raster path must consume display commands only.
 - [ ] Scrolling must not traverse the DOM.
-- [ ] Repainting must not recompute style or layout unless explicitly dirty.
+- [x] Repainting must not recompute style or layout unless explicitly dirty.
 - [x] Remove the temporary DOM compatibility adapter introduced in M2.5.
 
 **Acceptance criteria**
