@@ -83,7 +83,7 @@ package dom
 //
 // == Migration plan ==
 //
-//   Phase 1 (M2.3): Build compact store alongside *html.Node adapter.
-//   Phase 2 (M2.4): Streaming tokenizer writes directly to compact store.
-//   Phase 3 (M2.5): Adapter exposes *html.Node for unmigrated consumers.
-//   Phase 4 (M5):   Remove adapter; all consumers use NodeID.
+//   Phase 1 (M2.3): Build compact store alongside *html.Node adapter. [DONE]
+//   Phase 2 (M2.4): Streaming tokenizer writes directly to compact store. [DONE]
+//   Phase 3 (M2.5): Adapter exposes *html.Node for unmigrated consumers. [DONE]
+//   Phase 4 (M5.4): Remove adapter; all consumers use NodeID. [DONE]
