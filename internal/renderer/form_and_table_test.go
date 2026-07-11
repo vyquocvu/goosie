@@ -300,6 +300,129 @@ func TestTableSpansLimits(t *testing.T) {
 	}
 }
 
+func TestFormLayoutAndRendering(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+	<html>
+	<body>
+		<form id="myform">
+			<input class="name-input" type="text" placeholder="Your Name" value="Alice" style="width: 250px; height: 35px; padding: 5px; border: 2px solid black;" />
+			<textarea class="desc-input" placeholder="Your Description" style="width: 300px; height: 80px; padding: 10px; border: 1px solid gray;">Hello World</textarea>
+			<button class="submit-btn" type="submit" style="width: 100px; height: 40px;">Submit</button>
+		</form>
+	</body>
+	</html>`
+
+	// 1. Run layout
+	_, layoutRoot, renderTree := runLayout(t, htmlStr, "")
+
+	// Find nodes
+	nameInputNode := findNodeByClass(renderTree, "name-input")
+	descInputNode := findNodeByClass(renderTree, "desc-input")
+	submitBtnNode := findNodeByClass(renderTree, "submit-btn")
+
+	if nameInputNode == nil || descInputNode == nil || submitBtnNode == nil {
+		t.Fatal("One of the form nodes was not found in the render tree")
+	}
+
+	// 2. Verify layout box exists and matches width/height + padding/border
+	// For nameInput: width = 250px (with content-box, so Box.Width should include padding and border)
+	// Padding Left/Right = 5px * 2 = 10px. Border Left/Right = 2px * 2 = 4px.
+	// Total width = 250 + 10 + 4 = 264px.
+	// Height = 35px. Padding Top/Bottom = 5px * 2 = 10px. Border Top/Bottom = 2px * 2 = 4px.
+	// Total height = 35 + 10 + 4 = 49px.
+	nameInputBox := findLayoutBoxInTree(layoutRoot, nameInputNode.ID)
+	if nameInputBox == nil {
+		t.Fatal("Layout box for name input not found")
+	}
+	if nameInputBox.Box.Width != 264 {
+		t.Errorf("Expected name input layout box width to be 264, got %f", nameInputBox.Box.Width)
+	}
+	if nameInputBox.Box.Height != 49 {
+		t.Errorf("Expected name input layout box height to be 49, got %f", nameInputBox.Box.Height)
+	}
+
+	// 3. Verify CanvasRenderer.RenderWithViewport returns a container with correctly sized widgets
+	r := NewRenderer(800, 600)
+	r.currentRenderTree = renderTree
+	r.currentLayoutTree = layoutRoot
+
+	// Render using RenderWithViewport
+	obj := r.canvasRenderer.RenderWithViewport(renderTree, layoutRoot)
+
+	// Find the widgets in the container
+	var foundNameInput *widget.Entry
+	var foundDescInput *widget.Entry // textarea uses Entry in Fyne (MultiLineEntry)
+	var foundSubmitBtn *widget.Button
+
+	var inspect func(o fyne.CanvasObject)
+	inspect = func(o fyne.CanvasObject) {
+		if o == nil {
+			return
+		}
+		if entry, ok := o.(*widget.Entry); ok {
+			if entry.MultiLine {
+				foundDescInput = entry
+			} else {
+				foundNameInput = entry
+			}
+		} else if btn, ok := o.(*widget.Button); ok {
+			foundSubmitBtn = btn
+		}
+		if containerObj, ok := o.(*fyne.Container); ok {
+			for _, child := range containerObj.Objects {
+				inspect(child)
+			}
+		}
+	}
+	inspect(obj)
+
+	if foundNameInput == nil {
+		t.Fatal("widget.Entry for name input not rendered in RenderWithViewport")
+	}
+	if foundDescInput == nil {
+		t.Fatal("widget.Entry (MultiLine) for desc input not rendered in RenderWithViewport")
+	}
+	if foundSubmitBtn == nil {
+		t.Fatal("widget.Button for submit button not rendered in RenderWithViewport")
+	}
+
+	// 4. Verify widget attributes
+	if foundNameInput.Text != "Alice" {
+		t.Errorf("Expected name input value 'Alice', got %q", foundNameInput.Text)
+	}
+	if foundNameInput.PlaceHolder != "Your Name" {
+		t.Errorf("Expected name input placeholder 'Your Name', got %q", foundNameInput.PlaceHolder)
+	}
+	if foundDescInput.Text != "Hello World" {
+		t.Errorf("Expected textarea value 'Hello World', got %q", foundDescInput.Text)
+	}
+	if foundDescInput.PlaceHolder != "Your Description" {
+		t.Errorf("Expected textarea placeholder 'Your Description', got %q", foundDescInput.PlaceHolder)
+	}
+
+	// 5. Verify sized canvas objects match layout boxes
+	if foundNameInput.Size().Width != 264 {
+		t.Errorf("Expected name input widget width to be 264, got %f", foundNameInput.Size().Width)
+	}
+	if foundNameInput.Size().Height != 49 {
+		t.Errorf("Expected name input widget height to be 49, got %f", foundNameInput.Size().Height)
+	}
+
+	if foundDescInput.Size().Width != 322 { // 300 + 20 + 2
+		t.Errorf("Expected textarea widget width to be 322, got %f", foundDescInput.Size().Width)
+	}
+	if foundDescInput.Size().Height != 102 { // 80 + 20 + 2
+		t.Errorf("Expected textarea widget height to be 102, got %f", foundDescInput.Size().Height)
+	}
+
+	if foundSubmitBtn.Size().Width != 100 {
+		t.Errorf("Expected button widget width to be 100, got %f", foundSubmitBtn.Size().Width)
+	}
+	if foundSubmitBtn.Size().Height != 40 {
+		t.Errorf("Expected button widget height to be 40, got %f", foundSubmitBtn.Size().Height)
+	}
+}
+
 // helper to find a LayoutBox by node ID in a tree
 func findLayoutBoxInTree(root *LayoutBox, nodeID int64) *LayoutBox {
 	if root == nil {

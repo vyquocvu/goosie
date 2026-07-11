@@ -1268,13 +1268,90 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		})
 		button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 		return button
+
+	case PaintInput:
+		if cmd.InputType == "submit" || cmd.InputType == "button" || cmd.InputType == "reset" {
+			btnText := cmd.InputValue
+			if btnText == "" {
+				if cmd.InputType == "submit" {
+					btnText = "Submit"
+				} else if cmd.InputType == "reset" {
+					btnText = "Reset"
+				} else {
+					btnText = "Button"
+				}
+			}
+			button := widget.NewButton(btnText, func() {})
+			button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return button
+		}
+
+		if cmd.InputType == "checkbox" {
+			check := widget.NewCheck("", func(b bool) {})
+			if cmd.Node != nil {
+				if _, checked := cmd.Node.GetAttribute("checked"); checked {
+					check.Checked = true
+				}
+				if _, disabled := cmd.Node.GetAttribute("disabled"); disabled {
+					check.Disable()
+				}
+			}
+			check.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return check
+		}
+
+		if cmd.InputType == "radio" {
+			check := widget.NewCheck("", func(b bool) {})
+			if cmd.Node != nil {
+				if _, checked := cmd.Node.GetAttribute("checked"); checked {
+					check.Checked = true
+				}
+				if _, disabled := cmd.Node.GetAttribute("disabled"); disabled {
+					check.Disable()
+				}
+			}
+			check.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return check
+		}
+
+		entry := widget.NewEntry()
+		if cmd.Placeholder != "" {
+			entry.SetPlaceHolder(cmd.Placeholder)
+		}
+		if cmd.InputValue != "" {
+			entry.SetText(cmd.InputValue)
+		}
+		if cmd.InputType == "password" {
+			entry.Password = true
+		}
+		if cmd.Node != nil {
+			if _, disabled := cmd.Node.GetAttribute("disabled"); disabled {
+				entry.Disable()
+			}
+		}
+		entry.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		return entry
+
+	case PaintTextarea:
+		entry := widget.NewMultiLineEntry()
+		if cmd.Placeholder != "" {
+			entry.SetPlaceHolder(cmd.Placeholder)
+		}
+		if cmd.InputValue != "" {
+			entry.SetText(cmd.InputValue)
+		}
+		if cmd.Node != nil {
+			if _, disabled := cmd.Node.GetAttribute("disabled"); disabled {
+				entry.Disable()
+			}
+		}
+		entry.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		return entry
 	}
 
 	return nil
 }
 
-// renderCommand renders a single paint command to canvas objects
-// Deprecated: Use createCanvasObject instead
 func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
 	obj := cr.createCanvasObject(cmd)
 	if obj != nil {

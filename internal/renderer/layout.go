@@ -567,6 +567,36 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		} else {
 			width = explicitWidth + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
+	} else if node.TagName == "input" {
+		defaultW := float32(150)
+		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing == "border-box" {
+			width = defaultW
+		} else {
+			width = defaultW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
+		}
+	} else if node.TagName == "textarea" {
+		defaultW := float32(200)
+		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing == "border-box" {
+			width = defaultW
+		} else {
+			width = defaultW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
+		}
+	} else if node.TagName == "button" {
+		defaultW := float32(80)
+		if text := le.extractButtonText(node); text != "" {
+			style := le.fontMetrics.GetTextStyleFromNode(node)
+			letterSpacing := float32(0)
+			if node.ComputedStyle != nil {
+				letterSpacing = node.ComputedStyle.LetterSpacing
+			}
+			metrics := le.fontMetrics.MeasureText(text, le.defaultFontSize, style, letterSpacing)
+			defaultW = metrics.Width + 20 // 20px padding/buffer
+		}
+		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing == "border-box" {
+			width = defaultW
+		} else {
+			width = defaultW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
+		}
 	}
 
 	// Apply min-width and max-width constraints
@@ -737,17 +767,14 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		// Block elements: stack children vertically (when no inline content)
 		// Check if element has intrinsic dimensions (e.g. input, button, textarea)
 		if node.TagName == "input" {
-			// Default height for input
-			inputHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
-			childY = currentY + inputHeight
+			// Default content height for input is 30px
+			childY = currentY + 30
 		} else if node.TagName == "button" && !le.hasInlineContent(node) {
-			// Default height for empty button
-			buttonHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
-			childY = currentY + buttonHeight
+			// Default content height for empty button is 30px
+			childY = currentY + 30
 		} else if node.TagName == "textarea" {
-			// Default height for textarea
-			textareaHeight := float32(60) + layoutBox.PaddingTop + layoutBox.PaddingBottom
-			childY = currentY + textareaHeight
+			// Default content height for textarea is 60px
+			childY = currentY + 60
 		} else {
 			var lastChild *LayoutBox
 			for _, child := range node.Children {
@@ -847,17 +874,14 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 			// Check if element has intrinsic dimensions (e.g. input, button, textarea)
 			// These might have no children (void tags or empty) but need rendering size
 			if node.TagName == "input" {
-				// Default height for input
-				inputHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
-				childY = currentY + inputHeight
+				// Default content height for input is 30px
+				childY = currentY + 30
 			} else if node.TagName == "button" {
-				// Default height for button if empty (though usually has text)
-				buttonHeight := float32(30) + layoutBox.PaddingTop + layoutBox.PaddingBottom
-				childY = currentY + buttonHeight
+				// Default content height for button is 30px
+				childY = currentY + 30
 			} else if node.TagName == "textarea" {
-				// Default height for textarea
-				textareaHeight := float32(60) + layoutBox.PaddingTop + layoutBox.PaddingBottom
-				childY = currentY + textareaHeight
+				// Default content height for textarea is 60px
+				childY = currentY + 60
 			} else {
 				// Fallback for empty inline elements using Block layout (e.g. empty div)
 				for _, child := range node.Children {
@@ -1105,4 +1129,25 @@ func (le *LayoutEngine) hasInlineContentRecursive(node *RenderNode) bool {
 		}
 	}
 	return false
+}
+
+// extractButtonText extracts text content recursively from a render node
+func (le *LayoutEngine) extractButtonText(node *RenderNode) string {
+	if node == nil {
+		return ""
+	}
+	if node.Type == NodeTypeText {
+		return strings.TrimSpace(node.Text)
+	}
+	var sb strings.Builder
+	for _, child := range node.Children {
+		t := le.extractButtonText(child)
+		if t != "" {
+			if sb.Len() > 0 {
+				sb.WriteString(" ")
+			}
+			sb.WriteString(t)
+		}
+	}
+	return sb.String()
 }

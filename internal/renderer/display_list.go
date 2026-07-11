@@ -22,6 +22,10 @@ const (
 	PaintBorder
 	// PaintButton represents a button paint command
 	PaintButton
+	// PaintInput represents a native form input paint command
+	PaintInput
+	// PaintTextarea represents a native textarea paint command
+	PaintTextarea
 	// PushClip represents a command to start a clipping region
 	PushClip
 	// PopClip represents a command to end a clipping region
@@ -60,6 +64,11 @@ type PaintCommand struct {
 	// Button-specific fields
 	ButtonText string
 	OnClick    string // onclick attribute value
+
+	// Input-specific fields
+	InputType   string
+	InputValue  string
+	Placeholder string
 
 	// Border-specific fields
 	BorderTopWidth    float32
@@ -300,11 +309,10 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 		dlb.addBorderCommand(layoutBox, renderNode, displayList)
 	}
 
-	// Special handling for button elements - they should be rendered as buttons, not as text
-	if !isHidden && renderNode.Type == NodeTypeElement && renderNode.TagName == "button" {
+	// Special handling for form elements - they should be rendered as native controls, not as text
+	if !isHidden && renderNode.Type == NodeTypeElement && (renderNode.TagName == "button" || renderNode.TagName == "input" || renderNode.TagName == "textarea") {
 		dlb.addElementCommand(layoutBox, renderNode, displayList)
-		// Don't process children for buttons - the button text is extracted in addElementCommand
-		// Process children layout boxes for nested elements if any
+		// Don't process children for form inputs/textareas/buttons - their values/texts are extracted in addElementCommand
 		for _, child := range layoutBox.Children {
 			dlb.buildRecursive(child, renderMap, displayList)
 		}
@@ -613,7 +621,6 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 		}
 		return
 	}
-
 	// For button elements, add a button paint command
 	if renderNode.TagName == "button" {
 		buttonText := dlb.extractText(renderNode)
@@ -626,6 +633,42 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 			Box:        layoutBox.Box,
 			ButtonText: buttonText,
 			OnClick:    onclick,
+		}
+		displayList.AddCommand(cmd)
+		return
+	}
+
+	// For input elements, add an input paint command
+	if renderNode.TagName == "input" {
+		inputType, _ := renderNode.GetAttribute("type")
+		inputValue, _ := renderNode.GetAttribute("value")
+		placeholder, _ := renderNode.GetAttribute("placeholder")
+
+		cmd := &PaintCommand{
+			Type:        PaintInput,
+			NodeID:      layoutBox.NodeID,
+			Node:        renderNode,
+			Box:         layoutBox.Box,
+			InputType:   inputType,
+			InputValue:  inputValue,
+			Placeholder: placeholder,
+		}
+		displayList.AddCommand(cmd)
+		return
+	}
+
+	// For textarea elements, add a textarea paint command
+	if renderNode.TagName == "textarea" {
+		inputValue := dlb.extractText(renderNode)
+		placeholder, _ := renderNode.GetAttribute("placeholder")
+
+		cmd := &PaintCommand{
+			Type:        PaintTextarea,
+			NodeID:      layoutBox.NodeID,
+			Node:        renderNode,
+			Box:         layoutBox.Box,
+			InputValue:  inputValue,
+			Placeholder: placeholder,
 		}
 		displayList.AddCommand(cmd)
 		return
