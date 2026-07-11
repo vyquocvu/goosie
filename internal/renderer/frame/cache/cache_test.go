@@ -1,0 +1,423 @@
+package cache
+
+import (
+	"errors"
+	"image"
+	"image/color"
+	"sync"
+	"testing"
+)
+
+// ---------------------------------------------------------------------------
+// Metrics tests
+// ---------------------------------------------------------------------------
+
+func TestMetricsSnapshot(t *testing.T) {
+	var m Metrics
+	m.Hits.Store(10)
+	m.Misses.Store(5)
+	m.Evictions.Store(2)
+	snap := m.Snapshot()
+	if snap.Hits != 10 || snap.Misses != 5 || snap.Evictions != 2 {
+		t.Errorf("snapshot = %+v, want {10,5,2}", snap)
+	}
+}
+
+func TestMetricsHitRate(t *testing.T) {
+	snap := MetricsSnapshot{Hits: 80, Misses: 20}
+	rate := snap.HitRate()
+	if rate < 0.79 || rate > 0.81 {
+		t.Errorf("HitRate = %f, want ~0.8", rate)
+	}
+}
+
+func TestMetricsHitRateZeroAccess(t *testing.T) {
+	snap := MetricsSnapshot{}
+	if snap.HitRate() != 0 {
+		t.Errorf("HitRate with no access = %f, want 0", snap.HitRate())
+	}
+}
+
+func TestMetricsReset(t *testing.T) {
+	var m Metrics
+	m.Hits.Store(10)
+	m.Misses.Store(5)
+	m.Reset()
+	if m.Hits.Load() != 0 || m.Misses.Load() != 0 {
+		t.Error("Reset should zero counters")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GlyphCache tests
+// ---------------------------------------------------------------------------
+
+func TestGlyphCachePutGet(t *testing.T) {
+	c := NewGlyphCache(10)
+	key := GlyphKey{FontID: 1, GlyphID: 42, FontSize: 1600}
+	val := GlyphValue{Advance: 8.5, Width: 7.0, Height: 12.0}
+	c.Put(key, val)
+
+	got, ok := c.Get(key)
+	if !ok {
+		t.Fatal("expected cache hit")
+	}
+	if got.Advance != 8.5 || got.Width != 7.0 || got.Height != 12.0 {
+		t.Errorf("got %+v, want %+v", got, val)
+	}
+}
+
+func TestGlyphCacheMiss(t *testing.T) {
+	c := NewGlyphCache(10)
+	_, ok := c.Get(GlyphKey{FontID: 1, GlyphID: 99})
+	if ok {
+		t.Error("expected cache miss")
+	}
+}
+
+func TestGlyphCacheEviction(t *testing.T) {
+	c := NewGlyphCache(3)
+	for i := 0; i < 5; i++ {
+		c.Put(GlyphKey{FontID: 1, GlyphID: uint32(i)}, GlyphValue{Advance: float32(i)})
+	}
+	if c.Len() != 3 {
+		t.Errorf("Len() = %d, want 3 (capacity)", c.Len())
+	}
+	// First two should be evicted (LRU).
+	_, ok := c.Get(GlyphKey{FontID: 1, GlyphID: 0})
+	if ok {
+		t.Error("entry 0 should be evicted")
+	}
+	_, ok = c.Get(GlyphKey{FontID: 1, GlyphID: 1})
+	if ok {
+		t.Error("entry 1 should be evicted")
+	}
+	// Last three should be present.
+	_, ok = c.Get(GlyphKey{FontID: 1, GlyphID: 2})
+	if !ok {
+		t.Error("entry 2 should be present")
+	}
+}
+
+func TestGlyphCacheLRUOrder(t *testing.T) {
+	c := NewGlyphCache(3)
+	k0 := GlyphKey{GlyphID: 0}
+	k1 := GlyphKey{GlyphID: 1}
+	k2 := GlyphKey{GlyphID: 2}
+	k3 := GlyphKey{GlyphID: 3}
+
+	c.Put(k0, GlyphValue{})
+	c.Put(k1, GlyphValue{})
+	c.Put(k2, GlyphValue{})
+
+	// Access k0 to make it recently used.
+	c.Get(k0)
+
+	// Insert k3 — should evict k1 (LRU), not k0.
+	c.Put(k3, GlyphValue{})
+
+	_, ok := c.Get(k0)
+	if !ok {
+		t.Error("k0 should survive (recently accessed)")
+	}
+	_, ok = c.Get(k1)
+	if ok {
+		t.Error("k1 should be evicted (LRU)")
+	}
+}
+
+func TestGlyphCacheUpdate(t *testing.T) {
+	c := NewGlyphCache(10)
+	key := GlyphKey{GlyphID: 1}
+	c.Put(key, GlyphValue{Advance: 5})
+	c.Put(key, GlyphValue{Advance: 10})
+
+	got, ok := c.Get(key)
+	if !ok || got.Advance != 10 {
+		t.Errorf("update failed: got %+v, ok=%v", got, ok)
+	}
+	if c.Len() != 1 {
+		t.Errorf("Len() = %d, want 1 after update", c.Len())
+	}
+}
+
+func TestGlyphCacheMetrics(t *testing.T) {
+	c := NewGlyphCache(10)
+	key := GlyphKey{GlyphID: 1}
+	c.Put(key, GlyphValue{})
+	c.Get(key)                  // hit
+	c.Get(key)                  // hit
+	c.Get(GlyphKey{GlyphID: 2}) // miss
+
+	m := c.Metrics()
+	snap := m.Snapshot()
+	if snap.Hits != 2 {
+		t.Errorf("Hits = %d, want 2", snap.Hits)
+	}
+	if snap.Misses != 1 {
+		t.Errorf("Misses = %d, want 1", snap.Misses)
+	}
+}
+
+func TestGlyphCacheClear(t *testing.T) {
+	c := NewGlyphCache(10)
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{})
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{})
+	c.Clear()
+	if c.Len() != 0 {
+		t.Errorf("Len() after Clear = %d, want 0", c.Len())
+	}
+}
+
+func TestGlyphCacheDefaultCapacity(t *testing.T) {
+	c := NewGlyphCache(0)
+	if c.capacity != 256 {
+		t.Errorf("default capacity = %d, want 256", c.capacity)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ImageCache tests
+// ---------------------------------------------------------------------------
+
+func TestImageCachePutGet(t *testing.T) {
+	c := NewImageCache(1 << 20) // 1 MB
+	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	val := ImageValue{Image: img, ByteSize: 400}
+	c.Put("test.png", val)
+
+	got, ok := c.Get("test.png")
+	if !ok {
+		t.Fatal("expected cache hit")
+	}
+	if got.ByteSize != 400 {
+		t.Errorf("ByteSize = %d, want 400", got.ByteSize)
+	}
+}
+
+func TestImageCacheMiss(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	_, ok := c.Get("missing.png")
+	if ok {
+		t.Error("expected cache miss")
+	}
+}
+
+func TestImageCacheByteLimit(t *testing.T) {
+	c := NewImageCache(1000) // 1000 byte limit
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 400})
+	c.Put("b.png", ImageValue{Image: img, ByteSize: 400})
+	c.Put("c.png", ImageValue{Image: img, ByteSize: 400}) // Should evict a.png
+
+	if c.Len() > 3 {
+		t.Errorf("Len() = %d, should be <= 3", c.Len())
+	}
+	if c.Bytes() > 1000 {
+		t.Errorf("Bytes() = %d, exceeds limit 1000", c.Bytes())
+	}
+}
+
+func TestImageCacheEvictionMetrics(t *testing.T) {
+	c := NewImageCache(500)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 300})
+	c.Put("b.png", ImageValue{Image: img, ByteSize: 300}) // Evicts a
+
+	snap := c.Metrics().Snapshot()
+	if snap.Evictions < 1 {
+		t.Errorf("Evictions = %d, want >= 1", snap.Evictions)
+	}
+}
+
+func TestImageCacheOversizedItem(t *testing.T) {
+	c := NewImageCache(100)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("huge.png", ImageValue{Image: img, ByteSize: 200}) // Exceeds limit
+	if c.Len() != 0 {
+		t.Error("oversized item should not be cached")
+	}
+}
+
+func TestImageCacheUpdate(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img1 := image.NewRGBA(image.Rect(0, 0, 5, 5))
+	img2 := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	c.Put("a.png", ImageValue{Image: img1, ByteSize: 100})
+	c.Put("a.png", ImageValue{Image: img2, ByteSize: 400})
+
+	got, ok := c.Get("a.png")
+	if !ok {
+		t.Fatal("expected cache hit after update")
+	}
+	if got.ByteSize != 400 {
+		t.Errorf("ByteSize = %d, want 400 after update", got.ByteSize)
+	}
+	if c.Bytes() != 400 {
+		t.Errorf("Bytes() = %d, want 400", c.Bytes())
+	}
+}
+
+func TestImageCacheClear(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 100})
+	c.Clear()
+	if c.Len() != 0 || c.Bytes() != 0 {
+		t.Errorf("after Clear: Len=%d, Bytes=%d", c.Len(), c.Bytes())
+	}
+}
+
+func TestImageCacheClose(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 100})
+	c.Close()
+	if c.Len() != 0 {
+		t.Error("Close should clear cache")
+	}
+}
+
+func TestImageCacheDefaultLimit(t *testing.T) {
+	c := NewImageCache(0)
+	if c.maxBytes != 64<<20 {
+		t.Errorf("default maxBytes = %d, want %d", c.maxBytes, 64<<20)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetOrLoad — duplicate decode prevention
+// ---------------------------------------------------------------------------
+
+func TestImageCacheGetOrLoad(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+
+	callCount := 0
+	load := func() (ImageValue, error) {
+		callCount++
+		return ImageValue{Image: img, ByteSize: 100}, nil
+	}
+
+	v, err := c.GetOrLoad("test.png", load)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.ByteSize != 100 {
+		t.Errorf("ByteSize = %d, want 100", v.ByteSize)
+	}
+	if callCount != 1 {
+		t.Errorf("load called %d times, want 1", callCount)
+	}
+
+	// Second call should hit cache.
+	v, err = c.GetOrLoad("test.png", load)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callCount != 1 {
+		t.Errorf("load called %d times, want 1 (cached)", callCount)
+	}
+}
+
+func TestImageCacheGetOrLoadError(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	loadErr := errors.New("decode failed")
+	_, err := c.GetOrLoad("bad.png", func() (ImageValue, error) {
+		return ImageValue{}, loadErr
+	})
+	if err != loadErr {
+		t.Errorf("err = %v, want %v", err, loadErr)
+	}
+	if c.Len() != 0 {
+		t.Error("failed load should not cache")
+	}
+}
+
+func TestImageCacheGetOrLoadConcurrent(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.SetRGBA(0, 0, color.RGBA{R: 255, A: 255})
+
+	var callCount int64
+	var mu sync.Mutex
+	load := func() (ImageValue, error) {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+		return ImageValue{Image: img, ByteSize: 100}, nil
+	}
+
+	const N = 50
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			_, err := c.GetOrLoad("concurrent.png", load)
+			if err != nil {
+				t.Errorf("GetOrLoad error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	count := callCount
+	mu.Unlock()
+	if count != 1 {
+		t.Errorf("load called %d times, want 1 (deduplicated)", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
+
+func BenchmarkGlyphCachePut(b *testing.B) {
+	c := NewGlyphCache(1024)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Put(GlyphKey{FontID: 1, GlyphID: uint32(i % 500)}, GlyphValue{Advance: 8.0})
+	}
+}
+
+func BenchmarkGlyphCacheGet(b *testing.B) {
+	c := NewGlyphCache(1024)
+	for i := uint32(0); i < 500; i++ {
+		c.Put(GlyphKey{FontID: 1, GlyphID: i}, GlyphValue{Advance: 8.0})
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Get(GlyphKey{FontID: 1, GlyphID: uint32(i % 500)})
+	}
+}
+
+func BenchmarkImageCachePut(b *testing.B) {
+	c := NewImageCache(64 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := ImageKey("img" + string(rune('A'+i%26)) + ".png")
+		c.Put(key, ImageValue{Image: img, ByteSize: 100})
+	}
+}
+
+func BenchmarkImageCacheGet(b *testing.B) {
+	c := NewImageCache(64 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	for i := 0; i < 100; i++ {
+		key := ImageKey("img" + string(rune('A'+i%26)) + ".png")
+		c.Put(key, ImageValue{Image: img, ByteSize: 100})
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := ImageKey("img" + string(rune('A'+i%100)) + ".png")
+		c.Get(key)
+	}
+}

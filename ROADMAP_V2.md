@@ -567,11 +567,11 @@ type RasterBackend interface {
 
 ### M6.3 Add glyph and image caches
 
-- [ ] Add bounded glyph cache.
-- [ ] Add decoded image cache with byte-based limits.
-- [ ] Add cache hit and eviction metrics.
-- [ ] Release resources when sessions close.
-- [ ] Prevent duplicate concurrent decode of the same resource.
+- [x] Add bounded glyph cache.
+- [x] Add decoded image cache with byte-based limits.
+- [x] Add cache hit and eviction metrics.
+- [x] Release resources when sessions close.
+- [x] Prevent duplicate concurrent decode of the same resource.
 
 ### M6.4 Implement the Fyne presentation adapter
 

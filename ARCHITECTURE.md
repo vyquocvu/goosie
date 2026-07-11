@@ -674,6 +674,30 @@ produces pixel frame buffers.
 All raster operations are zero-allocation. The frame buffer is reused
 across frames via `Reset()` (memset to zero) without reallocation.
 
+### Glyph and Image Caches (M6.3)
+
+The `internal/renderer/frame/cache` package provides bounded LRU caches
+for the raster backend with byte-based limits and duplicate-decode
+prevention.
+
+**Key features:**
+- `GlyphCache`: bounded by entry count, LRU eviction, zero-alloc Get/Put
+- `ImageCache`: bounded by byte budget, LRU eviction by memory cost
+- `Metrics`: atomic hit/miss/eviction counters with `HitRate()`
+- `GetOrLoad()`: prevents duplicate concurrent decode via `sync.Once`
+- `Close()`/`Clear()`: releases all resources on session shutdown
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| GlyphCachePut | 52.0 | 0 | 0 |
+| GlyphCacheGet | 41.1 | 0 | 0 |
+| ImageCacheGet | 54.1 | 0 | 0 |
+
+Glyph cache operations are zero-allocation. Image cache Get is
+zero-allocation; Put allocates one LRU entry node.
+
 ## Navigation State Flow
 
 ```
