@@ -669,12 +669,12 @@ Keep Goja useful for lightweight interaction without allowing scripts to corrupt
 
 ### M8.4 Add script limits and policy controls
 
-- [ ] Add execution interruption for runaway scripts.
-- [ ] Add configurable timer limits.
-- [ ] Add maximum task queue size.
-- [ ] Add document mode that disables remote scripts.
-- [ ] Define fallback behavior for unsupported ES modules and advanced Web APIs.
-- [ ] Add per-origin permissions for selected APIs.
+- [x] Add execution interruption for runaway scripts.
+- [x] Add configurable timer limits.
+- [x] Add maximum task queue size.
+- [x] Add document mode that disables remote scripts.
+- [x] Define fallback behavior for unsupported ES modules and advanced Web APIs.
+- [x] Add per-origin permissions for selected APIs.
 
 ### M8.5 Add race and stress tests
 

@@ -931,6 +931,35 @@ Handles are zero-copy — they store only a NodeID and store pointer.
 Cache hits are zero-allocation. Stale nodes are rejected predictably
 with typed errors.
 
+### Script Limits and Policy Controls (M8.4)
+
+The `internal/js` package provides `ScriptPolicy` and `ScriptEnforcer`
+for configurable execution limits and security controls.
+
+**Key features:**
+- `ScriptPolicy`: MaxSteps, MaxExecutionTime, MaxTimers,
+  MaxTaskQueueSize, DocumentMode, per-origin API permissions
+- `ScriptEnforcer`: runtime enforcement with atomic step counter,
+  time tracking, timer/task slot acquisition
+- `DocumentMode`: Full, InlineOnly, NoScript — controls script loading
+- `AllowScript()`: checks if a script source is permitted
+- `CheckAPIPermission()`: per-origin API access control with
+  default fallback
+- Context cancellation on abort for cooperative interruption
+- Typed errors: ErrScriptTimeout, ErrScriptStepLimit,
+  ErrTimerLimit, ErrTaskQueueLimit, ErrRemoteScriptBlocked,
+  ErrAPIPermissionDenied
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| AddSteps | 7.5 | 0 | 0 |
+| CheckAPIPermission | 2.1 | 0 | 0 |
+
+All enforcement checks are zero-allocation. Atomic counters for
+step tracking and resource acquisition.
+
 ## Navigation State Flow
 
 ```
