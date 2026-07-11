@@ -728,6 +728,41 @@ render-to-PNG comparison for regression testing.
 - `CompareImages()`: pixel-by-pixel comparison with metrics
 - Separate update directory for review before acceptance
 
+### Retained Tile System (M7.1)
+
+The `internal/renderer/frame/compositor` package provides tile-based
+retained rendering for smooth scrolling. Content is divided into
+configurable raster tiles that are reused across frames when unchanged.
+
+**Key features:**
+- `Tile`: retained raster tile with coord, bounds, version, and image
+- `TileCache`: bounded LRU cache with byte budget and tile count limits
+- `TileCacheConfig`: configurable tile size (default 256×256), max bytes (32MB), max tiles (1024)
+- `TilePriority`: Visible/Near/Hidden based on viewport and prefetch margin
+- `CoordForPoint()`: maps layout-space point to tile coordinate
+- `BoundsForCoord()`: returns layout-space bounds for a tile
+- `CoordsInRect()`: returns all tile coordinates overlapping a rect (half-open interval)
+- `InvalidateRect()`: marks all overlapping tiles as dirty
+- Atomic hit/miss/eviction metrics
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| TileCache Get (hit) | 46.7 | 0 | 0 |
+| TileCache Get (miss) | 18.6 | 0 | 0 |
+| CoordForPoint | 0.32 | 0 | 0 |
+| CoordsInRect (4 tiles) | 43.8 | 96 | 1 |
+| InvalidateRect (400 tiles) | 4,033 | 0 | 0 |
+
+All tile lookups and invalidation operations are zero-allocation. The
+tile cache enables M7.2-M7.4 by providing the retained raster
+infrastructure needed for compositor snapshots, smooth scrolling, and
+viewport prefetch policies.
+
+The compositor package is independent of Fyne and the CPU backend.
+Tiles hold `*image.RGBA` but the cache logic is backend-neutral.
+
 ## Navigation State Flow
 
 ```

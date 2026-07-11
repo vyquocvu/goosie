@@ -602,11 +602,11 @@ Make scrolling and simple visual updates independent from full repaint work.
 
 ### M7.1 Add retained tiles
 
-- [ ] Divide content into configurable raster tiles.
-- [ ] Track tile content versions.
-- [ ] Reuse valid tiles across frames.
-- [ ] Prioritize visible and near-visible tiles.
-- [ ] Evict by byte budget and recency.
+- [x] Divide content into configurable raster tiles.
+- [x] Track tile content versions.
+- [x] Reuse valid tiles across frames.
+- [x] Prioritize visible and near-visible tiles.
+- [x] Evict by byte budget and recency.
 
 ### M7.2 Add compositor snapshots
 
