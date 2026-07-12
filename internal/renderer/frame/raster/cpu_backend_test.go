@@ -587,3 +587,113 @@ func BenchmarkBlendPixel(b *testing.B) {
 		blendPixel(pix, 0, src)
 	}
 }
+
+func TestCPUBackendRasterText(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	textRun := frame.TextRun{
+		Font:     0,
+		FontSize: 16,
+		Color:    frame.NewColor(0, 0, 255, 255), // Blue
+		Glyphs: []frame.Glyph{
+			{ID: 65, Advance: 8, XOffset: 0, YOffset: 0},
+		},
+	}
+
+	cmds := []DisplayCmd{
+		{
+			Kind:    CmdText,
+			Rect:    frame.Rect{X: 10, Y: 10, W: 20, H: 20},
+			TextRun: textRun,
+		},
+	}
+
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var blueFound bool
+	for y := 10; y < 30; y++ {
+		for x := 10; x < 30; x++ {
+			_, _, bl, a := img.At(x, y).RGBA()
+			if bl>>8 == 255 && a>>8 == 255 {
+				blueFound = true
+				break
+			}
+		}
+	}
+	if !blueFound {
+		t.Error("expected to find some blue pixels from text rendering")
+	}
+}
+
+func TestCPUBackendRasterSVG(t *testing.T) {
+	b := NewCPUBackend(100, 100)
+	defer b.Close()
+
+	vp := frame.NewViewport(100, 100, frame.PixelScaleDefault)
+	b.BeginFrame(vp)
+
+	svgData := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+		<rect x="0" y="0" width="20" height="20" fill="#00ff00"/>
+	</svg>`)
+
+	cmds := []DisplayCmd{
+		{
+			Kind: CmdImage,
+			Rect: frame.Rect{X: 10, Y: 10, W: 20, H: 20},
+			Image: ImageSpec{
+				Data: svgData,
+			},
+		},
+	}
+
+	img, err := b.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var greenFound bool
+	for y := 10; y < 30; y++ {
+		for x := 10; x < 30; x++ {
+			_, g, _, a := img.At(x, y).RGBA()
+			if g>>8 == 255 && a>>8 == 255 {
+				greenFound = true
+				break
+			}
+		}
+	}
+	if !greenFound {
+		t.Error("expected to find some green pixels from SVG rendering")
+	}
+}
+
+func BenchmarkRasterText(b *testing.B) {
+	backend := NewCPUBackend(400, 400)
+	vp := frame.NewViewport(400, 400, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	textRun := frame.TextRun{
+		Font:     0,
+		FontSize: 16,
+		Color:    frame.NewColor(0, 0, 255, 255),
+		Glyphs: []frame.Glyph{
+			{ID: 65, Advance: 8, XOffset: 0, YOffset: 0},
+			{ID: 66, Advance: 8, XOffset: 8, YOffset: 0},
+			{ID: 67, Advance: 8, XOffset: 16, YOffset: 0},
+		},
+	}
+	cmds := []DisplayCmd{
+		{Kind: CmdText, Rect: frame.Rect{X: 50, Y: 50, W: 100, H: 100}, TextRun: textRun},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}

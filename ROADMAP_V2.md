@@ -559,8 +559,8 @@ type RasterBackend interface {
 
 - [x] Support solid fills and borders.
 - [x] Support clipped images.
-- [ ] Support rasterizing the documented SVG subset.
-- [ ] Support shaped text runs.
+- [x] Support rasterizing the documented SVG subset.
+- [x] Support shaped text runs.
 - [x] Support opacity and basic transforms.
 - [x] Raster only dirty tiles.
 - [x] Reuse image buffers and raster scratch memory.
