@@ -340,3 +340,10 @@ func readResponseBody(ctx context.Context, resp *http.Response, onProgress Progr
 	}
 	return string(data), nil
 }
+
+func (s *Service) Close() error {
+	if s.cache != nil {
+		return s.cache.Close()
+	}
+	return nil
+}

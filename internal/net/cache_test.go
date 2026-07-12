@@ -3,6 +3,8 @@ package net
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -188,5 +190,29 @@ func TestHTTPCacheEntryJSONSchema(t *testing.T) {
 		if _, ok := fields[name]; !ok {
 			t.Errorf("JSON field %q missing from %s", name, data)
 		}
+	}
+}
+
+func TestHTTPCacheIndexBatchWrites(t *testing.T) {
+	root := t.TempDir()
+	cache := NewHTTPCache(root, false)
+	defer cache.Close()
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := newTestResponse(req, http.StatusOK, "one")
+	resp.Header.Set("Cache-Control", "max-age=60")
+
+	cache.Put("https://example.test/1", resp, "one")
+
+	if err := cache.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	indexPath := filepath.Join(root, "index.json")
+	if _, err := os.Stat(indexPath); err != nil {
+		t.Fatalf("index.json not created after Sync(): %v", err)
 	}
 }

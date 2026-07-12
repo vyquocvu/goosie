@@ -53,6 +53,7 @@ func main() {
 		Client: navSession.HTTPClient(),
 		Cache:  net.NewHTTPCache(filepath.Join(prof.Root(), "cache"), prof.Private()),
 	})
+	defer networkService.Close()
 	fetcher := net.NewFetcherWithService(networkService)
 	parser := dom.NewParser()
 	browser := ui.NewBrowserWithDependencies(ui.BrowserDependencies{

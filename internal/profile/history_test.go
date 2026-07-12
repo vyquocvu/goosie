@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,4 +97,37 @@ func TestHistoryStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://persisted.example.com"}, normal2Store.VisitURLs(),
 		"private writes must not persist to disk")
+}
+
+func TestHistoryStoreBatchWrites(t *testing.T) {
+	root := t.TempDir()
+	p, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	defer p.Close()
+
+	store, err := NewHistoryStore(p)
+	require.NoError(t, err)
+
+	initialWriteCount := p.WriteCount()
+
+	// Write 10 visits rapidly
+	for i := 0; i < 10; i++ {
+		require.NoError(t, store.AddVisit(fmt.Sprintf("https://example.com/%d", i), "Test"))
+	}
+
+	// Trigger sync to force the background writer to flush the debounced writes to disk
+	require.NoError(t, p.Sync())
+
+	// The actual write count increase should be exactly 1, because all 10 visits
+	// were coalesced into a single write!
+	finalWriteCount := p.WriteCount()
+	require.Equal(t, initialWriteCount+1, finalWriteCount, "rapid history writes must be batched/coalesced into a single disk write")
+
+	// Verify we can read all of them back
+	reloaded, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	defer reloaded.Close()
+	reloadedStore, err := NewHistoryStore(reloaded)
+	require.NoError(t, err)
+	require.Len(t, reloadedStore.VisitURLs(), 10)
 }

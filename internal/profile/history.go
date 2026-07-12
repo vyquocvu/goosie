@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -16,9 +18,12 @@ type historyDocument struct {
 }
 
 type HistoryStore struct {
-	mu      sync.Mutex
-	profile *Profile
-	doc     historyDocument
+	mu          sync.Mutex
+	profile     *Profile
+	doc         historyDocument
+	lastLoaded  time.Time
+	lastModTime time.Time
+	lastVersion uint64
 }
 
 func NewHistoryStore(p *Profile) (*HistoryStore, error) {
@@ -57,6 +62,8 @@ func (s *HistoryStore) VisitURLs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	_ = s.reloadLocked()
+
 	urls := make([]string, len(s.doc.Visits))
 	for i, visit := range s.doc.Visits {
 		urls[i] = visit.URL
@@ -70,6 +77,21 @@ func (s *HistoryStore) reloadLocked() error {
 		return nil
 	}
 
+	currentVersion := s.profile.SnapshotVersion("history.json")
+	if !s.lastLoaded.IsZero() && currentVersion == s.lastVersion {
+		path := filepath.Join(s.profile.Root(), "history.json")
+		if info, err := os.Stat(path); err == nil {
+			if !info.ModTime().After(s.lastModTime) {
+				return nil
+			}
+			s.lastModTime = info.ModTime()
+		} else if os.IsNotExist(err) {
+			return nil
+		} else {
+			return err
+		}
+	}
+
 	doc := historyDocument{
 		Visits: []Visit{},
 	}
@@ -80,10 +102,22 @@ func (s *HistoryStore) reloadLocked() error {
 		doc.Visits = []Visit{}
 	}
 	s.doc = doc
+	s.lastLoaded = time.Now()
+	s.lastVersion = currentVersion
+
+	path := filepath.Join(s.profile.Root(), "history.json")
+	if info, err := os.Stat(path); err == nil {
+		s.lastModTime = info.ModTime()
+	}
 
 	return nil
 }
 
 func (s *HistoryStore) persist() error {
-	return s.profile.SaveJSON("history.json", s.doc)
+	err := s.profile.SaveJSON("history.json", s.doc)
+	if err == nil {
+		s.lastLoaded = time.Now()
+		s.lastVersion = s.profile.SnapshotVersion("history.json")
+	}
+	return err
 }
