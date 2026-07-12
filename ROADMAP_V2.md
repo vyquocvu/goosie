@@ -712,7 +712,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [ ] Decoded image cache.
 - [ ] Glyph cache.
 - [x] Text shaping cache.
-- [ ] Selector and computed-style caches.
+- [x] Selector and computed-style caches.
 - [x] Layout intrinsic-size cache.
 - [ ] Tile cache.
 - [ ] JavaScript wrapper cache.

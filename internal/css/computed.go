@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"unsafe"
 )
 
 // InheritedStyle contains CSS properties that propagate from parent to child
@@ -846,6 +847,42 @@ func (p *StylePool) Reset() {
 	p.tail = nil
 	p.count = 0
 	p.dedup = 0
+}
+
+// entryByteSize returns the approximate byte cost of a single pool entry.
+// It covers the struct overhead (including the embedded InheritedStyle value)
+// plus the map bucket cost approximation.
+func entryByteSize() uint64 {
+	return uint64(unsafe.Sizeof(stylePoolEntry{}))
+}
+
+// ByteSize returns the approximate total byte cost of all interned entries.
+func (p *StylePool) ByteSize() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return uint64(p.count) * entryByteSize()
+}
+
+// Evict removes LRU entries from the pool until at least targetBytes have been
+// freed or the pool is empty. Returns the number of bytes actually freed.
+//
+// This satisfies the memory.Evictor signature:
+//
+//	func(targetBytes uint64) uint64
+//
+// Callers that evict interned styles must re-intern on the next style resolution
+// pass; this is safe because Intern is idempotent for identical inputs.
+func (p *StylePool) Evict(targetBytes uint64) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	entrySize := entryByteSize()
+	var freed uint64
+	for freed < targetBytes && p.tail != nil {
+		freed += entrySize
+		p.evictTail()
+	}
+	return freed
 }
 
 // pushFront adds entry to the front of the LRU list.
