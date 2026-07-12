@@ -95,7 +95,7 @@ func NewSession(cfg SessionConfig) *Session {
 		cfg.MaxPendingTasks = 256
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Session{
+	s := &Session{
 		rt:      NewRuntime(),
 		cfg:     cfg,
 		ctx:     ctx,
@@ -104,6 +104,12 @@ func NewSession(cfg SessionConfig) *Session {
 		maxTask: cfg.MaxPendingTasks,
 		notify:  make(chan struct{}, 1),
 	}
+	s.rt.enqueueTask = func(f func()) {
+		_ = s.Submit(func(rt *Runtime) {
+			f()
+		})
+	}
+	return s
 }
 
 // NewSessionWithContext creates a session with an external context.
@@ -113,7 +119,7 @@ func NewSessionWithContext(ctx context.Context, cfg SessionConfig) *Session {
 		cfg.MaxPendingTasks = 256
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	return &Session{
+	s := &Session{
 		rt:      NewRuntime(),
 		cfg:     cfg,
 		ctx:     ctx,
@@ -122,6 +128,12 @@ func NewSessionWithContext(ctx context.Context, cfg SessionConfig) *Session {
 		maxTask: cfg.MaxPendingTasks,
 		notify:  make(chan struct{}, 1),
 	}
+	s.rt.enqueueTask = func(f func()) {
+		_ = s.Submit(func(rt *Runtime) {
+			f()
+		})
+	}
+	return s
 }
 
 // Runtime returns the session's JavaScript runtime.
@@ -132,6 +144,8 @@ func (s *Session) Runtime() *Runtime {
 
 // Context returns the session's context for cancellation checks.
 func (s *Session) Context() context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.ctx
 }
 
@@ -179,11 +193,18 @@ func (s *Session) Run() error {
 		s.drainTasks()
 
 		// Wait for notification or context cancellation.
+		s.mu.Lock()
+		ctx := s.ctx
+		s.mu.Unlock()
+
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			// Final drain before exit.
 			s.drainTasks()
-			return s.ctx.Err()
+			s.mu.Lock()
+			err := s.ctx.Err()
+			s.mu.Unlock()
+			return err
 		case <-s.notify:
 			// New task(s) available — loop to drain.
 		}
@@ -215,7 +236,12 @@ func (s *Session) drainTasks() {
 // new task submissions. Pending tasks are drained by Run() before exit.
 func (s *Session) Close() {
 	if s.closed.CompareAndSwap(false, true) {
-		s.cancel()
+		s.mu.Lock()
+		cancel := s.cancel
+		s.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 	}
 }
 
@@ -240,20 +266,22 @@ func (s *Session) Metrics() (totalExecuted, totalDropped uint64) {
 // navigation to a new document. The runtime is reset for the new page.
 // This must be called from the owner goroutine.
 func (s *Session) Navigate() {
+	s.mu.Lock()
 	// Cancel current context.
-	s.cancel()
+	if s.cancel != nil {
+		s.cancel()
+	}
 
 	// Create new context for the new document.
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+
+	// Drain any remaining tasks from previous session.
+	s.head = 0
+	s.count = 0
+	s.mu.Unlock()
 
 	// Reset runtime state for new document.
 	s.rt.htmlCache = ""
 	s.rt.historyStack = []string{}
 	s.rt.historyIndex = -1
-
-	// Drain any remaining tasks from previous session.
-	s.mu.Lock()
-	s.head = 0
-	s.count = 0
-	s.mu.Unlock()
 }

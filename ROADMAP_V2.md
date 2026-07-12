@@ -678,11 +678,11 @@ Keep Goja useful for lightweight interaction without allowing scripts to corrupt
 
 ### M8.5 Add race and stress tests
 
-- [ ] Repeated navigation during timers.
-- [ ] Fetch completion after navigation cancellation.
-- [ ] DOM mutation bursts.
-- [ ] Tab close while script tasks are pending.
-- [ ] Script exceptions during event dispatch.
+- [x] Repeated navigation during timers.
+- [x] Fetch completion after navigation cancellation.
+- [x] DOM mutation bursts.
+- [x] Tab close while script tasks are pending.
+- [x] Script exceptions during event dispatch.
 
 **Acceptance criteria**
 

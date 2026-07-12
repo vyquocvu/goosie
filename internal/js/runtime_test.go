@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -603,22 +604,30 @@ func TestHistoryReplaceState(t *testing.T) {
 
 func TestSetTimeout(t *testing.T) {
 	runtime := NewRuntime()
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
-	// Test setTimeout
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var executed = false;
 var timerId = setTimeout(function() {
 executed = true;
 }, 10);
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("setTimeout failed: %v", err)
 	}
 
-	// Wait for timer to execute
 	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`executed`)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("Failed to check executed: %v", err)
 	}
@@ -630,20 +639,30 @@ executed = true;
 func TestWindowTimerAliasesAndFrameGlobals(t *testing.T) {
 	runtime := NewRuntime()
 	defer runtime.Cleanup()
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var windowExecuted = false;
 var timerId = window.setTimeout(function() {
 windowExecuted = true;
 }, 10);
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("window.setTimeout failed: %v", err)
 	}
 
 	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`windowExecuted && top === window && parent === window && self === window`)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("failed to check browser globals: %v", err)
 	}
@@ -655,8 +674,14 @@ windowExecuted = true;
 func TestClearTimeout(t *testing.T) {
 	runtime := NewRuntime()
 	defer runtime.Cleanup()
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
-	// Test clearTimeout
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var executed = false;
 var timerId = setTimeout(function() {
@@ -664,14 +689,16 @@ executed = true;
 }, 10);
 clearTimeout(timerId);
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("clearTimeout failed: %v", err)
 	}
 
-	// Wait to ensure timer doesn't execute
 	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`executed`)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("Failed to check executed: %v", err)
 	}
@@ -683,25 +710,31 @@ clearTimeout(timerId);
 func TestSetInterval(t *testing.T) {
 	runtime := NewRuntime()
 	defer runtime.Cleanup()
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
-	// Test setInterval
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var counter = 0;
 var intervalId = setInterval(function() {
 counter++;
 }, 10);
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("setInterval failed: %v", err)
 	}
 
-	// Wait for multiple executions
 	time.Sleep(55 * time.Millisecond)
 
-	// Clear the interval
+	mu.Lock()
 	runtime.RunScript(`clearInterval(intervalId)`)
-
 	val, err := runtime.RunScript(`counter`)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("Failed to check counter: %v", err)
 	}
@@ -715,8 +748,14 @@ counter++;
 func TestClearInterval(t *testing.T) {
 	runtime := NewRuntime()
 	defer runtime.Cleanup()
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
-	// Test clearInterval
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var counter = 0;
 var intervalId = setInterval(function() {
@@ -724,14 +763,16 @@ counter++;
 }, 10);
 clearInterval(intervalId);
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("clearInterval failed: %v", err)
 	}
 
-	// Wait to ensure interval doesn't execute
 	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`counter`)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("Failed to check counter: %v", err)
 	}
@@ -866,8 +907,14 @@ sessionStorage.setItem("key2", "value2");
 
 func TestFetchAPI(t *testing.T) {
 	runtime := NewRuntime()
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
-	// Test basic fetch
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var fetchCalled = false;
 fetch("https://api.example.com/data")
@@ -875,6 +922,7 @@ fetch("https://api.example.com/data")
 fetchCalled = true;
 });
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("fetch failed: %v", err)
 	}
@@ -882,7 +930,9 @@ fetchCalled = true;
 	// Give time for async operation
 	time.Sleep(50 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`fetchCalled`)
+	mu.Unlock()
 	if err != nil {
 		t.Errorf("Failed to check fetchCalled: %v", err)
 	}
@@ -1191,7 +1241,14 @@ func TestSetFetcher(t *testing.T) {
 func TestFetchAPIWithRealFetcher_Text(t *testing.T) {
 	runtime := NewRuntime()
 	runtime.SetFetcher(&mockFetcher{body: "hello from server"})
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var textResult = "";
 fetch("https://example.com/api")
@@ -1201,6 +1258,7 @@ fetch("https://example.com/api")
     });
   });
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("fetch script failed: %v", err)
 	}
@@ -1208,7 +1266,9 @@ fetch("https://example.com/api")
 	// Allow goroutine to complete
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`textResult`)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("reading textResult failed: %v", err)
 	}
@@ -1220,7 +1280,14 @@ fetch("https://example.com/api")
 func TestFetchAPIWithRealFetcher_JSON(t *testing.T) {
 	runtime := NewRuntime()
 	runtime.SetFetcher(&mockFetcher{body: `{"name":"goosie","version":1}`})
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var jsonResult = null;
 fetch("https://example.com/api")
@@ -1230,13 +1297,16 @@ fetch("https://example.com/api")
     });
   });
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("fetch script failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`jsonResult !== null && jsonResult.name === "goosie"`)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("reading jsonResult failed: %v", err)
 	}
@@ -1248,7 +1318,14 @@ fetch("https://example.com/api")
 func TestFetchAPIWithRealFetcher_ErrorPropagation(t *testing.T) {
 	runtime := NewRuntime()
 	runtime.SetFetcher(&mockFetcher{err: fmt.Errorf("connection refused")})
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
 
+	mu.Lock()
 	_, err := runtime.RunScript(`
 var catchCalled = false;
 var catchMsg = "";
@@ -1259,13 +1336,16 @@ fetch("https://example.com/api")
     catchMsg = err.message;
   });
 `)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("fetch script failed: %v", err)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
 	val, err := runtime.RunScript(`catchCalled`)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("reading catchCalled failed: %v", err)
 	}
@@ -1273,11 +1353,13 @@ fetch("https://example.com/api")
 		t.Errorf("expected catch callback to be called on fetch error")
 	}
 
+	mu.Lock()
 	val, err = runtime.RunScript(`catchMsg`)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("reading catchMsg failed: %v", err)
 	}
-	if !strings.Contains(val.String(), "connection refused") {
-		t.Errorf("expected error message to contain 'connection refused', got %q", val.String())
+	if val.String() != "connection refused" {
+		t.Errorf("expected catchMsg to be 'connection refused', got %q", val.String())
 	}
 }

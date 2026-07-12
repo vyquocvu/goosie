@@ -85,6 +85,8 @@ type Runtime struct {
 	fetcher           HTTPFetcher
 	isPopulatingJSDOM bool
 	onDOMMutation     func(string)
+	// enqueueTask allows routing asynchronous callbacks back to the owner goroutine.
+	enqueueTask func(func())
 }
 
 // NewRuntime creates a new JavaScript runtime with console.log and document APIs
@@ -1933,14 +1935,30 @@ func (r *Runtime) setupTimerAPIs() {
 
 		timer.Timer = time.AfterFunc(delay, func() {
 			timer.mu.Lock()
-			defer timer.mu.Unlock()
-
 			select {
 			case <-timer.Cancel:
+				timer.mu.Unlock()
 				return
 			default:
-				callback(goja.Undefined())
-				delete(r.timers, timerID)
+				timer.mu.Unlock()
+				if r.enqueueTask != nil {
+					r.enqueueTask(func() {
+						timer.mu.Lock()
+						defer timer.mu.Unlock()
+						select {
+						case <-timer.Cancel:
+							return
+						default:
+							callback(goja.Undefined()) //nolint:errcheck
+							delete(r.timers, timerID)
+						}
+					})
+				} else {
+					timer.mu.Lock()
+					defer timer.mu.Unlock()
+					callback(goja.Undefined()) //nolint:errcheck
+					delete(r.timers, timerID)
+				}
 			}
 		})
 
@@ -2006,8 +2024,29 @@ func (r *Runtime) setupTimerAPIs() {
 					return
 				case <-timer.Ticker.C:
 					timer.mu.Lock()
-					callback(goja.Undefined())
-					timer.mu.Unlock()
+					select {
+					case <-timer.Cancel:
+						timer.mu.Unlock()
+						return
+					default:
+						timer.mu.Unlock()
+						if r.enqueueTask != nil {
+							r.enqueueTask(func() {
+								timer.mu.Lock()
+								defer timer.mu.Unlock()
+								select {
+								case <-timer.Cancel:
+									return
+								default:
+									callback(goja.Undefined()) //nolint:errcheck
+								}
+							})
+						} else {
+							timer.mu.Lock()
+							defer timer.mu.Unlock()
+							callback(goja.Undefined()) //nolint:errcheck
+						}
+					}
 				}
 			}
 		}()
@@ -2053,6 +2092,7 @@ func (r *Runtime) setupFetchAPI() {
 
 		// Create a promise-like object
 		promise := r.vm.NewObject()
+		var callbackMu sync.Mutex
 		var catchCallback goja.Callable
 
 		// then method
@@ -2071,44 +2111,91 @@ func (r *Runtime) setupFetchAPI() {
 					// Real HTTP fetch
 					body, err := r.fetcher.Fetch(urlStr)
 					if err != nil {
-						if catchCallback != nil {
-							errObj := r.vm.NewObject()
-							errObj.Set("message", err.Error())
-							catchCallback(goja.Undefined(), errObj) //nolint:errcheck
+						callbackMu.Lock()
+						cc := catchCallback
+						callbackMu.Unlock()
+						if cc != nil {
+							if r.enqueueTask != nil {
+								r.enqueueTask(func() {
+									errObj := r.vm.NewObject()
+									errObj.Set("message", err.Error())
+									cc(goja.Undefined(), errObj) //nolint:errcheck
+								})
+							} else {
+								errObj := r.vm.NewObject()
+								errObj.Set("message", err.Error())
+								cc(goja.Undefined(), errObj) //nolint:errcheck
+							}
 						}
 						return
 					}
 
-					response := r.createFetchResponse(urlStr, body)
-					onSuccess(goja.Undefined(), response) //nolint:errcheck
+					if r.enqueueTask != nil {
+						r.enqueueTask(func() {
+							response := r.createFetchResponse(urlStr, body)
+							onSuccess(goja.Undefined(), response) //nolint:errcheck
+						})
+					} else {
+						response := r.createFetchResponse(urlStr, body)
+						onSuccess(goja.Undefined(), response) //nolint:errcheck
+					}
 				} else {
 					// Mock fetch (no fetcher set – used in tests without a live server)
-					response := r.vm.NewObject()
-					response.Set("ok", true)
-					response.Set("status", 200)
-					response.Set("statusText", "OK")
-					response.Set("url", urlStr)
+					if r.enqueueTask != nil {
+						r.enqueueTask(func() {
+							response := r.vm.NewObject()
+							response.Set("ok", true)
+							response.Set("status", 200)
+							response.Set("statusText", "OK")
+							response.Set("url", urlStr)
 
-					// json method
-					response.Set("json", func(jsonCall goja.FunctionCall) goja.Value {
-						jsonPromise := r.vm.NewObject()
-						jsonPromise.Set("then", func(jsonThenCall goja.FunctionCall) goja.Value {
-							// Return mock data
-							return r.vm.ToValue(map[string]interface{}{"data": "mock"})
+							// json method
+							response.Set("json", func(jsonCall goja.FunctionCall) goja.Value {
+								jsonPromise := r.vm.NewObject()
+								jsonPromise.Set("then", func(jsonThenCall goja.FunctionCall) goja.Value {
+									return r.vm.ToValue(map[string]interface{}{"data": "mock"})
+								})
+								return jsonPromise
+							})
+
+							// text method
+							response.Set("text", func(textCall goja.FunctionCall) goja.Value {
+								textPromise := r.vm.NewObject()
+								textPromise.Set("then", func(textThenCall goja.FunctionCall) goja.Value {
+									return r.vm.ToValue("mock response text")
+								})
+								return textPromise
+							})
+
+							onSuccess(goja.Undefined(), response) //nolint:errcheck
 						})
-						return jsonPromise
-					})
+					} else {
+						response := r.vm.NewObject()
+						response.Set("ok", true)
+						response.Set("status", 200)
+						response.Set("statusText", "OK")
+						response.Set("url", urlStr)
 
-					// text method
-					response.Set("text", func(textCall goja.FunctionCall) goja.Value {
-						textPromise := r.vm.NewObject()
-						textPromise.Set("then", func(textThenCall goja.FunctionCall) goja.Value {
-							return r.vm.ToValue("mock response text")
+						// json method
+						response.Set("json", func(jsonCall goja.FunctionCall) goja.Value {
+							jsonPromise := r.vm.NewObject()
+							jsonPromise.Set("then", func(jsonThenCall goja.FunctionCall) goja.Value {
+								return r.vm.ToValue(map[string]interface{}{"data": "mock"})
+							})
+							return jsonPromise
 						})
-						return textPromise
-					})
 
-					onSuccess(goja.Undefined(), response) //nolint:errcheck
+						// text method
+						response.Set("text", func(textCall goja.FunctionCall) goja.Value {
+							textPromise := r.vm.NewObject()
+							textPromise.Set("then", func(textThenCall goja.FunctionCall) goja.Value {
+								return r.vm.ToValue("mock response text")
+							})
+							return textPromise
+						})
+
+						onSuccess(goja.Undefined(), response) //nolint:errcheck
+					}
 				}
 			}()
 
@@ -2119,7 +2206,9 @@ func (r *Runtime) setupFetchAPI() {
 		promise.Set("catch", func(catchCall goja.FunctionCall) goja.Value {
 			if len(catchCall.Arguments) > 0 {
 				if fn, ok := goja.AssertFunction(catchCall.Arguments[0]); ok {
+					callbackMu.Lock()
 					catchCallback = fn
+					callbackMu.Unlock()
 				}
 			}
 			return promise
