@@ -8,15 +8,16 @@ import (
 type Component string
 
 const (
-	ComponentDOM          Component = "dom"
-	ComponentStyle        Component = "style"
-	ComponentLayout       Component = "layout"
-	ComponentDisplayList  Component = "display-list"
-	ComponentTile         Component = "tile"
-	ComponentImage        Component = "image"
-	ComponentGlyph        Component = "glyph"
-	ComponentScript       Component = "script"
-	ComponentNetworkCache Component = "network-cache"
+	ComponentDOM                 Component = "dom"
+	ComponentStyle               Component = "style"
+	ComponentLayout              Component = "layout"
+	ComponentDisplayList         Component = "display-list"
+	ComponentTile                Component = "tile"
+	ComponentImage               Component = "image"
+	ComponentGlyph               Component = "glyph"
+	ComponentScript              Component = "script"
+	ComponentNetworkCache        Component = "network-cache"
+	ComponentLayoutIntrinsicSize Component = "layout-intrinsic-size"
 )
 
 // Evictor is a callback function registered by a component.
@@ -63,6 +64,7 @@ func NewManager(cfg Config) *Manager {
 		ComponentImage,
 		ComponentTile,
 		ComponentDisplayList,
+		ComponentLayoutIntrinsicSize,
 		ComponentLayout,
 		ComponentDOM,
 		ComponentScript,
