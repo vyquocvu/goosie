@@ -48,6 +48,11 @@ type Renderer struct {
 
 	// Mutex protects stylesheet during concurrent CSS loading
 	stylesheetMu sync.RWMutex
+
+	// dirty tracks whether style/layout needs recomputation.
+	// Set by MarkDirty(), SetSize(), and mutation paths.
+	// Cleared by Refresh() after recomputation.
+	dirty bool
 }
 
 // NewRenderer creates a new HTML renderer
@@ -162,6 +167,7 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	// Cache trees for viewport updates
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
+	r.dirty = false
 	r.treeMu.Unlock()
 
 	// Load external CSS asynchronously (synchronously in testing mode)
@@ -289,6 +295,7 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 	// Cache trees for viewport updates.
 	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
+	r.dirty = false
 	r.treeMu.Unlock()
 
 	// Pass navigation callback to canvas renderer.
@@ -331,6 +338,7 @@ func (r *Renderer) SetSize(width, height float32) {
 	r.layoutEngine.canvasHeight = height
 	r.canvasRenderer.canvasWidth = width
 	r.canvasRenderer.canvasHeight = height
+	r.dirty = true
 }
 
 // SetImageLoader sets the image loader for the renderer
@@ -372,7 +380,9 @@ func (r *Renderer) GetRoot() *RenderNode {
 	return r.currentRenderTree
 }
 
-// Refresh re-calculates styles and layout, then triggers a refresh
+// Refresh re-calculates styles and layout only when dirty, then triggers a refresh.
+// When the renderer is clean (no mutations since last render), style and layout
+// recomputation is skipped to avoid unnecessary work.
 func (r *Renderer) Refresh() {
 	r.treeMu.Lock()
 	defer r.treeMu.Unlock()
@@ -380,29 +390,48 @@ func (r *Renderer) Refresh() {
 		return
 	}
 
-	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
+	if r.dirty {
+		width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
 
-	// Apply styles (in case attributes changed)
-	r.stylesheetMu.RLock()
-	styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
-	r.stylesheetMu.RUnlock()
-	renderTreeCopy := r.currentRenderTree.Clone()
-	styleManager.ApplyStyles(renderTreeCopy)
+		// Apply styles (in case attributes changed)
+		r.stylesheetMu.RLock()
+		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
+		r.stylesheetMu.RUnlock()
+		renderTreeCopy := r.currentRenderTree.Clone()
+		styleManager.ApplyStyles(renderTreeCopy)
 
-	// Perform layout
-	layoutEngine := NewLayoutEngine(width, height)
-	r.currentLayoutTree = layoutEngine.ComputeLayout(renderTreeCopy)
-	r.currentRenderTree = renderTreeCopy
+		// Perform layout
+		layoutEngine := NewLayoutEngine(width, height)
+		r.currentLayoutTree = layoutEngine.ComputeLayout(renderTreeCopy)
+		r.currentRenderTree = renderTreeCopy
 
-	// Clear canvas cache
-	r.canvasRenderer.ClearCache()
-	r.canvasRenderer.cachedRenderRoot = nil
-	r.canvasRenderer.cachedLayoutRoot = nil
+		// Clear canvas cache
+		r.canvasRenderer.ClearCache()
+		r.canvasRenderer.cachedRenderRoot = nil
+		r.canvasRenderer.cachedLayoutRoot = nil
+
+		r.dirty = false
+	}
 
 	// Trigger refresh callback
 	if r.onRefresh != nil {
 		r.onRefresh()
 	}
+}
+
+// MarkDirty marks the renderer as needing style/layout recomputation.
+// The next call to Refresh() will recompute styles and layout.
+func (r *Renderer) MarkDirty() {
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
+	r.dirty = true
+}
+
+// IsDirty reports whether the renderer needs style/layout recomputation.
+func (r *Renderer) IsDirty() bool {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
+	return r.dirty
 }
 
 // SetRefreshCallback sets the callback for refresh events
@@ -634,6 +663,8 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 				})
 			}
 
+			// Mark dirty so Refresh() recomputes style and layout with new CSS.
+			r.MarkDirty()
 			r.Refresh()
 		}
 

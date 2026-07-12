@@ -163,12 +163,30 @@ func (cr *CanvasRenderer) isInViewport(box Rect) bool {
 	return boxBottom >= viewportTop && box.Y <= viewportBottom
 }
 
-// Render renders the render tree and returns a Fyne container
+// Render renders the render tree and returns a Fyne container.
+// When a cached display list is available (from a prior RenderHTML or
+// RenderWithViewport call), Render delegates to RenderWithViewport to
+// consume display commands only, avoiding DOM tree traversal.
+// Falls back to DOM traversal only when no display list exists (e.g.,
+// direct test usage without a layout tree).
 func (cr *CanvasRenderer) Render(root *RenderNode) fyne.CanvasObject {
 	if root == nil {
-		return container.NewVBox()
+		return container.NewWithoutLayout()
 	}
 
+	// Use display-list path when cached display list and layout root exist.
+	cr.mu.RLock()
+	hasCache := cr.cachedDisplayList != nil && cr.cachedLayoutRoot != nil && cr.cachedRenderRoot == root
+	cr.mu.RUnlock()
+
+	if hasCache {
+		cr.mu.RLock()
+		layoutRoot := cr.cachedLayoutRoot
+		cr.mu.RUnlock()
+		return cr.RenderWithViewport(root, layoutRoot)
+	}
+
+	// Fallback: DOM traversal for test/direct usage without layout tree.
 	objects := make([]fyne.CanvasObject, 0)
 	cr.renderNode(root, &objects)
 

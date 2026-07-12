@@ -483,35 +483,12 @@ Run the benchmarks:
 go test -bench=BenchmarkStore -benchmem ./internal/dom/
 ```
 
-### Compatibility Adapter (M2.5)
+### Compatibility Adapter (M2.5) — Removed in M5.4
 
-The `NodeAdapter` converts compact `Store` subtrees back to `*html.Node` trees
-for unmigrated consumers. This is migration-only infrastructure marked for
-removal before Milestone 5 exit.
-
-**Usage metrics:**
-
-```go
-// Track adapter usage during migration
-count := dom.AdapterUsageCount()
-```
-
-**Performance (VirtualApple @ 2.50GHz):**
-
-| Benchmark | ns/op | B/op | allocs/op |
-|-----------|-------|------|----------|
-| Small HTML (div+p) | 364 | 837 | 9 |
-| Large HTML (100 divs) | 31,351 | 62,048 | 804 |
-| Table heavy (50 rows) | 16,655 | 39,760 | 355 |
-
-The adapter allocates `*html.Node` trees by design — that's the compatibility
-cost. Usage metrics detect remaining consumers during the migration to NodeID-based APIs.
-
-Run the benchmarks:
-
-```bash
-go test -bench=BenchmarkAdapter -benchmem ./internal/dom/
-```
+The `NodeAdapter` was removed in M5.4 after all consumers migrated to
+NodeID-based APIs. The compact DOM store now provides complete tree access
+via `NodeID` handles and zero-allocation iterators, eliminating the need
+for the `*html.Node` compatibility layer.
 
 ### CSS Pipeline (M3.1)
 
@@ -848,6 +825,45 @@ go test -bench=BenchmarkBuildPaintChunks -benchmem ./internal/renderer/
 go test -bench=BenchmarkChunkedDisplayList -benchmem ./internal/renderer/
 go test -bench=BenchmarkSourceMapping -benchmem ./internal/renderer/
 go test -bench=BenchmarkPaintChunk -benchmem ./internal/renderer/
+```
+
+### Dirty-Region Invalidation (M5.3)
+
+The `internal/renderer` package provides `DirtyRegion` and
+`DirtyRegionTracker` for tracking visual bounds and computing
+minimal repaint regions.
+
+#### Dirty Region Operations
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| DirtyRegionAdd | 4.1 | 0 | 0 |
+| MergeOverlapping (n=10) | 222 | 1,024 | 1 |
+| MergeOverlapping (n=100) | 1,351 | 3,072 | 2 |
+| MergeOverlapping (n=500) | 5,344 | 3,072 | 2 |
+| TotalArea (100 rects) | 127 | 0 | 0 |
+
+Add and area queries are zero-allocation. Merge scales with
+rect count but stays bounded by the `maxRects` limit.
+
+#### Tracker and Effects Expansion
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| TrackerInvalidateMove | 193 | 1,056 | 2 |
+| ExpandForEffects | 4.0 | 0 | 0 |
+| DebugOverlay (100 rects) | 14,514 | 99,704 | 10 |
+
+`ExpandForEffects` is zero-allocation. The tracker move
+invalidation allocates only for the new `DirtyRegion` returned
+by `Finalize()`. Debug overlay is a developer-tools path.
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkDirtyRegion -benchmem ./internal/renderer/
+go test -bench=BenchmarkExpandForEffects -benchmem ./internal/renderer/
+go test -bench=BenchmarkDebugDirtyRegionOverlay -benchmem ./internal/renderer/
 ```
 
 ### Streaming Parser (M2.4)
