@@ -210,6 +210,29 @@ func (c *TileCache) Metrics() (hits, misses, evictions int64) {
 	return c.hits.Load(), c.misses.Load(), c.evictions.Load()
 }
 
+// Evict removes LRU tiles until at least targetBytes have been freed or the
+// cache is empty. Returns the number of bytes actually freed.
+//
+// This satisfies the memory.Evictor interface:
+//
+//	func(targetBytes uint64) uint64
+func (c *TileCache) Evict(targetBytes uint64) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var freed uint64
+	for freed < targetBytes && len(c.tiles) > 0 {
+		freed += uint64(oldestTileByteSize(c.tiles))
+		c.evictLRU()
+	}
+	return freed
+}
+
+// Close removes all tiles and resets state.
+func (c *TileCache) Close() {
+	c.Clear()
+}
+
 // Config returns the cache configuration.
 func (c *TileCache) Config() TileCacheConfig {
 	return c.config
@@ -229,6 +252,21 @@ func (c *TileCache) evictLRU() {
 	c.currentBytes -= oldest.ByteSize
 	delete(c.tiles, oldest.Coord)
 	c.evictions.Add(1)
+}
+
+// oldestTileByteSize returns the ByteSize of the least recently used tile in
+// the map. Must be called with mu held. Returns 0 if the map is empty.
+func oldestTileByteSize(tiles map[TileCoord]*Tile) int64 {
+	var oldest *Tile
+	for _, t := range tiles {
+		if oldest == nil || t.LastUsed < oldest.LastUsed {
+			oldest = t
+		}
+	}
+	if oldest == nil {
+		return 0
+	}
+	return oldest.ByteSize
 }
 
 // ---------------------------------------------------------------------------

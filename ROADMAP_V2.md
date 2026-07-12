@@ -714,7 +714,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [x] Text shaping cache.
 - [x] Selector and computed-style caches.
 - [x] Layout intrinsic-size cache.
-- [ ] Tile cache.
+- [x] Tile cache.
 - [ ] JavaScript wrapper cache.
 
 ### M9.3 Improve persistent storage
