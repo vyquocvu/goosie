@@ -710,7 +710,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [x] HTTP response cache.
 - [ ] Page cache.
 - [x] Decoded image cache.
-- [ ] Glyph cache.
+- [x] Glyph cache.
 - [x] Text shaping cache.
 - [x] Selector and computed-style caches.
 - [x] Layout intrinsic-size cache.

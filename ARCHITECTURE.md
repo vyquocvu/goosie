@@ -681,10 +681,12 @@ for the raster backend with byte-based limits and duplicate-decode
 prevention.
 
 **Key features:**
-- `GlyphCache`: bounded by entry count, LRU eviction, zero-alloc Get/Put
-- `ImageCache`: bounded by byte budget, LRU eviction by memory cost
+- `GlyphCache`: bounded by entry count and byte budget, LRU eviction,
+  zero-alloc Get/Put, `Evict()` for memory.Manager integration,
+  `Bytes()` for memory reporting
+- `ImageCache`: bounded by byte budget, LRU eviction by memory cost,
+  `GetOrLoad()`: prevents duplicate concurrent decode via `sync.Once`
 - `Metrics`: atomic hit/miss/eviction counters with `HitRate()`
-- `GetOrLoad()`: prevents duplicate concurrent decode via `sync.Once`
 - `Close()`/`Clear()`: releases all resources on session shutdown
 
 **Performance (VirtualApple @ 2.50GHz):**
@@ -693,6 +695,8 @@ prevention.
 |-----------|-------|------|----------|
 | GlyphCachePut | 52.0 | 0 | 0 |
 | GlyphCacheGet | 41.1 | 0 | 0 |
+| GlyphCachePutWithBytes | 58.3 | 0 | 0 |
+| GlyphCacheEvict (50 entries) | 2,615 | 0 | 0 |
 | ImageCacheGet | 54.1 | 0 | 0 |
 
 Glyph cache operations are zero-allocation. Image cache Get is

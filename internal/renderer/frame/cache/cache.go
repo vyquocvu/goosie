@@ -2,6 +2,9 @@
 //
 // M6.3: Glyph and image caches with byte-based limits, LRU eviction,
 // hit/eviction metrics, and duplicate-decode prevention.
+//
+// M9.2: GlyphCache supports byte-based budgets via NewGlyphCacheWithBytes
+// and integrates with the memory.Manager via the Evict() method.
 package cache
 
 import (
@@ -64,11 +67,17 @@ type GlyphKey struct {
 	FontSize uint32 // Font size encoded as fixed-point (e.g. size*100)
 }
 
+// DefaultGlyphEntrySize is the estimated byte cost per glyph entry when
+// GlyphValue.ByteSize is zero. Covers the glyphEntry struct, map bucket
+// overhead, and LRU pointer fields.
+const DefaultGlyphEntrySize int64 = 64
+
 // GlyphValue holds cached glyph metrics.
 type GlyphValue struct {
-	Advance float32
-	Width   float32
-	Height  float32
+	Advance  float32
+	Width    float32
+	Height   float32
+	ByteSize int64 // Approximate memory cost in bytes; 0 uses DefaultGlyphEntrySize.
 }
 
 // glyphEntry is an LRU list node.
@@ -82,21 +91,42 @@ type glyphEntry struct {
 // GlyphCache is a bounded LRU cache for glyph metrics.
 // All operations are safe for concurrent use.
 type GlyphCache struct {
-	mu       sync.Mutex
-	capacity int
-	items    map[GlyphKey]*glyphEntry
-	head     *glyphEntry // most recently used
-	tail     *glyphEntry // least recently used
-	metrics  Metrics
+	mu           sync.Mutex
+	capacity     int
+	maxBytes     int64
+	currentBytes int64
+	items        map[GlyphKey]*glyphEntry
+	head         *glyphEntry // most recently used
+	tail         *glyphEntry // least recently used
+	metrics      Metrics
 }
 
 // NewGlyphCache creates a glyph cache with the given maximum entry count.
+// Byte budget is unlimited; use NewGlyphCacheWithBytes for memory-limited caches.
 func NewGlyphCache(capacity int) *GlyphCache {
 	if capacity <= 0 {
 		capacity = 256
 	}
 	return &GlyphCache{
 		capacity: capacity,
+		items:    make(map[GlyphKey]*glyphEntry, capacity),
+	}
+}
+
+// NewGlyphCacheWithBytes creates a glyph cache bounded by both entry count
+// and byte budget. When maxBytes > 0, Put evicts LRU entries to stay within
+// the byte limit. Use GlyphValue.ByteSize to report per-entry cost; when
+// ByteSize is zero, DefaultGlyphEntrySize is used.
+func NewGlyphCacheWithBytes(capacity int, maxBytes int64) *GlyphCache {
+	if capacity <= 0 {
+		capacity = 256
+	}
+	if maxBytes <= 0 {
+		maxBytes = 4 << 20 // 4 MB default
+	}
+	return &GlyphCache{
+		capacity: capacity,
+		maxBytes: maxBytes,
 		items:    make(map[GlyphKey]*glyphEntry, capacity),
 	}
 }
@@ -123,18 +153,27 @@ func (c *GlyphCache) Put(key GlyphKey, value GlyphValue) {
 	defer c.mu.Unlock()
 
 	if e, ok := c.items[key]; ok {
+		c.currentBytes -= entryByteSize(e.value)
 		e.value = value
+		c.currentBytes += entryByteSize(value)
 		c.moveToFront(e)
 		return
 	}
 
-	// Evict if at capacity.
-	if len(c.items) >= c.capacity {
+	// Evict if at capacity (entry count or byte budget).
+	for (len(c.items) >= c.capacity) ||
+		(c.maxBytes > 0 && c.currentBytes+entryByteSize(value) > c.maxBytes && c.tail != nil) {
 		c.evictLRU()
+	}
+
+	// Don't cache if single item exceeds byte limit.
+	if c.maxBytes > 0 && entryByteSize(value) > c.maxBytes {
+		return
 	}
 
 	e := &glyphEntry{key: key, value: value}
 	c.items[key] = e
+	c.currentBytes += entryByteSize(value)
 	c.pushFront(e)
 }
 
@@ -155,16 +194,55 @@ func (c *GlyphCache) Clear() {
 	c.items = make(map[GlyphKey]*glyphEntry, c.capacity)
 	c.head = nil
 	c.tail = nil
+	c.currentBytes = 0
 	c.metrics.Reset()
+}
+
+// Bytes returns the current total byte usage.
+func (c *GlyphCache) Bytes() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.currentBytes
+}
+
+// Evict removes LRU entries until at least targetBytes have been freed or the
+// cache is empty. Returns the number of bytes actually freed.
+//
+// This satisfies the memory.Evictor interface:
+//
+//	func(targetBytes uint64) uint64
+func (c *GlyphCache) Evict(targetBytes uint64) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var freed uint64
+	for freed < targetBytes && c.tail != nil {
+		freed += uint64(entryByteSize(c.tail.value))
+		c.evictLRU()
+	}
+	return freed
+}
+
+// Close removes all entries and resets state.
+func (c *GlyphCache) Close() {
+	c.Clear()
 }
 
 func (c *GlyphCache) evictLRU() {
 	if c.tail == nil {
 		return
 	}
+	c.currentBytes -= entryByteSize(c.tail.value)
 	delete(c.items, c.tail.key)
 	c.removeEntry(c.tail)
 	c.metrics.Evictions.Add(1)
+}
+
+func entryByteSize(v GlyphValue) int64 {
+	if v.ByteSize > 0 {
+		return v.ByteSize
+	}
+	return DefaultGlyphEntrySize
 }
 
 func (c *GlyphCache) moveToFront(e *glyphEntry) {
