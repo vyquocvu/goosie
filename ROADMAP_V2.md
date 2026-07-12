@@ -700,10 +700,10 @@ Make memory and storage behavior predictable across repeated navigation and mult
 
 ### M9.1 Define a global memory budget manager
 
-- [ ] Track DOM, style, layout, display-list, tile, image, glyph, script, and network-cache memory estimates.
-- [ ] Set configurable soft limits.
-- [ ] Trigger ordered eviction before runtime memory pressure becomes severe.
-- [ ] Expose current budgets in developer tools.
+- [x] Track DOM, style, layout, display-list, tile, image, glyph, script, and network-cache memory estimates.
+- [x] Set configurable soft limits.
+- [x] Trigger ordered eviction before runtime memory pressure becomes severe.
+- [x] Expose current budgets in developer tools.
 
 ### M9.2 Bound every cache
 
