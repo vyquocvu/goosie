@@ -177,6 +177,256 @@ func TestGlyphCacheDefaultCapacity(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GlyphCache — M9.2 byte budget and memory.Evictor integration
+// ---------------------------------------------------------------------------
+
+func TestGlyphCacheBytes(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	if c.Bytes() != 0 {
+		t.Errorf("empty cache Bytes() = %d, want 0", c.Bytes())
+	}
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 100})
+	if c.Bytes() != 100 {
+		t.Errorf("Bytes() = %d, want 100", c.Bytes())
+	}
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 200})
+	if c.Bytes() != 300 {
+		t.Errorf("Bytes() = %d, want 300", c.Bytes())
+	}
+}
+
+func TestGlyphCacheBytesDefaultEstimate(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{}) // ByteSize=0 → DefaultGlyphEntrySize
+	if c.Bytes() != DefaultGlyphEntrySize {
+		t.Errorf("Bytes() = %d, want %d (default estimate)", c.Bytes(), DefaultGlyphEntrySize)
+	}
+}
+
+func TestGlyphCacheBytesUpdate(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	key := GlyphKey{GlyphID: 1}
+	c.Put(key, GlyphValue{ByteSize: 100})
+	c.Put(key, GlyphValue{ByteSize: 200}) // update
+	if c.Bytes() != 200 {
+		t.Errorf("Bytes() after update = %d, want 200", c.Bytes())
+	}
+}
+
+func TestGlyphCacheByteLimitEviction(t *testing.T) {
+	c := NewGlyphCacheWithBytes(100, 500) // 500 byte limit
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 200})
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 200})
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 200}) // should evict entry 0
+
+	if c.Bytes() > 500 {
+		t.Errorf("Bytes() = %d, exceeds limit 500", c.Bytes())
+	}
+	_, ok := c.Get(GlyphKey{GlyphID: 0})
+	if ok {
+		t.Error("entry 0 should be evicted by byte limit")
+	}
+}
+
+func TestGlyphCacheByteLimitOversizedItem(t *testing.T) {
+	c := NewGlyphCacheWithBytes(100, 50)
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 100}) // exceeds limit
+	if c.Len() != 0 {
+		t.Error("oversized item should not be cached")
+	}
+	if c.Bytes() != 0 {
+		t.Errorf("Bytes() = %d, want 0", c.Bytes())
+	}
+}
+
+func TestGlyphCacheByteLimitLRUOrder(t *testing.T) {
+	c := NewGlyphCacheWithBytes(100, 300) // 300 byte limit
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 100}) // oldest
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 100})
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 100})
+	c.Get(GlyphKey{GlyphID: 0}) // make recently used
+
+	c.Put(GlyphKey{GlyphID: 3}, GlyphValue{ByteSize: 100}) // should evict 1 (LRU)
+
+	_, ok := c.Get(GlyphKey{GlyphID: 0})
+	if !ok {
+		t.Error("entry 0 should survive (recently accessed)")
+	}
+	_, ok = c.Get(GlyphKey{GlyphID: 1})
+	if ok {
+		t.Error("entry 1 should be evicted (LRU)")
+	}
+}
+
+func TestGlyphCacheNewWithBytesDefaultMax(t *testing.T) {
+	c := NewGlyphCacheWithBytes(0, 0)
+	if c.capacity != 256 {
+		t.Errorf("default capacity = %d, want 256", c.capacity)
+	}
+	if c.maxBytes != 4<<20 {
+		t.Errorf("default maxBytes = %d, want %d", c.maxBytes, 4<<20)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GlyphCache.Evict — M9.2 memory.Evictor integration
+// ---------------------------------------------------------------------------
+
+func TestGlyphCacheEvictNothing(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 100})
+
+	freed := c.Evict(0)
+	if freed != 0 {
+		t.Errorf("Evict(0) freed %d, want 0", freed)
+	}
+	if c.Len() != 1 {
+		t.Errorf("Len() = %d, want 1 (nothing should be evicted)", c.Len())
+	}
+}
+
+func TestGlyphCacheEvictExact(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 200})
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 300})
+
+	freed := c.Evict(200)
+	if freed < 200 {
+		t.Errorf("Evict(200) freed %d, want >= 200", freed)
+	}
+	if c.Bytes() > 300 {
+		t.Errorf("Bytes() = %d, want <= 300 after eviction", c.Bytes())
+	}
+}
+
+func TestGlyphCacheEvictAll(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 200})
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 300})
+
+	freed := c.Evict(1 << 20) // request more than total
+	if freed != 500 {
+		t.Errorf("Evict(1MB) freed %d, want 500 (all entries)", freed)
+	}
+	if c.Len() != 0 {
+		t.Errorf("Len() = %d, want 0 (all evicted)", c.Len())
+	}
+	if c.Bytes() != 0 {
+		t.Errorf("Bytes() = %d, want 0", c.Bytes())
+	}
+}
+
+func TestGlyphCacheEvictEmpty(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	freed := c.Evict(1000)
+	if freed != 0 {
+		t.Errorf("Evict on empty cache freed %d, want 0", freed)
+	}
+}
+
+func TestGlyphCacheEvictLRUOrder(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 100}) // oldest
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 200})
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 300}) // newest
+
+	c.Get(GlyphKey{GlyphID: 0}) // make recently used
+
+	freed := c.Evict(200) // should evict entry 1 (200 bytes, LRU)
+	if freed < 200 {
+		t.Errorf("Evict(200) freed %d, want >= 200", freed)
+	}
+
+	_, ok := c.Get(GlyphKey{GlyphID: 0})
+	if !ok {
+		t.Error("entry 0 should survive eviction (recently accessed)")
+	}
+}
+
+func TestGlyphCacheEvictReturnsActualBytes(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 150})
+
+	freed := c.Evict(1000) // request more than available
+	if freed != 150 {
+		t.Errorf("Evict(1000) freed %d, want 150 (actual available)", freed)
+	}
+}
+
+func TestGlyphCacheEvictMetrics(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 100})
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 200})
+
+	c.Evict(100)
+	snap := c.Metrics().Snapshot()
+	if snap.Evictions < 1 {
+		t.Errorf("Evictions = %d, want >= 1", snap.Evictions)
+	}
+}
+
+func TestGlyphCacheEvictConcurrent(t *testing.T) {
+	c := NewGlyphCacheWithBytes(100, 1<<20)
+
+	for i := 0; i < 50; i++ {
+		c.Put(GlyphKey{GlyphID: uint32(i)}, GlyphValue{ByteSize: 100})
+	}
+
+	var wg sync.WaitGroup
+	const N = 20
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			c.Evict(500)
+		}()
+	}
+	wg.Wait()
+
+	if c.Len() < 0 {
+		t.Error("Len() should be non-negative after concurrent eviction")
+	}
+	if c.Bytes() < 0 {
+		t.Error("Bytes() should be non-negative after concurrent eviction")
+	}
+}
+
+func TestGlyphCacheClose(t *testing.T) {
+	c := NewGlyphCacheWithBytes(10, 1<<20)
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 100})
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 200})
+	c.Close()
+	if c.Len() != 0 || c.Bytes() != 0 {
+		t.Errorf("after Close: Len=%d, Bytes=%d", c.Len(), c.Bytes())
+	}
+}
+
+func TestGlyphCacheBytesConsistentWithLen(t *testing.T) {
+	c := NewGlyphCacheWithBytes(3, 10000) // high byte limit, entry-count limited
+	for i := 0; i < 10; i++ {
+		c.Put(GlyphKey{GlyphID: uint32(i)}, GlyphValue{ByteSize: 50})
+	}
+	if c.Len() != 3 {
+		t.Errorf("Len() = %d, want 3", c.Len())
+	}
+	if c.Bytes() != 150 {
+		t.Errorf("Bytes() = %d, want 150 (3 entries * 50 bytes)", c.Bytes())
+	}
+}
+
+func TestGlyphCacheByteLimitAndEntryLimit(t *testing.T) {
+	// Entry count should be enforced even when byte limit is not reached.
+	c := NewGlyphCacheWithBytes(2, 1<<20)
+	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 10})
+	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 10})
+	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 10}) // evicts entry 0
+
+	if c.Len() != 2 {
+		t.Errorf("Len() = %d, want 2 (entry limit)", c.Len())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ImageCache tests
 // ---------------------------------------------------------------------------
 
@@ -528,6 +778,29 @@ func BenchmarkGlyphCacheGet(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		c.Get(GlyphKey{FontID: 1, GlyphID: uint32(i % 500)})
+	}
+}
+
+func BenchmarkGlyphCachePutWithBytes(b *testing.B) {
+	c := NewGlyphCacheWithBytes(1024, 1<<20)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Put(GlyphKey{FontID: 1, GlyphID: uint32(i % 500)}, GlyphValue{Advance: 8.0, ByteSize: 32})
+	}
+}
+
+func BenchmarkGlyphCacheEvict(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		c := NewGlyphCacheWithBytes(1024, 1<<20)
+		for j := 0; j < 100; j++ {
+			c.Put(GlyphKey{GlyphID: uint32(j)}, GlyphValue{ByteSize: 32})
+		}
+		b.StartTimer()
+		c.Evict(1600) // evict ~50 entries
 	}
 }
 

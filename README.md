@@ -231,6 +231,10 @@ go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
 go test -bench=BenchmarkMatchCache -benchmem ./internal/css/
 go test -bench=BenchmarkStylePool_Evict -benchmem ./internal/css/
 
+# Glyph cache byte budget and eviction benchmarks (M9.2)
+go test -bench=BenchmarkGlyphCachePutWithBytes -benchmem ./internal/renderer/frame/cache/
+go test -bench=BenchmarkGlyphCacheEvict -benchmem ./internal/renderer/frame/cache/
+
 # Style invalidation benchmarks (M3.4)
 go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
 go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
