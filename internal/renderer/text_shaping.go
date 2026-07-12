@@ -83,16 +83,39 @@ type ShapedText struct {
 	Descent float32
 }
 
-// TextShaper shapes and measures text with caching.
-type TextShaper struct {
-	mu    sync.RWMutex
-	cache map[string]*ShapedText // Cache key -> shaped text
+// cacheEntry represents an entry in the TextShaper LRU cache.
+type cacheEntry struct {
+	key   string
+	value *ShapedText
+	prev  *cacheEntry
+	next  *cacheEntry
 }
 
-// NewTextShaper creates a new text shaper.
+// TextShaper shapes and measures text with caching.
+type TextShaper struct {
+	mu        sync.Mutex
+	capacity  int
+	cache     map[string]*cacheEntry // Cache key -> LRU node
+	head      *cacheEntry            // most recently used
+	tail      *cacheEntry            // least recently used
+	Hits      int64
+	Misses    int64
+	Evictions int64
+}
+
+// NewTextShaper creates a new text shaper with a default cache capacity of 1024.
 func NewTextShaper() *TextShaper {
+	return NewTextShaperWithCapacity(1024)
+}
+
+// NewTextShaperWithCapacity creates a new text shaper with the specified cache capacity.
+func NewTextShaperWithCapacity(capacity int) *TextShaper {
+	if capacity <= 0 {
+		capacity = 1024
+	}
 	return &TextShaper{
-		cache: make(map[string]*ShapedText),
+		capacity: capacity,
+		cache:    make(map[string]*cacheEntry, capacity),
 	}
 }
 
@@ -109,24 +132,88 @@ func (s *TextShaper) Shape(text string, font FontKey) *ShapedText {
 		}
 	}
 
-	// Check cache
 	cacheKey := text + "|" + font.CacheKey()
-	s.mu.RLock()
-	cached, ok := s.cache[cacheKey]
-	s.mu.RUnlock()
-	if ok {
-		return cached
-	}
 
-	// Shape the text
+	// Check cache
+	s.mu.Lock()
+	e, ok := s.cache[cacheKey]
+	if ok {
+		s.moveToFront(e)
+		s.Hits++
+		result := e.value
+		s.mu.Unlock()
+		return result
+	}
+	s.Misses++
+	s.mu.Unlock()
+
+	// Shape the text outside the lock
 	result := s.shapeText(text, font)
 
 	// Cache the result
 	s.mu.Lock()
-	s.cache[cacheKey] = result
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	// Check again in case another goroutine shaped it
+	if e, ok := s.cache[cacheKey]; ok {
+		s.moveToFront(e)
+		return e.value
+	}
+
+	// Evict if at capacity
+	if len(s.cache) >= s.capacity {
+		s.evictLRU()
+	}
+
+	e = &cacheEntry{key: cacheKey, value: result}
+	s.cache[cacheKey] = e
+	s.pushFront(e)
 
 	return result
+}
+
+func (s *TextShaper) evictLRU() {
+	if s.tail == nil {
+		return
+	}
+	delete(s.cache, s.tail.key)
+	s.removeEntry(s.tail)
+	s.Evictions++
+}
+
+func (s *TextShaper) moveToFront(e *cacheEntry) {
+	if s.head == e {
+		return
+	}
+	s.removeEntry(e)
+	s.pushFront(e)
+}
+
+func (s *TextShaper) pushFront(e *cacheEntry) {
+	e.prev = nil
+	e.next = s.head
+	if s.head != nil {
+		s.head.prev = e
+	}
+	s.head = e
+	if s.tail == nil {
+		s.tail = e
+	}
+}
+
+func (s *TextShaper) removeEntry(e *cacheEntry) {
+	if e.prev != nil {
+		e.prev.next = e.next
+	} else {
+		s.head = e.next
+	}
+	if e.next != nil {
+		e.next.prev = e.prev
+	} else {
+		s.tail = e.prev
+	}
+	e.prev = nil
+	e.next = nil
 }
 
 // shapeText performs the actual text shaping.
@@ -247,12 +334,17 @@ func (s *TextShaper) MeasureWrappedNoWrap(text string, font FontKey, maxWidth fl
 func (s *TextShaper) ClearCache() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cache = make(map[string]*ShapedText)
+	s.cache = make(map[string]*cacheEntry, s.capacity)
+	s.head = nil
+	s.tail = nil
+	s.Hits = 0
+	s.Misses = 0
+	s.Evictions = 0
 }
 
 // CacheSize returns the number of cached shaped texts.
 func (s *TextShaper) CacheSize() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return len(s.cache)
 }
