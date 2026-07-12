@@ -240,7 +240,7 @@ func TestGlyphCacheByteLimitOversizedItem(t *testing.T) {
 }
 
 func TestGlyphCacheByteLimitLRUOrder(t *testing.T) {
-	c := NewGlyphCacheWithBytes(100, 300) // 300 byte limit
+	c := NewGlyphCacheWithBytes(100, 300)                  // 300 byte limit
 	c.Put(GlyphKey{GlyphID: 0}, GlyphValue{ByteSize: 100}) // oldest
 	c.Put(GlyphKey{GlyphID: 1}, GlyphValue{ByteSize: 100})
 	c.Put(GlyphKey{GlyphID: 2}, GlyphValue{ByteSize: 100})

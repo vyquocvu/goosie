@@ -719,7 +719,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 
 ### M9.3 Improve persistent storage
 
-- [ ] Separate session state from persistent profile state.
+- [x] Separate session state from persistent profile state.
 - [ ] Keep writes off the UI and engine owner goroutines.
 - [ ] Batch history and cache metadata writes.
 - [ ] Add schema versioning and migrations.
