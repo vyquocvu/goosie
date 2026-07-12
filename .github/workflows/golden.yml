@@ -1,0 +1,59 @@
+name: Golden Image Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'internal/renderer/frame/golden/**'
+      - '.github/workflows/golden.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'internal/renderer/frame/golden/**'
+      - '.github/workflows/golden.yml'
+
+jobs:
+  golden:
+    name: Golden Image Validation
+    runs-on: ubuntu-latest
+    env:
+      GOOS: linux
+      GOARCH: amd64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        cache: true
+
+    - name: Verify golden images match
+      run: |
+        echo "Running golden image tests against committed reference images..."
+        go test -v -count=1 ./internal/renderer/frame/golden/ -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
+        echo "All golden images match."
+
+    - name: Run golden benchmarks
+      run: |
+        go test -run=^$ -bench=BenchmarkGolden -benchmem -benchtime=100ms ./internal/renderer/frame/golden/
+
+    - name: Race detector (golden package)
+      run: go test -race -count=1 -short ./internal/renderer/frame/golden/
+
+    - name: Verify golden tests detect regressions
+      run: |
+        echo "Verifying golden tests fail on deliberate mismatch..."
+        go test -v -count=1 ./internal/renderer/frame/golden/ -run TestGoldenMismatchDetection
+        echo "Mismatch detection verified."
+
+    - name: Upload golden artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: golden-artifacts-${{ github.run_id }}
+        path: |
+          internal/renderer/frame/golden/testdata/golden-update/
+        retention-days: 5

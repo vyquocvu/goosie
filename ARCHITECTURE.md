@@ -722,7 +722,8 @@ directly), while Fyne remains the presentation shell.
 ### Golden Image Testing (M6.5)
 
 The `internal/renderer/frame/golden` package provides deterministic
-render-to-PNG comparison for regression testing.
+render-to-PNG comparison for regression testing, running on a controlled
+CI platform for bit-identical output.
 
 **Key features:**
 - `AssertGolden()`: renders commands via CPUBackend, compares to stored PNG
@@ -731,6 +732,14 @@ render-to-PNG comparison for regression testing.
 - Diff image generation for visual debugging
 - `CompareImages()`: pixel-by-pixel comparison with metrics
 - Separate update directory for review before acceptance
+
+**Rendering golden tests (M6.5):**
+- 7 deterministic test fixtures: solid fill, border, clip, opacity blend,
+  composite scene, nested clip, and empty frame
+- Bit-identical output across platforms (pure Go CPU rasterizer)
+- Committed reference images at `testdata/golden/`
+- CI workflow (`golden.yml`) validates on every PR touching golden paths
+- Race-detector clean, zero-allocation raster benchmarks
 
 ### Retained Tile System (M7.1)
 
