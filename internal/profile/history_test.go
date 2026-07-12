@@ -12,6 +12,7 @@ import (
 func TestHistoryStoreVisits(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewHistoryStore(p)
 	require.NoError(t, err)
@@ -38,6 +39,7 @@ func TestHistoryStoreLoadsSnakeCaseTimestampSchema(t *testing.T) {
 
 	p, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewHistoryStore(p)
 	require.NoError(t, err)
@@ -48,6 +50,7 @@ func TestHistoryStoreLoadsSnakeCaseTimestampSchema(t *testing.T) {
 func TestHistoryStoreConcurrentInstancesMergeVisits(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewHistoryStore(p)
 	require.NoError(t, err)
@@ -71,6 +74,7 @@ func TestHistoryStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	normalStore, err := NewHistoryStore(normal)
 	require.NoError(t, err)
 	require.NoError(t, normalStore.AddVisit("https://persisted.example.com", "Persisted"))
+	require.NoError(t, normal.Close())
 
 	// Open a private profile in the same root — should not read persisted data.
 	priv, err := Open(Options{Root: root, Private: true})
@@ -82,10 +86,12 @@ func TestHistoryStorePrivateDoesNotReadOrWrite(t *testing.T) {
 
 	// Mutate and verify nothing is written to disk.
 	require.NoError(t, privStore.AddVisit("https://private.example.com", "Private"))
+	require.NoError(t, priv.Close())
 
 	// Re-open as normal — should still have only the original visit.
 	normal2, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer normal2.Close()
 	normal2Store, err := NewHistoryStore(normal2)
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://persisted.example.com"}, normal2Store.VisitURLs(),

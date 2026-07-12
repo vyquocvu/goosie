@@ -26,6 +26,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open profile: %v", err)
 	}
+	defer prof.Close()
 	bookmarks, err := profile.NewBookmarkStore(prof)
 	if err != nil {
 		log.Fatalf("failed to open bookmarks: %v", err)

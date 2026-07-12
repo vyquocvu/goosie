@@ -11,6 +11,7 @@ import (
 func TestStorageStoreIsOriginScopedAndPersistent(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewStorageStore(p)
 	require.NoError(t, err)
@@ -31,6 +32,7 @@ func TestStorageStoreIsOriginScopedAndPersistent(t *testing.T) {
 func TestStorageStoreRemoveClearKeysAndSnapshot(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewStorageStore(p)
 	require.NoError(t, err)
@@ -82,6 +84,7 @@ func TestStorageStoreRemoveClearKeysAndSnapshot(t *testing.T) {
 func TestStorageStoreConcurrentInstancesMergeSets(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewStorageStore(p)
 	require.NoError(t, err)
@@ -105,6 +108,7 @@ func TestStorageStoreConcurrentInstancesMergeSets(t *testing.T) {
 func TestStorageStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewStorageStore(p)
 	require.NoError(t, err)
@@ -122,6 +126,7 @@ func TestStorageStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T) 
 func TestStorageStoreConcurrentInstanceClearReloadsBeforePersist(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewStorageStore(p)
 	require.NoError(t, err)
@@ -141,6 +146,7 @@ func TestStorageStoreConcurrentInstanceClearReloadsBeforePersist(t *testing.T) {
 func TestStorageStoreConcurrentIndependentInstancesMergeSets(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	const count = 20
 	stores := make([]*StorageStore, count)
@@ -182,6 +188,7 @@ func TestStorageStorePrivateDoesNotPersist(t *testing.T) {
 	root := t.TempDir()
 	p, err := Open(Options{Root: root, Private: true})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewStorageStore(p)
 	require.NoError(t, err)
@@ -192,6 +199,7 @@ func TestStorageStorePrivateDoesNotPersist(t *testing.T) {
 
 	normal, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer normal.Close()
 	reloaded, err := NewStorageStore(normal)
 	require.NoError(t, err)
 	_, ok = reloaded.Get("https://one.test", "token")

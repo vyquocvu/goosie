@@ -9,6 +9,7 @@ import (
 func TestSessionStoreVisitsAndTabs(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewSessionStore(p)
 	require.NoError(t, err)
@@ -28,6 +29,7 @@ func TestSessionStoreVisitsAndTabs(t *testing.T) {
 func TestSessionStoreTabsAreCopied(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewSessionStore(p)
 	require.NoError(t, err)
@@ -59,6 +61,7 @@ func TestSessionStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	require.NoError(t, normalStore.SaveSession([]SessionTab{
 		{URL: "https://persisted.example.com", Title: "Persisted", Active: true},
 	}))
+	require.NoError(t, normal.Close())
 
 	// Open a private profile in the same root — should not read persisted data.
 	priv, err := Open(Options{Root: root, Private: true})
@@ -72,10 +75,12 @@ func TestSessionStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	require.NoError(t, privStore.SaveSession([]SessionTab{
 		{URL: "https://private.example.com", Title: "Private", Active: true},
 	}))
+	require.NoError(t, priv.Close())
 
 	// Re-open as normal — should still have only the original session.
 	normal2, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer normal2.Close()
 	normal2Store, err := NewSessionStore(normal2)
 	require.NoError(t, err)
 	require.Equal(t, []SessionTab{
@@ -87,6 +92,7 @@ func TestSessionStorePrivateDoesNotReadOrWrite(t *testing.T) {
 func TestSessionStoreConcurrentInstancesMergeSets(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewSessionStore(p)
 	require.NoError(t, err)
@@ -112,6 +118,7 @@ func BenchmarkSessionStoreSaveSession(b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to open profile: %v", err)
 	}
+	defer p.Close()
 	store, err := NewSessionStore(p)
 	if err != nil {
 		b.Fatalf("failed to create session store: %v", err)
@@ -135,6 +142,7 @@ func BenchmarkSessionStoreSessionTabs(b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to open profile: %v", err)
 	}
+	defer p.Close()
 	store, err := NewSessionStore(p)
 	if err != nil {
 		b.Fatalf("failed to create session store: %v", err)

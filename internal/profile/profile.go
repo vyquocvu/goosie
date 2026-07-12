@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,11 +16,24 @@ type Options struct {
 	Private bool
 }
 
+type writeTask struct {
+	name     string
+	data     []byte
+	syncOnly bool
+	done     chan error
+}
+
 type Profile struct {
 	root      string
 	private   bool
 	locksMu   sync.Mutex
 	fileLocks map[string]*sync.Mutex
+
+	// Background writing
+	writeChan chan writeTask
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func Open(options Options) (*Profile, error) {
@@ -34,11 +48,20 @@ func Open(options Options) (*Profile, error) {
 		}
 	}
 
-	return &Profile{
+	ctx, cancel := context.WithCancel(context.Background())
+	p := &Profile{
 		root:      root,
 		private:   options.Private,
 		fileLocks: map[string]*sync.Mutex{},
-	}, nil
+		writeChan: make(chan writeTask, 1024),
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+
+	p.wg.Add(1)
+	go p.worker()
+
+	return p, nil
 }
 
 func defaultRoot() string {
@@ -56,6 +79,83 @@ func (p *Profile) Root() string {
 
 func (p *Profile) Private() bool {
 	return p.private
+}
+
+func (p *Profile) Close() error {
+	p.cancel()
+	p.wg.Wait()
+	return nil
+}
+
+func (p *Profile) Sync() error {
+	if p.private {
+		return nil
+	}
+
+	select {
+	case <-p.ctx.Done():
+		return errors.New("profile is closed")
+	default:
+	}
+
+	done := make(chan error, 1)
+	task := writeTask{
+		syncOnly: true,
+		done:     done,
+	}
+
+	select {
+	case p.writeChan <- task:
+		return <-done
+	case <-p.ctx.Done():
+		return errors.New("profile is closed")
+	}
+}
+
+func (p *Profile) worker() {
+	defer p.wg.Done()
+	for {
+		select {
+		case task, ok := <-p.writeChan:
+			if !ok {
+				return
+			}
+			if task.syncOnly {
+				if task.done != nil {
+					task.done <- nil
+					close(task.done)
+				}
+				continue
+			}
+
+			err := p.saveJSONBytes(task.name, task.data)
+			if task.done != nil {
+				task.done <- err
+				close(task.done)
+			}
+		case <-p.ctx.Done():
+			// Drain writeChan
+			for {
+				select {
+				case task := <-p.writeChan:
+					if task.syncOnly {
+						if task.done != nil {
+							task.done <- nil
+							close(task.done)
+						}
+						continue
+					}
+					err := p.saveJSONBytes(task.name, task.data)
+					if task.done != nil {
+						task.done <- err
+						close(task.done)
+					}
+				default:
+					return
+				}
+			}
+		}
+	}
 }
 
 func (p *Profile) withFileLock(name string, fn func() error) error {
@@ -82,6 +182,10 @@ func (p *Profile) fileLock(name string) *sync.Mutex {
 }
 
 func (p *Profile) LoadJSON(name string, target any) error {
+	if err := p.Sync(); err != nil {
+		return err
+	}
+
 	path := filepath.Join(p.root, name)
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -122,8 +226,10 @@ func (p *Profile) SaveJSON(name string, value any) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(p.root, 0o700); err != nil {
-		return err
+	select {
+	case <-p.ctx.Done():
+		return errors.New("profile is closed")
+	default:
 	}
 
 	data, err := json.MarshalIndent(value, "", "  ")
@@ -131,6 +237,25 @@ func (p *Profile) SaveJSON(name string, value any) error {
 		return err
 	}
 	data = append(data, '\n')
+
+	task := writeTask{
+		name: name,
+		data: data,
+		done: make(chan error, 1),
+	}
+
+	select {
+	case p.writeChan <- task:
+		return nil
+	case <-p.ctx.Done():
+		return errors.New("profile is closed")
+	}
+}
+
+func (p *Profile) saveJSONBytes(name string, data []byte) error {
+	if err := os.MkdirAll(p.root, 0o700); err != nil {
+		return err
+	}
 
 	path := filepath.Join(p.root, name)
 	tempFile, err := os.CreateTemp(p.root, "."+filepath.Base(name)+".*.tmp")

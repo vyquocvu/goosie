@@ -17,6 +17,7 @@ func TestOpenCreatesNormalProfileDirectory(t *testing.T) {
 
 	p, err := Open(Options{Root: dir})
 	require.NoError(t, err)
+	defer p.Close()
 	require.False(t, p.Private())
 	require.Equal(t, dir, p.Root())
 	require.DirExists(t, dir)
@@ -31,6 +32,7 @@ func TestOpenWithDefaultRootUsesUserConfigDir(t *testing.T) {
 
 	p, err := Open(Options{Private: true})
 	require.NoError(t, err)
+	defer p.Close()
 	require.True(t, p.Private())
 	require.Contains(t, p.Root(), "goosie")
 	require.Contains(t, p.Root(), base)
@@ -42,6 +44,7 @@ func TestPrivateProfileDoesNotWriteFiles(t *testing.T) {
 
 	p, err := Open(Options{Root: dir, Private: true})
 	require.NoError(t, err)
+	defer p.Close()
 	require.True(t, p.Private())
 
 	err = p.SaveJSON("state.json", sampleDocument{Name: "secret"})
@@ -53,10 +56,14 @@ func TestSaveJSONCreatesMissingRootAndWritesIndentedJSON(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "profile")
 	p, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer p.Close()
 	err = os.Remove(root)
 	require.NoError(t, err)
 
 	err = p.SaveJSON("state.json", sampleDocument{Name: "goosie"})
+	require.NoError(t, err)
+
+	err = p.Sync()
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(root, "state.json"))
@@ -68,6 +75,7 @@ func TestSaveAndLoadJSONRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Open(Options{Root: dir})
 	require.NoError(t, err)
+	defer p.Close()
 
 	err = p.SaveJSON("state.json", sampleDocument{Name: "goosie"})
 	require.NoError(t, err)
@@ -81,6 +89,7 @@ func TestSaveAndLoadJSONRoundTrip(t *testing.T) {
 func TestLoadMissingJSONLeavesTargetUnchanged(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	loaded := sampleDocument{Name: "default"}
 	err = p.LoadJSON("missing.json", &loaded)
@@ -92,6 +101,7 @@ func TestCorruptJSONIsBackedUp(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Open(Options{Root: dir})
 	require.NoError(t, err)
+	defer p.Close()
 
 	path := filepath.Join(dir, "state.json")
 	err = os.WriteFile(path, []byte("{not-json"), 0o600)
@@ -108,6 +118,7 @@ func TestJSONWithTrailingGarbageIsBackedUp(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Open(Options{Root: dir})
 	require.NoError(t, err)
+	defer p.Close()
 
 	path := filepath.Join(dir, "state.json")
 	err = os.WriteFile(path, []byte(`{"name":"ok"} nope`), 0o600)
@@ -124,6 +135,7 @@ func TestCorruptJSONBackupFailureIsReturned(t *testing.T) {
 	dir := t.TempDir()
 	p, err := Open(Options{Root: dir})
 	require.NoError(t, err)
+	defer p.Close()
 
 	path := filepath.Join(dir, "state.json")
 	err = os.WriteFile(path, []byte("{not-json"), 0o600)
@@ -137,4 +149,25 @@ func TestCorruptJSONBackupFailureIsReturned(t *testing.T) {
 	require.ErrorContains(t, err, "decode")
 	require.ErrorContains(t, err, "back up corrupt JSON")
 	require.FileExists(t, path)
+}
+
+func TestProfileAsyncWrites(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Open(Options{Root: dir})
+	require.NoError(t, err)
+	defer p.Close()
+
+	err = p.SaveJSON("state.json", sampleDocument{Name: "async"})
+	require.NoError(t, err)
+
+	// Since SaveJSON is asynchronous, calling Sync() guarantees that it is written.
+	err = p.Sync()
+	require.NoError(t, err)
+
+	require.FileExists(t, filepath.Join(dir, "state.json"))
+
+	var loaded sampleDocument
+	err = p.LoadJSON("state.json", &loaded)
+	require.NoError(t, err)
+	require.Equal(t, "async", loaded.Name)
 }

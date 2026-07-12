@@ -11,6 +11,7 @@ import (
 func TestSettingsStoreDefaultsAndPersist(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewSettingsStore(p)
 	require.NoError(t, err)
@@ -41,6 +42,7 @@ func TestSettingsStoreLoadsSnakeCaseSchema(t *testing.T) {
 
 	p, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewSettingsStore(p)
 	require.NoError(t, err)
@@ -60,6 +62,7 @@ func TestSettingsStoreLoadsPartialFileOverDefaults(t *testing.T) {
 
 	p, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewSettingsStore(p)
 	require.NoError(t, err)
@@ -81,6 +84,7 @@ func TestSettingsStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	settings := normalStore.Get()
 	settings.Homepage = "https://persisted.example.com"
 	require.NoError(t, normalStore.Set(settings))
+	require.NoError(t, normal.Close())
 
 	// Open a private profile in the same root — should not read persisted data.
 	priv, err := Open(Options{Root: root, Private: true})
@@ -94,10 +98,12 @@ func TestSettingsStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	// Mutate and verify nothing is written to disk.
 	got.Homepage = "https://private.example.com"
 	require.NoError(t, privStore.Set(got))
+	require.NoError(t, priv.Close())
 
 	// Re-open as normal — should still have the original persisted value.
 	normal2, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer normal2.Close()
 	normal2Store, err := NewSettingsStore(normal2)
 	require.NoError(t, err)
 	require.Equal(t, "https://persisted.example.com", normal2Store.Get().Homepage,

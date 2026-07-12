@@ -14,6 +14,7 @@ import (
 func TestBookmarkStoreAddRemoveAndPersist(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewBookmarkStore(p)
 	require.NoError(t, err)
@@ -46,6 +47,7 @@ func TestBookmarkStoreLoadsSnakeCaseTimestampSchema(t *testing.T) {
 
 	p, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewBookmarkStore(p)
 	require.NoError(t, err)
@@ -60,6 +62,7 @@ func TestBookmarkStoreLoadsSnakeCaseTimestampSchema(t *testing.T) {
 func TestBookmarkStoreListReturnsCopy(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	store, err := NewBookmarkStore(p)
 	require.NoError(t, err)
@@ -75,6 +78,7 @@ func TestBookmarkStoreListReturnsCopy(t *testing.T) {
 func TestBookmarkStoreConcurrentInstancesMergeAdds(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewBookmarkStore(p)
 	require.NoError(t, err)
@@ -93,6 +97,7 @@ func TestBookmarkStoreConcurrentInstancesMergeAdds(t *testing.T) {
 func TestBookmarkStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	first, err := NewBookmarkStore(p)
 	require.NoError(t, err)
@@ -110,6 +115,7 @@ func TestBookmarkStoreConcurrentInstanceRemoveReloadsBeforePersist(t *testing.T)
 func TestBookmarkStoreConcurrentIndependentInstancesMergeAdds(t *testing.T) {
 	p, err := Open(Options{Root: t.TempDir()})
 	require.NoError(t, err)
+	defer p.Close()
 
 	const count = 20
 	stores := make([]*BookmarkStore, count)
@@ -153,6 +159,7 @@ func TestBookmarkStorePrivateDoesNotReadOrWrite(t *testing.T) {
 	normalStore, err := NewBookmarkStore(normal)
 	require.NoError(t, err)
 	require.NoError(t, normalStore.Add("https://persisted.example.com", "Persisted"))
+	require.NoError(t, normal.Close())
 
 	// Open a private profile in the same root — should not read persisted data.
 	priv, err := Open(Options{Root: root, Private: true})
@@ -164,10 +171,12 @@ func TestBookmarkStorePrivateDoesNotReadOrWrite(t *testing.T) {
 
 	// Mutate and verify nothing is written to disk.
 	require.NoError(t, privStore.Add("https://private.example.com", "Private"))
+	require.NoError(t, priv.Close())
 
 	// Re-open as normal — should still have only the original bookmark.
 	normal2, err := Open(Options{Root: root})
 	require.NoError(t, err)
+	defer normal2.Close()
 	normal2Store, err := NewBookmarkStore(normal2)
 	require.NoError(t, err)
 	require.True(t, normal2Store.Contains("https://persisted.example.com"))
