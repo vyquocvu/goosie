@@ -11,15 +11,8 @@ type Visit struct {
 	VisitedAt time.Time `json:"visited_at"`
 }
 
-type SessionTab struct {
-	URL    string `json:"url"`
-	Title  string `json:"title"`
-	Active bool   `json:"active"`
-}
-
 type historyDocument struct {
-	Visits  []Visit      `json:"visits"`
-	Session []SessionTab `json:"session"`
+	Visits []Visit `json:"visits"`
 }
 
 type HistoryStore struct {
@@ -32,8 +25,7 @@ func NewHistoryStore(p *Profile) (*HistoryStore, error) {
 	store := &HistoryStore{
 		profile: p,
 		doc: historyDocument{
-			Visits:  []Visit{},
-			Session: []SessionTab{},
+			Visits: []Visit{},
 		},
 	}
 	if err := store.reloadLocked(); err != nil {
@@ -73,44 +65,19 @@ func (s *HistoryStore) VisitURLs() []string {
 	return urls
 }
 
-func (s *HistoryStore) SaveSession(tabs []SessionTab) error {
-	return s.profile.withFileLock("history.json", func() error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
-		if err := s.reloadLocked(); err != nil {
-			return err
-		}
-
-		s.doc.Session = append([]SessionTab(nil), tabs...)
-		return s.persist()
-	})
-}
-
-func (s *HistoryStore) SessionTabs() []SessionTab {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return append([]SessionTab(nil), s.doc.Session...)
-}
-
 func (s *HistoryStore) reloadLocked() error {
 	if s.profile.Private() {
 		return nil
 	}
 
 	doc := historyDocument{
-		Visits:  []Visit{},
-		Session: []SessionTab{},
+		Visits: []Visit{},
 	}
 	if err := s.profile.LoadJSON("history.json", &doc); err != nil {
 		return err
 	}
 	if doc.Visits == nil {
 		doc.Visits = []Visit{}
-	}
-	if doc.Session == nil {
-		doc.Session = []SessionTab{}
 	}
 	s.doc = doc
 

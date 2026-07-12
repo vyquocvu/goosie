@@ -34,6 +34,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open history: %v", err)
 	}
+	sessionStore, err := profile.NewSessionStore(prof)
+	if err != nil {
+		log.Fatalf("failed to open session: %v", err)
+	}
 	settingsStore, err := profile.NewSettingsStore(prof)
 	if err != nil {
 		log.Fatalf("failed to open settings: %v", err)
@@ -54,6 +58,7 @@ func main() {
 		Profile:       prof,
 		Bookmarks:     bookmarks,
 		History:       history,
+		Session:       sessionStore,
 		SettingsStore: settingsStore,
 		Storage:       storage,
 		Network:       networkService,

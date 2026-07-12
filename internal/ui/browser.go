@@ -52,6 +52,7 @@ type BrowserDependencies struct {
 	Profile       *profile.Profile
 	Bookmarks     *profile.BookmarkStore
 	History       *profile.HistoryStore
+	Session       *profile.SessionStore
 	SettingsStore *profile.SettingsStore
 	Storage       *profile.StorageStore
 	Network       *goosienet.Service
