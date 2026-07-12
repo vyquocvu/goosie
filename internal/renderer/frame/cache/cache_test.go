@@ -372,6 +372,141 @@ func TestImageCacheGetOrLoadConcurrent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ImageCache.Evict — M9.2 memory.Evictor integration
+// ---------------------------------------------------------------------------
+
+func TestImageCacheEvictNothing(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 400})
+
+	freed := c.Evict(0)
+	if freed != 0 {
+		t.Errorf("Evict(0) freed %d, want 0", freed)
+	}
+	if c.Len() != 1 {
+		t.Errorf("Len() = %d, want 1 (nothing should be evicted)", c.Len())
+	}
+}
+
+func TestImageCacheEvictExact(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 400})
+	c.Put("b.png", ImageValue{Image: img, ByteSize: 300})
+
+	freed := c.Evict(400)
+	if freed < 400 {
+		t.Errorf("Evict(400) freed %d, want >= 400", freed)
+	}
+	if c.Bytes() > 300 {
+		t.Errorf("Bytes() = %d, want <= 300 after eviction", c.Bytes())
+	}
+}
+
+func TestImageCacheEvictAll(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 400})
+	c.Put("b.png", ImageValue{Image: img, ByteSize: 300})
+
+	freed := c.Evict(1 << 20) // request more than total
+	if freed != 700 {
+		t.Errorf("Evict(1MB) freed %d, want 700 (all entries)", freed)
+	}
+	if c.Len() != 0 {
+		t.Errorf("Len() = %d, want 0 (all evicted)", c.Len())
+	}
+	if c.Bytes() != 0 {
+		t.Errorf("Bytes() = %d, want 0", c.Bytes())
+	}
+}
+
+func TestImageCacheEvictEmpty(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	freed := c.Evict(1000)
+	if freed != 0 {
+		t.Errorf("Evict on empty cache freed %d, want 0", freed)
+	}
+}
+
+func TestImageCacheEvictLRUOrder(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 100}) // oldest
+	c.Put("b.png", ImageValue{Image: img, ByteSize: 200})
+	c.Put("c.png", ImageValue{Image: img, ByteSize: 300}) // newest
+
+	// Access a.png to make it recently used.
+	c.Get("a.png")
+
+	freed := c.Evict(200) // Should evict b (200 bytes) first, then c if needed
+	if freed < 200 {
+		t.Errorf("Evict(200) freed %d, want >= 200", freed)
+	}
+
+	// a.png should survive (recently accessed).
+	_, ok := c.Get("a.png")
+	if !ok {
+		t.Error("a.png should survive eviction (recently accessed)")
+	}
+}
+
+func TestImageCacheEvictReturnsActualBytes(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 150})
+
+	freed := c.Evict(1000) // Request more than available
+	if freed != 150 {
+		t.Errorf("Evict(1000) freed %d, want 150 (actual available)", freed)
+	}
+}
+
+func TestImageCacheEvictMetrics(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	c.Put("a.png", ImageValue{Image: img, ByteSize: 100})
+	c.Put("b.png", ImageValue{Image: img, ByteSize: 200})
+
+	c.Evict(100)
+	snap := c.Metrics().Snapshot()
+	if snap.Evictions < 1 {
+		t.Errorf("Evictions = %d, want >= 1", snap.Evictions)
+	}
+}
+
+func TestImageCacheEvictConcurrent(t *testing.T) {
+	c := NewImageCache(1 << 20)
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+
+	// Fill cache.
+	for i := 0; i < 50; i++ {
+		key := ImageKey("img" + string(rune('A'+i%26)) + ".png")
+		c.Put(key, ImageValue{Image: img, ByteSize: 100})
+	}
+
+	var wg sync.WaitGroup
+	const N = 20
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			c.Evict(500)
+		}()
+	}
+	wg.Wait()
+
+	// Cache should be in a consistent state.
+	if c.Len() < 0 {
+		t.Error("Len() should be non-negative after concurrent eviction")
+	}
+	if c.Bytes() < 0 {
+		t.Error("Bytes() should be non-negative after concurrent eviction")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
 
@@ -419,5 +554,21 @@ func BenchmarkImageCacheGet(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := ImageKey("img" + string(rune('A'+i%100)) + ".png")
 		c.Get(key)
+	}
+}
+
+func BenchmarkImageCacheEvict(b *testing.B) {
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		c := NewImageCache(64 << 20)
+		for j := 0; j < 100; j++ {
+			key := ImageKey("img" + string(rune('A'+j%26)) + ".png")
+			c.Put(key, ImageValue{Image: img, ByteSize: 100})
+		}
+		b.StartTimer()
+		c.Evict(5000) // evict ~50 entries
 	}
 }

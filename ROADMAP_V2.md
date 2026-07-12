@@ -709,7 +709,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 
 - [x] HTTP response cache.
 - [ ] Page cache.
-- [ ] Decoded image cache.
+- [x] Decoded image cache.
 - [ ] Glyph cache.
 - [x] Text shaping cache.
 - [x] Selector and computed-style caches.
