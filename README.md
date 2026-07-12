@@ -227,6 +227,10 @@ go test -bench=BenchmarkStylePool -benchmem ./internal/css/
 go test -bench=BenchmarkApplyDeclarations -benchmem ./internal/css/
 go test -bench=BenchmarkComputedStyle -benchmem ./internal/css/
 
+# Match cache and style pool eviction benchmarks (M9.2)
+go test -bench=BenchmarkMatchCache -benchmem ./internal/css/
+go test -bench=BenchmarkStylePool_Evict -benchmem ./internal/css/
+
 # Style invalidation benchmarks (M3.4)
 go test -bench=BenchmarkComputeInvalidation -benchmem ./internal/css/
 go test -bench=BenchmarkBatchMutations -benchmem ./internal/css/
