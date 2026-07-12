@@ -18,6 +18,12 @@ type Options struct {
 	Private bool
 }
 
+const CurrentSchemaVersion = 1
+
+type schemaConfig struct {
+	Version int `json:"version"`
+}
+
 type writeTask struct {
 	name     string
 	data     []byte
@@ -69,6 +75,10 @@ func Open(options Options) (*Profile, error) {
 	}
 
 	if !options.Private {
+		if err := p.runMigrations(); err != nil {
+			cancel()
+			return nil, err
+		}
 		p.wg.Add(1)
 		go p.worker()
 	}
@@ -371,4 +381,111 @@ func defaultRoot() string {
 		return filepath.Join(".", ".goosie")
 	}
 	return filepath.Join(dir, "goosie")
+}
+
+func (p *Profile) runMigrations() error {
+	schemaPath := filepath.Join(p.root, "schema.json")
+	schemaData, err := os.ReadFile(schemaPath)
+
+	var currentVersion int
+	if os.IsNotExist(err) {
+		// schema.json does not exist.
+		// Check if this is an existing legacy profile (version 0) or a new one.
+		legacyExists := false
+		files := []string{"bookmarks.json", "history.json", "settings.json", "session.json", "storage.json"}
+		for _, file := range files {
+			if _, err := os.Stat(filepath.Join(p.root, file)); err == nil {
+				legacyExists = true
+				break
+			}
+		}
+
+		if legacyExists {
+			currentVersion = 0
+		} else {
+			// Brand new profile directory, set to current version directly
+			currentVersion = CurrentSchemaVersion
+			if err := p.writeSchemaVersion(CurrentSchemaVersion); err != nil {
+				return err
+			}
+		}
+	} else if err != nil {
+		return fmt.Errorf("read schema file: %w", err)
+	} else {
+		var cfg schemaConfig
+		if err := json.Unmarshal(schemaData, &cfg); err != nil {
+			// If schema.json is corrupt, back it up and assume version 0
+			_ = os.Rename(schemaPath, schemaPath+".corrupt")
+			currentVersion = 0
+		} else {
+			currentVersion = cfg.Version
+		}
+	}
+
+	for v := currentVersion; v < CurrentSchemaVersion; v++ {
+		switch v {
+		case 0:
+			if err := p.migrate0to1(); err != nil {
+				return fmt.Errorf("migration 0 to 1: %w", err)
+			}
+		}
+	}
+
+	if currentVersion < CurrentSchemaVersion {
+		if err := p.writeSchemaVersion(CurrentSchemaVersion); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *Profile) writeSchemaVersion(version int) error {
+	cfg := schemaConfig{Version: version}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return p.saveJSONBytes("schema.json", data)
+}
+
+func (p *Profile) migrate0to1() error {
+	// Migration 0 to 1: Migrate bookmarks.json if it is in legacy string array format []string
+	bookmarksPath := filepath.Join(p.root, "bookmarks.json")
+	data, err := os.ReadFile(bookmarksPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	// Try to unmarshal as legacy list of strings
+	var legacy []string
+	if err := json.Unmarshal(data, &legacy); err == nil {
+		// Migrate to modern []Bookmark format
+		now := time.Now().UTC()
+		modern := make([]Bookmark, len(legacy))
+		for i, url := range legacy {
+			modern[i] = Bookmark{
+				URL:       url,
+				Title:     url,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+		}
+
+		newData, err := json.MarshalIndent(modern, "", "  ")
+		if err != nil {
+			return err
+		}
+		newData = append(newData, '\n')
+
+		if err := p.saveJSONBytes("bookmarks.json", newData); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -4,7 +4,7 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
 
 ## Features
 
-- **Persistent Profile Foundation**: Browser data can be stored in a profile directory, including bookmarks, history, settings, origin-scoped localStorage, cookies, and cache metadata.
+- **Persistent Profile Foundation**: Browser data can be stored in a profile directory, including bookmarks, history, settings, origin-scoped localStorage, cookies, and cache metadata, with built-in schema versioning, automatic migrations, and corruption recovery.
 - **Private Browsing Foundation**: Ephemeral profile mode keeps browsing state in memory and avoids writing profile data to disk.
 - **Developer Tools Foundation**: Console execution, DOM inspection, network log, storage view, security summary, and downloads panels.
 - **Release Builds**: Tag-based GitHub Actions workflow builds cross-platform browser binaries.

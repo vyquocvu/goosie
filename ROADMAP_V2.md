@@ -722,8 +722,8 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [x] Separate session state from persistent profile state.
 - [x] Keep writes off the UI and engine owner goroutines.
 - [x] Batch history and cache metadata writes.
-- [ ] Add schema versioning and migrations.
-- [ ] Add corruption recovery tests.
+- [x] Add schema versioning and migrations.
+- [x] Add corruption recovery tests.
 - [x] Preserve private mode as fully ephemeral.
 - [ ] Add import and export paths for profile settings.
 

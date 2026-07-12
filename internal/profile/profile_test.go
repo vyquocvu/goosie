@@ -57,7 +57,7 @@ func TestSaveJSONCreatesMissingRootAndWritesIndentedJSON(t *testing.T) {
 	p, err := Open(Options{Root: root})
 	require.NoError(t, err)
 	defer p.Close()
-	err = os.Remove(root)
+	err = os.RemoveAll(root)
 	require.NoError(t, err)
 
 	err = p.SaveJSON("state.json", sampleDocument{Name: "goosie"})
@@ -170,4 +170,76 @@ func TestProfileAsyncWrites(t *testing.T) {
 	err = p.LoadJSON("state.json", &loaded)
 	require.NoError(t, err)
 	require.Equal(t, "async", loaded.Name)
+}
+
+func TestSchemaVersioningAndMigration0to1(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write legacy bookmarks (Version 0) as a raw array of strings
+	legacyPath := filepath.Join(dir, "bookmarks.json")
+	legacyData := []byte(`[
+  "https://example.com",
+  "https://google.com"
+]`)
+	err := os.WriteFile(legacyPath, legacyData, 0o600)
+	require.NoError(t, err)
+
+	// Open the profile. This should trigger the migration from v0 to v1.
+	p, err := Open(Options{Root: dir})
+	require.NoError(t, err)
+	defer p.Close()
+
+	// Verify schema.json was created with version 1
+	var schema schemaConfig
+	err = p.LoadJSON("schema.json", &schema)
+	require.NoError(t, err)
+	require.Equal(t, 1, schema.Version)
+
+	// Load bookmarks using the BookmarkStore and verify they are correctly migrated
+	store, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+
+	bookmarks := store.List()
+	require.Len(t, bookmarks, 2)
+	require.Equal(t, "https://example.com", bookmarks[0].URL)
+	require.Equal(t, "https://example.com", bookmarks[0].Title)
+	require.False(t, bookmarks[0].CreatedAt.IsZero())
+	require.Equal(t, "https://google.com", bookmarks[1].URL)
+}
+
+func TestCorruptionRecoveryStoreFlow(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write corrupt bookmarks
+	bookmarksPath := filepath.Join(dir, "bookmarks.json")
+	err := os.WriteFile(bookmarksPath, []byte("{corrupt-json"), 0o600)
+	require.NoError(t, err)
+
+	p, err := Open(Options{Root: dir})
+	require.NoError(t, err)
+	defer p.Close()
+
+	// Initial store creation should fail because the JSON is corrupt
+	store, err := NewBookmarkStore(p)
+	require.Error(t, err)
+	require.Nil(t, store)
+
+	// The corrupt file should now be renamed to bookmarks.json.corrupt, and the original file deleted
+	require.FileExists(t, bookmarksPath+".corrupt")
+	require.NoFileExists(t, bookmarksPath)
+
+	// A subsequent store creation should succeed, loading an empty store
+	store2, err := NewBookmarkStore(p)
+	require.NoError(t, err)
+	require.NotNil(t, store2)
+	require.Empty(t, store2.List())
+
+	// Add an item to make sure it works fine after recovery
+	err = store2.Add("https://recovered.com", "Recovered")
+	require.NoError(t, err)
+
+	// Force sync and verify the file exists now
+	err = p.Sync()
+	require.NoError(t, err)
+	require.FileExists(t, bookmarksPath)
 }
