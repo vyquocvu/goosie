@@ -184,6 +184,24 @@ go run ./cmd/roadmap_test/
 
 Use the short tier for sandbox-safe checks and the e2e tier for Playwright-driven browser tests.
 
+### Golden Image Tests
+
+```bash
+# Run golden image tests (validates against committed reference images)
+go test -v ./internal/renderer/frame/golden/ -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
+
+# Update golden reference images after intentional rendering changes
+GOOSIE_UPDATE_GOLDEN=1 go test -v ./internal/renderer/frame/golden/ -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
+
+# Run golden benchmarks
+go test -bench=BenchmarkGolden -benchmem ./internal/renderer/frame/golden/
+```
+
+Golden tests use the pure Go CPU raster backend, producing bit-identical output
+across platforms. Reference images are stored at `internal/renderer/frame/golden/testdata/golden/`.
+The CI workflow `.github/workflows/golden.yml` validates golden images on every PR
+touching golden-related paths.
+
 ### Milestone-Gated Testing
 
 Tests are gated by roadmap milestone so they unlock automatically as features are completed. The current milestone is controlled by the `GOOSIE_MILESTONE` environment variable (default: `2`).

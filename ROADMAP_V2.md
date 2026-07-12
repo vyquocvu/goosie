@@ -585,7 +585,7 @@ type RasterBackend interface {
 - [x] Render deterministic fixtures at fixed viewport sizes.
 - [x] Compare output with tolerance rules.
 - [x] Store intentional updates separately from test execution.
-- [ ] Run on a controlled CI platform.
+- [x] Run on a controlled CI platform.
 
 **Exit gate**
 

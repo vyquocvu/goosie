@@ -882,6 +882,33 @@ go test -bench=BenchmarkDebugDirtyRegionOverlay -benchmem ./internal/renderer/
 - The trade-off favors the streaming path: fewer allocations reduce GC pressure, context cancellation enables responsive navigation, and resource discovery enables parallel fetching.
 - Store layer shows zero regression on all benchmarks.
 
+### Golden Image Rendering (M6.5)
+
+The golden image test suite provides deterministic CPU raster benchmarks
+for the display command pipeline. All raster operations are zero-allocation.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| RasterFillRect (800×600, 3 fills) | 1,664,187 | 0 | 0 |
+| RasterComposite (800×600, 9 cmds) | 2,228,932 | 0 | 0 |
+| RasterClipOpacity (400×300, 6 cmds) | 792,145 | 0 | 0 |
+
+Golden comparison benchmarks:
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| CompareImages 100×100 | 731,800 | 80,004 | 20,000 |
+| CompareImages 800×600 | 35,343,540 | 3,840,070 | 960,000 |
+
+All raster operations produce zero allocations. Golden comparison allocates
+only for the pixel-diff comparison loop (proportional to image size).
+
+Run the benchmarks:
+
+```bash
+go test -bench=BenchmarkGolden -benchmem ./internal/renderer/frame/golden/
+```
+
 ## Known Limitations
 
 1. **Buffer Zone Trade-off**: Larger buffer zones (50% above/below viewport) use more memory but provide smoother scrolling
