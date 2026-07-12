@@ -707,7 +707,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 
 ### M9.2 Bound every cache
 
-- [ ] HTTP response cache.
+- [x] HTTP response cache.
 - [ ] Page cache.
 - [ ] Decoded image cache.
 - [ ] Glyph cache.
