@@ -861,6 +861,40 @@ Viewport policy enables M7 exit gates: visible tiles are rasterized
 first, scroll direction drives prefetch, hidden tabs pause raster
 work, and resource limits prevent unbounded memory growth.
 
+### Page Cache (M9.2)
+
+The `internal/engine/pagecache` package provides a bounded LRU cache
+for fully-rendered page snapshots, enabling instant back/forward
+navigation without re-fetching and re-parsing.
+
+**Key features:**
+- `Cache`: bounded LRU cache keyed by URL string
+- `PageEntry`: immutable snapshot with URL, title, and byte size
+- Count-bounded (default 3, matching `ResourcePrefetchLimits`)
+- Byte-bounded for `memory.Evictor` integration
+- `Evict(targetBytes)`: satisfies `memory.Evictor` for global
+  memory pressure eviction
+- Atomic hit/miss/eviction metrics
+- `Close()`/`Clear()`: releases all entries on session shutdown
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Put | 500 | 135 | 4 |
+| Get (hit) | 360 | 31 | 1 |
+| Get (miss) | 104 | 33 | 2 |
+| Put (with eviction) | 354 | 136 | 5 |
+| Len | 14 | 0 | 0 |
+
+The page cache is bounded by both entry count and byte budget.
+Entries exceeding the byte budget alone are rejected. The LRU
+doubly-linked-list pattern is consistent with GlyphCache, ImageCache,
+and other bounded caches in the codebase.
+
+The page cache integrates with `memory.Manager` via `ComponentPageCache`
+for global memory pressure eviction.
+
 ### JavaScript Session Ownership (M8.1)
 
 The `internal/js` package provides a `Session` type that wraps the

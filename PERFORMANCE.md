@@ -909,6 +909,30 @@ Run the benchmarks:
 go test -bench=BenchmarkGolden -benchmem ./internal/renderer/frame/golden/
 ```
 
+### Page Cache (M9.2)
+
+The `internal/engine/pagecache` package provides a bounded LRU cache
+for page snapshots, enabling instant back/forward navigation.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| Put | 500 | 135 | 4 |
+| Get (hit) | 360 | 31 | 1 |
+| Get (miss) | 104 | 33 | 2 |
+| Put (with eviction) | 354 | 136 | 5 |
+| Len | 14 | 0 | 0 |
+
+The page cache is bounded by entry count (default 3) and byte budget
+(default 32 MB). Entries exceeding the byte budget alone are rejected.
+The `Evict()` method satisfies the `memory.Evictor` interface for
+global memory pressure eviction.
+
+Run the benchmarks:
+
+```bash
+go test -bench=. -benchmem ./internal/engine/pagecache/
+```
+
 ## Known Limitations
 
 1. **Buffer Zone Trade-off**: Larger buffer zones (50% above/below viewport) use more memory but provide smoother scrolling

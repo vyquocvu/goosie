@@ -708,14 +708,14 @@ Make memory and storage behavior predictable across repeated navigation and mult
 ### M9.2 Bound every cache
 
 - [x] HTTP response cache.
-- [ ] Page cache.
+- [x] Page cache.
 - [x] Decoded image cache.
 - [x] Glyph cache.
 - [x] Text shaping cache.
 - [x] Selector and computed-style caches.
 - [x] Layout intrinsic-size cache.
 - [x] Tile cache.
-- [ ] JavaScript wrapper cache.
+- [x] JavaScript wrapper cache.
 
 ### M9.3 Improve persistent storage
 
