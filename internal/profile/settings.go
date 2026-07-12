@@ -29,6 +29,9 @@ func NewSettingsStore(p *Profile) (*SettingsStore, error) {
 		profile:  p,
 		settings: DefaultSettings(),
 	}
+	if p.Private() {
+		return store, nil
+	}
 	if err := p.LoadJSON("settings.json", &store.settings); err != nil {
 		return nil, err
 	}

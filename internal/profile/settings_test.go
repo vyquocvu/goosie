@@ -69,3 +69,37 @@ func TestSettingsStoreLoadsPartialFileOverDefaults(t *testing.T) {
 	require.Equal(t, DefaultSettings().EnableJavaScript, settings.EnableJavaScript)
 	require.Equal(t, DefaultSettings().EnableImages, settings.EnableImages)
 }
+
+func TestSettingsStorePrivateDoesNotReadOrWrite(t *testing.T) {
+	root := t.TempDir()
+
+	// Write settings as a normal profile.
+	normal, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	normalStore, err := NewSettingsStore(normal)
+	require.NoError(t, err)
+	settings := normalStore.Get()
+	settings.Homepage = "https://persisted.example.com"
+	require.NoError(t, normalStore.Set(settings))
+
+	// Open a private profile in the same root — should not read persisted data.
+	priv, err := Open(Options{Root: root, Private: true})
+	require.NoError(t, err)
+	privStore, err := NewSettingsStore(priv)
+	require.NoError(t, err)
+	got := privStore.Get()
+	require.Equal(t, DefaultSettings().Homepage, got.Homepage,
+		"private profile must not read settings from disk")
+
+	// Mutate and verify nothing is written to disk.
+	got.Homepage = "https://private.example.com"
+	require.NoError(t, privStore.Set(got))
+
+	// Re-open as normal — should still have the original persisted value.
+	normal2, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	normal2Store, err := NewSettingsStore(normal2)
+	require.NoError(t, err)
+	require.Equal(t, "https://persisted.example.com", normal2Store.Get().Homepage,
+		"private writes must not persist to disk")
+}

@@ -18,6 +18,7 @@ const (
 	ComponentScript              Component = "script"
 	ComponentNetworkCache        Component = "network-cache"
 	ComponentLayoutIntrinsicSize Component = "layout-intrinsic-size"
+	ComponentPageCache           Component = "page-cache"
 )
 
 // Evictor is a callback function registered by a component.
@@ -59,6 +60,7 @@ func NewManager(cfg Config) *Manager {
 	// Default eviction order (less critical/pure cached items first)
 	order := []Component{
 		ComponentNetworkCache,
+		ComponentPageCache,
 		ComponentStyle,
 		ComponentGlyph,
 		ComponentImage,

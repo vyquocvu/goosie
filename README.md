@@ -299,6 +299,9 @@ go test -bench=. -benchmem ./internal/renderer/
 # Tile cache benchmarks (M7.1, M9.2)
 go test -bench="BenchmarkTileCache_Get" -benchmem ./internal/renderer/frame/compositor/
 go test -bench=BenchmarkTileCache_Evict -benchmem ./internal/renderer/frame/compositor/
+
+# Page cache benchmarks (M9.2)
+go test -bench=. -benchmem ./internal/engine/pagecache/
 ```
 
 Pull requests that touch engine benchmark-sensitive paths run a
@@ -421,6 +424,7 @@ The browser demonstrates web functionality by:
 - **internal/engine/navigation**: Monotonic navigation IDs, cancellable load contexts, and stale-callback rejection
 - **internal/engine/session**: Session lifecycle (state machine, context propagation, event callbacks) wrapping the navigation scheduler
 - **internal/engine/metrics**: Phase-timing recorder and counters for tracing navigation from URL entry to first paint
+- **internal/engine/pagecache**: Bounded LRU page cache for instant back/forward navigation (M9.2)
 - **internal/dom**: HTML parser for extracting content; compact DOM store (M2.3) with NodeID-based index storage
 - **internal/dom/atom**: String interning with static atoms for HTML tags/attributes and bounded LRU-evicted dynamic table (M2.2)
 - **internal/net**: Async HTTP client with context support for fetching web pages

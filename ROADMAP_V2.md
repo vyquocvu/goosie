@@ -708,14 +708,14 @@ Make memory and storage behavior predictable across repeated navigation and mult
 ### M9.2 Bound every cache
 
 - [x] HTTP response cache.
-- [ ] Page cache.
+- [x] Page cache.
 - [x] Decoded image cache.
 - [x] Glyph cache.
 - [x] Text shaping cache.
 - [x] Selector and computed-style caches.
 - [x] Layout intrinsic-size cache.
 - [x] Tile cache.
-- [ ] JavaScript wrapper cache.
+- [x] JavaScript wrapper cache.
 
 ### M9.3 Improve persistent storage
 
@@ -724,7 +724,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [ ] Batch history and cache metadata writes.
 - [ ] Add schema versioning and migrations.
 - [ ] Add corruption recovery tests.
-- [ ] Preserve private mode as fully ephemeral.
+- [x] Preserve private mode as fully ephemeral.
 - [ ] Add import and export paths for profile settings.
 
 ### M9.4 Tune the Go runtime only after structural work
