@@ -55,6 +55,58 @@ func TestShapeTextCaching(t *testing.T) {
 	if result1 != result2 {
 		t.Error("expected cached result to be returned")
 	}
+
+	if shaper.Hits != 1 {
+		t.Errorf("expected 1 hit, got %d", shaper.Hits)
+	}
+	if shaper.Misses != 1 {
+		t.Errorf("expected 1 miss, got %d", shaper.Misses)
+	}
+}
+
+func TestTextShaper_Eviction(t *testing.T) {
+	shaper := NewTextShaperWithCapacity(2)
+	key := FontKey{Size: 16}
+
+	// Add two items, filling the cache
+	shaper.Shape("A", key)
+	shaper.Shape("B", key)
+	if shaper.CacheSize() != 2 {
+		t.Errorf("expected cache size 2, got %d", shaper.CacheSize())
+	}
+
+	// Add a third item, which should evict "A"
+	shaper.Shape("C", key)
+	if shaper.CacheSize() != 2 {
+		t.Errorf("expected cache size 2 after eviction, got %d", shaper.CacheSize())
+	}
+	if shaper.Evictions != 1 {
+		t.Errorf("expected 1 eviction, got %d", shaper.Evictions)
+	}
+
+	// Requesting "B" should be a hit
+	shaper.Shape("B", key)
+	if shaper.Hits != 1 {
+		t.Errorf("expected 1 hit for B, got %d", shaper.Hits)
+	}
+
+	// Requesting "A" should be a miss, causing "C" to be evicted
+	shaper.Shape("A", key)
+	if shaper.Evictions != 2 {
+		t.Errorf("expected 2 evictions, got %d", shaper.Evictions)
+	}
+
+	// Re-add "B" (already in cache, so hit, moves to front)
+	shaper.Shape("B", key)
+
+	// Cache now has A and B
+	shaper.ClearCache()
+	if shaper.CacheSize() != 0 {
+		t.Errorf("expected cache size 0 after clear, got %d", shaper.CacheSize())
+	}
+	if shaper.Hits != 0 || shaper.Misses != 0 || shaper.Evictions != 0 {
+		t.Errorf("expected metrics to be reset after clear")
+	}
 }
 
 func TestShapeTextDifferentSizes(t *testing.T) {
@@ -274,6 +326,23 @@ func BenchmarkTextShaperShape(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		shaper.Shape("Hello, World!", key)
+	}
+}
+
+func BenchmarkTextShaper_Eviction(b *testing.B) {
+	shaper := NewTextShaperWithCapacity(128)
+	key := FontKey{Size: 16}
+
+	// Fill the cache
+	for i := 0; i < 128; i++ {
+		shaper.Shape("String"+string(rune(i)), key)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		// This will constantly trigger an eviction
+		shaper.Shape("Evict"+string(rune(i)), key)
 	}
 }
 

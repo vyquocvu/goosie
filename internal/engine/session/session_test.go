@@ -730,8 +730,11 @@ func TestSessionStateAfterCloseDoesNotFireTransitions(t *testing.T) {
 	s.Close()
 
 	var called bool
+	var mu sync.Mutex
 	s.SetEventCallback(func(ev Event) {
+		mu.Lock()
 		called = true
+		mu.Unlock()
 	})
 
 	s.Parsing()
@@ -739,6 +742,8 @@ func TestSessionStateAfterCloseDoesNotFireTransitions(t *testing.T) {
 	s.Complete()
 	s.FlushEvents()
 
+	mu.Lock()
+	defer mu.Unlock()
 	if called {
 		t.Fatal("event callback was called after Close")
 	}
