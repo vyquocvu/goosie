@@ -277,6 +277,10 @@ go test -bench=. -benchmem ./internal/engine/testpages/
 
 # Full renderer benchmarks (layout, display list, viewport, scroll)
 go test -bench=. -benchmem ./internal/renderer/
+
+# Tile cache benchmarks (M7.1, M9.2)
+go test -bench="BenchmarkTileCache_Get" -benchmem ./internal/renderer/frame/compositor/
+go test -bench=BenchmarkTileCache_Evict -benchmem ./internal/renderer/frame/compositor/
 ```
 
 Pull requests that touch engine benchmark-sensitive paths run a

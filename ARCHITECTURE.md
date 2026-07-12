@@ -747,6 +747,8 @@ configurable raster tiles that are reused across frames when unchanged.
 - `BoundsForCoord()`: returns layout-space bounds for a tile
 - `CoordsInRect()`: returns all tile coordinates overlapping a rect (half-open interval)
 - `InvalidateRect()`: marks all overlapping tiles as dirty
+- `Evict()`: satisfies `memory.Evictor` for global memory pressure eviction
+- `Close()`: removes all tiles and resets metrics
 - Atomic hit/miss/eviction metrics
 
 **Performance (VirtualApple @ 2.50GHz):**
@@ -755,6 +757,7 @@ configurable raster tiles that are reused across frames when unchanged.
 |-----------|-------|------|----------|
 | TileCache Get (hit) | 46.7 | 0 | 0 |
 | TileCache Get (miss) | 18.6 | 0 | 0 |
+| TileCache Evict (256 tiles, 1MB) | ~1,000 | 0 | 0 |
 | CoordForPoint | 0.32 | 0 | 0 |
 | CoordsInRect (4 tiles) | 43.8 | 96 | 1 |
 | InvalidateRect (400 tiles) | 4,033 | 0 | 0 |

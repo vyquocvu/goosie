@@ -420,6 +420,130 @@ func TestPriorityForCoord_WithScroll(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TileCache — Evict (memory.Evictor interface)
+// ---------------------------------------------------------------------------
+
+func TestTileCache_Evict_FreesTargetBytes(t *testing.T) {
+	cfg := TileCacheConfig{TileWidth: 64, TileHeight: 64, MaxBytes: 1 << 30, MaxTiles: 1000}
+	c := NewTileCache(cfg)
+
+	// Insert 5 tiles of 100 bytes each = 500 bytes.
+	for i := int32(0); i < 5; i++ {
+		coord := TileCoord{Col: i, Row: 0}
+		c.Put(&Tile{Coord: coord, Bounds: c.BoundsForCoord(coord), ByteSize: 100})
+	}
+	if c.Bytes() != 500 {
+		t.Fatalf("Bytes before Evict = %d, want 500", c.Bytes())
+	}
+
+	// Evict 250 bytes — should remove at least 2 tiles (200 bytes) but
+	// likely 3 tiles due to LRU loop (each 100 bytes).
+	freed := c.Evict(250)
+	if freed < 200 {
+		t.Errorf("freed = %d, want >= 200", freed)
+	}
+	if c.Bytes() > 300 {
+		t.Errorf("Bytes after Evict(250) = %d, want <= 300", c.Bytes())
+	}
+}
+
+func TestTileCache_Evict_EmptyCache(t *testing.T) {
+	c := NewTileCache(DefaultTileCacheConfig())
+	freed := c.Evict(1000)
+	if freed != 0 {
+		t.Errorf("freed from empty cache = %d, want 0", freed)
+	}
+}
+
+func TestTileCache_Evict_All(t *testing.T) {
+	c := NewTileCache(DefaultTileCacheConfig())
+	for i := int32(0); i < 3; i++ {
+		coord := TileCoord{Col: i, Row: 0}
+		c.Put(&Tile{Coord: coord, Bounds: c.BoundsForCoord(coord), ByteSize: 50})
+	}
+
+	freed := c.Evict(1 << 30) // Request more than total.
+	if freed != 150 {
+		t.Errorf("freed = %d, want 150 (all tiles)", freed)
+	}
+	if c.Len() != 0 {
+		t.Errorf("Len = %d, want 0", c.Len())
+	}
+	if c.Bytes() != 0 {
+		t.Errorf("Bytes = %d, want 0", c.Bytes())
+	}
+}
+
+func TestTileCache_Evict_LRUOrder(t *testing.T) {
+	cfg := TileCacheConfig{TileWidth: 64, TileHeight: 64, MaxBytes: 1 << 30, MaxTiles: 100}
+	c := NewTileCache(cfg)
+
+	c0 := TileCoord{Col: 0, Row: 0}
+	c1 := TileCoord{Col: 1, Row: 0}
+	c2 := TileCoord{Col: 2, Row: 0}
+
+	c.Put(&Tile{Coord: c0, Bounds: c.BoundsForCoord(c0), ByteSize: 100})
+	c.Put(&Tile{Coord: c1, Bounds: c.BoundsForCoord(c1), ByteSize: 100})
+	c.Put(&Tile{Coord: c2, Bounds: c.BoundsForCoord(c2), ByteSize: 100})
+
+	// Access c0 to make it most recent.
+	c.Get(c0)
+
+	// Evict 100 bytes — should remove c1 (oldest).
+	freed := c.Evict(100)
+	if freed != 100 {
+		t.Errorf("freed = %d, want 100", freed)
+	}
+	if c.Get(c1) != nil {
+		t.Error("c1 should have been evicted (LRU)")
+	}
+	if c.Get(c0) == nil {
+		t.Error("c0 should still be present (recently accessed)")
+	}
+	if c.Get(c2) == nil {
+		t.Error("c2 should still be present")
+	}
+}
+
+func TestTileCache_Evict_Metrics(t *testing.T) {
+	c := NewTileCache(DefaultTileCacheConfig())
+	for i := int32(0); i < 4; i++ {
+		coord := TileCoord{Col: i, Row: 0}
+		c.Put(&Tile{Coord: coord, Bounds: c.BoundsForCoord(coord), ByteSize: 10})
+	}
+
+	c.Evict(25) // Should evict at least 3 tiles.
+	_, _, evictions := c.Metrics()
+	if evictions < 3 {
+		t.Errorf("evictions = %d, want >= 3", evictions)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TileCache — Close
+// ---------------------------------------------------------------------------
+
+func TestTileCache_Close(t *testing.T) {
+	c := NewTileCache(DefaultTileCacheConfig())
+	c.Put(&Tile{Coord: TileCoord{Col: 0, Row: 0}, ByteSize: 10})
+	c.Get(TileCoord{Col: 0, Row: 0}) // hit
+	c.Get(TileCoord{Col: 9, Row: 9}) // miss
+
+	c.Close()
+
+	if c.Len() != 0 {
+		t.Errorf("Len after Close = %d, want 0", c.Len())
+	}
+	if c.Bytes() != 0 {
+		t.Errorf("Bytes after Close = %d, want 0", c.Bytes())
+	}
+	hits, misses, evictions := c.Metrics()
+	if hits != 0 || misses != 0 || evictions != 0 {
+		t.Errorf("Metrics after Close = (%d,%d,%d), want (0,0,0)", hits, misses, evictions)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
 
@@ -470,6 +594,19 @@ func BenchmarkCoordsInRect(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		c.CoordsInRect(r)
+	}
+}
+
+func BenchmarkTileCache_Evict(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		cfg := TileCacheConfig{TileWidth: 256, TileHeight: 256, MaxBytes: 1 << 30, MaxTiles: 10000}
+		c := NewTileCache(cfg)
+		for j := int32(0); j < 256; j++ {
+			c.Put(&Tile{Coord: TileCoord{Col: j, Row: 0}, ByteSize: 4096})
+		}
+		b.StartTimer()
+		c.Evict(1 << 20) // Evict 1 MB (256 tiles × 4096 bytes).
 	}
 }
 
