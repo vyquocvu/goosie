@@ -67,17 +67,15 @@ type ReflowTracker struct {
 	parents map[LayoutID]LayoutID
 
 	// Intrinsic size cache
-	intrinsicWidth  map[LayoutID]float32
-	intrinsicHeight map[LayoutID]float32
+	intrinsicCache *IntrinsicSizeCache
 }
 
 // NewReflowTracker creates a new reflow tracker.
 func NewReflowTracker() *ReflowTracker {
 	return &ReflowTracker{
-		dirty:           make(map[LayoutID]ReflowReasons),
-		parents:         make(map[LayoutID]LayoutID),
-		intrinsicWidth:  make(map[LayoutID]float32),
-		intrinsicHeight: make(map[LayoutID]float32),
+		dirty:          make(map[LayoutID]ReflowReasons),
+		parents:        make(map[LayoutID]LayoutID),
+		intrinsicCache: NewIntrinsicSizeCache(4096),
 	}
 }
 
@@ -218,41 +216,26 @@ func (e *ReflowTracker) CollectDirtyRects() []LayoutID {
 
 // SetIntrinsicSize caches the intrinsic size for a layout object.
 func (e *ReflowTracker) SetIntrinsicSize(id LayoutID, width, height float32) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if !id.Valid() {
 		return
 	}
-
-	e.intrinsicWidth[id] = width
-	e.intrinsicHeight[id] = height
+	e.intrinsicCache.Put(id, width, height)
 }
 
 // IntrinsicSize returns the cached intrinsic size for a layout object.
 // Returns (0, 0) if not cached.
 func (e *ReflowTracker) IntrinsicSize(id LayoutID) (float32, float32) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	if !id.Valid() {
 		return 0, 0
 	}
-
-	width := e.intrinsicWidth[id]
-	height := e.intrinsicHeight[id]
-	return width, height
+	w, h, _ := e.intrinsicCache.Get(id)
+	return w, h
 }
 
 // InvalidateIntrinsicSize removes the cached intrinsic size for a layout object.
 func (e *ReflowTracker) InvalidateIntrinsicSize(id LayoutID) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if !id.Valid() {
 		return
 	}
-
-	delete(e.intrinsicWidth, id)
-	delete(e.intrinsicHeight, id)
+	e.intrinsicCache.Invalidate(id)
 }

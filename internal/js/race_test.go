@@ -58,7 +58,7 @@ func TestRace_RepeatedNavigationDuringTimers(t *testing.T) {
 func TestRace_FetchCompletionAfterNavigationCancellation(t *testing.T) {
 	session := NewSession(DefaultSessionConfig())
 	fetcher := &raceMockFetcher{delay: 20 * time.Millisecond, body: `{"status":"ok"}`}
-	
+
 	err := session.Submit(func(rt *Runtime) {
 		rt.SetFetcher(fetcher)
 	})
@@ -100,7 +100,7 @@ func TestRace_FetchCompletionAfterNavigationCancellation(t *testing.T) {
 // M8.5: DOM mutation bursts
 func TestRace_DOMMutationBursts(t *testing.T) {
 	session := NewSession(DefaultSessionConfig())
-	
+
 	var mutationCount atomic.Int32
 	err := session.Submit(func(rt *Runtime) {
 		rt.SetDOMMutationCallback(func(mutation string) {
