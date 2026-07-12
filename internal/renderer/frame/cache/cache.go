@@ -358,6 +358,24 @@ func (c *ImageCache) GetOrLoad(key ImageKey, load func() (ImageValue, error)) (I
 	return result, loadErr
 }
 
+// Evict removes LRU entries until at least targetBytes have been freed or the
+// cache is empty. Returns the number of bytes actually freed.
+//
+// This satisfies the memory.Evictor interface:
+//
+//	func(targetBytes uint64) uint64
+func (c *ImageCache) Evict(targetBytes uint64) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var freed uint64
+	for freed < targetBytes && c.tail != nil {
+		freed += uint64(c.tail.value.ByteSize)
+		c.evictLRU()
+	}
+	return freed
+}
+
 // Close releases all cached resources and resets state.
 func (c *ImageCache) Close() {
 	c.Clear()
