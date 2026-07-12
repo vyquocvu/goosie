@@ -724,7 +724,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [ ] Batch history and cache metadata writes.
 - [ ] Add schema versioning and migrations.
 - [ ] Add corruption recovery tests.
-- [ ] Preserve private mode as fully ephemeral.
+- [x] Preserve private mode as fully ephemeral.
 - [ ] Add import and export paths for profile settings.
 
 ### M9.4 Tune the Go runtime only after structural work

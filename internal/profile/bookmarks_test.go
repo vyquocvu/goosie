@@ -143,3 +143,34 @@ func TestBookmarkStoreConcurrentIndependentInstancesMergeAdds(t *testing.T) {
 		require.True(t, reloaded.Contains(fmt.Sprintf("https://%02d.test", i)))
 	}
 }
+
+func TestBookmarkStorePrivateDoesNotReadOrWrite(t *testing.T) {
+	root := t.TempDir()
+
+	// Write bookmarks as a normal profile.
+	normal, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	normalStore, err := NewBookmarkStore(normal)
+	require.NoError(t, err)
+	require.NoError(t, normalStore.Add("https://persisted.example.com", "Persisted"))
+
+	// Open a private profile in the same root — should not read persisted data.
+	priv, err := Open(Options{Root: root, Private: true})
+	require.NoError(t, err)
+	privStore, err := NewBookmarkStore(priv)
+	require.NoError(t, err)
+	require.Empty(t, privStore.List(),
+		"private profile must not read bookmarks from disk")
+
+	// Mutate and verify nothing is written to disk.
+	require.NoError(t, privStore.Add("https://private.example.com", "Private"))
+
+	// Re-open as normal — should still have only the original bookmark.
+	normal2, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	normal2Store, err := NewBookmarkStore(normal2)
+	require.NoError(t, err)
+	require.True(t, normal2Store.Contains("https://persisted.example.com"))
+	require.False(t, normal2Store.Contains("https://private.example.com"),
+		"private writes must not persist to disk")
+}

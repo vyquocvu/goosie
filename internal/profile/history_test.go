@@ -116,3 +116,33 @@ func TestHistoryStoreConcurrentInstanceSaveSessionPreservesVisits(t *testing.T) 
 	require.Equal(t, []string{"https://one.test"}, reloaded.VisitURLs())
 	require.Equal(t, []SessionTab{{URL: "https://two.test", Title: "Two", Active: true}}, reloaded.SessionTabs())
 }
+
+func TestHistoryStorePrivateDoesNotReadOrWrite(t *testing.T) {
+	root := t.TempDir()
+
+	// Write history as a normal profile.
+	normal, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	normalStore, err := NewHistoryStore(normal)
+	require.NoError(t, err)
+	require.NoError(t, normalStore.AddVisit("https://persisted.example.com", "Persisted"))
+
+	// Open a private profile in the same root — should not read persisted data.
+	priv, err := Open(Options{Root: root, Private: true})
+	require.NoError(t, err)
+	privStore, err := NewHistoryStore(priv)
+	require.NoError(t, err)
+	require.Empty(t, privStore.VisitURLs(),
+		"private profile must not read history from disk")
+
+	// Mutate and verify nothing is written to disk.
+	require.NoError(t, privStore.AddVisit("https://private.example.com", "Private"))
+
+	// Re-open as normal — should still have only the original visit.
+	normal2, err := Open(Options{Root: root})
+	require.NoError(t, err)
+	normal2Store, err := NewHistoryStore(normal2)
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://persisted.example.com"}, normal2Store.VisitURLs(),
+		"private writes must not persist to disk")
+}
