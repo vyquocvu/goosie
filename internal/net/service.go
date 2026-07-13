@@ -12,17 +12,36 @@ import (
 	"time"
 )
 
+// DefaultMaxBodySize is the default maximum decompressed response body size
+// (100 MB). Services created without an explicit MaxBodySize use this limit.
+// Set MaxBodySize to a negative value to disable the limit entirely.
+const DefaultMaxBodySize int64 = 100 * 1024 * 1024
+
+// MaxDecompressionRatio is the maximum allowed ratio of decompressed bytes
+// read to compressed bytes received (Content-Length). A ratio above this
+// threshold indicates a decompression bomb. The check only applies when
+// the server provides a non-negative Content-Length header.
+const MaxDecompressionRatio int64 = 100
+
 // ErrBodyTooLarge is returned when the response body exceeds the configured
 // MaxBodySize. Callers can check it with errors.Is.
 var ErrBodyTooLarge = errors.New("response body exceeds size limit")
 
+// ErrDecompressedTooLarge is returned when the decompressed response body
+// exceeds MaxDecompressionRatio times the compressed Content-Length,
+// indicating a potential decompression bomb. Callers can check it with errors.Is.
+var ErrDecompressedTooLarge = errors.New("response decompression ratio exceeded")
+
 // limitedContextReader wraps an io.Reader with context cancellation awareness
-// and optional byte limit enforcement. A limit of 0 means unlimited.
+// and optional byte limit enforcement. A limit of 0 means unlimited. When
+// compressedSize is positive, it tracks the decompression ratio and returns
+// ErrDecompressedTooLarge if decompressedBytes > compressedSize * ratio.
 type limitedContextReader struct {
-	ctx    context.Context
-	reader io.Reader
-	limit  int64 // max bytes to read; 0 = unlimited
-	read   int64 // bytes read so far
+	ctx            context.Context
+	reader         io.Reader
+	limit          int64 // max bytes to read; 0 = unlimited
+	read           int64 // bytes read so far
+	compressedSize int64 // Content-Length (compressed); 0 or -1 = unknown
 }
 
 func (r *limitedContextReader) Read(p []byte) (int, error) {
@@ -40,6 +59,11 @@ func (r *limitedContextReader) Read(p []byte) (int, error) {
 	}
 	n, err := r.reader.Read(p)
 	r.read += int64(n)
+	// Decompression bomb check: if we know the compressed size and the
+	// decompressed output exceeds the allowed ratio, abort immediately.
+	if r.compressedSize > 0 && r.read > r.compressedSize*MaxDecompressionRatio {
+		return 0, ErrDecompressedTooLarge
+	}
 	return n, err
 }
 
@@ -53,7 +77,7 @@ type ServiceOptions struct {
 	Client      *http.Client
 	Cache       *HTTPCache
 	UserAgent   string
-	MaxBodySize int64 // maximum response body size in bytes; 0 = unlimited
+	MaxBodySize int64 // maximum decompressed response body size in bytes; 0 = DefaultMaxBodySize, negative = unlimited
 }
 
 type Service struct {
@@ -77,12 +101,16 @@ func NewService(options ServiceOptions) *Service {
 	if userAgent == "" {
 		userAgent = defaultUserAgent
 	}
+	maxBodySize := options.MaxBodySize
+	if maxBodySize == 0 {
+		maxBodySize = DefaultMaxBodySize
+	}
 	return &Service{
 		client:      client,
 		cache:       options.Cache,
 		userAgent:   userAgent,
 		log:         NewRequestLog(),
-		maxBodySize: options.MaxBodySize,
+		maxBodySize: maxBodySize,
 	}
 }
 
@@ -319,11 +347,18 @@ func (s *Service) FetchStream(ctx context.Context, rawURL string) (io.ReadCloser
 		meta.FinalURL = resp.Request.URL.String()
 	}
 
+	// Content-Length pre-check: reject before returning the stream.
+	if err := checkContentLength(resp, s.maxBodySize); err != nil {
+		resp.Body.Close()
+		return nil, meta, err
+	}
+
 	// Wrap body with context cancellation and optional size limit.
 	reader := io.Reader(&limitedContextReader{
-		ctx:    ctx,
-		reader: resp.Body,
-		limit:  s.maxBodySize,
+		ctx:            ctx,
+		reader:         resp.Body,
+		limit:          s.maxBodySize,
+		compressedSize: resp.ContentLength,
 	})
 	stream := io.NopCloser(reader)
 
@@ -350,11 +385,28 @@ func (s *Service) setSecurity(summary SecuritySummary) {
 	s.security = summary
 }
 
+// checkContentLength returns ErrBodyTooLarge if the response's Content-Length
+// header is known and exceeds the configured maxBodySize. A maxBodySize <= 0
+// disables the check. Returns nil if the check passes or Content-Length is unknown.
+func checkContentLength(resp *http.Response, maxBodySize int64) error {
+	if maxBodySize <= 0 {
+		return nil
+	}
+	if resp.ContentLength > maxBodySize {
+		return ErrBodyTooLarge
+	}
+	return nil
+}
+
 func readResponseBody(ctx context.Context, resp *http.Response, onProgress ProgressCallback, maxBodySize int64) (string, error) {
+	if err := checkContentLength(resp, maxBodySize); err != nil {
+		return "", err
+	}
 	reader := io.Reader(&limitedContextReader{
-		ctx:    ctx,
-		reader: resp.Body,
-		limit:  maxBodySize,
+		ctx:            ctx,
+		reader:         resp.Body,
+		limit:          maxBodySize,
+		compressedSize: resp.ContentLength,
 	})
 	if onProgress != nil && resp.ContentLength > 0 {
 		reader = &progressReader{

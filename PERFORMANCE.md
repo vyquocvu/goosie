@@ -313,6 +313,31 @@ The streaming path is **26% faster**, uses **26% less memory**, and makes **15% 
 allocations** by eliminating the `bytes.Buffer` intermediary. The DOM parser's
 `ParseDocument(io.Reader)` accepts the stream directly for tokenizer consumption.
 
+### Response and Decompression Size Limits (M10.1)
+
+The network service enforces response body size limits and decompression bomb
+detection by default:
+
+- **Default body size limit**: 100 MB (`DefaultMaxBodySize`) applied when
+  `MaxBodySize == 0` in `ServiceOptions`. Set to a negative value to disable.
+- **Content-Length pre-check**: Rejects responses before reading the body when
+  `Content-Length` is known to exceed the limit. Zero-overhead for compliant
+  servers.
+- **Decompression bomb detection**: `limitedContextReader` tracks the ratio of
+  decompressed bytes to compressed `Content-Length`. Aborts with
+  `ErrDecompressedTooLarge` when the ratio exceeds 100:1.
+
+The overhead of the ratio check is a single integer comparison per `Read()` call
+when `Content-Length` is known (zero when unknown). The Content-Length pre-check
+avoids downloading oversized responses entirely.
+
+```bash
+go test -bench=BenchmarkLimitedContextReader -benchmem ./internal/net/
+```
+
+Results show the size limit enforcement adds no measurable overhead to normal
+response reading — the check is branch-predicted away on the fast path.
+
 ### Profiling
 
 ```bash

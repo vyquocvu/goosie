@@ -1088,6 +1088,29 @@ content blocking.
   alongside a `RedirectCount` of `maxRedirects`. Callers can detect the
   limit by checking `meta.RedirectCount == maxRedirects && meta.Status >= 300`.
 
+**Response and decompression size limits (M10.1):**
+- `DefaultMaxBodySize` (100 MB) is applied when `MaxBodySize == 0` in
+  `ServiceOptions`. Set `MaxBodySize` to a negative value to disable the
+  body size limit entirely.
+- `checkContentLength()` rejects responses before reading the body when
+  `Content-Length` is known to exceed `maxBodySize`. This prevents
+  downloading large files only to discard them.
+- `limitedContextReader` enforces the decompressed body size limit at
+  read time. It wraps `resp.Body` (which is the decompressed stream when
+  Go's `Transport.DisableCompression` is false).
+- Decompression bomb detection: `limitedContextReader` tracks the ratio
+  of decompressed bytes read to the compressed `Content-Length`. When the
+  ratio exceeds `MaxDecompressionRatio` (100:1), it returns
+  `ErrDecompressedTooLarge`. This catches gzip bombs that compress a
+  small payload into gigabytes.
+- The decompression ratio check is skipped when `Content-Length` is
+  unknown (-1) or when `maxBodySize` is negative (unlimited mode).
+- `ErrBodyTooLarge` is returned for body size violations (both
+  Content-Length pre-check and runtime read limit).
+- `ErrDecompressedTooLarge` is returned for decompression ratio violations.
+- All fetch paths (`FetchWithMeta`, `FetchWithContext`, `FetchStream`)
+  enforce both limits.
+
 ## Navigation State Flow
 
 ```

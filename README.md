@@ -85,6 +85,7 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
   - Context-based timeout and cancellation support
   - Response metadata preservation for security inspection and developer tools
   - Streaming response body path (M1.3) eliminates intermediate buffer copies
+  - Response and decompression size limits (M10.1): default 100 MB body limit, Content-Length pre-check, decompression bomb detection
 - **JavaScript Runtime**: Execute JavaScript with Goja engine and comprehensive DOM APIs
   - Enhanced Console API: `console.log()`, `console.error()`, `console.warn()`, `console.info()`, `console.table()`
   - Console panel in browser UI with filtering and error tracking

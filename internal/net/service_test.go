@@ -510,7 +510,8 @@ func TestServiceFetchWithContextCancelledDuringBodyRead(t *testing.T) {
 }
 
 func TestServiceFetchWithContextBodySizeBackwardCompat(t *testing.T) {
-	// Default MaxBodySize = 0 means unlimited — existing behavior preserved
+	// Default MaxBodySize = 0 means DefaultMaxBodySize (100 MB).
+	// A 50 KB body is well under the default limit.
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return newTestResponse(req, http.StatusOK, strings.Repeat("x", 50000)), nil
 	})}
@@ -1116,6 +1117,410 @@ func TestFetchStreamRedirectLimitExceeded(t *testing.T) {
 	data, _ := io.ReadAll(body)
 	if string(data) == "should not reach" {
 		t.Error("should not have reached the final response")
+	}
+}
+
+// --- Response and decompression size limits (M10.1) ---
+
+func TestNewServiceAppliesDefaultMaxBodySize(t *testing.T) {
+	service := NewService(ServiceOptions{})
+	if service.maxBodySize != DefaultMaxBodySize {
+		t.Fatalf("maxBodySize = %d, want %d", service.maxBodySize, DefaultMaxBodySize)
+	}
+}
+
+func TestNewServiceExplicitMaxBodySize(t *testing.T) {
+	service := NewService(ServiceOptions{MaxBodySize: 42})
+	if service.maxBodySize != 42 {
+		t.Fatalf("maxBodySize = %d, want 42", service.maxBodySize)
+	}
+}
+
+func TestNewServiceNegativeMaxBodySizeDisablesLimit(t *testing.T) {
+	service := NewService(ServiceOptions{MaxBodySize: -1})
+	if service.maxBodySize != -1 {
+		t.Fatalf("maxBodySize = %d, want -1", service.maxBodySize)
+	}
+}
+
+func TestContentLengthPreCheckRejectsOversizedResponse(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "tiny body")
+		resp.ContentLength = 200 * 1024 * 1024 // 200 MB declared
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 100 * 1024 * 1024})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/oversized", nil)
+	if err == nil {
+		t.Fatal("expected error for Content-Length exceeding MaxBodySize")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestContentLengthPreCheckAllowsSmallResponse(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "small body")
+		resp.ContentLength = int64(len("small body"))
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 100})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/small", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body != "small body" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestContentLengthPreCheckSkipsWhenUnknown(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "hi")
+		resp.ContentLength = -1 // unknown
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 100})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/unknown", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body != "hi" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestContentLengthPreCheckSkipsWhenUnlimited(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "ok")
+		resp.ContentLength = 1 << 40 // 1 TB
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: -1})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/unlimited", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body != "ok" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestContentLengthPreCheckWithFetchWithMeta(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "won't read")
+		resp.ContentLength = 200 * 1024 * 1024
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 100 * 1024 * 1024})
+
+	_, meta, err := service.FetchWithMeta(context.Background(), "https://example.test/oversized", nil)
+	if err == nil {
+		t.Fatal("expected error for Content-Length exceeding MaxBodySize")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+	if meta.Status == 0 {
+		// Metadata should still have been captured before the check
+		t.Error("meta.Status should not be zero")
+	}
+}
+
+func TestContentLengthPreCheckWithFetchStream(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "won't return")
+		resp.ContentLength = 200 * 1024 * 1024
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: 100 * 1024 * 1024})
+
+	body, meta, err := service.FetchStream(context.Background(), "https://example.test/oversized")
+	if err == nil {
+		body.Close()
+		t.Fatal("expected error for Content-Length exceeding MaxBodySize")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+	if meta.Status == 0 {
+		t.Error("meta.Status should not be zero")
+	}
+}
+
+func TestDefaultMaxBodySizeRejectsLargeResponse(t *testing.T) {
+	// Body exceeds DefaultMaxBodySize (100 MB)
+	largeBody := strings.Repeat("x", int(DefaultMaxBodySize)+1)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, largeBody), nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/large", nil)
+	if err == nil {
+		t.Fatal("expected error for body exceeding default MaxBodySize")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestDefaultMaxBodySizeAcceptsSmallResponse(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return newTestResponse(req, http.StatusOK, "small"), nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, err := service.FetchWithContext(context.Background(), "https://example.test/small", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body != "small" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestDecompressionBombDetection(t *testing.T) {
+	// Simulate a decompression bomb: small Content-Length (compressed) but
+	// large decompressed body exceeding MaxDecompressionRatio.
+	compressedSize := int64(1000)
+	decompressedSize := int64(1000*MaxDecompressionRatio + 1) // exceeds ratio
+	body := strings.Repeat("x", int(decompressedSize))
+
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, body)
+		resp.ContentLength = compressedSize
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/bomb", nil)
+	if err == nil {
+		t.Fatal("expected ErrDecompressedTooLarge for decompression bomb")
+	}
+	if !errors.Is(err, ErrDecompressedTooLarge) {
+		t.Fatalf("error = %v, want ErrDecompressedTooLarge", err)
+	}
+}
+
+func TestDecompressionRatioWithinLimit(t *testing.T) {
+	// Decompression ratio of 10:1 — within the 100:1 limit.
+	compressedSize := int64(1000)
+	decompressedSize := int64(10000)
+	body := strings.Repeat("x", int(decompressedSize))
+
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, body)
+		resp.ContentLength = compressedSize
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	result, err := service.FetchWithContext(context.Background(), "https://example.test/ok", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != int(decompressedSize) {
+		t.Fatalf("body length = %d, want %d", len(result), decompressedSize)
+	}
+}
+
+func TestDecompressionBombWithFetchStream(t *testing.T) {
+	compressedSize := int64(100)
+	decompressedSize := int64(100*MaxDecompressionRatio + 1)
+	body := strings.Repeat("x", int(decompressedSize))
+
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, body)
+		resp.ContentLength = compressedSize
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	stream, _, err := service.FetchStream(context.Background(), "https://example.test/bomb")
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	defer stream.Close()
+
+	_, readErr := io.ReadAll(stream)
+	if readErr == nil {
+		t.Fatal("expected ErrDecompressedTooLarge when reading stream")
+	}
+	if !errors.Is(readErr, ErrDecompressedTooLarge) {
+		t.Fatalf("read error = %v, want ErrDecompressedTooLarge", readErr)
+	}
+}
+
+func TestDecompressionBombSkippedWhenContentLengthUnknown(t *testing.T) {
+	// When Content-Length is unknown (-1), decompression ratio check is skipped.
+	body := strings.Repeat("x", 100000)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, body)
+		resp.ContentLength = -1
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: -1})
+
+	result, err := service.FetchWithContext(context.Background(), "https://example.test/unknown", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 100000 {
+		t.Fatalf("body length = %d, want 100000", len(result))
+	}
+}
+
+func TestDecompressionBombSkippedWhenLimitDisabled(t *testing.T) {
+	// MaxBodySize = -1 disables body limit, but decompression ratio still
+	// applies when Content-Length is known.
+	compressedSize := int64(10)
+	decompressedSize := int64(10*MaxDecompressionRatio + 1)
+	body := strings.Repeat("x", int(decompressedSize))
+
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, body)
+		resp.ContentLength = compressedSize
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client, MaxBodySize: -1})
+
+	_, err := service.FetchWithContext(context.Background(), "https://example.test/bomb", nil)
+	if err == nil {
+		t.Fatal("expected ErrDecompressedTooLarge even with unlimited body size")
+	}
+	if !errors.Is(err, ErrDecompressedTooLarge) {
+		t.Fatalf("error = %v, want ErrDecompressedTooLarge", err)
+	}
+}
+
+func TestLimitedContextReaderDecompressionBombExactBoundary(t *testing.T) {
+	// Exactly at the ratio boundary: decompressed == compressed * ratio
+	compressedSize := int64(100)
+	ratio := MaxDecompressionRatio
+	decompressedSize := compressedSize * ratio
+
+	reader := &limitedContextReader{
+		ctx:            context.Background(),
+		reader:         strings.NewReader(strings.Repeat("x", int(decompressedSize))),
+		compressedSize: compressedSize,
+	}
+	_, err := io.ReadAll(reader)
+	// Should succeed — decompressed == compressed * ratio, not exceeding it.
+	if err != nil {
+		t.Fatalf("unexpected error at exact boundary: %v", err)
+	}
+}
+
+func TestLimitedContextReaderDecompressionBombOneOverBoundary(t *testing.T) {
+	// One byte over the ratio boundary: decompressed == compressed * ratio + 1
+	compressedSize := int64(100)
+	ratio := MaxDecompressionRatio
+	decompressedSize := compressedSize*ratio + 1
+
+	reader := &limitedContextReader{
+		ctx:            context.Background(),
+		reader:         strings.NewReader(strings.Repeat("x", int(decompressedSize))),
+		compressedSize: compressedSize,
+	}
+	_, err := io.ReadAll(reader)
+	if err == nil {
+		t.Fatal("expected error one byte over boundary")
+	}
+	if !errors.Is(err, ErrDecompressedTooLarge) {
+		t.Fatalf("error = %v, want ErrDecompressedTooLarge", err)
+	}
+}
+
+func TestLimitedContextReaderBodyLimitAndDecompressionBomb(t *testing.T) {
+	// Both limits apply: body limit fires first.
+	compressedSize := int64(1000)
+	bodyLimit := int64(500)
+	decompressedSize := int64(1000*MaxDecompressionRatio + 1) // bomb
+
+	reader := &limitedContextReader{
+		ctx:            context.Background(),
+		reader:         strings.NewReader(strings.Repeat("x", int(decompressedSize))),
+		limit:          bodyLimit,
+		compressedSize: compressedSize,
+	}
+	_, err := io.ReadAll(reader)
+	// Body limit (500) fires before decompression ratio
+	if err == nil {
+		t.Fatal("expected error for body limit")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestLimitedContextReaderZeroCompressedSizeSkipsRatioCheck(t *testing.T) {
+	reader := &limitedContextReader{
+		ctx:            context.Background(),
+		reader:         strings.NewReader(strings.Repeat("x", 100000)),
+		compressedSize: 0, // unknown
+	}
+	_, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLimitedContextReaderNegativeCompressedSizeSkipsRatioCheck(t *testing.T) {
+	reader := &limitedContextReader{
+		ctx:            context.Background(),
+		reader:         strings.NewReader(strings.Repeat("x", 100000)),
+		compressedSize: -1, // unknown
+	}
+	_, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFetchWithMetaBodyLimitEnforcedByDefault(t *testing.T) {
+	// Use httptest to simulate a real server that doesn't set Content-Length
+	// (chunked encoding). Body exceeds DefaultMaxBodySize.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Write in chunks to simulate chunked encoding — exceed the default limit.
+		for i := 0; i < 102; i++ {
+			w.Write([]byte(strings.Repeat("x", 1024*1024))) // 1MB per chunk, 102MB total
+		}
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{Client: &http.Client{}})
+
+	_, _, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+	if err == nil {
+		t.Fatal("expected error for body exceeding default MaxBodySize")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
+	}
+}
+
+func TestFetchStreamContentLengthPreCheckWithDefaultLimit(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		resp := newTestResponse(req, http.StatusOK, "won't read")
+		resp.ContentLength = int64(DefaultMaxBodySize + 1)
+		return resp, nil
+	})}
+	service := NewService(ServiceOptions{Client: client})
+
+	body, _, err := service.FetchStream(context.Background(), "https://example.test/oversized")
+	if err == nil {
+		body.Close()
+		t.Fatal("expected error for Content-Length exceeding default MaxBodySize")
+	}
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("error = %v, want ErrBodyTooLarge", err)
 	}
 }
 
