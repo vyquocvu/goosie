@@ -266,7 +266,7 @@ func (l *loader) loadFromURL(url string) (*ImageData, error) {
 		return nil, fmt.Errorf("failed to read image data: %w", err)
 	}
 
-	// Detect SVG by URL suffix or Content-Type header
+	// Detect SVG by URL suffix or Content-Type header.
 	ct := resp.Header.Get("Content-Type")
 	if isSVGSource(url) || strings.Contains(ct, "image/svg") {
 		return decodeSVG(data)

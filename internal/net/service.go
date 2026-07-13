@@ -78,14 +78,20 @@ type ServiceOptions struct {
 	Cache       *HTTPCache
 	UserAgent   string
 	MaxBodySize int64 // maximum decompressed response body size in bytes; 0 = DefaultMaxBodySize, negative = unlimited
+	// ExpectedContentType is a list of allowed Content-Type media types for
+	// responses. When non-empty, each fetch method validates the response
+	// Content-Type against this list and returns ErrUnsupportedMediaType on
+	// mismatch. Empty means accept all types.
+	ExpectedContentType []string
 }
 
 type Service struct {
-	client      *http.Client
-	cache       *HTTPCache
-	userAgent   string
-	log         *RequestLog
-	maxBodySize int64
+	client              *http.Client
+	cache               *HTTPCache
+	userAgent           string
+	log                 *RequestLog
+	maxBodySize         int64
+	expectedContentType []string
 
 	securityMu sync.Mutex
 	security   SecuritySummary
@@ -106,11 +112,12 @@ func NewService(options ServiceOptions) *Service {
 		maxBodySize = DefaultMaxBodySize
 	}
 	return &Service{
-		client:      client,
-		cache:       options.Cache,
-		userAgent:   userAgent,
-		log:         NewRequestLog(),
-		maxBodySize: maxBodySize,
+		client:              client,
+		cache:               options.Cache,
+		userAgent:           userAgent,
+		log:                 NewRequestLog(),
+		maxBodySize:         maxBodySize,
+		expectedContentType: options.ExpectedContentType,
 	}
 }
 
@@ -164,6 +171,22 @@ func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress P
 	meta.RedirectCount = redirectCount
 	if resp.Request != nil && resp.Request.URL != nil {
 		meta.FinalURL = resp.Request.URL.String()
+	}
+
+	// Validate Content-Type against expected types before reading the body.
+	if err := s.validateContentType(meta.ContentType); err != nil {
+		resp.Body.Close()
+		entry := RequestLogEntry{
+			Method:      http.MethodGet,
+			URL:         rawURL,
+			Status:      resp.StatusCode,
+			ContentType: meta.ContentType,
+			Error:       err.Error(),
+			StartedAt:   startedAt,
+			Duration:    time.Since(startedAt),
+		}
+		s.log.Add(entry)
+		return "", meta, err
 	}
 
 	body, readErr := readResponseBody(ctx, resp, onProgress, s.maxBodySize)
@@ -240,6 +263,22 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 		return "", wrapped
 	}
 	defer resp.Body.Close()
+
+	// Validate Content-Type against expected types before reading the body.
+	respContentType := resp.Header.Get("Content-Type")
+	if err := s.validateContentType(respContentType); err != nil {
+		entry := RequestLogEntry{
+			Method:      http.MethodGet,
+			URL:         rawURL,
+			Status:      resp.StatusCode,
+			ContentType: respContentType,
+			Error:       err.Error(),
+			StartedAt:   startedAt,
+			Duration:    time.Since(startedAt),
+		}
+		s.log.Add(entry)
+		return "", err
+	}
 
 	body, readErr := readResponseBody(ctx, resp, onProgress, s.maxBodySize)
 	entry := RequestLogEntry{
@@ -347,6 +386,22 @@ func (s *Service) FetchStream(ctx context.Context, rawURL string) (io.ReadCloser
 		meta.FinalURL = resp.Request.URL.String()
 	}
 
+	// Validate Content-Type against expected types before returning the stream.
+	if err := s.validateContentType(meta.ContentType); err != nil {
+		resp.Body.Close()
+		entry := RequestLogEntry{
+			Method:      http.MethodGet,
+			URL:         rawURL,
+			Status:      resp.StatusCode,
+			ContentType: meta.ContentType,
+			Error:       err.Error(),
+			StartedAt:   startedAt,
+			Duration:    time.Since(startedAt),
+		}
+		s.log.Add(entry)
+		return nil, meta, err
+	}
+
 	// Content-Length pre-check: reject before returning the stream.
 	if err := checkContentLength(resp, s.maxBodySize); err != nil {
 		resp.Body.Close()
@@ -431,4 +486,11 @@ func (s *Service) Close() error {
 		return s.cache.Close()
 	}
 	return nil
+}
+
+// validateContentType checks the response Content-Type against the configured
+// expected types. Returns nil if no expected types are configured (accept all)
+// or if the Content-Type matches. Returns ErrUnsupportedMediaType otherwise.
+func (s *Service) validateContentType(contentType string) error {
+	return ValidateContentType(contentType, s.expectedContentType)
 }

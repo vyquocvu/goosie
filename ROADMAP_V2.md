@@ -755,7 +755,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [x] Use the public suffix list for cookie and origin decisions.
 - [x] Enforce redirect limits.
 - [x] Enforce response and decompression size limits.
-- [ ] Validate MIME handling.
+- [x] Validate MIME handling.
 - [ ] Enforce the documented Content Security Policy subset.
 - [ ] Add pop-up blocking policy at the navigation boundary.
 - [ ] Prevent local file access from remote origins by default.

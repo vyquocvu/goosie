@@ -86,6 +86,7 @@ A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GU
   - Response metadata preservation for security inspection and developer tools
   - Streaming response body path (M1.3) eliminates intermediate buffer copies
   - Response and decompression size limits (M10.1): default 100 MB body limit, Content-Length pre-check, decompression bomb detection
+  - MIME validation (M10.1): optional Content-Type validation against expected types, zero-allocation classification
 - **JavaScript Runtime**: Execute JavaScript with Goja engine and comprehensive DOM APIs
   - Enhanced Console API: `console.log()`, `console.error()`, `console.warn()`, `console.info()`, `console.table()`
   - Console panel in browser UI with filtering and error tracking
@@ -287,6 +288,10 @@ go test -bench=BenchmarkDebugDirtyRegionOverlay -benchmem ./internal/renderer/
 
 # DOM parser benchmarks
 go test -bench=. -benchmem ./internal/dom/
+
+# MIME validation benchmarks (M10.1)
+go test -bench=BenchmarkValidateContentType -benchmem ./internal/net/
+go test -bench=BenchmarkClassifyContentType -benchmem ./internal/net/
 
 # Atom and string interning benchmarks (M2.2)
 go test -bench=. -benchmem ./internal/dom/atom/

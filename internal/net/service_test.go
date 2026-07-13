@@ -1606,3 +1606,139 @@ func BenchmarkFetchStreamRedirectLimit(b *testing.B) {
 		body.Close()
 	}
 }
+
+func TestServiceMIMEValidationFetchWithMeta(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("fake png data"))
+	}))
+	defer server.Close()
+
+	// Service configured to accept only text/html — should reject image/png.
+	service := NewService(ServiceOptions{
+		ExpectedContentType: []string{"text/html"},
+	})
+	_, meta, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+	if err == nil {
+		t.Fatal("FetchWithMeta should reject image/png when expecting text/html")
+	}
+	if !errors.Is(err, ErrUnsupportedMediaType) {
+		t.Errorf("error = %v, want ErrUnsupportedMediaType", err)
+	}
+	if meta.ContentType != "image/png" {
+		t.Errorf("meta.ContentType = %q, want image/png", meta.ContentType)
+	}
+}
+
+func TestServiceMIMEValidationFetchWithContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"key":"value"}`))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{
+		ExpectedContentType: []string{"text/html", "text/css"},
+	})
+	_, err := service.FetchWithContext(context.Background(), server.URL, nil)
+	if err == nil {
+		t.Fatal("FetchWithContext should reject application/json when expecting html/css")
+	}
+	if !errors.Is(err, ErrUnsupportedMediaType) {
+		t.Errorf("error = %v, want ErrUnsupportedMediaType", err)
+	}
+}
+
+func TestServiceMIMEValidationFetchStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("plain text"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{
+		ExpectedContentType: []string{"text/html"},
+	})
+	body, meta, err := service.FetchStream(context.Background(), server.URL)
+	if err == nil {
+		body.Close()
+		t.Fatal("FetchStream should reject text/plain when expecting text/html")
+	}
+	if !errors.Is(err, ErrUnsupportedMediaType) {
+		t.Errorf("error = %v, want ErrUnsupportedMediaType", err)
+	}
+	if meta.ContentType != "text/plain" {
+		t.Errorf("meta.ContentType = %q, want text/plain", meta.ContentType)
+	}
+}
+
+func TestServiceMIMEValidationAcceptsMatchingType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><body>ok</body></html>"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{
+		ExpectedContentType: []string{"text/html"},
+	})
+	body, err := service.FetchWithContext(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext should accept text/html: %v", err)
+	}
+	if !strings.Contains(body, "<html>") {
+		t.Errorf("body = %q, expected HTML content", body)
+	}
+}
+
+func TestServiceMIMEValidationDefaultAcceptsAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("fake png"))
+	}))
+	defer server.Close()
+
+	// No ExpectedContentType configured — should accept all types.
+	service := NewService(ServiceOptions{})
+	body, err := service.FetchWithContext(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext without ExpectedContentType should accept all: %v", err)
+	}
+	if body != "fake png" {
+		t.Errorf("body = %q", body)
+	}
+}
+
+func TestServiceMIMEValidationLoggedOnReject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("video data"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{
+		ExpectedContentType: []string{"text/html"},
+	})
+	_, _, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	entries := service.Log().Entries()
+	if len(entries) == 0 {
+		t.Fatal("expected log entry for rejected MIME type")
+	}
+	last := entries[len(entries)-1]
+	if last.Error == "" {
+		t.Error("expected error in log entry")
+	}
+	if last.ContentType != "video/mp4" {
+		t.Errorf("log ContentType = %q, want video/mp4", last.ContentType)
+	}
+}

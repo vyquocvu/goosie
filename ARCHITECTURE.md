@@ -1088,6 +1088,24 @@ content blocking.
   alongside a `RedirectCount` of `maxRedirects`. Callers can detect the
   limit by checking `meta.RedirectCount == maxRedirects && meta.Status >= 300`.
 
+**MIME validation (M10.1):**
+- `ValidateContentType(rawContentType, allowedTypes)` checks whether a
+  response's Content-Type matches at least one of the allowed media types.
+  Returns `ErrUnsupportedMediaType` on mismatch, `nil` on match.
+- `parseMediaType(raw)` extracts the media-type/subtype portion, stripping
+  parameters (charset, boundary, etc.) and lowercasing for comparison.
+- `ClassifyContentType(raw)` classifies a Content-Type into broad resource
+  classes: `MediaTypeHTML`, `MediaTypeCSS`, `MediaTypeJavaScript`,
+  `MediaTypeImage`, or `MediaTypeUnknown`.
+- `SupportedMediaTypes` maps each class to its allowed Content-Type prefixes.
+- `ServiceOptions.ExpectedContentType` is a per-Service list of allowed
+  types. When non-empty, all three fetch methods validate the response
+  Content-Type before reading the body. Empty means accept all.
+- Validation is zero-allocation (36 ns/op) and adds no measurable overhead
+  to the fetch pipeline.
+- The validation is advisory — callers that need to handle unexpected types
+  (e.g., download a file) can set `ExpectedContentType` to nil.
+
 **Response and decompression size limits (M10.1):**
 - `DefaultMaxBodySize` (100 MB) is applied when `MaxBodySize == 0` in
   `ServiceOptions`. Set `MaxBodySize` to a negative value to disable the

@@ -1021,6 +1021,31 @@ To maintain clean and predictable garbage collection behavior, the engine strict
 - [Chromium Display Lists](https://chromium.googlesource.com/chromium/src/+/master/cc/paint/display_item_list.h)
 - [WebKit Viewport Culling](https://webkit.org/blog/6591/scroll-anchoring/)
 
+### MIME Validation (M10.1)
+
+The `internal/net` package provides Content-Type validation for HTTP responses,
+preventing type-mismatch attacks where a server returns a different Content-Type
+than expected (e.g., serving `image/png` for a main navigation URL).
+
+```bash
+go test -bench=BenchmarkValidateContentType -benchmem ./internal/net/
+go test -bench=BenchmarkParseMediaType -benchmem ./internal/net/
+go test -bench=BenchmarkClassifyContentType -benchmem ./internal/net/
+```
+
+Results (VirtualApple @ 2.50GHz):
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ValidateContentType (5 types) | 36.2 | 0 | 0 |
+| ParseMediaType | 37.6 | 0 | 0 |
+| ClassifyContentType | 86.3 | 0 | 0 |
+
+All MIME validation operations are zero-allocation. The validation adds no
+measurable overhead to the fetch pipeline (within noise of pre-existing
+FetchWithMeta benchmarks). The `parseMediaType` function strips parameters
+and lowercases in a single pass with no allocations.
+
 ---
 
 *Last updated: July 2026*
