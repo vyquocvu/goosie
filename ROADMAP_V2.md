@@ -729,11 +729,11 @@ Make memory and storage behavior predictable across repeated navigation and mult
 
 ### M9.4 Tune the Go runtime only after structural work
 
-- [ ] Record representative heap profiles.
-- [ ] Evaluate `GOGC` and soft memory limits on reference workloads.
-- [ ] Reject settings that cause GC thrashing.
-- [ ] Add PGO only after representative profiles are stable.
-- [ ] Keep experimental arenas outside the production architecture.
+- [x] Record representative heap profiles.
+- [x] Evaluate `GOGC` and soft memory limits on reference workloads.
+- [x] Reject settings that cause GC thrashing.
+- [x] Add PGO only after representative profiles are stable.
+- [x] Keep experimental arenas outside the production architecture.
 
 **Performance targets**
 

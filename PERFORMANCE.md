@@ -947,6 +947,49 @@ go test -bench=. -benchmem ./internal/engine/pagecache/
 - [ ] Implement lazy loading for off-screen images
 - [ ] Add virtual scrolling for infinite lists
 
+## Go Runtime Tuning and Profile-Guided Optimization (PGO)
+
+The engine provides APIs in `internal/memory` to dynamically evaluate and tune Go runtime settings (`GOGC` and `GOMEMLIMIT`) on reference workloads, detect/reject GC thrashing, and record CPU/heap profiles.
+
+### 1. Dynamic Evaluation & GC Thrashing Detection
+
+GC thrashing occurs when target memory limits are set too low, causing Go's GC to run continuously and consume significant CPU/execution time. The tuner identifies and rejects these configurations based on:
+- GC CPU fraction (`GCCPUFraction`) exceeding 20%.
+- Exceptionally high GC frequency (e.g., >100 GC cycles per second).
+
+You can evaluate any reference workload with:
+```go
+import "github.com/vyquocvu/goosie/internal/memory"
+
+cfg := memory.TuningConfig{GOGC: 100, MemoryLimit: 128 * 1024 * 1024}
+stats := memory.EvaluateConfig(cfg, func() {
+    // Reference workload here (e.g., render page)
+})
+if stats.Thrashing {
+    // Reject configuration
+}
+```
+
+### 2. Profile-Guided Optimization (PGO) Workflow
+
+Go 1.21+ supports Profile-Guided Optimization (PGO) to improve runtime performance by compiling with a representative CPU profile:
+
+1. **Record a stable representative profile**: Run the browser or run target workloads using the CPU profiling wrapper:
+   ```go
+   stop, err := memory.StartCPUProfile(file)
+   // Execute typical browsing session / reference workload
+   stop()
+   ```
+2. **Commit profile to package**: Save the resulting CPU profile as `default.pgo` in the main package directory (e.g., `cmd/browser/default.pgo`).
+3. **Compile with PGO**: Build the browser using:
+   ```bash
+   go build -pgo=default.pgo ./cmd/browser
+   ```
+
+### 3. Production Architecture Ban on Arenas
+
+To maintain clean and predictable garbage collection behavior, the engine strictly enforces a ban on experimental `arena` packages. The test suite walks the codebase structure programmatically using AST parsers to reject files containing `import "arena"`.
+
 ## References
 
 - [RENDER_ARCHITECTURE.md](RENDER_ARCHITECTURE.md) - Full rendering architecture

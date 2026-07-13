@@ -425,6 +425,7 @@ The browser demonstrates web functionality by:
 - **internal/engine/session**: Session lifecycle (state machine, context propagation, event callbacks) wrapping the navigation scheduler
 - **internal/engine/metrics**: Phase-timing recorder and counters for tracing navigation from URL entry to first paint
 - **internal/engine/pagecache**: Bounded LRU page cache for instant back/forward navigation (M9.2)
+- **internal/memory**: Bounded memory limits, GC tuning, evaluation, thrashing detection, and profiling APIs (M9.1, M9.4)
 - **internal/dom**: HTML parser for extracting content; compact DOM store (M2.3) with NodeID-based index storage
 - **internal/dom/atom**: String interning with static atoms for HTML tags/attributes and bounded LRU-evicted dynamic table (M2.2)
 - **internal/net**: Async HTTP client with context support for fetching web pages
