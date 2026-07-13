@@ -737,9 +737,9 @@ Make memory and storage behavior predictable across repeated navigation and mult
 
 **Performance targets**
 
-- [ ] Repeated navigation does not create unbounded heap growth.
-- [ ] Closing a tab releases session-owned memory after expected GC behavior.
-- [ ] Cache eviction is observable and deterministic under test budgets.
+- [x] Repeated navigation does not create unbounded heap growth.
+- [x] Closing a tab releases session-owned memory after expected GC behavior.
+- [x] Cache eviction is observable and deterministic under test budgets.
 
 # Milestone 10: Security Boundaries and Process-Ready Interfaces
 
