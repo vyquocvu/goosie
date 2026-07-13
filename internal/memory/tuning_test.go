@@ -230,4 +230,3 @@ func BenchmarkEvaluateConfig(b *testing.B) {
 		EvaluateConfig(cfg, workload)
 	}
 }
-

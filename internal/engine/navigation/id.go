@@ -66,7 +66,7 @@ func IDFromContext(ctx context.Context) (ID, bool) {
 type Load struct {
 	ID        ID
 	URL       string
-	Origin    string // extracted from URL (host only); used by RateLimiter
+	Origin    Origin // parsed web origin (scheme + host + port); Host() for rate limiter
 	Priority  Priority
 	StartedAt time.Time
 	Recorder  *metrics.Recorder
@@ -166,8 +166,8 @@ func (s *Scheduler) cancelPreviousLocked() {
 		delete(s.resourceCancels, id)
 		if load, ok := s.pending[id]; ok {
 			delete(s.pending, id)
-			if s.limiter != nil && load.Origin != "" {
-				s.limiter.Release(load.Origin)
+			if s.limiter != nil && load.Origin.IsValid() {
+				s.limiter.Release(load.Origin.Host())
 			}
 		}
 	}

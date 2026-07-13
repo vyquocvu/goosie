@@ -3,7 +3,6 @@ package navigation
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"sort"
 )
 
@@ -95,11 +94,12 @@ func (s *Scheduler) BeginWithPriority(parent context.Context, url string, prio P
 // resource. If the context is cancelled while waiting, a zero Load and the
 // cancelled context are returned without registering the resource.
 func (s *Scheduler) AddResource(parent context.Context, rawURL string, prio Priority) (Load, context.Context) {
-	origin := extractOrigin(rawURL)
+	origin, _ := ParseOrigin(rawURL)
+	originKey := origin.Host()
 
 	// Admit through rate limiter before taking scheduler lock.
 	if s.limiter != nil {
-		if err := s.limiter.Acquire(parent, origin, prio); err != nil {
+		if err := s.limiter.Acquire(parent, originKey, prio); err != nil {
 			// Context cancelled while waiting — do not register.
 			return Load{}, parent
 		}
@@ -143,19 +143,9 @@ func (s *Scheduler) RemoveResource(id ID) {
 	}
 	s.mu.Unlock()
 
-	if ok && s.limiter != nil && load.Origin != "" {
-		s.limiter.Release(load.Origin)
+	if ok && s.limiter != nil && load.Origin.IsValid() {
+		s.limiter.Release(load.Origin.Host())
 	}
-}
-
-// extractOrigin returns the host portion of a URL for use as a rate-limit key.
-// If the URL cannot be parsed, the raw string is returned as-is.
-func extractOrigin(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
-		return rawURL
-	}
-	return u.Host
 }
 
 // PendingLoads returns a snapshot of all pending loads (main navigation and

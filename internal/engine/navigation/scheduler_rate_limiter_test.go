@@ -22,8 +22,8 @@ func TestSchedulerWithRateLimiter_AddResourceAcquires(t *testing.T) {
 	if !load.ID.IsValid() {
 		t.Fatal("AddResource returned zero Load; want valid ID")
 	}
-	if load.Origin != "example.com" {
-		t.Errorf("load.Origin = %q, want %q", load.Origin, "example.com")
+	if load.Origin.Host() != "example.com" {
+		t.Errorf("load.Origin.Host() = %q, want %q", load.Origin.Host(), "example.com")
 	}
 	if load.Priority != PriorityBlockingCSS {
 		t.Errorf("load.Priority = %v, want PriorityBlockingCSS", load.Priority)
@@ -201,8 +201,8 @@ func TestSchedulerWithRateLimiter_RemoveResourceReleasesSlot(t *testing.T) {
 		if !res.load.ID.IsValid() {
 			t.Fatal("blocked AddResource should succeed after RemoveResource")
 		}
-		if res.load.Origin != "example.com" {
-			t.Errorf("load.Origin = %q, want %q", res.load.Origin, "example.com")
+		if res.load.Origin.Host() != "example.com" {
+			t.Errorf("load.Origin.Host() = %q, want %q", res.load.Origin.Host(), "example.com")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("blocked AddResource did not unblock after RemoveResource")

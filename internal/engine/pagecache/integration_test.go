@@ -24,7 +24,7 @@ func TestMemoryManagerIntegration_PageCacheEvictionIsDeterministic(t *testing.T)
 	const entryBytes = 1000
 	const entries = 5
 	const totalBytes = entryBytes * entries // 5 000 B
-	const budgetLimit = 3000               // 3 000 B — forces eviction of 2 entries
+	const budgetLimit = 3000                // 3 000 B — forces eviction of 2 entries
 
 	// Create a pagecache with generous entry count but a tight byte limit
 	// so only 3 entries fit at entryBytes each.

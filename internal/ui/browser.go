@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,10 +15,9 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/js"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
-	"github.com/vyquocvu/goosie/internal/profile"
-	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 // fixedHeightLayout is a custom layout that sets a fixed height for a widget
@@ -543,8 +541,8 @@ func (t *Tab) SetJSRuntime(runtime *js.Runtime) {
 	if t.browser.deps.Storage != nil {
 		runtime.SetLocalStorageAdapter(t.browser.deps.Storage)
 	}
-	if current, err := urlpkg.Parse(t.state.GetCurrentURL()); err == nil && current.Scheme != "" && current.Host != "" {
-		runtime.SetOrigin(current.Scheme + "://" + current.Host)
+	if origin, err := navigation.ParseOrigin(t.state.GetCurrentURL()); err == nil && origin.IsValid() {
+		runtime.SetOrigin(origin.String())
 	}
 }
 
@@ -583,8 +581,8 @@ func (b *Browser) NavigateTo(url string) {
 	if tab := b.ActiveTab(); tab != nil {
 		tab.state.AddToHistory(url)
 		if tab.jsRuntime != nil {
-			if current, err := urlpkg.Parse(url); err == nil && current.Scheme != "" && current.Host != "" {
-				tab.jsRuntime.SetOrigin(current.Scheme + "://" + current.Host)
+			if origin, err := navigation.ParseOrigin(url); err == nil && origin.IsValid() {
+				tab.jsRuntime.SetOrigin(origin.String())
 			}
 		}
 		if b.deps.History != nil {

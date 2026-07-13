@@ -1010,6 +1010,53 @@ for configurable execution limits and security controls.
 All enforcement checks are zero-allocation. Atomic counters for
 step tracking and resource acquisition.
 
+### Centralized Origin Calculation (M10.1)
+
+The `internal/engine/navigation` package provides a centralized `Origin` type
+that implements RFC 6454 (Web Origin concept). Previously, origin extraction
+was scattered across packages with different definitions — rate limiting used
+host-only strings, the JS runtime used `scheme + "://" + host` string concatenation,
+and localStorage used free-form origin strings.
+
+**Key features:**
+- `Origin` — value type with scheme, host, and port fields
+- `ParseOrigin(rawURL)` — parses a URL string into an Origin (returns opaque
+  origin for data:, javascript:, about:blank URLs)
+- `OriginFromURL(u *url.URL)` — extracts origin from a pre-parsed URL (zero-allocation
+  for the struct; one allocation from host lowercasing)
+- `String()` — canonical serialization (e.g., `"https://example.com:8443"`)
+- `IsSameOrigin(other)` — RFC 6454 comparison, normalizing default ports
+  (80 for http, 443 for https)
+- `IsOpaque()` / `IsValid()` — opaque origin detection (data:, file:, etc.)
+- `Host()`, `Scheme()`, `Port()` — accessor methods
+- Host is lowercased at construction time for consistent comparison
+
+**Usage in the codebase:**
+- `Load.Origin Origin` replaces the old `Load.Origin string` field
+- Rate limiter uses `Origin.Host()` (host-only, matching previous behavior)
+- `browser.go` uses `navigation.ParseOrigin().String()` instead of
+  `current.Scheme + "://" + current.Host`
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| ParseOrigin (4 URLs) | 1,031 | 624 | 6 |
+| OriginString | 66 | 24 | 1 |
+| IsSameOrigin | 11 | 0 | 0 |
+| OriginFromURL | 39 | 0 | 0 |
+
+`IsSameOrigin`, `IsOpaque`, `IsValid`, `Host()`, and `Scheme()` are
+zero-allocation. The `Origin` struct itself (48 bytes, three strings)
+is allocated once per resource load, which is naturally bounded by the
+navigation scheduler's concurrency limits. `OriginFromURL` is zero-allocation
+for the struct; `ParseOrigin` allocates for the underlying `url.Parse` call.
+
+The Origin type is additive infrastructure. All existing rate limiting and
+JS runtime behavior is preserved. The type forms the foundation for M10.1
+follow-up tasks: Same-Origin Policy enforcement, CORS checks, and mixed
+content blocking.
+
 ## Navigation State Flow
 
 ```
