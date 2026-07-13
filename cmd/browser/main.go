@@ -237,6 +237,13 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 	log.Printf("Navigation %s rendering page content", navID)
 
 	// Fyne widgets are thread-safe and can be updated from any goroutine
+	// Wire CSP policy into the renderer for style-src enforcement.
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetCSP(fetcher.CSP())
+		}
+	}
+
 	// Render HTML using the canvas-based renderer
 	err := browser.RenderHTMLContent(ctx, html)
 	if err != nil {
@@ -296,9 +303,19 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 		// Set HTML content for JS runtime (enables document.getElementById etc.)
 		jsRuntime.SetHTMLContent(html)
 
+		// Parse page URL for CSP enforcement.
+		baseURL, _ := urlpkg.Parse(url)
+		csp := fetcher.CSP()
+
 		// Execute inline <script> tags found in the page
 		scripts := extractInlineScripts(html)
 		for _, script := range scripts {
+			if csp != nil {
+				if err := csp.AllowScript("", baseURL); err != nil {
+					log.Printf("CSP blocked inline script: %v", err)
+					continue
+				}
+			}
 			if _, err := jsRuntime.RunScript(script); err != nil {
 				log.Printf("Error running page script: %v", err)
 			}
@@ -317,6 +334,12 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 				if !strings.HasPrefix(resolvedSrc, "http://") && !strings.HasPrefix(resolvedSrc, "https://") {
 					log.Printf("Skipping external script with non-HTTP src: %s", resolvedSrc)
 					continue
+				}
+				if csp != nil {
+					if err := csp.AllowScript(resolvedSrc, baseURL); err != nil {
+						log.Printf("CSP blocked external script %s: %v", resolvedSrc, err)
+						continue
+					}
 				}
 				scriptContent, fetchErr := fetcher.Fetch(resolvedSrc)
 				if fetchErr != nil {

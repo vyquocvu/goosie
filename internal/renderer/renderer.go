@@ -53,6 +53,10 @@ type Renderer struct {
 	// Set by MarkDirty(), SetSize(), and mutation paths.
 	// Cleared by Refresh() after recomputation.
 	dirty bool
+
+	// csp holds the parsed Content-Security-Policy for style-src enforcement.
+	csp   *net.CSPPolicy
+	cspMu sync.RWMutex
 }
 
 // NewRenderer creates a new HTML renderer
@@ -357,6 +361,14 @@ func (r *Renderer) SetCurrentURL(url string) {
 	r.currentURL = url
 }
 
+// SetCSP sets the Content-Security-Policy for style-src enforcement on
+// external stylesheets. Pass nil to clear the policy.
+func (r *Renderer) SetCSP(p *net.CSPPolicy) {
+	r.cspMu.Lock()
+	defer r.cspMu.Unlock()
+	r.csp = p
+}
+
 // ResolveURL resolves a relative or absolute URL against the current page URL
 func (r *Renderer) ResolveURL(href string) string {
 	return r.resolveURL(href)
@@ -607,12 +619,32 @@ func shouldAttemptParseExternalCSS(content string) bool {
 // loadExternalCSS finds and loads external stylesheets
 func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 	links := extractExternalLinks(doc)
+
+	// Read CSP policy for style-src enforcement.
+	r.cspMu.RLock()
+	csp := r.csp
+	r.cspMu.RUnlock()
+
+	// Parse base URL for CSP source matching.
+	var baseURL *url.URL
+	if r.currentURL != "" {
+		baseURL, _ = url.Parse(r.currentURL)
+	}
+
 	for _, href := range links {
 		if ctx.Err() != nil {
 			return
 		}
 		// Resolve URL
 		resolvedURL := r.ResolveURL(href)
+
+		// Check CSP style-src before fetching.
+		if csp != nil {
+			if err := csp.AllowStyle(resolvedURL, baseURL); err != nil {
+				fmt.Printf("CSP blocked stylesheet %s: %v\n", resolvedURL, err)
+				continue
+			}
+		}
 
 		// Fetch CSS
 		content, err := r.fetcher.FetchWithContext(ctx, resolvedURL, nil)

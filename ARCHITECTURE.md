@@ -1129,6 +1129,32 @@ content blocking.
 - All fetch paths (`FetchWithMeta`, `FetchWithContext`, `FetchStream`)
   enforce both limits.
 
+**Content Security Policy enforcement (M10.1):**
+- `ParseCSPHeader(headers...)` parses one or more `Content-Security-Policy`
+  header values into a `CSPPolicy`. Multiple headers are merged in order.
+- Supported directives: `default-src`, `script-src`, `style-src`,
+  `connect-src`, `base-uri`. Unknown directives are preserved but ignored.
+- Source expressions: `'none'`, `'self'`, scheme (`https:`), bare host,
+  host with path, wildcard host (`*.example.com`), and full URL.
+- Directive fallback: absent directives fall back to `default-src`. When
+  both are absent, no restriction applies for that resource type.
+- `Service.CSP()` returns the policy parsed from the most recent fetch
+  response. All three fetch methods (`FetchWithMeta`, `FetchWithContext`,
+  `FetchStream`) parse the CSP header.
+- `Fetcher.CSP()` exposes the CSP through the fetcher used by the browser
+  shell and renderer.
+- Script enforcement: the browser shell checks `AllowScript` before running
+  inline and external `<script>` tags. Blocked scripts are logged and skipped.
+- Style enforcement: the renderer checks `AllowStyle` before fetching each
+  external `<link rel="stylesheet">`. Blocked stylesheets are logged and skipped.
+- Connect enforcement: `AllowConnect` is available for fetch/XHR but not yet
+  wired into the JS runtime's `fetch()` API.
+- `AllowScriptURL`, `AllowStyleURL`, `AllowConnectURL` accept pre-parsed
+  `*url.URL` to avoid an allocation from `url.Parse` on hot paths.
+- CSP parsing and source matching are zero-allocation (tested with
+  `go test -benchmem`). The pre-parsed enforcement path (`AllowScriptURL`)
+  is allocation-free.
+
 ## Navigation State Flow
 
 ```

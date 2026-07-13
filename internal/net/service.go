@@ -95,6 +95,10 @@ type Service struct {
 
 	securityMu sync.Mutex
 	security   SecuritySummary
+
+	// cspMu protects csp (read-only after FetchWithMeta sets it).
+	cspMu sync.RWMutex
+	csp   *CSPPolicy
 }
 
 func NewService(options ServiceOptions) *Service {
@@ -171,6 +175,13 @@ func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress P
 	meta.RedirectCount = redirectCount
 	if resp.Request != nil && resp.Request.URL != nil {
 		meta.FinalURL = resp.Request.URL.String()
+	}
+
+	// Parse Content-Security-Policy from response headers.
+	if cspHeader := resp.Header.Get("Content-Security-Policy"); cspHeader != "" {
+		s.setCSP(ParseCSPHeader(cspHeader))
+	} else {
+		s.setCSP(nil)
 	}
 
 	// Validate Content-Type against expected types before reading the body.
@@ -263,6 +274,13 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 		return "", wrapped
 	}
 	defer resp.Body.Close()
+
+	// Parse Content-Security-Policy from response headers.
+	if cspHeader := resp.Header.Get("Content-Security-Policy"); cspHeader != "" {
+		s.setCSP(ParseCSPHeader(cspHeader))
+	} else {
+		s.setCSP(nil)
+	}
 
 	// Validate Content-Type against expected types before reading the body.
 	respContentType := resp.Header.Get("Content-Type")
@@ -386,6 +404,13 @@ func (s *Service) FetchStream(ctx context.Context, rawURL string) (io.ReadCloser
 		meta.FinalURL = resp.Request.URL.String()
 	}
 
+	// Parse Content-Security-Policy from response headers.
+	if cspHeader := resp.Header.Get("Content-Security-Policy"); cspHeader != "" {
+		s.setCSP(ParseCSPHeader(cspHeader))
+	} else {
+		s.setCSP(nil)
+	}
+
 	// Validate Content-Type against expected types before returning the stream.
 	if err := s.validateContentType(meta.ContentType); err != nil {
 		resp.Body.Close()
@@ -438,6 +463,20 @@ func (s *Service) setSecurity(summary SecuritySummary) {
 	s.securityMu.Lock()
 	defer s.securityMu.Unlock()
 	s.security = summary
+}
+
+// CSP returns the most recently parsed Content-Security-Policy. Returns nil
+// when no CSP header was present in the last fetch.
+func (s *Service) CSP() *CSPPolicy {
+	s.cspMu.RLock()
+	defer s.cspMu.RUnlock()
+	return s.csp
+}
+
+func (s *Service) setCSP(p *CSPPolicy) {
+	s.cspMu.Lock()
+	defer s.cspMu.Unlock()
+	s.csp = p
 }
 
 // checkContentLength returns ErrBodyTooLarge if the response's Content-Length

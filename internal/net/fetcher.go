@@ -45,6 +45,12 @@ func (f *Fetcher) Service() *Service {
 	return f.service
 }
 
+// CSP returns the Content-Security-Policy parsed from the most recent fetch
+// response, or nil if none was present.
+func (f *Fetcher) CSP() *CSPPolicy {
+	return f.service.CSP()
+}
+
 // Fetch retrieves the content from the given URL and preserves response metadata.
 func (f *Fetcher) Fetch(url string) (string, error) {
 	return f.FetchWithContext(context.Background(), url, nil)

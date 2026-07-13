@@ -1742,3 +1742,159 @@ func TestServiceMIMEValidationLoggedOnReject(t *testing.T) {
 		t.Errorf("log ContentType = %q, want video/mp4", last.ContentType)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CSP integration tests
+// ---------------------------------------------------------------------------
+
+func TestServiceCSPFetchWithMeta(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.example.com")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	_, _, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithMeta returned error: %v", err)
+	}
+
+	csp := service.CSP()
+	if csp == nil {
+		t.Fatal("CSP should be parsed from response header")
+	}
+	if !csp.HasDirective("default-src") {
+		t.Error("expected default-src directive")
+	}
+	if !csp.HasDirective("script-src") {
+		t.Error("expected script-src directive")
+	}
+	if csp.HasDirective("img-src") {
+		t.Error("should not have img-src directive")
+	}
+}
+
+func TestServiceCSPFetchWithContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Security-Policy", "style-src 'self'")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	_, err := service.FetchWithContext(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+
+	csp := service.CSP()
+	if csp == nil {
+		t.Fatal("CSP should be parsed")
+	}
+	if err := csp.AllowStyle(server.URL+"/style.css", mustParseURL(server.URL)); err != nil {
+		t.Errorf("self style should be allowed: %v", err)
+	}
+	if err := csp.AllowStyle("https://evil.com/style.css", mustParseURL(server.URL)); err == nil {
+		t.Error("cross-origin style should be blocked")
+	}
+}
+
+func TestServiceCSPNoHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	_, err := service.FetchWithContext(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+
+	if csp := service.CSP(); csp != nil {
+		t.Error("CSP should be nil when no header is present")
+	}
+}
+
+func TestServiceCSPFetchStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Security-Policy", "connect-src 'self'")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, _, err := service.FetchStream(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("FetchStream returned error: %v", err)
+	}
+	body.Close()
+
+	csp := service.CSP()
+	if csp == nil {
+		t.Fatal("CSP should be parsed from stream response")
+	}
+	if err := csp.AllowConnect(server.URL+"/data", mustParseURL(server.URL)); err != nil {
+		t.Errorf("allowed connect should succeed: %v", err)
+	}
+	if err := csp.AllowConnect("https://evil.com/data", mustParseURL(server.URL)); err == nil {
+		t.Error("blocked connect should fail")
+	}
+}
+
+func TestServiceFetcherCSP(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Security-Policy", "script-src 'self'")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+
+	fetcher := NewFetcherWithService(NewService(ServiceOptions{}))
+	_, err := fetcher.Fetch(server.URL)
+	if err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+
+	csp := fetcher.CSP()
+	if csp == nil {
+		t.Fatal("Fetcher.CSP() should return parsed policy")
+	}
+	if err := csp.AllowScript(server.URL+"/app.js", mustParseURL(server.URL)); err != nil {
+		t.Errorf("self script should be allowed: %v", err)
+	}
+}
+
+func TestServiceCSPNilPolicyAllowsAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	_, err := service.FetchWithContext(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithContext returned error: %v", err)
+	}
+
+	csp := service.CSP()
+	if csp != nil {
+		t.Fatal("CSP should be nil")
+	}
+	// nil CSP should allow everything.
+	if err := csp.AllowScript("https://anything.com/app.js", mustParseURL(server.URL)); err != nil {
+		t.Errorf("nil CSP should allow all scripts: %v", err)
+	}
+}

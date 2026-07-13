@@ -756,7 +756,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [x] Enforce redirect limits.
 - [x] Enforce response and decompression size limits.
 - [x] Validate MIME handling.
-- [ ] Enforce the documented Content Security Policy subset.
+- [x] Enforce the documented Content Security Policy subset.
 - [ ] Add pop-up blocking policy at the navigation boundary.
 - [ ] Prevent local file access from remote origins by default.
 

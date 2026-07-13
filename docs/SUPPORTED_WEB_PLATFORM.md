@@ -116,6 +116,47 @@ may need follow-up changes before every limit is enforced at runtime.
 | Maximum retained navigation history entries | 500 entries per profile | Evict oldest entries. |
 | Maximum local storage per origin | 5 MiB | Reject writes that exceed quota. |
 
+## Content Security Policy (CSP) Subset
+
+Goosie v2 enforces a subset of the Content Security Policy (CSP) Level 3
+specification. The CSP header is parsed from HTTP responses and applied to
+script loading, stylesheet loading, and fetch requests.
+
+### Supported Directives
+
+| Directive | Description |
+| --- | --- |
+| `default-src` | Fallback for directives not explicitly set. |
+| `script-src` | Controls which scripts may execute. |
+| `style-src` | Controls which stylesheets may be loaded. |
+| `connect-src` | Controls which URLs may be fetched via XHR/fetch. |
+| `base-uri` | Controls which URLs may be used as the document base. |
+
+### Supported Source Expressions
+
+| Source | Example | Behavior |
+| --- | --- | --- |
+| `'none'` | `script-src 'none'` | Blocks all resources of that type. |
+| `'self'` | `script-src 'self'` | Allows resources from the same origin (scheme + host + port). |
+| Scheme | `https:` | Allows any resource using that scheme. |
+| Host | `example.com` | Allows resources from that exact host (any path). |
+| Host with path | `example.com/assets` | Allows resources whose path starts with `/assets`. |
+| Wildcard host | `*.example.com` | Allows the base domain and any subdomain. |
+| Full URL | `https://cdn.example.com/lib.js` | Allows only that exact URL. |
+
+### Directive Fallback
+
+When a directive is absent, CSP falls back to `default-src`. When both the
+directive and `default-src` are absent, no restriction applies for that
+resource type.
+
+### Limitations
+
+- `unsafe-inline`, `unsafe-eval`, nonces, hashes, and strict-dynamic are
+  not supported and are silently ignored.
+- `report-uri` and `report-to` directives are parsed but not acted upon.
+- Multiple `Content-Security-Policy` headers are merged in order.
+
 ## Unsupported Feature Policy
 
 Unsupported features should fail closed and visibly:
