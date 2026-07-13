@@ -725,7 +725,7 @@ Make memory and storage behavior predictable across repeated navigation and mult
 - [x] Add schema versioning and migrations.
 - [x] Add corruption recovery tests.
 - [x] Preserve private mode as fully ephemeral.
-- [ ] Add import and export paths for profile settings.
+- [x] Add import and export paths for profile settings.
 
 ### M9.4 Tune the Go runtime only after structural work
 
