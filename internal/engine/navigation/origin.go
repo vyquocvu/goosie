@@ -4,6 +4,8 @@ import (
 	"net"
 	"net/url"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // Origin represents a web origin (scheme + host + port) as defined by
@@ -134,4 +136,39 @@ func isDefaultPort(scheme, port string) bool {
 		return port == "443"
 	}
 	return false
+}
+
+// isIPHost reports whether host is a literal IP address (IPv4 or IPv6).
+func isIPHost(host string) bool {
+	return net.ParseIP(host) != nil
+}
+
+// RegistrableDomain returns the registrable domain (eTLD+1) for the origin
+// using the Public Suffix List. Returns ("", false) for opaque origins,
+// IP addresses, localhost, and bare public suffixes (e.g., "com").
+func (o Origin) RegistrableDomain() (string, bool) {
+	if !o.IsValid() || isIPHost(o.host) {
+		return "", false
+	}
+	domain, err := publicsuffix.EffectiveTLDPlusOne(o.host)
+	if err != nil {
+		return "", false
+	}
+	return domain, true
+}
+
+// IsSameSite reports whether o and other share the same registrable domain
+// (eTLD+1). Unlike IsSameOrigin, it ignores scheme and port — two origins
+// with different schemes but the same registrable domain are same-site.
+// Opaque origins are never same-site with anything.
+func (o Origin) IsSameSite(other Origin) bool {
+	a, ok := o.RegistrableDomain()
+	if !ok {
+		return false
+	}
+	b, ok := other.RegistrableDomain()
+	if !ok {
+		return false
+	}
+	return a == b
 }

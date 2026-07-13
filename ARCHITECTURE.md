@@ -1052,6 +1052,25 @@ is allocated once per resource load, which is naturally bounded by the
 navigation scheduler's concurrency limits. `OriginFromURL` is zero-allocation
 for the struct; `ParseOrigin` allocates for the underlying `url.Parse` call.
 
+**Public Suffix List integration (M10.1):**
+- `RegistrableDomain() (string, bool)` — returns the eTLD+1 via
+  `golang.org/x/net/publicsuffix.EffectiveTLDPlusOne`. Returns false
+  for opaque origins, IP addresses, and bare public suffixes.
+- `IsSameSite(other) bool` — returns true if both origins share the
+  same registrable domain, ignoring scheme and port. Mirrors the
+  browser definition of "same-site" for SameSite cookie semantics.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|-------|------|----------|
+| RegistrableDomain (subdomain) | 205 | 48 | 1 |
+| IsSameSite | 448 | 96 | 2 |
+| RegistrableDomainIP | 33 | 0 | 0 |
+| RegistrableDomainOpaque | 9 | 0 | 0 |
+
+IP and opaque fast paths are zero-allocation. The PSL lookup allocates
+one string for the returned domain and is internally cached by the
+`publicsuffix` package.
+
 The Origin type is additive infrastructure. All existing rate limiting and
 JS runtime behavior is preserved. The type forms the foundation for M10.1
 follow-up tasks: Same-Origin Policy enforcement, CORS checks, and mixed

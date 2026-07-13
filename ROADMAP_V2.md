@@ -752,7 +752,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 ### M10.1 Harden origin and network policy
 
 - [x] Centralize origin calculation.
-- [ ] Use the public suffix list for cookie and origin decisions.
+- [x] Use the public suffix list for cookie and origin decisions.
 - [ ] Enforce redirect limits.
 - [ ] Enforce response and decompression size limits.
 - [ ] Validate MIME handling.

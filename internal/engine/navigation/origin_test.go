@@ -417,6 +417,199 @@ func BenchmarkOriginFromURL(b *testing.B) {
 	}
 }
 
+func TestRegistrableDomainStandard(t *testing.T) {
+	o, _ := ParseOrigin("https://example.com")
+	dom, ok := o.RegistrableDomain()
+	if !ok {
+		t.Fatal("RegistrableDomain() returned false for example.com")
+	}
+	if dom != "example.com" {
+		t.Errorf("RegistrableDomain() = %q, want %q", dom, "example.com")
+	}
+}
+
+func TestRegistrableDomainSubdomain(t *testing.T) {
+	o, _ := ParseOrigin("https://sub.example.com")
+	dom, ok := o.RegistrableDomain()
+	if !ok {
+		t.Fatal("RegistrableDomain() returned false for sub.example.com")
+	}
+	if dom != "example.com" {
+		t.Errorf("RegistrableDomain() = %q, want %q", dom, "example.com")
+	}
+}
+
+func TestRegistrableDomainDeepSubdomain(t *testing.T) {
+	o, _ := ParseOrigin("https://a.b.c.example.com")
+	dom, ok := o.RegistrableDomain()
+	if !ok {
+		t.Fatal("RegistrableDomain() returned false for a.b.c.example.com")
+	}
+	if dom != "example.com" {
+		t.Errorf("RegistrableDomain() = %q, want %q", dom, "example.com")
+	}
+}
+
+func TestRegistrableDomainUK(t *testing.T) {
+	o, _ := ParseOrigin("https://sub.example.co.uk")
+	dom, ok := o.RegistrableDomain()
+	if !ok {
+		t.Fatal("RegistrableDomain() returned false for sub.example.co.uk")
+	}
+	if dom != "example.co.uk" {
+		t.Errorf("RegistrableDomain() = %q, want %q", dom, "example.co.uk")
+	}
+}
+
+func TestRegistrableDomainIP(t *testing.T) {
+	o, _ := ParseOrigin("https://127.0.0.1")
+	_, ok := o.RegistrableDomain()
+	if ok {
+		t.Fatal("RegistrableDomain() should return false for IP address")
+	}
+}
+
+func TestRegistrableDomainIPv6(t *testing.T) {
+	o, _ := ParseOrigin("https://[::1]:8080")
+	_, ok := o.RegistrableDomain()
+	if ok {
+		t.Fatal("RegistrableDomain() should return false for IPv6 address")
+	}
+}
+
+func TestRegistrableDomainOpaque(t *testing.T) {
+	o, _ := ParseOrigin("data:text/html,hello")
+	_, ok := o.RegistrableDomain()
+	if ok {
+		t.Fatal("RegistrableDomain() should return false for opaque origin")
+	}
+}
+
+func TestRegistrableDomainZeroValue(t *testing.T) {
+	var o Origin
+	_, ok := o.RegistrableDomain()
+	if ok {
+		t.Fatal("RegistrableDomain() should return false for zero value")
+	}
+}
+
+func TestIsSameSiteIdentical(t *testing.T) {
+	a, _ := ParseOrigin("https://example.com")
+	b, _ := ParseOrigin("https://example.com")
+	if !a.IsSameSite(b) {
+		t.Fatal("identical origins should be same-site")
+	}
+}
+
+func TestIsSameSiteDifferentSchemes(t *testing.T) {
+	a, _ := ParseOrigin("https://example.com")
+	b, _ := ParseOrigin("http://example.com")
+	if !a.IsSameSite(b) {
+		t.Fatal("different schemes but same registrable domain = same-site")
+	}
+}
+
+func TestIsSameSiteDifferentPorts(t *testing.T) {
+	a, _ := ParseOrigin("https://example.com:8080")
+	b, _ := ParseOrigin("https://example.com:9090")
+	if !a.IsSameSite(b) {
+		t.Fatal("different ports but same registrable domain = same-site")
+	}
+}
+
+func TestIsSameSiteSubdomain(t *testing.T) {
+	a, _ := ParseOrigin("https://example.com")
+	b, _ := ParseOrigin("https://sub.example.com")
+	if !a.IsSameSite(b) {
+		t.Fatal("subdomain should be same-site with parent")
+	}
+}
+
+func TestIsSameSiteDeepSubdomain(t *testing.T) {
+	a, _ := ParseOrigin("https://a.example.com")
+	b, _ := ParseOrigin("https://deep.b.example.com")
+	if !a.IsSameSite(b) {
+		t.Fatal("two subdomains of same site should be same-site")
+	}
+}
+
+func TestIsSameSiteDifferentTLD(t *testing.T) {
+	a, _ := ParseOrigin("https://example.com")
+	b, _ := ParseOrigin("https://example.org")
+	if a.IsSameSite(b) {
+		t.Fatal("different TLDs should not be same-site")
+	}
+}
+
+func TestIsSameSiteOpaque(t *testing.T) {
+	a, _ := ParseOrigin("data:text/html,hello")
+	b, _ := ParseOrigin("https://example.com")
+	if a.IsSameSite(b) {
+		t.Fatal("opaque and valid origin should not be same-site")
+	}
+}
+
+func TestIsSameSiteOpaqueBoth(t *testing.T) {
+	a, _ := ParseOrigin("data:text/html,hello")
+	b, _ := ParseOrigin("javascript:void(0)")
+	if a.IsSameSite(b) {
+		t.Fatal("two opaque origins should not be same-site")
+	}
+}
+
+func TestIsSameSiteIP(t *testing.T) {
+	a, _ := ParseOrigin("https://127.0.0.1")
+	b, _ := ParseOrigin("https://127.0.0.1")
+	if a.IsSameSite(b) {
+		t.Fatal("IP addresses should not be same-site (no registrable domain)")
+	}
+}
+
+func TestIsSameSiteDifferentSubdomainsUK(t *testing.T) {
+	a, _ := ParseOrigin("https://sub1.example.co.uk")
+	b, _ := ParseOrigin("https://sub2.example.co.uk")
+	if !a.IsSameSite(b) {
+		t.Fatal("two subdomains under same .co.uk should be same-site")
+	}
+}
+
+func BenchmarkRegistrableDomain(b *testing.B) {
+	o, _ := ParseOrigin("https://sub.example.com")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		o.RegistrableDomain()
+	}
+}
+
+func BenchmarkIsSameSite(b *testing.B) {
+	a, _ := ParseOrigin("https://example.com")
+	c, _ := ParseOrigin("https://sub.example.com")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		a.IsSameSite(c)
+	}
+}
+
+func BenchmarkRegistrableDomainIP(b *testing.B) {
+	o, _ := ParseOrigin("https://127.0.0.1")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		o.RegistrableDomain()
+	}
+}
+
+func BenchmarkRegistrableDomainOpaque(b *testing.B) {
+	o, _ := ParseOrigin("data:text/html,hello")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		o.RegistrableDomain()
+	}
+}
+
 func TestRateLimiterAcceptsOriginHost(t *testing.T) {
 	rl := NewRateLimiter(6, 24)
 	ctx := context.Background()
