@@ -1076,6 +1076,18 @@ JS runtime behavior is preserved. The type forms the foundation for M10.1
 follow-up tasks: Same-Origin Policy enforcement, CORS checks, and mixed
 content blocking.
 
+**Redirect limits (M10.1):**
+- Every HTTP fetch (`FetchStream`, `FetchWithMeta`, `FetchWithContext`) enforces
+  a maximum of 20 redirects (matching Chromium/Edge).
+- The redirect limit is enforced via `http.Client.CheckRedirect` in
+  `Service.doRequest`, which returns `http.ErrUseLastResponse` when
+  the limit is reached.
+- `ResponseMeta.RedirectCount` tracks how many redirects were followed.
+- `ResponseMeta.FinalURL` contains the URL after all redirects.
+- When the limit is exceeded, the last redirect response (3xx) is returned
+  alongside a `RedirectCount` of `maxRedirects`. Callers can detect the
+  limit by checking `meta.RedirectCount == maxRedirects && meta.Status >= 300`.
+
 ## Navigation State Flow
 
 ```

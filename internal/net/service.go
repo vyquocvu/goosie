@@ -45,6 +45,10 @@ func (r *limitedContextReader) Read(p []byte) (int, error) {
 
 const defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+// maxRedirects is the maximum number of HTTP redirects the engine will
+// follow for a single request, matching Chromium's and Edge's limit.
+const maxRedirects = 20
+
 type ServiceOptions struct {
 	Client      *http.Client
 	Cache       *HTTPCache
@@ -118,7 +122,7 @@ func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress P
 		}
 	}
 
-	resp, err := s.client.Do(req)
+	resp, redirectCount, err := s.doRequest(req)
 	s.setSecurity(SecuritySummaryFromResponse(resp, err))
 	if err != nil {
 		wrapped := fmt.Errorf("failed to fetch URL: %w", err)
@@ -129,6 +133,10 @@ func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress P
 
 	// Capture metadata before body is consumed.
 	meta := ResponseMetaFromResponse(resp)
+	meta.RedirectCount = redirectCount
+	if resp.Request != nil && resp.Request.URL != nil {
+		meta.FinalURL = resp.Request.URL.String()
+	}
 
 	body, readErr := readResponseBody(ctx, resp, onProgress, s.maxBodySize)
 	entry := RequestLogEntry{
@@ -196,7 +204,7 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 		}
 	}
 
-	resp, err := s.client.Do(req)
+	resp, _, err := s.doRequest(req)
 	s.setSecurity(SecuritySummaryFromResponse(resp, err))
 	if err != nil {
 		wrapped := fmt.Errorf("failed to fetch URL: %w", err)
@@ -254,6 +262,27 @@ func (s *Service) Log() *RequestLog {
 	return s.log
 }
 
+// doRequest wraps http.Client.Do with a redirect policy that limits the
+// number of redirects to maxRedirects and tracks how many were followed.
+func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
+	var redirectCount int
+	client := &http.Client{
+		Transport: s.client.Transport,
+		Jar:       s.client.Jar,
+		Timeout:   s.client.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				redirectCount = maxRedirects
+				return http.ErrUseLastResponse
+			}
+			redirectCount = len(via)
+			return nil
+		},
+	}
+	resp, err := client.Do(req)
+	return resp, redirectCount, err
+}
+
 // FetchStream retrieves the response body as an io.ReadCloser without buffering
 // the entire body into memory. The caller must close the returned body when done.
 // Response metadata is captured before the body is returned. This eliminates the
@@ -275,7 +304,7 @@ func (s *Service) FetchStream(ctx context.Context, rawURL string) (io.ReadCloser
 	}
 	req.Header.Set("User-Agent", s.userAgent)
 
-	resp, err := s.client.Do(req)
+	resp, redirectCount, err := s.doRequest(req)
 	s.setSecurity(SecuritySummaryFromResponse(resp, err))
 	if err != nil {
 		wrapped := fmt.Errorf("failed to fetch URL: %w", err)
@@ -285,6 +314,10 @@ func (s *Service) FetchStream(ctx context.Context, rawURL string) (io.ReadCloser
 
 	// Capture metadata before body is consumed.
 	meta := ResponseMetaFromResponse(resp)
+	meta.RedirectCount = redirectCount
+	if resp.Request != nil && resp.Request.URL != nil {
+		meta.FinalURL = resp.Request.URL.String()
+	}
 
 	// Wrap body with context cancellation and optional size limit.
 	reader := io.Reader(&limitedContextReader{

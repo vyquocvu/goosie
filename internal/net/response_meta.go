@@ -34,6 +34,15 @@ type ResponseMeta struct {
 	// Cached indicates whether this metadata came from a cache hit rather
 	// than a live network response.
 	Cached bool
+
+	// RedirectCount is the number of redirects followed to reach this
+	// response. Zero means no redirects occurred.
+	RedirectCount int
+
+	// FinalURL is the URL after all redirects, or the original URL if
+	// no redirects occurred. Empty if the request failed before reaching
+	// a server.
+	FinalURL string
 }
 
 // ResponseMetaFromResponse captures response metadata into an immutable struct.

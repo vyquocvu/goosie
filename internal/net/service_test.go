@@ -931,35 +931,273 @@ func TestFetchStreamLogsEntry(t *testing.T) {
 	}
 }
 
-func BenchmarkFetchStreamVsBuffered(b *testing.B) {
-	htmlBody := strings.Repeat("<p>Hello world paragraph content for streaming benchmark.</p>", 100)
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return newTestResponse(req, http.StatusOK, htmlBody), nil
-	})}
+// --- Redirect limit tests (M10.1) ---
 
-	b.Run("FetchStream", func(b *testing.B) {
-		service := NewService(ServiceOptions{Client: client})
-		b.ResetTimer()
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			body, _, err := service.FetchStream(context.Background(), "https://example.test/bench")
-			if err != nil {
-				b.Fatal(err)
-			}
-			_, _ = io.ReadAll(body)
-			body.Close()
+// redirectServer creates an httptest.Server that redirects N times then
+// returns a 200 with the given final body. The handler always writes a
+// unique body on the final response so callers can distinguish redirect
+// responses from the final response.
+func redirectServer(redirects int, finalBody string) *httptest.Server {
+	var requests int
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= redirects {
+			http.Redirect(w, r, fmt.Sprintf("/step/%d", requests), http.StatusFound)
+			return
 		}
-	})
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(finalBody))
+	}))
+}
 
-	b.Run("FetchWithMeta", func(b *testing.B) {
-		service := NewService(ServiceOptions{Client: client})
-		b.ResetTimer()
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_, _, err := service.FetchWithMeta(context.Background(), "https://example.test/bench", nil)
-			if err != nil {
-				b.Fatal(err)
-			}
+func TestFetchWithMetaFollowsRedirect(t *testing.T) {
+	server := redirectServer(2, "final body")
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, meta, err := service.FetchWithMeta(context.Background(), server.URL+"/start", nil)
+	if err != nil {
+		t.Fatalf("FetchWithMeta error: %v", err)
+	}
+	if body != "final body" {
+		t.Errorf("body = %q, want %q", body, "final body")
+	}
+	if meta.RedirectCount != 2 {
+		t.Errorf("RedirectCount = %d, want 2", meta.RedirectCount)
+	}
+	if meta.Status != http.StatusOK {
+		t.Errorf("Status = %d, want %d", meta.Status, http.StatusOK)
+	}
+	if meta.FinalURL == "" {
+		t.Errorf("FinalURL should not be empty after redirect")
+	}
+}
+
+func TestFetchStreamFollowsRedirect(t *testing.T) {
+	server := redirectServer(2, "streamed body")
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, meta, err := service.FetchStream(context.Background(), server.URL+"/start")
+	if err != nil {
+		t.Fatalf("FetchStream error: %v", err)
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if string(data) != "streamed body" {
+		t.Errorf("body = %q, want %q", string(data), "streamed body")
+	}
+	if meta.RedirectCount != 2 {
+		t.Errorf("RedirectCount = %d, want 2", meta.RedirectCount)
+	}
+	if meta.Status != http.StatusOK {
+		t.Errorf("Status = %d, want %d", meta.Status, http.StatusOK)
+	}
+}
+
+func TestFetchWithMetaMultipleRedirects(t *testing.T) {
+	server := redirectServer(10, "after 10 redirects")
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, meta, err := service.FetchWithMeta(context.Background(), server.URL+"/start", nil)
+	if err != nil {
+		t.Fatalf("FetchWithMeta error: %v", err)
+	}
+	if body != "after 10 redirects" {
+		t.Errorf("body = %q, want %q", body, "after 10 redirects")
+	}
+	if meta.RedirectCount != 10 {
+		t.Errorf("RedirectCount = %d, want 10", meta.RedirectCount)
+	}
+}
+
+func TestFetchWithMetaNoRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("no redirect"))
+	}))
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, meta, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("FetchWithMeta error: %v", err)
+	}
+	if body != "no redirect" {
+		t.Errorf("body = %q, want %q", body, "no redirect")
+	}
+	if meta.RedirectCount != 0 {
+		t.Errorf("RedirectCount = %d, want 0", meta.RedirectCount)
+	}
+}
+
+func TestFetchWithMetaRedirectLimitExceeded(t *testing.T) {
+	// Infinite redirect loop — the engine should cap at maxRedirects.
+	server := redirectServer(maxRedirects+10, "should not reach")
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, meta, err := service.FetchWithMeta(context.Background(), server.URL+"/start", nil)
+	if err != nil {
+		t.Fatalf("FetchWithMeta error: %v", err)
+	}
+	if meta.RedirectCount != maxRedirects {
+		t.Errorf("RedirectCount = %d, want %d", meta.RedirectCount, maxRedirects)
+	}
+	// When the limit is hit, the last redirect response (302) is returned
+	// as the response. The caller can detect this via meta.RedirectCount.
+	if meta.Status >= 300 && meta.Status < 400 {
+		// Expected — redirect limit hit
+	} else {
+		t.Errorf("expected redirect status, got %d", meta.Status)
+	}
+	// Body should NOT be the "should not reach" final body
+	if body == "should not reach" {
+		t.Error("should not have reached the final response body")
+	}
+}
+
+func TestServiceRedirectDoesNotAffectOtherRequests(t *testing.T) {
+	server1 := redirectServer(2, "first")
+	defer server1.Close()
+	server2 := redirectServer(2, "second")
+	defer server2.Close()
+
+	service := NewService(ServiceOptions{})
+
+	body1, meta1, err1 := service.FetchWithMeta(context.Background(), server1.URL+"/a", nil)
+	if err1 != nil {
+		t.Fatalf("first FetchWithMeta error: %v", err1)
+	}
+	if meta1.RedirectCount != 2 {
+		t.Errorf("first RedirectCount = %d, want 2", meta1.RedirectCount)
+	}
+	if body1 != "first" {
+		t.Errorf("first body = %q, want %q", body1, "first")
+	}
+
+	body2, meta2, err2 := service.FetchWithMeta(context.Background(), server2.URL+"/b", nil)
+	if err2 != nil {
+		t.Fatalf("second FetchWithMeta error: %v", err2)
+	}
+	if body2 != "second" {
+		t.Errorf("second body = %q, want %q", body2, "second")
+	}
+	if meta2.RedirectCount != 2 {
+		t.Errorf("second RedirectCount = %d, want 2", meta2.RedirectCount)
+	}
+}
+
+func TestFetchStreamRedirectLimitExceeded(t *testing.T) {
+	server := redirectServer(maxRedirects+10, "should not reach")
+	defer server.Close()
+
+	service := NewService(ServiceOptions{})
+	body, meta, err := service.FetchStream(context.Background(), server.URL+"/start")
+	if err != nil {
+		t.Fatalf("FetchStream error: %v", err)
+	}
+	defer body.Close()
+
+	if meta.RedirectCount != maxRedirects {
+		t.Errorf("RedirectCount = %d, want %d", meta.RedirectCount, maxRedirects)
+	}
+	if meta.Status >= 300 && meta.Status < 400 {
+		// Expected
+	} else {
+		t.Errorf("expected redirect status, got %d", meta.Status)
+	}
+	// Body from the last redirect response should be read
+	data, _ := io.ReadAll(body)
+	if string(data) == "should not reach" {
+		t.Error("should not have reached the final response")
+	}
+}
+
+func BenchmarkFetchWithMetaRedirect(b *testing.B) {
+	server := redirectServer(3, "benchmarked body")
+	defer server.Close()
+	service := NewService(ServiceOptions{})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
+}
+
+func BenchmarkFetchWithMetaNoRedirect(b *testing.B) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello"))
+	}))
+	defer server.Close()
+	service := NewService(ServiceOptions{})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFetchStreamNoRedirect(b *testing.B) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello"))
+	}))
+	defer server.Close()
+	service := NewService(ServiceOptions{})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		body, _, err := service.FetchStream(context.Background(), server.URL)
+		if err != nil {
+			b.Fatal(err)
+		}
+		body.Close()
+	}
+}
+
+func BenchmarkFetchWithMetaRedirectLimit(b *testing.B) {
+	server := redirectServer(maxRedirects+5, "should not reach")
+	defer server.Close()
+	service := NewService(ServiceOptions{})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := service.FetchWithMeta(context.Background(), server.URL, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFetchStreamRedirectLimit(b *testing.B) {
+	server := redirectServer(maxRedirects+5, "should not reach")
+	defer server.Close()
+	service := NewService(ServiceOptions{})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		body, _, err := service.FetchStream(context.Background(), server.URL)
+		if err != nil {
+			b.Fatal(err)
+		}
+		body.Close()
+	}
 }
