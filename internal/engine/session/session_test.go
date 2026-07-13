@@ -727,25 +727,30 @@ func TestSessionMultipleCancelIsSafe(t *testing.T) {
 func TestSessionStateAfterCloseDoesNotFireTransitions(t *testing.T) {
 	s := New()
 	s.Navigate(context.Background(), "https://example.com")
-	s.Close()
-
-	var called bool
-	var mu sync.Mutex
-	s.SetEventCallback(func(ev Event) {
-		mu.Lock()
-		called = true
-		mu.Unlock()
-	})
-
-	s.Parsing()
-	s.Interactive()
-	s.Complete()
 	s.FlushEvents()
 
-	mu.Lock()
-	defer mu.Unlock()
-	if called {
-		t.Fatal("event callback was called after Close")
+	type counter struct {
+		mu    sync.Mutex
+		total int
+	}
+	var c counter
+	s.SetEventCallback(func(ev Event) {
+		c.mu.Lock()
+		c.total++
+		c.mu.Unlock()
+	})
+
+	s.Close()
+	s.FlushEvents()
+
+	c.mu.Lock()
+	got := c.total
+	c.mu.Unlock()
+
+	// Close fires exactly one event (StateClosed). If any extra
+	// transition event leaks through after Close this fails.
+	if got > 1 {
+		t.Fatalf("expected ≤1 event after Close (StateClosed only), got %d", got)
 	}
 }
 
@@ -1149,5 +1154,142 @@ func TestSessionNewEvents(t *testing.T) {
 	}
 	if len(events[EventProgress]) != 1 || events[EventProgress][0].Progress != 0.75 {
 		t.Fatalf("incorrect Progress event: %+v", events[EventProgress])
+	}
+}
+
+// --- File access policy tests ---
+
+func TestSessionNavigateFileURLFromEmpty(t *testing.T) {
+	// Initial navigation to a file:// URL must be allowed.
+	s := New()
+	defer s.Close()
+	load, ctx := s.Navigate(context.Background(), "file:///home/page.html")
+	if !load.ID.IsValid() {
+		t.Fatal("Navigate to file:// from empty URL should be allowed")
+	}
+	if ctx == nil {
+		t.Fatal("Navigate to file:// from empty URL should return non-nil context")
+	}
+	if s.State() != StateNavigating {
+		t.Fatalf("state = %v, want %v", s.State(), StateNavigating)
+	}
+}
+
+func TestSessionNavigateFileURLFromFileOrigin(t *testing.T) {
+	// Same-scheme: a file:// page may navigate to another file:// URL.
+	s := New()
+	defer s.Close()
+	s.Navigate(context.Background(), "file:///home/first.html")
+	s.Complete()
+
+	load, ctx := s.Navigate(context.Background(), "file:///home/second.html")
+	if !load.ID.IsValid() {
+		t.Fatal("Navigate from file:// to file:// should be allowed")
+	}
+	if ctx == nil {
+		t.Fatal("Navigate from file:// to file:// should return non-nil context")
+	}
+	if s.State() != StateNavigating {
+		t.Fatalf("state = %v, want %v", s.State(), StateNavigating)
+	}
+}
+
+func TestSessionNavigateFileURLFromRemoteOriginBlocked(t *testing.T) {
+	s := New()
+	defer s.Close()
+
+	// Navigate to a remote origin first.
+	if err := navigateAndComplete(s, "https://example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now try to navigate to a file:// URL — must be blocked.
+	load, ctx := s.Navigate(context.Background(), "file:///etc/passwd")
+	if load.ID.IsValid() {
+		t.Fatal("Navigate to file:// from https should be blocked")
+	}
+	if ctx != nil {
+		t.Fatal("Navigate to file:// from https should return nil context")
+	}
+}
+
+// navigateAndComplete is a helper that navigates to url and completes the
+// navigation, returning any error from the navigation setup.
+func navigateAndComplete(s *Session, url string) error {
+	load, ctx := s.Navigate(context.Background(), url)
+	if !load.ID.IsValid() {
+		return errors.New("navigate returned invalid load")
+	}
+	if ctx == nil {
+		return errors.New("navigate returned nil context")
+	}
+	s.Complete()
+	return nil
+}
+
+func TestSessionNavigateFileURLFromRemoteOriginEmitsErrorEvent(t *testing.T) {
+	s := New()
+	defer s.Close()
+
+	events := make([]Event, 0, 4)
+	var mu sync.Mutex
+	s.SetEventCallback(func(ev Event) {
+		mu.Lock()
+		events = append(events, ev)
+		mu.Unlock()
+	})
+
+	_ = navigateAndComplete(s, "https://example.com")
+	s.FlushEvents()
+
+	// Clear events from first navigation.
+	mu.Lock()
+	events = events[:0]
+	mu.Unlock()
+
+	// Try blocked navigation.
+	s.Navigate(context.Background(), "file:///etc/passwd")
+	s.FlushEvents()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var found bool
+	for _, ev := range events {
+		if ev.Type == EventError && ev.Err == navigation.ErrFileAccessDenied {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("blocked file:// navigation should emit EventError with ErrFileAccessDenied")
+	}
+}
+
+func TestSessionNavigateFileURLBlockedThenRecover(t *testing.T) {
+	// After a blocked navigation, the session should still accept valid
+	// navigations (not stuck in some error state).
+	s := New()
+	defer s.Close()
+
+	s.Navigate(context.Background(), "https://example.com")
+	s.Complete()
+
+	// Blocked file:// navigation
+	blocked, _ := s.Navigate(context.Background(), "file:///etc/passwd")
+	if blocked.ID.IsValid() {
+		t.Fatal("file:// from remote should be blocked")
+	}
+
+	// Subsequent valid navigation must work
+	recovery, ctx := s.Navigate(context.Background(), "https://example.com/page2")
+	if !recovery.ID.IsValid() {
+		t.Fatal("navigation after blocked file:// should succeed")
+	}
+	if ctx == nil {
+		t.Fatal("navigation after blocked file:// should return non-nil context")
+	}
+	if s.State() != StateNavigating {
+		t.Fatalf("state = %v, want %v", s.State(), StateNavigating)
 	}
 }

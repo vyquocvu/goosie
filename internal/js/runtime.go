@@ -87,6 +87,31 @@ type Runtime struct {
 	onDOMMutation     func(string)
 	// enqueueTask allows routing asynchronous callbacks back to the owner goroutine.
 	enqueueTask func(func())
+	// OnOpenWindow is called when JS calls window.open() and the popup
+	// is not blocked by policy. The callback receives the target URL and
+	// the window name (target). If nil, window.open() is a no-op.
+	OnOpenWindow func(url, name string)
+
+	// enforcer enforces script policy limits and API capabilities.
+	// When nil (default), all capabilities are allowed.
+	enforcer *ScriptEnforcer
+}
+
+// SetEnforcer attaches a ScriptEnforcer to this runtime for capability
+// and execution-limit enforcement. Passing nil removes enforcement.
+func (r *Runtime) SetEnforcer(e *ScriptEnforcer) {
+	r.enforcer = e
+}
+
+// allowCapability checks whether the given API capability is permitted
+// for the runtime's current origin. Returns nil if allowed, or
+// ErrAPIPermissionDenied if blocked. When no enforcer is set all
+// capabilities are allowed (backward compatible).
+func (r *Runtime) allowCapability(cap string) error {
+	if r.enforcer == nil {
+		return nil
+	}
+	return r.enforcer.CheckAPIPermission(r.origin, cap)
 }
 
 // NewRuntime creates a new JavaScript runtime with console.log and document APIs
@@ -1416,6 +1441,79 @@ func (r *Runtime) ClearJavaScriptErrors() {
 	r.jsErrors = make([]string, 0)
 }
 
+// capMethod returns a JS function that checks the given capability.
+// If denied, it returns a rejected promise. If allowed, it returns a
+// rejected promise indicating the API is not yet implemented.
+func (r *Runtime) capMethod(cap string) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		if err := r.allowCapability(cap); err != nil {
+			return r.vm.ToValue(r.createRejectedPromise(err.Error()))
+		}
+		return r.vm.ToValue(r.createRejectedPromise(cap + " API not yet implemented"))
+	}
+}
+
+// capCallbackMethod returns a JS function that checks the given capability
+// for callback-based APIs (e.g. getCurrentPosition). When the capability
+// is denied (or the API is not implemented), it calls the error callback
+// (second argument) with an error object.
+func (r *Runtime) capCallbackMethod(cap string) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		if err := r.allowCapability(cap); err != nil {
+			if len(call.Arguments) >= 2 {
+				if errFn, ok := goja.AssertFunction(call.Arguments[1]); ok {
+					_, _ = errFn(goja.Undefined(), r.vm.ToValue(err.Error()))
+				}
+			}
+			return goja.Undefined()
+		}
+		if len(call.Arguments) >= 2 {
+			if errFn, ok := goja.AssertFunction(call.Arguments[1]); ok {
+				_, _ = errFn(goja.Undefined(), r.vm.ToValue(cap+" API not yet implemented"))
+			}
+		}
+		return goja.Undefined()
+	}
+}
+
+// setupNavigatorAPI extends the navigator object with capability-gated
+// stubs for geolocation, clipboard, and other advanced APIs.
+func (r *Runtime) setupNavigatorAPI() {
+	nav := r.vm.Get("navigator")
+	var navObj *goja.Object
+	if nav == nil || goja.IsUndefined(nav) {
+		navObj = r.vm.NewObject()
+		navObj.Set("userAgent", "Goosie/1.0")
+		r.vm.Set("navigator", navObj)
+	} else {
+		navObj = nav.ToObject(r.vm)
+	}
+
+	// Geolocation — gated behind CapabilityGeolocation
+	geo := r.vm.NewObject()
+	geo.Set("getCurrentPosition", r.capCallbackMethod(CapabilityGeolocation))
+	geo.Set("watchPosition", r.capCallbackMethod(CapabilityGeolocation))
+	geo.Set("clearWatch", r.capMethod(CapabilityGeolocation))
+	navObj.Set("geolocation", geo)
+
+	// Clipboard — gated behind CapabilityClipboard
+	clip := r.vm.NewObject()
+	clip.Set("readText", r.capMethod(CapabilityClipboard))
+	clip.Set("writeText", r.capMethod(CapabilityClipboard))
+	navObj.Set("clipboard", clip)
+}
+
+// setupNotificationAPI creates the Notification constructor gated behind
+// CapabilityNotifications.
+func (r *Runtime) setupNotificationAPI() {
+	r.vm.Set("Notification", func(call goja.ConstructorCall) *goja.Object {
+		if err := r.allowCapability(CapabilityNotifications); err != nil {
+			panic(r.vm.NewTypeError(err.Error()))
+		}
+		panic(r.vm.NewTypeError("Notification API not yet implemented"))
+	})
+}
+
 // setupWindowAPI configures window object with browser APIs
 func (r *Runtime) setupWindowAPI() {
 	window := r.vm.NewObject()
@@ -1438,6 +1536,51 @@ func (r *Runtime) setupWindowAPI() {
 
 	// Setup fetch API
 	r.setupFetchAPI()
+
+	// Setup window.open with popup blocking
+	window.Set("open", func(call goja.FunctionCall) goja.Value {
+		var urlStr, name string
+		switch len(call.Arguments) {
+		case 0:
+			return goja.Null()
+		case 1:
+			urlStr = call.Arguments[0].String()
+		default:
+			urlStr = call.Arguments[0].String()
+			name = call.Arguments[1].String()
+		}
+
+		// Enforce capability-based access control: deny window.open
+		// when the navigation capability is not granted.
+		if err := r.allowCapability(CapabilityNavigation); err != nil {
+			r.jsConsoleWarn("window.open blocked: " + err.Error())
+			return goja.Null()
+		}
+
+		// Block popups from remote origins (no user gesture tracking yet).
+		if isRemoteOrigin(r.origin) {
+			r.jsConsoleWarn("window.open blocked: popup from remote origin")
+			return goja.Null()
+		}
+
+		if r.OnOpenWindow != nil {
+			r.OnOpenWindow(urlStr, name)
+		}
+		// Return a minimal window proxy.
+		proxy := r.vm.NewObject()
+		proxy.Set("closed", false)
+		proxy.Set("close", func(goja.FunctionCall) goja.Value {
+			proxy.Set("closed", true)
+			return goja.Undefined()
+		})
+		return r.vm.ToValue(proxy)
+	})
+
+	// Setup navigator with capability-gated APIs
+	r.setupNavigatorAPI()
+
+	// Setup Notification constructor
+	r.setupNotificationAPI()
 
 	r.vm.Set("window", window)
 	r.vm.Set("self", window)
@@ -1679,11 +1822,24 @@ func (r *Runtime) setupHistoryAPI(window *goja.Object) {
 }
 
 // setupLocalStorageAPI configures localStorage
+// storageMethod wraps a localStorage/sessionStorage method with a
+// CapabilityStorage check. When the capability is denied the method
+// returns null/undefined. The check is performed on every call so that
+// it works regardless of when a ScriptEnforcer is attached.
+func (r *Runtime) storageMethod(fn func(goja.FunctionCall) goja.Value) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
+		if err := r.allowCapability(CapabilityStorage); err != nil {
+			return goja.Null()
+		}
+		return fn(call)
+	}
+}
+
 func (r *Runtime) setupLocalStorageAPI() {
 	localStorage := r.vm.NewObject()
 
 	// getItem
-	localStorage.Set("getItem", func(call goja.FunctionCall) goja.Value {
+	localStorage.Set("getItem", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Null()
 		}
@@ -1700,10 +1856,10 @@ func (r *Runtime) setupLocalStorageAPI() {
 		}
 
 		return r.vm.ToValue(value)
-	})
+	}))
 
 	// setItem - with validation
-	localStorage.Set("setItem", func(call goja.FunctionCall) goja.Value {
+	localStorage.Set("setItem", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return goja.Undefined()
 		}
@@ -1720,10 +1876,10 @@ func (r *Runtime) setupLocalStorageAPI() {
 		r.localStorageSet(key, value)
 
 		return goja.Undefined()
-	})
+	}))
 
 	// removeItem
-	localStorage.Set("removeItem", func(call goja.FunctionCall) goja.Value {
+	localStorage.Set("removeItem", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()
 		}
@@ -1732,16 +1888,16 @@ func (r *Runtime) setupLocalStorageAPI() {
 		r.localStorageRemove(key)
 
 		return goja.Undefined()
-	})
+	}))
 
 	// clear - remove all items
-	localStorage.Set("clear", func(call goja.FunctionCall) goja.Value {
+	localStorage.Set("clear", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		r.localStorageClear()
 		return goja.Undefined()
-	})
+	}))
 
 	// key - get key at index
-	localStorage.Set("key", func(call goja.FunctionCall) goja.Value {
+	localStorage.Set("key", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Null()
 		}
@@ -1754,12 +1910,12 @@ func (r *Runtime) setupLocalStorageAPI() {
 		}
 
 		return r.vm.ToValue(keys[index])
-	})
+	}))
 
 	// length property
-	localStorage.Set("length", func(call goja.FunctionCall) goja.Value {
+	localStorage.Set("length", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(len(r.localStorageKeys()))
-	})
+	}))
 
 	r.vm.Set("localStorage", localStorage)
 }
@@ -1813,7 +1969,7 @@ func (r *Runtime) setupSessionStorageAPI() {
 	sessionStorage := r.vm.NewObject()
 
 	// getItem
-	sessionStorage.Set("getItem", func(call goja.FunctionCall) goja.Value {
+	sessionStorage.Set("getItem", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Null()
 		}
@@ -1838,10 +1994,10 @@ func (r *Runtime) setupSessionStorageAPI() {
 		}
 
 		return r.vm.ToValue(value)
-	})
+	}))
 
 	// setItem - with session schema support
-	sessionStorage.Set("setItem", func(call goja.FunctionCall) goja.Value {
+	sessionStorage.Set("setItem", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return goja.Undefined()
 		}
@@ -1860,10 +2016,10 @@ func (r *Runtime) setupSessionStorageAPI() {
 		r.sessionStorage[key] = schemaValue
 
 		return goja.Undefined()
-	})
+	}))
 
 	// removeItem
-	sessionStorage.Set("removeItem", func(call goja.FunctionCall) goja.Value {
+	sessionStorage.Set("removeItem", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Undefined()
 		}
@@ -1872,16 +2028,16 @@ func (r *Runtime) setupSessionStorageAPI() {
 		delete(r.sessionStorage, key)
 
 		return goja.Undefined()
-	})
+	}))
 
 	// clear - remove all items
-	sessionStorage.Set("clear", func(call goja.FunctionCall) goja.Value {
+	sessionStorage.Set("clear", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		r.sessionStorage = make(map[string]string)
 		return goja.Undefined()
-	})
+	}))
 
 	// key - get key at index
-	sessionStorage.Set("key", func(call goja.FunctionCall) goja.Value {
+	sessionStorage.Set("key", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Null()
 		}
@@ -1897,12 +2053,12 @@ func (r *Runtime) setupSessionStorageAPI() {
 		}
 
 		return r.vm.ToValue(keys[index])
-	})
+	}))
 
 	// length property
-	sessionStorage.Set("length", func(call goja.FunctionCall) goja.Value {
+	sessionStorage.Set("length", r.storageMethod(func(call goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(len(r.sessionStorage))
-	})
+	}))
 
 	r.vm.Set("sessionStorage", sessionStorage)
 }
@@ -2089,6 +2245,18 @@ func (r *Runtime) setupFetchAPI() {
 		}
 
 		urlStr := call.Arguments[0].String()
+
+		// Enforce capability-based access control: deny fetch when the
+		// network capability is not granted.
+		if err := r.allowCapability(CapabilityNetwork); err != nil {
+			return r.vm.ToValue(r.createRejectedPromise(err.Error()))
+		}
+
+		// Enforce the default file-access policy: remote origins must not
+		// fetch file:// URLs.
+		if err := checkFileFetchAccess(r.origin, urlStr); err != nil {
+			return r.vm.ToValue(r.createRejectedPromise(err.Error()))
+		}
 
 		// Create a promise-like object
 		promise := r.vm.NewObject()
@@ -2393,4 +2561,50 @@ func (r *Runtime) convertGoNodeToJS(n *html.Node) goja.Value {
 		return jsNode
 	}
 	return goja.Null()
+}
+
+// checkFileFetchAccess checks whether a fetch to targetURL should be
+// allowed from the given origin (string like "https://example.com").
+// It returns nil when allowed, or an error explaining why it was blocked.
+func checkFileFetchAccess(origin, targetURL string) error {
+	if origin == "" {
+		return nil
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return nil
+	}
+	// Only block file:// fetches from remote (non-file) origins.
+	target, err := url.Parse(targetURL)
+	if err != nil {
+		return nil
+	}
+	if target.Scheme != "file" {
+		return nil
+	}
+	if originURL.Scheme == "file" {
+		return nil
+	}
+	return errFetchFileAccessDenied
+}
+
+// errFetchFileAccessDenied is returned when a remote origin tries to fetch a
+// file:// URL through the JS fetch() API.
+var errFetchFileAccessDenied = fmt.Errorf("fetch: local file access denied from remote origin")
+
+// isRemoteOrigin returns true if the origin is a remote (http/https) URL.
+func isRemoteOrigin(origin string) bool {
+	return strings.HasPrefix(origin, "http://") || strings.HasPrefix(origin, "https://")
+}
+
+// jsConsoleWarn logs a warning message to the JS console from Go code.
+func (r *Runtime) jsConsoleWarn(msg string) {
+	r.consoleMu.Lock()
+	r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
+		Level:     "warn",
+		Message:   msg,
+		Timestamp: time.Now(),
+	})
+	r.consoleMu.Unlock()
+	fmt.Println("[WARN] " + msg)
 }

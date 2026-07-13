@@ -289,8 +289,21 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 		jsRuntime := tab.GetJSRuntime()
 
+		// Set the page origin and default capability policy so that
+		// JS runtime APIs (localStorage, fetch, window.open, etc.) are
+		// gated behind the appropriate capabilities.
+		jsRuntime.SetOrigin(originFromURL(url))
+		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
+
 		// Wire up the real HTTP fetcher so fetch() makes actual network requests
 		jsRuntime.SetFetcher(fetcher)
+
+		// Wire up window.open to navigate in the current browsing context.
+		jsRuntime.OnOpenWindow = func(url, name string) {
+			log.Printf("Popup (window.open): %s (name=%s)", url, name)
+			load, ctx := navSession.Navigate(context.Background(), url)
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession)
+		}
 
 		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
 		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
@@ -462,4 +475,18 @@ func resolveScriptURL(src, pageURL string) (string, error) {
 		return src, nil
 	}
 	return base.ResolveReference(parsedSrc).String(), nil
+}
+
+// originFromURL extracts the origin (scheme + host) from a URL string.
+// For URLs without a host (file://, about:blank, data:), it returns the
+// scheme portion so capability policies can still classify the origin.
+func originFromURL(rawURL string) string {
+	u, err := urlpkg.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	if u.Host != "" {
+		return u.Scheme + "://" + u.Host
+	}
+	return u.Scheme + "://"
 }

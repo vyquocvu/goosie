@@ -242,13 +242,29 @@ func (s *Session) dispatchLoop() {
 // Navigate starts a new navigation, cancelling any in-flight load.
 // The returned context carries the new navigation ID and metrics recorder.
 // When the navigation completes (or fails), the caller should call Complete
-// or Fail. Returns a zero Load and nil context when the session is closed.
+// or Fail. Returns a zero Load and nil context when the session is closed
+// or when the navigation is denied by security policy.
 func (s *Session) Navigate(parent context.Context, url string) (navigation.Load, context.Context) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return navigation.Load{}, nil
 	}
+
+	// Enforce the default file-access policy: remote origins must not
+	// navigate to file:// URLs. This is checked before scheduler.Begin
+	// so that no navigation context is created for denied loads.
+	if err := navigation.CheckFileAccess(s.url, url); err != nil {
+		s.mu.Unlock()
+		s.fireEvent(Event{
+			Type:      EventError,
+			NavID:     s.navID,
+			Err:       err,
+			Timestamp: time.Now(),
+		})
+		return navigation.Load{}, nil
+	}
+
 	s.state = StateNavigating
 	s.err = nil
 	load, ctx := s.scheduler.Begin(parent, url)

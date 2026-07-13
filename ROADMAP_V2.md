@@ -757,16 +757,20 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [x] Enforce response and decompression size limits.
 - [x] Validate MIME handling.
 - [x] Enforce the documented Content Security Policy subset.
-- [ ] Add pop-up blocking policy at the navigation boundary.
-- [ ] Prevent local file access from remote origins by default.
+- [x] Add pop-up blocking policy at the navigation boundary.
+- [x] Prevent local file access from remote origins by default.
 
 ### M10.2 Add capability-based browser APIs
 
-- [ ] Define explicit capabilities for network, storage, navigation, clipboard, file, and notifications.
-- [ ] Deny unsupported capabilities by default.
-- [ ] Add per-session policy.
-- [ ] Add auditable permission decisions.
-- [ ] Gate geolocation, notifications, and other advanced APIs behind explicit capabilities.
+- [x] Define explicit capabilities for network, storage, navigation, clipboard, file, and notifications.
+- [x] Deny unsupported capabilities by default (DefaultSecurePolicy).
+- [x] Add ScriptEnforcer and SetEnforcer on Runtime.
+- [x] Gate localStorage/sessionStorage behind CapabilityStorage (per-call via storageMethod wrapper).
+- [x] Gate fetch behind CapabilityNetwork.
+- [x] Gate window.open behind CapabilityNavigation.
+- [x] Wire DefaultSecurePolicy into cmd/browser/main.go.
+- [x] Add auditable permission decisions (PermissionDecision + PermissionDecisions() API).
+- [x] Gate geolocation, notifications, and other advanced APIs behind explicit capabilities (navigator.geolocation, navigator.clipboard, Notification).
 
 ### M10.3 Define serializable engine messages
 

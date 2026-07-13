@@ -49,6 +49,22 @@ const (
 )
 
 // ---------------------------------------------------------------------------
+// Capability names — used with ScriptPolicy.OriginPermissions and
+// CheckAPIPermission. Each constant identifies a browser API capability
+// that can be individually allowed or denied.
+// ---------------------------------------------------------------------------
+
+const (
+	CapabilityNetwork       = "network"       // fetch(), XMLHttpRequest, WebSocket
+	CapabilityStorage       = "storage"       // localStorage, sessionStorage
+	CapabilityNavigation    = "navigation"    // window.open, location navigation
+	CapabilityClipboard     = "clipboard"     // navigator.clipboard read/write
+	CapabilityFile          = "file"          // File System Access API
+	CapabilityNotifications = "notifications" // Notification API
+	CapabilityGeolocation   = "geolocation"   // Geolocation API
+)
+
+// ---------------------------------------------------------------------------
 // APIPermission — per-origin API access control
 // ---------------------------------------------------------------------------
 
@@ -95,7 +111,7 @@ type ScriptPolicy struct {
 	OriginPermissions map[string]map[string]APIPermission
 }
 
-// DefaultScriptPolicy returns permissive defaults.
+// DefaultScriptPolicy returns permissive defaults (allows everything).
 func DefaultScriptPolicy() ScriptPolicy {
 	return ScriptPolicy{
 		MaxSteps:             1_000_000,
@@ -107,9 +123,44 @@ func DefaultScriptPolicy() ScriptPolicy {
 	}
 }
 
+// DefaultSecurePolicy returns secure defaults — it denies capabilities that
+// the engine does not yet implement or that should require explicit user
+// consent, while allowing the core browser APIs (network, storage,
+// navigation) across all origins.
+func DefaultSecurePolicy() ScriptPolicy {
+	return ScriptPolicy{
+		MaxSteps:             1_000_000,
+		MaxExecutionTime:     10 * time.Second,
+		MaxTimers:            128,
+		MaxTaskQueueSize:     256,
+		Mode:                 DocumentModeFull,
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {
+				CapabilityNetwork:    APIAllowed,
+				CapabilityStorage:    APIAllowed,
+				CapabilityNavigation: APIAllowed,
+			},
+		},
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ScriptEnforcer — runtime enforcement of ScriptPolicy
 // ---------------------------------------------------------------------------
+
+// PermissionDecision records a single API capability check result.
+type PermissionDecision struct {
+	Origin     string    `json:"origin"`
+	Capability string    `json:"capability"`
+	Allowed    bool      `json:"allowed"`
+	MatchRule  string    `json:"matchRule"` // "exact", "wildcard", or "default"
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+// maxPermissionDecisions limits the audit trail size to prevent unbounded
+// memory growth.
+const maxPermissionDecisions = 1024
 
 // ScriptEnforcer enforces a ScriptPolicy at runtime. It tracks step count,
 // execution time, and provides interruption signals.
@@ -128,6 +179,9 @@ type ScriptEnforcer struct {
 
 	// Task queue tracking.
 	pendingTasks atomic.Int64
+
+	// Audit trail of permission decisions (bounded ring buffer).
+	decisions []PermissionDecision
 }
 
 // NewScriptEnforcer creates an enforcer with the given policy.
@@ -273,21 +327,56 @@ func (e *ScriptEnforcer) AllowScript(src string) error {
 
 // CheckAPIPermission checks if the given origin can access the named API.
 func (e *ScriptEnforcer) CheckAPIPermission(origin, api string) error {
-	// Check origin-specific permissions first.
+	allowed, rule := e.checkPermission(origin, api)
+	r := PermissionDecision{
+		Origin:     origin,
+		Capability: api,
+		Allowed:    allowed,
+		MatchRule:  rule,
+		Timestamp:  time.Now(),
+	}
+
+	e.mu.Lock()
+	if len(e.decisions) >= maxPermissionDecisions {
+		e.decisions = e.decisions[1:]
+	}
+	e.decisions = append(e.decisions, r)
+	e.mu.Unlock()
+
+	if !allowed {
+		return ErrAPIPermissionDenied
+	}
+	return nil
+}
+
+// checkPermission returns whether the API is allowed and which rule matched.
+func (e *ScriptEnforcer) checkPermission(origin, api string) (allowed bool, matchRule string) {
+	// Check exact origin match first (most specific).
 	if perms, ok := e.policy.OriginPermissions[origin]; ok {
 		if perm, ok := perms[api]; ok {
-			if perm == APIDenied || perm == APIPrompt {
-				return ErrAPIPermissionDenied
-			}
-			return nil
+			return perm == APIAllowed, "exact"
+		}
+	}
+
+	// Check wildcard origin ("*") as a fallback for global defaults.
+	if perms, ok := e.policy.OriginPermissions["*"]; ok {
+		if perm, ok := perms[api]; ok {
+			return perm == APIAllowed, "wildcard"
 		}
 	}
 
 	// Fall back to default.
-	if e.policy.DefaultAPIPermission == APIDenied || e.policy.DefaultAPIPermission == APIPrompt {
-		return ErrAPIPermissionDenied
-	}
-	return nil
+	return e.policy.DefaultAPIPermission == APIAllowed, "default"
+}
+
+// PermissionDecisions returns all recorded permission decisions and clears
+// the internal buffer.
+func (e *ScriptEnforcer) PermissionDecisions() []PermissionDecision {
+	e.mu.Lock()
+	out := e.decisions
+	e.decisions = nil
+	e.mu.Unlock()
+	return out
 }
 
 // Policy returns the current script policy.

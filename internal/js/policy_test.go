@@ -184,6 +184,38 @@ func TestScriptEnforcer_CheckAPIPermission_Denied(t *testing.T) {
 	}
 }
 
+func TestScriptEnforcer_CheckAPIPermission_WildcardOrigin(t *testing.T) {
+	policy := ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {
+				"network": APIAllowed,
+				"storage": APIAllowed,
+			},
+		},
+	}
+	e := NewScriptEnforcer(policy)
+
+	// Wildcard-allowed APIs should pass for any origin.
+	if err := e.CheckAPIPermission("https://example.com", "network"); err != nil {
+		t.Errorf("network should be allowed via wildcard: %v", err)
+	}
+	if err := e.CheckAPIPermission("file:///page.html", "storage"); err != nil {
+		t.Errorf("storage should be allowed via wildcard: %v", err)
+	}
+
+	// API not in wildcard should fall back to default (denied).
+	if err := e.CheckAPIPermission("https://example.com", "geolocation"); err != ErrAPIPermissionDenied {
+		t.Errorf("geolocation should be denied: %v", err)
+	}
+
+	// Exact-origin match should override wildcard.
+	policy.OriginPermissions["https://example.com"] = map[string]APIPermission{"network": APIDenied}
+	if err := e.CheckAPIPermission("https://example.com", "network"); err != ErrAPIPermissionDenied {
+		t.Errorf("exact origin should override wildcard: %v", err)
+	}
+}
+
 func TestScriptEnforcer_CheckAPIPermission_OriginSpecific(t *testing.T) {
 	policy := ScriptPolicy{
 		DefaultAPIPermission: APIAllowed,
@@ -264,8 +296,112 @@ func TestScriptEnforcer_StepsCounter(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Benchmarks
+// PermissionDecisions — audit trail
 // ---------------------------------------------------------------------------
+
+func TestPermissionDecisions_RecordsAllowed(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{DefaultAPIPermission: APIAllowed})
+	if err := e.CheckAPIPermission("https://example.com", "fetch"); err != nil {
+		t.Fatal(err)
+	}
+	decs := e.PermissionDecisions()
+	if len(decs) != 1 {
+		t.Fatalf("got %d decisions, want 1", len(decs))
+	}
+	if decs[0].Capability != "fetch" {
+		t.Errorf("capability = %q, want fetch", decs[0].Capability)
+	}
+	if !decs[0].Allowed {
+		t.Error("decision should be Allowed")
+	}
+	if decs[0].MatchRule != "default" {
+		t.Errorf("matchRule = %q, want default", decs[0].MatchRule)
+	}
+}
+
+func TestPermissionDecisions_RecordsDenied(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{DefaultAPIPermission: APIDenied})
+	_ = e.CheckAPIPermission("https://example.com", "fetch")
+	decs := e.PermissionDecisions()
+	if len(decs) != 1 {
+		t.Fatalf("got %d decisions, want 1", len(decs))
+	}
+	if decs[0].Allowed {
+		t.Error("decision should be Denied")
+	}
+	if decs[0].MatchRule != "default" {
+		t.Errorf("matchRule = %q, want default", decs[0].MatchRule)
+	}
+}
+
+func TestPermissionDecisions_MatchRule(t *testing.T) {
+	policy := ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*":                         {"storage": APIAllowed},
+			"https://exact.com":         {"storage": APIAllowed},
+			"https://exact-denied.com":  {"network": APIDenied},
+		},
+	}
+	e := NewScriptEnforcer(policy)
+
+	_ = e.CheckAPIPermission("https://exact.com", "storage")      // exact (allowed)
+	_ = e.CheckAPIPermission("https://wild.com", "storage")       // wildcard (allowed)
+	_ = e.CheckAPIPermission("https://other.com", "network")      // wildcard not listed → default (denied)
+	_ = e.CheckAPIPermission("https://exact-denied.com", "network") // exact (denied)
+
+	decs := e.PermissionDecisions()
+	if len(decs) != 4 {
+		t.Fatalf("got %d decisions, want 4", len(decs))
+	}
+
+	tests := []struct {
+		allowed  bool
+		rule     string
+	}{
+		{true, "exact"},
+		{true, "wildcard"},
+		{false, "default"},
+		{false, "exact"},
+	}
+	for i, tt := range tests {
+		if decs[i].Allowed != tt.allowed {
+			t.Errorf("decision %d: Allowed = %v, want %v", i, decs[i].Allowed, tt.allowed)
+		}
+		if decs[i].MatchRule != tt.rule {
+			t.Errorf("decision %d: MatchRule = %q, want %q", i, decs[i].MatchRule, tt.rule)
+		}
+	}
+}
+
+func TestPermissionDecisions_ReturnsAndClearsBuffer(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{DefaultAPIPermission: APIAllowed})
+	_ = e.CheckAPIPermission("https://example.com", "fetch")
+
+	first := e.PermissionDecisions()
+	if len(first) != 1 {
+		t.Fatalf("first call: got %d, want 1", len(first))
+	}
+
+	second := e.PermissionDecisions()
+	if len(second) != 0 {
+		t.Fatalf("second call (after clear): got %d, want 0", len(second))
+	}
+}
+
+func TestPermissionDecisions_BoundedBuffer(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{DefaultAPIPermission: APIAllowed})
+	for i := 0; i < maxPermissionDecisions+10; i++ {
+		_ = e.CheckAPIPermission("https://example.com", "fetch")
+	}
+	decs := e.PermissionDecisions()
+	if len(decs) > maxPermissionDecisions {
+		t.Fatalf("buffer exceeded: got %d, max %d", len(decs), maxPermissionDecisions)
+	}
+	if len(decs) != maxPermissionDecisions {
+		t.Fatalf("expected exactly %d decisions (overflow trim), got %d", maxPermissionDecisions, len(decs))
+	}
+}
 
 func BenchmarkScriptEnforcer_AddSteps(b *testing.B) {
 	e := NewScriptEnforcer(ScriptPolicy{MaxSteps: 0}) // no limit

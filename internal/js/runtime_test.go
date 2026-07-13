@@ -1363,3 +1363,536 @@ fetch("https://example.com/api")
 		t.Errorf("expected catchMsg to be 'connection refused', got %q", val.String())
 	}
 }
+
+// --- File access policy tests ---
+
+func TestFetchFileAccessFromRemoteOriginBlocked(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetOrigin("https://example.com")
+	runtime.SetFetcher(&mockFetcher{body: "should not be called"})
+
+	// The rejection is synchronous (before goroutine), so no enqueueTask needed.
+	val, err := runtime.RunScript(`
+		var result = "";
+		var errMsg = "";
+		fetch("file:///etc/passwd").then(function(res) {
+			result = "unexpected_success";
+		}).catch(function(err) {
+			errMsg = err.message;
+		});
+		result + "|" + errMsg;
+	`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	// The catch callback should fire synchronously and set errMsg.
+	want := "|fetch: local file access denied from remote origin"
+	if val.String() != want {
+		t.Fatalf("got %q, want %q", val.String(), want)
+	}
+}
+
+
+
+func TestCheckFileFetchAccess_EmptyOrigin(t *testing.T) {
+	err := checkFileFetchAccess("", "file:///etc/passwd")
+	if err != nil {
+		t.Fatalf("checkFileFetchAccess with empty origin should return nil, got: %v", err)
+	}
+}
+
+func TestCheckFileFetchAccess_RemoteOrigin(t *testing.T) {
+	err := checkFileFetchAccess("https://example.com", "file:///etc/passwd")
+	if err == nil {
+		t.Fatal("checkFileFetchAccess with remote origin should return error")
+	}
+	if err.Error() != "fetch: local file access denied from remote origin" {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestCheckFileFetchAccess_FileOrigin(t *testing.T) {
+	err := checkFileFetchAccess("file:///home/page.html", "file:///etc/passwd")
+	if err != nil {
+		t.Fatalf("checkFileFetchAccess with file origin should return nil, got: %v", err)
+	}
+}
+
+func TestCheckFileFetchAccess_NonFileTarget(t *testing.T) {
+	err := checkFileFetchAccess("https://example.com", "https://api.example.com/data")
+	if err != nil {
+		t.Fatalf("checkFileFetchAccess with non-file target should return nil, got: %v", err)
+	}
+}
+
+func TestFetchNonFileURLFromRemoteOrigin(t *testing.T) {
+	// Non-file URLs must not be blocked.
+	runtime := NewRuntime()
+	runtime.SetOrigin("https://example.com")
+	runtime.SetFetcher(&mockFetcher{body: `{"status":"ok"}`})
+
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
+
+	mu.Lock()
+	_, err := runtime.RunScript(`
+		var result = "";
+		fetch("https://api.example.com/data").then(function(res) {
+			result = "success";
+		}).catch(function(err) {
+			result = "blocked";
+		});
+	`)
+	mu.Unlock()
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	val, err := runtime.RunScript(`result`)
+	mu.Unlock()
+	if err != nil {
+		t.Fatalf("reading result failed: %v", err)
+	}
+	if val.String() != "success" {
+		t.Fatalf("expected non-file fetch from remote origin to be allowed, got: %q", val.String())
+	}
+}
+
+func TestWindowOpen_BlockedFromRemoteOrigin(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetOrigin("https://example.com")
+
+	var opened bool
+	runtime.OnOpenWindow = func(url, name string) {
+		opened = true
+	}
+
+	val, err := runtime.RunScript(`window.open("https://evil.com/popup")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	if val.String() != "null" && val.String() != "undefined" {
+		t.Fatalf("expected null from remote origin window.open, got %v", val)
+	}
+	if opened {
+		t.Fatal("OnOpenWindow should not be called for blocked popup from remote origin")
+	}
+}
+
+func TestWindowOpen_AllowedFromFileOrigin(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetOrigin("file:///home/page.html")
+
+	var openedURL, openedName string
+	runtime.OnOpenWindow = func(url, name string) {
+		openedURL = url
+		openedName = name
+	}
+
+	_, err := runtime.RunScript(`window.open("https://example.com", "mywindow")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	if openedURL != "https://example.com" {
+		t.Fatalf("expected opened URL 'https://example.com', got %q", openedURL)
+	}
+	if openedName != "mywindow" {
+		t.Fatalf("expected opened name 'mywindow', got %q", openedName)
+	}
+}
+
+func TestWindowOpen_AllowedFromEmptyOrigin(t *testing.T) {
+	runtime := NewRuntime()
+	// No SetOrigin call — empty origin (pre-navigation)
+
+	var opened bool
+	runtime.OnOpenWindow = func(url, name string) {
+		opened = true
+	}
+
+	_, err := runtime.RunScript(`window.open("https://example.com")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	if !opened {
+		t.Fatal("OnOpenWindow should be called for popup from empty origin")
+	}
+}
+
+func TestWindowOpen_ProxyObject(t *testing.T) {
+	runtime := NewRuntime()
+
+	runtime.OnOpenWindow = func(url, name string) {}
+
+	val, err := runtime.RunScript(`window.open("https://example.com")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	if val.String() == "null" || val.String() == "undefined" {
+		t.Fatal("expected non-null window proxy")
+	}
+	// Verify via JS that proxy.closed is false.
+	closed, err := runtime.RunScript(`window.open("https://example.com").closed`)
+	if err != nil {
+		t.Fatalf("reading proxy.closed failed: %v", err)
+	}
+	if closed.String() != "false" {
+		t.Fatalf("expected proxy.closed to be false, got %v", closed)
+	}
+}
+
+func TestWindowOpen_NoCallbackNoCrash(t *testing.T) {
+	runtime := NewRuntime()
+	runtime.SetOrigin("file:///home/page.html")
+	// OnOpenWindow is nil — should not crash
+
+	_, err := runtime.RunScript(`window.open("https://example.com")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Capability gating integration tests
+// ---------------------------------------------------------------------------
+
+func TestCapability_FetchDenied(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {CapabilityNetwork: APIDenied},
+		},
+	})
+	runtime := NewRuntime()
+	runtime.SetEnforcer(e)
+	runtime.SetOrigin("https://example.com")
+	runtime.SetFetcher(&mockFetcher{body: "data"})
+
+	_, err := runtime.RunScript(`
+		var caught = false;
+		fetch("https://example.com/api").catch(function() { caught = true; });
+		if (!caught) throw new Error("fetch should have been rejected");
+	`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+}
+
+func TestCapability_FetchAllowed(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {CapabilityNetwork: APIAllowed},
+		},
+	})
+	runtime := NewRuntime()
+	runtime.SetEnforcer(e)
+	runtime.SetOrigin("https://example.com")
+	runtime.SetFetcher(&mockFetcher{body: `{"ok":true}`})
+
+	var mu sync.Mutex
+	runtime.enqueueTask = func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+	}
+
+	mu.Lock()
+	_, err := runtime.RunScript(`
+		var result = "";
+		fetch("https://example.com/api").then(function(r) { result = "ok"; }).catch(function() { result = "err"; });
+	`)
+	mu.Unlock()
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	val, err := runtime.RunScript(`result`)
+	mu.Unlock()
+	if err != nil {
+		t.Fatalf("reading result failed: %v", err)
+	}
+	if val.String() != "ok" {
+		t.Fatalf("expected fetch to be allowed, got %q", val.String())
+	}
+}
+
+func TestCapability_StorageDenied(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {CapabilityStorage: APIDenied},
+		},
+	})
+	runtime := NewRuntime()
+	runtime.SetEnforcer(e)
+
+	// All storage methods should return null/undefined when denied.
+	check := func(script string) {
+		v, err := runtime.RunScript(script)
+		if err != nil {
+			t.Fatalf("script %q failed: %v", script, err)
+		}
+		if v.String() != "null" && v.String() != "undefined" && v.String() != "0" {
+			t.Fatalf("script %q expected null/undefined/0, got %q", script, v.String())
+		}
+	}
+	check(`localStorage.getItem("x")`)
+	check(`localStorage.setItem("x", "1")`)
+	check(`localStorage.key(0)`)
+	check(`localStorage.removeItem("x")`)
+	check(`localStorage.clear()`)
+	check(`sessionStorage.getItem("x")`)
+	check(`sessionStorage.setItem("x", "1")`)
+}
+
+func TestCapability_StorageAllowed(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {CapabilityStorage: APIAllowed},
+		},
+	})
+	runtime := NewRuntime()
+	runtime.SetEnforcer(e)
+
+	_, err := runtime.RunScript(`
+		localStorage.setItem("key1", "value1");
+		var v = localStorage.getItem("key1");
+		if (v !== "value1") throw new Error("expected value1, got " + v);
+		if (localStorage.length() < 1) throw new Error("length should be > 0");
+		localStorage.clear();
+	`)
+	if err != nil {
+		t.Fatalf("storage capability allowed test failed: %v", err)
+	}
+}
+
+func TestCapability_NavigationDenied(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {CapabilityNavigation: APIDenied},
+		},
+	})
+	runtime := NewRuntime()
+	runtime.SetEnforcer(e)
+	runtime.SetOrigin("file:///home/page.html")
+
+	val, err := runtime.RunScript(`window.open("https://example.com")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	if val.String() != "null" && val.String() != "undefined" {
+		t.Fatalf("expected null when navigation capability denied, got %v", val)
+	}
+}
+
+func TestCapability_NavigationAllowed(t *testing.T) {
+	e := NewScriptEnforcer(ScriptPolicy{
+		DefaultAPIPermission: APIDenied,
+		OriginPermissions: map[string]map[string]APIPermission{
+			"*": {CapabilityNavigation: APIAllowed},
+		},
+	})
+	runtime := NewRuntime()
+	runtime.SetEnforcer(e)
+	runtime.SetOrigin("file:///home/page.html")
+
+	var called bool
+	runtime.OnOpenWindow = func(url, name string) {
+		called = true
+	}
+
+	_, err := runtime.RunScript(`window.open("https://example.com")`)
+	if err != nil {
+		t.Fatalf("script failed: %v", err)
+	}
+	if !called {
+		t.Fatal("OnOpenWindow should be called when navigation allowed")
+	}
+}
+
+func TestCapability_NoEnforcerAllowsAll(t *testing.T) {
+	// When no ScriptEnforcer is set, all capabilities are allowed.
+	runtime := NewRuntime()
+	runtime.SetOrigin("file:///home/page.html")
+	runtime.SetFetcher(&mockFetcher{body: "data"})
+
+	// localStorage works.
+	_, err := runtime.RunScript(`localStorage.setItem("k", "v"); var x = localStorage.getItem("k"); if (x !== "v") throw new Error(x)`)
+	if err != nil {
+		t.Fatalf("localStorage should work without enforcer: %v", err)
+	}
+
+	// sessionStorage works.
+	_, err = runtime.RunScript(`sessionStorage.setItem("k", "v"); var x = sessionStorage.getItem("k"); if (x !== "v") throw new Error(x)`)
+	if err != nil {
+		t.Fatalf("sessionStorage should work without enforcer: %v", err)
+	}
+}
+
+func TestDefaultSecurePolicy(t *testing.T) {
+	p := DefaultSecurePolicy()
+	if p.DefaultAPIPermission != APIDenied {
+		t.Errorf("DefaultAPIPermission = %d, want APIDenied", p.DefaultAPIPermission)
+	}
+
+	// Core capabilities should be allowed via wildcard.
+	perms := p.OriginPermissions["*"]
+	if perms == nil {
+		t.Fatal("wildcard origin permissions missing")
+	}
+	if perm, ok := perms[CapabilityNetwork]; !ok || perm != APIAllowed {
+		t.Errorf("CapabilityNetwork should be APIAllowed")
+	}
+	if perm, ok := perms[CapabilityStorage]; !ok || perm != APIAllowed {
+		t.Errorf("CapabilityStorage should be APIAllowed")
+	}
+	if perm, ok := perms[CapabilityNavigation]; !ok || perm != APIAllowed {
+		t.Errorf("CapabilityNavigation should be APIAllowed")
+	}
+
+	// Unsupported capabilities should NOT be in the wildcard (fall through to denied).
+	e := NewScriptEnforcer(p)
+	if err := e.CheckAPIPermission("https://x.com", CapabilityGeolocation); err != ErrAPIPermissionDenied {
+		t.Errorf("geolocation should be denied by default: %v", err)
+	}
+	if err := e.CheckAPIPermission("https://x.com", CapabilityClipboard); err != ErrAPIPermissionDenied {
+		t.Errorf("clipboard should be denied by default: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Navigator API gating tests
+// ---------------------------------------------------------------------------
+
+func TestNavigatorGeolocation_DefaultDenied(t *testing.T) {
+	rt := NewRuntime()
+	e := NewScriptEnforcer(DefaultSecurePolicy())
+	rt.SetEnforcer(e)
+
+	v, err := rt.RunScript(`
+		var rejected = false;
+		navigator.geolocation.getCurrentPosition(
+			function() { rejected = false; },
+			function() { rejected = true; }
+		);
+		rejected;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "true" {
+		t.Errorf("geolocation getCurrentPosition should call error callback when denied, got %s", v.String())
+	}
+}
+
+func TestNavigatorGeolocation_WatchPositionDefaultDenied(t *testing.T) {
+	rt := NewRuntime()
+	e := NewScriptEnforcer(DefaultSecurePolicy())
+	rt.SetEnforcer(e)
+
+	v, err := rt.RunScript(`
+		var rejected = false;
+		navigator.geolocation.watchPosition(
+			function() { rejected = false; },
+			function() { rejected = true; }
+		);
+		rejected;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "true" {
+		t.Errorf("geolocation watchPosition should call error callback when denied, got %s", v.String())
+	}
+}
+
+func TestNavigatorClipboard_DefaultDenied(t *testing.T) {
+	rt := NewRuntime()
+	e := NewScriptEnforcer(DefaultSecurePolicy())
+	rt.SetEnforcer(e)
+
+	v, err := rt.RunScript(`
+		var msg = "";
+		var catchCalled = false;
+		navigator.clipboard.readText().catch(function(e) {
+			catchCalled = true;
+			msg = e.message;
+		});
+		catchCalled;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "true" {
+		t.Errorf("clipboard readText should reject when denied, got %s", v.String())
+	}
+}
+
+func TestNavigatorClipboard_WriteTextDefaultDenied(t *testing.T) {
+	rt := NewRuntime()
+	e := NewScriptEnforcer(DefaultSecurePolicy())
+	rt.SetEnforcer(e)
+
+	v, err := rt.RunScript(`
+		var catchCalled = false;
+		navigator.clipboard.writeText("hello").catch(function() {
+			catchCalled = true;
+		});
+		catchCalled;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "true" {
+		t.Errorf("clipboard writeText should reject when denied, got %s", v.String())
+	}
+}
+
+func TestNotificationConstructor_DefaultDenied(t *testing.T) {
+	rt := NewRuntime()
+	e := NewScriptEnforcer(DefaultSecurePolicy())
+	rt.SetEnforcer(e)
+
+	_, err := rt.RunScript(`new Notification("test")`)
+	if err == nil {
+		t.Fatal("Notification constructor should throw when denied")
+	}
+	// The error message should include the permission denied text.
+	if !strings.Contains(err.Error(), "API permission denied") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNavigatorAPIs_NoEnforcer(t *testing.T) {
+	// Without an enforcer, all capabilities are allowed — but the APIs
+	// still return "not implemented" since they aren't built.
+	rt := NewRuntime()
+
+	v, err := rt.RunScript(`
+		var catchCalled = false;
+		navigator.geolocation.getCurrentPosition(
+			function() { catchCalled = false; },
+			function() { catchCalled = true; }
+		);
+		catchCalled;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != "true" {
+		t.Errorf("should reject with 'not implemented' when no enforcer, got %s", v.String())
+	}
+}
