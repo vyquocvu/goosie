@@ -779,13 +779,27 @@ func (b *Browser) showMemoryDialog() {
 
 	stats := mgr.Stats()
 
+	// Add display list memory estimate from active tab
+	dlEstimate := int64(0)
+	if tab := b.ActiveTab(); tab != nil && tab.htmlRenderer != nil {
+		dlEstimate = int64(len(tab.htmlRenderer.GetDisplayListCommands())) * 256
+		if dlEstimate > 0 {
+			stats.Usage[memory.ComponentDisplayList] = uint64(dlEstimate)
+		}
+	}
+
 	label := widget.NewLabel(formatMemoryStats(stats))
 	label.Wrapping = fyne.TextWrapWord
+
+	refreshBtn := widget.NewButton("Refresh", func() {
+		b.showMemoryDialog()
+	})
 
 	scroll := container.NewScroll(label)
 	scroll.SetMinSize(fyne.NewSize(600, 400))
 
-	dialog.ShowCustom("Memory Budget", "Close", scroll, b.window)
+	content := container.NewBorder(nil, refreshBtn, nil, nil, scroll)
+	dialog.ShowCustom("Memory Budget", "Close", content, b.window)
 }
 
 // formatMemoryStats formats a memory.Stats snapshot into a readable string.
