@@ -782,7 +782,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 ### M10.4 Prototype renderer process isolation
 
 - [x] Run one engine session in a child process.
-- [ ] Send navigation and viewport commands over IPC.
+- [x] Send navigation and viewport commands over IPC.
 - [ ] Return frame output or display-list data.
 - [ ] Detect child crashes.
 - [ ] Restart or show a recoverable tab error.

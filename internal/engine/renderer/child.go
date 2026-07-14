@@ -70,9 +70,23 @@ func (c *Child) handleCommand(ctx context.Context, cmd *Command) bool {
 	case cmd.Navigate != nil:
 		c.handleNavigate(ctx, cmd.Navigate)
 	case cmd.SetViewport != nil:
-		// Prototype: acknowledged but not rendered
+		c.writeEvent(&message.Message{
+			Version: message.Version,
+			Time:    time.Now(),
+			Viewport: &message.Viewport{
+				Width:  cmd.SetViewport.Width,
+				Height: cmd.SetViewport.Height,
+			},
+		})
 	case cmd.Input != nil:
-		// Prototype: acknowledged but not dispatched
+		c.writeEvent(&message.Message{
+			Version: message.Version,
+			Time:    time.Now(),
+			Log: &message.Log{
+				Level:   "debug",
+				Message: fmt.Sprintf("input: kind=%d", cmd.Input.Kind),
+			},
+		})
 	case cmd.Close != nil:
 		c.session.Close()
 		return true

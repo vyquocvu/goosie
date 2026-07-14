@@ -310,3 +310,150 @@ func TestParentSendConcurrent(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 }
+
+func TestViewportCommandOverIPC(t *testing.T) {
+	child, parent, cleanup := connect(t)
+	defer cleanup()
+
+	var mu sync.Mutex
+	var events []*message.Message
+	parent.OnEvent = func(msg *message.Message) {
+		mu.Lock()
+		events = append(events, msg)
+		mu.Unlock()
+	}
+
+	parent.Start()
+	childCtx, childCancel := context.WithCancel(context.Background())
+	defer childCancel()
+	go child.Run(childCtx)
+
+	if err := parent.Send(NewSetViewportCommand(1024, 768)); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	if err := parent.Send(NewCloseCommand()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	found := false
+	for _, ev := range events {
+		if ev.Viewport != nil {
+			found = true
+			if ev.Viewport.Width != 1024 {
+				t.Errorf("Width = %f, want 1024", ev.Viewport.Width)
+			}
+			if ev.Viewport.Height != 768 {
+				t.Errorf("Height = %f, want 768", ev.Viewport.Height)
+			}
+		}
+	}
+	if !found {
+		t.Error("no Viewport event received")
+	}
+}
+
+func TestInputCommandOverIPC(t *testing.T) {
+	child, parent, cleanup := connect(t)
+	defer cleanup()
+
+	var mu sync.Mutex
+	var events []*message.Message
+	parent.OnEvent = func(msg *message.Message) {
+		mu.Lock()
+		events = append(events, msg)
+		mu.Unlock()
+	}
+
+	parent.Start()
+	childCtx, childCancel := context.WithCancel(context.Background())
+	defer childCancel()
+	go child.Run(childCtx)
+
+	if err := parent.Send(NewInputCommand(message.Input{
+		Kind: message.InputClick,
+		X:    50,
+		Y:    100,
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	if err := parent.Send(NewCloseCommand()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	found := false
+	for _, ev := range events {
+		if ev.Log != nil && strings.Contains(ev.Log.Message, "input") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no input log event received")
+	}
+}
+
+func TestNavigateAndViewportSequence(t *testing.T) {
+	child, parent, cleanup := connect(t)
+	defer cleanup()
+
+	var mu sync.Mutex
+	var events []*message.Message
+	parent.OnEvent = func(msg *message.Message) {
+		mu.Lock()
+		events = append(events, msg)
+		mu.Unlock()
+	}
+
+	parent.Start()
+	childCtx, childCancel := context.WithCancel(context.Background())
+	defer childCancel()
+	go child.Run(childCtx)
+
+	// Send navigate, then viewport
+	if err := parent.Send(NewNavigateCommand("https://example.com")); err != nil {
+		t.Fatal(err)
+	}
+	if err := parent.Send(NewSetViewportCommand(1280, 720)); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	if err := parent.Send(NewCloseCommand()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	hasNav := false
+	hasVP := false
+	for _, ev := range events {
+		if ev.Navigation != nil {
+			hasNav = true
+		}
+		if ev.Viewport != nil {
+			hasVP = true
+		}
+	}
+	if !hasNav {
+		t.Error("no Navigation event in sequence")
+	}
+	if !hasVP {
+		t.Error("no Viewport event in sequence")
+	}
+}
