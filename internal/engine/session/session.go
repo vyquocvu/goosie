@@ -325,6 +325,18 @@ func (s *Session) Interactive() {
 	})
 }
 
+// PendingLoads returns all loads currently queued in the scheduler,
+// ordered by priority (highest first). Returns nil if the scheduler
+// has not been initialized.
+func (s *Session) PendingLoads() []navigation.Load {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scheduler == nil {
+		return nil
+	}
+	return s.scheduler.PendingLoads()
+}
+
 // Complete marks the current navigation as successfully finished.
 func (s *Session) Complete() {
 	s.mu.Lock()

@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
+	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/memory"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
@@ -53,7 +54,8 @@ type BrowserDependencies struct {
 	Profile       *profile.Profile
 	Bookmarks     *profile.BookmarkStore
 	History       *profile.HistoryStore
-	Session       *profile.SessionStore
+	SessionStore  *profile.SessionStore
+	NavSession    *session.Session
 	SettingsStore *profile.SettingsStore
 	Storage       *profile.StorageStore
 	Network       *goosienet.Service
@@ -92,6 +94,7 @@ type Browser struct {
 	screenshotButton    *widget.Button
 	sourceButton        *widget.Button
 	memoryButton        *widget.Button
+	netQueueButton      *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -423,7 +426,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -557,6 +560,11 @@ func (b *Browser) createNavigationControls() {
 	// Memory budget button
 	b.memoryButton = widget.NewButton("Mem", func() {
 		b.showMemoryDialog()
+	})
+
+	// Network queue button
+	b.netQueueButton = widget.NewButton("Queue", func() {
+		b.showNetworkQueueDialog()
 	})
 }
 
@@ -768,6 +776,37 @@ func formatMemoryStats(stats memory.Stats) string {
 	}
 
 	return b.String()
+}
+
+// showNetworkQueueDialog opens a dialog showing pending network loads sorted by priority.
+func (b *Browser) showNetworkQueueDialog() {
+	sess := b.deps.NavSession
+	if sess == nil {
+		dialog.ShowInformation("Network Queue", "Navigation session not available.", b.window)
+		return
+	}
+
+	loads := sess.PendingLoads()
+	if len(loads) == 0 {
+		dialog.ShowInformation("Network Queue", "No pending network loads.", b.window)
+		return
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("Pending Loads: %d\n\n", len(loads)))
+	for i, load := range loads {
+		age := time.Since(load.StartedAt).Round(time.Millisecond)
+		buf.WriteString(fmt.Sprintf("%d. %s\n", i+1, load.URL))
+		buf.WriteString(fmt.Sprintf("   Priority: %s  Age: %v\n", load.Priority.String(), age))
+	}
+
+	label := widget.NewLabel(buf.String())
+	label.Wrapping = fyne.TextWrapWord
+
+	scroll := container.NewScroll(label)
+	scroll.SetMinSize(fyne.NewSize(600, 400))
+
+	dialog.ShowCustom("Network Queue", "Close", scroll, b.window)
 }
 
 // memoryDefaultOrder returns a consistent display order for memory components.
