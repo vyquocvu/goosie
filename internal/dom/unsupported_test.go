@@ -206,6 +206,9 @@ func TestUnsupportedFeatureKindString(t *testing.T) {
 		{FeatureObject, "object"},
 		{FeatureEmbed, "embed"},
 		{FeaturePWAManifest, "pwa-manifest"},
+		{FeatureWebSocket, "websocket"},
+		{FeatureWebWorker, "web-worker"},
+		{FeatureServiceWorker, "service-worker"},
 		{UnsupportedFeatureKind(0), "UnsupportedFeatureKind(0)"},
 		{UnsupportedFeatureKind(99), "UnsupportedFeatureKind(99)"},
 	}

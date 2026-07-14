@@ -1701,6 +1701,14 @@ func (r *Runtime) setupWindowAPI() {
 	// Setup Notification constructor
 	r.setupNotificationAPI()
 
+	// Install stubs for unsupported network/worker/PWA APIs. These
+	// detect page usage and report it to the fallback layer; they
+	// do NOT enforce capability policy — pages can call them, and
+	// the detection is the signal we surface.
+	r.setupWebSocketAPI()
+	r.setupWorkerAPI()
+	r.setupServiceWorkerAPI()
+
 	r.vm.Set("window", window)
 	r.vm.Set("self", window)
 	r.vm.Set("top", window)

@@ -81,6 +81,25 @@ substring `import` (0 B/op, 0 allocs/op, ~2 ns/call when no callback
 is installed) and reports at most once per Runtime via the same
 deduplicated detection callback as the runtime element creation path.
 
+### Runtime detection of WebSocket, Web Worker, ServiceWorker
+
+The engine installs stub constructors on the JS global object so that
+pages calling these unsupported APIs surface their intent to the
+fallback layer without crashing the page:
+
+- `new WebSocket(url)` reports `dom.FeatureWebSocket` and returns a
+  stub object with no-op `close`, `send`, `addEventListener`, etc.
+- `new Worker(url)` reports `dom.FeatureWebWorker` and returns a stub
+  object with no-op `postMessage`, `terminate`, `addEventListener`.
+- `navigator.serviceWorker.register(url)` reports
+  `dom.FeatureServiceWorker` and returns a rejected promise;
+  `getRegistration` returns null and `getRegistrations` returns an
+  empty array.
+
+Each kind is reported at most once per Runtime via the existing
+deduplicated detection callback. The stubs do NOT enforce capability
+policy — the detection is the signal we surface, not the access denial.
+
 ## Supported CSS
 
 | Feature | Status | Fallback behavior |

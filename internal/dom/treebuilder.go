@@ -43,6 +43,9 @@ const (
 	FeatureObject
 	FeatureEmbed
 	FeaturePWAManifest
+	FeatureWebSocket
+	FeatureWebWorker
+	FeatureServiceWorker
 )
 
 func (k UnsupportedFeatureKind) String() string {
@@ -63,6 +66,12 @@ func (k UnsupportedFeatureKind) String() string {
 		return "embed"
 	case FeaturePWAManifest:
 		return "pwa-manifest"
+	case FeatureWebSocket:
+		return "websocket"
+	case FeatureWebWorker:
+		return "web-worker"
+	case FeatureServiceWorker:
+		return "service-worker"
 	default:
 		return fmt.Sprintf("UnsupportedFeatureKind(%d)", k)
 	}
