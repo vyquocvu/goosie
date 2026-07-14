@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/widget"
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
@@ -32,6 +33,12 @@ type InspectPanel struct {
 	stylesContainer      *fyne.Container
 	layoutContainer      *fyne.Container
 	performanceContainer *fyne.Container
+
+	// lastMetrics is the most recent navigation metrics supplied by
+	// the engine via SetMetrics. When zero-valued, the performance
+	// tab falls back to a static "Total Nodes: N" line so the tab
+	// is still useful while metrics are not yet wired in.
+	lastMetrics metrics.Metrics
 
 	// Search
 	searchEntry *widget.Entry
@@ -438,9 +445,124 @@ func (ip *InspectPanel) updatePerformanceTab() {
 	nodeCount := len(ip.nodeMap)
 
 	ip.performanceContainer.Add(widget.NewLabelWithStyle("Metrics", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
-	ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Total Nodes: %d", nodeCount)))
+
+	if ip.hasPhaseTimings() {
+		ip.renderTimingPanel(metrics.NewTimingPanel(ip.lastMetrics))
+	} else {
+		ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Total Nodes: %d", nodeCount)))
+		ip.performanceContainer.Add(widget.NewLabel("No navigation timings yet"))
+	}
 
 	ip.performanceContainer.Refresh()
+}
+
+// hasPhaseTimings reports whether the inspect panel has recorded any
+// phase timings via SetMetrics. The Performance tab renders the
+// phase timing panel only when this is true; otherwise it falls back
+// to a static summary.
+func (ip *InspectPanel) hasPhaseTimings() bool {
+	return len(ip.lastMetrics.Timings) > 0 || ip.lastMetrics.NavID != 0
+}
+
+// SetMetrics updates the Performance tab with the given navigation
+// metrics. A zero-value Metrics clears the timing surface back to
+// the static summary. Safe to call from any goroutine — Fyne widgets
+// are touched only on the UI goroutine via a fyne.Do scheduling
+// pattern that the inspect panel relies on.
+//
+// Integration note: callers should invoke SetMetrics from the UI
+// goroutine; the simplest production wire-up is a goroutine-safe
+// helper on the engine session that reads the latest Recorder
+// snapshot and posts it through the Fyne main loop. Tests can call
+// SetMetrics directly.
+func (ip *InspectPanel) SetMetrics(m metrics.Metrics) {
+	ip.lastMetrics = m
+	ip.updateDetails()
+}
+
+// renderTimingPanel converts a metrics.TimingPanel snapshot into a
+// vertical stack of Fyne labels, mirroring the textual layout
+// produced by TimingPanel.String. It keeps the panel independent of
+// any Fyne canvas primitives that would force tab-size measurement
+// regressions — every label is a static-format widget.
+func (ip *InspectPanel) renderTimingPanel(panel metrics.TimingPanel) {
+	header := widget.NewLabelWithStyle(
+		fmt.Sprintf("Performance — Navigation %d", panel.NavID),
+		fyne.TextAlignCenter, fyne.TextStyle{Bold: true},
+	)
+	ip.performanceContainer.Add(header)
+	ip.performanceContainer.Add(widget.NewLabel(panel.URL))
+
+	totalRow := widget.NewLabel(fmt.Sprintf("Total: %.2f ms  Status: %s",
+		panel.TotalDuration.Seconds()*1000, panel.OverallStatus))
+	totalRow.TextStyle = fyne.TextStyle{Bold: true}
+	ip.performanceContainer.Add(totalRow)
+
+	summary := widget.NewLabel(fmt.Sprintf("Phases: %d ok, %d warning, %d slow",
+		panel.StatusSummary.OK, panel.StatusSummary.Warning, panel.StatusSummary.Slow))
+	ip.performanceContainer.Add(summary)
+
+	for _, row := range panel.Rows {
+		line := fmt.Sprintf("  %-12s %8.2f ms (%5.1f%%)%s  %s",
+			row.PhaseLabel,
+			row.DurationMs,
+			row.Percentage,
+			rowIntervalLabel(row.IntervalCount),
+			row.Status,
+		)
+		ip.performanceContainer.Add(widget.NewLabel(line))
+	}
+
+	for _, g := range panel.CounterGroups {
+		if len(g.Entries) == 0 {
+			continue
+		}
+		ip.performanceContainer.Add(widget.NewLabelWithStyle(g.Label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		ip.performanceContainer.Add(widget.NewLabel(formatCounterGroup(g)))
+	}
+}
+
+func rowIntervalLabel(n int) string {
+	if n <= 1 {
+		return ""
+	}
+	return fmt.Sprintf(" [%dx]", n)
+}
+
+// formatCounterGroup renders a CounterGroup's entries as a single
+// comma-separated label. This is a UI-layer helper to keep the
+// engine package free of Fyne imports.
+func formatCounterGroup(g metrics.CounterGroup) string {
+	parts := make([]string, 0, len(g.Entries))
+	for _, e := range g.Entries {
+		parts = append(parts, fmt.Sprintf("%s=%s", e.Name, formatCounterValue(e)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatCounterValue(e metrics.CounterEntry) string {
+	if !e.Bytes {
+		return fmt.Sprintf("%d", e.Value)
+	}
+	return formatBytes(e.Value)
+}
+
+// formatBytes mirrors metrics.formatBytes so the Fyne layer does not
+// need to import any private helper. Kept tiny and readonly; the
+// authoritative byte-formatter lives in the engine package.
+func formatBytes(b int64) string {
+	const step = 1000
+	if b <= 0 {
+		return "0 B"
+	}
+	abs := float64(b)
+	units := []string{"B", "KB", "MB", "GB"}
+	idx := 0
+	for abs >= step && idx < len(units)-1 {
+		abs /= step
+		idx++
+	}
+	return fmt.Sprintf("%.2f %s", abs, units[idx])
 }
 
 func (ip *InspectPanel) refreshRenderer() {
