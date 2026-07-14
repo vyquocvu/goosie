@@ -774,10 +774,10 @@ Improve safety in the single-process engine while preparing clean interfaces for
 
 ### M10.3 Define serializable engine messages
 
-- [ ] Define messages for navigation, input, viewport, resource responses, display lists, frames, logs, and crashes.
+- [x] Define messages for navigation, input, viewport, resource responses, display lists, frames, logs, and crashes.
 - [ ] Avoid passing raw pointers or UI objects across subsystem boundaries.
-- [ ] Version message schemas.
-- [ ] Add encode/decode tests.
+- [x] Version message schemas.
+- [x] Add encode/decode tests.
 
 ### M10.4 Prototype renderer process isolation
 
