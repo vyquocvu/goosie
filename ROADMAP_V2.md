@@ -850,7 +850,7 @@ Handle sites outside the Go engine's supported subset predictably with pure Go f
 ### M12.1 Define fallback triggers
 
 - [x] Unsupported mandatory feature detected: `<canvas>`, `<video>`, `<audio>`, `<iframe>`, `<script type="module">`, `<object>`, `<embed>`, `<link rel="manifest">` during streaming parse via `OnUnsupportedFeature` callback.
-- [ ] Canvas API required by page behavior.
+- [x] Canvas API required by page behavior. _(Implemented via JS runtime `OnRuntimeUnsupportedFeature` callback fired from `document.createElement` — covers canvas, video, audio, iframe, object, embed. Each kind reported at most once per Runtime, deduplicated by kind, surfaced through `Runtime.SetRuntimeUnsupportedFeatureCallback`.)_
 - [ ] Video, audio, WebSocket, Web Worker, Service Worker, or full PWA feature required.
 - [ ] ES module graph required beyond the supported script subset.
 - [x] User requests compatibility mode (`fallback.Policy.UserRequested`).

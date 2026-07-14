@@ -50,6 +50,21 @@ roadmap explicitly moves them into a planned compatibility path.
 | `canvas`, `video`, `audio`, `iframe`, `object`, `embed` | Out of Scope | Render as inert fallback content. |
 | Unknown HTML elements | Fallback | Preserve children and render as generic inline or block containers. |
 
+### Runtime detection of unsupported elements
+
+The engine detects the same set of out-of-scope elements (`canvas`,
+`video`, `audio`, `iframe`, `object`, `embed`) both during streaming
+HTML parse (`dom.ParseConfig.OnUnsupportedFeature`) and at JavaScript
+runtime when pages construct them dynamically via
+`document.createElement(...)` (`js.Runtime.SetRuntimeUnsupportedFeatureCallback`).
+
+The runtime path is deduplicated per kind and per `Runtime` instance —
+each kind is reported at most once. The hook is nil-safe and never
+allocates when no callback is installed. Callers wire the hook to the
+fallback decision layer (`internal/engine/fallback.Policy.Record`) so
+that scripts which dynamically build out-of-scope elements still trigger
+the same fallback logic as markup that already contains them.
+
 ## Supported CSS
 
 | Feature | Status | Fallback behavior |

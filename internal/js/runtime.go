@@ -92,6 +92,25 @@ type Runtime struct {
 	// the window name (target). If nil, window.open() is a no-op.
 	OnOpenWindow func(url, name string)
 
+	// OnRuntimeUnsupportedFeature is invoked when JavaScript uses an
+	// engine-unsupported DOM API surface (e.g. document.createElement
+	// with a tag the engine does not implement, like 'canvas', 'video',
+	// 'audio', 'iframe'). Reports each detected kind at most once per
+	// Runtime lifetime (deduplicated). Nil callback is a no-op.
+	//
+	// This complements the HTML parser's OnUnsupportedFeature callback
+	// (in internal/dom): the parser detects unsupported tags in the
+	// incoming HTML stream, while this callback detects them when the
+	// page's JavaScript dynamically constructs them.
+	OnRuntimeUnsupportedFeature func(dom.UnsupportedFeature)
+
+	// runtimeDetected tracks which unsupported feature kinds have
+	// already been reported by JavaScript during this page's lifetime.
+	// Used to deduplicate per-kind reports. Access guarded by
+	// runtimeDetectedMu.
+	runtimeDetected   map[dom.UnsupportedFeatureKind]bool
+	runtimeDetectedMu sync.Mutex
+
 	// enforcer enforces script policy limits and API capabilities.
 	// When nil (default), all capabilities are allowed.
 	enforcer *ScriptEnforcer
@@ -101,6 +120,54 @@ type Runtime struct {
 // and execution-limit enforcement. Passing nil removes enforcement.
 func (r *Runtime) SetEnforcer(e *ScriptEnforcer) {
 	r.enforcer = e
+}
+
+// SetRuntimeUnsupportedFeatureCallback installs the callback that
+// receives runtime-detected unsupported engine feature events from
+// JavaScript (e.g. document.createElement('canvas')). Passing nil
+// removes the callback. Each unsupported feature kind is reported
+// at most once per Runtime (deduplicated).
+func (r *Runtime) SetRuntimeUnsupportedFeatureCallback(cb func(dom.UnsupportedFeature)) {
+	r.OnRuntimeUnsupportedFeature = cb
+}
+
+// reportRuntimeUnsupportedFeature notifies the registered callback of
+// a runtime-detected unsupported feature. Each kind is reported at
+// most once per Runtime. Safe to call from goroutines other than the
+// JS owner (it serializes under runtimeDetectedMu). Nil callback is
+// a no-op. The report is best-effort and does not propagate errors.
+func (r *Runtime) reportRuntimeUnsupportedFeature(kind dom.UnsupportedFeatureKind) {
+	if kind == 0 {
+		return
+	}
+	cb := r.OnRuntimeUnsupportedFeature
+	if cb == nil {
+		return
+	}
+
+	r.runtimeDetectedMu.Lock()
+	alreadyReported := r.runtimeDetected[kind]
+	if !alreadyReported {
+		if r.runtimeDetected == nil {
+			r.runtimeDetected = make(map[dom.UnsupportedFeatureKind]bool, 8)
+		}
+		r.runtimeDetected[kind] = true
+	}
+	r.runtimeDetectedMu.Unlock()
+
+	if alreadyReported {
+		return
+	}
+	cb(dom.UnsupportedFeature{Kind: kind})
+}
+
+// ResetRuntimeUnsupportedFeatures clears the deduplication cache so
+// the same kind can be reported again. Useful for tests and for
+// re-using a Runtime across navigations.
+func (r *Runtime) ResetRuntimeUnsupportedFeatures() {
+	r.runtimeDetectedMu.Lock()
+	r.runtimeDetected = nil
+	r.runtimeDetectedMu.Unlock()
 }
 
 // allowCapability checks whether the given API capability is permitted
@@ -132,6 +199,7 @@ func NewRuntime() *Runtime {
 		historyIndex:    -1,
 		consoleMessages: make([]ConsoleMessage, 0),
 		jsErrors:        make([]string, 0),
+		runtimeDetected: make(map[dom.UnsupportedFeatureKind]bool, 8),
 	}
 
 	// Inject ES6+ polyfills before any other setup
@@ -731,6 +799,14 @@ func (r *Runtime) setupDocumentAPI() {
     }
     
     createElement(tagName) {
+      // Notify the engine when JavaScript constructs an element the engine
+      // does not implement. This is the "Canvas API required by page
+      // behavior" M12.1 runtime trigger — it complements the HTML parser's
+      // detection of unsupported tags in the incoming markup. The Go-side
+      // hook deduplicates by kind so the report is once per page per kind.
+      if (typeof window.__reportRuntimeUnsupportedFeature === "function") {
+        window.__reportRuntimeUnsupportedFeature(tagName);
+      }
       return new Element(tagName);
     }
     
@@ -826,6 +902,17 @@ func (r *Runtime) setupDocumentAPI() {
   window.__onDOMChanged = function() {
     if (typeof __onDOMChangedGo === "function") {
       __onDOMChangedGo();
+    }
+  };
+
+  // Bridge: JavaScript-side hook that forwards to __reportRuntimeUnsupportedFeatureGo.
+  // Used by document.createElement to detect when pages build engine-unsupported
+  // elements dynamically (canvas, video, audio, iframe, object, embed).
+  // Unknown tag names are ignored by the Go side, so passing them through
+  // is safe.
+  window.__reportRuntimeUnsupportedFeature = function(tagName) {
+    if (typeof __reportRuntimeUnsupportedFeatureGo === "function") {
+      __reportRuntimeUnsupportedFeatureGo(tagName);
     }
   };
   
@@ -1050,6 +1137,31 @@ func (r *Runtime) setupDocumentAPI() {
 		if r.onDOMMutation != nil {
 			r.onDOMMutation(r.htmlCache)
 		}
+	})
+
+	// Bridge: JavaScript calls window.__reportRuntimeUnsupportedFeature(tagName)
+	// (defined in the injected DOM setup below) which forwards here. We
+	// translate the tag name into the typed UnsupportedFeatureKind and
+	// invoke the deduplicated report path. Unknown tags are no-ops.
+	r.vm.Set("__reportRuntimeUnsupportedFeatureGo", func(tagName string) {
+		var kind dom.UnsupportedFeatureKind
+		switch strings.ToLower(strings.TrimSpace(tagName)) {
+		case "canvas":
+			kind = dom.FeatureCanvas
+		case "video":
+			kind = dom.FeatureVideo
+		case "audio":
+			kind = dom.FeatureAudio
+		case "iframe":
+			kind = dom.FeatureIframe
+		case "object":
+			kind = dom.FeatureObject
+		case "embed":
+			kind = dom.FeatureEmbed
+		default:
+			return
+		}
+		r.reportRuntimeUnsupportedFeature(kind)
 	})
 }
 
