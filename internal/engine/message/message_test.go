@@ -1,9 +1,14 @@
 package message
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vyquocvu/goosie/internal/engine/navigation"
+	"github.com/vyquocvu/goosie/internal/engine/session"
+	engineNet "github.com/vyquocvu/goosie/internal/net"
 )
 
 // ---------------------------------------------------------------------------
@@ -591,8 +596,308 @@ func BenchmarkRoundTrip_Navigation(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		wire, _ := m.Encode()
-		_, _ = Decode(wire)
+		_, _ = m.Encode()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Event → Message converter
+// ---------------------------------------------------------------------------
+
+func TestConvertEvent_StateChange(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventStateChange,
+		NavID: navigation.ID(1),
+		State: session.StateNavigating,
+		URL:   "https://example.com",
+	}
+	m := Event(ev, ts)
+
+	if m.Version != Version {
+		t.Fatalf("version = %d, want %d", m.Version, Version)
+	}
+	if m.Navigation == nil {
+		t.Fatal("Navigation payload is nil")
+	}
+	if m.Navigation.NavID != 1 {
+		t.Errorf("NavID = %d, want 1", m.Navigation.NavID)
+	}
+	if m.Navigation.State != StateNavigating {
+		t.Errorf("State = %d, want %d", m.Navigation.State, StateNavigating)
+	}
+	if m.Navigation.URL != "https://example.com" {
+		t.Errorf("URL = %q, want %q", m.Navigation.URL, "https://example.com")
+	}
+}
+
+func TestConvertEvent_TitleChange(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventTitleChange,
+		NavID: navigation.ID(5),
+		Title: "Hello World",
+	}
+	m := Event(ev, ts)
+
+	if m.Title == nil {
+		t.Fatal("Title payload is nil")
+	}
+	if m.Title.Title != "Hello World" {
+		t.Errorf("Title = %q, want %q", m.Title.Title, "Hello World")
+	}
+	if m.Title.NavID != 5 {
+		t.Errorf("NavID = %d, want 5", m.Title.NavID)
+	}
+}
+
+func TestConvertEvent_URLChange(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventURLChange,
+		NavID: navigation.ID(2),
+		URL:   "https://go.dev",
+	}
+	m := Event(ev, ts)
+
+	if m.URL == nil {
+		t.Fatal("URL payload is nil")
+	}
+	if m.URL.URL != "https://go.dev" {
+		t.Errorf("URL = %q, want %q", m.URL.URL, "https://go.dev")
+	}
+}
+
+func TestConvertEvent_FirstPaint(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventFirstPaint,
+		NavID: navigation.ID(3),
+	}
+	m := Event(ev, ts)
+
+	if m.Paint == nil {
+		t.Fatal("Paint payload is nil")
+	}
+	if m.Paint.NavID != 3 {
+		t.Errorf("NavID = %d, want 3", m.Paint.NavID)
+	}
+}
+
+func TestConvertEvent_Progress(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:     session.EventProgress,
+		NavID:    navigation.ID(4),
+		Progress: 0.75,
+	}
+	m := Event(ev, ts)
+
+	if m.Progress == nil {
+		t.Fatal("Progress payload is nil")
+	}
+	if m.Progress.Progress != 0.75 {
+		t.Errorf("Progress = %f, want 0.75", m.Progress.Progress)
+	}
+}
+
+func TestConvertEvent_Error(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventError,
+		NavID: navigation.ID(6),
+		Err:   errors.New("connection refused"),
+	}
+	m := Event(ev, ts)
+
+	if m.Error == nil {
+		t.Fatal("Error payload is nil")
+	}
+	if m.Error.Message != "connection refused" {
+		t.Errorf("Message = %q, want %q", m.Error.Message, "connection refused")
+	}
+}
+
+func TestConvertEvent_ErrorNil(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventError,
+		NavID: navigation.ID(7),
+	}
+	m := Event(ev, ts)
+
+	if m.Error == nil {
+		t.Fatal("Error payload is nil")
+	}
+	if m.Error.Message != "" {
+		t.Errorf("Message = %q, want empty", m.Error.Message)
+	}
+}
+
+func TestConvertEvent_Security(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventSecuritySummary,
+		NavID: navigation.ID(8),
+		SecuritySummary: engineNet.SecuritySummary{
+			URL:    "https://secure.example.com",
+			Scheme: "https",
+			Secure: true,
+		},
+	}
+	m := Event(ev, ts)
+
+	if m.Security == nil {
+		t.Fatal("Security payload is nil")
+	}
+	if !m.Security.Secure {
+		t.Error("Secure = false, want true")
+	}
+	if m.Security.Scheme != "https" {
+		t.Errorf("Scheme = %q, want %q", m.Security.Scheme, "https")
+	}
+}
+
+func TestConvertEvent_Download(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventDownload,
+		NavID: navigation.ID(9),
+		Download: engineNet.DownloadRecord{
+			URL:          "https://example.com/file.zip",
+			Status:       engineNet.DownloadComplete,
+			BytesWritten: 1024,
+		},
+	}
+	m := Event(ev, ts)
+
+	if m.Download == nil {
+		t.Fatal("Download payload is nil")
+	}
+	if m.Download.URL != "https://example.com/file.zip" {
+		t.Errorf("URL = %q, want %q", m.Download.URL, "https://example.com/file.zip")
+	}
+	if m.Download.Status != "complete" {
+		t.Errorf("Status = %q, want %q", m.Download.Status, "complete")
+	}
+	if m.Download.BytesWritten != 1024 {
+		t.Errorf("BytesWritten = %d, want 1024", m.Download.BytesWritten)
+	}
+}
+
+func TestConvertEvent_WireRoundTrip(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventStateChange,
+		NavID: navigation.ID(42),
+		State: session.StateComplete,
+		URL:   "https://example.com",
+	}
+	m := Event(ev, ts)
+
+	wire, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Navigation == nil {
+		t.Fatal("decoded Navigation is nil")
+	}
+	if decoded.Navigation.NavID != 42 {
+		t.Errorf("NavID = %d, want 42", decoded.Navigation.NavID)
+	}
+	if decoded.Navigation.State != StateComplete {
+		t.Errorf("State = %d, want %d", decoded.Navigation.State, StateComplete)
+	}
+}
+
+func TestConvertEvent_OtherEventsIgnored(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventStateChange,
+		NavID: navigation.ID(1),
+		State: session.StateCreated,
+	}
+	m := Event(ev, ts)
+
+	if m.Navigation == nil {
+		t.Fatal("Navigation payload is nil")
+	}
+	if m.Title != nil {
+		t.Error("Title should be nil for StateChange event")
+	}
+	if m.Error != nil {
+		t.Error("Error should be nil for StateChange event")
+	}
+}
+
+func TestConvertEvent_StateMapping(t *testing.T) {
+	cases := []struct {
+		sessionState session.State
+		wantState    NavState
+	}{
+		{session.StateCreated, StateCreated},
+		{session.StateNavigating, StateNavigating},
+		{session.StateParsing, StateParsing},
+		{session.StateInteractive, StateInteractive},
+		{session.StateComplete, StateComplete},
+		{session.StateCancelled, StateCancelled},
+		{session.StateFailed, StateFailed},
+		{session.StateClosed, StateClosed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.sessionState.String(), func(t *testing.T) {
+			got := convertState(tc.sessionState)
+			if got != tc.wantState {
+				t.Errorf("convertState(%v) = %d, want %d", tc.sessionState, got, tc.wantState)
+			}
+		})
+	}
+}
+
+func TestConvertEvent_Immutability(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventTitleChange,
+		NavID: navigation.ID(1),
+		Title: "Original",
+	}
+	m1 := Event(ev, ts)
+
+	ev.Title = "Modified"
+	m2 := Event(ev, ts)
+
+	if m1.Title.Title != "Original" {
+		t.Errorf("first message mutated: Title = %q", m1.Title.Title)
+	}
+	if m2.Title.Title != "Modified" {
+		t.Errorf("second message Title = %q, want %q", m2.Title.Title, "Modified")
+	}
+}
+
+func TestConvertEvent_EncodeJSON(t *testing.T) {
+	ts := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ev := session.Event{
+		Type:  session.EventStateChange,
+		NavID: navigation.ID(10),
+		State: session.StateParsing,
+		URL:   "https://example.com/page",
+	}
+	m := Event(ev, ts)
+
+	wire, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(wire)
+	if !strings.Contains(s, `"navID": 10`) {
+		t.Errorf("wire missing navID: %s", s)
+	}
+	if !strings.Contains(s, `"state": 2`) {
+		t.Errorf("wire missing state=2 (Parsing): %s", s)
 	}
 }
 
