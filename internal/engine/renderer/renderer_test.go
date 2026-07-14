@@ -649,3 +649,142 @@ func (p *panicOnNavigate) Run(ctx context.Context) error {
 
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// Tab (crash recovery) tests
+// ---------------------------------------------------------------------------
+
+func TestTabCrashDetected(t *testing.T) {
+	childInR, childInW := io.Pipe()
+	childOutR, childOutW := io.Pipe()
+
+	child := NewChild(childInR, childOutW)
+	parent := NewParent(childInW, childOutR)
+
+	var mu sync.Mutex
+	var crashErr error
+	tab := NewTab(child, parent)
+	tab.OnCrash = func(err error) {
+		mu.Lock()
+		crashErr = err
+		mu.Unlock()
+	}
+
+	go child.Run(context.Background())
+
+	// Simulate crash by closing child's output pipe abruptly.
+	childOutW.Close()
+	childInR.Close()
+
+	time.Sleep(150 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if crashErr == nil {
+		t.Error("OnCrash was not called after pipe close")
+	}
+}
+
+func TestTabRestartAfterCrash(t *testing.T) {
+	// Phase 1: set up tab, crash it, detect crash
+	childInR1, childInW1 := io.Pipe()
+	childOutR1, childOutW1 := io.Pipe()
+
+	child1 := NewChild(childInR1, childOutW1)
+	parent1 := NewParent(childInW1, childOutR1)
+
+	var mu sync.Mutex
+	var crashDetected bool
+	tab := NewTab(child1, parent1)
+	tab.OnCrash = func(err error) {
+		mu.Lock()
+		crashDetected = true
+		mu.Unlock()
+	}
+
+	go child1.Run(context.Background())
+
+	// Navigate first
+	tab.Navigate("https://example.com")
+	time.Sleep(100 * time.Millisecond)
+
+	// Crash the child
+	childOutW1.Close()
+	childInR1.Close()
+	time.Sleep(150 * time.Millisecond)
+
+	mu.Lock()
+	if !crashDetected {
+		mu.Unlock()
+		t.Fatal("crash not detected")
+	}
+	mu.Unlock()
+
+	// Phase 2: restart with new pipes
+	childInR2, childInW2 := io.Pipe()
+	childOutR2, childOutW2 := io.Pipe()
+	child2 := NewChild(childInR2, childOutW2)
+
+	var recovered bool
+	var events []*message.Message
+	tab.OnEvent = func(msg *message.Message) {
+		mu.Lock()
+		events = append(events, msg)
+		mu.Unlock()
+	}
+	tab.OnRecover = func() {
+		mu.Lock()
+		recovered = true
+		mu.Unlock()
+	}
+
+	tab.Restart(childInR2, childOutW2, childInW2, childOutR2)
+
+	// Start the new child first, then replay navigation
+	go child2.Run(context.Background())
+
+	// Replay the last navigation
+	tab.mu.Lock()
+	lastURL := tab.nextURL
+	tab.mu.Unlock()
+	if lastURL != "" {
+		tab.Navigate(lastURL)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !recovered {
+		t.Error("OnRecover was not called")
+	}
+
+	// Should have navigation event from the replayed URL
+	foundNav := false
+	for _, ev := range events {
+		if ev.Navigation != nil {
+			foundNav = true
+			if ev.Navigation.URL != "https://example.com" {
+				t.Errorf("replayed URL = %q, want %q", ev.Navigation.URL, "https://example.com")
+			}
+		}
+	}
+	if !foundNav {
+		t.Error("no Navigation event after restart")
+	}
+}
+
+func TestTabGracefulClose(t *testing.T) {
+	child, parent, cleanup := connect(t)
+	defer cleanup()
+
+	tab := NewTab(child, parent)
+	go child.Run(context.Background())
+
+	if err := tab.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+}

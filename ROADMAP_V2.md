@@ -785,7 +785,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [x] Send navigation and viewport commands over IPC.
 - [x] Return frame output or display-list data.
 - [x] Detect child crashes.
-- [ ] Restart or show a recoverable tab error.
+- [x] Restart or show a recoverable tab error.
 - [ ] Measure RSS and latency overhead.
 
 **Decision gate**
