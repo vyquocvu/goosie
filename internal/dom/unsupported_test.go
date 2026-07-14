@@ -44,6 +44,8 @@ func TestStreamParseDetectsAllUnsupportedFeatures(t *testing.T) {
 		<video src="vid.mp4"></video>
 		<audio src="aud.mp3"></audio>
 		<iframe src="page.html"></iframe>
+		<object data="plugin.dat"></object>
+		<embed src="plugin.swf">
 	</body></html>`
 
 	var mu sync.Mutex
@@ -69,7 +71,9 @@ func TestStreamParseDetectsAllUnsupportedFeatures(t *testing.T) {
 	assert.Equal(t, 1, detected[FeatureVideo], "should detect video")
 	assert.Equal(t, 1, detected[FeatureAudio], "should detect audio")
 	assert.Equal(t, 1, detected[FeatureIframe], "should detect iframe")
-	assert.Equal(t, 4, len(detected), "should detect exactly 4 unsupported features")
+	assert.Equal(t, 1, detected[FeatureObject], "should detect object")
+	assert.Equal(t, 1, detected[FeatureEmbed], "should detect embed")
+	assert.Equal(t, 6, len(detected), "should detect exactly 6 unsupported features")
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +202,10 @@ func TestUnsupportedFeatureKindString(t *testing.T) {
 		{FeatureVideo, "video"},
 		{FeatureAudio, "audio"},
 		{FeatureIframe, "iframe"},
+		{FeatureESModule, "es-module"},
+		{FeatureObject, "object"},
+		{FeatureEmbed, "embed"},
+		{FeaturePWAManifest, "pwa-manifest"},
 		{UnsupportedFeatureKind(0), "UnsupportedFeatureKind(0)"},
 		{UnsupportedFeatureKind(99), "UnsupportedFeatureKind(99)"},
 	}
@@ -302,4 +310,233 @@ func TestStreamParseUnsupportedFeatureMultipleInstances(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, doc)
 	assert.Equal(t, 3, count, "should detect each <canvas> instance")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsESModule
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsESModule(t *testing.T) {
+	const input = `<html><head>
+		<script type="module" src="app.mjs"></script>
+	</head><body><p>Content</p></body></html>`
+
+	var detected bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureESModule {
+				detected = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.True(t, detected, "should detect <script type=module> as unsupported")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsESModuleInline
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsESModuleInline(t *testing.T) {
+	const input = `<html><body>
+		<script type="module">import { foo } from "bar";</script>
+	</body></html>`
+
+	var detected bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureESModule {
+				detected = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.True(t, detected, "should detect inline <script type=module>")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsPWAManifest
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsPWAManifest(t *testing.T) {
+	const input = `<html><head>
+		<link rel="manifest" href="/manifest.json">
+	</head><body><p>Content</p></body></html>`
+
+	var detected bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeaturePWAManifest {
+				detected = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.True(t, detected, "should detect <link rel=manifest> as unsupported")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsObject
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsObject(t *testing.T) {
+	const input = `<html><body>
+		<object data="plugin.dat" type="application/x-someplugin"></object>
+	</body></html>`
+
+	var detected bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureObject {
+				detected = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.True(t, detected, "should detect <object> as unsupported")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsEmbed
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsEmbed(t *testing.T) {
+	const input = `<html><body>
+		<embed src="plugin.swf" type="application/x-shockwave-flash">
+	</body></html>`
+
+	var detected bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureEmbed {
+				detected = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.True(t, detected, "should detect <embed> as unsupported")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsPlainScriptNotModule
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsPlainScriptNotModule(t *testing.T) {
+	const input = `<html><head>
+		<script src="app.js"></script>
+		<script>var x = 1;</script>
+	</head><body><p>Content</p></body></html>`
+
+	var detectedESModule bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureESModule {
+				detectedESModule = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.False(t, detectedESModule, "should NOT detect plain <script> as module")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsPWAManifestNotStylesheet
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsPWAManifestNotStylesheet(t *testing.T) {
+	const input = `<html><head>
+		<link rel="stylesheet" href="style.css">
+	</head><body><p>Content</p></body></html>`
+
+	var detectedPWA bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeaturePWAManifest {
+				detectedPWA = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.False(t, detectedPWA, "should NOT detect <link rel=stylesheet> as PWA manifest")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsCombinedScriptTypes
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsCombinedScriptTypes(t *testing.T) {
+	const input = `<html><head>
+		<script src="regular.js"></script>
+		<script type="module" src="app.mjs"></script>
+		<script>var x = 1;</script>
+	</head><body><p>Content</p></body></html>`
+
+	var count int
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureESModule {
+				count++
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.Equal(t, 1, count, "should detect exactly one module script, not plain scripts")
+}
+
+// ---------------------------------------------------------------------------
+// TestStreamParseDetectsScriptTypeMismatch
+// ---------------------------------------------------------------------------
+
+func TestStreamParseDetectsScriptTypeMismatch(t *testing.T) {
+	const input = `<html><head>
+		<script type="text/javascript" src="app.js"></script>
+		<script type="application/javascript" src="lib.js"></script>
+	</head><body><p>Content</p></body></html>`
+
+	var detected bool
+	cfg := ParseConfig{
+		OnUnsupportedFeature: func(f UnsupportedFeature) {
+			if f.Kind == FeatureESModule {
+				detected = true
+			}
+		},
+	}
+
+	parser := NewParser()
+	doc, err := parser.ParseDocumentCtx(context.Background(), strings.NewReader(input), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.False(t, detected, "should not detect text/javascript as module")
 }

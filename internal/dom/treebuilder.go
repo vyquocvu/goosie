@@ -39,6 +39,10 @@ const (
 	FeatureVideo
 	FeatureAudio
 	FeatureIframe
+	FeatureESModule
+	FeatureObject
+	FeatureEmbed
+	FeaturePWAManifest
 )
 
 func (k UnsupportedFeatureKind) String() string {
@@ -51,6 +55,14 @@ func (k UnsupportedFeatureKind) String() string {
 		return "audio"
 	case FeatureIframe:
 		return "iframe"
+	case FeatureESModule:
+		return "es-module"
+	case FeatureObject:
+		return "object"
+	case FeatureEmbed:
+		return "embed"
+	case FeaturePWAManifest:
+		return "pwa-manifest"
 	default:
 		return fmt.Sprintf("UnsupportedFeatureKind(%d)", k)
 	}
@@ -502,7 +514,7 @@ func (tb *treeBuilder) handleStartTag(tokenizer *html.Tokenizer, selfClosing boo
 	if tb.onRes != nil {
 		discoverResources(tagName, tok.Attr, tb.onRes)
 	}
-	tb.detectUnsupportedFeatures(tagName)
+	tb.detectUnsupportedFeatures(tagName, tok.Attr)
 	return nil
 }
 
@@ -553,7 +565,7 @@ func autoCloseP(store *Store, stack *[]NodeID) {
 
 // detectUnsupportedFeatures calls onUnsupported when the tag is a known
 // engine-unsupported feature. Nil callback is a no-op.
-func (tb *treeBuilder) detectUnsupportedFeatures(tagName string) {
+func (tb *treeBuilder) detectUnsupportedFeatures(tagName string, tokAttrs []html.Attribute) {
 	if tb.onUnsupported == nil {
 		return
 	}
@@ -567,10 +579,28 @@ func (tb *treeBuilder) detectUnsupportedFeatures(tagName string) {
 		kind = FeatureAudio
 	case "iframe":
 		kind = FeatureIframe
-	default:
-		return
+	case "object":
+		kind = FeatureObject
+	case "embed":
+		kind = FeatureEmbed
+	case "script":
+		for _, a := range tokAttrs {
+			if strings.EqualFold(a.Key, "type") && strings.EqualFold(a.Val, "module") {
+				kind = FeatureESModule
+				break
+			}
+		}
+	case "link":
+		for _, a := range tokAttrs {
+			if strings.EqualFold(a.Key, "rel") && strings.EqualFold(a.Val, "manifest") {
+				kind = FeaturePWAManifest
+				break
+			}
+		}
 	}
-	tb.onUnsupported(UnsupportedFeature{Kind: kind})
+	if kind != 0 {
+		tb.onUnsupported(UnsupportedFeature{Kind: kind})
+	}
 }
 
 func discoverResources(tagName string, tokAttrs []html.Attribute, onResource func(Resource)) {
