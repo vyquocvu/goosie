@@ -22,6 +22,7 @@ A lightweight web browser engine built from scratch in Go. No platform WebViews 
    - Early resource discovery (CSS, scripts, images) during parse for parallel fetching
    - Unsupported feature detection (canvas, video, audio, iframe) during parse for fallback decisions (M12.1)
    - Runtime detection of unsupported DOM APIs (canvas, video, audio, iframe, object, embed) created via `document.createElement` — deduplicated per page, surfaced through `Runtime.SetRuntimeUnsupportedFeatureCallback` for fallback decisions (M12.1)
+   - Runtime detection of dynamic `import()` expressions via source-level pre-scan in `Runtime.ScanAndReportUnsupportedJSFeatures`, auto-invoked from `RunScript` — surfaces ES module graph usage for fallback decisions (M12.1)
 - **HTML Rendering**: Canvas-based renderer with layout engine
   - Render tree for optimized DOM representation
   - Layout engine with box model calculations

@@ -1486,8 +1486,15 @@ func (r *Runtime) SetFetcher(f HTTPFetcher) {
 	r.fetcher = f
 }
 
-// RunScript executes JavaScript code and catches errors
+// RunScript executes JavaScript code and catches errors. Before
+// delegating to the underlying Goja VM, the script body is scanned
+// for JS constructs the engine does not support (currently: dynamic
+// import() expressions). Detected kinds are reported via the runtime
+// detection callback so the fallback layer can mark the page for
+// compatibility. The scan is nil-safe and short-circuits when the
+// script does not contain the word "import".
 func (r *Runtime) RunScript(script string) (goja.Value, error) {
+	r.ScanAndReportUnsupportedJSFeatures(script)
 	val, err := r.vm.RunString(script)
 	// Flush microtask queue (drives Promise .then callbacks synchronously)
 	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {

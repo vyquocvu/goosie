@@ -65,6 +65,22 @@ fallback decision layer (`internal/engine/fallback.Policy.Record`) so
 that scripts which dynamically build out-of-scope elements still trigger
 the same fallback logic as markup that already contains them.
 
+### Runtime detection of dynamic import()
+
+Static ES module declarations (`<script type="module">`) are detected
+during streaming HTML parse and reported as `dom.FeatureESModule`.
+Dynamic `import(...)` expressions that appear only inside script
+bodies are detected at runtime by `Runtime.ScanAndReportUnsupportedJSFeatures`,
+which is auto-invoked from `Runtime.RunScript`. The scanner respects
+JS lexical structure (line/block comments, single/double/template-quoted
+strings, identifier boundaries) so that mere textual occurrences of
+`import` in comments or strings do not produce false positives.
+
+The scanner short-circuits when the script does not contain the
+substring `import` (0 B/op, 0 allocs/op, ~2 ns/call when no callback
+is installed) and reports at most once per Runtime via the same
+deduplicated detection callback as the runtime element creation path.
+
 ## Supported CSS
 
 | Feature | Status | Fallback behavior |
