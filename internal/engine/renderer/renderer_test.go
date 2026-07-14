@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -787,4 +788,73 @@ func TestTabGracefulClose(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
+
+func BenchmarkIPCRoundTrip(b *testing.B) {
+	child, parent, cleanup := connect_b(b)
+	defer cleanup()
+
+	parent.Start()
+	go child.Run(context.Background())
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		parent.Send(NewPingCommand())
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+func BenchmarkNavigateOverIPC(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		child, parent, cleanup := connect_b(b)
+		parent.Start()
+		go child.Run(context.Background())
+		parent.Send(NewNavigateCommand("https://example.com"))
+		time.Sleep(80 * time.Millisecond)
+		parent.Send(NewCloseCommand())
+		time.Sleep(20 * time.Millisecond)
+		cleanup()
+	}
+}
+
+func BenchmarkRSSOverhead(b *testing.B) {
+	var m1, m2 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m1)
+
+	for i := 0; i < b.N; i++ {
+		child, parent, cleanup := connect_b(b)
+		parent.Start()
+		go child.Run(context.Background())
+		parent.Send(NewNavigateCommand("https://example.com"))
+		time.Sleep(10 * time.Millisecond)
+		parent.Send(NewCloseCommand())
+		time.Sleep(10 * time.Millisecond)
+		cleanup()
+	}
+
+	runtime.GC()
+	runtime.ReadMemStats(&m2)
+
+	b.ReportMetric(float64(m2.TotalAlloc-m1.TotalAlloc)/float64(b.N), "bytes/op")
+}
+
+func connect_b(b *testing.B) (*Child, *Parent, func()) {
+	b.Helper()
+	childInR, childInW := io.Pipe()
+	childOutR, childOutW := io.Pipe()
+	child := NewChild(childInR, childOutW)
+	parent := NewParent(childInW, childOutR)
+	cleanup := func() {
+		childInR.Close()
+		childInW.Close()
+		childOutR.Close()
+		childOutW.Close()
+	}
+	return child, parent, cleanup
 }

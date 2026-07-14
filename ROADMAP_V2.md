@@ -786,7 +786,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 - [x] Return frame output or display-list data.
 - [x] Detect child crashes.
 - [x] Restart or show a recoverable tab error.
-- [ ] Measure RSS and latency overhead.
+- [x] Measure RSS and latency overhead.
 
 **Decision gate**
 
