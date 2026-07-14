@@ -98,13 +98,30 @@ func (c *Child) handleCommand(ctx context.Context, cmd *Command) bool {
 
 func (c *Child) handleNavigate(ctx context.Context, cmd *NavigateCmd) {
 	_, navCtx := c.session.Navigate(ctx, cmd.URL)
-	// Prototype: mark complete after a tick so lifecycle events flow.
+	// Prototype: simulate a frame lifecycle during navigation.
 	go func() {
+		start := time.Now()
 		t := time.NewTimer(50 * time.Millisecond)
 		defer t.Stop()
 		select {
 		case <-t.C:
 			if c.session.State() == session.StateNavigating {
+				// Emit frame begin → commit to simulate rendering a frame.
+				c.writeEvent(&message.Message{
+					Version: message.Version,
+					Time:    time.Now(),
+					Frame: &message.Frame{
+						Kind:  message.FrameBegin,
+					},
+				})
+				c.writeEvent(&message.Message{
+					Version: message.Version,
+					Time:    time.Now(),
+					Frame: &message.Frame{
+						Kind:     message.FrameCommit,
+						Duration: time.Since(start).Nanoseconds(),
+					},
+				})
 				c.session.Complete()
 			}
 		case <-navCtx.Done():

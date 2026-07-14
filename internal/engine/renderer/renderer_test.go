@@ -457,3 +457,57 @@ func TestNavigateAndViewportSequence(t *testing.T) {
 		t.Error("no Viewport event in sequence")
 	}
 }
+
+func TestFrameOutputOverIPC(t *testing.T) {
+	child, parent, cleanup := connect(t)
+	defer cleanup()
+
+	var mu sync.Mutex
+	var events []*message.Message
+	parent.OnEvent = func(msg *message.Message) {
+		mu.Lock()
+		events = append(events, msg)
+		mu.Unlock()
+	}
+
+	parent.Start()
+	childCtx, childCancel := context.WithCancel(context.Background())
+	defer childCancel()
+	go child.Run(childCtx)
+
+	if err := parent.Send(NewNavigateCommand("https://example.com")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for navigation + frame events + completion
+	time.Sleep(300 * time.Millisecond)
+
+	if err := parent.Send(NewCloseCommand()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var frameEvents []*message.Frame
+	for _, ev := range events {
+		if ev.Frame != nil {
+			frameEvents = append(frameEvents, ev.Frame)
+		}
+	}
+
+	if len(frameEvents) < 2 {
+		t.Fatalf("expected at least 2 frame events (begin + commit), got %d", len(frameEvents))
+	}
+
+	if frameEvents[0].Kind != message.FrameBegin {
+		t.Errorf("first frame event Kind = %d, want FrameBegin", frameEvents[0].Kind)
+	}
+	if frameEvents[1].Kind != message.FrameCommit {
+		t.Errorf("second frame event Kind = %d, want FrameCommit", frameEvents[1].Kind)
+	}
+	if frameEvents[1].Duration <= 0 {
+		t.Error("FrameCommit Duration should be positive")
+	}
+}

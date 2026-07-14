@@ -783,7 +783,7 @@ Improve safety in the single-process engine while preparing clean interfaces for
 
 - [x] Run one engine session in a child process.
 - [x] Send navigation and viewport commands over IPC.
-- [ ] Return frame output or display-list data.
+- [x] Return frame output or display-list data.
 - [ ] Detect child crashes.
 - [ ] Restart or show a recoverable tab error.
 - [ ] Measure RSS and latency overhead.
