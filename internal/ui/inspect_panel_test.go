@@ -33,17 +33,17 @@ func (m *MockHTMLRenderer) HitTest(x, y float32) (*renderer.RenderNode, *rendere
 }
 func (m *MockHTMLRenderer) SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
 }
-func (m *MockHTMLRenderer) GetRoot() *renderer.RenderNode         { return m.root }
-func (m *MockHTMLRenderer) Refresh()                              { m.refreshCalled = true }
-func (m *MockHTMLRenderer) SetRefreshCallback(callback func())    {}
-func (m *MockHTMLRenderer) SetSubmitting(submitting bool)         {}
-func (m *MockHTMLRenderer) SetCSP(p *goosienet.CSPPolicy)         {}
-func (m *MockHTMLRenderer) GetDisplayListSummary() map[string]int               { return nil }
-func (m *MockHTMLRenderer) GetDisplayListCommands() []renderer.PaintCommand      { return nil }
-func (m *MockHTMLRenderer) SetDirtyOverlayEnabled(enabled bool)   {}
-func (m *MockHTMLRenderer) DirtyOverlayEnabled() bool             { return false }
-func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)     { return 0, 0, 0 }
-func (m *MockHTMLRenderer) GetLayoutNodeCount() int               { return 0 }
+func (m *MockHTMLRenderer) GetRoot() *renderer.RenderNode                   { return m.root }
+func (m *MockHTMLRenderer) Refresh()                                        { m.refreshCalled = true }
+func (m *MockHTMLRenderer) SetRefreshCallback(callback func())              {}
+func (m *MockHTMLRenderer) SetSubmitting(submitting bool)                   {}
+func (m *MockHTMLRenderer) SetCSP(p *goosienet.CSPPolicy)                   {}
+func (m *MockHTMLRenderer) GetDisplayListSummary() map[string]int           { return nil }
+func (m *MockHTMLRenderer) GetDisplayListCommands() []renderer.PaintCommand { return nil }
+func (m *MockHTMLRenderer) SetDirtyOverlayEnabled(enabled bool)             {}
+func (m *MockHTMLRenderer) DirtyOverlayEnabled() bool                       { return false }
+func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)               { return 0, 0, 0 }
+func (m *MockHTMLRenderer) GetLayoutNodeCount() int                         { return 0 }
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()

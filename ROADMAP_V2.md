@@ -885,11 +885,11 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [x] Phase timing panel.
 - [x] DOM and layout node counts.
 - [x] Dirty style/layout/paint visualization.
-- [ ] Display-list inspector.
-- [ ] Tile-cache inspector.
-- [ ] Memory budget view.
-- [ ] Network priority and cancellation view.
-- [ ] Network waterfall view.
+- [x] Display-list inspector.
+- [x] Tile-cache inspector.
+- [x] Memory budget view.
+- [x] Network priority and cancellation view.
+- [x] Network waterfall view.
 - [x] Storage inspector for cookies, localStorage, and sessionStorage.
 - [x] View page source and rendered HTML views.
 - [x] CSS inspector with live editing.
@@ -898,7 +898,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [x] Network log panel with method/status/URL display.
 - [x] Security summary panel.
 - [x] Downloads panel.
-- [ ] Script task queue view.
+- [x] Script task queue view.
 
 ## C. Documentation
 

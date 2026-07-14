@@ -116,13 +116,13 @@ func (m *MockHTMLRendererComp) HitTest(x, y float32) (*renderer.RenderNode, *ren
 }
 func (m *MockHTMLRendererComp) SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
 }
-func (m *MockHTMLRendererComp) GetRoot() *renderer.RenderNode         { return nil }
-func (m *MockHTMLRendererComp) Refresh()                              {}
-func (m *MockHTMLRendererComp) SetRefreshCallback(callback func())    {}
-func (m *MockHTMLRendererComp) SetSubmitting(submitting bool)         {}
-func (m *MockHTMLRendererComp) SetCSP(p *goosienet.CSPPolicy)         {}
-func (m *MockHTMLRendererComp) GetDisplayListSummary() map[string]int               { return m.summary }
-func (m *MockHTMLRendererComp) GetDisplayListCommands() []renderer.PaintCommand      { return nil }
+func (m *MockHTMLRendererComp) GetRoot() *renderer.RenderNode                   { return nil }
+func (m *MockHTMLRendererComp) Refresh()                                        {}
+func (m *MockHTMLRendererComp) SetRefreshCallback(callback func())              {}
+func (m *MockHTMLRendererComp) SetSubmitting(submitting bool)                   {}
+func (m *MockHTMLRendererComp) SetCSP(p *goosienet.CSPPolicy)                   {}
+func (m *MockHTMLRendererComp) GetDisplayListSummary() map[string]int           { return m.summary }
+func (m *MockHTMLRendererComp) GetDisplayListCommands() []renderer.PaintCommand { return nil }
 func (m *MockHTMLRendererComp) SetDirtyOverlayEnabled(enabled bool) {
 	m.dirtyOverlayEnabled = enabled
 }
