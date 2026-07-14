@@ -198,7 +198,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 			}
 		}
 
-		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, resolvedURL)
+		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, resolvedURL, sess, parser)
 	}()
 }
 
@@ -230,7 +230,7 @@ func updateUIWithError(browser *ui.Browser, sess *session.Session, navID navigat
 }
 
 // updateUIWithContent updates the UI with HTML content.
-func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string) {
+func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string, navSession *session.Session, parser *dom.Parser) {
 	if !sess.IsActive(navID) {
 		return
 	}

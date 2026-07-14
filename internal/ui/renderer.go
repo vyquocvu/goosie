@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fyne.io/fyne/v2"
+	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
@@ -19,4 +20,5 @@ type HTMLRenderer interface {
 	Refresh()
 	SetRefreshCallback(callback func())
 	SetSubmitting(submitting bool)
+	SetCSP(p *net.CSPPolicy)
 }

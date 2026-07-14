@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
 	"github.com/stretchr/testify/assert"
+	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
@@ -34,6 +35,7 @@ func (m *MockHTMLRenderer) GetRoot() *renderer.RenderNode      { return m.root }
 func (m *MockHTMLRenderer) Refresh()                           { m.refreshCalled = true }
 func (m *MockHTMLRenderer) SetRefreshCallback(callback func()) {}
 func (m *MockHTMLRenderer) SetSubmitting(submitting bool)      {}
+func (m *MockHTMLRenderer) SetCSP(p *goosienet.CSPPolicy)     {}
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()

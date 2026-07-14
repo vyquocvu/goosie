@@ -18,6 +18,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/js"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/profile"
+	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 // fixedHeightLayout is a custom layout that sets a fixed height for a widget
