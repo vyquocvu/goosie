@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"testing"
+	"math/rand"
 
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 )
@@ -689,6 +690,232 @@ func BenchmarkRasterText(b *testing.B) {
 	}
 	cmds := []DisplayCmd{
 		{Kind: CmdText, Rect: frame.Rect{X: 50, Y: 50, W: 100, H: 100}, TextRun: textRun},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// M11.1 CPU Raster Benchmarks
+// ---------------------------------------------------------------------------
+
+func benchmarkFill(b *testing.B, w, h int) {
+	backend := NewCPUBackend(w, h)
+	vp := frame.NewViewport(float32(w), float32(h), frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := []DisplayCmd{
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 0, W: float32(w), H: float32(h)}, Color: frame.NewColor(255, 0, 0, 255)},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterFillSmall(b *testing.B)  { benchmarkFill(b, 100, 100) }
+func BenchmarkRasterFillMedium(b *testing.B) { benchmarkFill(b, 400, 400) }
+func BenchmarkRasterFillLarge(b *testing.B)  { benchmarkFill(b, 800, 600) }
+
+func benchmarkText(b *testing.B, glyphCount int) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	glyphs := make([]frame.Glyph, glyphCount)
+	for i := range glyphs {
+		glyphs[i] = frame.Glyph{
+			ID:      uint32(65 + i%26),
+			Advance: 8,
+			XOffset: float32(i * 8),
+			YOffset: 0,
+		}
+	}
+	textRun := frame.TextRun{
+		Font:     0,
+		FontSize: 16,
+		Color:    frame.NewColor(0, 0, 0, 255),
+		Glyphs:   glyphs,
+	}
+	cmds := []DisplayCmd{
+		{Kind: CmdText, Rect: frame.Rect{X: 10, Y: 10, W: float32(glyphCount * 8), H: 20}, TextRun: textRun},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterTextShort(b *testing.B)  { benchmarkText(b, 3) }
+func BenchmarkRasterTextMedium(b *testing.B) { benchmarkText(b, 50) }
+func BenchmarkRasterTextLong(b *testing.B)   { benchmarkText(b, 500) }
+
+func benchmarkImage(b *testing.B, srcW, srcH, dstW, dstH int) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	srcImg := image.NewRGBA(image.Rect(0, 0, srcW, srcH))
+	for y := 0; y < srcH; y++ {
+		for x := 0; x < srcW; x++ {
+			srcImg.Set(x, y, color.RGBA{uint8(x * 255 / srcW), uint8(y * 255 / srcH), 128, 255})
+		}
+	}
+	cmds := []DisplayCmd{
+		{
+			Kind: CmdImage,
+			Rect: frame.Rect{X: 10, Y: 10, W: float32(dstW), H: float32(dstH)},
+			Image: ImageSpec{Img: srcImg},
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterImageSmall(b *testing.B)    { benchmarkImage(b, 32, 32, 100, 100) }
+func BenchmarkRasterImageMedium(b *testing.B)   { benchmarkImage(b, 256, 256, 200, 200) }
+func BenchmarkRasterImageScaleUp(b *testing.B)  { benchmarkImage(b, 32, 32, 400, 400) }
+func BenchmarkRasterImageScaleDown(b *testing.B) { benchmarkImage(b, 800, 600, 200, 150) }
+
+func BenchmarkRasterBorderFourSides(b *testing.B) {
+	backend := NewCPUBackend(400, 400)
+	vp := frame.NewViewport(400, 400, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	red := frame.NewColor(255, 0, 0, 255)
+	green := frame.NewColor(0, 255, 0, 255)
+	blue := frame.NewColor(0, 0, 255, 255)
+	yellow := frame.NewColor(255, 255, 0, 255)
+	cmds := []DisplayCmd{
+		{
+			Kind: CmdBorder,
+			Rect: frame.Rect{X: 50, Y: 50, W: 300, H: 300},
+			Border: BorderSpec{
+				Top:    SideSpec{Width: float32(4), Color: red},
+				Right:  SideSpec{Width: float32(4), Color: green},
+				Bottom: SideSpec{Width: float32(4), Color: blue},
+				Left:   SideSpec{Width: float32(4), Color: yellow},
+			},
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterClipDepth(b *testing.B) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := make([]DisplayCmd, 0, 21)
+	for i := 0; i < 10; i++ {
+		cmds = append(cmds, DisplayCmd{
+			Kind: CmdClipPush,
+			Rect: frame.Rect{X: float32(10 + i*5), Y: float32(10 + i*5), W: float32(780 - i*10), H: float32(580 - i*10)},
+		})
+	}
+	cmds = append(cmds, DisplayCmd{
+		Kind: CmdFill, Color: frame.NewColor(0, 128, 255, 255),
+		Rect: frame.Rect{X: 50, Y: 50, W: 700, H: 500},
+	})
+	for i := 0; i < 10; i++ {
+		cmds = append(cmds, DisplayCmd{Kind: CmdClipPop})
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterOpacityDepth(b *testing.B) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	cmds := make([]DisplayCmd, 0, 21)
+	for i := 0; i < 10; i++ {
+		cmds = append(cmds, DisplayCmd{Kind: CmdOpacityPush, Opacity: 0.9})
+	}
+	cmds = append(cmds, DisplayCmd{
+		Kind: CmdFill, Color: frame.NewColor(0, 128, 255, 255),
+		Rect: frame.Rect{X: 0, Y: 0, W: 800, H: 600},
+	})
+	for i := 0; i < 10; i++ {
+		cmds = append(cmds, DisplayCmd{Kind: CmdOpacityPop})
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterMixedPage(b *testing.B) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	srcImg := image.NewRGBA(image.Rect(0, 0, 200, 150))
+	for y := 0; y < 150; y++ {
+		for x := 0; x < 200; x++ {
+			srcImg.Set(x, y, color.RGBA{128, 200, 255, 255})
+		}
+	}
+	glyphs := make([]frame.Glyph, 100)
+	for i := range glyphs {
+		glyphs[i] = frame.Glyph{
+			ID: uint32(65 + i%26), Advance: 8,
+			XOffset: float32(i * 8), YOffset: 0,
+		}
+	}
+	cmds := []DisplayCmd{
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 0, W: 800, H: 600}, Color: frame.NewColor(255, 255, 255, 255)},
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 0, W: 800, H: 80}, Color: frame.NewColor(50, 50, 50, 255)},
+		{Kind: CmdBorder, Rect: frame.Rect{X: 0, Y: 0, W: 800, H: 80}, Border: BorderSpec{Bottom: SideSpec{Width: float32(2), Color: frame.NewColor(200, 200, 200, 255)}}},
+		{Kind: CmdText, Rect: frame.Rect{X: 20, Y: 10, W: 800, H: 60}, TextRun: frame.TextRun{Font: 0, FontSize: 24, Color: frame.NewColor(255, 255, 255, 255), Glyphs: glyphs[:10]}},
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 80, W: 200, H: 440}, Color: frame.NewColor(240, 240, 240, 255)},
+		{Kind: CmdBorder, Rect: frame.Rect{X: 0, Y: 80, W: 200, H: 440}, Border: BorderSpec{Right: SideSpec{Width: float32(1), Color: frame.NewColor(200, 200, 200, 255)}}},
+		{Kind: CmdText, Rect: frame.Rect{X: 220, Y: 100, W: 560, H: 400}, TextRun: frame.TextRun{Font: 0, FontSize: 14, Color: frame.NewColor(0, 0, 0, 255), Glyphs: glyphs}},
+		{Kind: CmdImage, Rect: frame.Rect{X: 220, Y: 300, W: 200, H: 150}, Image: ImageSpec{Img: srcImg}},
+		{Kind: CmdFill, Rect: frame.Rect{X: 0, Y: 520, W: 800, H: 80}, Color: frame.NewColor(50, 50, 50, 255)},
+		{Kind: CmdText, Rect: frame.Rect{X: 20, Y: 540, W: 760, H: 40}, TextRun: frame.TextRun{Font: 0, FontSize: 12, Color: frame.NewColor(200, 200, 200, 255), Glyphs: glyphs[:5]}},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		backend.fb.Reset()
+		backend.Rasterize(cmds, nil)
+	}
+}
+
+func BenchmarkRasterManyCommands(b *testing.B) {
+	backend := NewCPUBackend(800, 600)
+	vp := frame.NewViewport(800, 600, frame.PixelScaleDefault)
+	backend.BeginFrame(vp)
+	rng := rand.New(rand.NewSource(42))
+	cmds := make([]DisplayCmd, 500)
+	for i := range cmds {
+		x := rng.Float32() * 700
+		y := rng.Float32() * 500
+		w := rng.Float32()*100 + 10
+		h := rng.Float32()*100 + 10
+		cmds[i] = DisplayCmd{
+			Kind: CmdFill,
+			Rect: frame.Rect{X: x, Y: y, W: w, H: h},
+			Color: frame.NewColor(uint8(rng.Intn(256)), uint8(rng.Intn(256)), uint8(rng.Intn(256)), 255),
+		}
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

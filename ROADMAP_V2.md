@@ -806,9 +806,9 @@ Evaluate GPU acceleration only after the retained display list, dirty regions, a
 
 ### M11.1 Benchmark CPU limitations
 
-- [ ] Identify pages where CPU raster is the dominant frame cost.
-- [ ] Measure text, image scaling, clipping, opacity, and transform workloads.
-- [ ] Confirm that layout and invalidation are not the actual bottlenecks.
+- [x] Identify pages where CPU raster is the dominant frame cost.
+- [x] Measure text, image scaling, clipping, opacity, and transform workloads.
+- [x] Confirm that layout and invalidation are not the actual bottlenecks.
 
 ### M11.2 Prototype a second backend
 
