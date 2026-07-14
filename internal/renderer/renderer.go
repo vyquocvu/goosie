@@ -849,3 +849,13 @@ func (r *Renderer) SetSubmitting(submitting bool) {
 func (r *Renderer) GetDisplayListSummary() map[string]int {
 	return r.canvasRenderer.DisplayListSummary()
 }
+
+// SetDirtyOverlayEnabled enables or disables the dirty-region overlay visualization.
+func (r *Renderer) SetDirtyOverlayEnabled(enabled bool) {
+	r.canvasRenderer.SetDirtyOverlayEnabled(enabled)
+}
+
+// DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
+func (r *Renderer) DirtyOverlayEnabled() bool {
+	return r.canvasRenderer.DirtyOverlayEnabled()
+}

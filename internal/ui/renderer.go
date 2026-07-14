@@ -26,4 +26,12 @@ type HTMLRenderer interface {
 	// their counts from the current display list. Returns nil when no
 	// display list has been built.
 	GetDisplayListSummary() map[string]int
+
+	// SetDirtyOverlayEnabled enables or disables the dirty-region overlay
+	// visualization. When enabled, semi-transparent colored rectangles are
+	// rendered over each paint command to show repaint regions.
+	SetDirtyOverlayEnabled(enabled bool)
+
+	// DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
+	DirtyOverlayEnabled() bool
 }

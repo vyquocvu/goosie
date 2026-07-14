@@ -68,6 +68,8 @@ type CanvasRenderer struct {
 
 	submitting      bool
 	submittingForms map[int64]bool
+
+	dirtyOverlayEnabled bool
 }
 
 // NewCanvasRenderer creates a new canvas renderer
@@ -1041,6 +1043,25 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 
 	rootObjects := objectStack[0]
 
+	// Add dirty-region overlay rectangles when enabled. Each visible command
+	// (excluding PushClip/PopClip) gets a semi-transparent overlay colored by
+	// its command type, showing which document areas are repainted.
+	if cr.dirtyOverlayEnabled && cr.cachedDisplayList != nil {
+		for _, cmd := range cr.cachedDisplayList.Commands {
+			if cmd.Type == PushClip || cmd.Type == PopClip {
+				continue
+			}
+			if !cr.isInViewport(cmd.Box) {
+				continue
+			}
+			overlayColor := CommandTypeToOverlayColor(cmd.Type)
+			overlay := canvas.NewRectangle(overlayColor)
+			overlay.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			overlay.Move(fyne.NewPos(cmd.Box.X, cmd.Box.Y))
+			rootObjects = append(rootObjects, overlay)
+		}
+	}
+
 	// Reuse background rectangle across frames
 	var viewportBg *canvas.Rectangle
 	if cached, ok := cr.objectCache[-1]; ok {
@@ -1520,6 +1541,53 @@ func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.Canva
 	obj := cr.createCanvasObject(cmd)
 	if obj != nil {
 		*objects = append(*objects, obj)
+	}
+}
+
+// SetDirtyOverlayEnabled enables or disables the dirty-region overlay visualization.
+// When enabled, semi-transparent colored rectangles are rendered over each paint
+// command to show which areas are being repainted and what command types they are.
+// Callers should call Refresh() after toggling to force a re-render.
+func (cr *CanvasRenderer) SetDirtyOverlayEnabled(enabled bool) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	if cr.dirtyOverlayEnabled != enabled {
+		cr.dirtyOverlayEnabled = enabled
+		cr.cachedDisplayList = nil
+		cr.objectCache = make(map[int]fyne.CanvasObject)
+		cr.dlBuildGen++
+	}
+}
+
+// DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
+func (cr *CanvasRenderer) DirtyOverlayEnabled() bool {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+	return cr.dirtyOverlayEnabled
+}
+
+// CommandTypeToOverlayColor returns a semi-transparent color for a paint command
+// type, used by the dirty-region overlay visualization.
+func CommandTypeToOverlayColor(t PaintCommandType) color.Color {
+	switch t {
+	case PaintText:
+		return color.RGBA{R: 0, G: 0, B: 255, A: 40}
+	case PaintRect:
+		return color.RGBA{R: 0, G: 128, B: 0, A: 40}
+	case PaintImage:
+		return color.RGBA{R: 255, G: 255, B: 0, A: 40}
+	case PaintLink:
+		return color.RGBA{R: 0, G: 255, B: 255, A: 40}
+	case PaintBorder:
+		return color.RGBA{R: 255, G: 165, B: 0, A: 40}
+	case PaintButton:
+		return color.RGBA{R: 128, G: 0, B: 128, A: 40}
+	case PaintInput:
+		return color.RGBA{R: 255, G: 192, B: 203, A: 40}
+	case PaintTextarea:
+		return color.RGBA{R: 255, G: 0, B: 255, A: 40}
+	default:
+		return color.RGBA{R: 128, G: 128, B: 128, A: 40}
 	}
 }
 

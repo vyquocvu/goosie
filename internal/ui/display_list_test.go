@@ -99,10 +99,13 @@ func TestDisplayListTypeOrder(t *testing.T) {
 
 // MockHTMLRendererComp implements HTMLRenderer with configurable summary.
 type MockHTMLRendererComp struct {
-	summary map[string]int
+	summary             map[string]int
+	dirtyOverlayEnabled bool
 }
 
-func (m *MockHTMLRendererComp) RenderHTML(ctx context.Context, s string) (fyne.CanvasObject, error) { return nil, nil }
+func (m *MockHTMLRendererComp) RenderHTML(ctx context.Context, s string) (fyne.CanvasObject, error) {
+	return nil, nil
+}
 func (m *MockHTMLRendererComp) UpdateViewport() fyne.CanvasObject               { return nil }
 func (m *MockHTMLRendererComp) SetCurrentURL(url string)                        {}
 func (m *MockHTMLRendererComp) ResolveURL(url string) string                    { return url }
@@ -113,9 +116,13 @@ func (m *MockHTMLRendererComp) HitTest(x, y float32) (*renderer.RenderNode, *ren
 }
 func (m *MockHTMLRendererComp) SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
 }
-func (m *MockHTMLRendererComp) GetRoot() *renderer.RenderNode      { return nil }
-func (m *MockHTMLRendererComp) Refresh()                           {}
-func (m *MockHTMLRendererComp) SetRefreshCallback(callback func()) {}
-func (m *MockHTMLRendererComp) SetSubmitting(submitting bool)      {}
-func (m *MockHTMLRendererComp) SetCSP(p *goosienet.CSPPolicy)      {}
+func (m *MockHTMLRendererComp) GetRoot() *renderer.RenderNode         { return nil }
+func (m *MockHTMLRendererComp) Refresh()                              {}
+func (m *MockHTMLRendererComp) SetRefreshCallback(callback func())    {}
+func (m *MockHTMLRendererComp) SetSubmitting(submitting bool)         {}
+func (m *MockHTMLRendererComp) SetCSP(p *goosienet.CSPPolicy)         {}
 func (m *MockHTMLRendererComp) GetDisplayListSummary() map[string]int { return m.summary }
+func (m *MockHTMLRendererComp) SetDirtyOverlayEnabled(enabled bool) {
+	m.dirtyOverlayEnabled = enabled
+}
+func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool { return m.dirtyOverlayEnabled }

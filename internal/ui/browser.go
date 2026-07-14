@@ -96,6 +96,7 @@ type Browser struct {
 	memoryButton        *widget.Button
 	netQueueButton      *widget.Button
 	displayListButton   *widget.Button
+	dirtyOverlayButton  *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -274,6 +275,28 @@ func (b *Browser) toggleInspect() {
 	b.window.Content().Refresh()
 }
 
+// toggleDirtyOverlay toggles the dirty-region overlay visualization on the
+// active tab. When enabled, semi-transparent colored rectangles are shown
+// over each paint command to indicate repaint regions.
+func (b *Browser) toggleDirtyOverlay() {
+	tab := b.ActiveTab()
+	if tab == nil || tab.htmlRenderer == nil {
+		return
+	}
+
+	enabled := !tab.htmlRenderer.DirtyOverlayEnabled()
+	tab.htmlRenderer.SetDirtyOverlayEnabled(enabled)
+
+	if enabled {
+		b.dirtyOverlayButton.SetText("Ov✓")
+	} else {
+		b.dirtyOverlayButton.SetText("Ov")
+	}
+
+	// Force re-render to show or hide overlays
+	tab.htmlRenderer.Refresh()
+}
+
 // newTabInternal creates a new tab without adding it to the tab container
 func (b *Browser) newTabInternal() *Tab {
 	contentBox := widget.NewRichTextFromMarkdown("Welcome to Goosie! Enter a URL above to start browsing.")
@@ -427,7 +450,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.dirtyOverlayButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -571,6 +594,11 @@ func (b *Browser) createNavigationControls() {
 	// Display list button
 	b.displayListButton = widget.NewButton("DL", func() {
 		b.showDisplayListDialog()
+	})
+
+	// Dirty overlay button — toggle for paint region visualization
+	b.dirtyOverlayButton = widget.NewButton("Ov", func() {
+		b.toggleDirtyOverlay()
 	})
 }
 
