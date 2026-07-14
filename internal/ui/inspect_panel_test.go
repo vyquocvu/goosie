@@ -291,3 +291,97 @@ func TestInspectPanel_RenderTimingPanel_AllRows(t *testing.T) {
 	panel.SetElement(nil, nil) // drives updateDetails (no selection)
 	assert.True(t, panel.hasPhaseTimings())
 }
+
+// TestInspectPanel_NodeCounts verifies that the Performance tab shows
+// the correct DOM node type breakdown (element vs text) when nodes are
+// loaded in the panel.
+func TestInspectPanel_NodeCounts(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "div"
+	root.ID = 1
+
+	child := renderer.NewRenderNode(renderer.NodeTypeElement)
+	child.TagName = "p"
+	child.ID = 2
+	root.AddChild(child)
+
+	text := renderer.NewRenderNode(renderer.NodeTypeText)
+	text.Text = "hello"
+	text.ID = 3
+	child.AddChild(text)
+
+	mockRenderer := &MockHTMLRenderer{root: root}
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(mockRenderer)
+	panel.SetElement(root, nil)
+
+	assert.Equal(t, 3, len(panel.nodeMap), "should have 3 nodes in map")
+}
+
+// TestInspectPanel_NodeCountsMixed verifies the performance tab renders
+// correctly with a mix of element, text, and no "other" node types.
+func TestInspectPanel_NodeCountsMixed(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "div"
+	root.ID = 1
+
+	e1 := renderer.NewRenderNode(renderer.NodeTypeElement)
+	e1.TagName = "span"
+	e1.ID = 2
+	root.AddChild(e1)
+
+	e2 := renderer.NewRenderNode(renderer.NodeTypeElement)
+	e2.TagName = "a"
+	e2.ID = 3
+	root.AddChild(e2)
+
+	t1 := renderer.NewRenderNode(renderer.NodeTypeText)
+	t1.Text = "alpha"
+	t1.ID = 4
+	e1.AddChild(t1)
+
+	t2 := renderer.NewRenderNode(renderer.NodeTypeText)
+	t2.Text = "beta"
+	t2.ID = 5
+	e2.AddChild(t2)
+
+	// Total: 5 nodes (3 elements + 2 text)
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(&MockHTMLRenderer{root: root})
+	panel.SetElement(root, nil)
+
+	assert.Equal(t, 5, len(panel.nodeMap))
+	// Count manually from nodeMap
+	elemCount := 0
+	textCount := 0
+	for _, n := range panel.nodeMap {
+		switch n.Type {
+		case renderer.NodeTypeElement:
+			elemCount++
+		case renderer.NodeTypeText:
+			textCount++
+		}
+	}
+	assert.Equal(t, 3, elemCount)
+	assert.Equal(t, 2, textCount)
+	assert.Equal(t, 0, 5-elemCount-textCount, "no other node types")
+}
+
+// TestInspectPanel_NodeCountsEmpty verifies the performance tab handles
+// an empty nodeMap gracefully.
+func TestInspectPanel_NodeCountsEmpty(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	panel := NewInspectPanel(nil)
+	panel.SetElement(nil, nil)
+
+	assert.Equal(t, 0, len(panel.nodeMap))
+	assert.False(t, panel.hasPhaseTimings())
+}

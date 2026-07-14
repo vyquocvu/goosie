@@ -443,6 +443,16 @@ func (ip *InspectPanel) updatePerformanceTab() {
 	ip.performanceContainer.Objects = nil
 
 	nodeCount := len(ip.nodeMap)
+	elemCount := 0
+	textCount := 0
+	for _, n := range ip.nodeMap {
+		switch n.Type {
+		case renderer.NodeTypeElement:
+			elemCount++
+		case renderer.NodeTypeText:
+			textCount++
+		}
+	}
 
 	ip.performanceContainer.Add(widget.NewLabelWithStyle("Metrics", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
 
@@ -452,6 +462,10 @@ func (ip *InspectPanel) updatePerformanceTab() {
 		ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Total Nodes: %d", nodeCount)))
 		ip.performanceContainer.Add(widget.NewLabel("No navigation timings yet"))
 	}
+
+	ip.performanceContainer.Add(widget.NewLabelWithStyle("Node Counts", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
+	ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Elements: %d  Text: %d  Other: %d",
+		elemCount, textCount, nodeCount-elemCount-textCount)))
 
 	ip.performanceContainer.Refresh()
 }
