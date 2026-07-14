@@ -98,6 +98,7 @@ type Browser struct {
 	displayListButton   *widget.Button
 	dirtyOverlayButton  *widget.Button
 	jsQueueButton       *widget.Button
+	tileCacheButton     *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -451,7 +452,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.dirtyOverlayButton, b.jsQueueButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.dirtyOverlayButton, b.jsQueueButton, b.tileCacheButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -605,6 +606,11 @@ func (b *Browser) createNavigationControls() {
 	// Script task queue button
 	b.jsQueueButton = widget.NewButton("JS", func() {
 		b.showScriptTaskQueueDialog()
+	})
+
+	// Tile cache inspector button
+	b.tileCacheButton = widget.NewButton("Tiles", func() {
+		b.showTileCacheDialog()
 	})
 }
 
@@ -951,6 +957,48 @@ func (b *Browser) showScriptTaskQueueDialog() {
 
 	content := container.NewBorder(nil, refreshBtn, nil, nil, container.NewScroll(label))
 	dialog.ShowCustom("Script Task Queue", "Close", content, b.window)
+}
+
+// showTileCacheDialog opens a dialog showing tile cache infrastructure status.
+func (b *Browser) showTileCacheDialog() {
+	tab := b.ActiveTab()
+
+	var buf strings.Builder
+	buf.WriteString("Tile Cache Inspector\n\n")
+
+	buf.WriteString("Infrastructure:\n")
+	buf.WriteString("  TileCache:    Available (internal/renderer/frame/compositor/tiles.go)\n")
+	buf.WriteString("  GlyphCache:   Available (internal/renderer/frame/cache/cache.go)\n")
+	buf.WriteString("  ImageCache:   Available (internal/renderer/frame/cache/cache.go)\n")
+	buf.WriteString("  IntrinsicSize: Available (internal/renderer/intrinsic_size_cache.go)\n\n")
+
+	buf.WriteString("Status:\n")
+	if b.deps.Memory != nil {
+		stats := b.deps.Memory.Stats()
+		tileLimit, hasTileLimit := stats.Limits[memory.ComponentTile]
+		if hasTileLimit && tileLimit > 0 {
+			buf.WriteString(fmt.Sprintf("  Tile Budget:   %s\n", formatBytes(int64(tileLimit))))
+		} else {
+			buf.WriteString("  Tile Budget:   unlimited\n")
+		}
+	}
+
+	buf.WriteString(fmt.Sprintf("  Active Tab:    %s\n", map[bool]string{true: "Yes", false: "No"}[tab != nil]))
+	buf.WriteString(fmt.Sprintf("  Render Tree:   %s\n", map[bool]string{true: "Yes", false: "No"}[tab != nil && tab.htmlRenderer != nil]))
+	buf.WriteString("\n")
+
+	buf.WriteString("Note: Tile caching is infrastructure-ready but not yet\n")
+	buf.WriteString("integrated into the document rendering pipeline.\n")
+	buf.WriteString("It activates when the compositor-based rendering path\n")
+	buf.WriteString("is wired into RenderWithViewport.\n")
+
+	label := widget.NewLabel(buf.String())
+	label.Wrapping = fyne.TextWrapWord
+
+	scroll := container.NewScroll(label)
+	scroll.SetMinSize(fyne.NewSize(500, 350))
+
+	dialog.ShowCustom("Tile Cache Inspector", "Close", scroll, b.window)
 }
 
 // showDisplayListDialog opens a dialog showing the display list command details.
