@@ -924,7 +924,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [ ] Cross-platform smoke tests.
 - [ ] Build variants for pure Go, standard GUI, and optional compatibility backend.
 - [ ] Release benchmark report.
-- [ ] Binary size tracking.
+- [x] Binary size tracking.
 - [ ] Startup time tracking.
 - [ ] Security audit workflow.
 - [ ] Command-line interface for browser automation (--headless flag, no Fyne dependency).
