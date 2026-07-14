@@ -825,6 +825,33 @@ func countBoxesAndFragments(box *LayoutBox) (boxes int, fragments int) {
 	return boxes, fragments
 }
 
+func countRenderNodes(n *RenderNode, total, elements, text *int) {
+	if n == nil {
+		return
+	}
+	*total++
+	switch n.Type {
+	case NodeTypeElement:
+		*elements++
+	case NodeTypeText:
+		*text++
+	}
+	for _, child := range n.Children {
+		countRenderNodes(child, total, elements, text)
+	}
+}
+
+func countLayoutBoxes(box *LayoutBox) int {
+	if box == nil {
+		return 0
+	}
+	count := 1
+	for _, child := range box.Children {
+		count += countLayoutBoxes(child)
+	}
+	return count
+}
+
 func countImages(node *RenderNode) int {
 	if node == nil {
 		return 0
@@ -858,4 +885,21 @@ func (r *Renderer) SetDirtyOverlayEnabled(enabled bool) {
 // DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
 func (r *Renderer) DirtyOverlayEnabled() bool {
 	return r.canvasRenderer.DirtyOverlayEnabled()
+}
+
+// GetDOMNodeCounts returns the total, element, and text node counts
+// from the current render tree.
+func (r *Renderer) GetDOMNodeCounts() (total int, elements int, text int) {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
+	countRenderNodes(r.currentRenderTree, &total, &elements, &text)
+	return
+}
+
+// GetLayoutNodeCount returns the number of layout boxes in the
+// current layout tree.
+func (r *Renderer) GetLayoutNodeCount() int {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
+	return countLayoutBoxes(r.currentLayoutTree)
 }

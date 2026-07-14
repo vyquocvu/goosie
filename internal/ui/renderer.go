@@ -34,4 +34,12 @@ type HTMLRenderer interface {
 
 	// DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
 	DirtyOverlayEnabled() bool
+
+	// GetDOMNodeCounts returns the total, element, and text node counts
+	// from the current render tree.
+	GetDOMNodeCounts() (total int, elements int, text int)
+
+	// GetLayoutNodeCount returns the number of layout boxes in the
+	// current layout tree.
+	GetLayoutNodeCount() int
 }

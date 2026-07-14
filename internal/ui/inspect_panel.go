@@ -445,13 +445,36 @@ func (ip *InspectPanel) updatePerformanceTab() {
 	nodeCount := len(ip.nodeMap)
 	elemCount := 0
 	textCount := 0
-	for _, n := range ip.nodeMap {
-		switch n.Type {
-		case renderer.NodeTypeElement:
-			elemCount++
-		case renderer.NodeTypeText:
-			textCount++
+	if ip.htmlRenderer != nil {
+		if t, e, tx := ip.htmlRenderer.GetDOMNodeCounts(); t > 0 {
+			nodeCount = t
+			elemCount = e
+			textCount = tx
+		} else {
+			// Fallback: count from cached nodeMap
+			for _, n := range ip.nodeMap {
+				switch n.Type {
+				case renderer.NodeTypeElement:
+					elemCount++
+				case renderer.NodeTypeText:
+					textCount++
+				}
+			}
 		}
+	} else {
+		for _, n := range ip.nodeMap {
+			switch n.Type {
+			case renderer.NodeTypeElement:
+				elemCount++
+			case renderer.NodeTypeText:
+				textCount++
+			}
+		}
+	}
+
+	layoutCount := 0
+	if ip.htmlRenderer != nil {
+		layoutCount = ip.htmlRenderer.GetLayoutNodeCount()
 	}
 
 	ip.performanceContainer.Add(widget.NewLabelWithStyle("Metrics", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
@@ -466,6 +489,7 @@ func (ip *InspectPanel) updatePerformanceTab() {
 	ip.performanceContainer.Add(widget.NewLabelWithStyle("Node Counts", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
 	ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Elements: %d  Text: %d  Other: %d",
 		elemCount, textCount, nodeCount-elemCount-textCount)))
+	ip.performanceContainer.Add(widget.NewLabel(fmt.Sprintf("Layout Boxes: %d", layoutCount)))
 
 	ip.performanceContainer.Refresh()
 }

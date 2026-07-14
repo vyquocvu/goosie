@@ -125,4 +125,6 @@ func (m *MockHTMLRendererComp) GetDisplayListSummary() map[string]int { return m
 func (m *MockHTMLRendererComp) SetDirtyOverlayEnabled(enabled bool) {
 	m.dirtyOverlayEnabled = enabled
 }
-func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool { return m.dirtyOverlayEnabled }
+func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool         { return m.dirtyOverlayEnabled }
+func (m *MockHTMLRendererComp) GetDOMNodeCounts() (int, int, int) { return 0, 0, 0 }
+func (m *MockHTMLRendererComp) GetLayoutNodeCount() int           { return 0 }

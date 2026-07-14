@@ -883,7 +883,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 ## B. Developer Tools
 
 - [x] Phase timing panel.
-- [ ] DOM and layout node counts.
+- [x] DOM and layout node counts.
 - [x] Dirty style/layout/paint visualization.
 - [ ] Display-list inspector.
 - [ ] Tile-cache inspector.
