@@ -240,6 +240,40 @@ across platforms. Reference images are stored at `internal/renderer/frame/golden
 The CI workflow `.github/workflows/golden.yml` validates golden images on every PR
 touching golden-related paths.
 
+### Golden Layout Tests
+
+The layout engine has a parallel golden-test infrastructure that catches
+regressions in box-model, flex, inline, and table layout before pixels are
+drawn. Where the raster golden tests compare rendered pixels against PNG
+snapshots, layout goldens compare the deterministic text serialization of
+the `LayoutBox` tree against committed text snapshots — fast to diff, easy
+to review, and unaffected by raster-side changes.
+
+```bash
+# Run golden layout tests against committed snapshots
+go test ./internal/renderer/layoutgolden/
+
+# Regenerate layout snapshots after intentional engine changes
+GOOSIE_UPDATE_GOLDEN=1 go test ./internal/renderer/layoutgolden/
+# Or equivalently:
+go test -update ./internal/renderer/layoutgolden/
+
+# Verify determinism guard (same input → same bytes twice)
+go test ./internal/renderer/layoutgolden/ -run TestGoldenLayoutDeterminism
+```
+
+Layout golden snapshots are stored at
+`internal/renderer/layoutgolden/testdata/golden-layout/<name>.txt`.
+Candidates produced by an in-progress run are written to
+`testdata/golden-layout-update/<name>.txt` for review before regeneration.
+
+The serializer rounds floats to two decimal places and emits only
+structural fields (geometry, padding, margin, display type, flex/grid
+container parameters). Volatile fields such as NodeID, colors, and font
+cache keys are intentionally omitted, which keeps snapshots stable
+across Go versions and platforms while still pinpointing real layout
+behavior changes.
+
 ### Fuzz Tests (Parser and Selector)
 
 The HTML streaming parser (`internal/dom`) and the CSS parser + compiled selector

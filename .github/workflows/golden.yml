@@ -5,11 +5,13 @@ on:
     branches: [ main ]
     paths:
       - 'internal/renderer/frame/golden/**'
+      - 'internal/renderer/layoutgolden/**'
       - '.github/workflows/golden.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'internal/renderer/frame/golden/**'
+      - 'internal/renderer/layoutgolden/**'
       - '.github/workflows/golden.yml'
 
 jobs:
@@ -49,6 +51,19 @@ jobs:
         go test -v -count=1 ./internal/renderer/frame/golden/ -run TestGoldenMismatchDetection
         echo "Mismatch detection verified."
 
+    - name: Verify layout golden tests match
+      run: |
+        echo "Running layout golden tests against committed reference snapshots..."
+        go test -v -count=1 ./internal/renderer/layoutgolden/
+        echo "Layout golden tests pass."
+
+    - name: Verify layout golden determinism
+      run: |
+        # Determinism guard: serializing the same fixture twice must
+        # produce byte-identical output. This catches accidental map
+        # iteration order or counter drift in the layout engine.
+        go test -v -count=1 ./internal/renderer/layoutgolden/ -run TestGoldenLayoutDeterminism
+
     - name: Upload golden artifacts on failure
       if: failure()
       uses: actions/upload-artifact@v4
@@ -56,4 +71,5 @@ jobs:
         name: golden-artifacts-${{ github.run_id }}
         path: |
           internal/renderer/frame/golden/testdata/golden-update/
+          internal/renderer/layoutgolden/testdata/golden-layout-update/
         retention-days: 5
