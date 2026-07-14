@@ -18,6 +18,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/internal/memory"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/profile"
 	"github.com/vyquocvu/goosie/internal/renderer"
@@ -74,6 +75,22 @@ func main() {
 		w.Resize(fyne.NewSize(1000, 700))
 	}
 
+	memMgr := memory.NewManager(memory.Config{
+		GlobalLimit: 512 * 1024 * 1024,
+		Limits: map[memory.Component]uint64{
+			memory.ComponentDOM:          100 * 1024 * 1024,
+			memory.ComponentStyle:        50 * 1024 * 1024,
+			memory.ComponentLayout:       50 * 1024 * 1024,
+			memory.ComponentDisplayList:  20 * 1024 * 1024,
+			memory.ComponentTile:         50 * 1024 * 1024,
+			memory.ComponentImage:        30 * 1024 * 1024,
+			memory.ComponentGlyph:        10 * 1024 * 1024,
+			memory.ComponentScript:       20 * 1024 * 1024,
+			memory.ComponentNetworkCache: 50 * 1024 * 1024,
+			memory.ComponentPageCache:    20 * 1024 * 1024,
+		},
+	})
+
 	browser := ui.NewBrowserWithDependencies(ui.BrowserDependencies{
 		Profile:       prof,
 		Bookmarks:     bookmarks,
@@ -82,6 +99,7 @@ func main() {
 		SettingsStore: settingsStore,
 		Storage:       storage,
 		Network:       networkService,
+		Memory:        memMgr,
 		App:           a,
 		Window:        w,
 	})

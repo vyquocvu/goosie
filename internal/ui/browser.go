@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/internal/memory"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/profile"
 	"github.com/vyquocvu/goosie/internal/renderer"
@@ -56,6 +57,7 @@ type BrowserDependencies struct {
 	SettingsStore *profile.SettingsStore
 	Storage       *profile.StorageStore
 	Network       *goosienet.Service
+	Memory        *memory.Manager
 	App           fyne.App
 	Window        fyne.Window
 }
@@ -89,6 +91,7 @@ type Browser struct {
 	inspectButton       *widget.Button
 	screenshotButton    *widget.Button
 	sourceButton        *widget.Button
+	memoryButton        *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -420,7 +423,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -549,6 +552,11 @@ func (b *Browser) createNavigationControls() {
 	// Source button
 	b.sourceButton = widget.NewButton("Source", func() {
 		b.showSourceDialog()
+	})
+
+	// Memory budget button
+	b.memoryButton = widget.NewButton("Mem", func() {
+		b.showMemoryDialog()
 	})
 }
 
@@ -711,6 +719,72 @@ func (b *Browser) UpdateActiveTabTitle(title string) {
 			}
 		}
 	})
+}
+
+// showMemoryDialog opens a dialog showing per-component memory budgets and usage.
+func (b *Browser) showMemoryDialog() {
+	mgr := b.deps.Memory
+	if mgr == nil {
+		dialog.ShowInformation("Memory Budget", "Memory manager not available.", b.window)
+		return
+	}
+
+	stats := mgr.Stats()
+
+	label := widget.NewLabel(formatMemoryStats(stats))
+	label.Wrapping = fyne.TextWrapWord
+
+	scroll := container.NewScroll(label)
+	scroll.SetMinSize(fyne.NewSize(600, 400))
+
+	dialog.ShowCustom("Memory Budget", "Close", scroll, b.window)
+}
+
+// formatMemoryStats formats a memory.Stats snapshot into a readable string.
+func formatMemoryStats(stats memory.Stats) string {
+	var b strings.Builder
+
+	b.WriteString("Global Budget\n")
+	b.WriteString(fmt.Sprintf("  Total Usage: %s / %s\n\n",
+		formatBytes(int64(stats.TotalUsage)),
+		formatBytes(int64(stats.GlobalLimit))))
+
+	b.WriteString("Per-Component Budgets\n")
+	for _, comp := range memoryDefaultOrder() {
+		usage, hasUsage := stats.Usage[comp]
+		limit, hasLimit := stats.Limits[comp]
+		if !hasUsage && !hasLimit {
+			continue
+		}
+		usageStr := "0 B"
+		if hasUsage {
+			usageStr = formatBytes(int64(usage))
+		}
+		limitStr := "unlimited"
+		if hasLimit && limit > 0 {
+			limitStr = formatBytes(int64(limit))
+		}
+		b.WriteString(fmt.Sprintf("  %-20s  %s / %s\n", string(comp), usageStr, limitStr))
+	}
+
+	return b.String()
+}
+
+// memoryDefaultOrder returns a consistent display order for memory components.
+func memoryDefaultOrder() []memory.Component {
+	return []memory.Component{
+		memory.ComponentDOM,
+		memory.ComponentStyle,
+		memory.ComponentLayout,
+		memory.ComponentDisplayList,
+		memory.ComponentTile,
+		memory.ComponentImage,
+		memory.ComponentGlyph,
+		memory.ComponentScript,
+		memory.ComponentNetworkCache,
+		memory.ComponentPageCache,
+		memory.ComponentLayoutIntrinsicSize,
+	}
 }
 
 // showSourceDialog opens a dialog showing the raw HTML source of the current page.
