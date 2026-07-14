@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"time"
 	urlpkg "net/url"
 	"path/filepath"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
@@ -22,6 +26,11 @@ import (
 )
 
 func main() {
+	headlessFlag := flag.Bool("headless", false, "Run in headless mode without a UI window")
+	urlFlag := flag.String("url", "", "URL to open on startup")
+	screenshotFlag := flag.String("screenshot", "", "File path to save a screenshot (only in headless mode)")
+	flag.Parse()
+
 	prof, err := profile.Open(profile.Options{})
 	if err != nil {
 		log.Fatalf("failed to open profile: %v", err)
@@ -56,6 +65,15 @@ func main() {
 	defer networkService.Close()
 	fetcher := net.NewFetcherWithService(networkService)
 	parser := dom.NewParser()
+
+	var a fyne.App
+	var w fyne.Window
+	if *headlessFlag {
+		a = test.NewApp()
+		w = a.NewWindow("Goosie Headless")
+		w.Resize(fyne.NewSize(1000, 700))
+	}
+
 	browser := ui.NewBrowserWithDependencies(ui.BrowserDependencies{
 		Profile:       prof,
 		Bookmarks:     bookmarks,
@@ -64,19 +82,62 @@ func main() {
 		SettingsStore: settingsStore,
 		Storage:       storage,
 		Network:       networkService,
+		App:           a,
+		Window:        w,
 	})
 	browser.RendererFactory = func() ui.HTMLRenderer {
 		return renderer.NewRenderer(1000, 700)
 	}
 
+	// Channel to signal when initial page load is complete (used in headless mode)
+	pageLoaded := make(chan bool, 1)
+
 	// Set up navigation callback
 	browser.SetNavigationCallback(func(url string) {
 		load, ctx := navSession.Navigate(context.Background(), url)
-		loadPageAsync(browser, fetcher, parser, load, ctx, navSession)
+		loadPageAsync(browser, fetcher, parser, load, ctx, navSession, func() {
+			select {
+			case pageLoaded <- true:
+			default:
+			}
+		})
 	})
 
-	// Show browser window
-	browser.Show()
+	if *headlessFlag {
+		// Construct the UI hierarchy so the canvas is populated
+		go browser.Show()
+
+		if *urlFlag != "" {
+			load, ctx := navSession.Navigate(context.Background(), *urlFlag)
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, func() {
+				pageLoaded <- true
+			})
+
+			<-pageLoaded
+
+			// Give Fyne's UI thread a brief moment to process the layout changes
+			time.Sleep(100 * time.Millisecond)
+
+			if *screenshotFlag != "" {
+				err := ui.TakeScreenshotToFile(w, *screenshotFlag)
+				if err != nil {
+					log.Printf("Failed to save screenshot: %v", err)
+				} else {
+					log.Printf("Screenshot saved to %s", *screenshotFlag)
+				}
+			}
+		}
+		os.Exit(0)
+	} else {
+		// Non-headless mode
+		if *urlFlag != "" {
+			load, ctx := navSession.Navigate(context.Background(), *urlFlag)
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, nil)
+		}
+
+		// Show browser window (this blocks until window is closed)
+		browser.Show()
+	}
 }
 
 // pageLoadResult represents the result of an async page load
@@ -86,7 +147,7 @@ type pageLoadResult struct {
 }
 
 // loadPageAsync fetches and displays a web page asynchronously.
-func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session) {
+func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session, onComplete func()) {
 	log.Printf("Navigation %s started: %s", load.ID, load.URL)
 
 	// Update browser state on main thread
@@ -105,6 +166,12 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 
 	// Launch background goroutine for fetch and render
 	go func() {
+		defer func() {
+			if onComplete != nil {
+				onComplete()
+			}
+		}()
+
 		if !sess.IsActive(navID) {
 			return
 		}
@@ -263,10 +330,12 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 	// Update tab title
 	if title, ok := extractTitle(html); ok {
-		fyne.CurrentApp().SendNotification(&fyne.Notification{
-			Title:   "Goosie",
-			Content: "Page loaded: " + title,
-		})
+		if fyne.CurrentApp() != nil {
+			fyne.CurrentApp().SendNotification(&fyne.Notification{
+				Title:   "Goosie",
+				Content: "Page loaded: " + title,
+			})
+		}
 		browser.UpdateActiveTabTitle(title)
 	}
 
@@ -302,7 +371,7 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 		jsRuntime.OnOpenWindow = func(url, name string) {
 			log.Printf("Popup (window.open): %s (name=%s)", url, name)
 			load, ctx := navSession.Navigate(context.Background(), url)
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession)
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, nil)
 		}
 
 		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
@@ -371,7 +440,7 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url string) {
 	s := session.New()
 	load, ctx := s.Navigate(context.Background(), url)
-	loadPageAsync(browser, fetcher, parser, load, ctx, s)
+	loadPageAsync(browser, fetcher, parser, load, ctx, s, nil)
 }
 
 // extractTitle parses the HTML and returns the content of the <title> tag.

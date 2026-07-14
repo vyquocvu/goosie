@@ -56,6 +56,8 @@ type BrowserDependencies struct {
 	SettingsStore *profile.SettingsStore
 	Storage       *profile.StorageStore
 	Network       *goosienet.Service
+	App           fyne.App
+	Window        fyne.Window
 }
 
 // Browser represents the browser UI
@@ -119,6 +121,10 @@ func NewBrowser() *Browser {
 	// Set window size
 	w.Resize(fyne.NewSize(1000, 700))
 
+	return newBrowserInternal(a, w)
+}
+
+func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 	state := NewBrowserState()
 	settings := NewSettings()
 	themeManager := NewThemeManager(a)
@@ -187,7 +193,22 @@ func NewBrowser() *Browser {
 }
 
 func NewBrowserWithDependencies(deps BrowserDependencies) *Browser {
-	browser := NewBrowser()
+	var a fyne.App
+	var w fyne.Window
+	if deps.App != nil {
+		a = deps.App
+	} else {
+		a = app.NewWithID("com.github.vyquocvu.goosie")
+	}
+	if deps.Window != nil {
+		w = deps.Window
+	} else {
+		w = a.NewWindow("Goosie")
+		// Set window size
+		w.Resize(fyne.NewSize(1000, 700))
+	}
+
+	browser := newBrowserInternal(a, w)
 	browser.deps = deps
 	browser.shortcuts = NewShortcutRegistry()
 	browser.registerDefaultShortcuts()

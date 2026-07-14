@@ -437,6 +437,12 @@ Run the full browser with GUI:
 go run ./cmd/browser
 ```
 
+Run the browser in headless mode (e.g., for background snapshot automation):
+
+```bash
+go run ./cmd/browser --headless --url=https://example.com --screenshot=screenshot.png
+```
+
 This will:
 1. Open a window titled "Goosie" with navigation controls
 2. Display a welcome message
