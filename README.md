@@ -240,6 +240,43 @@ across platforms. Reference images are stored at `internal/renderer/frame/golden
 The CI workflow `.github/workflows/golden.yml` validates golden images on every PR
 touching golden-related paths.
 
+### Fuzz Tests (Parser and Selector)
+
+The HTML streaming parser (`internal/dom`) and the CSS parser + compiled selector
+matcher (`internal/css`) ship with native Go fuzz harnesses. By default (no
+`-fuzz` flag) each fuzz target runs once with its seed corpus so CI remains
+deterministic; with `-fuzz` Go generates random inputs and reports any panic
+or invariant violation.
+
+```bash
+# Seed-only deterministic run (CI default)
+go test ./internal/dom/ ./internal/css/
+
+# Fuzz the streaming HTML parser for 10 seconds
+go test -fuzz=FuzzHTMLParseDocument -fuzztime=10s ./internal/dom/
+
+# Fuzz pre-cancelled context behavior
+go test -fuzz=FuzzHTMLParseDocumentCancelContext -fuzztime=10s ./internal/dom/
+
+# Fuzz element lookup by ID
+go test -fuzz=FuzzHTMLGetElementByID -fuzztime=10s ./internal/dom/
+
+# Fuzz the simple body-text extractor
+go test -fuzz=FuzzHTMLParseBodyText -fuzztime=10s ./internal/dom/
+
+# Fuzz the CSS parser
+go test -fuzz=FuzzCSSParser -fuzztime=10s ./internal/css/
+
+# Fuzz the compiled selector matcher
+go test -fuzz=FuzzSelectorMatcher -fuzztime=10s ./internal/css/
+```
+
+Each fuzz target enforces a strict input size bound (4 KiB for input bytes,
+256 B for selector fields) so the Go runtime never OOMs while the fuzzer
+explores pathological patterns. Invariants are structural — no exact output
+shape assertions — because HTML/CSS admit many equivalent parses for
+malformed input.
+
 ### Milestone-Gated Testing
 
 Tests are gated by roadmap milestone so they unlock automatically as features are completed. The current milestone is controlled by the `GOOSIE_MILESTONE` environment variable (default: `2`).

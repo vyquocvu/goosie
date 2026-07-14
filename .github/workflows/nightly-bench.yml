@@ -63,6 +63,18 @@ jobs:
           go test -run='^$' -bench='BenchmarkJS|BenchmarkRuntime' -benchmem -benchtime=1s -timeout=10m \
             ./internal/js || true
 
+      - name: Fuzz HTML parser and CSS selector matcher
+        # Cross-Cutting Workstreams → A. Testing → Parser and selector fuzz tests.
+        # Each fuzz target has a bounded input size (4 KiB) so the runtime never
+        # OOMs; failures surface as test panics or assertion violations.
+        run: |
+          go test -fuzz=FuzzHTMLParseDocument -fuzztime=30s ./internal/dom/
+          go test -fuzz=FuzzHTMLParseDocumentCancelContext -fuzztime=30s ./internal/dom/
+          go test -fuzz=FuzzHTMLGetElementByID -fuzztime=30s ./internal/dom/
+          go test -fuzz=FuzzHTMLParseBodyText -fuzztime=30s ./internal/dom/
+          go test -fuzz=FuzzCSSParser -fuzztime=30s ./internal/css/
+          go test -fuzz=FuzzSelectorMatcher -fuzztime=30s ./internal/css/
+
       - name: Run race-detected benchmarks
         run: |
           go test -race -run='^$' -bench='BenchmarkSessionConcurrentNavigate|BenchmarkGetScrolling' \

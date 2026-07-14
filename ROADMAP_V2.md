@@ -870,7 +870,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 ## A. Testing
 
 - [x] Unit tests for every engine package.
-- [ ] Parser and selector fuzz tests.
+- [x] Parser and selector fuzz tests.
 - [ ] Golden layout tests.
 - [x] Golden image tests.
 - [ ] Accessibility regression tests for keyboard navigation, ARIA behavior, high contrast, and text zoom.
