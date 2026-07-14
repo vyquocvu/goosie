@@ -866,11 +866,11 @@ Provide a product path for sites outside the Go engine's supported subset withou
 
 ### M12.3 Prototype platform WebView integration
 
-- [ ] Windows WebView2.
-- [ ] macOS WKWebView.
+- [ ] Windows WebView2 (stub created via `backend_new_default.go`; returns `DefaultBackend`).
+- [x] macOS WKWebView (`wkwebview_darwin.m` + `backend_new_darwin.go`; cgo/ObjC bridge with full navigation, JS eval, delegate callbacks, Cocoa event loop on locked thread).
 - [ ] Linux option evaluation.
 - [ ] Document feature and behavioral differences.
-- [ ] Keep fallback optional at build time where possible.
+- [x] Keep fallback optional at build time where possible (build tags `//go:build darwin && cgo` / `!darwin || !cgo`; non-macOS and non-cgo builds fall back to `DefaultBackend`).
 
 **Decision gate**
 
