@@ -884,7 +884,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 
 - [x] Phase timing panel.
 - [ ] DOM and layout node counts.
-- [ ] Dirty style/layout/paint visualization.
+- [x] Dirty style/layout/paint visualization.
 - [ ] Display-list inspector.
 - [ ] Tile-cache inspector.
 - [ ] Memory budget view.
