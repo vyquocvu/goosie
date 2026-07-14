@@ -1,6 +1,13 @@
 # Goosie
 
-A minimal web browser implemented in Go using Goja (JavaScript engine), Fyne (GUI framework), and x/net/html (HTML parser).
+A lightweight web browser engine built from scratch in Go. No platform WebViews (WKWebView, WebView2) — the entire rendering pipeline is custom Go code.
+
+**Architecture:**
+- **Rendering**: Pure Go CPU raster backend (optional CoreGraphics on macOS via CGo)
+- **GUI shell**: Fyne — handles windowing, keyboard/mouse input, pixel buffer presentation
+- **HTML/CSS**: Custom parser and layout engine via `golang.org/x/net/html` + internal CSS pipeline
+- **JavaScript**: Goja runtime with custom DOM/Browser API bindings
+
 
 ## Features
 
@@ -120,13 +127,38 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation.
 The project follows a clean architecture:
 - **cmd/**: Command-line applications (browser, renderer-demo, test, server)
 - **internal/**: Core library code (net, dom, renderer, js, ui, css, image)
+- **internal/engine/**: Navigation, session lifecycle, metrics
+- **internal/renderer/frame/**: Backend-neutral display commands and raster abstraction
+- **internal/renderer/frame/raster/**: Pure Go CPU raster backend (default) and CoreGraphics CGo backend (optional)
 - **examples/**: Demo files and HTML examples
+
+### Rendering Pipeline (from scratch, no WebViews)
+
+```text
+HTML String
+  → Custom HTML Parser (internal/dom) — streaming, compact DOM store
+  → CSS Pipeline (internal/css) — parser, compiled selectors, computed styles, invalidation
+  → Layout Engine (internal/renderer) — block/inline, fragments, incremental reflow
+  → Display Command List (internal/renderer) — backend-neutral value types
+  → Raster Backend (internal/renderer/frame/raster) — CPU or CoreGraphics
+  → Fyne Adapter (internal/renderer) — presents pixel buffer in window
+```
+
+Fyne never touches layout, style, or display-list construction. It is strictly the window/presentation shell.
 
 ## Dependencies
 
 - [goja](https://github.com/dop251/goja) - JavaScript engine
-- [fyne](https://fyne.io/) - Cross-platform GUI framework
-- [x/net/html](https://pkg.go.dev/golang.org/x/net/html) - HTML parser
+- [fyne](https://fyne.io/) - Cross-platform GUI framework (window shell only — rendering is done by Go's own raster backend, not Fyne canvas primitives)
+- [x/net/html](https://pkg.go.dev/golang.org/x/net/html) - HTML tokenizer (tree construction is custom, in `internal/dom`)
+- [golang.org/x/image](https://golang.org/x/image) - Font rendering and image decoding
+
+### What Goosie does NOT use
+
+- ❌ **No WKWebView** (macOS) — the core engine renders HTML/CSS with its own layout and CPU/GPU raster backend
+- ❌ **No WebView2** (Windows) — the core engine has no dependency on WebView2 or Edge Chromium
+- ❌ **No CEF/Chromium Embedded Framework**
+- ❌ **No WebKit** — no WKWebView, no embedded Chromium/WebKit. Everything is custom Go code
 
 ## Installation
 

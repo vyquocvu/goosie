@@ -1,5 +1,7 @@
 # Goosie Repository Index
 
+A lightweight web browser engine built **from scratch** in Go. No platform WebViews (WKWebView, WebView2, CEF) — the entire rendering pipeline is custom Go code.
+
 ## Quick Start
 
 ```bash
@@ -13,7 +15,7 @@ go test -v ./internal/...  # Unit tests
 ```
 goosie/
 ├── cmd/
-│   ├── browser/        # Main GUI browser (Fyne)
+│   ├── browser/        # Main GUI browser (Fyne window shell)
 │   ├── renderer-demo/  # Renderer demo (no GUI)
 │   ├── server/         # HTTP server for examples
 │   └── test/           # Headless test utility
@@ -21,11 +23,12 @@ goosie/
 ├── internal/
 │   ├── css/           # CSS parser and stylesheet handling
 │   ├── dom/           # HTML parsing and DOM operations
+│   ├── engine/        # Navigation, session, metrics
 │   ├── image/         # Image loading and caching
 │   ├── js/            # JavaScript runtime (Goja)
-│   ├── net/           # HTTP fetching and network operations
-│   ├── renderer/      # HTML rendering engine
-│   └── ui/            # GUI components (Fyne)
+│   ├── renderer/      # Rendering engine (layout, display list, raster)
+│   │   └── frame/     # Backend-neutral frame types, CPU raster, compositor
+│   └── ui/            # GUI components (Fyne shell)
 │
 └── examples/          # Example files and demos
 ```
@@ -40,12 +43,13 @@ goosie/
 ## Core Modules
 
 - **`internal/net/`** - Async HTTP client with context support
-- **`internal/dom/`** - HTML parser using golang.org/x/net/html
-- **`internal/renderer/`** - Rendering engine (render tree, layout, display list)
-- **`internal/css/`** - Full CSS parser with advanced selectors
+- **`internal/dom/`** - Compact DOM store and streaming HTML parser
+- **`internal/renderer/`** - Layout engine, display list, CPU/GPU raster backends
+- **`internal/css/`** - Full CSS parser with advanced selectors and style engine
 - **`internal/js/`** - Goja runtime with DOM/Browser APIs
 - **`internal/image/`** - Image loading and caching
-- **`internal/ui/`** - Browser UI, console, state management
+- **`internal/ui/`** - Browser UI, console, state management (Fyne shell only)
+- **`internal/engine/`** - Navigation scheduler, session lifecycle, metrics
 
 ## Examples
 
@@ -68,18 +72,21 @@ go test -bench=. ./internal/renderer  # Benchmarks
 
 ## Key Features
 
+- **From-scratch rendering**: no WKWebView, WebView2, CEF, or platform WebViews
 - HTTP fetching with async/cancellation
-- HTML parsing and rendering with layout engine
-- Full CSS parser with advanced selectors
+- Custom HTML parser and compact DOM store
+- Full CSS parser with advanced selectors, style invalidation, computed styles
 - JavaScript runtime (Goja) with DOM/Browser APIs
-- Fyne-based GUI with navigation, console, bookmarks
+- Fyne-based GUI shell (window management only)
 - Viewport-based rendering (30-65x faster)
+- Pure Go CPU raster backend + optional CoreGraphics on macOS
+- Retained tile compositor for smooth scrolling
 
 ## Dependencies
 
 - **goja** - JavaScript engine
-- **fyne** - Cross-platform GUI framework
-- **golang.org/x/net/html** - HTML parser
-- **golang.org/x/image** - Image processing
+- **fyne** - GUI framework (window shell only — rendering is custom Go raster)
+- **golang.org/x/net/html** - HTML tokenizer (tree construction is custom)
+- **golang.org/x/image** - Font rendering and image decoding
 
 See [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for details.

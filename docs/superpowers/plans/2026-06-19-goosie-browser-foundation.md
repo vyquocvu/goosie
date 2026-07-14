@@ -6,7 +6,9 @@
 
 **Architecture:** Add `internal/profile` as the durable state boundary, extend `internal/net` into a shared browser network service, and wire these into the existing `cmd/browser`, `internal/ui`, `internal/js`, and `internal/form` packages without replacing the custom Go/Fyne renderer. Implement the foundation in commit-sized vertical slices so every slice keeps the app buildable and testable.
 
-**Tech Stack:** Go 1.24.9, Fyne v2.7.0, Goja, `net/http`, `net/http/cookiejar`, `encoding/json`, Go standard `testing`, `testify`, GitHub Actions.
+**Tech Stack:** Go 1.24.9, Fyne v2.7.0 (window/presentation shell only — engine never imports Fyne), Goja (JS engine), `net/http`, `net/http/cookiejar`, `encoding/json`, Go standard `testing`, `testify`, GitHub Actions.
+
+**Render model:** Pure Go CPU raster backend (`internal/renderer/frame/raster`). No platform WebViews (WKWebView, WebView2, CEF). CoreGraphics via CGo optional (macOS only).
 
 ---
 

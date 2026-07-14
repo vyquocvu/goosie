@@ -6,7 +6,9 @@
 
 **Architecture:** Build on top of the existing renderer, style manager, layout engine, and JS runtime. The engine already handles external CSS/JS loading, float layout, and basic positioning — this plan fills the remaining gaps systematically: CSS value resolution first, then JS environment, then rendering fidelity.
 
-**Tech Stack:** Go 1.24, Goja (JS engine), Fyne v2 (GUI), `github.com/srwiley/oksvg` + `github.com/srwiley/rasterx` (SVG — already in go.sum as indirect deps of Fyne), `golang.org/x/net/html` (HTML parser)
+**Tech Stack:** Go 1.24, Goja (JS engine), Fyne v2 (window/presentation shell only — engine never imports Fyne), `github.com/srwiley/oksvg` + `github.com/srwiley/rasterx` (SVG — already in go.sum as indirect deps of Fyne), `golang.org/x/net/html` (HTML parser)
+
+**Render model:** Pure Go CPU raster backend (`internal/renderer/frame/raster`). No platform WebViews (WKWebView, WebView2, CEF).
 
 ---
 

@@ -115,27 +115,57 @@ This keeps navigation tracing UI-independent and prepares phase-level metrics in
 ## Component Flow
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Main Browser                          │
-│                    (cmd/browser/main.go)                     │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
+┌────────────────────────────────────────────────────────────┐
+│                      Main Browser                           │
+│                   (cmd/browser/main.go)                     │
+│  [Fyne window shell — windowing, input, pixel display]      │
+└──────────────────────────┬─────────────────────────────────┘
+                           │
+       ┌───────────────────┼───────────────────┐
+       │                   │                   │
+       ▼                   ▼                   ▼
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│   HTTP       │   │   HTML       │   │ JavaScript   │
-│   Fetcher    │──▶│   Parser     │──▶│   Runtime    │
-│ (internal/   │   │ (internal/   │   │ (internal/   │
-│    net)      │   │    dom)      │   │    js)       │
+│   HTTP        │   │   HTML       │   │ JavaScript   │
+│   Fetcher     │──▶│   Parser     │──▶│   Runtime    │
+│ (internal/    │   │ (internal/   │   │ (internal/   │
+│    net)       │   │    dom)      │   │    js)       │
 └──────────────┘   └──────┬───────┘   └──────────────┘
                           │
                           ▼
                    ┌──────────────┐
-                   │   HTML       │
-                   │  Renderer    │
+                   │ CSS Pipeline │
+                   │ (internal/   │
+                   │    css)      │
+                   └──────┬───────┘
+                          │
+                          ▼
+                   ┌──────────────┐
+                   │   Layout +   │
+                   │  Display List│
                    │ (internal/   │
                    │  renderer)   │
+                   │ [pure Go,    │
+                   │  no Fyne deps]│
+                   └──────┬───────┘
+                          │ backend-neutral DisplayCommands
+                          ▼
+                   ┌──────────────┐
+                   │ Raster Backend│
+                   │ (internal/   │
+                   │  renderer/   │
+                   │  frame/      │
+                   │  raster)     │
+                   │ [CPU or CG]  │
+                   └──────┬───────┘
+                          │ *image.RGBA pixel buffer
+                          ▼
+                   ┌──────────────┐
+                   │ Fyne Adapter │
+                   │ (internal/   │
+                   │  renderer/   │
+                   │  fyne_adapter│
+                   │  .go)        │
+                   │ [shell only] │
                    └──────┬───────┘
                           │
                           ▼

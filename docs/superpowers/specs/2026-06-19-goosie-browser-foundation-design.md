@@ -27,7 +27,7 @@ This milestone is not a full modern web platform implementation. Canvas, SVG, me
 
 ## Non-Goals
 
-- Replacing the custom renderer with Chromium, WebKit, or an embedded webview.
+- Replacing the custom renderer with Chromium, WebKit, or an embedded webview. _(All rendering is pure Go — CPU raster backend or optional CoreGraphics via CGo)_
 - Implementing full browser standards compatibility in this milestone.
 - Adding browser extensions, sync, password management, ad blocking, PDF viewing, or mobile apps.
 - Guaranteeing perfect compatibility with arbitrary modern websites.

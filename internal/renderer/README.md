@@ -1,6 +1,8 @@
 # HTML Renderer Module
 
-The HTML renderer module provides canvas-based rendering capabilities for the Goosie project. It parses HTML content, builds a render tree, performs layout calculations, and renders the content onto a Fyne canvas.
+The HTML renderer module provides rendering capabilities for the Goosie project. It parses HTML content, builds a render tree, performs layout calculations, and produces pixel output via Go's own raster backends (CPU or CoreGraphics) — not via platform WebViews (WKWebView, WebView2) or Fyne canvas primitives. Fyne is used only as the window shell that presents the final pixel buffer.
+
+**Render model:** Pure Go CPU raster backend (`internal/renderer/frame/raster`). No platform WebViews. Core engine packages never import Fyne types.
 
 ## Architecture
 
