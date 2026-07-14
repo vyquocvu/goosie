@@ -125,6 +125,91 @@ func BenchmarkStreamParseScrollingLong(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
+// Unsupported feature detection benchmarks
+// ---------------------------------------------------------------------------
+
+func BenchmarkStreamParseWithUnsupportedDetection(b *testing.B) {
+	input := `<html><body>
+		<p>Normal paragraph of text for testing purposes.</p>
+		<canvas id="game" width="800" height="600"></canvas>
+		<p>Another paragraph with more content here.</p>
+		<video src="video.mp4" controls></video>
+		<p>Yet another paragraph to provide page structure.</p>
+		<iframe src="embed.html" width="300" height="200"></iframe>
+		<p>Final paragraph closing out the page body.</p>
+	</body></html>`
+
+	b.Run("no_callback", func(b *testing.B) {
+		parser := NewParser()
+		ctx := context.Background()
+		cfg := ParseConfig{}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = parser.ParseDocumentCtx(ctx, strings.NewReader(input), cfg)
+		}
+	})
+
+	b.Run("with_callback", func(b *testing.B) {
+		parser := NewParser()
+		ctx := context.Background()
+		var count int
+		cfg := ParseConfig{
+			OnUnsupportedFeature: func(f UnsupportedFeature) {
+				count++
+			},
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = parser.ParseDocumentCtx(ctx, strings.NewReader(input), cfg)
+		}
+		_ = count
+	})
+}
+
+func BenchmarkStreamParseUnsupportedHeavy(b *testing.B) {
+	// Page with many canvas elements to stress detection.
+	var sb strings.Builder
+	sb.WriteString("<html><body>")
+	for i := 0; i < 100; i++ {
+		sb.WriteString("<canvas id=\"c")
+		sb.WriteString(string(rune('0' + i%10)))
+		sb.WriteString("\"></canvas>\n")
+	}
+	sb.WriteString("</body></html>")
+	input := sb.String()
+
+	b.Run("no_callback", func(b *testing.B) {
+		parser := NewParser()
+		ctx := context.Background()
+		cfg := ParseConfig{}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = parser.ParseDocumentCtx(ctx, strings.NewReader(input), cfg)
+		}
+	})
+
+	b.Run("with_callback", func(b *testing.B) {
+		parser := NewParser()
+		ctx := context.Background()
+		var count int
+		cfg := ParseConfig{
+			OnUnsupportedFeature: func(f UnsupportedFeature) {
+				count++
+			},
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = parser.ParseDocumentCtx(ctx, strings.NewReader(input), cfg)
+		}
+		_ = count
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Comparison benchmarks: old ParseDocument vs new ParseDocumentCtx
 // ---------------------------------------------------------------------------
 

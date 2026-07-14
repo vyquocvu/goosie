@@ -478,6 +478,7 @@ The parser uses `html.NewTokenizer` to read HTML tokens incrementally and build 
 - `ParseDocumentCtx(ctx, r, cfg)` — context-aware streaming parse entry point on `Parser`
 - `Document` — parse result containing `Store` and root `NodeID`
 - `Resource` / `OnResource` callback — discovers CSS, scripts, and images during parsing for early scheduling
+- `UnsupportedFeature` / `OnUnsupportedFeature` callback (M12.1) — detects `<canvas>`, `<video>`, `<audio>`, and `<iframe>` elements during parsing for fallback decisions
 
 **Design decisions:**
 - Token-by-token processing with `ctx.Done()` checks between tokens for cancellation

@@ -846,7 +846,7 @@ Provide a product path for sites outside the Go engine's supported subset withou
 
 ### M12.1 Define fallback triggers
 
-- [ ] Unsupported mandatory feature detected.
+- [x] Unsupported mandatory feature detected (M12.1: detect `<canvas>`, `<video>`, `<audio>`, `<iframe>` during streaming parse via `OnUnsupportedFeature` callback).
 - [ ] Canvas API required by page behavior.
 - [ ] Video, audio, WebSocket, Web Worker, Service Worker, or full PWA feature required.
 - [ ] ES module graph required beyond the supported script subset.

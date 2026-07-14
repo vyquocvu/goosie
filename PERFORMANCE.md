@@ -907,6 +907,35 @@ go test -bench=BenchmarkDebugDirtyRegionOverlay -benchmem ./internal/renderer/
 - The trade-off favors the streaming path: fewer allocations reduce GC pressure, context cancellation enables responsive navigation, and resource discovery enables parallel fetching.
 - Store layer shows zero regression on all benchmarks.
 
+### Unsupported Feature Detection (M12.1)
+
+The streaming parser detects `<canvas>`, `<video>`, `<audio>`, and `<iframe>` elements
+during tree construction via the `OnUnsupportedFeature` callback. Detection adds zero
+allocations — the nil-callback fast path returns after a single nil check, and the
+active path is a single switch on the tag name.
+
+```bash
+go test -bench=BenchmarkStreamParseWithUnsupportedDetection -benchmem ./internal/dom/
+go test -bench=BenchmarkStreamParseUnsupportedHeavy -benchmem ./internal/dom/
+```
+
+| Benchmark | Callback | ns/op | B/op | allocs/op |
+|-----------|----------|-------|------|----------|
+| Mixed content (4 unsupported) | none | 12,452 | 29,312 | 44 |
+| Mixed content (4 unsupported) | active | 12,396 | 29,312 | 44 |
+| 100x `<canvas>` | none | 67,665 | 33,048 | 214 |
+| 100x `<canvas>` | active | 68,863 | 33,048 | 214 |
+
+Active callback adds **zero allocations** and **~1.7% timing noise** (within
+measurement variance) vs. no callback, even with 100 detected elements per page.
+The nil-callback path has zero overhead.
+
+Run the benchmarks:
+```bash
+go test -bench=BenchmarkStreamParseWithUnsupportedDetection -benchmem ./internal/dom/
+go test -bench=BenchmarkStreamParseUnsupportedHeavy -benchmem ./internal/dom/
+```
+
 ### Golden Image Rendering (M6.5)
 
 The golden image test suite provides deterministic CPU raster benchmarks

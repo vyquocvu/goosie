@@ -2,6 +2,7 @@ package dom
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 
@@ -30,10 +31,41 @@ type Resource struct {
 	URL  string
 }
 
+// UnsupportedFeatureKind identifies the type of unsupported engine feature.
+type UnsupportedFeatureKind uint8
+
+const (
+	FeatureCanvas UnsupportedFeatureKind = iota + 1
+	FeatureVideo
+	FeatureAudio
+	FeatureIframe
+)
+
+func (k UnsupportedFeatureKind) String() string {
+	switch k {
+	case FeatureCanvas:
+		return "canvas"
+	case FeatureVideo:
+		return "video"
+	case FeatureAudio:
+		return "audio"
+	case FeatureIframe:
+		return "iframe"
+	default:
+		return fmt.Sprintf("UnsupportedFeatureKind(%d)", k)
+	}
+}
+
+// UnsupportedFeature describes a detected feature the engine does not support.
+type UnsupportedFeature struct {
+	Kind UnsupportedFeatureKind
+}
+
 // ParseConfig controls streaming parse behavior.
 type ParseConfig struct {
-	MaxBuf     int
-	OnResource func(Resource)
+	MaxBuf               int
+	OnResource           func(Resource)
+	OnUnsupportedFeature func(UnsupportedFeature)
 }
 
 // voidElements must not be pushed onto the open stack.
@@ -136,15 +168,16 @@ func init() {
 
 // treeBuilder tracks state during a streaming parse.
 type treeBuilder struct {
-	store    *Store
-	stack    []NodeID
-	rootID   NodeID
-	onRes    func(Resource)
-	htmlSeen bool
-	headSeen bool
-	bodySeen bool
-	headID   NodeID
-	bodyID   NodeID
+	store         *Store
+	stack         []NodeID
+	rootID        NodeID
+	onRes         func(Resource)
+	onUnsupported func(UnsupportedFeature)
+	htmlSeen      bool
+	headSeen      bool
+	bodySeen      bool
+	headID        NodeID
+	bodyID        NodeID
 }
 
 func internTag(name string) atom.Atom {
@@ -178,8 +211,9 @@ func (p *Parser) ParseDocumentCtx(ctx context.Context, r io.Reader, cfg ParseCon
 	}
 
 	tb := &treeBuilder{
-		store: NewStore(256),
-		onRes: cfg.OnResource,
+		store:         NewStore(256),
+		onRes:         cfg.OnResource,
+		onUnsupported: cfg.OnUnsupportedFeature,
 	}
 
 	rootID, err := tb.store.Allocate()
@@ -468,6 +502,7 @@ func (tb *treeBuilder) handleStartTag(tokenizer *html.Tokenizer, selfClosing boo
 	if tb.onRes != nil {
 		discoverResources(tagName, tok.Attr, tb.onRes)
 	}
+	tb.detectUnsupportedFeatures(tagName)
 	return nil
 }
 
@@ -514,6 +549,28 @@ func autoCloseP(store *Store, stack *[]NodeID) {
 			}
 		}
 	}
+}
+
+// detectUnsupportedFeatures calls onUnsupported when the tag is a known
+// engine-unsupported feature. Nil callback is a no-op.
+func (tb *treeBuilder) detectUnsupportedFeatures(tagName string) {
+	if tb.onUnsupported == nil {
+		return
+	}
+	var kind UnsupportedFeatureKind
+	switch tagName {
+	case "canvas":
+		kind = FeatureCanvas
+	case "video":
+		kind = FeatureVideo
+	case "audio":
+		kind = FeatureAudio
+	case "iframe":
+		kind = FeatureIframe
+	default:
+		return
+	}
+	tb.onUnsupported(UnsupportedFeature{Kind: kind})
 }
 
 func discoverResources(tagName string, tokAttrs []html.Attribute, onResource func(Resource)) {
