@@ -824,11 +824,11 @@ Evaluate GPU acceleration only after the retained display list, dirty regions, a
 
 ### M11.3 Define backend selection policy
 
-- [ ] Automatic capability detection.
-- [ ] CPU fallback.
-- [ ] Debug flag to force a backend.
-- [ ] Crash-safe fallback where possible.
-- [ ] Metrics labeled by backend.
+- [x] Automatic capability detection via build-tagged `SelectBackend()` — CG on `darwin && cgo`, CPU elsewhere.
+- [x] CPU fallback when the preferred backend fails and no type was forced.
+- [x] `WithBackend(BackendType)` option to force a specific backend.
+- [x] `WithCrashRecover()` option for panic-safe backend construction with CPU fallback.
+- [x] `NewBackend(w, h, opts...)` returns `(Backend, BackendType, error)` — callers record `BackendType.String()` as a metric label.
 
 **Acceptance criteria**
 

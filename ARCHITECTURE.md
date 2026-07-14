@@ -713,6 +713,62 @@ geometries and border-only workloads where no fill area is involved.
 - 8 cross-backend equivalence tests comparing CG output vs CPU output with `CompareImages` (tolerance=2)
 - 7 benchmarks matching the CPU benchmark suite
 
+### Backend Selection Policy (M11.3)
+
+The `raster` package provides `NewBackend(w, h, opts...)` as the single
+entry point for creating a raster backend with automatic type selection.
+
+**BackendType enum:**
+
+```go
+type BackendType int
+
+const (
+    BackendUnspecified BackendType = iota
+    BackendCPU
+    BackendCoreGraphics
+)
+```
+
+`BackendType.String()` returns `"cpu"`, `"core-graphics"`, or `"unspecified"`
+for use as a metrics label by callers.
+
+**Selection rules:**
+
+1. If `WithBackend(t)` is provided, that type is forced.
+2. Otherwise `SelectBackend()` chooses the best backend for the platform:
+   - `backend_select_darwin.go` (build tag `darwin && cgo`) → `BackendCoreGraphics`
+   - `backend_select_other.go` (build tag `!darwin || !cgo`) → `BackendCPU`
+3. If the chosen backend fails to construct and no type was forced, CPU is
+   used as a fallback.
+4. If `WithCrashRecover()` is set, constructor panics are caught and CPU is
+   used as a fallback.
+
+**Options pattern:**
+
+```go
+b, bt, err := NewBackend(w, h, WithBackend(BackendCPU))
+b, bt, err := NewBackend(w, h, WithCrashRecover())
+b, bt, err := NewBackend(w, h, WithBackend(BackendCoreGraphics), WithCrashRecover())
+```
+
+The options are extensible — new options implement `BackendOption`.
+
+**Metrics:**
+
+`NewBackend` returns the actual `BackendType` so callers can record it as a
+metric label (e.g., `raster_backend{type="core-graphics"}`). The selection
+itself has no direct dependency on the metrics package.
+
+**Design decisions:**
+- Build-tagged selection (not runtime detection) keeps platform complexity
+  in the build system where it belongs — YAGNI until non-CG accelerated
+  backends exist on other platforms.
+- `NewCPUBackend` and `NewCGBackend` constructors are unchanged. Only
+  `NewBackend` is additive.
+- CG backend is available on `darwin && cgo` via the same build tags used
+  by `cg_backend_darwin.go` and `cg_backend_stub.go`.
+
 ### Glyph and Image Caches (M6.3)
 
 The `internal/renderer/frame/cache` package provides bounded LRU caches
