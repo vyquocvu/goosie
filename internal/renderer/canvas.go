@@ -213,6 +213,24 @@ func (cr *CanvasRenderer) DisplayListSummary() map[string]int {
 	return summary
 }
 
+// DisplayListCommands returns a copy of the current display list commands
+// for inspection. Returns nil if no display list has been built yet.
+func (cr *CanvasRenderer) DisplayListCommands() []PaintCommand {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+
+	if cr.cachedDisplayList == nil {
+		return nil
+	}
+
+	cmds := make([]PaintCommand, len(cr.cachedDisplayList.Commands))
+	for i, cmd := range cr.cachedDisplayList.Commands {
+		cmds[i] = *cmd
+		cmds[i].Node = nil
+	}
+	return cmds
+}
+
 // renderNode renders a single node and its children
 func (cr *CanvasRenderer) renderNode(node *RenderNode, objects *[]fyne.CanvasObject) {
 	if node == nil {

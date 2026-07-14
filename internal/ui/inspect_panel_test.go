@@ -38,7 +38,8 @@ func (m *MockHTMLRenderer) Refresh()                              { m.refreshCal
 func (m *MockHTMLRenderer) SetRefreshCallback(callback func())    {}
 func (m *MockHTMLRenderer) SetSubmitting(submitting bool)         {}
 func (m *MockHTMLRenderer) SetCSP(p *goosienet.CSPPolicy)         {}
-func (m *MockHTMLRenderer) GetDisplayListSummary() map[string]int { return nil }
+func (m *MockHTMLRenderer) GetDisplayListSummary() map[string]int               { return nil }
+func (m *MockHTMLRenderer) GetDisplayListCommands() []renderer.PaintCommand      { return nil }
 func (m *MockHTMLRenderer) SetDirtyOverlayEnabled(enabled bool)   {}
 func (m *MockHTMLRenderer) DirtyOverlayEnabled() bool             { return false }
 func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)     { return 0, 0, 0 }

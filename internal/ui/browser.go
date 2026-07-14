@@ -843,7 +843,7 @@ func (b *Browser) showNetworkQueueDialog() {
 	dialog.ShowCustom("Network Queue", "Close", scroll, b.window)
 }
 
-// showDisplayListDialog opens a dialog showing the display list command summary.
+// showDisplayListDialog opens a dialog showing the display list command details.
 func (b *Browser) showDisplayListDialog() {
 	tab := b.ActiveTab()
 	if tab == nil || tab.htmlRenderer == nil {
@@ -851,32 +851,77 @@ func (b *Browser) showDisplayListDialog() {
 		return
 	}
 
-	summary := tab.htmlRenderer.GetDisplayListSummary()
-	if summary == nil || len(summary) == 0 {
+	cmds := tab.htmlRenderer.GetDisplayListCommands()
+	if len(cmds) == 0 {
 		dialog.ShowInformation("Display List", "No display list built yet.", b.window)
 		return
 	}
 
-	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("Display List Commands: %d types\n\n", len(summary)))
+	summary := tab.htmlRenderer.GetDisplayListSummary()
 	total := 0
+	for _, c := range summary {
+		total += c
+	}
+
+	summaryStr := fmt.Sprintf("Total: %d commands\n\n", total)
 	for _, name := range displayListTypeOrder() {
 		count, ok := summary[name]
 		if !ok {
 			continue
 		}
-		total += count
-		buf.WriteString(fmt.Sprintf("  %-12s %d\n", name+":", count))
+		summaryStr += fmt.Sprintf("  %-12s %d\n", name+":", count)
 	}
-	buf.WriteString(fmt.Sprintf("\n  Total: %d commands", total))
 
-	label := widget.NewLabel(buf.String())
-	label.Wrapping = fyne.TextWrapWord
+	summaryLabel := widget.NewLabel(summaryStr)
+	summaryLabel.Wrapping = fyne.TextWrapWord
 
-	scroll := container.NewScroll(label)
-	scroll.SetMinSize(fyne.NewSize(400, 350))
+	var detailBuf strings.Builder
+	for i, cmd := range cmds {
+		line := fmt.Sprintf("%d. %s", i+1, cmd.Type.String())
+		switch cmd.Type {
+		case renderer.PaintText:
+			txt := cmd.Text
+			if len(txt) > 40 {
+				txt = txt[:37] + "..."
+			}
+			line += fmt.Sprintf("  text=%q  font=%.0f  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
+				txt, cmd.FontSize, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PaintRect:
+			line += fmt.Sprintf("  pos=(%.0f,%.0f)  size=(%.0f×%.0f)", cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PaintImage:
+			src := cmd.ImageSrc
+			if len(src) > 40 {
+				src = src[:37] + "..."
+			}
+			line += fmt.Sprintf("  src=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)", src, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PaintLink:
+			line += fmt.Sprintf("  url=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)", cmd.LinkURL, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PaintBorder:
+			line += fmt.Sprintf("  pos=(%.0f,%.0f)  size=(%.0f×%.0f)  stroke=%.0f",
+				cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height, cmd.StrokeWidth)
+		case renderer.PaintButton:
+			line += fmt.Sprintf("  text=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
+				cmd.ButtonText, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PaintInput:
+			line += fmt.Sprintf("  type=%s  value=%s  placeholder=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
+				cmd.InputType, cmd.InputValue, cmd.Placeholder, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PaintTextarea:
+			line += fmt.Sprintf("  value=%s  placeholder=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
+				cmd.InputValue, cmd.Placeholder, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
+		case renderer.PushClip:
+			line += fmt.Sprintf("  pos=(%.0f,%.0f)  size=(%.0f×%.0f)  overflow=%s",
+				cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height, cmd.ClipOverflow)
+		case renderer.PopClip:
+		}
+		detailBuf.WriteString(line + "\n")
+	}
 
-	dialog.ShowCustom("Display List", "Close", scroll, b.window)
+	detailLabel := widget.NewLabel(detailBuf.String())
+	detailLabel.Wrapping = fyne.TextWrapWord
+
+	content := container.NewBorder(summaryLabel, nil, nil, nil, container.NewScroll(detailLabel))
+
+	dialog.ShowCustom("Display List Inspector", "Close", content, b.window)
 }
 
 // displayListTypeOrder returns command type names in a consistent display order.

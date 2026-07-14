@@ -877,6 +877,12 @@ func (r *Renderer) GetDisplayListSummary() map[string]int {
 	return r.canvasRenderer.DisplayListSummary()
 }
 
+// GetDisplayListCommands returns a copy of the current display list commands
+// for inspection. Returns nil when no display list has been built.
+func (r *Renderer) GetDisplayListCommands() []PaintCommand {
+	return r.canvasRenderer.DisplayListCommands()
+}
+
 // SetDirtyOverlayEnabled enables or disables the dirty-region overlay visualization.
 func (r *Renderer) SetDirtyOverlayEnabled(enabled bool) {
 	r.canvasRenderer.SetDirtyOverlayEnabled(enabled)

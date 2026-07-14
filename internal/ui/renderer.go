@@ -27,6 +27,11 @@ type HTMLRenderer interface {
 	// display list has been built.
 	GetDisplayListSummary() map[string]int
 
+	// GetDisplayListCommands returns a copy of the current display list
+	// commands for individual inspection. Returns nil when no display
+	// list has been built.
+	GetDisplayListCommands() []renderer.PaintCommand
+
 	// SetDirtyOverlayEnabled enables or disables the dirty-region overlay
 	// visualization. When enabled, semi-transparent colored rectangles are
 	// rendered over each paint command to show repaint regions.
