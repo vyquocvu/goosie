@@ -1047,7 +1047,9 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	// Reuse stable root container or create one
 	if cr.contentRoot != nil {
 		cr.contentRoot.Objects = rootObjects
-		cr.contentRoot.Refresh()
+		fyne.Do(func() {
+			cr.contentRoot.Refresh()
+		})
 	} else {
 		cr.contentRoot = container.NewWithoutLayout(rootObjects...)
 	}

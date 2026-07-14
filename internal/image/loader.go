@@ -12,8 +12,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +58,17 @@ type loader struct {
 	inProgress map[string]*sync.WaitGroup
 	// OnLoad is called when an image is successfully loaded
 	OnLoad OnLoadCallback
+
+	// Per-domain rate limiting to avoid 429 responses
+	domainSem   map[string]chan struct{}
+	domainSemMu sync.Mutex
 }
+
+const (
+	maxConcurrentPerDomain = 2
+	maxRetries             = 3
+	retryBaseDelay         = 500 * time.Millisecond
+)
 
 // NewLoader creates a new image loader with a cache
 func NewLoader(cacheSize int) Loader {
@@ -67,7 +78,29 @@ func NewLoader(cacheSize int) Loader {
 		},
 		cache:      NewCache(cacheSize),
 		inProgress: make(map[string]*sync.WaitGroup),
+		domainSem:  make(map[string]chan struct{}),
 	}
+}
+
+// acquireDomainSem acquires the per-domain semaphore for the given domain,
+// blocking if the maximum number of concurrent requests is already in flight.
+func (l *loader) acquireDomainSem(domain string) {
+	l.domainSemMu.Lock()
+	sem, ok := l.domainSem[domain]
+	if !ok {
+		sem = make(chan struct{}, maxConcurrentPerDomain)
+		l.domainSem[domain] = sem
+	}
+	l.domainSemMu.Unlock()
+	sem <- struct{}{}
+}
+
+// releaseDomainSem releases the per-domain semaphore.
+func (l *loader) releaseDomainSem(domain string) {
+	l.domainSemMu.Lock()
+	sem := l.domainSem[domain]
+	l.domainSemMu.Unlock()
+	<-sem
 }
 
 // SetOnLoadCallback sets the callback for when an image is loaded
@@ -235,26 +268,59 @@ func (l *loader) loadFromDataURI(dataURI string) (*ImageData, error) {
 	}
 
 	// URL encoded
-	decoded, err := url.QueryUnescape(data)
+	decoded, err := neturl.QueryUnescape(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unescape data URI: %w", err)
 	}
 	return l.decodeImage(strings.NewReader(decoded))
 }
 
-// loadFromURL loads an image from a remote URL
+// loadFromURL loads an image from a remote URL with per-domain rate limiting
+// and automatic retry on 429 (Too Many Requests) with exponential backoff.
 func (l *loader) loadFromURL(url string) (*ImageData, error) {
+	parsed, err := neturl.Parse(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse image URL: %w", err)
+	}
+
+	// Acquire per-domain semaphore to limit concurrent requests
+	l.acquireDomainSem(parsed.Host)
+	defer l.releaseDomainSem(parsed.Host)
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create image request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", "goosie/1.0 (https://github.com/vyquocvu/goosie; like Gecko)")
 
-	resp, err := l.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch image: %w", err)
+	var resp *http.Response
+	delay := retryBaseDelay
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(delay)
+			delay *= 2
+		}
+
+		resp, err = l.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch image: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			// Use Retry-After header if present, otherwise exponential backoff
+			retryAfter := resp.Header.Get("Retry-After")
+			if retryAfter != "" {
+				if seconds, err := strconv.Atoi(retryAfter); err == nil {
+					time.Sleep(time.Duration(seconds) * time.Second)
+				}
+			}
+			continue
+		}
+
+		defer resp.Body.Close()
+		break
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP error: %d", resp.StatusCode)
