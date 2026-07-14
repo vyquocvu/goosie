@@ -97,6 +97,7 @@ type Browser struct {
 	netQueueButton      *widget.Button
 	displayListButton   *widget.Button
 	dirtyOverlayButton  *widget.Button
+	jsQueueButton       *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -450,7 +451,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.dirtyOverlayButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.dirtyOverlayButton, b.jsQueueButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -599,6 +600,11 @@ func (b *Browser) createNavigationControls() {
 	// Dirty overlay button — toggle for paint region visualization
 	b.dirtyOverlayButton = widget.NewButton("Ov", func() {
 		b.toggleDirtyOverlay()
+	})
+
+	// Script task queue button
+	b.jsQueueButton = widget.NewButton("JS", func() {
+		b.showScriptTaskQueueDialog()
 	})
 }
 
@@ -894,6 +900,43 @@ func (b *Browser) showNetworkQueueDialog() {
 	content := container.NewBorder(nil, container.NewHBox(cancelBtn), nil, nil, container.NewScroll(label))
 
 	dialog.ShowCustom("Network View", "Close", content, b.window)
+}
+
+// showScriptTaskQueueDialog opens a dialog showing the JavaScript task queue state.
+func (b *Browser) showScriptTaskQueueDialog() {
+	tab := b.ActiveTab()
+	if tab == nil {
+		dialog.ShowInformation("Script Task Queue", "No active tab.", b.window)
+		return
+	}
+
+	rt := tab.GetJSRuntime()
+
+	var buf strings.Builder
+	buf.WriteString("JavaScript Task Queue\n\n")
+
+	if rt == nil {
+		buf.WriteString("No JavaScript runtime available.\n")
+	} else {
+		timers := rt.ActiveTimersCount()
+		consoleCount := len(rt.GetConsoleMessages())
+		errorCount := len(rt.GetJavaScriptErrors())
+
+		buf.WriteString(fmt.Sprintf("Active Timers (setTimeout/setInterval): %d\n", timers))
+		buf.WriteString(fmt.Sprintf("Console Messages:                      %d\n", consoleCount))
+		buf.WriteString(fmt.Sprintf("JavaScript Errors:                     %d\n", errorCount))
+		buf.WriteString(fmt.Sprintf("Script Running:                        %s\n", map[bool]string{true: "Yes", false: "No"}[rt.RunningScriptCount() > 0]))
+	}
+
+	label := widget.NewLabel(buf.String())
+	label.Wrapping = fyne.TextWrapWord
+
+	refreshBtn := widget.NewButton("Refresh", func() {
+		b.showScriptTaskQueueDialog()
+	})
+
+	content := container.NewBorder(nil, refreshBtn, nil, nil, container.NewScroll(label))
+	dialog.ShowCustom("Script Task Queue", "Close", content, b.window)
 }
 
 // showDisplayListDialog opens a dialog showing the display list command details.

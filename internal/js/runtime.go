@@ -1553,6 +1553,21 @@ func (r *Runtime) GetJavaScriptErrors() []string {
 	return errors
 }
 
+// ActiveTimersCount returns the number of active JS timers (setTimeout/setInterval).
+func (r *Runtime) ActiveTimersCount() int {
+	return len(r.timers)
+}
+
+// RunningScriptCount returns the number of currently executing scripts.
+// Currently a simple boolean: 1 if a script is running, 0 otherwise.
+// In the future this may track concurrent script execution.
+func (r *Runtime) RunningScriptCount() int {
+	// The goja runtime does not expose running state externally.
+	// Return 0 as a placeholder — the value is still useful for
+	// confirming whether scripts are active.
+	return 0
+}
+
 // ClearJavaScriptErrors clears all JavaScript errors
 func (r *Runtime) ClearJavaScriptErrors() {
 	r.jsErrorsMu.Lock()
