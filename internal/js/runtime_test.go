@@ -1392,8 +1392,6 @@ func TestFetchFileAccessFromRemoteOriginBlocked(t *testing.T) {
 	}
 }
 
-
-
 func TestCheckFileFetchAccess_EmptyOrigin(t *testing.T) {
 	err := checkFileFetchAccess("", "file:///etc/passwd")
 	if err != nil {

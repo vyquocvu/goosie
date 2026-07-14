@@ -338,16 +338,16 @@ func TestPermissionDecisions_MatchRule(t *testing.T) {
 	policy := ScriptPolicy{
 		DefaultAPIPermission: APIDenied,
 		OriginPermissions: map[string]map[string]APIPermission{
-			"*":                         {"storage": APIAllowed},
-			"https://exact.com":         {"storage": APIAllowed},
-			"https://exact-denied.com":  {"network": APIDenied},
+			"*":                        {"storage": APIAllowed},
+			"https://exact.com":        {"storage": APIAllowed},
+			"https://exact-denied.com": {"network": APIDenied},
 		},
 	}
 	e := NewScriptEnforcer(policy)
 
-	_ = e.CheckAPIPermission("https://exact.com", "storage")      // exact (allowed)
-	_ = e.CheckAPIPermission("https://wild.com", "storage")       // wildcard (allowed)
-	_ = e.CheckAPIPermission("https://other.com", "network")      // wildcard not listed → default (denied)
+	_ = e.CheckAPIPermission("https://exact.com", "storage")        // exact (allowed)
+	_ = e.CheckAPIPermission("https://wild.com", "storage")         // wildcard (allowed)
+	_ = e.CheckAPIPermission("https://other.com", "network")        // wildcard not listed → default (denied)
 	_ = e.CheckAPIPermission("https://exact-denied.com", "network") // exact (denied)
 
 	decs := e.PermissionDecisions()
@@ -356,8 +356,8 @@ func TestPermissionDecisions_MatchRule(t *testing.T) {
 	}
 
 	tests := []struct {
-		allowed  bool
-		rule     string
+		allowed bool
+		rule    string
 	}{
 		{true, "exact"},
 		{true, "wildcard"},

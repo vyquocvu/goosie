@@ -225,7 +225,7 @@ func TestInvalidCommandReturnsError(t *testing.T) {
 
 func TestVersionMismatchRejectsCommand(t *testing.T) {
 	cmd := &Command{
-		Version: 999,
+		Version:  999,
 		Navigate: &NavigateCmd{URL: "https://example.com"},
 	}
 	data, err := cmd.Encode()

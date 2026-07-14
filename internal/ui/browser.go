@@ -88,6 +88,7 @@ type Browser struct {
 	inspectContainer    *fyne.Container
 	inspectButton       *widget.Button
 	screenshotButton    *widget.Button
+	sourceButton        *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -103,6 +104,7 @@ type Tab struct {
 	state         *BrowserState
 	browser       *Browser
 	jsRuntime     *js.Runtime
+	rawSource     string
 }
 
 // window interface to allow testing
@@ -418,7 +420,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -543,6 +545,11 @@ func (b *Browser) createNavigationControls() {
 	b.screenshotButton = widget.NewButton("📷", func() {
 		b.takeScreenshot()
 	})
+
+	// Source button
+	b.sourceButton = widget.NewButton("Source", func() {
+		b.showSourceDialog()
+	})
 }
 
 // AsTabItem converts a Tab to a TabItem
@@ -572,6 +579,16 @@ func (t *Tab) SetJSRuntime(runtime *js.Runtime) {
 // GetRenderer returns the tab's HTML renderer
 func (t *Tab) GetRenderer() HTMLRenderer {
 	return t.htmlRenderer
+}
+
+// SetRawSource stores the raw page HTML source for the View Source feature.
+func (t *Tab) SetRawSource(html string) {
+	t.rawSource = html
+}
+
+// GetRawSource returns the stored raw HTML source, or empty string if none.
+func (t *Tab) GetRawSource() string {
+	return t.rawSource
 }
 
 // toggleBookmark adds or removes the current page from bookmarks
@@ -694,6 +711,30 @@ func (b *Browser) UpdateActiveTabTitle(title string) {
 			}
 		}
 	})
+}
+
+// showSourceDialog opens a dialog showing the raw HTML source of the current page.
+// Uses a read-only MultiLineEntry within a scroll container for navigation and copy.
+func (b *Browser) showSourceDialog() {
+	tab := b.ActiveTab()
+	if tab == nil {
+		return
+	}
+	source := tab.GetRawSource()
+	if source == "" {
+		dialog.ShowInformation("Page Source", "No source available — the page may not have loaded yet.", b.window)
+		return
+	}
+
+	sourceEntry := widget.NewMultiLineEntry()
+	sourceEntry.SetText(source)
+	sourceEntry.Wrapping = fyne.TextWrapOff
+	sourceEntry.Disable()
+
+	scroll := container.NewScroll(sourceEntry)
+	scroll.SetMinSize(fyne.NewSize(700, 500))
+
+	dialog.ShowCustom("Page Source ("+tab.title+")", "Close", scroll, b.window)
 }
 
 // GetApp returns the Fyne application instance for thread-safe operations

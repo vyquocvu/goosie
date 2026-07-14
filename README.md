@@ -453,6 +453,7 @@ This will:
 7. Support bookmark management with visual indicators
 8. Initialize the Goja runtime with `console.log` and `document.getElementById`
 9. Allow cancelling slow page loads by navigating to a new URL
+10. View raw HTML source of any page via the "Source" button in the toolbar
 
 ### Testing Components (No GUI)
 
@@ -535,6 +536,12 @@ The browser demonstrates web functionality by:
    - Track JavaScript errors with error counter
    - Clear console messages with one click
    - See [CONSOLE_DOCUMENTATION.md](CONSOLE_DOCUMENTATION.md) for details
+
+9. **View Page Source**: Inspect the raw HTML source of any loaded page
+   - Click the "Source" button in the toolbar to open a dialog
+   - Read-only monospace view with horizontal scrolling
+   - Supports copy/paste for external inspection
+   - Shows the current tab title in the dialog header
 
 ## Development
 

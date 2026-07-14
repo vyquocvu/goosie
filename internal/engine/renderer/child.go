@@ -127,7 +127,7 @@ func (c *Child) handleNavigate(ctx context.Context, cmd *NavigateCmd) {
 					Version: message.Version,
 					Time:    time.Now(),
 					Frame: &message.Frame{
-						Kind:  message.FrameBegin,
+						Kind: message.FrameBegin,
 					},
 				})
 				c.writeEvent(&message.Message{
@@ -166,9 +166,9 @@ func (c *Child) writeError(text string) {
 // It operates on io.ReadCloser / io.WriteCloser so it can be used with
 // exec.Cmd pipes or in-memory io.Pipe pairs for testing.
 type Parent struct {
-	w   io.WriteCloser
-	r   io.ReadCloser
-	mu  sync.Mutex
+	w    io.WriteCloser
+	r    io.ReadCloser
+	mu   sync.Mutex
 	done chan struct{}
 
 	// closed tracks whether the parent initiated the shutdown via Close().

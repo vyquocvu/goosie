@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"time"
 	urlpkg "net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
@@ -327,6 +327,11 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 	}
 
 	log.Printf("Page loaded successfully")
+
+	// Store raw HTML source for the View Source feature
+	if tab := browser.ActiveTab(); tab != nil {
+		tab.SetRawSource(html)
+	}
 
 	// Update tab title
 	if title, ok := extractTitle(html); ok {

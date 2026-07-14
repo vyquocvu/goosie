@@ -891,7 +891,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [ ] Network priority and cancellation view.
 - [ ] Network waterfall view.
 - [x] Storage inspector for cookies, localStorage, and sessionStorage.
-- [ ] View page source and rendered HTML views.
+- [x] View page source and rendered HTML views.
 - [x] CSS inspector with live editing.
 - [x] JavaScript console panel with filtering and error tracking.
 - [x] DOM tree inspector with search, properties, and layout tabs.

@@ -23,14 +23,14 @@ const ProtocolVersion = 1
 // Command is a message sent from the parent process to the child process.
 // Exactly one payload field should be set per command.
 type Command struct {
-	Version int `json:"v"`
+	Version int       `json:"v"`
 	Time    time.Time `json:"ts,omitempty"`
 
 	// Engine lifecycle
-	Navigate  *NavigateCmd  `json:"navigate,omitempty"`
-	SetViewport *ViewportCmd `json:"setViewport,omitempty"`
-	Input     *message.Input `json:"input,omitempty"`
-	Close     *CloseCmd     `json:"close,omitempty"`
+	Navigate    *NavigateCmd   `json:"navigate,omitempty"`
+	SetViewport *ViewportCmd   `json:"setViewport,omitempty"`
+	Input       *message.Input `json:"input,omitempty"`
+	Close       *CloseCmd      `json:"close,omitempty"`
 
 	// Synchronization
 	Ping *PingCmd `json:"ping,omitempty"`
@@ -73,8 +73,8 @@ func DecodeCommand(data []byte) (*Command, error) {
 // NewNavigateCommand creates a Navigate command.
 func NewNavigateCommand(url string) *Command {
 	return &Command{
-		Version: ProtocolVersion,
-		Time:    time.Now(),
+		Version:  ProtocolVersion,
+		Time:     time.Now(),
 		Navigate: &NavigateCmd{URL: url},
 	}
 }
@@ -82,8 +82,8 @@ func NewNavigateCommand(url string) *Command {
 // NewSetViewportCommand creates a SetViewport command.
 func NewSetViewportCommand(width, height float64) *Command {
 	return &Command{
-		Version: ProtocolVersion,
-		Time:    time.Now(),
+		Version:     ProtocolVersion,
+		Time:        time.Now(),
 		SetViewport: &ViewportCmd{Width: width, Height: height},
 	}
 }
