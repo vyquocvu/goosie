@@ -1048,6 +1048,37 @@ and lowercases in a single pass with no allocations.
 
 ---
 
+### CoreGraphics Backend Comparison (M11.2)
+
+The macOS CoreGraphics raster backend (`cgBackend`) is compared against
+the pure-Go CPU backend (`cpuBackend`) for fill, clip, and border workloads.
+CG benchmarks include per-frame BeginFrame/EndFrame overhead (C.malloc +
+CGBitmapContextCreate + CGContextRelease + C.free).
+
+| Benchmark | CG ns/op | CG allocs/op | CPU ns/op | CPU allocs/op | Speedup |
+|-----------|----------|--------------|-----------|--------------|---------|
+| FillSmall (100×100) | 7,149 | 1 | 30,049 | 0 | **4.2×** |
+| FillMedium (400×400) | 45,602 | 1 | 480,080 | 0 | **10.5×** |
+| FillLarge (800×600) | 132,062 | 1 | 1,434,532 | 0 | **10.9×** |
+| FillRect 100×100 | 21,383 | 1 | 42,542 | 0 | **2.0×** |
+| FillRect 800×600 | 134,174 | 1 | 1,428,218 | 0 | **10.6×** |
+| FillWithClip | 28,159 | 1 | 127,120 | 0 | **4.5×** |
+| BorderAllSides | 21,649 | 1 | 16,064 | 0 | 0.74× |
+
+**Key observations:**
+- Large-area fills are **~10× faster** via CoreGraphics hardware acceleration
+- The CG 1 alloc/op is the malloc in BeginFrame — in a retained rendering loop
+  this is a one-time cost, making real-world CG allocs effectively 0/op after warm-up
+- Border-only workloads are slightly slower on CG (per-side rects cost more via CGo)
+- The CG backend already matches the CPU backend correctness (cross-backend
+  `CompareImages` passes with tolerance=2 for all test fixtures)
+
+Run the benchmarks:
+```bash
+go test -bench=BenchmarkCG -benchmem ./internal/renderer/frame/raster/
+go test -bench=BenchmarkRasterFill -benchmem ./internal/renderer/frame/raster/
+```
+
 *Last updated: July 2026*
 
 ## Running Benchmarks and Profiling

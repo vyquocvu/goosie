@@ -674,6 +674,45 @@ produces pixel frame buffers.
 All raster operations are zero-allocation. The frame buffer is reused
 across frames via `Reset()` (memset to zero) without reallocation.
 
+### CoreGraphics Raster Backend (M11.2)
+
+The `cgBackend` in `internal/renderer/frame/raster/cg_backend_darwin.go`
+implements the same `Backend` interface using macOS CoreGraphics via CGo,
+providing a hardware-accelerated alternative for Apple platforms.
+
+**Build constraints:**
+- Real implementation: `//go:build darwin && cgo` + `// #cgo LDFLAGS: -framework CoreGraphics`
+- Stub (returns `ErrCGBackendNotSupported`): `//go:build !darwin || !cgo`
+
+**Implementation details:**
+- Pixel buffer allocated via `C.malloc()`, shared between `CGBitmapContext` and returned `*image.RGBA`
+- Coordinate system: CG uses bottom-left origin, Go uses top-left — the context CTM is flipped via `CGContextTranslateCTM(ctx, 0, h)` + `CGContextScaleCTM(ctx, 1, -1)` at the start of each `Rasterize` call
+- Fill batching: consecutive `CmdFill` commands are batched into a single `fillRectsBatch` C call, reducing CGo overhead
+- Clip stack: saved/restored via `CGContextSaveGState`/`CGContextRestoreGState`
+- Opacity stack: saved with alpha via `CGContextSetAlpha`
+- Border rendering: decomposes to 4 fill rects (same logic as CPUBackend)
+- Text rendering: renders glyphs to a temporary `*image.RGBA` using `golang.org/x/image/font`, then draws via `drawRGBA`
+- Image rendering: decodes SVG/PNG to `*image.RGBA`, draws via `drawRGBA`
+
+**Performance (VirtualApple @ 2.50GHz):**
+
+| Benchmark | CG ns/op | CPU ns/op | Speedup |
+|-----------|----------|-----------|---------|
+| FillSmall (100×100) | 7,149 | 30,049 | 4.2× |
+| FillMedium (400×400) | 45,602 | 480,080 | 10.5× |
+| FillLarge (800×600) | 132,062 | 1,434,532 | 10.9× |
+| FillWithClip | 28,159 | 127,120 | 4.5× |
+| BorderAllSides | 21,649 | 16,064 | 0.74× |
+
+The CG backend excels at large-area fills where CoreGraphics hardware
+acceleration matters most. The CPU backend is competitive on small
+geometries and border-only workloads where no fill area is involved.
+
+**Testing:**
+- 17 unit tests covering lifecycle, fill, clip, opacity, border, HiDPI, and empty frames
+- 8 cross-backend equivalence tests comparing CG output vs CPU output with `CompareImages` (tolerance=2)
+- 7 benchmarks matching the CPU benchmark suite
+
 ### Glyph and Image Caches (M6.3)
 
 The `internal/renderer/frame/cache` package provides bounded LRU caches

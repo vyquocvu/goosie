@@ -3,8 +3,8 @@ package raster
 import (
 	"image"
 	"image/color"
-	"testing"
 	"math/rand"
+	"testing"
 
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 )
@@ -768,8 +768,8 @@ func benchmarkImage(b *testing.B, srcW, srcH, dstW, dstH int) {
 	}
 	cmds := []DisplayCmd{
 		{
-			Kind: CmdImage,
-			Rect: frame.Rect{X: 10, Y: 10, W: float32(dstW), H: float32(dstH)},
+			Kind:  CmdImage,
+			Rect:  frame.Rect{X: 10, Y: 10, W: float32(dstW), H: float32(dstH)},
 			Image: ImageSpec{Img: srcImg},
 		},
 	}
@@ -781,9 +781,9 @@ func benchmarkImage(b *testing.B, srcW, srcH, dstW, dstH int) {
 	}
 }
 
-func BenchmarkRasterImageSmall(b *testing.B)    { benchmarkImage(b, 32, 32, 100, 100) }
-func BenchmarkRasterImageMedium(b *testing.B)   { benchmarkImage(b, 256, 256, 200, 200) }
-func BenchmarkRasterImageScaleUp(b *testing.B)  { benchmarkImage(b, 32, 32, 400, 400) }
+func BenchmarkRasterImageSmall(b *testing.B)     { benchmarkImage(b, 32, 32, 100, 100) }
+func BenchmarkRasterImageMedium(b *testing.B)    { benchmarkImage(b, 256, 256, 200, 200) }
+func BenchmarkRasterImageScaleUp(b *testing.B)   { benchmarkImage(b, 32, 32, 400, 400) }
 func BenchmarkRasterImageScaleDown(b *testing.B) { benchmarkImage(b, 800, 600, 200, 150) }
 
 func BenchmarkRasterBorderFourSides(b *testing.B) {
@@ -912,8 +912,8 @@ func BenchmarkRasterManyCommands(b *testing.B) {
 		w := rng.Float32()*100 + 10
 		h := rng.Float32()*100 + 10
 		cmds[i] = DisplayCmd{
-			Kind: CmdFill,
-			Rect: frame.Rect{X: x, Y: y, W: w, H: h},
+			Kind:  CmdFill,
+			Rect:  frame.Rect{X: x, Y: y, W: w, H: h},
 			Color: frame.NewColor(uint8(rng.Intn(256)), uint8(rng.Intn(256)), uint8(rng.Intn(256)), 255),
 		}
 	}
