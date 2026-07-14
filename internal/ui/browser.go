@@ -95,6 +95,7 @@ type Browser struct {
 	sourceButton        *widget.Button
 	memoryButton        *widget.Button
 	netQueueButton      *widget.Button
+	displayListButton   *widget.Button
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
@@ -426,7 +427,7 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.sourceButton, b.memoryButton, b.netQueueButton, b.displayListButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
@@ -565,6 +566,11 @@ func (b *Browser) createNavigationControls() {
 	// Network queue button
 	b.netQueueButton = widget.NewButton("Queue", func() {
 		b.showNetworkQueueDialog()
+	})
+
+	// Display list button
+	b.displayListButton = widget.NewButton("DL", func() {
+		b.showDisplayListDialog()
 	})
 }
 
@@ -807,6 +813,47 @@ func (b *Browser) showNetworkQueueDialog() {
 	scroll.SetMinSize(fyne.NewSize(600, 400))
 
 	dialog.ShowCustom("Network Queue", "Close", scroll, b.window)
+}
+
+// showDisplayListDialog opens a dialog showing the display list command summary.
+func (b *Browser) showDisplayListDialog() {
+	tab := b.ActiveTab()
+	if tab == nil || tab.htmlRenderer == nil {
+		dialog.ShowInformation("Display List", "No renderer available.", b.window)
+		return
+	}
+
+	summary := tab.htmlRenderer.GetDisplayListSummary()
+	if summary == nil || len(summary) == 0 {
+		dialog.ShowInformation("Display List", "No display list built yet.", b.window)
+		return
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("Display List Commands: %d types\n\n", len(summary)))
+	total := 0
+	for _, name := range displayListTypeOrder() {
+		count, ok := summary[name]
+		if !ok {
+			continue
+		}
+		total += count
+		buf.WriteString(fmt.Sprintf("  %-12s %d\n", name+":", count))
+	}
+	buf.WriteString(fmt.Sprintf("\n  Total: %d commands", total))
+
+	label := widget.NewLabel(buf.String())
+	label.Wrapping = fyne.TextWrapWord
+
+	scroll := container.NewScroll(label)
+	scroll.SetMinSize(fyne.NewSize(400, 350))
+
+	dialog.ShowCustom("Display List", "Close", scroll, b.window)
+}
+
+// displayListTypeOrder returns command type names in a consistent display order.
+func displayListTypeOrder() []string {
+	return []string{"Text", "Rect", "Image", "Link", "Border", "Button", "Input", "Textarea", "PushClip", "PopClip"}
 }
 
 // memoryDefaultOrder returns a consistent display order for memory components.

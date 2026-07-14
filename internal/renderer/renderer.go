@@ -843,3 +843,9 @@ func countImages(node *RenderNode) int {
 func (r *Renderer) SetSubmitting(submitting bool) {
 	r.canvasRenderer.SetSubmitting(submitting)
 }
+
+// GetDisplayListSummary returns command type counts from the canvas renderer's
+// cached display list. Returns nil when no display list has been built.
+func (r *Renderer) GetDisplayListSummary() map[string]int {
+	return r.canvasRenderer.DisplayListSummary()
+}

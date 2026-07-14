@@ -32,6 +32,29 @@ const (
 	PopClip
 )
 
+// commandNames maps PaintCommandType values to human-readable labels for
+// debugging and display list inspection.
+var commandNames = map[PaintCommandType]string{
+	PaintText:     "Text",
+	PaintRect:     "Rect",
+	PaintImage:    "Image",
+	PaintLink:     "Link",
+	PaintBorder:   "Border",
+	PaintButton:   "Button",
+	PaintInput:    "Input",
+	PaintTextarea: "Textarea",
+	PushClip:      "PushClip",
+	PopClip:       "PopClip",
+}
+
+// String returns a human-readable label for the paint command type.
+func (t PaintCommandType) String() string {
+	if name, ok := commandNames[t]; ok {
+		return name
+	}
+	return "Unknown"
+}
+
 // PaintCommand represents a single paint operation
 type PaintCommand struct {
 	Type   PaintCommandType

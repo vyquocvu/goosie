@@ -38,6 +38,7 @@ func (m *MockHTMLRenderer) Refresh()                           { m.refreshCalled
 func (m *MockHTMLRenderer) SetRefreshCallback(callback func()) {}
 func (m *MockHTMLRenderer) SetSubmitting(submitting bool)      {}
 func (m *MockHTMLRenderer) SetCSP(p *goosienet.CSPPolicy)      {}
+func (m *MockHTMLRenderer) GetDisplayListSummary() map[string]int { return nil }
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()

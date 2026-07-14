@@ -193,6 +193,24 @@ func (cr *CanvasRenderer) Render(root *RenderNode) fyne.CanvasObject {
 	return container.NewVBox(objects...)
 }
 
+// DisplayListSummary returns a map of command type names to their counts
+// from the currently cached display list. Returns nil if no display list
+// has been built yet.
+func (cr *CanvasRenderer) DisplayListSummary() map[string]int {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+
+	if cr.cachedDisplayList == nil {
+		return nil
+	}
+
+	summary := make(map[string]int)
+	for _, cmd := range cr.cachedDisplayList.Commands {
+		summary[cmd.Type.String()]++
+	}
+	return summary
+}
+
 // renderNode renders a single node and its children
 func (cr *CanvasRenderer) renderNode(node *RenderNode, objects *[]fyne.CanvasObject) {
 	if node == nil {

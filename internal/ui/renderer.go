@@ -21,4 +21,9 @@ type HTMLRenderer interface {
 	SetRefreshCallback(callback func())
 	SetSubmitting(submitting bool)
 	SetCSP(p *net.CSPPolicy)
+
+	// GetDisplayListSummary returns a map of paint command type names to
+	// their counts from the current display list. Returns nil when no
+	// display list has been built.
+	GetDisplayListSummary() map[string]int
 }
