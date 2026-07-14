@@ -1,9 +1,11 @@
 package renderer
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -510,4 +512,140 @@ func TestFrameOutputOverIPC(t *testing.T) {
 	if frameEvents[1].Duration <= 0 {
 		t.Error("FrameCommit Duration should be positive")
 	}
+}
+
+func TestChildPanicSendsCrashEvent(t *testing.T) {
+	// Create a child that panics when it receives a navigate command.
+	childInR, childInW := io.Pipe()
+	childOutR, childOutW := io.Pipe()
+	defer childInR.Close()
+	defer childInW.Close()
+	defer childOutR.Close()
+	defer childOutW.Close()
+
+	c := NewChild(childInR, childOutW)
+	panickingChild := &panicOnNavigate{Child: c}
+
+	var mu sync.Mutex
+	var events []*message.Message
+
+	parent := NewParent(childInW, childOutR)
+	parent.OnEvent = func(msg *message.Message) {
+		mu.Lock()
+		events = append(events, msg)
+		mu.Unlock()
+	}
+	parent.Start()
+
+	go panickingChild.Run(context.Background())
+
+	parent.Send(NewNavigateCommand("https://crash.example.com"))
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	foundCrash := false
+	for _, ev := range events {
+		if ev.Crash != nil {
+			foundCrash = true
+			if ev.Crash.Kind != message.CrashEngine {
+				t.Errorf("Crash.Kind = %d, want CrashEngine", ev.Crash.Kind)
+			}
+		}
+	}
+	if !foundCrash {
+		t.Error("no Crash event received from panicking child")
+	}
+}
+
+func TestUnexpectedChildExitDetected(t *testing.T) {
+	childInR, childInW := io.Pipe()
+	childOutR, childOutW := io.Pipe()
+
+	parent := NewParent(childInW, childOutR)
+
+	var mu sync.Mutex
+	var exitErr error
+	parent.OnExit = func(err error) {
+		mu.Lock()
+		exitErr = err
+		mu.Unlock()
+	}
+	parent.Start()
+
+	// Simulate child crash by closing pipes abruptly (no Close command sent).
+	childOutW.Close()
+	childInR.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if exitErr == nil {
+		t.Error("expected non-nil error for unexpected child exit")
+	}
+}
+
+func TestGracefulCloseNoCrash(t *testing.T) {
+	child, parent, cleanup := connect(t)
+	defer cleanup()
+
+	var mu sync.Mutex
+	var exitErr error
+	parent.OnExit = func(err error) {
+		mu.Lock()
+		exitErr = err
+		mu.Unlock()
+	}
+
+	parent.Start()
+	childCtx, childCancel := context.WithCancel(context.Background())
+	defer childCancel()
+	go child.Run(childCtx)
+
+	parent.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if exitErr != nil {
+		t.Errorf("expected nil error for graceful close, got: %v", exitErr)
+	}
+}
+
+// panicOnNavigate wraps a Child and panics when it receives a Navigate command.
+type panicOnNavigate struct {
+	*Child
+}
+
+func (p *panicOnNavigate) Run(ctx context.Context) error {
+	defer func() {
+		if r := recover(); r != nil {
+			p.writeEvent(&message.Message{
+				Version: message.Version,
+				Time:    time.Now(),
+				Crash: &message.Crash{
+					Kind:    message.CrashEngine,
+					Message: fmt.Sprintf("child panic: %v", r),
+				},
+			})
+		}
+	}()
+
+	// Read one command, panic on navigate, then delegate to normal Run.
+	scanner := bufio.NewScanner(p.r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	if scanner.Scan() {
+		line := scanner.Bytes()
+		cmd, err := DecodeCommand(line)
+		if err == nil && cmd.Navigate != nil {
+			panic("test: forced engine crash on navigate")
+		}
+	}
+
+	return nil
 }

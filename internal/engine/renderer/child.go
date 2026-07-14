@@ -33,7 +33,23 @@ func NewChild(r io.Reader, w io.Writer) *Child {
 
 // Run enters the main loop: reads commands, executes them, and writes
 // events back. It returns when a Close command is received or r is closed.
-func (c *Child) Run(ctx context.Context) error {
+// Panics within the child are recovered and reported as crash events.
+func (c *Child) Run(ctx context.Context) (retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.writeEvent(&message.Message{
+				Version: message.Version,
+				Time:    time.Now(),
+				Crash: &message.Crash{
+					Kind:    message.CrashEngine,
+					Message: fmt.Sprintf("child panic: %v", r),
+					Stack:   fmt.Sprintf("%v", r),
+				},
+			})
+			retErr = fmt.Errorf("renderer: child panic: %v", r)
+		}
+	}()
+
 	c.session.SetEventCallback(func(ev session.Event) {
 		msg := message.Event(ev, time.Now())
 		c.writeEvent(msg)
@@ -155,11 +171,17 @@ type Parent struct {
 	mu  sync.Mutex
 	done chan struct{}
 
+	// closed tracks whether the parent initiated the shutdown via Close().
+	// When the stream ends and closed is false, OnExit receives an error
+	// indicating an unexpected child exit (crash).
+	closed bool
+
 	// OnEvent is called for each event from the child.
 	// Runs in the reader goroutine — must not block.
 	OnEvent func(*message.Message)
 
-	// OnExit is called when the child stream ends.
+	// OnExit is called when the child stream ends. If the exit was
+	// unexpected (not preceded by a Close command), err is non-nil.
 	OnExit func(error)
 }
 
@@ -195,7 +217,8 @@ func (p *Parent) Send(cmd *Command) error {
 func (p *Parent) Close() error {
 	p.Send(NewCloseCommand())
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.closed = true
+	p.mu.Unlock()
 	p.w.Close()
 	p.r.Close()
 	<-p.done
@@ -226,10 +249,16 @@ func (p *Parent) readLoop() {
 
 	err := scanner.Err()
 	if p.OnExit != nil {
-		if err != nil {
-			p.OnExit(err)
-		} else {
+		p.mu.Lock()
+		closed := p.closed
+		p.mu.Unlock()
+
+		if closed {
 			p.OnExit(nil)
+		} else if err != nil {
+			p.OnExit(fmt.Errorf("renderer: child crashed: %w", err))
+		} else {
+			p.OnExit(fmt.Errorf("renderer: child exited unexpectedly"))
 		}
 	}
 }
