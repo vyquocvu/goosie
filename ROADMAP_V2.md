@@ -846,23 +846,23 @@ Provide a product path for sites outside the Go engine's supported subset withou
 
 ### M12.1 Define fallback triggers
 
-- [x] Unsupported mandatory feature detected (M12.1: detect `<canvas>`, `<video>`, `<audio>`, `<iframe>` during streaming parse via `OnUnsupportedFeature` callback).
+- [x] Unsupported mandatory feature detected (M12.1: detect `<canvas>`, `<video>`, `<audio>`, `<iframe>`, `<script type="module">`, `<object>`, `<embed>`, `<link rel="manifest">` during streaming parse via `OnUnsupportedFeature` callback).
 - [ ] Canvas API required by page behavior.
 - [ ] Video, audio, WebSocket, Web Worker, Service Worker, or full PWA feature required.
 - [ ] ES module graph required beyond the supported script subset.
-- [ ] User requests compatibility mode.
-- [ ] Site allowlist or policy selects embedded engine.
-- [ ] Repeated render or script failure exceeds a threshold.
+- [x] User requests compatibility mode (M12.1: `fallback.Policy.UserRequested`).
+- [x] Site allowlist or policy selects embedded engine (M12.1: `fallback.Policy.Allowlist`).
+- [x] Repeated render or script failure exceeds a threshold (M12.1: `fallback.Policy.FailureThreshold`).
 
 ### M12.2 Define a compatibility backend interface
 
-- [ ] Navigation.
-- [ ] Back, forward, reload, and stop.
-- [ ] Title and URL updates.
-- [ ] Download and permission events.
-- [ ] Profile and private-mode behavior.
-- [ ] Developer-tools handoff.
-- [ ] Media playback and advanced API handoff.
+- [x] Navigation (`backend.Backend.Navigate`).
+- [x] Back, forward, reload, and stop (`GoBack`, `GoForward`, `Reload`, `Stop`, `CanGoBack`, `CanGoForward`).
+- [x] Title and URL updates (`Callbacks.OnTitleChanged`, `OnURLChanged`, `OnNavigation`).
+- [x] Download and permission events (`Callbacks.OnDownload`, `OnPermissionRequested`).
+- [x] Profile and private-mode behavior (`Backend.SetPrivateMode`, `IsPrivateMode`).
+- [x] Developer-tools handoff (`Backend.ShowDevTools`, `DevToolsURL`).
+- [x] Media playback and advanced API handoff (`Callbacks.OnPermissionRequested` + `Backend.EvaluateJS`).
 
 ### M12.3 Prototype platform WebView integration
 
