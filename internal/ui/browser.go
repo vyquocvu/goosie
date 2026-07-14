@@ -812,35 +812,88 @@ func formatMemoryStats(stats memory.Stats) string {
 	return b.String()
 }
 
-// showNetworkQueueDialog opens a dialog showing pending network loads sorted by priority.
+// showNetworkQueueDialog opens a dialog showing network activity including
+// a waterfall view of completed requests and pending loads with priority.
 func (b *Browser) showNetworkQueueDialog() {
-	sess := b.deps.NavSession
-	if sess == nil {
-		dialog.ShowInformation("Network Queue", "Navigation session not available.", b.window)
-		return
-	}
-
-	loads := sess.PendingLoads()
-	if len(loads) == 0 {
-		dialog.ShowInformation("Network Queue", "No pending network loads.", b.window)
-		return
-	}
-
 	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("Pending Loads: %d\n\n", len(loads)))
-	for i, load := range loads {
-		age := time.Since(load.StartedAt).Round(time.Millisecond)
-		buf.WriteString(fmt.Sprintf("%d. %s\n", i+1, load.URL))
-		buf.WriteString(fmt.Sprintf("   Priority: %s  Age: %v\n", load.Priority.String(), age))
+
+	// Completed requests with waterfall
+	if b.deps.Network != nil {
+		entries := b.deps.Network.Log().Entries()
+		if len(entries) > 0 {
+			buf.WriteString(fmt.Sprintf("Completed Requests: %d\n\n", len(entries)))
+
+			maxDur := time.Duration(0)
+			for _, e := range entries {
+				if e.Duration > maxDur {
+					maxDur = e.Duration
+				}
+			}
+			maxBar := 40.0 // max chars for waterfall bar
+
+			for _, e := range entries {
+				barLen := 0
+				if maxDur > 0 && e.Duration > 0 {
+					barLen = int(float64(e.Duration) / float64(maxDur) * maxBar)
+					if barLen < 1 {
+						barLen = 1
+					}
+				}
+				bar := strings.Repeat("█", barLen)
+				status := fmt.Sprintf("%d", e.Status)
+				if e.Status == 0 {
+					status = "ERR"
+				}
+				cache := ""
+				if e.CacheHit {
+					cache = " [cache]"
+				}
+				url := e.URL
+				if len(url) > 60 {
+					url = url[:57] + "..."
+				}
+				buf.WriteString(fmt.Sprintf("%s %-4s %s%s\n", status, e.Method, url, cache))
+				buf.WriteString(fmt.Sprintf("  %s %.0fms\n", bar, e.Duration.Seconds()*1000))
+			}
+			buf.WriteString("\n")
+		}
+	}
+
+	// Pending loads
+	sess := b.deps.NavSession
+	if sess != nil {
+		loads := sess.PendingLoads()
+		if len(loads) > 0 {
+			buf.WriteString(fmt.Sprintf("Pending Loads: %d\n", len(loads)))
+			for i, load := range loads {
+				age := time.Since(load.StartedAt).Round(time.Millisecond)
+				url := load.URL
+				if len(url) > 60 {
+					url = url[:57] + "..."
+				}
+				buf.WriteString(fmt.Sprintf("  %d. %s\n", i+1, url))
+				buf.WriteString(fmt.Sprintf("     Priority: %s  Age: %v\n", load.Priority.String(), age))
+			}
+		}
+	}
+
+	if buf.Len() == 0 {
+		dialog.ShowInformation("Network View", "No network activity yet.", b.window)
+		return
 	}
 
 	label := widget.NewLabel(buf.String())
 	label.Wrapping = fyne.TextWrapWord
 
-	scroll := container.NewScroll(label)
-	scroll.SetMinSize(fyne.NewSize(600, 400))
+	cancelBtn := widget.NewButton("Cancel Pending", func() {
+		if sess != nil {
+			sess.Cancel()
+		}
+	})
 
-	dialog.ShowCustom("Network Queue", "Close", scroll, b.window)
+	content := container.NewBorder(nil, container.NewHBox(cancelBtn), nil, nil, container.NewScroll(label))
+
+	dialog.ShowCustom("Network View", "Close", content, b.window)
 }
 
 // showDisplayListDialog opens a dialog showing the display list command details.
