@@ -36,7 +36,7 @@ Branch: main
 **Fix:** Add `tls.Config` support to `Fetcher` for advanced TLS use cases. For basic HTTPS the default transport is sufficient.
 **Effort:** M (1 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done
 
 ## Observability Gaps
 
@@ -45,14 +45,14 @@ Branch: main
 **Fix:** Introduce a logger interface (e.g., `log/slog`) and replace printf calls with structured log entries including URL, error type, and context.
 **Effort:** S (1 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done
 
 ### [P2] No metrics for rendering performance
 **What:** No counters or histograms for: pages rendered, render duration, layout computation time, image load times, CSS parse time. Performance claims (30-65x viewport speedup) have no measurement backing.
 **Fix:** Add timing instrumentation to `RenderHTML`, `ComputeLayout`, `RenderWithViewport`. Log or expose p50/p95/p99 render times.
 **Effort:** M (2 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done
 
 ## Testing Gaps
 
@@ -62,7 +62,7 @@ Branch: main
 **Fix:** Add integration test that loads a real page, executes JS against it, and verifies the DOM was correctly populated.
 **Effort:** M (2 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done
 
 ### [P2] CSS parser edge cases not fully tested
 **File:** `internal/css/parser.go`, `internal/css/parser_test.go`
@@ -70,7 +70,7 @@ Branch: main
 **Fix:** Audit `parser_test.go` for edge case coverage. Add test cases for: `:nth-child(2n+1)`, `::before` with `content: attr()`, `a[href^="https"]` starts-with operator.
 **Effort:** S (1 hr human)
 **Priority:** P2
-**Status:** open
+**Status:** done
 
 ### [P3] No E2E test for viewport scroll performance
 **File:** `test/e2e/`
@@ -78,7 +78,7 @@ Branch: main
 **Fix:** Add scroll performance test that measures frame render time with 500+ elements.
 **Effort:** M (2 hr human)
 **Priority:** P3
-**Status:** open
+**Status:** done
 
 ## Deployment / Release
 
