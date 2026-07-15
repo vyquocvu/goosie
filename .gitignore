@@ -38,6 +38,6 @@ screenshots
 screenshot.png
 roadmap_test_output
 
-.prompt
+.prompt*
 .gstack/
 bin/
