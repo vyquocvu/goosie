@@ -88,22 +88,22 @@ func EvaluateConfig(cfg TuningConfig, workload func()) WorkloadStats {
 	allocatedBytes := endMem.TotalAlloc - startMem.TotalAlloc
 	gccpu := endMem.GCCPUFraction
 
-	var totalPause time.Duration
-	if len(endGCStats.Pause) > len(startGCStats.Pause) {
-		diff := len(endGCStats.Pause) - len(startGCStats.Pause)
-		for i := 0; i < diff && i < len(endGCStats.Pause); i++ {
-			totalPause += endGCStats.Pause[i]
-		}
-	} else if len(endGCStats.Pause) > 0 {
-		totalPause = endGCStats.PauseTotal - startGCStats.PauseTotal
-	}
+	// PauseTotal is cumulative, so subtract snapshots to measure only GC pause
+	// time attributable to this workload. Avoid summing the Pause ring because it
+	// can already contain historical entries before the workload starts.
+	totalPause := endGCStats.PauseTotal - startGCStats.PauseTotal
 
-	// Thrashing detection:
-	// 1. GC CPU fraction exceeds 20%
-	// 2. High frequency of GC cycles relative to time (e.g. >100 GCs/sec)
+	// Thrashing detection uses metrics from this workload only. MemStats.GCCPUFraction
+	// is process-wide since program start, so using it directly can make otherwise
+	// healthy short workloads fail when prior tests or CI startup performed GC work.
+	// Instead, mark thrashing when this run spent a large share of its own wall
+	// time paused for GC, or when it sustained a very high GC rate.
 	thrashing := false
-	if gccpu > 0.20 {
-		thrashing = true
+	if duration > 0 && totalPause > 0 {
+		pauseFraction := float64(totalPause) / float64(duration)
+		if pauseFraction > 0.20 {
+			thrashing = true
+		}
 	}
 	if duration > 10*time.Millisecond {
 		gcRate := float64(numGC) / duration.Seconds()
