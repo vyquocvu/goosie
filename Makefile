@@ -1,25 +1,60 @@
 # Goosie Makefile
-
-# Variables
 BINARY_NAME=goosie
 BUILD_DIR=bin
 TEST_OUTPUT_DIR=testdata
 E2E_TEST_DIR=test/e2e
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*")
 
-# Build flags
-LDFLAGS=-ldflags "-s -w"
+VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+BUILDTIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: all build clean install-playwright test generate-test-data
+# Build flags
+LDFLAGS=-ldflags "-s -w -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=$(BUILDTIME)"
+
+# Reproducible build flags for release builds
+REPRODUCIBLE_FLAGS=-trimpath -ldflags "-s -w -buildid= -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=reproducible"
+
+# Headless build variant (no Fyne dependency)
+HEADLESS_FLAGS=-tags headless -trimpath -ldflags "-s -w -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=$(BUILDTIME)"
+
+.PHONY: all build build-reproducible build-headless clean install-playwright test generate-test-data smoke-test
 
 all: build
 
-# Build the project binary
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/browser
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+build-reproducible:
+	@echo "Building $(BINARY_NAME) (reproducible)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(REPRODUCIBLE_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/browser
+	@echo "Reproducible build complete: $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64"
+
+build-headless:
+	@echo "Building $(BINARY_NAME) (headless)..."
+	@mkdir -p $(BUILD_DIR)
+	go build $(HEADLESS_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-headless ./cmd/browser
+	@echo "Headless build complete: $(BUILD_DIR)/$(BINARY_NAME)-headless"
+
+build-headless-cli:
+	@echo "Building $(BINARY_NAME)-cli (standalone headless renderer)..."
+	@mkdir -p $(BUILD_DIR)
+	go build -trimpath -ldflags "-s -w -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=$(BUILDTIME)" -o $(BUILD_DIR)/$(BINARY_NAME)-cli ./cmd/headless
+	@echo "CLI build complete: $(BUILD_DIR)/$(BINARY_NAME)-cli"
+
+smoke-test: build
+	@echo "Running smoke tests..."
+	@$(BUILD_DIR)/$(BINARY_NAME) -version 2>&1 | grep -q "commit" || (echo "FAIL: version check"; exit 1)
+	@echo "PASS: version check"
+	@# Test headless mode starts and renders
+	@echo '<html><body><p>smoke</p></body></html>' | go run ./cmd/headless -output /tmp/goosie-smoke.png 2>&1 | grep -q PNG || (echo "FAIL: headless render"; exit 1)
+	@echo "PASS: headless render"
+	@rm -f /tmp/goosie-smoke.png
+	@echo "All smoke tests passed."
 
 # Clean build artifacts and test data
 clean:
@@ -29,39 +64,29 @@ clean:
 	@rm -f screenshot.png
 	@go clean
 
-# Install Playwright browsers and dependencies
 install-playwright:
 	@echo "Installing Playwright dependencies..."
 	go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps
 
-# Generate test data using the CLI tool
 generate-test-data:
 	@echo "Generating test data..."
 	@mkdir -p $(TEST_OUTPUT_DIR)
 	go run ./cmd/test-gen -output $(TEST_OUTPUT_DIR)
 
-# Generate screenshots for all testdata HTML files
 screenshots: generate-test-data
 	@echo "Generating screenshots..."
 	@mkdir -p $(TEST_OUTPUT_DIR)/screenshots
 	HEADLESS=true go run ./cmd/screenshot-all -input $(TEST_OUTPUT_DIR) -output $(TEST_OUTPUT_DIR)/screenshots
 	@echo "Screenshots saved to $(TEST_OUTPUT_DIR)/screenshots"
 
-# Run tests
 test: clean generate-test-data
 	@echo "Running tests..."
-	# Verify output.html exists
 	@ls -l $(TEST_OUTPUT_DIR)/test_*.html | head -n 5
-	
-	# Run unit tests
 	@echo "Running unit tests..."
 	go test -v ./internal/... ./cmd/...
-	
-	# Run E2E tests with Playwright
 	@echo "Running E2E tests..."
 	go test -v -tags=e2e ./$(E2E_TEST_DIR)
 
-# Update test snapshots
 update-snapshots: clean generate-test-data
 	@echo "Updating test snapshots..."
 	UPDATE_SNAPSHOTS=true go test -v -tags=e2e ./$(E2E_TEST_DIR)

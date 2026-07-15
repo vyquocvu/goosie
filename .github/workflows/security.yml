@@ -1,0 +1,36 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+      - name: Security test suite
+        run: go test -v -count=1 ./internal/test_suite/security/
+      - name: go vet (all analyzers)
+        run: go vet -all ./internal/...
+      - name: Race detector (security-sensitive packages)
+        run: |
+          go test -race -count=1 -short \
+            ./internal/engine/navigation/... \
+            ./internal/net/... \
+            ./internal/js/... \
+            ./internal/engine/fallback/...

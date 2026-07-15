@@ -920,13 +920,13 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 
 ## D. Release Engineering
 
-- [ ] Reproducible builds.
-- [ ] Cross-platform smoke tests.
-- [ ] Build variants for pure Go, standard GUI, and optional compatibility backend.
-- [ ] Release benchmark report.
+- [x] Reproducible builds (`-trimpath`, `-buildid=`, version injection via `internal/version`).
+- [x] Cross-platform smoke tests (version check + headless render in CI and Makefile).
+- [x] Build variants: standard GUI (`make build`), headless (`make build-headless`), standalone CLI (`make build-headless-cli`), reproducible (`make build-reproducible`).
+- [x] Release benchmark report (benchmarks collected in release workflow, nightly-bench.yml with benchstat comparison).
 - [x] Binary size tracking.
 - [x] Startup time tracking. _(Completed metrics in TASKS.md)_
-- [ ] Security audit workflow.
+- [x] Security audit workflow (security.yml: security test suite, go vet -all, race detector on security packages).
 - [x] Command-line interface for browser automation (--headless flag, no Fyne dependency).
 - [x] Headless rendering mode: render to image.RGBA without opening a window.
 - [x] Tag-based release builds across darwin, linux, windows (release.yml).

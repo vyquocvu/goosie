@@ -23,6 +23,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/profile"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/ui"
+	"github.com/vyquocvu/goosie/internal/version"
 	ghtml "golang.org/x/net/html"
 )
 
@@ -30,7 +31,13 @@ func main() {
 	headlessFlag := flag.Bool("headless", false, "Run in headless mode without a UI window")
 	urlFlag := flag.String("url", "", "URL to open on startup")
 	screenshotFlag := flag.String("screenshot", "", "File path to save a screenshot (only in headless mode)")
+	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.String())
+		return
+	}
 
 	prof, err := profile.Open(profile.Options{})
 	if err != nil {
