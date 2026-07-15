@@ -323,6 +323,13 @@ func TestParserAttributeSelector(t *testing.T) {
 			operator: "*=",
 			value:    "example",
 		},
+		{
+			name:     "attribute starts with https combined",
+			css:      `a[href^="https"] { font-weight: bold; }`,
+			attrName: "href",
+			operator: "^=",
+			value:    "https",
+		},
 	}
 
 	for _, tt := range tests {
@@ -397,6 +404,11 @@ func TestParserPseudoClasses(t *testing.T) {
 			css:         `tr:nth-child(2) { background: gray; }`,
 			pseudoClass: "nth-child(2)",
 		},
+		{
+			name:        "nth-child-formula",
+			css:         `li:nth-child(2n+1) { background: red; }`,
+			pseudoClass: "nth-child(2n+1)",
+		},
 	}
 
 	for _, tt := range tests {
@@ -426,14 +438,17 @@ func TestParserPseudoElements(t *testing.T) {
 		p::before {
 			content: ">";
 		}
+		a::after {
+			content: attr(href);
+		}
 	`
 	p := NewParser(css)
 	stylesheet, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse() failed: %v", err)
 	}
-	if len(stylesheet.Rules) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(stylesheet.Rules))
+	if len(stylesheet.Rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(stylesheet.Rules))
 	}
 	rule := stylesheet.Rules[0]
 	selector := rule.Selectors[0].Simple
@@ -442,6 +457,18 @@ func TestParserPseudoElements(t *testing.T) {
 	}
 	if selector.PseudoElements[0] != "before" {
 		t.Errorf("expected pseudo-element 'before', got '%s'", selector.PseudoElements[0])
+	}
+
+	rule2 := stylesheet.Rules[1]
+	selector2 := rule2.Selectors[0].Simple
+	if len(selector2.PseudoElements) != 1 {
+		t.Fatalf("expected 1 pseudo-element on second rule, got %d", len(selector2.PseudoElements))
+	}
+	if selector2.PseudoElements[0] != "after" {
+		t.Errorf("expected pseudo-element 'after', got '%s'", selector2.PseudoElements[0])
+	}
+	if len(rule2.Declarations) != 1 || rule2.Declarations[0].Property != "content" || rule2.Declarations[0].Value != "attr(href)" {
+		t.Errorf("expected content: attr(href), got %#v", rule2.Declarations)
 	}
 }
 
