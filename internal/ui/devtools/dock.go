@@ -58,6 +58,22 @@ type requestLogProvider interface {
 	Entries() []NetRequestEntry
 }
 
+// TimingPhase represents one phase of a network request's lifecycle.
+type TimingPhase struct {
+	Name     string        `json:"name"`
+	Duration time.Duration `json:"duration"`
+}
+
+// standard phase names used in waterfall rendering
+const (
+	PhaseDNS      = "DNS"
+	PhaseConnect  = "Connect"
+	PhaseTLS      = "TLS"
+	PhaseRequest  = "Request"
+	PhaseResponse = "Response"
+	PhaseDownload = "Download"
+)
+
 // NetRequestEntry is a snapshot of one network request.
 // Exported so the ui package can wrap goosienet.RequestLogEntry values.
 type NetRequestEntry struct {
@@ -70,6 +86,8 @@ type NetRequestEntry struct {
 	Error       string
 	StartedAt   time.Time
 	Duration    time.Duration
+
+	TimingPhases []TimingPhase `json:"timing_phases,omitempty"`
 }
 
 type rendererProvider interface {

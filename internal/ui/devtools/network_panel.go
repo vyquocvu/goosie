@@ -32,6 +32,8 @@ type networkPanel struct {
 	entries       []NetRequestEntry
 	visible       []NetRequestEntry
 	list          *widget.List
+	emptyLabel    *widget.Label
+	listStack     *fyne.Container
 	detailLabel   *widget.Label
 	detailBox     *fyne.Container
 	clearBtn      *widget.Button
@@ -75,6 +77,10 @@ func (p *networkPanel) build() {
 		p.showDetail(p.visible[id])
 	}
 
+	p.emptyLabel = widget.NewLabel("No network activity recorded.\nLoad a page to see network requests.")
+	p.emptyLabel.Alignment = fyne.TextAlignCenter
+	p.emptyLabel.TextStyle = fyne.TextStyle{Italic: true}
+
 	p.detailLabel = widget.NewLabel("")
 	p.detailLabel.Wrapping = fyne.TextWrapWord
 	p.detailBox = container.NewVBox()
@@ -83,7 +89,9 @@ func (p *networkPanel) build() {
 	filterBar := p.buildFilterBar()
 
 	header := p.buildHeaderRow()
-	listContent := container.NewBorder(header, nil, nil, nil, p.list)
+
+	p.listStack = container.NewMax(p.emptyLabel)
+	listContent := container.NewBorder(header, nil, nil, nil, p.listStack)
 
 	split := container.NewVSplit(
 		container.NewBorder(nil, nil, nil, nil, listContent),
@@ -195,15 +203,37 @@ func (p *networkPanel) RefreshFrom(ctx *TabContext) {
 	if ctx == nil || ctx.RequestLog == nil {
 		return
 	}
-	entries := ctx.RequestLog.Entries()
-	p.entries = entries
-	p.rebuild()
+	p.entries = ctx.RequestLog.Entries()
+	if p.list != nil && fyne.CurrentApp() != nil {
+		p.rebuild()
+	} else {
+		p.syncData()
+	}
 }
 
 func (p *networkPanel) rebuild() {
+	p.syncData()
+	if p.list != nil && fyne.CurrentApp() != nil {
+		p.list.Refresh()
+	}
+}
+
+func (p *networkPanel) syncData() {
 	p.visible = p.filterEntries()
 	p.applySort()
-	p.list.Refresh()
+	if p.listStack == nil {
+		return
+	}
+	hasItems := len(p.visible) > 0
+	p.listStack.Objects = nil
+	if hasItems {
+		p.listStack.Objects = []fyne.CanvasObject{p.list}
+	} else {
+		p.listStack.Objects = []fyne.CanvasObject{p.emptyLabel}
+	}
+	if fyne.CurrentApp() != nil && p.listStack.Visible() {
+		p.listStack.Refresh()
+	}
 }
 
 func (p *networkPanel) filterEntries() []NetRequestEntry {
@@ -268,7 +298,12 @@ func (p *networkPanel) formatRow(e NetRequestEntry) string {
 		statusStr = "ERR"
 	}
 
-	waterfall := formatWaterfall(e.Duration)
+	var waterfall string
+	if len(e.TimingPhases) > 0 {
+		waterfall = formatWaterfallWithPhases(e.Duration, e.TimingPhases)
+	} else {
+		waterfall = formatWaterfall(e.Duration)
+	}
 	return fmt.Sprintf("%-7s %5s  %-60s %-11s %8s  %s",
 		e.Method,
 		statusStr,
@@ -301,7 +336,30 @@ func (p *networkPanel) showDetail(e NetRequestEntry) {
 
 	ms := e.Duration.Seconds() * 1000
 	addDetailRow(p.detailBox, "Total:", fmt.Sprintf("%.0f ms", ms))
-	addDetailRow(p.detailBox, "Waterfall:", formatWaterfall(e.Duration))
+
+	if len(e.TimingPhases) > 0 {
+		p.detailBox.Add(widget.NewLabelWithStyle("Phase Breakdown", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		for _, ph := range e.TimingPhases {
+			phaseMs := ph.Duration.Seconds() * 1000
+			pct := 0.0
+			if e.Duration > 0 {
+				pct = (float64(ph.Duration) / float64(e.Duration)) * 100
+			}
+			bar := waterfallPhaseChar(ph.Name)
+			proportion := float64(ph.Duration.Nanoseconds()) / float64(e.Duration.Nanoseconds())
+			const maxBar = 10
+			bars := int(proportion * maxBar)
+			if bars < 1 && ph.Duration > 0 {
+				bars = 1
+			}
+			addDetailRow(p.detailBox,
+				fmt.Sprintf("  %s %s:", bar, ph.Name),
+				fmt.Sprintf("%.0f ms (%5.1f%%)", phaseMs, pct),
+			)
+		}
+	} else {
+		addDetailRow(p.detailBox, "Waterfall:", formatWaterfall(e.Duration))
+	}
 
 	p.detailBox.Show()
 	p.detailBox.Refresh()
@@ -352,14 +410,67 @@ func truncateMiddle(s string, maxLen int) string {
 }
 
 func formatWaterfall(d time.Duration) string {
+	return formatWaterfallWithPhases(d, nil)
+}
+
+func waterfallPhaseChar(name string) string {
+	switch name {
+	case PhaseDNS:
+		return "░"
+	case PhaseConnect:
+		return "▒"
+	case PhaseTLS:
+		return "▓"
+	case PhaseRequest:
+		return "█"
+	case PhaseResponse:
+		return "▌"
+	case PhaseDownload:
+		return "▐"
+	default:
+		return "█"
+	}
+}
+
+func formatWaterfallWithPhases(total time.Duration, phases []TimingPhase) string {
 	const maxBar = 20
-	ms := d.Seconds() * 1000
-	bars := int(ms / 50) // 50ms per bar
-	if bars > maxBar {
-		bars = maxBar
+	ms := total.Seconds() * 1000
+
+	if len(phases) == 0 {
+		bars := int(ms / 50)
+		if bars > maxBar {
+			bars = maxBar
+		}
+		if bars < 1 && ms > 0 {
+			bars = 1
+		}
+		return strings.Repeat("█", bars) + fmt.Sprintf(" %.0fms", ms)
 	}
-	if bars < 1 && ms > 0 {
-		bars = 1
+
+	totalNs := total.Nanoseconds()
+	if totalNs <= 0 {
+		return strings.Repeat(" ", maxBar) + " 0ms"
 	}
-	return strings.Repeat("█", bars) + fmt.Sprintf(" %.0fms", ms)
+
+	var sb strings.Builder
+	remainingBars := maxBar
+	for i, p := range phases {
+		phaseMs := p.Duration.Seconds() * 1000
+		proportion := float64(p.Duration.Nanoseconds()) / float64(totalNs)
+		bars := int(proportion * maxBar)
+		if i == len(phases)-1 {
+			bars = remainingBars
+		}
+		if bars < 1 && phaseMs > 0 {
+			bars = 1
+		}
+		if bars > remainingBars {
+			bars = remainingBars
+		}
+		ch := waterfallPhaseChar(p.Name)
+		sb.WriteString(strings.Repeat(ch, bars))
+		remainingBars -= bars
+	}
+	sb.WriteString(fmt.Sprintf(" %.0fms", ms))
+	return sb.String()
 }

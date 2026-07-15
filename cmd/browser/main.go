@@ -149,34 +149,6 @@ func main() {
 			// Give Fyne's UI thread a brief moment to process the layout changes
 			time.Sleep(1500 * time.Millisecond)
 
-			if *urlFlag == "https://example.com" {
-				activeTab := browser.ActiveTab()
-				if activeTab != nil && activeTab.GetRenderer() != nil {
-					root := activeTab.GetRenderer().GetRoot()
-					var findH1 func(*renderer.RenderNode) *renderer.RenderNode
-					findH1 = func(n *renderer.RenderNode) *renderer.RenderNode {
-						if n == nil {
-							return nil
-						}
-						if n.TagName == "h1" {
-							return n
-						}
-						for _, child := range n.Children {
-							if found := findH1(child); found != nil {
-								return found
-							}
-						}
-						return nil
-					}
-					h1Node := findH1(root)
-					if h1Node != nil {
-						h1Box := activeTab.GetRenderer().GetLayoutBox(h1Node)
-						browser.InspectElement(h1Node, h1Box)
-					}
-				}
-				time.Sleep(1000 * time.Millisecond)
-			}
-
 			if *screenshotFlag != "" {
 				err := ui.TakeScreenshotToFile(w, *screenshotFlag)
 				if err != nil {
@@ -504,9 +476,6 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 		jsRuntime := tab.GetJSRuntime()
 
-		// Set the page origin and default capability policy so that
-		// JS runtime APIs (localStorage, fetch, window.open, etc.) are
-		// gated behind the appropriate capabilities.
 		jsRuntime.SetOrigin(originFromURL(url))
 		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
 
