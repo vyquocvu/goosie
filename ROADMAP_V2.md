@@ -910,11 +910,11 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [x] Rendering pipeline deep dive.
 - [x] Contributor API documentation (BROWSER_API_DOCUMENTATION.md, DOM_API_DOCUMENTATION.md, CONSOLE_DOCUMENTATION.md, CSS_PARSER_DOCUMENTATION.md, INSPECTOR_DOCUMENTATION.md).
 - [x] Pure-Go webview architecture doc: defines the rendering pipeline, raster backends, Fyne shell boundary, and platform WebView exclusion policy.
-- [ ] Contributing guide.
-- [ ] Code of conduct.
-- [ ] Contribution guide for adding CSS properties.
-- [ ] Contribution guide for adding DOM APIs.
-- [ ] Backend integration guide.
+- [x] Contributing guide.
+- [x] Code of conduct.
+- [x] Contribution guide for adding CSS properties.
+- [x] Contribution guide for adding DOM APIs.
+- [x] Backend integration guide.
 - [ ] Tutorial series for extending the browser.
 - [ ] Architecture deep-dive articles.
 
