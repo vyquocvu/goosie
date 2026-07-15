@@ -9,6 +9,62 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
+// ConsoleEntry is a custom entry widget that supports command history via up/down arrows.
+type ConsoleEntry struct {
+	widget.Entry
+	history      []string
+	historyIndex int
+}
+
+// NewConsoleEntry creates a new ConsoleEntry.
+func NewConsoleEntry() *ConsoleEntry {
+	e := &ConsoleEntry{
+		history:      make([]string, 0),
+		historyIndex: -1,
+	}
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+// TypedKey handles key events to provide command history navigation.
+func (e *ConsoleEntry) TypedKey(k *fyne.KeyEvent) {
+	if k.Name == fyne.KeyUp {
+		if len(e.history) > 0 {
+			if e.historyIndex < 0 {
+				e.historyIndex = len(e.history) - 1
+			} else if e.historyIndex > 0 {
+				e.historyIndex--
+			}
+			e.SetText(e.history[e.historyIndex])
+		}
+	} else if k.Name == fyne.KeyDown {
+		if len(e.history) > 0 && e.historyIndex >= 0 {
+			if e.historyIndex < len(e.history)-1 {
+				e.historyIndex++
+				e.SetText(e.history[e.historyIndex])
+			} else {
+				e.historyIndex = -1
+				e.SetText("")
+			}
+		}
+	} else {
+		e.Entry.TypedKey(k)
+	}
+}
+
+// AddHistory adds a command to the history if it is not empty.
+func (e *ConsoleEntry) AddHistory(cmd string) {
+	if cmd == "" {
+		return
+	}
+	if len(e.history) > 0 && e.history[len(e.history)-1] == cmd {
+		e.historyIndex = -1
+		return
+	}
+	e.history = append(e.history, cmd)
+	e.historyIndex = -1
+}
+
 // ConsolePanel represents the developer console panel
 type ConsolePanel struct {
 	container       *fyne.Container
@@ -18,7 +74,7 @@ type ConsolePanel struct {
 	closeButton     *widget.Button
 	filterSelect    *widget.Select
 	filterLevel     string
-	commandEntry    *widget.Entry
+	commandEntry    *ConsoleEntry
 	onExecute       func(string)
 	onRefresh       func()
 	onClose         func()
@@ -130,10 +186,11 @@ func NewConsolePanel(onClose func()) *ConsolePanel {
 		container.NewHBox(panel.clearButton, panel.closeButton),
 		container.NewHBox(widget.NewLabel("Filter:"), panel.filterSelect, panel.errorCountLabel),
 	)
-	panel.commandEntry = widget.NewEntry()
+	panel.commandEntry = NewConsoleEntry()
 	panel.commandEntry.SetPlaceHolder("Execute JavaScript")
 	panel.commandEntry.OnSubmitted = func(source string) {
 		if panel.onExecute != nil && source != "" {
+			panel.commandEntry.AddHistory(source)
 			panel.onExecute(source)
 			panel.commandEntry.SetText("")
 		}
