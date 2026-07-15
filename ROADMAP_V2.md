@@ -903,13 +903,13 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 ## C. Documentation
 
 - [x] Architecture overview (ARCHITECTURE.md).
-- [ ] Package ownership rules.
+- [x] Package ownership rules.
 - [x] Supported platform matrix (docs/SUPPORTED_WEB_PLATFORM.md).
 - [x] Performance methodology (PERFORMANCE.md).
-- [ ] Memory model and cache budgets.
-- [ ] Rendering pipeline deep dive.
+- [x] Memory model and cache budgets.
+- [x] Rendering pipeline deep dive.
 - [x] Contributor API documentation (BROWSER_API_DOCUMENTATION.md, DOM_API_DOCUMENTATION.md, CONSOLE_DOCUMENTATION.md, CSS_PARSER_DOCUMENTATION.md, INSPECTOR_DOCUMENTATION.md).
-- [ ] Pure-Go webview architecture doc: defines the rendering pipeline, raster backends, Fyne shell boundary, and platform WebView exclusion policy.
+- [x] Pure-Go webview architecture doc: defines the rendering pipeline, raster backends, Fyne shell boundary, and platform WebView exclusion policy.
 - [ ] Contributing guide.
 - [ ] Code of conduct.
 - [ ] Contribution guide for adding CSS properties.
