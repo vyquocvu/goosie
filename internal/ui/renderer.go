@@ -14,6 +14,7 @@ type HTMLRenderer interface {
 	SetCurrentURL(url string)
 	ResolveURL(url string) string
 	SetWindow(w fyne.Window)
+	SetHeadless(headless bool)
 	SetNavigationCallback(callback func(url string))
 	HitTest(x, y float32) (*renderer.RenderNode, *renderer.LayoutBox)
 	SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox))

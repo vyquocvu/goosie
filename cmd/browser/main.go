@@ -114,6 +114,7 @@ func main() {
 		Memory:        memMgr,
 		App:           a,
 		Window:        w,
+		Headless:      *headlessFlag,
 	})
 	browser.RendererFactory = func() ui.HTMLRenderer {
 		return renderer.NewRenderer(1000, 700)

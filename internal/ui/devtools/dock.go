@@ -83,13 +83,16 @@ type rendererProvider interface {
 	Refresh()
 }
 
-func NewDock(activeTab func() *TabContext) *Dock {
+func NewDock(activeTab func() *TabContext, headless ...bool) *Dock {
+	h := len(headless) > 0 && headless[0]
 	d := &Dock{
 		activeTab: activeTab,
 	}
 	d.buildTabs()
 	d.tabs = container.NewAppTabs()
-	d.addAllTabs()
+	if !h {
+		d.addAllTabs()
+	}
 	return d
 }
 

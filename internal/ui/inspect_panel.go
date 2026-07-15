@@ -66,6 +66,12 @@ type InspectPanel struct {
 
 	// breadcrumbsBar holds clickable ancestors.
 	breadcrumbsBar *fyne.Container
+
+	// lastRootID tracks the root node ID of the last SetRenderer call.
+	// OpenBranch is only called once per unique root (i.e. per page load).
+	// On subsequent calls with the same root (CSS reload, viewport scroll)
+	// the user's manually collapsed/expanded state is preserved.
+	lastRootID int64
 }
 
 // NewInspectPanel creates a new inspect panel
@@ -114,7 +120,9 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 			return len(node.Children) > 0
 		},
 		func(branch bool) fyne.CanvasObject {
-			return container.NewHBox(monospaceCanvasText("Node Template", color.Transparent))
+			// Single text widget per row — Fyne reuses this across rows.
+			// updateDOMTreeNode only mutates .Text and .Color, never replaces the object.
+			return monospaceCanvasText("Node Template", color.Transparent)
 		},
 		func(id widget.TreeNodeID, branch bool, o fyne.CanvasObject) {
 			node, ok := panel.nodeMap[id]
@@ -235,21 +243,39 @@ func (ip *InspectPanel) createDetailsView() {
 	)
 }
 
-// SetRenderer sets the HTML renderer and refreshes the tree
+// SetRenderer sets the HTML renderer and refreshes the tree.
+// Branch open-state is preserved across CSS reloads and viewport updates;
+// OpenBranch is only called once per new page (root node change).
 func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 	if ip.htmlRenderer != nil {
 		ip.htmlRenderer.SetHighlightNode(nil)
 	}
 	ip.htmlRenderer = r
 	if r != nil {
-		ip.rootNode = r.GetRoot()
+		newRoot := r.GetRoot()
+		ip.rootNode = newRoot
 		ip.rebuildNodeMap()
-		if ip.rootNode != nil {
-			ip.tree.OpenBranch(fmt.Sprintf("%d", ip.rootNode.ID))
-			for _, child := range ip.rootNode.Children {
-				ip.tree.OpenBranch(fmt.Sprintf("%d", child.ID))
+
+		// Only auto-open branches when the root node changes (i.e. a new page
+		// was loaded). On CSS-reload / tab-switch back / viewport updates the
+		// same root is reused and we must NOT call OpenBranch again, otherwise
+		// the user's manually-collapsed nodes (like <head>) will be forced open.
+		newRootID := int64(0)
+		if newRoot != nil {
+			newRootID = newRoot.ID
+		}
+		if newRoot != nil && newRootID != ip.lastRootID {
+			ip.lastRootID = newRootID
+			// Auto-open: html root, then body only (not head — matches Chrome).
+			ip.tree.OpenBranch(fmt.Sprintf("%d", newRoot.ID))
+			for _, child := range newRoot.Children {
+				// Open body automatically; leave head collapsed by default.
+				if strings.EqualFold(child.TagName, "body") {
+					ip.tree.OpenBranch(fmt.Sprintf("%d", child.ID))
+				}
 			}
 		}
+
 		ip.tree.Refresh()
 		// Also update details if selection exists but might be stale
 		if ip.selectedNode != nil {
@@ -801,82 +827,71 @@ func (ip *InspectPanel) CanvasObject() fyne.CanvasObject {
 	return container.NewThemeOverride(ip.container, &inspectTheme{Theme: fyne.CurrentApp().Settings().Theme()})
 }
 
-func updateDOMTreeNode(node *renderer.RenderNode, o fyne.CanvasObject) {
-	hbox, ok := o.(*fyne.Container)
-	if !ok {
-		return
-	}
-	hbox.Objects = nil
-
+// formatNodeLabel produces a compact single-line label for a DOM tree row.
+// It is used by updateDOMTreeNode so that only the .Text field of the
+// template canvas.Text object needs to change — no widget replacement occurs.
+func formatNodeLabel(node *renderer.RenderNode) (text string, col color.Color) {
 	if node.Type == renderer.NodeTypeElement {
-		tagColor := color.RGBA{R: 86, G: 156, B: 214, A: 255}     // Nice blue
-		attrKeyColor := color.RGBA{R: 156, G: 220, B: 254, A: 255} // Light blue
-		attrValColor := color.RGBA{R: 206, G: 145, B: 120, A: 255} // Soft orange
-		bracketColor := color.RGBA{R: 128, G: 128, B: 128, A: 255} // Gray
+		var sb strings.Builder
+		sb.WriteByte('<')
+		sb.WriteString(node.TagName)
 
-		bracket := canvas.NewText("<", bracketColor)
-		bracket.TextStyle.Monospace = true
-		bracket.TextSize = 10
-		hbox.Objects = append(hbox.Objects, bracket)
-
-		tag := canvas.NewText(node.TagName, tagColor)
-		tag.TextStyle.Monospace = true
-		tag.TextSize = 10
-		hbox.Objects = append(hbox.Objects, tag)
-
-		// id attribute
+		// id attribute first
 		if idVal, ok := node.GetAttribute("id"); ok {
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText(" id", attrKeyColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText("=\"", bracketColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText(idVal, attrValColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText("\"", bracketColor))
+			sb.WriteString(` id="`)
+			sb.WriteString(idVal)
+			sb.WriteByte('"')
 		}
-
-		// class attribute
+		// class attribute second
 		if classVal, ok := node.GetAttribute("class"); ok {
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText(" class", attrKeyColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText("=\"", bracketColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText(classVal, attrValColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText("\"", bracketColor))
+			sb.WriteString(` class="`)
+			sb.WriteString(classVal)
+			sb.WriteByte('"')
 		}
-
-		// other attributes (show up to 2 other attributes to avoid overflowing tree view width)
+		// up to 2 other attributes
 		count := 0
 		for k, v := range node.Attrs {
 			if k == "id" || k == "class" {
 				continue
 			}
 			if count >= 2 {
-				hbox.Objects = append(hbox.Objects, monospaceCanvasText(" ...", bracketColor))
+				sb.WriteString(" ...")
 				break
 			}
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText(" "+k, attrKeyColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText("=\"", bracketColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText(v, attrValColor))
-			hbox.Objects = append(hbox.Objects, monospaceCanvasText("\"", bracketColor))
+			sb.WriteByte(' ')
+			sb.WriteString(k)
+			sb.WriteString(`="`)
+			sb.WriteString(v)
+			sb.WriteByte('"')
 			count++
 		}
-
-		bracketEnd := canvas.NewText(">", bracketColor)
-		bracketEnd.TextStyle.Monospace = true
-		bracketEnd.TextSize = 10
-		hbox.Objects = append(hbox.Objects, bracketEnd)
-
-	} else {
-		// Text Node
-		textVal := strings.TrimSpace(node.Text)
-		if len(textVal) > 30 {
-			textVal = textVal[:27] + "..."
-		}
-		textColor := color.RGBA{R: 181, G: 206, B: 168, A: 255} // Neutral green/gray for text
-		textLabel := canvas.NewText(fmt.Sprintf("%q", textVal), textColor)
-		textLabel.TextStyle.Monospace = true
-		textLabel.TextStyle.Italic = true
-		textLabel.TextSize = 10
-		hbox.Objects = append(hbox.Objects, textLabel)
+		sb.WriteByte('>')
+		return sb.String(), color.RGBA{R: 86, G: 156, B: 214, A: 255}
 	}
+	// Text node
+	textVal := strings.TrimSpace(node.Text)
+	if len(textVal) > 40 {
+		textVal = textVal[:37] + "..."
+	}
+	return fmt.Sprintf("%q", textVal), color.RGBA{R: 181, G: 206, B: 168, A: 255}
+}
 
-	hbox.Refresh()
+func updateDOMTreeNode(node *renderer.RenderNode, o fyne.CanvasObject) {
+	txt, ok := o.(*canvas.Text)
+	if !ok {
+		return
+	}
+	label, col := formatNodeLabel(node)
+	// Only refresh if something actually changed — prevents spurious redraws.
+	if txt.Text == label && txt.Color == col {
+		return
+	}
+	txt.Text = label
+	txt.Color = col
+	txt.Refresh()
+
+	// Legacy hbox path is removed. updateDOMTreeNode now mutates a single
+	// canvas.Text in-place; no Objects replacement occurs.
 }
 
 func monospaceCanvasText(text string, col color.Color) *canvas.Text {

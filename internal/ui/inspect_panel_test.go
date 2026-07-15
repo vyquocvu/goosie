@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"image/color"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +64,7 @@ func (m *MockHTMLRenderer) SetHighlightNode(node *renderer.RenderNode) {
 func (m *MockHTMLRenderer) GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox {
 	return nil
 }
+func (m *MockHTMLRenderer) SetHeadless(bool) {}
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()
@@ -471,26 +474,22 @@ func TestElementsPanel_SyntaxHighlighting(t *testing.T) {
 	panel := NewInspectPanel(nil)
 	panel.SetRenderer(mockRenderer)
 
-	// Create and update a node
+	// Create and update a node using the new single-text-per-row API.
 	obj := panel.tree.CreateNode(false)
 	panel.tree.UpdateNode("1", false, obj)
 
-	// Verify it's a container with color-coded syntax elements
-	containerObj, ok := obj.(*fyne.Container)
-	assert.True(t, ok)
-	assert.NotEmpty(t, containerObj.Objects)
-
-	// The first object should be "<"
-	firstText, ok := containerObj.Objects[0].(*canvas.Text)
-	if assert.True(t, ok) {
-		assert.Equal(t, "<", firstText.Text)
+	// Verify it's a single canvas.Text (the new stable-update pattern).
+	txtObj, ok := obj.(*canvas.Text)
+	if !assert.True(t, ok, "tree node should be *canvas.Text") {
+		return
 	}
 
-	// Second object should be "div" tag name
-	tagNameText, ok := containerObj.Objects[1].(*canvas.Text)
-	if assert.True(t, ok) {
-		assert.Equal(t, "div", tagNameText.Text)
-	}
+	// The label should start with "<div" and contain the id and class attributes.
+	assert.True(t, strings.HasPrefix(txtObj.Text, "<div"), "label should start with <div, got: %q", txtObj.Text)
+	assert.Contains(t, txtObj.Text, `id="header"`)
+	assert.Contains(t, txtObj.Text, `class="container navbar"`)
+	// Element nodes should be rendered in blue.
+	assert.Equal(t, color.RGBA{R: 86, G: 156, B: 214, A: 255}, txtObj.Color)
 }
 
 func TestElementsPanel_MatchedCSSRules(t *testing.T) {

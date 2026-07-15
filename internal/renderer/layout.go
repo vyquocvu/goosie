@@ -477,17 +477,42 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 		fontSize = node.ComputedStyle.FontSize
 	}
 
-	// Apply margins
-	layoutBox.MarginTop = parseLength(node.ComputedStyle.MarginTop, fontSize)
-	layoutBox.MarginRight = parseLength(node.ComputedStyle.MarginRight, fontSize)
-	layoutBox.MarginBottom = parseLength(node.ComputedStyle.MarginBottom, fontSize)
-	layoutBox.MarginLeft = parseLength(node.ComputedStyle.MarginLeft, fontSize)
+	// Apply margins (use parseLengthWithViewport to support vh/vw/% units)
+	layoutBox.MarginTop = parseLengthWithViewport(node.ComputedStyle.MarginTop, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	layoutBox.MarginRight = parseLengthWithViewport(node.ComputedStyle.MarginRight, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	layoutBox.MarginBottom = parseLengthWithViewport(node.ComputedStyle.MarginBottom, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	layoutBox.MarginLeft = parseLengthWithViewport(node.ComputedStyle.MarginLeft, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	// parseLengthWithViewport returns -1 for "auto" or unsupported; treat as 0 for box model
+	if layoutBox.MarginTop < 0 {
+		layoutBox.MarginTop = 0
+	}
+	if layoutBox.MarginRight < 0 {
+		layoutBox.MarginRight = 0
+	}
+	if layoutBox.MarginBottom < 0 {
+		layoutBox.MarginBottom = 0
+	}
+	if layoutBox.MarginLeft < 0 {
+		layoutBox.MarginLeft = 0
+	}
 
-	// Apply padding
-	layoutBox.PaddingTop = parseLength(node.ComputedStyle.PaddingTop, fontSize)
-	layoutBox.PaddingRight = parseLength(node.ComputedStyle.PaddingRight, fontSize)
-	layoutBox.PaddingBottom = parseLength(node.ComputedStyle.PaddingBottom, fontSize)
-	layoutBox.PaddingLeft = parseLength(node.ComputedStyle.PaddingLeft, fontSize)
+	// Apply padding (use parseLengthWithViewport to support vh/vw/% units)
+	layoutBox.PaddingTop = parseLengthWithViewport(node.ComputedStyle.PaddingTop, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	layoutBox.PaddingRight = parseLengthWithViewport(node.ComputedStyle.PaddingRight, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	layoutBox.PaddingBottom = parseLengthWithViewport(node.ComputedStyle.PaddingBottom, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	layoutBox.PaddingLeft = parseLengthWithViewport(node.ComputedStyle.PaddingLeft, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+	if layoutBox.PaddingTop < 0 {
+		layoutBox.PaddingTop = 0
+	}
+	if layoutBox.PaddingRight < 0 {
+		layoutBox.PaddingRight = 0
+	}
+	if layoutBox.PaddingBottom < 0 {
+		layoutBox.PaddingBottom = 0
+	}
+	if layoutBox.PaddingLeft < 0 {
+		layoutBox.PaddingLeft = 0
+	}
 
 	// Apply borders
 	layoutBox.BorderTopWidth = parseLength(node.ComputedStyle.BorderTopWidth, fontSize)

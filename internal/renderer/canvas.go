@@ -73,6 +73,7 @@ type CanvasRenderer struct {
 	submitting      bool
 	submittingForms map[int64]bool
 
+	headless            bool
 	dirtyOverlayEnabled bool
 	Logger              *slog.Logger
 	highlightNode       *RenderNode
@@ -114,12 +115,12 @@ func (cr *CanvasRenderer) SetWindow(w fyne.Window) {
 	}
 }
 
+func (cr *CanvasRenderer) SetHeadless(headless bool) {
+	cr.headless = headless
+}
+
 func (cr *CanvasRenderer) onImageLoaded(source string) {
-	// Always go through fyne.Do so that when SetWindow is called later,
-	// the callback already holds the refresh and it runs on the main thread.
-	// If window is nil at call time, we queue the refresh anyway — it will
-	// be a no-op inside the callback but the cache clear still happens.
-	fyne.Do(func() {
+	fn := func() {
 		cr.ClearCache()
 		if cr.window != nil {
 			cr.window.Canvas().Refresh(cr.window.Content())
@@ -127,7 +128,17 @@ func (cr *CanvasRenderer) onImageLoaded(source string) {
 		if cr.OnRefresh != nil {
 			cr.OnRefresh()
 		}
-	})
+	}
+
+	if cr.headless {
+		fn()
+		return
+	}
+	// Always go through fyne.Do so that when SetWindow is called later,
+	// the callback already holds the refresh and it runs on the main thread.
+	// If window is nil at call time, we queue the refresh anyway — it will
+	// be a no-op inside the callback but the cache clear still happens.
+	fyne.Do(fn)
 }
 
 // SetViewport sets the current viewport for optimized rendering
@@ -1183,9 +1194,13 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	// Reuse stable root container or create one
 	if cr.contentRoot != nil {
 		cr.contentRoot.Objects = rootObjects
-		fyne.Do(func() {
+		if cr.headless {
 			cr.contentRoot.Refresh()
-		})
+		} else {
+			fyne.Do(func() {
+				cr.contentRoot.Refresh()
+			})
+		}
 	} else {
 		cr.contentRoot = container.NewWithoutLayout(rootObjects...)
 	}

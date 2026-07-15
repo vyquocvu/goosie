@@ -64,6 +64,7 @@ type BrowserDependencies struct {
 	Memory        *memory.Manager
 	App           fyne.App
 	Window        fyne.Window
+	Headless      bool
 }
 
 // Browser represents the browser UI
@@ -106,6 +107,7 @@ type Browser struct {
 	RendererFactory     func() HTMLRenderer
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
+	headless            bool
 }
 
 // Tab represents a single browser tab
@@ -140,10 +142,11 @@ func NewBrowser() *Browser {
 	return newBrowserInternal(a, w)
 }
 
-func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
+func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
+	h := len(headless) > 0 && headless[0]
 	state := NewBrowserState()
 	settings := NewSettings()
-	themeManager := NewThemeManager(a)
+	themeManager := NewThemeManager(a, h)
 
 	// Create thin, full-width loading progress bar with 5px height (initially hidden)
 	loadingBar := widget.NewProgressBarInfinite()
@@ -161,7 +164,8 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 		themeManager:        themeManager,
 		loadingBar:          loadingBar,
 		loadingBarContainer: loadingBarContainer,
-		tabItems: []*Tab{},
+		tabItems:            []*Tab{},
+		headless:            h,
 	}
 
 	// Create console panel
@@ -234,7 +238,7 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 			MetricsRecorder: &metricsAdapter{log: browser.deps.Network.Log()},
 		}
 		return ctx
-	})
+	}, h)
 
 	// Wire the real InspectPanel and ConsolePanel into the dock tabs.
 	browser.devToolsDock.SetElementsContent(browser.inspectPanel.CanvasObject())
@@ -302,8 +306,9 @@ func NewBrowserWithDependencies(deps BrowserDependencies) *Browser {
 		w.Resize(fyne.NewSize(1000, 700))
 	}
 
-	browser := newBrowserInternal(a, w)
+	browser := newBrowserInternal(a, w, deps.Headless)
 	browser.deps = deps
+	browser.headless = deps.Headless
 	browser.shortcuts = NewShortcutRegistry()
 	browser.registerDefaultShortcuts()
 	if deps.SettingsStore != nil {
@@ -623,6 +628,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 			return fmt.Errorf("RendererFactory returned nil renderer")
 		}
 		t.htmlRenderer.SetWindow(t.browser.window)
+		t.htmlRenderer.SetHeadless(t.browser.headless)
 		t.htmlRenderer.SetNavigationCallback(func(url string) {
 			if t.browser.onNavigate != nil {
 				t.browser.onNavigate(url)
@@ -635,7 +641,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 
 	// Set up inspect callback
 	t.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
-		fyne.Do(func() {
+		t.browser.do(func() {
 			if t.browser.devToolsVisible {
 				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 				t.browser.inspectPanel.SetElement(node, layout)
@@ -647,7 +653,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	// goroutine before showing the popup because fyne widgets must be
 	// touched from the main thread.
 	t.htmlRenderer.SetContextMenuCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
-		fyne.Do(func() {
+		t.browser.do(func() {
 			if t.browser.devToolsMenu == nil {
 				return
 			}
@@ -657,7 +663,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 
 	// Set up refresh callback for the renderer
 	t.htmlRenderer.SetRefreshCallback(func() {
-		fyne.Do(func() {
+		t.browser.do(func() {
 			// Trigger a refresh of the scroll container to show changes
 			t.contentScroll.Refresh()
 			// Also refresh inspector if visible
@@ -673,7 +679,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	}
 
 	// Update the scroll container with the rendered content on the main thread
-	fyne.Do(func() {
+	t.browser.do(func() {
 		t.contentScroll.Content = canvasObject
 		t.contentScroll.Refresh()
 		if t.browser.devToolsVisible {
@@ -710,9 +716,14 @@ func (b *Browser) Show() {
 		b.urlEntry,
 	)
 
-	// Dev tools dock container (hidden initially)
-	b.dockContainer = container.NewMax(b.devToolsDock.CanvasObject())
-	b.dockContainer.Hide()
+	// Dev tools dock container (hidden initially, skipped in headless mode)
+	if !b.headless {
+		b.dockContainer = container.NewMax(b.devToolsDock.CanvasObject())
+		b.dockContainer.Hide()
+	} else {
+		b.dockContainer = container.NewMax()
+		b.dockContainer.Hide()
+	}
 
 	// Vertical split: page content on top, dev tools dock on bottom
 	b.devToolsSplit = container.NewVSplit(b.tabs, b.dockContainer)
@@ -979,10 +990,19 @@ func (b *Browser) GetHistory() []string {
 	return []string{}
 }
 
+// do marshals work onto the Fyne UI thread. In headless mode there is no
+// UI event loop, so the function is called directly instead.
+func (b *Browser) do(fn func()) {
+	if b.headless {
+		fn()
+		return
+	}
+	fyne.Do(fn)
+}
+
 // ShowLoading displays the loading indicator
 func (b *Browser) ShowLoading() {
-	// Use fyne.Do to ensure UI updates happen on the main thread
-	fyne.Do(func() {
+	b.do(func() {
 		b.loadingBarContainer.Show()
 		b.loadingBar.Show()
 	})
@@ -990,8 +1010,7 @@ func (b *Browser) ShowLoading() {
 
 // HideLoading hides the loading indicator
 func (b *Browser) HideLoading() {
-	// Use fyne.Do to ensure UI updates happen on the main thread
-	fyne.Do(func() {
+	b.do(func() {
 		b.loadingBar.Hide()
 		b.loadingBarContainer.Hide()
 	})
@@ -999,7 +1018,7 @@ func (b *Browser) HideLoading() {
 
 // UpdateActiveTabTitle updates the title of the active tab
 func (b *Browser) UpdateActiveTabTitle(title string) {
-	fyne.Do(func() {
+	b.do(func() {
 		if tab := b.ActiveTab(); tab != nil {
 			tab.title = title
 			if selected := b.tabs.Selected(); selected != nil {

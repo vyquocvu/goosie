@@ -99,6 +99,7 @@ The end-to-end suite requires Playwright and network access. Install Playwright 
 - [Testing](TESTING.md)
 - [Performance](PERFORMANCE.md)
 - [Roadmap](ROADMAP_V2.md)
+- [MCP Integration Roadmap](ROADMAP_MCP.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

@@ -48,6 +48,9 @@ type Renderer struct {
 	// Testing mode to bypass Fyne's main thread requirement for callbacks
 	testingMode bool
 
+	// headless skips fyne.Do marshalling when no UI event loop is running
+	headless bool
+
 	// Mutex protects stylesheet during concurrent CSS loading
 	stylesheetMu sync.RWMutex
 
@@ -652,10 +655,17 @@ func (r *Renderer) SetTestingMode(mode bool) {
 	r.testingMode = mode
 }
 
+func (r *Renderer) SetHeadless(mode bool) {
+	r.headless = mode
+	if r.canvasRenderer != nil {
+		r.canvasRenderer.SetHeadless(mode)
+	}
+}
+
 func (r *Renderer) onImageLoaded(src string) {
 	r.canvasRenderer.InvalidateObjectCache()
 
-	if r.testingMode {
+	if r.testingMode || r.headless {
 		if r.onRefresh != nil {
 			r.onRefresh()
 		}

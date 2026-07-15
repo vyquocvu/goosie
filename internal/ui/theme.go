@@ -35,16 +35,21 @@ func (t ThemeType) String() string {
 type ThemeManager struct {
 	app       fyne.App
 	current   ThemeType
+	headless  bool
 	listeners []func(ThemeType)
 }
 
 // NewThemeManager creates a new ThemeManager
-func NewThemeManager(app fyne.App) *ThemeManager {
+func NewThemeManager(app fyne.App, headless ...bool) *ThemeManager {
+	h := len(headless) > 0 && headless[0]
 	tm := &ThemeManager{
-		app:     app,
-		current: ThemeSystem,
+		app:      app,
+		current:  ThemeSystem,
+		headless: h,
 	}
-	tm.load()
+	if !h {
+		tm.load()
+	}
 	return tm
 }
 
@@ -136,6 +141,9 @@ func (t *browserTheme) Size(name fyne.ThemeSizeName) float32 {
 
 // apply applies the current theme to the Fyne application
 func (tm *ThemeManager) apply() {
+	if tm.headless {
+		return
+	}
 	var variant fyne.ThemeVariant
 	switch tm.current {
 	case ThemeLight:
@@ -150,11 +158,17 @@ func (tm *ThemeManager) apply() {
 
 // save persists the theme preference
 func (tm *ThemeManager) save() {
+	if tm.headless {
+		return
+	}
 	tm.app.Preferences().SetInt("theme_preference", int(tm.current))
 }
 
 // load retrieves the persisted theme preference
 func (tm *ThemeManager) load() {
+	if tm.headless {
+		return
+	}
 	val := tm.app.Preferences().IntWithFallback("theme_preference", int(ThemeSystem))
 	tm.current = ThemeType(val)
 	tm.apply()
