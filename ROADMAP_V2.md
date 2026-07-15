@@ -927,8 +927,8 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [x] Binary size tracking.
 - [x] Startup time tracking. _(Completed metrics in TASKS.md)_
 - [ ] Security audit workflow.
-- [ ] Command-line interface for browser automation (--headless flag, no Fyne dependency).
-- [ ] Headless rendering mode: render to image.RGBA without opening a window.
+- [x] Command-line interface for browser automation (--headless flag, no Fyne dependency).
+- [x] Headless rendering mode: render to image.RGBA without opening a window.
 - [x] Tag-based release builds across darwin, linux, windows (release.yml).
 - [x] CI gates: unit tests (test.yml), race detection (performance.yml), golden image validation (golden.yml), nightly benchmarks (nightly-bench.yml), allocation regression checks.
 
@@ -1012,7 +1012,7 @@ The first sprint after this roadmap is accepted should contain only the followin
 - [x] Add navigation IDs and phase timings.
 - [x] Add CPU, heap, and trace capture commands.
 - [x] Add benchmark comparison documentation.
-- [ ] Create architecture decision records for compact DOM, retained display list, and raster backend boundaries.
+- [x] Create architecture decision records for compact DOM, retained display list, and raster backend boundaries.
 - [x] Publish the current baseline before modifying DOM or layout structures.
 
 No compact DOM rewrite, GPU integration, or multi-process work should begin before this sprint is complete.
