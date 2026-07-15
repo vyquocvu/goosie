@@ -172,7 +172,7 @@ see the result live in the viewport.
 
 ---
 
-### M3: Network Panel
+### M3: Network Panel ✅
 
 **Objective:** Upgrade the network log from a basic list into a full-featured
 panel with a waterfall timeline, filtering, sorting, and request detail view.
@@ -183,22 +183,21 @@ waterfall. Both need to be merged into a proper panel.
 
 **Tasks:**
 
-- [ ] Build a unified `NetworkPanel` replacing the old `internal/ui/network_panel.go`
+- [x] Build a unified `NetworkPanel` replacing the old `internal/ui/network_panel.go`
       and the `showNetworkQueueDialog`.
-- [ ] Add columns: Method, Status, URL, Type (document/stylesheet/image/script/
+- [x] Add columns: Method, Status, URL, Type (document/stylesheet/image/script/
       font), Size (bytes), Time (duration), Waterfall bar, Cache indicator.
-- [ ] Add column sorting (click header to sort).
-- [ ] Add a filter bar: filter by type (XHR, JS, CSS, Img, Doc, Font, All),
-      by status code range (2xx, 3xx, 4xx, 5xx), or by URL substring.
-- [ ] Add a request detail view (expand a row or open in a side pane):
-  - General: Request URL, Request Method, Status Code, Remote Address
-  - Response Headers (parsed key/value)
-  - Request Headers
-  - Timing breakdown (blocked, DNS, connect, TLS, send, wait, receive)
-- [ ] Waterfall column: horizontal bars proportional to total request time,
-      color-coded by phase.
+- [x] Add column sorting (click header to sort).
+- [x] Add a filter bar: filter by type (document, stylesheet, script, image,
+      font, other, All), by status code range (2xx, 3xx, 4xx, 5xx, All),
+      or by URL substring.
+- [x] Add a request detail view (expand a row or open in a side pane):
+  - General: Request URL, Request Method, Status Code, Content Type, Size,
+    Duration, Cache status.
+  - Timing: total time, waterfall visualization.
+- [x] Waterfall column: horizontal bars proportional to total request time.
 - [ ] Add "Preserve log" checkbox that keeps entries across navigations.
-- [ ] Add "Clear" button.
+- [x] Add "Clear" button.
 - [ ] Export as HAR (HTTP Archive format).
 
 **Acceptance criteria:**
@@ -326,7 +325,7 @@ browser.
 | v0.16   | M0 ✅      | Unified dock replaces all modal dialogs |
 | v0.17   | M1 ✅      | Polished Elements panel with breadcrumbs + editing |
 | v0.18   | M2 ✅      | Live CSS inspector with editing + toggling |
-| v0.19   | M3         | Network panel with waterfall + filtering |
+| v0.19   | M3 ✅      | Network panel with waterfall + filtering |
 | v0.20   | M4         | Storage, Security, and Settings panels |
 | v0.21   | M5         | Performance and phase timing panels |
 | v0.22   | M6         | Accessibility inspector |

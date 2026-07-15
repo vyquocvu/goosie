@@ -23,10 +23,29 @@ type Dock struct {
 }
 
 type TabContext struct {
-	Memory    *memory.Manager
-	Renderer  rendererProvider
-	JSRuntime *js.Runtime
-	RawSource string
+	Memory      *memory.Manager
+	Renderer    rendererProvider
+	JSRuntime   *js.Runtime
+	RawSource   string
+	RequestLog  requestLogProvider
+}
+
+type requestLogProvider interface {
+	Entries() []NetRequestEntry
+}
+
+// NetRequestEntry is a snapshot of one network request.
+// Exported so the ui package can wrap goosienet.RequestLogEntry values.
+type NetRequestEntry struct {
+	Method      string
+	URL         string
+	Status      int
+	ContentType string
+	Bytes       int64
+	CacheHit    bool
+	Error       string
+	StartedAt   time.Time
+	Duration    time.Duration
 }
 
 type rendererProvider interface {
@@ -188,9 +207,9 @@ func newConsolePanel(activeTab func() *TabContext) fyne.CanvasObject {
 }
 
 func newNetworkPanel(activeTab func() *TabContext) fyne.CanvasObject {
-	content := widget.NewLabel("Network panel — pending and completed requests")
-	content.Wrapping = fyne.TextWrapWord
-	return container.NewBorder(widget.NewLabelWithStyle("Network", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewScroll(content))
+	p := &networkPanel{}
+	p.build()
+	return p
 }
 
 func newSourcePanel(activeTab func() *TabContext) fyne.CanvasObject {

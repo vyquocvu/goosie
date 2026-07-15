@@ -212,10 +212,11 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 			return nil
 		}
 		ctx := &devtools.TabContext{
-			Memory:    browser.deps.Memory,
-			Renderer:  tab.htmlRenderer,
-			JSRuntime: tab.jsRuntime,
-			RawSource: tab.GetRawSource(),
+			Memory:      browser.deps.Memory,
+			Renderer:    tab.htmlRenderer,
+			JSRuntime:   tab.jsRuntime,
+			RawSource:   tab.GetRawSource(),
+			RequestLog:  &requestLogAdapter{log: browser.deps.Network.Log()},
 		}
 		return ctx
 	})
@@ -1087,4 +1088,28 @@ func (b *Browser) takeScreenshot() {
 	}
 
 	dialog.ShowInformation("Screenshot Saved", fmt.Sprintf("Screenshot saved to:\n%s", filepath), b.window)
+}
+
+// requestLogAdapter wraps *net.RequestLog as devtools.requestLogProvider.
+type requestLogAdapter struct {
+	log *goosienet.RequestLog
+}
+
+func (a *requestLogAdapter) Entries() []devtools.NetRequestEntry {
+	raw := a.log.Entries()
+	out := make([]devtools.NetRequestEntry, len(raw))
+	for i, e := range raw {
+		out[i] = devtools.NetRequestEntry{
+			Method:      e.Method,
+			URL:         e.URL,
+			Status:      e.Status,
+			ContentType: e.ContentType,
+			Bytes:       e.Bytes,
+			CacheHit:    e.CacheHit,
+			Error:       e.Error,
+			StartedAt:   e.StartedAt,
+			Duration:    e.Duration,
+		}
+	}
+	return out
 }
