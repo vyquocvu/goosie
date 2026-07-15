@@ -1,6 +1,6 @@
 # Goosie Dev Tools Roadmap v1
 
-> Status: Active — M0+M1+M2+M3+M4 complete (M5-M6 stretch)
+> Status: Active — M0+M1+M2+M3+M4+M5 complete (M6 stretch)
 > Target: Production-quality developer tools for the Goosie browser engine
 
 ## 1. Motivation
@@ -254,7 +254,7 @@ data model with a basic form dialog.
 
 ---
 
-### M5: Performance and Phase Timing Panels
+### M5: Performance and Phase Timing Panels ✅
 
 **Objective:** Build real-time performance visualization into the dev tools
 dock, leveraging the engine's existing `metrics.Recorder` and
@@ -262,7 +262,7 @@ dock, leveraging the engine's existing `metrics.Recorder` and
 
 **Tasks:**
 
-- [ ] **Phase Timing Panel:** Show a live bar chart of the most recent
+- [x] **Phase Timing Panel:** Show a live bar chart of the most recent
       navigation's phase timings (DNS, connect, first byte, parse, style,
       layout, paint, raster, present). Use the `metrics.Recorder.Snapshot()`
       API.
@@ -273,7 +273,7 @@ dock, leveraging the engine's existing `metrics.Recorder` and
       durations. Use `RenderMetrics.RenderWithViewport_time` for p50/p95/p99.
 - [ ] Highlight frames that exceed the budget (missed frames in red, dropped
       frames in orange).
-- [ ] Show tile, glyph, image cache hit/miss/eviction rates as live counters
+- [x] Show tile, glyph, image cache hit/miss/eviction rates as live counters
       aggregated from the memory manager and cache subsystems.
 - [ ] Add a "Record" button that captures a performance profile (phase timings,
       frame times, GC stats, goroutine count) over a user-defined window and
@@ -327,7 +327,7 @@ browser.
 | v0.18   | M2 ✅      | Live CSS inspector with editing + toggling |
 | v0.19   | M3 ✅      | Network panel with waterfall + filtering |
 | v0.20   | M4 ✅      | Storage, Security, and Settings panels |
-| v0.21   | M5         | Performance and phase timing panels |
+| v0.21   | M5 ✅      | Performance and phase timing panels |
 | v0.22   | M6         | Accessibility inspector |
 
 Each milestone is self-contained and usable independently.

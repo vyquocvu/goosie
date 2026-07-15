@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
@@ -228,6 +229,7 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 			CurrentURL:      currentURL,
 			SecuritySummary: secSummary,
 			Settings:        browser.settings,
+			MetricsRecorder: &metricsAdapter{log: browser.deps.Network.Log()},
 		}
 		return ctx
 	})
@@ -1123,4 +1125,34 @@ func (a *requestLogAdapter) Entries() []devtools.NetRequestEntry {
 		}
 	}
 	return out
+}
+
+// metricsAdapter wraps data accessible from the browser as devtools.metricsProvider.
+type metricsAdapter struct {
+	log *goosienet.RequestLog
+}
+
+func (m *metricsAdapter) Snapshot() metrics.Metrics {
+	// Build a metrics.Metrics from the request log entries for
+	// display in the performance panel. Full engine Recorder
+	// integration is a future enhancement.
+	entries := m.log.Entries()
+	var totalBytes int64
+	var cacheHits, cacheMisses int
+	for _, e := range entries {
+		totalBytes += e.Bytes
+		if e.CacheHit {
+			cacheHits++
+		} else {
+			cacheMisses++
+		}
+	}
+	return metrics.Metrics{
+		URL: "live",
+		Counters: metrics.Counters{
+			BytesDownloaded: totalBytes,
+			CacheHits:       cacheHits,
+			CacheMisses:     cacheMisses,
+		},
+	}
 }

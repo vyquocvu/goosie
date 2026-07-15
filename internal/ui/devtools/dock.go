@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/widget"
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/memory"
 	"github.com/vyquocvu/goosie/internal/renderer"
@@ -32,6 +33,7 @@ type TabContext struct {
 	CurrentURL      string
 	SecuritySummary string
 	Settings        settingsProvider
+	MetricsRecorder metricsProvider
 }
 
 type settingsProvider interface {
@@ -39,6 +41,10 @@ type settingsProvider interface {
 	GetDefaultSearchEngine() string
 	GetEnableJavaScript() bool
 	GetEnableImages() bool
+}
+
+type metricsProvider interface {
+	Snapshot() metrics.Metrics
 }
 
 type storageProvider interface {
@@ -102,6 +108,7 @@ func (d *Dock) addAllTabs() {
 	d.addTab("Storage", newStoragePanel(d.activeTab))
 	d.addTab("Security", newSecurityPanel(d.activeTab))
 	d.addTab("Settings", newSettingsPanel(d.activeTab))
+	d.addTab("Performance", newPerformancePanel(d.activeTab))
 }
 
 func (d *Dock) addTab(title string, content fyne.CanvasObject) {
