@@ -93,7 +93,7 @@ the same initially.
   - Page Source → tab
 - [x] Keep the right-click context menu (Inspect, View Source, Copy actions)
       working — it should open the dock and switch to the relevant tab.
-- [ ] Persist dock open/closed state and split position in the profile.
+- [x] Persist dock open/closed state and split position in the profile.
 
 ---
 

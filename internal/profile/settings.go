@@ -8,10 +8,12 @@ import (
 )
 
 type Settings struct {
-	Homepage            string `json:"homepage"`
-	DefaultSearchEngine string `json:"default_search_engine"`
-	EnableJavaScript    bool   `json:"enable_javascript"`
-	EnableImages        bool   `json:"enable_images"`
+	Homepage            string  `json:"homepage"`
+	DefaultSearchEngine string  `json:"default_search_engine"`
+	EnableJavaScript    bool    `json:"enable_javascript"`
+	EnableImages        bool    `json:"enable_images"`
+	DevToolsOpen        bool    `json:"devtools_open"`
+	DevToolsSplitOffset float64 `json:"devtools_split_offset"`
 }
 
 func DefaultSettings() Settings {

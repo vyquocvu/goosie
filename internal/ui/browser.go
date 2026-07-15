@@ -323,7 +323,7 @@ func (b *Browser) toggleConsole() {
 	b.window.Content().Refresh()
 }
 
-// toggleDevTools toggles the unified dev tools dock.
+// toggleDevTools toggles the unified dev tools dock and persists the state.
 func (b *Browser) toggleDevTools() {
 	b.devToolsVisible = !b.devToolsVisible
 	if b.devToolsSplit != nil {
@@ -336,9 +336,43 @@ func (b *Browser) toggleDevTools() {
 			b.devToolsDock.Hide()
 		}
 	}
+	b.persistDevToolsState()
 	if b.window != nil && b.window.Content() != nil {
 		b.window.Content().Refresh()
 	}
+}
+
+// restoreDevToolsState reads the profile and applies any saved dock visibility
+// and split offset. Called once during Show() after devToolsSplit is created.
+func (b *Browser) restoreDevToolsState() {
+	if b.deps.SettingsStore == nil {
+		return
+	}
+	s := b.deps.SettingsStore.Get()
+	if s.DevToolsOpen && b.devToolsSplit != nil {
+		b.devToolsVisible = true
+		b.devToolsDock.Show()
+		b.devToolsDock.Refresh()
+		if s.DevToolsSplitOffset > 0 && s.DevToolsSplitOffset < 1 {
+			b.devToolsSplit.Offset = s.DevToolsSplitOffset
+		} else {
+			b.devToolsSplit.Offset = 0.65
+		}
+	}
+}
+
+// persistDevToolsState writes the current dock visibility and split offset to
+// the profile so they survive browser restarts.
+func (b *Browser) persistDevToolsState() {
+	if b.deps.SettingsStore == nil {
+		return
+	}
+	s := b.deps.SettingsStore.Get()
+	s.DevToolsOpen = b.devToolsVisible
+	if b.devToolsSplit != nil {
+		s.DevToolsSplitOffset = b.devToolsSplit.Offset
+	}
+	_ = b.deps.SettingsStore.Set(s) // best-effort
 }
 
 // toggleInspect toggles the visibility of the inspect panel
@@ -660,6 +694,7 @@ func (b *Browser) Show() {
 	// Vertical split: page content on top, dev tools dock on bottom
 	b.devToolsSplit = container.NewVSplit(contentWithConsole, dockContainer)
 	b.devToolsSplit.Offset = 1.0
+	b.restoreDevToolsState()
 
 	// Wrap with nav bar, breadcrumb bar, and loading bar
 	mainContent := container.NewBorder(
@@ -684,6 +719,11 @@ func (b *Browser) Show() {
 		if ev.Name == fyne.KeyF12 {
 			b.toggleDevTools()
 		}
+	})
+
+	// Save dev tools state on close
+	b.window.SetOnClosed(func() {
+		b.persistDevToolsState()
 	})
 
 	b.window.ShowAndRun()
