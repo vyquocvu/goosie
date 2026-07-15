@@ -915,8 +915,8 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [x] Contribution guide for adding CSS properties.
 - [x] Contribution guide for adding DOM APIs.
 - [x] Backend integration guide.
-- [ ] Tutorial series for extending the browser.
-- [ ] Architecture deep-dive articles.
+- [x] Tutorial series for extending the browser (7 tutorials: CSS property, DOM API, capability gate, headless CLI, golden test, profiling, cache evictor).
+- [x] Architecture deep-dive articles (10 articles: DOM store, display list, raster backends, memory management, incremental layout, style invalidation, compositor/tiles, JS isolation, process isolation, streaming parser).
 
 ## D. Release Engineering
 
