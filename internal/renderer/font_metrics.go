@@ -1,8 +1,11 @@
 package renderer
 
 import (
-	"fyne.io/fyne/v2"
+	"io"
+	"log"
 	"sync"
+
+	"fyne.io/fyne/v2"
 )
 
 // FontMetrics provides accurate text measurement using font metrics
@@ -140,15 +143,18 @@ func (fm *FontMetrics) estimateTextWidth(text string, fontSize float32, style fy
 	return totalWidth
 }
 
-// isFyneAppAvailable checks if Fyne app is available
+// isFyneAppAvailable checks if Fyne app is available.
+// Suppresses Fyne's error log when no app is running (expected in headless mode).
 func isFyneAppAvailable() bool {
+	saveW := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(saveW)
+
 	defer func() {
 		if r := recover(); r != nil {
-			// Fyne panicked, app not available
 		}
 	}()
 
-	// Try to get current app - if it fails, Fyne is not initialized
 	app := fyne.CurrentApp()
 	return app != nil
 }

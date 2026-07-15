@@ -39,3 +39,5 @@ screenshot.png
 roadmap_test_output
 
 .prompt
+.gstack/
+bin/
