@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -45,6 +44,15 @@ type InspectPanel struct {
 
 	// State to prevent recursive updates
 	updatingUI bool
+
+	// onSelectNode is called whenever the selected element changes.
+	onSelectNode func(node *renderer.RenderNode, layout *renderer.LayoutBox)
+
+	// computedStyleView shows all CSS properties with search filter.
+	computedStyleView *ComputedStyleView
+
+	// inlineStyleEditor allows editing the element's inline style.
+	inlineStyleEditor *InlineStyleEditor
 }
 
 // NewInspectPanel creates a new inspect panel
@@ -205,6 +213,10 @@ func (ip *InspectPanel) createDetailsView() {
 
 	// Styles Tab
 	ip.stylesContainer = container.NewVBox()
+	ip.computedStyleView = NewComputedStyleView()
+	ip.inlineStyleEditor = NewInlineStyleEditor(func(style string) {
+		ip.refreshRenderer()
+	})
 
 	// Layout Tab
 	ip.layoutContainer = container.NewVBox()
@@ -215,6 +227,7 @@ func (ip *InspectPanel) createDetailsView() {
 	ip.detailsTabs = container.NewAppTabs(
 		container.NewTabItem("Properties", container.NewVScroll(ip.propertiesContainer)),
 		container.NewTabItem("Styles", container.NewVScroll(ip.stylesContainer)),
+		container.NewTabItem("Computed", container.NewBorder(nil, nil, nil, nil, ip.computedStyleView.CanvasObject())),
 		container.NewTabItem("Layout", container.NewVScroll(ip.layoutContainer)),
 		container.NewTabItem("Performance", container.NewVScroll(ip.performanceContainer)),
 	)
@@ -241,6 +254,11 @@ func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 	}
 }
 
+// SetSelectNodeCallback sets a callback invoked when the selected node changes.
+func (ip *InspectPanel) SetSelectNodeCallback(cb func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
+	ip.onSelectNode = cb
+}
+
 // SetElement sets the element to inspect (called from renderer hit test)
 func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
 	// Skip redundant updates when hovering the same element
@@ -257,6 +275,9 @@ func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.L
 	ip.selectedNode = node
 	ip.selectedLayout = layout
 	ip.updateDetails()
+	if ip.onSelectNode != nil {
+		ip.onSelectNode(node, layout)
+	}
 }
 
 func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
@@ -264,6 +285,9 @@ func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
 	// Note: selectedLayout might be stale if we just clicked tree node
 	// In a real implementation we'd ask renderer for layout box of this node
 	ip.updateDetails()
+	if ip.onSelectNode != nil {
+		ip.onSelectNode(node, ip.selectedLayout)
+	}
 }
 
 func (ip *InspectPanel) updateDetails() {
@@ -375,36 +399,13 @@ func (ip *InspectPanel) updateStylesTab() {
 		return
 	}
 
-	style := node.ComputedStyle
-
-	// Helper to add style row
-	addStyleRow := func(label string, value string, onUpdate func(string)) {
-		entry := widget.NewEntry()
-		entry.SetText(value)
-		entry.OnSubmitted = func(s string) {
-			onUpdate(s)
-			ip.refreshRenderer()
-		}
-
-		row := container.NewBorder(nil, nil, widget.NewLabel(label), nil, entry)
-		ip.stylesContainer.Add(row)
-	}
-
-	ip.stylesContainer.Add(widget.NewLabelWithStyle("Computed Styles", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
-
-	addStyleRow("Display", style.Display, func(s string) { style.Display = s })
-	addStyleRow("Font Size", fmt.Sprintf("%.1fpx", style.FontSize), func(s string) {
-		if f, err := strconv.ParseFloat(strings.TrimSuffix(s, "px"), 32); err == nil {
-			style.FontSize = float32(f)
-		}
-	})
-	addStyleRow("Width", style.Width, func(s string) { style.Width = s })
-	addStyleRow("Height", style.Height, func(s string) { style.Height = s })
-	addStyleRow("Color", fmt.Sprintf("%v", style.Color), func(s string) {
-		// Read-only for now
-	})
-
+	ip.stylesContainer.Add(widget.NewLabelWithStyle("Inline Styles", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
+	ip.stylesContainer.Add(ip.inlineStyleEditor.CanvasObject())
 	ip.stylesContainer.Refresh()
+
+	// Update the inline style editor and computed style viewer
+	ip.inlineStyleEditor.SetNode(node)
+	ip.computedStyleView.SetNode(node)
 }
 
 func (ip *InspectPanel) updateLayoutTab() {

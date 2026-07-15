@@ -28,15 +28,15 @@ func TestTabSetRawSourceEmpty(t *testing.T) {
 	assert.Equal(t, "", tab.GetRawSource(), "overwriting with empty clears the source")
 }
 
-func TestBrowserSourceButtonCreated(t *testing.T) {
+func TestBrowserDevToolsButtonSourceDialog(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
 	w := app.NewWindow("test")
 	browser := newBrowserInternal(app, w)
 
-	assert.NotNil(t, browser.sourceButton)
-	assert.Equal(t, "Source", browser.sourceButton.Text)
+	assert.NotNil(t, browser.devToolsButton)
+	assert.Equal(t, "DevTools", browser.devToolsButton.Text)
 }
 
 func TestBrowserShowSourceDialogWithEmptySource(t *testing.T) {
@@ -50,8 +50,9 @@ func TestBrowserShowSourceDialogWithEmptySource(t *testing.T) {
 	assert.NotNil(t, tab)
 	assert.Equal(t, "", tab.GetRawSource())
 
-	// showSourceDialog should handle empty source gracefully (no panic)
+	// showSourceDialog should open the dock without panic
 	browser.showSourceDialog()
+	assert.True(t, browser.devToolsVisible)
 }
 
 func TestBrowserShowSourceDialogWithContent(t *testing.T) {
@@ -68,8 +69,9 @@ func TestBrowserShowSourceDialogWithContent(t *testing.T) {
 	tab.SetRawSource(html)
 	assert.Equal(t, html, tab.GetRawSource())
 
-	// showSourceDialog should show the content without panic
+	// showSourceDialog should open the dock without panic
 	browser.showSourceDialog()
+	assert.True(t, browser.devToolsVisible)
 }
 
 func TestTabSourceSurvivesTabSwitch(t *testing.T) {
@@ -89,16 +91,22 @@ func TestTabSourceSurvivesTabSwitch(t *testing.T) {
 	assert.Equal(t, "<html>tab2</html>", tab2.GetRawSource())
 }
 
-func TestBrowserSourceButtonInNavBar(t *testing.T) {
+func TestBrowserDevToolsButtonToggle(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
 	w := app.NewWindow("test")
 	browser := newBrowserInternal(app, w)
 
-	assert.NotNil(t, browser.sourceButton)
-	assert.Equal(t, "Source", browser.sourceButton.Text)
+	assert.NotNil(t, browser.devToolsButton)
+	assert.Equal(t, "DevTools", browser.devToolsButton.Text)
+	assert.False(t, browser.devToolsVisible)
 
-	// Simulate clicking the button (ensures no crash)
-	browser.sourceButton.OnTapped()
+	// Click to open
+	browser.devToolsButton.OnTapped()
+	assert.True(t, browser.devToolsVisible)
+
+	// Click to close
+	browser.devToolsButton.OnTapped()
+	assert.False(t, browser.devToolsVisible)
 }

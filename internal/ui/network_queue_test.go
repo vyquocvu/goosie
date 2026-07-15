@@ -11,15 +11,15 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine/session"
 )
 
-func TestBrowserNetQueueButtonCreated(t *testing.T) {
+func TestBrowserDevToolsButtonNetworkDialog(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
 	w := app.NewWindow("test")
 	browser := newBrowserInternal(app, w)
 
-	assert.NotNil(t, browser.netQueueButton)
-	assert.Equal(t, "Queue", browser.netQueueButton.Text)
+	assert.NotNil(t, browser.devToolsButton)
+	assert.Equal(t, "DevTools", browser.devToolsButton.Text)
 }
 
 func TestBrowserShowNetworkQueueNoSession(t *testing.T) {
@@ -30,6 +30,7 @@ func TestBrowserShowNetworkQueueNoSession(t *testing.T) {
 	browser := newBrowserInternal(app, w)
 
 	browser.showNetworkQueueDialog()
+	assert.True(t, browser.devToolsVisible)
 }
 
 func TestBrowserShowNetworkQueueEmpty(t *testing.T) {
@@ -42,6 +43,7 @@ func TestBrowserShowNetworkQueueEmpty(t *testing.T) {
 	sess := session.New()
 	browser.deps.NavSession = sess
 	browser.showNetworkQueueDialog()
+	assert.True(t, browser.devToolsVisible)
 }
 
 func TestBrowserShowNetworkQueueWithLoads(t *testing.T) {
@@ -57,19 +59,25 @@ func TestBrowserShowNetworkQueueWithLoads(t *testing.T) {
 	ctx := navigation.WithPriority(context.Background(), navigation.PriorityDocument)
 	_, _ = sess.Navigate(ctx, "https://example.test/page")
 	browser.showNetworkQueueDialog()
+	assert.True(t, browser.devToolsVisible)
 }
 
-func TestBrowserNetQueueButtonInNavBar(t *testing.T) {
+func TestBrowserDevToolsToggleInNavBar(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
 	w := app.NewWindow("test")
 	browser := newBrowserInternal(app, w)
 
-	assert.NotNil(t, browser.netQueueButton)
-	assert.Equal(t, "Queue", browser.netQueueButton.Text)
+	assert.NotNil(t, browser.devToolsButton)
+	assert.Equal(t, "DevTools", browser.devToolsButton.Text)
+	assert.False(t, browser.devToolsVisible)
 
-	browser.netQueueButton.OnTapped()
+	browser.devToolsButton.OnTapped()
+	assert.True(t, browser.devToolsVisible)
+
+	browser.devToolsButton.OnTapped()
+	assert.False(t, browser.devToolsVisible)
 }
 
 func TestSessionPendingLoadsAfterNavigate(t *testing.T) {

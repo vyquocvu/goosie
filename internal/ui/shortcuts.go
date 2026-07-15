@@ -20,3 +20,6 @@ func (r *ShortcutRegistry) Dispatch(name string) bool {
 	command()
 	return true
 }
+
+// devToolsShortcutName is the shortcut name for toggling dev tools.
+const devToolsShortcutName = "toggle-dev-tools"

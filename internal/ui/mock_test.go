@@ -1,0 +1,44 @@
+package ui
+
+import (
+	"context"
+
+	"fyne.io/fyne/v2"
+	goosienet "github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/renderer"
+)
+
+// MockHTMLRendererComp implements HTMLRenderer with configurable summary.
+type MockHTMLRendererComp struct {
+	summary             map[string]int
+	dirtyOverlayEnabled bool
+}
+
+func (m *MockHTMLRendererComp) RenderHTML(ctx context.Context, s string) (fyne.CanvasObject, error) {
+	return nil, nil
+}
+func (m *MockHTMLRendererComp) UpdateViewport() fyne.CanvasObject               { return nil }
+func (m *MockHTMLRendererComp) SetCurrentURL(url string)                        {}
+func (m *MockHTMLRendererComp) ResolveURL(url string) string                    { return url }
+func (m *MockHTMLRendererComp) SetWindow(w fyne.Window)                         {}
+func (m *MockHTMLRendererComp) SetNavigationCallback(callback func(url string)) {}
+func (m *MockHTMLRendererComp) HitTest(x, y float32) (*renderer.RenderNode, *renderer.LayoutBox) {
+	return nil, nil
+}
+func (m *MockHTMLRendererComp) SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
+}
+func (m *MockHTMLRendererComp) SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position)) {
+}
+func (m *MockHTMLRendererComp) GetRoot() *renderer.RenderNode                   { return nil }
+func (m *MockHTMLRendererComp) Refresh()                                        {}
+func (m *MockHTMLRendererComp) SetRefreshCallback(callback func())              {}
+func (m *MockHTMLRendererComp) SetSubmitting(submitting bool)                   {}
+func (m *MockHTMLRendererComp) SetCSP(p *goosienet.CSPPolicy)                   {}
+func (m *MockHTMLRendererComp) GetDisplayListSummary() map[string]int           { return m.summary }
+func (m *MockHTMLRendererComp) GetDisplayListCommands() []renderer.PaintCommand { return nil }
+func (m *MockHTMLRendererComp) SetDirtyOverlayEnabled(enabled bool) {
+	m.dirtyOverlayEnabled = enabled
+}
+func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool         { return m.dirtyOverlayEnabled }
+func (m *MockHTMLRendererComp) GetDOMNodeCounts() (int, int, int) { return 0, 0, 0 }
+func (m *MockHTMLRendererComp) GetLayoutNodeCount() int           { return 0 }
