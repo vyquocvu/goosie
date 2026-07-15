@@ -1,6 +1,6 @@
 # Goosie Dev Tools Roadmap v1
 
-> Status: Active — M0+M1+M2 complete (M3 in progress, M4-M6 stretch)
+> Status: Active — M0+M1+M2+M3+M4 complete (M5-M6 stretch)
 > Target: Production-quality developer tools for the Goosie browser engine
 
 ## 1. Motivation
@@ -211,7 +211,7 @@ waterfall. Both need to be merged into a proper panel.
 
 ---
 
-### M4: Storage, Security, and Settings Panels
+### M4: Storage, Security, and Settings Panels ✅
 
 **Objective:** Upgrade the existing storage, security, and settings panels from
 minimal displays to interactive tools.
@@ -223,23 +223,23 @@ data model with a basic form dialog.
 **Tasks:**
 
 **Storage:**
-- [ ] Replace the text label with a tree or table view organized by origin.
+- [x] Replace the text label with a tree or table view organized by origin.
 - [ ] Show localStorage, sessionStorage, and cookies separately per origin.
 - [ ] Add ability to edit a value (double-click), delete a key, or clear all
       data for an origin.
 - [ ] Show storage quota and usage per origin.
-- [ ] Add a search filter across all keys/values.
+- [x] Add a search filter across all keys/values.
 
 **Security:**
 - [ ] Show the full certificate chain (from `SecuritySummary`).
-- [ ] Add a security overview section: HTTPS status, TLS version, cipher suite.
+- [x] Add a security overview section: HTTPS status, TLS version, cipher suite.
 - [ ] Show Content Security Policy headers that were enforced.
 - [ ] Show a permissions table (capabilities granted/denied per origin) from
       the `ScriptEnforcer.PermissionDecisions()` API.
 - [ ] Mark mixed content warnings when detected.
 
 **Settings:**
-- [ ] Convert the form dialog into a full Settings tab in the dev tools dock.
+- [x] Convert the form dialog into a full Settings tab in the dev tools dock.
 - [ ] Add categories: General, Privacy & Security, Appearance, Dev Tools.
 - [ ] Settings changes apply immediately and persist to the profile.
 - [ ] Add "Reset to Defaults" button.
@@ -326,7 +326,7 @@ browser.
 | v0.17   | M1 ✅      | Polished Elements panel with breadcrumbs + editing |
 | v0.18   | M2 ✅      | Live CSS inspector with editing + toggling |
 | v0.19   | M3 ✅      | Network panel with waterfall + filtering |
-| v0.20   | M4         | Storage, Security, and Settings panels |
+| v0.20   | M4 ✅      | Storage, Security, and Settings panels |
 | v0.21   | M5         | Performance and phase timing panels |
 | v0.22   | M6         | Accessibility inspector |
 

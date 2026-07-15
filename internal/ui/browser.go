@@ -211,12 +211,23 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 		if tab == nil {
 			return nil
 		}
+		currentURL := tab.state.GetCurrentURL()
+		secSummary := ""
+		if strings.HasPrefix(currentURL, "https://") {
+			secSummary = "TLS connection"
+		} else if strings.HasPrefix(currentURL, "http://") {
+			secSummary = "No encryption"
+		}
 		ctx := &devtools.TabContext{
-			Memory:      browser.deps.Memory,
-			Renderer:    tab.htmlRenderer,
-			JSRuntime:   tab.jsRuntime,
-			RawSource:   tab.GetRawSource(),
-			RequestLog:  &requestLogAdapter{log: browser.deps.Network.Log()},
+			Memory:          browser.deps.Memory,
+			Renderer:        tab.htmlRenderer,
+			JSRuntime:       tab.jsRuntime,
+			RawSource:       tab.GetRawSource(),
+			RequestLog:      &requestLogAdapter{log: browser.deps.Network.Log()},
+			Storage:         browser.deps.Storage,
+			CurrentURL:      currentURL,
+			SecuritySummary: secSummary,
+			Settings:        browser.settings,
 		}
 		return ctx
 	})

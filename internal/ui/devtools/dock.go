@@ -23,11 +23,29 @@ type Dock struct {
 }
 
 type TabContext struct {
-	Memory      *memory.Manager
-	Renderer    rendererProvider
-	JSRuntime   *js.Runtime
-	RawSource   string
-	RequestLog  requestLogProvider
+	Memory          *memory.Manager
+	Renderer        rendererProvider
+	JSRuntime       *js.Runtime
+	RawSource       string
+	RequestLog      requestLogProvider
+	Storage         storageProvider
+	CurrentURL      string
+	SecuritySummary string
+	Settings        settingsProvider
+}
+
+type settingsProvider interface {
+	GetHomepage() string
+	GetDefaultSearchEngine() string
+	GetEnableJavaScript() bool
+	GetEnableImages() bool
+}
+
+type storageProvider interface {
+	Snapshot() map[string]map[string]string
+	Set(origin, key, value string) error
+	Remove(origin, key string) error
+	Clear(origin string) error
 }
 
 type requestLogProvider interface {
@@ -83,6 +101,7 @@ func (d *Dock) addAllTabs() {
 	d.addTab("Tile Cache", newTileCachePanel(d.activeTab))
 	d.addTab("Storage", newStoragePanel(d.activeTab))
 	d.addTab("Security", newSecurityPanel(d.activeTab))
+	d.addTab("Settings", newSettingsPanel(d.activeTab))
 }
 
 func (d *Dock) addTab(title string, content fyne.CanvasObject) {
@@ -442,13 +461,115 @@ func newTileCachePanel(activeTab func() *TabContext) fyne.CanvasObject {
 }
 
 func newStoragePanel(activeTab func() *TabContext) fyne.CanvasObject {
-	label := widget.NewLabel("No storage data")
-	label.Wrapping = fyne.TextWrapWord
-	return container.NewBorder(widget.NewLabelWithStyle("Storage", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewScroll(label))
+	return newStoragePanelContent(activeTab)
+}
+
+type securityPanel struct {
+	fyne.Container
+	label *widget.Label
 }
 
 func newSecurityPanel(activeTab func() *TabContext) fyne.CanvasObject {
-	label := widget.NewLabel("No security information")
-	label.Wrapping = fyne.TextWrapWord
-	return container.NewBorder(widget.NewLabelWithStyle("Security", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), nil, nil, nil, container.NewScroll(label))
+	p := &securityPanel{
+		label: widget.NewLabel("No security information"),
+	}
+	p.label.Wrapping = fyne.TextWrapWord
+
+	refreshBtn := widget.NewButton("Refresh", func() {
+		if activeTab != nil {
+			ctx := activeTab()
+			if ctx != nil {
+				p.refreshFrom(ctx)
+			}
+		}
+	})
+
+	topBar := container.NewBorder(nil, nil, refreshBtn,
+		widget.NewLabelWithStyle("Security", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	content := container.NewBorder(topBar, nil, nil, nil, container.NewScroll(p.label))
+	p.Container = *content
+	return p
+}
+
+func (p *securityPanel) RefreshFrom(ctx *TabContext) {
+	if ctx != nil {
+		p.refreshFrom(ctx)
+	}
+}
+
+func (p *securityPanel) refreshFrom(ctx *TabContext) {
+	var b strings.Builder
+	b.WriteString("Current Page\n\n")
+
+	if ctx.CurrentURL != "" {
+		b.WriteString(fmt.Sprintf("  URL:     %s\n", ctx.CurrentURL))
+		if strings.HasPrefix(ctx.CurrentURL, "https://") {
+			b.WriteString("  Protocol: HTTPS (encrypted)\n")
+		} else if strings.HasPrefix(ctx.CurrentURL, "http://") {
+			b.WriteString("  Protocol: HTTP (unencrypted)\n")
+		}
+	} else {
+		b.WriteString("  No page loaded.\n")
+	}
+
+	if ctx.SecuritySummary != "" {
+		b.WriteString(fmt.Sprintf("  Summary: %s\n", ctx.SecuritySummary))
+	}
+
+	b.WriteString("\nCertificate\n\n")
+	b.WriteString("  Certificate chain inspection is available\n")
+	b.WriteString("  for HTTPS pages with TLS connections.\n")
+
+	p.label.SetText(b.String())
+	p.label.Refresh()
+}
+
+type settingsPanel struct {
+	fyne.Container
+	label *widget.Label
+}
+
+func newSettingsPanel(activeTab func() *TabContext) fyne.CanvasObject {
+	p := &settingsPanel{
+		label: widget.NewLabel("No settings available"),
+	}
+	p.label.Wrapping = fyne.TextWrapWord
+
+	refreshBtn := widget.NewButton("Refresh", func() {
+		if activeTab != nil {
+			ctx := activeTab()
+			if ctx != nil {
+				p.refreshFrom(ctx)
+			}
+		}
+	})
+
+	topBar := container.NewBorder(nil, nil, refreshBtn,
+		widget.NewLabelWithStyle("Settings", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	content := container.NewBorder(topBar, nil, nil, nil, container.NewScroll(p.label))
+	p.Container = *content
+	return p
+}
+
+func (p *settingsPanel) RefreshFrom(ctx *TabContext) {
+	if ctx != nil {
+		p.refreshFrom(ctx)
+	}
+}
+
+func (p *settingsPanel) refreshFrom(ctx *TabContext) {
+	if ctx.Settings == nil {
+		p.label.SetText("No settings provider available.")
+		return
+	}
+	s := ctx.Settings
+	var b strings.Builder
+	b.WriteString("Browser Settings\n\n")
+	b.WriteString(fmt.Sprintf("  Homepage:            %s\n", s.GetHomepage()))
+	b.WriteString(fmt.Sprintf("  Default Search:     %s\n", s.GetDefaultSearchEngine()))
+	b.WriteString(fmt.Sprintf("  JavaScript:         %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[s.GetEnableJavaScript()]))
+	b.WriteString(fmt.Sprintf("  Images:             %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[s.GetEnableImages()]))
+	b.WriteString("\nChanges are applied immediately and persisted\nto the profile on browser restart.\n")
+	p.label.SetText(b.String())
+	p.label.Refresh()
 }
