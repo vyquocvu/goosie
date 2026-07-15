@@ -78,6 +78,9 @@ type Browser struct {
 	forwardButton       *widget.Button
 	refreshButton       *widget.Button
 	bookmarkButton      *widget.Button
+	bookmarksListButton *widget.Button
+	historyButton       *widget.Button
+	downloadsButton     *widget.Button
 	settingsButton      *widget.Button
 	consoleButton       *widget.Button
 	loadingBar          *widget.ProgressBarInfinite
@@ -94,6 +97,7 @@ type Browser struct {
 	devToolsDock    *devtools.Dock
 	devToolsVisible bool
 	devToolsSplit   *container.Split
+	dockContainer   *fyne.Container
 	breadcrumbBar   *BreadcrumbBar
 	breadcrumbBox   *fyne.Container
 	screenshotButton    *widget.Button
@@ -256,6 +260,24 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 	browser.tabs.OnSelected = func(tab *container.TabItem) {
 		browser.updateNavigationButtons()
 		browser.updateConsoleFromActiveTab()
+		if browser.devToolsVisible {
+			if activeTab := browser.ActiveTab(); activeTab != nil {
+				browser.inspectPanel.SetRenderer(activeTab.htmlRenderer)
+			}
+		}
+	}
+	browser.tabs.OnClosed = func(tabItem *container.TabItem) {
+		for i, tab := range browser.tabItems {
+			if tab.content == tabItem.Content {
+				browser.tabItems = append(browser.tabItems[:i], browser.tabItems[i+1:]...)
+				break
+			}
+		}
+		if len(browser.tabItems) == 0 {
+			newTab := browser.NewTab()
+			browser.tabs.Append(newTab.AsTabItem())
+		}
+		browser.updateNavigationButtons()
 	}
 	browser.tabs.SetTabLocation(container.TabLocationTop)
 
@@ -330,10 +352,19 @@ func (b *Browser) toggleDevTools() {
 	if b.devToolsSplit != nil {
 		if b.devToolsVisible {
 			b.devToolsSplit.Offset = 0.65
+			if b.dockContainer != nil {
+				b.dockContainer.Show()
+			}
 			b.devToolsDock.Show()
 			b.devToolsDock.Refresh()
+			if tab := b.ActiveTab(); tab != nil {
+				b.inspectPanel.SetRenderer(tab.htmlRenderer)
+			}
 		} else {
 			b.devToolsSplit.Offset = 1.0
+			if b.dockContainer != nil {
+				b.dockContainer.Hide()
+			}
 			b.devToolsDock.Hide()
 		}
 	}
@@ -352,6 +383,9 @@ func (b *Browser) restoreDevToolsState() {
 	s := b.deps.SettingsStore.Get()
 	if s.DevToolsOpen && b.devToolsSplit != nil {
 		b.devToolsVisible = true
+		if b.dockContainer != nil {
+			b.dockContainer.Show()
+		}
 		b.devToolsDock.Show()
 		b.devToolsDock.Refresh()
 		if s.DevToolsSplitOffset > 0 && s.DevToolsSplitOffset < 1 {
@@ -423,6 +457,11 @@ func (b *Browser) devToolsInspectAction(node *renderer.RenderNode, layout *rende
 	}
 	b.inspectPanel.SetRenderer(tab.htmlRenderer)
 	b.inspectPanel.SetElement(node, layout)
+}
+
+// InspectElement programmatically inspects the given node and layout in the browser's DevTools.
+func (b *Browser) InspectElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	b.devToolsInspectAction(node, layout)
 }
 
 // devToolsViewSourceAction is the "View Source" callback. It shows a
@@ -637,6 +676,9 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	fyne.Do(func() {
 		t.contentScroll.Content = canvasObject
 		t.contentScroll.Refresh()
+		if t.browser.devToolsVisible {
+			t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
+		}
 	})
 
 	return nil
@@ -664,16 +706,16 @@ func (b *Browser) Show() {
 	// Create navigation bar
 	navBar := container.NewBorder(nil, nil,
 		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.screenshotButton, b.devToolsButton, b.dirtyOverlayButton, b.consoleButton, b.inspectButton, b.settingsButton),
+		container.NewHBox(b.bookmarkButton, b.bookmarksListButton, b.historyButton, b.downloadsButton, b.screenshotButton, b.devToolsButton, b.dirtyOverlayButton, b.consoleButton, b.inspectButton, b.settingsButton),
 		b.urlEntry,
 	)
 
 	// Dev tools dock container (hidden initially)
-	dockContainer := container.NewMax(b.devToolsDock.CanvasObject())
-	dockContainer.Hide()
+	b.dockContainer = container.NewMax(b.devToolsDock.CanvasObject())
+	b.dockContainer.Hide()
 
 	// Vertical split: page content on top, dev tools dock on bottom
-	b.devToolsSplit = container.NewVSplit(b.tabs, dockContainer)
+	b.devToolsSplit = container.NewVSplit(b.tabs, b.dockContainer)
 	b.devToolsSplit.Offset = 1.0
 	b.restoreDevToolsState()
 
@@ -760,6 +802,21 @@ func (b *Browser) createNavigationControls() {
 		b.toggleBookmark()
 	})
 	b.bookmarkButton.Disable()
+
+	// Bookmarks List button
+	b.bookmarksListButton = widget.NewButton("🔖", func() {
+		b.showBookmarksDialog()
+	})
+
+	// History button
+	b.historyButton = widget.NewButton("⏳", func() {
+		b.showHistoryDialog()
+	})
+
+	// Downloads button
+	b.downloadsButton = widget.NewButton("📥", func() {
+		b.showDownloadsDialog()
+	})
 
 	// Console button
 	b.consoleButton = widget.NewButton("⊞", func() {
@@ -1018,6 +1075,11 @@ func (b *Browser) GetApp() fyne.App {
 	return b.app
 }
 
+// GetWindow returns the browser window
+func (b *Browser) GetWindow() fyne.Window {
+	return b.window
+}
+
 // GetSettings returns the browser settings
 func (b *Browser) GetSettings() *Settings {
 	return b.settings
@@ -1177,3 +1239,121 @@ func (m *metricsAdapter) Snapshot() metrics.Metrics {
 		},
 	}
 }
+
+func (b *Browser) showBookmarksDialog() {
+	if b.deps.Bookmarks == nil {
+		dialog.ShowInformation("Bookmarks", "Bookmarks store is not available.", b.window)
+		return
+	}
+	bookmarks := b.deps.Bookmarks.List()
+	if len(bookmarks) == 0 {
+		dialog.ShowInformation("Bookmarks", "No bookmarks saved yet.", b.window)
+		return
+	}
+
+	var list *widget.List
+	list = widget.NewList(
+		func() int { return len(bookmarks) },
+		func() fyne.CanvasObject {
+			titleLabel := widget.NewLabel("")
+			deleteBtn := widget.NewButton("Delete", nil)
+			return container.NewBorder(nil, nil, nil, deleteBtn, titleLabel)
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			if id < 0 || id >= len(bookmarks) {
+				return
+			}
+			bm := bookmarks[id]
+			border := obj.(*fyne.Container)
+			label := border.Objects[0].(*widget.Label)
+			label.SetText(fmt.Sprintf("%s (%s)", bm.Title, bm.URL))
+
+			deleteBtn := border.Objects[1].(*widget.Button)
+			deleteBtn.OnTapped = func() {
+				_ = b.deps.Bookmarks.Remove(bm.URL)
+				b.state.RemoveBookmark(bm.URL)
+				b.updateNavigationButtons()
+				bookmarks = b.deps.Bookmarks.List()
+				list.Refresh()
+			}
+		},
+	)
+
+	list.OnSelected = func(id widget.ListItemID) {
+		if id < 0 || id >= len(bookmarks) {
+			return
+		}
+		bm := bookmarks[id]
+		if b.onNavigate != nil {
+			b.onNavigate(bm.URL)
+		}
+	}
+
+	d := dialog.NewCustom("Bookmarks", "Close", container.NewMax(list), b.window)
+	d.Resize(fyne.NewSize(500, 400))
+	d.Show()
+}
+
+func (b *Browser) showHistoryDialog() {
+	if b.deps.History == nil {
+		dialog.ShowInformation("History", "History store is not available.", b.window)
+		return
+	}
+	visits := b.deps.History.Visits()
+	if len(visits) == 0 {
+		dialog.ShowInformation("History", "No history visits recorded yet.", b.window)
+		return
+	}
+
+	var list *widget.List
+	list = widget.NewList(
+		func() int { return len(visits) },
+		func() fyne.CanvasObject {
+			titleLabel := widget.NewLabel("")
+			return container.NewMax(titleLabel)
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			if id < 0 || id >= len(visits) {
+				return
+			}
+			visit := visits[id]
+			label := obj.(*fyne.Container).Objects[0].(*widget.Label)
+			label.SetText(fmt.Sprintf("[%s] %s (%s)", visit.VisitedAt.Format("15:04:05"), visit.Title, visit.URL))
+		},
+	)
+
+	list.OnSelected = func(id widget.ListItemID) {
+		if id < 0 || id >= len(visits) {
+			return
+		}
+		visit := visits[id]
+		if b.onNavigate != nil {
+			b.onNavigate(visit.URL)
+		}
+	}
+
+	clearBtn := widget.NewButton("Clear History", func() {
+		_ = b.deps.History.Clear()
+		visits = b.deps.History.Visits()
+		list.Refresh()
+	})
+
+	content := container.NewBorder(nil, clearBtn, nil, nil, list)
+	d := dialog.NewCustom("History", "Close", content, b.window)
+	d.Resize(fyne.NewSize(500, 400))
+	d.Show()
+}
+
+func (b *Browser) showDownloadsDialog() {
+	if b.deps.Network == nil {
+		dialog.ShowInformation("Downloads", "Network service is not available.", b.window)
+		return
+	}
+	panel := NewDownloadsPanel()
+	panel.SetRecords(b.deps.Network.Downloads())
+
+	d := dialog.NewCustom("Downloads", "Close", panel.CanvasObject(), b.window)
+	d.Resize(fyne.NewSize(500, 400))
+	d.Show()
+}
+

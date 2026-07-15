@@ -134,15 +134,15 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		})
 	}
 
-	// Find body element
-	bodyNode := findBodyNode(doc)
-	if bodyNode == nil {
-		// No body found, use the entire document
-		bodyNode = doc
+	// Find html element
+	htmlNode := findHTMLNode(doc)
+	if htmlNode == nil {
+		// No html found, use the entire document
+		htmlNode = doc
 	}
 
 	// Build render tree
-	renderTree := BuildRenderTree(bodyNode)
+	renderTree := BuildRenderTree(htmlNode)
 
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseParse)
@@ -363,6 +363,25 @@ func findBodyNode(node *html.Node) *html.Node {
 	return nil
 }
 
+// findHTMLNode finds the html element in an HTML document
+func findHTMLNode(node *html.Node) *html.Node {
+	if node == nil {
+		return nil
+	}
+
+	if node.Type == html.ElementNode && node.Data == "html" {
+		return node
+	}
+
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if found := findHTMLNode(child); found != nil {
+			return found
+		}
+	}
+
+	return nil
+}
+
 // SetSize updates the renderer dimensions
 func (r *Renderer) SetSize(width, height float32) {
 	r.treeMu.Lock()
@@ -421,6 +440,22 @@ func (r *Renderer) SetContextMenuCallback(callback func(node *RenderNode, layout
 		return
 	}
 	r.canvasRenderer.SetContextMenuCallback(callback)
+}
+
+// SetHighlightNode sets the node to highlight in the viewport
+func (r *Renderer) SetHighlightNode(node *RenderNode) {
+	r.canvasRenderer.SetHighlightNode(node)
+	r.Refresh()
+}
+
+// GetLayoutBox returns the computed layout box associated with the given node
+func (r *Renderer) GetLayoutBox(node *RenderNode) *LayoutBox {
+	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
+	if node == nil || r.currentLayoutTree == nil {
+		return nil
+	}
+	return findLayoutBoxForNode(r.currentLayoutTree, node.ID)
 }
 
 // GetRoot returns the current render tree root
@@ -953,3 +988,19 @@ func (r *Renderer) GetLayoutNodeCount() int {
 	defer r.treeMu.RUnlock()
 	return countLayoutBoxes(r.currentLayoutTree)
 }
+
+// GetStyleSheet returns the current stylesheet.
+func (r *Renderer) GetStyleSheet() *css.StyleSheet {
+	r.stylesheetMu.RLock()
+	defer r.stylesheetMu.RUnlock()
+	return r.stylesheet
+}
+
+// GetMatchedRules returns all CSS rules matching the given node, sorted by specificity.
+func (r *Renderer) GetMatchedRules(node *RenderNode) []css.Rule {
+	r.stylesheetMu.RLock()
+	defer r.stylesheetMu.RUnlock()
+	sm := NewStyleManager(r.stylesheet)
+	return sm.MatchRules(node)
+}
+

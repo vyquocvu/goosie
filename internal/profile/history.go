@@ -121,3 +121,25 @@ func (s *HistoryStore) persist() error {
 	}
 	return err
 }
+
+func (s *HistoryStore) Visits() []Visit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_ = s.reloadLocked()
+
+	visits := make([]Visit, len(s.doc.Visits))
+	copy(visits, s.doc.Visits)
+	return visits
+}
+
+func (s *HistoryStore) Clear() error {
+	return s.profile.withFileLock("history.json", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		s.doc.Visits = []Visit{}
+		return s.persist()
+	})
+}
+

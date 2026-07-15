@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fyne.io/fyne/v2"
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
@@ -54,4 +55,14 @@ type HTMLRenderer interface {
 	// GetLayoutNodeCount returns the number of layout boxes in the
 	// current layout tree.
 	GetLayoutNodeCount() int
+
+	// GetStyleSheet returns the current stylesheet.
+	GetStyleSheet() *css.StyleSheet
+
+	// GetMatchedRules returns all CSS rules matching the given node, sorted by specificity.
+	GetMatchedRules(node *renderer.RenderNode) []css.Rule
+	// SetHighlightNode sets the node to highlight in the viewport.
+	SetHighlightNode(node *renderer.RenderNode)
+	// GetLayoutBox returns the computed layout box associated with the given node.
+	GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox
 }

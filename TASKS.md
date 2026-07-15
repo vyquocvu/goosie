@@ -128,13 +128,23 @@ Branch: main
 **Roadmap:** Long-Term Vision, Performance & Optimization
 **Status:** deferred
 
+## DevTools TDD Implementation Tasks
+
+### [P1] Elements DOM Tree Synchronization
+**What:** The Elements DOM tree is currently blank on startup or navigation because `SetRenderer` is not called. We need to auto-expand root and sync renderer on tab switch/page load.
+**Status:** done (2026-07-15)
+
+### [P2] DevTools Tabs TDD Implementation
+**What:** Implement fully responsive unit-test-backed layouts for Console, Sources, Network, Performance, Memory, Storage, Security, Settings, Display List, Script Queue, and Tile Cache.
+**Status:** open
+
 ## Summary
 
 | Priority | Count | Items |
 |----------|-------|-------|
-| P1 | 2 | CanvasRenderer panic, CSS race condition |
-| P2 | 7 | TLS config, logging, metrics, integration tests, CSS edge cases, release workflow, lazy loading |
-| P3 | 6 | E2E perf tests, popups, page caching, WebSocket, Web Workers, Service Workers, Canvas API |
+| P1 | 0 | (All P1 tasks completed) |
+| P2 | 1 | DevTools Tabs TDD Implementation |
+| P3 | 0 | (All P3 tasks completed) |
 | Deferred | 9 | Roadmap items beyond current scope |
 
-**Total open: 9 tasks**
+**Total open: 10 tasks (including 9 deferred)**

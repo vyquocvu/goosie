@@ -101,6 +101,9 @@ type Service struct {
 	// cspMu protects csp (read-only after FetchWithMeta sets it).
 	cspMu sync.RWMutex
 	csp   *CSPPolicy
+
+	downloadsMu sync.Mutex
+	downloads   []DownloadRecord
 }
 
 func NewService(options ServiceOptions) *Service {
@@ -547,3 +550,46 @@ func (s *Service) Close() error {
 func (s *Service) validateContentType(contentType string) error {
 	return ValidateContentType(contentType, s.expectedContentType)
 }
+
+func (s *Service) Downloads() []DownloadRecord {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
+	out := make([]DownloadRecord, len(s.downloads))
+	copy(out, s.downloads)
+	return out
+}
+
+func (s *Service) AddDownload(d DownloadRecord) {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
+	s.downloads = append(s.downloads, d)
+}
+
+func (s *Service) UpdateDownload(d DownloadRecord) {
+	s.downloadsMu.Lock()
+	defer s.downloadsMu.Unlock()
+	for i, record := range s.downloads {
+		if record.URL == d.URL && record.TargetPath == d.TargetPath && record.StartedAt.Equal(d.StartedAt) {
+			s.downloads[i] = d
+			break
+		}
+	}
+}
+
+func (s *Service) StartDownload(ctx context.Context, rawURL, targetPath string) (DownloadRecord, error) {
+	m := NewDownloadManager(s.client)
+	record := DownloadRecord{
+		URL:        rawURL,
+		TargetPath: targetPath,
+		Status:     DownloadRunning,
+		StartedAt:  time.Now(),
+	}
+	s.AddDownload(record)
+
+	go func() {
+		res, _ := m.DownloadWithContext(ctx, rawURL, targetPath)
+		s.UpdateDownload(res)
+	}()
+	return record, nil
+}
+

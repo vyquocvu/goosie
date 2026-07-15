@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/test"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
@@ -32,6 +33,7 @@ func main() {
 	urlFlag := flag.String("url", "", "URL to open on startup")
 	screenshotFlag := flag.String("screenshot", "", "File path to save a screenshot (only in headless mode)")
 	showVersion := flag.Bool("version", false, "Show version information")
+	privateFlag := flag.Bool("private", false, "Run in private browsing mode (incognito)")
 	flag.Parse()
 
 	if *showVersion {
@@ -39,7 +41,9 @@ func main() {
 		return
 	}
 
-	prof, err := profile.Open(profile.Options{})
+	prof, err := profile.Open(profile.Options{
+		Private: *privateFlag,
+	})
 	if err != nil {
 		log.Fatalf("failed to open profile: %v", err)
 	}
@@ -121,7 +125,7 @@ func main() {
 	// Set up navigation callback
 	browser.SetNavigationCallback(func(url string) {
 		load, ctx := navSession.Navigate(context.Background(), url)
-		loadPageAsync(browser, fetcher, parser, load, ctx, navSession, func() {
+		loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, func() {
 			select {
 			case pageLoaded <- true:
 			default:
@@ -135,14 +139,42 @@ func main() {
 
 		if *urlFlag != "" {
 			load, ctx := navSession.Navigate(context.Background(), *urlFlag)
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, func() {
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, func() {
 				pageLoaded <- true
 			})
 
 			<-pageLoaded
 
 			// Give Fyne's UI thread a brief moment to process the layout changes
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(1500 * time.Millisecond)
+
+			if *urlFlag == "https://example.com" {
+				activeTab := browser.ActiveTab()
+				if activeTab != nil && activeTab.GetRenderer() != nil {
+					root := activeTab.GetRenderer().GetRoot()
+					var findH1 func(*renderer.RenderNode) *renderer.RenderNode
+					findH1 = func(n *renderer.RenderNode) *renderer.RenderNode {
+						if n == nil {
+							return nil
+						}
+						if n.TagName == "h1" {
+							return n
+						}
+						for _, child := range n.Children {
+							if found := findH1(child); found != nil {
+								return found
+							}
+						}
+						return nil
+					}
+					h1Node := findH1(root)
+					if h1Node != nil {
+						h1Box := activeTab.GetRenderer().GetLayoutBox(h1Node)
+						browser.InspectElement(h1Node, h1Box)
+					}
+				}
+				time.Sleep(1000 * time.Millisecond)
+			}
 
 			if *screenshotFlag != "" {
 				err := ui.TakeScreenshotToFile(w, *screenshotFlag)
@@ -158,7 +190,7 @@ func main() {
 		// Non-headless mode
 		if *urlFlag != "" {
 			load, ctx := navSession.Navigate(context.Background(), *urlFlag)
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, nil)
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
 		}
 
 		// Show browser window (this blocks until window is closed)
@@ -173,7 +205,7 @@ type pageLoadResult struct {
 }
 
 // loadPageAsync fetches and displays a web page asynchronously.
-func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session, onComplete func()) {
+func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session, networkService *net.Service, onComplete func()) {
 	log.Printf("Navigation %s started: %s", load.ID, load.URL)
 
 	// Update browser state on main thread
@@ -247,6 +279,88 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 			return
 		}
 
+		// Check for downloads (non-HTML content types or attachment disposition)
+		cd := meta.Header.Get("Content-Disposition")
+		isAttachment := strings.HasPrefix(strings.ToLower(strings.TrimSpace(cd)), "attachment")
+
+		isDownload := isAttachment
+		if !isDownload && fetchErr == nil {
+			contentType := strings.ToLower(meta.ContentType)
+			isWebPage := false
+			for _, t := range []string{"text/html", "application/xhtml+xml", "text/plain", "application/json"} {
+				if strings.Contains(contentType, t) {
+					isWebPage = true
+					break
+				}
+			}
+			isImage := strings.HasPrefix(contentType, "image/")
+			if !isWebPage && !isImage && contentType != "" {
+				isDownload = true
+			}
+		}
+
+		if isDownload {
+			if stream != nil {
+				stream.Close()
+			}
+			filename := getFilenameFromURLAndCD(resolvedURL, cd)
+			fyne.Do(func() {
+				browser.HideLoading()
+				if activeTab := browser.ActiveTab(); activeTab != nil {
+					if r := activeTab.GetRenderer(); r != nil {
+						r.SetSubmitting(false)
+					}
+				}
+				d := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+					if err != nil || writer == nil {
+						return
+					}
+					targetPath := writer.URI().Path()
+					writer.Close()
+
+					go func() {
+						record := net.DownloadRecord{
+							URL:        resolvedURL,
+							TargetPath: targetPath,
+							Status:     net.DownloadRunning,
+							StartedAt:  time.Now(),
+						}
+						networkService.AddDownload(record)
+
+						if fyne.CurrentApp() != nil {
+							fyne.CurrentApp().SendNotification(&fyne.Notification{
+								Title:   "Goosie Download",
+								Content: "Started downloading " + filename,
+							})
+						}
+
+						m := net.NewDownloadManager(sess.HTTPClient())
+						res, downloadErr := m.DownloadWithContext(context.Background(), resolvedURL, targetPath)
+						networkService.UpdateDownload(res)
+
+						if downloadErr != nil {
+							if fyne.CurrentApp() != nil {
+								fyne.CurrentApp().SendNotification(&fyne.Notification{
+									Title:   "Goosie Download Failed",
+									Content: "Failed to download " + filename + ": " + downloadErr.Error(),
+								})
+							}
+						} else {
+							if fyne.CurrentApp() != nil {
+								fyne.CurrentApp().SendNotification(&fyne.Notification{
+									Title:   "Goosie Download Complete",
+									Content: "Successfully downloaded " + filename,
+								})
+							}
+						}
+					}()
+				}, browser.GetWindow())
+				d.SetFileName(filename)
+				d.Show()
+			})
+			return
+		}
+
 		var html string
 		if fetchErr != nil {
 			// Fallback to mock HTML for example.com if network is unavailable
@@ -291,7 +405,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 			}
 		}
 
-		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, resolvedURL, sess, parser)
+		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, resolvedURL, sess, networkService, parser)
 	}()
 }
 
@@ -323,7 +437,7 @@ func updateUIWithError(browser *ui.Browser, sess *session.Session, navID navigat
 }
 
 // updateUIWithContent updates the UI with HTML content.
-func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string, navSession *session.Session, parser *dom.Parser) {
+func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string, navSession *session.Session, networkService *net.Service, parser *dom.Parser) {
 	if !sess.IsActive(navID) {
 		return
 	}
@@ -402,7 +516,9 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 		jsRuntime.OnOpenWindow = func(url, name string) {
 			log.Printf("Popup (window.open): %s (name=%s)", url, name)
 			load, ctx := navSession.Navigate(context.Background(), url)
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, nil)
+			jsRuntime := tab.GetJSRuntime()
+			_ = jsRuntime // suppress unused warning if any, but wait, loadPageAsync is next
+			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
 		}
 
 		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
@@ -471,7 +587,7 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url string) {
 	s := session.New()
 	load, ctx := s.Navigate(context.Background(), url)
-	loadPageAsync(browser, fetcher, parser, load, ctx, s, nil)
+	loadPageAsync(browser, fetcher, parser, load, ctx, s, nil, nil)
 }
 
 // extractTitle parses the HTML and returns the content of the <title> tag.
@@ -590,3 +706,32 @@ func originFromURL(rawURL string) string {
 	}
 	return u.Scheme + "://"
 }
+
+// getFilenameFromURLAndCD extracts a default filename from the URL path or Content-Disposition.
+func getFilenameFromURLAndCD(urlStr, cd string) string {
+	// Parse Content-Disposition if present
+	if cd != "" {
+		parts := strings.Split(cd, ";")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(strings.ToLower(part), "filename=") {
+				filename := strings.Trim(part[9:], "\" ")
+				if filename != "" {
+					return filename
+				}
+			}
+		}
+	}
+
+	// Fallback to URL path base
+	u, err := urlpkg.Parse(urlStr)
+	if err == nil && u.Path != "" {
+		base := filepath.Base(u.Path)
+		if base != "." && base != "/" {
+			return base
+		}
+	}
+
+	return "download.bin"
+}
+

@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 	"github.com/stretchr/testify/assert"
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
@@ -18,6 +21,9 @@ import (
 type MockHTMLRenderer struct {
 	root          *renderer.RenderNode
 	refreshCalled bool
+	stylesheet    *css.StyleSheet
+	matchedRules  []css.Rule
+	highlightNode *renderer.RenderNode
 }
 
 func (m *MockHTMLRenderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
@@ -46,6 +52,16 @@ func (m *MockHTMLRenderer) SetDirtyOverlayEnabled(enabled bool)             {}
 func (m *MockHTMLRenderer) DirtyOverlayEnabled() bool                       { return false }
 func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)               { return 0, 0, 0 }
 func (m *MockHTMLRenderer) GetLayoutNodeCount() int                         { return 0 }
+func (m *MockHTMLRenderer) GetStyleSheet() *css.StyleSheet                  { return m.stylesheet }
+func (m *MockHTMLRenderer) GetMatchedRules(node *renderer.RenderNode) []css.Rule {
+	return m.matchedRules
+}
+func (m *MockHTMLRenderer) SetHighlightNode(node *renderer.RenderNode) {
+	m.highlightNode = node
+}
+func (m *MockHTMLRenderer) GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox {
+	return nil
+}
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()
@@ -97,10 +113,12 @@ func TestInspectPanel_SetElement(t *testing.T) {
 	// Test selecting root
 	panel.SetElement(root, nil)
 	assert.Equal(t, root, panel.selectedNode)
+	assert.Equal(t, root, mockRenderer.highlightNode)
 
 	// Test selecting child
 	panel.SetElement(child, nil)
 	assert.Equal(t, child, panel.selectedNode)
+	assert.Equal(t, child, mockRenderer.highlightNode)
 }
 
 func TestInspectPanel_PerformSearch(t *testing.T) {
@@ -393,3 +411,126 @@ func TestInspectPanel_NodeCountsEmpty(t *testing.T) {
 	assert.Equal(t, 0, len(panel.nodeMap))
 	assert.False(t, panel.hasPhaseTimings())
 }
+
+func TestElementsPanel_Breadcrumbs(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "html"
+	root.ID = 1
+
+	body := renderer.NewRenderNode(renderer.NodeTypeElement)
+	body.TagName = "body"
+	body.ID = 2
+	root.AddChild(body)
+
+	div := renderer.NewRenderNode(renderer.NodeTypeElement)
+	div.TagName = "div"
+	div.ID = 3
+	div.SetAttribute("class", "container")
+	body.AddChild(div)
+
+	mockRenderer := &MockHTMLRenderer{root: root}
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(mockRenderer)
+
+	// Initially, no selection, breadcrumbs should be empty
+	assert.Equal(t, 0, len(panel.breadcrumbsBar.Objects))
+
+	// Select the div
+	panel.SetElement(div, nil)
+
+	// Should have: "html", ">", "body", ">", "div.container"
+	// So 5 objects
+	assert.Equal(t, 5, len(panel.breadcrumbsBar.Objects))
+
+	// First object is "html" button
+	btn, ok := panel.breadcrumbsBar.Objects[0].(*widget.Button)
+	assert.True(t, ok)
+	assert.Equal(t, "html", btn.Text)
+
+	// Click "html" button
+	test.Tap(btn)
+
+	// Selection should update to root
+	assert.Equal(t, root, panel.selectedNode)
+}
+
+func TestElementsPanel_SyntaxHighlighting(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "div"
+	root.ID = 1
+	root.SetAttribute("id", "header")
+	root.SetAttribute("class", "container navbar")
+
+	mockRenderer := &MockHTMLRenderer{root: root}
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(mockRenderer)
+
+	// Create and update a node
+	obj := panel.tree.CreateNode(false)
+	panel.tree.UpdateNode("1", false, obj)
+
+	// Verify it's a container with color-coded syntax elements
+	containerObj, ok := obj.(*fyne.Container)
+	assert.True(t, ok)
+	assert.NotEmpty(t, containerObj.Objects)
+
+	// The first object should be "<"
+	firstText, ok := containerObj.Objects[0].(*canvas.Text)
+	if assert.True(t, ok) {
+		assert.Equal(t, "<", firstText.Text)
+	}
+
+	// Second object should be "div" tag name
+	tagNameText, ok := containerObj.Objects[1].(*canvas.Text)
+	if assert.True(t, ok) {
+		assert.Equal(t, "div", tagNameText.Text)
+	}
+}
+
+func TestElementsPanel_MatchedCSSRules(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "p"
+	root.ID = 1
+
+	mockRenderer := &MockHTMLRenderer{root: root}
+	// Let's set some mock matched rules
+	mockRenderer.matchedRules = []css.Rule{
+		{
+			Selectors: []css.SelectorSequence{
+				{Simple: css.SimpleSelector{TagName: "p", Classes: []string{"highlight"}}},
+			},
+			Declarations: []css.Declaration{
+				{Property: "background", Value: "yellow"},
+			},
+			Specificity: [3]uint16{0, 1, 1},
+		},
+		{
+			Selectors: []css.SelectorSequence{
+				{Simple: css.SimpleSelector{TagName: "p"}},
+			},
+			Declarations: []css.Declaration{
+				{Property: "color", Value: "red"},
+			},
+			Specificity: [3]uint16{0, 0, 1},
+		},
+	}
+
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(mockRenderer)
+
+	// Select paragraph
+	panel.SetElement(root, nil)
+
+	// Check stylesContainer has children. We expect the matched rules list to be populated.
+	assert.NotEmpty(t, panel.stylesContainer.Objects)
+}
+

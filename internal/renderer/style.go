@@ -3,11 +3,13 @@ package renderer
 import (
 	"fmt"
 	"image/color"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/css"
 )
+
 
 // StyleManager applies styles from a stylesheet to a render tree.
 type StyleManager struct {
@@ -1506,3 +1508,49 @@ func parseBackgroundShorthandColor(value string) (color.Color, bool) {
 	}
 	return nil, false
 }
+
+// MatchRules returns all rules in the style manager's stylesheets that match the given node,
+// sorted by specificity (highest specificity first).
+func (sm *StyleManager) MatchRules(node *RenderNode) []css.Rule {
+	var matched []css.Rule
+	if sm.stylesheet != nil {
+		for _, rule := range sm.stylesheet.Rules {
+			matches := false
+			for _, seq := range rule.Selectors {
+				if sm.matchesSequence(seq, node) {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				matched = append(matched, rule)
+			}
+		}
+	}
+	if sm.defaultStylesheet != nil {
+		for _, rule := range sm.defaultStylesheet.Rules {
+			matches := false
+			for _, seq := range rule.Selectors {
+				if sm.matchesSequence(seq, node) {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				matched = append(matched, rule)
+			}
+		}
+	}
+
+	// Sort by specificity (descending)
+	sort.Slice(matched, func(i, j int) bool {
+		cmp := css.CompareSpecificity(matched[i].Specificity, matched[j].Specificity)
+		if cmp != 0 {
+			return cmp > 0
+		}
+		// If specificity is equal, preserve source order (higher source order first)
+		return matched[i].SourceOrder > matched[j].SourceOrder
+	})
+	return matched
+}
+

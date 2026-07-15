@@ -154,3 +154,19 @@ func collectFixed(box *LayoutBox, out *[]*LayoutBox) {
 		collectFixed(child, out)
 	}
 }
+
+// findLayoutBoxForNode recursively searches the layout tree to find the LayoutBox associated with a RenderNode ID.
+func findLayoutBoxForNode(box *LayoutBox, nodeID int64) *LayoutBox {
+	if box == nil {
+		return nil
+	}
+	if box.NodeID == nodeID {
+		return box
+	}
+	for _, child := range box.Children {
+		if found := findLayoutBoxForNode(child, nodeID); found != nil {
+			return found
+		}
+	}
+	return nil
+}

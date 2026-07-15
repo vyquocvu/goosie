@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"fyne.io/fyne/v2"
+	"github.com/vyquocvu/goosie/internal/css"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
@@ -42,3 +43,12 @@ func (m *MockHTMLRendererComp) SetDirtyOverlayEnabled(enabled bool) {
 func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool         { return m.dirtyOverlayEnabled }
 func (m *MockHTMLRendererComp) GetDOMNodeCounts() (int, int, int) { return 0, 0, 0 }
 func (m *MockHTMLRendererComp) GetLayoutNodeCount() int           { return 0 }
+func (m *MockHTMLRendererComp) GetStyleSheet() *css.StyleSheet    { return nil }
+func (m *MockHTMLRendererComp) GetMatchedRules(node *renderer.RenderNode) []css.Rule {
+	return nil
+}
+func (m *MockHTMLRendererComp) SetHighlightNode(node *renderer.RenderNode) {}
+func (m *MockHTMLRendererComp) GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox {
+	return nil
+}
+

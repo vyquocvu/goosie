@@ -75,6 +75,7 @@ type CanvasRenderer struct {
 
 	dirtyOverlayEnabled bool
 	Logger              *slog.Logger
+	highlightNode       *RenderNode
 }
 
 // NewCanvasRenderer creates a new canvas renderer
@@ -1141,6 +1142,23 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		}
 	}
 
+	// Add highlight overlay if a node is selected in the inspector
+	if cr.highlightNode != nil {
+		highlightBox := findLayoutBoxForNode(layoutRoot, cr.highlightNode.ID)
+		if highlightBox != nil {
+			overlayColor := color.RGBA{R: 14, G: 116, B: 235, A: 64}
+			strokeColor := color.RGBA{R: 14, G: 116, B: 235, A: 200}
+
+			overlay := canvas.NewRectangle(overlayColor)
+			overlay.StrokeColor = strokeColor
+			overlay.StrokeWidth = 1.5
+
+			overlay.Resize(fyne.NewSize(highlightBox.Box.Width, highlightBox.Box.Height))
+			overlay.Move(fyne.NewPos(highlightBox.Box.X, highlightBox.Box.Y))
+			rootObjects = append(rootObjects, overlay)
+		}
+	}
+
 	// Reuse background rectangle across frames
 	var viewportBg *canvas.Rectangle
 	if cached, ok := cr.objectCache[-1]; ok {
@@ -1636,6 +1654,16 @@ func (cr *CanvasRenderer) SetDirtyOverlayEnabled(enabled bool) {
 		cr.objectCache = make(map[int]fyne.CanvasObject)
 		cr.dlBuildGen++
 	}
+}
+
+// SetHighlightNode sets the node to highlight in the viewport.
+func (cr *CanvasRenderer) SetHighlightNode(node *RenderNode) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.highlightNode = node
+	cr.cachedDisplayList = nil
+	cr.objectCache = make(map[int]fyne.CanvasObject)
+	cr.dlBuildGen++
 }
 
 // DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.

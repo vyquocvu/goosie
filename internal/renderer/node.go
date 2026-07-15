@@ -269,14 +269,6 @@ func processTextNode(htmlNode *html.Node) *RenderNode {
 
 // processElementNode handles element node processing
 func processElementNode(htmlNode *html.Node) *RenderNode {
-	nonVisibleTags := map[string]bool{
-		"script": true, "style": true, "meta": true, "link": true,
-		"head": true, "noscript": true, "template": true, "iframe": true,
-		"title": true, "base": true,
-	}
-	if nonVisibleTags[htmlNode.Data] {
-		return nil
-	}
 	node := NewRenderNode(NodeTypeElement)
 	node.TagName = htmlNode.Data
 	for _, attr := range htmlNode.Attr {

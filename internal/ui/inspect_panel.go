@@ -2,12 +2,16 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/renderer"
 )
@@ -59,6 +63,9 @@ type InspectPanel struct {
 
 	// statusBar shows live DOM node count and memory estimate.
 	statusBar *widget.Label
+
+	// breadcrumbsBar holds clickable ancestors.
+	breadcrumbsBar *fyne.Container
 }
 
 // NewInspectPanel creates a new inspect panel
@@ -70,6 +77,9 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 
 	// Create close button
 	panel.closeButton = widget.NewButton("✕", func() {
+		if panel.htmlRenderer != nil {
+			panel.htmlRenderer.SetHighlightNode(nil)
+		}
 		if panel.onClose != nil {
 			panel.onClose()
 		}
@@ -94,6 +104,9 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 			return children
 		},
 		func(id widget.TreeNodeID) bool {
+			if id == "" {
+				return panel.rootNode != nil
+			}
 			node, ok := panel.nodeMap[id]
 			if !ok {
 				return false
@@ -101,37 +114,14 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 			return len(node.Children) > 0
 		},
 		func(branch bool) fyne.CanvasObject {
-			return widget.NewLabel("Node")
+			return container.NewHBox(monospaceCanvasText("Node Template", color.Transparent))
 		},
 		func(id widget.TreeNodeID, branch bool, o fyne.CanvasObject) {
 			node, ok := panel.nodeMap[id]
 			if !ok {
 				return
 			}
-			label := o.(*widget.Label)
-			if node.Type == renderer.NodeTypeElement {
-				txt := "<" + node.TagName
-				if idAttr, ok := node.GetAttribute("id"); ok {
-					txt += " #" + idAttr
-				}
-				if classAttr, ok := node.GetAttribute("class"); ok {
-					// Truncate class if too long
-					if len(classAttr) > 15 {
-						classAttr = classAttr[:12] + "..."
-					}
-					txt += " ." + strings.ReplaceAll(classAttr, " ", ".")
-				}
-				txt += ">"
-				label.SetText(txt)
-				label.TextStyle = fyne.TextStyle{Bold: true}
-			} else {
-				text := strings.TrimSpace(node.Text)
-				if len(text) > 20 {
-					text = text[:17] + "..."
-				}
-				label.SetText("Text: " + text)
-				label.TextStyle = fyne.TextStyle{Italic: true}
-			}
+			updateDOMTreeNode(node, o)
 		},
 	)
 
@@ -157,8 +147,10 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 	searchContainer := container.NewBorder(nil, nil, nil, searchBtn, panel.searchEntry)
 
 	// Create Split Container
-	// Left: Tree with search, Right: Details
-	leftSide := container.NewBorder(searchContainer, nil, nil, nil, panel.tree)
+	// Left: Tree with search + breadcrumbs, Right: Details
+	panel.breadcrumbsBar = container.NewHBox()
+	breadcrumbsScroll := container.NewHScroll(panel.breadcrumbsBar)
+	leftSide := container.NewBorder(searchContainer, breadcrumbsScroll, nil, nil, panel.tree)
 
 	split := container.NewHSplit(
 		leftSide,
@@ -245,15 +237,26 @@ func (ip *InspectPanel) createDetailsView() {
 
 // SetRenderer sets the HTML renderer and refreshes the tree
 func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
+	if ip.htmlRenderer != nil {
+		ip.htmlRenderer.SetHighlightNode(nil)
+	}
 	ip.htmlRenderer = r
 	if r != nil {
 		ip.rootNode = r.GetRoot()
 		ip.rebuildNodeMap()
+		if ip.rootNode != nil {
+			ip.tree.OpenBranch(fmt.Sprintf("%d", ip.rootNode.ID))
+			for _, child := range ip.rootNode.Children {
+				ip.tree.OpenBranch(fmt.Sprintf("%d", child.ID))
+			}
+		}
 		ip.tree.Refresh()
 		// Also update details if selection exists but might be stale
 		if ip.selectedNode != nil {
 			// Check if node still exists in new map
 			if _, ok := ip.nodeMap[fmt.Sprintf("%d", ip.selectedNode.ID)]; ok {
+				ip.htmlRenderer.SetHighlightNode(ip.selectedNode)
+				ip.selectedLayout = ip.htmlRenderer.GetLayoutBox(ip.selectedNode)
 				ip.updateDetails()
 			} else {
 				ip.selectedNode = nil
@@ -309,6 +312,9 @@ func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.L
 
 	ip.selectedNode = node
 	ip.selectedLayout = layout
+	if ip.htmlRenderer != nil {
+		ip.htmlRenderer.SetHighlightNode(node)
+	}
 	ip.updateDetails()
 	if ip.onSelectNode != nil {
 		ip.onSelectNode(node, layout)
@@ -317,8 +323,16 @@ func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.L
 
 func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
 	ip.selectedNode = node
-	// Note: selectedLayout might be stale if we just clicked tree node
-	// In a real implementation we'd ask renderer for layout box of this node
+	var layout *renderer.LayoutBox
+	if ip.htmlRenderer != nil {
+		if node != nil {
+			layout = ip.htmlRenderer.GetLayoutBox(node)
+			ip.htmlRenderer.SetHighlightNode(node)
+		} else {
+			ip.htmlRenderer.SetHighlightNode(nil)
+		}
+	}
+	ip.selectedLayout = layout
 	ip.updateDetails()
 	if ip.onSelectNode != nil {
 		ip.onSelectNode(node, ip.selectedLayout)
@@ -326,6 +340,7 @@ func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
 }
 
 func (ip *InspectPanel) updateDetails() {
+	ip.updateBreadcrumbs()
 	if ip.selectedNode == nil {
 		ip.propertiesContainer.Objects = nil
 		ip.stylesContainer.Objects = nil
@@ -343,6 +358,64 @@ func (ip *InspectPanel) updateDetails() {
 	ip.updateStylesTab()
 	ip.updateLayoutTab()
 	ip.updatePerformanceTab()
+}
+
+func (ip *InspectPanel) updateBreadcrumbs() {
+	if ip.breadcrumbsBar == nil {
+		return
+	}
+	ip.breadcrumbsBar.Objects = nil
+	if ip.selectedNode == nil {
+		ip.breadcrumbsBar.Refresh()
+		return
+	}
+
+	// Gather ancestors from selectedNode up to rootNode
+	var ancestors []*renderer.RenderNode
+	current := ip.selectedNode
+	for current != nil {
+		ancestors = append(ancestors, current)
+		current = current.Parent
+	}
+
+	// Reverse so it starts from root down to selectedNode
+	for i, j := 0, len(ancestors)-1; i < j; i, j = i+1, j-1 {
+		ancestors[i], ancestors[j] = ancestors[j], ancestors[i]
+	}
+
+	for idx, ancestor := range ancestors {
+		if idx > 0 {
+			// Separator
+			sep := widget.NewLabel(">")
+			sep.TextStyle.Bold = true
+			ip.breadcrumbsBar.Objects = append(ip.breadcrumbsBar.Objects, sep)
+		}
+
+		ancestor := ancestor // capture variable
+		// Build label text: e.g. "div.container" or "div#header"
+		label := ancestor.TagName
+		if id, ok := ancestor.GetAttribute("id"); ok {
+			label += "#" + id
+		} else if class, ok := ancestor.GetAttribute("class"); ok {
+			// Just use the first class to keep breadcrumb concise
+			classes := strings.Fields(class)
+			if len(classes) > 0 {
+				label += "." + classes[0]
+			}
+		}
+		if label == "" && ancestor.Type == renderer.NodeTypeText {
+			label = "text"
+		}
+
+		btn := widget.NewButton(label, func() {
+			ip.tree.Select(fmt.Sprintf("%d", ancestor.ID))
+			ip.selectNode(ancestor)
+		})
+		btn.Importance = widget.LowImportance
+		ip.breadcrumbsBar.Objects = append(ip.breadcrumbsBar.Objects, btn)
+	}
+
+	ip.breadcrumbsBar.Refresh()
 }
 
 func (ip *InspectPanel) updatePropertiesTab() {
@@ -436,6 +509,40 @@ func (ip *InspectPanel) updateStylesTab() {
 
 	ip.stylesContainer.Add(widget.NewLabelWithStyle("Inline Styles", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
 	ip.stylesContainer.Add(ip.inlineStyleEditor.CanvasObject())
+
+	ip.stylesContainer.Add(widget.NewLabelWithStyle("Matched CSS Rules", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
+	if ip.htmlRenderer != nil {
+		rules := ip.htmlRenderer.GetMatchedRules(node)
+		if len(rules) == 0 {
+			ip.stylesContainer.Add(widget.NewLabel("No matching CSS rules"))
+		} else {
+			for _, rule := range rules {
+				var b strings.Builder
+				var sels []string
+				for _, seq := range rule.Selectors {
+					sels = append(sels, selectorToString(seq))
+				}
+				b.WriteString(strings.Join(sels, ", "))
+				specStr := fmt.Sprintf(" /* specificity: [%d,%d,%d] */", rule.Specificity[0], rule.Specificity[1], rule.Specificity[2])
+				b.WriteString(specStr + " {\n")
+				for _, decl := range rule.Declarations {
+					important := ""
+					if decl.Important {
+						important = " !important"
+					}
+					b.WriteString(fmt.Sprintf("    %s: %s%s;\n", decl.Property, decl.Value, important))
+				}
+				b.WriteString("}")
+
+				ruleLabel := widget.NewLabel(b.String())
+				ruleLabel.TextStyle.Monospace = true
+				ruleLabel.Wrapping = fyne.TextWrapWord
+
+				ip.stylesContainer.Add(container.NewPadded(ruleLabel))
+			}
+		}
+	}
+
 	ip.stylesContainer.Refresh()
 
 	// Update the inline style editor and computed style viewer
@@ -672,9 +779,153 @@ func (ip *InspectPanel) GetContainer() *fyne.Container {
 	return ip.container
 }
 
+type inspectTheme struct {
+	fyne.Theme
+}
+
+func (t *inspectTheme) Size(name fyne.ThemeSizeName) float32 {
+	if name == theme.SizeNameText {
+		return 11 // Smaller font size for standard text
+	}
+	if name == theme.SizeNamePadding {
+		return 2 // Smaller padding/margins
+	}
+	if name == theme.SizeNameInlineIcon {
+		return 10 // Smaller icons/arrows
+	}
+	return t.Theme.Size(name)
+}
+
 // CanvasObject returns the underlying canvas object for the panel
 func (ip *InspectPanel) CanvasObject() fyne.CanvasObject {
-	return ip.container
+	return container.NewThemeOverride(ip.container, &inspectTheme{Theme: fyne.CurrentApp().Settings().Theme()})
+}
+
+func updateDOMTreeNode(node *renderer.RenderNode, o fyne.CanvasObject) {
+	hbox, ok := o.(*fyne.Container)
+	if !ok {
+		return
+	}
+	hbox.Objects = nil
+
+	if node.Type == renderer.NodeTypeElement {
+		tagColor := color.RGBA{R: 86, G: 156, B: 214, A: 255}     // Nice blue
+		attrKeyColor := color.RGBA{R: 156, G: 220, B: 254, A: 255} // Light blue
+		attrValColor := color.RGBA{R: 206, G: 145, B: 120, A: 255} // Soft orange
+		bracketColor := color.RGBA{R: 128, G: 128, B: 128, A: 255} // Gray
+
+		bracket := canvas.NewText("<", bracketColor)
+		bracket.TextStyle.Monospace = true
+		bracket.TextSize = 10
+		hbox.Objects = append(hbox.Objects, bracket)
+
+		tag := canvas.NewText(node.TagName, tagColor)
+		tag.TextStyle.Monospace = true
+		tag.TextSize = 10
+		hbox.Objects = append(hbox.Objects, tag)
+
+		// id attribute
+		if idVal, ok := node.GetAttribute("id"); ok {
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText(" id", attrKeyColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText("=\"", bracketColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText(idVal, attrValColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText("\"", bracketColor))
+		}
+
+		// class attribute
+		if classVal, ok := node.GetAttribute("class"); ok {
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText(" class", attrKeyColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText("=\"", bracketColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText(classVal, attrValColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText("\"", bracketColor))
+		}
+
+		// other attributes (show up to 2 other attributes to avoid overflowing tree view width)
+		count := 0
+		for k, v := range node.Attrs {
+			if k == "id" || k == "class" {
+				continue
+			}
+			if count >= 2 {
+				hbox.Objects = append(hbox.Objects, monospaceCanvasText(" ...", bracketColor))
+				break
+			}
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText(" "+k, attrKeyColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText("=\"", bracketColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText(v, attrValColor))
+			hbox.Objects = append(hbox.Objects, monospaceCanvasText("\"", bracketColor))
+			count++
+		}
+
+		bracketEnd := canvas.NewText(">", bracketColor)
+		bracketEnd.TextStyle.Monospace = true
+		bracketEnd.TextSize = 10
+		hbox.Objects = append(hbox.Objects, bracketEnd)
+
+	} else {
+		// Text Node
+		textVal := strings.TrimSpace(node.Text)
+		if len(textVal) > 30 {
+			textVal = textVal[:27] + "..."
+		}
+		textColor := color.RGBA{R: 181, G: 206, B: 168, A: 255} // Neutral green/gray for text
+		textLabel := canvas.NewText(fmt.Sprintf("%q", textVal), textColor)
+		textLabel.TextStyle.Monospace = true
+		textLabel.TextStyle.Italic = true
+		textLabel.TextSize = 10
+		hbox.Objects = append(hbox.Objects, textLabel)
+	}
+
+	hbox.Refresh()
+}
+
+func monospaceCanvasText(text string, col color.Color) *canvas.Text {
+	t := canvas.NewText(text, col)
+	t.TextStyle.Monospace = true
+	t.TextSize = 10
+	return t
+}
+
+func selectorToString(seq css.SelectorSequence) string {
+	var parts []string
+	current := &seq
+	for current != nil {
+		part := simpleSelectorToString(current.Simple)
+		if current.Combinator != "" {
+			part += " " + current.Combinator + " "
+		}
+		parts = append(parts, part)
+		current = current.Next
+	}
+	return strings.Join(parts, "")
+}
+
+func simpleSelectorToString(simple css.SimpleSelector) string {
+	if simple.Universal {
+		return "*"
+	}
+	var res strings.Builder
+	res.WriteString(simple.TagName)
+	if simple.ID != "" {
+		res.WriteString("#" + simple.ID)
+	}
+	for _, class := range simple.Classes {
+		res.WriteString("." + class)
+	}
+	for _, pseudo := range simple.PseudoClasses {
+		res.WriteString(":" + pseudo)
+	}
+	for _, pseudoElem := range simple.PseudoElements {
+		res.WriteString("::" + pseudoElem)
+	}
+	for _, attr := range simple.Attributes {
+		res.WriteString("[" + attr.Name)
+		if attr.Operator != "" {
+			res.WriteString(attr.Operator + "\"" + attr.Value + "\"")
+		}
+		res.WriteString("]")
+	}
+	return res.String()
 }
 
 // Helper for binding
