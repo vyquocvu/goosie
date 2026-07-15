@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"image/color"
-	"log"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -70,6 +70,7 @@ type CanvasRenderer struct {
 	submittingForms map[int64]bool
 
 	dirtyOverlayEnabled bool
+	Logger              *slog.Logger
 }
 
 // NewCanvasRenderer creates a new canvas renderer
@@ -85,6 +86,18 @@ func NewCanvasRenderer(width, height float32) *CanvasRenderer {
 		objectCache:     make(map[int]fyne.CanvasObject),
 		dlBuildGen:      1,
 		submittingForms: make(map[int64]bool),
+		Logger:          slog.Default(),
+	}
+}
+
+// SetLogger sets the structured logger for the CanvasRenderer
+func (cr *CanvasRenderer) SetLogger(l *slog.Logger) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	if l == nil {
+		cr.Logger = slog.Default()
+	} else {
+		cr.Logger = l
 	}
 }
 
@@ -237,7 +250,7 @@ func (cr *CanvasRenderer) renderNode(node *RenderNode, objects *[]fyne.CanvasObj
 		return
 	}
 
-	log.Printf("DEBUG: renderNode processing %s (Type: %d)\n", node.TagName, node.Type)
+	cr.Logger.Debug("renderNode processing", "tag", node.TagName, "type", node.Type)
 
 	// Apply display: none
 	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
@@ -690,10 +703,14 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 		}
 		opacity = float64(node.ComputedStyle.Opacity)
 	} else {
-		log.Printf("DEBUG: ComputedStyle is nil for %s\n", node.TagName)
+		cr.Logger.Debug("ComputedStyle is nil", "tag", node.TagName)
 	}
 
-	log.Printf("DEBUG: renderImage %s, visibility=%s, isHidden=%v, opacity=%f\n", node.TagName, node.ComputedStyle.Visibility, isHidden, opacity)
+	if node.ComputedStyle != nil {
+		cr.Logger.Debug("renderImage", "tag", node.TagName, "visibility", node.ComputedStyle.Visibility, "isHidden", isHidden, "opacity", opacity)
+	} else {
+		cr.Logger.Debug("renderImage", "tag", node.TagName, "visibility", "unknown", "isHidden", isHidden, "opacity", opacity)
+	}
 
 	// If hidden, render transparent placeholder
 	if isHidden {
@@ -724,9 +741,9 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	if cr.imageLoader != nil {
 		imageData, err := cr.imageLoader.Load(resolvedSrc)
 
-		log.Printf("DEBUG: renderImage %s loaded state: %v, err: %v\n", node.TagName, imageData, err)
+		cr.Logger.Debug("renderImage load", "tag", node.TagName, "state", imageData, "err", err)
 		if imageData != nil {
-			log.Printf("DEBUG: renderImage %s state: %d\n", node.TagName, imageData.State)
+			cr.Logger.Debug("renderImage state", "tag", node.TagName, "state", imageData.State)
 		}
 
 		if err != nil {

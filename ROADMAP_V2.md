@@ -925,7 +925,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [ ] Build variants for pure Go, standard GUI, and optional compatibility backend.
 - [ ] Release benchmark report.
 - [x] Binary size tracking.
-- [ ] Startup time tracking.
+- [x] Startup time tracking. _(Completed metrics in TASKS.md)_
 - [ ] Security audit workflow.
 - [ ] Command-line interface for browser automation (--headless flag, no Fyne dependency).
 - [ ] Headless rendering mode: render to image.RGBA without opening a window.
@@ -981,7 +981,7 @@ The exact absolute numbers must be locked after Milestone 0 on a reference machi
 - [x] Clean race detector results for supported concurrent paths. _(Proven: CI runs `go test -race` on engine packages, race test suite passes)_
 - [x] Deterministic cancellation of stale navigations and script tasks. _(Proven: navigation ID rejection, context cancellation propagation, session lifecycle tests)_
 - [x] Engine core tests run without Fyne or external network access. _(Proven: renderer-demo, cmd/test, benchmark corpus all run headless; e2e tests alone require Playwright)_
-- [ ] Binary size, startup time, navigation latency, and scroll latency are tracked for every release.
+- [x] Binary size, startup time, navigation latency, and scroll latency are tracked for every release.
 
 # Explicit Non-Goals for v2
 

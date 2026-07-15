@@ -2,6 +2,7 @@ package net
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -83,6 +84,7 @@ type ServiceOptions struct {
 	// Content-Type against this list and returns ErrUnsupportedMediaType on
 	// mismatch. Empty means accept all types.
 	ExpectedContentType []string
+	TLSConfig           *tls.Config // TLS configuration for advanced scenarios
 }
 
 type Service struct {
@@ -105,7 +107,19 @@ func NewService(options ServiceOptions) *Service {
 	client := options.Client
 	if client == nil {
 		jar, _ := cookiejar.New(nil)
-		client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		if options.TLSConfig != nil {
+			transport.TLSClientConfig = options.TLSConfig
+		}
+		client = &http.Client{Jar: jar, Timeout: 30 * time.Second, Transport: transport}
+	} else if options.TLSConfig != nil {
+		if tr, ok := client.Transport.(*http.Transport); ok {
+			tr.TLSClientConfig = options.TLSConfig
+		} else if client.Transport == nil {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = options.TLSConfig
+			client.Transport = transport
+		}
 	}
 	userAgent := options.UserAgent
 	if userAgent == "" {

@@ -153,6 +153,9 @@ func TestNewBackendForceCPU(t *testing.T) {
 
 func TestNewBackendForceCG(t *testing.T) {
 	b, bt, err := NewBackend(100, 100, WithBackend(BackendCoreGraphics))
+	if err != nil && err.Error() == "core-graphics: cg backend: not supported on this platform" {
+		t.Skip("CG backend not supported on this platform")
+	}
 	if err == ErrCGBackendNotSupported {
 		t.Skip("CG backend not supported on this platform")
 	}
@@ -236,6 +239,9 @@ func TestNewBackendCrashRecover(t *testing.T) {
 
 func TestCPUAndCGProduceSameFill(t *testing.T) {
 	cgB, cgBT, err := NewBackend(50, 50, WithBackend(BackendCoreGraphics))
+	if err != nil && err.Error() == "core-graphics: cg backend: not supported on this platform" {
+		t.Skip("CG backend not supported on this platform")
+	}
 	if err == ErrCGBackendNotSupported {
 		t.Skip("CG backend not supported on this platform")
 	}

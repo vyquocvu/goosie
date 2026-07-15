@@ -2,11 +2,13 @@ package renderer
 
 import (
 	"context"
-	"fmt"
+
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -57,6 +59,9 @@ type Renderer struct {
 	// csp holds the parsed Content-Security-Policy for style-src enforcement.
 	csp   *net.CSPPolicy
 	cspMu sync.RWMutex
+
+	Logger  *slog.Logger
+	metrics *RenderMetrics
 }
 
 // NewRenderer creates a new HTML renderer
@@ -70,11 +75,31 @@ func NewRenderer(width, height float32) *Renderer {
 		canvasRenderer: canvasRenderer,
 		imageLoader:    imageLoader,
 		fetcher:        net.NewFetcher(),
+		Logger:         slog.Default(),
+		metrics:        NewRenderMetrics(),
 	}
+}
+
+// Metrics returns the render metrics
+func (r *Renderer) Metrics() *RenderMetrics {
+	return r.metrics
+}
+
+// SetLogger sets the structured logger for the Renderer and its CanvasRenderer
+func (r *Renderer) SetLogger(l *slog.Logger) {
+	if l == nil {
+		r.Logger = slog.Default()
+	} else {
+		r.Logger = l
+	}
+	r.canvasRenderer.SetLogger(r.Logger)
 }
 
 // RenderHTML renders HTML content and returns a Fyne canvas object
 func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
+	start := time.Now()
+	defer func() { r.metrics.RecordRenderHTML(time.Since(start)) }()
+
 	globalTableColumnCache.Clear()
 	recorder := metrics.RecorderFromContext(ctx)
 	if recorder != nil {
@@ -154,7 +179,9 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	}
 	// Perform layout
 	layoutEngine := NewLayoutEngine(width, height)
+	layoutStart := time.Now()
 	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
+	r.metrics.RecordComputeLayout(time.Since(layoutStart))
 	renderTree = renderTreeCopy
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseLayout)
@@ -196,7 +223,9 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		recorder.BeginPhase(metrics.PhaseRaster)
 	}
 	// Render to canvas with viewport optimization
+	viewportStart := time.Now()
 	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
+	r.metrics.RecordRenderWithViewport(time.Since(viewportStart))
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseRaster)
 	}
@@ -641,7 +670,9 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		// Check CSP style-src before fetching.
 		if csp != nil {
 			if err := csp.AllowStyle(resolvedURL, baseURL); err != nil {
-				fmt.Printf("CSP blocked stylesheet %s: %v\n", resolvedURL, err)
+				if r.Logger != nil {
+					r.Logger.Warn("CSP blocked stylesheet", "url", resolvedURL, "err", err)
+				}
 				continue
 			}
 		}
@@ -649,7 +680,9 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		// Fetch CSS
 		content, err := r.fetcher.FetchWithContext(ctx, resolvedURL, nil)
 		if err != nil {
-			fmt.Printf("Failed to fetch CSS %s: %v\n", resolvedURL, err)
+			if r.Logger != nil {
+				r.Logger.Warn("Failed to fetch CSS", "url", resolvedURL, "err", err)
+			}
 			continue
 		}
 		if !shouldAttemptParseExternalCSS(content) {
@@ -664,7 +697,9 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		parser := css.NewParser(content)
 		stylesheet, err := parser.Parse()
 		if err != nil {
-			fmt.Printf("Failed to parse CSS %s: %v\n", resolvedURL, err)
+			if r.Logger != nil {
+				r.Logger.Warn("Failed to parse CSS", "url", resolvedURL, "err", err)
+			}
 			continue
 		}
 
