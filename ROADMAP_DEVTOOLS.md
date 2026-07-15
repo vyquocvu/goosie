@@ -1,6 +1,6 @@
 # Goosie Dev Tools Roadmap v1
 
-> Status: Active — M0+M1+M2+M3+M4+M5 complete (M6 stretch)
+> Status: Complete — M0 through M5 delivered, M6 deferred
 > Target: Production-quality developer tools for the Goosie browser engine
 
 ## 1. Motivation
@@ -336,13 +336,13 @@ Each milestone is self-contained and usable independently.
 
 A milestone is complete only when all applicable items are checked.
 
-- [ ] Public interfaces are documented.
-- [ ] Unit tests cover normal, empty, and edge cases.
-- [ ] Headless-compatible data probes (`metrics.Recorder`,
+- [x] Public interfaces are documented.
+- [x] Unit tests cover normal, empty, and edge cases.
+- [x] Headless-compatible data probes (`metrics.Recorder`,
       `renderer.RenderMetrics`) continue to work without a window.
-- [ ] No panel holds a reference to engine mutable state across panel switches.
-- [ ] Panels use read-only snapshots where engine data is consumed.
-- [ ] Keyboard navigation is supported in tree views and lists.
+- [x] No panel holds a reference to engine mutable state across panel switches.
+- [x] Panels use read-only snapshots where engine data is consumed.
+- [x] Keyboard navigation is supported in tree views and lists.
 - [ ] Cross-platform: panels render correctly on darwin, linux, windows.
 
 ## 7. Non-Goals
