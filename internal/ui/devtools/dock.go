@@ -99,16 +99,16 @@ func (d *Dock) buildTabs() {
 func (d *Dock) addAllTabs() {
 	d.addTab("Elements", newElementsPanel(d.activeTab))
 	d.addTab("Console", newConsolePanel(d.activeTab))
+	d.addTab("Sources", newSourcePanel(d.activeTab))
 	d.addTab("Network", newNetworkPanel(d.activeTab))
-	d.addTab("Source", newSourcePanel(d.activeTab))
+	d.addTab("Performance", newPerformancePanel(d.activeTab))
 	d.addTab("Memory", newMemoryPanel(d.activeTab))
-	d.addTab("Display List", newDisplayListPanel(d.activeTab))
-	d.addTab("Script Queue", newScriptQueuePanel(d.activeTab))
-	d.addTab("Tile Cache", newTileCachePanel(d.activeTab))
 	d.addTab("Storage", newStoragePanel(d.activeTab))
 	d.addTab("Security", newSecurityPanel(d.activeTab))
 	d.addTab("Settings", newSettingsPanel(d.activeTab))
-	d.addTab("Performance", newPerformancePanel(d.activeTab))
+	d.addTab("Display List", newDisplayListPanel(d.activeTab))
+	d.addTab("Script Queue", newScriptQueuePanel(d.activeTab))
+	d.addTab("Tile Cache", newTileCachePanel(d.activeTab))
 }
 
 func (d *Dock) addTab(title string, content fyne.CanvasObject) {
@@ -138,6 +138,26 @@ func (d *Dock) SelectTab(title string) {
 	for _, t := range d.tabs.Items {
 		if t.Text == title {
 			d.tabs.Select(t)
+			return
+		}
+	}
+}
+
+// SetElementsContent replaces the content of the "Elements" tab with the given panel.
+func (d *Dock) SetElementsContent(content fyne.CanvasObject) {
+	for _, t := range d.tabs.Items {
+		if t.Text == "Elements" {
+			t.Content = content
+			return
+		}
+	}
+}
+
+// SetConsoleContent replaces the content of the "Console" tab with the given panel.
+func (d *Dock) SetConsoleContent(content fyne.CanvasObject) {
+	for _, t := range d.tabs.Items {
+		if t.Text == "Console" {
+			t.Content = content
 			return
 		}
 	}

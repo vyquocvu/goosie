@@ -86,12 +86,7 @@ type Browser struct {
 	tabs                *container.DocTabs
 	tabItems            []*Tab
 	consolePanel        *ConsolePanel
-	consoleSplit        *container.Split
-	consoleVisible      bool
-	consoleContainer    *fyne.Container
 	inspectPanel        *InspectPanel
-	inspectVisible      bool
-	inspectContainer    *fyne.Container
 	inspectButton       *widget.Button
 	// devToolsMenu assembles and shows the right-click context menu. A
 	// single instance is reused across right-click events.
@@ -162,13 +157,11 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 		themeManager:        themeManager,
 		loadingBar:          loadingBar,
 		loadingBarContainer: loadingBarContainer,
-		tabItems:            []*Tab{},
-		consoleVisible:      false,
-		inspectVisible:      false,
+		tabItems: []*Tab{},
 	}
 
 	// Create console panel
-	browser.consolePanel = NewConsolePanel(browser.toggleConsole)
+	browser.consolePanel = NewConsolePanel(browser.toggleDevTools)
 	browser.consolePanel.SetRefreshCallback(func() {
 		// Clear console messages in the active tab's runtime
 		if tab := browser.ActiveTab(); tab != nil && tab.jsRuntime != nil {
@@ -195,13 +188,18 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 	browser.breadcrumbBox.Hide()
 
 	// Create inspect panel
-	browser.inspectPanel = NewInspectPanel(browser.toggleInspect)
+	browser.inspectPanel = NewInspectPanel(browser.toggleDevTools)
 	browser.inspectPanel.SetSelectNodeCallback(func(node *renderer.RenderNode, _ *renderer.LayoutBox) {
 		if node != nil {
 			browser.breadcrumbBar.SetSelection(node, nil)
 			browser.breadcrumbBox.Show()
 		} else {
 			browser.breadcrumbBox.Hide()
+		}
+	})
+	browser.inspectPanel.SetScrollToCallback(func(x, y float32) {
+		if tab := browser.ActiveTab(); tab != nil && tab.contentScroll != nil {
+			tab.contentScroll.ScrollToOffset(fyne.NewPos(0, y))
 		}
 	})
 
@@ -233,6 +231,10 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 		}
 		return ctx
 	})
+
+	// Wire the real InspectPanel and ConsolePanel into the dock tabs.
+	browser.devToolsDock.SetElementsContent(browser.inspectPanel.CanvasObject())
+	browser.devToolsDock.SetConsoleContent(browser.consolePanel.CanvasObject())
 
 	// Build the dev-tools right-click context menu. The same instance
 	// is reused across right-click events.
@@ -312,15 +314,14 @@ func (b *Browser) registerDefaultShortcuts() {
 	})
 }
 
-// toggleConsole toggles the visibility of the console panel
+// toggleConsole opens the dev tools dock and selects the Console tab.
 func (b *Browser) toggleConsole() {
-	if b.consoleVisible {
-		b.consoleContainer.Hide()
+	if !b.devToolsVisible {
+		b.toggleDevTools()
 	} else {
-		b.consoleContainer.Show()
+		b.devToolsDock.SelectTab("Console")
+		b.devToolsDock.Refresh()
 	}
-	b.consoleVisible = !b.consoleVisible
-	b.window.Content().Refresh()
 }
 
 // toggleDevTools toggles the unified dev tools dock and persists the state.
@@ -375,19 +376,14 @@ func (b *Browser) persistDevToolsState() {
 	_ = b.deps.SettingsStore.Set(s) // best-effort
 }
 
-// toggleInspect toggles the visibility of the inspect panel
+// toggleInspect opens the dev tools dock and selects the Elements tab.
 func (b *Browser) toggleInspect() {
-	if b.inspectVisible {
-		b.inspectContainer.Hide()
+	if !b.devToolsVisible {
+		b.toggleDevTools()
 	} else {
-		b.inspectContainer.Show()
-		// Initialize with current renderer if available
-		if tab := b.ActiveTab(); tab != nil && tab.htmlRenderer != nil {
-			b.inspectPanel.SetRenderer(tab.htmlRenderer)
-		}
+		b.devToolsDock.SelectTab("Elements")
+		b.devToolsDock.Refresh()
 	}
-	b.inspectVisible = !b.inspectVisible
-	b.window.Content().Refresh()
 }
 
 // showDevToolsMenu renders and shows the right-click dev-tools menu for
@@ -601,7 +597,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	// Set up inspect callback
 	t.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
 		fyne.Do(func() {
-			if t.browser.inspectVisible {
+			if t.browser.devToolsVisible {
 				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 				t.browser.inspectPanel.SetElement(node, layout)
 			}
@@ -626,7 +622,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 			// Trigger a refresh of the scroll container to show changes
 			t.contentScroll.Refresh()
 			// Also refresh inspector if visible
-			if t.browser.inspectVisible {
+			if t.browser.devToolsVisible {
 				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 			}
 		})
@@ -672,27 +668,12 @@ func (b *Browser) Show() {
 		b.urlEntry,
 	)
 
-	// Create containers for console and inspect panels (hidden initially)
-	b.consoleContainer = container.NewMax(b.consolePanel.CanvasObject())
-	b.consoleContainer.Hide()
-
-	b.inspectContainer = container.NewMax(b.inspectPanel.CanvasObject())
-	b.inspectContainer.Hide()
-
-	// Horizontal split: tabs on left, inspect panel on right
-	mainWithInspect := container.NewHSplit(b.tabs, b.inspectContainer)
-	mainWithInspect.Offset = 1.0
-
-	// Vertical split: top area (tabs+inspect) on top, console at bottom
-	contentWithConsole := container.NewVSplit(mainWithInspect, b.consoleContainer)
-	contentWithConsole.Offset = 1.0
-
 	// Dev tools dock container (hidden initially)
 	dockContainer := container.NewMax(b.devToolsDock.CanvasObject())
 	dockContainer.Hide()
 
 	// Vertical split: page content on top, dev tools dock on bottom
-	b.devToolsSplit = container.NewVSplit(contentWithConsole, dockContainer)
+	b.devToolsSplit = container.NewVSplit(b.tabs, dockContainer)
 	b.devToolsSplit.Offset = 1.0
 	b.restoreDevToolsState()
 
@@ -1027,7 +1008,7 @@ func (b *Browser) showSourceDialog() {
 	if !b.devToolsVisible {
 		b.toggleDevTools()
 	} else {
-		b.devToolsDock.SelectTab("Source")
+		b.devToolsDock.SelectTab("Sources")
 		b.devToolsDock.Refresh()
 	}
 }

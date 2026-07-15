@@ -48,6 +48,9 @@ type InspectPanel struct {
 	// onSelectNode is called whenever the selected element changes.
 	onSelectNode func(node *renderer.RenderNode, layout *renderer.LayoutBox)
 
+	// onScrollToNode is called when the "Scroll to Node" button is pressed.
+	onScrollToNode func(x, y float32)
+
 	// computedStyleView shows all CSS properties with search filter.
 	computedStyleView *ComputedStyleView
 
@@ -285,6 +288,12 @@ func (ip *InspectPanel) SetSelectNodeCallback(cb func(node *renderer.RenderNode,
 	ip.onSelectNode = cb
 }
 
+// SetScrollToCallback sets a callback invoked when the "Scroll to Node" button is pressed.
+// The callback receives the x and y position of the selected layout box.
+func (ip *InspectPanel) SetScrollToCallback(cb func(x, y float32)) {
+	ip.onScrollToNode = cb
+}
+
 // SetElement sets the element to inspect (called from renderer hit test)
 func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
 	// Skip redundant updates when hovering the same element
@@ -462,6 +471,14 @@ func (ip *InspectPanel) updateLayoutTab() {
 	ip.layoutContainer.Add(widget.NewLabelWithStyle("Padding", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 	ip.layoutContainer.Add(widget.NewLabel(fmt.Sprintf("Top: %.1f, Right: %.1f, Bottom: %.1f, Left: %.1f",
 		box.PaddingTop, box.PaddingRight, box.PaddingBottom, box.PaddingLeft)))
+
+	scrollBtn := widget.NewButton("Scroll to Node", func() {
+		if ip.onScrollToNode != nil {
+			ip.onScrollToNode(box.Box.X, box.Box.Y)
+		}
+	})
+	scrollBtn.Importance = widget.MediumImportance
+	ip.layoutContainer.Add(scrollBtn)
 
 	ip.layoutContainer.Refresh()
 }
