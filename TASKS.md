@@ -137,4 +137,4 @@ Branch: main
 | P3 | 6 | E2E perf tests, popups, page caching, WebSocket, Web Workers, Service Workers, Canvas API |
 | Deferred | 9 | Roadmap items beyond current scope |
 
-**Total open: 15 tasks**
+**Total open: 9 tasks**
