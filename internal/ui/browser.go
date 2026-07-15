@@ -91,6 +91,9 @@ type Browser struct {
 	inspectVisible      bool
 	inspectContainer    *fyne.Container
 	inspectButton       *widget.Button
+	// devToolsMenu assembles and shows the right-click context menu. A
+	// single instance is reused across right-click events.
+	devToolsMenu *DevToolsContextMenu
 	screenshotButton    *widget.Button
 	sourceButton        *widget.Button
 	memoryButton        *widget.Button
@@ -185,6 +188,15 @@ func newBrowserInternal(a fyne.App, w fyne.Window) *Browser {
 	// Create inspect panel
 	browser.inspectPanel = NewInspectPanel(browser.toggleInspect)
 
+	// Build the dev-tools right-click context menu. The same instance
+	// is reused across right-click events.
+	browser.devToolsMenu = NewDevToolsContextMenu(DevToolsContextMenuOptions{
+		Clipboard:          fyne.CurrentApp().Clipboard(),
+		OnInspect:          browser.devToolsInspectAction,
+		OnViewSource:       browser.devToolsViewSourceAction,
+		OnViewComputedStyle: browser.devToolsViewComputedStyleAction,
+	})
+
 	firstTab := browser.newTabInternal()
 	browser.tabItems = append(browser.tabItems, firstTab)
 
@@ -275,6 +287,94 @@ func (b *Browser) toggleInspect() {
 	}
 	b.inspectVisible = !b.inspectVisible
 	b.window.Content().Refresh()
+}
+
+// showDevToolsMenu renders and shows the right-click dev-tools menu for
+// the active tab. The caller is responsible for hopping onto the Fyne
+// UI goroutine before invoking this method.
+func (b *Browser) showDevToolsMenu(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
+	if b.devToolsMenu == nil {
+		return
+	}
+	// Anchor the popup to the active tab's content scroll container so
+	// Fyne can position it correctly relative to the window.
+	var anchor fyne.CanvasObject
+	if tab := b.ActiveTab(); tab != nil && tab.contentScroll != nil {
+		anchor = tab.contentScroll
+	} else {
+		anchor = b.window.Canvas().Content()
+	}
+	b.devToolsMenu.Show(anchor, node, layout, abs)
+}
+
+// devToolsInspectAction is the "Inspect Element" callback for the
+// right-click context menu. It reveals the inspect panel and
+// pre-selects the right-clicked element.
+func (b *Browser) devToolsInspectAction(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	if node == nil {
+		return
+	}
+	if !b.inspectVisible {
+		b.toggleInspect()
+	}
+	tab := b.ActiveTab()
+	if tab == nil {
+		return
+	}
+	b.inspectPanel.SetRenderer(tab.htmlRenderer)
+	b.inspectPanel.SetElement(node, layout)
+}
+
+// devToolsViewSourceAction is the "View Source" callback. It shows a
+// small dialog containing the outer HTML of the right-clicked node.
+// It is a no-op when the user right-clicks empty canvas area.
+func (b *Browser) devToolsViewSourceAction(node *renderer.RenderNode, _ *renderer.LayoutBox) {
+	if node == nil {
+		return
+	}
+	html := renderOuterHTMLString(node)
+	if html == "" {
+		html = "(empty)"
+	}
+	entry := widget.NewMultiLineEntry()
+	entry.SetText(html)
+	entry.Disable()
+	scroll := container.NewVScroll(entry)
+	dialog.ShowCustom("Element Source", "Close", scroll, b.window)
+}
+
+// devToolsViewComputedStyleAction is the "View Computed Style" callback.
+// It mirrors the Styles tab in InspectPanel by presenting the rendered
+// node's computed style as a key/value list inside a dialog. When the
+// hit node has no computed style — e.g. text nodes — the dialog
+// explains that no styles are available.
+func (b *Browser) devToolsViewComputedStyleAction(node *renderer.RenderNode, _ *renderer.LayoutBox) {
+	if node == nil {
+		return
+	}
+	box := container.NewVBox()
+	if node.ComputedStyle == nil {
+		box.Add(widget.NewLabel("No computed styles available for this node."))
+	} else {
+		style := node.ComputedStyle
+		box.Add(widget.NewLabelWithStyle(
+			fmt.Sprintf("Computed style <%s>", node.TagName),
+			fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		box.Add(widget.NewLabel(fmt.Sprintf("display: %s", style.Display)))
+		box.Add(widget.NewLabel(fmt.Sprintf("font-size: %.1fpx", style.FontSize)))
+		box.Add(widget.NewLabel(fmt.Sprintf("width: %s", style.Width)))
+		box.Add(widget.NewLabel(fmt.Sprintf("height: %s", style.Height)))
+		box.Add(widget.NewLabel(fmt.Sprintf("color: %v", style.Color)))
+	}
+	scroll := container.NewVScroll(box)
+	dialog.ShowCustom("Computed Style", "Close", scroll, b.window)
+}
+
+// renderOuterHTMLString is a thin wrapper around renderOuterHTML so
+// the dialog callbacks (which live in this file) have a stable local
+// surface for HTML serialisation.
+func renderOuterHTMLString(node *renderer.RenderNode) string {
+	return renderOuterHTML(node)
 }
 
 // toggleDirtyOverlay toggles the dirty-region overlay visualization on the
@@ -401,6 +501,18 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 				t.browser.inspectPanel.SetElement(node, layout)
 			}
+		})
+	})
+
+	// Set up right-click context menu callback. Marshalled onto the UI
+	// goroutine before showing the popup because fyne widgets must be
+	// touched from the main thread.
+	t.htmlRenderer.SetContextMenuCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
+		fyne.Do(func() {
+			if t.browser.devToolsMenu == nil {
+				return
+			}
+			t.browser.showDevToolsMenu(node, layout, abs)
 		})
 	})
 

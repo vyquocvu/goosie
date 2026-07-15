@@ -16,6 +16,13 @@ type HTMLRenderer interface {
 	SetNavigationCallback(callback func(url string))
 	HitTest(x, y float32) (*renderer.RenderNode, *renderer.LayoutBox)
 	SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox))
+
+	// SetContextMenuCallback wires a callback invoked when the user
+	// right-clicks (secondary tap) on the rendered page. The callback
+	// receives the hit-tested node, layout box, and absolute position of
+	// the cursor so the UI layer can show a dev-tools context menu. Passing
+	// nil disables the context menu.
+	SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position))
 	GetRoot() *renderer.RenderNode
 	Refresh()
 	SetRefreshCallback(callback func())

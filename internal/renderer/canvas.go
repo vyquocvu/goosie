@@ -55,8 +55,12 @@ type CanvasRenderer struct {
 
 	// Inspect callback for element inspection
 	onInspect func(node *RenderNode, layout *LayoutBox)
-	renderer  *Renderer // Reference to main renderer for hit testing
-	mu        sync.RWMutex
+	// Context menu callback for right-click. Invoked with the absolute
+	// canvas position of the right click so the UI layer can place a
+	// popup near the cursor.
+	onContextMenu func(node *RenderNode, layout *LayoutBox, abs fyne.Position)
+	renderer      *Renderer // Reference to main renderer for hit testing
+	mu            sync.RWMutex
 
 	// Object cache: reuses Fyne canvas objects across frames instead of
 	// re-creating them on every scroll/render. Keyed by command index in the
@@ -163,6 +167,17 @@ func (cr *CanvasRenderer) SetImageLoader(loader imageloader.Loader) {
 func (cr *CanvasRenderer) SetInspectCallback(callback func(node *RenderNode, layout *LayoutBox), renderer *Renderer) {
 	cr.onInspect = callback
 	cr.renderer = renderer
+}
+
+// SetContextMenuCallback wires a callback that the canvas invokes when the
+// user right-clicks (secondary tap) on the rendered page. The callback
+// receives the hit-tested node, layout box, and absolute position of the
+// click so a popup menu can be displayed near the cursor. Passing nil
+// disables the context menu callback (the default).
+func (cr *CanvasRenderer) SetContextMenuCallback(callback func(node *RenderNode, layout *LayoutBox, abs fyne.Position)) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.onContextMenu = callback
 }
 
 // isInViewport checks if a box intersects with the current viewport
@@ -596,6 +611,35 @@ func (ic *InspectableContainer) MouseDown(event *fyne.PointEvent) {
 			ic.canvasRenderer.onInspect(node, layout)
 		}
 	}
+}
+
+// TappedSecondary handles right-click (secondary tap) events on the rendered
+// page. It performs a hit-test at the cursor and, when a context menu
+// callback is registered, forwards the result along with the absolute cursor
+// position so the UI layer can show a dev-tools context menu.
+//
+// If no node is hit (e.g. the user clicks outside any layout box) and a
+// callback is registered we still notify it with nil node/layout so the
+// UI can decide whether to show a page-level menu.
+func (ic *InspectableContainer) TappedSecondary(event *fyne.PointEvent) {
+	if ic.canvasRenderer == nil || ic.canvasRenderer.renderer == nil {
+		return
+	}
+
+	ic.canvasRenderer.mu.RLock()
+	cb := ic.canvasRenderer.onContextMenu
+	ic.canvasRenderer.mu.RUnlock()
+	if cb == nil {
+		return
+	}
+
+	// Convert mouse position to content coordinates (scroll-aware).
+	scrollY := ic.canvasRenderer.viewportY
+	contentX := event.Position.X
+	contentY := event.Position.Y + scrollY
+
+	node, layout := ic.canvasRenderer.renderer.HitTest(contentX, contentY)
+	cb(node, layout, event.AbsolutePosition)
 }
 
 // inspectableContainerRenderer is the renderer for the inspectable container

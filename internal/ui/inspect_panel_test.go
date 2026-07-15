@@ -33,6 +33,8 @@ func (m *MockHTMLRenderer) HitTest(x, y float32) (*renderer.RenderNode, *rendere
 }
 func (m *MockHTMLRenderer) SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
 }
+func (m *MockHTMLRenderer) SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position)) {
+}
 func (m *MockHTMLRenderer) GetRoot() *renderer.RenderNode                   { return m.root }
 func (m *MockHTMLRenderer) Refresh()                                        { m.refreshCalled = true }
 func (m *MockHTMLRenderer) SetRefreshCallback(callback func())              {}

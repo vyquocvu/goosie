@@ -414,6 +414,15 @@ func (r *Renderer) SetInspectCallback(callback func(node *RenderNode, layout *La
 	r.canvasRenderer.SetInspectCallback(callback, r)
 }
 
+// SetContextMenuCallback forwards to the underlying canvas renderer.
+// See CanvasRenderer.SetContextMenuCallback for details.
+func (r *Renderer) SetContextMenuCallback(callback func(node *RenderNode, layout *LayoutBox, abs fyne.Position)) {
+	if r.canvasRenderer == nil {
+		return
+	}
+	r.canvasRenderer.SetContextMenuCallback(callback)
+}
+
 // GetRoot returns the current render tree root
 func (r *Renderer) GetRoot() *RenderNode {
 	r.treeMu.RLock()
