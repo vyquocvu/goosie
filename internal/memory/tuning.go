@@ -88,15 +88,10 @@ func EvaluateConfig(cfg TuningConfig, workload func()) WorkloadStats {
 	allocatedBytes := endMem.TotalAlloc - startMem.TotalAlloc
 	gccpu := endMem.GCCPUFraction
 
-	var totalPause time.Duration
-	if len(endGCStats.Pause) > len(startGCStats.Pause) {
-		diff := len(endGCStats.Pause) - len(startGCStats.Pause)
-		for i := 0; i < diff && i < len(endGCStats.Pause); i++ {
-			totalPause += endGCStats.Pause[i]
-		}
-	} else if len(endGCStats.Pause) > 0 {
-		totalPause = endGCStats.PauseTotal - startGCStats.PauseTotal
-	}
+	// PauseTotal is cumulative, so subtract snapshots to measure only GC pause
+	// time attributable to this workload. Avoid summing the Pause ring because it
+	// can already contain historical entries before the workload starts.
+	totalPause := endGCStats.PauseTotal - startGCStats.PauseTotal
 
 	// Thrashing detection uses metrics from this workload only. MemStats.GCCPUFraction
 	// is process-wide since program start, so using it directly can make otherwise
