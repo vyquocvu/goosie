@@ -53,6 +53,9 @@ type InspectPanel struct {
 
 	// inlineStyleEditor allows editing the element's inline style.
 	inlineStyleEditor *InlineStyleEditor
+
+	// statusBar shows live DOM node count and memory estimate.
+	statusBar *widget.Label
 }
 
 // NewInspectPanel creates a new inspect panel
@@ -167,8 +170,12 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 		container.NewHBox(panel.closeButton),
 	)
 
+	// Status bar
+	panel.statusBar = widget.NewLabel("")
+	panel.statusBar.TextStyle.Monospace = true
+
 	panel.container = container.NewBorder(
-		topBar, nil, nil, nil,
+		topBar, panel.statusBar, nil, nil,
 		split,
 	)
 
@@ -252,6 +259,25 @@ func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 			}
 		}
 	}
+	ip.updateStatusBar()
+}
+
+// updateStatusBar refreshes the bottom status bar with DOM node counts.
+func (ip *InspectPanel) updateStatusBar() {
+	if ip.htmlRenderer == nil {
+		ip.statusBar.SetText("")
+		return
+	}
+	total, elements, text := ip.htmlRenderer.GetDOMNodeCounts()
+	layoutCount := ip.htmlRenderer.GetLayoutNodeCount()
+	if total > 0 {
+		memEstimate := total * 256 // rough bytes-per-node estimate
+		ip.statusBar.SetText(fmt.Sprintf("%d nodes (%d elem, %d text, %d layout)  ~%s",
+			total, elements, text, layoutCount, formatBytes(int64(memEstimate))))
+	} else {
+		ip.statusBar.SetText(fmt.Sprintf("%d nodes in nodeMap", len(ip.nodeMap)))
+	}
+	ip.statusBar.Refresh()
 }
 
 // SetSelectNodeCallback sets a callback invoked when the selected node changes.

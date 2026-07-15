@@ -109,7 +109,7 @@ Performance tabs — this milestone focuses on UX completeness.
 - [x] Add an element breadcrumb bar at the bottom of the viewport (above the
       dock) that shows the current selection's ancestor chain as clickable
       labels. Clicking a breadcrumb selects that ancestor in the tree.
-- [ ] Add live DOM node count and memory estimate to the panel's status bar.
+- [x] Add live DOM node count and memory estimate to the panel's status bar.
 - [x] Add inline attribute editing: double-click an attribute value in the
       Properties tab to edit it, apply the change via a DOM mutation, and
       trigger style/layout invalidation.
