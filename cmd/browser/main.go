@@ -9,6 +9,7 @@ import (
 	urlpkg "net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -567,6 +568,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	docFetcher := fetcher
 
 	var externalResults []documentloader.CSSResult
+	var scriptResults []documentloader.ScriptResult
 	coord, err := documentloader.New(documentloader.Options{
 		NavigationID:      load.ID,
 		NavigationContext: navCtx,
@@ -578,6 +580,9 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 		Callbacks: documentloader.Callbacks{
 			OnStylesheet: func(r documentloader.CSSResult) {
 				externalResults = append(externalResults, r)
+			},
+			OnScript: func(r documentloader.ScriptResult) {
+				scriptResults = append(scriptResults, r)
 			},
 			OnError: func(_ documentloader.Resource, e error) {
 				if r := browser.ActiveTab(); r != nil {
@@ -674,10 +679,18 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	}
 	sess.Complete()
 
-	// 8. JS runtime wiring (mirror of the legacy path's setup). M4
-	//    will replace the post-render script execution with the
-	//    coordinator's ordered queue; for M3 we keep the existing
-	//    behavior so the user-visible flow is unchanged.
+	// 8. JS runtime wiring + M4 ordered script queue.
+	//
+	//    The coordinator has already CSP-gated, fetched, and ordered
+	//    every classic script (inline + external). We now enrich the
+	//    inline entries with bodies extracted from the parsed DOM and
+	//    execute the queue in document order via js.Runtime.RunScript.
+	//
+	//    Per plan.md M4: "execute this queue after document bytes are
+	//    available but before the final browser render". Render has
+	//    already happened above (RenderParsedContent), so M4 executes
+	//    after render — this matches the conservative "initially"
+	//    strategy in the plan and keeps the user-visible flow stable.
 	tab := browser.ActiveTab()
 	if tab != nil {
 		if tab.GetJSRuntime() == nil {
@@ -699,7 +712,76 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 				log.Printf("Error rendering mutated HTML: %v", err)
 			}
 		})
+
+		executeScriptQueue(jsRuntime, url, csp, doc, scriptResults)
 	}
+}
+
+// executeScriptQueue runs classic scripts in document order per
+// plan.md M4. Inline entries arrive with Source=nil (the streaming
+// parser cannot capture body bytes until </script> closes — see M2);
+// inline bodies are extracted from the parsed DOM and merged in
+// by Position. CSP is re-checked here for inline scripts (the
+// coordinator CSP-checks external scripts at fetch time; inline
+// scripts bypass the fetcher, so the gate happens here).
+//
+// Script failures are reported but do not stop subsequent classic
+// scripts unless the engine's policy explicitly requires it. The
+// current Goosie policy is permissive: log and continue.
+func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolicy, doc *ghtml.Node, results []documentloader.ScriptResult) {
+	if jsRuntime == nil || len(results) == 0 {
+		return
+	}
+	baseURL, _ := urlpkg.Parse(pageURL)
+	inlineBodies := inlineScriptsByPosition(doc)
+
+	// Sort by document-order Position (coordinator preserves order,
+	// but be defensive in case of callback ordering edge cases).
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Position < results[j].Position
+	})
+
+	for _, r := range results {
+		source := r.Source
+		if r.Inline {
+			// M2 left inline Source empty; M4 fills it from the DOM walk.
+			if body, ok := inlineBodies[r.Position]; ok {
+				source = []byte(body)
+			} else {
+				log.Printf("Script queue: inline script at position %d has no body", r.Position)
+				continue
+			}
+			if csp != nil {
+				if err := csp.AllowScript("", baseURL); err != nil {
+					log.Printf("CSP blocked inline script at position %d: %v", r.Position, err)
+					continue
+				}
+			}
+		}
+
+		if _, err := jsRuntime.RunScript(string(source)); err != nil {
+			log.Printf("Error running %s script %s at position %d: %v",
+				scriptKind(r), scriptLabel(r), r.Position, err)
+			continue
+		}
+	}
+}
+
+func scriptKind(r documentloader.ScriptResult) string {
+	if r.Inline {
+		return "inline"
+	}
+	return "external"
+}
+
+func scriptLabel(r documentloader.ScriptResult) string {
+	if r.URL != "" {
+		return r.URL
+	}
+	if r.Resolved != "" {
+		return r.Resolved
+	}
+	return "<inline>"
 }
 
 // updateUIWithError updates the UI with an error message.
@@ -962,6 +1044,66 @@ func extractExternalScriptSrcs(doc *ghtml.Node) []string {
 	}
 	walk(doc)
 	return srcs
+}
+
+// inlineScriptsByPosition walks a parsed DOM and returns inline
+// <script> bodies keyed by the position the streaming parser would
+// have assigned. The streaming parser increments its resPos counter
+// for every element start tag EXCEPT the structural elements
+// <html>, <head>, and <body> (which return early in
+// handleStartTag before the resPos++). This walker mirrors that
+// quirk so positions align.
+//
+// This bridges the gap from M2: the streaming parser reports inline
+// scripts via OnResource with Inline=true and Source=nil because the
+// tokenizer cannot capture body bytes until </script> closes. Rather
+// than buffering script bodies in the parser (a more invasive change
+// deferred to a later milestone), M4 enriches the coordinator's
+// ScriptResults with bodies extracted from the secondary html.Parse
+// pass that RenderParsed already needs.
+//
+// Position alignment is verified by TestInlineScriptsByPosition_Aligns.
+func inlineScriptsByPosition(doc *ghtml.Node) map[int]string {
+	out := make(map[int]string)
+	if doc == nil {
+		return out
+	}
+	// Streaming parser skips these in resPos; mirror the skip.
+	skipResPos := map[string]bool{"html": true, "head": true, "body": true}
+	var pos int
+	var walk func(*ghtml.Node)
+	walk = func(n *ghtml.Node) {
+		if n.Type == ghtml.ElementNode {
+			if n.Data == "script" {
+				hasSrc := false
+				for _, attr := range n.Attr {
+					if attr.Key == "src" && attr.Val != "" {
+						hasSrc = true
+						break
+					}
+				}
+				if !hasSrc {
+					var sb strings.Builder
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						if c.Type == ghtml.TextNode {
+							sb.WriteString(c.Data)
+						}
+					}
+					if sb.Len() > 0 {
+						out[pos] = sb.String()
+					}
+				}
+			}
+			if !skipResPos[n.Data] {
+				pos++
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return out
 }
 
 func resolveScriptURL(src, pageURL string) (string, error) {
