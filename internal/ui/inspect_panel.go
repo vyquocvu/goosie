@@ -85,6 +85,7 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 	panel.closeButton = widget.NewButton("✕", func() {
 		if panel.htmlRenderer != nil {
 			panel.htmlRenderer.SetHighlightNode(nil)
+			panel.refreshRenderer()
 		}
 		if panel.onClose != nil {
 			panel.onClose()
@@ -249,6 +250,7 @@ func (ip *InspectPanel) createDetailsView() {
 func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 	if ip.htmlRenderer != nil {
 		ip.htmlRenderer.SetHighlightNode(nil)
+		ip.refreshRenderer()
 	}
 	ip.htmlRenderer = r
 	if r != nil {
@@ -283,6 +285,7 @@ func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 			if _, ok := ip.nodeMap[fmt.Sprintf("%d", ip.selectedNode.ID)]; ok {
 				ip.htmlRenderer.SetHighlightNode(ip.selectedNode)
 				ip.selectedLayout = ip.htmlRenderer.GetLayoutBox(ip.selectedNode)
+				ip.refreshRenderer()
 				ip.updateDetails()
 			} else {
 				ip.selectedNode = nil
@@ -340,6 +343,7 @@ func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.L
 	ip.selectedLayout = layout
 	if ip.htmlRenderer != nil {
 		ip.htmlRenderer.SetHighlightNode(node)
+		ip.refreshRenderer()
 	}
 	ip.updateDetails()
 	if ip.onSelectNode != nil {
@@ -357,6 +361,7 @@ func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
 		} else {
 			ip.htmlRenderer.SetHighlightNode(nil)
 		}
+		ip.refreshRenderer()
 	}
 	ip.selectedLayout = layout
 	ip.updateDetails()

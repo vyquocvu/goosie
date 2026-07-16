@@ -1702,10 +1702,12 @@ func (cr *CanvasRenderer) SetDirtyOverlayEnabled(enabled bool) {
 func (cr *CanvasRenderer) SetHighlightNode(node *RenderNode) {
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
-	cr.highlightNode = node
-	cr.cachedDisplayList = nil
-	cr.objectCache = make(map[int]fyne.CanvasObject)
-	cr.dlBuildGen++
+	if cr.highlightNode != node {
+		cr.highlightNode = node
+		cr.cachedDisplayList = nil
+		cr.objectCache = make(map[int]fyne.CanvasObject)
+		cr.dlBuildGen++
+	}
 }
 
 // DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
