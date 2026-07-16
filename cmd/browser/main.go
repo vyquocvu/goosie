@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
 	"github.com/vyquocvu/goosie/internal/dom"
+	csspkg "github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/engine/documentloader"
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
@@ -570,6 +571,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 
 	var externalResults []documentloader.CSSResult
 	var scriptResults []documentloader.ScriptResult
+	var coord *documentloader.Coordinator
 	coord, err := documentloader.New(documentloader.Options{
 		NavigationID:      load.ID,
 		NavigationContext: navCtx,
@@ -581,9 +583,36 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 		Callbacks: documentloader.Callbacks{
 			OnStylesheet: func(r documentloader.CSSResult) {
 				externalResults = append(externalResults, r)
+				// M7: extract nested resources (@import, @font-face,
+				// url()) from the fetched stylesheet and feed them
+				// back through the same coordinator. This keeps the
+				// network path uniform across top-level and nested
+				// resources.
+				if sheet, parseErr := csspkg.NewParser(string(r.Source)).Parse(); parseErr == nil {
+					for _, sub := range csspkg.ExtractResources(sheet) {
+						var k documentloader.ResourceKind
+						switch sub.Kind {
+						case csspkg.ResourceStylesheet:
+							k = documentloader.KindCSS
+						case csspkg.ResourceFont:
+							k = documentloader.KindFont
+						case csspkg.ResourceImage:
+							k = documentloader.KindImage
+						default:
+							continue
+						}
+						coord.EnqueueSecondary(context.Background(), k, sub.URL, r.Resolved)
+					}
+				}
 			},
 			OnScript: func(r documentloader.ScriptResult) {
 				scriptResults = append(scriptResults, r)
+			},
+			OnImage: func(r documentloader.ImageResult) {
+				log.Printf("CSS-nested image fetched: %s (%d bytes)", r.Resolved, len(r.Source))
+			},
+			OnFont: func(r documentloader.FontResult) {
+				log.Printf("CSS-nested font fetched: %s (%d bytes)", r.Resolved, len(r.Source))
 			},
 			OnError: func(_ documentloader.Resource, e error) {
 				if r := browser.ActiveTab(); r != nil {

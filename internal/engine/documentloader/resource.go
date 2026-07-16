@@ -19,8 +19,12 @@ const (
 	KindCSS ResourceKind = iota + 1
 	// KindScript represents <script src> or inline <script>.
 	KindScript
-	// KindImage represents <img src> and (later) CSS url(...) images.
+	// KindImage represents <img src> and (M7) CSS url(...) images.
 	KindImage
+	// KindFont represents @font-face src: url(...) discovered inside a
+	// stylesheet. The coordinator fetches the bytes and reports them
+	// via Callbacks.OnFont.
+	KindFont
 )
 
 // Default to zero so callers can omit ScriptMode for classic scripts;
@@ -35,6 +39,8 @@ func (k ResourceKind) String() string {
 		return "script"
 	case KindImage:
 		return "image"
+	case KindFont:
+		return "font"
 	default:
 		return fmt.Sprintf("unknown_kind_%d", uint8(k))
 	}
@@ -133,6 +139,16 @@ type ScriptResult struct {
 // ImageResult is the coordinator's output for one image load. M1 emits
 // the result; downstream caching/decoding is the caller's responsibility.
 type ImageResult struct {
+	URL      string
+	Resolved string
+	Source   []byte
+	Position int
+}
+
+// FontResult is the coordinator's output for one font load (M7). Fonts
+// are discovered via @font-face src: url(...) inside stylesheets. The
+// raw bytes are returned; decoding to glyphs is the renderer's job.
+type FontResult struct {
 	URL      string
 	Resolved string
 	Source   []byte

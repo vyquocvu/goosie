@@ -32,15 +32,16 @@ type Fetcher interface {
 // goroutine owned by the coordinator, so callers do not need their own
 // synchronization when reacting to a single coordinator.
 //
-// OnStylesheet / OnScript / OnImage are invoked exactly once per
-// resource that was successfully fetched and CSP-cleared. OnError is
-// invoked for every resource that was skipped (CSP, invalid URL,
-// unsupported mode) or that failed to fetch. OnLifecycle fires once at
-// HandleDocumentEnd.
+// OnStylesheet / OnScript / OnImage / OnFont are invoked exactly once
+// per resource that was successfully fetched and CSP-cleared. OnError
+// is invoked for every resource that was skipped (CSP, invalid URL,
+// unsupported mode) or that failed to fetch. OnLifecycle fires once
+// at HandleDocumentEnd.
 type Callbacks struct {
 	OnStylesheet func(CSSResult)
 	OnScript     func(ScriptResult)
 	OnImage      func(ImageResult)
+	OnFont       func(FontResult)
 	OnError      func(resource Resource, err error)
 	OnLifecycle  func(LifecycleEvent)
 }
@@ -71,6 +72,11 @@ type Options struct {
 	// Recorder receives phase timings for the subresource pipeline.
 	// nil disables per-phase recording for this navigation.
 	Recorder *metrics.Recorder
+	// MaxCSSImportDepth bounds nested @import chains. Zero means
+	// no limit (default). M7 enforces this against the coordinator's
+	// internal depth counter; the CSS parser's MaxImportDepth is a
+	// related but independent cap on parse-time recursion.
+	MaxCSSImportDepth int
 }
 
 // Coordinator owns subresource lifecycle for one navigation. It is not
@@ -96,6 +102,21 @@ type Coordinator struct {
 	asyncDone chan struct{}    // closed when asyncN hits 0 (after HandleDocumentEnd)
 	drainDone bool             // true after HandleDocumentEnd has run
 	finalized chan struct{}    // closed when HandleDocumentEnd / Cancel completes
+
+	// M7: depth tracking for nested CSS @import chains. Each
+	// EnqueueSecondary of a stylesheet kind increments cssDepthInt
+	// and bails when it exceeds MaxCSSImportDepth. This bounds
+	// recursion and protects against pathological @import cycles.
+	cssDepthInt    int32 // atomic; bumped on EnqueueSecondary of KindCSS, decremented on completion
+	maxCSSDepth    int
+	baseURLByDepth map[int]string // optional base URL overrides (for nested sheets)
+
+	// pendingSecondaries buffers EnqueueSecondary calls so they can
+	// be dispatched after the main drain (avoiding re-entrant
+	// deadlocks when callers invoke EnqueueSecondary from within
+	// OnStylesheet). flushed in flushPendingSecondaries.
+	pendingMu         sync.Mutex
+	pendingSecondaries []pendingSecondary
 }
 
 // bufferedResult is a completed result waiting to be emitted in
@@ -107,6 +128,7 @@ type bufferedResult struct {
 	css      *CSSResult
 	script   *ScriptResult
 	image    *ImageResult
+	font     *FontResult
 }
 
 // New constructs a Coordinator. Returns an error if any required field
@@ -138,8 +160,10 @@ func New(opts Options) (*Coordinator, error) {
 		fetcher:  opts.Fetcher,
 		cb:       opts.Callbacks,
 		rec:      opts.Recorder,
-		finalized: make(chan struct{}),
-		asyncDone: make(chan struct{}),
+		finalized:        make(chan struct{}),
+		asyncDone:        make(chan struct{}),
+		maxCSSDepth:      opts.MaxCSSImportDepth,
+		baseURLByDepth:   map[int]string{},
 	}
 	if c.rec != nil {
 		c.rec.BeginPhase(metrics.PhaseNavigation)
@@ -221,6 +245,101 @@ func (c *Coordinator) HandleResource(r Resource) {
 	go c.processResource(r)
 }
 
+// EnqueueSecondary registers a secondary resource discovered inside a
+// primary resource (e.g. @import url(...), @font-face src: url(...),
+// or url(...) in any declaration). M7 callers are typically the
+// OnStylesheet callback: after receiving a stylesheet's bytes, they
+// extract nested URLs and feed them back through this method.
+//
+// parentURL is the URL used to resolve rawURL when it is relative
+// (e.g. the stylesheet's resolved URL). Pass an empty string to
+// resolve against the document's base URL.
+//
+// Lifecycle: EnqueueSecondary may be called from inside any callback
+// without deadlocking. It does not fetch directly; it appends the
+// resource to c.pendingSecondaries. The pending slice is drained
+// once HandleDocumentEnd's main fetch loop has settled.
+//
+// Depth control: every KindCSS enqueue increments an internal depth
+// counter and decrements on completion. New KindCSS enqueues that
+// would exceed Options.MaxCSSImportDepth (when non-zero) are skipped
+// with a "max import depth exceeded" reason. Other kinds are not
+// depth-tracked.
+//
+// The returned bool reports whether the resource was accepted (true)
+// or skipped (false). When skipped, OnError fires with the reason.
+func (c *Coordinator) EnqueueSecondary(ctx context.Context, kind ResourceKind, rawURL, parentURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	if parentURL == "" {
+		parentURL = c.baseURL
+	}
+	parentP, err := url.Parse(parentURL)
+	if err != nil || parentP == nil {
+		c.skip(Resource{Kind: kind, URL: rawURL}, "secondary: invalid parent url "+parentURL)
+		return false
+	}
+	ref, err := url.Parse(rawURL)
+	if err != nil {
+		c.skip(Resource{Kind: kind, URL: rawURL}, "secondary: invalid url "+err.Error())
+		return false
+	}
+	abs := parentP.ResolveReference(ref)
+	absURL := abs.String()
+	if !IsHTTPOrHTTPS(absURL) {
+		c.skip(Resource{Kind: kind, URL: rawURL}, "secondary: non-http(s) scheme "+absURL)
+		return false
+	}
+	// Append to pending; the actual fetch happens after the main
+	// drain completes (see flushPendingSecondaries). This avoids
+	// deadlocks when EnqueueSecondary is called from within an
+	// OnStylesheet callback (which fires under c.mu during drain).
+	c.pendingMu.Lock()
+	c.pendingSecondaries = append(c.pendingSecondaries, pendingSecondary{
+		kind: kind, url: absURL,
+	})
+	c.pendingMu.Unlock()
+	return true
+}
+
+// pendingSecondary is a deferred resource enqueue recorded by
+// EnqueueSecondary. The coordinator flushes pendingSecondaries after
+// the main drain completes (HandleDocumentEnd). At flush time, each
+// pending entry is dispatched to HandleResource, which fetches it
+// and routes the result through the matching callback (OnStylesheet,
+// OnImage, OnFont).
+type pendingSecondary struct {
+	kind ResourceKind
+	url  string // absolute
+}
+
+// flushPendingSecondaries moves every pending secondary into the
+// normal HandleResource path. Called after the main drain so that
+// callbacks fired during drain (which hold c.mu) have already
+// returned.
+//
+// Depth enforcement: pending CSS enqueues are checked against
+// c.maxCSSDepth before being dispatched. Excess enqueues are
+// reported via OnError and dropped.
+func (c *Coordinator) flushPendingSecondaries() {
+	c.pendingMu.Lock()
+	pending := c.pendingSecondaries
+	c.pendingSecondaries = nil
+	c.pendingMu.Unlock()
+	for _, p := range pending {
+		if p.kind == KindCSS && c.maxCSSDepth > 0 {
+			depth := atomic.AddInt32(&c.cssDepthInt, 1)
+			if int(depth) > c.maxCSSDepth {
+				atomic.AddInt32(&c.cssDepthInt, -1)
+				c.skip(Resource{Kind: p.kind, URL: p.url}, "max css import depth exceeded")
+				continue
+			}
+		}
+		c.HandleResource(Resource{Kind: p.kind, URL: p.url})
+	}
+}
+
 // HandleDocumentEnd waits for all in-flight fetches to settle, emits
 // any buffered results in document order, then fires EventDocumentEnd.
 // After HandleDocumentEnd returns, the coordinator is closed and any
@@ -249,10 +368,49 @@ func (c *Coordinator) HandleDocumentEnd(ctx context.Context) error {
 		c.mu.Unlock()
 		return waitErr
 	}
-	c.closed = true
 	c.drainLocked()
-	c.drainDone = true
-	close(c.finalized)
+	c.mu.Unlock()
+
+	// M7: secondary resources (M7 @import/@font-face/url()) are
+	// enqueued by OnStylesheet callbacks during the drain. Flush them
+	// here and run a second fetch+drain cycle so their results fire
+	// before we close. We cap the number of secondary cycles to
+	// prevent runaway recursion if a fetched stylesheet adds more
+	// stylesheets (depth limit already enforces this; the cap is
+	// defense in depth).
+	const maxSecondaryCycles = 8
+	for cycle := 0; cycle < maxSecondaryCycles; cycle++ {
+		if c.pendingCount() == 0 {
+			break
+		}
+		c.flushPendingSecondaries()
+		// Wait for the freshly-dispatched fetches to settle.
+		done2 := make(chan struct{})
+		go func() {
+			c.inFlight.Wait()
+			close(done2)
+		}()
+		select {
+		case <-done2:
+		case <-ctx.Done():
+			waitErr = ctx.Err()
+		case <-c.navCtx.Done():
+			waitErr = c.navCtx.Err()
+		}
+		c.mu.Lock()
+		c.drainLocked()
+		c.mu.Unlock()
+		if waitErr != nil {
+			break
+		}
+	}
+
+	c.mu.Lock()
+	if !c.closed {
+		c.closed = true
+		c.drainDone = true
+		close(c.finalized)
+	}
 	c.mu.Unlock()
 
 	// M5: Emit EventDOMContentLoaded after classic + deferred drain.
@@ -279,6 +437,15 @@ func (c *Coordinator) HandleDocumentEnd(ctx context.Context) error {
 		c.rec.EndPhase(metrics.PhaseStyle)
 	}
 	return waitErr
+}
+
+// pendingCount returns the current size of the pendingSecondaries
+// queue. Used by HandleDocumentEnd to detect whether another cycle is
+// needed.
+func (c *Coordinator) pendingCount() int {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	return len(c.pendingSecondaries)
 }
 
 // fireLoadEvents emits EventLoad and EventDocumentEnd. Safe to call
@@ -455,6 +622,13 @@ func (c *Coordinator) processResource(r Resource) {
 			Source:   []byte(body),
 			Position: r.Position,
 		})
+	case KindFont:
+		c.emitFont(FontResult{
+			URL:      r.URL,
+			Resolved: resolved,
+			Source:   []byte(body),
+			Position: r.Position,
+		})
 	}
 	_ = start // reserved for future per-resource timing
 }
@@ -480,6 +654,10 @@ func (c *Coordinator) cspCheck(kind ResourceKind, resolved string) string {
 		if !c.csp.AllowsURL("img-src", resolved, c.baseURLP) {
 			return "csp: img-src disallows " + resolved
 		}
+	case KindFont:
+		if !c.csp.AllowsURL("font-src", resolved, c.baseURLP) {
+			return "csp: font-src disallows " + resolved
+		}
 	}
 	return ""
 }
@@ -493,6 +671,8 @@ func (c *Coordinator) priorityFor(kind ResourceKind) navigation.Priority {
 		return navigation.PriorityScript
 	case KindImage:
 		return navigation.PriorityVisibleImage
+	case KindFont:
+		return navigation.PrioritySpeculative
 	default:
 		return navigation.PrioritySpeculative
 	}
@@ -509,6 +689,9 @@ func (c *Coordinator) emitScript(r ScriptResult) {
 }
 func (c *Coordinator) emitImage(r ImageResult) {
 	c.buffer(r.Position, bufferedResult{position: r.Position, kind: KindImage, image: &r})
+}
+func (c *Coordinator) emitFont(r FontResult) {
+	c.buffer(r.Position, bufferedResult{position: r.Position, kind: KindFont, font: &r})
 }
 
 // buffer stores a completed result at its source position. Drain
@@ -554,7 +737,10 @@ func (c *Coordinator) fireAsync(r ScriptResult) {
 }
 
 // drainLocked emits all buffered results in source-order position.
-// Caller must hold c.mu.
+// Caller must hold c.mu. After the callback pass, c.results is
+// cleared so the next drain cycle only sees newly-buffered entries;
+// without this, M7 secondary cycles would re-fire OnStylesheet for
+// every previously-seen stylesheet and infinite-loop.
 func (c *Coordinator) drainLocked() {
 	if len(c.results) == 0 {
 		return
@@ -562,7 +748,9 @@ func (c *Coordinator) drainLocked() {
 	sort.SliceStable(c.results, func(i, j int) bool {
 		return c.results[i].position < c.results[j].position
 	})
-	for _, r := range c.results {
+	results := c.results
+	c.results = nil
+	for _, r := range results {
 		switch r.kind {
 		case KindCSS:
 			if c.cb.OnStylesheet != nil && r.css != nil {
@@ -575,6 +763,10 @@ func (c *Coordinator) drainLocked() {
 		case KindImage:
 			if c.cb.OnImage != nil && r.image != nil {
 				c.cb.OnImage(*r.image)
+			}
+		case KindFont:
+			if c.cb.OnFont != nil && r.font != nil {
+				c.cb.OnFont(*r.font)
 			}
 		}
 	}
