@@ -406,8 +406,34 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 	text := cr.extractText(node)
 	href, hasHref := node.GetAttribute("href")
 
-	if text == "" {
+	// Check if the anchor contains non-text children (e.g. <img>)
+	hasNonTextChildren := false
+	for _, child := range node.Children {
+		if child.Type == NodeTypeElement {
+			hasNonTextChildren = true
+			break
+		}
+	}
+
+	// If there is no text and no non-text children, nothing to render.
+	if text == "" && !hasNonTextChildren {
 		return
+	}
+
+	// If the anchor contains images (or other element children) but no text,
+	// render the children directly so images are not silently dropped.
+	if text == "" && hasNonTextChildren {
+		for _, child := range node.Children {
+			cr.renderNode(child, objects)
+		}
+		return
+	}
+
+	// Render any element children (e.g. images inside the link) first.
+	for _, child := range node.Children {
+		if child.Type == NodeTypeElement {
+			cr.renderNode(child, objects)
+		}
 	}
 
 	if hasHref && href != "" {
@@ -448,6 +474,7 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 		*objects = append(*objects, label)
 	}
 }
+
 
 // resolveURL resolves a relative or absolute URL against the base URL
 func (cr *CanvasRenderer) resolveURL(href string) string {

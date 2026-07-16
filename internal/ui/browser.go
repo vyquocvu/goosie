@@ -49,6 +49,34 @@ func (l *fixedHeightLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) 
 	objects[0].Move(fyne.NewPos(0, 0))
 }
 
+// fixedSizeLayout is a custom layout that pins an object to an exact width × height.
+type fixedSizeLayout struct {
+	width, height float32
+}
+
+func (l *fixedSizeLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(l.width, l.height)
+}
+
+func (l *fixedSizeLayout) Layout(objects []fyne.CanvasObject, _ fyne.Size) {
+	for _, o := range objects {
+		o.Resize(fyne.NewSize(l.width, l.height))
+		o.Move(fyne.NewPos(0, 0))
+	}
+}
+
+// compactBtn wraps a button in a fixed-size container so it renders as a
+// small oval/capsule rather than a full-height bar button.
+func compactBtn(btn *widget.Button) *fyne.Container {
+	const btnH float32 = 28
+	// For icon-only / short labels keep it square-ish; wider labels get more room.
+	minW := btn.MinSize().Width
+	if minW < btnH {
+		minW = btnH
+	}
+	return container.New(&fixedSizeLayout{width: minW, height: btnH}, btn)
+}
+
 // NavigationCallback is a function that is called when navigation is requested
 type NavigationCallback func(url string)
 
@@ -108,6 +136,37 @@ type Browser struct {
 	deps                BrowserDependencies
 	shortcuts           *ShortcutRegistry
 	headless            bool
+}
+
+// windowResizeWatcher wraps content and fires a callback when its size
+// changes (e.g. on window resize). It sits at the top of the content
+// hierarchy to detect size changes propagated by Fyne's layout system.
+type windowResizeWatcher struct {
+	widget.BaseWidget
+	content  fyne.CanvasObject
+	lastSize fyne.Size
+	onResize func(fyne.Size)
+}
+
+func newWindowResizeWatcher(content fyne.CanvasObject, onResize func(fyne.Size)) *windowResizeWatcher {
+	w := &windowResizeWatcher{
+		content:  content,
+		onResize: onResize,
+	}
+	w.ExtendBaseWidget(w)
+	return w
+}
+
+func (w *windowResizeWatcher) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(w.content)
+}
+
+func (w *windowResizeWatcher) Resize(size fyne.Size) {
+	w.BaseWidget.Resize(size)
+	if w.lastSize != size && w.onResize != nil {
+		w.lastSize = size
+		w.onResize(size)
+	}
 }
 
 // Tab represents a single browser tab
@@ -593,6 +652,29 @@ func (b *Browser) ActiveTab() *Tab {
 	return b.tabItems[selectedIndex]
 }
 
+// onWindowResize handles window resize events by updating the active tab's
+// renderer dimensions and triggering a full re-render with the new layout.
+func (b *Browser) onWindowResize(_ fyne.Size) {
+	tab := b.ActiveTab()
+	if tab == nil || tab.htmlRenderer == nil {
+		return
+	}
+
+	contentSize := tab.contentScroll.Size()
+	if contentSize.Width <= 0 || contentSize.Height <= 0 {
+		return
+	}
+
+	tab.htmlRenderer.SetSize(contentSize.Width, contentSize.Height)
+	tab.htmlRenderer.Refresh()
+
+	canvasObject := tab.htmlRenderer.UpdateViewport()
+	if canvasObject != nil {
+		tab.contentScroll.Content = canvasObject
+		tab.contentScroll.Refresh()
+	}
+}
+
 // SetContent updates the displayed content (plain text)
 func (b *Browser) SetContent(content string) {
 	if tab := b.ActiveTab(); tab != nil {
@@ -709,11 +791,33 @@ func (b *Browser) SetNavigationCallback(callback NavigationCallback) {
 
 // Show displays the browser window
 func (b *Browser) Show() {
-	// Create navigation bar
-	navBar := container.NewBorder(nil, nil,
-		container.NewHBox(b.backButton, b.forwardButton, b.refreshButton),
-		container.NewHBox(b.bookmarkButton, b.bookmarksListButton, b.historyButton, b.downloadsButton, b.screenshotButton, b.devToolsButton, b.dirtyOverlayButton, b.consoleButton, b.inspectButton, b.settingsButton),
-		b.urlEntry,
+	// Wrap URL entry in a fixed-height container so the nav bar stays slim.
+	const navH float32 = 32
+	urlContainer := container.New(&fixedHeightLayout{height: navH}, b.urlEntry)
+
+	// Compact nav buttons — each wrapped to stay small and oval.
+	leftBtns := container.NewHBox(
+		compactBtn(b.backButton),
+		compactBtn(b.forwardButton),
+		compactBtn(b.refreshButton),
+	)
+	rightBtns := container.NewHBox(
+		compactBtn(b.bookmarkButton),
+		compactBtn(b.bookmarksListButton),
+		compactBtn(b.historyButton),
+		compactBtn(b.downloadsButton),
+		compactBtn(b.screenshotButton),
+		compactBtn(b.devToolsButton),
+		compactBtn(b.dirtyOverlayButton),
+		compactBtn(b.consoleButton),
+		compactBtn(b.inspectButton),
+		compactBtn(b.settingsButton),
+	)
+
+	// Nav bar: nav buttons on left, action buttons on right, URL entry in centre.
+	navBar := container.New(
+		&fixedHeightLayout{height: navH},
+		container.NewBorder(nil, nil, leftBtns, rightBtns, urlContainer),
 	)
 
 	// Dev tools dock container (hidden initially, skipped in headless mode)
@@ -745,7 +849,13 @@ func (b *Browser) Show() {
 		bg.Refresh()
 	})
 
-	contentWithBg := container.NewMax(bg, mainContent)
+	// Wrap in a resize-detecting widget to trigger re-renders on window resize
+	var contentRoot fyne.CanvasObject = mainContent
+	if !b.headless {
+		contentRoot = newWindowResizeWatcher(mainContent, b.onWindowResize)
+	}
+
+	contentWithBg := container.NewMax(bg, contentRoot)
 	b.window.SetContent(contentWithBg)
 
 	// Register F12 to toggle dev tools

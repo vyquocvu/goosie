@@ -52,4 +52,5 @@ func (m *MockHTMLRendererComp) GetLayoutBox(node *renderer.RenderNode) *renderer
 	return nil
 }
 func (m *MockHTMLRendererComp) SetHeadless(bool) {}
+func (m *MockHTMLRendererComp) SetSize(width, height float32) {}
 

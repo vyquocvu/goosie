@@ -49,6 +49,11 @@ type HTMLRenderer interface {
 	// DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
 	DirtyOverlayEnabled() bool
 
+	// SetSize updates the renderer's canvas dimensions and marks it for
+	// re-layout. Callers should call Refresh() after SetSize to recompute
+	// style/layout and trigger a re-render.
+	SetSize(width, height float32)
+
 	// GetDOMNodeCounts returns the total, element, and text node counts
 	// from the current render tree.
 	GetDOMNodeCounts() (total int, elements int, text int)

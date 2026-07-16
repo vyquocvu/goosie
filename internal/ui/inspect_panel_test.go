@@ -65,6 +65,7 @@ func (m *MockHTMLRenderer) GetLayoutBox(node *renderer.RenderNode) *renderer.Lay
 	return nil
 }
 func (m *MockHTMLRenderer) SetHeadless(bool) {}
+func (m *MockHTMLRenderer) SetSize(width, height float32) {}
 
 func TestNewInspectPanel(t *testing.T) {
 	app := test.NewApp()
