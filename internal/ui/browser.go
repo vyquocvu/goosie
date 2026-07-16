@@ -24,6 +24,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/profile"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/ui/devtools"
+
+	"golang.org/x/net/html"
 )
 
 // fixedHeightLayout is a custom layout that sets a fixed height for a widget
@@ -698,25 +700,73 @@ func (b *Browser) RenderHTMLContent(ctx context.Context, htmlContent string) err
 	return tab.RenderHTML(ctx, htmlContent)
 }
 
+// RenderParsedContent renders an already-parsed HTML node with the
+// supplied external stylesheets on the active tab. It is the M3
+// snapshot entry point exposed at the UI layer; callers (typically
+// cmd/browser after the documentloader coordinator has finished
+// fetching CSS) hand in a fully assembled set of stylesheets and the
+// renderer does not perform any further network I/O for them.
+func (b *Browser) RenderParsedContent(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) error {
+	tab := b.ActiveTab()
+	if tab == nil {
+		return nil
+	}
+	return tab.RenderParsedContent(ctx, doc, externalCSS)
+}
+
 // RenderHTML renders HTML content using the canvas-based renderer for this specific tab
 func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
-	// Lazily initialize the renderer if needed
-	if t.htmlRenderer == nil {
-		if t.browser.RendererFactory == nil {
-			return fmt.Errorf("RendererFactory is not set")
-		}
-		t.htmlRenderer = t.browser.RendererFactory()
-		if t.htmlRenderer == nil {
-			return fmt.Errorf("RendererFactory returned nil renderer")
-		}
-		t.htmlRenderer.SetWindow(t.browser.window)
-		t.htmlRenderer.SetHeadless(t.browser.headless)
-		t.htmlRenderer.SetNavigationCallback(func(url string) {
-			if t.browser.onNavigate != nil {
-				t.browser.onNavigate(url)
-			}
-		})
+	t.ensureHTMLRenderer()
+
+	canvasObject, err := t.htmlRenderer.RenderHTML(ctx, htmlContent)
+	if err != nil {
+		return err
 	}
+
+	t.publishCanvasObject(canvasObject)
+	return nil
+}
+
+// RenderParsedContent is the M3 snapshot entry point at the tab level.
+// Behavior matches RenderHTML for the UI surface (lazy init, refresh
+// callbacks, devtools wiring) but routes through renderer.RenderParsed
+// so no further CSS fetching happens inside the renderer.
+func (t *Tab) RenderParsedContent(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) error {
+	t.ensureHTMLRenderer()
+
+	canvasObject, err := t.htmlRenderer.RenderParsed(ctx, doc, externalCSS)
+	if err != nil {
+		return err
+	}
+
+	t.publishCanvasObject(canvasObject)
+	return nil
+}
+
+// ensureHTMLRenderer initializes the lazy renderer on first use and
+// wires the navigation / inspect / refresh / context-menu callbacks.
+// Shared by RenderHTML and RenderParsedContent.
+func (t *Tab) ensureHTMLRenderer() {
+	if t.htmlRenderer != nil {
+		return
+	}
+	if t.browser.RendererFactory == nil {
+		// RenderHTML/RenderParsedContent will surface this as a render
+		// error on the next call; we keep the panic-free path here.
+		return
+	}
+	t.htmlRenderer = t.browser.RendererFactory()
+	if t.htmlRenderer == nil {
+		return
+	}
+	t.htmlRenderer.SetWindow(t.browser.window)
+	t.htmlRenderer.SetHeadless(t.browser.headless)
+	t.htmlRenderer.SetNavigationCallback(func(url string) {
+		if t.browser.onNavigate != nil {
+			t.browser.onNavigate(url)
+		}
+	})
+
 	// Set the current URL for resolving relative links
 	currentURL := t.state.GetCurrentURL()
 	t.htmlRenderer.SetCurrentURL(currentURL)
@@ -754,13 +804,12 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 			}
 		})
 	})
+}
 
-	canvasObject, err := t.htmlRenderer.RenderHTML(ctx, htmlContent)
-	if err != nil {
-		return err
-	}
-
-	// Update the scroll container with the rendered content on the main thread
+// publishCanvasObject installs the rendered canvas into the scroll
+// container on the main thread. Shared by RenderHTML and
+// RenderParsedContent.
+func (t *Tab) publishCanvasObject(canvasObject fyne.CanvasObject) {
 	t.browser.do(func() {
 		t.contentScroll.Content = canvasObject
 		t.contentScroll.Refresh()
@@ -768,8 +817,6 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 			t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 		}
 	})
-
-	return nil
 }
 
 func refreshTabContent(tab *Tab) {

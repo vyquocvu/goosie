@@ -257,6 +257,207 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	return canvasObject, nil
 }
 
+// ExternalCSS is one externally-fetched stylesheet delivered to the
+// renderer. Source is the raw CSS body; URL is the resolved URL used
+// for diagnostics and CSP error messages. Callers are expected to
+// have already CSP-checked and resolved the URL against the document.
+type ExternalCSS struct {
+	URL    string
+	Source []byte
+}
+
+// RenderParsed renders a pre-parsed HTML node with the supplied
+// external stylesheets and returns a Fyne canvas object. It is the
+// snapshot entry point introduced by M3 of the resource pipeline
+// plan: callers (e.g. cmd/browser after the documentloader coordinator
+// has fetched all stylesheets) hand in a fully assembled set of CSS
+// sources in document order, and the renderer blocks only on the
+// render itself — no async CSS loading happens here.
+//
+// Behavior:
+//   - Inline <style> tag contents are extracted from doc and merged
+//     with external in source order (inline first, external appended
+//     in the order provided).
+//   - r.loadExternalCSS is NOT called. The caller is responsible for
+//     any further external CSS loading.
+//   - On a parse failure of doc, the error is returned.
+//
+// RenderHTML remains the legacy entry point for direct callers (tests,
+// demos, headless renderer); it continues to call loadExternalCSS
+// asynchronously and is unchanged in observable behavior.
+func (r *Renderer) RenderParsed(ctx context.Context, doc *html.Node, externalCSS []ExternalCSS) (fyne.CanvasObject, error) {
+	start := time.Now()
+	defer func() { r.metrics.RecordRenderHTML(time.Since(start)) }()
+
+	globalTableColumnCache.Clear()
+	recorder := metrics.RecorderFromContext(ctx)
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseParse)
+	}
+
+	if recorder != nil {
+		recorder.AddCounters(metrics.Counters{
+			NodeCount: countHTMLNodes(doc),
+		})
+	}
+
+	// Assemble stylesheet: inline + external (in source order).
+	inline := extractAndParseCSS(doc)
+	assembled := mergeInlineAndExternalCSS(inline, externalCSS)
+
+	r.stylesheetMu.Lock()
+	r.stylesheet = assembled
+	r.stylesheetMu.Unlock()
+
+	if recorder != nil && r.stylesheet != nil {
+		rules, selectors := countRulesAndSelectors(r.stylesheet)
+		recorder.AddCounters(metrics.Counters{
+			RuleCount:     rules,
+			SelectorCount: selectors,
+		})
+	}
+
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseParse)
+	}
+
+	return r.renderParsedInner(ctx, doc, recorder), nil
+}
+
+// renderParsedInner runs style, layout, raster, and image loading for a
+// pre-assembled document and stylesheet. Shared helper used by
+// RenderParsed and by tests that want to drive these phases directly
+// without going through RenderHTML.
+func (r *Renderer) renderParsedInner(ctx context.Context, doc *html.Node, recorder *metrics.Recorder) fyne.CanvasObject {
+	// Find html element
+	htmlNode := findHTMLNode(doc)
+	if htmlNode == nil {
+		// No html found, use the entire document
+		htmlNode = doc
+	}
+
+	// Build render tree
+	renderTree := BuildRenderTree(htmlNode)
+	if renderTree == nil {
+		// Return empty container if no content
+		return r.canvasRenderer.Render(nil)
+	}
+
+	r.treeMu.RLock()
+	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
+	r.treeMu.RUnlock()
+
+	r.treeMu.Lock()
+
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseStyle)
+	}
+	// Apply styles
+	renderTreeCopy := renderTree.Clone()
+	r.stylesheetMu.RLock()
+	if r.stylesheet != nil {
+		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
+		styleManager.ApplyStyles(renderTreeCopy)
+	}
+	r.stylesheetMu.RUnlock()
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseStyle)
+	}
+
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseLayout)
+	}
+	// Perform layout
+	layoutEngine := NewLayoutEngine(width, height)
+	layoutStart := time.Now()
+	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
+	r.metrics.RecordComputeLayout(time.Since(layoutStart))
+	renderTree = renderTreeCopy
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseLayout)
+
+		boxes, fragments := countBoxesAndFragments(layoutTree)
+		recorder.AddCounters(metrics.Counters{
+			BoxCount:      boxes,
+			FragmentCount: fragments,
+		})
+	}
+
+	// Cache trees for viewport updates
+	r.currentRenderTree = renderTree
+	r.currentLayoutTree = layoutTree
+	r.dirty = false
+	r.treeMu.Unlock()
+
+	// Pass navigation callback to canvas renderer
+	r.treeMu.RLock()
+	onNav := r.onNavigate
+	curURL := r.currentURL
+	r.treeMu.RUnlock()
+	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
+
+	if recorder != nil {
+		recorder.BeginPhase(metrics.PhaseRaster)
+	}
+	// Render to canvas with viewport optimization
+	viewportStart := time.Now()
+	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
+	r.metrics.RecordRenderWithViewport(time.Since(viewportStart))
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseRaster)
+
+		// Read cached display list command count
+		r.canvasRenderer.mu.RLock()
+		if r.canvasRenderer.cachedDisplayList != nil {
+			recorder.AddCounters(metrics.Counters{
+				DisplayItemCount: len(r.canvasRenderer.cachedDisplayList.Commands),
+			})
+		}
+		r.canvasRenderer.mu.RUnlock()
+
+		// Count images from renderTree
+		images := countImages(renderTree)
+		recorder.AddCounters(metrics.Counters{
+			ImageCount: images,
+		})
+	}
+
+	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
+	r.loadImages(renderTree)
+
+	_ = ctx // reserved for future per-frame recorder hooks
+	return canvasObject
+}
+
+// mergeInlineAndExternalCSS combines inline <style> rules with external
+// stylesheets in source order. The external list is the order returned
+// by the documentloader coordinator. Each external entry is parsed
+// independently; parse failures are skipped silently and reported via
+// the renderer's logger when one is configured.
+//
+// shouldAttemptParseExternalCSS is the same gate loadExternalCSS uses
+// to refuse non-CSS bodies (e.g. an HTML 404 page). Keeping the gate
+// here ensures RenderParsed and loadExternalCSS behave consistently
+// when fed the same source bytes.
+func mergeInlineAndExternalCSS(inline *css.StyleSheet, external []ExternalCSS) *css.StyleSheet {
+	if inline == nil {
+		inline = &css.StyleSheet{}
+	}
+	for _, e := range external {
+		body := string(e.Source)
+		if !shouldAttemptParseExternalCSS(body) {
+			continue
+		}
+		parser := css.NewParser(body)
+		sheet, err := parser.Parse()
+		if err != nil {
+			continue
+		}
+		inline.Rules = append(inline.Rules, sheet.Rules...)
+	}
+	return inline
+}
+
 // SetViewport updates the viewport for optimized rendering during scroll
 func (r *Renderer) SetViewport(y, height float32) {
 	r.canvasRenderer.SetViewport(y, height)

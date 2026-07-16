@@ -6,10 +6,17 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
+	"golang.org/x/net/html"
 )
 
 type HTMLRenderer interface {
 	RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error)
+	// RenderParsed renders a pre-parsed HTML node with the supplied
+	// external stylesheets. It is the M3 snapshot entry point: the
+	// caller has already fetched CSS via the documentloader
+	// coordinator and the renderer does not perform further network
+	// I/O for stylesheets.
+	RenderParsed(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) (fyne.CanvasObject, error)
 	UpdateViewport() fyne.CanvasObject
 	SetCurrentURL(url string)
 	ResolveURL(url string) string

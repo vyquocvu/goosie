@@ -15,6 +15,8 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/engine/documentloader"
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
@@ -126,7 +128,7 @@ func main() {
 	// Set up navigation callback
 	browser.SetNavigationCallback(func(url string) {
 		load, ctx := navSession.Navigate(context.Background(), url)
-		loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, func() {
+		loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, navSession, networkService, func() {
 			select {
 			case pageLoaded <- true:
 			default:
@@ -140,7 +142,7 @@ func main() {
 
 		if *urlFlag != "" {
 			load, ctx := navSession.Navigate(context.Background(), *urlFlag)
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, func() {
+			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, navSession, networkService, func() {
 				pageLoaded <- true
 			})
 
@@ -163,7 +165,7 @@ func main() {
 		// Non-headless mode
 		if *urlFlag != "" {
 			load, ctx := navSession.Navigate(context.Background(), *urlFlag)
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
+			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
 		}
 
 		// Show browser window (this blocks until window is closed)
@@ -382,6 +384,324 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 	}()
 }
 
+// loadPageAsyncWithCoordinator is the M3-aware sibling of
+// loadPageAsync. After fetching the HTML, it parses with the streaming
+// parser (firing OnResource into a documentloader coordinator), waits
+// for external CSS to land, then routes the assembled document and
+// stylesheets into renderer.RenderParsed via the UI's snapshot entry
+// point. The coordinator owns CSP gating, URL resolution, scheduling,
+// and ordered fetch.
+//
+// loadPageAsync continues to work for callers that bypass the
+// coordinator; the new path is the recommended one for browser
+// navigation.
+func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session, networkService *net.Service, onComplete func()) {
+	log.Printf("Navigation %s (coordinator) started: %s", load.ID, load.URL)
+
+	browser.NavigateTo(load.URL)
+	browser.ShowLoading()
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetSubmitting(true)
+		}
+	}
+
+	navID := load.ID
+	url := load.URL
+
+	go func() {
+		defer func() {
+			if onComplete != nil {
+				onComplete()
+			}
+		}()
+
+		if !sess.IsActive(navID) {
+			return
+		}
+
+		resolvedURL := url
+		if activeTab := browser.ActiveTab(); activeTab != nil {
+			if renderer := activeTab.GetRenderer(); renderer != nil {
+				resolvedURL = renderer.ResolveURL(url)
+			}
+		}
+
+		if strings.HasPrefix(url, "#") {
+			log.Printf("Navigation %s anchor link: %s", navID, url)
+			if sess.IsActive(navID) {
+				browser.HideLoading()
+				if activeTab := browser.ActiveTab(); activeTab != nil {
+					if r := activeTab.GetRenderer(); r != nil {
+						r.SetSubmitting(false)
+					}
+				}
+			}
+			return
+		}
+
+		stream, meta, fetchErr := fetcher.FetchStreamWithContext(ctx, resolvedURL)
+
+		if !sess.IsActive(navID) {
+			log.Printf("Navigation %s stale after fetch: %s", navID, url)
+			if stream != nil {
+				stream.Close()
+			}
+			return
+		}
+
+		if ctx.Err() != nil {
+			log.Printf("Navigation %s cancelled: %s", navID, url)
+			if stream != nil {
+				stream.Close()
+			}
+			return
+		}
+
+		// Detect non-HTML responses (downloads).
+		cd := meta.Header.Get("Content-Disposition")
+		isAttachment := strings.HasPrefix(strings.ToLower(strings.TrimSpace(cd)), "attachment")
+		isDownload := isAttachment
+		if !isDownload && fetchErr == nil {
+			contentType := strings.ToLower(meta.ContentType)
+			isWebPage := false
+			for _, t := range []string{"text/html", "application/xhtml+xml", "text/plain", "application/json"} {
+				if strings.Contains(contentType, t) {
+					isWebPage = true
+					break
+				}
+			}
+			isImage := strings.HasPrefix(contentType, "image/")
+			if !isWebPage && !isImage && contentType != "" {
+				isDownload = true
+			}
+		}
+
+		if isDownload {
+			if stream != nil {
+				stream.Close()
+			}
+			filename := getFilenameFromURLAndCD(resolvedURL, cd)
+			fyne.Do(func() {
+				browser.HideLoading()
+				if activeTab := browser.ActiveTab(); activeTab != nil {
+					if r := activeTab.GetRenderer(); r != nil {
+						r.SetSubmitting(false)
+					}
+				}
+				d := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+					if err != nil || writer == nil {
+						return
+					}
+					targetPath := writer.URI().Path()
+					writer.Close()
+					go func() {
+						record := net.DownloadRecord{
+							URL:        resolvedURL,
+							TargetPath: targetPath,
+							Status:     net.DownloadRunning,
+							StartedAt:  time.Now(),
+						}
+						networkService.AddDownload(record)
+						m := net.NewDownloadManager(sess.HTTPClient())
+						res, _ := m.DownloadWithContext(context.Background(), resolvedURL, targetPath)
+						networkService.UpdateDownload(res)
+					}()
+				}, browser.GetWindow())
+				d.SetFileName(filename)
+				d.Show()
+			})
+			return
+		}
+
+		var html string
+		if fetchErr != nil {
+			if resolvedURL == "https://example.com" {
+				html = `<!DOCTYPE html>
+<html><head><title>Example Domain</title></head>
+<body><div><h1>Example Domain</h1><p>Mock fallback.</p></div></body></html>`
+			} else {
+				updateUIWithError(browser, sess, navID, fetchErr, resolvedURL)
+				return
+			}
+		} else {
+			data, readErr := io.ReadAll(stream)
+			stream.Close()
+			if readErr != nil {
+				log.Printf("Navigation %s stream read error: %v", navID, readErr)
+				updateUIWithError(browser, sess, navID, readErr, resolvedURL)
+				return
+			}
+			html = string(data)
+			if meta.Status >= 400 && strings.TrimSpace(html) == "" {
+				html = fmt.Sprintf(
+					"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
+					meta.Status, strings.TrimSpace(fmt.Sprintf("%d", meta.Status)),
+				)
+			}
+		}
+
+		updateUIWithCoordinatorContent(ctx, browser, fetcher, sess, navID, html, resolvedURL, networkService, parser)
+	}()
+}
+
+// updateUIWithCoordinatorContent is the M3 path: stream-parse the
+// HTML, route discoveries through the documentloader coordinator,
+// wait for external CSS, then render via renderer.RenderParsed. This
+// is the snapshot entry point that delivers the first styled frame
+// with required CSS rules per plan.md M3 acceptance criteria #3.
+func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string, networkService *net.Service, parser *dom.Parser) {
+	if !sess.IsActive(navID) {
+		return
+	}
+	log.Printf("Navigation %s (coordinator) rendering", navID)
+
+	// 1. Wire the active navigation + CSP into the coordinator.
+	scheduler := navigation.NewScheduler()
+	defer scheduler.Cancel()
+
+	load, navCtx := scheduler.Begin(ctx, url)
+	recorder := metrics.NewRecorder(uint64(load.ID), url)
+
+	csp := fetcher.CSP()
+	docFetcher := fetcher
+
+	var externalResults []documentloader.CSSResult
+	coord, err := documentloader.New(documentloader.Options{
+		NavigationID:      load.ID,
+		NavigationContext: navCtx,
+		FinalURL:          url,
+		CSP:               csp,
+		Scheduler:         scheduler,
+		Fetcher:           docFetcher,
+		Recorder:          recorder,
+		Callbacks: documentloader.Callbacks{
+			OnStylesheet: func(r documentloader.CSSResult) {
+				externalResults = append(externalResults, r)
+			},
+			OnError: func(_ documentloader.Resource, e error) {
+				if r := browser.ActiveTab(); r != nil {
+					if rend := r.GetRenderer(); rend != nil {
+						log.Printf("Coordinator resource skipped: %v", e)
+					}
+				}
+			},
+		},
+	})
+	if err != nil {
+		log.Printf("Navigation %s coordinator init failed: %v", navID, err)
+		// Fall back to the legacy path so the user still sees the page.
+		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, url, sess, networkService, parser)
+		return
+	}
+
+	// 2. Stream-parse the HTML, feeding discoveries into the coordinator.
+	parseCtx, cancel := context.WithTimeout(navCtx, 30*time.Second)
+	_, _ = parser.ParseDocumentCtx(parseCtx, strings.NewReader(html), dom.ParseConfig{
+		OnResource: coord.FromDomOnResource(),
+	})
+	cancel()
+
+	// 3. Wait for in-flight CSS fetches to settle (timeout fallback
+	//    renders with what we have so far, per plan.md M3 acceptance).
+	if err := coord.HandleDocumentEnd(parseCtx); err != nil {
+		log.Printf("Navigation %s coordinator drain ended with %v (continuing with %d stylesheets)",
+			navID, err, len(externalResults))
+	}
+
+	// 4. Convert coordinator results into the renderer's
+	//    []renderer.ExternalCSS. The coordinator guarantees source
+	//    order via Position; we preserve that here.
+	external := make([]renderer.ExternalCSS, 0, len(externalResults))
+	for _, r := range externalResults {
+		external = append(external, renderer.ExternalCSS{URL: r.Resolved, Source: r.Source})
+	}
+
+	// 5. Parse the document for rendering. The renderer expects
+	//    *html.Node; the streaming parser produces *dom.Document. We
+	//    re-parse with html.Parse for rendering; the streaming pass
+	//    only drove discovery.
+	doc, parseErr := ghtml.Parse(strings.NewReader(html))
+	if parseErr != nil {
+		log.Printf("Navigation %s render parse failed: %v", navID, parseErr)
+		updateUIWithError(browser, sess, navID, parseErr, url)
+		return
+	}
+
+	// 6. Wire the renderer's CSP (for any non-CSS checks the renderer
+	//    still performs) and route through the snapshot entry point.
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetCSP(csp)
+		}
+	}
+
+	if err := browser.RenderParsedContent(ctx, doc, external); err != nil {
+		log.Printf("Error rendering (coordinator path): %v", err)
+		browser.SetContent("Error rendering HTML: " + err.Error())
+		browser.HideLoading()
+		if activeTab := browser.ActiveTab(); activeTab != nil {
+			if r := activeTab.GetRenderer(); r != nil {
+				r.SetSubmitting(false)
+			}
+		}
+		sess.Fail(err)
+		return
+	}
+
+	log.Printf("Page loaded (coordinator) successfully with %d stylesheets", len(external))
+
+	// 7. Mirror the legacy updateUIWithContent side-effects (raw
+	//    source, title, loading indicator, JS runtime wiring). These
+	//    do not depend on the rendering path.
+	if tab := browser.ActiveTab(); tab != nil {
+		tab.SetRawSource(html)
+	}
+	if title, ok := extractTitle(html); ok {
+		if fyne.CurrentApp() != nil {
+			fyne.CurrentApp().SendNotification(&fyne.Notification{
+				Title:   "Goosie",
+				Content: "Page loaded: " + title,
+			})
+		}
+		browser.UpdateActiveTabTitle(title)
+	}
+	browser.HideLoading()
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if r := activeTab.GetRenderer(); r != nil {
+			r.SetSubmitting(false)
+		}
+	}
+	sess.Complete()
+
+	// 8. JS runtime wiring (mirror of the legacy path's setup). M4
+	//    will replace the post-render script execution with the
+	//    coordinator's ordered queue; for M3 we keep the existing
+	//    behavior so the user-visible flow is unchanged.
+	tab := browser.ActiveTab()
+	if tab != nil {
+		if tab.GetJSRuntime() == nil {
+			jsRuntime := js.NewRuntime()
+			tab.SetJSRuntime(jsRuntime)
+		}
+		jsRuntime := tab.GetJSRuntime()
+		jsRuntime.SetOrigin(originFromURL(url))
+		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
+		jsRuntime.SetFetcher(fetcher)
+		jsRuntime.OnOpenWindow = func(openURL, name string) {
+			log.Printf("Popup (window.open): %s (name=%s)", openURL, name)
+			load, ctx := sess.Navigate(context.Background(), openURL)
+			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
+		}
+		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
+			log.Printf("DOM mutated by JS, triggering UI re-render")
+			if err := tab.RenderHTML(context.Background(), mutatedHTML); err != nil {
+				log.Printf("Error rendering mutated HTML: %v", err)
+			}
+		})
+	}
+}
+
 // updateUIWithError updates the UI with an error message.
 func updateUIWithError(browser *ui.Browser, sess *session.Session, navID navigation.ID, err error, url string) {
 	if !sess.IsActive(navID) {
@@ -488,7 +808,7 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 			load, ctx := navSession.Navigate(context.Background(), url)
 			jsRuntime := tab.GetJSRuntime()
 			_ = jsRuntime // suppress unused warning if any, but wait, loadPageAsync is next
-			loadPageAsync(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
+			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
 		}
 
 		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
@@ -553,11 +873,11 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 	}
 }
 
-// loadPage fetches and displays a web page (deprecated - use loadPageAsync).
+// loadPage fetches and displays a web page (deprecated - use loadPageAsyncWithCoordinator).
 func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url string) {
 	s := session.New()
 	load, ctx := s.Navigate(context.Background(), url)
-	loadPageAsync(browser, fetcher, parser, load, ctx, s, nil, nil)
+	loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, s, nil, nil)
 }
 
 // extractTitle parses the HTML and returns the content of the <title> tag.

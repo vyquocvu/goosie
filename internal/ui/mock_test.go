@@ -7,6 +7,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
+	"golang.org/x/net/html"
 )
 
 // MockHTMLRendererComp implements HTMLRenderer with configurable summary.
@@ -16,6 +17,9 @@ type MockHTMLRendererComp struct {
 }
 
 func (m *MockHTMLRendererComp) RenderHTML(ctx context.Context, s string) (fyne.CanvasObject, error) {
+	return nil, nil
+}
+func (m *MockHTMLRendererComp) RenderParsed(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) (fyne.CanvasObject, error) {
 	return nil, nil
 }
 func (m *MockHTMLRendererComp) UpdateViewport() fyne.CanvasObject               { return nil }

@@ -17,6 +17,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/renderer"
+	"golang.org/x/net/html"
 )
 
 // MockHTMLRenderer for testing
@@ -29,6 +30,9 @@ type MockHTMLRenderer struct {
 }
 
 func (m *MockHTMLRenderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
+	return nil, nil
+}
+func (m *MockHTMLRenderer) RenderParsed(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) (fyne.CanvasObject, error) {
 	return nil, nil
 }
 func (m *MockHTMLRenderer) UpdateViewport() fyne.CanvasObject               { return nil }
