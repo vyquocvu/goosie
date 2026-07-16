@@ -14,7 +14,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/test"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
@@ -81,9 +80,10 @@ func main() {
 	var a fyne.App
 	var w fyne.Window
 	if *headlessFlag {
-		a = test.NewApp()
-		w = a.NewWindow("Goosie Headless")
-		w.Resize(fyne.NewSize(1000, 700))
+		a, w, err = newHeadlessAppWindow()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	memMgr := memory.NewManager(memory.Config{
@@ -704,4 +704,3 @@ func getFilenameFromURLAndCD(urlStr, cd string) string {
 
 	return "download.bin"
 }
-

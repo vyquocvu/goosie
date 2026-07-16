@@ -534,3 +534,15 @@ func TestElementsPanel_MatchedCSSRules(t *testing.T) {
 	assert.NotEmpty(t, panel.stylesContainer.Objects)
 }
 
+
+func TestElementsPanel_PopulateAndExpand(t *testing.T) {
+	test.NewApp()
+	mockRoot := &renderer.RenderNode{ID: 1, TagName: "html", Type: renderer.NodeTypeElement}
+	mockRoot.Children = append(mockRoot.Children, &renderer.RenderNode{ID: 2, TagName: "body", Type: renderer.NodeTypeElement})
+
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(&MockHTMLRenderer{root: mockRoot})
+
+	assert.True(t, panel.tree.IsBranchOpen("1"))
+	assert.True(t, panel.tree.IsBranchOpen("2"))
+}
