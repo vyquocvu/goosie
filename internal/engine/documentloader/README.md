@@ -52,14 +52,16 @@ modified by M1; they are consumers of later milestones.
 | `resource.go` | `Resource`, `ResourceKind`, `ScriptMode`, result types |
 | `url.go` | `ResolveURL(base, ref)` — absolute + relative URL resolution |
 | `coordinator.go` | `Coordinator` struct, `Options`, `Callbacks`, lifecycle |
-| `coordinator_test.go` | Characterization tests (M0) and coordinator tests |
+| `dom_bridge.go` | `FromDomResource` adapter + `Coordinator.FromDomOnResource` closure |
+| `*_test.go` | M0 characterization tests, M1 unit tests, M2 bridge tests |
 
 ## Dependencies
 
 - `internal/engine/navigation` — scheduler, ID, priority
 - `internal/engine/metrics` — phase recorder
 - `internal/net` — `CSPPolicy`, `Fetcher`
+- `internal/dom` — `Resource` shape for the bridge (M2; one-way dep)
 
 The package does not import `fyne.io/fyne/v2`, `internal/renderer`,
-`internal/dom`, `internal/js`, or `internal/css`. It is pure
-orchestration; the renderer/JS runtime consume its outputs.
+`internal/js`, or `internal/css`. It is pure orchestration; the
+renderer/JS runtime consume its outputs.

@@ -25,10 +25,59 @@ const (
 	ResourceImage
 )
 
+// ScriptMode identifies how a discovered <script> should be executed.
+// The streaming parser reports the mode it observed in the markup;
+// downstream code (e.g. internal/engine/documentloader) decides what
+// to do with each mode. The zero value is ScriptModeClassic so callers
+// can omit the field for parser-blocking scripts.
+type ScriptMode uint8
+
+const (
+	// ScriptModeClassic is a parser-blocking classic script.
+	ScriptModeClassic ScriptMode = iota
+	// ScriptModeAsync executes when ready without preserving order.
+	ScriptModeAsync
+	// ScriptModeDefer executes in document order after parsing.
+	ScriptModeDefer
+	// ScriptModeModule is an ES module. Out of scope for M2.
+	ScriptModeModule
+)
+
+// String returns a stable label for the script mode.
+func (m ScriptMode) String() string {
+	switch m {
+	case ScriptModeClassic:
+		return "classic"
+	case ScriptModeAsync:
+		return "async"
+	case ScriptModeDefer:
+		return "defer"
+	case ScriptModeModule:
+		return "module"
+	default:
+		return "unknown"
+	}
+}
+
 // Resource is a discovered external resource during parsing.
+//
+// The shape intentionally carries more fields than M0/M1 of the engine
+// pipeline consumed; M2 of plan.md wires these fields into the
+// ResourceCoordinator via the internal/engine/documentloader bridge.
+//
+// Source is currently empty for inline scripts. The streaming parser
+// reports the existence of an inline script (Inline=true, Source=nil);
+// downstream code may re-traverse the parsed document to extract the
+// script body. Capturing inline script bodies during the streaming
+// tokenizer pass is deferred to a later milestone.
 type Resource struct {
-	Kind ResourceKind
-	URL  string
+	Kind       ResourceKind
+	URL        string
+	Position   int        // document-order index assigned by the parser
+	ScriptMode ScriptMode // meaningful only when Kind == ResourceScript
+	Inline     bool       // true for <script>...</script> with no src
+	Integrity  string     // SRI hash, empty when absent
+	CrossOrigin string    // crossorigin attribute, empty when absent
 }
 
 // UnsupportedFeatureKind identifies the type of unsupported engine feature.
@@ -199,6 +248,7 @@ type treeBuilder struct {
 	bodySeen      bool
 	headID        NodeID
 	bodyID        NodeID
+	resPos        int // next document-order index for discovered resources
 }
 
 func internTag(name string) atom.Atom {
@@ -521,7 +571,10 @@ func (tb *treeBuilder) handleStartTag(tokenizer *html.Tokenizer, selfClosing boo
 	}
 
 	if tb.onRes != nil {
-		discoverResources(tagName, tok.Attr, tb.onRes)
+		discoverResources(tagName, tok.Attr, tb.resPos, tb.onRes)
+		// Advance position for every start tag so that document order is
+		// preserved even when a tag does not yield a discovered resource.
+		tb.resPos++
 	}
 	tb.detectUnsupportedFeatures(tagName, tok.Attr)
 	return nil
@@ -612,34 +665,106 @@ func (tb *treeBuilder) detectUnsupportedFeatures(tagName string, tokAttrs []html
 	}
 }
 
-func discoverResources(tagName string, tokAttrs []html.Attribute, onResource func(Resource)) {
+func discoverResources(tagName string, tokAttrs []html.Attribute, position int, onResource func(Resource)) {
 	switch tagName {
 	case "link":
-		var rel, href string
+		var rel, href, integrity, crossorigin string
 		for _, a := range tokAttrs {
 			switch a.Key {
 			case "rel":
 				rel = a.Val
 			case "href":
 				href = a.Val
+			case "integrity":
+				integrity = a.Val
+			case "crossorigin":
+				crossorigin = a.Val
 			}
 		}
 		if strings.EqualFold(rel, "stylesheet") && href != "" {
-			onResource(Resource{Kind: ResourceCSS, URL: href})
+			onResource(Resource{
+				Kind:        ResourceCSS,
+				URL:         href,
+				Position:    position,
+				Integrity:   integrity,
+				CrossOrigin: crossorigin,
+			})
 		}
 	case "script":
+		var src string
+		mode := ScriptModeClassic
+		integrity := ""
+		crossorigin := ""
+		hasAsync := false
+		hasDefer := false
+		hasModule := false
 		for _, a := range tokAttrs {
-			if a.Key == "src" && a.Val != "" {
-				onResource(Resource{Kind: ResourceScript, URL: a.Val})
-				break
+			switch a.Key {
+			case "src":
+				src = a.Val
+			case "type":
+				if strings.EqualFold(a.Val, "module") {
+					hasModule = true
+				}
+			case "async":
+				hasAsync = true
+			case "defer":
+				hasDefer = true
+			case "integrity":
+				integrity = a.Val
+			case "crossorigin":
+				crossorigin = a.Val
 			}
 		}
+		// Mode precedence: type=module > async > defer > classic.
+		switch {
+		case hasModule:
+			mode = ScriptModeModule
+		case hasAsync:
+			mode = ScriptModeAsync
+		case hasDefer:
+			mode = ScriptModeDefer
+		}
+		if src != "" {
+			onResource(Resource{
+				Kind:        ResourceScript,
+				URL:         src,
+				Position:    position,
+				ScriptMode:  mode,
+				Integrity:   integrity,
+				CrossOrigin: crossorigin,
+			})
+			return
+		}
+		// Inline script: report its existence with Inline=true. The
+		// streaming tokenizer does not currently capture the body;
+		// downstream code may re-traverse the parsed Document to
+		// extract it.
+		onResource(Resource{
+			Kind:        ResourceScript,
+			Position:    position,
+			ScriptMode:  mode,
+			Inline:      true,
+			Integrity:   integrity,
+			CrossOrigin: crossorigin,
+		})
 	case "img":
+		var src, crossorigin string
 		for _, a := range tokAttrs {
-			if a.Key == "src" && a.Val != "" {
-				onResource(Resource{Kind: ResourceImage, URL: a.Val})
-				break
+			switch a.Key {
+			case "src":
+				src = a.Val
+			case "crossorigin":
+				crossorigin = a.Val
 			}
+		}
+		if src != "" {
+			onResource(Resource{
+				Kind:        ResourceImage,
+				URL:         src,
+				Position:    position,
+				CrossOrigin: crossorigin,
+			})
 		}
 	}
 }
