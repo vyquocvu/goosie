@@ -22,6 +22,7 @@ func NewConsoleEntry() *ConsoleEntry {
 		history:      make([]string, 0),
 		historyIndex: -1,
 	}
+	e.Wrapping = fyne.TextTruncate
 	e.ExtendBaseWidget(e)
 	return e
 }
