@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -706,11 +707,40 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 			load, ctx := sess.Navigate(context.Background(), openURL)
 			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
 		}
-		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
-			log.Printf("DOM mutated by JS, triggering UI re-render")
-			if err := tab.RenderHTML(context.Background(), mutatedHTML); err != nil {
-				log.Printf("Error rendering mutated HTML: %v", err)
+		// M6 mutation handling: coalesce a burst of JS DOM mutations
+		// into a single render via documentloader's MutationCoalescer,
+		// then re-render using the snapshot entry point (RenderParsed)
+		// with the cached external CSS from the initial coordinator
+		// run. This avoids re-fetching stylesheets/scripts on every
+		// mutation — the prior path (tab.RenderHTML) re-fetched
+		// external CSS via RenderHTML's async loader.
+		var (
+			muMut          sync.Mutex
+			currentMutHTML string
+		)
+		mutCoalescer := documentloader.NewMutationCoalescer(16*time.Millisecond, func(n int) {
+			muMut.Lock()
+			latest := currentMutHTML
+			muMut.Unlock()
+			if latest == "" {
+				return
 			}
+			doc, parseErr := ghtml.Parse(strings.NewReader(latest))
+			if parseErr != nil {
+				log.Printf("Mutation render: parse failed: %v", parseErr)
+				return
+			}
+			if err := tab.RenderParsedContent(context.Background(), doc, external); err != nil {
+				log.Printf("Mutation render: RenderParsedContent failed: %v", err)
+			} else {
+				log.Printf("Mutation render: coalesced %d mutations", n)
+			}
+		})
+		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
+			muMut.Lock()
+			currentMutHTML = mutatedHTML
+			muMut.Unlock()
+			mutCoalescer.Trigger()
 		})
 
 		executeScriptQueue(jsRuntime, url, csp, doc, scriptResults)

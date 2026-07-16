@@ -202,16 +202,19 @@ func TestM5EndToEndAsyncOrdering(t *testing.T) {
 		t.Fatalf("drain: %v", err)
 	}
 
-	// Wait for async to complete (load event).
+	// Wait for async to complete (load event). The OnLifecycle callback
+	// fires from a coordinator goroutine; reads must hold mu.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		hasLoad := false
+		mu.Lock()
 		for _, e := range events {
 			if e == documentloader.EventLoad {
 				hasLoad = true
 				break
 			}
 		}
+		mu.Unlock()
 		if hasLoad {
 			break
 		}
@@ -223,7 +226,6 @@ func TestM5EndToEndAsyncOrdering(t *testing.T) {
 	mu.Lock()
 	stylesCopy := append([]documentloader.CSSResult(nil), styles...)
 	scriptsCopy := append([]documentloader.ScriptResult(nil), scripts...)
-	eventsCopy := append([]documentloader.LifecycleEvent(nil), events...)
 	mu.Unlock()
 
 	if len(stylesCopy) != 1 {
@@ -252,9 +254,13 @@ func TestM5EndToEndAsyncOrdering(t *testing.T) {
 		t.Errorf("inline count = %d, want 1", inlineN)
 	}
 
-	// Lifecycle order: DOMContentLoaded first, Load later.
+	// Lifecycle order: DOMContentLoaded first, Load later. Use the
+	// already-copied snapshot under mu.
+	mu.Lock()
+	eventsCopy2 := append([]documentloader.LifecycleEvent(nil), events...)
+	mu.Unlock()
 	var domIdx, loadIdx = -1, -1
-	for i, e := range eventsCopy {
+	for i, e := range eventsCopy2 {
 		if e == documentloader.EventDOMContentLoaded && domIdx == -1 {
 			domIdx = i
 		}
