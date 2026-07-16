@@ -18,6 +18,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/net"
+	"log"
+	"fmt"
 )
 
 // Renderer is the main HTML renderer that coordinates parsing, layout, and rendering
@@ -483,6 +485,11 @@ func (r *Renderer) Refresh() {
 
 		// Apply styles (in case attributes changed)
 		r.stylesheetMu.RLock()
+		if r.stylesheet != nil {
+			fmt.Printf("DEBUG Refresh: r.stylesheet has %d rules\n", len(r.stylesheet.Rules))
+		} else {
+			fmt.Printf("DEBUG Refresh: r.stylesheet is nil\n")
+		}
 		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
 		r.stylesheetMu.RUnlock()
 		renderTreeCopy := r.currentRenderTree.Clone()
@@ -702,6 +709,7 @@ func shouldAttemptParseExternalCSS(content string) bool {
 // loadExternalCSS finds and loads external stylesheets
 func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 	links := extractExternalLinks(doc)
+	log.Printf("loadExternalCSS found links: %v", links)
 
 	// Read CSP policy for style-src enforcement.
 	r.cspMu.RLock()
@@ -720,10 +728,12 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		}
 		// Resolve URL
 		resolvedURL := r.ResolveURL(href)
+		log.Printf("loadExternalCSS fetching resolved URL: %s", resolvedURL)
 
 		// Check CSP style-src before fetching.
 		if csp != nil {
 			if err := csp.AllowStyle(resolvedURL, baseURL); err != nil {
+				log.Printf("loadExternalCSS: CSP blocked stylesheet %s: %v", resolvedURL, err)
 				if r.Logger != nil {
 					r.Logger.Warn("CSP blocked stylesheet", "url", resolvedURL, "err", err)
 				}
@@ -734,12 +744,15 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		// Fetch CSS
 		content, err := r.fetcher.FetchWithContext(ctx, resolvedURL, nil)
 		if err != nil {
+			log.Printf("loadExternalCSS: Failed to fetch CSS %s: %v", resolvedURL, err)
 			if r.Logger != nil {
 				r.Logger.Warn("Failed to fetch CSS", "url", resolvedURL, "err", err)
 			}
 			continue
 		}
+		log.Printf("loadExternalCSS: Successfully fetched CSS %s, length=%d", resolvedURL, len(content))
 		if !shouldAttemptParseExternalCSS(content) {
+			log.Printf("loadExternalCSS: Skipping parse for CSS %s (shouldAttemptParseExternalCSS returned false)", resolvedURL)
 			continue
 		}
 
@@ -751,11 +764,13 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		parser := css.NewParser(content)
 		stylesheet, err := parser.Parse()
 		if err != nil {
+			log.Printf("loadExternalCSS: Failed to parse CSS %s: %v", resolvedURL, err)
 			if r.Logger != nil {
 				r.Logger.Warn("Failed to parse CSS", "url", resolvedURL, "err", err)
 			}
 			continue
 		}
+		log.Printf("loadExternalCSS: Successfully parsed CSS %s, rules count=%d", resolvedURL, len(stylesheet.Rules))
 
 		// Append rules to current stylesheet safely
 		// Note: This simple append assumes r.stylesheet is safe to modify or we are lucky.

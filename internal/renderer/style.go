@@ -166,9 +166,14 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	if stylesheet == nil {
 		return
 	}
+	// Only print for non-default stylesheet to avoid spamming default stylesheet matches
+	isDefault := stylesheet == sm.defaultStylesheet
 	for _, rule := range stylesheet.Rules {
 		for _, selectorSeq := range rule.Selectors {
 			if sm.matchesSequence(selectorSeq, node) {
+				if !isDefault {
+					fmt.Printf("DEBUG matchesSequence MATCHED for tag %s (has class %s, id %s)\n", node.TagName, node.Attrs["class"], node.Attrs["id"])
+				}
 				for _, decl := range rule.Declarations {
 					sm.applyDeclaration(node, decl)
 				}
@@ -177,56 +182,115 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	}
 }
 
+type styleSelectorPart struct {
+	Selector   css.SimpleSelector
+	Combinator string
+}
+
+func flattenSelectorSequence(seq *css.SelectorSequence) []styleSelectorPart {
+	var parts []styleSelectorPart
+	for s := seq; s != nil; s = s.Next {
+		parts = append(parts, styleSelectorPart{
+			Selector:   s.Simple,
+			Combinator: s.Combinator,
+		})
+	}
+	return parts
+}
+
 // matchesSequence checks if a selector sequence matches a node
-// Note: Selectors are stored left-to-right (e.g., "div > p" stored as div->p)
-// but we match right-to-left for efficiency (first check if node matches p, then check parent matches div)
 func (sm *StyleManager) matchesSequence(seq css.SelectorSequence, node *RenderNode) bool {
-	return sm.matchesFromRight(&seq, node)
-}
-
-// matchesFromRight recursively matches selectors from right to left
-func (sm *StyleManager) matchesFromRight(seq *css.SelectorSequence, node *RenderNode) bool {
-	// Find the rightmost selector in the chain
-	if seq.Next == nil {
-		// This is the rightmost selector, match it against the node
-		return sm.matchesSimple(seq.Simple, node)
+	class, _ := node.GetAttribute("class")
+	isNav := strings.Contains(class, "navigation") || node.TagName == "li"
+	parts := flattenSelectorSequence(&seq)
+	res := sm.matchStyleParts(parts, len(parts)-1, node)
+	if isNav && res {
+		fmt.Printf("DEBUG matchesSequence MATCHED for %s node (class %s): seq=%+v (comb: %q)\n", node.TagName, class, seq.Simple, seq.Combinator)
 	}
-
-	// This is not the rightmost, so we need to match the rightmost first
-	// and then check if this one matches the appropriate ancestor/sibling
-	return sm.matchesWithCombinatorLeftToRight(seq, node)
+	return res
 }
 
-// matchesWithCombinatorLeftToRight handles combinator matching for left-to-right sequences
-func (sm *StyleManager) matchesWithCombinatorLeftToRight(seq *css.SelectorSequence, node *RenderNode) bool {
-	// seq = A (combinator) B
-	// We need to check if B matches the node, then verify A matches the related element
-
-	// First, recursively match the right side
-	if !sm.matchesFromRight(seq.Next, node) {
+// matchStyleParts recursively matches selector parts from right to left.
+func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node *RenderNode) bool {
+	if idx < 0 || node == nil {
 		return false
 	}
 
-	// Now check if the left side (seq.Simple) matches according to the combinator
-	switch seq.Combinator {
-	case " ": // Descendant combinator: A B means B is descendant of A
-		return sm.hasMatchingAncestor(seq.Simple, node)
-	case ">": // Child combinator: A > B means B is direct child of A
-		if node.Parent != nil {
-			return sm.matchesSimple(seq.Simple, node.Parent)
+	part := &parts[idx]
+
+	isNav := node.TagName == "li" || node.TagName == "a"
+	if isNav {
+		fmt.Printf("TRACE matchStyleParts: idx=%d node=%s id=%q class=%q trying to match selector %+v\n",
+			idx, node.TagName, node.Attrs["id"], node.Attrs["class"], part.Selector)
+	}
+
+	// Check if current node matches this part's simple selector
+	if !sm.matchesSimple(part.Selector, node) {
+		if isNav {
+			fmt.Printf("TRACE matchStyleParts: idx=%d node=%s matchesSimple failed\n", idx, node.TagName)
 		}
 		return false
-	case "+": // Adjacent sibling: A + B means B immediately follows A
+	}
+
+	// If this is the leftmost part, we're done
+	if idx == 0 {
+		if isNav {
+			fmt.Printf("TRACE matchStyleParts: idx=0 matched successfully!\n")
+		}
+		return true
+	}
+
+	// Check combinator with the part to the left
+	leftPart := &parts[idx-1]
+	switch leftPart.Combinator {
+	case " ": // Descendant combinator
+		current := node.Parent
+		for current != nil {
+			if isNav {
+				fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator=' ', trying parent %s\n", idx, node.TagName, current.TagName)
+			}
+			if sm.matchStyleParts(parts, idx-1, current) {
+				return true
+			}
+			current = current.Parent
+		}
+		return false
+
+	case ">": // Child combinator
+		if node.Parent == nil {
+			return false
+		}
+		if isNav {
+			fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator='>', trying parent %s\n", idx, node.TagName, node.Parent.TagName)
+		}
+		return sm.matchStyleParts(parts, idx-1, node.Parent)
+
+	case "+": // Adjacent sibling combinator
 		sibling := sm.getPreviousSibling(node)
-		if sibling != nil {
-			return sm.matchesSimple(seq.Simple, sibling)
+		if sibling == nil {
+			return false
+		}
+		if isNav {
+			fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator='+', trying sibling %s\n", idx, node.TagName, sibling.TagName)
+		}
+		return sm.matchStyleParts(parts, idx-1, sibling)
+
+	case "~": // General sibling combinator
+		sibling := sm.getPreviousSibling(node)
+		for sibling != nil {
+			if isNav {
+				fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator='~', trying sibling %s\n", idx, node.TagName, sibling.TagName)
+			}
+			if sm.matchStyleParts(parts, idx-1, sibling) {
+				return true
+			}
+			sibling = sm.getPreviousSibling(sibling)
 		}
 		return false
-	case "~": // General sibling: A ~ B means B is preceded by A
-		return sm.hasMatchingPreviousSibling(seq.Simple, node)
-	}
 
-	return false
+	default:
+		return sm.matchStyleParts(parts, idx-1, node)
+	}
 }
 
 // hasMatchingAncestor checks if any ancestor matches the selector

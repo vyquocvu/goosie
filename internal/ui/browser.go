@@ -747,7 +747,7 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	t.htmlRenderer.SetRefreshCallback(func() {
 		t.browser.do(func() {
 			// Trigger a refresh of the scroll container to show changes
-			t.contentScroll.Refresh()
+			refreshTabContent(t)
 			// Also refresh inspector if visible
 			if t.browser.devToolsVisible {
 				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
