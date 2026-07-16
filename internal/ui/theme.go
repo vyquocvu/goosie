@@ -49,6 +49,8 @@ func NewThemeManager(app fyne.App, headless ...bool) *ThemeManager {
 	}
 	if !h {
 		tm.load()
+	} else {
+		tm.apply()
 	}
 	return tm
 }
@@ -139,11 +141,7 @@ func (t *browserTheme) Size(name fyne.ThemeSizeName) float32 {
 	return theme.DefaultTheme().Size(name)
 }
 
-// apply applies the current theme to the Fyne application
 func (tm *ThemeManager) apply() {
-	if tm.headless {
-		return
-	}
 	var variant fyne.ThemeVariant
 	switch tm.current {
 	case ThemeLight:
@@ -151,9 +149,15 @@ func (tm *ThemeManager) apply() {
 	case ThemeDark:
 		variant = theme.VariantDark
 	case ThemeSystem:
-		variant = tm.app.Settings().ThemeVariant()
+		if tm.headless {
+			variant = theme.VariantLight
+		} else {
+			variant = tm.app.Settings().ThemeVariant()
+		}
 	}
-	tm.app.Settings().SetTheme(&browserTheme{variant: variant})
+	if tm.app != nil {
+		tm.app.Settings().SetTheme(&browserTheme{variant: variant})
+	}
 }
 
 // save persists the theme preference

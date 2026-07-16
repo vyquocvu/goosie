@@ -202,13 +202,21 @@ func (n *RenderNode) SetAttribute(key, value string) {
 
 // IsBlock returns true if the element is a block-level element
 func (n *RenderNode) IsBlock() bool {
-	if n.ComputedStyle != nil && n.ComputedStyle.Display != "" {
-		disp := n.ComputedStyle.Display
-		if disp == "block" || disp == "flex" || disp == "grid" || disp == "table" {
+	if n.ComputedStyle != nil {
+		if n.ComputedStyle.Float == "left" || n.ComputedStyle.Float == "right" {
 			return true
 		}
-		if disp == "inline" || disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
-			return false
+		if n.ComputedStyle.Position == "absolute" || n.ComputedStyle.Position == "fixed" {
+			return true
+		}
+		if n.ComputedStyle.Display != "" {
+			disp := n.ComputedStyle.Display
+			if disp == "block" || disp == "flex" || disp == "grid" || disp == "table" || disp == "flow-root" {
+				return true
+			}
+			if disp == "inline" || disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
+				return false
+			}
 		}
 	}
 	blockElements := map[string]bool{

@@ -959,6 +959,10 @@ func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
 	if node.ComputedStyle == nil {
 		return false
 	}
+	// display: flow-root
+	if node.ComputedStyle.Display == "flow-root" {
+		return true
+	}
 	// overflow other than visible
 	if node.ComputedStyle.Overflow != "" && node.ComputedStyle.Overflow != "visible" {
 		return true

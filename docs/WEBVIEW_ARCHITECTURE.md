@@ -4,40 +4,110 @@ This document defines the rendering pipeline, raster backends, Fyne shell bounda
 
 ---
 
-## 1. Rendering Pipeline
+## 1. Rendering and Resource Pipeline
 
-The complete pipeline from navigation to pixel output:
+The complete browser lifecycle includes a main-document path, subresource branches,
+script execution, and mutation-driven updates. External CSS and JavaScript are not
+part of a single linear parse step:
 
 ```
 Navigation
+  │  create navigation ID, cancellation scope, document priority
+  ▼
+Resolve URL + Fetch Main Document ──► HTTP request/redirect/response (internal/net)
+  │                                     response headers, MIME type, CSP, body
+  ▼
+HTML Tokenization + Tree Building ──► DOM construction (internal/dom)
   │
+  ├── <link rel="stylesheet" href="...">
+  │     resolve against document URL
+  │       → CSP style-src check
+  │       → schedule as blocking CSS
+  │       → HTTP fetch
+  │       → CSS parse / CSSOM rule storage (internal/css)
+  │       → style invalidation ───────────────────────────────┐
+  │                                                          │
+  ├── <script src="...">                                    │
+  │     resolve against document URL                         │
+  │       → CSP script-src check                              │
+  │       → schedule using blocking / defer / async semantics│
+  │       → HTTP fetch → decode / compile → execute (internal/js)
+  │       → DOM or CSSOM mutation ───────────────────────────┤
+  │                                                          │
+  ├── <style> → CSS parse / CSSOM rule storage ──────────────┤
+  ├── inline <script> → CSP check → execute ─────────────────┤
+  └── images / fonts / other resources → fetch + decode      │
+                                                             │
+  ┌──────────────────────────────────────────────────────────┘
   ▼
-Resource Loading ──────► HTTP fetch (internal/net)
-  │                        Streaming body + discovery
+DOM + CSSOM / Stylesheet Storage ► Compact index-based DOM store (ADR 0001)
+  │                                 Computed-style pool (internal/css)
   ▼
-HTML/CSS Parsing ───────► Streaming tree construction (internal/dom)
-  │                        CSS parsing + rule storage (internal/css)
+Style Resolution ───────────────► Cascade + selector matching (compiled rules)
+  │                                 Incremental invalidation (M3.4)
   ▼
-DOM + Stylesheet Storage ► Compact index-based DOM store (ADR 0001)
-  │                        Computed-style pool (internal/css)
+Layout + Fragments ─────────────► Layout store + fragment store (internal/renderer)
+  │                                 Incremental reflow (M4.4)
   ▼
-Style Resolution ───────► Selector matching (compiled rules)
-  │                        Incremental invalidation (M3.4)
+Display List ───────────────────► Backend-neutral DisplayCommandList (ADR 0002)
+  │                                 Paint chunks keyed by LayoutID (M5.2)
   ▼
-Layout + Fragments ─────► Layout store + fragment store (internal/renderer)
-  │                        Incremental reflow (M4.4)
+Raster ─────────────────────────► Backend interface (CPU / CoreGraphics)
+  │                                 Dirty-region-only raster (M5.3)
   ▼
-Display List ───────────► Backend-neutral DisplayCommandList (ADR 0002)
-  │                        Paint chunks keyed by LayoutID (M5.2)
-  ▼
-Raster ─────────────────► Backend interface (CPU / CoreGraphics)
-  │                        Dirty-region only raster (M5.3)
-  ▼
-Composition + Present ──► Tile cache, compositor (M7)
-                           Fyne pixel buffer present (M6.4)
+Composition + Present ──────────► Tile cache, compositor (M7)
+                                    Fyne pixel-buffer present (M6.4)
 ```
 
-Each phase has explicit inputs, outputs, and metrics recorded by the `internal/engine/metrics` recorder.
+### Resource Loading and Ordering
+
+Every discovered URL must be resolved against the final document URL after redirects,
+checked by CSP before the request, attached to the active navigation's cancellation
+scope, and fetched through `internal/net`. The navigation scheduler assigns priorities:
+
+| Resource | Discovery | Scheduling and render effect |
+|---|---|---|
+| Main document | Navigation request | `PriorityDocument`; creates the parsing input |
+| External stylesheet | `<link rel="stylesheet" href>` | `PriorityBlockingCSS`; blocks the first fully styled frame |
+| Classic script | `<script src>` | `PriorityScript`; parser-blocking unless `defer` or `async` applies |
+| Inline style/script | `<style>` / `<script>` | No fetch; parse or execute at its document position |
+| Image | `<img src>` and CSS image values | Visible images outrank deferred/offscreen images; decode invalidates paint/layout as needed |
+
+Classic script ordering must follow HTML semantics:
+
+- A parser-blocking script pauses tree construction until it is fetched and executed.
+- A `defer` script may fetch in parallel but executes in document order after parsing.
+- An `async` script executes when ready without preserving document order.
+- `DOMContentLoaded` fires after parsing and deferred scripts; `load` waits for required
+  page subresources. ES modules remain governed by the unsupported-feature policy below.
+
+CSS fetched from a URL is parsed into the same stylesheet set as inline CSS. A newly
+available stylesheet invalidates computed style, then only affected layout, display-list,
+and raster work is repeated. `@import`, fonts, and CSS image URLs should enter the same
+resource scheduler when their owning CSS rule is parsed.
+
+### Current Implementation Status
+
+The diagram above is the intended end-to-end architecture. The active browser path has
+these transitional limitations:
+
+- `cmd/browser.loadPageAsync` obtains an HTTP response stream, but reads the complete
+  main-document body before `internal/renderer.RenderHTML` parses it. The streaming DOM
+  parser can report CSS, script, and image discoveries through `OnResource`, but that
+  discovery callback is not yet connected to the browser's subresource scheduler.
+- `internal/renderer.loadExternalCSS` discovers `<link rel="stylesheet">` after the full
+  document parse, resolves and CSP-checks each URL, fetches it asynchronously, appends its
+  rules, and triggers a style/layout refresh. The first frame can therefore appear before
+  render-blocking CSS is available.
+- `cmd/browser` executes all inline scripts after the first render, then fetches and
+  executes all external scripts. This does not yet preserve mixed inline/external document
+  order or implement parser-blocking, `defer`, and `async` timing.
+- JavaScript DOM mutations currently serialize and render the document again. The target
+  path is mutation-specific style/layout/paint invalidation without rediscovering and
+  refetching unchanged subresources.
+
+Each phase has explicit inputs, outputs, and metrics recorded by the
+`internal/engine/metrics` recorder.
 
 ---
 

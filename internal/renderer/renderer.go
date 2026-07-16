@@ -19,7 +19,6 @@ import (
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/net"
 	"log"
-	"fmt"
 )
 
 // Renderer is the main HTML renderer that coordinates parsing, layout, and rendering
@@ -474,8 +473,8 @@ func (r *Renderer) GetRoot() *RenderNode {
 // recomputation is skipped to avoid unnecessary work.
 func (r *Renderer) Refresh() {
 	r.treeMu.Lock()
-	defer r.treeMu.Unlock()
 	if r.currentRenderTree == nil {
+		r.treeMu.Unlock()
 		return
 	}
 
@@ -484,11 +483,6 @@ func (r *Renderer) Refresh() {
 
 		// Apply styles (in case attributes changed)
 		r.stylesheetMu.RLock()
-		if r.stylesheet != nil {
-			fmt.Printf("DEBUG Refresh: r.stylesheet has %d rules\n", len(r.stylesheet.Rules))
-		} else {
-			fmt.Printf("DEBUG Refresh: r.stylesheet is nil\n")
-		}
 		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
 		r.stylesheetMu.RUnlock()
 		renderTreeCopy := r.currentRenderTree.Clone()
@@ -506,6 +500,7 @@ func (r *Renderer) Refresh() {
 
 		r.dirty = false
 	}
+	r.treeMu.Unlock()
 
 	// Trigger refresh callback
 	if r.onRefresh != nil {
@@ -670,24 +665,8 @@ func (r *Renderer) SetHeadless(mode bool) {
 
 func (r *Renderer) onImageLoaded(src string) {
 	r.canvasRenderer.InvalidateObjectCache()
-
-	if r.testingMode || r.headless {
-		if r.onRefresh != nil {
-			r.onRefresh()
-		}
-		return
-	}
-
-	if r.canvasRenderer.window != nil {
-		fyne.Do(func() {
-			r.canvasRenderer.window.Canvas().Refresh(r.canvasRenderer.window.Content())
-		})
-	} else if r.onRefresh != nil {
-		// Fallback if window is not set directly but refresh callback is available
-		fyne.Do(func() {
-			r.onRefresh()
-		})
-	}
+	r.MarkDirty()
+	r.Refresh()
 }
 
 func shouldAttemptParseExternalCSS(content string) bool {

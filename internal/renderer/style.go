@@ -200,14 +200,8 @@ func flattenSelectorSequence(seq *css.SelectorSequence) []styleSelectorPart {
 
 // matchesSequence checks if a selector sequence matches a node
 func (sm *StyleManager) matchesSequence(seq css.SelectorSequence, node *RenderNode) bool {
-	class, _ := node.GetAttribute("class")
-	isNav := strings.Contains(class, "navigation") || node.TagName == "li"
 	parts := flattenSelectorSequence(&seq)
-	res := sm.matchStyleParts(parts, len(parts)-1, node)
-	if isNav && res {
-		fmt.Printf("DEBUG matchesSequence MATCHED for %s node (class %s): seq=%+v (comb: %q)\n", node.TagName, class, seq.Simple, seq.Combinator)
-	}
-	return res
+	return sm.matchStyleParts(parts, len(parts)-1, node)
 }
 
 // matchStyleParts recursively matches selector parts from right to left.
@@ -218,25 +212,13 @@ func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node
 
 	part := &parts[idx]
 
-	isNav := node.TagName == "li" || node.TagName == "a"
-	if isNav {
-		fmt.Printf("TRACE matchStyleParts: idx=%d node=%s id=%q class=%q trying to match selector %+v\n",
-			idx, node.TagName, node.Attrs["id"], node.Attrs["class"], part.Selector)
-	}
-
 	// Check if current node matches this part's simple selector
 	if !sm.matchesSimple(part.Selector, node) {
-		if isNav {
-			fmt.Printf("TRACE matchStyleParts: idx=%d node=%s matchesSimple failed\n", idx, node.TagName)
-		}
 		return false
 	}
 
 	// If this is the leftmost part, we're done
 	if idx == 0 {
-		if isNav {
-			fmt.Printf("TRACE matchStyleParts: idx=0 matched successfully!\n")
-		}
 		return true
 	}
 
@@ -246,9 +228,6 @@ func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node
 	case " ": // Descendant combinator
 		current := node.Parent
 		for current != nil {
-			if isNav {
-				fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator=' ', trying parent %s\n", idx, node.TagName, current.TagName)
-			}
 			if sm.matchStyleParts(parts, idx-1, current) {
 				return true
 			}
@@ -260,9 +239,6 @@ func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node
 		if node.Parent == nil {
 			return false
 		}
-		if isNav {
-			fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator='>', trying parent %s\n", idx, node.TagName, node.Parent.TagName)
-		}
 		return sm.matchStyleParts(parts, idx-1, node.Parent)
 
 	case "+": // Adjacent sibling combinator
@@ -270,17 +246,11 @@ func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node
 		if sibling == nil {
 			return false
 		}
-		if isNav {
-			fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator='+', trying sibling %s\n", idx, node.TagName, sibling.TagName)
-		}
 		return sm.matchStyleParts(parts, idx-1, sibling)
 
 	case "~": // General sibling combinator
 		sibling := sm.getPreviousSibling(node)
 		for sibling != nil {
-			if isNav {
-				fmt.Printf("TRACE matchStyleParts: idx=%d node=%s combinator='~', trying sibling %s\n", idx, node.TagName, sibling.TagName)
-			}
 			if sm.matchStyleParts(parts, idx-1, sibling) {
 				return true
 			}
@@ -351,6 +321,11 @@ func (sm *StyleManager) getPreviousSibling(node *RenderNode) *RenderNode {
 
 // matchesSimple checks if a simple selector matches a node
 func (sm *StyleManager) matchesSimple(selector css.SimpleSelector, node *RenderNode) bool {
+	// If the selector targets a pseudo-element, it should never match a normal RenderNode
+	if len(selector.PseudoElements) > 0 {
+		return false
+	}
+
 	// Universal selector matches everything only when it has no other constraints
 	if selector.Universal && selector.TagName == "" && selector.ID == "" &&
 		len(selector.Classes) == 0 && len(selector.PseudoClasses) == 0 &&
@@ -671,6 +646,15 @@ var colorNameToHex = map[string]string{
 }
 
 func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration) {
+	// Resolve var() tokens using this element's custom properties
+	if strings.Contains(decl.Value, "var(") {
+		resolved := resolveVarTokens(decl.Value, node.ComputedStyle)
+		if resolved == "" {
+			return // unresolved variable with no fallback, skip
+		}
+		decl.Value = resolved
+	}
+
 	if node.Styles == nil {
 		node.Styles = make(map[string]string)
 	}
@@ -685,15 +669,6 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		}
 		node.ComputedStyle.CustomProperties[decl.Property] = strings.TrimSpace(decl.Value)
 		return
-	}
-
-	// Resolve var() tokens using this element's custom properties
-	if strings.Contains(decl.Value, "var(") {
-		resolved := resolveVarTokens(decl.Value, node.ComputedStyle)
-		if resolved == "" {
-			return // unresolved variable with no fallback, skip
-		}
-		decl.Value = resolved
 	}
 
 	switch decl.Property {
