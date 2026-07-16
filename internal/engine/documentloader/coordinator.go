@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
@@ -91,6 +92,9 @@ type Coordinator struct {
 	nextPos   int              // next Position to assign
 	results   []bufferedResult // results completed in any order, drained at HandleDocumentEnd
 	inFlight  sync.WaitGroup   // counts active fetches
+	asyncN    int32            // active async script callbacks
+	asyncDone chan struct{}    // closed when asyncN hits 0 (after HandleDocumentEnd)
+	drainDone bool             // true after HandleDocumentEnd has run
 	finalized chan struct{}    // closed when HandleDocumentEnd / Cancel completes
 }
 
@@ -135,6 +139,7 @@ func New(opts Options) (*Coordinator, error) {
 		cb:       opts.Callbacks,
 		rec:      opts.Recorder,
 		finalized: make(chan struct{}),
+		asyncDone: make(chan struct{}),
 	}
 	if c.rec != nil {
 		c.rec.BeginPhase(metrics.PhaseNavigation)
@@ -198,7 +203,19 @@ func (c *Coordinator) HandleResource(r Resource) {
 	}
 	r.Position = c.nextPos
 	c.nextPos++
-	c.inFlight.Add(1)
+	// M5: external async scripts are tracked via asyncN, NOT inFlight.
+	// HandleDocumentEnd waits on inFlight; we don't want async fetches
+	// that may still be in flight at drain time to block document_end.
+	// asyncN is incremented here (when the fetch starts) and
+	// decremented by fireAsync after the callback returns. This
+	// ensures the load event waits for async fetches that are still
+	// pending at drain time, not just those that have begun executing.
+	isAsyncExternalScript := !r.Inline && r.Kind == KindScript && r.ScriptMode == ScriptModeAsync
+	if isAsyncExternalScript {
+		atomic.AddInt32(&c.asyncN, 1)
+	} else {
+		c.inFlight.Add(1)
+	}
 	c.mu.Unlock()
 
 	go c.processResource(r)
@@ -234,18 +251,58 @@ func (c *Coordinator) HandleDocumentEnd(ctx context.Context) error {
 	}
 	c.closed = true
 	c.drainLocked()
+	c.drainDone = true
 	close(c.finalized)
 	c.mu.Unlock()
 
+	// M5: Emit EventDOMContentLoaded after classic + deferred drain.
+	// Async scripts may still be in flight; EventLoad fires below
+	// once they all complete.
 	if c.cb.OnLifecycle != nil {
-		c.cb.OnLifecycle(EventDocumentEnd)
+		c.cb.OnLifecycle(EventDOMContentLoaded)
 	}
+
+	// If no async scripts are in flight (zero counter), fire EventLoad
+	// and EventDocumentEnd immediately. Otherwise spawn a watcher that
+	// fires them when async drains. HandleDocumentEnd returns
+	// promptly either way; callers that want to wait for load can
+	// poll Snapshot().Lifecycle or wait on Done() / a custom signal.
+	if atomic.LoadInt32(&c.asyncN) == 0 {
+		c.fireLoadEvents()
+	} else {
+		go c.waitAsyncAndFireLoad()
+	}
+
 	if c.rec != nil {
 		c.rec.EndPhase(metrics.PhaseParse)
 		c.rec.BeginPhase(metrics.PhaseStyle)
 		c.rec.EndPhase(metrics.PhaseStyle)
 	}
 	return waitErr
+}
+
+// fireLoadEvents emits EventLoad and EventDocumentEnd. Safe to call
+// from any goroutine; the callbacks are read-only via c.cb.
+func (c *Coordinator) fireLoadEvents() {
+	if c.cb.OnLifecycle == nil {
+		return
+	}
+	c.cb.OnLifecycle(EventLoad)
+	c.cb.OnLifecycle(EventDocumentEnd)
+}
+
+// waitAsyncAndFireLoad blocks until asyncN reaches zero, then fires
+// EventLoad and EventDocumentEnd. Also returns early if the
+// coordinator is cancelled or the navigation context expires.
+func (c *Coordinator) waitAsyncAndFireLoad() {
+	select {
+	case <-c.asyncDone:
+		// all async callbacks completed
+	case <-c.navCtx.Done():
+		// navigation cancelled; skip load events
+		return
+	}
+	c.fireLoadEvents()
 }
 
 // Cancel marks the coordinator closed, cancels all in-flight fetches
@@ -279,8 +336,18 @@ func (c *Coordinator) skip(r Resource, reason string) {
 // processResource performs URL resolution, CSP gating, scheduling, and
 // fetch for one resource. Extracted from HandleResource so the
 // goroutine bookkeeping stays in one place.
+//
+// For classic + defer scripts (and CSS, images), the in-flight slot
+// is released via the deferred inFlight.Done() below. External async
+// scripts do NOT participate in inFlight (HandleResource skips the
+// Add for them); their completion is tracked via asyncN inside
+// fireAsync. Inline async scripts still participate in inFlight
+// because they don't have an external fetch to await.
 func (c *Coordinator) processResource(r Resource) {
-	defer c.inFlight.Done()
+	isAsyncExternalScript := !r.Inline && r.Kind == KindScript && r.ScriptMode == ScriptModeAsync
+	if !isAsyncExternalScript {
+		defer c.inFlight.Done()
+	}
 
 	// Inline scripts: emit immediately, no fetch.
 	if r.Inline {
@@ -364,14 +431,23 @@ func (c *Coordinator) processResource(r Resource) {
 			Position: r.Position,
 		})
 	case KindScript:
-		c.emitScript(ScriptResult{
+		result := ScriptResult{
 			URL:      r.URL,
 			Resolved: resolved,
 			Source:   []byte(body),
 			Inline:   false,
-			Mode:     ScriptModeClassic,
+			Mode:     r.ScriptMode,
 			Position: r.Position,
-		})
+		}
+		// M5: async scripts fire OnScript immediately on fetch complete;
+		// classic + defer are buffered for drain-time emission in source
+		// order so the caller can dispatch them after the document is
+		// parsed.
+		if r.ScriptMode == ScriptModeAsync {
+			c.fireAsync(result)
+			return
+		}
+		c.emitScript(result)
 	case KindImage:
 		c.emitImage(ImageResult{
 			URL:      r.URL,
@@ -443,6 +519,38 @@ func (c *Coordinator) buffer(position int, r bufferedResult) {
 	c.mu.Lock()
 	c.results = append(c.results, r)
 	c.mu.Unlock()
+}
+
+// fireAsync delivers an async script result to the caller immediately
+// rather than buffering it for drain. M5: async scripts execute when
+// ready, no source-order guarantee. The callback runs on the fetcher
+// goroutine; callers must be thread-safe.
+//
+// asyncN is incremented by HandleResource when an async fetch starts
+// (so in-flight async fetches are counted even before the response
+// arrives), and decremented here after the callback returns. When it
+// reaches zero AND HandleDocumentEnd has been called, the asyncDone
+// channel is closed and EventLoad / EventDocumentEnd fire.
+func (c *Coordinator) fireAsync(r ScriptResult) {
+	defer func() {
+		n := atomic.AddInt32(&c.asyncN, -1)
+		if n == 0 {
+			c.mu.Lock()
+			drained := c.drainDone
+			c.mu.Unlock()
+			if drained {
+				select {
+				case <-c.asyncDone:
+					// already closed
+				default:
+					close(c.asyncDone)
+				}
+			}
+		}
+	}()
+	if c.cb.OnScript != nil {
+		c.cb.OnScript(r)
+	}
 }
 
 // drainLocked emits all buffered results in source-order position.

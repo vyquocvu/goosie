@@ -140,20 +140,41 @@ type ImageResult struct {
 }
 
 // LifecycleEvent identifies coarse-grained lifecycle transitions the
-// coordinator reports via Callbacks.OnLifecycle. M1 emits only
-// EventDocumentEnd; later milestones add DOMContentLoaded/load.
+// coordinator reports via Callbacks.OnLifecycle.
+//
+// Order of emission for one navigation:
+//  1. EventDOMContentLoaded — after HandleDocumentEnd drains classic
+//     and deferred scripts in source order. Async scripts may still be
+//     in flight at this point.
+//  2. EventLoad — after DOMContentLoaded AND every async script has
+//     finished executing.
+//  3. EventDocumentEnd — final cleanup signal. Currently emitted at
+//     the same time as EventLoad; kept for backward compatibility with
+//     the M1 contract.
 type LifecycleEvent uint8
 
 const (
-	// EventDocumentEnd fires after HandleDocumentEnd drains queued
-	// resources. It is the last event the coordinator emits for a
-	// navigation in M1.
-	EventDocumentEnd LifecycleEvent = iota + 1
+	// EventDOMContentLoaded fires after HandleDocumentEnd drains
+	// classic and deferred scripts in source order. This matches the
+	// HTML spec: DOMContentLoaded fires after the document is parsed
+	// and defer scripts execute.
+	EventDOMContentLoaded LifecycleEvent = iota + 1
+	// EventLoad fires after DOMContentLoaded and every async script
+	// has finished executing.
+	EventLoad
+	// EventDocumentEnd is the final cleanup signal. Kept for backward
+	// compatibility with M1 callers; emits at the same time as
+	// EventLoad in M5.
+	EventDocumentEnd
 )
 
 // String returns a stable label for the lifecycle event.
 func (e LifecycleEvent) String() string {
 	switch e {
+	case EventDOMContentLoaded:
+		return "dom_content_loaded"
+	case EventLoad:
+		return "load"
 	case EventDocumentEnd:
 		return "document_end"
 	default:

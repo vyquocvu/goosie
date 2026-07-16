@@ -717,43 +717,78 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	}
 }
 
-// executeScriptQueue runs classic scripts in document order per
-// plan.md M4. Inline entries arrive with Source=nil (the streaming
-// parser cannot capture body bytes until </script> closes — see M2);
-// inline bodies are extracted from the parsed DOM and merged in
-// by Position. CSP is re-checked here for inline scripts (the
-// coordinator CSP-checks external scripts at fetch time; inline
-// scripts bypass the fetcher, so the gate happens here).
+// executeScriptQueue runs classic and deferred scripts in document
+// order per plan.md M4 + M5. Inline entries arrive with Source=nil
+// (the streaming parser cannot capture body bytes until </script>
+// closes — see M2); inline bodies are extracted from the parsed DOM
+// and merged in by Position. CSP is re-checked here for inline
+// scripts (the coordinator CSP-checks external scripts at fetch time;
+// inline scripts bypass the fetcher, so the gate happens here).
 //
-// Script failures are reported but do not stop subsequent classic
-// scripts unless the engine's policy explicitly requires it. The
-// current Goosie policy is permissive: log and continue.
+// M5: classic scripts execute first (in source order), then deferred
+// scripts (in source order). Async scripts have already fired via
+// the coordinator's OnScript callback during parsing and do not
+// appear in the results slice here.
+//
+// Script failures are reported but do not stop subsequent scripts
+// unless the engine's policy explicitly requires it. The current
+// Goosie policy is permissive: log and continue.
 func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolicy, doc *ghtml.Node, results []documentloader.ScriptResult) {
-	if jsRuntime == nil || len(results) == 0 {
+	if jsRuntime == nil {
+		return
+	}
+	if len(results) == 0 {
+		// No classic/defer scripts. Still dispatch DOMContentLoaded
+		// so listeners (analytics, "ready" handlers) fire.
+		fireDOMContentLoaded(jsRuntime)
 		return
 	}
 	baseURL, _ := urlpkg.Parse(pageURL)
 	inlineBodies := inlineScriptsByPosition(doc)
 
-	// Sort by document-order Position (coordinator preserves order,
-	// but be defensive in case of callback ordering edge cases).
-	sort.SliceStable(results, func(i, j int) bool {
-		return results[i].Position < results[j].Position
-	})
-
+	// Filter and group by mode. Classic and defer are executed at
+	// drain time; module is reported and skipped.
+	classics := make([]documentloader.ScriptResult, 0, len(results))
+	defers := make([]documentloader.ScriptResult, 0, len(results))
 	for _, r := range results {
+		switch r.Mode {
+		case documentloader.ScriptModeClassic:
+			classics = append(classics, r)
+		case documentloader.ScriptModeDefer:
+			defers = append(defers, r)
+		case documentloader.ScriptModeModule:
+			log.Printf("Skipping module script at position %d (unsupported)", r.Position)
+		default:
+			// Async / unknown modes shouldn't appear here, but be safe.
+			log.Printf("Script queue: ignoring %s mode at position %d", r.Mode, r.Position)
+		}
+	}
+
+	runScriptGroup(jsRuntime, csp, baseURL, doc, inlineBodies, classics, "classic")
+	runScriptGroup(jsRuntime, csp, baseURL, doc, inlineBodies, defers, "defer")
+
+	// Dispatch DOMContentLoaded to JS after classic + defer finish.
+	fireDOMContentLoaded(jsRuntime)
+}
+
+// runScriptGroup executes one group of scripts (classic or defer) in
+// source order. Failures log and continue per the permissive policy.
+func runScriptGroup(jsRuntime *js.Runtime, csp *net.CSPPolicy, baseURL *urlpkg.URL, doc *ghtml.Node, inlineBodies map[int]string, group []documentloader.ScriptResult, label string) {
+	sort.SliceStable(group, func(i, j int) bool {
+		return group[i].Position < group[j].Position
+	})
+	for _, r := range group {
 		source := r.Source
 		if r.Inline {
-			// M2 left inline Source empty; M4 fills it from the DOM walk.
 			if body, ok := inlineBodies[r.Position]; ok {
 				source = []byte(body)
 			} else {
-				log.Printf("Script queue: inline script at position %d has no body", r.Position)
+				log.Printf("%s script at position %d has no inline body", label, r.Position)
 				continue
 			}
 			if csp != nil {
 				if err := csp.AllowScript("", baseURL); err != nil {
-					log.Printf("CSP blocked inline script at position %d: %v", r.Position, err)
+					log.Printf("CSP blocked %s inline script at position %d: %v", label, r.Position, err)
 					continue
 				}
 			}
@@ -761,11 +796,45 @@ func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolic
 
 		if _, err := jsRuntime.RunScript(string(source)); err != nil {
 			log.Printf("Error running %s script %s at position %d: %v",
-				scriptKind(r), scriptLabel(r), r.Position, err)
+				label, scriptLabel(r), r.Position, err)
 			continue
 		}
 	}
 }
+
+// fireDOMContentLoaded dispatches the DOMContentLoaded event to the
+// JS runtime after classic + deferred scripts have run. Per HTML spec,
+// DOMContentLoaded fires after the document is parsed and defer
+// scripts execute; async scripts may still be in flight at this
+// point (their completion fires the load event, which M5 emits via
+// EventLoad from the coordinator).
+func fireDOMContentLoaded(jsRuntime *js.Runtime) {
+	if jsRuntime == nil {
+		return
+	}
+	if _, err := jsRuntime.RunScript(dispatchDOMContentLoaded); err != nil {
+		log.Printf("Error dispatching DOMContentLoaded: %v", err)
+	}
+}
+
+// dispatchDOMContentLoaded is the snippet that builds and dispatches
+// the DOMContentLoaded event on document. It tolerates a missing
+// Event constructor (some test environments) by falling back to a
+// plain dispatch.
+const dispatchDOMContentLoaded = `
+(function() {
+  try {
+    var ev = (typeof Event === 'function')
+      ? new Event('DOMContentLoaded')
+      : { type: 'DOMContentLoaded' };
+    if (document && typeof document.dispatchEvent === 'function') {
+      document.dispatchEvent(ev);
+    } else if (typeof dispatchEvent === 'function') {
+      dispatchEvent(ev);
+    }
+  } catch (e) { console.error('DOMContentLoaded dispatch failed:', e); }
+})();
+`
 
 func scriptKind(r documentloader.ScriptResult) string {
 	if r.Inline {

@@ -96,70 +96,125 @@ type captureCallbacks struct {
 	Lifecycle []LifecycleEvent
 }
 
+// record returns the Callbacks wiring. Each closure allocates a fresh
+// slice on every append so snapshot()'s defensive copies are never
+// mutated by a later callback firing on the same goroutine. M5
+// surfaced this race: async scripts fire OnScript from fetcher
+// goroutines, so the test goroutine reading h.cb.Scripts after
+// snapshot can race with a concurrent append into the snapshot's
+// underlying array. Allocating fresh slices breaks that sharing.
 func (c *captureCallbacks) record() Callbacks {
 	return Callbacks{
 		OnStylesheet: func(r CSSResult) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.CSS = append(c.CSS, r)
+			n := make([]CSSResult, 0, len(c.CSS)+1)
+			n = append(n, c.CSS...)
+			n = append(n, r)
+			c.CSS = n
 		},
 		OnScript: func(r ScriptResult) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.Scripts = append(c.Scripts, r)
+			n := make([]ScriptResult, 0, len(c.Scripts)+1)
+			n = append(n, c.Scripts...)
+			n = append(n, r)
+			c.Scripts = n
 		},
 		OnImage: func(r ImageResult) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.Images = append(c.Images, r)
+			n := make([]ImageResult, 0, len(c.Images)+1)
+			n = append(n, c.Images...)
+			n = append(n, r)
+			c.Images = n
 		},
 		OnError: func(_ Resource, err error) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.Errors = append(c.Errors, err)
+			n := make([]error, 0, len(c.Errors)+1)
+			n = append(n, c.Errors...)
+			n = append(n, err)
+			c.Errors = n
 		},
 		OnLifecycle: func(e LifecycleEvent) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			c.Lifecycle = append(c.Lifecycle, e)
+			n := make([]LifecycleEvent, 0, len(c.Lifecycle)+1)
+			n = append(n, c.Lifecycle...)
+			n = append(n, e)
+			c.Lifecycle = n
 		},
 	}
 }
 
+// snapshot is the original M1-M4 accessor: it copies each slice under
+// the lock and replaces the field with the copy. Tests that read
+// h.cb.Scripts after snapshot get the snapshot's copy.
+//
+// M5 caveat: when callbacks fire OUTSIDE drainLocked (e.g. async
+// script OnScript from a fetcher goroutine), a concurrent closure
+// can mutate h.cb.Scripts between snapshot's lock release and the
+// test's read. M5 tests that exercise async paths use Snapshot()
+// instead and read from the returned struct.
 func (c *captureCallbacks) snapshot() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// Defensive copies so test assertions see stable slices.
-	cp := func(s []CSSResult) []CSSResult {
-		out := make([]CSSResult, len(s))
-		copy(out, s)
-		return out
+	c.CSS = copySliceCSS(c.CSS)
+	c.Scripts = copySliceScripts(c.Scripts)
+	c.Images = copySliceImages(c.Images)
+	c.Errors = copySliceErrors(c.Errors)
+	c.Lifecycle = copySliceLifecycle(c.Lifecycle)
+}
+
+// Snapshot is the M5-safe accessor: returns a struct of independent
+// slice copies under the lock. The caller reads the returned struct
+// without locking; the snapshot's underlying arrays are never shared
+// with concurrent callback writers.
+func (c *captureCallbacks) Snapshot() callbackSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return callbackSnapshot{
+		CSS:       copySliceCSS(c.CSS),
+		Scripts:   copySliceScripts(c.Scripts),
+		Images:    copySliceImages(c.Images),
+		Errors:    copySliceErrors(c.Errors),
+		Lifecycle: copySliceLifecycle(c.Lifecycle),
 	}
-	sp := func(s []ScriptResult) []ScriptResult {
-		out := make([]ScriptResult, len(s))
-		copy(out, s)
-		return out
-	}
-	ip := func(s []ImageResult) []ImageResult {
-		out := make([]ImageResult, len(s))
-		copy(out, s)
-		return out
-	}
-	ep := func(s []error) []error {
-		out := make([]error, len(s))
-		copy(out, s)
-		return out
-	}
-	lp := func(s []LifecycleEvent) []LifecycleEvent {
-		out := make([]LifecycleEvent, len(s))
-		copy(out, s)
-		return out
-	}
-	c.CSS = cp(c.CSS)
-	c.Scripts = sp(c.Scripts)
-	c.Images = ip(c.Images)
-	c.Errors = ep(c.Errors)
-	c.Lifecycle = lp(c.Lifecycle)
+}
+
+type callbackSnapshot struct {
+	CSS       []CSSResult
+	Scripts   []ScriptResult
+	Images    []ImageResult
+	Errors    []error
+	Lifecycle []LifecycleEvent
+}
+
+func copySliceCSS(s []CSSResult) []CSSResult {
+	out := make([]CSSResult, len(s))
+	copy(out, s)
+	return out
+}
+func copySliceScripts(s []ScriptResult) []ScriptResult {
+	out := make([]ScriptResult, len(s))
+	copy(out, s)
+	return out
+}
+func copySliceImages(s []ImageResult) []ImageResult {
+	out := make([]ImageResult, len(s))
+	copy(out, s)
+	return out
+}
+func copySliceErrors(s []error) []error {
+	out := make([]error, len(s))
+	copy(out, s)
+	return out
+}
+func copySliceLifecycle(s []LifecycleEvent) []LifecycleEvent {
+	out := make([]LifecycleEvent, len(s))
+	copy(out, s)
+	return out
 }
 
 // newTestCoord constructs a Coordinator wired against a fake fetcher
@@ -683,11 +738,18 @@ func TestLifecycleFiresAtDocumentEnd(t *testing.T) {
 		t.Fatalf("HandleDocumentEnd: %v", err)
 	}
 	h.cb.snapshot()
-	if len(h.cb.Lifecycle) != 1 {
-		t.Fatalf("expected 1 lifecycle event, got %d", len(h.cb.Lifecycle))
+	// M5 emits 3 events: DOMContentLoaded, Load, DocumentEnd.
+	if len(h.cb.Lifecycle) != 3 {
+		t.Fatalf("expected 3 lifecycle events, got %d (%v)", len(h.cb.Lifecycle), h.cb.Lifecycle)
 	}
-	if h.cb.Lifecycle[0] != EventDocumentEnd {
-		t.Errorf("lifecycle event = %v, want EventDocumentEnd", h.cb.Lifecycle[0])
+	if h.cb.Lifecycle[0] != EventDOMContentLoaded {
+		t.Errorf("lifecycle[0] = %v, want EventDOMContentLoaded", h.cb.Lifecycle[0])
+	}
+	if h.cb.Lifecycle[1] != EventLoad {
+		t.Errorf("lifecycle[1] = %v, want EventLoad", h.cb.Lifecycle[1])
+	}
+	if h.cb.Lifecycle[2] != EventDocumentEnd {
+		t.Errorf("lifecycle[2] = %v, want EventDocumentEnd", h.cb.Lifecycle[2])
 	}
 }
 
