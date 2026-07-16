@@ -448,7 +448,6 @@ func (r *Renderer) SetContextMenuCallback(callback func(node *RenderNode, layout
 // SetHighlightNode sets the node to highlight in the viewport
 func (r *Renderer) SetHighlightNode(node *RenderNode) {
 	r.canvasRenderer.SetHighlightNode(node)
-	r.Refresh()
 }
 
 // GetLayoutBox returns the computed layout box associated with the given node
