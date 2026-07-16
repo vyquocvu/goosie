@@ -10,15 +10,22 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 BUILDTIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Build flags
-LDFLAGS=-ldflags "-s -w -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=$(BUILDTIME)"
+VERSION_LDFLAGS=-X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=$(BUILDTIME)
+LDFLAGS=-ldflags "-s -w $(VERSION_LDFLAGS)"
 
 # Reproducible build flags for release builds
 REPRODUCIBLE_FLAGS=-trimpath -ldflags "-s -w -buildid= -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=reproducible"
 
-# Headless build variant (no Fyne dependency)
-HEADLESS_FLAGS=-tags headless -trimpath -ldflags "-s -w -X github.com/vyquocvu/goosie/internal/version.Version=$(VERSION) -X github.com/vyquocvu/goosie/internal/version.Commit=$(COMMIT) -X github.com/vyquocvu/goosie/internal/version.BuildTime=$(BUILDTIME)"
+# Size-optimized release flags. UPX compression is optional because it can slow
+# startup slightly and may be rejected by some antivirus scanners.
+SMALL_FLAGS=-trimpath -ldflags "-s -w -buildid= $(VERSION_LDFLAGS)"
+UPX ?= upx
+UPX_FLAGS ?= --best --lzma
 
-.PHONY: all build build-reproducible build-headless clean install-playwright test generate-test-data smoke-test
+# Headless browser variant for URL screenshots via Fyne test driver
+HEADLESS_FLAGS=-tags headless -trimpath -ldflags "-s -w $(VERSION_LDFLAGS)"
+
+.PHONY: all build build-small build-small-upx build-reproducible build-headless clean install-playwright test generate-test-data smoke-test
 
 all: build
 
@@ -27,6 +34,17 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/browser
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+build-small:
+	@echo "Building $(BINARY_NAME) (size optimized)..."
+	@mkdir -p $(BUILD_DIR)
+	go build $(SMALL_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-small ./cmd/browser
+	@echo "Size-optimized build complete: $(BUILD_DIR)/$(BINARY_NAME)-small"
+
+build-small-upx: build-small
+	@command -v $(UPX) >/dev/null 2>&1 || (echo "UPX not found; install upx or set UPX=/path/to/upx"; exit 1)
+	$(UPX) $(UPX_FLAGS) $(BUILD_DIR)/$(BINARY_NAME)-small
+	@echo "UPX-compressed build complete: $(BUILD_DIR)/$(BINARY_NAME)-small"
 
 build-reproducible:
 	@echo "Building $(BINARY_NAME) (reproducible)..."

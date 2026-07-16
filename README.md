@@ -47,15 +47,38 @@ make build
 ./bin/goosie
 ```
 
-## Headless rendering
-
-Capture a website:
+For a smaller release binary, use the size-optimized target. It keeps the
+existing symbol/debug stripping, removes local path metadata with `-trimpath`,
+and clears the Go build ID for reproducible, slightly smaller output:
 
 ```bash
-go run ./cmd/browser -headless \
+make build-small
+./bin/goosie-small
+```
+
+If you need the smallest distributable file and accept the trade-offs of packed
+executables (slightly slower startup and occasional antivirus false positives),
+install UPX and run:
+
+```bash
+make build-small-upx
+```
+
+## Headless rendering
+
+Capture a website with the headless-tag browser build:
+
+```bash
+go run -tags headless ./cmd/browser -headless \
   -url=https://example.com \
   -screenshot=screenshot.png
+# or build it first
+make build-headless
+./bin/goosie-headless -headless -url=https://example.com -screenshot=screenshot.png
 ```
+
+The default GUI build intentionally leaves out Fyne's test driver to keep the
+binary smaller; use the headless-tag build above for URL screenshots.
 
 Render local HTML or standard input directly to PNG:
 
