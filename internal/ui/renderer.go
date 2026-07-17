@@ -78,4 +78,6 @@ type HTMLRenderer interface {
 	SetHighlightNode(node *renderer.RenderNode)
 	// GetLayoutBox returns the computed layout box associated with the given node.
 	GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox
+	// SetViewport updates the scroll position for viewport-optimized rendering.
+	SetViewport(y, height float32)
 }

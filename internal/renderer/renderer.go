@@ -865,9 +865,39 @@ func (r *Renderer) SetHeadless(mode bool) {
 }
 
 func (r *Renderer) onImageLoaded(src string) {
+	r.treeMu.Lock()
+	r.updateNodeImageData(r.currentRenderTree, src)
+	r.treeMu.Unlock()
+
 	r.canvasRenderer.InvalidateObjectCache()
 	r.MarkDirty()
 	r.Refresh()
+}
+
+func (r *Renderer) updateNodeImageData(node *RenderNode, src string) {
+	if node == nil {
+		return
+	}
+	if node.TagName == "img" {
+		if nodeSrc, ok := node.GetAttribute("src"); ok {
+			resolvedSrc := r.resolveURL(nodeSrc)
+			if resolvedSrc == src {
+				cache := r.imageLoader.GetCache()
+				if cache != nil {
+					if cached := cache.Get(src); cached != nil {
+						node.ImageData = cached
+					}
+				} else {
+					if img, err := r.imageLoader.Load(src); err == nil {
+						node.ImageData = img
+					}
+				}
+			}
+		}
+	}
+	for _, child := range node.Children {
+		r.updateNodeImageData(child, src)
+	}
 }
 
 func shouldAttemptParseExternalCSS(content string) bool {

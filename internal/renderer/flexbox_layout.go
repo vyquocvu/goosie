@@ -122,8 +122,9 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 		if isRow {
 			x = contentX + mainAxisPositions[i]
 			y = contentY + fle.calculateCrossAxisOffset(item.crossSize, crossAxisSize, alignItems, item)
-			item.layoutBox.Box.X = x
-			item.layoutBox.Box.Y = y
+			deltaX := x - item.layoutBox.Box.X
+			deltaY := y - item.layoutBox.Box.Y
+			shiftLayoutBoxTree(item.layoutBox, deltaX, deltaY)
 			item.layoutBox.Box.Width = item.mainSize
 			if alignItems == "stretch" && item.crossSize == 0 {
 				item.layoutBox.Box.Height = crossAxisSize
@@ -131,8 +132,9 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 		} else {
 			x = contentX + fle.calculateCrossAxisOffset(item.crossSize, crossAxisSize, alignItems, item)
 			y = contentY + mainAxisPositions[i]
-			item.layoutBox.Box.X = x
-			item.layoutBox.Box.Y = y
+			deltaX := x - item.layoutBox.Box.X
+			deltaY := y - item.layoutBox.Box.Y
+			shiftLayoutBoxTree(item.layoutBox, deltaX, deltaY)
 			if alignItems == "stretch" && item.crossSize == 0 {
 				item.layoutBox.Box.Width = crossAxisSize
 			}

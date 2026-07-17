@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	urlpkg "net/url"
@@ -262,6 +263,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 		isAttachment := strings.HasPrefix(strings.ToLower(strings.TrimSpace(cd)), "attachment")
 
 		isDownload := isAttachment
+		isImage := false
 		if !isDownload && fetchErr == nil {
 			contentType := strings.ToLower(meta.ContentType)
 			isWebPage := false
@@ -271,7 +273,7 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 					break
 				}
 			}
-			isImage := strings.HasPrefix(contentType, "image/")
+			isImage = strings.HasPrefix(contentType, "image/")
 			if !isWebPage && !isImage && contentType != "" {
 				isDownload = true
 			}
@@ -304,33 +306,9 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 							StartedAt:  time.Now(),
 						}
 						networkService.AddDownload(record)
-
-						if fyne.CurrentApp() != nil {
-							fyne.CurrentApp().SendNotification(&fyne.Notification{
-								Title:   "Goosie Download",
-								Content: "Started downloading " + filename,
-							})
-						}
-
 						m := net.NewDownloadManager(sess.HTTPClient())
-						res, downloadErr := m.DownloadWithContext(context.Background(), resolvedURL, targetPath)
+						res, _ := m.DownloadWithContext(context.Background(), resolvedURL, targetPath)
 						networkService.UpdateDownload(res)
-
-						if downloadErr != nil {
-							if fyne.CurrentApp() != nil {
-								fyne.CurrentApp().SendNotification(&fyne.Notification{
-									Title:   "Goosie Download Failed",
-									Content: "Failed to download " + filename + ": " + downloadErr.Error(),
-								})
-							}
-						} else {
-							if fyne.CurrentApp() != nil {
-								fyne.CurrentApp().SendNotification(&fyne.Notification{
-									Title:   "Goosie Download Complete",
-									Content: "Successfully downloaded " + filename,
-								})
-							}
-						}
 					}()
 				}, browser.GetWindow())
 				d.SetFileName(filename)
@@ -341,30 +319,15 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 
 		var html string
 		if fetchErr != nil {
-			// Fallback to mock HTML for example.com if network is unavailable
-			log.Printf("Navigation %s network error (%v), checking if example.com for mock HTML", navID, fetchErr)
 			if resolvedURL == "https://example.com" {
 				html = `<!DOCTYPE html>
-<html>
-<head>
-    <title>Example Domain</title>
-</head>
-<body>
-    <div>
-        <h1>Example Domain</h1>
-        <p id="main-content">This domain is for use in illustrative examples in documents. You may use this domain in literature without prior coordination or asking for permission.</p>
-        <p><a href="https://www.iana.org/domains/example">More information...</a></p>
-    </div>
-</body>
-</html>`
+<html><head><title>Example Domain</title></head>
+<body><div><h1>Example Domain</h1><p>Mock fallback.</p></div></body></html>`
 			} else {
 				updateUIWithError(browser, sess, navID, fetchErr, resolvedURL)
 				return
 			}
 		} else {
-			// Read the stream directly into a string. This performs one allocation
-			// for the body bytes plus one string conversion, instead of the previous
-			// bytes.Buffer path which allocated repeatedly during growth.
 			data, readErr := io.ReadAll(stream)
 			stream.Close()
 			if readErr != nil {
@@ -373,13 +336,14 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 				return
 			}
 			html = string(data)
-
-			// Handle error status codes: generate fallback HTML for empty error bodies.
 			if meta.Status >= 400 && strings.TrimSpace(html) == "" {
 				html = fmt.Sprintf(
 					"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
 					meta.Status, strings.TrimSpace(fmt.Sprintf("%d", meta.Status)),
 				)
+			}
+			if isImage {
+				html = wrapImageInHTML(resolvedURL)
 			}
 		}
 
@@ -465,6 +429,7 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 		cd := meta.Header.Get("Content-Disposition")
 		isAttachment := strings.HasPrefix(strings.ToLower(strings.TrimSpace(cd)), "attachment")
 		isDownload := isAttachment
+		isImage := false
 		if !isDownload && fetchErr == nil {
 			contentType := strings.ToLower(meta.ContentType)
 			isWebPage := false
@@ -474,7 +439,7 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 					break
 				}
 			}
-			isImage := strings.HasPrefix(contentType, "image/")
+			isImage = strings.HasPrefix(contentType, "image/")
 			if !isWebPage && !isImage && contentType != "" {
 				isDownload = true
 			}
@@ -541,6 +506,9 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 					"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
 					meta.Status, strings.TrimSpace(fmt.Sprintf("%d", meta.Status)),
 				)
+			}
+			if isImage {
+				html = wrapImageInHTML(resolvedURL)
 			}
 		}
 
@@ -635,7 +603,6 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	_, _ = parser.ParseDocumentCtx(parseCtx, strings.NewReader(html), dom.ParseConfig{
 		OnResource: coord.FromDomOnResource(),
 	})
-	cancel()
 
 	// 3. Wait for in-flight CSS fetches to settle (timeout fallback
 	//    renders with what we have so far, per plan.md M3 acceptance).
@@ -643,6 +610,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 		log.Printf("Navigation %s coordinator drain ended with %v (continuing with %d stylesheets)",
 			navID, err, len(externalResults))
 	}
+	cancel()
 
 	// 4. Convert coordinator results into the renderer's
 	//    []renderer.ExternalCSS. The coordinator guarantees source
@@ -1293,4 +1261,11 @@ func getFilenameFromURLAndCD(urlStr, cd string) string {
 	}
 
 	return "download.bin"
+}
+
+// wrapImageInHTML wraps a direct image URL in a minimal HTML page so the
+// browser renders it inline instead of showing raw binary data. This is the
+// same approach real browsers use when navigating to an image URL directly.
+func wrapImageInHTML(url string) string {
+	return fmt.Sprintf(`<!DOCTYPE html><html><head><title>Image</title></head><body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="%s" alt="Image" style="max-width:100%%;height:auto"></body></html>`, html.EscapeString(url))
 }

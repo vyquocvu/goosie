@@ -406,9 +406,19 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 				accum.text.WriteString(inlineBox.Text)
 			}
 
-			for _, nodeID := range order {
+			for idx, nodeID := range order {
 				accum := seen[nodeID]
-				text := strings.TrimSpace(accum.text.String())
+				rawText := accum.text.String()
+				if strings.TrimSpace(rawText) == "" {
+					continue
+				}
+				text := rawText
+				if idx == 0 {
+					text = strings.TrimLeft(text, " ")
+				}
+				if idx == len(order)-1 {
+					text = strings.TrimRight(text, " ")
+				}
 				if text == "" {
 					continue
 				}

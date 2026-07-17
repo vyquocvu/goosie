@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"fyne.io/fyne/v2"
+	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
 // WhiteSpaceMode represents how white space should be handled
@@ -349,6 +350,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 		newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, lineHeight)
 		*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
 		spaceWidth = 0 // No space at start of new line
+		addSpaceBefore = false
 
 		// Re-measure for new line
 		totalWidth = metrics.Width
@@ -542,10 +544,51 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 	// For inline-block, we need to compute its layout first
 	// This is a placeholder - actual implementation would use the layout engine
 
-	// Estimate size (in real implementation, would compute actual layout)
+	// Determine size from styling, attributes, or intrinsic image size
 	fontSize := ile.getFontSizeForNode(node)
-	height := fontSize * 1.5
-	width := fontSize * 5 // Placeholder width
+	var width, height float32
+	width = -1
+	height = -1
+
+	// 1. Check computed styles
+	if node.ComputedStyle != nil {
+		if node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto" {
+			width = parseLengthWithViewport(node.ComputedStyle.Width, fontSize, availableWidth, availableWidth, availableWidth)
+		}
+		if node.ComputedStyle.Height != "" && node.ComputedStyle.Height != "auto" {
+			height = parseLengthWithViewport(node.ComputedStyle.Height, fontSize, availableWidth, availableWidth, availableWidth)
+		}
+	}
+
+	// 2. Check HTML attributes
+	if width < 0 {
+		if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
+			width = parseLength(wAttr, fontSize)
+		}
+	}
+	if height < 0 {
+		if hAttr, ok := node.GetAttribute("height"); ok && hAttr != "" {
+			height = parseLength(hAttr, fontSize)
+		}
+	}
+
+	// 3. Fallback to image intrinsic size if loaded
+	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+		if width < 0 {
+			width = float32(node.ImageData.Width)
+		}
+		if height < 0 {
+			height = float32(node.ImageData.Height)
+		}
+	}
+
+	// 4. Default fallbacks
+	if width < 0 {
+		width = fontSize * 5 // Placeholder width
+	}
+	if height < 0 {
+		height = fontSize * 1.5 // Placeholder height
+	}
 
 	// Check if inline-block fits on current line
 	if (*currentLine).Width+width > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) > 0 {

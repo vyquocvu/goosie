@@ -194,6 +194,9 @@ func (cr *CanvasRenderer) SetContextMenuCallback(callback func(node *RenderNode,
 
 // isInViewport checks if a box intersects with the current viewport
 func (cr *CanvasRenderer) isInViewport(box Rect) bool {
+	if cr.headless {
+		return true
+	}
 	// Add buffer zone above and below viewport for smoother scrolling
 	bufferZone := cr.viewportHeight * 0.5
 	viewportTop := cr.viewportY - bufferZone
@@ -852,6 +855,15 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 			switch imageData.State {
 			case imageloader.StateLoaded:
 				// Image loaded successfully - render it
+				if cr.headless {
+					w, h := cr.imageAttrSize(node)
+					rect := canvas.NewRectangle(color.RGBA{R: 76, G: 175, B: 80, A: 255}) // Material Green
+					rect.SetMinSize(fyne.NewSize(w, h))
+					rect.Resize(fyne.NewSize(w, h))
+					*objects = append(*objects, rect)
+					return
+				}
+
 				img := canvas.NewImageFromImage(imageData.Image)
 				img.FillMode = canvas.ImageFillOriginal
 				img.SetMinSize(fyne.NewSize(float32(imageData.Width), float32(imageData.Height)))
@@ -1054,36 +1066,20 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		return &objectStack[len(objectStack)-1]
 	}
 
-	// Determine which command range to process using Y-band spatial index
-	cmdStart, cmdEnd := 0, len(displayList.Commands)
-	if len(displayList.YBands) > 0 {
-		viewportTop := cr.viewportY - cr.viewportHeight*0.5
-		viewportBottom := cr.viewportY + cr.viewportHeight*1.5 // extra buffer
-		found := false
-		for _, band := range displayList.YBands {
-			if band.YEnd >= viewportTop && band.YStart <= viewportBottom {
-				if !found || band.CmdStart < cmdStart {
-					cmdStart = band.CmdStart
-				}
-				if band.CmdEnd > cmdEnd || !found {
-					cmdEnd = band.CmdEnd
-				}
-				found = true
+	// Determine viewport limits for culling
+	viewportTop := cr.viewportY - cr.viewportHeight*0.5
+	viewportBottom := cr.viewportY + cr.viewportHeight*1.5 // extra buffer
+
+	for cmdIdx := 0; cmdIdx < len(displayList.Commands); cmdIdx++ {
+		cmd := displayList.Commands[cmdIdx]
+
+		// Viewport culling check (do not cull PushClip/PopClip)
+		if cmd.Type != PushClip && cmd.Type != PopClip {
+			cmdBottom := cmd.Box.Y + cmd.Box.Height
+			if cmdBottom < viewportTop || cmd.Box.Y > viewportBottom {
+				continue
 			}
 		}
-		if !found {
-			cmdStart, cmdEnd = 0, 0
-		}
-	}
-	if cmdStart < 0 {
-		cmdStart = 0
-	}
-	if cmdEnd > len(displayList.Commands) {
-		cmdEnd = len(displayList.Commands)
-	}
-
-	for cmdIdx := cmdStart; cmdIdx < cmdEnd; cmdIdx++ {
-		cmd := displayList.Commands[cmdIdx]
 
 		// Handle Clip Commands
 		if cmd.Type == PushClip {
@@ -1214,6 +1210,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 			contentHeight = layoutRoot.Box.Height
 		}
 		viewportBg.Resize(fyne.NewSize(cr.canvasWidth, contentHeight))
+		viewportBg.SetMinSize(fyne.NewSize(cr.canvasWidth, contentHeight))
 		viewportBg.Move(fyne.NewPos(0, 0))
 		rootObjects = append([]fyne.CanvasObject{viewportBg}, rootObjects...)
 	}
@@ -1335,29 +1332,26 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 				switch imageData.State {
 				case imageloader.StateLoaded:
 					// Image loaded successfully - render it
+					if cr.headless {
+						// In headless mode, Fyne's software renderer may draw canvas.Image as blank.
+						// Render a colored rectangle to easily verify successful loading.
+						rect := canvas.NewRectangle(color.RGBA{R: 76, G: 175, B: 80, A: 255}) // Material Green
+						rect.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+						rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+						return rect
+					}
+
 					img := canvas.NewImageFromImage(imageData.Image)
-					img.FillMode = canvas.ImageFillOriginal
-					img.Resize(fyne.NewSize(float32(imageData.Width), float32(imageData.Height)))
-					// Override size with box size to fit layout
+					img.FillMode = canvas.ImageFillStretch
 					img.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+					img.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 
 					// Apply opacity
 					if cmd.Node.ComputedStyle != nil {
 						img.Translucency = 1.0 - float64(cmd.Node.ComputedStyle.Opacity)
 					}
 
-					// Add alt text below the image if available
-					if cmd.ImageAlt != "" {
-						altLabel := widget.NewLabel(cmd.ImageAlt)
-						altLabel.Wrapping = fyne.TextWrapWord
-
-						// VBox for Image + Alt
-						vbox := container.NewVBox(img, altLabel)
-						vbox.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height)) // VBox might ignore this for children?
-						return vbox
-					} else {
-						return img
-					}
+					return img
 
 				case imageloader.StateError:
 					// Image failed to load - show error with alt text

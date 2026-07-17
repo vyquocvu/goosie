@@ -717,6 +717,10 @@ func (b *Browser) RenderParsedContent(ctx context.Context, doc *html.Node, exter
 // RenderHTML renders HTML content using the canvas-based renderer for this specific tab
 func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	t.ensureHTMLRenderer()
+	if t.browser.headless {
+		t.contentScroll.Resize(fyne.NewSize(1000, 600))
+		t.htmlRenderer.SetSize(1000, 600)
+	}
 
 	canvasObject, err := t.htmlRenderer.RenderHTML(ctx, htmlContent)
 	if err != nil {
@@ -733,6 +737,10 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 // so no further CSS fetching happens inside the renderer.
 func (t *Tab) RenderParsedContent(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) error {
 	t.ensureHTMLRenderer()
+	if t.browser.headless {
+		t.contentScroll.Resize(fyne.NewSize(1000, 600))
+		t.htmlRenderer.SetSize(1000, 600)
+	}
 
 	canvasObject, err := t.htmlRenderer.RenderParsed(ctx, doc, externalCSS)
 	if err != nil {
@@ -804,6 +812,17 @@ func (t *Tab) ensureHTMLRenderer() {
 			}
 		})
 	})
+
+	// Sync Fyne scroll position with the renderer viewport so viewport
+	// culling and hit-testing follow the user's scroll.
+	t.contentScroll.OnScrolled = func(pos fyne.Position) {
+		if t.htmlRenderer == nil {
+			return
+		}
+		scrollSize := t.contentScroll.Size()
+		t.htmlRenderer.SetViewport(pos.Y, scrollSize.Height)
+		refreshTabContent(t)
+	}
 }
 
 // publishCanvasObject installs the rendered canvas into the scroll
@@ -811,6 +830,10 @@ func (t *Tab) ensureHTMLRenderer() {
 // RenderParsedContent.
 func (t *Tab) publishCanvasObject(canvasObject fyne.CanvasObject) {
 	t.browser.do(func() {
+		if t.browser.headless {
+			t.contentScroll.Resize(fyne.NewSize(1000, 600))
+			t.htmlRenderer.SetSize(1000, 600)
+		}
 		t.contentScroll.Content = canvasObject
 		t.contentScroll.Refresh()
 		if t.browser.devToolsVisible {
@@ -827,7 +850,10 @@ func refreshTabContent(tab *Tab) {
 	if content == nil {
 		return
 	}
-	tab.contentScroll.Content = content
+	// Only reassign content if different to preserve scroll offset
+	if tab.contentScroll.Content != content {
+		tab.contentScroll.Content = content
+	}
 	tab.contentScroll.Refresh()
 }
 

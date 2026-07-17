@@ -592,6 +592,47 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		} else {
 			width = explicitWidth + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
+	} else if node.ComputedStyle != nil && (node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" || node.ComputedStyle.Display == "inline-block") {
+		// Float or Inline-Block with auto width: compute shrink-to-fit width
+		contentW := float32(0)
+		if le.hasInlineContent(node) {
+			wsMode := le.whiteSpaceModeForNode(node)
+			tempILE := NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize)
+			lines, _ := tempILE.LayoutInlineContent(node, 0, 0, availableWidth, wsMode, nil)
+			for _, line := range lines {
+				if line.Width > contentW {
+					contentW = line.Width
+				}
+			}
+		} else {
+			for _, child := range node.Children {
+				if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+					continue
+				}
+				if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
+					continue
+				}
+				childBox := le.buildLayoutBox(child, 0, 0, availableWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				if childBox != nil {
+					childW := childBox.Box.Width + childBox.MarginLeft + childBox.MarginRight
+					if childW > contentW {
+						contentW = childW
+					}
+				}
+			}
+		}
+
+		if node.ComputedStyle.BoxSizing == "border-box" {
+			width = contentW
+		} else {
+			width = contentW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
+		}
+
+		// Ensure width doesn't exceed availableWidth - (marginLeft + marginRight)
+		maxWidth := availableWidth - (marginLeft + marginRight)
+		if width > maxWidth {
+			width = maxWidth
+		}
 	} else if node.TagName == "input" {
 		defaultW := float32(150)
 		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing == "border-box" {
