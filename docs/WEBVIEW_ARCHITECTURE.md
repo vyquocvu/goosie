@@ -91,10 +91,11 @@ resource scheduler when their owning CSS rule is parsed.
 The diagram above is the intended end-to-end architecture. The active browser path has
 these transitional limitations:
 
-- `cmd/browser.loadPageAsync` obtains an HTTP response stream, but reads the complete
-  main-document body before `internal/renderer.RenderHTML` parses it. The streaming DOM
-  parser can report CSS, script, and image discoveries through `OnResource`, but that
-  discovery callback is not yet connected to the browser's subresource scheduler.
+- `cmd/browser.loadPageAsync` (deprecated; replaced by `loadPageAsyncWithCoordinator`)
+  obtains an HTTP response stream, but reads the complete main-document body before
+  `internal/renderer.RenderHTML` parses it. The streaming DOM parser can report CSS,
+  script, and image discoveries through `OnResource`, but that discovery callback is
+  not yet connected to the browser's subresource scheduler.
 - `internal/renderer.loadExternalCSS` discovers `<link rel="stylesheet">` after the full
   document parse, resolves and CSP-checks each URL, fetches it asynchronously, appends its
   rules, and triggers a style/layout refresh. The first frame can therefore appear before
@@ -131,14 +132,17 @@ Callers receive `(Backend, BackendType, error)` — the `BackendType` is logged 
 
 ### Frame Lifecycle
 
+The frame cycle is driven by the `Backend` interface directly. A `Compositor` abstraction
+is planned (M7) but not yet implemented; callers invoke the backend methods inline:
+
 ```
-Compositor.BeginFrame()     ──► Backend.BeginFrame(FrameInfo)
-Compositor.Rasterize(list)  ──► Backend.Rasterize(list, dirtyRegions)
-Compositor.EndFrame()       ──► Backend.EndFrame()
+caller.BeginFrame(vp)       ──► Backend.BeginFrame(vp frame.Viewport)
+caller.Rasterize(list, dr)  ──► Backend.Rasterize(list []DisplayCmd, dirty []frame.Rect)
+caller.EndFrame()           ──► Backend.EndFrame()
                               ──► FyneAdapter.PresentFrame(buffer)
 ```
 
-The compositor owns the frame cycle. The raster backend never touches layout or DOM.
+The raster backend never touches layout or DOM.
 
 ---
 
@@ -186,7 +190,7 @@ The `FyneAdapter` (`internal/renderer/fyne_adapter.go`) is the sole bridge:
 ### No Fyne Types in Display Commands
 
 Display commands (`DisplayCommandList`) use only backend-neutral types:
-`ColorRGBA` (packed uint32), `RectF` (float32), `PointF` (float32).
+`frame.Color` (packed uint32 RGBA), `RectF` (float32).
 No `fyne.CanvasObject`, `fyne.Color`, or Fyne type appears in engine core.
 
 ---
@@ -219,7 +223,7 @@ When a page requires unsupported features (canvas, video, iframe, ES modules, We
 - **Runtime detection** (`OnRuntimeUnsupportedFeature` callback): Fired from JS when `document.createElement('canvas')` or similar is called.
 - **JS feature detection** (`ScanAndReportUnsupportedJSFeatures`): Pre-scans script source for `import()` expressions.
 
-The policy (`None`, `UserRequested`, `Allowlist`, `FailureThreshold`) determines the fallback action — always within the pure-Go engine, never via a platform WebView.
+The policy (`None`, `UserRequested`, `UnsupportedFeature`, `Allowlist`, `FailureThreshold`) determines the fallback action — always within the pure-Go engine, never via a platform WebView.
 
 ---
 
@@ -228,7 +232,7 @@ The policy (`None`, `UserRequested`, `Allowlist`, `FailureThreshold`) determines
 | Variant | Build Command | Backend | Fyne GUI |
 |---|---|---|---|
 | Pure Go | `go build ./cmd/browser` | CPU only | Yes |
-| Headless | `go build -tags headless ./cmd/headless` | CPU only | No (`image.RGBA` output) |
+| Headless | `go build ./cmd/headless` | CPU only | No (`image.RGBA` output) |
 | macOS accelerated | `go build ./cmd/browser` (on darwin) | Auto: CG or CPU | Yes |
 
 The headless variant (`cmd/headless`) enables scripted rendering without opening a window, useful for automated testing and server-side rendering.
