@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 	"github.com/stretchr/testify/assert"
@@ -484,11 +483,12 @@ func TestElementsPanel_SyntaxHighlighting(t *testing.T) {
 	obj := panel.tree.CreateNode(false)
 	panel.tree.UpdateNode("1", false, obj)
 
-	// Verify it's a single canvas.Text (the new stable-update pattern).
-	txtObj, ok := obj.(*canvas.Text)
-	if !assert.True(t, ok, "tree node should be *canvas.Text") {
+	// Verify it's a domTreeNodeWidget wrapping canvas.Text.
+	nodeWidget, ok := obj.(*domTreeNodeWidget)
+	if !assert.True(t, ok, "tree node should be *domTreeNodeWidget") {
 		return
 	}
+	txtObj := nodeWidget.text
 
 	// The label should start with "<div" and contain the id and class attributes.
 	assert.True(t, strings.HasPrefix(txtObj.Text, "<div"), "label should start with <div, got: %q", txtObj.Text)

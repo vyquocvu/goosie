@@ -124,20 +124,20 @@ type Browser struct {
 	inspectButton       *widget.Button
 	// devToolsMenu assembles and shows the right-click context menu. A
 	// single instance is reused across right-click events.
-	devToolsMenu    *DevToolsContextMenu
-	devToolsDock    *devtools.Dock
-	devToolsVisible bool
-	devToolsSplit   *container.Split
-	dockContainer   *fyne.Container
-	breadcrumbBar   *BreadcrumbBar
-	breadcrumbBox   *fyne.Container
-	screenshotButton    *widget.Button
-	devToolsButton      *widget.Button
-	dirtyOverlayButton  *widget.Button
-	RendererFactory     func() HTMLRenderer
-	deps                BrowserDependencies
-	shortcuts           *ShortcutRegistry
-	headless            bool
+	devToolsMenu       *DevToolsContextMenu
+	devToolsDock       *devtools.Dock
+	devToolsVisible    bool
+	devToolsSplit      *container.Split
+	dockContainer      *fyne.Container
+	breadcrumbBar      *BreadcrumbBar
+	breadcrumbBox      *fyne.Container
+	screenshotButton   *widget.Button
+	devToolsButton     *widget.Button
+	dirtyOverlayButton *widget.Button
+	RendererFactory    func() HTMLRenderer
+	deps               BrowserDependencies
+	shortcuts          *ShortcutRegistry
+	headless           bool
 }
 
 // windowResizeWatcher wraps content and fires a callback when its size
@@ -297,6 +297,7 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 			SecuritySummary: secSummary,
 			Settings:        browser.settings,
 			MetricsRecorder: &metricsAdapter{log: browser.deps.Network.Log()},
+			SourceCache:     browser.deps.Network,
 		}
 		return ctx
 	}, h)
@@ -308,9 +309,9 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 	// Build the dev-tools right-click context menu. The same instance
 	// is reused across right-click events.
 	browser.devToolsMenu = NewDevToolsContextMenu(DevToolsContextMenuOptions{
-		Clipboard:          fyne.CurrentApp().Clipboard(),
-		OnInspect:          browser.devToolsInspectAction,
-		OnViewSource:       browser.devToolsViewSourceAction,
+		Clipboard:           fyne.CurrentApp().Clipboard(),
+		OnInspect:           browser.devToolsInspectAction,
+		OnViewSource:        browser.devToolsViewSourceAction,
 		OnViewComputedStyle: browser.devToolsViewComputedStyleAction,
 	})
 
@@ -409,6 +410,42 @@ func (b *Browser) toggleConsole() {
 	} else {
 		b.devToolsDock.SelectTab("Console")
 		b.devToolsDock.Refresh()
+	}
+}
+
+// ShowDevTools ensures the DevTools dock is visible and selects the given
+// tab (if non-empty). Used by headless screenshot tooling and automation.
+func (b *Browser) ShowDevTools(tab string) {
+	if b.devToolsDock == nil {
+		return
+	}
+	b.devToolsDock.EnsureTabs()
+	// Re-wire panels that the dock constructs lazily so headless mode sees
+	// the full InspectPanel / ConsolePanel content rather than stubs.
+	if b.inspectPanel != nil {
+		b.devToolsDock.SetElementsContent(b.inspectPanel.CanvasObject())
+	}
+	if b.consolePanel != nil {
+		b.devToolsDock.SetConsoleContent(b.consolePanel.CanvasObject())
+	}
+	if !b.devToolsVisible {
+		b.toggleDevTools()
+	}
+	if tab != "" {
+		b.devToolsDock.SelectTab(tab)
+	}
+	b.devToolsDock.Refresh()
+	// Force a re-layout of the split + dock containers so the newly
+	// populated dock is rendered before the screenshot is taken.
+	if b.dockContainer != nil {
+		b.dockContainer.Refresh()
+	}
+	if b.devToolsSplit != nil {
+		b.devToolsSplit.SetOffset(0.65)
+		b.devToolsSplit.Refresh()
+	}
+	if b.window != nil && b.window.Canvas() != nil {
+		b.window.Canvas().Refresh(b.window.Content())
 	}
 }
 
@@ -893,14 +930,10 @@ func (b *Browser) Show() {
 		container.NewBorder(nil, nil, leftBtns, rightBtns, urlContainer),
 	)
 
-	// Dev tools dock container (hidden initially, skipped in headless mode)
-	if !b.headless {
-		b.dockContainer = container.NewMax(b.devToolsDock.CanvasObject())
-		b.dockContainer.Hide()
-	} else {
-		b.dockContainer = container.NewMax()
-		b.dockContainer.Hide()
-	}
+	// Dev tools dock container. In headless mode the dock starts with no
+	// tabs; -devtools tooling populates them via ShowDevTools.
+	b.dockContainer = container.NewMax(b.devToolsDock.CanvasObject())
+	b.dockContainer.Hide()
 
 	// Vertical split: page content on top, dev tools dock on bottom
 	b.devToolsSplit = container.NewVSplit(b.tabs, b.dockContainer)
@@ -1558,4 +1591,3 @@ func (b *Browser) showDownloadsDialog() {
 	d.Resize(fyne.NewSize(500, 400))
 	d.Show()
 }
-

@@ -17,8 +17,8 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
-	"github.com/vyquocvu/goosie/internal/dom"
 	csspkg "github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/documentloader"
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
@@ -39,6 +39,8 @@ func main() {
 	screenshotFlag := flag.String("screenshot", "", "File path to save a screenshot (only in headless mode)")
 	showVersion := flag.Bool("version", false, "Show version information")
 	privateFlag := flag.Bool("private", false, "Run in private browsing mode (incognito)")
+	devToolsFlag := flag.Bool("devtools", false, "Show the developer tools dock (intended for headless screenshots)")
+	devToolsTabFlag := flag.String("devtools-tab", "", "DevTools tab to select when -devtools is set (e.g. Sources, Network, Console)")
 	flag.Parse()
 
 	if *showVersion {
@@ -152,8 +154,17 @@ func main() {
 
 			<-pageLoaded
 
+			if *devToolsFlag {
+				browser.ShowDevTools(*devToolsTabFlag)
+				time.Sleep(500 * time.Millisecond)
+			}
+
 			// Give Fyne's UI thread a brief moment to process the layout changes
 			time.Sleep(1500 * time.Millisecond)
+
+			if content := w.Content(); content != nil {
+				content.Refresh()
+			}
 
 			if *screenshotFlag != "" {
 				err := ui.TakeScreenshotToFile(w, *screenshotFlag)
@@ -719,6 +730,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 			muMut.Lock()
 			latest := currentMutHTML
 			muMut.Unlock()
+			fmt.Printf("DEBUG: Mutation render callback, latest HTML length: %d\n", len(latest))
 			if latest == "" {
 				return
 			}

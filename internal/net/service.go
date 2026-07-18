@@ -364,6 +364,17 @@ func (s *Service) Log() *RequestLog {
 	return s.log
 }
 
+// CachedBody returns the cached response body for rawURL when a fresh cache
+// entry exists. It lets developer tools (e.g. the Sources panel) display
+// sub-resource content without issuing new network requests.
+func (s *Service) CachedBody(rawURL string) (string, bool) {
+	if s == nil || s.cache == nil {
+		return "", false
+	}
+	body, _, ok := s.cache.Get(rawURL)
+	return body, ok
+}
+
 // doRequest wraps http.Client.Do with a redirect policy that limits the
 // number of redirects to maxRedirects and tracks how many were followed.
 func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
@@ -592,4 +603,3 @@ func (s *Service) StartDownload(ctx context.Context, rawURL, targetPath string) 
 	}()
 	return record, nil
 }
-

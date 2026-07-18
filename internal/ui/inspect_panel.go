@@ -121,16 +121,18 @@ func NewInspectPanel(onClose func()) *InspectPanel {
 			return len(node.Children) > 0
 		},
 		func(branch bool) fyne.CanvasObject {
-			// Single text widget per row — Fyne reuses this across rows.
-			// updateDOMTreeNode only mutates .Text and .Color, never replaces the object.
-			return monospaceCanvasText("Node Template", color.Transparent)
+			// Using our custom widget wrapper instead of raw canvas.Text.
+			// This ensures Fyne's layout is correctly notified when size/text changes,
+			// preventing alignment and color issues during recycling.
+			return newDOMTreeNodeWidget("Node Template", color.Transparent)
 		},
 		func(id widget.TreeNodeID, branch bool, o fyne.CanvasObject) {
 			node, ok := panel.nodeMap[id]
 			if !ok {
 				return
 			}
-			updateDOMTreeNode(node, o)
+			selected := panel.selectedNode != nil && panel.selectedNode.ID == node.ID
+			updateDOMTreeNode(node, o, selected)
 		},
 	)
 
@@ -248,13 +250,30 @@ func (ip *InspectPanel) createDetailsView() {
 // Branch open-state is preserved across CSS reloads and viewport updates;
 // OpenBranch is only called once per new page (root node change).
 func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
-	if ip.htmlRenderer != nil {
-		ip.htmlRenderer.SetHighlightNode(nil)
-		ip.refreshRenderer()
+	if ip.updatingUI {
+		return
 	}
+	ip.updatingUI = true
+	defer func() {
+		ip.updatingUI = false
+	}()
+
+	var rootChanged bool
+	var newRoot *renderer.RenderNode
+	if r != nil {
+		newRoot = r.GetRoot()
+		rootChanged = ip.rootNode != newRoot
+	}
+
+	if ip.htmlRenderer != nil && (ip.htmlRenderer != r || rootChanged) {
+		ip.htmlRenderer.SetHighlightNode(nil)
+		if ip.htmlRenderer != r {
+			ip.refreshRenderer()
+		}
+	}
+
 	ip.htmlRenderer = r
 	if r != nil {
-		newRoot := r.GetRoot()
 		ip.rootNode = newRoot
 		ip.rebuildNodeMap()
 
@@ -285,7 +304,6 @@ func (ip *InspectPanel) SetRenderer(r HTMLRenderer) {
 			if _, ok := ip.nodeMap[fmt.Sprintf("%d", ip.selectedNode.ID)]; ok {
 				ip.htmlRenderer.SetHighlightNode(ip.selectedNode)
 				ip.selectedLayout = ip.htmlRenderer.GetLayoutBox(ip.selectedNode)
-				ip.refreshRenderer()
 				ip.updateDetails()
 			} else {
 				ip.selectedNode = nil
@@ -328,10 +346,17 @@ func (ip *InspectPanel) SetScrollToCallback(cb func(x, y float32)) {
 
 // SetElement sets the element to inspect (called from renderer hit test)
 func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	if ip.updatingUI {
+		return
+	}
 	// Skip redundant updates when hovering the same element
 	if ip.selectedNode != nil && node != nil && ip.selectedNode.ID == node.ID {
 		return
 	}
+	ip.updatingUI = true
+	defer func() {
+		ip.updatingUI = false
+	}()
 
 	// Update tree selection
 	if node != nil {
@@ -352,6 +377,14 @@ func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.L
 }
 
 func (ip *InspectPanel) selectNode(node *renderer.RenderNode) {
+	if ip.updatingUI {
+		return
+	}
+	ip.updatingUI = true
+	defer func() {
+		ip.updatingUI = false
+	}()
+
 	ip.selectedNode = node
 	var layout *renderer.LayoutBox
 	if ip.htmlRenderer != nil {
@@ -881,22 +914,43 @@ func formatNodeLabel(node *renderer.RenderNode) (text string, col color.Color) {
 	return fmt.Sprintf("%q", textVal), color.RGBA{R: 181, G: 206, B: 168, A: 255}
 }
 
-func updateDOMTreeNode(node *renderer.RenderNode, o fyne.CanvasObject) {
-	txt, ok := o.(*canvas.Text)
+func updateDOMTreeNode(node *renderer.RenderNode, o fyne.CanvasObject, selected bool) {
+	w, ok := o.(*domTreeNodeWidget)
 	if !ok {
 		return
 	}
 	label, col := formatNodeLabel(node)
-	// Only refresh if something actually changed — prevents spurious redraws.
-	if txt.Text == label && txt.Color == col {
+	if selected {
+		col = theme.ForegroundColor()
+	}
+	w.Update(label, col)
+}
+
+type domTreeNodeWidget struct {
+	widget.BaseWidget
+	text *canvas.Text
+}
+
+func newDOMTreeNodeWidget(val string, col color.Color) *domTreeNodeWidget {
+	w := &domTreeNodeWidget{
+		text: monospaceCanvasText(val, col),
+	}
+	w.ExtendBaseWidget(w)
+	return w
+}
+
+func (w *domTreeNodeWidget) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(w.text)
+}
+
+func (w *domTreeNodeWidget) Update(val string, col color.Color) {
+	if w.text.Text == val && w.text.Color == col {
 		return
 	}
-	txt.Text = label
-	txt.Color = col
-	txt.Refresh()
-
-	// Legacy hbox path is removed. updateDOMTreeNode now mutates a single
-	// canvas.Text in-place; no Objects replacement occurs.
+	w.text.Text = val
+	w.text.Color = col
+	w.text.Refresh()
+	w.Refresh()
 }
 
 func monospaceCanvasText(text string, col color.Color) *canvas.Text {

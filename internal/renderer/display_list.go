@@ -363,6 +363,41 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 
 			for _, inlineBox := range lineBox.InlineBoxes {
 				if !inlineBox.IsText {
+					inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]
+					if inlineExists {
+						// Create a temporary layout box with the absolute coordinates of the inline box
+						tempBox := &LayoutBox{
+							NodeID: inlineBox.NodeID,
+							Box:    Rect{X: lineBox.X + inlineBox.X, Y: lineBox.Y + inlineBox.Y, Width: inlineBox.Width, Height: inlineBox.Height},
+						}
+						dlb.addElementCommand(tempBox, inlineRenderNode, displayList)
+						
+						// If this inline element is wrapped in a link, we should also add a link command
+						if linkNode, href, ok := dlb.linkAncestor(inlineRenderNode); ok {
+							linkCmd := &PaintCommand{
+								Type:     PaintLink,
+								NodeID:   linkNode.ID,
+								Node:     linkNode,
+								Box:      tempBox.Box,
+								LinkURL:  href,
+								LinkText: "",
+							}
+							displayList.AddCommand(linkCmd)
+						} else if inlineRenderNode.TagName == "a" {
+							href, hasHref := inlineRenderNode.GetAttribute("href")
+							if hasHref && href != "" {
+								linkCmd := &PaintCommand{
+									Type:     PaintLink,
+									NodeID:   inlineRenderNode.ID,
+									Node:     inlineRenderNode,
+									Box:      tempBox.Box,
+									LinkURL:  href,
+									LinkText: "",
+								}
+								displayList.AddCommand(linkCmd)
+							}
+						}
+					}
 					continue
 				}
 				inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]

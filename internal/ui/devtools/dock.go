@@ -34,6 +34,13 @@ type TabContext struct {
 	SecuritySummary string
 	Settings        settingsProvider
 	MetricsRecorder metricsProvider
+	SourceCache     sourceCacheProvider
+}
+
+// sourceCacheProvider exposes cached response bodies to the Sources panel so
+// sub-resource content can be displayed without issuing new network requests.
+type sourceCacheProvider interface {
+	CachedBody(rawURL string) (string, bool)
 }
 
 type settingsProvider interface {
@@ -117,6 +124,16 @@ func NewDock(activeTab func() *TabContext, headless ...bool) *Dock {
 func (d *Dock) buildTabs() {
 }
 
+// EnsureTabs populates the dock with every registered DevTools tab if it is
+// currently empty. Safe to call multiple times; callers wire Elements/Console
+// content after invoking this in headless contexts.
+func (d *Dock) EnsureTabs() {
+	if len(d.tabs.Items) > 0 {
+		return
+	}
+	d.addAllTabs()
+}
+
 func (d *Dock) addAllTabs() {
 	d.addTab("Elements", newElementsPanel(d.activeTab))
 	d.addTab("Console", newConsolePanel(d.activeTab))
@@ -182,6 +199,15 @@ func (d *Dock) SetConsoleContent(content fyne.CanvasObject) {
 			return
 		}
 	}
+}
+
+// ActiveTabContext returns the current tab context from the dock's active
+// tab callback, or nil if none is registered.
+func (d *Dock) ActiveTabContext() *TabContext {
+	if d == nil || d.activeTab == nil {
+		return nil
+	}
+	return d.activeTab()
 }
 
 func (d *Dock) Refresh() {
@@ -280,23 +306,7 @@ func newNetworkPanel(activeTab func() *TabContext) fyne.CanvasObject {
 }
 
 func newSourcePanel(activeTab func() *TabContext) fyne.CanvasObject {
-	entry := widget.NewMultiLineEntry()
-	entry.Disable()
-	entry.Wrapping = fyne.TextWrapOff
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		ctx := activeTab()
-		if ctx == nil || ctx.RawSource == "" {
-			entry.SetText("No source available — the page may not have loaded yet.")
-			return
-		}
-		entry.SetText(ctx.RawSource)
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn, nil,
-		widget.NewLabelWithStyle("Page Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-
-	return container.NewBorder(topBar, nil, nil, nil, container.NewScroll(entry))
+	return newSourcesPanel(activeTab)
 }
 
 func newMemoryPanel(activeTab func() *TabContext) fyne.CanvasObject {

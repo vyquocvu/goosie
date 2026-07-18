@@ -75,6 +75,9 @@ go run -tags headless ./cmd/browser -headless \
 # or build it first
 make build-headless
 ./bin/goosie-headless -headless -url=https://example.com -screenshot=screenshot.png
+
+make build-headless
+./bin/goosie-headless -headless -url=https://www.iana.org/help/example-domains -screenshot=example-domains.png
 ```
 
 The default GUI build intentionally leaves out Fyne's test driver to keep the
