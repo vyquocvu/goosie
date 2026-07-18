@@ -309,51 +309,6 @@ func newSourcePanel(activeTab func() *TabContext) fyne.CanvasObject {
 	return newSourcesPanel(activeTab)
 }
 
-func newMemoryPanel(activeTab func() *TabContext) fyne.CanvasObject {
-	label := widget.NewLabel("No memory data available yet.")
-	label.Wrapping = fyne.TextWrapWord
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		ctx := activeTab()
-		if ctx == nil || ctx.Memory == nil {
-			label.SetText("Memory manager not available.")
-			return
-		}
-
-		stats := ctx.Memory.Stats()
-		var b strings.Builder
-
-		b.WriteString("Global Budget\n")
-		b.WriteString(fmt.Sprintf("  Total Usage: %s / %s\n\n",
-			formatBytes(int64(stats.TotalUsage)),
-			formatBytes(int64(stats.GlobalLimit))))
-
-		b.WriteString("Per-Component Budgets\n")
-		for _, comp := range memoryDefaultOrder() {
-			usage, hasUsage := stats.Usage[comp]
-			limit, hasLimit := stats.Limits[comp]
-			if !hasUsage && !hasLimit {
-				continue
-			}
-			usageStr := "0 B"
-			if hasUsage {
-				usageStr = formatBytes(int64(usage))
-			}
-			limitStr := "unlimited"
-			if hasLimit && limit > 0 {
-				limitStr = formatBytes(int64(limit))
-			}
-			b.WriteString(fmt.Sprintf("  %-20s  %s / %s\n", string(comp), usageStr, limitStr))
-		}
-		label.SetText(b.String())
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn, nil,
-		widget.NewLabelWithStyle("Memory Budget", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-
-	return container.NewBorder(topBar, nil, nil, nil, container.NewScroll(label))
-}
-
 func newDisplayListPanel(activeTab func() *TabContext) fyne.CanvasObject {
 	label := widget.NewLabel("No display list built yet.")
 	label.Wrapping = fyne.TextWrapWord
