@@ -313,7 +313,14 @@ type ImageCache struct {
 	metrics      Metrics
 
 	// inFlight prevents duplicate concurrent decode of the same resource.
-	inFlight map[ImageKey]*sync.Once
+	inFlight map[ImageKey]*inflightLoad
+}
+
+// inflightLoad tracks an in-progress decode for deduplication.
+type inflightLoad struct {
+	once   sync.Once
+	result ImageValue
+	err    error
 }
 
 // NewImageCache creates an image cache with the given byte limit.
@@ -324,7 +331,7 @@ func NewImageCache(maxBytes int64) *ImageCache {
 	return &ImageCache{
 		maxBytes: maxBytes,
 		items:    make(map[ImageKey]*imageEntry),
-		inFlight: make(map[ImageKey]*sync.Once),
+		inFlight: make(map[ImageKey]*inflightLoad),
 	}
 }
 
@@ -398,42 +405,43 @@ func (c *ImageCache) Clear() {
 	c.head = nil
 	c.tail = nil
 	c.currentBytes = 0
-	c.inFlight = make(map[ImageKey]*sync.Once)
+	c.inFlight = make(map[ImageKey]*inflightLoad)
 	c.metrics.Reset()
 }
 
 // GetOrLoad retrieves an image or calls load exactly once per key to prevent
 // duplicate concurrent decodes. The load function is called at most once per
-// key across all concurrent callers.
+// key across all concurrent callers. Results are shared across all callers.
 func (c *ImageCache) GetOrLoad(key ImageKey, load func() (ImageValue, error)) (ImageValue, error) {
 	// Fast path: cache hit.
 	if v, ok := c.Get(key); ok {
 		return v, nil
 	}
 
-	// Slow path: ensure only one goroutine loads this key.
 	c.mu.Lock()
-	once, exists := c.inFlight[key]
+	// Double-check: someone may have loaded it while we waited for the lock.
+	if e, ok := c.items[key]; ok {
+		c.mu.Unlock()
+		return e.value, nil
+	}
+	inflight, exists := c.inFlight[key]
 	if !exists {
-		once = &sync.Once{}
-		c.inFlight[key] = once
+		inflight = &inflightLoad{}
+		c.inFlight[key] = inflight
 	}
 	c.mu.Unlock()
 
-	var result ImageValue
-	var loadErr error
-	once.Do(func() {
-		result, loadErr = load()
-		if loadErr == nil {
-			c.Put(key, result)
+	inflight.once.Do(func() {
+		inflight.result, inflight.err = load()
+		if inflight.err == nil {
+			c.Put(key, inflight.result)
 		}
-		// Clean up inFlight entry.
 		c.mu.Lock()
 		delete(c.inFlight, key)
 		c.mu.Unlock()
 	})
 
-	return result, loadErr
+	return inflight.result, inflight.err
 }
 
 // Evict removes LRU entries until at least targetBytes have been freed or the

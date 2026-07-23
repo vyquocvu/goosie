@@ -38,7 +38,8 @@ type Renderer struct {
 	onNavigate func(url string)
 
 	// Current page URL for resolving relative links
-	currentURL string
+	currentURL   string
+	currentURLMu sync.RWMutex
 
 	// Inspect callback for element inspection
 	onInspect func(node *RenderNode, layout *LayoutBox)
@@ -219,9 +220,8 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	// Pass navigation callback to canvas renderer
 	r.treeMu.RLock()
 	onNav := r.onNavigate
-	curURL := r.currentURL
 	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
+	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
 
 	if recorder != nil {
 		recorder.BeginPhase(metrics.PhaseRaster)
@@ -392,9 +392,8 @@ func (r *Renderer) renderParsedInner(ctx context.Context, doc *html.Node, record
 	// Pass navigation callback to canvas renderer
 	r.treeMu.RLock()
 	onNav := r.onNavigate
-	curURL := r.currentURL
 	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
+	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
 
 	if recorder != nil {
 		recorder.BeginPhase(metrics.PhaseRaster)
@@ -539,9 +538,8 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 	// Pass navigation callback to canvas renderer.
 	r.treeMu.RLock()
 	onNav := r.onNavigate
-	curURL := r.currentURL
 	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, curURL)
+	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
 
 	// Render to canvas with viewport optimization.
 	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
@@ -611,7 +609,9 @@ func (r *Renderer) SetNavigationCallback(callback func(url string)) {
 
 // SetCurrentURL sets the current page URL for resolving relative links
 func (r *Renderer) SetCurrentURL(url string) {
+	r.currentURLMu.Lock()
 	r.currentURL = url
+	r.currentURLMu.Unlock()
 }
 
 // SetCSP sets the Content-Security-Policy for style-src enforcement on
@@ -814,6 +814,13 @@ func (r *Renderer) loadImages(node *RenderNode) {
 	}
 }
 
+// currentURLRead returns the current page URL, safe for concurrent access.
+func (r *Renderer) currentURLRead() string {
+	r.currentURLMu.RLock()
+	defer r.currentURLMu.RUnlock()
+	return r.currentURL
+}
+
 // resolveURL resolves a relative or absolute URL against the current page URL
 func (r *Renderer) resolveURL(href string) string {
 	// If href is already absolute, return as-is
@@ -821,10 +828,12 @@ func (r *Renderer) resolveURL(href string) string {
 		return href
 	}
 
+	curURL := r.currentURLRead()
+
 	if strings.HasPrefix(href, "//") {
 		scheme := "https:"
-		if r.currentURL != "" {
-			if parsed, err := url.Parse(r.currentURL); err == nil && parsed.Scheme != "" {
+		if curURL != "" {
+			if parsed, err := url.Parse(curURL); err == nil && parsed.Scheme != "" {
 				scheme = parsed.Scheme + ":"
 			}
 		}
@@ -832,12 +841,12 @@ func (r *Renderer) resolveURL(href string) string {
 	}
 
 	// If no current URL, return href as-is
-	if r.currentURL == "" {
+	if curURL == "" {
 		return href
 	}
 
 	// Parse current URL
-	baseURL, err := url.Parse(r.currentURL)
+	baseURL, err := url.Parse(curURL)
 	if err != nil {
 		return href
 	}
@@ -920,15 +929,17 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 	links := extractExternalLinks(doc)
 	log.Printf("loadExternalCSS found links: %v", links)
 
-	// Read CSP policy for style-src enforcement.
+	// Read CSP policy and current URL for CSP source matching.
 	r.cspMu.RLock()
 	csp := r.csp
 	r.cspMu.RUnlock()
+	r.currentURLMu.RLock()
+	currentURL := r.currentURL
+	r.currentURLMu.RUnlock()
 
-	// Parse base URL for CSP source matching.
 	var baseURL *url.URL
-	if r.currentURL != "" {
-		baseURL, _ = url.Parse(r.currentURL)
+	if currentURL != "" {
+		baseURL, _ = url.Parse(currentURL)
 	}
 
 	for _, href := range links {

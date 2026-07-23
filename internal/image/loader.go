@@ -185,8 +185,11 @@ func (l *loader) loadAsync(source string, wg *sync.WaitGroup) {
 	l.cache.Put(source, data)
 
 	// Trigger callback if loaded successfully
-	if l.OnLoad != nil && data.State == StateLoaded {
-		l.OnLoad(source)
+	l.mu.RLock()
+	cb := l.OnLoad
+	l.mu.RUnlock()
+	if cb != nil && data.State == StateLoaded {
+		cb(source)
 	}
 }
 
