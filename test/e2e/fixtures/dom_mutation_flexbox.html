@@ -1,0 +1,28 @@
+<!doctype html>
+<html data-goosie-execute-scripts>
+<head>
+  <meta charset="utf-8">
+  <title>DOM Mutation Flexbox</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #ffffff; }
+    #container { display: flex; width: 600px; height: 300px; }
+    .box { width: 300px; height: 300px; }
+    .before { background: #b91c1c; }
+    .after { background: #15803d; }
+    .added { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="status" class="box before"></div>
+  </div>
+  <script>
+    var target = document.getElementById("status");
+    target.className = "box after";
+    var added = document.createElement("div");
+    added.id = "added";
+    added.className = "box added";
+    document.getElementById("container").appendChild(added);
+  </script>
+</body>
+</html>

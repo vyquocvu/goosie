@@ -170,7 +170,7 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 		for _, selectorSeq := range rule.Selectors {
 			if sm.matchesSequence(selectorSeq, node) {
 				if !isDefault {
-					fmt.Printf("DEBUG matchesSequence MATCHED for tag %s (has class %s, id %s)\n", node.TagName, node.Attrs["class"], node.Attrs["id"])
+					// fmt.Printf("DEBUG matchesSequence MATCHED for tag %s (has class %s, id %s)\n", node.TagName, node.Attrs["class"], node.Attrs["id"])
 				}
 				for _, decl := range rule.Declarations {
 					sm.applyDeclaration(node, decl)

@@ -12,6 +12,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDOMMutationGoosieVsBrowser(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	fixturePath := filepath.Join(cwd, "fixtures", "dom_mutation_flexbox.html")
+
+	page := newPage(t)
+	defer page.Close()
+	config := VisualTestConfig{
+		DiffThreshold:  0.08,
+		OutputDir:      filepath.Join("testdata", "results"),
+		ViewportWidth:  800,
+		ViewportHeight: 600,
+	}
+	CompareGoosieVsBrowser(t, page, fixturePath, "dom_mutation_flexbox", config)
+}
+
 func TestGeneratedHTML(t *testing.T) {
 	// Verify testdata/output.html exists
 	cwd, err := os.Getwd()

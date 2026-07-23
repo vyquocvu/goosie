@@ -212,6 +212,10 @@ func (c *Coordinator) IsActive() bool {
 // Skipped resources (CSP block, invalid URL, unsupported mode,
 // inactive navigation) report via OnError with a *SkippedError.
 func (c *Coordinator) HandleResource(r Resource) {
+	c.handleResource(r, false)
+}
+
+func (c *Coordinator) handleResource(r Resource, preservePosition bool) {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -225,8 +229,14 @@ func (c *Coordinator) HandleResource(r Resource) {
 		return
 	default:
 	}
-	r.Position = c.nextPos
-	c.nextPos++
+	if preservePosition && r.Position >= 0 {
+		if r.Position >= c.nextPos {
+			c.nextPos = r.Position + 1
+		}
+	} else {
+		r.Position = c.nextPos
+		c.nextPos++
+	}
 	// M5: external async scripts are tracked via asyncN, NOT inFlight.
 	// HandleDocumentEnd waits on inFlight; we don't want async fetches
 	// that may still be in flight at drain time to block document_end.

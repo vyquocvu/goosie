@@ -198,6 +198,58 @@ func TestCoordinatorFromDomOnResource(t *testing.T) {
 	}
 }
 
+func TestCoordinatorFromDomOnResourcePreservesSparsePositions(t *testing.T) {
+	h := newTestHarness(t, "https://example.com/page", nil)
+	defer h.shutdown(t)
+	coord := h.newCoord(t, nil)
+
+	html := `<html><head>
+		<meta charset="utf-8">
+		<title>positions</title>
+		<style>body { color: red; }</style>
+	</head><body>
+		<div>before</div>
+		<script>first()</script>
+		<p>between</p>
+		<script>second()</script>
+	</body></html>`
+
+	var parserPositions []int
+	forward := coord.FromDomOnResource()
+	cfg := dom.ParseConfig{OnResource: func(r dom.Resource) {
+		if r.Kind == dom.ResourceScript && r.Inline {
+			parserPositions = append(parserPositions, r.Position)
+		}
+		forward(r)
+	}}
+	if _, err := dom.NewParser().ParseDocumentCtx(context.Background(), strings.NewReader(html), cfg); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	coord.HandleResource(Resource{Kind: KindScript, Inline: true, Source: []byte("afterParser()")})
+	if err := coord.HandleDocumentEnd(context.Background()); err != nil {
+		t.Fatalf("HandleDocumentEnd: %v", err)
+	}
+	h.cb.snapshot()
+
+	if len(parserPositions) != 2 {
+		t.Fatalf("parser positions = %v, want two inline scripts", parserPositions)
+	}
+	if parserPositions[0] == 0 || parserPositions[1]-parserPositions[0] <= 1 {
+		t.Fatalf("fixture did not produce sparse positions: %v", parserPositions)
+	}
+	if len(h.cb.Scripts) != len(parserPositions)+1 {
+		t.Fatalf("coordinator scripts = %d, want %d parser scripts plus one direct script", len(h.cb.Scripts), len(parserPositions))
+	}
+	for i, result := range h.cb.Scripts[:len(parserPositions)] {
+		if result.Position != parserPositions[i] {
+			t.Errorf("script %d position = %d, want parser position %d", i, result.Position, parserPositions[i])
+		}
+	}
+	if directPosition := h.cb.Scripts[len(h.cb.Scripts)-1].Position; directPosition <= parserPositions[len(parserPositions)-1] {
+		t.Errorf("direct resource position = %d, want greater than parser max %d", directPosition, parserPositions[len(parserPositions)-1])
+	}
+}
+
 // TestCoordinatorFromDomOnResource_CSP — the bridge closure respects
 // CSP. Off-origin discoveries from the parser are skipped before fetch.
 func TestCoordinatorFromDomOnResource_CSP(t *testing.T) {
@@ -252,32 +304,45 @@ func TestCoordinatorFromDomOnResource_ScriptModePreserved(t *testing.T) {
 	defer h.shutdown(t)
 	coord := h.newCoord(t, nil)
 
-	// async and defer are unsupported in M1, so they should be skipped
-	// (reported via OnError) but the discovery must still propagate.
 	html := `<html><head>
 		<script src="a.js" async></script>
 		<script src="d.js" defer></script>
 	</head></html>`
+	asyncResponse := h.fetcher.register("https://example.com/a.js")
+	deferResponse := h.fetcher.register("https://example.com/d.js")
 
 	if _, err := dom.NewParser().ParseDocumentCtx(context.Background(),
 		strings.NewReader(html),
 		dom.ParseConfig{OnResource: coord.FromDomOnResource()}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	waitForFetch(t, h.fetcher, time.Second,
+		"https://example.com/a.js",
+		"https://example.com/d.js")
+	asyncResponse <- fakeResponse{body: "async()"}
+	deferResponse <- fakeResponse{body: "defer()"}
 
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := h.cb.Snapshot()
+		if len(snapshot.Scripts) > 0 && snapshot.Scripts[0].Mode == ScriptModeAsync {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 	if err := coord.HandleDocumentEnd(context.Background()); err != nil {
 		t.Fatalf("HandleDocumentEnd: %v", err)
 	}
-	h.cb.snapshot()
-
-	if h.fetcher.fetchCountFor("https://example.com/a.js") != 0 {
-		t.Errorf("async script should be skipped in M1")
+	snapshot := h.cb.Snapshot()
+	if len(snapshot.Scripts) != 2 {
+		t.Fatalf("scripts = %d, want async and defer results", len(snapshot.Scripts))
 	}
-	if h.fetcher.fetchCountFor("https://example.com/d.js") != 0 {
-		t.Errorf("defer script should be skipped in M1")
+	seen := map[ScriptMode]bool{}
+	for _, script := range snapshot.Scripts {
+		seen[script.Mode] = true
 	}
-	if len(h.cb.Errors) != 2 {
-		t.Errorf("expected 2 skip errors, got %d (%v)", len(h.cb.Errors), h.cb.Errors)
+	if !seen[ScriptModeAsync] || !seen[ScriptModeDefer] {
+		t.Errorf("script modes = %v, want async and defer", seen)
 	}
 }
 

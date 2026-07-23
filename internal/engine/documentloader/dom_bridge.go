@@ -90,6 +90,6 @@ func fromDomScriptMode(m dom.ScriptMode) ScriptMode {
 // goroutine; HandleResource is non-blocking.
 func (c *Coordinator) FromDomOnResource() func(dom.Resource) {
 	return func(r dom.Resource) {
-		c.HandleResource(FromDomResource(r))
+		c.handleResource(FromDomResource(r), true)
 	}
 }

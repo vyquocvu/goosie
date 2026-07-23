@@ -12,13 +12,16 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	goosiejs "github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/testutil"
+	ghtml "golang.org/x/net/html"
 )
 
 // VisualTestConfig holds configuration for visual testing
@@ -146,10 +149,15 @@ func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string,
 	}
 	htmlBytes, err := os.ReadFile(filePath)
 	require.NoError(t, err)
+	htmlSource := string(htmlBytes)
+	if strings.Contains(htmlSource, "data-goosie-execute-scripts") {
+		htmlSource, err = executeInlineScriptsForComparison(htmlSource)
+		require.NoError(t, err)
+	}
 	r := renderer.NewRenderer(float32(width), float32(height))
 	abs, _ := filepath.Abs(filePath)
 	r.SetCurrentURL("file://" + abs)
-	obj, err := r.RenderHTML(context.Background(), string(htmlBytes))
+	obj, err := r.RenderHTML(context.Background(), htmlSource)
 	require.NoError(t, err)
 	h := int(r.GetContentHeight())
 	if h > 0 {
@@ -192,6 +200,57 @@ func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string,
 	} else {
 		os.Remove(diffPath)
 	}
+}
+
+func executeInlineScriptsForComparison(source string) (string, error) {
+	runtime := goosiejs.NewRuntime()
+	defer runtime.Cleanup()
+	runtime.SetHTMLContent(source)
+	mutated := source
+	runtime.SetDOMMutationCallback(func(html string) {
+		mutated = html
+	})
+
+	doc, err := ghtml.Parse(strings.NewReader(source))
+	if err != nil {
+		return "", err
+	}
+	var runErr error
+	var walk func(*ghtml.Node)
+	walk = func(node *ghtml.Node) {
+		if node == nil || runErr != nil {
+			return
+		}
+		if node.Type == ghtml.ElementNode && node.Data == "script" {
+			hasSource := false
+			for _, attr := range node.Attr {
+				if attr.Key == "src" && attr.Val != "" {
+					hasSource = true
+					break
+				}
+			}
+			if !hasSource {
+				var body strings.Builder
+				for child := node.FirstChild; child != nil; child = child.NextSibling {
+					if child.Type == ghtml.TextNode {
+						body.WriteString(child.Data)
+					}
+				}
+				if _, err := runtime.RunScript(body.String()); err != nil {
+					runErr = err
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	if runErr != nil {
+		return "", runErr
+	}
+	return mutated, nil
 }
 
 // ValidateDOMSnapshot captures the computed style and structure of elements

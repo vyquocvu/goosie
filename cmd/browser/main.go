@@ -702,11 +702,12 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	//    strategy in the plan and keeps the user-visible flow stable.
 	tab := browser.ActiveTab()
 	if tab != nil {
-		if tab.GetJSRuntime() == nil {
-			jsRuntime := js.NewRuntime()
-			tab.SetJSRuntime(jsRuntime)
+		if oldRuntime := tab.GetJSRuntime(); oldRuntime != nil {
+			oldRuntime.SetDOMMutationCallback(nil)
+			oldRuntime.Cleanup()
 		}
-		jsRuntime := tab.GetJSRuntime()
+		jsRuntime := js.NewRuntime()
+		tab.SetJSRuntime(jsRuntime)
 		jsRuntime.SetOrigin(originFromURL(url))
 		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
 		jsRuntime.SetFetcher(fetcher)
@@ -715,6 +716,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 			load, ctx := sess.Navigate(context.Background(), openURL)
 			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
 		}
+		jsRuntime.SetHTMLContent(html)
 		// M6 mutation handling: coalesce a burst of JS DOM mutations
 		// into a single render via documentloader's MutationCoalescer,
 		// then re-render using the snapshot entry point (RenderParsed)
@@ -727,10 +729,13 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 			currentMutHTML string
 		)
 		mutCoalescer := documentloader.NewMutationCoalescer(16*time.Millisecond, func(n int) {
+			if !sess.IsActive(navID) {
+				return
+			}
 			muMut.Lock()
 			latest := currentMutHTML
 			muMut.Unlock()
-			fmt.Printf("DEBUG: Mutation render callback, latest HTML length: %d\n", len(latest))
+			// fmt.Printf("DEBUG: Mutation render callback, latest HTML length: %d\n", len(latest))
 			if latest == "" {
 				return
 			}
@@ -746,6 +751,9 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 			}
 		})
 		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
+			if !sess.IsActive(navID) {
+				return
+			}
 			muMut.Lock()
 			currentMutHTML = mutatedHTML
 			muMut.Unlock()

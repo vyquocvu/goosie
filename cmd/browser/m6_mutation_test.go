@@ -11,11 +11,15 @@ import (
 	"testing"
 	"time"
 
+	fynetest "fyne.io/fyne/v2/test"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/documentloader"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
+	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
 	goosienet "github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/renderer"
+	"github.com/vyquocvu/goosie/internal/ui"
 )
 
 // TestM6_MutationCoalescesBurst — M6 acceptance: a burst of JS DOM
@@ -341,6 +345,94 @@ func TestM6_DOMMutationCallback_CoalescesAndRenders(t *testing.T) {
 	// (the total mutations triggered).
 	if coalesced < 10 {
 		t.Errorf("coalesced = %d, want >= 10", coalesced)
+	}
+}
+
+func TestM6_CoordinatorNavigationMutatesCurrentDocumentAndIsolatesRuntime(t *testing.T) {
+	app := fynetest.NewApp()
+	defer app.Quit()
+	window := app.NewWindow("DOM mutation test")
+
+	navSession := session.New()
+	defer navSession.Close()
+	networkService := goosienet.NewService(goosienet.ServiceOptions{Client: navSession.HTTPClient()})
+	defer networkService.Close()
+	fetcher := goosienet.NewFetcherWithService(networkService)
+	parser := dom.NewParser()
+	browser := ui.NewBrowserWithDependencies(ui.BrowserDependencies{
+		App:        app,
+		Window:     window,
+		Headless:   true,
+		NavSession: navSession,
+		Network:    networkService,
+	})
+	browser.RendererFactory = func() ui.HTMLRenderer {
+		return renderer.NewRenderer(1000, 600)
+	}
+
+	firstHTML := `<!doctype html><html><head>
+		<meta charset="utf-8"><title>first</title>
+	</head><body>
+		<div id="status" class="before" data-state="before">BEFORE SCRIPT</div>
+		<p>non-resource gap</p>
+		<script>
+			var status = document.getElementById("status");
+			status.textContent = "AFTER JS DOM MUTATION";
+			status.className = "after";
+			status.setAttribute("data-state", "after");
+			var added = document.createElement("p");
+			added.id = "added";
+			added.textContent = "ADDED BY JAVASCRIPT";
+			document.body.appendChild(added);
+		</script>
+	</body></html>`
+
+	firstLoad, firstCtx := navSession.Navigate(context.Background(), "https://example.com/first")
+	updateUIWithCoordinatorContent(firstCtx, browser, fetcher, navSession, firstLoad.ID, firstHTML, firstLoad.URL, networkService, parser)
+
+	firstRuntime := browser.ActiveTab().GetJSRuntime()
+	if firstRuntime == nil {
+		t.Fatal("first navigation did not create a JavaScript runtime")
+	}
+	state, err := firstRuntime.RunScript(`(function () {
+		var status = document.getElementById("status");
+		var added = document.getElementById("added");
+		if (!status) return "missing";
+		return status.textContent + "|" + status.getAttribute("data-state") + "|" + (added ? added.textContent : "missing");
+	})()`)
+	if err != nil {
+		t.Fatalf("read first navigation DOM: %v", err)
+	}
+	if got, want := state.String(), "AFTER JS DOM MUTATION|after|ADDED BY JAVASCRIPT"; got != want {
+		t.Fatalf("first navigation DOM = %q, want %q", got, want)
+	}
+	if _, err := firstRuntime.RunScript(`globalThis.previousNavigationMarker = true`); err != nil {
+		t.Fatalf("set first navigation marker: %v", err)
+	}
+
+	secondHTML := `<!doctype html><html><head><title>second</title></head><body>
+		<div id="status">BEFORE SECOND SCRIPT</div>
+		<script>
+			document.getElementById("status").textContent =
+				typeof globalThis.previousNavigationMarker === "undefined" ? "ISOLATED" : "LEAKED";
+		</script>
+	</body></html>`
+	secondLoad, secondCtx := navSession.Navigate(context.Background(), "https://example.com/second")
+	updateUIWithCoordinatorContent(secondCtx, browser, fetcher, navSession, secondLoad.ID, secondHTML, secondLoad.URL, networkService, parser)
+
+	secondRuntime := browser.ActiveTab().GetJSRuntime()
+	if secondRuntime == nil {
+		t.Fatal("second navigation did not create a JavaScript runtime")
+	}
+	if secondRuntime == firstRuntime {
+		t.Fatal("full-document navigation reused the previous JavaScript runtime")
+	}
+	state, err = secondRuntime.RunScript(`document.getElementById("status").textContent`)
+	if err != nil {
+		t.Fatalf("read second navigation DOM: %v", err)
+	}
+	if got, want := state.String(), "ISOLATED"; got != want {
+		t.Fatalf("second navigation DOM = %q, want %q", got, want)
 	}
 }
 
