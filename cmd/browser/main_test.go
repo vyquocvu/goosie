@@ -164,7 +164,7 @@ func TestExecuteScriptQueue_DocumentOrder(t *testing.T) {
 	results := []documentloader.ScriptResult{
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 0},
 		{Inline: false, Mode: documentloader.ScriptModeClassic, Position: 1,
-			URL: "https://example.com/ext-1.js",
+			URL:    "https://example.com/ext-1.js",
 			Source: []byte("globalThis.M4_ORDER.push('ext-1')")},
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 2},
 	}
@@ -217,7 +217,7 @@ func TestExecuteScriptQueue_SortedDefensively(t *testing.T) {
 	results := []documentloader.ScriptResult{
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 2}, // 'c' arrives first
 		{Inline: false, Mode: documentloader.ScriptModeClassic, Position: 1,
-			URL: "https://example.com/b.js",
+			URL:    "https://example.com/b.js",
 			Source: []byte("globalThis.M4.push('b')")}, // 'b' second
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 0}, // 'a' third
 	}

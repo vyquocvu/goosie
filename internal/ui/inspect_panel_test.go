@@ -67,7 +67,7 @@ func (m *MockHTMLRenderer) SetHighlightNode(node *renderer.RenderNode) {
 func (m *MockHTMLRenderer) GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox {
 	return nil
 }
-func (m *MockHTMLRenderer) SetHeadless(bool) {}
+func (m *MockHTMLRenderer) SetHeadless(bool)              {}
 func (m *MockHTMLRenderer) SetSize(width, height float32) {}
 func (m *MockHTMLRenderer) SetViewport(y, height float32) {}
 
@@ -538,7 +538,6 @@ func TestElementsPanel_MatchedCSSRules(t *testing.T) {
 	// Check stylesContainer has children. We expect the matched rules list to be populated.
 	assert.NotEmpty(t, panel.stylesContainer.Objects)
 }
-
 
 func TestElementsPanel_PopulateAndExpand(t *testing.T) {
 	test.NewApp()

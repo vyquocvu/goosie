@@ -108,8 +108,8 @@ type Resource struct {
 	Source []byte
 	// Integrity and CrossOrigin are accepted for forward compatibility
 	// with SRI / CORS-aware policies (M5+). M1 does not act on them.
-	Integrity    string
-	CrossOrigin  string
+	Integrity   string
+	CrossOrigin string
 }
 
 // CSSResult is the coordinator's output for one successfully fetched

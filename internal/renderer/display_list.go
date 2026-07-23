@@ -371,7 +371,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 							Box:    Rect{X: lineBox.X + inlineBox.X, Y: lineBox.Y + inlineBox.Y, Width: inlineBox.Width, Height: inlineBox.Height},
 						}
 						dlb.addElementCommand(tempBox, inlineRenderNode, displayList)
-						
+
 						// If this inline element is wrapped in a link, we should also add a link command
 						if linkNode, href, ok := dlb.linkAncestor(inlineRenderNode); ok {
 							linkCmd := &PaintCommand{

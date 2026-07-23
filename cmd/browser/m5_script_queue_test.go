@@ -13,8 +13,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/documentloader"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
-	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/js"
+	goosienet "github.com/vyquocvu/goosie/internal/net"
 	ghtml "golang.org/x/net/html"
 )
 
@@ -36,12 +36,12 @@ func TestExecuteScriptQueue_DefersAfterClassics(t *testing.T) {
 		// Document order: classic, defer, classic, defer, classic
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 0},
 		{Inline: false, Mode: documentloader.ScriptModeDefer, Position: 1,
-			URL: "https://example.com/early.js",
+			URL:    "https://example.com/early.js",
 			Source: []byte("globalThis.M5.push('defer-1')")},
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 2,
 			Source: []byte("globalThis.M5.push('classic-mid')")},
 		{Inline: false, Mode: documentloader.ScriptModeDefer, Position: 3,
-			URL: "https://example.com/late.js",
+			URL:    "https://example.com/late.js",
 			Source: []byte("globalThis.M5.push('defer-2')")},
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 4,
 			Source: []byte("globalThis.M5.push('classic-end')")},
@@ -77,10 +77,10 @@ func TestExecuteScriptQueue_AsyncScriptsNotInQueue(t *testing.T) {
 	results := []documentloader.ScriptResult{
 		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 0},
 		{Inline: false, Mode: documentloader.ScriptModeDefer, Position: 1,
-			URL: "https://example.com/defer.js",
+			URL:    "https://example.com/defer.js",
 			Source: []byte("globalThis.M5_ASYNC = (globalThis.M5_ASYNC || '') + '|defer'")},
 		{Inline: false, Mode: documentloader.ScriptModeAsync, Position: 2,
-			URL: "https://example.com/async.js",
+			URL:    "https://example.com/async.js",
 			Source: []byte("globalThis.M5_ASYNC = (globalThis.M5_ASYNC || '') + '|async'")},
 	}
 
@@ -161,10 +161,10 @@ func TestM5EndToEndAsyncOrdering(t *testing.T) {
 	load, navCtx := sched.Begin(context.Background(), srv.URL+"/page")
 
 	var (
-		mu              sync.Mutex
-		scripts         []documentloader.ScriptResult
-		styles          []documentloader.CSSResult
-		events          []documentloader.LifecycleEvent
+		mu      sync.Mutex
+		scripts []documentloader.ScriptResult
+		styles  []documentloader.CSSResult
+		events  []documentloader.LifecycleEvent
 	)
 	coord, err := documentloader.New(documentloader.Options{
 		NavigationID:      load.ID,
@@ -174,15 +174,18 @@ func TestM5EndToEndAsyncOrdering(t *testing.T) {
 		Fetcher:           realFetcher{srv.Client()},
 		Callbacks: documentloader.Callbacks{
 			OnStylesheet: func(r documentloader.CSSResult) {
-				mu.Lock(); defer mu.Unlock()
+				mu.Lock()
+				defer mu.Unlock()
 				styles = append(styles, r)
 			},
 			OnScript: func(r documentloader.ScriptResult) {
-				mu.Lock(); defer mu.Unlock()
+				mu.Lock()
+				defer mu.Unlock()
 				scripts = append(scripts, r)
 			},
 			OnLifecycle: func(e documentloader.LifecycleEvent) {
-				mu.Lock(); defer mu.Unlock()
+				mu.Lock()
+				defer mu.Unlock()
 				events = append(events, e)
 			},
 		},

@@ -14,8 +14,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/documentloader"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
-	goosienet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/js"
+	goosienet "github.com/vyquocvu/goosie/internal/net"
 )
 
 // TestM6_MutationCoalescesBurst — M6 acceptance: a burst of JS DOM
@@ -89,9 +89,9 @@ func TestM6_NoRefetchOnMutation(t *testing.T) {
 	load, navCtx := sched.Begin(context.Background(), srv.URL+"/page")
 
 	var (
-		mu       sync.Mutex
-		scripts  []documentloader.ScriptResult
-		styles   []documentloader.CSSResult
+		mu      sync.Mutex
+		scripts []documentloader.ScriptResult
+		styles  []documentloader.CSSResult
 	)
 	coord, err := documentloader.New(documentloader.Options{
 		NavigationID:      load.ID,
@@ -101,11 +101,13 @@ func TestM6_NoRefetchOnMutation(t *testing.T) {
 		Fetcher:           countingFetcher{real: realFetcher{srv.Client()}},
 		Callbacks: documentloader.Callbacks{
 			OnStylesheet: func(r documentloader.CSSResult) {
-				mu.Lock(); defer mu.Unlock()
+				mu.Lock()
+				defer mu.Unlock()
 				styles = append(styles, r)
 			},
 			OnScript: func(r documentloader.ScriptResult) {
-				mu.Lock(); defer mu.Unlock()
+				mu.Lock()
+				defer mu.Unlock()
 				scripts = append(scripts, r)
 			},
 		},
@@ -213,7 +215,8 @@ func TestM6_MutationRenderUsesCachedExternalCSS(t *testing.T) {
 		Scheduler: sched, Fetcher: realFetcher{srv.Client()},
 		Callbacks: documentloader.Callbacks{
 			OnStylesheet: func(r documentloader.CSSResult) {
-				mu.Lock(); defer mu.Unlock()
+				mu.Lock()
+				defer mu.Unlock()
 				styles = append(styles, r)
 			},
 		},
@@ -290,8 +293,8 @@ func TestM6_DOMMutationCallback_CoalescesAndRenders(t *testing.T) {
 	defer rt.SetDOMMutationCallback(nil)
 
 	var (
-		mu       sync.Mutex
-		renders  int
+		mu        sync.Mutex
+		renders   int
 		coalesced int
 	)
 	renderedCh := make(chan struct{}, 1)

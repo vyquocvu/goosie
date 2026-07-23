@@ -55,14 +55,14 @@ func (m *RenderMetrics) Stats() map[string]time.Duration {
 	defer m.mu.Unlock()
 
 	return map[string]time.Duration{
-		"RenderHTML_p50":           renderPercentile(m.renderHTMLTimes, 50),
-		"RenderHTML_p95":           renderPercentile(m.renderHTMLTimes, 95),
-		"RenderHTML_p99":           renderPercentile(m.renderHTMLTimes, 99),
-		"ComputeLayout_p50":        renderPercentile(m.computeLayoutTimes, 50),
-		"ComputeLayout_p95":        renderPercentile(m.computeLayoutTimes, 95),
-		"ComputeLayout_p99":        renderPercentile(m.computeLayoutTimes, 99),
-		"RenderWithViewport_p50":   renderPercentile(m.renderWithViewportTimes, 50),
-		"RenderWithViewport_p95":   renderPercentile(m.renderWithViewportTimes, 95),
-		"RenderWithViewport_p99":   renderPercentile(m.renderWithViewportTimes, 99),
+		"RenderHTML_p50":         renderPercentile(m.renderHTMLTimes, 50),
+		"RenderHTML_p95":         renderPercentile(m.renderHTMLTimes, 95),
+		"RenderHTML_p99":         renderPercentile(m.renderHTMLTimes, 99),
+		"ComputeLayout_p50":      renderPercentile(m.computeLayoutTimes, 50),
+		"ComputeLayout_p95":      renderPercentile(m.computeLayoutTimes, 95),
+		"ComputeLayout_p99":      renderPercentile(m.computeLayoutTimes, 99),
+		"RenderWithViewport_p50": renderPercentile(m.renderWithViewportTimes, 50),
+		"RenderWithViewport_p95": renderPercentile(m.renderWithViewportTimes, 95),
+		"RenderWithViewport_p99": renderPercentile(m.renderWithViewportTimes, 99),
 	}
 }

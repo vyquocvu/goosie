@@ -11,8 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-
-
 // StyleManager applies styles from a stylesheet to a render tree.
 type StyleManager struct {
 	defaultStylesheet *css.StyleSheet
@@ -1868,4 +1866,3 @@ func (sm *StyleManager) MatchRules(node *RenderNode) []css.Rule {
 	})
 	return matched
 }
-

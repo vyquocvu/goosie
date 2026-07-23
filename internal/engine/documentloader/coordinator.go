@@ -115,7 +115,7 @@ type Coordinator struct {
 	// be dispatched after the main drain (avoiding re-entrant
 	// deadlocks when callers invoke EnqueueSecondary from within
 	// OnStylesheet). flushed in flushPendingSecondaries.
-	pendingMu         sync.Mutex
+	pendingMu          sync.Mutex
 	pendingSecondaries []pendingSecondary
 }
 
@@ -151,19 +151,19 @@ func New(opts Options) (*Coordinator, error) {
 		return nil, fmt.Errorf("documentloader: FinalURL %q: %w", opts.FinalURL, ErrInvalidBaseURL)
 	}
 	c := &Coordinator{
-		navID:    opts.NavigationID,
-		navCtx:   opts.NavigationContext,
-		baseURL:  opts.FinalURL,
-		baseURLP: baseURL,
-		csp:      opts.CSP,
-		sched:    opts.Scheduler,
-		fetcher:  opts.Fetcher,
-		cb:       opts.Callbacks,
-		rec:      opts.Recorder,
-		finalized:        make(chan struct{}),
-		asyncDone:        make(chan struct{}),
-		maxCSSDepth:      opts.MaxCSSImportDepth,
-		baseURLByDepth:   map[int]string{},
+		navID:          opts.NavigationID,
+		navCtx:         opts.NavigationContext,
+		baseURL:        opts.FinalURL,
+		baseURLP:       baseURL,
+		csp:            opts.CSP,
+		sched:          opts.Scheduler,
+		fetcher:        opts.Fetcher,
+		cb:             opts.Callbacks,
+		rec:            opts.Recorder,
+		finalized:      make(chan struct{}),
+		asyncDone:      make(chan struct{}),
+		maxCSSDepth:    opts.MaxCSSImportDepth,
+		baseURLByDepth: map[int]string{},
 	}
 	if c.rec != nil {
 		c.rec.BeginPhase(metrics.PhaseNavigation)
@@ -683,7 +683,9 @@ func (c *Coordinator) priorityFor(kind ResourceKind) navigation.Priority {
 // external fetches complete out of order, callbacks fire in the order
 // the resources were discovered. This is the "stylesheet source order
 // wins over response completion order" guarantee.
-func (c *Coordinator) emitCSS(r CSSResult)  { c.buffer(r.Position, bufferedResult{position: r.Position, kind: KindCSS, css: &r}) }
+func (c *Coordinator) emitCSS(r CSSResult) {
+	c.buffer(r.Position, bufferedResult{position: r.Position, kind: KindCSS, css: &r})
+}
 func (c *Coordinator) emitScript(r ScriptResult) {
 	c.buffer(r.Position, bufferedResult{position: r.Position, kind: KindScript, script: &r})
 }

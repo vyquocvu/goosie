@@ -478,7 +478,6 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 	}
 }
 
-
 // resolveURL resolves a relative or absolute URL against the base URL
 func (cr *CanvasRenderer) resolveURL(href string) string {
 	// If href is already absolute, return as-is

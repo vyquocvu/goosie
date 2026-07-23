@@ -27,10 +27,10 @@ import (
 // since the last fire, so the renderer can log "rendered after N
 // coalesced mutations" if it cares.
 type MutationCoalescer struct {
-	window time.Duration
-	render func(n int)
-	mu     sync.Mutex
-	timer  *time.Timer
+	window  time.Duration
+	render  func(n int)
+	mu      sync.Mutex
+	timer   *time.Timer
 	pending int
 	stopped bool
 }

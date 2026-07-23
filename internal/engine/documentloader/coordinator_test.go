@@ -88,11 +88,11 @@ func (f *fakeFetcher) fetchCountFor(rawURL string) int {
 
 // captureCallbacks records every callback invocation in order.
 type captureCallbacks struct {
-	mu       sync.Mutex
-	CSS      []CSSResult
-	Scripts  []ScriptResult
-	Images   []ImageResult
-	Errors   []error
+	mu        sync.Mutex
+	CSS       []CSSResult
+	Scripts   []ScriptResult
+	Images    []ImageResult
+	Errors    []error
 	Lifecycle []LifecycleEvent
 }
 

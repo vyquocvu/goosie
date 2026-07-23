@@ -187,4 +187,3 @@ func (tm *ThemeManager) Current() ThemeType {
 func (tm *ThemeManager) AddListener(l func(ThemeType)) {
 	tm.listeners = append(tm.listeners, l)
 }
-

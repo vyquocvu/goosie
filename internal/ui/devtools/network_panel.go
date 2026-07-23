@@ -42,8 +42,8 @@ type networkPanel struct {
 	filter filterConfig
 
 	// Sort state
-	sortCol    int
-	sortAsc    bool
+	sortCol int
+	sortAsc bool
 
 	// Type filter buttons (toggle group style)
 	typeButtons map[string]*widget.Button

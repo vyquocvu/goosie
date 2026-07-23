@@ -24,7 +24,7 @@ func TestServiceOptions_TLSConfig_WithClient(t *testing.T) {
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	client := &http.Client{}
 	svc := NewService(ServiceOptions{
-		Client: client,
+		Client:    client,
 		TLSConfig: tlsConfig,
 	})
 	tr, ok := svc.client.Transport.(*http.Transport)

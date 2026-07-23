@@ -76,11 +76,11 @@ type DevToolsContextMenu struct {
 // silently skipped when clipboard is nil. All action callbacks are
 // optional; an unset callback disables the corresponding menu item.
 type DevToolsContextMenuOptions struct {
-	Clipboard          fyne.Clipboard
-	OnInspect          DevToolsAction
-	OnViewSource       DevToolsAction
+	Clipboard           fyne.Clipboard
+	OnInspect           DevToolsAction
+	OnViewSource        DevToolsAction
 	OnViewComputedStyle DevToolsAction
-	OnCopyInnerText    DevToolsAction
+	OnCopyInnerText     DevToolsAction
 }
 
 // NewDevToolsContextMenu constructs a DevToolsContextMenu with the

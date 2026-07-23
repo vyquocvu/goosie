@@ -142,4 +142,3 @@ func (s *HistoryStore) Clear() error {
 		return s.persist()
 	})
 }
-

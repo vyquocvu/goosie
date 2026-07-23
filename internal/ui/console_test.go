@@ -26,19 +26,19 @@ func TestConsolePanel_LogFiltering(t *testing.T) {
 }
 
 func TestConsolePanel_Execute(t *testing.T) {
-    test.NewApp()
-    panel := NewConsolePanel(nil)
+	test.NewApp()
+	panel := NewConsolePanel(nil)
 
-    executedCmd := ""
-    panel.SetExecuteCallback(func(cmd string) {
-        executedCmd = cmd
-    })
+	executedCmd := ""
+	panel.SetExecuteCallback(func(cmd string) {
+		executedCmd = cmd
+	})
 
-    panel.commandEntry.SetText("test cmd")
-    panel.commandEntry.OnSubmitted("test cmd")
+	panel.commandEntry.SetText("test cmd")
+	panel.commandEntry.OnSubmitted("test cmd")
 
-    assert.Equal(t, "test cmd", executedCmd)
-    assert.Equal(t, "", panel.commandEntry.Text)
+	assert.Equal(t, "test cmd", executedCmd)
+	assert.Equal(t, "", panel.commandEntry.Text)
 }
 
 func TestConsoleEntry_History(t *testing.T) {

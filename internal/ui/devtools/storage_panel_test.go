@@ -59,5 +59,5 @@ func (m *mockStorage) Snapshot() map[string]map[string]string {
 	return m.data
 }
 func (m *mockStorage) Set(origin, key, value string) error { return nil }
-func (m *mockStorage) Remove(origin, key string) error      { return nil }
-func (m *mockStorage) Clear(origin string) error            { return nil }
+func (m *mockStorage) Remove(origin, key string) error     { return nil }
+func (m *mockStorage) Clear(origin string) error           { return nil }

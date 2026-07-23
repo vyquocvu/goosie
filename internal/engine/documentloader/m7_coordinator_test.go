@@ -81,7 +81,9 @@ func TestM7_SecondaryResource_FontFace(t *testing.T) {
 		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
-				mu.Lock(); css = append(css, r); mu.Unlock()
+				mu.Lock()
+				css = append(css, r)
+				mu.Unlock()
 				sheet, _ := parseCSS(r.Source)
 				for _, sub := range extractFromSheet(sheet) {
 					if sub.Kind == resourceFontKind {
@@ -90,7 +92,9 @@ func TestM7_SecondaryResource_FontFace(t *testing.T) {
 				}
 			},
 			OnFont: func(r FontResult) {
-				mu.Lock(); fonts = append(fonts, r); mu.Unlock()
+				mu.Lock()
+				fonts = append(fonts, r)
+				mu.Unlock()
 			},
 		},
 	})
@@ -130,8 +134,8 @@ func TestM7_SecondaryResource_ImageInDeclaration(t *testing.T) {
 	load, navCtx := sched.Begin(context.Background(), srv.base()+"/theme.css")
 
 	var (
-		mu    sync.Mutex
-		imgs  []ImageResult
+		mu   sync.Mutex
+		imgs []ImageResult
 	)
 	var coord *Coordinator
 	coord, _ = New(Options{
@@ -147,7 +151,9 @@ func TestM7_SecondaryResource_ImageInDeclaration(t *testing.T) {
 				}
 			},
 			OnImage: func(r ImageResult) {
-				mu.Lock(); imgs = append(imgs, r); mu.Unlock()
+				mu.Lock()
+				imgs = append(imgs, r)
+				mu.Unlock()
 			},
 		},
 	})
@@ -186,7 +192,9 @@ func TestM7_SecondaryResource_ImportResolvesRelative(t *testing.T) {
 		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
-				mu.Lock(); css = append(css, r); mu.Unlock()
+				mu.Lock()
+				css = append(css, r)
+				mu.Unlock()
 				sheet, _ := parseCSS(r.Source)
 				for _, sub := range extractFromSheet(sheet) {
 					if sub.Kind == resourceStylesheetKind {
@@ -228,9 +236,9 @@ func TestM7_MaxCSSImportDepth(t *testing.T) {
 	load, navCtx := sched.Begin(context.Background(), srv.base()+"/a.css")
 
 	var (
-		mu      sync.Mutex
-		css     []CSSResult
-		skips   []string
+		mu    sync.Mutex
+		css   []CSSResult
+		skips []string
 	)
 	var coord *Coordinator
 	coord, _ = New(Options{
@@ -239,7 +247,9 @@ func TestM7_MaxCSSImportDepth(t *testing.T) {
 		MaxCSSImportDepth: 2, // limit recursion to depth 2
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
-				mu.Lock(); css = append(css, r); mu.Unlock()
+				mu.Lock()
+				css = append(css, r)
+				mu.Unlock()
 				sheet, _ := parseCSS(r.Source)
 				for _, sub := range extractFromSheet(sheet) {
 					if sub.Kind == resourceStylesheetKind {
@@ -248,7 +258,9 @@ func TestM7_MaxCSSImportDepth(t *testing.T) {
 				}
 			},
 			OnError: func(_ Resource, e error) {
-				mu.Lock(); skips = append(skips, e.Error()); mu.Unlock()
+				mu.Lock()
+				skips = append(skips, e.Error())
+				mu.Unlock()
 			},
 		},
 	})
@@ -285,8 +297,8 @@ func TestM7_FontResult_HasSource(t *testing.T) {
 	load, navCtx := sched.Begin(context.Background(), srv.base()+"/")
 
 	var (
-		mu     sync.Mutex
-		fonts  []FontResult
+		mu    sync.Mutex
+		fonts []FontResult
 	)
 	var coord *Coordinator
 	coord, _ = New(Options{
@@ -294,7 +306,9 @@ func TestM7_FontResult_HasSource(t *testing.T) {
 		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnFont: func(r FontResult) {
-				mu.Lock(); fonts = append(fonts, r); mu.Unlock()
+				mu.Lock()
+				fonts = append(fonts, r)
+				mu.Unlock()
 			},
 		},
 	})

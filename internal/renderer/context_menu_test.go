@@ -45,7 +45,7 @@ func TestInspectableContainer_TappedSecondary_NoCallback(t *testing.T) {
 	// No panic is the success criterion here.
 	assert.NotPanics(t, func() {
 		ic.TappedSecondary(&fyne.PointEvent{
-			Position:        fyne.NewPos(10, 10),
+			Position:         fyne.NewPos(10, 10),
 			AbsolutePosition: fyne.NewPos(20, 20),
 		})
 	})
@@ -96,7 +96,7 @@ func TestInspectableContainer_TappedSecondary_InvokesCallback(t *testing.T) {
 
 	// The hit-test traverses down to the deepest matching box.
 	cr.inspectable.TappedSecondary(&fyne.PointEvent{
-		Position:        fyne.NewPos(5, 5),
+		Position:         fyne.NewPos(5, 5),
 		AbsolutePosition: fyne.NewPos(105, 55),
 	})
 

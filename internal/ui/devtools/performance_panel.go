@@ -13,8 +13,8 @@ import (
 
 type performancePanel struct {
 	fyne.Container
-	label     *widget.Label
-	content   *fyne.Container
+	label   *widget.Label
+	content *fyne.Container
 }
 
 func newPerformancePanel(activeTab func() *TabContext) fyne.CanvasObject {

@@ -83,15 +83,15 @@ func TestResolveURLInvalidRef(t *testing.T) {
 // TestIsHTTPOrHTTPS classifies schemes the coordinator should fetch vs skip.
 func TestIsHTTPOrHTTPS(t *testing.T) {
 	cases := map[string]bool{
-		"http://example.com/":           true,
-		"https://example.com/":          true,
-		"data:text/css,body{}":          false,
-		"blob:https://x/abc":            false,
-		"file:///etc/passwd":            false,
-		"javascript:alert(1)":           false,
-		"mailto:nobody@example.com":     false,
-		"":                              false,
-		"://malformed":                  false,
+		"http://example.com/":       true,
+		"https://example.com/":      true,
+		"data:text/css,body{}":      false,
+		"blob:https://x/abc":        false,
+		"file:///etc/passwd":        false,
+		"javascript:alert(1)":       false,
+		"mailto:nobody@example.com": false,
+		"":                          false,
+		"://malformed":              false,
 	}
 	for in, want := range cases {
 		got := IsHTTPOrHTTPS(in)

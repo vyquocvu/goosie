@@ -71,13 +71,13 @@ func (m ScriptMode) String() string {
 // script body. Capturing inline script bodies during the streaming
 // tokenizer pass is deferred to a later milestone.
 type Resource struct {
-	Kind       ResourceKind
-	URL        string
-	Position   int        // document-order index assigned by the parser
-	ScriptMode ScriptMode // meaningful only when Kind == ResourceScript
-	Inline     bool       // true for <script>...</script> with no src
-	Integrity  string     // SRI hash, empty when absent
-	CrossOrigin string    // crossorigin attribute, empty when absent
+	Kind        ResourceKind
+	URL         string
+	Position    int        // document-order index assigned by the parser
+	ScriptMode  ScriptMode // meaningful only when Kind == ResourceScript
+	Inline      bool       // true for <script>...</script> with no src
+	Integrity   string     // SRI hash, empty when absent
+	CrossOrigin string     // crossorigin attribute, empty when absent
 }
 
 // UnsupportedFeatureKind identifies the type of unsupported engine feature.

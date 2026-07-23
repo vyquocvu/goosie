@@ -1237,4 +1237,3 @@ func (r *Renderer) GetMatchedRules(node *RenderNode) []css.Rule {
 	sm := NewStyleManager(r.stylesheet)
 	return sm.MatchRules(node)
 }
-

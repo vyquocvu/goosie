@@ -55,7 +55,6 @@ func (m *MockHTMLRendererComp) SetHighlightNode(node *renderer.RenderNode) {}
 func (m *MockHTMLRendererComp) GetLayoutBox(node *renderer.RenderNode) *renderer.LayoutBox {
 	return nil
 }
-func (m *MockHTMLRendererComp) SetHeadless(bool) {}
+func (m *MockHTMLRendererComp) SetHeadless(bool)              {}
 func (m *MockHTMLRendererComp) SetSize(width, height float32) {}
 func (m *MockHTMLRendererComp) SetViewport(y, height float32) {}
-
