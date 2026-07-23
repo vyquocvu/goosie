@@ -54,10 +54,10 @@ goosie/
 ## Proposed MCP Integration
 
 - **[MCP Roadmap](ROADMAP_MCP.md)** - Documentation-first milestones and release gates
-- **[MCP Architecture](docs/MCP_ARCHITECTURE.md)** - UI-independent browser-control boundary
-- **[MCP Contracts](docs/MCP_PROTOCOL_CONTRACTS.md)** - Planned tools, resources, limits, and errors
-- **[MCP Security](docs/MCP_SECURITY.md)** - Threat model and mandatory controls
-- **[MCP TDD Plan](docs/MCP_TDD_PLAN.md)** - Test order, fixtures, matrices, and CI gates
+- **[MCP Architecture](website/docs/mcp-architecture.md)** - UI-independent browser-control boundary
+- **[MCP Contracts](website/docs/mcp-protocol-contracts.md)** - Planned tools, resources, limits, and errors
+- **[MCP Security](website/docs/mcp-security.md)** - Threat model and mandatory controls
+- **[MCP TDD Plan](website/docs/mcp-tdd-plan.md)** - Test order, fixtures, matrices, and CI gates
 
 ## Examples
 

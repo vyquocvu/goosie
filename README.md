@@ -4,7 +4,7 @@ Goosie is an experimental web browser engine written in Go. It implements its ow
 
 Fyne provides the desktop window and input handling; page rendering is done by Goosie.
 
-> Goosie is under active development and supports a subset of the web platform. See [Supported Web Platform](docs/SUPPORTED_WEB_PLATFORM.md) for current coverage.
+> Goosie is under active development and supports a subset of the web platform. See [Supported Web Platform](website/docs/supported-web-platform.md) for current coverage.
 
 ## Features
 
@@ -120,8 +120,9 @@ The end-to-end suite requires Playwright and network access. Install Playwright 
 
 ## Documentation
 
-- [Architecture](ARCHITECTURE.md)
-- [Supported Web Platform](docs/SUPPORTED_WEB_PLATFORM.md)
+- [Architecture](website/docs/architecture.md)
+- [Supported Web Platform](website/docs/supported-web-platform.md)
+- [Documentation Site](website/docs/intro.md)
 - [Testing](TESTING.md)
 - [Performance](PERFORMANCE.md)
 - [Roadmap](ROADMAP_V2.md)

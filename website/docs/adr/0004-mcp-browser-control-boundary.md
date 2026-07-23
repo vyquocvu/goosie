@@ -74,7 +74,7 @@ Rejected for v1. It adds Origin/Host validation, authentication, secure session 
 
 ## Acceptance criteria
 
-- The dependency graph matches `docs/MCP_ARCHITECTURE.md`.
+- The dependency graph matches `../mcp-architecture.md`.
 - Browser-control integration tests load and act on local fixtures with no Fyne initialization.
 - MCP handler tests run entirely against a fake browser-control implementation.
 - No package below the shell imports the MCP SDK.

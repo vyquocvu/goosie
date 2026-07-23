@@ -9,11 +9,11 @@
 
 This roadmap is the execution index for MCP work. The supporting documents are normative for implementation:
 
-- [Architecture and boundaries](docs/MCP_ARCHITECTURE.md)
-- [Tool and resource contracts](docs/MCP_PROTOCOL_CONTRACTS.md)
-- [Threat model and security requirements](docs/MCP_SECURITY.md)
-- [TDD and verification plan](docs/MCP_TDD_PLAN.md)
-- [Architecture decision record](docs/adr/0004-mcp-browser-control-boundary.md)
+- [Architecture and boundaries](website/docs/mcp-architecture.md)
+- [Tool and resource contracts](website/docs/mcp-protocol-contracts.md)
+- [Threat model and security requirements](website/docs/mcp-security.md)
+- [TDD and verification plan](website/docs/mcp-tdd-plan.md)
+- [Architecture decision record](website/docs/adr/0004-mcp-browser-control-boundary.md)
 
 No MCP code should be written until the Phase 0 documentation exit gate is accepted.
 

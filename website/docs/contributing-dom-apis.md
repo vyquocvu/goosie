@@ -87,7 +87,7 @@ if !h.enforcer.HasCapability(js.CapabilityYourAPI) {
 
 ## Step 4: Add to Supported Platform Doc
 
-Update `docs/SUPPORTED_WEB_PLATFORM.md` with the new API, its status, and any documented subset.
+Update `supported-web-platform.md` with the new API, its status, and any documented subset.
 
 ## Step 5: Integration Test
 
@@ -111,7 +111,7 @@ Update `ROADMAP_V2.md` if the API was a planned roadmap item.
 - [ ] Benchmarks for performance-sensitive paths
 - [ ] JavaScript binding added (if JS-accessible)
 - [ ] Capability gate added (if privileged)
-- [ ] Updated `docs/SUPPORTED_WEB_PLATFORM.md`
+- [ ] Updated `supported-web-platform.md`
 - [ ] Integration test added
 - [ ] Ran `go test -short ./internal/dom/... ./internal/js/...`
 - [ ] Ran `go test -race -short ./internal/dom/... ./internal/js/...`

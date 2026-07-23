@@ -184,7 +184,7 @@ Establish a trustworthy baseline before changing core data structures. Lock the 
 
 ### M0.1 Define supported engine scope
 
-- [x] Create `docs/SUPPORTED_WEB_PLATFORM.md`.
+- [x] Create `website/docs/supported-web-platform.md`.
 - [x] Separate features into `supported`, `partial`, `planned`, `fallback`, and `out of scope`.
 - [x] Define supported HTML elements.
 - [x] Define supported CSS properties and selector types.
@@ -904,7 +904,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 
 - [x] Architecture overview (ARCHITECTURE.md).
 - [x] Package ownership rules.
-- [x] Supported platform matrix (docs/SUPPORTED_WEB_PLATFORM.md).
+- [x] Supported platform matrix (website/docs/supported-web-platform.md).
 - [x] Performance methodology (PERFORMANCE.md).
 - [x] Memory model and cache budgets.
 - [x] Rendering pipeline deep dive.
@@ -1006,7 +1006,7 @@ These may be handled through future dedicated milestones, optional backends, or 
 
 The first sprint after this roadmap is accepted should contain only the following work:
 
-- [x] Add `docs/SUPPORTED_WEB_PLATFORM.md`.
+- [x] Add `website/docs/supported-web-platform.md`.
 - [x] Add deterministic benchmark fixtures.
 - [x] Add parser, style, layout, paint, and scroll benchmarks.
 - [x] Add navigation IDs and phase timings.

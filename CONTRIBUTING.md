@@ -56,8 +56,8 @@ go test -bench=. -benchmem ./path/to/package
 ## Documentation
 
 - Update `ROADMAP_V2.md` (mark checkboxes) when completing a roadmap task.
-- Add ADR `docs/adr/NNNN-title.md` for significant architecture decisions (see `docs/adr/` for examples).
-- Update `docs/SUPPORTED_WEB_PLATFORM.md` when adding or changing supported features.
+- Add ADR `website/docs/adr/NNNN-title.md` for significant architecture decisions (see `website/docs/adr/` for examples).
+- Update `website/docs/supported-web-platform.md` when adding or changing supported features.
 - Add package doc comments (`// Package X provides ...`) for new packages.
 
 ## Pull Request Process

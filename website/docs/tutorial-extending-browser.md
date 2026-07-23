@@ -19,7 +19,7 @@ This series walks through extending the Goosie engine, from adding a simple CSS 
 5. **Implement raster.** Handle the new command kind in `internal/renderer/frame/raster/cpu_backend.go` by drawing the shadow before the text.
 6. **Test.** Add a golden test fixture with `text-shadow`. Verify output matches the reference rendering.
 
-**See also:** `docs/CONTRIBUTING_CSS_PROPERTIES.md`
+**See also:** `contributing-css-properties.md`
 
 ---
 
@@ -35,9 +35,9 @@ This series walks through extending the Goosie engine, from adding a simple CSS 
 2. **Test.** Add `TestClosest` in `internal/dom/store_test.go` covering match, no match, self-match, and stale node cases.
 3. **JS binding.** Add `closest(call)` method on `NodeHandle` in `internal/js/dom_handle.go`. Register it on the prototype.
 4. **Integration test.** Write a JS snippet that calls `element.closest()` and verify the result in a Goja runtime test.
-5. **Document.** Add `closest` to `docs/SUPPORTED_WEB_PLATFORM.md`.
+5. **Document.** Add `closest` to `supported-web-platform.md`.
 
-**See also:** `docs/CONTRIBUTING_DOM_APIS.md`
+**See also:** `contributing-dom-apis.md`
 
 ---
 
@@ -121,4 +121,4 @@ This series walks through extending the Goosie engine, from adding a simple CSS 
 4. **Report usage.** After each mutation, call `memory.Manager.UpdateUsage(memory.ComponentYourCache, c.Bytes())`.
 5. **Test.** Verify that filling the cache triggers eviction, that usage reports are accurate, and that the cache reaches steady state.
 
-**See also:** `docs/MEMORY_MODEL.md`
+**See also:** `memory-model.md`

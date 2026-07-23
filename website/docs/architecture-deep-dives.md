@@ -6,7 +6,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 1: The Compact DOM Store — Why Index-Based Storage Wins
 
-**File:** `docs/adr/0001-use-compact-dom-store.md`
+**File:** `adr/0001-use-compact-dom-store.md`
 
 **Covers:**
 - Pointer-density problem with `*html.Node`
@@ -20,7 +20,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 2: The Retained Display List — From Layout to Pixel
 
-**File:** `docs/adr/0002-retained-display-list-design.md`
+**File:** `adr/0002-retained-display-list-design.md`
 
 **Covers:**
 - Why a flat command list instead of a recording canvas
@@ -34,7 +34,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 3: Raster Backend Abstraction
 
-**File:** `docs/adr/0003-raster-backend-boundaries.md`
+**File:** `adr/0003-raster-backend-boundaries.md`
 
 **Covers:**
 - Backend interface lifecycle design
@@ -47,7 +47,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 4: Memory Budget Manager and Eviction Cascade
 
-**File:** `docs/MEMORY_MODEL.md`
+**File:** `memory-model.md`
 
 **Covers:**
 - Two-phase eviction (per-component → global)

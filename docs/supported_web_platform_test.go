@@ -7,7 +7,7 @@ import (
 )
 
 func TestSupportedWebPlatformDocumentCoversRoadmapScope(t *testing.T) {
-	data, err := os.ReadFile("SUPPORTED_WEB_PLATFORM.md")
+	data, err := os.ReadFile("../website/docs/supported-web-platform.md")
 	if err != nil {
 		t.Fatalf("read support matrix: %v", err)
 	}

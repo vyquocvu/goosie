@@ -113,7 +113,7 @@ func TestMetalGoldenEquivalence(t *testing.T) {
 
 ### 7. Update Documentation
 
-- Add the new backend to `WEBVIEW_ARCHITECTURE.md` (backend table).
+- Add the new backend to `webview-architecture.md` (backend table).
 - Add build instructions to `README.md` if additional dependencies are needed.
 - Document platform requirements and known limitations.
 

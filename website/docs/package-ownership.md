@@ -10,7 +10,7 @@ This document defines the ownership boundaries, responsibilities, and import rul
 2. **No circular imports.** Packages may import only packages with an equal or lower layer number (see Layer map below).
 3. **Engine must not import Fyne.** Core engine packages (`internal/dom/*`, `internal/css`, `internal/renderer/frame/*`, `internal/engine/*`, `internal/js`, `internal/net`) must never import `fyne.io/fyne/v2` or any of its subpackages. Fyne is the window/presentation shell only.
 4. **Package doc comments** must state the package's responsibility, the milestone it was introduced in, and any ownership constraints (e.g., "single-owner goroutine").
-5. **Evictor registration.** Any package that owns a bounded cache with byte-based limits must register a `memory.Evictor` with the global `memory.Manager` (see `docs/MEMORY_MODEL.md`).
+5. **Evictor registration.** Any package that owns a bounded cache with byte-based limits must register a `memory.Evictor` with the global `memory.Manager` (see `memory-model.md`).
 
 ---
 

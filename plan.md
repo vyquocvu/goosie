@@ -3,7 +3,7 @@
 ## Goal
 
 Implement the resource lifecycle described in
-[`docs/WEBVIEW_ARCHITECTURE.md`](docs/WEBVIEW_ARCHITECTURE.md): load external CSS
+[`website/docs/webview-architecture.md`](website/docs/webview-architecture.md): load external CSS
 and classic JavaScript from URLs, apply correct URL/CSP/navigation handling, and
 move toward ordered script execution and targeted rendering invalidation.
 

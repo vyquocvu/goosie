@@ -65,7 +65,7 @@ If the property affects rendering (color, background, border), update the displa
 
 ## Step 6: Add to Supported Platform Doc
 
-Update `docs/SUPPORTED_WEB_PLATFORM.md` — add the new property to the CSS properties table with its status (`supported`, `partial`, or `planned`).
+Update `supported-web-platform.md` — add the new property to the CSS properties table with its status (`supported`, `partial`, or `planned`).
 
 ## Step 7: Tests
 
@@ -82,7 +82,7 @@ Update `docs/SUPPORTED_WEB_PLATFORM.md` — add the new property to the CSS prop
 - [ ] Added resolution logic in `ApplyDeclaration()`
 - [ ] Updated layout engine (if layout-affecting)
 - [ ] Updated display commands or raster (if paint-affecting)
-- [ ] Updated `docs/SUPPORTED_WEB_PLATFORM.md`
+- [ ] Updated `supported-web-platform.md`
 - [ ] Added parser and resolution tests
 - [ ] Added layout or golden tests (if applicable)
 - [ ] Ran `go test -short ./internal/css/...`
