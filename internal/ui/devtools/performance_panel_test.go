@@ -42,3 +42,54 @@ func TestPerformancePanelRefresh(t *testing.T) {
 	panel.RefreshFrom(ctx)
 	assert.NotNil(t, panel.label)
 }
+
+func TestPerformancePanel_Counters(t *testing.T) {
+	panel := newPerformancePanel(nil).(*performancePanel)
+	ctx := &TabContext{
+		MetricsRecorder: &mockMetricsProvider{
+			m: metrics.Metrics{
+				NavID: 2,
+				Counters: metrics.Counters{
+					NodeCount:        200,
+					RuleCount:        50,
+					SelectorCount:    30,
+					BoxCount:         80,
+					DisplayItemCount: 120,
+					ImageCount:       10,
+					TileCount:        15,
+					BytesDownloaded:  50000,
+					DecodedImageBytes: 200000,
+					CacheHits:        100,
+					CacheMisses:      5,
+					ScriptErrors:     3,
+				},
+			},
+		},
+	}
+	panel.RefreshFrom(ctx)
+	assert.Contains(t, panel.label.Text, "200")
+	assert.Contains(t, panel.label.Text, "50")
+	assert.Contains(t, panel.label.Text, "100")
+	assert.Contains(t, panel.label.Text, "5")
+	assert.Contains(t, panel.label.Text, "48.8 KB")
+}
+
+func TestPerformancePanel_NilMetrics(t *testing.T) {
+	panel := newPerformancePanel(nil).(*performancePanel)
+	ctx := &TabContext{MetricsRecorder: nil}
+	panel.RefreshFrom(ctx)
+	assert.Contains(t, panel.label.Text, "No performance data")
+}
+
+func TestPerformancePanel_NilTabContext(t *testing.T) {
+	panel := newPerformancePanel(nil).(*performancePanel)
+	panel.RefreshFrom(nil)
+	assert.Contains(t, panel.label.Text, "No performance data")
+}
+
+func TestPerformancePanel_HumanPhaseLabel(t *testing.T) {
+	assert.Equal(t, "DNS Resolve", humanPhaseLabel("dns_resolve"))
+	assert.Equal(t, "First Byte", humanPhaseLabel("first_byte"))
+	assert.Equal(t, "Body Read", humanPhaseLabel("body_read"))
+	assert.Equal(t, "Connect", humanPhaseLabel("connect"))
+}

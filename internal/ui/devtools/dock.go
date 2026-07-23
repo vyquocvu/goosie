@@ -2,7 +2,6 @@ package devtools
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -23,10 +22,25 @@ type Dock struct {
 	activeTab func() *TabContext
 }
 
+// memoryProvider abstracts access to memory manager stats.
+// The concrete implementation is *memory.Manager.
+type memoryProvider interface {
+	Stats() memory.Stats
+}
+
+// jsRuntimeProvider abstracts access to JS runtime statistics.
+// The concrete implementation is *js.Runtime.
+type jsRuntimeProvider interface {
+	ActiveTimersCount() int
+	GetConsoleMessages() []js.ConsoleMessage
+	GetJavaScriptErrors() []string
+	RunningScriptCount() int
+}
+
 type TabContext struct {
-	Memory          *memory.Manager
+	Memory          memoryProvider
 	Renderer        rendererProvider
-	JSRuntime       *js.Runtime
+	JSRuntime       jsRuntimeProvider
 	RawSource       string
 	RequestLog      requestLogProvider
 	Storage         storageProvider
@@ -310,279 +324,17 @@ func newSourcePanel(activeTab func() *TabContext) fyne.CanvasObject {
 }
 
 func newDisplayListPanel(activeTab func() *TabContext) fyne.CanvasObject {
-	label := widget.NewLabel("No display list built yet.")
-	label.Wrapping = fyne.TextWrapWord
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		ctx := activeTab()
-		if ctx == nil || ctx.Renderer == nil {
-			label.SetText("No renderer available.")
-			return
-		}
-
-		summary := ctx.Renderer.GetDisplayListSummary()
-		cmds := ctx.Renderer.GetDisplayListCommands()
-		if len(cmds) == 0 {
-			label.SetText("No display list built yet.")
-			return
-		}
-
-		total := 0
-		for _, c := range summary {
-			total += c
-		}
-
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Total: %d commands\n\n", total))
-		for _, name := range displayListTypeOrder() {
-			count, ok := summary[name]
-			if !ok {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("  %-12s %d\n", name+":", count))
-		}
-
-		b.WriteString("\n--- Command Details ---\n")
-		for i, cmd := range cmds {
-			line := fmt.Sprintf("%d. %s", i+1, cmd.Type.String())
-			switch cmd.Type {
-			case renderer.PaintText:
-				txt := cmd.Text
-				if len(txt) > 40 {
-					txt = txt[:37] + "..."
-				}
-				line += fmt.Sprintf("  text=%q  font=%.0f  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
-					txt, cmd.FontSize, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PaintRect:
-				line += fmt.Sprintf("  pos=(%.0f,%.0f)  size=(%.0f×%.0f)", cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PaintImage:
-				src := cmd.ImageSrc
-				if len(src) > 40 {
-					src = src[:37] + "..."
-				}
-				line += fmt.Sprintf("  src=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)", src, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PaintLink:
-				line += fmt.Sprintf("  url=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)", cmd.LinkURL, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PaintBorder:
-				line += fmt.Sprintf("  pos=(%.0f,%.0f)  size=(%.0f×%.0f)  stroke=%.0f",
-					cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height, cmd.StrokeWidth)
-			case renderer.PaintButton:
-				line += fmt.Sprintf("  text=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
-					cmd.ButtonText, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PaintInput:
-				line += fmt.Sprintf("  type=%s  value=%s  placeholder=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
-					cmd.InputType, cmd.InputValue, cmd.Placeholder, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PaintTextarea:
-				line += fmt.Sprintf("  value=%s  placeholder=%s  pos=(%.0f,%.0f)  size=(%.0f×%.0f)",
-					cmd.InputValue, cmd.Placeholder, cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height)
-			case renderer.PushClip:
-				line += fmt.Sprintf("  pos=(%.0f,%.0f)  size=(%.0f×%.0f)  overflow=%s",
-					cmd.Box.X, cmd.Box.Y, cmd.Box.Width, cmd.Box.Height, cmd.ClipOverflow)
-			case renderer.PopClip:
-			}
-			b.WriteString(line + "\n")
-		}
-		label.SetText(b.String())
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn, nil,
-		widget.NewLabelWithStyle("Display List Inspector", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-
-	return container.NewBorder(topBar, nil, nil, nil, container.NewScroll(label))
-}
-
-func displayListTypeOrder() []string {
-	return []string{"Text", "Rect", "Image", "Link", "Border", "Button", "Input", "Textarea", "PushClip", "PopClip"}
+	return newDisplayListPanelContent(activeTab)
 }
 
 func newScriptQueuePanel(activeTab func() *TabContext) fyne.CanvasObject {
-	label := widget.NewLabel("No JavaScript runtime available.")
-	label.Wrapping = fyne.TextWrapWord
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		ctx := activeTab()
-		if ctx == nil {
-			label.SetText("No active tab.")
-			return
-		}
-		rt := ctx.JSRuntime
-		if rt == nil {
-			label.SetText("No JavaScript runtime available.\n\nJavaScript task queue monitoring requires an active JS runtime on the current tab.")
-			return
-		}
-
-		var b strings.Builder
-		b.WriteString("JavaScript Task Queue\n\n")
-		timers := rt.ActiveTimersCount()
-		consoleCount := len(rt.GetConsoleMessages())
-		errorCount := len(rt.GetJavaScriptErrors())
-
-		b.WriteString(fmt.Sprintf("Active Timers (setTimeout/setInterval): %d\n", timers))
-		b.WriteString(fmt.Sprintf("Console Messages:                      %d\n", consoleCount))
-		b.WriteString(fmt.Sprintf("JavaScript Errors:                     %d\n", errorCount))
-		b.WriteString(fmt.Sprintf("Script Running:                        %s\n", map[bool]string{true: "Yes", false: "No"}[rt.RunningScriptCount() > 0]))
-		label.SetText(b.String())
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn, nil,
-		widget.NewLabelWithStyle("Script Task Queue", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-
-	return container.NewBorder(topBar, nil, nil, nil, container.NewScroll(label))
+	return newScriptQueuePanelContent(activeTab)
 }
 
 func newTileCachePanel(activeTab func() *TabContext) fyne.CanvasObject {
-	label := widget.NewLabel("No tile cache data available.")
-	label.Wrapping = fyne.TextWrapWord
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		ctx := activeTab()
-		if ctx == nil {
-			label.SetText("No active tab.")
-			return
-		}
-
-		var b strings.Builder
-		b.WriteString("Tile Cache Infrastructure\n\n")
-		b.WriteString("  TileCache:    Available (internal/renderer/frame/compositor/tiles.go)\n")
-		b.WriteString("  GlyphCache:   Available (internal/renderer/frame/cache/cache.go)\n")
-		b.WriteString("  ImageCache:   Available (internal/renderer/frame/cache/cache.go)\n")
-		b.WriteString("  IntrinsicSize: Available (internal/renderer/intrinsic_size_cache.go)\n\n")
-
-		b.WriteString("Status:\n")
-		if ctx.Memory != nil {
-			stats := ctx.Memory.Stats()
-			tileLimit, hasTileLimit := stats.Limits[memory.ComponentTile]
-			if hasTileLimit && tileLimit > 0 {
-				b.WriteString(fmt.Sprintf("  Tile Budget:   %s\n", formatBytes(int64(tileLimit))))
-			} else {
-				b.WriteString("  Tile Budget:   unlimited\n")
-			}
-		}
-		b.WriteString(fmt.Sprintf("  Render Tree:   %s\n", map[bool]string{true: "Yes", false: "No"}[ctx.Renderer != nil]))
-		b.WriteString("\n")
-		b.WriteString("Note: Tile caching is infrastructure-ready but not yet\n")
-		b.WriteString("integrated into the document rendering pipeline.\n")
-		b.WriteString("It activates when the compositor-based rendering path\n")
-		b.WriteString("is wired into RenderWithViewport.\n")
-		label.SetText(b.String())
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn, nil,
-		widget.NewLabelWithStyle("Tile Cache Inspector", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-
-	return container.NewBorder(topBar, nil, nil, nil, container.NewScroll(label))
+	return newTileCachePanelContent(activeTab)
 }
 
 func newStoragePanel(activeTab func() *TabContext) fyne.CanvasObject {
 	return newStoragePanelContent(activeTab)
-}
-
-type securityPanel struct {
-	fyne.Container
-	label *widget.Label
-}
-
-func newSecurityPanel(activeTab func() *TabContext) fyne.CanvasObject {
-	p := &securityPanel{
-		label: widget.NewLabel("No security information"),
-	}
-	p.label.Wrapping = fyne.TextWrapWord
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		if activeTab != nil {
-			ctx := activeTab()
-			if ctx != nil {
-				p.refreshFrom(ctx)
-			}
-		}
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn,
-		widget.NewLabelWithStyle("Security", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-	content := container.NewBorder(topBar, nil, nil, nil, container.NewScroll(p.label))
-	p.Container = *content
-	return p
-}
-
-func (p *securityPanel) RefreshFrom(ctx *TabContext) {
-	if ctx != nil {
-		p.refreshFrom(ctx)
-	}
-}
-
-func (p *securityPanel) refreshFrom(ctx *TabContext) {
-	var b strings.Builder
-	b.WriteString("Current Page\n\n")
-
-	if ctx.CurrentURL != "" {
-		b.WriteString(fmt.Sprintf("  URL:     %s\n", ctx.CurrentURL))
-		if strings.HasPrefix(ctx.CurrentURL, "https://") {
-			b.WriteString("  Protocol: HTTPS (encrypted)\n")
-		} else if strings.HasPrefix(ctx.CurrentURL, "http://") {
-			b.WriteString("  Protocol: HTTP (unencrypted)\n")
-		}
-	} else {
-		b.WriteString("  No page loaded.\n")
-	}
-
-	if ctx.SecuritySummary != "" {
-		b.WriteString(fmt.Sprintf("  Summary: %s\n", ctx.SecuritySummary))
-	}
-
-	b.WriteString("\nCertificate\n\n")
-	b.WriteString("  Certificate chain inspection is available\n")
-	b.WriteString("  for HTTPS pages with TLS connections.\n")
-
-	p.label.SetText(b.String())
-	p.label.Refresh()
-}
-
-type settingsPanel struct {
-	fyne.Container
-	label *widget.Label
-}
-
-func newSettingsPanel(activeTab func() *TabContext) fyne.CanvasObject {
-	p := &settingsPanel{
-		label: widget.NewLabel("No settings available"),
-	}
-	p.label.Wrapping = fyne.TextWrapWord
-
-	refreshBtn := widget.NewButton("Refresh", func() {
-		if activeTab != nil {
-			ctx := activeTab()
-			if ctx != nil {
-				p.refreshFrom(ctx)
-			}
-		}
-	})
-
-	topBar := container.NewBorder(nil, nil, refreshBtn,
-		widget.NewLabelWithStyle("Settings", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-	content := container.NewBorder(topBar, nil, nil, nil, container.NewScroll(p.label))
-	p.Container = *content
-	return p
-}
-
-func (p *settingsPanel) RefreshFrom(ctx *TabContext) {
-	if ctx != nil {
-		p.refreshFrom(ctx)
-	}
-}
-
-func (p *settingsPanel) refreshFrom(ctx *TabContext) {
-	if ctx.Settings == nil {
-		p.label.SetText("No settings provider available.")
-		return
-	}
-	s := ctx.Settings
-	var b strings.Builder
-	b.WriteString("Browser Settings\n\n")
-	b.WriteString(fmt.Sprintf("  Homepage:            %s\n", s.GetHomepage()))
-	b.WriteString(fmt.Sprintf("  Default Search:     %s\n", s.GetDefaultSearchEngine()))
-	b.WriteString(fmt.Sprintf("  JavaScript:         %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[s.GetEnableJavaScript()]))
-	b.WriteString(fmt.Sprintf("  Images:             %s\n", map[bool]string{true: "Enabled", false: "Disabled"}[s.GetEnableImages()]))
-	b.WriteString("\nChanges are applied immediately and persisted\nto the profile on browser restart.\n")
-	p.label.SetText(b.String())
-	p.label.Refresh()
 }
