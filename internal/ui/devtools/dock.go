@@ -37,6 +37,15 @@ type jsRuntimeProvider interface {
 	RunningScriptCount() int
 }
 
+// SecurityInfo holds TLS certificate details for the Security panel.
+type SecurityInfo struct {
+	Scheme    string // "https" or "http"
+	Subject   string // TLS certificate subject
+	Issuer    string // TLS certificate issuer
+	NotBefore string // certificate validity start
+	NotAfter  string // certificate validity end
+}
+
 type TabContext struct {
 	Memory          memoryProvider
 	Renderer        rendererProvider
@@ -46,6 +55,7 @@ type TabContext struct {
 	Storage         storageProvider
 	CurrentURL      string
 	SecuritySummary string
+	SecurityInfo    SecurityInfo
 	Settings        settingsProvider
 	MetricsRecorder metricsProvider
 	SourceCache     sourceCacheProvider

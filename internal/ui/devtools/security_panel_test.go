@@ -75,5 +75,39 @@ func TestSecurityPanel_RefreshFrom(t *testing.T) {
 	}
 	p := newSecurityPanel(func() *TabContext { return ctx }).(*securityPanel)
 	p.RefreshFrom(ctx)
-	assert.Contains(t, p.label.Text, "Certificate chain inspection")
+	assert.Contains(t, p.label.Text, "TLS 1.2")
+}
+
+func TestSecurityPanel_WithCertDetails(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	ctx := &TabContext{
+		CurrentURL:      "https://example.com",
+		SecuritySummary: "TLS CN=example.com",
+		SecurityInfo: SecurityInfo{
+			Subject:   "CN=example.com",
+			Issuer:    "CN=CA Issuer",
+			NotBefore: "Jan 1, 2026",
+			NotAfter:  "Jan 1, 2027",
+		},
+	}
+	p := newSecurityPanel(func() *TabContext { return ctx }).(*securityPanel)
+	p.RefreshFrom(ctx)
+	assert.Contains(t, p.label.Text, "CN=example.com")
+	assert.Contains(t, p.label.Text, "CN=CA Issuer")
+	assert.Contains(t, p.label.Text, "Jan 1, 2027")
+}
+
+func TestSecurityPanel_HTTPPageNoCert(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	ctx := &TabContext{
+		CurrentURL:   "http://example.com",
+		SecurityInfo: SecurityInfo{Scheme: "http"},
+	}
+	p := newSecurityPanel(func() *TabContext { return ctx }).(*securityPanel)
+	p.RefreshFrom(ctx)
+	assert.Contains(t, p.label.Text, "No certificate for HTTP")
 }

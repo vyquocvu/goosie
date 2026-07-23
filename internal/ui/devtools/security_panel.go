@@ -62,8 +62,21 @@ func (p *securityPanel) refreshFrom(ctx *TabContext) {
 	}
 
 	b.WriteString("\nCertificate\n\n")
-	b.WriteString("  Certificate chain inspection is available\n")
-	b.WriteString("  for HTTPS pages with TLS connections.\n")
+	if ctx.SecurityInfo.Subject != "" {
+		b.WriteString(fmt.Sprintf("  Subject: %s\n", ctx.SecurityInfo.Subject))
+		b.WriteString(fmt.Sprintf("  Issuer:  %s\n", ctx.SecurityInfo.Issuer))
+		if ctx.SecurityInfo.NotBefore != "" {
+			b.WriteString(fmt.Sprintf("  Valid From: %s\n", ctx.SecurityInfo.NotBefore))
+		}
+		if ctx.SecurityInfo.NotAfter != "" {
+			b.WriteString(fmt.Sprintf("  Valid Until: %s\n", ctx.SecurityInfo.NotAfter))
+		}
+	} else if strings.HasPrefix(ctx.CurrentURL, "https://") {
+		b.WriteString("  Certificate chain details available on\n")
+		b.WriteString("  HTTPS pages with TLS connections.\n")
+	} else {
+		b.WriteString("  No certificate for HTTP pages.\n")
+	}
 
 	p.label.SetText(b.String())
 	p.label.Refresh()

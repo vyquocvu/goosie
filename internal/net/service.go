@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"time"
@@ -379,6 +380,11 @@ func (s *Service) CachedBody(rawURL string) (string, bool) {
 // number of redirects to maxRedirects and tracks how many were followed.
 func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 	var redirectCount int
+
+	if req.Context() == context.Background() {
+		req = req.WithContext(context.Background())
+	}
+
 	client := &http.Client{
 		Transport: s.client.Transport,
 		Jar:       s.client.Jar,
@@ -392,8 +398,71 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 			return nil
 		},
 	}
+
+	var (
+		dnsStart       time.Time
+		connectStart   time.Time
+		tlsStart       time.Time
+		gotFirstByte   time.Time
+		requestWritten time.Time
+	)
+
+	trace := &httptrace.ClientTrace{
+		DNSStart:             func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
+		DNSDone:              func(_ httptrace.DNSDoneInfo) {},
+		ConnectStart:         func(_, _ string) { connectStart = time.Now() },
+		ConnectDone:          func(_, _ string, _ error) {},
+		TLSHandshakeStart:    func() { tlsStart = time.Now() },
+		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) {},
+		WroteRequest:         func(_ httptrace.WroteRequestInfo) { requestWritten = time.Now() },
+		GotFirstResponseByte: func() { gotFirstByte = time.Now() },
+	}
+
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	resp, err := client.Do(req)
+
+	if err == nil && resp != nil {
+		now := time.Now()
+		var phases []TimingPhase
+		if !dnsStart.IsZero() {
+			phases = append(phases, TimingPhase{Name: PhaseDNS, Duration: time.Since(dnsStart)})
+		}
+		if !connectStart.IsZero() {
+			phases = append(phases, TimingPhase{Name: PhaseConnect, Duration: time.Since(connectStart)})
+		}
+		if !tlsStart.IsZero() {
+			phases = append(phases, TimingPhase{Name: PhaseTLS, Duration: time.Since(tlsStart)})
+		}
+		if !requestWritten.IsZero() {
+			phases = append(phases, TimingPhase{Name: PhaseRequest, Duration: time.Since(requestWritten)})
+		}
+		if !gotFirstByte.IsZero() {
+			phases = append(phases, TimingPhase{Name: PhaseResponse, Duration: now.Sub(gotFirstByte)})
+		}
+		phases = append(phases, TimingPhase{Name: PhaseDownload, Duration: 0})
+		resp.Body = &timedBody{ReadCloser: resp.Body, start: now, phase: &phases[len(phases)-1]}
+	}
+
 	return resp, redirectCount, err
+}
+
+// timedBody wraps an io.ReadCloser to measure the download phase duration.
+type timedBody struct {
+	io.ReadCloser
+	start time.Time
+	phase *TimingPhase
+}
+
+func (b *timedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if b.phase != nil {
+		b.phase.Duration = time.Since(b.start)
+	}
+	return n, err
+}
+
+func (b *timedBody) Close() error {
+	return b.ReadCloser.Close()
 }
 
 // FetchStream retrieves the response body as an io.ReadCloser without buffering

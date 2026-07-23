@@ -281,10 +281,22 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 		}
 		currentURL := tab.state.GetCurrentURL()
 		secSummary := ""
+		secInfo := devtools.SecurityInfo{}
 		if strings.HasPrefix(currentURL, "https://") {
 			secSummary = "TLS connection"
+			if sum := browser.deps.Network.Security(); sum.Subject != "" {
+				secSummary = "TLS " + sum.Subject
+				secInfo = devtools.SecurityInfo{
+					Scheme:   "https",
+					Subject:  sum.Subject,
+					Issuer:   sum.Issuer,
+					NotBefore: sum.NotBefore.Format("Jan 2, 2006"),
+					NotAfter:  sum.NotAfter.Format("Jan 2, 2006"),
+				}
+			}
 		} else if strings.HasPrefix(currentURL, "http://") {
 			secSummary = "No encryption"
+			secInfo = devtools.SecurityInfo{Scheme: "http"}
 		}
 		ctx := &devtools.TabContext{
 			Memory:          browser.deps.Memory,
@@ -295,6 +307,7 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 			Storage:         browser.deps.Storage,
 			CurrentURL:      currentURL,
 			SecuritySummary: secSummary,
+			SecurityInfo:    secInfo,
 			Settings:        browser.settings,
 			MetricsRecorder: &metricsAdapter{log: browser.deps.Network.Log()},
 			SourceCache:     browser.deps.Network,
@@ -1430,7 +1443,7 @@ func (a *requestLogAdapter) Entries() []devtools.NetRequestEntry {
 	raw := a.log.Entries()
 	out := make([]devtools.NetRequestEntry, len(raw))
 	for i, e := range raw {
-		out[i] = devtools.NetRequestEntry{
+		n := devtools.NetRequestEntry{
 			Method:      e.Method,
 			URL:         e.URL,
 			Status:      e.Status,
@@ -1441,6 +1454,16 @@ func (a *requestLogAdapter) Entries() []devtools.NetRequestEntry {
 			StartedAt:   e.StartedAt,
 			Duration:    e.Duration,
 		}
+		if len(e.TimingPhases) > 0 {
+			n.TimingPhases = make([]devtools.TimingPhase, len(e.TimingPhases))
+			for j, tp := range e.TimingPhases {
+				n.TimingPhases[j] = devtools.TimingPhase{
+					Name:     string(tp.Name),
+					Duration: tp.Duration,
+				}
+			}
+		}
+		out[i] = n
 	}
 	return out
 }
