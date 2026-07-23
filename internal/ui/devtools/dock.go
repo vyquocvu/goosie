@@ -46,6 +46,18 @@ type SecurityInfo struct {
 	NotAfter  string // certificate validity end
 }
 
+type A11yNode struct {
+	Role        string
+	Name        string
+	Tag         string
+	Description string
+	Children    []*A11yNode
+}
+
+type accessibilityProvider interface {
+	GetAccessibilityTree() []*A11yNode
+}
+
 type TabContext struct {
 	Memory          memoryProvider
 	Renderer        rendererProvider
@@ -59,6 +71,8 @@ type TabContext struct {
 	Settings        settingsProvider
 	MetricsRecorder metricsProvider
 	SourceCache     sourceCacheProvider
+	RenderStats     map[string]time.Duration // render timing percentiles
+	Accessibility   accessibilityProvider
 }
 
 // sourceCacheProvider exposes cached response bodies to the Sources panel so
@@ -171,6 +185,7 @@ func (d *Dock) addAllTabs() {
 	d.addTab("Display List", newDisplayListPanel(d.activeTab))
 	d.addTab("Script Queue", newScriptQueuePanel(d.activeTab))
 	d.addTab("Tile Cache", newTileCachePanel(d.activeTab))
+	d.addTab("Accessibility", newAccessibilityPanel(d.activeTab))
 }
 
 func (d *Dock) addTab(title string, content fyne.CanvasObject) {

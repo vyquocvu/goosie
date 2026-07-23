@@ -87,6 +87,32 @@ func TestPerformancePanel_NilTabContext(t *testing.T) {
 	assert.Contains(t, panel.label.Text, "No performance data")
 }
 
+func TestPerformancePanel_RenderStats(t *testing.T) {
+	panel := newPerformancePanel(nil).(*performancePanel)
+	ctx := &TabContext{
+		MetricsRecorder: &mockMetricsProvider{
+			m: metrics.Metrics{
+				NavID: 3,
+				Counters: metrics.Counters{
+					NodeCount: 50,
+				},
+			},
+		},
+		RenderStats: map[string]time.Duration{
+			"RenderHTML_p50":         5 * time.Millisecond,
+			"RenderHTML_p95":         10 * time.Millisecond,
+			"RenderWithViewport_p50": 8 * time.Millisecond,
+			"RenderWithViewport_p99": 30 * time.Millisecond,
+		},
+	}
+	panel.RefreshFrom(ctx)
+	assert.Contains(t, panel.label.Text, "RenderHTML p50")
+	assert.Contains(t, panel.label.Text, "5ms")
+	assert.Contains(t, panel.label.Text, "RenderWithViewport p99")
+	assert.Contains(t, panel.label.Text, "30ms")
+	assert.Contains(t, panel.label.Text, "Render Timing")
+}
+
 func TestPerformancePanel_HumanPhaseLabel(t *testing.T) {
 	assert.Equal(t, "DNS Resolve", humanPhaseLabel("dns_resolve"))
 	assert.Equal(t, "First Byte", humanPhaseLabel("first_byte"))

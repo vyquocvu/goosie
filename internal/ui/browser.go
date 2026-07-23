@@ -298,6 +298,16 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 			secSummary = "No encryption"
 			secInfo = devtools.SecurityInfo{Scheme: "http"}
 		}
+		var renderStats map[string]time.Duration
+		if rr, ok := tab.htmlRenderer.(interface{ Stats() map[string]time.Duration }); ok {
+			renderStats = rr.Stats()
+		}
+		a11y := devtools.NewRenderTreeAccessibilityProvider(func() *renderer.RenderNode {
+			if tab.htmlRenderer == nil {
+				return nil
+			}
+			return tab.htmlRenderer.GetRoot()
+		})
 		ctx := &devtools.TabContext{
 			Memory:          browser.deps.Memory,
 			Renderer:        tab.htmlRenderer,
@@ -311,6 +321,8 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 			Settings:        browser.settings,
 			MetricsRecorder: &metricsAdapter{log: browser.deps.Network.Log()},
 			SourceCache:     browser.deps.Network,
+			RenderStats:     renderStats,
+			Accessibility:   a11y,
 		}
 		return ctx
 	}, h)

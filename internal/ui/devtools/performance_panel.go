@@ -47,10 +47,10 @@ func (p *performancePanel) RefreshFrom(ctx *TabContext) {
 		return
 	}
 	m := ctx.MetricsRecorder.Snapshot()
-	p.renderMetrics(m)
+	p.renderMetrics(m, ctx.RenderStats)
 }
 
-func (p *performancePanel) renderMetrics(m metrics.Metrics) {
+func (p *performancePanel) renderMetrics(m metrics.Metrics, renderStats map[string]time.Duration) {
 	var b strings.Builder
 
 	if m.URL != "" && m.URL != "live" {
@@ -110,6 +110,20 @@ func (p *performancePanel) renderMetrics(m metrics.Metrics) {
 	b.WriteString(fmt.Sprintf("  Cache Hits:         %d\n", m.Counters.CacheHits))
 	b.WriteString(fmt.Sprintf("  Cache Misses:       %d\n", m.Counters.CacheMisses))
 	b.WriteString(fmt.Sprintf("  Script Errors:      %d\n", m.Counters.ScriptErrors))
+
+	// Render timing percentiles
+	if len(renderStats) > 0 {
+		b.WriteString("\nRender Timing\n")
+		b.WriteString("─────────────\n")
+		for _, key := range []string{"RenderHTML_p50", "RenderHTML_p95", "RenderHTML_p99",
+			"ComputeLayout_p50", "ComputeLayout_p95", "ComputeLayout_p99",
+			"RenderWithViewport_p50", "RenderWithViewport_p95", "RenderWithViewport_p99"} {
+			if d, ok := renderStats[key]; ok {
+				label := strings.ReplaceAll(key, "_", " ")
+				b.WriteString(fmt.Sprintf("  %-24s %s\n", label, formatDuration(d)))
+			}
+		}
+	}
 
 	p.label.SetText(b.String())
 	p.label.TextStyle.Monospace = true
