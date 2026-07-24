@@ -551,6 +551,16 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	var externalResults []documentloader.CSSResult
 	var scriptResults []documentloader.ScriptResult
 	var coord *documentloader.Coordinator
+
+	// Async script execution: the OnScript callback fires on the
+	// coordinator goroutine, potentially before jsRuntime exists.
+	// Buffer async scripts that arrive early, execute them once
+	// the runtime is created.
+	var (
+		asyncMu           sync.Mutex
+		preRuntimeAsync   []documentloader.ScriptResult
+		jsRuntimeReady    bool
+	)
 	coord, err := documentloader.New(documentloader.Options{
 		NavigationID:      load.ID,
 		NavigationContext: navCtx,
@@ -584,9 +594,29 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 					}
 				}
 			},
-			OnScript: func(r documentloader.ScriptResult) {
-				scriptResults = append(scriptResults, r)
-			},
+OnScript: func(r documentloader.ScriptResult) {
+			scriptResults = append(scriptResults, r)
+			if r.Mode != documentloader.ScriptModeAsync || r.Source == nil {
+				return
+			}
+			if !sess.IsActive(navID) {
+				return
+			}
+			asyncMu.Lock()
+			if !jsRuntimeReady {
+				preRuntimeAsync = append(preRuntimeAsync, r)
+				asyncMu.Unlock()
+				return
+			}
+			asyncMu.Unlock()
+			if t := browser.ActiveTab(); t != nil {
+				if rt := t.GetJSRuntime(); rt != nil {
+					if _, err := rt.RunScript(string(r.Source)); err != nil {
+						log.Printf("Error running async script %s: %v", r.Resolved, err)
+					}
+				}
+			}
+		},
 			OnImage: func(r documentloader.ImageResult) {
 				log.Printf("CSS-nested image fetched: %s (%d bytes)", r.Resolved, len(r.Source))
 			},
@@ -708,12 +738,29 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 		}
 		jsRuntime := js.NewRuntime()
 		tab.SetJSRuntime(jsRuntime)
+		asyncMu.Lock()
+		jsRuntimeReady = true
+		for _, a := range preRuntimeAsync {
+			if _, err := jsRuntime.RunScript(string(a.Source)); err != nil {
+				log.Printf("Error running pre-runtime async script %s: %v", a.Resolved, err)
+			}
+		}
+		preRuntimeAsync = nil
+		asyncMu.Unlock()
 		jsRuntime.SetOrigin(originFromURL(url))
 		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
 		jsRuntime.SetFetcher(fetcher)
 		jsRuntime.OnOpenWindow = func(openURL, name string) {
 			log.Printf("Popup (window.open): %s (name=%s)", openURL, name)
 			load, ctx := sess.Navigate(context.Background(), openURL)
+			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
+		}
+		jsRuntime.OnNavigate = func(targetURL string) {
+			if !sess.IsActive(navID) {
+				return
+			}
+			log.Printf("Programmatic navigation: window.location → %s", targetURL)
+			load, ctx := sess.Navigate(context.Background(), targetURL)
 			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
 		}
 		jsRuntime.SetHTMLContent(html)
@@ -773,9 +820,10 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 // inline scripts bypass the fetcher, so the gate happens here).
 //
 // M5: classic scripts execute first (in source order), then deferred
-// scripts (in source order). Async scripts have already fired via
-// the coordinator's OnScript callback during parsing and do not
-// appear in the results slice here.
+// scripts (in source order). Async scripts are executed immediately
+// by the OnScript callback (and optionally buffered until the runtime
+// is created); any that appear here are silently skipped — they were
+// already handed to jsRuntime.RunScript at fetch completion.
 //
 // Script failures are reported but do not stop subsequent scripts
 // unless the engine's policy explicitly requires it. The current
@@ -805,9 +853,11 @@ func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolic
 			defers = append(defers, r)
 		case documentloader.ScriptModeModule:
 			log.Printf("Skipping module script at position %d (unsupported)", r.Position)
+		case documentloader.ScriptModeAsync:
+			// Already executed by the OnScript callback when the
+			// fetch completed.  No-op here.
 		default:
-			// Async / unknown modes shouldn't appear here, but be safe.
-			log.Printf("Script queue: ignoring %s mode at position %d", r.Mode, r.Position)
+			log.Printf("Script queue: unknown mode %s at position %d", r.Mode, r.Position)
 		}
 	}
 

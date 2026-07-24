@@ -92,6 +92,13 @@ type Runtime struct {
 	// the window name (target). If nil, window.open() is a no-op.
 	OnOpenWindow func(url, name string)
 
+	// OnNavigate is called when JS programmatically navigates via
+	// window.location.href assignment, location.assign(), or
+	// location.replace(). The callback receives the target URL string.
+	// If nil, the navigation is silently ignored (href changes are
+	// still reflected in the location object).
+	OnNavigate func(url string)
+
 	// OnRuntimeUnsupportedFeature is invoked when JavaScript uses an
 	// engine-unsupported DOM API surface (e.g. document.createElement
 	// with a tag the engine does not implement, like 'canvas', 'video',
@@ -1878,6 +1885,44 @@ func (r *Runtime) setupLocationAPI(window *goja.Object) {
 	})
 
 	window.Set("location", location)
+
+	// Install a Go-level accessor property on location.href so that
+	// both JS assignment (location.href = url) and Go-side Set()
+	// trigger the OnNavigate callback. Uses Goja's native
+	// DefineAccessorProperty, which Goja's Get/Set respect correctly.
+	currentURL = "about:blank"
+	getter := r.vm.ToValue(func() goja.Value {
+		return r.vm.ToValue(currentURL)
+	})
+	setter := r.vm.ToValue(func(newURL string) {
+		currentURL = newURL
+		if r.OnNavigate != nil {
+			r.OnNavigate(newURL)
+		}
+	})
+	_ = location.DefineAccessorProperty("href", getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
+
+	// location.assign and location.replace — explicit method-based navigation.
+	location.Set("assign", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		urlStr := call.Arguments[0].String()
+		if r.OnNavigate != nil {
+			r.OnNavigate(urlStr)
+		}
+		return goja.Undefined()
+	})
+	location.Set("replace", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		urlStr := call.Arguments[0].String()
+		if r.OnNavigate != nil {
+			r.OnNavigate(urlStr)
+		}
+		return goja.Undefined()
+	})
 }
 
 // setupHistoryAPI configures window.history object
