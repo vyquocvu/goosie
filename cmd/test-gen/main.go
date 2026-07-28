@@ -225,5 +225,47 @@ func generateTestCases() []TestCase {
 	add("edge_cases", "Viewport Units", `<!DOCTYPE html><html><style>.box{width:50vw;height:50vh;background:pink;}</style><body><div class="box">Viewport Units</div></body></html>`)
 	add("edge_cases", "Gradient Background", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:linear-gradient(to right, red, yellow);}</style><body><div class="box"></div></body></html>`)
 
+	// 101-105: Background Styling
+	add("background", "Background Color Named", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background-color:tomato;border:1px solid black;}</style><body><div class="box">Tomato</div></body></html>`)
+	add("background", "Background Color Hex", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background-color:#3366cc;border:1px solid black;}</style><body><div class="box">Hex</div></body></html>`)
+	add("background", "Background Shorthand Color", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:rgb(120,200,80);border:1px solid black;}</style><body><div class="box">RGB</div></body></html>`)
+	add("background", "Transparent Background", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:transparent;border:1px solid black;}</style><body><div class="box">Transparent</div></body></html>`)
+	add("background", "Background Color Inheritance", `<!DOCTYPE html><html><style>.parent{background-color:yellow;}.child{background-color:inherit;}</style><body><div class="parent">Parent<div class="child">Child</div></div></body></html>`)
+
+	// 106-110: Border Radius
+	add("border_radius", "All Corners Rounded", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:blue;border-radius:10px;}</style><body><div class="box">10px</div></body></html>`)
+	add("border_radius", "Circle 50 Percent", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:red;border-radius:50%;}</style><body><div class="box">Circle</div></body></html>`)
+	add("border_radius", "Large Radius", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:green;border-radius:50px;}</style><body><div class="box">50px</div></body></html>`)
+	add("border_radius", "Mixed Values", `<!DOCTYPE html><html><style>.box{width:120px;height:80px;background:orange;border-radius:10px 30px;}</style><body><div class="box">Mixed</div></body></html>`)
+	add("border_radius", "Rounded with Border", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;background:white;border:3px solid black;border-radius:15px;}</style><body><div class="box">With Border</div></body></html>`)
+
+	// 111-115: Text Decoration & Transform
+	add("text_style", "Text Decoration Underline", `<!DOCTYPE html><html><body><p style="text-decoration:underline">Underlined text</p></body></html>`)
+	add("text_style", "Text Decoration Line-Through", `<!DOCTYPE html><html><body><p style="text-decoration:line-through">Strikethrough text</p></body></html>`)
+	add("text_style", "Text Transform Uppercase", `<!DOCTYPE html><html><body><p style="text-transform:uppercase">lowercase becomes upper</p></body></html>`)
+	add("text_style", "Text Transform Capitalize", `<!DOCTYPE html><html><body><p style="text-transform:capitalize">capitalize each word</p></body></html>`)
+	add("text_style", "Vertical Alignment", `<!DOCTYPE html><html><body><p>Baseline <span style="vertical-align:super">super</span> and <span style="vertical-align:sub">sub</span> text</p></body></html>`)
+
+	// 116-120: HTML5 Semantic Elements
+	add("semantic", "Article Element", `<!DOCTYPE html><html><body><article style="border:1px solid black;padding:10px;"><h2>Article Title</h2><p>Article content goes here.</p></article></body></html>`)
+	add("semantic", "Section Element", `<!DOCTYPE html><html><body><section style="background:#eee;padding:10px;"><h2>Section Heading</h2><p>Section content.</p></section></body></html>`)
+	add("semantic", "Nav Element", `<!DOCTYPE html><html><body><nav style="background:#333;color:white;padding:10px;"><a href="#" style="color:white;">Home</a> <a href="#" style="color:white;">About</a></nav></body></html>`)
+	add("semantic", "Header Footer Main", `<!DOCTYPE html><html><body><header style="background:#333;color:white;padding:10px;">Site Header</header><main style="padding:20px;">Main Content</main><footer style="background:#666;color:white;padding:10px;">Site Footer</footer></body></html>`)
+	add("semantic", "Aside and Address", `<!DOCTYPE html><html><body><main><p>Article text</p><aside style="background:#ffe;padding:10px;">Sidebar note</aside></main><address>Contact: test@example.com</address></body></html>`)
+
+	// 121-125: Color Values
+	add("colors", "Color Inheritance", `<!DOCTYPE html><html><style>.parent{color:red;}.child{color:inherit;}</style><body><div class="parent">Red parent<span class="child">Red child</span></div></body></html>`)
+	add("colors", "Color Keywords", `<!DOCTYPE html><html><body><p style="color:red">Red</p><p style="color:blue">Blue</p><p style="color:green">Green</p></body></html>`)
+	add("colors", "Hex Short Color", `<!DOCTYPE html><html><body><p style="color:#f00">#f00 Red</p><p style="color:#0f0">#0f0 Green</p><p style="color:#00f">#00f Blue</p></body></html>`)
+	add("colors", "RGB Color", `<!DOCTYPE html><html><body><p style="color:rgb(255,128,0)">Orange RGB</p><p style="color:rgb(0,128,128)">Teal RGB</p></body></html>`)
+	add("colors", "Opacity Layered", `<!DOCTYPE html><html><style>.red{width:100px;height:100px;background:red;}.blue{width:100px;height:100px;background:blue;opacity:0.5;}</style><body><div class="red"></div><div class="blue"></div></body></html>`)
+
+	// 126-130: Box Sizing, Cursor, Outline
+	add("misc", "Box Sizing Border-Box", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;padding:10px;border:5px solid black;box-sizing:border-box;}</style><body><div class="box">Border-Box</div></body></html>`)
+	add("misc", "Box Sizing Content-Box", `<!DOCTYPE html><html><style>.box{width:100px;height:100px;padding:10px;border:5px solid black;box-sizing:content-box;}</style><body><div class="box">Content-Box</div></body></html>`)
+	add("misc", "Cursor Pointer", `<!DOCTYPE html><html><body><button style="cursor:pointer;padding:10px;">Pointer</button><button style="cursor:text;padding:10px;">Text</button></body></html>`)
+	add("misc", "Outline Style", `<!DOCTYPE html><html><body><button style="outline:2px solid red;padding:10px;">Outlined</button></body></html>`)
+	add("misc", "Text Overflow Ellipsis", `<!DOCTYPE html><html><style>.box{width:100px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid black;}</style><body><div class="box">Long text that should be truncated with ellipsis</div></body></html>`)
+
 	return cases
 }

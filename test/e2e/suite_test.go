@@ -77,6 +77,24 @@ func TestComprehensiveSuite(t *testing.T) {
 				localConfig.DiffThreshold = 0.55
 			} else if strings.Contains(testName, "_edge_cases") {
 				localConfig.DiffThreshold = 0.30
+			} else if strings.Contains(testName, "_background") {
+				// Background tests use solid colors and should match closely
+				localConfig.DiffThreshold = 0.05
+			} else if strings.Contains(testName, "_border_radius") {
+				// Rounded corners are sensitive to anti-aliasing differences
+				localConfig.DiffThreshold = 0.15
+			} else if strings.Contains(testName, "_text_style") {
+				// Text decoration/transform varies with font metrics
+				localConfig.DiffThreshold = 0.15
+			} else if strings.Contains(testName, "_semantic") {
+				// HTML5 semantic elements are rendered as generic blocks
+				localConfig.DiffThreshold = 0.10
+			} else if strings.Contains(testName, "_colors") {
+				// Color tests focus on color values, mostly matching
+				localConfig.DiffThreshold = 0.05
+			} else if strings.Contains(testName, "_misc") {
+				// Box-sizing/cursor/outline/overflow tests
+				localConfig.DiffThreshold = 0.15
 			}
 			page := newPage(t)
 			defer page.Close()

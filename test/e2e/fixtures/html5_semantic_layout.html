@@ -1,0 +1,57 @@
+<!doctype html>
+<html data-goosie-execute-scripts>
+<head>
+  <meta charset="utf-8">
+  <title>HTML5 Semantic Layout</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #ffffff; font-family: sans-serif; }
+    header { background: #1e3a8a; color: white; padding: 16px; }
+    nav    { background: #0f172a; color: white; padding: 12px; }
+    nav a  { color: #93c5fd; margin-right: 12px; text-decoration: none; }
+    main   { padding: 20px; }
+    article { border: 1px solid #cbd5e1; padding: 16px; margin-bottom: 16px; border-radius: 8px; }
+    aside  { background: #fef9c3; padding: 12px; border-radius: 8px; }
+    footer { background: #1e293b; color: white; padding: 12px; }
+    h1 { margin: 0 0 8px 0; }
+    h2 { margin: 0 0 8px 0; color: #1e3a8a; }
+    .meta { color: #64748b; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header id="site-header">
+    <h1 id="site-title">Goosie Browser</h1>
+    <div class="meta">HTML5 Semantic Layout Visual Regression Fixture</div>
+  </header>
+
+  <nav id="primary-nav">
+    <a href="#home">Home</a>
+    <a href="#docs">Docs</a>
+    <a href="#about">About</a>
+  </nav>
+
+  <main id="content">
+    <article id="article-1">
+      <h2>First Article</h2>
+      <p>This fixture exercises HTML5 semantic elements: <code>header</code>, <code>nav</code>, <code>main</code>, <code>article</code>, <code>aside</code>, and <code>footer</code>.</p>
+    </article>
+
+    <article id="article-2">
+      <h2>Second Article</h2>
+      <p>It validates that the renderer treats unknown semantic tags as block-level containers, preserving authored styling.</p>
+      <aside id="note">
+        <strong>Note:</strong> Semantics help accessibility tools and search engines.
+      </aside>
+    </article>
+  </main>
+
+  <footer id="site-footer">
+    <address>contact@example.com</address>
+    <div>© 2026 Goosie</div>
+  </footer>
+
+  <script>
+    // Mutate one element to ensure the script path also works on this layout.
+    document.getElementById("site-title").textContent = "Goosie Browser";
+  </script>
+</body>
+</html>

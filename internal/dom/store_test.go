@@ -175,8 +175,10 @@ func TestInsertBefore(t *testing.T) {
 	}
 }
 
-// TestRemoveChild tests removing a child from its parent.
-func TestRemoveChild(t *testing.T) {
+// TestStoreRemoveChild tests removing a child from its parent
+// in the DOM store (the low-level tree mutation API used by the
+// renderer for DOM tree operations).
+func TestStoreRemoveChild(t *testing.T) {
 	s := NewStore(16)
 
 	doc, _ := s.Allocate()

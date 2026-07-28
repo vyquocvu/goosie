@@ -293,7 +293,10 @@ func TestNextSibling(t *testing.T) {
 
 // --- Remove ---
 
-func TestRemoveChild(t *testing.T) {
+// TestLayoutStoreRemoveChild tests removing a child from its
+// parent in the layout tree store (a separate, renderer-internal
+// store used for layout bookkeeping, not the DOM tree itself).
+func TestLayoutStoreRemoveChild(t *testing.T) {
 	store := NewLayoutStore(0)
 	parent, _ := store.Allocate()
 	child, _ := store.Allocate()

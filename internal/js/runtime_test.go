@@ -327,7 +327,13 @@ func TestAppendChild(t *testing.T) {
 	}
 }
 
-func TestRemoveChild(t *testing.T) {
+// TestRuntimeRemoveChild exercises the JavaScript `removeChild`
+// API exposed on DOM element objects. The JS binding manipulates
+// a Go slice of children on the element object; this test
+// verifies the binding wires createElement / appendChild /
+// removeChild / children.length correctly across the JS↔Go
+// boundary.
+func TestRuntimeRemoveChild(t *testing.T) {
 	runtime := NewRuntime()
 
 	val, err := runtime.RunScript(`

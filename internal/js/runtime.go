@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -2804,29 +2805,37 @@ type ValueResult struct {
 
 // SerializeValue converts a Goja value to a serializable result with size limits.
 func (r *Runtime) SerializeValue(value goja.Value, maxBytes int) ValueResult {
-	if value == nil || value.IsUndefined() {
+	if value == nil || goja.IsUndefined(value) {
 		return ValueResult{Type: "undefined", Value: nil}
 	}
 
-	if value.IsNull() {
+	if goja.IsNull(value) {
 		return ValueResult{Type: "null", Value: nil}
 	}
 
-	if value.IsBool() {
-		return ValueResult{Type: "boolean", Value: value.Bool()}
-	}
-
-	if value.IsNumber() {
-		if f, err := value.ToFloat64(); err == nil {
-			if f == float64(int64(f)) {
-				return ValueResult{Type: "number", Value: int64(f)}
-			}
-			return ValueResult{Type: "number", Value: f}
+	// Booleans are detected by ExportType because the goja.Value
+	// interface no longer exposes IsBool()/Bool() methods in the
+	// October 2025 release (cf18d89f3cf6). ExportType returns the
+	// reflect.Type of the underlying Go value.
+	if value.ExportType() == reflect.TypeOf(false) {
+		if b, ok := value.Export().(bool); ok {
+			return ValueResult{Type: "boolean", Value: b}
 		}
-		return ValueResult{Type: "number", Value: value.ToInteger()}
 	}
 
-	if value.IsString() {
+	if goja.IsNumber(value) {
+		// ToFloat() replaces the removed ToFloat64(); both return
+		// float64. The conversion to int64 when the value is
+		// integer-valued is preserved so JSON consumers see an
+		// integer instead of an unnecessary ".0" suffix.
+		f := value.ToFloat()
+		if f == float64(int64(f)) {
+			return ValueResult{Type: "number", Value: int64(f)}
+		}
+		return ValueResult{Type: "number", Value: f}
+	}
+
+	if goja.IsString(value) {
 		s := value.String()
 		if len(s) > maxBytes {
 			s = s[:maxBytes] + "...[truncated]"
@@ -2834,10 +2843,12 @@ func (r *Runtime) SerializeValue(value goja.Value, maxBytes int) ValueResult {
 		return ValueResult{Type: "string", Value: s}
 	}
 
-	// Objects and arrays
-	if value.IsObject() {
-		obj := value.ToObject(r.vm)
-		if obj != nil && (obj.Class() == "Array" || obj.Class() == "Object") {
+	// Objects and arrays. IsObject() is gone, so we attempt
+	// ToObject(r.vm) and treat any non-nil result as an object.
+	// Class() was renamed to ClassName() in the same goja release.
+	if obj := value.ToObject(r.vm); obj != nil {
+		className := obj.ClassName()
+		if className == "Array" || className == "Object" {
 			exported := obj.Export()
 			return ValueResult{Type: "object", Value: exported}
 		}

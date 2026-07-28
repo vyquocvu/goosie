@@ -28,6 +28,22 @@ func TestDOMMutationGoosieVsBrowser(t *testing.T) {
 	CompareGoosieVsBrowser(t, page, fixturePath, "dom_mutation_flexbox", config)
 }
 
+func TestHTML5SemanticLayoutGoosieVsBrowser(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	fixturePath := filepath.Join(cwd, "fixtures", "html5_semantic_layout.html")
+
+	page := newPage(t)
+	defer page.Close()
+	config := VisualTestConfig{
+		DiffThreshold:  0.10,
+		OutputDir:      filepath.Join("testdata", "results"),
+		ViewportWidth:  1280,
+		ViewportHeight: 800,
+	}
+	CompareGoosieVsBrowser(t, page, fixturePath, "html5_semantic_layout", config)
+}
+
 func TestGeneratedHTML(t *testing.T) {
 	// Verify testdata/output.html exists
 	cwd, err := os.Getwd()
