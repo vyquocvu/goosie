@@ -2795,3 +2795,63 @@ func (r *Runtime) jsConsoleWarn(msg string) {
 	r.consoleMu.Unlock()
 	fmt.Println("[WARN] " + msg)
 }
+
+// ValueResult represents a serialized JavaScript value.
+type ValueResult struct {
+	Type  string
+	Value interface{}
+}
+
+// SerializeValue converts a Goja value to a serializable result with size limits.
+func (r *Runtime) SerializeValue(value goja.Value, maxBytes int) ValueResult {
+	if value == nil || value.IsUndefined() {
+		return ValueResult{Type: "undefined", Value: nil}
+	}
+
+	if value.IsNull() {
+		return ValueResult{Type: "null", Value: nil}
+	}
+
+	if value.IsBool() {
+		return ValueResult{Type: "boolean", Value: value.Bool()}
+	}
+
+	if value.IsNumber() {
+		if f, err := value.ToFloat64(); err == nil {
+			if f == float64(int64(f)) {
+				return ValueResult{Type: "number", Value: int64(f)}
+			}
+			return ValueResult{Type: "number", Value: f}
+		}
+		return ValueResult{Type: "number", Value: value.ToInteger()}
+	}
+
+	if value.IsString() {
+		s := value.String()
+		if len(s) > maxBytes {
+			s = s[:maxBytes] + "...[truncated]"
+		}
+		return ValueResult{Type: "string", Value: s}
+	}
+
+	// Objects and arrays
+	if value.IsObject() {
+		obj := value.ToObject(r.vm)
+		if obj != nil && (obj.Class() == "Array" || obj.Class() == "Object") {
+			exported := obj.Export()
+			return ValueResult{Type: "object", Value: exported}
+		}
+		s := value.String()
+		if len(s) > maxBytes {
+			s = s[:maxBytes] + "...[truncated]"
+		}
+		return ValueResult{Type: "object", Value: s}
+	}
+
+	// Functions
+	s := value.String()
+	if len(s) > maxBytes {
+		s = s[:maxBytes] + "...[truncated]"
+	}
+	return ValueResult{Type: "function", Value: s}
+}

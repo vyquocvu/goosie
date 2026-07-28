@@ -1,6 +1,6 @@
 module github.com/vyquocvu/goosie
 
-go 1.24.9
+go 1.25
 
 require (
 	fyne.io/fyne/v2 v2.7.0

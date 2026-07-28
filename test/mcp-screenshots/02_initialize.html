@@ -1,0 +1,91 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>POST /mcp → initialize</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 32px; }
+  h1 { color: #58a6ff; font-size: 28px; margin: 0 0 16px 0; font-weight: 600; }
+  h2 { font-size: 16px; color: #f0f6fc; margin: 0 0 12px 0; }
+  h3 { font-size: 14px; color: #f0f6fc; margin: 16px 0 8px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  p { margin: 8px 0; line-height: 1.5; }
+  pre { background: #161b22; padding: 14px; border-radius: 6px; border: 1px solid #30363d; font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9d1d9; overflow-x: auto; line-height: 1.5; white-space: pre-wrap; }
+  pre.audit { background: #0d1117; border: 1px solid #30363d; color: #7ee787; }
+  code { background: #161b22; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #79c0ff; border: 1px solid #30363d; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 16px 0; }
+  .card { background: #161b22; padding: 18px; border-radius: 8px; border: 1px solid #30363d; }
+  .card.danger { border-color: #da3633; background: #1c0e0e; }
+  .card.danger h2 { color: #f85149; }
+  .status { display: inline-block; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 14px; }
+  .ok { background: #238636; color: white; }
+  .hdr { display: inline-block; padding: 4px 8px; background: #1f6feb; color: white; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+  .kv { background: #161b22; padding: 18px; border-radius: 8px; border: 1px solid #30363d; }
+  .row { display: flex; padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 13px; }
+  .row:last-child { border-bottom: none; }
+  .key { flex: 0 0 220px; color: #79c0ff; font-family: ui-monospace, monospace; }
+  .value { color: #f0f6fc; }
+  .lead { color: #8b949e; margin-bottom: 20px; font-size: 14px; }
+  .note { color: #8b949e; font-size: 13px; font-style: italic; }
+  .tools { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .tool { background: #161b22; padding: 14px; border-radius: 8px; border: 1px solid #30363d; position: relative; }
+  .tool h3 { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #79c0ff; margin: 24px 0 6px 0; font-size: 13.5px; }
+  .tool p { color: #8b949e; font-size: 13px; margin: 4px 0; }
+  .ribbon { position: absolute; top: 8px; right: 8px; font-size: 10px; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; font-weight: bold; letter-spacing: 0.5px; }
+  .ribbon.context { background: #1f6feb; color: white; }
+  .ribbon.navigate { background: #a371f7; color: white; }
+  .ribbon.read { background: #238636; color: white; }
+  .ribbon.mutate { background: #d29922; color: #0d1117; }
+  .ribbon.eval { background: #db61a2; color: white; }
+  .ribbon.capture { background: #f0883e; color: #0d1117; }
+  .timeline { list-style: none; padding: 0; margin: 0; }
+  .timeline li { padding: 12px 0 18px 80px; position: relative; border-left: 2px solid #30363d; margin-left: 8px; }
+  .step { position: absolute; left: -8px; top: 8px; background: #1f6feb; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: bold; }
+  .policy { list-style: none; padding: 0; }
+  .policy li { padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .policy li:last-child { border-bottom: none; }
+  .layers { display: flex; flex-direction: column; gap: 0; align-items: center; }
+  .layer { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px 20px; width: 100%; max-width: 720px; text-align: center; }
+  .layer.highlight { background: #1f2937; border-color: #58a6ff; }
+  .layer .title { font-family: ui-monospace, monospace; color: #79c0ff; font-size: 16px; margin-bottom: 4px; }
+  .layer .desc { color: #8b949e; font-size: 13px; }
+  .arrow { color: #58a6ff; padding: 8px; font-family: ui-monospace, monospace; font-size: 14px; }
+</style></head><body><h1>POST /mcp → initialize</h1>
+<div class="grid">
+  <div class="card">
+    <h2>📤 Request</h2>
+<pre>{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-11-25",
+    "clientInfo": {
+      "name": "claude-desktop",
+      "version": "1.0.0"
+    }
+  }
+}</pre>
+  </div>
+  <div class="card">
+    <h2>📥 Response</h2>
+<p><span class="status ok">HTTP 200 OK</span></p>
+<p><span class="hdr">Mcp-Session-Id: a4f1c2e87b1d4539...</span></p>
+<pre>{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2025-11-25",
+    "serverInfo": {
+      "name": "goosie-mcp-server",
+      "version": "1.0.0-alpha",
+      "protocolVersion": "2025-11-25",
+      "goVersion": "go1.25",
+      "os": "darwin",
+      "arch": "arm64"
+    },
+    "capabilities": {
+      "tools": {},
+      "resources": {}
+    }
+  }
+}</pre>
+  </div>
+</div></body></html>

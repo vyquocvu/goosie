@@ -13,6 +13,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 )
 
@@ -121,6 +122,10 @@ type engineContext struct {
 	network   []NetworkEntry
 	navID     navigation.ID
 	domStore  *dom.Store // Compact DOM store for mutations
+
+	// JavaScript runtime
+	jsSession *js.Session
+	jsRuntime *js.Runtime
 }
 
 var _ Context = (*engineContext)(nil)
@@ -136,12 +141,16 @@ func newEngineContext(id string, vp Viewport) *engineContext {
 		vp.Scale = 1.0
 	}
 	sess := session.New()
+	jsSess := js.NewSession(js.DefaultSessionConfig())
+	rt := jsSess.Runtime()
 	return &engineContext{
-		id:       id,
-		sess:     sess,
-		fetcher:  net.NewFetcherWithClient(sess.HTTPClient()),
-		parser:   dom.NewParser(),
-		viewport: vp,
+		id:        id,
+		sess:      sess,
+		fetcher:   net.NewFetcherWithClient(sess.HTTPClient()),
+		parser:    dom.NewParser(),
+		viewport:  vp,
+		jsSession: jsSess,
+		jsRuntime: rt,
 	}
 }
 
@@ -153,6 +162,10 @@ func (ec *engineContext) close() {
 	}
 	ec.closed = true
 	ec.mu.Unlock()
+	// Close JS session first
+	if ec.jsSession != nil {
+		ec.jsSession.Close()
+	}
 	ec.sess.Close()
 }
 
@@ -559,14 +572,74 @@ func (ec *engineContext) Evaluate(ctx context.Context, source string, opts Evalu
 
 	ec.mu.Lock()
 	rev := ec.pageRev
+	jsRuntime := ec.jsRuntime
 	ec.mu.Unlock()
 
-	// TODO: Implement real JS evaluation via Goja runtime
+	if jsRuntime == nil {
+		return EvaluationResult{
+			ContextID:    ec.id,
+			PageRevision: rev,
+			Type:        "string",
+			Value:       "JavaScript runtime not available",
+			IsError:     true,
+			ErrorText:   "JS runtime not initialized",
+		}, nil
+	}
+
+	// Apply limits
+	maxBytes := opts.MaxResultBytes
+	if maxBytes <= 0 {
+		maxBytes = MaxEvalResultBytes
+	}
+	if maxBytes > MaxEvalResultBytes {
+		maxBytes = MaxEvalResultBytes
+	}
+
+	// Check source length
+	if len(source) > MaxSourceBytes {
+		return EvaluationResult{
+			ContextID:    ec.id,
+			PageRevision: rev,
+			Type:        "string",
+			Value:       "",
+			IsError:     true,
+			ErrorText:   fmt.Sprintf("source exceeds maximum length of %d bytes", MaxSourceBytes),
+		}, nil
+	}
+
+	// Run the script
+	value, err := jsRuntime.RunScript(source)
+
+	// Process result
+	if err != nil {
+		return EvaluationResult{
+			ContextID:    ec.id,
+			PageRevision: rev,
+			Type:        "string",
+			Value:       "",
+			IsError:     true,
+			ErrorText:   truncateError(err.Error(), maxBytes),
+		}, nil
+	}
+
+	// Convert value to serializable result
+	result := jsRuntime.SerializeValue(value, maxBytes)
+	if result.Type == "" {
+		// Serialization failed
+		return EvaluationResult{
+			ContextID:    ec.id,
+			PageRevision: rev,
+			Type:        "string",
+			Value:       value.String(),
+			IsError:     false,
+		}, nil
+	}
+
 	return EvaluationResult{
 		ContextID:    ec.id,
 		PageRevision: rev,
-		Type:        "string",
-		Value:       "[evaluation pending host runtime]",
+		Type:        result.Type,
+		Value:       result.Value,
 		IsError:     false,
 	}, nil
 }
@@ -932,4 +1005,12 @@ func nodeHasRole(nodes []SemanticNode, ref string, roleName string, exact bool) 
 		}
 	}
 	return false
+}
+
+// truncateError truncates an error message to maxBytes.
+func truncateError(s string, maxBytes int) string {
+	if len(s) > maxBytes {
+		return s[:maxBytes] + "...[truncated]"
+	}
+	return s
 }
