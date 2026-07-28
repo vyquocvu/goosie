@@ -238,11 +238,21 @@ type Glyph struct {
 
 // TextRun is a sequence of shaped glyphs ready for rasterization.
 // All glyphs share the same font, size, and color.
+//
+// FontFamily, Bold, and Italic are advisory hints consumed by the
+// raster backend's FontRegistry when it builds the actual
+// font.Face for the run. They mirror the CSS font axes the
+// renderer evaluates during styling: family names like "serif"
+// or "monospace" route to a different face, Bold selects a bold
+// cut, and Italic selects an italic cut when available.
 type TextRun struct {
-	Font     FontHandle
-	FontSize float32
-	Color    Color
-	Glyphs   []Glyph
+	Font       FontHandle
+	FontSize   float32
+	Color      Color
+	Glyphs     []Glyph
+	FontFamily string
+	Bold       bool
+	Italic     bool
 }
 
 // Len returns the number of glyphs.

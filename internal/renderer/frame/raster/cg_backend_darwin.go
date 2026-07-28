@@ -80,7 +80,6 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -279,10 +278,20 @@ func (b *cgBackend) renderText(rect frame.Rect, textRun frame.TextRun) {
 	}
 
 	temp := image.NewRGBA(image.Rect(0, 0, tw, th))
+
+	// Resolve a scalable font face from the shared registry. The
+	// CPU and CoreGraphics backends share the registry so the two
+	// code paths produce equivalent text output. Falls back to
+	// skipping the run when no face is available, rather than
+	// drawing placeholder pixels at the wrong size.
+	face := resolveTextFaceFromRegistry(textRun)
+	if face == nil {
+		return
+	}
 	d := &font.Drawer{
 		Dst:  temp,
 		Src:  image.NewUniform(textRun.Color.StdColor()),
-		Face: basicfont.Face7x13,
+		Face: face,
 	}
 
 	ps := b.vp.PixelScale

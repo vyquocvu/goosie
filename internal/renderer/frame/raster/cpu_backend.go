@@ -18,7 +18,6 @@ import (
 	"github.com/srwiley/rasterx"
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -162,16 +161,49 @@ type CPUBackend struct {
 	viewport     frame.Viewport
 	clipStack    []frame.Rect
 	opacityStack []float32
+	fonts        *FontRegistry
 	closed       bool
 }
 
 // NewCPUBackend creates a CPU raster backend with the given initial dimensions.
+// A default FontRegistry is installed so text uses scalable fonts out of the
+// box; callers may override it via SetFontRegistry.
 func NewCPUBackend(width, height int) *CPUBackend {
 	return &CPUBackend{
 		fb:           NewFrameBuffer(width, height),
 		clipStack:    make([]frame.Rect, 0, 8),
 		opacityStack: make([]float32, 0, 8),
+		fonts:        NewFontRegistry(),
 	}
+}
+
+// SetFontRegistry swaps in a custom FontRegistry. The raster backend will
+// then resolve every text run through the provided registry. Passing nil
+// restores the default registry.
+func (b *CPUBackend) SetFontRegistry(r *FontRegistry) {
+	if r == nil {
+		r = NewFontRegistry()
+	}
+	b.fonts = r
+}
+
+// FontRegistry returns the registry currently installed. May be nil if the
+// backend has been Close()d.
+func (b *CPUBackend) FontRegistry() *FontRegistry { return b.fonts }
+
+// resolveTextFaceFromRegistry resolves a scalable font.Face for the
+// given text run via the package-level shared registry. It is the
+// fallback path used by raster backends that do not own a
+// per-backend registry (e.g. the CoreGraphics backend).
+func resolveTextFaceFromRegistry(textRun frame.TextRun) font.Face {
+	r := SharedFontRegistry()
+	d := FontDescriptor{
+		Family: textRun.FontFamily,
+		Bold:   textRun.Bold,
+		Italic: textRun.Italic,
+	}
+	face, _ := r.Get(d, textRun.FontSize)
+	return face
 }
 
 // BeginFrame prepares for a new frame.
@@ -422,6 +454,27 @@ func applyOpacity(c frame.Color, opacity float32) frame.Color {
 	return c.WithAlpha(newA)
 }
 
+// resolveTextFace looks up a scalable font.Face for the given text
+// run via the backend's FontRegistry. The run carries a
+// FontHandle, FontSize, and may carry font family / weight / style
+// hints in Style. Returns nil if no face can be produced, in which
+// case the caller skips rendering the run rather than crashing.
+func (b *CPUBackend) resolveTextFace(textRun frame.TextRun) font.Face {
+	if b.fonts == nil {
+		b.fonts = NewFontRegistry()
+	}
+	d := FontDescriptor{
+		Family: textRun.FontFamily,
+		Bold:   textRun.Bold,
+		Italic: textRun.Italic,
+	}
+	face, ok := b.fonts.Get(d, textRun.FontSize)
+	if !ok {
+		return nil
+	}
+	return face
+}
+
 func clampf32(v, lo, hi float32) float32 {
 	if v < lo {
 		return lo
@@ -443,7 +496,7 @@ func (e backendError) Error() string { return string(e) }
 const errBackendClosed = backendError("raster: backend is closed")
 
 // ---------------------------------------------------------------------------
-// rasterText — renders a shaped text run using basicfont
+// rasterText — renders a shaped text run using a scalable font face
 // ---------------------------------------------------------------------------
 
 func (b *CPUBackend) rasterText(rect frame.Rect, textRun frame.TextRun, clip, dirty frame.Rect, opacity float32, ps frame.PixelScale) {
@@ -470,17 +523,32 @@ func (b *CPUBackend) rasterText(rect frame.Rect, textRun frame.TextRun, clip, di
 	}
 
 	temp := image.NewRGBA(image.Rect(0, 0, tw, th))
+
+	// Resolve a scalable font face for this run. The face is
+	// cached by (family, weight, italic, size) inside the registry
+	// so subsequent runs with the same descriptor do not re-parse.
+	face := b.resolveTextFace(textRun)
+	if face == nil {
+		return
+	}
 	d := &font.Drawer{
 		Dst:  temp,
 		Src:  image.NewUniform(c.StdColor()),
-		Face: basicfont.Face7x13,
+		Face: face,
 	}
 
 	for _, g := range textRun.Glyphs {
 		r := rune(g.ID)
+		// Anchor the glyph at the font's baseline (~0.75 of the
+		// font size). Without this offset, glyphs sit on the top
+		// edge of the temp image and disappear when the run is
+		// composited at the layout rect.
 		gx := g.XOffset * ps.Scale
 		gy := (textRun.FontSize*0.75 + g.YOffset) * ps.Scale
 		d.Dot = fixed.P(int(math.Round(float64(gx))), int(math.Round(float64(gy))))
+		// The font.Drawer takes its own step from Face.Advance
+		// once we draw the glyph, so the per-glyph Advance stored
+		// in the run is only consumed by the layout engine.
 		d.DrawString(string(r))
 	}
 

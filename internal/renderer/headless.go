@@ -172,8 +172,9 @@ func effectiveFontSize(cmd *PaintCommand) float32 {
 
 // buildTextRun creates a frame.TextRun from text with per-rune glyph layout.
 // Uses basic per-rune glyph layout since we don't have full HarfBuzz shaping
-// in the headless path. The raster backend renders via basicfont.Face7x13
-// scaled by fontSize.
+// in the headless path. The raster backend resolves the actual font.Face via
+// its FontRegistry using the FontFamily / Bold / Italic hints populated from
+// the paint command's computed style.
 func buildTextRun(text string, fontSize float32, cmd *PaintCommand) frame.TextRun {
 	if fontSize <= 0 {
 		fontSize = 16
@@ -191,10 +192,22 @@ func buildTextRun(text string, fontSize float32, cmd *PaintCommand) frame.TextRu
 		}
 		x += charWidth
 	}
+	var family string
+	bold := false
+	italic := false
+	if cmd.Node != nil && cmd.Node.ComputedStyle != nil {
+		family = cmd.Node.ComputedStyle.FontFamily
+		if cmd.Node.ComputedStyle.FontWeight == "bold" || cmd.Node.ComputedStyle.FontWeight == "700" {
+			bold = true
+		}
+	}
 	return frame.TextRun{
-		FontSize: fontSize,
-		Color:    frame.FromStdColor(textPaintColor(cmd)),
-		Glyphs:   glyphs,
+		FontSize:   fontSize,
+		Color:      frame.FromStdColor(textPaintColor(cmd)),
+		Glyphs:     glyphs,
+		FontFamily: family,
+		Bold:       bold,
+		Italic:     italic,
 	}
 }
 
