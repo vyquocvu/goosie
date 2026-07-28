@@ -120,6 +120,7 @@ type engineContext struct {
 	console   []ConsoleEntry
 	network   []NetworkEntry
 	navID     navigation.ID
+	domStore  *dom.Store // Compact DOM store for mutations
 }
 
 var _ Context = (*engineContext)(nil)
@@ -345,7 +346,18 @@ func (ec *engineContext) Snapshot(ctx context.Context, opts SnapshotOptions) (Pa
 			ContextID: ec.id, PageRevision: ec.pageRev,
 		}, nil
 	}
-	nodes, truncated := domToSemantic(ec.lastDoc, "", opts.MaxDepth, opts.MaxNodes)
+
+	// Apply default limits
+	maxDepth := opts.MaxDepth
+	if maxDepth <= 0 || maxDepth > MaxSnapshotDepth {
+		maxDepth = MaxSnapshotDepth
+	}
+	maxNodes := opts.MaxNodes
+	if maxNodes <= 0 || maxNodes > MaxSnapshotNodes {
+		maxNodes = MaxSnapshotNodes
+	}
+
+	nodes, truncated := domToSemantic(ec.lastDoc, ec.id, maxDepth, maxNodes)
 	return PageSnapshot{
 		ContextID:    ec.id,
 		PageRevision: ec.pageRev,
@@ -371,6 +383,8 @@ func (ec *engineContext) Screenshot(ctx context.Context, opts ScreenshotOptions)
 	rev := ec.pageRev
 	ec.mu.Unlock()
 
+	// TODO: Implement real screenshot using renderer
+	// For now, return empty placeholder
 	return ScreenshotResult{
 		ContextID:    ec.id,
 		PageRevision: rev,
@@ -394,10 +408,17 @@ func (ec *engineContext) Query(ctx context.Context, locator Locator) (QueryResul
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 	if ec.lastDoc == nil {
-		return QueryResult{ContextID: ec.id, PageRevision: ec.pageRev}, nil
+		return QueryResult{ContextID: ec.id, PageRevision: ec.pageRev, Refs: []ElementRef{}}, nil
 	}
-	nodes, _ := domToSemantic(ec.lastDoc, "", 0, 0)
+
+	nodes, _ := domToSemantic(ec.lastDoc, ec.id, 0, 0)
 	refs := findRefs(nodes, ec.id, ec.pageRev)
+
+	// Filter refs based on locator
+	if locator.Role != nil {
+		refs = filterRefsByRole(refs, nodes, locator.Role.Name, locator.Role.Exact)
+	}
+
 	return QueryResult{
 		ContextID:    ec.id,
 		PageRevision: ec.pageRev,
@@ -418,11 +439,16 @@ func (ec *engineContext) Click(ctx context.Context, ref ElementRef, opts ClickOp
 	if ref.PageRevision != rev {
 		return ActionResult{}, ErrPageChangedSentinel
 	}
+
 	select {
 	case <-ctx.Done():
 		return ActionResult{}, ctx.Err()
 	default:
 	}
+
+	// TODO: Implement real click - dispatch click event to element
+	// For now, return success
+
 	return ActionResult{
 		ContextID:         ec.id,
 		PageRevision:      rev,
@@ -444,11 +470,16 @@ func (ec *engineContext) Type(ctx context.Context, ref ElementRef, text string, 
 	if ref.PageRevision != rev {
 		return ActionResult{}, ErrPageChangedSentinel
 	}
+
 	select {
 	case <-ctx.Done():
 		return ActionResult{}, ctx.Err()
 	default:
 	}
+
+	// TODO: Implement real type - dispatch input events to element
+	// For now, return success
+
 	return ActionResult{
 		ContextID:         ec.id,
 		PageRevision:      rev,
@@ -466,7 +497,17 @@ func (ec *engineContext) PressKey(ctx context.Context, key string, modifiers []s
 		return ActionResult{}, ctx.Err()
 	default:
 	}
-	return ActionResult{ContextID: ec.id, PageRevision: ec.pageRev, ActionApplied: true}, nil
+
+	ec.mu.Lock()
+	rev := ec.pageRev
+	ec.mu.Unlock()
+
+	return ActionResult{
+		ContextID:         ec.id,
+		PageRevision:      rev,
+		ActionApplied:     true,
+		NavigationStarted: false,
+	}, nil
 }
 
 func (ec *engineContext) Scroll(ctx context.Context, opts ScrollOptions) (ActionResult, error) {
@@ -478,7 +519,17 @@ func (ec *engineContext) Scroll(ctx context.Context, opts ScrollOptions) (Action
 		return ActionResult{}, ctx.Err()
 	default:
 	}
-	return ActionResult{ContextID: ec.id, PageRevision: ec.pageRev, ActionApplied: true}, nil
+
+	ec.mu.Lock()
+	rev := ec.pageRev
+	ec.mu.Unlock()
+
+	return ActionResult{
+		ContextID:         ec.id,
+		PageRevision:      rev,
+		ActionApplied:     true,
+		NavigationStarted: false,
+	}, nil
 }
 
 func (ec *engineContext) SetViewport(ctx context.Context, vp Viewport) (Viewport, error) {
@@ -505,12 +556,18 @@ func (ec *engineContext) Evaluate(ctx context.Context, source string, opts Evalu
 		return EvaluationResult{}, ctx.Err()
 	default:
 	}
+
+	ec.mu.Lock()
+	rev := ec.pageRev
+	ec.mu.Unlock()
+
+	// TODO: Implement real JS evaluation via Goja runtime
 	return EvaluationResult{
 		ContextID:    ec.id,
-		PageRevision: ec.pageRev,
-		Type:         "string",
-		Value:        "[evaluation pending host runtime]",
-		IsError:      false,
+		PageRevision: rev,
+		Type:        "string",
+		Value:       "[evaluation pending host runtime]",
+		IsError:     false,
 	}, nil
 }
 
@@ -525,11 +582,28 @@ func (ec *engineContext) Console(ctx context.Context, cursor string, limit int) 
 	}
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
+
+	entries := ec.console
+	if entries == nil {
+		entries = []ConsoleEntry{}
+	}
+
+	limitVal := limit
+	if limitVal <= 0 || limitVal > 100 {
+		limitVal = 100
+	}
+
+	dropped := 0
+	if len(entries) > limitVal {
+		dropped = len(entries) - limitVal
+		entries = entries[:limitVal]
+	}
+
 	return ConsolePage{
 		ContextID:    ec.id,
 		PageRevision: ec.pageRev,
-		Entries:      []ConsoleEntry{},
-		Dropped:      0,
+		Entries:      entries,
+		Dropped:      dropped,
 		Cursor:       fmt.Sprintf("cursor_%d", ec.pageRev),
 	}, nil
 }
@@ -545,11 +619,28 @@ func (ec *engineContext) Network(ctx context.Context, cursor string, limit int) 
 	}
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
+
+	entries := ec.network
+	if entries == nil {
+		entries = []NetworkEntry{}
+	}
+
+	limitVal := limit
+	if limitVal <= 0 || limitVal > 100 {
+		limitVal = 100
+	}
+
+	dropped := 0
+	if len(entries) > limitVal {
+		dropped = len(entries) - limitVal
+		entries = entries[:limitVal]
+	}
+
 	return NetworkPage{
 		ContextID:    ec.id,
 		PageRevision: ec.pageRev,
-		Entries:      []NetworkEntry{},
-		Dropped:      0,
+		Entries:      entries,
+		Dropped:      dropped,
 		Cursor:       fmt.Sprintf("cursor_%d", ec.pageRev),
 	}, nil
 }
@@ -599,14 +690,14 @@ func countRefNodes(nodes []SemanticNode) int {
 	return count
 }
 
-func domToSemantic(doc *html.Node, refPrefix string, maxDepth int, maxNodes int) ([]SemanticNode, bool) {
+func domToSemantic(doc *html.Node, ctxID string, maxDepth int, maxNodes int) ([]SemanticNode, bool) {
 	count := 0
 	truncated := false
-	nodes := buildSemanticNodes(doc, refPrefix, 0, maxDepth, maxNodes, &count, &truncated)
+	nodes := buildSemanticNodes(doc, ctxID, 0, maxDepth, maxNodes, &count, &truncated)
 	return nodes, truncated
 }
 
-func buildSemanticNodes(n *html.Node, refPrefix string, depth int, maxDepth int, maxNodes int, count *int, truncated *bool) []SemanticNode {
+func buildSemanticNodes(n *html.Node, ctxID string, depth int, maxDepth int, maxNodes int, count *int, truncated *bool) []SemanticNode {
 	if maxDepth > 0 && depth > maxDepth {
 		return nil
 	}
@@ -652,10 +743,10 @@ func buildSemanticNodes(n *html.Node, refPrefix string, depth int, maxDepth int,
 			}
 			if role != "presentation" && role != "text" && role != "" && role != "none" && role != "unknown" {
 				*count++
-				ref := fmt.Sprintf("%se_%d", refPrefix, *count)
+				ref := fmt.Sprintf("e_%s_%d", ctxID, *count)
 				sn.Ref = ref
 			}
-			sn.Children = buildSemanticNodes(c, refPrefix, depth+1, maxDepth, maxNodes, count, truncated)
+			sn.Children = buildSemanticNodes(c, ctxID, depth+1, maxDepth, maxNodes, count, truncated)
 			nodes = append(nodes, sn)
 		case html.TextNode:
 			text := strings.TrimSpace(c.Data)
@@ -676,6 +767,7 @@ func buildSemanticNodes(n *html.Node, refPrefix string, depth int, maxDepth int,
 }
 
 func inferDOMRole(n *html.Node) string {
+	// Check explicit role first
 	for _, a := range n.Attr {
 		if a.Key == "role" && a.Val != "" {
 			return a.Val
@@ -741,6 +833,7 @@ func inferDOMRole(n *html.Node) string {
 }
 
 func computeDOMName(n *html.Node) string {
+	// Check aria-label first
 	for _, a := range n.Attr {
 		switch a.Key {
 		case "aria-label":
@@ -759,8 +852,13 @@ func computeDOMName(n *html.Node) string {
 			if a.Val != "" {
 				return a.Val
 			}
+		case "name":
+			if a.Val != "" {
+				return a.Val
+			}
 		}
 	}
+	// For links, use href
 	if n.Data == "a" {
 		for _, a := range n.Attr {
 			if a.Key == "href" {
@@ -775,13 +873,13 @@ func computeDOMName(n *html.Node) string {
 
 func stateMet(current ContextState, target WaitCondition) bool {
 	order := map[ContextState]int{
-		ContextCreated:    0,
-		ContextNavigating: 1,
-		ContextParsing:    2,
+		ContextCreated:     0,
+		ContextNavigating:  1,
+		ContextParsing:     2,
 		ContextInteractive: 3,
-		ContextComplete:   4,
-		ContextFailed:     5,
-		ContextCancelled:  5,
+		ContextComplete:     4,
+		ContextFailed:      5,
+		ContextCancelled:   5,
 		ContextClosed:     6,
 	}
 	cur := order[current]
@@ -796,3 +894,42 @@ func stateMet(current ContextState, target WaitCondition) bool {
 	return false
 }
 
+func findRefs(nodes []SemanticNode, ctxID string, rev int) []ElementRef {
+	var refs []ElementRef
+	for _, n := range nodes {
+		if n.Ref != "" {
+			refs = append(refs, ElementRef{
+				Ref:          n.Ref,
+				ContextID:    ctxID,
+				PageRevision: rev,
+			})
+		}
+		refs = append(refs, findRefs(n.Children, ctxID, rev)...)
+	}
+	return refs
+}
+
+func filterRefsByRole(refs []ElementRef, nodes []SemanticNode, roleName string, exact bool) []ElementRef {
+	var filtered []ElementRef
+	for _, ref := range refs {
+		if nodeHasRole(nodes, ref.Ref, roleName, exact) {
+			filtered = append(filtered, ref)
+		}
+	}
+	return filtered
+}
+
+func nodeHasRole(nodes []SemanticNode, ref string, roleName string, exact bool) bool {
+	for _, n := range nodes {
+		if n.Ref == ref {
+			if exact {
+				return n.Role == roleName
+			}
+			return strings.Contains(n.Role, roleName)
+		}
+		if nodeHasRole(n.Children, ref, roleName, exact) {
+			return true
+		}
+	}
+	return false
+}

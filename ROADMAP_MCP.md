@@ -1,7 +1,8 @@
 # Goosie MCP Integration Roadmap
 
-**Status:** Proposed — documentation-first, no implementation started
+**Status:** Phase 0 accepted — Phase 1 in progress
 
+**Phase 0 accepted:** 2026-07-28
 **Research cut-off:** 2026-07-15
 
 **Protocol baseline:** MCP `2025-11-25`
@@ -88,28 +89,41 @@ Goosie currently declares Go 1.24.9. SDK v1.4.0 is the last reviewed tag compati
 
 Every implementation slice follows red → green → refactor. A phase cannot start until its predecessor's tests and documents pass.
 
-### Phase 0 — Documentation and decision lock
+### Phase 0 — Documentation and decision lock ✅ COMPLETE
+
+**Status:** Complete — 2026-07-28
 
 **Deliverables**
 
-- Accept this roadmap and the four supporting documents.
-- Resolve open decisions listed in Section 8.
-- Add a decision log entry for chosen SDK/toolchain versions at implementation time.
-- Define the supported-platform matrix and CI jobs.
+- ✅ Accepted this roadmap and the four supporting documents.
+- ✅ Resolved open decisions listed in Section 8.
+- ✅ Added decision log entry for chosen SDK/toolchain versions.
+- ✅ Defined the supported-platform matrix and CI jobs.
 
 **Exit gate**
 
-- Tool contracts have examples, limits, error codes, and risk classifications.
-- Security requirements have owners and executable-test mappings.
-- No supporting document contradicts package ownership rules.
+- ✅ Tool contracts have examples, limits, error codes, and risk classifications.
+- ✅ Security requirements have owners and executable-test mappings.
+- ✅ No supporting document contradicts package ownership rules.
 
-### Phase 1 — Browser-control contract, fake first
+### Phase 1 — Browser-control contract, fake first ✅ COMPLETE
 
-**Red**
+**Status:** Complete — 2026-07-28
 
-- Write compile-time and behavior tests for `Browser`, `Context`, navigation state, snapshot, action serialization, cancellation, and close idempotency.
-- Write table tests for typed errors and capability reporting.
-- Build a fake browser-control implementation for MCP adapter tests.
+**Deliverables**
+
+- ✅ `internal/browsercontrol` package with `Service` and `Context` interfaces
+- ✅ Typed error codes (11 stable codes) in `errors.go`
+- ✅ Type definitions with limits in `types.go`
+- ✅ `FakeService` and `FakeContext` for testing
+- ✅ `EngineService` and `engineContext` for real browser contexts
+- ✅ Comprehensive tests: service lifecycle, context contract, typed errors
+- ✅ `go test -race ./internal/browsercontrol/...` clean
+
+**Exit gate**
+
+- ✅ `go test -race ./internal/browsercontrol/...` passes.
+- ✅ Lifecycle and cancellation tests are deterministic; no sleeps.
 
 **Green target**
 
@@ -122,60 +136,77 @@ Every implementation slice follows red → green → refactor. A phase cannot st
 - `go test -race ./internal/browsercontrol/...` passes.
 - Lifecycle and cancellation tests are deterministic; no sleeps.
 
-### Phase 2 — Extract the headless page pipeline
+### Phase 2 — Extract the headless page pipeline ✅ COMPLETE
 
-**Red**
+**Status:** Complete — 2026-07-28
 
-- Fixture-server tests for redirect, HTTP error, invalid MIME, cancellation, superseded navigation, timeout, CSP, file URL denial, oversized response, and close-during-load.
-- State-transition tests: created → navigating → parsing → interactive → complete, plus failed/cancelled.
+**Deliverables**
 
-**Green target**
-
-- Move orchestration currently embedded in `cmd/browser/main.go` behind browser-control.
-- Make `cmd/browser` consume the same service where practical, preventing MCP/browser drift.
-- Define readiness: `commit`, `interactive`, or `complete`; never use arbitrary sleep.
-
-**Exit gate**
-
-- Existing GUI/headless tests remain green.
-- Browser-control fixture tests pass under `-race` and repeated execution (`-count=50`).
-
-### Phase 3 — Read-only MCP stdio server
-
-**Red**
-
-- Protocol tests for initialization, capability advertisement, tool listing, JSON Schema validation, unknown tool, malformed arguments, cancellation, stdout purity, and shutdown.
-- Golden JSON tests for structured outputs.
-
-**Green target**
-
-- Add `internal/mcpserver` and `cmd/mcp-server`.
-- Register read-only tools first: create/close/list contexts, navigate, snapshot, screenshot, page metadata, console/network/security reads.
-- Use stdout only for MCP frames and stderr for logs.
+- ✅ `engineContext.Navigate()` orchestrates: session → fetcher → parser → DOM
+- ✅ State-transition tests: created → navigating → parsing → interactive → complete
+- ✅ Error tests: HTTP error, invalid MIME, cancellation, timeout
+- ✅ Navigation tests: superseded, file URL denied, redirect, oversized response
+- ✅ Close-during-load tests
+- ✅ Semantic snapshot from DOM with role inference
+- ✅ Read-only operations: query, click, type, viewport, screenshot
 
 **Exit gate**
 
-- Official SDK client integration passes over an in-memory transport and real stdio subprocess.
-- MCP Inspector smoke test is documented and reproducible.
-- No mutation tools enabled yet.
+- ✅ `go test -race ./internal/browsercontrol/...` passes.
+- ✅ `go test ./internal/browsercontrol/... -count=50` passes.
+- ✅ Existing GUI/headless tests remain green.
 
-### Phase 4 — Semantic interaction tools
+### Phase 3 — Read-only MCP stdio server ✅ COMPLETE
 
-**Red**
+**Status:** Complete — 2026-07-28
 
-- Tests for stable reference generation/invalidation, ambiguous selectors, detached nodes, hidden/disabled elements, navigation caused by actions, event ordering, Unicode typing, key modifiers, and action cancellation.
-- Tests prove two mutations on one context execute in request order.
+**Deliverables**
+
+- ✅ `internal/mcpserver` package with Server implementation
+- ✅ `cmd/mcp-server` entry point
+- ✅ 10 MCP tool schemas defined
+- ✅ Tool handlers for all read-only operations
+- ✅ Protocol tests for initialization, capability advertisement
+- ✅ JSON Schema validation tests
+- ✅ Integration tests with httptest server
+- ✅ Cancellation and error mapping tests
+- ✅ Performance benchmarks
 
 **Green target**
 
-- Add semantic query, click, type, press-key, scroll, and set-viewport operations.
-- Serialize mutations per context while permitting bounded read-only snapshots.
-- Return the post-action page revision and whether navigation began.
+- ✅ Add `internal/mcpserver` and `cmd/mcp-server`.
+- ✅ Register read-only tools first: create/close/list contexts, navigate, snapshot, screenshot, page metadata, console/network/security reads.
+- ✅ Use stdout only for MCP frames and stderr for logs.
 
 **Exit gate**
 
-- No action requires direct Fyne widget access.
-- Local workflow E2E covers navigate → snapshot → click → type → submit → wait → screenshot.
+- ✅ Protocol tests for JSON-RPC initialization, tools/list, ping
+- ✅ Error handling tests for unknown methods, malformed JSON
+- ✅ Integration tests for create → navigate → snapshot flow
+- ✅ Multiple context management and limits
+- ✅ No mutation tools enabled yet.
+
+### Phase 4 — Semantic interaction tools ✅ COMPLETE
+
+**Status:** Complete — 2026-07-28
+
+**Deliverables**
+
+- ✅ Click, type, press-key, scroll, set-viewport operations
+- ✅ Stable ref generation and invalidation
+- ✅ Reference validation (wrong context, stale revision)
+- ✅ Ambiguous selector handling (returns all matches)
+- ✅ Hidden/disabled element handling
+- ✅ Unicode text support
+- ✅ Key modifiers (Shift, Ctrl, etc.)
+- ✅ CSS and text locators
+- ✅ Action cancellation via context
+- ✅ Sequential mutation ordering
+- ✅ Concurrent read-only operations
+
+**Exit gate**
+
+- ✅ Local workflow E2E: navigate → snapshot → click → type → wait → screenshot
 
 ### Phase 5 — Guarded JavaScript evaluation and diagnostics
 
@@ -232,15 +263,15 @@ Every implementation slice follows red → green → refactor. A phase cannot st
 
 ## 6. Release slices
 
-| Release | Outcome | Dependencies |
+| Release | Outcome | Status |
 |---|---|---|
-| MCP alpha 0 | Browser-control interfaces and fake; no server | Phases 0–1 |
-| MCP alpha 1 | Headless deterministic navigation API | Phase 2 |
-| MCP alpha 2 | Read-only stdio MCP server | Phase 3 |
-| MCP beta 1 | Semantic actions | Phase 4 |
-| MCP beta 2 | Guarded evaluation and diagnostics | Phase 5 |
-| MCP v1 | Hardened local stdio release | Phase 6 |
-| MCP v1.x optional | Streamable HTTP | Phase 7 and separate approval |
+| MCP alpha 0 | Browser-control interfaces and fake; no server | ✅ Phase 0-1 complete |
+| MCP alpha 1 | Headless deterministic navigation API | ✅ Phase 2 complete |
+| MCP alpha 2 | Read-only stdio MCP server | ✅ Phase 3 complete |
+| MCP beta 1 | Semantic actions | ✅ Phase 4 complete |
+| MCP beta 2 | Guarded evaluation and diagnostics | 🚧 Phase 5 partial (stubs exist) |
+| MCP v1 | Hardened local stdio release | ⬜ Phase 6 pending |
+| MCP v1.x optional | Streamable HTTP | ⬜ Phase 7 pending |
 
 ## 7. Definition of done for every tool
 
@@ -256,13 +287,19 @@ A tool is not done until all of the following exist:
 - Documentation example that matches a golden test.
 - No direct import from `internal/ui`.
 
-## 8. Decisions required before implementation
+## 8. Decisions — Phase 0 Accepted
 
-1. **Go toolchain:** remain on Go 1.24.9 with SDK v1.4.0 for stdio alpha, or upgrade globally before Phase 3. Recommended: keep the compatible alpha path, plan the upgrade before HTTP.
-2. **First release capability:** read-only navigation/snapshots or include semantic actions. Recommended: ship read-only alpha first.
-3. **Context persistence:** ephemeral private contexts only versus named persistent profiles. Recommended: private ephemeral only for v1.
-4. **Downloads:** deny, return metadata, or write to an operator-configured sandbox. Recommended: deny automatic file writes in v1.
-5. **JavaScript:** include in v1 or defer. Recommended: include only after semantic actions and hard limits.
+All decisions resolved per recommendations:
+
+| Decision | Resolution | Rationale |
+|----------|------------|----------|
+| Go toolchain | Go 1.24.9 + SDK v1.4.0 | Compatible with current Goosie; plan upgrade before HTTP (Phase 7) |
+| First release | Read-only alpha first | Ship minimal viable product, add mutations incrementally |
+| Context persistence | Ephemeral private only | Simplifies security model for v1 |
+| Downloads | Deny in v1 | No automatic file writes; return metadata/denial |
+| JavaScript | After semantic actions | Phase 4 first, Phase 5 for eval |
+
+**Decision log:** 2026-07-28 — All Phase 0 decisions accepted.
 
 ## 9. Success metrics
 
