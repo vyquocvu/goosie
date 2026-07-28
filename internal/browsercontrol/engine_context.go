@@ -1,8 +1,11 @@
 package browsercontrol
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"image/png"
 	"io"
 	"strings"
 	"sync"
@@ -15,7 +18,15 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine/session"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/renderer"
 )
+
+// refJSON returns a JSON string literal suitable for embedding in JS source.
+// Used to safely pass arbitrary identifier strings into generated scripts.
+func refJSON(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
 
 // EngineService creates real browser contexts backed by engine packages.
 type EngineService struct {
@@ -394,18 +405,77 @@ func (ec *engineContext) Screenshot(ctx context.Context, opts ScreenshotOptions)
 	ec.mu.Lock()
 	vp := ec.viewport
 	rev := ec.pageRev
+	docNode := ec.lastDoc
 	ec.mu.Unlock()
 
-	// TODO: Implement real screenshot using renderer
-	// For now, return empty placeholder
+	width := vp.Width
+	height := vp.Height
+	if width <= 0 {
+		width = 1280
+	}
+	if height <= 0 {
+		height = 720
+	}
+
+	// Cap pixels to MaxScreenshotPixels
+	maxPixels := MaxScreenshotPixels
+	if width*height > maxPixels {
+		scale := float64(maxPixels) / float64(width*height)
+		newW := int(float64(width) * scale)
+		newH := int(float64(height) * scale)
+		if newW < 1 {
+			newW = 1
+		}
+		if newH < 1 {
+			newH = 1
+		}
+		width = newW
+		height = newH
+	}
+
+	// Serialize the DOM tree to HTML for the renderer
+	var htmlBytes []byte
+	if docNode != nil {
+		var buf bytes.Buffer
+		if err := html.Render(&buf, docNode); err == nil {
+			htmlBytes = buf.Bytes()
+		}
+	}
+
+	// Fall back to a minimal placeholder if no document is loaded
+	if len(htmlBytes) == 0 {
+		htmlBytes = []byte("<!doctype html><html><body></body></html>")
+	}
+
+	// Render via the headless renderer
+	img, err := renderer.RenderHTMLToImage(ctx, string(htmlBytes), width, height)
+	if err != nil {
+		return ScreenshotResult{}, fmt.Errorf("screenshot render failed: %w", err)
+	}
+
+	// Encode as PNG
+	var pngBuf bytes.Buffer
+	pngEnc := png.Encoder{CompressionLevel: png.DefaultCompression}
+	if err := pngEnc.Encode(&pngBuf, img); err != nil {
+		return ScreenshotResult{}, fmt.Errorf("png encode failed: %w", err)
+	}
+	data := pngBuf.Bytes()
+
+	// Apply size cap
+	truncated := false
+	if len(data) > MaxScreenshotBytes {
+		data = data[:MaxScreenshotBytes]
+		truncated = true
+	}
+
 	return ScreenshotResult{
 		ContextID:    ec.id,
 		PageRevision: rev,
-		Width:        vp.Width,
-		Height:       vp.Height,
-		Data:         []byte{},
+		Width:        img.Bounds().Dx(),
+		Height:       img.Bounds().Dy(),
+		Data:         data,
 		MIMEType:     "image/png",
-		Truncated:    false,
+		Truncated:    truncated,
 	}, nil
 }
 
@@ -459,8 +529,56 @@ func (ec *engineContext) Click(ctx context.Context, ref ElementRef, opts ClickOp
 	default:
 	}
 
-	// TODO: Implement real click - dispatch click event to element
-	// For now, return success
+	// Dispatch click via JS runtime on the element matched by ref.
+	// The ref is registered to a DOM element by the accessibility tree;
+	// we look it up via document.querySelector using the stored data-attr.
+	jsRuntime := ec.jsRuntime
+	if jsRuntime == nil {
+		return ActionResult{}, NewError(ErrInternal, "JS runtime not available", false, nil)
+	}
+
+	// Build a script that finds the element with data-goosie-ref set to the ref value.
+	// We pass the ref as a separate JS variable so CSS attribute selector quoting
+	// does not need to escape arbitrary ref strings.
+	source := `var __ref = ` + refJSON(ref.Ref) + `;
+		(function() {
+			var el = document.querySelector('[data-goosie-ref="' + __ref + '"]');
+			if (!el) { return { ok: false, reason: 'not_found' }; }
+			if (el.disabled) { return { ok: false, reason: 'disabled' }; }
+			var rect = el.getBoundingClientRect();
+			if (rect.width === 0 || rect.height === 0) {
+				return { ok: false, reason: 'hidden' };
+			}
+			el.click();
+			return { ok: true };
+		})()`
+
+	value, err := jsRuntime.RunScript(source)
+	if err != nil {
+		return ActionResult{}, fmt.Errorf("click script failed: %w", err)
+	}
+
+	result := jsRuntime.SerializeValue(value, MaxEvalResultBytes)
+
+	// Inspect the returned object to confirm success
+	if result.Type == "object" {
+		if m, ok := result.Value.(map[string]interface{}); ok {
+			ok, _ := m["ok"].(bool)
+			reason, _ := m["reason"].(string)
+			if !ok {
+				switch reason {
+				case "not_found":
+					return ActionResult{}, ErrElementNotFoundSentinel
+				case "disabled":
+					return ActionResult{}, NewError(ErrInvalidState, "element is disabled", false, nil)
+				case "hidden":
+					return ActionResult{}, NewError(ErrElementNotFound, "element has no layout box", false, nil)
+				default:
+					return ActionResult{}, NewError(ErrInternal, "click failed: "+reason, true, nil)
+				}
+			}
+		}
+	}
 
 	return ActionResult{
 		ContextID:         ec.id,
@@ -479,6 +597,7 @@ func (ec *engineContext) Type(ctx context.Context, ref ElementRef, text string, 
 	}
 	ec.mu.Lock()
 	rev := ec.pageRev
+	jsRuntime := ec.jsRuntime
 	ec.mu.Unlock()
 	if ref.PageRevision != rev {
 		return ActionResult{}, ErrPageChangedSentinel
@@ -490,14 +609,67 @@ func (ec *engineContext) Type(ctx context.Context, ref ElementRef, text string, 
 	default:
 	}
 
-	// TODO: Implement real type - dispatch input events to element
-	// For now, return success
+	if jsRuntime == nil {
+		return ActionResult{}, NewError(ErrInternal, "JS runtime not available", false, nil)
+	}
+
+	// Build a script that focuses the element, clears it, types the new value,
+	// and dispatches the input+change events expected by the page.
+	source := `var __ref = ` + refJSON(ref.Ref) + `;
+		var __text = ` + refJSON(text) + `;
+		var __submit = ` + fmt.Sprintf("%v", opts.Submit) + `;
+		(function() {
+			var el = document.querySelector('[data-goosie-ref="' + __ref + '"]');
+			if (!el) { return { ok: false, reason: 'not_found' }; }
+			if (el.disabled || el.readOnly) { return { ok: false, reason: 'readonly' }; }
+			var tag = (el.tagName || '').toUpperCase();
+			var editable = tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+			if (!editable) { return { ok: false, reason: 'not_editable' }; }
+			el.focus();
+			el.value = '';
+			el.value = __text;
+			try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+			try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+			if (__submit) {
+				var form = el.form;
+				if (form) { form.submit(); }
+				else if (el.dispatchEvent) {
+					try { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); } catch (e) {}
+				}
+			}
+			return { ok: true, length: __text.length };
+		})()`
+
+	value, err := jsRuntime.RunScript(source)
+	if err != nil {
+		return ActionResult{}, fmt.Errorf("type script failed: %w", err)
+	}
+
+	result := jsRuntime.SerializeValue(value, MaxEvalResultBytes)
+	if result.Type == "object" {
+		if m, ok := result.Value.(map[string]interface{}); ok {
+			ok, _ := m["ok"].(bool)
+			reason, _ := m["reason"].(string)
+			if !ok {
+				switch reason {
+				case "not_found":
+					return ActionResult{}, ErrElementNotFoundSentinel
+				case "readonly":
+					return ActionResult{}, NewError(ErrInvalidState, "element is read-only", false, nil)
+				case "not_editable":
+					return ActionResult{}, NewError(ErrInvalidState, "element is not editable", false, nil)
+				default:
+					return ActionResult{}, NewError(ErrInternal, "type failed: "+reason, true, nil)
+				}
+			}
+		}
+	}
 
 	return ActionResult{
 		ContextID:         ec.id,
 		PageRevision:      rev,
 		ActionApplied:     true,
-		NavigationStarted: false,
+		NavigationStarted: opts.Submit,
 	}, nil
 }
 
