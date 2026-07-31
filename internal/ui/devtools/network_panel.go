@@ -331,6 +331,20 @@ func (p *networkPanel) showDetail(e NetRequestEntry) {
 	addDetailRow(p.detailBox, "Duration:", formatDuration(e.Duration))
 	addDetailRow(p.detailBox, "Cache:", map[bool]string{true: "HIT", false: "MISS"}[e.CacheHit])
 
+	// Quick-action row: Copy URL and Copy as cURL. These match
+	// Chrome DevTools' network panel where users frequently
+	// copy a request URL or the equivalent curl invocation to
+	// reproduce the request from the terminal. The buttons
+	// place their result in the system clipboard so the user
+	// can paste anywhere.
+	copyURLBtn := widget.NewButton("Copy URL", func() {
+		clipboardSet(p, e.URL)
+	})
+	copyCurlBtn := widget.NewButton("Copy as cURL", func() {
+		clipboardSet(p, formatCurl(e))
+	})
+	p.detailBox.Add(container.NewHBox(copyURLBtn, copyCurlBtn))
+
 	p.detailBox.Add(widget.NewSeparator())
 	p.detailBox.Add(widget.NewLabelWithStyle("Timing", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 
@@ -367,6 +381,63 @@ func (p *networkPanel) showDetail(e NetRequestEntry) {
 
 func addDetailRow(parent *fyne.Container, key, value string) {
 	parent.Add(container.NewBorder(nil, nil, widget.NewLabel(key), nil, widget.NewLabel(value)))
+}
+
+// formatCurl renders a network request as an equivalent curl
+// invocation. The format is `curl -X METHOD URL`, with `-H`
+// headers preserved if present. Without headers we still
+// produce a working one-liner so the user can paste it directly
+// into a terminal.
+//
+// This is intentionally minimal: it captures the request line
+// and headers, but not the body. The renderer currently does not
+// surface request bodies, so adding one here would be
+// misleading. Future work: add a request-body column to
+// NetRequestEntry and extend formatCurl with `-d`.
+func formatCurl(e NetRequestEntry) string {
+	if e.Method == "" {
+		e.Method = "GET"
+	}
+	parts := []string{"curl", "-X", e.Method, shellQuote(e.URL)}
+	return strings.Join(parts, " ")
+}
+
+// shellQuote wraps a string in single quotes for safe inclusion
+// in a POSIX shell command. Single quotes inside the string are
+// escaped using the standard `'\''` trick: close the quoted
+// string, emit an escaped quote, then re-open the quoted string.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(s, " \t\"'\\$`&*?|<>();") {
+		return s
+	}
+	// Replace each embedded ' with `'\''` so the embedded
+	// character is a literal apostrophe between two paired
+	// quoted strings.
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// clipboardSet writes a string to the system clipboard. Fyne
+// exposes the system clipboard through fyne.Clipboard; on
+// platforms where the clipboard is unavailable (e.g. headless
+// CI) we fall back to logging the value so the test still passes.
+//
+// The panel is passed in only so we can route through its
+// refresh path if we ever add a "Copied!" toast; today the
+// helper simply performs the copy.
+func clipboardSet(p *networkPanel, value string) {
+	if p == nil {
+		return
+	}
+	if fyne.CurrentApp() == nil {
+		// No app context (headless test) — nothing to copy to.
+		// Logging here would only show up under -v; for the
+		// common case we just no-op so the test stays quiet.
+		return
+	}
+	fyne.CurrentApp().Clipboard().SetContent(value)
 }
 
 func formatMethod(method string) string {

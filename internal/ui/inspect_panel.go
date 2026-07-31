@@ -34,6 +34,8 @@ type InspectPanel struct {
 	// Details View Components
 	propertiesContainer  *fyne.Container
 	stylesContainer      *fyne.Container
+	stylesFilter         *widget.Entry
+	stylesFilterText     string
 	layoutContainer      *fyne.Container
 	performanceContainer *fyne.Container
 
@@ -212,11 +214,38 @@ func (ip *InspectPanel) PerformSearch(query string) {
 		}
 
 		if match {
+			// Open every ancestor chain so the matched node is
+			// visible. Without this the selection lands on a
+			// hidden branch and the user has to expand it
+			// manually to confirm the match landed in the right
+			// place.
+			ip.expandAncestors(node)
 			ip.tree.Select(id)
-			// Note: Fyne tree scrolling to item is not easily exposed yet,
-			// but selection will update the details view
 			return // Stop after first match for now
 		}
+	}
+}
+
+// expandAncestors walks the parent chain from `node` to the root
+// and opens every branch along the way. This is what lets a
+// programmatically-selected node (search hit, hover, URL anchor
+// scroll) actually become visible in the tree: a collapsed
+// branch hides its descendants, so without this the tree.Select
+// call selects an invisible id.
+//
+// The walk uses the cached parent pointer maintained by the
+// render tree, which is always correct for nodes the panel has
+// observed since SetRenderer. For nodes outside that set we fall
+// back to a no-op; the caller can always call this again after
+// SetRenderer.
+func (ip *InspectPanel) expandAncestors(node *renderer.RenderNode) {
+	if node == nil {
+		return
+	}
+	current := node.Parent
+	for current != nil {
+		ip.tree.OpenBranch(fmt.Sprintf("%d", current.ID))
+		current = current.Parent
 	}
 }
 
@@ -231,6 +260,17 @@ func (ip *InspectPanel) createDetailsView() {
 		ip.refreshRenderer()
 	})
 
+	// Styles-tab filter: filters the matched-rules list by
+	// property name. We allocate the widget here so it survives
+	// tab rebuilds; the OnChanged handler simply calls
+	// updateStylesTab() which re-runs the filter.
+	ip.stylesFilter = widget.NewEntry()
+	ip.stylesFilter.PlaceHolder = "Filter by property (e.g. color, margin)..."
+	ip.stylesFilter.OnChanged = func(s string) {
+		ip.stylesFilterText = strings.TrimSpace(strings.ToLower(s))
+		ip.updateStylesTab()
+	}
+
 	// Layout Tab
 	ip.layoutContainer = container.NewVBox()
 
@@ -239,7 +279,13 @@ func (ip *InspectPanel) createDetailsView() {
 
 	ip.detailsTabs = container.NewAppTabs(
 		container.NewTabItem("Properties", container.NewVScroll(ip.propertiesContainer)),
-		container.NewTabItem("Styles", container.NewVScroll(ip.stylesContainer)),
+		// Styles: filter entry above the list of matched rules
+		// so the user can narrow the list by CSS property name
+		// (e.g. "color", "margin"). Empty filter shows all rules.
+		container.NewTabItem("Styles", container.NewBorder(
+			nil, ip.stylesFilter, nil, nil,
+			container.NewVScroll(ip.stylesContainer),
+		)),
 		container.NewTabItem("Computed", container.NewBorder(nil, nil, nil, nil, ip.computedStyleView.CanvasObject())),
 		container.NewTabItem("Layout", container.NewVScroll(ip.layoutContainer)),
 		container.NewTabItem("Performance", container.NewVScroll(ip.performanceContainer)),
@@ -360,6 +406,11 @@ func (ip *InspectPanel) SetElement(node *renderer.RenderNode, layout *renderer.L
 
 	// Update tree selection
 	if node != nil {
+		// Open every ancestor chain so the hit-tested node is
+		// visible. This is the “sync” half of M1: hovering a
+		// region of the page must reveal the corresponding tree
+		// node, not just select an id the user cannot see.
+		ip.expandAncestors(node)
 		id := fmt.Sprintf("%d", node.ID)
 		ip.tree.Select(id)
 	}
@@ -577,10 +628,32 @@ func (ip *InspectPanel) updateStylesTab() {
 	ip.stylesContainer.Add(widget.NewLabelWithStyle("Matched CSS Rules", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}))
 	if ip.htmlRenderer != nil {
 		rules := ip.htmlRenderer.GetMatchedRules(node)
-		if len(rules) == 0 {
-			ip.stylesContainer.Add(widget.NewLabel("No matching CSS rules"))
+		// Apply the property-name filter. An empty filter passes
+		// every rule through; a non-empty filter requires at
+		// least one declaration whose property contains the
+		// filter text (case-insensitive substring match).
+		filteredRules := rules[:0:0]
+		if ip.stylesFilterText == "" {
+			filteredRules = append(filteredRules, rules...)
 		} else {
 			for _, rule := range rules {
+				for _, decl := range rule.Declarations {
+					if strings.Contains(strings.ToLower(decl.Property), ip.stylesFilterText) {
+						filteredRules = append(filteredRules, rule)
+						break
+					}
+				}
+			}
+		}
+
+		if len(filteredRules) == 0 {
+			if ip.stylesFilterText != "" {
+				ip.stylesContainer.Add(widget.NewLabel("No rules match the filter."))
+			} else {
+				ip.stylesContainer.Add(widget.NewLabel("No matching CSS rules"))
+			}
+		} else {
+			for _, rule := range filteredRules {
 				var b strings.Builder
 				var sels []string
 				for _, seq := range rule.Selectors {

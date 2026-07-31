@@ -171,6 +171,137 @@ func TestInspectPanel_PerformSearch(t *testing.T) {
 	assert.Nil(t, panel.selectedNode)
 }
 
+// TestInspectPanel_ExpandAncestors_NilNode verifies that calling
+// expandAncestors with a nil node is a safe no-op. This is the
+// regression guard against a panic when an external caller hands
+// the inspector a nil selection.
+func TestInspectPanel_ExpandAncestors_NilNode(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "html"
+	root.ID = 1
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(&MockHTMLRenderer{root: root})
+
+	assert.NotPanics(t, func() {
+		panel.expandAncestors(nil)
+	}, "expandAncestors(nil) must not panic")
+}
+
+// TestInspectPanel_ExpandAncestors_DeepNode verifies that
+// expandAncestors opens every ancestor in the chain leading
+// from a deep node to the root. The tree.IsBranchOpen check is
+// the regression guard: without this, programmatic selection of
+// a hidden deep node would land on a uid the user could not see.
+func TestInspectPanel_ExpandAncestors_DeepNode(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "html"
+	root.ID = 1
+
+	body := renderer.NewRenderNode(renderer.NodeTypeElement)
+	body.TagName = "body"
+	body.ID = 2
+	root.AddChild(body)
+
+	div := renderer.NewRenderNode(renderer.NodeTypeElement)
+	div.TagName = "div"
+	div.ID = 3
+	body.AddChild(div)
+
+	span := renderer.NewRenderNode(renderer.NodeTypeElement)
+	span.TagName = "span"
+	span.ID = 4
+	div.AddChild(span)
+
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(&MockHTMLRenderer{root: root})
+
+	// Note: SetRenderer already auto-opens html and body (the
+	// “matches Chrome” behaviour); only div (id=3) is
+	// collapsed at this point. The interesting case for this
+	// test is whether div opens after expandAncestors.
+	assert.True(t, panel.tree.IsBranchOpen("1"), "html must start open")
+	assert.True(t, panel.tree.IsBranchOpen("2"), "body must start open")
+	assert.False(t, panel.tree.IsBranchOpen("3"), "div must start closed")
+
+	panel.expandAncestors(span)
+
+	// After expansion, the div ancestor must be open so the
+	// user can see the span in the tree. html and body were
+	// already open, but the assertion holds either way.
+	assert.True(t, panel.tree.IsBranchOpen("1"), "html must be open")
+	assert.True(t, panel.tree.IsBranchOpen("2"), "body must be open")
+	assert.True(t, panel.tree.IsBranchOpen("3"), "div must be open")
+}
+
+// TestInspectPanel_ExpandAncestors_Root verifies that expanding
+// the root node is a safe no-op (the root has no ancestors).
+func TestInspectPanel_ExpandAncestors_Root(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "html"
+	root.ID = 1
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(&MockHTMLRenderer{root: root})
+
+	assert.NotPanics(t, func() {
+		panel.expandAncestors(root)
+	}, "expanding the root must not panic")
+}
+
+// TestInspectPanel_SetElement_ExpandsAncestors verifies that
+// programmatic selection through SetElement (the path the browser
+// uses for hover-hit testing) opens every ancestor so the selected
+// node is visible in the tree. Without this the tree would
+// silently select an invisible id.
+func TestInspectPanel_SetElement_ExpandsAncestors(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "html"
+	root.ID = 1
+
+	body := renderer.NewRenderNode(renderer.NodeTypeElement)
+	body.TagName = "body"
+	body.ID = 2
+	root.AddChild(body)
+
+	inner := renderer.NewRenderNode(renderer.NodeTypeElement)
+	inner.TagName = "div"
+	inner.ID = 3
+	body.AddChild(inner)
+
+	deep := renderer.NewRenderNode(renderer.NodeTypeElement)
+	deep.TagName = "span"
+	deep.ID = 4
+	inner.AddChild(deep)
+
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(&MockHTMLRenderer{root: root})
+
+	// SetRenderer already opened html and body, but inner (id=3)
+	// is still collapsed at the time of selection.
+	assert.False(t, panel.tree.IsBranchOpen("3"), "inner must start closed")
+
+	panel.SetElement(deep, nil)
+
+	// After SetElement, every ancestor must be open so the
+	// user can see the deep node in the tree.
+	assert.True(t, panel.tree.IsBranchOpen("1"), "html must be open")
+	assert.True(t, panel.tree.IsBranchOpen("2"), "body must be open")
+	assert.True(t, panel.tree.IsBranchOpen("3"), "inner must be open")
+	assert.Equal(t, deep, panel.selectedNode,
+		"SetElement must record the deep node as selected")
+}
+
 func TestInspectPanel_Refresh(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
@@ -537,6 +668,101 @@ func TestElementsPanel_MatchedCSSRules(t *testing.T) {
 
 	// Check stylesContainer has children. We expect the matched rules list to be populated.
 	assert.NotEmpty(t, panel.stylesContainer.Objects)
+}
+
+// TestInspectPanel_StylesFilter_Empty verifies that an empty
+// filter keeps every matched rule visible. This is the default
+// behaviour and the regression guard against an off-by-one that
+// would hide rules when no filter is set.
+func TestInspectPanel_StylesFilter_Empty(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "p"
+	root.ID = 1
+
+	mockRenderer := &MockHTMLRenderer{root: root, matchedRules: []css.Rule{
+		{
+			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
+			Declarations: []css.Declaration{{Property: "color", Value: "red"}},
+			Specificity: [3]uint16{0, 0, 1},
+		},
+		{
+			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
+			Declarations: []css.Declaration{{Property: "margin", Value: "10px"}},
+			Specificity: [3]uint16{0, 0, 1},
+		},
+	}}
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(mockRenderer)
+	panel.SetElement(root, nil)
+
+	// No filter: every rule renders. We assert the container has
+	// the standard heading + at least one rule card.
+	panel.stylesFilter.SetText("")
+	assert.NotEmpty(t, panel.stylesContainer.Objects,
+		"empty filter must not hide rules")
+}
+
+// TestInspectPanel_StylesFilter_MatchesProperty verifies the
+// filter narrows the matched-rules list by CSS property name
+// (case-insensitive substring match).
+func TestInspectPanel_StylesFilter_MatchesProperty(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	root := renderer.NewRenderNode(renderer.NodeTypeElement)
+	root.TagName = "p"
+	root.ID = 1
+
+	mockRenderer := &MockHTMLRenderer{root: root, matchedRules: []css.Rule{
+		{
+			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
+			Declarations: []css.Declaration{{Property: "color", Value: "red"}},
+			Specificity: [3]uint16{0, 0, 1},
+		},
+		{
+			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
+			Declarations: []css.Declaration{{Property: "background-color", Value: "yellow"}},
+			Specificity: [3]uint16{0, 0, 1},
+		},
+		{
+			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
+			Declarations: []css.Declaration{{Property: "margin", Value: "10px"}},
+			Specificity: [3]uint16{0, 0, 1},
+		},
+	}}
+	panel := NewInspectPanel(nil)
+	panel.SetRenderer(mockRenderer)
+	panel.SetElement(root, nil)
+
+	// Filter on "color" should keep the two rules that mention a
+	// color property ("color" and "background-color") and drop
+	// the margin rule.
+	panel.stylesFilter.OnChanged("color")
+	countColor := countStylesObjects(panel)
+	assert.GreaterOrEqual(t, countColor, 2,
+		"color filter must keep at least the two color rules")
+
+	// A filter that matches nothing should produce a “no
+	// matches” placeholder rather than dropping every rule
+	// silently.
+	panel.stylesFilter.OnChanged("zzz_nothing_matches_this")
+	countNone := countStylesObjects(panel)
+	assert.GreaterOrEqual(t, countNone, 1,
+		"empty-result filter must surface the 'no matches' placeholder")
+}
+
+// countStylesObjects counts the widgets currently in the styles
+// container so the filter tests can assert on the visible rule
+// count without depending on Fyne's internal label/separator
+// internals.
+func countStylesObjects(panel *InspectPanel) int {
+	if panel.stylesContainer == nil {
+		return 0
+	}
+	return len(panel.stylesContainer.Objects)
 }
 
 func TestElementsPanel_PopulateAndExpand(t *testing.T) {

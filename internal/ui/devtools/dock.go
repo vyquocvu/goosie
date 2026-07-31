@@ -86,6 +86,15 @@ type settingsProvider interface {
 	GetDefaultSearchEngine() string
 	GetEnableJavaScript() bool
 	GetEnableImages() bool
+	// SetHomepage updates the homepage URL. Implementations must
+	// persist the value so it survives a browser restart.
+	SetHomepage(url string)
+	// SetDefaultSearchEngine updates the default search engine.
+	SetDefaultSearchEngine(url string)
+	// SetEnableJavaScript toggles JavaScript execution.
+	SetEnableJavaScript(enabled bool)
+	// SetEnableImages toggles image loading.
+	SetEnableImages(enabled bool)
 }
 
 type metricsProvider interface {

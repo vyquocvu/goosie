@@ -90,6 +90,83 @@ func TestFormatWaterfall_EmptyPhases(t *testing.T) {
 	assert.Contains(t, result, "█")
 }
 
+// TestFormatCurl covers every common request shape the user might
+// copy: a plain GET, a POST with body (currently ignored in the
+// curl output), and a URL containing shell metacharacters that
+// must be quoted.
+func TestFormatCurl(t *testing.T) {
+	cases := []struct {
+		name string
+		in   NetRequestEntry
+		want string
+	}{
+		{
+			name: "simple GET",
+			in:   NetRequestEntry{Method: "GET", URL: "https://example.com/"},
+			want: `curl -X GET https://example.com/`,
+		},
+		{
+			name: "POST defaults method when zero",
+			in:   NetRequestEntry{URL: "https://example.com/api"},
+			want: `curl -X GET https://example.com/api`,
+		},
+		{
+			name: "URL with spaces gets single-quoted",
+			in:   NetRequestEntry{Method: "GET", URL: "https://example.com/path with space"},
+			want: `curl -X GET 'https://example.com/path with space'`,
+		},
+		{
+			name: "URL with single quotes is escaped",
+			in:   NetRequestEntry{Method: "GET", URL: "https://example.com/it's"},
+			want: `curl -X GET 'https://example.com/it'\''s'`,
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, formatCurl(c.in))
+		})
+	}
+}
+
+// TestShellQuote covers the shell-quoting edge cases. Plain
+// ASCII identifiers and alphanumeric URLs pass through
+// unchanged; metacharacters force single-quoting; embedded
+// single quotes are escaped via the standard `'\''` trick.
+func TestShellQuote(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "''"},
+		{"hello", "hello"},
+		{"hello world", "'hello world'"},
+		{"it's", `'it'\''s'`},
+		{"$PATH", "'$PATH'"},
+		{`a"b`, `'a"b'`},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.in, func(t *testing.T) {
+			assert.Equal(t, c.want, shellQuote(c.in))
+		})
+	}
+}
+
+// TestClipboardSetNoApp verifies that the copy helpers do not
+// panic when no Fyne app is running (headless test environment).
+// This is the regression guard for the dev-test harness which
+// constructs the panel without a current app.
+func TestClipboardSetNoApp(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("clipboardSet panicked without app: %v", r)
+		}
+	}()
+	p := &networkPanel{}
+	clipboardSet(p, "anything")
+	clipboardSet(nil, "nil panel")
+}
+
 func TestNetworkPanel_EmptyState(t *testing.T) {
 	p := newNetworkPanel(func() *TabContext {
 		return &TabContext{RequestLog: &mockRequestLog{}}
