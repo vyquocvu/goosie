@@ -17,6 +17,20 @@ Fyne provides the desktop window and input handling; page rendering is done by G
 - Built-in console, DOM inspector, network log, and storage tools
 - GUI and headless PNG rendering
 
+## Screenshots
+
+All of the following pages are rendered entirely by Goosie's own layout engine
+and CPU rasterizer—no embedded browser is involved.
+
+| | |
+|:---:|:---:|
+| ![Rendered web page (IANA example domains)](example-domains.png) | ![Long-form article rendering](docs/screenshots/long-page.png) |
+| *Live page fetched over HTTP and rendered* | *Long-form article with nested sections* |
+| ![Grid layout demo](docs/screenshots/grid-layout.png) | ![CSS styling demo](docs/screenshots/css-demo.png) |
+| *CSS Grid layout* | *CSS selectors, cascade, and styling* |
+| ![Form controls](docs/screenshots/forms.png) | ![Table layout](docs/screenshots/tables.png) |
+| *Form controls and inputs* | *HTML table layout* |
+
 ## Quick start
 
 Goosie requires Go 1.24.9 or newer.

@@ -34,7 +34,7 @@ go.work.sum
 Thumbs.db
 
 #test
-screenshots
+/screenshots
 screenshot.png
 roadmap_test_output
 
