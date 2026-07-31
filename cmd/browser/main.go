@@ -198,8 +198,20 @@ type pageLoadResult struct {
 func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session, networkService *net.Service, onComplete func()) {
 	log.Printf("Navigation %s started: %s", load.ID, load.URL)
 
+	url := load.URL
+
+	// Resolve the navigation target against the current page BEFORE
+	// recording it in browser state so path-only targets are stored and
+	// rendered as absolute URLs (scheme + host), never a bare path.
+	resolvedURL := url
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if renderer := activeTab.GetRenderer(); renderer != nil {
+			resolvedURL = renderer.ResolveURL(url)
+		}
+	}
+
 	// Update browser state on main thread
-	browser.NavigateTo(load.URL)
+	browser.NavigateTo(resolvedURL)
 
 	// Show loading indicator on main thread
 	browser.ShowLoading()
@@ -210,7 +222,6 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 	}
 
 	navID := load.ID
-	url := load.URL
 
 	// Launch background goroutine for fetch and render
 	go func() {
@@ -222,14 +233,6 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 
 		if !sess.IsActive(navID) {
 			return
-		}
-
-		// Resolve URL if it's relative or needs resolution
-		resolvedURL := url
-		if activeTab := browser.ActiveTab(); activeTab != nil {
-			if renderer := activeTab.GetRenderer(); renderer != nil {
-				resolvedURL = renderer.ResolveURL(url)
-			}
 		}
 
 		// Handle anchor links (scroll within current page)
@@ -376,7 +379,21 @@ func loadPageAsync(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser
 func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, load navigation.Load, ctx context.Context, sess *session.Session, networkService *net.Service, onComplete func()) {
 	log.Printf("Navigation %s (coordinator) started: %s", load.ID, load.URL)
 
-	browser.NavigateTo(load.URL)
+	url := load.URL
+
+	// Resolve the navigation target against the current page BEFORE
+	// recording it in browser state, so path-only targets (e.g. a click
+	// on <a href="/path"> that already resolved, or a programmatic
+	// window.location assignment) are stored and rendered as absolute
+	// URLs with a scheme and host — never as a bare path.
+	resolvedURL := url
+	if activeTab := browser.ActiveTab(); activeTab != nil {
+		if renderer := activeTab.GetRenderer(); renderer != nil {
+			resolvedURL = renderer.ResolveURL(url)
+		}
+	}
+
+	browser.NavigateTo(resolvedURL)
 	browser.ShowLoading()
 	if activeTab := browser.ActiveTab(); activeTab != nil {
 		if r := activeTab.GetRenderer(); r != nil {
@@ -385,7 +402,6 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 	}
 
 	navID := load.ID
-	url := load.URL
 
 	go func() {
 		defer func() {
@@ -396,13 +412,6 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 
 		if !sess.IsActive(navID) {
 			return
-		}
-
-		resolvedURL := url
-		if activeTab := browser.ActiveTab(); activeTab != nil {
-			if renderer := activeTab.GetRenderer(); renderer != nil {
-				resolvedURL = renderer.ResolveURL(url)
-			}
 		}
 
 		if strings.HasPrefix(url, "#") {

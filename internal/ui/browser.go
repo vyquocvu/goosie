@@ -815,76 +815,78 @@ func (t *Tab) RenderParsedContent(ctx context.Context, doc *html.Node, externalC
 
 // ensureHTMLRenderer initializes the lazy renderer on first use and
 // wires the navigation / inspect / refresh / context-menu callbacks.
-// Shared by RenderHTML and RenderParsedContent.
+// Shared by RenderHTML and RenderParsedContent. The current page URL is
+// synced into the renderer on every call (not just creation) so that
+// path-only hrefs (e.g. <a href="/path">) resolve against the page
+// being rendered — even when the renderer was created eagerly by
+// newTabInternal or a later navigation rendered a new page.
 func (t *Tab) ensureHTMLRenderer() {
-	if t.htmlRenderer != nil {
-		return
-	}
-	if t.browser.RendererFactory == nil {
-		// RenderHTML/RenderParsedContent will surface this as a render
-		// error on the next call; we keep the panic-free path here.
-		return
-	}
-	t.htmlRenderer = t.browser.RendererFactory()
 	if t.htmlRenderer == nil {
-		return
-	}
-	t.htmlRenderer.SetWindow(t.browser.window)
-	t.htmlRenderer.SetHeadless(t.browser.headless)
-	t.htmlRenderer.SetNavigationCallback(func(url string) {
-		if t.browser.onNavigate != nil {
-			t.browser.onNavigate(url)
+		if t.browser.RendererFactory == nil {
+			// RenderHTML/RenderParsedContent will surface this as a render
+			// error on the next call; we keep the panic-free path here.
+			return
 		}
-	})
-
-	// Set the current URL for resolving relative links
-	currentURL := t.state.GetCurrentURL()
-	t.htmlRenderer.SetCurrentURL(currentURL)
-
-	// Set up inspect callback
-	t.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
-		t.browser.do(func() {
-			if t.browser.devToolsVisible {
-				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
-				t.browser.inspectPanel.SetElement(node, layout)
-			}
-		})
-	})
-
-	// Set up right-click context menu callback. Marshalled onto the UI
-	// goroutine before showing the popup because fyne widgets must be
-	// touched from the main thread.
-	t.htmlRenderer.SetContextMenuCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
-		t.browser.do(func() {
-			if t.browser.devToolsMenu == nil {
-				return
-			}
-			t.browser.showDevToolsMenu(node, layout, abs)
-		})
-	})
-
-	// Set up refresh callback for the renderer
-	t.htmlRenderer.SetRefreshCallback(func() {
-		t.browser.do(func() {
-			// Trigger a refresh of the scroll container to show changes
-			refreshTabContent(t)
-			// Also refresh inspector if visible
-			if t.browser.devToolsVisible {
-				t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
-			}
-		})
-	})
-
-	// Sync Fyne scroll position with the renderer viewport so viewport
-	// culling and hit-testing follow the user's scroll.
-	t.contentScroll.OnScrolled = func(pos fyne.Position) {
+		t.htmlRenderer = t.browser.RendererFactory()
 		if t.htmlRenderer == nil {
 			return
 		}
-		scrollSize := t.contentScroll.Size()
-		t.htmlRenderer.SetViewport(pos.Y, scrollSize.Height)
-		refreshTabContent(t)
+		t.htmlRenderer.SetWindow(t.browser.window)
+		t.htmlRenderer.SetHeadless(t.browser.headless)
+		t.htmlRenderer.SetNavigationCallback(func(url string) {
+			if t.browser.onNavigate != nil {
+				t.browser.onNavigate(url)
+			}
+		})
+
+		// Set up inspect callback
+		t.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+			t.browser.do(func() {
+				if t.browser.devToolsVisible {
+					t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
+					t.browser.inspectPanel.SetElement(node, layout)
+				}
+			})
+		})
+
+		// Set up right-click context menu callback. Marshalled onto the UI
+		// goroutine before showing the popup because fyne widgets must be
+		// touched from the main thread.
+		t.htmlRenderer.SetContextMenuCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
+			t.browser.do(func() {
+				if t.browser.devToolsMenu == nil {
+					return
+				}
+				t.browser.showDevToolsMenu(node, layout, abs)
+			})
+		})
+
+		// Set up refresh callback for the renderer
+		t.htmlRenderer.SetRefreshCallback(func() {
+			t.browser.do(func() {
+				// Trigger a refresh of the scroll container to show changes
+				refreshTabContent(t)
+				// Also refresh inspector if visible
+				if t.browser.devToolsVisible {
+					t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
+				}
+			})
+		})
+
+		// Sync Fyne scroll position with the renderer viewport so viewport
+		// culling and hit-testing follow the user's scroll.
+		t.contentScroll.OnScrolled = func(pos fyne.Position) {
+			if t.htmlRenderer == nil {
+				return
+			}
+			scrollSize := t.contentScroll.Size()
+			t.htmlRenderer.SetViewport(pos.Y, scrollSize.Height)
+			refreshTabContent(t)
+		}
 	}
+
+	// Set the current URL for resolving relative links on every render.
+	t.htmlRenderer.SetCurrentURL(t.state.GetCurrentURL())
 }
 
 // publishCanvasObject installs the rendered canvas into the scroll
