@@ -1400,10 +1400,10 @@ func parseOklchColor(content string) (color.Color, error) {
 	r, g, bv := oklabToSrgb(l, a, b)
 
 	return color.RGBA{
-		R: uint8(clamp(r*255, 0, 255)),
-		G: uint8(clamp(g*255, 0, 255)),
-		B: uint8(clamp(bv*255, 0, 255)),
-		A: uint8(clamp(alpha*255, 0, 255)),
+		R: f32ToByte(r),
+		G: f32ToByte(g),
+		B: f32ToByte(bv),
+		A: f32ToByte(alpha),
 	}, nil
 }
 
@@ -1444,10 +1444,10 @@ func parseOklabColor(content string) (color.Color, error) {
 	r, g, bv := oklabToSrgb(l, a, b)
 
 	return color.RGBA{
-		R: uint8(clamp(r*255, 0, 255)),
-		G: uint8(clamp(g*255, 0, 255)),
-		B: uint8(clamp(bv*255, 0, 255)),
-		A: uint8(clamp(alpha*255, 0, 255)),
+		R: f32ToByte(r),
+		G: f32ToByte(g),
+		B: f32ToByte(bv),
+		A: f32ToByte(alpha),
 	}, nil
 }
 
@@ -1490,6 +1490,12 @@ func clamp(val, min, max float32) float32 {
 		return max
 	}
 	return val
+}
+
+// f32ToByte converts a normalized float in [0,1] to a byte channel, rounding
+// to the nearest integer like browsers do (rather than truncating).
+func f32ToByte(val float32) uint8 {
+	return uint8(clamp(float32(math.Round(float64(val*255))), 0, 255))
 }
 
 func parseHexColor(hex string) (color.Color, error) {

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
 // LayoutEngine handles layout calculations for render nodes
@@ -140,13 +142,16 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			layoutBox.Box.Height = calculatedHeight
 		}
 	} else if node.TagName == "img" {
-		// For img elements, fall back to HTML height attribute if CSS height is not set
+		// For img elements, fall back to HTML height attribute if CSS height is not set,
+		// then to the image's intrinsic height once it is loaded.
 		if hAttr, ok := node.GetAttribute("height"); ok && hAttr != "" {
 			if v := parseLength(hAttr, le.defaultFontSize); v > 0 {
 				layoutBox.Box.Height = v
 			} else {
 				layoutBox.Box.Height = calculatedHeight
 			}
+		} else if node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+			layoutBox.Box.Height = float32(node.ImageData.Height)
 		} else {
 			layoutBox.Box.Height = calculatedHeight
 		}
@@ -558,10 +563,34 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		}
 	}
 
+	fontSize := le.defaultFontSize
+	if node.ComputedStyle != nil && node.ComputedStyle.FontSize > 0 {
+		fontSize = node.ComputedStyle.FontSize
+	}
+
+	// Determine the used border-box width for margin:auto centering. In CSS,
+	// margin:auto distributes the remaining space around the full box
+	// (content + padding + border), not just the specified content width.
+	usedBoxWidth := float32(-1)
+	if explicitWidth >= 0 {
+		usedBoxWidth = explicitWidth
+		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing != "border-box" {
+			usedBoxWidth += layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
+		}
+	} else if node.ComputedStyle != nil && node.ComputedStyle.MaxWidth != "" && node.ComputedStyle.MaxWidth != "none" {
+		maxW := parseLengthWithViewport(node.ComputedStyle.MaxWidth, fontSize, le.canvasWidth, le.canvasHeight, availableWidth)
+		if maxW >= 0 {
+			usedBoxWidth = maxW
+			if node.ComputedStyle.BoxSizing != "border-box" {
+				usedBoxWidth += layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
+			}
+		}
+	}
+
 	// Handle margin: auto for block-level elements
-	if node.IsBlock() && explicitWidth >= 0 && explicitWidth < availableWidth {
+	if node.IsBlock() && usedBoxWidth >= 0 && usedBoxWidth < availableWidth {
 		if node.ComputedStyle != nil && (node.ComputedStyle.MarginLeft == "auto" || node.ComputedStyle.MarginRight == "auto") {
-			remainingSpace := availableWidth - explicitWidth
+			remainingSpace := availableWidth - usedBoxWidth
 			if node.ComputedStyle.MarginLeft == "auto" && node.ComputedStyle.MarginRight == "auto" {
 				// Center
 				marginLeft = remainingSpace / 2
@@ -592,6 +621,9 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		} else {
 			width = explicitWidth + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
+	} else if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+		// Use the image's intrinsic width when no CSS/HTML width is specified
+		width = float32(node.ImageData.Width)
 	} else if node.ComputedStyle != nil && (node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" || node.ComputedStyle.Display == "inline-block") {
 		// Float or Inline-Block with auto width: compute shrink-to-fit width
 		contentW := float32(0)
@@ -612,12 +644,9 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 				if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 					continue
 				}
-				childBox := le.buildLayoutBox(child, 0, 0, availableWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
-				if childBox != nil {
-					childW := childBox.Box.Width + childBox.MarginLeft + childBox.MarginRight
-					if childW > contentW {
-						contentW = childW
-					}
+				childW := le.measureMaxContentWidth(child, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				if childW > contentW {
+					contentW = childW
 				}
 			}
 		}
@@ -1174,6 +1203,64 @@ func (le *LayoutEngine) hasInlineContent(node *RenderNode) bool {
 	return le.hasInlineContentRecursive(node)
 }
 
+// measureMaxContentWidth computes the max-content width of a node: the width it
+// needs to lay out all its content on a single line without wrapping. This is
+// used for shrink-to-fit sizing of floats and inline-blocks whose children are
+// block-level boxes.
+func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
+	if node == nil {
+		return 0
+	}
+	if node.Type == NodeTypeText {
+		return 0
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+		return 0
+	}
+
+	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+		return float32(node.ImageData.Width)
+	}
+
+	var contentW float32
+	if le.hasInlineContent(node) {
+		wsMode := le.whiteSpaceModeForNode(node)
+		tempILE := NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize)
+		lines, _ := tempILE.LayoutInlineContent(node, 0, 0, 1e6, wsMode, nil)
+		for _, line := range lines {
+			if line.Width > contentW {
+				contentW = line.Width
+			}
+		}
+	} else {
+		for _, child := range node.Children {
+			if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+				continue
+			}
+			if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
+				continue
+			}
+			childW := le.measureMaxContentWidth(child, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+			// Float or inline-level children are placed side by side; block
+			// children stack, so the max-content width is the sum of floats
+			// on a line or the widest stacked block.
+			if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+				contentW += childW
+			} else if childW > contentW {
+				contentW = childW
+			}
+		}
+	}
+
+	// Include the box model (padding/border) for the node being measured.
+	if node.ComputedStyle != nil {
+		box := NewLayoutBox(node.ID)
+		le.applyBoxModel(node, box)
+		contentW += box.PaddingLeft + box.PaddingRight + box.BorderLeftWidth + box.BorderRightWidth
+	}
+	return contentW
+}
+
 // hasInlineContentRecursive recursively checks for inline content
 func (le *LayoutEngine) hasInlineContentRecursive(node *RenderNode) bool {
 	for _, child := range node.Children {
@@ -1192,6 +1279,11 @@ func (le *LayoutEngine) hasInlineContentRecursive(node *RenderNode) bool {
 				return true
 			}
 		} else if !child.IsBlock() {
+			if child.TagName == "img" || child.TagName == "svg" || child.TagName == "input" || child.TagName == "button" || child.TagName == "textarea" {
+				// Replaced elements (img, svg, form controls) are inline content:
+				// they have intrinsic dimensions that the inline layout engine sizes.
+				return true
+			}
 			// Inline element - check its children too
 			if le.hasInlineContentRecursive(child) {
 				return true

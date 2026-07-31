@@ -209,8 +209,9 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	// Load external CSS asynchronously (synchronously in testing mode)
 	if r.testingMode {
 		r.loadExternalCSS(ctx, doc)
-		// Re-read current layout tree since Refresh() updated it
+		// Re-read current render tree and layout tree since Refresh() re-cloned them
 		r.treeMu.RLock()
+		renderTree = r.currentRenderTree
 		layoutTree = r.currentLayoutTree
 		r.treeMu.RUnlock()
 	} else {

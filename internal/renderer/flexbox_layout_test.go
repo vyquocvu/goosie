@@ -212,6 +212,69 @@ func TestFlexLayoutFlexGrow(t *testing.T) {
 	}
 }
 
+func TestFlexLayoutFlexBasisZero(t *testing.T) {
+	htmlContent := `
+		<html>
+			<head>
+				<style>
+					.flex-container {
+						display: flex;
+						width: 300px;
+					}
+					.grow {
+						flex-grow: 1;
+						flex-basis: 0;
+						width: 250px;
+					}
+					.nogrow {
+						flex-grow: 0;
+						flex-basis: 0;
+						width: 250px;
+					}
+				</style>
+			</head>
+			<body>
+				<div class="flex-container">
+					<div class="grow">grow</div>
+					<div class="nogrow">nogrow</div>
+				</div>
+			</body>
+		</html>
+	`
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("html.Parse failed: %v", err)
+	}
+
+	stylesheet := extractAndParseCSS(doc)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	styleManager := NewStyleManager(stylesheet)
+	styleManager.ApplyStyles(renderTree)
+
+	layoutEngine := NewLayoutEngine(800, 600)
+	layoutEngine.ComputeLayout(renderTree)
+
+	grow := findLayoutByClass(t, layoutEngine, renderTree, "grow")
+	if grow == nil {
+		t.Fatal("grow item not found")
+	}
+	nogrow := findLayoutByClass(t, layoutEngine, renderTree, "nogrow")
+	if nogrow == nil {
+		t.Fatal("nogrow item not found")
+	}
+
+	// flex-basis: 0 with flex-grow: 1 should fill the remaining space (300px),
+	// ignoring the explicit width: 250px.
+	if grow.Box.Width < 299 || grow.Box.Width > 301 {
+		t.Errorf("grow item (flex-basis: 0, flex-grow: 1) width = %f; want ~300 (ignoring width: 250px)", grow.Box.Width)
+	}
+
+	// flex-basis: 0 with flex-grow: 0 should collapse to 0, ignoring width: 250px.
+	if nogrow.Box.Width != 0 {
+		t.Errorf("nogrow item (flex-basis: 0, flex-grow: 0) width = %f; want 0 (ignoring width: 250px)", nogrow.Box.Width)
+	}
+}
+
 func TestFlexLayoutDirection(t *testing.T) {
 	htmlContent := `
 		<html>

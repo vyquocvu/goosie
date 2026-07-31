@@ -222,8 +222,13 @@ func decodeSVG(data []byte) (*ImageData, error) {
 		return nil, fmt.Errorf("svg parse: %w", err)
 	}
 
+	// Prefer the SVG's width/height attributes (matching browsers) over the
+	// viewBox when they are present and valid.
 	w := int(icon.ViewBox.W)
 	h := int(icon.ViewBox.H)
+	if aw, ah, ok := parseSVGIntrinsicSize(data); ok {
+		w, h = aw, ah
+	}
 	if w <= 0 {
 		w = 100
 	}
@@ -247,6 +252,125 @@ func decodeSVG(data []byte) (*ImageData, error) {
 		Format: "svg",
 		State:  StateLoaded,
 	}, nil
+}
+
+// parseSVGIntrinsicSize extracts the width and height attributes from an SVG
+// document's root <svg> element. Length units other than px are ignored
+// (viewBox is used as the fallback in that case). Returns false when either
+// attribute is missing or invalid.
+func parseSVGIntrinsicSize(data []byte) (int, int, bool) {
+	open := bytes.Index(data, []byte("<svg"))
+	if open < 0 {
+		return 0, 0, false
+	}
+	tag := data[open:]
+	close := bytes.IndexByte(tag, '>')
+	if close < 0 {
+		return 0, 0, false
+	}
+	tag = tag[:close]
+
+	wStr := extractSVGAttribute(tag, "width")
+	hStr := extractSVGAttribute(tag, "height")
+	if wStr == "" || hStr == "" {
+		return 0, 0, false
+	}
+	w := parseSVGLength(wStr)
+	h := parseSVGLength(hStr)
+	if w <= 0 || h <= 0 {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
+// extractSVGAttribute returns the value of a quoted attribute within an SVG
+// element tag, or "" if absent. Attribute names are matched case-insensitively
+// (SVG attribute names are case-sensitive, but real-world documents
+// occasionally uppercase them, and browsers treat XML attributes case-sensitively
+// while tolerating these variants).
+func extractSVGAttribute(tag []byte, name string) string {
+	lowerTag := bytes.ToLower(tag)
+	lowerName := strings.ToLower(name)
+	idx := 0
+	for {
+		pos := bytes.Index(lowerTag[idx:], []byte(lowerName))
+		if pos < 0 {
+			return ""
+		}
+		pos += idx
+		// Ensure it's a full attribute name (followed by optional whitespace/=)
+		if pos+len(lowerName) < len(tag) {
+			next := tag[pos+len(lowerName)]
+			if next != '=' && next != ' ' && next != '\t' && next != '\n' {
+				idx = pos + len(lowerName)
+				continue
+			}
+		}
+		eq := bytes.IndexByte(tag[pos:], '=')
+		if eq < 0 {
+			return ""
+		}
+		valStart := pos + eq + 1
+		for valStart < len(tag) && (tag[valStart] == ' ' || tag[valStart] == '\t') {
+			valStart++
+		}
+		if valStart >= len(tag) {
+			return ""
+		}
+		var val []byte
+		if tag[valStart] == '"' || tag[valStart] == '\'' {
+			q := tag[valStart]
+			end := bytes.IndexByte(tag[valStart+1:], q)
+			if end < 0 {
+				return ""
+			}
+			val = tag[valStart+1 : valStart+1+end]
+		} else {
+			end := valStart
+			for end < len(tag) && tag[end] != ' ' && tag[end] != '\t' && tag[end] != '>' && tag[end] != '/' {
+				end++
+			}
+			val = tag[valStart:end]
+		}
+		return string(val)
+	}
+}
+
+// parseSVGLength parses a CSS-like length. Returns the value in pixels when it
+// is unitless or has a px unit; returns <= 0 otherwise.
+func parseSVGLength(s string) int {
+	s = strings.TrimSpace(s)
+	lower := strings.ToLower(s)
+	num := s
+	scale := float64(1)
+	switch {
+	case strings.HasSuffix(lower, "px"):
+		num = strings.TrimSpace(lower[:len(lower)-2])
+	case strings.HasSuffix(lower, "pt"):
+		num = strings.TrimSpace(lower[:len(lower)-2])
+		scale = 96.0 / 72.0
+	case strings.HasSuffix(lower, "pc"):
+		num = strings.TrimSpace(lower[:len(lower)-2])
+		scale = 16
+	case strings.HasSuffix(lower, "mm"):
+		num = strings.TrimSpace(lower[:len(lower)-2])
+		scale = 96.0 / 25.4
+	case strings.HasSuffix(lower, "cm"):
+		num = strings.TrimSpace(lower[:len(lower)-2])
+		scale = 96.0 / 2.54
+	case strings.HasSuffix(lower, "in"):
+		num = strings.TrimSpace(lower[:len(lower)-2])
+		scale = 96
+	default:
+		if strings.HasSuffix(lower, "%") || strings.HasSuffix(lower, "em") || strings.HasSuffix(lower, "rem") || strings.HasSuffix(lower, "vw") || strings.HasSuffix(lower, "vh") {
+			return -1
+		}
+	}
+	v, err := strconv.ParseFloat(num, 64)
+	if err != nil || v < 0 {
+		return -1
+	}
+	return int(v * scale)
 }
 
 // loadFromDataURI loads an image from a data URI

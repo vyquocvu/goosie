@@ -26,6 +26,7 @@ type flexItem struct {
 	flexGrow   float32
 	flexShrink float32
 	flexBasis  float32
+	basisSet   bool // true when flex-basis was explicitly specified (including 0)
 	order      int
 }
 
@@ -174,7 +175,6 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 			layoutBox:  childBox,
 			flexGrow:   0,
 			flexShrink: 1, // Default shrink is 1
-			flexBasis:  0, // 0 means auto
 			order:      0,
 		}
 
@@ -186,22 +186,24 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 			}
 			item.order = child.ComputedStyle.Order
 
-			// Parse flex-basis
+			// Parse flex-basis: "auto" (or empty) means fall back to width/height;
+			// an explicit length (including 0) overrides the natural size.
 			if child.ComputedStyle.FlexBasis != "" && child.ComputedStyle.FlexBasis != "auto" {
 				item.flexBasis = parseLength(child.ComputedStyle.FlexBasis, 16)
+				item.basisSet = true
 			}
 		}
 
 		// Calculate main and cross sizes
 		if isRow {
-			if item.flexBasis > 0 {
+			if item.basisSet {
 				item.mainSize = item.flexBasis
 			} else {
 				item.mainSize = childBox.Box.Width
 			}
 			item.crossSize = childBox.Box.Height
 		} else {
-			if item.flexBasis > 0 {
+			if item.basisSet {
 				item.mainSize = item.flexBasis
 			} else {
 				item.mainSize = childBox.Box.Height
