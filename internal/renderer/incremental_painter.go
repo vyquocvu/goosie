@@ -18,10 +18,7 @@ type IncrementalPainter struct {
 }
 
 func NewIncrementalPainter(width, height int) (*IncrementalPainter, error) {
-	backend, _, err := raster.NewBackend(width, height)
-	if err != nil {
-		return nil, err
-	}
+	backend := raster.NewCPUBackend(width, height)
 	return &IncrementalPainter{
 		backend:  backend,
 		viewport: frame.NewViewport(float32(width), float32(height), frame.PixelScaleDefault),
@@ -92,6 +89,18 @@ func (p *IncrementalPainter) paintBackground(dirty []frame.Rect) error {
 		}
 	}
 	return nil
+}
+
+// Present pushes the most recent frame buffer to the supplied Fyne adapter
+// when one is configured. The painter owns the raster output; callers should
+// invoke Present after PaintFull or PaintDirty.
+func (p *IncrementalPainter) Present(adapter *FyneAdapter) {
+	if p == nil || adapter == nil || p.backend == nil {
+		return
+	}
+	if cpu, ok := p.backend.(*raster.CPUBackend); ok {
+		adapter.PresentFrame(cpu.FrameBuffer())
+	}
 }
 
 // DirtyRect unions chunk bounds into a single dirty rect for raster clipping.

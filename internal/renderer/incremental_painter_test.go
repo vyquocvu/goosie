@@ -37,6 +37,22 @@ func TestIncrementalPainterPaintFull(t *testing.T) {
 	}
 }
 
+func TestIncrementalPainterPresentPushesFrame(t *testing.T) {
+	p, err := NewIncrementalPainter(64, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	adapter := NewFyneAdapter()
+	if _, err := p.PaintFull(makeTestCommands()); err != nil {
+		t.Fatal(err)
+	}
+	p.Present(adapter)
+	if adapter.CurrentFrame() == nil {
+		t.Fatal("expected frame buffer to be presented")
+	}
+}
+
 func TestIncrementalPainterPaintDirtyLimitsDirtyRects(t *testing.T) {
 	p, err := NewIncrementalPainter(200, 200)
 	if err != nil {
