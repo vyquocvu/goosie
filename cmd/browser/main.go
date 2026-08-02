@@ -573,9 +573,9 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	// Buffer async scripts that arrive early, execute them once
 	// the runtime is created.
 	var (
-		asyncMu           sync.Mutex
-		preRuntimeAsync   []documentloader.ScriptResult
-		jsRuntimeReady    bool
+		asyncMu         sync.Mutex
+		preRuntimeAsync []documentloader.ScriptResult
+		jsRuntimeReady  bool
 	)
 	coord, err := documentloader.New(documentloader.Options{
 		NavigationID:      load.ID,
@@ -610,29 +610,29 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 					}
 				}
 			},
-OnScript: func(r documentloader.ScriptResult) {
-			scriptResults = append(scriptResults, r)
-			if r.Mode != documentloader.ScriptModeAsync || r.Source == nil {
-				return
-			}
-			if !sess.IsActive(navID) {
-				return
-			}
-			asyncMu.Lock()
-			if !jsRuntimeReady {
-				preRuntimeAsync = append(preRuntimeAsync, r)
+			OnScript: func(r documentloader.ScriptResult) {
+				scriptResults = append(scriptResults, r)
+				if r.Mode != documentloader.ScriptModeAsync || r.Source == nil {
+					return
+				}
+				if !sess.IsActive(navID) {
+					return
+				}
+				asyncMu.Lock()
+				if !jsRuntimeReady {
+					preRuntimeAsync = append(preRuntimeAsync, r)
+					asyncMu.Unlock()
+					return
+				}
 				asyncMu.Unlock()
-				return
-			}
-			asyncMu.Unlock()
-			if t := browser.ActiveTab(); t != nil {
-				if rt := t.GetJSRuntime(); rt != nil {
-					if _, err := rt.RunScript(string(r.Source)); err != nil {
-						log.Printf("Error running async script %s: %v", r.Resolved, err)
+				if t := browser.ActiveTab(); t != nil {
+					if rt := t.GetJSRuntime(); rt != nil {
+						if _, err := rt.RunScript(string(r.Source)); err != nil {
+							log.Printf("Error running async script %s: %v", r.Resolved, err)
+						}
 					}
 				}
-			}
-		},
+			},
 			OnImage: func(r documentloader.ImageResult) {
 				log.Printf("CSS-nested image fetched: %s (%d bytes)", r.Resolved, len(r.Source))
 			},
@@ -780,6 +780,12 @@ OnScript: func(r documentloader.ScriptResult) {
 			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
 		}
 		jsRuntime.SetHTMLContent(html)
+		if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
+			lookup := renderer.NewNodeIDLookup()
+			lookup.Snapshot(r.GetRoot())
+			sink := renderer.NewMutationSinkWithAdapter(r, lookup, nil)
+			jsRuntime.SetDOMMutationBatchCallback(sink.Handle)
+		}
 		// M6 mutation handling: coalesce a burst of JS DOM mutations
 		// into a single render via documentloader's MutationCoalescer,
 		// then re-render using the snapshot entry point (RenderParsed)
@@ -1094,6 +1100,12 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 
 		// Set HTML content for JS runtime (enables document.getElementById etc.)
 		jsRuntime.SetHTMLContent(html)
+		if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
+			lookup := renderer.NewNodeIDLookup()
+			lookup.Snapshot(r.GetRoot())
+			sink := renderer.NewMutationSinkWithAdapter(r, lookup, nil)
+			jsRuntime.SetDOMMutationBatchCallback(sink.Handle)
+		}
 
 		// Parse page URL for CSP enforcement.
 		baseURL, _ := urlpkg.Parse(url)
