@@ -43,13 +43,27 @@ func TestIncrementalPainterPaintDirtyLimitsDirtyRects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	dirty := []frame.Rect{{X: 10, Y: 10, W: 50, H: 50}}
-	img, err := p.PaintDirty(nil, makeTestCommands(), dirty)
+	chunks := []PaintChunk{
+		{Owner: LayoutID(1), Start: 0, End: 1, Bounds: RectF{X: 10, Y: 10, W: 50, H: 50}, dirty: true},
+	}
+	img, err := p.PaintDirty(chunks, makeTestCommands())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if img == nil {
 		t.Fatal("expected non-nil image from dirty paint")
+	}
+}
+
+func TestDirtyRectUnionsChunkBounds(t *testing.T) {
+	chunks := []PaintChunk{
+		{Owner: LayoutID(1), Start: 0, End: 1, Bounds: RectF{X: 0, Y: 0, W: 50, H: 50}, dirty: true},
+		{Owner: LayoutID(2), Start: 1, End: 2, Bounds: RectF{X: 60, Y: 70, W: 30, H: 30}},
+		{Owner: LayoutID(3), Start: 2, End: 3, Bounds: RectF{X: 80, Y: 90, W: 40, H: 40}, dirty: true},
+	}
+	dirty := DirtyRect(chunks)
+	if dirty.W != 120 || dirty.H != 130 {
+		t.Fatalf("expected union bounds, got %+v", dirty)
 	}
 }
 
@@ -76,11 +90,13 @@ func BenchmarkIncrementalPainterPaintDirty(b *testing.B) {
 	}
 	defer p.Close()
 	cmds := makeTestCommands()
-	dirty := []frame.Rect{{X: 10, Y: 10, W: 50, H: 50}}
+	chunks := []PaintChunk{
+		{Owner: LayoutID(1), Start: 0, End: 1, Bounds: RectF{X: 10, Y: 10, W: 50, H: 50}, dirty: true},
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := p.PaintDirty(nil, cmds, dirty); err != nil {
+		if _, err := p.PaintDirty(chunks, cmds); err != nil {
 			b.Fatal(err)
 		}
 	}

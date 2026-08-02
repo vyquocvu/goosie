@@ -37,24 +37,26 @@ func (p *IncrementalPainter) Close() error {
 	return p.backend.Close()
 }
 
-func (p *IncrementalPainter) PaintDirty(chunks []PaintChunk, cmds []raster.DisplayCmd, dirty []frame.Rect) (image.Image, error) {
+func (p *IncrementalPainter) PaintDirty(chunks []PaintChunk, cmds []raster.DisplayCmd) (image.Image, error) {
 	if p == nil || p.backend == nil {
 		return nil, nil
 	}
+	dirty := DirtyRect(chunks)
 	if err := p.backend.BeginFrame(p.viewport); err != nil {
 		return nil, err
 	}
-	if err := p.paintBackground(dirty); err != nil {
-		return nil, err
+	if !dirty.IsEmpty() {
+		if err := p.paintBackground([]frame.Rect{dirty}); err != nil {
+			return nil, err
+		}
 	}
-	img, err := p.backend.Rasterize(cmds, dirty)
+	img, err := p.backend.Rasterize(cmds, []frame.Rect{dirty})
 	if err != nil {
 		return nil, err
 	}
 	if err := p.backend.EndFrame(); err != nil {
 		return nil, err
 	}
-	_ = chunks
 	return img, nil
 }
 
@@ -90,4 +92,23 @@ func (p *IncrementalPainter) paintBackground(dirty []frame.Rect) error {
 		}
 	}
 	return nil
+}
+
+// DirtyRect unions chunk bounds into a single dirty rect for raster clipping.
+func DirtyRect(chunks []PaintChunk) frame.Rect {
+	var dirty frame.Rect
+	initialized := false
+	for _, chunk := range chunks {
+		if !chunk.dirty {
+			continue
+		}
+		bounds := frame.Rect{X: chunk.Bounds.X, Y: chunk.Bounds.Y, W: chunk.Bounds.W, H: chunk.Bounds.H}
+		if !initialized {
+			dirty = bounds
+			initialized = true
+			continue
+		}
+		dirty = dirty.Union(bounds)
+	}
+	return dirty
 }
