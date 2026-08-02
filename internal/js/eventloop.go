@@ -62,8 +62,9 @@ type EventLoop struct {
 	maxTimer int
 
 	// DOM mutation batching.
-	pendingMutations int
-	onFlushMutations func() // called after each task to flush DOM mutations
+	pendingMutations     int
+	onFlushMutations     func() // called after each task to flush DOM mutations
+	onFlushMutationBatch func([]DOMMutation)
 
 	// Context for shutdown.
 	ctx    context.Context
@@ -120,9 +121,11 @@ func (el *EventLoop) SetMutationFlush(fn func()) {
 	el.onFlushMutations = fn
 }
 
-// ---------------------------------------------------------------------------
-// Task scheduling
-// ---------------------------------------------------------------------------
+func (el *EventLoop) SetMutationBatchFlush(fn func([]DOMMutation)) {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	el.onFlushMutationBatch = fn
+}
 
 // QueueTask enqueues a macrotask. Returns false if the queue is full.
 func (el *EventLoop) QueueTask(fn TaskCallback) bool {
@@ -268,14 +271,21 @@ func (el *EventLoop) RunOnce() bool {
 	el.mu.Lock()
 	hasMutations := el.pendingMutations > 0
 	flushFn := el.onFlushMutations
+	batchFn := el.onFlushMutationBatch
+	mutationCount := el.pendingMutations
 	if hasMutations {
 		el.pendingMutations = 0
 		el.mutationBatches.Add(1)
 	}
 	el.mu.Unlock()
 
-	if hasMutations && flushFn != nil {
-		flushFn()
+	if hasMutations {
+		if flushFn != nil {
+			flushFn()
+		}
+		if batchFn != nil {
+			batchFn([]DOMMutation{{Kind: MutationBatch, Count: mutationCount}})
+		}
 	}
 
 	return didWork

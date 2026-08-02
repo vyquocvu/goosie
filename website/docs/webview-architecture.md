@@ -26,19 +26,19 @@ HTML Tokenization + Tree Building ──► DOM construction (internal/dom)
   │       → HTTP fetch
   │       → CSS parse / CSSOM rule storage (internal/css)
   │       → style invalidation ───────────────────────────────┐
-  │                                                          │
-  ├── <script src="...">                                    │
-  │     resolve against document URL                         │
+  │                                                           │
+  ├── <script src="...">                                      │
+  │     resolve against document URL                          │
   │       → CSP script-src check                              │
-  │       → schedule using blocking / defer / async semantics│
+  │       → schedule using blocking / defer / async semantics │
   │       → HTTP fetch → decode / compile → execute (internal/js)
-  │       → DOM or CSSOM mutation ───────────────────────────┤
-  │                                                          │
-  ├── <style> → CSS parse / CSSOM rule storage ──────────────┤
-  ├── inline <script> → CSP check → execute ─────────────────┤
-  └── images / fonts / other resources → fetch + decode      │
-                                                             │
-  ┌──────────────────────────────────────────────────────────┘
+  │       → DOM or CSSOM mutation ────────────────────────────┤
+  │                                                           │
+  ├── <style> → CSS parse / CSSOM rule storage ───────────────┤
+  ├── inline <script> → CSP check → execute ──────────────────┤
+  └── images / fonts / other resources → fetch + decode       │
+                                                              │
+  ┌───────────────────────────────────────────────────────────┘
   ▼
 DOM + CSSOM / Stylesheet Storage ► Compact index-based DOM store (ADR 0001)
   │                                 Computed-style pool (internal/css)
@@ -249,3 +249,134 @@ The headless variant (`cmd/headless`) enables scripted rendering without opening
 | `package-ownership.md` | Package boundaries, responsibilities, import rules |
 | `adr/0003-raster-backend-boundaries.md` | ADR for raster backend interface and selection |
 | `supported-web-platform.md` | Supported HTML/CSS/JS feature matrix |
+
+---
+
+## 7. Incremental Interaction and Render Architecture
+
+Goosie must use a retained, incremental pipeline rather than treating HTML serialization as the runtime DOM protocol. The goal is to outperform Blink for its target workload: fast startup, predictable resource usage, headless rendering, automation, and pages within the supported platform subset.
+
+### Runtime Pipeline
+
+```text
+Input / navigation
+  │
+  ├── high-priority input queue
+  ├── navigation and resource scheduler
+  └── JavaScript event loop
+        │
+        ▼
+Live index-based DOM store ◄── typed mutation records
+        │
+        ├── CSS invalidation
+        ├── incremental style resolution
+        ├── smallest valid layout/reflow roots
+        ├── dirty display-list chunks
+        └── dirty raster tiles
+                 │
+                 ▼
+          compositor / tile cache
+                 │
+                 ▼
+          Fyne pixel presentation
+```
+
+JavaScript DOM operations must mutate the live Go DOM through stable `NodeID` handles. The normal mutation path must not serialize the entire DOM, parse HTML again, or refetch unchanged resources. Full serialization remains available for debugging, snapshots, and compatibility fallback only.
+
+### Mutation Batches
+
+The event loop runs one render transaction after a macrotask and its microtasks complete. Multiple DOM operations in one task produce one typed batch:
+
+```go
+type MutationRecord struct {
+    Kind      MutationKind
+    Target    dom.NodeID
+    Parent    dom.NodeID
+    Attribute string
+    OldValue  string
+    NewValue  string
+    Added     []dom.NodeID
+    Removed   []dom.NodeID
+}
+```
+
+The mutation batch is classified before rendering:
+
+| Mutation | Minimum work |
+|---|---|
+| Color, background, focus outline | Repaint affected chunks |
+| Text content | Text layout and repaint |
+| Class, ID, or style attribute | Selector/style invalidation |
+| Width, height, margin, font, text wrapping | Incremental reflow and repaint |
+| Child insertion or removal | Parent/subtree reflow and dirty old bounds |
+| Transform or opacity | Compositor update when layer-safe |
+| Data attribute or event listener | JavaScript state only |
+
+DOM state changes are synchronous and immediately observable by JavaScript. Style, layout, paint, and raster work are deferred until the transaction flush. APIs such as `getBoundingClientRect()` may force a targeted layout flush when required for correctness.
+
+### User Interaction
+
+Input must be separated from document rendering:
+
+```text
+Fyne event
+  ▼
+Input router
+  ├── scroll → compositor viewport transform
+  ├── pointer down → hit test and pointer capture
+  ├── pointer move → captured target or selection update
+  ├── pointer up → click/drag completion
+  └── keyboard → focused DOM node and JavaScript event dispatch
+```
+
+High-frequency scroll and pointer-move events use latest-value coalescing. Clicks, pointer-up events, and key events are never dropped. Pointer capture avoids repeated full-tree hit testing during drag operations.
+
+Scrolling must not traverse the DOM or recompute layout. The compositor updates the viewport transform immediately, reuses visible display-list and raster tiles, and schedules only newly exposed tiles. Selection and caret movement invalidate only their old and new overlay rectangles.
+
+### Parallel Go Execution Model
+
+Use one owner for mutable document state and bounded workers for independent work:
+
+```text
+Document owner goroutine
+  ├── JS tasks and DOM mutations
+  ├── style invalidation decisions
+  └── frame transaction assembly
+
+Worker pools
+  ├── CSS/script/image/font fetch and decode
+  ├── selector matching and style computation
+  ├── independent layout subtrees
+  ├── display-list chunk construction
+  └── dirty tile rasterization
+```
+
+Workers communicate with immutable inputs and typed results. The document owner applies results in document order and drops results from stale navigation revisions. This provides concurrency without allowing unsynchronized DOM mutation.
+
+### Browser Engine Comparison
+
+Blink, WebKit, and Gecko retain DOM, style, layout, display-list, layer, and tile structures and invalidate them incrementally. Goosie follows the same proven model but can be more efficient for its target scope by avoiding a large multi-process compatibility stack, using compact index-based storage, making scheduling explicit, and supporting pure-Go headless execution.
+
+Goosie should not attempt to beat Blink on general web compatibility. It should beat Blink on measurable target workloads:
+
+- time to first useful frame;
+- interaction latency during scroll and DOM mutation bursts;
+- memory per page and per tab;
+- headless startup and screenshot throughput;
+- deterministic cancellation and stale-work elimination;
+- automation round-trip latency;
+- CPU cost for supported HTML/CSS/JS pages.
+
+Every optimization must be validated with phase metrics, benchmarks, `go test -race`, CPU profiles, heap profiles, and visual comparison fixtures. The primary acceptance rule is that user interaction remains responsive while script, resource loading, layout, and raster workers are active.
+
+### Implementation Priorities
+
+1. Replace the JS `func(string)` mutation callback with typed mutation batches.
+2. Stop serializing and reparsing HTML after normal DOM mutations.
+3. Connect CSS invalidation to `renderer.ReflowTracker` and dirty display chunks.
+4. Add one frame scheduler that coalesces mutations and input at frame rate.
+5. Keep scroll, transforms, selection, and caret updates on compositor/overlay paths.
+6. Add prioritized tile rasterization and stale revision cancellation.
+7. Measure against Blink using first-paint, input-latency, memory, and throughput fixtures.
+
+The architectural rule is: HTML is an input format, not a runtime update format; interaction is state plus invalidation, not a full document render.

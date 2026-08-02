@@ -102,12 +102,13 @@ type Runtime struct {
 	// execution via goja's interrupt mechanism when the script runs
 	// longer than this budget. A non-positive value disables the
 	// budget (the historical default).
-	maxTaskDuration time.Duration
+	maxTaskDuration  time.Duration
 	interruptedCount atomic.Uint64
 	// HTTP fetcher for the fetch() API
-	fetcher           HTTPFetcher
-	isPopulatingJSDOM bool
-	onDOMMutation     func(string)
+	fetcher            HTTPFetcher
+	isPopulatingJSDOM  bool
+	onDOMMutation      func(string)
+	onDOMMutationBatch func([]DOMMutation)
 	// enqueueTask allows routing asynchronous callbacks back to the owner goroutine.
 	enqueueTask func(func())
 	// OnOpenWindow is called when JS calls window.open() and the popup
@@ -1248,8 +1249,11 @@ func (r *Runtime) setupDocumentAPI() {
 		if r.isPopulatingJSDOM {
 			return
 		}
-		r.serializeJSDOMToCache()
+		if r.onDOMMutationBatch != nil {
+			r.onDOMMutationBatch([]DOMMutation{{Kind: MutationBatch, Count: 1}})
+		}
 		if r.onDOMMutation != nil {
+			r.serializeJSDOMToCache()
 			r.onDOMMutation(r.htmlCache)
 		}
 	})
@@ -2928,9 +2932,12 @@ func (r *Runtime) installFrameScheduler() {
 	r.vm.Set("window.cancelAnimationFrame", cancel)
 }
 
-// SetDOMMutationCallback sets a callback for when the JS DOM tree is mutated
 func (r *Runtime) SetDOMMutationCallback(callback func(string)) {
 	r.onDOMMutation = callback
+}
+
+func (r *Runtime) SetDOMMutationBatchCallback(callback func([]DOMMutation)) {
+	r.onDOMMutationBatch = callback
 }
 
 func (r *Runtime) serializeJSDOMToCache() {

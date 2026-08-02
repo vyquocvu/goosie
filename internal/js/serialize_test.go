@@ -101,3 +101,19 @@ func TestProxy_StyleAssignmentDoesNotPolluteAttributes(t *testing.T) {
 	assert.Equal(t, "clean", v.String(),
 		"element.attributes must not contain a 'style' key after construction")
 }
+
+func TestDOMMutationBatchCallbackSkipsSerialization(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetHTMLContent(`<html><body><div>before</div></body></html>`)
+	before := rt.htmlCache
+
+	var batches []DOMMutation
+	rt.SetDOMMutationBatchCallback(func(batch []DOMMutation) {
+		batches = append(batches, batch...)
+	})
+
+	_, err := rt.RunScript(`document.body.firstChild.textContent = "after"`)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, batches)
+	assert.Equal(t, before, rt.htmlCache)
+}

@@ -233,6 +233,27 @@ func TestEventLoop_MutationBatching(t *testing.T) {
 	}
 }
 
+func TestEventLoop_TypedMutationBatch(t *testing.T) {
+	el := NewEventLoop(DefaultEventLoopConfig())
+
+	var got []DOMMutation
+	el.SetMutationBatchFlush(func(batch []DOMMutation) {
+		got = batch
+	})
+	el.QueueTask(func() {
+		el.RecordMutation()
+		el.RecordMutation()
+	})
+
+	el.RunOnce()
+
+	if len(got) != 1 {
+		t.Fatalf("batch length = %d, want 1", len(got))
+	}
+	if got[0].Kind != MutationBatch || got[0].Count != 2 {
+		t.Fatalf("batch = %#v, want kind=%v count=2", got[0], MutationBatch)
+	}
+}
 func TestEventLoop_NoFlushWithoutMutations(t *testing.T) {
 	el := NewEventLoop(DefaultEventLoopConfig())
 
