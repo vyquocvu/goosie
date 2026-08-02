@@ -68,6 +68,29 @@ func BenchmarkMutationSinkAttributeMutation(b *testing.B) {
 	}
 }
 
+func TestMutationSinkWithAdapterPresentsFrame(t *testing.T) {
+	r := NewRenderer(200, 200)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target" __goosie_id="100">before</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := NewNodeIDLookup()
+	lookup.Snapshot(r.GetRoot())
+	r.chunkedDisplay.chunks.Add(PaintChunk{Owner: LayoutID(100), Start: 0, End: 1, Bounds: RectF{X: 0, Y: 0, W: 50, H: 50}})
+	r.chunkedDisplay.commands.Add(DisplayCommand{Kind: CmdRect, Rect: RectCommand{Bounds: RectF{X: 0, Y: 0, W: 200, H: 200}}})
+	adapter := NewFyneAdapter()
+	sink := NewMutationSinkWithAdapter(r, lookup, adapter)
+	sink.Handle([]js.DOMMutation{{
+		Kind:      js.MutationSetAttribute,
+		TargetID:  "100",
+		Attribute: "data-state",
+		NewValue:  "ready",
+	}})
+	if adapter.CurrentFrame() == nil {
+		t.Fatal("expected adapter to receive a frame")
+	}
+}
+
 func TestNodeIDLookupBidirectional(t *testing.T) {
 	lookup := NewNodeIDLookup()
 	lookup.Bind("42", 1001)

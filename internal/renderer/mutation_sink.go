@@ -4,10 +4,13 @@ import "github.com/vyquocvu/goosie/internal/js"
 
 // MutationSink is the typed seam that consumes JS DOM mutation batches and
 // routes them into the renderer's invalidation tracker without re-serializing
-// the document.
+// the document. When an adapter is supplied, the sink also requests a
+// present after invalidating paint chunks so dirty pixels reach the Fyne
+// canvas in a single chain.
 type MutationSink struct {
 	r       *Renderer
 	store   *NodeIDLookup
+	adapter *FyneAdapter
 	present func()
 }
 
@@ -16,6 +19,15 @@ func NewMutationSink(r *Renderer, store *NodeIDLookup, present func()) *Mutation
 		present = func() {}
 	}
 	return &MutationSink{r: r, store: store, present: present}
+}
+
+// NewMutationSinkWithAdapter wires the sink to a FyneAdapter so the
+// present path can drive IncrementalPainter + FyneAdapter.PresentFrame
+// without any caller-provided closure.
+func NewMutationSinkWithAdapter(r *Renderer, store *NodeIDLookup, adapter *FyneAdapter) *MutationSink {
+	sink := &MutationSink{r: r, store: store, adapter: adapter}
+	sink.present = func() { sink.r.PresentFromMutationBatch(adapter) }
+	return sink
 }
 
 func (s *MutationSink) Handle(batch []js.DOMMutation) {
