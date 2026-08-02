@@ -327,6 +327,27 @@ func TestRendererInvalidatePaintChunksMarksDirty(t *testing.T) {
 	}
 }
 
+func TestRendererPresentFromMutationBatch(t *testing.T) {
+	r := NewRenderer(200, 200)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target">v</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.chunkedDisplay.chunks.Add(PaintChunk{Owner: LayoutID(1), Start: 0, End: 1, Bounds: RectF{X: 0, Y: 0, W: 50, H: 50}})
+	r.chunkedDisplay.chunks.Add(PaintChunk{Owner: LayoutID(2), Start: 1, End: 2, Bounds: RectF{X: 60, Y: 70, W: 30, H: 30}})
+	r.chunkedDisplay.commands.Add(DisplayCommand{Kind: CmdRect, Rect: RectCommand{Bounds: RectF{X: 0, Y: 0, W: 200, H: 200}}})
+	adapter := NewFyneAdapter()
+	if !r.PresentFromMutationBatch(adapter) {
+		t.Fatal("expected PresentFromMutationBatch to return true")
+	}
+	if adapter.CurrentFrame() == nil {
+		t.Fatal("expected adapter to receive a frame")
+	}
+	if r.chunkedDisplay.DirtyChunkCount() != 0 {
+		t.Fatal("expected chunks to be marked clean after present")
+	}
+}
+
 func TestRendererPartialReflowPreservesLayout(t *testing.T) {
 	r := NewRenderer(800, 600)
 	_, err := r.RenderHTML(context.Background(), `<html><body><div id="a">a</div><div id="b">b</div></body></html>`)

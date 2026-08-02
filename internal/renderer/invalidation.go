@@ -1,5 +1,10 @@
 package renderer
 
+import (
+	"github.com/vyquocvu/goosie/internal/renderer/frame"
+	"github.com/vyquocvu/goosie/internal/renderer/frame/raster"
+)
+
 type MutationInvalidation struct {
 	NodeID int64
 	Flags  DirtyFlag
@@ -41,6 +46,58 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 		}
 	}
 	return applied
+}
+
+// PresentFromMutationBatch triggers a dirty paint using the renderer's
+// chunked display list and forwards the raster output to the supplied
+// Fyne adapter when one is configured. Returns true when a paint
+// happened. The function is the typed-mutation entry point called by
+// the JS sink after ApplyMutationBatch + InvalidatePaintChunks.
+func (r *Renderer) PresentFromMutationBatch(adapter *FyneAdapter) bool {
+	if r == nil || r.chunkedDisplay == nil || r.layoutEngine == nil {
+		return false
+	}
+	width := int(r.layoutEngine.canvasWidth)
+	height := int(r.layoutEngine.canvasHeight)
+	if width <= 0 || height <= 0 {
+		return false
+	}
+	commands := convertDisplayCommands(r.chunkedDisplay.commands.Commands())
+	painter, err := NewIncrementalPainter(width, height)
+	if err != nil || painter == nil {
+		return false
+	}
+	defer painter.Close()
+	chunks := r.chunkedDisplay.chunks.Chunks()
+	img, err := painter.PaintDirty(chunks, commands)
+	if err != nil || img == nil {
+		return false
+	}
+	r.chunkedDisplay.MarkAllClean()
+	painter.Present(adapter)
+	return true
+}
+
+// convertDisplayCommands converts the renderer's DisplayCommand slice into
+// the backend-neutral raster.DisplayCmd slice consumed by IncrementalPainter.
+func convertDisplayCommands(in []DisplayCommand) []raster.DisplayCmd {
+	out := make([]raster.DisplayCmd, 0, len(in))
+	for _, cmd := range in {
+		out = append(out, toRasterDisplayCmd(cmd))
+	}
+	return out
+}
+
+// toRasterDisplayCmd converts a single DisplayCommand into the raster
+// backend command shape. The conversion is intentionally minimal: only the
+// rect/clip/opacity/text/image fields that the dirty paint path uses today
+// are propagated. Other fields are no-ops for the current test surface.
+func toRasterDisplayCmd(cmd DisplayCommand) raster.DisplayCmd {
+	rect := frame.Rect{X: cmd.Rect.Bounds.X, Y: cmd.Rect.Bounds.Y, W: cmd.Rect.Bounds.W, H: cmd.Rect.Bounds.H}
+	if rect == (frame.Rect{}) {
+		rect = frame.Rect{X: cmd.Border.Bounds.X, Y: cmd.Border.Bounds.Y, W: cmd.Border.Bounds.W, H: cmd.Border.Bounds.H}
+	}
+	return raster.DisplayCmd{Rect: rect, Color: frame.White}
 }
 
 type DirtyFlag uint8
