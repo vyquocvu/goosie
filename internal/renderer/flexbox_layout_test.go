@@ -263,15 +263,97 @@ func TestFlexLayoutFlexBasisZero(t *testing.T) {
 		t.Fatal("nogrow item not found")
 	}
 
-	// flex-basis: 0 with flex-grow: 1 should fill the remaining space (300px),
-	// ignoring the explicit width: 250px.
-	if grow.Box.Width < 299 || grow.Box.Width > 301 {
-		t.Errorf("grow item (flex-basis: 0, flex-grow: 1) width = %f; want ~300 (ignoring width: 250px)", grow.Box.Width)
+	// flex-basis: 0 with flex-grow: 1 should fill the remaining space after the
+	// nogrow item's automatic minimum (min-width:auto), ignoring width: 250px.
+	// flex-basis: 0 with flex-grow: 0 should shrink to its min-content size
+	// (automatic minimum), NOT to 0 and NOT to width: 250px. This matches the
+	// browser: flex items won't shrink below their content by default.
+	if grow.Box.Width <= 0 || nogrow.Box.Width <= 0 {
+		t.Errorf("items should have positive widths (grow: %f, nogrow: %f)",
+			grow.Box.Width, nogrow.Box.Width)
+	}
+	if grow.Box.Width+nogrow.Box.Width < 298 || grow.Box.Width+nogrow.Box.Width > 302 {
+		t.Errorf("grow (%f) + nogrow (%f) should fill the 300px container; got sum %f",
+			grow.Box.Width, nogrow.Box.Width, grow.Box.Width+nogrow.Box.Width)
+	}
+	// nogrow stays at its min-content width (a single word), well below 250px.
+	if nogrow.Box.Width > 100 {
+		t.Errorf("nogrow item (flex-basis: 0, flex-grow: 0) width = %f; want min-content (ignoring width: 250px)", nogrow.Box.Width)
+	}
+}
+
+func TestFlexLayoutAutomaticMinSize(t *testing.T) {
+	// Mirrors the IANA site layout: a row-reverse flex container with a fixed
+	// 250px nav (flex-basis: 0, width: 250px) whose content is a 225px-wide
+	// block with 25px margin-right. The nav must stay 250px wide via the
+	// automatic minimum (min(specified size suggestion, content size
+	// suggestion)); the main content (flex-grow: 1, flex-basis: 0) takes the
+	// rest.
+	htmlContent := `
+		<html>
+			<head>
+				<style>
+					.article {
+						display: flex;
+						flex-direction: row-reverse;
+						width: 1100px;
+					}
+					.main {
+						flex-grow: 1;
+						flex-basis: 0;
+					}
+					.sidenav {
+						flex-basis: 0;
+						width: 250px;
+					}
+					.navigation_box {
+						width: 225px;
+						margin-right: 25px;
+					}
+				</style>
+			</head>
+			<body>
+				<div class="article">
+					<div class="main">main content text</div>
+					<div class="sidenav">
+						<div class="navigation_box">nav content</div>
+					</div>
+				</div>
+			</body>
+		</html>
+	`
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		t.Fatalf("html.Parse failed: %v", err)
 	}
 
-	// flex-basis: 0 with flex-grow: 0 should collapse to 0, ignoring width: 250px.
-	if nogrow.Box.Width != 0 {
-		t.Errorf("nogrow item (flex-basis: 0, flex-grow: 0) width = %f; want 0 (ignoring width: 250px)", nogrow.Box.Width)
+	stylesheet := extractAndParseCSS(doc)
+	renderTree := BuildRenderTree(findBodyNode(doc))
+	styleManager := NewStyleManager(stylesheet)
+	styleManager.ApplyStyles(renderTree)
+
+	layoutEngine := NewLayoutEngine(1200, 800)
+	layoutEngine.ComputeLayout(renderTree)
+
+	main := findLayoutByClass(t, layoutEngine, renderTree, "main")
+	if main == nil {
+		t.Fatal("main item not found")
+	}
+	sidenav := findLayoutByClass(t, layoutEngine, renderTree, "sidenav")
+	if sidenav == nil {
+		t.Fatal("sidenav item not found")
+	}
+
+	// The nav must not collapse below 250px (its width + child content).
+	if sidenav.Box.Width < 249 || sidenav.Box.Width > 251 {
+		t.Errorf("sidenav width = %f; want ~250px (automatic minimum, flex-basis: 0)", sidenav.Box.Width)
+	}
+	// main takes the remaining 1100 - 250 = 850px.
+	if main.Box.Width < 848 || main.Box.Width > 852 {
+		t.Errorf("main width = %f; want ~850px (1100 - 250px sidenav)", main.Box.Width)
+	}
+	if main.Box.Width+sidenav.Box.Width < 1098 || main.Box.Width+sidenav.Box.Width > 1102 {
+		t.Errorf("main (%f) + sidenav (%f) should fill 1100px", main.Box.Width, sidenav.Box.Width)
 	}
 }
 

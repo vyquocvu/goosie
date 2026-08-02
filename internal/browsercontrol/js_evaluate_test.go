@@ -15,7 +15,7 @@ func TestJS_Evaluate_Basic(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// Test string return
@@ -33,7 +33,7 @@ func TestJS_Evaluate_Number(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `42 + 8`, EvaluateOptions{})
@@ -54,7 +54,7 @@ func TestJS_Evaluate_Boolean(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `true && false`, EvaluateOptions{})
@@ -70,7 +70,7 @@ func TestJS_Evaluate_Object(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `({name: "test", value: 42})`, EvaluateOptions{})
@@ -89,7 +89,7 @@ func TestJS_Evaluate_Array(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `[1, 2, 3]`, EvaluateOptions{})
@@ -104,7 +104,7 @@ func TestJS_Evaluate_Null(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `null`, EvaluateOptions{})
@@ -120,7 +120,7 @@ func TestJS_Evaluate_Undefined(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `(function() {})()`, EvaluateOptions{}) // returns undefined
@@ -135,7 +135,7 @@ func TestJS_Evaluate_Error(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `throw new Error("test error")`, EvaluateOptions{})
@@ -152,7 +152,7 @@ func TestJS_Evaluate_SyntaxError(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `{invalid syntax`, EvaluateOptions{})
@@ -167,7 +167,7 @@ func TestJS_Evaluate_SourceLengthLimit(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// Create source larger than MaxSourceBytes
@@ -189,7 +189,7 @@ func TestJS_Evaluate_ContextID(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `"test"`, EvaluateOptions{})
@@ -204,7 +204,7 @@ func TestJS_Evaluate_PageRevision(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `"test"`, EvaluateOptions{})
@@ -219,7 +219,7 @@ func TestJS_Evaluate_Cancellation(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// Create cancelled context
@@ -238,7 +238,7 @@ func TestJS_Evaluate_Function(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// Define and call a function
@@ -257,7 +257,7 @@ func TestJS_Evaluate_StringLength(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	result, err := ec.Evaluate(ctx, `"hello".toUpperCase()`, EvaluateOptions{})
@@ -273,12 +273,12 @@ func TestJS_Evaluate_ConsoleLog(t *testing.T) {
 
 	info, err := svc.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// console.log should not cause an error
 	result, err := ec.Evaluate(ctx, `console.log("hello"); 42`, EvaluateOptions{})
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
-	assert.Equal(t, 42, result.Value)
+	assert.Equal(t, int64(42), result.Value)
 }

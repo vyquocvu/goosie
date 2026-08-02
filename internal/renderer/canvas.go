@@ -77,6 +77,35 @@ type CanvasRenderer struct {
 	dirtyOverlayEnabled bool
 	Logger              *slog.Logger
 	highlightNode       *RenderNode
+
+	// fps measures the presented-frame rate (see fps.go). One frame is
+	// recorded per RenderWithViewport call. fpsOverlayEnabled renders a small
+	// on-screen FPS readout when true.
+	fps               *FPSCounter
+	fpsOverlayEnabled bool
+
+	// frameMetrics is the actionable metrics surface for the
+	// performance HUD. It tracks render duration, UI-queue wait,
+	// input-to-present latency, and the counters that reveal where
+	// work is being collapsed or dropped. See framemetrics.go.
+	frameMetrics *FrameMetrics
+
+	// scrollCoalescer collapses OnScrolled bursts into a single
+	// pending render. The contract: Schedule() records the latest
+	// viewport and TryClaim() drains it. Without coalescing, every
+	// OnScrolled tick walks the full display list, builds Fyne
+	// objects, and triggers a refresh — easily enough to drive
+	// scroll-rate FPS into single digits.
+	scrollCoalescer *ScrollCoalescer
+
+	// fpsOverlayText / fpsOverlayBg cache the Fyne canvas objects backing
+	// the FPS HUD so we mutate them in place across frames instead of
+	// allocating a fresh rectangle+text every scroll tick. Reused only
+	// while the overlay stays enabled (CreateRenderer is responsible for
+	// rebuilding on first show).
+	fpsOverlayText *canvas.Text
+	fpsOverlayBg   *canvas.Rectangle
+	fpsOverlayTextCache string // last text we set on fpsOverlayText, to skip refreshes
 }
 
 // NewCanvasRenderer creates a new canvas renderer
@@ -92,6 +121,9 @@ func NewCanvasRenderer(width, height float32) *CanvasRenderer {
 		objectCache:     make(map[int]fyne.CanvasObject),
 		dlBuildGen:      1,
 		submittingForms: make(map[int64]bool),
+		fps:             NewFPSCounter(),
+		frameMetrics:    NewFrameMetrics(),
+		scrollCoalescer: NewScrollCoalescer(),
 		Logger:          slog.Default(),
 	}
 }
@@ -145,6 +177,62 @@ func (cr *CanvasRenderer) onImageLoaded(source string) {
 func (cr *CanvasRenderer) SetViewport(y, height float32) {
 	cr.viewportY = y
 	cr.viewportHeight = height
+}
+
+// ScheduleScroll records a new scroll position. The canvas runs the
+// actual render on the next tick of the Fyne presentation loop; the
+// coalescer ensures only the latest viewport is rendered even when
+// the user is scrolling rapidly.
+//
+// The returned boolean reports whether a new render was scheduled
+// (true) or whether an existing pending render was reused (false).
+// Callers can use this to feed FrameMetrics.IncCoalescedScroll.
+func (cr *CanvasRenderer) ScheduleScroll(y, height float32) bool {
+	cr.scrollCoalescer.Schedule(ScrollViewport{Y: y, Height: height})
+	// If a render was already pending, this Schedule collapsed into it.
+	return !cr.scrollCoalescer.Pending()
+}
+
+// TryClaimScroll returns the latest queued viewport and clears the
+// pending flag. The caller is responsible for the actual render.
+//
+// Returns (ScrollViewport{}, false) if no render is pending.
+func (cr *CanvasRenderer) TryClaimScroll() (ScrollViewport, bool) {
+	return cr.scrollCoalescer.TryClaim()
+}
+
+// FrameMetrics returns the renderer's actionable metrics snapshot.
+// Exposed so the DevTools performance panel and on-screen HUD can
+// show render duration, UI-queue wait, input-to-present latency,
+// and coalesced-event counters.
+func (cr *CanvasRenderer) FrameMetrics() FrameMetricsSnapshot {
+	return cr.frameMetrics.Snapshot()
+}
+
+// RecordInputToPresent records the time from a user-input event
+// (scroll, mutation) to the next presented frame. Owners call this
+// immediately before triggering a render.
+func (cr *CanvasRenderer) RecordInputToPresent(d time.Duration) {
+	cr.frameMetrics.RecordInputToPresent(d)
+}
+
+// RecordUIQueueWait records how long a piece of work waited on the
+// Fyne main thread. High values here are a direct signal of UI
+// contention.
+func (cr *CanvasRenderer) RecordUIQueueWait(d time.Duration) {
+	cr.frameMetrics.RecordUIQueueWait(d)
+}
+
+// RecordCoalescedMutations records how many JS mutations were
+// collapsed into a single render. See FrameMetrics.
+func (cr *CanvasRenderer) RecordCoalescedMutations(n int) {
+	cr.frameMetrics.IncCoalescedMutations(n)
+}
+
+// RecordCoalescedScroll records how many scroll events were
+// collapsed into a single render. See FrameMetrics.
+func (cr *CanvasRenderer) RecordCoalescedScroll(n int) {
+	cr.frameMetrics.IncCoalescedScroll(n)
 }
 
 // SetNavigationCallback sets the navigation callback for link clicks
@@ -1023,6 +1111,17 @@ func (cr *CanvasRenderer) getTextStyle(tagName string) fyne.TextStyle {
 // caching, and spatial Y-band indexing for high-performance scroll/redraw.
 // Objects are reused across frames so Fyne doesn't allocate new canvas objects
 // on every scroll tick — matching Chrome/WebKit's retain-and-recycle approach.
+//
+// Threading contract: this method MUST be called on the Fyne main goroutine.
+// It mutates Fyne canvas objects (canvas.Text, canvas.Rectangle, widget.*,
+// container.Objects) and triggers container Refresh; doing so off-thread
+// trips Fyne's async.EnsureMain guard and the app appears not-responding
+// because the queued function never runs while the main goroutine is
+// blocked waiting on it. The UI layer (ui.Tab.RenderHTML/RenderParsedContent)
+// marshals callers onto the main thread via ui.RunOnMainThread before
+// invoking this method. Direct callers (tests, the headless renderer) are
+// either single-threaded or explicitly headless and don't enforce the
+// contract.
 func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *LayoutBox) fyne.CanvasObject {
 	if root == nil || layoutRoot == nil {
 		return container.NewWithoutLayout()
@@ -1030,6 +1129,16 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
+
+	// Time the render path. The deferred call records the duration
+	// into FrameMetrics so the HUD can show where time is going.
+	renderStart := time.Now()
+	defer func() {
+		cr.frameMetrics.ObserveFrame(time.Since(renderStart))
+	}()
+
+	// Each viewport paint is one presented frame for the FPS meter.
+	cr.fps.RecordFrame()
 
 	// Build or reuse display list
 	var displayList *DisplayList
@@ -1192,6 +1301,16 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		}
 	}
 
+	// Add live FPS HUD when enabled. The readout is drawn over the top-left
+	// of the viewport and refreshed on every frame so it reflects the current
+	// measurement.
+	if cr.fpsOverlayEnabled {
+		textObj := cr.buildFPSOverlay()
+		if textObj != nil {
+			rootObjects = append(rootObjects, textObj...)
+		}
+	}
+
 	// Reuse background rectangle across frames
 	var viewportBg *canvas.Rectangle
 	if cached, ok := cr.objectCache[-1]; ok {
@@ -1217,12 +1336,15 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	// Reuse stable root container or create one
 	if cr.contentRoot != nil {
 		cr.contentRoot.Objects = rootObjects
-		if cr.headless {
+		// Direct refresh: this function is contractually on the Fyne
+		// main goroutine. The previous fyne.Do() re-queued the
+		// refresh onto the very thread already executing us, which
+		// both deadlocked the caller's doAndWait and stacked up
+		// refreshes behind any blocking work we had just done.
+		// Headless mode skips Refresh entirely because there is no
+		// Fyne event loop to drive; tests rely on this.
+		if !cr.headless {
 			cr.contentRoot.Refresh()
-		} else {
-			fyne.Do(func() {
-				cr.contentRoot.Refresh()
-			})
 		}
 	} else {
 		cr.contentRoot = container.NewWithoutLayout(rootObjects...)
@@ -1708,6 +1830,147 @@ func (cr *CanvasRenderer) DirtyOverlayEnabled() bool {
 	cr.mu.RLock()
 	defer cr.mu.RUnlock()
 	return cr.dirtyOverlayEnabled
+}
+
+// buildFPSOverlay constructs the on-screen FPS readout objects for the
+// current snapshot. It returns a background rectangle plus the text label,
+// both positioned in the top-left corner of the viewport. Returns nil when
+// there is no measured frame yet.
+//
+// The renderer is required to run on the Fyne main thread (the UI layer
+// marshals RenderParsed/RenderHTML onto the main goroutine before
+// invoking the canvas), so we can mutate the cached overlay objects in
+// place across frames instead of allocating fresh ones every scroll
+// tick. This matters because RenderWithViewport is invoked on every
+// OnScrolled tick — historically the per-frame allocations here
+// contributed noticeable GC pressure at 60 Hz.
+//
+// The displayed text is intentionally *actionable*: it shows the
+// observed FPS, the worst-case input-to-present latency, the number
+// of long frames, and how many scroll/mutation events were coalesced
+// in the current window. A "bad FPS" symptom becomes a "lots of long
+// frames" symptom, which is what the operator needs to identify the
+// real bottleneck.
+func (cr *CanvasRenderer) buildFPSOverlay() []fyne.CanvasObject {
+	stats := cr.fps.Snapshot()
+	if stats.Frames == 0 {
+		return nil
+	}
+	m := cr.frameMetrics.Snapshot()
+
+	const (
+		padX  float32 = 8
+		padY  float32 = 8
+		fontS float32 = 12
+	)
+
+	// Three lines, top-left. The first line is the headline FPS; the
+	// second is the worst-case latency we observed in the recent
+	// window; the third is the long-frame count and the coalesced
+	// event totals.
+	lines := []string{
+		fmt.Sprintf("FPS %.1f", stats.CurrentFPS),
+		fmt.Sprintf("i\u2192p %s  q %s",
+			formatLatency(m.MaxInputToPresent), formatLatency(m.MaxUIQueueWait)),
+		fmt.Sprintf("long %d  coalesced s%d m%d  drop %d",
+			m.LongFrames, m.CoalescedScrollEvents, m.CoalescedMutations, m.StaleFramesDropped),
+	}
+	text := strings.Join(lines, "\n")
+
+	// Approximate width from the longest line so the background hugs
+	// the text closely enough without a text-measure dependency here.
+	estW := fontS * 0.62 * float32(longestLine(lines)) + 2*padX
+	estH := fontS*float32(len(lines)) + 2*padY
+
+	// Lazily allocate the overlay objects the first time the HUD is
+	// shown. After that we mutate in place — the text object's Text
+	// field is reset only when the displayed value actually changed,
+	// avoiding a Refresh per scroll tick.
+	if cr.fpsOverlayBg == nil {
+		cr.fpsOverlayBg = canvas.NewRectangle(color.RGBA{R: 0, G: 0, B: 0, A: 170})
+	}
+	if cr.fpsOverlayText == nil {
+		cr.fpsOverlayText = canvas.NewText(text, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		cr.fpsOverlayText.TextSize = fontS
+	}
+
+	bg := cr.fpsOverlayBg
+	bg.Resize(fyne.NewSize(estW, estH))
+	bg.Move(fyne.NewPos(0, 0))
+
+	textObj := cr.fpsOverlayText
+	textObj.Resize(fyne.NewSize(estW, estH-fontS))
+	textObj.Move(fyne.NewPos(padX, padY))
+	if cr.fpsOverlayTextCache != text {
+		textObj.Text = text
+		cr.fpsOverlayTextCache = text
+		textObj.Refresh()
+	}
+
+	return []fyne.CanvasObject{bg, textObj}
+}
+
+// longestLine returns the length (in bytes) of the longest string in s.
+// Used to size the FPS overlay background without a text-measure call.
+func longestLine(s []string) int {
+	max := 0
+	for _, l := range s {
+		if len(l) > max {
+			max = len(l)
+		}
+	}
+	return max
+}
+
+// formatLatency renders a duration as a short human-readable string
+// suitable for the on-screen HUD (e.g. "12ms", "1.2s"). Zero values
+// render as "-" to keep the HUD compact.
+func formatLatency(d time.Duration) string {
+	if d <= 0 {
+		return "-"
+	}
+	if d >= time.Second {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
+// FPSStats returns the current frame-rate statistics measured by the
+// renderer.
+func (cr *CanvasRenderer) FPSStats() FPSStats {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+	return cr.fps.Snapshot()
+}
+
+// SetFPSOverlayEnabled enables or disables the on-screen FPS HUD overlay.
+// When enabled, each presented frame updates a small readout at the top-left
+// of the viewport.
+func (cr *CanvasRenderer) SetFPSOverlayEnabled(enabled bool) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	if cr.fpsOverlayEnabled == enabled {
+		return
+	}
+	cr.fpsOverlayEnabled = enabled
+	if !enabled {
+		// Drop the cached overlay objects so the next time the HUD is
+		// turned on we start from a clean slate. The container will
+		// detach them when it next rebuilds rootObjects.
+		cr.fpsOverlayBg = nil
+		cr.fpsOverlayText = nil
+		cr.fpsOverlayTextCache = ""
+	}
+	// Invalidate the retained display list so the next render reflects the
+	// overlay toggle.
+	cr.cachedDisplayList = nil
+}
+
+// FPSOverlayEnabled returns whether the on-screen FPS HUD overlay is enabled.
+func (cr *CanvasRenderer) FPSOverlayEnabled() bool {
+	cr.mu.RLock()
+	defer cr.mu.RUnlock()
+	return cr.fpsOverlayEnabled
 }
 
 // CommandTypeToOverlayColor returns a semi-transparent color for a paint command

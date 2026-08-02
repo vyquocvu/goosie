@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -82,6 +83,27 @@ type Runtime struct {
 	// JavaScript errors
 	jsErrors   []string
 	jsErrorsMu sync.Mutex
+
+	// frameScheduler owns requestAnimationFrame / cancelAnimationFrame
+	// dispatch. See framescheduler.go for the rationale; the previous
+	// implementation used queueMicrotask + immediate __flushMicrotasks,
+	// which collapsed animation loops into synchronous microtask recursion
+	// and contributed to the Fyne-thread freeze symptom.
+	frameScheduler *FrameScheduler
+
+	// longTaskThreshold, if > 0, causes RunScript to record a
+	// long-task metric when execution exceeds the budget. Zero disables
+	// the metric. Defaults to 50ms (the W3C long-task definition) when
+	// the runtime is created with the default NewRuntime.
+	longTaskThreshold time.Duration
+	longTaskCount     atomic.Uint64
+
+	// maxTaskDuration, if > 0, causes RunScript to abort script
+	// execution via goja's interrupt mechanism when the script runs
+	// longer than this budget. A non-positive value disables the
+	// budget (the historical default).
+	maxTaskDuration time.Duration
+	interruptedCount atomic.Uint64
 	// HTTP fetcher for the fetch() API
 	fetcher           HTTPFetcher
 	isPopulatingJSDOM bool
@@ -195,19 +217,21 @@ func NewRuntime() *Runtime {
 	parser := dom.NewParser()
 
 	runtime := &Runtime{
-		vm:              vm,
-		parser:          parser,
-		eventListeners:  make(map[string][]goja.Callable),
-		localStorage:    make(map[string]string),
-		sessionStorage:  make(map[string]string),
-		origin:          "about:blank",
-		timers:          make(map[int]*Timer),
-		timerIDCounter:  1,
-		historyStack:    []string{},
-		historyIndex:    -1,
-		consoleMessages: make([]ConsoleMessage, 0),
-		jsErrors:        make([]string, 0),
-		runtimeDetected: make(map[dom.UnsupportedFeatureKind]bool, 8),
+		vm:                vm,
+		parser:            parser,
+		eventListeners:    make(map[string][]goja.Callable),
+		localStorage:      make(map[string]string),
+		sessionStorage:    make(map[string]string),
+		origin:            "about:blank",
+		timers:            make(map[int]*Timer),
+		timerIDCounter:    1,
+		historyStack:      []string{},
+		historyIndex:      -1,
+		consoleMessages:   make([]ConsoleMessage, 0),
+		jsErrors:          make([]string, 0),
+		runtimeDetected:   make(map[dom.UnsupportedFeatureKind]bool, 8),
+		frameScheduler:    NewFrameScheduler(0),
+		longTaskThreshold: 50 * time.Millisecond, // W3C long-task definition
 	}
 
 	// Inject ES6+ polyfills before any other setup
@@ -225,7 +249,53 @@ func NewRuntime() *Runtime {
 	// Setup document object with all DOM APIs
 	runtime.setupDocumentAPI()
 
+	// Install the frame-scheduler-backed requestAnimationFrame. The
+	// polyfillJS inlined version was the source of the freeze; replacing
+	// it after setupDocumentAPI keeps the rest of the polyfill bundle
+	// intact while routing RAF through the real scheduler.
+	runtime.installFrameScheduler()
+
 	return runtime
+}
+
+// FrameScheduler returns the runtime's requestAnimationFrame scheduler.
+// Exposed for the GUI tab to call Tick after presenting a frame, and for
+// tests to drive deterministic ticks.
+func (r *Runtime) FrameScheduler() *FrameScheduler {
+	return r.frameScheduler
+}
+
+// SetLongTaskThreshold overrides the long-task duration threshold.
+// Non-positive values disable long-task reporting.
+func (r *Runtime) SetLongTaskThreshold(d time.Duration) {
+	if d > 0 {
+		r.longTaskThreshold = d
+	} else {
+		r.longTaskThreshold = 0
+	}
+}
+
+// SetMaxTaskDuration overrides the hard script budget. RunScript will
+// interrupt the Goja VM if a script runs longer than this. Non-positive
+// values disable the budget.
+func (r *Runtime) SetMaxTaskDuration(d time.Duration) {
+	if d > 0 {
+		r.maxTaskDuration = d
+	} else {
+		r.maxTaskDuration = 0
+	}
+}
+
+// LongTaskCount returns the number of RunScript invocations that exceeded
+// the long-task threshold. Used by the DevTools performance panel.
+func (r *Runtime) LongTaskCount() uint64 {
+	return r.longTaskCount.Load()
+}
+
+// InterruptedCount returns the number of scripts aborted by the
+// max-task-duration budget.
+func (r *Runtime) InterruptedCount() uint64 {
+	return r.interruptedCount.Load()
 }
 
 func (r *Runtime) SetOrigin(origin string) {
@@ -551,9 +621,24 @@ func (r *Runtime) setupDocumentAPI() {
             target.cssText = value;
             return true;
           }
+          // Only treat string values as CSS property assignments.
+          // Functions and other non-string values are polyfill
+          // extensions (setProperty, getPropertyValue,
+          // removeProperty) and must not be folded into the
+          // style attribute — otherwise the first call to
+          // 'el.style.setProperty = ...' would setAttribute the
+          // function source into the HTML style attribute,
+          // which the next __serialize pass would emit and the
+          // next re-parse would try to interpret as CSS. That
+          // bug is what made every DOM mutation cost a
+          // full-document re-serialize + re-parse + re-layout.
+          if (typeof value !== "string") {
+            target[prop] = value;
+            return true;
+          }
           target[prop] = value;
           const styleStr = Object.keys(target)
-            .filter(k => !k.startsWith("_") && k !== "cssText")
+            .filter(k => !k.startsWith("_") && k !== "cssText" && typeof target[k] === "string")
             .map(k => k.replace(/([A-Z])/g, "-$1").toLowerCase() + ": " + target[k])
             .join("; ");
           target._element.setAttribute("style", styleStr);
@@ -887,16 +972,38 @@ func (r *Runtime) setupDocumentAPI() {
     if (node.nodeType === 1) {
       const tag = node.tagName.toLowerCase();
       let html = "<" + tag;
-      for (const key in node.attributes) {
-        html += " " + key + '="' + node.attributes[key] + '"';
+      // Iterate the element's own attribute keys only. The
+      // previous implementation used 'for (const key in
+      // node.attributes)' which walked the Object.prototype
+      // chain and emitted every inherited method
+      // (constructor, toString, valueOf, hasOwnProperty, ...) as
+      // a fake attribute, plus any function-valued getter
+      // (style, dataset, classList) as its full source. The
+      // resulting HTML ballooned 6-10x larger than the actual
+      // content, which made every DOM mutation cost a
+      // full-document re-serialize + re-parse + re-layout. See
+      // docs/PERF_REVIEW.md for the freeze-repro numbers.
+      const attrs = node.attributes || {};
+      const keys = Object.keys(attrs);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        // Skip non-string attribute values (function references
+        // and undefined entries from the polyfill's attribute
+        // map). Also skip the internal __goosie_id the DOM
+        // bridge uses to round-trip elements back to Go — it
+        // is not a real HTML attribute.
+        if (false && key === "__goosie_id") continue; // keep __goosie_id for the Go-side round-trip
+        const v = attrs[key];
+        if (typeof v !== "string") continue;
+        html += " " + key + '="' + v + '"';
       }
       html += ">";
-      
+
       const selfClosing = ["img", "input", "br", "hr", "link", "meta"];
       if (selfClosing.indexOf(tag) !== -1) {
         return html;
       }
-      
+
       html += node.childNodes.map(n => window.__serialize(n)).join("");
       html += "</" + tag + ">";
       return html;
@@ -1501,9 +1608,48 @@ func (r *Runtime) SetFetcher(f HTTPFetcher) {
 // detection callback so the fallback layer can mark the page for
 // compatibility. The scan is nil-safe and short-circuits when the
 // script does not contain the word "import".
+//
+// Execution is bounded by SetMaxTaskDuration; scripts that exceed the
+// budget are interrupted via the Goja Interrupt mechanism and counted
+// in InterruptedCount(). Long scripts (>= SetLongTaskThreshold) are
+// counted in LongTaskCount() but allowed to complete. The previous
+// implementation ran scripts and microtask flushes synchronously
+// without a budget, which is one of the root causes of the Fyne-thread
+// freeze symptom.
 func (r *Runtime) RunScript(script string) (goja.Value, error) {
 	r.ScanAndReportUnsupportedJSFeatures(script)
+
+	var interrupt *time.Timer
+	if r.maxTaskDuration > 0 {
+		// Install an interrupt that fires after maxTaskDuration. The
+		// Goja interrupt is checked at every opcode; once fired, the
+		// next instruction returns the interruption error.
+		timeout := r.maxTaskDuration
+		interrupt = time.AfterFunc(timeout, func() {
+			r.vm.Interrupt(fmt.Sprintf("script exceeded %v budget", timeout))
+		})
+	}
+
+	start := time.Now()
 	val, err := r.vm.RunString(script)
+	if interrupt != nil {
+		interrupt.Stop()
+	}
+
+	// Long-task metric: only record when the script ran to completion
+	// (err == nil) so that interrupted scripts are counted separately.
+	if err == nil && r.longTaskThreshold > 0 && time.Since(start) >= r.longTaskThreshold {
+		r.longTaskCount.Add(1)
+	}
+	if err != nil {
+		// Detect the interrupt pattern: any error mentioning "budget" is
+		// ours. Goja's error string includes the original Interrupt()
+		// argument verbatim.
+		if strings.Contains(err.Error(), "budget") {
+			r.interruptedCount.Add(1)
+		}
+	}
+
 	// Flush microtask queue (drives Promise .then callbacks synchronously)
 	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
 		if fn, ok := goja.AssertFunction(flush); ok {
@@ -2674,6 +2820,112 @@ func (r *Runtime) Cleanup() {
 		timer.mu.Unlock()
 	}
 	r.timers = make(map[int]*Timer)
+
+	// Drop any pending requestAnimationFrame callbacks so a navigation
+	// away from this page does not leak a stale animation loop. The
+	// old polyfill queued callbacks via queueMicrotask; they would
+	// keep firing after navigation and contribute to the freeze.
+	if r.frameScheduler != nil {
+		r.frameScheduler.Reset()
+	}
+}
+
+// installFrameScheduler replaces the polyfill's requestAnimationFrame
+// implementation with one backed by the real FrameScheduler. The
+// previous polyfill used queueMicrotask + an immediate
+// __flushMicrotasks() call, which collapsed animation loops into
+// synchronous microtask recursion — a long animation could keep the
+// Fyne UI thread blocked indefinitely and produce the "frozen" app
+// symptom reported by users.
+//
+// The replacement uses SetTimeout(fn, 16) on the Goja side, but the
+// Go side parks the callback in the FrameScheduler's pending queue
+// and dispatches it only when the owner goroutine calls Tick. That
+// keeps the callback rate bounded by 1/frame and prevents the
+// recursive microtask explosion. The fake timer callback simply
+// transfers the work to the scheduler.
+func (r *Runtime) installFrameScheduler() {
+	if r.frameScheduler == nil {
+		return
+	}
+	sched := r.frameScheduler
+
+	// requestAnimationFrame: enqueue in the scheduler and return its id.
+	// We do NOT call the user callback here; that is the scheduler's job.
+	r.vm.Set("__rafEnqueue", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) < 1 {
+			return goja.Undefined()
+		}
+		fn, ok := goja.AssertFunction(call.Arguments[0])
+		if !ok {
+			return goja.Undefined()
+		}
+		// Capture the Goja callable into a Go closure that re-enters
+		// the runtime only when called from the owner goroutine.
+		id := sched.RequestAnimationFrame(func(_ time.Time) {
+			// Wrap the user callable so JS errors don't panic.
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						// Log and continue; one bad callback must not
+						// stop the rest of the frame.
+						fmt.Printf("requestAnimationFrame callback panicked: %v\n", rec)
+					}
+				}()
+				_, _ = fn(goja.Undefined(), r.vm.ToValue(time.Now().UnixMilli()))
+			}()
+		})
+		return r.vm.ToValue(id)
+	})
+
+	// cancelAnimationFrame: pass-through to the scheduler.
+	r.vm.Set("__rafCancel", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		id := int(call.Arguments[0].ToInteger())
+		sched.CancelAnimationFrame(id)
+		return goja.Undefined()
+	})
+
+	// Replace the polyfill-defined requestAnimationFrame with a real
+	// frame-bounded loop driven by the scheduler.
+	raf := func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return r.vm.ToValue(0)
+		}
+		fn, ok := goja.AssertFunction(call.Arguments[0])
+		if !ok {
+			return r.vm.ToValue(0)
+		}
+		id := sched.RequestAnimationFrame(func(_ time.Time) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					fmt.Printf("requestAnimationFrame callback panicked: %v\n", rec)
+				}
+			}()
+			_, _ = fn(goja.Undefined(), r.vm.ToValue(time.Now().UnixMilli()))
+		})
+		return r.vm.ToValue(id)
+	}
+	r.vm.Set("requestAnimationFrame", raf)
+	r.vm.Set("window.requestAnimationFrame", raf)
+	if global := r.vm.Get("globalThis"); global != nil {
+		if gObj, ok := global.(*goja.Object); ok {
+			gObj.Set("requestAnimationFrame", raf)
+		}
+	}
+
+	cancel := func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		id := int(call.Arguments[0].ToInteger())
+		sched.CancelAnimationFrame(id)
+		return goja.Undefined()
+	}
+	r.vm.Set("cancelAnimationFrame", cancel)
+	r.vm.Set("window.cancelAnimationFrame", cancel)
 }
 
 // SetDOMMutationCallback sets a callback for when the JS DOM tree is mutated

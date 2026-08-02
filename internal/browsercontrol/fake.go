@@ -54,8 +54,8 @@ func (s *FakeService) SetMaxContexts(n int) {
 	s.maxContexts = n
 }
 
-// Context returns the fake context by ID (for test assertions).
-func (s *FakeService) Context(id string) (*fakeContext, error) {
+// Context returns the fake context by ID as the public Context interface.
+func (s *FakeService) Context(ctx context.Context, id string) (Context, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.contexts[id]
@@ -338,7 +338,7 @@ func (c *fakeContext) Query(ctx context.Context, locator Locator) (QueryResult, 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	refs := findRefs(c.nodes, c.id, c.pageRev)
+	refs := generateAndCollectRefs(c.nodes, c.id, c.pageRev)
 	return QueryResult{
 		ContextID:    c.id,
 		PageRevision: c.pageRev,
@@ -577,9 +577,10 @@ func fakeNodes(url string) []SemanticNode {
 	}
 }
 
-func findRefs(nodes []SemanticNode, ctxID string, rev int) []ElementRef {
+func generateAndCollectRefs(nodes []SemanticNode, ctxID string, rev int) []ElementRef {
 	var refs []ElementRef
-	for _, n := range nodes {
+	for i := range nodes {
+		n := &nodes[i]
 		if n.Role != "presentation" && n.Role != "" && n.Role != "text" {
 			ref := generateID("e")
 			n.Ref = ref
@@ -589,7 +590,7 @@ func findRefs(nodes []SemanticNode, ctxID string, rev int) []ElementRef {
 				PageRevision: rev,
 			})
 		}
-		refs = append(refs, findRefs(n.Children, ctxID, rev)...)
+		refs = append(refs, generateAndCollectRefs(n.Children, ctxID, rev)...)
 	}
 	return refs
 }

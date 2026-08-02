@@ -6,8 +6,11 @@ import (
 )
 
 // FlexLayoutEngine handles flexbox layout calculations
-type FlexLayoutEngine struct {
-	fontMetrics *FontMetrics
+type FlexLayoutEngine struct {	fontMetrics *FontMetrics
+	// minContentFn measures a node's min-content size along the main axis.
+	// Used to compute the automatic minimum size (min-width:auto / min-height:auto)
+	// of flex items so they don't collapse below their content.
+	minContentFn func(node *RenderNode) float32
 }
 
 // NewFlexLayoutEngine creates a new flex layout engine
@@ -23,6 +26,7 @@ type flexItem struct {
 	layoutBox  *LayoutBox
 	mainSize   float32 // Size along main axis
 	crossSize  float32 // Size along cross axis
+	minMainSize float32 // Automatic minimum size along main axis (min-width:auto floor)
 	flexGrow   float32
 	flexShrink float32
 	flexBasis  float32
@@ -67,16 +71,21 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 
 	mainAxisSize := parentBox.Box.Width - parentBox.PaddingLeft - parentBox.PaddingRight
 	crossAxisSize := parentBox.Box.Height - parentBox.PaddingTop - parentBox.PaddingBottom
+	mainAxisDefinite := true
 	if !isRow {
 		mainAxisSize, crossAxisSize = crossAxisSize, mainAxisSize
-		// For column direction with no explicit height, use a large value and let content determine size
+		// For column direction with no explicit height, the container is
+		// shrink-wrapped by its content: flex-grow has no free space to
+		// distribute, so keep the main axis indefinite (no 10000 fallback
+		// which would inflate growing items like a flex-grow:1 paragraph).
 		if mainAxisSize <= 0 {
 			mainAxisSize = 10000 // Large value, will be shrunk by content
+			mainAxisDefinite = false
 		}
 	}
 
 	// Build flex items
-	items := fle.buildFlexItems(container, buildLayoutBox, parentBox, mainAxisSize, isRow)
+	items := fle.buildFlexItems(container, buildLayoutBox, parentBox, isRow)
 	if len(items) == 0 {
 		return
 	}
@@ -103,9 +112,14 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 
 	remainingSpace := mainAxisSize - totalMainSize
 
-	// Distribute remaining space (flex-grow/shrink)
+
+	// Distribute remaining space (flex-grow/shrink). For an indefinite column
+	// main axis (auto height), the container shrink-wraps its content so there
+	// is no free space to grow into.
 	if remainingSpace > 0 {
-		fle.distributeGrow(items, remainingSpace)
+		if mainAxisDefinite {
+			fle.distributeGrow(items, remainingSpace)
+		}
 	} else if remainingSpace < 0 {
 		fle.distributeShrink(items, -remainingSpace)
 	}
@@ -123,27 +137,62 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 		if isRow {
 			x = contentX + mainAxisPositions[i]
 			y = contentY + fle.calculateCrossAxisOffset(item.crossSize, crossAxisSize, alignItems, item)
-			deltaX := x - item.layoutBox.Box.X
-			deltaY := y - item.layoutBox.Box.Y
-			shiftLayoutBoxTree(item.layoutBox, deltaX, deltaY)
-			item.layoutBox.Box.Width = item.mainSize
-			if alignItems == "stretch" && item.crossSize == 0 {
-				item.layoutBox.Box.Height = crossAxisSize
-			}
 		} else {
 			x = contentX + fle.calculateCrossAxisOffset(item.crossSize, crossAxisSize, alignItems, item)
 			y = contentY + mainAxisPositions[i]
+		}
+
+		// Re-layout the item with its resolved flex size so its internal
+		// content flows at the final width/height rather than the container's
+		// full available size. Without this, a shrunken item keeps content laid
+		// out at the container width (e.g. main at 850px still containing
+		// 1100px-wide children).
+		resolvedMainSize := item.mainSize
+		resolvedCrossSize := item.crossSize
+		if alignItems == "stretch" && item.crossSize == 0 {
+			resolvedCrossSize = crossAxisSize
+		}
+		var newBox *LayoutBox
+		if isRow {
+			if absDiff(resolvedMainSize, item.layoutBox.Box.Width) > 0.5 {
+				newBox = buildLayoutBox(item.node, x, y, resolvedMainSize)
+			}
+		} else {
+			if absDiff(resolvedMainSize, item.layoutBox.Box.Height) > 0.5 {
+				newBox = buildLayoutBox(item.node, x, y, resolvedCrossSize)
+			}
+		}
+		if newBox != nil {
+			item.layoutBox = newBox
+		}
+
+		if isRow {
+			deltaX := x - item.layoutBox.Box.X
+			deltaY := y - item.layoutBox.Box.Y
+			shiftLayoutBoxTree(item.layoutBox, deltaX, deltaY)
+			item.layoutBox.Box.Width = resolvedMainSize
+			if alignItems == "stretch" && item.crossSize == 0 {
+				item.layoutBox.Box.Height = resolvedCrossSize
+			}
+		} else {
 			deltaX := x - item.layoutBox.Box.X
 			deltaY := y - item.layoutBox.Box.Y
 			shiftLayoutBoxTree(item.layoutBox, deltaX, deltaY)
 			if alignItems == "stretch" && item.crossSize == 0 {
-				item.layoutBox.Box.Width = crossAxisSize
+				item.layoutBox.Box.Width = resolvedCrossSize
 			}
-			item.layoutBox.Box.Height = item.mainSize
+			item.layoutBox.Box.Height = resolvedMainSize
 		}
 
 		parentBox.AddChild(item.layoutBox)
 	}
+}
+
+func absDiff(a, b float32) float32 {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 // buildFlexItems creates flex items from container children
@@ -151,7 +200,6 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 	container *RenderNode,
 	buildLayoutBox func(node *RenderNode, x, y, width float32) *LayoutBox,
 	parentBox *LayoutBox,
-	mainAxisSize float32,
 	isRow bool,
 ) []*flexItem {
 	items := make([]*flexItem, 0, len(container.Children))
@@ -164,8 +212,12 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 			continue
 		}
 
-		// Build the child layout box to get its natural size
-		childBox := buildLayoutBox(child, 0, 0, mainAxisSize)
+		// Children are always laid out at the container's content width
+		// (main axis for rows, cross axis for columns). Using mainAxisSize
+		// directly would give column items a width equal to the container's
+		// height fallback (e.g. 10000px), breaking their inline layout.
+		availWidth := parentBox.Box.Width - parentBox.PaddingLeft - parentBox.PaddingRight
+		childBox := buildLayoutBox(child, 0, 0, availWidth)
 		if childBox == nil {
 			continue
 		}
@@ -202,6 +254,7 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 				item.mainSize = childBox.Box.Width
 			}
 			item.crossSize = childBox.Box.Height
+			item.minMainSize = fle.automaticMinMainSize(child, childBox)
 		} else {
 			if item.basisSet {
 				item.mainSize = item.flexBasis
@@ -209,12 +262,64 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 				item.mainSize = childBox.Box.Height
 			}
 			item.crossSize = childBox.Box.Width
+			item.minMainSize = fle.automaticMinMainSize(child, childBox)
+		}
+
+
+		// Apply the automatic minimum size so items don't collapse below their
+		// content (min-width/min-height: auto behavior).
+		if item.mainSize < item.minMainSize {
+			item.mainSize = item.minMainSize
 		}
 
 		items = append(items, item)
 	}
 
 	return items
+}
+
+// automaticMinMainSize computes the automatic minimum main size of a flex item.
+// Per css-flexbox §4.5, the automatic minimum size (min-width:auto, the default)
+// is the smaller of the content size suggestion (min-content size) and the
+// specified size suggestion (the item's width/height when definite). An explicit
+// min-width/min-height overrides it entirely.
+func (fle *FlexLayoutEngine) automaticMinMainSize(node *RenderNode, childBox *LayoutBox) float32 {
+	if node.ComputedStyle == nil {
+		return 0
+	}
+
+	// An explicit min-width takes precedence over the automatic minimum.
+	explicitMin := node.ComputedStyle.MinWidth
+	if explicitMin != "" && explicitMin != "auto" {
+		if minW := parseLength(explicitMin, fle.fontMetrics.defaultFontSize); minW >= 0 {
+			return minW
+		}
+	}
+
+	// Automatic minimum: min(specified size suggestion, content size suggestion).
+	contentSuggestion := float32(0)
+	if fle.minContentFn != nil {
+		contentSuggestion = fle.minContentFn(node)
+	}
+	specifiedSuggestion := float32(-1)
+	if node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto" {
+		if w := parseLength(node.ComputedStyle.Width, fle.fontMetrics.defaultFontSize); w >= 0 {
+			specifiedSuggestion = w
+		}
+	}
+
+	min := contentSuggestion
+	if specifiedSuggestion >= 0 && specifiedSuggestion < min {
+		min = specifiedSuggestion
+	}
+
+	// Clamp by the maximum main size if it's definite.
+	if node.ComputedStyle.MaxWidth != "" && node.ComputedStyle.MaxWidth != "none" {
+		if maxW := parseLength(node.ComputedStyle.MaxWidth, fle.fontMetrics.defaultFontSize); maxW >= 0 && maxW < min {
+			min = maxW
+		}
+	}
+	return min
 }
 
 // distributeGrow distributes positive remaining space based on flex-grow
@@ -239,7 +344,11 @@ func (fle *FlexLayoutEngine) distributeGrow(items []*flexItem, remainingSpace fl
 func (fle *FlexLayoutEngine) distributeShrink(items []*flexItem, overflow float32) {
 	totalShrink := float32(0)
 	for _, item := range items {
-		totalShrink += item.flexShrink * item.mainSize
+		shrinkable := item.mainSize - item.minMainSize
+		if shrinkable < 0 {
+			shrinkable = 0
+		}
+		totalShrink += item.flexShrink * shrinkable
 	}
 
 	if totalShrink <= 0 {
@@ -248,10 +357,14 @@ func (fle *FlexLayoutEngine) distributeShrink(items []*flexItem, overflow float3
 
 	for _, item := range items {
 		if item.flexShrink > 0 {
-			shrinkAmount := (item.flexShrink * item.mainSize / totalShrink) * overflow
+			shrinkable := item.mainSize - item.minMainSize
+			if shrinkable < 0 {
+				shrinkable = 0
+			}
+			shrinkAmount := (item.flexShrink * shrinkable / totalShrink) * overflow
 			item.mainSize -= shrinkAmount
-			if item.mainSize < 0 {
-				item.mainSize = 0
+			if item.mainSize < item.minMainSize {
+				item.mainSize = item.minMainSize
 			}
 		}
 	}

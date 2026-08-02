@@ -62,6 +62,7 @@ func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
 	// Build layout tree from render tree
 	inlineLayoutEngine := NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize)
 	flexLayoutEngine := NewFlexLayoutEngine(le.fontMetrics)
+	flexLayoutEngine.minContentFn = le.minContentSize
 	gridLayoutEngine := NewGridLayoutEngine(le.fontMetrics)
 	layoutRoot := le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
 
@@ -1259,6 +1260,124 @@ func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode, inlineLayoutEng
 		contentW += box.PaddingLeft + box.PaddingRight + box.BorderLeftWidth + box.BorderRightWidth
 	}
 	return contentW
+}
+
+// minContentSize computes the min-content width of a node: the narrowest width
+// its content can occupy without overflowing (the widest unbreakable segment,
+// e.g. the longest word or a fixed-size child). It does NOT clamp by the node's
+// own explicit width - that is the caller's "specified size suggestion" job.
+// Box model padding/border are included.
+func (le *LayoutEngine) minContentSize(node *RenderNode) float32 {
+	if node == nil {
+		return 0
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+		return 0
+	}
+	if node.Type == NodeTypeText {
+		return 0
+	}
+	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+		box := NewLayoutBox(node.ID)
+		le.applyBoxModel(node, box)
+		return float32(node.ImageData.Width) + box.PaddingLeft + box.PaddingRight + box.BorderLeftWidth + box.BorderRightWidth
+	}
+
+	var contentW float32
+	if le.hasInlineContent(node) {
+		contentW = le.widestInlineSegment(node)
+	} else {
+		for _, child := range node.Children {
+			if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+				continue
+			}
+			if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
+				continue
+			}
+			childW := le.minContentContribution(child)
+			if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+				contentW += childW
+			} else if childW > contentW {
+				contentW = childW
+			}
+		}
+	}
+
+	box := NewLayoutBox(node.ID)
+	le.applyBoxModel(node, box)
+	contentW += box.PaddingLeft + box.PaddingRight + box.BorderLeftWidth + box.BorderRightWidth
+	return contentW
+}
+
+// minContentContribution returns how much of a node's width a parent must
+// reserve: the max of the node's own content-based min-content size and its
+// explicit width, plus margins.
+func (le *LayoutEngine) minContentContribution(node *RenderNode) float32 {
+	contentW := le.minContentSize(node)
+	if node.ComputedStyle != nil && node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto" {
+		// Percentage widths are indefinite during intrinsic sizing and must
+		// not inflate the min-content contribution (a width: 100% child does
+		// not force its parent to be viewport-wide).
+		if !strings.HasSuffix(node.ComputedStyle.Width, "%") {
+			w := parseLengthWithViewport(node.ComputedStyle.Width, le.defaultFontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
+			if w > contentW {
+				contentW = w
+			}
+		}
+	}
+	if node.ComputedStyle != nil {
+		box := NewLayoutBox(node.ID)
+		le.applyBoxModel(node, box)
+		contentW += box.MarginLeft + box.MarginRight
+	}
+	return contentW
+}
+
+// widestInlineSegment returns the width of the widest unbreakable inline
+// segment in a node's subtree: the widest word, inline image, or replaced
+// element, which governs the min-content width of inline content.
+func (le *LayoutEngine) widestInlineSegment(node *RenderNode) float32 {
+	if node == nil {
+		return 0
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+		return 0
+	}
+	if node.Type == NodeTypeText {
+		if strings.TrimSpace(node.Text) == "" {
+			return 0
+		}
+		fontSize := le.defaultFontSize
+		if node.ComputedStyle != nil && node.ComputedStyle.FontSize > 0 {
+			fontSize = node.ComputedStyle.FontSize
+		}
+		style := le.fontMetrics.GetTextStyleFromNode(node)
+		letterSpacing := float32(0)
+		if node.ComputedStyle != nil {
+			letterSpacing = node.ComputedStyle.LetterSpacing
+		}
+		var widest float32
+		for _, word := range strings.Fields(node.Text) {
+			m := le.fontMetrics.MeasureText(word, fontSize, style, letterSpacing)
+			if m.Width > widest {
+				widest = m.Width
+			}
+		}
+		return widest
+	}
+	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+		return float32(node.ImageData.Width)
+	}
+	if node.TagName == "svg" || node.TagName == "input" || node.TagName == "button" || node.TagName == "textarea" {
+		return le.minContentSize(node)
+	}
+	var widest float32
+	for _, c := range node.Children {
+		if w := le.widestInlineSegment(c); w > widest {
+			widest = w
+		}
+	}
+	return widest
 }
 
 // hasInlineContentRecursive recursively checks for inline content

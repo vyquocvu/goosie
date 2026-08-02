@@ -91,18 +91,46 @@ func TestIntersectionObserverFires(t *testing.T) {
 	}
 }
 
+// TestRequestAnimationFrame verifies that the runtime routes RAF
+// callbacks through the FrameScheduler and that the callback only
+// fires when the owner goroutine calls Tick. The previous polyfill
+// fired the callback synchronously via queueMicrotask + immediate
+// __flushMicrotasks, which collapsed animation loops into microtask
+// recursion. The new contract: RAF is a deferred request; the test
+// explicitly drives the scheduler.
 func TestRequestAnimationFrame(t *testing.T) {
 	rt := NewRuntime()
-	val, err := rt.RunScript(`
+	if _, err := rt.RunScript(`
 		var fired = false;
 		requestAnimationFrame(function() { fired = true; });
-		fired;
-	`)
+	`); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Without a Tick, the callback must not have fired yet. Verify
+	// via the runtime's JS state.
+	val, err := rt.RunScript(`fired`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val.String() != "false" {
+		t.Fatalf("RAF callback should be deferred, got fired=%q", val.String())
+	}
+
+	// Drive the frame; the callback should now run.
+	rt.FrameScheduler().Tick()
+
+	val, err = rt.RunScript(`fired`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if val.String() != "true" {
-		t.Errorf("expected 'true', got %q", val.String())
+		t.Errorf("RAF callback should have fired after Tick, got fired=%q", val.String())
+	}
+
+	// Pending must be zero after a fired tick.
+	if rt.FrameScheduler().Pending() != 0 {
+		t.Errorf("Pending should be 0 after Tick, got %d", rt.FrameScheduler().Pending())
 	}
 }
 

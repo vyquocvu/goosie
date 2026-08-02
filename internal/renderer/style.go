@@ -18,6 +18,22 @@ type StyleManager struct {
 	viewportWidth     float32
 	viewportHeight    float32
 	mediaEvaluator    *MediaQueryEvaluator
+
+	// prepared caches the flattened selector parts for each stylesheet so the
+	// per-node matching loop does not re-flatten (and re-allocate) every
+	// selector on every rule×node pair. Built once per stylesheet on first
+	// use within a render pass.
+	prepared map[*css.StyleSheet][]preparedRule
+}
+
+// preparedRule is precomputed selector-part data for one CSS rule. The
+// selectors field holds the flattened [][]styleSelectorPart for each of the
+// rule's selector sequences; declarations is the rule's declarations. It is
+// immutable for the duration of a style pass, so it can be shared across all
+// nodes without re-computation.
+type preparedRule struct {
+	selectors    [][]styleSelectorPart
+	declarations []css.Declaration
 }
 
 // NewStyleManager creates a new StyleManager.
@@ -164,20 +180,45 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	if stylesheet == nil {
 		return
 	}
-	// Only print for non-default stylesheet to avoid spamming default stylesheet matches
-	isDefault := stylesheet == sm.defaultStylesheet
-	for _, rule := range stylesheet.Rules {
-		for _, selectorSeq := range rule.Selectors {
-			if sm.matchesSequence(selectorSeq, node) {
-				if !isDefault {
-					// fmt.Printf("DEBUG matchesSequence MATCHED for tag %s (has class %s, id %s)\n", node.TagName, node.Attrs["class"], node.Attrs["id"])
-				}
-				for _, decl := range rule.Declarations {
-					sm.applyDeclaration(node, decl)
-				}
+	for _, rule := range sm.preparedFor(stylesheet) {
+		matched := false
+		for _, parts := range rule.selectors {
+			if sm.matchStyleParts(parts, len(parts)-1, node) {
+				matched = true
+				break
 			}
 		}
+		if !matched {
+			continue
+		}
+		for _, decl := range rule.declarations {
+			sm.applyDeclaration(node, decl)
+		}
 	}
+}
+
+// preparedFor returns the flattened-selector representation of a stylesheet,
+// computing it once and caching it so the node-matching loops in
+// applyMatchingRules do not re-flatten selectors (and re-allocate) for every
+// node in the tree. Only the main and default stylesheets are cached, keyed
+// by pointer; the map is bounded per render pass.
+func (sm *StyleManager) preparedFor(stylesheet *css.StyleSheet) []preparedRule {
+	if sm.prepared == nil {
+		sm.prepared = make(map[*css.StyleSheet][]preparedRule)
+	}
+	if rules, ok := sm.prepared[stylesheet]; ok {
+		return rules
+	}
+	rules := make([]preparedRule, 0, len(stylesheet.Rules))
+	for _, rule := range stylesheet.Rules {
+		pr := preparedRule{declarations: rule.Declarations}
+		for _, ss := range rule.Selectors {
+			pr.selectors = append(pr.selectors, flattenSelectorSequence(&ss))
+		}
+		rules = append(rules, pr)
+	}
+	sm.prepared[stylesheet] = rules
+	return rules
 }
 
 type styleSelectorPart struct {
@@ -1006,6 +1047,10 @@ func parseFontSize(value string, parentFontSize float32) (float32, error) {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "" {
 		return parentFontSize, nil
+	}
+
+	if isCalcExpr(value) {
+		return evalCalcExpr(value, parentFontSize, 1280, 800, parentFontSize), nil
 	}
 
 	// Keywords

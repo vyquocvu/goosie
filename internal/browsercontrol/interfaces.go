@@ -8,6 +8,12 @@ type Service interface {
 	// CreateContext creates a new private ephemeral browser context.
 	CreateContext(ctx context.Context, opts CreateContextOptions) (ContextInfo, error)
 
+	// Context returns the live Context handle for an existing
+	// context ID. The returned value is ready to receive method
+	// calls (Navigate, Snapshot, etc.). Returns ErrContextNotFound
+	// when no context with the given ID is open.
+	Context(ctx context.Context, id string) (Context, error)
+
 	// ListContexts returns all contexts owned by this service instance.
 	ListContexts(ctx context.Context) ([]ContextInfo, error)
 

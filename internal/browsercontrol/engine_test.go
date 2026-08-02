@@ -28,7 +28,7 @@ func newTestContext(t *testing.T, s *EngineService) (context.Context, Context, f
 		Viewport: Viewport{Width: 1280, Height: 720, Scale: 1},
 	})
 	require.NoError(t, err)
-	ec, err := s.Context(info.ID)
+	ec, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 	return ctx, ec, func() { s.CloseContext(ctx, info.ID) }
 }
@@ -212,7 +212,7 @@ func TestCloseDuringNavigation(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	ec, err := s.Context(info.ID)
+	ec, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// Start navigation and close immediately

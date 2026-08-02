@@ -55,6 +55,16 @@ func (m *MockHTMLRenderer) GetDisplayListSummary() map[string]int           { re
 func (m *MockHTMLRenderer) GetDisplayListCommands() []renderer.PaintCommand { return nil }
 func (m *MockHTMLRenderer) SetDirtyOverlayEnabled(enabled bool)             {}
 func (m *MockHTMLRenderer) DirtyOverlayEnabled() bool                       { return false }
+func (m *MockHTMLRenderer) SetFPSOverlayEnabled(enabled bool)               {}
+func (m *MockHTMLRenderer) FPSOverlayEnabled() bool                         { return false }
+func (m *MockHTMLRenderer) FPSStats() renderer.FPSStats                     { return renderer.FPSStats{} }
+func (m *MockHTMLRenderer) FrameMetrics() renderer.FrameMetricsSnapshot     { return renderer.FrameMetricsSnapshot{} }
+func (m *MockHTMLRenderer) ScheduleScroll(_, _ float32) bool                 { return false }
+func (m *MockHTMLRenderer) TryClaimScroll() (renderer.ScrollViewport, bool) { return renderer.ScrollViewport{}, false }
+func (m *MockHTMLRenderer) RecordInputToPresent(_ time.Duration)              {}
+func (m *MockHTMLRenderer) RecordUIQueueWait(_ time.Duration)                  {}
+func (m *MockHTMLRenderer) RecordCoalescedMutations(_ int)                      {}
+func (m *MockHTMLRenderer) RecordCoalescedScroll(_ int)                          {}
 func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)               { return 0, 0, 0 }
 func (m *MockHTMLRenderer) GetLayoutNodeCount() int                         { return 0 }
 func (m *MockHTMLRenderer) GetStyleSheet() *css.StyleSheet                  { return m.stylesheet }

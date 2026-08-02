@@ -1218,6 +1218,68 @@ func (r *Renderer) DirtyOverlayEnabled() bool {
 	return r.canvasRenderer.DirtyOverlayEnabled()
 }
 
+// SetFPSOverlayEnabled enables or disables the on-screen FPS HUD overlay on
+// the active viewport. See CanvasRenderer.SetFPSOverlayEnabled.
+func (r *Renderer) SetFPSOverlayEnabled(enabled bool) {
+	r.canvasRenderer.SetFPSOverlayEnabled(enabled)
+}
+
+// FPSOverlayEnabled returns whether the on-screen FPS HUD overlay is enabled.
+func (r *Renderer) FPSOverlayEnabled() bool {
+	return r.canvasRenderer.FPSOverlayEnabled()
+}
+
+// FPSStats returns the current frame-rate statistics measured by the renderer.
+func (r *Renderer) FPSStats() FPSStats {
+	return r.canvasRenderer.FPSStats()
+}
+
+// FrameMetrics returns the renderer's actionable performance metrics
+// snapshot. See CanvasRenderer.FrameMetrics and FrameMetricsSnapshot.
+func (r *Renderer) FrameMetrics() FrameMetricsSnapshot {
+	return r.canvasRenderer.FrameMetrics()
+}
+
+// ScheduleScroll records a new scroll position and asks the canvas to
+// coalesce it. Returns true when the call scheduled a new render,
+// false when an existing render was reused (i.e. another scroll
+// event arrived in the same frame and was collapsed into this one).
+func (r *Renderer) ScheduleScroll(y, height float32) bool {
+	return r.canvasRenderer.ScheduleScroll(y, height)
+}
+
+// TryClaimScroll returns the latest queued viewport and clears the
+// pending flag. The caller is responsible for the actual render.
+func (r *Renderer) TryClaimScroll() (ScrollViewport, bool) {
+	return r.canvasRenderer.TryClaimScroll()
+}
+
+// RecordInputToPresent records the time from a user-input event
+// (scroll, mutation) to the next presented frame.
+func (r *Renderer) RecordInputToPresent(d time.Duration) {
+	r.canvasRenderer.RecordInputToPresent(d)
+}
+
+// RecordUIQueueWait records how long a piece of work waited on the
+// Fyne main thread.
+func (r *Renderer) RecordUIQueueWait(d time.Duration) {
+	r.canvasRenderer.RecordUIQueueWait(d)
+}
+
+// RecordCoalescedMutations records how many JS mutations were
+// collapsed into a single render. Owners call this from the
+// mutation-coalescer callback so the freeze-fix health checks
+// and the on-screen HUD can see the actual rate.
+func (r *Renderer) RecordCoalescedMutations(n int) {
+	r.canvasRenderer.RecordCoalescedMutations(n)
+}
+
+// RecordCoalescedScroll records how many scroll events were
+// collapsed into a single render.
+func (r *Renderer) RecordCoalescedScroll(n int) {
+	r.canvasRenderer.RecordCoalescedScroll(n)
+}
+
 // GetDOMNodeCounts returns the total, element, and text node counts
 // from the current render tree.
 func (r *Renderer) GetDOMNodeCounts() (total int, elements int, text int) {

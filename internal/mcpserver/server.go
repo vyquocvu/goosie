@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/modelcontextprotocol/go-sdk/mcp/tool"
 
 	"github.com/vyquocvu/goosie/internal/browsercontrol"
 )

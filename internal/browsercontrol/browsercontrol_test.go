@@ -75,7 +75,7 @@ func TestOperationAfterClose_ReturnsContextNotFound(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	s.CloseContext(ctx, info.ID)
@@ -96,7 +96,7 @@ func TestParentCancellation_ClosesChildWork(t *testing.T) {
 	info, err := s.CreateContext(parentCtx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	// Cancel parent
@@ -166,7 +166,7 @@ func TestNavigate_ReturnsStateAndRevision(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	nav, err := c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -187,7 +187,7 @@ func TestSnapshot_ReturnsSemanticTree(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -208,7 +208,7 @@ func TestQuery_LocatorReturnsRefs(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -232,7 +232,7 @@ func TestEvaluate_ReturnsPrimitiveResult(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -256,7 +256,7 @@ func TestScreenshot_ReturnsImageData(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -277,7 +277,7 @@ func TestConsole_ReturnsBoundedEntries(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -295,7 +295,7 @@ func TestSecurity_ReturnsSummary(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -350,7 +350,7 @@ func TestWait_Timeout(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
@@ -383,7 +383,7 @@ func TestSnapshot_DefaultOptions(t *testing.T) {
 	ctx := context.Background()
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
 
@@ -399,7 +399,7 @@ func TestContextID_NotEmpty(t *testing.T) {
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 	assert.Equal(t, info.ID, c.ID())
 	assert.NotEmpty(t, c.ID())
@@ -410,7 +410,7 @@ func TestClick_ReturnsActionResult(t *testing.T) {
 	ctx := context.Background()
 	info, err := s.CreateContext(ctx, CreateContextOptions{})
 	require.NoError(t, err)
-	c, err := s.Context(info.ID)
+	c, err := s.Context(context.Background(), info.ID)
 	require.NoError(t, err)
 	c.Navigate(ctx, "https://example.com", WaitComplete, 5000)
 

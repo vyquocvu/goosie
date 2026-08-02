@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"github.com/vyquocvu/goosie/internal/css"
@@ -13,7 +14,9 @@ import (
 // MockHTMLRendererComp implements HTMLRenderer with configurable summary.
 type MockHTMLRendererComp struct {
 	summary             map[string]int
+	coalescer           *renderer.ScrollCoalescer
 	dirtyOverlayEnabled bool
+	fpsOverlayEnabled   bool
 }
 
 func (m *MockHTMLRendererComp) RenderHTML(ctx context.Context, s string) (fyne.CanvasObject, error) {
@@ -44,7 +47,32 @@ func (m *MockHTMLRendererComp) GetDisplayListCommands() []renderer.PaintCommand 
 func (m *MockHTMLRendererComp) SetDirtyOverlayEnabled(enabled bool) {
 	m.dirtyOverlayEnabled = enabled
 }
-func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool         { return m.dirtyOverlayEnabled }
+func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool { return m.dirtyOverlayEnabled }
+func (m *MockHTMLRendererComp) SetFPSOverlayEnabled(enabled bool) {
+	m.fpsOverlayEnabled = enabled
+}
+func (m *MockHTMLRendererComp) FPSOverlayEnabled() bool           { return m.fpsOverlayEnabled }
+func (m *MockHTMLRendererComp) FPSStats() renderer.FPSStats       { return renderer.FPSStats{} }
+func (m *MockHTMLRendererComp) FrameMetrics() renderer.FrameMetricsSnapshot {
+	return renderer.FrameMetricsSnapshot{}
+}
+func (m *MockHTMLRendererComp) ScheduleScroll(y, h float32) bool {
+	if m.coalescer == nil {
+		m.coalescer = renderer.NewScrollCoalescer()
+	}
+	m.coalescer.Schedule(renderer.ScrollViewport{Y: y, Height: h})
+	return !m.coalescer.Pending()
+}
+func (m *MockHTMLRendererComp) TryClaimScroll() (renderer.ScrollViewport, bool) {
+	if m.coalescer == nil {
+		return renderer.ScrollViewport{}, false
+	}
+	return m.coalescer.TryClaim()
+}
+func (m *MockHTMLRendererComp) RecordInputToPresent(_ time.Duration)                      {}
+func (m *MockHTMLRendererComp) RecordUIQueueWait(_ time.Duration)                          {}
+func (m *MockHTMLRendererComp) RecordCoalescedMutations(_ int)                              {}
+func (m *MockHTMLRendererComp) RecordCoalescedScroll(_ int)                                  {}
 func (m *MockHTMLRendererComp) GetDOMNodeCounts() (int, int, int) { return 0, 0, 0 }
 func (m *MockHTMLRendererComp) GetLayoutNodeCount() int           { return 0 }
 func (m *MockHTMLRendererComp) GetStyleSheet() *css.StyleSheet    { return nil }

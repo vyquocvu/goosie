@@ -1,7 +1,7 @@
 package mcpserver
 
 import (
-	"github.com/modelcontextprotocol/go-sdk/mcp/tool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // toolSchemas defines the MCP tool schemas for the browser automation tools.

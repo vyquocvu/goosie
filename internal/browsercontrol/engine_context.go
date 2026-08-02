@@ -103,8 +103,11 @@ func (s *EngineService) CloseContext(ctx context.Context, id string) error {
 	return nil
 }
 
-// Context returns the engine context by ID (for test access).
-func (s *EngineService) Context(id string) (*engineContext, error) {
+// Context returns the engine context by ID. The returned Context is
+// the public interface, suitable for use by any automation layer
+// (MCP, CLI, perf tooling) that does not need access to the
+// engine-internal state.
+func (s *EngineService) Context(ctx context.Context, id string) (Context, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ec, ok := s.contexts[id]
@@ -463,8 +466,8 @@ func (ec *engineContext) Screenshot(ctx context.Context, opts ScreenshotOptions)
 
 	// Apply size cap
 	truncated := false
-	if len(data) > MaxScreenshotBytes {
-		data = data[:MaxScreenshotBytes]
+	if len(data) > MaxScreenshotEncoded {
+		data = data[:MaxScreenshotEncoded]
 		truncated = true
 	}
 

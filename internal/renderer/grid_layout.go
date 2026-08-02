@@ -655,7 +655,9 @@ func parseTrackList(value string) []TrackSize {
 	if value == "" {
 		return nil
 	}
-	parts := strings.Fields(value)
+	// Expand repeat(N, <tracks>) syntax into its repeated tracks.
+	expanded := expandRepeat(value)
+	parts := strings.Fields(expanded)
 	tracks := make([]TrackSize, 0, len(parts))
 
 	for _, part := range parts {
@@ -673,6 +675,52 @@ func parseTrackList(value string) []TrackSize {
 		}
 	}
 	return tracks
+}
+
+// expandRepeat expands `repeat(N, <tracks>)` into N copies of the track list.
+// Only simple track values are supported (auto, lengths, fr, %).
+func expandRepeat(value string) string {
+	if !strings.Contains(value, "repeat(") {
+		return value
+	}
+	var out strings.Builder
+	rest := value
+	for {
+		idx := strings.Index(rest, "repeat(")
+		if idx < 0 {
+			out.WriteString(rest)
+			break
+		}
+		out.WriteString(rest[:idx])
+		// Find the matching close paren.
+		open := strings.Index(rest[idx:], "(")
+		close := strings.Index(rest[idx:], ")")
+		if open < 0 || close < 0 {
+			out.WriteString(rest[idx:])
+			break
+		}
+		inner := rest[idx+open+1 : idx+close]
+		comma := strings.Index(inner, ",")
+		if comma < 0 {
+			out.WriteString(rest[idx : idx+close+1])
+			rest = rest[idx+close+1:]
+			continue
+		}
+		countStr := strings.TrimSpace(inner[:comma])
+		count, err := strconv.Atoi(countStr)
+		if err != nil || count < 0 {
+			out.WriteString(rest[idx : idx+close+1])
+			rest = rest[idx+close+1:]
+			continue
+		}
+		trackPart := strings.TrimSpace(inner[comma+1:])
+		for i := 0; i < count; i++ {
+			out.WriteString(" ")
+			out.WriteString(trackPart)
+		}
+		rest = rest[idx+close+1:]
+	}
+	return strings.TrimSpace(out.String())
 }
 
 func parseGridPlacement(startVal, endVal string) (int, int, error) {

@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"time"
+
 	"fyne.io/fyne/v2"
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/net"
@@ -55,6 +57,55 @@ type HTMLRenderer interface {
 
 	// DirtyOverlayEnabled returns whether the dirty-region overlay is enabled.
 	DirtyOverlayEnabled() bool
+
+	// SetFPSOverlayEnabled enables or disables the live on-screen FPS HUD
+	// overlay. When enabled, each presented frame updates a small readout at
+	// the top-left of the viewport.
+	SetFPSOverlayEnabled(enabled bool)
+
+	// FPSOverlayEnabled returns whether the live on-screen FPS HUD overlay is
+	// enabled.
+	FPSOverlayEnabled() bool
+
+	// FPSStats returns the renderer's current frame-rate statistics.
+	FPSStats() renderer.FPSStats
+
+	// FrameMetrics returns the renderer's actionable performance
+	// metrics: render duration, UI-queue wait, input-to-present
+	// latency, long-frame count, and the coalesced event counters.
+	// Use this for the DevTools performance panel and any UI that
+	// needs to attribute "low FPS" to a specific bottleneck.
+	FrameMetrics() renderer.FrameMetricsSnapshot
+
+	// ScheduleScroll records a new scroll position. The renderer
+	// coalesces a burst of scroll events into a single render — the
+	// latest viewport always wins. Owners should drive the actual
+	// render after calling this.
+	ScheduleScroll(y, height float32) bool
+
+	// TryClaimScroll returns the latest queued viewport and clears
+	// the pending flag. The caller is responsible for the actual
+	// render. Returns (renderer.ScrollViewport{}, false) when no
+	// render is pending.
+	TryClaimScroll() (renderer.ScrollViewport, bool)
+
+	// RecordInputToPresent records the time from a user-input event
+	// (scroll, mutation) to the next presented frame. Owners call
+	// this just before triggering a render.
+	RecordInputToPresent(d time.Duration)
+
+	// RecordUIQueueWait records how long a piece of work waited on
+	// the Fyne main thread. High values here are a direct signal
+	// of UI contention.
+	RecordUIQueueWait(d time.Duration)
+
+	// RecordCoalescedMutations records how many JS mutations
+	// were collapsed into a single render.
+	RecordCoalescedMutations(n int)
+
+	// RecordCoalescedScroll records how many scroll events
+	// were collapsed into a single render.
+	RecordCoalescedScroll(n int)
 
 	// SetSize updates the renderer's canvas dimensions and marks it for
 	// re-layout. Callers should call Refresh() after SetSize to recompute

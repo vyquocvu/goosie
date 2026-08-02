@@ -134,6 +134,7 @@ type Browser struct {
 	screenshotButton   *widget.Button
 	devToolsButton     *widget.Button
 	dirtyOverlayButton *widget.Button
+	fpsButton          *widget.Button
 	RendererFactory    func() HTMLRenderer
 	deps               BrowserDependencies
 	shortcuts          *ShortcutRegistry
@@ -204,6 +205,16 @@ func NewBrowser() *Browser {
 }
 
 func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
+	// Capture the Fyne main goroutine ID. NewBrowser (and the test
+	// helpers that drive newBrowserInternal directly) construct the
+	// app on the goroutine that Fyne's glfw driver pins with
+	// runtime.LockOSThread in its init — so this is the same goroutine
+	// the event loop runs on. Capturing here lets doAndWait decide
+	// whether a caller is already on the main thread (and can run
+	// synchronously) or on a worker goroutine (and needs to marshal via
+	// fyne.DoAndWait).
+	captureMainGoroutineID()
+
 	h := len(headless) > 0 && headless[0]
 	state := NewBrowserState()
 	settings := NewSettings()
@@ -666,6 +677,28 @@ func (b *Browser) toggleDirtyOverlay() {
 	tab.htmlRenderer.Refresh()
 }
 
+// toggleFPSOverlay toggles the live on-screen FPS HUD on the active tab.
+// When enabled, each presented frame updates a small readout at the top-left
+// of the viewport measuring the rendered frame rate.
+func (b *Browser) toggleFPSOverlay() {
+	tab := b.ActiveTab()
+	if tab == nil || tab.htmlRenderer == nil {
+		return
+	}
+
+	enabled := !tab.htmlRenderer.FPSOverlayEnabled()
+	tab.htmlRenderer.SetFPSOverlayEnabled(enabled)
+
+	if enabled {
+		b.fpsButton.SetText("FPS✓")
+	} else {
+		b.fpsButton.SetText("FPS")
+	}
+
+	// Force re-render to show or hide the overlay
+	tab.htmlRenderer.Refresh()
+}
+
 // newTabInternal creates a new tab without adding it to the tab container
 func (b *Browser) newTabInternal() *Tab {
 	contentBox := widget.NewRichTextFromMarkdown("Welcome to Goosie! Enter a URL above to start browsing.")
@@ -784,9 +817,27 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 		t.htmlRenderer.SetSize(1000, 600)
 	}
 
-	canvasObject, err := t.htmlRenderer.RenderHTML(ctx, htmlContent)
-	if err != nil {
-		return err
+	// RenderHTML internally creates and mutates Fyne canvas objects
+	// (canvas.Text, canvas.Rectangle, widget.NewButton, container
+	// Refresh, etc.). All of those must run on the Fyne main thread —
+	// see the comment on Browser.doAndWait — so marshal here when the
+	// caller is on a non-Fyne goroutine (e.g. the navigation fetch
+	// goroutine, the documentloader mutation-coalescer timer, the image
+	// loader). When the caller is already on the main thread we run
+	// directly to avoid a deadlock via fyne.DoAndWait.
+	var (
+		canvasObject fyne.CanvasObject
+		renderErr    error
+	)
+	t.browser.doAndWait(func() {
+		if t.browser.headless {
+			t.contentScroll.Resize(fyne.NewSize(1000, 600))
+			t.htmlRenderer.SetSize(1000, 600)
+		}
+		canvasObject, renderErr = t.htmlRenderer.RenderHTML(ctx, htmlContent)
+	})
+	if renderErr != nil {
+		return renderErr
 	}
 
 	t.publishCanvasObject(canvasObject)
@@ -804,9 +855,27 @@ func (t *Tab) RenderParsedContent(ctx context.Context, doc *html.Node, externalC
 		t.htmlRenderer.SetSize(1000, 600)
 	}
 
-	canvasObject, err := t.htmlRenderer.RenderParsed(ctx, doc, externalCSS)
-	if err != nil {
-		return err
+	// Marshal to the Fyne main thread for the same reason as RenderHTML
+	// — the underlying render is the only place that touches Fyne
+	// canvas objects, and the mutation coalescer that drives us on JS
+	// pages runs on a timer goroutine. Without this marshalling a burst
+	// of JS DOM mutations logs the "Error in Fyne call thread, this
+	// should have been called in fyne.Do[AndWait]" diagnostic and the
+	// app appears not-responding because fyne.DoAndWait from main
+	// deadlocks.
+	var (
+		canvasObject fyne.CanvasObject
+		renderErr    error
+	)
+	t.browser.doAndWait(func() {
+		if t.browser.headless {
+			t.contentScroll.Resize(fyne.NewSize(1000, 600))
+			t.htmlRenderer.SetSize(1000, 600)
+		}
+		canvasObject, renderErr = t.htmlRenderer.RenderParsed(ctx, doc, externalCSS)
+	})
+	if renderErr != nil {
+		return renderErr
 	}
 
 	t.publishCanvasObject(canvasObject)
@@ -875,12 +944,45 @@ func (t *Tab) ensureHTMLRenderer() {
 
 		// Sync Fyne scroll position with the renderer viewport so viewport
 		// culling and hit-testing follow the user's scroll.
+		//
+		// The previous implementation called refreshTabContent(t)
+		// directly on every OnScrolled tick. When the user was
+		// scrolling rapidly, every tick walked the full display list,
+		// built Fyne objects, and triggered a refresh — easily enough
+		// to drive scroll-rate FPS into single digits on a large
+		// page. The fix is to route scroll updates through the
+		// renderer's ScrollCoalescer: the latest viewport always
+		// wins, and at most one render is queued at any time.
+		scrollStart := time.Now()
 		t.contentScroll.OnScrolled = func(pos fyne.Position) {
 			if t.htmlRenderer == nil {
 				return
 			}
 			scrollSize := t.contentScroll.Size()
-			t.htmlRenderer.SetViewport(pos.Y, scrollSize.Height)
+			scheduledNew := t.htmlRenderer.ScheduleScroll(pos.Y, scrollSize.Height)
+			if !scheduledNew {
+				// The new viewport was collapsed into a
+				// pending one. Bump the coalesced-scroll
+				// counter so the freeze-fix health check
+				// and the on-screen HUD can see how many
+				// scroll events were collapsed.
+				t.htmlRenderer.RecordCoalescedScroll(1)
+				return
+			}
+			viewport, ok := t.htmlRenderer.TryClaimScroll()
+			if !ok {
+				return
+			}
+			// Record input-to-present latency. The HUD will display
+			// the maximum of these samples so the user can see the
+			// worst case across a session.
+			t.htmlRenderer.RecordInputToPresent(time.Since(scrollStart))
+			scrollStart = time.Now()
+			// Apply the coalesced viewport. SetViewport on the
+			// canvas is cheap (it just stores two floats) but we
+			// keep the call because the canvas reader uses the
+			// values for culling and hit-testing.
+			t.htmlRenderer.SetViewport(viewport.Y, viewport.Height)
 			refreshTabContent(t)
 		}
 	}
@@ -946,6 +1048,7 @@ func (b *Browser) Show() {
 		compactBtn(b.screenshotButton),
 		compactBtn(b.devToolsButton),
 		compactBtn(b.dirtyOverlayButton),
+		compactBtn(b.fpsButton),
 		compactBtn(b.consoleButton),
 		compactBtn(b.inspectButton),
 		compactBtn(b.settingsButton),
@@ -1101,6 +1204,11 @@ func (b *Browser) createNavigationControls() {
 	b.dirtyOverlayButton = widget.NewButton("Ov", func() {
 		b.toggleDirtyOverlay()
 	})
+
+	// FPS overlay button — toggle the live on-screen FPS HUD
+	b.fpsButton = widget.NewButton("FPS", func() {
+		b.toggleFPSOverlay()
+	})
 }
 
 // AsTabItem converts a Tab to a TabItem
@@ -1241,6 +1349,29 @@ func (b *Browser) do(fn func()) {
 		return
 	}
 	fyne.Do(fn)
+}
+
+// doAndWait runs fn on the Fyne UI thread, blocking the caller until fn
+// returns. Use this when the caller is on a non-Fyne goroutine (the JS
+// runtime, the documentloader mutation-coalescer timer, the image
+// loader, etc.) and needs to wait for the Fyne-side work to finish
+// before continuing — typically because the return value of the work
+// is needed by the caller.
+//
+// In headless mode the function runs directly. From the Fyne main
+// goroutine the function also runs directly so that fyne.DoAndWait —
+// which would re-queue onto the very thread that's executing us — does
+// not deadlock.
+func (b *Browser) doAndWait(fn func()) {
+	if b.headless {
+		fn()
+		return
+	}
+	if IsMainGoroutine() {
+		fn()
+		return
+	}
+	fyne.DoAndWait(fn)
 }
 
 // ShowLoading displays the loading indicator

@@ -41,6 +41,9 @@ func main() {
 	privateFlag := flag.Bool("private", false, "Run in private browsing mode (incognito)")
 	devToolsFlag := flag.Bool("devtools", false, "Show the developer tools dock (intended for headless screenshots)")
 	devToolsTabFlag := flag.String("devtools-tab", "", "DevTools tab to select when -devtools is set (e.g. Sources, Network, Console)")
+	reproFlag := flag.Bool("repro", false, "After page load, run a click+scroll+mutate workload to reproduce the freeze symptom, then print timing. Headless only.")
+	reproScrolling := flag.Int("repro-scrolls", 5, "number of scroll events to issue during the repro workload")
+	reproEvalExpr := flag.String("repro-evaluate", "(function(){var b=document.body;if(!b)return 0;var t=b.textContent.length;for(var i=0;i<5;i++){var d=document.createElement('div');d.textContent='probe-'+i+'-of-'+t;b.appendChild(d);}return b.children.length;})()", "JS expression to run during the repro workload (default provokes 5 DOM mutations)")
 	flag.Parse()
 
 	if *showVersion {
@@ -173,6 +176,10 @@ func main() {
 				} else {
 					log.Printf("Screenshot saved to %s", *screenshotFlag)
 				}
+			}
+
+			if *reproFlag {
+				runReproWorkload(browser, *reproScrolling, *reproEvalExpr)
 			}
 		}
 		os.Exit(0)
@@ -791,7 +798,6 @@ OnScript: func(r documentloader.ScriptResult) {
 			muMut.Lock()
 			latest := currentMutHTML
 			muMut.Unlock()
-			// fmt.Printf("DEBUG: Mutation render callback, latest HTML length: %d\n", len(latest))
 			if latest == "" {
 				return
 			}
@@ -800,10 +806,20 @@ OnScript: func(r documentloader.ScriptResult) {
 				log.Printf("Mutation render: parse failed: %v", parseErr)
 				return
 			}
+			renderStart := time.Now()
 			if err := tab.RenderParsedContent(context.Background(), doc, external); err != nil {
 				log.Printf("Mutation render: RenderParsedContent failed: %v", err)
 			} else {
-				log.Printf("Mutation render: coalesced %d mutations", n)
+				log.Printf("Mutation render: coalesced %d mutations (bytes=%d, render=%s)", n, len(latest), time.Since(renderStart))
+			}
+			// Record the coalesced-event count so the freeze
+			// health checks and the on-screen HUD can see
+			// whether the mutation path is keeping up. The
+			// render-start time feeds the input-to-present
+			// metric.
+			if r := tab.GetRenderer(); r != nil {
+				r.RecordInputToPresent(time.Since(renderStart))
+				r.RecordCoalescedMutations(n)
 			}
 		})
 		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
@@ -1135,6 +1151,142 @@ func loadPage(browser *ui.Browser, fetcher *net.Fetcher, parser *dom.Parser, url
 	s := session.New()
 	load, ctx := s.Navigate(context.Background(), url)
 	loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, s, nil, nil)
+}
+
+// runReproWorkload drives a click + scroll + JS-evaluate sequence
+// against the active tab and prints per-stage timing. It is the
+// focused reproducer for the freeze that fires immediately after
+// the "Mutation render: coalesced N mutations" log line. Each
+// stage is timed with time.Now/Sub and the renderer's FrameMetrics
+// is dumped at the end so the operator can see whether the
+// mutation-render path produced long frames.
+//
+// The reproducer is deliberately synchronous: it does not pump
+// events or run an animation loop, so any "long frame" we see is
+// the result of a single real workload, not a sustained animation
+// run. To reproduce that case, run with a long `-repro-scrolls`.
+func runReproWorkload(browser *ui.Browser, scrolls int, evalExpr string) {
+	tab := browser.ActiveTab()
+	if tab == nil {
+		log.Print("repro: no active tab")
+		return
+	}
+	rt := tab.GetJSRuntime()
+	r := tab.GetRenderer()
+	if r == nil {
+		log.Print("repro: no renderer on the active tab")
+		return
+	}
+	log.Print("repro: starting click+scroll+mutate workload")
+
+	// Stage 1: snapshot the metrics baseline so we can report deltas.
+	before := r.FrameMetrics()
+
+	// Stage 2: click a link if one exists on the page. We pick the
+	// first anchor and call .click() on it through the JS runtime.
+	// On the IANA page this is a real link to a domain registry.
+	if _, err := rt.RunScript("(function(){var a=document.querySelector('a[href]');if(!a)return null;a.click();return a.getAttribute('href');})()"); err != nil {
+		log.Printf("repro: click failed: %v", err)
+	} else {
+		log.Print("repro: click dispatched")
+	}
+
+	// Stage 3: scroll the page repeatedly. Each scroll is timed
+	// individually and we report the worst case alongside the
+	// aggregate, because the user-reported freeze is a
+	// single-event stall, not a slow average.
+	scrollDurations := make([]time.Duration, 0, scrolls)
+	for i := 0; i < scrolls; i++ {
+		start := time.Now()
+		if _, err := rt.RunScript("window.scrollBy(0, 240); window.scrollY"); err != nil {
+			log.Printf("repro: scroll %d failed: %v", i, err)
+			continue
+		}
+		scrollDurations = append(scrollDurations, time.Since(start))
+		// 16ms cadence to mimic a 60Hz scroll wheel. We do not
+		// yield to the Fyne event loop here because the headless
+		// binary has no event loop; the renderer just runs each
+		// call inline.
+		time.Sleep(16 * time.Millisecond)
+	}
+	if len(scrollDurations) > 0 {
+		var min, max, sum time.Duration
+		min = scrollDurations[0]
+		max = scrollDurations[0]
+		for _, d := range scrollDurations {
+			if d < min {
+				min = d
+			}
+			if d > max {
+				max = d
+			}
+			sum += d
+		}
+		mean := sum / time.Duration(len(scrollDurations))
+		log.Printf("repro: scroll n=%d min=%s mean=%s max=%s", len(scrollDurations), min, mean, max)
+	}
+
+	// Stage 4: run a mutation-heavy JS expression. This is the
+	// direct trigger for the "Mutation render: coalesced N
+	// mutations" log line that the user identified as the freeze
+	// boundary. We time both the evaluate call and the wall-clock
+	// delay before the next frame is observable in the metrics.
+	mutStart := time.Now()
+	if _, err := rt.RunScript(evalExpr); err != nil {
+		log.Printf("repro: evaluate failed: %v", err)
+	}
+	evalDur := time.Since(mutStart)
+	log.Printf("repro: evaluate call returned in %s (coalescer will fire after a 16ms debounce)", evalDur)
+
+	// Dump the size of the JS-side serialized DOM so the
+	// operator can see whether the freeze is correlated with
+	// payload size. A real page with N elements should produce
+	// on the order of 200-500 bytes per element; if the
+	// serialized output is much larger, the __serialize
+	// polyfill is leaking inherited Object.prototype properties
+	// into the HTML, which scales the next parse/render.
+	if rt != nil {
+		// serializeJSDOMToCache is unexported, so reach the
+		// same effect via the JS hook the polyfill exposes.
+		sizeExpr := "window.__serialize(document).length"
+		v, err := rt.RunScript(sizeExpr)
+		if err == nil {
+			log.Printf("repro: serialized DOM size = %s bytes", v.String())
+		}
+		// Show a sample element's serialized form so we can
+		// see whether the polyfill is leaking inherited
+		// properties (a known goja polyfill bug).
+		probeExpr := "window.__serialize(document.querySelector('div') || document.body)"
+		v2, err := rt.RunScript(probeExpr)
+		if err == nil {
+			s := v2.String()
+			if len(s) > 400 {
+				s = s[:400] + "...(truncated)"
+			}
+			log.Printf("repro: sample element serialization = %s", s)
+		}
+	}
+
+	// Give the coalescer and the Fyne thread enough time to flush.
+	// The 16ms debounce plus a full re-render typically fits in
+	// ~80ms; we wait 250ms to capture the worst case.
+	time.Sleep(250 * time.Millisecond)
+
+	// Stage 5: report the final metrics. The interesting column
+	// is "max_render" — if a single render took >16ms the user
+	// will see a jank. The "long" counter is the cumulative
+	// count of frames above the 20ms threshold.
+	after := r.FrameMetrics()
+	log.Printf("repro: metrics render_dur=%s max_render=%s long=%d coalesced_s=%d coalesced_m=%d uiq=%s",
+		after.RenderDuration, after.MaxRenderDuration, after.LongFrames,
+		after.CoalescedScrollEvents, after.CoalescedMutations, after.UIQueueWait)
+	log.Printf("repro: deltas long=%d (vs %d) coalesced_s=%d (vs %d) coalesced_m=%d (vs %d)",
+		after.LongFrames-before.LongFrames,
+		before.LongFrames,
+		after.CoalescedScrollEvents-before.CoalescedScrollEvents,
+		before.CoalescedScrollEvents,
+		after.CoalescedMutations-before.CoalescedMutations,
+		before.CoalescedMutations)
 }
 
 // extractTitle parses the HTML and returns the content of the <title> tag.
