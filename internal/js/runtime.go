@@ -1560,8 +1560,15 @@ func (r *Runtime) addEventMethods(obj *goja.Object) {
 
 // SetHTMLContent sets the HTML content and populates the JS DOM tree
 func (r *Runtime) SetHTMLContent(htmlStr string) {
+	if r.onDOMMutationBatch != nil && r.onDOMMutation == nil {
+		r.applyHTMLContent(htmlStr)
+		return
+	}
 	r.htmlCache = htmlStr
+	r.applyHTMLContentWithMutationNotify(htmlStr)
+}
 
+func (r *Runtime) applyHTMLContent(htmlStr string) {
 	doc, err := html.Parse(strings.NewReader(htmlStr))
 	if err != nil {
 		return
@@ -1570,6 +1577,17 @@ func (r *Runtime) SetHTMLContent(htmlStr string) {
 	r.isPopulatingJSDOM = true
 	defer func() { r.isPopulatingJSDOM = false }()
 
+	r.populateDocument(doc)
+}
+
+func (r *Runtime) applyHTMLContentWithMutationNotify(htmlStr string) {
+	r.isPopulatingJSDOM = true
+	defer func() { r.isPopulatingJSDOM = false }()
+
+	r.populateDocumentFromHTML(htmlStr)
+}
+
+func (r *Runtime) populateDocument(doc *html.Node) {
 	jsDoc := r.vm.Get("document").ToObject(r.vm)
 	jsHead := jsDoc.Get("head").ToObject(r.vm)
 	jsBody := jsDoc.Get("body").ToObject(r.vm)
@@ -1629,6 +1647,14 @@ func (r *Runtime) SetHTMLContent(htmlStr string) {
 		}
 		r.populateJSNode(bodyNode, jsBody)
 	}
+}
+
+func (r *Runtime) populateDocumentFromHTML(htmlStr string) {
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	if err != nil {
+		return
+	}
+	r.populateDocument(doc)
 }
 
 // LoadHTML is an alias for SetHTMLContent, provided for test convenience.
@@ -3013,7 +3039,6 @@ func (r *Runtime) populateJSNode(goNode *html.Node, jsNode *goja.Object) {
 		}
 	}
 }
-
 func (r *Runtime) convertGoNodeToJS(n *html.Node) goja.Value {
 	if n == nil {
 		return goja.Null()

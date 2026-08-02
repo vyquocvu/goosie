@@ -118,6 +118,15 @@ func TestDOMMutationBatchCallbackSkipsSerialization(t *testing.T) {
 	assert.Equal(t, before, rt.htmlCache)
 }
 
+func TestSetHTMLContentSkipsHtmlCacheWhenOnlyBatchCallbackSet(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetDOMMutationBatchCallback(func([]DOMMutation) {})
+	rt.SetHTMLContent(`<html><body><div>initial</div></body></html>`)
+	if rt.htmlCache != "" {
+		t.Fatalf("htmlCache should stay empty on the typed path, got %q", rt.htmlCache)
+	}
+}
+
 func TestDOMMutationBatchIncludesOperationDetails(t *testing.T) {
 	rt := NewRuntime()
 	rt.SetHTMLContent(`<html><body><div id="target">before</div></body></html>`)
