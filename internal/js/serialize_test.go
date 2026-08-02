@@ -117,3 +117,29 @@ func TestDOMMutationBatchCallbackSkipsSerialization(t *testing.T) {
 	assert.NotEmpty(t, batches)
 	assert.Equal(t, before, rt.htmlCache)
 }
+
+func TestDOMMutationBatchIncludesOperationDetails(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetHTMLContent(`<html><body><div id="target">before</div></body></html>`)
+
+	var mutations []DOMMutation
+	rt.SetDOMMutationBatchCallback(func(batch []DOMMutation) {
+		mutations = append(mutations, batch...)
+	})
+
+	_, err := rt.RunScript(`(function(){
+		var target = document.getElementById("target");
+		target.setAttribute("data-state", "ready");
+		target.textContent = "after";
+	})()`)
+	assert.NoError(t, err)
+	if len(mutations) != 2 {
+		t.Fatalf("mutation count = %d, want 2", len(mutations))
+	}
+	assert.Equal(t, MutationSetAttribute, mutations[0].Kind)
+	assert.Equal(t, "data-state", mutations[0].Attribute)
+	assert.Equal(t, "ready", mutations[0].NewValue)
+	assert.Equal(t, MutationSetText, mutations[1].Kind)
+	assert.NotEmpty(t, mutations[1].TargetID)
+	assert.Equal(t, "after", mutations[1].NewValue)
+}

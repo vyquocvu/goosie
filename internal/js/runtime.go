@@ -432,6 +432,11 @@ func (r *Runtime) setupConsoleAPI() {
 func (r *Runtime) setupDocumentAPI() {
 	jsDOMScript := `
 (function() {
+  function nodeId(node) {
+    if (!node || !node.attributes) return "";
+    return String(node.attributes["__goosie_id"] || "");
+  }
+
   class Node {
     constructor(nodeType, nodeName) {
       this.nodeType = nodeType;
@@ -457,22 +462,24 @@ func (r *Runtime) setupDocumentAPI() {
     }
     
     appendChild(child) {
-      if (child.parentNode) {
-        child.parentNode.removeChild(child);
-      }
-      child.parentNode = this;
-      this.childNodes.push(child);
-      if (window.__onDOMChanged) window.__onDOMChanged();
-      return child;
+       if (child.parentNode) {
+         child.parentNode.removeChild(child);
+       }
+       child.parentNode = this;
+       this.childNodes.push(child);
+       if (window.__onDOMChanged) window.__onDOMChanged("insert", nodeId(child), nodeId(this), "", "", "");
+       return child;
+
     }
     
     removeChild(child) {
       const idx = this.childNodes.indexOf(child);
       if (idx !== -1) {
         this.childNodes.splice(idx, 1);
-        child.parentNode = null;
-        if (window.__onDOMChanged) window.__onDOMChanged();
-        return child;
+         child.parentNode = null;
+         if (window.__onDOMChanged) window.__onDOMChanged("remove", nodeId(child), nodeId(this), "", "", "");
+         return child;
+
       }
       throw new Error("NotFoundErr");
     }
@@ -488,9 +495,10 @@ func (r *Runtime) setupDocumentAPI() {
         newChild.parentNode.removeChild(newChild);
       }
       newChild.parentNode = this;
-      this.childNodes.splice(idx, 0, newChild);
-      if (window.__onDOMChanged) window.__onDOMChanged();
-      return newChild;
+       this.childNodes.splice(idx, 0, newChild);
+       if (window.__onDOMChanged) window.__onDOMChanged("insert", nodeId(newChild), nodeId(this), nodeId(refChild), "", "");
+       return newChild;
+
     }
     
     replaceChild(newChild, oldChild) {
@@ -502,9 +510,10 @@ func (r *Runtime) setupDocumentAPI() {
       }
       oldChild.parentNode = null;
       newChild.parentNode = this;
-      this.childNodes[idx] = newChild;
-      if (window.__onDOMChanged) window.__onDOMChanged();
-      return oldChild;
+       this.childNodes[idx] = newChild;
+       if (window.__onDOMChanged) window.__onDOMChanged("replace", nodeId(oldChild), nodeId(this), nodeId(newChild), "", "");
+       return oldChild;
+
     }
     
     addEventListener(type, listener) {
@@ -578,13 +587,15 @@ func (r *Runtime) setupDocumentAPI() {
     }
     get textContent() { return this._textContent; }
     set textContent(val) {
-      this._textContent = val;
-      if (window.__onDOMChanged) window.__onDOMChanged();
+       this._textContent = val;
+       if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
+
     }
     get nodeValue() { return this._textContent; }
     set nodeValue(val) {
-      this._textContent = val;
-      if (window.__onDOMChanged) window.__onDOMChanged();
+       this._textContent = val;
+       if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
+
     }
   }
   
@@ -708,14 +719,20 @@ func (r *Runtime) setupDocumentAPI() {
     }
     
     setAttribute(name, value) {
-      this.attributes[name.toLowerCase()] = String(value);
-      if (window.__onDOMChanged) window.__onDOMChanged();
-    }
-    
-    removeAttribute(name) {
-      delete this.attributes[name.toLowerCase()];
-      if (window.__onDOMChanged) window.__onDOMChanged();
-    }
+       const key = name.toLowerCase();
+       const oldValue = this.attributes[key] === undefined ? "" : String(this.attributes[key]);
+       const newValue = String(value);
+       this.attributes[key] = newValue;
+       if (window.__onDOMChanged) window.__onDOMChanged("set-attribute", nodeId(this), nodeId(this.parentNode), "", key, newValue);
+     }
+
+     removeAttribute(name) {
+       const key = name.toLowerCase();
+       const oldValue = this.attributes[key] === undefined ? "" : String(this.attributes[key]);
+       delete this.attributes[key];
+       if (window.__onDOMChanged) window.__onDOMChanged("set-attribute", nodeId(this), nodeId(this.parentNode), "", key, "");
+     }
+
     
     get children() {
       return this.childNodes.filter(n => n.nodeType === 1);
@@ -750,8 +767,9 @@ func (r *Runtime) setupDocumentAPI() {
     
     set textContent(val) {
       this.childNodes = [new TextNode(val)];
-      this.childNodes[0].parentNode = this;
-      if (window.__onDOMChanged) window.__onDOMChanged();
+       this.childNodes[0].parentNode = this;
+       if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
+
     }
     
     get innerHTML() {
@@ -1017,7 +1035,7 @@ func (r *Runtime) setupDocumentAPI() {
   
   window.__onDOMChanged = function() {
     if (typeof __onDOMChangedGo === "function") {
-      __onDOMChangedGo();
+      __onDOMChangedGo.apply(null, arguments);
     }
   };
 
@@ -1245,12 +1263,31 @@ func (r *Runtime) setupDocumentAPI() {
 		return r.vm.ToValue(jsNodes)
 	})
 
-	r.vm.Set("__onDOMChangedGo", func() {
+	r.vm.Set("__onDOMChangedGo", func(args ...goja.Value) {
 		if r.isPopulatingJSDOM {
 			return
 		}
 		if r.onDOMMutationBatch != nil {
-			r.onDOMMutationBatch([]DOMMutation{{Kind: MutationBatch, Count: 1}})
+			mutation := DOMMutation{Kind: MutationBatch, Count: 1}
+			if len(args) > 0 {
+				mutation.Kind = mutationKindFromString(args[0].String())
+			}
+			if len(args) > 1 {
+				mutation.TargetID = args[1].String()
+			}
+			if len(args) > 2 {
+				mutation.ParentID = args[2].String()
+			}
+			if len(args) > 3 {
+				mutation.ReferenceID = args[3].String()
+			}
+			if len(args) > 4 {
+				mutation.Attribute = args[4].String()
+			}
+			if len(args) > 5 {
+				mutation.NewValue = args[5].String()
+			}
+			r.onDOMMutationBatch([]DOMMutation{mutation})
 		}
 		if r.onDOMMutation != nil {
 			r.serializeJSDOMToCache()
