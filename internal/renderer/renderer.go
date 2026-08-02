@@ -24,6 +24,7 @@ import (
 // Renderer is the main HTML renderer that coordinates parsing, layout, and rendering
 type Renderer struct {
 	layoutEngine   *LayoutEngine
+	incremental    *IncrementalLayoutEngine
 	canvasRenderer *CanvasRenderer
 	imageLoader    imageloader.Loader
 	stylesheet     *css.StyleSheet
@@ -77,6 +78,7 @@ func NewRenderer(width, height float32) *Renderer {
 
 	return &Renderer{
 		layoutEngine:   NewLayoutEngine(width, height),
+		incremental:    NewIncrementalLayoutEngine(width, height),
 		canvasRenderer: canvasRenderer,
 		imageLoader:    imageLoader,
 		fetcher:        net.NewFetcher(),

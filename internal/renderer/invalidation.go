@@ -1,6 +1,41 @@
 package renderer
 
-// DirtyFlag represents what needs to be recomputed for a node
+type MutationInvalidation struct {
+	NodeID int64
+	Flags  DirtyFlag
+}
+
+func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
+	if len(batch) == 0 {
+		return 0
+	}
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
+	if r.currentRenderTree == nil {
+		return 0
+	}
+	if r.incremental == nil {
+		width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
+		r.incremental = NewIncrementalLayoutEngine(width, height)
+	}
+	applied := 0
+	for _, mutation := range batch {
+		if mutation.NodeID == 0 || mutation.Flags == DirtyNone {
+			continue
+		}
+		node := r.findRenderNodeByID(r.currentRenderTree, mutation.NodeID)
+		if node == nil {
+			continue
+		}
+		r.incremental.InvalidateNode(node, mutation.Flags)
+		applied++
+	}
+	if applied > 0 {
+		r.dirty = true
+	}
+	return applied
+}
+
 type DirtyFlag uint8
 
 const (

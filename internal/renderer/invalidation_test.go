@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"testing"
 )
 
@@ -269,5 +270,62 @@ func TestDirtyFlagCombinations(t *testing.T) {
 				t.Errorf("Expected flags %v, got %v", tt.flags, flags)
 			}
 		})
+	}
+}
+
+func TestRendererApplyMutationBatchMarksExistingNode(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target">value</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target *RenderNode
+	walkRenderNodes(r.GetRoot(), func(node *RenderNode) {
+		if node != nil && node.Attrs["id"] == "target" {
+			target = node
+		}
+	})
+	if target == nil {
+		t.Fatal("target node not found")
+	}
+	if applied := r.ApplyMutationBatch([]MutationInvalidation{{NodeID: target.ID, Flags: DirtyStyle | DirtyPaint}}); applied != 1 {
+		t.Fatalf("applied = %d, want 1", applied)
+	}
+	if !r.incremental.IsNodeDirty(target.ID) {
+		t.Fatal("target should be invalidated")
+	}
+}
+
+func BenchmarkRendererApplyMutationBatch(b *testing.B) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target">value</div></body></html>`)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var target *RenderNode
+	walkRenderNodes(r.GetRoot(), func(node *RenderNode) {
+		if node != nil && node.Attrs["id"] == "target" {
+			target = node
+		}
+	})
+	if target == nil {
+		b.Fatal("target node not found")
+	}
+	mutation := []MutationInvalidation{{NodeID: target.ID, Flags: DirtyStyle | DirtyPaint}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.ApplyMutationBatch(mutation)
+		r.incremental.GetInvalidationTracker().ClearAll()
+	}
+}
+
+func walkRenderNodes(node *RenderNode, visit func(*RenderNode)) {
+	if node == nil {
+		return
+	}
+	visit(node)
+	for _, child := range node.Children {
+		walkRenderNodes(child, visit)
 	}
 }
