@@ -19,19 +19,26 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 		r.incremental = NewIncrementalLayoutEngine(width, height)
 	}
 	applied := 0
+	hasLayout := false
 	for _, mutation := range batch {
 		if mutation.NodeID == 0 || mutation.Flags == DirtyNone {
 			continue
 		}
-		node := r.findRenderNodeByID(r.currentRenderTree, mutation.NodeID)
+		node := findRenderNodeByIDRoot(r.currentRenderTree, mutation.NodeID)
 		if node == nil {
 			continue
 		}
 		r.incremental.InvalidateNode(node, mutation.Flags)
 		applied++
+		if mutation.Flags&DirtyLayout != 0 || mutation.Flags&DirtySubtree != 0 {
+			hasLayout = true
+		}
 	}
 	if applied > 0 {
 		r.dirty = true
+		if hasLayout {
+			r.currentLayoutTree = r.incremental.RecomputeDirty(r.currentRenderTree, r.currentLayoutTree)
+		}
 	}
 	return applied
 }
@@ -163,6 +170,85 @@ func (ile *IncrementalLayoutEngine) InvalidateNode(node *RenderNode, flags Dirty
 }
 
 // ComputeIncrementalLayout performs incremental layout, only recomputing dirty subtrees
+func (ile *IncrementalLayoutEngine) RecomputeDirty(root *RenderNode, previousLayout *LayoutBox) *LayoutBox {
+	if root == nil {
+		return nil
+	}
+	if previousLayout == nil {
+		return ile.LayoutEngine.ComputeLayout(root)
+	}
+	dirtyNodes := ile.invalidation.GetDirtyNodes()
+	if len(dirtyNodes) == 0 {
+		return previousLayout
+	}
+	return ile.recomputeSubtrees(root, previousLayout, dirtyNodes)
+}
+
+func findRenderNodeByIDRoot(node *RenderNode, id int64) *RenderNode {
+	if node == nil || id == 0 {
+		return nil
+	}
+	if node.ID == id {
+		return node
+	}
+	for _, child := range node.Children {
+		if result := findRenderNodeByIDRoot(child, id); result != nil {
+			return result
+		}
+	}
+	return nil
+}
+
+func (ile *IncrementalLayoutEngine) recomputeSubtrees(root *RenderNode, previous *LayoutBox, dirtyNodes []int64) *LayoutBox {
+	visited := make(map[int64]bool, len(dirtyNodes))
+	for _, id := range dirtyNodes {
+		if visited[id] {
+			continue
+		}
+		node := findRenderNodeByIDRoot(root, id)
+		if node == nil {
+			continue
+		}
+		rootID := ile.findReflowRoot(node)
+		if rootID == 0 {
+			continue
+		}
+		rootNode := findRenderNodeByIDRoot(root, rootID)
+		if rootNode == nil {
+			continue
+		}
+		ile.rebuildSubtree(rootNode)
+		visited[rootID] = true
+	}
+	ile.invalidation.ClearAll()
+	return previous
+}
+
+func (ile *IncrementalLayoutEngine) findReflowRoot(node *RenderNode) int64 {
+	current := node
+	for current != nil {
+		if ile.invalidation.IsDirty(current.ID) {
+			return current.ID
+		}
+		current = current.Parent
+	}
+	return node.ID
+}
+
+func (ile *IncrementalLayoutEngine) rebuildSubtree(node *RenderNode) {
+	if node == nil {
+		return
+	}
+	le := ile.LayoutEngine
+	le.nodeMapMu.Lock()
+	le.nodeMap = make(map[int64]*LayoutBox)
+	le.nodeMapMu.Unlock()
+	_ = le.buildLayoutBox(node, 0, 0, le.canvasWidth, nil,
+		NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize),
+		NewFlexLayoutEngine(le.fontMetrics),
+		NewGridLayoutEngine(le.fontMetrics),
+	)
+}
 func (ile *IncrementalLayoutEngine) ComputeIncrementalLayout(root *RenderNode, previousLayout *LayoutBox) *LayoutBox {
 	if root == nil {
 		return nil

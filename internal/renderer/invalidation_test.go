@@ -2,6 +2,8 @@ package renderer
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -296,6 +298,33 @@ func TestRendererApplyMutationBatchMarksExistingNode(t *testing.T) {
 	}
 }
 
+func TestRendererPartialReflowPreservesLayout(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="a">a</div><div id="b">b</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := r.GetLayoutBox(r.GetRoot())
+	if original == nil {
+		t.Fatal("expected initial layout")
+	}
+	var target *RenderNode
+	walkRenderNodes(r.GetRoot(), func(node *RenderNode) {
+		if node != nil && node.Attrs["id"] == "a" {
+			target = node
+		}
+	})
+	if target == nil {
+		t.Fatal("target node not found")
+	}
+	if applied := r.ApplyMutationBatch([]MutationInvalidation{{NodeID: target.ID, Flags: DirtyLayout}}); applied != 1 {
+		t.Fatalf("applied = %d, want 1", applied)
+	}
+	if r.GetLayoutBox(r.GetRoot()) == nil {
+		t.Fatal("layout tree should still exist after partial reflow")
+	}
+}
+
 func BenchmarkRendererApplyMutationBatch(b *testing.B) {
 	r := NewRenderer(800, 600)
 	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target">value</div></body></html>`)
@@ -318,6 +347,57 @@ func BenchmarkRendererApplyMutationBatch(b *testing.B) {
 		r.ApplyMutationBatch(mutation)
 		r.incremental.GetInvalidationTracker().ClearAll()
 	}
+}
+
+func BenchmarkRendererPartialReflow(b *testing.B) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body>`+repeatingDivs(200)+`</body></html>`)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var target *RenderNode
+	walkRenderNodes(r.GetRoot(), func(node *RenderNode) {
+		if node != nil && node.TagName == "div" && node.Attrs["id"] == "d100" {
+			target = node
+		}
+	})
+	if target == nil {
+		b.Fatal("target node not found")
+	}
+	mutation := []MutationInvalidation{{NodeID: target.ID, Flags: DirtyLayout}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.ApplyMutationBatch(mutation)
+		r.incremental.GetInvalidationTracker().ClearAll()
+		r.currentLayoutTree = r.layoutEngine.ComputeLayout(r.GetRoot())
+	}
+}
+
+func BenchmarkRendererFullReflow(b *testing.B) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body>`+repeatingDivs(200)+`</body></html>`)
+	if err != nil {
+		b.Fatal(err)
+	}
+	root := r.GetRoot()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.currentLayoutTree = r.layoutEngine.ComputeLayout(root)
+	}
+}
+
+func repeatingDivs(n int) string {
+	var out strings.Builder
+	for i := 0; i < n; i++ {
+		out.WriteString(`<div id="d`)
+		out.WriteString(strconv.Itoa(i))
+		out.WriteString(`">`)
+		out.WriteString(strconv.Itoa(i))
+		out.WriteString(`</div>`)
+	}
+	return out.String()
 }
 
 func walkRenderNodes(node *RenderNode, visit func(*RenderNode)) {
