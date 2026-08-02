@@ -26,6 +26,7 @@ type Renderer struct {
 	layoutEngine   *LayoutEngine
 	incremental    *IncrementalLayoutEngine
 	canvasRenderer *CanvasRenderer
+	chunkedDisplay *ChunkedDisplayList
 	imageLoader    imageloader.Loader
 	stylesheet     *css.StyleSheet
 	fetcher        *net.Fetcher
@@ -80,6 +81,7 @@ func NewRenderer(width, height float32) *Renderer {
 		layoutEngine:   NewLayoutEngine(width, height),
 		incremental:    NewIncrementalLayoutEngine(width, height),
 		canvasRenderer: canvasRenderer,
+		chunkedDisplay: NewChunkedDisplayList(NewDisplayCommandList(), NewPaintChunkList()),
 		imageLoader:    imageLoader,
 		fetcher:        net.NewFetcher(),
 		Logger:         slog.Default(),

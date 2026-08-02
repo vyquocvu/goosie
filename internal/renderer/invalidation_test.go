@@ -298,6 +298,35 @@ func TestRendererApplyMutationBatchMarksExistingNode(t *testing.T) {
 	}
 }
 
+func TestRendererInvalidatePaintChunksMarksDirty(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="a">a</div><div id="b">b</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target *RenderNode
+	walkRenderNodes(r.GetRoot(), func(node *RenderNode) {
+		if node != nil && node.Attrs["id"] == "a" {
+			target = node
+		}
+	})
+	if target == nil {
+		t.Fatal("target node not found")
+	}
+	box := r.GetLayoutBox(target)
+	if box == nil {
+		t.Fatalf("layout box missing for node %d", target.ID)
+	}
+	r.chunkedDisplay.chunks.Add(PaintChunk{Owner: LayoutID(uint32(box.NodeID)), Start: 0, End: 1, Bounds: RectF{X: 0, Y: 0, W: 10, H: 10}})
+	r.chunkedDisplay.MarkAllClean()
+	if invalidated := r.InvalidatePaintChunks([]int64{target.ID}); invalidated == 0 {
+		t.Fatal("expected at least one chunk invalidated")
+	}
+	if r.chunkedDisplay.DirtyChunkCount() == 0 {
+		t.Fatal("dirty chunk count should be > 0")
+	}
+}
+
 func TestRendererPartialReflowPreservesLayout(t *testing.T) {
 	r := NewRenderer(800, 600)
 	_, err := r.RenderHTML(context.Background(), `<html><body><div id="a">a</div><div id="b">b</div></body></html>`)
@@ -385,6 +414,31 @@ func BenchmarkRendererFullReflow(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.currentLayoutTree = r.layoutEngine.ComputeLayout(root)
+	}
+}
+
+func BenchmarkRendererInvalidatePaintChunks(b *testing.B) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="a">a</div><div id="b">b</div></body></html>`)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var target *RenderNode
+	walkRenderNodes(r.GetRoot(), func(node *RenderNode) {
+		if node != nil && node.Attrs["id"] == "a" {
+			target = node
+		}
+	})
+	if target == nil {
+		b.Fatal("target node not found")
+	}
+	r.chunkedDisplay.chunks.Add(PaintChunk{Owner: LayoutID(uint32(target.ID)), Start: 0, End: 1, Bounds: RectF{X: 0, Y: 0, W: 10, H: 10}})
+	r.chunkedDisplay.MarkAllClean()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.InvalidatePaintChunks([]int64{target.ID})
+		r.chunkedDisplay.MarkAllClean()
 	}
 }
 

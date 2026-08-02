@@ -37,7 +37,7 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 	if applied > 0 {
 		r.dirty = true
 		if hasLayout {
-			r.currentLayoutTree = r.incremental.RecomputeDirty(r.currentRenderTree, r.currentLayoutTree)
+			r.currentLayoutTree = r.incremental.RecomputeDirtyFromPrevious(r.currentLayoutTree, r.currentRenderTree)
 		}
 	}
 	return applied
@@ -57,6 +57,27 @@ const (
 	// DirtySubtree means the entire subtree is dirty
 	DirtySubtree DirtyFlag = 1 << 3
 )
+
+func (r *Renderer) InvalidatePaintChunks(nodeIDs []int64) int {
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
+	if r.chunkedDisplay == nil {
+		return 0
+	}
+	if r.incremental == nil {
+		return 0
+	}
+	invalidated := 0
+	for _, id := range nodeIDs {
+		if id == 0 {
+			continue
+		}
+		if r.chunkedDisplay.InvalidateByLayoutIDCount(LayoutID(uint32(id))) > 0 {
+			invalidated++
+		}
+	}
+	return invalidated
+}
 
 // InvalidationTracker tracks which nodes need recomputation
 type InvalidationTracker struct {
@@ -241,13 +262,34 @@ func (ile *IncrementalLayoutEngine) rebuildSubtree(node *RenderNode) {
 	}
 	le := ile.LayoutEngine
 	le.nodeMapMu.Lock()
-	le.nodeMap = make(map[int64]*LayoutBox)
+	if le.nodeMap == nil {
+		le.nodeMap = make(map[int64]*LayoutBox)
+	}
 	le.nodeMapMu.Unlock()
 	_ = le.buildLayoutBox(node, 0, 0, le.canvasWidth, nil,
 		NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize),
 		NewFlexLayoutEngine(le.fontMetrics),
 		NewGridLayoutEngine(le.fontMetrics),
 	)
+}
+
+func (ile *IncrementalLayoutEngine) RecomputeDirtyFromPrevious(previous *LayoutBox, root *RenderNode) *LayoutBox {
+	if previous == nil || root == nil {
+		return ile.RecomputeDirty(root, previous)
+	}
+	dirtyNodes := ile.invalidation.GetDirtyNodes()
+	if len(dirtyNodes) == 0 {
+		return previous
+	}
+	for _, id := range dirtyNodes {
+		node := findRenderNodeByIDRoot(root, id)
+		if node == nil {
+			continue
+		}
+		ile.rebuildSubtree(node)
+	}
+	ile.invalidation.ClearAll()
+	return previous
 }
 func (ile *IncrementalLayoutEngine) ComputeIncrementalLayout(root *RenderNode, previousLayout *LayoutBox) *LayoutBox {
 	if root == nil {

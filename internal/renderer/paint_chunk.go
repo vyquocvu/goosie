@@ -305,6 +305,23 @@ func (cdl *ChunkedDisplayList) InvalidateByLayoutID(layout LayoutID) {
 	}
 }
 
+// InvalidateByLayoutIDCount marks all chunks owned by layout as dirty and
+// returns the number of chunks newly marked dirty.
+func (cdl *ChunkedDisplayList) InvalidateByLayoutIDCount(layout LayoutID) int {
+	if layout == LayoutNone {
+		return 0
+	}
+	count := 0
+	for i := 0; i < cdl.chunks.Len(); i++ {
+		chunk := &cdl.chunks.chunks[i]
+		if chunk.Owner == layout && !chunk.dirty {
+			chunk.dirty = true
+			count++
+		}
+	}
+	return count
+}
+
 // MarkAllClean clears the dirty flag on all chunks.
 func (cdl *ChunkedDisplayList) MarkAllClean() {
 	cdl.chunks.MarkAllClean()
