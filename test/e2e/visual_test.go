@@ -44,6 +44,23 @@ func TestHTML5SemanticLayoutGoosieVsBrowser(t *testing.T) {
 	CompareGoosieVsBrowser(t, page, fixturePath, "html5_semantic_layout", config)
 }
 
+func TestLinkedSVGImageGoosieVsBrowser(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	fixturePath := filepath.Join(cwd, "fixtures", "linked_svg_image.html")
+
+	page := newPage(t)
+	defer page.Close()
+	config := VisualTestConfig{
+		DiffThreshold:  0.01,
+		OutputDir:      filepath.Join("testdata", "results"),
+		ViewportWidth:  240,
+		ViewportHeight: 120,
+		WaitForImages:  true,
+	}
+	CompareGoosieVsBrowser(t, page, fixturePath, "linked_svg_image", config)
+}
+
 func TestGeneratedHTML(t *testing.T) {
 	// Verify testdata/output.html exists
 	cwd, err := os.Getwd()

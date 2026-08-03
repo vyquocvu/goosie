@@ -24,6 +24,12 @@ func TestNewRenderNode(t *testing.T) {
 	if node.Box == nil {
 		t.Error("Box not initialized")
 	}
+	if node.ComputedStyle == nil {
+		t.Fatal("ComputedStyle not initialized")
+	}
+	if node.ComputedStyle.Opacity != 1.0 {
+		t.Errorf("Expected default opacity 1.0, got %f", node.ComputedStyle.Opacity)
+	}
 }
 
 func TestRenderNodeAddChild(t *testing.T) {

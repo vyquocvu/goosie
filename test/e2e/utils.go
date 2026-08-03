@@ -14,10 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/playwright-community/playwright-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	imageloader "github.com/vyquocvu/goosie/internal/image"
 	goosiejs "github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"github.com/vyquocvu/goosie/internal/testutil"
@@ -31,6 +33,7 @@ type VisualTestConfig struct {
 	OutputDir      string  // Directory for test artifacts
 	ViewportWidth  int
 	ViewportHeight int
+	WaitForImages  bool
 }
 
 // CompareScreenshot takes a screenshot of the current page and compares it with a baseline
@@ -137,6 +140,25 @@ func compareImages(img1Data, img2Data []byte, diffPath string) (float64, error) 
 	return float64(diffPixels) / float64(totalPixels), nil
 }
 
+func imagesSettled(root *renderer.RenderNode) bool {
+	settled := true
+	var walk func(*renderer.RenderNode)
+	walk = func(node *renderer.RenderNode) {
+		if node == nil || !settled {
+			return
+		}
+		if node.TagName == "img" && (node.ImageData == nil || node.ImageData.State == imageloader.StateLoading) {
+			settled = false
+			return
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	return settled
+}
+
 // CompareGoosieVsBrowser renders with Goosie and Playwright and compares screenshots
 func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string, name string, config VisualTestConfig) {
 	width := config.ViewportWidth
@@ -159,6 +181,14 @@ func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string,
 	r.SetCurrentURL("file://" + abs)
 	obj, err := r.RenderHTML(context.Background(), htmlSource)
 	require.NoError(t, err)
+	if config.WaitForImages {
+		deadline := time.Now().Add(5 * time.Second)
+		for !imagesSettled(r.GetRoot()) && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		require.True(t, imagesSettled(r.GetRoot()), "images did not finish loading")
+		obj = r.UpdateViewport()
+	}
 	h := int(r.GetContentHeight())
 	if h > 0 {
 		height = h

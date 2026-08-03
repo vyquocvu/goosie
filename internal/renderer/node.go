@@ -179,7 +179,7 @@ func NewRenderNode(nodeType NodeType) *RenderNode {
 		Styles:        make(map[string]string),
 		Children:      make([]*RenderNode, 0),
 		Box:           &Box{},
-		ComputedStyle: &Style{},
+		ComputedStyle: &Style{Opacity: 1.0},
 	}
 }
 
