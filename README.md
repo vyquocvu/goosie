@@ -24,12 +24,10 @@ and CPU rasterizer—no embedded browser is involved.
 
 | | |
 |:---:|:---:|
-| ![Rendered web page (IANA example domains)](example-domains.png) | ![Long-form article rendering](docs/screenshots/long-page.png) |
-| *Live page fetched over HTTP and rendered* | *Long-form article with nested sections* |
-| ![Grid layout demo](docs/screenshots/grid-layout.png) | ![CSS styling demo](docs/screenshots/css-demo.png) |
-| *CSS Grid layout* | *CSS selectors, cascade, and styling* |
-| ![Form controls](docs/screenshots/forms.png) | ![Table layout](docs/screenshots/tables.png) |
-| *Form controls and inputs* | *HTML table layout* |
+| ![Long-form article rendering](docs/screenshots/long-page.png) | ![Grid layout demo](docs/screenshots/grid-layout.png) |
+| *Long-form article with nested sections* | *CSS Grid layout* |
+| ![CSS styling demo](docs/screenshots/css-demo.png) | ![Table layout](docs/screenshots/tables.png) |
+| *CSS selectors, cascade, and styling* | *HTML table layout* |
 
 ## Quick start
 
@@ -89,9 +87,6 @@ go run -tags headless ./cmd/browser -headless \
 # or build it first
 make build-headless
 ./bin/goosie-headless -headless -url=https://example.com -screenshot=screenshot.png
-
-make build-headless
-./bin/goosie-headless -headless -url=https://www.iana.org/help/example-domains -screenshot=example-domains.png
 ```
 
 The default GUI build intentionally leaves out Fyne's test driver to keep the

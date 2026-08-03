@@ -88,24 +88,6 @@ GOOSIE_MILESTONE=3 go test -tags=e2e ./test/e2e/ -run TestRealWebsitesCSSParsing
 
 All tests use graceful degradation with `t.Skipf` for network failures and `context.WithTimeout` for cancellation support.
 
-#### Roadmap Verification
-
-The `cmd/roadmap_test/main.go` provides a standalone verification tool that tests the engine pipeline against real websites. It validates:
-
-- Phase 1: HTTP fetching, HTML parsing, JavaScript execution
-- Phase 2: Console API, error reporting
-- Phase 3: CSS parsing, layout engine
-- Phase 4: Screenshot capability
-- Phase 5: Real website integration (M1-M3 pipeline)
-
-```bash
-# Run at current milestone
-go run ./cmd/roadmap_test/
-
-# Run at M3
-GOOSIE_MILESTONE=3 go run ./cmd/roadmap_test/
-```
-
 ### 2.4 Performance Tests
 *   **Scope**: Speed and memory usage.
 *   **Location**: `_test.go` files with `Benchmark` functions.

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
-	"image/draw"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -20,7 +19,6 @@ import (
 	"time"
 
 	"github.com/srwiley/oksvg"
-	"github.com/srwiley/rasterx"
 	_ "golang.org/x/image/webp"
 )
 
@@ -236,14 +234,7 @@ func decodeSVG(data []byte) (*ImageData, error) {
 		h = 100
 	}
 
-	icon.SetTarget(0, 0, float64(w), float64(h))
-
-	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-	draw.Draw(rgba, rgba.Bounds(), image.White, image.Point{}, draw.Src)
-
-	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
-	raster := rasterx.NewDasher(w, h, scanner)
-	icon.Draw(raster, 1.0)
+	rgba := rasterizeIcon(icon, w, h)
 
 	return &ImageData{
 		Image:  rgba,

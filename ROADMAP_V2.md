@@ -908,7 +908,7 @@ Platform WebView backend interface (`internal/engine/backend/`) deleted — out 
 - [x] Performance methodology (PERFORMANCE.md).
 - [x] Memory model and cache budgets.
 - [x] Rendering pipeline deep dive.
-- [x] Contributor API documentation (BROWSER_API_DOCUMENTATION.md, DOM_API_DOCUMENTATION.md, CONSOLE_DOCUMENTATION.md, CSS_PARSER_DOCUMENTATION.md, INSPECTOR_DOCUMENTATION.md).
+- [x] Contributor API documentation (covered by `website/docs/supported-web-platform.md`).
 - [x] Pure-Go webview architecture doc: defines the rendering pipeline, raster backends, Fyne shell boundary, and platform WebView exclusion policy.
 - [x] Contributing guide.
 - [x] Code of conduct.
@@ -980,7 +980,7 @@ The exact absolute numbers must be locked after Milestone 0 on a reference machi
 - [x] Bounded tile, glyph, image, shaping, and HTTP caches. _(Proven: all caches bounded by entry count and byte budget, LRU eviction, memory.Evictor integration)_
 - [x] Clean race detector results for supported concurrent paths. _(Proven: CI runs `go test -race` on engine packages, race test suite passes)_
 - [x] Deterministic cancellation of stale navigations and script tasks. _(Proven: navigation ID rejection, context cancellation propagation, session lifecycle tests)_
-- [x] Engine core tests run without Fyne or external network access. _(Proven: renderer-demo, cmd/test, benchmark corpus all run headless; e2e tests alone require Playwright)_
+- [x] Engine core tests run without Fyne or external network access. _(Proven: headless renderer, benchmark corpus all run headless; e2e tests alone require Playwright)_
 - [x] Binary size, startup time, navigation latency, and scroll latency are tracked for every release.
 
 # Explicit Non-Goals for v2

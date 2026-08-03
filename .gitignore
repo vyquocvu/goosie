@@ -19,6 +19,9 @@ go.work.sum
 # Build artifacts
 /cmd/browser/browser
 /browser
+/dom_api_demo
+/scroll_perf_demo
+/roadmap_test
 /test/e2e/testdata/*
 .worktrees/
 

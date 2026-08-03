@@ -25,7 +25,7 @@ UPX_FLAGS ?= --best --lzma
 # Headless browser variant for URL screenshots via Fyne test driver
 HEADLESS_FLAGS=-tags headless -trimpath -ldflags "-s -w $(VERSION_LDFLAGS)"
 
-.PHONY: all build build-small build-small-upx build-reproducible build-headless clean install-playwright test generate-test-data smoke-test
+.PHONY: all build build-small build-small-upx build-reproducible build-headless clean install-playwright test e2e-online generate-test-data smoke-test
 
 all: build
 
@@ -104,6 +104,10 @@ test: clean generate-test-data
 	go test -v ./internal/... ./cmd/...
 	@echo "Running E2E tests..."
 	go test -v -tags=e2e ./$(E2E_TEST_DIR)
+
+# Live-network E2E tests (require internet access; skipped by default)
+e2e-online:
+	go test -v -tags="e2e online" ./$(E2E_TEST_DIR)
 
 update-snapshots: clean generate-test-data
 	@echo "Updating test snapshots..."

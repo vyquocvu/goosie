@@ -5,8 +5,8 @@ A lightweight web browser engine built **from scratch** in Go. No platform WebVi
 ## Quick Start
 
 ```bash
-go run ./cmd/browser    # Main GUI browser
-go run ./cmd/test       # Headless tests
+go run ./cmd/browser      # Main GUI browser
+go run ./cmd/headless     # Headless rendering (URL screenshots)
 go test -v ./internal/...  # Unit tests
 ```
 
@@ -16,9 +16,9 @@ go test -v ./internal/...  # Unit tests
 goosie/
 ├── cmd/
 │   ├── browser/        # Main GUI browser (Fyne window shell)
-│   ├── renderer-demo/  # Renderer demo (no GUI)
-│   ├── server/         # HTTP server for examples
-│   └── test/           # Headless test utility
+│   ├── headless/       # Headless rendering / CLI screenshots
+│   ├── test-gen/       # Generate e2e test fixtures
+│   └── screenshot-all/ # Screenshot all generated fixtures
 │
 ├── internal/
 │   ├── css/           # CSS parser and stylesheet handling
@@ -36,9 +36,7 @@ goosie/
 ## Entry Points
 
 - **`cmd/browser/main.go`** - Main GUI browser with navigation, console, bookmarks
-- **`cmd/renderer-demo/main.go`** - Renderer demo without GUI
-- **`cmd/server/main.go`** - HTTP server for examples (port 8080)
-- **`cmd/test/main.go`** - Headless test utility
+- **`cmd/headless/main.go`** - Headless rendering and screenshot capture
 
 ## Core Modules
 

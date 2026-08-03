@@ -78,6 +78,7 @@ import (
 	"math"
 	"unsafe"
 
+	goosieimage "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
@@ -357,8 +358,8 @@ func (b *cgBackend) dirtyBounds(dirty []frame.Rect) frame.Rect {
 }
 
 func decodeImageData(data []byte, w, h int) (*image.RGBA, error) {
-	if isSVGContent(data) {
-		return RasterizeSVG(data, w, h)
+	if goosieimage.IsSVGContent(data) {
+		return goosieimage.RasterizeSVG(data, w, h)
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {

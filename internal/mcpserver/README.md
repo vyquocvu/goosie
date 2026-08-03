@@ -399,8 +399,7 @@ Adding a new tool:
 
 ```bash
 node scripts/render_screenshots.js   # regenerate HTML demo files
-node scripts/html_to_png.js          # convert to PNGs via Playwright
 ```
 
-Both commands take screenshots from `test/mcp-screenshots/png/` and
-embed them in this README.
+This command takes screenshots from `test/mcp-screenshots/png/` and
+embeds them in this README.

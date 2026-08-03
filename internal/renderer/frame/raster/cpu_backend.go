@@ -6,16 +6,11 @@
 package raster
 
 import (
-	"bytes"
-	"encoding/xml"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
-	"strings"
 
-	"github.com/srwiley/oksvg"
-	"github.com/srwiley/rasterx"
+	goosieimage "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
@@ -594,11 +589,11 @@ func (b *CPUBackend) rasterImage(rect frame.Rect, imgSpec ImageSpec, clip, dirty
 
 	var img image.Image = imgSpec.Img
 	if img == nil && len(imgSpec.Data) > 0 {
-		if isSVGContent(imgSpec.Data) {
+		if goosieimage.IsSVGContent(imgSpec.Data) {
 			w := int(math.Round(float64(rect.W * ps.Scale)))
 			h := int(math.Round(float64(rect.H * ps.Scale)))
 			var err error
-			img, err = RasterizeSVG(imgSpec.Data, w, h)
+			img, err = goosieimage.RasterizeSVG(imgSpec.Data, w, h)
 			if err != nil {
 				return
 			}
@@ -671,52 +666,3 @@ func (b *CPUBackend) rasterImage(rect frame.Rect, imgSpec ImageSpec, clip, dirty
 // SVG Rasterization Helpers
 // ---------------------------------------------------------------------------
 
-func isSVGContent(data []byte) bool {
-	dec := xml.NewDecoder(bytes.NewReader(data))
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return false
-		}
-		if se, ok := tok.(xml.StartElement); ok {
-			return strings.EqualFold(se.Name.Local, "svg")
-		}
-	}
-}
-
-func RasterizeSVG(data []byte, w, h int) (*image.RGBA, error) {
-	if !isSVGContent(data) {
-		return nil, xml.UnmarshalError("svg parse: data does not contain an SVG root element")
-	}
-
-	icon, err := oksvg.ReadIconStream(bytes.NewReader(data), oksvg.WarnErrorMode)
-	if err != nil {
-		return nil, err
-	}
-
-	intrinsicW := int(icon.ViewBox.W)
-	intrinsicH := int(icon.ViewBox.H)
-	if intrinsicW <= 0 {
-		intrinsicW = 100
-	}
-	if intrinsicH <= 0 {
-		intrinsicH = 100
-	}
-	if w <= 0 {
-		w = intrinsicW
-	}
-	if h <= 0 {
-		h = intrinsicH
-	}
-
-	icon.SetTarget(0, 0, float64(w), float64(h))
-
-	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-	draw.Draw(rgba, rgba.Bounds(), image.White, image.Point{}, draw.Src)
-
-	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
-	raster := rasterx.NewDasher(w, h, scanner)
-	icon.Draw(raster, 1.0)
-
-	return rgba, nil
-}

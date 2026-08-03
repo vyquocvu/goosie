@@ -1,4 +1,4 @@
-package renderer
+package image
 
 import (
 	"bytes"
@@ -12,8 +12,8 @@ import (
 	"github.com/srwiley/rasterx"
 )
 
-// isSVGContent performs a quick sanity check that the data contains an SVG root element.
-func isSVGContent(data []byte) bool {
+// IsSVGContent performs a quick sanity check that the data contains an SVG root element.
+func IsSVGContent(data []byte) bool {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		tok, err := dec.Token()
@@ -26,10 +26,24 @@ func isSVGContent(data []byte) bool {
 	}
 }
 
+// rasterizeIcon draws an oksvg icon onto a new RGBA canvas at (w, h) pixels.
+func rasterizeIcon(icon *oksvg.SvgIcon, w, h int) *image.RGBA {
+	icon.SetTarget(0, 0, float64(w), float64(h))
+
+	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(rgba, rgba.Bounds(), image.White, image.Point{}, draw.Src)
+
+	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
+	raster := rasterx.NewDasher(w, h, scanner)
+	icon.Draw(raster, 1.0)
+
+	return rgba
+}
+
 // RasterizeSVG decodes SVG bytes and rasterizes to an RGBA image at (w, h) pixels.
 // If w or h is 0, uses the SVG's intrinsic ViewBox size (defaulting to 100 if unset).
 func RasterizeSVG(data []byte, w, h int) (*image.RGBA, error) {
-	if !isSVGContent(data) {
+	if !IsSVGContent(data) {
 		return nil, fmt.Errorf("svg parse: data does not contain an SVG root element")
 	}
 
@@ -53,14 +67,5 @@ func RasterizeSVG(data []byte, w, h int) (*image.RGBA, error) {
 		h = intrinsicH
 	}
 
-	icon.SetTarget(0, 0, float64(w), float64(h))
-
-	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-	draw.Draw(rgba, rgba.Bounds(), image.White, image.Point{}, draw.Src)
-
-	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
-	raster := rasterx.NewDasher(w, h, scanner)
-	icon.Draw(raster, 1.0)
-
-	return rgba, nil
+	return rasterizeIcon(icon, w, h), nil
 }
