@@ -3,6 +3,8 @@ package devtools
 import (
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"github.com/stretchr/testify/assert"
 )
@@ -230,4 +232,45 @@ func TestSettingsPanel_PassiveSetup(t *testing.T) {
 		p.RefreshFrom(nil)
 		p.RefreshFrom(&TabContext{}) // no provider
 	})
+}
+
+// TestSettingsPanel_MinSizeStableInTabs is the regression guard for
+// the devtools-resize bug. Previously the status label used
+// TextWrapWord, which in a BorderLayout creates a circular
+// dependency: the BorderLayout sizes the right-hand child to its
+// current MinSize, and a wrapping label's MinSize depends on the
+// current width. Once the panel was laid out inside an AppTab at a
+// narrow width the text wrapped to dozens of lines and the panel
+// MinSize ballooned past the window height. That inflated MinSize
+// propagated to the dock container and collapsed the
+// devtools/page split drag range, so the user could not resize
+// the devtools pane. The fix pins the status label to a single
+// line with ellipsis truncation, so the MinSize stays stable
+// regardless of container width.
+func TestSettingsPanel_MinSizeStableInTabs(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	panel := newSettingsPanel(func() *TabContext { return nil })
+	directMin := panel.MinSize()
+
+	tabs := container.NewAppTabs()
+	tabs.Append(container.NewTabItem("Settings", panel))
+	tabs.Append(container.NewTabItem("Other", container.NewVBox()))
+
+	w := app.NewWindow("test")
+	w.Resize(fyne.NewSize(1000, 700))
+	w.SetContent(tabs)
+	w.Show()
+
+	// The panel's MinSize must be the same before and after being
+	// laid out inside AppTabs. The bug doubled the MinSize height
+	// (392 → 964) because the wrapping label's MinSize was driven
+	// by the post-layout width.
+	assert.Less(t, panel.MinSize().Height, directMin.Height*2,
+		"settings panel MinSize must not inflate after being laid out in AppTabs")
+	assert.Less(t, panel.MinSize().Height, float32(700),
+		"settings panel MinSize must fit in a standard window height")
+	assert.Equal(t, directMin.Height, panel.MinSize().Height,
+		"settings panel MinSize must be stable across layouts")
 }

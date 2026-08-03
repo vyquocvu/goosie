@@ -4,9 +4,9 @@ import (
 	"testing"
 )
 
-// TestM7_ExtractResources_Import — M7 acceptance: @import urls are
+// TestExtractResources_Import — M7 acceptance: @import urls are
 // discovered and reported as ResourceStylesheet.
-func TestM7_ExtractResources_Import(t *testing.T) {
+func TestExtractResources_Import(t *testing.T) {
 	css := `@import "theme.css"; @import url('fonts.css');`
 	sheet, err := NewParser(css).Parse()
 	if err != nil {
@@ -24,9 +24,9 @@ func TestM7_ExtractResources_Import(t *testing.T) {
 	}
 }
 
-// TestM7_ExtractResources_FontFace — @font-face src: url(...) is
+// TestExtractResources_FontFace — @font-face src: url(...) is
 // reported as ResourceFont.
-func TestM7_ExtractResources_FontFace(t *testing.T) {
+func TestExtractResources_FontFace(t *testing.T) {
 	css := `
 @font-face {
   font-family: 'MyFont';
@@ -55,9 +55,9 @@ func TestM7_ExtractResources_FontFace(t *testing.T) {
 	}
 }
 
-// TestM7_ExtractResources_ImageInDeclaration — url() in any
+// TestExtractResources_ImageInDeclaration — url() in any
 // declaration value is reported as ResourceImage with Property.
-func TestM7_ExtractResources_ImageInDeclaration(t *testing.T) {
+func TestExtractResources_ImageInDeclaration(t *testing.T) {
 	css := `
 .x { background-image: url('bg.png'); }
 .y { list-style-image: url("bullet.svg"); }`
@@ -87,9 +87,9 @@ func TestM7_ExtractResources_ImageInDeclaration(t *testing.T) {
 	}
 }
 
-// TestM7_ExtractResources_NestedAtRule — @media containing rules
+// TestExtractResources_NestedAtRule — @media containing rules
 // with url() is discovered.
-func TestM7_ExtractResources_NestedAtRule(t *testing.T) {
+func TestExtractResources_NestedAtRule(t *testing.T) {
 	css := `
 @media screen {
   .x { background: url('nested.png'); }
@@ -107,9 +107,9 @@ func TestM7_ExtractResources_NestedAtRule(t *testing.T) {
 	}
 }
 
-// TestM7_ExtractResources_QuotedAndUnquoted — url() handles double,
+// TestExtractResources_QuotedAndUnquoted — url() handles double,
 // single, and unquoted forms.
-func TestM7_ExtractResources_QuotedAndUnquoted(t *testing.T) {
+func TestExtractResources_QuotedAndUnquoted(t *testing.T) {
 	css := `
 .a { background: url(double.png); }
 .b { background: url('single.png'); }
@@ -130,9 +130,9 @@ func TestM7_ExtractResources_QuotedAndUnquoted(t *testing.T) {
 	}
 }
 
-// TestM7_ExtractResources_NoURLs — declarations without url() yield
+// TestExtractResources_NoURLs — declarations without url() yield
 // no resources.
-func TestM7_ExtractResources_NoURLs(t *testing.T) {
+func TestExtractResources_NoURLs(t *testing.T) {
 	css := `.x { color: red; width: 100px; }`
 	sheet, err := NewParser(css).Parse()
 	if err != nil {
@@ -144,16 +144,16 @@ func TestM7_ExtractResources_NoURLs(t *testing.T) {
 	}
 }
 
-// TestM7_ExtractResources_NilSheet — nil sheet returns nil.
-func TestM7_ExtractResources_NilSheet(t *testing.T) {
+// TestExtractResources_NilSheet — nil sheet returns nil.
+func TestExtractResources_NilSheet(t *testing.T) {
 	if got := ExtractResources(nil); got != nil {
 		t.Errorf("got %v, want nil", got)
 	}
 }
 
-// TestM7_ExtractResources_FontFacePropertyCarries — ResourceImage
+// TestExtractResources_FontFacePropertyCarries — ResourceImage
 // preserves the source property name for the renderer to map back.
-func TestM7_ExtractResources_FontFacePropertyCarries(t *testing.T) {
+func TestExtractResources_FontFacePropertyCarries(t *testing.T) {
 	css := `
 @font-face {
   font-family: 'X';
@@ -179,8 +179,8 @@ func TestM7_ExtractResources_FontFacePropertyCarries(t *testing.T) {
 	}
 }
 
-// TestM7_ResourceKind_String — string round-trip for log lines.
-func TestM7_ResourceKind_String(t *testing.T) {
+// TestResourceKind_String — string round-trip for log lines.
+func TestResourceKind_String(t *testing.T) {
 	cases := map[ResourceKind]string{
 		ResourceStylesheet: "stylesheet",
 		ResourceFont:       "font",

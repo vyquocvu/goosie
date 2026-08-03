@@ -107,11 +107,11 @@ func TestFireDOMContentLoaded(t *testing.T) {
 	// If we got here without panicking, dispatch worked.
 }
 
-// TestM5EndToEndAsyncOrdering — full end-to-end: streaming parse +
+// TestScriptQueueEndToEndAsyncOrdering — full end-to-end: streaming parse +
 // coordinator + renderer, with a real httptest server. Verifies that
 // async scripts execute when fetched (during parse) and the
 // document renders with all CSS before scripts run.
-func TestM5EndToEndAsyncOrdering(t *testing.T) {
+func TestScriptQueueEndToEndAsyncOrdering(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/page", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")

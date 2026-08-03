@@ -72,8 +72,8 @@ func realFetcherFromTestServer(srv *httptest.Server) Fetcher {
 	return &httpFetcher{client: srv.Client(), base: srv.URL}
 }
 
-// httpFetcher is a minimal Fetcher used by M7 tests. It uses the
-// provided *http.Client to GET absolute URLs and returns the body.
+// httpFetcher is a minimal Fetcher used by the secondary-resource tests.
+// It uses the provided *http.Client to GET absolute URLs and returns the body.
 type httpFetcher struct {
 	client *http.Client
 	base   string

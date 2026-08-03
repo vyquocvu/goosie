@@ -6,7 +6,7 @@ import (
 
 // --- test helpers ---
 
-// testElement is defined in m32_test.go and reused here.
+// testElement is defined in specificity_test.go and reused here.
 
 func newTestElem(tag string) *testElement {
 	return &testElement{tag: tag, attrs: make(map[string]string)}

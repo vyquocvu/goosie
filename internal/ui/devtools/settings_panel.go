@@ -39,7 +39,15 @@ func newSettingsPanel(activeTab func() *TabContext) fyne.CanvasObject {
 		status: widget.NewLabel(""),
 	}
 	p.setActiveTabFn(activeTab)
-	p.status.Wrapping = fyne.TextWrapWord
+	// Keep the status on a single line. A wrapping label interacts poorly
+	// with the BorderLayout used in the panel footer: the BorderLayout
+	// sizes the right-hand child to its current-size-dependent MinSize,
+	// which can collapse to a few pixels and force the wrapped text to
+	// balloon vertically. That inflated MinSize then propagates to the
+	// enclosing devtools dock and starves the splitter drag range, making
+	// the panel un-resizable from the user's perspective.
+	p.status.Wrapping = fyne.TextWrapOff
+	p.status.Truncation = fyne.TextTruncateEllipsis
 
 	// Form widgets, populated lazily on first refresh so the
 	// displayed values match the live provider state.

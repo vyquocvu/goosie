@@ -22,12 +22,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/ui"
 )
 
-// TestM6_MutationCoalescesBurst — M6 acceptance: a burst of JS DOM
+// TestMutationCoalescesBurst — M6 acceptance: a burst of JS DOM
 // mutations coalesces into a single re-render via the
 // MutationCoalescer. This test exercises the coordinator-level helper
 // directly with a synthetic render callback (the integration with the
 // real browser command is verified by other tests).
-func TestM6_MutationCoalescesBurst(t *testing.T) {
+func TestMutationCoalescesBurst(t *testing.T) {
 	var (
 		fires int32
 		sum   int32
@@ -55,7 +55,7 @@ func TestM6_MutationCoalescesBurst(t *testing.T) {
 	}
 }
 
-// TestM6_NoRefetchOnMutation — M6 acceptance: a JS DOM mutation does
+// TestNoRefetchOnMutation — M6 acceptance: a JS DOM mutation does
 // NOT trigger re-fetching of external CSS. The coordinator's
 // ResultCount metric (or, in this integration test, a fake fetcher's
 // fetch counter) must remain stable across mutations.
@@ -63,7 +63,7 @@ func TestM6_MutationCoalescesBurst(t *testing.T) {
 // The integration test sets up a real coordinator against a real
 // httptest server, captures the initial fetch count, fires mutations,
 // and verifies the fetch count does not grow.
-func TestM6_NoRefetchOnMutation(t *testing.T) {
+func TestNoRefetchOnMutation(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/page", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -184,12 +184,12 @@ func TestM6_NoRefetchOnMutation(t *testing.T) {
 	}
 }
 
-// TestM6_MutationRenderUsesCachedExternalCSS — confirms the
+// TestMutationRenderUsesCachedExternalCSS — confirms the
 // coordinator's external CSS results are reusable across renders
 // without re-fetching. We bypass the actual renderer (which would
 // require a full fyne stack) and verify the documentloader's
 // ScriptResult/CSSResult data is stable across calls.
-func TestM6_MutationRenderUsesCachedExternalCSS(t *testing.T) {
+func TestMutationRenderUsesCachedExternalCSS(t *testing.T) {
 	html := `<html><head>
 	<link rel="stylesheet" href="x.css">
 	<script src="y.js"></script>
@@ -287,12 +287,12 @@ func TestM6_MutationRenderUsesCachedExternalCSS(t *testing.T) {
 	}
 }
 
-// TestM6_DOMMutationCallback_CoalescesAndRenders — integration test:
+// TestDOMMutationCallback_CoalescesAndRenders — integration test:
 // the JS runtime's DOM mutation callback fires; the browser command's
 // coalescer collects mutations; the renderer is invoked via the
 // snapshot entry point. We simulate the render path by spying on a
 // render function (in production this is tab.RenderParsedContent).
-func TestM6_DOMMutationCallback_CoalescesAndRenders(t *testing.T) {
+func TestDOMMutationCallback_CoalescesAndRenders(t *testing.T) {
 	rt := js.NewRuntime()
 	defer rt.SetDOMMutationCallback(nil)
 
@@ -348,7 +348,7 @@ func TestM6_DOMMutationCallback_CoalescesAndRenders(t *testing.T) {
 	}
 }
 
-func TestM6_CoordinatorNavigationMutatesCurrentDocumentAndIsolatesRuntime(t *testing.T) {
+func TestCoordinatorNavigationMutatesCurrentDocumentAndIsolatesRuntime(t *testing.T) {
 	app := fynetest.NewApp()
 	defer app.Quit()
 	window := app.NewWindow("DOM mutation test")

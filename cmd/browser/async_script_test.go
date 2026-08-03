@@ -18,13 +18,13 @@ import (
 	"github.com/vyquocvu/goosie/internal/ui"
 )
 
-// TestM8_AsyncScriptExecutesViaOnScript verifies that external <script async>
+// TestAsyncScriptExecutesViaOnScript verifies that external <script async>
 // is fetched by the coordinator and executed by the OnScript callback (not
 // silently dropped).  The test uses a real test server, drives the full
 // coordinator path (updateUIWithCoordinatorContent), and asserts that the
 // async script's side effects are visible in the JS runtime after the page
 // is "loaded".
-func TestM8_AsyncScriptExecutesViaOnScript(t *testing.T) {
+func TestAsyncScriptExecutesViaOnScript(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/async.js", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`globalThis.asyncMarker = "async-ran"`))
@@ -119,11 +119,11 @@ func TestM8_AsyncScriptExecutesViaOnScript(t *testing.T) {
 	}
 }
 
-// TestM8_AsyncScriptBufferDrain verifies that an async script whose fetch
+// TestAsyncScriptBufferDrain verifies that an async script whose fetch
 // completes during the streaming parse (before jsRuntime is created) is
 // correctly buffered and then executed during the buffer drain that runs
 // immediately after jsRuntime creation.
-func TestM8_AsyncScriptBufferDrain(t *testing.T) {
+func TestAsyncScriptBufferDrain(t *testing.T) {
 	// Use an fetch-delay server that responds immediately so the async
 	// script fetch can complete during the streaming parse window.
 	mux := http.NewServeMux()
@@ -198,10 +198,10 @@ func TestM8_AsyncScriptBufferDrain(t *testing.T) {
 	}
 }
 
-// TestM8_AsyncScriptDoesNotBlockClassicExecution verifies that classic
+// TestAsyncScriptDoesNotBlockClassicExecution verifies that classic
 // scripts execute in order even when an async script fetch is in flight.
 // Classic scripts should not wait for async scripts to complete.
-func TestM8_AsyncScriptDoesNotBlockClassicExecution(t *testing.T) {
+func TestAsyncScriptDoesNotBlockClassicExecution(t *testing.T) {
 	var (
 		mu      sync.Mutex
 		asyncCh = make(chan struct{})
@@ -288,10 +288,10 @@ func TestM8_AsyncScriptDoesNotBlockClassicExecution(t *testing.T) {
 	<-done
 }
 
-// TestM8_AsyncScriptAndClassicOrdering verifies that async scripts execute
+// TestAsyncScriptAndClassicOrdering verifies that async scripts execute
 // at fetch-completion time rather than participating in the classic/defer
 // queue, and that classic scripts maintain source-order execution.
-func TestM8_AsyncScriptAndClassicOrdering(t *testing.T) {
+func TestAsyncScriptAndClassicOrdering(t *testing.T) {
 	// The async script is served fast.  The HTML has:
 	//   1. a classic inline script that pushes "c1"
 	//   2. an async external script that pushes "async"

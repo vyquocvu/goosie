@@ -12,17 +12,17 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 )
 
-// M7 helper: spin up a test server with a few CSS resources and
-// return the base URL plus counts per path.
-type m7Server struct {
+// secondaryResourceServer: spin up a test server with a few CSS resources
+// and return the base URL plus counts per path.
+type secondaryResourceServer struct {
 	srv      *httptest.Server
 	fetchCnt map[string]*int32
 	mu       sync.Mutex
 }
 
-func newM7Server(t *testing.T, paths map[string]string) *m7Server {
+func newSecondaryResourceServer(t *testing.T, paths map[string]string) *secondaryResourceServer {
 	t.Helper()
-	s := &m7Server{fetchCnt: map[string]*int32{}}
+	s := &secondaryResourceServer{fetchCnt: map[string]*int32{}}
 	mux := http.NewServeMux()
 	for path, body := range paths {
 		path, body := path, body
@@ -38,24 +38,24 @@ func newM7Server(t *testing.T, paths map[string]string) *m7Server {
 	return s
 }
 
-func (s *m7Server) base() string { return s.srv.URL }
-func (s *m7Server) Close()       { s.srv.Close() }
+func (s *secondaryResourceServer) base() string { return s.srv.URL }
+func (s *secondaryResourceServer) Close()       { s.srv.Close() }
 
-func (s *m7Server) fetchCount(path string) int32 {
+func (s *secondaryResourceServer) fetchCount(path string) int32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return atomic.LoadInt32(s.fetchCnt[path])
 }
 
-func m7NewRealFetcher(s *httptest.Server) Fetcher {
+func newSecondaryResourceFetcher(s *httptest.Server) Fetcher {
 	return realFetcherFromTestServer(s)
 }
 
-// TestM7_SecondaryResource_FontFace — @font-face url() discovered
+// TestSecondaryResource_FontFace — @font-face url() discovered
 // from a stylesheet is fetched by the coordinator and reported via
 // OnFont.
-func TestM7_SecondaryResource_FontFace(t *testing.T) {
-	srv := newM7Server(t, map[string]string{
+func TestSecondaryResource_FontFace(t *testing.T) {
+	srv := newSecondaryResourceServer(t, map[string]string{
 		"/theme.css": `@font-face {
   font-family: 'MyFont';
   src: url('myfont.woff2');
@@ -78,7 +78,7 @@ func TestM7_SecondaryResource_FontFace(t *testing.T) {
 	var coord *Coordinator
 	coord, err := New(Options{
 		NavigationID: load.ID, NavigationContext: navCtx, FinalURL: srv.base() + "/theme.css",
-		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
+		Scheduler: sched, Fetcher: newSecondaryResourceFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
 				mu.Lock()
@@ -120,10 +120,10 @@ func TestM7_SecondaryResource_FontFace(t *testing.T) {
 	}
 }
 
-// TestM7_SecondaryResource_ImageInDeclaration — url() in any CSS
+// TestSecondaryResource_ImageInDeclaration — url() in any CSS
 // declaration value is fetched and reported via OnImage.
-func TestM7_SecondaryResource_ImageInDeclaration(t *testing.T) {
-	srv := newM7Server(t, map[string]string{
+func TestSecondaryResource_ImageInDeclaration(t *testing.T) {
+	srv := newSecondaryResourceServer(t, map[string]string{
 		"/theme.css": `.x { background-image: url('bg.png'); }`,
 		"/bg.png":    "fake-png-bytes",
 	})
@@ -140,7 +140,7 @@ func TestM7_SecondaryResource_ImageInDeclaration(t *testing.T) {
 	var coord *Coordinator
 	coord, _ = New(Options{
 		NavigationID: load.ID, NavigationContext: navCtx, FinalURL: srv.base() + "/theme.css",
-		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
+		Scheduler: sched, Fetcher: newSecondaryResourceFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
 				sheet, _ := parseCSS(r.Source)
@@ -169,10 +169,10 @@ func TestM7_SecondaryResource_ImageInDeclaration(t *testing.T) {
 	}
 }
 
-// TestM7_SecondaryResource_ImportResolvesRelative — @import url()
+// TestSecondaryResource_ImportResolvesRelative — @import url()
 // uses the parent stylesheet URL as the base for resolution.
-func TestM7_SecondaryResource_ImportResolvesRelative(t *testing.T) {
-	srv := newM7Server(t, map[string]string{
+func TestSecondaryResource_ImportResolvesRelative(t *testing.T) {
+	srv := newSecondaryResourceServer(t, map[string]string{
 		"/dir/theme.css":  `@import url('nested.css');`,
 		"/dir/nested.css": `.x { color: red; }`,
 	})
@@ -189,7 +189,7 @@ func TestM7_SecondaryResource_ImportResolvesRelative(t *testing.T) {
 	var coord *Coordinator
 	coord, _ = New(Options{
 		NavigationID: load.ID, NavigationContext: navCtx, FinalURL: srv.base() + "/dir/theme.css",
-		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
+		Scheduler: sched, Fetcher: newSecondaryResourceFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
 				mu.Lock()
@@ -219,11 +219,11 @@ func TestM7_SecondaryResource_ImportResolvesRelative(t *testing.T) {
 	}
 }
 
-// TestM7_MaxCSSImportDepth — exceeding the configured depth limit
+// TestMaxCSSImportDepth — exceeding the configured depth limit
 // causes the extra @import to be skipped, not infinite-looped.
-func TestM7_MaxCSSImportDepth(t *testing.T) {
+func TestMaxCSSImportDepth(t *testing.T) {
 	// Build a chain a.css -> b.css -> c.css -> d.css (depth 4).
-	srv := newM7Server(t, map[string]string{
+	srv := newSecondaryResourceServer(t, map[string]string{
 		"/a.css": `@import url('b.css');`,
 		"/b.css": `@import url('c.css');`,
 		"/c.css": `@import url('d.css');`,
@@ -243,7 +243,7 @@ func TestM7_MaxCSSImportDepth(t *testing.T) {
 	var coord *Coordinator
 	coord, _ = New(Options{
 		NavigationID: load.ID, NavigationContext: navCtx, FinalURL: srv.base() + "/a.css",
-		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
+		Scheduler: sched, Fetcher: newSecondaryResourceFetcher(srv.srv),
 		MaxCSSImportDepth: 2, // limit recursion to depth 2
 		Callbacks: Callbacks{
 			OnStylesheet: func(r CSSResult) {
@@ -285,10 +285,10 @@ func TestM7_MaxCSSImportDepth(t *testing.T) {
 	}
 }
 
-// TestM7_FontResult_HasSource — OnFont delivers the raw bytes
+// TestFontResult_HasSource — OnFont delivers the raw bytes
 // fetched from the network.
-func TestM7_FontResult_HasSource(t *testing.T) {
-	srv := newM7Server(t, map[string]string{
+func TestFontResult_HasSource(t *testing.T) {
+	srv := newSecondaryResourceServer(t, map[string]string{
 		"/f.woff2": "WOFF2-DATA",
 	})
 	defer srv.Close()
@@ -303,7 +303,7 @@ func TestM7_FontResult_HasSource(t *testing.T) {
 	var coord *Coordinator
 	coord, _ = New(Options{
 		NavigationID: load.ID, NavigationContext: navCtx, FinalURL: srv.base() + "/",
-		Scheduler: sched, Fetcher: m7NewRealFetcher(srv.srv),
+		Scheduler: sched, Fetcher: newSecondaryResourceFetcher(srv.srv),
 		Callbacks: Callbacks{
 			OnFont: func(r FontResult) {
 				mu.Lock()
@@ -325,15 +325,15 @@ func TestM7_FontResult_HasSource(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
-// Helpers live in m7_adapters.go:
+// Helpers live in test_adapters.go:
 //   - parseCSSAdapter, extractFromSheet wrap css.NewParser/ExtractResources
-//   - m7NewRealFetcher returns a Fetcher over the test server
+//   - newSecondaryResourceFetcher returns a Fetcher over the test server
 //   - resourceStylesheetKind / resourceFontKind / resourceImageKind
 //     mirror css.ResourceKind constants
 // --------------------------------------------------------------------------
 
 // parseCSS / extractFromSheet are convenience aliases used throughout
-// the M7 tests below.
+// the secondary-resource tests below.
 var parseCSS = parseCSSAdapter
 
 var _ = strings.Contains // keep imports tidy
