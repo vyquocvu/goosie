@@ -138,6 +138,51 @@ new text is allocated.
   investigation; the browsercontrol build issue is a pre-existing
   problem documented separately.
 
+## Event loop foundation (first vertical slice)
+
+**`internal/engine/eventloop`** adds the Fyne-independent scheduling
+foundation for follow-up UI and render-worker integration:
+
+- bounded ordered input storage for click and key events
+- latest-wins slots for scroll, mouse-move, and resize events
+- a render-request channel with capacity one; newer requests replace and
+  cancel queued work
+- generation ownership and stale-result rejection before presentation
+- context cancellation for render jobs and loop shutdown
+- immutable atomic metric snapshots for coalesced input, replaced render
+  requests, render errors, stale frames, and presented frames
+- a deterministic frame-budget helper
+
+This reduces freeze risk by giving bursty input and stale frame work an
+explicit bounded scheduling policy before those paths are routed out of the
+Fyne UI thread. The package does not import Fyne and does not create worker
+goroutines, timers, or unbounded queues.
+
+### Completed in this slice
+
+- Event-loop types, lifecycle, coalescing, generation checks, cancellation,
+  metrics, unit tests, race coverage, and burst benchmarks.
+- No renderer or UI behavior changed; this is additive infrastructure.
+
+### Known limitations
+
+- Existing Fyne callbacks do not post into this loop yet.
+- Heavy `RenderHTML`, `RenderParsed`, viewport object construction, and
+  refresh work still run on the Fyne main goroutine.
+- `RenderResult.Snapshot` is opaque until the renderer adopts an immutable
+  frame handoff.
+- GUI JavaScript still uses `js.Runtime` directly rather than one `js.Session`
+  owner per tab.
+- Mutation and image-loaded callbacks are not yet routed through event-loop
+  batches.
+
+### Next recommended PR
+
+Route scroll and mouse input from `internal/ui/browser.go` through this loop,
+keeping click/key ordering intact and proving that rapid input produces one
+latest viewport render request. The following PR should split background
+`BuildFrame` from Fyne-thread `PresentFrame`.
+
 ## Remaining work
 
 These are intentionally deferred because they require a larger
