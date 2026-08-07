@@ -180,8 +180,6 @@ goroutines, timers, or unbounded queues.
   loop itself is not yet wired to `internal/ui/browser.go`.
 - Heavy `RenderHTML`, `RenderParsed`, viewport object construction, and
   refresh work still run on the Fyne main goroutine.
-- Heavy `RenderHTML`, `RenderParsed`, viewport object construction, and
-  refresh work still run on the Fyne main goroutine.
 - `RenderResult.Snapshot` is opaque until the renderer adopts an immutable
   frame handoff.
 - GUI JavaScript still uses `js.Runtime` directly rather than one `js.Session`
