@@ -195,7 +195,7 @@ func (s *fakeService) CloseContext(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *fakeService) Context(id string) (browsercontrol.Context, error) {
+func (s *fakeService) Context(ctx context.Context, id string) (browsercontrol.Context, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -442,7 +442,7 @@ func TestFakeService_WithTestServer(t *testing.T) {
 	info, err := svc.CreateContext(ctx, browsercontrol.CreateContextOptions{})
 	require.NoError(t, err)
 
-	c, err := svc.Context(info.ID)
+	c, err := svc.Context(ctx, info.ID)
 	require.NoError(t, err)
 
 	result, err := c.Navigate(ctx, srv.URL, browsercontrol.WaitComplete, 5000)

@@ -210,7 +210,7 @@ func TestHTTPServer_AllowedOrigins(t *testing.T) {
 
 // TestHTTPServer_HostValidation verifies Host header is validated.
 func TestHTTPServer_HostValidation(t *testing.T) {
-	_, baseURL := startTestHTTPServer(t, DefaultHTTPConfig())
+	startTestHTTPServer(t, DefaultHTTPConfig())
 
 	// Loopback should be allowed (we tested that above)
 	// External Host should be rejected - but this is hard to test with localhost server

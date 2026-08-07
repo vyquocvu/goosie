@@ -11,13 +11,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // HTTPConfig configures the HTTP transport.
@@ -61,7 +60,6 @@ func DefaultHTTPConfig() HTTPConfig {
 type HTTPServer struct {
 	config   HTTPConfig
 	server   *Server
-	mcpSrv   *mcp.Server
 	listener net.Listener
 
 	mu       sync.RWMutex
@@ -97,7 +95,6 @@ func NewHTTPServer(server *Server, config HTTPConfig) (*HTTPServer, error) {
 		server:   server,
 		sessions: make(map[string]*httpSession),
 	}
-	hs.mcpSrv = server.mcpServer
 
 	return hs, nil
 }
@@ -151,6 +148,9 @@ func (h *HTTPServer) Start(ctx context.Context) (net.Addr, error) {
 		}
 	}()
 
+	// Expire idle sessions in the background.
+	go h.runSessionReaper(ctx)
+
 	// Shutdown on context cancellation
 	go func() {
 		<-ctx.Done()
@@ -189,8 +189,8 @@ func (h *HTTPServer) securityMiddleware(next http.Handler) http.Handler {
 
 // handleMCP handles MCP-over-HTTP requests.
 func (h *HTTPServer) handleMCP(w http.ResponseWriter, r *http.Request) {
-	// Only POST and GET allowed (GET is for SSE streams)
-	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+	// Only POST and GET allowed (GET is for SSE streams); DELETE closes a session.
+	if r.Method != http.MethodPost && r.Method != http.MethodGet && r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -237,13 +237,12 @@ func (h *HTTPServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 func (h *HTTPServer) validateOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		// No Origin header - same-origin request, allow
-		// But only on POST with correct Content-Type
-		if r.Method == http.MethodPost && isJSONContentType(r.Header.Get("Content-Type")) {
-			return true
+		// No Origin header - same-origin request, allow.
+		// POST and DELETE are state-changing; GET is used for SSE streams.
+		if r.Method == http.MethodPost {
+			return isJSONContentType(r.Header.Get("Content-Type"))
 		}
-		// GET without Origin may be valid for SSE
-		return r.Method == http.MethodGet
+		return r.Method == http.MethodGet || r.Method == http.MethodDelete
 	}
 
 	// If explicit allowlist configured, use it
@@ -264,16 +263,15 @@ func (h *HTTPServer) validateOrigin(r *http.Request) bool {
 // Only allows exact loopback matches.
 func (h *HTTPServer) validateHost(r *http.Request) bool {
 	host := r.Host
-	// Strip port if present
-	if idx := strings.LastIndex(host, ":"); idx > 0 {
-		host = host[:idx]
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
 	}
+	// Normalize bracketed IPv6 literals (e.g. "[::1]" -> "::1").
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 
-	allowed := []string{"localhost", "127.0.0.1", "[::1]"}
-	for _, a := range allowed {
-		if host == a {
-			return true
-		}
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
 	}
 	return false
 }
@@ -303,21 +301,12 @@ func (h *HTTPServer) validateAuth(r *http.Request) bool {
 
 // isLoopbackOrigin returns true if the URL's host is loopback.
 func isLoopbackOrigin(origin string) bool {
-	if !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://") {
+	u, err := url.Parse(origin)
+	if err != nil {
 		return false
 	}
-	rest := origin
-	rest = strings.TrimPrefix(rest, "http://")
-	rest = strings.TrimPrefix(rest, "https://")
-	// Strip path
-	if idx := strings.Index(rest, "/"); idx >= 0 {
-		rest = rest[:idx]
-	}
-	// Strip port
-	if idx := strings.Index(rest, ":"); idx >= 0 {
-		rest = rest[:idx]
-	}
-	return rest == "localhost" || rest == "127.0.0.1" || rest == "[::1]" || rest == "::1"
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func isJSONContentType(ct string) bool {
@@ -395,26 +384,33 @@ func (h *HTTPServer) closeSession(id string) {
 	h.sessionCount.Add(-1)
 }
 
-// cleanupExpiredSessions removes sessions older than SessionTimeout.
-func (h *HTTPServer) cleanupExpiredSessions() {
+// runSessionReaper periodically removes sessions older than SessionTimeout.
+func (h *HTTPServer) runSessionReaper(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
-			h.mu.Lock()
-			now := time.Now()
-			for id, sess := range h.sessions {
-				if now.Sub(sess.LastSeenAt) > h.config.SessionTimeout {
-					delete(h.sessions, id)
-					sess.Cancel()
-					close(sess.outbox)
-					h.sessionCount.Add(-1)
-				}
-			}
-			h.mu.Unlock()
+			h.cleanupExpiredSessions()
 		}
 	}
+}
+
+// cleanupExpiredSessions removes sessions older than SessionTimeout.
+func (h *HTTPServer) cleanupExpiredSessions() {
+	h.mu.Lock()
+	now := time.Now()
+	for id, sess := range h.sessions {
+		if now.Sub(sess.LastSeenAt) > h.config.SessionTimeout {
+			delete(h.sessions, id)
+			sess.Cancel()
+			close(sess.outbox)
+			h.sessionCount.Add(-1)
+		}
+	}
+	h.mu.Unlock()
 }
 
 // handleInitialize handles initial handshake and creates a session.

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
 
@@ -74,11 +73,18 @@ func NewServer(bc browsercontrol.Service, opts ServerOptions) (*Server, error) {
 	}
 	s.health = NewHealthReporter(opts.MaxContexts, s.activeContextCount)
 
-	// Create MCP server with stdio transport
-	mcpServer := mcp.NewServer(opts.Name, opts.Version,
-		mcp.WithToolHandler(s.handleToolCall),
-		mcp.WithResourceHandler(s.handleResourceRequest),
-	)
+	// Create MCP server and register tools/resources
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: opts.Name, Version: opts.Version}, nil)
+	for _, tool := range GetToolSchemas() {
+		tool := tool
+		mcpServer.AddTool(&tool, s.handleToolCall)
+	}
+	mcpServer.AddResource(&mcp.Resource{
+		Name:        "contexts",
+		URI:         "goosie://contexts",
+		MIMEType:    "application/json",
+		Description: "Active browser contexts",
+	}, s.handleResourceRequest)
 	s.mcpServer = mcpServer
 
 	s.audit.LogServerEvent("startup", "success", map[string]string{
@@ -165,10 +171,10 @@ func (s *Server) Run(ctx context.Context) error {
 	s.audit.LogServerEvent("run", "start", nil)
 
 	// Use stdio transport
-	transport := mcp.NewStdioTransport(os.Stdin, os.Stdout, os.Stderr)
+	transport := &mcp.StdioTransport{}
 
 	// Run the server
-	err := s.mcpServer.Serve(ctx, transport)
+	err := s.mcpServer.Run(ctx, transport)
 	if err != nil {
 		s.audit.LogServerEvent("run", "error", map[string]string{"error": SafeError(err)})
 		return err
@@ -192,25 +198,18 @@ func (s *Server) handleToolCall(ctx context.Context, req *mcp.CallToolRequest) (
 	}
 	s.health.RecordRequest()
 
-	// Extract correlation ID for logging
-	correlationID := req.JSONRPCRequest.ID
-	if id, ok := correlationID.(string); ok {
-		reqCtx, cancel := context.WithCancel(ctx)
-		s.mu.Lock()
-		s.requests[id] = cancel
-		s.mu.Unlock()
-
-		defer func() {
-			s.mu.Lock()
-			delete(s.requests, id)
-			s.mu.Unlock()
-		}()
-
-		_ = reqCtx // Used via cancellation propagation
+	// Unmarshal tool arguments (raw JSON from the wire).
+	args := map[string]interface{}{}
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			s.audit.LogToolCall("", toolName, "error", "invalid_arguments", time.Since(start),
+				map[string]string{"reason": err.Error()})
+			return s.errorResult("invalid tool arguments: " + err.Error()), nil
+		}
 	}
 
 	// Per-context quota check
-	if ctxID := s.extractContextID(req.Params.Arguments); ctxID != "" {
+	if ctxID := s.extractContextID(args); ctxID != "" {
 		if ok, msg := s.quota.CheckRequest(ctxID); !ok {
 			s.health.RecordDenied()
 			s.audit.LogToolCall(ctxID, toolName, "denied", "quota_exceeded", time.Since(start),
@@ -220,23 +219,20 @@ func (s *Server) handleToolCall(ctx context.Context, req *mcp.CallToolRequest) (
 		s.quota.RecordRequest(ctxID)
 	}
 
-	result, err := s.executeTool(ctx, toolName, req.Params.Arguments)
+	result, err := s.executeTool(ctx, toolName, args)
 	if err != nil {
 		s.health.RecordError()
-		s.audit.LogToolCall(s.extractContextID(req.Params.Arguments), toolName, "error",
+		s.audit.LogToolCall(s.extractContextID(args), toolName, "error",
 			s.extractErrorCode(err), time.Since(start), nil)
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{
-				{
-					Type: "text",
-					Text: SafeError(err),
-				},
+				&mcp.TextContent{Text: SafeError(err)},
 			},
 		}, nil
 	}
 
-	s.audit.LogToolCall(s.extractContextID(req.Params.Arguments), toolName, "success", "",
+	s.audit.LogToolCall(s.extractContextID(args), toolName, "success", "",
 		time.Since(start), nil)
 
 	// Convert result to MCP content
@@ -246,10 +242,7 @@ func (s *Server) handleToolCall(ctx context.Context, req *mcp.CallToolRequest) (
 		return &mcp.CallToolResult{
 			IsError: true,
 			Content: []mcp.Content{
-				{
-					Type: "text",
-					Text: fmt.Sprintf("failed to serialize result: %v", err),
-				},
+				&mcp.TextContent{Text: fmt.Sprintf("failed to serialize result: %v", err)},
 			},
 		}, nil
 	}
@@ -273,7 +266,7 @@ func (s *Server) extractContextID(args map[string]interface{}) string {
 // extractErrorCode attempts to extract an error code from an error.
 func (s *Server) extractErrorCode(err error) string {
 	if be, ok := err.(*browsercontrol.Error); ok {
-		return be.Code
+		return string(be.Code)
 	}
 	return "internal_error"
 }
@@ -283,10 +276,7 @@ func (s *Server) errorResult(msg string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		IsError: true,
 		Content: []mcp.Content{
-			{
-				Type: "text",
-				Text: msg,
-			},
+			&mcp.TextContent{Text: msg},
 		},
 	}
 }
@@ -332,10 +322,7 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]i
 func (s *Server) resultToContent(result interface{}) ([]mcp.Content, error) {
 	if result == nil {
 		return []mcp.Content{
-			{
-				Type: "text",
-				Text: "{}",
-			},
+			&mcp.TextContent{Text: "{}"},
 		}, nil
 	}
 
@@ -345,15 +332,12 @@ func (s *Server) resultToContent(result interface{}) ([]mcp.Content, error) {
 	}
 
 	return []mcp.Content{
-		{
-			Type: "text",
-			Text: string(data),
-		},
+		&mcp.TextContent{Text: string(data)},
 	}, nil
 }
 
 // handleResourceRequest handles MCP resource requests.
-func (s *Server) handleResourceRequest(ctx context.Context, req *mcp.GetResourceRequest) (*mcp.GetResourceResult, error) {
+func (s *Server) handleResourceRequest(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	slog.Debug("handling resource request", "uri", req.Params.URI)
 
 	// Parse resource URI
@@ -365,7 +349,7 @@ func (s *Server) handleResourceRequest(ctx context.Context, req *mcp.GetResource
 	}
 }
 
-func (s *Server) getContextsResource(ctx context.Context) (*mcp.GetResourceResult, error) {
+func (s *Server) getContextsResource(ctx context.Context) (*mcp.ReadResourceResult, error) {
 	bc := s.bc
 	list, err := bc.ListContexts(ctx)
 	if err != nil {
@@ -379,12 +363,12 @@ func (s *Server) getContextsResource(ctx context.Context) (*mcp.GetResourceResul
 		return nil, err
 	}
 
-	return &mcp.GetResourceResult{
-		Contents: []mcp.ResourceContents{
+	return &mcp.ReadResourceResult{
+		Contents: []*mcp.ResourceContents{
 			{
-				URI: "goosie://contexts",
+				URI:      "goosie://contexts",
 				MIMEType: "application/json",
-				Blob: string(data),
+				Text:     string(data),
 			},
 		},
 	}, nil

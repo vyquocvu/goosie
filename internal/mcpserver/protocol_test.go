@@ -5,13 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,26 +20,22 @@ import (
 // --- Protocol Test Helpers ---
 
 type mockTransport struct {
-	stdin    io.Reader
-	stdout   io.Writer
-	stderr   io.Writer
-	requests chan []byte
+	requests  chan []byte
 	responses chan []byte
-	done     chan struct{}
+	done      chan struct{}
 }
 
 func newMockTransport() *mockTransport {
-	stdinR, stdinW := io.Pipe()
-	stdoutR, stdoutW := io.Pipe()
-
 	return &mockTransport{
-		stdin:    stdinR,
-		stdout:   stdoutW,
-		stderr:   io.Discard,
-		requests: make(chan []byte, 10),
+		requests:  make(chan []byte, 10),
 		responses: make(chan []byte, 10),
-		done:     make(chan struct{}),
+		done:      make(chan struct{}),
 	}
+}
+
+// send delivers a raw request to the simulated server.
+func (m *mockTransport) send(data []byte) {
+	m.requests <- data
 }
 
 // MCPMessage represents a JSON-RPC 2.0 message
@@ -63,18 +58,12 @@ func (m *mockTransport) startServer(t *testing.T, server *Server) {
 	go func() {
 		defer close(m.done)
 
-		dec := json.NewDecoder(m.stdin)
-		for {
+		for req := range m.requests {
 			var msg MCPMessage
-			if err := dec.Decode(&msg); err != nil {
-				if err == io.EOF {
-					return
-				}
+			if err := json.Unmarshal(req, &msg); err != nil {
 				t.Logf("decode error: %v", err)
 				return
 			}
-
-			m.requests <- mustMarshal(msg)
 
 			// Handle the message and generate response
 			resp := m.handleMessage(t, &msg, server)
@@ -204,16 +193,13 @@ func TestProtocol_Initialize(t *testing.T) {
 	require.NoError(t, err)
 
 	transport := newMockTransport()
-	go func() {
-		// Send initialize request
-		req := MCPMessage{
-			JSONRPC: "2.0",
-			ID:      1,
-			Method:  "initialize",
-			Params:  mustMarshal(map[string]interface{}{"protocolVersion": "2025-11-25"}),
-		}
-		transport.stdout.Write(mustMarshal(req))
-	}()
+	transport.startServer(t, server)
+	transport.send(mustMarshal(MCPMessage{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+		Params:  mustMarshal(map[string]interface{}{"protocolVersion": "2025-11-25"}),
+	}))
 
 	// Wait for and read response
 	select {
@@ -235,14 +221,12 @@ func TestProtocol_ToolsList(t *testing.T) {
 	require.NoError(t, err)
 
 	transport := newMockTransport()
-	go func() {
-		req := MCPMessage{
-			JSONRPC: "2.0",
-			ID:      2,
-			Method:  "tools/list",
-		}
-		transport.stdout.Write(mustMarshal(req))
-	}()
+	transport.startServer(t, server)
+	transport.send(mustMarshal(MCPMessage{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "tools/list",
+	}))
 
 	select {
 	case resp := <-transport.responses:
@@ -263,14 +247,12 @@ func TestProtocol_Ping(t *testing.T) {
 	require.NoError(t, err)
 
 	transport := newMockTransport()
-	go func() {
-		req := MCPMessage{
-			JSONRPC: "2.0",
-			ID:      3,
-			Method:  "ping",
-		}
-		transport.stdout.Write(mustMarshal(req))
-	}()
+	transport.startServer(t, server)
+	transport.send(mustMarshal(MCPMessage{
+		JSONRPC: "2.0",
+		ID:      3,
+		Method:  "ping",
+	}))
 
 	select {
 	case resp := <-transport.responses:
@@ -289,14 +271,12 @@ func TestProtocol_UnknownMethod(t *testing.T) {
 	require.NoError(t, err)
 
 	transport := newMockTransport()
-	go func() {
-		req := MCPMessage{
-			JSONRPC: "2.0",
-			ID:      4,
-			Method:  "unknown/method",
-		}
-		transport.stdout.Write(mustMarshal(req))
-	}()
+	transport.startServer(t, server)
+	transport.send(mustMarshal(MCPMessage{
+		JSONRPC: "2.0",
+		ID:      4,
+		Method:  "unknown/method",
+	}))
 
 	select {
 	case resp := <-transport.responses:
@@ -311,21 +291,23 @@ func TestProtocol_UnknownMethod(t *testing.T) {
 }
 
 func TestProtocol_MalformedJSON(t *testing.T) {
+	svc := browsercontrol.NewFakeService()
+	server, err := NewServer(svc, ServerOptions{Name: "test", Version: "0.0.1"})
+	require.NoError(t, err)
+
 	transport := newMockTransport()
-	go func() {
-		transport.stdout.Write([]byte("not valid json{"))
-	}()
+	transport.startServer(t, server)
+	transport.send([]byte("not valid json{"))
 
 	select {
-	case <-transport.requests:
-		// Request was received (malformed)
+	case <-transport.done:
+		// Server terminated cleanly on malformed input.
 	case resp := <-transport.responses:
-		// Response to malformed request
 		var msg MCPMessage
 		mustUnmarshal(resp, &msg)
 		assert.NotNil(t, msg.Error)
 	case <-time.After(5 * time.Second):
-		// Timeout is acceptable for malformed input
+		t.Fatal("timeout waiting for server to handle malformed input")
 	}
 }
 
@@ -335,23 +317,21 @@ func TestProtocol_CreateContextTool(t *testing.T) {
 	require.NoError(t, err)
 
 	transport := newMockTransport()
-	go func() {
-		req := MCPMessage{
-			JSONRPC: "2.0",
-			ID:      5,
-			Method:  "tools/call",
-			Params: mustMarshal(map[string]interface{}{
-				"name": "browser_context_create",
-				"arguments": map[string]interface{}{
-					"viewport": map[string]float64{
-						"width":  1280,
-						"height": 720,
-					},
+	transport.startServer(t, server)
+	transport.send(mustMarshal(MCPMessage{
+		JSONRPC: "2.0",
+		ID:      5,
+		Method:  "tools/call",
+		Params: mustMarshal(map[string]interface{}{
+			"name": "browser_context_create",
+			"arguments": map[string]interface{}{
+				"viewport": map[string]float64{
+					"width":  1280,
+					"height": 720,
 				},
-			}),
-		}
-		transport.stdout.Write(mustMarshal(req))
-	}()
+			},
+		}),
+	}))
 
 	select {
 	case resp := <-transport.responses:
@@ -372,14 +352,12 @@ func TestProtocol_ResourcesList(t *testing.T) {
 	require.NoError(t, err)
 
 	transport := newMockTransport()
-	go func() {
-		req := MCPMessage{
-			JSONRPC: "2.0",
-			ID:      6,
-			Method:  "resources/list",
-		}
-		transport.stdout.Write(mustMarshal(req))
-	}()
+	transport.startServer(t, server)
+	transport.send(mustMarshal(MCPMessage{
+		JSONRPC: "2.0",
+		ID:      6,
+		Method:  "resources/list",
+	}))
 
 	select {
 	case resp := <-transport.responses:
@@ -397,8 +375,8 @@ func TestProtocol_ResourcesList(t *testing.T) {
 // --- Stdio Purity Tests ---
 
 func TestStdioPurity_NoLogsToStdout(t *testing.T) {
-	// This test verifies that logs go to stderr, not stdout
-	// In a real test, we'd capture stdout and verify it contains only JSON
+	// This test verifies that logs go to stderr, not stdout.
+	// The MCP server writes JSON-RPC responses to stdout and logs to stderr.
 
 	var stdoutBuf bytes.Buffer
 
@@ -409,14 +387,15 @@ func TestStdioPurity_NoLogsToStdout(t *testing.T) {
 	_ = server
 
 	// Verify the server writes logs to stderr (checked by integration test)
-	// Here we just verify the structure is correct
+	// Here we just verify the structure is correct.
+	assert.Equal(t, 0, stdoutBuf.Len())
 }
 
 // --- Cancellation Tests ---
 
 func TestCancellation_Propagates(t *testing.T) {
 	svc := browsercontrol.NewFakeService()
-	server, err := NewServer(svc, ServerOptions{Name: "test", Version: "0.0.1"})
+	_, err := NewServer(svc, ServerOptions{Name: "test", Version: "0.0.1"})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -479,11 +458,36 @@ func TestErrorMapping_LimitExceeded(t *testing.T) {
 
 // --- Tool Schema Validation Tests ---
 
+// schemaMap returns a tool's input schema as a plain map for inspection.
+func schemaMap(schema mcp.Tool) map[string]interface{} {
+	m, ok := schema.InputSchema.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return m
+}
+
+// schemaRequired returns the "required" array of a tool schema as strings.
+func schemaRequired(schema mcp.Tool) []string {
+	if req, ok := schemaMap(schema)["required"].([]string); ok {
+		return req
+	}
+	var out []string
+	if req, ok := schemaMap(schema)["required"].([]interface{}); ok {
+		for _, v := range req {
+			if s, ok := v.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
 func TestToolSchema_ContextCreate_RequiredFields(t *testing.T) {
 	schema, ok := GetToolSchema("browser_context_create")
 	assert.True(t, ok)
 
-	input := schema.InputSchema
+	input := schemaMap(schema)
 	props := input["properties"].(map[string]interface{})
 
 	// Check viewport properties
@@ -499,7 +503,7 @@ func TestToolSchema_Navigate_RequiredFields(t *testing.T) {
 	assert.True(t, ok)
 
 	// Verify required fields in the schema
-	required := schema.InputSchema["required"].([]interface{})
+	required := schemaRequired(schema)
 	assert.Contains(t, required, "contextId")
 	assert.Contains(t, required, "url")
 }
@@ -508,7 +512,7 @@ func TestToolSchema_Snapshot_OptionalFields(t *testing.T) {
 	schema, ok := GetToolSchema("browser_snapshot")
 	assert.True(t, ok)
 
-	props := schema.InputSchema["properties"].(map[string]interface{})
+	props := schemaMap(schema)["properties"].(map[string]interface{})
 	assert.Contains(t, props, "maxDepth")
 	assert.Contains(t, props, "maxNodes")
 	assert.Contains(t, props, "includeHidden")
@@ -518,7 +522,7 @@ func TestToolSchema_Query_LocatorTypes(t *testing.T) {
 	schema, ok := GetToolSchema("browser_query")
 	assert.True(t, ok)
 
-	props := schema.InputSchema["properties"].(map[string]interface{})
+	props := schemaMap(schema)["properties"].(map[string]interface{})
 	assert.Contains(t, props, "role")
 	assert.Contains(t, props, "css")
 	assert.Contains(t, props, "text")
@@ -528,7 +532,7 @@ func TestToolSchema_Click_RequiredFields(t *testing.T) {
 	schema, ok := GetToolSchema("browser_click")
 	assert.True(t, ok)
 
-	required := schema.InputSchema["required"].([]interface{})
+	required := schemaRequired(schema)
 	assert.Contains(t, required, "contextId")
 	assert.Contains(t, required, "ref")
 }
@@ -537,7 +541,7 @@ func TestToolSchema_Type_RequiredFields(t *testing.T) {
 	schema, ok := GetToolSchema("browser_type")
 	assert.True(t, ok)
 
-	required := schema.InputSchema["required"].([]interface{})
+	required := schemaRequired(schema)
 	assert.Contains(t, required, "contextId")
 	assert.Contains(t, required, "ref")
 	assert.Contains(t, required, "text")
@@ -561,7 +565,7 @@ func TestIntegration_CreateAndNavigate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get context
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(ctx, info.ID)
 	require.NoError(t, err)
 
 	// Navigate
@@ -581,7 +585,7 @@ func TestIntegration_CreateAndNavigate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify context is gone
-	_, err = svc.Context(info.ID)
+	_, err = svc.Context(ctx, info.ID)
 	assert.Error(t, err)
 }
 
@@ -628,7 +632,7 @@ func TestIntegration_NavigationSequence(t *testing.T) {
 	info, err := svc.CreateContext(ctx, browsercontrol.CreateContextOptions{})
 	require.NoError(t, err)
 
-	ec, err := svc.Context(info.ID)
+	ec, err := svc.Context(ctx, info.ID)
 	require.NoError(t, err)
 
 	// First navigation
@@ -674,7 +678,7 @@ func BenchmarkNavigate(b *testing.B) {
 	ctx := context.Background()
 
 	info, _ := svc.CreateContext(ctx, browsercontrol.CreateContextOptions{})
-	ec, _ := svc.Context(info.ID)
+	ec, _ := svc.Context(ctx, info.ID)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -694,7 +698,7 @@ func BenchmarkSnapshot(b *testing.B) {
 	ctx := context.Background()
 
 	info, _ := svc.CreateContext(ctx, browsercontrol.CreateContextOptions{})
-	ec, _ := svc.Context(info.ID)
+	ec, _ := svc.Context(ctx, info.ID)
 	ec.Navigate(ctx, srv.URL, browsercontrol.WaitComplete, 5000)
 
 	b.ResetTimer()
