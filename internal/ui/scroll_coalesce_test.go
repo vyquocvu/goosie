@@ -17,10 +17,11 @@ import (
 // and trigger a refresh.
 func TestScheduleScroll_CollapsesBurst(t *testing.T) {
 	r := &MockHTMLRendererComp{}
-	// Simulate the canvas scheduler path: schedule 20 viewports and
-	// then drain via TryClaim.
-	for i := 0; i < 20; i++ {
-		r.ScheduleScroll(float32(i*10), 600)
+	// Simulate the canvas scheduler path: only the first event should
+	// queue presentation; the rest update the pending viewport.
+	assert.True(t, r.ScheduleScroll(0, 600))
+	for i := 1; i < 20; i++ {
+		assert.False(t, r.ScheduleScroll(float32(i*10), 600))
 	}
 	v, ok := r.TryClaimScroll()
 	assert.True(t, ok, "expected a pending claim after the burst")

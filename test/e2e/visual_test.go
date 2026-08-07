@@ -61,6 +61,22 @@ func TestLinkedSVGImageGoosieVsBrowser(t *testing.T) {
 	CompareGoosieVsBrowser(t, page, fixturePath, "linked_svg_image", config)
 }
 
+func TestScrollCoalescingGoosieVsBrowser(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	fixturePath := filepath.Join(cwd, "fixtures", "scroll_coalescing.html")
+
+	page := newPage(t)
+	defer page.Close()
+	config := VisualTestConfig{
+		DiffThreshold:  0.10,
+		OutputDir:      filepath.Join("testdata", "results"),
+		ViewportWidth:  800,
+		ViewportHeight: 600,
+	}
+	CompareGoosieVsBrowser(t, page, fixturePath, "scroll_coalescing", config)
+}
+
 func TestGeneratedHTML(t *testing.T) {
 	// Verify testdata/output.html exists
 	cwd, err := os.Getwd()

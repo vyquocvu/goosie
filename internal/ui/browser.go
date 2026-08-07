@@ -959,31 +959,27 @@ func (t *Tab) ensureHTMLRenderer() {
 				return
 			}
 			scrollSize := t.contentScroll.Size()
-			scheduledNew := t.htmlRenderer.ScheduleScroll(pos.Y, scrollSize.Height)
-			if !scheduledNew {
-				// The new viewport was collapsed into a
-				// pending one. Bump the coalesced-scroll
-				// counter so the freeze-fix health check
-				// and the on-screen HUD can see how many
-				// scroll events were collapsed.
+			if !t.htmlRenderer.ScheduleScroll(pos.Y, scrollSize.Height) {
 				t.htmlRenderer.RecordCoalescedScroll(1)
 				return
 			}
-			viewport, ok := t.htmlRenderer.TryClaimScroll()
-			if !ok {
-				return
-			}
-			// Record input-to-present latency. The HUD will display
-			// the maximum of these samples so the user can see the
-			// worst case across a session.
-			t.htmlRenderer.RecordInputToPresent(time.Since(scrollStart))
-			scrollStart = time.Now()
-			// Apply the coalesced viewport. SetViewport on the
-			// canvas is cheap (it just stores two floats) but we
-			// keep the call because the canvas reader uses the
-			// values for culling and hit-testing.
-			t.htmlRenderer.SetViewport(viewport.Y, viewport.Height)
-			refreshTabContent(t)
+
+			// Defer presentation to the next UI turn. Wheel events that
+			// arrive before then only replace the pending viewport, so a
+			// burst produces one canvas rebuild and refresh.
+			t.browser.do(func() {
+				if t.htmlRenderer == nil {
+					return
+				}
+				viewport, ok := t.htmlRenderer.TryClaimScroll()
+				if !ok {
+					return
+				}
+				t.htmlRenderer.RecordInputToPresent(time.Since(scrollStart))
+				scrollStart = time.Now()
+				t.htmlRenderer.SetViewport(viewport.Y, viewport.Height)
+				refreshTabContent(t)
+			})
 		}
 	}
 

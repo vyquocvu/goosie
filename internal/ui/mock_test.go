@@ -60,8 +60,7 @@ func (m *MockHTMLRendererComp) ScheduleScroll(y, h float32) bool {
 	if m.coalescer == nil {
 		m.coalescer = renderer.NewScrollCoalescer()
 	}
-	m.coalescer.Schedule(renderer.ScrollViewport{Y: y, Height: h})
-	return !m.coalescer.Pending()
+	return m.coalescer.Schedule(renderer.ScrollViewport{Y: y, Height: h})
 }
 func (m *MockHTMLRendererComp) TryClaimScroll() (renderer.ScrollViewport, bool) {
 	if m.coalescer == nil {

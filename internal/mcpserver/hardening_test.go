@@ -46,9 +46,6 @@ func TestAuditLogger_ToolCall(t *testing.T) {
 
 // TestAuditLogger_SensitiveRedaction tests that sensitive keys are redacted.
 func TestAuditLogger_SensitiveRedaction(t *testing.T) {
-	var buf bytes.Buffer
-	logger := NewAuditLoggerTo(&buf)
-
 	sensitive := map[string]string{
 		"password":     "secret123",
 		"secret":       "abc",
@@ -245,7 +242,7 @@ func TestHealthReporter_BasicMetrics(t *testing.T) {
 	assert.Equal(t, uint64(1), metrics.TotalTimeouts)
 	assert.Equal(t, int64(3), metrics.ActiveContexts)
 	assert.Equal(t, 10, metrics.MaxContexts)
-	assert.Greater(t, metrics.UptimeSeconds, int64(0))
+	assert.InDelta(t, float64(metrics.UptimeSeconds), time.Since(metrics.StartedAt).Seconds(), 1.0)
 }
 
 // TestHealthReporter_Health tests health check.
@@ -369,7 +366,7 @@ func TestTruncate(t *testing.T) {
 	assert.Equal(t, "abc", Truncate("abc", 10))
 	assert.Equal(t, "abcdef...", Truncate("abcdefghij", 9))
 	assert.Equal(t, "a...", Truncate("abcdef", 4))
-	assert.Equal(t, "abcd", Truncate("abcdef", 3)) // too small for ellipsis
+	assert.Equal(t, "abc", Truncate("abcdef", 3)) // too small for ellipsis
 }
 
 // TestQuotaUsage_JSON tests QuotaUsage JSON marshalling.

@@ -188,9 +188,7 @@ func (cr *CanvasRenderer) SetViewport(y, height float32) {
 // (true) or whether an existing pending render was reused (false).
 // Callers can use this to feed FrameMetrics.IncCoalescedScroll.
 func (cr *CanvasRenderer) ScheduleScroll(y, height float32) bool {
-	cr.scrollCoalescer.Schedule(ScrollViewport{Y: y, Height: height})
-	// If a render was already pending, this Schedule collapsed into it.
-	return !cr.scrollCoalescer.Pending()
+	return cr.scrollCoalescer.Schedule(ScrollViewport{Y: y, Height: height})
 }
 
 // TryClaimScroll returns the latest queued viewport and clears the

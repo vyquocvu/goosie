@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 

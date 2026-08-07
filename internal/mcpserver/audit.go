@@ -128,7 +128,7 @@ func SanitizeMetadata(meta map[string]string) map[string]string {
 	return out
 }
 
-// Truncate returns a string truncated to n bytes, appending an indicator.
+// Truncate returns a string truncated to n bytes, appending an ellipsis.
 func Truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -136,7 +136,7 @@ func Truncate(s string, n int) string {
 	if n < 4 {
 		return s[:n]
 	}
-	return s[:n-4] + "..."
+	return s[:n-3] + "..."
 }
 
 // SafeError returns an error message safe for protocol responses.

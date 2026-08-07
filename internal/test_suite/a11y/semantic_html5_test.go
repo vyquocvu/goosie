@@ -222,12 +222,13 @@ func TestHTML5SemanticElements_AttributesPreserved(t *testing.T) {
 				assert.Equal(t, c.dir, el.Attributes["dir"])
 			}
 			if c.dataAttr != "" {
-				assert.Equal(t, c.dataAttr, el.Attributes["data-testid"],
-					"data-* attribute must survive parsing")
+				// Elements carry their data-* value under different keys.
+				key := "data-testid"
 				if c.id == "x" {
-					// data-widget must also be preserved (different key).
-					assert.Equal(t, "sidebar", el.Attributes["data-widget"])
+					key = "data-widget"
 				}
+				assert.Equal(t, c.dataAttr, el.Attributes[key],
+					"data-* attribute must survive parsing")
 			}
 			if c.id == "x" {
 				assert.Equal(t, "x-label", el.Attributes["aria-labelledby"])

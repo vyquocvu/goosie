@@ -312,15 +312,15 @@ type createContextService interface {
 }
 
 type contextGetter interface {
-	Context(id string) (browsercontrol.Context, error)
+	Context(ctx context.Context, id string) (browsercontrol.Context, error)
 }
 
 func (s *Server) getContext(id string) (browsercontrol.Context, error) {
 	// Try to get from EngineService
 	if eg, ok := s.bc.(interface {
-		Context(id string) (browsercontrol.Context, error)
+		Context(ctx context.Context, id string) (browsercontrol.Context, error)
 	}); ok {
-		return eg.Context(id)
+		return eg.Context(context.Background(), id)
 	}
 
 	// For FakeService, we need a different approach
@@ -351,13 +351,6 @@ func mapError(err error) error {
 	}
 
 	return err
-}
-
-func getString(m map[string]interface{}, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
-	}
-	return ""
 }
 
 func getBool(m map[string]interface{}, key string) bool {
@@ -455,10 +448,7 @@ func formatResult(v interface{}) string {
 
 // truncateString truncates a string to maxLen characters.
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
+	return Truncate(s, maxLen)
 }
 
 // parseJSONArgs parses raw JSON arguments into a map.

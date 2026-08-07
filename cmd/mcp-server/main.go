@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/browsercontrol"
 	"github.com/vyquocvu/goosie/internal/mcpserver"

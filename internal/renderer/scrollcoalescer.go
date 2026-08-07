@@ -47,17 +47,20 @@ func NewScrollCoalescer() *ScrollCoalescer {
 
 // Schedule records a new viewport and ensures the next Run call will
 // process it. Multiple Schedule calls before Run increment the
-// coalesced counter but only retain the last viewport.
-func (c *ScrollCoalescer) Schedule(v ScrollViewport) {
+// coalesced counter but only retain the last viewport. It returns true
+// only when this call transitions the coalescer from idle to pending.
+func (c *ScrollCoalescer) Schedule(v ScrollViewport) bool {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.viewport = v
 	c.hasView = true
 	if c.pending {
 		c.coalesced.Add(1)
-	} else {
-		c.pending = true
+		return false
 	}
-	c.mu.Unlock()
+	c.pending = true
+	return true
 }
 
 // TryClaim returns the current viewport and resets the pending flag,

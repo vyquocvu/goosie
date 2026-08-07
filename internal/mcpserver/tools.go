@@ -5,11 +5,11 @@ import (
 )
 
 // toolSchemas defines the MCP tool schemas for the browser automation tools.
-var toolSchemas = map[string]tool.Tool{
+var toolSchemas = map[string]mcp.Tool{
 	"browser_context_create": {
 		Name:        "browser_context_create",
 		Description: "Create a new private ephemeral browser context",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"viewport": map[string]interface{}{
@@ -31,7 +31,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_context_list": {
 		Name:        "browser_context_list",
 		Description: "List all browser contexts owned by this connection",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{},
 		},
@@ -40,7 +40,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_context_close": {
 		Name:        "browser_context_close",
 		Description: "Idempotently close a browser context",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -55,7 +55,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_navigate": {
 		Name:        "browser_navigate",
 		Description: "Navigate to a URL and optionally wait for a lifecycle condition",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -83,7 +83,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_snapshot": {
 		Name:        "browser_snapshot",
 		Description: "Return a bounded semantic page snapshot with opaque element references",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -114,7 +114,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_screenshot": {
 		Name:        "browser_screenshot",
 		Description: "Capture the current viewport as a PNG image",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -137,7 +137,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_page_info": {
 		Name:        "browser_page_info",
 		Description: "Get current page URL, title, lifecycle state, revision, and viewport",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -151,7 +151,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_query": {
 		Name:        "browser_query",
 		Description: "Resolve a locator to element references on the current page",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -185,7 +185,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_click": {
 		Name:        "browser_click",
 		Description: "Activate an element identified by reference",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -211,7 +211,7 @@ var toolSchemas = map[string]tool.Tool{
 	"browser_type": {
 		Name:        "browser_type",
 		Description: "Enter text into an element identified by reference",
-		InputSchema: tool.InputSchema{
+		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"contextId": map[string]interface{}{
@@ -239,8 +239,8 @@ var toolSchemas = map[string]tool.Tool{
 }
 
 // GetToolSchemas returns all tool schemas for registration.
-func GetToolSchemas() []tool.Tool {
-	tools := make([]tool.Tool, 0, len(toolSchemas))
+func GetToolSchemas() []mcp.Tool {
+	tools := make([]mcp.Tool, 0, len(toolSchemas))
 	for _, t := range toolSchemas {
 		tools = append(tools, t)
 	}
@@ -248,7 +248,7 @@ func GetToolSchemas() []tool.Tool {
 }
 
 // GetToolSchema returns a specific tool schema by name.
-func GetToolSchema(name string) (tool.Tool, bool) {
+func GetToolSchema(name string) (mcp.Tool, bool) {
 	t, ok := toolSchemas[name]
 	return t, ok
 }
