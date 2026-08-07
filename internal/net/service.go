@@ -400,6 +400,7 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 	}
 
 	var (
+		traceMu        sync.Mutex
 		dnsStart       time.Time
 		connectStart   time.Time
 		tlsStart       time.Time
@@ -408,14 +409,34 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 	)
 
 	trace := &httptrace.ClientTrace{
-		DNSStart:             func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
-		DNSDone:              func(_ httptrace.DNSDoneInfo) {},
-		ConnectStart:         func(_, _ string) { connectStart = time.Now() },
-		ConnectDone:          func(_, _ string, _ error) {},
-		TLSHandshakeStart:    func() { tlsStart = time.Now() },
-		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) {},
-		WroteRequest:         func(_ httptrace.WroteRequestInfo) { requestWritten = time.Now() },
-		GotFirstResponseByte: func() { gotFirstByte = time.Now() },
+		DNSStart: func(_ httptrace.DNSStartInfo) {
+			traceMu.Lock()
+			dnsStart = time.Now()
+			traceMu.Unlock()
+		},
+		DNSDone: func(_ httptrace.DNSDoneInfo) {},
+		ConnectStart: func(_, _ string) {
+			traceMu.Lock()
+			connectStart = time.Now()
+			traceMu.Unlock()
+		},
+		ConnectDone: func(_, _ string, _ error) {},
+		TLSHandshakeStart: func() {
+			traceMu.Lock()
+			tlsStart = time.Now()
+			traceMu.Unlock()
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {},
+		WroteRequest: func(_ httptrace.WroteRequestInfo) {
+			traceMu.Lock()
+			requestWritten = time.Now()
+			traceMu.Unlock()
+		},
+		GotFirstResponseByte: func() {
+			traceMu.Lock()
+			gotFirstByte = time.Now()
+			traceMu.Unlock()
+		},
 	}
 
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
@@ -423,6 +444,7 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 
 	if err == nil && resp != nil {
 		now := time.Now()
+		traceMu.Lock()
 		var phases []TimingPhase
 		if !dnsStart.IsZero() {
 			phases = append(phases, TimingPhase{Name: PhaseDNS, Duration: time.Since(dnsStart)})
@@ -439,6 +461,7 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 		if !gotFirstByte.IsZero() {
 			phases = append(phases, TimingPhase{Name: PhaseResponse, Duration: now.Sub(gotFirstByte)})
 		}
+		traceMu.Unlock()
 		phases = append(phases, TimingPhase{Name: PhaseDownload, Duration: 0})
 		resp.Body = &timedBody{ReadCloser: resp.Body, start: now, phase: &phases[len(phases)-1]}
 	}
