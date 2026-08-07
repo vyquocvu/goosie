@@ -162,11 +162,24 @@ goroutines, timers, or unbounded queues.
 
 - Event-loop types, lifecycle, coalescing, generation checks, cancellation,
   metrics, unit tests, race coverage, and burst benchmarks.
-- No renderer or UI behavior changed; this is additive infrastructure.
+- Scroll presentation in `internal/ui/browser.go` no longer builds and
+  refreshes synchronously inside `OnScrolled`: the viewport is applied on the
+  next Fyne UI turn via `fyne.Do`, and `ScrollCoalescer.Schedule` now reports
+  whether it transitioned idle→pending so a burst collapses into one canvas
+  rebuild and refresh.
+- E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` renders a
+  scroll-page fixture in Goosie and Chromium and compares them. The diff is
+  ~8% and is entirely the known 4px Fyne test-driver top offset at section
+  boundaries; the fixture is kept text-free and viewport-sized so the
+  comparison is meaningful (threshold 10%).
 
 ### Known limitations
 
-- Existing Fyne callbacks do not post into this loop yet.
+- Existing Fyne callbacks do not post into the loop yet. The scroll path
+  coalesces through `ScrollCoalescer` and defers presentation, but the event
+  loop itself is not yet wired to `internal/ui/browser.go`.
+- Heavy `RenderHTML`, `RenderParsed`, viewport object construction, and
+  refresh work still run on the Fyne main goroutine.
 - Heavy `RenderHTML`, `RenderParsed`, viewport object construction, and
   refresh work still run on the Fyne main goroutine.
 - `RenderResult.Snapshot` is opaque until the renderer adopts an immutable
@@ -225,6 +238,12 @@ fix:
    fully closed.
 7. **Visual verification.** The changes touch user-visible
    scroll behavior and the on-screen HUD. Visual verification
-   against Chromium baselines is still required per the
-   project's `AGENTS.md` policy, but was not run as part of this
-   fix because the changes are not on a golden baseline yet.
+   against Chromium baselines is required per the project's
+   `AGENTS.md` policy. The scroll-coalescing path is now covered by
+   `TestScrollCoalescingGoosieVsBrowser` (passes; ~8% diff, all from
+   the 4px Fyne test-driver offset). Remaining visual gaps are
+   pre-existing renderer-fidelity differences that also fail on
+   `main` (`test_105_background`, `test_117/118/119_semantic`,
+   `TestHTML5SemanticLayoutGoosieVsBrowser` ~12.9%,
+   `TestLinkedSVGImageGoosieVsBrowser` image-settle timeout); the HUD
+   still lacks a golden baseline.

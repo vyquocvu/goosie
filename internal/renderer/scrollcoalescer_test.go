@@ -16,8 +16,8 @@ func TestScrollCoalescer_CollapseAndClaim(t *testing.T) {
 	assert.False(t, ok)
 	assert.False(t, c.Pending())
 
-	// First schedule claims it.
-	c.Schedule(ScrollViewport{Y: 0, Height: 600})
+	// First schedule opens one pending frame.
+	assert.True(t, c.Schedule(ScrollViewport{Y: 0, Height: 600}))
 	assert.True(t, c.Pending())
 	v, ok = c.TryClaim()
 	assert.True(t, ok)
@@ -31,9 +31,9 @@ func TestScrollCoalescer_CollapseAndClaim(t *testing.T) {
 
 func TestScrollCoalescer_LastViewportWins(t *testing.T) {
 	c := NewScrollCoalescer()
-	c.Schedule(ScrollViewport{Y: 0, Height: 600})
-	c.Schedule(ScrollViewport{Y: 10, Height: 600})
-	c.Schedule(ScrollViewport{Y: 20, Height: 600})
+	assert.True(t, c.Schedule(ScrollViewport{Y: 0, Height: 600}))
+	assert.False(t, c.Schedule(ScrollViewport{Y: 10, Height: 600}))
+	assert.False(t, c.Schedule(ScrollViewport{Y: 20, Height: 600}))
 
 	v, ok := c.TryClaim()
 	assert.True(t, ok)
