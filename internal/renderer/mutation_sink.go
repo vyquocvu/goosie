@@ -57,7 +57,9 @@ func (s *MutationSink) Handle(batch []js.DOMMutation) {
 		case js.MutationSetText:
 			flags = DirtyLayout | DirtyStyle | DirtyPaint
 		case js.MutationSetAttribute:
-			flags = DirtyStyle | DirtyPaint
+			// Attribute changes can alter matched rules (class, id, style=),
+			// so they relayout as well as recompute style (PR10).
+			flags = DirtyLayout | DirtyStyle | DirtyPaint
 		}
 		invalidations = append(invalidations, MutationInvalidation{NodeID: id, Flags: flags})
 		paintIDs = append(paintIDs, id)

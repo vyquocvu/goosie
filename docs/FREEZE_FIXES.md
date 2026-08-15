@@ -190,9 +190,8 @@ goroutines, timers, or unbounded queues.
 - Typed mutations (PR6) handle pure attribute/text changes without a full
   reparse; structural mutations (insert/remove/replace) still fall back to
   the full serialize + reparse path because the typed sink cannot yet
-  synthesize render subtrees. The typed path also does not yet recompute
-  computed styles, so attribute-driven style changes (class toggles,
-  `style=` edits) keep stale styling until the next reparse.
+  synthesize render subtrees. (Computed-style recompute for the typed path
+  landed in PR10; structural full-reparse is the remaining limitation.)
 - Image loads are batched (PR7), but the canvas renderer keeps a second
   `onImageLoaded` callback that can win the loader slot if `SetWindow`
   runs after a present; the renderer's batched path is the effective
@@ -316,10 +315,9 @@ the 10% threshold.
 
 ### Next recommended PR
 
-Mouse-move/click routing through the event loop was completed as PR9;
-the follow-ups in "Remaining work" (stream-the-main-response,
-typed-path style recompute, residual image-callback owner) are the
-remaining candidates.
+The typed-path style recompute was completed as PR10; the follow-ups in
+"Remaining work" (stream-the-main-response, residual image-callback
+owner) are the remaining candidates.
 
 ## PR5 — Single-owner JS session for GUI tabs
 
@@ -396,9 +394,9 @@ E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
 the 10% threshold (no layout-affecting rendering changes in this PR).
 
 Known limitations (also recorded in "Known limitations (after PR4)"):
-structural mutations still full-reparse, and computed styles are not yet
-recomputed on the typed path (class/style attribute changes show stale
-styling until the next reparse).
+structural mutations still full-reparse (the typed sink cannot synthesize
+render subtrees); computed-style recompute for the typed path landed in
+PR10.
 
 ## PR7 — Image invalidation batching
 
@@ -517,6 +515,36 @@ link taps navigate in FIFO order interleaved with clicks/keys).
 E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
 the 10% threshold (no rendering changes in this PR).
 
+## PR10 — Recompute computed styles on the typed mutation path
+
+The PR6 known limitation is closed: class/`style=` mutations on the
+incremental path now recompute computed styles (and relayout) instead of
+keeping stale styling until the next structural reparse.
+
+- **`internal/renderer/invalidation.go`** — `ApplyMutationBatch` now runs
+  `recomputeSubtreeStyles` on every mutation carrying `DirtyStyle` before
+  any relayout, so the rebuilt layout boxes read fresh computed styles.
+  The new `resetSubtreeStyles` helper clears `ComputedStyle` and the raw
+  `Styles` map for the whole mutated subtree first — `ApplyStyles` merges
+  into existing computed styles, so without a reset a removed class or
+  cleared `style=` declaration would keep its stale styling. The
+  re-apply runs under `treeMu` with a fresh `StyleManager` built from the
+  current stylesheet and viewport; when no stylesheet is loaded (an
+  un-built renderer) styles are left as-is to mirror build-time behavior.
+- **`internal/renderer/mutation_sink.go`** — `set-attribute` mutations now
+  carry `DirtyLayout` (in addition to `DirtyStyle | DirtyPaint`): an
+  attribute change can alter matched rules (`class`, `id`, `style=`) and
+  therefore layout, so the subtree is relaid out as well as restyled.
+
+Tests: `internal/renderer/mutation_sink_test.go` — class change flips
+computed color and a removed class reverts to the colorless default;
+class change from `block` to `flex` recomputes the computed display AND
+rebuilds the incremental engine's layout box for the target with
+`DisplayFlex`; `style=` re-parse on change and revert on clear.
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold.
+
 ## Remaining work
 
 These are intentionally deferred because they require a larger
@@ -528,14 +556,10 @@ fix:
    and re-parse twice (once for the streaming pass, once for the
    renderer's `html.Node`). The targeted fix here did not change
    this.
-2. **Typed-path style recompute.** The PR6 typed path syncs text and
-   attribute values but does not yet re-run style computation for
-   the mutated subtree, so class/`style=` changes keep stale
-   styling until the next structural reparse.
-3. **Residual image-callback owner.** `CanvasRenderer.onImageLoaded`
+2. **Residual image-callback owner.** `CanvasRenderer.onImageLoaded`
    still exists alongside the renderer's batched owner and can win
    the loader callback slot if `SetWindow` runs after a present.
-4. **Visual verification.** The changes touch user-visible
+3. **Visual verification.** The changes touch user-visible
    scroll behavior and the on-screen HUD. Visual verification
    against Chromium baselines is required per the project's
    `AGENTS.md` policy. The scroll-coalescing path is now covered by

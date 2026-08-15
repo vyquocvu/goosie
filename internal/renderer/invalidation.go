@@ -34,6 +34,13 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 			continue
 		}
 		r.incremental.InvalidateNode(node, mutation.Flags)
+		if mutation.Flags&DirtyStyle != 0 {
+			// Recompute computed styles for the mutated subtree before any
+			// relayout so the rebuilt boxes read fresh styling (PR10).
+			// Without this, class/style= mutations keep the styling from the
+			// original full render until the next reparse.
+			r.recomputeSubtreeStyles(node)
+		}
 		applied++
 		if mutation.Flags&DirtyLayout != 0 || mutation.Flags&DirtySubtree != 0 {
 			hasLayout = true
@@ -55,6 +62,42 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 		r.canvasRenderer.mu.Unlock()
 	}
 	return applied
+}
+
+// recomputeSubtreeStyles resets and re-applies computed styles for a
+// mutated node's subtree so class/style attribute mutations produce fresh
+// styling on the typed path without a full reparse (PR10). The caller must
+// hold treeMu. When no stylesheet is loaded (a renderer that never went
+// through a Build* pass), styles are left as-is to mirror the build-time
+// behavior of not styling an un-built tree.
+func (r *Renderer) recomputeSubtreeStyles(node *RenderNode) {
+	if node == nil {
+		return
+	}
+	r.stylesheetMu.RLock()
+	sheet := r.stylesheet
+	r.stylesheetMu.RUnlock()
+	if sheet == nil {
+		return
+	}
+	resetSubtreeStyles(node)
+	sm := NewStyleManagerWithViewport(sheet, r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight)
+	sm.ApplyStyles(node)
+}
+
+// resetSubtreeStyles clears the computed style and raw declaration map of a
+// node and all its descendants so a style re-apply starts from a clean
+// slate. ApplyStyles merges into existing computed styles, so without a
+// reset a removed class or style= declaration would keep its stale styling.
+func resetSubtreeStyles(node *RenderNode) {
+	if node == nil {
+		return
+	}
+	node.ComputedStyle = nil
+	node.Styles = nil
+	for _, child := range node.Children {
+		resetSubtreeStyles(child)
+	}
 }
 
 // PresentFromMutationBatch triggers a dirty paint using the renderer's
