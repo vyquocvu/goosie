@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -509,47 +510,65 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 			return
 		}
 
-		var html string
 		if fetchErr != nil {
-			if resolvedURL == "https://example.com" {
-				html = `<!DOCTYPE html>
-<html><head><title>Example Domain</title></head>
-<body><div><h1>Example Domain</h1><p>Mock fallback.</p></div></body></html>`
-			} else {
+			if resolvedURL != "https://example.com" {
 				updateUIWithError(browser, sess, navID, fetchErr, resolvedURL)
 				return
 			}
-		} else {
-			data, readErr := io.ReadAll(stream)
-			stream.Close()
-			if readErr != nil {
-				log.Printf("Navigation %s stream read error: %v", navID, readErr)
-				updateUIWithError(browser, sess, navID, readErr, resolvedURL)
-				return
-			}
-			html = string(data)
-			if meta.Status >= 400 && strings.TrimSpace(html) == "" {
-				html = fmt.Sprintf(
-					"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
-					meta.Status, strings.TrimSpace(fmt.Sprintf("%d", meta.Status)),
-				)
-			}
-			if isImage {
-				html = wrapImageInHTML(resolvedURL)
-			}
+			mock := `<!DOCTYPE html>
+<html><head><title>Example Domain</title></head>
+<body><div><h1>Example Domain</h1><p>Mock fallback.</p></div></body></html>`
+			updateUIWithCoordinatorContent(ctx, browser, fetcher, sess, navID, mock, resolvedURL, networkService, parser)
+			return
 		}
 
-		updateUIWithCoordinatorContent(ctx, browser, fetcher, sess, navID, html, resolvedURL, networkService, parser)
+		// Pass the live response stream through instead of io.ReadAll-ing
+		// the whole body first: the coordinator path parses the stream as
+		// it downloads (tee-capturing the body for the renderer's parse),
+		// so <link>/<script> resources in the head are discovered — and
+		// their fetches start — before the body finishes arriving.
+		updateUIWithCoordinatorStream(ctx, browser, fetcher, sess, navID, stream, stream, meta, isImage, resolvedURL, networkService, parser)
 	}()
 }
 
-// updateUIWithCoordinatorContent is the M3 path: stream-parse the
-// HTML, route discoveries through the documentloader coordinator,
-// wait for external CSS, then render via renderer.RenderParsed. This
-// is the snapshot entry point that delivers the first styled frame
-// with required CSS rules per plan.md M3 acceptance criteria #3.
+// errRecordingReader wraps an io.Reader and records the first non-EOF
+// read error. The streaming DOM parser's tokenizer treats reader errors
+// like end-of-input, so this wrapper lets the caller distinguish a clean
+// EOF from a truncated body — preserving the explicit read-error contract
+// the previous io.ReadAll path had.
+type errRecordingReader struct {
+	io.Reader
+	err error
+}
+
+func (r *errRecordingReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && err != io.EOF && r.err == nil {
+		r.err = err
+	}
+	return n, err
+}
+
+// updateUIWithCoordinatorContent is the string entry point to the
+// coordinator path, kept for tests and the mock fallback: the real
+// navigation path hands the live response stream to
+// updateUIWithCoordinatorStream so resource discovery starts while the
+// body downloads.
 func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, html string, url string, networkService *net.Service, parser *dom.Parser) {
+	updateUIWithCoordinatorStream(ctx, browser, fetcher, sess, navID, strings.NewReader(html), nil, net.ResponseMeta{}, false, url, networkService, parser)
+}
+
+// updateUIWithCoordinatorStream is the M3 path: stream-parse the
+// main response (discovery starts as the body downloads), route
+// discoveries through the documentloader coordinator, wait for external
+// CSS, then render via renderer.RenderParsed. This is the snapshot entry
+// point that delivers the first styled frame with required CSS rules per
+// plan.md M3 acceptance criteria #3.
+func updateUIWithCoordinatorStream(ctx context.Context, browser *ui.Browser, fetcher *net.Fetcher, sess *session.Session, navID navigation.ID, body io.Reader, bodyCloser io.Closer, meta net.ResponseMeta, isImage bool, url string, networkService *net.Service, parser *dom.Parser) {
 	if !sess.IsActive(navID) {
+		if bodyCloser != nil {
+			bodyCloser.Close()
+		}
 		return
 	}
 	log.Printf("Navigation %s (coordinator) rendering", navID)
@@ -651,15 +670,53 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	if err != nil {
 		log.Printf("Navigation %s coordinator init failed: %v", navID, err)
 		// Fall back to the legacy path so the user still sees the page.
+		var html string
+		if body != nil {
+			if data, rerr := io.ReadAll(body); rerr == nil {
+				html = string(data)
+			}
+		}
+		if bodyCloser != nil {
+			bodyCloser.Close()
+		}
 		updateUIWithContent(ctx, browser, fetcher, sess, navID, html, url, sess, networkService, parser)
 		return
 	}
 
-	// 2. Stream-parse the HTML, feeding discoveries into the coordinator.
+	// 2. Stream the main response: the discovery parser consumes the body
+	//    as it downloads, tee-capturing the bytes for the renderer's parse,
+	//    so <link>/<script> resources in the head are discovered — and
+	//    their fetches start — before the body finishes arriving. This
+	//    replaces the io.ReadAll + string pass that buffered the whole
+	//    body before any discovery.
+	var bodyBuf bytes.Buffer
+	rec := &errRecordingReader{Reader: io.TeeReader(body, &bodyBuf)}
 	parseCtx, cancel := context.WithTimeout(navCtx, 30*time.Second)
-	_, _ = parser.ParseDocumentCtx(parseCtx, strings.NewReader(html), dom.ParseConfig{
+	_, _ = parser.ParseDocumentCtx(parseCtx, rec, dom.ParseConfig{
 		OnResource: coord.FromDomOnResource(),
 	})
+	if bodyCloser != nil {
+		bodyCloser.Close()
+	}
+	if rec.err != nil {
+		log.Printf("Navigation %s stream read error: %v", navID, rec.err)
+		cancel()
+		updateUIWithError(browser, sess, navID, rec.err, url)
+		return
+	}
+	document := bodyBuf.Bytes()
+	if meta.Status >= 400 && strings.TrimSpace(string(document)) == "" {
+		document = []byte(fmt.Sprintf(
+			"<html><body><h1>%d %s</h1><p>The server returned an error.</p></body></html>",
+			meta.Status, strings.TrimSpace(fmt.Sprintf("%d", meta.Status)),
+		))
+	}
+	if isImage {
+		document = []byte(wrapImageInHTML(url))
+	}
+	// Raw source string for the mirror side-effects below (raw-source
+	// storage, title extraction, JS runtime HTML).
+	rawSource := string(document)
 
 	// 3. Wait for in-flight CSS fetches to settle (timeout fallback
 	//    renders with what we have so far, per plan.md M3 acceptance).
@@ -681,7 +738,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	//    *html.Node; the streaming parser produces *dom.Document. We
 	//    re-parse with html.Parse for rendering; the streaming pass
 	//    only drove discovery.
-	doc, parseErr := ghtml.Parse(strings.NewReader(html))
+	doc, parseErr := ghtml.Parse(bytes.NewReader(document))
 	if parseErr != nil {
 		log.Printf("Navigation %s render parse failed: %v", navID, parseErr)
 		updateUIWithError(browser, sess, navID, parseErr, url)
@@ -715,9 +772,9 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	//    source, title, loading indicator, JS runtime wiring). These
 	//    do not depend on the rendering path.
 	if tab := browser.ActiveTab(); tab != nil {
-		tab.SetRawSource(html)
+		tab.SetRawSource(rawSource)
 	}
-	if title, ok := extractTitle(html); ok {
+	if title, ok := extractTitle(rawSource); ok {
 		if fyne.CurrentApp() != nil {
 			fyne.CurrentApp().SendNotification(&fyne.Notification{
 				Title:   "Goosie",
@@ -841,7 +898,7 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 				load, ctx := sess.Navigate(context.Background(), targetURL)
 				loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
 			}
-			rt.SetHTMLContent(html)
+			rt.SetHTMLContent(rawSource)
 			if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
 				mutationLookup = renderer.NewNodeIDLookup()
 				mutationLookup.Snapshot(r.GetRoot())

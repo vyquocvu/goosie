@@ -155,6 +155,18 @@ func (cr *CanvasRenderer) SetHeadless(headless bool) {
 }
 
 func (cr *CanvasRenderer) onImageLoaded(source string) {
+	// When a Renderer owns this canvas, route the completion through the
+	// renderer's batched owner (PR7): N images finishing within one window
+	// produce one flush → one style+layout+present instead of one refresh
+	// per image. Delegating here (rather than registering a second,
+	// competing callback) keeps the loader's single callback slot on the
+	// batched path regardless of whether SetWindow ran before or after the
+	// present that registered it. A standalone canvas (no owning renderer —
+	// direct usage and tests) keeps the legacy per-image refresh below.
+	if cr.renderer != nil {
+		cr.renderer.onImageLoaded(source)
+		return
+	}
 	fn := func() {
 		cr.ClearCache()
 		if cr.window != nil {

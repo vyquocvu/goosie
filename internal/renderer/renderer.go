@@ -102,6 +102,11 @@ func NewRenderer(width, height float32) *Renderer {
 		Logger:         slog.Default(),
 		metrics:        NewRenderMetrics(),
 	}
+	// The canvas is owned by this renderer, so its image-load callback
+	// delegates to the renderer's batched owner (PR12): the loader's
+	// single callback slot always lands on the PR7 batch path even when
+	// SetWindow runs after a present.
+	canvasRenderer.renderer = r
 	r.imageBatcher = NewImageLoadBatcher(16*time.Millisecond, r.flushImageBatch)
 	return r
 }

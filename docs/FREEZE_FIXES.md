@@ -316,10 +316,13 @@ the 10% threshold.
 
 ### Next recommended PR
 
-The typed-path style recompute (PR10) and the event-loop optimization
-pass (PR11) are complete; the follow-ups in "Remaining work"
-(stream-the-main-response, residual image-callback owner) are the
-remaining candidates.
+PR10–PR12 completed the typed-path style recompute, the event-loop
+optimization pass, and the remaining follow-ups (image-callback owner,
+stream-the-main-response, frame-gated scroll present). The only
+remaining item in "Remaining work" is the visual-verification baseline;
+a larger architectural candidate would be converting `dom.Document` to
+`*html.Node` to eliminate the renderer's second parse (fidelity risk
+noted in PR12).
 
 ## PR5 — Single-owner JS session for GUI tabs
 
@@ -583,21 +586,63 @@ once the drain returns (same-turn execution).
 E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
 the 10% threshold (no rendering changes).
 
+## PR12 — Close out the remaining follow-ups
+
+Three follow-ups from "Remaining work" landed in one pass:
+
+- **Residual image-callback owner.** `CanvasRenderer.onImageLoaded` no
+  longer competes with the renderer's PR7 batched owner for the loader's
+  single callback slot. `NewRenderer` wires the canvas's `renderer`
+  back-reference (it already existed for hit-testing), and the canvas
+  callback now delegates to `Renderer.onImageLoaded` (the batched path)
+  whenever a Renderer owns the canvas; a standalone canvas keeps the
+  legacy per-image refresh. `SetWindow` after a present can no longer
+  clobber the batching — ordering is now irrelevant.
+- **Stream-the-main-response.** `updateUIWithCoordinatorContent` (kept as
+  the string entry for tests/mock fallback) now wraps a new streaming
+  variant, `updateUIWithCoordinatorStream`, that the real navigation path
+  feeds the **live response stream** instead of an `io.ReadAll`-ed
+  string. The discovery parser consumes the body as it downloads
+  (tee-capturing the bytes for the renderer's parse), so `<link>`/
+  `<script>` resources in the head are discovered — and their fetches
+  start — before the body finishes arriving; CSS fetch RTT now overlaps
+  the body download. An `errRecordingReader` preserves the explicit
+  read-error contract (the tokenizer would otherwise treat a truncated
+  body as clean EOF). The renderer's `html.Parse` pass is unchanged (its
+  contract is `*html.Node`; converting `dom.Document` remains a future
+  fidelity-risk item).
+- **Frame-gated scroll present.** `drainInputLoop` no longer presents on
+  every UI turn: `scheduleScrollPresent` executes the queued render
+  immediately when ≥1 frame elapsed since the last present, otherwise it
+  arms one frame-boundary timer. The request stays in the loop's
+  replace-latest queue while waiting, so sub-frame scroll bursts collapse
+  into one canvas rebuild per display frame and the boundary always
+  paints the newest viewport (no lost final frame). This is the concrete
+  realization of the loop's frame-budget machinery: the budget duration
+  (`Loop.FrameBudget().Duration`, default 60fps) is the gate. A small
+  `renderGateMu` guards the timer/present fields for headless mode where
+  `browser.do` runs inline on the timer goroutine.
+
+Tests: `internal/renderer/imagebatch_test.go` (canvas callback delegates
+through the batcher: a two-signal burst coalesces to one refresh with
+`CoalescedImages == 2`), `cmd/browser/stream_main_response_test.go` (a
+stylesheet in the head is fetched while the body is still staged — the
+pipelining proof — and a mid-body read error fails the navigation
+instead of rendering a truncated page), and `internal/ui/
+event_loop_input_test.go` (frame-gated present: a second sub-frame
+scroll defers to the boundary and supersedes intermediate positions,
+collapsing to one boundary present).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold (no rendering changes).
+
 ## Remaining work
 
 These are intentionally deferred because they require a larger
 architectural pass and were out of scope for the focused freeze
 fix:
 
-1. **Stream-the-main-response.** `FetchStreamWithContext` returns
-   a stream, but the callers still do `io.ReadAll` into a string
-   and re-parse twice (once for the streaming pass, once for the
-   renderer's `html.Node`). The targeted fix here did not change
-   this.
-2. **Residual image-callback owner.** `CanvasRenderer.onImageLoaded`
-   still exists alongside the renderer's batched owner and can win
-   the loader callback slot if `SetWindow` runs after a present.
-3. **Visual verification.** The changes touch user-visible
+1. **Visual verification.** The changes touch user-visible
    scroll behavior and the on-screen HUD. Visual verification
    against Chromium baselines is required per the project's
    `AGENTS.md` policy. The scroll-coalescing path is now covered by

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -204,6 +205,21 @@ type Tab struct {
 	// seen by the drain, used to report the per-render coalesced delta to
 	// the renderer's FrameMetrics HUD.
 	lastCoalescedScroll uint64
+	// renderGateMu guards lastPresent and boundaryTimer. In the real app
+	// both are touched on the UI thread only; the mutex makes the
+	// frame-boundary timer safe when browser.do runs inline (headless mode
+	// and tests), where the timer callback executes on its own goroutine.
+	renderGateMu sync.Mutex
+	// lastPresent is the wall time of the most recent scroll-frame present.
+	// scheduleScrollPresent gates on it against the loop's frame budget so
+	// sub-frame scroll bursts collapse into one canvas rebuild per display
+	// frame instead of one per UI turn.
+	lastPresent time.Time
+	// boundaryTimer defers a scroll present to the frame boundary (at most
+	// one pending). The render request stays in the loop's replace-latest
+	// queue while it waits, so the boundary always paints the newest
+	// viewport — no final frame is ever lost.
+	boundaryTimer *time.Timer
 	// docGeneration increments every time a new document is rendered into
 	// the tab; it feeds the loop's Generation so scroll renders from a
 	// superseded document are dropped before presentation.
@@ -1369,15 +1385,47 @@ func (t *Tab) drainInputLoop() {
 		}
 	}
 
-	// Execute the final render request synchronously on this UI turn. The
-	// loop's replace-latest queue already collapsed the burst into one
-	// request, so executing here — instead of a deferred second UI turn —
-	// halves the input-to-present path while keeping the loop's
-	// generation/cancellation gate (ProcessPendingResults drops stale
-	// results before the present callback runs).
+	// Present the final render request. When at least one frame has elapsed
+	// since the last present it executes immediately on this UI turn; when
+	// a present happened within the frame budget it defers to the frame
+	// boundary so sub-frame scroll bursts collapse into one canvas rebuild
+	// per display frame (PR12 frame-gated present). The loop's
+	// replace-latest queue + generation/cancellation gate (in
+	// ProcessPendingResults) apply either way.
 	if scheduledRender {
-		t.executeRenderRequest()
+		t.scheduleScrollPresent()
 	}
+}
+
+// scheduleScrollPresent executes the queued scroll render immediately when
+// at least one frame has elapsed since the last present; otherwise it arms
+// the frame-boundary timer (at most one pending). The render request stays
+// in the loop's replace-latest queue while it waits, so a newer scroll
+// arriving before the boundary supersedes the queued viewport and the
+// boundary paints the latest position.
+func (t *Tab) scheduleScrollPresent() {
+	t.renderGateMu.Lock()
+	remaining := t.eventLoop.FrameBudget().Duration - time.Since(t.lastPresent)
+	if remaining <= 0 {
+		t.renderGateMu.Unlock()
+		t.executeRenderRequest()
+		return
+	}
+	if t.boundaryTimer != nil {
+		t.renderGateMu.Unlock()
+		return // already armed; the boundary picks up the latest request
+	}
+	t.boundaryTimer = time.AfterFunc(remaining, func() {
+		t.browser.do(func() {
+			t.renderGateMu.Lock()
+			t.boundaryTimer = nil
+			t.renderGateMu.Unlock()
+			if t.eventLoop != nil && t.htmlRenderer != nil {
+				t.executeRenderRequest()
+			}
+		})
+	})
+	t.renderGateMu.Unlock()
 }
 
 // executeRenderRequest consumes the loop's latest render request (the
@@ -1420,6 +1468,9 @@ func (t *Tab) presentRenderResult(result eventloop.RenderResult) {
 	t.htmlRenderer.SetViewport(result.Request.Viewport.Y, result.Request.Viewport.Height)
 	t.htmlRenderer.RecordInputToPresent(time.Since(result.Request.Created))
 	refreshTabContent(t)
+	t.renderGateMu.Lock()
+	t.lastPresent = time.Now()
+	t.renderGateMu.Unlock()
 }
 
 // bumpDocumentGeneration advances the tab's engine generation when a new

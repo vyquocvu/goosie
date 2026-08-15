@@ -309,7 +309,9 @@ func TestTabEventLoop_ScrollBurstAppliesLatestViewportOnce(t *testing.T) {
 
 // TestTabEventLoop_ScrollThroughOnScrolled uses the real OnScrolled entry
 // point (the path the Fyne scroll container invokes) and verifies the
-// latest viewport is applied.
+// latest viewport is applied. The PR12 frame-gated present may defer the
+// sub-frame follow-up scrolls to the frame boundary, so the final position
+// is asserted by polling for it.
 func TestTabEventLoop_ScrollThroughOnScrolled(t *testing.T) {
 	rec := &scrollRecorder{}
 	_, tab := newInputTestBrowser(t, rec)
@@ -323,15 +325,65 @@ func TestTabEventLoop_ScrollThroughOnScrolled(t *testing.T) {
 	tab.contentScroll.OnScrolled(fyne.NewPos(0, 126))
 
 	// In headless mode do() runs inline, so each OnScrolled already
-	// drained; assert the drain applied the final position and that no
-	// further drain finds work.
+	// drained; the first scroll presents immediately and later sub-frame
+	// scrolls are applied at the frame boundary.
 	tab.drainInputLoop()
 
-	applied := rec.appliedViewports()
-	assert.NotEmpty(t, applied, "scrolls should have been applied")
-	if len(applied) > 0 {
-		assert.Equal(t, float32(126), applied[len(applied)-1].Y,
-			"the last drained viewport must be the latest scroll position")
+	deadline := time.Now().Add(time.Second)
+	for {
+		applied := rec.appliedViewports()
+		if len(applied) > 0 && applied[len(applied)-1].Y == 126 {
+			break // the latest position reached the canvas
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("latest viewport 126 never applied; got %v", applied)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestTabEventLoop_FrameBudgetCoalescesSubFrameScrolls is the PR12 guard
+// for the frame-gated present: a scroll within the frame budget of the
+// previous present defers to the frame boundary, so a fast scroll stream
+// collapses into one canvas rebuild per display frame and the intermediate
+// positions are superseded (latest-wins at the boundary).
+func TestTabEventLoop_FrameBudgetCoalescesSubFrameScrolls(t *testing.T) {
+	rec := &scrollRecorder{}
+	_, tab := newInputTestBrowser(t, rec)
+	tab.ensureHTMLRenderer()
+
+	post := func(y float32) {
+		assert.NoError(t, tab.eventLoop.PostInput(eventloop.InputEvent{
+			Type:      eventloop.InputScroll,
+			Viewport:  eventloop.Viewport{Y: y, Height: 600},
+			Timestamp: time.Now(),
+		}))
+		tab.drainInputLoop()
+	}
+
+	// First scroll: no prior present, so it executes immediately.
+	post(42)
+	assert.Equal(t, []eventloop.Viewport{{Y: 42, Height: 600}}, rec.appliedViewports(),
+		"the first scroll of a frame presents immediately")
+
+	// A second and third scroll land within the same frame budget: they
+	// defer to the boundary and supersede each other (latest-wins), so the
+	// boundary applies only the final position.
+	post(84)
+	post(126)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		applied := rec.appliedViewports()
+		if len(applied) >= 2 && applied[len(applied)-1].Y == 126 {
+			assert.Len(t, applied, 2,
+				"sub-frame scrolls must collapse to one boundary present (42 then 126)")
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("boundary present never applied the final position; got %v", applied)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

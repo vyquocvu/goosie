@@ -196,6 +196,64 @@ func TestRendererImageLoadsBatchSingleRender(t *testing.T) {
 	}
 }
 
+// TestCanvasImageCallbackDelegatesToRendererBatcher — PR12 regression:
+// the canvas's onImageLoaded must route through the renderer's batched
+// owner when a Renderer owns the canvas, so SetWindow (which registers
+// the canvas callback on the loader's single slot) can never clobber the
+// PR7 batching with one refresh per image.
+func TestCanvasImageCallbackDelegatesToRendererBatcher(t *testing.T) {
+	loader := newMockImageLoader()
+	r := NewRenderer(800, 600)
+	r.imageLoader = loader
+	r.SetCurrentURL("https://example.com/page")
+
+	if r.canvasRenderer.renderer != r {
+		t.Fatal("NewRenderer must wire the canvas owner back-reference")
+	}
+
+	refreshes := make(chan struct{}, 16)
+	r.SetRefreshCallback(func() {
+		select {
+		case refreshes <- struct{}{}:
+		default:
+		}
+	})
+
+	// No <img> nodes: RenderHTML's own loadImages pass fires no signals,
+	// so every signal below comes from the delegation under test.
+	_, err := r.RenderHTML(context.Background(), `<html><body><div>page</div></body></html>`)
+	require.NoError(t, err)
+
+	// A present already registered the renderer's batched callback; a
+	// later SetWindow re-registers cr.onImageLoaded, which must delegate
+	// to that same batched path rather than refreshing per image.
+	r.canvasRenderer.onImageLoaded("img0.png")
+	r.canvasRenderer.onImageLoaded("img1.png")
+
+	// No immediate present: delegated signals are batched.
+	select {
+	case <-refreshes:
+		t.Fatal("delegated completion must not force an immediate present before the batch window")
+	case <-time.After(5 * time.Millisecond):
+	}
+
+	select {
+	case <-refreshes:
+	case <-time.After(time.Second):
+		t.Fatal("expected one batched refresh after the delegated burst")
+	}
+	select {
+	case <-refreshes:
+		t.Fatal("delegated burst produced more than one refresh")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	require.NotNil(t, r.FrameMetrics)
+	if got := r.FrameMetrics().CoalescedImages; got != 2 {
+		t.Fatalf("CoalescedImages = %d, want 2", got)
+	}
+}
+
 // TestRendererImageLoadsFlushAppliesData — after the batch flush, every
 // img node in the current render tree carries the loaded image data.
 func TestRendererImageLoadsFlushAppliesData(t *testing.T) {
