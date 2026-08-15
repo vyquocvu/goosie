@@ -241,10 +241,11 @@ pipeline instead of being applied directly:
   `Loop.ScheduleRender` (queue capacity 1): a newer scroll replaces the
   queued request and cancels the superseded one, so a burst still produces
   exactly one render of the final viewport.
-- A separate UI-thread execution turn (`scheduleRenderExecution`, at most
-  one per UI turn) consumes the latest request, submits its completion via
+- The drain consumes the latest request, submits its completion via
   `SubmitRenderResult`, and runs the loop's generation/cancellation gate
-  through the new non-blocking `Loop.ProcessPendingResults()`.
+  through the new non-blocking `Loop.ProcessPendingResults()`. (PR11
+  collapsed the former deferred execution turn into the drain itself, so
+  input-to-present spans a single UI turn.)
 - The `Present` callback (`presentRenderResult`) is the single place a
   completed render touches the canvas (`SetViewport` + `refreshTabContent`)
   and records the coalesced-scroll delta and input-to-present latency. It
@@ -315,9 +316,10 @@ the 10% threshold.
 
 ### Next recommended PR
 
-The typed-path style recompute was completed as PR10; the follow-ups in
-"Remaining work" (stream-the-main-response, residual image-callback
-owner) are the remaining candidates.
+The typed-path style recompute (PR10) and the event-loop optimization
+pass (PR11) are complete; the follow-ups in "Remaining work"
+(stream-the-main-response, residual image-callback owner) are the
+remaining candidates.
 
 ## PR5 — Single-owner JS session for GUI tabs
 
@@ -544,6 +546,42 @@ rebuilds the incremental engine's layout box for the target with
 
 E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
 the 10% threshold.
+
+## PR11 — Event-loop optimization pass
+
+A focused review of the input→present pipeline with three changes, each
+removing per-event or per-frame work without changing behavior:
+
+- **Same-turn scroll present.** The scroll drain previously queued a
+  second UI-thread turn (`scheduleRenderExecution`) to consume the loop's
+  render request — one extra `fyne.Do` marshal and channel round trip per
+  scroll frame in the real app (headless tests ran it inline, so behavior
+  was identical there). `drainInputLoop` now executes the final request
+  (`executeRenderRequest`) at the end of the same drain turn, halving the
+  input-to-present path while keeping the loop's replace-latest burst
+  coalescing and the generation/cancellation gate. The now-dead
+  `scheduleRenderExecution` and `execScheduled` field were removed; the
+  `executeRenderRequest` seam stays (it is exercised directly by the
+  replace-old-request and stale-drop tests).
+- **Mouse-move pre-throttle.** `postCanvasMouseInput` now drops
+  `MouseInputMove` events inside the 80ms hover window before they reach
+  the loop — `handleMouseMove` would discard them anyway, so the ~60fps
+  pointer stream no longer pays the post + drain cost for positions that
+  cannot produce a hit test. Clicks and link taps are discrete and never
+  throttled. The 80ms window is now a shared `hoverThrottle` constant.
+- **Single culling pass in `RenderWithViewport`.** The leaf-command loop
+  culled with viewport bounds and then called `isInViewport` again per
+  leaf — provably identical bounds (`y−0.5h` / `y+1.5h`), so the second
+  check could never reject a surviving command. Removed the redundant
+  pass; the dirty-overlay debug path keeps its own check.
+
+Tests: `internal/ui/event_loop_input_test.go` — the mouse poster drops
+in-window moves before posting (clicks always posted, no extra hit tests),
+and the full scroll-flow test asserts the render-request queue is empty
+once the drain returns (same-turn execution).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold (no rendering changes).
 
 ## Remaining work
 

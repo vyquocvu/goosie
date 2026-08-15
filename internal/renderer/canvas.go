@@ -1301,10 +1301,9 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 			continue
 		}
 
-		// Viewport Culling (per-command for leaf commands; PushClip/PopClip already handled)
-		if !cr.isInViewport(cmd.Box) {
-			continue
-		}
+		// Leaf commands were already culled by the loop above (the outer
+		// bounds check is identical to isInViewport), so every command
+		// reaching here is visible; no second culling pass is needed.
 
 		// Object cache: reuse Fyne objects across frames. The cache is keyed
 		// by command index and invalidated when the display list is rebuilt.

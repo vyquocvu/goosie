@@ -200,11 +200,6 @@ type Tab struct {
 	// drain is queued per UI turn: further scroll/key events while a
 	// drain is pending only update the loop's coalesced state.
 	drainScheduled bool
-	// execScheduled is a UI-thread flag guaranteeing at most one render
-	// execution turn is queued per UI turn. Drains that replace the
-	// pending render request while an execution is queued only update the
-	// loop's latest-request state.
-	execScheduled bool
 	// lastCoalescedScroll is the last CoalescedScrollEvents counter value
 	// seen by the drain, used to report the per-render coalesced delta to
 	// the renderer's FrameMetrics HUD.
@@ -1180,14 +1175,27 @@ func (t *Tab) postKeyInput(key string) {
 	t.scheduleInputDrain()
 }
 
+// hoverThrottle is the minimum interval between drained hover hit-tests.
+// MouseMoved posts arrive at display refresh rate and each hit test walks
+// the layout tree, so both the poster and the drain gate on this window.
+const hoverThrottle = 80 * time.Millisecond
+
 // postCanvasMouseInput is the renderer's mouse-input poster hook (PR9).
 // The canvas calls it on the Fyne main thread for every pointer event;
 // the tab maps each renderer.MouseInput into the engine loop's matching
 // slot — mouse-move into the latest-wins slot (a ~60fps burst collapses
 // to one drained position), clicks and link taps into the ordered FIFO —
-// and schedules the single per-turn drain.
+// and schedules the single per-turn drain. Mouse moves inside the hover
+// window are dropped here, before the loop, because handleMouseMove would
+// discard them anyway: the pointer stream never pays the post + drain
+// cost for positions that cannot produce a hit test.
 func (t *Tab) postCanvasMouseInput(input renderer.MouseInput) {
 	if t.eventLoop == nil {
+		return
+	}
+	// Pre-throttle the ~60fps mouse-move stream. Clicks and link taps
+	// are discrete and never throttled.
+	if input.Kind == renderer.MouseInputMove && time.Since(t.lastHoverHit) < hoverThrottle {
 		return
 	}
 	event := eventloop.InputEvent{
@@ -1254,7 +1262,7 @@ func (t *Tab) handleMouseMove(x, y float32) {
 	if t.htmlRenderer == nil {
 		return
 	}
-	if time.Since(t.lastHoverHit) < 80*time.Millisecond {
+	if time.Since(t.lastHoverHit) < hoverThrottle {
 		return
 	}
 	t.lastHoverHit = time.Now()
@@ -1324,6 +1332,7 @@ func (t *Tab) drainInputLoop() {
 		return
 	}
 
+	scheduledRender := false
 	for _, ev := range events {
 		switch ev.Type {
 		case eventloop.InputScroll:
@@ -1331,8 +1340,9 @@ func (t *Tab) drainInputLoop() {
 			// latest-only queue: a newer scroll replaces the queued
 			// request and cancels the superseded one, so a burst still
 			// produces exactly one render of the final viewport. The
-			// request is executed (and its result presented) on a later
-			// UI turn via scheduleRenderExecution.
+			// request is executed and presented at the end of this same
+			// UI turn (executeRenderRequest below) — no deferred second
+			// turn — so input-to-present latency stays at one turn.
 			t.lastViewportY = ev.Viewport.Y
 			if _, err := t.eventLoop.ScheduleRender(context.Background(), eventloop.RenderRequest{
 				Generation: t.eventLoop.Generation(),
@@ -1340,7 +1350,7 @@ func (t *Tab) drainInputLoop() {
 				Reason:     eventloop.RenderReasonViewport,
 				Created:    ev.Timestamp,
 			}); err == nil {
-				t.scheduleRenderExecution()
+				scheduledRender = true
 			}
 		case eventloop.InputKey:
 			if ev.Key == string(fyne.KeyF12) {
@@ -1358,30 +1368,24 @@ func (t *Tab) drainInputLoop() {
 			t.handleClick(ev)
 		}
 	}
-}
 
-// scheduleRenderExecution queues at most one render-execution turn per
-// UI turn. Drains that replace the pending render request while an
-// execution is queued only update the loop's latest-request state; the
-// single queued execution picks up the newest request.
-func (t *Tab) scheduleRenderExecution() {
-	if t.execScheduled {
-		return
-	}
-	t.execScheduled = true
-	t.browser.do(func() {
-		t.execScheduled = false
+	// Execute the final render request synchronously on this UI turn. The
+	// loop's replace-latest queue already collapsed the burst into one
+	// request, so executing here — instead of a deferred second UI turn —
+	// halves the input-to-present path while keeping the loop's
+	// generation/cancellation gate (ProcessPendingResults drops stale
+	// results before the present callback runs).
+	if scheduledRender {
 		t.executeRenderRequest()
-	})
+	}
 }
 
 // executeRenderRequest consumes the loop's latest render request (the
 // queue holds at most one; ScheduleRender replaced and cancelled older
-// ones) and submits its completion. PR3 still executes on the UI thread:
-// the heavy render work is the present-side canvas rebuild, and the
+// ones) and submits its completion. The heavy render work is the
+// present-side canvas rebuild on the UI thread, and the
 // generation/cancellation gate lives in ProcessPendingResults so a stale
-// request is never painted. PR4 moves this body to a worker goroutine and
-// keeps the present callback unchanged.
+// request is never painted.
 func (t *Tab) executeRenderRequest() {
 	if t.eventLoop == nil || t.htmlRenderer == nil {
 		return

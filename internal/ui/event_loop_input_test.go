@@ -391,6 +391,35 @@ func TestTabEventLoop_ClosedLoopRejectsInput(t *testing.T) {
 	assert.ErrorIs(t, err, eventloop.ErrClosed, "posting after close must fail predictably")
 }
 
+// TestTabEventLoop_MousePosterThrottlesHoverMoves is the PR11 guard for
+// the pre-throttle: mouse-move posts inside the hover window never reach
+// the loop (the drain would discard them anyway), while clicks and link
+// taps are always posted.
+func TestTabEventLoop_MousePosterThrottlesHoverMoves(t *testing.T) {
+	rec := &mouseRecorder{}
+	_, tab := newInputTestBrowser(t, rec)
+	tab.ensureHTMLRenderer()
+
+	// First move with a cold throttle: posted and drained (headless do()
+	// runs inline, so the drain's hit test sets lastHoverHit fresh).
+	tab.lastHoverHit = time.Now().Add(-time.Hour)
+	tab.postCanvasMouseInput(renderer.MouseInput{Kind: renderer.MouseInputMove, X: 1, Y: 2})
+	assert.Equal(t, uint64(1), tab.eventLoop.Metrics().InputEventsReceived,
+		"a move outside the hover window must be posted")
+
+	// A move inside the window is dropped before the loop: no post, no
+	// drain work, no hit test.
+	tab.postCanvasMouseInput(renderer.MouseInput{Kind: renderer.MouseInputMove, X: 3, Y: 4})
+	assert.Equal(t, uint64(1), tab.eventLoop.Metrics().InputEventsReceived,
+		"a move inside the hover window must be dropped before posting")
+	assert.Len(t, rec.recordedHits(), 1, "no extra hit test inside the hover window")
+
+	// Clicks are discrete and never throttled by the hover window.
+	tab.postCanvasMouseInput(renderer.MouseInput{Kind: renderer.MouseInputClick, Button: 1, X: 5, Y: 6})
+	assert.Equal(t, uint64(2), tab.eventLoop.Metrics().InputEventsReceived,
+		"clicks must always be posted")
+}
+
 // TestTabEventLoop_FullScrollFlowThroughRenderQueue is the PR3 happy
 // path: a scroll burst drained from the loop becomes one render request
 // that is executed and presented through the generation-gated present
@@ -430,6 +459,15 @@ func TestTabEventLoop_FullScrollFlowThroughRenderQueue(t *testing.T) {
 	assert.Equal(t, uint64(1), m.RenderRequestsCreated, "one render request per drain")
 	assert.Equal(t, uint64(1), m.FramesPresented, "one frame presented")
 	assert.Equal(t, uint64(0), m.StaleFramesDropped)
+
+	// PR11: the drain executes the render in the same UI turn — the
+	// render-request queue must be empty once drainInputLoop returns,
+	// rather than waiting for a deferred execution turn.
+	select {
+	case req := <-tab.eventLoop.RenderRequests():
+		t.Fatalf("drain must execute the render request in-turn, left %v queued", req)
+	default:
+	}
 }
 
 // TestTabEventLoop_RenderQueueReplacesOldRequest verifies the
