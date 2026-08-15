@@ -194,6 +194,65 @@ func TestMetricsCountCoalescedInputAndStaleFrames(t *testing.T) {
 	}
 }
 
+func TestProcessPendingResultsNonBlocking(t *testing.T) {
+	var presented atomic.Uint64
+	gen := Generation{Layout: 3}
+	loop := New(Config{Present: func(RenderResult) { presented.Add(1) }})
+	loop.SetGeneration(gen)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// SubmitRenderResult keeps only the latest completion (capacity 1), so
+	// two of the three submits replace older results.
+	for i := 0; i < 3; i++ {
+		if err := loop.SubmitRenderResult(RenderResult{Request: RenderRequest{
+			Context: ctx, Generation: gen,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The surviving result is processed without blocking; the two replaced
+	// completions were counted as stale at submit time.
+	if got := loop.ProcessPendingResults(); got != 1 {
+		t.Fatalf("processed = %d, want 1", got)
+	}
+	if got := presented.Load(); got != 1 {
+		t.Fatalf("presented = %d, want 1", got)
+	}
+	if got := loop.Metrics().StaleFramesDropped; got != 2 {
+		t.Fatalf("replaced completions = %d, want 2", got)
+	}
+	// Second call is a non-blocking no-op: nothing new to process.
+	if got := loop.ProcessPendingResults(); got != 0 {
+		t.Fatalf("empty processed = %d, want 0", got)
+	}
+}
+
+func TestProcessPendingResultsDropsStaleByGeneration(t *testing.T) {
+	var presented atomic.Uint64
+	loop := New(Config{Present: func(RenderResult) { presented.Add(1) }})
+	loop.SetGeneration(Generation{Navigation: 2})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// A result built for generation 1 arrives after the engine moved to
+	// generation 2: it must be dropped, not presented.
+	if err := loop.SubmitRenderResult(RenderResult{Request: RenderRequest{
+		Context: ctx, Generation: Generation{Navigation: 1},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loop.ProcessPendingResults(); got != 1 {
+		t.Fatalf("processed = %d, want 1", got)
+	}
+	if got := presented.Load(); got != 0 {
+		t.Fatalf("stale frame was presented")
+	}
+	if got := loop.Metrics().StaleFramesDropped; got != 1 {
+		t.Fatalf("stale frames = %d, want 1", got)
+	}
+}
+
 func TestLoopShutsDownCleanly(t *testing.T) {
 	loop := New(Config{})
 	done := make(chan error, 1)

@@ -19,17 +19,17 @@ import (
 //
 //   - RenderDuration:        time spent inside the most recent render
 //   - InputToPresent:        time from a scroll/mutation trigger to the
-//                             next presented frame (when set)
+//     next presented frame (when set)
 //   - UIQueueWait:           time the work spent waiting on the Fyne
-//                             main thread (when set)
+//     main thread (when set)
 //   - LongFrames:            count of frames whose RenderDuration
-//                             exceeded the frame budget
+//     exceeded the frame budget
 //   - CoalescedScrollEvents: count of scroll events collapsed into one
-//                             render
+//     render
 //   - CoalescedMutations:    count of mutation batches collapsed into
-//                             one render
+//     one render
 //   - StaleFramesDropped:    count of frame requests superseded before
-//                             they reached the canvas
+//     they reached the canvas
 //
 // FrameMetrics is goroutine-safe. The hot path (Observe / Add*) uses
 // atomics where possible and a mutex only for the timestamp ring buffer.
@@ -40,15 +40,15 @@ type FrameMetrics struct {
 	window time.Duration // moving-window span for FPS averaging
 
 	// --- frame interval samples (for FPS / dropped-frames display) ---
-	mu       sync.Mutex
-	samples  []time.Time
-	maxSamp  int
-	prev     time.Time
-	total    int64
-	dropped  int64
-	lastInt  time.Duration
-	minInt   time.Duration
-	maxInt   time.Duration
+	mu      sync.Mutex
+	samples []time.Time
+	maxSamp int
+	prev    time.Time
+	total   int64
+	dropped int64
+	lastInt time.Duration
+	minInt  time.Duration
+	maxInt  time.Duration
 
 	// --- per-frame duration samples ---
 	lastRenderNs  atomic.Int64
@@ -69,6 +69,7 @@ type FrameMetrics struct {
 	// --- coalesced event counters ---
 	coalescedScroll    atomic.Int64
 	coalescedMutations atomic.Int64
+	coalescedImages    atomic.Int64
 	staleFramesDropped atomic.Int64
 }
 
@@ -76,26 +77,27 @@ type FrameMetrics struct {
 type FrameMetricsSnapshot struct {
 	// Legacy FPS fields (same semantics as FPSStats) for backwards
 	// compatibility with the existing on-screen HUD.
-	Frames      int64
-	CurrentFPS  float64
-	AverageFPS  float64
-	MinFPS      float64
-	MaxFPS      float64
-	Dropped     int64
+	Frames       int64
+	CurrentFPS   float64
+	AverageFPS   float64
+	MinFPS       float64
+	MaxFPS       float64
+	Dropped      int64
 	SampleWindow time.Duration
 
 	// New actionable fields.
-	RenderDuration         time.Duration
-	MaxRenderDuration      time.Duration
-	InputToPresent         time.Duration
-	MaxInputToPresent      time.Duration
-	UIQueueWait            time.Duration
-	MaxUIQueueWait         time.Duration
-	LongFrames             int64
-	CoalescedScrollEvents  int64
-	CoalescedMutations     int64
-	StaleFramesDropped     int64
-	LongThreshold          time.Duration
+	RenderDuration        time.Duration
+	MaxRenderDuration     time.Duration
+	InputToPresent        time.Duration
+	MaxInputToPresent     time.Duration
+	UIQueueWait           time.Duration
+	MaxUIQueueWait        time.Duration
+	LongFrames            int64
+	CoalescedScrollEvents int64
+	CoalescedMutations    int64
+	CoalescedImages       int64
+	StaleFramesDropped    int64
+	LongThreshold         time.Duration
 }
 
 // NewFrameMetrics creates a metrics struct with the default 60Hz budget.
@@ -216,6 +218,14 @@ func (m *FrameMetrics) IncCoalescedMutations(n int) {
 	}
 }
 
+// IncCoalescedImages bumps the image-load-coalescing counter. Owners call
+// this when they collapse N image-loaded callbacks into one render.
+func (m *FrameMetrics) IncCoalescedImages(n int) {
+	if n > 0 {
+		m.coalescedImages.Add(int64(n))
+	}
+}
+
 // IncStaleFramesDropped bumps the stale-frame counter. Owners call
 // this when a render request is superseded by a newer one before the
 // Fyne thread got to run it.
@@ -227,8 +237,8 @@ func (m *FrameMetrics) IncStaleFramesDropped() {
 func (m *FrameMetrics) Snapshot() FrameMetricsSnapshot {
 	m.mu.Lock()
 	s := FrameMetricsSnapshot{
-		Frames:      m.total,
-		Dropped:     m.dropped,
+		Frames:       m.total,
+		Dropped:      m.dropped,
 		SampleWindow: m.window,
 	}
 	if m.total > 0 && len(m.samples) >= 2 {
@@ -260,6 +270,7 @@ func (m *FrameMetrics) Snapshot() FrameMetricsSnapshot {
 	s.LongFrames = m.longFrames.Load()
 	s.CoalescedScrollEvents = m.coalescedScroll.Load()
 	s.CoalescedMutations = m.coalescedMutations.Load()
+	s.CoalescedImages = m.coalescedImages.Load()
 	s.StaleFramesDropped = m.staleFramesDropped.Load()
 	s.LongThreshold = m.longThreshold
 	return s
@@ -287,5 +298,6 @@ func (m *FrameMetrics) Reset() {
 	m.maxUIQueueWaitNs.Store(0)
 	m.coalescedScroll.Store(0)
 	m.coalescedMutations.Store(0)
+	m.coalescedImages.Store(0)
 	m.staleFramesDropped.Store(0)
 }

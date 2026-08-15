@@ -144,11 +144,11 @@ func (r *renderParsedSpy) RenderParsed(_ context.Context, _ *html.Node, _ []rend
 	r.parsedOnMain = IsMainGoroutine()
 	return fyne.NewContainerWithoutLayout(), nil
 }
-func (r *renderParsedSpy) UpdateViewport() fyne.CanvasObject { return nil }
-func (r *renderParsedSpy) SetCurrentURL(_ string)          {}
-func (r *renderParsedSpy) ResolveURL(_ string) string      { return "" }
-func (r *renderParsedSpy) SetWindow(_ fyne.Window)          {}
-func (r *renderParsedSpy) SetHeadless(_ bool)              {}
+func (r *renderParsedSpy) UpdateViewport() fyne.CanvasObject    { return nil }
+func (r *renderParsedSpy) SetCurrentURL(_ string)               {}
+func (r *renderParsedSpy) ResolveURL(_ string) string           { return "" }
+func (r *renderParsedSpy) SetWindow(_ fyne.Window)              {}
+func (r *renderParsedSpy) SetHeadless(_ bool)                   {}
 func (r *renderParsedSpy) SetNavigationCallback(_ func(string)) {}
 func (r *renderParsedSpy) HitTest(_, _ float32) (*renderer.RenderNode, *renderer.LayoutBox) {
 	return nil, nil
@@ -156,30 +156,36 @@ func (r *renderParsedSpy) HitTest(_, _ float32) (*renderer.RenderNode, *renderer
 func (r *renderParsedSpy) SetInspectCallback(_ func(*renderer.RenderNode, *renderer.LayoutBox)) {}
 func (r *renderParsedSpy) SetContextMenuCallback(_ func(*renderer.RenderNode, *renderer.LayoutBox, fyne.Position)) {
 }
-func (r *renderParsedSpy) GetRoot() *renderer.RenderNode                                { return nil }
-func (r *renderParsedSpy) Refresh()                                                     {}
-func (r *renderParsedSpy) SetRefreshCallback(_ func())                                  {}
-func (r *renderParsedSpy) SetSubmitting(_ bool)                                         {}
-func (r *renderParsedSpy) SetCSP(_ *net.CSPPolicy)                                      {}
-func (r *renderParsedSpy) GetDisplayListSummary() map[string]int                        { return nil }
-func (r *renderParsedSpy) GetDisplayListCommands() []renderer.PaintCommand              { return nil }
-func (r *renderParsedSpy) SetDirtyOverlayEnabled(_ bool)                                {}
-func (r *renderParsedSpy) DirtyOverlayEnabled() bool                                    { return false }
-func (r *renderParsedSpy) SetFPSOverlayEnabled(_ bool)                                  {}
-func (r *renderParsedSpy) FPSOverlayEnabled() bool                                      { return false }
-func (r *renderParsedSpy) FPSStats() renderer.FPSStats                                  { return renderer.FPSStats{} }
-func (r *renderParsedSpy) FrameMetrics() renderer.FrameMetricsSnapshot                  { return renderer.FrameMetricsSnapshot{} }
-func (r *renderParsedSpy) ScheduleScroll(_, _ float32) bool                            { return false }
-func (r *renderParsedSpy) TryClaimScroll() (renderer.ScrollViewport, bool)             { return renderer.ScrollViewport{}, false }
-func (r *renderParsedSpy) RecordInputToPresent(_ time.Duration)                          {}
-func (r *renderParsedSpy) RecordUIQueueWait(_ time.Duration)                              {}
-func (r *renderParsedSpy) RecordCoalescedMutations(_ int)                                  {}
-func (r *renderParsedSpy) RecordCoalescedScroll(_ int)                                     {}
-func (r *renderParsedSpy) SetSize(_, _ float32)                                         {}
-func (r *renderParsedSpy) GetDOMNodeCounts() (int, int, int)                            { return 0, 0, 0 }
-func (r *renderParsedSpy) GetLayoutNodeCount() int                                       { return 0 }
-func (r *renderParsedSpy) GetStyleSheet() *css.StyleSheet                                { return nil }
-func (r *renderParsedSpy) GetMatchedRules(_ *renderer.RenderNode) []css.Rule            { return nil }
-func (r *renderParsedSpy) SetHighlightNode(_ *renderer.RenderNode)                      {}
-func (r *renderParsedSpy) GetLayoutBox(_ *renderer.RenderNode) *renderer.LayoutBox      { return nil }
-func (r *renderParsedSpy) SetViewport(_, _ float32)                                     {}
+func (r *renderParsedSpy) GetRoot() *renderer.RenderNode                   { return nil }
+func (r *renderParsedSpy) Refresh()                                        {}
+func (r *renderParsedSpy) SetRefreshCallback(_ func())                     {}
+func (r *renderParsedSpy) SetSubmitting(_ bool)                            {}
+func (r *renderParsedSpy) SetCSP(_ *net.CSPPolicy)                         {}
+func (r *renderParsedSpy) GetDisplayListSummary() map[string]int           { return nil }
+func (r *renderParsedSpy) GetDisplayListCommands() []renderer.PaintCommand { return nil }
+func (r *renderParsedSpy) SetDirtyOverlayEnabled(_ bool)                   {}
+func (r *renderParsedSpy) DirtyOverlayEnabled() bool                       { return false }
+func (r *renderParsedSpy) SetFPSOverlayEnabled(_ bool)                     {}
+func (r *renderParsedSpy) FPSOverlayEnabled() bool                         { return false }
+func (r *renderParsedSpy) FPSStats() renderer.FPSStats                     { return renderer.FPSStats{} }
+func (r *renderParsedSpy) FrameMetrics() renderer.FrameMetricsSnapshot {
+	return renderer.FrameMetricsSnapshot{}
+}
+func (r *renderParsedSpy) ScheduleScroll(_, _ float32) bool { return false }
+func (r *renderParsedSpy) TryClaimScroll() (renderer.ScrollViewport, bool) {
+	return renderer.ScrollViewport{}, false
+}
+func (r *renderParsedSpy) RecordInputToPresent(_ time.Duration)                    {}
+func (r *renderParsedSpy) RecordUIQueueWait(_ time.Duration)                       {}
+func (r *renderParsedSpy) RecordCoalescedMutations(_ int)                          {}
+func (r *renderParsedSpy) RecordCoalescedScroll(_ int)                             {}
+func (r *renderParsedSpy) RecordCoalescedImages(_ int)                             {}
+func (r *renderParsedSpy) SetMouseInputCallback(_ func(input renderer.MouseInput)) {}
+func (r *renderParsedSpy) SetSize(_, _ float32)                                    {}
+func (r *renderParsedSpy) GetDOMNodeCounts() (int, int, int)                       { return 0, 0, 0 }
+func (r *renderParsedSpy) GetLayoutNodeCount() int                                 { return 0 }
+func (r *renderParsedSpy) GetStyleSheet() *css.StyleSheet                          { return nil }
+func (r *renderParsedSpy) GetMatchedRules(_ *renderer.RenderNode) []css.Rule       { return nil }
+func (r *renderParsedSpy) SetHighlightNode(_ *renderer.RenderNode)                 {}
+func (r *renderParsedSpy) GetLayoutBox(_ *renderer.RenderNode) *renderer.LayoutBox { return nil }
+func (r *renderParsedSpy) SetViewport(_, _ float32)                                {}

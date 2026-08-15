@@ -626,10 +626,10 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 				}
 				asyncMu.Unlock()
 				if t := browser.ActiveTab(); t != nil {
-					if rt := t.GetJSRuntime(); rt != nil {
-						if _, err := rt.RunScript(string(r.Source)); err != nil {
-							log.Printf("Error running async script %s: %v", r.Resolved, err)
-						}
+					// Route through the session owner so the goja VM is only
+					// touched by its owner goroutine (M8.1).
+					if _, err := t.RunScriptOnOwner(string(r.Source)); err != nil {
+						log.Printf("Error running async script %s: %v", r.Resolved, err)
 					}
 				}
 			},
@@ -748,44 +748,14 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 	//    strategy in the plan and keeps the user-visible flow stable.
 	tab := browser.ActiveTab()
 	if tab != nil {
-		if oldRuntime := tab.GetJSRuntime(); oldRuntime != nil {
-			oldRuntime.SetDOMMutationCallback(nil)
-			oldRuntime.Cleanup()
-		}
+		// A new document replaces the previous runtime. Closing the old
+		// session cancels its owner goroutine and rejects queued tasks,
+		// including lingering timers/fetch callbacks from the old page.
+		tab.CloseJSSession()
+
 		jsRuntime := js.NewRuntime()
 		tab.SetJSRuntime(jsRuntime)
-		asyncMu.Lock()
-		jsRuntimeReady = true
-		for _, a := range preRuntimeAsync {
-			if _, err := jsRuntime.RunScript(string(a.Source)); err != nil {
-				log.Printf("Error running pre-runtime async script %s: %v", a.Resolved, err)
-			}
-		}
-		preRuntimeAsync = nil
-		asyncMu.Unlock()
-		jsRuntime.SetOrigin(originFromURL(url))
-		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
-		jsRuntime.SetFetcher(fetcher)
-		jsRuntime.OnOpenWindow = func(openURL, name string) {
-			log.Printf("Popup (window.open): %s (name=%s)", openURL, name)
-			load, ctx := sess.Navigate(context.Background(), openURL)
-			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
-		}
-		jsRuntime.OnNavigate = func(targetURL string) {
-			if !sess.IsActive(navID) {
-				return
-			}
-			log.Printf("Programmatic navigation: window.location → %s", targetURL)
-			load, ctx := sess.Navigate(context.Background(), targetURL)
-			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
-		}
-		jsRuntime.SetHTMLContent(html)
-		if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
-			lookup := renderer.NewNodeIDLookup()
-			lookup.Snapshot(r.GetRoot())
-			sink := renderer.NewMutationSinkWithAdapter(r, lookup, nil)
-			jsRuntime.SetDOMMutationBatchCallback(sink.Handle)
-		}
+
 		// M6 mutation handling: coalesce a burst of JS DOM mutations
 		// into a single render via documentloader's MutationCoalescer,
 		// then re-render using the snapshot entry point (RenderParsed)
@@ -796,6 +766,11 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 		var (
 			muMut          sync.Mutex
 			currentMutHTML string
+			// mutationLookup maps JS __goosie_id → render node ID for the
+			// typed mutation sink. It is re-snapshotted after every
+			// structural reparse so typed mutations keep mapping to the
+			// current render tree.
+			mutationLookup *renderer.NodeIDLookup
 		)
 		mutCoalescer := documentloader.NewMutationCoalescer(16*time.Millisecond, func(n int) {
 			if !sess.IsActive(navID) {
@@ -817,6 +792,13 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 				log.Printf("Mutation render: RenderParsedContent failed: %v", err)
 			} else {
 				log.Printf("Mutation render: coalesced %d mutations (bytes=%d, render=%s)", n, len(latest), time.Since(renderStart))
+				// The structural reparse rebuilt the render tree with fresh
+				// render node IDs; re-snapshot the lookup so subsequent
+				// typed mutations map to the new tree (stale IDs are then
+				// rejected safely instead of invalidating the wrong node).
+				if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil && mutationLookup != nil {
+					mutationLookup.Snapshot(r.GetRoot())
+				}
 			}
 			// Record the coalesced-event count so the freeze
 			// health checks and the on-screen HUD can see
@@ -828,17 +810,69 @@ func updateUIWithCoordinatorContent(ctx context.Context, browser *ui.Browser, fe
 				r.RecordCoalescedMutations(n)
 			}
 		})
-		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
-			if !sess.IsActive(navID) {
-				return
-			}
-			muMut.Lock()
-			currentMutHTML = mutatedHTML
-			muMut.Unlock()
-			mutCoalescer.Trigger()
-		})
 
-		executeScriptQueue(jsRuntime, url, csp, doc, scriptResults)
+		// Runtime configuration, buffered async scripts, and callback
+		// wiring all run on the JS session's owner goroutine (M8.1), so
+		// no non-owner thread touches the goja VM.
+		if err := tab.SubmitOnOwner(func(rt *js.Runtime) {
+			asyncMu.Lock()
+			jsRuntimeReady = true
+			for _, a := range preRuntimeAsync {
+				if _, err := rt.RunScript(string(a.Source)); err != nil {
+					log.Printf("Error running pre-runtime async script %s: %v", a.Resolved, err)
+				}
+			}
+			preRuntimeAsync = nil
+			asyncMu.Unlock()
+
+			rt.SetOrigin(originFromURL(url))
+			rt.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
+			rt.SetFetcher(fetcher)
+			rt.OnOpenWindow = func(openURL, name string) {
+				log.Printf("Popup (window.open): %s (name=%s)", openURL, name)
+				load, ctx := sess.Navigate(context.Background(), openURL)
+				loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
+			}
+			rt.OnNavigate = func(targetURL string) {
+				if !sess.IsActive(navID) {
+					return
+				}
+				log.Printf("Programmatic navigation: window.location → %s", targetURL)
+				load, ctx := sess.Navigate(context.Background(), targetURL)
+				loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, sess, networkService, nil)
+			}
+			rt.SetHTMLContent(html)
+			if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
+				mutationLookup = renderer.NewNodeIDLookup()
+				mutationLookup.Snapshot(r.GetRoot())
+				// PR6 typed mutation path: sync mutation values into the
+				// render tree, invalidate, and present via the tab without a
+				// full serialize/reparse for pure attribute/text mutations.
+				// Structural mutations still fall back to the string
+				// callback + coalescer below.
+				sink := renderer.NewMutationSink(r, mutationLookup, func() {
+					tab.RefreshFromMutation()
+				})
+				rt.SetDOMMutationBatchCallback(sink.Handle)
+			}
+			rt.SetDOMMutationCallback(func(mutatedHTML string) {
+				if !sess.IsActive(navID) {
+					return
+				}
+				muMut.Lock()
+				currentMutHTML = mutatedHTML
+				muMut.Unlock()
+				mutCoalescer.Trigger()
+			})
+		}); err != nil {
+			log.Printf("JS session unavailable, skipping script setup: %v", err)
+		}
+
+		if err := tab.SubmitOnOwner(func(rt *js.Runtime) {
+			executeScriptQueue(rt, url, csp, doc, scriptResults)
+		}); err != nil {
+			log.Printf("JS session unavailable, skipping script queue: %v", err)
+		}
 	}
 }
 
@@ -1073,87 +1107,95 @@ func updateUIWithContent(ctx context.Context, browser *ui.Browser, fetcher *net.
 			tab.SetJSRuntime(jsRuntime)
 		}
 
-		jsRuntime := tab.GetJSRuntime()
+		// Runtime configuration, script execution, and callback wiring all
+		// run on the JS session's owner goroutine (M8.1) so no non-owner
+		// thread touches the goja VM.
+		if err := tab.SubmitOnOwner(func(jsRuntime *js.Runtime) {
+			jsRuntime.SetOrigin(originFromURL(url))
+			jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
 
-		jsRuntime.SetOrigin(originFromURL(url))
-		jsRuntime.SetEnforcer(js.NewScriptEnforcer(js.DefaultSecurePolicy()))
+			// Wire up the real HTTP fetcher so fetch() makes actual network requests
+			jsRuntime.SetFetcher(fetcher)
 
-		// Wire up the real HTTP fetcher so fetch() makes actual network requests
-		jsRuntime.SetFetcher(fetcher)
-
-		// Wire up window.open to navigate in the current browsing context.
-		jsRuntime.OnOpenWindow = func(url, name string) {
-			log.Printf("Popup (window.open): %s (name=%s)", url, name)
-			load, ctx := navSession.Navigate(context.Background(), url)
-			jsRuntime := tab.GetJSRuntime()
-			_ = jsRuntime // suppress unused warning if any, but wait, loadPageAsync is next
-			loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
-		}
-
-		// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
-		jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
-			log.Printf("DOM mutated by JS, triggering UI re-render")
-			if err := tab.RenderHTML(context.Background(), mutatedHTML); err != nil {
-				log.Printf("Error rendering mutated HTML: %v", err)
+			// Wire up window.open to navigate in the current browsing context.
+			jsRuntime.OnOpenWindow = func(url, name string) {
+				log.Printf("Popup (window.open): %s (name=%s)", url, name)
+				load, ctx := navSession.Navigate(context.Background(), url)
+				loadPageAsyncWithCoordinator(browser, fetcher, parser, load, ctx, navSession, networkService, nil)
 			}
-		})
 
-		// Set HTML content for JS runtime (enables document.getElementById etc.)
-		jsRuntime.SetHTMLContent(html)
-		if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
-			lookup := renderer.NewNodeIDLookup()
-			lookup.Snapshot(r.GetRoot())
-			sink := renderer.NewMutationSinkWithAdapter(r, lookup, nil)
-			jsRuntime.SetDOMMutationBatchCallback(sink.Handle)
-		}
-
-		// Parse page URL for CSP enforcement.
-		baseURL, _ := urlpkg.Parse(url)
-		csp := fetcher.CSP()
-
-		// Execute inline <script> tags found in the page
-		scripts := extractInlineScripts(html)
-		for _, script := range scripts {
-			if csp != nil {
-				if err := csp.AllowScript("", baseURL); err != nil {
-					log.Printf("CSP blocked inline script: %v", err)
-					continue
+			// Wire up the DOM mutation callback to re-render the HTML content on dynamic updates
+			jsRuntime.SetDOMMutationCallback(func(mutatedHTML string) {
+				log.Printf("DOM mutated by JS, triggering UI re-render")
+				if err := tab.RenderHTML(context.Background(), mutatedHTML); err != nil {
+					log.Printf("Error rendering mutated HTML: %v", err)
 				}
+			})
+
+			// Set HTML content for JS runtime (enables document.getElementById etc.)
+			jsRuntime.SetHTMLContent(html)
+			if r, ok := tab.GetRenderer().(*renderer.Renderer); ok && r != nil {
+				// PR6 typed mutation path: sync values, invalidate, and
+				// present via the tab without a full serialize/reparse for
+				// pure attribute/text mutations.
+				lookup := renderer.NewNodeIDLookup()
+				lookup.Snapshot(r.GetRoot())
+				sink := renderer.NewMutationSink(r, lookup, func() {
+					tab.RefreshFromMutation()
+				})
+				jsRuntime.SetDOMMutationBatchCallback(sink.Handle)
 			}
-			if _, err := jsRuntime.RunScript(script); err != nil {
-				log.Printf("Error running page script: %v", err)
-			}
-		}
 
-		// Fetch and execute external scripts (<script src="...">)
-		doc, htmlParseErr := ghtml.Parse(strings.NewReader(html))
-		if htmlParseErr == nil {
-			for _, src := range extractExternalScriptSrcs(doc) {
-				resolvedSrc, resolveErr := resolveScriptURL(src, url)
-				if resolveErr != nil {
-					log.Printf("Skipping external script with invalid src %s: %v", src, resolveErr)
-					continue
-				}
-				// Only fetch scripts with a valid HTTP/HTTPS URL
-				if !strings.HasPrefix(resolvedSrc, "http://") && !strings.HasPrefix(resolvedSrc, "https://") {
-					log.Printf("Skipping external script with non-HTTP src: %s", resolvedSrc)
-					continue
-				}
+			// Parse page URL for CSP enforcement.
+			baseURL, _ := urlpkg.Parse(url)
+			csp := fetcher.CSP()
+
+			// Execute inline <script> tags found in the page
+			scripts := extractInlineScripts(html)
+			for _, script := range scripts {
 				if csp != nil {
-					if err := csp.AllowScript(resolvedSrc, baseURL); err != nil {
-						log.Printf("CSP blocked external script %s: %v", resolvedSrc, err)
+					if err := csp.AllowScript("", baseURL); err != nil {
+						log.Printf("CSP blocked inline script: %v", err)
 						continue
 					}
 				}
-				scriptContent, fetchErr := fetcher.Fetch(resolvedSrc)
-				if fetchErr != nil {
-					log.Printf("Failed to fetch external script %s: %v", resolvedSrc, fetchErr)
-					continue
-				}
-				if _, runErr := jsRuntime.RunScript(scriptContent); runErr != nil {
-					log.Printf("Error running external script %s: %v", resolvedSrc, runErr)
+				if _, err := jsRuntime.RunScript(script); err != nil {
+					log.Printf("Error running page script: %v", err)
 				}
 			}
+
+			// Fetch and execute external scripts (<script src="...">)
+			doc, htmlParseErr := ghtml.Parse(strings.NewReader(html))
+			if htmlParseErr == nil {
+				for _, src := range extractExternalScriptSrcs(doc) {
+					resolvedSrc, resolveErr := resolveScriptURL(src, url)
+					if resolveErr != nil {
+						log.Printf("Skipping external script with invalid src %s: %v", src, resolveErr)
+						continue
+					}
+					// Only fetch scripts with a valid HTTP/HTTPS URL
+					if !strings.HasPrefix(resolvedSrc, "http://") && !strings.HasPrefix(resolvedSrc, "https://") {
+						log.Printf("Skipping external script with non-HTTP src: %s", resolvedSrc)
+						continue
+					}
+					if csp != nil {
+						if err := csp.AllowScript(resolvedSrc, baseURL); err != nil {
+							log.Printf("CSP blocked external script %s: %v", resolvedSrc, err)
+							continue
+						}
+					}
+					scriptContent, fetchErr := fetcher.Fetch(resolvedSrc)
+					if fetchErr != nil {
+						log.Printf("Failed to fetch external script %s: %v", resolvedSrc, fetchErr)
+						continue
+					}
+					if _, runErr := jsRuntime.RunScript(scriptContent); runErr != nil {
+						log.Printf("Error running external script %s: %v", resolvedSrc, runErr)
+					}
+				}
+			}
+		}); err != nil {
+			log.Printf("JS session unavailable, skipping legacy page script setup: %v", err)
 		}
 	}
 }
@@ -1197,7 +1239,7 @@ func runReproWorkload(browser *ui.Browser, scrolls int, evalExpr string) {
 	// Stage 2: click a link if one exists on the page. We pick the
 	// first anchor and call .click() on it through the JS runtime.
 	// On the IANA page this is a real link to a domain registry.
-	if _, err := rt.RunScript("(function(){var a=document.querySelector('a[href]');if(!a)return null;a.click();return a.getAttribute('href');})()"); err != nil {
+	if _, err := tab.RunScriptOnOwner("(function(){var a=document.querySelector('a[href]');if(!a)return null;a.click();return a.getAttribute('href');})()"); err != nil {
 		log.Printf("repro: click failed: %v", err)
 	} else {
 		log.Print("repro: click dispatched")
@@ -1210,7 +1252,7 @@ func runReproWorkload(browser *ui.Browser, scrolls int, evalExpr string) {
 	scrollDurations := make([]time.Duration, 0, scrolls)
 	for i := 0; i < scrolls; i++ {
 		start := time.Now()
-		if _, err := rt.RunScript("window.scrollBy(0, 240); window.scrollY"); err != nil {
+		if _, err := tab.RunScriptOnOwner("window.scrollBy(0, 240); window.scrollY"); err != nil {
 			log.Printf("repro: scroll %d failed: %v", i, err)
 			continue
 		}
@@ -1244,7 +1286,7 @@ func runReproWorkload(browser *ui.Browser, scrolls int, evalExpr string) {
 	// boundary. We time both the evaluate call and the wall-clock
 	// delay before the next frame is observable in the metrics.
 	mutStart := time.Now()
-	if _, err := rt.RunScript(evalExpr); err != nil {
+	if _, err := tab.RunScriptOnOwner(evalExpr); err != nil {
 		log.Printf("repro: evaluate failed: %v", err)
 	}
 	evalDur := time.Since(mutStart)
@@ -1261,7 +1303,7 @@ func runReproWorkload(browser *ui.Browser, scrolls int, evalExpr string) {
 		// serializeJSDOMToCache is unexported, so reach the
 		// same effect via the JS hook the polyfill exposes.
 		sizeExpr := "window.__serialize(document).length"
-		v, err := rt.RunScript(sizeExpr)
+		v, err := tab.RunScriptOnOwner(sizeExpr)
 		if err == nil {
 			log.Printf("repro: serialized DOM size = %s bytes", v.String())
 		}
@@ -1269,7 +1311,7 @@ func runReproWorkload(browser *ui.Browser, scrolls int, evalExpr string) {
 		// see whether the polyfill is leaking inherited
 		// properties (a known goja polyfill bug).
 		probeExpr := "window.__serialize(document.querySelector('div') || document.body)"
-		v2, err := rt.RunScript(probeExpr)
+		v2, err := tab.RunScriptOnOwner(probeExpr)
 		if err == nil {
 			s := v2.String()
 			if len(s) > 400 {

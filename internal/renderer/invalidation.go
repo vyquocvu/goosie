@@ -44,6 +44,15 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 		if hasLayout {
 			r.currentLayoutTree = r.incremental.RecomputeDirtyFromPrevious(r.currentLayoutTree, r.currentRenderTree)
 		}
+		// Mutation values were applied in place, so the canvas renderer's
+		// pointer-identity display-list cache would repaint stale content on
+		// the next UpdateViewport/present. Drop the cache so the next
+		// present rebuilds commands from the updated trees.
+		r.canvasRenderer.mu.Lock()
+		r.canvasRenderer.cachedDisplayList = nil
+		r.canvasRenderer.cachedRenderRoot = nil
+		r.canvasRenderer.cachedLayoutRoot = nil
+		r.canvasRenderer.mu.Unlock()
 	}
 	return applied
 }

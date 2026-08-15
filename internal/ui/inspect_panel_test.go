@@ -46,6 +46,8 @@ func (m *MockHTMLRenderer) SetInspectCallback(callback func(node *renderer.Rende
 }
 func (m *MockHTMLRenderer) SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position)) {
 }
+func (m *MockHTMLRenderer) SetMouseInputCallback(callback func(input renderer.MouseInput)) {
+}
 func (m *MockHTMLRenderer) GetRoot() *renderer.RenderNode                   { return m.root }
 func (m *MockHTMLRenderer) Refresh()                                        { m.refreshCalled = true }
 func (m *MockHTMLRenderer) SetRefreshCallback(callback func())              {}
@@ -58,16 +60,21 @@ func (m *MockHTMLRenderer) DirtyOverlayEnabled() bool                       { re
 func (m *MockHTMLRenderer) SetFPSOverlayEnabled(enabled bool)               {}
 func (m *MockHTMLRenderer) FPSOverlayEnabled() bool                         { return false }
 func (m *MockHTMLRenderer) FPSStats() renderer.FPSStats                     { return renderer.FPSStats{} }
-func (m *MockHTMLRenderer) FrameMetrics() renderer.FrameMetricsSnapshot     { return renderer.FrameMetricsSnapshot{} }
-func (m *MockHTMLRenderer) ScheduleScroll(_, _ float32) bool                 { return false }
-func (m *MockHTMLRenderer) TryClaimScroll() (renderer.ScrollViewport, bool) { return renderer.ScrollViewport{}, false }
-func (m *MockHTMLRenderer) RecordInputToPresent(_ time.Duration)              {}
-func (m *MockHTMLRenderer) RecordUIQueueWait(_ time.Duration)                  {}
-func (m *MockHTMLRenderer) RecordCoalescedMutations(_ int)                      {}
-func (m *MockHTMLRenderer) RecordCoalescedScroll(_ int)                          {}
-func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)               { return 0, 0, 0 }
-func (m *MockHTMLRenderer) GetLayoutNodeCount() int                         { return 0 }
-func (m *MockHTMLRenderer) GetStyleSheet() *css.StyleSheet                  { return m.stylesheet }
+func (m *MockHTMLRenderer) FrameMetrics() renderer.FrameMetricsSnapshot {
+	return renderer.FrameMetricsSnapshot{}
+}
+func (m *MockHTMLRenderer) ScheduleScroll(_, _ float32) bool { return false }
+func (m *MockHTMLRenderer) TryClaimScroll() (renderer.ScrollViewport, bool) {
+	return renderer.ScrollViewport{}, false
+}
+func (m *MockHTMLRenderer) RecordInputToPresent(_ time.Duration) {}
+func (m *MockHTMLRenderer) RecordUIQueueWait(_ time.Duration)    {}
+func (m *MockHTMLRenderer) RecordCoalescedMutations(_ int)       {}
+func (m *MockHTMLRenderer) RecordCoalescedScroll(_ int)          {}
+func (m *MockHTMLRenderer) RecordCoalescedImages(_ int)          {}
+func (m *MockHTMLRenderer) GetDOMNodeCounts() (int, int, int)    { return 0, 0, 0 }
+func (m *MockHTMLRenderer) GetLayoutNodeCount() int              { return 0 }
+func (m *MockHTMLRenderer) GetStyleSheet() *css.StyleSheet       { return m.stylesheet }
 func (m *MockHTMLRenderer) GetMatchedRules(node *renderer.RenderNode) []css.Rule {
 	return m.matchedRules
 }
@@ -696,12 +703,12 @@ func TestInspectPanel_StylesFilter_Empty(t *testing.T) {
 		{
 			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
 			Declarations: []css.Declaration{{Property: "color", Value: "red"}},
-			Specificity: [3]uint16{0, 0, 1},
+			Specificity:  [3]uint16{0, 0, 1},
 		},
 		{
 			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
 			Declarations: []css.Declaration{{Property: "margin", Value: "10px"}},
-			Specificity: [3]uint16{0, 0, 1},
+			Specificity:  [3]uint16{0, 0, 1},
 		},
 	}}
 	panel := NewInspectPanel(nil)
@@ -730,17 +737,17 @@ func TestInspectPanel_StylesFilter_MatchesProperty(t *testing.T) {
 		{
 			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
 			Declarations: []css.Declaration{{Property: "color", Value: "red"}},
-			Specificity: [3]uint16{0, 0, 1},
+			Specificity:  [3]uint16{0, 0, 1},
 		},
 		{
 			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
 			Declarations: []css.Declaration{{Property: "background-color", Value: "yellow"}},
-			Specificity: [3]uint16{0, 0, 1},
+			Specificity:  [3]uint16{0, 0, 1},
 		},
 		{
 			Selectors:    []css.SelectorSequence{{Simple: css.SimpleSelector{TagName: "p"}}},
 			Declarations: []css.Declaration{{Property: "margin", Value: "10px"}},
-			Specificity: [3]uint16{0, 0, 1},
+			Specificity:  [3]uint16{0, 0, 1},
 		},
 	}}
 	panel := NewInspectPanel(nil)

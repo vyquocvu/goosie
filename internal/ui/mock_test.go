@@ -37,6 +37,8 @@ func (m *MockHTMLRendererComp) SetInspectCallback(callback func(node *renderer.R
 }
 func (m *MockHTMLRendererComp) SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position)) {
 }
+func (m *MockHTMLRendererComp) SetMouseInputCallback(callback func(input renderer.MouseInput)) {
+}
 func (m *MockHTMLRendererComp) GetRoot() *renderer.RenderNode                   { return nil }
 func (m *MockHTMLRendererComp) Refresh()                                        {}
 func (m *MockHTMLRendererComp) SetRefreshCallback(callback func())              {}
@@ -51,8 +53,8 @@ func (m *MockHTMLRendererComp) DirtyOverlayEnabled() bool { return m.dirtyOverla
 func (m *MockHTMLRendererComp) SetFPSOverlayEnabled(enabled bool) {
 	m.fpsOverlayEnabled = enabled
 }
-func (m *MockHTMLRendererComp) FPSOverlayEnabled() bool           { return m.fpsOverlayEnabled }
-func (m *MockHTMLRendererComp) FPSStats() renderer.FPSStats       { return renderer.FPSStats{} }
+func (m *MockHTMLRendererComp) FPSOverlayEnabled() bool     { return m.fpsOverlayEnabled }
+func (m *MockHTMLRendererComp) FPSStats() renderer.FPSStats { return renderer.FPSStats{} }
 func (m *MockHTMLRendererComp) FrameMetrics() renderer.FrameMetricsSnapshot {
 	return renderer.FrameMetricsSnapshot{}
 }
@@ -68,13 +70,14 @@ func (m *MockHTMLRendererComp) TryClaimScroll() (renderer.ScrollViewport, bool) 
 	}
 	return m.coalescer.TryClaim()
 }
-func (m *MockHTMLRendererComp) RecordInputToPresent(_ time.Duration)                      {}
-func (m *MockHTMLRendererComp) RecordUIQueueWait(_ time.Duration)                          {}
-func (m *MockHTMLRendererComp) RecordCoalescedMutations(_ int)                              {}
-func (m *MockHTMLRendererComp) RecordCoalescedScroll(_ int)                                  {}
-func (m *MockHTMLRendererComp) GetDOMNodeCounts() (int, int, int) { return 0, 0, 0 }
-func (m *MockHTMLRendererComp) GetLayoutNodeCount() int           { return 0 }
-func (m *MockHTMLRendererComp) GetStyleSheet() *css.StyleSheet    { return nil }
+func (m *MockHTMLRendererComp) RecordInputToPresent(_ time.Duration) {}
+func (m *MockHTMLRendererComp) RecordUIQueueWait(_ time.Duration)    {}
+func (m *MockHTMLRendererComp) RecordCoalescedMutations(_ int)       {}
+func (m *MockHTMLRendererComp) RecordCoalescedScroll(_ int)          {}
+func (m *MockHTMLRendererComp) RecordCoalescedImages(_ int)          {}
+func (m *MockHTMLRendererComp) GetDOMNodeCounts() (int, int, int)    { return 0, 0, 0 }
+func (m *MockHTMLRendererComp) GetLayoutNodeCount() int              { return 0 }
+func (m *MockHTMLRendererComp) GetStyleSheet() *css.StyleSheet       { return nil }
 func (m *MockHTMLRendererComp) GetMatchedRules(node *renderer.RenderNode) []css.Rule {
 	return nil
 }

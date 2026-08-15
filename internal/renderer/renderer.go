@@ -2,13 +2,14 @@ package renderer
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"log/slog"
 	"net/url"
 	"strings"
-	"sync"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -35,6 +36,15 @@ type Renderer struct {
 	currentRenderTree *RenderNode
 	currentLayoutTree *LayoutBox
 	treeMu            sync.RWMutex
+
+	// buildSeq is a monotonic build counter. buildFrame hands off its
+	// trees only when its sequence is still the newest, so a slower build
+	// for an older render intent cannot clobber a newer build's trees.
+	buildSeq atomic.Uint64
+	// lastRecorder is the navigation recorder of the most recent build,
+	// stashed under treeMu so PresentFrame can time the raster phase on
+	// the same navigation the built trees belong to.
+	lastRecorder *metrics.Recorder
 
 	// Navigation callback for link clicks
 	onNavigate func(url string)
@@ -63,6 +73,11 @@ type Renderer struct {
 	// Cleared by Refresh() after recomputation.
 	dirty bool
 
+	// imageBatcher collapses image-loaded callbacks into one flush per
+	// window so an image-heavy page performs one style+layout+present
+	// cycle per burst instead of one per completed image (PR7).
+	imageBatcher *ImageLoadBatcher
+
 	// csp holds the parsed Content-Security-Policy for style-src enforcement.
 	csp   *net.CSPPolicy
 	cspMu sync.RWMutex
@@ -77,7 +92,7 @@ func NewRenderer(width, height float32) *Renderer {
 	canvasRenderer := NewCanvasRenderer(width, height)
 	canvasRenderer.imageLoader = imageLoader
 
-	return &Renderer{
+	r := &Renderer{
 		layoutEngine:   NewLayoutEngine(width, height),
 		incremental:    NewIncrementalLayoutEngine(width, height),
 		canvasRenderer: canvasRenderer,
@@ -87,6 +102,8 @@ func NewRenderer(width, height float32) *Renderer {
 		Logger:         slog.Default(),
 		metrics:        NewRenderMetrics(),
 	}
+	r.imageBatcher = NewImageLoadBatcher(16*time.Millisecond, r.flushImageBatch)
+	return r
 }
 
 // Metrics returns the render metrics
@@ -104,8 +121,27 @@ func (r *Renderer) SetLogger(l *slog.Logger) {
 	r.canvasRenderer.SetLogger(r.Logger)
 }
 
-// RenderHTML renders HTML content and returns a Fyne canvas object
+// RenderHTML renders HTML content and returns a Fyne canvas object. It is
+// the legacy single-phase entry point: it builds the engine state (parse,
+// style, layout) and then presents the frame. Callers running off the
+// Fyne main thread (navigation, mutations) should prefer the two-phase
+// BuildHTML + PresentFrame pair so the heavy engine phases do not block
+// the UI thread.
 func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error) {
+	if err := r.BuildHTML(ctx, htmlContent); err != nil {
+		return nil, err
+	}
+	return r.PresentFrame(), nil
+}
+
+// BuildHTML performs the engine phases of rendering — HTML parse,
+// stylesheet assembly, style resolution, and layout — and caches the
+// resulting trees for PresentFrame. It performs no Fyne work and is safe
+// to call off the UI thread: this is the PR4 "build" half of the render
+// split. Legacy external-CSS loading is kicked off here exactly as
+// RenderHTML did (asynchronous in normal mode, synchronous under
+// testingMode).
+func (r *Renderer) BuildHTML(ctx context.Context, htmlContent string) error {
 	start := time.Now()
 	defer func() { r.metrics.RecordRenderHTML(time.Since(start)) }()
 
@@ -121,7 +157,7 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		if recorder != nil {
 			recorder.EndPhase(metrics.PhaseParse)
 		}
-		return nil, err
+		return err
 	}
 
 	if recorder != nil {
@@ -130,19 +166,49 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		})
 	}
 
-	// Extract and parse CSS from <style> tags
+	// Extract and parse CSS from <style> tags. The sheet is captured
+	// locally so a concurrent build cannot overwrite the stylesheet
+	// between parse and style application (see buildFrame).
+	sheet := extractAndParseCSS(doc)
 	r.stylesheetMu.Lock()
-	r.stylesheet = extractAndParseCSS(doc)
+	r.stylesheet = sheet
 	r.stylesheetMu.Unlock()
 
-	if recorder != nil && r.stylesheet != nil {
-		rules, selectors := countRulesAndSelectors(r.stylesheet)
+	if recorder != nil && sheet != nil {
+		rules, selectors := countRulesAndSelectors(sheet)
 		recorder.AddCounters(metrics.Counters{
 			RuleCount:     rules,
 			SelectorCount: selectors,
 		})
 	}
 
+	if recorder != nil {
+		recorder.EndPhase(metrics.PhaseParse)
+	}
+
+	if err := r.buildFrame(ctx, doc, sheet, recorder); err != nil {
+		return err
+	}
+
+	// Load external CSS asynchronously (synchronously in testing mode),
+	// preserving the legacy RenderHTML behavior.
+	if r.testingMode {
+		r.loadExternalCSS(ctx, doc)
+	} else {
+		go r.loadExternalCSS(ctx, doc)
+	}
+
+	return nil
+}
+
+// buildFrame applies styles and computes layout for a parsed document,
+// caching the resulting trees for PresentFrame. Style and layout run on
+// local trees without holding the tree lock, so a background build never
+// blocks a concurrent scroll render on the UI thread; only the final
+// handoff is atomic. A build that has been superseded by a newer one
+// (buildSeq mismatch) or cancelled via ctx skips the handoff so a stale
+// frame is never painted.
+func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.StyleSheet, recorder *metrics.Recorder) error {
 	// Find html element
 	htmlNode := findHTMLNode(doc)
 	if htmlNode == nil {
@@ -152,35 +218,34 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 
 	// Build render tree
 	renderTree := BuildRenderTree(htmlNode)
-
-	if recorder != nil {
-		recorder.EndPhase(metrics.PhaseParse)
-	}
-
 	if renderTree == nil {
-		// Return empty container if no content
-		return r.canvasRenderer.Render(nil), nil
+		// Empty document: PresentFrame renders an empty canvas.
+		return nil
 	}
 
 	r.treeMu.RLock()
 	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
 	r.treeMu.RUnlock()
 
-	r.treeMu.Lock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if recorder != nil {
 		recorder.BeginPhase(metrics.PhaseStyle)
 	}
 	// Apply styles
 	renderTreeCopy := renderTree.Clone()
-	r.stylesheetMu.RLock()
-	if r.stylesheet != nil {
-		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
+	if sheet != nil {
+		styleManager := NewStyleManagerWithViewport(sheet, width, height)
 		styleManager.ApplyStyles(renderTreeCopy)
 	}
-	r.stylesheetMu.RUnlock()
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseStyle)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	if recorder != nil {
@@ -191,7 +256,6 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 	layoutStart := time.Now()
 	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
 	r.metrics.RecordComputeLayout(time.Since(layoutStart))
-	renderTree = renderTreeCopy
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseLayout)
 	}
@@ -204,62 +268,18 @@ func (r *Renderer) RenderHTML(ctx context.Context, htmlContent string) (fyne.Can
 		})
 	}
 
-	// Cache trees for viewport updates
-	r.currentRenderTree = renderTree
+	// Hand off atomically; skip when a newer build already owns the trees.
+	seq := r.buildSeq.Add(1)
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
+	if seq != r.buildSeq.Load() {
+		return nil
+	}
+	r.currentRenderTree = renderTreeCopy
 	r.currentLayoutTree = layoutTree
 	r.dirty = false
-	r.treeMu.Unlock()
-
-	// Load external CSS asynchronously (synchronously in testing mode)
-	if r.testingMode {
-		r.loadExternalCSS(ctx, doc)
-		// Re-read current render tree and layout tree since Refresh() re-cloned them
-		r.treeMu.RLock()
-		renderTree = r.currentRenderTree
-		layoutTree = r.currentLayoutTree
-		r.treeMu.RUnlock()
-	} else {
-		go r.loadExternalCSS(ctx, doc)
-	}
-
-	// Pass navigation callback to canvas renderer
-	r.treeMu.RLock()
-	onNav := r.onNavigate
-	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
-
-	if recorder != nil {
-		recorder.BeginPhase(metrics.PhaseRaster)
-	}
-	// Render to canvas with viewport optimization
-	viewportStart := time.Now()
-	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
-	r.metrics.RecordRenderWithViewport(time.Since(viewportStart))
-	if recorder != nil {
-		recorder.EndPhase(metrics.PhaseRaster)
-	}
-
-	if recorder != nil {
-		// Read cached display list command count
-		r.canvasRenderer.mu.RLock()
-		if r.canvasRenderer.cachedDisplayList != nil {
-			recorder.AddCounters(metrics.Counters{
-				DisplayItemCount: len(r.canvasRenderer.cachedDisplayList.Commands),
-			})
-		}
-		r.canvasRenderer.mu.RUnlock()
-
-		// Count images from renderTree
-		images := countImages(renderTree)
-		recorder.AddCounters(metrics.Counters{
-			ImageCount: images,
-		})
-	}
-
-	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
-	r.loadImages(renderTree)
-
-	return canvasObject, nil
+	r.lastRecorder = recorder
+	return nil
 }
 
 // ExternalCSS is one externally-fetched stylesheet delivered to the
@@ -273,11 +293,13 @@ type ExternalCSS struct {
 
 // RenderParsed renders a pre-parsed HTML node with the supplied
 // external stylesheets and returns a Fyne canvas object. It is the
-// snapshot entry point introduced by M3 of the resource pipeline
-// plan: callers (e.g. cmd/browser after the documentloader coordinator
-// has fetched all stylesheets) hand in a fully assembled set of CSS
-// sources in document order, and the renderer blocks only on the
-// render itself — no async CSS loading happens here.
+// legacy single-phase snapshot entry point introduced by M3 of the
+// resource pipeline plan: callers (e.g. cmd/browser after the
+// documentloader coordinator has fetched all stylesheets) hand in a
+// fully assembled set of CSS sources in document order, and the
+// renderer blocks only on the render itself — no async CSS loading
+// happens here. Callers running off the Fyne main thread should prefer
+// the two-phase BuildParsed + PresentFrame pair.
 //
 // Behavior:
 //   - Inline <style> tag contents are extracted from doc and merged
@@ -286,11 +308,20 @@ type ExternalCSS struct {
 //   - r.loadExternalCSS is NOT called. The caller is responsible for
 //     any further external CSS loading.
 //   - On a parse failure of doc, the error is returned.
-//
-// RenderHTML remains the legacy entry point for direct callers (tests,
-// demos, headless renderer); it continues to call loadExternalCSS
-// asynchronously and is unchanged in observable behavior.
 func (r *Renderer) RenderParsed(ctx context.Context, doc *html.Node, externalCSS []ExternalCSS) (fyne.CanvasObject, error) {
+	if err := r.BuildParsed(ctx, doc, externalCSS); err != nil {
+		return nil, err
+	}
+	return r.PresentFrame(), nil
+}
+
+// BuildParsed performs the engine phases — render-tree construction,
+// style resolution, and layout — for an already-parsed document with
+// pre-assembled external stylesheets, caching the result for
+// PresentFrame. It performs no Fyne work and is safe to call off the
+// UI thread: this is the PR4 "build" half of the render split used by
+// the documentloader coordinator and mutation paths.
+func (r *Renderer) BuildParsed(ctx context.Context, doc *html.Node, externalCSS []ExternalCSS) error {
 	start := time.Now()
 	defer func() { r.metrics.RecordRenderHTML(time.Since(start)) }()
 
@@ -306,7 +337,9 @@ func (r *Renderer) RenderParsed(ctx context.Context, doc *html.Node, externalCSS
 		})
 	}
 
-	// Assemble stylesheet: inline + external (in source order).
+	// Assemble stylesheet: inline + external (in source order). The
+	// sheet is captured locally so a concurrent build cannot overwrite
+	// the stylesheet between parse and style application (buildFrame).
 	inline := extractAndParseCSS(doc)
 	assembled := mergeInlineAndExternalCSS(inline, externalCSS)
 
@@ -314,8 +347,8 @@ func (r *Renderer) RenderParsed(ctx context.Context, doc *html.Node, externalCSS
 	r.stylesheet = assembled
 	r.stylesheetMu.Unlock()
 
-	if recorder != nil && r.stylesheet != nil {
-		rules, selectors := countRulesAndSelectors(r.stylesheet)
+	if recorder != nil && assembled != nil {
+		rules, selectors := countRulesAndSelectors(assembled)
 		recorder.AddCounters(metrics.Counters{
 			RuleCount:     rules,
 			SelectorCount: selectors,
@@ -326,79 +359,28 @@ func (r *Renderer) RenderParsed(ctx context.Context, doc *html.Node, externalCSS
 		recorder.EndPhase(metrics.PhaseParse)
 	}
 
-	return r.renderParsedInner(ctx, doc, recorder), nil
+	return r.buildFrame(ctx, doc, assembled, recorder)
 }
 
-// renderParsedInner runs style, layout, raster, and image loading for a
-// pre-assembled document and stylesheet. Shared helper used by
-// RenderParsed and by tests that want to drive these phases directly
-// without going through RenderHTML.
-func (r *Renderer) renderParsedInner(ctx context.Context, doc *html.Node, recorder *metrics.Recorder) fyne.CanvasObject {
-	// Find html element
-	htmlNode := findHTMLNode(doc)
-	if htmlNode == nil {
-		// No html found, use the entire document
-		htmlNode = doc
-	}
+// PresentFrame builds the Fyne canvas object for the trees cached by the
+// most recent BuildHTML/BuildParsed call. It MUST run on the Fyne main
+// thread: it constructs and mutates Fyne canvas objects (the PR4
+// "present" half of the render split). The heavy engine phases already
+// ran in the Build* call, possibly on a worker goroutine.
+func (r *Renderer) PresentFrame() fyne.CanvasObject {
+	r.treeMu.RLock()
+	renderTree := r.currentRenderTree
+	layoutTree := r.currentLayoutTree
+	onNav := r.onNavigate
+	recorder := r.lastRecorder
+	r.treeMu.RUnlock()
 
-	// Build render tree
-	renderTree := BuildRenderTree(htmlNode)
-	if renderTree == nil {
+	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
+
+	if renderTree == nil || layoutTree == nil {
 		// Return empty container if no content
 		return r.canvasRenderer.Render(nil)
 	}
-
-	r.treeMu.RLock()
-	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
-	r.treeMu.RUnlock()
-
-	r.treeMu.Lock()
-
-	if recorder != nil {
-		recorder.BeginPhase(metrics.PhaseStyle)
-	}
-	// Apply styles
-	renderTreeCopy := renderTree.Clone()
-	r.stylesheetMu.RLock()
-	if r.stylesheet != nil {
-		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
-		styleManager.ApplyStyles(renderTreeCopy)
-	}
-	r.stylesheetMu.RUnlock()
-	if recorder != nil {
-		recorder.EndPhase(metrics.PhaseStyle)
-	}
-
-	if recorder != nil {
-		recorder.BeginPhase(metrics.PhaseLayout)
-	}
-	// Perform layout
-	layoutEngine := NewLayoutEngine(width, height)
-	layoutStart := time.Now()
-	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
-	r.metrics.RecordComputeLayout(time.Since(layoutStart))
-	renderTree = renderTreeCopy
-	if recorder != nil {
-		recorder.EndPhase(metrics.PhaseLayout)
-
-		boxes, fragments := countBoxesAndFragments(layoutTree)
-		recorder.AddCounters(metrics.Counters{
-			BoxCount:      boxes,
-			FragmentCount: fragments,
-		})
-	}
-
-	// Cache trees for viewport updates
-	r.currentRenderTree = renderTree
-	r.currentLayoutTree = layoutTree
-	r.dirty = false
-	r.treeMu.Unlock()
-
-	// Pass navigation callback to canvas renderer
-	r.treeMu.RLock()
-	onNav := r.onNavigate
-	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
 
 	if recorder != nil {
 		recorder.BeginPhase(metrics.PhaseRaster)
@@ -429,7 +411,6 @@ func (r *Renderer) renderParsedInner(ctx context.Context, doc *html.Node, record
 	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
 	r.loadImages(renderTree)
 
-	_ = ctx // reserved for future per-frame recorder hooks
 	return canvasObject
 }
 
@@ -650,6 +631,15 @@ func (r *Renderer) SetContextMenuCallback(callback func(node *RenderNode, layout
 		return
 	}
 	r.canvasRenderer.SetContextMenuCallback(callback)
+}
+
+// SetMouseInputCallback forwards to the underlying canvas renderer.
+// See CanvasRenderer.SetMouseInputCallback for details.
+func (r *Renderer) SetMouseInputCallback(poster func(MouseInput)) {
+	if r.canvasRenderer == nil {
+		return
+	}
+	r.canvasRenderer.SetMouseInputCallback(poster)
 }
 
 // SetHighlightNode sets the node to highlight in the viewport
@@ -879,13 +869,33 @@ func (r *Renderer) SetHeadless(mode bool) {
 }
 
 func (r *Renderer) onImageLoaded(src string) {
+	if r.imageBatcher != nil {
+		r.imageBatcher.Signal(src)
+		return
+	}
+	// No batcher (tests constructing the renderer directly): fall back to
+	// an immediate single-image flush.
+	r.flushImageBatch([]string{src})
+}
+
+// flushImageBatch applies completed image data to the current render tree
+// and triggers exactly one style+layout recompute and refresh for the whole
+// batch (PR7): 100 images completing within a window produce one render
+// request instead of 100. Runs on the batcher's flush goroutine.
+func (r *Renderer) flushImageBatch(srcs []string) {
+	if len(srcs) == 0 {
+		return
+	}
 	r.treeMu.Lock()
-	r.updateNodeImageData(r.currentRenderTree, src)
+	for _, src := range srcs {
+		r.updateNodeImageData(r.currentRenderTree, src)
+	}
 	r.treeMu.Unlock()
 
 	r.canvasRenderer.InvalidateObjectCache()
 	r.MarkDirty()
 	r.Refresh()
+	r.RecordCoalescedImages(len(srcs))
 }
 
 func (r *Renderer) updateNodeImageData(node *RenderNode, src string) {
@@ -1282,6 +1292,12 @@ func (r *Renderer) RecordCoalescedMutations(n int) {
 // collapsed into a single render.
 func (r *Renderer) RecordCoalescedScroll(n int) {
 	r.canvasRenderer.RecordCoalescedScroll(n)
+}
+
+// RecordCoalescedImages records how many image-loaded callbacks were
+// collapsed into a single render (PR7).
+func (r *Renderer) RecordCoalescedImages(n int) {
+	r.canvasRenderer.RecordCoalescedImages(n)
 }
 
 // GetDOMNodeCounts returns the total, element, and text node counts

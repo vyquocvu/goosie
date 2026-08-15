@@ -127,6 +127,89 @@ func TestSetHTMLContentSkipsHtmlCacheWhenOnlyBatchCallbackSet(t *testing.T) {
 	}
 }
 
+// TestPureAttributeTextMutationSkipsSerialization — PR6: when a typed
+// batch callback is wired alongside the string callback, pure
+// set-attribute / set-text mutations must NOT serialize the whole DOM
+// (the typed sink handles them). Only structural mutations fall back to
+// the string callback.
+func TestPureAttributeTextMutationSkipsSerialization(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetHTMLContent(`<html><body><div id="target" class="a">before</div></body></html>`)
+	before := rt.htmlCache
+
+	var (
+		stringFires  int
+		batchMuts    []DOMMutation
+		serializedAt string
+	)
+	rt.SetDOMMutationBatchCallback(func(batch []DOMMutation) {
+		batchMuts = append(batchMuts, batch...)
+	})
+	rt.SetDOMMutationCallback(func(mutatedHTML string) {
+		stringFires++
+		serializedAt = mutatedHTML
+	})
+
+	_, err := rt.RunScript(`(function(){
+		var target = document.getElementById("target");
+		target.setAttribute("class", "b");
+		target.setAttribute("data-state", "ready");
+		target.textContent = "after";
+	})()`)
+	assert.NoError(t, err)
+
+	// The typed batch saw all three mutations.
+	assert.Len(t, batchMuts, 3)
+	// No full serialize/reparse happened: the string callback never fired
+	// and the cached HTML was never refreshed.
+	assert.Equal(t, 0, stringFires, "string callback must not fire for attribute/text mutations")
+	assert.Equal(t, before, rt.htmlCache, "htmlCache must not be re-serialized")
+	_ = serializedAt
+}
+
+// TestStructuralMutationStillSerializes — PR6: insert/remove/replace
+// mutations still fall back to the string callback (full serialize +
+// reparse) because the typed sink cannot synthesize render subtrees.
+func TestStructuralMutationStillSerializes(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetHTMLContent(`<html><body><div id="container"><p id="p1">x</p></div></body></html>`)
+
+	var stringFires int
+	rt.SetDOMMutationBatchCallback(func([]DOMMutation) {})
+	rt.SetDOMMutationCallback(func(mutatedHTML string) {
+		stringFires++
+	})
+
+	_, err := rt.RunScript(`(function(){
+		var added = document.createElement("p");
+		added.textContent = "new";
+		document.getElementById("container").appendChild(added);
+	})()`)
+	assert.NoError(t, err)
+
+	if stringFires == 0 {
+		t.Fatal("structural mutation must still fall back to the string callback")
+	}
+}
+
+// TestNoBatchCallbackKeepsSerializing — legacy callers that only wire
+// the string callback keep the full serialize behavior.
+func TestNoBatchCallbackKeepsSerializing(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetHTMLContent(`<html><body><div id="target">before</div></body></html>`)
+
+	var stringFires int
+	rt.SetDOMMutationCallback(func(mutatedHTML string) {
+		stringFires++
+	})
+
+	_, err := rt.RunScript(`document.getElementById("target").setAttribute("data-x", "1")`)
+	assert.NoError(t, err)
+	if stringFires == 0 {
+		t.Fatal("string callback must fire when no batch callback is wired")
+	}
+}
+
 func TestDOMMutationBatchIncludesOperationDetails(t *testing.T) {
 	rt := NewRuntime()
 	rt.SetHTMLContent(`<html><body><div id="target">before</div></body></html>`)

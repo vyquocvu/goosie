@@ -42,8 +42,14 @@ func (s *MutationSink) Handle(batch []js.DOMMutation) {
 			id = s.lookup(mutation.ParentID)
 		}
 		if id == 0 {
+			// Stale NodeID (superseded document or unknown element):
+			// reject safely — nothing to invalidate or sync.
 			continue
 		}
+		// Sync the mutation's value into the render tree before
+		// invalidation so the subsequent layout/present reads fresh
+		// content instead of repainting the stale cached tree.
+		s.r.ApplyTypedMutationValue(id, mutation.Kind, mutation.Attribute, mutation.NewValue)
 		flags := DirtyStyle | DirtyPaint
 		switch mutation.Kind {
 		case js.MutationInsert, js.MutationRemove, js.MutationReplace:
@@ -61,9 +67,66 @@ func (s *MutationSink) Handle(batch []js.DOMMutation) {
 	}
 	applied := s.r.ApplyMutationBatch(invalidations)
 	if applied > 0 {
+		s.r.RecordCoalescedMutations(len(batch))
 		s.r.InvalidatePaintChunks(paintIDs)
 		s.present()
 	}
+}
+
+// ApplyTypedMutationValue syncs the value carried by a typed JS DOM
+// mutation into the render tree under treeMu, so the next layout and
+// present read fresh content. set-text updates the node's (or its first
+// text child's) Text; set-attribute updates the Attrs map. Structural
+// mutations have no render-side node to update here — they fall back to
+// the full reparse path. Stale NodeIDs resolve to nothing and are
+// rejected safely (returns false).
+func (r *Renderer) ApplyTypedMutationValue(renderID int64, kind js.MutationKind, attr, newValue string) bool {
+	if renderID == 0 {
+		return false
+	}
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
+	if r.currentRenderTree == nil {
+		return false
+	}
+	node := findRenderNodeByIDRoot(r.currentRenderTree, renderID)
+	if node == nil {
+		return false
+	}
+	switch kind {
+	case js.MutationSetText:
+		setRenderText(node, newValue)
+		return true
+	case js.MutationSetAttribute:
+		if node.Attrs == nil {
+			node.Attrs = make(map[string]string)
+		}
+		node.Attrs[attr] = newValue
+		return true
+	default:
+		return false
+	}
+}
+
+// setRenderText updates the text content of a render node. JS
+// element.textContent replaces the element's children with a single text
+// node, so an element target updates its first text child; a text target
+// is itself. When an element has no text child yet, one is appended so
+// the relayout can render the new content.
+func setRenderText(node *RenderNode, text string) {
+	if node.Type == NodeTypeText {
+		node.Text = text
+		return
+	}
+	for _, c := range node.Children {
+		if c.Type == NodeTypeText {
+			c.Text = text
+			return
+		}
+	}
+	child := NewRenderNode(NodeTypeText)
+	child.Text = text
+	node.AddChild(child)
 }
 
 func (s *MutationSink) lookup(goosieID string) int64 {

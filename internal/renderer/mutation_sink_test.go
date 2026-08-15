@@ -32,6 +32,126 @@ func TestMutationSinkRoutesAttributeMutationToRenderer(t *testing.T) {
 	}
 }
 
+func TestMutationSinkSyncsTextAndAttributeValues(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target" __goosie_id="100" class="a">before</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := NewNodeIDLookup()
+	lookup.Snapshot(r.GetRoot())
+	sink := NewMutationSink(r, lookup, nil)
+
+	// set-text on an element target updates its first text child.
+	sink.Handle([]js.DOMMutation{{
+		Kind:     js.MutationSetText,
+		TargetID: "100",
+		NewValue: "after",
+	}})
+	target := findRenderNodeByIDRoot(r.GetRoot(), lookup.Lookup("100"))
+	if target == nil {
+		t.Fatal("target render node not found")
+	}
+	found := false
+	for _, c := range target.Children {
+		if c.Type == NodeTypeText {
+			found = true
+			if c.Text != "after" {
+				t.Fatalf("text child = %q, want %q", c.Text, "after")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected a text child carrying the new value")
+	}
+
+	// set-attribute updates the Attrs map.
+	sink.Handle([]js.DOMMutation{{
+		Kind:      js.MutationSetAttribute,
+		TargetID:  "100",
+		Attribute: "class",
+		NewValue:  "b",
+	}})
+	if target.Attrs["class"] != "b" {
+		t.Fatalf("class attr = %q, want %q", target.Attrs["class"], "b")
+	}
+}
+
+func TestMutationSinkAppendsTextChildOnEmptyElement(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="empty" __goosie_id="50"></div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := NewNodeIDLookup()
+	lookup.Snapshot(r.GetRoot())
+	sink := NewMutationSink(r, lookup, nil)
+
+	sink.Handle([]js.DOMMutation{{
+		Kind:     js.MutationSetText,
+		TargetID: "50",
+		NewValue: "filled",
+	}})
+	empty := findRenderNodeByIDRoot(r.GetRoot(), lookup.Lookup("50"))
+	if empty == nil {
+		t.Fatal("target render node not found")
+	}
+	if len(empty.Children) != 1 || empty.Children[0].Type != NodeTypeText || empty.Children[0].Text != "filled" {
+		t.Fatalf("expected an appended text child with %q, got %+v", "filled", empty.Children)
+	}
+}
+
+func TestMutationSinkRejectsStaleNodeIDs(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div>no ids</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := NewMutationSink(r, NewNodeIDLookup(), nil)
+	// Unknown TargetID and ParentID: rejected without dirtying the renderer.
+	sink.Handle([]js.DOMMutation{{
+		Kind:     js.MutationSetText,
+		TargetID: "99999",
+		NewValue: "x",
+	}})
+	if r.IsDirty() {
+		t.Fatal("stale NodeID must be rejected without marking the renderer dirty")
+	}
+}
+
+func TestMutationBatchInvalidatesCanvasDisplayListCache(t *testing.T) {
+	r := NewRenderer(800, 600)
+	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target" __goosie_id="100">before</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Warm the canvas display-list cache (present builds it).
+	r.UpdateViewport()
+	r.canvasRenderer.mu.Lock()
+	cached := r.canvasRenderer.cachedDisplayList
+	r.canvasRenderer.mu.Unlock()
+	if cached == nil {
+		t.Fatal("expected a warm display list cache")
+	}
+
+	lookup := NewNodeIDLookup()
+	lookup.Snapshot(r.GetRoot())
+	sink := NewMutationSink(r, lookup, nil)
+	sink.Handle([]js.DOMMutation{{
+		Kind:      js.MutationSetAttribute,
+		TargetID:  "100",
+		Attribute: "data-x",
+		NewValue:  "1",
+	}})
+
+	r.canvasRenderer.mu.Lock()
+	cachedAfter := r.canvasRenderer.cachedDisplayList
+	r.canvasRenderer.mu.Unlock()
+	if cachedAfter != nil {
+		t.Fatal("display list cache must be dropped after an in-place mutation")
+	}
+}
+
 func TestMutationSinkIgnoresUnknownIDs(t *testing.T) {
 	r := NewRenderer(800, 600)
 	_, err := r.RenderHTML(context.Background(), `<html><body><div id="target">before</div></body></html>`)

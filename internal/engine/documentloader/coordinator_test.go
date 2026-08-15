@@ -806,9 +806,11 @@ func TestImageUsesImgSrcDirective(t *testing.T) {
 	if err := coord.HandleDocumentEnd(context.Background()); err != nil {
 		t.Fatalf("HandleDocumentEnd: %v", err)
 	}
-	h.cb.snapshot()
-	if len(h.cb.Errors) != 1 {
-		t.Fatalf("expected 1 error, got %d", len(h.cb.Errors))
+	// PR8: images are non-blocking — the CSP skip fires on the image's
+	// goroutine after HandleDocumentEnd returns. Read through Snapshot()
+	// (the race-safe accessor).
+	if !waitFor(t, func() bool { return len(h.cb.Snapshot().Errors) > 0 }) {
+		t.Fatalf("expected 1 error, got 0")
 	}
 }
 
@@ -918,8 +920,13 @@ func TestEndToEndWithHTTPServer(t *testing.T) {
 	if len(cb.Scripts) != 1 {
 		t.Errorf("expected 1 script, got %d", len(cb.Scripts))
 	}
-	if len(cb.Images) != 1 {
-		t.Errorf("expected 1 image, got %d", len(cb.Images))
+	// PR8: images are non-blocking — HandleDocumentEnd returns before
+	// they necessarily complete; the callback arrives via the final
+	// drain once the fetch settles. Read through Snapshot() (the
+	// race-safe accessor); the callback fires on the coordinator's
+	// goroutine.
+	if !waitFor(t, func() bool { return len(cb.Snapshot().Images) > 0 }) {
+		t.Errorf("expected 1 image, got 0")
 	}
 	for _, c := range cb.CSS {
 		if !contains(string(c.Source), "color:red") {

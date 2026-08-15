@@ -91,6 +91,9 @@ type Runtime struct {
 	// and contributed to the Fyne-thread freeze symptom.
 	frameScheduler *FrameScheduler
 
+	// scriptMu serializes goja VM execution (RunScript). See RunScript.
+	scriptMu sync.Mutex
+
 	// longTaskThreshold, if > 0, causes RunScript to record a
 	// long-task metric when execution exceeds the budget. Zero disables
 	// the metric. Defaults to 50ms (the W3C long-task definition) when
@@ -1267,31 +1270,38 @@ func (r *Runtime) setupDocumentAPI() {
 		if r.isPopulatingJSDOM {
 			return
 		}
+		mutation := DOMMutation{Kind: MutationBatch, Count: 1}
+		if len(args) > 0 {
+			mutation.Kind = mutationKindFromString(args[0].String())
+		}
+		if len(args) > 1 {
+			mutation.TargetID = args[1].String()
+		}
+		if len(args) > 2 {
+			mutation.ParentID = args[2].String()
+		}
+		if len(args) > 3 {
+			mutation.ReferenceID = args[3].String()
+		}
+		if len(args) > 4 {
+			mutation.Attribute = args[4].String()
+		}
+		if len(args) > 5 {
+			mutation.NewValue = args[5].String()
+		}
 		if r.onDOMMutationBatch != nil {
-			mutation := DOMMutation{Kind: MutationBatch, Count: 1}
-			if len(args) > 0 {
-				mutation.Kind = mutationKindFromString(args[0].String())
-			}
-			if len(args) > 1 {
-				mutation.TargetID = args[1].String()
-			}
-			if len(args) > 2 {
-				mutation.ParentID = args[2].String()
-			}
-			if len(args) > 3 {
-				mutation.ReferenceID = args[3].String()
-			}
-			if len(args) > 4 {
-				mutation.Attribute = args[4].String()
-			}
-			if len(args) > 5 {
-				mutation.NewValue = args[5].String()
-			}
 			r.onDOMMutationBatch([]DOMMutation{mutation})
 		}
 		if r.onDOMMutation != nil {
-			r.serializeJSDOMToCache()
-			r.onDOMMutation(r.htmlCache)
+			// Pure attribute/text mutations are fully handled by the typed
+			// batch path — skip the expensive full-DOM serialize + reparse.
+			// Structural mutations (insert/remove/replace) and unclassified
+			// kinds still fall back to the string callback because the typed
+			// sink cannot yet synthesize new render subtrees.
+			if r.onDOMMutationBatch == nil || needsFullReparse(mutation.Kind) {
+				r.serializeJSDOMToCache()
+				r.onDOMMutation(r.htmlCache)
+			}
 		}
 	})
 
@@ -1684,6 +1694,13 @@ func (r *Runtime) SetFetcher(f HTTPFetcher) {
 // without a budget, which is one of the root causes of the Fyne-thread
 // freeze symptom.
 func (r *Runtime) RunScript(script string) (goja.Value, error) {
+	// The goja VM is not safe for concurrent use. This mutex serializes
+	// script execution so direct callers (console eval, tests) are safe
+	// even when a js.Session owner is also running scripts; the session's
+	// owner goroutine provides ordering and queueing on top of it.
+	r.scriptMu.Lock()
+	defer r.scriptMu.Unlock()
+
 	r.ScanAndReportUnsupportedJSFeatures(script)
 
 	var interrupt *time.Timer

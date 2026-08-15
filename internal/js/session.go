@@ -10,6 +10,8 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+
+	"github.com/dop251/goja"
 )
 
 // ---------------------------------------------------------------------------
@@ -88,15 +90,24 @@ type Session struct {
 	droppedTasks atomic.Uint64
 }
 
-// NewSession creates a session with a fresh Runtime and the given config.
-// The returned session is not yet owned — call Run() to start the owner loop.
-func NewSession(cfg SessionConfig) *Session {
+// newSession creates a session wrapping the given runtime and config,
+// wiring the runtime's async-callback routing (enqueueTask) to the
+// session so timers, fetch completions, and other async callbacks run on
+// the owner goroutine. The runtime must not be shared with another
+// session.
+func newSession(rt *Runtime, cfg SessionConfig, parent context.Context) *Session {
+	if rt == nil {
+		rt = NewRuntime()
+	}
 	if cfg.MaxPendingTasks <= 0 {
 		cfg.MaxPendingTasks = 256
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
 	s := &Session{
-		rt:      NewRuntime(),
+		rt:      rt,
 		cfg:     cfg,
 		ctx:     ctx,
 		cancel:  cancel,
@@ -104,7 +115,7 @@ func NewSession(cfg SessionConfig) *Session {
 		maxTask: cfg.MaxPendingTasks,
 		notify:  make(chan struct{}, 1),
 	}
-	s.rt.enqueueTask = func(f func()) {
+	rt.enqueueTask = func(f func()) {
 		_ = s.Submit(func(rt *Runtime) {
 			f()
 		})
@@ -112,28 +123,23 @@ func NewSession(cfg SessionConfig) *Session {
 	return s
 }
 
+// NewSession creates a session with a fresh Runtime and the given config.
+// The returned session is not yet owned — call Run() to start the owner loop.
+func NewSession(cfg SessionConfig) *Session {
+	return newSession(nil, cfg, nil)
+}
+
 // NewSessionWithContext creates a session with an external context.
 // Cancelling the context triggers session shutdown.
 func NewSessionWithContext(ctx context.Context, cfg SessionConfig) *Session {
-	if cfg.MaxPendingTasks <= 0 {
-		cfg.MaxPendingTasks = 256
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	s := &Session{
-		rt:      NewRuntime(),
-		cfg:     cfg,
-		ctx:     ctx,
-		cancel:  cancel,
-		tasks:   make([]Task, cfg.MaxPendingTasks),
-		maxTask: cfg.MaxPendingTasks,
-		notify:  make(chan struct{}, 1),
-	}
-	s.rt.enqueueTask = func(f func()) {
-		_ = s.Submit(func(rt *Runtime) {
-			f()
-		})
-	}
-	return s
+	return newSession(nil, cfg, ctx)
+}
+
+// NewSessionWithRuntime creates a session that owns the given runtime,
+// wiring its async-callback routing to the session. The runtime must not
+// be shared with another session. Call Run() to start the owner loop.
+func NewSessionWithRuntime(rt *Runtime, cfg SessionConfig) *Session {
+	return newSession(rt, cfg, nil)
 }
 
 // Runtime returns the session's JavaScript runtime.
@@ -147,6 +153,48 @@ func (s *Session) Context() context.Context {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ctx
+}
+
+// SubmitAndWait enqueues a task and blocks until the owner goroutine has
+// executed it, returning ErrSessionClosed if the session shuts down
+// before the task runs. It must NOT be called from the owner goroutine
+// itself, which would deadlock the owner loop; the GUI uses it from
+// worker/UI goroutines to run scripts and configuration on the owner.
+func (s *Session) SubmitAndWait(task Task) error {
+	if s.closed.Load() {
+		return ErrSessionClosed
+	}
+	done := make(chan struct{})
+	err := s.Submit(func(rt *Runtime) {
+		defer close(done)
+		task(rt)
+	})
+	if err != nil {
+		return err
+	}
+	ctx := s.Context()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ErrSessionClosed
+	}
+}
+
+// Eval runs a script on the owner goroutine and returns its result. It
+// blocks the caller until the owner has executed the script, so it must
+// NOT be called from the owner goroutine itself.
+func (s *Session) Eval(src string) (goja.Value, error) {
+	var (
+		val goja.Value
+		err error
+	)
+	if err := s.SubmitAndWait(func(rt *Runtime) {
+		val, err = rt.RunScript(src)
+	}); err != nil {
+		return nil, err
+	}
+	return val, err
 }
 
 // Submit enqueues a task for execution on the owner goroutine.

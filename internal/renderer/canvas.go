@@ -60,7 +60,10 @@ type CanvasRenderer struct {
 	// popup near the cursor.
 	onContextMenu func(node *RenderNode, layout *LayoutBox, abs fyne.Position)
 	renderer      *Renderer // Reference to main renderer for hit testing
-	mu            sync.RWMutex
+	// mousePoster routes canvas mouse events to the owning Tab (PR9).
+	// When nil, the widgets fall back to their legacy direct dispatch.
+	mousePoster mouseInputPoster
+	mu          sync.RWMutex
 
 	// Object cache: reuses Fyne canvas objects across frames instead of
 	// re-creating them on every scroll/render. Keyed by command index in the
@@ -103,8 +106,8 @@ type CanvasRenderer struct {
 	// allocating a fresh rectangle+text every scroll tick. Reused only
 	// while the overlay stays enabled (CreateRenderer is responsible for
 	// rebuilding on first show).
-	fpsOverlayText *canvas.Text
-	fpsOverlayBg   *canvas.Rectangle
+	fpsOverlayText      *canvas.Text
+	fpsOverlayBg        *canvas.Rectangle
 	fpsOverlayTextCache string // last text we set on fpsOverlayText, to skip refreshes
 }
 
@@ -233,6 +236,12 @@ func (cr *CanvasRenderer) RecordCoalescedScroll(n int) {
 	cr.frameMetrics.IncCoalescedScroll(n)
 }
 
+// RecordCoalescedImages records how many image-loaded callbacks were
+// collapsed into a single render. See FrameMetrics.
+func (cr *CanvasRenderer) RecordCoalescedImages(n int) {
+	cr.frameMetrics.IncCoalescedImages(n)
+}
+
 // SetNavigationCallback sets the navigation callback for link clicks
 func (cr *CanvasRenderer) SetNavigationCallback(callback NavigationCallback, baseURL string) {
 	cr.mu.Lock()
@@ -276,6 +285,18 @@ func (cr *CanvasRenderer) SetContextMenuCallback(callback func(node *RenderNode,
 	cr.mu.Lock()
 	defer cr.mu.Unlock()
 	cr.onContextMenu = callback
+}
+
+// SetMouseInputCallback wires the canvas mouse events to a poster (PR9).
+// When a poster is set, the canvas widgets post immutable MouseInput
+// values to the owner instead of dispatching inspect/context-menu/
+// navigation callbacks directly; the owner routes them through the engine
+// event loop and owns hit-testing and dispatch. Passing nil restores the
+// legacy direct dispatch.
+func (cr *CanvasRenderer) SetMouseInputCallback(poster func(MouseInput)) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	cr.mousePoster = poster
 }
 
 // isInViewport checks if a box intersects with the current viewport
@@ -619,7 +640,10 @@ func newTappableHyperlink(text, urlStr string, onNavigate NavigationCallback, cr
 	return link
 }
 
-// Tapped handles tap events on the hyperlink
+// Tapped handles tap events on the hyperlink. With a mouse-input poster
+// wired (PR9) it posts an immutable LinkTap event into the engine loop
+// instead of dispatching navigation directly; the drain resolves the URL
+// on the owner. Without a poster it keeps the legacy direct dispatch.
 func (t *TappableHyperlink) Tapped(_ *fyne.PointEvent) {
 	if t.cr != nil {
 		t.cr.mu.Lock()
@@ -628,6 +652,9 @@ func (t *TappableHyperlink) Tapped(_ *fyne.PointEvent) {
 			return
 		}
 		t.cr.mu.Unlock()
+		if t.cr.postMouseInput(MouseInput{Kind: MouseInputLinkTap, URL: t.url}) {
+			return
+		}
 	}
 	if t.onNavigate != nil {
 		t.onNavigate(t.url)
@@ -681,9 +708,24 @@ func (ic *InspectableContainer) MouseOut() {
 	// Mouse leave - could clear hover state
 }
 
-// MouseMoved handles mouse movement for hover inspection
+// MouseMoved handles mouse movement for hover inspection. With a mouse-input
+// poster wired (PR9) it posts an immutable Move event into the engine loop
+// (the loop's latest-wins slot collapses the ~60fps burst); the drain owns
+// hit-test throttling and the inspect dispatch. Without a poster it keeps
+// the legacy direct dispatch below.
 func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
-	if ic.canvasRenderer.onInspect == nil || ic.canvasRenderer.renderer == nil {
+	cr := ic.canvasRenderer
+	if cr == nil {
+		return
+	}
+	if cr.postMouseInput(MouseInput{
+		Kind: MouseInputMove,
+		X:    event.Position.X,
+		Y:    event.Position.Y,
+	}) {
+		return
+	}
+	if cr.onInspect == nil || cr.renderer == nil {
 		return
 	}
 
@@ -696,20 +738,20 @@ func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
 	ic.lastHitTest = time.Now()
 
 	// Get the scroll offset if we're in a scroll container
-	scrollY := ic.canvasRenderer.viewportY
+	scrollY := cr.viewportY
 
 	// Convert mouse position to content coordinates
 	contentX := event.Position.X
 	contentY := event.Position.Y + scrollY
 
 	// Perform hit test
-	node, layout := ic.canvasRenderer.renderer.HitTest(contentX, contentY)
+	node, layout := cr.renderer.HitTest(contentX, contentY)
 	if node != nil && layout != nil {
 		// Only trigger callback if hovering a different element
 		if node.ID != ic.lastHitNodeID {
 			ic.lastHitNodeID = node.ID
-			if ic.canvasRenderer.onInspect != nil {
-				ic.canvasRenderer.onInspect(node, layout)
+			if cr.onInspect != nil {
+				cr.onInspect(node, layout)
 			}
 		}
 	} else {
@@ -717,25 +759,40 @@ func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
 	}
 }
 
-// MouseDown handles mouse click events for element selection
+// MouseDown handles mouse click events for element selection. With a
+// mouse-input poster wired (PR9) it posts an immutable Click event (button
+// 1) into the engine loop's ordered FIFO; the drain hit-tests and selects.
+// Without a poster it keeps the legacy direct dispatch below.
 func (ic *InspectableContainer) MouseDown(event *fyne.PointEvent) {
-	if ic.canvasRenderer.onInspect == nil || ic.canvasRenderer.renderer == nil {
+	cr := ic.canvasRenderer
+	if cr == nil {
+		return
+	}
+	if cr.postMouseInput(MouseInput{
+		Kind:   MouseInputClick,
+		Button: 1,
+		X:      event.Position.X,
+		Y:      event.Position.Y,
+	}) {
+		return
+	}
+	if cr.onInspect == nil || cr.renderer == nil {
 		return
 	}
 
 	// Get the scroll offset
-	scrollY := ic.canvasRenderer.viewportY
+	scrollY := cr.viewportY
 
 	// Convert mouse position to content coordinates
 	contentX := event.Position.X
 	contentY := event.Position.Y + scrollY
 
 	// Perform hit test
-	node, layout := ic.canvasRenderer.renderer.HitTest(contentX, contentY)
+	node, layout := cr.renderer.HitTest(contentX, contentY)
 	if node != nil && layout != nil {
 		// Call inspect callback on click (to select element)
-		if ic.canvasRenderer.onInspect != nil {
-			ic.canvasRenderer.onInspect(node, layout)
+		if cr.onInspect != nil {
+			cr.onInspect(node, layout)
 		}
 	}
 }
@@ -749,23 +806,34 @@ func (ic *InspectableContainer) MouseDown(event *fyne.PointEvent) {
 // callback is registered we still notify it with nil node/layout so the
 // UI can decide whether to show a page-level menu.
 func (ic *InspectableContainer) TappedSecondary(event *fyne.PointEvent) {
-	if ic.canvasRenderer == nil || ic.canvasRenderer.renderer == nil {
+	cr := ic.canvasRenderer
+	if cr == nil || cr.renderer == nil {
+		return
+	}
+	if cr.postMouseInput(MouseInput{
+		Kind:   MouseInputClick,
+		Button: 2,
+		X:      event.Position.X,
+		Y:      event.Position.Y,
+		AbsX:   event.AbsolutePosition.X,
+		AbsY:   event.AbsolutePosition.Y,
+	}) {
 		return
 	}
 
-	ic.canvasRenderer.mu.RLock()
-	cb := ic.canvasRenderer.onContextMenu
-	ic.canvasRenderer.mu.RUnlock()
+	cr.mu.RLock()
+	cb := cr.onContextMenu
+	cr.mu.RUnlock()
 	if cb == nil {
 		return
 	}
 
 	// Convert mouse position to content coordinates (scroll-aware).
-	scrollY := ic.canvasRenderer.viewportY
+	scrollY := cr.viewportY
 	contentX := event.Position.X
 	contentY := event.Position.Y + scrollY
 
-	node, layout := ic.canvasRenderer.renderer.HitTest(contentX, contentY)
+	node, layout := cr.renderer.HitTest(contentX, contentY)
 	cb(node, layout, event.AbsolutePosition)
 }
 
@@ -1870,14 +1938,14 @@ func (cr *CanvasRenderer) buildFPSOverlay() []fyne.CanvasObject {
 		fmt.Sprintf("FPS %.1f", stats.CurrentFPS),
 		fmt.Sprintf("i\u2192p %s  q %s",
 			formatLatency(m.MaxInputToPresent), formatLatency(m.MaxUIQueueWait)),
-		fmt.Sprintf("long %d  coalesced s%d m%d  drop %d",
-			m.LongFrames, m.CoalescedScrollEvents, m.CoalescedMutations, m.StaleFramesDropped),
+		fmt.Sprintf("long %d  coalesced s%d m%d i%d  drop %d",
+			m.LongFrames, m.CoalescedScrollEvents, m.CoalescedMutations, m.CoalescedImages, m.StaleFramesDropped),
 	}
 	text := strings.Join(lines, "\n")
 
 	// Approximate width from the longest line so the background hugs
 	// the text closely enough without a text-measure dependency here.
-	estW := fontS * 0.62 * float32(longestLine(lines)) + 2*padX
+	estW := fontS*0.62*float32(longestLine(lines)) + 2*padX
 	estH := fontS*float32(len(lines)) + 2*padY
 
 	// Lazily allocate the overlay objects the first time the HUD is

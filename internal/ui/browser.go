@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/engine/eventloop"
 	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 	"github.com/vyquocvu/goosie/internal/engine/session"
@@ -183,6 +186,53 @@ type Tab struct {
 	browser       *Browser
 	jsRuntime     *js.Runtime
 	rawSource     string
+
+	// eventLoop is the tab's bounded engine scheduling policy for input.
+	// Scroll events land in the loop's latest-wins slot and click/key
+	// events in its FIFO, so a burst of scrolls collapses into one
+	// latest-viewport render while discrete input keeps its order. It is
+	// driven purely from the Fyne main thread (PostInput from the
+	// scroll/key callbacks, DrainInput from a deferred UI turn) and is
+	// closed when the tab closes. See internal/engine/eventloop.
+	eventLoop *eventloop.Loop
+
+	// drainScheduled is a UI-thread flag guaranteeing at most one input
+	// drain is queued per UI turn: further scroll/key events while a
+	// drain is pending only update the loop's coalesced state.
+	drainScheduled bool
+	// execScheduled is a UI-thread flag guaranteeing at most one render
+	// execution turn is queued per UI turn. Drains that replace the
+	// pending render request while an execution is queued only update the
+	// loop's latest-request state.
+	execScheduled bool
+	// lastCoalescedScroll is the last CoalescedScrollEvents counter value
+	// seen by the drain, used to report the per-render coalesced delta to
+	// the renderer's FrameMetrics HUD.
+	lastCoalescedScroll uint64
+	// docGeneration increments every time a new document is rendered into
+	// the tab; it feeds the loop's Generation so scroll renders from a
+	// superseded document are dropped before presentation.
+	docGeneration uint64
+
+	// Mouse routing state (PR9), all UI-thread owned.
+	// lastViewportY mirrors the loop's latest drained scroll offset so
+	// mouse hit-tests can convert widget-space positions to content
+	// coordinates without reaching into the canvas.
+	lastViewportY float32
+	// lastHoverHit throttles hover hit-tests: MouseMoved posts fire at
+	// display refresh rate, and each hit test walks the layout tree.
+	lastHoverHit time.Time
+	// lastHoverNodeID suppresses repeated inspect callbacks while the
+	// pointer stays over the same element.
+	lastHoverNodeID int64
+
+	// jsSession is the single-owner goroutine wrapper around jsRuntime
+	// (M8.1). All script execution and runtime configuration goes through
+	// it so the goja VM is only ever touched by its owner goroutine;
+	// async callbacks (timers, fetch completions) route back to the owner
+	// via the runtime's enqueueTask hook. Created by SetJSRuntime and
+	// closed on navigation/tab close.
+	jsSession *js.Session
 }
 
 // window interface to allow testing
@@ -251,7 +301,10 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 	})
 	browser.consolePanel.SetExecuteCallback(func(source string) {
 		if tab := browser.ActiveTab(); tab != nil && tab.jsRuntime != nil {
-			value, err := tab.jsRuntime.RunScript(source)
+			// Route through the session owner so the goja VM is only
+			// touched by its owner goroutine (M8.1). The UI thread
+			// blocks until the script finishes, as before.
+			value, err := tab.RunScriptOnOwner(source)
 			if err != nil {
 				browser.consolePanel.AddMessage(js.ConsoleMessage{Level: "error", Message: err.Error(), Timestamp: time.Now(), Data: err.Error()})
 				return
@@ -298,9 +351,9 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 			if sum := browser.deps.Network.Security(); sum.Subject != "" {
 				secSummary = "TLS " + sum.Subject
 				secInfo = devtools.SecurityInfo{
-					Scheme:   "https",
-					Subject:  sum.Subject,
-					Issuer:   sum.Issuer,
+					Scheme:    "https",
+					Subject:   sum.Subject,
+					Issuer:    sum.Issuer,
 					NotBefore: sum.NotBefore.Format("Jan 2, 2006"),
 					NotAfter:  sum.NotAfter.Format("Jan 2, 2006"),
 				}
@@ -310,7 +363,9 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 			secInfo = devtools.SecurityInfo{Scheme: "http"}
 		}
 		var renderStats map[string]time.Duration
-		if rr, ok := tab.htmlRenderer.(interface{ Stats() map[string]time.Duration }); ok {
+		if rr, ok := tab.htmlRenderer.(interface {
+			Stats() map[string]time.Duration
+		}); ok {
 			renderStats = rr.Stats()
 		}
 		a11y := devtools.NewRenderTreeAccessibilityProvider(func() *renderer.RenderNode {
@@ -371,6 +426,10 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 	browser.tabs.OnClosed = func(tabItem *container.TabItem) {
 		for i, tab := range browser.tabItems {
 			if tab.content == tabItem.Content {
+				// Release the tab's input loop and JS session so late
+				// work is rejected predictably instead of queued.
+				tab.eventLoop.Close()
+				tab.CloseJSSession()
 				browser.tabItems = append(browser.tabItems[:i], browser.tabItems[i+1:]...)
 				break
 			}
@@ -719,7 +778,7 @@ func (b *Browser) newTabInternal() *Tab {
 
 	tabState := NewBrowserState()
 
-	return &Tab{
+	tab := &Tab{
 		title:         "New Tab",
 		content:       contentScroll,
 		contentBox:    contentBox,
@@ -728,6 +787,15 @@ func (b *Browser) newTabInternal() *Tab {
 		state:         tabState,
 		browser:       b,
 	}
+	tab.eventLoop = eventloop.New(eventloop.Config{
+		InputQueueSize: 128,
+		// The present callback runs on the UI thread (via
+		// ProcessPendingResults) and is the only place a completed
+		// render touches the canvas. PR4 keeps this callback unchanged
+		// and moves the request execution off-thread.
+		Present: tab.presentRenderResult,
+	})
+	return tab
 }
 
 // NewTab creates a new browser tab and adds it to the tab container
@@ -812,9 +880,26 @@ func (b *Browser) RenderParsedContent(ctx context.Context, doc *html.Node, exter
 // RenderHTML renders HTML content using the canvas-based renderer for this specific tab
 func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 	t.ensureHTMLRenderer()
-	if t.browser.headless {
-		t.contentScroll.Resize(fyne.NewSize(1000, 600))
-		t.htmlRenderer.SetSize(1000, 600)
+	// A new document supersedes any pending scroll render from the
+	// previous document; the loop drops results carrying the old
+	// generation before presentation.
+	t.bumpDocumentGeneration()
+
+	// PR4 render split: renderers that implement frameSplitter build the
+	// engine state (parse/style/layout) on the caller's goroutine and
+	// only the canvas-object build is marshalled onto the Fyne main
+	// thread. Renderers without the split fall back to the legacy
+	// single-phase path (everything marshalled onto the UI thread).
+	if fs, ok := t.htmlRenderer.(frameSplitter); ok {
+		if err := fs.BuildHTML(ctx, htmlContent); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// Superseded navigation; not an error worth surfacing.
+				return nil
+			}
+			return err
+		}
+		t.presentEngineFrame()
+		return nil
 	}
 
 	// RenderHTML internally creates and mutates Fyne canvas objects
@@ -850,15 +935,31 @@ func (t *Tab) RenderHTML(ctx context.Context, htmlContent string) error {
 // so no further CSS fetching happens inside the renderer.
 func (t *Tab) RenderParsedContent(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) error {
 	t.ensureHTMLRenderer()
-	if t.browser.headless {
-		t.contentScroll.Resize(fyne.NewSize(1000, 600))
-		t.htmlRenderer.SetSize(1000, 600)
+	// A new document supersedes any pending scroll render from the
+	// previous document; the loop drops results carrying the old
+	// generation before presentation.
+	t.bumpDocumentGeneration()
+
+	// PR4 render split: renderers that implement frameSplitter build the
+	// engine state on the caller's goroutine — in production the
+	// navigation and mutation-coalescer worker goroutines, so the Fyne
+	// main thread is no longer blocked by parse/style/layout — and only
+	// the canvas-object build is marshalled onto the UI thread.
+	if fs, ok := t.htmlRenderer.(frameSplitter); ok {
+		if err := fs.BuildParsed(ctx, doc, externalCSS); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// Superseded navigation; the session guards already
+				// cover this, so do not surface an error UI.
+				return nil
+			}
+			return err
+		}
+		t.presentEngineFrame()
+		return nil
 	}
 
-	// Marshal to the Fyne main thread for the same reason as RenderHTML
-	// — the underlying render is the only place that touches Fyne
-	// canvas objects, and the mutation coalescer that drives us on JS
-	// pages runs on a timer goroutine. Without this marshalling a burst
+	// Legacy fallback for renderers without the split: marshal the whole
+	// render onto the Fyne main thread. Without this marshalling a burst
 	// of JS DOM mutations logs the "Error in Fyne call thread, this
 	// should have been called in fyne.Do[AndWait]" diagnostic and the
 	// app appears not-responding because fyne.DoAndWait from main
@@ -880,6 +981,32 @@ func (t *Tab) RenderParsedContent(ctx context.Context, doc *html.Node, externalC
 
 	t.publishCanvasObject(canvasObject)
 	return nil
+}
+
+// presentEngineFrame marshals the frameSplitter's canvas-object build
+// onto the Fyne main thread and publishes the result. It is the PR4
+// "present" half of the render split: the heavy engine phases already ran
+// off-thread in the preceding Build* call, so the UI thread only
+// constructs and refreshes canvas objects here.
+func (t *Tab) presentEngineFrame() {
+	if t.htmlRenderer == nil {
+		return
+	}
+	fs, ok := t.htmlRenderer.(frameSplitter)
+	if !ok {
+		return
+	}
+	var canvasObject fyne.CanvasObject
+	t.browser.doAndWait(func() {
+		if t.browser.headless {
+			t.contentScroll.Resize(fyne.NewSize(1000, 600))
+			t.htmlRenderer.SetSize(1000, 600)
+		}
+		canvasObject = fs.PresentFrame()
+	})
+	if canvasObject != nil {
+		t.publishCanvasObject(canvasObject)
+	}
 }
 
 // ensureHTMLRenderer initializes the lazy renderer on first use and
@@ -908,27 +1035,27 @@ func (t *Tab) ensureHTMLRenderer() {
 			}
 		})
 
-		// Set up inspect callback
+		// Set up inspect callback. This is the direct-dispatch fallback:
+		// when the mouse poster below is wired, canvas mouse events post
+		// into the event loop instead and the drain dispatches through the
+		// same handleInspect/handleContextMenu helpers.
 		t.htmlRenderer.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
-			t.browser.do(func() {
-				if t.browser.devToolsVisible {
-					t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
-					t.browser.inspectPanel.SetElement(node, layout)
-				}
-			})
+			t.handleInspect(node, layout)
 		})
 
 		// Set up right-click context menu callback. Marshalled onto the UI
 		// goroutine before showing the popup because fyne widgets must be
 		// touched from the main thread.
 		t.htmlRenderer.SetContextMenuCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
-			t.browser.do(func() {
-				if t.browser.devToolsMenu == nil {
-					return
-				}
-				t.browser.showDevToolsMenu(node, layout, abs)
-			})
+			t.handleContextMenu(node, layout, abs)
 		})
+
+		// Route canvas mouse events through the engine event loop (PR9):
+		// the canvas posts raw immutable MouseInput values here, the tab
+		// maps them into the loop's slots (mouse-move latest-wins, clicks
+		// FIFO), and the drain owns hit-testing + dispatch. Passing nil
+		// would restore the canvas's direct dispatch.
+		t.htmlRenderer.SetMouseInputCallback(t.postCanvasMouseInput)
 
 		// Set up refresh callback for the renderer
 		t.htmlRenderer.SetRefreshCallback(func() {
@@ -945,41 +1072,21 @@ func (t *Tab) ensureHTMLRenderer() {
 		// Sync Fyne scroll position with the renderer viewport so viewport
 		// culling and hit-testing follow the user's scroll.
 		//
-		// The previous implementation called refreshTabContent(t)
-		// directly on every OnScrolled tick. When the user was
-		// scrolling rapidly, every tick walked the full display list,
-		// built Fyne objects, and triggered a refresh — easily enough
-		// to drive scroll-rate FPS into single digits on a large
-		// page. The fix is to route scroll updates through the
-		// renderer's ScrollCoalescer: the latest viewport always
-		// wins, and at most one render is queued at any time.
-		scrollStart := time.Now()
+		// The previous implementation collapsed bursts through the
+		// renderer's ScrollCoalescer and deferred a single presentation
+		// via fyne.Do. The engine event loop now owns that policy: the
+		// scroll callback only posts an immutable InputEvent into the
+		// tab's bounded loop (latest-wins slot), and one drain per UI
+		// turn applies the latest viewport and refreshes once. A burst
+		// of wheel events therefore produces exactly one canvas rebuild
+		// and refresh, and the loop's counters feed the FrameMetrics
+		// HUD (coalesced scroll, input-to-present latency).
 		t.contentScroll.OnScrolled = func(pos fyne.Position) {
 			if t.htmlRenderer == nil {
 				return
 			}
 			scrollSize := t.contentScroll.Size()
-			if !t.htmlRenderer.ScheduleScroll(pos.Y, scrollSize.Height) {
-				t.htmlRenderer.RecordCoalescedScroll(1)
-				return
-			}
-
-			// Defer presentation to the next UI turn. Wheel events that
-			// arrive before then only replace the pending viewport, so a
-			// burst produces one canvas rebuild and refresh.
-			t.browser.do(func() {
-				if t.htmlRenderer == nil {
-					return
-				}
-				viewport, ok := t.htmlRenderer.TryClaimScroll()
-				if !ok {
-					return
-				}
-				t.htmlRenderer.RecordInputToPresent(time.Since(scrollStart))
-				scrollStart = time.Now()
-				t.htmlRenderer.SetViewport(viewport.Y, viewport.Height)
-				refreshTabContent(t)
-			})
+			t.postScrollViewport(pos.Y, scrollSize.Height)
 		}
 	}
 
@@ -1004,6 +1111,21 @@ func (t *Tab) publishCanvasObject(canvasObject fyne.CanvasObject) {
 	})
 }
 
+// RefreshFromMutation marshals a post-mutation canvas refresh onto the
+// Fyne main thread. It is the present hook the JS typed-mutation sink
+// calls from the session owner goroutine: the renderer has already
+// applied the mutation values and invalidated its display-list cache, so
+// this turn only rebuilds and repaints the canvas from the updated trees
+// — no full reparse.
+func (t *Tab) RefreshFromMutation() {
+	if t == nil || t.browser == nil || t.htmlRenderer == nil {
+		return
+	}
+	t.browser.do(func() {
+		refreshTabContent(t)
+	})
+}
+
 func refreshTabContent(tab *Tab) {
 	if tab == nil || tab.htmlRenderer == nil || tab.contentScroll == nil {
 		return
@@ -1017,6 +1139,300 @@ func refreshTabContent(tab *Tab) {
 		tab.contentScroll.Content = content
 	}
 	tab.contentScroll.Refresh()
+}
+
+// postScrollViewport routes a scroll event into the tab's engine event
+// loop. The loop keeps a latest-wins scroll slot, so a burst of wheel
+// events collapses into one viewport; the drain (scheduled on the next
+// UI turn) applies it once. This is the engine event loop's replacement
+// for calling the renderer's ScrollCoalescer directly from OnScrolled.
+func (t *Tab) postScrollViewport(y, height float32) {
+	if t.eventLoop == nil || t.htmlRenderer == nil {
+		return
+	}
+	if err := t.eventLoop.PostInput(eventloop.InputEvent{
+		Type:      eventloop.InputScroll,
+		Viewport:  eventloop.Viewport{Y: y, Height: height},
+		Timestamp: time.Now(),
+	}); err != nil {
+		// ErrClosed after tab close, ErrInputQueueFull for the bounded
+		// ordered queue — both are safe to drop: the next scroll simply
+		// replaces the latest state.
+		return
+	}
+	t.scheduleInputDrain()
+}
+
+// postKeyInput routes a key press into the tab's engine event loop. Keys
+// use the loop's bounded FIFO so their order relative to other discrete
+// input (clicks) is preserved when the drain dispatches them.
+func (t *Tab) postKeyInput(key string) {
+	if t.eventLoop == nil {
+		return
+	}
+	if err := t.eventLoop.PostInput(eventloop.InputEvent{
+		Type:      eventloop.InputKey,
+		Key:       key,
+		Timestamp: time.Now(),
+	}); err != nil {
+		return
+	}
+	t.scheduleInputDrain()
+}
+
+// postCanvasMouseInput is the renderer's mouse-input poster hook (PR9).
+// The canvas calls it on the Fyne main thread for every pointer event;
+// the tab maps each renderer.MouseInput into the engine loop's matching
+// slot — mouse-move into the latest-wins slot (a ~60fps burst collapses
+// to one drained position), clicks and link taps into the ordered FIFO —
+// and schedules the single per-turn drain.
+func (t *Tab) postCanvasMouseInput(input renderer.MouseInput) {
+	if t.eventLoop == nil {
+		return
+	}
+	event := eventloop.InputEvent{
+		X:         input.X,
+		Y:         input.Y,
+		Button:    input.Button,
+		AbsX:      input.AbsX,
+		AbsY:      input.AbsY,
+		URL:       input.URL,
+		Timestamp: time.Now(),
+	}
+	switch input.Kind {
+	case renderer.MouseInputMove:
+		event.Type = eventloop.InputMouseMove
+	case renderer.MouseInputClick:
+		event.Type = eventloop.InputClick
+	case renderer.MouseInputLinkTap:
+		event.Type = eventloop.InputClick
+	default:
+		return
+	}
+	if err := t.eventLoop.PostInput(event); err != nil {
+		return
+	}
+	t.scheduleInputDrain()
+}
+
+// handleInspect marshals an element-inspection update onto the UI
+// goroutine and shows it in the dev-tools inspect panel. Shared by the
+// direct canvas dispatch and the event-loop drain.
+func (t *Tab) handleInspect(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+	if t == nil || t.browser == nil {
+		return
+	}
+	t.browser.do(func() {
+		if t.browser.devToolsVisible {
+			t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
+			t.browser.inspectPanel.SetElement(node, layout)
+		}
+	})
+}
+
+// handleContextMenu marshals a right-click context-menu popup onto the
+// UI goroutine. Shared by the direct canvas dispatch and the event-loop
+// drain.
+func (t *Tab) handleContextMenu(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position) {
+	if t == nil || t.browser == nil {
+		return
+	}
+	t.browser.do(func() {
+		if t.browser.devToolsMenu == nil {
+			return
+		}
+		t.browser.showDevToolsMenu(node, layout, abs)
+	})
+}
+
+// handleMouseMove is the drain's dispatch for the loop's latest mouse
+// position. It throttles hover hit-tests (MouseMoved posts fire at
+// display refresh rate and each hit test walks the layout tree) and only
+// fires the inspect callback when the pointer moves onto a different
+// element.
+func (t *Tab) handleMouseMove(x, y float32) {
+	if t.htmlRenderer == nil {
+		return
+	}
+	if time.Since(t.lastHoverHit) < 80*time.Millisecond {
+		return
+	}
+	t.lastHoverHit = time.Now()
+
+	node, layout := t.htmlRenderer.HitTest(x, y+t.lastViewportY)
+	if node != nil && layout != nil {
+		if node.ID != t.lastHoverNodeID {
+			t.lastHoverNodeID = node.ID
+			t.handleInspect(node, layout)
+		}
+	} else {
+		t.lastHoverNodeID = 0
+	}
+}
+
+// handleClick is the drain's dispatch for a discrete click: link taps
+// navigate directly, left clicks hit-test and select for inspection,
+// right clicks hit-test and open the dev-tools context menu at the
+// cursor.
+func (t *Tab) handleClick(ev eventloop.InputEvent) {
+	if t.htmlRenderer == nil {
+		return
+	}
+	if ev.URL != "" {
+		if t.browser.onNavigate != nil {
+			t.browser.onNavigate(ev.URL)
+		}
+		return
+	}
+	node, layout := t.htmlRenderer.HitTest(ev.X, ev.Y+t.lastViewportY)
+	if ev.Button == 2 {
+		t.handleContextMenu(node, layout, fyne.NewPos(ev.AbsX, ev.AbsY))
+		return
+	}
+	if node != nil && layout != nil {
+		t.handleInspect(node, layout)
+	}
+}
+
+// scheduleInputDrain queues at most one drain per UI turn. All callers
+// (scroll/key callbacks) and the drain itself run on the Fyne main
+// thread, so the flag is a plain bool. Events that arrive while a drain
+// is pending only update the loop's coalesced state and are picked up by
+// the already-queued drain.
+func (t *Tab) scheduleInputDrain() {
+	if t.drainScheduled {
+		return
+	}
+	t.drainScheduled = true
+	t.browser.do(func() {
+		t.drainScheduled = false
+		t.drainInputLoop()
+	})
+}
+
+// drainInputLoop consumes the tab's pending input in the loop's policy
+// order — ordered user intent (clicks/keys) first, then latest scroll
+// state — and applies it. Scroll input becomes one latest-viewport
+// render; key input dispatches to the browser. This is the single place
+// input leaves the event loop for presentation.
+func (t *Tab) drainInputLoop() {
+	if t.eventLoop == nil || t.htmlRenderer == nil {
+		return
+	}
+	events := t.eventLoop.DrainInput()
+	if len(events) == 0 {
+		return
+	}
+
+	for _, ev := range events {
+		switch ev.Type {
+		case eventloop.InputScroll:
+			// Scroll becomes a render request through the loop's
+			// latest-only queue: a newer scroll replaces the queued
+			// request and cancels the superseded one, so a burst still
+			// produces exactly one render of the final viewport. The
+			// request is executed (and its result presented) on a later
+			// UI turn via scheduleRenderExecution.
+			t.lastViewportY = ev.Viewport.Y
+			if _, err := t.eventLoop.ScheduleRender(context.Background(), eventloop.RenderRequest{
+				Generation: t.eventLoop.Generation(),
+				Viewport:   ev.Viewport,
+				Reason:     eventloop.RenderReasonViewport,
+				Created:    ev.Timestamp,
+			}); err == nil {
+				t.scheduleRenderExecution()
+			}
+		case eventloop.InputKey:
+			if ev.Key == string(fyne.KeyF12) {
+				t.browser.toggleDevTools()
+			}
+		case eventloop.InputMouseMove:
+			// Latest-wins slot: the burst of ~60fps MouseMoved posts
+			// drained here is one position per UI turn; dispatch is
+			// throttled and delta-checked inside.
+			t.handleMouseMove(ev.X, ev.Y)
+		case eventloop.InputClick:
+			// Discrete clicks and link taps drained in FIFO order relative
+			// to keys and other clicks. Dispatch does the hit test with
+			// the tab's mirror of the latest scroll offset.
+			t.handleClick(ev)
+		}
+	}
+}
+
+// scheduleRenderExecution queues at most one render-execution turn per
+// UI turn. Drains that replace the pending render request while an
+// execution is queued only update the loop's latest-request state; the
+// single queued execution picks up the newest request.
+func (t *Tab) scheduleRenderExecution() {
+	if t.execScheduled {
+		return
+	}
+	t.execScheduled = true
+	t.browser.do(func() {
+		t.execScheduled = false
+		t.executeRenderRequest()
+	})
+}
+
+// executeRenderRequest consumes the loop's latest render request (the
+// queue holds at most one; ScheduleRender replaced and cancelled older
+// ones) and submits its completion. PR3 still executes on the UI thread:
+// the heavy render work is the present-side canvas rebuild, and the
+// generation/cancellation gate lives in ProcessPendingResults so a stale
+// request is never painted. PR4 moves this body to a worker goroutine and
+// keeps the present callback unchanged.
+func (t *Tab) executeRenderRequest() {
+	if t.eventLoop == nil || t.htmlRenderer == nil {
+		return
+	}
+	var req eventloop.RenderRequest
+	select {
+	case req = <-t.eventLoop.RenderRequests():
+	default:
+		return
+	}
+	_ = t.eventLoop.SubmitRenderResult(eventloop.RenderResult{
+		Request:  req,
+		Finished: time.Now(),
+	})
+	t.eventLoop.ProcessPendingResults()
+}
+
+// presentRenderResult is the loop's present callback, invoked only for
+// current (non-stale) render results after the generation and
+// cancellation checks. It is the single place a completed scroll render
+// touches the renderer and canvas, and it runs on the UI thread.
+func (t *Tab) presentRenderResult(result eventloop.RenderResult) {
+	if result.Err != nil || t.htmlRenderer == nil {
+		return
+	}
+	// Report how many scroll events this render collapsed.
+	m := t.eventLoop.Metrics()
+	if delta := m.CoalescedScrollEvents - t.lastCoalescedScroll; delta > 0 {
+		t.htmlRenderer.RecordCoalescedScroll(int(delta))
+		t.lastCoalescedScroll = m.CoalescedScrollEvents
+	}
+	t.htmlRenderer.SetViewport(result.Request.Viewport.Y, result.Request.Viewport.Height)
+	t.htmlRenderer.RecordInputToPresent(time.Since(result.Request.Created))
+	refreshTabContent(t)
+}
+
+// bumpDocumentGeneration advances the tab's engine generation when a new
+// document is rendered, cancelling any render scheduled under the prior
+// generation so stale scroll renders are dropped before presentation.
+func (t *Tab) bumpDocumentGeneration() {
+	if t.eventLoop == nil {
+		return
+	}
+	t.docGeneration++
+	t.eventLoop.SetGeneration(eventloop.Generation{
+		Navigation: t.docGeneration,
+		Document:   t.docGeneration,
+		DOM:        t.docGeneration,
+		Style:      t.docGeneration,
+		Layout:     t.docGeneration,
+	})
 }
 
 // SetNavigationCallback sets the callback for when navigation is requested
@@ -1090,10 +1506,15 @@ func (b *Browser) Show() {
 	contentWithBg := container.NewMax(bg, contentRoot)
 	b.window.SetContent(contentWithBg)
 
-	// Register F12 to toggle dev tools
+	// Register F12 to toggle dev tools. The key is routed through the
+	// active tab's engine event loop (FIFO with clicks) so the toggle
+	// runs in the same drained turn as any other pending input — the
+	// order in which the user pressed them is preserved.
 	b.window.Canvas().SetOnTypedKey(func(ev *fyne.KeyEvent) {
 		if ev.Name == fyne.KeyF12 {
-			b.toggleDevTools()
+			if tab := b.ActiveTab(); tab != nil {
+				tab.postKeyInput(string(ev.Name))
+			}
 		}
 	})
 
@@ -1217,17 +1638,65 @@ func (t *Tab) GetJSRuntime() *js.Runtime {
 	return t.jsRuntime
 }
 
-// SetJSRuntime sets the tab's JavaScript runtime
+// SetJSRuntime attaches the tab's JavaScript runtime, wrapping it in a
+// single-owner js.Session (M8.1) so the goja VM is only ever accessed by
+// the session's owner goroutine. Storage/origin wiring runs on that
+// owner; callers then use RunScriptOnOwner/SubmitOnOwner for script
+// execution and configuration. Passing nil detaches the runtime and
+// closes any active session.
 func (t *Tab) SetJSRuntime(runtime *js.Runtime) {
-	t.jsRuntime = runtime
-	if runtime == nil || t.browser == nil {
+	if runtime == nil {
+		t.CloseJSSession()
+		t.jsRuntime = nil
 		return
 	}
-	if t.browser.deps.Storage != nil {
-		runtime.SetLocalStorageAdapter(t.browser.deps.Storage)
+	t.jsRuntime = runtime
+	t.jsSession = js.NewSessionWithRuntime(runtime, js.DefaultSessionConfig())
+	go t.jsSession.Run()
+
+	if t.browser == nil {
+		return
 	}
-	if origin, err := navigation.ParseOrigin(t.state.GetCurrentURL()); err == nil && origin.IsValid() {
-		runtime.SetOrigin(origin.String())
+	// Wire storage and origin on the owner goroutine so no non-owner
+	// thread touches runtime state.
+	_ = t.jsSession.SubmitAndWait(func(rt *js.Runtime) {
+		if t.browser.deps.Storage != nil {
+			rt.SetLocalStorageAdapter(t.browser.deps.Storage)
+		}
+		if origin, err := navigation.ParseOrigin(t.state.GetCurrentURL()); err == nil && origin.IsValid() {
+			rt.SetOrigin(origin.String())
+		}
+	})
+}
+
+// RunScriptOnOwner runs a script on the tab's JS session owner goroutine
+// and returns its result. It blocks the caller until the owner finishes;
+// it must not be called from the owner goroutine itself. Returns
+// js.ErrSessionClosed when no session is active.
+func (t *Tab) RunScriptOnOwner(source string) (goja.Value, error) {
+	if t.jsSession == nil {
+		return nil, js.ErrSessionClosed
+	}
+	return t.jsSession.Eval(source)
+}
+
+// SubmitOnOwner schedules a task on the tab's JS session owner goroutine
+// and blocks until it completes. It must not be called from the owner
+// goroutine itself. Returns js.ErrSessionClosed when no session is active.
+func (t *Tab) SubmitOnOwner(fn func(rt *js.Runtime)) error {
+	if t.jsSession == nil {
+		return js.ErrSessionClosed
+	}
+	return t.jsSession.SubmitAndWait(fn)
+}
+
+// CloseJSSession shuts down the tab's JS session, cancelling its owner
+// goroutine and rejecting queued tasks. Called on navigation (before a
+// new runtime is attached) and tab close.
+func (t *Tab) CloseJSSession() {
+	if t.jsSession != nil {
+		t.jsSession.Close()
+		t.jsSession = nil
 	}
 }
 
@@ -1275,10 +1744,14 @@ func (b *Browser) toggleBookmark() {
 func (b *Browser) NavigateTo(url string) {
 	if tab := b.ActiveTab(); tab != nil {
 		tab.state.AddToHistory(url)
-		if tab.jsRuntime != nil {
-			if origin, err := navigation.ParseOrigin(url); err == nil && origin.IsValid() {
-				tab.jsRuntime.SetOrigin(origin.String())
-			}
+		// Sync origin on the JS owner goroutine (best-effort; the runtime
+		// may not have a session yet).
+		if tab.jsSession != nil {
+			_ = tab.SubmitOnOwner(func(rt *js.Runtime) {
+				if origin, err := navigation.ParseOrigin(url); err == nil && origin.IsValid() {
+					rt.SetOrigin(origin.String())
+				}
+			})
 		}
 		if b.deps.History != nil {
 			_ = b.deps.History.AddVisit(url, tab.title)

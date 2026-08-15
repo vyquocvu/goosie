@@ -11,6 +11,19 @@ import (
 	"golang.org/x/net/html"
 )
 
+// frameSplitter is the optional two-phase render interface implemented by
+// renderers that can build engine state (parse/style/layout) off the Fyne
+// main thread and present the resulting frame on it. The tab render
+// methods use it when available — the heavy Build* phases run on the
+// caller's goroutine (a worker in production) and only PresentFrame is
+// marshalled onto the UI thread. Renderers without the split fall back to
+// the legacy single-phase path.
+type frameSplitter interface {
+	BuildHTML(ctx context.Context, html string) error
+	BuildParsed(ctx context.Context, doc *html.Node, externalCSS []renderer.ExternalCSS) error
+	PresentFrame() fyne.CanvasObject
+}
+
 type HTMLRenderer interface {
 	RenderHTML(ctx context.Context, htmlContent string) (fyne.CanvasObject, error)
 	// RenderParsed renders a pre-parsed HTML node with the supplied
@@ -34,6 +47,13 @@ type HTMLRenderer interface {
 	// the cursor so the UI layer can show a dev-tools context menu. Passing
 	// nil disables the context menu.
 	SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position))
+
+	// SetMouseInputCallback wires the canvas mouse events to a poster
+	// (PR9). When set, the canvas widgets post immutable renderer.MouseInput
+	// values to the owner instead of dispatching inspect/context-menu/
+	// navigation callbacks directly; the owner routes them through the
+	// engine event loop. Passing nil restores legacy direct dispatch.
+	SetMouseInputCallback(callback func(input renderer.MouseInput))
 	GetRoot() *renderer.RenderNode
 	Refresh()
 	SetRefreshCallback(callback func())
@@ -106,6 +126,10 @@ type HTMLRenderer interface {
 	// RecordCoalescedScroll records how many scroll events
 	// were collapsed into a single render.
 	RecordCoalescedScroll(n int)
+
+	// RecordCoalescedImages records how many image-loaded callbacks
+	// were collapsed into a single render (PR7).
+	RecordCoalescedImages(n int)
 
 	// SetSize updates the renderer's canvas dimensions and marks it for
 	// re-layout. Callers should call Refresh() after SetSize to recompute

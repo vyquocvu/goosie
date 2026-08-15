@@ -34,6 +34,19 @@ func TestNewSession_DefaultConfig(t *testing.T) {
 	}
 }
 
+func TestSession_NewSessionWithRuntime(t *testing.T) {
+	rt := NewRuntime()
+	s := NewSessionWithRuntime(rt, DefaultSessionConfig())
+	defer s.Close()
+
+	if s.Runtime() != rt {
+		t.Fatal("session should own the provided runtime")
+	}
+	if rt.enqueueTask == nil {
+		t.Error("async-callback routing (enqueueTask) should be wired to the session")
+	}
+}
+
 func TestNewSessionWithContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,6 +172,106 @@ func TestSession_SubmitAfterClose(t *testing.T) {
 
 	err := s.Submit(func(rt *Runtime) {})
 	if err != ErrSessionClosed {
+		t.Errorf("expected ErrSessionClosed, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Session — SubmitAndWait and Eval (blocking owner execution)
+// ---------------------------------------------------------------------------
+
+func TestSession_SubmitAndWait(t *testing.T) {
+	s := NewSession(DefaultSessionConfig())
+	done := make(chan error, 1)
+	go func() { done <- s.Run() }()
+
+	var ran atomic.Bool
+	if err := s.SubmitAndWait(func(rt *Runtime) { ran.Store(true) }); err != nil {
+		t.Fatalf("SubmitAndWait: %v", err)
+	}
+	if !ran.Load() {
+		t.Error("task should have run before SubmitAndWait returned")
+	}
+
+	s.Close()
+	if err := <-done; err != context.Canceled {
+		t.Errorf("Run error = %v, want context.Canceled", err)
+	}
+}
+
+func TestSession_SubmitAndWait_Ordered(t *testing.T) {
+	s := NewSession(DefaultSessionConfig())
+	done := make(chan error, 1)
+	go func() { done <- s.Run() }()
+
+	order := make([]int, 0, 3)
+	var mu sync.Mutex
+	for i := 0; i < 3; i++ {
+		val := i
+		if err := s.SubmitAndWait(func(rt *Runtime) {
+			mu.Lock()
+			order = append(order, val)
+			mu.Unlock()
+		}); err != nil {
+			t.Fatalf("SubmitAndWait #%d: %v", i, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i, v := range order {
+		if v != i {
+			t.Errorf("order[%d] = %d, want %d", i, v, i)
+		}
+	}
+	s.Close()
+	<-done
+}
+
+func TestSession_SubmitAndWait_Closed(t *testing.T) {
+	s := NewSession(DefaultSessionConfig())
+	s.Close()
+
+	err := s.SubmitAndWait(func(rt *Runtime) {})
+	if err != ErrSessionClosed {
+		t.Errorf("expected ErrSessionClosed, got %v", err)
+	}
+}
+
+func TestSession_Eval(t *testing.T) {
+	s := NewSession(DefaultSessionConfig())
+	done := make(chan error, 1)
+	go func() { done <- s.Run() }()
+
+	v, err := s.Eval("1 + 2")
+	if err != nil {
+		t.Fatalf("Eval: %v", err)
+	}
+	if v.String() != "3" {
+		t.Errorf("Eval result = %s, want 3", v.String())
+	}
+
+	s.Close()
+	<-done
+}
+
+func TestSession_Eval_Error(t *testing.T) {
+	s := NewSession(DefaultSessionConfig())
+	done := make(chan error, 1)
+	go func() { done <- s.Run() }()
+
+	if _, err := s.Eval("this is not valid js {"); err == nil {
+		t.Error("expected a syntax error from Eval")
+	}
+
+	s.Close()
+	<-done
+}
+
+func TestSession_Eval_Closed(t *testing.T) {
+	s := NewSession(DefaultSessionConfig())
+	s.Close()
+
+	if _, err := s.Eval("1"); err != ErrSessionClosed {
 		t.Errorf("expected ErrSessionClosed, got %v", err)
 	}
 }

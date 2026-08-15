@@ -173,26 +173,349 @@ goroutines, timers, or unbounded queues.
   boundaries; the fixture is kept text-free and viewport-sized so the
   comparison is meaningful (threshold 10%).
 
-### Known limitations
+### Known limitations (after PR4)
 
-- Existing Fyne callbacks do not post into the loop yet. The scroll path
-  coalesces through `ScrollCoalescer` and defers presentation, but the event
-  loop itself is not yet wired to `internal/ui/browser.go`.
-- Heavy `RenderHTML`, `RenderParsed`, viewport object construction, and
-  refresh work still run on the Fyne main goroutine.
+- Mouse-move hover inspection, the right-click context menu, and hyperlink
+  taps still dispatch inside the renderer's canvas internals; they do not yet
+  post into the loop. The loop's `InputMouseMove`/`InputClick` slots are wired
+  and drained in order, so a later PR can route them without reordering.
+- The scroll path's render request is scheduled and gated through the loop,
+  but the canvas rebuild (viewport object construction + refresh) still runs
+  on the Fyne main thread — that is the retained-display-list path and is
+  deliberately the only remaining UI-thread work.
+- `go test -race ./internal/renderer/` fails on `main` too (pre-existing):
+  Fyne's internal font-metrics cache is not goroutine-safe and the image
+  integration tests' async image loading overlaps layout in the next test.
+  Unrelated to the render split; tracked for a follow-up.
+- Typed mutations (PR6) handle pure attribute/text changes without a full
+  reparse; structural mutations (insert/remove/replace) still fall back to
+  the full serialize + reparse path because the typed sink cannot yet
+  synthesize render subtrees. The typed path also does not yet recompute
+  computed styles, so attribute-driven style changes (class toggles,
+  `style=` edits) keep stale styling until the next reparse.
+- Image loads are batched (PR7), but the canvas renderer keeps a second
+  `onImageLoaded` callback that can win the loader slot if `SetWindow`
+  runs after a present; the renderer's batched path is the effective
+  owner in the browser flow.
 - `RenderResult.Snapshot` is opaque until the renderer adopts an immutable
   frame handoff.
-- GUI JavaScript still uses `js.Runtime` directly rather than one `js.Session`
-  owner per tab.
-- Mutation and image-loaded callbacks are not yet routed through event-loop
-  batches.
+
+## PR2 — Route UI input through the engine event loop
+
+Scroll and F12 key input from `internal/ui/browser.go` now flow through the
+per-tab `eventloop.Loop` instead of calling the renderer directly:
+
+- Each `Tab` owns a bounded `eventloop.Loop` (128-slot FIFO for clicks/keys,
+  latest-wins slots for scroll), created in `newTabInternal` and closed on
+  tab close (`tabs.OnClosed`).
+- `OnScrolled` now only posts an immutable `InputScroll` event
+  (`postScrollViewport`); a UI-thread drain scheduled via `fyne.Do`
+  (`scheduleInputDrain`, at most one per turn) collapses the burst into one
+  `SetViewport` + `refreshTabContent` with the latest position.
+- `InputKey` (F12 dev-tools toggle) routes through the loop's FIFO so it is
+  drained in the same order as other discrete input.
+- The drain reports the per-render coalesced-scroll delta and input-to-present
+  latency to `FrameMetrics`, keeping the on-screen HUD numbers intact.
+- The tab no longer uses the renderer's `ScrollCoalescer` directly; that path
+  remains on the `HTMLRenderer` interface for the canvas-internal callers and
+  tests that still exercise it.
+
+Tests (`internal/ui/event_loop_input_test.go`):
+
+- 20-event scroll burst collapses to exactly one drain applying the latest
+  viewport (Y=190), with input-to-present recorded once.
+- Real `OnScrolled` entry point applies the latest position.
+- Click/key FIFO ordering preserved through the tab wiring (two F12 keys
+  toggle dev tools off→on→off with clicks interleaved).
+- Empty drain is a no-op; posting after `Close` returns `ErrClosed`.
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at the
+10% threshold (known ~8% diff from the 4px Fyne test-driver offset);
+screenshots regenerated under `test/e2e/testdata/results/{goosie,browser}/`.
+
+## PR3 — Latest-only render scheduling
+
+The drained scroll state now flows through the loop's render-request
+pipeline instead of being applied directly:
+
+- The input drain turns a scroll event into a `RenderRequest` via
+  `Loop.ScheduleRender` (queue capacity 1): a newer scroll replaces the
+  queued request and cancels the superseded one, so a burst still produces
+  exactly one render of the final viewport.
+- A separate UI-thread execution turn (`scheduleRenderExecution`, at most
+  one per UI turn) consumes the latest request, submits its completion via
+  `SubmitRenderResult`, and runs the loop's generation/cancellation gate
+  through the new non-blocking `Loop.ProcessPendingResults()`.
+- The `Present` callback (`presentRenderResult`) is the single place a
+  completed render touches the canvas (`SetViewport` + `refreshTabContent`)
+  and records the coalesced-scroll delta and input-to-present latency. It
+  only fires for current, non-stale results — a stale render is never
+  painted.
+- Each new document render (`Tab.RenderHTML` / `RenderParsedContent`) bumps
+  the loop's generation (`bumpDocumentGeneration`), cancelling any render
+  scheduled under the prior document so late scroll results are dropped.
+
+Tests (`internal/engine/eventloop/loop_test.go`,
+`internal/ui/event_loop_input_test.go`):
+
+- `ProcessPendingResults` processes queued completions non-blocking and
+  drops stale-by-generation results.
+- Full drain → schedule → execute → present flow: 20-event burst produces
+  one presented render with the final viewport.
+- Render-queue replacement: scheduling a second request cancels the first
+  and only the newest viewport is presented.
+- Stale dropping: a scroll render scheduled before a navigation is never
+  painted after the generation bump.
+- Generation advances on every document render.
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at the
+10% threshold; screenshots regenerated under
+`test/e2e/testdata/results/{goosie,browser}/`.
+
+## PR4 — Background BuildFrame / Fyne-thread PresentFrame split
+
+The heavy engine phases no longer run on the Fyne main thread. Renderers
+that implement the optional `frameSplitter` interface (the real
+`*renderer.Renderer`) split rendering into:
+
+- **Build** — `BuildHTML` / `BuildParsed`: parse, stylesheet assembly,
+  style resolution, and layout. No Fyne work; safe to call off the UI
+  thread. The tab runs these on the caller's goroutine — in production
+  the navigation and mutation-coalescer worker goroutines, so the UI
+  thread is no longer blocked by parse/style/layout.
+- **Present** — `PresentFrame`: builds the Fyne canvas objects from the
+  cached trees. Marshalled onto the UI thread via `doAndWait`; the UI
+  thread only constructs/refreshes canvas objects here.
+
+Key details in `internal/renderer/renderer.go`:
+
+- Style/layout run on local trees **without** holding `treeMu`, so a
+  background build never blocks a concurrent scroll render; only the
+  final tree handoff is atomic.
+- A `buildSeq` counter implements newest-build-wins: a slower build for
+  an older render intent skips the handoff instead of clobbering a newer
+  build's trees.
+- `ctx` is checked between phases, so a superseded navigation aborts the
+  build; the tab swallows `context.Canceled`/`DeadlineExceeded` instead
+  of surfacing an error UI.
+- The parsed stylesheet is captured locally at build time, closing a
+  read-after-write race that concurrent builds could hit through
+  `r.stylesheet`.
+- The legacy `RenderHTML`/`RenderParsed` methods are now thin wrappers
+  composing Build + Present, preserving behavior for direct callers
+  (headless renderer, tests). The tab falls back to the legacy
+  single-phase path for renderers without `frameSplitter` (mocks).
+
+Tests: `internal/renderer/render_split_test.go` (two-phase == legacy
+output, BuildHTML→Present end to end, newest-build-wins, cancelled-build
+handoff) and `internal/ui/render_split_test.go` (tab takes the split path,
+error propagation, cancellation swallowed, legacy fallback).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold.
 
 ### Next recommended PR
 
-Route scroll and mouse input from `internal/ui/browser.go` through this loop,
-keeping click/key ordering intact and proving that rapid input produces one
-latest viewport render request. The following PR should split background
-`BuildFrame` from Fyne-thread `PresentFrame`.
+Mouse-move/click routing through the event loop was completed as PR9;
+the follow-ups in "Remaining work" (stream-the-main-response,
+typed-path style recompute, residual image-callback owner) are the
+remaining candidates.
+
+## PR5 — Single-owner JS session for GUI tabs
+
+GUI tabs now route all JavaScript through one `js.Session` owner per tab
+so the goja VM is never touched from a non-owner goroutine:
+
+- `js.Session` gains `NewSessionWithRuntime` (own an existing runtime and
+  wire its async-callback routing to the session), `SubmitAndWait`
+  (blocking owner execution), and `Eval` (blocking script evaluation) in
+  `internal/js/session.go`.
+- `Runtime.RunScript` is mutex-serialized in `internal/js/runtime.go` as a
+  safety net for direct callers.
+- `Tab.SetJSRuntime` wraps the runtime in a session and starts its owner
+  goroutine; storage/origin wiring runs on that owner.
+  `RunScriptOnOwner`/`SubmitOnOwner`/`CloseJSSession` are the tab's
+  owner-routed execution helpers (`internal/ui/browser.go`). The console
+  eval path, navigation teardown (close the old session before attaching
+  a new runtime), and tab close all use them.
+- `cmd/browser/main.go`: the coordinator's runtime configuration,
+  buffered-async replay, and script queue run inside `SubmitOnOwner`;
+  the legacy sync page-load path does the same; the repro workload uses
+  `RunScriptOnOwner`. Navigation (`CloseJSSession` → new runtime)
+  rejects lingering timers/fetch callbacks from the superseded document.
+
+Tests: `internal/js/session_test.go` (NewSessionWithRuntime wiring,
+SubmitAndWait ordering/closed, Eval value/error/closed) and
+`internal/ui/js_session_test.go` (lifecycle: no-session reject → eval →
+submit → close rejects; nil detach).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` still
+passes at the 10% threshold (no rendering changes in this PR).
+
+## PR6 — Structured NodeID mutation records
+
+Pure attribute/text DOM mutations no longer serialize the whole JS DOM to
+HTML and reparse it. The pipeline is now `JS mutation → MutationRecord →
+compact render-tree apply → invalidation → present`:
+
+- **`internal/js`** — `__onDOMChangedGo` builds the typed `DOMMutation`
+  record once and shares it between the batch and string callbacks. When a
+  typed batch callback is wired, `set-text`/`set-attribute` mutations skip
+  the full `serializeJSDOMToCache` + reparse entirely (new
+  `needsFullReparse` guard in `mutation.go`); structural mutations
+  (insert/remove/replace) and unclassified kinds still fall back to the
+  string callback.
+- **`internal/renderer`** — `MutationSink.Handle` now syncs the mutation
+  value into the render tree before invalidating: `ApplyTypedMutationValue`
+  sets `set-text` on the node (or its first text child, appending one when
+  an element had none) and updates the `Attrs` map for `set-attribute`.
+  Stale NodeIDs (superseded document, reparse) resolve to nothing and are
+  rejected safely. `ApplyMutationBatch` also drops the canvas renderer's
+  pointer-identity display-list cache on in-place mutation so the next
+  `UpdateViewport`/present rebuilds commands from the updated trees
+  instead of repainting stale content. The sink records the coalesced-
+  mutation metric per batch.
+- **`internal/ui`** — new `Tab.RefreshFromMutation` marshals the post-
+  mutation canvas refresh onto the Fyne main thread (no full reparse).
+- **`cmd/browser`** — both the coordinator and legacy paths wire the sink
+  with `RefreshFromMutation` as the present hook (previously the adapter
+  was nil, so the typed present was a no-op). The structural-mutation
+  coalescer stays as the fallback, and after each structural reparse the
+  NodeID lookup is re-snapshotted so subsequent typed mutations map to the
+  new render tree.
+
+Tests: `internal/js/serialize_test.go` (attribute/text mutations skip
+serialization when a batch callback exists; structural mutations still
+serialize; no-batch legacy keeps serializing), `internal/renderer/
+mutation_sink_test.go` (text/attr value sync, text-child append on empty
+element, stale-ID rejection, display-list cache drop after mutation), and
+`internal/ui/event_loop_input_test.go` (RefreshFromMutation refreshes the
+canvas once per call).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold (no layout-affecting rendering changes in this PR).
+
+Known limitations (also recorded in "Known limitations (after PR4)"):
+structural mutations still full-reparse, and computed styles are not yet
+recomputed on the typed path (class/style attribute changes show stale
+styling until the next reparse).
+
+## PR7 — Image invalidation batching
+
+Image-loaded callbacks are now coalesced into one render per window
+instead of one full style+layout+present cycle per completed image:
+
+- **`internal/renderer/imagebatch.go`** (new) — `ImageLoadBatcher`
+  accumulates completed image sources into a pending set; the first
+  `Signal` after an idle period arms a window timer (16ms), and when it
+  fires the whole set is handed to the flush callback in one call.
+  Duplicate sources (e.g. a load-goroutine signal racing the loader's
+  own callback) collapse to one entry. `Flush()` drains immediately
+  (tests/shutdown), `Close()` flushes pending work once and rejects
+  further signals, and `Metrics()` reports batches performed and
+  signals collapsed.
+- **`internal/renderer/renderer.go`** — `onImageLoaded` now only
+  signals the batcher; `flushImageBatch` applies the completed image
+  data to the current render tree, invalidates the object cache, and
+  triggers exactly one `Refresh()` for the whole batch, recording the
+  batch size via `RecordCoalescedImages`. A nil batcher (tests) falls
+  back to an immediate single-image flush.
+- **Metrics** — `FrameMetrics` gains `CoalescedImages`
+  (`IncCoalescedImages`), plumbed through `CanvasRenderer`/`Renderer`
+  and the `HTMLRenderer` interface, and the on-screen HUD now shows
+  `i<N>` on the coalesced line.
+
+Tests: `internal/renderer/imagebatch_test.go` (100-signal burst → one
+flush with all sources + metrics, separate windows → separate flushes,
+immediate `Flush`, `Close` drains-then-rejects, source dedup) and
+renderer integration tests (`TestRendererImageLoadsBatchSingleRender`:
+5 loads in a burst → exactly one refresh, no immediate present before
+the window, `CoalescedImages == 5`; `TestRendererImageLoadsFlushAppliesData`:
+img nodes carry loaded data after the flush).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold. `TestLinkedSVGImageGoosieVsBrowser` still fails but
+improved: at HEAD it times out with "images did not finish loading";
+with PR7 the image loads and settles and the remaining 34.6% diff is
+the pre-existing SVG rendering-fidelity gap (artifacts under
+`test/e2e/testdata/results/{goosie,browser}/linked_svg_image.png`).
+
+## PR8 — Non-blocking first paint
+
+`Coordinator.HandleDocumentEnd` no longer waits for every in-flight
+resource before first paint. Resources now split into two classes:
+
+- **Blocking** (stylesheets, classic/defer scripts) — shape the
+  document; `HandleDocumentEnd` still waits for these (with the
+  caller's deadline), so first paint is correct.
+- **Non-blocking** (images, fonts — primary and CSS-nested) — stream
+  in after first paint. Their fetches keep running; results fire via
+  `OnImage`/`OnFont` as they settle.
+
+Implementation in `internal/engine/documentloader/coordinator.go`:
+
+- A second `blockingInFlight` WaitGroup counts only blocking kinds
+  (`isBlockingKind`); `HandleDocumentEnd`'s initial and secondary-cycle
+  waits use it. `pendingN` (atomic mirror of `inFlight`) plus the
+  existing `asyncN` drive a new `allDone` channel.
+- After the main drain, buffered late results (images/fonts that
+  completed after `HandleDocumentEnd`) are emitted by a final drain
+  (`finalDrain`), still in document order, so every successfully
+  fetched resource fires its callback exactly once.
+- `EventLoad`/`EventDocumentEnd` are now gated on ALL work — async
+  scripts and non-blocking fetches — via `waitAllDoneAndFinalize`,
+  matching browser load semantics.
+
+Tests: `internal/engine/documentloader/coordinator_pr8_test.go`
+(HandleDocumentEnd returns while an image/font is still in flight;
+stylesheets still block; late image results emit in document order;
+EventLoad waits for images). Existing image/font tests updated to poll
+for callbacks that now arrive after `HandleDocumentEnd` (with
+race-safe accessors).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold (no rendering changes in this PR).
+
+## PR9 — Route mouse input through the engine event loop
+
+Mouse-move, click, and hyperlink-tap dispatch moved out of the
+renderer's canvas internals and into the per-tab engine loop — the last
+remaining event-loop wiring. The loop's `InputMouseMove` (latest-wins)
+and `InputClick` (FIFO) slots now carry real pointer input end to end:
+
+- **`internal/renderer/mouseinput.go`** (new) — UI-agnostic `MouseInput`
+  value (kind, widget-space X/Y, canvas-absolute X/Y, button, link URL)
+  and the `mouseInputPoster` callback. `CanvasRenderer`
+  (`SetMouseInputCallback`) and `Renderer` forward it; when a poster is
+  wired the canvas widgets (`InspectableContainer.MouseMoved`/`MouseDown`/
+  `TappedSecondary`, `TappableHyperlink.Tapped`) post immutable events
+  instead of dispatching inspect/context-menu/navigation directly. With
+  no poster they keep the legacy direct dispatch, so renderer-only
+  owners and tests are unaffected.
+- **`internal/engine/eventloop`** — `InputEvent` gains `URL` (link
+  navigation target) and `AbsX`/`AbsY` (canvas-absolute cursor for
+  context-menu placement), keeping the loop fyne-free.
+- **`internal/ui/browser.go`** — `Tab.postCanvasMouseInput` maps each
+  renderer `MouseInput` into the loop's matching slot and schedules the
+  single per-turn drain. The drain (`drainInputLoop`) now dispatches
+  `InputMouseMove` (throttled 80ms hover hit-test, element-delta
+  checked) and `InputClick` (left → hit-test + inspect select; button 2
+  → hit-test + dev-tools context menu at the absolute position; URL
+  present → navigate). The tab mirrors the latest drained scroll offset
+  (`lastViewportY`) so hit tests convert widget-space to content
+  coordinates, and the shared `handleInspect`/`handleContextMenu`
+  helpers serve both the direct canvas path and the drain.
+
+Tests: `internal/renderer/mouseinput_test.go` (poster routing carries
+positions/buttons/URLs and suppresses direct dispatch; no-poster
+fallback keeps dispatching), `internal/ui/event_loop_input_test.go`
+(mouse-move burst → one drained hover hit-test at the latest position
+with the coalesced delta; left-click hit-tests at the scroll-adjusted
+position and selects the element; right-click reaches the context menu;
+link taps navigate in FIFO order interleaved with clicks/keys).
+
+E2E visual verification: `TestScrollCoalescingGoosieVsBrowser` passes at
+the 10% threshold (no rendering changes in this PR).
 
 ## Remaining work
 
@@ -200,41 +523,19 @@ These are intentionally deferred because they require a larger
 architectural pass and were out of scope for the focused freeze
 fix:
 
-1. **Background engine + Fyne presentation split.** The renderer's
-   `doAndWait(RenderParsed(...))` still blocks the Fyne main thread
-   for the entire parse + style + layout + display-list build. The
-   targeted fix here only removed the nested `fyne.Do`; the heavy
-   work itself still runs on the UI thread during navigation and
-   mutations. The full fix moves parse/style/layout/display-list
-   construction to a background goroutine and reduces the
-   Fyne-thread work to a single `PresentFrame` call.
-2. **NodeID-based incremental mutations.** The mutation callback
-   still serializes the whole JS DOM to HTML and reparses it. The
-   full fix emits structured mutation records (NodeID + attr +
-   new value) and applies them through the existing
-   `StyleInvalidator` / `ReflowTracker` machinery. The targeted
-   fix here only added `FrameThrottler` so continuous mutations
-   are bounded.
-3. **Single image-callback owner.** `Renderer.loadImages`,
-   `CanvasRenderer.onImageLoaded`, and the image loader's
-   `SetOnLoadCallback` chain still all wire up separately. The
-   targeted fix here did not touch image completion; per-image
-   full-tree invalidation remains a problem on image-heavy pages.
-4. **Stream-the-main-response.** `FetchStreamWithContext` returns
+1. **Stream-the-main-response.** `FetchStreamWithContext` returns
    a stream, but the callers still do `io.ReadAll` into a string
    and re-parse twice (once for the streaming pass, once for the
    renderer's `html.Node`). The targeted fix here did not change
    this.
-5. **First-frame split for blocking vs non-blocking resources.**
-   `Coordinator.HandleDocumentEnd` still waits for every in-flight
-   resource (including images and fonts) before the first paint.
-6. **JS session queue for GUI tabs.** The GUI still uses
-   `js.NewRuntime()` directly rather than `js.Session`. Async
-   scripts, fetch callbacks, and timers can still touch Goja from
-   non-owner goroutines. The targeted fix here added a deadline
-   and a long-task metric, but the race-condition surface is not
-   fully closed.
-7. **Visual verification.** The changes touch user-visible
+2. **Typed-path style recompute.** The PR6 typed path syncs text and
+   attribute values but does not yet re-run style computation for
+   the mutated subtree, so class/`style=` changes keep stale
+   styling until the next structural reparse.
+3. **Residual image-callback owner.** `CanvasRenderer.onImageLoaded`
+   still exists alongside the renderer's batched owner and can win
+   the loader callback slot if `SetWindow` runs after a present.
+4. **Visual verification.** The changes touch user-visible
    scroll behavior and the on-screen HUD. Visual verification
    against Chromium baselines is required per the project's
    `AGENTS.md` policy. The scroll-coalescing path is now covered by
@@ -243,5 +544,5 @@ fix:
    pre-existing renderer-fidelity differences that also fail on
    `main` (`test_105_background`, `test_117/118/119_semantic`,
    `TestHTML5SemanticLayoutGoosieVsBrowser` ~12.9%,
-   `TestLinkedSVGImageGoosieVsBrowser` image-settle timeout); the HUD
+   `TestLinkedSVGImageGoosieVsBrowser` 34.6% SVG-fidelity diff); the HUD
    still lacks a golden baseline.

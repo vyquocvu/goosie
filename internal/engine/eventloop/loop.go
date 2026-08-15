@@ -251,6 +251,25 @@ func (l *Loop) handleRenderResult(result RenderResult) {
 	l.metrics.framesPresented.Add(1)
 }
 
+// ProcessPendingResults processes any completed render results already
+// queued via SubmitRenderResult without blocking, applying the same
+// generation and cancellation checks as Run. It returns the number of
+// results processed. Integrations that present synchronously on their own
+// thread (e.g. a UI thread without a dedicated worker goroutine) call
+// this after submitting a result so presentation runs on that thread.
+func (l *Loop) ProcessPendingResults() int {
+	processed := 0
+	for {
+		select {
+		case result := <-l.renderResults:
+			l.handleRenderResult(result)
+			processed++
+		default:
+			return processed
+		}
+	}
+}
+
 // Run processes completed render results until ctx is cancelled or Close is
 // called. It is safe to run on a caller-owned goroutine.
 func (l *Loop) Run(ctx context.Context) error {

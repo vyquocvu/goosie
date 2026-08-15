@@ -41,12 +41,19 @@ type Viewport struct {
 // InputEvent is an immutable input value posted to the engine loop. Scroll,
 // mouse-move, and resize events are coalesced; click and key events are FIFO.
 type InputEvent struct {
-	Type      InputEventType
-	Viewport  Viewport
-	X, Y      float32
-	Button    int
-	Key       string
-	Timestamp time.Time
+	Type     InputEventType
+	Viewport Viewport
+	X, Y     float32
+	Button   int
+	Key      string
+	// URL carries the navigation target for a click on a hyperlink
+	// (InputClick with a resolved href). Empty for plain clicks.
+	URL string
+	// AbsX, AbsY carry the canvas-absolute cursor position for a click,
+	// used to place UI anchored at the pointer (e.g. the dev-tools
+	// context menu). UI-independent floats keep the loop fyne-free.
+	AbsX, AbsY float32
+	Timestamp  time.Time
 }
 
 // Generation identifies the engine state used to build a frame.

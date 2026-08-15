@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/engine/navigation"
 )
@@ -109,11 +110,21 @@ func TestSecondaryResource_FontFace(t *testing.T) {
 	if len(css) != 1 {
 		t.Fatalf("css results = %d, want 1", len(css))
 	}
-	if len(fonts) != 1 {
-		t.Fatalf("font results = %d, want 1", len(fonts))
+	// PR8: the CSS-nested font is dispatched during the secondary
+	// cycle but not waited on — its callback arrives via the final
+	// drain once the fetch settles. Read under mu: the final drain
+	// runs on the coordinator's goroutine.
+	if !waitForLocked(t, &mu, func() int { return len(fonts) }) {
+		t.Fatalf("font results = 0, want 1")
 	}
-	if !strings.HasSuffix(fonts[0].Resolved, "/myfont.woff2") {
-		t.Errorf("font resolved = %q, want suffix /myfont.woff2", fonts[0].Resolved)
+	mu.Lock()
+	fontResults := append([]FontResult(nil), fonts...)
+	mu.Unlock()
+	if len(fontResults) != 1 {
+		t.Fatalf("font results = %d, want 1", len(fontResults))
+	}
+	if !strings.HasSuffix(fontResults[0].Resolved, "/myfont.woff2") {
+		t.Errorf("font resolved = %q, want suffix /myfont.woff2", fontResults[0].Resolved)
 	}
 	if srv.fetchCount("/myfont.woff2") != 1 {
 		t.Errorf("font fetch count = %d, want 1", srv.fetchCount("/myfont.woff2"))
@@ -161,8 +172,18 @@ func TestSecondaryResource_ImageInDeclaration(t *testing.T) {
 	if err := coord.HandleDocumentEnd(context.Background()); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if len(imgs) != 1 {
-		t.Fatalf("image results = %d, want 1", len(imgs))
+	// PR8: the CSS-nested image is dispatched during the secondary
+	// cycle but not waited on — its callback arrives via the final
+	// drain once the fetch settles. Read under mu: the final drain
+	// runs on the coordinator's goroutine.
+	if !waitForLocked(t, &mu, func() int { return len(imgs) }) {
+		t.Fatalf("image results = 0, want 1")
+	}
+	mu.Lock()
+	imgCount := len(imgs)
+	mu.Unlock()
+	if imgCount != 1 {
+		t.Fatalf("image results = %d, want 1", imgCount)
 	}
 	if srv.fetchCount("/bg.png") != 1 {
 		t.Errorf("image fetch count = %d, want 1", srv.fetchCount("/bg.png"))
@@ -316,8 +337,17 @@ func TestFontResult_HasSource(t *testing.T) {
 	if err := coord.HandleDocumentEnd(context.Background()); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	if len(fonts) != 1 {
-		t.Fatalf("fonts = %d, want 1", len(fonts))
+	// PR8: fonts are non-blocking — the callback arrives via the final
+	// drain after HandleDocumentEnd returns. Read under mu: the final
+	// drain runs on the coordinator's goroutine.
+	if !waitForLocked(t, &mu, func() int { return len(fonts) }) {
+		t.Fatalf("fonts = 0, want 1")
+	}
+	mu.Lock()
+	fontResults := append([]FontResult(nil), fonts...)
+	mu.Unlock()
+	if len(fontResults) != 1 {
+		t.Fatalf("fonts = %d, want 1", len(fontResults))
 	}
 	if string(fonts[0].Source) != "WOFF2-DATA" {
 		t.Errorf("font source = %q, want WOFF2-DATA", fonts[0].Source)
@@ -331,6 +361,25 @@ func TestFontResult_HasSource(t *testing.T) {
 //   - resourceStylesheetKind / resourceFontKind / resourceImageKind
 //     mirror css.ResourceKind constants
 // --------------------------------------------------------------------------
+
+// waitForLocked polls a count guarded by mu until it is non-zero or the
+// deadline passes. PR8: non-blocking image/font callbacks arrive after
+// HandleDocumentEnd returns (via the final drain on the coordinator's
+// goroutine), so tests must wait under the mutex.
+func waitForLocked(t *testing.T, mu *sync.Mutex, count func() int) bool {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := count()
+		mu.Unlock()
+		if n > 0 {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
 
 // parseCSS / extractFromSheet are convenience aliases used throughout
 // the secondary-resource tests below.

@@ -93,15 +93,20 @@ type Coordinator struct {
 	cb       Callbacks
 	rec      *metrics.Recorder
 
-	mu        sync.Mutex
-	closed    bool
-	nextPos   int              // next Position to assign
-	results   []bufferedResult // results completed in any order, drained at HandleDocumentEnd
-	inFlight  sync.WaitGroup   // counts active fetches
-	asyncN    int32            // active async script callbacks
-	asyncDone chan struct{}    // closed when asyncN hits 0 (after HandleDocumentEnd)
-	drainDone bool             // true after HandleDocumentEnd has run
-	finalized chan struct{}    // closed when HandleDocumentEnd / Cancel completes
+	mu       sync.Mutex
+	closed   bool
+	nextPos  int              // next Position to assign
+	results  []bufferedResult // results completed in any order, drained at HandleDocumentEnd
+	inFlight sync.WaitGroup   // counts ALL active fetches (blocking + non-blocking)
+	// blockingInFlight counts stylesheet + classic/defer script fetches
+	// — the resources first paint cannot do without. Images and fonts
+	// are deliberately excluded: they stream in after first paint (PR8).
+	blockingInFlight sync.WaitGroup
+	pendingN         int32         // atomic mirror of inFlight; drives allDone
+	asyncN           int32         // active async script callbacks
+	allDone          chan struct{} // closed when asyncN==0 && pendingN==0 (after HandleDocumentEnd)
+	drainDone        bool          // true after HandleDocumentEnd has run
+	finalized        chan struct{} // closed when HandleDocumentEnd / Cancel completes
 
 	// M7: depth tracking for nested CSS @import chains. Each
 	// EnqueueSecondary of a stylesheet kind increments cssDepthInt
@@ -161,7 +166,7 @@ func New(opts Options) (*Coordinator, error) {
 		cb:             opts.Callbacks,
 		rec:            opts.Recorder,
 		finalized:      make(chan struct{}),
-		asyncDone:      make(chan struct{}),
+		allDone:        make(chan struct{}),
 		maxCSSDepth:    opts.MaxCSSImportDepth,
 		baseURLByDepth: map[int]string{},
 	}
@@ -238,10 +243,10 @@ func (c *Coordinator) handleResource(r Resource, preservePosition bool) {
 		c.nextPos++
 	}
 	// M5: external async scripts are tracked via asyncN, NOT inFlight.
-	// HandleDocumentEnd waits on inFlight; we don't want async fetches
-	// that may still be in flight at drain time to block document_end.
-	// asyncN is incremented here (when the fetch starts) and
-	// decremented by fireAsync after the callback returns. This
+	// HandleDocumentEnd waits on blockingInFlight; we don't want async
+	// fetches that may still be in flight at drain time to block
+	// document_end. asyncN is incremented here (when the fetch starts)
+	// and decremented by fireAsync after the callback returns. This
 	// ensures the load event waits for async fetches that are still
 	// pending at drain time, not just those that have begun executing.
 	isAsyncExternalScript := !r.Inline && r.Kind == KindScript && r.ScriptMode == ScriptModeAsync
@@ -249,6 +254,10 @@ func (c *Coordinator) handleResource(r Resource, preservePosition bool) {
 		atomic.AddInt32(&c.asyncN, 1)
 	} else {
 		c.inFlight.Add(1)
+		atomic.AddInt32(&c.pendingN, 1)
+		if isBlockingKind(r.Kind) {
+			c.blockingInFlight.Add(1)
+		}
 	}
 	c.mu.Unlock()
 
@@ -358,10 +367,12 @@ func (c *Coordinator) HandleDocumentEnd(ctx context.Context) error {
 	if c.rec != nil {
 		c.rec.BeginPhase(metrics.PhaseParse)
 	}
-	// Wait for in-flight fetches, but respect the caller's deadline.
+	// Wait for blocking fetches (stylesheets, classic/defer scripts)
+	// only — images and fonts stream in after first paint (PR8) — but
+	// respect the caller's deadline.
 	done := make(chan struct{})
 	go func() {
-		c.inFlight.Wait()
+		c.blockingInFlight.Wait()
 		close(done)
 	}()
 	var waitErr error
@@ -394,10 +405,11 @@ func (c *Coordinator) HandleDocumentEnd(ctx context.Context) error {
 			break
 		}
 		c.flushPendingSecondaries()
-		// Wait for the freshly-dispatched fetches to settle.
+		// Wait for the freshly-dispatched blocking fetches to settle;
+		// non-blocking (image/font) secondaries keep streaming.
 		done2 := make(chan struct{})
 		go func() {
-			c.inFlight.Wait()
+			c.blockingInFlight.Wait()
 			close(done2)
 		}()
 		select {
@@ -430,15 +442,16 @@ func (c *Coordinator) HandleDocumentEnd(ctx context.Context) error {
 		c.cb.OnLifecycle(EventDOMContentLoaded)
 	}
 
-	// If no async scripts are in flight (zero counter), fire EventLoad
-	// and EventDocumentEnd immediately. Otherwise spawn a watcher that
-	// fires them when async drains. HandleDocumentEnd returns
-	// promptly either way; callers that want to wait for load can
-	// poll Snapshot().Lifecycle or wait on Done() / a custom signal.
-	if atomic.LoadInt32(&c.asyncN) == 0 {
+	// Fire EventLoad and EventDocumentEnd once ALL work has settled:
+	// async scripts (asyncN), and non-blocking image/font fetches that
+	// are still in flight (pendingN). HandleDocumentEnd returns promptly
+	// either way; callers that want to wait for load can poll
+	// Snapshot().Lifecycle or wait on Done() / a custom signal.
+	if atomic.LoadInt32(&c.asyncN) == 0 && atomic.LoadInt32(&c.pendingN) == 0 {
+		c.finalDrain()
 		c.fireLoadEvents()
 	} else {
-		go c.waitAsyncAndFireLoad()
+		go c.waitAllDoneAndFinalize()
 	}
 
 	if c.rec != nil {
@@ -458,6 +471,58 @@ func (c *Coordinator) pendingCount() int {
 	return len(c.pendingSecondaries)
 }
 
+// isBlockingKind reports whether a resource must complete before first
+// paint. Stylesheets and scripts shape the document; images and fonts
+// are non-blocking and stream in afterwards (PR8) — their callbacks
+// fire as they arrive and the final drain + load events wait for them.
+func isBlockingKind(kind ResourceKind) bool {
+	switch kind {
+	case KindCSS, KindScript:
+		return true
+	default:
+		return false
+	}
+}
+
+// notePendingDone decrements the in-flight fetch counter and closes
+// allDone when no work remains (fetches + async scripts) and
+// HandleDocumentEnd has run.
+func (c *Coordinator) notePendingDone() {
+	n := atomic.AddInt32(&c.pendingN, -1)
+	c.maybeCloseAllDone(n == 0 && atomic.LoadInt32(&c.asyncN) == 0)
+}
+
+// maybeCloseAllDone closes allDone once every resource has settled and
+// HandleDocumentEnd has finished its main drain. Called from
+// notePendingDone and fireAsync. The drainDone guard keeps the channel
+// from closing before the main drain has run.
+func (c *Coordinator) maybeCloseAllDone(workZero bool) {
+	if !workZero {
+		return
+	}
+	c.mu.Lock()
+	drained := c.drainDone
+	c.mu.Unlock()
+	if drained {
+		select {
+		case <-c.allDone:
+			// already closed
+		default:
+			close(c.allDone)
+		}
+	}
+}
+
+// finalDrain emits any results buffered after HandleDocumentEnd's main
+// drain — non-blocking images/fonts that completed late. Runs once all
+// work has settled so every successfully fetched resource still fires
+// its callback exactly once, in document order.
+func (c *Coordinator) finalDrain() {
+	c.mu.Lock()
+	c.drainLocked()
+	c.mu.Unlock()
+}
+
 // fireLoadEvents emits EventLoad and EventDocumentEnd. Safe to call
 // from any goroutine; the callbacks are read-only via c.cb.
 func (c *Coordinator) fireLoadEvents() {
@@ -468,17 +533,19 @@ func (c *Coordinator) fireLoadEvents() {
 	c.cb.OnLifecycle(EventDocumentEnd)
 }
 
-// waitAsyncAndFireLoad blocks until asyncN reaches zero, then fires
-// EventLoad and EventDocumentEnd. Also returns early if the
-// coordinator is cancelled or the navigation context expires.
-func (c *Coordinator) waitAsyncAndFireLoad() {
+// waitAllDoneAndFinalize blocks until every resource (async scripts,
+// images, fonts) has settled, emits any results buffered after the main
+// drain, then fires EventLoad and EventDocumentEnd. Returns early if
+// the navigation context expires.
+func (c *Coordinator) waitAllDoneAndFinalize() {
 	select {
-	case <-c.asyncDone:
-		// all async callbacks completed
+	case <-c.allDone:
+		// all async callbacks and fetches completed
 	case <-c.navCtx.Done():
 		// navigation cancelled; skip load events
 		return
 	}
+	c.finalDrain()
 	c.fireLoadEvents()
 }
 
@@ -514,16 +581,22 @@ func (c *Coordinator) skip(r Resource, reason string) {
 // fetch for one resource. Extracted from HandleResource so the
 // goroutine bookkeeping stays in one place.
 //
-// For classic + defer scripts (and CSS, images), the in-flight slot
-// is released via the deferred inFlight.Done() below. External async
-// scripts do NOT participate in inFlight (HandleResource skips the
-// Add for them); their completion is tracked via asyncN inside
+// For classic + defer scripts (and CSS, images, fonts), the in-flight
+// slot is released via the deferred inFlight.Done() below. External
+// async scripts do NOT participate in inFlight (HandleResource skips
+// the Add for them); their completion is tracked via asyncN inside
 // fireAsync. Inline async scripts still participate in inFlight
 // because they don't have an external fetch to await.
 func (c *Coordinator) processResource(r Resource) {
 	isAsyncExternalScript := !r.Inline && r.Kind == KindScript && r.ScriptMode == ScriptModeAsync
 	if !isAsyncExternalScript {
-		defer c.inFlight.Done()
+		defer func() {
+			c.inFlight.Done()
+			c.notePendingDone()
+		}()
+		if isBlockingKind(r.Kind) {
+			defer c.blockingInFlight.Done()
+		}
 	}
 
 	// Inline scripts: emit immediately, no fetch.
@@ -729,19 +802,7 @@ func (c *Coordinator) buffer(position int, r bufferedResult) {
 func (c *Coordinator) fireAsync(r ScriptResult) {
 	defer func() {
 		n := atomic.AddInt32(&c.asyncN, -1)
-		if n == 0 {
-			c.mu.Lock()
-			drained := c.drainDone
-			c.mu.Unlock()
-			if drained {
-				select {
-				case <-c.asyncDone:
-					// already closed
-				default:
-					close(c.asyncDone)
-				}
-			}
-		}
+		c.maybeCloseAllDone(n == 0 && atomic.LoadInt32(&c.pendingN) == 0)
 	}()
 	if c.cb.OnScript != nil {
 		c.cb.OnScript(r)

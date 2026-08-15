@@ -81,12 +81,14 @@ func TestFrameMetrics_Coalesced(t *testing.T) {
 	m.IncCoalescedScroll(5)
 	m.IncCoalescedScroll(0)
 	m.IncCoalescedMutations(3)
+	m.IncCoalescedImages(7)
 	m.IncStaleFramesDropped()
 	m.IncStaleFramesDropped()
 
 	s := m.Snapshot()
 	assert.Equal(t, int64(5), s.CoalescedScrollEvents)
 	assert.Equal(t, int64(3), s.CoalescedMutations)
+	assert.Equal(t, int64(7), s.CoalescedImages)
 	assert.Equal(t, int64(2), s.StaleFramesDropped)
 }
 
