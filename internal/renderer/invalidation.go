@@ -115,18 +115,37 @@ func (r *Renderer) PresentFromMutationBatch(adapter *FyneAdapter) bool {
 		return false
 	}
 	commands := convertDisplayCommands(r.chunkedDisplay.commands.Commands())
-	painter, err := NewIncrementalPainter(width, height)
-	if err != nil || painter == nil {
+	chunks := r.chunkedDisplay.chunks.Chunks()
+	if len(commands) == 0 || len(chunks) == 0 {
+		// Nothing painted through the chunk pipeline yet; a full present
+		// path owns the screen. Skip rather than allocate a raster frame
+		// to repaint nothing.
 		return false
 	}
-	defer painter.Close()
-	chunks := r.chunkedDisplay.chunks.Chunks()
-	img, err := painter.PaintDirty(chunks, commands)
+
+	// The painter (and its full-size raster buffer) is reused across
+	// mutation batches and rebuilt only when the canvas size changes.
+	r.mutationPainterMu.Lock()
+	defer r.mutationPainterMu.Unlock()
+	if r.mutationPainter == nil || r.mutationPainterW != width || r.mutationPainterH != height {
+		if r.mutationPainter != nil {
+			r.mutationPainter.Close()
+		}
+		painter, err := NewIncrementalPainter(width, height)
+		if err != nil || painter == nil {
+			r.mutationPainter = nil
+			return false
+		}
+		r.mutationPainter = painter
+		r.mutationPainterW = width
+		r.mutationPainterH = height
+	}
+	img, err := r.mutationPainter.PaintDirty(chunks, commands)
 	if err != nil || img == nil {
 		return false
 	}
 	r.chunkedDisplay.MarkAllClean()
-	painter.Present(adapter)
+	r.mutationPainter.Present(adapter)
 	return true
 }
 
@@ -370,15 +389,10 @@ func (ile *IncrementalLayoutEngine) rebuildSubtree(node *RenderNode) {
 		return
 	}
 	le := ile.LayoutEngine
-	le.nodeMapMu.Lock()
-	if le.nodeMap == nil {
-		le.nodeMap = make(map[int64]*LayoutBox)
-	}
-	le.nodeMapMu.Unlock()
+	le.mu.Lock()
+	defer le.mu.Unlock()
 	_ = le.buildLayoutBox(node, 0, 0, le.canvasWidth, nil,
-		NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize),
-		NewFlexLayoutEngine(le.fontMetrics),
-		NewGridLayoutEngine(le.fontMetrics),
+		le.inlineEngine, le.flexEngine, le.gridEngine,
 	)
 }
 

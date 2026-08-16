@@ -15,6 +15,24 @@ type FontMetrics struct {
 	fyneAvailable bool
 	checkedFyne   bool
 	mu            sync.RWMutex
+
+	// measureCache caches MeasureText results. Layout measures the same
+	// words repeatedly across passes; the cache is keyed on every input
+	// that affects the result. Bounded: when full, it is cleared (a simple
+	// reset keeps hot entries cheap to repopulate).
+	measureCache map[measureKey]TextMetrics
+}
+
+// measureCacheMax bounds the measurement cache. A text-heavy page measures a
+// few thousand distinct words; 16k entries ≈ a few MB worst case.
+const measureCacheMax = 16 << 10
+
+// measureKey is a comparable key covering every MeasureText input.
+type measureKey struct {
+	text          string
+	fontSize      float32
+	style         fyne.TextStyle
+	letterSpacing float32
 }
 
 // NewFontMetrics creates a new FontMetrics instance
@@ -57,6 +75,14 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 		fm.mu.Unlock()
 	}
 
+	key := measureKey{text: text, fontSize: fontSize, style: style, letterSpacing: letterSpacing}
+	fm.mu.RLock()
+	cached, ok := fm.measureCache[key]
+	fm.mu.RUnlock()
+	if ok {
+		return cached
+	}
+
 	var width, height float32
 
 	if available {
@@ -80,12 +106,24 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 	ascent := fontSize * 0.75
 	descent := fontSize * 0.25
 
-	return TextMetrics{
+	result := TextMetrics{
 		Width:   width,
 		Height:  height,
 		Ascent:  ascent,
 		Descent: descent,
 	}
+
+	fm.mu.Lock()
+	if fm.measureCache == nil {
+		fm.measureCache = make(map[measureKey]TextMetrics)
+	}
+	if len(fm.measureCache) >= measureCacheMax {
+		clear(fm.measureCache)
+	}
+	fm.measureCache[key] = result
+	fm.mu.Unlock()
+
+	return result
 }
 
 // estimateTextWidth provides a better estimation for text width

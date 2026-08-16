@@ -82,6 +82,14 @@ type Renderer struct {
 	csp   *net.CSPPolicy
 	cspMu sync.RWMutex
 
+	// mutationPainter is the cached IncrementalPainter (with its full-size
+	// raster buffer) reused across PresentFromMutationBatch calls; it is
+	// rebuilt only when the canvas size changes.
+	mutationPainter   *IncrementalPainter
+	mutationPainterMu sync.Mutex
+	mutationPainterW  int
+	mutationPainterH  int
+
 	Logger  *slog.Logger
 	metrics *RenderMetrics
 }
@@ -239,11 +247,11 @@ func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.St
 	if recorder != nil {
 		recorder.BeginPhase(metrics.PhaseStyle)
 	}
-	// Apply styles
-	renderTreeCopy := renderTree.Clone()
+	// Apply styles. The tree was built locally in this frame and has no
+	// other holders, so it is styled in place without a working copy.
 	if sheet != nil {
 		styleManager := NewStyleManagerWithViewport(sheet, width, height)
-		styleManager.ApplyStyles(renderTreeCopy)
+		styleManager.ApplyStyles(renderTree)
 	}
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseStyle)
@@ -257,9 +265,10 @@ func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.St
 		recorder.BeginPhase(metrics.PhaseLayout)
 	}
 	// Perform layout
-	layoutEngine := NewLayoutEngine(width, height)
+	layoutEngine := getLayoutEngine(width, height)
+	defer putLayoutEngine(layoutEngine)
 	layoutStart := time.Now()
-	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
+	layoutTree := layoutEngine.ComputeLayout(renderTree)
 	r.metrics.RecordComputeLayout(time.Since(layoutStart))
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseLayout)
@@ -280,7 +289,7 @@ func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.St
 	if seq != r.buildSeq.Load() {
 		return nil
 	}
-	r.currentRenderTree = renderTreeCopy
+	r.currentRenderTree = renderTree
 	r.currentLayoutTree = layoutTree
 	r.dirty = false
 	r.lastRecorder = recorder
@@ -516,7 +525,8 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 	r.stylesheetMu.RUnlock()
 
 	// Perform layout.
-	layoutEngine := NewLayoutEngine(width, height)
+	layoutEngine := getLayoutEngine(width, height)
+	defer putLayoutEngine(layoutEngine)
 	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
 	renderTree = renderTreeCopy
 
@@ -690,7 +700,8 @@ func (r *Renderer) Refresh() {
 		styleManager.ApplyStyles(renderTreeCopy)
 
 		// Perform layout
-		layoutEngine := NewLayoutEngine(width, height)
+		layoutEngine := getLayoutEngine(width, height)
+		defer putLayoutEngine(layoutEngine)
 		r.currentLayoutTree = layoutEngine.ComputeLayout(renderTreeCopy)
 		r.currentRenderTree = renderTreeCopy
 

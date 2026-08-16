@@ -18,6 +18,22 @@ func TestTypedMutationEndToEndNoFullReparse(t *testing.T) {
 	lookup.Snapshot(r.GetRoot())
 	adapter := NewFyneAdapter()
 	sink := NewMutationSinkWithAdapter(r, lookup, adapter)
+
+	// The chunk pipeline is producer-owned: seed it with the document's
+	// commands and one dirty chunk so the present path has real work.
+	// Without this, PresentFromMutationBatch correctly presents nothing.
+	r.chunkedDisplay.commands.Add(DisplayCommand{
+		Kind: CmdRect,
+		Rect: RectCommand{Bounds: RectF{X: 0, Y: 0, W: 200, H: 200}},
+	})
+	r.chunkedDisplay.chunks.Add(PaintChunk{
+		Owner:  LayoutID(100),
+		Start:  0,
+		End:    1,
+		Bounds: RectF{X: 0, Y: 0, W: 200, H: 200},
+	})
+	r.chunkedDisplay.InvalidateByLayoutID(LayoutID(100))
+
 	rt := js.NewRuntime()
 	rt.SetDOMMutationBatchCallback(sink.Handle)
 	rt.SetHTMLContent(page)

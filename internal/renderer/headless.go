@@ -39,17 +39,19 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height in
 		return image.NewRGBA(image.Rect(0, 0, width, height)), nil
 	}
 
-	renderTreeCopy := renderTree.Clone()
+	// The tree was just built and has no other holders, so styles are
+	// applied in place — no working copy is needed.
 	if stylesheet != nil && len(stylesheet.Rules) > 0 {
 		styleManager := NewStyleManagerWithViewport(stylesheet, w, h)
-		styleManager.ApplyStyles(renderTreeCopy)
+		styleManager.ApplyStyles(renderTree)
 	}
 
-	layoutEngine := NewLayoutEngine(w, h)
-	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
+	layoutEngine := getLayoutEngine(w, h)
+	defer putLayoutEngine(layoutEngine)
+	layoutTree := layoutEngine.ComputeLayout(renderTree)
 
 	dlb := NewDisplayListBuilder()
-	displayList := dlb.Build(layoutTree, renderTreeCopy)
+	displayList := dlb.Build(layoutTree, renderTree)
 	SortByZIndex(displayList)
 
 	cmds := convertPaintCommands(displayList.Commands)

@@ -26,26 +26,38 @@ type LayoutEngine struct {
 	// fontMetrics provides accurate text measurement
 	fontMetrics *FontMetrics
 
-	// We create layout engines per compute cycle to be fully thread safe.
-	// We no longer keep them as state.
+	// Sub-engines are stateless between computations, so one set is created
+	// per engine and reused across ComputeLayout calls. All uses are
+	// serialized by mu (rebuildSubtree also takes mu).
+	inlineEngine *InlineLayoutEngine
+	flexEngine   *FlexLayoutEngine
+	gridEngine   *GridLayoutEngine
 }
 
 // NewLayoutEngine creates a new layout engine
 func NewLayoutEngine(width, height float32) *LayoutEngine {
 	defaultSize := float32(16.0)
 	fontMetrics := NewFontMetrics(defaultSize)
-	return &LayoutEngine{
+	le := &LayoutEngine{
 		canvasWidth:     width,
 		canvasHeight:    height,
 		defaultFontSize: defaultSize,
 		lineHeight:      1.5,
 		nodeMap:         make(map[int64]*LayoutBox),
 		fontMetrics:     fontMetrics,
+		inlineEngine:    NewInlineLayoutEngine(fontMetrics, defaultSize),
+		flexEngine:      NewFlexLayoutEngine(fontMetrics),
+		gridEngine:      NewGridLayoutEngine(fontMetrics),
 	}
+	le.flexEngine.minContentFn = le.minContentSize
+	return le
 }
 
-// Layout performs layout calculations on the render tree and returns a layout tree
-// This is the new API that produces a separate layout tree
+// ComputeLayout lays out the render tree and returns a layout tree. Layout
+// always recomputes in full: callers mutate render trees in place (tests and
+// the typed-mutation path), so no same-pointer caching is done here. Skipping
+// work for unchanged documents is the caller's (or the incremental engine's)
+// responsibility.
 func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
 	le.mu.Lock()
 	defer le.mu.Unlock()
@@ -54,19 +66,49 @@ func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
 		return nil
 	}
 
-	// Clear previous mappings
+	// Clear previous mappings, reusing the map's storage
 	le.nodeMapMu.Lock()
-	le.nodeMap = make(map[int64]*LayoutBox)
+	clear(le.nodeMap)
 	le.nodeMapMu.Unlock()
 
 	// Build layout tree from render tree
-	inlineLayoutEngine := NewInlineLayoutEngine(le.fontMetrics, le.defaultFontSize)
-	flexLayoutEngine := NewFlexLayoutEngine(le.fontMetrics)
-	flexLayoutEngine.minContentFn = le.minContentSize
-	gridLayoutEngine := NewGridLayoutEngine(le.fontMetrics)
-	layoutRoot := le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+	return le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil, le.inlineEngine, le.flexEngine, le.gridEngine)
+}
 
-	return layoutRoot
+// layoutEnginePool recycles LayoutEngines across build cycles. Engines are
+// per-cycle for thread safety (concurrent builds never share one), but their
+// maps, sub-engines, and FontMetrics measurement caches are worth reusing.
+var layoutEnginePool = sync.Pool{
+	New: func() any { return NewLayoutEngine(0, 0) },
+}
+
+// getLayoutEngine returns a pooled engine reset for the given canvas size.
+func getLayoutEngine(width, height float32) *LayoutEngine {
+	le := layoutEnginePool.Get().(*LayoutEngine)
+	le.reset(width, height)
+	return le
+}
+
+// putLayoutEngine returns an engine to the pool, dropping cached references.
+func putLayoutEngine(le *LayoutEngine) {
+	if le == nil {
+		return
+	}
+	le.reset(0, 0)
+	layoutEnginePool.Put(le)
+}
+
+// reset reinitializes an engine (pool get/put and size changes). It drops
+// all box mappings so a pooled engine retains nothing from the previous
+// document.
+func (le *LayoutEngine) reset(width, height float32) {
+	le.mu.Lock()
+	le.canvasWidth = width
+	le.canvasHeight = height
+	le.mu.Unlock()
+	le.nodeMapMu.Lock()
+	le.nodeMap = make(map[int64]*LayoutBox)
+	le.nodeMapMu.Unlock()
 }
 
 // buildLayoutBox creates a LayoutBox for a RenderNode and computes its layout
