@@ -6,69 +6,124 @@ import (
 	"strings"
 )
 
+// maxCalcDepth bounds evaluator recursion. Legitimate calc nesting is a
+// handful of levels; the cap is a safety net against pathological input.
+const maxCalcDepth = 24
+
 // evalCalcExpr evaluates a CSS calc/min/max/clamp expression and returns px value.
 // pct is the containing-block dimension used for % resolution.
 func evalCalcExpr(expr string, fontSize, vw, vh, pct float32) float32 {
+	return evalCalc(expr, fontSize, vw, vh, pct, 0)
+}
+
+func evalCalc(expr string, fontSize, vw, vh, pct float32, depth int) float32 {
+	if depth > maxCalcDepth {
+		return 0
+	}
 	expr = strings.TrimSpace(expr)
 	lower := strings.ToLower(expr)
-	if strings.HasPrefix(lower, "calc(") && strings.HasSuffix(expr, ")") {
-		inner := expr[5 : len(expr)-1]
-		return evalCalcAddSub(inner, fontSize, vw, vh, pct)
-	}
-	if strings.HasPrefix(lower, "min(") && strings.HasSuffix(expr, ")") {
-		args := splitCalcCommas(expr[4 : len(expr)-1])
-		best := float32(math.MaxFloat32)
-		for _, a := range args {
-			v := evalCalcExpr(strings.TrimSpace(a), fontSize, vw, vh, pct)
-			if v < best {
-				best = v
+	switch {
+	case strings.HasPrefix(lower, "calc("):
+		if inner, ok := balancedInterior(expr); ok {
+			return evalCalcAddSub(inner, fontSize, vw, vh, pct, depth+1)
+		}
+		return 0
+	case strings.HasPrefix(lower, "min("):
+		if inner, ok := balancedInterior(expr); ok {
+			best := float32(math.MaxFloat32)
+			for _, a := range splitCalcCommas(inner) {
+				if v := evalCalc(strings.TrimSpace(a), fontSize, vw, vh, pct, depth+1); v < best {
+					best = v
+				}
+			}
+			return best
+		}
+		return 0
+	case strings.HasPrefix(lower, "max("):
+		if inner, ok := balancedInterior(expr); ok {
+			best := float32(-math.MaxFloat32)
+			for _, a := range splitCalcCommas(inner) {
+				if v := evalCalc(strings.TrimSpace(a), fontSize, vw, vh, pct, depth+1); v > best {
+					best = v
+				}
+			}
+			return best
+		}
+		return 0
+	case strings.HasPrefix(lower, "clamp("):
+		if inner, ok := balancedInterior(expr); ok {
+			args := splitCalcCommas(inner)
+			if len(args) == 3 {
+				minV := evalCalc(strings.TrimSpace(args[0]), fontSize, vw, vh, pct, depth+1)
+				val := evalCalc(strings.TrimSpace(args[1]), fontSize, vw, vh, pct, depth+1)
+				maxV := evalCalc(strings.TrimSpace(args[2]), fontSize, vw, vh, pct, depth+1)
+				if val < minV {
+					return minV
+				}
+				if val > maxV {
+					return maxV
+				}
+				return val
 			}
 		}
-		return best
+		return 0
 	}
-	if strings.HasPrefix(lower, "max(") && strings.HasSuffix(expr, ")") {
-		args := splitCalcCommas(expr[4 : len(expr)-1])
-		best := float32(-math.MaxFloat32)
-		for _, a := range args {
-			v := evalCalcExpr(strings.TrimSpace(a), fontSize, vw, vh, pct)
-			if v > best {
-				best = v
-			}
+
+	// Anything that still looks like a function call here is malformed
+	// (unterminated or carrying trailing tokens, e.g. fragments produced by
+	// shorthand splitting). Never hand it back to parseLength: isCalcExpr
+	// matches on the prefix alone, so the same string would be redispatched
+	// here forever (the github.com stack overflow). Evaluate the interior
+	// best-effort instead.
+	if isCalcExpr(expr) {
+		if inner, ok := balancedInterior(expr); ok {
+			return evalCalc(inner, fontSize, vw, vh, pct, depth+1)
 		}
-		return best
-	}
-	if strings.HasPrefix(lower, "clamp(") && strings.HasSuffix(expr, ")") {
-		args := splitCalcCommas(expr[6 : len(expr)-1])
-		if len(args) == 3 {
-			minV := evalCalcExpr(strings.TrimSpace(args[0]), fontSize, vw, vh, pct)
-			val := evalCalcExpr(strings.TrimSpace(args[1]), fontSize, vw, vh, pct)
-			maxV := evalCalcExpr(strings.TrimSpace(args[2]), fontSize, vw, vh, pct)
-			if val < minV {
-				return minV
-			}
-			if val > maxV {
-				return maxV
-			}
-			return val
-		}
+		return 0
 	}
 	return resolveSingleLength(expr, fontSize, vw, vh, pct)
 }
 
-func evalCalcAddSub(expr string, fontSize, vw, vh, pct float32) float32 {
-	expr = strings.TrimSpace(expr)
+// balancedInterior returns the content between the first '(' of expr and its
+// MATCHING ')'. Unlike prefix+suffix checks this tolerates trailing tokens
+// after the closing paren and rejects unterminated calls.
+func balancedInterior(expr string) (string, bool) {
+	open := strings.IndexByte(expr, '(')
+	if open < 0 {
+		return "", false
+	}
 	depth := 0
+	for i := open; i < len(expr); i++ {
+		switch expr[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return expr[open+1 : i], true
+			}
+		}
+	}
+	return "", false
+}
+
+func evalCalcAddSub(expr string, fontSize, vw, vh, pct float32, depth int) float32 {
+	if depth > maxCalcDepth {
+		return 0
+	}
+	expr = strings.TrimSpace(expr)
+	depthBal := 0
 	for i := len(expr) - 1; i >= 0; i-- {
 		c := expr[i]
 		if c == ')' {
-			depth++
+			depthBal++
 		} else if c == '(' {
-			depth--
+			depthBal--
 		}
-		if depth == 0 && (c == '+' || c == '-') && i > 0 {
+		if depthBal == 0 && (c == '+' || c == '-') && i > 0 {
 			if i > 0 && expr[i-1] == ' ' {
-				left := evalCalcAddSub(expr[:i-1], fontSize, vw, vh, pct)
-				right := evalCalcMulDiv(strings.TrimSpace(expr[i+1:]), fontSize, vw, vh, pct)
+				left := evalCalcAddSub(expr[:i-1], fontSize, vw, vh, pct, depth+1)
+				right := evalCalcMulDiv(strings.TrimSpace(expr[i+1:]), fontSize, vw, vh, pct, depth+1)
 				if c == '+' {
 					return left + right
 				}
@@ -76,21 +131,24 @@ func evalCalcAddSub(expr string, fontSize, vw, vh, pct float32) float32 {
 			}
 		}
 	}
-	return evalCalcMulDiv(expr, fontSize, vw, vh, pct)
+	return evalCalcMulDiv(expr, fontSize, vw, vh, pct, depth+1)
 }
 
-func evalCalcMulDiv(expr string, fontSize, vw, vh, pct float32) float32 {
+func evalCalcMulDiv(expr string, fontSize, vw, vh, pct float32, depth int) float32 {
+	if depth > maxCalcDepth {
+		return 0
+	}
 	expr = strings.TrimSpace(expr)
-	depth := 0
+	depthBal := 0
 	for i := len(expr) - 1; i >= 0; i-- {
 		c := expr[i]
 		if c == ')' {
-			depth++
+			depthBal++
 		} else if c == '(' {
-			depth--
+			depthBal--
 		}
-		if depth == 0 && (c == '*' || c == '/') {
-			left := evalCalcMulDiv(strings.TrimSpace(expr[:i]), fontSize, vw, vh, pct)
+		if depthBal == 0 && (c == '*' || c == '/') {
+			left := evalCalcMulDiv(strings.TrimSpace(expr[:i]), fontSize, vw, vh, pct, depth+1)
 			right := resolveSingleLength(strings.TrimSpace(expr[i+1:]), fontSize, vw, vh, pct)
 			if c == '*' {
 				return left * right
@@ -102,7 +160,7 @@ func evalCalcMulDiv(expr string, fontSize, vw, vh, pct float32) float32 {
 		}
 	}
 	if strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
-		return evalCalcAddSub(expr[1:len(expr)-1], fontSize, vw, vh, pct)
+		return evalCalcAddSub(expr[1:len(expr)-1], fontSize, vw, vh, pct, depth+1)
 	}
 	return resolveSingleLength(expr, fontSize, vw, vh, pct)
 }

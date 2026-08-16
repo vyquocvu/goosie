@@ -1431,8 +1431,17 @@ func (le *LayoutEngine) widestInlineSegment(node *RenderNode) float32 {
 	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		return float32(node.ImageData.Width)
 	}
-	if node.TagName == "svg" || node.TagName == "input" || node.TagName == "button" || node.TagName == "textarea" {
-		return le.minContentSize(node)
+	// Replaced-style elements contribute fixed intrinsic widths, not flowing
+	// text. Calling minContentSize here is circular — minContentSize calls
+	// back into widestInlineSegment whenever the node has inline children
+	// (a text-bearing button or textarea), which recursed until stack
+	// overflow on github.com. Buttons and textareas measure their own text
+	// through the generic child loop below instead.
+	if node.TagName == "input" {
+		return float32(150) // matches the form-control default width in computeElementLayout
+	}
+	if node.TagName == "svg" {
+		return 0
 	}
 	var widest float32
 	for _, c := range node.Children {
