@@ -90,6 +90,11 @@ type Renderer struct {
 	mutationPainterW  int
 	mutationPainterH  int
 
+	// nodeIndex caches the id→node map for the current render tree,
+	// guarding typed-mutation lookups. Protected by treeMu.
+	nodeIndex     map[int64]*RenderNode
+	nodeIndexRoot *RenderNode
+
 	Logger  *slog.Logger
 	metrics *RenderMetrics
 }
@@ -290,6 +295,7 @@ func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.St
 		return nil
 	}
 	r.currentRenderTree = renderTree
+	r.nodeIndex, r.nodeIndexRoot = nil, nil
 	r.currentLayoutTree = layoutTree
 	r.dirty = false
 	r.lastRecorder = recorder
@@ -532,6 +538,7 @@ func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error)
 
 	// Cache trees for viewport updates.
 	r.currentRenderTree = renderTree
+	r.nodeIndex, r.nodeIndexRoot = nil, nil
 	r.currentLayoutTree = layoutTree
 	r.dirty = false
 	r.treeMu.Unlock()
@@ -704,6 +711,7 @@ func (r *Renderer) Refresh() {
 		defer putLayoutEngine(layoutEngine)
 		r.currentLayoutTree = layoutEngine.ComputeLayout(renderTreeCopy)
 		r.currentRenderTree = renderTreeCopy
+		r.nodeIndex, r.nodeIndexRoot = nil, nil
 
 		// Clear canvas cache
 		r.canvasRenderer.ClearCache()
@@ -958,7 +966,9 @@ func shouldAttemptParseExternalCSS(content string) bool {
 // loadExternalCSS finds and loads external stylesheets
 func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 	links := extractExternalLinks(doc)
-	log.Printf("loadExternalCSS found links: %v", links)
+	if len(links) == 0 {
+		return
+	}
 
 	// Read CSP policy and current URL for CSP source matching.
 	r.cspMu.RLock()
@@ -979,7 +989,6 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 		}
 		// Resolve URL
 		resolvedURL := r.ResolveURL(href)
-		log.Printf("loadExternalCSS fetching resolved URL: %s", resolvedURL)
 
 		// Check CSP style-src before fetching.
 		if csp != nil {
@@ -1001,9 +1010,7 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 			}
 			continue
 		}
-		log.Printf("loadExternalCSS: Successfully fetched CSS %s, length=%d", resolvedURL, len(content))
 		if !shouldAttemptParseExternalCSS(content) {
-			log.Printf("loadExternalCSS: Skipping parse for CSS %s (shouldAttemptParseExternalCSS returned false)", resolvedURL)
 			continue
 		}
 
@@ -1021,7 +1028,6 @@ func (r *Renderer) loadExternalCSS(ctx context.Context, doc *html.Node) {
 			}
 			continue
 		}
-		log.Printf("loadExternalCSS: Successfully parsed CSS %s, rules count=%d", resolvedURL, len(stylesheet.Rules))
 
 		// Append rules to current stylesheet safely
 		// Note: This simple append assumes r.stylesheet is safe to modify or we are lucky.

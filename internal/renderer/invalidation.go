@@ -23,13 +23,14 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 		width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
 		r.incremental = NewIncrementalLayoutEngine(width, height)
 	}
+	nodeIndex := r.nodeIndexFor(r.currentRenderTree)
 	applied := 0
 	hasLayout := false
 	for _, mutation := range batch {
 		if mutation.NodeID == 0 || mutation.Flags == DirtyNone {
 			continue
 		}
-		node := findRenderNodeByIDRoot(r.currentRenderTree, mutation.NodeID)
+		node := nodeIndex[mutation.NodeID]
 		if node == nil {
 			continue
 		}
@@ -348,13 +349,46 @@ func findRenderNodeByIDRoot(node *RenderNode, id int64) *RenderNode {
 	return nil
 }
 
+// buildNodeIndex flattens a render tree into an id→node map with a single
+// walk, replacing per-lookup tree walks in the mutation path.
+func buildNodeIndex(root *RenderNode) map[int64]*RenderNode {
+	idx := make(map[int64]*RenderNode, 64)
+	var walk func(n *RenderNode)
+	walk = func(n *RenderNode) {
+		if n == nil {
+			return
+		}
+		idx[n.ID] = n
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(root)
+	return idx
+}
+
+// nodeIndexFor returns the cached id→node index for the current render
+// tree, rebuilding it when the tree has been replaced. Callers must hold
+// treeMu. The index is keyed by the tree root: text and attribute mutations
+// do not change tree shape through the typed path (structural mutations go
+// through a full reparse, which installs a new tree), so the map stays
+// valid between rebuilds.
+func (r *Renderer) nodeIndexFor(root *RenderNode) map[int64]*RenderNode {
+	if r.nodeIndexRoot != root || r.nodeIndex == nil {
+		r.nodeIndex = buildNodeIndex(root)
+		r.nodeIndexRoot = root
+	}
+	return r.nodeIndex
+}
+
 func (ile *IncrementalLayoutEngine) recomputeSubtrees(root *RenderNode, previous *LayoutBox, dirtyNodes []int64) *LayoutBox {
 	visited := make(map[int64]bool, len(dirtyNodes))
+	index := buildNodeIndex(root)
 	for _, id := range dirtyNodes {
 		if visited[id] {
 			continue
 		}
-		node := findRenderNodeByIDRoot(root, id)
+		node := index[id]
 		if node == nil {
 			continue
 		}
@@ -362,7 +396,7 @@ func (ile *IncrementalLayoutEngine) recomputeSubtrees(root *RenderNode, previous
 		if rootID == 0 {
 			continue
 		}
-		rootNode := findRenderNodeByIDRoot(root, rootID)
+		rootNode := index[rootID]
 		if rootNode == nil {
 			continue
 		}
@@ -404,8 +438,9 @@ func (ile *IncrementalLayoutEngine) RecomputeDirtyFromPrevious(previous *LayoutB
 	if len(dirtyNodes) == 0 {
 		return previous
 	}
+	index := buildNodeIndex(root)
 	for _, id := range dirtyNodes {
-		node := findRenderNodeByIDRoot(root, id)
+		node := index[id]
 		if node == nil {
 			continue
 		}

@@ -333,25 +333,24 @@ func (fm *FontMetrics) GetTextStyleFromNode(node *RenderNode) fyne.TextStyle {
 	return style
 }
 
-// splitIntoWords splits text into words for wrapping
+// splitIntoWords splits text into words for wrapping. It slices the input
+// directly instead of building each word byte-by-byte, so a word costs one
+// substring and no per-character allocations.
 func splitIntoWords(text string) []string {
-	words := []string{}
-	currentWord := ""
-
-	for _, ch := range text {
+	words := make([]string, 0, 8)
+	start := -1
+	for i, ch := range text {
 		if ch == ' ' || ch == '\t' || ch == '\n' {
-			if currentWord != "" {
-				words = append(words, currentWord)
-				currentWord = ""
+			if start >= 0 {
+				words = append(words, text[start:i])
+				start = -1
 			}
-		} else {
-			currentWord += string(ch)
+		} else if start < 0 {
+			start = i
 		}
 	}
-
-	if currentWord != "" {
-		words = append(words, currentWord)
+	if start >= 0 {
+		words = append(words, text[start:])
 	}
-
 	return words
 }

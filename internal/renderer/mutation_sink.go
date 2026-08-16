@@ -91,7 +91,7 @@ func (r *Renderer) ApplyTypedMutationValue(renderID int64, kind js.MutationKind,
 	if r.currentRenderTree == nil {
 		return false
 	}
-	node := findRenderNodeByIDRoot(r.currentRenderTree, renderID)
+	node := r.nodeIndexFor(r.currentRenderTree)[renderID]
 	if node == nil {
 		return false
 	}

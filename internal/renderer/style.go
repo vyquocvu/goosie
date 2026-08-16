@@ -24,6 +24,10 @@ type StyleManager struct {
 	// selector on every rule×node pair. Built once per stylesheet on first
 	// use within a render pass.
 	prepared map[*css.StyleSheet][]preparedRule
+
+	// mediaMatch memoizes @media prelude evaluations for the current
+	// viewport; cleared by SetViewport.
+	mediaMatch map[string]bool
 }
 
 // preparedRule is precomputed selector-part data for one CSS rule. The
@@ -59,6 +63,7 @@ func NewStyleManagerWithViewport(stylesheet *css.StyleSheet, viewportWidth, view
 func (sm *StyleManager) SetViewport(width, height float32) {
 	sm.viewportWidth = width
 	sm.viewportHeight = height
+	sm.mediaMatch = nil // prelude results are viewport-dependent
 	if sm.mediaEvaluator != nil {
 		sm.mediaEvaluator.UpdateViewport(width, height)
 	} else {
@@ -149,12 +154,28 @@ func (sm *StyleManager) applyMediaRulesForStylesheet(stylesheet *css.StyleSheet,
 	sm.applyConditionalAtRules(stylesheet.AtRules, node, true)
 }
 
+// mediaMatchFor evaluates an @media prelude with memoization. Style
+// application walks every node against every conditional rule; without the
+// cache each prelude would be re-parsed and re-evaluated per node. The cache
+// is dropped by SetViewport, on which all results depend.
+func (sm *StyleManager) mediaMatchFor(prelude string) bool {
+	if sm.mediaMatch == nil {
+		sm.mediaMatch = make(map[string]bool)
+	}
+	if m, ok := sm.mediaMatch[prelude]; ok {
+		return m
+	}
+	m := sm.mediaEvaluator.Evaluate(prelude)
+	sm.mediaMatch[prelude] = m
+	return m
+}
+
 func (sm *StyleManager) applyConditionalAtRules(atRules []css.AtRule, node *RenderNode, parentMatches bool) {
 	for _, atRule := range atRules {
 		matches := parentMatches
 		switch atRule.Name {
 		case "media":
-			matches = matches && sm.mediaEvaluator.Evaluate(atRule.Prelude)
+			matches = matches && sm.mediaMatchFor(atRule.Prelude)
 		case "supports":
 			// Unsupported feature tests are treated permissively until capability
 			// detection is modeled explicitly.
