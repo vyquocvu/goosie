@@ -76,6 +76,34 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height in
 	return toRGBA(img), nil
 }
 
+// LayoutHTML runs the engine pipeline — parse, CSS extraction, style, and
+// layout — for an HTML document and returns the styled render tree and the
+// layout root. Nothing is rasterized. It is the inspection entry point used
+// by the HTML conformance audit and tests that need to assert on layout
+// rather than pixels.
+func LayoutHTML(htmlContent string, width, height float32) (*RenderNode, *LayoutBox, error) {
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil, nil, err
+	}
+	stylesheet := extractAndParseCSS(doc)
+	bodyNode := findBodyNode(doc)
+	if bodyNode == nil {
+		bodyNode = doc
+	}
+	renderTree := BuildRenderTree(bodyNode)
+	if renderTree == nil {
+		return nil, nil, nil
+	}
+	if stylesheet != nil && len(stylesheet.Rules) > 0 {
+		styleManager := NewStyleManagerWithViewport(stylesheet, width, height)
+		styleManager.ApplyStyles(renderTree)
+	}
+	layoutEngine := getLayoutEngine(width, height)
+	defer putLayoutEngine(layoutEngine)
+	return renderTree, layoutEngine.ComputeLayout(renderTree), nil
+}
+
 // convertPaintCommands converts the old PaintCommand slice to raster.DisplayCmd
 // commands for the backend-neutral raster pipeline.
 func convertPaintCommands(cmds []*PaintCommand) []raster.DisplayCmd {

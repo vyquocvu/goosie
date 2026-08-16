@@ -112,3 +112,9 @@ e2e-online:
 update-snapshots: clean generate-test-data
 	@echo "Updating test snapshots..."
 	UPDATE_SNAPSHOTS=true go test -v -tags=e2e ./$(E2E_TEST_DIR)
+
+# Regenerate the HTML element conformance tracker (HTML_CONFORMANCE.md)
+html-audit:
+	@echo "Regenerating HTML conformance tracker..."
+	go run ./cmd/html-audit
+	@echo "Tracker written to HTML_CONFORMANCE.md"
