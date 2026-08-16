@@ -64,6 +64,18 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height in
 		return nil, err
 	}
 
+	// Browsers paint unstyled pages on a white canvas. The display list
+	// only carries a background command when the page sets one, so seed the
+	// frame with a white page background first.
+	bgCmd := raster.DisplayCmd{
+		Kind:  raster.CmdFill,
+		Rect:  frame.NewRect(0, 0, float32(width), float32(height)),
+		Color: frame.White,
+	}
+	if _, err := backend.Rasterize([]raster.DisplayCmd{bgCmd}, nil); err != nil {
+		return nil, err
+	}
+
 	img, err := backend.Rasterize(cmds, nil)
 	if err != nil {
 		return nil, err
