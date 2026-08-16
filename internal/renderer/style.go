@@ -91,6 +91,7 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		node.ComputedStyle.TextDecoration = node.Parent.ComputedStyle.TextDecoration
 		node.ComputedStyle.TextTransform = node.Parent.ComputedStyle.TextTransform
 		node.ComputedStyle.TextAlign = node.Parent.ComputedStyle.TextAlign
+		node.ComputedStyle.WhiteSpace = node.Parent.ComputedStyle.WhiteSpace
 
 		// Inherit custom properties from parent
 		if node.Parent.ComputedStyle.CustomProperties != nil {

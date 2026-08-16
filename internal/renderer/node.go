@@ -219,18 +219,18 @@ func (n *RenderNode) IsBlock() bool {
 			}
 		}
 	}
-	blockElements := map[string]bool{
-		"div": true, "p": true, "h1": true, "h2": true, "h3": true,
-		"h4": true, "h5": true, "h6": true, "ul": true, "ol": true,
-		"li": true, "body": true, "html": true, "header": true,
-		"footer": true, "section": true, "article": true, "aside": true,
-		"nav": true, "main": true, "pre": true, "blockquote": true,
-		"dl": true, "dt": true, "dd": true,
-		// Form elements and tables should be treated as block-level for proper layout
-		"input": true, "textarea": true, "button": true, "table": true, "form": true,
-		"thead": true, "tbody": true, "tfoot": true, "tr": true, "td": true, "th": true,
+	// Form elements and tables should be treated as block-level for proper layout
+	switch n.TagName {
+	case "div", "p", "h1", "h2", "h3", "h4", "h5", "h6",
+		"ul", "ol", "li", "body", "html", "header",
+		"footer", "section", "article", "aside",
+		"nav", "main", "pre", "blockquote",
+		"dl", "dt", "dd",
+		"input", "textarea", "button", "table", "form",
+		"thead", "tbody", "tfoot", "tr", "td", "th":
+		return true
 	}
-	return blockElements[n.TagName]
+	return false
 }
 
 // BuildRenderTree builds a render tree from an HTML node
@@ -250,7 +250,10 @@ func BuildRenderTree(htmlNode *html.Node) *RenderNode {
 	}
 }
 
-// processTextNode handles text node processing
+// processTextNode handles text node processing. Runs of spaces/tabs/CRs
+// collapse to a single space, but newlines are preserved so white-space
+// aware layout (pre, pre-line) can honor them; wrapping modes collapse the
+// newlines later via collapseWhiteSpace/splitTextForWrapping.
 func processTextNode(htmlNode *html.Node) *RenderNode {
 	if htmlNode.Data == "" {
 		return nil
@@ -260,12 +263,16 @@ func processTextNode(htmlNode *html.Node) *RenderNode {
 	var builder strings.Builder
 	inWhitespace := false
 	for _, r := range htmlNode.Data {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+		switch r {
+		case ' ', '\t', '\r':
 			if !inWhitespace {
 				builder.WriteByte(' ')
 				inWhitespace = true
 			}
-		} else {
+		case '\n':
+			builder.WriteByte('\n')
+			inWhitespace = false
+		default:
 			builder.WriteRune(r)
 			inWhitespace = false
 		}

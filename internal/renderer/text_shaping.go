@@ -19,6 +19,8 @@
 package renderer
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -47,12 +49,14 @@ func (k FontKey) Valid() bool {
 	return k.Size > 0
 }
 
-// CacheKey returns a string key for caching shaped text.
+// CacheKey returns a string key for caching shaped text. The float size is
+// encoded via its bits so distinct sizes never collide (a previous
+// byte(size) truncation made 16.0 and 16.5 share a key).
 func (k FontKey) CacheKey() string {
 	var sb strings.Builder
 	sb.WriteString(k.Family)
 	sb.WriteByte('|')
-	sb.WriteByte(byte(k.Size))
+	sb.WriteString(strconv.FormatUint(uint64(math.Float32bits(k.Size)), 10))
 	if k.Bold {
 		sb.WriteByte('B')
 	}

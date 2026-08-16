@@ -198,6 +198,11 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 	if node.Type == NodeTypeText {
 		ile.addTextToLines(node, currentLine, lines, lineX, availableWidth, whiteSpaceMode)
 	} else if node.Type == NodeTypeElement {
+		// A forced line break: finalize the current line and start a new one.
+		if node.TagName == "br" {
+			ile.addLineBreak(currentLine, lines, lineX, availableWidth)
+			return
+		}
 		// Check if inline-block
 		if ile.isInlineBlock(node) {
 			ile.addInlineBlockToLines(node, currentLine, lines, lineX, availableWidth)
@@ -208,6 +213,33 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 			}
 		}
 	}
+}
+
+// addLineBreak handles a <br> element: emit the current line (even when
+// empty, so consecutive <br>s produce visible blank lines) and open a fresh
+// line below it. An empty line is given the block's strut height so vertical
+// progress is preserved.
+func (ile *InlineLayoutEngine) addLineBreak(
+	currentLine **LineBox,
+	lines *[]*LineBox,
+	lineX, availableWidth float32,
+) {
+	line := *currentLine
+	if line.Height <= 0 {
+		if line.LineHeight > 0 {
+			line.Height = line.LineHeight
+		} else {
+			line.Height = ile.defaultFontSize * 1.2
+		}
+	}
+	if len(line.InlineBoxes) > 0 {
+		ile.finalizeLine(line)
+	}
+	*lines = append(*lines, line)
+
+	nextY := line.Y + line.Height
+	newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, line.LineHeight)
+	*currentLine = ile.newLineBox(newLineX, nextY, newWidth, line.TextAlign, line.LineHeight)
 }
 
 // addTextToLines adds text content to line boxes with proper word wrapping
@@ -238,7 +270,21 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		if node != nil && node.ComputedStyle != nil {
 			letterSpacing = node.ComputedStyle.LetterSpacing
 		}
-		ile.addTextPiece(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, false)
+		// pre mode honors embedded newlines as forced breaks; nowrap keeps
+		// the whole run on one line.
+		if whiteSpaceMode == WhiteSpacePre && strings.Contains(text, "\n") {
+			segments := strings.Split(text, "\n")
+			for i, seg := range segments {
+				if seg != "" {
+					ile.addTextPiece(seg, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, false, true)
+				}
+				if i < len(segments)-1 {
+					ile.addLineBreak(currentLine, lines, lineX, availableWidth)
+				}
+			}
+			return
+		}
+		ile.addTextPiece(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, false, true)
 		return
 	}
 
@@ -268,7 +314,7 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		if len((*currentLine).InlineBoxes) > 0 {
 			lastBox := (*currentLine).InlineBoxes[len((*currentLine).InlineBoxes)-1]
 			if lastBox.IsText && !strings.HasSuffix(lastBox.Text, " ") {
-				ile.addTextPiece("", node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, true)
+				ile.addTextPiece("", node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, true, false)
 			}
 		}
 		return
@@ -293,18 +339,20 @@ func (ile *InlineLayoutEngine) addTextToLines(
 			}
 		}
 
-		ile.addTextPiece(word, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, addSpace)
+		ile.addTextPiece(word, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, addSpace, false)
 	}
 
 	if hasTrailingSpace && len((*currentLine).InlineBoxes) > 0 {
 		lastBox := (*currentLine).InlineBoxes[len((*currentLine).InlineBoxes)-1]
 		if lastBox.IsText && !strings.HasSuffix(lastBox.Text, " ") {
-			ile.addTextPiece("", node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, true)
+			ile.addTextPiece("", node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing, true, false)
 		}
 	}
 }
 
-// addTextPiece adds a piece of text to the current line or creates a new line
+// addTextPiece adds a piece of text to the current line or creates a new
+// line. When noWrap is set (white-space: nowrap/pre) the piece never wraps:
+// it stays on the current line and may overflow it, as in browsers.
 func (ile *InlineLayoutEngine) addTextPiece(
 	text string,
 	node *RenderNode,
@@ -315,6 +363,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	style fyne.TextStyle,
 	letterSpacing float32,
 	addSpaceBefore bool,
+	noWrap bool,
 ) {
 	if text == "" && !addSpaceBefore {
 		return
@@ -339,7 +388,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	totalWidth := metrics.Width + spaceWidth
 
 	// Check if text fits on current line
-	if (*currentLine).Width+totalWidth > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) > 0 {
+	if !noWrap && (*currentLine).Width+totalWidth > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) > 0 {
 		// Text doesn't fit - finalize current line and create new one
 		ile.finalizeLine(*currentLine)
 		*lines = append(*lines, *currentLine)
@@ -357,7 +406,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	}
 
 	// If text still doesn't fit (very long word), break it into characters
-	if metrics.Width > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) == 0 {
+	if !noWrap && metrics.Width > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) == 0 {
 		ile.addTextWithCharacterBreaking(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing)
 		return
 	}
@@ -880,11 +929,9 @@ func (ile *InlineLayoutEngine) isInlineBlock(node *RenderNode) bool {
 			return true
 		}
 	}
-	inlineBlockElements := map[string]bool{
-		"img":    true,
-		"button": true,
-		"input":  true,
-		"select": true,
+	switch node.TagName {
+	case "img", "button", "input", "select":
+		return true
 	}
-	return inlineBlockElements[node.TagName]
+	return false
 }

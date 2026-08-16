@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Media Query Range Syntax</title>
+<style>
+:root { --page-margin: 24px; }
+body { margin: 0; font-size: 16px; }
+article.hemmed {
+  width: calc(1100px - var(--page-margin) * 2);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: row-reverse;
+  padding: 16px;
+}
+main { flex-grow: 1; flex-basis: 0; }
+nav.side { width: 180px; background: #e8eef2; padding: 8px; }
+h2 { font-size: 24px; margin: 0 0 12px 0; }
+p { margin: 0 0 12px 0; }
+.nowrap { white-space: nowrap; background: #fff3cd; }
+pre.block { white-space: pre; background: #f0f0f0; margin: 0 0 12px 0; }
+code { background: #e8e8ff; }
+@media (width < 1200px) {
+  article.hemmed { width: auto; }
+}
+@media (width <= 1000px) {
+  nav.side { display: none; }
+}
+</style>
+</head>
+<body>
+<article class="hemmed">
+  <main>
+    <h2>Media query range syntax</h2>
+    <p>This paragraph wraps inside the main column. At viewport widths of one thousand pixels or less the sidebar is hidden by a range media query and the article fills the available width.</p>
+    <p>Line one<br>Line two after a break<br>Line three after another break.</p>
+    <p class="nowrap">This paragraph must stay on a single unwrapped line even though it contains a fairly long run of words.</p>
+    <pre class="block">pre keeps
+  newlines
+  and spacing</pre>
+    <p>Inline <code>code that wraps like normal text in browsers even when the element contains a long run of characters</code> inside a paragraph.</p>
+  </main>
+  <nav class="side">
+    <p>Side A</p>
+    <p>Side B</p>
+    <p>Side C</p>
+  </nav>
+</article>
+</body>
+</html>

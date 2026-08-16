@@ -1,6 +1,8 @@
 package renderer
 
 import (
+	"sync"
+
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
@@ -42,12 +44,19 @@ tbody { display: table-row-group; }
 tfoot { display: table-footer-group; }
 `
 
-// GetDefaultStyleSheet returns the default user-agent stylesheet.
-func GetDefaultStyleSheet() *css.StyleSheet {
+// defaultStyleSheet caches the parsed UA stylesheet. It is immutable after
+// parse (StyleManagers only read .Rules), so every manager can share one
+// instance instead of re-parsing defaultUAStyle per construction.
+var defaultStyleSheet = sync.OnceValue(func() *css.StyleSheet {
 	parser := css.NewParser(defaultUAStyle)
 	sheet, err := parser.Parse()
 	if err != nil {
 		return &css.StyleSheet{}
 	}
 	return sheet
+})
+
+// GetDefaultStyleSheet returns the default user-agent stylesheet.
+func GetDefaultStyleSheet() *css.StyleSheet {
+	return defaultStyleSheet()
 }

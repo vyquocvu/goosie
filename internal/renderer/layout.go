@@ -1184,19 +1184,40 @@ func (le *LayoutEngine) getFontSize(tagName string) float32 {
 	return le.fontMetrics.GetFontSize(tagName)
 }
 
-// whiteSpaceModeForNode selects white space handling based on element type
+// whiteSpaceModeForNode selects white space handling. The CSS white-space
+// property wins when present (it is inherited, so descendants pick it up);
+// the tag fallback only covers unstyled documents and matches browser UA
+// defaults — notably <code> wraps by default (white-space: normal).
 func (le *LayoutEngine) whiteSpaceModeForNode(node *RenderNode) WhiteSpaceMode {
 	if node == nil {
 		return WhiteSpaceNormal
 	}
-	switch node.TagName {
-	case "pre":
-		return WhiteSpacePre
-	case "code":
-		return WhiteSpaceNoWrap
-	default:
-		return WhiteSpaceNormal
+	if node.ComputedStyle != nil && node.ComputedStyle.WhiteSpace != "" {
+		if mode, ok := whiteSpaceModeFromCSS(node.ComputedStyle.WhiteSpace); ok {
+			return mode
+		}
 	}
+	if node.TagName == "pre" {
+		return WhiteSpacePre
+	}
+	return WhiteSpaceNormal
+}
+
+// whiteSpaceModeFromCSS maps a CSS white-space value to a layout mode.
+func whiteSpaceModeFromCSS(value string) (WhiteSpaceMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "normal":
+		return WhiteSpaceNormal, true
+	case "nowrap":
+		return WhiteSpaceNoWrap, true
+	case "pre":
+		return WhiteSpacePre, true
+	case "pre-wrap", "break-spaces":
+		return WhiteSpacePreWrap, true
+	case "pre-line":
+		return WhiteSpacePreLine, true
+	}
+	return WhiteSpaceNormal, false
 }
 
 // hasInlineContent checks if a node has inline content (text or inline children)

@@ -115,7 +115,7 @@ policy — the detection is the signal we surface, not the access denial.
 | Inline and block layout | Partial | Unsupported display values use block or inline fallback. |
 | Flexbox | Partial | Unsupported flex properties use normal flow fallback. |
 | Tables | Partial | Unsupported table layout details use normal flow fallback. |
-| Media queries | Partial | Unsupported media features evaluate as non-matching. |
+| Media queries | Partial | Level 4 range syntax (`(width <= 600px)`, `(600px >= width)`, chained) is supported; unsupported media features evaluate as non-matching. |
 | CSS custom properties and `calc()` | Partial | Invalid substitutions or calculations invalidate the declaration. |
 | Animations, transitions, transforms, filters, grid, and advanced typography | Planned | Declarations are ignored until implemented. |
 

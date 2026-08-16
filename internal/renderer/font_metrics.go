@@ -239,19 +239,19 @@ func (fm *FontMetrics) MeasureTextWithWrapping(text string, fontSize float32, st
 
 // GetFontSize returns the appropriate font size for a given HTML element
 func (fm *FontMetrics) GetFontSize(tagName string) float32 {
-	fontSizes := map[string]float32{
-		"h1":    fm.defaultFontSize * 2.0,
-		"h2":    fm.defaultFontSize * 1.5,
-		"h3":    fm.defaultFontSize * 1.17,
-		"h4":    fm.defaultFontSize * 1.0,
-		"h5":    fm.defaultFontSize * 0.83,
-		"h6":    fm.defaultFontSize * 0.67,
-		"p":     fm.defaultFontSize,
-		"small": fm.defaultFontSize * 0.83,
-	}
-
-	if size, ok := fontSizes[tagName]; ok {
-		return size
+	switch tagName {
+	case "h1":
+		return fm.defaultFontSize * 2.0
+	case "h2":
+		return fm.defaultFontSize * 1.5
+	case "h3":
+		return fm.defaultFontSize * 1.17
+	case "h4":
+		return fm.defaultFontSize * 1.0
+	case "h5", "small":
+		return fm.defaultFontSize * 0.83
+	case "h6":
+		return fm.defaultFontSize * 0.67
 	}
 	return fm.defaultFontSize
 }

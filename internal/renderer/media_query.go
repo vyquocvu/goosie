@@ -83,8 +83,25 @@ func (mq *MediaQueryEvaluator) evaluateCondition(condition string) bool {
 	return true
 }
 
-// evaluateFeature evaluates a media feature like "max-width: 600px"
+// aspectRatioRE parses ratio values like "16/9". Package-level so it is
+// compiled once instead of per evaluation call.
+var aspectRatioRE = regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
+
+// evaluateFeature evaluates a media feature like "max-width: 600px" or the
+// Media Queries Level 4 range forms "width <= 600px", "600px >= width", and
+// the chained "400px <= width <= 700px".
 func (mq *MediaQueryEvaluator) evaluateFeature(feature string) bool {
+	feature = strings.TrimSpace(feature)
+	if feature == "" {
+		return false
+	}
+
+	for _, op := range rangeOperators {
+		if strings.Contains(feature, op) {
+			return mq.evaluateRangeFeature(feature)
+		}
+	}
+
 	parts := strings.SplitN(feature, ":", 2)
 	if len(parts) != 2 {
 		return false
@@ -154,8 +171,7 @@ func (mq *MediaQueryEvaluator) parsePixelValue(value string) float32 {
 // evaluateAspectRatio evaluates aspect ratio media features
 func (mq *MediaQueryEvaluator) evaluateAspectRatio(name, value string) bool {
 	// Parse aspect ratio like "16/9" or "4/3"
-	re := regexp.MustCompile(`(\d+)\s*/\s*(\d+)`)
-	matches := re.FindStringSubmatch(value)
+	matches := aspectRatioRE.FindStringSubmatch(value)
 	if len(matches) != 3 {
 		return false
 	}
@@ -179,6 +195,188 @@ func (mq *MediaQueryEvaluator) evaluateAspectRatio(name, value string) bool {
 	}
 
 	return false
+}
+
+// rangeOperators is ordered longest-first so "<=" is matched before "<".
+var rangeOperators = []string{"<=", ">=", "<", ">", "="}
+
+// evaluateRangeFeature evaluates the Media Queries Level 4 range forms:
+//
+//	width <= 600px        (feature op value)
+//	600px >= width        (value op feature)
+//	400px <= width <= 700px (chained)
+//
+// The middle operand of a chain (and exactly one operand of a simple form)
+// must be a known media feature; the others are values.
+func (mq *MediaQueryEvaluator) evaluateRangeFeature(expr string) bool {
+	tokens, ok := splitRangeExpr(expr)
+	if !ok {
+		return false
+	}
+
+	if len(tokens) == 3 { // lhs op rhs
+		lhs, op, rhs := tokens[0], tokens[1], tokens[2]
+		lhsFeature, rhsFeature := mediaFeatureKind(lhs), mediaFeatureKind(rhs)
+		if lhsFeature != featureNone && rhsFeature == featureNone {
+			return mq.compareFeature(lhsFeature, op, rhs)
+		}
+		if lhsFeature == featureNone && rhsFeature != featureNone {
+			return mq.compareFeature(rhsFeature, reverseRangeOp(op), lhs)
+		}
+		return false
+	}
+
+	// Chained: value op feature op value — the middle operand must be the
+	// feature and both comparisons must hold.
+	valueA, opA, mid, opB, valueB := tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]
+	midFeature := mediaFeatureKind(mid)
+	if midFeature == featureNone {
+		return false
+	}
+	return mq.compareFeature(midFeature, reverseRangeOp(opA), valueA) &&
+		mq.compareFeature(midFeature, opB, valueB)
+}
+
+// splitRangeExpr tokenizes a range expression into alternating operands and
+// operators: "width <= 600px" → [width <= 600px],
+// "400px <= width <= 700px" → [400px <= width <= 700px].
+// It reports ok=false for anything that is not a 2- or 3-comparison shape.
+func splitRangeExpr(expr string) ([]string, bool) {
+	var tokens []string
+	start := 0
+	for i := 0; i < len(expr); i++ {
+		op := ""
+		switch {
+		case strings.HasPrefix(expr[i:], "<="):
+			op = "<="
+		case strings.HasPrefix(expr[i:], ">="):
+			op = ">="
+		case expr[i] == '<' || expr[i] == '>' || expr[i] == '=':
+			op = string(expr[i])
+		}
+		if op == "" {
+			continue
+		}
+		tokens = append(tokens, strings.TrimSpace(expr[start:i]), op)
+		i += len(op) - 1
+		start = i + 1
+	}
+	tokens = append(tokens, strings.TrimSpace(expr[start:]))
+
+	if len(tokens) != 3 && len(tokens) != 5 {
+		return nil, false
+	}
+	for i, t := range tokens {
+		if i%2 == 0 && t == "" { // empty operand
+			return nil, false
+		}
+	}
+	return tokens, true
+}
+
+// mediaFeatureKind classifies an operand: a known numeric feature, the
+// ratio feature, or not a feature (a value).
+type featureKind int
+
+const (
+	featureNone featureKind = iota
+	featureWidth
+	featureHeight
+	featureAspectRatio
+)
+
+func mediaFeatureKind(operand string) featureKind {
+	switch strings.ToLower(strings.TrimSpace(operand)) {
+	case "width", "min-width", "max-width":
+		return featureWidth
+	case "height", "min-height", "max-height":
+		return featureHeight
+	case "aspect-ratio", "min-aspect-ratio", "max-aspect-ratio":
+		return featureAspectRatio
+	}
+	return featureNone
+}
+
+// reverseRangeOp mirrors an operator so a reversed form ("600px >= width")
+// can be evaluated as "width <= 600px".
+func reverseRangeOp(op string) string {
+	switch op {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	}
+	return op
+}
+
+// compareFeature compares the viewport's value of feature against val using
+// the operator seen from the feature's perspective.
+func (mq *MediaQueryEvaluator) compareFeature(kind featureKind, op string, val string) bool {
+	val = strings.TrimSpace(val)
+	var actual float32
+	switch kind {
+	case featureWidth:
+		actual = mq.viewportWidth
+	case featureHeight:
+		actual = mq.viewportHeight
+	case featureAspectRatio:
+		actual = mq.viewportWidth / mq.viewportHeight
+	default:
+		return false
+	}
+
+	target, ok := mq.parseFeatureValue(val, kind)
+	if !ok {
+		return false
+	}
+	switch op {
+	case "<":
+		return actual < target
+	case "<=":
+		return actual <= target
+	case ">":
+		return actual > target
+	case ">=":
+		return actual >= target
+	case "=":
+		return actual == target
+	}
+	return false
+}
+
+// parseFeatureValue parses the value operand for a feature kind. Ratios
+// ("16/9") only apply to aspect-ratio; everything else goes through
+// parsePixelValue.
+func (mq *MediaQueryEvaluator) parseFeatureValue(val string, kind featureKind) (float32, bool) {
+	if kind == featureAspectRatio {
+		if w, h, ok := parseAspectRatioValue(val); ok {
+			return w / h, true
+		}
+		return 0, false
+	}
+	// A feature name on the value side ("width <= height") is invalid.
+	if mediaFeatureKind(val) != featureNone {
+		return 0, false
+	}
+	return mq.parsePixelValue(val), true
+}
+
+// parseAspectRatioValue parses "16/9" into its components.
+func parseAspectRatioValue(val string) (float32, float32, bool) {
+	matches := aspectRatioRE.FindStringSubmatch(val)
+	if len(matches) != 3 {
+		return 0, 0, false
+	}
+	w, errW := strconv.ParseFloat(matches[1], 32)
+	h, errH := strconv.ParseFloat(matches[2], 32)
+	if errW != nil || errH != nil || h == 0 {
+		return 0, 0, false
+	}
+	return float32(w), float32(h), true
 }
 
 // UpdateViewport updates the viewport dimensions

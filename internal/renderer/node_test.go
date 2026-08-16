@@ -271,9 +271,12 @@ func TestBuildRenderTreeWhitespace(t *testing.T) {
 			expected: []string{" Hello World "},
 		},
 		{
-			name:     "newlines converted to spaces",
+			// Newlines are preserved at build time so white-space: pre /
+			// pre-line layout can honor them; wrapping modes collapse them
+			// later (see collapseWhiteSpace / splitTextForWrapping).
+			name:     "newlines preserved for white-space aware layout",
 			html:     "<p>\nHello\nWorld\n</p>",
-			expected: []string{" Hello World "},
+			expected: []string{"\nHello\nWorld\n"},
 		},
 	}
 
