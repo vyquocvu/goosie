@@ -22,11 +22,9 @@ import (
 	"github.com/vyquocvu/goosie/internal/testutil"
 )
 
-// milestoneGate returns true if the current milestone level meets the required level.
-// The current milestone is read from GOOSIE_MILESTONE env var (default: 2).
-// As milestones are completed in ROADMAP_V2.md, bump the default value.
+// milestoneGate reports whether GOOSIE_MILESTONE (default 2) meets required.
 //
-// Current roadmap status:
+// Supported levels:
 //
 //	M0-M2: complete
 //	M3:    in progress (M3.1-M3.3 done, M3.4 pending)

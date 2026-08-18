@@ -174,7 +174,7 @@ Memory overhead is ~48 bytes per display command (header + inline data), compara
 
 ## Related
 
-- M5 milestone in `ROADMAP_V2.md`
+- `website/docs/architecture-deep-dives.md`
 - `internal/renderer/displaycmd.go` — command type definitions and serialization
 - `internal/renderer/chunked_display_list.go` — paint chunk management
 - `internal/renderer/dirty_region.go` — dirty-region tracking and merging

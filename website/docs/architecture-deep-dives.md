@@ -1,6 +1,6 @@
 # Architecture Deep-Dive Articles
 
-This document indexes deep-dive architectural articles that explore specific subsystems of the Goosie engine in detail. Each article assumes familiarity with the overall architecture (see `ARCHITECTURE.md`) and focuses on internal design, trade-offs, and performance characteristics.
+This document indexes architectural notes for specific Goosie subsystems, focusing on internal design, trade-offs, and performance characteristics.
 
 ---
 
@@ -61,7 +61,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 5: Incremental Layout and Invalidation
 
-**File:** `internal/renderer/incremental_layout.go` + `ARCHITECTURE.md` (M4.4)
+**File:** `internal/renderer/incremental_layout.go`
 
 **Covers:**
 - Layout dirty reason classification (geometry, intrinsic size, text, children, viewport, font, style)
@@ -75,7 +75,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 6: Style Invalidation — From Class Toggle to Repaint
 
-**File:** `internal/css/invalidation.go` + `ARCHITECTURE.md` (M3.4)
+**File:** `internal/css/invalidation.go`
 
 **Covers:**
 - Mutation classification (class, ID, attribute, inline, text, insert, remove)
@@ -89,7 +89,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 7: Compositor, Tiles, and Smooth Scrolling
 
-**File:** `internal/renderer/frame/compositor/tiles.go` + `ARCHITECTURE.md` (M7)
+**File:** `internal/renderer/frame/compositor/tiles.go`
 
 **Covers:**
 - Tile grid: configurable tile size (256×256 default), version tracking
@@ -103,7 +103,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 8: JavaScript Runtime Isolation
 
-**File:** `internal/js/session.go` + `ARCHITECTURE.md` (M8)
+**File:** `internal/js/session.go`
 
 **Covers:**
 - Single-owner goroutine pattern with `ErrWrongOwner`
@@ -117,7 +117,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 9: Process Isolation Prototype
 
-**File:** `internal/engine/renderer/` + `internal/engine/message/` + `ARCHITECTURE.md` (M10.4)
+**Files:** `internal/engine/renderer/` and `internal/engine/message/`
 
 **Covers:**
 - IPC protocol over stdin/stdout
@@ -130,7 +130,7 @@ This document indexes deep-dive architectural articles that explore specific sub
 
 ## Article 10: Streaming Parser and Resource Discovery
 
-**File:** `internal/dom/treebuilder.go` + `ARCHITECTURE.md` (M2.4)
+**File:** `internal/dom/treebuilder.go`
 
 **Covers:**
 - Token-by-token tree construction

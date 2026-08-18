@@ -102,7 +102,7 @@ func TestYourMethodJS(t *testing.T) {
 
 ## Step 6: Mark as Supported
 
-Update `ROADMAP_V2.md` if the API was a planned roadmap item.
+Update `supported-web-platform.md` when the change affects advertised API coverage.
 
 ## Checklist
 

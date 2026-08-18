@@ -529,9 +529,7 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 		// Resolve URL (absolute or relative)
 		resolvedURL := cr.resolveURL(href)
 
-		// Note: Link target attribute (_blank, _self, etc.) is available via node.GetAttribute("target")
-		// but not currently implemented as the browser doesn't support tabs yet.
-		// This is tracked in the legacy product backlog in ROADMAP_V2.md.
+		// Link targets are not implemented yet.
 
 		// Parse URL to create a proper Fyne URL object
 		parsedURL, err := url.Parse(resolvedURL)

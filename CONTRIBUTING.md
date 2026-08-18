@@ -11,11 +11,10 @@ make build
 
 ## Development Workflow
 
-1. Read `ROADMAP_V2.md` to understand the current milestone and pick an unblocked task.
-2. Read `PACKAGE_OWNERSHIP.md` to find the owning package for your change.
-3. Read `.prompt` for the engineering workflow (if using an AI coding agent).
-4. Write tests first (TDD). Include normal, edge, and cancellation cases.
-5. Run the full check suite before committing:
+1. Check the issue tracker and confirm the scope before starting work.
+2. Read `website/docs/package-ownership.md` to find the owning package.
+3. Write tests first. Include normal, edge, and cancellation cases.
+4. Run the full check suite before committing:
 
 ```bash
 gofmt -w .
@@ -25,13 +24,13 @@ go test -race -short ./internal/engine/... ./internal/js/... ./internal/net/...
 make smoke-test
 ```
 
-6. Compare benchmark results against `main` for performance-sensitive changes:
+5. Compare benchmark results against `main` for performance-sensitive changes:
 
 ```bash
 go test -bench=. -benchmem ./path/to/package
 ```
 
-7. Commit with a message prefixed by the roadmap milestone, e.g. `roadmap-v2/m4-fix-table-layout`.
+6. Use a concise conventional commit message, such as `fix(renderer): correct table layout`.
 
 ## Code Conventions
 
@@ -55,7 +54,6 @@ go test -bench=. -benchmem ./path/to/package
 
 ## Documentation
 
-- Update `ROADMAP_V2.md` (mark checkboxes) when completing a roadmap task.
 - Add ADR `website/docs/adr/NNNN-title.md` for significant architecture decisions (see `website/docs/adr/` for examples).
 - Update `website/docs/supported-web-platform.md` when adding or changing supported features.
 - Add package doc comments (`// Package X provides ...`) for new packages.
@@ -63,7 +61,7 @@ go test -bench=. -benchmem ./path/to/package
 ## Pull Request Process
 
 1. One commit per logical change. Squash before merging.
-2. Commit messages must reference the roadmap milestone.
+2. Commit messages must describe the affected area and outcome.
 3. PR description must include benchmark comparison for performance changes.
 4. All CI gates must pass (build, test, race, golden).
 5. Architecture documentation must be updated when ownership or data flow changes.
