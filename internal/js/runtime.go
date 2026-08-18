@@ -1002,9 +1002,8 @@ func (r *Runtime) setupDocumentAPI() {
       // a fake attribute, plus any function-valued getter
       // (style, dataset, classList) as its full source. The
       // resulting HTML ballooned 6-10x larger than the actual
-      // content, which made every DOM mutation cost a
-      // full-document re-serialize + re-parse + re-layout. See
-      // docs/PERF_REVIEW.md for the freeze-repro numbers.
+      // content, making every mutation reserialize, reparse, and
+      // relayout an unnecessarily large document.
       const attrs = node.attributes || {};
       const keys = Object.keys(attrs);
       for (let i = 0; i < keys.length; i++) {

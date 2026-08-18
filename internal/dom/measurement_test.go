@@ -261,8 +261,7 @@ func mustParse(t *testing.T, p *Parser, htmlStr string) *html.Node {
 	return doc
 }
 
-// TestMeasureCorpusSummary prints a formatted table of corpus baseline metrics
-// suitable for inclusion in PERFORMANCE.md.
+// TestMeasureCorpusSummary prints a formatted table of corpus baseline metrics.
 func TestMeasureCorpusSummary(t *testing.T) {
 	p := NewParser()
 	summaries := testpages.List()

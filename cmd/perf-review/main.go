@@ -1,9 +1,8 @@
 // perf-review is a CLI driver that exercises the Goosie browser through
 // the browsercontrol.Service interface, measuring every stage of the
 // pipeline. It is the in-process equivalent of the MCP server: same
-// API, same backing engine, no protocol overhead. Use it to verify
-// the freeze / FPS fixes shipped in docs/FREEZE_FIXES.md and to
-// attribute future regressions to a specific subsystem.
+// API, same backing engine, no protocol overhead. Use it to attribute
+// performance regressions to a specific subsystem.
 //
 // Usage:
 //
@@ -33,38 +32,72 @@ import (
 )
 
 func main() {
-	urlsFlag := flag.String("urls", "https://example.com,https://www.iana.org/help/example-domains", "comma-separated URLs to navigate")
-	iterFlag := flag.Int("iterations", 3, "number of times to repeat each workload")
-	includeMutations := flag.Bool("include-mutations", true, "run the JS mutation stress test")
-	includeScroll := flag.Bool("include-scroll", true, "run the scroll-burst test")
-	jsonOut := flag.Bool("json", false, "emit a single JSON document instead of human-readable text")
-	verbose := flag.Bool("v", false, "print per-iteration results in addition to aggregates")
-	flag.Parse()
+	opts, err := parseOptions(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
-	urls := splitNonEmpty(*urlsFlag, ",")
-
-	// Always start a local fixture server so the test is hermetic
-	// when network is unavailable.
 	ts, fixtures := startFixtureServer()
 	defer ts.Close()
 
 	allURLs := append([]string(nil), fixtures...)
-	allURLs = append(allURLs, urls...)
+	allURLs = append(allURLs, opts.urls...)
 
 	runner := &review{
 		urls:       allURLs,
-		iterations: *iterFlag,
-		verbose:    *verbose,
+		iterations: opts.iterations,
+		verbose:    opts.verbose,
 	}
-	results := runner.run(*includeMutations, *includeScroll)
+	results := runner.run(opts.includeMutations, opts.includeScroll)
 
-	if *jsonOut {
+	if opts.json {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(results)
 		return
 	}
 	printHuman(os.Stdout, results)
+}
+
+type options struct {
+	urls             []string
+	iterations       int
+	includeMutations bool
+	includeScroll    bool
+	json             bool
+	verbose          bool
+}
+
+func parseOptions(args []string) (options, error) {
+	const defaultURLs = "https://example.com,https://www.iana.org/help/example-domains"
+
+	fs := flag.NewFlagSet("perf-review", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	urls := fs.String("urls", defaultURLs, "comma-separated URLs to navigate")
+	iterations := fs.Int("iterations", 3, "number of times to repeat each workload")
+	includeMutations := fs.Bool("include-mutations", true, "run the JS mutation stress test")
+	includeScroll := fs.Bool("include-scroll", true, "run the scroll-burst test")
+	jsonOut := fs.Bool("json", false, "emit a single JSON document instead of human-readable text")
+	verbose := fs.Bool("v", false, "print per-iteration results in addition to aggregates")
+	if err := fs.Parse(args); err != nil {
+		return options{}, err
+	}
+	if *iterations < 1 {
+		return options{}, fmt.Errorf("iterations must be positive")
+	}
+	if fs.NArg() != 0 {
+		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+
+	return options{
+		urls:             splitNonEmpty(*urls, ","),
+		iterations:       *iterations,
+		includeMutations: *includeMutations,
+		includeScroll:    *includeScroll,
+		json:             *jsonOut,
+		verbose:          *verbose,
+	}, nil
 }
 
 type review struct {
@@ -93,7 +126,7 @@ type workloadResult struct {
 }
 
 type reviewResult struct {
-	GoVersion    string           `json:"go_version"`
+	GoVersion     string           `json:"go_version"`
 	StartedAt     time.Time        `json:"started_at"`
 	Duration      time.Duration    `json:"duration"`
 	Workloads     []workloadResult `json:"workloads"`

@@ -144,7 +144,7 @@ Traversal benchmarks show 0 allocs/op for all iterator types. Mutation benchmark
 
 ## Related
 
-- M2 milestone in `ROADMAP_V2.md`
+- `website/docs/memory-model.md`
 - `internal/dom/store.go` — canonical implementation
 - `internal/dom/store_traverse.go` — iterator implementations
 - `internal/dom/api_inventory.go` — migration plan from pointer-based APIs
