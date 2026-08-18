@@ -190,7 +190,7 @@ The CPU backend is competitive on small geometries and complex borders but loses
 
 ## Related
 
-- M6 and M11 milestones in `ROADMAP_V2.md`
+- `website/docs/backend-integration.md`
 - `internal/renderer/frame/raster/backend.go` — `Backend` interface
 - `internal/renderer/frame/raster/cpu_backend.go` — CPU implementation
 - `internal/renderer/frame/raster/cg_backend_darwin.go` — CoreGraphics implementation

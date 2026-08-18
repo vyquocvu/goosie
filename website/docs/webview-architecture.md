@@ -243,8 +243,8 @@ The headless variant (`cmd/headless`) enables scripted rendering without opening
 
 | Document | Covers |
 |---|---|
-| `ARCHITECTURE.md` | Full system architecture, component flow, all subsystems |
-| `PERFORMANCE.md` | Performance optimizations, benchmarks, profiling |
+| `architecture-deep-dives.md` | Subsystem architecture and component flows |
+| `memory-model.md` | Memory ownership, budgets, and profiling guidance |
 | `memory-model.md` | Cache budgets, eviction, memory management |
 | `package-ownership.md` | Package boundaries, responsibilities, import rules |
 | `adr/0003-raster-backend-boundaries.md` | ADR for raster backend interface and selection |

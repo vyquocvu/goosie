@@ -8,16 +8,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// settingsPanel renders the browser settings as an editable form.
-// The previous implementation only displayed the values; this
-// version lets the user change them in-place. Changes are applied
-// immediately through the settingsProvider, which is responsible
-// for persistence (typically the browser profile store).
-//
-// The form is split into two sections: General (homepage and
-// default search engine) and Privacy (JS and image toggles). This
-// matches the spec in ROADMAP_DEVTOOLS.md and the look of Chrome's
-// DevTools Settings tab.
+// settingsPanel renders editable general and privacy settings. Changes are
+// applied immediately through the settingsProvider, which handles persistence.
 type settingsPanel struct {
 	fyne.Container
 

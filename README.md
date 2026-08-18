@@ -129,13 +129,10 @@ The end-to-end suite requires Playwright and network access. Install Playwright 
 
 ## Documentation
 
-- [Architecture](website/docs/architecture.md)
+- [Architecture deep dives](website/docs/architecture-deep-dives.md)
+- [Package ownership](website/docs/package-ownership.md)
 - [Supported Web Platform](website/docs/supported-web-platform.md)
-- [Documentation Site](website/docs/intro.md)
-- [Testing](TESTING.md)
-- [Performance](PERFORMANCE.md)
-- [Roadmap](ROADMAP_V2.md)
-- [MCP Integration Roadmap](ROADMAP_MCP.md)
+- [MCP architecture](website/docs/mcp-architecture.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

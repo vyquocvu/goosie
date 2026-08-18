@@ -298,5 +298,5 @@ Package ownership should not change without consulting this document. When owner
 
 1. Update this document.
 2. Update package doc comments.
-3. Update any stale ARCHITECTURE.md diagrams.
+3. Update stale diagrams in `architecture-deep-dives.md`.
 4. Ensure import-layer rules are preserved.

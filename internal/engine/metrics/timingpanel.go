@@ -188,11 +188,8 @@ type StatusThresholds struct {
 // DefaultStatusThresholds are the engine-default warning/slow
 // thresholds applied when the caller does not override them.
 //
-// The defaults are intentionally conservative: an isolated script
-// run on the reference machine clears all phases well under
-// WarnAt, while DocumentOrder-class interactive loads typically
-// sit between WarnAt and SlowAt. Tuned for the contributor
-// workstation (see ARCHITECTURE.md and PERFORMANCE.md).
+// The defaults are intentionally conservative: isolated scripts should remain
+// below WarnAt, while interactive document loads may approach SlowAt.
 var DefaultStatusThresholds = StatusThresholds{
 	WarnAt: 50 * time.Millisecond,
 	SlowAt: 250 * time.Millisecond,

@@ -85,7 +85,7 @@ protected side boundaries:
 
 ## 5. Optional Streamable HTTP requirements
 
-HTTP is forbidden until Phase 7 prerequisites in `ROADMAP_MCP.md` are met.
+HTTP must remain disabled unless the deployment satisfies the security requirements in this document.
 
 - Bind `127.0.0.1`/`::1` only by default; never `0.0.0.0` implicitly.
 - Validate `Origin` on every POST/GET; reject invalid present origins with 403.
