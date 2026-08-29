@@ -35,12 +35,14 @@ func (t linkColorTheme) Color(name fyne.ThemeColorName, v fyne.ThemeVariant) col
 	return t.Theme.Color(name, v)
 }
 
+var defaultUALinkColor = color.RGBA{R: 0, G: 0, B: 0xee, A: 0xff}
+
 // applyLinkColor wraps a hyperlink widget in a theme override carrying the
 // node's computed color. Fyne's Hyperlink hardcodes ColorNameHyperlink in its
 // text segment, so a per-widget theme is the only way to recolor it. Returns
-// the original object when the node has no computed color.
+// the original object when the node has no computed color or uses the default link color.
 func applyLinkColor(node *RenderNode, obj fyne.CanvasObject) fyne.CanvasObject {
-	if node == nil || node.ComputedStyle == nil || node.ComputedStyle.Color == nil {
+	if node == nil || node.ComputedStyle == nil || node.ComputedStyle.Color == nil || node.ComputedStyle.Color == defaultUALinkColor {
 		return obj
 	}
 	return container.NewThemeOverride(obj, linkColorTheme{Theme: theme.Current(), link: node.ComputedStyle.Color})

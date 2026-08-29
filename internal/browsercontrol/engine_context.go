@@ -308,6 +308,11 @@ func (ec *engineContext) Navigate(ctx context.Context, url string, waitUntil Wai
 		return NavigationResult{}, NewError(ErrInternal, "parse error: "+parseErr.Error(), true, nil)
 	}
 
+	if ec.jsRuntime != nil {
+		ec.jsRuntime.SetOrigin(url)
+		ec.jsRuntime.LoadHTML(htmlContent)
+	}
+
 	ec.sess.Interactive()
 
 	title := extractTitle(doc)

@@ -1514,13 +1514,16 @@ func inlineScriptsByPosition(doc *ghtml.Node) map[int]string {
 		if n.Type == ghtml.ElementNode {
 			if n.Data == "script" {
 				hasSrc := false
+				typeAttr := ""
 				for _, attr := range n.Attr {
 					if attr.Key == "src" && attr.Val != "" {
 						hasSrc = true
-						break
+					}
+					if attr.Key == "type" {
+						typeAttr = attr.Val
 					}
 				}
-				if !hasSrc {
+				if !hasSrc && dom.IsJavaScriptMIMEType(typeAttr) {
 					var sb strings.Builder
 					for c := n.FirstChild; c != nil; c = c.NextSibling {
 						if c.Type == ghtml.TextNode {

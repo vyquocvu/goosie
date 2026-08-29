@@ -2,6 +2,7 @@ package js
 
 import (
 	"testing"
+	"time"
 )
 
 func TestDatasetRead(t *testing.T) {
@@ -203,3 +204,226 @@ func TestCreateHTMLDocument(t *testing.T) {
 		t.Errorf("createHTMLDocument did not create the expected structure")
 	}
 }
+
+func TestWindowEventTarget(t *testing.T) {
+	rt := NewRuntime()
+	val, err := rt.RunScript(`
+		var loadFired = false;
+		var customDetail = null;
+		var onceCount = 0;
+
+		window.addEventListener("load", function(e) {
+			loadFired = (e.type === "load" && e.target === window && e.currentTarget === window);
+		});
+
+		globalThis.addEventListener("custom", function(e) {
+			customDetail = e.detail;
+		});
+
+		window.addEventListener("onceEvent", function() {
+			onceCount++;
+		}, { once: true });
+
+		var ev = new Event("load");
+		window.dispatchEvent(ev);
+
+		globalThis.dispatchEvent(new CustomEvent("custom", { detail: { score: 99 } }));
+
+		window.dispatchEvent(new Event("onceEvent"));
+		window.dispatchEvent(new Event("onceEvent"));
+
+		loadFired && customDetail && customDetail.score === 99 && onceCount === 1;
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected Window EventTarget tests to pass")
+	}
+}
+
+func TestGlobalScopeMirroring(t *testing.T) {
+	rt := NewRuntime()
+	// Step 1: Assign properties to window in an IIFE
+	_, err := rt.RunScript(`
+		(function(w) {
+			w.ga = function(action, id) { return action + ":" + id; };
+			w.$ = function(selector) { return "jQuery(" + selector + ")"; };
+			w.jQuery = w.$;
+			w.env = { mode: "production", version: "1.0.0" };
+		})(window);
+	`)
+	if err != nil {
+		t.Fatalf("script 1 failed: %v", err)
+	}
+
+	// Step 2: Access properties in subsequent script as bare global variables
+	val, err := rt.RunScript(`
+		var r1 = ga("create", "UA-12345");
+		var r2 = $("#main");
+		var r3 = jQuery.name || "jq";
+		var r4 = env.mode;
+		r1 === "create:UA-12345" && r2 === "jQuery(#main)" && r4 === "production";
+	`)
+	if err != nil {
+		t.Fatalf("script 2 failed: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected global scope mirroring to succeed")
+	}
+}
+
+func TestEventDispatchTargetContext(t *testing.T) {
+	rt := NewRuntime()
+	rt.LoadHTML(`<html><body><button id="btn" class="active">Click</button></body></html>`)
+	val, err := rt.RunScript(`
+		var btn = document.getElementById("btn");
+		var targetCorrect = false;
+		var readyStateObserved = "";
+
+		btn.addEventListener("click", function(event) {
+			targetCorrect = (event.target === btn && event.currentTarget === btn);
+		});
+		btn.dispatchEvent(new Event("click", { bubbles: true }));
+
+		document.addEventListener("readystatechange", function(event) {
+			if (event.target && event.target.readyState) {
+				readyStateObserved = event.target.readyState;
+			}
+		});
+		document.dispatchEvent(new Event("readystatechange"));
+
+		targetCorrect && readyStateObserved === "complete";
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected Event dispatch target context test to pass")
+	}
+}
+
+func TestElementHasAttributesAndAttributesIterator(t *testing.T) {
+	rt := NewRuntime()
+	rt.LoadHTML(`<html><body><div id="target" class="foo bar" data-name="test" title="hello"></div></body></html>`)
+	val, err := rt.RunScript(`
+		var target = document.getElementById("target");
+		var empty = document.createElement("span");
+
+		var hasAttrsTarget = target.hasAttributes();
+		var hasAttrsEmpty = empty.hasAttributes();
+
+		var collected = [];
+		for (const attr of target.attributes) {
+			collected.push(attr.name + "=" + attr.value);
+		}
+
+		var len = target.attributes.length;
+		var item0 = target.attributes.item(0);
+		var classAttr = target.attributes.getNamedItem("class");
+
+		hasAttrsTarget === true &&
+		hasAttrsEmpty === false &&
+		len >= 4 &&
+		collected.length === len &&
+		item0 !== null && typeof item0.name === "string" &&
+		classAttr !== null && classAttr.value === "foo bar";
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected Element attributes and iterator test to pass")
+	}
+}
+
+func TestMediaAndDocumentAPIStubs(t *testing.T) {
+	rt := NewRuntime()
+	rt.SetOrigin("https://example.com/sub/page.html?foo=bar#section1")
+	val, err := rt.RunScript(`
+		var audio = document.createElement("audio");
+		var playPromise = audio.play();
+		var isPromise = (playPromise && typeof playPromise.then === "function");
+		audio.pause();
+		audio.load();
+		var canPlay = audio.canPlayType("audio/mpeg");
+
+		var mediaPropsOk = (audio.paused === true && audio.volume === 1 && audio.muted === false && audio.readyState === 4);
+
+		var docLocOk = (document.location === window.location &&
+		                document.location.protocol === "https:" &&
+		                document.location.hostname === "example.com" &&
+		                document.location.pathname === "/sub/page.html");
+
+		isPromise && canPlay === "probably" && mediaPropsOk && docLocOk;
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected Media and Document API stubs test to pass")
+	}
+}
+
+func TestTimerStringEvaluation(t *testing.T) {
+	rt := NewRuntime()
+	_, err := rt.RunScript(`
+		window.__timerEvalRun = false;
+		setTimeout("window.__timerEvalRun = true", 10);
+	`)
+	if err != nil {
+		t.Fatalf("setTimeout failed: %v", err)
+	}
+
+	// Wait for timer to execute
+	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		val, _ := rt.RunScript(`window.__timerEvalRun`)
+		if val != nil && val.ToBoolean() {
+			return
+		}
+	}
+	t.Errorf("expected timer string evaluation to set window.__timerEvalRun = true")
+}
+
+func TestJSExpandedQuerySelectors(t *testing.T) {
+	rt := NewRuntime()
+	rt.LoadHTML(`
+		<html>
+		<body>
+			<div class="NavigationDrawer-header">
+				<a href="/home" id="brand">Goosie</a>
+			</div>
+			<div class="article-toc">
+				<a href="#intro" class="toc-link is-active">Intro</a>
+				<a href="https://example.com" class="external">Ext</a>
+			</div>
+			<ul class="items">
+				<li class="item primary active"><span class="label">One</span></li>
+			</ul>
+		</body>
+		</html>
+	`)
+
+	val, err := rt.RunScript(`
+		var brand = document.querySelector(".NavigationDrawer-header > a");
+		var tocLink = document.querySelector(".article-toc a[href^='#']");
+		var item = document.querySelector(".item.primary.active");
+
+		var matchesChild = brand && brand.matches(".NavigationDrawer-header > a");
+		var matchesDescendant = tocLink && tocLink.matches(".article-toc a[href^='#']");
+		var closestHeader = brand && brand.closest(".NavigationDrawer-header") !== null;
+
+		brand !== null && brand.id === "brand" &&
+		tocLink !== null && tocLink.textContent === "Intro" &&
+		item !== null &&
+		matchesChild && matchesDescendant && closestHeader;
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("expected expanded query selectors to match in JS DOM")
+	}
+}
+

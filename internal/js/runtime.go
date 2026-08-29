@@ -1,11 +1,13 @@
 package js
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -304,6 +306,32 @@ func (r *Runtime) InterruptedCount() uint64 {
 
 func (r *Runtime) SetOrigin(origin string) {
 	r.origin = origin
+	if locVal := r.vm.Get("location"); locVal != nil && locVal != goja.Undefined() && locVal != goja.Null() {
+		if locObj := locVal.ToObject(r.vm); locObj != nil {
+			if parsedURL, err := url.Parse(origin); err == nil {
+				scheme := parsedURL.Scheme
+				if scheme != "" && !strings.HasSuffix(scheme, ":") {
+					scheme += ":"
+				}
+				locObj.Set("href", origin)
+				locObj.Set("protocol", scheme)
+				locObj.Set("host", parsedURL.Host)
+				locObj.Set("hostname", parsedURL.Hostname())
+				locObj.Set("port", parsedURL.Port())
+				locObj.Set("pathname", parsedURL.Path)
+				if parsedURL.RawQuery != "" {
+					locObj.Set("search", "?"+parsedURL.RawQuery)
+				} else {
+					locObj.Set("search", "")
+				}
+				if parsedURL.Fragment != "" {
+					locObj.Set("hash", "#"+parsedURL.Fragment)
+				} else {
+					locObj.Set("hash", "")
+				}
+			}
+		}
+	}
 }
 
 func (r *Runtime) SetLocalStorageAdapter(adapter LocalStorageAdapter) {
@@ -436,17 +464,221 @@ func (r *Runtime) setupDocumentAPI() {
 	jsDOMScript := `
 (function() {
   function nodeId(node) {
-    if (!node || !node.attributes) return "";
-    return String(node.attributes["__goosie_id"] || "");
+    if (!node || !node._rawAttributes) return "";
+    return String(node._rawAttributes["__goosie_id"] || "");
   }
 
-  class Node {
+  class Attr {
+    constructor(name, value, ownerElement) {
+      this.name = name;
+      this.value = value;
+      this.specified = true;
+      this.ownerElement = ownerElement || null;
+    }
+    get nodeName() { return this.name; }
+    get nodeValue() { return this.value; }
+    set nodeValue(v) { this.value = String(v); if (this.ownerElement) this.ownerElement.setAttribute(this.name, this.value); }
+    get textContent() { return this.value; }
+    set textContent(v) { this.value = String(v); if (this.ownerElement) this.ownerElement.setAttribute(this.name, this.value); }
+  }
+
+  class NamedNodeMap {
+    constructor(element) {
+      this._element = element;
+    }
+    get length() {
+      let count = 0;
+      const attrs = this._element._rawAttributes || {};
+      for (const k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k) && k !== '__goosie_id') {
+          count++;
+        }
+      }
+      return count;
+    }
+    item(i) {
+      const items = this._getItems();
+      return items[i] || null;
+    }
+    getNamedItem(name) {
+      if (!name) return null;
+      const k = String(name).toLowerCase();
+      if (this._element.hasAttribute(k)) {
+        return new Attr(k, this._element.getAttribute(k), this._element);
+      }
+      return null;
+    }
+    setNamedItem(attr) {
+      if (attr && attr.name) {
+        this._element.setAttribute(attr.name, attr.value);
+      }
+    }
+    removeNamedItem(name) {
+      if (!name) return null;
+      const k = String(name).toLowerCase();
+      if (this._element.hasAttribute(k)) {
+        const val = this._element.getAttribute(k);
+        this._element.removeAttribute(k);
+        return new Attr(k, val, this._element);
+      }
+      throw new Error("NotFoundError");
+    }
+    _getItems() {
+      const items = [];
+      const attrs = this._element._rawAttributes || {};
+      for (const k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k) && k !== '__goosie_id') {
+          items.push(new Attr(k, String(attrs[k]), this._element));
+        }
+      }
+      return items;
+    }
+    [Symbol.iterator]() {
+      const items = this._getItems();
+      let index = 0;
+      return {
+        next() {
+          if (index < items.length) {
+            return { value: items[index++], done: false };
+          }
+          return { done: true };
+        }
+      };
+    }
+  }
+
+  function createNamedNodeMap(element) {
+    const map = new NamedNodeMap(element);
+    return new Proxy(map, {
+      get(target, prop) {
+        if (prop === Symbol.iterator) {
+          return target[Symbol.iterator].bind(target);
+        }
+        if (prop === 'length') return target.length;
+        if (prop === 'item') return target.item.bind(target);
+        if (prop === 'getNamedItem') return target.getNamedItem.bind(target);
+        if (prop === 'setNamedItem') return target.setNamedItem.bind(target);
+        if (prop === 'removeNamedItem') return target.removeNamedItem.bind(target);
+        if (typeof prop === 'string') {
+          const num = Number(prop);
+          if (Number.isInteger(num) && num >= 0) {
+            return target.item(num) || undefined;
+          }
+          if (target._element && target._element.hasAttribute(prop)) {
+            return target.getNamedItem(prop);
+          }
+        }
+        return target[prop];
+      },
+      has(target, prop) {
+        if (typeof prop === 'string' && target._element && target._element.hasAttribute(prop)) {
+          return true;
+        }
+        return prop in target;
+      }
+    });
+  }
+
+  class Event {
+    constructor(type, options = {}) {
+      this.type = String(type || '');
+      this.bubbles = !!(options && options.bubbles);
+      this.cancelable = !!(options && options.cancelable);
+      this.defaultPrevented = false;
+      this.target = null;
+      this.currentTarget = null;
+      this._propagationStopped = false;
+      this._immediatePropagationStopped = false;
+      this.timeStamp = Date.now();
+    }
+    preventDefault() {
+      if (this.cancelable) {
+        this.defaultPrevented = true;
+      }
+    }
+    stopPropagation() {
+      this._propagationStopped = true;
+    }
+    stopImmediatePropagation() {
+      this._immediatePropagationStopped = true;
+      this._propagationStopped = true;
+    }
+  }
+
+  class CustomEvent extends Event {
+    constructor(type, options = {}) {
+      super(type, options);
+      this.detail = (options && options.detail !== undefined) ? options.detail : null;
+    }
+  }
+
+  class EventTarget {
+    constructor() {
+      this._listeners = {};
+    }
+    addEventListener(type, listener, options) {
+      if (!type || !listener) return;
+      if (!this._listeners) this._listeners = {};
+      if (!this._listeners[type]) this._listeners[type] = [];
+      const once = typeof options === 'object' && !!(options && options.once);
+      if (once) {
+        var orig = listener;
+        var wrapper = function(e) {
+          if (typeof orig === 'function') orig.call(this, e);
+          else if (orig && typeof orig.handleEvent === 'function') orig.handleEvent(e);
+        };
+        wrapper._once = true;
+        wrapper._original = orig;
+        this._listeners[type].push(wrapper);
+      } else {
+        this._listeners[type].push(listener);
+      }
+    }
+    removeEventListener(type, listener, options) {
+      if (!type || !listener || !this._listeners || !this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(l => {
+        return l !== listener && l._original !== listener;
+      });
+    }
+    dispatchEvent(event) {
+      if (!event) return true;
+      if (!event.target) {
+        event.target = this;
+      }
+      event.currentTarget = this;
+      if (this._listeners && this._listeners[event.type]) {
+        const entries = this._listeners[event.type].slice();
+        for (let i = 0; i < entries.length; i++) {
+          const l = entries[i];
+          if (l && l._once) {
+            this.removeEventListener(event.type, l._original || l);
+          }
+          try {
+            if (typeof l === 'function') {
+              l.call(this, event);
+            } else if (l && typeof l.handleEvent === 'function') {
+              l.handleEvent(event);
+            }
+          } catch(e) {
+            console.error(e);
+          }
+          if (event._immediatePropagationStopped) break;
+        }
+      }
+      if (this.parentNode && event.bubbles && !event._propagationStopped) {
+        this.parentNode.dispatchEvent(event);
+      }
+      return !event.defaultPrevented;
+    }
+  }
+
+  class Node extends EventTarget {
     constructor(nodeType, nodeName) {
+      super();
       this.nodeType = nodeType;
       this.nodeName = nodeName;
       this.parentNode = null;
       this.childNodes = [];
-      this._listeners = {};
     }
     
     get firstChild() { return this.childNodes[0] || null; }
@@ -464,25 +696,38 @@ func (r *Runtime) setupDocumentAPI() {
       return this.parentNode.childNodes[idx - 1] || null;
     }
     
-    appendChild(child) {
-       if (child.parentNode) {
-         child.parentNode.removeChild(child);
-       }
-       child.parentNode = this;
-       this.childNodes.push(child);
-       if (window.__onDOMChanged) window.__onDOMChanged("insert", nodeId(child), nodeId(this), "", "", "");
-       return child;
+    get parentElement() {
+      if (this.parentNode && this.parentNode.nodeType === 1) return this.parentNode;
+      return null;
+    }
 
+    contains(otherNode) {
+      if (!otherNode) return false;
+      let curr = otherNode;
+      while (curr) {
+        if (curr === this) return true;
+        curr = curr.parentNode;
+      }
+      return false;
+    }
+
+    appendChild(child) {
+      if (child.parentNode) {
+        child.parentNode.removeChild(child);
+      }
+      child.parentNode = this;
+      this.childNodes.push(child);
+      if (window.__onDOMChanged) window.__onDOMChanged("insert", nodeId(child), nodeId(this), "", "", "");
+      return child;
     }
     
     removeChild(child) {
       const idx = this.childNodes.indexOf(child);
       if (idx !== -1) {
         this.childNodes.splice(idx, 1);
-         child.parentNode = null;
-         if (window.__onDOMChanged) window.__onDOMChanged("remove", nodeId(child), nodeId(this), "", "", "");
-         return child;
-
+        child.parentNode = null;
+        if (window.__onDOMChanged) window.__onDOMChanged("remove", nodeId(child), nodeId(this), "", "", "");
+        return child;
       }
       throw new Error("NotFoundErr");
     }
@@ -498,10 +743,9 @@ func (r *Runtime) setupDocumentAPI() {
         newChild.parentNode.removeChild(newChild);
       }
       newChild.parentNode = this;
-       this.childNodes.splice(idx, 0, newChild);
-       if (window.__onDOMChanged) window.__onDOMChanged("insert", nodeId(newChild), nodeId(this), nodeId(refChild), "", "");
-       return newChild;
-
+      this.childNodes.splice(idx, 0, newChild);
+      if (window.__onDOMChanged) window.__onDOMChanged("insert", nodeId(newChild), nodeId(this), nodeId(refChild), "", "");
+      return newChild;
     }
     
     replaceChild(newChild, oldChild) {
@@ -513,44 +757,18 @@ func (r *Runtime) setupDocumentAPI() {
       }
       oldChild.parentNode = null;
       newChild.parentNode = this;
-       this.childNodes[idx] = newChild;
-       if (window.__onDOMChanged) window.__onDOMChanged("replace", nodeId(oldChild), nodeId(this), nodeId(newChild), "", "");
-       return oldChild;
-
-    }
-    
-    addEventListener(type, listener) {
-      if (!this._listeners[type]) this._listeners[type] = [];
-      this._listeners[type].push(listener);
-    }
-    
-    removeEventListener(type, listener) {
-      if (!this._listeners[type]) return;
-      this._listeners[type] = this._listeners[type].filter(l => l !== listener);
-    }
-    
-    dispatchEvent(event) {
-      const listeners = this._listeners[event.type] || [];
-      listeners.forEach(l => {
-        try {
-          if (typeof l === "function") l.call(this, event);
-          else if (l.handleEvent) l.handleEvent(event);
-        } catch(e) {
-          console.error(e);
-        }
-      });
-      if (this.parentNode && event.bubbles) {
-        this.parentNode.dispatchEvent(event);
-      }
+      this.childNodes[idx] = newChild;
+      if (window.__onDOMChanged) window.__onDOMChanged("replace", nodeId(oldChild), nodeId(this), nodeId(newChild), "", "");
+      return oldChild;
     }
 
     cloneNode(deep) {
       let clone;
       if (this.nodeType === 1) {
         clone = new Element(this.tagName);
-        for (const key in this.attributes) {
-          if (Object.prototype.hasOwnProperty.call(this.attributes, key) && key !== "__goosie_id") {
-            clone.attributes[key] = this.attributes[key];
+        for (const key in this._rawAttributes) {
+          if (Object.prototype.hasOwnProperty.call(this._rawAttributes, key) && key !== "__goosie_id") {
+            clone.setAttribute(key, this._rawAttributes[key]);
           }
         }
       } else if (this.nodeType === 3) {
@@ -590,26 +808,293 @@ func (r *Runtime) setupDocumentAPI() {
     }
     get textContent() { return this._textContent; }
     set textContent(val) {
-       this._textContent = val;
-       if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
-
+      this._textContent = val;
+      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
     }
     get nodeValue() { return this._textContent; }
     set nodeValue(val) {
-       this._textContent = val;
-       if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
-
+      this._textContent = val;
+      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
     }
+  }
+
+  // Selector matching helpers for JS DOM
+  function jsSplitSelectorList(sel) {
+    const results = [];
+    let current = '';
+    let inQuotes = false;
+    let quoteChar = '';
+    let bracketDepth = 0;
+    for (let i = 0; i < sel.length; i++) {
+      const ch = sel[i];
+      if (inQuotes) {
+        current += ch;
+        if (ch === quoteChar) inQuotes = false;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inQuotes = true;
+        quoteChar = ch;
+        current += ch;
+        continue;
+      }
+      if (ch === '[') {
+        bracketDepth++;
+        current += ch;
+        continue;
+      }
+      if (ch === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+        current += ch;
+        continue;
+      }
+      if (ch === ',' && bracketDepth === 0) {
+        const p = current.trim();
+        if (p) results.push(p);
+        current = '';
+        continue;
+      }
+      current += ch;
+    }
+    const p = current.trim();
+    if (p) results.push(p);
+    return results;
+  }
+
+  function jsParseAttr(raw) {
+    raw = raw.trim();
+    const ops = ["^=", "$=", "*=", "~=", "|=", "="];
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      const idx = raw.indexOf(op);
+      if (idx !== -1) {
+        const name = raw.slice(0, idx).trim();
+        let val = raw.slice(idx + op.length).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        return { name: name.toLowerCase(), op: op, val: val };
+      }
+    }
+    return { name: raw.toLowerCase(), op: "", val: "" };
+  }
+
+  function jsParseCompound(s, comb) {
+    const step = { comb: comb, tag: "", ids: [], classes: [], attrs: [], pseudos: [] };
+    let i = 0;
+    while (i < s.length && s[i] !== '#' && s[i] !== '.' && s[i] !== '[' && s[i] !== ':') {
+      step.tag += s[i];
+      i++;
+    }
+    step.tag = step.tag.trim().toLowerCase();
+
+    while (i < s.length) {
+      const ch = s[i];
+      if (ch === '#') {
+        i++;
+        let id = '';
+        while (i < s.length && s[i] !== '#' && s[i] !== '.' && s[i] !== '[' && s[i] !== ':') {
+          id += s[i++];
+        }
+        if (id) step.ids.push(id);
+      } else if (ch === '.') {
+        i++;
+        let cls = '';
+        while (i < s.length && s[i] !== '#' && s[i] !== '.' && s[i] !== '[' && s[i] !== ':') {
+          cls += s[i++];
+        }
+        if (cls) step.classes.push(cls);
+      } else if (ch === '[') {
+        let raw = '';
+        let inQuotes = false;
+        let qChar = '';
+        while (i < s.length) {
+          const ach = s[i++];
+          if (inQuotes) {
+            raw += ach;
+            if (ach === qChar) inQuotes = false;
+            continue;
+          }
+          if (ach === '"' || ach === "'") {
+            inQuotes = true;
+            qChar = ach;
+            raw += ach;
+            continue;
+          }
+          if (ach === ']') {
+            break;
+          }
+          if (ach !== '[') raw += ach;
+        }
+        step.attrs.push(jsParseAttr(raw));
+      } else if (ch === ':') {
+        i++;
+        let ps = '';
+        while (i < s.length && s[i] !== '#' && s[i] !== '.' && s[i] !== '[' && s[i] !== ':') {
+          ps += s[i++];
+        }
+        if (ps) step.pseudos.push(ps.trim().toLowerCase());
+      } else {
+        i++;
+      }
+    }
+    return step;
+  }
+
+  function jsParseSequence(seq) {
+    const steps = [];
+    let currentComb = "";
+    let currentTok = "";
+    let inQuotes = false;
+    let quoteChar = '';
+    let bracketDepth = 0;
+
+    function flush() {
+      const tok = currentTok.trim();
+      currentTok = "";
+      if (!tok) return;
+      steps.push(jsParseCompound(tok, currentComb));
+      currentComb = " ";
+    }
+
+    for (let i = 0; i < seq.length; i++) {
+      const ch = seq[i];
+      if (inQuotes) {
+        currentTok += ch;
+        if (ch === quoteChar) inQuotes = false;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inQuotes = true;
+        quoteChar = ch;
+        currentTok += ch;
+        continue;
+      }
+      if (ch === '[') {
+        bracketDepth++;
+        currentTok += ch;
+        continue;
+      }
+      if (ch === ']') {
+        if (bracketDepth > 0) bracketDepth--;
+        currentTok += ch;
+        continue;
+      }
+      if (bracketDepth === 0) {
+        if (ch === '>' || ch === '+' || ch === '~') {
+          flush();
+          currentComb = ch;
+          continue;
+        }
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+          let j = i + 1;
+          while (j < seq.length && (seq[j] === ' ' || seq[j] === '\t' || seq[j] === '\n' || seq[j] === '\r')) j++;
+          if (j < seq.length && (seq[j] === '>' || seq[j] === '+' || seq[j] === '~')) {
+            flush();
+            currentComb = seq[j];
+            i = j;
+            continue;
+          }
+          if (currentTok.length > 0) {
+            flush();
+            currentComb = " ";
+          }
+          continue;
+        }
+      }
+      currentTok += ch;
+    }
+    flush();
+    return steps;
+  }
+
+  function jsMatchCompound(el, step) {
+    if (!el || el.nodeType !== 1) return false;
+    if (step.tag && step.tag !== '*' && (el.tagName || '').toLowerCase() !== step.tag) {
+      return false;
+    }
+    for (let i = 0; i < step.ids.length; i++) {
+      if (el.getAttribute('id') !== step.ids[i]) return false;
+    }
+    for (let i = 0; i < step.classes.length; i++) {
+      if (!el.classList || !el.classList.contains(step.classes[i])) return false;
+    }
+    for (let i = 0; i < step.attrs.length; i++) {
+      const am = step.attrs[i];
+      if (!el.hasAttribute(am.name)) return false;
+      const val = el.getAttribute(am.name) || "";
+      switch (am.op) {
+        case "": break;
+        case "=": if (val !== am.val) return false; break;
+        case "^=": if (!val.startsWith(am.val)) return false; break;
+        case "$=": if (!val.endsWith(am.val)) return false; break;
+        case "*=": if (!val.includes(am.val)) return false; break;
+        case "~=": if (!val.split(/\s+/).includes(am.val)) return false; break;
+        case "|=": if (val !== am.val && !val.startsWith(am.val + "-")) return false; break;
+      }
+    }
+    for (let i = 0; i < step.pseudos.length; i++) {
+      const ps = step.pseudos[i];
+      if (ps === 'first-child') {
+        if (el.previousElementSibling) return false;
+      } else if (ps === 'last-child') {
+        if (el.nextElementSibling) return false;
+      } else if (ps === 'only-child') {
+        if (el.previousElementSibling || el.nextElementSibling) return false;
+      }
+    }
+    return true;
+  }
+
+  function jsMatchSequence(el, steps, idx) {
+    if (idx < 0) return true;
+    if (!jsMatchCompound(el, steps[idx])) return false;
+    if (idx === 0) return true;
+    const comb = steps[idx].comb;
+    if (comb === '>') {
+      const parent = el.parentElement;
+      if (!parent) return false;
+      return jsMatchSequence(parent, steps, idx - 1);
+    } else if (comb === ' ') {
+      let curr = el.parentElement;
+      while (curr) {
+        if (jsMatchSequence(curr, steps, idx - 1)) return true;
+        curr = curr.parentElement;
+      }
+      return false;
+    } else if (comb === '+') {
+      const sib = el.previousElementSibling;
+      if (!sib) return false;
+      return jsMatchSequence(sib, steps, idx - 1);
+    } else if (comb === '~') {
+      let sib = el.previousElementSibling;
+      while (sib) {
+        if (jsMatchSequence(sib, steps, idx - 1)) return true;
+        sib = sib.previousElementSibling;
+      }
+      return false;
+    }
+    return true;
   }
   
   class Element extends Node {
     constructor(tagName) {
       super(1, tagName);
       this.tagName = tagName;
-      this.attributes = {};
+      this._rawAttributes = {};
       if (window.__goosieIdCounter) {
-        this.attributes["__goosie_id"] = String(window.__goosieIdCounter++);
+        this._rawAttributes["__goosie_id"] = String(window.__goosieIdCounter++);
       }
+      this.attributes = createNamedNodeMap(this);
+
+      // Media element properties
+      this.paused = true;
+      this.currentTime = 0;
+      this.duration = 0;
+      this.volume = 1;
+      this.muted = false;
+      this.ended = false;
+      this.readyState = 4;
       
       const self = this;
       this.style = new Proxy({
@@ -636,17 +1121,6 @@ func (r *Runtime) setupDocumentAPI() {
             target.cssText = value;
             return true;
           }
-          // Only treat string values as CSS property assignments.
-          // Functions and other non-string values are polyfill
-          // extensions (setProperty, getPropertyValue,
-          // removeProperty) and must not be folded into the
-          // style attribute — otherwise the first call to
-          // 'el.style.setProperty = ...' would setAttribute the
-          // function source into the HTML style attribute,
-          // which the next __serialize pass would emit and the
-          // next re-parse would try to interpret as CSS. That
-          // bug is what made every DOM mutation cost a
-          // full-document re-serialize + re-parse + re-layout.
           if (typeof value !== "string") {
             target[prop] = value;
             return true;
@@ -677,6 +1151,29 @@ func (r *Runtime) setupDocumentAPI() {
         delete this.style[camel];
       };
     }
+
+    // Media element methods
+    play() {
+      this.paused = false;
+      return Promise.resolve();
+    }
+    pause() {
+      this.paused = true;
+    }
+    load() {
+      this.readyState = 4;
+    }
+    canPlayType(type) {
+      if (!type) return "";
+      type = String(type).toLowerCase();
+      if (type.includes("audio/mpeg") || type.includes("audio/mp3") || type.includes("audio/wav") || type.includes("audio/ogg") || type.includes("video/mp4") || type.includes("video/webm")) {
+        return "probably";
+      }
+      return "maybe";
+    }
+
+    get src() { return this.getAttribute("src") || ""; }
+    set src(val) { this.setAttribute("src", val); }
     
     get id() { return this.getAttribute("id") || ""; }
     set id(val) { this.setAttribute("id", val); }
@@ -688,23 +1185,23 @@ func (r *Runtime) setupDocumentAPI() {
       const self = this;
       return {
         add(...classes) {
-          const current = self.className ? self.className.split(/\\s+/) : [];
+          const current = self.className ? self.className.split(/\s+/) : [];
           classes.forEach(c => {
             if (current.indexOf(c) === -1) current.push(c);
           });
           self.className = current.join(" ");
         },
         remove(...classes) {
-          let current = self.className ? self.className.split(/\\s+/) : [];
+          let current = self.className ? self.className.split(/\s+/) : [];
           current = current.filter(c => classes.indexOf(c) === -1);
           self.className = current.join(" ");
         },
         contains(c) {
-          const current = self.className ? self.className.split(/\\s+/) : [];
+          const current = self.className ? self.className.split(/\s+/) : [];
           return current.indexOf(c) !== -1;
         },
         toggle(c) {
-          const current = self.className ? self.className.split(/\\s+/) : [];
+          const current = self.className ? self.className.split(/\s+/) : [];
           const idx = current.indexOf(c);
           if (idx === -1) {
             current.push(c);
@@ -716,26 +1213,39 @@ func (r *Runtime) setupDocumentAPI() {
       };
     }
     
+    hasAttributes() {
+      const attrs = this._rawAttributes || {};
+      for (const k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k) && k !== '__goosie_id') {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    hasAttribute(name) {
+      if (!name) return false;
+      return Object.prototype.hasOwnProperty.call(this._rawAttributes || {}, String(name).toLowerCase());
+    }
+
     getAttribute(name) {
-      const val = this.attributes[name.toLowerCase()];
+      if (!name) return null;
+      const val = (this._rawAttributes || {})[String(name).toLowerCase()];
       return val !== undefined ? String(val) : null;
     }
     
     setAttribute(name, value) {
-       const key = name.toLowerCase();
-       const oldValue = this.attributes[key] === undefined ? "" : String(this.attributes[key]);
-       const newValue = String(value);
-       this.attributes[key] = newValue;
-       if (window.__onDOMChanged) window.__onDOMChanged("set-attribute", nodeId(this), nodeId(this.parentNode), "", key, newValue);
-     }
+      const key = String(name).toLowerCase();
+      const newValue = String(value);
+      this._rawAttributes[key] = newValue;
+      if (window.__onDOMChanged) window.__onDOMChanged("set-attribute", nodeId(this), nodeId(this.parentNode), "", key, newValue);
+    }
 
-     removeAttribute(name) {
-       const key = name.toLowerCase();
-       const oldValue = this.attributes[key] === undefined ? "" : String(this.attributes[key]);
-       delete this.attributes[key];
-       if (window.__onDOMChanged) window.__onDOMChanged("set-attribute", nodeId(this), nodeId(this.parentNode), "", key, "");
-     }
-
+    removeAttribute(name) {
+      const key = String(name).toLowerCase();
+      delete this._rawAttributes[key];
+      if (window.__onDOMChanged) window.__onDOMChanged("set-attribute", nodeId(this), nodeId(this.parentNode), "", key, "");
+    }
     
     get children() {
       return this.childNodes.filter(n => n.nodeType === 1);
@@ -770,9 +1280,8 @@ func (r *Runtime) setupDocumentAPI() {
     
     set textContent(val) {
       this.childNodes = [new TextNode(val)];
-       this.childNodes[0].parentNode = this;
-       if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
-
+      this.childNodes[0].parentNode = this;
+      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
     }
     
     get innerHTML() {
@@ -833,25 +1342,49 @@ func (r *Runtime) setupDocumentAPI() {
       });
     }
 
-    hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name.toLowerCase()); }
+    matches(selector) {
+      if (!selector) return false;
+      const list = jsSplitSelectorList(selector);
+      for (let i = 0; i < list.length; i++) {
+        const steps = jsParseSequence(list[i]);
+        if (steps.length > 0 && jsMatchSequence(this, steps, steps.length - 1)) {
+          return true;
+        }
+      }
+      return false;
+    }
 
     closest(selector) {
       let el = this;
       while (el) {
         if (el.matches && el.matches(selector)) return el;
-        el = el.parentNode;
+        el = el.parentElement;
       }
       return null;
     }
 
-    matches(selector) {
-      if (!selector) return false;
-      selector = selector.trim();
-      if (selector.startsWith('#')) return this.getAttribute('id') === selector.slice(1);
-      if (selector.startsWith('.')) return (this.classList && this.classList.contains(selector.slice(1)));
-      if (/^[a-zA-Z]/.test(selector)) return this.tagName && this.tagName.toLowerCase() === selector.toLowerCase();
-      if (selector.includes('.')) return selector.split('.').filter(Boolean).every(cls => this.classList && this.classList.contains(cls));
-      return false;
+    querySelector(sel) {
+      if (!sel) return null;
+      for (const child of this.children) {
+        if (child.matches && child.matches(sel)) return child;
+        if (child.querySelector) {
+          const found = child.querySelector(sel);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    querySelectorAll(sel) {
+      if (!sel) return [];
+      let results = [];
+      for (const child of this.children) {
+        if (child.matches && child.matches(sel)) results.push(child);
+        if (child.querySelectorAll) {
+          results = results.concat(child.querySelectorAll(sel));
+        }
+      }
+      return results;
     }
 
     get outerHTML() {
@@ -914,11 +1447,6 @@ func (r *Runtime) setupDocumentAPI() {
     }
     
     createElement(tagName) {
-      // Notify the engine when JavaScript constructs an element the engine
-      // does not implement. This is the "Canvas API required by page
-      // behavior" M12.1 runtime trigger — it complements the HTML parser's
-      // detection of unsupported tags in the incoming markup. The Go-side
-      // hook deduplicates by kind so the report is once per page per kind.
       if (typeof window.__reportRuntimeUnsupportedFeature === "function") {
         window.__reportRuntimeUnsupportedFeature(tagName);
       }
@@ -941,6 +1469,28 @@ func (r *Runtime) setupDocumentAPI() {
       return this.documentElement.getElementsByTagName(tagName);
     }
     
+    get location() {
+      return window.location;
+    }
+    set location(val) {
+      window.location = val;
+    }
+    get URL() {
+      return window.location ? window.location.href : "";
+    }
+    get documentURI() {
+      return this.URL;
+    }
+    get referrer() {
+      return "";
+    }
+    get domain() {
+      return window.location ? window.location.hostname : "";
+    }
+    get currentScript() {
+      return null;
+    }
+
     querySelector(sel) {
       return window.__querySelectorHelper(sel);
     }
@@ -950,35 +1500,33 @@ func (r *Runtime) setupDocumentAPI() {
     }
   }
   
-  class Event {
-    constructor(type, options = {}) {
-      this.type = type;
-      this.bubbles = !!options.bubbles;
-      this.cancelable = !!options.cancelable;
-    }
-  }
-  
-  class CustomEvent extends Event {
-    constructor(type, options = {}) {
-      super(type, options);
-      this.detail = options.detail || null;
-    }
-  }
-  
+  window.EventTarget = EventTarget;
   window.Event = Event;
   window.CustomEvent = CustomEvent;
-  globalThis.Event = Event;
-  globalThis.CustomEvent = CustomEvent;
-  
   window.Node = Node;
   window.Element = Element;
   window.TextNode = TextNode;
   window.Document = Document;
+  window.Attr = Attr;
+  window.NamedNodeMap = NamedNodeMap;
   
+  globalThis.EventTarget = EventTarget;
+  globalThis.Event = Event;
+  globalThis.CustomEvent = CustomEvent;
   globalThis.Node = Node;
   globalThis.Element = Element;
   globalThis.TextNode = TextNode;
   globalThis.Document = Document;
+  globalThis.Attr = Attr;
+  globalThis.NamedNodeMap = NamedNodeMap;
+
+  window._listeners = {};
+  window.addEventListener = EventTarget.prototype.addEventListener.bind(window);
+  window.removeEventListener = EventTarget.prototype.removeEventListener.bind(window);
+  window.dispatchEvent = EventTarget.prototype.dispatchEvent.bind(window);
+  globalThis.addEventListener = window.addEventListener;
+  globalThis.removeEventListener = window.removeEventListener;
+  globalThis.dispatchEvent = window.dispatchEvent;
   
   window.__goosieIdCounter = 1;
   
@@ -994,26 +1542,10 @@ func (r *Runtime) setupDocumentAPI() {
     if (node.nodeType === 1) {
       const tag = node.tagName.toLowerCase();
       let html = "<" + tag;
-      // Iterate the element's own attribute keys only. The
-      // previous implementation used 'for (const key in
-      // node.attributes)' which walked the Object.prototype
-      // chain and emitted every inherited method
-      // (constructor, toString, valueOf, hasOwnProperty, ...) as
-      // a fake attribute, plus any function-valued getter
-      // (style, dataset, classList) as its full source. The
-      // resulting HTML ballooned 6-10x larger than the actual
-      // content, making every mutation reserialize, reparse, and
-      // relayout an unnecessarily large document.
-      const attrs = node.attributes || {};
+      const attrs = node._rawAttributes || {};
       const keys = Object.keys(attrs);
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        // Skip non-string attribute values (function references
-        // and undefined entries from the polyfill's attribute
-        // map). Also skip the internal __goosie_id the DOM
-        // bridge uses to round-trip elements back to Go — it
-        // is not a real HTML attribute.
-        if (false && key === "__goosie_id") continue; // keep __goosie_id for the Go-side round-trip
         const v = attrs[key];
         if (typeof v !== "string") continue;
         html += " " + key + '="' + v + '"';
@@ -1041,11 +1573,6 @@ func (r *Runtime) setupDocumentAPI() {
     }
   };
 
-  // Bridge: JavaScript-side hook that forwards to __reportRuntimeUnsupportedFeatureGo.
-  // Used by document.createElement to detect when pages build engine-unsupported
-  // elements dynamically (canvas, video, audio, iframe, object, embed).
-  // Unknown tag names are ignored by the Go side, so passing them through
-  // is safe.
   window.__reportRuntimeUnsupportedFeature = function(tagName) {
     if (typeof __reportRuntimeUnsupportedFeatureGo === "function") {
       __reportRuntimeUnsupportedFeatureGo(tagName);
@@ -1120,8 +1647,15 @@ func (r *Runtime) setupDocumentAPI() {
   document.cookie = '';
   Object.defineProperty(document, 'title', {
     configurable: true,
-    get: function() { return document._title || ''; },
-    set: function(v) { document._title = v; }
+    get: function() {
+      if (typeof document._title === 'string') return document._title;
+      if (document.head) {
+        var titles = document.head.getElementsByTagName('title');
+        if (titles.length > 0) return titles[0].textContent;
+      }
+      return '';
+    },
+    set: function(v) { document._title = String(v); }
   });
   document.createDocumentFragment = function() {
     var frag = new Element('fragment');
@@ -1187,23 +1721,6 @@ func (r *Runtime) setupDocumentAPI() {
   window.cancelAnimationFrame = function() {};
   globalThis.requestAnimationFrame = window.requestAnimationFrame;
   globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
-
-  // CustomEvent / Event override (more complete implementation)
-  window.CustomEvent = function(type, options) {
-    this.type = type || '';
-    this.detail = options && options.detail;
-    this.bubbles = (options && options.bubbles) || false;
-    this.cancelable = (options && options.cancelable) || false;
-    this.defaultPrevented = false;
-    this.target = null;
-    this.currentTarget = null;
-  };
-  window.CustomEvent.prototype.preventDefault = function() { this.defaultPrevented = true; };
-  window.CustomEvent.prototype.stopPropagation = function() {};
-  window.CustomEvent.prototype.stopImmediatePropagation = function() {};
-  window.Event = window.CustomEvent;
-  globalThis.CustomEvent = window.CustomEvent;
-  globalThis.Event = window.Event;
 })();
 `
 
@@ -1887,7 +2404,7 @@ func (r *Runtime) setupNotificationAPI() {
 
 // setupWindowAPI configures window object with browser APIs
 func (r *Runtime) setupWindowAPI() {
-	window := r.vm.NewObject()
+	window := r.vm.GlobalObject()
 
 	// Setup window.location
 	r.setupLocationAPI(window)
@@ -1953,6 +2470,9 @@ func (r *Runtime) setupWindowAPI() {
 	// Setup Notification constructor
 	r.setupNotificationAPI()
 
+	// Setup Crypto API (getRandomValues, randomUUID)
+	r.setupCryptoAPI(window)
+
 	// Install stubs for unsupported network/worker/PWA APIs. These
 	// detect page usage and report it to the fallback layer; they
 	// do NOT enforce capability policy — pages can call them, and
@@ -1965,10 +2485,12 @@ func (r *Runtime) setupWindowAPI() {
 	r.vm.Set("self", window)
 	r.vm.Set("top", window)
 	r.vm.Set("parent", window)
+	r.vm.Set("globalThis", window)
 	window.Set("window", window)
 	window.Set("self", window)
 	window.Set("top", window)
 	window.Set("parent", window)
+	window.Set("globalThis", window)
 }
 
 func (r *Runtime) attachWindowTimerAPIs(window *goja.Object) {
@@ -2153,6 +2675,51 @@ func (r *Runtime) setupLocationAPI(window *goja.Object) {
 		}
 		return goja.Undefined()
 	})
+
+	r.vm.Set("location", location)
+}
+
+// setupCryptoAPI configures window.crypto and global crypto object.
+func (r *Runtime) setupCryptoAPI(window *goja.Object) {
+	cryptoObj := r.vm.NewObject()
+	cryptoObj.Set("getRandomValues", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Null()
+		}
+		target := call.Arguments[0].ToObject(r.vm)
+		if target == nil {
+			return goja.Null()
+		}
+		var length int
+		if bLen := target.Get("byteLength"); bLen != nil && !goja.IsUndefined(bLen) && !goja.IsNull(bLen) {
+			length = int(bLen.ToInteger())
+		} else if lVal := target.Get("length"); lVal != nil && !goja.IsUndefined(lVal) && !goja.IsNull(lVal) {
+			length = int(lVal.ToInteger())
+		}
+		if length > 0 {
+			if length > 65536 {
+				panic(r.vm.NewTypeError("crypto.getRandomValues: QuotaExceededError"))
+			}
+			buf := make([]byte, length)
+			_, _ = rand.Read(buf)
+			for i := 0; i < length; i++ {
+				_ = target.Set(strconv.Itoa(i), buf[i])
+			}
+		}
+		return call.Arguments[0]
+	})
+	cryptoObj.Set("randomUUID", func(goja.FunctionCall) goja.Value {
+		b := make([]byte, 16)
+		_, _ = rand.Read(b)
+		b[6] = (b[6] & 0x0f) | 0x40 // Version 4
+		b[8] = (b[8] & 0x3f) | 0x80 // Variant RFC4122
+		uuid := fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+			b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+			b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
+		return r.vm.ToValue(uuid)
+	})
+	window.Set("crypto", cryptoObj)
+	r.vm.Set("crypto", cryptoObj)
 }
 
 // setupHistoryAPI configures window.history object
@@ -2484,16 +3051,26 @@ func (r *Runtime) setupSessionStorageAPI() {
 func (r *Runtime) setupTimerAPIs() {
 	// setTimeout
 	r.vm.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) < 2 {
+		if len(call.Arguments) < 1 {
 			return goja.Undefined()
 		}
 
-		callback, ok := goja.AssertFunction(call.Arguments[0])
-		if !ok {
+		var callback goja.Callable
+		if fn, ok := goja.AssertFunction(call.Arguments[0]); ok {
+			callback = fn
+		} else if call.Arguments[0] != nil && !goja.IsNull(call.Arguments[0]) && !goja.IsUndefined(call.Arguments[0]) {
+			codeStr := call.Arguments[0].String()
+			callback = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
+				return r.vm.RunString(codeStr)
+			}
+		} else {
 			return goja.Undefined()
 		}
 
-		delay := time.Duration(call.Arguments[1].ToInteger()) * time.Millisecond
+		delay := time.Duration(0)
+		if len(call.Arguments) >= 2 {
+			delay = time.Duration(call.Arguments[1].ToInteger()) * time.Millisecond
+		}
 
 		timerID := r.timerIDCounter
 		r.timerIDCounter++
@@ -2566,16 +3143,26 @@ func (r *Runtime) setupTimerAPIs() {
 
 	// setInterval
 	r.vm.Set("setInterval", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) < 2 {
+		if len(call.Arguments) < 1 {
 			return goja.Undefined()
 		}
 
-		callback, ok := goja.AssertFunction(call.Arguments[0])
-		if !ok {
+		var callback goja.Callable
+		if fn, ok := goja.AssertFunction(call.Arguments[0]); ok {
+			callback = fn
+		} else if call.Arguments[0] != nil && !goja.IsNull(call.Arguments[0]) && !goja.IsUndefined(call.Arguments[0]) {
+			codeStr := call.Arguments[0].String()
+			callback = func(this goja.Value, args ...goja.Value) (goja.Value, error) {
+				return r.vm.RunString(codeStr)
+			}
+		} else {
 			return goja.Undefined()
 		}
 
-		interval := time.Duration(call.Arguments[1].ToInteger()) * time.Millisecond
+		interval := time.Duration(0)
+		if len(call.Arguments) >= 2 {
+			interval = time.Duration(call.Arguments[1].ToInteger()) * time.Millisecond
+		}
 
 		timerID := r.timerIDCounter
 		r.timerIDCounter++

@@ -501,3 +501,99 @@ func BenchmarkParseDocument(b *testing.B) {
 		}
 	}
 }
+
+func TestQuerySelector_ExpandedSelectors(t *testing.T) {
+	parser := NewParser()
+	htmlStr := `
+	<html>
+	<body>
+		<nav class="article-toc">
+			<a href="#intro" class="toc-link is-active">Intro</a>
+			<a href="#details" class="toc-link">Details</a>
+			<a href="https://example.com" class="external">External</a>
+		</nav>
+		<div class="NavigationDrawer-header">
+			<a href="/home" id="brand">Goosie</a>
+		</div>
+		<ul class="menu">
+			<li class="menu-item primary active"><span class="label">One</span></li>
+			<li class="menu-item secondary"><span class="label">Two</span></li>
+		</ul>
+		<input type="text" disabled required name="user" value="alice">
+	</body>
+	</html>
+	`
+
+	tests := []struct {
+		name     string
+		selector string
+		wantTag  string
+		wantID   string
+		wantText string
+	}{
+		{
+			name:     "child combinator",
+			selector: ".NavigationDrawer-header > a",
+			wantTag:  "a",
+			wantID:   "brand",
+			wantText: "Goosie",
+		},
+		{
+			name:     "descendant combinator with attribute prefix",
+			selector: ".article-toc a[href^=\"#\"]",
+			wantTag:  "a",
+			wantText: "Intro",
+		},
+		{
+			name:     "compound classes",
+			selector: ".menu-item.primary.active",
+			wantTag:  "li",
+			wantText: "One",
+		},
+		{
+			name:     "attribute existence",
+			selector: "input[disabled]",
+			wantTag:  "input",
+		},
+		{
+			name:     "attribute suffix",
+			selector: "a[href$=\".com\"]",
+			wantTag:  "a",
+			wantText: "External",
+		},
+		{
+			name:     "attribute contains",
+			selector: "a[href*=\"detail\"]",
+			wantTag:  "a",
+			wantText: "Details",
+		},
+		{
+			name:     "selector list (comma separated)",
+			selector: "h1, h2, #brand",
+			wantTag:  "a",
+			wantID:   "brand",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			elem, err := parser.QuerySelector(htmlStr, tt.selector)
+			if err != nil {
+				t.Fatalf("QuerySelector(%q) error = %v", tt.selector, err)
+			}
+			if elem == nil {
+				t.Fatalf("QuerySelector(%q) returned nil, expected match", tt.selector)
+			}
+			if tt.wantTag != "" && elem.TagName != tt.wantTag {
+				t.Errorf("TagName = %q, want %q", elem.TagName, tt.wantTag)
+			}
+			if tt.wantID != "" && elem.ID != tt.wantID {
+				t.Errorf("ID = %q, want %q", elem.ID, tt.wantID)
+			}
+			if tt.wantText != "" && elem.TextContent != tt.wantText {
+				t.Errorf("TextContent = %q, want %q", elem.TextContent, tt.wantText)
+			}
+		})
+	}
+}
+

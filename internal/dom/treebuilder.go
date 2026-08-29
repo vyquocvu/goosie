@@ -692,6 +692,7 @@ func discoverResources(tagName string, tokAttrs []html.Attribute, position int, 
 		}
 	case "script":
 		var src string
+		var typeAttr string
 		mode := ScriptModeClassic
 		integrity := ""
 		crossorigin := ""
@@ -703,7 +704,8 @@ func discoverResources(tagName string, tokAttrs []html.Attribute, position int, 
 			case "src":
 				src = a.Val
 			case "type":
-				if strings.EqualFold(a.Val, "module") {
+				typeAttr = a.Val
+				if strings.EqualFold(strings.TrimSpace(a.Val), "module") {
 					hasModule = true
 				}
 			case "async":
@@ -715,6 +717,9 @@ func discoverResources(tagName string, tokAttrs []html.Attribute, position int, 
 			case "crossorigin":
 				crossorigin = a.Val
 			}
+		}
+		if !IsJavaScriptMIMEType(typeAttr) {
+			return
 		}
 		// Mode precedence: type=module > async > defer > classic.
 		switch {
@@ -766,5 +771,32 @@ func discoverResources(tagName string, tokAttrs []html.Attribute, position int, 
 				CrossOrigin: crossorigin,
 			})
 		}
+	}
+}
+
+// IsJavaScriptMIMEType returns true if the specified script type attribute represents
+// an executable JavaScript or module script according to the HTML specification.
+// An empty MIME type defaults to true (classic JavaScript).
+func IsJavaScriptMIMEType(typeAttr string) bool {
+	typeAttr = strings.TrimSpace(typeAttr)
+	if typeAttr == "" {
+		return true
+	}
+	if idx := strings.IndexByte(typeAttr, ';'); idx != -1 {
+		typeAttr = strings.TrimSpace(typeAttr[:idx])
+	}
+	typeAttr = strings.ToLower(typeAttr)
+	switch typeAttr {
+	case "text/javascript",
+		"text/ecmascript",
+		"application/javascript",
+		"application/ecmascript",
+		"text/jscript",
+		"text/livescript",
+		"javascript",
+		"module":
+		return true
+	default:
+		return false
 	}
 }

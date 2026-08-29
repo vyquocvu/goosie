@@ -2,6 +2,7 @@ package browsercontrol
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -281,4 +282,41 @@ func TestJS_Evaluate_ConsoleLog(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
 	assert.Equal(t, int64(42), result.Value)
+}
+
+// TestJS_Evaluate_NavigateDOM tests that Navigate loads DOM and origin into jsRuntime
+func TestJS_Evaluate_NavigateDOM(t *testing.T) {
+	srv := fixtureServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html><head><title>Goosie Page</title></head><body><h1 id=\"headline\">Welcome to Goosie</h1><div class=\"content\"><p>Paragraph text</p></div></body></html>"))
+	})
+	defer srv.Close()
+
+	svc := NewEngineService()
+	ctx := context.Background()
+
+	info, err := svc.CreateContext(ctx, CreateContextOptions{})
+	require.NoError(t, err)
+	ec, err := svc.Context(context.Background(), info.ID)
+	require.NoError(t, err)
+
+	_, err = ec.Navigate(ctx, srv.URL, WaitInteractive, 1000)
+	require.NoError(t, err)
+
+	// Verify Evaluate interacts with the loaded DOM
+	resTitle, err := ec.Evaluate(ctx, `document.title`, EvaluateOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "Goosie Page", resTitle.Value)
+
+	resHeadline, err := ec.Evaluate(ctx, `document.getElementById("headline").textContent`, EvaluateOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "Welcome to Goosie", resHeadline.Value)
+
+	resContent, err := ec.Evaluate(ctx, `document.querySelector(".content p").textContent`, EvaluateOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "Paragraph text", resContent.Value)
+
+	resOrigin, err := ec.Evaluate(ctx, `document.location.href`, EvaluateOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, srv.URL, resOrigin.Value)
 }

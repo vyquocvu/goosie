@@ -42,6 +42,7 @@ th { font-weight: bold; text-align: center; }
 thead { display: table-header-group; }
 tbody { display: table-row-group; }
 tfoot { display: table-footer-group; }
+a { color: #0000ee; text-decoration: underline; }
 `
 
 // defaultStyleSheet caches the parsed UA stylesheet. It is immutable after

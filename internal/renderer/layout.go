@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"image/color"
 	"strconv"
 	"strings"
@@ -349,11 +350,29 @@ func (le *LayoutEngine) shiftLayoutBox(box *LayoutBox, deltaX, deltaY float32) {
 
 // buildTableLayoutBox creates a LayoutBox for a table node and computes its layout
 func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
-	// x, y and availableWidth already account for margins from computeLayoutBox
-	// availableWidth here is the border-box width
-
-	// Reduce available width by borders (if we supported them fully) - for now just assume availableWidth is content width
 	contentWidth := availableWidth
+	if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
+		if strings.HasSuffix(wAttr, "%") {
+			if pct, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "%"), 32); err == nil && pct > 0 {
+				contentWidth = availableWidth * float32(pct) / 100.0
+			}
+		} else {
+			if val, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && val > 0 {
+				contentWidth = float32(val)
+			}
+		}
+	}
+	if csAttr, ok := node.GetAttribute("cellspacing"); ok {
+		if v, err := strconv.Atoi(csAttr); err == nil && v >= 0 {
+			layoutBox.Gap = float32(v)
+		}
+	}
+	var cellPadding float32 = -1
+	if cpAttr, ok := node.GetAttribute("cellpadding"); ok {
+		if v, err := strconv.Atoi(cpAttr); err == nil && v >= 0 {
+			cellPadding = float32(v)
+		}
+	}
 
 	// Ensure we don't proceed with negative width
 	if contentWidth < 0 {
@@ -413,6 +432,8 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		occupied[row][col] = true
 	}
 
+	colSpecs := make(map[int]string)
+
 	for r, rowNode := range rows {
 		currentRow := r + 1
 		currentCol := 1
@@ -467,6 +488,28 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 					maxCols = colEnd - 1
 				}
 
+				// Check cell width specification for single-column cells
+				if colspan == 1 {
+					colIdx := colStart - 1
+					cellWidthStr := ""
+					if w, ok := cell.GetAttribute("width"); ok && w != "" {
+						cellWidthStr = w
+					} else if cell.ComputedStyle != nil && cell.ComputedStyle.Width != "" && cell.ComputedStyle.Width != "auto" {
+						cellWidthStr = cell.ComputedStyle.Width
+					}
+					if cellWidthStr != "" {
+						if strings.HasSuffix(cellWidthStr, "%") {
+							if _, err := strconv.ParseFloat(strings.TrimSuffix(cellWidthStr, "%"), 32); err == nil {
+								colSpecs[colIdx] = cellWidthStr
+							}
+						} else {
+							if v, err := strconv.ParseFloat(strings.TrimSuffix(cellWidthStr, "px"), 32); err == nil && v > 0 {
+								colSpecs[colIdx] = fmt.Sprintf("%dpx", int(v))
+							}
+						}
+					}
+				}
+
 				// Create cell box
 				cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
 				if cellBox != nil {
@@ -474,6 +517,13 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 					cellBox.GridColumnEnd = colEnd
 					cellBox.GridRowStart = rowStart
 					cellBox.GridRowEnd = rowEnd
+
+					if cellPadding >= 0 && cellBox.PaddingTop == 0 && cellBox.PaddingBottom == 0 && cellBox.PaddingLeft == 0 && cellBox.PaddingRight == 0 {
+						cellBox.PaddingTop = cellPadding
+						cellBox.PaddingBottom = cellPadding
+						cellBox.PaddingLeft = cellPadding
+						cellBox.PaddingRight = cellPadding
+					}
 
 					// Transmit TR background to cell if cell has none
 					if trBgColor != nil && (cellBox.BackgroundColor == nil || cellBox.BackgroundColor == color.Transparent) {
@@ -498,7 +548,11 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		if i > 0 {
 			colsBuilder.WriteString(" ")
 		}
-		colsBuilder.WriteString("auto")
+		if spec, ok := colSpecs[i]; ok && spec != "" {
+			colsBuilder.WriteString(spec)
+		} else {
+			colsBuilder.WriteString("auto")
+		}
 	}
 	layoutBox.GridTemplateColumns = colsBuilder.String()
 

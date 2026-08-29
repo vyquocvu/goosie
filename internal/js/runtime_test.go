@@ -291,6 +291,79 @@ func TestQuerySelectorAll(t *testing.T) {
 	}
 }
 
+func TestElementQuerySelector(t *testing.T) {
+	runtime := NewRuntime()
+	html := `<html><body>
+		<div id="container">
+			<span class="highlight">Hello</span>
+			<a href="https://example.com" class="link">Link</a>
+		</div>
+	</body></html>`
+	runtime.SetHTMLContent(html)
+
+	val, err := runtime.RunScript(`
+		var container = document.getElementById("container");
+		var span = container.querySelector(".highlight");
+		span ? span.textContent : "null";
+	`)
+	if err != nil {
+		t.Fatalf("container.querySelector failed: %v", err)
+	}
+	if val.String() != "Hello" {
+		t.Errorf("Expected 'Hello', got %s", val.String())
+	}
+
+	valAll, err := runtime.RunScript(`
+		var container = document.getElementById("container");
+		var links = container.querySelectorAll(".link");
+		links.length;
+	`)
+	if err != nil {
+		t.Fatalf("container.querySelectorAll failed: %v", err)
+	}
+	if valAll.ToInteger() != 1 {
+		t.Errorf("Expected 1 link, got %d", valAll.ToInteger())
+	}
+}
+
+func TestCryptoAPI(t *testing.T) {
+	runtime := NewRuntime()
+	val, err := runtime.RunScript(`
+		typeof window.crypto.getRandomValues === "function" &&
+		typeof crypto.randomUUID === "function" &&
+		crypto.randomUUID().length === 36;
+	`)
+	if err != nil {
+		t.Fatalf("crypto test failed: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("Expected crypto APIs to be available and valid")
+	}
+
+	valRand, err := runtime.RunScript(`
+		var arr = new Uint8Array(8);
+		crypto.getRandomValues(arr);
+		arr.length === 8;
+	`)
+	if err != nil {
+		t.Fatalf("crypto.getRandomValues failed: %v", err)
+	}
+	if !valRand.ToBoolean() {
+		t.Errorf("Expected getRandomValues to succeed on Uint8Array")
+	}
+}
+
+func TestGlobalLocation(t *testing.T) {
+	runtime := NewRuntime()
+	val, err := runtime.RunScript(`typeof location !== "undefined" && location.href === window.location.href`)
+	if err != nil {
+		t.Fatalf("global location test failed: %v", err)
+	}
+	if !val.ToBoolean() {
+		t.Errorf("Expected global location to match window.location")
+	}
+}
+
 func TestCreateElement(t *testing.T) {
 	runtime := NewRuntime()
 

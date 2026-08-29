@@ -239,50 +239,447 @@ func hasMatchingClass(classAttr, className string) bool {
 	return false
 }
 
-// matchesSelector checks if a node matches a CSS selector (basic implementation)
-func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
-	selector = strings.TrimSpace(selector)
+type domAttrMatcher struct {
+	name     string
+	operator string // "", "=", "^=", "$=", "*=", "~=", "|="
+	value    string
+}
 
-	// Handle ID selector (#id)
-	if strings.HasPrefix(selector, "#") {
-		id := selector[1:]
-		for _, attr := range n.Attr {
-			if attr.Key == "id" && attr.Val == id {
-				return true
+type domCompoundStep struct {
+	combinator string // "", " ", ">", "+", "~"
+	tag        string
+	ids        []string
+	classes    []string
+	attrs      []domAttrMatcher
+	pseudos    []string
+}
+
+func getParentElem(n *html.Node) *html.Node {
+	if n == nil {
+		return nil
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.Type == html.ElementNode {
+			return p
+		}
+	}
+	return nil
+}
+
+func getPrevElemSibling(n *html.Node) *html.Node {
+	if n == nil {
+		return nil
+	}
+	for s := n.PrevSibling; s != nil; s = s.PrevSibling {
+		if s.Type == html.ElementNode {
+			return s
+		}
+	}
+	return nil
+}
+
+func getNextElemSibling(n *html.Node) *html.Node {
+	if n == nil {
+		return nil
+	}
+	for s := n.NextSibling; s != nil; s = s.NextSibling {
+		if s.Type == html.ElementNode {
+			return s
+		}
+	}
+	return nil
+}
+
+func splitSelectorList(sel string) []string {
+	var results []string
+	var current strings.Builder
+	inQuotes := false
+	var quoteChar rune
+	bracketDepth := 0
+
+	for _, r := range sel {
+		if inQuotes {
+			current.WriteRune(r)
+			if r == quoteChar {
+				inQuotes = false
+			}
+			continue
+		}
+		if r == '"' || r == '\'' {
+			inQuotes = true
+			quoteChar = r
+			current.WriteRune(r)
+			continue
+		}
+		if r == '[' {
+			bracketDepth++
+			current.WriteRune(r)
+			continue
+		}
+		if r == ']' {
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
+			current.WriteRune(r)
+			continue
+		}
+		if r == ',' && bracketDepth == 0 {
+			part := strings.TrimSpace(current.String())
+			if part != "" {
+				results = append(results, part)
+			}
+			current.Reset()
+			continue
+		}
+		current.WriteRune(r)
+	}
+	if part := strings.TrimSpace(current.String()); part != "" {
+		results = append(results, part)
+	}
+	return results
+}
+
+func parseAttrSelector(raw string) domAttrMatcher {
+	raw = strings.TrimSpace(raw)
+	for _, op := range []string{"^=", "$=", "*=", "~=", "|=", "="} {
+		if idx := strings.Index(raw, op); idx != -1 {
+			name := strings.TrimSpace(raw[:idx])
+			val := strings.TrimSpace(raw[idx+len(op):])
+			val = strings.Trim(val, "\"'")
+			return domAttrMatcher{
+				name:     name,
+				operator: op,
+				value:    val,
 			}
 		}
-		return false
 	}
+	return domAttrMatcher{
+		name:     strings.TrimSpace(raw),
+		operator: "",
+		value:    "",
+	}
+}
 
-	// Handle class selector (.class)
-	if strings.HasPrefix(selector, ".") {
-		className := selector[1:]
-		for _, attr := range n.Attr {
-			if attr.Key == "class" && hasMatchingClass(attr.Val, className) {
-				return true
+func parseCompoundStep(s string, comb string) domCompoundStep {
+	step := domCompoundStep{combinator: comb}
+	runes := []rune(s)
+	i := 0
+
+	var tagBuilder strings.Builder
+	for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
+		tagBuilder.WriteRune(runes[i])
+		i++
+	}
+	step.tag = strings.TrimSpace(tagBuilder.String())
+
+	for i < len(runes) {
+		r := runes[i]
+		if r == '#' {
+			i++
+			var idBuilder strings.Builder
+			for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
+				idBuilder.WriteRune(runes[i])
+				i++
 			}
-		}
-		return false
-	}
-
-	// Handle attribute selector ([attr=value])
-	if strings.HasPrefix(selector, "[") && strings.HasSuffix(selector, "]") {
-		attrSelector := selector[1 : len(selector)-1]
-		parts := strings.Split(attrSelector, "=")
-		if len(parts) == 2 {
-			attrName := strings.TrimSpace(parts[0])
-			attrValue := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
-			for _, attr := range n.Attr {
-				if attr.Key == attrName && attr.Val == attrValue {
-					return true
+			if id := idBuilder.String(); id != "" {
+				step.ids = append(step.ids, id)
+			}
+		} else if r == '.' {
+			i++
+			var classBuilder strings.Builder
+			for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
+				classBuilder.WriteRune(runes[i])
+				i++
+			}
+			if cls := classBuilder.String(); cls != "" {
+				step.classes = append(step.classes, cls)
+			}
+		} else if r == '[' {
+			i++
+			var attrBuilder strings.Builder
+			inQuotes := false
+			var quoteChar rune
+			for i < len(runes) {
+				ar := runes[i]
+				if inQuotes {
+					attrBuilder.WriteRune(ar)
+					if ar == quoteChar {
+						inQuotes = false
+					}
+					i++
+					continue
 				}
+				if ar == '"' || ar == '\'' {
+					inQuotes = true
+					quoteChar = ar
+					attrBuilder.WriteRune(ar)
+					i++
+					continue
+				}
+				if ar == ']' {
+					i++
+					break
+				}
+				attrBuilder.WriteRune(ar)
+				i++
+			}
+			raw := attrBuilder.String()
+			am := parseAttrSelector(raw)
+			step.attrs = append(step.attrs, am)
+		} else if r == ':' {
+			i++
+			var pseudoBuilder strings.Builder
+			for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
+				pseudoBuilder.WriteRune(runes[i])
+				i++
+			}
+			if p := strings.ToLower(strings.TrimSpace(pseudoBuilder.String())); p != "" {
+				step.pseudos = append(step.pseudos, p)
+			}
+		} else {
+			i++
+		}
+	}
+
+	return step
+}
+
+func parseSelectorSequence(seq string) []domCompoundStep {
+	var steps []domCompoundStep
+	currentComb := ""
+	var currentToken strings.Builder
+
+	inQuotes := false
+	var quoteChar rune
+	bracketDepth := 0
+
+	flush := func() {
+		tok := strings.TrimSpace(currentToken.String())
+		currentToken.Reset()
+		if tok == "" {
+			return
+		}
+		step := parseCompoundStep(tok, currentComb)
+		steps = append(steps, step)
+		currentComb = " "
+	}
+
+	runes := []rune(seq)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if inQuotes {
+			currentToken.WriteRune(r)
+			if r == quoteChar {
+				inQuotes = false
+			}
+			continue
+		}
+		if r == '"' || r == '\'' {
+			inQuotes = true
+			quoteChar = r
+			currentToken.WriteRune(r)
+			continue
+		}
+		if r == '[' {
+			bracketDepth++
+			currentToken.WriteRune(r)
+			continue
+		}
+		if r == ']' {
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
+			currentToken.WriteRune(r)
+			continue
+		}
+
+		if bracketDepth == 0 {
+			if r == '>' || r == '+' || r == '~' {
+				flush()
+				currentComb = string(r)
+				continue
+			}
+			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+				j := i + 1
+				for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
+					j++
+				}
+				if j < len(runes) && (runes[j] == '>' || runes[j] == '+' || runes[j] == '~') {
+					flush()
+					currentComb = string(runes[j])
+					i = j
+					continue
+				}
+				if currentToken.Len() > 0 {
+					flush()
+					currentComb = " "
+				}
+				continue
+			}
+		}
+
+		currentToken.WriteRune(r)
+	}
+
+	flush()
+	return steps
+}
+
+func matchCompound(n *html.Node, step *domCompoundStep) bool {
+	if n == nil || n.Type != html.ElementNode {
+		return false
+	}
+	if step.tag != "" && step.tag != "*" {
+		if !strings.EqualFold(n.Data, step.tag) {
+			return false
+		}
+	}
+	for _, id := range step.ids {
+		found := false
+		for _, a := range n.Attr {
+			if a.Key == "id" && a.Val == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, cls := range step.classes {
+		found := false
+		for _, a := range n.Attr {
+			if a.Key == "class" && hasMatchingClass(a.Val, cls) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, am := range step.attrs {
+		found := false
+		var val string
+		for _, a := range n.Attr {
+			if strings.EqualFold(a.Key, am.name) {
+				found = true
+				val = a.Val
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+		switch am.operator {
+		case "":
+			// Existence
+		case "=":
+			if val != am.value {
+				return false
+			}
+		case "^=":
+			if am.value == "" || !strings.HasPrefix(val, am.value) {
+				return false
+			}
+		case "$=":
+			if am.value == "" || !strings.HasSuffix(val, am.value) {
+				return false
+			}
+		case "*=":
+			if am.value == "" || !strings.Contains(val, am.value) {
+				return false
+			}
+		case "~=":
+			if !hasMatchingClass(val, am.value) {
+				return false
+			}
+		case "|=":
+			if val != am.value && !strings.HasPrefix(val, am.value+"-") {
+				return false
+			}
+		}
+	}
+	for _, pseudo := range step.pseudos {
+		switch pseudo {
+		case "first-child":
+			if getPrevElemSibling(n) != nil {
+				return false
+			}
+		case "last-child":
+			if getNextElemSibling(n) != nil {
+				return false
+			}
+		case "only-child":
+			if getPrevElemSibling(n) != nil || getNextElemSibling(n) != nil {
+				return false
+			}
+		case "scope":
+			// matches
+		}
+	}
+	return true
+}
+
+func matchSelectorSequence(n *html.Node, steps []domCompoundStep, stepIdx int) bool {
+	if stepIdx < 0 {
+		return true
+	}
+	if !matchCompound(n, &steps[stepIdx]) {
+		return false
+	}
+	if stepIdx == 0 {
+		return true
+	}
+	comb := steps[stepIdx].combinator
+	switch comb {
+	case ">":
+		parent := getParentElem(n)
+		if parent == nil {
+			return false
+		}
+		return matchSelectorSequence(parent, steps, stepIdx-1)
+	case " ":
+		for curr := getParentElem(n); curr != nil; curr = getParentElem(curr) {
+			if matchSelectorSequence(curr, steps, stepIdx-1) {
+				return true
 			}
 		}
 		return false
+	case "+":
+		sib := getPrevElemSibling(n)
+		if sib == nil {
+			return false
+		}
+		return matchSelectorSequence(sib, steps, stepIdx-1)
+	case "~":
+		for sib := getPrevElemSibling(n); sib != nil; sib = getPrevElemSibling(sib) {
+			if matchSelectorSequence(sib, steps, stepIdx-1) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
 	}
+}
 
-	// Handle tag selector
-	return strings.ToLower(n.Data) == strings.ToLower(selector)
+// matchesSelector checks if a node matches a CSS selector
+func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
+	if n == nil || n.Type != html.ElementNode {
+		return false
+	}
+	selectorList := splitSelectorList(selector)
+	for _, sel := range selectorList {
+		steps := parseSelectorSequence(sel)
+		if len(steps) == 0 {
+			continue
+		}
+		if matchSelectorSequence(n, steps, len(steps)-1) {
+			return true
+		}
+	}
+	return false
 }
 
 // nodeToElement converts an html.Node to an Element

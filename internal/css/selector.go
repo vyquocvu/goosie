@@ -340,44 +340,11 @@ func (cs *CompiledStyleSheet) collectCandidates(elem Element) []int {
 	tag := toLowerFast(elem.TagName())
 	candidates = append(candidates, cs.tagBucket[tag]...)
 
-	// Attribute buckets - check all element attributes
-	// For now, we use a simple approach: check common attribute names
-	// In practice, the element could provide an attribute iterator
-	if _, ok := elem.GetAttribute("type"); ok {
-		candidates = append(candidates, cs.attrBucket["type"]...)
-	}
-	if _, ok := elem.GetAttribute("href"); ok {
-		candidates = append(candidates, cs.attrBucket["href"]...)
-	}
-	if _, ok := elem.GetAttribute("class"); ok {
-		candidates = append(candidates, cs.attrBucket["class"]...)
-	}
-	if _, ok := elem.GetAttribute("id"); ok {
-		candidates = append(candidates, cs.attrBucket["id"]...)
-	}
-	if _, ok := elem.GetAttribute("src"); ok {
-		candidates = append(candidates, cs.attrBucket["src"]...)
-	}
-	if _, ok := elem.GetAttribute("title"); ok {
-		candidates = append(candidates, cs.attrBucket["title"]...)
-	}
-	if _, ok := elem.GetAttribute("disabled"); ok {
-		candidates = append(candidates, cs.attrBucket["disabled"]...)
-	}
-	if _, ok := elem.GetAttribute("checked"); ok {
-		candidates = append(candidates, cs.attrBucket["checked"]...)
-	}
-	if _, ok := elem.GetAttribute("target"); ok {
-		candidates = append(candidates, cs.attrBucket["target"]...)
-	}
-	if _, ok := elem.GetAttribute("data-type"); ok {
-		candidates = append(candidates, cs.attrBucket["data-type"]...)
-	}
-	if _, ok := elem.GetAttribute("data-theme"); ok {
-		candidates = append(candidates, cs.attrBucket["data-theme"]...)
-	}
-	if _, ok := elem.GetAttribute("method"); ok {
-		candidates = append(candidates, cs.attrBucket["method"]...)
+	// Attribute buckets - check all element attributes matching indexed attributes
+	for attrName, ruleIndices := range cs.attrBucket {
+		if _, ok := elem.GetAttribute(attrName); ok {
+			candidates = append(candidates, ruleIndices...)
+		}
 	}
 
 	// Universal bucket always applies
