@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"unicode/utf8"
 
 	"fyne.io/fyne/v2"
 )
@@ -95,8 +96,8 @@ func (fm *FontMetrics) MeasureText(text string, fontSize float32, style fyne.Tex
 	}
 
 	// Add letter spacing
-	if len(text) > 0 {
-		width += float32(len([]rune(text))) * letterSpacing
+	if letterSpacing != 0 && len(text) > 0 {
+		width += float32(utf8.RuneCountInString(text)) * letterSpacing
 	}
 
 	height = fontSize * 1.2 // Line height with spacing

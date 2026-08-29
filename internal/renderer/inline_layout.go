@@ -101,6 +101,18 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 	whiteSpaceMode WhiteSpaceMode,
 	floatCtx *FloatContext,
 ) ([]*LineBox, float32) {
+	return ile.LayoutInlineChildren(node.Children, x, y, availableWidth, whiteSpaceMode, floatCtx)
+}
+
+// LayoutInlineChildren performs inline layout for an explicit list of sibling
+// nodes. It backs LayoutInlineContent and lets the block layout engine lay out
+// inline runs between block-level children (anonymous block boxes).
+func (ile *InlineLayoutEngine) LayoutInlineChildren(
+	children []*RenderNode,
+	x, y, availableWidth float32,
+	whiteSpaceMode WhiteSpaceMode,
+	floatCtx *FloatContext,
+) ([]*LineBox, float32) {
 	ile.mu.Lock()
 	ile.floatCtx = floatCtx
 	ile.mu.Unlock()
@@ -114,16 +126,16 @@ func (ile *InlineLayoutEngine) LayoutInlineContent(
 
 	textAlign := ""
 	lineHeight := float32(0)
-	if node.ComputedStyle != nil {
-		textAlign = node.ComputedStyle.TextAlign
-		lineHeight = node.ComputedStyle.LineHeight
+	if len(children) > 0 && children[0].Parent != nil && children[0].Parent.ComputedStyle != nil {
+		textAlign = children[0].Parent.ComputedStyle.TextAlign
+		lineHeight = children[0].Parent.ComputedStyle.LineHeight
 	}
 
 	lineX, widthForLine := ile.getLineXAndWidth(x, y, availableWidth, lineHeight)
 	currentLine := ile.newLineBox(lineX, y, widthForLine, textAlign, lineHeight)
 
 	// Process all inline children and text nodes
-	for _, child := range node.Children {
+	for _, child := range children {
 		ile.addNodeToLines(child, &currentLine, &lines, x, availableWidth, whiteSpaceMode)
 	}
 

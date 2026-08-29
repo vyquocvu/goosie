@@ -124,8 +124,16 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 		fle.distributeShrink(items, -remainingSpace)
 	}
 
-	// Position items along main axis based on justify-content
-	mainAxisPositions := fle.calculateMainAxisPositions(items, mainAxisSize, gap, justifyContent)
+	// Position items along main axis based on justify-content.
+	// For an indefinite column main axis (auto height) the container
+	// shrink-wraps its content, so there is no free space to distribute and
+	// justify-content is a no-op. Using the 10000px fallback here would push
+	// flex-end/center items ~10000px down (e.g. Google's doodle homepage).
+	posAxisSize := mainAxisSize
+	if !mainAxisDefinite {
+		posAxisSize = totalMainSize
+	}
+	mainAxisPositions := fle.calculateMainAxisPositions(items, posAxisSize, gap, justifyContent)
 
 	// Position items along cross axis based on align-items
 	contentX := parentBox.Box.X + parentBox.PaddingLeft

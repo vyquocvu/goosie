@@ -7,6 +7,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -107,8 +108,13 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 			t.Errorf("Expected Object 3 to be *canvas.Text, got %T", vbox.Objects[3])
 		}
 
-		// Check link
-		switch link := vbox.Objects[4].(type) {
+		// Check link. Anchors with a computed color are wrapped in a
+		// ThemeOverride so the hyperlink honors the CSS color.
+		linkObj := vbox.Objects[4]
+		if override, ok := linkObj.(*container.ThemeOverride); ok {
+			linkObj = override.Content
+		}
+		switch link := linkObj.(type) {
 		case *TappableHyperlink:
 			if link.Text != "Learn more" {
 				t.Errorf("Expected link text 'Learn more', got '%s'", link.Text)
@@ -118,7 +124,7 @@ func TestBugFixDuplicateRendering(t *testing.T) {
 				t.Errorf("Expected link text 'Learn more', got '%s'", link.Text)
 			}
 		default:
-			t.Errorf("Expected Object 4 to be a hyperlink, got %T", vbox.Objects[4])
+			t.Errorf("Expected Object 4 to be a hyperlink, got %T", linkObj)
 		}
 	}
 }

@@ -200,10 +200,13 @@ func CompareGoosieVsBrowser(t *testing.T, page playwright.Page, filePath string,
 	fileURL := "file://" + filePath
 	_, err = page.Goto(fileURL)
 	require.NoError(t, err)
-	// Inject CSS to normalize fonts closer to Goosie/Fyne rendering
+	// Inject CSS to normalize fonts closer to Goosie/Fyne rendering.
+	// Font names use single quotes: this is a Go raw string, so escaped
+	// double quotes would reach JS verbatim and break the snippet (the
+	// broken injection used to fail silently).
 	_, _ = page.Evaluate(`() => {
 		const style = document.createElement('style');
-		style.textContent = "* { font-family: -apple-system, BlinkMacSystemFont, \\"Segoe UI\\", Roboto, \\"Helvetica Neue\\", Arial, sans-serif !important; line-height: 1.2; } body { background: #ffffff; }";
+		style.textContent = "* { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important; line-height: 1.2; } body { background: #ffffff; }";
 		document.head.appendChild(style);
 	}`)
 	browserPNG, err := page.Screenshot(playwright.PageScreenshotOptions{

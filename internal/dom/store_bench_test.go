@@ -133,14 +133,12 @@ func BenchmarkStoreSubtreeIterator(b *testing.B) {
 
 // BenchmarkStoreRemoveChild measures removing children.
 func BenchmarkStoreRemoveChild(b *testing.B) {
-	s := NewStore(1024)
-	doc, _ := s.Allocate()
-	s.SetKind(doc, NodeKindDocument)
-
 	b.ReportAllocs()
-	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
+		s := NewStore(64)
+		doc, _ := s.Allocate()
+		s.SetKind(doc, NodeKindDocument)
 		div, _ := s.Allocate()
 		s.SetKind(div, NodeKindElement)
 		s.SetName(div, atom.AtomDiv)

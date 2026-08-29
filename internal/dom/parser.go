@@ -144,14 +144,9 @@ func (p *Parser) GetElementsByClassName(htmlContent, className string) ([]*Eleme
 	findElements = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			for _, attr := range n.Attr {
-				if attr.Key == "class" {
-					classes := strings.Fields(attr.Val)
-					for _, class := range classes {
-						if class == className {
-							elements = append(elements, p.nodeToElement(n))
-							break
-						}
-					}
+				if attr.Key == "class" && hasMatchingClass(attr.Val, className) {
+					elements = append(elements, p.nodeToElement(n))
+					break
 				}
 			}
 		}
@@ -221,6 +216,29 @@ func (p *Parser) QuerySelectorAll(htmlContent, selector string) ([]*Element, err
 	return elements, nil
 }
 
+// hasMatchingClass checks if classAttr contains className without allocating slices.
+func hasMatchingClass(classAttr, className string) bool {
+	for classAttr != "" {
+		i := 0
+		for i < len(classAttr) && (classAttr[i] == ' ' || classAttr[i] == '\t' || classAttr[i] == '\n' || classAttr[i] == '\r' || classAttr[i] == '\f') {
+			i++
+		}
+		classAttr = classAttr[i:]
+		if classAttr == "" {
+			break
+		}
+		j := 0
+		for j < len(classAttr) && !(classAttr[j] == ' ' || classAttr[j] == '\t' || classAttr[j] == '\n' || classAttr[j] == '\r' || classAttr[j] == '\f') {
+			j++
+		}
+		if classAttr[:j] == className {
+			return true
+		}
+		classAttr = classAttr[j:]
+	}
+	return false
+}
+
 // matchesSelector checks if a node matches a CSS selector (basic implementation)
 func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
 	selector = strings.TrimSpace(selector)
@@ -240,13 +258,8 @@ func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
 	if strings.HasPrefix(selector, ".") {
 		className := selector[1:]
 		for _, attr := range n.Attr {
-			if attr.Key == "class" {
-				classes := strings.Fields(attr.Val)
-				for _, class := range classes {
-					if class == className {
-						return true
-					}
-				}
+			if attr.Key == "class" && hasMatchingClass(attr.Val, className) {
+				return true
 			}
 		}
 		return false

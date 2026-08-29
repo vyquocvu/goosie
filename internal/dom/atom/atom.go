@@ -408,13 +408,15 @@ func LookupStatic(s string) (Atom, bool) {
 // Table is a bounded LRU-evicted string interning table.
 // It is safe for concurrent use.
 type Table struct {
-	mu         sync.RWMutex
-	maxEntries int
-	maxBytes   int
-	nextAtom   Atom
-	strToAtom  map[string]Atom
-	atomToStr  map[Atom]string
-	lru        *list.List // front = most recently used
+	mu          sync.RWMutex
+	maxEntries  int
+	maxBytes    int
+	bytesUsed   int
+	nextAtom    Atom
+	strToAtom   map[string]Atom
+	atomToStr   map[Atom]string
+	lruElements map[Atom]*list.Element
+	lru         *list.List // front = most recently used
 }
 
 type lruEntry struct {
@@ -432,12 +434,13 @@ func NewTable(maxEntries int, maxBytes int) *Table {
 		maxBytes = 4096
 	}
 	return &Table{
-		maxEntries: maxEntries,
-		maxBytes:   maxBytes,
-		nextAtom:   staticEnd,
-		strToAtom:  make(map[string]Atom, maxEntries),
-		atomToStr:  make(map[Atom]string, maxEntries),
-		lru:        list.New(),
+		maxEntries:  maxEntries,
+		maxBytes:    maxBytes,
+		nextAtom:    staticEnd,
+		strToAtom:   make(map[string]Atom, maxEntries),
+		atomToStr:   make(map[Atom]string, maxEntries),
+		lruElements: make(map[Atom]*list.Element, maxEntries),
+		lru:         list.New(),
 	}
 }
 
@@ -470,14 +473,13 @@ func (t *Table) Intern(s string) Atom {
 	}
 
 	// Check byte budget.
-	currentBytes := t.bytesUsedLocked()
-	if len(s) > t.maxBytes-currentBytes && t.lru.Len() == 0 {
+	if len(s) > t.maxBytes-t.bytesUsed && t.lru.Len() == 0 {
 		// Single string exceeds entire budget and table is empty.
 		return AtomNone
 	}
 
 	// Evict until both entry count and byte budget are satisfied.
-	for t.lru.Len() >= t.maxEntries || t.bytesUsedLocked()+len(s) > t.maxBytes {
+	for t.lru.Len() >= t.maxEntries || t.bytesUsed+len(s) > t.maxBytes {
 		if t.lru.Len() == 0 {
 			return AtomNone
 		}
@@ -488,7 +490,9 @@ func (t *Table) Intern(s string) Atom {
 	t.nextAtom++
 	t.strToAtom[s] = a
 	t.atomToStr[a] = s
-	t.lru.PushFront(&lruEntry{atom: a})
+	t.bytesUsed += len(s)
+	elem := t.lru.PushFront(&lruEntry{atom: a})
+	t.lruElements[a] = elem
 
 	return a
 }
@@ -546,7 +550,7 @@ func (t *Table) BytesUsed() int {
 		return 0
 	}
 	t.mu.RLock()
-	n := t.bytesUsedLocked()
+	n := t.bytesUsed
 	t.mu.RUnlock()
 	return n
 }
@@ -559,26 +563,20 @@ func (t *Table) Reset() {
 	t.mu.Lock()
 	t.strToAtom = make(map[string]Atom, 64)
 	t.atomToStr = make(map[Atom]string, 64)
+	t.lruElements = make(map[Atom]*list.Element, 64)
 	t.lru.Init()
+	t.bytesUsed = 0
 	t.nextAtom = staticEnd
 	t.mu.Unlock()
 }
 
 func (t *Table) bytesUsedLocked() int {
-	total := 0
-	for s := range t.strToAtom {
-		total += len(s)
-	}
-	return total
+	return t.bytesUsed
 }
 
 func (t *Table) promote(a Atom) {
-	// Move to front of LRU.
-	for e := t.lru.Front(); e != nil; e = e.Next() {
-		if entry, ok := e.Value.(*lruEntry); ok && entry.atom == a {
-			t.lru.MoveToFront(e)
-			return
-		}
+	if elem, ok := t.lruElements[a]; ok {
+		t.lru.MoveToFront(elem)
 	}
 }
 
@@ -589,8 +587,10 @@ func (t *Table) evictLRU() {
 	}
 	entry := back.Value.(*lruEntry)
 	s := t.atomToStr[entry.atom]
+	t.bytesUsed -= len(s)
 	delete(t.strToAtom, s)
 	delete(t.atomToStr, entry.atom)
+	delete(t.lruElements, entry.atom)
 	t.lru.Remove(back)
 }
 

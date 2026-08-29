@@ -298,6 +298,11 @@ func (s *Store) removeAttrsLocked(start, count uint32) {
 	if end > uint32(len(s.attrs)) {
 		return
 	}
+	if end == uint32(len(s.attrs)) {
+		s.attrs = s.attrs[:start]
+		s.attrCount -= int(count)
+		return
+	}
 	// Shift remaining attrs down.
 	copy(s.attrs[start:], s.attrs[end:])
 	s.attrs = s.attrs[:len(s.attrs)-int(count)]
@@ -364,6 +369,11 @@ func (s *Store) SetText(id NodeID, text string) error {
 func (s *Store) removeTextLocked(start, length uint32) {
 	end := start + length
 	if end > uint32(len(s.textData)) {
+		return
+	}
+	if end == uint32(len(s.textData)) {
+		s.textData = s.textData[:start]
+		s.textBytes -= int(length)
 		return
 	}
 	// Shift remaining text down.

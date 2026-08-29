@@ -298,8 +298,6 @@ func TestAsyncScriptAndClassicOrdering(t *testing.T) {
 	//   3. a classic inline script that pushes "c2"
 	// Because M5 says classics execute in source order and async
 	// executes at fetch completion, we should see classics in order.
-	var mu sync.Mutex
-	var log []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ord.js", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`globalThis.orderLog = globalThis.orderLog || []; globalThis.orderLog.push("async");`))
@@ -367,8 +365,6 @@ func TestAsyncScriptAndClassicOrdering(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	_ = mu
-	_ = log
 	if gotOrder == "missing" {
 		t.Fatal("orderLog never appeared")
 	}

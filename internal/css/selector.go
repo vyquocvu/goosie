@@ -263,11 +263,37 @@ func (cs *CompiledStyleSheet) MatchElement(elem Element) []CompiledRule {
 
 	// Collect candidate rule indices from buckets
 	candidates := cs.collectCandidates(elem)
+	if len(candidates) == 0 {
+		return nil
+	}
 
-	// Deduplicate and match
-	seen := make(map[int]bool, len(candidates))
 	var matched []CompiledRule
+	if len(candidates) <= 32 {
+		for i, idx := range candidates {
+			duplicate := false
+			for j := 0; j < i; j++ {
+				if candidates[j] == idx {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				continue
+			}
 
+			rule := &cs.rules[idx]
+			for _, sel := range rule.Selectors {
+				if matchCompiledSelector(&sel, elem) {
+					matched = append(matched, *rule)
+					break
+				}
+			}
+		}
+		return matched
+	}
+
+	// Deduplicate and match for large candidate lists
+	seen := make(map[int]bool, len(candidates))
 	for _, idx := range candidates {
 		if seen[idx] {
 			continue
@@ -286,6 +312,16 @@ func (cs *CompiledStyleSheet) MatchElement(elem Element) []CompiledRule {
 	return matched
 }
 
+func toLowerFast(s string) string {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			return strings.ToLower(s)
+		}
+	}
+	return s
+}
+
 // collectCandidates gathers rule indices from relevant buckets.
 func (cs *CompiledStyleSheet) collectCandidates(elem Element) []int {
 	var candidates []int
@@ -301,7 +337,7 @@ func (cs *CompiledStyleSheet) collectCandidates(elem Element) []int {
 	}
 
 	// Tag bucket
-	tag := strings.ToLower(elem.TagName())
+	tag := toLowerFast(elem.TagName())
 	candidates = append(candidates, cs.tagBucket[tag]...)
 
 	// Attribute buckets - check all element attributes

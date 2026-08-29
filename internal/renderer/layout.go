@@ -107,7 +107,11 @@ func (le *LayoutEngine) reset(width, height float32) {
 	le.canvasHeight = height
 	le.mu.Unlock()
 	le.nodeMapMu.Lock()
-	le.nodeMap = make(map[int64]*LayoutBox)
+	if le.nodeMap != nil {
+		clear(le.nodeMap)
+	} else {
+		le.nodeMap = make(map[int64]*LayoutBox)
+	}
 	le.nodeMapMu.Unlock()
 }
 
@@ -876,31 +880,10 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 			}
 		}
 	} else if node.IsBlock() && le.hasInlineContent(node) {
-		// Use inline layout for the children
-		wsMode := le.whiteSpaceModeForNode(node)
-		lines, totalHeight := inlineLayoutEngine.LayoutInlineContent(
-			node, childX, currentY, contentWidth, wsMode, floatCtx,
-		)
-
-		// Store line boxes in the layout box
-		layoutBox.LineBoxes = lines
-
-		// DO NOT create child LayoutBox instances for inline boxes
-		// The LineBoxes contain all the information needed for rendering
-		// However, we still need to populate nodeMap for GetLayoutBox to work
-		processedNodeIDs := make(map[int64]bool)
-		for _, line := range lines {
-			for _, inlineBox := range line.InlineBoxes {
-				if !processedNodeIDs[inlineBox.NodeID] {
-					processedNodeIDs[inlineBox.NodeID] = true
-					// Map the inline node ID to the parent layout box
-					// This allows GetLayoutBox to find a box for inline nodes
-					le.nodeMap[inlineBox.NodeID] = layoutBox
-				}
-			}
-		}
-
-		childY = currentY + totalHeight
+		// Mixed block and inline content: lay out consecutive inline runs as
+		// anonymous blocks (line boxes) and stack block-level children between
+		// them, per CSS block-in-inline model.
+		childY = le.layoutBlockAndInline(node, layoutBox, childX, currentY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
 	} else if node.IsBlock() {
 		// Block elements: stack children vertically (when no inline content)
 		// Check if element has intrinsic dimensions (e.g. input, button, textarea)
@@ -931,51 +914,15 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 
 				// 2. Handle float
 				if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
-					floatDir := child.ComputedStyle.Float
-
-					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
-					if childLayoutBox != nil {
-						fx, fy := floatCtx.PlaceFloat(childLayoutBox, floatDir, childY, childX, contentWidth)
-						dx := fx - childLayoutBox.Box.X
-						dy := fy - childLayoutBox.Box.Y
-						childLayoutBox.Box.X = fx
-						childLayoutBox.Box.Y = fy
-						le.shiftLayoutBox(childLayoutBox, dx, dy)
-
-						floatCtx.AddFloat(childLayoutBox, floatDir)
-						layoutBox.AddChild(childLayoutBox)
-					}
+					le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
 					continue
 				}
 
 				// 3. Normal in-flow block elements: stack vertically with margin collapse
-				nextChildY := childY
-				if lastChild != nil {
-					isBlock1 := lastChild.Display == DisplayBlock || lastChild.Display == DisplayFlex || lastChild.Display == DisplayGrid
-					isBlock2 := child.IsBlock()
-					if isBlock1 && isBlock2 &&
-						lastChild.Position != "absolute" && lastChild.Position != "fixed" && lastChild.Float == "" &&
-						child.ComputedStyle != nil && child.ComputedStyle.Position != "absolute" && child.ComputedStyle.Position != "fixed" && child.ComputedStyle.Float == "" {
-
-						fontSize := le.defaultFontSize
-						if child.ComputedStyle.FontSize > 0 {
-							fontSize = child.ComputedStyle.FontSize
-						}
-						childMarginTop := parseLength(child.ComputedStyle.MarginTop, fontSize)
-						collapsedMargin := maxFloat32(lastChild.MarginBottom, childMarginTop)
-
-						lastChildBottom := lastChild.Box.Y + lastChild.Box.Height
-						nextChildY = lastChildBottom + collapsedMargin - childMarginTop
-					}
-				}
-
-				childLayoutBox := le.buildLayoutBox(child, childX, nextChildY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
-				if childLayoutBox != nil {
-					layoutBox.AddChild(childLayoutBox)
-					if childLayoutBox.Position != "absolute" && childLayoutBox.Position != "fixed" {
-						childY = childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom
-						lastChild = childLayoutBox
-					}
+				newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				if inFlow {
+					childY = newY
+					lastChild = childBox
 				}
 			}
 		}
@@ -1050,6 +997,142 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 
 	// Add border bottom offset after padding
 	childY += layoutBox.BorderBottomWidth
+
+	return childY
+}
+
+// layoutFloatedChild builds a LayoutBox for a floated child, places it via
+// the float context, and attaches it to the parent box. Shared by the pure
+// block and mixed block/inline stacking paths.
+func (le *LayoutEngine) layoutFloatedChild(child *RenderNode, layoutBox *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) {
+	floatDir := child.ComputedStyle.Float
+
+	childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+	if childLayoutBox != nil {
+		fx, fy := floatCtx.PlaceFloat(childLayoutBox, floatDir, childY, childX, contentWidth)
+		dx := fx - childLayoutBox.Box.X
+		dy := fy - childLayoutBox.Box.Y
+		childLayoutBox.Box.X = fx
+		childLayoutBox.Box.Y = fy
+		le.shiftLayoutBox(childLayoutBox, dx, dy)
+
+		floatCtx.AddFloat(childLayoutBox, floatDir)
+		layoutBox.AddChild(childLayoutBox)
+	}
+}
+
+// stackBlockChild builds a LayoutBox for an in-flow block child, stacking it
+// vertically with margin collapse against the previous block box. The child
+// is attached to layoutBox whenever its box could be built. Returns the
+// advanced Y, the child's box, and whether the box participates in flow
+// (in-flow boxes advance the stacking position; positioned boxes do not).
+func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox, lastChild *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) (float32, *LayoutBox, bool) {
+	// Collapse margins with the previous sibling block box.
+	nextChildY := childY
+	if lastChild != nil {
+		isBlock1 := lastChild.Display == DisplayBlock || lastChild.Display == DisplayFlex || lastChild.Display == DisplayGrid
+		isBlock2 := child.IsBlock()
+		if isBlock1 && isBlock2 &&
+			lastChild.Position != "absolute" && lastChild.Position != "fixed" && lastChild.Float == "" &&
+			child.ComputedStyle != nil && child.ComputedStyle.Position != "absolute" && child.ComputedStyle.Position != "fixed" && child.ComputedStyle.Float == "" {
+
+			fontSize := le.defaultFontSize
+			if child.ComputedStyle.FontSize > 0 {
+				fontSize = child.ComputedStyle.FontSize
+			}
+			childMarginTop := parseLength(child.ComputedStyle.MarginTop, fontSize)
+			collapsedMargin := maxFloat32(lastChild.MarginBottom, childMarginTop)
+
+			lastChildBottom := lastChild.Box.Y + lastChild.Box.Height
+			nextChildY = lastChildBottom + collapsedMargin - childMarginTop
+		}
+	}
+
+	childLayoutBox := le.buildLayoutBox(child, childX, nextChildY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+	if childLayoutBox == nil {
+		return childY, nil, false
+	}
+	layoutBox.AddChild(childLayoutBox)
+	if childLayoutBox.Position == "absolute" || childLayoutBox.Position == "fixed" {
+		return childY, childLayoutBox, false
+	}
+	return childLayoutBox.Box.Y + childLayoutBox.Box.Height + childLayoutBox.MarginBottom, childLayoutBox, true
+}
+
+// layoutBlockAndInline lays out a block container whose children mix inline
+// runs (text, inline elements, inline-blocks) with block-level children.
+// Consecutive inline siblings are grouped into an anonymous block and laid
+// out as line boxes; block-level children are stacked between the runs with
+// float, clear, and margin handling mirroring the pure-block path.
+func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *LayoutBox, childX, currentY, contentWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
+	wsMode := le.whiteSpaceModeForNode(node)
+	childY := currentY
+	var lastChild *LayoutBox
+	var run []*RenderNode
+
+	flushRun := func() {
+		if len(run) == 0 {
+			return
+		}
+		// Whitespace-only runs between blocks must not create empty lines.
+		hasContent := false
+		for _, rn := range run {
+			if rn.Type == NodeTypeElement || strings.TrimSpace(rn.Text) != "" {
+				hasContent = true
+				break
+			}
+		}
+		if hasContent {
+			lines, totalHeight := inlineLayoutEngine.LayoutInlineChildren(
+				run, childX, childY, contentWidth, wsMode, floatCtx,
+			)
+			layoutBox.LineBoxes = append(layoutBox.LineBoxes, lines...)
+			for _, line := range lines {
+				for _, inlineBox := range line.InlineBoxes {
+					le.nodeMapMu.Lock()
+					le.nodeMap[inlineBox.NodeID] = layoutBox
+					le.nodeMapMu.Unlock()
+				}
+			}
+			childY += totalHeight
+		}
+		run = run[:0]
+	}
+
+	for _, child := range node.Children {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			continue
+		}
+
+		isBlockChild := child.Type == NodeTypeElement && child.IsBlock()
+		if !isBlockChild {
+			run = append(run, child)
+			continue
+		}
+
+		flushRun()
+
+		// Handle clear
+		if child.ComputedStyle != nil && child.ComputedStyle.Clear != "" {
+			childY = floatCtx.ClearFloat(child.ComputedStyle.Clear, childY)
+		}
+
+		// Handle float
+		if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+			le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+			continue
+		}
+
+		// Normal in-flow block element: stack vertically with margin collapse
+		// against the previous block box (line runs do not participate).
+		newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+		if inFlow {
+			childY = newY
+			lastChild = childBox
+		}
+	}
+
+	flushRun()
 
 	return childY
 }

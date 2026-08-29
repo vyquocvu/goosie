@@ -580,6 +580,82 @@ func TestComprehensiveGeneratedFlexboxFiles(t *testing.T) {
 	}
 }
 
+// TestFlexColumnIndefiniteHeightJustifyContentNoop guards against the
+// indefinite-column-height 10000px fallback: when a column flex container has
+// no definite height, it shrink-wraps its content, so justify-content has no
+// free space to distribute. flex-end/center must not push items ~10000px down
+// (this broke Google's doodle homepage, whose logo span was laid out at y≈10066).
+func TestFlexColumnIndefiniteHeightJustifyContentNoop(t *testing.T) {
+	tests := []struct {
+		name           string
+		justifyContent string
+	}{
+		{"flex-end", "flex-end"},
+		{"center", "center"},
+		{"space-between", "space-between"},
+		{"space-around", "space-around"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			htmlContent := `
+				<html>
+					<head>
+						<style>
+							.flex-container {
+								display: flex;
+								flex-direction: column;
+								justify-content: ` + tt.justifyContent + `;
+								width: 300px;
+							}
+							.item {
+								height: 40px;
+							}
+						</style>
+					</head>
+					<body>
+						<div class="flex-container">
+							<div class="item">1</div>
+							<div class="item">2</div>
+						</div>
+					</body>
+				</html>
+			`
+			doc, err := html.Parse(strings.NewReader(htmlContent))
+			if err != nil {
+				t.Fatalf("html.Parse failed: %v", err)
+			}
+
+			stylesheet := extractAndParseCSS(doc)
+			renderTree := BuildRenderTree(findBodyNode(doc))
+			styleManager := NewStyleManager(stylesheet)
+			styleManager.ApplyStyles(renderTree)
+
+			layoutEngine := NewLayoutEngine(800, 600)
+			layoutEngine.ComputeLayout(renderTree)
+
+			flexContainer := findLayoutByClass(t, layoutEngine, renderTree, "flex-container")
+			if flexContainer == nil {
+				t.Fatal("flex-container not found")
+			}
+
+			// The container has no explicit height: its height equals its
+			// content. Flex items must start at the container's top.
+			expectedTop := flexContainer.Box.Y
+			for i, child := range flexContainer.Children {
+				if child.Box.Y > expectedTop+60 {
+					t.Errorf("%s: item %d pushed to y=%.0f (container top %.0f, height %.0f); should be near the top",
+						tt.name, i, child.Box.Y, expectedTop, flexContainer.Box.Height)
+				}
+			}
+			if flexContainer.Box.Height > 200 {
+				t.Errorf("%s: container height %.0f is inflated; expected content height (~80-120px)",
+					tt.name, flexContainer.Box.Height)
+			}
+		})
+	}
+}
+
 func countFlexNodes(node *RenderNode) int {
 	if node == nil {
 		return 0

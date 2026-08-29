@@ -14,10 +14,37 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
+
+// linkColorTheme overrides the hyperlink color of a base theme so anchor
+// widgets honor the element's computed color instead of the theme's default
+// link blue. All other lookups fall through to the base theme.
+type linkColorTheme struct {
+	fyne.Theme
+	link color.Color
+}
+
+func (t linkColorTheme) Color(name fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	if name == theme.ColorNameHyperlink {
+		return t.link
+	}
+	return t.Theme.Color(name, v)
+}
+
+// applyLinkColor wraps a hyperlink widget in a theme override carrying the
+// node's computed color. Fyne's Hyperlink hardcodes ColorNameHyperlink in its
+// text segment, so a per-widget theme is the only way to recolor it. Returns
+// the original object when the node has no computed color.
+func applyLinkColor(node *RenderNode, obj fyne.CanvasObject) fyne.CanvasObject {
+	if node == nil || node.ComputedStyle == nil || node.ComputedStyle.Color == nil {
+		return obj
+	}
+	return container.NewThemeOverride(obj, linkColorTheme{Theme: theme.Current(), link: node.ComputedStyle.Color})
+}
 
 // NavigationCallback is a function that is called when navigation is requested
 type NavigationCallback func(url string)
@@ -582,10 +609,10 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 		if cr.onNavigate != nil {
 			// Create a custom tappable widget
 			tappableLink := newTappableHyperlink(text, resolvedURL, cr.onNavigate, cr, cr.dlBuildGen)
-			*objects = append(*objects, tappableLink)
+			*objects = append(*objects, applyLinkColor(node, tappableLink))
 		} else {
 			// Fallback to default hyperlink behavior
-			*objects = append(*objects, link)
+			*objects = append(*objects, applyLinkColor(node, link))
 		}
 	} else {
 		// No href, just display as text
@@ -1615,7 +1642,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			// Create a custom tappable widget
 			tappableLink := newTappableHyperlink(cmd.LinkText, resolvedURL, cr.onNavigate, cr, cr.dlBuildGen)
 			tappableLink.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-			return tappableLink
+			return applyLinkColor(cmd.Node, tappableLink)
 		} else {
 			// Fallback to default hyperlink behavior
 			parsedURL, err := url.Parse(resolvedURL)
@@ -1623,7 +1650,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 				link := widget.NewHyperlink(cmd.LinkText, parsedURL)
 				link.Wrapping = fyne.TextWrapOff
 				link.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
-				return link
+				return applyLinkColor(cmd.Node, link)
 			} else {
 				// If URL parsing fails, display as text
 				label := widget.NewLabel(cmd.LinkText)

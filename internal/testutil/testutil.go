@@ -33,6 +33,10 @@ func RenderToImage(obj fyne.CanvasObject, width, height int) (image.Image, error
 	defer a.Quit()
 
 	w := a.NewWindow("Screenshot")
+	// Fyne windows pad content by theme.Padding (4px), which would shift
+	// every captured pixel relative to the browser's coordinate space.
+	// Screenshots must map 1:1 to Goosie's layout coordinates.
+	w.SetPadded(false)
 	w.Resize(fyne.NewSize(float32(width), float32(height)))
 	bg := canvas.NewRectangle(color.RGBA{R: 255, G: 255, B: 255, A: 255})
 	bg.Resize(fyne.NewSize(float32(width), float32(height)))
