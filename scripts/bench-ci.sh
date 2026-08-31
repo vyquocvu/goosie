@@ -7,15 +7,15 @@
 set -euo pipefail
 
 PACKAGES=(
-  ./internal/dom
-  ./internal/css
-  ./internal/renderer
-  ./internal/engine/session
-  ./internal/engine/navigation
-  ./internal/engine/metrics
-  ./internal/engine/testpages
-  ./internal/js
-  ./internal/net
+  ./test/internal/dom
+  ./test/internal/css
+  ./test/internal/renderer
+  ./test/internal/engine/session
+  ./test/internal/engine/navigation
+  ./test/internal/engine/metrics
+  ./test/internal/engine/testpages
+  ./test/internal/js
+  ./test/internal/net
 )
 
 BENCHTIME="${BENCHTIME:-100ms}"

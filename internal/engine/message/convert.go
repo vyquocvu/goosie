@@ -21,7 +21,7 @@ func Event(ev session.Event, ts time.Time) *Message {
 		m.Navigation = &Navigation{
 			NavID: navID,
 			URL:   ev.URL,
-			State: convertState(ev.State),
+			State: ConvertState(ev.State),
 		}
 	case session.EventTitleChange:
 		m.Title = &Title{
@@ -72,7 +72,8 @@ func Event(ev session.Event, ts time.Time) *Message {
 	return m
 }
 
-func convertState(s session.State) NavState {
+// ConvertState maps a session.State to the corresponding message NavState.
+func ConvertState(s session.State) NavState {
 	switch s {
 	case session.StateCreated:
 		return StateCreated

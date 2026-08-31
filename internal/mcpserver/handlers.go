@@ -201,17 +201,17 @@ func (s *Server) toolQuery(ctx context.Context, args map[string]interface{}) (*b
 	var locator browsercontrol.Locator
 	if role, ok := args["role"].(map[string]interface{}); ok {
 		locator.Role = &browsercontrol.RoleLocator{
-			Name:  getString(role, "name"),
-			Exact: getBool(role, "exact"),
+			Name:  GetString(role, "name"),
+			Exact: GetBool(role, "exact"),
 		}
 	} else if css, ok := args["css"].(map[string]interface{}); ok {
 		locator.CSS = &browsercontrol.CSSLocator{
-			Selector: getString(css, "selector"),
+			Selector: GetString(css, "selector"),
 		}
 	} else if text, ok := args["text"].(map[string]interface{}); ok {
 		locator.Text = &browsercontrol.TextLocator{
-			Value: getString(text, "value"),
-			Exact: getBool(text, "exact"),
+			Value: GetString(text, "value"),
+			Exact: GetBool(text, "exact"),
 		}
 	}
 
@@ -353,14 +353,14 @@ func mapError(err error) error {
 	return err
 }
 
-func getBool(m map[string]interface{}, key string) bool {
+func GetBool(m map[string]interface{}, key string) bool {
 	if v, ok := m[key].(bool); ok {
 		return v
 	}
 	return false
 }
 
-func parseInt(v interface{}) int {
+func ParseInt(v interface{}) int {
 	switch n := v.(type) {
 	case float64:
 		return int(n)
@@ -382,7 +382,7 @@ type ErrorDetail struct {
 	Retryable bool                  `json:"retryable"`
 }
 
-func newErrorResponse(code browsercontrol.ErrorCode, message string, retryable bool) ErrorResponse {
+func NewErrorResponse(code browsercontrol.ErrorCode, message string, retryable bool) ErrorResponse {
 	return ErrorResponse{
 		Error: ErrorDetail{
 			Code:       code,
@@ -398,8 +398,8 @@ func parseLocator(args map[string]interface{}) browsercontrol.Locator {
 	// Check for role locator
 	if role, ok := args["role"].(map[string]interface{}); ok {
 		locator.Role = &browsercontrol.RoleLocator{
-			Name:  getString(role, "name"),
-			Exact: getBool(role, "exact"),
+			Name:  GetString(role, "name"),
+			Exact: GetBool(role, "exact"),
 		}
 		return locator
 	}
@@ -407,7 +407,7 @@ func parseLocator(args map[string]interface{}) browsercontrol.Locator {
 	// Check for CSS locator
 	if css, ok := args["css"].(map[string]interface{}); ok {
 		locator.CSS = &browsercontrol.CSSLocator{
-			Selector: getString(css, "selector"),
+			Selector: GetString(css, "selector"),
 		}
 		return locator
 	}
@@ -415,8 +415,8 @@ func parseLocator(args map[string]interface{}) browsercontrol.Locator {
 	// Check for text locator
 	if text, ok := args["text"].(map[string]interface{}); ok {
 		locator.Text = &browsercontrol.TextLocator{
-			Value: getString(text, "value"),
-			Exact: getBool(text, "exact"),
+			Value: GetString(text, "value"),
+			Exact: GetBool(text, "exact"),
 		}
 		return locator
 	}
@@ -447,7 +447,7 @@ func formatResult(v interface{}) string {
 }
 
 // truncateString truncates a string to maxLen characters.
-func truncateString(s string, maxLen int) string {
+func TruncateString(s string, maxLen int) string {
 	return Truncate(s, maxLen)
 }
 
@@ -465,7 +465,7 @@ func parseJSONArgs(rawArgs json.RawMessage) (map[string]interface{}, error) {
 }
 
 // contains checks if a string slice contains a value.
-func contains(ss []string, s string) bool {
+func Contains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
 			return true
@@ -475,7 +475,7 @@ func contains(ss []string, s string) bool {
 }
 
 // normalizeURL normalizes a URL for comparison.
-func normalizeURL(url string) string {
+func NormalizeURL(url string) string {
 	url = strings.TrimSpace(url)
 	url = strings.ToLower(url)
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {

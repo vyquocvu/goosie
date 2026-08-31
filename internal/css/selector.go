@@ -47,12 +47,12 @@ type CompiledRule struct {
 // CompiledStyleSheet is a pre-processed stylesheet with bucketed rules.
 // Rules are organized by their rightmost selector key for O(1) candidate lookup.
 type CompiledStyleSheet struct {
-	rules           []CompiledRule
-	idBucket        map[string][]int // ID -> rule indices
-	classBucket     map[string][]int // class -> rule indices
-	tagBucket       map[string][]int // tag (lowercased) -> rule indices
-	attrBucket      map[string][]int // attr name -> rule indices
-	universalBucket []int            // rule indices for universal selectors
+	Rules           []CompiledRule
+	IDBucket        map[string][]int // ID -> rule indices
+	ClassBucket     map[string][]int // class -> rule indices
+	TagBucket       map[string][]int // tag (lowercased) -> rule indices
+	AttrBucket      map[string][]int // attr name -> rule indices
+	UniversalBucket []int            // rule indices for universal selectors
 }
 
 // Element is the interface for DOM elements during selector matching.
@@ -128,39 +128,39 @@ func CompareSpecificity(a, b [3]uint16) int {
 func CompileStyleSheet(sheet *StyleSheet) *CompiledStyleSheet {
 	if sheet == nil {
 		return &CompiledStyleSheet{
-			idBucket:    make(map[string][]int),
-			classBucket: make(map[string][]int),
-			tagBucket:   make(map[string][]int),
-			attrBucket:  make(map[string][]int),
+			IDBucket:    make(map[string][]int),
+			ClassBucket: make(map[string][]int),
+			TagBucket:   make(map[string][]int),
+			AttrBucket:  make(map[string][]int),
 		}
 	}
 
 	cs := &CompiledStyleSheet{
-		rules:       make([]CompiledRule, 0, len(sheet.Rules)),
-		idBucket:    make(map[string][]int),
-		classBucket: make(map[string][]int),
-		tagBucket:   make(map[string][]int),
-		attrBucket:  make(map[string][]int),
+		Rules:       make([]CompiledRule, 0, len(sheet.Rules)),
+		IDBucket:    make(map[string][]int),
+		ClassBucket: make(map[string][]int),
+		TagBucket:   make(map[string][]int),
+		AttrBucket:  make(map[string][]int),
 	}
 
 	for _, rule := range sheet.Rules {
 		compiled := compileRule(rule)
-		ruleIdx := len(cs.rules)
-		cs.rules = append(cs.rules, compiled)
+		ruleIdx := len(cs.Rules)
+		cs.Rules = append(cs.Rules, compiled)
 
 		// Bucket by each selector's key
 		for _, sel := range compiled.Selectors {
 			switch sel.Key.kind {
 			case bucketID:
-				cs.idBucket[sel.Key.key] = append(cs.idBucket[sel.Key.key], ruleIdx)
+				cs.IDBucket[sel.Key.key] = append(cs.IDBucket[sel.Key.key], ruleIdx)
 			case bucketClass:
-				cs.classBucket[sel.Key.key] = append(cs.classBucket[sel.Key.key], ruleIdx)
+				cs.ClassBucket[sel.Key.key] = append(cs.ClassBucket[sel.Key.key], ruleIdx)
 			case bucketTag:
-				cs.tagBucket[sel.Key.key] = append(cs.tagBucket[sel.Key.key], ruleIdx)
+				cs.TagBucket[sel.Key.key] = append(cs.TagBucket[sel.Key.key], ruleIdx)
 			case bucketAttr:
-				cs.attrBucket[sel.Key.key] = append(cs.attrBucket[sel.Key.key], ruleIdx)
+				cs.AttrBucket[sel.Key.key] = append(cs.AttrBucket[sel.Key.key], ruleIdx)
 			case bucketUniversal:
-				cs.universalBucket = append(cs.universalBucket, ruleIdx)
+				cs.UniversalBucket = append(cs.UniversalBucket, ruleIdx)
 			}
 		}
 	}
@@ -281,7 +281,7 @@ func (cs *CompiledStyleSheet) MatchElement(elem Element) []CompiledRule {
 				continue
 			}
 
-			rule := &cs.rules[idx]
+			rule := &cs.Rules[idx]
 			for _, sel := range rule.Selectors {
 				if matchCompiledSelector(&sel, elem) {
 					matched = append(matched, *rule)
@@ -300,7 +300,7 @@ func (cs *CompiledStyleSheet) MatchElement(elem Element) []CompiledRule {
 		}
 		seen[idx] = true
 
-		rule := &cs.rules[idx]
+		rule := &cs.Rules[idx]
 		for _, sel := range rule.Selectors {
 			if matchCompiledSelector(&sel, elem) {
 				matched = append(matched, *rule)
@@ -328,27 +328,27 @@ func (cs *CompiledStyleSheet) collectCandidates(elem Element) []int {
 
 	// ID bucket
 	if id := elem.ID(); id != "" {
-		candidates = append(candidates, cs.idBucket[id]...)
+		candidates = append(candidates, cs.IDBucket[id]...)
 	}
 
 	// Class buckets
 	for _, class := range elem.Classes() {
-		candidates = append(candidates, cs.classBucket[class]...)
+		candidates = append(candidates, cs.ClassBucket[class]...)
 	}
 
 	// Tag bucket
 	tag := toLowerFast(elem.TagName())
-	candidates = append(candidates, cs.tagBucket[tag]...)
+	candidates = append(candidates, cs.TagBucket[tag]...)
 
 	// Attribute buckets - check all element attributes matching indexed attributes
-	for attrName, ruleIndices := range cs.attrBucket {
+	for attrName, ruleIndices := range cs.AttrBucket {
 		if _, ok := elem.GetAttribute(attrName); ok {
 			candidates = append(candidates, ruleIndices...)
 		}
 	}
 
 	// Universal bucket always applies
-	candidates = append(candidates, cs.universalBucket...)
+	candidates = append(candidates, cs.UniversalBucket...)
 
 	return candidates
 }

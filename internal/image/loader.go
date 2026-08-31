@@ -47,8 +47,8 @@ type ImageData struct {
 // OnLoadCallback is a callback function for when an image is loaded
 type OnLoadCallback func(source string)
 
-// loader handles loading images from various sources
-type loader struct {
+// ImageLoader handles loading images from various sources
+type ImageLoader struct {
 	httpClient *http.Client
 	cache      *Cache
 	mu         sync.RWMutex
@@ -68,9 +68,9 @@ const (
 	retryBaseDelay         = 500 * time.Millisecond
 )
 
-// NewLoader creates a new image loader with a cache
+// NewLoader creates a new image ImageLoader with a cache
 func NewLoader(cacheSize int) Loader {
-	return &loader{
+	return &ImageLoader{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -82,7 +82,7 @@ func NewLoader(cacheSize int) Loader {
 
 // acquireDomainSem acquires the per-domain semaphore for the given domain,
 // blocking if the maximum number of concurrent requests is already in flight.
-func (l *loader) acquireDomainSem(domain string) {
+func (l *ImageLoader) acquireDomainSem(domain string) {
 	l.domainSemMu.Lock()
 	sem, ok := l.domainSem[domain]
 	if !ok {
@@ -94,7 +94,7 @@ func (l *loader) acquireDomainSem(domain string) {
 }
 
 // releaseDomainSem releases the per-domain semaphore.
-func (l *loader) releaseDomainSem(domain string) {
+func (l *ImageLoader) releaseDomainSem(domain string) {
 	l.domainSemMu.Lock()
 	sem := l.domainSem[domain]
 	l.domainSemMu.Unlock()
@@ -102,7 +102,7 @@ func (l *loader) releaseDomainSem(domain string) {
 }
 
 // SetOnLoadCallback sets the callback for when an image is loaded
-func (l *loader) SetOnLoadCallback(callback OnLoadCallback) {
+func (l *ImageLoader) SetOnLoadCallback(callback OnLoadCallback) {
 	l.mu.Lock()
 	l.OnLoad = callback
 	l.mu.Unlock()
@@ -110,7 +110,7 @@ func (l *loader) SetOnLoadCallback(callback OnLoadCallback) {
 
 // Load loads an image from a URL or file path
 // Returns cached image if available, otherwise loads asynchronously
-func (l *loader) Load(source string) (*ImageData, error) {
+func (l *ImageLoader) Load(source string) (*ImageData, error) {
 	// Check cache first
 	if cached := l.cache.Get(source); cached != nil {
 		return cached, nil
@@ -138,14 +138,14 @@ func (l *loader) Load(source string) (*ImageData, error) {
 }
 
 // LoadSync loads an image synchronously
-func (l *loader) LoadSync(source string) (*ImageData, error) {
+func (l *ImageLoader) LoadSync(source string) (*ImageData, error) {
 	// Check cache first
 	if cached := l.cache.Get(source); cached != nil {
 		return cached, nil
 	}
 
 	// Load the image
-	data, err := l.loadImage(source)
+	data, err := l.LoadImage(source)
 	if err != nil {
 		data = &ImageData{
 			State: StateError,
@@ -160,7 +160,7 @@ func (l *loader) LoadSync(source string) (*ImageData, error) {
 }
 
 // loadAsync loads an image asynchronously
-func (l *loader) loadAsync(source string, wg *sync.WaitGroup) {
+func (l *ImageLoader) loadAsync(source string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() {
 		l.mu.Lock()
@@ -168,7 +168,7 @@ func (l *loader) loadAsync(source string, wg *sync.WaitGroup) {
 		l.mu.Unlock()
 	}()
 
-	data, err := l.loadImage(source)
+	data, err := l.LoadImage(source)
 	if err != nil {
 		log.Printf("Failed to load image %s: %v", source, err)
 		data = &ImageData{
@@ -191,13 +191,13 @@ func (l *loader) loadAsync(source string, wg *sync.WaitGroup) {
 	}
 }
 
-// loadImage loads an image from a source (URL or file path)
-func (l *loader) loadImage(source string) (*ImageData, error) {
+// LoadImage loads an image from a source (URL or file path).
+func (l *ImageLoader) LoadImage(source string) (*ImageData, error) {
 	// Determine if it's a URL or file path
 	if strings.HasPrefix(source, "data:") {
 		return l.loadFromDataURI(source)
 	}
-	if isURL(source) {
+	if IsURL(source) {
 		return l.loadFromURL(source)
 	}
 	return l.loadFromFile(source)
@@ -224,7 +224,7 @@ func decodeSVG(data []byte) (*ImageData, error) {
 	// viewBox when they are present and valid.
 	w := int(icon.ViewBox.W)
 	h := int(icon.ViewBox.H)
-	if aw, ah, ok := parseSVGIntrinsicSize(data); ok {
+	if aw, ah, ok := ParseSVGIntrinsicSize(data); ok {
 		w, h = aw, ah
 	}
 	if w <= 0 {
@@ -249,7 +249,7 @@ func decodeSVG(data []byte) (*ImageData, error) {
 // document's root <svg> element. Length units other than px are ignored
 // (viewBox is used as the fallback in that case). Returns false when either
 // attribute is missing or invalid.
-func parseSVGIntrinsicSize(data []byte) (int, int, bool) {
+func ParseSVGIntrinsicSize(data []byte) (int, int, bool) {
 	open := bytes.Index(data, []byte("<svg"))
 	if open < 0 {
 		return 0, 0, false
@@ -365,7 +365,7 @@ func parseSVGLength(s string) int {
 }
 
 // loadFromDataURI loads an image from a data URI
-func (l *loader) loadFromDataURI(dataURI string) (*ImageData, error) {
+func (l *ImageLoader) loadFromDataURI(dataURI string) (*ImageData, error) {
 	// Format: data:[<mediatype>][;base64],<data>
 	parts := strings.SplitN(dataURI, ",", 2)
 	if len(parts) != 2 {
@@ -395,7 +395,7 @@ func (l *loader) loadFromDataURI(dataURI string) (*ImageData, error) {
 
 // loadFromURL loads an image from a remote URL with per-domain rate limiting
 // and automatic retry on 429 (Too Many Requests) with exponential backoff.
-func (l *loader) loadFromURL(url string) (*ImageData, error) {
+func (l *ImageLoader) loadFromURL(url string) (*ImageData, error) {
 	parsed, err := neturl.Parse(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse image URL: %w", err)
@@ -460,7 +460,7 @@ func (l *loader) loadFromURL(url string) (*ImageData, error) {
 }
 
 // loadFromFile loads an image from a local file
-func (l *loader) loadFromFile(path string) (*ImageData, error) {
+func (l *ImageLoader) loadFromFile(path string) (*ImageData, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open image file: %w", err)
@@ -480,7 +480,7 @@ func (l *loader) loadFromFile(path string) (*ImageData, error) {
 }
 
 // decodeImage decodes an image from a reader
-func (l *loader) decodeImage(r io.Reader) (*ImageData, error) {
+func (l *ImageLoader) decodeImage(r io.Reader) (*ImageData, error) {
 	img, format, err := image.Decode(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode image: %w", err)
@@ -497,11 +497,16 @@ func (l *loader) decodeImage(r io.Reader) (*ImageData, error) {
 }
 
 // GetCache returns the cache instance
-func (l *loader) GetCache() *Cache {
+func (l *ImageLoader) GetCache() *Cache {
 	return l.cache
 }
 
-// isURL checks if a string is a URL
-func isURL(s string) bool {
+// GetHTTPClient returns the HTTP client. Exported for testing.
+func (l *ImageLoader) GetHTTPClient() *http.Client {
+	return l.httpClient
+}
+
+// IsURL checks if a string is a URL.
+func IsURL(s string) bool {
 	return len(s) > 7 && (s[:7] == "http://" || s[:8] == "https://")
 }

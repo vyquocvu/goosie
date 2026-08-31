@@ -292,6 +292,22 @@ func (r *Runtime) SetMaxTaskDuration(d time.Duration) {
 	}
 }
 
+// LongTaskThreshold returns the current long-task duration threshold.
+func (r *Runtime) LongTaskThreshold() time.Duration {
+	return r.longTaskThreshold
+}
+
+// MaxTaskDuration returns the current hard script budget.
+func (r *Runtime) MaxTaskDuration() time.Duration {
+	return r.maxTaskDuration
+}
+
+// ReportRuntimeUnsupportedFeature exposes the internal detection path for
+// testing and benchmarking from external packages.
+func (r *Runtime) ReportRuntimeUnsupportedFeature(kind dom.UnsupportedFeatureKind) {
+	r.reportRuntimeUnsupportedFeature(kind)
+}
+
 // LongTaskCount returns the number of RunScript invocations that exceeded
 // the long-task threshold. Used by the DevTools performance panel.
 func (r *Runtime) LongTaskCount() uint64 {

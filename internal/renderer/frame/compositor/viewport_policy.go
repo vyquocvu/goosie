@@ -52,7 +52,7 @@ func DefaultViewportPolicyConfig() ViewportPolicyConfig {
 // and scroll direction. It determines which tiles to rasterize first
 // and how far to prefetch in the scroll direction.
 type ViewportPolicy struct {
-	config     ViewportPolicyConfig
+	Config     ViewportPolicyConfig
 	cache      *TileCache
 	visible    frame.Viewport
 	prevScroll frame.Point
@@ -72,7 +72,7 @@ func NewViewportPolicy(cache *TileCache, cfg ViewportPolicyConfig) *ViewportPoli
 		cfg.MaxPrefetchTiles = 32
 	}
 	return &ViewportPolicy{
-		config: cfg,
+		Config: cfg,
 		cache:  cache,
 	}
 }
@@ -119,23 +119,23 @@ func (p *ViewportPolicy) Direction() ScrollDirection {
 // direction and policy. For hidden tabs, the margin is reduced.
 func (p *ViewportPolicy) PrefetchRect() frame.Rect {
 	vr := p.visible.VisibleRect()
-	margin := p.config.PrefetchMargin
+	margin := p.Config.PrefetchMargin
 	if p.hidden {
-		margin *= p.config.HiddenTabPrefetchFraction
+		margin *= p.Config.HiddenTabPrefetchFraction
 	}
 
 	switch p.direction {
 	case ScrollDirectionDown:
-		vr.Y = vr.Y + vr.H - p.config.OppositeMargin
-		vr.H = margin + p.config.OppositeMargin
+		vr.Y = vr.Y + vr.H - p.Config.OppositeMargin
+		vr.H = margin + p.Config.OppositeMargin
 	case ScrollDirectionUp:
-		vr.H = margin + p.config.OppositeMargin
+		vr.H = margin + p.Config.OppositeMargin
 		vr.Y = vr.Y - margin
 	case ScrollDirectionRight:
-		vr.X = vr.X + vr.W - p.config.OppositeMargin
-		vr.W = margin + p.config.OppositeMargin
+		vr.X = vr.X + vr.W - p.Config.OppositeMargin
+		vr.W = margin + p.Config.OppositeMargin
 	case ScrollDirectionLeft:
-		vr.W = margin + p.config.OppositeMargin
+		vr.W = margin + p.Config.OppositeMargin
 		vr.X = vr.X - margin
 	default:
 		// No direction — prefetch equally in all directions.
@@ -176,8 +176,8 @@ func (p *ViewportPolicy) PrioritizeTiles() []TilePriorityResult {
 	sortResults(results)
 
 	// Bound the result.
-	if len(results) > p.config.MaxPrefetchTiles {
-		results = results[:p.config.MaxPrefetchTiles]
+	if len(results) > p.Config.MaxPrefetchTiles {
+		results = results[:p.Config.MaxPrefetchTiles]
 	}
 	return results
 }

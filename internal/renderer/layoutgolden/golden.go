@@ -141,16 +141,16 @@ func AssertGoldenLayout(t *testing.T, name string, cfg Config, viewportW, viewpo
 func RunDeterminismGuard(t *testing.T, name string, viewportW, viewportH float32, htmlDoc, cssDoc string) {
 	t.Helper()
 
-	first := renderAndSerialize(t, viewportW, viewportH, htmlDoc, cssDoc)
-	second := renderAndSerialize(t, viewportW, viewportH, htmlDoc, cssDoc)
+	first := RenderAndSerialize(t, viewportW, viewportH, htmlDoc, cssDoc)
+	second := RenderAndSerialize(t, viewportW, viewportH, htmlDoc, cssDoc)
 	if first != second {
 		t.Fatalf("determinism guard %q: two consecutive runs produced different layouts", name)
 	}
 }
 
-// renderAndSerialize is a helper that runs the layout pipeline and
+// RenderAndSerialize is a helper that runs the layout pipeline and
 // returns the deterministic text snapshot.
-func renderAndSerialize(t *testing.T, viewportW, viewportH float32, htmlDoc, cssDoc string) string {
+func RenderAndSerialize(t *testing.T, viewportW, viewportH float32, htmlDoc, cssDoc string) string {
 	t.Helper()
 	tree, err := parseHTMLToRenderTree(htmlDoc)
 	if err != nil {

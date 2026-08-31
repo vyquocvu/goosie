@@ -112,7 +112,7 @@ func (r *InvalidationResult) IsEmpty() bool {
 // StyleInvalidator analyzes DOM mutations against a compiled stylesheet
 // to determine which elements need style recalculation.
 type StyleInvalidator struct {
-	sheet *CompiledStyleSheet
+	Sheet *CompiledStyleSheet
 
 	// Batch state
 	batching  bool
@@ -123,7 +123,7 @@ type StyleInvalidator struct {
 // NewStyleInvalidator creates a StyleInvalidator for the given compiled stylesheet.
 func NewStyleInvalidator(sheet *CompiledStyleSheet) *StyleInvalidator {
 	return &StyleInvalidator{
-		sheet: sheet,
+		Sheet: sheet,
 	}
 }
 
@@ -234,7 +234,7 @@ func (inv *StyleInvalidator) invalidateInlineStyle(m Mutation) InvalidationResul
 func (inv *StyleInvalidator) invalidateClassChange(m Mutation) InvalidationResult {
 	result := InvalidationResult{Targets: []Element{m.Target}}
 
-	affected := inv.affectedRuleIndices(m)
+	affected := inv.AffectedRuleIndices(m)
 	if len(affected) == 0 && !inv.hasUniversalRules() {
 		// No rules reference this class — check if old/new class has rules
 		if !inv.classHasRules(m.OldAttr) && !inv.classHasRules(m.NewAttr) {
@@ -262,7 +262,7 @@ func (inv *StyleInvalidator) invalidateIDChange(m Mutation) InvalidationResult {
 		Targets: []Element{m.Target},
 	}
 
-	affected := inv.affectedRuleIndices(m)
+	affected := inv.AffectedRuleIndices(m)
 	if inv.rulesContainInherited(affected) {
 		result.InvalidateDescendants = true
 	}
@@ -278,7 +278,7 @@ func (inv *StyleInvalidator) invalidateAttributeChange(m Mutation) InvalidationR
 		Targets: []Element{m.Target},
 	}
 
-	affected := inv.affectedRuleIndices(m)
+	affected := inv.AffectedRuleIndices(m)
 	if inv.rulesContainInherited(affected) {
 		result.InvalidateDescendants = true
 	}
@@ -315,10 +315,10 @@ func (inv *StyleInvalidator) invalidateRemoval(m Mutation) InvalidationResult {
 
 // --- Analysis helpers ---
 
-// affectedRuleIndices returns the indices of rules in the compiled stylesheet
+// AffectedRuleIndices returns the indices of rules in the compiled stylesheet
 // that could be affected by the given mutation.
-func (inv *StyleInvalidator) affectedRuleIndices(m Mutation) []int {
-	if inv.sheet == nil {
+func (inv *StyleInvalidator) AffectedRuleIndices(m Mutation) []int {
+	if inv.Sheet == nil {
 		return nil
 	}
 
@@ -328,48 +328,48 @@ func (inv *StyleInvalidator) affectedRuleIndices(m Mutation) []int {
 	case MutationClassChange:
 		// Check both old and new class buckets
 		if m.OldAttr != "" {
-			indices = append(indices, inv.sheet.classBucket[m.OldAttr]...)
+			indices = append(indices, inv.Sheet.ClassBucket[m.OldAttr]...)
 		}
 		if m.NewAttr != "" && m.NewAttr != m.OldAttr {
-			indices = append(indices, inv.sheet.classBucket[m.NewAttr]...)
+			indices = append(indices, inv.Sheet.ClassBucket[m.NewAttr]...)
 		}
 		// Also check tag bucket since the element's tag may match rules
 		if m.Target != nil {
 			tag := toLower(m.Target.TagName())
-			indices = append(indices, inv.sheet.tagBucket[tag]...)
+			indices = append(indices, inv.Sheet.TagBucket[tag]...)
 		}
 
 	case MutationIDChange:
 		if m.OldAttr != "" {
-			indices = append(indices, inv.sheet.idBucket[m.OldAttr]...)
+			indices = append(indices, inv.Sheet.IDBucket[m.OldAttr]...)
 		}
 		if m.NewAttr != "" && m.NewAttr != m.OldAttr {
-			indices = append(indices, inv.sheet.idBucket[m.NewAttr]...)
+			indices = append(indices, inv.Sheet.IDBucket[m.NewAttr]...)
 		}
 
 	case MutationAttributeChange:
 		if m.OldAttr != "" {
-			indices = append(indices, inv.sheet.attrBucket[m.OldAttr]...)
+			indices = append(indices, inv.Sheet.AttrBucket[m.OldAttr]...)
 		}
 		if m.NewAttr != "" && m.NewAttr != m.OldAttr {
-			indices = append(indices, inv.sheet.attrBucket[m.NewAttr]...)
+			indices = append(indices, inv.Sheet.AttrBucket[m.NewAttr]...)
 		}
 		// Also check tag bucket
 		if m.Target != nil {
 			tag := toLower(m.Target.TagName())
-			indices = append(indices, inv.sheet.tagBucket[tag]...)
+			indices = append(indices, inv.Sheet.TagBucket[tag]...)
 		}
 
 	case MutationInlineStyleChange, MutationInsertion, MutationRemoval:
 		// These always affect the target; include tag-based rules
 		if m.Target != nil {
 			tag := toLower(m.Target.TagName())
-			indices = append(indices, inv.sheet.tagBucket[tag]...)
+			indices = append(indices, inv.Sheet.TagBucket[tag]...)
 		}
 	}
 
 	// Universal bucket always applies
-	indices = append(indices, inv.sheet.universalBucket...)
+	indices = append(indices, inv.Sheet.UniversalBucket...)
 
 	return dedupInts(indices)
 }
@@ -377,12 +377,12 @@ func (inv *StyleInvalidator) affectedRuleIndices(m Mutation) []int {
 // rulesContainInherited checks if any of the given rules contain inherited
 // CSS properties.
 func (inv *StyleInvalidator) rulesContainInherited(indices []int) bool {
-	if inv.sheet == nil {
+	if inv.Sheet == nil {
 		return false
 	}
 	for _, idx := range indices {
-		if idx >= 0 && idx < len(inv.sheet.rules) {
-			if declarationsContainInherited(inv.sheet.rules[idx].Declarations) {
+		if idx >= 0 && idx < len(inv.Sheet.Rules) {
+			if DeclarationsContainInherited(inv.Sheet.Rules[idx].Declarations) {
 				return true
 			}
 		}
@@ -390,8 +390,8 @@ func (inv *StyleInvalidator) rulesContainInherited(indices []int) bool {
 	return false
 }
 
-// declarationsContainInherited checks if any declaration is an inherited property.
-func declarationsContainInherited(decls []Declaration) bool {
+// DeclarationsContainInherited checks if any declaration is an inherited property.
+func DeclarationsContainInherited(decls []Declaration) bool {
 	for i := range decls {
 		if IsInheritedProperty(decls[i].Property) {
 			return true
@@ -400,16 +400,16 @@ func declarationsContainInherited(decls []Declaration) bool {
 	return false
 }
 
-// hasSiblingCombinator checks if any rule in the stylesheet uses sibling
+// HasSiblingCombinator checks if any rule in the stylesheet uses sibling
 // combinators (+ or ~).
-func (inv *StyleInvalidator) hasSiblingCombinator() bool {
-	if inv.sheet == nil {
+func (inv *StyleInvalidator) HasSiblingCombinator() bool {
+	if inv.Sheet == nil {
 		return false
 	}
-	for i := range inv.sheet.rules {
-		for j := range inv.sheet.rules[i].Selectors {
-			for k := range inv.sheet.rules[i].Selectors[j].Parts {
-				c := inv.sheet.rules[i].Selectors[j].Parts[k].Combinator
+	for i := range inv.Sheet.Rules {
+		for j := range inv.Sheet.Rules[i].Selectors {
+			for k := range inv.Sheet.Rules[i].Selectors[j].Parts {
+				c := inv.Sheet.Rules[i].Selectors[j].Parts[k].Combinator
 				if c == '+' || c == '~' {
 					return true
 				}
@@ -422,13 +422,13 @@ func (inv *StyleInvalidator) hasSiblingCombinator() bool {
 // addSiblingInvalidation checks for sibling combinators and sets the
 // appropriate invalidation flags.
 func (inv *StyleInvalidator) addSiblingInvalidation(result *InvalidationResult) {
-	if inv.sheet == nil {
+	if inv.Sheet == nil {
 		return
 	}
 	// Scan rules for sibling combinators
-	for i := range inv.sheet.rules {
-		for j := range inv.sheet.rules[i].Selectors {
-			sel := &inv.sheet.rules[i].Selectors[j]
+	for i := range inv.Sheet.Rules {
+		for j := range inv.Sheet.Rules[i].Selectors {
+			sel := &inv.Sheet.Rules[i].Selectors[j]
 			for k := range sel.Parts {
 				switch sel.Parts[k].Combinator {
 				case '+':
@@ -444,19 +444,19 @@ func (inv *StyleInvalidator) addSiblingInvalidation(result *InvalidationResult) 
 // classHasRules checks if any rule in the stylesheet has a class bucket
 // entry for the given class name.
 func (inv *StyleInvalidator) classHasRules(class string) bool {
-	if inv.sheet == nil || class == "" {
+	if inv.Sheet == nil || class == "" {
 		return false
 	}
-	_, ok := inv.sheet.classBucket[class]
+	_, ok := inv.Sheet.ClassBucket[class]
 	return ok
 }
 
 // hasUniversalRules checks if the stylesheet has universal bucket rules.
 func (inv *StyleInvalidator) hasUniversalRules() bool {
-	if inv.sheet == nil {
+	if inv.Sheet == nil {
 		return false
 	}
-	return len(inv.sheet.universalBucket) > 0
+	return len(inv.Sheet.UniversalBucket) > 0
 }
 
 // --- Utility functions ---

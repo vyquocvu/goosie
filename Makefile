@@ -101,7 +101,7 @@ test: clean generate-test-data
 	@echo "Running tests..."
 	@ls -l $(TEST_OUTPUT_DIR)/test_*.html | head -n 5
 	@echo "Running unit tests..."
-	go test -v ./internal/... ./cmd/...
+	go test -v ./cmd/... ./test/...
 	@echo "Running E2E tests..."
 	go test -v -tags=e2e ./$(E2E_TEST_DIR)
 

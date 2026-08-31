@@ -41,7 +41,7 @@ jobs:
       - name: Run go test -race for concurrent engine packages
         run: |
           go test -race -count=1 -short -timeout=10m \
-            ./internal/engine/...
+            ./test/internal/engine/...
 
   microbenchmarks:
     name: Microbenchmarks
@@ -64,32 +64,32 @@ jobs:
       - name: Run parser and selector benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkParse' -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/dom
+            ./test/internal/dom
           go test -run='^$' -bench='BenchmarkParseSelector|BenchmarkMatch' -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/css
+            ./test/internal/css
 
       - name: Run layout and display-list benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkLayout' -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/renderer
+            ./test/internal/renderer
           go test -run='^$' -bench='BenchmarkDisplayList' -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/renderer
+            ./test/internal/renderer
 
       - name: Run navigation and session benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkSession|BenchmarkNav' -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/engine/...
+            ./test/internal/engine/...
 
       - name: Run metrics benchmarks
         run: |
           go test -run='^$' -bench='Benchmark' -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/engine/metrics
+            ./test/internal/engine/metrics
 
       - name: Run testpages benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkGet|BenchmarkGetContext|BenchmarkList' \
             -benchmem -benchtime=100ms -timeout=10m \
-            ./internal/engine/testpages
+            ./test/internal/engine/testpages
 
       - name: Build benchmark comparison script
         run: chmod +x scripts/bench-ci.sh

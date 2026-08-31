@@ -258,7 +258,7 @@ type RasterJob struct {
 type RasterJobQueue struct {
 	mu   sync.Mutex
 	jobs []RasterJob
-	max  int
+	Max  int
 }
 
 // NewRasterJobQueue creates a bounded job queue.
@@ -268,7 +268,7 @@ func NewRasterJobQueue(maxJobs int) *RasterJobQueue {
 	}
 	return &RasterJobQueue{
 		jobs: make([]RasterJob, 0, maxJobs),
-		max:  maxJobs,
+		Max:  maxJobs,
 	}
 }
 
@@ -276,7 +276,7 @@ func NewRasterJobQueue(maxJobs int) *RasterJobQueue {
 func (q *RasterJobQueue) Enqueue(job RasterJob) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.jobs) >= q.max {
+	if len(q.jobs) >= q.Max {
 		return false
 	}
 	q.jobs = append(q.jobs, job)

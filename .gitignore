@@ -32,6 +32,7 @@ go.work.sum
 *.swo
 *~
 .agents
+.qoder
 
 # OS
 .DS_Store

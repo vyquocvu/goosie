@@ -130,7 +130,7 @@ func SaveTestScreenshot(obj fyne.CanvasObject, testName string, width, height in
 	}
 
 	// Sanitize test name for filename
-	filename := sanitizeFilename(testName) + ".png"
+	filename := SanitizeFilename(testName) + ".png"
 	filePath := filepath.Join(dir, filename)
 
 	if err := SaveRenderedScreenshot(obj, filePath, width, height); err != nil {
@@ -140,8 +140,8 @@ func SaveTestScreenshot(obj fyne.CanvasObject, testName string, width, height in
 	return filePath, nil
 }
 
-// sanitizeFilename removes or replaces characters that are invalid in filenames.
-func sanitizeFilename(name string) string {
+// SanitizeFilename removes or replaces characters that are invalid in filenames.
+func SanitizeFilename(name string) string {
 	result := make([]byte, 0, len(name))
 	for i := 0; i < len(name); i++ {
 		c := name[i]

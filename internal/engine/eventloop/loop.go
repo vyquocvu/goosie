@@ -29,7 +29,7 @@ type Config struct {
 // Loop owns bounded input scheduling, render replacement, generation checks,
 // and presentation eligibility. It does not start worker goroutines.
 type Loop struct {
-	mu sync.Mutex
+	Mu sync.Mutex
 
 	ordered    []InputEvent
 	inputHead  int
@@ -55,7 +55,7 @@ type Loop struct {
 	budget       FrameBudget
 	present      func(RenderResult)
 	metrics      metricState
-	runCtx       context.Context
+	RunCtx       context.Context
 }
 
 // New creates a stopped event loop. Call Run to process render results.
@@ -80,8 +80,8 @@ func New(cfg Config) *Loop {
 // PostInput schedules an input event. Scroll, mouse move, and resize use
 // latest-wins slots; click and key events use the bounded FIFO.
 func (l *Loop) PostInput(event InputEvent) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.Mu.Lock()
+	defer l.Mu.Unlock()
 	if l.closed {
 		return ErrClosed
 	}
@@ -119,8 +119,8 @@ func (l *Loop) PostInput(event InputEvent) error {
 // DrainInput returns pending input in deterministic policy order: ordered user
 // intent first, then latest resize, scroll, and mouse-move state.
 func (l *Loop) DrainInput() []InputEvent {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.Mu.Lock()
+	defer l.Mu.Unlock()
 
 	capacity := l.inputCount
 	if l.hasResize {
@@ -157,19 +157,19 @@ func (l *Loop) DrainInput() []InputEvent {
 // SetGeneration replaces the current engine generation and cancels any render
 // scheduled under the prior generation.
 func (l *Loop) SetGeneration(g Generation) {
-	l.mu.Lock()
+	l.Mu.Lock()
 	if !l.generation.Matches(g) && l.cancelRender != nil {
 		l.cancelRender()
 		l.cancelRender = nil
 	}
 	l.generation = g
-	l.mu.Unlock()
+	l.Mu.Unlock()
 }
 
 // Generation returns the current generation.
 func (l *Loop) Generation() Generation {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.Mu.Lock()
+	defer l.Mu.Unlock()
 	return l.generation
 }
 
@@ -179,8 +179,8 @@ func (l *Loop) ScheduleRender(parent context.Context, req RenderRequest) (Render
 	if parent == nil {
 		parent = context.Background()
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.Mu.Lock()
+	defer l.Mu.Unlock()
 	if l.closed {
 		return RenderRequest{}, ErrClosed
 	}
@@ -211,8 +211,8 @@ func (l *Loop) RenderRequests() <-chan RenderRequest { return l.renderRequests }
 // SubmitRenderResult queues a completed result for generation and cancellation
 // checks. A newer completion replaces an older unprocessed completion.
 func (l *Loop) SubmitRenderResult(result RenderResult) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.Mu.Lock()
+	defer l.Mu.Unlock()
 	if l.closed {
 		return ErrClosed
 	}
@@ -226,7 +226,9 @@ func (l *Loop) SubmitRenderResult(result RenderResult) error {
 	return nil
 }
 
-func (l *Loop) handleRenderResult(result RenderResult) {
+// HandleRenderResult processes a single render result, applying generation and
+// cancellation checks before presenting.
+func (l *Loop) HandleRenderResult(result RenderResult) {
 	if result.Err != nil {
 		l.metrics.renderErrors.Add(1)
 		return
@@ -235,12 +237,12 @@ func (l *Loop) handleRenderResult(result RenderResult) {
 		l.metrics.staleFramesDropped.Add(1)
 		return
 	}
-	l.mu.Lock()
+	l.Mu.Lock()
 	current := l.generation
 	present := l.present
 	closed := l.closed
-	runCtx := l.runCtx
-	l.mu.Unlock()
+	runCtx := l.RunCtx
+	l.Mu.Unlock()
 	if closed || (runCtx != nil && runCtx.Err() != nil) || !result.Request.Generation.Matches(current) {
 		l.metrics.staleFramesDropped.Add(1)
 		return
@@ -262,7 +264,7 @@ func (l *Loop) ProcessPendingResults() int {
 	for {
 		select {
 		case result := <-l.renderResults:
-			l.handleRenderResult(result)
+			l.HandleRenderResult(result)
 			processed++
 		default:
 			return processed
@@ -276,13 +278,13 @@ func (l *Loop) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	l.mu.Lock()
+	l.Mu.Lock()
 	if l.closed {
-		l.mu.Unlock()
+		l.Mu.Unlock()
 		return nil
 	}
-	l.runCtx = ctx
-	l.mu.Unlock()
+	l.RunCtx = ctx
+	l.Mu.Unlock()
 	defer l.Close()
 	for {
 		select {
@@ -291,7 +293,7 @@ func (l *Loop) Run(ctx context.Context) error {
 		case <-l.done:
 			return nil
 		case result := <-l.renderResults:
-			l.handleRenderResult(result)
+			l.HandleRenderResult(result)
 		case <-l.wake:
 		}
 	}
@@ -300,13 +302,13 @@ func (l *Loop) Run(ctx context.Context) error {
 // Close cancels pending render work and shuts the loop down idempotently.
 func (l *Loop) Close() {
 	l.closeOnce.Do(func() {
-		l.mu.Lock()
+		l.Mu.Lock()
 		l.closed = true
 		if l.cancelRender != nil {
 			l.cancelRender()
 			l.cancelRender = nil
 		}
-		l.mu.Unlock()
+		l.Mu.Unlock()
 		close(l.done)
 	})
 }

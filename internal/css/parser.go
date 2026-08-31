@@ -520,8 +520,8 @@ func (p *Parser) parseDeclarations() []Declaration {
 		}
 
 		// M3.1: Intern property name and classify as hot/cold
-		propAtom := internPropertyName(property)
-		isHot := isHotProperty(property)
+		propAtom := InternPropertyName(property)
+		isHot := IsHotProperty(property)
 
 		declarations = append(declarations, Declaration{
 			Property:     property,
