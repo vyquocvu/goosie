@@ -65,9 +65,9 @@ const (
 
 // Runtime wraps the Goja JavaScript runtime
 type Runtime struct {
-	vm             *goja.Runtime
-	parser         *dom.Parser
-	htmlCache      string
+	vm        *goja.Runtime
+	parser    *dom.Parser
+	htmlCache string
 	// Browser API storage
 	localStorage        map[string]string
 	sessionStorage      map[string]string
@@ -694,6 +694,15 @@ func (r *Runtime) setupDocumentAPI() {
       this.parentNode = null;
       this.childNodes = [];
     }
+
+    // The owning document for every node in the single-document Goosie
+    // DOM. Libraries such as jQuery resolve fragment/document context
+    // via elem.ownerDocument; without it, jQuery's buildFragment and
+    // Sizzle.contains crash on undefined context. Resolved lazily
+    // because the document singleton is created after the classes.
+    get ownerDocument() {
+      return window.document || null;
+    }
     
     get firstChild() { return this.childNodes[0] || null; }
     get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
@@ -726,6 +735,15 @@ func (r *Runtime) setupDocumentAPI() {
     }
 
     appendChild(child) {
+      // DocumentFragment semantics: appending a fragment moves its
+      // children into this node and empties the fragment. jQuery's
+      // domManip passes fragments here whenever parsed content has
+      // more than one node.
+      if (child.nodeType === 11) {
+        const kids = child.childNodes.slice();
+        for (const k of kids) this.appendChild(k);
+        return child;
+      }
       if (child.parentNode) {
         child.parentNode.removeChild(child);
       }
@@ -750,6 +768,13 @@ func (r *Runtime) setupDocumentAPI() {
       if (!refChild) {
         return this.appendChild(newChild);
       }
+      // DocumentFragment semantics: inserting a fragment moves its
+      // children before refChild and empties the fragment.
+      if (newChild.nodeType === 11) {
+        const kids = newChild.childNodes.slice();
+        for (const k of kids) this.insertBefore(k, refChild);
+        return newChild;
+      }
       const idx = this.childNodes.indexOf(refChild);
       if (idx === -1) throw new Error("NotFoundErr");
       
@@ -765,6 +790,14 @@ func (r *Runtime) setupDocumentAPI() {
     replaceChild(newChild, oldChild) {
       const idx = this.childNodes.indexOf(oldChild);
       if (idx === -1) throw new Error("NotFoundErr");
+      // DocumentFragment semantics: the fragment's children take the
+      // place of oldChild and the fragment is emptied.
+      if (newChild.nodeType === 11) {
+        const kids = newChild.childNodes.slice();
+        for (const k of kids) this.insertBefore(k, oldChild);
+        this.removeChild(oldChild);
+        return oldChild;
+      }
       
       if (newChild.parentNode) {
         newChild.parentNode.removeChild(newChild);
@@ -1293,9 +1326,21 @@ func (r *Runtime) setupDocumentAPI() {
     }
     
     set textContent(val) {
-      this.childNodes = [new TextNode(val)];
-      this.childNodes[0].parentNode = this;
-      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
+      // Detach replaced children: their parentNode must not point into
+      // a tree they no longer belong to (jQuery's buildFragment clears
+      // its wrapper via textContent="" and later re-appends children).
+      this.childNodes.forEach(n => { n.parentNode = null; });
+      // Per spec an empty value removes all children instead of
+      // inserting an empty text node. jQuery's buildFragment relies on
+      // the exact childNodes.length after clearing (fragment.textContent="").
+      const str = String(val);
+      if (str === "") {
+        this.childNodes = [];
+      } else {
+        this.childNodes = [new TextNode(str)];
+        this.childNodes[0].parentNode = this;
+      }
+      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", str);
     }
     
     get innerHTML() {
@@ -1304,6 +1349,7 @@ func (r *Runtime) setupDocumentAPI() {
     
     set innerHTML(htmlStr) {
       const parsedNodes = window.__parseHTMLFragment(htmlStr);
+      this.childNodes.forEach(n => { n.parentNode = null; });
       this.childNodes = [];
       parsedNodes.forEach(n => {
         n.parentNode = this;
@@ -1458,6 +1504,12 @@ func (r *Runtime) setupDocumentAPI() {
       
       this.documentElement.appendChild(this.head);
       this.documentElement.appendChild(this.body);
+      this.defaultView = window;
+    }
+
+    // Per spec the document node itself has no owner document.
+    get ownerDocument() {
+      return null;
     }
     
     createElement(tagName) {
@@ -1502,7 +1554,7 @@ func (r *Runtime) setupDocumentAPI() {
       return window.location ? window.location.hostname : "";
     }
     get currentScript() {
-      return null;
+      return window.__goosieCurrentScript || null;
     }
 
     querySelector(sel) {
@@ -1625,6 +1677,24 @@ func (r *Runtime) setupDocumentAPI() {
       if (found) results.push(found);
     }
     return results;
+  };
+
+  // document.currentScript support: the Go side installs the element
+  // of the currently-executing classic/defer script before running
+  // it and clears it afterwards (per HTML spec, async scripts keep
+  // the null value).
+  window.__goosieCurrentScript = null;
+  window.__setCurrentScript = function(attrs) {
+    const el = document.createElement("script");
+    for (const key in attrs) {
+      if (Object.prototype.hasOwnProperty.call(attrs, key)) {
+        el.setAttribute(key, attrs[key]);
+      }
+    }
+    window.__goosieCurrentScript = el;
+  };
+  window.__clearCurrentScript = function() {
+    window.__goosieCurrentScript = null;
   };
 
   // Window geometry
@@ -1963,6 +2033,52 @@ func (r *Runtime) populateDocumentFromHTML(htmlStr string) {
 // LoadHTML is an alias for SetHTMLContent, provided for test convenience.
 func (r *Runtime) LoadHTML(htmlStr string) {
 	r.SetHTMLContent(htmlStr)
+}
+
+// SetCurrentScript exposes a synthetic <script> element carrying the
+// given attributes via document.currentScript. The HTML spec defines
+// document.currentScript as the element of the currently-executing
+// classic or deferred script; analytics snippets (e.g. Plausible)
+// read data-* attributes and src from it at load time. Callers pair
+// this with RunScript and must call ClearCurrentScript once the
+// script finishes; async scripts keep the spec-mandated null. Errors
+// are swallowed: a broken currentScript must never abort the script
+// queue.
+func (r *Runtime) SetCurrentScript(attrs map[string]string) {
+	r.scriptMu.Lock()
+	defer r.scriptMu.Unlock()
+
+	setFn := r.vm.Get("__setCurrentScript")
+	if setFn == nil || goja.IsUndefined(setFn) || goja.IsNull(setFn) {
+		return
+	}
+	fn, ok := goja.AssertFunction(setFn)
+	if !ok {
+		return
+	}
+	obj := r.vm.NewObject()
+	for k, v := range attrs {
+		_ = obj.Set(k, v)
+	}
+	_, _ = fn(goja.Undefined(), obj)
+}
+
+// ClearCurrentScript resets document.currentScript to null between
+// script executions, matching the HTML spec (the value is only
+// non-null while a synchronous script is running).
+func (r *Runtime) ClearCurrentScript() {
+	r.scriptMu.Lock()
+	defer r.scriptMu.Unlock()
+
+	clearFn := r.vm.Get("__clearCurrentScript")
+	if clearFn == nil || goja.IsUndefined(clearFn) || goja.IsNull(clearFn) {
+		return
+	}
+	fn, ok := goja.AssertFunction(clearFn)
+	if !ok {
+		return
+	}
+	_, _ = fn(goja.Undefined())
 }
 
 // SetFetcher sets the HTTP fetcher used by the fetch() JS API.
