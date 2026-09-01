@@ -1174,6 +1174,8 @@ func (t *Tab) ensureHTMLRenderer() {
 				return
 			}
 			scrollSize := t.contentScroll.Size()
+			t.htmlRenderer.SetViewport(pos.Y, scrollSize.Height)
+			t.lastViewportY = pos.Y
 			t.postScrollViewport(pos.Y, scrollSize.Height)
 		}
 	}

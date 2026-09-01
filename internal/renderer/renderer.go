@@ -437,26 +437,50 @@ func (r *Renderer) PresentFrame() fyne.CanvasObject {
 // by the documentloader coordinator. Each external entry is parsed
 // independently; parse failures are skipped silently and reported via
 // the renderer's logger when one is configured.
-//
-// shouldAttemptParseExternalCSS is the same gate loadExternalCSS uses
-// to refuse non-CSS bodies (e.g. an HTML 404 page). Keeping the gate
-// here ensures RenderParsed and loadExternalCSS behave consistently
-// when fed the same source bytes.
+var externalCSSCache = struct {
+	sync.RWMutex
+	m map[string]*css.StyleSheet
+}{m: make(map[string]*css.StyleSheet)}
+
+func getParsedExternalCSS(source string) *css.StyleSheet {
+	externalCSSCache.RLock()
+	cached, ok := externalCSSCache.m[source]
+	externalCSSCache.RUnlock()
+	if ok {
+		return cached
+	}
+	if !shouldAttemptParseExternalCSS(source) {
+		return nil
+	}
+	parser := css.NewParser(source)
+	sheet, err := parser.Parse()
+	if err != nil {
+		return nil
+	}
+	externalCSSCache.Lock()
+	if len(externalCSSCache.m) > 100 {
+		externalCSSCache.m = make(map[string]*css.StyleSheet)
+	}
+	externalCSSCache.m[source] = sheet
+	externalCSSCache.Unlock()
+	return sheet
+}
+
+// mergeInlineAndExternalCSS combines inline <style> rules with external
+// stylesheets in source order. The external list is the order returned
+// by the documentloader coordinator. Each external entry is parsed
+// independently with results cached by source content to avoid multi-second
+// re-parsing on DOM mutations.
 func mergeInlineAndExternalCSS(inline *css.StyleSheet, external []ExternalCSS) *css.StyleSheet {
 	if inline == nil {
 		inline = &css.StyleSheet{}
 	}
 	for _, e := range external {
 		body := string(e.Source)
-		if !shouldAttemptParseExternalCSS(body) {
-			continue
+		sheet := getParsedExternalCSS(body)
+		if sheet != nil && len(sheet.Rules) > 0 {
+			inline.Rules = append(inline.Rules, sheet.Rules...)
 		}
-		parser := css.NewParser(body)
-		sheet, err := parser.Parse()
-		if err != nil {
-			continue
-		}
-		inline.Rules = append(inline.Rules, sheet.Rules...)
 	}
 	return inline
 }
