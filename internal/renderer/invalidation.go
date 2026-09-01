@@ -26,6 +26,7 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 	nodeIndex := r.nodeIndexFor(r.currentRenderTree)
 	applied := 0
 	hasLayout := false
+	scrollOnly := true
 	for _, mutation := range batch {
 		if mutation.NodeID == 0 || mutation.Flags == DirtyNone {
 			continue
@@ -43,12 +44,22 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 			r.recomputeSubtreeStyles(node)
 		}
 		applied++
+		if mutation.Flags&(DirtyLayout|DirtySubtree|DirtyStyle) != 0 {
+			scrollOnly = false
+		}
 		if mutation.Flags&DirtyLayout != 0 || mutation.Flags&DirtySubtree != 0 {
 			hasLayout = true
 		}
 	}
 	if applied > 0 {
 		r.dirty = true
+		if scrollOnly {
+			// Skip layout recomputation and display list invalidation
+			r.canvasRenderer.mu.Lock()
+			r.canvasRenderer.scrollOnlyDirty = true
+			r.canvasRenderer.mu.Unlock()
+			return applied
+		}
 		if hasLayout {
 			r.currentLayoutTree = r.incremental.RecomputeDirtyFromPrevious(r.currentLayoutTree, r.currentRenderTree)
 		}
@@ -115,6 +126,23 @@ func (r *Renderer) PresentFromMutationBatch(adapter *FyneAdapter) bool {
 	if width <= 0 || height <= 0 {
 		return false
 	}
+
+	// Check for scroll-only dirty flag. When set, the display list is still
+	// valid and we can skip rebuilding it — just clear the flag and trigger
+	// a repaint with the current viewport.
+	r.canvasRenderer.mu.RLock()
+	scrollOnly := r.canvasRenderer.scrollOnlyDirty
+	r.canvasRenderer.mu.RUnlock()
+
+	if scrollOnly {
+		// Display list is valid, just clear the flag and trigger repaint
+		r.canvasRenderer.mu.Lock()
+		r.canvasRenderer.scrollOnlyDirty = false
+		r.canvasRenderer.mu.Unlock()
+		// Force re-render with current viewport (display list stays cached)
+		return true
+	}
+
 	commands := convertDisplayCommands(r.chunkedDisplay.commands.Commands())
 	chunks := r.chunkedDisplay.chunks.Chunks()
 	if len(commands) == 0 || len(chunks) == 0 {

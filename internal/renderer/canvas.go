@@ -166,6 +166,11 @@ type CanvasRenderer struct {
 	fpsOverlayText      *canvas.Text
 	fpsOverlayBg        *canvas.Rectangle
 	fpsOverlayTextCache string // last text we set on fpsOverlayText, to skip refreshes
+
+	// scrollOnlyDirty tracks when a mutation batch contains only paint-only
+	// changes (no layout/structure). When set, PresentFromMutationBatch can
+	// skip display list rebuild and just re-render with the current viewport.
+	scrollOnlyDirty bool
 }
 
 // NewCanvasRenderer creates a new canvas renderer
