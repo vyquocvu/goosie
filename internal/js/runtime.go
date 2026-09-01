@@ -153,9 +153,9 @@ type Runtime struct {
 	// History tracking
 	historyStack []string
 	historyIndex int
-	// Console messages
-	consoleMessages []ConsoleMessage
-	consoleMu       sync.Mutex
+	// Console messages — fixed-size ring buffer with atomic index (no mutex).
+	consoleBuffer   [1000]ConsoleMessage
+	consoleWriteIdx atomic.Uint64
 	// JavaScript errors
 	jsErrors   []string
 	jsErrorsMu sync.Mutex
@@ -319,7 +319,7 @@ func NewRuntime() *Runtime {
 		timerEvents:       make(chan int, 64),
 		historyStack:      []string{},
 		historyIndex:      -1,
-		consoleMessages:   make([]ConsoleMessage, 0),
+		consoleBuffer:     [1000]ConsoleMessage{},
 		jsErrors:          make([]string, 0),
 		runtimeDetected:   make(map[dom.UnsupportedFeatureKind]bool, 8),
 		frameScheduler:    NewFrameScheduler(0),
@@ -480,14 +480,7 @@ func (r *Runtime) setupConsoleAPI() {
 	// Helper function to log a console message
 	logMessage := func(level string, args []goja.Value, data interface{}) {
 		message := formatArgs(args)
-		r.consoleMu.Lock()
-		r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
-			Level:     level,
-			Message:   message,
-			Timestamp: time.Now(),
-			Data:      data,
-		})
-		r.consoleMu.Unlock()
+		r.addConsoleMessage(level, message, data)
 
 		// Also print to stdout with level prefix
 		prefix := ""
@@ -2291,14 +2284,7 @@ func (r *Runtime) RunScript(script string) (goja.Value, error) {
 		r.jsErrorsMu.Unlock()
 
 		// Also add to console as an error
-		r.consoleMu.Lock()
-		r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
-			Level:     "error",
-			Message:   errorMsg,
-			Timestamp: time.Now(),
-			Data:      nil,
-		})
-		r.consoleMu.Unlock()
+		r.addConsoleMessage("error", errorMsg, nil)
 
 		fmt.Println("[JS ERROR]", errorMsg)
 	}
@@ -2342,22 +2328,39 @@ func scriptHash(script string) string {
 	return fmt.Sprintf("%x", h.Sum64())
 }
 
-// GetConsoleMessages returns all console messages
-func (r *Runtime) GetConsoleMessages() []ConsoleMessage {
-	r.consoleMu.Lock()
-	defer r.consoleMu.Unlock()
+// addConsoleMessage writes a message into the ring buffer.
+func (r *Runtime) addConsoleMessage(level, message string, data interface{}) {
+	idx := r.consoleWriteIdx.Add(1) - 1
+	r.consoleBuffer[idx%1000] = ConsoleMessage{
+		Level:     level,
+		Message:   message,
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+}
 
-	// Return a copy to prevent concurrent modification
-	messages := make([]ConsoleMessage, len(r.consoleMessages))
-	copy(messages, r.consoleMessages)
+// GetConsoleMessages returns all console messages in chronological order.
+func (r *Runtime) GetConsoleMessages() []ConsoleMessage {
+	count := r.consoleWriteIdx.Load()
+	if count == 0 {
+		return nil
+	}
+	n := int(count)
+	if n > 1000 {
+		n = 1000
+	}
+	messages := make([]ConsoleMessage, n)
+	writeIdx := r.consoleWriteIdx.Load()
+	start := writeIdx - uint64(n)
+	for i := 0; i < n; i++ {
+		messages[i] = r.consoleBuffer[(start+uint64(i))%1000]
+	}
 	return messages
 }
 
 // ClearConsoleMessages clears all console messages
 func (r *Runtime) ClearConsoleMessages() {
-	r.consoleMu.Lock()
-	defer r.consoleMu.Unlock()
-	r.consoleMessages = make([]ConsoleMessage, 0)
+	r.consoleWriteIdx.Store(0)
 }
 
 // GetJavaScriptErrors returns all JavaScript errors
@@ -3795,13 +3798,7 @@ func isRemoteOrigin(origin string) bool {
 
 // jsConsoleWarn logs a warning message to the JS console from Go code.
 func (r *Runtime) jsConsoleWarn(msg string) {
-	r.consoleMu.Lock()
-	r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
-		Level:     "warn",
-		Message:   msg,
-		Timestamp: time.Now(),
-	})
-	r.consoleMu.Unlock()
+	r.addConsoleMessage("warn", msg, nil)
 	fmt.Println("[WARN] " + msg)
 }
 
