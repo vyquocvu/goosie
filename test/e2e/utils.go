@@ -151,6 +151,10 @@ func imagesSettled(root *renderer.RenderNode) bool {
 			settled = false
 			return
 		}
+		if node.BackgroundImageData != nil && node.BackgroundImageData.State == imageloader.StateLoading {
+			settled = false
+			return
+		}
 		for _, child := range node.Children {
 			walk(child)
 		}

@@ -26,6 +26,8 @@ const (
 	PaintInput
 	// PaintTextarea represents a native textarea paint command
 	PaintTextarea
+	// PaintBackgroundImage represents a background image paint command
+	PaintBackgroundImage
 	// PushClip represents a command to start a clipping region
 	PushClip
 	// PopClip represents a command to end a clipping region
@@ -35,16 +37,17 @@ const (
 // commandNames maps PaintCommandType values to human-readable labels for
 // debugging and display list inspection.
 var commandNames = map[PaintCommandType]string{
-	PaintText:     "Text",
-	PaintRect:     "Rect",
-	PaintImage:    "Image",
-	PaintLink:     "Link",
-	PaintBorder:   "Border",
-	PaintButton:   "Button",
-	PaintInput:    "Input",
-	PaintTextarea: "Textarea",
-	PushClip:      "PushClip",
-	PopClip:       "PopClip",
+	PaintText:            "Text",
+	PaintRect:            "Rect",
+	PaintImage:           "Image",
+	PaintLink:            "Link",
+	PaintBorder:          "Border",
+	PaintButton:          "Button",
+	PaintInput:           "Input",
+	PaintTextarea:        "Textarea",
+	PaintBackgroundImage: "BackgroundImage",
+	PushClip:             "PushClip",
+	PopClip:              "PopClip",
 }
 
 // String returns a human-readable label for the paint command type.
@@ -322,6 +325,21 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 				Node:      renderNode,
 				Box:       layoutBox.Box,
 				FillColor: layoutBox.BackgroundColor,
+			}
+			displayList.AddCommand(cmd)
+		}
+	}
+
+	// Paint background image if present (drawn after background color, before borders and content)
+	if !isHidden && renderNode.Type == NodeTypeElement && (layoutBox.BackgroundImage != "" || renderNode.BackgroundImageData != nil || (renderNode.ComputedStyle != nil && renderNode.ComputedStyle.BackgroundImage != "")) {
+		if renderNode.TagName != "button" {
+			bgBox := layoutBox.Box
+			// If this is the body or html tag, ensure it covers at least the layout box bounds
+			cmd := &PaintCommand{
+				Type:   PaintBackgroundImage,
+				NodeID: layoutBox.NodeID,
+				Node:   renderNode,
+				Box:    bgBox,
 			}
 			displayList.AddCommand(cmd)
 		}

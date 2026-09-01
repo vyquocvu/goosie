@@ -134,6 +134,14 @@ func (m *FrameMetrics) SetTargetFPS(fps float64) {
 	}
 }
 
+// TargetFPS returns the target refresh rate in frames-per-second.
+func (m *FrameMetrics) TargetFPS() float64 {
+	if m.target > 0 {
+		return float64(time.Second) / float64(m.target)
+	}
+	return 60.0
+}
+
 // ObserveFrame records that a frame was presented at the current clock.
 // The duration parameter is the wall-clock time spent inside the render
 // function; it is added to the rolling statistics.
@@ -143,21 +151,24 @@ func (m *FrameMetrics) ObserveFrame(duration time.Duration) {
 	if !m.prev.IsZero() {
 		dt := now.Sub(m.prev)
 		if dt > 0 {
-			m.lastInt = dt
-			if m.minInt == 0 || dt < m.minInt {
-				m.minInt = dt
-			}
-			if dt > m.maxInt {
-				m.maxInt = dt
-			}
-			if dt > m.target {
-				m.dropped++
+			if dt > 200*time.Millisecond {
+				// Idle gap: start a new active burst
+				m.samples = nil
+			} else {
+				m.lastInt = dt
+				if m.minInt == 0 || dt < m.minInt {
+					m.minInt = dt
+				}
+				if dt > m.maxInt {
+					m.maxInt = dt
+				}
+				if dt > m.target+m.target/8 {
+					m.dropped++
+				}
+				m.samples = append(m.samples, now)
 			}
 		}
 	}
-	// Always append the timestamp so the rolling window accumulates
-	// even when the interval is zero (same-tick re-records).
-	m.samples = append(m.samples, now)
 	if len(m.samples) > m.maxSamp {
 		m.samples = m.samples[len(m.samples)-m.maxSamp:]
 	}
@@ -242,22 +253,29 @@ func (m *FrameMetrics) Snapshot() FrameMetricsSnapshot {
 		SampleWindow: m.window,
 	}
 	if m.total > 0 && len(m.samples) >= 2 {
-		s.CurrentFPS = fpsFromInterval(m.lastInt)
-		s.MinFPS = fpsFromInterval(m.maxInt)
-		s.MaxFPS = fpsFromInterval(m.minInt)
-		var sum time.Duration
-		n := 0
-		for i := 1; i < len(m.samples); i++ {
-			dt := m.samples[i].Sub(m.samples[i-1])
-			if dt > 0 {
-				sum += dt
-				n++
+		if m.now().Sub(m.samples[len(m.samples)-1]) > 200*time.Millisecond {
+			s.CurrentFPS = m.TargetFPS()
+			s.AverageFPS = m.TargetFPS()
+		} else {
+			s.CurrentFPS = fpsFromInterval(m.lastInt)
+			s.MinFPS = fpsFromInterval(m.maxInt)
+			s.MaxFPS = fpsFromInterval(m.minInt)
+			var sum time.Duration
+			n := 0
+			for i := 1; i < len(m.samples); i++ {
+				dt := m.samples[i].Sub(m.samples[i-1])
+				if dt > 0 {
+					sum += dt
+					n++
+				}
 			}
+			if n > 0 {
+				s.AverageFPS = fpsFromInterval(sum / time.Duration(n))
+			} else {
+				s.AverageFPS = s.CurrentFPS
+			}
+			s.SampleWindow = m.samples[len(m.samples)-1].Sub(m.samples[0])
 		}
-		if n > 0 {
-			s.AverageFPS = fpsFromInterval(sum / time.Duration(n))
-		}
-		s.SampleWindow = m.samples[len(m.samples)-1].Sub(m.samples[0])
 	}
 	m.mu.Unlock()
 

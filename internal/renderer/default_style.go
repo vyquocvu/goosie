@@ -11,6 +11,7 @@ html { display: block; }
 head, title, meta, link, style, script, noscript, template, base, iframe { display: none; }
 body { display: block; margin: 8px; }
 article, aside, details, figcaption, figure, footer, header, hgroup, main, nav, section, summary { display: block; }
+address { display: block; font-style: italic; }
 b, strong { font-weight: bold; }
 i, em { font-style: italic; }
 u { text-decoration: underline; }

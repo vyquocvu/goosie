@@ -114,6 +114,9 @@ var FormatCounterValue = formatCounterValue
 // FPSButton exports fpsButton field for use by external test packages.
 func (b *Browser) FPSButton() *widget.Button { return b.fpsButton }
 
+// FPSBar exports fpsBar field for use by external test packages.
+func (b *Browser) FPSBar() *FPSBar { return b.fpsBar }
+
 // ToggleFPSOverlay exports toggleFPSOverlay for use by external test packages.
 func (b *Browser) ToggleFPSOverlay() { b.toggleFPSOverlay() }
 

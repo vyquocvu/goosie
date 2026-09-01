@@ -180,7 +180,7 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			fontSize = node.ComputedStyle.FontSize
 		}
 		explicitHeight := parseLengthWithViewport(node.ComputedStyle.Height, fontSize, le.canvasWidth, le.canvasHeight, le.canvasHeight)
-		if explicitHeight > 0 {
+		if explicitHeight >= 0 {
 			if node.ComputedStyle.BoxSizing == "border-box" {
 				layoutBox.Box.Height = explicitHeight
 			} else {
@@ -584,17 +584,17 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.MarginRight = parseLengthWithViewport(node.ComputedStyle.MarginRight, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginBottom = parseLengthWithViewport(node.ComputedStyle.MarginBottom, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginLeft = parseLengthWithViewport(node.ComputedStyle.MarginLeft, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
-	// parseLengthWithViewport returns -1 for "auto" or unsupported; treat as 0 for box model
-	if layoutBox.MarginTop < 0 {
+	// Reset "auto" or empty margins to 0 (margin: auto centering calculates used margins separately)
+	if node.ComputedStyle.MarginTop == "" || node.ComputedStyle.MarginTop == "auto" {
 		layoutBox.MarginTop = 0
 	}
-	if layoutBox.MarginRight < 0 {
+	if node.ComputedStyle.MarginRight == "" || node.ComputedStyle.MarginRight == "auto" {
 		layoutBox.MarginRight = 0
 	}
-	if layoutBox.MarginBottom < 0 {
+	if node.ComputedStyle.MarginBottom == "" || node.ComputedStyle.MarginBottom == "auto" {
 		layoutBox.MarginBottom = 0
 	}
-	if layoutBox.MarginLeft < 0 {
+	if node.ComputedStyle.MarginLeft == "" || node.ComputedStyle.MarginLeft == "auto" {
 		layoutBox.MarginLeft = 0
 	}
 
@@ -632,8 +632,17 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.BorderBottomColor = node.ComputedStyle.BorderBottomColor
 	layoutBox.BorderLeftColor = node.ComputedStyle.BorderLeftColor
 
-	// Apply background color
+	// Apply background properties
 	layoutBox.BackgroundColor = node.ComputedStyle.BackgroundColor
+	layoutBox.BackgroundImage = node.ComputedStyle.BackgroundImage
+	layoutBox.BackgroundRepeat = node.ComputedStyle.BackgroundRepeat
+	layoutBox.BackgroundPosition = node.ComputedStyle.BackgroundPosition
+	layoutBox.BackgroundSize = node.ComputedStyle.BackgroundSize
+	layoutBox.BackgroundAttachment = node.ComputedStyle.BackgroundAttachment
+	layoutBox.BackgroundImageData = node.BackgroundImageData
+	if layoutBox.BackgroundImageData == nil && node.ComputedStyle.BackgroundImageData != nil {
+		layoutBox.BackgroundImageData = node.ComputedStyle.BackgroundImageData
+	}
 }
 
 // computeLayoutBox computes the layout for a single box
@@ -934,12 +943,12 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 				childY = endY
 			}
 		}
-	} else if node.IsBlock() && le.hasInlineContent(node) {
+	} else if node.IsBlock() && le.hasBlockChildren(node) && le.hasInlineContent(node) {
 		// Mixed block and inline content: lay out consecutive inline runs as
 		// anonymous blocks (line boxes) and stack block-level children between
 		// them, per CSS block-in-inline model.
 		childY = le.layoutBlockAndInline(node, layoutBox, childX, currentY, contentWidth, floatCtx)
-	} else if node.IsBlock() {
+	} else if node.IsBlock() && le.hasBlockChildren(node) {
 		// Block elements: stack children vertically (when no inline content)
 		// Check if element has intrinsic dimensions (e.g. input, button, textarea)
 		if node.TagName == "input" {
@@ -1096,7 +1105,7 @@ func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox,
 				fontSize = child.ComputedStyle.FontSize
 			}
 			childMarginTop := parseLength(child.ComputedStyle.MarginTop, fontSize)
-			collapsedMargin := maxFloat32(lastChild.MarginBottom, childMarginTop)
+			collapsedMargin := collapseMargins(lastChild.MarginBottom, childMarginTop)
 
 			lastChildBottom := lastChild.Box.Y + lastChild.Box.Height
 			nextChildY = lastChildBottom + collapsedMargin - childMarginTop
@@ -1204,6 +1213,16 @@ func minFloat32(a, b float32) float32 {
 		return a
 	}
 	return b
+}
+
+func collapseMargins(m1, m2 float32) float32 {
+	if m1 >= 0 && m2 >= 0 {
+		return maxFloat32(m1, m2)
+	}
+	if m1 < 0 && m2 < 0 {
+		return minFloat32(m1, m2)
+	}
+	return m1 + m2
 }
 
 func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
@@ -1398,6 +1417,22 @@ func whiteSpaceModeFromCSS(value string) (WhiteSpaceMode, bool) {
 		return WhiteSpacePreLine, true
 	}
 	return WhiteSpaceNormal, false
+}
+
+// hasBlockChildren checks if a node has any in-flow block-level child elements
+func (le *LayoutEngine) hasBlockChildren(node *RenderNode) bool {
+	if node == nil {
+		return false
+	}
+	for _, child := range node.Children {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			continue
+		}
+		if child.Type == NodeTypeElement && child.IsBlock() {
+			return true
+		}
+	}
+	return false
 }
 
 // hasInlineContent checks if a node has inline content (text or inline children)

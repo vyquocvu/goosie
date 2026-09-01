@@ -257,6 +257,8 @@ func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.St
 		styleManager := NewStyleManagerWithViewport(sheet, width, height)
 		styleManager.ApplyStyles(renderTree)
 	}
+	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
+	r.loadImages(renderTree)
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseStyle)
 	}
@@ -427,9 +429,6 @@ func (r *Renderer) PresentFrame() fyne.CanvasObject {
 		})
 	}
 
-	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
-	r.loadImages(renderTree)
-
 	return canvasObject
 }
 
@@ -465,6 +464,11 @@ func mergeInlineAndExternalCSS(inline *css.StyleSheet, external []ExternalCSS) *
 // SetViewport updates the viewport for optimized rendering during scroll
 func (r *Renderer) SetViewport(y, height float32) {
 	r.canvasRenderer.SetViewport(y, height)
+}
+
+// SetTargetFPS configures the target frame rate across renderer components
+func (r *Renderer) SetTargetFPS(fps float64) {
+	r.canvasRenderer.SetTargetFPS(fps)
 }
 
 // UpdateViewport re-renders with the current viewport (for scroll updates)
@@ -637,6 +641,7 @@ func (r *Renderer) Refresh() {
 		r.stylesheetMu.RUnlock()
 		renderTreeCopy := r.currentRenderTree.Clone()
 		styleManager.ApplyStyles(renderTreeCopy)
+		r.loadImages(renderTreeCopy)
 
 		// Perform layout
 		layoutEngine := getLayoutEngine(width, height)
@@ -743,26 +748,52 @@ func (r *Renderer) findRenderNodeByID(node *RenderNode, id int64) *RenderNode {
 }
 
 func (r *Renderer) loadImages(node *RenderNode) {
+	if node == nil {
+		return
+	}
 	if node.TagName == "img" {
 		if src, ok := node.GetAttribute("src"); ok {
-			// Resolve relative URLs before loading
 			resolvedSrc := r.resolveURL(src)
-			go func() {
-				img, err := r.imageLoader.Load(resolvedSrc)
-				if err == nil {
-					// Need to lock when updating the node directly since we might be cloning/re-rendering
-					r.treeMu.Lock()
+			if node.ImageData == nil || node.ImageData.State != imageloader.StateLoaded {
+				if img, err := r.imageLoader.Load(resolvedSrc); err == nil {
 					node.ImageData = img
-					r.treeMu.Unlock()
-					// Trigger refresh when image is loaded
-					r.onImageLoaded(resolvedSrc)
 				}
-			}()
+			}
+		}
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.BackgroundImage != "" {
+		if bgURL := extractURLFromCSSValue(node.ComputedStyle.BackgroundImage); bgURL != "" {
+			resolvedSrc := r.resolveURL(bgURL)
+			if node.BackgroundImageData == nil || node.BackgroundImageData.State != imageloader.StateLoaded {
+				if img, err := r.imageLoader.Load(resolvedSrc); err == nil {
+					node.BackgroundImageData = img
+					if node.ComputedStyle != nil {
+						node.ComputedStyle.BackgroundImageData = img
+					}
+				}
+			}
 		}
 	}
 	for _, child := range node.Children {
 		r.loadImages(child)
 	}
+}
+
+func extractURLFromCSSValue(val string) string {
+	val = strings.TrimSpace(val)
+	lower := strings.ToLower(val)
+	idx := strings.Index(lower, "url(")
+	if idx == -1 {
+		return ""
+	}
+	sub := val[idx+4:]
+	end := strings.Index(sub, ")")
+	if end == -1 {
+		return ""
+	}
+	urlStr := strings.TrimSpace(sub[:end])
+	urlStr = strings.Trim(urlStr, `'"`)
+	return urlStr
 }
 
 // currentURLRead returns the current page URL, safe for concurrent access.
@@ -870,6 +901,25 @@ func (r *Renderer) updateNodeImageData(node *RenderNode, src string) {
 				} else {
 					if img, err := r.imageLoader.Load(src); err == nil {
 						node.ImageData = img
+					}
+				}
+			}
+		}
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.BackgroundImage != "" {
+		if bgURL := extractURLFromCSSValue(node.ComputedStyle.BackgroundImage); bgURL != "" {
+			resolvedSrc := r.resolveURL(bgURL)
+			if resolvedSrc == src {
+				cache := r.imageLoader.GetCache()
+				if cache != nil {
+					if cached := cache.Get(src); cached != nil {
+						node.BackgroundImageData = cached
+						node.ComputedStyle.BackgroundImageData = cached
+					}
+				} else {
+					if img, err := r.imageLoader.Load(src); err == nil {
+						node.BackgroundImageData = img
+						node.ComputedStyle.BackgroundImageData = img
 					}
 				}
 			}

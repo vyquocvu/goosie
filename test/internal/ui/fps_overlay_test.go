@@ -74,9 +74,15 @@ func TestBrowserFPSButtonToggleWithRenderer(t *testing.T) {
 	tab := browser.ActiveTab()
 	tab.SetHTMLRenderer(&MockHTMLRendererComp{})
 
+	assert.False(t, browser.FPSBar().Visible())
+
 	browser.FPSButton().OnTapped()
 	assert.Equal(t, "FPS✓", browser.FPSButton().Text)
+	assert.True(t, browser.FPSBar().Visible())
+	assert.Contains(t, browser.FPSBar().Text(), "FPS:")
 
 	browser.FPSButton().OnTapped()
 	assert.Equal(t, "FPS", browser.FPSButton().Text)
+	assert.False(t, browser.FPSBar().Visible())
 }
+

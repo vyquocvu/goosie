@@ -132,6 +132,16 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		sm.applyInlineStyles(node, styleAttr)
 	}
 
+	// CSS 2.1 Section 9.7: If float is not 'none' or position is absolute/fixed, display is converted to block
+	if node.ComputedStyle != nil {
+		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" ||
+			node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" {
+			if node.ComputedStyle.Display == "inline" || node.ComputedStyle.Display == "inline-block" {
+				node.ComputedStyle.Display = "block"
+			}
+		}
+	}
+
 	for _, child := range node.Children {
 		sm.ApplyStyles(child)
 	}
@@ -811,10 +821,18 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		if val, err := parseColor(decl.Value); err == nil {
 			style.BackgroundColor = val
 		}
+	case "background-image":
+		style.BackgroundImage = decl.Value
+	case "background-repeat":
+		style.BackgroundRepeat = decl.Value
+	case "background-position":
+		style.BackgroundPosition = decl.Value
+	case "background-size":
+		style.BackgroundSize = decl.Value
+	case "background-attachment":
+		style.BackgroundAttachment = decl.Value
 	case "background":
-		if val, ok := parseBackgroundShorthandColor(decl.Value); ok {
-			style.BackgroundColor = val
-		}
+		applyBackgroundShorthand(style, decl.Value)
 	case "width":
 		style.Width = decl.Value
 	case "height":
@@ -2021,7 +2039,7 @@ func parseFlexShorthand(value string, style *Style) {
 	}
 }
 
-func parseBackgroundShorthandColor(value string) (color.Color, bool) {
+func applyBackgroundShorthand(style *Style, value string) {
 	var tokens []string
 	var current strings.Builder
 	inParens := 0
@@ -2051,10 +2069,33 @@ func parseBackgroundShorthandColor(value string) (color.Color, bool) {
 		tokens = append(tokens, current.String())
 	}
 
+	var positionTokens []string
 	for _, tok := range tokens {
-		if col, err := parseColor(tok); err == nil {
-			return col, true
+		tokLower := strings.ToLower(tok)
+		if strings.HasPrefix(tokLower, "url(") || tokLower == "none" {
+			style.BackgroundImage = tok
+		} else if tokLower == "repeat" || tokLower == "no-repeat" || tokLower == "repeat-x" || tokLower == "repeat-y" || tokLower == "space" || tokLower == "round" {
+			style.BackgroundRepeat = tokLower
+		} else if tokLower == "fixed" || tokLower == "scroll" || tokLower == "local" {
+			style.BackgroundAttachment = tokLower
+		} else if tokLower == "cover" || tokLower == "contain" {
+			style.BackgroundSize = tokLower
+		} else if tokLower == "top" || tokLower == "bottom" || tokLower == "left" || tokLower == "right" || tokLower == "center" {
+			positionTokens = append(positionTokens, tokLower)
+		} else if col, err := parseColor(tok); err == nil {
+			style.BackgroundColor = col
 		}
+	}
+	if len(positionTokens) > 0 {
+		style.BackgroundPosition = strings.Join(positionTokens, " ")
+	}
+}
+
+func parseBackgroundShorthandColor(value string) (color.Color, bool) {
+	var temp Style
+	applyBackgroundShorthand(&temp, value)
+	if temp.BackgroundColor != nil {
+		return temp.BackgroundColor, true
 	}
 	return nil, false
 }

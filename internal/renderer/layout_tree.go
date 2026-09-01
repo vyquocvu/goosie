@@ -1,6 +1,10 @@
 package renderer
 
-import "image/color"
+import (
+	"image/color"
+
+	imageloader "github.com/vyquocvu/goosie/internal/image"
+)
 
 // DisplayType represents the display type of a layout box
 type DisplayType string
@@ -65,7 +69,13 @@ type LayoutBox struct {
 	BorderLeftColor   color.Color
 
 	// Background
-	BackgroundColor color.Color
+	BackgroundColor      color.Color
+	BackgroundImage      string
+	BackgroundRepeat     string
+	BackgroundPosition   string
+	BackgroundSize       string
+	BackgroundAttachment string
+	BackgroundImageData  *imageloader.ImageData
 
 	// Inline layout information
 	LineBoxes []*LineBox // Line boxes for inline content (if this contains inline children)

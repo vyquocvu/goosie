@@ -97,17 +97,18 @@ func TestCanvasRendererFPSOverlayReusesObjects(t *testing.T) {
 	layout := simpleLayoutBox(root)
 	cr.SetFPSOverlayEnabled(true)
 
-	// Drive several frames; the second render would allocate fresh
-	// objects under the old implementation.
+	// Drive frames so FPS counter records measurements
 	cr.RenderWithViewport(root, layout)
+	cr.BuildFPSOverlay()
 	firstText := cr.FPSOverlayText()
 	firstBg := cr.FPSOverlayBg()
-	assert.NotNil(t, firstText, "first render should allocate the cached text")
-	assert.NotNil(t, firstBg, "first render should allocate the cached background")
+	assert.NotNil(t, firstText, "first build should allocate the cached text")
+	assert.NotNil(t, firstBg, "first build should allocate the cached background")
 
 	cr.RenderWithViewport(root, layout)
-	assert.Same(t, firstText, cr.FPSOverlayText(), "second render must reuse the cached text object")
-	assert.Same(t, firstBg, cr.FPSOverlayBg(), "second render must reuse the cached background object")
+	cr.BuildFPSOverlay()
+	assert.Same(t, firstText, cr.FPSOverlayText(), "second build must reuse the cached text object")
+	assert.Same(t, firstBg, cr.FPSOverlayBg(), "second build must reuse the cached background object")
 }
 
 // TestCanvasRendererFPSOverlayDisableClearsCache verifies that toggling
@@ -121,6 +122,7 @@ func TestCanvasRendererFPSOverlayDisableClearsCache(t *testing.T) {
 	layout := simpleLayoutBox(root)
 	cr.SetFPSOverlayEnabled(true)
 	cr.RenderWithViewport(root, layout)
+	cr.BuildFPSOverlay()
 	assert.NotNil(t, cr.FPSOverlayText())
 	assert.NotNil(t, cr.FPSOverlayBg())
 
@@ -142,10 +144,12 @@ func TestCanvasRendererFPSOverlayRefreshOnlyOnChange(t *testing.T) {
 	cr.SetFPSOverlayEnabled(true)
 
 	cr.RenderWithViewport(root, layout)
+	cr.BuildFPSOverlay()
 	assert.NotEmpty(t, cr.FPSOverlayTextCache(), "first render should seed the text cache")
 
 	cachedBefore := cr.FPSOverlayTextCache()
 	cr.RenderWithViewport(root, layout)
+	cr.BuildFPSOverlay()
 	// The cached text field must remain stable across consecutive
 	// renders that produce the same readout; we don't have a direct
 	// counter for Refresh calls but the cachedText field is the guard
