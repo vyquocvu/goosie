@@ -173,13 +173,66 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	}
 }
 
-// applyInlineStyles parses and applies inline styles from the style attribute
+// inlineStyleCache memoizes parsed inline-style declarations keyed by the
+// raw style attribute string. Inline styles are deterministic (same string
+// → same declarations) so the cache is safe across render passes.
+type inlineStyleCache struct {
+	mu    sync.Mutex
+	cache map[string][]css.Declaration
+	limit int
+}
+
+func (c *inlineStyleCache) Get(styleAttr string) ([]css.Declaration, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	decls, ok := c.cache[styleAttr]
+	return decls, ok
+}
+
+func (c *inlineStyleCache) Put(styleAttr string, decls []css.Declaration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.cache) >= c.limit {
+		// Simple eviction: clear half the cache to bound memory.
+		count := 0
+		for k := range c.cache {
+			delete(c.cache, k)
+			count++
+			if count >= c.limit/2 {
+				break
+			}
+		}
+	}
+	c.cache[styleAttr] = decls
+}
+
+// globalInlineStyleCache is the process-wide inline-style parse cache.
+var globalInlineStyleCache = &inlineStyleCache{
+	cache: make(map[string][]css.Declaration),
+	limit: 1000,
+}
+
+// applyInlineStyles parses and applies inline styles from the style attribute.
+// Parsed declarations are cached by styleAttr to avoid re-parsing identical
+// style strings on every render pass.
 func (sm *StyleManager) applyInlineStyles(node *RenderNode, styleAttr string) {
+	// Check cache first.
+	if decls, ok := globalInlineStyleCache.Get(styleAttr); ok {
+		for _, decl := range decls {
+			sm.applyDeclaration(node, decl)
+		}
+		return
+	}
+
+	// Parse inline style.
 	declarations, err := css.ParseStyleAttribute(styleAttr)
 	if err != nil {
 		// Just ignore parsing errors for now
 		return
 	}
+
+	// Cache the parsed declarations.
+	globalInlineStyleCache.Put(styleAttr, declarations)
 
 	for _, decl := range declarations {
 		sm.applyDeclaration(node, decl)
