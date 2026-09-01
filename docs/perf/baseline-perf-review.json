@@ -1,0 +1,216 @@
+{
+  "go_version": "go1.26.5",
+  "started_at": "2026-09-02T00:43:30.672704+07:00",
+  "duration": 4130841125,
+  "workloads": [
+    {
+      "name": "navigation",
+      "url": "http://127.0.0.1:55077/fix/large_page.html",
+      "samples": [
+        {
+          "name": "navigate",
+          "n": 5,
+          "min_ns": 74918209,
+          "max_ns": 84858542,
+          "mean_ns": 80202916.8,
+          "p50_ns": 81315667,
+          "p95_ns": 84858542,
+          "p99_ns": 84858542,
+          "errors": 0
+        }
+      ]
+    },
+    {
+      "name": "navigation",
+      "url": "http://127.0.0.1:55077/fix/layout_sample.html",
+      "samples": [
+        {
+          "name": "navigate",
+          "n": 5,
+          "min_ns": 820291,
+          "max_ns": 1126000,
+          "mean_ns": 930075,
+          "p50_ns": 937792,
+          "p95_ns": 1126000,
+          "p99_ns": 1126000,
+          "errors": 0
+        }
+      ]
+    },
+    {
+      "name": "navigation",
+      "url": "http://127.0.0.1:55077/fix/typography_sample.html",
+      "samples": [
+        {
+          "name": "navigate",
+          "n": 5,
+          "min_ns": 869250,
+          "max_ns": 1145250,
+          "mean_ns": 986941.6,
+          "p50_ns": 941375,
+          "p95_ns": 1145250,
+          "p99_ns": 1145250,
+          "errors": 0
+        }
+      ]
+    },
+    {
+      "name": "navigation",
+      "url": "https://example.com",
+      "samples": [
+        {
+          "name": "navigate",
+          "n": 5,
+          "min_ns": 177541041,
+          "max_ns": 219220542,
+          "mean_ns": 192527399.8,
+          "p50_ns": 191452708,
+          "p95_ns": 219220542,
+          "p99_ns": 219220542,
+          "errors": 0
+        }
+      ]
+    },
+    {
+      "name": "navigation",
+      "url": "https://www.iana.org/help/example-domains",
+      "samples": [
+        {
+          "name": "navigate",
+          "n": 5,
+          "min_ns": 180840625,
+          "max_ns": 228128083,
+          "mean_ns": 207091949.8,
+          "p50_ns": 210840333,
+          "p95_ns": 228128083,
+          "p99_ns": 228128083,
+          "errors": 0
+        }
+      ]
+    },
+    {
+      "name": "read-stages",
+      "url": "http://127.0.0.1:55077/fix/large_page.html",
+      "samples": [
+        {
+          "name": "snapshot",
+          "n": 5,
+          "min_ns": 460208,
+          "max_ns": 1037875,
+          "mean_ns": 765408.6,
+          "p50_ns": 711542,
+          "p95_ns": 1037875,
+          "p99_ns": 1037875,
+          "errors": 0,
+          "notes": "PageSnapshot extraction"
+        },
+        {
+          "name": "screenshot",
+          "n": 5,
+          "min_ns": 74937375,
+          "max_ns": 81484209,
+          "mean_ns": 78113358.4,
+          "p50_ns": 77767583,
+          "p95_ns": 81484209,
+          "p99_ns": 81484209,
+          "errors": 0,
+          "notes": "PNG capture"
+        },
+        {
+          "name": "evaluate",
+          "n": 5,
+          "min_ns": 39208,
+          "max_ns": 48083,
+          "mean_ns": 43341.8,
+          "p50_ns": 43667,
+          "p95_ns": 48083,
+          "p99_ns": 48083,
+          "errors": 0,
+          "notes": "JS expression eval"
+        }
+      ]
+    },
+    {
+      "name": "scroll-burst",
+      "url": "http://127.0.0.1:55077/fix/large_page.html",
+      "samples": [
+        {
+          "name": "scroll.per_event",
+          "n": 5,
+          "min_ns": 32,
+          "max_ns": 37,
+          "mean_ns": 35.4,
+          "p50_ns": 36,
+          "p95_ns": 37,
+          "p99_ns": 37,
+          "errors": 0,
+          "notes": "per-scroll median over 100-event burst"
+        }
+      ]
+    },
+    {
+      "name": "mutation-burst",
+      "url": "http://127.0.0.1:55077/fix/large_page.html",
+      "samples": [
+        {
+          "name": "mutation.cycle",
+          "n": 5,
+          "min_ns": 9504,
+          "max_ns": 11079,
+          "mean_ns": 10150.2,
+          "p50_ns": 9905,
+          "p95_ns": 11079,
+          "p99_ns": 11079,
+          "errors": 0,
+          "notes": "per-cycle median over 30-element textContent mutation burst"
+        }
+      ]
+    }
+  ],
+  "freeze_health": {
+    "mutation_under_50ms_p95": true,
+    "scroll_under_5ms_p50": true
+  },
+  "health_summary": "2/2 checks passed",
+  "render_stages": [
+    {
+      "fixture": "large_page.html",
+      "n": 5,
+      "stages_ns": {
+        "build_render_tree": 2293450,
+        "css_extract": 199316,
+        "display_list": 902650,
+        "layout": 2077933,
+        "parse": 979583,
+        "raster": 34233700,
+        "style": 21075966
+      }
+    },
+    {
+      "fixture": "layout_sample.html",
+      "n": 5,
+      "stages_ns": {
+        "build_render_tree": 5941,
+        "css_extract": 5949,
+        "display_list": 4541,
+        "layout": 11808,
+        "parse": 15025,
+        "raster": 2750749,
+        "style": 20008
+      }
+    },
+    {
+      "fixture": "typography_sample.html",
+      "n": 5,
+      "stages_ns": {
+        "build_render_tree": 34925,
+        "css_extract": 450,
+        "display_list": 10433,
+        "layout": 21116,
+        "parse": 11267,
+        "raster": 5051933,
+        "style": 25
+      }
+    }
+  ]
+}
