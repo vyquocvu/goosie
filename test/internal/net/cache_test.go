@@ -23,13 +23,13 @@ func TestHTTPCacheHitMissAndExpiry(t *testing.T) {
 	resp := newTestResponse(req, http.StatusOK, "fresh")
 	resp.Header.Set("Content-Type", "text/plain")
 	resp.Header.Set("Cache-Control", "max-age=60")
-	cache.Put(req.URL.String(), resp, "fresh")
+	cache.Put(req.URL.String(), resp, []byte("fresh"))
 
 	body, entry, ok := cache.Get(req.URL.String())
 	if !ok {
 		t.Fatal("fresh cache entry missed")
 	}
-	if body != "fresh" {
+	if string(body) != "fresh" {
 		t.Fatalf("body = %q, want fresh", body)
 	}
 	if entry.URL != req.URL.String() {
@@ -48,7 +48,7 @@ func TestHTTPCacheHitMissAndExpiry(t *testing.T) {
 	}
 	expiredResp := newTestResponse(expiredReq, http.StatusOK, "expired")
 	expiredResp.Header.Set("Cache-Control", "max-age=0")
-	cache.Put(expiredReq.URL.String(), expiredResp, "expired")
+	cache.Put(expiredReq.URL.String(), expiredResp, []byte("expired"))
 	if _, _, ok := cache.Get(expiredReq.URL.String()); ok {
 		t.Fatal("expired cache entry returned a hit")
 	}
@@ -63,7 +63,7 @@ func TestHTTPCachePrivateModeDoesNotWriteOrRead(t *testing.T) {
 	resp := newTestResponse(req, http.StatusOK, "private")
 	resp.Header.Set("Cache-Control", "max-age=60")
 
-	cache.Put(req.URL.String(), resp, "private")
+	cache.Put(req.URL.String(), resp, []byte("private"))
 
 	if _, _, ok := cache.Get(req.URL.String()); ok {
 		t.Fatal("private cache returned a hit")
@@ -78,7 +78,7 @@ func TestHTTPCacheDoesNotStoreWithoutMaxAge(t *testing.T) {
 	}
 	resp := newTestResponse(req, http.StatusOK, "body")
 
-	cache.Put(req.URL.String(), resp, "body")
+	cache.Put(req.URL.String(), resp, []byte("body"))
 
 	if _, _, ok := cache.Get(req.URL.String()); ok {
 		t.Fatal("response without max-age was cached")
@@ -108,7 +108,7 @@ func TestHTTPCacheVetoDirectivesOverrideMaxAge(t *testing.T) {
 			resp := newTestResponse(req, http.StatusOK, "body")
 			resp.Header.Set("Cache-Control", tt.cacheControl)
 
-			cache.Put(req.URL.String(), resp, "body")
+			cache.Put(req.URL.String(), resp, []byte("body"))
 
 			if _, _, ok := cache.Get(req.URL.String()); ok {
 				t.Fatalf("cached response with Cache-Control %q", tt.cacheControl)
@@ -144,7 +144,7 @@ func TestHTTPCacheRejectsUnsafeResponses(t *testing.T) {
 				resp.Header.Set(tt.header, tt.value)
 			}
 
-			cache.Put(req.URL.String(), resp, "body")
+			cache.Put(req.URL.String(), resp, []byte("body"))
 
 			if _, _, ok := cache.Get(req.URL.String()); ok {
 				t.Fatalf("cached unsafe response: status=%d %s=%q", tt.status, tt.header, tt.value)
@@ -165,7 +165,7 @@ func TestHTTPCacheVetoesSeparateCacheControlHeaderValues(t *testing.T) {
 			resp.Header.Add("Cache-Control", "max-age=60")
 			resp.Header.Add("Cache-Control", veto)
 
-			cache.Put(req.URL.String(), resp, "body")
+			cache.Put(req.URL.String(), resp, []byte("body"))
 
 			if _, _, ok := cache.Get(req.URL.String()); ok {
 				t.Fatalf("cached response with separate Cache-Control veto %q", veto)
@@ -206,7 +206,7 @@ func TestHTTPCacheIndexBatchWrites(t *testing.T) {
 	resp := newTestResponse(req, http.StatusOK, "one")
 	resp.Header.Set("Cache-Control", "max-age=60")
 
-	cache.Put("https://example.test/1", resp, "one")
+	cache.Put("https://example.test/1", resp, []byte("one"))
 
 	if err := cache.Sync(); err != nil {
 		t.Fatal(err)

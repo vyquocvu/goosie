@@ -43,7 +43,7 @@ func putEntry(t *testing.T, c *net.HTTPCache, url string, body string, maxAge in
 	resp := newTestResponse(req, http.StatusOK, body)
 	resp.Header.Set("Content-Type", "text/plain")
 	resp.Header.Set("Cache-Control", fmt.Sprintf("max-age=%d", maxAge))
-	c.Put(url, resp, body)
+	c.Put(url, resp, []byte(body))
 }
 
 func assertHit(t *testing.T, c *net.HTTPCache, url string, wantBody string) {
@@ -52,7 +52,7 @@ func assertHit(t *testing.T, c *net.HTTPCache, url string, wantBody string) {
 	if !ok {
 		t.Fatalf("expected cache HIT for %s, got miss", url)
 	}
-	if body != wantBody {
+	if string(body) != wantBody {
 		t.Fatalf("body = %q, want %q", body, wantBody)
 	}
 }
@@ -307,7 +307,7 @@ func BenchmarkHTTPCachePut(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		url := fmt.Sprintf("https://bench.test/%d", i%256)
-		c.Put(url, resp, "benchbody")
+		c.Put(url, resp, []byte("benchbody"))
 	}
 }
 
@@ -321,7 +321,7 @@ func BenchmarkHTTPCacheGet(b *testing.B) {
 	req, _ := http.NewRequest(http.MethodGet, "https://bench.test/1", nil)
 	resp := newTestResponse(req, http.StatusOK, "benchbody")
 	resp.Header.Set("Cache-Control", "max-age=3600")
-	c.Put("https://bench.test/hot", resp, "benchbody")
+	c.Put("https://bench.test/hot", resp, []byte("benchbody"))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

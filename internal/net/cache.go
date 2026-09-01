@@ -141,10 +141,10 @@ func (c *HTTPCache) Sync() error {
 	return nil
 }
 
-func (c *HTTPCache) Get(rawURL string) (string, CacheEntry, bool) {
+func (c *HTTPCache) Get(rawURL string) ([]byte, CacheEntry, bool) {
 	if c == nil || c.private {
 		c.recordMiss()
-		return "", CacheEntry{}, false
+		return nil, CacheEntry{}, false
 	}
 
 	key := normalizeCacheURL(rawURL)
@@ -154,7 +154,7 @@ func (c *HTTPCache) Get(rawURL string) (string, CacheEntry, bool) {
 	if !ok {
 		c.misses++
 		c.mu.Unlock()
-		return "", CacheEntry{}, false
+		return nil, CacheEntry{}, false
 	}
 
 	if c.lruItems != nil {
@@ -162,7 +162,7 @@ func (c *HTTPCache) Get(rawURL string) (string, CacheEntry, bool) {
 		if !inLRU {
 			c.misses++
 			c.mu.Unlock()
-			return "", CacheEntry{}, false
+			return nil, CacheEntry{}, false
 		}
 		c.moveToFrontLocked(e)
 	}
@@ -170,24 +170,24 @@ func (c *HTTPCache) Get(rawURL string) (string, CacheEntry, bool) {
 
 	if entry.ExpiresAt.IsZero() || !time.Now().Before(entry.ExpiresAt) {
 		c.recordMiss()
-		return "", CacheEntry{}, false
+		return nil, CacheEntry{}, false
 	}
 
 	bodyPath := filepath.Join(c.root, entry.BodyFile)
 	body, err := os.ReadFile(bodyPath)
 	if err != nil {
 		c.recordMiss()
-		return "", CacheEntry{}, false
+		return nil, CacheEntry{}, false
 	}
 
 	c.mu.Lock()
 	c.hits++
 	c.mu.Unlock()
 
-	return string(body), entry, true
+	return body, entry, true
 }
 
-func (c *HTTPCache) Put(rawURL string, resp *http.Response, body string) {
+func (c *HTTPCache) Put(rawURL string, resp *http.Response, body []byte) {
 	if c == nil || c.private || resp == nil {
 		return
 	}
@@ -229,7 +229,7 @@ func (c *HTTPCache) Put(rawURL string, resp *http.Response, body string) {
 		return
 	}
 	_, bodyPath := c.paths(rawURL)
-	if err := os.WriteFile(bodyPath, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(bodyPath, body, 0o644); err != nil {
 		return
 	}
 

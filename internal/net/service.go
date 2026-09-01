@@ -196,7 +196,8 @@ func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress P
 	req.Header.Set("User-Agent", s.userAgent)
 	hasCookies := s.client.Jar != nil && len(s.client.Jar.Cookies(req.URL)) > 0
 	if !hasCookies {
-		if body, entry, ok := s.cache.Get(rawURL); ok {
+		if bodyBytes, entry, ok := s.cache.Get(rawURL); ok {
+			body := string(bodyBytes)
 			s.setSecurity(securitySummaryFromURL(req.URL))
 			s.log.Add(RequestLogEntry{
 				Method:      http.MethodGet,
@@ -283,7 +284,7 @@ func (s *Service) FetchWithMeta(ctx context.Context, rawURL string, onProgress P
 	}
 
 	if !hasCookies && responseMatchesOriginalURL(rawURL, resp) {
-		s.cache.Put(rawURL, resp, body)
+		s.cache.Put(rawURL, resp, []byte(body))
 	}
 	entry.Duration = time.Since(startedAt)
 	s.log.Add(entry)
@@ -313,8 +314,11 @@ func (s *Service) CachedBody(rawURL string) (string, bool) {
 	if s == nil || s.cache == nil {
 		return "", false
 	}
-	body, _, ok := s.cache.Get(rawURL)
-	return body, ok
+	bodyBytes, _, ok := s.cache.Get(rawURL)
+	if !ok {
+		return "", false
+	}
+	return string(bodyBytes), true
 }
 
 // doRequest wraps http.Client.Do with a redirect policy that limits the
