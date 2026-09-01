@@ -156,6 +156,11 @@ type Runtime struct {
 	scriptCache      map[string]*goja.Program
 	scriptCacheMu    sync.Mutex
 	scriptCacheLimit int
+
+	// flushMicrotasksFn caches the resolved __flushMicrotasks function
+	// to avoid vm.Get lookup on every RunScript call.
+	flushMicrotasksFn       goja.Callable
+	flushMicrotasksResolved bool
 }
 
 // SetEnforcer attaches a ScriptEnforcer to this runtime for capability
@@ -268,7 +273,25 @@ func NewRuntime() *Runtime {
 	// intact while routing RAF through the real scheduler.
 	runtime.installFrameScheduler()
 
+	// Resolve the __flushMicrotasks function reference once after all
+	// polyfills have been loaded. Avoids per-RunScript vm.Get lookup.
+	runtime.resolveFlushMicrotasks()
+
 	return runtime
+}
+
+// resolveFlushMicrotasks resolves and caches the __flushMicrotasks function
+// reference. Called once after polyfills are loaded in NewRuntime.
+func (r *Runtime) resolveFlushMicrotasks() {
+	if r.flushMicrotasksResolved {
+		return
+	}
+	r.flushMicrotasksResolved = true
+	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
+		if fn, ok := goja.AssertFunction(flush); ok {
+			r.flushMicrotasksFn = fn
+		}
+	}
 }
 
 // FrameScheduler returns the runtime's requestAnimationFrame scheduler.
@@ -2170,11 +2193,9 @@ func (r *Runtime) RunScript(script string) (goja.Value, error) {
 			}
 		}
 
-		// Flush microtask queue (drives Promise .then callbacks synchronously)
-		if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
-			if fn, ok := goja.AssertFunction(flush); ok {
-				fn(goja.Undefined()) //nolint:errcheck
-			}
+		// Flush microtask queue using cached function reference
+		if r.flushMicrotasksFn != nil {
+			r.flushMicrotasksFn(goja.Undefined()) //nolint:errcheck
 		}
 	}
 	if err != nil {
