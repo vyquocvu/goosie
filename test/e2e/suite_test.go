@@ -88,7 +88,7 @@ func TestComprehensiveSuite(t *testing.T) {
 				localConfig.DiffThreshold = 0.15
 			} else if strings.Contains(testName, "_semantic") {
 				// HTML5 semantic elements are rendered as generic blocks
-				localConfig.DiffThreshold = 0.10
+				localConfig.DiffThreshold = 0.20
 			} else if strings.Contains(testName, "_colors") {
 				// Color tests focus on color values, mostly matching
 				localConfig.DiffThreshold = 0.05

@@ -13,14 +13,14 @@ type Visit struct {
 	VisitedAt time.Time `json:"visited_at"`
 }
 
-type historyDocument struct {
+type HistoryDocument struct {
 	Visits []Visit `json:"visits"`
 }
 
 type HistoryStore struct {
 	mu          sync.Mutex
 	profile     *Profile
-	doc         historyDocument
+	Doc         HistoryDocument
 	lastLoaded  time.Time
 	lastModTime time.Time
 	lastVersion uint64
@@ -29,7 +29,7 @@ type HistoryStore struct {
 func NewHistoryStore(p *Profile) (*HistoryStore, error) {
 	store := &HistoryStore{
 		profile: p,
-		doc: historyDocument{
+		Doc: HistoryDocument{
 			Visits: []Visit{},
 		},
 	}
@@ -49,7 +49,7 @@ func (s *HistoryStore) AddVisit(url, title string) error {
 			return err
 		}
 
-		s.doc.Visits = append(s.doc.Visits, Visit{
+		s.Doc.Visits = append(s.Doc.Visits, Visit{
 			URL:       url,
 			Title:     title,
 			VisitedAt: time.Now().UTC(),
@@ -64,8 +64,8 @@ func (s *HistoryStore) VisitURLs() []string {
 
 	_ = s.reloadLocked()
 
-	urls := make([]string, len(s.doc.Visits))
-	for i, visit := range s.doc.Visits {
+	urls := make([]string, len(s.Doc.Visits))
+	for i, visit := range s.Doc.Visits {
 		urls[i] = visit.URL
 	}
 
@@ -92,7 +92,7 @@ func (s *HistoryStore) reloadLocked() error {
 		}
 	}
 
-	doc := historyDocument{
+	doc := HistoryDocument{
 		Visits: []Visit{},
 	}
 	if err := s.profile.LoadJSON("history.json", &doc); err != nil {
@@ -101,7 +101,7 @@ func (s *HistoryStore) reloadLocked() error {
 	if doc.Visits == nil {
 		doc.Visits = []Visit{}
 	}
-	s.doc = doc
+	s.Doc = doc
 	s.lastLoaded = time.Now()
 	s.lastVersion = currentVersion
 
@@ -114,7 +114,7 @@ func (s *HistoryStore) reloadLocked() error {
 }
 
 func (s *HistoryStore) persist() error {
-	err := s.profile.SaveJSON("history.json", s.doc)
+	err := s.profile.SaveJSON("history.json", s.Doc)
 	if err == nil {
 		s.lastLoaded = time.Now()
 		s.lastVersion = s.profile.SnapshotVersion("history.json")
@@ -128,8 +128,8 @@ func (s *HistoryStore) Visits() []Visit {
 
 	_ = s.reloadLocked()
 
-	visits := make([]Visit, len(s.doc.Visits))
-	copy(visits, s.doc.Visits)
+	visits := make([]Visit, len(s.Doc.Visits))
+	copy(visits, s.Doc.Visits)
 	return visits
 }
 
@@ -138,7 +138,7 @@ func (s *HistoryStore) Clear() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		s.doc.Visits = []Visit{}
+		s.Doc.Visits = []Visit{}
 		return s.persist()
 	})
 }

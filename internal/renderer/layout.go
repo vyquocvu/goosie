@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"image/color"
 	"strconv"
 	"strings"
@@ -72,7 +73,7 @@ func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
 	le.nodeMapMu.Unlock()
 
 	// Build layout tree from render tree
-	return le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil, le.inlineEngine, le.flexEngine, le.gridEngine)
+	return le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil)
 }
 
 // layoutEnginePool recycles LayoutEngines across build cycles. Engines are
@@ -116,7 +117,7 @@ func (le *LayoutEngine) reset(width, height float32) {
 }
 
 // buildLayoutBox creates a LayoutBox for a RenderNode and computes its layout
-func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) *LayoutBox {
+func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth float32, floatCtx *FloatContext) *LayoutBox {
 	if node == nil {
 		return nil
 	}
@@ -162,9 +163,9 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	var currentY float32
 	if node.TagName == "table" {
 		layoutBox.Display = DisplayGrid
-		currentY = le.buildTableLayoutBox(node, layoutBox, x, y, availableWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+		currentY = le.buildTableLayoutBox(node, layoutBox, x, y, availableWidth, floatCtx)
 	} else {
-		currentY = le.computeLayoutBox(node, layoutBox, x, y, availableWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+		currentY = le.computeLayoutBox(node, layoutBox, x, y, availableWidth, floatCtx)
 	}
 
 	// Update height based on children
@@ -179,7 +180,7 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			fontSize = node.ComputedStyle.FontSize
 		}
 		explicitHeight := parseLengthWithViewport(node.ComputedStyle.Height, fontSize, le.canvasWidth, le.canvasHeight, le.canvasHeight)
-		if explicitHeight > 0 {
+		if explicitHeight >= 0 {
 			if node.ComputedStyle.BoxSizing == "border-box" {
 				layoutBox.Box.Height = explicitHeight
 			} else {
@@ -348,12 +349,30 @@ func (le *LayoutEngine) shiftLayoutBox(box *LayoutBox, deltaX, deltaY float32) {
 }
 
 // buildTableLayoutBox creates a LayoutBox for a table node and computes its layout
-func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
-	// x, y and availableWidth already account for margins from computeLayoutBox
-	// availableWidth here is the border-box width
-
-	// Reduce available width by borders (if we supported them fully) - for now just assume availableWidth is content width
+func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext) float32 {
 	contentWidth := availableWidth
+	if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
+		if strings.HasSuffix(wAttr, "%") {
+			if pct, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "%"), 32); err == nil && pct > 0 {
+				contentWidth = availableWidth * float32(pct) / 100.0
+			}
+		} else {
+			if val, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && val > 0 {
+				contentWidth = float32(val)
+			}
+		}
+	}
+	if csAttr, ok := node.GetAttribute("cellspacing"); ok {
+		if v, err := strconv.Atoi(csAttr); err == nil && v >= 0 {
+			layoutBox.Gap = float32(v)
+		}
+	}
+	var cellPadding float32 = -1
+	if cpAttr, ok := node.GetAttribute("cellpadding"); ok {
+		if v, err := strconv.Atoi(cpAttr); err == nil && v >= 0 {
+			cellPadding = float32(v)
+		}
+	}
 
 	// Ensure we don't proceed with negative width
 	if contentWidth < 0 {
@@ -413,6 +432,8 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		occupied[row][col] = true
 	}
 
+	colSpecs := make(map[int]string)
+
 	for r, rowNode := range rows {
 		currentRow := r + 1
 		currentCol := 1
@@ -467,13 +488,42 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 					maxCols = colEnd - 1
 				}
 
+				// Check cell width specification for single-column cells
+				if colspan == 1 {
+					colIdx := colStart - 1
+					cellWidthStr := ""
+					if w, ok := cell.GetAttribute("width"); ok && w != "" {
+						cellWidthStr = w
+					} else if cell.ComputedStyle != nil && cell.ComputedStyle.Width != "" && cell.ComputedStyle.Width != "auto" {
+						cellWidthStr = cell.ComputedStyle.Width
+					}
+					if cellWidthStr != "" {
+						if strings.HasSuffix(cellWidthStr, "%") {
+							if _, err := strconv.ParseFloat(strings.TrimSuffix(cellWidthStr, "%"), 32); err == nil {
+								colSpecs[colIdx] = cellWidthStr
+							}
+						} else {
+							if v, err := strconv.ParseFloat(strings.TrimSuffix(cellWidthStr, "px"), 32); err == nil && v > 0 {
+								colSpecs[colIdx] = fmt.Sprintf("%dpx", int(v))
+							}
+						}
+					}
+				}
+
 				// Create cell box
-				cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth, nil)
 				if cellBox != nil {
 					cellBox.GridColumnStart = colStart
 					cellBox.GridColumnEnd = colEnd
 					cellBox.GridRowStart = rowStart
 					cellBox.GridRowEnd = rowEnd
+
+					if cellPadding >= 0 && cellBox.PaddingTop == 0 && cellBox.PaddingBottom == 0 && cellBox.PaddingLeft == 0 && cellBox.PaddingRight == 0 {
+						cellBox.PaddingTop = cellPadding
+						cellBox.PaddingBottom = cellPadding
+						cellBox.PaddingLeft = cellPadding
+						cellBox.PaddingRight = cellPadding
+					}
 
 					// Transmit TR background to cell if cell has none
 					if trBgColor != nil && (cellBox.BackgroundColor == nil || cellBox.BackgroundColor == color.Transparent) {
@@ -488,22 +538,22 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		}
 	}
 
-	if maxCols == 0 {
-		return y + layoutBox.PaddingTop + layoutBox.PaddingBottom
-	}
-
-	// 3. Set grid template columns
+	// 3. Build grid-template-columns string from colSpecs
 	var colsBuilder strings.Builder
 	for i := 0; i < maxCols; i++ {
 		if i > 0 {
 			colsBuilder.WriteString(" ")
 		}
-		colsBuilder.WriteString("auto")
+		if spec, ok := colSpecs[i]; ok && spec != "" {
+			colsBuilder.WriteString(spec)
+		} else {
+			colsBuilder.WriteString("auto")
+		}
 	}
 	layoutBox.GridTemplateColumns = colsBuilder.String()
 
 	// 4. Run grid layout
-	gridLayoutEngine.LayoutTable(layoutBox)
+	le.gridEngine.LayoutTable(layoutBox)
 
 	// Calculate height
 	maxY := y + layoutBox.PaddingTop
@@ -534,17 +584,17 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.MarginRight = parseLengthWithViewport(node.ComputedStyle.MarginRight, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginBottom = parseLengthWithViewport(node.ComputedStyle.MarginBottom, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginLeft = parseLengthWithViewport(node.ComputedStyle.MarginLeft, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
-	// parseLengthWithViewport returns -1 for "auto" or unsupported; treat as 0 for box model
-	if layoutBox.MarginTop < 0 {
+	// Reset "auto" or empty margins to 0 (margin: auto centering calculates used margins separately)
+	if node.ComputedStyle.MarginTop == "" || node.ComputedStyle.MarginTop == "auto" {
 		layoutBox.MarginTop = 0
 	}
-	if layoutBox.MarginRight < 0 {
+	if node.ComputedStyle.MarginRight == "" || node.ComputedStyle.MarginRight == "auto" {
 		layoutBox.MarginRight = 0
 	}
-	if layoutBox.MarginBottom < 0 {
+	if node.ComputedStyle.MarginBottom == "" || node.ComputedStyle.MarginBottom == "auto" {
 		layoutBox.MarginBottom = 0
 	}
-	if layoutBox.MarginLeft < 0 {
+	if node.ComputedStyle.MarginLeft == "" || node.ComputedStyle.MarginLeft == "auto" {
 		layoutBox.MarginLeft = 0
 	}
 
@@ -582,12 +632,21 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.BorderBottomColor = node.ComputedStyle.BorderBottomColor
 	layoutBox.BorderLeftColor = node.ComputedStyle.BorderLeftColor
 
-	// Apply background color
+	// Apply background properties
 	layoutBox.BackgroundColor = node.ComputedStyle.BackgroundColor
+	layoutBox.BackgroundImage = node.ComputedStyle.BackgroundImage
+	layoutBox.BackgroundRepeat = node.ComputedStyle.BackgroundRepeat
+	layoutBox.BackgroundPosition = node.ComputedStyle.BackgroundPosition
+	layoutBox.BackgroundSize = node.ComputedStyle.BackgroundSize
+	layoutBox.BackgroundAttachment = node.ComputedStyle.BackgroundAttachment
+	layoutBox.BackgroundImageData = node.BackgroundImageData
+	if layoutBox.BackgroundImageData == nil && node.ComputedStyle.BackgroundImageData != nil {
+		layoutBox.BackgroundImageData = node.ComputedStyle.BackgroundImageData
+	}
 }
 
 // computeLayoutBox computes the layout for a single box
-func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
+func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext) float32 {
 	// Account for margins
 	marginLeft := layoutBox.MarginLeft
 	marginRight := layoutBox.MarginRight
@@ -691,7 +750,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 				if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 					continue
 				}
-				childW := le.measureMaxContentWidth(child, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				childW := le.measureMaxContentWidth(child)
 				if childW > contentW {
 					contentW = childW
 				}
@@ -739,6 +798,11 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		} else {
 			width = defaultW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
+
+		// Constrain to available width
+		if width > availableWidth-marginLeft-marginRight {
+			width = availableWidth - marginLeft - marginRight
+		}
 	}
 
 	// Apply min-width and max-width constraints
@@ -784,7 +848,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		currentY = le.computeTextLayout(node, layoutBox, x, y, width)
 	} else if node.Type == NodeTypeElement {
 		// Layout element node
-		currentY = le.computeElementLayout(node, layoutBox, x, y, width, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+		currentY = le.computeElementLayout(node, layoutBox, x, y, width, floatCtx)
 	}
 
 	return currentY
@@ -821,7 +885,7 @@ func (le *LayoutEngine) computeTextLayout(node *RenderNode, layoutBox *LayoutBox
 }
 
 // computeElementLayout computes layout for element nodes
-func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
+func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext) float32 {
 	currentY := y
 
 	// Add border top offset before padding
@@ -851,10 +915,10 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 	if layoutBox.Display == DisplayFlex {
 		// Use Adapter to build child layout boxes with nil float context since flex items establish new BFC
 		buildLayoutBoxAdapter := func(child *RenderNode, cx, cy, cw float32) *LayoutBox {
-			return le.buildLayoutBox(child, cx, cy, cw, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+			return le.buildLayoutBox(child, cx, cy, cw, nil)
 		}
 		// Use flexbox layout engine for flex containers
-		flexLayoutEngine.LayoutFlexContainer(node, layoutBox, buildLayoutBoxAdapter)
+		le.flexEngine.LayoutFlexContainer(node, layoutBox, buildLayoutBoxAdapter)
 
 		// Calculate childY based on laid out flex items
 		for _, child := range layoutBox.Children {
@@ -866,10 +930,10 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 	} else if layoutBox.Display == DisplayGrid {
 		// Use Adapter to build child layout boxes with nil float context since grid items establish new BFC
 		buildLayoutBoxAdapter := func(child *RenderNode, cx, cy, cw float32) *LayoutBox {
-			return le.buildLayoutBox(child, cx, cy, cw, nil, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+			return le.buildLayoutBox(child, cx, cy, cw, nil)
 		}
 		// Use grid layout engine for grid containers
-		gridLayoutEngine.LayoutGridContainer(node, layoutBox, buildLayoutBoxAdapter)
+		le.gridEngine.LayoutGridContainer(node, layoutBox, buildLayoutBoxAdapter)
 
 		// Calculate childY based on laid out items (similar to Block/Flex)
 		// Grid layout sets height on parentBox too, but let's ensure childY reflects content
@@ -879,12 +943,12 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 				childY = endY
 			}
 		}
-	} else if node.IsBlock() && le.hasInlineContent(node) {
+	} else if node.IsBlock() && le.hasBlockChildren(node) && le.hasInlineContent(node) {
 		// Mixed block and inline content: lay out consecutive inline runs as
 		// anonymous blocks (line boxes) and stack block-level children between
 		// them, per CSS block-in-inline model.
-		childY = le.layoutBlockAndInline(node, layoutBox, childX, currentY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
-	} else if node.IsBlock() {
+		childY = le.layoutBlockAndInline(node, layoutBox, childX, currentY, contentWidth, floatCtx)
+	} else if node.IsBlock() && le.hasBlockChildren(node) {
 		// Block elements: stack children vertically (when no inline content)
 		// Check if element has intrinsic dimensions (e.g. input, button, textarea)
 		if node.TagName == "input" {
@@ -914,12 +978,12 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 
 				// 2. Handle float
 				if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
-					le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+					le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx)
 					continue
 				}
 
 				// 3. Normal in-flow block elements: stack vertically with margin collapse
-				newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+				newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx)
 				if inFlow {
 					childY = newY
 					lastChild = childBox
@@ -930,7 +994,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		// Inline elements: use inline layout engine
 		if le.hasInlineContent(node) {
 			wsMode := le.whiteSpaceModeForNode(node)
-			lines, totalHeight := inlineLayoutEngine.LayoutInlineContent(
+			lines, totalHeight := le.inlineEngine.LayoutInlineContent(
 				node, childX, currentY, contentWidth, wsMode, floatCtx,
 			)
 
@@ -970,7 +1034,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 			} else {
 				// Fallback for empty inline elements using Block layout (e.g. empty div)
 				for _, child := range node.Children {
-					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx)
 					if childLayoutBox != nil {
 						layoutBox.AddChild(childLayoutBox)
 						if childLayoutBox.Position != "absolute" && childLayoutBox.Position != "fixed" {
@@ -1004,10 +1068,10 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 // layoutFloatedChild builds a LayoutBox for a floated child, places it via
 // the float context, and attaches it to the parent box. Shared by the pure
 // block and mixed block/inline stacking paths.
-func (le *LayoutEngine) layoutFloatedChild(child *RenderNode, layoutBox *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) {
+func (le *LayoutEngine) layoutFloatedChild(child *RenderNode, layoutBox *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext) {
 	floatDir := child.ComputedStyle.Float
 
-	childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+	childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx)
 	if childLayoutBox != nil {
 		fx, fy := floatCtx.PlaceFloat(childLayoutBox, floatDir, childY, childX, contentWidth)
 		dx := fx - childLayoutBox.Box.X
@@ -1026,7 +1090,7 @@ func (le *LayoutEngine) layoutFloatedChild(child *RenderNode, layoutBox *LayoutB
 // is attached to layoutBox whenever its box could be built. Returns the
 // advanced Y, the child's box, and whether the box participates in flow
 // (in-flow boxes advance the stacking position; positioned boxes do not).
-func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox, lastChild *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) (float32, *LayoutBox, bool) {
+func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox, lastChild *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext) (float32, *LayoutBox, bool) {
 	// Collapse margins with the previous sibling block box.
 	nextChildY := childY
 	if lastChild != nil {
@@ -1041,14 +1105,14 @@ func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox,
 				fontSize = child.ComputedStyle.FontSize
 			}
 			childMarginTop := parseLength(child.ComputedStyle.MarginTop, fontSize)
-			collapsedMargin := maxFloat32(lastChild.MarginBottom, childMarginTop)
+			collapsedMargin := collapseMargins(lastChild.MarginBottom, childMarginTop)
 
 			lastChildBottom := lastChild.Box.Y + lastChild.Box.Height
 			nextChildY = lastChildBottom + collapsedMargin - childMarginTop
 		}
 	}
 
-	childLayoutBox := le.buildLayoutBox(child, childX, nextChildY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+	childLayoutBox := le.buildLayoutBox(child, childX, nextChildY, contentWidth, floatCtx)
 	if childLayoutBox == nil {
 		return childY, nil, false
 	}
@@ -1064,7 +1128,7 @@ func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox,
 // Consecutive inline siblings are grouped into an anonymous block and laid
 // out as line boxes; block-level children are stacked between the runs with
 // float, clear, and margin handling mirroring the pure-block path.
-func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *LayoutBox, childX, currentY, contentWidth float32, floatCtx *FloatContext, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
+func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *LayoutBox, childX, currentY, contentWidth float32, floatCtx *FloatContext) float32 {
 	wsMode := le.whiteSpaceModeForNode(node)
 	childY := currentY
 	var lastChild *LayoutBox
@@ -1083,7 +1147,7 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 			}
 		}
 		if hasContent {
-			lines, totalHeight := inlineLayoutEngine.LayoutInlineChildren(
+			lines, totalHeight := le.inlineEngine.LayoutInlineChildren(
 				run, childX, childY, contentWidth, wsMode, floatCtx,
 			)
 			layoutBox.LineBoxes = append(layoutBox.LineBoxes, lines...)
@@ -1119,13 +1183,13 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 
 		// Handle float
 		if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
-			le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+			le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx)
 			continue
 		}
 
 		// Normal in-flow block element: stack vertically with margin collapse
 		// against the previous block box (line runs do not participate).
-		newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+		newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx)
 		if inFlow {
 			childY = newY
 			lastChild = childBox
@@ -1149,6 +1213,16 @@ func minFloat32(a, b float32) float32 {
 		return a
 	}
 	return b
+}
+
+func collapseMargins(m1, m2 float32) float32 {
+	if m1 >= 0 && m2 >= 0 {
+		return maxFloat32(m1, m2)
+	}
+	if m1 < 0 && m2 < 0 {
+		return minFloat32(m1, m2)
+	}
+	return m1 + m2
 }
 
 func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
@@ -1345,6 +1419,22 @@ func whiteSpaceModeFromCSS(value string) (WhiteSpaceMode, bool) {
 	return WhiteSpaceNormal, false
 }
 
+// hasBlockChildren checks if a node has any in-flow block-level child elements
+func (le *LayoutEngine) hasBlockChildren(node *RenderNode) bool {
+	if node == nil {
+		return false
+	}
+	for _, child := range node.Children {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			continue
+		}
+		if child.Type == NodeTypeElement && child.IsBlock() {
+			return true
+		}
+	}
+	return false
+}
+
 // hasInlineContent checks if a node has inline content (text or inline children)
 func (le *LayoutEngine) hasInlineContent(node *RenderNode) bool {
 	return le.hasInlineContentRecursive(node)
@@ -1354,7 +1444,7 @@ func (le *LayoutEngine) hasInlineContent(node *RenderNode) bool {
 // needs to lay out all its content on a single line without wrapping. This is
 // used for shrink-to-fit sizing of floats and inline-blocks whose children are
 // block-level boxes.
-func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode, inlineLayoutEngine *InlineLayoutEngine, flexLayoutEngine *FlexLayoutEngine, gridLayoutEngine *GridLayoutEngine) float32 {
+func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode) float32 {
 	if node == nil {
 		return 0
 	}
@@ -1387,7 +1477,7 @@ func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode, inlineLayoutEng
 			if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 				continue
 			}
-			childW := le.measureMaxContentWidth(child, inlineLayoutEngine, flexLayoutEngine, gridLayoutEngine)
+			childW := le.measureMaxContentWidth(child)
 			// Float or inline-level children are placed side by side; block
 			// children stack, so the max-content width is the sum of floats
 			// on a line or the widest stacked block.

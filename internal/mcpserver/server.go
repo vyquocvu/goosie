@@ -31,7 +31,7 @@ type Server struct {
 	audit   *AuditLogger
 	health  *HealthReporter
 	quota   *QuotaTracker
-	limiter *RateLimiter
+	Limiter *RateLimiter
 }
 
 type ServerOptions struct {
@@ -69,7 +69,7 @@ func NewServer(bc browsercontrol.Service, opts ServerOptions) (*Server, error) {
 		requests: make(map[string]context.CancelFunc),
 		audit:    NewAuditLogger(),
 		quota:    NewQuotaTracker(opts.Quota),
-		limiter:  NewRateLimiter(opts.RateCapacity, opts.RateRefill),
+		Limiter:  NewRateLimiter(opts.RateCapacity, opts.RateRefill),
 	}
 	s.health = NewHealthReporter(opts.MaxContexts, s.activeContextCount)
 
@@ -127,22 +127,22 @@ func (s *Server) Quota() *QuotaTracker {
 // LimiterTokens returns the current rate-limiter token count.
 // Useful for diagnostics and tool integrations.
 func (s *Server) LimiterTokens() float64 {
-	return s.limiter.Tokens()
+	return s.Limiter.Tokens()
 }
 
 // LimiterAllow checks if a single request would be allowed under the rate limit.
 func (s *Server) LimiterAllow() bool {
-	return s.limiter.Allow()
+	return s.Limiter.Allow()
 }
 
 // LimiterCapacity returns the configured burst capacity.
 func (s *Server) LimiterCapacity() int {
-	return s.limiter.capacity
+	return s.Limiter.capacity
 }
 
 // LimiterRefillRate returns the configured refill rate (tokens/sec).
 func (s *Server) LimiterRefillRate() float64 {
-	return s.limiter.refillRate
+	return s.Limiter.refillRate
 }
 
 // RecordNavigation increments the per-context navigation counter.
@@ -190,7 +190,7 @@ func (s *Server) handleToolCall(ctx context.Context, req *mcp.CallToolRequest) (
 	toolName := req.Params.Name
 
 	// Rate limit check
-	if !s.limiter.Allow() {
+	if !s.Limiter.Allow() {
 		s.health.RecordDenied()
 		s.health.RecordError()
 		s.audit.LogToolCall("", toolName, "denied", "rate_limited", time.Since(start), nil)
@@ -219,7 +219,7 @@ func (s *Server) handleToolCall(ctx context.Context, req *mcp.CallToolRequest) (
 		s.quota.RecordRequest(ctxID)
 	}
 
-	result, err := s.executeTool(ctx, toolName, args)
+	result, err := s.ExecuteTool(ctx, toolName, args)
 	if err != nil {
 		s.health.RecordError()
 		s.audit.LogToolCall(s.extractContextID(args), toolName, "error",
@@ -282,7 +282,7 @@ func (s *Server) errorResult(msg string) *mcp.CallToolResult {
 }
 
 // executeTool dispatches to the appropriate browser-control method.
-func (s *Server) executeTool(ctx context.Context, name string, args map[string]interface{}) (interface{}, error) {
+func (s *Server) ExecuteTool(ctx context.Context, name string, args map[string]interface{}) (interface{}, error) {
 	bc, ok := s.bc.(interface {
 		CreateContext(ctx context.Context, opts browsercontrol.CreateContextOptions) (browsercontrol.ContextInfo, error)
 		ListContexts(ctx context.Context) ([]browsercontrol.ContextInfo, error)

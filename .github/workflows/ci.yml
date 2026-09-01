@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Build all packages
+        run: go build ./...
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run unit tests
+        run: go test -short ./...
+
+  race:
+    name: Race Detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run tests with race detector
+        run: go test -race -short ./test/internal/engine/... ./test/internal/js/... ./test/internal/net/...
+
+  smoke:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run smoke tests
+        run: make smoke-test
+
+  golden:
+    name: Golden Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run golden image tests
+        run: |
+          go test -v -count=1 ./test/internal/renderer/frame/golden/ \
+            -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
+
+      - name: Verify mismatch detection
+        run: |
+          go test -v -count=1 ./test/internal/renderer/frame/golden/ \
+            -run TestGoldenMismatchDetection
+
+      - name: Upload golden artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-artifacts-${{ github.run_id }}
+          path: |
+            test/internal/renderer/frame/golden/testdata/golden-update/
+          retention-days: 5
+
+  benchmark:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux GUI dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+
+      - name: Run CI benchmarks
+        run: |
+          chmod +x scripts/bench-ci.sh
+          scripts/bench-ci.sh run-only
+        env:
+          BENCHTIME: 100ms
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: testdata/benchmarks/
+          retention-days: 14

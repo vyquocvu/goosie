@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Goosie — Wiki</title>
+<style>
+  /* ============================================
+     Wiki Template — Neutral style
+     No brand colors. Pure grayscale + desaturated
+     semantic colors. Light default, dark via
+     html.dark class.
+     ============================================ */
+
+  /* --- Light mode (default) --- */
+  :root {
+    --bg: #F7F7F8;
+    --bg-secondary: #FFFFFF;
+    --bg-tertiary: #EDEDF0;
+    --border: #D4D4D8;
+    --border-strong: #A1A1AA;
+    --text: #18181B;
+    --text-muted: #71717A;
+    --text-subtle: #A1A1AA;
+    --accent: #3F3F46;
+    --accent-hover: #27272A;
+    --accent-surface: #F4F4F5;
+    --accent-border: #A1A1AA;
+    --green: #15803D;
+    --green-surface: #F0FDF4;
+    --orange: #B45309;
+    --orange-surface: #FFFBEB;
+    --red: #B91C1C;
+    --red-surface: #FEF2F2;
+    --blue: #1D4ED8;
+    --blue-surface: #EFF6FF;
+    --purple: #6D28D9;
+    --purple-surface: #F5F3FF;
+    --cyan: #0E7490;
+    --cyan-surface: #ECFEFF;
+    --shadow-flat: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-menu: 0 4px 6px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  }
+
+  /* --- Dark mode --- */
+  html.dark {
+    --bg: #18181B;
+    --bg-secondary: #27272A;
+    --bg-tertiary: #3F3F46;
+    --border: #3F3F46;
+    --border-strong: #52525B;
+    --text: #FAFAFA;
+    --text-muted: #A1A1AA;
+    --text-subtle: #52525B;
+    --accent: #D4D4D8;
+    --accent-hover: #FAFAFA;
+    --accent-surface: #27272A;
+    --accent-border: #71717A;
+    --green: #4ADE80;
+    --green-surface: #14532D;
+    --orange: #FBBF24;
+    --orange-surface: #78350F;
+    --red: #F87171;
+    --red-surface: #7F1D1D;
+    --blue: #60A5FA;
+    --blue-surface: #1E3A5F;
+    --purple: #A78BFA;
+    --purple-surface: #2E1065;
+    --cyan: #22D3EE;
+    --cyan-surface: #164E63;
+    --shadow-flat: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-menu: 0 4px 6px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+  }
+
+  /* --- Base --- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+  /* --- Sidebar --- */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 260px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    overflow-y: auto;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar-header { margin-bottom: 24px; padding: 0 8px; }
+  .sidebar-header h3 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.3px;
+  }
+  .sidebar-header .version {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+  }
+  .sidebar nav { flex: 1; }
+  .sidebar nav a {
+    display: block;
+    padding: 6px 12px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.15s;
+    margin-bottom: 1px;
+  }
+  .sidebar nav a:hover {
+    background: var(--bg-tertiary);
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  /* --- Main content --- */
+  .main {
+    margin-left: calc(260px + (100% - 260px - 900px) / 2);
+    margin-right: auto;
+    max-width: 900px;
+    padding: 40px 32px 80px;
+    min-height: 100vh;
+  }
+
+  /* --- Hero (flat, not a card) --- */
+  .hero {
+    background: transparent;
+    border: none;
+    padding: 40px 0;
+    margin-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero h1 {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 12px;
+    color: var(--text);
+  }
+  .hero .subtitle { font-size: 16px; color: var(--text-muted); max-width: 640px; line-height: 1.6; }
+  .hero .tech-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+  .hero .tech-badge {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 4px;
+    background: var(--accent-surface);
+    color: var(--accent);
+    border: 1px solid var(--accent-border);
+  }
+
+  /* --- Typography --- */
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin: 48px 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 28px 0 12px;
+    color: var(--text);
+  }
+  p { margin-bottom: 16px; color: var(--text); }
+  ul, ol { margin-bottom: 16px; padding-left: 24px; color: var(--text); }
+  li { margin-bottom: 6px; }
+  strong { font-weight: 600; }
+
+  /* --- Code --- */
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+  pre {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin-bottom: 16px;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* --- Tables --- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border-bottom: 2px solid var(--border);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+  }
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tbody tr:hover { background: var(--bg-tertiary); }
+
+  /* --- Tags --- */
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .tag-green { background: var(--green-surface); color: var(--green); }
+  .tag-blue { background: var(--blue-surface); color: var(--blue); }
+  .tag-red { background: var(--red-surface); color: var(--red); }
+  .tag-orange { background: var(--orange-surface); color: var(--orange); }
+  .tag-purple { background: var(--purple-surface); color: var(--purple); }
+  .tag-cyan { background: var(--cyan-surface); color: var(--cyan); }
+
+  /* --- Callout boxes --- */
+  .callout {
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .callout.info {
+    background: var(--blue-surface);
+    border-left: 4px solid var(--blue);
+    color: var(--text);
+  }
+  .callout.warn {
+    background: var(--orange-surface);
+    border-left: 4px solid var(--orange);
+    color: var(--text);
+  }
+
+  /* --- Flow diagrams --- */
+  .flow { margin-bottom: 16px; overflow-x: auto; }
+  .flow-steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    white-space: nowrap;
+  }
+  .flow-step {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .flow-step.blue { background: var(--blue-surface); color: var(--blue); }
+  .flow-step.green { background: var(--green-surface); color: var(--green); }
+  .flow-step.orange { background: var(--orange-surface); color: var(--orange); }
+  .flow-step.purple { background: var(--purple-surface); color: var(--purple); }
+  .flow-step.cyan { background: var(--cyan-surface); color: var(--cyan); }
+  .flow-arrow { margin: 0 8px; color: var(--text-subtle); font-size: 18px; }
+
+  /* --- File tree --- */
+  .file-tree {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin-bottom: 16px;
+    white-space: pre;
+  }
+  .file-tree .dir { color: var(--accent); font-weight: 600; }
+  .file-tree .file { color: var(--text); }
+  .file-tree .comment { color: var(--text-muted); font-style: italic; }
+
+  /* --- Cards grid --- */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: var(--shadow-flat);
+  }
+  .card h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .card p { font-size: 13px; color: var(--text-muted); margin-bottom: 0; }
+
+  /* --- Responsive --- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: auto; margin-right: auto; padding: 24px 20px 60px; }
+  }
+  @media (max-width: 600px) {
+    .card-grid { grid-template-columns: 1fr; }
+    .hero { padding: 24px 0; }
+    .hero h1 { font-size: 24px; }
+  }
+
+  /* --- Scrollbar --- */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+  /* --- Theme toggle button --- */
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-top: 16px;
+    transition: all 0.15s;
+    width: 100%;
+    justify-content: center;
+  }
+  .theme-toggle:hover { background: var(--border); color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h3>Goosie <span class="version">Wiki</span></h3>
+  </div>
+  <nav>
+    <a href="#overview">Overview</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#pipeline">Rendering Pipeline</a>
+    <a href="#dom">DOM &amp; HTML Parsing</a>
+    <a href="#css">CSS Engine</a>
+    <a href="#layout">Layout</a>
+    <a href="#paint">Paint, Raster &amp; Compositing</a>
+    <a href="#js">JavaScript Runtime</a>
+    <a href="#dom-api">DOM APIs in JS</a>
+    <a href="#networking">Networking &amp; Resources</a>
+    <a href="#memory">Memory Model</a>
+    <a href="#ui">Browser Shell &amp; UI</a>
+    <a href="#cli">Binaries &amp; CLI</a>
+    <a href="#mcp">MCP Automation</a>
+    <a href="#config">Profile &amp; Config</a>
+    <a href="#testing">Testing &amp; Conformance</a>
+    <a href="#structure">Project Structure</a>
+    <a href="#commands">Development Commands</a>
+    <a href="#ci">CI/CD &amp; Releases</a>
+  </nav>
+  <button class="theme-toggle" onclick="toggleTheme()">
+    <span id="themeIcon">&#9790;</span>
+    <span id="themeLabel">Dark mode</span>
+  </button>
+</div>
+
+<main class="main">
+
+  <div class="hero" id="overview">
+    <h1>Goosie</h1>
+    <p class="subtitle">An experimental web browser engine written from scratch in Go. It implements its own HTML/CSS pipeline, layout engine, display list, and rasterizer — no WKWebView, WebView2, CEF, or any other embedded browser. Fyne provides only the desktop window and input; everything that draws a page is Goosie's own code.</p>
+    <div class="tech-badges">
+      <span class="tech-badge">Go 1.25</span>
+      <span class="tech-badge">Fyne v2.7</span>
+      <span class="tech-badge">goja (ECMAScript)</span>
+      <span class="tech-badge">x/net/html</span>
+      <span class="tech-badge">oksvg / rasterx</span>
+      <span class="tech-badge">MCP go-sdk</span>
+      <span class="tech-badge">Playwright (E2E)</span>
+      <span class="tech-badge">Docusaurus</span>
+    </div>
+  </div>
+
+  <p>Goosie is a full engine, not a wrapper. A single navigation walks through a streaming HTML parser that builds an index-addressed DOM, a CSS cascade that produces computed styles, a layout engine that emits fragments, a retained display list, and a CPU rasterizer that writes pixels into a frame — then hands that frame to a Fyne window or writes it straight to a PNG. The whole thing is about 144k lines of Go across 484 files, of which roughly 290 are test files, committed over 571 commits.</p>
+
+  <p>Two things shape the design more than anything else. First, <strong>pure Go with no cgo in the rendering path</strong>: the JS runtime is <code>goja</code> rather than V8, the SVG stack is <code>oksvg</code>/<code>rasterx</code> rather than librsvg, and the rasterizer has a hand-written CPU backend. That is what makes a headless <code>goosie-cli</code> that renders a document to an image file, or a reproducible <code>CGO_ENABLED=0</code> release binary, possible at all. Second, <strong>verification against a real browser</strong>: the project's own CI compares Goosie's rendered output against Chromium screenshots, so engine decisions are judged by pixel diff rather than by taste.</p>
+
+  <p>Scope is honest about being partial. <code>HTML_CONFORMANCE.md</code> tracks support for 110 of 132 MDN-documented HTML elements (83%), and <code>website/docs/supported-web-platform.md</code> lists the Web Platform surface that actually works. The current project phase in <code>PROJECT.md</code> — "Live URL Real-world Browsing &amp; Subsystem Fixes" — covers DOM/JS completeness, CSS/renderer correctness, and the verification milestone, and all three are marked done.</p>
+
+  <h2 id="architecture">Architecture</h2>
+
+  <p>The engine is organised as a strict layering of <code>internal/</code> packages, and the rule is enforced in prose and in review: <strong>a package may only import packages at its own layer or below</strong>, and <strong>no core engine package may import Fyne</strong>. The rule exists because the same engine has to serve three very different hosts — an interactive desktop window, a headless PNG writer, and a JSON-RPC automation server — and any Fyne type that leaked into layout or painting would make two of those three impossible. The authoritative map is <code>website/docs/package-ownership.md</code>.</p>
+
+  <div class="flow">
+    <div class="flow-steps">
+      <span class="flow-step blue">L0 dom &middot; css</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step green">L1 renderer</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step cyan">L2 frame &middot; raster</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step purple">L3 engine &middot; js</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step orange">L4 ui</span>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Layer</th><th>Packages</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag tag-blue">L0 Foundation</span></td><td><code>internal/dom</code>, <code>internal/css</code></td><td>Index-based DOM store and streaming tree builder; CSS parsing, selector compilation, computed style and style invalidation.</td></tr>
+      <tr><td><span class="tag tag-green">L1 Layout</span></td><td><code>internal/renderer</code></td><td>Layout tree, fragment store, text shaping, block/inline/flex/grid/table layout, display list, paint chunks, dirty regions, incremental layout.</td></tr>
+      <tr><td><span class="tag tag-cyan">L2 Raster</span></td><td><code>internal/renderer/frame/*</code></td><td>Backend-neutral frame types, a pure-Go CPU rasterizer plus a macOS CoreGraphics backend behind build tags, glyph/image caches, and a 256&times;256 tile compositor.</td></tr>
+      <tr><td><span class="tag tag-purple">L3 Engine</span></td><td><code>internal/engine/*</code>, <code>internal/js</code>, <code>internal/net</code></td><td>Document loading coordination, navigation scheduling, session lifecycle, event loop, IPC/process-isolation prototype; goja runtime; HTTP fetching, caching, cookies, CSP.</td></tr>
+      <tr><td><span class="tag tag-orange">L4 Shell</span></td><td><code>internal/ui</code>, <code>internal/profile</code></td><td>Fyne browser chrome, tabs and DevTools panels; bookmarks, history, settings, storage.</td></tr>
+      <tr><td><span class="tag tag-red">Automation</span></td><td><code>internal/browsercontrol</code>, <code>internal/mcpserver</code></td><td>UI-independent headless browser service and the MCP server on top of it. Neither imports <code>internal/ui</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="architecture-pipeline">The pipeline as the organising idea</h3>
+
+  <p>Almost every layer boundary in the table above is a data-format boundary, and the canonical form is the display list. Parsing and styling produce a DOM plus computed styles; layout turns those into positioned fragments; the display list flattens fragments into backend-neutral paint commands; and only then does anything touch pixels. That sequencing is what makes the incremental behaviours possible at all — a DOM mutation from JavaScript can invalidate one subtree, re-layout it, and repaint only the dirty tiles, because each stage keeps its own retained structure instead of rebuilding the next one's.</p>
+
+  <p>The deliberate exception to "everything is core" is the automation boundary. <code>internal/browsercontrol</code> exposes a <code>Service</code>/<code>Context</code> interface that drives the engine without any window, and both <code>internal/mcpserver</code> (see <a href="#mcp">MCP Automation</a>) and <code>cmd/perf-review</code> consume it. Because that surface is UI-free, the performance profiler and the AI-agent server exercise exactly the code path the desktop browser does — which is what makes benchmark numbers meaningful. This boundary is recorded as an ADR: <code>website/docs/adr/0004-*.md</code>.</p>
+
+  <div class="callout info"><strong>Reading order for the deep dives.</strong> <code>website/docs/architecture-deep-dives.md</code> indexes ten short design articles that map one-to-one onto the layers above: compact DOM store, streaming parser, style invalidation, incremental layout, retained display list, raster backend boundaries, compositor and tiles, memory budget, JS runtime isolation, and process isolation. Four ADRs in <code>website/docs/adr/</code> explain the choices that were contested.</div>
+
+  <h3 id="architecture-startup">Startup and dependency wiring</h3>
+
+  <p><code>cmd/browser/main.go</code> is the composition root. It parses flags, opens the user profile, then constructs a <code>session.Session</code>, a <code>net.Service</code> with an HTTP cache, and a <code>memory.Manager</code> before creating the UI. Notably, the renderer is injected rather than imported-into-a-global: <code>ui.NewBrowserWithDependencies</code> receives a <code>RendererFactory</code> closure (<code>renderer.NewRenderer(1000, 700)</code>), so the shell never decides how an engine instance is created. The same factory trick is what lets the headless build swap in Fyne's test driver without touching engine code.</p>
+
+  <p>From there, a navigation is a coordinated, partly-overlapped sequence: stream-fetch the document, parse it incrementally while the byte stream is still arriving, let the resource coordinator discover and fetch CSS, scripts, fonts and images during that same download, wait for stylesheets to settle, then re-parse into the form the renderer consumes, paint, and run scripts in the correct classic/defer/async order. The details are in <a href="#pipeline">Rendering Pipeline</a> and <a href="#networking">Networking &amp; Resources</a>.</p>
+
+  <h2 id="pipeline">Rendering Pipeline</h2>
+
+  <p>This is the spine of the engine, and every subsystem described below exists to feed the next stage of it. One navigation runs fetch &rarr; streaming parse &rarr; resource coordination &rarr; style cascade &rarr; layout &rarr; display commands &rarr; raster. The stages are coupled only through data formats, which is what lets each one be replaced, cached, or run incrementally without touching the others.</p>
+
+  <div class="flow">
+    <div class="flow-steps">
+      <span class="flow-step blue">fetch &middot; stream parse</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step green">css cascade</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step green">layout</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step purple">DisplayCommand &middot; PaintChunk</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step orange">raster &middot; Fyne &middot; PNG</span>
+    </div>
+  </div>
+
+  <p>Two details make the pipeline behave like a browser rather than a batch renderer. The first is that <strong>parsing and resource loading overlap</strong>: <code>dom.Parser.ParseDocumentCtx</code> emits discovered resources while the HTTP body is still streaming, so stylesheet and image fetches begin before the last byte arrives — and parser-blocking scripts deliberately <em>stop</em> that overlap, because the spec says so (see <a href="#networking">Networking &amp; Resources</a>). The second is that <strong>the expensive work never happens on the UI thread</strong>. <code>internal/ui/renderer.go</code> defines an <code>HTMLRenderer</code> interface and a <code>frameSplitter</code> that splits a frame into two phases: engine work off-thread, then <code>PresentFrame</code> on Fyne's goroutine. A slow layout can therefore delay a frame without freezing the address bar.</p>
+
+  <p>Lifecycle is observable rather than implicit. <code>internal/engine/session/session.go</code> drives a state machine through <code>Navigate</code>, <code>Parsing</code>, <code>Interactive</code>, and <code>FirstPaint</code>, recording each navigation with <code>metrics.Recorder</code>. Those stage timings are the same ones <code>cmd/perf-review</code> prints, so the numbers used for debugging and the numbers used for CI gates come from one instrumented source.</p>
+
+  <div class="callout info"><strong>Where to look first.</strong> The end-to-end trace is easiest to read in <code>cmd/browser/main.go</code>'s <code>loadPageAsyncWithCoordinator</code>, which calls each stage in order. The ten articles indexed by <code>website/docs/architecture-deep-dives.md</code> each cover one stage in more depth than this page can.</div>
+
+  <h2 id="dom">DOM &amp; HTML Parsing</h2>
+
+  <p>A browser's DOM is usually modelled as objects with parent and child pointers. Goosie deliberately does not, because that shape is expensive: an <code>Element</code> struct with attribute maps and slice-based children costs several allocations per node, and a real page is tens of thousands of nodes competing for the 100&nbsp;MB DOM budget in <a href="#memory">Memory Model</a>. The trade-off is recorded in <code>website/docs/adr/0001</code>.</p>
+
+  <h3 id="dom-store">The compact store</h3>
+
+  <p><code>internal/dom/store.go</code> keeps nodes in contiguous <code>[]nodeRecord</code> slices addressed by a <code>NodeID (uint32)</code> handle, with first-child/next-sibling links instead of child slices, packed attribute storage, and a separate text arena. Traversal in <code>internal/dom/store_traverse.go</code> is written to allocate nothing. Handles are validated rather than trusted: a freed node's <code>Kind</code> is zeroed, so a stale <code>NodeID</code> is detectable instead of being a use-after-free equivalent. Tag and attribute names are interned through <code>internal/dom/atom/</code>, which is why the parser, the CSS matcher, and JS attribute lookups can compare small integers instead of strings.</p>
+
+  <p>The cost of that design is ergonomics — every API that looks "object-shaped" is a view over indices — and it is paid in two places: <code>internal/dom</code> itself, and the JS bridge, which cannot hand goja pointers into the store and instead uses its own identity scheme (<a href="#dom-api">DOM APIs in JS</a>).</p>
+
+  <h3 id="dom-parsing">Streaming tree construction</h3>
+
+  <p>Parsing has two entry points, and it matters which one you use. <code>internal/dom/parser.go</code> is a thin wrapper over <code>golang.org/x/net/html</code> that exists so an HTTP body can be parsed without buffering it into a string. The engine path is <code>internal/dom/treebuilder.go</code>, which drives <code>html.Tokenizer</code> by hand and feeds an internal <code>treeBuilder</code>. That control buys three things a plain <code>html.Parse</code> cannot do:</p>
+
+  <ul>
+    <li><strong>Early resource discovery.</strong> <code>discoverResources</code> emits <code>Resource</code> values tagged CSS, script, or image as tags are seen, so the <a href="#networking">coordinator</a> can start fetches mid-document.</li>
+    <li><strong>Script mode classification.</strong> Each <code>&lt;script&gt;</code> is classified classic, async, defer, or module at parse time — the ordering rules are enforced later by <code>cmd/browser</code>, which cannot make the right decision without this information.</li>
+    <li><strong>Structure repair and diagnostics.</strong> <code>ensureHtml</code>/<code>ensureHead</code>/<code>ensureBody</code>, <code>autoStructure</code>, and <code>autoCloseP</code> synthesise the missing tags real pages omit, while <code>detectUnsupportedFeatures</code> records what the document asked for that the engine does not do — the feed for the conformance reports in <a href="#testing">Testing &amp; Conformance</a>.</li>
+  </ul>
+
+  <p>The parsed result is a <code>Document{Store, Root}</code>. It is not what layout consumes: <code>internal/engine/documentloader/dom_bridge.go</code> converts it into the renderer's <code>RenderNode</code> tree. That bridge is the seam that keeps <code>internal/dom</code> free of layout concerns, and it is where the two representations are allowed to disagree.</p>
+
+  <div class="callout warn"><strong>Two document representations coexist.</strong> <code>internal/dom</code> holds the parse-level store; the renderer holds <code>RenderNode</code>; and goja holds a JS object graph. A DOM change is not automatically visible in all three — it must be propagated, which is exactly what the mutation channel in <a href="#js">JavaScript Runtime</a> is for.</div>
+
+  <h2 id="css">CSS Engine</h2>
+
+  <p>CSS is where a from-scratch engine either stays fast or becomes unusable on real sites, and Goosie's answer is to make matching cheap first and correctness second. The package is split from the renderer by an interface: <code>internal/css</code> matches against a <code>css.Element</code> abstraction, so the cascade knows nothing about layout boxes.</p>
+
+  <h3 id="css-parsing">Parsing and the cascade keys</h3>
+
+  <p><code>internal/css/parser.go</code> is a hand-written single-pass tokenizer and parser producing <code>StyleSheet</code>, <code>Rule</code>, and <code>AtRule</code> values defined in <code>stylesheet.go</code>. It is bounded by a <code>ParseConfig</code> carrying <code>MaxBytes</code>, <code>MaxImportDepth</code>, and an <code>Origin</code> — the depth limit is what stops a pair of stylesheets that <code>@import</code> each other from hanging the parse, and the origin is a cascade input, not a label.</p>
+
+  <p>Each rule pre-computes its three cascade keys at parse time: <code>Specificity [3]uint16</code>, <code>SourceOrder</code>, and <code>Origin</code> (user-agent, user, or author). Pre-computation is the point — the cascade then reduces to comparing values that already exist rather than re-analysing selector text per element.</p>
+
+  <h3 id="css-matching">Rightmost-selector bucketing</h3>
+
+  <p>The optimisation that keeps large pages responsive lives in <code>internal/css/selector.go</code>. Selectors are flattened into <code>CompiledSelector</code> slices, and rules are indexed into buckets keyed by their <em>rightmost</em> simple selector: <code>idBucket</code>, <code>classBucket</code>, <code>tagBucket</code>, <code>attrBucket</code>, and <code>universalBucket</code> on <code>CompiledStyleSheet</code>. Because a descendant selector like <code>.card ul li &gt; a</code> can only ever match an <code>a</code>, matching starts from the element being styled and walks a candidate list built from that element's own id, classes, tag, and attributes — ancestor complexity does not multiply the candidate set. A bounded LRU <code>MatchCache</code> in <code>match_cache.go</code>, keyed by <code>ElementKey</code>, absorbs the repetition that survives bucketing.</p>
+
+  <h3 id="css-computed">Computed style and invalidation</h3>
+
+  <p>The renderer-side consumer is <code>StyleManager</code> in <code>internal/renderer/style.go</code>, which caches <code>preparedRule</code>s, resolves pseudo-classes and sibling combinators, applies media rules (including CSS Media Queries Level 4 range syntax, implemented in <code>internal/renderer/media_query.go</code> with the viewport pushed in via <code>SetViewport</code>), merges inline styles, and sorts the survivors by origin &rarr; specificity &rarr; source order. User-agent defaults come from <code>internal/renderer/default_style.go</code> and custom properties from <code>internal/renderer/css_vars.go</code>.</p>
+
+  <p>Computed values are split into <code>InheritedStyle</code> and <code>NonInheritedStyle</code> in <code>internal/css/computed.go</code>, with inherited groups fingerprinted so a subtree that shares an inherited state stores it once, and property names interned. When something changes, <code>StyleInvalidator</code> in <code>internal/css/invalidation.go</code> decides which subtrees must be recomputed rather than re-running the cascade over the document — the input to the reflow roots in <a href="#layout">Layout</a>.</p>
+
+  <div class="callout info"><strong>Conformance detail worth knowing.</strong> <code>internal/css/fuzz_test.go</code> and <code>adversarial_cascade_test.go</code> exist because CSS parsing is the widest attack surface in the engine: it is unvalidated remote text. Parser limits above are security-relevant, not just politeness.</div>
+
+  <h2 id="layout">Layout</h2>
+
+  <p><code>internal/renderer/layout.go</code> exposes the one function everything else waits on: <code>LayoutEngine.ComputeLayout(*RenderNode) *LayoutBox</code>. It builds the tree defined in <code>layout_tree.go</code>, where each <code>LayoutBox</code> carries a <code>Rect</code>, a <code>DisplayType</code> (block, inline, none, flex, grid, inline-block), and the margin/padding/border triple — the box model, concretely. Layout engines for the special display types are held by <code>LayoutEngine</code> and pooled for reuse across builds.</p>
+
+  <table>
+    <thead><tr><th>Sub-engine</th><th>File</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Inline / line layout</td><td><code>inline_layout.go</code></td><td>Line boxes and word wrapping; also the home of anonymous-block splitting.</td></tr>
+      <tr><td>Flexbox</td><td><code>flexbox_layout.go</code></td><td>Resolves flexible sizes with a min-content callback into <code>minContentSize</code>, because <code>flex: 1</code> cannot be resolved without asking children how small they can go.</td></tr>
+      <tr><td>Grid</td><td><code>grid_layout.go</code></td><td>Track sizing and placement.</td></tr>
+      <tr><td>Floats</td><td><code>float_layout.go</code></td><td>Float placement and inline avoidance.</td></tr>
+      <tr><td>Tables</td><td><code>table_cache.go</code></td><td>Auto table sizing, with intrinsic sizes cached rather than recomputed per pass.</td></tr>
+      <tr><td>Text metrics</td><td><code>font_metrics.go</code>, <code>text_shaping.go</code></td><td>Measurement backing every width and line height.</td></tr>
+      <tr><td>Value math</td><td><code>calc.go</code></td><td>Resolves <code>calc()</code> expressions, including overflow handling.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="layout-bii">Block-in-inline: why anonymous boxes appeared</h3>
+
+  <p>The most recent substantive layout work (commit <code>1d494db</code>) was block-in-inline handling, and it is a good illustration of how spec conformance shows up as data structure. CSS does not allow a block-level box to sit inside an inline box, but authors write <code>&lt;span&gt;text &lt;div&gt;block&lt;/div&gt; more text&lt;/span&gt;</code> constantly. The correct rendering splits the inline into pieces: consecutive inline siblings are grouped into <strong>anonymous block boxes</strong> that interleave with the block child, so the inline content before and after the <code>&lt;div&gt;</code> become separate blocks. The split happens in <code>layout.go</code> (around the inline-grouping code) and <code>inline_layout.go</code>, and is pinned by <code>internal/renderer/block_in_inline_test.go</code>. Without it, real pages place content at the wrong vertical offset in a way that is very hard to notice except in a Chromium diff.</p>
+
+  <h3 id="layout-incremental">Incremental reflow and dirty regions</h3>
+
+  <p>Full-tree layout is the simple model, and it is what <code>ComputeLayout</code> still does per build — but a page-wide relayout on every hover would miss the interactivity budget in <a href="#cli-perf-gates">perf-review's gates</a>. <code>internal/renderer/incremental_layout.go</code> adds a <code>ReflowTracker</code> with <code>MarkDirty</code> and <code>FindReflowRoot</code>, so a mutation reflows the smallest ancestor whose geometry can absorb the change, plus an intrinsic-size cache so containers that only depend on min/max content do not re-ask their children. Dirty rectangles from that tracking feed <code>dirty_region.go</code>, which is what lets the painter in the next section rasterize a subregion instead of the viewport.</p>
+
+  <p>The fragment store (<code>fragment_store.go</code>) is the other half of the same idea: layout output is retained so that painting and hit-testing can work against stable records rather than re-walking a tree, matching the retained-display-list decision in <code>website/docs/adr/0002</code>.</p>
+
+  <h2 id="paint">Paint, Raster &amp; Compositing</h2>
+
+  <p>There are two paint contracts in the renderer, and the reason for both is that Goosie has two very different consumers of the same layout result. Understanding which one you are looking at prevents a lot of confusion while reading this package.</p>
+
+  <table>
+    <thead><tr><th>Contract</th><th>File</th><th>Commands</th><th>Consumed by</th></tr></thead>
+    <tbody>
+      <tr><td>Legacy canvas path</td><td><code>display_list.go</code> &rarr; <code>canvas.go</code></td><td><code>PaintCommand</code>: Text, Rect, Image, Link, Border, Button, Input, PushClip/PopClip</td><td><code>CanvasRenderer</code> builds Fyne canvas objects — the interactive UI, where widgets need to exist as Fyne nodes.</td></tr>
+      <tr><td>Backend-neutral path (M5.1)</td><td><code>displaycmd.go</code> &rarr; <code>paint_chunk.go</code> &rarr; <code>incremental_painter.go</code></td><td><code>DisplayCommand</code>: Rect, Border, Text, Image, Push/PopClip, Transform, Opacity, StackingContext</td><td>Rasterized into a backbuffer image by <code>IncrementalPainter.PaintDirty</code>/<code>PaintFull</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The newer contract is the architectural one: <code>DisplayCommand</code> is the stable layout&nbsp;&rarr;&nbsp;paint boundary (ADR <code>website/docs/adr/0002</code>), grouped into <code>PaintChunk</code>s so that a chunk is the unit of invalidation. Raster backends sit behind it in <code>internal/renderer/frame/raster/</code>: a pure-Go CPU backend (<code>cpu_backend.go</code>) and a macOS Core Graphics backend (<code>cg_backend_darwin.go</code>, with its own font registry) selected by build tags. The abstraction is the subject of <code>website/docs/adr/0003</code> and of <code>website/docs/architecture-deep-dives.md</code>'s raster-boundary article — the point being that pixel output must be reachable with no GPU, so <code>cmd/headless</code> and CI goldens can run anywhere.</p>
+
+  <p>Compositing lives in <code>internal/renderer/frame/compositor/</code> as a 256&times;256 tile compositor with frame budgets and a viewport policy, plus glyph and image caches under <code>frame/cache</code>. Tiles are the unit that survives scrolling: a scroll can reuse most of what is already rasterized, which is why <code>scrollcoalescer.go</code> gates scroll presents to frames and coalesces multiple wheel events into one repaint. That pair — tile reuse plus coalescing — is what keeps scroll p50 under the 5&nbsp;ms budget.</p>
+
+  <h3 id="paint-assets">Images and SVG</h3>
+
+  <p>Raster image decoding, an LRU cache, and network loading sit in <code>internal/image</code>: <code>loader.go</code> handles png/jpeg/gif/webp, <code>data:</code> base64 URIs, and HTTP with 429 backoff, modelling async load state (<code>LoadState</code> plus <code>OnLoadCallback</code>) so an unloaded image reserves its box instead of collapsing it. <code>svg.go</code> detects SVG content with <code>IsSVGContent</code> and rasterizes through <code>oksvg</code> + <code>rasterx</code> — again pure Go, no external SVG library. Headless raster output for snapshot and golden tests is produced by <code>internal/renderer/headless.go</code>.</p>
+
+  <h2 id="js">JavaScript Runtime</h2>
+
+  <p>Goosie runs scripts with <code>github.com/dop251/goja</code>, a pure-Go ECMAScript engine. That choice is not incidental: goja needs no cgo, so JS runs in the same process as a CPU-rasterized frame and inside the same static binary as everything else (see <a href="#architecture">Architecture</a>). The price is that Goosie owns everything goja does not provide — the DOM, the window object, events, timers, and the concurrency model around a VM that is explicitly not safe for concurrent use.</p>
+
+  <p><code>internal/js/runtime.go</code> is the host: 3,792 lines of the package's ~13k, and by far the largest single file in the repository. <code>NewRuntime()</code> creates the goja VM, injects <code>polyfillsJS</code> from <code>polyfills.go</code> (a hand-written <code>queueMicrotask</code>, <code>Promise</code>, and timer helpers), then installs the console, window, and document APIs plus a frame scheduler.</p>
+
+  <h3 id="js-concurrency">One owner goroutine, everything else submits</h3>
+
+  <p>A goja VM cannot be driven from several goroutines at once, but a browser has several things that want to: a timer firing, a fetch completing, a user clicking, a script calling <code>document.querySelector</code>. <code>internal/js/session.go</code> resolves this with an ownership model (milestone M8.1): exactly one goroutine owns the VM, and everyone else submits <code>Task</code>s through <code>Submit</code>, <code>SubmitAndWait</code>, or <code>Eval</code> into a bounded 256-entry ring queue. The runtime's <code>enqueueTask</code> hook is how asynchronous completions — timer callbacks, network responses — get back onto the owner goroutine instead of executing wherever they happened to finish.</p>
+
+  <p>Direct execution goes through <code>RunScript</code>, which serialises VM access with a mutex, scans sources for constructs the engine cannot honour such as dynamic <code>import()</code> (<code>runtime_import_scan.go</code>), can interrupt a runaway script using goja's <code>Interrupt</code> via <code>SetMaxTaskDuration</code>, counts long tasks against the W3C 50&nbsp;ms definition, and flushes the polyfill microtask queue after each run.</p>
+
+  <div class="callout warn"><strong>There are two timer systems.</strong> <code>setupTimerAPIs</code> in <code>runtime.go</code> implements <code>setTimeout</code>/<code>setInterval</code> on Go <code>time.AfterFunc</code> and tickers, while a second, independent scheduler exists in <code>eventloop.go</code> whose <code>RunOnce</code> drains one macrotask, then microtasks, then due timers, then pending DOM mutations. When changing timer or queue behaviour, check both — a task queued into the wrong scheduler will run at the wrong time rather than failing.</div>
+
+  <p><code>requestAnimationFrame</code> is real, and it is a separate file for a good reason. <code>framescheduler.go</code> accumulates RAF callbacks until the GUI calls <code>Tick()</code> after presenting a frame. Previously RAF was a synchronous microtask-recursion polyfill, which let a page that re-registered inside its own callback starve the host and freeze the browser; deferring to the frame boundary is what ties animation to actual presentation.</p>
+
+  <h3 id="js-policy">Capability gating and script limits</h3>
+
+  <p>Because scripts are untrusted input, <code>internal/js/policy.go</code> adds a <code>ScriptEnforcer</code> with execution ceilings (<code>MaxSteps</code>, timer and queue caps), a <code>DocumentMode</code> covering no-script and inline-only pages, and per-origin capability gates for network, storage, navigation, clipboard, notifications, and geolocation. <code>fetch</code> is available only when gated on, via <code>HTTPFetcher</code>; <code>window.open</code> honours popup blocking.</p>
+
+  <p>Unsupported platform features are reported rather than silently missing. <code>runtime_pwa_workers.go</code> provides reporting stubs for <code>WebSocket</code>, <code>Worker</code>, and <code>ServiceWorker</code> that emit <code>dom.UnsupportedFeatureKind</code>, the same mechanism the parser's <code>detectUnsupportedFeatures</code> uses (<a href="#dom-parsing">streaming tree construction</a>), so the fallback layer and the conformance audit can both see what a page asked for.</p>
+
+  <h2 id="dom-api">DOM APIs in JS</h2>
+
+  <p>This is the most unusual part of the codebase, and it will confuse anyone expecting Go structs projected into JS. The DOM classes are not Go types — they are JavaScript, written as a large embedded script. <code>setupDocumentAPI</code> in <code>runtime.go</code> installs a ~1,260-line <code>jsDOMScript</code> string that defines <code>Attr</code>, <code>NamedNodeMap</code>, <code>Event</code>, <code>CustomEvent</code>, <code>EventTarget</code>, <code>Node</code>, <code>TextNode</code>, <code>Element</code>, and <code>Document</code> on <code>globalThis</code>. Writing the façade in JS means the semantics are exactly the ones the spec describes — subclassable, iterable, extensible — without a proxying layer in Go getting in the way.</p>
+
+  <p>The consequences of that choice are visible in the API surface: <code>NamedNodeMap</code> is Proxy-backed so it supports index access, named access, and <code>Symbol.iterator</code>; <code>Element</code> exposes <code>classList</code>, <code>dataset</code>, <code>closest</code>, and a <code>style</code> Proxy with <code>setProperty</code>/<code>getPropertyValue</code>; <code>innerHTML</code> assignment round-trips into Go for re-parsing. Commit <code>90d93a2</code> replaced the earlier ad-hoc listener maps with this full <code>EventTarget</code> and <code>NamedNodeMap</code> implementation and expanded <code>Location</code>, adding roughly a thousand lines of tests with it (<code>dom_api_test.go</code>, <code>adversarial_challenge_test.go</code>).</p>
+
+  <h3 id="dom-api-bridge">The bridge: identity attributes and serialization</h3>
+
+  <p>The JS object graph and the Go DOM store are separate, and the bridge between them is an element identity attribute named <code>__goosie_id</code>:</p>
+
+  <div class="flow">
+    <div class="flow-steps">
+      <span class="flow-step blue">populateDocument</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step green">JS calls __querySelectorGo</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step orange">serializeJSDOMToCache</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step purple">Go dom.Parser.QuerySelector</span>
+      <span class="flow-arrow">&rarr;</span>
+      <span class="flow-step cyan">resolve to JS objects</span>
+    </div>
+  </div>
+
+  <p><code>populateDocument</code> walks the parsed <code>*html.Node</code> tree to hydrate <code>document</code>, <code>head</code>, and <code>body</code>. A selector query from JS calls <code>__querySelectorGo</code>/<code>__querySelectorAllGo</code>, which serialize the live JS DOM back to HTML (<code>serializeJSDOMToCache</code>), re-parse it with Go's <code>dom.Parser.QuerySelector(All)</code>, and return <code>__goosie_id</code> values that <code>__findElementByGoosieId</code> resolves to JS objects. Mutations travel the other way: <code>window.__onDOMChanged(kind, &hellip;)</code> reaches <code>__onDOMChangedGo</code>, which produces typed <code>DOMMutation</code> structs in <code>mutation.go</code> and delivers them through <code>SetDOMMutationBatchCallback</code> to the renderer, coalesced on a 16&nbsp;ms <code>MutationCoalescer</code> so a loop of <code>appendChild</code> calls produces one relayout. Structural changes still fall back to a legacy full-serialization callback.</p>
+
+  <div class="callout warn"><strong>Read this before optimising a selector path.</strong> Because every query round-trips through HTML serialization and a Go re-parse, DOM results in JS are snapshots rather than live views on the layout tree. The design chooses correctness-per-query over speed, and it is the known hot spot for script-heavy pages.</div>
+
+  <h3 id="dom-api-events">Events, and what is not wired</h3>
+
+  <p><code>EventTarget.dispatchEvent</code> is pure JS: bubbling up <code>parentNode</code>, <code>once</code> and <code>handleEvent</code> support, <code>stopPropagation</code> and <code>preventDefault</code>. Lifecycle events originate in Go — <code>fireDOMContentLoaded</code> in <code>cmd/browser/main.go</code> dispatches <code>DOMContentLoaded</code> on <code>document</code> after classic and deferred scripts complete, and the documentloader coordinator emits <code>EventDOMContentLoaded</code>/<code>EventLoad</code>. The automation layer synthesizes input by evaluating JS: <code>internal/browsercontrol/engine_context.go</code> calls <code>el.click()</code>, dispatches <code>input</code>/<code>change</code> events with <code>bubbles: true</code>, and fires <code>KeyboardEvent('keydown')</code>.</p>
+
+  <p>Honest gaps, all of which are load-bearing for anyone extending this layer: dispatch has no capture phase; real mouse input from the Fyne shell is not connected to DOM pointer events; <code>getComputedStyle</code> returns inline styles only; <code>getBoundingClientRect</code> is stubbed, so layout is not observable from JS; <code>MutationObserver</code>, <code>IntersectionObserver</code>, and <code>ResizeObserver</code> are stubs. A vestigial Go-side <code>eventListeners</code> map is populated by <code>addEventMethods</code> but never dispatched, and <code>website/docs/contributing-dom-apis.md</code> still references removed <code>dom_handle.go</code>/<code>NodeHandle</code> code — trust the source over that page.</p>
+
+  <p>Window-level APIs are implemented where they are cheap and safe: <code>setupLocationAPI</code> covers <code>href</code>, <code>protocol</code>, <code>host</code> and friends plus <code>reload</code>, <code>setURL</code>, query-parameter helpers and an <code>OnNavigate</code> hook; <code>setupHistoryAPI</code> and origin-scoped <code>localStorage</code>/<code>sessionStorage</code> sit behind a pluggable <code>LocalStorageAdapter</code>, alongside <code>crypto</code> and <code>navigator</code>.</p>
+
+  <h2 id="networking">Networking &amp; Resources</h2>
+
+  <p>A browser engine's network layer is not an HTTP client; it is an HTTP client plus a resource policy, a cache, and a scheduler that has to cooperate with a parser that is still running. Goosie splits those responsibilities between <code>internal/net</code> (mechanism) and <code>internal/engine/documentloader</code> and <code>internal/engine/navigation</code> (policy and ordering).</p>
+
+  <p><code>internal/net/service.go</code> owns the single <code>http.Client</code> — cookie jar, <code>httptrace</code> timing, TLS — and applies the ceilings that keep a hostile server from ending the process: a 100&nbsp;MB <code>MaxBodySize</code> and a decompression-ratio guard against gzip bombs. <code>Fetcher</code> (<code>fetcher.go</code>) wraps it while preserving <code>ResponseMeta</code>, including the CSP header parsed in <code>csp.go</code>, because security policy is decided by the coordinator but carried by the response. A bounded HTTP cache (<code>cache.go</code>), MIME sniffing, downloads, and a <code>SecuritySummary</code> in <code>security.go</code> complete the layer.</p>
+
+  <h3 id="networking-coordinator">The coordinator</h3>
+
+  <p><code>internal/engine/documentloader/coordinator.go</code> is where the pipeline's overlap is actually implemented. Resources discovered by the streaming parser arrive at <code>HandleResource</code> or <code>EnqueueSecondary</code>, get CSP-checked, and are prioritized through <code>priorityFor</code> into a <code>navigation.Priority</code>. Two behaviours matter most:</p>
+
+  <ul>
+    <li><strong>Parser-blocking scripts block.</strong> <code>isBlockingKind</code> identifies the classic, non-async scripts that must pause parsing, which is the difference between a page that works and one whose scripts see a half-built DOM.</li>
+    <li><strong>Load events wait.</strong> <code>HandleDocumentEnd</code> drains pending stylesheet loads before firing lifecycle events, so first paint and <code>load</code> observe a styled document. Font and image discovery during the same stream is what makes the first frame arrive earlier.</li>
+  </ul>
+
+  <p>URL policy sits in <code>internal/engine/navigation</code>: a scheduler with rate limits, origin policy, and — for local files — <code>CheckFileAccess</code> in <code>file_access.go</code>, which allows <code>file://</code> subresources only from a <code>file://</code> page or the initial navigation. That single predicate is the barrier between "open a saved page and its images work" and "a random website can read your disk". <code>data:</code> URLs never hit the network; they are decoded in the image loader (<a href="#paint-assets">Images and SVG</a>).</p>
+
+  <p>Session history is still intentionally simple: a URL stack with <code>GoBack</code>/<code>GoForward</code>/<code>CanGoBack</code> in <code>internal/ui/state.go</code>, rather than a per-document history item model with restore states.</p>
+
+  <h2 id="memory">Memory Model</h2>
+
+  <p>Every stage of the pipeline retains something — DOM nodes, computed styles, layout boxes, display commands, tiles, glyphs, decoded images, scripts — and a renderer that lets each grow freely will exhaust memory on a long page before the user scrolls it. Goosie's answer is a single accounting authority rather than per-component limits scattered through the code: <code>internal/memory/manager.go</code>.</p>
+
+  <p>The manager tracks eleven components (<code>dom</code>, <code>style</code>, <code>layout</code>, <code>display-list</code>, <code>tile</code>, <code>image</code>, <code>glyph</code>, <code>script</code>, <code>network-cache</code>, <code>page-cache</code>, <code>layout-intrinsic-size</code>). Components call <code>UpdateUsage</code> with their current byte total; <code>checkLimitsAndEvict</code> then enforces both the per-component limit and the global one by invoking the <code>Evictor</code> callbacks each subsystem registered with <code>RegisterEvictor</code>, walking them in a fixed order until usage falls back under budget.</p>
+
+  <table>
+    <thead><tr><th>Component</th><th>Budget</th><th>Why this size</th></tr></thead>
+    <tbody>
+      <tr><td><code>dom</code></td><td>100 MB</td><td>Largest single allowance — and the reason the compact store in <a href="#dom-store">DOM &amp; HTML Parsing</a> exists at all.</td></tr>
+      <tr><td><code>style</code>, <code>layout</code>, <code>tile</code>, <code>network-cache</code></td><td>50 MB each</td><td>Style, layout and the compositor tiles are the retained structures that grow with document size.</td></tr>
+      <tr><td><code>image</code></td><td>30 MB</td><td>Decoded bitmaps are the fastest way to blow a budget, hence the LRU in <code>internal/image/cache.go</code>.</td></tr>
+      <tr><td><code>display-list</code>, <code>script</code>, <code>page-cache</code></td><td>20 MB each</td><td>Retained commands and back/forward cache entries.</td></tr>
+      <tr><td><code>glyph</code></td><td>10 MB</td><td>Smallest — a glyph is small and recomputation is cheap.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Those caps are wired in <code>cmd/browser/main.go</code> against a <code>GlobalLimit</code> of 512&nbsp;MB. Note that the per-component numbers already sum to the global limit, so the global ceiling is the real one and the per-component budgets are fairness, not headroom.</p>
+
+  <p>The eviction order is the interesting design decision: <code>network-cache</code> and <code>page-cache</code> go first, then <code>style</code>, <code>glyph</code>, <code>image</code>, <code>tile</code>, <code>display-list</code>, <code>layout-intrinsic-size</code>, and <code>layout</code>, with <code>dom</code> and <code>script</code> last. That ordering is ranked by recomputation cost: throwing away an HTTP cache entry costs a request, dropping a style or glyph cache entry costs CPU, but discarding layout means re-running the engine, and discarding the DOM or script state is user-visible breakage. So pressure is absorbed by the cheapest-to-regain things first.</p>
+
+  <div class="callout info"><strong>Tuning is measured, not guessed.</strong> <code>internal/memory/tuning.go</code> adds <code>EvaluateConfig</code> and <code>AutoTune</code>, which run a supplied workload function against candidate configurations and report statistics, plus <code>WriteHeapProfile</code> and <code>StartCPUProfile</code> helpers. <code>internal/browsercontrol/fake.go</code> and the manager's observable eviction test make the cascade testable without a real page.</div>
+
+  <h2 id="ui">Browser Shell &amp; UI</h2>
+
+  <p><code>internal/ui</code> is the only package allowed to know Fyne exists, and it is thinner than its 15.9k lines suggest because much of that is DevTools panels and their tests. <code>internal/ui/browser.go</code> (2,285 lines) is the shell: a Fyne app using <code>container.DocTabs</code> for tab management (<code>Tab</code>/<code>AsTabItem</code>, <code>CreateTab</code>, <code>OnClosed</code>), with the address bar in <code>address.go</code>, navigation state and the history stack in <code>state.go</code>, keyboard shortcuts, console output, an inspect panel, and screenshot capture each in their own file.</p>
+
+  <p>The rendering boundary is the part that matters for engine work: <code>renderer.go</code> declares an <code>HTMLRenderer</code> interface and the <code>frameSplitter</code> two-phase presenter described in <a href="#pipeline">Rendering Pipeline</a> — engine build off-thread, <code>PresentFrame</code> on the UI thread. The shell receives a renderer from a factory injected at construction, so <code>internal/ui</code> never decides how an engine instance is created, which is what lets the headless build replace it.</p>
+
+  <p>DevTools lives in <code>internal/ui/devtools/</code>, with a <code>dock.go</code> and panels for network, memory, sources, performance, security, storage, accessibility, display list, tile cache, and script queue. Those last three are engine-specific rather than web-standard: being able to look at the retained <code>DisplayCommand</code> list, the compositor's tile states, and the JS task queue is what makes the incremental behaviours debuggable at all. Panel screenshots used in documentation are in <code>screenshots/</code>, and <code>docs/screenshots/</code> holds rendered fixtures (CSS demo, forms, grid, tables, long page) used by the README.</p>
+
+  <h2 id="testing">Testing &amp; Conformance</h2>
+
+  <p>Goosie's testing thesis is that an engine is only correct relative to a real browser, so the suite is built around comparison rather than assertion. Concretely: 291 test files contain roughly 3,000 test and benchmark functions (384 of them benchmarks), and the top-level design in <code>TEST_INFRA.md</code> is a four-tier methodology — category partitioning, boundary values, pairwise combinations, and real-world workload — evaluated against ten named live websites.</p>
+
+  <table>
+    <thead><tr><th>Where</th><th>Files</th><th>Covers</th></tr></thead>
+    <tbody>
+      <tr><td><code>internal/renderer</code> (+ <code>frame/raster</code>, <code>frame/compositor</code>)</td><td>79 (+9)</td><td>Layout algorithms, display lists, borders, box model, regression tests per bug class.</td></tr>
+      <tr><td><code>internal/ui</code> (+ <code>ui/devtools</code>)</td><td>26 (+15)</td><td>Shell behaviour, tabs, panels.</td></tr>
+      <tr><td><code>internal/js</code> / <code>net</code> / <code>dom</code> / <code>css</code></td><td>20 / 14 / 13 / 13</td><td>Runtime and DOM APIs; fetch, cache and CSP; store and treebuilder; parser, cascade and fuzzing.</td></tr>
+      <tr><td><code>internal/engine/*</code></td><td>~20</td><td>Navigation (9), documentloader (7), plus session, metrics, eventloop.</td></tr>
+      <tr><td><code>internal/test_suite/*</code></td><td>&mdash;</td><td>Thematic cross-package suites: <code>integration</code>, <code>a11y</code>, <code>e2e</code>, <code>webapi</code>, <code>security</code>, <code>performance</code>.</td></tr>
+      <tr><td><code>test/e2e</code></td><td>15</td><td>Playwright comparison, live URLs, conformance (behind <code>-tags=e2e</code>).</td></tr>
+      <tr><td><code>cmd/*</code></td><td>8</td><td>CLI option parsing, script queue, mutation coalescing, binary size.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="testing-comparison">Goosie vs Chromium</h3>
+
+  <p>The keystone is <code>CompareGoosieVsBrowser</code> in <code>test/e2e/utils.go</code>. For a fixture it renders the HTML with Goosie's own renderer through <code>testutil.RenderToImage</code>, loads the same document as a <code>file://</code> URL in Playwright-driven Chromium, injects font-normalizing CSS (an <code>-apple-system</code> stack and <code>line-height: 1.2</code> so text differences reflect layout bugs rather than font choice), and pixel-diffs the two PNGs with <code>compareImages</code> — writing a red-highlighted diff image whenever a fixture exceeds its threshold. Sibling helpers cover the other axes: <code>CompareScreenshot</code> for baseline regression, <code>ValidateDOMSnapshot</code> for computed-style JSON, and <code>imagesSettled</code> to wait on <code>&lt;img&gt;</code> loads. Playwright itself starts in <code>test/e2e/main_test.go</code>'s <code>TestMain</code>, with <code>BROWSER=chromium|firefox|webkit</code> to change the reference engine.</p>
+
+  <p><code>TestComprehensiveSuite</code> in <code>test/e2e/suite_test.go</code> globs every <code>testdata/test_*.html</code> fixture — 130 generated files across 15 categories (<code>typography</code>, <code>layout</code>, <code>flexbox</code>, <code>grid</code>, <code>forms</code>, <code>media</code>, <code>tables</code>, <code>css_advanced</code>, <code>edge_cases</code>, and six smaller groups), rebuilt by <code>make generate-test-data</code> — and runs three subtests per fixture: <code>Visual</code>, <code>DOM</code>, and <code>GoosieVsBrowser</code>. The default diff threshold is 0.1%, and categories carry per-float overrides because some things will never match a different font stack: 0.05 for colors and backgrounds, 0.08 for flexbox, 0.15 for typography and border radius, 0.30&ndash;0.45 for media, edge cases and tables, up to 0.35 for general layout, 0.55 for advanced CSS, and 0.80&ndash;0.85 for grid and forms. Treating those as reviewed tolerances rather than failures is what keeps the suite usable as a gate.</p>
+
+  <p>Artifacts land in <code>test/e2e/testdata/</code>: baselines and snapshots in <code>{baselines,snapshots}</code>, and evidence in <code>results/{goosie,browser,diffs_compare,actual,diffs}</code>. Targeted behaviour has focused fixtures too — DOM mutation, HTML5 semantic layout, linked SVG images, and scroll coalescing, each with its own tight threshold (0.01 for the SVG case). Offline goldens sit closer to the engine in <code>internal/renderer/layoutgolden/</code> (with <code>serialize.go</code> and an <code>adversarial_determinism_test.go</code>) and <code>internal/renderer/frame/golden/</code>.</p>
+
+  <div class="callout warn"><strong>Snapshots are evidence, not a checkbox.</strong> <code>UPDATE_SNAPSHOTS=true</code> (or <code>make update-snapshots</code>) re-records baselines, and the repository's own rules in <code>AGENTS.md</code> forbid using it to hide a regression: a baseline change must come from an intentional expected-output change, with the diff artifacts reviewed. For any user-visible change, a Goosie screenshot alone is not verification — the comparison against Chromium is mandatory before the work counts as done.</div>
+
+  <h3 id="testing-live">Live-URL tiers</h3>
+
+  <p>Because synthetic fixtures cannot catch the ways real websites break an engine, <code>test/e2e/live_urls_test.go</code> runs <code>TestLiveURLs</code> against ten sites in four tiers, documented as status in <code>TEST_READY.md</code>. Tier&nbsp;1 is five checks per site — navigation, title, DOM snapshot, a 1280&times;800 PNG raster, and a JavaScript-safety probe; tier&nbsp;2 adds boundary cases, tier&nbsp;3 cross-feature interaction, and tier&nbsp;4 workload sweeps. These need network access and are excluded from the default run: they are compiled only with <code>-tags="e2e online"</code>, i.e. <code>make e2e-online</code>.</p>
+
+  <h3 id="testing-conformance">Element conformance tracking</h3>
+
+  <p><code>HTML_CONFORMANCE.md</code> is generated, not maintained by hand: <code>make html-audit</code> runs <code>cmd/html-audit</code> over <code>internal/conformance/registry.go</code> and <code>audit.go</code>, using MDN's element reference as the source of truth, and currently scores 110 of 132 standard elements supported (83%) with 22 partial and none missing. The workflow it documents is deliberately narrow — pick one element, reproduce with <code>go test ./internal/conformance -run TestElementAudit -v</code>, fix the user-agent defaults in <code>internal/renderer/default_style.go</code>, then verify with <code>TestHTMLConformance</code> in <code>test/e2e/html_conformance_test.go</code>. That last test compares per-element computed style and geometry against Chromium (display, font properties, text alignment and decoration, white-space, margins, box size), scores <code>matched/applicable</code>, and is guarded by a <em>ratcheted</em> baseline in <code>test/e2e/baselines/html_conformance_baseline.json</code> — re-recorded only with <code>HTML_CONFORMANCE_UPDATE=true</code> when the score improves, so conformance can move in one direction.</p>
+
+  <h2 id="cli">Binaries &amp; CLI</h2>
+
+  <p>Seven <code>main</code> packages live under <code>cmd/</code>. Only two are user-facing products; the rest exist so that engine behaviour can be exercised from a shell without launching a window — a direct consequence of the layering above.</p>
+
+  <table>
+    <thead><tr><th>Binary</th><th>Purpose</th><th>Notable flags</th></tr></thead>
+    <tbody>
+      <tr><td><code>cmd/browser</code></td><td>The browser itself: Fyne GUI, plus a headless render mode.</td><td><code>-url</code>, <code>-headless</code>, <code>-screenshot &lt;path&gt;</code>, <code>-private</code>, <code>-devtools</code>, <code>-devtools-tab</code>, <code>-version</code>, and a debug trio <code>-repro</code> / <code>-repro-scrolls</code> / <code>-repro-evaluate</code> that drives a scripted click/scroll/mutate workload and dumps <code>FrameMetrics</code>.</td></tr>
+      <tr><td><code>cmd/headless</code></td><td>Standalone renderer — HTML in, PNG out, no Fyne at all.</td><td><code>-html</code> (or stdin), <code>-output</code> (default <code>output.png</code>), <code>-width</code>/<code>-height</code> (800&times;600), <code>-version</code>. Calls <code>renderer.RenderHTMLToImage</code>.</td></tr>
+      <tr><td><code>cmd/mcp-server</code></td><td>MCP server exposing the engine to AI agents.</td><td><code>--http</code>, <code>--bind</code>, <code>--port</code>, <code>--path</code>, <code>--auth</code>, <code>--auth-token</code>, <code>--name</code>, <code>--log-level</code>.</td></tr>
+      <tr><td><code>cmd/perf-review</code></td><td>In-process profiler over <code>browsercontrol.Service</code>, reporting per-stage timings.</td><td><code>-urls</code>, <code>-iterations</code>, <code>-include-mutations</code>, <code>-include-scroll</code>, <code>-json</code>, <code>-v</code>.</td></tr>
+      <tr><td><code>cmd/test-gen</code></td><td>Generates the synthetic HTML corpus in <code>testdata/</code>.</td><td><code>-output</code></td></tr>
+      <tr><td><code>cmd/screenshot-all</code></td><td>Batch-render a directory of fixtures to images.</td><td><code>-input</code>, <code>-output</code>, <code>-width</code>, <code>-height</code>, <code>-fullpage</code></td></tr>
+      <tr><td><code>cmd/html-audit</code></td><td>Regenerates the element-conformance tracker <code>HTML_CONFORMANCE.md</code>.</td><td>&mdash; (run via <code>make html-audit</code>)</td></tr>
+    </tbody>
+  </table>
+
+  <p><code>cmd/browser</code>'s headless mode is build-tag gated, which surprises people the first time. Passing <code>-headless</code> to a normal build is rejected by <code>cmd/browser/headless_app_disabled.go</code>; the real implementation in <code>headless_app.go</code> is compiled only with <code>-tags headless</code> (<code>make build-headless</code>), and it substitutes Fyne's <code>test.NewApp()</code> driver for a GL window. The reason is that screenshot output must be deterministic — a GPU-backed window on an unknown driver is not.</p>
+
+  <p>Each binary parses flags with the standard library, and the option-parsing code is kept in its own function so behaviour can be tested without executing the program. <code>cmd/perf-review</code> is the clearest example: <code>parseOptions()</code> builds a private <code>flag.NewFlagSet</code> and is covered directly by <code>cmd/perf-review/main_test.go</code>, following the <code>refactor(perf-review): isolate CLI option parsing</code> change.</p>
+
+  <h3 id="cli-perf-gates">What perf-review actually checks</h3>
+
+  <p><code>cmd/perf-review</code> is not just a timer — it encodes the project's interactivity budget. It reports p50/p95/p99 for each pipeline stage and applies "freeze health" thresholds: scroll p50 must stay under 5&nbsp;ms and mutation p95 under 50&nbsp;ms. Those numbers reappear as regression gates in CI (<a href="#ci">CI/CD &amp; Releases</a>), so a layout change that makes scrolling stutter fails a check rather than being noticed by hand.</p>
+
+  <h2 id="mcp">MCP Automation</h2>
+
+  <p>Goosie speaks Model Context Protocol, which means an AI agent can drive the engine the same way a user does — create a context, navigate, take a snapshot, click, type — over stdio or HTTP. This uses the official <code>github.com/modelcontextprotocol/go-sdk</code> and lives entirely in <code>internal/mcpserver</code>: <code>server.go</code> builds the MCP server, registers ten tools and one resource via <code>AddTool</code>, and wires either a stdio or a Streamable HTTP transport. The tool names are declared in <code>tools.go</code>:</p>
+
+  <table>
+    <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>browser_context_create</code> / <code>list</code> / <code>close</code></td><td>Lifecycle of isolated browsing contexts, each with its own session and tab set.</td></tr>
+      <tr><td><code>browser_navigate</code></td><td>Load a URL into a context's active tab.</td></tr>
+      <tr><td><code>browser_snapshot</code></td><td>Structured accessibility/DOM snapshot for programmatic reading.</td></tr>
+      <tr><td><code>browser_screenshot</code></td><td>Rendered frame as an image.</td></tr>
+      <tr><td><code>browser_page_info</code></td><td>Title, URL, and document metadata.</td></tr>
+      <tr><td><code>browser_query</code></td><td>Select nodes from the document.</td></tr>
+      <tr><td><code>browser_click</code> / <code>browser_type</code></td><td>Dispatch synthetic input into the engine.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The important structural decision is that the MCP server never touches <code>internal/ui</code>. It talks to <code>internal/browsercontrol.EngineService</code>, the same UI-free service the GUI-independent tests use, so there is no hidden dependency on a window existing. That is also why <code>cmd/mcp-server</code> can run in CI or inside another application. The boundary is documented in <code>website/docs/mcp-architecture.md</code>, with the wire contract in <code>mcp-protocol-contracts.md</code> and the threat model in <code>mcp-security.md</code>.</p>
+
+  <div class="callout warn"><strong>Serving it is not unauthenticated by default.</strong> <code>cmd/mcp-server</code> applies rate limiting and per-context quotas (<code>internal/mcpserver/quota.go</code>), and <code>--auth --auth-token</code> accepts either a literal token or an <code>env:VAR_NAME</code> indirection for HTTP binds. Prefer stdio, or loopback-only bindings, unless you deliberately pass a token via env.</div>
+
+  <h2 id="config">Profile &amp; Config</h2>
+
+  <p>There is no config file to hand-edit and no environment-variable configuration layer at runtime. Persistent state is a <em>user profile</em>, owned by <code>internal/profile</code>, and it is treated as data the browser mutates rather than as program configuration.</p>
+
+  <p><code>profile.Open()</code> resolves a directory under <code>os.UserConfigDir()/goosie</code> (falling back to <code>./.goosie</code> when that is unavailable) and loads JSON stores for <code>bookmarks.json</code>, <code>history.json</code>, <code>settings.json</code>, <code>session.json</code>, and <code>storage.json</code>. Writes go through a 200&nbsp;ms coalescing background writer that replaces files via atomic temp-file renames, with an in-memory snapshot serving reads — so rapid navigation updates do not hammer the disk and a crash mid-write cannot truncate the profile. Schema changes are handled by a versioned migration path recorded in <code>schema.json</code>; the v0&nbsp;&rarr;&nbsp;v1 migration, for example, converts legacy string-array bookmarks into the current structured form.</p>
+
+  <p>Runtime behaviour that users do change lives in <code>settings.json</code> via <code>internal/profile/settings.go</code>: <code>homepage</code>, <code>default_search_engine</code>, <code>enable_javascript</code>, <code>enable_images</code>, and DevTools state, with <code>Export</code>/<code>Import</code> for portable JSON. Passing <code>-private</code> keeps all of it in memory, which is why private mode is threaded through the profile API rather than implemented as a "delete on exit" sweep.</p>
+
+  <p>Two other configuration facts worth knowing up front. The default user agent is a Chrome/120 string set in <code>internal/net/service.go</code>, overridable through <code>ServiceOptions.UserAgent</code>; the image loader deliberately identifies itself as <code>goosie/1.0 (...; like Gecko)</code> instead (<code>internal/image/loader.go</code>), because some hosts reject unknown UAs for images but not for documents. Memory budgets are not configurable either — they are hardcoded in <code>cmd/browser/main.go</code> as a 512&nbsp;MB global with per-component caps, explained in <a href="#memory">Memory Model</a>.</p>
+
+  <div class="callout info"><strong>Environment variables are test-only.</strong> <code>UPDATE_SNAPSHOTS</code>, <code>GOOSIE_SCREENSHOT_DIR</code>, <code>HTML_AUDIT_WRITE</code>, and <code>HEADLESS=true</code> influence generated artifacts and suites, not engine behaviour. See <a href="#testing">Testing &amp; Conformance</a> before reaching for them — <code>UPDATE_SNAPSHOTS</code> in particular is treated as a reviewed change, not a fix.</div>
+
+  <h2 id="structure">Project Structure</h2>
+
+  <p>The tree below is annotated with approximate line counts so you can calibrate where the mass is. Two numbers explain a lot: <code>internal/renderer</code> is roughly a third of the codebase, and <code>internal/js</code> plus <code>internal/dom</code> together approach the entire UI layer — the engine and its scriptable document model are the project, and the chrome around them is comparatively thin.</p>
+
+  <div class="file-tree">
+<span class="dir">goosie/</span>                              <span class="comment"># module github.com/vyquocvu/goosie &mdash; Go 1.25</span>
+├── <span class="dir">cmd/</span>                               <span class="comment"># seven main packages, thin argument handling only</span>
+│   ├── <span class="dir">browser/</span>                       <span class="comment"># GUI + headless browser; composition root</span>
+│   │   ├── <span class="file">main.go</span>                    <span class="comment"># flags, profile, session, net, memory, RendererFactory</span>
+│   │   ├── <span class="file">headless_app.go</span>            <span class="comment"># -tags headless &rarr; Fyne test.NewApp() driver</span>
+│   │   └── <span class="file">headless_app_disabled.go</span>   <span class="comment"># default build: -headless errors out</span>
+│   ├── <span class="dir">headless/</span>                      <span class="comment"># HTML &rarr; PNG, no Fyne (goosie-cli)</span>
+│   ├── <span class="dir">mcp-server/</span>                    <span class="comment"># MCP stdio / HTTP server</span>
+│   ├── <span class="dir">perf-review/</span>                   <span class="comment"># stage timings + freeze-health gates</span>
+│   ├── <span class="dir">test-gen/</span>                      <span class="comment"># synthetic testdata corpus generator</span>
+│   ├── <span class="dir">screenshot-all/</span>                <span class="comment"># batch fixture rendering</span>
+│   └── <span class="dir">html-audit/</span>                    <span class="comment"># regenerates HTML_CONFORMANCE.md</span>
+├── <span class="dir">internal/</span>
+│   ├── <span class="dir">dom/</span>            <span class="comment">19 files, ~10.0k  # index-based NodeID store, streaming treebuilder, atom interning</span>
+│   ├── <span class="dir">css/</span>            <span class="comment">21 files, ~8.1k   # parser, selector compilation, cascade, invalidation.go</span>
+│   ├── <span class="dir">renderer/</span>       <span class="comment">118 files, ~47.5k # layout, fragments, display list, paint, dirty regions</span>
+│   │   ├── <span class="dir">frame/</span>                        <span class="comment"># backend-neutral frames, CPU + CoreGraphics raster, tile compositor</span>
+│   │   └── <span class="dir">layoutgolden/</span>                 <span class="comment"># layout golden fixtures</span>
+│   ├── <span class="dir">engine/</span>         <span class="comment">~15.7k total</span>
+│   │   ├── <span class="dir">documentloader/</span>               <span class="comment"># resource coordinator: CSP gate, URL resolve, ordered fetch</span>
+│   │   ├── <span class="dir">navigation/</span>                   <span class="comment"># scheduler, rate limits, origin/file policy</span>
+│   │   ├── <span class="dir">session/</span>                      <span class="comment"># document lifecycle state machine</span>
+│   │   ├── <span class="dir">eventloop/</span>                    <span class="comment"># task + timer queue</span>
+│   │   ├── <span class="dir">metrics/</span>                      <span class="comment"># pipeline instrumentation</span>
+│   │   ├── <span class="dir">message/</span> <span class="dir">renderer/</span>           <span class="comment"># IPC and child-process isolation prototype</span>
+│   │   └── <span class="dir">testpages/</span>                    <span class="comment"># in-repo pages used by tests</span>
+│   ├── <span class="dir">js/</span>             <span class="comment">29 files, ~13.1k  # goja runtime, DOM bridge, event dispatch, capability gating</span>
+│   ├── <span class="dir">net/</span>            <span class="comment">24 files, ~7.0k   # streaming fetch, disk+LRU cache, cookies, CSP, downloads</span>
+│   ├── <span class="dir">ui/</span>             <span class="comment">43 files, ~15.9k  # Fyne chrome, tabs, DevTools panels &mdash; the only Fyne consumer</span>
+│   ├── <span class="dir">profile/</span>        <span class="comment">12 files, ~2.3k   # bookmarks/history/settings/session/storage, migrations</span>
+│   ├── <span class="dir">browsercontrol/</span> <span class="comment">9 files, ~3.7k    # UI-free Service/Context automation surface</span>
+│   ├── <span class="dir">mcpserver/</span>      <span class="comment">14 files, ~4.9k   # MCP tools, transports, quotas, hardening</span>
+│   ├── <span class="dir">image/</span>          <span class="comment">8 files, ~1.3k    # decoding, SVG via oksvg/rasterx, image cache</span>
+│   ├── <span class="dir">memory/</span>         <span class="comment">5 files, ~1.1k    # 512MB budget, per-component limits, Evictor cascade</span>
+│   ├── <span class="dir">conformance/</span>    <span class="comment">3 files, 0.7k     # element-support audit feeding HTML_CONFORMANCE.md</span>
+│   ├── <span class="dir">testutil/</span>       <span class="comment">3 files, 0.4k     # shared test helpers</span>
+│   ├── <span class="dir">test_suite/</span>                      <span class="comment"># a11y &middot; e2e &middot; integration &middot; performance &middot; security &middot; webapi</span>
+│   └── <span class="dir">version/</span>        <span class="comment">1 file            # Version/Commit/BuildTime, set by ldflags</span>
+├── <span class="dir">test/</span>
+│   ├── <span class="dir">e2e/</span>                             <span class="comment"># -tags e2e suites, Chromium comparison, results in testdata/</span>
+│   └── <span class="dir">mcp-screenshots/</span>                 <span class="comment"># MCP-driven screenshot artifacts</span>
+├── <span class="dir">website/</span>                             <span class="comment"># Docusaurus 3 docs site &rarr; GitHub Pages</span>
+│   └── <span class="dir">docs/</span>                            <span class="comment"># 13 pages + adr/ &mdash; architecture, memory model, MCP, web platform</span>
+├── <span class="dir">examples/</span>                            <span class="comment"># runnable demos: dom_api_demo, console_demo, grid_layout.html&hellip;</span>
+├── <span class="dir">scripts/</span>                             <span class="comment"># bench.sh, bench-ci.sh (benchstat gate), render_screenshots.js</span>
+├── <span class="dir">docs/screenshots/</span>                    <span class="comment"># five rendered demos used by README</span>
+├── <span class="dir">testdata/</span>                            <span class="comment"># generated corpus + rendered results (make clean removes it)</span>
+├── <span class="file">Makefile</span>                            <span class="comment"># build matrix, test/e2e, snapshot and audit targets</span>
+├── <span class="file">README.md</span> <span class="file">PROJECT.md</span>                <span class="comment"># mission, pipeline, current phase and milestones</span>
+├── <span class="file">HTML_CONFORMANCE.md</span>                 <span class="comment"># generated 110/132 element tracker + fix-one workflow</span>
+├── <span class="file">TEST_INFRA.md</span> <span class="file">TEST_READY.md</span>         <span class="comment"># four-tier test design; live-URL suite status and commands</span>
+└── <span class="file">AGENTS.md</span> <span class="file">CLAUDE.md</span>                 <span class="comment"># GitNexus impact-analysis and visual-verification rules</span>
+</div>
+
+  <div class="callout warn"><strong>The stray <code>browser/</code> entry at repo root is a build artifact</strong>, not a source directory — a ~46&nbsp;MB compiled binary. All browser code lives in <code>cmd/browser</code>, <code>internal/ui</code>, and <code>internal/browsercontrol</code>. <code>make clean</code> removes it along with <code>bin/</code> and <code>testdata/</code>.</div>
+
+  <h2 id="commands">Development Commands</h2>
+
+  <p>Everything goes through the <code>Makefile</code>; the only thing you need to know before the table below is that <strong><code>make test</code> wipes and regenerates its own fixtures</strong>. The <code>test</code> target depends on <code>clean</code> and <code>generate-test-data</code>, so it deletes <code>bin/</code> and <code>testdata/</code>, rebuilds the corpus with <code>cmd/test-gen</code>, and then runs unit and E2E suites against that known corpus. It is slow on purpose — a stale fixture is worse than a ten-second rebuild.</p>
+
+  <pre><code># daily loop
+make build                       # &rarr; bin/goosie (Fyne GUI browser)
+make test                        # clean + generate-test-data + unit + e2e
+go test ./internal/renderer -run TestFlexbox   # fast, targeted iteration
+
+# first checkout, before any e2e run
+make install-playwright          # playwright-go install --with-deps
+make generate-test-data          # go run ./cmd/test-gen -output testdata</code></pre>
+
+  <table>
+    <thead><tr><th>Target</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><code>make build</code></td><td><code>go build -ldflags "-s -w"</code> of <code>cmd/browser</code> &rarr; <code>bin/goosie</code>, stamping <code>Version</code>/<code>Commit</code>/<code>BuildTime</code> into <code>internal/version</code>.</td></tr>
+      <tr><td><code>make build-headless</code></td><td>Same browser with <code>-tags headless</code>, enabling deterministic screenshot rendering via Fyne's test driver.</td></tr>
+      <tr><td><code>make build-headless-cli</code></td><td><code>cmd/headless</code> &rarr; <code>bin/goosie-cli</code>, the standalone HTML&nbsp;&rarr;&nbsp;PNG renderer.</td></tr>
+      <tr><td><code>make build-small</code> / <code>-small-upx</code></td><td>Trimpath size build; the optional UPX step is deliberately separate because compression can slow startup and trip antivirus scanners.</td></tr>
+      <tr><td><code>make build-reproducible</code></td><td><code>CGO_ENABLED=0 GOOS=linux GOARCH=amd64</code> with <code>-buildid=</code> and a fixed build time, for byte-reproducible release artifacts.</td></tr>
+      <tr><td><code>make test</code></td><td><code>clean</code> + <code>generate-test-data</code>, then <code>go test ./internal/... ./cmd/...</code> and <code>go test -tags=e2e ./test/e2e</code>.</td></tr>
+      <tr><td><code>make e2e-online</code></td><td>Live-network E2E against real websites: <code>-tags="e2e online"</code>. Requires internet and is skipped by default.</td></tr>
+      <tr><td><code>make generate-test-data</code></td><td>Regenerate <code>testdata/test_NNN_*.html</code> fixtures with <code>cmd/test-gen</code>.</td></tr>
+      <tr><td><code>make screenshots</code></td><td><code>HEADLESS=true go run ./cmd/screenshot-all</code> over the fixture corpus &rarr; <code>testdata/screenshots/</code>.</td></tr>
+      <tr><td><code>make smoke-test</code></td><td>Builds, asserts <code>-version</code> reports a commit, then pipes a document through <code>cmd/headless</code> and checks PNG comes back.</td></tr>
+      <tr><td><code>make update-snapshots</code></td><td><code>UPDATE_SNAPSHOTS=true</code> e2e run. Baseline changes require reviewing the resulting diff artifacts.</td></tr>
+      <tr><td><code>make html-audit</code></td><td>Re-run <code>cmd/html-audit</code> and rewrite <code>HTML_CONFORMANCE.md</code>.</td></tr>
+      <tr><td><code>make install-playwright</code></td><td>Install Chromium for the Playwright comparison harness.</td></tr>
+      <tr><td><code>make clean</code></td><td>Remove <code>bin/</code>, <code>testdata/</code>, <code>screenshot.png</code>, and <code>go clean</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <p>For UI or rendering changes, the repo's own instructions in <code>AGENTS.md</code> make comparison against a real browser mandatory, not optional:</p>
+
+  <pre><code>make generate-test-data
+go test -tags=e2e ./test/e2e -run TestComprehensiveSuite</code></pre>
+
+  <p>That produces Goosie, Chromium, and diff images under <code>test/e2e/testdata/results/</code>, and any diff exceeding the fixture's threshold is expected to be fixed or explicitly documented as an accepted limitation. How the comparison harness is built is covered in <a href="#testing">Testing &amp; Conformance</a>.</p>
+
+  <h2 id="ci">CI/CD &amp; Releases</h2>
+
+  <p>Six GitHub Actions workflows in <code>.github/workflows/</code> cover build, visual goldens, performance, security, and releases. There is no Dockerfile — the engine is a static Go binary, so packaging is per-platform archives rather than images.</p>
+
+  <table>
+    <thead><tr><th>Workflow</th><th>Trigger</th><th>What it guards</th></tr></thead>
+    <tbody>
+      <tr><td><code>build.yml</code></td><td>Push / PR</td><td><code>go build ./...</code> on ubuntu after installing <code>libgl1-mesa-dev</code> and <code>xorg-dev</code> &mdash; the Fyne/OpenGL C dependencies that otherwise produce confusing link errors.</td></tr>
+      <tr><td><code>golden.yml</code></td><td>Path-filtered</td><td>Golden-image tests, run only when the paths that affect rendering change.</td></tr>
+      <tr><td><code>performance.yml</code></td><td>PR</td><td>Pipeline benchmarks via <code>scripts/bench-ci.sh</code>, which diffs <code>benchstat</code> output and exits 0/1/2 to gate regressions.</td></tr>
+      <tr><td><code>nightly-bench.yml</code></td><td>Cron 06:00 UTC</td><td>Nightly <code>scripts/bench.sh</code> run, catching slow drift a single PR cannot see.</td></tr>
+      <tr><td><code>security.yml</code></td><td>Schedule / push</td><td>Static and dependency checks; relevant because the engine parses hostile input and exposes an agent-facing server.</td></tr>
+      <tr><td><code>release.yml</code></td><td>Tag <code>v*</code></td><td>Matrix build for darwin arm64/amd64, linux amd64/arm64, windows amd64; runs <code>go test -short</code> then packages.</td></tr>
+    </tbody>
+  </table>
+
+  <p>The performance workflow is the one most likely to reject a reasonable-looking change, and it is tied to the same budgets <code>cmd/perf-review</code> enforces locally (scroll p50 &lt;&nbsp;5&nbsp;ms, mutation p95 &lt;&nbsp;50&nbsp;ms). If you touch layout invalidation or the display list, run <code>cmd/perf-review</code> before opening the PR — see <a href="#cli-perf-gates">What perf-review actually checks</a>.</p>
+
+  <hr style="margin-top: 48px; border-color: var(--border);">
+  <p style="text-align: center; color: var(--text-subtle); font-size: 12px; margin-top: 24px;">
+    Goosie &mdash; Generated from codebase analysis on 2026-08-29
+  </p>
+
+</main>
+
+<script>
+function toggleTheme() {
+  var html = document.documentElement;
+  var isDark = html.classList.toggle('dark');
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  updateToggleButton(isDark);
+}
+function updateToggleButton(isDark) {
+  document.getElementById('themeIcon').innerHTML = isDark ? '&#9788;' : '&#9790;';
+  document.getElementById('themeLabel').textContent = isDark ? 'Light mode' : 'Dark mode';
+}
+(function() {
+  var saved = localStorage.getItem('theme');
+  var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var isDark = saved === 'dark' || (!saved && prefersDark);
+  if (isDark) document.documentElement.classList.add('dark');
+  document.addEventListener('DOMContentLoaded', function() { updateToggleButton(isDark); });
+})();
+</script>
+</body>
+</html>

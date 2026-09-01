@@ -26,6 +26,8 @@ const (
 	PaintInput
 	// PaintTextarea represents a native textarea paint command
 	PaintTextarea
+	// PaintBackgroundImage represents a background image paint command
+	PaintBackgroundImage
 	// PushClip represents a command to start a clipping region
 	PushClip
 	// PopClip represents a command to end a clipping region
@@ -35,16 +37,17 @@ const (
 // commandNames maps PaintCommandType values to human-readable labels for
 // debugging and display list inspection.
 var commandNames = map[PaintCommandType]string{
-	PaintText:     "Text",
-	PaintRect:     "Rect",
-	PaintImage:    "Image",
-	PaintLink:     "Link",
-	PaintBorder:   "Border",
-	PaintButton:   "Button",
-	PaintInput:    "Input",
-	PaintTextarea: "Textarea",
-	PushClip:      "PushClip",
-	PopClip:       "PopClip",
+	PaintText:            "Text",
+	PaintRect:            "Rect",
+	PaintImage:           "Image",
+	PaintLink:            "Link",
+	PaintBorder:          "Border",
+	PaintButton:          "Button",
+	PaintInput:           "Input",
+	PaintTextarea:        "Textarea",
+	PaintBackgroundImage: "BackgroundImage",
+	PushClip:             "PushClip",
+	PopClip:              "PopClip",
 }
 
 // String returns a human-readable label for the paint command type.
@@ -327,6 +330,21 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 		}
 	}
 
+	// Paint background image if present (drawn after background color, before borders and content)
+	if !isHidden && renderNode.Type == NodeTypeElement && (layoutBox.BackgroundImage != "" || renderNode.BackgroundImageData != nil || (renderNode.ComputedStyle != nil && renderNode.ComputedStyle.BackgroundImage != "")) {
+		if renderNode.TagName != "button" {
+			bgBox := layoutBox.Box
+			// If this is the body or html tag, ensure it covers at least the layout box bounds
+			cmd := &PaintCommand{
+				Type:   PaintBackgroundImage,
+				NodeID: layoutBox.NodeID,
+				Node:   renderNode,
+				Box:    bgBox,
+			}
+			displayList.AddCommand(cmd)
+		}
+	}
+
 	// Add border paint command if the element has borders (skip if hidden)
 	if !isHidden {
 		dlb.addBorderCommand(layoutBox, renderNode, displayList)
@@ -346,7 +364,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	// (skip rendering text if element is hidden)
 	if !isHidden && len(layoutBox.LineBoxes) > 0 {
 		for _, lineBox := range layoutBox.LineBoxes {
-			// Coalesce inline text fragments with the same NodeID per line
+			// Coalesce contiguous inline text fragments with the same NodeID per line
 			type textAccum struct {
 				node      *RenderNode
 				text      strings.Builder
@@ -358,11 +376,59 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 				underline bool
 				strike    bool
 			}
-			seen := make(map[int64]*textAccum)
-			order := make([]int64, 0) // preserve insertion order
+
+			var currentAccum *textAccum
+			isFirstInLine := true
+
+			flushAccum := func(isLastInLine bool) {
+				if currentAccum == nil {
+					return
+				}
+				rawText := currentAccum.text.String()
+				if strings.TrimSpace(rawText) != "" {
+					text := rawText
+					if isFirstInLine {
+						text = strings.TrimLeft(text, " ")
+					}
+					if isLastInLine {
+						text = strings.TrimRight(text, " ")
+					}
+					if text != "" {
+						if linkNode, href, ok := dlb.linkAncestor(currentAccum.node); ok {
+							cmd := &PaintCommand{
+								Type:     PaintLink,
+								NodeID:   linkNode.ID,
+								Node:     linkNode,
+								Box:      currentAccum.box,
+								LinkURL:  href,
+								LinkText: text,
+							}
+							displayList.AddCommand(cmd)
+						} else {
+							cmd := &PaintCommand{
+								Type:          PaintText,
+								NodeID:        currentAccum.node.ID,
+								Node:          currentAccum.node,
+								Box:           currentAccum.box,
+								Text:          text,
+								FontSize:      currentAccum.fontSize,
+								Color:         currentAccum.color,
+								Bold:          currentAccum.bold,
+								Italic:        currentAccum.italic,
+								Underline:     currentAccum.underline,
+								Strikethrough: currentAccum.strike,
+							}
+							displayList.AddCommand(cmd)
+						}
+						isFirstInLine = false
+					}
+				}
+				currentAccum = nil
+			}
 
 			for _, inlineBox := range lineBox.InlineBoxes {
 				if !inlineBox.IsText {
+					flushAccum(false)
 					inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]
 					if inlineExists {
 						// Create a temporary layout box with the absolute coordinates of the inline box
@@ -400,15 +466,20 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 					}
 					continue
 				}
+
 				inlineRenderNode, inlineExists := renderMap[inlineBox.NodeID]
 				if !inlineExists {
 					continue
 				}
 
-				accum, exists := seen[inlineBox.NodeID]
-				if !exists {
+				if currentAccum != nil && currentAccum.node.ID == inlineBox.NodeID {
+					// Extend width to include this fragment on the same line
+					currentAccum.box.Width = (inlineBox.X + inlineBox.Width) - (currentAccum.box.X - lineBox.X)
+					currentAccum.text.WriteString(inlineBox.Text)
+				} else {
+					flushAccum(false)
+
 					style := dlb.fontMetrics.GetTextStyleFromNode(inlineRenderNode)
-					// Get font size from computed style (prefer this over tag heuristic)
 					fontSize := dlb.defaultFontSize
 					var textColor color.Color
 					if inlineRenderNode.ComputedStyle != nil && inlineRenderNode.ComputedStyle.FontSize > 0 {
@@ -422,7 +493,8 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 							fontSize = dlb.fontMetrics.GetFontSize(inlineRenderNode.Parent.TagName)
 						}
 					}
-					accum = &textAccum{
+
+					currentAccum = &textAccum{
 						node:      inlineRenderNode,
 						box:       Rect{X: lineBox.X + inlineBox.X, Y: lineBox.Y + inlineBox.Y, Width: inlineBox.Width, Height: inlineBox.Height},
 						fontSize:  fontSize,
@@ -432,58 +504,11 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 						underline: inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "underline"),
 						strike:    inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "line-through"),
 					}
-					seen[inlineBox.NodeID] = accum
-					order = append(order, inlineBox.NodeID)
-				} else {
-					// Extend width to include this fragment on the same line
-					accum.box.Width = (inlineBox.X + inlineBox.Width) - (accum.box.X - lineBox.X)
+					currentAccum.text.WriteString(inlineBox.Text)
 				}
-				accum.text.WriteString(inlineBox.Text)
 			}
 
-			for idx, nodeID := range order {
-				accum := seen[nodeID]
-				rawText := accum.text.String()
-				if strings.TrimSpace(rawText) == "" {
-					continue
-				}
-				text := rawText
-				if idx == 0 {
-					text = strings.TrimLeft(text, " ")
-				}
-				if idx == len(order)-1 {
-					text = strings.TrimRight(text, " ")
-				}
-				if text == "" {
-					continue
-				}
-				if linkNode, href, ok := dlb.linkAncestor(accum.node); ok {
-					cmd := &PaintCommand{
-						Type:     PaintLink,
-						NodeID:   linkNode.ID,
-						Node:     linkNode,
-						Box:      accum.box,
-						LinkURL:  href,
-						LinkText: text,
-					}
-					displayList.AddCommand(cmd)
-					continue
-				}
-				cmd := &PaintCommand{
-					Type:          PaintText,
-					NodeID:        nodeID,
-					Node:          accum.node,
-					Box:           accum.box,
-					Text:          text,
-					FontSize:      accum.fontSize,
-					Color:         accum.color,
-					Bold:          accum.bold,
-					Italic:        accum.italic,
-					Underline:     accum.underline,
-					Strikethrough: accum.strike,
-				}
-				displayList.AddCommand(cmd)
-			}
+			flushAccum(true)
 		}
 	} else if !isHidden {
 		// No inline content - generate paint command based on node type

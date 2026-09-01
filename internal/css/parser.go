@@ -520,8 +520,8 @@ func (p *Parser) parseDeclarations() []Declaration {
 		}
 
 		// M3.1: Intern property name and classify as hot/cold
-		propAtom := internPropertyName(property)
-		isHot := isHotProperty(property)
+		propAtom := InternPropertyName(property)
+		isHot := IsHotProperty(property)
 
 		declarations = append(declarations, Declaration{
 			Property:     property,
@@ -604,15 +604,6 @@ func (p *Parser) consumeIdentifier() string {
 		}
 	}
 	return result
-}
-
-func (p *Parser) consumeUntil(stopChar byte) string {
-	var result string
-	for p.pos < len(p.input) && p.peek() != stopChar {
-		result += string(p.input[p.pos])
-		p.pos++
-	}
-	return strings.TrimSpace(result)
 }
 
 func (p *Parser) consumeUntilChar(stopChar byte) string {

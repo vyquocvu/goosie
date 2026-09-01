@@ -20,7 +20,7 @@ type Options struct {
 
 const CurrentSchemaVersion = 1
 
-type schemaConfig struct {
+type SchemaConfig struct {
 	Version int `json:"version"`
 }
 
@@ -412,7 +412,7 @@ func (p *Profile) runMigrations() error {
 	} else if err != nil {
 		return fmt.Errorf("read schema file: %w", err)
 	} else {
-		var cfg schemaConfig
+		var cfg SchemaConfig
 		if err := json.Unmarshal(schemaData, &cfg); err != nil {
 			// If schema.json is corrupt, back it up and assume version 0
 			_ = os.Rename(schemaPath, schemaPath+".corrupt")
@@ -441,7 +441,7 @@ func (p *Profile) runMigrations() error {
 }
 
 func (p *Profile) writeSchemaVersion(version int) error {
-	cfg := schemaConfig{Version: version}
+	cfg := SchemaConfig{Version: version}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err

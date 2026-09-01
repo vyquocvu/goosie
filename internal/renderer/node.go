@@ -35,18 +35,25 @@ type RenderNode struct {
 	Parent        *RenderNode       // Parent node
 	ComputedStyle *Style
 	Box           *Box
-	ImageData     *image.ImageData // For `<img>` elements
+	ImageData           *image.ImageData // For `<img>` elements
+	BackgroundImageData *image.ImageData // For CSS background-image
 }
 
 // Style represents computed styles for a node (placeholder for future CSS support)
 type Style struct {
-	Display         string // "block", "inline", "none", etc.
-	Visibility      string // "visible", "hidden", "collapse"
-	FontSize        float32
-	FontWeight      string
-	Color           color.Color
-	BackgroundColor color.Color
-	Width           string
+	Display              string // "block", "inline", "none", etc.
+	Visibility           string // "visible", "hidden", "collapse"
+	FontSize             float32
+	FontWeight           string
+	Color                color.Color
+	BackgroundColor      color.Color
+	BackgroundImage      string // "url(...)" or "none"
+	BackgroundRepeat     string // "repeat", "no-repeat", "repeat-x", "repeat-y"
+	BackgroundPosition   string // "top left", "top center", "center", etc.
+	BackgroundSize       string // "auto", "cover", "contain", or length
+	BackgroundAttachment string // "scroll", "fixed"
+	BackgroundImageData  *image.ImageData
+	Width                string
 	Height          string
 	FontFamily      string
 	Opacity         float32
@@ -310,8 +317,9 @@ func (n *RenderNode) Clone() *RenderNode {
 		TagName:   n.TagName,
 		Text:      n.Text,
 		Attrs:     make(map[string]string),
-		Styles:    make(map[string]string),
-		ImageData: n.ImageData,
+		Styles:              make(map[string]string),
+		ImageData:           n.ImageData,
+		BackgroundImageData: n.BackgroundImageData,
 	}
 
 	for k, v := range n.Attrs {

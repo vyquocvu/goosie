@@ -4,14 +4,14 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'internal/renderer/frame/golden/**'
-      - 'internal/renderer/layoutgolden/**'
+      - 'test/internal/renderer/frame/golden/**'
+      - 'test/internal/renderer/layoutgolden/**'
       - '.github/workflows/golden.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'internal/renderer/frame/golden/**'
-      - 'internal/renderer/layoutgolden/**'
+      - 'test/internal/renderer/frame/golden/**'
+      - 'test/internal/renderer/layoutgolden/**'
       - '.github/workflows/golden.yml'
 
 jobs:
@@ -35,26 +35,26 @@ jobs:
     - name: Verify golden images match
       run: |
         echo "Running golden image tests against committed reference images..."
-        go test -v -count=1 ./internal/renderer/frame/golden/ -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
+        go test -v -count=1 ./test/internal/renderer/frame/golden/ -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
         echo "All golden images match."
 
     - name: Run golden benchmarks
       run: |
-        go test -run=^$ -bench=BenchmarkGolden -benchmem -benchtime=100ms ./internal/renderer/frame/golden/
+        go test -run=^$ -bench=BenchmarkGolden -benchmem -benchtime=100ms ./test/internal/renderer/frame/golden/
 
     - name: Race detector (golden package)
-      run: go test -race -count=1 -short ./internal/renderer/frame/golden/
+      run: go test -race -count=1 -short ./test/internal/renderer/frame/golden/
 
     - name: Verify golden tests detect regressions
       run: |
         echo "Verifying golden tests fail on deliberate mismatch..."
-        go test -v -count=1 ./internal/renderer/frame/golden/ -run TestGoldenMismatchDetection
+        go test -v -count=1 ./test/internal/renderer/frame/golden/ -run TestGoldenMismatchDetection
         echo "Mismatch detection verified."
 
     - name: Verify layout golden tests match
       run: |
         echo "Running layout golden tests against committed reference snapshots..."
-        go test -v -count=1 ./internal/renderer/layoutgolden/
+        go test -v -count=1 ./test/internal/renderer/layoutgolden/
         echo "Layout golden tests pass."
 
     - name: Verify layout golden determinism
@@ -62,7 +62,7 @@ jobs:
         # Determinism guard: serializing the same fixture twice must
         # produce byte-identical output. This catches accidental map
         # iteration order or counter drift in the layout engine.
-        go test -v -count=1 ./internal/renderer/layoutgolden/ -run TestGoldenLayoutDeterminism
+        go test -v -count=1 ./test/internal/renderer/layoutgolden/ -run TestGoldenLayoutDeterminism
 
     - name: Upload golden artifacts on failure
       if: failure()
@@ -70,6 +70,6 @@ jobs:
       with:
         name: golden-artifacts-${{ github.run_id }}
         path: |
-          internal/renderer/frame/golden/testdata/golden-update/
-          internal/renderer/layoutgolden/testdata/golden-layout-update/
+          test/internal/renderer/frame/golden/testdata/golden-update/
+          test/internal/renderer/layoutgolden/testdata/golden-layout-update/
         retention-days: 5

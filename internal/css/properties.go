@@ -110,8 +110,8 @@ var hotProperties = map[string]bool{
 	"empty-cells":  true,
 }
 
-// isHotProperty returns true if the property is in the hot set
-func isHotProperty(property string) bool {
+// IsHotProperty returns true if the property is in the hot set
+func IsHotProperty(property string) bool {
 	return hotProperties[property]
 }
 
@@ -130,18 +130,18 @@ func init() {
 	}
 }
 
-// internPropertyName interns a CSS property name and returns its atom
+// InternPropertyName interns a CSS property name and returns its atom
 // Returns AtomNone (0) if the property cannot be interned
-func internPropertyName(property string) atom.Atom {
+func InternPropertyName(property string) atom.Atom {
 	if property == "" {
 		return atom.AtomNone
 	}
 	return PropertyTable.Intern(property)
 }
 
-// lookupPropertyAtom looks up an interned property name
+// LookupPropertyAtom looks up an interned property name
 // Returns the atom (AtomNone if not found)
-func lookupPropertyAtom(property string) atom.Atom {
+func LookupPropertyAtom(property string) atom.Atom {
 	if property == "" {
 		return atom.AtomNone
 	}

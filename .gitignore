@@ -31,6 +31,10 @@ go.work.sum
 *.swp
 *.swo
 *~
+.agents
+.qoder
+.claude
+.codegraph/
 
 # OS
 .DS_Store

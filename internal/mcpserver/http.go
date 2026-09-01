@@ -62,8 +62,8 @@ type HTTPServer struct {
 	server   *Server
 	listener net.Listener
 
-	mu       sync.RWMutex
-	sessions map[string]*httpSession
+	Mu       sync.RWMutex
+	Sessions map[string]*HTTPSession
 
 	requestCount  atomic.Uint64
 	sessionCount  atomic.Int64
@@ -93,7 +93,7 @@ func NewHTTPServer(server *Server, config HTTPConfig) (*HTTPServer, error) {
 	hs := &HTTPServer{
 		config:   config,
 		server:   server,
-		sessions: make(map[string]*httpSession),
+		Sessions: make(map[string]*HTTPSession),
 	}
 
 	return hs, nil
@@ -203,7 +203,7 @@ func (h *HTTPServer) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate Host to prevent DNS-rebinding
-	if !h.validateHost(r) {
+	if !h.ValidateHost(r) {
 		slog.Warn("rejected request with invalid Host", "host", r.Host)
 		http.Error(w, "invalid Host header", http.StatusForbidden)
 		return
@@ -256,12 +256,12 @@ func (h *HTTPServer) validateOrigin(r *http.Request) bool {
 	}
 
 	// Default: only allow loopback origins
-	return isLoopbackOrigin(origin)
+	return IsLoopbackOrigin(origin)
 }
 
 // validateHost checks the Host header to prevent DNS-rebinding.
 // Only allows exact loopback matches.
-func (h *HTTPServer) validateHost(r *http.Request) bool {
+func (h *HTTPServer) ValidateHost(r *http.Request) bool {
 	host := r.Host
 	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
 		host = parsedHost
@@ -300,7 +300,7 @@ func (h *HTTPServer) validateAuth(r *http.Request) bool {
 }
 
 // isLoopbackOrigin returns true if the URL's host is loopback.
-func isLoopbackOrigin(origin string) bool {
+func IsLoopbackOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
 		return false
@@ -318,8 +318,8 @@ func isJSONContentType(ct string) bool {
 	return ct == "application/json" || ct == "text/json"
 }
 
-// httpSession represents an active MCP-over-HTTP session.
-type httpSession struct {
+// HTTPSession represents an active MCP-over-HTTP session.
+type HTTPSession struct {
 	ID          string
 	CreatedAt   time.Time
 	LastSeenAt  time.Time
@@ -332,14 +332,14 @@ type httpSession struct {
 }
 
 // newSession creates a new HTTP session.
-func (h *HTTPServer) newSession() *httpSession {
-	id, err := generateSessionID()
+func (h *HTTPServer) newSession() *HTTPSession {
+	id, err := GenerateSessionID()
 	if err != nil {
 		slog.Error("failed to generate session ID", "error", err)
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	sess := &httpSession{
+	sess := &HTTPSession{
 		ID:         id,
 		CreatedAt:  time.Now(),
 		LastSeenAt: time.Now(),
@@ -348,18 +348,18 @@ func (h *HTTPServer) newSession() *httpSession {
 		Limiter:    NewRateLimiter(h.config.RateCapacity, h.config.RateRefill),
 		outbox:     make(chan []byte, 16),
 	}
-	h.mu.Lock()
-	h.sessions[id] = sess
-	h.mu.Unlock()
+	h.Mu.Lock()
+	h.Sessions[id] = sess
+	h.Mu.Unlock()
 	h.sessionCount.Add(1)
 	return sess
 }
 
 // getSession retrieves an existing session.
-func (h *HTTPServer) getSession(id string) *httpSession {
-	h.mu.RLock()
-	sess, ok := h.sessions[id]
-	h.mu.RUnlock()
+func (h *HTTPServer) getSession(id string) *HTTPSession {
+	h.Mu.RLock()
+	sess, ok := h.Sessions[id]
+	h.Mu.RUnlock()
 	if !ok {
 		return nil
 	}
@@ -371,12 +371,12 @@ func (h *HTTPServer) getSession(id string) *httpSession {
 
 // closeSession removes a session.
 func (h *HTTPServer) closeSession(id string) {
-	h.mu.Lock()
-	sess, ok := h.sessions[id]
+	h.Mu.Lock()
+	sess, ok := h.Sessions[id]
 	if ok {
-		delete(h.sessions, id)
+		delete(h.Sessions, id)
 	}
-	h.mu.Unlock()
+	h.Mu.Unlock()
 	if sess != nil {
 		sess.Cancel()
 		close(sess.outbox)
@@ -393,24 +393,24 @@ func (h *HTTPServer) runSessionReaper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			h.cleanupExpiredSessions()
+			h.CleanupExpiredSessions()
 		}
 	}
 }
 
-// cleanupExpiredSessions removes sessions older than SessionTimeout.
-func (h *HTTPServer) cleanupExpiredSessions() {
-	h.mu.Lock()
+// CleanupExpiredSessions removes sessions older than SessionTimeout.
+func (h *HTTPServer) CleanupExpiredSessions() {
+	h.Mu.Lock()
 	now := time.Now()
-	for id, sess := range h.sessions {
+	for id, sess := range h.Sessions {
 		if now.Sub(sess.LastSeenAt) > h.config.SessionTimeout {
-			delete(h.sessions, id)
+			delete(h.Sessions, id)
 			sess.Cancel()
 			close(sess.outbox)
 			h.sessionCount.Add(-1)
 		}
 	}
-	h.mu.Unlock()
+	h.Mu.Unlock()
 }
 
 // handleInitialize handles initial handshake and creates a session.
@@ -528,7 +528,7 @@ func (h *HTTPServer) handleSessionRequest(w http.ResponseWriter, r *http.Request
 	id, _ := jsonReq["id"]
 
 	// Route to appropriate handler
-	response := h.routeHTTPRequest(r.Context(), method, jsonReq["params"], id)
+	response := h.RouteHTTPRequest(r.Context(), method, jsonReq["params"], id)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -538,7 +538,7 @@ func (h *HTTPServer) handleSessionRequest(w http.ResponseWriter, r *http.Request
 
 // routeHTTPRequest routes an HTTP request to the appropriate handler.
 // Returns the JSON-RPC response.
-func (h *HTTPServer) routeHTTPRequest(ctx context.Context, method string, params interface{}, id interface{}) map[string]interface{} {
+func (h *HTTPServer) RouteHTTPRequest(ctx context.Context, method string, params interface{}, id interface{}) map[string]interface{} {
 	resp := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      id,
@@ -565,7 +565,7 @@ func (h *HTTPServer) routeHTTPRequest(ctx context.Context, method string, params
 			}
 			return resp
 		}
-		result, err := h.server.executeTool(ctx, getString(pm, "name"), getMap(pm, "arguments"))
+		result, err := h.server.ExecuteTool(ctx, GetString(pm, "name"), getMap(pm, "arguments"))
 		if err != nil {
 			resp["error"] = map[string]interface{}{
 				"code":    -32603,
@@ -693,7 +693,7 @@ func (h *HTTPServer) handleVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 // generateSessionID generates a cryptographically random session ID.
-func generateSessionID() (string, error) {
+func GenerateSessionID() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -702,7 +702,7 @@ func generateSessionID() (string, error) {
 }
 
 // Helper to extract string from map.
-func getString(m map[string]interface{}, key string) string {
+func GetString(m map[string]interface{}, key string) string {
 	if m == nil {
 		return ""
 	}
@@ -726,14 +726,14 @@ func getMap(m map[string]interface{}, key string) map[string]interface{} {
 // Stop shuts down the HTTP server gracefully.
 func (h *HTTPServer) Stop(ctx context.Context) error {
 	// Close all sessions
-	h.mu.Lock()
-	for id := range h.sessions {
-		sess := h.sessions[id]
-		delete(h.sessions, id)
+	h.Mu.Lock()
+	for id := range h.Sessions {
+		sess := h.Sessions[id]
+		delete(h.Sessions, id)
 		sess.Cancel()
 		close(sess.outbox)
 	}
-	h.mu.Unlock()
+	h.Mu.Unlock()
 
 	if h.listener != nil {
 		return h.listener.Close()

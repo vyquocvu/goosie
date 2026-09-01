@@ -94,7 +94,7 @@ type SideSpec struct {
 // FrameBuffer wraps an image.RGBA with reuse semantics. The buffer is
 // allocated once and reused across frames to avoid per-frame allocation.
 type FrameBuffer struct {
-	img    *image.RGBA
+	Img    *image.RGBA
 	width  int
 	height int
 }
@@ -108,22 +108,22 @@ func NewFrameBuffer(width, height int) *FrameBuffer {
 		height = 1
 	}
 	return &FrameBuffer{
-		img:    image.NewRGBA(image.Rect(0, 0, width, height)),
+		Img:    image.NewRGBA(image.Rect(0, 0, width, height)),
 		width:  width,
 		height: height,
 	}
 }
 
 // Image returns the underlying image.
-func (fb *FrameBuffer) Image() *image.RGBA { return fb.img }
+func (fb *FrameBuffer) Image() *image.RGBA { return fb.Img }
 
 // Bounds returns the pixel bounds.
-func (fb *FrameBuffer) Bounds() image.Rectangle { return fb.img.Bounds() }
+func (fb *FrameBuffer) Bounds() image.Rectangle { return fb.Img.Bounds() }
 
 // Reset clears the buffer to transparent black without reallocating.
 func (fb *FrameBuffer) Reset() {
-	for i := range fb.img.Pix {
-		fb.img.Pix[i] = 0
+	for i := range fb.Img.Pix {
+		fb.Img.Pix[i] = 0
 	}
 }
 
@@ -141,7 +141,7 @@ func (fb *FrameBuffer) Resize(width, height int) bool {
 	}
 	fb.width = width
 	fb.height = height
-	fb.img = image.NewRGBA(image.Rect(0, 0, width, height))
+	fb.Img = image.NewRGBA(image.Rect(0, 0, width, height))
 	return true
 }
 
@@ -152,7 +152,7 @@ func (fb *FrameBuffer) Resize(width, height int) bool {
 // CPUBackend is a pure-Go CPU raster backend that processes display commands
 // and writes pixels into a FrameBuffer.
 type CPUBackend struct {
-	fb           *FrameBuffer
+	Fb           *FrameBuffer
 	viewport     frame.Viewport
 	clipStack    []frame.Rect
 	opacityStack []float32
@@ -165,7 +165,7 @@ type CPUBackend struct {
 // box; callers may override it via SetFontRegistry.
 func NewCPUBackend(width, height int) *CPUBackend {
 	return &CPUBackend{
-		fb:           NewFrameBuffer(width, height),
+		Fb:           NewFrameBuffer(width, height),
 		clipStack:    make([]frame.Rect, 0, 8),
 		opacityStack: make([]float32, 0, 8),
 		fonts:        NewFontRegistry(),
@@ -214,8 +214,8 @@ func (b *CPUBackend) BeginFrame(vp frame.Viewport) error {
 	if dh <= 0 {
 		dh = 1
 	}
-	b.fb.Resize(int(dw), int(dh))
-	b.fb.Reset()
+	b.Fb.Resize(int(dw), int(dh))
+	b.Fb.Reset()
 	b.clipStack = b.clipStack[:0]
 	b.opacityStack = b.opacityStack[:0]
 	// Push initial clip to full viewport.
@@ -247,7 +247,7 @@ func (b *CPUBackend) Rasterize(cmds []DisplayCmd, dirty []frame.Rect) (image.Ima
 		}
 	} else {
 		// No dirty regions = full frame.
-		dw, dh := b.fb.width, b.fb.height
+		dw, dh := b.Fb.width, b.Fb.height
 		dirtyBounds = frame.Rect{X: 0, Y: 0, W: float32(dw), H: float32(dh)}
 	}
 
@@ -280,7 +280,7 @@ func (b *CPUBackend) Rasterize(cmds []DisplayCmd, dirty []frame.Rect) (image.Ima
 			clip := b.clipStack[len(b.clipStack)-1]
 			fillRect := cmd.Rect.Intersection(clip).Intersection(dirtyBounds)
 			if !fillRect.IsEmpty() {
-				c := applyOpacity(cmd.Color, currentOpacity)
+				c := ApplyOpacity(cmd.Color, currentOpacity)
 				b.rasterFill(fillRect, c, ps)
 			}
 
@@ -298,7 +298,7 @@ func (b *CPUBackend) Rasterize(cmds []DisplayCmd, dirty []frame.Rect) (image.Ima
 		}
 	}
 
-	return b.fb.Image(), nil
+	return b.Fb.Image(), nil
 }
 
 // EndFrame finalizes the current frame.
@@ -314,14 +314,14 @@ func (b *CPUBackend) EndFrame() error {
 // Close releases resources.
 func (b *CPUBackend) Close() error {
 	b.closed = true
-	b.fb = nil
+	b.Fb = nil
 	b.clipStack = nil
 	b.opacityStack = nil
 	return nil
 }
 
 // FrameBuffer returns the underlying frame buffer (for testing).
-func (b *CPUBackend) FrameBuffer() *FrameBuffer { return b.fb }
+func (b *CPUBackend) FrameBuffer() *FrameBuffer { return b.Fb }
 
 // ---------------------------------------------------------------------------
 // rasterFill — fills a rectangle in device pixels
@@ -340,11 +340,11 @@ func (b *CPUBackend) rasterFill(r frame.Rect, c frame.Color, ps frame.PixelScale
 	if y0 < 0 {
 		y0 = 0
 	}
-	if x1 > b.fb.width {
-		x1 = b.fb.width
+	if x1 > b.Fb.width {
+		x1 = b.Fb.width
 	}
-	if y1 > b.fb.height {
-		y1 = b.fb.height
+	if y1 > b.Fb.height {
+		y1 = b.Fb.height
 	}
 
 	if x0 >= x1 || y0 >= y1 {
@@ -353,9 +353,9 @@ func (b *CPUBackend) rasterFill(r frame.Rect, c frame.Color, ps frame.PixelScale
 
 	srgba := c.StdColor()
 	for y := y0; y < y1; y++ {
-		offset := (y*b.fb.width + x0) * 4
+		offset := (y*b.Fb.width + x0) * 4
 		for x := x0; x < x1; x++ {
-			blendPixel(b.fb.img.Pix, offset, srgba)
+			BlendPixel(b.Fb.Img.Pix, offset, srgba)
 			offset += 4
 		}
 	}
@@ -371,7 +371,7 @@ func (b *CPUBackend) rasterBorder(bounds frame.Rect, border BorderSpec, clip, di
 		r := frame.Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: border.Top.Width}
 		r = r.Intersection(clip).Intersection(dirty)
 		if !r.IsEmpty() {
-			b.rasterFill(r, applyOpacity(border.Top.Color, opacity), ps)
+			b.rasterFill(r, ApplyOpacity(border.Top.Color, opacity), ps)
 		}
 	}
 	// Bottom border
@@ -379,7 +379,7 @@ func (b *CPUBackend) rasterBorder(bounds frame.Rect, border BorderSpec, clip, di
 		r := frame.Rect{X: bounds.X, Y: bounds.Y + bounds.H - border.Bottom.Width, W: bounds.W, H: border.Bottom.Width}
 		r = r.Intersection(clip).Intersection(dirty)
 		if !r.IsEmpty() {
-			b.rasterFill(r, applyOpacity(border.Bottom.Color, opacity), ps)
+			b.rasterFill(r, ApplyOpacity(border.Bottom.Color, opacity), ps)
 		}
 	}
 	// Left border
@@ -387,7 +387,7 @@ func (b *CPUBackend) rasterBorder(bounds frame.Rect, border BorderSpec, clip, di
 		r := frame.Rect{X: bounds.X, Y: bounds.Y, W: border.Left.Width, H: bounds.H}
 		r = r.Intersection(clip).Intersection(dirty)
 		if !r.IsEmpty() {
-			b.rasterFill(r, applyOpacity(border.Left.Color, opacity), ps)
+			b.rasterFill(r, ApplyOpacity(border.Left.Color, opacity), ps)
 		}
 	}
 	// Right border
@@ -395,7 +395,7 @@ func (b *CPUBackend) rasterBorder(bounds frame.Rect, border BorderSpec, clip, di
 		r := frame.Rect{X: bounds.X + bounds.W - border.Right.Width, Y: bounds.Y, W: border.Right.Width, H: bounds.H}
 		r = r.Intersection(clip).Intersection(dirty)
 		if !r.IsEmpty() {
-			b.rasterFill(r, applyOpacity(border.Right.Color, opacity), ps)
+			b.rasterFill(r, ApplyOpacity(border.Right.Color, opacity), ps)
 		}
 	}
 }
@@ -404,8 +404,8 @@ func (b *CPUBackend) rasterBorder(bounds frame.Rect, border BorderSpec, clip, di
 // pixel helpers
 // ---------------------------------------------------------------------------
 
-// blendPixel alpha-blends src over the existing pixel at the given offset.
-func blendPixel(pix []byte, offset int, src color.RGBA) {
+// BlendPixel alpha-blends src over the existing pixel at the given offset.
+func BlendPixel(pix []byte, offset int, src color.RGBA) {
 	if src.A == 0 {
 		return
 	}
@@ -437,8 +437,8 @@ func blendPixel(pix []byte, offset int, src color.RGBA) {
 	pix[offset+3] = byte(outA)
 }
 
-// applyOpacity returns a new color with alpha multiplied by opacity.
-func applyOpacity(c frame.Color, opacity float32) frame.Color {
+// ApplyOpacity returns a new color with alpha multiplied by opacity.
+func ApplyOpacity(c frame.Color, opacity float32) frame.Color {
 	if opacity >= 1.0 {
 		return c
 	}
@@ -499,7 +499,7 @@ func (b *CPUBackend) rasterText(rect frame.Rect, textRun frame.TextRun, clip, di
 		return
 	}
 
-	c := applyOpacity(textRun.Color, opacity)
+	c := ApplyOpacity(textRun.Color, opacity)
 	if c.IsFullyTransparent() {
 		return
 	}
@@ -571,8 +571,8 @@ func (b *CPUBackend) rasterText(rect frame.Rect, textRun frame.TextRun, clip, di
 				continue
 			}
 
-			offsetDst := (dy*b.fb.width + dx) * 4
-			blendPixel(b.fb.img.Pix, offsetDst, color.RGBA{R: sr, G: sg, B: sb, A: sa})
+			offsetDst := (dy*b.Fb.width + dx) * 4
+			BlendPixel(b.Fb.Img.Pix, offsetDst, color.RGBA{R: sr, G: sg, B: sb, A: sa})
 		}
 	}
 }
@@ -654,10 +654,10 @@ func (b *CPUBackend) rasterImage(rect frame.Rect, imgSpec ImageSpec, clip, dirty
 			bl := uint8((sb * 255) / sa)
 			a := uint8(sa >> 8)
 
-			rgba := applyOpacity(frame.NewColor(r, g, bl, a), opacity).StdColor()
+			rgba := ApplyOpacity(frame.NewColor(r, g, bl, a), opacity).StdColor()
 
-			offsetDst := (dy*b.fb.width + dx) * 4
-			blendPixel(b.fb.img.Pix, offsetDst, rgba)
+			offsetDst := (dy*b.Fb.width + dx) * 4
+			BlendPixel(b.Fb.Img.Pix, offsetDst, rgba)
 		}
 	}
 }

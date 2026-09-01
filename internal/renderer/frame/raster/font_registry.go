@@ -139,12 +139,6 @@ func SharedFontRegistry() *FontRegistry {
 	return sharedFontRegistry
 }
 
-// SetSharedFontRegistry replaces the package-level registry. Use
-// this from tests that need to inject a custom registry.
-func SetSharedFontRegistry(r *FontRegistry) {
-	sharedFontRegistry = r
-}
-
 // Get returns a font.Face for the given descriptor and size. The
 // returned face scales with `size` (units: CSS pixels). If the
 // descriptor's family is unknown it is normalised to sans-serif.
@@ -152,7 +146,7 @@ func (r *FontRegistry) Get(d FontDescriptor, size float32) (font.Face, bool) {
 	if size <= 0 {
 		size = 14
 	}
-	family := normaliseFamily(d.Family)
+	family := NormaliseFamily(d.Family)
 
 	// Probe system fonts once on first use so we honour local
 	// installed fonts when available. Failures are non-fatal; the
@@ -243,7 +237,7 @@ func (r *FontRegistry) DesignMetrics(d FontDescriptor, size float32) FontMetrics
 	if size <= 0 {
 		size = 14
 	}
-	family := normaliseFamily(d.Family)
+	family := NormaliseFamily(d.Family)
 
 	r.systemPathOnce.Do(func() {
 		r.probeSystemFonts()
@@ -441,7 +435,7 @@ func systemFontAliases() map[string][]string {
 	}
 }
 
-// normaliseFamily maps a CSS font-family value (which may include
+// NormaliseFamily maps a CSS font-family value (which may include
 // unquoted generics, quoted specific names, or comma-separated
 // fallbacks) to one of the Family* constants. The first matching
 // token wins; anything unrecognised collapses to sans-serif.
@@ -451,7 +445,7 @@ func systemFontAliases() map[string][]string {
 // or `TIMESNEWROMAN` interchangeably. The fallback chain matches
 // the CSS family-with-fallback rule: the first recognised token
 // wins, generics act as last-resort buckets.
-func normaliseFamily(family string) string {
+func NormaliseFamily(family string) string {
 	if family == "" {
 		return FamilySansSerif
 	}

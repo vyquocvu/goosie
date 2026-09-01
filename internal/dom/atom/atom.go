@@ -19,7 +19,7 @@ import (
 )
 
 // Atom is a compact uint32 handle representing an interned string.
-// Zero is the invalid/empty atom. Values below staticEnd are pre-assigned
+// Zero is the invalid/empty atom. Values below StaticEnd are pre-assigned
 // static atoms for common HTML tags and attributes.
 type Atom uint32
 
@@ -191,13 +191,13 @@ const (
 	AttrDraggable    Atom = 246
 	AttrHidden       Atom = 247
 
-	// staticEnd marks the boundary between static and dynamic atoms.
-	staticEnd Atom = 500
+	// StaticEnd marks the boundary between static and dynamic atoms.
+	StaticEnd Atom = 500
 )
 
 // staticStrings maps static Atom values to their string representations.
 // Index 0 is empty (AtomNone). We use a flat slice for O(1) lookup.
-var staticStrings [staticEnd]string
+var staticStrings [StaticEnd]string
 
 // staticLookup maps static strings to their Atom values.
 var staticLookup map[string]Atom
@@ -382,7 +382,7 @@ func (a Atom) String() string {
 	if a == AtomNone {
 		return ""
 	}
-	if a < staticEnd {
+	if a < StaticEnd {
 		return staticStrings[a]
 	}
 	// Dynamic atoms are resolved via the default table.
@@ -391,7 +391,7 @@ func (a Atom) String() string {
 
 // IsStatic reports whether the atom is a pre-assigned static atom.
 func (a Atom) IsStatic() bool {
-	return a > AtomNone && a < staticEnd
+	return a > AtomNone && a < StaticEnd
 }
 
 // LookupStatic returns the static atom for s, or (0, false) if s is not
@@ -436,7 +436,7 @@ func NewTable(maxEntries int, maxBytes int) *Table {
 	return &Table{
 		maxEntries:  maxEntries,
 		maxBytes:    maxBytes,
-		nextAtom:    staticEnd,
+		nextAtom:    StaticEnd,
 		strToAtom:   make(map[string]Atom, maxEntries),
 		atomToStr:   make(map[Atom]string, maxEntries),
 		lruElements: make(map[Atom]*list.Element, maxEntries),
@@ -521,7 +521,7 @@ func (t *Table) Lookup(s string) Atom {
 
 // LookupByAtom returns the string for a dynamic atom, or "" if not found.
 func (t *Table) LookupByAtom(a Atom) string {
-	if a < staticEnd {
+	if a < StaticEnd {
 		return staticStrings[a]
 	}
 	if t == nil {
@@ -566,12 +566,8 @@ func (t *Table) Reset() {
 	t.lruElements = make(map[Atom]*list.Element, 64)
 	t.lru.Init()
 	t.bytesUsed = 0
-	t.nextAtom = staticEnd
+	t.nextAtom = StaticEnd
 	t.mu.Unlock()
-}
-
-func (t *Table) bytesUsedLocked() int {
-	return t.bytesUsed
 }
 
 func (t *Table) promote(a Atom) {

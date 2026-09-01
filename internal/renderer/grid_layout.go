@@ -363,7 +363,7 @@ func (gle *GridLayoutEngine) LayoutTable(layoutBox *LayoutBox) {
 	if cachedWidths, found := globalTableColumnCache.Get(layoutBox.NodeID, containerWidth); found {
 		colWidths = cachedWidths
 	} else {
-		colWidths = gle.calculateTrackSizes(gridTemplateColumns, containerWidth, columnGap)
+		colWidths = gle.calculateTableTrackSizes(gridTemplateColumns, items, containerWidth, columnGap)
 		globalTableColumnCache.Set(layoutBox.NodeID, containerWidth, colWidths)
 	}
 
@@ -531,6 +531,121 @@ func (gle *GridLayoutEngine) calculateTrackSizes(tracks []TrackSize, availableSp
 			for i, t := range tracks {
 				if t.Type == TrackTypeAuto && sizes[i] == 0 {
 					sizes[i] = 100 // default fallback
+				}
+			}
+		}
+	}
+
+	return sizes
+}
+
+// calculateTableTrackSizes calculates track sizes for tables, taking into account cell content constraints for auto tracks
+func (gle *GridLayoutEngine) calculateTableTrackSizes(tracks []TrackSize, items []*gridItem, availableSpace float32, gap float32) []float32 {
+	numTracks := len(tracks)
+	if numTracks == 0 {
+		return nil
+	}
+
+	sizes := make([]float32, numTracks)
+	remainingSpace := availableSpace
+	if remainingSpace < 0 {
+		remainingSpace = 0
+	}
+
+	totalGapSpace := float32(numTracks-1) * gap
+	if totalGapSpace > remainingSpace {
+		totalGapSpace = remainingSpace
+	}
+	remainingSpace -= totalGapSpace
+
+	totalFr := float32(0)
+	autoIndices := make([]int, 0, numTracks)
+
+	for i, t := range tracks {
+		if t.Type == TrackTypePx {
+			sizes[i] = t.Value
+			remainingSpace -= t.Value
+		} else if t.Type == TrackTypePercent {
+			px := (t.Value / 100.0) * availableSpace
+			sizes[i] = px
+			remainingSpace -= px
+		} else if t.Type == TrackTypeFr {
+			totalFr += t.Value
+		} else if t.Type == TrackTypeAuto {
+			autoIndices = append(autoIndices, i)
+		}
+	}
+
+	if totalFr > 0 && remainingSpace > 0 {
+		frUnit := remainingSpace / totalFr
+		for i, t := range tracks {
+			if t.Type == TrackTypeFr {
+				sizes[i] = t.Value * frUnit
+			}
+		}
+		remainingSpace = 0
+	}
+
+	if len(autoIndices) > 0 {
+		if remainingSpace > 0 {
+			// Measure content widths for auto columns
+			autoContentWidths := make(map[int]float32)
+			totalAutoContent := float32(0)
+
+			for _, item := range items {
+				if item.colEnd-item.colStart == 1 {
+					colIdx := item.colStart - 1
+					if colIdx >= 0 && colIdx < numTracks && tracks[colIdx].Type == TrackTypeAuto {
+						cellW := float32(0)
+						if item.layoutBox != nil {
+							for _, line := range item.layoutBox.LineBoxes {
+								if line.Width > cellW {
+									cellW = line.Width
+								}
+							}
+							for _, child := range item.layoutBox.Children {
+								if child.Box.Width > cellW {
+									cellW = child.Box.Width
+								}
+							}
+							cellW += item.layoutBox.PaddingLeft + item.layoutBox.PaddingRight + item.layoutBox.BorderLeftWidth + item.layoutBox.BorderRightWidth
+						}
+						if cellW > autoContentWidths[colIdx] {
+							autoContentWidths[colIdx] = cellW
+						}
+					}
+				}
+			}
+
+			for _, idx := range autoIndices {
+				totalAutoContent += autoContentWidths[idx]
+			}
+
+			if totalAutoContent > 0 && remainingSpace >= totalAutoContent {
+				excess := remainingSpace - totalAutoContent
+				for _, idx := range autoIndices {
+					cw := autoContentWidths[idx]
+					if cw > 0 {
+						sizes[idx] = cw + excess*(cw/totalAutoContent)
+					} else {
+						sizes[idx] = excess / float32(len(autoIndices))
+					}
+				}
+			} else if totalAutoContent > 0 && remainingSpace < totalAutoContent {
+				for _, idx := range autoIndices {
+					cw := autoContentWidths[idx]
+					sizes[idx] = remainingSpace * (cw / totalAutoContent)
+				}
+			} else {
+				autoWidth := remainingSpace / float32(len(autoIndices))
+				for _, idx := range autoIndices {
+					sizes[idx] = autoWidth
+				}
+			}
+		} else {
+			for _, idx := range autoIndices {
+				if sizes[idx] == 0 {
+					sizes[idx] = 20
 				}
 			}
 		}

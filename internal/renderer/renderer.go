@@ -14,7 +14,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"golang.org/x/net/html"
-	"golang.org/x/net/html/atom"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
@@ -258,6 +257,8 @@ func (r *Renderer) buildFrame(ctx context.Context, doc *html.Node, sheet *css.St
 		styleManager := NewStyleManagerWithViewport(sheet, width, height)
 		styleManager.ApplyStyles(renderTree)
 	}
+	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
+	r.loadImages(renderTree)
 	if recorder != nil {
 		recorder.EndPhase(metrics.PhaseStyle)
 	}
@@ -428,9 +429,6 @@ func (r *Renderer) PresentFrame() fyne.CanvasObject {
 		})
 	}
 
-	r.imageLoader.SetOnLoadCallback(r.onImageLoaded)
-	r.loadImages(renderTree)
-
 	return canvasObject
 }
 
@@ -439,26 +437,50 @@ func (r *Renderer) PresentFrame() fyne.CanvasObject {
 // by the documentloader coordinator. Each external entry is parsed
 // independently; parse failures are skipped silently and reported via
 // the renderer's logger when one is configured.
-//
-// shouldAttemptParseExternalCSS is the same gate loadExternalCSS uses
-// to refuse non-CSS bodies (e.g. an HTML 404 page). Keeping the gate
-// here ensures RenderParsed and loadExternalCSS behave consistently
-// when fed the same source bytes.
+var externalCSSCache = struct {
+	sync.RWMutex
+	m map[string]*css.StyleSheet
+}{m: make(map[string]*css.StyleSheet)}
+
+func getParsedExternalCSS(source string) *css.StyleSheet {
+	externalCSSCache.RLock()
+	cached, ok := externalCSSCache.m[source]
+	externalCSSCache.RUnlock()
+	if ok {
+		return cached
+	}
+	if !shouldAttemptParseExternalCSS(source) {
+		return nil
+	}
+	parser := css.NewParser(source)
+	sheet, err := parser.Parse()
+	if err != nil {
+		return nil
+	}
+	externalCSSCache.Lock()
+	if len(externalCSSCache.m) > 100 {
+		externalCSSCache.m = make(map[string]*css.StyleSheet)
+	}
+	externalCSSCache.m[source] = sheet
+	externalCSSCache.Unlock()
+	return sheet
+}
+
+// mergeInlineAndExternalCSS combines inline <style> rules with external
+// stylesheets in source order. The external list is the order returned
+// by the documentloader coordinator. Each external entry is parsed
+// independently with results cached by source content to avoid multi-second
+// re-parsing on DOM mutations.
 func mergeInlineAndExternalCSS(inline *css.StyleSheet, external []ExternalCSS) *css.StyleSheet {
 	if inline == nil {
 		inline = &css.StyleSheet{}
 	}
 	for _, e := range external {
 		body := string(e.Source)
-		if !shouldAttemptParseExternalCSS(body) {
-			continue
+		sheet := getParsedExternalCSS(body)
+		if sheet != nil && len(sheet.Rules) > 0 {
+			inline.Rules = append(inline.Rules, sheet.Rules...)
 		}
-		parser := css.NewParser(body)
-		sheet, err := parser.Parse()
-		if err != nil {
-			continue
-		}
-		inline.Rules = append(inline.Rules, sheet.Rules...)
 	}
 	return inline
 }
@@ -466,6 +488,11 @@ func mergeInlineAndExternalCSS(inline *css.StyleSheet, external []ExternalCSS) *
 // SetViewport updates the viewport for optimized rendering during scroll
 func (r *Renderer) SetViewport(y, height float32) {
 	r.canvasRenderer.SetViewport(y, height)
+}
+
+// SetTargetFPS configures the target frame rate across renderer components
+func (r *Renderer) SetTargetFPS(fps float64) {
+	r.canvasRenderer.SetTargetFPS(fps)
 }
 
 // UpdateViewport re-renders with the current viewport (for scroll updates)
@@ -486,73 +513,6 @@ func (r *Renderer) GetContentHeight() float32 {
 		return 0
 	}
 	return r.currentLayoutTree.Box.Height
-}
-
-// RenderHTMLBody renders just the body content of an HTML document
-func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error) {
-	globalTableColumnCache.Clear()
-	// Use html.ParseFragment to handle content that is expected to be inside a <body> tag.
-	// This avoids wrapping the content in an extra <html><body>...</body></html> structure.
-	nodes, err := html.ParseFragment(strings.NewReader(htmlContent), &html.Node{
-		Type:     html.ElementNode,
-		Data:     "body",
-		DataAtom: atom.Body,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a new root node to hold the parsed fragment.
-	root := &html.Node{
-		Type:     html.ElementNode,
-		Data:     "body",
-		DataAtom: atom.Body,
-	}
-	for _, node := range nodes {
-		root.AppendChild(node)
-	}
-
-	// Build the render tree from the fragment.
-	renderTree := BuildRenderTree(root)
-	if renderTree == nil {
-		return r.canvasRenderer.Render(nil), nil
-	}
-
-	r.treeMu.RLock()
-	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
-	r.treeMu.RUnlock()
-
-	r.treeMu.Lock()
-	// Apply styles
-	renderTreeCopy := renderTree.Clone()
-	r.stylesheetMu.RLock()
-	styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
-	styleManager.ApplyStyles(renderTreeCopy)
-	r.stylesheetMu.RUnlock()
-
-	// Perform layout.
-	layoutEngine := getLayoutEngine(width, height)
-	defer putLayoutEngine(layoutEngine)
-	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
-	renderTree = renderTreeCopy
-
-	// Cache trees for viewport updates.
-	r.currentRenderTree = renderTree
-	r.nodeIndex, r.nodeIndexRoot = nil, nil
-	r.currentLayoutTree = layoutTree
-	r.dirty = false
-	r.treeMu.Unlock()
-
-	// Pass navigation callback to canvas renderer.
-	r.treeMu.RLock()
-	onNav := r.onNavigate
-	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
-
-	// Render to canvas with viewport optimization.
-	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
-
-	return canvasObject, nil
 }
 
 // findBodyNode finds the body element in an HTML document
@@ -705,6 +665,7 @@ func (r *Renderer) Refresh() {
 		r.stylesheetMu.RUnlock()
 		renderTreeCopy := r.currentRenderTree.Clone()
 		styleManager.ApplyStyles(renderTreeCopy)
+		r.loadImages(renderTreeCopy)
 
 		// Perform layout
 		layoutEngine := getLayoutEngine(width, height)
@@ -811,26 +772,52 @@ func (r *Renderer) findRenderNodeByID(node *RenderNode, id int64) *RenderNode {
 }
 
 func (r *Renderer) loadImages(node *RenderNode) {
+	if node == nil {
+		return
+	}
 	if node.TagName == "img" {
 		if src, ok := node.GetAttribute("src"); ok {
-			// Resolve relative URLs before loading
 			resolvedSrc := r.resolveURL(src)
-			go func() {
-				img, err := r.imageLoader.Load(resolvedSrc)
-				if err == nil {
-					// Need to lock when updating the node directly since we might be cloning/re-rendering
-					r.treeMu.Lock()
+			if node.ImageData == nil || node.ImageData.State != imageloader.StateLoaded {
+				if img, err := r.imageLoader.Load(resolvedSrc); err == nil {
 					node.ImageData = img
-					r.treeMu.Unlock()
-					// Trigger refresh when image is loaded
-					r.onImageLoaded(resolvedSrc)
 				}
-			}()
+			}
+		}
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.BackgroundImage != "" {
+		if bgURL := extractURLFromCSSValue(node.ComputedStyle.BackgroundImage); bgURL != "" {
+			resolvedSrc := r.resolveURL(bgURL)
+			if node.BackgroundImageData == nil || node.BackgroundImageData.State != imageloader.StateLoaded {
+				if img, err := r.imageLoader.Load(resolvedSrc); err == nil {
+					node.BackgroundImageData = img
+					if node.ComputedStyle != nil {
+						node.ComputedStyle.BackgroundImageData = img
+					}
+				}
+			}
 		}
 	}
 	for _, child := range node.Children {
 		r.loadImages(child)
 	}
+}
+
+func extractURLFromCSSValue(val string) string {
+	val = strings.TrimSpace(val)
+	lower := strings.ToLower(val)
+	idx := strings.Index(lower, "url(")
+	if idx == -1 {
+		return ""
+	}
+	sub := val[idx+4:]
+	end := strings.Index(sub, ")")
+	if end == -1 {
+		return ""
+	}
+	urlStr := strings.TrimSpace(sub[:end])
+	urlStr = strings.Trim(urlStr, `'"`)
+	return urlStr
 }
 
 // currentURLRead returns the current page URL, safe for concurrent access.
@@ -938,6 +925,25 @@ func (r *Renderer) updateNodeImageData(node *RenderNode, src string) {
 				} else {
 					if img, err := r.imageLoader.Load(src); err == nil {
 						node.ImageData = img
+					}
+				}
+			}
+		}
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.BackgroundImage != "" {
+		if bgURL := extractURLFromCSSValue(node.ComputedStyle.BackgroundImage); bgURL != "" {
+			resolvedSrc := r.resolveURL(bgURL)
+			if resolvedSrc == src {
+				cache := r.imageLoader.GetCache()
+				if cache != nil {
+					if cached := cache.Get(src); cached != nil {
+						node.BackgroundImageData = cached
+						node.ComputedStyle.BackgroundImageData = cached
+					}
+				} else {
+					if img, err := r.imageLoader.Load(src); err == nil {
+						node.BackgroundImageData = img
+						node.ComputedStyle.BackgroundImageData = img
 					}
 				}
 			}

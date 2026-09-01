@@ -67,7 +67,7 @@ jobs:
           mkdir -p dist/bench
           go test -run='^$' -bench='BenchmarkParse|BenchmarkMatch|BenchmarkLayout|BenchmarkDisplayList' \
             -benchmem -benchtime=100ms -timeout=5m \
-            ./internal/dom ./internal/css ./internal/renderer \
+            ./test/internal/dom ./test/internal/css ./test/internal/renderer \
             > dist/bench/report.txt 2>&1 || true
           echo "Benchmark report collected: $(wc -l < dist/bench/report.txt) lines"
       - name: Smoke test (version check)

@@ -139,10 +139,15 @@ type Browser struct {
 	devToolsButton     *widget.Button
 	dirtyOverlayButton *widget.Button
 	fpsButton          *widget.Button
-	RendererFactory    func() HTMLRenderer
-	deps               BrowserDependencies
-	shortcuts          *ShortcutRegistry
-	headless           bool
+	fpsBar             *FPSBar
+	// lastFPSBarUpdate gates updateFPSBar so it fires at most ~5 Hz during
+	// rapid scrolling. Without this, every scroll frame calls label.SetText +
+	// label.Refresh() — an extra Fyne widget repaint per scroll tick.
+	lastFPSBarUpdate time.Time
+	RendererFactory  func() HTMLRenderer
+	deps             BrowserDependencies
+	shortcuts        *ShortcutRegistry
+	headless         bool
 }
 
 // windowResizeWatcher wraps content and fires a callback when its size
@@ -230,6 +235,14 @@ type Tab struct {
 	// mouse hit-tests can convert widget-space positions to content
 	// coordinates without reaching into the canvas.
 	lastViewportY float32
+	// lastPaintedViewportY / lastPaintedViewportHeight track the viewport
+	// of the most recently painted frame. presentRenderResult skips the
+	// canvas rebuild when these match the incoming request — e.g. at
+	// rubber-band boundaries or when coalesced events share the same final
+	// Y. Kept separate from lastViewportY, which is updated in the drain
+	// for mouse hit-testing and is always equal to the incoming request Y.
+	lastPaintedViewportY      float32
+	lastPaintedViewportHeight float32
 	// lastHoverHit throttles hover hit-tests: MouseMoved posts fire at
 	// display refresh rate, and each hit test walks the layout tree.
 	lastHoverHit time.Time
@@ -331,6 +344,12 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 	browser.breadcrumbBox = container.NewMax(browser.breadcrumbBar.CanvasObject())
 	browser.breadcrumbBox.Hide()
 
+	// Create fixed FPS bar (hidden until toggled on)
+	browser.fpsBar = NewFPSBar()
+	themeManager.AddListener(func(tt ThemeType) {
+		browser.fpsBar.SetTheme(tt)
+	})
+
 	// Create inspect panel
 	browser.inspectPanel = NewInspectPanel(browser.toggleDevTools)
 	browser.inspectPanel.SetSelectNodeCallback(func(node *renderer.RenderNode, _ *renderer.LayoutBox) {
@@ -428,6 +447,20 @@ func newBrowserInternal(a fyne.App, w fyne.Window, headless ...bool) *Browser {
 	browser.tabs.OnSelected = func(tab *container.TabItem) {
 		browser.updateNavigationButtons()
 		browser.updateConsoleFromActiveTab()
+		if activeTab := browser.ActiveTab(); activeTab != nil && activeTab.htmlRenderer != nil {
+			if activeTab.htmlRenderer.FPSOverlayEnabled() {
+				browser.fpsButton.SetText("FPS✓")
+				if browser.fpsBar != nil {
+					browser.fpsBar.Show()
+					browser.updateFPSBar()
+				}
+			} else {
+				browser.fpsButton.SetText("FPS")
+				if browser.fpsBar != nil {
+					browser.fpsBar.Hide()
+				}
+			}
+		}
 		if browser.devToolsVisible {
 			if activeTab := browser.ActiveTab(); activeTab != nil {
 				browser.inspectPanel.SetRenderer(activeTab.htmlRenderer)
@@ -747,9 +780,8 @@ func (b *Browser) toggleDirtyOverlay() {
 	tab.htmlRenderer.Refresh()
 }
 
-// toggleFPSOverlay toggles the live on-screen FPS HUD on the active tab.
-// When enabled, each presented frame updates a small readout at the top-left
-// of the viewport measuring the rendered frame rate.
+// toggleFPSOverlay toggles the live fixed FPS bar for the active tab.
+// When enabled, the fixed bar displays live frame rate and latency metrics.
 func (b *Browser) toggleFPSOverlay() {
 	tab := b.ActiveTab()
 	if tab == nil || tab.htmlRenderer == nil {
@@ -761,12 +793,45 @@ func (b *Browser) toggleFPSOverlay() {
 
 	if enabled {
 		b.fpsButton.SetText("FPS✓")
+		if b.fpsBar != nil {
+			b.fpsBar.Show()
+			b.updateFPSBar()
+		}
 	} else {
 		b.fpsButton.SetText("FPS")
+		if b.fpsBar != nil {
+			b.fpsBar.Hide()
+		}
 	}
 
-	// Force re-render to show or hide the overlay
+	// Force re-render to update metrics
 	tab.htmlRenderer.Refresh()
+}
+
+// fpsBarThrottle is the minimum interval between FPS bar UI updates.
+// The bar shows live frame-rate stats but doesn't need to refresh faster
+// than the human eye can read (~5 Hz), saving a label.Refresh() call per
+// scroll frame.
+const fpsBarThrottle = 200 * time.Millisecond
+
+// updateFPSBar updates the live FPS metrics displayed in the fixed bar.
+// It is throttled to at most ~5 Hz so it doesn't contribute a redundant
+// Fyne widget Refresh() on every scroll tick.
+func (b *Browser) updateFPSBar() {
+	if b.fpsBar == nil || !b.fpsBar.Visible() {
+		return
+	}
+	if time.Since(b.lastFPSBarUpdate) < fpsBarThrottle {
+		return
+	}
+	b.lastFPSBarUpdate = time.Now()
+	tab := b.ActiveTab()
+	if tab == nil || tab.htmlRenderer == nil {
+		return
+	}
+	stats := tab.htmlRenderer.FPSStats()
+	metrics := tab.htmlRenderer.FrameMetrics()
+	b.fpsBar.Update(stats, metrics)
 }
 
 // newTabInternal creates a new tab without adding it to the tab container
@@ -798,8 +863,20 @@ func (b *Browser) newTabInternal() *Tab {
 		state:         tabState,
 		browser:       b,
 	}
+	deviceFPS := GetDeviceScreenRefreshRate()
+	if deviceFPS <= 0 {
+		deviceFPS = 60.0
+	}
+	frameDuration := time.Duration(float64(time.Second) / deviceFPS)
+	if htmlRenderer != nil {
+		if tr, ok := htmlRenderer.(interface{ SetTargetFPS(float64) }); ok {
+			tr.SetTargetFPS(deviceFPS)
+		}
+	}
+
 	tab.eventLoop = eventloop.New(eventloop.Config{
 		InputQueueSize: 128,
+		FrameBudget:    eventloop.NewFrameBudget(frameDuration),
 		// The present callback runs on the UI thread (via
 		// ProcessPendingResults) and is the only place a completed
 		// render touches the canvas. PR4 keeps this callback unchanged
@@ -1097,6 +1174,8 @@ func (t *Tab) ensureHTMLRenderer() {
 				return
 			}
 			scrollSize := t.contentScroll.Size()
+			t.htmlRenderer.SetViewport(pos.Y, scrollSize.Height)
+			t.lastViewportY = pos.Y
 			t.postScrollViewport(pos.Y, scrollSize.Height)
 		}
 	}
@@ -1119,6 +1198,7 @@ func (t *Tab) publishCanvasObject(canvasObject fyne.CanvasObject) {
 		if t.browser.devToolsVisible {
 			t.browser.inspectPanel.SetRenderer(t.htmlRenderer)
 		}
+		t.browser.updateFPSBar()
 	})
 }
 
@@ -1145,11 +1225,17 @@ func refreshTabContent(tab *Tab) {
 	if content == nil {
 		return
 	}
-	// Only reassign content if different to preserve scroll offset
+	// Only refresh the outer scroll container when the content reference changed
+	// (i.e. a new document was loaded). For scroll updates, RenderWithViewport
+	// already called contentRoot.Refresh() internally — calling
+	// contentScroll.Refresh() on top is a redundant second full repaint.
 	if tab.contentScroll.Content != content {
 		tab.contentScroll.Content = content
+		tab.contentScroll.Refresh()
 	}
-	tab.contentScroll.Refresh()
+	if tab.browser != nil {
+		tab.browser.updateFPSBar()
+	}
 }
 
 // postScrollViewport routes a scroll event into the tab's engine event
@@ -1459,15 +1545,38 @@ func (t *Tab) presentRenderResult(result eventloop.RenderResult) {
 	if result.Err != nil || t.htmlRenderer == nil {
 		return
 	}
+	// Skip the canvas rebuild when the viewport position is identical to the
+	// last painted frame (e.g. rubber-band at top/bottom, or coalesced events
+	// that share the same final Y). Always record metrics so the HUD stays
+	// accurate, but don't pay for a full RenderWithViewport pass.
+	// NOTE: we compare against lastPainted*, not lastViewportY — the latter
+	// is updated in drainInputLoop for mouse hit-testing and equals newY.
+	newY := result.Request.Viewport.Y
+	newH := result.Request.Viewport.Height
+	if !t.lastPresent.IsZero() &&
+		newY == t.lastPaintedViewportY &&
+		newH == t.lastPaintedViewportHeight {
+		t.htmlRenderer.RecordInputToPresent(time.Since(result.Request.Created))
+		// Still tick JS frame scheduler so rAF callbacks fire.
+		if t.jsRuntime != nil && t.jsRuntime.FrameScheduler() != nil {
+			t.jsRuntime.FrameScheduler().Tick()
+		}
+		return
+	}
 	// Report how many scroll events this render collapsed.
 	m := t.eventLoop.Metrics()
 	if delta := m.CoalescedScrollEvents - t.lastCoalescedScroll; delta > 0 {
 		t.htmlRenderer.RecordCoalescedScroll(int(delta))
 		t.lastCoalescedScroll = m.CoalescedScrollEvents
 	}
-	t.htmlRenderer.SetViewport(result.Request.Viewport.Y, result.Request.Viewport.Height)
+	t.htmlRenderer.SetViewport(newY, newH)
 	t.htmlRenderer.RecordInputToPresent(time.Since(result.Request.Created))
 	refreshTabContent(t)
+	if t.jsRuntime != nil && t.jsRuntime.FrameScheduler() != nil {
+		t.jsRuntime.FrameScheduler().Tick()
+	}
+	t.lastPaintedViewportY = newY
+	t.lastPaintedViewportHeight = newH
 	t.renderGateMu.Lock()
 	t.lastPresent = time.Now()
 	t.renderGateMu.Unlock()
@@ -1537,9 +1646,15 @@ func (b *Browser) Show() {
 	b.devToolsSplit.Offset = 1.0
 	b.restoreDevToolsState()
 
-	// Wrap with nav bar, breadcrumb bar, and loading bar
+	// Wrap with nav bar, breadcrumb bar, loading bar, and fixed FPS bar
+	var topContent []fyne.CanvasObject
+	if b.fpsBar != nil {
+		topContent = []fyne.CanvasObject{navBar, b.loadingBarContainer, b.fpsBar.CanvasObject()}
+	} else {
+		topContent = []fyne.CanvasObject{navBar, b.loadingBarContainer}
+	}
 	mainContent := container.NewBorder(
-		container.NewVBox(navBar, b.loadingBarContainer),
+		container.NewVBox(topContent...),
 		b.breadcrumbBox,
 		nil, nil,
 		b.devToolsSplit,

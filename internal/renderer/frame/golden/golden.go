@@ -139,7 +139,7 @@ func AssertGolden(t *testing.T, name string, cfg Config, vp frame.Viewport, cmds
 	}
 	backend.Close()
 
-	gotRGBA := toRGBA(img)
+	gotRGBA := ToRGBA(img)
 	goldenPath := filepath.Join(cfg.GoldenDir, name+".png")
 
 	// Update mode: write golden image and skip comparison.
@@ -170,7 +170,7 @@ func AssertGolden(t *testing.T, name string, cfg Config, vp frame.Viewport, cmds
 		}
 		// Write diff image for debugging.
 		diffPath := filepath.Join(cfg.UpdateDir, name+"_diff.png")
-		diffImg := createDiffImage(gotRGBA, wantRGBA, cfg.Tolerance)
+		diffImg := CreateDiffImage(gotRGBA, wantRGBA, cfg.Tolerance)
 		_ = writePNG(diffPath, diffImg)
 
 		t.Errorf("golden mismatch %q: %d/%d pixels differ (max delta=%d, mean=%.2f)\n  diff: %s",
@@ -203,7 +203,7 @@ func max4(a, b, c, d uint8) uint8 {
 	return m
 }
 
-func toRGBA(img image.Image) *image.RGBA {
+func ToRGBA(img image.Image) *image.RGBA {
 	if rgba, ok := img.(*image.RGBA); ok {
 		return rgba
 	}
@@ -239,11 +239,11 @@ func loadPNG(path string) (*image.RGBA, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toRGBA(img), nil
+	return ToRGBA(img), nil
 }
 
-// createDiffImage produces a visualization where differing pixels are red.
-func createDiffImage(got, want *image.RGBA, tolerance uint8) *image.RGBA {
+// CreateDiffImage produces a visualization where differing pixels are red.
+func CreateDiffImage(got, want *image.RGBA, tolerance uint8) *image.RGBA {
 	bounds := got.Bounds()
 	diff := image.NewRGBA(bounds)
 	red := color.RGBA{R: 255, A: 255}

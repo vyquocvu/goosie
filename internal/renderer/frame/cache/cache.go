@@ -92,8 +92,8 @@ type glyphEntry struct {
 // All operations are safe for concurrent use.
 type GlyphCache struct {
 	mu           sync.Mutex
-	capacity     int
-	maxBytes     int64
+	Capacity     int
+	MaxBytes     int64
 	currentBytes int64
 	items        map[GlyphKey]*glyphEntry
 	head         *glyphEntry // most recently used
@@ -108,7 +108,7 @@ func NewGlyphCache(capacity int) *GlyphCache {
 		capacity = 256
 	}
 	return &GlyphCache{
-		capacity: capacity,
+		Capacity: capacity,
 		items:    make(map[GlyphKey]*glyphEntry, capacity),
 	}
 }
@@ -125,8 +125,8 @@ func NewGlyphCacheWithBytes(capacity int, maxBytes int64) *GlyphCache {
 		maxBytes = 4 << 20 // 4 MB default
 	}
 	return &GlyphCache{
-		capacity: capacity,
-		maxBytes: maxBytes,
+		Capacity: capacity,
+		MaxBytes: maxBytes,
 		items:    make(map[GlyphKey]*glyphEntry, capacity),
 	}
 }
@@ -161,13 +161,13 @@ func (c *GlyphCache) Put(key GlyphKey, value GlyphValue) {
 	}
 
 	// Evict if at capacity (entry count or byte budget).
-	for (len(c.items) >= c.capacity) ||
-		(c.maxBytes > 0 && c.currentBytes+entryByteSize(value) > c.maxBytes && c.tail != nil) {
+	for (len(c.items) >= c.Capacity) ||
+		(c.MaxBytes > 0 && c.currentBytes+entryByteSize(value) > c.MaxBytes && c.tail != nil) {
 		c.evictLRU()
 	}
 
 	// Don't cache if single item exceeds byte limit.
-	if c.maxBytes > 0 && entryByteSize(value) > c.maxBytes {
+	if c.MaxBytes > 0 && entryByteSize(value) > c.MaxBytes {
 		return
 	}
 
@@ -191,7 +191,7 @@ func (c *GlyphCache) Metrics() *Metrics { return &c.metrics }
 func (c *GlyphCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.items = make(map[GlyphKey]*glyphEntry, c.capacity)
+	c.items = make(map[GlyphKey]*glyphEntry, c.Capacity)
 	c.head = nil
 	c.tail = nil
 	c.currentBytes = 0
@@ -305,7 +305,7 @@ type imageEntry struct {
 // All operations are safe for concurrent use.
 type ImageCache struct {
 	mu           sync.Mutex
-	maxBytes     int64
+	MaxBytes     int64
 	currentBytes int64
 	items        map[ImageKey]*imageEntry
 	head         *imageEntry // most recently used
@@ -329,7 +329,7 @@ func NewImageCache(maxBytes int64) *ImageCache {
 		maxBytes = 64 << 20 // 64 MB default
 	}
 	return &ImageCache{
-		maxBytes: maxBytes,
+		MaxBytes: maxBytes,
 		items:    make(map[ImageKey]*imageEntry),
 		inFlight: make(map[ImageKey]*inflightLoad),
 	}
@@ -365,12 +365,12 @@ func (c *ImageCache) Put(key ImageKey, value ImageValue) {
 	}
 
 	// Evict until we have room.
-	for c.currentBytes+value.ByteSize > c.maxBytes && c.tail != nil {
+	for c.currentBytes+value.ByteSize > c.MaxBytes && c.tail != nil {
 		c.evictLRU()
 	}
 
 	// Don't cache if single item exceeds limit.
-	if value.ByteSize > c.maxBytes {
+	if value.ByteSize > c.MaxBytes {
 		return
 	}
 

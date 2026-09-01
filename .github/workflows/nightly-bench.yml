@@ -31,64 +31,64 @@ jobs:
       - name: Run navigation lifecycle benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkSession' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/engine/session
+            ./test/internal/engine/session
 
       - name: Run parser benchmarks (longer)
         run: |
           go test -run='^$' -bench='BenchmarkParseBody' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/dom
+            ./test/internal/dom
 
       - name: Run selector benchmarks (longer)
         run: |
           go test -run='^$' -bench='BenchmarkParseSelector|BenchmarkMatch' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/css
+            ./test/internal/css
 
       - name: Run scrolling benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkViewportScroll' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/renderer
+            ./test/internal/renderer
 
       - name: Run full-pipeline benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkFullPipeline' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/renderer
+            ./test/internal/renderer
 
       - name: Run testpages corpus benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkGet|BenchmarkGetContext' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/engine/testpages
+            ./test/internal/engine/testpages
 
       - name: Run JS runtime benchmarks
         run: |
           go test -run='^$' -bench='BenchmarkJS|BenchmarkRuntime' -benchmem -benchtime=1s -timeout=10m \
-            ./internal/js || true
+            ./test/internal/js || true
 
       - name: Fuzz HTML parser and CSS selector matcher
         # Cross-Cutting Workstreams → A. Testing → Parser and selector fuzz tests.
         # Each fuzz target has a bounded input size (4 KiB) so the runtime never
         # OOMs; failures surface as test panics or assertion violations.
         run: |
-          go test -fuzz=FuzzHTMLParseDocument -fuzztime=30s ./internal/dom/
-          go test -fuzz=FuzzHTMLParseDocumentCancelContext -fuzztime=30s ./internal/dom/
-          go test -fuzz=FuzzHTMLGetElementByID -fuzztime=30s ./internal/dom/
-          go test -fuzz=FuzzHTMLParseBodyText -fuzztime=30s ./internal/dom/
-          go test -fuzz=FuzzCSSParser -fuzztime=30s ./internal/css/
-          go test -fuzz=FuzzSelectorMatcher -fuzztime=30s ./internal/css/
+          go test -fuzz=FuzzHTMLParseDocument -fuzztime=30s ./test/internal/dom/
+          go test -fuzz=FuzzHTMLParseDocumentCancelContext -fuzztime=30s ./test/internal/dom/
+          go test -fuzz=FuzzHTMLGetElementByID -fuzztime=30s ./test/internal/dom/
+          go test -fuzz=FuzzHTMLParseBodyText -fuzztime=30s ./test/internal/dom/
+          go test -fuzz=FuzzCSSParser -fuzztime=30s ./test/internal/css/
+          go test -fuzz=FuzzSelectorMatcher -fuzztime=30s ./test/internal/css/
 
       - name: Run race-detected benchmarks
         run: |
           go test -race -run='^$' -bench='BenchmarkSessionConcurrentNavigate|BenchmarkGetScrolling' \
             -benchmem -benchtime=200ms -timeout=10m \
-            ./internal/engine/...
+            ./test/internal/engine/...
 
       - name: Collect all results
         run: |
           mkdir -p testdata/benchmarks/nightly
           go test -run='^$' -bench='.' -benchmem -benchtime=500ms -timeout=30m \
-            ./internal/dom \
-            ./internal/css \
-            ./internal/renderer \
-            ./internal/engine/... \
+            ./test/internal/dom \
+            ./test/internal/css \
+            ./test/internal/renderer \
+            ./test/internal/engine/... \
             > testdata/benchmarks/nightly/full-suite.txt 2>&1 || true
           echo "Nightly suite collected: $(wc -l < testdata/benchmarks/nightly/full-suite.txt) lines"
 

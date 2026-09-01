@@ -1,0 +1,18 @@
+# goosie layout golden snapshot
+html display=block
+  box=(x=0.00 y=0.00 w=400.00 h=106.00)
+  body display=block
+    box=(x=8.00 y=8.00 w=384.00 h=90.00)
+    margin=(t=8.00 r=8.00 b=8.00 l=8.00)
+    div display=block
+      box=(x=8.00 y=8.00 w=100.00 h=30.00)
+      div display=block
+        box=(x=8.00 y=8.00 w=100.00 h=19.20)
+    div display=block
+      box=(x=8.00 y=38.00 w=200.00 h=40.00)
+      div display=block
+        box=(x=8.00 y=38.00 w=200.00 h=19.20)
+    div display=block
+      box=(x=8.00 y=78.00 w=50.00 h=20.00)
+      div display=block
+        box=(x=8.00 y=78.00 w=50.00 h=19.20)

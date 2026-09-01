@@ -94,6 +94,14 @@ func (c *FPSCounter) SetTargetFPS(fps float64) {
 	}
 }
 
+// TargetFPS returns the target refresh rate in frames-per-second.
+func (c *FPSCounter) TargetFPS() float64 {
+	if c.target > 0 {
+		return float64(time.Second) / float64(c.target)
+	}
+	return defaultTargetFPS
+}
+
 // RecordFrame notifies the counter that one frame was presented at the
 // current clock time. It is a no-op for the first frame (there is no prior
 // interval to measure).
@@ -106,6 +114,9 @@ func (c *FPSCounter) RecordFrame() {
 			// Zero/negative interval (same or re-ordered timestamps): record
 			// the frame but do not let it skew interval statistics.
 			c.samples = append(c.samples, now)
+		} else if dt > 200*time.Millisecond {
+			// Idle gap: start a new active burst without marking an idle pause as dropped
+			c.samples = nil
 		} else {
 			c.lastInterval = dt
 			if c.minInterval == 0 || dt < c.minInterval {
@@ -114,7 +125,7 @@ func (c *FPSCounter) RecordFrame() {
 			if dt > c.maxInterval {
 				c.maxInterval = dt
 			}
-			if dt > c.target {
+			if dt > c.target+c.target/8 {
 				c.dropped++
 			}
 			c.samples = append(c.samples, now)
@@ -140,6 +151,12 @@ func (c *FPSCounter) Snapshot() FPSStats {
 		return s
 	}
 
+	if c.now().Sub(c.samples[len(c.samples)-1]) > 200*time.Millisecond {
+		s.CurrentFPS = c.TargetFPS()
+		s.AverageFPS = c.TargetFPS()
+		return s
+	}
+
 	s.CurrentFPS = fpsFromInterval(c.lastInterval)
 	s.MinFPS = fpsFromInterval(c.maxInterval)
 	s.MaxFPS = fpsFromInterval(c.minInterval)
@@ -156,6 +173,8 @@ func (c *FPSCounter) Snapshot() FPSStats {
 	}
 	if n > 0 {
 		s.AverageFPS = fpsFromInterval(sum / time.Duration(n))
+	} else {
+		s.AverageFPS = s.CurrentFPS
 	}
 
 	s.SampleWindow = c.samples[len(c.samples)-1].Sub(c.samples[0])

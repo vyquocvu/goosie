@@ -11,6 +11,7 @@ html { display: block; }
 head, title, meta, link, style, script, noscript, template, base, iframe { display: none; }
 body { display: block; margin: 8px; }
 article, aside, details, figcaption, figure, footer, header, hgroup, main, nav, section, summary { display: block; }
+address { display: block; font-style: italic; }
 b, strong { font-weight: bold; }
 i, em { font-style: italic; }
 u { text-decoration: underline; }
@@ -42,6 +43,7 @@ th { font-weight: bold; text-align: center; }
 thead { display: table-header-group; }
 tbody { display: table-row-group; }
 tfoot { display: table-footer-group; }
+a { color: #0000ee; text-decoration: underline; }
 `
 
 // defaultStyleSheet caches the parsed UA stylesheet. It is immutable after

@@ -135,7 +135,6 @@ type engineContext struct {
 	console   []ConsoleEntry
 	network   []NetworkEntry
 	navID     navigation.ID
-	domStore  *dom.Store // Compact DOM store for mutations
 
 	// JavaScript runtime
 	jsSession *js.Session
@@ -306,6 +305,11 @@ func (ec *engineContext) Navigate(ctx context.Context, url string, waitUntil Wai
 	if parseErr != nil {
 		ec.sess.Fail(parseErr)
 		return NavigationResult{}, NewError(ErrInternal, "parse error: "+parseErr.Error(), true, nil)
+	}
+
+	if ec.jsRuntime != nil {
+		ec.jsRuntime.SetOrigin(url)
+		ec.jsRuntime.LoadHTML(htmlContent)
 	}
 
 	ec.sess.Interactive()
@@ -925,17 +929,6 @@ func extractTitle(doc *html.Node) string {
 	}
 	walk(doc)
 	return title
-}
-
-func countRefNodes(nodes []SemanticNode) int {
-	count := 0
-	for _, n := range nodes {
-		if n.Ref != "" {
-			count++
-		}
-		count += countRefNodes(n.Children)
-	}
-	return count
 }
 
 func domToSemantic(doc *html.Node, ctxID string, maxDepth int, maxNodes int) ([]SemanticNode, bool) {

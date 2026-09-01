@@ -24,13 +24,14 @@ jobs:
       - name: Install Linux GUI dependencies
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
       - name: Security test suite
-        run: go test -v -count=1 ./internal/test_suite/security/
+        run: go test -v -count=1 ./test/internal/test_suite/security/
       - name: go vet (all analyzers)
-        run: go vet -all ./internal/...
+        run: go vet -all ./...
       - name: Race detector (security-sensitive packages)
         run: |
           go test -race -count=1 -short \
-            ./internal/engine/navigation/... \
-            ./internal/net/... \
-            ./internal/js/... \
-            ./internal/engine/documentloader/...
+            ./test/internal/engine/navigation/... \
+            ./test/internal/net/... \
+            ./test/internal/js/... \
+            ./test/internal/engine/documentloader/...
+

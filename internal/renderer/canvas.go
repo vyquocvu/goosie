@@ -3,7 +3,9 @@ package renderer
 import (
 	"flag"
 	"fmt"
+	"image"
 	"image/color"
+	"image/draw"
 	"log/slog"
 	"net/url"
 	"strconv"
@@ -20,30 +22,48 @@ import (
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
-// linkColorTheme overrides the hyperlink color of a base theme so anchor
-// widgets honor the element's computed color instead of the theme's default
-// link blue. All other lookups fall through to the base theme.
+// linkColorTheme overrides the hyperlink color and text size of a base theme so anchor
+// widgets honor the element's computed color and font size.
 type linkColorTheme struct {
 	fyne.Theme
 	link color.Color
+	size float32
 }
 
 func (t linkColorTheme) Color(name fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
-	if name == theme.ColorNameHyperlink {
+	if name == theme.ColorNameHyperlink && t.link != nil {
 		return t.link
 	}
 	return t.Theme.Color(name, v)
 }
 
+func (t linkColorTheme) Size(name fyne.ThemeSizeName) float32 {
+	if name == theme.SizeNameText && t.size > 0 {
+		return t.size
+	}
+	if name == theme.SizeNameInnerPadding || name == theme.SizeNamePadding {
+		return 0
+	}
+	return t.Theme.Size(name)
+}
+
+var defaultUALinkColor color.Color = color.RGBA{R: 0, G: 0, B: 0xee, A: 0xff}
+
 // applyLinkColor wraps a hyperlink widget in a theme override carrying the
-// node's computed color. Fyne's Hyperlink hardcodes ColorNameHyperlink in its
-// text segment, so a per-widget theme is the only way to recolor it. Returns
-// the original object when the node has no computed color.
+// node's computed color and font size.
 func applyLinkColor(node *RenderNode, obj fyne.CanvasObject) fyne.CanvasObject {
 	if node == nil || node.ComputedStyle == nil || node.ComputedStyle.Color == nil {
 		return obj
 	}
-	return container.NewThemeOverride(obj, linkColorTheme{Theme: theme.Current(), link: node.ComputedStyle.Color})
+	r, g, b, a := node.ComputedStyle.Color.RGBA()
+	if r == 0 && g == 0 && b == 0xeeee && a == 0xffff {
+		return obj
+	}
+	return container.NewThemeOverride(obj, linkColorTheme{
+		Theme: theme.Current(),
+		link:  node.ComputedStyle.Color,
+		size:  node.ComputedStyle.FontSize,
+	})
 }
 
 // NavigationCallback is a function that is called when navigation is requested
@@ -127,6 +147,15 @@ type CanvasRenderer struct {
 	// objects, and triggers a refresh — easily enough to drive
 	// scroll-rate FPS into single digits.
 	scrollCoalescer *ScrollCoalescer
+
+	// lastRenderedViewportY / lastRenderedViewportHeight track the
+	// viewport coordinates of the most recent contentRoot.Refresh() call.
+	// When the viewport hasn't moved and the display list hasn't changed,
+	// the visible-object set is identical and we can skip the Refresh()
+	// entirely — eliminating the redundant Fyne layout + repaint pass that
+	// was the primary cost of each scroll tick.
+	lastRenderedViewportY      float32
+	lastRenderedViewportHeight float32
 
 	// fpsOverlayText / fpsOverlayBg cache the Fyne canvas objects backing
 	// the FPS HUD so we mutate them in place across frames instead of
@@ -1205,11 +1234,6 @@ func (cr *CanvasRenderer) getFontSize(tagName string) float32 {
 	return cr.fontMetrics.GetFontSize(tagName)
 }
 
-// getTextStyle returns text style for an element type (delegates to fontMetrics)
-func (cr *CanvasRenderer) getTextStyle(tagName string) fyne.TextStyle {
-	return cr.fontMetrics.GetTextStyle(tagName)
-}
-
 // RenderWithViewport renders the render tree with viewport culling, object
 // caching, and spatial Y-band indexing for high-performance scroll/redraw.
 // Objects are reused across frames so Fyne doesn't allocate new canvas objects
@@ -1277,15 +1301,32 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		return &objectStack[len(objectStack)-1]
 	}
 
-	// Determine viewport limits for culling
-	viewportTop := cr.viewportY - cr.viewportHeight*0.5
-	viewportBottom := cr.viewportY + cr.viewportHeight*1.5 // extra buffer
+	// For display lists with <= 3000 commands (virtually all standard web pages),
+	// render the entire document into contentRoot once. Fyne's hardware renderer
+	// clips off-screen canvas objects on the GPU during drawing. This completely avoids
+	// rebuilding object slices and calling contentRoot.Refresh() on every scroll tick,
+	// allowing 60–120 FPS hardware-accelerated scrolling.
+	// For very large documents (> 3000 commands), use a 3x viewport buffer and only
+	// re-cull when the user scrolls past 1 full screen from the buffered center.
+	shouldCull := len(displayList.Commands) > 3000
+	bufferExceeded := shouldCull && (cr.lastRenderedViewportHeight <= 0 ||
+		cr.viewportY < cr.lastRenderedViewportY-cr.viewportHeight ||
+		cr.viewportY > cr.lastRenderedViewportY+cr.viewportHeight)
+
+	// If display list has not changed and we don't need to re-cull the buffer,
+	// the existing contentRoot objects are completely valid. Skip the entire command loop.
+	if !dlChanged && !bufferExceeded && cr.contentRoot != nil {
+		return cr.contentRoot
+	}
+
+	viewportTop := cr.viewportY - cr.viewportHeight*2.0
+	viewportBottom := cr.viewportY + cr.viewportHeight*3.0
 
 	for cmdIdx := 0; cmdIdx < len(displayList.Commands); cmdIdx++ {
 		cmd := displayList.Commands[cmdIdx]
 
-		// Viewport culling check (do not cull PushClip/PopClip)
-		if cmd.Type != PushClip && cmd.Type != PopClip {
+		// Viewport culling check for very large documents (do not cull PushClip/PopClip)
+		if shouldCull && cmd.Type != PushClip && cmd.Type != PopClip {
 			cmdBottom := cmd.Box.Y + cmd.Box.Height
 			if cmdBottom < viewportTop || cmd.Box.Y > viewportBottom {
 				continue
@@ -1338,13 +1379,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 			continue
 		}
 
-		// Leaf commands were already culled by the loop above (the outer
-		// bounds check is identical to isInViewport), so every command
-		// reaching here is visible; no second culling pass is needed.
-
-		// Object cache: reuse Fyne objects across frames. The cache is keyed
-		// by command index and invalidated when the display list is rebuilt.
-		// This eliminates allocation/GC pressure during scrolling.
+		// Leaf commands: retrieve or create Fyne canvas object
 		obj, ok := cr.objectCache[cmdIdx]
 		if !ok {
 			obj = cr.createCanvasObject(cmd)
@@ -1403,16 +1438,6 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		}
 	}
 
-	// Add live FPS HUD when enabled. The readout is drawn over the top-left
-	// of the viewport and refreshed on every frame so it reflects the current
-	// measurement.
-	if cr.fpsOverlayEnabled {
-		textObj := cr.buildFPSOverlay()
-		if textObj != nil {
-			rootObjects = append(rootObjects, textObj...)
-		}
-	}
-
 	// Reuse background rectangle across frames
 	var viewportBg *canvas.Rectangle
 	if cached, ok := cr.objectCache[-1]; ok {
@@ -1438,19 +1463,14 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	// Reuse stable root container or create one
 	if cr.contentRoot != nil {
 		cr.contentRoot.Objects = rootObjects
-		// Direct refresh: this function is contractually on the Fyne
-		// main goroutine. The previous fyne.Do() re-queued the
-		// refresh onto the very thread already executing us, which
-		// both deadlocked the caller's doAndWait and stacked up
-		// refreshes behind any blocking work we had just done.
-		// Headless mode skips Refresh entirely because there is no
-		// Fyne event loop to drive; tests rely on this.
 		if !cr.headless {
 			cr.contentRoot.Refresh()
 		}
 	} else {
 		cr.contentRoot = container.NewWithoutLayout(rootObjects...)
 	}
+	cr.lastRenderedViewportY = cr.viewportY
+	cr.lastRenderedViewportHeight = cr.viewportHeight
 
 	if cr.onInspect != nil && cr.renderer != nil {
 		if cr.inspectable != nil {
@@ -1659,6 +1679,89 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 				return label
 			}
 		}
+
+	case PaintBackgroundImage:
+		if cmd.Node == nil {
+			return nil
+		}
+		imgData := cmd.Node.BackgroundImageData
+		if imgData == nil && cmd.Node.ComputedStyle != nil {
+			imgData = cmd.Node.ComputedStyle.BackgroundImageData
+		}
+		if imgData == nil || imgData.State != imageloader.StateLoaded || imgData.Image == nil {
+			return nil
+		}
+
+		repeat := "repeat"
+		pos := "top left"
+		if cmd.Node.ComputedStyle != nil {
+			if cmd.Node.ComputedStyle.BackgroundRepeat != "" {
+				repeat = cmd.Node.ComputedStyle.BackgroundRepeat
+			}
+			if cmd.Node.ComputedStyle.BackgroundPosition != "" {
+				pos = cmd.Node.ComputedStyle.BackgroundPosition
+			}
+		}
+
+		boxW := int(cmd.Box.Width)
+		boxH := int(cmd.Box.Height)
+		if boxW <= 0 || boxH <= 0 {
+			return nil
+		}
+
+		srcImg := imgData.Image
+		srcBounds := srcImg.Bounds()
+		srcW := srcBounds.Dx()
+		srcH := srcBounds.Dy()
+		if srcW <= 0 || srcH <= 0 {
+			return nil
+		}
+
+		if repeat == "no-repeat" {
+			startX := 0
+			startY := 0
+			if strings.Contains(pos, "center") {
+				startX = (boxW - srcW) / 2
+			} else if strings.Contains(pos, "right") {
+				startX = boxW - srcW
+			}
+			if strings.Contains(pos, "bottom") {
+				startY = boxH - srcH
+			} else if strings.Contains(pos, "center") && (strings.HasPrefix(pos, "center") || strings.HasSuffix(pos, "center")) {
+				startY = (boxH - srcH) / 2
+			}
+
+			if startX == 0 && startY == 0 && boxW == srcW && boxH == srcH {
+				imgObj := canvas.NewImageFromImage(srcImg)
+				imgObj.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+				return imgObj
+			}
+
+			dst := image.NewRGBA(image.Rect(0, 0, boxW, boxH))
+			draw.Draw(dst, image.Rect(startX, startY, startX+srcW, startY+srcH), srcImg, srcBounds.Min, draw.Over)
+			imgObj := canvas.NewImageFromImage(dst)
+			imgObj.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return imgObj
+		}
+
+		repeatX := repeat == "repeat" || repeat == "repeat-x"
+		repeatY := repeat == "repeat" || repeat == "repeat-y"
+
+		dst := image.NewRGBA(image.Rect(0, 0, boxW, boxH))
+		for y := 0; y < boxH; y += srcH {
+			for x := 0; x < boxW; x += srcW {
+				draw.Draw(dst, image.Rect(x, y, x+srcW, y+srcH), srcImg, srcBounds.Min, draw.Src)
+				if !repeatX {
+					break
+				}
+			}
+			if !repeatY {
+				break
+			}
+		}
+		imgObj := canvas.NewImageFromImage(dst)
+		imgObj.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+		return imgObj
 
 	case PaintBorder:
 		// Render borders as lines or rectangles
@@ -1893,13 +1996,6 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 	return nil
 }
 
-func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
-	obj := cr.createCanvasObject(cmd)
-	if obj != nil {
-		*objects = append(*objects, obj)
-	}
-}
-
 // SetDirtyOverlayEnabled enables or disables the dirty-region overlay visualization.
 // When enabled, semi-transparent colored rectangles are rendered over each paint
 // command to show which areas are being repainted and what command types they are.
@@ -1966,12 +2062,17 @@ func (cr *CanvasRenderer) buildFPSOverlay() []fyne.CanvasObject {
 		fontS float32 = 12
 	)
 
+	fpsDisplay := stats.CurrentFPS
+	if fpsDisplay <= 0 {
+		fpsDisplay = cr.fps.TargetFPS()
+	}
+
 	// Three lines, top-left. The first line is the headline FPS; the
 	// second is the worst-case latency we observed in the recent
 	// window; the third is the long-frame count and the coalesced
 	// event totals.
 	lines := []string{
-		fmt.Sprintf("FPS %.1f", stats.CurrentFPS),
+		fmt.Sprintf("FPS %.1f", fpsDisplay),
 		fmt.Sprintf("i\u2192p %s  q %s",
 			formatLatency(m.MaxInputToPresent), formatLatency(m.MaxUIQueueWait)),
 		fmt.Sprintf("long %d  coalesced s%d m%d i%d  drop %d",
@@ -2045,6 +2146,18 @@ func (cr *CanvasRenderer) FPSStats() FPSStats {
 	return cr.fps.Snapshot()
 }
 
+// SetTargetFPS updates the target frame rate across the FPS counter and frame metrics.
+func (cr *CanvasRenderer) SetTargetFPS(fps float64) {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	if cr.fps != nil {
+		cr.fps.SetTargetFPS(fps)
+	}
+	if cr.frameMetrics != nil {
+		cr.frameMetrics.SetTargetFPS(fps)
+	}
+}
+
 // SetFPSOverlayEnabled enables or disables the on-screen FPS HUD overlay.
 // When enabled, each presented frame updates a small readout at the top-left
 // of the viewport.
@@ -2095,6 +2208,8 @@ func CommandTypeToOverlayColor(t PaintCommandType) color.Color {
 		return color.RGBA{R: 255, G: 192, B: 203, A: 40}
 	case PaintTextarea:
 		return color.RGBA{R: 255, G: 0, B: 255, A: 40}
+	case PaintBackgroundImage:
+		return color.RGBA{R: 100, G: 200, B: 100, A: 40}
 	default:
 		return color.RGBA{R: 128, G: 128, B: 128, A: 40}
 	}

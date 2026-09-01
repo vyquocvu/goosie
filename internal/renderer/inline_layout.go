@@ -219,9 +219,35 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 		if ile.isInlineBlock(node) {
 			ile.addInlineBlockToLines(node, currentLine, lines, lineX, availableWidth)
 		} else {
+			marginLeft := float32(0)
+			marginRight := float32(0)
+			if node.ComputedStyle != nil {
+				fontSize := ile.getFontSizeForNode(node)
+				if node.ComputedStyle.MarginLeft != "" && node.ComputedStyle.MarginLeft != "auto" {
+					marginLeft += parseLength(node.ComputedStyle.MarginLeft, fontSize)
+				}
+				if node.ComputedStyle.MarginRight != "" && node.ComputedStyle.MarginRight != "auto" {
+					marginRight += parseLength(node.ComputedStyle.MarginRight, fontSize)
+				}
+				if node.ComputedStyle.PaddingLeft != "" && node.ComputedStyle.PaddingLeft != "auto" {
+					marginLeft += parseLength(node.ComputedStyle.PaddingLeft, fontSize)
+				}
+				if node.ComputedStyle.PaddingRight != "" && node.ComputedStyle.PaddingRight != "auto" {
+					marginRight += parseLength(node.ComputedStyle.PaddingRight, fontSize)
+				}
+			}
+
+			if marginLeft > 0 && len((*currentLine).InlineBoxes) > 0 {
+				(*currentLine).Width += marginLeft
+			}
+
 			// Regular inline element - process children
 			for _, child := range node.Children {
 				ile.addNodeToLines(child, currentLine, lines, lineX, availableWidth, whiteSpaceMode)
+			}
+
+			if marginRight > 0 {
+				(*currentLine).Width += marginRight
 			}
 		}
 	}

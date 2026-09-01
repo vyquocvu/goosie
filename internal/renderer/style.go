@@ -30,14 +30,21 @@ type StyleManager struct {
 	mediaMatch map[string]bool
 }
 
+// preparedSelector holds a flattened selector part sequence and its precomputed specificity.
+type preparedSelector struct {
+	parts       []styleSelectorPart
+	specificity [3]uint16
+}
+
 // preparedRule is precomputed selector-part data for one CSS rule. The
-// selectors field holds the flattened [][]styleSelectorPart for each of the
+// selectors field holds the preparedSelector for each of the
 // rule's selector sequences; declarations is the rule's declarations. It is
 // immutable for the duration of a style pass, so it can be shared across all
 // nodes without re-computation.
 type preparedRule struct {
-	selectors    [][]styleSelectorPart
+	selectors    []preparedSelector
 	declarations []css.Declaration
+	sourceOrder  int
 }
 
 // NewStyleManager creates a new StyleManager.
@@ -97,6 +104,9 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		node.ComputedStyle.TextTransform = node.Parent.ComputedStyle.TextTransform
 		node.ComputedStyle.TextAlign = node.Parent.ComputedStyle.TextAlign
 		node.ComputedStyle.WhiteSpace = node.Parent.ComputedStyle.WhiteSpace
+		node.ComputedStyle.ListStyleType = node.Parent.ComputedStyle.ListStyleType
+		node.ComputedStyle.ListStylePosition = node.Parent.ComputedStyle.ListStylePosition
+		node.ComputedStyle.Visibility = node.Parent.ComputedStyle.Visibility
 
 		// Inherit custom properties from parent
 		if node.Parent.ComputedStyle.CustomProperties != nil {
@@ -120,6 +130,16 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	// Apply inline styles from style attribute
 	if styleAttr, ok := node.GetAttribute("style"); ok && styleAttr != "" {
 		sm.applyInlineStyles(node, styleAttr)
+	}
+
+	// CSS 2.1 Section 9.7: If float is not 'none' or position is absolute/fixed, display is converted to block
+	if node.ComputedStyle != nil {
+		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" ||
+			node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" {
+			if node.ComputedStyle.Display == "inline" || node.ComputedStyle.Display == "inline-block" {
+				node.ComputedStyle.Display = "block"
+			}
+		}
 	}
 
 	for _, child := range node.Children {
@@ -185,15 +205,58 @@ func (sm *StyleManager) applyConditionalAtRules(atRules []css.AtRule, node *Rend
 		if !matches {
 			continue
 		}
-		for _, rule := range atRule.Rules {
+
+		type matchedAtRuleItem struct {
+			declarations []css.Declaration
+			specificity  [3]uint16
+			sourceOrder  int
+		}
+		var matchedAt []matchedAtRuleItem
+
+		for i, rule := range atRule.Rules {
+			matchedSel := false
+			var bestSpec [3]uint16
 			for _, selectorSeq := range rule.Selectors {
 				if sm.matchesSequence(selectorSeq, node) {
-					for _, decl := range rule.Declarations {
-						sm.applyDeclaration(node, decl)
+					spec := css.ComputeSpecificity(&selectorSeq)
+					if !matchedSel || css.CompareSpecificity(spec, bestSpec) > 0 {
+						bestSpec = spec
 					}
+					matchedSel = true
+				}
+			}
+			if matchedSel {
+				matchedAt = append(matchedAt, matchedAtRuleItem{
+					declarations: rule.Declarations,
+					specificity:  bestSpec,
+					sourceOrder:  i,
+				})
+			}
+		}
+
+		sort.SliceStable(matchedAt, func(i, j int) bool {
+			cmp := css.CompareSpecificity(matchedAt[i].specificity, matchedAt[j].specificity)
+			if cmp != 0 {
+				return cmp < 0
+			}
+			return matchedAt[i].sourceOrder < matchedAt[j].sourceOrder
+		})
+
+		for _, m := range matchedAt {
+			for _, decl := range m.declarations {
+				if !decl.Important {
+					sm.applyDeclaration(node, decl)
 				}
 			}
 		}
+		for _, m := range matchedAt {
+			for _, decl := range m.declarations {
+				if decl.Important {
+					sm.applyDeclaration(node, decl)
+				}
+			}
+		}
+
 		sm.applyConditionalAtRules(atRule.AtRules, node, matches)
 	}
 }
@@ -202,19 +265,56 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	if stylesheet == nil {
 		return
 	}
+	type matchedRuleItem struct {
+		declarations []css.Declaration
+		specificity  [3]uint16
+		sourceOrder  int
+	}
+	var matched []matchedRuleItem
+
 	for _, rule := range sm.preparedFor(stylesheet) {
-		matched := false
-		for _, parts := range rule.selectors {
-			if sm.matchStyleParts(parts, len(parts)-1, node) {
-				matched = true
-				break
+		matchedSel := false
+		var bestSpec [3]uint16
+		for _, sel := range rule.selectors {
+			if sm.matchStyleParts(sel.parts, len(sel.parts)-1, node) {
+				if !matchedSel || css.CompareSpecificity(sel.specificity, bestSpec) > 0 {
+					bestSpec = sel.specificity
+				}
+				matchedSel = true
 			}
 		}
-		if !matched {
-			continue
+		if matchedSel {
+			matched = append(matched, matchedRuleItem{
+				declarations: rule.declarations,
+				specificity:  bestSpec,
+				sourceOrder:  rule.sourceOrder,
+			})
 		}
-		for _, decl := range rule.declarations {
-			sm.applyDeclaration(node, decl)
+	}
+
+	sort.SliceStable(matched, func(i, j int) bool {
+		cmp := css.CompareSpecificity(matched[i].specificity, matched[j].specificity)
+		if cmp != 0 {
+			return cmp < 0
+		}
+		return matched[i].sourceOrder < matched[j].sourceOrder
+	})
+
+	// Pass 1: Apply normal declarations in sorted specificity / source order
+	for _, m := range matched {
+		for _, decl := range m.declarations {
+			if !decl.Important {
+				sm.applyDeclaration(node, decl)
+			}
+		}
+	}
+
+	// Pass 2: Apply !important declarations in sorted specificity / source order
+	for _, m := range matched {
+		for _, decl := range m.declarations {
+			if decl.Important {
+				sm.applyDeclaration(node, decl)
+			}
 		}
 	}
 }
@@ -232,10 +332,17 @@ func (sm *StyleManager) preparedFor(stylesheet *css.StyleSheet) []preparedRule {
 		return rules
 	}
 	rules := make([]preparedRule, 0, len(stylesheet.Rules))
-	for _, rule := range stylesheet.Rules {
-		pr := preparedRule{declarations: rule.Declarations}
+	for i, rule := range stylesheet.Rules {
+		pr := preparedRule{
+			declarations: rule.Declarations,
+			sourceOrder:  i,
+		}
 		for _, ss := range rule.Selectors {
-			pr.selectors = append(pr.selectors, flattenSelectorSequence(&ss))
+			spec := css.ComputeSpecificity(&ss)
+			pr.selectors = append(pr.selectors, preparedSelector{
+				parts:       flattenSelectorSequence(&ss),
+				specificity: spec,
+			})
 		}
 		rules = append(rules, pr)
 	}
@@ -322,47 +429,6 @@ func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node
 	default:
 		return sm.matchStyleParts(parts, idx-1, node)
 	}
-}
-
-// hasMatchingAncestor checks if any ancestor matches the selector
-func (sm *StyleManager) hasMatchingAncestor(selector css.SimpleSelector, node *RenderNode) bool {
-	current := node.Parent
-	for current != nil {
-		if sm.matchesSimple(selector, current) {
-			return true
-		}
-		current = current.Parent
-	}
-	return false
-}
-
-// hasMatchingPreviousSibling checks if any previous sibling matches the selector
-func (sm *StyleManager) hasMatchingPreviousSibling(selector css.SimpleSelector, node *RenderNode) bool {
-	if node.Parent == nil {
-		return false
-	}
-
-	// Find node's index in parent's children
-	nodeIndex := -1
-	for i, child := range node.Parent.Children {
-		if child == node {
-			nodeIndex = i
-			break
-		}
-	}
-
-	if nodeIndex == -1 {
-		return false
-	}
-
-	// Check all previous siblings
-	for i := nodeIndex - 1; i >= 0; i-- {
-		if sm.matchesSimple(selector, node.Parent.Children[i]) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // getPreviousSibling returns the previous sibling of a node
@@ -755,10 +821,18 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		if val, err := parseColor(decl.Value); err == nil {
 			style.BackgroundColor = val
 		}
+	case "background-image":
+		style.BackgroundImage = decl.Value
+	case "background-repeat":
+		style.BackgroundRepeat = decl.Value
+	case "background-position":
+		style.BackgroundPosition = decl.Value
+	case "background-size":
+		style.BackgroundSize = decl.Value
+	case "background-attachment":
+		style.BackgroundAttachment = decl.Value
 	case "background":
-		if val, ok := parseBackgroundShorthandColor(decl.Value); ok {
-			style.BackgroundColor = val
-		}
+		applyBackgroundShorthand(style, decl.Value)
 	case "width":
 		style.Width = decl.Value
 	case "height":
@@ -1031,6 +1105,14 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.WhiteSpace = decl.Value
 	case "word-break":
 		style.WordBreak = decl.Value
+	case "font":
+		parentFontSize := float32(16.0)
+		if node.Parent != nil && node.Parent.ComputedStyle != nil && node.Parent.ComputedStyle.FontSize > 0 {
+			parentFontSize = node.Parent.ComputedStyle.FontSize
+		}
+		parseFontShorthand(decl.Value, style, parentFontSize)
+	case "list-style":
+		parseListStyleShorthand(decl.Value, style)
 	case "list-style-type":
 		style.ListStyleType = decl.Value
 	case "list-style-position":
@@ -1061,6 +1143,106 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "order":
 		if val, err := strconv.Atoi(decl.Value); err == nil {
 			style.Order = val
+		}
+	}
+}
+
+// parseFontShorthand parses CSS font shorthand:
+// [ [ <'font-style'> || <'font-variant'> || <'font-weight'> ]? <'font-size'> [ / <'line-height'> ]? <'font-family'> ]
+func parseFontShorthand(value string, style *Style, parentFontSize float32) {
+	val := strings.TrimSpace(value)
+	if val == "" || val == "inherit" || val == "initial" || val == "unset" {
+		return
+	}
+
+	tokens := strings.Fields(val)
+	if len(tokens) == 0 {
+		return
+	}
+
+	sizeIdx := -1
+	for i, tok := range tokens {
+		if strings.Contains(tok, "/") {
+			parts := strings.SplitN(tok, "/", 2)
+			if _, err := parseFontSize(parts[0], parentFontSize); err == nil {
+				sizeIdx = i
+				break
+			}
+		} else {
+			if _, err := parseFontSize(tok, parentFontSize); err == nil {
+				isWeightKeyword := (tok == "100" || tok == "200" || tok == "300" || tok == "400" ||
+					tok == "500" || tok == "600" || tok == "700" || tok == "800" || tok == "900")
+				if isWeightKeyword && i+1 < len(tokens) {
+					nextTok := tokens[i+1]
+					nextSizePart := nextTok
+					if strings.Contains(nextTok, "/") {
+						nextSizePart = strings.SplitN(nextTok, "/", 2)[0]
+					}
+					if _, errNext := parseFontSize(nextSizePart, parentFontSize); errNext == nil {
+						continue
+					}
+				}
+				sizeIdx = i
+				break
+			}
+		}
+	}
+
+	if sizeIdx == -1 {
+		return
+	}
+
+	for i := 0; i < sizeIdx; i++ {
+		tok := strings.ToLower(tokens[i])
+		switch tok {
+		case "italic", "oblique":
+			style.FontStyle = tok
+		case "bold", "bolder", "lighter", "100", "200", "300", "400", "500", "600", "700", "800", "900":
+			style.FontWeight = tok
+		}
+	}
+
+	sizeToken := tokens[sizeIdx]
+	if strings.Contains(sizeToken, "/") {
+		parts := strings.SplitN(sizeToken, "/", 2)
+		if sz, err := parseFontSize(parts[0], parentFontSize); err == nil {
+			style.FontSize = sz
+			style.LineHeight = parseLineHeight(parts[1], style.FontSize)
+		}
+	} else {
+		if sz, err := parseFontSize(sizeToken, parentFontSize); err == nil {
+			style.FontSize = sz
+		}
+	}
+
+	if sizeIdx+1 < len(tokens) {
+		pos := strings.Index(val, sizeToken)
+		if pos != -1 {
+			fam := strings.TrimSpace(val[pos+len(sizeToken):])
+			if fam != "" {
+				style.FontFamily = fam
+			}
+		}
+	}
+}
+
+// parseListStyleShorthand parses CSS list-style shorthand:
+// [ <'list-style-type'> || <'list-style-position'> || <'list-style-image'> ]
+func parseListStyleShorthand(value string, style *Style) {
+	val := strings.TrimSpace(value)
+	if val == "" {
+		return
+	}
+	tokens := strings.Fields(val)
+	for _, tok := range tokens {
+		tokLower := strings.ToLower(tok)
+		switch tokLower {
+		case "inside", "outside":
+			style.ListStylePosition = tokLower
+		case "none", "disc", "circle", "square", "decimal",
+			"lower-roman", "upper-roman", "lower-alpha", "upper-alpha",
+			"lower-latin", "upper-latin", "cjk-decimal", "armenian", "georgian":
+			style.ListStyleType = tokLower
 		}
 	}
 }
@@ -1857,7 +2039,7 @@ func parseFlexShorthand(value string, style *Style) {
 	}
 }
 
-func parseBackgroundShorthandColor(value string) (color.Color, bool) {
+func applyBackgroundShorthand(style *Style, value string) {
 	var tokens []string
 	var current strings.Builder
 	inParens := 0
@@ -1887,10 +2069,33 @@ func parseBackgroundShorthandColor(value string) (color.Color, bool) {
 		tokens = append(tokens, current.String())
 	}
 
+	var positionTokens []string
 	for _, tok := range tokens {
-		if col, err := parseColor(tok); err == nil {
-			return col, true
+		tokLower := strings.ToLower(tok)
+		if strings.HasPrefix(tokLower, "url(") || tokLower == "none" {
+			style.BackgroundImage = tok
+		} else if tokLower == "repeat" || tokLower == "no-repeat" || tokLower == "repeat-x" || tokLower == "repeat-y" || tokLower == "space" || tokLower == "round" {
+			style.BackgroundRepeat = tokLower
+		} else if tokLower == "fixed" || tokLower == "scroll" || tokLower == "local" {
+			style.BackgroundAttachment = tokLower
+		} else if tokLower == "cover" || tokLower == "contain" {
+			style.BackgroundSize = tokLower
+		} else if tokLower == "top" || tokLower == "bottom" || tokLower == "left" || tokLower == "right" || tokLower == "center" {
+			positionTokens = append(positionTokens, tokLower)
+		} else if col, err := parseColor(tok); err == nil {
+			style.BackgroundColor = col
 		}
+	}
+	if len(positionTokens) > 0 {
+		style.BackgroundPosition = strings.Join(positionTokens, " ")
+	}
+}
+
+func parseBackgroundShorthandColor(value string) (color.Color, bool) {
+	var temp Style
+	applyBackgroundShorthand(&temp, value)
+	if temp.BackgroundColor != nil {
+		return temp.BackgroundColor, true
 	}
 	return nil, false
 }
