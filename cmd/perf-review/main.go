@@ -460,8 +460,13 @@ func startFixtureServer() (*httptest.Server, []string) {
 // loadFixtureDir reads HTML files from dir, registers them on the test
 // server, and returns the URLs. Each file is served at /fix/<filename>.
 func loadFixtureDir(ts *httptest.Server, dir string) []string {
+	mux, ok := ts.Config.Handler.(*http.ServeMux)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "[error] test server handler is not *http.ServeMux\n")
+		return nil
+	}
 	var urls []string
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -480,13 +485,15 @@ func loadFixtureDir(ts *httptest.Server, dir string) []string {
 		// that writes the content directly.
 		content := htmlContent // capture
 		pattern := "/fix/" + name
-		ts.Config.Handler.(*http.ServeMux).HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write(content)
 		})
 		urls = append(urls, ts.URL+pattern)
 		return nil
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[error] cannot walk fixture directory %s: %v\n", dir, err)
+	}
 	sort.Strings(urls)
 	return urls
 }
@@ -502,7 +509,7 @@ func measureRenderStages(dir string, iterations int) []renderStageResult {
 	}
 
 	var results []renderStageResult
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -547,7 +554,9 @@ func measureRenderStages(dir string, iterations int) []renderStageResult {
 			Stages:  means,
 		})
 		return nil
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[error] cannot walk fixture directory %s: %v\n", dir, err)
+	}
 	sort.Slice(results, func(i, j int) bool { return results[i].Fixture < results[j].Fixture })
 	return results
 }
