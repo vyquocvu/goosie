@@ -215,13 +215,5 @@ func TestClose_ReleasesSessionOwnedMemory(t *testing.T) {
 	}
 	t.Logf("  Memory released    : %d B (%.0f%% of peak growth)",
 		peakGrowth-retainedGrowth,
-		100*float64(peakGrowth-retainedGrowth)/float64(max1(peakGrowth, 1)))
-}
-
-// max1 is a local helper to avoid importing math.
-func max1(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
+		100*float64(peakGrowth-retainedGrowth)/float64(max(peakGrowth, 1)))
 }

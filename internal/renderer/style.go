@@ -1731,14 +1731,8 @@ func oklabToSrgb(l, a, b float32) (r, g, bOut float32) {
 	return
 }
 
-func clamp(val, min, max float32) float32 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
+func clamp(val, minVal, maxVal float32) float32 {
+	return min(max(val, minVal), maxVal)
 }
 
 // f32ToByte converts a normalized float in [0,1] to a byte channel, rounding

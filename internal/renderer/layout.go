@@ -16,15 +16,12 @@ type LayoutEngine struct {
 	canvasWidth  float32
 	canvasHeight float32
 
-	// Default font sizes for headings and text
 	defaultFontSize float32
 	lineHeight      float32
 
-	// nodeMap maps RenderNode IDs to their corresponding LayoutBoxes
 	nodeMap   map[int64]*LayoutBox
 	nodeMapMu sync.RWMutex
 
-	// fontMetrics provides accurate text measurement
 	fontMetrics *FontMetrics
 
 	// Sub-engines are stateless between computations, so one set is created
@@ -35,7 +32,6 @@ type LayoutEngine struct {
 	gridEngine   *GridLayoutEngine
 }
 
-// NewLayoutEngine creates a new layout engine
 func NewLayoutEngine(width, height float32) *LayoutEngine {
 	defaultSize := float32(16.0)
 	fontMetrics := NewFontMetrics(defaultSize)
@@ -67,12 +63,10 @@ func (le *LayoutEngine) ComputeLayout(root *RenderNode) *LayoutBox {
 		return nil
 	}
 
-	// Clear previous mappings, reusing the map's storage
 	le.nodeMapMu.Lock()
 	clear(le.nodeMap)
 	le.nodeMapMu.Unlock()
 
-	// Build layout tree from render tree
 	return le.buildLayoutBox(root, 0, 0, le.canvasWidth, nil)
 }
 
@@ -127,7 +121,6 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	le.nodeMap[node.ID] = layoutBox
 	le.nodeMapMu.Unlock()
 
-	// Determine display type from computed style
 	if node.ComputedStyle != nil && node.ComputedStyle.Display != "" {
 		switch node.ComputedStyle.Display {
 		case "block":
@@ -136,7 +129,7 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			layoutBox.Display = DisplayInline
 		case "none":
 			layoutBox.Display = DisplayNone
-			return nil // Don't layout non-displayed elements
+			return nil
 		case "flex":
 			layoutBox.Display = DisplayFlex
 		case "grid":
@@ -144,7 +137,7 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		case "inline-block":
 			layoutBox.Display = DisplayInlineBlock
 		default:
-			layoutBox.Display = DisplayInline // Default for unknown values
+			layoutBox.Display = DisplayInline
 		}
 	} else if node.Type == NodeTypeElement {
 		if node.IsBlock() {
@@ -153,13 +146,11 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			layoutBox.Display = DisplayInline
 		}
 	} else {
-		layoutBox.Display = DisplayInline // Text nodes are inline
+		layoutBox.Display = DisplayInline
 	}
 
-	// Apply box model properties from computed style
 	le.applyBoxModel(node, layoutBox)
 
-	// Compute layout
 	var currentY float32
 	if node.TagName == "table" {
 		layoutBox.Display = DisplayGrid
@@ -168,12 +159,8 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		currentY = le.computeLayoutBox(node, layoutBox, x, y, availableWidth, floatCtx)
 	}
 
-	// Update height based on children
-	// currentY tracks the bottom edge of content/padding
-	// layoutBox.Box.Y is the top edge
 	calculatedHeight := currentY - layoutBox.Box.Y
 
-	// Check for explicit height
 	if node.ComputedStyle != nil && node.ComputedStyle.Height != "" && node.ComputedStyle.Height != "auto" {
 		fontSize := le.defaultFontSize
 		if node.ComputedStyle.FontSize > 0 {
@@ -239,7 +226,6 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		layoutBox.Box.Height = 0
 	}
 
-	// Apply CSS positioning: copy position value and override coordinates for absolute/fixed
 	if node.ComputedStyle != nil {
 		layoutBox.Position = node.ComputedStyle.Position
 		layoutBox.Float = node.ComputedStyle.Float
@@ -273,7 +259,6 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 				}
 			}
 
-			// Store old coordinates to calculate delta
 			oldX := layoutBox.Box.X
 			oldY := layoutBox.Box.Y
 
@@ -330,7 +315,6 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	return layoutBox
 }
 
-// shiftLayoutBox recursively offsets the coordinates of a layout box, its children, and its inline line boxes.
 func (le *LayoutEngine) shiftLayoutBox(box *LayoutBox, deltaX, deltaY float32) {
 	if box == nil || (deltaX == 0 && deltaY == 0) {
 		return
@@ -348,7 +332,6 @@ func (le *LayoutEngine) shiftLayoutBox(box *LayoutBox, deltaX, deltaY float32) {
 	}
 }
 
-// buildTableLayoutBox creates a LayoutBox for a table node and computes its layout
 func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext) float32 {
 	contentWidth := availableWidth
 	if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
@@ -374,7 +357,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		}
 	}
 
-	// Ensure we don't proceed with negative width
 	if contentWidth < 0 {
 		contentWidth = 0
 	}
@@ -383,7 +365,7 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 	layoutBox.Box.Y = y
 	layoutBox.Box.Width = contentWidth
 
-	// 1. Gather all rows in correct visual order: thead -> tbody/direct-tr -> tfoot
+	// Gather all rows in correct visual order: thead -> tbody/direct-tr -> tfoot
 	var rows []*RenderNode
 	gatherRows := func(parent *RenderNode, targetTags []string) {
 		for _, child := range parent.Children {
@@ -416,7 +398,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		return y + layoutBox.PaddingTop + layoutBox.PaddingBottom
 	}
 
-	// 2. Map cells to coordinates, respecting colspan and rowspan
 	maxCols := 0
 	occupied := make(map[int]map[int]bool)
 	isOccupied := func(row, col int) bool {
@@ -438,7 +419,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		currentRow := r + 1
 		currentCol := 1
 
-		// Try to get row background color
 		var trBgColor color.Color
 		if rowNode.ComputedStyle != nil {
 			trBgColor = rowNode.ComputedStyle.BackgroundColor
@@ -446,12 +426,10 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 
 		for _, cell := range rowNode.Children {
 			if cell.TagName == "td" || cell.TagName == "th" {
-				// Find next unoccupied column
 				for isOccupied(currentRow, currentCol) {
 					currentCol++
 				}
 
-				// Parse colspan and rowspan, with a clamp of 100 to prevent OOM
 				colspan := 1
 				if attr, ok := cell.GetAttribute("colspan"); ok {
 					if v, err := strconv.Atoi(attr); err == nil && v > 0 {
@@ -472,7 +450,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 					}
 				}
 
-				// Mark occupied cells
 				for dr := 0; dr < rowspan; dr++ {
 					for dc := 0; dc < colspan; dc++ {
 						markOccupied(currentRow+dr, currentCol+dc)
@@ -488,7 +465,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 					maxCols = colEnd - 1
 				}
 
-				// Check cell width specification for single-column cells
 				if colspan == 1 {
 					colIdx := colStart - 1
 					cellWidthStr := ""
@@ -510,7 +486,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 					}
 				}
 
-				// Create cell box
 				cellBox := le.buildLayoutBox(cell, 0, 0, contentWidth, nil)
 				if cellBox != nil {
 					cellBox.GridColumnStart = colStart
@@ -525,7 +500,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 						cellBox.PaddingRight = cellPadding
 					}
 
-					// Transmit TR background to cell if cell has none
 					if trBgColor != nil && (cellBox.BackgroundColor == nil || cellBox.BackgroundColor == color.Transparent) {
 						cellBox.BackgroundColor = trBgColor
 					}
@@ -538,7 +512,6 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 		}
 	}
 
-	// 3. Build grid-template-columns string from colSpecs
 	var colsBuilder strings.Builder
 	for i := 0; i < maxCols; i++ {
 		if i > 0 {
@@ -552,10 +525,8 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 	}
 	layoutBox.GridTemplateColumns = colsBuilder.String()
 
-	// 4. Run grid layout
 	le.gridEngine.LayoutTable(layoutBox)
 
-	// Calculate height
 	maxY := y + layoutBox.PaddingTop
 	for _, child := range layoutBox.Children {
 		childBottom := child.Box.Y + child.Box.Height + child.MarginBottom
@@ -567,24 +538,20 @@ func (le *LayoutEngine) buildTableLayoutBox(node *RenderNode, layoutBox *LayoutB
 	return maxY + layoutBox.PaddingBottom
 }
 
-// applyBoxModel applies box model properties (margin, padding, border) from computed style to layout box
 func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	if node.ComputedStyle == nil {
 		return
 	}
 
-	// Get font size for em/rem calculations
 	fontSize := le.defaultFontSize
 	if node.ComputedStyle.FontSize > 0 {
 		fontSize = node.ComputedStyle.FontSize
 	}
 
-	// Apply margins (use parseLengthWithViewport to support vh/vw/% units)
 	layoutBox.MarginTop = parseLengthWithViewport(node.ComputedStyle.MarginTop, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginRight = parseLengthWithViewport(node.ComputedStyle.MarginRight, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginBottom = parseLengthWithViewport(node.ComputedStyle.MarginBottom, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.MarginLeft = parseLengthWithViewport(node.ComputedStyle.MarginLeft, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
-	// Reset "auto" or empty margins to 0 (margin: auto centering calculates used margins separately)
 	if node.ComputedStyle.MarginTop == "" || node.ComputedStyle.MarginTop == "auto" {
 		layoutBox.MarginTop = 0
 	}
@@ -598,7 +565,6 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 		layoutBox.MarginLeft = 0
 	}
 
-	// Apply padding (use parseLengthWithViewport to support vh/vw/% units)
 	layoutBox.PaddingTop = parseLengthWithViewport(node.ComputedStyle.PaddingTop, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.PaddingRight = parseLengthWithViewport(node.ComputedStyle.PaddingRight, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
 	layoutBox.PaddingBottom = parseLengthWithViewport(node.ComputedStyle.PaddingBottom, fontSize, le.canvasWidth, le.canvasHeight, le.canvasWidth)
@@ -616,7 +582,6 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 		layoutBox.PaddingLeft = 0
 	}
 
-	// Apply borders
 	layoutBox.BorderTopWidth = parseLength(node.ComputedStyle.BorderTopWidth, fontSize)
 	layoutBox.BorderRightWidth = parseLength(node.ComputedStyle.BorderRightWidth, fontSize)
 	layoutBox.BorderBottomWidth = parseLength(node.ComputedStyle.BorderBottomWidth, fontSize)
@@ -632,7 +597,6 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	layoutBox.BorderBottomColor = node.ComputedStyle.BorderBottomColor
 	layoutBox.BorderLeftColor = node.ComputedStyle.BorderLeftColor
 
-	// Apply background properties
 	layoutBox.BackgroundColor = node.ComputedStyle.BackgroundColor
 	layoutBox.BackgroundImage = node.ComputedStyle.BackgroundImage
 	layoutBox.BackgroundRepeat = node.ComputedStyle.BackgroundRepeat
@@ -645,13 +609,10 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 	}
 }
 
-// computeLayoutBox computes the layout for a single box
 func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext) float32 {
-	// Account for margins
 	marginLeft := layoutBox.MarginLeft
 	marginRight := layoutBox.MarginRight
 
-	// Check for explicit width
 	explicitWidth := float32(-1)
 	if node.ComputedStyle != nil && node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto" {
 		fontSize := le.defaultFontSize
@@ -660,7 +621,6 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		}
 		explicitWidth = parseLengthWithViewport(node.ComputedStyle.Width, fontSize, le.canvasWidth, le.canvasHeight, availableWidth)
 	}
-	// For img elements, fall back to HTML width attribute if CSS width is not set
 	if node.TagName == "img" && explicitWidth < 0 {
 		if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
 			if v := parseLength(wAttr, le.defaultFontSize); v > 0 {
@@ -693,24 +653,19 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		}
 	}
 
-	// Handle margin: auto for block-level elements
 	if node.IsBlock() && usedBoxWidth >= 0 && usedBoxWidth < availableWidth {
 		if node.ComputedStyle != nil && (node.ComputedStyle.MarginLeft == "auto" || node.ComputedStyle.MarginRight == "auto") {
 			remainingSpace := availableWidth - usedBoxWidth
 			if node.ComputedStyle.MarginLeft == "auto" && node.ComputedStyle.MarginRight == "auto" {
-				// Center
 				marginLeft = remainingSpace / 2
 				marginRight = remainingSpace / 2
 			} else if node.ComputedStyle.MarginLeft == "auto" {
-				// Align right
 				marginLeft = remainingSpace
 				marginRight = 0
 			} else {
-				// Align left (default)
 				marginLeft = 0
 				marginRight = remainingSpace
 			}
-			// Update layout box margins
 			layoutBox.MarginLeft = marginLeft
 			layoutBox.MarginRight = marginRight
 		}
@@ -719,7 +674,6 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 	x += marginLeft
 	y += layoutBox.MarginTop
 
-	// Calculate width
 	width := availableWidth - (marginLeft + marginRight)
 	if explicitWidth >= 0 {
 		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing == "border-box" {
@@ -728,10 +682,8 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 			width = explicitWidth + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
 	} else if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
-		// Use the image's intrinsic width when no CSS/HTML width is specified
 		width = float32(node.ImageData.Width)
 	} else if node.ComputedStyle != nil && (node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" || node.ComputedStyle.Display == "inline-block") {
-		// Float or Inline-Block with auto width: compute shrink-to-fit width
 		contentW := float32(0)
 		if le.hasInlineContent(node) {
 			wsMode := le.whiteSpaceModeForNode(node)
@@ -763,7 +715,6 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 			width = contentW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
 
-		// Ensure width doesn't exceed availableWidth - (marginLeft + marginRight)
 		maxWidth := availableWidth - (marginLeft + marginRight)
 		if width > maxWidth {
 			width = maxWidth
@@ -791,7 +742,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 				letterSpacing = node.ComputedStyle.LetterSpacing
 			}
 			metrics := le.fontMetrics.MeasureText(text, le.defaultFontSize, style, letterSpacing)
-			defaultW = metrics.Width + 20 // 20px padding/buffer
+			defaultW = metrics.Width + 20
 		}
 		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing == "border-box" {
 			width = defaultW
@@ -799,13 +750,11 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 			width = defaultW + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
 
-		// Constrain to available width
 		if width > availableWidth-marginLeft-marginRight {
 			width = availableWidth - marginLeft - marginRight
 		}
 	}
 
-	// Apply min-width and max-width constraints
 	if node.ComputedStyle != nil {
 		fontSize := le.defaultFontSize
 		if node.ComputedStyle.FontSize > 0 {
@@ -844,35 +793,28 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 	currentY := y
 
 	if node.Type == NodeTypeText {
-		// Layout text node
 		currentY = le.computeTextLayout(node, layoutBox, x, y, width)
 	} else if node.Type == NodeTypeElement {
-		// Layout element node
 		currentY = le.computeElementLayout(node, layoutBox, x, y, width, floatCtx)
 	}
 
 	return currentY
 }
 
-// computeTextLayout computes layout for text nodes
 func (le *LayoutEngine) computeTextLayout(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32) float32 {
-	// Get font size from computed style
 	fontSize := le.defaultFontSize
 	if node.Parent != nil && node.Parent.ComputedStyle != nil && node.Parent.ComputedStyle.FontSize > 0 {
 		fontSize = node.Parent.ComputedStyle.FontSize
 	}
 
-	// Get text style from parent hierarchy
 	style := le.fontMetrics.GetTextStyleFromNode(node)
 
-	// Calculate text dimensions using font metrics
 	text := strings.TrimSpace(node.Text)
 	if text == "" {
 		layoutBox.Box.Height = 0
 		return y
 	}
 
-	// Measure text with wrapping
 	letterSpacing := float32(0)
 	if node.Parent != nil && node.Parent.ComputedStyle != nil {
 		letterSpacing = node.Parent.ComputedStyle.LetterSpacing
@@ -884,43 +826,28 @@ func (le *LayoutEngine) computeTextLayout(node *RenderNode, layoutBox *LayoutBox
 	return y + metrics.Height
 }
 
-// computeElementLayout computes layout for element nodes
 func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *LayoutBox, x, y, availableWidth float32, floatCtx *FloatContext) float32 {
-	currentY := y
-
-	// Add border top offset before padding
-	currentY += layoutBox.BorderTopWidth
-
-	// Add padding to the starting position
-	currentY += layoutBox.PaddingTop
+	currentY := y + layoutBox.BorderTopWidth + layoutBox.PaddingTop
 	childX := x + layoutBox.BorderLeftWidth + layoutBox.PaddingLeft
 
-	// Reduce available width by horizontal borders and padding
 	contentWidth := availableWidth - layoutBox.BorderLeftWidth - layoutBox.PaddingLeft - layoutBox.PaddingRight - layoutBox.BorderRightWidth
 	if contentWidth < 0 {
 		contentWidth = 0
 	}
 
-	// Establish a BFC (independent FloatContext) if needed
 	if floatCtx == nil || establishesBFC(node, layoutBox) {
 		floatCtx = NewFloatContext(childX, currentY, contentWidth)
 	}
 	floatStart := len(floatCtx.floats)
 
-	// Layout children
 	childY := currentY
 
-	// Check if this block element contains inline content
-	// Block elements like p, div can contain inline content
 	if layoutBox.Display == DisplayFlex {
-		// Use Adapter to build child layout boxes with nil float context since flex items establish new BFC
 		buildLayoutBoxAdapter := func(child *RenderNode, cx, cy, cw float32) *LayoutBox {
 			return le.buildLayoutBox(child, cx, cy, cw, nil)
 		}
-		// Use flexbox layout engine for flex containers
 		le.flexEngine.LayoutFlexContainer(node, layoutBox, buildLayoutBoxAdapter)
 
-		// Calculate childY based on laid out flex items
 		for _, child := range layoutBox.Children {
 			endY := child.Box.Y + child.Box.Height + child.MarginBottom
 			if endY > childY {
@@ -928,15 +855,11 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 			}
 		}
 	} else if layoutBox.Display == DisplayGrid {
-		// Use Adapter to build child layout boxes with nil float context since grid items establish new BFC
 		buildLayoutBoxAdapter := func(child *RenderNode, cx, cy, cw float32) *LayoutBox {
 			return le.buildLayoutBox(child, cx, cy, cw, nil)
 		}
-		// Use grid layout engine for grid containers
 		le.gridEngine.LayoutGridContainer(node, layoutBox, buildLayoutBoxAdapter)
 
-		// Calculate childY based on laid out items (similar to Block/Flex)
-		// Grid layout sets height on parentBox too, but let's ensure childY reflects content
 		for _, child := range layoutBox.Children {
 			endY := child.Box.Y + child.Box.Height + child.MarginBottom
 			if endY > childY {
@@ -949,16 +872,11 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		// them, per CSS block-in-inline model.
 		childY = le.layoutBlockAndInline(node, layoutBox, childX, currentY, contentWidth, floatCtx)
 	} else if node.IsBlock() && le.hasBlockChildren(node) {
-		// Block elements: stack children vertically (when no inline content)
-		// Check if element has intrinsic dimensions (e.g. input, button, textarea)
 		if node.TagName == "input" {
-			// Default content height for input is 30px
 			childY = currentY + 30
 		} else if node.TagName == "button" && !le.hasInlineContent(node) {
-			// Default content height for empty button is 30px
 			childY = currentY + 30
 		} else if node.TagName == "textarea" {
-			// Default content height for textarea is 60px
 			childY = currentY + 60
 		} else {
 			var lastChild *LayoutBox
@@ -966,23 +884,19 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 				if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
 					continue
 				}
-				// Skip whitespace-only text nodes in block children stacking
 				if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 					continue
 				}
 
-				// 1. Handle clear
 				if child.ComputedStyle != nil && child.ComputedStyle.Clear != "" {
 					childY = floatCtx.ClearFloat(child.ComputedStyle.Clear, childY)
 				}
 
-				// 2. Handle float
 				if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
 					le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx)
 					continue
 				}
 
-				// 3. Normal in-flow block elements: stack vertically with margin collapse
 				newY, childBox, inFlow := le.stackBlockChild(child, layoutBox, lastChild, childX, childY, contentWidth, floatCtx)
 				if inFlow {
 					childY = newY
@@ -991,26 +905,19 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 			}
 		}
 	} else {
-		// Inline elements: use inline layout engine
 		if le.hasInlineContent(node) {
 			wsMode := le.whiteSpaceModeForNode(node)
 			lines, totalHeight := le.inlineEngine.LayoutInlineContent(
 				node, childX, currentY, contentWidth, wsMode, floatCtx,
 			)
 
-			// Store line boxes in the layout box
 			layoutBox.LineBoxes = lines
 
-			// DO NOT create child LayoutBox instances for inline boxes
-			// The LineBoxes contain all the information needed for rendering
-			// However, we still need to populate nodeMap for GetLayoutBox to work
 			processedNodeIDs := make(map[int64]bool)
 			for _, line := range lines {
 				for _, inlineBox := range line.InlineBoxes {
 					if !processedNodeIDs[inlineBox.NodeID] {
 						processedNodeIDs[inlineBox.NodeID] = true
-						// Map the inline node ID to the parent layout box
-						// This allows GetLayoutBox to find a box for inline nodes
 						le.nodeMapMu.Lock()
 						le.nodeMap[inlineBox.NodeID] = layoutBox
 						le.nodeMapMu.Unlock()
@@ -1020,19 +927,13 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 
 			childY = currentY + totalHeight
 		} else {
-			// Check if element has intrinsic dimensions (e.g. input, button, textarea)
-			// These might have no children (void tags or empty) but need rendering size
 			if node.TagName == "input" {
-				// Default content height for input is 30px
 				childY = currentY + 30
 			} else if node.TagName == "button" {
-				// Default content height for button is 30px
 				childY = currentY + 30
 			} else if node.TagName == "textarea" {
-				// Default content height for textarea is 60px
 				childY = currentY + 60
 			} else {
-				// Fallback for empty inline elements using Block layout (e.g. empty div)
 				for _, child := range node.Children {
 					childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx)
 					if childLayoutBox != nil {
@@ -1046,7 +947,6 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		}
 	}
 
-	// Enclose floats if BFC or overflow is not visible
 	if node.ComputedStyle != nil && (node.ComputedStyle.Overflow == "hidden" || node.ComputedStyle.Overflow == "auto" || node.ComputedStyle.Overflow == "scroll") {
 		childY = floatCtx.ClearFloat("both", childY)
 	}
@@ -1056,10 +956,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		}
 	}
 
-	// Add bottom padding
 	childY += layoutBox.PaddingBottom
-
-	// Add border bottom offset after padding
 	childY += layoutBox.BorderBottomWidth
 
 	return childY
@@ -1176,12 +1073,10 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 
 		flushRun()
 
-		// Handle clear
 		if child.ComputedStyle != nil && child.ComputedStyle.Clear != "" {
 			childY = floatCtx.ClearFloat(child.ComputedStyle.Clear, childY)
 		}
 
-		// Handle float
 		if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
 			le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx)
 			continue
@@ -1201,26 +1096,12 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 	return childY
 }
 
-func maxFloat32(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minFloat32(a, b float32) float32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func collapseMargins(m1, m2 float32) float32 {
 	if m1 >= 0 && m2 >= 0 {
-		return maxFloat32(m1, m2)
+		return max(m1, m2)
 	}
 	if m1 < 0 && m2 < 0 {
-		return minFloat32(m1, m2)
+		return min(m1, m2)
 	}
 	return m1 + m2
 }
@@ -1229,23 +1110,18 @@ func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
 	if node.ComputedStyle == nil {
 		return false
 	}
-	// display: flow-root
 	if node.ComputedStyle.Display == "flow-root" {
 		return true
 	}
-	// overflow other than visible
 	if node.ComputedStyle.Overflow != "" && node.ComputedStyle.Overflow != "visible" {
 		return true
 	}
-	// float other than none
 	if node.ComputedStyle.Float != "" && node.ComputedStyle.Float != "none" {
 		return true
 	}
-	// position: absolute or fixed
 	if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" {
 		return true
 	}
-	// display: inline-block, flex, grid
 	disp := layoutBox.Display
 	if disp == DisplayInlineBlock || disp == DisplayFlex || disp == DisplayGrid {
 		return true
@@ -1253,16 +1129,13 @@ func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
 	return false
 }
 
-// GetLayoutBox returns the LayoutBox for a given RenderNode ID
 func (le *LayoutEngine) GetLayoutBox(nodeID int64) *LayoutBox {
 	le.nodeMapMu.RLock()
 	defer le.nodeMapMu.RUnlock()
 	return le.nodeMap[nodeID]
 }
 
-// HitTest performs hit testing on the layout tree
-// Returns the node ID of the deepest layout box containing the point (x, y)
-// Returns 0 if no box contains the point
+// HitTest returns the node ID of the deepest layout box containing (x, y), or 0.
 func (le *LayoutEngine) HitTest(layoutRoot *LayoutBox, x, y float32) int64 {
 	if layoutRoot == nil {
 		return 0
@@ -1271,35 +1144,29 @@ func (le *LayoutEngine) HitTest(layoutRoot *LayoutBox, x, y float32) int64 {
 	return le.hitTestRecursive(layoutRoot, x, y)
 }
 
-// hitTestRecursive recursively searches for the deepest box containing (x, y)
 func (le *LayoutEngine) hitTestRecursive(box *LayoutBox, x, y float32) int64 {
 	if !box.Contains(x, y) {
 		return 0
 	}
 
-	// Check children first (depth-first search for deepest match)
 	for _, child := range box.Children {
 		if hitID := le.hitTestRecursive(child, x, y); hitID != 0 {
 			return hitID
 		}
 	}
 
-	// If no child contains the point, return this box's node ID
 	return box.NodeID
 }
 
 // Layout performs layout calculations on the render tree (deprecated - use ComputeLayout)
-// Kept for backward compatibility
 func (le *LayoutEngine) Layout(root *RenderNode) {
 	if root == nil {
 		return
 	}
 
-	// Start layout from top-left with full canvas width
 	le.layoutNode(root, 0, 0, le.canvasWidth)
 }
 
-// layoutNode performs layout calculation for a single node and its children
 func (le *LayoutEngine) layoutNode(node *RenderNode, x, y, availableWidth float32) float32 {
 	if node == nil {
 		return y
@@ -1308,34 +1175,27 @@ func (le *LayoutEngine) layoutNode(node *RenderNode, x, y, availableWidth float3
 	currentY := y
 
 	if node.Type == NodeTypeText {
-		// Layout text node
 		currentY = le.layoutTextNode(node, x, y, availableWidth)
 	} else if node.Type == NodeTypeElement {
-		// Layout element node
 		currentY = le.layoutElementNode(node, x, y, availableWidth)
 	}
 
 	return currentY
 }
 
-// layoutTextNode handles layout for text nodes
 func (le *LayoutEngine) layoutTextNode(node *RenderNode, x, y, availableWidth float32) float32 {
-	// Get font size from parent element
 	fontSize := le.defaultFontSize
 	if node.Parent != nil {
 		fontSize = le.fontMetrics.GetFontSize(node.Parent.TagName)
 	}
 
-	// Get text style from parent hierarchy
 	style := le.fontMetrics.GetTextStyleFromNode(node)
 
-	// Calculate text dimensions using font metrics
 	text := strings.TrimSpace(node.Text)
 	if text == "" {
 		return y
 	}
 
-	// Measure text with wrapping
 	letterSpacing := float32(0)
 	if node.Parent != nil && node.Parent.ComputedStyle != nil {
 		letterSpacing = node.Parent.ComputedStyle.LetterSpacing
@@ -1350,7 +1210,6 @@ func (le *LayoutEngine) layoutTextNode(node *RenderNode, x, y, availableWidth fl
 	return y + metrics.Height
 }
 
-// layoutElementNode handles layout for element nodes (legacy path used by layoutNode)
 func (le *LayoutEngine) layoutElementNode(node *RenderNode, x, y, availableWidth float32) float32 {
 	node.Box.X = x
 	node.Box.Y = y
@@ -1378,7 +1237,6 @@ func (le *LayoutEngine) layoutElementNode(node *RenderNode, x, y, availableWidth
 	return childY
 }
 
-// getFontSize returns the font size for an element (delegates to fontMetrics)
 func (le *LayoutEngine) getFontSize(tagName string) float32 {
 	return le.fontMetrics.GetFontSize(tagName)
 }
@@ -1402,7 +1260,6 @@ func (le *LayoutEngine) whiteSpaceModeForNode(node *RenderNode) WhiteSpaceMode {
 	return WhiteSpaceNormal
 }
 
-// whiteSpaceModeFromCSS maps a CSS white-space value to a layout mode.
 func whiteSpaceModeFromCSS(value string) (WhiteSpaceMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "normal":
@@ -1419,7 +1276,6 @@ func whiteSpaceModeFromCSS(value string) (WhiteSpaceMode, bool) {
 	return WhiteSpaceNormal, false
 }
 
-// hasBlockChildren checks if a node has any in-flow block-level child elements
 func (le *LayoutEngine) hasBlockChildren(node *RenderNode) bool {
 	if node == nil {
 		return false
@@ -1435,7 +1291,6 @@ func (le *LayoutEngine) hasBlockChildren(node *RenderNode) bool {
 	return false
 }
 
-// hasInlineContent checks if a node has inline content (text or inline children)
 func (le *LayoutEngine) hasInlineContent(node *RenderNode) bool {
 	return le.hasInlineContentRecursive(node)
 }

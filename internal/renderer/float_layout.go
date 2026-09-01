@@ -24,10 +24,7 @@ func NewFloatContext(containerX, containerY, containerWidth float32) *FloatConte
 	}
 }
 
-// PlaceFloat positions a new float element, constrained by the containing block's X and width.
-// For float: left, it finds the leftmost available position at or below currentY.
-// For float: right, it finds the rightmost available position at or below currentY.
-// If there are existing floats that overlap with the new float, it pushes the Y coordinate down.
+// PlaceFloat positions a new float element at or below currentY within the containing block.
 func (fc *FloatContext) PlaceFloat(box *LayoutBox, floatDir string, currentY float32, containingBlockX, containingBlockWidth float32) (float32, float32) {
 	width := box.Box.Width + box.MarginLeft + box.MarginRight
 	height := box.Box.Height + box.MarginTop + box.MarginBottom
@@ -39,31 +36,24 @@ func (fc *FloatContext) PlaceFloat(box *LayoutBox, floatDir string, currentY flo
 		bfcLeft := fc.containerX + leftOffset
 		bfcRight := fc.containerX + leftOffset + bfcAvailableWidth
 
-		leftBoundary := maxFloat32(containingBlockX, bfcLeft)
-		rightBoundary := minFloat32(containingBlockX+containingBlockWidth, bfcRight)
+		leftBoundary := max(containingBlockX, bfcLeft)
+		rightBoundary := min(containingBlockX+containingBlockWidth, bfcRight)
 
-		availableWidth := rightBoundary - leftBoundary
-		if availableWidth < 0 {
-			availableWidth = 0
-		}
+		availableWidth := max(0, rightBoundary-leftBoundary)
 
-		// If width fits, place it
 		if width <= availableWidth {
 			var x float32
 			if floatDir == "left" {
 				x = leftBoundary + box.MarginLeft
-			} else { // "right"
+			} else {
 				x = rightBoundary - width + box.MarginLeft
 			}
 			return x, targetY + box.MarginTop
 		}
 
-		// Otherwise, find the lowest bottom of any active float that overlaps the targetY range,
-		// and move targetY there to try again.
-		lowestY := targetY + 1.0 // progress by at least 1px
+		lowestY := targetY + 1.0
 		foundOverlap := false
 		for _, f := range fc.floats {
-			// If float overlaps vertically with [targetY, targetY + height]
 			if f.Box.Y < targetY+height && f.Box.Y+f.Box.Height > targetY {
 				if f.Box.Y+f.Box.Height > lowestY {
 					lowestY = f.Box.Y + f.Box.Height
@@ -72,7 +62,6 @@ func (fc *FloatContext) PlaceFloat(box *LayoutBox, floatDir string, currentY flo
 			}
 		}
 		if !foundOverlap {
-			// If no overlapping floats but still doesn't fit, we have to place it here anyway
 			var x float32
 			if floatDir == "left" {
 				x = leftBoundary + box.MarginLeft
@@ -85,16 +74,13 @@ func (fc *FloatContext) PlaceFloat(box *LayoutBox, floatDir string, currentY flo
 	}
 }
 
-// GetAvailableWidth computes the available horizontal span at a given Y position and height,
-// accounting for any left and right floats that intersect that vertical range.
+// GetAvailableWidth computes the available horizontal span at a given Y position and height.
 func (fc *FloatContext) GetAvailableWidth(y, height float32) (float32, float32) {
 	leftBoundary := float32(0.0)
 	rightBoundary := fc.containerWidth
 
 	for _, f := range fc.floats {
-		// Vertically overlapping?
 		if f.Box.Y < y+height && f.Box.Y+f.Box.Height > y {
-			// Shift boundaries relative to containerX
 			fx := f.Box.X - fc.containerX
 			fWidth := f.Box.Width
 
@@ -112,16 +98,12 @@ func (fc *FloatContext) GetAvailableWidth(y, height float32) (float32, float32) 
 		}
 	}
 
-	available := rightBoundary - leftBoundary
-	if available < 0 {
-		available = 0
-	}
+	available := max(0, rightBoundary-leftBoundary)
 	return leftBoundary, available
 }
 
-// AddFloat registers a placed float's layout box (including margins) into the exclusion tracking.
+// AddFloat registers a placed float's layout box into exclusion tracking.
 func (fc *FloatContext) AddFloat(box *LayoutBox, floatDir string) {
-	// Include margins in the layout box exclusion rect
 	entry := FloatEntry{
 		Box: Rect{
 			X:      box.Box.X - box.MarginLeft,
@@ -134,7 +116,7 @@ func (fc *FloatContext) AddFloat(box *LayoutBox, floatDir string) {
 	fc.floats = append(fc.floats, entry)
 }
 
-// ClearFloat moves the current Y position down past any active left, right, or both floats.
+// ClearFloat moves the current Y position down past active floats matching clearType.
 func (fc *FloatContext) ClearFloat(clearType string, currentY float32) float32 {
 	if clearType == "none" || clearType == "" {
 		return currentY

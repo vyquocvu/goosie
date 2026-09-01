@@ -130,16 +130,6 @@ func TestInlineScriptsByPosition_ScriptWithSrcOnly(t *testing.T) {
 	}
 }
 
-// contains is a small helper used by table-style assertions above.
-func contains(s []string, want string) bool {
-	for _, v := range s {
-		if v == want {
-			return true
-		}
-	}
-	return false
-}
-
 // TestExecuteScriptQueue_DocumentOrder — M4 acceptance: scripts
 // execute in document order. Mixes inline and external (mocked) in a
 // known sequence and verifies the js.Runtime sees them in that order.

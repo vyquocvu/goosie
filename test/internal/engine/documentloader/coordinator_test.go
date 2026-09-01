@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -586,7 +587,7 @@ func TestUnsupportedScriptModeSkipped(t *testing.T) {
 	if !errors.As(h.cb.Errors[0], &skip) {
 		t.Errorf("expected SkippedError, got %T", h.cb.Errors[0])
 	}
-	if skip == nil || !contains(skip.Reason, "module") {
+	if skip == nil || !strings.Contains(skip.Reason, "module") {
 		t.Errorf("expected reason to mention 'module', got %q", skip.Reason)
 	}
 }
@@ -790,7 +791,7 @@ func TestErrorContextIsInformative(t *testing.T) {
 	}
 	for _, e := range h.cb.Errors {
 		msg := e.Error()
-		if !contains(msg, "csp") {
+		if !strings.Contains(msg, "csp") {
 			t.Errorf("error message lacks 'csp' context: %s", msg)
 		}
 	}
@@ -930,7 +931,7 @@ func TestEndToEndWithHTTPServer(t *testing.T) {
 		t.Errorf("expected 1 image, got 0")
 	}
 	for _, c := range cb.CSS {
-		if !contains(string(c.Source), "color:red") {
+		if !strings.Contains(string(c.Source), "color:red") {
 			t.Errorf("CSS body unexpected: %s", c.Source)
 		}
 	}
@@ -975,23 +976,6 @@ func TestIsActiveLifecycle(t *testing.T) {
 	if coord.IsActive() {
 		t.Fatal("expected IsActive false after Cancel")
 	}
-}
-
-// --------------------------------------------------------------------------
-// helpers
-// --------------------------------------------------------------------------
-
-func contains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && (indexOf(s, sub) >= 0))
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 // itoa is a tiny integer formatter; avoids importing strconv into the

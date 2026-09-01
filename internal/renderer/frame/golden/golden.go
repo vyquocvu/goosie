@@ -85,7 +85,7 @@ func CompareImages(got, want image.Image, tolerance uint8) CompareResult {
 			db := absDiff(uint8(gb>>8), uint8(wb>>8))
 			da := absDiff(uint8(ga>>8), uint8(wa>>8))
 
-			maxChannel := max4(dr, dg, db, da)
+			maxChannel := max(dr, dg, db, da)
 			if maxChannel > maxDelta {
 				maxDelta = maxChannel
 			}
@@ -189,20 +189,6 @@ func absDiff(a, b uint8) uint8 {
 	return b - a
 }
 
-func max4(a, b, c, d uint8) uint8 {
-	m := a
-	if b > m {
-		m = b
-	}
-	if c > m {
-		m = c
-	}
-	if d > m {
-		m = d
-	}
-	return m
-}
-
 func ToRGBA(img image.Image) *image.RGBA {
 	if rgba, ok := img.(*image.RGBA); ok {
 		return rgba
@@ -259,7 +245,7 @@ func CreateDiffImage(got, want *image.RGBA, tolerance uint8) *image.RGBA {
 			db := absDiff(uint8(gb>>8), uint8(wb>>8))
 			da := absDiff(uint8(ga>>8), uint8(wa>>8))
 
-			if max4(dr, dg, db, da) > tolerance {
+			if max(dr, dg, db, da) > tolerance {
 				diff.Set(x, y, red)
 			} else {
 				diff.Set(x, y, transparent)

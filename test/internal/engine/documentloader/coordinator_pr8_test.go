@@ -2,6 +2,7 @@ package documentloader_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func TestHandleDocumentEndDoesNotWaitForImages(t *testing.T) {
 	if len(snap.Images) != 0 {
 		t.Fatalf("image emitted before completion: %d", len(snap.Images))
 	}
-	if hasEvent(snap.Lifecycle, documentloader.EventLoad) {
+	if slices.Contains(snap.Lifecycle, documentloader.EventLoad) {
 		t.Fatal("EventLoad fired while the image was still in flight")
 	}
 
@@ -52,7 +53,7 @@ func TestHandleDocumentEndDoesNotWaitForImages(t *testing.T) {
 	if !waitFor(t, func() bool { return len(h.cb.Snapshot().Images) == 1 }) {
 		t.Fatalf("image callback never fired, got %d", len(h.cb.Snapshot().Images))
 	}
-	if !waitFor(t, func() bool { return hasEvent(h.cb.Snapshot().Lifecycle, documentloader.EventLoad) }) {
+	if !waitFor(t, func() bool { return slices.Contains(h.cb.Snapshot().Lifecycle, documentloader.EventLoad) }) {
 		t.Fatal("EventLoad never fired after the image completed")
 	}
 }
@@ -88,7 +89,7 @@ func TestHandleDocumentEndDoesNotWaitForFonts(t *testing.T) {
 	// harness only records CSS/Scripts/Images/Errors/Lifecycle. Font
 	// results are delivered to OnFont, which captureCallbacks does not
 	// wire, so we assert the load event fires instead.
-	if !waitFor(t, func() bool { return hasEvent(h.cb.Snapshot().Lifecycle, documentloader.EventLoad) }) {
+	if !waitFor(t, func() bool { return slices.Contains(h.cb.Snapshot().Lifecycle, documentloader.EventLoad) }) {
 		t.Fatal("EventLoad never fired after the font completed")
 	}
 }
@@ -147,15 +148,6 @@ func TestLateImageResultEmitsInDocumentOrder(t *testing.T) {
 	if !waitFor(t, func() bool { return len(h.cb.Snapshot().Images) == 1 }) {
 		t.Fatal("late image callback never fired")
 	}
-}
-
-func hasEvent(events []documentloader.LifecycleEvent, want documentloader.LifecycleEvent) bool {
-	for _, e := range events {
-		if e == want {
-			return true
-		}
-	}
-	return false
 }
 
 // waitFor polls cond until it returns true or the deadline passes.
