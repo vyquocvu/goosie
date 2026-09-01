@@ -208,6 +208,19 @@ func (n *RenderNode) SetAttribute(key, value string) {
 	n.Attrs[key] = value
 }
 
+// classes returns the space-separated class list from the class attribute.
+func (n *RenderNode) classes() []string {
+	if class, ok := n.Attrs["class"]; ok && class != "" {
+		return strings.Fields(class)
+	}
+	return nil
+}
+
+// id returns the value of the id attribute.
+func (n *RenderNode) id() string {
+	return n.Attrs["id"]
+}
+
 // IsBlock returns true if the element is a block-level element
 func (n *RenderNode) IsBlock() bool {
 	if n.ComputedStyle != nil {

@@ -28,6 +28,11 @@ type StyleManager struct {
 	// use within a render pass.
 	prepared map[*css.StyleSheet][]preparedRule
 
+	// buckets partitions prepared rules by right-most compound selector
+	// (tag/id/class) so applyMatchingRules tests only candidate rules
+	// instead of scanning every rule for every node.
+	buckets map[*css.StyleSheet]*ruleBuckets
+
 	// mediaMatch memoizes @media prelude evaluations for the current
 	// viewport; cleared by SetViewport.
 	mediaMatch map[string]bool
@@ -286,6 +291,39 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	if stylesheet == nil {
 		return
 	}
+
+	buckets := sm.bucketsFor(stylesheet)
+	rules := sm.preparedFor(stylesheet)
+
+	// Collect candidate rule indices from the relevant buckets.
+	candidateSet := make(map[int]bool)
+
+	// Tag bucket
+	if node.TagName != "" {
+		for _, idx := range buckets.byTag[strings.ToLower(node.TagName)] {
+			candidateSet[idx] = true
+		}
+	}
+
+	// Class buckets
+	for _, class := range node.classes() {
+		for _, idx := range buckets.byClass[class] {
+			candidateSet[idx] = true
+		}
+	}
+
+	// ID bucket
+	if id := node.id(); id != "" {
+		for _, idx := range buckets.byID[id] {
+			candidateSet[idx] = true
+		}
+	}
+
+	// Universal bucket (always tested)
+	for _, idx := range buckets.universal {
+		candidateSet[idx] = true
+	}
+
 	type matchedRuleItem struct {
 		declarations []css.Declaration
 		specificity  [3]uint16
@@ -293,7 +331,8 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	}
 	var matched []matchedRuleItem
 
-	for _, rule := range sm.preparedFor(stylesheet) {
+	for idx := range candidateSet {
+		rule := rules[idx]
 		matchedSel := false
 		var bestSpec [3]uint16
 		for _, sel := range rule.selectors {
@@ -369,6 +408,75 @@ func (sm *StyleManager) preparedFor(stylesheet *css.StyleSheet) []preparedRule {
 	}
 	sm.prepared[stylesheet] = rules
 	return rules
+}
+
+// ruleBuckets partitions prepared rules by right-most compound selector so
+// that applyMatchingRules only tests candidate rules for each node instead
+// of scanning every rule. A rule may appear in multiple buckets (e.g. both
+// tag and class); the candidateSet in applyMatchingRules deduplicates.
+type ruleBuckets struct {
+	byTag     map[string][]int // lowercased tag name -> indices into preparedRules
+	byClass   map[string][]int // class name -> indices
+	byID      map[string][]int // ID -> indices
+	universal []int            // rules with universal selector or no keyable part
+}
+
+// buildRuleBuckets partitions rules by the right-most compound selector of
+// each of their selector alternatives.
+func buildRuleBuckets(rules []preparedRule) *ruleBuckets {
+	b := &ruleBuckets{
+		byTag:   make(map[string][]int),
+		byClass: make(map[string][]int),
+		byID:    make(map[string][]int),
+	}
+	for i, rule := range rules {
+		bucketed := false
+		for _, sel := range rule.selectors {
+			if len(sel.parts) == 0 {
+				continue
+			}
+			// The right-most part is the key selector (subject).
+			rightmost := sel.parts[len(sel.parts)-1].Selector
+
+			if rightmost.Universal && rightmost.TagName == "" && rightmost.ID == "" && len(rightmost.Classes) == 0 {
+				// Pure universal selector — goes to universal bucket only.
+				continue
+			}
+
+			if rightmost.TagName != "" {
+				tag := strings.ToLower(rightmost.TagName)
+				b.byTag[tag] = append(b.byTag[tag], i)
+				bucketed = true
+			}
+			for _, class := range rightmost.Classes {
+				b.byClass[class] = append(b.byClass[class], i)
+				bucketed = true
+			}
+			if rightmost.ID != "" {
+				b.byID[rightmost.ID] = append(b.byID[rightmost.ID], i)
+				bucketed = true
+			}
+		}
+		if !bucketed {
+			b.universal = append(b.universal, i)
+		}
+	}
+	return b
+}
+
+// bucketsFor returns the ruleBuckets for a stylesheet, building and caching
+// them on first access.
+func (sm *StyleManager) bucketsFor(stylesheet *css.StyleSheet) *ruleBuckets {
+	if sm.buckets == nil {
+		sm.buckets = make(map[*css.StyleSheet]*ruleBuckets)
+	}
+	if b, ok := sm.buckets[stylesheet]; ok {
+		return b
+	}
+	rules := sm.preparedFor(stylesheet)
+	b := buildRuleBuckets(rules)
+	sm.buckets[stylesheet] = b
+	return b
 }
 
 type styleSelectorPart struct {
