@@ -24,13 +24,24 @@ type CookieRecord struct {
 }
 
 type CookieJar struct {
-	mu      sync.Mutex
-	records []CookieRecord
-	now     func() time.Time
+	mu          sync.Mutex
+	records     []CookieRecord
+	domainIndex map[string][]int // domain -> indices into records
+	now         func() time.Time
 }
 
 func NewCookieJar() *CookieJar {
-	return &CookieJar{now: time.Now}
+	return &CookieJar{
+		domainIndex: make(map[string][]int),
+		now:         time.Now,
+	}
+}
+
+func (j *CookieJar) rebuildDomainIndex() {
+	j.domainIndex = make(map[string][]int)
+	for i, record := range j.records {
+		j.domainIndex[record.Domain] = append(j.domainIndex[record.Domain], i)
+	}
 }
 
 func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
@@ -39,6 +50,7 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	defer j.rebuildDomainIndex()
 	now := j.currentTime()
 	for _, cookie := range cookies {
 		if cookie == nil {
@@ -117,19 +129,31 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
+
+	hostname := canonicalCookieHost(u.Hostname())
+
+	// Collect candidate indices from domain index
+	var candidateIndices []int
+	for domain, indices := range j.domainIndex {
+		if domainMatches(hostname, domain, false) {
+			candidateIndices = append(candidateIndices, indices...)
+		}
+	}
+
+	// Filter candidates by expiry, secure, and path
+	var records []CookieRecord
 	now := j.currentTime()
 	requestPath := cookieRequestPath(u)
-	var records []CookieRecord
-	active := j.records[:0]
-	for _, record := range j.records {
+
+	for _, idx := range candidateIndices {
+		record := j.records[idx]
 		if !record.Expires.IsZero() && !record.Expires.After(now) {
 			continue
 		}
-		active = append(active, record)
 		if record.Secure && u.Scheme != "https" {
 			continue
 		}
-		if !domainMatches(u.Hostname(), record.Domain, record.HostOnly) {
+		if !domainMatches(hostname, record.Domain, record.HostOnly) {
 			continue
 		}
 		if !pathMatches(requestPath, record.Path) {
@@ -137,7 +161,7 @@ func (j *CookieJar) CookieRecords(u *url.URL) []CookieRecord {
 		}
 		records = append(records, record)
 	}
-	j.records = active
+
 	return records
 }
 
