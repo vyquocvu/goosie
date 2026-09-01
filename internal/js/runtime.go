@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"reflect"
 	"sort"
@@ -149,6 +150,12 @@ type Runtime struct {
 	// enforcer enforces script policy limits and API capabilities.
 	// When nil (default), all capabilities are allowed.
 	enforcer *ScriptEnforcer
+
+	// scriptCache caches compiled goja programs keyed by content hash
+	// to avoid re-parsing identical scripts on every RunScript call.
+	scriptCache      map[string]*goja.Program
+	scriptCacheMu    sync.Mutex
+	scriptCacheLimit int
 }
 
 // SetEnforcer attaches a ScriptEnforcer to this runtime for capability
@@ -236,6 +243,8 @@ func NewRuntime() *Runtime {
 		runtimeDetected:   make(map[dom.UnsupportedFeatureKind]bool, 8),
 		frameScheduler:    NewFrameScheduler(0),
 		longTaskThreshold: 50 * time.Millisecond, // W3C long-task definition
+		scriptCache:       make(map[string]*goja.Program),
+		scriptCacheLimit:  500,
 	}
 
 	// Inject ES6+ polyfills before any other setup
@@ -2112,41 +2121,60 @@ func (r *Runtime) RunScript(script string) (goja.Value, error) {
 
 	r.ScanAndReportUnsupportedJSFeatures(script)
 
-	var interrupt *time.Timer
-	if r.maxTaskDuration > 0 {
-		// Install an interrupt that fires after maxTaskDuration. The
-		// Goja interrupt is checked at every opcode; once fired, the
-		// next instruction returns the interruption error.
-		timeout := r.maxTaskDuration
-		interrupt = time.AfterFunc(timeout, func() {
-			r.vm.Interrupt(fmt.Sprintf("script exceeded %v budget", timeout))
-		})
-	}
-
-	start := time.Now()
-	val, err := r.vm.RunString(script)
-	if interrupt != nil {
-		interrupt.Stop()
-	}
-
-	// Long-task metric: only record when the script ran to completion
-	// (err == nil) so that interrupted scripts are counted separately.
-	if err == nil && r.longTaskThreshold > 0 && time.Since(start) >= r.longTaskThreshold {
-		r.longTaskCount.Add(1)
-	}
-	if err != nil {
-		// Detect the interrupt pattern: any error mentioning "budget" is
-		// ours. Goja's error string includes the original Interrupt()
-		// argument verbatim.
-		if strings.Contains(err.Error(), "budget") {
-			r.interruptedCount.Add(1)
+	// Check script compilation cache
+	prog, hash := r.getCachedProgram(script)
+	var compileErr error
+	if prog == nil {
+		prog, compileErr = goja.Compile(script, script, false) // match RunString non-strict mode
+		if compileErr == nil {
+			r.cacheProgram(script, prog, hash)
 		}
 	}
 
-	// Flush microtask queue (drives Promise .then callbacks synchronously)
-	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
-		if fn, ok := goja.AssertFunction(flush); ok {
-			fn(goja.Undefined()) //nolint:errcheck
+	var val goja.Value
+	var err error
+
+	if compileErr != nil {
+		// Compilation failed — skip execution, let error tracking below handle it
+		val = goja.Undefined()
+		err = compileErr
+	} else {
+		var interrupt *time.Timer
+		if r.maxTaskDuration > 0 {
+			// Install an interrupt that fires after maxTaskDuration. The
+			// Goja interrupt is checked at every opcode; once fired, the
+			// next instruction returns the interruption error.
+			timeout := r.maxTaskDuration
+			interrupt = time.AfterFunc(timeout, func() {
+				r.vm.Interrupt(fmt.Sprintf("script exceeded %v budget", timeout))
+			})
+		}
+
+		start := time.Now()
+		val, err = r.vm.RunProgram(prog)
+		if interrupt != nil {
+			interrupt.Stop()
+		}
+
+		// Long-task metric: only record when the script ran to completion
+		// (err == nil) so that interrupted scripts are counted separately.
+		if err == nil && r.longTaskThreshold > 0 && time.Since(start) >= r.longTaskThreshold {
+			r.longTaskCount.Add(1)
+		}
+		if err != nil {
+			// Detect the interrupt pattern: any error mentioning "budget" is
+			// ours. Goja's error string includes the original Interrupt()
+			// argument verbatim.
+			if strings.Contains(err.Error(), "budget") {
+				r.interruptedCount.Add(1)
+			}
+		}
+
+		// Flush microtask queue (drives Promise .then callbacks synchronously)
+		if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
+			if fn, ok := goja.AssertFunction(flush); ok {
+				fn(goja.Undefined()) //nolint:errcheck
+			}
 		}
 	}
 	if err != nil {
@@ -2169,6 +2197,43 @@ func (r *Runtime) RunScript(script string) (goja.Value, error) {
 		fmt.Println("[JS ERROR]", errorMsg)
 	}
 	return val, err
+}
+
+// getCachedProgram looks up a compiled goja.Program by content hash.
+// Returns (nil, hash) on cache miss so the caller can compile and cache.
+func (r *Runtime) getCachedProgram(script string) (*goja.Program, string) {
+	hash := scriptHash(script)
+	r.scriptCacheMu.Lock()
+	defer r.scriptCacheMu.Unlock()
+	if prog, ok := r.scriptCache[hash]; ok {
+		return prog, hash
+	}
+	return nil, hash
+}
+
+// cacheProgram stores a compiled goja.Program in the script cache.
+// Evicts half the cache when the limit is reached (simple FIFO-ish eviction).
+func (r *Runtime) cacheProgram(script string, prog *goja.Program, hash string) {
+	r.scriptCacheMu.Lock()
+	defer r.scriptCacheMu.Unlock()
+	if len(r.scriptCache) >= r.scriptCacheLimit {
+		count := 0
+		for k := range r.scriptCache {
+			delete(r.scriptCache, k)
+			count++
+			if count >= r.scriptCacheLimit/2 {
+				break
+			}
+		}
+	}
+	r.scriptCache[hash] = prog
+}
+
+// scriptHash returns a hex-encoded FNV-1a 64a hash of the script content.
+func scriptHash(script string) string {
+	h := fnv.New64a()
+	h.Write([]byte(script))
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 // GetConsoleMessages returns all console messages
