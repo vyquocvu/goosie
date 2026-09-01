@@ -33,17 +33,85 @@ type LocalStorageAdapter interface {
 	Keys(origin string) []string
 }
 
-// Timer represents a scheduled timer
+// Timer represents a scheduled JavaScript timer (setTimeout/setInterval).
 type Timer struct {
 	ID       int
 	Callback goja.Callable
 	Interval time.Duration
 	Repeat   bool
-	Timer    *time.Timer
-	Ticker   *time.Ticker
-	Cancel   chan bool
-	mu       sync.Mutex
-	stopped  bool // Track if timer has been stopped
+}
+
+// timerPool pools time.Timer objects to reduce allocations.
+var timerPool = sync.Pool{
+	New: func() interface{} {
+		return time.NewTimer(0)
+	},
+}
+
+// pendingTimerEntry tracks a scheduled timer in the dispatcher.
+type pendingTimerEntry struct {
+	callback goja.Callable
+	timer    *time.Timer
+	interval time.Duration
+	repeat   bool
+	deleted  bool
+	runtime  *Runtime
+	id       int
+	gen      uint64    // monotonic generation to detect stale events
+	done     chan struct{} // closed to signal the reader goroutine to exit
+	doneOnce sync.Once   // ensures done is closed exactly once
+}
+
+// startTimerDispatcher starts the per-runtime timer dispatcher goroutine.
+func (r *Runtime) startTimerDispatcher() {
+	r.timerDone = make(chan struct{})
+	go r.runTimerDispatcher()
+}
+
+// runTimerDispatcher reads from pooled time.Timers and dispatches callbacks.
+func (r *Runtime) runTimerDispatcher() {
+	defer r.timerWg.Done()
+	r.timerWg.Add(1)
+	for {
+		select {
+		case <-r.timerDone:
+			return
+		case id := <-r.timerEvents:
+			r.timerCallbackMu.Lock()
+			entry, ok := r.pendingTimers[id]
+			if !ok || entry.deleted {
+				if ok {
+					entry.doneOnce.Do(func() { close(entry.done) })
+					delete(r.pendingTimers, id)
+				}
+				r.timerCallbackMu.Unlock()
+				continue
+			}
+			cb := entry.callback
+			if entry.repeat {
+				// Re-arm for next interval: stop, drain, reset, bump gen.
+				entry.timer.Stop()
+				select {
+				case <-entry.timer.C:
+				default:
+				}
+				entry.gen++
+				entry.timer.Reset(entry.interval)
+				r.timerCallbackMu.Unlock()
+			} else {
+				entry.doneOnce.Do(func() { close(entry.done) })
+				delete(r.pendingTimers, id)
+				r.timerCallbackMu.Unlock()
+			}
+			if r.enqueueTask != nil {
+				r.enqueueTask(func() {
+					cb(goja.Undefined()) //nolint:errcheck
+				})
+			} else {
+				cb(goja.Undefined()) //nolint:errcheck
+			}
+		}
+	}
 }
 
 // ConsoleMessage represents a console log message
@@ -76,6 +144,12 @@ type Runtime struct {
 	origin              string
 	timers              map[int]*Timer
 	timerIDCounter      int
+	// Timer pool dispatcher state.
+	pendingTimers   map[int]*pendingTimerEntry
+	timerEvents     chan int
+	timerDone       chan struct{}
+	timerWg         sync.WaitGroup
+	timerCallbackMu sync.Mutex // protects pendingTimers
 	// History tracking
 	historyStack []string
 	historyIndex int
@@ -241,6 +315,8 @@ func NewRuntime() *Runtime {
 		origin:            "about:blank",
 		timers:            make(map[int]*Timer),
 		timerIDCounter:    1,
+		pendingTimers:     make(map[int]*pendingTimerEntry),
+		timerEvents:       make(chan int, 64),
 		historyStack:      []string{},
 		historyIndex:      -1,
 		consoleMessages:   make([]ConsoleMessage, 0),
@@ -251,6 +327,9 @@ func NewRuntime() *Runtime {
 		scriptCache:       make(map[string]*goja.Program),
 		scriptCacheLimit:  500,
 	}
+
+	// Start the timer dispatcher goroutine for pooled time.Timer objects.
+	runtime.startTimerDispatcher()
 
 	// Inject ES6+ polyfills before any other setup
 	if _, err := vm.RunString(polyfillsJS); err != nil {
@@ -3032,7 +3111,7 @@ func (r *Runtime) setupSessionStorageAPI() {
 	r.vm.Set("sessionStorage", sessionStorage)
 }
 
-// setupTimerAPIs configures setTimeout and setInterval
+// setupTimerAPIs configures setTimeout and setInterval using pooled time.Timer objects.
 func (r *Runtime) setupTimerAPIs() {
 	// setTimeout
 	r.vm.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
@@ -3060,44 +3139,52 @@ func (r *Runtime) setupTimerAPIs() {
 		timerID := r.timerIDCounter
 		r.timerIDCounter++
 
-		timer := &Timer{
+		// Get a timer from the pool, stop and drain any stale state.
+		t := timerPool.Get().(*time.Timer)
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
+		}
+		t.Reset(delay)
+
+		entry := &pendingTimerEntry{
+			callback: callback,
+			timer:    t,
+			repeat:   false,
+			runtime:  r,
+			id:       timerID,
+			gen:      0,
+			done:     make(chan struct{}),
+		}
+		r.timerCallbackMu.Lock()
+		r.pendingTimers[timerID] = entry
+		r.timerCallbackMu.Unlock()
+
+		// Goroutine waits for the pooled timer to fire, then routes the event.
+		go func() {
+			select {
+			case <-t.C:
+				r.timerEvents <- timerID
+			case <-entry.done:
+				// Timer was cleared — drain and return to pool.
+				if t.Stop() {
+					select {
+					case <-t.C:
+					default:
+					}
+				}
+				timerPool.Put(t)
+			}
+		}()
+
+		r.timers[timerID] = &Timer{
 			ID:       timerID,
 			Callback: callback,
 			Interval: delay,
 			Repeat:   false,
-			Cancel:   make(chan bool),
 		}
-
-		timer.Timer = time.AfterFunc(delay, func() {
-			timer.mu.Lock()
-			select {
-			case <-timer.Cancel:
-				timer.mu.Unlock()
-				return
-			default:
-				timer.mu.Unlock()
-				if r.enqueueTask != nil {
-					r.enqueueTask(func() {
-						timer.mu.Lock()
-						defer timer.mu.Unlock()
-						select {
-						case <-timer.Cancel:
-							return
-						default:
-							callback(goja.Undefined()) //nolint:errcheck
-							delete(r.timers, timerID)
-						}
-					})
-				} else {
-					timer.mu.Lock()
-					defer timer.mu.Unlock()
-					callback(goja.Undefined()) //nolint:errcheck
-					delete(r.timers, timerID)
-				}
-			}
-		})
-
-		r.timers[timerID] = timer
 
 		return r.vm.ToValue(timerID)
 	})
@@ -3109,19 +3196,18 @@ func (r *Runtime) setupTimerAPIs() {
 		}
 
 		timerID := int(call.Arguments[0].ToInteger())
-		timer, exists := r.timers[timerID]
-		if exists {
-			timer.mu.Lock()
-			if !timer.stopped {
-				close(timer.Cancel)
-				timer.stopped = true
-				if timer.Timer != nil {
-					timer.Timer.Stop()
-				}
-			}
-			timer.mu.Unlock()
-			delete(r.timers, timerID)
+		if _, exists := r.timers[timerID]; !exists {
+			return goja.Undefined()
 		}
+
+		r.timerCallbackMu.Lock()
+		if entry, ok := r.pendingTimers[timerID]; ok {
+			entry.deleted = true
+			entry.doneOnce.Do(func() { close(entry.done) })
+			delete(r.pendingTimers, timerID)
+		}
+		r.timerCallbackMu.Unlock()
+		delete(r.timers, timerID)
 
 		return goja.Undefined()
 	})
@@ -3152,51 +3238,56 @@ func (r *Runtime) setupTimerAPIs() {
 		timerID := r.timerIDCounter
 		r.timerIDCounter++
 
-		timer := &Timer{
-			ID:       timerID,
-			Callback: callback,
-			Interval: interval,
-			Repeat:   true,
-			Cancel:   make(chan bool),
+		// Get a timer from the pool, stop and drain any stale state.
+		t := timerPool.Get().(*time.Timer)
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
 		}
+		t.Reset(interval)
 
-		timer.Ticker = time.NewTicker(interval)
+		entry := &pendingTimerEntry{
+			callback: callback,
+			timer:    t,
+			interval: interval,
+			repeat:   true,
+			runtime:  r,
+			id:       timerID,
+			gen:      0,
+			done:     make(chan struct{}),
+		}
+		r.timerCallbackMu.Lock()
+		r.pendingTimers[timerID] = entry
+		r.timerCallbackMu.Unlock()
 
+		// Goroutine loops for repeating timers; the dispatcher re-arms after each fire.
 		go func() {
 			for {
 				select {
-				case <-timer.Cancel:
-					return
-				case <-timer.Ticker.C:
-					timer.mu.Lock()
-					select {
-					case <-timer.Cancel:
-						timer.mu.Unlock()
-						return
-					default:
-						timer.mu.Unlock()
-						if r.enqueueTask != nil {
-							r.enqueueTask(func() {
-								timer.mu.Lock()
-								defer timer.mu.Unlock()
-								select {
-								case <-timer.Cancel:
-									return
-								default:
-									callback(goja.Undefined()) //nolint:errcheck
-								}
-							})
-						} else {
-							timer.mu.Lock()
-							defer timer.mu.Unlock()
-							callback(goja.Undefined()) //nolint:errcheck
+				case <-t.C:
+					r.timerEvents <- timerID
+				case <-entry.done:
+					// Timer was cleared — drain and return to pool.
+					if t.Stop() {
+						select {
+						case <-t.C:
+						default:
 						}
 					}
+					timerPool.Put(t)
+					return
 				}
 			}
 		}()
 
-		r.timers[timerID] = timer
+		r.timers[timerID] = &Timer{
+			ID:       timerID,
+			Callback: callback,
+			Interval: interval,
+			Repeat:   true,
+		}
 
 		return r.vm.ToValue(timerID)
 	})
@@ -3208,19 +3299,18 @@ func (r *Runtime) setupTimerAPIs() {
 		}
 
 		timerID := int(call.Arguments[0].ToInteger())
-		timer, exists := r.timers[timerID]
-		if exists {
-			timer.mu.Lock()
-			if !timer.stopped {
-				close(timer.Cancel)
-				timer.stopped = true
-				if timer.Ticker != nil {
-					timer.Ticker.Stop()
-				}
-			}
-			timer.mu.Unlock()
-			delete(r.timers, timerID)
+		if _, exists := r.timers[timerID]; !exists {
+			return goja.Undefined()
 		}
+
+		r.timerCallbackMu.Lock()
+		if entry, ok := r.pendingTimers[timerID]; ok {
+			entry.deleted = true
+			entry.doneOnce.Do(func() { close(entry.done) })
+			delete(r.pendingTimers, timerID)
+		}
+		r.timerCallbackMu.Unlock()
+		delete(r.timers, timerID)
 
 		return goja.Undefined()
 	})
@@ -3460,20 +3550,14 @@ func (r *Runtime) createRejectedPromise(errMsg string) *goja.Object {
 
 // Cleanup cleans up all timers and resources
 func (r *Runtime) Cleanup() {
-	for _, timer := range r.timers {
-		timer.mu.Lock()
-		if !timer.stopped {
-			close(timer.Cancel)
-			timer.stopped = true
-			if timer.Timer != nil {
-				timer.Timer.Stop()
-			}
-			if timer.Ticker != nil {
-				timer.Ticker.Stop()
-			}
-		}
-		timer.mu.Unlock()
+	// Stop all pending pooled timers and signal goroutines to exit.
+	r.timerCallbackMu.Lock()
+	for id, entry := range r.pendingTimers {
+		entry.deleted = true
+		entry.doneOnce.Do(func() { close(entry.done) })
+		delete(r.pendingTimers, id)
 	}
+	r.timerCallbackMu.Unlock()
 	r.timers = make(map[int]*Timer)
 
 	// Drop any pending requestAnimationFrame callbacks so a navigation
