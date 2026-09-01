@@ -5,14 +5,8 @@ import "github.com/dop251/goja"
 // VM exports vm field for use by external test packages.
 func (r *Runtime) VM() *goja.Runtime { return r.vm }
 
-// SetVM sets vm field for use by external test packages.
-func (r *Runtime) SetVM(vm *goja.Runtime) { r.vm = vm }
-
 // HTMLCache exports htmlCache field for use by external test packages.
 func (r *Runtime) HTMLCache() string { return r.htmlCache }
-
-// SetHTMLCache sets htmlCache field for use by external test packages.
-func (r *Runtime) SetHTMLCache(cache string) { r.htmlCache = cache }
 
 // EnqueueTask exports enqueueTask field for use by external test packages.
 func (r *Runtime) EnqueueTask(fn func()) { r.enqueueTask(fn) }

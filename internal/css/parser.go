@@ -606,15 +606,6 @@ func (p *Parser) consumeIdentifier() string {
 	return result
 }
 
-func (p *Parser) consumeUntil(stopChar byte) string {
-	var result string
-	for p.pos < len(p.input) && p.peek() != stopChar {
-		result += string(p.input[p.pos])
-		p.pos++
-	}
-	return strings.TrimSpace(result)
-}
-
 func (p *Parser) consumeUntilChar(stopChar byte) string {
 	var result string
 	for p.pos < len(p.input) && p.peek() != stopChar {

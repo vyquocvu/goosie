@@ -421,47 +421,6 @@ func (sm *StyleManager) matchStyleParts(parts []styleSelectorPart, idx int, node
 	}
 }
 
-// hasMatchingAncestor checks if any ancestor matches the selector
-func (sm *StyleManager) hasMatchingAncestor(selector css.SimpleSelector, node *RenderNode) bool {
-	current := node.Parent
-	for current != nil {
-		if sm.matchesSimple(selector, current) {
-			return true
-		}
-		current = current.Parent
-	}
-	return false
-}
-
-// hasMatchingPreviousSibling checks if any previous sibling matches the selector
-func (sm *StyleManager) hasMatchingPreviousSibling(selector css.SimpleSelector, node *RenderNode) bool {
-	if node.Parent == nil {
-		return false
-	}
-
-	// Find node's index in parent's children
-	nodeIndex := -1
-	for i, child := range node.Parent.Children {
-		if child == node {
-			nodeIndex = i
-			break
-		}
-	}
-
-	if nodeIndex == -1 {
-		return false
-	}
-
-	// Check all previous siblings
-	for i := nodeIndex - 1; i >= 0; i-- {
-		if sm.matchesSimple(selector, node.Parent.Children[i]) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // getPreviousSibling returns the previous sibling of a node
 func (sm *StyleManager) getPreviousSibling(node *RenderNode) *RenderNode {
 	if node.Parent == nil {

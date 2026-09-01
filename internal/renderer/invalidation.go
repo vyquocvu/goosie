@@ -425,9 +425,7 @@ func (ile *IncrementalLayoutEngine) rebuildSubtree(node *RenderNode) {
 	le := ile.LayoutEngine
 	le.mu.Lock()
 	defer le.mu.Unlock()
-	_ = le.buildLayoutBox(node, 0, 0, le.canvasWidth, nil,
-		le.inlineEngine, le.flexEngine, le.gridEngine,
-	)
+	_ = le.buildLayoutBox(node, 0, 0, le.canvasWidth, nil)
 }
 
 func (ile *IncrementalLayoutEngine) RecomputeDirtyFromPrevious(previous *LayoutBox, root *RenderNode) *LayoutBox {

@@ -1207,11 +1207,6 @@ func (cr *CanvasRenderer) getFontSize(tagName string) float32 {
 	return cr.fontMetrics.GetFontSize(tagName)
 }
 
-// getTextStyle returns text style for an element type (delegates to fontMetrics)
-func (cr *CanvasRenderer) getTextStyle(tagName string) fyne.TextStyle {
-	return cr.fontMetrics.GetTextStyle(tagName)
-}
-
 // RenderWithViewport renders the render tree with viewport culling, object
 // caching, and spatial Y-band indexing for high-performance scroll/redraw.
 // Objects are reused across frames so Fyne doesn't allocate new canvas objects
@@ -1893,13 +1888,6 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 	}
 
 	return nil
-}
-
-func (cr *CanvasRenderer) renderCommand(cmd *PaintCommand, objects *[]fyne.CanvasObject) {
-	obj := cr.createCanvasObject(cmd)
-	if obj != nil {
-		*objects = append(*objects, obj)
-	}
 }
 
 // SetDirtyOverlayEnabled enables or disables the dirty-region overlay visualization.

@@ -43,5 +43,3 @@ const MaxRedirects = maxRedirects
 
 // MaxBodySize exports maxBodySize field for use by external test packages.
 func (s *Service) MaxBodySize() int64 { return s.maxBodySize }
-
-

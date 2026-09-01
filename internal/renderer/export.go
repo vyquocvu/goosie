@@ -71,14 +71,8 @@ var GlobalTableColumnCache = globalTableColumnCache
 // LayoutEngine exports layoutEngine field for use by external test packages.
 func (r *Renderer) LayoutEngine() *LayoutEngine { return r.layoutEngine }
 
-// SetLayoutEngine sets layoutEngine field for use by external test packages.
-func (r *Renderer) SetLayoutEngine(le *LayoutEngine) { r.layoutEngine = le }
-
 // CanvasRenderer exports canvasRenderer field for use by external test packages.
 func (r *Renderer) CanvasRenderer() *CanvasRenderer { return r.canvasRenderer }
-
-// SetCanvasRenderer sets canvasRenderer field for use by external test packages.
-func (r *Renderer) SetCanvasRenderer(cr *CanvasRenderer) { r.canvasRenderer = cr }
 
 // TestingMode exports testingMode field for use by external test packages.
 func (r *Renderer) TestingMode() bool { return r.testingMode }
@@ -88,9 +82,6 @@ func (r *Renderer) ImageLoader() imageloader.Loader { return r.imageLoader }
 
 // ChunkedDisplay exports chunkedDisplay field for use by external test packages.
 func (r *Renderer) ChunkedDisplay() *ChunkedDisplayList { return r.chunkedDisplay }
-
-// SetChunkedDisplay sets chunkedDisplay field for use by external test packages.
-func (r *Renderer) SetChunkedDisplay(cd *ChunkedDisplayList) { r.chunkedDisplay = cd }
 
 // TreeMu exports treeMu field for use by external test packages.
 func (r *Renderer) TreeMu() *sync.RWMutex { return &r.treeMu }
@@ -114,9 +105,6 @@ func (r *Renderer) StylesheetMu() *sync.RWMutex { return &r.stylesheetMu }
 
 // Incremental exports incremental field for use by external test packages.
 func (r *Renderer) Incremental() *IncrementalLayoutEngine { return r.incremental }
-
-// SetIncremental sets incremental field for use by external test packages.
-func (r *Renderer) SetIncremental(inc *IncrementalLayoutEngine) { r.incremental = inc }
 
 // Inspectable exports inspectable field for use by external test packages.
 func (cr *CanvasRenderer) Inspectable() *InspectableContainer { return cr.inspectable }
@@ -318,12 +306,3 @@ func (t LinkColorTheme) LinkColor() color.Color { return t.link }
 func NewPaintChunk(owner LayoutID, start, end int, bounds RectF, dirty bool) PaintChunk {
 	return PaintChunk{Owner: owner, Start: start, End: end, Bounds: bounds, dirty: dirty}
 }
-
-
-
-
-
-
-
-
-

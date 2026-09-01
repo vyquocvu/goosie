@@ -74,33 +74,11 @@ type Element struct {
 
 // GetElementByID searches for an element by ID (basic implementation)
 func (p *Parser) GetElementByID(htmlContent, id string) (string, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
+	elem, err := p.GetElementByIDFull(htmlContent, id)
+	if err != nil || elem == nil {
 		return "", err
 	}
-
-	var result string
-	var findElement func(*html.Node)
-	findElement = func(n *html.Node) {
-		if n.Type == html.ElementNode {
-			for _, attr := range n.Attr {
-				if attr.Key == "id" && attr.Val == id {
-					var textBuilder strings.Builder
-					p.getTextFromNode(n, &textBuilder)
-					result = textBuilder.String()
-					return
-				}
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if result == "" {
-				findElement(c)
-			}
-		}
-	}
-
-	findElement(doc)
-	return result, nil
+	return elem.TextContent, nil
 }
 
 // GetElementByIDFull returns the full Element object by ID

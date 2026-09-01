@@ -570,10 +570,6 @@ func (t *Table) Reset() {
 	t.mu.Unlock()
 }
 
-func (t *Table) bytesUsedLocked() int {
-	return t.bytesUsed
-}
-
 func (t *Table) promote(a Atom) {
 	if elem, ok := t.lruElements[a]; ok {
 		t.lru.MoveToFront(elem)

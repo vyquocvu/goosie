@@ -139,12 +139,6 @@ func SharedFontRegistry() *FontRegistry {
 	return sharedFontRegistry
 }
 
-// SetSharedFontRegistry replaces the package-level registry. Use
-// this from tests that need to inject a custom registry.
-func SetSharedFontRegistry(r *FontRegistry) {
-	sharedFontRegistry = r
-}
-
 // Get returns a font.Face for the given descriptor and size. The
 // returned face scales with `size` (units: CSS pixels). If the
 // descriptor's family is unknown it is normalised to sans-serif.

@@ -14,7 +14,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"golang.org/x/net/html"
-	"golang.org/x/net/html/atom"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
@@ -486,73 +485,6 @@ func (r *Renderer) GetContentHeight() float32 {
 		return 0
 	}
 	return r.currentLayoutTree.Box.Height
-}
-
-// RenderHTMLBody renders just the body content of an HTML document
-func (r *Renderer) RenderHTMLBody(htmlContent string) (fyne.CanvasObject, error) {
-	globalTableColumnCache.Clear()
-	// Use html.ParseFragment to handle content that is expected to be inside a <body> tag.
-	// This avoids wrapping the content in an extra <html><body>...</body></html> structure.
-	nodes, err := html.ParseFragment(strings.NewReader(htmlContent), &html.Node{
-		Type:     html.ElementNode,
-		Data:     "body",
-		DataAtom: atom.Body,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a new root node to hold the parsed fragment.
-	root := &html.Node{
-		Type:     html.ElementNode,
-		Data:     "body",
-		DataAtom: atom.Body,
-	}
-	for _, node := range nodes {
-		root.AppendChild(node)
-	}
-
-	// Build the render tree from the fragment.
-	renderTree := BuildRenderTree(root)
-	if renderTree == nil {
-		return r.canvasRenderer.Render(nil), nil
-	}
-
-	r.treeMu.RLock()
-	width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
-	r.treeMu.RUnlock()
-
-	r.treeMu.Lock()
-	// Apply styles
-	renderTreeCopy := renderTree.Clone()
-	r.stylesheetMu.RLock()
-	styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
-	styleManager.ApplyStyles(renderTreeCopy)
-	r.stylesheetMu.RUnlock()
-
-	// Perform layout.
-	layoutEngine := getLayoutEngine(width, height)
-	defer putLayoutEngine(layoutEngine)
-	layoutTree := layoutEngine.ComputeLayout(renderTreeCopy)
-	renderTree = renderTreeCopy
-
-	// Cache trees for viewport updates.
-	r.currentRenderTree = renderTree
-	r.nodeIndex, r.nodeIndexRoot = nil, nil
-	r.currentLayoutTree = layoutTree
-	r.dirty = false
-	r.treeMu.Unlock()
-
-	// Pass navigation callback to canvas renderer.
-	r.treeMu.RLock()
-	onNav := r.onNavigate
-	r.treeMu.RUnlock()
-	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
-
-	// Render to canvas with viewport optimization.
-	canvasObject := r.canvasRenderer.RenderWithViewport(renderTree, layoutTree)
-
-	return canvasObject, nil
 }
 
 // findBodyNode finds the body element in an HTML document
