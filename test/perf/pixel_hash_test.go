@@ -72,7 +72,11 @@ func TestPixelHashManifest(t *testing.T) {
 	}
 
 	if updateManifest {
-		data, _ := json.MarshalIndent(manifest, "", "  ")
+		data, err := json.MarshalIndent(manifest, "", "  ")
+		if err != nil {
+			t.Fatalf("failed to marshal manifest: %v", err)
+		}
+		data = append(data, '\n')
 		if err := os.WriteFile(manifestPath, data, 0644); err != nil {
 			t.Fatalf("failed to write manifest: %v", err)
 		}
