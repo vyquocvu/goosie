@@ -285,6 +285,7 @@ const polyfillsJS = `
       else url = base + '/' + url.replace(/^\//, '');
     }
     this.href = url;
+    this.origin = "";
     // Very basic parsing for properties
     var match = url.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^?]*)?(\?[^#]*)?(#.*)?$/);
     if (match) {
@@ -292,6 +293,7 @@ const polyfillsJS = `
       this.hostname = match[2] || "";
       this.port = (match[3] || "").substring(1);
       this.host = this.hostname + (this.port ? ":" + this.port : "");
+      this.origin = this.protocol + '//' + this.host;
       this.pathname = match[4] || "/";
       this.search = match[5] || "";
       this.hash = match[6] || "";
@@ -352,4 +354,3 @@ const polyfillsJS = `
 
 })(this);
 `
-
