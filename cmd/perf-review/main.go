@@ -495,9 +495,11 @@ func loadFixtureDir(ts *httptest.Server, dir string) []string {
 // fixture file and collects per-stage timings. The GOOSIE_PERF_STAGES
 // environment variable must be set for stage collection to be active.
 func measureRenderStages(dir string, iterations int) []renderStageResult {
-	// Ensure stage collection is enabled.
-	os.Setenv("GOOSIE_PERF_STAGES", "1")
-	defer os.Unsetenv("GOOSIE_PERF_STAGES")
+	// Respect the GOOSIE_PERF_STAGES env var gate — the user controls
+	// whether stage collection is active.
+	if os.Getenv("GOOSIE_PERF_STAGES") == "" {
+		return nil
+	}
 
 	var results []renderStageResult
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
