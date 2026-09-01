@@ -51,3 +51,4 @@ roadmap_test_output
 bin/
 perf-review
 perf-suite.txt
+test/**/testdata/golden-layout-update/

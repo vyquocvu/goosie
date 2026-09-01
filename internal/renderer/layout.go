@@ -995,6 +995,8 @@ func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox,
 		isBlock1 := lastChild.Display == DisplayBlock || lastChild.Display == DisplayFlex || lastChild.Display == DisplayGrid
 		isBlock2 := child.IsBlock()
 		if isBlock1 && isBlock2 &&
+			// Float check covers both unset ("", when ComputedStyle was nil)
+			// and explicit "none" (from FloatAtom.String() conversion).
 			lastChild.Position != "absolute" && lastChild.Position != "fixed" && (lastChild.Float == "" || lastChild.Float == "none") &&
 			child.ComputedStyle != nil && child.ComputedStyle.Position != css.PositionAtomAbsolute && child.ComputedStyle.Position != css.PositionAtomFixed && child.ComputedStyle.Float == css.FloatAtomNone {
 
