@@ -1997,9 +1997,6 @@ func (r *Runtime) populateDocument(doc *html.Node) {
 	jsHead := jsDoc.Get("head").ToObject(r.vm)
 	jsBody := jsDoc.Get("body").ToObject(r.vm)
 
-	jsHead.Set("childNodes", r.vm.NewArray())
-	jsBody.Set("childNodes", r.vm.NewArray())
-
 	var findNodes func(*html.Node) (*html.Node, *html.Node, *html.Node)
 	findNodes = func(n *html.Node) (*html.Node, *html.Node, *html.Node) {
 		var htmlN, head, body *html.Node
@@ -2029,26 +2026,35 @@ func (r *Runtime) populateDocument(doc *html.Node) {
 
 	htmlNode, headNode, bodyNode := findNodes(doc)
 
+	jsHead.Set("childNodes", r.vm.NewArray())
+	jsBody.Set("childNodes", r.vm.NewArray())
+
 	if htmlNode != nil {
 		jsDocElement := jsDoc.Get("documentElement").ToObject(r.vm)
-		for _, attr := range htmlNode.Attr {
+		if len(htmlNode.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsDocElement.Get("setAttribute"))
-			setAttribute(jsDocElement, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range htmlNode.Attr {
+				setAttribute(jsDocElement, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 	}
 
 	if headNode != nil {
-		for _, attr := range headNode.Attr {
+		if len(headNode.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsHead.Get("setAttribute"))
-			setAttribute(jsHead, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range headNode.Attr {
+				setAttribute(jsHead, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 		r.populateJSNode(headNode, jsHead)
 	}
 
 	if bodyNode != nil {
-		for _, attr := range bodyNode.Attr {
+		if len(bodyNode.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsBody.Get("setAttribute"))
-			setAttribute(jsBody, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range bodyNode.Attr {
+				setAttribute(jsBody, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 		r.populateJSNode(bodyNode, jsBody)
 	}
@@ -3594,10 +3600,28 @@ func (r *Runtime) serializeJSDOMToCache() {
 }
 
 func (r *Runtime) populateJSNode(goNode *html.Node, jsNode *goja.Object) {
+	// Count children first for pre-allocation
+	childCount := 0
+	for c := goNode.FirstChild; c != nil; c = c.NextSibling {
+		childCount++
+	}
+	if childCount == 0 {
+		return
+	}
+
+	// Pre-allocate slice and convert all children
+	childValues := make([]goja.Value, 0, childCount)
 	for c := goNode.FirstChild; c != nil; c = c.NextSibling {
 		if childJS := r.convertGoNodeToJS(c); childJS != nil && childJS != goja.Null() {
-			appendChild, _ := goja.AssertFunction(jsNode.Get("appendChild"))
-			appendChild(jsNode, childJS)
+			childValues = append(childValues, childJS)
+		}
+	}
+
+	// Batch append all children at once
+	if len(childValues) > 0 {
+		appendChild, _ := goja.AssertFunction(jsNode.Get("appendChild"))
+		for _, childVal := range childValues {
+			appendChild(jsNode, childVal)
 		}
 	}
 }
@@ -3617,17 +3641,33 @@ func (r *Runtime) convertGoNodeToJS(n *html.Node) goja.Value {
 		jsNode, _ := createElement(jsDoc, r.vm.ToValue(n.Data))
 		jsNodeObj := jsNode.ToObject(r.vm)
 
-		for _, attr := range n.Attr {
+		// Batch attribute setting
+		if len(n.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsNodeObj.Get("setAttribute"))
-			setAttribute(jsNodeObj, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range n.Attr {
+				setAttribute(jsNodeObj, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 
-		// Recursively populate children
+		// Count children first for pre-allocation
+		childCount := 0
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			childJS := r.convertGoNodeToJS(c)
-			if childJS != nil && childJS != goja.Null() {
-				appendChild, _ := goja.AssertFunction(jsNodeObj.Get("appendChild"))
-				appendChild(jsNodeObj, childJS)
+			childCount++
+		}
+
+		// Pre-allocate and convert all children
+		if childCount > 0 {
+			childValues := make([]goja.Value, 0, childCount)
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if childJS := r.convertGoNodeToJS(c); childJS != nil && childJS != goja.Null() {
+					childValues = append(childValues, childJS)
+				}
+			}
+
+			// Batch append all children
+			appendChild, _ := goja.AssertFunction(jsNodeObj.Get("appendChild"))
+			for _, childVal := range childValues {
+				appendChild(jsNodeObj, childVal)
 			}
 		}
 		return jsNode
