@@ -75,6 +75,32 @@ const defaultUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
 // follow for a single request, matching Chromium's and Edge's limit.
 const maxRedirects = 20
 
+// contextKey is an unexported type for context keys defined in this package,
+// preventing collisions with keys defined in other packages.
+type contextKey int
+
+const redirectCountKey contextKey = iota
+
+// withRedirectCount returns a derived context with a redirect counter initialised to zero.
+func withRedirectCount(ctx context.Context) context.Context {
+	return context.WithValue(ctx, redirectCountKey, new(int))
+}
+
+// getRedirectCount reads the current redirect count from the context.
+func getRedirectCount(ctx context.Context) int {
+	if ptr, ok := ctx.Value(redirectCountKey).(*int); ok {
+		return *ptr
+	}
+	return 0
+}
+
+// setRedirectCount updates the redirect count stored in the context.
+func setRedirectCount(ctx context.Context, count int) {
+	if ptr, ok := ctx.Value(redirectCountKey).(*int); ok {
+		*ptr = count
+	}
+}
+
 type ServiceOptions struct {
 	Client      *http.Client
 	Cache       *HTTPCache
@@ -132,6 +158,14 @@ func NewService(options ServiceOptions) *Service {
 	maxBodySize := options.MaxBodySize
 	if maxBodySize == 0 {
 		maxBodySize = DefaultMaxBodySize
+	}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			setRedirectCount(req.Context(), maxRedirects)
+			return http.ErrUseLastResponse
+		}
+		setRedirectCount(req.Context(), len(via))
+		return nil
 	}
 	return &Service{
 		client:              client,
@@ -378,26 +412,11 @@ func (s *Service) CachedBody(rawURL string) (string, bool) {
 
 // doRequest wraps http.Client.Do with a redirect policy that limits the
 // number of redirects to maxRedirects and tracks how many were followed.
+// The redirect counter is stored in the request context so that the shared
+// client's CheckRedirect callback can update it without per-request client
+// allocations.
 func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
-	var redirectCount int
-
-	if req.Context() == context.Background() {
-		req = req.WithContext(context.Background())
-	}
-
-	client := &http.Client{
-		Transport: s.client.Transport,
-		Jar:       s.client.Jar,
-		Timeout:   s.client.Timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				redirectCount = maxRedirects
-				return http.ErrUseLastResponse
-			}
-			redirectCount = len(via)
-			return nil
-		},
-	}
+	req = req.WithContext(withRedirectCount(req.Context()))
 
 	var (
 		traceMu        sync.Mutex
@@ -440,7 +459,9 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 	}
 
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
-	resp, err := client.Do(req)
+	resp, err := s.client.Do(req)
+
+	redirectCount := getRedirectCount(req.Context())
 
 	if err == nil && resp != nil {
 		now := time.Now()
