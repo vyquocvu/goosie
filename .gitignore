@@ -49,3 +49,5 @@ roadmap_test_output
 !.prompt
 .gstack/
 bin/
+perf-review
+perf-suite.txt
