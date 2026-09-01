@@ -1323,16 +1323,56 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 	viewportTop := cr.viewportY - cr.viewportHeight*2.0
 	viewportBottom := cr.viewportY + cr.viewportHeight*3.0
 
-	for cmdIdx := 0; cmdIdx < len(displayList.Commands); cmdIdx++ {
-		cmd := displayList.Commands[cmdIdx]
+	// Determine visible command range from Y-band spatial index.
+	// Instead of iterating all commands linearly, use the pre-built Y-band
+	// index to skip commands outside the buffered viewport range.
+	cmdStart := 0
+	cmdEnd := len(displayList.Commands)
 
-		// Viewport culling check for very large documents (do not cull PushClip/PopClip)
-		if shouldCull && cmd.Type != PushClip && cmd.Type != PopClip {
-			cmdBottom := cmd.Box.Y + cmd.Box.Height
-			if cmdBottom < viewportTop || cmd.Box.Y > viewportBottom {
-				continue
+	if shouldCull && len(displayList.YBands) > 0 {
+		// Find bands overlapping the buffered viewport
+		firstBand := -1
+		lastBand := -1
+
+		for i, band := range displayList.YBands {
+			if band.YEnd >= viewportTop && band.YStart <= viewportBottom {
+				if firstBand < 0 {
+					firstBand = i
+				}
+				lastBand = i
+			}
+			// Early exit: bands are sorted by Y, no more can overlap
+			if band.YStart > viewportBottom {
+				break
 			}
 		}
+
+		if firstBand >= 0 {
+			cmdStart = displayList.YBands[firstBand].CmdStart
+			if cmdStart < 0 {
+				cmdStart = 0
+			}
+			cmdEnd = displayList.YBands[lastBand].CmdEnd
+			if cmdEnd < 0 {
+				cmdEnd = len(displayList.Commands)
+			}
+		}
+	}
+
+	// Ensure clip balance: walk back to find the enclosing PushClip boundary
+	// so we don't start rendering in the middle of a clip group.
+	for i := cmdStart - 1; i >= 0; i-- {
+		if displayList.Commands[i].Type == PopClip {
+			break
+		}
+		if displayList.Commands[i].Type == PushClip {
+			cmdStart = i
+			break
+		}
+	}
+
+	for cmdIdx := cmdStart; cmdIdx < cmdEnd && cmdIdx < len(displayList.Commands); cmdIdx++ {
+		cmd := displayList.Commands[cmdIdx]
 
 		// Handle Clip Commands
 		if cmd.Type == PushClip {
