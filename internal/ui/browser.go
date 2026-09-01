@@ -160,11 +160,15 @@ type Browser struct {
 // windowResizeWatcher wraps content and fires a callback when its size
 // changes (e.g. on window resize). It sits at the top of the content
 // hierarchy to detect size changes propagated by Fyne's layout system.
+// Resize events are debounced (100ms) to avoid excessive re-renders during
+// continuous window resizing.
 type windowResizeWatcher struct {
 	widget.BaseWidget
-	content  fyne.CanvasObject
-	lastSize fyne.Size
-	onResize func(fyne.Size)
+	content     fyne.CanvasObject
+	lastSize    fyne.Size
+	onResize    func(fyne.Size)
+	resizeTimer *time.Timer
+	resizeMu    sync.Mutex
 }
 
 func newWindowResizeWatcher(content fyne.CanvasObject, onResize func(fyne.Size)) *windowResizeWatcher {
@@ -184,7 +188,16 @@ func (w *windowResizeWatcher) Resize(size fyne.Size) {
 	w.BaseWidget.Resize(size)
 	if w.lastSize != size && w.onResize != nil {
 		w.lastSize = size
-		w.onResize(size)
+
+		w.resizeMu.Lock()
+		if w.resizeTimer != nil {
+			w.resizeTimer.Stop()
+		}
+
+		w.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
+			w.onResize(size)
+		})
+		w.resizeMu.Unlock()
 	}
 }
 
