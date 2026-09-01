@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"image/color"
 	"strings"
@@ -115,7 +116,7 @@ func TestFontShorthandParsing(t *testing.T) {
 	if h1 == nil {
 		t.Fatal("h1 not found")
 	}
-	if h1.ComputedStyle.FontStyle != "italic" {
+	if h1.ComputedStyle.FontStyle != css.FontStyleAtomItalic {
 		t.Errorf("Expected h1 font-style 'italic', got '%s'", h1.ComputedStyle.FontStyle)
 	}
 	if h1.ComputedStyle.FontWeight != "bold" {
@@ -166,7 +167,7 @@ func TestListStyleShorthandParsing(t *testing.T) {
 	if li1 == nil {
 		t.Fatal("li1 not found")
 	}
-	if li1.ComputedStyle.ListStyleType != "none" {
+	if li1.ComputedStyle.ListStyleType != css.ListStyleTypeAtomNone {
 		t.Errorf("Expected li1 list-style-type 'none', got '%s'", li1.ComputedStyle.ListStyleType)
 	}
 
@@ -174,10 +175,10 @@ func TestListStyleShorthandParsing(t *testing.T) {
 	if li2 == nil {
 		t.Fatal("li2 not found")
 	}
-	if li2.ComputedStyle.ListStyleType != "square" {
+	if li2.ComputedStyle.ListStyleType != css.ListStyleTypeAtomSquare {
 		t.Errorf("Expected li2 list-style-type 'square', got '%s'", li2.ComputedStyle.ListStyleType)
 	}
-	if li2.ComputedStyle.ListStylePosition != "inside" {
+	if li2.ComputedStyle.ListStylePosition != css.ListStylePositionAtomInside {
 		t.Errorf("Expected li2 list-style-position 'inside', got '%s'", li2.ComputedStyle.ListStylePosition)
 	}
 }
@@ -205,7 +206,7 @@ func TestDefaultUALinkStyle(t *testing.T) {
 	if link.ComputedStyle.Color != expectedColor {
 		t.Errorf("Expected default UA link color %v, got %v", expectedColor, link.ComputedStyle.Color)
 	}
-	if !strings.Contains(link.ComputedStyle.TextDecoration, "underline") {
+	if link.ComputedStyle.TextDecoration != css.TextDecorationAtomUnderline {
 		t.Errorf("Expected default UA link underline decoration, got '%s'", link.ComputedStyle.TextDecoration)
 	}
 }

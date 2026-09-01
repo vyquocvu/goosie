@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
@@ -121,20 +122,20 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	le.nodeMap[node.ID] = layoutBox
 	le.nodeMapMu.Unlock()
 
-	if node.ComputedStyle != nil && node.ComputedStyle.Display != "" {
+	if node.ComputedStyle != nil && node.ComputedStyle.Display != css.DisplayAtomUnset {
 		switch node.ComputedStyle.Display {
-		case "block":
+		case css.DisplayAtomBlock:
 			layoutBox.Display = DisplayBlock
-		case "inline":
+		case css.DisplayAtomInline:
 			layoutBox.Display = DisplayInline
-		case "none":
+		case css.DisplayAtomNone:
 			layoutBox.Display = DisplayNone
 			return nil
-		case "flex":
+		case css.DisplayAtomFlex:
 			layoutBox.Display = DisplayFlex
-		case "grid":
+		case css.DisplayAtomGrid:
 			layoutBox.Display = DisplayGrid
-		case "inline-block":
+		case css.DisplayAtomInlineBlock:
 			layoutBox.Display = DisplayInlineBlock
 		default:
 			layoutBox.Display = DisplayInline
@@ -227,13 +228,13 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 	}
 
 	if node.ComputedStyle != nil {
-		layoutBox.Position = node.ComputedStyle.Position
-		layoutBox.Float = node.ComputedStyle.Float
+		layoutBox.Position = node.ComputedStyle.Position.String()
+		layoutBox.Float = node.ComputedStyle.Float.String()
 		layoutBox.Clear = node.ComputedStyle.Clear
 	}
-	if node.ComputedStyle != nil && node.ComputedStyle.Position != "" {
+	if node.ComputedStyle != nil && node.ComputedStyle.Position != css.PositionAtomStatic {
 		pos := node.ComputedStyle.Position
-		if pos == "absolute" || pos == "fixed" {
+		if pos == css.PositionAtomAbsolute || pos == css.PositionAtomFixed {
 			fontSize := le.defaultFontSize
 			if node.ComputedStyle.FontSize > 0 {
 				fontSize = node.ComputedStyle.FontSize
@@ -243,10 +244,10 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 			containerWidth := le.canvasWidth
 			containerHeight := le.canvasHeight
 
-			if pos == "absolute" {
+			if pos == css.PositionAtomAbsolute {
 				curr := node.Parent
 				for curr != nil {
-					if curr.ComputedStyle != nil && curr.ComputedStyle.Position != "" && curr.ComputedStyle.Position != "static" {
+					if curr.ComputedStyle != nil && curr.ComputedStyle.Position != css.PositionAtomStatic {
 						if ancestorBox, ok := le.nodeMap[curr.ID]; ok {
 							ancestorX = ancestorBox.Box.X
 							ancestorY = ancestorBox.Box.Y
@@ -285,7 +286,7 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 				layoutBox.Box.Y = newY
 				le.shiftLayoutBox(layoutBox, deltaX, deltaY)
 			}
-		} else if pos == "relative" {
+		} else if pos == css.PositionAtomRelative {
 			fontSize := le.defaultFontSize
 			if node.ComputedStyle.FontSize > 0 {
 				fontSize = node.ComputedStyle.FontSize
@@ -599,10 +600,10 @@ func (le *LayoutEngine) applyBoxModel(node *RenderNode, layoutBox *LayoutBox) {
 
 	layoutBox.BackgroundColor = node.ComputedStyle.BackgroundColor
 	layoutBox.BackgroundImage = node.ComputedStyle.BackgroundImage
-	layoutBox.BackgroundRepeat = node.ComputedStyle.BackgroundRepeat
-	layoutBox.BackgroundPosition = node.ComputedStyle.BackgroundPosition
-	layoutBox.BackgroundSize = node.ComputedStyle.BackgroundSize
-	layoutBox.BackgroundAttachment = node.ComputedStyle.BackgroundAttachment
+	layoutBox.BackgroundRepeat = node.ComputedStyle.BackgroundRepeat.String()
+	layoutBox.BackgroundPosition = node.ComputedStyle.BackgroundPosition.String()
+	layoutBox.BackgroundSize = node.ComputedStyle.BackgroundSize.String()
+	layoutBox.BackgroundAttachment = node.ComputedStyle.BackgroundAttachment.String()
 	layoutBox.BackgroundImageData = node.BackgroundImageData
 	if layoutBox.BackgroundImageData == nil && node.ComputedStyle.BackgroundImageData != nil {
 		layoutBox.BackgroundImageData = node.ComputedStyle.BackgroundImageData
@@ -683,7 +684,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		}
 	} else if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		width = float32(node.ImageData.Width)
-	} else if node.ComputedStyle != nil && (node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" || node.ComputedStyle.Display == "inline-block") {
+	} else if node.ComputedStyle != nil && (node.ComputedStyle.Float == css.FloatAtomLeft || node.ComputedStyle.Float == css.FloatAtomRight || node.ComputedStyle.Display == css.DisplayAtomInlineBlock) {
 		contentW := float32(0)
 		if le.hasInlineContent(node) {
 			wsMode := le.whiteSpaceModeForNode(node)
@@ -696,7 +697,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 			}
 		} else {
 			for _, child := range node.Children {
-				if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+				if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 					continue
 				}
 				if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
@@ -881,18 +882,18 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		} else {
 			var lastChild *LayoutBox
 			for _, child := range node.Children {
-				if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+				if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 					continue
 				}
 				if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 					continue
 				}
-
+				
 				if child.ComputedStyle != nil && child.ComputedStyle.Clear != "" {
 					childY = floatCtx.ClearFloat(child.ComputedStyle.Clear, childY)
 				}
-
-				if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+				
+				if child.ComputedStyle != nil && (child.ComputedStyle.Float == css.FloatAtomLeft || child.ComputedStyle.Float == css.FloatAtomRight) {
 					le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx)
 					continue
 				}
@@ -947,7 +948,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 		}
 	}
 
-	if node.ComputedStyle != nil && (node.ComputedStyle.Overflow == "hidden" || node.ComputedStyle.Overflow == "auto" || node.ComputedStyle.Overflow == "scroll") {
+	if node.ComputedStyle != nil && (node.ComputedStyle.Overflow == css.OverflowAtomHidden || node.ComputedStyle.Overflow == css.OverflowAtomAuto || node.ComputedStyle.Overflow == css.OverflowAtomScroll) {
 		childY = floatCtx.ClearFloat("both", childY)
 	}
 	for _, f := range floatCtx.floats[floatStart:] {
@@ -966,7 +967,7 @@ func (le *LayoutEngine) computeElementLayout(node *RenderNode, layoutBox *Layout
 // the float context, and attaches it to the parent box. Shared by the pure
 // block and mixed block/inline stacking paths.
 func (le *LayoutEngine) layoutFloatedChild(child *RenderNode, layoutBox *LayoutBox, childX, childY, contentWidth float32, floatCtx *FloatContext) {
-	floatDir := child.ComputedStyle.Float
+	floatDir := child.ComputedStyle.Float.String()
 
 	childLayoutBox := le.buildLayoutBox(child, childX, childY, contentWidth, floatCtx)
 	if childLayoutBox != nil {
@@ -994,8 +995,8 @@ func (le *LayoutEngine) stackBlockChild(child *RenderNode, layoutBox *LayoutBox,
 		isBlock1 := lastChild.Display == DisplayBlock || lastChild.Display == DisplayFlex || lastChild.Display == DisplayGrid
 		isBlock2 := child.IsBlock()
 		if isBlock1 && isBlock2 &&
-			lastChild.Position != "absolute" && lastChild.Position != "fixed" && lastChild.Float == "" &&
-			child.ComputedStyle != nil && child.ComputedStyle.Position != "absolute" && child.ComputedStyle.Position != "fixed" && child.ComputedStyle.Float == "" {
+			lastChild.Position != "absolute" && lastChild.Position != "fixed" && (lastChild.Float == "" || lastChild.Float == "none") &&
+			child.ComputedStyle != nil && child.ComputedStyle.Position != css.PositionAtomAbsolute && child.ComputedStyle.Position != css.PositionAtomFixed && child.ComputedStyle.Float == css.FloatAtomNone {
 
 			fontSize := le.defaultFontSize
 			if child.ComputedStyle.FontSize > 0 {
@@ -1061,7 +1062,7 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 	}
 
 	for _, child := range node.Children {
-		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 			continue
 		}
 
@@ -1077,7 +1078,7 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 			childY = floatCtx.ClearFloat(child.ComputedStyle.Clear, childY)
 		}
 
-		if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+		if child.ComputedStyle != nil && (child.ComputedStyle.Float == css.FloatAtomLeft || child.ComputedStyle.Float == css.FloatAtomRight) {
 			le.layoutFloatedChild(child, layoutBox, childX, childY, contentWidth, floatCtx)
 			continue
 		}
@@ -1110,16 +1111,16 @@ func establishesBFC(node *RenderNode, layoutBox *LayoutBox) bool {
 	if node.ComputedStyle == nil {
 		return false
 	}
-	if node.ComputedStyle.Display == "flow-root" {
+	if node.ComputedStyle.Display == css.DisplayAtomFlowRoot {
 		return true
 	}
-	if node.ComputedStyle.Overflow != "" && node.ComputedStyle.Overflow != "visible" {
+	if node.ComputedStyle.Overflow != css.OverflowAtomVisible {
 		return true
 	}
-	if node.ComputedStyle.Float != "" && node.ComputedStyle.Float != "none" {
+	if node.ComputedStyle.Float != css.FloatAtomNone {
 		return true
 	}
-	if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" {
+	if node.ComputedStyle.Position == css.PositionAtomAbsolute || node.ComputedStyle.Position == css.PositionAtomFixed {
 		return true
 	}
 	disp := layoutBox.Display
@@ -1249,8 +1250,8 @@ func (le *LayoutEngine) whiteSpaceModeForNode(node *RenderNode) WhiteSpaceMode {
 	if node == nil {
 		return WhiteSpaceNormal
 	}
-	if node.ComputedStyle != nil && node.ComputedStyle.WhiteSpace != "" {
-		if mode, ok := whiteSpaceModeFromCSS(node.ComputedStyle.WhiteSpace); ok {
+	if node.ComputedStyle != nil && node.ComputedStyle.WhiteSpace != css.WhiteSpaceAtomNormal {
+		if mode, ok := whiteSpaceModeFromCSS(node.ComputedStyle.WhiteSpace.String()); ok {
 			return mode
 		}
 	}
@@ -1281,7 +1282,7 @@ func (le *LayoutEngine) hasBlockChildren(node *RenderNode) bool {
 		return false
 	}
 	for _, child := range node.Children {
-		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 			continue
 		}
 		if child.Type == NodeTypeElement && child.IsBlock() {
@@ -1306,7 +1307,7 @@ func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode) float32 {
 	if node.Type == NodeTypeText {
 		return 0
 	}
-	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == css.DisplayAtomNone {
 		return 0
 	}
 
@@ -1326,7 +1327,7 @@ func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode) float32 {
 		}
 	} else {
 		for _, child := range node.Children {
-			if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 				continue
 			}
 			if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
@@ -1336,7 +1337,7 @@ func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode) float32 {
 			// Float or inline-level children are placed side by side; block
 			// children stack, so the max-content width is the sum of floats
 			// on a line or the widest stacked block.
-			if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+			if child.ComputedStyle != nil && (child.ComputedStyle.Float == css.FloatAtomLeft || child.ComputedStyle.Float == css.FloatAtomRight) {
 				contentW += childW
 			} else if childW > contentW {
 				contentW = childW
@@ -1362,7 +1363,7 @@ func (le *LayoutEngine) minContentSize(node *RenderNode) float32 {
 	if node == nil {
 		return 0
 	}
-	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == css.DisplayAtomNone {
 		return 0
 	}
 	if node.Type == NodeTypeText {
@@ -1379,14 +1380,14 @@ func (le *LayoutEngine) minContentSize(node *RenderNode) float32 {
 		contentW = le.widestInlineSegment(node)
 	} else {
 		for _, child := range node.Children {
-			if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+			if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 				continue
 			}
 			if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {
 				continue
 			}
 			childW := le.minContentContribution(child)
-			if child.ComputedStyle != nil && (child.ComputedStyle.Float == "left" || child.ComputedStyle.Float == "right") {
+			if child.ComputedStyle != nil && (child.ComputedStyle.Float == css.FloatAtomLeft || child.ComputedStyle.Float == css.FloatAtomRight) {
 				contentW += childW
 			} else if childW > contentW {
 				contentW = childW
@@ -1431,7 +1432,7 @@ func (le *LayoutEngine) widestInlineSegment(node *RenderNode) float32 {
 	if node == nil {
 		return 0
 	}
-	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == css.DisplayAtomNone {
 		return 0
 	}
 	if node.Type == NodeTypeText {
@@ -1484,11 +1485,11 @@ func (le *LayoutEngine) widestInlineSegment(node *RenderNode) float32 {
 func (le *LayoutEngine) hasInlineContentRecursive(node *RenderNode) bool {
 	for _, child := range node.Children {
 		// Skip display:none elements
-		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 			continue
 		}
 		// Skip absolute/fixed positioned elements from inline content check
-		if child.ComputedStyle != nil && (child.ComputedStyle.Position == "absolute" || child.ComputedStyle.Position == "fixed") {
+		if child.ComputedStyle != nil && (child.ComputedStyle.Position == css.PositionAtomAbsolute || child.ComputedStyle.Position == css.PositionAtomFixed) {
 			continue
 		}
 

@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"context"
 	"testing"
@@ -31,8 +32,8 @@ func TestRenderHTMLAppliesMediaQueriesForViewport(t *testing.T) {
 	mobile := findRenderNodeByClass(r.CurrentRenderTree(), "mobile")
 	require.NotNil(t, desktop)
 	require.NotNil(t, mobile)
-	require.Equal(t, "block", desktop.ComputedStyle.Display)
-	require.Equal(t, "none", mobile.ComputedStyle.Display)
+	require.Equal(t, css.DisplayAtomBlock, desktop.ComputedStyle.Display)
+	require.Equal(t, css.DisplayAtomNone, mobile.ComputedStyle.Display)
 }
 
 func TestRenderHTMLAppliesNestedMediaQueriesOnlyWhenBothMatch(t *testing.T) {
@@ -50,13 +51,13 @@ func TestRenderHTMLAppliesNestedMediaQueriesOnlyWhenBothMatch(t *testing.T) {
 	wide.SetTestingMode(true)
 	_, err := wide.RenderHTML(context.Background(), html)
 	require.NoError(t, err)
-	require.Equal(t, "none", findRenderNodeByClass(wide.CurrentRenderTree(), "narrow").ComputedStyle.Display)
+	require.Equal(t, css.DisplayAtomNone, findRenderNodeByClass(wide.CurrentRenderTree(), "narrow").ComputedStyle.Display)
 
 	narrow := renderer.NewRenderer(500, 700)
 	narrow.SetTestingMode(true)
 	_, err = narrow.RenderHTML(context.Background(), html)
 	require.NoError(t, err)
-	require.Equal(t, "block", findRenderNodeByClass(narrow.CurrentRenderTree(), "narrow").ComputedStyle.Display)
+	require.Equal(t, css.DisplayAtomBlock, findRenderNodeByClass(narrow.CurrentRenderTree(), "narrow").ComputedStyle.Display)
 }
 
 func findRenderNodeByClass(node *renderer.RenderNode, class string) *renderer.RenderNode {

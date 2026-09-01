@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"image/color"
 	"strings"
@@ -48,7 +49,7 @@ func TestStyleApplication(t *testing.T) {
 		t.Fatal("h1 node not found in render tree")
 	}
 
-	if h1Node.ComputedStyle.Display != "block" {
+	if h1Node.ComputedStyle.Display != css.DisplayAtomBlock {
 		t.Errorf("expected display 'block', got '%s'", h1Node.ComputedStyle.Display)
 	}
 	if h1Node.ComputedStyle.FontSize != 32.0 {

@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
@@ -458,7 +459,7 @@ func (cr *CanvasRenderer) renderNode(node *RenderNode, objects *[]fyne.CanvasObj
 	cr.Logger.Debug("renderNode processing", "tag", node.TagName, "type", node.Type)
 
 	// Apply display: none
-	if node.ComputedStyle != nil && node.ComputedStyle.Display == "none" {
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == css.DisplayAtomNone {
 		return
 	}
 
@@ -1003,7 +1004,7 @@ func (cr *CanvasRenderer) renderImage(node *RenderNode, objects *[]fyne.CanvasOb
 	isHidden := false
 	opacity := float64(1.0)
 	if node.ComputedStyle != nil {
-		if node.ComputedStyle.Visibility == "hidden" {
+		if node.ComputedStyle.Visibility == css.VisibilityAtomHidden {
 			isHidden = true
 		}
 		opacity = float64(node.ComputedStyle.Opacity)
@@ -1695,11 +1696,11 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		repeat := "repeat"
 		pos := "top left"
 		if cmd.Node.ComputedStyle != nil {
-			if cmd.Node.ComputedStyle.BackgroundRepeat != "" {
-				repeat = cmd.Node.ComputedStyle.BackgroundRepeat
+			if cmd.Node.ComputedStyle.BackgroundRepeat != css.BackgroundRepeatAtomRepeat {
+				repeat = cmd.Node.ComputedStyle.BackgroundRepeat.String()
 			}
-			if cmd.Node.ComputedStyle.BackgroundPosition != "" {
-				pos = cmd.Node.ComputedStyle.BackgroundPosition
+			if cmd.Node.ComputedStyle.BackgroundPosition != css.BackgroundPositionAtomCenter {
+				pos = cmd.Node.ComputedStyle.BackgroundPosition.String()
 			}
 		}
 

@@ -3,6 +3,8 @@ package renderer
 import (
 	"sort"
 	"strings"
+
+	"github.com/vyquocvu/goosie/internal/css"
 )
 
 // FlexLayoutEngine handles flexbox layout calculations
@@ -213,7 +215,7 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 	items := make([]*flexItem, 0, len(container.Children))
 
 	for _, child := range container.Children {
-		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 			continue
 		}
 		if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {

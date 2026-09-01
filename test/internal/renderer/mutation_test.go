@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"strings"
 	"testing"
@@ -59,7 +60,7 @@ func TestMutationClassToggle(t *testing.T) {
 
 	target := findNodeByID(renderTree, "target")
 	require.NotNil(t, target)
-	assert.Equal(t, "block", target.ComputedStyle.Display)
+	assert.Equal(t, css.DisplayAtomBlock, target.ComputedStyle.Display)
 
 	le := renderer.NewLayoutEngine(800, 600)
 	layoutTree := le.ComputeLayout(renderTree)
@@ -81,7 +82,7 @@ func TestMutationClassToggle(t *testing.T) {
 	require.NotNil(t, layoutTree2)
 
 	// Verify updated Style and Layout
-	assert.Equal(t, "flex", target.ComputedStyle.Display)
+	assert.Equal(t, css.DisplayAtomFlex, target.ComputedStyle.Display)
 	le.NodeMapMu().RLock()
 	targetBox2, ok := le.NodeMap()[target.ID]
 	le.NodeMapMu().RUnlock()

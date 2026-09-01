@@ -87,7 +87,7 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	if node.ComputedStyle == nil {
 		node.ComputedStyle = &Style{
 			Opacity: 1.0,
-			Display: "block", // Default to block for now, ideally depends on tag
+			Display: css.DisplayAtomBlock, // Default to block for now, ideally depends on tag
 		}
 	}
 
@@ -134,10 +134,10 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 
 	// CSS 2.1 Section 9.7: If float is not 'none' or position is absolute/fixed, display is converted to block
 	if node.ComputedStyle != nil {
-		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" ||
-			node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" {
-			if node.ComputedStyle.Display == "inline" || node.ComputedStyle.Display == "inline-block" {
-				node.ComputedStyle.Display = "block"
+		if node.ComputedStyle.Position == css.PositionAtomAbsolute || node.ComputedStyle.Position == css.PositionAtomFixed ||
+			node.ComputedStyle.Float == css.FloatAtomLeft || node.ComputedStyle.Float == css.FloatAtomRight {
+			if node.ComputedStyle.Display == css.DisplayAtomInline || node.ComputedStyle.Display == css.DisplayAtomInlineBlock {
+				node.ComputedStyle.Display = css.DisplayAtomBlock
 			}
 		}
 	}
@@ -800,9 +800,9 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	switch decl.Property {
 	case "display":
-		style.Display = decl.Value
+		style.Display = css.DisplayAtomFromString(decl.Value)
 	case "visibility":
-		style.Visibility = decl.Value
+		style.Visibility = css.VisibilityAtomFromString(decl.Value)
 	case "font-size":
 		parentFontSize := float32(16.0) // Default font size
 		if node.Parent != nil && node.Parent.ComputedStyle != nil && node.Parent.ComputedStyle.FontSize > 0 {
@@ -824,13 +824,13 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "background-image":
 		style.BackgroundImage = decl.Value
 	case "background-repeat":
-		style.BackgroundRepeat = decl.Value
+		style.BackgroundRepeat = css.BackgroundRepeatAtomFromString(decl.Value)
 	case "background-position":
-		style.BackgroundPosition = decl.Value
+		style.BackgroundPosition = css.BackgroundPositionAtomFromString(decl.Value)
 	case "background-size":
-		style.BackgroundSize = decl.Value
+		style.BackgroundSize = css.BackgroundSizeAtomFromString(decl.Value)
 	case "background-attachment":
-		style.BackgroundAttachment = decl.Value
+		style.BackgroundAttachment = css.BackgroundAttachmentAtomFromString(decl.Value)
 	case "background":
 		applyBackgroundShorthand(style, decl.Value)
 	case "width":
@@ -844,7 +844,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 			style.Opacity = float32(val)
 		}
 	case "text-align":
-		style.TextAlign = decl.Value
+		style.TextAlign = css.TextAlignAtomFromString(decl.Value)
 	case "letter-spacing":
 		if decl.Value == "normal" {
 			style.LetterSpacing = 0
@@ -854,11 +854,11 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "line-height":
 		style.LineHeight = parseLineHeight(decl.Value, style.FontSize)
 	case "font-style":
-		style.FontStyle = decl.Value
+		style.FontStyle = css.FontStyleAtomFromString(decl.Value)
 	case "text-decoration":
-		style.TextDecoration = decl.Value
+		style.TextDecoration = css.TextDecorationAtomFromString(decl.Value)
 	case "text-transform":
-		style.TextTransform = decl.Value
+		style.TextTransform = css.TextTransformAtomFromString(decl.Value)
 
 	// Margin properties
 	case "margin":
@@ -1032,7 +1032,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	// Positioning
 	case "position":
-		style.Position = decl.Value
+		style.Position = css.PositionAtomFromString(decl.Value)
 	case "z-index":
 		if val, err := strconv.Atoi(decl.Value); err == nil {
 			style.ZIndex = val
@@ -1050,7 +1050,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	// Overflow
 	case "overflow":
-		style.Overflow = decl.Value
+		style.Overflow = css.OverflowAtomFromString(decl.Value)
 		if style.OverflowX == "" {
 			style.OverflowX = decl.Value
 		}
@@ -1066,7 +1066,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	// Float and Clear
 	case "float":
-		style.Float = decl.Value
+		style.Float = css.FloatAtomFromString(decl.Value)
 	case "clear":
 		style.Clear = decl.Value
 
@@ -1102,7 +1102,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "vertical-align":
 		style.VerticalAlign = decl.Value
 	case "white-space":
-		style.WhiteSpace = decl.Value
+		style.WhiteSpace = css.WhiteSpaceAtomFromString(decl.Value)
 	case "word-break":
 		style.WordBreak = decl.Value
 	case "font":
@@ -1114,9 +1114,9 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "list-style":
 		parseListStyleShorthand(decl.Value, style)
 	case "list-style-type":
-		style.ListStyleType = decl.Value
+		style.ListStyleType = css.ListStyleTypeAtomFromString(decl.Value)
 	case "list-style-position":
-		style.ListStylePosition = decl.Value
+		style.ListStylePosition = css.ListStylePositionAtomFromString(decl.Value)
 	case "table-layout":
 		style.TableLayout = decl.Value
 	case "border-collapse":
@@ -1196,7 +1196,7 @@ func parseFontShorthand(value string, style *Style, parentFontSize float32) {
 		tok := strings.ToLower(tokens[i])
 		switch tok {
 		case "italic", "oblique":
-			style.FontStyle = tok
+			style.FontStyle = css.FontStyleAtomItalic
 		case "bold", "bolder", "lighter", "100", "200", "300", "400", "500", "600", "700", "800", "900":
 			style.FontWeight = tok
 		}
@@ -1237,12 +1237,14 @@ func parseListStyleShorthand(value string, style *Style) {
 	for _, tok := range tokens {
 		tokLower := strings.ToLower(tok)
 		switch tokLower {
-		case "inside", "outside":
-			style.ListStylePosition = tokLower
+		case "inside":
+			style.ListStylePosition = css.ListStylePositionAtomInside
+		case "outside":
+			style.ListStylePosition = css.ListStylePositionAtomOutside
 		case "none", "disc", "circle", "square", "decimal",
 			"lower-roman", "upper-roman", "lower-alpha", "upper-alpha",
 			"lower-latin", "upper-latin", "cjk-decimal", "armenian", "georgian":
-			style.ListStyleType = tokLower
+			style.ListStyleType = css.ListStyleTypeAtomFromString(tokLower)
 		}
 	}
 }
@@ -2069,11 +2071,11 @@ func applyBackgroundShorthand(style *Style, value string) {
 		if strings.HasPrefix(tokLower, "url(") || tokLower == "none" {
 			style.BackgroundImage = tok
 		} else if tokLower == "repeat" || tokLower == "no-repeat" || tokLower == "repeat-x" || tokLower == "repeat-y" || tokLower == "space" || tokLower == "round" {
-			style.BackgroundRepeat = tokLower
+			style.BackgroundRepeat = css.BackgroundRepeatAtomFromString(tokLower)
 		} else if tokLower == "fixed" || tokLower == "scroll" || tokLower == "local" {
-			style.BackgroundAttachment = tokLower
+			style.BackgroundAttachment = css.BackgroundAttachmentAtomFromString(tokLower)
 		} else if tokLower == "cover" || tokLower == "contain" {
-			style.BackgroundSize = tokLower
+			style.BackgroundSize = css.BackgroundSizeAtomFromString(tokLower)
 		} else if tokLower == "top" || tokLower == "bottom" || tokLower == "left" || tokLower == "right" || tokLower == "center" {
 			positionTokens = append(positionTokens, tokLower)
 		} else if col, err := parseColor(tok); err == nil {
@@ -2081,7 +2083,7 @@ func applyBackgroundShorthand(style *Style, value string) {
 		}
 	}
 	if len(positionTokens) > 0 {
-		style.BackgroundPosition = strings.Join(positionTokens, " ")
+		style.BackgroundPosition = css.BackgroundPositionAtomFromString(strings.Join(positionTokens, " "))
 	}
 }
 

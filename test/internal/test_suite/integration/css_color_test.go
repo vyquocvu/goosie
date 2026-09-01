@@ -230,7 +230,7 @@ func TestCSSTextDecoration_AcceptsValues(t *testing.T) {
 			target := findFirstByID(root, "t")
 			require.NotNil(t, target)
 			require.NotNil(t, target.ComputedStyle)
-			assert.Equal(t, value, target.ComputedStyle.TextDecoration)
+			assert.Equal(t, value, target.ComputedStyle.TextDecoration.String())
 		})
 	}
 }
@@ -255,7 +255,7 @@ func TestCSSTextTransform_AcceptsValues(t *testing.T) {
 			target := findFirstByID(root, "t")
 			require.NotNil(t, target)
 			require.NotNil(t, target.ComputedStyle)
-			assert.Equal(t, value, target.ComputedStyle.TextTransform)
+			assert.Equal(t, value, target.ComputedStyle.TextTransform.String())
 		})
 	}
 }

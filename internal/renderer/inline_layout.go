@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"fyne.io/fyne/v2"
+	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
@@ -114,7 +115,7 @@ func (ile *InlineLayoutEngine) LayoutInlineChildren(
 	textAlign := ""
 	lineHeight := float32(0)
 	if len(children) > 0 && children[0].Parent != nil && children[0].Parent.ComputedStyle != nil {
-		textAlign = children[0].Parent.ComputedStyle.TextAlign
+		textAlign = children[0].Parent.ComputedStyle.TextAlign.String()
 		lineHeight = children[0].Parent.ComputedStyle.LineHeight
 	}
 
@@ -176,10 +177,10 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 	}
 
 	if node.ComputedStyle != nil {
-		if node.ComputedStyle.Display == "none" {
+		if node.ComputedStyle.Display == css.DisplayAtomNone {
 			return
 		}
-		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" {
+		if node.ComputedStyle.Position == css.PositionAtomAbsolute || node.ComputedStyle.Position == css.PositionAtomFixed {
 			return
 		}
 	}
@@ -274,7 +275,7 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		}
 		fontSize := ile.getFontSizeForNode(node)
 		style := ile.fontMetrics.GetTextStyleFromNode(node)
-		if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
+		if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == css.FontStyleAtomItalic {
 			style.Italic = true
 		}
 		letterSpacing := float32(0)
@@ -311,7 +312,7 @@ func (ile *InlineLayoutEngine) addTextToLines(
 
 	fontSize := ile.getFontSizeForNode(node)
 	style := ile.fontMetrics.GetTextStyleFromNode(node)
-	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
+	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == css.FontStyleAtomItalic {
 		style.Italic = true
 	}
 
@@ -330,8 +331,8 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		return
 	}
 
-	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != "" {
-		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform)
+	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != css.TextTransformAtomNone {
+		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform.String())
 	}
 
 	words := ile.splitTextForWrapping(text, whiteSpaceMode)
@@ -879,7 +880,7 @@ func (ile *InlineLayoutEngine) applyTextTransform(text string, transform string)
 func (ile *InlineLayoutEngine) isInlineBlock(node *RenderNode) bool {
 	if node.ComputedStyle != nil {
 		disp := node.ComputedStyle.Display
-		if disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
+		if disp == css.DisplayAtomInlineBlock {
 			return true
 		}
 	}

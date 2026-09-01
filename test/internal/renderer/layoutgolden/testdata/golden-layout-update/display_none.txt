@@ -4,7 +4,5 @@ html display=block
   body display=block
     box=(x=8.00 y=8.00 w=384.00 h=20.00)
     margin=(t=8.00 r=8.00 b=8.00 l=8.00)
-    div display=block
+    div display=inline
       box=(x=8.00 y=8.00 w=100.00 h=20.00)
-      div display=block
-        box=(x=8.00 y=8.00 w=100.00 h=19.20)

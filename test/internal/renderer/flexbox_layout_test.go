@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"context"
 	"os"
@@ -496,7 +497,7 @@ func TestFlexPropertyParsing(t *testing.T) {
 		t.Fatal("container not found")
 	}
 
-	if container.ComputedStyle.Display != "flex" {
+	if container.ComputedStyle.Display != css.DisplayAtomFlex {
 		t.Errorf("expected display: flex, got %s", container.ComputedStyle.Display)
 	}
 	if container.ComputedStyle.FlexDirection != "column" {
@@ -663,7 +664,7 @@ func countFlexNodes(node *renderer.RenderNode) int {
 	}
 
 	count := 0
-	if node.ComputedStyle.Display == "flex" {
+	if node.ComputedStyle.Display == css.DisplayAtomFlex {
 		count++
 	}
 

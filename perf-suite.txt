@@ -1,0 +1,156 @@
+PASS
+ok  	github.com/vyquocvu/goosie/cmd/browser	0.897s
+?   	github.com/vyquocvu/goosie/cmd/headless	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/html-audit	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/mcp-server	[no test files]
+PASS
+ok  	github.com/vyquocvu/goosie/cmd/perf-review	0.695s
+?   	github.com/vyquocvu/goosie/cmd/screenshot-all	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/test-gen	[no test files]
+?   	github.com/vyquocvu/goosie/examples/console_demo	[no test files]
+?   	github.com/vyquocvu/goosie/examples/dom_api_demo	[no test files]
+?   	github.com/vyquocvu/goosie/examples/font_metrics_demo	[no test files]
+?   	github.com/vyquocvu/goosie/examples/image_loading_demo	[no test files]
+?   	github.com/vyquocvu/goosie/examples/scroll_perf_demo	[no test files]
+?   	github.com/vyquocvu/goosie/internal/browsercontrol	[no test files]
+?   	github.com/vyquocvu/goosie/internal/conformance	[no test files]
+?   	github.com/vyquocvu/goosie/internal/css	[no test files]
+?   	github.com/vyquocvu/goosie/internal/dom	[no test files]
+?   	github.com/vyquocvu/goosie/internal/dom/atom	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/documentloader	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/eventloop	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/message	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/metrics	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/navigation	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/renderer	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/session	[no test files]
+?   	github.com/vyquocvu/goosie/internal/engine/testpages	[no test files]
+?   	github.com/vyquocvu/goosie/internal/image	[no test files]
+?   	github.com/vyquocvu/goosie/internal/js	[no test files]
+?   	github.com/vyquocvu/goosie/internal/mcpserver	[no test files]
+?   	github.com/vyquocvu/goosie/internal/memory	[no test files]
+?   	github.com/vyquocvu/goosie/internal/net	[no test files]
+?   	github.com/vyquocvu/goosie/internal/profile	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer/frame	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer/frame/cache	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer/frame/compositor	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer/frame/golden	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer/frame/raster	[no test files]
+?   	github.com/vyquocvu/goosie/internal/renderer/layoutgolden	[no test files]
+?   	github.com/vyquocvu/goosie/internal/testutil	[no test files]
+?   	github.com/vyquocvu/goosie/internal/ui	[no test files]
+?   	github.com/vyquocvu/goosie/internal/ui/devtools	[no test files]
+?   	github.com/vyquocvu/goosie/internal/version	[no test files]
+goos: darwin
+goarch: arm64
+pkg: github.com/vyquocvu/goosie/test/e2e
+cpu: Apple M1 Pro
+BenchmarkE2EScrollPerformance-10    	 6856618	       175.6 ns/op	      91 B/op	       0 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/test/e2e	2.513s
+PASS
+ok  	github.com/vyquocvu/goosie/test/internal/browsercontrol	0.808s
+PASS
+ok  	github.com/vyquocvu/goosie/test/internal/conformance	0.755s
+goos: darwin
+goarch: arm64
+pkg: github.com/vyquocvu/goosie/test/internal/css
+cpu: Apple M1 Pro
+BenchmarkParseSmall-10                       	  337110	      3559 ns/op	    2272 B/op	     166 allocs/op
+BenchmarkParseMedium-10                      	   29484	     40612 ns/op	   25368 B/op	    1909 allocs/op
+BenchmarkParseLarge-10                       	    6134	    193344 ns/op	  129217 B/op	    9067 allocs/op
+BenchmarkParseSelectorComplex-10             	   63541	     18900 ns/op	   11776 B/op	     912 allocs/op
+BenchmarkParseSelectorHeavy-10               	   35611	     33940 ns/op	   24464 B/op	    1609 allocs/op
+BenchmarkParseAtRules-10                     	   37666	     30970 ns/op	   23008 B/op	    1512 allocs/op
+BenchmarkParseMalformed-10                   	 1315112	       911.6 ns/op	     320 B/op	      18 allocs/op
+BenchmarkParseStyleAttribute-10              	  506576	      2318 ns/op	    1344 B/op	     118 allocs/op
+BenchmarkMatchCache_Cached-10                	53382067	        22.86 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMatchCache_Uncached-10              	 4652001	       257.4 ns/op	     504 B/op	       6 allocs/op
+BenchmarkMatchCache_ManyElements-10          	39745791	        30.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStylePool_Evict-10                  	  569487	      2120 ns/op	    6424 B/op	      21 allocs/op
+BenchmarkInheritedStyleFingerprint-10        	12230596	        97.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInheritedStyleEqual-10              	59699882	        20.12 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStylePoolInternHit-10               	 6747934	       177.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStylePoolInternMiss-10              	 6163665	       194.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkApplyDeclarationsInherited-10       	19722744	        60.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkApplyDeclarationsNonInherited-10    	15457393	        77.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComputedStyleInherit-10             	1000000000	         0.3148 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComputeInvalidation-10              	 6539172	       186.0 ns/op	      72 B/op	       4 allocs/op
+BenchmarkComputeInvalidationInherited-10     	 9108063	       130.4 ns/op	      40 B/op	       3 allocs/op
+BenchmarkBatchMutations-10                   	 3028210	       396.3 ns/op	     112 B/op	       8 allocs/op
+BenchmarkAffectedRuleIndices-10              	10779948	       112.5 ns/op	      56 B/op	       3 allocs/op
+BenchmarkHasSiblingCombinator-10             	858819855	         1.375 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPropertyInterning-10                	  724710	      1675 ns/op	     976 B/op	      81 allocs/op
+BenchmarkHotColdClassification-10            	  207086	      5853 ns/op	    3544 B/op	     285 allocs/op
+BenchmarkSourceOrderTracking-10              	  390318	      3002 ns/op	    2544 B/op	     120 allocs/op
+BenchmarkParseWithConfig-10                  	   29626	     40667 ns/op	   25368 B/op	    1909 allocs/op
+BenchmarkPropertyTableIntern-10              	 4012902	       299.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComputeSpecificity-10               	141723878	         8.300 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompileStyleSheet/Small-10          	 1883607	       639.5 ns/op	    1464 B/op	      16 allocs/op
+BenchmarkCompileStyleSheet/Medium-10         	  258796	      4532 ns/op	    9816 B/op	      81 allocs/op
+BenchmarkCompileStyleSheet/Large-10          	   58023	     20717 ns/op	   40776 B/op	     314 allocs/op
+BenchmarkCompileStyleSheet/SelectorComplex-10         	  370893	      3249 ns/op	    7440 B/op	      61 allocs/op
+BenchmarkCompileStyleSheet/SelectorHeavy-10           	  178116	      6906 ns/op	   23640 B/op	     100 allocs/op
+BenchmarkMatchElement/ByID-10                         	 6777042	       178.9 ns/op	     216 B/op	       4 allocs/op
+BenchmarkMatchElement/ByClass-10                      	 6789442	       184.6 ns/op	     216 B/op	       4 allocs/op
+BenchmarkMatchElement/ByTag-10                        	 7176177	       169.8 ns/op	     216 B/op	       4 allocs/op
+BenchmarkMatchElement/Compound-10                     	 5977278	       199.9 ns/op	     240 B/op	       4 allocs/op
+BenchmarkMatchElement/Descendant-10                   	11973956	        99.51 ns/op	      72 B/op	       2 allocs/op
+BenchmarkMatchElement/NoMatch-10                      	 9897562	       121.9 ns/op	      72 B/op	       2 allocs/op
+BenchmarkMatchVsLinear/Bucketed-10                    	 6124876	       197.0 ns/op	     136 B/op	       6 allocs/op
+BenchmarkMatchVsLinear/Linear-10                      	 1000000	      1045 ns/op	    2930 B/op	      22 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/test/internal/css	60.099s
+goos: darwin
+goarch: arm64
+pkg: github.com/vyquocvu/goosie/test/internal/dom
+cpu: Apple M1 Pro
+BenchmarkParseBodyTextSmall-10                     	  742390	      1623 ns/op	    5536 B/op	      19 allocs/op
+BenchmarkParseBodyTextMedium-10                    	  148575	      8159 ns/op	   10736 B/op	     100 allocs/op
+BenchmarkParseBodyTextLarge-10                     	   16347	     70375 ns/op	   62128 B/op	     689 allocs/op
+BenchmarkParseBodyTextTableHeavy-10                	   18163	     65914 ns/op	   69128 B/op	     739 allocs/op
+BenchmarkParseBodyTextFormHeavy-10                 	   26680	     45188 ns/op	   40832 B/op	     454 allocs/op
+BenchmarkParseBodyTextImageHeavy-10                	   43916	     27360 ns/op	   22800 B/op	     255 allocs/op
+BenchmarkParseBodyTextScrollingShort-10            	  102704	     11566 ns/op	   14136 B/op	     103 allocs/op
+BenchmarkParseBodyTextScrollingLong-10             	   13162	     90972 ns/op	   94296 B/op	     678 allocs/op
+BenchmarkParseBodyHTMLScrollingShort-10            	  102688	     11634 ns/op	   14288 B/op	     104 allocs/op
+BenchmarkParseBodyHTMLScrollingLong-10             	   13136	     93178 ns/op	   94312 B/op	     679 allocs/op
+BenchmarkParseBodyHTMLSmall-10                     	  728000	      1679 ns/op	    5568 B/op	      20 allocs/op
+BenchmarkParseBodyHTMLMedium-10                    	  145206	      8272 ns/op	   10736 B/op	     101 allocs/op
+BenchmarkParseBodyHTMLLarge-10                     	   16980	     70691 ns/op	   62128 B/op	     690 allocs/op
+BenchmarkParseBodyHTMLTableHeavy-10                	   18054	     66470 ns/op	   69784 B/op	     741 allocs/op
+BenchmarkParseBodyHTMLFormHeavy-10                 	   26540	     45023 ns/op	   40896 B/op	     455 allocs/op
+BenchmarkParseBodyHTMLImageHeavy-10                	   44540	     27438 ns/op	   22928 B/op	     256 allocs/op
+BenchmarkGetElementByIDFound-10                    	  144164	      8600 ns/op	   11040 B/op	     102 allocs/op
+BenchmarkGetElementByIDNotFound-10                 	  152658	      7985 ns/op	   10384 B/op	      96 allocs/op
+BenchmarkGetElementByIDFull-10                     	  144696	      8249 ns/op	   10888 B/op	     101 allocs/op
+BenchmarkGetElementsByClassName-10                 	  136382	      8782 ns/op	   11832 B/op	     114 allocs/op
+BenchmarkGetElementsByTagName-10                   	  143728	      8317 ns/op	   10840 B/op	     101 allocs/op
+BenchmarkQuerySelectorID-10                        	   79692	     15165 ns/op	   14984 B/op	     256 allocs/op
+BenchmarkQuerySelectorClass-10                     	   93830	     12938 ns/op	   14952 B/op	     216 allocs/op
+BenchmarkQuerySelectorTag-10                       	  105471	     11177 ns/op	   14096 B/op	     195 allocs/op
+BenchmarkQuerySelectorNotFound-10                  	   86510	     14374 ns/op	   14320 B/op	     249 allocs/op
+BenchmarkQuerySelectorAllTag-10                    	   96153	     12666 ns/op	   15344 B/op	     203 allocs/op
+BenchmarkParseEmpty-10                             	 1344856	       905.4 ns/op	    5016 B/op	      10 allocs/op
+BenchmarkMeasureParseCorpus/long_article-10        	   28192	     42177 ns/op	 120.06 MB/s	   30864 B/op	     306 allocs/op
+BenchmarkMeasureParseCorpus/documentation-10       	   50511	     23723 ns/op	  77.31 MB/s	   23048 B/op	     230 allocs/op
+BenchmarkMeasureParseCorpus/table_heavy-10         	   19010	     62927 ns/op	  63.53 MB/s	   65400 B/op	     733 allocs/op
+BenchmarkMeasureParseCorpus/form_heavy-10          	   27468	     45103 ns/op	  85.76 MB/s	   38640 B/op	     449 allocs/op
+BenchmarkMeasureParseCorpus/image_heavy-10         	   43923	     27394 ns/op	 122.76 MB/s	   21600 B/op	     251 allocs/op
+BenchmarkMeasureParseCorpus/javascript_light_todo-10         	   44821	     26962 ns/op	 121.91 MB/s	   22424 B/op	     217 allocs/op
+BenchmarkMeasureParseCorpus/scrolling_short-10               	  105476	     11103 ns/op	  85.56 MB/s	   12808 B/op	      98 allocs/op
+BenchmarkMeasureParseCorpus/scrolling_long-10                	   14148	     84203 ns/op	 138.88 MB/s	   59448 B/op	     666 allocs/op
+BenchmarkMeasureAllocsPerNode/10p-10                         	  339668	      4277 ns/op	  53.77 MB/s	    7448 B/op	      41 allocs/op
+BenchmarkMeasureAllocsPerNode/50p-10                         	   82395	     14495 ns/op	  79.34 MB/s	   17048 B/op	     161 allocs/op
+BenchmarkMeasureAllocsPerNode/100p-10                        	   43204	     27795 ns/op	  82.75 MB/s	   29048 B/op	     311 allocs/op
+BenchmarkMeasureAllocsPerNode/500p-10                        	    9350	    132660 ns/op	  86.69 MB/s	  125048 B/op	    1511 allocs/op
+BenchmarkStoreApplyMutationSetAttribute-10                   	13184204	        90.81 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParseDocument-10                                    	   29490	     37377 ns/op	   32248 B/op	     311 allocs/op
+BenchmarkStoreAllocate-10                                    	  140256	      9017 ns/op	   61904 B/op	       6 allocs/op
+BenchmarkStoreAppendChild-10                                 	19370029	        66.06 ns/op	     203 B/op	       0 allocs/op
+BenchmarkStoreSetAttrs-10                                    	60176895	        19.85 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStoreSetText-10                                     	61163120	        19.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStoreChildIterator-10                               	 2852956	       420.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStoreSubtreeIterator-10                             	 1598113	       738.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkStoreRemoveChild-10                                 	

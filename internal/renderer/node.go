@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/net/html"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/image"
 )
 
@@ -41,31 +42,31 @@ type RenderNode struct {
 
 // Style represents computed styles for a node (placeholder for future CSS support)
 type Style struct {
-	Display              string // "block", "inline", "none", etc.
-	Visibility           string // "visible", "hidden", "collapse"
+	Display              css.DisplayAtom      // "block", "inline", "none", etc.
+	Visibility           css.VisibilityAtom    // "visible", "hidden", "collapse"
 	FontSize             float32
 	FontWeight           string
 	Color                color.Color
 	BackgroundColor      color.Color
 	BackgroundImage      string // "url(...)" or "none"
-	BackgroundRepeat     string // "repeat", "no-repeat", "repeat-x", "repeat-y"
-	BackgroundPosition   string // "top left", "top center", "center", etc.
-	BackgroundSize       string // "auto", "cover", "contain", or length
-	BackgroundAttachment string // "scroll", "fixed"
+	BackgroundRepeat     css.BackgroundRepeatAtom     // "repeat", "no-repeat", "repeat-x", "repeat-y"
+	BackgroundPosition   css.BackgroundPositionAtom   // "top left", "top center", "center", etc.
+	BackgroundSize       css.BackgroundSizeAtom       // "auto", "cover", "contain"
+	BackgroundAttachment css.BackgroundAttachmentAtom // "scroll", "fixed"
 	BackgroundImageData  *image.ImageData
 	Width                string
 	Height          string
 	FontFamily      string
 	Opacity         float32
-	TextAlign       string // "left", "right", "center", "justify"
+	TextAlign       css.TextAlignAtom        // "left", "right", "center", "justify"
 	LetterSpacing   float32
 	LineHeight      float32
-	FontStyle       string // "normal", "italic"
-	TextDecoration  string // "none", "underline", "line-through"
-	TextTransform   string // "none", "uppercase", "lowercase", "capitalize"
+	FontStyle       css.FontStyleAtom         // "normal", "italic"
+	TextDecoration  css.TextDecorationAtom    // "none", "underline", "line-through"
+	TextTransform   css.TextTransformAtom     // "none", "uppercase", "lowercase", "capitalize"
 
 	// Positioning
-	Position string // "static", "relative", "absolute", "fixed", "sticky"
+	Position css.PositionAtom // "static", "relative", "absolute", "fixed", "sticky"
 	Top      string
 	Right    string
 	Bottom   string
@@ -73,14 +74,14 @@ type Style struct {
 	ZIndex   int
 
 	// Float and Clear
-	Float string // "none", "left", "right"
-	Clear string // "none", "left", "right", "both"
+	Float css.FloatAtom // "none", "left", "right"
+	Clear string        // "none", "left", "right", "both"
 
 	// Overflow
-	Overflow     string // "visible", "hidden", "scroll", "auto"
-	OverflowX    string // "visible", "hidden", "scroll", "auto"
-	OverflowY    string // "visible", "hidden", "scroll", "auto"
-	TextOverflow string // "clip", "ellipsis"
+	Overflow     css.OverflowAtom // "visible", "hidden", "scroll", "auto"
+	OverflowX    string           // "visible", "hidden", "scroll", "auto"
+	OverflowY    string           // "visible", "hidden", "scroll", "auto"
+	TextOverflow string           // "clip", "ellipsis"
 
 	// Box sizing
 	BoxSizing string // "content-box", "border-box"
@@ -156,10 +157,10 @@ type Style struct {
 	Transition        string // CSS transition specification
 	Cursor            string // Cursor type
 	VerticalAlign     string // "baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super"
-	WhiteSpace        string // "normal", "nowrap", "pre", "pre-wrap", "pre-line"
-	WordBreak         string // "normal", "break-all", "keep-all", "break-word"
-	ListStyleType     string // "disc", "circle", "square", "decimal", "none"
-	ListStylePosition string // "inside", "outside"
+	WhiteSpace        css.WhiteSpaceAtom        // "normal", "nowrap", "pre", "pre-wrap", "pre-line"
+	WordBreak         string                     // "normal", "break-all", "keep-all", "break-word"
+	ListStyleType     css.ListStyleTypeAtom      // "disc", "circle", "square", "decimal", "none"
+	ListStylePosition css.ListStylePositionAtom  // "inside", "outside"
 	TableLayout       string // "auto", "fixed"
 	BorderCollapse    string // "collapse", "separate"
 	BorderSpacing     string // Length value for collapsed borders
@@ -210,20 +211,25 @@ func (n *RenderNode) SetAttribute(key, value string) {
 // IsBlock returns true if the element is a block-level element
 func (n *RenderNode) IsBlock() bool {
 	if n.ComputedStyle != nil {
-		if n.ComputedStyle.Float == "left" || n.ComputedStyle.Float == "right" {
+		if n.ComputedStyle.Float == css.FloatAtomLeft || n.ComputedStyle.Float == css.FloatAtomRight {
 			return true
 		}
-		if n.ComputedStyle.Position == "absolute" || n.ComputedStyle.Position == "fixed" {
+		if n.ComputedStyle.Position == css.PositionAtomAbsolute || n.ComputedStyle.Position == css.PositionAtomFixed {
 			return true
 		}
-		if n.ComputedStyle.Display != "" {
-			disp := n.ComputedStyle.Display
-			if disp == "block" || disp == "flex" || disp == "grid" || disp == "table" || disp == "flow-root" {
-				return true
-			}
-			if disp == "inline" || disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
-				return false
-			}
+		disp := n.ComputedStyle.Display
+		switch disp {
+		case css.DisplayAtomBlock, css.DisplayAtomFlex, css.DisplayAtomGrid,
+			css.DisplayAtomTable, css.DisplayAtomFlowRoot, css.DisplayAtomListItem,
+			css.DisplayAtomTableHeaderGroup, css.DisplayAtomTableRowGroup,
+			css.DisplayAtomTableFooterGroup, css.DisplayAtomTableRow, css.DisplayAtomTableCell:
+			return true
+		case css.DisplayAtomInline, css.DisplayAtomInlineBlock:
+			return false
+		}
+		// DisplayAtomNone means display:none — not block
+		if disp == css.DisplayAtomNone {
+			return false
 		}
 	}
 	// Form elements and tables should be treated as block-level for proper layout

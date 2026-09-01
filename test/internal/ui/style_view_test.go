@@ -1,6 +1,7 @@
 package ui_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/ui"
 	"image/color"
 	"testing"
@@ -21,7 +22,7 @@ func TestComputedStyleView_ShowsProperties(t *testing.T) {
 		ID:      1,
 		TagName: "div",
 		ComputedStyle: &renderer.Style{
-			Display:  "block",
+			Display:  css.DisplayAtomBlock,
 			FontSize: 16,
 			Color:    color.RGBA{R: 0, G: 0, B: 0, A: 255},
 			Width:    "100px",
@@ -37,7 +38,7 @@ func TestComputedStyleView_Filter(t *testing.T) {
 		ID:      1,
 		TagName: "div",
 		ComputedStyle: &renderer.Style{
-			Display:  "block",
+			Display:  css.DisplayAtomBlock,
 			FontSize: 16,
 			Color:    color.RGBA{R: 0, G: 0, B: 0, A: 255},
 			Width:    "100px",
@@ -59,7 +60,7 @@ func TestComputedStyleView_FilterNoMatch(t *testing.T) {
 		ID:      1,
 		TagName: "div",
 		ComputedStyle: &renderer.Style{
-			Display: "block",
+			Display: css.DisplayAtomBlock,
 		},
 	}
 	view.SetNode(node)
@@ -73,7 +74,7 @@ func TestComputedStyleView_ClearsOnEmptyFilter(t *testing.T) {
 		ID:      1,
 		TagName: "div",
 		ComputedStyle: &renderer.Style{
-			Display: "block",
+			Display: css.DisplayAtomFlex,
 			Width:   "100px",
 			Height:  "200px",
 		},
