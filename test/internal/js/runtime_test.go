@@ -1975,3 +1975,57 @@ func TestNavigatorAPIs_NoEnforcer(t *testing.T) {
 		t.Errorf("should reject with 'not implemented' when no enforcer, got %s", v.String())
 	}
 }
+
+// TestRuntimeDocumentCurrentScript — document.currentScript defaults
+// to null, reflects SetCurrentScript attributes while set (including
+// the Plausible-style endpoint derivation from src), and resets to
+// null after ClearCurrentScript.
+func TestRuntimeDocumentCurrentScript(t *testing.T) {
+	rt := js.NewRuntime()
+	defer rt.Cleanup()
+
+	val, err := rt.RunScript(`document.currentScript === null`)
+	require.NoError(t, err)
+	require.True(t, val.ToBoolean(), "currentScript must default to null")
+
+	rt.SetCurrentScript(map[string]string{
+		"src":         "https://analytics.example.com/js/script.js",
+		"data-domain": "example.com",
+		"defer":       "",
+	})
+
+	val, err = rt.RunScript(`document.currentScript.getAttribute("data-domain")`)
+	require.NoError(t, err)
+	require.Equal(t, "example.com", val.String())
+
+	val, err = rt.RunScript(`document.currentScript.src`)
+	require.NoError(t, err)
+	require.Equal(t, "https://analytics.example.com/js/script.js", val.String())
+
+	// Plausible init pattern: endpoint derived from the script's own
+	// src origin when data-api is absent.
+	val, err = rt.RunScript(`(function() {
+		var i = document.currentScript;
+		return i.getAttribute("data-api") || new URL(i.src).origin + "/api/event";
+	})()`)
+	require.NoError(t, err)
+	require.Equal(t, "https://analytics.example.com/api/event", val.String())
+
+	rt.ClearCurrentScript()
+	val, err = rt.RunScript(`document.currentScript === null`)
+	require.NoError(t, err)
+	require.True(t, val.ToBoolean(), "currentScript must reset to null")
+}
+
+// TestRuntimeSetCurrentScript_NoBootstrap — Set/ClearCurrentScript are
+// safe no-ops on a VM without the bootstrap helpers (defensive guard).
+func TestRuntimeSetCurrentScript_EmptyAttrs(t *testing.T) {
+	rt := js.NewRuntime()
+	defer rt.Cleanup()
+
+	rt.SetCurrentScript(nil)
+	val, err := rt.RunScript(`document.currentScript !== null && document.currentScript.tagName === "script"`)
+	require.NoError(t, err)
+	require.True(t, val.ToBoolean(), "empty attrs must still expose a script element")
+	rt.ClearCurrentScript()
+}

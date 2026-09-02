@@ -9,6 +9,7 @@
 //	perf-review                          # default pages, default iterations
 //	perf-review -iterations=5            # repeat each workload
 //	perf-review -urls=https://example.com,https://www.iana.org
+//	perf-review -fixtures=testdata/perf/ # use offline HTML fixtures
 //	perf-review -include-mutations       # run the JS mutation stress test
 //	perf-review -include-scroll          # run the scroll-burst test
 //	perf-review -json                    # machine-readable output
@@ -20,15 +21,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/browsercontrol"
+	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 func main() {
@@ -41,7 +45,16 @@ func main() {
 	ts, fixtures := startFixtureServer()
 	defer ts.Close()
 
-	allURLs := append([]string(nil), fixtures...)
+	// If -fixtures is set, load HTML files from that directory and serve
+	// them via the test server, replacing the default fixtures.
+	var fixtureURLs []string
+	if opts.fixtures != "" {
+		fixtureURLs = loadFixtureDir(ts, opts.fixtures)
+	} else {
+		fixtureURLs = fixtures
+	}
+
+	allURLs := append([]string(nil), fixtureURLs...)
 	allURLs = append(allURLs, opts.urls...)
 
 	runner := &review{
@@ -50,6 +63,12 @@ func main() {
 		verbose:    opts.verbose,
 	}
 	results := runner.run(opts.includeMutations, opts.includeScroll)
+
+	// When using offline fixtures, also measure the render pipeline stages
+	// directly via the renderer package.
+	if opts.fixtures != "" {
+		results.RenderStages = measureRenderStages(opts.fixtures, opts.iterations)
+	}
 
 	if opts.json {
 		enc := json.NewEncoder(os.Stdout)
@@ -62,6 +81,7 @@ func main() {
 
 type options struct {
 	urls             []string
+	fixtures         string
 	iterations       int
 	includeMutations bool
 	includeScroll    bool
@@ -75,6 +95,7 @@ func parseOptions(args []string) (options, error) {
 	fs := flag.NewFlagSet("perf-review", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	urls := fs.String("urls", defaultURLs, "comma-separated URLs to navigate")
+	fixtures := fs.String("fixtures", "", "directory of offline HTML fixtures to use instead of default pages")
 	iterations := fs.Int("iterations", 3, "number of times to repeat each workload")
 	includeMutations := fs.Bool("include-mutations", true, "run the JS mutation stress test")
 	includeScroll := fs.Bool("include-scroll", true, "run the scroll-burst test")
@@ -92,6 +113,7 @@ func parseOptions(args []string) (options, error) {
 
 	return options{
 		urls:             splitNonEmpty(*urls, ","),
+		fixtures:         *fixtures,
 		iterations:       *iterations,
 		includeMutations: *includeMutations,
 		includeScroll:    *includeScroll,
@@ -132,6 +154,15 @@ type reviewResult struct {
 	Workloads     []workloadResult `json:"workloads"`
 	FreezeHealth  map[string]bool  `json:"freeze_health"`
 	HealthSummary string           `json:"health_summary,omitempty"`
+	RenderStages  []renderStageResult `json:"render_stages,omitempty"`
+}
+
+// renderStageResult holds per-stage timing for the render pipeline,
+// measured directly via renderer.RenderHTMLToImageWithStages.
+type renderStageResult struct {
+	Fixture string            `json:"fixture"`
+	N       int               `json:"n"`
+	Stages  map[string]int64  `json:"stages_ns"` // mean duration per stage in nanoseconds
 }
 
 // withContext opens a context, runs fn, and closes the context. The
@@ -426,6 +457,110 @@ func startFixtureServer() (*httptest.Server, []string) {
 	return ts, urls
 }
 
+// loadFixtureDir reads HTML files from dir, registers them on the test
+// server, and returns the URLs. Each file is served at /fix/<filename>.
+func loadFixtureDir(ts *httptest.Server, dir string) []string {
+	mux, ok := ts.Config.Handler.(*http.ServeMux)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "[error] test server handler is not *http.ServeMux\n")
+		return nil
+	}
+	var urls []string
+	if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if filepath.Ext(path) != ".html" {
+			return nil
+		}
+		name := filepath.Base(path)
+		htmlContent, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] cannot read fixture %s: %v\n", path, err)
+			return nil
+		}
+		// Register a handler on the test server's mux via the global
+		// pattern. Since httptest.Server wraps a ServeMux, we use the
+		// underlying handler. For simplicity, we serve via a closure
+		// that writes the content directly.
+		content := htmlContent // capture
+		pattern := "/fix/" + name
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write(content)
+		})
+		urls = append(urls, ts.URL+pattern)
+		return nil
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[error] cannot walk fixture directory %s: %v\n", dir, err)
+	}
+	sort.Strings(urls)
+	return urls
+}
+
+// measureRenderStages runs the renderer pipeline directly on each HTML
+// fixture file and collects per-stage timings. The GOOSIE_PERF_STAGES
+// environment variable must be set for stage collection to be active.
+func measureRenderStages(dir string, iterations int) []renderStageResult {
+	// Respect the GOOSIE_PERF_STAGES env var gate — the user controls
+	// whether stage collection is active.
+	if os.Getenv("GOOSIE_PERF_STAGES") == "" {
+		return nil
+	}
+
+	var results []renderStageResult
+	if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if filepath.Ext(path) != ".html" {
+			return nil
+		}
+		htmlContent, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[warn] cannot read fixture %s: %v\n", path, err)
+			return nil
+		}
+
+		// Accumulate stage totals across iterations.
+		totals := make(map[string]int64)
+		n := 0
+		for i := 0; i < iterations; i++ {
+			_, stages, err := renderer.RenderHTMLToImageWithStages(
+				context.Background(), string(htmlContent), 800, 600)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[warn] render %s iteration %d failed: %v\n",
+					filepath.Base(path), i, err)
+				continue
+			}
+			if stages != nil {
+				for k, v := range stages {
+					totals[k] += int64(v)
+				}
+			}
+			n++
+		}
+
+		if n == 0 {
+			return nil
+		}
+		means := make(map[string]int64)
+		for k, v := range totals {
+			means[k] = v / int64(n)
+		}
+		results = append(results, renderStageResult{
+			Fixture: filepath.Base(path),
+			N:       n,
+			Stages:  means,
+		})
+		return nil
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[error] cannot walk fixture directory %s: %v\n", dir, err)
+	}
+	sort.Slice(results, func(i, j int) bool { return results[i].Fixture < results[j].Fixture })
+	return results
+}
+
 func splitNonEmpty(s, sep string) []string {
 	parts := strings.Split(s, sep)
 	out := make([]string, 0, len(parts))
@@ -505,5 +640,22 @@ func printHuman(w io.Writer, r reviewResult) {
 			fmt.Fprintf(w, "  %-30s  %s\n", k, mark)
 		}
 		fmt.Fprintf(w, "\n  Summary: %s\n", r.HealthSummary)
+	}
+
+	if len(r.RenderStages) > 0 {
+		fmt.Fprintln(w, "Render pipeline stages")
+		fmt.Fprintln(w, "----------------------")
+		for _, rs := range r.RenderStages {
+			fmt.Fprintf(w, "  %s  (n=%d)\n", rs.Fixture, rs.N)
+			// Sort stage names for deterministic output.
+			names := make([]string, 0, len(rs.Stages))
+			for k := range rs.Stages {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				fmt.Fprintf(w, "    %-20s %s\n", name, time.Duration(rs.Stages[name]))
+			}
+		}
 	}
 }

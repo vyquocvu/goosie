@@ -653,10 +653,10 @@ func updateUIWithCoordinatorStream(ctx context.Context, browser *ui.Browser, fet
 				}
 			},
 			OnImage: func(r documentloader.ImageResult) {
-				log.Printf("CSS-nested image fetched: %s (%d bytes)", r.Resolved, len(r.Source))
+				// log.Printf("CSS-nested image fetched: %s (%d bytes)", r.Resolved, len(r.Source))
 			},
 			OnFont: func(r documentloader.FontResult) {
-				log.Printf("CSS-nested font fetched: %s (%d bytes)", r.Resolved, len(r.Source))
+				// log.Printf("CSS-nested font fetched: %s (%d bytes)", r.Resolved, len(r.Source))
 			},
 			OnError: func(_ documentloader.Resource, e error) {
 				if r := browser.ActiveTab(); r != nil {
@@ -962,6 +962,7 @@ func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolic
 	}
 	baseURL, _ := urlpkg.Parse(pageURL)
 	inlineBodies := inlineScriptsByPosition(doc)
+	scriptAttrs := scriptAttrsByPosition(doc)
 
 	// Filter and group by mode. Classic and defer are executed at
 	// drain time; module is reported and skipped.
@@ -983,8 +984,8 @@ func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolic
 		}
 	}
 
-	runScriptGroup(jsRuntime, csp, baseURL, doc, inlineBodies, classics, "classic")
-	runScriptGroup(jsRuntime, csp, baseURL, doc, inlineBodies, defers, "defer")
+	runScriptGroup(jsRuntime, csp, baseURL, doc, inlineBodies, scriptAttrs, classics, "classic")
+	runScriptGroup(jsRuntime, csp, baseURL, doc, inlineBodies, scriptAttrs, defers, "defer")
 
 	// Dispatch DOMContentLoaded to JS after classic + defer finish.
 	fireDOMContentLoaded(jsRuntime)
@@ -992,7 +993,11 @@ func executeScriptQueue(jsRuntime *js.Runtime, pageURL string, csp *net.CSPPolic
 
 // runScriptGroup executes one group of scripts (classic or defer) in
 // source order. Failures log and continue per the permissive policy.
-func runScriptGroup(jsRuntime *js.Runtime, csp *net.CSPPolicy, baseURL *urlpkg.URL, doc *ghtml.Node, inlineBodies map[int]string, group []documentloader.ScriptResult, label string) {
+//
+// document.currentScript reflects each script's element while it runs
+// (attributes from scriptAttrs, src resolved for external scripts)
+// and is reset to null afterwards, per the HTML spec.
+func runScriptGroup(jsRuntime *js.Runtime, csp *net.CSPPolicy, baseURL *urlpkg.URL, doc *ghtml.Node, inlineBodies map[int]string, scriptAttrs map[int]map[string]string, group []documentloader.ScriptResult, label string) {
 	sort.SliceStable(group, func(i, j int) bool {
 		return group[i].Position < group[j].Position
 	})
@@ -1013,12 +1018,71 @@ func runScriptGroup(jsRuntime *js.Runtime, csp *net.CSPPolicy, baseURL *urlpkg.U
 			}
 		}
 
-		if _, err := jsRuntime.RunScript(string(source)); err != nil {
+		jsRuntime.SetCurrentScript(scriptAttrsFor(r, scriptAttrs))
+		_, err := jsRuntime.RunScript(string(source))
+		jsRuntime.ClearCurrentScript()
+		if err != nil {
 			log.Printf("Error running %s script %s at position %d: %v",
 				label, scriptLabel(r), r.Position, err)
 			continue
 		}
 	}
+}
+
+// scriptAttrsByPosition mirrors inlineScriptsByPosition's position
+// counting but captures every script element's attributes so
+// document.currentScript can reflect them during execution.
+func scriptAttrsByPosition(doc *ghtml.Node) map[int]map[string]string {
+	out := make(map[int]map[string]string)
+	if doc == nil {
+		return out
+	}
+	// Streaming parser skips these in resPos; mirror the skip.
+	skipResPos := map[string]bool{"html": true, "head": true, "body": true}
+	var pos int
+	var walk func(*ghtml.Node)
+	walk = func(n *ghtml.Node) {
+		if n.Type == ghtml.ElementNode {
+			if n.Data == "script" {
+				attrs := make(map[string]string, len(n.Attr))
+				for _, attr := range n.Attr {
+					attrs[attr.Key] = attr.Val
+				}
+				out[pos] = attrs
+			}
+			if !skipResPos[n.Data] {
+				pos++
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return out
+}
+
+// scriptAttrsFor builds the attribute map exposed via
+// document.currentScript while r executes. External scripts get
+// their src replaced with the resolved fetch URL (browsers reflect
+// the resolved absolute URL), so analytics code reading
+// currentScript.src works without base-URL resolution.
+func scriptAttrsFor(r documentloader.ScriptResult, byPos map[int]map[string]string) map[string]string {
+	attrs := make(map[string]string)
+	if found := byPos[r.Position]; found != nil {
+		for k, v := range found {
+			attrs[k] = v
+		}
+	}
+	if !r.Inline {
+		switch {
+		case r.Resolved != "":
+			attrs["src"] = r.Resolved
+		case r.URL != "":
+			attrs["src"] = r.URL
+		}
+	}
+	return attrs
 }
 
 // fireDOMContentLoaded dispatches the DOMContentLoaded event to the

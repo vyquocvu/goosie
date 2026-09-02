@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestRecorderDebugLogEmitsStructured(t *testing.T) {
 		"image_count=4",
 		"parse_ns=",
 	} {
-		if !contains(out, want) {
+		if !strings.Contains(out, want) {
 			t.Errorf("log output missing %q\n got: %s", want, out)
 		}
 	}
@@ -134,13 +135,13 @@ func TestRecorderLogStructuredExplicitCall(t *testing.T) {
 	r.LogStructured(context.Background())
 
 	out := buf.String()
-	if !contains(out, "nav_id=3") || !contains(out, "box_count=42") {
+	if !strings.Contains(out, "nav_id=3") || !strings.Contains(out, "box_count=42") {
 		t.Fatalf("explicit LogStructured missing expected fields: %s", out)
 	}
 
 	// Finalize emits a second, complete record.
 	r.Finalize()
-	if countOccurrences(buf.String(), "navigation complete") != 2 {
+	if strings.Count(buf.String(), "navigation complete") != 2 {
 		t.Fatalf("expected two navigation complete records, got: %s", buf.String())
 	}
 }
@@ -164,7 +165,7 @@ func TestRecorderDebugLogConcurrentSafe(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := countOccurrences(buf.String(), "navigation complete"); got != 20 {
+	if got := strings.Count(buf.String(), "navigation complete"); got != 20 {
 		t.Fatalf("expected 20 navigation complete records, got %d", got)
 	}
 }
@@ -181,27 +182,7 @@ func TestRecorderDebugLogContextPropagation(t *testing.T) {
 	r.LogStructured(ctx)
 	r.Finalize()
 
-	if !contains(buf.String(), "nav_id=9") {
+	if !strings.Contains(buf.String(), "nav_id=9") {
 		t.Fatalf("expected nav_id in output: %s", buf.String())
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
-func countOccurrences(s, sub string) int {
-	n := 0
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			n++
-			i += len(sub) - 1
-		}
-	}
-	return n
 }

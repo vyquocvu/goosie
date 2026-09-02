@@ -212,7 +212,7 @@ func TestServiceCookieBearingRequestBypassesCacheLookup(t *testing.T) {
 	cache := net.NewHTTPCache(t.TempDir(), false)
 	cachedResp := newTestResponse(u, http.StatusOK, "stale")
 	cachedResp.Header.Set("Cache-Control", "max-age=60")
-	cache.Put(u.URL.String(), cachedResp, "stale")
+	cache.Put(u.URL.String(), cachedResp, []byte("stale"))
 	calls := 0
 	client := &http.Client{Jar: jar, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
@@ -267,7 +267,7 @@ func TestServiceCacheHitReplacesSecuritySummary(t *testing.T) {
 	}
 	cachedResp := newTestResponse(cachedReq, http.StatusOK, "cached")
 	cachedResp.Header.Set("Cache-Control", "max-age=60")
-	cache.Put(cachedReq.URL.String(), cachedResp, "cached")
+	cache.Put(cachedReq.URL.String(), cachedResp, []byte("cached"))
 
 	cert := syntheticCertificate("Origin A", "Issuer A")
 	calls := 0

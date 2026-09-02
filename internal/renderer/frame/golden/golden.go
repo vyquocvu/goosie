@@ -85,7 +85,7 @@ func CompareImages(got, want image.Image, tolerance uint8) CompareResult {
 			db := absDiff(uint8(gb>>8), uint8(wb>>8))
 			da := absDiff(uint8(ga>>8), uint8(wa>>8))
 
-			maxChannel := max4(dr, dg, db, da)
+			maxChannel := max(dr, dg, db, da)
 			if maxChannel > maxDelta {
 				maxDelta = maxChannel
 			}
@@ -189,20 +189,6 @@ func absDiff(a, b uint8) uint8 {
 	return b - a
 }
 
-func max4(a, b, c, d uint8) uint8 {
-	m := a
-	if b > m {
-		m = b
-	}
-	if c > m {
-		m = c
-	}
-	if d > m {
-		m = d
-	}
-	return m
-}
-
 func ToRGBA(img image.Image) *image.RGBA {
 	if rgba, ok := img.(*image.RGBA); ok {
 		return rgba
@@ -259,7 +245,7 @@ func CreateDiffImage(got, want *image.RGBA, tolerance uint8) *image.RGBA {
 			db := absDiff(uint8(gb>>8), uint8(wb>>8))
 			da := absDiff(uint8(ga>>8), uint8(wa>>8))
 
-			if max4(dr, dg, db, da) > tolerance {
+			if max(dr, dg, db, da) > tolerance {
 				diff.Set(x, y, red)
 			} else {
 				diff.Set(x, y, transparent)
@@ -286,4 +272,97 @@ func (r CompareResult) PixelDiffRatio() float64 {
 // NearlyEqual reports whether two floats are within epsilon.
 func NearlyEqual(a, b, epsilon float64) bool {
 	return math.Abs(a-b) <= epsilon
+}
+
+// ---------------------------------------------------------------------------
+// M2.2: Dual Backend Parity
+// ---------------------------------------------------------------------------
+
+// BackendParityResult holds the result of comparing CPU and CoreGraphics output.
+type BackendParityResult struct {
+	CPUImage        *image.RGBA
+	CGImage         *image.RGBA
+	Comparison      CompareResult
+	BackendsMatch   bool
+	CPUBackendUsed  raster.BackendType
+	CGBackendUsed   raster.BackendType
+}
+
+// AssertBackendParity renders the same display commands with both CPU and
+// CoreGraphics backends (when available) and verifies they produce identical
+// output. On non-macOS platforms or when CGo is disabled, this only tests
+// the CPU backend and skips the parity check.
+func AssertBackendParity(t *testing.T, name string, vp frame.Viewport, cmds []raster.DisplayCmd) *BackendParityResult {
+	t.Helper()
+
+	dw, dh := vp.DeviceSize()
+	width, height := int(dw), int(dh)
+
+	// Render with CPU backend.
+	cpuBackend := raster.NewCPUBackend(width, height)
+	if err := cpuBackend.BeginFrame(vp); err != nil {
+		t.Fatalf("CPU BeginFrame: %v", err)
+	}
+	cpuImg, err := cpuBackend.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatalf("CPU Rasterize: %v", err)
+	}
+	if err := cpuBackend.EndFrame(); err != nil {
+		t.Fatalf("CPU EndFrame: %v", err)
+	}
+	cpuBackend.Close()
+	cpuRGBA := ToRGBA(cpuImg)
+
+	result := &BackendParityResult{
+		CPUImage:       cpuRGBA,
+		CPUBackendUsed: raster.BackendCPU,
+	}
+
+	// Try to render with CoreGraphics backend.
+	cgBackend, cgType, cgErr := raster.NewBackend(width, height, raster.WithBackend(raster.BackendCoreGraphics))
+	if cgErr != nil {
+		// CoreGraphics not available on this platform — skip parity check.
+		t.Logf("CoreGraphics backend not available: %v (CPU-only test)", cgErr)
+		result.BackendsMatch = true // Trivially true when only one backend exists.
+		return result
+	}
+	result.CGBackendUsed = cgType
+
+	if err := cgBackend.BeginFrame(vp); err != nil {
+		t.Fatalf("CG BeginFrame: %v", err)
+	}
+	cgImg, err := cgBackend.Rasterize(cmds, nil)
+	if err != nil {
+		t.Fatalf("CG Rasterize: %v", err)
+	}
+	if err := cgBackend.EndFrame(); err != nil {
+		t.Fatalf("CG EndFrame: %v", err)
+	}
+	cgBackend.Close()
+	cgRGBA := ToRGBA(cgImg)
+	result.CGImage = cgRGBA
+
+	// Compare CPU and CG output pixel-by-pixel.
+	comparison := CompareImages(cpuRGBA, cgRGBA, 0) // Zero tolerance for exact parity.
+	result.Comparison = comparison
+	result.BackendsMatch = comparison.Match
+
+	if !comparison.Match {
+		// Write diff images for debugging.
+		diffDir := "testdata/golden-parity"
+		cpuPath := filepath.Join(diffDir, name+"_cpu.png")
+		cgPath := filepath.Join(diffDir, name+"_cg.png")
+		diffPath := filepath.Join(diffDir, name+"_parity_diff.png")
+
+		_ = writePNG(cpuPath, cpuRGBA)
+		_ = writePNG(cgPath, cgRGBA)
+		diffImg := CreateDiffImage(cpuRGBA, cgRGBA, 0)
+		_ = writePNG(diffPath, diffImg)
+
+		t.Errorf("backend parity failure %q: %d/%d pixels differ (max delta=%d, mean=%.2f)\n  cpu: %s\n  cg:  %s\n  diff: %s",
+			name, comparison.DiffPixels, comparison.TotalPixels, comparison.MaxDelta, comparison.MeanDelta,
+			cpuPath, cgPath, diffPath)
+	}
+
+	return result
 }

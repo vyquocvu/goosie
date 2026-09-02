@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"context"
 	"image/color"
@@ -287,7 +288,7 @@ func TestMutationRelayoutsSubtreeOnClassChange(t *testing.T) {
 	if target == nil {
 		t.Fatal("target render node not found")
 	}
-	if got := target.ComputedStyle.Display; got != "block" {
+	if got := target.ComputedStyle.Display; got != css.DisplayAtomBlock {
 		t.Fatalf("initial display = %q, want block", got)
 	}
 
@@ -308,7 +309,7 @@ func TestMutationRelayoutsSubtreeOnClassChange(t *testing.T) {
 		NewValue:  "bar",
 	}})
 
-	if got := target.ComputedStyle.Display; got != "flex" {
+	if got := target.ComputedStyle.Display; got != css.DisplayAtomFlex {
 		t.Fatalf("display after class change = %q, want flex", got)
 	}
 	le.NodeMapMu().RLock()

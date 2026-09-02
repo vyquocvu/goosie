@@ -4,12 +4,17 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/renderer/frame"
 	"github.com/vyquocvu/goosie/internal/renderer/frame/raster"
 	"golang.org/x/net/html"
 )
+
+// StageTimings holds the duration of each pipeline stage.
+type StageTimings map[string]time.Duration
 
 // RenderHTMLToImage renders HTML content to an *image.RGBA using the pure-Go
 // CPU raster backend, without opening any window or depending on Fyne at
@@ -20,12 +25,38 @@ import (
 // width and height are in layout pixels. The returned image uses device-pixel
 // resolution (1x scale). For HiDPI output, scale the dimensions accordingly.
 func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height int) (*image.RGBA, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return nil, err
+	img, _, err := renderWithStages(ctx, htmlContent, width, height)
+	return img, err
+}
+
+// RenderHTMLToImageWithStages is like RenderHTMLToImage but also returns
+// per-stage timing information when the GOOSIE_PERF_STAGES environment
+// variable is set. When the variable is unset, stages is nil.
+func RenderHTMLToImageWithStages(ctx context.Context, htmlContent string, width, height int) (*image.RGBA, StageTimings, error) {
+	return renderWithStages(ctx, htmlContent, width, height)
+}
+
+func renderWithStages(_ context.Context, htmlContent string, width, height int) (*image.RGBA, StageTimings, error) {
+	var stages StageTimings
+	if os.Getenv("GOOSIE_PERF_STAGES") != "" {
+		stages = make(StageTimings)
 	}
 
+	t0 := time.Now()
+	doc, err := html.Parse(strings.NewReader(htmlContent))
+	if err != nil {
+		return nil, nil, err
+	}
+	if stages != nil {
+		stages["parse"] = time.Since(t0)
+	}
+
+	t1 := time.Now()
 	stylesheet := extractAndParseCSS(doc)
+	if stages != nil {
+		stages["css_extract"] = time.Since(t1)
+	}
+
 	w := float32(width)
 	h := float32(height)
 
@@ -34,26 +65,43 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height in
 		bodyNode = doc
 	}
 
+	t2 := time.Now()
 	renderTree := BuildRenderTree(bodyNode)
+	if stages != nil {
+		stages["build_render_tree"] = time.Since(t2)
+	}
 	if renderTree == nil {
-		return image.NewRGBA(image.Rect(0, 0, width, height)), nil
+		return image.NewRGBA(image.Rect(0, 0, width, height)), stages, nil
 	}
 
 	// The tree was just built and has no other holders, so styles are
 	// applied in place — no working copy is needed.
+	t3 := time.Now()
 	if stylesheet != nil && len(stylesheet.Rules) > 0 {
 		styleManager := NewStyleManagerWithViewport(stylesheet, w, h)
 		styleManager.ApplyStyles(renderTree)
 	}
+	if stages != nil {
+		stages["style"] = time.Since(t3)
+	}
 
+	t4 := time.Now()
 	layoutEngine := getLayoutEngine(w, h)
 	defer putLayoutEngine(layoutEngine)
 	layoutTree := layoutEngine.ComputeLayout(renderTree)
+	if stages != nil {
+		stages["layout"] = time.Since(t4)
+	}
 
+	t5 := time.Now()
 	dlb := NewDisplayListBuilder()
 	displayList := dlb.Build(layoutTree, renderTree)
 	SortByZIndex(displayList)
+	if stages != nil {
+		stages["display_list"] = time.Since(t5)
+	}
 
+	t6 := time.Now()
 	cmds := convertPaintCommands(displayList.Commands)
 
 	vp := frame.NewViewport(float32(width), float32(height), frame.PixelScaleDefault)
@@ -61,7 +109,7 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height in
 	defer backend.Close()
 
 	if err := backend.BeginFrame(vp); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Browsers paint unstyled pages on a white canvas. The display list
@@ -73,19 +121,22 @@ func RenderHTMLToImage(ctx context.Context, htmlContent string, width, height in
 		Color: frame.White,
 	}
 	if _, err := backend.Rasterize([]raster.DisplayCmd{bgCmd}, nil); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	img, err := backend.Rasterize(cmds, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := backend.EndFrame(); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if stages != nil {
+		stages["raster"] = time.Since(t6)
 	}
 
-	return toRGBA(img), nil
+	return toRGBA(img), stages, nil
 }
 
 // LayoutHTML runs the engine pipeline — parse, CSS extraction, style, and

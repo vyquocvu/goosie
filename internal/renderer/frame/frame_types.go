@@ -163,10 +163,10 @@ func (r Rect) Intersects(other Rect) bool {
 // Intersection returns the overlapping region of r and other.
 // Returns RectZero if they do not overlap.
 func (r Rect) Intersection(other Rect) Rect {
-	x0 := max32(r.X, other.X)
-	y0 := max32(r.Y, other.Y)
-	x1 := min32(r.X+r.W, other.X+other.W)
-	y1 := min32(r.Y+r.H, other.Y+other.H)
+	x0 := max(r.X, other.X)
+	y0 := max(r.Y, other.Y)
+	x1 := min(r.X+r.W, other.X+other.W)
+	y1 := min(r.Y+r.H, other.Y+other.H)
 	if x1 <= x0 || y1 <= y0 {
 		return RectZero
 	}
@@ -181,10 +181,10 @@ func (r Rect) Union(other Rect) Rect {
 	if other.IsEmpty() {
 		return r
 	}
-	x0 := min32(r.X, other.X)
-	y0 := min32(r.Y, other.Y)
-	x1 := max32(r.X+r.W, other.X+other.W)
-	y1 := max32(r.Y+r.H, other.Y+other.H)
+	x0 := min(r.X, other.X)
+	y0 := min(r.Y, other.Y)
+	x1 := max(r.X+r.W, other.X+other.W)
+	y1 := max(r.Y+r.H, other.Y+other.H)
 	return Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
 }
 
@@ -419,20 +419,3 @@ func (s FrameSnapshot) IsNewerThan(other FrameSnapshot) bool {
 	return s.Generation > other.Generation
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-func max32(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min32(a, b float32) float32 {
-	if a < b {
-		return a
-	}
-	return b
-}

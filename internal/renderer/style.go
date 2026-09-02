@@ -2,11 +2,14 @@ package renderer
 
 import (
 	"fmt"
+	"hash"
+	"hash/fnv"
 	"image/color"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/vyquocvu/goosie/internal/css"
 )
@@ -24,6 +27,11 @@ type StyleManager struct {
 	// selector on every rule×node pair. Built once per stylesheet on first
 	// use within a render pass.
 	prepared map[*css.StyleSheet][]preparedRule
+
+	// buckets partitions prepared rules by right-most compound selector
+	// (tag/id/class) so applyMatchingRules tests only candidate rules
+	// instead of scanning every rule for every node.
+	buckets map[*css.StyleSheet]*ruleBuckets
 
 	// mediaMatch memoizes @media prelude evaluations for the current
 	// viewport; cleared by SetViewport.
@@ -84,10 +92,15 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		return
 	}
 
+	// Reset the style pool at the start of each render pass (root node).
+	if node.Parent == nil {
+		globalStylePool.Reset()
+	}
+
 	if node.ComputedStyle == nil {
 		node.ComputedStyle = &Style{
 			Opacity: 1.0,
-			Display: "block", // Default to block for now, ideally depends on tag
+			Display: css.DisplayAtomBlock, // Default to block for now, ideally depends on tag
 		}
 	}
 
@@ -108,14 +121,11 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 		node.ComputedStyle.ListStylePosition = node.Parent.ComputedStyle.ListStylePosition
 		node.ComputedStyle.Visibility = node.Parent.ComputedStyle.Visibility
 
-		// Inherit custom properties from parent
+		// Inherit custom properties from parent via pointer sharing (copy-on-write).
+		// The child shares the parent's map; cloning happens only when the child
+		// sets its own custom property in applyDeclaration.
 		if node.Parent.ComputedStyle.CustomProperties != nil {
-			if node.ComputedStyle.CustomProperties == nil {
-				node.ComputedStyle.CustomProperties = make(map[string]string)
-			}
-			for k, v := range node.Parent.ComputedStyle.CustomProperties {
-				node.ComputedStyle.CustomProperties[k] = v
-			}
+			node.ComputedStyle.CustomProperties = node.Parent.ComputedStyle.CustomProperties
 		}
 	}
 
@@ -134,12 +144,28 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 
 	// CSS 2.1 Section 9.7: If float is not 'none' or position is absolute/fixed, display is converted to block
 	if node.ComputedStyle != nil {
-		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" ||
-			node.ComputedStyle.Float == "left" || node.ComputedStyle.Float == "right" {
-			if node.ComputedStyle.Display == "inline" || node.ComputedStyle.Display == "inline-block" {
-				node.ComputedStyle.Display = "block"
+		if node.ComputedStyle.Position == css.PositionAtomAbsolute || node.ComputedStyle.Position == css.PositionAtomFixed ||
+			node.ComputedStyle.Float == css.FloatAtomLeft || node.ComputedStyle.Float == css.FloatAtomRight {
+			if node.ComputedStyle.Display == css.DisplayAtomInline || node.ComputedStyle.Display == css.DisplayAtomInlineBlock {
+				node.ComputedStyle.Display = css.DisplayAtomBlock
 			}
 		}
+	}
+
+	// Before interning, clone CustomProperties if non-nil so the interned
+	// style owns its own map and is truly immutable. This avoids mutation
+	// of shared maps (e.g., pointer-shared from parent during inheritance).
+	if node.ComputedStyle != nil && node.ComputedStyle.CustomProperties != nil {
+		cloned := make(map[string]string, len(node.ComputedStyle.CustomProperties))
+		for k, v := range node.ComputedStyle.CustomProperties {
+			cloned[k] = v
+		}
+		node.ComputedStyle.CustomProperties = cloned
+	}
+
+	// Intern the computed style for deduplication.
+	if node.ComputedStyle != nil {
+		node.ComputedStyle = globalStylePool.Intern(node.ComputedStyle)
 	}
 
 	for _, child := range node.Children {
@@ -147,13 +173,66 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 	}
 }
 
-// applyInlineStyles parses and applies inline styles from the style attribute
+// inlineStyleCache memoizes parsed inline-style declarations keyed by the
+// raw style attribute string. Inline styles are deterministic (same string
+// → same declarations) so the cache is safe across render passes.
+type inlineStyleCache struct {
+	mu    sync.Mutex
+	cache map[string][]css.Declaration
+	limit int
+}
+
+func (c *inlineStyleCache) Get(styleAttr string) ([]css.Declaration, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	decls, ok := c.cache[styleAttr]
+	return decls, ok
+}
+
+func (c *inlineStyleCache) Put(styleAttr string, decls []css.Declaration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.cache) >= c.limit {
+		// Simple eviction: clear half the cache to bound memory.
+		count := 0
+		for k := range c.cache {
+			delete(c.cache, k)
+			count++
+			if count >= c.limit/2 {
+				break
+			}
+		}
+	}
+	c.cache[styleAttr] = decls
+}
+
+// globalInlineStyleCache is the process-wide inline-style parse cache.
+var globalInlineStyleCache = &inlineStyleCache{
+	cache: make(map[string][]css.Declaration),
+	limit: 1000,
+}
+
+// applyInlineStyles parses and applies inline styles from the style attribute.
+// Parsed declarations are cached by styleAttr to avoid re-parsing identical
+// style strings on every render pass.
 func (sm *StyleManager) applyInlineStyles(node *RenderNode, styleAttr string) {
+	// Check cache first.
+	if decls, ok := globalInlineStyleCache.Get(styleAttr); ok {
+		for _, decl := range decls {
+			sm.applyDeclaration(node, decl)
+		}
+		return
+	}
+
+	// Parse inline style.
 	declarations, err := css.ParseStyleAttribute(styleAttr)
 	if err != nil {
 		// Just ignore parsing errors for now
 		return
 	}
+
+	// Cache the parsed declarations.
+	globalInlineStyleCache.Put(styleAttr, declarations)
 
 	for _, decl := range declarations {
 		sm.applyDeclaration(node, decl)
@@ -265,6 +344,39 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	if stylesheet == nil {
 		return
 	}
+
+	buckets := sm.bucketsFor(stylesheet)
+	rules := sm.preparedFor(stylesheet)
+
+	// Collect candidate rule indices from the relevant buckets.
+	candidateSet := make(map[int]bool)
+
+	// Tag bucket
+	if node.TagName != "" {
+		for _, idx := range buckets.byTag[strings.ToLower(node.TagName)] {
+			candidateSet[idx] = true
+		}
+	}
+
+	// Class buckets
+	for _, class := range node.classes() {
+		for _, idx := range buckets.byClass[class] {
+			candidateSet[idx] = true
+		}
+	}
+
+	// ID bucket
+	if id := node.id(); id != "" {
+		for _, idx := range buckets.byID[id] {
+			candidateSet[idx] = true
+		}
+	}
+
+	// Universal bucket (always tested)
+	for _, idx := range buckets.universal {
+		candidateSet[idx] = true
+	}
+
 	type matchedRuleItem struct {
 		declarations []css.Declaration
 		specificity  [3]uint16
@@ -272,7 +384,8 @@ func (sm *StyleManager) applyMatchingRules(stylesheet *css.StyleSheet, node *Ren
 	}
 	var matched []matchedRuleItem
 
-	for _, rule := range sm.preparedFor(stylesheet) {
+	for idx := range candidateSet {
+		rule := rules[idx]
 		matchedSel := false
 		var bestSpec [3]uint16
 		for _, sel := range rule.selectors {
@@ -348,6 +461,75 @@ func (sm *StyleManager) preparedFor(stylesheet *css.StyleSheet) []preparedRule {
 	}
 	sm.prepared[stylesheet] = rules
 	return rules
+}
+
+// ruleBuckets partitions prepared rules by right-most compound selector so
+// that applyMatchingRules only tests candidate rules for each node instead
+// of scanning every rule. A rule may appear in multiple buckets (e.g. both
+// tag and class); the candidateSet in applyMatchingRules deduplicates.
+type ruleBuckets struct {
+	byTag     map[string][]int // lowercased tag name -> indices into preparedRules
+	byClass   map[string][]int // class name -> indices
+	byID      map[string][]int // ID -> indices
+	universal []int            // rules with universal selector or no keyable part
+}
+
+// buildRuleBuckets partitions rules by the right-most compound selector of
+// each of their selector alternatives.
+func buildRuleBuckets(rules []preparedRule) *ruleBuckets {
+	b := &ruleBuckets{
+		byTag:   make(map[string][]int),
+		byClass: make(map[string][]int),
+		byID:    make(map[string][]int),
+	}
+	for i, rule := range rules {
+		bucketed := false
+		for _, sel := range rule.selectors {
+			if len(sel.parts) == 0 {
+				continue
+			}
+			// The right-most part is the key selector (subject).
+			rightmost := sel.parts[len(sel.parts)-1].Selector
+
+			if rightmost.Universal && rightmost.TagName == "" && rightmost.ID == "" && len(rightmost.Classes) == 0 {
+				// Pure universal selector — goes to universal bucket only.
+				continue
+			}
+
+			if rightmost.TagName != "" {
+				tag := strings.ToLower(rightmost.TagName)
+				b.byTag[tag] = append(b.byTag[tag], i)
+				bucketed = true
+			}
+			for _, class := range rightmost.Classes {
+				b.byClass[class] = append(b.byClass[class], i)
+				bucketed = true
+			}
+			if rightmost.ID != "" {
+				b.byID[rightmost.ID] = append(b.byID[rightmost.ID], i)
+				bucketed = true
+			}
+		}
+		if !bucketed {
+			b.universal = append(b.universal, i)
+		}
+	}
+	return b
+}
+
+// bucketsFor returns the ruleBuckets for a stylesheet, building and caching
+// them on first access.
+func (sm *StyleManager) bucketsFor(stylesheet *css.StyleSheet) *ruleBuckets {
+	if sm.buckets == nil {
+		sm.buckets = make(map[*css.StyleSheet]*ruleBuckets)
+	}
+	if b, ok := sm.buckets[stylesheet]; ok {
+		return b
+	}
+	rules := sm.preparedFor(stylesheet)
+	b := buildRuleBuckets(rules)
+	sm.buckets[stylesheet] = b
+	return b
 }
 
 type styleSelectorPart struct {
@@ -793,6 +975,14 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	if strings.HasPrefix(decl.Property, "--") {
 		if node.ComputedStyle.CustomProperties == nil {
 			node.ComputedStyle.CustomProperties = make(map[string]string)
+		} else {
+			// Copy-on-write: clone the map before mutating so we don't
+			// modify a map shared with the parent or sibling nodes.
+			cloned := make(map[string]string, len(node.ComputedStyle.CustomProperties))
+			for k, v := range node.ComputedStyle.CustomProperties {
+				cloned[k] = v
+			}
+			node.ComputedStyle.CustomProperties = cloned
 		}
 		node.ComputedStyle.CustomProperties[decl.Property] = strings.TrimSpace(decl.Value)
 		return
@@ -800,9 +990,9 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	switch decl.Property {
 	case "display":
-		style.Display = decl.Value
+		style.Display = css.DisplayAtomFromString(decl.Value)
 	case "visibility":
-		style.Visibility = decl.Value
+		style.Visibility = css.VisibilityAtomFromString(decl.Value)
 	case "font-size":
 		parentFontSize := float32(16.0) // Default font size
 		if node.Parent != nil && node.Parent.ComputedStyle != nil && node.Parent.ComputedStyle.FontSize > 0 {
@@ -824,13 +1014,13 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "background-image":
 		style.BackgroundImage = decl.Value
 	case "background-repeat":
-		style.BackgroundRepeat = decl.Value
+		style.BackgroundRepeat = css.BackgroundRepeatAtomFromString(decl.Value)
 	case "background-position":
-		style.BackgroundPosition = decl.Value
+		style.BackgroundPosition = css.BackgroundPositionAtomFromString(decl.Value)
 	case "background-size":
-		style.BackgroundSize = decl.Value
+		style.BackgroundSize = css.BackgroundSizeAtomFromString(decl.Value)
 	case "background-attachment":
-		style.BackgroundAttachment = decl.Value
+		style.BackgroundAttachment = css.BackgroundAttachmentAtomFromString(decl.Value)
 	case "background":
 		applyBackgroundShorthand(style, decl.Value)
 	case "width":
@@ -844,7 +1034,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 			style.Opacity = float32(val)
 		}
 	case "text-align":
-		style.TextAlign = decl.Value
+		style.TextAlign = css.TextAlignAtomFromString(decl.Value)
 	case "letter-spacing":
 		if decl.Value == "normal" {
 			style.LetterSpacing = 0
@@ -854,11 +1044,11 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "line-height":
 		style.LineHeight = parseLineHeight(decl.Value, style.FontSize)
 	case "font-style":
-		style.FontStyle = decl.Value
+		style.FontStyle = css.FontStyleAtomFromString(decl.Value)
 	case "text-decoration":
-		style.TextDecoration = decl.Value
+		style.TextDecoration = css.TextDecorationAtomFromString(decl.Value)
 	case "text-transform":
-		style.TextTransform = decl.Value
+		style.TextTransform = css.TextTransformAtomFromString(decl.Value)
 
 	// Margin properties
 	case "margin":
@@ -1032,7 +1222,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	// Positioning
 	case "position":
-		style.Position = decl.Value
+		style.Position = css.PositionAtomFromString(decl.Value)
 	case "z-index":
 		if val, err := strconv.Atoi(decl.Value); err == nil {
 			style.ZIndex = val
@@ -1050,7 +1240,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	// Overflow
 	case "overflow":
-		style.Overflow = decl.Value
+		style.Overflow = css.OverflowAtomFromString(decl.Value)
 		if style.OverflowX == "" {
 			style.OverflowX = decl.Value
 		}
@@ -1066,7 +1256,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 
 	// Float and Clear
 	case "float":
-		style.Float = decl.Value
+		style.Float = css.FloatAtomFromString(decl.Value)
 	case "clear":
 		style.Clear = decl.Value
 
@@ -1102,7 +1292,7 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "vertical-align":
 		style.VerticalAlign = decl.Value
 	case "white-space":
-		style.WhiteSpace = decl.Value
+		style.WhiteSpace = css.WhiteSpaceAtomFromString(decl.Value)
 	case "word-break":
 		style.WordBreak = decl.Value
 	case "font":
@@ -1114,9 +1304,9 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 	case "list-style":
 		parseListStyleShorthand(decl.Value, style)
 	case "list-style-type":
-		style.ListStyleType = decl.Value
+		style.ListStyleType = css.ListStyleTypeAtomFromString(decl.Value)
 	case "list-style-position":
-		style.ListStylePosition = decl.Value
+		style.ListStylePosition = css.ListStylePositionAtomFromString(decl.Value)
 	case "table-layout":
 		style.TableLayout = decl.Value
 	case "border-collapse":
@@ -1196,7 +1386,7 @@ func parseFontShorthand(value string, style *Style, parentFontSize float32) {
 		tok := strings.ToLower(tokens[i])
 		switch tok {
 		case "italic", "oblique":
-			style.FontStyle = tok
+			style.FontStyle = css.FontStyleAtomItalic
 		case "bold", "bolder", "lighter", "100", "200", "300", "400", "500", "600", "700", "800", "900":
 			style.FontWeight = tok
 		}
@@ -1237,12 +1427,14 @@ func parseListStyleShorthand(value string, style *Style) {
 	for _, tok := range tokens {
 		tokLower := strings.ToLower(tok)
 		switch tokLower {
-		case "inside", "outside":
-			style.ListStylePosition = tokLower
+		case "inside":
+			style.ListStylePosition = css.ListStylePositionAtomInside
+		case "outside":
+			style.ListStylePosition = css.ListStylePositionAtomOutside
 		case "none", "disc", "circle", "square", "decimal",
 			"lower-roman", "upper-roman", "lower-alpha", "upper-alpha",
 			"lower-latin", "upper-latin", "cjk-decimal", "armenian", "georgian":
-			style.ListStyleType = tokLower
+			style.ListStyleType = css.ListStyleTypeAtomFromString(tokLower)
 		}
 	}
 }
@@ -1731,14 +1923,8 @@ func oklabToSrgb(l, a, b float32) (r, g, bOut float32) {
 	return
 }
 
-func clamp(val, min, max float32) float32 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
+func clamp(val, minVal, maxVal float32) float32 {
+	return min(max(val, minVal), maxVal)
 }
 
 // f32ToByte converts a normalized float in [0,1] to a byte channel, rounding
@@ -2075,11 +2261,11 @@ func applyBackgroundShorthand(style *Style, value string) {
 		if strings.HasPrefix(tokLower, "url(") || tokLower == "none" {
 			style.BackgroundImage = tok
 		} else if tokLower == "repeat" || tokLower == "no-repeat" || tokLower == "repeat-x" || tokLower == "repeat-y" || tokLower == "space" || tokLower == "round" {
-			style.BackgroundRepeat = tokLower
+			style.BackgroundRepeat = css.BackgroundRepeatAtomFromString(tokLower)
 		} else if tokLower == "fixed" || tokLower == "scroll" || tokLower == "local" {
-			style.BackgroundAttachment = tokLower
+			style.BackgroundAttachment = css.BackgroundAttachmentAtomFromString(tokLower)
 		} else if tokLower == "cover" || tokLower == "contain" {
-			style.BackgroundSize = tokLower
+			style.BackgroundSize = css.BackgroundSizeAtomFromString(tokLower)
 		} else if tokLower == "top" || tokLower == "bottom" || tokLower == "left" || tokLower == "right" || tokLower == "center" {
 			positionTokens = append(positionTokens, tokLower)
 		} else if col, err := parseColor(tok); err == nil {
@@ -2087,7 +2273,7 @@ func applyBackgroundShorthand(style *Style, value string) {
 		}
 	}
 	if len(positionTokens) > 0 {
-		style.BackgroundPosition = strings.Join(positionTokens, " ")
+		style.BackgroundPosition = css.BackgroundPositionAtomFromString(strings.Join(positionTokens, " "))
 	}
 }
 
@@ -2143,4 +2329,406 @@ func (sm *StyleManager) MatchRules(node *RenderNode) []css.Rule {
 		return matched[i].SourceOrder > matched[j].SourceOrder
 	})
 	return matched
+}
+
+// --- Fingerprint and StylePool for computed style deduplication ---
+
+// Fingerprint returns a uint64 hash of the Style for deduplication.
+// Two Style values with identical fields produce the same fingerprint.
+func (s *Style) Fingerprint() uint64 {
+	h := fnv.New64a()
+
+	// Write enum/atom fields packed into bytes
+	h.Write([]byte{byte(s.Display), byte(s.Position), byte(s.Float), byte(s.TextAlign)})
+	h.Write([]byte{byte(s.Visibility), byte(s.FontStyle), byte(s.TextDecoration), byte(s.TextTransform)})
+	h.Write([]byte{byte(s.WhiteSpace), byte(s.BackgroundRepeat), byte(s.BackgroundPosition)})
+	h.Write([]byte{byte(s.BackgroundSize), byte(s.BackgroundAttachment)})
+	h.Write([]byte{byte(s.ListStyleType), byte(s.ListStylePosition)})
+
+	// Write float fields as their bit representation
+	var fbuf [8]byte
+	rendererPutFloat32(fbuf[:4], s.FontSize)
+	rendererPutFloat32(fbuf[4:], s.LineHeight)
+	h.Write(fbuf[:8])
+
+	rendererPutFloat32(fbuf[:4], s.Opacity)
+	rendererPutFloat32(fbuf[4:], s.LetterSpacing)
+	h.Write(fbuf[:8])
+
+	rendererPutFloat32(fbuf[:4], s.FlexGrow)
+	rendererPutFloat32(fbuf[4:], s.FlexShrink)
+	h.Write(fbuf[:8])
+
+	// Write int fields
+	var ibuf [8]byte
+	ibuf[0] = byte(s.ZIndex)
+	ibuf[1] = byte(s.ZIndex >> 8)
+	ibuf[2] = byte(s.ZIndex >> 16)
+	ibuf[3] = byte(s.ZIndex >> 24)
+	ibuf[4] = byte(s.Order)
+	ibuf[5] = byte(s.Order >> 8)
+	ibuf[6] = byte(s.Order >> 16)
+	ibuf[7] = byte(s.Order >> 24)
+	h.Write(ibuf[:8])
+
+	// Write color fields (Color, BackgroundColor, and 4 border colors)
+	writeColorToHash(h, s.Color)
+	writeColorToHash(h, s.BackgroundColor)
+	writeColorToHash(h, s.BorderTopColor)
+	writeColorToHash(h, s.BorderRightColor)
+	writeColorToHash(h, s.BorderBottomColor)
+	writeColorToHash(h, s.BorderLeftColor)
+
+	// Write string fields with null separators
+	h.Write([]byte(s.FontFamily))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BackgroundImage))
+	h.Write([]byte{0})
+	h.Write([]byte(s.FontWeight))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Width))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Height))
+	h.Write([]byte{0})
+
+	// Positioning strings
+	h.Write([]byte(s.Top))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Right))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Bottom))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Left))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Clear))
+	h.Write([]byte{0})
+
+	// Overflow strings
+	h.Write([]byte(s.OverflowX))
+	h.Write([]byte{0})
+	h.Write([]byte(s.OverflowY))
+	h.Write([]byte{0})
+	h.Write([]byte(s.TextOverflow))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BoxSizing))
+	h.Write([]byte{0})
+
+	// Min/Max constraints
+	h.Write([]byte(s.MinWidth))
+	h.Write([]byte{0})
+	h.Write([]byte(s.MaxWidth))
+	h.Write([]byte{0})
+	h.Write([]byte(s.MinHeight))
+	h.Write([]byte{0})
+	h.Write([]byte(s.MaxHeight))
+	h.Write([]byte{0})
+
+	// Margin
+	h.Write([]byte(s.MarginTop))
+	h.Write([]byte{0})
+	h.Write([]byte(s.MarginRight))
+	h.Write([]byte{0})
+	h.Write([]byte(s.MarginBottom))
+	h.Write([]byte{0})
+	h.Write([]byte(s.MarginLeft))
+	h.Write([]byte{0})
+
+	// Padding
+	h.Write([]byte(s.PaddingTop))
+	h.Write([]byte{0})
+	h.Write([]byte(s.PaddingRight))
+	h.Write([]byte{0})
+	h.Write([]byte(s.PaddingBottom))
+	h.Write([]byte{0})
+	h.Write([]byte(s.PaddingLeft))
+	h.Write([]byte{0})
+
+	// Border widths and styles
+	h.Write([]byte(s.BorderTopWidth))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderRightWidth))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderBottomWidth))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderLeftWidth))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderTopStyle))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderRightStyle))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderBottomStyle))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderLeftStyle))
+	h.Write([]byte{0})
+
+	// Flexbox
+	h.Write([]byte(s.FlexDirection))
+	h.Write([]byte{0})
+	h.Write([]byte(s.FlexWrap))
+	h.Write([]byte{0})
+	h.Write([]byte(s.JustifyContent))
+	h.Write([]byte{0})
+	h.Write([]byte(s.AlignItems))
+	h.Write([]byte{0})
+	h.Write([]byte(s.AlignContent))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Gap))
+	h.Write([]byte{0})
+	h.Write([]byte(s.RowGap))
+	h.Write([]byte{0})
+	h.Write([]byte(s.ColumnGap))
+	h.Write([]byte{0})
+	h.Write([]byte(s.FlexBasis))
+	h.Write([]byte{0})
+	h.Write([]byte(s.AlignSelf))
+	h.Write([]byte{0})
+
+	// Grid
+	h.Write([]byte(s.GridTemplateColumns))
+	h.Write([]byte{0})
+	h.Write([]byte(s.GridTemplateRows))
+	h.Write([]byte{0})
+	h.Write([]byte(s.GridColumnStart))
+	h.Write([]byte{0})
+	h.Write([]byte(s.GridColumnEnd))
+	h.Write([]byte{0})
+	h.Write([]byte(s.GridRowStart))
+	h.Write([]byte{0})
+	h.Write([]byte(s.GridRowEnd))
+	h.Write([]byte{0})
+
+	// Visual properties
+	h.Write([]byte(s.BorderRadius))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BoxShadow))
+	h.Write([]byte{0})
+	h.Write([]byte(s.TextShadow))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Transform))
+	h.Write([]byte{0})
+	h.Write([]byte(s.TransformOrigin))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Transition))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Cursor))
+	h.Write([]byte{0})
+	h.Write([]byte(s.VerticalAlign))
+	h.Write([]byte{0})
+	h.Write([]byte(s.WordBreak))
+	h.Write([]byte{0})
+	h.Write([]byte(s.TableLayout))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderCollapse))
+	h.Write([]byte{0})
+	h.Write([]byte(s.BorderSpacing))
+	h.Write([]byte{0})
+
+	return h.Sum64()
+}
+
+// writeColorToHash writes a color.Color to a hash for fingerprinting.
+func writeColorToHash(h hash.Hash64, c color.Color) {
+	if c == nil {
+		h.Write([]byte{0, 0, 0, 0, 0, 0, 0, 0})
+		return
+	}
+	r, g, b, a := c.RGBA()
+	var buf [8]byte
+	buf[0] = byte(r >> 8)
+	buf[1] = byte(r)
+	buf[2] = byte(g >> 8)
+	buf[3] = byte(g)
+	buf[4] = byte(b >> 8)
+	buf[5] = byte(b)
+	buf[6] = byte(a >> 8)
+	buf[7] = byte(a)
+	h.Write(buf[:8])
+}
+
+// rendererPutFloat32 writes float32 bits to a byte slice.
+func rendererPutFloat32(b []byte, f float32) {
+	bits := math.Float32bits(f)
+	b[0] = byte(bits >> 24)
+	b[1] = byte(bits >> 16)
+	b[2] = byte(bits >> 8)
+	b[3] = byte(bits)
+}
+
+// rendererStylePoolEntry is one entry in the renderer style pool.
+type rendererStylePoolEntry struct {
+	fp    uint64
+	style Style
+}
+
+// rendererStylePool is a cache for deduplicating identical renderer.Style values.
+// When an identical style is interned, the existing pointer is returned,
+// reducing memory allocations for repeated computed styles.
+//
+// Safe for concurrent use.
+type rendererStylePool struct {
+	mu     sync.Mutex
+	styles map[uint64]*rendererStylePoolEntry
+}
+
+// globalStylePool is the package-level style pool used by ApplyStyles.
+var globalStylePool = &rendererStylePool{
+	styles: make(map[uint64]*rendererStylePoolEntry),
+}
+
+// Intern returns a pointer to the deduplicated Style.
+// If an identical style already exists in the pool (same fingerprint and fields),
+// it returns the existing pointer. Otherwise, it inserts the new style.
+func (p *rendererStylePool) Intern(s *Style) *Style {
+	if s == nil {
+		return nil
+	}
+
+	fp := s.Fingerprint()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if entry, ok := p.styles[fp]; ok {
+		// Verify actual equality to handle fingerprint collisions.
+		if styleEqual(&entry.style, s) {
+			return &entry.style
+		}
+		// Fingerprint collision with different content — overwrite.
+		// Collisions are extremely rare with FNV-1a 64-bit.
+	}
+
+	// Insert new entry.
+	entry := &rendererStylePoolEntry{
+		fp:    fp,
+		style: *s,
+	}
+	p.styles[fp] = entry
+	return &entry.style
+}
+
+// Reset clears the pool. Called at the start of each render pass.
+func (p *rendererStylePool) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.styles = make(map[uint64]*rendererStylePoolEntry)
+}
+
+// styleEqual reports whether two Style values are field-by-field identical.
+func styleEqual(a, b *Style) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Compare atom fields
+	if a.Display != b.Display || a.Position != b.Position || a.Float != b.Float ||
+		a.TextAlign != b.TextAlign || a.Visibility != b.Visibility ||
+		a.FontStyle != b.FontStyle || a.TextDecoration != b.TextDecoration ||
+		a.TextTransform != b.TextTransform || a.WhiteSpace != b.WhiteSpace ||
+		a.BackgroundRepeat != b.BackgroundRepeat || a.BackgroundPosition != b.BackgroundPosition ||
+		a.BackgroundSize != b.BackgroundSize || a.BackgroundAttachment != b.BackgroundAttachment ||
+		a.ListStyleType != b.ListStyleType || a.ListStylePosition != b.ListStylePosition {
+		return false
+	}
+
+	// Compare float fields
+	if a.FontSize != b.FontSize || a.LineHeight != b.LineHeight ||
+		a.Opacity != b.Opacity || a.LetterSpacing != b.LetterSpacing ||
+		a.FlexGrow != b.FlexGrow || a.FlexShrink != b.FlexShrink {
+		return false
+	}
+
+	// Compare int fields
+	if a.ZIndex != b.ZIndex || a.Order != b.Order {
+		return false
+	}
+
+	// Compare color fields
+	if !rendererColorsEqual(a.Color, b.Color) ||
+		!rendererColorsEqual(a.BackgroundColor, b.BackgroundColor) ||
+		!rendererColorsEqual(a.BorderTopColor, b.BorderTopColor) ||
+		!rendererColorsEqual(a.BorderRightColor, b.BorderRightColor) ||
+		!rendererColorsEqual(a.BorderBottomColor, b.BorderBottomColor) ||
+		!rendererColorsEqual(a.BorderLeftColor, b.BorderLeftColor) {
+		return false
+	}
+
+	// Compare string fields
+	return a.FontFamily == b.FontFamily &&
+		a.BackgroundImage == b.BackgroundImage &&
+		a.FontWeight == b.FontWeight &&
+		a.Width == b.Width &&
+		a.Height == b.Height &&
+		a.Top == b.Top &&
+		a.Right == b.Right &&
+		a.Bottom == b.Bottom &&
+		a.Left == b.Left &&
+		a.Clear == b.Clear &&
+		a.OverflowX == b.OverflowX &&
+		a.OverflowY == b.OverflowY &&
+		a.TextOverflow == b.TextOverflow &&
+		a.BoxSizing == b.BoxSizing &&
+		a.MinWidth == b.MinWidth &&
+		a.MaxWidth == b.MaxWidth &&
+		a.MinHeight == b.MinHeight &&
+		a.MaxHeight == b.MaxHeight &&
+		a.MarginTop == b.MarginTop &&
+		a.MarginRight == b.MarginRight &&
+		a.MarginBottom == b.MarginBottom &&
+		a.MarginLeft == b.MarginLeft &&
+		a.PaddingTop == b.PaddingTop &&
+		a.PaddingRight == b.PaddingRight &&
+		a.PaddingBottom == b.PaddingBottom &&
+		a.PaddingLeft == b.PaddingLeft &&
+		a.BorderTopWidth == b.BorderTopWidth &&
+		a.BorderRightWidth == b.BorderRightWidth &&
+		a.BorderBottomWidth == b.BorderBottomWidth &&
+		a.BorderLeftWidth == b.BorderLeftWidth &&
+		a.BorderTopStyle == b.BorderTopStyle &&
+		a.BorderRightStyle == b.BorderRightStyle &&
+		a.BorderBottomStyle == b.BorderBottomStyle &&
+		a.BorderLeftStyle == b.BorderLeftStyle &&
+		a.FlexDirection == b.FlexDirection &&
+		a.FlexWrap == b.FlexWrap &&
+		a.JustifyContent == b.JustifyContent &&
+		a.AlignItems == b.AlignItems &&
+		a.AlignContent == b.AlignContent &&
+		a.Gap == b.Gap &&
+		a.RowGap == b.RowGap &&
+		a.ColumnGap == b.ColumnGap &&
+		a.FlexBasis == b.FlexBasis &&
+		a.AlignSelf == b.AlignSelf &&
+		a.GridTemplateColumns == b.GridTemplateColumns &&
+		a.GridTemplateRows == b.GridTemplateRows &&
+		a.GridColumnStart == b.GridColumnStart &&
+		a.GridColumnEnd == b.GridColumnEnd &&
+		a.GridRowStart == b.GridRowStart &&
+		a.GridRowEnd == b.GridRowEnd &&
+		a.BorderRadius == b.BorderRadius &&
+		a.BoxShadow == b.BoxShadow &&
+		a.TextShadow == b.TextShadow &&
+		a.Transform == b.Transform &&
+		a.TransformOrigin == b.TransformOrigin &&
+		a.Transition == b.Transition &&
+		a.Cursor == b.Cursor &&
+		a.VerticalAlign == b.VerticalAlign &&
+		a.WordBreak == b.WordBreak &&
+		a.TableLayout == b.TableLayout &&
+		a.BorderCollapse == b.BorderCollapse &&
+		a.BorderSpacing == b.BorderSpacing
+}
+
+// rendererColorsEqual compares two color.Color values for equality.
+func rendererColorsEqual(a, b color.Color) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
 }

@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/renderer"
 	"context"
 	"strings"
@@ -56,7 +57,7 @@ func TestZIndexParsing(t *testing.T) {
 		t.Fatal("layer-1 not found")
 	}
 
-	if layer1.ComputedStyle.Position != "absolute" {
+	if layer1.ComputedStyle.Position != css.PositionAtomAbsolute {
 		t.Errorf("Expected position: absolute, got %s", layer1.ComputedStyle.Position)
 	}
 	if layer1.ComputedStyle.ZIndex != 10 {
@@ -71,7 +72,7 @@ func TestZIndexParsing(t *testing.T) {
 		t.Fatal("layer-2 not found")
 	}
 
-	if layer2.ComputedStyle.Position != "relative" {
+	if layer2.ComputedStyle.Position != css.PositionAtomRelative {
 		t.Errorf("Expected position: relative, got %s", layer2.ComputedStyle.Position)
 	}
 	if layer2.ComputedStyle.ZIndex != 5 {
@@ -120,7 +121,7 @@ func TestOverflowParsing(t *testing.T) {
 		t.Fatal("clip node not found")
 	}
 
-	if clip.ComputedStyle.Overflow != "hidden" {
+	if clip.ComputedStyle.Overflow != css.OverflowAtomHidden {
 		t.Errorf("Expected overflow: hidden, got %s", clip.ComputedStyle.Overflow)
 	}
 
@@ -129,7 +130,7 @@ func TestOverflowParsing(t *testing.T) {
 		t.Fatal("scroll node not found")
 	}
 
-	if scroll.ComputedStyle.Overflow != "scroll" {
+	if scroll.ComputedStyle.Overflow != css.OverflowAtomScroll {
 		t.Errorf("Expected overflow: scroll, got %s", scroll.ComputedStyle.Overflow)
 	}
 }

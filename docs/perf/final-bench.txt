@@ -1,0 +1,26 @@
+# github.com/vyquocvu/goosie/test/internal/renderer.test
+ld: warning: ignoring duplicate libraries: '-lobjc'
+goos: darwin
+goarch: arm64
+pkg: github.com/vyquocvu/goosie/test/internal/renderer
+cpu: Apple M1 Pro
+BenchmarkDisplayCommandCreate-10             	1000000000	         0.3166 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDisplayCommandListAdd-10            	   75018	     16464 ns/op	   97889 B/op	       8 allocs/op
+BenchmarkDisplayCommandListAddMixed-10       	   71941	     16709 ns/op	   97888 B/op	       8 allocs/op
+BenchmarkDisplayCommandSerializeRect-10      	  223862	      5265 ns/op	    1804 B/op	      25 allocs/op
+BenchmarkDisplayCommandSerializeList-10      	    1458	    836418 ns/op	  232030 B/op	    2205 allocs/op
+BenchmarkDisplayCommandDeserializeList-10    	     666	   1794509 ns/op	  340875 B/op	    4921 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/test/internal/renderer	8.088s
+# github.com/vyquocvu/goosie/test/internal/renderer.test
+ld: warning: ignoring duplicate libraries: '-lobjc'
+goos: darwin
+goarch: arm64
+pkg: github.com/vyquocvu/goosie/test/internal/renderer
+cpu: Apple M1 Pro
+BenchmarkDirtyRegionFromPatches-10            	221084302	         5.405 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTransformMatrixMul-10                	1000000000	         0.3400 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTransformMatrixInverse-10            	64485646	        16.96 ns/op	      24 B/op	       1 allocs/op
+BenchmarkIncrementalLayout_SingleUpdate-10    	13291041	        89.47 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/vyquocvu/goosie/test/internal/renderer	5.423s

@@ -1,20 +1,10 @@
 package renderer
 
-// dirty_region.go — M5.3 Dirty-Region Invalidation
-//
-// Provides:
-//   - DirtyRegion: bounded list of dirty rectangles with merge and expansion
-//   - DirtyRegionTracker: tracks per-LayoutID bounds across frames, invalidates
-//     both old and new regions on move
-//   - ExpandForEffects: expands dirty rects to account for shadows, borders, AA
-//   - DebugDirtyRegionOverlay: generates display commands for debug visualization
-
 import (
 	"image/color"
 	"math"
+	"slices"
 )
-
-// --- RectF utility methods ---
 
 // Area returns the area of the rectangle. Returns 0 for empty or negative-size rects.
 func (r RectF) Area() float32 {
@@ -43,7 +33,6 @@ func (r RectF) NearlyEqual(other RectF, eps float32) bool {
 }
 
 // RectUnion returns the smallest rectangle containing both a and b.
-// If either rect is empty, returns the other.
 func RectUnion(a, b RectF) RectF {
 	if a.IsEmpty() {
 		return b
@@ -51,44 +40,19 @@ func RectUnion(a, b RectF) RectF {
 	if b.IsEmpty() {
 		return a
 	}
-	x0 := a.X
-	if b.X < x0 {
-		x0 = b.X
-	}
-	y0 := a.Y
-	if b.Y < y0 {
-		y0 = b.Y
-	}
-	x1 := a.X + a.W
-	if b.X+b.W > x1 {
-		x1 = b.X + b.W
-	}
-	y1 := a.Y + a.H
-	if b.Y+b.H > y1 {
-		y1 = b.Y + b.H
-	}
+	x0 := min(a.X, b.X)
+	y0 := min(a.Y, b.Y)
+	x1 := max(a.X+a.W, b.X+b.W)
+	y1 := max(a.Y+a.H, b.Y+b.H)
 	return RectF{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
 }
 
-// RectIntersection returns the intersection of a and b.
-// Returns a zero-size rect if they don't overlap.
+// RectIntersection returns the intersection of a and b, or zero-size rect if no overlap.
 func RectIntersection(a, b RectF) RectF {
-	x0 := a.X
-	if b.X > x0 {
-		x0 = b.X
-	}
-	y0 := a.Y
-	if b.Y > y0 {
-		y0 = b.Y
-	}
-	x1 := a.X + a.W
-	if b.X+b.W < x1 {
-		x1 = b.X + b.W
-	}
-	y1 := a.Y + a.H
-	if b.Y+b.H < y1 {
-		y1 = b.Y + b.H
-	}
+	x0 := max(a.X, b.X)
+	y0 := max(a.Y, b.Y)
+	x1 := min(a.X+a.W, b.X+b.W)
+	y1 := min(a.Y+a.H, b.Y+b.H)
 	if x1 <= x0 || y1 <= y0 {
 		return RectF{}
 	}
@@ -97,13 +61,6 @@ func RectIntersection(a, b RectF) RectF {
 
 func float32Abs(x float32) float32 {
 	return float32(math.Abs(float64(x)))
-}
-
-func float32Max(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // --- DirtyRegion ---
@@ -214,24 +171,8 @@ func uniqueSorted(vals []float32) []float32 {
 	if len(vals) == 0 {
 		return vals
 	}
-	// Simple insertion sort for small slices
-	for i := 1; i < len(vals); i++ {
-		key := vals[i]
-		j := i - 1
-		for j >= 0 && vals[j] > key {
-			vals[j+1] = vals[j]
-			j--
-		}
-		vals[j+1] = key
-	}
-	// Deduplicate
-	out := vals[:1]
-	for i := 1; i < len(vals); i++ {
-		if vals[i] != out[len(out)-1] {
-			out = append(out, vals[i])
-		}
-	}
-	return out
+	slices.Sort(vals)
+	return slices.Compact(vals)
 }
 
 // Expand expands all dirty rectangles by the given amount on each side.
@@ -364,30 +305,22 @@ type EffectParams struct {
 // MaxExpansion returns the maximum expansion amount across all effect params.
 func (ep EffectParams) MaxExpansion() float32 {
 	m := ep.BorderWidth + ep.AAMargin
-	// Shadow expansion: blur + max(|offsetX|, |offsetY|)
-	shadowExpand := ep.ShadowBlur + float32Max(float32Abs(ep.ShadowOffsetX), float32Abs(ep.ShadowOffsetY))
-	if shadowExpand > m {
-		m = shadowExpand
-	}
-	return m
+	shadowExpand := ep.ShadowBlur + max(float32Abs(ep.ShadowOffsetX), float32Abs(ep.ShadowOffsetY))
+	return max(m, shadowExpand)
 }
 
 // ExpandForEffects expands a rectangle to account for visual effects
-// (shadows, borders, antialiasing). The returned rect is guaranteed to
-// cover all pixels that could be affected by these effects.
+// (shadows, borders, antialiasing).
 func ExpandForEffects(r RectF, params EffectParams) RectF {
 	if params.ShadowBlur == 0 && params.BorderWidth == 0 && params.AAMargin == 0 {
 		return r
 	}
 
-	// Border and AA expand symmetrically
 	symmetric := params.BorderWidth + params.AAMargin
-
-	// Shadow expansion is asymmetric when offset is non-zero
-	leftExpand := symmetric + params.ShadowBlur + float32Max(0, -params.ShadowOffsetX)
-	rightExpand := symmetric + params.ShadowBlur + float32Max(0, params.ShadowOffsetX)
-	topExpand := symmetric + params.ShadowBlur + float32Max(0, -params.ShadowOffsetY)
-	bottomExpand := symmetric + params.ShadowBlur + float32Max(0, params.ShadowOffsetY)
+	leftExpand := symmetric + params.ShadowBlur + max(0, -params.ShadowOffsetX)
+	rightExpand := symmetric + params.ShadowBlur + max(0, params.ShadowOffsetX)
+	topExpand := symmetric + params.ShadowBlur + max(0, -params.ShadowOffsetY)
+	bottomExpand := symmetric + params.ShadowBlur + max(0, params.ShadowOffsetY)
 
 	return RectF{
 		X: r.X - leftExpand,
@@ -496,9 +429,7 @@ func (tr *DirtyRegionTracker) Finalize() *DirtyRegion {
 
 // Reset clears all tracked bounds and pending dirty regions.
 func (tr *DirtyRegionTracker) Reset() {
-	for k := range tr.bounds {
-		delete(tr.bounds, k)
-	}
+	clear(tr.bounds)
 	tr.dirty.Clear()
 }
 

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/url"
 	"reflect"
 	"sort"
@@ -32,17 +33,85 @@ type LocalStorageAdapter interface {
 	Keys(origin string) []string
 }
 
-// Timer represents a scheduled timer
+// Timer represents a scheduled JavaScript timer (setTimeout/setInterval).
 type Timer struct {
 	ID       int
 	Callback goja.Callable
 	Interval time.Duration
 	Repeat   bool
-	Timer    *time.Timer
-	Ticker   *time.Ticker
-	Cancel   chan bool
-	mu       sync.Mutex
-	stopped  bool // Track if timer has been stopped
+}
+
+// timerPool pools time.Timer objects to reduce allocations.
+var timerPool = sync.Pool{
+	New: func() interface{} {
+		return time.NewTimer(0)
+	},
+}
+
+// pendingTimerEntry tracks a scheduled timer in the dispatcher.
+type pendingTimerEntry struct {
+	callback goja.Callable
+	timer    *time.Timer
+	interval time.Duration
+	repeat   bool
+	deleted  bool
+	runtime  *Runtime
+	id       int
+	gen      uint64    // monotonic generation to detect stale events
+	done     chan struct{} // closed to signal the reader goroutine to exit
+	doneOnce sync.Once   // ensures done is closed exactly once
+}
+
+// startTimerDispatcher starts the per-runtime timer dispatcher goroutine.
+func (r *Runtime) startTimerDispatcher() {
+	r.timerDone = make(chan struct{})
+	go r.runTimerDispatcher()
+}
+
+// runTimerDispatcher reads from pooled time.Timers and dispatches callbacks.
+func (r *Runtime) runTimerDispatcher() {
+	defer r.timerWg.Done()
+	r.timerWg.Add(1)
+	for {
+		select {
+		case <-r.timerDone:
+			return
+		case id := <-r.timerEvents:
+			r.timerCallbackMu.Lock()
+			entry, ok := r.pendingTimers[id]
+			if !ok || entry.deleted {
+				if ok {
+					entry.doneOnce.Do(func() { close(entry.done) })
+					delete(r.pendingTimers, id)
+				}
+				r.timerCallbackMu.Unlock()
+				continue
+			}
+			cb := entry.callback
+			if entry.repeat {
+				// Re-arm for next interval: stop, drain, reset, bump gen.
+				entry.timer.Stop()
+				select {
+				case <-entry.timer.C:
+				default:
+				}
+				entry.gen++
+				entry.timer.Reset(entry.interval)
+				r.timerCallbackMu.Unlock()
+			} else {
+				entry.doneOnce.Do(func() { close(entry.done) })
+				delete(r.pendingTimers, id)
+				r.timerCallbackMu.Unlock()
+			}
+			if r.enqueueTask != nil {
+				r.enqueueTask(func() {
+					cb(goja.Undefined()) //nolint:errcheck
+				})
+			} else {
+				cb(goja.Undefined()) //nolint:errcheck
+			}
+		}
+	}
 }
 
 // ConsoleMessage represents a console log message
@@ -65,9 +134,9 @@ const (
 
 // Runtime wraps the Goja JavaScript runtime
 type Runtime struct {
-	vm             *goja.Runtime
-	parser         *dom.Parser
-	htmlCache      string
+	vm        *goja.Runtime
+	parser    *dom.Parser
+	htmlCache string
 	// Browser API storage
 	localStorage        map[string]string
 	sessionStorage      map[string]string
@@ -75,12 +144,18 @@ type Runtime struct {
 	origin              string
 	timers              map[int]*Timer
 	timerIDCounter      int
+	// Timer pool dispatcher state.
+	pendingTimers   map[int]*pendingTimerEntry
+	timerEvents     chan int
+	timerDone       chan struct{}
+	timerWg         sync.WaitGroup
+	timerCallbackMu sync.Mutex // protects pendingTimers
 	// History tracking
 	historyStack []string
 	historyIndex int
-	// Console messages
-	consoleMessages []ConsoleMessage
-	consoleMu       sync.Mutex
+	// Console messages — fixed-size ring buffer with atomic index (no mutex).
+	consoleBuffer   [1000]ConsoleMessage
+	consoleWriteIdx atomic.Uint64
 	// JavaScript errors
 	jsErrors   []string
 	jsErrorsMu sync.Mutex
@@ -149,6 +224,17 @@ type Runtime struct {
 	// enforcer enforces script policy limits and API capabilities.
 	// When nil (default), all capabilities are allowed.
 	enforcer *ScriptEnforcer
+
+	// scriptCache caches compiled goja programs keyed by content hash
+	// to avoid re-parsing identical scripts on every RunScript call.
+	scriptCache      map[string]*goja.Program
+	scriptCacheMu    sync.Mutex
+	scriptCacheLimit int
+
+	// flushMicrotasksFn caches the resolved __flushMicrotasks function
+	// to avoid vm.Get lookup on every RunScript call.
+	flushMicrotasksFn       goja.Callable
+	flushMicrotasksResolved bool
 }
 
 // SetEnforcer attaches a ScriptEnforcer to this runtime for capability
@@ -229,14 +315,21 @@ func NewRuntime() *Runtime {
 		origin:            "about:blank",
 		timers:            make(map[int]*Timer),
 		timerIDCounter:    1,
+		pendingTimers:     make(map[int]*pendingTimerEntry),
+		timerEvents:       make(chan int, 64),
 		historyStack:      []string{},
 		historyIndex:      -1,
-		consoleMessages:   make([]ConsoleMessage, 0),
+		consoleBuffer:     [1000]ConsoleMessage{},
 		jsErrors:          make([]string, 0),
 		runtimeDetected:   make(map[dom.UnsupportedFeatureKind]bool, 8),
 		frameScheduler:    NewFrameScheduler(0),
 		longTaskThreshold: 50 * time.Millisecond, // W3C long-task definition
+		scriptCache:       make(map[string]*goja.Program),
+		scriptCacheLimit:  500,
 	}
+
+	// Start the timer dispatcher goroutine for pooled time.Timer objects.
+	runtime.startTimerDispatcher()
 
 	// Inject ES6+ polyfills before any other setup
 	if _, err := vm.RunString(polyfillsJS); err != nil {
@@ -259,7 +352,25 @@ func NewRuntime() *Runtime {
 	// intact while routing RAF through the real scheduler.
 	runtime.installFrameScheduler()
 
+	// Resolve the __flushMicrotasks function reference once after all
+	// polyfills have been loaded. Avoids per-RunScript vm.Get lookup.
+	runtime.resolveFlushMicrotasks()
+
 	return runtime
+}
+
+// resolveFlushMicrotasks resolves and caches the __flushMicrotasks function
+// reference. Called once after polyfills are loaded in NewRuntime.
+func (r *Runtime) resolveFlushMicrotasks() {
+	if r.flushMicrotasksResolved {
+		return
+	}
+	r.flushMicrotasksResolved = true
+	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
+		if fn, ok := goja.AssertFunction(flush); ok {
+			r.flushMicrotasksFn = fn
+		}
+	}
 }
 
 // FrameScheduler returns the runtime's requestAnimationFrame scheduler.
@@ -369,14 +480,7 @@ func (r *Runtime) setupConsoleAPI() {
 	// Helper function to log a console message
 	logMessage := func(level string, args []goja.Value, data interface{}) {
 		message := formatArgs(args)
-		r.consoleMu.Lock()
-		r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
-			Level:     level,
-			Message:   message,
-			Timestamp: time.Now(),
-			Data:      data,
-		})
-		r.consoleMu.Unlock()
+		r.addConsoleMessage(level, message, data)
 
 		// Also print to stdout with level prefix
 		prefix := ""
@@ -694,6 +798,15 @@ func (r *Runtime) setupDocumentAPI() {
       this.parentNode = null;
       this.childNodes = [];
     }
+
+    // The owning document for every node in the single-document Goosie
+    // DOM. Libraries such as jQuery resolve fragment/document context
+    // via elem.ownerDocument; without it, jQuery's buildFragment and
+    // Sizzle.contains crash on undefined context. Resolved lazily
+    // because the document singleton is created after the classes.
+    get ownerDocument() {
+      return window.document || null;
+    }
     
     get firstChild() { return this.childNodes[0] || null; }
     get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
@@ -726,6 +839,15 @@ func (r *Runtime) setupDocumentAPI() {
     }
 
     appendChild(child) {
+      // DocumentFragment semantics: appending a fragment moves its
+      // children into this node and empties the fragment. jQuery's
+      // domManip passes fragments here whenever parsed content has
+      // more than one node.
+      if (child.nodeType === 11) {
+        const kids = child.childNodes.slice();
+        for (const k of kids) this.appendChild(k);
+        return child;
+      }
       if (child.parentNode) {
         child.parentNode.removeChild(child);
       }
@@ -750,6 +872,13 @@ func (r *Runtime) setupDocumentAPI() {
       if (!refChild) {
         return this.appendChild(newChild);
       }
+      // DocumentFragment semantics: inserting a fragment moves its
+      // children before refChild and empties the fragment.
+      if (newChild.nodeType === 11) {
+        const kids = newChild.childNodes.slice();
+        for (const k of kids) this.insertBefore(k, refChild);
+        return newChild;
+      }
       const idx = this.childNodes.indexOf(refChild);
       if (idx === -1) throw new Error("NotFoundErr");
       
@@ -765,6 +894,14 @@ func (r *Runtime) setupDocumentAPI() {
     replaceChild(newChild, oldChild) {
       const idx = this.childNodes.indexOf(oldChild);
       if (idx === -1) throw new Error("NotFoundErr");
+      // DocumentFragment semantics: the fragment's children take the
+      // place of oldChild and the fragment is emptied.
+      if (newChild.nodeType === 11) {
+        const kids = newChild.childNodes.slice();
+        for (const k of kids) this.insertBefore(k, oldChild);
+        this.removeChild(oldChild);
+        return oldChild;
+      }
       
       if (newChild.parentNode) {
         newChild.parentNode.removeChild(newChild);
@@ -1293,9 +1430,21 @@ func (r *Runtime) setupDocumentAPI() {
     }
     
     set textContent(val) {
-      this.childNodes = [new TextNode(val)];
-      this.childNodes[0].parentNode = this;
-      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", String(val));
+      // Detach replaced children: their parentNode must not point into
+      // a tree they no longer belong to (jQuery's buildFragment clears
+      // its wrapper via textContent="" and later re-appends children).
+      this.childNodes.forEach(n => { n.parentNode = null; });
+      // Per spec an empty value removes all children instead of
+      // inserting an empty text node. jQuery's buildFragment relies on
+      // the exact childNodes.length after clearing (fragment.textContent="").
+      const str = String(val);
+      if (str === "") {
+        this.childNodes = [];
+      } else {
+        this.childNodes = [new TextNode(str)];
+        this.childNodes[0].parentNode = this;
+      }
+      if (window.__onDOMChanged) window.__onDOMChanged("set-text", nodeId(this), nodeId(this.parentNode), "", "", str);
     }
     
     get innerHTML() {
@@ -1304,6 +1453,7 @@ func (r *Runtime) setupDocumentAPI() {
     
     set innerHTML(htmlStr) {
       const parsedNodes = window.__parseHTMLFragment(htmlStr);
+      this.childNodes.forEach(n => { n.parentNode = null; });
       this.childNodes = [];
       parsedNodes.forEach(n => {
         n.parentNode = this;
@@ -1458,6 +1608,12 @@ func (r *Runtime) setupDocumentAPI() {
       
       this.documentElement.appendChild(this.head);
       this.documentElement.appendChild(this.body);
+      this.defaultView = window;
+    }
+
+    // Per spec the document node itself has no owner document.
+    get ownerDocument() {
+      return null;
     }
     
     createElement(tagName) {
@@ -1502,7 +1658,7 @@ func (r *Runtime) setupDocumentAPI() {
       return window.location ? window.location.hostname : "";
     }
     get currentScript() {
-      return null;
+      return window.__goosieCurrentScript || null;
     }
 
     querySelector(sel) {
@@ -1625,6 +1781,24 @@ func (r *Runtime) setupDocumentAPI() {
       if (found) results.push(found);
     }
     return results;
+  };
+
+  // document.currentScript support: the Go side installs the element
+  // of the currently-executing classic/defer script before running
+  // it and clears it afterwards (per HTML spec, async scripts keep
+  // the null value).
+  window.__goosieCurrentScript = null;
+  window.__setCurrentScript = function(attrs) {
+    const el = document.createElement("script");
+    for (const key in attrs) {
+      if (Object.prototype.hasOwnProperty.call(attrs, key)) {
+        el.setAttribute(key, attrs[key]);
+      }
+    }
+    window.__goosieCurrentScript = el;
+  };
+  window.__clearCurrentScript = function() {
+    window.__goosieCurrentScript = null;
   };
 
   // Window geometry
@@ -1895,9 +2069,6 @@ func (r *Runtime) populateDocument(doc *html.Node) {
 	jsHead := jsDoc.Get("head").ToObject(r.vm)
 	jsBody := jsDoc.Get("body").ToObject(r.vm)
 
-	jsHead.Set("childNodes", r.vm.NewArray())
-	jsBody.Set("childNodes", r.vm.NewArray())
-
 	var findNodes func(*html.Node) (*html.Node, *html.Node, *html.Node)
 	findNodes = func(n *html.Node) (*html.Node, *html.Node, *html.Node) {
 		var htmlN, head, body *html.Node
@@ -1927,26 +2098,35 @@ func (r *Runtime) populateDocument(doc *html.Node) {
 
 	htmlNode, headNode, bodyNode := findNodes(doc)
 
+	jsHead.Set("childNodes", r.vm.NewArray())
+	jsBody.Set("childNodes", r.vm.NewArray())
+
 	if htmlNode != nil {
 		jsDocElement := jsDoc.Get("documentElement").ToObject(r.vm)
-		for _, attr := range htmlNode.Attr {
+		if len(htmlNode.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsDocElement.Get("setAttribute"))
-			setAttribute(jsDocElement, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range htmlNode.Attr {
+				setAttribute(jsDocElement, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 	}
 
 	if headNode != nil {
-		for _, attr := range headNode.Attr {
+		if len(headNode.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsHead.Get("setAttribute"))
-			setAttribute(jsHead, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range headNode.Attr {
+				setAttribute(jsHead, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 		r.populateJSNode(headNode, jsHead)
 	}
 
 	if bodyNode != nil {
-		for _, attr := range bodyNode.Attr {
+		if len(bodyNode.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsBody.Get("setAttribute"))
-			setAttribute(jsBody, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range bodyNode.Attr {
+				setAttribute(jsBody, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 		r.populateJSNode(bodyNode, jsBody)
 	}
@@ -1963,6 +2143,52 @@ func (r *Runtime) populateDocumentFromHTML(htmlStr string) {
 // LoadHTML is an alias for SetHTMLContent, provided for test convenience.
 func (r *Runtime) LoadHTML(htmlStr string) {
 	r.SetHTMLContent(htmlStr)
+}
+
+// SetCurrentScript exposes a synthetic <script> element carrying the
+// given attributes via document.currentScript. The HTML spec defines
+// document.currentScript as the element of the currently-executing
+// classic or deferred script; analytics snippets (e.g. Plausible)
+// read data-* attributes and src from it at load time. Callers pair
+// this with RunScript and must call ClearCurrentScript once the
+// script finishes; async scripts keep the spec-mandated null. Errors
+// are swallowed: a broken currentScript must never abort the script
+// queue.
+func (r *Runtime) SetCurrentScript(attrs map[string]string) {
+	r.scriptMu.Lock()
+	defer r.scriptMu.Unlock()
+
+	setFn := r.vm.Get("__setCurrentScript")
+	if setFn == nil || goja.IsUndefined(setFn) || goja.IsNull(setFn) {
+		return
+	}
+	fn, ok := goja.AssertFunction(setFn)
+	if !ok {
+		return
+	}
+	obj := r.vm.NewObject()
+	for k, v := range attrs {
+		_ = obj.Set(k, v)
+	}
+	_, _ = fn(goja.Undefined(), obj)
+}
+
+// ClearCurrentScript resets document.currentScript to null between
+// script executions, matching the HTML spec (the value is only
+// non-null while a synchronous script is running).
+func (r *Runtime) ClearCurrentScript() {
+	r.scriptMu.Lock()
+	defer r.scriptMu.Unlock()
+
+	clearFn := r.vm.Get("__clearCurrentScript")
+	if clearFn == nil || goja.IsUndefined(clearFn) || goja.IsNull(clearFn) {
+		return
+	}
+	fn, ok := goja.AssertFunction(clearFn)
+	if !ok {
+		return
+	}
+	_, _ = fn(goja.Undefined())
 }
 
 // SetFetcher sets the HTTP fetcher used by the fetch() JS API.
@@ -1996,41 +2222,58 @@ func (r *Runtime) RunScript(script string) (goja.Value, error) {
 
 	r.ScanAndReportUnsupportedJSFeatures(script)
 
-	var interrupt *time.Timer
-	if r.maxTaskDuration > 0 {
-		// Install an interrupt that fires after maxTaskDuration. The
-		// Goja interrupt is checked at every opcode; once fired, the
-		// next instruction returns the interruption error.
-		timeout := r.maxTaskDuration
-		interrupt = time.AfterFunc(timeout, func() {
-			r.vm.Interrupt(fmt.Sprintf("script exceeded %v budget", timeout))
-		})
-	}
-
-	start := time.Now()
-	val, err := r.vm.RunString(script)
-	if interrupt != nil {
-		interrupt.Stop()
-	}
-
-	// Long-task metric: only record when the script ran to completion
-	// (err == nil) so that interrupted scripts are counted separately.
-	if err == nil && r.longTaskThreshold > 0 && time.Since(start) >= r.longTaskThreshold {
-		r.longTaskCount.Add(1)
-	}
-	if err != nil {
-		// Detect the interrupt pattern: any error mentioning "budget" is
-		// ours. Goja's error string includes the original Interrupt()
-		// argument verbatim.
-		if strings.Contains(err.Error(), "budget") {
-			r.interruptedCount.Add(1)
+	// Check script compilation cache
+	prog, hash := r.getCachedProgram(script)
+	var compileErr error
+	if prog == nil {
+		prog, compileErr = goja.Compile(script, script, false) // match RunString non-strict mode
+		if compileErr == nil {
+			r.cacheProgram(script, prog, hash)
 		}
 	}
 
-	// Flush microtask queue (drives Promise .then callbacks synchronously)
-	if flush := r.vm.Get("__flushMicrotasks"); flush != nil {
-		if fn, ok := goja.AssertFunction(flush); ok {
-			fn(goja.Undefined()) //nolint:errcheck
+	var val goja.Value
+	var err error
+
+	if compileErr != nil {
+		// Compilation failed — skip execution, let error tracking below handle it
+		val = goja.Undefined()
+		err = compileErr
+	} else {
+		var interrupt *time.Timer
+		if r.maxTaskDuration > 0 {
+			// Install an interrupt that fires after maxTaskDuration. The
+			// Goja interrupt is checked at every opcode; once fired, the
+			// next instruction returns the interruption error.
+			timeout := r.maxTaskDuration
+			interrupt = time.AfterFunc(timeout, func() {
+				r.vm.Interrupt(fmt.Sprintf("script exceeded %v budget", timeout))
+			})
+		}
+
+		start := time.Now()
+		val, err = r.vm.RunProgram(prog)
+		if interrupt != nil {
+			interrupt.Stop()
+		}
+
+		// Long-task metric: only record when the script ran to completion
+		// (err == nil) so that interrupted scripts are counted separately.
+		if err == nil && r.longTaskThreshold > 0 && time.Since(start) >= r.longTaskThreshold {
+			r.longTaskCount.Add(1)
+		}
+		if err != nil {
+			// Detect the interrupt pattern: any error mentioning "budget" is
+			// ours. Goja's error string includes the original Interrupt()
+			// argument verbatim.
+			if strings.Contains(err.Error(), "budget") {
+				r.interruptedCount.Add(1)
+			}
+		}
+
+		// Flush microtask queue using cached function reference
+		if r.flushMicrotasksFn != nil {
+			r.flushMicrotasksFn(goja.Undefined()) //nolint:errcheck
 		}
 	}
 	if err != nil {
@@ -2041,36 +2284,83 @@ func (r *Runtime) RunScript(script string) (goja.Value, error) {
 		r.jsErrorsMu.Unlock()
 
 		// Also add to console as an error
-		r.consoleMu.Lock()
-		r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
-			Level:     "error",
-			Message:   errorMsg,
-			Timestamp: time.Now(),
-			Data:      nil,
-		})
-		r.consoleMu.Unlock()
+		r.addConsoleMessage("error", errorMsg, nil)
 
 		fmt.Println("[JS ERROR]", errorMsg)
 	}
 	return val, err
 }
 
-// GetConsoleMessages returns all console messages
-func (r *Runtime) GetConsoleMessages() []ConsoleMessage {
-	r.consoleMu.Lock()
-	defer r.consoleMu.Unlock()
+// getCachedProgram looks up a compiled goja.Program by content hash.
+// Returns (nil, hash) on cache miss so the caller can compile and cache.
+func (r *Runtime) getCachedProgram(script string) (*goja.Program, string) {
+	hash := scriptHash(script)
+	r.scriptCacheMu.Lock()
+	defer r.scriptCacheMu.Unlock()
+	if prog, ok := r.scriptCache[hash]; ok {
+		return prog, hash
+	}
+	return nil, hash
+}
 
-	// Return a copy to prevent concurrent modification
-	messages := make([]ConsoleMessage, len(r.consoleMessages))
-	copy(messages, r.consoleMessages)
+// cacheProgram stores a compiled goja.Program in the script cache.
+// Evicts half the cache when the limit is reached (simple FIFO-ish eviction).
+func (r *Runtime) cacheProgram(script string, prog *goja.Program, hash string) {
+	r.scriptCacheMu.Lock()
+	defer r.scriptCacheMu.Unlock()
+	if len(r.scriptCache) >= r.scriptCacheLimit {
+		count := 0
+		for k := range r.scriptCache {
+			delete(r.scriptCache, k)
+			count++
+			if count >= r.scriptCacheLimit/2 {
+				break
+			}
+		}
+	}
+	r.scriptCache[hash] = prog
+}
+
+// scriptHash returns a hex-encoded FNV-1a 64a hash of the script content.
+func scriptHash(script string) string {
+	h := fnv.New64a()
+	h.Write([]byte(script))
+	return fmt.Sprintf("%x", h.Sum64())
+}
+
+// addConsoleMessage writes a message into the ring buffer.
+func (r *Runtime) addConsoleMessage(level, message string, data interface{}) {
+	idx := r.consoleWriteIdx.Add(1) - 1
+	r.consoleBuffer[idx%1000] = ConsoleMessage{
+		Level:     level,
+		Message:   message,
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+}
+
+// GetConsoleMessages returns all console messages in chronological order.
+func (r *Runtime) GetConsoleMessages() []ConsoleMessage {
+	count := r.consoleWriteIdx.Load()
+	if count == 0 {
+		return nil
+	}
+	n := int(count)
+	if n > 1000 {
+		n = 1000
+	}
+	messages := make([]ConsoleMessage, n)
+	writeIdx := r.consoleWriteIdx.Load()
+	start := writeIdx - uint64(n)
+	for i := 0; i < n; i++ {
+		messages[i] = r.consoleBuffer[(start+uint64(i))%1000]
+	}
 	return messages
 }
 
 // ClearConsoleMessages clears all console messages
 func (r *Runtime) ClearConsoleMessages() {
-	r.consoleMu.Lock()
-	defer r.consoleMu.Unlock()
-	r.consoleMessages = make([]ConsoleMessage, 0)
+	r.consoleWriteIdx.Store(0)
 }
 
 // GetJavaScriptErrors returns all JavaScript errors
@@ -2824,7 +3114,7 @@ func (r *Runtime) setupSessionStorageAPI() {
 	r.vm.Set("sessionStorage", sessionStorage)
 }
 
-// setupTimerAPIs configures setTimeout and setInterval
+// setupTimerAPIs configures setTimeout and setInterval using pooled time.Timer objects.
 func (r *Runtime) setupTimerAPIs() {
 	// setTimeout
 	r.vm.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
@@ -2852,44 +3142,52 @@ func (r *Runtime) setupTimerAPIs() {
 		timerID := r.timerIDCounter
 		r.timerIDCounter++
 
-		timer := &Timer{
+		// Get a timer from the pool, stop and drain any stale state.
+		t := timerPool.Get().(*time.Timer)
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
+		}
+		t.Reset(delay)
+
+		entry := &pendingTimerEntry{
+			callback: callback,
+			timer:    t,
+			repeat:   false,
+			runtime:  r,
+			id:       timerID,
+			gen:      0,
+			done:     make(chan struct{}),
+		}
+		r.timerCallbackMu.Lock()
+		r.pendingTimers[timerID] = entry
+		r.timerCallbackMu.Unlock()
+
+		// Goroutine waits for the pooled timer to fire, then routes the event.
+		go func() {
+			select {
+			case <-t.C:
+				r.timerEvents <- timerID
+			case <-entry.done:
+				// Timer was cleared — drain and return to pool.
+				if t.Stop() {
+					select {
+					case <-t.C:
+					default:
+					}
+				}
+				timerPool.Put(t)
+			}
+		}()
+
+		r.timers[timerID] = &Timer{
 			ID:       timerID,
 			Callback: callback,
 			Interval: delay,
 			Repeat:   false,
-			Cancel:   make(chan bool),
 		}
-
-		timer.Timer = time.AfterFunc(delay, func() {
-			timer.mu.Lock()
-			select {
-			case <-timer.Cancel:
-				timer.mu.Unlock()
-				return
-			default:
-				timer.mu.Unlock()
-				if r.enqueueTask != nil {
-					r.enqueueTask(func() {
-						timer.mu.Lock()
-						defer timer.mu.Unlock()
-						select {
-						case <-timer.Cancel:
-							return
-						default:
-							callback(goja.Undefined()) //nolint:errcheck
-							delete(r.timers, timerID)
-						}
-					})
-				} else {
-					timer.mu.Lock()
-					defer timer.mu.Unlock()
-					callback(goja.Undefined()) //nolint:errcheck
-					delete(r.timers, timerID)
-				}
-			}
-		})
-
-		r.timers[timerID] = timer
 
 		return r.vm.ToValue(timerID)
 	})
@@ -2901,19 +3199,18 @@ func (r *Runtime) setupTimerAPIs() {
 		}
 
 		timerID := int(call.Arguments[0].ToInteger())
-		timer, exists := r.timers[timerID]
-		if exists {
-			timer.mu.Lock()
-			if !timer.stopped {
-				close(timer.Cancel)
-				timer.stopped = true
-				if timer.Timer != nil {
-					timer.Timer.Stop()
-				}
-			}
-			timer.mu.Unlock()
-			delete(r.timers, timerID)
+		if _, exists := r.timers[timerID]; !exists {
+			return goja.Undefined()
 		}
+
+		r.timerCallbackMu.Lock()
+		if entry, ok := r.pendingTimers[timerID]; ok {
+			entry.deleted = true
+			entry.doneOnce.Do(func() { close(entry.done) })
+			delete(r.pendingTimers, timerID)
+		}
+		r.timerCallbackMu.Unlock()
+		delete(r.timers, timerID)
 
 		return goja.Undefined()
 	})
@@ -2944,51 +3241,56 @@ func (r *Runtime) setupTimerAPIs() {
 		timerID := r.timerIDCounter
 		r.timerIDCounter++
 
-		timer := &Timer{
-			ID:       timerID,
-			Callback: callback,
-			Interval: interval,
-			Repeat:   true,
-			Cancel:   make(chan bool),
+		// Get a timer from the pool, stop and drain any stale state.
+		t := timerPool.Get().(*time.Timer)
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
 		}
+		t.Reset(interval)
 
-		timer.Ticker = time.NewTicker(interval)
+		entry := &pendingTimerEntry{
+			callback: callback,
+			timer:    t,
+			interval: interval,
+			repeat:   true,
+			runtime:  r,
+			id:       timerID,
+			gen:      0,
+			done:     make(chan struct{}),
+		}
+		r.timerCallbackMu.Lock()
+		r.pendingTimers[timerID] = entry
+		r.timerCallbackMu.Unlock()
 
+		// Goroutine loops for repeating timers; the dispatcher re-arms after each fire.
 		go func() {
 			for {
 				select {
-				case <-timer.Cancel:
-					return
-				case <-timer.Ticker.C:
-					timer.mu.Lock()
-					select {
-					case <-timer.Cancel:
-						timer.mu.Unlock()
-						return
-					default:
-						timer.mu.Unlock()
-						if r.enqueueTask != nil {
-							r.enqueueTask(func() {
-								timer.mu.Lock()
-								defer timer.mu.Unlock()
-								select {
-								case <-timer.Cancel:
-									return
-								default:
-									callback(goja.Undefined()) //nolint:errcheck
-								}
-							})
-						} else {
-							timer.mu.Lock()
-							defer timer.mu.Unlock()
-							callback(goja.Undefined()) //nolint:errcheck
+				case <-t.C:
+					r.timerEvents <- timerID
+				case <-entry.done:
+					// Timer was cleared — drain and return to pool.
+					if t.Stop() {
+						select {
+						case <-t.C:
+						default:
 						}
 					}
+					timerPool.Put(t)
+					return
 				}
 			}
 		}()
 
-		r.timers[timerID] = timer
+		r.timers[timerID] = &Timer{
+			ID:       timerID,
+			Callback: callback,
+			Interval: interval,
+			Repeat:   true,
+		}
 
 		return r.vm.ToValue(timerID)
 	})
@@ -3000,19 +3302,18 @@ func (r *Runtime) setupTimerAPIs() {
 		}
 
 		timerID := int(call.Arguments[0].ToInteger())
-		timer, exists := r.timers[timerID]
-		if exists {
-			timer.mu.Lock()
-			if !timer.stopped {
-				close(timer.Cancel)
-				timer.stopped = true
-				if timer.Ticker != nil {
-					timer.Ticker.Stop()
-				}
-			}
-			timer.mu.Unlock()
-			delete(r.timers, timerID)
+		if _, exists := r.timers[timerID]; !exists {
+			return goja.Undefined()
 		}
+
+		r.timerCallbackMu.Lock()
+		if entry, ok := r.pendingTimers[timerID]; ok {
+			entry.deleted = true
+			entry.doneOnce.Do(func() { close(entry.done) })
+			delete(r.pendingTimers, timerID)
+		}
+		r.timerCallbackMu.Unlock()
+		delete(r.timers, timerID)
 
 		return goja.Undefined()
 	})
@@ -3252,20 +3553,14 @@ func (r *Runtime) createRejectedPromise(errMsg string) *goja.Object {
 
 // Cleanup cleans up all timers and resources
 func (r *Runtime) Cleanup() {
-	for _, timer := range r.timers {
-		timer.mu.Lock()
-		if !timer.stopped {
-			close(timer.Cancel)
-			timer.stopped = true
-			if timer.Timer != nil {
-				timer.Timer.Stop()
-			}
-			if timer.Ticker != nil {
-				timer.Ticker.Stop()
-			}
-		}
-		timer.mu.Unlock()
+	// Stop all pending pooled timers and signal goroutines to exit.
+	r.timerCallbackMu.Lock()
+	for id, entry := range r.pendingTimers {
+		entry.deleted = true
+		entry.doneOnce.Do(func() { close(entry.done) })
+		delete(r.pendingTimers, id)
 	}
+	r.timerCallbackMu.Unlock()
 	r.timers = make(map[int]*Timer)
 
 	// Drop any pending requestAnimationFrame callbacks so a navigation
@@ -3392,10 +3687,28 @@ func (r *Runtime) serializeJSDOMToCache() {
 }
 
 func (r *Runtime) populateJSNode(goNode *html.Node, jsNode *goja.Object) {
+	// Count children first for pre-allocation
+	childCount := 0
+	for c := goNode.FirstChild; c != nil; c = c.NextSibling {
+		childCount++
+	}
+	if childCount == 0 {
+		return
+	}
+
+	// Pre-allocate slice and convert all children
+	childValues := make([]goja.Value, 0, childCount)
 	for c := goNode.FirstChild; c != nil; c = c.NextSibling {
 		if childJS := r.convertGoNodeToJS(c); childJS != nil && childJS != goja.Null() {
-			appendChild, _ := goja.AssertFunction(jsNode.Get("appendChild"))
-			appendChild(jsNode, childJS)
+			childValues = append(childValues, childJS)
+		}
+	}
+
+	// Batch append all children at once
+	if len(childValues) > 0 {
+		appendChild, _ := goja.AssertFunction(jsNode.Get("appendChild"))
+		for _, childVal := range childValues {
+			appendChild(jsNode, childVal)
 		}
 	}
 }
@@ -3415,17 +3728,33 @@ func (r *Runtime) convertGoNodeToJS(n *html.Node) goja.Value {
 		jsNode, _ := createElement(jsDoc, r.vm.ToValue(n.Data))
 		jsNodeObj := jsNode.ToObject(r.vm)
 
-		for _, attr := range n.Attr {
+		// Batch attribute setting
+		if len(n.Attr) > 0 {
 			setAttribute, _ := goja.AssertFunction(jsNodeObj.Get("setAttribute"))
-			setAttribute(jsNodeObj, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			for _, attr := range n.Attr {
+				setAttribute(jsNodeObj, r.vm.ToValue(attr.Key), r.vm.ToValue(attr.Val))
+			}
 		}
 
-		// Recursively populate children
+		// Count children first for pre-allocation
+		childCount := 0
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			childJS := r.convertGoNodeToJS(c)
-			if childJS != nil && childJS != goja.Null() {
-				appendChild, _ := goja.AssertFunction(jsNodeObj.Get("appendChild"))
-				appendChild(jsNodeObj, childJS)
+			childCount++
+		}
+
+		// Pre-allocate and convert all children
+		if childCount > 0 {
+			childValues := make([]goja.Value, 0, childCount)
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if childJS := r.convertGoNodeToJS(c); childJS != nil && childJS != goja.Null() {
+					childValues = append(childValues, childJS)
+				}
+			}
+
+			// Batch append all children
+			appendChild, _ := goja.AssertFunction(jsNodeObj.Get("appendChild"))
+			for _, childVal := range childValues {
+				appendChild(jsNodeObj, childVal)
 			}
 		}
 		return jsNode
@@ -3469,13 +3798,7 @@ func isRemoteOrigin(origin string) bool {
 
 // jsConsoleWarn logs a warning message to the JS console from Go code.
 func (r *Runtime) jsConsoleWarn(msg string) {
-	r.consoleMu.Lock()
-	r.consoleMessages = append(r.consoleMessages, ConsoleMessage{
-		Level:     "warn",
-		Message:   msg,
-		Timestamp: time.Now(),
-	})
-	r.consoleMu.Unlock()
+	r.addConsoleMessage("warn", msg, nil)
 	fmt.Println("[WARN] " + msg)
 }
 

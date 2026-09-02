@@ -471,13 +471,7 @@ func (b *CPUBackend) resolveTextFace(textRun frame.TextRun) font.Face {
 }
 
 func clampf32(v, lo, hi float32) float32 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+	return min(max(v, lo), hi)
 }
 
 // ---------------------------------------------------------------------------

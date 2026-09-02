@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"fyne.io/fyne/v2"
+	"github.com/vyquocvu/goosie/internal/css"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
 )
 
@@ -13,15 +14,10 @@ import (
 type WhiteSpaceMode int
 
 const (
-	// WhiteSpaceNormal collapses white space and wraps text normally
 	WhiteSpaceNormal WhiteSpaceMode = iota
-	// WhiteSpaceNoWrap collapses white space but prevents wrapping
 	WhiteSpaceNoWrap
-	// WhiteSpacePre preserves white space and prevents wrapping
 	WhiteSpacePre
-	// WhiteSpacePreWrap preserves white space but allows wrapping
 	WhiteSpacePreWrap
-	// WhiteSpacePreLine collapses white space except newlines and allows wrapping
 	WhiteSpacePreLine
 )
 
@@ -29,52 +25,44 @@ const (
 type VerticalAlign int
 
 const (
-	// VerticalAlignBaseline aligns to parent's baseline
 	VerticalAlignBaseline VerticalAlign = iota
-	// VerticalAlignTop aligns to top of line box
 	VerticalAlignTop
-	// VerticalAlignBottom aligns to bottom of line box
 	VerticalAlignBottom
-	// VerticalAlignMiddle aligns to middle of line box
 	VerticalAlignMiddle
-	// VerticalAlignTextTop aligns to top of parent's content area
 	VerticalAlignTextTop
-	// VerticalAlignTextBottom aligns to bottom of parent's content area
 	VerticalAlignTextBottom
-	// VerticalAlignSub subscript alignment
 	VerticalAlignSub
-	// VerticalAlignSuper superscript alignment
 	VerticalAlignSuper
 )
 
 // LineBox represents a horizontal line containing inline elements
 type LineBox struct {
-	X              float32      // X position of line
-	Y              float32      // Y position (baseline)
-	Width          float32      // Total width of content in line
-	Height         float32      // Height of line box
-	Ascent         float32      // Distance from baseline to top
-	Descent        float32      // Distance from baseline to bottom
-	InlineBoxes    []*InlineBox // Inline boxes in this line
-	AvailableWidth float32      // Available width for line
-	TextAlign      string       // Text alignment for this line
-	LineHeight     float32      // Preferred line height
+	X              float32
+	Y              float32
+	Width          float32
+	Height         float32
+	Ascent         float32
+	Descent        float32
+	InlineBoxes    []*InlineBox
+	AvailableWidth float32
+	TextAlign      string
+	LineHeight     float32
 }
 
 // InlineBox represents an inline-level box (text or inline element)
 type InlineBox struct {
-	NodeID        int64         // ID of corresponding RenderNode
-	X             float32       // X position relative to line
-	Y             float32       // Y position relative to line (adjusted for vertical align)
-	Width         float32       // Width of inline box
-	Height        float32       // Height of inline box
-	Ascent        float32       // Baseline to top
-	Descent       float32       // Baseline to bottom
-	Text          string        // Text content (for text nodes)
-	IsText        bool          // True if this is a text node
-	VerticalAlign VerticalAlign // Vertical alignment
-	LayoutBox     *LayoutBox    // Reference to layout box for inline-block elements
-	LetterSpacing float32       // Letter spacing for this box
+	NodeID        int64
+	X             float32
+	Y             float32
+	Width         float32
+	Height        float32
+	Ascent        float32
+	Descent       float32
+	Text          string
+	IsText        bool
+	VerticalAlign VerticalAlign
+	LayoutBox     *LayoutBox
+	LetterSpacing float32
 }
 
 // InlineLayoutEngine handles inline layout calculations
@@ -127,25 +115,22 @@ func (ile *InlineLayoutEngine) LayoutInlineChildren(
 	textAlign := ""
 	lineHeight := float32(0)
 	if len(children) > 0 && children[0].Parent != nil && children[0].Parent.ComputedStyle != nil {
-		textAlign = children[0].Parent.ComputedStyle.TextAlign
+		textAlign = children[0].Parent.ComputedStyle.TextAlign.String()
 		lineHeight = children[0].Parent.ComputedStyle.LineHeight
 	}
 
 	lineX, widthForLine := ile.getLineXAndWidth(x, y, availableWidth, lineHeight)
 	currentLine := ile.newLineBox(lineX, y, widthForLine, textAlign, lineHeight)
 
-	// Process all inline children and text nodes
 	for _, child := range children {
 		ile.addNodeToLines(child, &currentLine, &lines, x, availableWidth, whiteSpaceMode)
 	}
 
-	// Add the last line if it has content
 	if len(currentLine.InlineBoxes) > 0 {
 		ile.finalizeLine(currentLine)
 		lines = append(lines, currentLine)
 	}
 
-	// Calculate total height
 	totalHeight := float32(0)
 	for _, line := range lines {
 		totalHeight += line.Height
@@ -170,8 +155,8 @@ func (ile *InlineLayoutEngine) getLineXAndWidth(x, y, availableWidth, lineHeight
 	bfcLeft := floatCtx.containerX + leftOffset
 	bfcRight := bfcLeft + bfcAvailableWidth
 
-	lineLeft := maxFloat32(x, bfcLeft)
-	lineRight := minFloat32(x+availableWidth, bfcRight)
+	lineLeft := max(x, bfcLeft)
+	lineRight := min(x+availableWidth, bfcRight)
 
 	lineWidth := lineRight - lineLeft
 	if lineWidth < 0 {
@@ -180,7 +165,6 @@ func (ile *InlineLayoutEngine) getLineXAndWidth(x, y, availableWidth, lineHeight
 	return lineLeft, lineWidth
 }
 
-// addNodeToLines adds a render node to the line boxes
 func (ile *InlineLayoutEngine) addNodeToLines(
 	node *RenderNode,
 	currentLine **LineBox,
@@ -192,30 +176,23 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 		return
 	}
 
-	// Skip elements that should not participate in normal text flow
 	if node.ComputedStyle != nil {
-		// Skip display:none elements
-		if node.ComputedStyle.Display == "none" {
+		if node.ComputedStyle.Display == css.DisplayAtomNone {
 			return
 		}
-		// Skip absolute and fixed positioned elements - they don't participate in inline flow
-		if node.ComputedStyle.Position == "absolute" || node.ComputedStyle.Position == "fixed" {
+		if node.ComputedStyle.Position == css.PositionAtomAbsolute || node.ComputedStyle.Position == css.PositionAtomFixed {
 			return
 		}
-		// Skip visibility:hidden elements (they take up space but don't render)
-		// Actually visibility:hidden still takes space in inline flow, so we still process text
-		// but the text node text should still flow (hidden from rendering, not from layout)
 	}
 
-	if node.Type == NodeTypeText {
+	switch node.Type {
+	case NodeTypeText:
 		ile.addTextToLines(node, currentLine, lines, lineX, availableWidth, whiteSpaceMode)
-	} else if node.Type == NodeTypeElement {
-		// A forced line break: finalize the current line and start a new one.
+	case NodeTypeElement:
 		if node.TagName == "br" {
 			ile.addLineBreak(currentLine, lines, lineX, availableWidth)
 			return
 		}
-		// Check if inline-block
 		if ile.isInlineBlock(node) {
 			ile.addInlineBlockToLines(node, currentLine, lines, lineX, availableWidth)
 		} else {
@@ -241,7 +218,6 @@ func (ile *InlineLayoutEngine) addNodeToLines(
 				(*currentLine).Width += marginLeft
 			}
 
-			// Regular inline element - process children
 			for _, child := range node.Children {
 				ile.addNodeToLines(child, currentLine, lines, lineX, availableWidth, whiteSpaceMode)
 			}
@@ -280,7 +256,6 @@ func (ile *InlineLayoutEngine) addLineBreak(
 	*currentLine = ile.newLineBox(newLineX, nextY, newWidth, line.TextAlign, line.LineHeight)
 }
 
-// addTextToLines adds text content to line boxes with proper word wrapping
 func (ile *InlineLayoutEngine) addTextToLines(
 	node *RenderNode,
 	currentLine **LineBox,
@@ -293,7 +268,6 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		return
 	}
 
-	// Process white space according to mode
 	if whiteSpaceMode == WhiteSpacePre || whiteSpaceMode == WhiteSpaceNoWrap {
 		text = ile.processWhiteSpace(text, whiteSpaceMode)
 		if text == "" {
@@ -301,7 +275,7 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		}
 		fontSize := ile.getFontSizeForNode(node)
 		style := ile.fontMetrics.GetTextStyleFromNode(node)
-		if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
+		if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == css.FontStyleAtomItalic {
 			style.Italic = true
 		}
 		letterSpacing := float32(0)
@@ -326,7 +300,6 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		return
 	}
 
-	// Determine if text starts/ends with whitespace or is only whitespace
 	hasLeadingSpace := unicode.IsSpace(rune(text[0]))
 	hasTrailingSpace := unicode.IsSpace(rune(text[len(text)-1]))
 	isOnlyWhitespace := true
@@ -339,7 +312,7 @@ func (ile *InlineLayoutEngine) addTextToLines(
 
 	fontSize := ile.getFontSizeForNode(node)
 	style := ile.fontMetrics.GetTextStyleFromNode(node)
-	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == "italic" {
+	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.FontStyle == css.FontStyleAtomItalic {
 		style.Italic = true
 	}
 
@@ -358,11 +331,10 @@ func (ile *InlineLayoutEngine) addTextToLines(
 		return
 	}
 
-	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != "" {
-		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform)
+	if node != nil && node.ComputedStyle != nil && node.ComputedStyle.TextTransform != css.TextTransformAtomNone {
+		text = ile.applyTextTransform(text, node.ComputedStyle.TextTransform.String())
 	}
 
-	// Split text into words
 	words := ile.splitTextForWrapping(text, whiteSpaceMode)
 	for i, word := range words {
 		addSpace := i > 0
@@ -407,16 +379,13 @@ func (ile *InlineLayoutEngine) addTextPiece(
 		return
 	}
 
-	// If letterSpacing is non-zero, we break the text into characters to allow for correct positioning
 	if letterSpacing != 0 {
 		ile.addTextWithCharacterBreaking(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing)
 		return
 	}
 
-	// Measure text
 	metrics := ile.fontMetrics.MeasureText(text, fontSize, style, letterSpacing)
 
-	// Add space width if needed
 	spaceWidth := float32(0)
 	if addSpaceBefore && len((*currentLine).InlineBoxes) > 0 {
 		spaceMetrics := ile.fontMetrics.MeasureText(" ", fontSize, style, letterSpacing)
@@ -425,9 +394,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 
 	totalWidth := metrics.Width + spaceWidth
 
-	// Check if text fits on current line
 	if !noWrap && (*currentLine).Width+totalWidth > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) > 0 {
-		// Text doesn't fit - finalize current line and create new one
 		ile.finalizeLine(*currentLine)
 		*lines = append(*lines, *currentLine)
 
@@ -436,20 +403,17 @@ func (ile *InlineLayoutEngine) addTextPiece(
 		nextY := (*currentLine).Y + (*currentLine).Height
 		newLineX, newWidth := ile.getLineXAndWidth(lineX, nextY, availableWidth, lineHeight)
 		*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
-		spaceWidth = 0 // No space at start of new line
+		spaceWidth = 0
 		addSpaceBefore = false
 
-		// Re-measure for new line
 		totalWidth = metrics.Width
 	}
 
-	// If text still doesn't fit (very long word), break it into characters
 	if !noWrap && metrics.Width > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) == 0 {
 		ile.addTextWithCharacterBreaking(text, node, currentLine, lines, lineX, availableWidth, fontSize, style, letterSpacing)
 		return
 	}
 
-	// Create inline box for text
 	boxText := text
 	if addSpaceBefore {
 		boxText = " " + text
@@ -458,7 +422,7 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	inlineBox := &InlineBox{
 		NodeID:        node.ID,
 		X:             (*currentLine).Width,
-		Y:             0, // Will be adjusted based on vertical alignment
+		Y:             0,
 		Width:         totalWidth,
 		Height:        metrics.Height,
 		Ascent:        metrics.Ascent,
@@ -468,7 +432,6 @@ func (ile *InlineLayoutEngine) addTextPiece(
 		VerticalAlign: VerticalAlignBaseline,
 	}
 
-	// Apply vertical alignment for sub/sup if parent indicates it
 	if node.Parent != nil {
 		switch node.Parent.TagName {
 		case "sub":
@@ -481,7 +444,6 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	(*currentLine).InlineBoxes = append((*currentLine).InlineBoxes, inlineBox)
 	(*currentLine).Width += totalWidth
 
-	// Update line metrics
 	if inlineBox.Ascent > (*currentLine).Ascent {
 		(*currentLine).Ascent = inlineBox.Ascent
 	}
@@ -490,7 +452,6 @@ func (ile *InlineLayoutEngine) addTextPiece(
 	}
 }
 
-// addTextWithCharacterBreaking breaks very long words at character boundaries
 func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 	text string,
 	node *RenderNode,
@@ -502,7 +463,6 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 	letterSpacing float32,
 ) {
 	if letterSpacing != 0 {
-		// For letter-spacing, we must emit each character separately
 		for _, ch := range text {
 			charStr := string(ch)
 			metrics := ile.fontMetrics.MeasureText(charStr, fontSize, style, letterSpacing)
@@ -542,19 +502,15 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 		return
 	}
 
-	// Normal text accumulation
 	currentPiece := strings.Builder{}
 	for _, ch := range text {
 		charStr := string(ch)
 		piece := currentPiece.String()
 
-		// Measure piece + this char
 		fullMetrics := ile.fontMetrics.MeasureText(piece+charStr, fontSize, style, 0)
 
 		if fullMetrics.Width > (*currentLine).AvailableWidth {
-			// Doesn't fit on this line
 			if currentPiece.Len() > 0 {
-				// Emit current piece
 				p := currentPiece.String()
 				m := ile.fontMetrics.MeasureText(p, fontSize, style, 0)
 				box := &InlineBox{
@@ -580,7 +536,6 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 				currentPiece.Reset()
 			}
 
-			// Wrap if line is not empty OR if even this single char doesn't fit on empty line
 			if (*currentLine).Width > 0 || ile.fontMetrics.MeasureText(charStr, fontSize, style, 0).Width > (*currentLine).AvailableWidth {
 				ile.finalizeLine(*currentLine)
 				*lines = append(*lines, *currentLine)
@@ -594,7 +549,6 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 		currentPiece.WriteRune(ch)
 	}
 
-	// Final piece
 	if currentPiece.Len() > 0 {
 		p := currentPiece.String()
 		m := ile.fontMetrics.MeasureText(p, fontSize, style, 0)
@@ -621,23 +575,17 @@ func (ile *InlineLayoutEngine) addTextWithCharacterBreaking(
 	}
 }
 
-// addInlineBlockToLines adds an inline-block element to lines
 func (ile *InlineLayoutEngine) addInlineBlockToLines(
 	node *RenderNode,
 	currentLine **LineBox,
 	lines *[]*LineBox,
 	lineX, availableWidth float32,
 ) {
-	// For inline-block, we need to compute its layout first
-	// This is a placeholder - actual implementation would use the layout engine
-
-	// Determine size from styling, attributes, or intrinsic image size
 	fontSize := ile.getFontSizeForNode(node)
 	var width, height float32
 	width = -1
 	height = -1
 
-	// 1. Check computed styles
 	if node.ComputedStyle != nil {
 		if node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto" {
 			width = parseLengthWithViewport(node.ComputedStyle.Width, fontSize, availableWidth, availableWidth, availableWidth)
@@ -647,7 +595,6 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		}
 	}
 
-	// 2. Check HTML attributes
 	if width < 0 {
 		if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
 			width = parseLength(wAttr, fontSize)
@@ -659,7 +606,6 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		}
 	}
 
-	// 3. Fallback to image intrinsic size if loaded
 	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		if width < 0 {
 			width = float32(node.ImageData.Width)
@@ -669,17 +615,14 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		}
 	}
 
-	// 4. Default fallbacks
 	if width < 0 {
-		width = fontSize * 5 // Placeholder width
+		width = fontSize * 5
 	}
 	if height < 0 {
-		height = fontSize * 1.5 // Placeholder height
+		height = fontSize * 1.5
 	}
 
-	// Check if inline-block fits on current line
 	if (*currentLine).Width+width > (*currentLine).AvailableWidth && len((*currentLine).InlineBoxes) > 0 {
-		// Doesn't fit - start new line
 		ile.finalizeLine(*currentLine)
 		*lines = append(*lines, *currentLine)
 
@@ -690,7 +633,6 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		*currentLine = ile.newLineBox(newLineX, nextY, newWidth, textAlign, lineHeight)
 	}
 
-	// Create inline box for inline-block
 	inlineBox := &InlineBox{
 		NodeID:        node.ID,
 		X:             (*currentLine).Width,
@@ -707,7 +649,6 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 	(*currentLine).InlineBoxes = append((*currentLine).InlineBoxes, inlineBox)
 	(*currentLine).Width += width
 
-	// Update line metrics
 	if inlineBox.Ascent > (*currentLine).Ascent {
 		(*currentLine).Ascent = inlineBox.Ascent
 	}
@@ -716,7 +657,6 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 	}
 }
 
-// finalizeLine finalizes a line box by computing final positions and height
 func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 	if len(line.InlineBoxes) == 0 {
 		return
@@ -724,7 +664,6 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 
 	// Coalesce inline boxes with same NodeID and 0 letter-spacing on same line
 	if len(line.InlineBoxes) > 1 {
-		// log.Printf("DEBUG: finalizeLine before coalescing: %d boxes", len(line.InlineBoxes))
 		coalesced := make([]*InlineBox, 0, len(line.InlineBoxes))
 		for _, box := range line.InlineBoxes {
 			if len(coalesced) > 0 {
@@ -742,7 +681,6 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 			coalesced = append(coalesced, box)
 		}
 		line.InlineBoxes = coalesced
-		// log.Printf("DEBUG: finalizeLine after coalescing: %d boxes", len(line.InlineBoxes))
 	}
 
 	// Guard: ensure line ascent/descent reflect the tallest inline box before computing offsets.
@@ -756,17 +694,14 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 		}
 	}
 
-	// Set line height based on maximum ascent and descent
 	lineHeight := line.Ascent + line.Descent
 
-	// Also consider the maximum inline box height (includes leading/line-height)
 	for _, box := range line.InlineBoxes {
 		if box.Height > lineHeight {
 			lineHeight = box.Height
 		}
 	}
 
-	// If we have a preferred line height, use it if it's larger or if explicitly set
 	if line.LineHeight > 0 {
 		if line.LineHeight > lineHeight {
 			line.Height = line.LineHeight
@@ -806,7 +741,6 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 		box.Y = boxY
 	}
 
-	// Horizontal alignment
 	remainingWidth := line.AvailableWidth - line.Width
 	if remainingWidth > 0 {
 		var startX float32
@@ -827,7 +761,6 @@ func (ile *InlineLayoutEngine) finalizeLine(line *LineBox) {
 	}
 }
 
-// newLineBox creates a new line box
 func (ile *InlineLayoutEngine) newLineBox(x, y, availableWidth float32, textAlign string, lineHeight float32) *LineBox {
 	return &LineBox{
 		X:              x,
@@ -843,27 +776,21 @@ func (ile *InlineLayoutEngine) newLineBox(x, y, availableWidth float32, textAlig
 	}
 }
 
-// processWhiteSpace processes white space according to the mode
 func (ile *InlineLayoutEngine) processWhiteSpace(text string, mode WhiteSpaceMode) string {
 	switch mode {
 	case WhiteSpaceNormal, WhiteSpaceNoWrap:
-		// Collapse white space: convert sequences of white space to single space
 		return ile.collapseWhiteSpace(text)
 	case WhiteSpacePre:
-		// Preserve all white space
 		return text
 	case WhiteSpacePreWrap:
-		// Preserve white space but allow wrapping
 		return text
 	case WhiteSpacePreLine:
-		// Collapse white space except newlines
 		return ile.collapseWhiteSpacePreserveNewlines(text)
 	default:
 		return ile.collapseWhiteSpace(text)
 	}
 }
 
-// collapseWhiteSpace collapses sequences of white space into single spaces
 func (ile *InlineLayoutEngine) collapseWhiteSpace(text string) string {
 	var result strings.Builder
 	prevWasSpace := false
@@ -883,7 +810,6 @@ func (ile *InlineLayoutEngine) collapseWhiteSpace(text string) string {
 	return strings.TrimSpace(result.String())
 }
 
-// collapseWhiteSpacePreserveNewlines collapses white space but preserves newlines
 func (ile *InlineLayoutEngine) collapseWhiteSpacePreserveNewlines(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
@@ -892,9 +818,7 @@ func (ile *InlineLayoutEngine) collapseWhiteSpacePreserveNewlines(text string) s
 	return strings.Join(lines, "\n")
 }
 
-// splitTextForWrapping splits text into wrappable pieces
 func (ile *InlineLayoutEngine) splitTextForWrapping(text string, mode WhiteSpaceMode) []string {
-	// For normal and pre-line modes, split on white space
 	words := make([]string, 0)
 	currentWord := strings.Builder{}
 
@@ -916,25 +840,20 @@ func (ile *InlineLayoutEngine) splitTextForWrapping(text string, mode WhiteSpace
 	return words
 }
 
-// getFontSizeForNode returns the font size for a node
 func (ile *InlineLayoutEngine) getFontSizeForNode(node *RenderNode) float32 {
 	if node == nil {
 		return ile.defaultFontSize
 	}
 
-	// Priority 1: Computed style from CSS or inline style attribute
 	if node.ComputedStyle != nil && node.ComputedStyle.FontSize > 0 {
 		return node.ComputedStyle.FontSize
 	}
 
-	// Priority 2: Tag-based default size
 	if node.Type == NodeTypeElement {
 		return ile.fontMetrics.GetFontSize(node.TagName)
 	}
 
-	// Priority 3: Inherit from parent
 	if node.Parent != nil {
-		// Handle sub/sup font size reduction relative to grandparent
 		if node.Parent.TagName == "sub" || node.Parent.TagName == "sup" {
 			base := ile.getFontSizeForNode(node.Parent.Parent)
 			return base * 0.83
@@ -945,7 +864,6 @@ func (ile *InlineLayoutEngine) getFontSizeForNode(node *RenderNode) float32 {
 	return ile.defaultFontSize
 }
 
-// applyTextTransform applies text-transform property logic
 func (ile *InlineLayoutEngine) applyTextTransform(text string, transform string) string {
 	switch transform {
 	case "uppercase":
@@ -959,11 +877,10 @@ func (ile *InlineLayoutEngine) applyTextTransform(text string, transform string)
 	}
 }
 
-// isInlineBlock checks if a node should be treated as inline-block
 func (ile *InlineLayoutEngine) isInlineBlock(node *RenderNode) bool {
 	if node.ComputedStyle != nil {
 		disp := node.ComputedStyle.Display
-		if disp == "inline-block" || disp == "inline-flex" || disp == "inline-grid" {
+		if disp == css.DisplayAtomInlineBlock {
 			return true
 		}
 	}

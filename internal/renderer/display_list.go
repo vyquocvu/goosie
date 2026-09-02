@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"sort"
 	"strings"
+
+	"github.com/vyquocvu/goosie/internal/css"
 )
 
 // PaintCommandType represents the type of paint command
@@ -309,12 +311,12 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 	}
 
 	// Skip elements with display:none (already excluded from layout tree, but guard here too)
-	if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Display == "none" {
+	if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Display == css.DisplayAtomNone {
 		return
 	}
 
 	// For visibility:hidden, skip paint commands but still process children (they maintain space in layout)
-	isHidden := renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == "hidden"
+	isHidden := renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == css.VisibilityAtomHidden
 
 	// Paint background color if present (drawn behind borders and content)
 	if !isHidden && renderNode.Type == NodeTypeElement && layoutBox.BackgroundColor != nil && layoutBox.BackgroundColor != color.Transparent {
@@ -501,8 +503,8 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 						color:     textColor,
 						bold:      style.Bold,
 						italic:    style.Italic,
-						underline: inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "underline"),
-						strike:    inlineRenderNode.ComputedStyle != nil && strings.Contains(inlineRenderNode.ComputedStyle.TextDecoration, "line-through"),
+						underline: inlineRenderNode.ComputedStyle != nil && inlineRenderNode.ComputedStyle.TextDecoration == css.TextDecorationAtomUnderline,
+						strike:    inlineRenderNode.ComputedStyle != nil && inlineRenderNode.ComputedStyle.TextDecoration == css.TextDecorationAtomLineThrough,
 					}
 					currentAccum.text.WriteString(inlineBox.Text)
 				}
@@ -531,7 +533,7 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 
 	// Check for overflow property
 	isOverflow := false
-	if renderNode.ComputedStyle != nil && (renderNode.ComputedStyle.Overflow == "hidden" || renderNode.ComputedStyle.Overflow == "scroll" || renderNode.ComputedStyle.Overflow == "auto") {
+	if renderNode.ComputedStyle != nil && (renderNode.ComputedStyle.Overflow == css.OverflowAtomHidden || renderNode.ComputedStyle.Overflow == css.OverflowAtomScroll || renderNode.ComputedStyle.Overflow == css.OverflowAtomAuto) {
 		isOverflow = true
 		// Push clip command
 		dlb.addPushClipCommand(layoutBox, renderNode, displayList)
@@ -603,7 +605,7 @@ func (dlb *DisplayListBuilder) addPushClipCommand(layoutBox *LayoutBox, renderNo
 		NodeID:       layoutBox.NodeID,
 		Node:         renderNode,
 		Box:          layoutBox.Box,
-		ClipOverflow: renderNode.ComputedStyle.Overflow,
+		ClipOverflow: renderNode.ComputedStyle.Overflow.String(),
 	}
 	displayList.AddCommand(cmd)
 }
@@ -651,8 +653,8 @@ func (dlb *DisplayListBuilder) addTextCommand(layoutBox *LayoutBox, renderNode *
 		Color:         textColor,
 		Bold:          style.Bold,
 		Italic:        style.Italic,
-		Underline:     renderNode.ComputedStyle != nil && strings.Contains(renderNode.ComputedStyle.TextDecoration, "underline"),
-		Strikethrough: renderNode.ComputedStyle != nil && strings.Contains(renderNode.ComputedStyle.TextDecoration, "line-through"),
+		Underline:     renderNode.ComputedStyle != nil && renderNode.ComputedStyle.TextDecoration == css.TextDecorationAtomUnderline,
+		Strikethrough: renderNode.ComputedStyle != nil && renderNode.ComputedStyle.TextDecoration == css.TextDecorationAtomLineThrough,
 	}
 
 	displayList.AddCommand(cmd)
@@ -684,7 +686,7 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 	// For image elements, add a rectangle placeholder and text
 	if renderNode.TagName == "img" {
 		// Check visibility
-		if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == "hidden" {
+		if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == css.VisibilityAtomHidden {
 			// Add transparent placeholder to maintain layout space
 			cmd := &PaintCommand{
 				Type:      PaintRect,

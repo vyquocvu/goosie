@@ -148,16 +148,27 @@ type Browser struct {
 	deps             BrowserDependencies
 	shortcuts        *ShortcutRegistry
 	headless         bool
+
+	// UseRasterCanvas enables the experimental single-surface raster
+	// canvas (M1.3) instead of the tree-of-widgets viewport. When true,
+	// new tabs display rendered pixels through one InteractiveRasterCanvas
+	// widget; Fyne only acts as the window/display layer and Goosie owns
+	// 100% of the graphics pipeline. Flag-gated for A/B comparison.
+	UseRasterCanvas bool
 }
 
 // windowResizeWatcher wraps content and fires a callback when its size
 // changes (e.g. on window resize). It sits at the top of the content
 // hierarchy to detect size changes propagated by Fyne's layout system.
+// Resize events are debounced (100ms) to avoid excessive re-renders during
+// continuous window resizing.
 type windowResizeWatcher struct {
 	widget.BaseWidget
-	content  fyne.CanvasObject
-	lastSize fyne.Size
-	onResize func(fyne.Size)
+	content     fyne.CanvasObject
+	lastSize    fyne.Size
+	onResize    func(fyne.Size)
+	resizeTimer *time.Timer
+	resizeMu    sync.Mutex
 }
 
 func newWindowResizeWatcher(content fyne.CanvasObject, onResize func(fyne.Size)) *windowResizeWatcher {
@@ -177,7 +188,16 @@ func (w *windowResizeWatcher) Resize(size fyne.Size) {
 	w.BaseWidget.Resize(size)
 	if w.lastSize != size && w.onResize != nil {
 		w.lastSize = size
-		w.onResize(size)
+
+		w.resizeMu.Lock()
+		if w.resizeTimer != nil {
+			w.resizeTimer.Stop()
+		}
+
+		w.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
+			w.onResize(size)
+		})
+		w.resizeMu.Unlock()
 	}
 }
 
@@ -257,6 +277,12 @@ type Tab struct {
 	// via the runtime's enqueueTask hook. Created by SetJSRuntime and
 	// closed on navigation/tab close.
 	jsSession *js.Session
+
+	// rasterCanvas is the experimental single-surface raster widget
+	// (M1.3). Non-nil only when Browser.UseRasterCanvas is true. When
+	// active, it replaces contentScroll as the viewport and handles all
+	// pointer/keyboard interaction directly.
+	rasterCanvas *InteractiveRasterCanvas
 }
 
 // window interface to allow testing
@@ -862,6 +888,27 @@ func (b *Browser) newTabInternal() *Tab {
 		htmlRenderer:  htmlRenderer,
 		state:         tabState,
 		browser:       b,
+	}
+
+	// M1.3: When the raster canvas flag is enabled, create an
+	// InteractiveRasterCanvas and wire it to the renderer. The raster
+	// canvas replaces the tree-of-widgets viewport with a single pixel
+	// surface that Goosie fully controls.
+	if b.UseRasterCanvas && htmlRenderer != nil {
+		rc := NewInteractiveRasterCanvas(htmlRenderer)
+		rc.SetNavigateCallback(func(url string) {
+			if b.onNavigate != nil {
+				b.onNavigate(url)
+			}
+		})
+		rc.SetInspectCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox) {
+			tab.handleInspect(node, layout)
+		})
+		rc.SetContextMenuCallback(func(node *renderer.RenderNode, layout *renderer.LayoutBox, pos fyne.Position) {
+			tab.handleContextMenu(node, layout, pos)
+		})
+		tab.rasterCanvas = rc
+		tab.content = rc
 	}
 	deviceFPS := GetDeviceScreenRefreshRate()
 	if deviceFPS <= 0 {

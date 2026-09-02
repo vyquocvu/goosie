@@ -96,6 +96,57 @@ func TestExecuteScriptQueue_AsyncScriptsNotInQueue(t *testing.T) {
 	}
 }
 
+// TestExecuteScriptQueue_CurrentScript — while a classic or defer
+// script runs, document.currentScript reflects its element's
+// attributes (Plausible-style analytics reads data-domain/src from
+// it). External scripts see the resolved src; after execution the
+// value is null again, per the HTML spec.
+func TestExecuteScriptQueue_CurrentScript(t *testing.T) {
+	rt := js.NewRuntime()
+	doc, _ := ghtml.Parse(strings.NewReader(
+		`<html><head><script src="analytics.js" defer data-domain="example.com"></script></head>
+<body><script>globalThis.M5_CS_CLASSIC = document.currentScript === null ? 'null' : 'set';</script></body></html>`))
+
+	// Positions mirror the doc walk: defer script in head = 0,
+	// inline script in body = 1 (html/head/body are skipped).
+	results := []documentloader.ScriptResult{
+		{Inline: false, Mode: documentloader.ScriptModeDefer, Position: 0,
+			URL: "https://example.com/analytics.js",
+			Source: []byte(`
+globalThis.M5_CS_DOMAIN = document.currentScript ? document.currentScript.getAttribute("data-domain") : 'null';
+globalThis.M5_CS_SRC = document.currentScript ? document.currentScript.src : 'null';
+globalThis.M5_CS_ENDPOINT = (function() {
+  var i = document.currentScript;
+  return i.getAttribute("data-api") || new URL(i.src).origin + "/api/event";
+})();
+`)},
+		{Inline: true, Mode: documentloader.ScriptModeClassic, Position: 1},
+	}
+
+	executeScriptQueue(rt, "https://example.com/", nil, doc, results)
+
+	classic, _ := rt.RunScript(`globalThis.M5_CS_CLASSIC`)
+	if classic.String() != "set" {
+		t.Errorf("classic currentScript = %q, want 'set'", classic.String())
+	}
+	domain, _ := rt.RunScript(`globalThis.M5_CS_DOMAIN`)
+	if domain.String() != "example.com" {
+		t.Errorf("data-domain = %q, want 'example.com'", domain.String())
+	}
+	src, _ := rt.RunScript(`globalThis.M5_CS_SRC`)
+	if src.String() != "https://example.com/analytics.js" {
+		t.Errorf("src = %q, want resolved URL", src.String())
+	}
+	endpoint, _ := rt.RunScript(`globalThis.M5_CS_ENDPOINT`)
+	if endpoint.String() != "https://example.com/api/event" {
+		t.Errorf("endpoint = %q, want 'https://example.com/api/event'", endpoint.String())
+	}
+	after, err := rt.RunScript(`document.currentScript === null`)
+	if err != nil || after == nil || !after.ToBoolean() {
+		t.Errorf("currentScript after queue = %v, want null", after)
+	}
+}
+
 // TestFireDOMContentLoaded — the dispatch helper runs without error
 // and is idempotent.
 func TestFireDOMContentLoaded(t *testing.T) {

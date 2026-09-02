@@ -3,6 +3,8 @@ package renderer
 import (
 	"strconv"
 	"strings"
+
+	"github.com/vyquocvu/goosie/internal/css"
 )
 
 // GridLayoutEngine handles grid layout calculations
@@ -66,7 +68,7 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 	}
 
 	for _, child := range container.Children {
-		if child.ComputedStyle != nil && child.ComputedStyle.Display == "none" {
+		if child.ComputedStyle != nil && child.ComputedStyle.Display == css.DisplayAtomNone {
 			continue
 		}
 		if child.Type == NodeTypeText && strings.TrimSpace(child.Text) == "" {

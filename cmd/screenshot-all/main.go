@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"github.com/vyquocvu/goosie/internal/renderer"
@@ -82,19 +83,10 @@ func collectHTMLFiles(root string) []string {
 		if d.IsDir() {
 			return nil
 		}
-		if filepath.Ext(path) == ".html" && !contains(files, path) {
+		if filepath.Ext(path) == ".html" && !slices.Contains(files, path) {
 			files = append(files, path)
 		}
 		return nil
 	})
 	return files
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

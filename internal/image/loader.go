@@ -176,7 +176,7 @@ func (l *ImageLoader) loadAsync(source string, wg *sync.WaitGroup) {
 			Error: err,
 		}
 	} else {
-		log.Printf("Successfully loaded image %s", source)
+		// log.Printf("Successfully loaded image %s", source)
 	}
 
 	// Cache the result

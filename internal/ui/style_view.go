@@ -126,6 +126,17 @@ func cssFieldName(goName string) string {
 }
 
 func formatValue(fv reflect.Value) string {
+	// Check if the value implements fmt.Stringer (covers atom types).
+	// Zero-valued atoms (underlying uint8 == 0) are defaults and are
+	// suppressed to keep the inspector concise.
+	if fv.CanInterface() {
+		if s, ok := fv.Interface().(fmt.Stringer); ok {
+			if fv.Kind() >= reflect.Uint && fv.Kind() <= reflect.Uint64 && fv.Uint() == 0 {
+				return ""
+			}
+			return s.String()
+		}
+	}
 	switch fv.Kind() {
 	case reflect.String:
 		s := fv.String()

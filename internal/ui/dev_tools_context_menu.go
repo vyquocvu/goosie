@@ -333,16 +333,16 @@ func extractTextInto(node *renderer.RenderNode, b *strings.Builder) {
 	}
 }
 
-// escapeAttr replaces characters that would otherwise break out of a
-// double-quoted HTML attribute value. We keep this minimal — quote,
-// ampersand and the most common control characters — which is more
-// than enough for clipboard purposes.
+// attrReplacer escapes characters that would break out of a double-quoted
+// HTML attribute value. Package-level for reuse — strings.Replacer is safe
+// for concurrent use.
+var attrReplacer = strings.NewReplacer(
+	`&`, "&amp;",
+	`"`, "&quot;",
+	`<`, "&lt;",
+	`>`, "&gt;",
+)
+
 func escapeAttr(s string) string {
-	replacer := strings.NewReplacer(
-		`&`, "&amp;",
-		`"`, "&quot;",
-		`<`, "&lt;",
-		`>`, "&gt;",
-	)
-	return replacer.Replace(s)
+	return attrReplacer.Replace(s)
 }
