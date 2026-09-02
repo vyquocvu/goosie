@@ -130,7 +130,7 @@ The Fyne adapter (`internal/renderer/fyne_adapter.go`) receives `*image.RGBA` bu
 - The raster package exports `Backend` interface, frame types, and factory — but not Fyne imports.
 - The CPU backend imports only `image`, `image/color`, `image/draw`, `golang.org/x/image/font`, `golang.org/x/image/math/fixed`, and `golang.org/x/image/bmp` (for image decoding).
 - The CoreGraphics backend lives in platform-specific files (`cg_backend_darwin.go`, `cg_backend_other.go`) with build-tagged empty stubs on non-macOS platforms.
-- A CI gate (`go vet` on linux) catches accidental Fyne imports in core packages.
+- A CI gate (`go vet ./...` on linux) catches accidental Fyne imports in core packages.
 
 ---
 
@@ -191,8 +191,7 @@ The CPU backend is competitive on small geometries and complex borders but loses
 ## Related
 
 - `website/docs/backend-integration.md`
-- `internal/renderer/frame/raster/backend.go` — `Backend` interface
-- `internal/renderer/frame/raster/cpu_backend.go` — CPU implementation
+- `internal/renderer/frame/raster/cpu_backend.go` — `Backend` interface and CPU implementation
 - `internal/renderer/frame/raster/cg_backend_darwin.go` — CoreGraphics implementation
 - `internal/renderer/frame/raster/backend_type.go` — factory and selection logic
 - `internal/renderer/frame/frame_types.go` — platform-neutral frame types

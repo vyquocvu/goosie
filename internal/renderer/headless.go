@@ -158,10 +158,8 @@ func LayoutHTML(htmlContent string, width, height float32) (*RenderNode, *Layout
 	if renderTree == nil {
 		return nil, nil, nil
 	}
-	if stylesheet != nil && len(stylesheet.Rules) > 0 {
-		styleManager := NewStyleManagerWithViewport(stylesheet, width, height)
-		styleManager.ApplyStyles(renderTree)
-	}
+	styleManager := NewStyleManagerWithViewport(stylesheet, width, height)
+	styleManager.ApplyStyles(renderTree)
 	layoutEngine := getLayoutEngine(width, height)
 	defer putLayoutEngine(layoutEngine)
 	return renderTree, layoutEngine.ComputeLayout(renderTree), nil

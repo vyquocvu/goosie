@@ -1,14 +1,14 @@
 # ADR 0004: MCP Uses a UI-Independent Browser-Control Boundary
 
-**Status:** Proposed
+**Status:** Accepted (Implemented)
 
-**Decision date:** 2026-07-15
+**Decision date:** 2026-07-15 (stdio) / 2026-08 (HTTP transport)
 
 **Deciders:** Goosie maintainers
 
 ## Context
 
-Goosie has reusable navigation, network, DOM, JavaScript, and raster packages, but the complete page-load workflow is currently coordinated by the GUI command and `internal/ui`. MCP requires a long-lived, cancellable, multi-context automation service. Directly wrapping UI methods would couple protocol behavior to Fyne, UI-thread scheduling, active-tab globals, and renderer pointers.
+Goosie has reusable navigation, network, DOM, JavaScript, and raster packages, but the complete page-load workflow was originally coordinated by the GUI command and `internal/ui`. MCP requires a long-lived, cancellable, multi-context automation service. Directly wrapping UI methods would couple protocol behavior to Fyne, UI-thread scheduling, active-tab globals, and renderer pointers.
 
 MCP also has an independent lifecycle and transport model. Its JSON-RPC session must not be confused with Goosie's navigation session or existing child-renderer IPC protocol.
 
@@ -19,9 +19,9 @@ Introduce two boundaries:
 1. `internal/browsercontrol`: protocol-neutral orchestration and stable browser automation types.
 2. `internal/mcpserver`: a thin adapter from MCP schemas/handlers to browser-control.
 
-Add `cmd/mcp-server` as the stdio composition root. It owns configuration, process lifecycle, and logs but no browser behavior.
+Add `cmd/mcp-server` as the composition root. It owns configuration, process lifecycle, and logs but no browser behavior.
 
-The first transport is stdio. Streamable HTTP is deferred behind a Go 1.25+, SDK, authorization, and security review gate.
+Both stdio (default) and Streamable HTTP transports are supported. HTTP mode is enabled via `--http` with configurable port (`--port`), bind address (`--bind`, loopback by default), and token authentication (`--auth`, `--auth-token`).
 
 ## Detailed rules
 
@@ -53,7 +53,7 @@ Rejected. Use the official Go SDK for lifecycle, schema, transport, and compatib
 
 ### Start with Streamable HTTP
 
-Rejected for v1. It adds Origin/Host validation, authentication, secure session management, proxy, SSRF, and operational requirements before browser-control is stable. It also conflicts with the present Go 1.24.9 toolchain if using current reviewed SDK releases.
+Initially deferred for v1 to ensure browser-control boundary stability and stdio reliability. Streamable HTTP was subsequently implemented with strict loopback binding (`--bind 127.0.0.1`), port allocation (`--port`), bearer token authorization (`--auth`, `--auth-token`), and DNS rebinding protections.
 
 ## Consequences
 

@@ -1,12 +1,15 @@
 # Stream E: GUI Layer Optimization
 
+## Status
+**IMPLEMENTED**
+
 ## Goal
 Reduce UI thread blocking and unnecessary widget rebuilds in the Fyne GUI layer.
 
 ## Scope
 - `internal/ui/browser.go` — main browser UI
 - `internal/ui/dev_tools_context_menu.go` — escapeAttr
-- `internal/ui/panels/` — devtools panels
+- `internal/ui/` — devtools panels and views (`console.go`, `style_view.go`, `inspect_panel.go`)
 
 ## Constraints
 - Zero behavior change (same UI, same functionality)

@@ -1,5 +1,8 @@
 # Stream D: Scroll/Interaction Optimization
 
+## Status
+**IMPLEMENTED**
+
 ## Goal
 Reduce scroll jank and improve interaction responsiveness by optimizing the render pipeline's viewport culling and paint path.
 

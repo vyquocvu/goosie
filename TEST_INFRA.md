@@ -28,7 +28,7 @@
 - **Unit & Conformance Checks**:
   1. `go vet ./...` (0 warnings/errors)
   2. `go test ./...` across all packages
-  3. `go test ./internal/renderer/layoutgolden/`
+  3. `go test ./test/internal/renderer/layoutgolden/`
   4. `go run ./cmd/perf-review -urls="" -iterations=3`
 
 ## Coverage Thresholds

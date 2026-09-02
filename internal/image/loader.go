@@ -461,6 +461,9 @@ func (l *ImageLoader) loadFromURL(url string) (*ImageData, error) {
 
 // loadFromFile loads an image from a local file
 func (l *ImageLoader) loadFromFile(path string) (*ImageData, error) {
+	if strings.HasPrefix(path, "file://") {
+		path = strings.TrimPrefix(path, "file://")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open image file: %w", err)

@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `internal/net/service.go:381-470`
 
-- [ ] **Step 1: Add redirect counter to context**
+- [x] **Step 1: Add redirect counter to context**
 
 Add a context key type and helper functions to store redirect count in request context:
 
@@ -42,7 +42,7 @@ func setRedirectCount(ctx context.Context, count int) {
 }
 ```
 
-- [ ] **Step 2: Configure CheckRedirect on service client**
+- [x] **Step 2: Configure CheckRedirect on service client**
 
 In `NewService`, after creating the client, set a CheckRedirect that reads/writes the counter from context:
 
@@ -58,7 +58,7 @@ client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 }
 ```
 
-- [ ] **Step 3: Simplify doRequest**
+- [x] **Step 3: Simplify doRequest**
 
 Remove the per-request client allocation. Use `s.client` directly. Initialize the redirect counter in the request context before calling `s.client.Do`:
 
@@ -78,19 +78,19 @@ func (s *Service) doRequest(req *http.Request) (*http.Response, int, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
-go test ./internal/net/... -v
+go test ./test/internal/net/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/net/service.go
-git commit -m "perf(net): eliminate per-request http.Client allocation"
+git commit -m "refactor(net): eliminate per-request http.Client allocation in doRequest"
 ```
 
 ---
@@ -100,7 +100,7 @@ git commit -m "perf(net): eliminate per-request http.Client allocation"
 **Files:**
 - Modify: `internal/net/service.go:259-355`
 
-- [ ] **Step 1: Make FetchWithContext call FetchWithMeta**
+- [x] **Step 1: Make FetchWithContext call FetchWithMeta**
 
 Replace the entire `FetchWithContext` implementation with a thin wrapper:
 
@@ -111,19 +111,19 @@ func (s *Service) FetchWithContext(ctx context.Context, rawURL string, onProgres
 }
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 ```bash
-go test ./internal/net/... -v
+go test ./test/internal/net/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/net/service.go
-git commit -m "refactor(net): deduplicate FetchWithContext and FetchWithMeta"
+git commit -m "refactor(net): deduplicate FetchWithContext by delegating to FetchWithMeta"
 ```
 
 ---
@@ -133,7 +133,7 @@ git commit -m "refactor(net): deduplicate FetchWithContext and FetchWithMeta"
 **Files:**
 - Modify: `internal/net/cookies.go:26-142`
 
-- [ ] **Step 1: Add domain index to CookieJar**
+- [x] **Step 1: Add domain index to CookieJar**
 
 Add a `domainIndex` field to `CookieJar`:
 
@@ -153,7 +153,7 @@ func NewCookieJar() *CookieJar {
 }
 ```
 
-- [ ] **Step 2: Update SetCookies to maintain index**
+- [x] **Step 2: Update SetCookies to maintain index**
 
 After adding/replacing a cookie, rebuild the domain index for that domain:
 
@@ -175,7 +175,7 @@ func (j *CookieJar) rebuildDomainIndex() {
 }
 ```
 
-- [ ] **Step 3: Update CookieRecord to use index**
+- [x] **Step 3: Update CookieRecord to use index**
 
 In `CookieRecord(u *url.URL)`, look up by domain first:
 
@@ -219,19 +219,19 @@ func (j *CookieJar) CookieRecord(u *url.URL) []CookieRecord {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
-go test ./internal/net/... -v
+go test ./test/internal/net/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/net/cookies.go
-git commit -m "perf(net): add domain index to cookie jar"
+git commit -m "feat(net): add domain index to CookieJar for O(1) domain lookup"
 ```
 
 ---
@@ -242,7 +242,7 @@ git commit -m "perf(net): add domain index to cookie jar"
 - Modify: `internal/net/cache.go:144-255`
 - Modify: `internal/net/service.go:165,232`
 
-- [ ] **Step 1: Change cache.Get to return []byte**
+- [x] **Step 1: Change cache.Get to return []byte**
 
 Update `HTTPCache.Get` signature and implementation:
 
@@ -262,7 +262,7 @@ func (c *HTTPCache) Get(rawURL string) ([]byte, CacheEntry, bool) {
 }
 ```
 
-- [ ] **Step 2: Change cache.Put to accept []byte**
+- [x] **Step 2: Change cache.Put to accept []byte**
 
 Update `HTTPCache.Put` signature:
 
@@ -282,7 +282,7 @@ func (c *HTTPCache) Put(rawURL string, resp *http.Response, body []byte) {
 }
 ```
 
-- [ ] **Step 3: Update service.go to convert at boundaries**
+- [x] **Step 3: Update service.go to convert at boundaries**
 
 In `FetchWithMeta`, convert cache result to string:
 
@@ -301,7 +301,7 @@ if !hasCookies && responseMatchesOriginalURL(rawURL, resp) {
 }
 ```
 
-- [ ] **Step 4: Update CachedBody**
+- [x] **Step 4: Update CachedBody**
 
 ```go
 func (s *Service) CachedBody(rawURL string) (string, bool) {
@@ -316,55 +316,56 @@ func (s *Service) CachedBody(rawURL string) (string, bool) {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
-go test ./internal/net/... -v
+go test ./test/internal/net/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/net/cache.go internal/net/service.go
-git commit -m "perf(net): cache body as []byte to avoid string conversions"
+git commit -m "refactor(net): cache body as []byte instead of string (C4)"
 ```
 
 ---
 
 ## Task C5: Final verification
 
-- [ ] **Step 1: Run all net tests**
+- [x] **Step 1: Run all net tests**
 
 ```bash
-go test ./internal/net/... -v
+go test ./test/internal/net/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
-go test ./... -short
+go test ./...
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 3: Verify pixel hashes unchanged**
+- [x] **Step 3: Verify pixel hashes unchanged**
 
 ```bash
-go test -tags=e2e ./test/perf -run TestPixelHashManifest
+go test -v ./test/perf -run TestPixelHashManifest
 ```
 
 Expected: Pass (network layer doesn't affect rendering)
 
-- [ ] **Step 4: Benchmark comparison (optional)**
+- [x] **Step 4: Benchmark comparison (optional)**
 
 If benchmarks exist, run before/after comparison:
 
 ```bash
-go test -bench=BenchmarkFetch ./internal/net/... -benchtime=1s
+go test -bench=BenchmarkFetch ./test/internal/net/... -benchtime=1s
 ```
 
 Expected: No regression, potential improvement from reduced allocations
+

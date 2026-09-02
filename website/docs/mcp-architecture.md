@@ -1,6 +1,6 @@
 # MCP Architecture and Browser-Control Boundary
 
-**Status:** Proposed
+**Status:** Implemented
 
 **Related ADR:** [ADR 0004](adr/0004-mcp-browser-control-boundary.md)
 
@@ -8,11 +8,11 @@
 
 ```text
 MCP client
-   │ JSON-RPC 2.0 (stdio first)
+   │ JSON-RPC 2.0 (stdio or Streamable HTTP)
    ▼
-cmd/mcp-server                 composition, flags, signals, stderr logging
+cmd/mcp-server                 composition, flags (--http, --auth), signals, stderr logging
    ▼
-internal/mcpserver             schemas, MCP handlers, result/error mapping
+internal/mcpserver             schemas, MCP handlers, HTTP/stdio transports, result/error mapping
    ▼
 internal/browsercontrol        UI-independent browser service and policy
    ├── engine/session          navigation lifecycle and cancellation
@@ -23,7 +23,7 @@ internal/browsercontrol        UI-independent browser service and policy
    └── renderer/frame          loaded-page raster/screenshot
 ```
 
-`internal/mcpserver` depends on `internal/browsercontrol`, never the reverse. Neither package imports `internal/ui`. MCP sessions and Goosie browser contexts are distinct: one MCP connection may own multiple browser contexts, while one browser context owns one active page lifecycle.
+`internal/mcpserver` depends on `internal/browsercontrol`, never the reverse. Neither package imports `internal/ui`. MCP sessions and Goosie browser contexts are distinct: one MCP connection may own multiple browser contexts, while one browser context owns one active page lifecycle. Supported transports include stdio (default) and Streamable HTTP (via `--http`, `--port`, `--auth`, `--auth-token`).
 
 ## 2. Why extraction is necessary
 

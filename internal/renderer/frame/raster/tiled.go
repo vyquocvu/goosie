@@ -312,7 +312,7 @@ func filterAndShiftCommands(cmds []DisplayCmd, yStart, yEnd int) []DisplayCmd {
 		case CmdBorder:
 			// Border rect also needs shifting (already done via Rect)
 		case CmdText:
-			shifted.TextRun.Color = shifted.TextRun.Color // no-op, text run Y is in glyphs
+			// no-op, text run Y is in glyphs
 		case CmdImage:
 			// Image rect already shifted
 		}

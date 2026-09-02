@@ -32,9 +32,9 @@ This series walks through extending the Goosie engine, from adding a simple CSS 
 **Steps:**
 
 1. **Core function.** Add `func (s *Store) Closest(node NodeID, selector string) (NodeID, error)` in `internal/dom/store.go`. Walk ancestors from `node` to root, matching each against the compiled selector.
-2. **Test.** Add `TestClosest` in `internal/dom/store_test.go` covering match, no match, self-match, and stale node cases.
-3. **JS binding.** Add `closest(call)` method on `NodeHandle` in `internal/js/dom_handle.go`. Register it on the prototype.
-4. **Integration test.** Write a JS snippet that calls `element.closest()` and verify the result in a Goja runtime test.
+2. **Test.** Add `TestClosest` in `test/internal/dom/store_test.go` covering match, no match, self-match, and stale node cases.
+3. **JS binding.** Add `closest(selector)` method on `Element.prototype` within `setupDocumentAPI()` in `internal/js/runtime.go`.
+4. **Integration test.** Write a JS snippet that calls `element.closest()` and verify the result in a Goja runtime test in `test/internal/js/`.
 5. **Document.** Add `closest` to `supported-web-platform.md`.
 
 **See also:** `contributing-dom-apis.md`
@@ -49,13 +49,13 @@ This series walks through extending the Goosie engine, from adding a simple CSS 
 
 **Steps:**
 
-1. **Define capability.** Add `CapabilityClipboard` to the capability enum in `internal/js/capability.go`.
+1. **Define capability.** Add `CapabilityClipboard` to the capability definitions in `internal/js/policy.go`.
 2. **Set default.** Add `CapabilityClipboard` to `DefaultSecurePolicy` (denied).
 3. **Implement stub.** If denied, the clipboard API exists but throws a `TypeError` with "permission denied". If allowed, call through to the system clipboard.
 4. **Test.** Verify `navigator.clipboard.writeText("secret")` throws in the default policy. Verify it succeeds after `runtime.SetEnforcer(policy.Allow(CapabilityClipboard))`.
 5. **Audit.** Add to `PermissionDecisions()` output so the developer tools show the denial.
 
-**See also:** `internal/js/capability.go`, `internal/js/policy.go`
+**See also:** `internal/js/policy.go`
 
 ---
 
@@ -78,12 +78,12 @@ This series walks through extending the Goosie engine, from adding a simple CSS 
 
 **Goal:** Add a golden rendering test for a `border-radius` fixture.
 
-**Packages touched:** `internal/renderer/frame/golden`
+**Packages touched:** `internal/renderer/frame/golden`, `test/internal/renderer/frame/golden`
 
 **Steps:**
 
 1. **Create fixture.** Add a function `GoldenBorderRadius() DisplayCommandList` that builds display commands for a rounded rectangle.
-2. **Reference image.** Run `GOOSIE_UPDATE_GOLDEN=1 go test ./internal/renderer/frame/golden/` to generate the reference PNG.
+2. **Reference image.** Run `GOOSIE_UPDATE_GOLDEN=1 go test ./test/internal/renderer/frame/golden/...` to generate the reference PNG.
 3. **Review.** Check the generated image in `testdata/golden/` for correctness.
 4. **Test.** Rename the reference to trigger a deliberate mismatch and verify the test fails.
 5. **CI.** The golden workflow (`golden.yml`) will pick up the new test automatically.

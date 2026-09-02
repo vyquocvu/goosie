@@ -31,7 +31,7 @@ and CPU rasterizer—no embedded browser is involved.
 
 ## Quick start
 
-Goosie requires Go 1.24.9 or newer.
+Goosie requires Go 1.25 or newer.
 
 ```bash
 git clone https://github.com/vyquocvu/goosie.git
@@ -119,10 +119,10 @@ Core code lives under `internal/`; runnable programs live under `cmd/`.
 ## Testing
 
 ```bash
-go test ./... -short                         # quick suite
-go test ./...                                # full local suite
-go test -tags=e2e ./test/e2e                 # end-to-end tests
-go test ./internal/renderer/layoutgolden/    # layout snapshots
+go test ./test/... -short                             # quick unit/subsystem suite
+go test ./...                                         # full local suite
+go test -tags=e2e ./test/e2e                          # end-to-end tests
+go test ./test/internal/renderer/layoutgolden/        # layout snapshots
 ```
 
 The end-to-end suite requires Playwright and network access. Install Playwright with `make install-playwright`.

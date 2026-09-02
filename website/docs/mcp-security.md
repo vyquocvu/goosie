@@ -1,6 +1,6 @@
 # MCP Threat Model and Security Requirements
 
-**Status:** Proposed; every MUST maps to an automated test before release.
+**Status:** Implemented
 
 **Scope:** Goosie MCP server, browser contexts, transports, tools, and returned data.
 
@@ -83,17 +83,18 @@ protected side boundaries:
 - Error messages returned to clients MUST omit stacks, absolute host paths, raw response bodies, and credentials.
 - Screenshot dimensions and encoded size MUST be bounded; encoder cancellation and memory pressure MUST be handled.
 
-## 5. Optional Streamable HTTP requirements
+## 5. Streamable HTTP security requirements
 
-HTTP must remain disabled unless the deployment satisfies the security requirements in this document.
+Streamable HTTP mode is activated via `--http` and enforces strict security controls:
 
-- Bind `127.0.0.1`/`::1` only by default; never `0.0.0.0` implicitly.
+- Binds to `127.0.0.1` by default (via `--bind`); never `0.0.0.0` without explicit operator override.
+- Configurable port via `--port` (default ephemeral port `0` or explicit integer).
+- Bearer token authentication required when `--auth` is set (specified via `--auth-token` or `env:VAR_NAME`).
 - Validate `Origin` on every POST/GET; reject invalid present origins with 403.
 - Validate Host/local-address relationships to prevent DNS rebinding.
-- Configure the SDK's cross-origin/localhost protection explicitly; do not trust a zero-value default because SDK security defaults have changed across releases.
-- Require authentication for any non-stdio use; non-loopback operation requires a separately approved OAuth design.
+- Configure cross-origin/localhost protection explicitly.
 - Bind each MCP session to the authenticated user/client, expire idle sessions, use cryptographic session IDs, and implement cleanup.
-- Validate `MCP-Protocol-Version`, content type, Accept, body size, method, and endpoint path.
+- Validate `MCP-Protocol-Version`, content type, Accept, body size, method, and endpoint path (`--path /mcp`).
 - Apply request/concurrency rate limits before allocating a browser context.
 - Respect reverse-proxy headers only from configured trusted proxies.
 - Never forward client bearer tokens to navigated sites.
@@ -130,7 +131,7 @@ HTTP must remain disabled unless the deployment satisfies the security requireme
 
 - No unresolved critical/high finding.
 - All MUST requirements have tests with stable names referenced from the implementation PR.
-- `go test -race` passes for browser-control/MCP packages.
+- `go test -race ./test/internal/browsercontrol/... ./test/internal/mcpserver/...` passes for browser-control/MCP packages.
 - Dependency vulnerability and license review is recorded.
 - A reviewer validates the pinned SDK's actual security defaults at the selected tag.
 - Remote/HTTP features remain build/runtime disabled unless their separate gate is complete.

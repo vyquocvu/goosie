@@ -166,7 +166,6 @@ internal/engine/*
 internal/js
 internal/net
 internal/memory
-internal/form
 internal/image
 ```
 
@@ -217,13 +216,13 @@ No `fyne.CanvasObject`, `fyne.Color`, or Fyne type appears in engine core.
 
 ### What Happens Instead
 
-When a page requires unsupported features (canvas, video, iframe, ES modules, WebSocket, Web Worker), the engine's fallback layer (`internal/engine/fallback`) decides how to respond:
+When a page requires unsupported features (canvas, video, iframe, ES modules, WebSocket, Web Worker), the engine handles unsupported feature detection gracefully:
 
 - **Parse-time detection** (`OnUnsupportedFeature` callback): Fired when `<canvas>`, `<video>`, `<audio>`, `<iframe>`, `<script type="module">`, `<object>`, or `<embed>` elements are encountered during streaming parse.
 - **Runtime detection** (`OnRuntimeUnsupportedFeature` callback): Fired from JS when `document.createElement('canvas')` or similar is called.
 - **JS feature detection** (`ScanAndReportUnsupportedJSFeatures`): Pre-scans script source for `import()` expressions.
 
-The policy (`None`, `UserRequested`, `UnsupportedFeature`, `Allowlist`, `FailureThreshold`) determines the fallback action — always within the pure-Go engine, never via a platform WebView.
+The engine stays within the pure-Go engine boundaries and renders graceful fallbacks, never delegating to a platform WebView.
 
 ---
 
@@ -244,8 +243,7 @@ The headless variant (`cmd/headless`) enables scripted rendering without opening
 | Document | Covers |
 |---|---|
 | `architecture-deep-dives.md` | Subsystem architecture and component flows |
-| `memory-model.md` | Memory ownership, budgets, and profiling guidance |
-| `memory-model.md` | Cache budgets, eviction, memory management |
+| `memory-model.md` | Memory ownership, cache budgets, eviction, and profiling guidance |
 | `package-ownership.md` | Package boundaries, responsibilities, import rules |
 | `adr/0003-raster-backend-boundaries.md` | ADR for raster backend interface and selection |
 | `supported-web-platform.md` | Supported HTML/CSS/JS feature matrix |
@@ -367,7 +365,7 @@ Goosie should not attempt to beat Blink on general web compatibility. It should 
 - automation round-trip latency;
 - CPU cost for supported HTML/CSS/JS pages.
 
-Every optimization must be validated with phase metrics, benchmarks, `go test -race`, CPU profiles, heap profiles, and visual comparison fixtures. The primary acceptance rule is that user interaction remains responsive while script, resource loading, layout, and raster workers are active.
+Every optimization must be validated with phase metrics, benchmarks, `go test -race ./test/internal/engine/...`, CPU profiles, heap profiles, and visual comparison fixtures. The primary acceptance rule is that user interaction remains responsive while script, resource loading, layout, and raster workers are active.
 
 ### Implementation Priorities
 

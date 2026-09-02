@@ -20,13 +20,13 @@ Packages are organized in layers. A package may import from its own layer or any
 
 | Layer | Package | Import restiction | Contains |
 |-------|---------|-------------------|----------|
-| 0 (foundation) | `internal/dom`, `internal/dom/atom`, `internal/css` | None | DOM store, HTML parser, atom interning, CSS parser, selectors, style |
+| 0 (foundation) | `internal/dom`, `internal/dom/atom`, `internal/css`, `internal/version`, `internal/conformance` | None | DOM store, HTML parser, atom interning, CSS parser, selectors, style, version metadata, conformance tracker |
 | 1 (layout) | `internal/renderer` (top-level) | May import layer 0 | Layout tree, fragments, text shaping, display list, paint chunks |
 | 2 (raster) | `internal/renderer/frame/*` | May import layers 0-1 | Backend-neutral types, raster backends, caches, compositor |
-| 3 (engine) | `internal/engine/*`, `internal/js` | May import layers 0-2 | Session lifecycle, navigation, metrics, IPC, JS runtime |
+| 3 (engine) | `internal/engine/*`, `internal/js`, `internal/browsercontrol`, `internal/mcpserver` | May import layers 0-2 | Session lifecycle, navigation, metrics, IPC, documentloader, eventloop, JS runtime, automation control, MCP server |
 | 4 (shell) | `internal/ui`, `internal/profile` | May import layers 0-3 | Fyne window, browser chrome, developer tools, profile storage |
-| 4 (utilities) | `internal/memory`, `internal/net`, `internal/form`, `internal/image`, `internal/testutil` | May import layer 0 | Memory manager, HTTP networking, form state, image decoding, test helpers |
-| 5 (testing) | `internal/test_suite/*`, `test/e2e` | May import any | Cross-cutting test suites |
+| 4 (utilities) | `internal/memory`, `internal/net`, `internal/image`, `internal/testutil` | May import layer 0 | Memory manager, HTTP networking, image decoding, test helpers |
+| 5 (testing) | `test/internal/test_suite/*`, `test/internal/*`, `test/e2e` | May import any | Cross-cutting and package test suites |
 
 ---
 
@@ -59,13 +59,31 @@ Packages are organized in layers. A package may import from its own layer or any
 
 **Import rules:** May import `internal/dom` (for `NodeID` and node traversal). Must not import layout, engine, or shell packages.
 
+### `internal/version` — Version Information
+
+**Owner:** Build metadata, application version constants, and git commit SHA injection.
+
+- Owns `Version`, `Commit`, `BuildTime` variables.
+- Exposes clean version formatting functions.
+
+**Import rules:** Pure stdlib only. Foundation package.
+
+### `internal/conformance` — HTML & Web Platform Conformance Tracker
+
+**Owner:** HTML element conformance tracker and audit registry.
+
+- Owns `Elements` registry and web platform conformance matrices.
+- Tracks element implementation status and automated audit reports.
+
+**Import rules:** May import `internal/dom`. Foundation package.
+
 ### `internal/renderer` (top-level) — Layout and Display List (M4-M5)
 
 **Owner:** Layout computation, fragment storage, text measurement, display list construction, and paint chunks.
 
 - Owns `LayoutID`, `LayoutBox`, `LayoutStore` (M4.1).
 - Owns `FragmentStore` for inline layout (M4.2).
-- Owns text measurement and shaping abstraction (`Measurer` interface, M4.3).
+- Owns text measurement and shaping abstraction (`TextShaper`/`FontMetrics`, M4.3).
 - Owns `ReflowTracker` and incremental layout (M4.4).
 - Owns table and form layout (M4.5).
 - Owns `DisplayCommand`, `DisplayCommandList`, `ChunkedDisplayList` (M5.1-M5.2).
@@ -113,11 +131,11 @@ Packages are organized in layers. A package may import from its own layer or any
 
 ### `internal/renderer/frame/golden` — Golden Image Tests (M6.5)
 
-**Owner:** Golden image testing framework for cross-backend equivalence.
+**Owner:** Golden image testing framework for cross-backend equivalence (test suites located in `test/internal/renderer/frame/golden/`).
 
 ### `internal/renderer/layoutgolden` — Golden Layout Tests
 
-**Owner:** Deterministic layout serialization and golden layout snapshot tests.
+**Owner:** Deterministic layout serialization and golden layout snapshot tests (test suites located in `test/internal/renderer/layoutgolden/`).
 
 ### `internal/engine/navigation` — Navigation Scheduler (M1.2)
 
@@ -150,12 +168,19 @@ Packages are organized in layers. A package may import from its own layer or any
 - Owns `Recorder` (concurrency-safe phase timing, counters, runtime state).
 - Owns timing panel data for developer tools.
 
-### `internal/engine/fallback` — Compatibility Fallback (M12.1)
+### `internal/engine/documentloader` — Document Loading Pipeline
 
-**Owner:** Unsupported-feature detection, fallback policy, and decision routing.
+**Owner:** Document loading pipeline, resource loader coordinator, URL canonicalization, and streaming response delivery.
 
-- Owns `Policy` enum (`None`, `UserRequested`, `Allowlist`, `FailureThreshold`).
-- Owns unsupported-feature detection triggers (parse-time and runtime).
+- Owns `Coordinator`, resource tracking, fetch coalescing, and DOM bridge binding.
+- Coordinates streaming HTML parsing with network fetches.
+
+### `internal/engine/eventloop` — Engine Event Loop
+
+**Owner:** Engine-level event loop coordination, frame budget monitoring, and task queue scheduling.
+
+- Owns `Loop`, async task queues, frame deadline timers, and engine event pump.
+- Integrates frame budget tracking with event processing.
 
 ### `internal/engine/renderer` — Process Isolation Proxy (M10.4)
 
@@ -172,28 +197,21 @@ Packages are organized in layers. A package may import from its own layer or any
 - Owns navigation, input, viewport, resource response, display list, frame, log, and crash messages.
 - Owns encode/decode and schema versioning.
 
-### `internal/engine/pagecache` — Page Cache (M9.2)
-
-**Owner:** Bounded LRU cache for fully-rendered page snapshots (back/forward navigation).
-
-- Default: 3 entries, 32 MB.
-- Registers `memory.Evictor` with manager.
-
 ### `internal/engine/testpages` — Test Corpus (M0.2)
 
 **Owner:** Deterministic local HTML/CSS documents for engine benchmarks and scenario tests.
 
 ### `internal/js` — JavaScript Runtime (M8)
 
-**Owner:** Goja runtime per session, event loop, DOM handles, script policies, and polyfills.
+**Owner:** Goja runtime per session, event loop, DOM polyfills and bridge bindings, script policies, and resource pooling.
 
 - Owns per-session Goja runtime with single-owner goroutine (M8.1).
 - Owns explicit event loop with task/microtask ordering (M8.2).
-- Owns `NodeHandle` (lazy JS wrapper around `dom.NodeID`, M8.3).
-- Owns script limits, interruption, timer bounds, and capability gating (M8.4).
-- Owns unsupported-JS-feature reporting (dynamic `import()` scan, M12.1).
+- Owns DOM bindings and runtime polyfills (`setupDocumentAPI`, `populateJSNode`, `window.__onDOMChanged`).
+- Owns script compilation caching, timer pooling, console ring buffer, script limits, and capability gating (`policy.go`).
+- Owns unsupported-JS-feature reporting (dynamic `import()` scan).
 
-**Import rules:** May import `internal/dom` (for `NodeID` via `NodeHandle` only). Must not import Fyne or UI packages.
+**Import rules:** May import `internal/dom` (for `NodeID` and tree access). Must not import Fyne or UI packages.
 
 ### `internal/net` — HTTP Networking (M1.3)
 
@@ -216,6 +234,24 @@ Packages are organized in layers. A package may import from its own layer or any
 - Owns `TuningConfig`, `EvaluateConfig`, `AutoTune` for GC tuning.
 - Does not own any specific cache — caches register `Evictor` callbacks.
 
+### `internal/browsercontrol` — Headless Browser Automation
+
+**Owner:** Headless browser automation orchestrator, context lifecycle, navigation synchronization, and tool execution backend.
+
+- Owns `EngineService`, the per-context `engineContext` automation state, navigation sync, and screenshot capture.
+- Coordinates headless rendering pipelines and DOM state synchronization for automation.
+
+**Import rules:** May import `internal/engine/*`, `internal/dom`, `internal/renderer`, `internal/js`, `internal/net`.
+
+### `internal/mcpserver` — Model Context Protocol Server
+
+**Owner:** Model Context Protocol (MCP) server, tool dispatch handlers, transport layers (stdio and Streamable HTTP), and security boundaries.
+
+- Owns MCP JSON-RPC protocol handling, tool registry, session quota tracker, and rate limiting.
+- Implements stdio and HTTP transports with token-based authentication (`--http`, `--port`, `--auth`, `--auth-token`).
+
+**Import rules:** May import `internal/browsercontrol`, `internal/engine/*`.
+
 ### `internal/profile` — Persistent Profiles (M9.3)
 
 **Owner:** Browser profile storage, bookmarks, history, settings, session storage.
@@ -226,10 +262,6 @@ Packages are organized in layers. A package may import from its own layer or any
 - Owns private mode (fully ephemeral).
 
 **Import rules:** May import `internal/net` (for cookie storage). Should not import engine-core packages.
-
-### `internal/form` — Form State (M4.5)
-
-**Owner:** Form element state, validation, submission prevention, stale event target protection.
 
 ### `internal/image` — Image Loading (M6.3)
 
@@ -250,9 +282,9 @@ Packages are organized in layers. A package may import from its own layer or any
 
 **Owner:** Shared test helpers, golden fixtures, and test corpus utilities.
 
-### `internal/test_suite/*` — Cross-Cutting Test Suites
+### `test/internal/test_suite/*` — Cross-Cutting Test Suites
 
-Each subpackage owns one dimension of cross-cutting tests:
+Each subpackage in `test/internal/test_suite/` owns one dimension of cross-cutting tests:
 
 | Subpackage | Concern |
 |---|---|
@@ -262,6 +294,8 @@ Each subpackage owns one dimension of cross-cutting tests:
 | `performance` | Memory growth, allocation pattern, and latency tests |
 | `security` | CSP enforcement, origin isolation, capability gating tests |
 | `webapi` | Web API compliance tests |
+
+All package unit tests reside in `test/internal/<pkg>/`.
 
 ---
 
@@ -276,7 +310,7 @@ Some concerns span multiple packages. These have designated coordinators:
 | Developer tools | `internal/ui` (panels) | `internal/engine/metrics` (timing), `internal/memory` (budget view) |
 | Golden tests | `internal/renderer/frame/golden` | `internal/renderer/layoutgolden` |
 | IPC / process isolation | `internal/engine/renderer` | `internal/engine/message` (schema) |
-| Fallback decisions | `internal/engine/fallback` | `internal/dom` (parse-time), `internal/js` (runtime) |
+| Headless automation & MCP | `internal/mcpserver` | `internal/browsercontrol`, `internal/engine/session` |
 
 ---
 

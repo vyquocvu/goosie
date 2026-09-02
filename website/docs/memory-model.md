@@ -144,15 +144,13 @@ Each cache is responsible for implementing its evictor to actually free memory. 
 | Concurrency | `sync.Mutex` |
 | Notes | Tiles are 256×256 pixels by default; version-tracked per frame |
 
-### PageCache — `internal/engine/pagecache`
+### PageCache (Historical)
 
 | Property | Value |
 |---|---|
-| Entry limit | 3 pages |
-| Byte limit | 32 MB |
-| Eviction | LRU (doubly-linked list) |
-| `memory.Evictor` | Yes |
-| Concurrency | `sync.Mutex` |
+| Status | Retired; page snapshots managed via session lifecycle |
+| Component constant | `ComponentPageCache` (reserved in `memory.Manager`) |
+| Eviction | LRU |
 
 ### HTTPCache — `internal/net`
 
@@ -290,7 +288,7 @@ Session.Close ──→ All memory released:
 
 | Test | File | What it proves |
 |---|---|---|
-| `TestRepeatedNavigation_NoUnboundedHeapGrowth` | `internal/engine/session/memory_growth_test.go` | 50 navigation cycles retain < 512 KB |
+| `TestRepeatedNavigation_NoUnboundedHeapGrowth` | `test/internal/engine/session/memory_growth_test.go` | 50 navigation cycles retain < 512 KB |
 | `TestRepeatedNavigation_HeapDoesNotGrowLinearly` | same file | Growth is sublinear, not O(n) |
 | `TestClose_ReleasesSessionOwnedMemory` | same file | Closing session releases heap |
 

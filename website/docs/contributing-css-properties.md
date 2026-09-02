@@ -69,10 +69,10 @@ Update `supported-web-platform.md` — add the new property to the CSS propertie
 
 ## Step 7: Tests
 
-- **Parser test:** Add a test fixture in `internal/css/` that parses a stylesheet with the new property.
-- **Style resolution test:** Verify the computed value matches expectations.
-- **Layout test:** If layout-affecting, add a layout fixture in `internal/renderer/layoutgolden/`.
-- **Golden image test:** If paint-affecting, add a rendering fixture in `internal/renderer/frame/golden/`.
+- **Parser test:** Add a test fixture in `test/internal/css/` that parses a stylesheet with the new property.
+- **Style resolution test:** Verify the computed value matches expectations in `test/internal/css/` or `test/internal/renderer/`.
+- **Layout test:** If layout-affecting, add a layout fixture in `test/internal/renderer/layoutgolden/`.
+- **Golden image test:** If paint-affecting, add a rendering fixture in `test/internal/renderer/frame/golden/`.
 
 ## Checklist
 
@@ -83,6 +83,6 @@ Update `supported-web-platform.md` — add the new property to the CSS propertie
 - [ ] Updated layout engine (if layout-affecting)
 - [ ] Updated display commands or raster (if paint-affecting)
 - [ ] Updated `supported-web-platform.md`
-- [ ] Added parser and resolution tests
-- [ ] Added layout or golden tests (if applicable)
-- [ ] Ran `go test -short ./internal/css/...`
+- [ ] Added parser and resolution tests in `test/internal/css/`
+- [ ] Added layout or golden tests in `test/internal/renderer/` (if applicable)
+- [ ] Ran `go test ./test/internal/css/... ./test/internal/renderer/...`

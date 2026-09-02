@@ -238,7 +238,7 @@ func RenderTracker(results []ElementResult) string {
 
 	sb.WriteString("## Workflow (fix one element at a time)\n\n")
 	sb.WriteString("1. Pick the next `partial`/`missing` element below (work category by category).\n")
-	sb.WriteString("2. Reproduce: `go test ./internal/conformance -run TestElementAudit -v` and the fixture in `internal/conformance/registry.go`.\n")
+	sb.WriteString("2. Reproduce: `go test ./test/internal/conformance -run TestElementAudit -v` and the fixture in `internal/conformance/registry.go`.\n")
 	sb.WriteString("3. Fix the renderer (UA default in `internal/renderer/default_style.go`, block classification in `node.go`, layout/paint special-casing).\n")
 	sb.WriteString("4. Verify vs Chromium: `go test -tags=e2e ./test/e2e -run TestHTMLConformance` (computed-style + geometry comparison, ratcheted score).\n")
 	sb.WriteString("5. Regenerate this tracker: `make html-audit`. Commit renderer fix + tracker delta together.\n\n")

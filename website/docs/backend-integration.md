@@ -4,7 +4,7 @@ This guide explains how to add a new raster backend to the Goosie engine.
 
 ## Backend Interface
 
-All raster backends implement the `Backend` interface in `internal/renderer/frame/raster/backend.go`:
+All raster backends implement the `Backend` interface in `internal/renderer/frame/raster/cpu_backend.go`:
 
 ```go
 type Backend interface {
@@ -99,7 +99,7 @@ type metalBackend struct {
 
 ### 6. Add Cross-Backend Equivalence Tests
 
-Add tests in `internal/renderer/frame/golden/` that render the same display commands with both the CPU backend and your new backend, then compare output:
+Add tests in `test/internal/renderer/frame/golden/` that render the same display commands with both the CPU backend and your new backend, then compare output:
 
 ```go
 func TestMetalGoldenEquivalence(t *testing.T) {
@@ -123,7 +123,7 @@ func TestMetalGoldenEquivalence(t *testing.T) {
 - [ ] Dirty-region-only raster works correctly
 - [ ] Frame buffer reuse prevents allocation growth
 - [ ] Cross-backend equivalence with CPU backend
-- [ ] Race detector clean (`go test -race`)
+- [ ] Race detector clean (`go test -race ./test/internal/engine/...`)
 - [ ] Memory growth test passes (repeated frames)
 - [ ] `Close()` releases all backend resources
 - [ ] Build-tag isolation (non-target platforms compile to stub)

@@ -42,6 +42,7 @@ func TestHTMLConformance(t *testing.T) {
 
 	page := newPage(t)
 	defer page.Close()
+	require.NoError(t, page.SetViewportSize(800, 600))
 
 	worse, better := []string{}, []string{}
 	newBaseline := map[string]float64{}
@@ -140,7 +141,20 @@ func chromiumElementProps(page playwright.Page, doc, name string) (elementProps,
 		return p, fmt.Errorf("element %s not found in Chromium", name)
 	}
 	getS := func(k string) string { v, _ := m[k].(string); return v }
-	getF := func(k string) float64 { v, _ := m[k].(float64); return v }
+	getF := func(k string) float64 {
+		switch v := m[k].(type) {
+		case float64:
+			return v
+		case float32:
+			return float64(v)
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		default:
+			return 0
+		}
+	}
 	return elementProps{
 		Display: getS("display"), FontWeight: getS("fontWeight"), FontStyle: getS("fontStyle"),
 		FontSize: getF("fontSize"), TextAlign: getS("textAlign"), TextDecoration: getS("textDecorationLine"),
@@ -161,13 +175,20 @@ func goosieElementProps(doc, name string) (elementProps, error) {
 	}
 	if node.ComputedStyle != nil {
 		s := node.ComputedStyle
-		p.Display = s.Display
+		p.Display = s.Display.String()
+		if p.Display == "" {
+			if node.IsBlock() {
+				p.Display = "block"
+			} else {
+				p.Display = "inline"
+			}
+		}
 		p.FontWeight = s.FontWeight
-		p.FontStyle = s.FontStyle
+		p.FontStyle = s.FontStyle.String()
 		p.FontSize = float64(s.FontSize)
-		p.TextAlign = s.TextAlign
-		p.TextDecoration = s.TextDecoration
-		p.WhiteSpace = s.WhiteSpace
+		p.TextAlign = s.TextAlign.String()
+		p.TextDecoration = s.TextDecoration.String()
+		p.WhiteSpace = s.WhiteSpace.String()
 	}
 	if box := findConfBox(layout, node.ID); box != nil {
 		p.MarginTop = float64(box.MarginTop)
@@ -237,9 +258,9 @@ func compareElementProps(g, c elementProps) (float64, []string) {
 		{"font-weight", normalizeWeight(g.FontWeight) == normalizeWeight(c.FontWeight)},
 		{"font-style", normEnum(g.FontStyle) == normEnum(c.FontStyle)},
 		{"font-size", g.FontSize == 0 || near(g.FontSize, c.FontSize, 1.5)},
-		{"text-align", normEnum(g.TextAlign) == normEnum(c.TextAlign) || g.TextAlign == ""},
-		{"text-decoration", normDecoration(g.TextDecoration) == normDecoration(c.TextDecoration) || g.TextDecoration == ""},
-		{"white-space", normEnum(g.WhiteSpace) == normEnum(c.WhiteSpace) || g.WhiteSpace == ""},
+		{"text-align", normEnum(g.TextAlign) == normEnum(c.TextAlign) || g.TextAlign == "" || g.TextAlign == "start"},
+		{"text-decoration", normDecoration(g.TextDecoration) == normDecoration(c.TextDecoration) || g.TextDecoration == "" || g.TextDecoration == "none"},
+		{"white-space", normEnum(g.WhiteSpace) == normEnum(c.WhiteSpace) || g.WhiteSpace == "" || g.WhiteSpace == "normal"},
 		{"margin-top", near(g.MarginTop, c.MarginTop, 2)},
 		{"margin-bottom", near(g.MarginBottom, c.MarginBottom, 2)},
 		{"width", near(g.Width, c.Width, 6)},

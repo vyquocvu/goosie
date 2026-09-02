@@ -60,10 +60,10 @@ runtime when pages construct them dynamically via
 
 The runtime path is deduplicated per kind and per `Runtime` instance —
 each kind is reported at most once. The hook is nil-safe and never
-allocates when no callback is installed. Callers wire the hook to the
-fallback decision layer (`internal/engine/fallback.Policy.Record`) so
-that scripts which dynamically build out-of-scope elements still trigger
-the same fallback logic as markup that already contains them.
+allocates when no callback is installed. Callers wire the hook to engine
+telemetry or decision layers so that scripts which dynamically build
+out-of-scope elements still trigger appropriate handling just like markup
+that already contains them.
 
 ### Runtime detection of dynamic import()
 
@@ -117,7 +117,8 @@ policy — the detection is the signal we surface, not the access denial.
 | Tables | Partial | Unsupported table layout details use normal flow fallback. |
 | Media queries | Partial | Level 4 range syntax (`(width <= 600px)`, `(600px >= width)`, chained) is supported; unsupported media features evaluate as non-matching. |
 | CSS custom properties and `calc()` | Partial | Invalid substitutions or calculations invalidate the declaration. |
-| Animations, transitions, transforms, filters, grid, and advanced typography | Planned | Declarations are ignored until implemented. |
+| CSS Grid (`display: grid`, `grid-template-columns`, `grid-template-rows`, `gap`, `grid-column`, `grid-row`) | Partial | Grid container layout, track sizing, auto placement, row/column gaps, and span resolution supported in `internal/renderer/grid_layout.go`; complex subgrid and named areas fall back to auto tracks. |
+| Animations, transitions, transforms, filters, and advanced typography | Planned | Declarations are ignored until implemented. |
 
 ## Supported DOM and Browser APIs
 

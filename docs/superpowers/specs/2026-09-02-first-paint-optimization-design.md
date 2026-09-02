@@ -1,7 +1,7 @@
 # Stream A: First-Paint Render Pipeline Optimization
 
 ## Status
-**DRAFT** — awaiting user review
+**IMPLEMENTED**
 
 ## Goal
 Reduce first-paint latency (HTML parse → CSS extract → render tree → style cascade → layout → display list → raster) through architecture-first rework of the style and layout pipelines, followed by evidence-driven micro-tuning. Zero pixel or behavior change.
@@ -21,6 +21,7 @@ Reduce first-paint latency (HTML parse → CSS extract → render tree → style
 - `internal/renderer/node.go` — `RenderNode`, `Style` struct
 - `internal/renderer/display_list.go` — `DisplayListBuilder`, `convertPaintCommands`
 - `internal/renderer/headless.go` — `RenderHTMLToImage` entry point
+- `internal/css/atoms.go` — enumerated property atom definitions and conversions
 - `internal/css/match_cache.go` — `MatchCache`, `ElementKey`, `StylePool`
 - `internal/css/computed.go` — `ComputedStyle`, `Fingerprint`
 - `internal/css/selector.go` — selector matching
@@ -64,7 +65,7 @@ Script or test that:
 
 #### 1.1 Enumerated property atoms
 **Problem:** `renderer.Style` has ~20 string-valued fields (`Display`, `Position`, `Float`, `TextAlign`, ...) compared via string equality in layout hot paths.
-**Solution:** Replace hot string fields with interned atom/enum types (reuse existing CSS atom interning from `internal/css/properties.go`). Conversions happen at parse boundaries; layout code compares uint8/uint16 values.
+**Solution:** Replace hot string fields with interned atom/enum types (in `internal/css/atoms.go`). Conversions happen at parse boundaries; layout code compares uint8/uint16 values.
 **Risk:** Low — mechanical refactor, behavior-preserving if atom values are 1:1 with string values.
 **Verification:** Unit tests for atom conversion; layoutgolden; pixel-hash manifest.
 

@@ -108,10 +108,11 @@ This document indexes architectural notes for specific Goosie subsystems, focusi
 **Covers:**
 - Single-owner goroutine pattern with `ErrWrongOwner`
 - Bounded task queue with navigation cancellation
-- Event loop: task/microtask ordering
-- `NodeHandle` — lazy JS wrapper around `NodeID` with staleness detection
+- Event loop: task/microtask ordering and cached microtask flush
+- DOM polyfills and bridge bindings (`setupDocumentAPI`, `populateJSNode`, `window.__onDOMChanged`)
+- Script compilation caching, timer pooling, and console ring buffer
 - Script interruption and timer limits
-- Capability-based API gating (`CapabilityNetwork`, `CapabilityStorage`, `CapabilityNavigation`)
+- Capability-based API gating (`CapabilityNetwork`, `CapabilityStorage`, `CapabilityNavigation` via `internal/js/policy.go`)
 
 ---
 

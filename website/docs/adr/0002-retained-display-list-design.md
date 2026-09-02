@@ -176,7 +176,7 @@ Memory overhead is ~48 bytes per display command (header + inline data), compara
 
 - `website/docs/architecture-deep-dives.md`
 - `internal/renderer/displaycmd.go` — command type definitions and serialization
-- `internal/renderer/chunked_display_list.go` — paint chunk management
+- `internal/renderer/display_list.go` — display list and paint chunk management
 - `internal/renderer/dirty_region.go` — dirty-region tracking and merging
 - ADR 0001: Use a Compact, Index-Based DOM Store (same compaction principles)
 - ADR 0003: Raster Backend Boundaries (display list as raster input contract)

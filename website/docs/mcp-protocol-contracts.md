@@ -1,6 +1,6 @@
 # MCP Tool and Resource Contracts
 
-**Status:** Proposed contract; schemas must be golden-tested before handlers exist.
+**Status:** Implemented; validated against MCP specification and regression suites.
 
 **Protocol baseline:** MCP `2025-11-25`
 
@@ -17,26 +17,35 @@
 
 ## 2. v1 tool catalog
 
-| Tool | Class | Phase | Purpose |
-|---|---|---:|---|
-| `browser_context_create` | state | 3 | Create a private ephemeral context. |
-| `browser_context_list` | read | 3 | List contexts owned by this MCP connection. |
-| `browser_context_close` | state | 3 | Idempotently close one context. |
-| `browser_navigate` | network mutation | 3 | Navigate and optionally wait for readiness. |
-| `browser_wait` | read/wait | 3 | Wait for lifecycle, URL, text, or revision condition. |
-| `browser_snapshot` | read | 3 | Return bounded semantic page state and refs. |
-| `browser_screenshot` | expensive read | 3 | Return bounded viewport PNG. |
-| `browser_page_info` | read | 3 | URL, title, lifecycle, revision, viewport, truncation flags. |
-| `browser_console_read` | sensitive read | 3 | Read bounded console entries. |
-| `browser_network_read` | sensitive read | 3 | Read redacted request/response metadata. |
-| `browser_security_read` | read | 3 | Read TLS/CSP/policy summary. |
-| `browser_query` | read | 4 | Resolve a semantic/CSS/text locator to refs. |
-| `browser_click` | page mutation | 4 | Activate one current element ref. |
-| `browser_type` | sensitive mutation | 4 | Type text into one editable element. |
-| `browser_press_key` | page mutation | 4 | Dispatch a supported key chord. |
-| `browser_scroll` | page mutation | 4 | Scroll viewport or referenced element. |
-| `browser_set_viewport` | state mutation | 4 | Set bounded viewport and scale. |
-| `browser_evaluate` | high-risk mutation/read | 5 | Run bounded JavaScript in page context. |
+The authoritative tool registry is `internal/mcpserver/tools.go` (`toolSchemas`); the server registers exactly the tools listed there via `AddTool`.
+
+**Implemented tools:**
+
+| Tool | Class | Purpose |
+|---|---|---|
+| `browser_context_create` | state | Create a private ephemeral context. |
+| `browser_context_list` | read | List contexts owned by this MCP connection. |
+| `browser_context_close` | state | Idempotently close one context. |
+| `browser_navigate` | network mutation | Navigate and optionally wait for readiness (`waitUntil`: `commit`, `interactive`, `complete`). |
+| `browser_snapshot` | read | Return bounded semantic page state and refs. |
+| `browser_screenshot` | expensive read | Return bounded viewport PNG. |
+| `browser_page_info` | read | URL, title, lifecycle, revision, viewport. |
+| `browser_query` | read | Resolve a role/CSS/text locator to refs. |
+| `browser_click` | page mutation | Activate one current element ref. |
+| `browser_type` | sensitive mutation | Type text into one editable element. |
+
+**Planned tools (contract defined below, not yet registered):**
+
+| Tool | Class | Purpose |
+|---|---|---|
+| `browser_wait` | read/wait | Wait for lifecycle, URL, text, or revision condition. |
+| `browser_console_read` | sensitive read | Read bounded console entries. |
+| `browser_network_read` | sensitive read | Read redacted request/response metadata. |
+| `browser_security_read` | read | Read TLS/CSP/policy summary. |
+| `browser_press_key` | page mutation | Dispatch a supported key chord. |
+| `browser_scroll` | page mutation | Scroll viewport or referenced element. |
+| `browser_set_viewport` | state mutation | Set bounded viewport and scale. |
+| `browser_evaluate` | high-risk mutation/read | Run bounded JavaScript in page context. |
 
 ## 3. Common fields
 
@@ -195,7 +204,7 @@ Input:
 
 Only `viewport` is supported initially. Hard caps: 16 megapixels raw and 8 MiB encoded. Output contains image content with MIME `image/png`, plus structured width, height, page revision, and truncation fields.
 
-### `browser_evaluate`
+### `browser_evaluate` (planned — not yet registered)
 
 Input:
 
@@ -216,22 +225,24 @@ Hard caps: source 256 KiB, duration 5 seconds, serialized result 1 MiB, depth 20
 `browser_query` accepts exactly one locator kind:
 
 ```json
-{"role": {"name": "button", "accessibleName": "Submit", "exact": true}}
+{"role": {"name": "button", "exact": true}}
 ```
 
 ```json
-{"css": "form#login button[type=submit]"}
+{"css": {"selector": "form#login button[type=submit]"}}
 ```
 
 ```json
 {"text": {"value": "Continue", "exact": true}}
 ```
 
-Role/accessible-name is preferred. CSS support is limited to Goosie's selector engine. Query returns zero or more current refs and never performs an action. Mutation tools accept one ref, eliminating ambiguous action semantics.
+Role/name is preferred (an `accessibleName` refinement is planned). CSS support is limited to Goosie's selector engine. Query returns zero or more current refs and never performs an action. Mutation tools accept one ref, eliminating ambiguous action semantics.
 
 ## 6. Wait contract
 
-`browser_wait` accepts one condition:
+The implemented wait surface is `browser_navigate`'s `waitUntil` condition (`commit`, `interactive`, `complete`).
+
+The standalone `browser_wait` tool is planned and will accept one condition:
 
 - lifecycle state reached;
 - URL exact/glob match;
@@ -243,11 +254,16 @@ Polling intervals are an implementation detail; the API is event-driven where si
 
 ## 7. Resources
 
-Resources complement tools for repeatable reads and client-driven context selection:
+The implemented resource is:
 
 | URI | MIME | Content |
 |---|---|---|
 | `goosie://contexts` | `application/json` | Contexts owned by the connection. |
+
+Planned per-context resources:
+
+| URI | MIME | Content |
+|---|---|---|
 | `goosie://context/{id}/page` | `application/json` | Current page metadata. |
 | `goosie://context/{id}/snapshot` | `application/json` | Default bounded semantic snapshot. |
 | `goosie://context/{id}/console` | `application/json` | Redacted recent console entries. |
@@ -274,4 +290,4 @@ Messages must be safe to show to users. Never include filesystem paths, headers,
 
 ## 9. Capability/version resource
 
-The server exposes implementation name/version, MCP protocol revision, SDK version, Goosie version, enabled transports, enabled tools, hard limits, and supported readiness/locator modes. Clients must use advertised capabilities rather than infer features from a version string.
+The capability/version resource is planned. Today the server advertises its implementation name and version via the `--name` and `--version` flags, plus the MCP protocol revision negotiated by the SDK. Clients must use advertised capabilities rather than infer features from a version string.

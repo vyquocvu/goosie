@@ -15,11 +15,11 @@
 **Files:**
 - Modify: `internal/renderer/canvas.go` — RenderWithViewport method
 
-- [ ] **Step 1: Read current RenderWithViewport implementation**
+- [x] **Step 1: Read current RenderWithViewport implementation**
 
 Read `internal/renderer/canvas.go` and find the `RenderWithViewport` method. Understand how it iterates display list commands.
 
-- [ ] **Step 2: Add Y-band culling logic**
+- [x] **Step 2: Add Y-band culling logic**
 
 Before the main command iteration loop, add viewport-based culling using the Y-band index:
 
@@ -57,7 +57,7 @@ for i := cmdStart; i < cmdEnd && i < len(displayList.Commands); i++ {
 }
 ```
 
-- [ ] **Step 3: Handle clip commands correctly**
+- [x] **Step 3: Handle clip commands correctly**
 
 PushClip/PopClip commands must be balanced. When culling, ensure we don't start in the middle of a clip group. Walk backward from cmdStart to find the nearest PopClip or start of list:
 
@@ -74,27 +74,27 @@ for i := cmdStart - 1; i >= 0; i-- {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
-go test ./internal/renderer/... -v
+go test ./test/internal/renderer/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 5: Verify pixel output unchanged**
+- [x] **Step 5: Verify pixel output unchanged**
 
 ```bash
-go test -tags=e2e ./test/perf -run TestPixelHashManifest
+go test -v ./test/perf -run TestPixelHashManifest
 ```
 
 Expected: Pass (same visual output, just fewer commands iterated)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/renderer/canvas.go
-git commit -m "perf(renderer): use Y-band index for viewport culling"
+git commit -m "feat(renderer): use Y-band spatial index for viewport culling in RenderWithViewport"
 ```
 
 ---
@@ -105,7 +105,7 @@ git commit -m "perf(renderer): use Y-band index for viewport culling"
 - Modify: `internal/renderer/invalidation.go:13-66`
 - Modify: `internal/renderer/renderer.go` — PresentFromMutationBatch
 
-- [ ] **Step 1: Add scroll-only detection**
+- [x] **Step 1: Add scroll-only detection**
 
 In `ApplyMutationBatch`, detect when all mutations are paint-only (no layout/structure changes):
 
@@ -135,7 +135,7 @@ func (r *Renderer) ApplyMutationBatch(batch []MutationInvalidation) int {
 }
 ```
 
-- [ ] **Step 2: Add scrollOnlyDirty flag to CanvasRenderer**
+- [x] **Step 2: Add scrollOnlyDirty flag to CanvasRenderer**
 
 Add the field to `CanvasRenderer`:
 
@@ -146,7 +146,7 @@ type CanvasRenderer struct {
 }
 ```
 
-- [ ] **Step 3: Handle scroll-only in PresentFromMutationBatch**
+- [x] **Step 3: Handle scroll-only in PresentFromMutationBatch**
 
 In `PresentFromMutationBatch`, check the flag and skip display list rebuild:
 
@@ -173,59 +173,60 @@ func (r *Renderer) PresentFromMutationBatch(adapter *FyneAdapter) bool {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
-go test ./internal/renderer/... -v
+go test ./test/internal/renderer/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 5: Verify pixel output unchanged**
+- [x] **Step 5: Verify pixel output unchanged**
 
 ```bash
-go test -tags=e2e ./test/perf -run TestPixelHashManifest
+go test -v ./test/perf -run TestPixelHashManifest
 ```
 
 Expected: Pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/renderer/invalidation.go internal/renderer/canvas.go
-git commit -m "perf(renderer): add scroll-only fast path"
+git commit -m "feat(renderer): add scroll-only fast path for mutation batches"
 ```
 
 ---
 
 ## Task D3: Final verification
 
-- [ ] **Step 1: Run all renderer tests**
+- [x] **Step 1: Run all renderer tests**
 
 ```bash
-go test ./internal/renderer/... -v
+go test ./test/internal/renderer/... -v
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
-go test ./... -short
+go test ./...
 ```
 
 Expected: All tests pass
 
-- [ ] **Step 3: Verify pixel hashes unchanged**
+- [x] **Step 3: Verify pixel hashes unchanged**
 
 ```bash
-go test -tags=e2e ./test/perf -run TestPixelHashManifest
+go test -v ./test/perf -run TestPixelHashManifest
 ```
 
 Expected: Pass
 
-- [ ] **Step 4: Benchmark scroll performance (optional)**
+- [x] **Step 4: Benchmark scroll performance (optional)**
 
 If scroll benchmarks exist, run before/after comparison.
 
 Expected: Improved frame time during scroll
+

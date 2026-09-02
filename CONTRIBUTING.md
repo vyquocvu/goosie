@@ -20,14 +20,14 @@ make build
 gofmt -w .
 go vet ./...
 go test -short ./...
-go test -race -short ./internal/engine/... ./internal/js/... ./internal/net/...
+go test -race -short ./test/internal/engine/... ./test/internal/net/... && go test -short ./test/internal/js/...
 make smoke-test
 ```
 
 5. Compare benchmark results against `main` for performance-sensitive changes:
 
 ```bash
-go test -bench=. -benchmem ./path/to/package
+go test -bench=. -benchmem ./test/perf
 ```
 
 6. Use a concise conventional commit message, such as `fix(renderer): correct table layout`.
@@ -45,12 +45,12 @@ go test -bench=. -benchmem ./path/to/package
 
 | Test type | Command | When to run |
 |---|---|---|
-| Unit tests | `go test ./internal/...` | Every commit |
-| Race detector | `go test -race -short ./internal/engine/...` | PRs touching concurrent code |
-| Golden images | `go test ./internal/renderer/frame/golden/...` | PRs touching raster/display list |
-| Fuzz tests | `go test -fuzz=FuzzHTMLParse -fuzztime=30s ./internal/dom/` | Parser/selector changes |
+| Unit tests | `go test ./test/...` | Every commit |
+| Race detector | `go test -race -short ./test/internal/engine/...` | PRs touching concurrent code |
+| Golden images | `go test ./test/internal/renderer/frame/golden/...` | PRs touching raster/display list |
+| Fuzz tests | `go test -fuzz=^FuzzHTMLParseDocument$ -fuzztime=30s ./test/internal/dom/` | Parser/selector changes |
 | E2E | `go test -tags=e2e ./test/e2e/` | Full pipeline changes |
-| Memory growth | `go test -v ./internal/engine/session/ -run TestMemory` | Changes to caches or session lifecycle |
+| Memory growth | `go test -v ./test/internal/engine/session/ -run TestRepeatedNavigation` | Changes to caches or session lifecycle |
 
 ## Documentation
 

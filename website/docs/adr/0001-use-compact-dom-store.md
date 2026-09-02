@@ -147,5 +147,4 @@ Traversal benchmarks show 0 allocs/op for all iterator types. Mutation benchmark
 - `website/docs/memory-model.md`
 - `internal/dom/store.go` — canonical implementation
 - `internal/dom/store_traverse.go` — iterator implementations
-- `internal/dom/api_inventory.go` — migration plan from pointer-based APIs
 - ADR 0002: Retained Display List Design (display list uses the same compaction principles)

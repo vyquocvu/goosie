@@ -4,10 +4,10 @@ This guide explains how to add a new DOM API (method or property) to the Goosie 
 
 ## Architecture Overview
 
-DOM APIs are implemented in two layers:
+DOM APIs in Goosie are implemented across two cooperating layers:
 
-1. **Core implementation** (`internal/dom`): The DOM store and tree manipulation functions operate on `NodeID` handles.
-2. **JavaScript binding** (`internal/js`): Lazy JavaScript wrappers (`NodeHandle`, `DocumentHandle`) expose core functions to the Goja JS runtime.
+1. **Core implementation** (`internal/dom`): The compact DOM store and HTML tree manipulation functions operate on `NodeID` handles and interned string atoms.
+2. **JavaScript runtime bridge** (`internal/js`): Polyfilled JavaScript DOM classes (`Node`, `Element`, `Document`, `Attr`, `NamedNodeMap`, `DOMTokenList`, `CSSStyleDeclaration`) configured via `setupDocumentAPI` in `internal/js/runtime.go` and `polyfills.go`. Tree population from Go to JS is handled by `populateJSNode`, and mutations in JS land trigger Go callbacks via `window.__onDOMChanged`.
 
 ## Step 1: Add the Core Function
 
@@ -37,7 +37,7 @@ func (s *Store) YourMethod(node NodeID) error {
 
 ## Step 2: Add Tests
 
-Add tests in `internal/dom/store_test.go` covering:
+Add unit tests in `test/internal/dom/store_test.go` covering:
 - Normal case
 - Edge case (empty store, nil receiver)
 - Stale node handle
@@ -56,32 +56,33 @@ func TestYourMethod(t *testing.T) {
 
 If the API should be callable from JavaScript:
 
-1. **Add a handle method** in `internal/js/dom_handle.go`:
+1. **Add the method/property to the DOM polyfills** in `internal/js/runtime.go` (`setupDocumentAPI` or `polyfills.go`):
+
+```javascript
+// Inside setupDocumentAPI() JS polyfill definition:
+Element.prototype.yourMethod = function() {
+    // Perform JS-level DOM manipulation
+    // Notify Go engine if DOM structure or attributes changed:
+    if (typeof window.__onDOMChanged === 'function') {
+        window.__onDOMChanged(nodeId(this), 'yourMethod');
+    }
+};
+```
+
+2. **Or register Go-backed bridge functions** in `internal/js/runtime.go`:
 
 ```go
-func (h *NodeHandle) yourMethod(call goja.FunctionCall) goja.Value {
-    if h.stale {
-        panic(h.vm.NewTypeError("node is stale"))
-    }
-    err := h.store.YourMethod(h.id)
-    if err != nil {
-        panic(h.vm.NewTypeError(err.Error()))
-    }
+vm.Set("__goosie_yourMethod", func(call goja.FunctionCall) goja.Value {
+    // Extract arguments, validate permissions, and call dom.Store
     return goja.Undefined()
-}
+})
 ```
 
-2. **Register the method** in the `NodeHandle` constructor or prototype setup:
+3. **Gate behind capability** if the API accesses network, storage, or other privileged functionality via `internal/js/policy.go`:
 
 ```go
-proto.Set("yourMethod", h.vm.ToValue(h.yourMethod))
-```
-
-3. **Gate behind capability** if the API accesses network, storage, or other privileged functionality:
-
-```go
-if !h.enforcer.HasCapability(js.CapabilityYourAPI) {
-    panic(h.vm.NewTypeError("permission denied"))
+if !r.policy.HasCapability(CapabilityStorage) {
+    panic(r.vm.NewTypeError("permission denied"))
 }
 ```
 
@@ -91,12 +92,13 @@ Update `supported-web-platform.md` with the new API, its status, and any documen
 
 ## Step 5: Integration Test
 
-Add a JS integration test in `internal/js/dom_handle_test.go` or `internal/test_suite/webapi/` that exercises the new API end-to-end:
+Add a JS integration test in `test/internal/js/` (such as `runtime_test.go` or `dom_test.go`) or `test/internal/test_suite/webapi/` that exercises the new API end-to-end:
 
 ```go
 func TestYourMethodJS(t *testing.T) {
-    vm := goja.New()
-    // set up DOM, run JS, assert results
+    rt := NewRuntime()
+    val, err := rt.RunScript(`document.createElement("div").yourMethod()`)
+    // assert results
 }
 ```
 
@@ -107,11 +109,10 @@ Update `supported-web-platform.md` when the change affects advertised API covera
 ## Checklist
 
 - [ ] Core implementation added to `internal/dom/store.go`
-- [ ] Tests for normal, edge, and error cases
+- [ ] Tests for normal, edge, and error cases in `test/internal/dom/`
 - [ ] Benchmarks for performance-sensitive paths
-- [ ] JavaScript binding added (if JS-accessible)
-- [ ] Capability gate added (if privileged)
+- [ ] JavaScript binding/polyfill added in `internal/js/runtime.go` (if JS-accessible)
+- [ ] Capability gate added in `internal/js/policy.go` (if privileged)
 - [ ] Updated `supported-web-platform.md`
-- [ ] Integration test added
-- [ ] Ran `go test -short ./internal/dom/... ./internal/js/...`
-- [ ] Ran `go test -race -short ./internal/dom/... ./internal/js/...`
+- [ ] Integration test added in `test/internal/js/` or `test/internal/test_suite/`
+- [ ] Ran `go test ./test/internal/dom/... && go test -short ./test/internal/js/...`
