@@ -1,9 +1,13 @@
 package frame
 
+import (
+	"image"
+	"image/color"
+)
+
 // Color is a premultiplied RGBA pixel packed as R<<24|G<<16|B<<8|A so that a
 // uint32 store is one aligned word and byte order in memory is RGBA on a little
 // endian host, matching what a bitmap context expects.
-
 type Color uint32
 
 // RGBA builds a premultiplied color from straight components.
@@ -31,6 +35,16 @@ func (c Color) G() uint8 { return uint8(c >> 16 & 0xFF) }
 
 // B returns the premultiplied blue byte.
 func (c Color) B() uint8 { return uint8(c >> 8 & 0xFF) }
+
+// RGBA returns the color as a standard-library premultiplied RGBA8 value.
+func (c Color) RGBA() color.RGBA { return color.RGBA{R: c.R(), G: c.G(), B: c.B(), A: c.A()} }
+
+// AsColor converts a standard-library premultiplied RGBA8 color into a Bitmap
+// color. It is the inverse of RGBA, and the reason both types can stay 8-bit
+// premultiplied with no conversion table.
+func AsColor(c color.RGBA) Color {
+	return Color(uint32(c.R)<<24 | uint32(c.G)<<16 | uint32(c.B)<<8 | uint32(c.A))
+}
 
 // Opaque returns whether the color covers a pixel completely. The blit paths
 // have a whole-line copy fast path gated on this, so it is on the hot path.
@@ -88,6 +102,18 @@ func (b *Bitmap) Size() Size { return Size{W: int32(b.W), H: int32(b.H)} }
 
 // Bytes returns the backing allocation size, which is what tile budgets track.
 func (b *Bitmap) Bytes() int64 { return int64(len(b.RGBA)) }
+
+// AsRGBA reinterprets the buffer as an image.RGBA over the same memory, with no
+// copy. The layouts agree exactly: RGBA is four bytes per pixel in R, G, B, A
+// order, premultiplied, which is Color's packing, so this is a header and not a
+// conversion.
+//
+// It exists so the rasterizer can hand a tile to the standard drawing primitives
+// for antialiased glyph and image blending without a per-pixel At/Set round trip,
+// while every v2-owned path keeps using the typed Bitmap API.
+func (b *Bitmap) AsRGBA() *image.RGBA {
+	return &image.RGBA{Pix: b.RGBA, Stride: b.Stride, Rect: image.Rect(0, 0, b.W, b.H)}
+}
 
 // Reset zeroes every pixel, including padding bytes, so a buffer can be
 // returned to the pool in a defined state.

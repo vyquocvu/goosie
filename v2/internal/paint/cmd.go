@@ -130,10 +130,13 @@ type ImageSpec struct {
 // detail; unused fields stay zero, which costs a little memory and buys a
 // uniform slice.
 type DisplayCmd struct {
-	Kind    CmdKind
-	Rect    frame.Rect
-	Color   frame.Color
-	Border  BorderSpec
+	Kind   CmdKind
+	Rect   frame.Rect
+	Color  frame.Color
+	Border BorderSpec
+	// Opacity multiplies the command's coverage. Zero means unset, that is
+	// opaque, so a producer only writes the field when it is not 1; an element
+	// that is fully transparent is dropped before it reaches a list at all.
 	Opacity float32
 	Text    TextRun
 	Image   ImageSpec
