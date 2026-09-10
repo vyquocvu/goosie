@@ -1,0 +1,320 @@
+package raster
+
+import (
+	"context"
+	"errors"
+	"runtime"
+	"sync"
+
+	"github.com/vyquocvu/goosie/v2/internal/frame"
+	"github.com/vyquocvu/goosie/v2/internal/paint"
+)
+
+// ErrPoolClosed and ErrQueueFull are the two ways a submit can be refused. Both
+// are ordinary outcomes rather than failures: a full queue means the rasterizers
+// are behind, and the correct response is to present the frame with the tiles
+// that are ready and re-ask next vsync. Blocking here would put tile raster on
+// the UI thread, which is invariant 2.
+var (
+	ErrPoolClosed = errors.New("raster: pool is closed")
+	ErrQueueFull  = errors.New("raster: job queue is full")
+)
+
+// ErrTilePanic replaces a panic raised inside one job. The distinction survives
+// because it has to: a tile whose rasterizer panicked is retried once and then
+// rendered blank with a counter, while a tile that returned an error may simply
+// be waiting on something that has not arrived yet.
+var ErrTilePanic = errors.New("raster: tile rasterizer panicked")
+
+// ErrNoRasterizer is what a job submitted to a pool built without a rasterizer
+// reports. Returning an error rather than panicking keeps a construction mistake
+// observable through the same channel as every other tile failure.
+var ErrNoRasterizer = errors.New("raster: pool has no rasterizer")
+
+// Job is one tile to paint. Out is a buffer the caller already acquired from the
+// grid's pool, so a worker never allocates a tile and never has to know where
+// buffers come from.
+type Job struct {
+	Layer  *frame.Layer
+	Coord  frame.TileCoord
+	DL     *paint.LayerDL
+	Bounds frame.Rect
+	Out    *frame.Bitmap
+}
+
+// Done is one job's result. Out is the same buffer the job carried, whether the
+// raster succeeded or not: it is the caller's, and on failure the caller decides
+// whether to release it or keep the stale pixels.
+type Done struct {
+	Coord   frame.TileCoord
+	LayerID frame.LayerID
+	Out     *frame.Bitmap
+	Err     error
+}
+
+// RasterFunc paints one tile. The pool takes a function rather than calling
+// RasterizeTile directly so that it stays independent of the fonts, the atlas,
+// and the display-list format, which is also what lets a test hand it a
+// rasterizer that panics on purpose.
+type RasterFunc func(j Job) error
+
+// DefaultRaster returns the RasterFunc the frame path uses.
+func DefaultRaster(f *Fonts, g *GlyphAtlas) RasterFunc {
+	return func(j Job) error {
+		return RasterizeTile(j.DL, j.Bounds, j.Out, f, g)
+	}
+}
+
+// PoolStats is a snapshot of what the pool did. The three counters partition the
+// submissions: Rasterized and Failed together are the jobs a worker ran, Refused
+// is the jobs that never reached one, and Panics is the subset of Failed that
+// recovered a panic. Rasterized therefore measures work completed rather than
+// traffic offered, which is what the frame gate asserts on.
+type PoolStats struct {
+	Workers    int
+	Queued     int
+	Rasterized int64
+	Failed     int64
+	Panics     int64
+	Refused    int64
+}
+
+// Pool is the raster side of the frame path: a fixed set of workers fed by a
+// queue the UI thread can always write to without waiting.
+type Pool struct {
+	raster  RasterFunc
+	workers int
+
+	jobs chan Job
+	done chan Done
+
+	ctx        context.Context
+	cancel     context.CancelFunc
+	start      sync.Once
+	wg         sync.WaitGroup
+	mu         sync.Mutex
+	closeOnce  sync.Once
+	closed     bool
+	rasterized int64
+	failed     int64
+	panics     int64
+	refused    int64
+}
+
+// DefaultWorkers is how many raster threads a pool gets when nobody says: all
+// but the one core the UI thread is spinning on, capped low enough that a
+// 128-core CI box does not build a queue nobody can drain in one vsync.
+func DefaultWorkers() int {
+	n := runtime.GOMAXPROCS(0) - 1
+	if n < 1 {
+		n = 1
+	}
+	if n > 4 {
+		n = 4
+	}
+	return n
+}
+
+// New returns an unstarted pool. queueDepth is how many tiles may wait to be
+// painted; a frame's worth of newly visible tiles is the sensible value, because
+// anything beyond that is work for a viewport the user may have already scrolled
+// past.
+func New(workers int, queueDepth int, raster RasterFunc) *Pool {
+	if workers <= 0 {
+		workers = DefaultWorkers()
+	}
+	if queueDepth <= 0 {
+		queueDepth = workers * 32
+	}
+	if raster == nil {
+		raster = func(Job) error { return ErrNoRasterizer }
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Pool{
+		raster:  raster,
+		workers: workers,
+		jobs:    make(chan Job, queueDepth),
+		done:    make(chan Done, queueDepth),
+		ctx:     ctx,
+		cancel:  cancel,
+	}
+}
+
+// Start launches the workers. It is idempotent, and the first call's context is
+// the one that governs them: when it is cancelled the pool closes itself, so a
+// caller that owns a document lifetime needs no separate teardown call.
+func (p *Pool) Start(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	p.start.Do(func() {
+		p.wg.Add(p.workers)
+		for i := 0; i < p.workers; i++ {
+			go p.work(ctx)
+		}
+		if done := ctx.Done(); done != nil {
+			go func() {
+				select {
+				case <-done:
+					p.Close()
+				case <-p.ctx.Done():
+				}
+			}()
+		}
+	})
+}
+
+// Workers returns the configured worker count.
+func (p *Pool) Workers() int { return p.workers }
+
+func (p *Pool) work(ctx context.Context) {
+	defer p.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.ctx.Done():
+			return
+		case j, ok := <-p.jobs:
+			if !ok {
+				return
+			}
+			p.run(j)
+		}
+	}
+}
+
+// run executes one job with the recovery that keeps a panic inside a single
+// tile. Without it, one bad display list would end every worker goroutine and
+// the page would stop painting with no diagnostic at all.
+func (p *Pool) run(j Job) {
+	d := Done{Coord: j.Coord, Out: j.Out}
+	if j.Layer != nil {
+		d.LayerID = j.Layer.ID
+	}
+	err := func() (err error) {
+		defer func() {
+			if v := recover(); v != nil {
+				p.mu.Lock()
+				p.panics++
+				p.mu.Unlock()
+				err = ErrTilePanic
+			}
+		}()
+		return p.raster(j)
+	}()
+	d.Err = err
+	p.mu.Lock()
+	if err == nil {
+		p.rasterized++
+	} else {
+		p.failed++
+	}
+	// A result the completion queue cannot hold is dropped rather than waited
+	// on: the buffer belongs to the caller, who will find the tile still stale
+	// and ask again, and a worker blocked on a UI thread that stopped polling is
+	// exactly the coupling this pool exists to avoid.
+	select {
+	case p.done <- d:
+	default:
+		p.refused++
+	}
+	p.mu.Unlock()
+}
+
+// Submit hands a tile to the pool without ever blocking. A full queue is
+// reported, not waited on: the tile stays stale and the next frame asks again,
+// which is the difference between a hitch and a stall.
+func (p *Pool) Submit(j Job) error {
+	p.mu.Lock()
+	if p.closed {
+		p.refused++
+		p.mu.Unlock()
+		return ErrPoolClosed
+	}
+	select {
+	case p.jobs <- j:
+		p.mu.Unlock()
+		return nil
+	default:
+		p.refused++
+		p.mu.Unlock()
+		return ErrQueueFull
+	}
+}
+
+// Poll takes one finished job if there is one, and never waits. This is the
+// shape invariant 2 requires of the UI thread: it can collect results, but there
+// is no call it can make that puts a raster behind a present.
+func (p *Pool) Poll() (Done, bool) {
+	select {
+	case d := <-p.done:
+		return d, true
+	default:
+		return Done{}, false
+	}
+}
+
+// Wait collects up to n results, blocking until either n have arrived or the
+// pool is closing. It exists for tools and tests that want a deterministic end
+// state; the frame path uses Poll, because invariant 2 forbids waiting on raster.
+//
+// Each call returns its own slice. A reused buffer was tried first, on the theory
+// that Wait is off the hot path anyway, and it is quietly wrong: two waiters that
+// serialise cleanly still each hand back the same array, so the second refill
+// rewrites the tiles the first is about to read, and the results are lost without
+// a race to point at.
+func (p *Pool) Wait(n int) []Done {
+	if n <= 0 {
+		return nil
+	}
+	// Capped growth rather than make([]Done, n): n is a caller's guess at how many
+	// results exist, and a pool must not be talked into a huge allocation by one.
+	out := make([]Done, 0, min(n, 64))
+	for len(out) < n {
+		select {
+		case d := <-p.done:
+			out = append(out, d)
+		case <-p.ctx.Done():
+			// Drain whatever already arrived so a caller that is tearing down can
+			// release every buffer it handed out.
+			for {
+				select {
+				case d := <-p.done:
+					out = append(out, d)
+				default:
+					return out
+				}
+			}
+		}
+	}
+	return out
+}
+
+// Stats returns a snapshot of the counters.
+func (p *Pool) Stats() PoolStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return PoolStats{
+		Workers:    p.workers,
+		Queued:     len(p.jobs),
+		Rasterized: p.rasterized,
+		Failed:     p.failed,
+		Panics:     p.panics,
+		Refused:    p.refused,
+	}
+}
+
+// Close stops the workers and waits for them to leave. In-flight jobs finish;
+// queued ones are dropped, which is correct because a dropped tile is simply a
+// tile nobody asked for any more.
+func (p *Pool) Close() error {
+	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		p.closed = true
+		p.mu.Unlock()
+		p.cancel()
+		p.wg.Wait()
+	})
+	return nil
+}
