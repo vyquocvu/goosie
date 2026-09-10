@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/vyquocvu/goosie/v2/internal/frame"
 	"github.com/vyquocvu/goosie/v2/internal/paint"
@@ -106,6 +107,13 @@ type PoolStats struct {
 
 // Pool is the raster side of the frame path: a fixed set of workers fed by a
 // queue the UI thread can always write to without waiting.
+//
+// The counters are atomic rather than mutex-guarded, and the reason is the same
+// invariant the channels are there for. A mutex held by a worker that is finishing
+// a tile can put the UI thread to sleep for the length of a raster - and when it
+// does, the runtime allocates a semaphore ticket for the waiter, which the frame
+// gate in v2/test/gate counts against the frame path it cannot tell apart from a
+// buffer. Neither is acceptable at 60fps, and neither is what a counter is worth.
 type Pool struct {
 	raster  RasterFunc
 	workers int
@@ -113,20 +121,28 @@ type Pool struct {
 	jobs chan Job
 	done chan Done
 
-	ctx         context.Context
-	cancel      context.CancelFunc
-	start       sync.Once
-	wg          sync.WaitGroup
-	mu          sync.Mutex
-	closeOnce   sync.Once
-	closed      bool
-	slots       int
-	outstanding int
-	rasterized  int64
-	failed      int64
-	panics      int64
-	refused     int64
-	dropped     int64
+	ctx       context.Context
+	cancel    context.CancelFunc
+	start     sync.Once
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+
+	slots int
+
+	// closed and outstanding are the pool's two decisions. The rest are tallies.
+	//
+	// outstanding is exact for the pool as the frame path uses it, which is one
+	// submitting goroutine: a check-then-add from several submitters could overshoot
+	// slots by their count, and the channel's own capacity is the hard bound either
+	// way. A second submitter would need a CAS loop here, not a mutex.
+	closed      atomic.Bool
+	outstanding atomic.Int64
+
+	rasterized atomic.Int64
+	failed     atomic.Int64
+	panics     atomic.Int64
+	refused    atomic.Int64
+	dropped    atomic.Int64
 }
 
 // DefaultWorkers is how many raster threads a pool gets when nobody says: all
@@ -237,20 +253,17 @@ func (p *Pool) run(j Job) {
 	err := func() (err error) {
 		defer func() {
 			if v := recover(); v != nil {
-				p.mu.Lock()
-				p.panics++
-				p.mu.Unlock()
+				p.panics.Add(1)
 				err = ErrTilePanic
 			}
 		}()
 		return p.raster(j)
 	}()
 	d.Err = err
-	p.mu.Lock()
 	if err == nil {
-		p.rasterized++
+		p.rasterized.Add(1)
 	} else {
-		p.failed++
+		p.failed.Add(1)
 	}
 	// A result the completion queue cannot hold is dropped rather than waited
 	// on: the buffer belongs to the caller, who will find the tile still stale and
@@ -259,9 +272,8 @@ func (p *Pool) run(j Job) {
 	select {
 	case p.done <- d:
 	default:
-		p.dropped++
+		p.dropped.Add(1)
 	}
-	p.mu.Unlock()
 }
 
 // Submit hands a tile to the pool without ever blocking. A full queue is
@@ -270,25 +282,20 @@ func (p *Pool) run(j Job) {
 // window - a caller that cannot collect any faster than this has no use for a
 // fifth tile, and would have had it handed back as a dropped result instead.
 func (p *Pool) Submit(j Job) error {
-	p.mu.Lock()
-	if p.closed {
-		p.refused++
-		p.mu.Unlock()
+	if p.closed.Load() {
+		p.refused.Add(1)
 		return ErrPoolClosed
 	}
-	if p.outstanding >= p.slots {
-		p.refused++
-		p.mu.Unlock()
+	if p.outstanding.Load() >= int64(p.slots) {
+		p.refused.Add(1)
 		return ErrQueueFull
 	}
 	select {
 	case p.jobs <- j:
-		p.outstanding++
-		p.mu.Unlock()
+		p.outstanding.Add(1)
 		return nil
 	default:
-		p.refused++
-		p.mu.Unlock()
+		p.refused.Add(1)
 		return ErrQueueFull
 	}
 }
@@ -299,9 +306,7 @@ func (p *Pool) collected(n int) {
 	if n <= 0 {
 		return
 	}
-	p.mu.Lock()
-	p.outstanding -= n
-	p.mu.Unlock()
+	p.outstanding.Add(-int64(n))
 }
 
 // Poll takes one finished job if there is one, and never waits. This is the
@@ -354,19 +359,20 @@ func (p *Pool) Wait(n int) []Done {
 	return out
 }
 
-// Stats returns a snapshot of the counters.
+// Stats reads the counters. Each is loaded atomically and the set is not a
+// transaction: a worker can finish a tile between two of the loads, so Rasterized
+// and Outstanding can disagree by one job. Nothing can fix that without stopping the
+// workers to look, which is what this pool exists to avoid.
 func (p *Pool) Stats() PoolStats {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return PoolStats{
 		Workers:        p.workers,
 		Queued:         len(p.jobs),
-		Rasterized:     p.rasterized,
-		Failed:         p.failed,
-		Panics:         p.panics,
-		Refused:        p.refused,
-		DroppedResults: p.dropped,
-		Outstanding:    int64(p.outstanding),
+		Rasterized:     p.rasterized.Load(),
+		Failed:         p.failed.Load(),
+		Panics:         p.panics.Load(),
+		Refused:        p.refused.Load(),
+		DroppedResults: p.dropped.Load(),
+		Outstanding:    p.outstanding.Load(),
 	}
 }
 
@@ -375,9 +381,7 @@ func (p *Pool) Stats() PoolStats {
 // tile nobody asked for any more.
 func (p *Pool) Close() error {
 	p.closeOnce.Do(func() {
-		p.mu.Lock()
-		p.closed = true
-		p.mu.Unlock()
+		p.closed.Store(true)
 		p.cancel()
 		p.wg.Wait()
 	})

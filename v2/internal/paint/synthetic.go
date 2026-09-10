@@ -42,8 +42,6 @@ const (
 
 	// sceneLayerID identifies the one layer a scene owns.
 	sceneLayerID = frame.LayerID(1)
-	// scenePoolIdle caps the tile pool's free list; the budget is the real limit.
-	scenePoolIdle = 512
 	// sceneMargin keeps the outermost commands off the document's edge, so a bounds
 	// assertion is never decided by a half pixel.
 	sceneMargin = int32(8)
@@ -96,6 +94,11 @@ type SceneSpec struct {
 	// BudgetTiles is the layer's tile-buffer budget, the knob the byte-budget criteria
 	// are stated in. Zero or less means DefaultBudgetTiles.
 	BudgetTiles int64
+	// PreallocTiles is how many tile buffers the layer's pool creates up front instead of
+	// on first acquire. Zero - the default - means none, which is right for a page: the
+	// pool fills as the document is scrolled. A gate that intends to measure a cold
+	// document without the pool's first-touch allocations in the numbers sets it.
+	PreallocTiles int32
 }
 
 func (s SceneSpec) cols() int32 {
@@ -132,14 +135,21 @@ func (s SceneSpec) runs() int32 {
 	return DefaultTextRuns
 }
 
-// budget returns the layer's tile byte budget, which the grid clamps up to at least
-// one tile.
-func (s SceneSpec) budget() int64 {
+// budgetTiles returns the layer's tile-buffer budget as a whole number of buffers,
+// rounded up and never below one, since a grid that cannot hold a tile is raised to
+// one tile by NewGrid anyway.
+func (s SceneSpec) budgetTiles() int64 {
 	n := s.BudgetTiles
 	if n <= 0 {
 		n = DefaultBudgetTiles
 	}
-	return n * frame.TileSizeBytes()
+	return n
+}
+
+// budget returns the layer's tile byte budget, which the grid clamps up to at least
+// one tile.
+func (s SceneSpec) budget() int64 {
+	return s.budgetTiles() * frame.TileSizeBytes()
 }
 
 // BuildLayer returns a frozen display list and the layer that caches its tiles.
@@ -196,7 +206,15 @@ func BuildLayer(spec SceneSpec) (*LayerDL, *frame.Layer) {
 	}
 	dl := b.list.Build(SceneVersion).Publish()
 
-	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, scenePoolIdle)
+	// The pool's free list has to be able to hold every buffer the layer's budget can
+	// pay for. A list that is shorter than the budget drops the releases it cannot keep,
+	// and the next acquire then allocates - which breaks invariant 6 through a constant
+	// nobody intended as a limit. maxIdle is a ceiling on retention, not on creation, so
+	// sizing it to the budget costs nothing until tiles actually exist.
+	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(spec.budgetTiles()))
+	if n := spec.PreallocTiles; n > 0 {
+		pool.Prealloc(int(n))
+	}
 	l := frame.NewLayer(sceneLayerID, frame.Rect4(0, 0, b.w, b.h), spec.budget(), pool)
 	l.SetContent(dl)
 	return dl, l

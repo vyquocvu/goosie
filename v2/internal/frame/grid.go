@@ -17,6 +17,11 @@ type Grid struct {
 	head  *Tile // most recently used tile holding pixels
 	tail  *Tile
 
+	// free holds tile records built at construction, so the first visit to a
+	// coordinate costs the frame path a pointer copy rather than an allocation. See
+	// recordCap.
+	free []*Tile
+
 	used   int64
 	budget int64
 	clock  uint64
@@ -64,12 +69,62 @@ func NewGrid(extent Rect, tileSize int32, budget int64, pool *BitmapPool) *Grid 
 	if budget < one {
 		budget = one
 	}
-	return &Grid{
+	g := &Grid{
 		tileSize: tileSize,
 		extent:   extent.Canon(),
-		tiles:    make(map[TileCoord]*Tile),
 		budget:   budget,
 		pool:     pool,
+	}
+	// The map is sized to the record cap rather than left to grow: a map that doubles
+	// halfway down a document allocates during a scroll frame, which is the one frame
+	// invariant 6 is stated about, and the growth is invisible in every other
+	// measurement. Sizing it here costs the same memory, just earlier.
+	n := g.recordCap()
+	g.tiles = make(map[TileCoord]*Tile, n)
+	g.prebuild(n)
+	return g
+}
+
+// coordCount is how many tile coordinates the extent covers, which is the ceiling on
+// what the map can ever hold: a coordinate outside the extent is never produced,
+// because ensure refuses one and VisibleCoords and PrefetchCoords both clip.
+func (g *Grid) coordCount() int {
+	if g.tileSize <= 0 || g.extent.Empty() {
+		return 0
+	}
+	cols := int((g.extent.W() + g.tileSize - 1) / g.tileSize)
+	rows := int((g.extent.H() + g.tileSize - 1) / g.tileSize)
+	return cols * rows
+}
+
+// recordCap bounds the pre-build at the extent's coordinate count, or a few
+// budgets' worth when the document is far larger than the cache can hold. The other
+// half of that limit is why the records are cheap enough to pre-build at all: a
+// document 200,000px tall has some 9,400 coordinates, and 900KB of metadata paid
+// before the first scroll is a bad trade for the ~500 of them a page can have on
+// screen and in the prefetch ring at once.
+func (g *Grid) recordCap() int {
+	const budgetMultiple = 4
+	n := g.coordCount()
+	if limit := int(g.budget/(int64(g.tileSize)*int64(g.tileSize)*4)) * budgetMultiple; n > limit {
+		n = limit
+	}
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// prebuild puts n zero-valued tile records on the free list.
+func (g *Grid) prebuild(n int) {
+	if n <= 0 {
+		return
+	}
+	if g.free == nil {
+		g.free = make([]*Tile, 0, n)
+	}
+	for i := 0; i < n; i++ {
+		g.free = append(g.free, &Tile{})
 	}
 }
 
@@ -105,9 +160,28 @@ func (g *Grid) ensure(c TileCoord) *Tile {
 	if !g.Inside(c) {
 		return nil
 	}
-	t := &Tile{Coord: c, Bounds: c.Rect(g.tileSize), State: TileEmpty}
+	t := g.newRecord(c)
 	g.tiles[c] = t
 	g.counts[TileEmpty]++
+	return t
+}
+
+// newRecord hands out a tile record for a coordinate, from the set NewGrid built when
+// there is one left. The records on that list are zero-valued and were never in the
+// map, so nothing needs resetting; only the two fields that identify a tile are
+// written. Falling through to an allocation is the ordinary case for a document
+// bigger than a few budgets, where the metadata is not worth holding in advance.
+func (g *Grid) newRecord(c TileCoord) *Tile {
+	var t *Tile
+	if n := len(g.free); n > 0 {
+		t = g.free[n-1]
+		g.free = g.free[:n-1]
+	} else {
+		t = new(Tile)
+	}
+	t.Coord = c
+	t.Bounds = c.Rect(g.tileSize)
+	t.State = TileEmpty
 	return t
 }
 

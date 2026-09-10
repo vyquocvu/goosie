@@ -28,6 +28,28 @@ type Composer struct {
 	damage []frame.Rect
 }
 
+// ReserveDamage widens the scratch Compose returns its list from, to hold at least n
+// rects. It never shrinks what is already there, so calling it every frame costs a
+// comparison.
+//
+// Compose's list is the frame path's last un-reserved buffer: everything the scheduler
+// hands it is pre-sized, but this one grew on the first frame wide enough to need it,
+// which is a scroll-frame allocation on the way into steady state and invariant 6's.
+// The scheduler, which owns the geometry that bounds the count, reserves it on the
+// composer's behalf; a driver that composes without one calls this at setup.
+func (c *Composer) ReserveDamage(n int) {
+	if cap(c.damage) >= n {
+		return
+	}
+	if c.damage == nil {
+		c.damage = make([]frame.Rect, 0, n)
+		return
+	}
+	grown := make([]frame.Rect, len(c.damage), n)
+	copy(grown, c.damage)
+	c.damage = grown
+}
+
 // NewComposer returns a composer with a backing store sized to vp. The pool
 // should be sized to vp too; when it is not, the buffer is allocated at vp rather
 // than acquired, because presenting a buffer whose size is the pool's and not the

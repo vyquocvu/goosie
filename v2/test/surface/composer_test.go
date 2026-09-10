@@ -153,6 +153,58 @@ func TestComposeWithScratchDamageIsAllocationFree(t *testing.T) {
 	}
 }
 
+// columns returns n one-pixel-wide rects across a 64px surface, which is the shape a
+// page whose every visible tile changed produces.
+func columns(n int) []frame.Rect {
+	out := make([]frame.Rect, n)
+	for i := range out {
+		out[i] = frame.Rect4(int32(i), 0, int32(i)+1, 64)
+	}
+	return out
+}
+
+// TestReserveDamagePaysForTheWideningAtSetup is Composer.ReserveDamage's contract: the
+// list it reserves is the one Compose returns, a request smaller than what is already
+// there changes nothing, and a list too wide for the reserve is still correct.
+//
+// The buffer's address is the evidence that a frame allocated nothing, which is a
+// steadier claim than an allocation counter: growth would have to move the list, and the
+// frame path's consequence - a cold burst that allocates - is what the gate in
+// v2/test/gate asserts end to end.
+func TestReserveDamagePaysForTheWideningAtSetup(t *testing.T) {
+	c := newComposer(64, 64)
+	c.ReserveDamage(8)
+	wide := columns(8)
+
+	got := c.Compose(frame.RGB(0, 0, 0), nil, wide, nil)
+	if len(got) != 8 {
+		t.Fatalf("Compose returned %d rects for 8 damaged columns", len(got))
+	}
+	addr := unsafe.Pointer(&got[0])
+
+	// A narrower frame reuses the buffer rather than trading it for a smaller one.
+	if got = c.Compose(frame.RGB(0, 0, 0), nil, wide[:3], nil); len(got) != 3 {
+		t.Fatalf("Compose returned %d rects for 3", len(got))
+	}
+	c.ReserveDamage(2)
+	if again := c.Compose(frame.RGB(0, 0, 0), nil, wide, nil); unsafe.Pointer(&again[0]) != addr {
+		t.Fatal("a request smaller than the current capacity moved the list; ReserveDamage must not shrink it")
+	}
+
+	// Wider than the reserve is still correct: the list grows, and what comes back is
+	// what went in.
+	d := newComposer(64, 64)
+	d.ReserveDamage(2)
+	if got = d.Compose(frame.RGB(0, 0, 0), nil, columns(8), nil); len(got) != 8 {
+		t.Fatalf("a composer reserved for 2 returned %d rects for 8", len(got))
+	}
+	for i, r := range got {
+		if want := (frame.Rect4(int32(i), 0, int32(i)+1, 64)); r != want {
+			t.Fatalf("rect %d = %v, want %v", i, r, want)
+		}
+	}
+}
+
 func TestShiftYMovesRowsAndCountsWrites(t *testing.T) {
 	c := newComposer(4, 8)
 	b := c.Backing

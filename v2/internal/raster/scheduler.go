@@ -403,6 +403,10 @@ func (s *Scheduler) ComposeInto(backing *frame.Bitmap, c *surface.Composer, plan
 	if backing == nil || c == nil || plan == nil {
 		return nil
 	}
+	// The composer returns its own scratch list, and this frame can hand it everything
+	// the damage buffer holds. Reserving the bound rather than this frame's length keeps
+	// the widening out of the frames that follow: see Composer.ReserveDamage.
+	c.ReserveDamage(cap(s.damage))
 	if s.grid == nil {
 		// No layer to composite is still a surface that must show the background
 		// rather than whatever the last document left there.
