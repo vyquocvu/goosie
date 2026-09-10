@@ -45,11 +45,20 @@ type Job struct {
 // Done is one job's result. Out is the same buffer the job carried, whether the
 // raster succeeded or not: it is the caller's, and on failure the caller decides
 // whether to release it or keep the stale pixels.
+//
+// Version is the content version those pixels depict, read off the job's frozen
+// display list rather than taken from the layer the caller still holds. The
+// difference is the whole point: content can bump while a job runs, and a caller
+// that labelled the older rendering current would mark a tile valid that it still
+// owes a raster for, permanently.
 type Done struct {
 	Coord   frame.TileCoord
 	LayerID frame.LayerID
 	Out     *frame.Bitmap
 	Err     error
+	// Version is 0 for a job that carried no display list, which no caller may mark
+	// valid at any real version.
+	Version uint64
 }
 
 // RasterFunc paints one tile. The pool takes a function rather than calling
@@ -221,6 +230,9 @@ func (p *Pool) run(j Job) {
 	d := Done{Coord: j.Coord, Out: j.Out}
 	if j.Layer != nil {
 		d.LayerID = j.Layer.ID
+	}
+	if j.DL != nil {
+		d.Version = j.DL.Version()
 	}
 	err := func() (err error) {
 		defer func() {

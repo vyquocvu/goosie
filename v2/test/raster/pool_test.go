@@ -682,6 +682,50 @@ func TestPoolRasterizesRealTilesIntoGridBuffers(t *testing.T) {
 	}
 }
 
+// A result has to say which content version it depicts, because the caller cannot
+// recover that from the layer it still holds: content bumps while jobs run, and a
+// scheduler that assumed the current version would install older pixels and then
+// believe they were finished.
+func TestDoneCarriesTheVersionTheJobPainted(t *testing.T) {
+	src := paint.NewList(1)
+	src.Append(paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(0, 0, 64, 64), Color: frame.RGB(1, 2, 3)})
+	newer := src.Build(9).Publish()
+	l, older := newLayer(t, 1, 1)
+	if older.Version() != 3 {
+		t.Fatalf("setup: expected a version 3 list, got %d", older.Version())
+	}
+
+	p := raster.New(2, 8, func(raster.Job) error { return nil })
+	p.Start(context.Background())
+	defer p.Close()
+
+	jobs := []raster.Job{
+		{Layer: l, Coord: frame.TileCoord{Col: 0, Row: 0}, DL: older, Bounds: frame.Rect4(0, 0, 64, 64), Out: newTile()},
+		{Layer: l, Coord: frame.TileCoord{Col: 1, Row: 0}, DL: newer, Bounds: frame.Rect4(0, 0, 64, 64), Out: newTile()},
+		// A job with no list at all: the zero version is what makes a caller refuse it
+		// rather than accidentally mark a tile current.
+		{Layer: l, Coord: frame.TileCoord{Col: 2, Row: 0}, Bounds: frame.Rect4(0, 0, 64, 64), Out: newTile()},
+	}
+	for _, j := range jobs {
+		if err := p.Submit(j); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+	}
+	got := map[frame.TileCoord]uint64{}
+	for _, d := range collect(t, p, len(jobs)) {
+		got[d.Coord] = d.Version
+	}
+	if want := uint64(3); got[jobs[0].Coord] != want {
+		t.Errorf("version for %v = %d, want %d", jobs[0].Coord, got[jobs[0].Coord], want)
+	}
+	if want := uint64(9); got[jobs[1].Coord] != want {
+		t.Errorf("version for %v = %d, want %d", jobs[1].Coord, got[jobs[1].Coord], want)
+	}
+	if got[jobs[2].Coord] != 0 {
+		t.Errorf("version for a listless job = %d, want 0", got[jobs[2].Coord])
+	}
+}
+
 // newLayer returns a layer over a cols x rows tile grid whose single command
 // fills the whole extent, with a budget that holds every tile at once.
 func newLayer(t *testing.T, cols, rows int32) (*frame.Layer, *paint.LayerDL) {
