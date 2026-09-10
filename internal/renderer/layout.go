@@ -48,6 +48,8 @@ func NewLayoutEngine(width, height float32) *LayoutEngine {
 		gridEngine:      NewGridLayoutEngine(fontMetrics),
 	}
 	le.flexEngine.minContentFn = le.minContentSize
+	le.flexEngine.maxContentFn = le.measureMaxContentWidth
+	le.gridEngine.MeasureMaxContent = le.measureMaxContentWidth
 	return le
 }
 
@@ -177,8 +179,8 @@ func (le *LayoutEngine) buildLayoutBox(node *RenderNode, x, y, availableWidth fl
 		} else {
 			layoutBox.Box.Height = calculatedHeight
 		}
-	} else if node.TagName == "img" {
-		// For img elements, fall back to HTML height attribute if CSS height is not set,
+	} else if node.TagName == "img" || node.TagName == "svg" {
+		// For img and svg elements, fall back to HTML height attribute if CSS height is not set,
 		// then to the image's intrinsic height once it is loaded.
 		if hAttr, ok := node.GetAttribute("height"); ok && hAttr != "" {
 			if v := parseLength(hAttr, le.defaultFontSize); v > 0 {
@@ -622,7 +624,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		}
 		explicitWidth = parseLengthWithViewport(node.ComputedStyle.Width, fontSize, le.canvasWidth, le.canvasHeight, availableWidth)
 	}
-	if node.TagName == "img" && explicitWidth < 0 {
+	if (node.TagName == "img" || node.TagName == "svg") && explicitWidth < 0 {
 		if wAttr, ok := node.GetAttribute("width"); ok && wAttr != "" {
 			if v := parseLength(wAttr, le.defaultFontSize); v > 0 {
 				explicitWidth = v
@@ -644,6 +646,8 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		if node.ComputedStyle != nil && node.ComputedStyle.BoxSizing != "border-box" {
 			usedBoxWidth += layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
+	} else if (node.TagName == "img" || node.TagName == "svg") && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+		usedBoxWidth = float32(node.ImageData.Width) + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 	} else if node.ComputedStyle != nil && node.ComputedStyle.MaxWidth != "" && node.ComputedStyle.MaxWidth != "none" {
 		maxW := parseLengthWithViewport(node.ComputedStyle.MaxWidth, fontSize, le.canvasWidth, le.canvasHeight, availableWidth)
 		if maxW >= 0 {
@@ -682,7 +686,7 @@ func (le *LayoutEngine) computeLayoutBox(node *RenderNode, layoutBox *LayoutBox,
 		} else {
 			width = explicitWidth + layoutBox.PaddingLeft + layoutBox.PaddingRight + layoutBox.BorderLeftWidth + layoutBox.BorderRightWidth
 		}
-	} else if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+	} else if (node.TagName == "img" || node.TagName == "svg") && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		width = float32(node.ImageData.Width)
 	} else if node.ComputedStyle != nil && (node.ComputedStyle.Float == css.FloatAtomLeft || node.ComputedStyle.Float == css.FloatAtomRight || node.ComputedStyle.Display == css.DisplayAtomInlineBlock) {
 		contentW := float32(0)
@@ -1059,6 +1063,10 @@ func (le *LayoutEngine) layoutBlockAndInline(node *RenderNode, layoutBox *Layout
 				}
 			}
 			childY += totalHeight
+			// The inline run became an anonymous block box between lastChild
+			// and the next block sibling, so margin collapse against lastChild
+			// no longer applies; the next block stacks from childY instead.
+			lastChild = nil
 		}
 		run = run[:0]
 	}
@@ -1313,7 +1321,7 @@ func (le *LayoutEngine) measureMaxContentWidth(node *RenderNode) float32 {
 		return 0
 	}
 
-	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+	if (node.TagName == "img" || node.TagName == "svg") && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		return float32(node.ImageData.Width)
 	}
 
@@ -1371,7 +1379,7 @@ func (le *LayoutEngine) minContentSize(node *RenderNode) float32 {
 	if node.Type == NodeTypeText {
 		return 0
 	}
-	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+	if (node.TagName == "img" || node.TagName == "svg") && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		box := NewLayoutBox(node.ID)
 		le.applyBoxModel(node, box)
 		return float32(node.ImageData.Width) + box.PaddingLeft + box.PaddingRight + box.BorderLeftWidth + box.BorderRightWidth
@@ -1459,7 +1467,7 @@ func (le *LayoutEngine) widestInlineSegment(node *RenderNode) float32 {
 		}
 		return widest
 	}
-	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+	if (node.TagName == "img" || node.TagName == "svg") && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		return float32(node.ImageData.Width)
 	}
 	// Replaced-style elements contribute fixed intrinsic widths, not flowing
@@ -1470,9 +1478,6 @@ func (le *LayoutEngine) widestInlineSegment(node *RenderNode) float32 {
 	// through the generic child loop below instead.
 	if node.TagName == "input" {
 		return float32(150) // matches the form-control default width in computeElementLayout
-	}
-	if node.TagName == "svg" {
-		return 0
 	}
 	var widest float32
 	for _, c := range node.Children {
@@ -1518,6 +1523,13 @@ func (le *LayoutEngine) hasInlineContentRecursive(node *RenderNode) bool {
 // extractButtonText extracts text content recursively from a render node
 func (le *LayoutEngine) extractButtonText(node *RenderNode) string {
 	if node == nil {
+		return ""
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == css.DisplayAtomNone {
+		return ""
+	}
+	switch node.TagName {
+	case "style", "script", "noscript", "template":
 		return ""
 	}
 	if node.Type == NodeTypeText {

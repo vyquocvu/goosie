@@ -42,7 +42,8 @@ func TestBufferPool_GetAndPut(t *testing.T) {
 	}
 
 	// Should be the same underlying array (reused)
-	if &buf2.Pix[0] != &buf1.Pix[0] {
+	reused := &buf2.Pix[0] == &buf1.Pix[0]
+	if !reused {
 		t.Log("Warning: Buffer was not reused (may be GC'd)")
 	}
 
@@ -56,7 +57,7 @@ func TestBufferPool_GetAndPut(t *testing.T) {
 	if stats.Puts != 2 {
 		t.Errorf("Expected 2 Puts, got %d", stats.Puts)
 	}
-	if stats.Allocs != 1 {
+	if reused && stats.Allocs != 1 {
 		t.Errorf("Expected 1 Alloc, got %d", stats.Allocs)
 	}
 }

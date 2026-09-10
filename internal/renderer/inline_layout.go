@@ -606,7 +606,7 @@ func (ile *InlineLayoutEngine) addInlineBlockToLines(
 		}
 	}
 
-	if node.TagName == "img" && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
+	if (node.TagName == "img" || node.TagName == "svg") && node.ImageData != nil && node.ImageData.State == imageloader.StateLoaded {
 		if width < 0 {
 			width = float32(node.ImageData.Width)
 		}
@@ -885,7 +885,7 @@ func (ile *InlineLayoutEngine) isInlineBlock(node *RenderNode) bool {
 		}
 	}
 	switch node.TagName {
-	case "img", "button", "input", "select":
+	case "img", "svg", "button", "input", "select":
 		return true
 	}
 	return false

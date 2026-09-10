@@ -190,3 +190,114 @@ func TestCacheUpdate(t *testing.T) {
 		t.Errorf("Expected updated width 150, got %d", result.Width)
 	}
 }
+
+func TestCacheByteBoundsEviction(t *testing.T) {
+	// 100 KB limit, capacity 10
+	cache := img.NewCacheWithByteLimit(100*1024, 10)
+	if cache.MaxBytes() != 100*1024 {
+		t.Errorf("Expected maxBytes 102400, got %d", cache.MaxBytes())
+	}
+
+	// 100x100 RGBA image is 40,000 bytes (~39 KB)
+	img1 := &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded}
+	img2 := &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded}
+	img3 := &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded}
+
+	cache.Put("img1", img1) // 40 KB
+	cache.Put("img2", img2) // 80 KB
+	if cache.Len() != 2 {
+		t.Fatalf("Expected 2 items, got %d", cache.Len())
+	}
+	if cache.Bytes() != 80000 {
+		t.Errorf("Expected 80000 bytes, got %d", cache.Bytes())
+	}
+
+	// Adding img3 would bring total to 120 KB (> 100 KB budget) -> evicts img1
+	cache.Put("img3", img3)
+
+	if cache.Len() != 2 {
+		t.Fatalf("Expected 2 items after byte-bound eviction, got %d", cache.Len())
+	}
+	if cache.Bytes() > 100*1024 {
+		t.Errorf("Cache bytes %d exceeds maxBytes %d", cache.Bytes(), cache.MaxBytes())
+	}
+	if cache.Get("img1") != nil {
+		t.Error("Expected img1 to be evicted due to byte limit")
+	}
+	if cache.Get("img2") == nil || cache.Get("img3") == nil {
+		t.Error("Expected img2 and img3 to be retained")
+	}
+}
+
+func TestCacheEvictMethod(t *testing.T) {
+	cache := img.NewCacheWithByteLimit(200*1024, 10)
+
+	// 3 images of 40 KB each = 120 KB total
+	cache.Put("img1", &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded})
+	cache.Put("img2", &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded})
+	cache.Put("img3", &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded})
+
+	if cache.Bytes() != 120000 {
+		t.Fatalf("Expected 120000 bytes, got %d", cache.Bytes())
+	}
+
+	// Evict 50 KB -> should evict img1 (40 KB) and img2 (40 KB) = 80 KB freed
+	freed := cache.Evict(50 * 1024)
+	if freed < 50*1024 {
+		t.Errorf("Expected freed >= 50KB, got %d", freed)
+	}
+	if cache.Bytes() > 70*1024 {
+		t.Errorf("Expected remaining bytes <= 70KB, got %d", cache.Bytes())
+	}
+	if cache.Get("img1") != nil {
+		t.Error("Expected img1 to be evicted")
+	}
+	if cache.Get("img3") == nil {
+		t.Error("Expected newest img3 to be retained")
+	}
+}
+
+func TestCacheUsageCallback(t *testing.T) {
+	cache := img.NewCacheWithByteLimit(100*1024, 10)
+
+	var lastReported uint64
+	callbackCount := 0
+	cache.SetUsageCallback(func(bytes uint64) {
+		lastReported = bytes
+		callbackCount++
+	})
+
+	// Initial call on SetUsageCallback (0 bytes)
+	if callbackCount != 1 || lastReported != 0 {
+		t.Fatalf("Expected initial callback with 0 bytes, got count=%d, bytes=%d", callbackCount, lastReported)
+	}
+
+	// Put an image of 40 KB
+	cache.Put("img1", &img.ImageData{Width: 100, Height: 100, Format: "png", State: img.StateLoaded})
+	if lastReported != 40000 {
+		t.Errorf("Expected reported bytes 40000, got %d", lastReported)
+	}
+
+	// Clear cache
+	cache.Clear()
+	if lastReported != 0 {
+		t.Errorf("Expected reported bytes 0 after clear, got %d", lastReported)
+	}
+}
+
+func TestCacheOversizedItemNotCached(t *testing.T) {
+	// Cache max 50 KB
+	cache := img.NewCacheWithByteLimit(50*1024, 10)
+
+	// Image of 200x200 = 160 KB (> 50 KB)
+	oversized := &img.ImageData{Width: 200, Height: 200, Format: "png", State: img.StateLoaded}
+	cache.Put("large", oversized)
+
+	if cache.Len() != 0 {
+		t.Errorf("Expected oversized item not to be cached, got len %d", cache.Len())
+	}
+	if cache.Get("large") != nil {
+		t.Error("Expected nil for oversized item")
+	}
+}
+

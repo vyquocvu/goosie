@@ -101,12 +101,53 @@ func TestRasterCanvas_TappedSecondary(t *testing.T) {
 func TestRasterCanvas_Scrolled(t *testing.T) {
 	irc := ui.NewInteractiveRasterCanvas(nil)
 
+	var receivedOffset float32
+	called := false
+	irc.SetOnScrolled(func(offset float32) {
+		called = true
+		receivedOffset = offset
+	})
+
 	event := &fyne.ScrollEvent{
-		Scrolled: fyne.NewDelta(0, -1), // Scroll down
+		Scrolled: fyne.NewDelta(0, -2), // Scroll down 2 ticks = 100px
 	}
 
-	// Should not panic
 	irc.Scrolled(event)
+
+	if !called {
+		t.Fatal("expected onScrolled callback to be called")
+	}
+	if receivedOffset != 100.0 {
+		t.Fatalf("expected scrollOffset 100.0, got %f", receivedOffset)
+	}
+	if irc.ScrollOffset() != 100.0 {
+		t.Fatalf("expected ScrollOffset() 100.0, got %f", irc.ScrollOffset())
+	}
+}
+
+// TestRasterCanvas_Dragged verifies drag event scrolling.
+func TestRasterCanvas_Dragged(t *testing.T) {
+	irc := ui.NewInteractiveRasterCanvas(nil)
+	irc.SetScrollOffset(50.0)
+
+	var receivedOffset float32
+	called := false
+	irc.SetOnScrolled(func(offset float32) {
+		called = true
+		receivedOffset = offset
+	})
+
+	dragEvent := &fyne.DragEvent{
+		Dragged: fyne.NewDelta(0, -30),
+	}
+	irc.Dragged(dragEvent)
+
+	if !called {
+		t.Fatal("expected onScrolled callback to be called on drag")
+	}
+	if receivedOffset != 80.0 {
+		t.Fatalf("expected scrollOffset 80.0, got %f", receivedOffset)
+	}
 }
 
 // TestRasterCanvas_Focus verifies focus handling.

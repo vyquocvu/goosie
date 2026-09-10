@@ -154,6 +154,9 @@ func (r *renderParsedSpy) SetNavigationCallback(_ func(string)) {}
 func (r *renderParsedSpy) HitTest(_, _ float32) (*renderer.RenderNode, *renderer.LayoutBox) {
 	return nil, nil
 }
+func (r *renderParsedSpy) ActivateClick(_ *renderer.RenderNode) renderer.Activation {
+	return renderer.Activation{}
+}
 func (r *renderParsedSpy) SetInspectCallback(_ func(*renderer.RenderNode, *renderer.LayoutBox)) {}
 func (r *renderParsedSpy) SetContextMenuCallback(_ func(*renderer.RenderNode, *renderer.LayoutBox, fyne.Position)) {
 }

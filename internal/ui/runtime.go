@@ -38,16 +38,11 @@ var mainGoroutineID atomic.Uint64
 // inside the glfw driver's init and is therefore always the first to
 // reach this function via NewBrowser / NewBrowserWithDependencies.
 func captureMainGoroutineID() {
-	id := currentGoroutineID()
-	for {
-		prev := mainGoroutineID.Load()
-		if prev != 0 {
-			return
-		}
-		if mainGoroutineID.CompareAndSwap(0, id) {
-			return
-		}
+	if mainGoroutineID.Load() != 0 {
+		return
 	}
+	id := currentGoroutineID()
+	mainGoroutineID.CompareAndSwap(0, id)
 }
 
 // IsMainGoroutine reports whether the caller is running on the Fyne main
@@ -62,7 +57,10 @@ func IsMainGoroutine() bool {
 		// captureMainGoroutineID is safe to call from any goroutine — the
 		// "first caller wins" rule matches NewBrowser which always runs on
 		// the Fyne main goroutine.
-		captureMainGoroutineID()
+		id := currentGoroutineID()
+		if mainGoroutineID.CompareAndSwap(0, id) {
+			return true
+		}
 		main = mainGoroutineID.Load()
 	}
 	return currentGoroutineID() == main
@@ -108,23 +106,20 @@ func RunOnMainThread(fn func()) {
 // use; Go's runtime deliberately hides the value for a reason but
 // exposing it for a UI-thread check is a long-standing pattern.
 func currentGoroutineID() uint64 {
-	var buf [64]byte
+	var buf [30]byte
 	n := runtime.Stack(buf[:], false)
 	// Header is "goroutine <id> [other stuff]:"
-	// The first ' ' is after "goroutine"; everything up to the next ' '
-	// is the decimal ID.
-	const prefix = "goroutine "
-	if n < len(prefix) {
+	// "goroutine " prefix is exactly 10 bytes.
+	if n <= 10 {
 		return 0
 	}
-	// Locate the trailing space after the ID.
-	id := uint64(0)
-	for i := len(prefix); i < n && buf[i] != ' '; i++ {
-		c := buf[i]
-		if c < '0' || c > '9' {
+	var id uint64
+	for i := 10; i < n && buf[i] != ' '; i++ {
+		b := buf[i]
+		if b < '0' || b > '9' {
 			break
 		}
-		id = id*10 + uint64(c-'0')
+		id = id*10 + uint64(b-'0')
 	}
 	return id
 }

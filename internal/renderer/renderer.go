@@ -2,23 +2,26 @@ package renderer
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
-	"time"
-
-	"github.com/vyquocvu/goosie/internal/engine/metrics"
+	"image"
+	"log"
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"golang.org/x/net/html"
 
 	"github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/engine/metrics"
 	imageloader "github.com/vyquocvu/goosie/internal/image"
+	"github.com/vyquocvu/goosie/internal/memory"
 	"github.com/vyquocvu/goosie/internal/net"
-	"log"
+	"github.com/vyquocvu/goosie/internal/renderer/frame"
+	"github.com/vyquocvu/goosie/internal/renderer/frame/raster"
 )
 
 // Renderer is the main HTML renderer that coordinates parsing, layout, and rendering
@@ -28,6 +31,7 @@ type Renderer struct {
 	canvasRenderer *CanvasRenderer
 	chunkedDisplay *ChunkedDisplayList
 	imageLoader    imageloader.Loader
+	memMgr         *memory.Manager
 	stylesheet     *css.StyleSheet
 	fetcher        *net.Fetcher
 
@@ -100,6 +104,11 @@ type Renderer struct {
 
 // NewRenderer creates a new HTML renderer
 func NewRenderer(width, height float32) *Renderer {
+	return NewRendererWithMemory(width, height, nil)
+}
+
+// NewRendererWithMemory creates a new HTML renderer wired with a central memory manager
+func NewRendererWithMemory(width, height float32, memMgr *memory.Manager) *Renderer {
 	imageLoader := imageloader.NewLoader(100) // Cache up to 100 images
 	canvasRenderer := NewCanvasRenderer(width, height)
 	canvasRenderer.imageLoader = imageLoader
@@ -119,9 +128,45 @@ func NewRenderer(width, height float32) *Renderer {
 	// single callback slot always lands on the PR7 batch path even when
 	// SetWindow runs after a present.
 	canvasRenderer.renderer = r
-	r.imageBatcher = NewImageLoadBatcher(16*time.Millisecond, r.flushImageBatch)
+	r.imageBatcher = NewImageLoadBatcherWithDebounce(32*time.Millisecond, 100*time.Millisecond, r.flushImageBatch)
+
+	if memMgr != nil {
+		r.SetMemoryManager(memMgr)
+	}
+
 	return r
 }
+
+// SetMemoryManager registers the memory manager with the renderer,
+// hooks the image cache eviction callback, and wires usage updates.
+func (r *Renderer) SetMemoryManager(mgr *memory.Manager) {
+	r.memMgr = mgr
+	if r.memMgr != nil && r.imageLoader != nil && r.imageLoader.GetCache() != nil {
+		cache := r.imageLoader.GetCache()
+		r.memMgr.RegisterEvictor(memory.ComponentImage, func(targetBytes uint64) uint64 {
+			return cache.Evict(targetBytes)
+		})
+		cache.SetUsageCallback(func(currentBytes uint64) {
+			if r.memMgr != nil {
+				r.memMgr.UpdateUsage(memory.ComponentImage, currentBytes)
+			}
+		})
+		r.memMgr.UpdateUsage(memory.ComponentImage, uint64(cache.Bytes()))
+	}
+}
+
+// MemoryManager returns the configured memory manager, or nil if none.
+func (r *Renderer) MemoryManager() *memory.Manager {
+	return r.memMgr
+}
+
+// ClearImageCache clears the image cache and resets its byte usage.
+func (r *Renderer) ClearImageCache() {
+	if r.imageLoader != nil && r.imageLoader.GetCache() != nil {
+		r.imageLoader.GetCache().Clear()
+	}
+}
+
 
 // Metrics returns the render metrics
 func (r *Renderer) Metrics() *RenderMetrics {
@@ -390,11 +435,11 @@ func (r *Renderer) BuildParsed(ctx context.Context, doc *html.Node, externalCSS 
 // ran in the Build* call, possibly on a worker goroutine.
 func (r *Renderer) PresentFrame() fyne.CanvasObject {
 	r.treeMu.RLock()
+	defer r.treeMu.RUnlock()
 	renderTree := r.currentRenderTree
 	layoutTree := r.currentLayoutTree
 	onNav := r.onNavigate
 	recorder := r.lastRecorder
-	r.treeMu.RUnlock()
 
 	r.canvasRenderer.SetNavigationCallback(onNav, r.currentURLRead())
 
@@ -559,8 +604,13 @@ func (r *Renderer) SetSize(width, height float32) {
 	defer r.treeMu.Unlock()
 	r.layoutEngine.canvasWidth = width
 	r.layoutEngine.canvasHeight = height
+	// Canvas geometry is read by RenderWithViewport under the canvas
+	// lock; write it under the same lock (treeMu -> canvas lock order
+	// matches PresentFrame/UpdateViewport).
+	r.canvasRenderer.mu.Lock()
 	r.canvasRenderer.canvasWidth = width
 	r.canvasRenderer.canvasHeight = height
+	r.canvasRenderer.mu.Unlock()
 	r.dirty = true
 }
 
@@ -568,6 +618,18 @@ func (r *Renderer) SetSize(width, height float32) {
 func (r *Renderer) SetImageLoader(loader imageloader.Loader) {
 	r.imageLoader = loader
 	r.canvasRenderer.SetImageLoader(loader)
+	if r.memMgr != nil && r.imageLoader != nil && r.imageLoader.GetCache() != nil {
+		cache := r.imageLoader.GetCache()
+		r.memMgr.RegisterEvictor(memory.ComponentImage, func(targetBytes uint64) uint64 {
+			return cache.Evict(targetBytes)
+		})
+		cache.SetUsageCallback(func(currentBytes uint64) {
+			if r.memMgr != nil {
+				r.memMgr.UpdateUsage(memory.ComponentImage, currentBytes)
+			}
+		})
+		r.memMgr.UpdateUsage(memory.ComponentImage, uint64(cache.Bytes()))
+	}
 }
 
 // SetNavigationCallback sets the callback for link clicks
@@ -575,12 +637,19 @@ func (r *Renderer) SetNavigationCallback(callback func(url string)) {
 	r.onNavigate = callback
 }
 
-// SetCurrentURL sets the current page URL for resolving relative links
+// SetCurrentURL sets the current page URL for resolving relative links.
+// If navigating to a new URL, the image cache is cleared to release assets from the prior page.
 func (r *Renderer) SetCurrentURL(url string) {
 	r.currentURLMu.Lock()
+	oldURL := r.currentURL
 	r.currentURL = url
 	r.currentURLMu.Unlock()
+
+	if oldURL != "" && oldURL != url {
+		r.ClearImageCache()
+	}
 }
+
 
 // SetCSP sets the Content-Security-Policy for style-src enforcement on
 // external stylesheets. Pass nil to clear the policy.
@@ -780,7 +849,7 @@ func (r *Renderer) loadImages(node *RenderNode) {
 			resolvedSrc := r.resolveURL(src)
 			if node.ImageData == nil || node.ImageData.State != imageloader.StateLoaded {
 				if img, err := r.imageLoader.Load(resolvedSrc); err == nil {
-					node.ImageData = img
+					node.SetImageData(img)
 				}
 			}
 		}
@@ -897,61 +966,152 @@ func (r *Renderer) flushImageBatch(srcs []string) {
 	if len(srcs) == 0 {
 		return
 	}
-	r.treeMu.Lock()
-	for _, src := range srcs {
-		r.updateNodeImageData(r.currentRenderTree, src)
+
+	srcSet := make(map[string]bool, len(srcs))
+	for _, s := range srcs {
+		srcSet[s] = true
 	}
+
+	r.treeMu.Lock()
+	needsRelayout := r.updateNodesImageDataBatch(r.currentRenderTree, srcSet)
 	r.treeMu.Unlock()
 
 	r.canvasRenderer.InvalidateObjectCache()
-	r.MarkDirty()
-	r.Refresh()
+
+	if needsRelayout {
+		r.MarkDirty()
+		r.Refresh()
+	} else {
+		// Pure repaint: layout geometry didn't change (e.g. background images or fixed dimensions).
+		// Notify refresh callback to repaint without re-running CSS cascade or full layout engine.
+		if r.onRefresh != nil {
+			r.onRefresh()
+		}
+	}
 	r.RecordCoalescedImages(len(srcs))
 }
 
-func (r *Renderer) updateNodeImageData(node *RenderNode, src string) {
-	if node == nil {
-		return
+func (r *Renderer) updateNodesImageDataBatch(node *RenderNode, srcSet map[string]bool) bool {
+	if node == nil || r.imageLoader == nil {
+		return false
 	}
+	needsRelayout := false
+
 	if node.TagName == "img" {
 		if nodeSrc, ok := node.GetAttribute("src"); ok {
 			resolvedSrc := r.resolveURL(nodeSrc)
-			if resolvedSrc == src {
+			if srcSet[resolvedSrc] {
 				cache := r.imageLoader.GetCache()
+				var img *imageloader.ImageData
 				if cache != nil {
-					if cached := cache.Get(src); cached != nil {
-						node.ImageData = cached
-					}
+					img = cache.Get(resolvedSrc)
 				} else {
-					if img, err := r.imageLoader.Load(src); err == nil {
-						node.ImageData = img
+					img, _ = r.imageLoader.Load(resolvedSrc)
+				}
+				if img != nil {
+					node.SetImageData(img)
+					// If image node lacks explicit CSS/HTML dimensions, intrinsic size can affect layout -> relayout needed.
+					hasExplicitWidth := (node.ComputedStyle != nil && node.ComputedStyle.Width != "" && node.ComputedStyle.Width != "auto") || (node.Attrs != nil && node.Attrs["width"] != "")
+					hasExplicitHeight := (node.ComputedStyle != nil && node.ComputedStyle.Height != "" && node.ComputedStyle.Height != "auto") || (node.Attrs != nil && node.Attrs["height"] != "")
+					if !hasExplicitWidth || !hasExplicitHeight {
+						needsRelayout = true
 					}
 				}
 			}
 		}
 	}
+
 	if node.ComputedStyle != nil && node.ComputedStyle.BackgroundImage != "" {
 		if bgURL := extractURLFromCSSValue(node.ComputedStyle.BackgroundImage); bgURL != "" {
 			resolvedSrc := r.resolveURL(bgURL)
-			if resolvedSrc == src {
+			if srcSet[resolvedSrc] {
 				cache := r.imageLoader.GetCache()
+				var img *imageloader.ImageData
 				if cache != nil {
-					if cached := cache.Get(src); cached != nil {
-						node.BackgroundImageData = cached
-						node.ComputedStyle.BackgroundImageData = cached
-					}
+					img = cache.Get(resolvedSrc)
 				} else {
-					if img, err := r.imageLoader.Load(src); err == nil {
-						node.BackgroundImageData = img
-						node.ComputedStyle.BackgroundImageData = img
-					}
+					img, _ = r.imageLoader.Load(resolvedSrc)
+				}
+				if img != nil {
+					node.BackgroundImageData = img
+					node.ComputedStyle.BackgroundImageData = img
+					// Background images never alter box dimensions; needsRelayout remains false
 				}
 			}
 		}
 	}
+
 	for _, child := range node.Children {
-		r.updateNodeImageData(child, src)
+		if r.updateNodesImageDataBatch(child, srcSet) {
+			needsRelayout = true
+		}
 	}
+	return needsRelayout
+}
+
+// RenderToImage rasterizes the current page to an *image.RGBA at the given dimensions,
+// taking into account the current viewport scroll offset.
+func (r *Renderer) RenderToImage(width, height int) *image.RGBA {
+	r.treeMu.Lock()
+	defer r.treeMu.Unlock()
+	if r.currentLayoutTree == nil || r.currentRenderTree == nil || width <= 0 || height <= 0 {
+		if width < 0 {
+			width = 0
+		}
+		if height < 0 {
+			height = 0
+		}
+		return image.NewRGBA(image.Rect(0, 0, width, height))
+	}
+	dlb := NewDisplayListBuilder()
+	dl := dlb.Build(r.currentLayoutTree, r.currentRenderTree)
+	SortByZIndex(dl)
+
+	scrollY := float32(0)
+	if r.canvasRenderer != nil {
+		r.canvasRenderer.mu.RLock()
+		scrollY = r.canvasRenderer.viewportY
+		r.canvasRenderer.mu.RUnlock()
+		if scrollY < 0 {
+			scrollY = 0
+		}
+	}
+
+	if scrollY > 0 {
+		for _, cmd := range dl.Commands {
+			if cmd == nil {
+				continue
+			}
+			if !isFixedOrSticky(cmd.Node) {
+				cmd.Box.Y -= scrollY
+			}
+		}
+	}
+
+	cmds := convertPaintCommands(dl.Commands)
+	vp := frame.NewViewport(float32(width), float32(height), frame.PixelScaleDefault).WithScroll(0, scrollY)
+	backend := raster.NewCPUBackend(width, height)
+	defer backend.Close()
+
+	if err := backend.BeginFrame(vp); err != nil {
+		return image.NewRGBA(image.Rect(0, 0, width, height))
+	}
+	bgCmd := raster.DisplayCmd{
+		Kind:  raster.CmdFill,
+		Rect:  frame.NewRect(0, 0, float32(width), float32(height)),
+		Color: frame.White,
+	}
+	if _, err := backend.Rasterize([]raster.DisplayCmd{bgCmd}, nil); err != nil {
+		return image.NewRGBA(image.Rect(0, 0, width, height))
+	}
+	img, err := backend.Rasterize(cmds, nil)
+	if err != nil {
+		return image.NewRGBA(image.Rect(0, 0, width, height))
+	}
+	if err := backend.EndFrame(); err != nil {
+		return image.NewRGBA(image.Rect(0, 0, width, height))
+	}
+	return toRGBA(img)
 }
 
 func shouldAttemptParseExternalCSS(content string) bool {

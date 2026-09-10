@@ -88,6 +88,9 @@ func (r *mouseRecorder) HitTest(x, y float32) (*renderer.RenderNode, *renderer.L
 	r.hits = append(r.hits, fyne.NewPos(x, y))
 	return &renderer.RenderNode{ID: 7, TagName: "div"}, &renderer.LayoutBox{}
 }
+func (r *mouseRecorder) ActivateClick(_ *renderer.RenderNode) renderer.Activation {
+	return renderer.Activation{}
+}
 
 func (r *mouseRecorder) recordedHits() []fyne.Position {
 	r.mu.Lock()

@@ -10,6 +10,7 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -19,8 +20,60 @@ import (
 	"time"
 
 	"github.com/srwiley/oksvg"
+	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
+
+const (
+	// DefaultMaxDecodeWidth is the default upper bound for decoded image width (1080p).
+	DefaultMaxDecodeWidth = 1920
+	// DefaultMaxDecodeHeight is the default upper bound for decoded image height (1080p).
+	DefaultMaxDecodeHeight = 1080
+)
+
+// DownscaleImage downscales src to fit within maxW x maxH preserving aspect ratio using BiLinear interpolation.
+// If src is nil, it returns nil.
+// If src is already within maxW x maxH, or if maxW <= 0 and maxH <= 0, src is returned as-is.
+func DownscaleImage(src image.Image, maxW, maxH int) image.Image {
+	if src == nil {
+		return nil
+	}
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return src
+	}
+	if (maxW <= 0 || w <= maxW) && (maxH <= 0 || h <= maxH) {
+		return src
+	}
+
+	var ratio float64
+	if maxW > 0 && maxH > 0 {
+		ratio = math.Min(float64(maxW)/float64(w), float64(maxH)/float64(h))
+	} else if maxW > 0 {
+		ratio = float64(maxW) / float64(w)
+	} else {
+		ratio = float64(maxH) / float64(h)
+	}
+
+	if ratio >= 1.0 {
+		return src
+	}
+
+	targetW := int(math.Round(float64(w) * ratio))
+	targetH := int(math.Round(float64(h) * ratio))
+	if targetW < 1 {
+		targetW = 1
+	}
+	if targetH < 1 {
+		targetH = 1
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
+	return dst
+}
+
 
 // LoadState represents the state of an image load operation
 type LoadState int
@@ -44,6 +97,27 @@ type ImageData struct {
 	Error  error
 }
 
+// Downscale returns a copy of ImageData with its Image downscaled to fit within maxW x maxH.
+// If the image is already within bounds, it returns the receiver unmodified.
+func (d *ImageData) Downscale(maxW, maxH int) *ImageData {
+	if d == nil || d.Image == nil || maxW <= 0 || maxH <= 0 {
+		return d
+	}
+	scaled := DownscaleImage(d.Image, maxW, maxH)
+	if scaled == d.Image {
+		return d
+	}
+	bounds := scaled.Bounds()
+	return &ImageData{
+		Image:  scaled,
+		Width:  bounds.Dx(),
+		Height: bounds.Dy(),
+		Format: d.Format,
+		State:  d.State,
+		Error:  d.Error,
+	}
+}
+
 // OnLoadCallback is a callback function for when an image is loaded
 type OnLoadCallback func(source string)
 
@@ -60,6 +134,10 @@ type ImageLoader struct {
 	// Per-domain rate limiting to avoid 429 responses
 	domainSem   map[string]chan struct{}
 	domainSemMu sync.Mutex
+
+	// Maximum decode dimensions (downscales images exceeding these bounds)
+	maxDecodeWidth  int
+	maxDecodeHeight int
 }
 
 const (
@@ -74,11 +152,38 @@ func NewLoader(cacheSize int) Loader {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		cache:      NewCache(cacheSize),
-		inProgress: make(map[string]*sync.WaitGroup),
-		domainSem:  make(map[string]chan struct{}),
+		cache:           NewCache(cacheSize),
+		inProgress:      make(map[string]*sync.WaitGroup),
+		domainSem:       make(map[string]chan struct{}),
+		maxDecodeWidth:  DefaultMaxDecodeWidth,
+		maxDecodeHeight: DefaultMaxDecodeHeight,
 	}
 }
+
+// SetMaxDecodeDimensions configures the maximum decoded dimensions for loaded images.
+// Images with native resolutions exceeding these bounds are downscaled while preserving aspect ratio.
+func (l *ImageLoader) SetMaxDecodeDimensions(maxW, maxH int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.maxDecodeWidth = maxW
+	l.maxDecodeHeight = maxH
+}
+
+// MaxDecodeDimensions returns the configured maximum decode dimensions.
+func (l *ImageLoader) MaxDecodeDimensions() (int, int) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	maxW := l.maxDecodeWidth
+	maxH := l.maxDecodeHeight
+	if maxW <= 0 {
+		maxW = DefaultMaxDecodeWidth
+	}
+	if maxH <= 0 {
+		maxH = DefaultMaxDecodeHeight
+	}
+	return maxW, maxH
+}
+
 
 // acquireDomainSem acquires the per-domain semaphore for the given domain,
 // blocking if the maximum number of concurrent requests is already in flight.
@@ -232,6 +337,19 @@ func decodeSVG(data []byte) (*ImageData, error) {
 	}
 	if h <= 0 {
 		h = 100
+	}
+
+	// Clamp SVG raster dimensions to sensible decode bounds
+	if w > DefaultMaxDecodeWidth || h > DefaultMaxDecodeHeight {
+		ratio := math.Min(float64(DefaultMaxDecodeWidth)/float64(w), float64(DefaultMaxDecodeHeight)/float64(h))
+		w = int(math.Round(float64(w) * ratio))
+		h = int(math.Round(float64(h) * ratio))
+		if w < 1 {
+			w = 1
+		}
+		if h < 1 {
+			h = 1
+		}
 	}
 
 	rgba := rasterizeIcon(icon, w, h)
@@ -482,12 +600,15 @@ func (l *ImageLoader) loadFromFile(path string) (*ImageData, error) {
 	return l.decodeImage(file)
 }
 
-// decodeImage decodes an image from a reader
+// decodeImage decodes an image from a reader and clamps resolution to max decode bounds.
 func (l *ImageLoader) decodeImage(r io.Reader) (*ImageData, error) {
 	img, format, err := image.Decode(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode image: %w", err)
 	}
+
+	maxW, maxH := l.MaxDecodeDimensions()
+	img = DownscaleImage(img, maxW, maxH)
 
 	bounds := img.Bounds()
 	return &ImageData{
@@ -498,6 +619,7 @@ func (l *ImageLoader) decodeImage(r io.Reader) (*ImageData, error) {
 		State:  StateLoaded,
 	}, nil
 }
+
 
 // GetCache returns the cache instance
 func (l *ImageLoader) GetCache() *Cache {

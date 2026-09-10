@@ -150,6 +150,23 @@ func (sm *StyleManager) ApplyStyles(node *RenderNode) {
 				node.ComputedStyle.Display = css.DisplayAtomBlock
 			}
 		}
+
+		// CSS Display Level 3 / Flexbox Level 1: Flex and Grid items are blockified
+		if node.Parent != nil && node.Parent.ComputedStyle != nil {
+			pDisp := node.Parent.ComputedStyle.Display
+			if pDisp == css.DisplayAtomFlex || pDisp == css.DisplayAtomGrid {
+				if node.ComputedStyle.Display == css.DisplayAtomInline || node.ComputedStyle.Display == css.DisplayAtomInlineBlock {
+					node.ComputedStyle.Display = css.DisplayAtomBlock
+				}
+			}
+		}
+
+		// HTML5: input[type="hidden"] is not rendered
+		if node.TagName == "input" {
+			if t, ok := node.GetAttribute("type"); ok && strings.EqualFold(strings.TrimSpace(t), "hidden") {
+				node.ComputedStyle.Display = css.DisplayAtomNone
+			}
+		}
 	}
 
 	// Before interning, clone CustomProperties if non-nil so the interned
@@ -1185,6 +1202,11 @@ func (sm *StyleManager) applyDeclaration(node *RenderNode, decl css.Declaration)
 		style.RowGap = decl.Value
 	case "column-gap":
 		style.ColumnGap = decl.Value
+
+	case "justify-items":
+		style.JustifyItems = decl.Value
+	case "justify-self":
+		style.JustifySelf = decl.Value
 
 	// Grid Container properties
 	case "grid-template-columns":
@@ -2478,6 +2500,10 @@ func (s *Style) Fingerprint() uint64 {
 	h.Write([]byte{0})
 	h.Write([]byte(s.ColumnGap))
 	h.Write([]byte{0})
+	h.Write([]byte(s.JustifyItems))
+	h.Write([]byte{0})
+	h.Write([]byte(s.JustifySelf))
+	h.Write([]byte{0})
 	h.Write([]byte(s.FlexBasis))
 	h.Write([]byte{0})
 	h.Write([]byte(s.AlignSelf))
@@ -2698,6 +2724,8 @@ func styleEqual(a, b *Style) bool {
 		a.Gap == b.Gap &&
 		a.RowGap == b.RowGap &&
 		a.ColumnGap == b.ColumnGap &&
+		a.JustifyItems == b.JustifyItems &&
+		a.JustifySelf == b.JustifySelf &&
 		a.FlexBasis == b.FlexBasis &&
 		a.AlignSelf == b.AlignSelf &&
 		a.GridTemplateColumns == b.GridTemplateColumns &&

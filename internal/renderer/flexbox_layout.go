@@ -13,6 +13,10 @@ type FlexLayoutEngine struct {	fontMetrics *FontMetrics
 	// Used to compute the automatic minimum size (min-width:auto / min-height:auto)
 	// of flex items so they don't collapse below their content.
 	minContentFn func(node *RenderNode) float32
+	// maxContentFn measures a node's max-content size along the inline axis.
+	// Per css-flexbox §9.2, items with flex-basis:auto and width:auto use their
+	// max-content size as their flex base size instead of container width.
+	maxContentFn func(node *RenderNode) float32
 }
 
 // NewFlexLayoutEngine creates a new flex layout engine
@@ -114,7 +118,6 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 
 	remainingSpace := mainAxisSize - totalMainSize
 
-
 	// Distribute remaining space (flex-grow/shrink). For an indefinite column
 	// main axis (auto height), the container shrink-wraps its content so there
 	// is no free space to grow into.
@@ -136,6 +139,19 @@ func (fle *FlexLayoutEngine) LayoutFlexContainer(
 		posAxisSize = totalMainSize
 	}
 	mainAxisPositions := fle.calculateMainAxisPositions(items, posAxisSize, gap, justifyContent)
+
+	// For row direction with auto height, ensure crossAxisSize accommodates items
+	if isRow {
+		maxItemCrossSize := float32(0)
+		for _, item := range items {
+			if item.crossSize > maxItemCrossSize {
+				maxItemCrossSize = item.crossSize
+			}
+		}
+		if crossAxisSize < maxItemCrossSize {
+			crossAxisSize = maxItemCrossSize
+		}
+	}
 
 	// Position items along cross axis based on align-items
 	contentX := parentBox.Box.X + parentBox.PaddingLeft
@@ -260,6 +276,15 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 		if isRow {
 			if item.basisSet {
 				item.mainSize = item.flexBasis
+			} else if child.ComputedStyle != nil && child.ComputedStyle.Width != "" && child.ComputedStyle.Width != "auto" {
+				item.mainSize = childBox.Box.Width
+			} else if fle.maxContentFn != nil {
+				maxW := fle.maxContentFn(child)
+				if maxW > 0 {
+					item.mainSize = maxW
+				} else {
+					item.mainSize = childBox.Box.Width
+				}
 			} else {
 				item.mainSize = childBox.Box.Width
 			}
@@ -274,7 +299,6 @@ func (fle *FlexLayoutEngine) buildFlexItems(
 			item.crossSize = childBox.Box.Width
 			item.minMainSize = fle.automaticMinMainSize(child, childBox)
 		}
-
 
 		// Apply the automatic minimum size so items don't collapse below their
 		// content (min-width/min-height: auto behavior).
@@ -453,8 +477,14 @@ func (fle *FlexLayoutEngine) calculateCrossAxisOffset(
 
 	switch alignSelf {
 	case "flex-end":
+		if containerCrossSize <= itemCrossSize {
+			return 0
+		}
 		return containerCrossSize - itemCrossSize
 	case "center":
+		if containerCrossSize <= itemCrossSize {
+			return 0
+		}
 		return (containerCrossSize - itemCrossSize) / 2
 	case "stretch":
 		return 0 // Item will be stretched to fill container

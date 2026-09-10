@@ -6,8 +6,10 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"log"
 	"log/slog"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -51,19 +54,30 @@ func (t linkColorTheme) Size(name fyne.ThemeSizeName) float32 {
 var defaultUALinkColor color.Color = color.RGBA{R: 0, G: 0, B: 0xee, A: 0xff}
 
 // applyLinkColor wraps a hyperlink widget in a theme override carrying the
-// node's computed color and font size.
+// node's computed color and font size. The override is applied whenever the
+// node has a computed font size or color, including the default link color —
+// the size and padding correction matter even when the color does not.
 func applyLinkColor(node *RenderNode, obj fyne.CanvasObject) fyne.CanvasObject {
-	if node == nil || node.ComputedStyle == nil || node.ComputedStyle.Color == nil {
+	if node == nil || node.ComputedStyle == nil {
 		return obj
 	}
-	r, g, b, a := node.ComputedStyle.Color.RGBA()
-	if r == 0 && g == 0 && b == 0xeeee && a == 0xffff {
+	linkColor := node.ComputedStyle.Color
+	size := node.ComputedStyle.FontSize
+	if linkColor == nil && size <= 0 {
 		return obj
+	}
+	if linkColor != nil {
+		r, g, b, a := linkColor.RGBA()
+		if r == 0 && g == 0 && b == 0xeeee && a == 0xffff {
+			// Default link color: keep it nil so the override falls through
+			// to the theme's hyperlink color, but still override sizing.
+			linkColor = nil
+		}
 	}
 	return container.NewThemeOverride(obj, linkColorTheme{
 		Theme: theme.Current(),
-		link:  node.ComputedStyle.Color,
-		size:  node.ComputedStyle.FontSize,
+		link:  linkColor,
+		size:  size,
 	})
 }
 
@@ -250,10 +264,15 @@ func (cr *CanvasRenderer) onImageLoaded(source string) {
 	fyne.Do(fn)
 }
 
-// SetViewport sets the current viewport for optimized rendering
+// SetViewport sets the current viewport for optimized rendering.
+// It takes the renderer lock: RenderWithViewport reads these fields under
+// the same lock, and scroll callbacks can arrive from threads other than
+// the presenting thread (headless repro, tests).
 func (cr *CanvasRenderer) SetViewport(y, height float32) {
+	cr.mu.Lock()
 	cr.viewportY = y
 	cr.viewportHeight = height
+	cr.mu.Unlock()
 }
 
 // ScheduleScroll records a new scroll position. The canvas runs the
@@ -373,7 +392,9 @@ func (cr *CanvasRenderer) SetMouseInputCallback(poster func(MouseInput)) {
 	cr.mousePoster = poster
 }
 
-// isInViewport checks if a box intersects with the current viewport
+// isInViewport checks if a box intersects with the current viewport.
+// Callers must hold cr.mu (read or write): it is invoked from
+// RenderWithViewport under the write lock and reads viewportY/Height.
 func (cr *CanvasRenderer) isInViewport(box Rect) bool {
 	if cr.headless {
 		return true
@@ -605,10 +626,18 @@ func (cr *CanvasRenderer) renderLink(node *RenderNode, objects *[]fyne.CanvasObj
 	}
 
 	// If the anchor contains images (or other element children) but no text,
-	// render the children directly so images are not silently dropped.
+	// render the children inside a tappable wrapper so the link stays
+	// clickable instead of silently dropping navigation.
 	if text == "" && hasNonTextChildren {
+		var children []fyne.CanvasObject
 		for _, child := range node.Children {
-			cr.renderNode(child, objects)
+			cr.renderNode(child, &children)
+		}
+		if hasHref && strings.TrimSpace(href) != "" && len(children) > 0 {
+			resolvedURL := cr.resolveURL(href)
+			*objects = append(*objects, newTappableContainer(children, resolvedURL, cr, cr.dlBuildGen))
+		} else {
+			*objects = append(*objects, children...)
 		}
 		return
 	}
@@ -716,22 +745,45 @@ func newTappableHyperlink(text, urlStr string, onNavigate NavigationCallback, cr
 // wired (PR9) it posts an immutable LinkTap event into the engine loop
 // instead of dispatching navigation directly; the drain resolves the URL
 // on the owner. Without a poster it keeps the legacy direct dispatch.
+//
+// Unlike form submitters, link taps are never gated on the page-wide
+// submitting flag: starting a new navigation cancels the in-flight load
+// by design, so blocking the tap removes the user's escape hatch during
+// slow loads — and bricks every link when the flag sticks. A stale
+// generation (widget outlived a display-list rebuild) still dispatches:
+// link activation is idempotent navigation to an already-resolved URL,
+// whereas silently dropping the tap strands the user with no feedback.
 func (t *TappableHyperlink) Tapped(_ *fyne.PointEvent) {
 	if t.cr != nil {
 		t.cr.mu.Lock()
-		if t.cr.dlBuildGen != t.gen || t.cr.submitting {
-			t.cr.mu.Unlock()
-			return
-		}
+		stale := t.cr.dlBuildGen != t.gen
 		t.cr.mu.Unlock()
-		if t.cr.postMouseInput(MouseInput{Kind: MouseInputLinkTap, URL: t.url}) {
-			return
+		if !stale {
+			if t.cr.postMouseInput(MouseInput{Kind: MouseInputLinkTap, URL: t.url}) {
+				if clickDebug() {
+					log.Printf("[goosie-click] link tap posted to event loop url=%s", t.url)
+				}
+				return
+			}
 		}
+		if clickDebug() {
+			log.Printf("[goosie-click] link tap direct dispatch url=%s stale=%v", t.url, stale)
+		}
+	} else if clickDebug() {
+		log.Printf("[goosie-click] link tap rendererless url=%s", t.url)
 	}
 	if t.onNavigate != nil {
 		t.onNavigate(t.url)
+	} else if clickDebug() {
+		log.Printf("[goosie-click] link tap dropped: no navigate callback url=%s", t.url)
 	}
 }
+
+// clickDebug reports whether tap-chain diagnostics are enabled. Set
+// GOOSIE_DEBUG_CLICKS=1 to log every link/form tap, its poster/stale
+// decision, and the resulting dispatch — useful when a click appears
+// to do nothing in the live browser.
+func clickDebug() bool { return os.Getenv("GOOSIE_DEBUG_CLICKS") != "" }
 
 // urlParse is a helper that returns nil on parse error
 func urlParse(urlStr string) *url.URL {
@@ -740,6 +792,62 @@ func urlParse(urlStr string) *url.URL {
 		return nil
 	}
 	return parsed
+}
+
+// tappableContainer wraps arbitrary child objects (e.g. an image inside a
+// link) in a clickable widget so element-only anchors keep navigation.
+// It mirrors TappableHyperlink's dispatch: with a mouse-input poster wired
+// it posts a LinkTap into the engine loop, otherwise it navigates directly.
+type tappableContainer struct {
+	widget.BaseWidget
+	container *fyne.Container
+	url       string
+	cr        *CanvasRenderer
+	gen       uint64
+}
+
+func newTappableContainer(children []fyne.CanvasObject, urlStr string, cr *CanvasRenderer, gen uint64) *tappableContainer {
+	t := &tappableContainer{
+		container: fyne.NewContainer(children...),
+		url:       urlStr,
+		cr:        cr,
+		gen:       gen,
+	}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+// CreateRenderer returns the Fyne renderer for this widget.
+func (t *tappableContainer) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.container)
+}
+
+// Tapped handles tap events on the wrapped content. Like
+// TappableHyperlink, link taps are never gated on the submitting flag
+// and stale generations still navigate (idempotent dispatch beats a
+// silently swallowed click).
+func (t *tappableContainer) Tapped(_ *fyne.PointEvent) {
+	if t.cr != nil {
+		t.cr.mu.Lock()
+		stale := t.cr.dlBuildGen != t.gen
+		t.cr.mu.Unlock()
+		if !stale {
+			if t.cr.postMouseInput(MouseInput{Kind: MouseInputLinkTap, URL: t.url}) {
+				if clickDebug() {
+					log.Printf("[goosie-click] image-link tap posted to event loop url=%s", t.url)
+				}
+				return
+			}
+		}
+		if clickDebug() {
+			log.Printf("[goosie-click] image-link tap direct dispatch url=%s stale=%v", t.url, stale)
+		}
+		if t.cr.onNavigate != nil {
+			t.cr.onNavigate(t.url)
+		} else if clickDebug() {
+			log.Printf("[goosie-click] image-link tap dropped: no navigate callback url=%s", t.url)
+		}
+	}
 }
 
 // InspectableContainer is a container that handles mouse events for element inspection
@@ -751,6 +859,12 @@ type InspectableContainer struct {
 	lastHitNodeID int64
 	lastHitTest   time.Time
 }
+
+// Compile-time assertions: InspectableContainer must implement the correct
+// Fyne desktop interfaces so Fyne routes mouse events to it properly.
+var _ desktop.Mouseable = (*InspectableContainer)(nil)
+var _ desktop.Hoverable = (*InspectableContainer)(nil)
+var _ fyne.SecondaryTappable = (*InspectableContainer)(nil)
 
 // newInspectableContainer creates a new inspectable container
 func newInspectableContainer(content fyne.CanvasObject, cr *CanvasRenderer) *InspectableContainer {
@@ -771,7 +885,7 @@ func (ic *InspectableContainer) CreateRenderer() fyne.WidgetRenderer {
 }
 
 // MouseIn handles mouse enter events
-func (ic *InspectableContainer) MouseIn(*fyne.PointEvent) {
+func (ic *InspectableContainer) MouseIn(*desktop.MouseEvent) {
 	// Mouse enter - could show hover state
 }
 
@@ -785,7 +899,7 @@ func (ic *InspectableContainer) MouseOut() {
 // (the loop's latest-wins slot collapses the ~60fps burst); the drain owns
 // hit-test throttling and the inspect dispatch. Without a poster it keeps
 // the legacy direct dispatch below.
-func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
+func (ic *InspectableContainer) MouseMoved(event *desktop.MouseEvent) {
 	cr := ic.canvasRenderer
 	if cr == nil {
 		return
@@ -831,15 +945,122 @@ func (ic *InspectableContainer) MouseMoved(event *fyne.PointEvent) {
 	}
 }
 
-// MouseDown handles mouse click events for element selection. With a
-// mouse-input poster wired (PR9) it posts an immutable Click event (button
-// 1) into the engine loop's ordered FIFO; the drain hit-tests and selects.
-// Without a poster it keeps the legacy direct dispatch below.
-func (ic *InspectableContainer) MouseDown(event *fyne.PointEvent) {
+// hitTestLink searches the cached display list for a PaintLink command whose
+// bounding box contains (x, y) in content coordinates. Inline elements such as
+// <a> do not receive their own layout boxes — their text is stored as LineBoxes
+// on the parent block — so the regular HitTest + FindLinkAncestor path cannot
+// resolve them. The display list's PaintLink commands carry the <a> node and
+// its resolved URL directly, making this a reliable fallback.
+func (cr *CanvasRenderer) hitTestLink(x, y float32) (url string, ok bool) {
+	cr.mu.RLock()
+	dl := cr.cachedDisplayList
+	cr.mu.RUnlock()
+	if dl == nil {
+		return "", false
+	}
+	for _, cmd := range dl.Commands {
+		if cmd.Type != PaintLink {
+			continue
+		}
+		if x >= cmd.Box.X && x <= cmd.Box.X+cmd.Box.Width &&
+			y >= cmd.Box.Y && y <= cmd.Box.Y+cmd.Box.Height {
+			if cmd.LinkURL != "" {
+				return cmd.LinkURL, true
+			}
+		}
+	}
+	return "", false
+}
+
+// dispatchLinkTap resolves the link navigation: it posts a MouseInputLinkTap
+// when a mouse-input poster is wired, otherwise falls back to the direct
+// onNavigate callback. Returns true when the navigation was dispatched.
+func (cr *CanvasRenderer) dispatchLinkTap(resolved string) bool {
+	if strings.TrimSpace(resolved) == "" {
+		return false
+	}
+	if cr.postMouseInput(MouseInput{Kind: MouseInputLinkTap, URL: resolved}) {
+		return true
+	}
+	if cr.onNavigate != nil {
+		cr.onNavigate(resolved)
+		return true
+	}
+	return false
+}
+
+// MouseDown handles mouse click events for element selection and link
+// activation. Because InspectableContainer implements desktop.Mouseable, Fyne
+// routes all mouse clicks to it — child Tappable widgets (TappableHyperlink)
+// never receive Tapped() in the live runtime. To compensate, this handler does
+// a hit test and posts MouseInputLinkTap when the click lands inside a link,
+// falling back to MouseInputClick for all other targets.
+func (ic *InspectableContainer) MouseDown(event *desktop.MouseEvent) {
 	cr := ic.canvasRenderer
 	if cr == nil {
 		return
 	}
+
+	contentX := event.Position.X
+	contentY := event.Position.Y + cr.viewportY
+
+	// Right-click: dispatch as button 2.
+	if event.Button == desktop.MouseButtonSecondary {
+		if cr.postMouseInput(MouseInput{
+			Kind:   MouseInputClick,
+			Button: 2,
+			X:      event.Position.X,
+			Y:      event.Position.Y,
+			AbsX:   event.AbsolutePosition.X,
+			AbsY:   event.AbsolutePosition.Y,
+		}) {
+			return
+		}
+		// Legacy direct dispatch for right-click.
+		cr.mu.RLock()
+		cb := cr.onContextMenu
+		cr.mu.RUnlock()
+		if cb != nil && cr.renderer != nil {
+			node, layout := cr.renderer.HitTest(contentX, contentY)
+			cb(node, layout, event.AbsolutePosition)
+		}
+		return
+	}
+
+	// Left-click (primary):
+
+	// Path 1: layout-tree hit test. Works when the <a> has a layout box
+	// (e.g. display:inline-block links or links containing block children).
+	if cr.renderer != nil {
+		node, _ := cr.renderer.HitTest(contentX, contentY)
+		if link := FindLinkAncestor(node); link != nil {
+			if href, ok := link.GetAttribute("href"); ok && strings.TrimSpace(href) != "" {
+				resolved := href
+				if cr.renderer != nil {
+					resolved = cr.renderer.ResolveURL(href)
+				}
+				if cr.dispatchLinkTap(resolved) {
+					return
+				}
+			}
+		}
+	}
+
+	// Path 2: display-list hit test. Inline <a> elements have no layout box
+	// of their own, so the layout-tree path above misses them. The display
+	// list's PaintLink commands carry the link URL and bounding box directly.
+	if linkURL, ok := cr.hitTestLink(contentX, contentY); ok {
+		resolved := linkURL
+		if cr.renderer != nil {
+			resolved = cr.renderer.ResolveURL(linkURL)
+		} else {
+			resolved = cr.resolveURL(linkURL)
+		}
+		if cr.dispatchLinkTap(resolved) {
+			return
+		}
+	}
+
 	if cr.postMouseInput(MouseInput{
 		Kind:   MouseInputClick,
 		Button: 1,
@@ -852,22 +1073,17 @@ func (ic *InspectableContainer) MouseDown(event *fyne.PointEvent) {
 		return
 	}
 
-	// Get the scroll offset
-	scrollY := cr.viewportY
-
-	// Convert mouse position to content coordinates
-	contentX := event.Position.X
-	contentY := event.Position.Y + scrollY
-
-	// Perform hit test
 	node, layout := cr.renderer.HitTest(contentX, contentY)
 	if node != nil && layout != nil {
-		// Call inspect callback on click (to select element)
 		if cr.onInspect != nil {
 			cr.onInspect(node, layout)
 		}
 	}
 }
+
+// MouseUp satisfies the desktop.Mouseable interface. No action is needed on
+// mouse release — the browser dispatches navigation/activation on MouseDown.
+func (ic *InspectableContainer) MouseUp(*desktop.MouseEvent) {}
 
 // TappedSecondary handles right-click (secondary tap) events on the rendered
 // page. It performs a hit-test at the cursor and, when a context menu
@@ -1289,6 +1505,10 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		dlChanged = true
 	}
 
+	if displayList != nil && len(displayList.Commands) > 0 && len(displayList.FixedCommands) == 0 && len(displayList.YBands) == 0 {
+		buildYBands(displayList)
+	}
+
 	// Invalidate object cache on display list rebuild
 	if dlChanged {
 		cr.dlBuildGen++
@@ -1296,37 +1516,35 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		cr.submittingForms = make(map[int64]bool)
 	}
 
-	// Object stack for clipped hierarchy
-	objectStack := [][]fyne.CanvasObject{make([]fyne.CanvasObject, 0)}
-	type ClipInfo struct {
-		Box      Rect
-		Overflow string
+	// Viewport culling is enabled whenever the document height exceeds the viewport
+	// buffer or for non-trivial display lists (> 100 commands), avoiding allocating Fyne
+	// canvas objects and GPU textures for offscreen content. A 5x viewport buffer
+	// ([-2H, +3H]) is used, allowing rapid scrolling within the buffer to return the cached
+	// contentRoot in sub-microsecond time.
+	effectiveViewportHeight := cr.viewportHeight
+	if effectiveViewportHeight <= 0 {
+		effectiveViewportHeight = cr.canvasHeight
 	}
-	clipStack := []ClipInfo{{Box: Rect{X: 0, Y: 0, Width: cr.canvasWidth, Height: cr.canvasHeight}, Overflow: "visible"}}
-	getCurrentList := func() *[]fyne.CanvasObject {
-		return &objectStack[len(objectStack)-1]
+	if effectiveViewportHeight <= 0 {
+		effectiveViewportHeight = 800
 	}
 
-	// For display lists with <= 3000 commands (virtually all standard web pages),
-	// render the entire document into contentRoot once. Fyne's hardware renderer
-	// clips off-screen canvas objects on the GPU during drawing. This completely avoids
-	// rebuilding object slices and calling contentRoot.Refresh() on every scroll tick,
-	// allowing 60–120 FPS hardware-accelerated scrolling.
-	// For very large documents (> 3000 commands), use a 3x viewport buffer and only
-	// re-cull when the user scrolls past 1 full screen from the buffered center.
-	shouldCull := len(displayList.Commands) > 3000
-	bufferExceeded := shouldCull && (cr.lastRenderedViewportHeight <= 0 ||
-		cr.viewportY < cr.lastRenderedViewportY-cr.viewportHeight ||
-		cr.viewportY > cr.lastRenderedViewportY+cr.viewportHeight)
+	docHeight := displayList.Height
+	if docHeight <= 0 && layoutRoot != nil {
+		docHeight = layoutRoot.Box.Height
+	}
+	shouldCull := len(displayList.Commands) > 0 && (docHeight > effectiveViewportHeight*2.0 || len(displayList.Commands) > 100)
+	cacheInvalidated := cr.lastRenderedViewportHeight <= 0
+	bufferExceeded := cacheInvalidated || (shouldCull && (cr.viewportY < cr.lastRenderedViewportY-effectiveViewportHeight || cr.viewportY > cr.lastRenderedViewportY+effectiveViewportHeight))
 
 	// If display list has not changed and we don't need to re-cull the buffer,
 	// the existing contentRoot objects are completely valid. Skip the entire command loop.
-	if !dlChanged && !bufferExceeded && cr.contentRoot != nil {
+	if !dlChanged && !bufferExceeded && cr.contentRoot != nil && !cacheInvalidated {
 		return cr.contentRoot
 	}
 
-	viewportTop := cr.viewportY - cr.viewportHeight*2.0
-	viewportBottom := cr.viewportY + cr.viewportHeight*3.0
+	viewportTop := cr.viewportY - effectiveViewportHeight*2.0
+	viewportBottom := cr.viewportY + effectiveViewportHeight*3.0
 
 	// Determine visible command range from Y-band spatial index.
 	// Instead of iterating all commands linearly, use the pre-built Y-band
@@ -1353,27 +1571,94 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		}
 
 		if firstBand >= 0 {
-			cmdStart = displayList.YBands[firstBand].CmdStart
-			if cmdStart < 0 {
+			minCmdStart := -1
+			maxCmdEnd := -1
+			for b := firstBand; b <= lastBand; b++ {
+				band := displayList.YBands[b]
+				if band.CmdStart < 0 || band.CmdEnd <= band.CmdStart {
+					continue
+				}
+				if minCmdStart < 0 || band.CmdStart < minCmdStart {
+					minCmdStart = band.CmdStart
+				}
+				if maxCmdEnd < 0 || band.CmdEnd > maxCmdEnd {
+					maxCmdEnd = band.CmdEnd
+				}
+			}
+			if minCmdStart >= 0 {
+				cmdStart = minCmdStart
+			} else {
 				cmdStart = 0
 			}
-			cmdEnd = displayList.YBands[lastBand].CmdEnd
-			if cmdEnd < 0 {
-				cmdEnd = len(displayList.Commands)
+			if maxCmdEnd >= 0 {
+				cmdEnd = maxCmdEnd
+			} else {
+				cmdEnd = 0
 			}
+		} else {
+			cmdStart = 0
+			cmdEnd = 0
 		}
 	}
 
-	// Ensure clip balance: walk back to find the enclosing PushClip boundary
-	// so we don't start rendering in the middle of a clip group.
+	// Ensure clip balance:
+	// 1. Backward scan: scan backward from cmdStart to identify all unclosed
+	// PushClip commands whose scope includes cmdStart, expanding cmdStart to
+	// the outermost enclosing PushClip.
+	depth := 0
+	outermostPushClip := -1
 	for i := cmdStart - 1; i >= 0; i-- {
-		if displayList.Commands[i].Type == PopClip {
-			break
+		switch displayList.Commands[i].Type {
+		case PopClip:
+			depth++
+		case PushClip:
+			if depth > 0 {
+				depth--
+			} else {
+				outermostPushClip = i
+			}
 		}
+	}
+	if outermostPushClip >= 0 {
+		cmdStart = outermostPushClip
+	}
+
+	// 2. Forward scan: extend cmdEnd forward so that all PushClip
+	// commands opened between cmdStart and cmdEnd have their matching PopClip executed.
+	openClips := 0
+	for i := cmdStart; i < cmdEnd && i < len(displayList.Commands); i++ {
 		if displayList.Commands[i].Type == PushClip {
-			cmdStart = i
-			break
+			openClips++
+		} else if displayList.Commands[i].Type == PopClip {
+			if openClips > 0 {
+				openClips--
+			}
 		}
+	}
+	for openClips > 0 && cmdEnd < len(displayList.Commands) {
+		if displayList.Commands[cmdEnd].Type == PushClip {
+			openClips++
+		} else if displayList.Commands[cmdEnd].Type == PopClip {
+			openClips--
+		}
+		cmdEnd++
+	}
+
+	// Object stack for clipped hierarchy. The root list is pre-sized for
+	// the visible command range so scroll rebuilds don't pay repeated
+	// slice-growth reallocations while appending visible objects.
+	type ClipInfo struct {
+		Box      Rect
+		Overflow string
+	}
+	visibleCap := cmdEnd - cmdStart + 1
+	if visibleCap < 0 {
+		visibleCap = 0
+	}
+	objectStack := [][]fyne.CanvasObject{make([]fyne.CanvasObject, 0, visibleCap)}
+	clipStack := []ClipInfo{{Box: Rect{X: 0, Y: 0, Width: cr.canvasWidth, Height: cr.canvasHeight}, Overflow: "visible"}}
+	getCurrentList := func() *[]fyne.CanvasObject {
+		return &objectStack[len(objectStack)-1]
 	}
 
 	for cmdIdx := cmdStart; cmdIdx < cmdEnd && cmdIdx < len(displayList.Commands); cmdIdx++ {
@@ -1425,6 +1710,22 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 			continue
 		}
 
+		// Fixed and sticky position commands are anchored to the viewport and are
+		// unconditionally processed separately below from dl.FixedCommands.
+		if isFixedOrSticky(cmd.Node) {
+			continue
+		}
+
+		// Leaf command viewport culling check:
+		// Slices derived from YBands may contain commands whose Y coordinates fall outside
+		// the buffered viewport (e.g. out-of-order commands, z-index groupings).
+		if shouldCull {
+			cmdBottom := cmd.Box.Y + cmd.Box.Height
+			if cmdBottom < viewportTop || cmd.Box.Y > viewportBottom {
+				continue
+			}
+		}
+
 		// Leaf commands: retrieve or create Fyne canvas object
 		obj, ok := cr.objectCache[cmdIdx]
 		if !ok {
@@ -1446,7 +1747,81 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		*getCurrentList() = append(*getCurrentList(), obj)
 	}
 
+	// Unwind any remaining open clip levels so children are never dropped
+	for len(objectStack) > 1 {
+		poppedObjects := objectStack[len(objectStack)-1]
+		objectStack = objectStack[:len(objectStack)-1]
+		if len(poppedObjects) > 0 {
+			clipInfo := clipStack[len(clipStack)-1]
+			clipStack = clipStack[:len(clipStack)-1]
+			contentObj := container.NewWithoutLayout(poppedObjects...)
+			maxX, maxY := float32(0), float32(0)
+			for _, obj := range poppedObjects {
+				pos := obj.Position()
+				size := obj.Size()
+				if right := pos.X + size.Width; right > maxX {
+					maxX = right
+				}
+				if bottom := pos.Y + size.Height; bottom > maxY {
+					maxY = bottom
+				}
+			}
+			contentObj.Resize(fyne.NewSize(maxX, maxY))
+
+			var clipped fyne.CanvasObject
+			if clipInfo.Overflow == "hidden" {
+				clipped = container.NewWithoutLayout(poppedObjects...)
+				clipped.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
+				clipped.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
+			} else {
+				scroll := container.NewScroll(contentObj)
+				scroll.Resize(fyne.NewSize(clipInfo.Box.Width, clipInfo.Box.Height))
+				scroll.Move(fyne.NewPos(clipInfo.Box.X, clipInfo.Box.Y))
+				clipped = scroll
+			}
+			*getCurrentList() = append(*getCurrentList(), clipped)
+		} else if len(clipStack) > 1 {
+			clipStack = clipStack[:len(clipStack)-1]
+		}
+	}
+
 	rootObjects := objectStack[0]
+
+	// Unconditionally process fixed/sticky commands to instantiate/update fixed canvas objects
+	if len(displayList.FixedCommands) > 0 {
+		fixedIndices := make(map[*PaintCommand]int, len(displayList.FixedCommands))
+		for i, c := range displayList.Commands {
+			if isFixedOrSticky(c.Node) {
+				fixedIndices[c] = i
+			}
+		}
+		for _, cmd := range displayList.FixedCommands {
+			if cmd == nil || cmd.Type == PushClip || cmd.Type == PopClip {
+				continue
+			}
+			cmdIdx, hasIdx := fixedIndices[cmd]
+			var obj fyne.CanvasObject
+			var ok bool
+			if hasIdx {
+				obj, ok = cr.objectCache[cmdIdx]
+			}
+			if !ok {
+				obj = cr.createCanvasObject(cmd)
+				if obj == nil {
+					continue
+				}
+				if hasIdx {
+					cr.objectCache[cmdIdx] = obj
+				}
+			}
+
+			if obj.Position().X != cmd.Box.X || obj.Position().Y != cmd.Box.Y {
+				obj.Move(fyne.NewPos(cmd.Box.X, cmd.Box.Y))
+			}
+
+			rootObjects = append(rootObjects, obj)
+		}
+	}
 
 	// Add dirty-region overlay rectangles when enabled. Each visible command
 	// (excluding PushClip/PopClip) gets a semi-transparent overlay colored by
@@ -1500,9 +1875,16 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		if layoutRoot != nil && layoutRoot.Box.Height > contentHeight {
 			contentHeight = layoutRoot.Box.Height
 		}
-		viewportBg.Resize(fyne.NewSize(cr.canvasWidth, contentHeight))
-		viewportBg.SetMinSize(fyne.NewSize(cr.canvasWidth, contentHeight))
-		viewportBg.Move(fyne.NewPos(0, 0))
+		// Skip geometry updates when the background already covers the
+		// content: Resize/SetMinSize/Move each mark the object dirty and
+		// feed an extra layout pass into every scroll rebuild.
+		if viewportBg.Size().Width != cr.canvasWidth || viewportBg.Size().Height != contentHeight {
+			viewportBg.Resize(fyne.NewSize(cr.canvasWidth, contentHeight))
+			viewportBg.SetMinSize(fyne.NewSize(cr.canvasWidth, contentHeight))
+		}
+		if pos := viewportBg.Position(); pos.X != 0 || pos.Y != 0 {
+			viewportBg.Move(fyne.NewPos(0, 0))
+		}
 		rootObjects = append([]fyne.CanvasObject{viewportBg}, rootObjects...)
 	}
 
@@ -1516,7 +1898,7 @@ func (cr *CanvasRenderer) RenderWithViewport(root *RenderNode, layoutRoot *Layou
 		cr.contentRoot = container.NewWithoutLayout(rootObjects...)
 	}
 	cr.lastRenderedViewportY = cr.viewportY
-	cr.lastRenderedViewportHeight = cr.viewportHeight
+	cr.lastRenderedViewportHeight = effectiveViewportHeight
 
 	if cr.onInspect != nil && cr.renderer != nil {
 		if cr.inspectable != nil {
@@ -1608,22 +1990,26 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		return textObj
 
 	case PaintRect:
+		if cmd.Box.Width <= 0 || cmd.Box.Height <= 0 {
+			return nil
+		}
 		rect := canvas.NewRectangle(cmd.FillColor)
 		rect.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 		return rect
 
 	case PaintImage:
 		// Try to load and render the actual image if loader is available
-		if cr.imageLoader != nil && cmd.Node.ImageData != nil {
-			imageData := cmd.Node.ImageData
+		var imageData *imageloader.ImageData
+		if cmd.Node != nil {
+			imageData = cmd.Node.GetImageData()
+		}
 
-			if imageData != nil {
+		if imageData != nil {
 				switch imageData.State {
 				case imageloader.StateLoaded:
-					// Image loaded successfully - render it
-					if cr.headless {
-						// In headless mode, Fyne's software renderer may draw canvas.Image as blank.
-						// Render a colored rectangle to easily verify successful loading.
+					if cr.headless && imageData.Image == nil {
+						// In headless mode when no image raster exists,
+						// render a colored rectangle to easily verify successful loading.
 						rect := canvas.NewRectangle(color.RGBA{R: 76, G: 175, B: 80, A: 255}) // Material Green
 						rect.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 						rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
@@ -1643,6 +2029,12 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 					return img
 
 				case imageloader.StateError:
+					if cmd.Box.Width <= 2 || cmd.Box.Height <= 2 || cmd.ImageSrc == "inline-svg" || (cr.headless && cmd.ImageAlt == "") {
+						rect := canvas.NewRectangle(color.Transparent)
+						rect.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+						rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+						return rect
+					}
 					// Image failed to load - show error with alt text
 					displayText := "[Image Load Failed"
 					if cmd.ImageAlt != "" {
@@ -1672,9 +2064,15 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 					return vbox
 				}
 			}
-		}
 
 		// Fallback: Render image placeholder
+		if cmd.ImageSrc == "inline-svg" || (cr.headless && cmd.ImageAlt == "") || cmd.Box.Width <= 2 || cmd.Box.Height <= 2 {
+			rect := canvas.NewRectangle(color.Transparent)
+			rect.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			rect.SetMinSize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
+			return rect
+		}
+
 		displayText := "[Image"
 		if cmd.ImageSrc != "" {
 			displayText += ": " + cmd.ImageSrc
@@ -1696,7 +2094,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 
 	case PaintLink:
 		// Render clickable link
-		if cmd.LinkText == "" {
+		if cmd.LinkText == "" || cmd.Box.Width <= 0 || cmd.Box.Height <= 0 {
 			return nil
 		}
 
@@ -1810,6 +2208,9 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		return imgObj
 
 	case PaintBorder:
+		if cmd.Box.Width <= 0 || cmd.Box.Height <= 0 {
+			return nil
+		}
 		// Render borders as lines or rectangles
 		// Borders meet at corners without overlapping
 		borderContainer := container.NewWithoutLayout()
@@ -1823,8 +2224,10 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		// Right border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderRightWidth > 0 && cmd.BorderRightStyle != "" && cmd.BorderRightStyle != "none" {
 			rightHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
-			addVerticalBorderSegments(borderContainer, cmd.BorderRightStyle, cmd.BorderRightColor,
-				cmd.Box.Width-cmd.BorderRightWidth, cmd.BorderTopWidth, cmd.BorderRightWidth, rightHeight)
+			if rightHeight > 0 {
+				addVerticalBorderSegments(borderContainer, cmd.BorderRightStyle, cmd.BorderRightColor,
+					cmd.Box.Width-cmd.BorderRightWidth, cmd.BorderTopWidth, cmd.BorderRightWidth, rightHeight)
+			}
 		}
 
 		// Bottom border (full width)
@@ -1836,8 +2239,10 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		// Left border (height minus top and bottom border widths to avoid overlap)
 		if cmd.BorderLeftWidth > 0 && cmd.BorderLeftStyle != "" && cmd.BorderLeftStyle != "none" {
 			leftHeight := cmd.Box.Height - cmd.BorderTopWidth - cmd.BorderBottomWidth
-			addVerticalBorderSegments(borderContainer, cmd.BorderLeftStyle, cmd.BorderLeftColor,
-				0, cmd.BorderTopWidth, cmd.BorderLeftWidth, leftHeight)
+			if leftHeight > 0 {
+				addVerticalBorderSegments(borderContainer, cmd.BorderLeftStyle, cmd.BorderLeftColor,
+					0, cmd.BorderTopWidth, cmd.BorderLeftWidth, leftHeight)
+			}
 		}
 
 		if len(borderContainer.Objects) > 0 {
@@ -1848,7 +2253,7 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 
 	case PaintButton:
 		// Render button widget
-		if cmd.ButtonText == "" {
+		if cmd.ButtonText == "" || cmd.Box.Width <= 0 || cmd.Box.Height <= 0 {
 			return nil
 		}
 
@@ -1869,49 +2274,16 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			cr.mu.Unlock()
 
 			if isSubmit {
-				formNode := findFormAncestor(cmd.Node)
-				if formNode != nil {
-					cr.mu.Lock()
-					if cr.submittingForms[formNode.ID] {
-						cr.mu.Unlock()
-						return
-					}
-					cr.submittingForms[formNode.ID] = true
-					cr.mu.Unlock()
-
-					data := cr.collectFormData(formNode)
-					method, _ := formNode.GetAttribute("method")
-					method = strings.ToUpper(method)
-					if method == "" {
-						method = "GET"
-					}
-
-					if cr.onNavigate != nil {
-						action, _ := formNode.GetAttribute("action")
-						resolved := cr.resolveURL(action)
-						if method == "POST" {
-							cr.onNavigate(resolved)
-						} else {
-							parsed, err := url.Parse(resolved)
-							if err == nil {
-								query := parsed.Query()
-								for k, v := range data {
-									query.Set(k, v)
-								}
-								parsed.RawQuery = query.Encode()
-								cr.onNavigate(parsed.String())
-							} else {
-								cr.onNavigate(resolved)
-							}
-						}
-					}
-				}
+				cr.submitForm(cmd.Node)
 			}
 		})
 		button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
 		return button
 
 	case PaintInput:
+		if cmd.Box.Width <= 0 || cmd.Box.Height <= 0 {
+			return nil
+		}
 		if cmd.InputType == "submit" || cmd.InputType == "button" || cmd.InputType == "reset" {
 			btnText := cmd.InputValue
 			if btnText == "" {
@@ -1927,49 +2299,12 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 			button := widget.NewButton(btnText, func() {
 				if cmd.InputType == "submit" {
 					cr.mu.Lock()
-					if cr.dlBuildGen != gen || cr.submitting {
-						cr.mu.Unlock()
+					stale := cr.dlBuildGen != gen || cr.submitting
+					cr.mu.Unlock()
+					if stale {
 						return
 					}
-					cr.mu.Unlock()
-
-					formNode := findFormAncestor(cmd.Node)
-					if formNode != nil {
-						cr.mu.Lock()
-						if cr.submittingForms[formNode.ID] {
-							cr.mu.Unlock()
-							return
-						}
-						cr.submittingForms[formNode.ID] = true
-						cr.mu.Unlock()
-
-						data := cr.collectFormData(formNode)
-						method, _ := formNode.GetAttribute("method")
-						method = strings.ToUpper(method)
-						if method == "" {
-							method = "GET"
-						}
-
-						if cr.onNavigate != nil {
-							action, _ := formNode.GetAttribute("action")
-							resolved := cr.resolveURL(action)
-							if method == "POST" {
-								cr.onNavigate(resolved)
-							} else {
-								parsed, err := url.Parse(resolved)
-								if err == nil {
-									query := parsed.Query()
-									for k, v := range data {
-										query.Set(k, v)
-									}
-									parsed.RawQuery = query.Encode()
-									cr.onNavigate(parsed.String())
-								} else {
-									cr.onNavigate(resolved)
-								}
-							}
-						}
-					}
+					cr.submitForm(cmd.Node)
 				}
 			})
 			button.Resize(fyne.NewSize(cmd.Box.Width, cmd.Box.Height))
@@ -2023,6 +2358,9 @@ func (cr *CanvasRenderer) createCanvasObject(cmd *PaintCommand) fyne.CanvasObjec
 		return entry
 
 	case PaintTextarea:
+		if cmd.Box.Width <= 0 || cmd.Box.Height <= 0 {
+			return nil
+		}
 		entry := widget.NewMultiLineEntry()
 		if cmd.Placeholder != "" {
 			entry.SetPlaceHolder(cmd.Placeholder)
@@ -2280,6 +2618,7 @@ func (cr *CanvasRenderer) InvalidateObjectCache() {
 	defer cr.mu.Unlock()
 	cr.objectCache = make(map[int]fyne.CanvasObject)
 	cr.dlBuildGen++
+	cr.lastRenderedViewportHeight = 0
 }
 
 func (cr *CanvasRenderer) renderInput(node *RenderNode, objects *[]fyne.CanvasObject) {
@@ -2451,6 +2790,9 @@ const minDashLength = float32(6)
 // addHorizontalBorderSegments adds horizontal border segments (dashed/dotted/solid) to a container.
 // x, y define the top-left corner; totalWidth and height define the area.
 func addHorizontalBorderSegments(c *fyne.Container, style string, col color.Color, x, y, totalWidth, height float32) {
+	if totalWidth <= 0 || height <= 0 {
+		return
+	}
 	if col == nil {
 		col = color.Black
 	}
@@ -2496,6 +2838,9 @@ func addHorizontalBorderSegments(c *fyne.Container, style string, col color.Colo
 // addVerticalBorderSegments adds vertical border segments (dashed/dotted/solid) to a container.
 // x, y define the top-left corner; width and totalHeight define the area.
 func addVerticalBorderSegments(c *fyne.Container, style string, col color.Color, x, y, width, totalHeight float32) {
+	if width <= 0 || totalHeight <= 0 {
+		return
+	}
 	if col == nil {
 		col = color.Black
 	}
@@ -2615,12 +2960,35 @@ func (cr *CanvasRenderer) collectFormData(formNode *RenderNode) map[string]strin
 	return data
 }
 
-// findFormAncestor walks up the parent tree to find the containing form element
+// findFormAncestor walks up the parent tree to find the containing form
+// element. It delegates to the shared activation helper so the widget-tree
+// and raster canvases resolve forms identically.
 func findFormAncestor(node *RenderNode) *RenderNode {
-	for n := node; n != nil; n = n.Parent {
-		if n.TagName == "form" {
-			return n
-		}
+	return FindFormAncestor(node)
+}
+
+// submitForm runs the default activation for a submitter inside a form:
+// it guards against double submission, gathers live widget state, builds
+// the submission URL, and dispatches navigation. It is shared by <button>
+// and <input type="submit"> widgets.
+func (cr *CanvasRenderer) submitForm(submitter *RenderNode) {
+	formNode := FindFormAncestor(submitter)
+	if formNode == nil {
+		return
 	}
-	return nil
+	cr.mu.Lock()
+	if cr.submittingForms[formNode.ID] {
+		cr.mu.Unlock()
+		return
+	}
+	cr.submittingForms[formNode.ID] = true
+	cr.mu.Unlock()
+
+	if cr.onNavigate == nil {
+		return
+	}
+	data := cr.collectFormData(formNode)
+	if target := BuildFormSubmitURL(formNode, data, cr.resolveURL); target != "" {
+		cr.onNavigate(target)
+	}
 }

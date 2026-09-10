@@ -19,12 +19,14 @@ import (
 // handed to the flush callback in one call. A window of 0 fires immediately
 // on every signal (no batching).
 type ImageLoadBatcher struct {
-	mu      sync.Mutex
-	pending map[string]struct{}
-	window  time.Duration
-	flush   func([]string)
-	timer   *time.Timer
-	stopped bool
+	mu          sync.Mutex
+	pending     map[string]struct{}
+	window      time.Duration
+	maxWait     time.Duration
+	firstSignal time.Time
+	flush       func([]string)
+	timer       *time.Timer
+	stopped     bool
 
 	// batches is the number of flush calls performed; signals is the
 	// number of accepted Signal calls. dropped (signals − batches) is
@@ -38,12 +40,23 @@ type ImageLoadBatcher struct {
 // 0 means "flush immediately on every signal" (no batching). The flush
 // callback runs on its own goroutine.
 func NewImageLoadBatcher(window time.Duration, flush func([]string)) *ImageLoadBatcher {
-	if window < 0 {
-		window = 0
+	return NewImageLoadBatcherWithDebounce(window, window*3, flush)
+}
+
+// NewImageLoadBatcherWithDebounce creates a batcher with a trailing debounce window
+// and a maximum wait cap. Rapidly arriving image completions reset the quiet period
+// (trailing debounce) up to maxWait from the first signal, at which point a flush is forced.
+func NewImageLoadBatcherWithDebounce(debounce, maxWait time.Duration, flush func([]string)) *ImageLoadBatcher {
+	if debounce < 0 {
+		debounce = 0
+	}
+	if maxWait < debounce && debounce > 0 {
+		maxWait = debounce * 3
 	}
 	return &ImageLoadBatcher{
 		pending: make(map[string]struct{}),
-		window:  window,
+		window:  debounce,
+		maxWait: maxWait,
 		flush:   flush,
 	}
 }
@@ -71,10 +84,28 @@ func (b *ImageLoadBatcher) Signal(src string) {
 		b.flushLocked()
 		return
 	}
-	if b.timer != nil {
-		return // already armed; the fire will pick up this source
+	now := time.Now()
+	if b.timer == nil {
+		b.firstSignal = now
+		b.timer = time.AfterFunc(b.window, b.fire)
+		return
 	}
-	b.timer = time.AfterFunc(b.window, b.fire)
+	// Trailing debounce: extend timer if within maxWait
+	if b.maxWait > 0 {
+		deadline := b.firstSignal.Add(b.maxWait)
+		if now.Before(deadline) {
+			remaining := deadline.Sub(now)
+			extend := b.window
+			if extend > remaining {
+				extend = remaining
+			}
+			b.timer.Stop()
+			b.timer = time.AfterFunc(extend, b.fire)
+		}
+	} else {
+		b.timer.Stop()
+		b.timer = time.AfterFunc(b.window, b.fire)
+	}
 }
 
 // Flush drains the pending batch immediately (used by tests and on
@@ -96,6 +127,7 @@ func (b *ImageLoadBatcher) flushLocked() {
 		b.timer.Stop()
 		b.timer = nil
 	}
+	b.firstSignal = time.Time{}
 	srcs := make([]string, 0, len(b.pending))
 	for src := range b.pending {
 		srcs = append(srcs, src)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,9 +33,9 @@ func TestCanvasRenderer_MouseInputPosterRoutesEvents(t *testing.T) {
 	ic := renderer.NewInspectableContainer(nil, cr)
 
 	// Hover move posts a Move event (widget-space position only).
-	ic.MouseMoved(&fyne.PointEvent{Position: fyne.NewPos(10, 20)})
+	ic.MouseMoved(&desktop.MouseEvent{PointEvent: fyne.PointEvent{Position: fyne.NewPos(10, 20)}})
 	// Left click posts a Click event with button 1.
-	ic.MouseDown(&fyne.PointEvent{Position: fyne.NewPos(30, 40)})
+	ic.MouseDown(&desktop.MouseEvent{PointEvent: fyne.PointEvent{Position: fyne.NewPos(30, 40)}, Button: desktop.MouseButtonPrimary})
 	// Right click posts a Click event with button 2 + absolute position.
 	ic.TappedSecondary(&fyne.PointEvent{
 		Position:         fyne.NewPos(50, 60),

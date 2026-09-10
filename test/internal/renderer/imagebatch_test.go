@@ -297,3 +297,30 @@ func findFirstImg(n *renderer.RenderNode) *renderer.RenderNode {
 	}
 	return nil
 }
+
+func TestImageLoadBatcher_TrailingDebounceWithMaxWait(t *testing.T) {
+	flushed := make(chan []string, 10)
+	// 20ms debounce, 60ms maxWait
+	b := renderer.NewImageLoadBatcherWithDebounce(20*time.Millisecond, 60*time.Millisecond, func(srcs []string) {
+		flushed <- srcs
+	})
+	defer b.Close()
+
+	start := time.Now()
+	b.Signal("img0.png")
+	time.Sleep(10 * time.Millisecond)
+	b.Signal("img1.png")
+	time.Sleep(10 * time.Millisecond)
+	b.Signal("img2.png")
+	time.Sleep(10 * time.Millisecond)
+	b.Signal("img3.png")
+
+	select {
+	case srcs := <-flushed:
+		elapsed := time.Since(start)
+		assert.Len(t, srcs, 4, "all 4 images should be in one batch")
+		assert.GreaterOrEqual(t, elapsed, 45*time.Millisecond, "trailing debounce should extend timer past original 20ms")
+	case <-time.After(time.Second):
+		t.Fatal("batcher never flushed")
+	}
+}

@@ -129,7 +129,9 @@ func main() {
 		Headless:      *headlessFlag,
 	})
 	browser.RendererFactory = func() ui.HTMLRenderer {
-		return renderer.NewRenderer(1000, 700)
+		r := renderer.NewRenderer(1000, 700)
+		r.SetMemoryManager(memMgr)
+		return r
 	}
 
 	// Channel to signal when initial page load is complete (used in headless mode)
@@ -406,6 +408,9 @@ func loadPageAsyncWithCoordinator(browser *ui.Browser, fetcher *net.Fetcher, par
 	if activeTab := browser.ActiveTab(); activeTab != nil {
 		if r := activeTab.GetRenderer(); r != nil {
 			r.SetSubmitting(true)
+			if cr, ok := r.(*renderer.Renderer); ok && cr != nil {
+				cr.ClearImageCache()
+			}
 		}
 	}
 
@@ -745,14 +750,6 @@ func updateUIWithCoordinatorStream(ctx context.Context, browser *ui.Browser, fet
 		return
 	}
 
-	// 6. Wire the renderer's CSP (for any non-CSS checks the renderer
-	//    still performs) and route through the snapshot entry point.
-	if activeTab := browser.ActiveTab(); activeTab != nil {
-		if r := activeTab.GetRenderer(); r != nil {
-			r.SetCSP(csp)
-		}
-	}
-
 	if err := browser.RenderParsedContent(ctx, doc, external); err != nil {
 		log.Printf("Error rendering (coordinator path): %v", err)
 		browser.SetContent("Error rendering HTML: " + err.Error())
@@ -762,7 +759,6 @@ func updateUIWithCoordinatorStream(ctx context.Context, browser *ui.Browser, fet
 				r.SetSubmitting(false)
 			}
 		}
-		sess.Fail(err)
 		return
 	}
 

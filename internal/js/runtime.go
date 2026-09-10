@@ -65,13 +65,13 @@ type pendingTimerEntry struct {
 // startTimerDispatcher starts the per-runtime timer dispatcher goroutine.
 func (r *Runtime) startTimerDispatcher() {
 	r.timerDone = make(chan struct{})
+	r.timerWg.Add(1)
 	go r.runTimerDispatcher()
 }
 
 // runTimerDispatcher reads from pooled time.Timers and dispatches callbacks.
 func (r *Runtime) runTimerDispatcher() {
 	defer r.timerWg.Done()
-	r.timerWg.Add(1)
 	for {
 		select {
 		case <-r.timerDone:
@@ -103,12 +103,15 @@ func (r *Runtime) runTimerDispatcher() {
 				delete(r.pendingTimers, id)
 				r.timerCallbackMu.Unlock()
 			}
-			if r.enqueueTask != nil {
-				r.enqueueTask(func() {
-					cb(goja.Undefined()) //nolint:errcheck
-				})
-			} else {
+			invoke := func() {
+				r.scriptMu.Lock()
+				defer r.scriptMu.Unlock()
 				cb(goja.Undefined()) //nolint:errcheck
+			}
+			if r.enqueueTask != nil {
+				r.enqueueTask(invoke)
+			} else {
+				invoke()
 			}
 		}
 	}
@@ -142,13 +145,15 @@ type Runtime struct {
 	sessionStorage      map[string]string
 	localStorageAdapter LocalStorageAdapter
 	origin              string
-	timers              map[int]*Timer
-	timerIDCounter      int
+	timers         map[int]*Timer
+	timerMu        sync.Mutex // protects timers
+	timerIDCounter int
 	// Timer pool dispatcher state.
 	pendingTimers   map[int]*pendingTimerEntry
 	timerEvents     chan int
 	timerDone       chan struct{}
 	timerWg         sync.WaitGroup
+	timerCloseOnce  sync.Once
 	timerCallbackMu sync.Mutex // protects pendingTimers
 	// History tracking
 	historyStack []string
@@ -969,6 +974,17 @@ func (r *Runtime) setupDocumentAPI() {
     }
   }
 
+  class Comment extends Node {
+    constructor(data) {
+      super(8, "#comment");
+      this.data = String(data || "");
+    }
+    get textContent() { return this.data; }
+    set textContent(val) { this.data = String(val); }
+    get nodeValue() { return this.data; }
+    set nodeValue(val) { this.data = String(val); }
+  }
+
   // Selector matching helpers for JS DOM
   function jsSplitSelectorList(sel) {
     const results = [];
@@ -1272,11 +1288,16 @@ func (r *Runtime) setupDocumentAPI() {
             target.cssText = value;
             return true;
           }
-          if (typeof value !== "string") {
+          if (typeof value === "function") {
             target[prop] = value;
             return true;
           }
-          target[prop] = value;
+          const valStr = typeof value === "string" ? value : String(value);
+          target[prop] = valStr;
+          if (typeof prop === "string" && prop.indexOf("-") !== -1 && !prop.startsWith("--")) {
+            const camel = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+            target[camel] = valStr;
+          }
           const styleStr = Object.keys(target)
             .filter(k => !k.startsWith("_") && k !== "cssText" && typeof target[k] === "string")
             .map(k => k.replace(/([A-Z])/g, "-$1").toLowerCase() + ": " + target[k])
@@ -1286,7 +1307,12 @@ func (r *Runtime) setupDocumentAPI() {
         },
         get(target, prop) {
           if (prop === "cssText") return target.cssText;
-          return target[prop];
+          if (target[prop] !== undefined) return target[prop];
+          if (typeof prop === "string" && prop.indexOf("-") !== -1 && !prop.startsWith("--")) {
+            const camel = prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+            return target[camel];
+          }
+          return undefined;
         }
       });
       this.style.setProperty = (name, value) => {
@@ -1354,12 +1380,16 @@ func (r *Runtime) setupDocumentAPI() {
         toggle(c) {
           const current = self.className ? self.className.split(/\s+/) : [];
           const idx = current.indexOf(c);
+          let added = false;
           if (idx === -1) {
             current.push(c);
+            added = true;
           } else {
             current.splice(idx, 1);
+            added = false;
           }
           self.className = current.join(" ");
+          return added;
         }
       };
     }
@@ -1461,7 +1491,144 @@ func (r *Runtime) setupDocumentAPI() {
       });
       if (window.__onDOMChanged) window.__onDOMChanged();
     }
-    
+
+    get value() {
+      if (this._value !== undefined) return this._value;
+      const v = this.getAttribute("value");
+      return v !== null ? v : "";
+    }
+
+    set value(v) {
+      this._value = String(v);
+      this.setAttribute("value", this._value);
+    }
+
+    get checked() {
+      if (this._checked !== undefined) return this._checked;
+      return this.hasAttribute("checked");
+    }
+
+    set checked(v) {
+      this._checked = Boolean(v);
+      if (this._checked) {
+        this.setAttribute("checked", "");
+      } else {
+        this.removeAttribute("checked");
+      }
+    }
+
+    get disabled() { return this.hasAttribute("disabled"); }
+
+    get readOnly() { return this.hasAttribute("readonly"); }
+
+    get form() {
+      let n = this.parentNode;
+      while (n) {
+        if (n.tagName && String(n.tagName).toLowerCase() === "form") return n;
+        n = n.parentNode;
+      }
+      return null;
+    }
+
+    focus() {
+      const doc = (typeof window !== "undefined" && window.document) || null;
+      if (doc && doc.activeElement && doc.activeElement !== this &&
+          typeof doc.activeElement.blur === "function") {
+        doc.activeElement.blur();
+      }
+      if (doc) doc.activeElement = this;
+      try { this.dispatchEvent(new Event("focus", { bubbles: false, cancelable: false })); } catch (e) {}
+      try { this.dispatchEvent(new Event("focusin", { bubbles: true, cancelable: false })); } catch (e) {}
+    }
+
+    blur() {
+      const doc = (typeof window !== "undefined" && window.document) || null;
+      if (doc && doc.activeElement === this) doc.activeElement = null;
+      try { this.dispatchEvent(new Event("blur", { bubbles: false, cancelable: false })); } catch (e) {}
+      try { this.dispatchEvent(new Event("focusout", { bubbles: true, cancelable: false })); } catch (e) {}
+    }
+
+    click() {
+      if (this.disabled) return;
+      const tag = (this.tagName || "").toLowerCase();
+      const type = (this.getAttribute("type") || "").toLowerCase();
+      // Default pre-activation for checkables mirrors the Go renderer
+      // (internal/renderer/activation.go) so script-driven and native
+      // clicks toggle identically.
+      let toggle = null;
+      if (tag === "input" && (type === "checkbox" || type === "radio")) {
+        if (type === "checkbox") {
+          toggle = !this.checked;
+        } else if (!this.checked) {
+          toggle = true;
+        }
+      }
+      let notPrevented = true;
+      try { notPrevented = this.dispatchEvent(new Event("click", { bubbles: true, cancelable: true })); } catch (e) {}
+      if (!notPrevented) return;
+      if (toggle !== null && toggle !== this.checked) this.checked = toggle;
+      if (toggle === true && type === "radio") {
+        const name = this.getAttribute("name") || "";
+        let scope = this;
+        while (scope.parentNode) scope = scope.parentNode;
+        if (this.form) scope = this.form;
+        const walk = (n) => {
+          if (!n) return;
+          if (n !== this && n.tagName && String(n.tagName).toLowerCase() === "input" &&
+              (n.getAttribute("type") || "").toLowerCase() === "radio" &&
+              (n.getAttribute("name") || "") === name) {
+            n.checked = false;
+          }
+          (n.childNodes || []).forEach(walk);
+        };
+        walk(scope);
+      }
+      const isSubmitter =
+        (tag === "button" && type !== "button") ||
+        (tag === "input" && (type === "submit" || type === "image"));
+      if (isSubmitter && this.form && typeof this.form.requestSubmit === "function") {
+        this.form.requestSubmit(this);
+      }
+    }
+
+    submit() {
+      if ((this.tagName || "").toLowerCase() !== "form") return;
+      this._submitted = true;
+    }
+
+    requestSubmit(submitter) {
+      if ((this.tagName || "").toLowerCase() !== "form") return;
+      let notPrevented = true;
+      try {
+        const ev = new Event("submit", { bubbles: true, cancelable: true });
+        ev.submitter = submitter || null;
+        notPrevented = this.dispatchEvent(ev);
+      } catch (e) {}
+      if (notPrevented) this._submitted = true;
+    }
+
+    reset() {
+      if ((this.tagName || "").toLowerCase() !== "form") return;
+      const walk = (n) => {
+        if (!n) return;
+        const t = (n.tagName || "").toLowerCase();
+        if (t === "input") {
+          const it = (n.getAttribute("type") || "").toLowerCase();
+          if (it === "checkbox" || it === "radio") {
+            n.checked = false;
+          } else if (it !== "submit" && it !== "button" && it !== "image" && it !== "reset") {
+            n.value = "";
+          }
+        } else if (t === "textarea") {
+          n.value = "";
+        } else if (t === "option") {
+          n.removeAttribute("selected");
+        }
+        (n.childNodes || []).forEach(walk);
+      };
+      walk(this);
+    }
+
     getElementById(id) {
       if (this.id === id) return this;
       for (const child of this.children) {
@@ -1605,10 +1772,11 @@ func (r *Runtime) setupDocumentAPI() {
       
       this.head = new Element("head");
       this.body = new Element("body");
-      
+
       this.documentElement.appendChild(this.head);
       this.documentElement.appendChild(this.body);
       this.defaultView = window;
+      this.activeElement = null;
     }
 
     // Per spec the document node itself has no owner document.
@@ -1622,9 +1790,17 @@ func (r *Runtime) setupDocumentAPI() {
       }
       return new Element(tagName);
     }
+
+    createElementNS(namespaceURI, tagName) {
+      return this.createElement(tagName);
+    }
     
     createTextNode(text) {
       return new TextNode(text);
+    }
+
+    createComment(data) {
+      return new Comment(data);
     }
     
     getElementById(id) {
@@ -1676,6 +1852,7 @@ func (r *Runtime) setupDocumentAPI() {
   window.Node = Node;
   window.Element = Element;
   window.TextNode = TextNode;
+  window.Comment = Comment;
   window.Document = Document;
   window.Attr = Attr;
   window.NamedNodeMap = NamedNodeMap;
@@ -1686,6 +1863,7 @@ func (r *Runtime) setupDocumentAPI() {
   globalThis.Node = Node;
   globalThis.Element = Element;
   globalThis.TextNode = TextNode;
+  globalThis.Comment = Comment;
   globalThis.Document = Document;
   globalThis.Attr = Attr;
   globalThis.NamedNodeMap = NamedNodeMap;
@@ -1708,6 +1886,9 @@ func (r *Runtime) setupDocumentAPI() {
     if (!node) return "";
     if (node.nodeType === 3) {
       return node.textContent;
+    }
+    if (node.nodeType === 8) {
+      return "<!--" + (node.data || "") + "-->";
     }
     if (node.nodeType === 1) {
       const tag = node.tagName.toLowerCase();
@@ -1821,13 +2002,18 @@ func (r *Runtime) setupDocumentAPI() {
     var styleMap = {};
     inline.split(';').forEach(function(pair) {
       var idx = pair.indexOf(':');
-      if (idx !== -1) styleMap[pair.slice(0,idx).trim()] = pair.slice(idx+1).trim();
+      if (idx !== -1) {
+        var k = pair.slice(0, idx).trim();
+        var v = pair.slice(idx + 1).trim();
+        styleMap[k] = v;
+        var camel = k.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
+        styleMap[camel] = v;
+      }
     });
-    return {
-      getPropertyValue: function(name) { return styleMap[name] || ''; },
-      setProperty: function() {},
-      removeProperty: function() {}
-    };
+    styleMap.getPropertyValue = function(name) { return styleMap[name] || ''; };
+    styleMap.setProperty = function() {};
+    styleMap.removeProperty = function() {};
+    return styleMap;
   };
 
   // document additions
@@ -2376,6 +2562,8 @@ func (r *Runtime) GetJavaScriptErrors() []string {
 
 // ActiveTimersCount returns the number of active JS timers (setTimeout/setInterval).
 func (r *Runtime) ActiveTimersCount() int {
+	r.timerMu.Lock()
+	defer r.timerMu.Unlock()
 	return len(r.timers)
 }
 
@@ -2547,6 +2735,12 @@ func (r *Runtime) setupWindowAPI() {
 	r.setupWebSocketAPI()
 	r.setupWorkerAPI()
 	r.setupServiceWorkerAPI()
+
+	// Web compatibility APIs for dynamic websites (performance, fonts, xhr)
+	r.setupPerformanceAPI()
+	r.setupFontsAPI()
+	r.setupXHRAPI()
+	r.setupWebCompat()
 
 	r.vm.Set("window", window)
 	r.vm.Set("self", window)
@@ -3169,25 +3363,33 @@ func (r *Runtime) setupTimerAPIs() {
 		go func() {
 			select {
 			case <-t.C:
-				r.timerEvents <- timerID
+				select {
+				case r.timerEvents <- timerID:
+				case <-r.timerDone:
+					return
+				}
 			case <-entry.done:
 				// Timer was cleared — drain and return to pool.
-				if t.Stop() {
+				if !t.Stop() {
 					select {
 					case <-t.C:
 					default:
 					}
 				}
 				timerPool.Put(t)
+			case <-r.timerDone:
+				return
 			}
 		}()
 
+		r.timerMu.Lock()
 		r.timers[timerID] = &Timer{
 			ID:       timerID,
 			Callback: callback,
 			Interval: delay,
 			Repeat:   false,
 		}
+		r.timerMu.Unlock()
 
 		return r.vm.ToValue(timerID)
 	})
@@ -3199,9 +3401,13 @@ func (r *Runtime) setupTimerAPIs() {
 		}
 
 		timerID := int(call.Arguments[0].ToInteger())
+		r.timerMu.Lock()
 		if _, exists := r.timers[timerID]; !exists {
+			r.timerMu.Unlock()
 			return goja.Undefined()
 		}
+		delete(r.timers, timerID)
+		r.timerMu.Unlock()
 
 		r.timerCallbackMu.Lock()
 		if entry, ok := r.pendingTimers[timerID]; ok {
@@ -3210,7 +3416,6 @@ func (r *Runtime) setupTimerAPIs() {
 			delete(r.pendingTimers, timerID)
 		}
 		r.timerCallbackMu.Unlock()
-		delete(r.timers, timerID)
 
 		return goja.Undefined()
 	})
@@ -3236,6 +3441,11 @@ func (r *Runtime) setupTimerAPIs() {
 		interval := time.Duration(0)
 		if len(call.Arguments) >= 2 {
 			interval = time.Duration(call.Arguments[1].ToInteger()) * time.Millisecond
+		}
+		// HTML5 §8.5.2: Minimum timer clamping (at least 4ms for intervals)
+		// to prevent unthrottled 0ms spin loops.
+		if interval < 4*time.Millisecond {
+			interval = 4 * time.Millisecond
 		}
 
 		timerID := r.timerIDCounter
@@ -3270,10 +3480,14 @@ func (r *Runtime) setupTimerAPIs() {
 			for {
 				select {
 				case <-t.C:
-					r.timerEvents <- timerID
+					select {
+					case r.timerEvents <- timerID:
+					case <-r.timerDone:
+						return
+					}
 				case <-entry.done:
 					// Timer was cleared — drain and return to pool.
-					if t.Stop() {
+					if !t.Stop() {
 						select {
 						case <-t.C:
 						default:
@@ -3281,16 +3495,20 @@ func (r *Runtime) setupTimerAPIs() {
 					}
 					timerPool.Put(t)
 					return
+				case <-r.timerDone:
+					return
 				}
 			}
 		}()
 
+		r.timerMu.Lock()
 		r.timers[timerID] = &Timer{
 			ID:       timerID,
 			Callback: callback,
 			Interval: interval,
 			Repeat:   true,
 		}
+		r.timerMu.Unlock()
 
 		return r.vm.ToValue(timerID)
 	})
@@ -3302,9 +3520,13 @@ func (r *Runtime) setupTimerAPIs() {
 		}
 
 		timerID := int(call.Arguments[0].ToInteger())
+		r.timerMu.Lock()
 		if _, exists := r.timers[timerID]; !exists {
+			r.timerMu.Unlock()
 			return goja.Undefined()
 		}
+		delete(r.timers, timerID)
+		r.timerMu.Unlock()
 
 		r.timerCallbackMu.Lock()
 		if entry, ok := r.pendingTimers[timerID]; ok {
@@ -3313,7 +3535,6 @@ func (r *Runtime) setupTimerAPIs() {
 			delete(r.pendingTimers, timerID)
 		}
 		r.timerCallbackMu.Unlock()
-		delete(r.timers, timerID)
 
 		return goja.Undefined()
 	})
@@ -3561,7 +3782,9 @@ func (r *Runtime) Cleanup() {
 		delete(r.pendingTimers, id)
 	}
 	r.timerCallbackMu.Unlock()
+	r.timerMu.Lock()
 	r.timers = make(map[int]*Timer)
+	r.timerMu.Unlock()
 
 	// Drop any pending requestAnimationFrame callbacks so a navigation
 	// away from this page does not leak a stale animation loop. The
@@ -3570,6 +3793,19 @@ func (r *Runtime) Cleanup() {
 	if r.frameScheduler != nil {
 		r.frameScheduler.Reset()
 	}
+}
+
+// Close cleanly terminates the timer dispatcher goroutine, cleans up all
+// pending timers, and waits for background timer routines to shut down.
+// It is safe to call Close multiple times concurrently.
+func (r *Runtime) Close() {
+	r.timerCloseOnce.Do(func() {
+		r.Cleanup()
+		if r.timerDone != nil {
+			close(r.timerDone)
+		}
+		r.timerWg.Wait()
+	})
 }
 
 // installFrameScheduler replaces the polyfill's requestAnimationFrame

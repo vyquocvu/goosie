@@ -21,7 +21,11 @@ func (r *Runtime) HasEnqueueTask() bool { return r.enqueueTask != nil }
 const MaxPermissionDecisions = maxPermissionDecisions
 
 // Timers exports timers field for use by external test packages.
-func (r *Runtime) Timers() map[int]*Timer { return r.timers }
+func (r *Runtime) Timers() map[int]*Timer {
+	r.timerMu.Lock()
+	defer r.timerMu.Unlock()
+	return r.timers
+}
 
 // Fetcher exports fetcher field for use by external test packages.
 func (r *Runtime) Fetcher() HTTPFetcher { return r.fetcher }

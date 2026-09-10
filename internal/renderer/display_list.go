@@ -127,14 +127,17 @@ type YBand struct {
 
 // DisplayList represents a list of paint commands
 type DisplayList struct {
-	Commands []*PaintCommand
-	YBands   []YBand // Spatial index — commands grouped by Y-range (~200px bands)
+	Commands      []*PaintCommand
+	FixedCommands []*PaintCommand // Fixed and sticky commands anchored to viewport
+	YBands        []YBand         // Spatial index — commands grouped by Y-range (~200px bands)
+	Height        float32         // Document layout height
 }
 
 // NewDisplayList creates a new display list
 func NewDisplayList() *DisplayList {
 	return &DisplayList{
-		Commands: make([]*PaintCommand, 0),
+		Commands:      make([]*PaintCommand, 0),
+		FixedCommands: make([]*PaintCommand, 0),
 	}
 }
 
@@ -146,18 +149,33 @@ func (dl *DisplayList) AddCommand(cmd *PaintCommand) {
 // Clear removes all commands from the display list
 func (dl *DisplayList) Clear() {
 	dl.Commands = make([]*PaintCommand, 0)
+	dl.FixedCommands = nil
+	dl.YBands = nil
 }
 
 // SortByZIndex reorders PaintCommands so lower z-index paints before higher z-index.
+// It also rebuilds dl.YBands so the spatial index reflects the post-sort command slice.
 func SortByZIndex(dl *DisplayList) {
+	if dl == nil {
+		return
+	}
 	sort.SliceStable(dl.Commands, func(i, j int) bool {
 		return zIndexOf(dl.Commands[i]) < zIndexOf(dl.Commands[j])
 	})
+	buildYBands(dl)
 }
 
 func zIndexOf(cmd *PaintCommand) int {
-	if cmd.Node != nil && cmd.Node.ComputedStyle != nil {
+	if cmd == nil || cmd.Node == nil {
+		return 0
+	}
+	if cmd.Node.ComputedStyle != nil && cmd.Node.ComputedStyle.ZIndex != 0 {
 		return cmd.Node.ComputedStyle.ZIndex
+	}
+	for n := cmd.Node.Parent; n != nil; n = n.Parent {
+		if n.ComputedStyle != nil && n.ComputedStyle.ZIndex != 0 {
+			return n.ComputedStyle.ZIndex
+		}
 	}
 	return 0
 }
@@ -186,6 +204,7 @@ func (dlb *DisplayListBuilder) Build(layoutRoot *LayoutBox, renderRoot *RenderNo
 	if layoutRoot == nil || renderRoot == nil {
 		return displayList
 	}
+	displayList.Height = layoutRoot.Box.Height
 
 	// Build a map of render nodes by ID for quick lookup
 	renderMap := dlb.buildRenderMap(renderRoot)
@@ -193,8 +212,8 @@ func (dlb *DisplayListBuilder) Build(layoutRoot *LayoutBox, renderRoot *RenderNo
 	// Walk the layout tree and generate paint commands
 	dlb.buildRecursive(layoutRoot, renderMap, displayList)
 
-	// Build spatial Y-band index for viewport culling
-	buildYBands(displayList)
+	// Sort commands by z-index and build spatial Y-band index for viewport culling
+	SortByZIndex(displayList)
 
 	return displayList
 }
@@ -202,17 +221,31 @@ func (dlb *DisplayListBuilder) Build(layoutRoot *LayoutBox, renderRoot *RenderNo
 // buildYBands partitions display list leaf commands into spatial Y-bands for
 // efficient viewport culling. Each band groups ~200px of vertical space so
 // that RenderWithViewport can skip entire groups of off-screen commands.
+// Fixed and sticky commands are collected into dl.FixedCommands and are NOT
+// indexed into YBands to avoid expanding all band intervals to [0, N].
 func buildYBands(dl *DisplayList) {
-	if len(dl.Commands) == 0 {
+	if dl == nil || len(dl.Commands) == 0 {
+		if dl != nil {
+			dl.YBands = nil
+			dl.FixedCommands = nil
+		}
 		return
 	}
 
-	// Find Y range of non-clip commands
+	// Populate FixedCommands in stable z-index order (dl.Commands is already sorted by SortByZIndex)
+	dl.FixedCommands = nil
+	for _, cmd := range dl.Commands {
+		if cmd != nil && isFixedOrSticky(cmd.Node) {
+			dl.FixedCommands = append(dl.FixedCommands, cmd)
+		}
+	}
+
+	// Find Y range of in-flow non-clip commands
 	minY := float32(0)
 	maxY := float32(0)
 	first := true
 	for _, cmd := range dl.Commands {
-		if cmd.Type == PushClip || cmd.Type == PopClip {
+		if cmd == nil || cmd.Type == PushClip || cmd.Type == PopClip || isFixedOrSticky(cmd.Node) {
 			continue
 		}
 		cmdBottom := cmd.Box.Y + cmd.Box.Height
@@ -229,7 +262,8 @@ func buildYBands(dl *DisplayList) {
 			}
 		}
 	}
-	if first {
+	if first || maxY <= minY {
+		dl.YBands = nil
 		return
 	}
 
@@ -245,33 +279,49 @@ func buildYBands(dl *DisplayList) {
 		}
 	}
 
-	currentBand := 0
+	// Index in-flow commands into all bands they intersect
 	for i, cmd := range dl.Commands {
-		if cmd.Type == PushClip || cmd.Type == PopClip {
+		if cmd == nil || cmd.Type == PushClip || cmd.Type == PopClip || isFixedOrSticky(cmd.Node) {
 			continue
 		}
-		for currentBand < numBands-1 && cmd.Box.Y >= bands[currentBand+1].YStart {
-			if bands[currentBand].CmdEnd < 0 {
-				bands[currentBand].CmdEnd = i
+
+		cmdTop := cmd.Box.Y
+		cmdBottom := cmd.Box.Y + cmd.Box.Height
+
+		startBand := int((cmdTop - minY) / bandH)
+		endBand := int((cmdBottom - minY) / bandH)
+
+		if startBand < 0 {
+			startBand = 0
+		}
+		if startBand >= numBands {
+			startBand = numBands - 1
+		}
+		if endBand < 0 {
+			endBand = 0
+		}
+		if endBand >= numBands {
+			endBand = numBands - 1
+		}
+		if endBand < startBand {
+			endBand = startBand
+		}
+
+		for b := startBand; b <= endBand; b++ {
+			if bands[b].CmdStart < 0 || i < bands[b].CmdStart {
+				bands[b].CmdStart = i
 			}
-			currentBand++
+			if bands[b].CmdEnd < 0 || i+1 > bands[b].CmdEnd {
+				bands[b].CmdEnd = i + 1
+			}
 		}
-		if bands[currentBand].CmdStart < 0 {
-			bands[currentBand].CmdStart = i
-		}
-		bands[currentBand].CmdEnd = i + 1
 	}
 
-	// Fill empty trailing bands with their predecessor's CmdEnd (marks them as empty)
-	for b := numBands - 1; b >= 0; b-- {
+	// Cleanly mark empty bands
+	for b := 0; b < numBands; b++ {
 		if bands[b].CmdStart < 0 {
-			if b == 0 {
-				bands[b].CmdStart = 0
-				bands[b].CmdEnd = 0
-			} else {
-				bands[b].CmdStart = bands[b-1].CmdEnd
-				bands[b].CmdEnd = bands[b-1].CmdEnd
-			}
+			bands[b].CmdStart = -1
+			bands[b].CmdEnd = -1
 		}
 	}
 
@@ -683,8 +733,8 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 		return
 	}
 
-	// For image elements, add a rectangle placeholder and text
-	if renderNode.TagName == "img" {
+	// For image and svg elements, add an image paint command
+	if renderNode.TagName == "img" || renderNode.TagName == "svg" {
 		// Check visibility
 		if renderNode.ComputedStyle != nil && renderNode.ComputedStyle.Visibility == css.VisibilityAtomHidden {
 			// Add transparent placeholder to maintain layout space
@@ -702,8 +752,11 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 		// Add image info text if available
 		src, _ := renderNode.GetAttribute("src")
 		alt, _ := renderNode.GetAttribute("alt")
+		if renderNode.TagName == "svg" {
+			src = "inline-svg"
+		}
 
-		if src != "" || alt != "" {
+		if src != "" || alt != "" || renderNode.ImageData != nil {
 			textCmd := &PaintCommand{
 				Type:     PaintImage,
 				NodeID:   layoutBox.NodeID,
@@ -736,6 +789,9 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 	// For input elements, add an input paint command
 	if renderNode.TagName == "input" {
 		inputType, _ := renderNode.GetAttribute("type")
+		if strings.EqualFold(strings.TrimSpace(inputType), "hidden") {
+			return
+		}
 		inputValue, _ := renderNode.GetAttribute("value")
 		placeholder, _ := renderNode.GetAttribute("placeholder")
 
@@ -773,6 +829,13 @@ func (dlb *DisplayListBuilder) addElementCommand(layoutBox *LayoutBox, renderNod
 // extractText extracts text content from a render node
 func (dlb *DisplayListBuilder) extractText(node *RenderNode) string {
 	if node == nil {
+		return ""
+	}
+	if node.ComputedStyle != nil && node.ComputedStyle.Display == css.DisplayAtomNone {
+		return ""
+	}
+	switch node.TagName {
+	case "style", "script", "noscript", "template":
 		return ""
 	}
 

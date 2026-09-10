@@ -39,6 +39,11 @@ type HTMLRenderer interface {
 	SetHeadless(headless bool)
 	SetNavigationCallback(callback func(url string))
 	HitTest(x, y float32) (*renderer.RenderNode, *renderer.LayoutBox)
+	// ActivateClick computes (and applies) the default action of a click
+	// on the hit node: link navigation, form submission, checkbox/radio
+	// toggles, etc. Callers use the returned Activation to decide
+	// whether to navigate, repaint, or focus.
+	ActivateClick(node *renderer.RenderNode) renderer.Activation
 	SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox))
 
 	// SetContextMenuCallback wires a callback invoked when the user

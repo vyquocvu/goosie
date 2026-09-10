@@ -145,7 +145,9 @@ func (p *Profile) worker() {
 	}
 	pending := make(map[string]pendingItem)
 	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker.Stop() // Initially stopped while pending is empty
 	defer ticker.Stop()
+	var tickerChan <-chan time.Time
 
 	flushFile := func(name string, item pendingItem) {
 		err := p.saveJSONBytes(name, item.data)
@@ -159,6 +161,10 @@ func (p *Profile) worker() {
 	flushAll := func() {
 		for name, item := range pending {
 			flushFile(name, item)
+		}
+		if tickerChan != nil {
+			ticker.Stop()
+			tickerChan = nil
 		}
 	}
 
@@ -192,13 +198,24 @@ func (p *Profile) worker() {
 				done: task.done,
 			}
 
-		case <-ticker.C:
+			// Activate ticker only when pending items exist
+			if tickerChan == nil {
+				ticker.Reset(50 * time.Millisecond)
+				tickerChan = ticker.C
+			}
+
+		case <-tickerChan:
 			now := time.Now()
 			for name, item := range pending {
 				// Coalesce / delay writes by 200ms
 				if now.Sub(item.at) >= 200*time.Millisecond {
 					flushFile(name, item)
 				}
+			}
+			// When all pending writes have been completed, back off and stop ticker to save CPU
+			if len(pending) == 0 && tickerChan != nil {
+				ticker.Stop()
+				tickerChan = nil
 			}
 
 		case <-p.ctx.Done():

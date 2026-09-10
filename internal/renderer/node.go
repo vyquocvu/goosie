@@ -1,9 +1,11 @@
 package renderer
 
 import (
+	"bytes"
 	"image/color"
 	"strings"
 	"sync/atomic"
+	"unsafe"
 
 	"golang.org/x/net/html"
 
@@ -138,6 +140,10 @@ type Style struct {
 	GridRowStart    string
 	GridRowEnd      string
 
+	// Box alignment properties (flex/grid)
+	JustifyItems string
+	JustifySelf  string
+
 	// Flexbox item properties
 	FlexGrow   float32 // How much item should grow
 	FlexShrink float32 // How much item should shrink (default 1)
@@ -208,6 +214,15 @@ func (n *RenderNode) SetAttribute(key, value string) {
 	n.Attrs[key] = value
 }
 
+// RemoveAttribute deletes an attribute. It is a no-op on nil nodes or when
+// the attribute is absent.
+func (n *RenderNode) RemoveAttribute(key string) {
+	if n == nil {
+		return
+	}
+	delete(n.Attrs, key)
+}
+
 // classes returns the space-separated class list from the class attribute.
 func (n *RenderNode) classes() []string {
 	if class, ok := n.Attrs["class"]; ok && class != "" {
@@ -257,6 +272,37 @@ func (n *RenderNode) IsBlock() bool {
 		return true
 	}
 	return false
+}
+
+// IsFixedOrSticky returns true if the node or any of its ancestors has position: fixed or position: sticky.
+func IsFixedOrSticky(node *RenderNode) bool {
+	for n := node; n != nil; n = n.Parent {
+		if n.ComputedStyle != nil && (n.ComputedStyle.Position == css.PositionAtomFixed || n.ComputedStyle.Position == css.PositionAtomSticky) {
+			return true
+		}
+	}
+	return false
+}
+
+// isFixedOrSticky is an internal package helper alias for IsFixedOrSticky.
+func isFixedOrSticky(node *RenderNode) bool {
+	return IsFixedOrSticky(node)
+}
+
+// GetImageData returns the image data for the node safely across goroutines.
+func (n *RenderNode) GetImageData() *image.ImageData {
+	if n == nil {
+		return nil
+	}
+	return (*image.ImageData)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&n.ImageData))))
+}
+
+// SetImageData sets the image data for the node safely across goroutines.
+func (n *RenderNode) SetImageData(data *image.ImageData) {
+	if n == nil {
+		return
+	}
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&n.ImageData)), unsafe.Pointer(data))
 }
 
 // BuildRenderTree builds a render tree from an HTML node
@@ -315,6 +361,37 @@ func processElementNode(htmlNode *html.Node) *RenderNode {
 	for _, attr := range htmlNode.Attr {
 		node.SetAttribute(attr.Key, attr.Val)
 	}
+
+	switch htmlNode.Data {
+	case "style", "script", "noscript", "template":
+		// Script and style element contents are code/metadata, not renderable text.
+		return node
+	}
+
+	if htmlNode.Data == "svg" {
+		var buf bytes.Buffer
+		if err := html.Render(&buf, htmlNode); err == nil {
+			svgData := buf.Bytes()
+			w, h := 0, 0
+			if wAttr, ok := node.GetAttribute("width"); ok {
+				w = int(parseLength(wAttr, 16))
+			}
+			if hAttr, ok := node.GetAttribute("height"); ok {
+				h = int(parseLength(hAttr, 16))
+			}
+			if rgba, err := image.RasterizeSVG(svgData, w, h); err == nil && rgba != nil {
+				node.ImageData = &image.ImageData{
+					Image:  rgba,
+					Width:  rgba.Bounds().Dx(),
+					Height: rgba.Bounds().Dy(),
+					Format: "svg",
+					State:  image.StateLoaded,
+				}
+			}
+		}
+		return node
+	}
+
 	for child := htmlNode.FirstChild; child != nil; child = child.NextSibling {
 		childNode := BuildRenderTree(child)
 		if childNode != nil {

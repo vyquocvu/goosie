@@ -1,7 +1,6 @@
 package renderer_test
 
 import (
-	"github.com/vyquocvu/goosie/internal/renderer"
 	"context"
 	"image"
 	"image/color"
@@ -11,6 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	imgpkg "github.com/vyquocvu/goosie/internal/image"
+	"github.com/vyquocvu/goosie/internal/memory"
+	"github.com/vyquocvu/goosie/internal/renderer"
 )
 
 func TestRendererWithImages(t *testing.T) {
@@ -177,3 +180,75 @@ func TestImageCacheEviction(t *testing.T) {
 		t.Errorf("Expected cache length <= 2, got %d", r.ImageLoader().GetCache().Len())
 	}
 }
+
+func TestRendererMemoryManagerIntegration(t *testing.T) {
+	memMgr := memory.NewManager(memory.Config{
+		GlobalLimit: 100 * 1024,
+		Limits: map[memory.Component]uint64{
+			memory.ComponentImage: 50 * 1024, // 50 KB limit
+		},
+	})
+
+	r := renderer.NewRenderer(800, 600)
+	r.SetMemoryManager(memMgr)
+
+	if r.MemoryManager() != memMgr {
+		t.Error("Expected MemoryManager to return registered manager")
+	}
+
+	cache := r.ImageLoader().GetCache()
+	// Insert 100x100 RGBA image (40 KB)
+	cache.Put("img1", &imgpkg.ImageData{Width: 100, Height: 100, Format: "png", State: imgpkg.StateLoaded})
+
+	// Check that memMgr reported usage matches cache bytes (40,000 bytes)
+	if memMgr.Usage(memory.ComponentImage) != 40000 {
+		t.Errorf("Expected ComponentImage usage 40000, got %d", memMgr.Usage(memory.ComponentImage))
+	}
+
+	// Insert second image (40 KB) -> total 80 KB exceeds 50 KB limit
+	// memMgr will trigger evictor (calling cache.Evict) to evict down within budget
+	cache.Put("img2", &imgpkg.ImageData{Width: 100, Height: 100, Format: "png", State: imgpkg.StateLoaded})
+
+	if memMgr.Usage(memory.ComponentImage) > 50*1024 {
+		t.Errorf("Expected ComponentImage usage <= 50KB after eviction, got %d", memMgr.Usage(memory.ComponentImage))
+	}
+	if cache.Bytes() > 50*1024 {
+		t.Errorf("Expected cache bytes <= 50KB after eviction, got %d", cache.Bytes())
+	}
+	if cache.Get("img1") != nil {
+		t.Error("Expected img1 to be evicted by memory manager")
+	}
+	if cache.Get("img2") == nil {
+		t.Error("Expected img2 to be retained")
+	}
+}
+
+func TestRendererNavigationClearsImageCache(t *testing.T) {
+	r := renderer.NewRenderer(800, 600)
+	cache := r.ImageLoader().GetCache()
+
+	cache.Put("img1", &imgpkg.ImageData{Width: 100, Height: 100, Format: "png", State: imgpkg.StateLoaded})
+	if cache.Len() != 1 {
+		t.Fatalf("Expected 1 cached image, got %d", cache.Len())
+	}
+
+	// Set initial URL
+	r.SetCurrentURL("https://example.com/page1")
+	if cache.Len() != 1 {
+		t.Error("Initial SetCurrentURL should not clear cache")
+	}
+
+	// Navigate to new URL -> should clear image cache
+	r.SetCurrentURL("https://example.com/page2")
+	if cache.Len() != 0 {
+		t.Errorf("Expected cache cleared on URL change, got %d items", cache.Len())
+	}
+
+	// Test explicit ClearImageCache
+	cache.Put("img2", &imgpkg.ImageData{Width: 50, Height: 50, Format: "png", State: imgpkg.StateLoaded})
+	r.ClearImageCache()
+	if cache.Len() != 0 {
+		t.Errorf("Expected cache cleared on ClearImageCache, got %d items", cache.Len())
+	}
+}
+

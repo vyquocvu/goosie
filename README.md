@@ -43,7 +43,9 @@ go run ./cmd/browser
 To open a page at startup:
 
 ```bash
+go run ./cmd/browser -url=https://example.com
 go run ./cmd/browser -url=https://google.com
+go run ./cmd/browser -url=https://peach.blender.org
 ```
 
 On Linux, install the native libraries required by Fyne first:

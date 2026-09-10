@@ -9,7 +9,8 @@ import (
 
 // GridLayoutEngine handles grid layout calculations
 type GridLayoutEngine struct {
-	fontMetrics *FontMetrics
+	fontMetrics       *FontMetrics
+	MeasureMaxContent func(node *RenderNode) float32
 }
 
 // NewGridLayoutEngine creates a new grid layout engine
@@ -227,8 +228,23 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 			itemWidth += float32(colEndIdx-colStartIdx-1) * columnGap
 		}
 
+		buildW := itemWidth
+		justify := ""
+		if container.ComputedStyle != nil {
+			justify = container.ComputedStyle.JustifyItems
+		}
+		if item.node.ComputedStyle != nil && item.node.ComputedStyle.JustifySelf != "" {
+			justify = item.node.ComputedStyle.JustifySelf
+		}
+		if justify != "" && justify != "stretch" && gle.MeasureMaxContent != nil {
+			mcw := gle.MeasureMaxContent(item.node)
+			if mcw > 0 && mcw < itemWidth {
+				buildW = mcw
+			}
+		}
+
 		// Build box to get content height
-		item.layoutBox = buildLayoutBox(item.node, 0, 0, itemWidth)
+		item.layoutBox = buildLayoutBox(item.node, 0, 0, buildW)
 
 		if item.layoutBox != nil {
 			item.layoutBox.GridColumnStart = item.colStart
@@ -274,13 +290,55 @@ func (gle *GridLayoutEngine) LayoutGridContainer(
 		// Correct logic: layoutbox width is content width.
 		// If stretched, we force it? For now, we trust buildLayoutBox.
 
+		trackWidth := float32(0)
+		for c := cStart; c < item.colEnd-1 && c < len(colWidths); c++ {
+			trackWidth += colWidths[c]
+		}
+		if item.colEnd-1 > cStart+1 {
+			trackWidth += float32(item.colEnd-1-cStart-1) * columnGap
+		}
+		offsetX := float32(0)
+		justify := ""
+		if container.ComputedStyle != nil {
+			justify = container.ComputedStyle.JustifyItems
+		}
+		if item.node.ComputedStyle != nil && item.node.ComputedStyle.JustifySelf != "" {
+			justify = item.node.ComputedStyle.JustifySelf
+		}
+		if (justify == "center" || justify == "middle") && item.layoutBox.Box.Width < trackWidth {
+			offsetX = (trackWidth - item.layoutBox.Box.Width) / 2
+		} else if (justify == "end" || justify == "flex-end" || justify == "right") && item.layoutBox.Box.Width < trackWidth {
+			offsetX = trackWidth - item.layoutBox.Box.Width
+		}
+
+		trackHeight := float32(0)
+		for r := rStart; r < item.rowEnd-1 && r < len(rowHeights); r++ {
+			trackHeight += rowHeights[r]
+		}
+		if item.rowEnd-1 > rStart+1 {
+			trackHeight += float32(item.rowEnd-1-rStart-1) * rowGap
+		}
+		offsetY := float32(0)
+		align := ""
+		if container.ComputedStyle != nil {
+			align = container.ComputedStyle.AlignItems
+		}
+		if item.node.ComputedStyle != nil && item.node.ComputedStyle.AlignSelf != "" {
+			align = item.node.ComputedStyle.AlignSelf
+		}
+		if (align == "center" || align == "middle") && item.layoutBox.Box.Height < trackHeight {
+			offsetY = (trackHeight - item.layoutBox.Box.Height) / 2
+		} else if (align == "end" || align == "flex-end" || align == "bottom") && item.layoutBox.Box.Height < trackHeight {
+			offsetY = trackHeight - item.layoutBox.Box.Height
+		}
+
 		// Set position
 		if cStart >= 0 && cStart < len(colPositions) {
-			dx := colPositions[cStart] - item.layoutBox.Box.X
+			dx := colPositions[cStart] + offsetX - item.layoutBox.Box.X
 			shiftLayoutBoxTree(item.layoutBox, dx, 0)
 		}
 		if rStart >= 0 && rStart < len(rowPositions) {
-			dy := rowPositions[rStart] - item.layoutBox.Box.Y
+			dy := rowPositions[rStart] + offsetY - item.layoutBox.Box.Y
 			shiftLayoutBoxTree(item.layoutBox, 0, dy)
 		}
 

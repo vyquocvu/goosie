@@ -331,3 +331,76 @@ func createTestImage(path string, width, height int) error {
 
 	return nil
 }
+
+func TestDownscaleImage(t *testing.T) {
+	// 1. Nil input returns nil
+	if img.DownscaleImage(nil, 100, 100) != nil {
+		t.Error("Expected nil for nil src image")
+	}
+
+	// 2. 4K image (3840 x 2160, 16:9)
+	src4K := image.NewRGBA(image.Rect(0, 0, 3840, 2160))
+	downscaled := img.DownscaleImage(src4K, 1920, 1080)
+	if downscaled.Bounds().Dx() != 1920 || downscaled.Bounds().Dy() != 1080 {
+		t.Errorf("Expected 1920x1080, got %dx%d", downscaled.Bounds().Dx(), downscaled.Bounds().Dy())
+	}
+
+	// 3. Aspect ratio preserving downscale to 300x200
+	// 3840/2160 = 16/9. If maxW=300, maxH=200: ratio = min(300/3840, 200/2160) = 300/3840 = 0.078125
+	// targetW = 300, targetH = round(2160 * 0.078125) = 169 <= 200.
+	thumb := img.DownscaleImage(src4K, 300, 200)
+	if thumb.Bounds().Dx() != 300 {
+		t.Errorf("Expected width 300, got %d", thumb.Bounds().Dx())
+	}
+	if thumb.Bounds().Dy() != 169 {
+		t.Errorf("Expected height 169, got %d", thumb.Bounds().Dy())
+	}
+
+	// 4. Smaller image returned unmodified
+	small := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	same := img.DownscaleImage(small, 800, 600)
+	if same != small {
+		t.Error("Expected same image returned when already within bounds")
+	}
+
+	// 5. Zero/negative max dimensions returns original
+	noCap := img.DownscaleImage(small, 0, 0)
+	if noCap != small {
+		t.Error("Expected same image returned when maxW/maxH <= 0")
+	}
+
+	// 6. ImageData.Downscale helper
+	data := &img.ImageData{Image: src4K, Width: 3840, Height: 2160, Format: "png", State: img.StateLoaded}
+	scaledData := data.Downscale(300, 200)
+	if scaledData.Width != 300 || scaledData.Height != 169 {
+		t.Errorf("Expected scaledData dimensions 300x169, got %dx%d", scaledData.Width, scaledData.Height)
+	}
+}
+
+func TestLoaderDecodeClamping(t *testing.T) {
+	tmpDir := t.TempDir()
+	largeImgPath := filepath.Join(tmpDir, "large.png")
+
+	// Create 2400 x 1200 image (exceeds default 1920x1080)
+	err := createTestImage(largeImgPath, 2400, 1200)
+	require.NoError(t, err)
+
+	l := img.NewLoader(10)
+	loader := l.(*img.ImageLoader)
+
+	data, err := loader.LoadSync(largeImgPath)
+	require.NoError(t, err)
+	require.NotNil(t, data)
+	require.NotNil(t, data.Image)
+
+	// Max decode resolution must clamp to <= 1920x1080 while preserving 2:1 aspect ratio
+	// 2400x1200 clamped to 1920x1080: ratio = 1920/2400 = 0.8 -> 1920 x 960
+	if data.Width > img.DefaultMaxDecodeWidth || data.Height > img.DefaultMaxDecodeHeight {
+		t.Errorf("Expected clamped dimensions <= %dx%d, got %dx%d",
+			img.DefaultMaxDecodeWidth, img.DefaultMaxDecodeHeight, data.Width, data.Height)
+	}
+	if data.Width != 1920 || data.Height != 960 {
+		t.Errorf("Expected 1920x960, got %dx%d", data.Width, data.Height)
+	}
+}
+

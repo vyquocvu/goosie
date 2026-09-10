@@ -199,3 +199,83 @@ func TestDisplayListBuilderTextStyling(t *testing.T) {
 		})
 	}
 }
+
+func TestSortByZIndexRebuildsYBands(t *testing.T) {
+	dl := renderer.NewDisplayList()
+
+	// Add commands out of order with different z-indices
+	// Command 0: z-index 10, Y = 600..700
+	nodeHighZ := renderer.NewRenderNode(renderer.NodeTypeElement)
+	nodeHighZ.ComputedStyle = &renderer.Style{ZIndex: 10}
+	cmd0 := &renderer.PaintCommand{
+		Type: renderer.PaintRect,
+		Node: nodeHighZ,
+		Box:  renderer.Rect{X: 0, Y: 600, Width: 100, Height: 100},
+	}
+
+	// Command 1: z-index 0, Y = 50..100
+	nodeLowZ := renderer.NewRenderNode(renderer.NodeTypeElement)
+	nodeLowZ.ComputedStyle = &renderer.Style{ZIndex: 0}
+	cmd1 := &renderer.PaintCommand{
+		Type: renderer.PaintRect,
+		Node: nodeLowZ,
+		Box:  renderer.Rect{X: 0, Y: 50, Width: 100, Height: 50},
+	}
+
+	dl.AddCommand(cmd0)
+	dl.AddCommand(cmd1)
+
+	// Sort by z-index
+	renderer.SortByZIndex(dl)
+
+	// After sort, cmd1 (low Z) should be at index 0, cmd0 (high Z) at index 1
+	if dl.Commands[0] != cmd1 {
+		t.Fatalf("expected cmd1 at index 0, got %v", dl.Commands[0])
+	}
+	if dl.Commands[1] != cmd0 {
+		t.Fatalf("expected cmd0 at index 1, got %v", dl.Commands[1])
+	}
+
+	// Spatial YBands must reflect post-sort indices
+	if len(dl.YBands) == 0 {
+		t.Fatal("YBands must be populated")
+	}
+
+	// Band 0 (Y=50..250) must point to index 0 (cmd1)
+	if dl.YBands[0].CmdStart != 0 || dl.YBands[0].CmdEnd != 1 {
+		t.Fatalf("expected Band 0 [0, 1], got [%d, %d]", dl.YBands[0].CmdStart, dl.YBands[0].CmdEnd)
+	}
+
+	// Last band containing Y=600..700 must point to index 1 (cmd0)
+	lastBand := dl.YBands[len(dl.YBands)-1]
+	if lastBand.CmdStart != 1 || lastBand.CmdEnd != 2 {
+		t.Fatalf("expected last band [1, 2], got [%d, %d]", lastBand.CmdStart, lastBand.CmdEnd)
+	}
+}
+
+func TestYBandsMultiBandIntervalSpan(t *testing.T) {
+	dl := renderer.NewDisplayList()
+
+	// A tall element spanning from Y=100 to Y=700 (600px tall = spans multiple 200px bands)
+	node := renderer.NewRenderNode(renderer.NodeTypeElement)
+	tallCmd := &renderer.PaintCommand{
+		Type: renderer.PaintRect,
+		Node: node,
+		Box:  renderer.Rect{X: 0, Y: 100, Width: 100, Height: 600},
+	}
+	dl.AddCommand(tallCmd)
+
+	renderer.SortByZIndex(dl)
+
+	if len(dl.YBands) < 3 {
+		t.Fatalf("expected at least 3 bands, got %d", len(dl.YBands))
+	}
+
+	// Tall command at index 0 must be present in every intersecting band
+	for bIdx, band := range dl.YBands {
+		if band.CmdStart != 0 || band.CmdEnd != 1 {
+			t.Fatalf("band %d: expected [%d, %d] to include tall command at index 0, got [%d, %d]",
+				bIdx, 0, 1, band.CmdStart, band.CmdEnd)
+		}
+	}
+}

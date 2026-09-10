@@ -33,6 +33,9 @@ func (m *MockHTMLRendererComp) SetNavigationCallback(callback func(url string)) 
 func (m *MockHTMLRendererComp) HitTest(x, y float32) (*renderer.RenderNode, *renderer.LayoutBox) {
 	return nil, nil
 }
+func (m *MockHTMLRendererComp) ActivateClick(node *renderer.RenderNode) renderer.Activation {
+	return renderer.Activation{}
+}
 func (m *MockHTMLRendererComp) SetInspectCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox)) {
 }
 func (m *MockHTMLRendererComp) SetContextMenuCallback(callback func(node *renderer.RenderNode, layout *renderer.LayoutBox, abs fyne.Position)) {
