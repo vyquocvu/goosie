@@ -255,10 +255,20 @@ func (g *Grid) Advance(version uint64, dirty Rect) int {
 			continue
 		}
 		if c.Rect(g.tileSize).Intersects(dirty) {
-			if t.Pixels != nil && t.State != TileStale {
+			switch {
+			case t.Pixels != nil && t.State != TileStale:
 				g.setState(t, TileStale)
 				t.Attempts = 0
 				staled++
+			case t.State == TileFailed:
+				// The other branch of this loop promotes a failed tile out of Failed, and
+				// the case that actually changed under this version deserves the same
+				// treatment: a failed tile holds no pixels, so the retry-count cap is
+				// guarding a raster of content that no longer exists. Leaving it Failed
+				// would keep a blank rectangle on screen for the rest of the document's
+				// life, which is a permanent artefact from one transient failure.
+				g.setState(t, TileEmpty)
+				t.Attempts = 0
 			}
 			continue
 		}

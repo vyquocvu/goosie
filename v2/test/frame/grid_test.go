@@ -294,6 +294,44 @@ func TestFailedTileRendersBlankAndIsNotRetriedForever(t *testing.T) {
 	}
 }
 
+// A tile that failed under an old version is only blank for that version. Once
+// content changes under it, the pixels it could not produce no longer exist, so
+// the retry cap that gave up on it has nothing left to protect and the tile has
+// to be willing to try again - otherwise one transient rasteriser panic costs a
+// blank rectangle for the rest of the document's life.
+func TestVersionBumpRetriesATileThatFailedUnderTheOldOne(t *testing.T) {
+	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, tilePool())
+	dead, live := frame.TileCoord{Col: 0, Row: 0}, frame.TileCoord{Col: 1, Row: 1}
+	for _, c := range []frame.TileCoord{dead, live} {
+		bmp, _ := g.Acquire(c)
+		g.MarkValid(c, 1, bmp)
+	}
+	for attempt := 0; attempt < frame.MaxTileAttempts; attempt++ {
+		g.Acquire(dead)
+		g.MarkFailed(dead)
+	}
+	if !g.Failed(dead) {
+		t.Fatal("setup: the tile was not given up on")
+	}
+
+	// The dirty rect covers the failed tile; the other one is outside it.
+	if got := g.Advance(2, dead.Rect(frame.TileSize)); got != 0 {
+		t.Fatalf("Advance staled %d tiles, want 0 - a failed tile holds no pixels to keep showing", got)
+	}
+	if g.Failed(dead) {
+		t.Fatal("a version bump left a tile Failed inside its own dirty rect; it will never render again")
+	}
+	if got := g.Peek(dead).Attempts; got != 0 {
+		t.Fatalf("Attempts = %d after a version bump, want the retry budget reset", got)
+	}
+	if !g.Needs(dead, 2) {
+		t.Fatal("the retried tile reports itself current at the new version")
+	}
+	if g.Failed(live) || g.Needs(live, 2) {
+		t.Fatal("a tile outside the dirty rect changed state; an image load would cost a full page repaint")
+	}
+}
+
 func TestLayerBumpStalesOnlyDirtyTiles(t *testing.T) {
 	pool := tilePool()
 	l := frame.NewLayer(1, frame.Rect4(0, 0, 1024, 2048), 1<<30, pool)
