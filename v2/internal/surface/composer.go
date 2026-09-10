@@ -28,11 +28,18 @@ type Composer struct {
 	damage []frame.Rect
 }
 
-// NewComposer returns a composer with a backing store sized to vp. The pool must
-// be sized to vp so a resize can swap the buffer without the composer allocating
-// outside the pool.
+// NewComposer returns a composer with a backing store sized to vp. The pool
+// should be sized to vp too; when it is not, the buffer is allocated at vp rather
+// than acquired, because presenting a buffer whose size is the pool's and not the
+// viewport's is a whole-surface artefact rather than a startup convenience.
 func NewComposer(vp frame.Size, pool *frame.BitmapPool) *Composer {
-	return &Composer{Backing: pool.Acquire(), pool: pool}
+	var b *frame.Bitmap
+	if pool.Size() == vp {
+		b = pool.Acquire()
+	} else {
+		b = frame.NewBitmap(int(vp.W), int(vp.H))
+	}
+	return &Composer{Backing: b, pool: pool}
 }
 
 // NewComposerFromBacking returns a composer that writes into a buffer somebody
@@ -43,9 +50,15 @@ func NewComposerFromBacking(b *frame.Bitmap, pool *frame.BitmapPool) *Composer {
 	return &Composer{Backing: b, pool: pool}
 }
 
-// Resize swaps the backing store to a new size, returning the buffer to the pool.
-// It reports false when the size is unchanged, so a spurious resize event does
-// not cost a full repaint.
+// Resize swaps the backing store to a new size, returning the old buffer to the
+// pool. It reports false when the size is unchanged, so a spurious resize event
+// does not cost a full repaint.
+//
+// A real size change cannot be served from the pool, which holds buffers of one
+// dimension only: the old buffer goes back (Release drops it, since it no longer
+// matches the pool) and the new one is allocated at the requested size. That
+// allocation is on a resize frame, which is not the steady state invariant 6 is
+// about, and it is cheaper than keeping a free list per size a window has visited.
 func (c *Composer) Resize(vp frame.Size) bool {
 	if c.Backing != nil && c.Backing.Size() == vp {
 		return false
@@ -53,7 +66,11 @@ func (c *Composer) Resize(vp frame.Size) bool {
 	if c.Backing != nil {
 		c.pool.Release(c.Backing)
 	}
-	c.Backing = c.pool.Acquire()
+	if c.pool.Size() == vp {
+		c.Backing = c.pool.Acquire()
+	} else {
+		c.Backing = frame.NewBitmap(int(vp.W), int(vp.H))
+	}
 	return true
 }
 
