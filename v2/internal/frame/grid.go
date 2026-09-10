@@ -472,6 +472,14 @@ func (g *Grid) Pixels(c TileCoord) *Bitmap {
 	return t.Pixels
 }
 
+// Blittable reports whether a tile has pixels worth compositing, valid or stale. It is
+// the grid's view of Tile.Blittable: a stale tile is still presented while its
+// replacement is drawn, and a failed one has been emptied on purpose and must show the
+// layer background instead.
+func (g *Grid) Blittable(c TileCoord) bool {
+	return g.tiles[c].Blittable()
+}
+
 // Tick advances the frame clock used for recency.
 func (g *Grid) Tick() { g.clock++ }
 
