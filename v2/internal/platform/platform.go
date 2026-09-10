@@ -56,6 +56,44 @@ type backend interface {
 	open(Options) (surface.Window, error)
 }
 
+// Runner is a window whose platform owns the thread the program runs on. AppKit, X11,
+// and Win32 all have a run loop that has to be turning for a window to receive or draw
+// anything, and none of them let a library start it on a thread it did not choose.
+//
+// A binary that might get such a window asks for it once it has opened the window and
+// started its frame loop elsewhere: Run blocks, so calling it is the caller's way of
+// saying "this thread is yours now". A backend with no run loop - headless is the only
+// one in v2 today - does not implement this, and the same binary then just waits on its
+// frame loop. Close is what ends Run.
+type Runner interface {
+	Run()
+}
+
+// DroppedVsyncer is a window that can say how many pacing ticks it shed because nobody
+// was reading. A frame path that draws slower than the display asks is not an error and
+// is not a slow frame either - it is a skipped one - and a report that cannot tell the
+// two apart cannot say what its mean was measured over. Headless windows count this
+// directly and a native shim counts it in its own queue.
+type DroppedVsyncer interface {
+	DroppedVsyncs() int64
+}
+
+// Sizer is a window that has a size of its own, which is every window except one that
+// takes whatever it is handed. A report asks because a run whose surface ended up a
+// different shape from the one that was configured measured something else, and the
+// difference is invisible in every other number in the report.
+type Sizer interface {
+	Size() frame.Size
+}
+
+// PresentCounter is a window that can say what the display did with the frames it was
+// given: how many were queued to it, how many it refused, and how many actually
+// reached the compositor. A loop can present a frame the platform never shows, and a
+// baseline that reports only the loop's own count would call that a drawn frame.
+type PresentCounter interface {
+	Presents() (queued, dropped, committed int64)
+}
+
 // native is this platform's own window backend.
 //
 // It is a variable rather than a build-tagged branch in Select because the whole

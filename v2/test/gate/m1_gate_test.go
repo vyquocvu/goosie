@@ -222,6 +222,41 @@ func gateTestBinary(t *testing.T, root string) string {
 	return bin
 }
 
+// appBinary builds the GUI binary v2 ships. On macOS this is the link that carries the
+// Cocoa shim, which the test binary above does not: the gate package selects the
+// headless backend, so platform/darwin is not in its dependency closure and nm of it
+// would prove nothing about the one platform v2 has a real window on. Criterion 6 is
+// about "the binary", and on darwin the binary that matters is this one.
+func appBinary(t *testing.T, root string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "goosie")
+	cmd := exec.Command("go", "build", "-o", bin, "./v2/cmd/goosie")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build ./v2/cmd/goosie: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// scanBinaryForGPU reads a binary's symbol table and reports any banned graphics API in
+// it. floor is the smallest listing worth trusting: a whole program plus its runtime is
+// thousands of symbols, and under that many the nm output is not one, so an empty
+// listing - the failure mode of a stripped binary - would otherwise "pass" by having
+// listed nothing.
+func scanBinaryForGPU(t *testing.T, bin string, floor int) {
+	t.Helper()
+	syms, err := archtest.Symbols(bin)
+	if err != nil {
+		t.Fatalf("go tool nm %s: %v", bin, err)
+	}
+	if len(syms) < floor {
+		t.Fatalf("%s has %d symbols; the listing is not real", bin, len(syms))
+	}
+	for _, v := range archtest.CheckBanned("", syms, bannedSubstrings...) {
+		t.Errorf("%s links %s: %s", filepath.Base(bin), v.Import, v.Why)
+	}
+}
+
 // Criterion 6: "v2 is GPU-free: no Metal/GL/Vulkan symbol in the binary". Both halves
 // of the claim are checked, because they fail differently. The import closure catches
 // a dependency somebody added; the symbol table catches what a cgo shim links, which
@@ -240,20 +275,10 @@ func TestGate_NoGPULinkage(t *testing.T) {
 		t.Errorf("v2 depends on %s: %s", v.Import, v.Why)
 	}
 
-	bin := gateTestBinary(t, root)
-	syms, err := archtest.Symbols(bin)
-	if err != nil {
-		t.Fatalf("go tool nm %s: %v", bin, err)
-	}
-	// A whole test binary, its dependencies and its runtime is thousands of symbols.
-	// Under this many the listing is not one, and an empty one would pass the loop below
-	// by listing nothing rather than by linking nothing.
-	if len(syms) < 1000 {
-		t.Fatalf("%s has %d symbols; the listing is not real", bin, len(syms))
-	}
-	for _, v := range archtest.CheckBanned("", syms, bannedSubstrings...) {
-		t.Errorf("the frame path links %s: %s", v.Import, v.Why)
-	}
+	// Both links are scanned: the test binary is the frame path on every platform, the
+	// GUI binary is the frame path plus whatever a platform shim drags in.
+	scanBinaryForGPU(t, gateTestBinary(t, root), 1000)
+	scanBinaryForGPU(t, appBinary(t, root), 1000)
 }
 
 // Criterion 3: archtest green, kept here so "M1 CI green" is one command. This is the

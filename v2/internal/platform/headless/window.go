@@ -297,6 +297,25 @@ func (w *Window) Size() frame.Size {
 // measurement of a run can name the rate it was paced at.
 func (w *Window) VsyncPeriod() time.Duration { return w.period }
 
+// DroppedVsyncs reports the shed ticks on its own, satisfying platform.DroppedVsyncer
+// for a report that names the pacing without wanting a window's whole summary. It is
+// the same number Stats carries.
+func (w *Window) DroppedVsyncs() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.dropped
+}
+
+// Presents satisfies platform.PresentCounter. A headless window refuses nothing and
+// commits synchronously - the copy into its ring is the commit - so all three numbers
+// are the same one. Reporting that apart is what keeps a native run's "committed"
+// honest: a backend that never drops makes the difference visible by not having it.
+func (w *Window) Presents() (queued, dropped, committed int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.presents, 0, w.presents
+}
+
 // Stats returns the counters. Safe to call while the window runs.
 func (w *Window) Stats() Stats {
 	w.mu.Lock()
