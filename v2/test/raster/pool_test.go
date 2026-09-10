@@ -298,6 +298,13 @@ func TestFailedTileIsRetriedOnceThenMarkedFailed(t *testing.T) {
 		if !errors.Is(d.Err, raster.ErrTilePanic) {
 			t.Fatalf("attempt %d reported %v, want ErrTilePanic", reports, d.Err)
 		}
+		// The failed raster's buffer goes back before the tile is asked for again.
+		// A buffer on order is what makes a tile in flight, so a retry that skipped
+		// this step would be handed the same buffer and the attempts would never
+		// exhaust - the panic would go on forever rather than becoming a blank tile.
+		if !l.Grid.Release(c, d.Out) {
+			t.Fatalf("attempt %d: Release refused the buffer the grid handed out", reports)
+		}
 		if l.Grid.Attempts(c) >= frame.MaxTileAttempts {
 			break
 		}
@@ -382,43 +389,82 @@ func TestSubmitRefusesInsteadOfBlocking(t *testing.T) {
 	})
 }
 
-func TestDroppedResultsAreCountedNotBlocked(t *testing.T) {
-	// A completion queue one deep with nobody polling: workers must keep drawing
-	// jobs from the job queue instead of stalling on a UI thread that stopped
-	// listening, and the overflow has to be visible as a counter.
-	const n = 32
-	p := raster.New(2, 1, func(raster.Job) error { return nil })
-	p.Start(context.Background())
-	defer p.Close()
-	for i := 0; i < n; i++ {
-		submitted := false
-		within(t, "submitting into a full pool", func() {
-			for !submitted {
-				if p.Submit(raster.Job{Coord: frame.TileCoord{Col: int32(i)}}) == nil {
-					submitted = true
-					continue
-				}
-				if _, ok := p.Poll(); !ok {
-					time.Sleep(time.Millisecond)
-				}
-			}
-		})
+// TestUncollectedResultsPinTheWindowAndAreNeverLost covers the one way a UI thread
+// can damage the raster pipeline from the outside: stop collecting. Every job it
+// admitted still has to be collectable afterwards, because a lost result leaves
+// its tile claimed by a worker that will never report, and past the window the
+// pool has to say no rather than discard an answer. The workers are held inside a
+// rasterizer until told, so both halves are deterministic rather than a race
+// against a fast worker.
+func TestUncollectedResultsPinTheWindowAndAreNeverLost(t *testing.T) {
+	const (
+		workers    = 2
+		queueDepth = 4
+	)
+	slots := workers + queueDepth
+	release := make(chan struct{})
+	var running int32
+	rf := func(raster.Job) error {
+		atomic.AddInt32(&running, 1)
+		defer atomic.AddInt32(&running, -1)
+		<-release
+		return nil
 	}
-	within(t, "draining the job queue", func() {
-		for p.Stats().Queued > 0 {
+	p := raster.New(workers, queueDepth, rf)
+	p.Start(context.Background())
+	t.Cleanup(func() { p.Close() })
+	// Registered after p.Close's cleanup so that it runs first: a worker still
+	// parked inside the rasterizer would otherwise hang Close and turn an assertion
+	// failure into a package timeout.
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+
+	// Take the workers out of the queue first, so that "the window is full" means
+	// the job queue is full *and* a worker is busy, rather than depending on how
+	// quickly the scheduler happened to start the goroutines.
+	for i := 0; i < workers; i++ {
+		if err := p.Submit(raster.Job{Coord: frame.TileCoord{Col: int32(i)}}); err != nil {
+			t.Fatalf("Submit %d onto an empty queue: %v", i, err)
+		}
+	}
+	if !pollUntil(func() bool { return atomic.LoadInt32(&running) == workers }) {
+		t.Fatalf("%d of %d workers entered the rasterizer, want both", atomic.LoadInt32(&running), workers)
+	}
+	for i := 0; i < queueDepth; i++ {
+		if err := p.Submit(raster.Job{Coord: frame.TileCoord{Col: int32(workers + i)}}); err != nil {
+			t.Fatalf("Submit %d: slots were free and the queue was empty, got %v", workers+i, err)
+		}
+	}
+
+	// Two jobs parked in the rasterizer and four queued, none collected. The next
+	// submission has to be a refusal - a lost result would leave its tile claimed
+	// by a worker that never reports.
+	if err := p.Submit(raster.Job{Coord: frame.TileCoord{Col: 99}}); !errors.Is(err, raster.ErrQueueFull) {
+		t.Fatalf("Submit past a full result window = %v, want ErrQueueFull", err)
+	}
+	if got := p.Stats(); got.Outstanding != int64(slots) || got.DroppedResults != 0 {
+		t.Fatalf("outstanding/dropped = %d/%d, want %d/0", got.Outstanding, got.DroppedResults, slots)
+	}
+
+	close(release)
+	if got := p.Wait(slots); len(got) != slots {
+		t.Fatalf("collected %d results of %d admitted jobs", len(got), slots)
+	}
+	if st := p.Stats(); st.DroppedResults != 0 || st.Outstanding != 0 {
+		t.Fatalf("after collecting everything, outstanding/dropped = %d/%d, want 0/0", st.Outstanding, st.DroppedResults)
+	}
+	// Freeing a slot reopens the window. A dropped result would have wedged it shut
+	// and the frame path would have starved without a single error to read.
+	within(t, "Submit after the window drained", func() {
+		for p.Submit(raster.Job{}) != nil {
 			time.Sleep(time.Millisecond)
 		}
 	})
-	st := p.Stats()
-	if st.Rasterized+st.Failed != n {
-		t.Fatalf("only %d of %d jobs ran (Rasterized=%d Failed=%d)", st.Rasterized+st.Failed, n, st.Rasterized, st.Failed)
-	}
-	if st.Refused == 0 {
-		t.Fatal("nobody polled and yet no result was dropped; the completion queue cannot have bound")
-	}
-	if got := len(p.Wait(1)); got != 1 {
-		t.Fatalf("the one slot in the completion queue held %d results", got)
-	}
 }
 
 func TestPollNeverWaits(t *testing.T) {

@@ -65,11 +65,16 @@ func DefaultRaster(f *Fonts, g *GlyphAtlas) RasterFunc {
 	}
 }
 
-// PoolStats is a snapshot of what the pool did. The three counters partition the
-// submissions: Rasterized and Failed together are the jobs a worker ran, Refused
-// is the jobs that never reached one, and Panics is the subset of Failed that
-// recovered a panic. Rasterized therefore measures work completed rather than
-// traffic offered, which is what the frame gate asserts on.
+// PoolStats is a snapshot of what the pool did. Rasterized and Failed together
+// are the jobs a worker ran; Refused is the submissions that never reached one;
+// Panics is the subset of Failed that recovered a panic. Rasterized therefore
+// measures work completed rather than traffic offered, which is what the frame
+// gate asserts on.
+//
+// DroppedResults is kept apart from Refused on purpose. A dropped result is a job
+// that did run, so folding the two together would let the frame path lose a tile
+// buffer into a worker that will never report and still read a clean zero for
+// refused work.
 type PoolStats struct {
 	Workers    int
 	Queued     int
@@ -77,6 +82,17 @@ type PoolStats struct {
 	Failed     int64
 	Panics     int64
 	Refused    int64
+	// DroppedResults counts finished jobs the completion queue could not hold, and is
+	// zero by construction: Submit admits a job only while a result slot is free, so
+	// the queue can never be asked for more than it was sized to hold. A non-zero
+	// value means that admission control was broken, and the affected tile would stay
+	// claimed by a silent worker forever.
+	DroppedResults int64
+	// Outstanding is how many admitted jobs have not been collected yet - queued,
+	// running, or finished and waiting in the completion queue. It is capped at
+	// queueDepth+workers by Submit, which is the same thing as saying the pool will
+	// rather refuse work than lose a result.
+	Outstanding int64
 }
 
 // Pool is the raster side of the frame path: a fixed set of workers fed by a
@@ -88,17 +104,20 @@ type Pool struct {
 	jobs chan Job
 	done chan Done
 
-	ctx        context.Context
-	cancel     context.CancelFunc
-	start      sync.Once
-	wg         sync.WaitGroup
-	mu         sync.Mutex
-	closeOnce  sync.Once
-	closed     bool
-	rasterized int64
-	failed     int64
-	panics     int64
-	refused    int64
+	ctx         context.Context
+	cancel      context.CancelFunc
+	start       sync.Once
+	wg          sync.WaitGroup
+	mu          sync.Mutex
+	closeOnce   sync.Once
+	closed      bool
+	slots       int
+	outstanding int
+	rasterized  int64
+	failed      int64
+	panics      int64
+	refused     int64
+	dropped     int64
 }
 
 // DefaultWorkers is how many raster threads a pool gets when nobody says: all
@@ -130,14 +149,25 @@ func New(workers int, queueDepth int, raster RasterFunc) *Pool {
 		raster = func(Job) error { return ErrNoRasterizer }
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Pool{
+	// The completion queue holds one slot per job that can exist: at most queueDepth
+	// are queued and at most workers are running, and Submit refuses rather than
+	// waiting once that many results are uncollected. Sizing it that way is
+	// deliberate rather than generous - a dropped result is unrecoverable, since the
+	// tile stays claimed by a worker that will never report and its buffer never
+	// returns to the pool. Making the drop impossible costs one admission check on a
+	// call that is already refusing on queue depth, and turns "the UI thread stopped
+	// polling" into refused submissions, which the frame path already handles.
+	slots := queueDepth + workers
+	p := &Pool{
 		raster:  raster,
 		workers: workers,
 		jobs:    make(chan Job, queueDepth),
-		done:    make(chan Done, queueDepth),
+		done:    make(chan Done, slots),
+		slots:   slots,
 		ctx:     ctx,
 		cancel:  cancel,
 	}
+	return p
 }
 
 // Start launches the workers. It is idempotent, and the first call's context is
@@ -211,20 +241,22 @@ func (p *Pool) run(j Job) {
 		p.failed++
 	}
 	// A result the completion queue cannot hold is dropped rather than waited
-	// on: the buffer belongs to the caller, who will find the tile still stale
-	// and ask again, and a worker blocked on a UI thread that stopped polling is
+	// on: the buffer belongs to the caller, who will find the tile still stale and
+	// ask again, and a worker blocked on a UI thread that stopped polling is
 	// exactly the coupling this pool exists to avoid.
 	select {
 	case p.done <- d:
 	default:
-		p.refused++
+		p.dropped++
 	}
 	p.mu.Unlock()
 }
 
 // Submit hands a tile to the pool without ever blocking. A full queue is
 // reported, not waited on: the tile stays stale and the next frame asks again,
-// which is the difference between a hitch and a stall.
+// which is the difference between a hitch and a stall. So is a full result
+// window - a caller that cannot collect any faster than this has no use for a
+// fifth tile, and would have had it handed back as a dropped result instead.
 func (p *Pool) Submit(j Job) error {
 	p.mu.Lock()
 	if p.closed {
@@ -232,8 +264,14 @@ func (p *Pool) Submit(j Job) error {
 		p.mu.Unlock()
 		return ErrPoolClosed
 	}
+	if p.outstanding >= p.slots {
+		p.refused++
+		p.mu.Unlock()
+		return ErrQueueFull
+	}
 	select {
 	case p.jobs <- j:
+		p.outstanding++
 		p.mu.Unlock()
 		return nil
 	default:
@@ -243,12 +281,24 @@ func (p *Pool) Submit(j Job) error {
 	}
 }
 
+// collected accounts for n results taken out of the completion queue, freeing the
+// result slots their submissions reserved.
+func (p *Pool) collected(n int) {
+	if n <= 0 {
+		return
+	}
+	p.mu.Lock()
+	p.outstanding -= n
+	p.mu.Unlock()
+}
+
 // Poll takes one finished job if there is one, and never waits. This is the
 // shape invariant 2 requires of the UI thread: it can collect results, but there
 // is no call it can make that puts a raster behind a present.
 func (p *Pool) Poll() (Done, bool) {
 	select {
 	case d := <-p.done:
+		p.collected(1)
 		return d, true
 	default:
 		return Done{}, false
@@ -271,6 +321,7 @@ func (p *Pool) Wait(n int) []Done {
 	// Capped growth rather than make([]Done, n): n is a caller's guess at how many
 	// results exist, and a pool must not be talked into a huge allocation by one.
 	out := make([]Done, 0, min(n, 64))
+	defer func() { p.collected(len(out)) }()
 	for len(out) < n {
 		select {
 		case d := <-p.done:
@@ -296,12 +347,14 @@ func (p *Pool) Stats() PoolStats {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return PoolStats{
-		Workers:    p.workers,
-		Queued:     len(p.jobs),
-		Rasterized: p.rasterized,
-		Failed:     p.failed,
-		Panics:     p.panics,
-		Refused:    p.refused,
+		Workers:        p.workers,
+		Queued:         len(p.jobs),
+		Rasterized:     p.rasterized,
+		Failed:         p.failed,
+		Panics:         p.panics,
+		Refused:        p.refused,
+		DroppedResults: p.dropped,
+		Outstanding:    int64(p.outstanding),
 	}
 }
 
