@@ -404,3 +404,105 @@ func TestGridTickAndStatsSnapshots(t *testing.T) {
 		t.Fatalf("fresh grid stats = %+v, want all zero", st)
 	}
 }
+
+// TestEvictingAnInFlightTileWaitsForItsWorker is the buffer-ownership case the
+// budget exists to create: a tile is re-rasterized, loses its presentable pixels
+// to eviction while a worker is painting the replacement, and only then reports.
+func TestEvictingAnInFlightTileWaitsForItsWorker(t *testing.T) {
+	pool := tilePool()
+	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, pool)
+	c := frame.TileCoord{Col: 0, Row: 0}
+	near := frame.TileCoord{Col: 1, Row: 0}
+
+	first, _ := g.Acquire(c)
+	if !g.MarkValid(c, 1, first) {
+		t.Fatal("the first raster of a tile was refused")
+	}
+	// A scroll brings the tile back at an older version, so it is re-rasterized.
+	// The replacement must not be the buffer still being presented, or the worker
+	// and the compositor would share bytes.
+	onOrder, _ := g.Acquire(c)
+	if onOrder == first {
+		t.Fatal("Acquire handed back the tile's presentable pixels as its paint target")
+	}
+	if !g.InFlight(c) {
+		t.Fatal("Acquire left the tile looking idle")
+	}
+	second, _ := g.Acquire(near)
+	g.MarkValid(near, 1, second)
+
+	g.SetBudget(frame.TileSizeBytes())
+	if g.Pixels(c) != nil {
+		t.Fatal("the in-flight tile kept its pixels; eviction skipped the LRU tail")
+	}
+	if got := g.Stats().PaintingBytes; got != frame.TileSizeBytes() {
+		t.Fatalf("PaintingBytes = %d, want one tile still held for its worker", got)
+	}
+	if got := g.Stats().Bytes; got != frame.TileSizeBytes() {
+		t.Fatalf("Bytes = %d, want only the in-flight tile counted against the budget", got)
+	}
+	// The point of the whole exercise: a buffer a worker owns is not up for reuse.
+	for i := 0; i < 2; i++ {
+		if got := pool.Acquire(); got == onOrder {
+			t.Fatal("an in-flight buffer was recycled to another tile")
+		}
+	}
+
+	// The worker reports late. The tile lost its pixels in the meantime, but the
+	// result is still this grid's own paint target, so it is installed rather than
+	// thrown away.
+	if !g.MarkValid(c, 1, onOrder) {
+		t.Fatal("a result for a tile evicted mid-flight was refused")
+	}
+	if got := g.Stats().PaintingBytes; got != 0 {
+		t.Fatalf("PaintingBytes = %d after the worker reported, want 0", got)
+	}
+	if g.Pixels(c) != onOrder {
+		t.Fatal("the late result was not installed")
+	}
+	// A buffer the tile no longer has on order is stale news, whoever holds it.
+	if g.MarkValid(c, 1, first) {
+		t.Fatal("a foreign buffer was accepted as a raster result")
+	}
+	if got := g.Stats().DroppedLate; got == 0 {
+		t.Fatal("the refused result was not counted")
+	}
+}
+
+func TestReleaseHandsBackOnlyWhatTheGridDoesNotOwn(t *testing.T) {
+	pool := tilePool()
+	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, pool)
+	c := frame.TileCoord{Col: 0, Row: 0}
+	pixels, _ := g.Acquire(c)
+	g.MarkValid(c, 1, pixels)
+
+	// The tile still points at this buffer, so a release would put the pool and the
+	// grid on the same memory.
+	if g.Release(c, pixels) {
+		t.Fatal("Release took back a buffer the tile still owns")
+	}
+	if g.Pixels(c) != pixels {
+		t.Fatal("Release disturbed the tile's pixels")
+	}
+	// A buffer on order is the grid's to take back: a caller whose submit was
+	// refused has nowhere else to put it, and once Release says true no worker owns
+	// it and the tile is free to be re-acquired.
+	onOrder, _ := g.Acquire(c)
+	if !g.Release(c, onOrder) {
+		t.Fatal("Release kept an in-flight buffer claimed")
+	}
+	if g.InFlight(c) {
+		t.Fatal("Release left the tile marked in flight")
+	}
+	if got := pool.Acquire(); got != onOrder {
+		t.Fatal("the released paint buffer did not go back to the pool")
+	}
+	// A buffer the grid has no claim on is not the grid's to keep.
+	far := frame.TileCoord{Col: 9, Row: 9}
+	if !g.Release(far, pixels) {
+		t.Fatal("Release refused a coordinate outside the grid")
+	}
+	if g.Release(c, nil) {
+		t.Fatal("Release of a nil buffer reported a return")
+	}
+}

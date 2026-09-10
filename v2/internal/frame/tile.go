@@ -72,8 +72,17 @@ func (s TileState) String() string {
 // given up on, per the failure policy: retry once, then blank with a counter.
 const MaxTileAttempts = 2
 
-// Tile is one retained raster. Pixels is owned by the grid and borrowed from a
-// BitmapPool; the grid is the only thing that releases it.
+// Tile is one retained raster.
+//
+// The two buffers have exactly one reader and one writer each, and that split is
+// what makes "no tile rasterizes on the UI thread" safe rather than merely fast:
+//
+//	Pixels    owned by the grid, read by whoever composites, never written
+//	painting  owned by the grid, written by one raster worker, never read
+//
+// until the worker reports it back through MarkValid, which swaps it into Pixels.
+// A single buffer doing both jobs would have the UI thread blit pixels a worker
+// is still filling - a torn tile at best and undefined behaviour at worst.
 type Tile struct {
 	Coord    TileCoord
 	Bounds   Rect
@@ -89,6 +98,11 @@ type Tile struct {
 	// recency is touched every visible tile every frame, so a boxed list would
 	// break invariant 6 during ordinary scrolling.
 	prev, next *Tile
+
+	// painting is the buffer currently on order for this tile, or nil. Its being
+	// non-nil is the whole in-flight state: one buffer, one owner, no counter that
+	// could be left unbalanced by a refused submit.
+	painting *Bitmap
 }
 
 // ValidAt reports the tile's half of the spec's validity rule: current pixels

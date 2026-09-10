@@ -27,23 +27,29 @@ type Grid struct {
 	rasterized  int64
 	reused      int64
 	droppedLate int64
+	painting    int64
 	counts      [4]int
 }
 
 // GridStats is a snapshot for reports and for the gate tests, which assert on
 // counters rather than timings so CI stays deterministic.
 type GridStats struct {
-	Tiles       int
-	Valid       int
-	Stale       int
-	Empty       int
-	Failed      int
-	Bytes       int64
-	Budget      int64
-	Evictions   int64
-	Rasterized  int64
-	Reused      int64
-	DroppedLate int64
+	Tiles  int
+	Valid  int
+	Stale  int
+	Empty  int
+	Failed int
+	Bytes  int64
+	Budget int64
+	// PaintingBytes is the tile buffers currently on order at a worker. They count
+	// toward Bytes and therefore against the budget, because the memory is really
+	// held; a caller checking that tile memory plateaus has to expect a tile to
+	// cost twice while it is being redrawn.
+	PaintingBytes int64
+	Evictions     int64
+	Rasterized    int64
+	Reused        int64
+	DroppedLate   int64
 }
 
 // NewGrid returns a grid covering extent, budgeted at budget bytes and drawing
@@ -277,26 +283,33 @@ func (g *Grid) Needs(c TileCoord, layerVersion uint64) bool {
 	return t == nil || !t.ValidAt(layerVersion)
 }
 
-// Acquire reserves a pixel buffer for a tile, evicting least-recently-used
-// tiles as the budget requires, and returns it ready to be rasterized. The
-// second result is false when the coordinate lies outside the layer.
+// Acquire reserves a buffer for a tile's next raster, evicting least-recently-used
+// pixels as the budget requires, and returns it ready to be painted. The second
+// result is false when the coordinate lies outside the layer.
+//
+// The buffer returned is never the tile's current pixels. That separation is the
+// point: a stale tile keeps being composited while its replacement is drawn, and
+// the UI thread and the worker never touch the same bytes. Calling Acquire twice
+// for the same tile returns the same buffer, so a duplicate submission paints
+// once rather than handing two workers one target.
 func (g *Grid) Acquire(c TileCoord) (*Bitmap, bool) {
 	t := g.ensure(c)
 	if t == nil {
 		return nil, false
 	}
-	need := int64(g.tileSize) * int64(g.tileSize) * 4
-	if t.Pixels == nil {
-		g.evictFor(need, c)
-		t.Pixels = g.pool.Acquire()
-		t.Bytes = need
-		g.used += need
+	if t.painting != nil {
+		return t.painting, true
 	}
+	need := int64(g.tileSize) * int64(g.tileSize) * 4
+	g.evictFor(need, c)
+	t.painting = g.pool.Acquire()
+	g.used += need
+	g.painting += need
 	if t.State != TileStale {
 		g.setState(t, TileStale)
 	}
 	t.Attempts++
-	return t.Pixels, true
+	return t.painting, true
 }
 
 // evictFor frees buffers until need more bytes fit, never evicting the tile
@@ -323,34 +336,50 @@ func (g *Grid) dropPixels(t *Tile) {
 	if t.Pixels == nil {
 		return
 	}
-	t.Pixels.Reset()
-	g.pool.Release(t.Pixels)
+	pixels := t.Pixels
 	g.used -= t.Bytes
 	t.Bytes = 0
 	t.Pixels = nil
 	t.Version = 0
 	g.unlink(t)
 	g.setState(t, TileEmpty)
+	// A tile's own painting buffer is untouched here: it belongs to a worker until
+	// that worker reports, and it is still counted against the budget.
+	//
+	// It is not cleared either. The pool documents an acquired buffer's contents as
+	// undefined and every rasterizer clears before drawing, so zeroing on the way
+	// out is a tile-sized memset on the thread that also has to present.
+	g.pool.Release(pixels)
 }
 
-// MarkValid retires a finished raster. It returns false when the result is
-// stale news — the tile was evicted or re-requested while the worker was busy —
-// and the caller must return pixels to the pool instead. Handling that case
-// here rather than in the pool is what keeps a late worker from ever writing
-// into a buffer the UI thread owns.
+// MarkValid installs a finished raster and retires the pixels it replaced. It
+// returns false when the result is stale news - the tile vanished, or the buffer
+// was never this grid's - and the caller must then hand the buffer back.
+//
+// Only the buffer this grid handed out by Acquire is accepted, and that is what
+// makes the swap safe: Pixels changes wholesale at one instant on one thread, so a
+// compositor sees either the old rendering or the new one and never a mixture of
+// the two.
 func (g *Grid) MarkValid(c TileCoord, version uint64, pixels *Bitmap) bool {
 	t := g.tiles[c]
-	if t == nil || pixels == nil || t.State == TileEmpty || (t.Pixels != nil && t.Pixels != pixels) {
+	if t == nil || pixels == nil || t.painting != pixels {
 		g.droppedLate++
 		return false
 	}
+	t.painting = nil
+	g.painting -= int64(len(pixels.RGBA))
+	if old := t.Pixels; old != nil {
+		// The superseded rendering goes straight back to the pool: no worker owns it,
+		// and this is the UI thread, so nothing is reading it right now.
+		g.used -= t.Bytes
+		t.Pixels = nil
+		t.Bytes = 0
+		g.pool.Release(old)
+	}
+	t.Pixels = pixels
+	t.Bytes = int64(len(pixels.RGBA))
 	t.Version = version
 	g.rasterized++
-	if t.Pixels == nil {
-		t.Pixels = pixels
-		t.Bytes = int64(len(pixels.RGBA))
-		g.used += t.Bytes
-	}
 	g.setState(t, TileValid)
 	t.Attempts = 0
 	t.LastUsed = g.clock
@@ -358,8 +387,9 @@ func (g *Grid) MarkValid(c TileCoord, version uint64, pixels *Bitmap) bool {
 	return true
 }
 
-// MarkFailed records that a tile exhausted MaxTileAttempts; it keeps no pixels
-// and renders as the layer background.
+// MarkFailed records that a tile exhausted MaxTileAttempts; it keeps no pixels and
+// renders as the layer background. A buffer still on order for the tile is left
+// with its worker, which reports it back through Release.
 func (g *Grid) MarkFailed(c TileCoord) {
 	t := g.tiles[c]
 	if t == nil {
@@ -375,6 +405,43 @@ func (g *Grid) MarkFailed(c TileCoord) {
 func (g *Grid) Failed(c TileCoord) bool {
 	t := g.tiles[c]
 	return t != nil && t.State == TileFailed
+}
+
+// Release gives back an Acquired buffer that is not going to be reported through
+// MarkValid, the usual case being a submission the queue refused. It is the only
+// safe way for a raster caller to hand memory back, because the grid is the one
+// that knows whether the buffer is a tile's painting target, a tile's presentable
+// pixels, or something that came from elsewhere.
+//
+// It reports whether the buffer went back to the pool.
+func (g *Grid) Release(c TileCoord, pixels *Bitmap) bool {
+	if pixels == nil {
+		return false
+	}
+	t := g.tiles[c]
+	if t != nil && t.painting == pixels {
+		t.painting = nil
+		need := int64(len(pixels.RGBA))
+		g.painting -= need
+		g.used -= need
+		g.pool.Release(pixels)
+		return true
+	}
+	if t != nil && t.Pixels == pixels {
+		// Still this tile's content, which the compositor is entitled to keep
+		// blitting. The tile owns it and will release it when it is evicted.
+		return false
+	}
+	g.pool.Release(pixels)
+	return true
+}
+
+// InFlight reports whether a tile has a buffer on order at a worker. A caller that
+// queued such a tile again would pay for a second raster of pixels it already has
+// arriving, and under budget pressure the duplicate would evict the original.
+func (g *Grid) InFlight(c TileCoord) bool {
+	t := g.tiles[c]
+	return t != nil && t.painting != nil
 }
 
 // Attempts returns how many rasterizations have been tried for a tile.
@@ -423,16 +490,17 @@ func (g *Grid) SetBudget(budget int64) {
 // Stats returns a snapshot of grid state and counters.
 func (g *Grid) Stats() GridStats {
 	return GridStats{
-		Tiles:       len(g.tiles),
-		Valid:       g.counts[TileValid],
-		Stale:       g.counts[TileStale],
-		Empty:       g.counts[TileEmpty],
-		Failed:      g.counts[TileFailed],
-		Bytes:       g.used,
-		Budget:      g.budget,
-		Evictions:   g.evictions,
-		Rasterized:  g.rasterized,
-		Reused:      g.reused,
-		DroppedLate: g.droppedLate,
+		Tiles:         len(g.tiles),
+		Valid:         g.counts[TileValid],
+		Stale:         g.counts[TileStale],
+		Empty:         g.counts[TileEmpty],
+		Failed:        g.counts[TileFailed],
+		Bytes:         g.used,
+		Budget:        g.budget,
+		PaintingBytes: g.painting,
+		Evictions:     g.evictions,
+		Rasterized:    g.rasterized,
+		Reused:        g.reused,
+		DroppedLate:   g.droppedLate,
 	}
 }
