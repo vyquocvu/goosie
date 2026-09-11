@@ -1560,6 +1560,10 @@ func parseLineHeight(value string, fontSize float32) float32 {
 // Returns -1 if the value is empty, "auto", or uses an unsupported unit (so callers
 // can detect "unset" vs 0).
 func parseLengthWithViewport(value string, fontSize, viewportWidth, viewportHeight, percentBase float32) float32 {
+	// Fast-path: most values are "Npx", "N%", or plain numbers with no whitespace.
+	if v, ok := parseLengthFast(value); ok {
+		return v
+	}
 	value = strings.TrimSpace(value)
 	if value == "" || value == "auto" {
 		return -1
@@ -1591,6 +1595,10 @@ func parseLengthWithViewport(value string, fontSize, viewportWidth, viewportHeig
 }
 
 func parseLength(value string, fontSize float32) float32 {
+	// Fast-path: "Npx" or plain number with no whitespace.
+	if v, ok := parseLengthFast(value); ok {
+		return v
+	}
 	value = strings.TrimSpace(value)
 
 	// Handle empty or "0" values
@@ -1637,6 +1645,56 @@ func parseLength(value string, fontSize float32) float32 {
 	}
 
 	return 0
+}
+
+// parseLengthFast is a zero-allocation fast path for the two most common CSS
+// length formats: "Npx" and plain numbers (e.g. "100", "3.5"). It returns
+// (value, true) on success or (0, false) when the slow path is needed.
+// It does NOT call strings.TrimSpace — callers that may have leading/trailing
+// whitespace must fall through to the slow path.
+func parseLengthFast(value string) (float32, bool) {
+	n := len(value)
+	if n == 0 {
+		return 0, true // empty → 0
+	}
+
+	// "Npx" fast path: last two bytes are "px"
+	if n >= 3 && value[n-2] == 'p' && value[n-1] == 'x' {
+		numStr := value[:n-2]
+		// Reject if there's whitespace (TrimSpace needed)
+		if numStr[0] == ' ' || numStr[len(numStr)-1] == ' ' {
+			return 0, false
+		}
+		if v, err := strconv.ParseFloat(numStr, 32); err == nil {
+			return float32(v), true
+		}
+		return 0, false
+	}
+
+	// Plain number fast path: first byte is digit, '-', or '.'; no whitespace
+	first := value[0]
+	if (first >= '0' && first <= '9') || first == '-' || first == '.' {
+		// Check no trailing unit suffix (last byte is digit or '.')
+		last := value[n-1]
+		if (last >= '0' && last <= '9') || last == '.' {
+			// No internal whitespace
+			for i := 0; i < n; i++ {
+				if value[i] == ' ' || value[i] == '\t' {
+					return 0, false
+				}
+			}
+			if v, err := strconv.ParseFloat(value, 32); err == nil {
+				return float32(v), true
+			}
+		}
+	}
+
+	// "0" special case
+	if value == "0" {
+		return 0, true
+	}
+
+	return 0, false
 }
 
 func parseColor(value string) (color.Color, error) {

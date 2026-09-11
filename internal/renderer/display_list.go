@@ -589,39 +589,52 @@ func (dlb *DisplayListBuilder) buildRecursive(layoutBox *LayoutBox, renderMap ma
 		dlb.addPushClipCommand(layoutBox, renderNode, displayList)
 	}
 
-	// Process children
-	// Create a copy of children to sort by z-index
-	children := make([]*LayoutBox, len(layoutBox.Children))
-	copy(children, layoutBox.Children)
-
-	// Sort children by z-index
-	sort.SliceStable(children, func(i, j int) bool {
-		nodeI := renderMap[children[i].NodeID]
-		nodeJ := renderMap[children[j].NodeID]
-
-		zIndexI := 0
-		if nodeI != nil && nodeI.ComputedStyle != nil {
-			zIndexI = nodeI.ComputedStyle.ZIndex
-		}
-
-		zIndexJ := 0
-		if nodeJ != nil && nodeJ.ComputedStyle != nil {
-			zIndexJ = nodeJ.ComputedStyle.ZIndex
-		}
-
-		return zIndexI < zIndexJ
-	})
-
-	for _, child := range children {
-		// If this box used inline layout (LineBoxes), text node children were already
-		// rendered as inline fragments above. Skip them to avoid double rendering.
-		if len(layoutBox.LineBoxes) > 0 {
-			childNode := renderMap[child.NodeID]
-			if childNode != nil && childNode.Type == NodeTypeText {
-				continue
+	// Process children — sort by z-index only when at least one child has a
+	// non-zero z-index (the common case is all-zero, so this avoids an
+	// allocation and sort on every element).
+	if !hasNonZeroZIndex(layoutBox, renderMap) {
+		for _, child := range layoutBox.Children {
+			// If this box used inline layout (LineBoxes), text node children were already
+			// rendered as inline fragments above. Skip them to avoid double rendering.
+			if len(layoutBox.LineBoxes) > 0 {
+				childNode := renderMap[child.NodeID]
+				if childNode != nil && childNode.Type == NodeTypeText {
+					continue
+				}
 			}
+			dlb.buildRecursive(child, renderMap, displayList)
 		}
-		dlb.buildRecursive(child, renderMap, displayList)
+	} else {
+		children := make([]*LayoutBox, len(layoutBox.Children))
+		copy(children, layoutBox.Children)
+
+		// Sort children by z-index
+		sort.SliceStable(children, func(i, j int) bool {
+			nodeI := renderMap[children[i].NodeID]
+			nodeJ := renderMap[children[j].NodeID]
+
+			zIndexI := 0
+			if nodeI != nil && nodeI.ComputedStyle != nil {
+				zIndexI = nodeI.ComputedStyle.ZIndex
+			}
+
+			zIndexJ := 0
+			if nodeJ != nil && nodeJ.ComputedStyle != nil {
+				zIndexJ = nodeJ.ComputedStyle.ZIndex
+			}
+
+			return zIndexI < zIndexJ
+		})
+
+		for _, child := range children {
+			if len(layoutBox.LineBoxes) > 0 {
+				childNode := renderMap[child.NodeID]
+				if childNode != nil && childNode.Type == NodeTypeText {
+					continue
+				}
+			}
+			dlb.buildRecursive(child, renderMap, displayList)
+		}
 	}
 
 	// Pop clip command if needed
@@ -898,4 +911,18 @@ func (dlb *DisplayListBuilder) addBorderCommand(layoutBox *LayoutBox, renderNode
 	}
 
 	displayList.AddCommand(cmd)
+}
+
+// hasNonZeroZIndex reports whether any direct child of layoutBox has a
+// non-zero z-index. It is used to skip the children copy+sort in the
+// common case where no child participates in z-ordering.
+func hasNonZeroZIndex(layoutBox *LayoutBox, renderMap map[int64]*RenderNode) bool {
+	for _, child := range layoutBox.Children {
+		if node, ok := renderMap[child.NodeID]; ok && node != nil {
+			if node.ComputedStyle != nil && node.ComputedStyle.ZIndex != 0 {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -728,19 +728,18 @@ func (r *Renderer) Refresh() {
 	if r.dirty {
 		width, height := r.layoutEngine.canvasWidth, r.layoutEngine.canvasHeight
 
-		// Apply styles (in case attributes changed)
+		// Apply styles in place — ApplyStyles overwrites ComputedStyle fields
+		// without allocating a new tree, avoiding the O(n) Clone cost.
 		r.stylesheetMu.RLock()
 		styleManager := NewStyleManagerWithViewport(r.stylesheet, width, height)
 		r.stylesheetMu.RUnlock()
-		renderTreeCopy := r.currentRenderTree.Clone()
-		styleManager.ApplyStyles(renderTreeCopy)
-		r.loadImages(renderTreeCopy)
+		styleManager.ApplyStyles(r.currentRenderTree)
+		r.loadImages(r.currentRenderTree)
 
-		// Perform layout
+		// Perform layout (produces a fresh layout tree each time)
 		layoutEngine := getLayoutEngine(width, height)
 		defer putLayoutEngine(layoutEngine)
-		r.currentLayoutTree = layoutEngine.ComputeLayout(renderTreeCopy)
-		r.currentRenderTree = renderTreeCopy
+		r.currentLayoutTree = layoutEngine.ComputeLayout(r.currentRenderTree)
 		r.nodeIndex, r.nodeIndexRoot = nil, nil
 
 		// Clear canvas cache

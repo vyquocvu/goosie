@@ -416,7 +416,6 @@ static void sendResize(GoosieContentView *v) {
 	[item setSubmenu:appMenu];
 	[NSApp setMainMenu:bar];
 	[appMenu release];
-	[item release];
 	[bar release];
 }
 
