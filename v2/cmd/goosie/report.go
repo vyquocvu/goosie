@@ -9,7 +9,7 @@ import (
 	"github.com/vyquocvu/goosie/v2/internal/platform"
 )
 
-// report is what a run leaves behind: three greppable lines on stderr and, with -out,
+// report is what a run leaves behind: a few greppable lines on stderr and, with -out,
 // the recorder's own JSON artifact.
 //
 // The split is deliberate. The JSON is the timing record - the frame marks and the
@@ -26,7 +26,15 @@ func (f *framePath) report(d *driver) error {
 	ps := f.pool.Stats()
 
 	elapsed := time.Since(f.started)
-	name, interactive := platform.Available()
+	// The window names the run, not the machine. A gate run that fell back to headless
+	// because it could not reach a display still drew every frame and still produced
+	// timings; if its report says "darwin", those timings read as display-paced macOS
+	// numbers, which is the one thing this line exists to distinguish.
+	name := platform.WindowName(f.window)
+	// A native window that opened has pixels on a display by construction - reaching no
+	// window server is an error from the shim rather than an invisible window - so
+	// interactivity is a fact about the window that exists, not a second question.
+	interactive := name != platform.Headless
 	backend := c.backend
 	if backend == "" {
 		backend = "auto"
@@ -58,8 +66,8 @@ func (f *framePath) report(d *driver) error {
 	fmt.Fprintf(os.Stderr, "goosie: run backend=%s requested=%q interactive=%t frames=%d stamped=%d elapsed_s=%.2f fps=%.1f scene=%s size=%dx%d window=%dx%d dpr=%g\n",
 		name, backend, interactive, rep.Frames, stamped, elapsed.Seconds(), fps, c.scene,
 		c.devSize().W, c.devSize().H, actual.W, actual.H, c.dpr)
-	fmt.Fprintf(os.Stderr, "goosie: timings mean_ms=%.3f p50_ms=%.3f p99_ms=%.3f max_ms=%.3f zero_work_frames=%d\n",
-		rep.MeanMS, rep.P50MS, rep.P99MS, rep.MaxMS, rep.ZeroWorkFrames)
+	fmt.Fprintf(os.Stderr, "goosie: timings mean_ms=%.3f p50_ms=%.3f p99_ms=%.3f max_ms=%.3f present_mean_ms=%.3f present_p99_ms=%.3f zero_work_frames=%d\n",
+		rep.MeanMS, rep.P50MS, rep.P99MS, rep.MaxMS, rep.PresentMeanMS, rep.PresentP99MS, rep.ZeroWorkFrames)
 	fmt.Fprintf(os.Stderr, "goosie: counters rasterized=%d reused=%d failed=%d refused=%d deferred=%d panics=%d writes=%d bytes=%d budget=%d miss_pct=%.2f presents=%d idle=%d dropped_vsyncs=%d plans_published=%d plans_superseded=%d\n",
 		st.Rasterized, st.Reused, st.Failed, st.Refused, st.Deferred, ps.Panics, st.Writes,
 		st.Bytes, st.Budget, miss, ls.Presents, ls.Idle, dropped,

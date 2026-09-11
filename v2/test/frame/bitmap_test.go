@@ -1,6 +1,8 @@
 package frame_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -275,5 +277,90 @@ func TestRecorderReportAggregatesInvariantCounters(t *testing.T) {
 	}
 	if rep.Frames != 2 {
 		t.Fatalf("Frames = %d, want 2", rep.Frames)
+	}
+}
+
+// TestRecorderReportsPresentPathLatency covers M1's criterion 8 instrument: how long a
+// frame took to leave the composer and be accepted by the window. It is reported apart
+// from the frame mean because the two move independently - a shim that copies or refuses
+// changes this figure and nobody else's - and because the baseline file has to record
+// one number that came from the window rather than from the pipeline.
+func TestRecorderReportsPresentPathLatency(t *testing.T) {
+	rec := frame.NewFrameRecorder(1024)
+	for i := 1; i <= 100; i++ {
+		start := frameTime(i)
+		rec.Record(frame.FrameMark{
+			Serial:      uint64(i),
+			VsyncAt:     start,
+			ComposedAt:  start,
+			PresentedAt: start.Add(frameDuration(i)),
+		})
+	}
+	rep := rec.Report()
+	// composed→presented is i ms for i in 1..100, so the ranks are the frame ones above.
+	if rep.PresentMeanMS < 50.4 || rep.PresentMeanMS > 50.6 {
+		t.Errorf("PresentMeanMS = %v, want 50.5", rep.PresentMeanMS)
+	}
+	if rep.PresentP99MS < 98.9 || rep.PresentP99MS > 99.1 {
+		t.Errorf("PresentP99MS = %v, want 99", rep.PresentP99MS)
+	}
+
+	// A frame that never reached a present contributes nothing, rather than a zero that
+	// drags the mean down and a percentile read off a list one shorter than the frames.
+	noPresent := frame.NewFrameRecorder(4)
+	noPresent.Record(frame.FrameMark{Serial: 1, VsyncAt: frameTime(0)})
+	noPresent.Record(frame.FrameMark{Serial: 2, ComposedAt: frameTime(0), PresentedAt: frameTime(4)})
+	got := noPresent.Report()
+	if got.PresentMeanMS < 3.9 || got.PresentMeanMS > 4.1 {
+		t.Errorf("PresentMeanMS = %v with one unstamped frame in the window; unstamped frames must be left out of the denominator, not averaged in as zero", got.PresentMeanMS)
+	}
+
+	// The instrument is worth nothing if it cannot see a slow present.
+	late := frame.NewFrameRecorder(4)
+	late.Record(frame.FrameMark{Serial: 1, ComposedAt: frameTime(0), PresentedAt: frameTime(2)})
+	late.Record(frame.FrameMark{Serial: 2, ComposedAt: frameTime(0), PresentedAt: frameTime(900)})
+	if v := late.Report().PresentP99MS; v < 899 {
+		t.Errorf("PresentP99MS = %v for a window holding a 900ms present; the instrument cannot see the case it exists for", v)
+	}
+}
+
+// TestRecorderJSONFieldNamesSayWhatTheyHold keeps the artifact a shell script reads
+// honest about its own keys. The timestamps are time.Time values, so they encode as RFC
+// 3339 strings; a name ending in "_ns" invites a consumer to subtract them as integers,
+// which jq answers with a coerced null - the failure shape that looks like a fast frame.
+func TestRecorderJSONFieldNamesSayWhatTheyHold(t *testing.T) {
+	rec := frame.NewFrameRecorder(4)
+	start := frameTime(0)
+	rec.Record(frame.FrameMark{Serial: 1, VsyncAt: start, PresentedAt: start.Add(time.Millisecond)})
+
+	var buf bytes.Buffer
+	if err := rec.WriteJSON(&buf); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var doc struct {
+		Report map[string]any   `json:"report"`
+		Frames []map[string]any `json:"frames"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("the JSON this writes is not what it reads back: %v", err)
+	}
+	if len(doc.Frames) != 1 {
+		t.Fatalf("%d frames in the artifact, want 1", len(doc.Frames))
+	}
+	for _, name := range []string{"vsync", "plan", "submit", "composed", "presented"} {
+		key := name + "_at"
+		if v, ok := doc.Frames[0][key]; !ok {
+			t.Errorf("the mark has no %q field", key)
+		} else if _, isString := v.(string); !isString {
+			t.Errorf("%q holds %T, not a time string", key, v)
+		}
+		if _, ok := doc.Frames[0][key+"_ns"]; ok {
+			t.Errorf("the mark still carries %q, which promises an integer it does not hold", key+"_ns")
+		}
+	}
+	for _, key := range []string{"mean_ms", "p99_ms", "present_mean_ms", "present_p99_ms"} {
+		if _, ok := doc.Report[key]; !ok {
+			t.Errorf("the report has no %q field; the gate script reads it", key)
+		}
 	}
 }

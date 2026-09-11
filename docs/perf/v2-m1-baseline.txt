@@ -1,0 +1,305 @@
+# Goosie v2 - M1 frame-path baseline
+#
+# Recorded 2026-09-11 by Task 14 of
+# docs/superpowers/plans/2026-09-11-goosie-v2-m1-frame-path.md. These are M3's reference
+# figures: the numbers the tile-based compositor has to beat or match when real web
+# content arrives, measured before any of it exists.
+#
+# Everything below is one machine's wall clock. Read "Measurement conventions" before
+# comparing any two numbers here, and re-run the commands in "How to reproduce" rather
+# than trusting a copy of these digits. Every run below was executed on the tree this
+# record is committed with, on the machine named below, within one sitting; the interactive
+# run in section 4 is the only one not repeated in CI.
+
+machine:
+  model:            Apple M1 Pro
+  cores:            10 physical, 10 logical   (sysctl hw.physicalcpu hw.logicalcpu)
+  memory:           32 GiB                    (sysctl hw.memsize = 34359738368)
+  os:               macOS 26.6.2
+  go:               go1.26.5 darwin/arm64     (go.mod directs 1.25)
+  cgo_enabled:      1
+  raster workers:   4 = min(GOMAXPROCS-1, 4)  (raster.DefaultWorkers(); M1 criterion 7
+                                                is stated at exactly this width)
+  panel:            built-in, CVDisplayLink ticks at ~119 Hz (119.5-119.9 fps measured
+                                                    below on a 60Hz-capped pipeline)
+
+how to reproduce:
+  go build ./v2/...
+  go test -count=1 ./v2/...
+  go test -run='^$' -bench='BenchmarkWarmScroll|BenchmarkColdScrollBurst' \
+    -benchmem -benchtime=200x -count=3 ./v2/test/gate
+  go run ./v2/cmd/goosie -gate -scene checkerboard -frames 600 -out /tmp/gate.json
+  scripts/v2-gate-check.sh /tmp/gate.json -mean 16 -p99 33 \
+    -bench /tmp/bench.txt -warm-ms 5 -cold-ms 8
+
+  v2/README.md "The gate, and what CI does" is the same sequence as one copy-paste block,
+  including the check that the run was display-paced.
+
+# ---------------------------------------------------------------------------
+# 1. M1 criterion 7: the two scroll budgets, on this machine
+# ---------------------------------------------------------------------------
+# BenchmarkWarmScroll      budget 5.0 ms/op   median 1.807 ms/op   PASS (2.8x inside)
+# BenchmarkColdScrollBurst budget 8.0 ms/op   median 2.478 ms/op   PASS (3.2x inside)
+# BenchmarkWarmScroll      allocs/op = 0                            PASS (criterion 4)
+
+goos: darwin
+goarch: arm64
+pkg: github.com/vyquocvu/goosie/v2/test/gate
+cpu: Apple M1 Pro
+BenchmarkWarmScroll-10               200           1916510 ns/op                 1.917 ms/op           0 B/op          0 allocs/op
+BenchmarkWarmScroll-10               200           1806782 ns/op                 1.807 ms/op           0 B/op          0 allocs/op
+BenchmarkWarmScroll-10               200           1803651 ns/op                 1.804 ms/op           0 B/op          0 allocs/op
+BenchmarkColdScrollBurst-10          200           2478028 ns/op                 2.478 ms/op        9064 B/op         59 allocs/op
+BenchmarkColdScrollBurst-10          200           2540222 ns/op                 2.540 ms/op        9017 B/op         59 allocs/op
+BenchmarkColdScrollBurst-10          200           2454842 ns/op                 2.455 ms/op        9017 B/op         59 allocs/op
+PASS
+ok      github.com/vyquocvu/goosie/v2/test/gate 4.031s
+
+# Repetition spread is +/-3 % warm and +/-2 % cold, so the 2.8x and 3.2x margins are not
+# one lucky run. The absolute ms/op figures moved 5 % between the two sessions recorded
+# here (1.895 -> 1.807 median); a later comparison that needs better than that should
+# interleave, not compare across sittings.
+
+# BenchmarkColdScrollBurst's 59 allocs/op are the raster workers' glyph masks, not the
+# UI path's. testing.AllocsPerRun and -benchmem both count the process, so a benchmark
+# that runs the real rasterizer cannot separate them; plan Task 12 gates "0 allocs/op"
+# on the warm case and carries the cold case's UI-path zero in
+# TestGate_ColdScrollBurstNoRedundantJobs, which measures the same burst against a
+# rasterizer stub that allocates nothing. Criterion 5's second half - jobs == stale tiles
+# - is asserted there too, by counter.
+
+# ---------------------------------------------------------------------------
+# 2. M1 criterion 8: the paced gate run through a real macOS window, and the
+#    present-path latency inside it
+# ---------------------------------------------------------------------------
+# Task 14 Step 1's command verbatim: 600 scripted scroll frames of 100 px, drawn in
+# answer to 600 real CVDisplayLink ticks on an NSWindow, at the nightly job's budgets
+# (mean <= 16, p99 <= 33):
+#
+#   mean_ms         1.498   budget 16     PASS
+#   p50_ms          1.484
+#   p99_ms          2.043   budget 33     PASS
+#   max_ms          8.061   (reported, not gated - one frame is not a pacing result)
+#   present_mean_ms 0.253   composed -> presented, M1's present-path latency
+#   present_p99_ms  0.557
+#   fps             119.9   dropped_vsyncs 0
+
+goosie: run backend=darwin requested="auto" interactive=true frames=600 stamped=600 elapsed_s=5.00 fps=119.9 scene=checkerboard size=2880x1800 window=2880x1654 dpr=2
+goosie: timings mean_ms=1.498 p50_ms=1.484 p99_ms=2.043 max_ms=8.061 present_mean_ms=0.253 present_p99_ms=0.557 zero_work_frames=368
+goosie: counters rasterized=2988 reused=53438 failed=0 refused=0 deferred=0 panics=0 writes=359136000 bytes=783286272 budget=785383424 miss_pct=5.30 presents=600 idle=0 dropped_vsyncs=0 plans_published=1 plans_superseded=0
+goosie: env goos=darwin goarch=arm64 go=go1.26.5 cpu=10 workers=4
+goosie: present queued=296 dropped=304 committed=295
+
+# The same command with -backend native, run twice more in the same sitting:
+# mean_ms 1.501 / p99_ms 2.082 and mean_ms 1.495 / p99_ms 2.069. The spread is under
+# 1 %; the backend that gets chosen is the same either way on this machine.
+
+# The tile cache filled to its ceiling and stopped rather than growing: 2988 buffers,
+# 783,286,272 of the 785,383,424-byte budget, with deferred=0 and refused=0. For a paced
+# run the budget is defined as the whole gate document plus eight buffers, so this line
+# says "the sweep held the page and asked for nothing more"; the binding-cap case - a
+# budget smaller than what is visible - is TestBudgetPlateaus and TestEvictedTileIsRequeued
+# in v2/test/raster, asserted by counters, which is where CI can hold them.
+
+# The same 600 frames through the headless backend at a 16 ms fake vsync, for comparison
+# only. NOT comparable to the figure above - see convention 1.
+#
+#   mean_ms=6.981 p50_ms=6.994 p99_ms=11.364 present_mean_ms=1.695 present_p99_ms=3.546
+#   fps=56.8   present queued=600 dropped=0 committed=600   (the headless window owns its
+#   buffer, so it never refuses one)   backend=headless interactive=false
+
+# ---------------------------------------------------------------------------
+# 3. The gate script's verdict on run 2 (what the nightly asserts)
+# ---------------------------------------------------------------------------
+
+v2-gate-check: /tmp/gate.json (600 frames)
+  mean_ms                       1.498  ok, budget 16 ms
+  p99_ms                        2.043  ok, budget 33 ms
+  style_passes                      0  ok, budget 0 total
+  layout_passes                     0  ok, budget 0 total
+  max_ms                        8.061  reported, not gated
+  present_mean_ms               0.253  reported, not gated
+  present_p99_ms                0.557  reported, not gated
+  tiles_rasterized               2988  of 56426 tile slots offered
+v2-gate-check: /tmp/bench.txt (median of repetitions, ms/op)
+  BenchmarkWarmScroll           1.807  ok, budget 5 ms/op
+  BenchmarkColdScrollBurst      2.478  ok, budget 8 ms/op
+  warm allocs/op                    0  criterion 4 gates this in CI; reported here
+v2-gate-check: PASS
+
+# The script's failure paths are exercised too, because a gate that cannot fail is not a
+# gate: -mean 1 -p99 1 and -cold-ms 1 both exit 1 with the offending row named, a missing
+# or empty artifact exits 2 ("an empty window would pass every budget below by having
+# nothing in it"), and a benchmark line whose ms/op column moves exits 2 rather than
+# comparing a string to a budget.
+
+# ---------------------------------------------------------------------------
+# 4. An interactive window, unscrolled, for 30 seconds
+# ---------------------------------------------------------------------------
+# Criterion 1's cache half is about a page a person can scroll, so this is the
+# no-scripted-driver run: `goosie -scene checkerboard -width 1440 -height 900`, the real
+# 20,000-device-pixel document at the default budget, left alone and terminated by SIGTERM.
+#
+#   rasterized=228  bytes=59,768,832 of budget=67,108,864  deferred=0 refused=0
+#   presents=3581   present queued=1784 dropped=1797 committed=1784
+#   plans_published=1   frames=120 (the ring's cap, not the session's count)
+
+goosie: run backend=darwin requested="auto" interactive=true frames=120 stamped=-1 elapsed_s=29.86 fps=4.0 scene=checkerboard size=2880x1800 window=2880x1654 dpr=2
+goosie: timings mean_ms=0.266 p50_ms=0.105 p99_ms=0.580 max_ms=0.581 present_mean_ms=0.235 present_p99_ms=0.548 zero_work_frames=120
+goosie: counters rasterized=228 reused=300601 failed=0 refused=0 deferred=0 panics=0 writes=14290560 bytes=59768832 budget=67108864 miss_pct=0.08 presents=3581 idle=0 dropped_vsyncs=0 plans_published=1 plans_superseded=0
+goosie: env goos=darwin goarch=arm64 go=go1.26.5 cpu=10 workers=4
+goosie: present queued=1784 dropped=1797 committed=1784
+
+# What this says and what it does not. The document is 20,000 device px tall, which is 79
+# tile rows by 12 columns; the cache settled at 228 of its 256 buffers and did not ask
+# for more, so the plateau is reached by drawing the page rather than by a driver
+# scripting a sweep. It is not a binding-cap demonstration - see section 2 on that.
+#
+# The frame numbers describe the last 120 presents, not the 3581 the session made: an
+# interactive run's recorder ring is 120 deep, and a report cannot describe more than it
+# kept. fps=4.0 is 120/29.86 and is an artifact of that cap, not a rate. The mean of
+# 0.266 ms is a tail of unchanged frames, which is the cheapest 120 frames there are.
+# Nothing in CI reads an interactive run's numbers.
+#
+# What is worth acting on later, and is not an M1 criterion: presents=3581 with
+# plans_published=1 and zero_work_frames=120. An idle window re-presents its unchanged
+# frame on every vsync it services, because surface.Loop.draw presents whenever a plan
+# exists and a plan always exists after the first publish. About half of those presents
+# are refused for want of a free surface (dropped=1797), which costs roughly a present's
+# worth of UI work and a slot in the three-buffer ring each time. Skipping a present with
+# an empty damage list is the obvious fix; it belongs with the throttle described in
+# convention 2, not as a late M1 change.
+
+# ---------------------------------------------------------------------------
+# Measurement conventions - the things that make two numbers here disagree
+# ---------------------------------------------------------------------------
+#
+# 1. mean_ms is not the same quantity on the two backends, and only the native one is
+#    gated. The shim timestamps a vsync when its pump hands the event to Go, so the
+#    native mean is the UI thread's own work: plan, submit, compose, present. The
+#    headless window timestamps it when its clock fires, so its mean also carries how
+#    long the tick waited behind the frame before it - which is why the same pipeline
+#    reports 1.498 ms through AppKit and 6.981 ms through a timer. Criterion 7 says "UI
+#    thread work", so the pump-read convention is the one that matches the criterion.
+#
+#    This is also why the run line's backend matters: a headless artifact and a native
+#    artifact have the same shape and different units. See "Corrections made while
+#    recording this baseline" below, which is about exactly that mix-up.
+#
+# 2. CVDisplayLink ticks at ~119 Hz on this ProMotion panel while Core Animation commits
+#    this layer at ~59 Hz, so about half of all presents find all three surfaces still
+#    owed to the display and return GOOSIE_DROPPED (queued=296 dropped=304 committed=295
+#    above). The frames that do commit are complete and correct - a dropped present marks
+#    the surface so the next one uploads the whole surface rather than its own damage
+#    rects (see GoosiePresent's need_full) - and the effective displayed rate is the
+#    commit rate. The dropped work costs 1.5 ms a frame, which is why it has not yet been
+#    worth throttling vsync delivery on buffer availability; that change also risks
+#    stalling the loop on a release callback that never arrives, so it is not free.
+#
+# 3. fps in a run line counts the ticks the display produced, not the commits the display
+#    showed, and for an interactive run it is capped by the recorder ring (section 4). Use
+#    the present line for the second.
+#
+# 4. -bench (headless, 1 microsecond period) reports a mean_ms in the hundreds - 226.998
+#    for a 2000-frame run, fps=554.4, dropped_vsyncs=374230 - and both are correct: the
+#    clock outruns the loop by orders of magnitude, so every mean is mostly queue depth.
+#    Only the fps line in that mode means anything, and nothing gates it.
+#
+# 5. writes and bytes are device pixels: a 2880x1800 viewport at DPR 2 is what the
+#    1.498 ms bought. Halving the viewport is not comparable to these numbers.
+#
+# 6. The window that was measured is not the window that was asked for. A 1440x900pt
+#    request reported window=2880x1654 device px: AppKit constrained the height to the
+#    display's visibleFrame, the resize event propagated, and the frame path re-sized its
+#    composer, so the timings belong to the window that was on screen. The headless runs
+#    report window=2880x1800 - nothing constrains a surface with no title bar - which is
+#    one more reason the two backends' means are not one quantity.
+#
+#    The two size sources do not agree to the pixel, and this is an open item rather than
+#    a settled fact. A 1200x800 request reported window=2400x1600 (2x, unconstrained)
+#    while CoreGraphics listed that window's frame as 1176x816+168+48 points. CGWindowList
+#    bounds include the title bar and the shim reports the content layer, so the
+#    discrepancy is expected in height and not in width. Nothing in M1's criteria reads a
+#    width that closely; M2's pixel comparisons against Chromium will have to, so the
+#    shim's size source should be pinned down before then.
+
+# ---------------------------------------------------------------------------
+# Corrections made while recording this baseline
+# ---------------------------------------------------------------------------
+#
+# cmd/goosie's run line used to print the backend the machine could open rather than the
+# one the run drew through: platform.Available() answers "does this Mac have a window
+# server" before anything is opened, so a `-backend headless` gate run on this machine
+# reported backend=darwin interactive=true while no window existed.
+#
+# That is not a cosmetic label. The nightly job's "Require that the run was paced by a
+# display" step greps that line, so before the fix the step could not fail: a macOS runner
+# with no window session would fall back to headless, print darwin anyway, and have its
+# 16 ms budget enforced against timings measured on a 16 ms timer. Both were fixed - the
+# report now asks the window (platform.WindowName, satisfied by a Name() on each
+# backend), and the workflow names -backend native so a fallback is an error exit before
+# it is a mislabelled artifact. TestWindowNameReportsTheWindowNotTheMachine in
+# v2/test/platform is the counter-only guard: it asserts a headless window does not report
+# the machine's native backend where one exists.
+#
+# Every number in sections 2 and 4 was produced after that change, and each run line here
+# says which window it actually used.
+
+# ---------------------------------------------------------------------------
+# M1 exit-criteria audit
+# ---------------------------------------------------------------------------
+#
+# 1. cmd/goosie opens a real macOS window driven by a synthetic display list; scrolling a
+#    20,000 px procedural document is visually smooth and the cache plateaus at budget.
+#    PASS with two substitutions. The cache plateau is shown by an unscrolled interactive
+#    window on the 20,000 px page (section 4: 228 of 256 buffers, deferred=0 refused=0)
+#    and by the paced sweep holding its whole document (section 2). The scroll itself was
+#    scripted: -gate's driver stamps 100 px deltas onto the real ticks the display
+#    produced, and everything downstream of that is the code a finger exercises. No
+#    finger was involved - see "Not measured here".
+# 2. go test ./v2/... green on ubuntu-latest through platform/headless. NOT ASSERTED BY
+#    THIS RECORD - there is no Linux or container runtime on this machine, so it cannot
+#    be. Locally: ./v2/... cross-compiles for linux/amd64 with CGO_ENABLED=1 including the
+#    gate test binary and cmd/goosie, no v2 test reads a display or a darwin-only path, and
+#    ci.yml's `go test -short ./...` covers ./v2/... on the next push.
+# 3. archtest green. PASS - v2/internal/archtest and TestGate_ArchtestBoundaries, which
+#    shares the same rule table rather than copying it.
+# 4. BenchmarkWarmScroll allocs/op == 0 and tiles rasterized per frame after warmup == 0.
+#    PASS - 0 allocs/op above, and TestGate_WarmScrollZeroAllocsZeroTiles asserts the
+#    per-frame zero by counter over 600 frames.
+# 5. BenchmarkColdScrollBurst allocs/op == 0 and jobs == stale tiles. PASS on the UI path
+#    by counter; see the note under 1 about what -benchmem can and cannot attribute.
+# 6. v2 is GPU-free, by nm in the test. PASS - TestGate_NoGPULinkage scans cmd/goosie as
+#    well as the gate test binary, which is the link that carries the Cocoa shim.
+# 7. Warm <= 5.0 ms/op, cold <= 8.0 ms/op at min(GOMAXPROCS-1, 4) workers. PASS - 1.807
+#    and 2.478 at 4 workers, three repetitions each.
+# 8. Present-path latency and the two figures above recorded here. PASS - sections 1, 2.
+#
+# Criterion 2 is the one M1 figure this machine cannot produce, and it is the one the next
+# push to CI settles. Criteria 3-8 pass on evidence in this file; criterion 1 passes on a
+# scripted scroll and needs a person's eye before M2 calls it done.
+#
+# Not measured here, and why:
+#
+# - A finger on a trackpad. Nothing in this environment can move the pointer or post a
+#   CGEvent: Screen Recording and Accessibility are both denied to the agent's host
+#   process (a Computer Use attempt reproduced the denial against Finder, and
+#   `screencapture` fails with "could not create image from display"). The scripted
+#   driver is the substitute, and it is a real one - it goes through the same channel,
+#   the same loop, the same scheduler and the same present - but it cannot exercise the
+#   AppKit scroll-gesture path itself: hasPreciseScrollingDeltas scaling, momentum
+#   continuation, and the interrupt-on-finger-down behaviour those events imply.
+# - A screenshot of the running window, for the same reason. Its presence on screen was
+#   verified instead through CoreGraphics' window list - CGWindowListCopyWindowInfo,
+#   on-screen only, which needs no Screen Recording permission because it reads metadata
+#   rather than pixels - taken while a window was open in a separate process:
+#
+#     windowprobe: owner=goosie-v2 pid=56275 layer=0 alpha=1.00 bounds=1176x816+168+48
+#
+#   layer 0 is an ordinary window, alpha 1.00 is not hidden or faded, and the bounds are
+#   on-screen rather than off it. Its pixels were then verified structurally rather than
+#   visually: the damage rects that reach GoosiePresent, the counters around them, and the
+#   comparison tests in v2/test.
+#   Both of these need one human run to close, and criterion 1's "visually smooth"
+#   should be re-checked by a person before M2 is called done on M1.
+# - A Linux or container execution of ./v2/... (criterion 2), as recorded there.

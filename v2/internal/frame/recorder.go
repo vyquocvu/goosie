@@ -14,13 +14,20 @@ import (
 // turn the architectural invariants into assertions: StylePasses and
 // LayoutPasses must be zero on a scroll-only frame, and TilesRasterized must be
 // zero once the tile cache is warm.
+//
+// The timestamp names end in "_at" rather than "_at_ns" because they encode as
+// RFC 3339 strings, which is what time.Time marshals to. A consumer that trusted
+// the older "_ns" names and subtracted two of them would have got an error from
+// jq, or a coerced null that read as a suspiciously fast frame. Deltas are not a
+// shell's job: Report computes them here, from the real time.Time values, and the
+// marks carry them in the same file.
 type FrameMark struct {
 	Serial          uint64    `json:"serial"`
-	VsyncAt         time.Time `json:"vsync_at_ns"`
-	PlanAt          time.Time `json:"plan_at_ns"`
-	SubmitAt        time.Time `json:"submit_at_ns"`
-	ComposedAt      time.Time `json:"composed_at_ns"`
-	PresentedAt     time.Time `json:"presented_at_ns"`
+	VsyncAt         time.Time `json:"vsync_at"`
+	PlanAt          time.Time `json:"plan_at"`
+	SubmitAt        time.Time `json:"submit_at"`
+	ComposedAt      time.Time `json:"composed_at"`
+	PresentedAt     time.Time `json:"presented_at"`
 	TilesRasterized int32     `json:"tiles_rasterized"`
 	TilesReused     int32     `json:"tiles_reused"`
 	StylePasses     int32     `json:"style_passes"`
@@ -35,6 +42,17 @@ func (m FrameMark) Work() time.Duration {
 	return m.PresentedAt.Sub(m.VsyncAt)
 }
 
+// Present returns composition-to-present: the time the frame spent leaving the
+// composer and being accepted by the window. It is M1's present-path latency, and it
+// is the interval that a window shim can make slow without any of the frame path
+// changing - a copy, a commit, a driver that says no.
+func (m FrameMark) Present() time.Duration {
+	if m.ComposedAt.IsZero() || m.PresentedAt.IsZero() {
+		return 0
+	}
+	return m.PresentedAt.Sub(m.ComposedAt)
+}
+
 // Report summarizes a recording window. Latency is reported in milliseconds
 // because the consumers are a shell script gate and a text baseline file.
 type Report struct {
@@ -43,6 +61,8 @@ type Report struct {
 	P50MS           float64 `json:"p50_ms"`
 	P99MS           float64 `json:"p99_ms"`
 	MaxMS           float64 `json:"max_ms"`
+	PresentMeanMS   float64 `json:"present_mean_ms"`
+	PresentP99MS    float64 `json:"present_p99_ms"`
 	TilesRasterized int64   `json:"tiles_rasterized"`
 	TilesReused     int64   `json:"tiles_reused"`
 	StylePasses     int64   `json:"style_passes"`
@@ -117,9 +137,13 @@ func (r *FrameRecorder) Report() Report {
 		return rep
 	}
 	durs := make([]float64, 0, r.filled)
+	presents := make([]float64, 0, r.filled)
 	marks := r.Marks()
 	for _, m := range marks {
 		durs = append(durs, float64(m.Work())/float64(time.Millisecond))
+		if !m.ComposedAt.IsZero() && !m.PresentedAt.IsZero() {
+			presents = append(presents, float64(m.Present())/float64(time.Millisecond))
+		}
 		rep.TilesRasterized += int64(m.TilesRasterized)
 		rep.TilesReused += int64(m.TilesReused)
 		rep.StylePasses += int64(m.StylePasses)
@@ -134,21 +158,34 @@ func (r *FrameRecorder) Report() Report {
 		sum += d
 	}
 	n := len(durs)
-	rank := func(q float64) float64 {
-		idx := int(math.Ceil(q*float64(n))) - 1
+	// rank is the nearest-rank percentile of an already-sorted slice.
+	rank := func(sorted []float64, q float64) float64 {
+		m := len(sorted)
+		idx := int(math.Ceil(q*float64(m))) - 1
 		if idx < 0 {
 			idx = 0
 		}
-		if idx >= n {
-			idx = n - 1
+		if idx >= m {
+			idx = m - 1
 		}
-		return durs[idx]
+		return sorted[idx]
 	}
 	rep.Frames = int64(n)
 	rep.MeanMS = sum / float64(n)
-	rep.P50MS = rank(0.50)
-	rep.P99MS = rank(0.99)
+	rep.P50MS = rank(durs, 0.50)
+	rep.P99MS = rank(durs, 0.99)
 	rep.MaxMS = durs[n-1]
+	// Reported apart from the frame mean because they are gated apart: a present-path
+	// p99 is a window shim's number, and a frame mean is the whole pipeline's.
+	if len(presents) > 0 {
+		sort.Float64s(presents)
+		var psum float64
+		for _, d := range presents {
+			psum += d
+		}
+		rep.PresentMeanMS = psum / float64(len(presents))
+		rep.PresentP99MS = rank(presents, 0.99)
+	}
 	return rep
 }
 
