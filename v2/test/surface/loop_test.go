@@ -496,6 +496,8 @@ func TestVsyncFrameCountEqualsPresentCount(t *testing.T) {
 		w.vsync(t)
 		waitFor(t, "a present", func() bool { return w.count() == i+1 })
 	}
+	waitFor(t, "4 valid tiles", func() bool { return l.Stats().Valid == 4 })
+
 	got := loop.Stats()
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
