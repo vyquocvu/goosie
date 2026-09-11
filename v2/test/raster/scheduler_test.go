@@ -418,9 +418,10 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	h := newSchedRaster(t, cols, rows, 32, frame.Viewport{Size: frame.Size{W: vp, H: vp}}, raster.Pref{PrefetchRows: raster.PrefetchOff}, draw)
 
 	// More frames than MaxTileAttempts: the retries have to stop somewhere.
-	for i := 0; i < frame.MaxTileAttempts*8 && h.s.Stats().Failed == 0; i++ {
+	pollUntil(func() bool {
 		h.frame(t, vsync(0))
-	}
+		return h.s.Stats().Failed > 0
+	})
 	mu.Lock()
 	attemptsAfterFailure := attempts
 	mu.Unlock()
