@@ -22,6 +22,12 @@ import (
 	"github.com/vyquocvu/goosie/v2/internal/surface"
 )
 
+// Name is this backend's name. It is a method's return value as much as a constant: a
+// report that says "darwin" is claiming a real NSWindow was on screen for these frames,
+// so the same string has to come from the window that opened as from the table that
+// chose it.
+const Name = "darwin"
+
 // Config is the window a caller asks for.
 type Config struct {
 	// Title is the window's title bar text.
@@ -284,6 +290,9 @@ func (w *Window) Size() frame.Size {
 	C.GoosieSizeDevice(w.gw, &cw, &ch)
 	return frame.Size{W: int32(cw), H: int32(ch)}
 }
+
+// Name satisfies platform.Namer.
+func (w *Window) Name() string { return Name }
 
 // Presents satisfies platform.PresentCounter. Committed is the number that says the
 // frame reached Core Animation: a present the loop made and the shim queued is not the

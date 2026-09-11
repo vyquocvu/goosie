@@ -23,6 +23,10 @@ import (
 )
 
 const (
+	// Name is this backend's name, and the single place the string is spelled. The
+	// platform package's Headless constant is defined from it, so a report that says
+	// "headless" and a selection that asks for "headless" cannot drift apart.
+	Name = "headless"
 	// DefaultVsyncPeriod is 60Hz, so a headless run measures the same cadence the macOS
 	// shim will be held to.
 	DefaultVsyncPeriod = 16 * time.Millisecond
@@ -292,6 +296,10 @@ func (w *Window) Size() frame.Size {
 	defer w.mu.Unlock()
 	return w.size
 }
+
+// Name satisfies platform.Namer: the string a report prints for a window that put no
+// pixels on any display, whatever the machine it runs on could have done instead.
+func (w *Window) Name() string { return Name }
 
 // VsyncPeriod returns the interval the clock is driven at. It never changes, so a
 // measurement of a run can name the rate it was paced at.

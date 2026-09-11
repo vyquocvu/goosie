@@ -18,7 +18,9 @@ func init() { native = darwinBackend{} }
 // exports. It knows nothing about AppKit; the whole of that lives behind shim.h.
 type darwinBackend struct{}
 
-func (darwinBackend) name() string { return "darwin" }
+// name is the darwin package's own string, so the backend table and a window opened
+// from it cannot report two different names for one run.
+func (darwinBackend) name() string { return darwin.Name }
 
 // interactive asks the shim whether a window server is reachable, which is the
 // question a GUI binary needs answered before it decides whether opening a window is

@@ -109,6 +109,50 @@ func TestSelectReportsAnUnknownOrUnavailableBackend(t *testing.T) {
 	}
 }
 
+// TestWindowNameReportsTheWindowNotTheMachine guards the run line a pacing gate reads.
+// Available() answers a question about the machine and is answered before anything is
+// opened, so a run that names headless on a Mac with a display would report "darwin"
+// while drawing no pixels anywhere - and a nightly step that greps that line to prove a
+// frame path was paced by a real display would pass on the very fallback it exists to
+// catch. The window has to be the one that answers.
+func TestWindowNameReportsTheWindowNotTheMachine(t *testing.T) {
+	w, err := platform.Select(appendHeadless(testOptions()))
+	if err != nil {
+		t.Fatalf("Select(headless): %v", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	if got := platform.WindowName(w); got != platform.Headless {
+		t.Fatalf("WindowName(headless window) = %q, want %q", got, platform.Headless)
+	}
+	if machine, _ := platform.Available(); machine == platform.Headless {
+		// On a machine with no native backend the two answers coincide, so the
+		// distinction below is only provable where a shim exists.
+		t.Log("no native backend here; the two questions cannot disagree on this machine")
+	} else if platform.WindowName(w) == machine {
+		t.Fatalf("a headless window reported %q, the machine's backend: the report is "+
+			"answering what this Mac could open, not what this run drew", machine)
+	}
+}
+
+// unnamedWindow is a window that does not name itself, which is what a test fake in
+// another package looks like to WindowName.
+type unnamedWindow struct{ events chan surface.Event }
+
+func (w *unnamedWindow) Events() <-chan surface.Event              { return w.events }
+func (w *unnamedWindow) Present(*frame.Bitmap, []frame.Rect) error { return nil }
+func (w *unnamedWindow) SetCursor(surface.Cursor)                  {}
+func (w *unnamedWindow) ScaleFactor() float32                      { return 1 }
+func (w *unnamedWindow) Close() error                              { return nil }
+
+func TestWindowNameDefaultsToHeadless(t *testing.T) {
+	var w surface.Window = &unnamedWindow{events: make(chan surface.Event)}
+	if got := platform.WindowName(w); got != platform.Headless {
+		t.Fatalf("WindowName(unnamed window) = %q, want %q: a window that draws nothing "+
+			"must not be reported as a display backend", got, platform.Headless)
+	}
+}
+
 // TestSelectCarriesTheWindowConfigThrough checks that the options are honoured rather
 // than merely accepted, since a window that ignores its size or period silently
 // changes what every pacing measurement downstream means.

@@ -14,7 +14,7 @@ import (
 // Native means "this machine's own window", which is only one on a platform v2 has a
 // shim for.
 const (
-	Headless = "headless"
+	Headless = headless.Name
 	Native   = "native"
 )
 
@@ -86,6 +86,33 @@ type Sizer interface {
 	Size() frame.Size
 }
 
+// Namer is a window that can say which backend produced it. Every real window names
+// itself; the interface exists so that a report can ask the window instead of asking the
+// machine, which is a different question - see WindowName.
+type Namer interface {
+	Name() string
+}
+
+// WindowName reports the backend that opened w.
+//
+// Ask the window, not Available(): Available answers what this machine could put on a
+// display, while a run's report has to say what it actually drew through. The two
+// disagree the moment a caller names a backend - a headless gate run on a Mac with a
+// display is a run with no window on it, and printing "darwin" beside its timings would
+// describe a frame path this artifact did not measure. It also quietly passes any gate
+// that checks the line for a native backend.
+//
+// A window that does not name itself is reported as headless, which is the honest
+// default for the fakes that do that: they own their own event channel and no display.
+func WindowName(w surface.Window) string {
+	if n, ok := w.(Namer); ok {
+		if name := n.Name(); name != "" {
+			return name
+		}
+	}
+	return Headless
+}
+
 // PresentCounter is a window that can say what the display did with the frames it was
 // given: how many were queued to it, how many it refused, and how many actually
 // reached the compositor. A loop can present a frame the platform never shows, and a
@@ -114,6 +141,10 @@ func (unavailable) open(Options) (surface.Window, error) { return nil, ErrBacken
 // The second answer is the one a GUI binary needs: refusing to open a window is a
 // different event from opening an invisible one, and a run over ssh has to be told which
 // it got.
+//
+// This is a question about the machine, not about a run: it is answered before anything
+// is opened and does not change if the caller then names a different backend. A report
+// describing frames that were drawn asks WindowName instead.
 func Available() (name string, interactive bool) {
 	if native.interactive() {
 		return native.name(), true
