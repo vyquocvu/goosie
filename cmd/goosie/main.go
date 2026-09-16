@@ -24,7 +24,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -105,7 +107,7 @@ func (c config) paced() bool { return c.gate || c.bench }
 func parse(args []string) (config, error) {
 	var c config
 	fs := flag.NewFlagSet("goosie", flag.ContinueOnError)
-	fs.StringVar(&c.url, "url", "", "document to load; M1 has no engine, so naming one is an error")
+	fs.StringVar(&c.url, "url", "", "document to load")
 	fs.BoolVar(&c.gate, "gate", false, "drive -frames scripted scroll frames at real pacing, then report")
 	fs.BoolVar(&c.bench, "bench", false, "run frames as fast as the clock allows, headless, and report the rate")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
@@ -127,8 +129,6 @@ func parse(args []string) (config, error) {
 		return c, fmt.Errorf("%w: %v", errUsage, err)
 	}
 	switch {
-	case c.url != "":
-		return c, fmt.Errorf("%w: -url needs M2's document loader; M1 draws -scene", errUsage)
 	case c.width <= 0 || c.height <= 0:
 		return c, fmt.Errorf("%w: -width and -height must be positive", errUsage)
 	case c.dpr <= 0 || c.dpr > 8:
@@ -183,33 +183,54 @@ type framePath struct {
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
 // frame path sized for c.
 func build(c config) (*framePath, error) {
-	spec, err := sceneSpec(c.scene)
-	if err != nil {
-		return nil, err
-	}
 	dev := c.devSize()
 	scale := float32(c.dpr)
 
-	// The document's height is the scroll distance a run can cover. An interactive run
-	// gets the 20,000 device-pixel page M1's first criterion names, with the default
-	// budget, so that watching the cache reach its ceiling and evict is part of what
-	// the binary shows. A paced run is the warm-cache measurement: it keeps the gate
-	// suite's document and gets a budget big enough to hold all of it, because a cache
-	// that loses pages during the sweep rasterizes during it, and the report would
-	// then be timing the worker pool rather than the frame path.
-	cols := spec.Cols
-	if cols <= 0 {
-		cols = paint.DefaultCols
-	}
-	if c.paced() {
-		if spec.DocHeight <= 0 {
-			spec.DocHeight = paint.DefaultDocHeight
+	var layer *frame.Layer
+	var spec paint.SceneSpec
+
+	if c.url != "" {
+		client := net.DefaultClient()
+		defer client.Close()
+		resp, err := client.Get(c.url)
+		if err != nil {
+			return nil, fmt.Errorf("goosie: fetch %s: %w", c.url, err)
 		}
-		spec.BudgetTiles = int64((spec.DocHeight+frame.TileSize-1)/frame.TileSize)*int64(cols) + 8
+		sess, err := engine.NewSession(string(resp.Body), nil, float32(c.width))
+		if err != nil {
+			return nil, fmt.Errorf("goosie: build session: %w", err)
+		}
+		list := sess.Paint(scale)
+		dl := list.Build(1)
+		extent := dl.Extent()
+		layer = &frame.Layer{
+			ID:             1,
+			ContentVersion: dl.Version(),
+			Bounds:         frame.RectAt(frame.Point{}, dev),
+			Grid:           frame.NewGrid(extent, dev.W, 0, nil),
+			Content:        dl,
+		}
+		spec = paint.SceneSpec{DocHeight: extent.H()}
 	} else {
-		spec.DocHeight = interactiveDocHeight
+		var err error
+		spec, err = sceneSpec(c.scene)
+		if err != nil {
+			return nil, err
+		}
+		cols := spec.Cols
+		if cols <= 0 {
+			cols = paint.DefaultCols
+		}
+		if c.paced() {
+			if spec.DocHeight <= 0 {
+				spec.DocHeight = paint.DefaultDocHeight
+			}
+			spec.BudgetTiles = int64((spec.DocHeight+frame.TileSize-1)/frame.TileSize)*int64(cols) + 8
+		} else {
+			spec.DocHeight = interactiveDocHeight
+		}
+		_, layer = paint.BuildLayer(spec)
 	}
-	_, layer := paint.BuildLayer(spec) // the layer's content carries the list into every job it names
 
 	fonts, err := raster.NewFonts()
 	if err != nil {

@@ -1,0 +1,14 @@
+# M2 First-Paint Timings
+# Recorded: 2026-09-16
+# Test: test.html (simple static page with h1 and p elements)
+# Command: ./goosie -url "file://.../test.html" -backend headless -frames 1 -gate
+#
+# Note: This is the initial M2 front-end pipeline timing. The scene shows "checkerboard"
+# because the paint builder is not yet wired to the headless backend's scene generator.
+# Once the full pipeline is connected, this will show actual DOM rendering timings.
+
+goosie: run backend=headless requested="headless" interactive=false frames=1 stamped=1 elapsed_s=0.02 fps=45.3 scene=checkerboard size=2880x1800 window=2880x1800 dpr=2
+goosie: timings mean_ms=6.162 p50_ms=6.162 p99_ms=6.162 max_ms=6.162 present_mean_ms=2.901 present_p99_ms=2.901 zero_work_frames=1
+goosie: counters rasterized=0 reused=0 failed=0 refused=0 deferred=0 panics=0 writes=5184000 bytes=0 budget=33177600 miss_pct=0.00 presents=1 idle=0 dropped_vsyncs=0 plans_published=1 plans_superseded=0
+goosie: env goos=darwin goarch=arm64 go=go1.26.5 cpu=10 workers=4
+goosie: present queued=1 dropped=0 committed=1

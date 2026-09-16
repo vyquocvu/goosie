@@ -33,13 +33,20 @@ const ModulePrefix = "github.com/vyquocvu/goosie/"
 // contributor is most likely to break by accident while fixing something urgent.
 var Allowed = map[string][]string{
 	"internal/frame":             nil,
-	"internal/paint":             {"internal/frame"},
+	"internal/paint":             {"internal/frame", "internal/css", "internal/layout", "internal/style"},
 	"internal/surface":           {"internal/frame", "internal/paint"},
 	"internal/raster":            {"internal/frame", "internal/paint", "internal/surface"},
 	"internal/platform/headless": {"internal/frame", "internal/surface"},
 	"internal/platform/darwin":   {"internal/frame", "internal/surface"},
 	"internal/platform":          {"internal/frame", "internal/surface", "internal/platform/headless", "internal/platform/darwin"},
 	"internal/archtest":          nil,
+	"internal/dom":               nil,
+	"internal/css":               {"internal/dom"},
+	"internal/net":               nil,
+	"internal/image":             nil,
+	"internal/style":             {"internal/css", "internal/dom"},
+	"internal/layout":            {"internal/dom", "internal/style"},
+	"internal/engine":            {"internal/dom", "internal/css", "internal/style", "internal/layout", "internal/paint"},
 }
 
 // FreeDirs are the subtrees exempt from the table. Tests and binaries may reach
