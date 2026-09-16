@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# v2-gate-check.sh - the M1 pacing gate. Reads the JSON artifact `go run ./v2/cmd/goosie
+# v2-gate-check.sh - the M1 pacing gate. Reads the JSON artifact `go run ./cmd/goosie
 # -gate -out FILE` leaves behind and asserts the wall-clock budgets that a counter cannot
 # carry, because they are only meaningful on the machine with the display attached.
 #
 # This is deliberately not the CI gate. CI (ubuntu-latest, headless, fake vsync) asserts
-# deterministic counters only - see v2/test/gate/m1_gate_test.go - because runner core
+# deterministic counters only - see test/gate/m1_gate_test.go - because runner core
 # counts and memory bandwidth vary enough that a timing gate there would flake, and a
 # flaky gate is ignored within a month. The numbers below are the macOS nightly's.
 #

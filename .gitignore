@@ -17,13 +17,7 @@ go.work
 go.work.sum
 
 # Build artifacts
-/cmd/browser/browser
-/browser
-/dom_api_demo
-/scroll_perf_demo
-/roadmap_test
-/test/e2e/testdata/*
-.worktrees/
+bin/
 
 # IDE
 .vscode/
@@ -40,15 +34,12 @@ go.work.sum
 .DS_Store
 Thumbs.db
 
-#test
+# Screenshots and perf artifacts
 /screenshots
 screenshot.png
-roadmap_test_output
+perf-suite.txt
+.gstack/
+.worktrees/
 
 .prompt*
 !.prompt
-.gstack/
-bin/
-perf-review
-perf-suite.txt
-test/**/testdata/golden-layout-update/

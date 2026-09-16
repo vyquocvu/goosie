@@ -11,122 +11,7 @@ permissions:
 
 jobs:
   nightly:
-    name: Nightly benchmark suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
-      - name: Run navigation lifecycle benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkSession' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/engine/session
-
-      - name: Run parser benchmarks (longer)
-        run: |
-          go test -run='^$' -bench='BenchmarkParseBody' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/dom
-
-      - name: Run selector benchmarks (longer)
-        run: |
-          go test -run='^$' -bench='BenchmarkParseSelector|BenchmarkMatch' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/css
-
-      - name: Run scrolling benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkViewportScroll' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/renderer
-
-      - name: Run full-pipeline benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkFullPipeline' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/renderer
-
-      - name: Run testpages corpus benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkGet|BenchmarkGetContext' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/engine/testpages
-
-      - name: Run JS runtime benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkJS|BenchmarkRuntime' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/js || true
-
-      - name: Fuzz HTML parser and CSS selector matcher
-        # Cross-Cutting Workstreams → A. Testing → Parser and selector fuzz tests.
-        # Each fuzz target has a bounded input size (4 KiB) so the runtime never
-        # OOMs; failures surface as test panics or assertion violations.
-        run: |
-          go test -fuzz=FuzzHTMLParseDocument -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzHTMLParseDocumentCancelContext -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzHTMLGetElementByID -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzHTMLParseBodyText -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzCSSParser -fuzztime=30s ./test/internal/css/
-          go test -fuzz=FuzzSelectorMatcher -fuzztime=30s ./test/internal/css/
-
-      - name: Run race-detected benchmarks
-        run: |
-          go test -race -run='^$' -bench='BenchmarkSessionConcurrentNavigate|BenchmarkGetScrolling' \
-            -benchmem -benchtime=200ms -timeout=10m \
-            ./test/internal/engine/...
-
-      - name: Collect all results
-        run: |
-          mkdir -p testdata/benchmarks/nightly
-          go test -run='^$' -bench='.' -benchmem -benchtime=500ms -timeout=30m \
-            ./test/internal/dom \
-            ./test/internal/css \
-            ./test/internal/renderer \
-            ./test/internal/engine/... \
-            > testdata/benchmarks/nightly/full-suite.txt 2>&1 || true
-          echo "Nightly suite collected: $(wc -l < testdata/benchmarks/nightly/full-suite.txt) lines"
-
-      - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-benchmarks-${{ github.run_id }}
-          path: testdata/benchmarks/nightly/
-          retention-days: 90
-
-      - name: Compare against last nightly
-        continue-on-error: true
-        run: |
-          go install golang.org/x/perf/cmd/benchstat@latest
-          LATEST=$(gh run list --workflow "Nightly Benchmarks" --branch main \
-            --limit 2 --json databaseId -q '.[1].databaseId' 2>/dev/null || echo "")
-          if [ -n "$LATEST" ]; then
-            gh run download "$LATEST" --repo "${{ github.repository }}" \
-              --dir /tmp/prev-nightly 2>/dev/null || true
-            if [ -f "/tmp/prev-nightly/nightly-benchmarks-$LATEST/full-suite.txt" ]; then
-              benchstat \
-                "/tmp/prev-nightly/nightly-benchmarks-$LATEST/full-suite.txt" \
-                testdata/benchmarks/nightly/full-suite.txt \
-                > testdata/benchmarks/nightly/delta.txt 2>&1 || true
-              echo "=== Delta vs previous nightly ==="
-              cat testdata/benchmarks/nightly/delta.txt
-            fi
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  # The v2 M1 frame path, measured where its pacing is real: a macOS runner's
-  # CVDisplayLink, driving a window the binary actually opened. This is M1's criteria 7
-  # and 8, and it is the only job here that asserts a duration - deliberately, because a
-  # duration measured on the machine with the display attached is the only duration that
-  # means anything. ci.yml's ubuntu jobs stay on counters.
-  v2-macos:
-    name: v2 M1 frame path (macOS, real CVDisplayLink)
+    name: Nightly frame-path benchmarks (macOS, real CVDisplayLink)
     runs-on: macos-latest
     timeout-minutes: 30
 
@@ -140,54 +25,44 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run the v2 suites on this platform
-        # The same suites ci.yml runs on ubuntu-latest. They are cheap here and they are
-        # the check that the cgo shim did not break a counter assertion that only links
-        # on macOS - which is exactly the case TestGate_NoGPULinkage was widened for.
-        run: go test -count=1 ./v2/...
+      - name: Run all tests
+        run: go test -count=1 ./...
 
       - name: Run the M1 scroll benchmarks
         run: |
           mkdir -p testdata/benchmarks/nightly
           go test -run='^$' -bench='BenchmarkWarmScroll|BenchmarkColdScrollBurst' \
-            -benchmem -benchtime=200x -count=3 -timeout=20m ./v2/test/gate \
-            > testdata/benchmarks/nightly/v2-m1-bench.txt 2>&1
-          cat testdata/benchmarks/nightly/v2-m1-bench.txt
+            -benchmem -benchtime=200x -count=3 -timeout=20m ./test/gate \
+            > testdata/benchmarks/nightly/m1-bench.txt 2>&1
+          cat testdata/benchmarks/nightly/m1-bench.txt
 
       - name: Run the gate through a real window
-        # -backend native is the first half of the guard below. Left empty, the backend
-        # selection falls back to headless on a machine with no window server, the run
-        # still reports 600 frames, and every budget holds against a frame path that never
-        # had a display attached. Naming it turns that fallback into an error exit.
         run: |
-          go run ./v2/cmd/goosie -gate -backend native -scene checkerboard -frames 600 \
-            -out testdata/benchmarks/nightly/v2-m1-gate.json \
-            2> testdata/benchmarks/nightly/v2-m1-report.txt
-          cat testdata/benchmarks/nightly/v2-m1-report.txt
+          go run ./cmd/goosie -gate -backend native -scene checkerboard -frames 600 \
+            -out testdata/benchmarks/nightly/m1-gate.json \
+            2> testdata/benchmarks/nightly/m1-report.txt
+          cat testdata/benchmarks/nightly/m1-report.txt
 
       - name: Require that the run was paced by a display
-        # And the second half: the report has to say the window actually opened. A run that
-        # reported the headless backend would produce timings measured against a 16ms
-        # timer rather than against a panel, which is not what this job exists to measure.
         run: |
-          if ! grep -q 'backend=darwin' testdata/benchmarks/nightly/v2-m1-report.txt; then
+          if ! grep -q 'backend=darwin' testdata/benchmarks/nightly/m1-report.txt; then
             echo "::error::the gate run did not open a macOS window; this runner has no display session to pace it"
             exit 1
           fi
 
       - name: Assert the M1 budgets
         run: |
-          scripts/v2-gate-check.sh testdata/benchmarks/nightly/v2-m1-gate.json \
+          scripts/v2-gate-check.sh testdata/benchmarks/nightly/m1-gate.json \
             -mean 16 -p99 33 \
-            -bench testdata/benchmarks/nightly/v2-m1-bench.txt -warm-ms 5 -cold-ms 8
+            -bench testdata/benchmarks/nightly/m1-bench.txt -warm-ms 5 -cold-ms 8
 
-      - name: Upload the M1 measurement
+      - name: Upload measurements
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: v2-m1-macos-${{ github.run_id }}
+          name: nightly-macos-${{ github.run_id }}
           path: |
-            testdata/benchmarks/nightly/v2-m1-bench.txt
-            testdata/benchmarks/nightly/v2-m1-report.txt
-            testdata/benchmarks/nightly/v2-m1-gate.json
+            testdata/benchmarks/nightly/m1-bench.txt
+            testdata/benchmarks/nightly/m1-report.txt
+            testdata/benchmarks/nightly/m1-gate.json
           retention-days: 90

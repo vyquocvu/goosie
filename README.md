@@ -1,57 +1,23 @@
 # Goosie
 
-Goosie is an experimental web browser engine written in Go. It implements its own HTML/CSS pipeline, layout engine, display list, and rasterizer—without WKWebView, WebView2, CEF, or another embedded browser.
-
-Fyne provides the desktop window and input handling; page rendering is done by Goosie.
-
-> Goosie is under active development and supports a subset of the web platform. See [Supported Web Platform](website/docs/supported-web-platform.md) for current coverage.
-
-## Features
-
-- Asynchronous HTTP navigation with cancellation and resource limits
-- Custom DOM, CSS selector, style, and layout engines
-- Block, inline, flex, grid, form, and table layout
-- Pure Go CPU rasterization with retained display lists and dirty-region updates
-- JavaScript through Goja, with custom DOM and browser API bindings
-- Tabs, history, bookmarks, profiles, local storage, cookies, and cache
-- Built-in console, DOM inspector, network log, and storage tools
-- GUI and headless PNG rendering
-
-## Screenshots
-
-All of the following pages are rendered entirely by Goosie's own layout engine
-and CPU rasterizer—no embedded browser is involved.
-
-| | |
-|:---:|:---:|
-| ![Long-form article rendering](docs/screenshots/long-page.png) | ![Grid layout demo](docs/screenshots/grid-layout.png) |
-| *Long-form article with nested sections* | *CSS Grid layout* |
-| ![CSS styling demo](docs/screenshots/css-demo.png) | ![Table layout](docs/screenshots/tables.png) |
-| *CSS selectors, cascade, and styling* | *HTML table layout* |
+Goosie is a Go browser engine built around a fixed 256px tile frame path. It renders synthetic documents through a CPU tile rasterizer with a worker pool, a damage-blit composer, and a vsync-paced UI loop. There is no DOM, no CSS cascade, and no style or layout pass — the frame path is measured on what it does: a scroll frame runs zero style and zero layout passes.
 
 ## Quick start
 
-Goosie requires Go 1.25 or newer.
+Requires Go 1.25 or newer. On macOS, `CGO_ENABLED=1` (the default) for a real window.
 
 ```bash
 git clone https://github.com/vyquocvu/goosie.git
 cd goosie
-go mod download
-go run ./cmd/browser
-```
 
-To open a page at startup:
+# a window on this machine, scrollable with a trackpad. Ctrl-C ends it.
+go run ./cmd/goosie
 
-```bash
-go run ./cmd/browser -url=https://example.com
-go run ./cmd/browser -url=https://google.com
-go run ./cmd/browser -url=https://peach.blender.org
-```
+# no window: works over ssh, in CI, on Linux
+go run ./cmd/goosie -backend headless
 
-On Linux, install the native libraries required by Fyne first:
-
-```bash
-sudo apt-get install libgl1-mesa-dev xorg-dev
+# a different document, viewport, or ratio
+go run ./cmd/goosie -scene plain -width 1024 -height 640 -dpr 1
 ```
 
 Build a binary with:
@@ -61,81 +27,48 @@ make build
 ./bin/goosie
 ```
 
-For a smaller release binary, use the size-optimized target. It keeps the
-existing symbol/debug stripping, removes local path metadata with `-trimpath`,
-and clears the Go build ID for reproducible, slightly smaller output:
+## Scenes
+
+`-scene checkerboard` and `-scene plain` are the same document — a page of bordered cells, one image, and 1,200 positioned glyph runs — except that `plain` gives every cell one colour. The alternation is what makes a damaged tile differ from its neighbour, so `checkerboard` is what a blit-correctness run should use and `plain` is what isolates the text layout below it.
+
+## Measuring
 
 ```bash
-make build-small
-./bin/goosie-small
+# throughput: as many frames as the clock allows, headless
+go run ./cmd/goosie -bench -frames 2000
+
+# pacing: 600 scripted scroll frames at real vsync
+go run ./cmd/goosie -gate -scene checkerboard -frames 600 -out /tmp/gate.json
+
+# scroll budgets
+go test -run='^$' -bench='BenchmarkWarmScroll|BenchmarkColdScrollBurst' \
+  -benchmem -benchtime=200x -count=3 ./test/gate
 ```
-
-If you need the smallest distributable file and accept the trade-offs of packed
-executables (slightly slower startup and occasional antivirus false positives),
-install UPX and run:
-
-```bash
-make build-small-upx
-```
-
-## Headless rendering
-
-Capture a website with the headless-tag browser build:
-
-```bash
-go run -tags headless ./cmd/browser -headless \
-  -url=https://example.com \
-  -screenshot=screenshot.png
-# or build it first
-make build-headless
-./bin/goosie-headless -headless -url=https://example.com -screenshot=screenshot.png
-```
-
-The default GUI build intentionally leaves out Fyne's test driver to keep the
-binary smaller; use the headless-tag build above for URL screenshots.
-
-Render local HTML or standard input directly to PNG:
-
-```bash
-go run ./cmd/headless -html=page.html -output=page.png
-# or
-echo '<h1>Hello, Goosie</h1>' | go run ./cmd/headless -output=page.png
-```
-
-Use `-width` and `-height` to change the headless viewport.
-
-## How it works
-
-```text
-HTTP/HTML
-  → DOM parser
-  → CSS cascade and computed styles
-  → layout and fragments
-  → display list
-  → CPU rasterizer
-  → Fyne window or PNG
-```
-
-Core code lives under `internal/`; runnable programs live under `cmd/`.
 
 ## Testing
 
 ```bash
-go test ./test/... -short                             # quick unit/subsystem suite
-go test ./...                                         # full local suite
-go test -tags=e2e ./test/e2e                          # end-to-end tests
-go test ./test/internal/renderer/layoutgolden/        # layout snapshots
+go test ./...                  # everything
+go test -race ./...            # race detector
+go test ./test/gate -run TestGate -v   # gate suite
 ```
 
-The end-to-end suite requires Playwright and network access. Install Playwright with `make install-playwright`.
+All tests pass on a machine with no display.
 
-## Documentation
+## Architecture
 
-- [Architecture deep dives](website/docs/architecture-deep-dives.md)
-- [Package ownership](website/docs/package-ownership.md)
-- [Supported Web Platform](website/docs/supported-web-platform.md)
-- [MCP architecture](website/docs/mcp-architecture.md)
-- [Contributing](CONTRIBUTING.md)
+```
+cmd/goosie            the binary: flags, pipeline assembly, run report
+internal/frame        geometry, bitmaps, tile grid, plans, frame recording
+internal/paint        display lists and synthetic scene generator
+internal/surface      UI-thread loop and composer
+internal/raster       glyph atlas, tile rasterizer, worker pool, per-vsync scheduler
+internal/platform     backend selection; headless/ and darwin/ are the backends
+internal/archtest     import and cgo boundary enforcement
+test/                 one package per unit under test, plus test/gate
+```
+
+Imports point down: `frame` <- `paint` <- `surface` <- `raster` <- {`platform/*`, `cmd/*`}. Enforced, not documented: `go test ./internal/archtest/`.
 
 ## License
 

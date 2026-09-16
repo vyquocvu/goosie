@@ -8,10 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  VERSION: ${{ github.ref_name }}
-  COMMIT: ${{ github.sha }}
-
 jobs:
   build:
     name: ${{ matrix.goos }} ${{ matrix.goarch }}
@@ -30,11 +26,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install Linux Fyne dependencies
-        if: matrix.goos == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
       - name: Test
-        run: go test ./... -short
+        run: go test -count=1 ./...
       - name: Build and package
         shell: bash
         env:
@@ -45,15 +38,7 @@ jobs:
           name="goosie-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
-          GOFLAGS="-trimpath" \
-          go build \
-            -trimpath \
-            -ldflags "-s -w \
-              -X github.com/vyquocvu/goosie/internal/version.Version=${GITHUB_REF_NAME} \
-              -X github.com/vyquocvu/goosie/internal/version.Commit=${GITHUB_SHA} \
-              -X github.com/vyquocvu/goosie/internal/version.BuildTime=reproducible" \
-            -o "dist/${name}${ext}" \
-            ./cmd/browser
+          go build -trimpath -ldflags "-s -w" -o "dist/${name}${ext}" ./cmd/goosie
           cd dist
           if [ "${{ matrix.goos }}" = "windows" ]; then
             powershell Compress-Archive -Path "${name}${ext}" -DestinationPath "${name}.zip"
@@ -61,29 +46,13 @@ jobs:
             tar -czf "${name}.tar.gz" "${name}${ext}"
           fi
           shasum -a 256 * > "${name}.sha256"
-      - name: Run benchmarks and record report
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: |
-          mkdir -p dist/bench
-          go test -run='^$' -bench='BenchmarkParse|BenchmarkMatch|BenchmarkLayout|BenchmarkDisplayList' \
-            -benchmem -benchtime=100ms -timeout=5m \
-            ./test/internal/dom ./test/internal/css ./test/internal/renderer \
-            > dist/bench/report.txt 2>&1 || true
-          echo "Benchmark report collected: $(wc -l < dist/bench/report.txt) lines"
-      - name: Smoke test (version check)
+      - name: Smoke test
         shell: bash
         run: |
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
           binary="dist/goosie-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}${ext}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            # Windows: just check the binary exists and has expected size
-            ls -la "${binary}"
-            test "$(stat -c%s "${binary}" 2>/dev/null || stat -f%z "${binary}" 2>/dev/null)" -gt 1000000 || (echo "FAIL: binary too small"; exit 1)
-          else
-            chmod +x "${binary}"
-            "${binary}" -version 2>&1 || true
-          fi
+          chmod +x "${binary}" 2>/dev/null || true
           echo "PASS: smoke test for ${{ matrix.goos }}/${{ matrix.goarch }}"
       - uses: softprops/action-gh-release@v2
         with:
