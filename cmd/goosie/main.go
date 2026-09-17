@@ -189,6 +189,11 @@ func build(c config) (*framePath, error) {
 	var layer *frame.Layer
 	var spec paint.SceneSpec
 
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		return nil, fmt.Errorf("goosie: %w", err)
+	}
+
 	if c.url != "" {
 		client := net.DefaultClient()
 		defer client.Close()
@@ -196,20 +201,23 @@ func build(c config) (*framePath, error) {
 		if err != nil {
 			return nil, fmt.Errorf("goosie: fetch %s: %w", c.url, err)
 		}
-		sess, err := engine.NewSession(string(resp.Body), nil, float32(c.width))
+		sess, err := engine.NewSession(string(resp.Body), nil, float32(c.width), engine.WithMetrics(fonts))
 		if err != nil {
 			return nil, fmt.Errorf("goosie: build session: %w", err)
 		}
 		list := sess.Paint(scale)
 		dl := list.Build(1)
 		extent := dl.Extent()
-		layer = &frame.Layer{
-			ID:             1,
-			ContentVersion: dl.Version(),
-			Bounds:         frame.RectAt(frame.Point{}, dev),
-			Grid:           frame.NewGrid(extent, dev.W, 0, nil),
-			Content:        dl,
-		}
+		// A tile grid needs a pool of tile-sized buffers; a nil pool crashes on
+		// the first Acquire, and dev-sized tiles break the 256px frame path's
+		// geometry. Budget covers the document plus prefetch headroom, the same
+		// shape the paced synthetic path is given.
+		docTiles := int64((extent.W()+frame.TileSize-1)/frame.TileSize) *
+			int64((extent.H()+frame.TileSize-1)/frame.TileSize)
+		budgetTiles := docTiles + 8
+		pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
+		layer = frame.NewLayer(1, extent, budgetTiles*frame.TileSizeBytes(), pool)
+		layer.SetContent(dl)
 		spec = paint.SceneSpec{DocHeight: extent.H()}
 	} else {
 		var err error
@@ -232,10 +240,6 @@ func build(c config) (*framePath, error) {
 		_, layer = paint.BuildLayer(spec)
 	}
 
-	fonts, err := raster.NewFonts()
-	if err != nil {
-		return nil, fmt.Errorf("goosie: %w", err)
-	}
 	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))
 	wp.Start(context.Background())
 

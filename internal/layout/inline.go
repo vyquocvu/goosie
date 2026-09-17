@@ -47,11 +47,17 @@ func inlineInto(a *Arena, id ObjectID) {
 				continue
 			}
 			fontSize := k.Style.FontSize
+			// A declared line-height is already px; an unset one falls back to
+			// the 1.2 multiplier the CSS initial value computes to.
+			lineH := k.Style.LineHeight
+			if lineH <= 0 {
+				lineH = fontSize * 1.2
+			}
 			words := splitWords(text)
 			var firstWordID ObjectID
-			var prevWordID ObjectID
+			var lastWordID ObjectID
 			for _, word := range words {
-				wordW := measureWord(word, fontSize)
+				wordW := measureWord(word, fontSize, a.Metrics)
 				if current.w+wordW > contentW && current.w > 0 {
 					lines = append(lines, current)
 					current = lineBox{}
@@ -62,28 +68,47 @@ func inlineInto(a *Arena, id ObjectID) {
 				wordObj.Node = &nodeCopy
 				wordObj.Style = k.Style
 				wordObj.Parent = id
-				// Link word object into arena's child list
-				if firstWordID == 0 {
+				// Word-to-word links only; splicing into the parent chain
+				// happens once after the loop.
+				if lastWordID == 0 {
 					firstWordID = wordID
-					obj.FirstKid = wordID
 				} else {
-					a.Get(prevWordID).NextSibling = wordID
-					wordObj.PrevSibling = prevWordID
+					a.Get(lastWordID).NextSibling = wordID
+					wordObj.PrevSibling = lastWordID
 				}
-				prevWordID = wordID
+				lastWordID = wordID
 				current.runs = append(current.runs, textRun{
-					text: word,
-					size: fontSize,
-					obj:  wordID,
+					text:  word,
+					size:  fontSize,
+					lineH: lineH,
+					obj:   wordID,
 				})
 				current.w += wordW
-				current.h = maxF(current.h, fontSize*1.2)
+				current.h = maxF(current.h, lineH)
 			}
-			if prevWordID != 0 {
-				obj.LastKid = prevWordID
+			if lastWordID != 0 {
+				// Splice [firstWordID..lastWordID] into the kid chain in place
+				// of the text node. Every write goes through a fresh a.Get:
+				// the Alloc calls above may have reallocated the arena slice,
+				// so pointers captured earlier must not be written through.
+				prev := k.PrevSibling
+				next := k.NextSibling
+				if prev != 0 {
+					a.Get(prev).NextSibling = firstWordID
+					a.Get(firstWordID).PrevSibling = prev
+				} else {
+					a.Get(id).FirstKid = firstWordID
+				}
+				if next != 0 {
+					a.Get(next).PrevSibling = lastWordID
+					a.Get(lastWordID).NextSibling = next
+				} else {
+					a.Get(id).LastKid = lastWordID
+				}
+				// Clear the original text node so the paint builder doesn't
+				// paint it.
+				a.Get(kid).Node = nil
 			}
-			// Clear the original text node so the paint builder doesn't paint it
-			k.Node = nil
 			continue
 		}
 		inlineInto(a, kid)
@@ -91,16 +116,21 @@ func inlineInto(a *Arena, id ObjectID) {
 	if len(current.runs) > 0 {
 		lines = append(lines, current)
 	}
+	// Re-fetch obj: the Alloc calls in the text path may have reallocated the
+	// arena slice, so the pointer captured at function entry is stale.
+	obj = a.Get(id)
 	y := obj.Y + obj.PaddingTop + obj.BorderTop
 	lineH := float32(0)
 	for _, line := range lines {
 		x := obj.X + obj.PaddingLeft + obj.BorderLeft
 		for _, run := range line.runs {
 			runObj := a.Get(run.obj)
-			wordW := measureWord(run.text, run.size)
+			wordW := measureWord(run.text, run.size, a.Metrics)
 			if runObj.X == 0 && runObj.Y == 0 {
 				runObj.X = x
-				runObj.Y = y
+				// Half-leading: the glyph box centers in the line box, which
+				// is what makes a tall line-height center its text.
+				runObj.Y = y + (line.h-run.size*1.2)/2
 			}
 			runObj.W = wordW
 			runObj.H = run.size * 1.2
@@ -120,13 +150,25 @@ type lineBox struct {
 }
 
 type textRun struct {
-	text string
-	size float32
-	obj  ObjectID
+	text  string
+	size  float32
+	lineH float32
+	obj   ObjectID
 }
 
-func measureWord(word string, fontSize float32) float32 {
-	return float32(len(word)) * fontSize * 0.5
+// measureWord returns the width of word at fontSize. With metrics it is the
+// exact sum of the font's glyph advances; without, a half-em-per-character
+// estimate. The two must stay the only sources of width so line breaking and
+// painted spacing can't disagree.
+func measureWord(word string, fontSize float32, m Metrics) float32 {
+	if m == nil {
+		return float32(len(word)) * fontSize * 0.5
+	}
+	sum := float32(0)
+	for _, r := range word {
+		sum += float32(m.GlyphAdvance(int32(fontSize), r))
+	}
+	return sum
 }
 
 func splitWords(text string) []string {

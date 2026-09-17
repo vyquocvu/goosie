@@ -154,6 +154,14 @@ func (f *Fonts) Glyph(size int32, r rune) Glyph {
 	return g
 }
 
+// GlyphAdvance reports the width r occupies at a device-pixel size, in device
+// pixels. It satisfies layout.Metrics, which is why this method exists as a
+// one-liner beside Glyph: layout measures words with the same numbers the
+// rasterizer draws them with, without layout importing raster.
+func (f *Fonts) GlyphAdvance(size int32, r rune) int32 {
+	return f.Glyph(size, r).Advance
+}
+
 // renderGlyph copies one glyph's coverage out of a face.
 //
 // The copy is mandatory rather than defensive: a face's own mask buffer is

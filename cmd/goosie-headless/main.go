@@ -105,7 +105,12 @@ func run(args []string) error {
 	dev := c.devSize()
 	scale := float32(c.dpr)
 
-	sess, err := engine.NewSession(string(html), authorCSS, float32(c.width))
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		return fmt.Errorf("init fonts: %w", err)
+	}
+
+	sess, err := engine.NewSession(string(html), authorCSS, float32(c.width), engine.WithMetrics(fonts))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)
 	}
@@ -114,20 +119,16 @@ func run(args []string) error {
 	dl := list.Build(1)
 	extent := dl.Extent()
 
-	bitmapPool := frame.NewBitmapPool(dev, 2)
+	// The grid must be a tile grid: TileSize squares with a pool of matching
+	// buffers, not dev-sized tiles. Budget covers the document plus headroom.
+	docTiles := int64((extent.W()+frame.TileSize-1)/frame.TileSize) *
+		int64((extent.H()+frame.TileSize-1)/frame.TileSize)
+	budgetTiles := docTiles + 8
+	bitmapPool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
 	layerBounds := frame.Rect{X0: 0, Y0: 0, X1: extent.X1, Y1: extent.Y1}
-	layer := &frame.Layer{
-		ID:             1,
-		ContentVersion: dl.Version(),
-		Bounds:         layerBounds,
-		Grid:           frame.NewGrid(layerBounds, dev.W, 0, bitmapPool),
-		Content:        dl,
-	}
+	layer := frame.NewLayer(1, layerBounds, budgetTiles*frame.TileSizeBytes(), bitmapPool)
+	layer.SetContent(dl)
 
-	fonts, err := raster.NewFonts()
-	if err != nil {
-		return fmt.Errorf("init fonts: %w", err)
-	}
 	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))
 	wp.Start(context.Background())
 	defer wp.Close()

@@ -65,6 +65,20 @@ func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
 	return
 }
 
+// Metrics supplies per-glyph advance widths so layout measures text with the
+// same numbers paint draws with. The size is the pixel size the glyph is drawn
+// at: layout passes CSS pixels, paint passes device pixels. It lives as an
+// interface rather than a concrete font type because layout may not depend on
+// the raster package; the concrete Fonts type satisfies it structurally, and
+// the binaries wire it in.
+//
+// A nil Metrics is valid: measurement falls back to a half-em-per-character
+// estimate. Text with a nil Metrics renders, but spacing drifts from the real
+// font, which is why every binary passes one.
+type Metrics interface {
+	GlyphAdvance(sizePx int32, r rune) int32
+}
+
 // Arena is the flat box tree.
 //
 // Objects is indexed by ObjectID; the zero slot is unused so the zero ObjectID
@@ -74,6 +88,10 @@ func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
 type Arena struct {
 	Objects []Object
 	byNode  map[dom.NodeID]ObjectID
+
+	// Metrics is optional; see the Metrics interface. Set it before the
+	// inline pass runs, which is where text is measured.
+	Metrics Metrics
 }
 
 // NewArena returns an arena with the root object pre-allocated at index 1.

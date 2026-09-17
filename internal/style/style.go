@@ -257,7 +257,11 @@ func DefaultStyle() ComputedStyle {
 		Color:      css.Color{R: 0, G: 0, B: 0, A: 255},
 		FontSize:   16,
 		FontWeight: WeightNormal,
-		LineHeight: 1.2,
+		// -1 means unset: a declared line-height resolves to a px value in
+		// resolveLineHeight, but the initial value cannot be one because a
+		// unitless multiplier recomputes per element's font size. Consumers
+		// fall back to fontSize * 1.2 when they see a value at or below zero.
+		LineHeight: -1,
 		FontFamily: "Go Regular",
 		Visibility: "visible",
 		WhiteSpace: WhiteSpaceNormal,

@@ -90,7 +90,7 @@ func (t TextRun) Bounds(scale int32) frame.Rect {
 		return frame.Rect{}
 	}
 	r := frame.Rect{X0: t.Glyphs[0].X, Y0: t.Glyphs[0].Y - t.Glyphs[0].Size,
-		X1: t.Glyphs[0].X + 1, Y1: t.Glyphs[0].Y}
+		X1: t.Glyphs[0].X + t.Glyphs[0].Size*scale, Y1: t.Glyphs[0].Y}
 	for _, g := range t.Glyphs[1:] {
 		gx0, gy0 := g.X, g.Y-g.Size
 		if gx0 < r.X0 {

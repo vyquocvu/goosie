@@ -38,27 +38,37 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 	y := float32(0)
 	prevBottomMargin := float32(0)
 	firstChild := true
-	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
-		k := a.Get(kid)
-		if k.Style == nil || k.Style.Display == style.DisplayNone {
-			continue
-		}
-		if isBlock(k) {
-			blockInto(a, kid, contentW)
-			// Margin collapsing: between adjacent siblings, the collapsed margin
-			// is max(prevBottom, thisTop) for positive margins.
-			var topMargin float32
-			if firstChild {
-				topMargin = k.MarginTop
-				firstChild = false
-			} else {
-				topMargin = collapseMargin(prevBottomMargin, k.MarginTop)
+	if obj.Style != nil && obj.Style.Display == style.DisplayFlex {
+		// Flex containers lay their items out on a row, not in the block flow,
+		// so the whole kid walk below is replaced. No margin collapsing
+		// happens in or through a flex container.
+		y = layoutFlexRow(a, obj, contentX, contentY, contentW)
+	} else {
+		for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+			k := a.Get(kid)
+			if k.Style == nil || k.Style.Display == style.DisplayNone {
+				continue
 			}
-			k.X = contentX + k.MarginLeft
-			k.Y = contentY + y + topMargin
-			// y advances to the bottom border edge of the child
-			y = (k.Y - contentY) + k.H
-			prevBottomMargin = k.MarginBottom
+			if isBlock(k) {
+				// Position the kid before recursing: the recursive walk derives
+				// every descendant's origin from k.X/k.Y, so they must be final
+				// here. Only k.H is unknown until the recursion returns. Margins
+				// come from the style because resolveBoxSizes has not yet run for
+				// the kid.
+				var topMargin float32
+				if firstChild {
+					topMargin = k.Style.MarginTop
+					firstChild = false
+				} else {
+					topMargin = collapseMargin(prevBottomMargin, k.Style.MarginTop)
+				}
+				k.X = contentX + k.Style.MarginLeft
+				k.Y = contentY + y + topMargin
+				blockInto(a, kid, contentW)
+				// y advances to the bottom border edge of the child
+				y = (k.Y - contentY) + k.H
+				prevBottomMargin = k.Style.MarginBottom
+			}
 		}
 	}
 	// Add the last child's bottom margin to the total height
@@ -71,6 +81,78 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 		return obj.H
 	}
 	return obj.H + obj.MarginTop + obj.MarginBottom
+}
+
+// layoutFlexRow lays out a single-line row flex container.
+//
+// This is the minimal flex pass the gate fixture needs: items on one row,
+// free space distributed by flex-grow, horizontal margins respected, and
+// auto-height items stretched to the container's content height (the CSS
+// align-items:stretch default). Items with flex-grow 0 and an explicit width
+// take that width; auto-width non-growing items are not yet supported and
+// collapse to zero. Raw text inside a flex container is skipped rather than
+// wrapped in an anonymous item.
+func layoutFlexRow(a *Arena, obj *Object, contentX, contentY, contentW float32) float32 {
+	type item struct {
+		id    ObjectID
+		obj   *Object
+		share float32
+	}
+	var items []item
+	hMargins := float32(0)
+	growSum := float32(0)
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		k := a.Get(kid)
+		if k.Style == nil || k.Style.Display == style.DisplayNone {
+			continue
+		}
+		if k.Node != nil && k.Node.Type != 1 {
+			continue
+		}
+		items = append(items, item{id: kid, obj: k})
+		hMargins += k.Style.MarginLeft + k.Style.MarginRight
+		growSum += k.Style.FlexGrow
+	}
+	free := contentW - hMargins
+	if free < 0 {
+		free = 0
+	}
+	for i := range items {
+		it := &items[i]
+		s := it.obj.Style
+		if s.FlexGrow > 0 && growSum > 0 {
+			it.share = free * s.FlexGrow / growSum
+		} else if s.Width >= 0 {
+			it.share = s.Width
+			if s.BoxSizing != style.BoxSizingBorderBox {
+				it.share += s.PaddingLeft + s.PaddingRight + s.BorderLeftWidth + s.BorderRightWidth
+			}
+			it.share += s.MarginLeft + s.MarginRight
+		}
+	}
+	contentH := obj.H - obj.PaddingTop - obj.PaddingBottom - obj.BorderTop - obj.BorderBottom
+	cursor := contentX
+	maxBottom := float32(0)
+	for _, it := range items {
+		// X and Y before recursing, same rule as the block branch: the
+		// recursion derives every descendant's origin from them. The item
+		// recursion receives the share as its containing width so an auto
+		// width resolves to share minus margins, padding, and borders.
+		it.obj.X = cursor + it.obj.Style.MarginLeft
+		it.obj.Y = contentY
+		blockInto(a, it.id, it.share)
+		// align-items: stretch. The item's own height was just resolved;
+		// only an auto-height item stretches, and only into a definite
+		// container height.
+		if contentH > 0 && it.obj.Style.Height < 0 {
+			it.obj.H = contentH
+		}
+		if bottom := (it.obj.Y - contentY) + it.obj.H; bottom > maxBottom {
+			maxBottom = bottom
+		}
+		cursor += it.share
+	}
+	return maxBottom
 }
 
 func resolveBoxSizes(obj *Object, containingW float32) {

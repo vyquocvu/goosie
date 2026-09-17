@@ -14,14 +14,17 @@ import (
 // operations that paint understands. The builder runs after layout is complete;
 // it does not mutate the arena.
 type Builder struct {
-	list  *List
-	arena *layout.Arena
-	scale float32
+	list    *List
+	arena   *layout.Arena
+	scale   float32
+	metrics layout.Metrics
 }
 
-// NewBuilder returns a builder that will emit commands into list.
-func NewBuilder(list *List, arena *layout.Arena, scale float32) *Builder {
-	return &Builder{list: list, arena: arena, scale: scale}
+// NewBuilder returns a builder that will emit commands into list. metrics is
+// the same glyph-advance source layout measured with; nil falls back to the
+// half-em estimate layout used, which spaces glyphs approximately.
+func NewBuilder(list *List, arena *layout.Arena, scale float32, metrics layout.Metrics) *Builder {
+	return &Builder{list: list, arena: arena, scale: scale, metrics: metrics}
 }
 
 // Build walks the arena starting at root and appends display commands to the
@@ -105,21 +108,29 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect) {
 	if len(runes) == 0 {
 		return
 	}
+	baseline := rect.Y0 + int32(s.FontSize*b.scale*0.8)
 	glyphs := make([]GlyphRun, 0, len(runes))
-	x := rect.X0
-	y := rect.Y0 + int32(s.FontSize*b.scale*0.8)
-	advance := fontSize / 2
-	if obj.W > 0 {
-		advance = int32(obj.W*b.scale) / int32(len(runes))
-	}
-	for _, r := range runes {
-		glyphs = append(glyphs, GlyphRun{
-			Rune: r,
-			X:    x,
-			Y:    y,
-			Size: fontSize,
-		})
-		x += advance
+	if b.metrics != nil {
+		// Real advances: each glyph moves the pen by what the font says, the
+		// same numbers layout measured the word with. No stretching to fit
+		// the box - a stretched advance is what overlaps glyphs.
+		x := rect.X0
+		for _, r := range runes {
+			glyphs = append(glyphs, GlyphRun{Rune: r, X: x, Y: baseline, Size: fontSize})
+			x += b.metrics.GlyphAdvance(fontSize, r)
+		}
+	} else {
+		// Estimate fallback: half an em per glyph, stretched across the box
+		// width when layout measured one.
+		x := rect.X0
+		advance := fontSize / 2
+		if obj.W > 0 {
+			advance = int32(obj.W*b.scale) / int32(len(runes))
+		}
+		for _, r := range runes {
+			glyphs = append(glyphs, GlyphRun{Rune: r, X: x, Y: baseline, Size: fontSize})
+			x += advance
+		}
 	}
 	b.list.Append(DisplayCmd{
 		Kind: CmdText,
