@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
+	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
 const (
@@ -175,6 +177,10 @@ type framePath struct {
 	rec      *frame.FrameRecorder
 	spec     paint.SceneSpec
 	config   config
+	toolbar  *toolbar.State
+	client   net.HTTP
+	fonts    *raster.Fonts
+	navSerial uint64
 	// started is when frames began, so the reported rate excludes window creation and
 	// the scene build: a run's frames-per-second is a claim about the frame path.
 	started time.Time
@@ -186,43 +192,25 @@ func build(c config) (*framePath, error) {
 	dev := c.devSize()
 	scale := float32(c.dpr)
 
-	var layer *frame.Layer
-	var spec paint.SceneSpec
-
 	fonts, err := raster.NewFonts()
 	if err != nil {
 		return nil, fmt.Errorf("goosie: %w", err)
 	}
 
+	client := net.DefaultClient()
+
+	var layer *frame.Layer
+	var spec paint.SceneSpec
+
 	if c.url != "" {
-		client := net.DefaultClient()
-		defer client.Close()
-		resp, err := client.Get(c.url)
-		if err != nil {
-			return nil, fmt.Errorf("goosie: fetch %s: %w", c.url, err)
-		}
-		sess, err := engine.NewSession(string(resp.Body), nil, float32(c.width), engine.WithMetrics(fonts))
-		if err != nil {
-			return nil, fmt.Errorf("goosie: build session: %w", err)
-		}
-		list := sess.Paint(scale)
-		dl := list.Build(1)
-		extent := dl.Extent()
-		// A tile grid needs a pool of tile-sized buffers; a nil pool crashes on
-		// the first Acquire, and dev-sized tiles break the 256px frame path's
-		// geometry. Budget covers the document plus prefetch headroom, the same
-		// shape the paced synthetic path is given.
-		docTiles := int64((extent.W()+frame.TileSize-1)/frame.TileSize) *
-			int64((extent.H()+frame.TileSize-1)/frame.TileSize)
-		budgetTiles := docTiles + 8
-		pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
-		layer = frame.NewLayer(1, extent, budgetTiles*frame.TileSizeBytes(), pool)
-		layer.SetContent(dl)
-		spec = paint.SceneSpec{DocHeight: extent.H()}
+		// Defer URL fetch until after the window opens. Start with a placeholder
+		// layer so the user sees the toolbar immediately, not a blank wait.
+		spec = paint.SceneSpec{DocHeight: dev.H}
+		_, layer = paint.BuildLayer(spec)
 	} else {
-		var err error
 		spec, err = sceneSpec(c.scene)
 		if err != nil {
+			_ = client.Close()
 			return nil, err
 		}
 		cols := spec.Cols
@@ -243,8 +231,6 @@ func build(c config) (*framePath, error) {
 	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))
 	wp.Start(context.Background())
 
-	// The ring has to be at least as long as the run, or the report the gate script
-	// reads would be a report of the tail of the sweep rather than of all of it.
 	capacity := ringFrames
 	if c.paced() {
 		capacity = c.frames
@@ -257,9 +243,80 @@ func build(c config) (*framePath, error) {
 		rec:      frame.NewFrameRecorder(capacity),
 		spec:     spec,
 		config:   c,
+		client:   client,
+		fonts:    fonts,
+	}
+	if !c.paced() {
+		f.toolbar = toolbar.NewState(dev.W, fonts)
+		f.toolbar.OnNavigate = func(rawURL string) {
+			f.navigate(rawURL)
+		}
+		if c.url != "" {
+			f.toolbar.URL = normalizeURL(c.url)
+			f.toolbar.Input = normalizeURL(c.url)
+		}
 	}
 	f.sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: frame.RGB(248, 248, 248)})
 	return f, nil
+}
+
+// loadURL fetches a URL, builds a session and display list, and returns the layer,
+// scene spec, and document background color for it. It is used both at startup
+// for -url and by navigate for address bar submissions.
+func loadURL(client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
+	u := normalizeURL(rawURL)
+	resp, err := client.Get(u)
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: fetch %s: %w", u, err)
+	}
+	sess, err := engine.NewSession(string(resp.Body), nil, float32(viewportW), engine.WithMetrics(fonts))
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: build session: %w", err)
+	}
+	list := sess.Paint(scale)
+	dl := list.Build(1)
+	extent := dl.Extent()
+	docTiles := int64((extent.W()+frame.TileSize-1)/frame.TileSize) *
+		int64((extent.H()+frame.TileSize-1)/frame.TileSize)
+	budgetTiles := docTiles + 8
+	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
+	layer := frame.NewLayer(frame.LayerID(budgetTiles), extent, budgetTiles*frame.TileSizeBytes(), pool)
+	layer.SetContent(dl)
+	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), nil
+}
+
+// navigate loads a new URL on a goroutine and publishes a new plan when it
+// arrives. It is called from the toolbar event pump, which runs on a different
+// goroutine from the UI thread; SetPlan is the one scheduler method that is
+// safe to call cross-thread, and the layer swap it triggers is applied in
+// BeginFrame on the UI thread.
+func (f *framePath) navigate(rawURL string) {
+	go func() {
+		layer, _, bgColor, err := loadURL(f.client, f.fonts, rawURL, f.config.width, float32(f.config.dpr))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		f.navSerial++
+		f.toolbar.Navigate(normalizeURL(rawURL))
+		f.sched.SetPlan(frame.FramePlan{
+			Serial:     f.navSerial,
+			Layers:     []*frame.Layer{layer},
+			Background: bgColor,
+		})
+	}()
+}
+
+
+// normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
+func normalizeURL(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "file://") {
+		return raw
+	}
+	return "https://" + raw
 }
 
 // openWindow picks the window last, because a backend that cannot open one is a
@@ -275,8 +332,12 @@ func (f *framePath) openWindow() error {
 	if err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}
-	f.window = w
-	f.loop = surface.NewLoop(w, f.sched, f.composer, f.rec)
+	if f.toolbar != nil {
+		f.window = newToolbarWindow(w, f.toolbar)
+	} else {
+		f.window = w
+	}
+	f.loop = surface.NewLoop(f.window, f.sched, f.composer, f.rec)
 	return nil
 }
 
@@ -304,11 +365,19 @@ func run(args []string) error {
 		return err
 	}
 	defer func() { _ = f.pool.Close() }()
+	defer func() { _ = f.client.Close() }()
 
 	if err := f.openWindow(); err != nil {
 		return err
 	}
 	defer func() { _ = f.window.Close() }()
+
+	// If a URL was provided, start loading it now that the window is visible.
+	// The user sees the toolbar immediately while the page fetches in the background.
+	if c.url != "" && !c.paced() {
+		f.navigate(c.url)
+	}
+
 
 	// A paced run cannot wait for a finger, so the driver stamps the scroll onto the
 	// ticks the display already produces. Everything downstream of it - the loop, the

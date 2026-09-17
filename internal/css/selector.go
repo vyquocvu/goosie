@@ -385,9 +385,26 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		}
 		sel := ParseSelector(c.Pseudo)
 		return !sel.Matches(n)
+	case "link", "any-link":
+		// Match any hyperlink element (<a href>, <area href>, <link href>).
+		// We have no navigation history, so all links are treated as unvisited.
+		tag := strings.ToLower(n.Data)
+		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
+	case "visited":
+		// Without a history store, treat visited the same as link so author
+		// styles for a:visited still apply (e.g. example.com's color rule).
+		tag := strings.ToLower(n.Data)
+		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
+	case "hover", "focus", "active", "focus-within", "focus-visible":
+		// Interaction pseudo-classes require runtime state that the engine
+		// does not track yet. Return false so they never match.
+		return false
+	case "checked", "disabled", "enabled", "placeholder-shown":
+		return false
 	}
 	return false
 }
+
 
 func isFirstElementChild(n *dom.Node) bool {
 	if n.Parent == nil {

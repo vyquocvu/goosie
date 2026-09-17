@@ -323,7 +323,7 @@ Two contracts are fixed now so later milestones are not designed wrong:
 
 - **M5:** every JS DOM mutation enters through the batched `Invalidation` sink. `rAF`
   callbacks coalesce to one frame. No binding may call raster or platform directly.
-- **M6:** devtools and tab chrome consume the engine API only — they may read display
+- **M6:** devtools and tab toolbar consume the engine API only — they may read display
   lists, tile state, and `FrameRecorder` output, never mutate them.
 
 ## Verification

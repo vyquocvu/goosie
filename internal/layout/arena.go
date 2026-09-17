@@ -49,8 +49,8 @@ type Object struct {
 
 // ContentRect returns the content box as four edges.
 func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {
-	x0 = o.X + o.MarginLeft + o.BorderLeft + o.PaddingLeft
-	y0 = o.Y + o.MarginTop + o.BorderTop + o.PaddingTop
+	x0 = o.X + o.BorderLeft + o.PaddingLeft
+	y0 = o.Y + o.BorderTop + o.PaddingTop
 	x1 = x0 + o.W
 	y1 = y0 + o.H
 	return
@@ -58,12 +58,13 @@ func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {
 
 // BorderRect returns the border box as four edges.
 func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
-	x0 = o.X + o.MarginLeft
-	y0 = o.Y + o.MarginTop
+	x0 = o.X
+	y0 = o.Y
 	x1 = x0 + o.W + o.PaddingLeft + o.PaddingRight + o.BorderLeft + o.BorderRight
 	y1 = y0 + o.H + o.PaddingTop + o.PaddingBottom + o.BorderTop + o.BorderBottom
 	return
 }
+
 
 // Metrics supplies per-glyph advance widths so layout measures text with the
 // same numbers paint draws with. The size is the pixel size the glyph is drawn

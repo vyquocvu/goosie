@@ -331,3 +331,44 @@ func TestInlineWordRelinkLarge(t *testing.T) {
 		t.Errorf("reachable words lorem=%d ipsum=%d, want 40 each (got %d texts)", lorem, ipsum, len(texts))
 	}
 }
+
+func TestMarginAutoCentering(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="width: 600px; margin: 0 auto;"></div>
+</body></html>`, 1000)
+
+	div := findByTag(arena, "div")
+	if div == nil {
+		t.Fatal("div not found")
+	}
+	if !almostEqual(div.MarginLeft, 200) {
+		t.Errorf("div.MarginLeft = %v, want 200", div.MarginLeft)
+	}
+	if !almostEqual(div.MarginRight, 200) {
+		t.Errorf("div.MarginRight = %v, want 200", div.MarginRight)
+	}
+	if !almostEqual(div.X, 200) {
+		t.Errorf("div.X = %v, want 200", div.X)
+	}
+}
+
+func TestTextAlignCenter(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="width: 400px; text-align: center;">word</div>
+</body></html>`, 800)
+	layout.Inline(arena, layout.ObjectID(1))
+
+	div := findByTag(arena, "div")
+	if div == nil {
+		t.Fatal("div not found")
+	}
+	wordObj := arena.Get(div.FirstKid)
+	if wordObj == nil || wordObj.Node == nil {
+		t.Fatal("word obj not found")
+	}
+	wantX := (400 - wordObj.W) / 2
+	if !almostEqual(wordObj.X, wantX) {
+		t.Errorf("wordObj.X = %v, want %v", wordObj.X, wantX)
+	}
+}
+

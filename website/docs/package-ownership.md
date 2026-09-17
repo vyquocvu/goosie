@@ -24,7 +24,7 @@ Packages are organized in layers. A package may import from its own layer or any
 | 1 (layout) | `internal/renderer` (top-level) | May import layer 0 | Layout tree, fragments, text shaping, display list, paint chunks |
 | 2 (raster) | `internal/renderer/frame/*` | May import layers 0-1 | Backend-neutral types, raster backends, caches, compositor |
 | 3 (engine) | `internal/engine/*`, `internal/js`, `internal/browsercontrol`, `internal/mcpserver` | May import layers 0-2 | Session lifecycle, navigation, metrics, IPC, documentloader, eventloop, JS runtime, automation control, MCP server |
-| 4 (shell) | `internal/ui`, `internal/profile` | May import layers 0-3 | Fyne window, browser chrome, developer tools, profile storage |
+| 4 (shell) | `internal/ui`, `internal/profile` | May import layers 0-3 | Fyne window, browser toolbar, developer tools, profile storage |
 | 4 (utilities) | `internal/memory`, `internal/net`, `internal/image`, `internal/testutil` | May import layer 0 | Memory manager, HTTP networking, image decoding, test helpers |
 | 5 (testing) | `test/internal/test_suite/*`, `test/internal/*`, `test/e2e` | May import any | Cross-cutting and package test suites |
 

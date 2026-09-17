@@ -50,24 +50,28 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 				continue
 			}
 			if isBlock(k) {
-				// Position the kid before recursing: the recursive walk derives
-				// every descendant's origin from k.X/k.Y, so they must be final
-				// here. Only k.H is unknown until the recursion returns. Margins
-				// come from the style because resolveBoxSizes has not yet run for
-				// the kid.
+				// Pre-resolve box sizes for the child before positioning: this
+				// computes k.W and resolves auto horizontal margins (centering)
+				// so k.MarginLeft is correct when we set k.X below.
+				// resolveBoxSizes is idempotent and will run again at the top of
+				// the recursive blockInto call; calling it here is not redundant
+				// because k.X/k.Y are not yet known (they depend on the margins
+				// we are about to compute).
+				resolveBoxSizes(k, contentW)
+
 				var topMargin float32
 				if firstChild {
-					topMargin = k.Style.MarginTop
+					topMargin = k.MarginTop
 					firstChild = false
 				} else {
-					topMargin = collapseMargin(prevBottomMargin, k.Style.MarginTop)
+					topMargin = collapseMargin(prevBottomMargin, k.MarginTop)
 				}
-				k.X = contentX + k.Style.MarginLeft
+				k.X = contentX + k.MarginLeft
 				k.Y = contentY + y + topMargin
 				blockInto(a, kid, contentW)
 				// y advances to the bottom border edge of the child
 				y = (k.Y - contentY) + k.H
-				prevBottomMargin = k.Style.MarginBottom
+				prevBottomMargin = k.MarginBottom
 			}
 		}
 	}
@@ -82,6 +86,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	return obj.H + obj.MarginTop + obj.MarginBottom
 }
+
 
 // layoutFlexRow lays out a single-line row flex container.
 //
@@ -160,10 +165,6 @@ func resolveBoxSizes(obj *Object, containingW float32) {
 	if s == nil {
 		return
 	}
-	obj.MarginTop = s.MarginTop
-	obj.MarginRight = s.MarginRight
-	obj.MarginBottom = s.MarginBottom
-	obj.MarginLeft = s.MarginLeft
 	obj.PaddingTop = s.PaddingTop
 	obj.PaddingRight = s.PaddingRight
 	obj.PaddingBottom = s.PaddingBottom
@@ -173,16 +174,65 @@ func resolveBoxSizes(obj *Object, containingW float32) {
 	obj.BorderBottom = s.BorderBottomWidth
 	obj.BorderLeft = s.BorderLeftWidth
 
-	// Width: -1 means auto. For block boxes, auto fills the containing block.
+	innerExtra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
+
+	// Width: -1 means auto. Compute explicit width first so auto-margin
+	// centering can use it.
+	var explicitW float32 = -1
 	if s.Width >= 0 {
 		if s.BoxSizing == style.BoxSizingBorderBox {
-			obj.W = s.Width - obj.PaddingLeft - obj.PaddingRight - obj.BorderLeft - obj.BorderRight
+			explicitW = s.Width - innerExtra
 		} else {
-			obj.W = s.Width
+			explicitW = s.Width
 		}
+		if explicitW < 0 {
+			explicitW = 0
+		}
+	}
+
+	// Margin auto: MarginAuto (-1) from the style means the CSS value was
+	// "auto". For horizontal margins on a block with an explicit width, auto
+	// distributes the remaining space (CSS 2.1 §10.3.3). For auto width or
+	// vertical margins, auto margins collapse to 0.
+	leftAuto := s.MarginLeft == style.MarginAuto
+	rightAuto := s.MarginRight == style.MarginAuto
+
+	if explicitW >= 0 && (leftAuto || rightAuto) {
+		// Remaining space the two horizontal margins share.
+		remaining := containingW - explicitW - innerExtra
+		if remaining < 0 {
+			remaining = 0
+		}
+		if leftAuto && rightAuto {
+			obj.MarginLeft = remaining / 2
+			obj.MarginRight = remaining / 2
+		} else if leftAuto {
+			obj.MarginLeft = remaining
+			obj.MarginRight = s.MarginRight
+		} else {
+			obj.MarginRight = remaining
+			obj.MarginLeft = s.MarginLeft
+		}
+	} else {
+		if leftAuto {
+			obj.MarginLeft = 0
+		} else {
+			obj.MarginLeft = s.MarginLeft
+		}
+		if rightAuto {
+			obj.MarginRight = 0
+		} else {
+			obj.MarginRight = s.MarginRight
+		}
+	}
+	obj.MarginTop = s.MarginTop
+	obj.MarginBottom = s.MarginBottom
+
+	// Width: -1 means auto. For block boxes, auto fills the containing block.
+	if explicitW >= 0 {
+		obj.W = explicitW
 	} else if s.Display != style.DisplayInline {
-		obj.W = containingW - obj.MarginLeft - obj.MarginRight -
-			obj.PaddingLeft - obj.PaddingRight - obj.BorderLeft - obj.BorderRight
+		obj.W = containingW - obj.MarginLeft - obj.MarginRight - innerExtra
 	}
 	if obj.W < 0 {
 		obj.W = 0
@@ -200,6 +250,7 @@ func resolveBoxSizes(obj *Object, containingW float32) {
 		obj.H = 0
 	}
 }
+
 
 func isBlock(obj *Object) bool {
 	if obj.Style == nil {

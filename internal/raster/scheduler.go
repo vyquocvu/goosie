@@ -265,6 +265,14 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 		s.cur = frame.FramePlan{}
 		return nil, nil
 	}
+	// A plan whose first layer changed is a page navigation: swap the grid to
+	// match. This runs on the UI thread inside BeginFrame, so no lock is needed;
+	// the cross-thread publish is handled by the Plan slot's own mutex.
+	if len(p.Layers) > 0 && p.Layers[0] != s.layer {
+		s.layer = p.Layers[0]
+		s.grid = s.layer.Grid
+		s.haveDone = false
+	}
 	vp := s.resolve()
 	s.cur = frame.FramePlan{
 		Serial:     p.Serial,

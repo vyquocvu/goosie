@@ -3,6 +3,7 @@ package platform
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -172,6 +173,8 @@ func Select(o Options) (surface.Window, error) {
 	case "":
 		if w, err := native.open(o); err == nil {
 			return w, nil
+		} else {
+			fmt.Fprintf(os.Stderr, "platform: native window unavailable (%v); falling back to headless\n", err)
 		}
 		return newHeadless(o), nil
 	}

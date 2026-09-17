@@ -152,7 +152,7 @@ Fyne is strictly the window/pixel-presentation shell. It handles:
 - Window management and OS event loop
 - Keyboard and mouse input delivery
 - Pixel buffer display via `canvas.Image`
-- Menu bar, dialogs, and browser chrome
+- Menu bar, dialogs, and browser toolbar
 
 ### Import Prohibition
 

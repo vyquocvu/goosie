@@ -134,7 +134,8 @@ func run(args []string) error {
 	defer wp.Close()
 
 	sched := raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{})
-	sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: frame.RGB(248, 248, 248)})
+	sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: sess.BackgroundColor()})
+
 
 	composer := surface.NewComposer(dev, bitmapPool)
 	rec := frame.NewFrameRecorder(2)

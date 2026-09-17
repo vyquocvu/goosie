@@ -532,28 +532,29 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.MaxHeight = resolveLength(parsed, -1)
 
 	case "margin":
-		t, r, b, l := parseBoxShorthand(value)
+		t, r, b, l := parseMarginShorthand(value, cs.FontSize)
 		cs.MarginTop = t; cs.MarginRight = r; cs.MarginBottom = b; cs.MarginLeft = l
 	case "margin-top":
-		cs.MarginTop = resolveLength(parsed, 0)
+		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "margin-right":
-		cs.MarginRight = resolveLength(parsed, 0)
+		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
 	case "margin-bottom":
-		cs.MarginBottom = resolveLength(parsed, 0)
+		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "margin-left":
-		cs.MarginLeft = resolveLength(parsed, 0)
+		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
 
 	case "padding":
-		t, r, b, l := parseBoxShorthand(value)
+		t, r, b, l := parsePaddingShorthand(value, cs.FontSize)
 		cs.PaddingTop = t; cs.PaddingRight = r; cs.PaddingBottom = b; cs.PaddingLeft = l
 	case "padding-top":
-		cs.PaddingTop = resolveLength(parsed, 0)
+		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "padding-right":
-		cs.PaddingRight = resolveLength(parsed, 0)
+		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "padding-bottom":
-		cs.PaddingBottom = resolveLength(parsed, 0)
+		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "padding-left":
-		cs.PaddingLeft = resolveLength(parsed, 0)
+		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize)
+
 
 	case "border":
 		w, s, c := parseBorderShorthand(value)
@@ -610,20 +611,24 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		// simplified: store as border-top-left-radius for now
 
 	case "top":
-		cs.Top = resolveLength(parsed, 0)
+		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "right":
-		cs.Right = resolveLength(parsed, 0)
+		cs.Right = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "bottom":
-		cs.Bottom = resolveLength(parsed, 0)
+		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "left":
-		cs.Left = resolveLength(parsed, 0)
+		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize)
 
 	case "color":
 		cs.Color = parseColorValue(value)
 	case "background-color":
 		cs.BackgroundColor = parseColorValue(value)
 	case "background":
-		cs.BackgroundColor = parseColorValue(value)
+		// Extract the color component from a background shorthand value.
+		// The shorthand may contain url(), position, repeat, and color in
+		// any order; try each whitespace-separated token and take the first
+		// one that parses as a color.
+		cs.BackgroundColor = parseBackgroundColor(value)
 
 	case "font-family":
 		cs.FontFamily = parseFontFamily(value)
@@ -690,12 +695,30 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	}
 }
 
+// MarginAuto is the sentinel value stored in a margin field when the CSS
+// value is "auto". Block layout detects this to implement horizontal centering
+// (margin-left: auto / margin-right: auto). The same -1 convention is used by
+// Width and Height for their auto value.
+const MarginAuto float32 = -1
+
 func resolveLength(v css.Value, auto float32) float32 {
 	if v.Type == css.ValueKeyword && (v.Str == "auto" || v.Str == "") {
 		return auto
 	}
 	return v.ToLength()
 }
+
+// resolveLengthEm is like resolveLength but passes fontSize to ToLengthWithEm
+// so that em units are computed against the element's own font-size instead of
+// the hardcoded 16px fallback in ToLength. Use this for all box-model lengths
+// (margin, padding, top/right/bottom/left, width when not percentage, etc.).
+func resolveLengthEm(v css.Value, auto, fontSize float32) float32 {
+	if v.Type == css.ValueKeyword && (v.Str == "auto" || v.Str == "") {
+		return auto
+	}
+	return v.ToLengthWithEm(fontSize)
+}
+
 
 func resolveFontSize(v css.Value, parent float32) float32 {
 	switch v.Type {
@@ -955,6 +978,106 @@ func parseColorValue(v string) css.Color {
 	c, _ := css.ParseColor(v)
 	return c
 }
+
+// parseBackgroundColor extracts the color from a background shorthand value.
+// The CSS background shorthand may contain url(), keywords (no-repeat, center,
+// cover, etc.), and a color in any order. This function tries each whitespace-
+// separated token (skipping url() function calls) and returns the first one
+// that parses as a valid color.
+func parseBackgroundColor(v string) css.Color {
+	// Try the whole value first (handles plain "background: #fff").
+	if c, ok := css.ParseColor(v); ok {
+		return c
+	}
+	// Skip past any url(...) call, then try each token.
+	s := v
+	for {
+		urlIdx := strings.Index(strings.ToLower(s), "url(")
+		if urlIdx < 0 {
+			break
+		}
+		// find matching paren
+		depth := 0
+		end := urlIdx
+		for end < len(s) {
+			if s[end] == '(' {
+				depth++
+			} else if s[end] == ')' {
+				depth--
+				if depth == 0 {
+					end++
+					break
+				}
+			}
+			end++
+		}
+		s = strings.TrimSpace(s[end:])
+	}
+	for _, tok := range strings.Fields(s) {
+		if c, ok := css.ParseColor(tok); ok {
+			return c
+		}
+	}
+	return css.Color{}
+}
+
+// parseMarginShorthand parses the CSS margin shorthand (1–4 values), using
+// MarginAuto as the resolved value for "auto". fontSize is used to resolve
+// em-valued lengths against the element's own computed font-size.
+func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
+	parts := strings.Fields(v)
+	switch len(parts) {
+	case 1:
+		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize)
+		return val, val, val, val
+	case 2:
+		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
+		return tb, rl, tb, rl
+	case 3:
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		return top, rl, bottom, rl
+	case 4:
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize)
+		return
+	}
+	return
+}
+
+// parsePaddingShorthand parses the CSS padding shorthand (1–4 values).
+// Padding cannot be "auto", so 0 is always the fallback. fontSize is used to
+// resolve em-valued lengths.
+func parsePaddingShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
+	parts := strings.Fields(v)
+	switch len(parts) {
+	case 1:
+		val := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		return val, val, val, val
+	case 2:
+		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
+		return tb, rl, tb, rl
+	case 3:
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		return top, rl, bottom, rl
+	case 4:
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		right = resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		left = resolveLengthEm(css.ParseValue(parts[3]), 0, fontSize)
+		return
+	}
+	return
+}
+
+
 
 func parseBoxShorthand(v string) (top, right, bottom, left float32) {
 	parts := strings.Fields(v)

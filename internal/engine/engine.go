@@ -11,6 +11,7 @@ package engine
 import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -85,3 +86,24 @@ func (s *Session) Paint(scale float32) *paint.List {
 	b.Build(layout.ObjectID(1))
 	return list
 }
+
+// BackgroundColor returns the effective canvas background color.
+// If html has a non-transparent background, that is used. Otherwise if body
+// has a non-transparent background, that is used. If both are transparent,
+// white RGB(255, 255, 255) is returned.
+func (s *Session) BackgroundColor() frame.Color {
+	if s.Doc != nil {
+		if s.Doc.HTML != nil {
+			if st, ok := s.Styles[s.Doc.HTML.ID]; ok && st.BackgroundColor.A > 0 {
+				return frame.RGBA(st.BackgroundColor.R, st.BackgroundColor.G, st.BackgroundColor.B, st.BackgroundColor.A)
+			}
+		}
+		if s.Doc.Body != nil {
+			if st, ok := s.Styles[s.Doc.Body.ID]; ok && st.BackgroundColor.A > 0 {
+				return frame.RGBA(st.BackgroundColor.R, st.BackgroundColor.G, st.BackgroundColor.B, st.BackgroundColor.A)
+			}
+		}
+	}
+	return frame.RGB(255, 255, 255)
+}
+

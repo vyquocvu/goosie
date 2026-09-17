@@ -317,6 +317,59 @@ func (v Value) ToLength() float32 {
 	return 0
 }
 
+// ToLengthWithEm is like ToLength but resolves em, rem, and ex units against
+// the provided font-size rather than the hardcoded 16px default. Use this for
+// all non-font-size lengths (margin, padding, top/right/bottom/left, etc.) so
+// that e.g. "0.67em" on an h1 with font-size:32px correctly yields 21.44px
+// instead of 10.72px.
+func (v Value) ToLengthWithEm(fontSize float32) float32 {
+	return v.ToLengthWithContext(fontSize, 1440, 900)
+}
+
+// ToLengthWithContext resolves length units with full context: font size for
+// em/rem/ex, and viewport width/height for vw/vh/vmin/vmax.
+func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
+	if vw <= 0 {
+		vw = 1440
+	}
+	if vh <= 0 {
+		vh = 900
+	}
+	switch v.Type {
+	case ValueLength:
+		switch v.Unit {
+		case "vw":
+			return float32(v.Num) * vw / 100
+		case "vh":
+			return float32(v.Num) * vh / 100
+		case "vmin":
+			m := vw
+			if vh < m {
+				m = vh
+			}
+			return float32(v.Num) * m / 100
+		case "vmax":
+			m := vw
+			if vh > m {
+				m = vh
+			}
+			return float32(v.Num) * m / 100
+		case "em", "rem", "ex":
+			if em > 0 {
+				return float32(v.Num) * em
+			}
+			return float32(v.Num) * 16
+		default:
+			return toPixels(v.Num, v.Unit)
+		}
+	case ValueNumber:
+		return float32(v.Num)
+	case ValuePercentage:
+		return 0
+	}
+	return 0
+}
+
 func toPixels(num float64, unit string) float32 {
 	switch unit {
 	case "px", "":
@@ -333,8 +386,15 @@ func toPixels(num float64, unit string) float32 {
 		return float32(num * 96 / 2.54)
 	case "mm":
 		return float32(num * 96 / 25.4)
-	case "vw", "vh", "vmin", "vmax":
-		return 0
+	case "vw":
+		return float32(num * 1440 / 100)
+	case "vh":
+		return float32(num * 900 / 100)
+	case "vmin":
+		return float32(num * 900 / 100)
+	case "vmax":
+		return float32(num * 1440 / 100)
 	}
 	return float32(num)
 }
+
