@@ -55,6 +55,7 @@ type Job struct {
 type Done struct {
 	Coord   frame.TileCoord
 	LayerID frame.LayerID
+	Layer   *frame.Layer
 	Out     *frame.Bitmap
 	Err     error
 	// Version is 0 for a job that carried no display list, which no caller may mark
@@ -243,7 +244,7 @@ func (p *Pool) work(ctx context.Context) {
 // tile. Without it, one bad display list would end every worker goroutine and
 // the page would stop painting with no diagnostic at all.
 func (p *Pool) run(j Job) {
-	d := Done{Coord: j.Coord, Out: j.Out}
+	d := Done{Coord: j.Coord, Out: j.Out, Layer: j.Layer}
 	if j.Layer != nil {
 		d.LayerID = j.Layer.ID
 	}
@@ -377,13 +378,41 @@ func (p *Pool) Stats() PoolStats {
 }
 
 // Close stops the workers and waits for them to leave. In-flight jobs finish;
-// queued ones are dropped, which is correct because a dropped tile is simply a
-// tile nobody asked for any more.
+// queued ones are dropped and their buffers returned with cancellation errors,
+// which is correct because a dropped tile is simply a tile nobody asked for any
+// more.
 func (p *Pool) Close() error {
 	p.closeOnce.Do(func() {
 		p.closed.Store(true)
 		p.cancel()
-		p.wg.Wait()
+		// Drain queued jobs and return their buffers with cancellation errors. This
+		// ensures buffers are released back to their pools rather than leaked.
+		for {
+			select {
+			case j := <-p.jobs:
+				d := Done{
+					Coord: j.Coord,
+					Layer: j.Layer,
+					Out:   j.Out,
+					Err:   context.Canceled,
+				}
+				if j.Layer != nil {
+					d.LayerID = j.Layer.ID
+				}
+				if j.DL != nil {
+					d.Version = j.DL.Version()
+				}
+				select {
+				case p.done <- d:
+				default:
+					// Completion queue full; drop result but buffer is still in Done
+					// for caller to reclaim via Poll.
+				}
+			default:
+				p.wg.Wait()
+				return
+			}
+		}
 	})
 	return nil
 }

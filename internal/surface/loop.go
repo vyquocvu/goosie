@@ -171,6 +171,9 @@ func (l *Loop) Run(ctx context.Context) error {
 				return nil
 			}
 			if ev.Kind != EvVsync {
+				if handler, ok := l.s.(interface{ HandleEvent(Event) bool }); ok && handler.HandleEvent(ev) {
+					continue
+				}
 				// Input that arrives between vsyncs is state, not work: a scroll
 				// delta is only meaningful once the display is ready for another
 				// frame, and drawing an intermediate one costs a present nobody

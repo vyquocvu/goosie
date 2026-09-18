@@ -1,6 +1,7 @@
 package dom
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -13,13 +14,62 @@ func Parse(html string) *Document {
 	return doc
 }
 
+// ParseLimits bounds allocations while the actual HTML tokenizer builds the tree.
+// Nodes includes the document and implicit elements; depth counts edges from it.
+// Zero limits are only used by the legacy, unchecked Parse entry point.
+type ParseLimits struct {
+	Nodes, Depth, Attributes, AttributeBytes int
+}
+
+// ParseBounded is Parse with resource limits, checked before node allocation.
+// The caller must bound the input byte length before calling it.
+func ParseBounded(html string, limits ParseLimits) (*Document, error) {
+	if limits.Nodes <= 0 || limits.Depth <= 0 || limits.Attributes <= 0 || limits.AttributeBytes <= 0 {
+		return nil, fmt.Errorf("HTML parse limits must be positive")
+	}
+	tb := &treeBuilder{doc: NewDocument(), limits: limits, text: make(map[*Node]*strings.Builder)}
+	tb.parse(html)
+	if tb.err != nil {
+		return nil, tb.err
+	}
+	for n, text := range tb.text {
+		n.DataContent = text.String()
+	}
+	return tb.doc, nil
+}
+
 type treeBuilder struct {
-	doc         *Document
-	openStack   []*Node
-	headElem    *Node
-	bodyElem    *Node
-	htmlElem    *Node
+	doc          *Document
+	openStack    []*Node
+	headElem     *Node
+	bodyElem     *Node
+	htmlElem     *Node
 	fosterParent bool
+	limits       ParseLimits
+	err          error
+	text         map[*Node]*strings.Builder
+}
+
+func (tb *treeBuilder) allowNode(parent *Node) bool {
+	if tb.err != nil {
+		return false
+	}
+	if tb.limits.Nodes == 0 {
+		return true
+	}
+	if int(tb.doc.nextID) >= tb.limits.Nodes {
+		tb.err = fmt.Errorf("HTML node limit exceeded (%d)", tb.limits.Nodes)
+		return false
+	}
+	depth := 0
+	for p := parent; p != nil; p = p.Parent {
+		depth++
+		if depth > tb.limits.Depth {
+			tb.err = fmt.Errorf("HTML tree depth limit exceeded (%d)", tb.limits.Depth)
+			return false
+		}
+	}
+	return true
 }
 
 func (tb *treeBuilder) current() *Node {
@@ -92,13 +142,15 @@ var rawTextEndTags = map[string]string{
 }
 
 func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bool) *Node {
-	n := tb.doc.NewElement(tag)
-	n.Attr = attrs
 	parent := tb.current()
-
 	if tb.fosterParent && isTableElement(parent) {
 		parent = tb.findFosterParent()
 	}
+	if !tb.allowNode(parent) {
+		return nil
+	}
+	n := tb.doc.NewElement(tag)
+	n.Attr = attrs
 	parent.AppendChild(n)
 
 	if tag == "html" {
@@ -147,7 +199,20 @@ func (tb *treeBuilder) insertText(data string) {
 		parent = tb.findFosterParent()
 	}
 	if last := parent.LastChild; last != nil && last.Text() {
-		last.DataContent += data
+		if tb.text == nil {
+			last.DataContent += data
+		} else {
+			b := tb.text[last]
+			if b == nil {
+				b = &strings.Builder{}
+				b.WriteString(last.DataContent)
+				tb.text[last] = b
+			}
+			b.WriteString(data)
+		}
+		return
+	}
+	if !tb.allowNode(parent) {
 		return
 	}
 	n := tb.doc.NewText(data)
@@ -155,14 +220,17 @@ func (tb *treeBuilder) insertText(data string) {
 }
 
 func (tb *treeBuilder) insertComment(data string) {
+	if !tb.allowNode(tb.current()) {
+		return
+	}
 	n := tb.doc.NewComment(data)
 	tb.current().AppendChild(n)
 }
 
 func (tb *treeBuilder) parse(html string) {
-	p := &tokenizer{input: html}
+	p := &tokenizer{input: html, limits: tb.limits}
 
-	for p.pos < len(p.input) {
+	for p.pos < len(p.input) && tb.err == nil {
 		if p.pos < len(p.input) && p.input[p.pos] == '<' {
 			if p.pos+1 < len(p.input) && p.input[p.pos+1] == '/' {
 				tb.handleEndTag(p)
@@ -214,6 +282,10 @@ func (tb *treeBuilder) handleStartTag(p *tokenizer) {
 	}
 
 	tag, attrs, selfClose := p.parseTag()
+	if p.err != nil {
+		tb.err = p.err
+		return
+	}
 	if tag == "" {
 		tb.insertText("<")
 		return
@@ -524,10 +596,13 @@ func (tb *treeBuilder) handleCommentOrDoctype(p *tokenizer) {
 		}
 		return
 	}
-	if strings.HasPrefix(strings.ToUpper(p.input[p.pos:]), "DOCTYPE") {
+	if len(p.input)-p.pos >= 7 && strings.EqualFold(p.input[p.pos:p.pos+7], "DOCTYPE") {
 		p.pos += 7
 		end := strings.Index(p.input[p.pos:], ">")
 		if end >= 0 {
+			if !tb.allowNode(&tb.doc.Node) {
+				return
+			}
 			data := strings.TrimSpace(p.input[p.pos : p.pos+end])
 			dt := tb.doc.NewDoctype(data)
 			tb.doc.Node.AppendChild(dt)
@@ -545,8 +620,10 @@ func (tb *treeBuilder) handleCommentOrDoctype(p *tokenizer) {
 }
 
 type tokenizer struct {
-	input string
-	pos   int
+	input  string
+	pos    int
+	limits ParseLimits
+	err    error
 }
 
 func (t *tokenizer) readTagName() string {
@@ -598,6 +675,14 @@ func (t *tokenizer) parseTag() (tag string, attrs []Attribute, selfClose bool) {
 		}
 		name, value := t.parseAttr()
 		if name != "" {
+			if t.limits.Attributes > 0 && len(attrs) >= t.limits.Attributes {
+				t.err = fmt.Errorf("HTML attribute count limit exceeded (%d)", t.limits.Attributes)
+				return
+			}
+			if t.limits.AttributeBytes > 0 && len(name)+len(value) > t.limits.AttributeBytes {
+				t.err = fmt.Errorf("HTML attribute byte limit exceeded (%d)", t.limits.AttributeBytes)
+				return
+			}
 			attrs = append(attrs, Attribute{
 				Name:     name,
 				NameAtom: LookupAttr(name),

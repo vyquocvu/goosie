@@ -16,12 +16,12 @@ const (
 const textSize = 14
 
 var (
-	buttonColor = frame.RGB(100, 100, 100)
-	barBg       = frame.RGB(255, 255, 255)
-	barBorder   = frame.RGB(200, 200, 200)
-	toolbarBg   = frame.RGB(240, 240, 240)
-	textColor   = frame.RGB(33, 33, 33)
-	cursorColor = frame.RGB(0, 120, 215)
+	buttonColor   = frame.RGB(100, 100, 100)
+	barBg         = frame.RGB(255, 255, 255)
+	barBorder     = frame.RGB(200, 200, 200)
+	toolbarBg     = frame.RGB(240, 240, 240)
+	textColor     = frame.RGB(33, 33, 33)
+	cursorColor   = frame.RGB(0, 120, 215)
 	disabledColor = frame.RGB(180, 180, 180)
 )
 
@@ -32,8 +32,11 @@ type State struct {
 	Focus      Focus
 	History    *History
 	Loading    bool
+	Error      string
 	Bounds     frame.Rect
 	OnNavigate func(string)
+	OnTraverse func(int)
+	OnReload   func()
 
 	fonts *raster.Fonts
 }
@@ -75,16 +78,16 @@ func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 	w := s.Bounds.W()
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), pos):
-		if url, ok := s.History.Back(); ok && s.OnNavigate != nil {
-			s.OnNavigate(url)
+		if s.History.CanBack() && s.OnTraverse != nil {
+			s.OnTraverse(-1)
 		}
 	case rectContains(ButtonRect(ButtonForward, w), pos):
-		if url, ok := s.History.Forward(); ok && s.OnNavigate != nil {
-			s.OnNavigate(url)
+		if s.History.CanForward() && s.OnTraverse != nil {
+			s.OnTraverse(1)
 		}
 	case rectContains(ButtonRect(ButtonReload, w), pos):
-		if s.URL != "" && s.OnNavigate != nil {
-			s.OnNavigate(s.URL)
+		if s.OnReload != nil {
+			s.OnReload()
 		}
 	case rectContains(AddressBarRect(w), pos):
 		s.Focus = FocusAddress
