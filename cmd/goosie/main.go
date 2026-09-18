@@ -265,7 +265,7 @@ func build(c config) (*framePath, error) {
 // for -url and by navigate for address bar submissions.
 func loadURL(client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
 	u := normalizeURL(rawURL)
-	resp, err := client.Get(u)
+	resp, err := client.Get(context.Background(), u)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: fetch %s: %w", u, err)
 	}

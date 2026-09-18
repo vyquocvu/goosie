@@ -9,7 +9,8 @@
 package engine
 
 import (
-	"github.com/vyquocvu/goosie/internal/css"
+	"fmt"
+
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
@@ -51,30 +52,79 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	for _, opt := range opts {
 		opt(s)
 	}
-	doc := dom.Parse(html)
-	var sheets []*css.Stylesheet
-	for _, src := range authorCSS {
-		sheets = append(sheets, css.Parse(src))
+	if err := validateWidth(viewportW); err != nil {
+		return nil, err
 	}
-	// Document-embedded style sheets come after the caller's sheets so they
-	// win ties in the cascade, matching how linked sheets precede <style>.
-	for _, el := range doc.ElementsByTagName("style") {
-		if src := el.TextContent(); src != "" {
-			sheets = append(sheets, css.Parse(src))
-		}
+	if len(html) > MaxDocumentBytes {
+		return nil, fmt.Errorf("HTML byte limit exceeded (%d)", MaxDocumentBytes)
 	}
-	styles := style.Resolve(doc, sheets)
-	arena := layout.Build(doc, styles)
-	arena.Metrics = s.metrics
-	layout.Block(arena, layout.ObjectID(1), viewportW)
-	layout.Inline(arena, layout.ObjectID(1))
+	doc, err := dom.ParseBounded(html, dom.ParseLimits{
+		Nodes: MaxDocumentNodes, Depth: MaxDocumentDepth,
+		Attributes: MaxAttributes, AttributeBytes: MaxAttributeBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sheets, err := checkedSheets(doc, authorCSS)
+	if err != nil {
+		return nil, err
+	}
 	s.Doc = doc
-	s.Styles = styles
-	s.Arena = arena
+	s.Styles = style.Resolve(doc, sheets)
+	if err := s.Reflow(viewportW); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
-// Paint builds a display list from the session's layout arena.
+// Reflow runs layout only, retaining the document, computed style identities,
+// and font metrics. The old arena is untouched unless the candidate validates.
+// Like Paint, this method must be called by the session's single owner.
+func (s *Session) Reflow(viewportW float32) error {
+	if err := validateWidth(viewportW); err != nil {
+		return err
+	}
+	if s == nil {
+		return fmt.Errorf("missing session")
+	}
+	if err := s.validateLayoutInput(); err != nil {
+		return err
+	}
+	candidate := layout.Build(s.Doc, s.Styles)
+	candidate.Metrics = s.metrics
+	layout.Block(candidate, layout.ObjectID(1), viewportW)
+	if err := validateArena(candidate); err != nil {
+		return err
+	}
+	layout.Inline(candidate, layout.ObjectID(1))
+	if err := validateArena(candidate); err != nil {
+		return err
+	}
+	s.Arena = candidate
+	return nil
+}
+
+// PaintChecked validates geometry and scale before any device-coordinate
+// conversion, then checks tile metadata bounds before handing off the list.
+func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
+	if err := validateScale(float64(scale)); err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return nil, fmt.Errorf("missing session")
+	}
+	if err := validateArena(s.Arena); err != nil {
+		return nil, err
+	}
+	list := s.Paint(scale)
+	if err := ValidateExtent(list.Bounds()); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// Paint builds a display list from a trusted session's layout arena. Binaries
+// processing untrusted input must use PaintChecked instead.
 //
 // The list is mutable; the caller freezes it with Publish when the frame is
 // ready. scale is the device-pixel ratio: a 2x Retina display passes 2.0, and
@@ -106,4 +156,3 @@ func (s *Session) BackgroundColor() frame.Color {
 	}
 	return frame.RGB(255, 255, 255)
 }
-

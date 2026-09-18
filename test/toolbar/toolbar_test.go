@@ -3,10 +3,21 @@ package toolbar_test
 import (
 	"testing"
 
-	"github.com/vyquocvu/goosie/internal/toolbar"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/surface"
+	"github.com/vyquocvu/goosie/internal/toolbar"
 )
+
+func TestTraversalDoesNotCommitBeforeLoad(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.Navigate("https://a.com")
+	s.Navigate("https://b.com")
+	r := toolbar.ButtonRect(toolbar.ButtonBack, 800)
+	s.HandleClick(frame.Point{X: r.X0 + 1, Y: r.Y0 + 1}, surface.ButtonLeft)
+	if got := s.History.Current(); got != "https://b.com" {
+		t.Fatalf("history changed before load succeeded: %q", got)
+	}
+}
 
 func TestHistoryPushAndCurrent(t *testing.T) {
 	h := toolbar.NewHistory()
@@ -289,7 +300,12 @@ func TestClickBackButton(t *testing.T) {
 	s.History.Push("https://b.com")
 
 	var navigated string
-	s.OnNavigate = func(url string) { navigated = url }
+	s.OnTraverse = func(delta int) {
+		if delta != -1 {
+			t.Fatalf("back delta = %d", delta)
+		}
+		navigated = "https://a.com"
+	}
 
 	rect := toolbar.ButtonRect(toolbar.ButtonBack, 800)
 	mid := frame.Point{X: (rect.X0 + rect.X1) / 2, Y: (rect.Y0 + rect.Y1) / 2}
@@ -307,7 +323,12 @@ func TestClickForwardButton(t *testing.T) {
 	s.History.Back()
 
 	var navigated string
-	s.OnNavigate = func(url string) { navigated = url }
+	s.OnTraverse = func(delta int) {
+		if delta != 1 {
+			t.Fatalf("forward delta = %d", delta)
+		}
+		navigated = "https://b.com"
+	}
 
 	rect := toolbar.ButtonRect(toolbar.ButtonForward, 800)
 	mid := frame.Point{X: (rect.X0 + rect.X1) / 2, Y: (rect.Y0 + rect.Y1) / 2}
@@ -323,7 +344,7 @@ func TestClickReloadButton(t *testing.T) {
 	s.URL = "https://example.com"
 
 	var navigated string
-	s.OnNavigate = func(url string) { navigated = url }
+	s.OnReload = func() { navigated = s.URL }
 
 	rect := toolbar.ButtonRect(toolbar.ButtonReload, 800)
 	mid := frame.Point{X: (rect.X0 + rect.X1) / 2, Y: (rect.Y0 + rect.Y1) / 2}

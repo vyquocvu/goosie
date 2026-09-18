@@ -522,10 +522,21 @@ func (s *Scheduler) HandleDone(d Done) error {
 	if s.grid == nil || s.layer == nil {
 		return nil
 	}
+	// Check if the buffer came from a different grid. This can happen when layers
+	// have the same ID but are different instances (e.g., after navigation), or when
+	// the LayerID differs. Release foreign buffers back to their originating grid.
+	if d.Layer != nil && d.Layer.Grid != nil && d.Layer.Grid != s.grid {
+		d.Layer.Grid.Release(d.Coord, d.Out)
+		s.staleNews++
+		return errForeignResult
+	}
 	if d.LayerID != s.layer.ID {
 		// The buffer came from another layer's pool, so this scheduler must not put it
-		// anywhere. One layer per scheduler cannot reach this; a frame path that grows
-		// past it has to route results before they get here.
+		// anywhere. Release it back to the originating grid so the buffer returns to
+		// its pool.
+		if d.Layer != nil && d.Layer.Grid != nil {
+			d.Layer.Grid.Release(d.Coord, d.Out)
+		}
 		s.staleNews++
 		return errForeignResult
 	}
