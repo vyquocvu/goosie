@@ -22,6 +22,8 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -180,10 +182,14 @@ type framePath struct {
 	toolbar  *toolbar.State
 	client   net.HTTP
 	fonts    *raster.Fonts
-	navSerial uint64
 	// started is when frames began, so the reported rate excludes window creation and
 	// the scene build: a run's frames-per-second is a claim about the frame path.
 	started time.Time
+
+	// Navigation state. navMu protects navCancel; navSerial is atomic.
+	navMu     sync.Mutex
+	navCancel context.CancelFunc
+	navSerial atomic.Uint64
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -251,6 +257,12 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnNavigate = func(rawURL string) {
 			f.navigate(rawURL)
 		}
+		f.toolbar.OnTraverse = func(delta int) {
+			f.traverse(delta)
+		}
+		f.toolbar.OnReload = func() {
+			f.reload()
+		}
 		if c.url != "" {
 			f.toolbar.URL = normalizeURL(c.url)
 			f.toolbar.Input = normalizeURL(c.url)
@@ -263,14 +275,163 @@ func build(c config) (*framePath, error) {
 	return f, nil
 }
 
-// loadURL fetches a URL, builds a session and display list, and returns the layer,
-// scene spec, and document background color for it. It is used both at startup
-// for -url and by navigate for address bar submissions.
-func loadURL(client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
+// navigate loads a new URL on a goroutine and publishes a new plan when it
+// arrives. It cancels any in-flight navigation first, and rejects the result
+// if another navigation started while this one was fetching.
+func (f *framePath) navigate(rawURL string) {
 	u := normalizeURL(rawURL)
-	resp, err := client.Get(context.Background(), u)
+
+	// Cancel any in-flight navigation.
+	f.navMu.Lock()
+	if f.navCancel != nil {
+		f.navCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	f.navCancel = cancel
+	f.navMu.Unlock()
+
+	// Capture the serial for stale-result rejection.
+	serial := f.navSerial.Add(1)
+
+	if f.toolbar != nil {
+		f.toolbar.SetLoading(true)
+		f.toolbar.Error = ""
+	}
+
+	go func() {
+		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, float32(f.config.dpr))
+		if err != nil {
+			// Context cancelled means a newer navigation superseded this one;
+			// don't report it as an error.
+			if ctx.Err() != nil {
+				return
+			}
+			// Stale result: a newer navigation already started.
+			if f.navSerial.Load() != serial {
+				return
+			}
+			if f.toolbar != nil {
+				f.toolbar.SetLoading(false)
+				f.toolbar.Error = err.Error()
+			}
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		// Stale result check: only apply if this is still the current navigation.
+		if f.navSerial.Load() != serial {
+			return
+		}
+		if f.toolbar != nil {
+			f.toolbar.SetLoading(false)
+			f.toolbar.Navigate(u)
+		}
+		f.sched.SetPlan(frame.FramePlan{
+			Serial:     serial,
+			Layers:     []*frame.Layer{layer},
+			Background: bgColor,
+		})
+	}()
+}
+
+// traverse loads a URL from history (back/forward). It navigates without
+// pushing to history again, since the history index was already moved.
+func (f *framePath) traverse(delta int) {
+	if f.toolbar == nil {
+		return
+	}
+	var url string
+	var ok bool
+	if delta < 0 {
+		url, ok = f.toolbar.History.Back()
+	} else if delta > 0 {
+		url, ok = f.toolbar.History.Forward()
+	}
+	if !ok || url == "" {
+		return
+	}
+	// Navigate without pushing to history again.
+	f.navigateNoHistory(url)
+}
+
+// navigateNoHistory loads a URL without pushing it to history. Used for
+// back/forward traversal where the history index is already correct.
+func (f *framePath) navigateNoHistory(rawURL string) {
+	u := normalizeURL(rawURL)
+
+	f.navMu.Lock()
+	if f.navCancel != nil {
+		f.navCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	f.navCancel = cancel
+	f.navMu.Unlock()
+
+	serial := f.navSerial.Add(1)
+
+	if f.toolbar != nil {
+		f.toolbar.SetLoading(true)
+		f.toolbar.Error = ""
+	}
+
+	go func() {
+		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, float32(f.config.dpr))
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if f.navSerial.Load() != serial {
+				return
+			}
+			if f.toolbar != nil {
+				f.toolbar.SetLoading(false)
+				f.toolbar.Error = err.Error()
+			}
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+		if f.navSerial.Load() != serial {
+			return
+		}
+		if f.toolbar != nil {
+			f.toolbar.SetLoading(false)
+			// Update URL display without pushing to history.
+			f.toolbar.URL = u
+			f.toolbar.Input = u
+			f.toolbar.Focus = toolbar.FocusNone
+		}
+		f.sched.SetPlan(frame.FramePlan{
+			Serial:     serial,
+			Layers:     []*frame.Layer{layer},
+			Background: bgColor,
+		})
+	}()
+}
+
+// reload re-fetches the current URL.
+func (f *framePath) reload() {
+	if f.toolbar == nil {
+		return
+	}
+	url := f.toolbar.URL
+	if url == "" {
+		return
+	}
+	f.navigateNoHistory(url)
+}
+
+// loadURLCtx is like loadURL but respects context cancellation.
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
+	// Check context before starting the fetch.
+	if ctx.Err() != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
+	}
+	resp, err := client.Get(ctx, rawURL)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: fetch %s: %w", u, err)
+		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
+	}
+	// Check context after the fetch in case it was cancelled during the network call.
+	if ctx.Err() != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
 	}
 	sess, err := engine.NewSession(string(resp.Body), nil, float32(viewportW), engine.WithMetrics(fonts))
 	if err != nil {
@@ -286,28 +447,6 @@ func loadURL(client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW int,
 	layer := frame.NewLayer(frame.LayerID(budgetTiles), extent, budgetTiles*frame.TileSizeBytes(), pool)
 	layer.SetContent(dl)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), nil
-}
-
-// navigate loads a new URL on a goroutine and publishes a new plan when it
-// arrives. It is called from the toolbar event pump, which runs on a different
-// goroutine from the UI thread; SetPlan is the one scheduler method that is
-// safe to call cross-thread, and the layer swap it triggers is applied in
-// BeginFrame on the UI thread.
-func (f *framePath) navigate(rawURL string) {
-	go func() {
-		layer, _, bgColor, err := loadURL(f.client, f.fonts, rawURL, f.config.width, float32(f.config.dpr))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return
-		}
-		f.navSerial++
-		f.toolbar.Navigate(normalizeURL(rawURL))
-		f.sched.SetPlan(frame.FramePlan{
-			Serial:     f.navSerial,
-			Layers:     []*frame.Layer{layer},
-			Background: bgColor,
-		})
-	}()
 }
 
 

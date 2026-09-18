@@ -449,3 +449,73 @@ func TestInsertInMiddle(t *testing.T) {
 		t.Fatalf("Cursor = %d after mid-insert, want 2", s.Cursor)
 	}
 }
+
+func TestOnTraverseCallback(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.Navigate("https://a.com")
+	s.Navigate("https://b.com")
+
+	// OnTraverse should be called with the delta; simulate what the real
+	// traverse does by moving the history index.
+	s.OnTraverse = func(delta int) {
+		if delta < 0 {
+			s.History.Back()
+		} else if delta > 0 {
+			s.History.Forward()
+		}
+	}
+
+	// Click back button.
+	r := toolbar.ButtonRect(toolbar.ButtonBack, 800)
+	s.HandleClick(frame.Point{X: r.X0 + 1, Y: r.Y0 + 1}, surface.ButtonLeft)
+	if got := s.History.Current(); got != "https://a.com" {
+		t.Fatalf("after back: Current() = %q, want https://a.com", got)
+	}
+
+	// Click forward button.
+	r = toolbar.ButtonRect(toolbar.ButtonForward, 800)
+	s.HandleClick(frame.Point{X: r.X0 + 1, Y: r.Y0 + 1}, surface.ButtonLeft)
+	if got := s.History.Current(); got != "https://b.com" {
+		t.Fatalf("after forward: Current() = %q, want https://b.com", got)
+	}
+}
+
+func TestOnReloadCallback(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.Navigate("https://example.com")
+
+	called := false
+	s.OnReload = func() { called = true }
+
+	r := toolbar.ButtonRect(toolbar.ButtonReload, 800)
+	s.HandleClick(frame.Point{X: r.X0 + 1, Y: r.Y0 + 1}, surface.ButtonLeft)
+	if !called {
+		t.Fatal("OnReload not called")
+	}
+}
+
+func TestLoadingState(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	if s.Loading {
+		t.Fatal("Loading = true initially")
+	}
+	s.SetLoading(true)
+	if !s.Loading {
+		t.Fatal("SetLoading(true) did not set Loading")
+	}
+	s.SetLoading(false)
+	if s.Loading {
+		t.Fatal("SetLoading(false) did not clear Loading")
+	}
+}
+
+func TestErrorState(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	if s.Error != "" {
+		t.Fatalf("Error = %q initially, want empty", s.Error)
+	}
+	s.Error = "fetch failed"
+	if s.Error != "fetch failed" {
+		t.Fatalf("Error = %q, want 'fetch failed'", s.Error)
+	}
+}
