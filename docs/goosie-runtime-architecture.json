@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Goosie Runtime Architecture",
+    "output": "goosie-runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": { "url": "https://github.com/vyquocvu/goosie", "provider": "github", "revision": "e3177f98db4b0674c8e5ce041e323d4668dd6084" },
+    "viewBox": [1050, 384],
+    "views": [
+      { "id": "url-to-pixels", "label": "URL to pixels", "focus": ["toolbar", "net", "engine", "layer", "sched", "pool", "composer", "platform", "display"], "note": "Follow the one primary path from navigation to scanout." },
+      { "id": "frame-path", "label": "Frame path", "focus": ["sched", "pool", "composer", "platform"], "note": "The vsync-paced frame path: tile jobs, damage blit, present." },
+      { "id": "content-pipeline", "label": "Content pipeline", "focus": ["toolbar", "net", "engine", "layer"], "note": "Fetch and parse: navigation to a published tile layer." },
+      { "id": "boundaries", "label": "Trust boundaries", "focus": ["web", "net", "engine", "platform", "display"], "note": "Untrusted remote bytes and the single cgo crossing." }
+    ]
+  },
+  "components": [
+    { "id": "web", "type": "external", "label": "Web Servers", "sublabel": "HTTPS origins", "pos": [257, 24], "size": [132, 64] },
+    { "id": "toolbar", "type": "frontend", "label": "Toolbar", "sublabel": "URL bar · history", "pos": [55, 152], "size": [132, 64], "sources": [{ "path": "internal/toolbar/toolbar.go" }] },
+    { "id": "net", "type": "backend", "label": "HTTP Client", "sublabel": "internal/net", "pos": [257, 152], "size": [132, 64], "sources": [{ "path": "internal/net/http.go" }] },
+    { "id": "engine", "type": "backend", "label": "Engine Session", "sublabel": "Parse · Style · Layout · Paint", "pos": [459, 152], "size": [132, 64], "sources": [{ "path": "internal/engine/engine.go", "line": 49 }] },
+    { "id": "layer", "type": "backend", "label": "Frame Layer", "sublabel": "256px tile grid", "tag": "bitmap pool", "pos": [661, 152], "size": [132, 64], "sources": [{ "path": "internal/frame/layer.go" }] },
+    { "id": "sched", "type": "backend", "label": "Tile Scheduler", "sublabel": "per-vsync plans", "pos": [55, 288], "size": [132, 64], "sources": [{ "path": "internal/raster/scheduler.go" }] },
+    { "id": "pool", "type": "backend", "label": "Raster Workers", "sublabel": "worker pool · glyph atlas", "pos": [257, 288], "size": [132, 64], "sources": [{ "path": "internal/raster/pool.go" }] },
+    { "id": "composer", "type": "backend", "label": "Composer", "sublabel": "damage blit", "pos": [459, 288], "size": [132, 64], "sources": [{ "path": "internal/surface/composer.go" }] },
+    { "id": "platform", "type": "backend", "label": "Platform Backend", "sublabel": "darwin · headless", "tag": "cgo", "pos": [661, 288], "size": [132, 64], "sources": [{ "path": "internal/platform/platform.go" }] },
+    { "id": "display", "type": "external", "label": "Display / OS", "sublabel": "AppKit compositor", "pos": [863, 288], "size": [132, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Goosie process", "wraps": ["toolbar", "net", "engine", "layer", "sched", "pool", "composer", "platform"] },
+    { "kind": "security-group", "label": "Untrusted network ingress", "wraps": ["net"] },
+    { "kind": "security-group", "label": "cgo · internal/platform/darwin", "wraps": ["platform"] }
+  ],
+  "connections": [
+    { "id": "navigate", "from": "toolbar", "to": "net", "label": "navigate", "variant": "emphasis" },
+    { "id": "fetch", "from": "net", "to": "engine", "label": "HTML" },
+    { "id": "display-list", "from": "engine", "to": "layer", "label": "display list" },
+    { "id": "set-plan", "from": "layer", "to": "sched", "label": "SetPlan", "fromSide": "bottom", "toSide": "top" },
+    { "id": "tile-jobs", "from": "sched", "to": "pool", "label": "tile jobs" },
+    { "id": "rasterized", "from": "pool", "to": "composer", "label": "tiles" },
+    { "id": "present", "from": "composer", "to": "platform", "label": "Present" },
+    { "id": "frames", "from": "platform", "to": "display", "label": "frames" },
+    { "id": "https", "from": "web", "to": "net", "label": "HTTPS", "fromSide": "bottom", "toSide": "top", "labelDy": 24 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Frame path", "items": [
+      "surface.Loop paces BeginFrame; the scheduler publishes FramePlan layer swaps",
+      "Worker pool rasters 256px tiles into a recycled bitmap pool",
+      "Bundled Go fonts fill a 4 MiB glyph atlas; damage blit presents changed tiles"
+    ] },
+    { "dot": "emerald", "title": "Content pipeline", "items": [
+      "dom.Parse → css.Parse → style.Resolve → layout → paint display list",
+      "Author sheets and <style> blocks; layout.Block + Inline fill the arena",
+      "Each stage is a pure function; edits re-run only the affected stage"
+    ] },
+    { "dot": "violet", "title": "Browser chrome & orchestration", "items": [
+      "cmd/goosie assembles the frame path and owns navigation",
+      "Navigate runs on a goroutine; SetPlan is the one cross-thread publish",
+      "Window shows the toolbar immediately while the page fetches"
+    ] },
+    { "dot": "rose", "title": "Trust boundaries & backends", "items": [
+      "Untrusted bytes enter only via internal/net and hand-written parsers",
+      "cgo confined to internal/platform/darwin; layering enforced by archtest",
+      "-gate drives 600 scroll frames; -bench reports the headless rate"
+    ] }
+  ]
+}
