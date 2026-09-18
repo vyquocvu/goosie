@@ -43,3 +43,5 @@ perf-suite.txt
 
 .prompt*
 !.prompt
+
+node_modules/
