@@ -98,7 +98,7 @@ func (tw *toolbarWindow) intercept(ev surface.Event) bool {
 		return false
 	case surface.EvKey:
 		if tw.toolbar.Focus == toolbar.FocusAddress {
-			tw.toolbar.HandleKey(ev.Key)
+			tw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
 			return true
 		}
 		return false

@@ -189,3 +189,21 @@ func newHeadless(o Options) *headless.Window {
 		Clock:       o.Clock,
 	})
 }
+
+// clipboardFactory is set by platform-specific init functions to provide a
+// clipboard. Nil means no platform clipboard is available.
+var clipboardFactory func() interface {
+	Read() string
+	Write(string)
+}
+
+// NewClipboard returns a platform clipboard, or nil if none is available.
+func NewClipboard() interface {
+	Read() string
+	Write(string)
+} {
+	if clipboardFactory != nil {
+		return clipboardFactory()
+	}
+	return nil
+}

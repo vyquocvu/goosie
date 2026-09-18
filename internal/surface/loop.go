@@ -208,6 +208,7 @@ func mergeEvent(dst, src Event) Event {
 	}
 	if src.Key != 0 {
 		out.Key = src.Key
+		out.Mods = src.Mods
 	}
 	if src.Size.W != 0 && src.Size.H != 0 {
 		out.Size = src.Size

@@ -193,6 +193,7 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 	case C.GOOSIE_EV_KEY:
 		ev.Kind = surface.EvKey
 		ev.Key = rune(ce.key)
+		ev.Mods = surface.KeyMod(ce.mods)
 	case C.GOOSIE_EV_RESIZE:
 		ev.Kind = surface.EvResize
 		ev.Size = frame.Size{W: int32(ce.w), H: int32(ce.h)}

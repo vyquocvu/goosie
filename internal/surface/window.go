@@ -63,6 +63,17 @@ const (
 	CursorGrab
 )
 
+// KeyMod is a bitmask of modifier keys held during a key event.
+// The values match NSEvent modifier flags so the darwin shim passes them through.
+type KeyMod uint32
+
+const (
+	ModShift   KeyMod = 1 << 17
+	ModControl KeyMod = 1 << 18
+	ModOption  KeyMod = 1 << 19
+	ModCommand KeyMod = 1 << 20
+)
+
 // Event is one platform input. All positions and deltas are device pixels, so
 // no handler needs the scale factor to interpret an event, and a DPR change
 // cannot silently rescale a queued scroll.
@@ -72,6 +83,7 @@ type Event struct {
 	Pos    frame.Point // EvPointer
 	Button Button      // EvPointer
 	Key    rune        // EvKey
+	Mods   KeyMod      // EvKey: modifier flags
 	Size   frame.Size  // EvResize
 	Scale  float32     // current device pixel ratio
 	At     time.Time

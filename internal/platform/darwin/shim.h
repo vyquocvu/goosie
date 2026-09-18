@@ -63,6 +63,25 @@ enum {
 	GOOSIE_CLOSED = 2
 };
 
+// Modifier flags for key events, matching NSEventModifierFlag masks.
+enum {
+	GOOSIE_MOD_SHIFT   = 1 << 17,
+	GOOSIE_MOD_OPTION  = 1 << 19,
+	GOOSIE_MOD_CONTROL = 1 << 18,
+	GOOSIE_MOD_COMMAND = 1 << 20,
+};
+
+// Special key codes mapped from NSEvent keyCode values.
+// These are in the Unicode Private Use Area so they never collide with a real rune.
+enum {
+	GOOSIE_KEY_UP    = 0xF700,
+	GOOSIE_KEY_DOWN  = 0xF701,
+	GOOSIE_KEY_LEFT  = 0xF702,
+	GOOSIE_KEY_RIGHT = 0xF703,
+	GOOSIE_KEY_HOME  = 0xF704,
+	GOOSIE_KEY_END   = 0xF705,
+};
+
 // GoosieEvent is one platform input, in device pixels. at_ns is the shim's clock
 // at the moment the input happened, which is where a vsync-to-present measurement
 // starts.
@@ -73,6 +92,7 @@ typedef struct GoosieEvent {
 	int action;     // GOOSIE_POINTER_*
 	int button;     // 1 left, 2 right, 3 middle, 0 none
 	int key;        // GOOSIE_EV_KEY: the typed rune, 0 for a control key
+	int mods;       // GOOSIE_EV_KEY: GOOSIE_MOD_* modifier flags
 	int w, h;       // GOOSIE_EV_RESIZE: the new surface size, device pixels
 	double scale;   // the device pixel ratio this event was produced under
 	long long at_ns;
@@ -148,6 +168,15 @@ void GoosieCounters(GoosieWindow *gw, int *queued, int *dropped, int *shed_vsync
 // with no thread left to report it on. A v2 process that has closed its window is
 // minutes from exiting; the shim holds one window's worth of C memory until then.
 void GoosieClose(GoosieWindow *gw);
+
+// GoosieClipboardRead returns the clipboard text as a C string the caller must
+// free, or NULL if the clipboard is empty or has no string content. The call is
+// safe from any thread; it dispatches to the main queue internally.
+char *GoosieClipboardRead(void);
+
+// GoosieClipboardWrite replaces the clipboard contents with text. A NULL text
+// clears the clipboard. The call is safe from any thread.
+void GoosieClipboardWrite(const char *text);
 
 #ifdef __cplusplus
 }

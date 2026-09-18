@@ -15,20 +15,45 @@ const (
 
 const textSize = 14
 
-var (
-	buttonColor   = frame.RGB(100, 100, 100)
-	barBg         = frame.RGB(255, 255, 255)
-	barBorder     = frame.RGB(200, 200, 200)
-	toolbarBg     = frame.RGB(240, 240, 240)
-	textColor     = frame.RGB(33, 33, 33)
-	cursorColor   = frame.RGB(0, 120, 215)
-	disabledColor = frame.RGB(180, 180, 180)
+// Special key codes matching the darwin shim's GOOSIE_KEY_* constants.
+const (
+	keyUp    = 0xF700
+	keyDown  = 0xF701
+	keyLeft  = 0xF702
+	keyRight = 0xF703
+	keyHome  = 0xF704
+	keyEnd   = 0xF705
 )
+
+var (
+	buttonColor    = frame.RGB(100, 100, 100)
+	barBg          = frame.RGB(255, 255, 255)
+	barBorder      = frame.RGB(200, 200, 200)
+	toolbarBg      = frame.RGB(240, 240, 240)
+	textColor      = frame.RGB(33, 33, 33)
+	cursorColor    = frame.RGB(0, 120, 215)
+	disabledColor  = frame.RGB(180, 180, 180)
+	selectionColor = frame.RGB(180, 210, 250)
+)
+
+// Clipboard is the platform clipboard interface. The darwin package provides
+// the real implementation; tests use nopClipboard.
+type Clipboard interface {
+	Read() string
+	Write(string)
+}
+
+type nopClipboardImpl struct{}
+
+func (nopClipboardImpl) Read() string      { return "" }
+func (nopClipboardImpl) Write(string)      {}
 
 type State struct {
 	URL        string
 	Input      string
 	Cursor     int
+	SelStart   int
+	SelEnd     int
 	Focus      Focus
 	History    *History
 	Loading    bool
@@ -37,15 +62,17 @@ type State struct {
 	OnNavigate func(string)
 	OnTraverse func(int)
 	OnReload   func()
+	Clipboard  Clipboard
 
 	fonts *raster.Fonts
 }
 
 func NewState(width int32, fonts *raster.Fonts) *State {
 	return &State{
-		History: NewHistory(),
-		Bounds:  frame.Rect4(0, 0, width, ToolbarHeight),
-		fonts:   fonts,
+		History:   NewHistory(),
+		Bounds:    frame.Rect4(0, 0, width, ToolbarHeight),
+		fonts:     fonts,
+		Clipboard: nopClipboardImpl{},
 	}
 }
 
@@ -57,6 +84,8 @@ func (s *State) Navigate(url string) {
 	s.URL = url
 	s.Input = url
 	s.Cursor = len([]rune(url))
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
 	s.History.Push(url)
 	s.Focus = FocusNone
 }
@@ -72,6 +101,7 @@ func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 	if pos.Y >= ToolbarHeight {
 		if s.Focus == FocusAddress {
 			s.Focus = FocusNone
+			s.clearSelection()
 		}
 		return
 	}
@@ -92,38 +122,137 @@ func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 	case rectContains(AddressBarRect(w), pos):
 		s.Focus = FocusAddress
 		s.Cursor = len([]rune(s.Input))
+		s.clearSelection()
 	default:
 		if s.Focus == FocusAddress {
 			s.Focus = FocusNone
+			s.clearSelection()
 		}
 	}
 }
 
+// HandleKey dispatches a key event with no modifier information. It exists
+// for backward compatibility; HandleKeyEvent is the full entry point.
 func (s *State) HandleKey(r rune) {
+	s.HandleKeyEvent(r, 0)
+}
+
+// HandleKeyEvent dispatches a key event with modifier flags.
+func (s *State) HandleKeyEvent(key rune, mods surface.KeyMod) {
 	if s.Focus != FocusAddress {
 		return
 	}
-	switch r {
-	case '\r':
-		s.submitInput()
+
+	cmd := mods&surface.ModCommand != 0
+	ctrl := mods&surface.ModControl != 0
+	shift := mods&surface.ModShift != 0
+	opt := mods&surface.ModOption != 0
+
+	// Handle special keys before backward compat conversion.
+	switch key {
+	case '\r', '\n':
+		if !cmd && !ctrl {
+			s.submitInput()
+		}
+		return
 	case 0x7f, '\b':
 		s.DeleteBackward()
-	case 0x01:
-		s.MoveCursorStart()
-	case 0x05:
-		s.MoveCursorEnd()
-	case 0x02:
-		s.MoveCursorLeft()
-	case 0x06:
-		s.MoveCursorRight()
-	case 0x0b:
-		s.Input = s.Input[:s.cursorByte()]
-		s.Cursor = len([]rune(s.Input))
+		return
+	}
+
+	// Backward compat: bare control codes (1-26) without modifier flags are
+	// treated as Ctrl+letter from the old key path.
+	if !cmd && !shift && !opt && key >= 1 && key <= 26 {
+		ctrl = true
+		key = 'a' + (key - 1) % 26
+	}
+
+	switch key {
+	case keyLeft:
+		if cmd {
+			s.moveCursorStart(shift)
+		} else if opt {
+			s.moveWordLeft(shift)
+		} else {
+			s.moveCursorLeft(shift)
+		}
+	case keyRight:
+		if cmd {
+			s.moveCursorEnd(shift)
+		} else if opt {
+			s.moveWordRight(shift)
+		} else {
+			s.moveCursorRight(shift)
+		}
+	case keyUp:
+		s.moveCursorStart(shift)
+	case keyDown:
+		s.moveCursorEnd(shift)
+	case keyHome:
+		s.moveCursorStart(shift)
+	case keyEnd:
+		s.moveCursorEnd(shift)
+
+	case 'a':
+		if cmd {
+			s.SelectAll()
+		} else if ctrl {
+			s.moveCursorStart(shift)
+		} else {
+			s.insertChar(key)
+		}
+	case 'c':
+		if cmd {
+			s.Copy()
+		} else {
+			s.insertChar(key)
+		}
+	case 'v':
+		if cmd {
+			s.Paste()
+		} else {
+			s.insertChar(key)
+		}
+	case 'x':
+		if cmd {
+			s.Cut()
+		} else {
+			s.insertChar(key)
+		}
+	case 'z':
+		if cmd {
+			// Undo: no-op for now
+		} else {
+			s.insertChar(key)
+		}
+
 	default:
-		if r >= 0x20 {
-			s.InsertRune(r)
+		if ctrl {
+			switch key {
+			case 'e':
+				s.moveCursorEnd(shift)
+			case 'b':
+				s.moveCursorLeft(shift)
+			case 'f':
+				s.moveCursorRight(shift)
+			case 'k':
+				s.Input = s.Input[:s.cursorByte()]
+				s.Cursor = len([]rune(s.Input))
+				s.clearSelection()
+			case 'd':
+				s.DeleteForward()
+			case 'w':
+				s.deleteWordBackward()
+			}
+		} else if key >= 0x20 {
+			s.insertChar(key)
 		}
 	}
+}
+
+func (s *State) insertChar(r rune) {
+	s.deleteSelection()
+	s.InsertRune(r)
 }
 
 func (s *State) submitInput() {
@@ -142,6 +271,29 @@ func (s *State) cursorByte() int {
 		return len(s.Input)
 	}
 	return len(string(runes[:s.Cursor]))
+}
+
+func (s *State) hasSelection() bool {
+	return s.SelStart != s.SelEnd
+}
+
+func (s *State) selMin() int {
+	if s.SelStart < s.SelEnd {
+		return s.SelStart
+	}
+	return s.SelEnd
+}
+
+func (s *State) selMax() int {
+	if s.SelStart > s.SelEnd {
+		return s.SelStart
+	}
+	return s.SelEnd
+}
+
+func (s *State) clearSelection() {
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
 }
 
 func rectContains(r frame.Rect, p frame.Point) bool {
@@ -241,6 +393,26 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 
 	textX := r.X0 + BarPadding
 	textY := r.Y0 + (ButtonSize-textSize)/2 + textSize
+
+	// Draw selection highlight behind text.
+	if s.Focus == FocusAddress && s.hasSelection() {
+		runes := []rune(text)
+		sMin := s.selMin()
+		sMax := s.selMax()
+		if sMin < 0 {
+			sMin = 0
+		}
+		if sMax > len(runes) {
+			sMax = len(runes)
+		}
+		if sMin < sMax {
+			selText := string(runes[sMin:sMax])
+			selX0 := textX + s.measureText(string(runes[:sMin]))
+			selX1 := selX0 + s.measureText(selText)
+			backing.FillRect(frame.Rect4(selX0, r.Y0+2, selX1, r.Y1-2), selectionColor, nil)
+		}
+	}
+
 	s.drawText(backing, text, textX, textY, textColor, clip)
 
 	if s.Focus == FocusAddress {

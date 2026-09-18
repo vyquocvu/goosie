@@ -12,7 +12,15 @@ import (
 // carries a cgo build tag outside the darwin package, so a tag here would fail the
 // boundary test for naming the platform the boundary test is about.
 
-func init() { native = darwinBackend{} }
+func init() {
+	native = darwinBackend{}
+	clipboardFactory = func() interface {
+		Read() string
+		Write(string)
+	} {
+		return darwin.NewClipboard()
+	}
+}
 
 // darwinBackend is macOS's window shim, seen through the narrow API the darwin package
 // exports. It knows nothing about AppKit; the whole of that lives behind shim.h.

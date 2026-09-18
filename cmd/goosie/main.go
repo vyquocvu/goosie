@@ -255,6 +255,9 @@ func build(c config) (*framePath, error) {
 			f.toolbar.URL = normalizeURL(c.url)
 			f.toolbar.Input = normalizeURL(c.url)
 		}
+		if cb := platform.NewClipboard(); cb != nil {
+			f.toolbar.Clipboard = cb
+		}
 	}
 	f.sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: frame.RGB(248, 248, 248)})
 	return f, nil

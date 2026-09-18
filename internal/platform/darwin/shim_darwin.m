@@ -363,11 +363,28 @@ static void sendResize(GoosieContentView *v) {
 	ev.kind = GOOSIE_EV_KEY;
 	ev.scale = viewScale(self);
 	ev.at_ns = nowNs();
-	// charactersIgnoringModifiers, because the frame path wants the code point and
-	// does its own modifier reasoning; a function or arrow key yields nothing here and
-	// arrives as a zero key with no rune, which is what surface.EvKey already means.
+	ev.mods = (int)e.modifierFlags;
+	// Map special keys by keyCode first; these produce no useful character.
+	switch (e.keyCode) {
+		case 126: ev.key = GOOSIE_KEY_UP; push(gw, ev); return;
+		case 125: ev.key = GOOSIE_KEY_DOWN; push(gw, ev); return;
+		case 123: ev.key = GOOSIE_KEY_LEFT; push(gw, ev); return;
+		case 124: ev.key = GOOSIE_KEY_RIGHT; push(gw, ev); return;
+		case 115: ev.key = GOOSIE_KEY_HOME; push(gw, ev); return;
+		case 119: ev.key = GOOSIE_KEY_END; push(gw, ev); return;
+	}
+	// charactersIgnoringModifiers strips Cmd/Ctrl but keeps Option (dead keys,
+	// compose sequences). Control+letter yields a control code (1-26); convert
+	// back to the base lowercase letter so the Go handler sees the letter with
+	// ModControl rather than a bare control code.
 	NSString *chars = [e charactersIgnoringModifiers];
-	if (chars.length > 0) ev.key = (int)[chars characterAtIndex:0];
+	if (chars.length > 0) {
+		unichar c = [chars characterAtIndex:0];
+		if ((ev.mods & GOOSIE_MOD_CONTROL) && c < 0x20 && c >= 1) {
+			c = 'a' + (c - 1) % 26;
+		}
+		ev.key = (int)c;
+	}
 	push(gw, ev);
 }
 
@@ -801,12 +818,34 @@ void GoosieCounters(GoosieWindow *gw, int *queued, int *dropped, int *shed_vsync
 
 void GoosieClose(GoosieWindow *gw) {
 	if (!gw) return;
-	// Safe twice: stopDisplayLink clears the link, and pushQuit sets a flag a second
-	// call says nothing new about.
 	stopDisplayLink(gw);
 	pushQuit(gw);
-	// Nothing is dispatched to the main thread here, because the main loop reads the
-	// same flag pushQuit sets and leaves on its own inside kGoosieIdlePoll. The
-	// alternative - dispatch_async of -[NSApp stop:] - is the thing that does not work:
-	// see GoosieAppRun.
+}
+
+char *GoosieClipboardRead(void) {
+	__block char *result = NULL;
+	dispatch_sync(dispatch_get_main_queue(), ^{
+		@autoreleasepool {
+			NSPasteboard *pb = [NSPasteboard generalPasteboard];
+			NSString *s = [pb stringForType:NSPasteboardTypeString];
+			if (s) {
+				const char *utf8 = [s UTF8String];
+				if (utf8) result = strdup(utf8);
+			}
+		}
+	});
+	return result;
+}
+
+void GoosieClipboardWrite(const char *text) {
+	dispatch_sync(dispatch_get_main_queue(), ^{
+		@autoreleasepool {
+			NSPasteboard *pb = [NSPasteboard generalPasteboard];
+			[pb clearContents];
+			if (text) {
+				[pb setString:[NSString stringWithUTF8String:text]
+				       forType:NSPasteboardTypeString];
+			}
+		}
+	});
 }
