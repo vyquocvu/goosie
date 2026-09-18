@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Semantic HTML - Article and Section</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+            line-height: 1.6;
+        }
+        article {
+            max-width: 800px;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        article header {
+            background-color: #3498db;
+            color: white;
+            padding: 20px;
+        }
+        article h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+        article .meta {
+            font-size: 14px;
+            margin-top: 10px;
+            opacity: 0.9;
+        }
+        article .content {
+            padding: 20px;
+        }
+        section {
+            margin: 20px 0;
+        }
+        section h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 5px;
+        }
+        article footer {
+            background-color: #ecf0f1;
+            padding: 15px 20px;
+            font-size: 14px;
+            border-top: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <article>
+        <header>
+            <h1>Understanding Semantic HTML</h1>
+            <div class="meta">
+                Published on <time datetime="2024-01-15">January 15, 2024</time> by
+                <address>John Doe</address>
+            </div>
+        </header>
+
+        <div class="content">
+            <section>
+                <h2>Introduction</h2>
+                <p>Semantic HTML introduces meaning to the web page structure. Instead of using generic <code>&lt;div&gt;</code> elements, we use elements that describe their content.</p>
+            </section>
+
+            <section>
+                <h2>Benefits</h2>
+                <p>Using semantic HTML provides several advantages:</p>
+                <ul>
+                    <li>Improved accessibility for screen readers</li>
+                    <li>Better SEO rankings</li>
+                    <li>Easier maintenance and readability</li>
+                    <li>Consistent structure across pages</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>Common Elements</h2>
+                <p>HTML5 introduced many semantic elements:</p>
+                <ul>
+                    <li><code>&lt;header&gt;</code> - Introductory content</li>
+                    <li><code>&lt;nav&gt;</code> - Navigation links</li>
+                    <li><code>&lt;main&gt;</code> - Main content</li>
+                    <li><code>&lt;article&gt;</code> - Self-contained content</li>
+                    <li><code>&lt;section&gt;</code> - Thematic grouping</li>
+                    <li><code>&lt;aside&gt;</code> - Sidebar content</li>
+                    <li><code>&lt;footer&gt;</code> - Footer information</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>Conclusion</h2>
+                <p>Semantic HTML is essential for modern web development. It creates a better experience for all users and makes your code more maintainable.</p>
+            </section>
+        </div>
+
+        <footer>
+            <p>Tags: <a href="#html">HTML</a>, <a href="#semantic">Semantic</a>, <a href="#accessibility">Accessibility</a></p>
+            <p>Related articles: <a href="#web-standards">Web Standards</a>, <a href="#best-practices">Best Practices</a></p>
+        </footer>
+    </article>
+</body>
+</html>

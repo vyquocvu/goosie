@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Box Model - Margin</title>
+    <style>
+        body { margin: 0; padding: 20px; }
+        .box {
+            width: 200px;
+            height: 100px;
+            background-color: #3498db;
+            color: white;
+            margin: 20px;
+        }
+        .margin-top { margin-top: 40px; }
+        .margin-right { margin-right: 60px; }
+        .margin-bottom { margin-bottom: 30px; }
+        .margin-left { margin-left: 50px; }
+        .margin-all { margin: 10px 20px 30px 40px; }
+        .margin-auto { margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <h2>Margin Tests</h2>
+
+    <div class="box">Uniform margin: 20px</div>
+
+    <div class="box margin-top">Margin-top: 40px</div>
+
+    <div class="box margin-right">Margin-right: 60px</div>
+
+    <div class="box margin-bottom">Margin-bottom: 30px</div>
+
+    <div class="box margin-left">Margin-left: 50px</div>
+
+    <div class="box margin-all">Shorthand: 10px 20px 30px 40px</div>
+
+    <div class="box margin-auto" style="width: 300px;">Centered with margin: 0 auto</div>
+</body>
+</html>

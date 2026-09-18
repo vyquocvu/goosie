@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forms - Text Inputs</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"],
+        input[type="password"],
+        input[type="email"],
+        input[type="tel"],
+        input[type="url"],
+        input[type="search"],
+        input[type="number"] {
+            width: 300px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            border-color: #3498db;
+            outline: none;
+        }
+        textarea {
+            width: 300px;
+            height: 100px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: sans-serif;
+            font-size: 14px;
+            resize: vertical;
+        }
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Text Input Types</h2>
+
+    <form>
+        <div class="form-group">
+            <label for="text">Text:</label>
+            <input type="text" id="text" name="text" placeholder="Enter text">
+            <div class="hint">Standard single-line text input</div>
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" placeholder="Enter password">
+            <div class="hint">Password field (characters hidden)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" placeholder="user@example.com">
+            <div class="hint">Email address with validation</div>
+        </div>
+
+        <div class="form-group">
+            <label for="tel">Telephone:</label>
+            <input type="tel" id="tel" name="tel" placeholder="+1 (555) 123-4567">
+            <div class="hint">Phone number</div>
+        </div>
+
+        <div class="form-group">
+            <label for="url">URL:</label>
+            <input type="url" id="url" name="url" placeholder="https://example.com">
+            <div class="hint">Web address</div>
+        </div>
+
+        <div class="form-group">
+            <label for="search">Search:</label>
+            <input type="search" id="search" name="search" placeholder="Search...">
+            <div class="hint">Search field (may show clear button)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="number">Number:</label>
+            <input type="number" id="number" name="number" placeholder="42" min="0" max="100" step="1">
+            <div class="hint">Numeric input with spinner</div>
+        </div>
+
+        <div class="form-group">
+            <label for="textarea">Textarea:</label>
+            <textarea id="textarea" name="textarea" placeholder="Enter multiple lines of text..."></textarea>
+            <div class="hint">Multi-line text input</div>
+        </div>
+    </form>
+</body>
+</html>

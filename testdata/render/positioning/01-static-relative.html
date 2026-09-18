@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Positioning - Static and Relative</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .container {
+            width: 600px;
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px solid #3498db;
+        }
+        .box {
+            width: 100px;
+            height: 100px;
+            margin: 10px;
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            text-align: center;
+            line-height: 100px;
+        }
+        .static {
+            position: static;
+            background-color: #95a5a6;
+        }
+        .relative {
+            position: relative;
+            background-color: #e74c3c;
+        }
+        .relative-offset {
+            position: relative;
+            top: 20px;
+            left: 30px;
+            background-color: #2ecc71;
+        }
+        .relative-negative {
+            position: relative;
+            top: -10px;
+            left: -20px;
+            background-color: #f39c12;
+        }
+    </style>
+</head>
+<body>
+    <h2>Static Positioning (default)</h2>
+    <div class="container">
+        <div class="box static">Static 1</div>
+        <div class="box static">Static 2</div>
+        <div class="box static">Static 3</div>
+        <p>Static elements follow the normal document flow.</p>
+    </div>
+
+    <h2>Relative Positioning</h2>
+    <div class="container">
+        <div class="box relative">Relative 1</div>
+        <div class="box relative">Relative 2</div>
+        <div class="box relative">Relative 3</div>
+        <p>Relative elements are positioned relative to their normal position.</p>
+    </div>
+
+    <h2>Relative with Offsets</h2>
+    <div class="container">
+        <div class="box static">Normal</div>
+        <div class="box relative-offset">Offset +</div>
+        <div class="box relative-negative">Offset -</div>
+        <p>Elements shifted from their normal position using top/left/bottom/right.</p>
+    </div>
+
+    <h2>Relative Positioning in Context</h2>
+    <div class="container" style="position: relative;">
+        <p>This paragraph is in normal flow.</p>
+        <div class="box relative-offset" style="margin: 20px 0;">
+            Shifted
+        </div>
+        <p>This paragraph comes after the shifted element. Notice how the shifted element still occupies its original space in the flow.</p>
+    </div>
+</body>
+</html>

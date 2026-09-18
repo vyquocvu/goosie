@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Grid Layout - Alignment</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        .grid-container {
+            display: grid;
+            gap: 10px;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #ecf0f1;
+            height: 300px;
+        }
+
+        .grid-item {
+            background-color: #3498db;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        /* Justify items */
+        .justify-start {
+            grid-template-columns: 1fr 1fr 1fr;
+            justify-items: start;
+        }
+        .justify-end {
+            grid-template-columns: 1fr 1fr 1fr;
+            justify-items: end;
+        }
+        .justify-center {
+            grid-template-columns: 1fr 1fr 1fr;
+            justify-items: center;
+        }
+        .justify-stretch {
+            grid-template-columns: 1fr 1fr 1fr;
+            justify-items: stretch;
+        }
+
+        /* Align items */
+        .align-start {
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: start;
+        }
+        .align-end {
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: end;
+        }
+        .align-center {
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: center;
+        }
+        .align-stretch {
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: stretch;
+        }
+
+        /* Justify content */
+        .justify-content-start {
+            grid-template-columns: 100px 100px 100px;
+            justify-content: start;
+        }
+        .justify-content-end {
+            grid-template-columns: 100px 100px 100px;
+            justify-content: end;
+        }
+        .justify-content-center {
+            grid-template-columns: 100px 100px 100px;
+            justify-content: center;
+        }
+        .justify-content-space-between {
+            grid-template-columns: 100px 100px 100px;
+            justify-content: space-between;
+        }
+        .justify-content-space-around {
+            grid-template-columns: 100px 100px 100px;
+            justify-content: space-around;
+        }
+
+        /* Align content */
+        .align-content-start {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 50px 50px;
+            align-content: start;
+        }
+        .align-content-end {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 50px 50px;
+            align-content: end;
+        }
+        .align-content-center {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 50px 50px;
+            align-content: center;
+        }
+        .align-content-space-between {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 50px 50px;
+            align-content: space-between;
+        }
+
+        /* Place items (shorthand) */
+        .place-center {
+            grid-template-columns: 1fr 1fr 1fr;
+            place-items: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Grid Alignment Tests</h1>
+
+    <h2>Justify Items</h2>
+
+    <h3>justify-items: start</h3>
+    <div class="grid-container justify-start">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h3>justify-items: end</h3>
+    <div class="grid-container justify-end">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h3>justify-items: center</h3>
+    <div class="grid-container justify-center">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h2>Align Items</h2>
+
+    <h3>align-items: start</h3>
+    <div class="grid-container align-start">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h3>align-items: end</h3>
+    <div class="grid-container align-end">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h3>align-items: center</h3>
+    <div class="grid-container align-center">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h2>Justify Content</h2>
+
+    <h3>justify-content: start</h3>
+    <div class="grid-container justify-content-start">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h3>justify-content: center</h3>
+    <div class="grid-container justify-content-center">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h3>justify-content: space-between</h3>
+    <div class="grid-container justify-content-space-between">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+
+    <h2>Place Items (Shorthand)</h2>
+
+    <h3>place-items: center</h3>
+    <div class="grid-container place-center">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+    </div>
+</body>
+</html>

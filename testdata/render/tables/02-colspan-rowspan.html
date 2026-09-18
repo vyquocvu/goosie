@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tables - Colspan and Rowspan</title>
+    <style>
+        body { margin: 20px; }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #333;
+            padding: 10px;
+            text-align: center;
+        }
+        th {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .highlight {
+            background-color: #f39c12;
+        }
+    </style>
+</head>
+<body>
+    <h2>Colspan (Column Span)</h2>
+
+    <table>
+        <tr>
+            <th>Name</th>
+            <th colspan="2">Contact Details</th>
+        </tr>
+        <tr>
+            <td>John Doe</td>
+            <td>john@example.com</td>
+            <td>555-1234</td>
+        </tr>
+        <tr>
+            <td>Jane Smith</td>
+            <td>jane@example.com</td>
+            <td>555-5678</td>
+        </tr>
+    </table>
+
+    <h2>Rowspan (Row Span)</h2>
+
+    <table>
+        <tr>
+            <th>Category</th>
+            <th>Item</th>
+            <th>Price</th>
+        </tr>
+        <tr>
+            <td rowspan="2" class="highlight">Fruits</td>
+            <td>Apple</td>
+            <td>$1.00</td>
+        </tr>
+        <tr>
+            <td>Banana</td>
+            <td>$0.50</td>
+        </tr>
+        <tr>
+            <td rowspan="3" class="highlight">Vegetables</td>
+            <td>Carrot</td>
+            <td>$0.75</td>
+        </tr>
+        <tr>
+            <td>Broccoli</td>
+            <td>$2.00</td>
+        </tr>
+        <tr>
+            <td>Spinach</td>
+            <td>$1.50</td>
+        </tr>
+    </table>
+
+    <h2>Combined Colspan and Rowspan</h2>
+
+    <table>
+        <tr>
+            <th colspan="3">Quarterly Report</th>
+        </tr>
+        <tr>
+            <th rowspan="2">Region</th>
+            <th colspan="2">Sales</th>
+        </tr>
+        <tr>
+            <th>Q1</th>
+            <th>Q2</th>
+        </tr>
+        <tr>
+            <td>North</td>
+            <td>$10,000</td>
+            <td>$12,000</td>
+        </tr>
+        <tr>
+            <td>South</td>
+            <td>$8,000</td>
+            <td>$9,500</td>
+        </tr>
+    </table>
+</body>
+</html>

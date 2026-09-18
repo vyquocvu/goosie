@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Borders - Border Radius</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .box {
+            width: 150px;
+            height: 150px;
+            margin: 20px;
+            display: inline-block;
+            vertical-align: top;
+            background-color: #3498db;
+            color: white;
+            text-align: center;
+            line-height: 150px;
+            border: 2px solid #2c3e50;
+        }
+        .radius-uniform { border-radius: 20px; }
+        .radius-circle { border-radius: 50%; }
+        .radius-ellipse { border-radius: 50% / 30%; width: 200px; }
+        .radius-top-left { border-radius: 30px 0 0 0; }
+        .radius-top-right { border-radius: 0 30px 0 0; }
+        .radius-bottom-right { border-radius: 0 0 30px 0; }
+        .radius-bottom-left { border-radius: 0 0 0 30px; }
+        .radius-mixed { border-radius: 30px 10px 20px 5px; }
+        .radius-large { border-radius: 50px; }
+        .pill { border-radius: 999px; width: 200px; height: 50px; line-height: 50px; }
+    </style>
+</head>
+<body>
+    <h2>Border Radius</h2>
+
+    <div class="box">No radius</div>
+    <div class="box radius-uniform">Uniform 20px</div>
+    <div class="box radius-circle">Circle</div>
+    <div class="box radius-ellipse">Ellipse</div>
+    <div class="box radius-top-left">Top-left</div>
+    <div class="box radius-top-right">Top-right</div>
+    <div class="box radius-bottom-right">Bottom-right</div>
+    <div class="box radius-bottom-left">Bottom-left</div>
+    <div class="box radius-mixed">Mixed</div>
+    <div class="box radius-large">Large 50px</div>
+    <div class="box pill">Pill shape</div>
+</body>
+</html>

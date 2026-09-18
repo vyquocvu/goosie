@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lists - Unordered and Ordered</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; line-height: 1.6; }
+        .container {
+            max-width: 800px;
+            margin: 20px 0;
+        }
+        .styled-list {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .custom-bullets li {
+            list-style-type: square;
+            margin: 8px 0;
+        }
+        .custom-bullets-circle li {
+            list-style-type: circle;
+            margin: 8px 0;
+        }
+        .custom-bullets-disc li {
+            list-style-type: disc;
+            margin: 8px 0;
+        }
+        .custom-bullets-none li {
+            list-style-type: none;
+            margin: 8px 0;
+        }
+        .ordered-decimal li {
+            list-style-type: decimal;
+            margin: 8px 0;
+        }
+        .ordered-upper-alpha li {
+            list-style-type: upper-alpha;
+            margin: 8px 0;
+        }
+        .ordered-lower-alpha li {
+            list-style-type: lower-alpha;
+            margin: 8px 0;
+        }
+        .ordered-upper-roman li {
+            list-style-type: upper-roman;
+            margin: 8px 0;
+        }
+        .ordered-lower-roman li {
+            list-style-type: lower-roman;
+            margin: 8px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Unordered Lists</h2>
+
+        <div class="styled-list">
+            <h3>Disc bullets (default)</h3>
+            <ul class="custom-bullets-disc">
+                <li>First item</li>
+                <li>Second item</li>
+                <li>Third item</li>
+                <li>Fourth item with longer text to show wrapping behavior</li>
+            </ul>
+        </div>
+
+        <div class="styled-list">
+            <h3>Circle bullets</h3>
+            <ul class="custom-bullets-circle">
+                <li>Item one</li>
+                <li>Item two</li>
+                <li>Item three</li>
+            </ul>
+        </div>
+
+        <div class="styled-list">
+            <h3>Square bullets</h3>
+            <ul class="custom-bullets">
+                <li>First item</li>
+                <li>Second item</li>
+                <li>Third item</li>
+            </ul>
+        </div>
+
+        <div class="styled-list">
+            <h3>No bullets</h3>
+            <ul class="custom-bullets-none">
+                <li>Item without bullet</li>
+                <li>Another item</li>
+                <li>Third item</li>
+            </ul>
+        </div>
+
+        <h2>Ordered Lists</h2>
+
+        <div class="styled-list">
+            <h3>Decimal numbers (default)</h3>
+            <ol class="ordered-decimal">
+                <li>First step</li>
+                <li>Second step</li>
+                <li>Third step</li>
+                <li>Fourth step with longer text to demonstrate wrapping</li>
+            </ol>
+        </div>
+
+        <div class="styled-list">
+            <h3>Upper case letters</h3>
+            <ol class="ordered-upper-alpha">
+                <li>Item A</li>
+                <li>Item B</li>
+                <li>Item C</li>
+            </ol>
+        </div>
+
+        <div class="styled-list">
+            <h3>Lower case letters</h3>
+            <ol class="ordered-lower-alpha">
+                <li>Item a</li>
+                <li>Item b</li>
+                <li>Item c</li>
+            </ol>
+        </div>
+
+        <div class="styled-list">
+            <h3>Upper case Roman numerals</h3>
+            <ol class="ordered-upper-roman">
+                <li>Chapter I</li>
+                <li>Chapter II</li>
+                <li>Chapter III</li>
+            </ol>
+        </div>
+
+        <div class="styled-list">
+            <h3>Lower case Roman numerals</h3>
+            <ol class="ordered-lower-roman">
+                <li>Section i</li>
+                <li>Section ii</li>
+                <li>Section iii</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>

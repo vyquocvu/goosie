@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Borders - Border Colors</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .box {
+            width: 200px;
+            height: 100px;
+            margin: 20px;
+            display: inline-block;
+            vertical-align: top;
+            text-align: center;
+            line-height: 100px;
+            border: 4px solid;
+        }
+        .color-red { border-color: red; }
+        .color-green { border-color: #2ecc71; }
+        .color-blue { border-color: rgb(52, 152, 219); }
+        .color-multi {
+            border-top-color: #e74c3c;
+            border-right-color: #3498db;
+            border-bottom-color: #2ecc71;
+            border-left-color: #f39c12;
+        }
+        .color-transparent { border-color: transparent; background-color: #3498db; }
+        .color-inherit { color: purple; border-color: currentColor; }
+    </style>
+</head>
+<body>
+    <h2>Border Colors</h2>
+
+    <div class="box color-red">Red</div>
+    <div class="box color-green">Green</div>
+    <div class="box color-blue">Blue</div>
+    <div class="box color-multi">Multi-color</div>
+    <div class="box color-transparent">Transparent</div>
+    <div class="box color-inherit">CurrentColor</div>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Selectors - Pseudo-elements</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* ::first-line */
+        p.first-line-test {
+            font-size: 16px;
+            line-height: 1.6;
+        }
+        p.first-line-test::first-line {
+            color: #3498db;
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        /* ::first-letter */
+        p.first-letter-test {
+            font-size: 16px;
+        }
+        p.first-letter-test::first-letter {
+            font-size: 48px;
+            color: #e74c3c;
+            font-weight: bold;
+            float: left;
+            margin-right: 10px;
+        }
+
+        /* ::before */
+        .with-before::before {
+            content: "★ ";
+            color: #f39c12;
+            font-size: 20px;
+        }
+
+        /* ::after */
+        .with-after::after {
+            content: " ✓";
+            color: #2ecc71;
+            font-weight: bold;
+        }
+
+        /* ::before and ::after together */
+        .quote::before {
+            content: """;
+            font-size: 48px;
+            color: #3498db;
+            vertical-align: -20px;
+        }
+        .quote::after {
+            content: """;
+            font-size: 48px;
+            color: #3498db;
+            vertical-align: -20px;
+        }
+
+        /* ::selection */
+        ::selection {
+            background-color: #f39c12;
+            color: white;
+        }
+
+        /* Combined with other selectors */
+        li::before {
+            content: "→ ";
+            color: #9b59b6;
+        }
+
+        /* Generated content */
+        .note::before {
+            content: "📝 Note: ";
+            font-weight: bold;
+            color: #3498db;
+        }
+
+        .warning::before {
+            content: "⚠️ Warning: ";
+            font-weight: bold;
+            color: #e74c3c;
+        }
+
+        .tip::before {
+            content: "💡 Tip: ";
+            font-weight: bold;
+            color: #2ecc71;
+        }
+
+        /* Counter with ::before */
+        .numbered-list {
+            counter-reset: item;
+            list-style: none;
+            padding: 0;
+        }
+        .numbered-list li {
+            counter-increment: item;
+            margin: 10px 0;
+        }
+        .numbered-list li::before {
+            content: counter(item) ". ";
+            font-weight: bold;
+            color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pseudo-elements Test</h1>
+
+    <h2>::first-line</h2>
+    <p class="first-line-test">This is the first line of the paragraph which should be styled differently. The rest of the paragraph continues with normal styling. Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+
+    <h2>::first-letter</h2>
+    <p class="first-letter-test">This paragraph has a large first letter that stands out. The rest of the text flows normally around it. This is often used for drop caps in articles and books.</p>
+
+    <h2>::before</h2>
+    <p class="with-before">This paragraph has a star before it</p>
+    <p class="with-before">Another paragraph with a star</p>
+
+    <h2>::after</h2>
+    <p class="with-after">This paragraph has a checkmark after it</p>
+    <p class="with-after">Another paragraph with a checkmark</p>
+
+    <h2>::before and ::after together</h2>
+    <p class="quote">This text is wrapped in decorative quotation marks</p>
+
+    <h2>::selection</h2>
+    <p>Try selecting this text - it should have an orange background with white text</p>
+
+    <h2>List with ::before</h2>
+    <ul>
+        <li>Item with arrow</li>
+        <li>Another item</li>
+        <li>Third item</li>
+    </ul>
+
+    <h2>Generated Content</h2>
+    <p class="note">This is an important note with an icon</p>
+    <p class="warning">Be careful with this operation</p>
+    <p class="tip">Here's a helpful tip for you</p>
+
+    <h2>Counter with ::before</h2>
+    <ol class="numbered-list">
+        <li>First item</li>
+        <li>Second item</li>
+        <li>Third item</li>
+        <li>Fourth item</li>
+        <li>Fifth item</li>
+    </ol>
+</body>
+</html>

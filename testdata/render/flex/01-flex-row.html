@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flexbox - Basic Row</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .flex-container {
+            display: flex;
+            background-color: #ecf0f1;
+            padding: 10px;
+            margin: 20px 0;
+            border: 2px solid #3498db;
+        }
+        .flex-item {
+            background-color: #3498db;
+            color: white;
+            padding: 20px;
+            margin: 5px;
+            text-align: center;
+        }
+        .flex-grow-1 { flex-grow: 1; }
+        .flex-grow-2 { flex-grow: 2; }
+        .flex-basis-100 { flex-basis: 100px; }
+        .flex-basis-200 { flex-basis: 200px; }
+    </style>
+</head>
+<body>
+    <h2>Flexbox Row Layout</h2>
+
+    <h3>Default flex row</h3>
+    <div class="flex-container">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>Flex-grow: all equal</h3>
+    <div class="flex-container">
+        <div class="flex-item flex-grow-1">Grow 1</div>
+        <div class="flex-item flex-grow-1">Grow 1</div>
+        <div class="flex-item flex-grow-1">Grow 1</div>
+    </div>
+
+    <h3>Flex-grow: mixed ratios</h3>
+    <div class="flex-container">
+        <div class="flex-item flex-grow-1">Grow 1</div>
+        <div class="flex-item flex-grow-2">Grow 2</div>
+        <div class="flex-item flex-grow-1">Grow 1</div>
+    </div>
+
+    <h3>Flex-basis: fixed widths</h3>
+    <div class="flex-container">
+        <div class="flex-item flex-basis-100">Basis 100px</div>
+        <div class="flex-item flex-basis-200">Basis 200px</div>
+        <div class="flex-item flex-basis-100">Basis 100px</div>
+    </div>
+
+    <h3>Flex shorthand</h3>
+    <div class="flex-container">
+        <div class="flex-item" style="flex: 1 1 100px;">Flex: 1 1 100px</div>
+        <div class="flex-item" style="flex: 2 1 150px;">Flex: 2 1 150px</div>
+        <div class="flex-item" style="flex: 1 1 100px;">Flex: 1 1 100px</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Colors - Opacity</title>
+    <style>
+        body { margin: 20px; }
+        .container {
+            width: 400px;
+            height: 200px;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="40" height="40" fill="%23ccc"/><rect x="40" y="40" width="40" height="40" fill="%23ccc"/><rect x="80" width="40" height="40" fill="%23ccc"/><rect x="120" y="40" width="40" height="40" fill="%23ccc"/><rect x="160" width="40" height="40" fill="%23ccc"/><rect x="200" y="40" width="40" height="40" fill="%23ccc"/><rect x="240" width="40" height="40" fill="%23ccc"/><rect x="280" y="40" width="40" height="40" fill="%23ccc"/><rect x="320" width="40" height="40" fill="%23ccc"/><rect x="360" y="40" width="40" height="40" fill="%23ccc"/></svg>');
+            position: relative;
+            margin: 20px 0;
+        }
+        .box {
+            position: absolute;
+            width: 150px;
+            height: 100px;
+            background-color: red;
+            color: white;
+            padding: 20px;
+        }
+        .opacity-1 { opacity: 1; }
+        .opacity-0-8 { opacity: 0.8; }
+        .opacity-0-6 { opacity: 0.6; }
+        .opacity-0-4 { opacity: 0.4; }
+        .opacity-0-2 { opacity: 0.2; }
+        .opacity-0 { opacity: 0; }
+    </style>
+</head>
+<body>
+    <h2>Opacity</h2>
+
+    <div class="container">
+        <div class="box opacity-1" style="top: 10px; left: 10px;">Opacity: 1</div>
+    </div>
+
+    <div class="container">
+        <div class="box opacity-0-8" style="top: 10px; left: 10px;">Opacity: 0.8</div>
+    </div>
+
+    <div class="container">
+        <div class="box opacity-0-6" style="top: 10px; left: 10px;">Opacity: 0.6</div>
+    </div>
+
+    <div class="container">
+        <div class="box opacity-0-4" style="top: 10px; left: 10px;">Opacity: 0.4</div>
+    </div>
+
+    <div class="container">
+        <div class="box opacity-0-2" style="top: 10px; left: 10px;">Opacity: 0.2</div>
+    </div>
+
+    <div class="container">
+        <div class="box opacity-0" style="top: 10px; left: 10px;">Opacity: 0 (invisible)</div>
+    </div>
+</body>
+</html>

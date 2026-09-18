@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Box Model - Border</title>
+    <style>
+        body { margin: 20px; }
+        .box {
+            width: 200px;
+            height: 80px;
+            margin: 20px 0;
+            background-color: #ecf0f1;
+        }
+        .border-solid { border: 3px solid #3498db; }
+        .border-dashed { border: 3px dashed #e74c3c; }
+        .border-dotted { border: 3px dotted #2ecc71; }
+        .border-double { border: 5px double #9b59b6; }
+        .border-individual {
+            border-top: 4px solid #f39c12;
+            border-right: 3px dashed #1abc9c;
+            border-bottom: 2px dotted #e67e22;
+            border-left: 6px double #34495e;
+        }
+        .border-radius { border: 2px solid #3498db; border-radius: 10px; }
+        .border-circle { border: 2px solid #e74c3c; border-radius: 50%; width: 100px; height: 100px; }
+    </style>
+</head>
+<body>
+    <h2>Border Tests</h2>
+
+    <div class="box border-solid">Solid border</div>
+    <div class="box border-dashed">Dashed border</div>
+    <div class="box border-dotted">Dotted border</div>
+    <div class="box border-double">Double border</div>
+    <div class="box border-individual">Individual borders</div>
+    <div class="box border-radius">Rounded corners</div>
+    <div class="border-circle">Circle</div>
+</body>
+</html>

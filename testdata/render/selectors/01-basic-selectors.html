@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Selectors - Basic</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* Element selector */
+        p { color: blue; }
+
+        /* Class selector */
+        .highlight { background-color: yellow; }
+
+        /* ID selector */
+        #special { font-weight: bold; color: red; }
+
+        /* Universal selector */
+        * { margin: 0; }
+
+        /* Descendant selector */
+        div p { color: green; }
+
+        /* Child selector */
+        div > p { border: 1px solid #333; padding: 5px; }
+
+        /* Adjacent sibling selector */
+        h2 + p { font-style: italic; }
+
+        /* General sibling selector */
+        h2 ~ p { color: purple; }
+
+        /* Attribute selectors */
+        [data-type] { background-color: #ecf0f1; padding: 5px; }
+        [data-type="warning"] { background-color: #f39c12; color: white; }
+        [data-type^="info"] { background-color: #3498db; color: white; }
+        [data-type$="error"] { background-color: #e74c3c; color: white; }
+        [data-type*="success"] { background-color: #2ecc71; color: white; }
+
+        /* Multiple classes */
+        .text-large.text-bold { font-size: 24px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>CSS Selectors Test</h1>
+
+    <h2>Element Selector</h2>
+    <p>This paragraph is blue (element selector)</p>
+
+    <h2>Class Selector</h2>
+    <p class="highlight">This has a yellow background (class selector)</p>
+
+    <h2>ID Selector</h2>
+    <p id="special">This is bold and red (ID selector)</p>
+
+    <h2>Descendant Selector</h2>
+    <div>
+        <p>This paragraph is green (descendant selector)</p>
+        <span>
+            <p>This is also green (nested descendant)</p>
+        </span>
+    </div>
+
+    <h2>Child Selector</h2>
+    <div>
+        <p>This has a border (direct child)</p>
+        <span>
+            <p>This does NOT have a border (not direct child)</p>
+        </span>
+    </div>
+
+    <h2>Adjacent Sibling Selector</h2>
+    <p>This paragraph is NOT italic</p>
+    <p>This paragraph IS italic (adjacent to h2)</p>
+    <p>This paragraph is NOT italic</p>
+
+    <h2>General Sibling Selector</h2>
+    <p>This is purple (general sibling)</p>
+    <p>This is also purple</p>
+    <p>And this too</p>
+
+    <h2>Attribute Selectors</h2>
+    <p data-type="info">Has data-type attribute (gray background)</p>
+    <p data-type="warning">data-type="warning" (orange)</p>
+    <p data-type="info-alert">data-type starts with "info" (blue)</p>
+    <p data-type="critical-error">data-type ends with "error" (red)</p>
+    <p data-type="operation-success">data-type contains "success" (green)</p>
+
+    <h2>Multiple Classes</h2>
+    <p class="text-large">Large text only</p>
+    <p class="text-bold">Bold text only</p>
+    <p class="text-large text-bold">Large AND bold (both classes)</p>
+</body>
+</html>

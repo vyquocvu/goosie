@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Box Model - Width and Height</title>
+    <style>
+        body { margin: 20px; }
+        .box {
+            background-color: #9b59b6;
+            color: white;
+            margin: 10px 0;
+            padding: 10px;
+        }
+        .fixed-size { width: 300px; height: 150px; }
+        .percentage-width { width: 50%; height: 100px; }
+        .max-width { max-width: 400px; width: 100%; }
+        .min-width { min-width: 200px; width: 100px; }
+        .max-height { max-height: 100px; height: 200px; overflow: hidden; }
+        .min-height { min-height: 150px; height: 50px; }
+        .box-sizing-content { width: 200px; padding: 20px; border: 5px solid #3498db; box-sizing: content-box; }
+        .box-sizing-border { width: 200px; padding: 20px; border: 5px solid #e74c3c; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <h2>Width and Height Tests</h2>
+
+    <div class="box fixed-size">Fixed: 300px × 150px</div>
+
+    <div class="box percentage-width">Percentage width: 50%</div>
+
+    <div class="box max-width">Max-width: 400px (should not exceed)</div>
+
+    <div class="box min-width">Min-width: 200px (should be at least 200px)</div>
+
+    <div class="box max-height">Max-height: 100px (content may overflow)</div>
+
+    <div class="box min-height">Min-height: 150px</div>
+
+    <div class="box box-sizing-content">Content-box: 200px + padding + border</div>
+
+    <div class="box box-sizing-border">Border-box: 200px total</div>
+</body>
+</html>

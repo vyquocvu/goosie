@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forms - Advanced Inputs</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .form-group {
+            margin: 20px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        input[type="date"],
+        input[type="time"],
+        input[type="datetime-local"],
+        input[type="month"],
+        input[type="week"],
+        input[type="color"],
+        input[type="range"],
+        input[type="file"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="range"] {
+            width: 300px;
+        }
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        output {
+            display: inline-block;
+            margin-left: 10px;
+            padding: 5px 10px;
+            background-color: #ecf0f1;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Advanced Input Types</h2>
+
+    <form>
+        <div class="form-group">
+            <label for="date">Date:</label>
+            <input type="date" id="date" name="date">
+            <div class="hint">Date picker (YYYY-MM-DD)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="time">Time:</label>
+            <input type="time" id="time" name="time">
+            <div class="hint">Time picker (HH:MM)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="datetime-local">Date and Time:</label>
+            <input type="datetime-local" id="datetime-local" name="datetime-local">
+            <div class="hint">Combined date and time picker</div>
+        </div>
+
+        <div class="form-group">
+            <label for="month">Month:</label>
+            <input type="month" id="month" name="month">
+            <div class="hint">Month and year picker</div>
+        </div>
+
+        <div class="form-group">
+            <label for="week">Week:</label>
+            <input type="week" id="week" name="week">
+            <div class="hint">Week picker</div>
+        </div>
+
+        <div class="form-group">
+            <label for="color">Color:</label>
+            <input type="color" id="color" name="color" value="#3498db">
+            <div class="hint">Color picker</div>
+        </div>
+
+        <div class="form-group">
+            <label for="range">Range slider:</label>
+            <input type="range" id="range" name="range" min="0" max="100" value="50" step="1">
+            <output>50</output>
+            <div class="hint">Slider control (0-100)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="file">File upload:</label>
+            <input type="file" id="file" name="file" accept="image/*">
+            <div class="hint">File selector (images only)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="file-multiple">Multiple files:</label>
+            <input type="file" id="file-multiple" name="file-multiple" multiple>
+            <div class="hint">Multiple file selection</div>
+        </div>
+
+        <div class="form-group">
+            <label for="hidden">Hidden input:</label>
+            <input type="hidden" id="hidden" name="hidden" value="secret-value">
+            <div class="hint">Hidden field (not visible, value: "secret-value")</div>
+        </div>
+    </form>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Overflow - Visible and Hidden</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .container {
+            width: 200px;
+            height: 150px;
+            margin: 20px;
+            display: inline-block;
+            vertical-align: top;
+            border: 2px solid #3498db;
+            background-color: #ecf0f1;
+            padding: 10px;
+        }
+        .overflow-visible { overflow: visible; }
+        .overflow-hidden { overflow: hidden; }
+        .overflow-scroll { overflow: scroll; }
+        .overflow-auto { overflow: auto; }
+        .overflow-x-hidden { overflow-x: hidden; overflow-y: visible; }
+        .overflow-y-hidden { overflow-x: visible; overflow-y: hidden; }
+        .content {
+            width: 300px;
+            height: 250px;
+            background-color: rgba(231, 76, 60, 0.7);
+            color: white;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Overflow Values</h2>
+
+    <h3>Visible (default) - content overflows</h3>
+    <div class="container overflow-visible">
+        <div class="content">
+            This content is larger than its container and should overflow visibly.
+        </div>
+    </div>
+
+    <h3>Hidden - content clipped</h3>
+    <div class="container overflow-hidden">
+        <div class="content">
+            This content is larger than its container and should be clipped/hidden.
+        </div>
+    </div>
+
+    <h3>Scroll - scrollbars always visible</h3>
+    <div class="container overflow-scroll">
+        <div class="content">
+            This content has scrollbars always visible, even if content fits.
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+        </div>
+    </div>
+
+    <h3>Auto - scrollbars when needed</h3>
+    <div class="container overflow-auto">
+        <div class="content">
+            This content shows scrollbars only when needed.
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor.
+        </div>
+    </div>
+
+    <h3>Overflow-X hidden, Overflow-Y visible</h3>
+    <div class="container overflow-x-hidden">
+        <div class="content">
+            Horizontal overflow hidden, vertical visible.
+        </div>
+    </div>
+
+    <h3>Overflow-X visible, Overflow-Y hidden</h3>
+    <div class="container overflow-y-hidden">
+        <div class="content">
+            Horizontal overflow visible, vertical hidden.
+        </div>
+    </div>
+</body>
+</html>
