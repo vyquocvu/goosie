@@ -666,7 +666,7 @@ func TestPoolRasterizesRealTilesIntoGridBuffers(t *testing.T) {
 	// proof is per-tile agreement with a single-threaded raster of that same tile.
 	for _, c := range []frame.TileCoord{{Col: 0, Row: 0}, {Col: 1, Row: 0}, {Col: 2, Row: 2}} {
 		ref := newTile()
-		if err := raster.RasterizeTile(dl, c.Rect(frame.TileSize), ref, f, g); err != nil {
+		if err := raster.RasterizeTile(dl, c.Rect(frame.TileSize), ref, f, g, frame.TransparentBlack); err != nil {
 			t.Fatalf("RasterizeTile: %v", err)
 		}
 		got := l.Grid.Pixels(c)

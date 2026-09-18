@@ -16,6 +16,7 @@ import (
 type glyphKey struct {
 	r    rune
 	size int32
+	slot frame.FontSlot
 }
 
 type glyphVal struct {
@@ -67,10 +68,10 @@ func NewGlyphAtlas(budget int64, f *Fonts) *GlyphAtlas {
 	}
 }
 
-// Get returns the rendering of r at a device-pixel size, rasterizing it on a
-// miss. The zero Glyph means the font has no such glyph.
-func (a *GlyphAtlas) Get(r rune, size int32) Glyph {
-	k := glyphKey{r: r, size: size}
+// Get returns the rendering of r in a slot at a device-pixel size, rasterizing
+// it on a miss. The zero Glyph means the font has no such glyph.
+func (a *GlyphAtlas) Get(r rune, size int32, slot frame.FontSlot) Glyph {
+	k := glyphKey{r: r, size: size, slot: slot}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if el, ok := a.index[k]; ok {
@@ -79,7 +80,7 @@ func (a *GlyphAtlas) Get(r rune, size int32) Glyph {
 		return el.Value.(*glyphVal).g
 	}
 	a.stats.Misses++
-	g := a.fonts.Glyph(size, r)
+	g := a.fonts.Glyph(size, r, slot)
 	if !g.Ok || g.Mask == nil {
 		// Uncached: a miss with nothing to store. Repeated lookups for the same
 		// absent glyph stay cheap because Fonts memoizes its own answer.
@@ -95,8 +96,8 @@ func (a *GlyphAtlas) Get(r rune, size int32) Glyph {
 // GlyphBound returns the box r occupies relative to the pen, without exposing
 // the mask. Tile selection and text bounds use it; a false result means the
 // glyph is unknown or draws nothing.
-func (a *GlyphAtlas) GlyphBound(r rune, size int32) (frame.Rect, bool) {
-	g := a.Get(r, size)
+func (a *GlyphAtlas) GlyphBound(r rune, size int32, slot frame.FontSlot) (frame.Rect, bool) {
+	g := a.Get(r, size, slot)
 	if !g.Ok || g.Mask == nil {
 		return frame.Rect{}, false
 	}

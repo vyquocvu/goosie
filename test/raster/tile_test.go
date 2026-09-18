@@ -54,7 +54,7 @@ func TestRasterizeTileFillInside(t *testing.T) {
 		Rect:  frame.Rect4(10, 20, 30, 40),
 		Color: frame.RGB(255, 0, 0),
 	})
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if got := out.At(10, 20); got != frame.RGB(255, 0, 0) {
@@ -78,7 +78,7 @@ func TestRasterizeTileFillOutsideWritesNothing(t *testing.T) {
 		Rect:  frame.Rect4(1000, 1000, 1100, 1100),
 		Color: frame.RGB(0, 255, 0),
 	})
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if n := inkPixels(out); n != 0 {
@@ -95,7 +95,7 @@ func TestRasterizeTileFillAtTileEdgeIsClipped(t *testing.T) {
 	})
 	// The tile covers content [0,256); the command covers [250,400). Only the
 	// 6x6 corner belongs to this tile, and the rest must land in the neighbours.
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if got := out.At(255, 255); got != frame.RGB(0, 0, 255) {
@@ -114,7 +114,7 @@ func TestRasterizeTileNegativeOrigin(t *testing.T) {
 		Color: frame.RGB(9, 9, 9),
 	})
 	// The tile spans content [-256, 0); the command's right half is inside it.
-	if err := raster.RasterizeTile(dl, frame.Rect4(-256, -256, 0, 0), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(-256, -256, 0, 0), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if got := out.At(255, 255); got != frame.RGB(9, 9, 9) {
@@ -141,7 +141,7 @@ func TestRasterizeTileBorderPerSideWidths(t *testing.T) {
 			Bottom: paint.SideSpec{Width: 10, Color: red},
 		},
 	})
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	checks := []struct {
@@ -170,7 +170,7 @@ func TestRasterizeTileTextDrawsInk(t *testing.T) {
 	out := newTile()
 	f, g := mustFonts(t)
 	dl := build(t, textCmd("Goosie", 40, 60, 16))
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if n := inkPixels(out); n == 0 {
@@ -184,7 +184,7 @@ func TestRasterizeTileTextIsDeterministicAcrossWorkers(t *testing.T) {
 
 	render := func() uint64 {
 		out := newTile()
-		if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g); err != nil {
+		if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 			t.Fatalf("RasterizeTile: %v", err)
 		}
 		return hashTile(out)
@@ -212,7 +212,7 @@ func TestRasterizeTileGlyphPlacedRelativeToPen(t *testing.T) {
 	at := func(x, y int32) uint64 {
 		out := newTile()
 		dl := build(t, textCmd("A", x, y, 16))
-		if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g); err != nil {
+		if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 			t.Fatalf("RasterizeTile: %v", err)
 		}
 		return hashTile(out)
@@ -238,7 +238,7 @@ func TestRasterizeTileImageScalesIntoRect(t *testing.T) {
 		Rect:  frame.Rect4(8, 8, 40, 40),
 		Image: paint.ImageSpec{Src: src},
 	})
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if got := out.At(8, 8); got.G() < 150 || got.G() <= got.R() {
@@ -271,14 +271,14 @@ func TestRasterizeTileZeroAllocAfterWarmup(t *testing.T) {
 	)
 	out := newTile()
 	// Warm every glyph in the run into the atlas, then measure.
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile warmup: %v", err)
 	}
 	if inkPixels(out) == 0 {
 		t.Fatal("the warmup pass drew nothing; the measurement below would be meaningless")
 	}
 	if n := testing.AllocsPerRun(500, func() {
-		if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g); err != nil {
+		if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 			t.Errorf("RasterizeTile: %v", err)
 		}
 	}); n != 0 {
@@ -294,8 +294,8 @@ func TestGlyphCacheReusesFaceAcrossDPR(t *testing.T) {
 	g := raster.NewGlyphAtlas(1<<20, f)
 	// GlyphRun.Size is already a device-pixel size, so a 16px glyph at DPR 1 and
 	// a 16px glyph at DPR 2 are the same bitmap and must be rasterized once.
-	first := g.Get('a', 16)
-	second := g.Get('a', 16)
+	first := g.Get('a', 16, frame.FontSlot{})
+	second := g.Get('a', 16, frame.FontSlot{})
 	if !first.Ok || !second.Ok {
 		t.Fatal("glyph lookup failed")
 	}
@@ -306,7 +306,7 @@ func TestGlyphCacheReusesFaceAcrossDPR(t *testing.T) {
 		t.Fatalf("Misses = %d, want 1 for two lookups of one glyph at one size", got)
 	}
 	// A different device size is a different bitmap, not a rescale.
-	if big := g.Get('a', 32); big.Mask == first.Mask {
+	if big := g.Get('a', 32, frame.FontSlot{}); big.Mask == first.Mask {
 		t.Fatal("32px reused the 16px mask; glyphs must be rasterized at their own size")
 	}
 }
@@ -316,13 +316,13 @@ func TestGlyphAtlasEvictsToBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFonts: %v", err)
 	}
-	one := f.Glyph(16, 'a').Bytes()
+	one := f.Glyph(16, 'a', frame.FontSlot{}).Bytes()
 	if one == 0 {
 		t.Fatal("a 16px glyph mask is empty; the budget below would not bind")
 	}
 	g := raster.NewGlyphAtlas(one*2, f)
 	for _, r := range []rune{'a', 'b', 'c', 'd', 'e'} {
-		g.Get(r, 16)
+		g.Get(r, 16, frame.FontSlot{})
 	}
 	st := g.Stats()
 	if st.Bytes > st.Budget {
@@ -334,7 +334,7 @@ func TestGlyphAtlasEvictsToBudget(t *testing.T) {
 }
 
 func TestRasterizeTileNilDestination(t *testing.T) {
-	if err := raster.RasterizeTile(nil, frame.Rect4(0, 0, 256, 256), nil, nil, nil); err == nil {
+	if err := raster.RasterizeTile(nil, frame.Rect4(0, 0, 256, 256), nil, nil, nil, frame.TransparentBlack); err == nil {
 		t.Fatal("nil destination accepted")
 	}
 }
@@ -343,7 +343,7 @@ func TestRasterizeTileEmptyListClears(t *testing.T) {
 	out := frame.NewBitmap(16, 16)
 	out.FillRect(out.Bounds(), frame.RGB(1, 2, 3), nil)
 	dl := build(t)
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 16, 16), out, nil, nil); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 16, 16), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
 	if n := inkPixels(out); n != 0 {
@@ -359,7 +359,7 @@ func TestRasterizeTileConcurrentSameAtlas(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			out := newTile()
-			if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g); err != nil {
+			if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 				t.Errorf("RasterizeTile: %v", err)
 			}
 			ch <- hashTile(out)

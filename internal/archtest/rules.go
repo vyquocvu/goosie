@@ -44,8 +44,8 @@ var Allowed = map[string][]string{
 	"internal/css":               {"internal/dom"},
 	"internal/net":               nil,
 	"internal/image":             nil,
-	"internal/style":             {"internal/css", "internal/dom"},
-	"internal/layout":            {"internal/dom", "internal/style"},
+	"internal/style":             {"internal/css", "internal/dom", "internal/frame"},
+	"internal/layout":            {"internal/dom", "internal/style", "internal/frame"},
 	"internal/engine":            {"internal/dom", "internal/css", "internal/style", "internal/layout", "internal/paint", "internal/frame"},
 	"internal/toolbar":           {"internal/frame", "internal/raster", "internal/surface"},
 }
@@ -331,13 +331,24 @@ func UsesCgo(path string) bool {
 // CheckCgo walks every .go file under v2Dir and returns the paths that use cgo but
 // do not live in allowedDir. It reads files rather than the import graph because
 // cgo needs no new import at all.
+//
+// Dot-directories and node_modules are pruned: a nested git worktree under
+// .worktrees/ is a second full checkout, and walking it reports that checkout's
+// own legal internal/platform/darwin files as violations.
 func CheckCgo(v2Dir, allowedDir string) ([]string, error) {
 	var found []string
 	err := filepath.Walk(v2Dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") || !UsesCgo(path) {
+		if info.IsDir() {
+			name := filepath.Base(path)
+			if path != v2Dir && (strings.HasPrefix(name, ".") || name == "node_modules") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || !UsesCgo(path) {
 			return nil
 		}
 		if filepath.Dir(path) != allowedDir {

@@ -30,21 +30,23 @@ var ErrNilDestination = errors.New("raster: nil tile destination")
 // g is the glyph cache and is what a frame path passes. It may be nil, in which
 // case glyphs come straight from f unshared - a slower rendering that exists so a
 // one-off tool can rasterize a tile without building an atlas.
-func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas) error {
+func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas, bg frame.Color) error {
 	if out == nil {
 		return ErrNilDestination
 	}
 	if out.Empty() {
 		return fmt.Errorf("raster: tile buffer has no pixels for %v", bounds)
 	}
-	out.Reset()
+	if bg.Opaque() {
+		out.FillRect(out.Bounds(), bg, nil)
+	} else {
+		out.Reset()
+	}
 	if dl == nil || dl.Len() == 0 {
 		return nil
 	}
 	b := bounds.Canon()
 	dx, dy := -b.X0, -b.Y0
-	// The tile buffer's own bounds are the clip: a command that runs past the
-	// edge belongs to the neighbouring tile as well, and each draws its own part.
 	clip := out.Bounds()
 	for _, c := range dl.Intersecting(b) {
 		if !c.Intersects(b) {
@@ -52,7 +54,11 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 		}
 		switch c.Kind {
 		case paint.CmdFill:
-			out.FillRect(c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), nil)
+			if c.Radius.Empty() {
+				out.FillRect(c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), nil)
+			} else {
+				out.FillRounded(c.Rect.Translate(dx, dy), c.Radius, applyOpacity(c.Color, c.Opacity), nil)
+			}
 		case paint.CmdBorder:
 			drawBorder(out, &c, dx, dy, clip)
 		case paint.CmdText:
@@ -61,6 +67,8 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 			}
 		case paint.CmdImage:
 			drawImage(out, &c, dx, dy, clip)
+		case paint.CmdGradient:
+			out.FillLinearGradient(c.Rect.Translate(dx, dy), c.Radius, c.Gradient, nil)
 		}
 	}
 	return nil
@@ -99,6 +107,19 @@ func drawBorder(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame
 	}
 	r := c.Rect.Translate(dx, dy).Canon()
 	w, h := r.W(), r.H()
+	if !c.Radius.Empty() {
+		// A rounded box's ring is one shape, not four strips: the corner bands
+		// belong to the horizontal edges, so the arc stays continuous.
+		out.StrokeRounded(r, c.Radius,
+			clampW(c.Border.Top.Width, h), clampW(c.Border.Right.Width, w),
+			clampW(c.Border.Bottom.Width, h), clampW(c.Border.Left.Width, w),
+			applyOpacity(c.Border.Top.Color, c.Opacity),
+			applyOpacity(c.Border.Right.Color, c.Opacity),
+			applyOpacity(c.Border.Bottom.Color, c.Opacity),
+			applyOpacity(c.Border.Left.Color, c.Opacity),
+			nil)
+		return
+	}
 	var sides [4]side
 	sides[0] = side{c.Border.Top, frame.Rect4(r.X0, r.Y0, r.X1, r.Y0+clampW(c.Border.Top.Width, h))}
 	sides[1] = side{c.Border.Bottom, frame.Rect4(r.X0, r.Y1-clampW(c.Border.Bottom.Width, h), r.X1, r.Y1)}
@@ -135,9 +156,9 @@ func drawText(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.R
 		}
 		var glyph Glyph
 		if g != nil {
-			glyph = g.Get(gl.Rune, gl.Size)
+			glyph = g.Get(gl.Rune, gl.Size, gl.Slot)
 		} else {
-			glyph = f.Glyph(gl.Size, gl.Rune)
+			glyph = f.Glyph(gl.Size, gl.Rune, gl.Slot)
 		}
 		if !glyph.Ok || glyph.Mask == nil || glyph.Mask.Bounds().Empty() {
 			continue

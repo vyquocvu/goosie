@@ -110,7 +110,7 @@ func run(args []string) error {
 		return fmt.Errorf("init fonts: %w", err)
 	}
 
-	sess, err := engine.NewSession(string(html), authorCSS, float32(c.width), engine.WithMetrics(fonts))
+	sess, err := engine.NewSession(string(html), authorCSS, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)
 	}

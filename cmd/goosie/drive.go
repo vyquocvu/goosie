@@ -120,3 +120,58 @@ func (d *driver) finish() {
 }
 
 var _ surface.Window = (*driver)(nil)
+
+// steadyDriver is a window that passes vsyncs through without scrolling and
+// signals done after a fixed number of frames. It is the screenshot mode's
+// driver: the page loads in the background, the loop presents frames, and
+// after enough frames for tiles to rasterize the run exits and writes a PNG.
+type steadyDriver struct {
+	surface.Window
+	out  chan surface.Event
+	done chan struct{}
+	n    int
+
+	mu   sync.Mutex
+	sent int
+}
+
+func newSteadyDriver(f *framePath, frames int) *steadyDriver {
+	d := &steadyDriver{
+		Window: f.window,
+		out:    make(chan surface.Event),
+		done:   make(chan struct{}),
+		n:      frames,
+	}
+	go d.pump()
+	return d
+}
+
+func (d *steadyDriver) Events() <-chan surface.Event { return d.out }
+
+func (d *steadyDriver) pump() {
+	defer close(d.out)
+	for ev := range d.Window.Events() {
+		d.mu.Lock()
+		if ev.Kind == surface.EvVsync {
+			d.sent++
+			if d.sent >= d.n {
+				d.mu.Unlock()
+				select {
+				case d.out <- ev:
+				case <-d.done:
+					return
+				}
+				close(d.done)
+				return
+			}
+		}
+		d.mu.Unlock()
+		select {
+		case d.out <- ev:
+		case <-d.done:
+			return
+		}
+	}
+}
+
+var _ surface.Window = (*steadyDriver)(nil)

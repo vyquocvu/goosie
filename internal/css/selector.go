@@ -1,6 +1,7 @@
 package css
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -19,10 +20,10 @@ type SelectorPart struct {
 
 // Condition is one test on a node.
 type Condition struct {
-	Type  ConditionType
-	Value string
-	Attr  string
-	Op    string
+	Type   ConditionType
+	Value  string
+	Attr   string
+	Op     string
 	Pseudo string
 }
 
@@ -130,9 +131,11 @@ func ParseSelector(s string) Selector {
 		}
 
 		if combinator != 0 && len(current.Conditions) > 0 {
-			current.Combinator = combinator
+			// A combinator relates its left-hand part to the part that follows it,
+			// and matchParts reads it off the right-hand side, so the flushed part
+			// keeps the combinator that introduced it and the new one takes this.
 			parts = append(parts, current)
-			current = SelectorPart{}
+			current = SelectorPart{Combinator: combinator}
 		}
 
 		cond, newI := parseCondition(s, i)
@@ -255,7 +258,7 @@ func (s Selector) Matches(n *dom.Node) bool {
 	if len(s.Parts) == 0 {
 		return false
 	}
-	return matchParts(s.Parts, len(s.Parts)- 1, n)
+	return matchParts(s.Parts, len(s.Parts)-1, n)
 }
 
 func matchParts(parts []SelectorPart, idx int, n *dom.Node) bool {
@@ -401,10 +404,117 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		return false
 	case "checked", "disabled", "enabled", "placeholder-shown":
 		return false
+	case "nth-child":
+		return matchNth(c.Pseudo, n, false, false)
+	case "nth-last-child":
+		return matchNth(c.Pseudo, n, false, true)
+	case "nth-of-type":
+		return matchNth(c.Pseudo, n, true, false)
+	case "nth-last-of-type":
+		return matchNth(c.Pseudo, n, true, true)
+	case "first-of-type":
+		return matchNth("1", n, true, false)
+	case "last-of-type":
+		return matchNth("1", n, true, true)
+	case "only-of-type":
+		return matchNth("1", n, true, false) && matchNth("1", n, true, true)
 	}
 	return false
 }
 
+// matchNth resolves an An+B expression against the node's position among its
+// element siblings.
+func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
+	a, b, ok := parseNth(arg)
+	if !ok {
+		return false
+	}
+	i, total := nthIndex(n, ofType)
+	if i == 0 {
+		return false
+	}
+	if fromEnd {
+		i = total - i + 1
+	}
+	if a == 0 {
+		return i == b
+	}
+	d := i - b
+	return d%a == 0 && d/a >= 0
+}
+
+// nthIndex returns the node's 1-based position among its element siblings and
+// how many such siblings exist. ofType restricts both counts to the same tag
+// name, which is what separates nth-child from nth-of-type.
+func nthIndex(n *dom.Node, ofType bool) (index, total int) {
+	if n.Parent == nil {
+		return 0, 0
+	}
+	for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
+		if !c.Element() || (ofType && c.Data != n.Data) {
+			continue
+		}
+		total++
+		if c == n {
+			index = total
+		}
+	}
+	return index, total
+}
+
+// parseNth reads the An+B microsyntax along with the odd and even keywords. The
+// argument arrives with its whitespace intact, so the whole expression is
+// squeezed first and only then split around the `n`.
+func parseNth(arg string) (a, b int, ok bool) {
+	s := strings.ToLower(strings.Join(strings.Fields(arg), ""))
+	switch s {
+	case "":
+		return 0, 0, false
+	case "odd":
+		return 2, 1, true
+	case "even":
+		return 2, 0, true
+	}
+	i := strings.IndexByte(s, 'n')
+	if i < 0 {
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, 0, false
+		}
+		return 0, v, true
+	}
+	switch coef := s[:i]; coef {
+	case "", "+":
+		a = 1
+	case "-":
+		a = -1
+	default:
+		v, err := strconv.Atoi(coef)
+		if err != nil {
+			return 0, 0, false
+		}
+		a = v
+	}
+	rest := s[i+1:]
+	if rest == "" {
+		return a, 0, true
+	}
+	sign := 1
+	switch rest[0] {
+	case '+':
+		rest = rest[1:]
+	case '-':
+		sign = -1
+		rest = rest[1:]
+	default:
+		return 0, 0, false
+	}
+	v, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0, 0, false
+	}
+	return a, sign * v, true
+}
 
 func isFirstElementChild(n *dom.Node) bool {
 	if n.Parent == nil {

@@ -1,10 +1,13 @@
 package style
 
 import (
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/frame"
 )
 
 // Display is the CSS display property value.
@@ -27,6 +30,8 @@ const (
 	DisplayTableColumn
 	DisplayTableColumnGroup
 	DisplayTableCaption
+	DisplayGrid
+	DisplayInlineGrid
 )
 
 // Position is the CSS position property value.
@@ -158,25 +163,25 @@ const (
 // ComputedStyle holds every CSS property fully resolved to concrete values.
 // Every length is float32 in CSS pixels; no parse step remains for layout.
 type ComputedStyle struct {
-	Display      Display
-	Position     Position
-	Float        Float
-	Clear        Clear
-	Overflow     Overflow
-	OverflowX    Overflow
-	OverflowY    Overflow
-	BoxSizing    BoxSizing
-	Visibility   string
-	Opacity      float32
-	ZIndex       int32
-	HasZIndex    bool
+	Display    Display
+	Position   Position
+	Float      Float
+	Clear      Clear
+	Overflow   Overflow
+	OverflowX  Overflow
+	OverflowY  Overflow
+	BoxSizing  BoxSizing
+	Visibility string
+	Opacity    float32
+	ZIndex     int32
+	HasZIndex  bool
 
-	Width      float32
-	Height     float32
-	MinWidth   float32
-	MinHeight  float32
-	MaxWidth   float32
-	MaxHeight  float32
+	Width     float32
+	Height    float32
+	MinWidth  float32
+	MinHeight float32
+	MaxWidth  float32
+	MaxHeight float32
 
 	MarginTop    float32
 	MarginRight  float32
@@ -203,33 +208,56 @@ type ComputedStyle struct {
 	BorderBottomColor css.Color
 	BorderLeftColor   css.Color
 
+	// BorderRadius is each corner's horizontal and vertical radius in the order
+	// top-left, top-right, bottom-right, bottom-left. A percentage arrives still
+	// encoded as one, the way every other box length does: a radius is a share of
+	// the box, and the cascade has no box to measure it against.
+	BorderRadius [4][2]float32
+
 	Top    float32
 	Right  float32
 	Bottom float32
 	Left   float32
+	// The insets default to 0 in the numeric fields, which is also what the
+	// initial `auto` stores. Layout has to tell "top: 0" from "top: auto" to
+	// resolve an absolutely positioned box, so each side carries whether it was
+	// specified.
+	HasTop, HasRight, HasBottom, HasLeft bool
 
-	Color            css.Color
-	BackgroundColor  css.Color
+	Color           css.Color
+	BackgroundColor css.Color
+	// BackgroundGradient is a linear-gradient() taken from the background
+	// shorthand or background-image, painted over the colour.
+	BackgroundGradient Gradient
 
-	FontFamily    string
-	FontSize      float32
-	FontWeight    FontWeight
-	FontStyle     FontStyle
-	LineHeight    float32
-	TextAlign     TextAlign
-	TextIndent    float32
-	TextTransform string
-	TextDecoration TextDecoration
-	WhiteSpace    WhiteSpace
-	WordSpacing   float32
-	LetterSpacing float32
+	// FontFamily is the family resolved from the declared font-family list:
+	// the first entry the engine can serve, or the standard font when none of
+	// them can be. See parseFontFamily.
+	FontFamily frame.FontFamily
+	FontSize   float32
+	FontWeight FontWeight
+	FontStyle  FontStyle
+	LineHeight float32
+	// LineHeightRatio is the number or percentage form of a declared
+	// line-height, which is what actually inherits: each element re-derives its
+	// own height from its own font size, so a 1.6 on the body gives a 32px
+	// heading 51px rather than the 26px its 16px parent computed. Zero means the
+	// declaration was a length, or there was none.
+	LineHeightRatio float32
+	TextAlign       TextAlign
+	TextIndent      float32
+	TextTransform   string
+	TextDecoration  TextDecoration
+	WhiteSpace      WhiteSpace
+	WordSpacing     float32
+	LetterSpacing   float32
 
 	VerticalAlign string
 
 	ListStyleType ListStyleType
 
-	FlexDirection FlexDirection
-	FlexWrap      FlexWrap
+	FlexDirection  FlexDirection
+	FlexWrap       FlexWrap
 	JustifyContent string
 	AlignItems     string
 	AlignSelf      string
@@ -238,8 +266,51 @@ type ComputedStyle struct {
 	FlexBasis      float32
 	Gap            float32
 
-	TableLayout string
+	// The grid track lists stay as declared text: sizing a track needs the
+	// container's own width, which the cascade does not have, so the layout pass
+	// parses them.
+	GridTemplateColumns string
+	GridTemplateRows    string
+	GridTemplateAreas   string
+	GridArea            string
+	GridColumnSpan      int
+	GridRowSpan         int
+	// Grids use the bare keywords "start" and "end" where flexbox writes
+	// "flex-start" and "flex-end", so each axis keeps its own value.
+	JustifyItems string
+	AlignContent string
+
+	TableLayout    string
 	BorderCollapse bool
+	// BorderSpacing is the gap a separated table leaves between and around its
+	// cells. `collapse` ignores both values.
+	BorderSpacingH float32
+	BorderSpacingV float32
+}
+
+// AnonymousBlockStyle is the style of the block box layout invents to hold
+// inline content that shares a container with block-level children: the parent's
+// typography, with the box properties that belong to the parent rather than to
+// the content inside it dropped.
+func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
+	var s ComputedStyle
+	if parent == nil {
+		s = DefaultStyle()
+	} else {
+		s = *parent
+	}
+	s.Display = DisplayBlock
+	s.Position = PositionStatic
+	s.Width = -1
+	s.Height = -1
+	s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight = 0, 0, -1, -1
+	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
+	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
+	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
+	// The parent's background already covers this area; painting it twice would
+	// double the alpha of a translucent box.
+	s.BackgroundColor = css.Color{}
+	return &s
 }
 
 // DefaultStyle returns the initial computed style with CSS defaults.
@@ -262,23 +333,55 @@ func DefaultStyle() ComputedStyle {
 		// unitless multiplier recomputes per element's font size. Consumers
 		// fall back to fontSize * 1.2 when they see a value at or below zero.
 		LineHeight: -1,
-		FontFamily: "Go Regular",
+		// Serif, not the embedded sans: a document that names no family is
+		// drawn in the engine's standard font, and Blink's on macOS is Times
+		// New Roman. Matching that is most of the difference in where text
+		// wraps.
+		FontFamily: frame.FontTimes,
+		// A flex item gives back main-axis space it cannot keep unless the author
+		// says otherwise, so shrink defaults to 1 while grow defaults to 0.
+		FlexShrink: 1,
 		Visibility: "visible",
 		WhiteSpace: WhiteSpaceNormal,
+		FlexBasis:  -1,
 	}
 }
 
-// UserAgentStylesheet returns the default UA stylesheet.
-func UserAgentStylesheet() *css.Stylesheet {
-	return css.Parse(uaCSS)
+// FontSlot is the face a computed style draws with: the resolved family at the
+// resolved weight and slant.
+//
+// Layout measures with this and paint draws with it, which is the only way a
+// word's width and its glyphs can't disagree. CSS weights are coarser here than
+// in a browser with a variable font - this engine loads one regular and one bold
+// file per family - so anything at or above 700 is the bold face. Oblique takes
+// the italic face rather than synthesizing a slant.
+func (cs *ComputedStyle) FontSlot() frame.FontSlot {
+	if cs == nil {
+		return frame.FontSlot{}
+	}
+	return frame.FontSlot{
+		Family: cs.FontFamily,
+		Bold:   cs.FontWeight >= WeightBold,
+		Italic: cs.FontStyle != FontStyleNormal,
+	}
 }
 
+// UserAgentStylesheet returns the default UA stylesheet. It is parsed once and
+// the same pointer comes back every time, which is how the cascade recognises
+// UA rules: origin outranks specificity, so an author `*` declaration beats a
+// UA element rule no matter how the two score on (id, class, type).
+func UserAgentStylesheet() *css.Stylesheet {
+	uaSheetOnce.Do(func() { uaSheet = css.Parse(uaCSS) })
+	return uaSheet
+}
+
+var (
+	uaSheetOnce sync.Once
+	uaSheet     *css.Stylesheet
+)
+
 var uaCSS = `
-html, body, div, span, h1, h2, h3, h4, h5, h6, p, a, img,
-ul, ol, li, table, thead, tbody, tr, td, th, form, input, button,
-select, textarea, label, header, footer, nav, main, section, article,
-aside, figure, figcaption, pre, code, blockquote, dl, dt, dd,
-address, details, summary, dialog, fieldset, legend {
+input, button, select, textarea, table {
 	box-sizing: border-box;
 }
 html { display: block; }
@@ -306,7 +409,7 @@ caption { display: table-caption; text-align: center; }
 colgroup { display: table-column-group; }
 col { display: table-column; }
 pre { display: block; white-space: pre; font-family: monospace; margin: 1em 0; }
-code { font-family: monospace; }
+code, kbd, samp, tt { font-family: monospace; }
 blockquote { display: block; margin: 1em 40px; }
 hr { display: block; margin-top: 0.5em; margin-bottom: 0.5em; border-top: 1px solid; }
 br { display: inline; }
@@ -332,32 +435,79 @@ fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border
 legend { display: block; padding: 0 0.25em; }
 form { display: block; }
 label { display: inline; }
-input, select, textarea, button { display: inline; }
+select, textarea { display: inline; }
+/* A text or tick control is a replaced box: Chrome gives it a box of its own
+   whose size comes from the control rather than from content. The other input
+   types shrink to a label the engine does not read out of an attribute, or draw
+   a widget it cannot reproduce, so they stay inline and take no box. */
+input { display: inline-block; background-color: #ffffff; }
+input[type=submit], input[type=reset], input[type=button], input[type=image],
+input[type=file], input[type=date], input[type=time], input[type=datetime-local],
+input[type=datetime], input[type=month], input[type=week], input[type=color],
+input[type=range] { display: inline; }
+input[type=hidden] { display: none; }
+/* Chrome lays a button out as an inline-level box that shrinks to its label, so
+   a row of buttons sits side by side. */
+button { display: inline-block; text-align: center; }
 dl { display: block; margin-top: 1em; margin-bottom: 1em; }
 dt { display: block; font-weight: 700; }
 dd { display: block; margin-left: 40px; }
 address { display: block; font-style: italic; }
 `
 
-// Resolve computes the style for every element in the document.
+// Viewport is the size a document is laid out in. The viewport units are a share
+// of it, and nothing else in the cascade depends on the frame's size.
+type Viewport struct {
+	W, H float32
+}
+
+// inViewport rewrites a declaration whose value is a viewport unit as the pixels
+// that unit stands for. Resolving it here, where the size is known, is what keeps
+// vw/vh out of every consumer downstream; a declaration with no viewport to speak
+// of keeps the fallback the value parser assumed.
+func inViewport(d css.Declaration, vp Viewport) css.Declaration {
+	if vp.W <= 0 || vp.H <= 0 {
+		return d
+	}
+	v := d.Parsed
+	if v.Type != css.ValueLength {
+		return d
+	}
+	switch v.Unit {
+	case "vw", "vh", "vmin", "vmax":
+	default:
+		return d
+	}
+	d.Parsed = css.Value{Type: css.ValueLength, Num: float64(v.ToLengthWithContext(0, vp.W, vp.H)), Unit: "px"}
+	return d
+}
+
+// Resolve computes the style for every element in a document laid out in an
+// unspecified viewport, which is what the viewport units then fall back to.
 func Resolve(doc *dom.Document, sheets []*css.Stylesheet) map[dom.NodeID]*ComputedStyle {
+	return ResolveViewport(doc, sheets, Viewport{})
+}
+
+// ResolveViewport computes the style for every element in a document laid out in
+// the given viewport.
+func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport) map[dom.NodeID]*ComputedStyle {
 	allSheets := []*css.Stylesheet{UserAgentStylesheet()}
 	allSheets = append(allSheets, sheets...)
 
 	result := make(map[dom.NodeID]*ComputedStyle)
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, allSheets, result)
+		resolveNode(c, allSheets, result, vp)
 	}
 	return result
 }
 
-func resolveNode(n *dom.Node, sheets []*css.Stylesheet, result map[dom.NodeID]*ComputedStyle) {
+func resolveNode(n *dom.Node, sheets []*css.Stylesheet, result map[dom.NodeID]*ComputedStyle, vp Viewport) {
 	if n == nil {
 		return
 	}
 	if n.Element() {
 		parentStyle := findParentStyle(n, result)
-		cs := computeStyle(n, sheets, parentStyle)
+		cs := computeStyle(n, sheets, parentStyle, vp)
 		result[n.ID] = cs
 	} else if n.Type == 2 {
 		parentStyle := findParentStyle(n, result)
@@ -367,7 +517,7 @@ func resolveNode(n *dom.Node, sheets []*css.Stylesheet, result map[dom.NodeID]*C
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, sheets, result)
+		resolveNode(c, sheets, result, vp)
 	}
 }
 
@@ -386,7 +536,39 @@ func inheritStyle(parent *ComputedStyle) *ComputedStyle {
 	return &cs
 }
 
-func computeStyle(n *dom.Node, sheets []*css.Stylesheet, parent *ComputedStyle) *ComputedStyle {
+// cascadeEntry is one declaration plus the origin and specificity it arrived
+// under. A declaration's value survives only by beating every other declaration
+// for the same property, and the order that decides it is CSS's own: importance
+// splits the list into two passes, then origin outranks specificity, and
+// specificity outranks document order.
+type cascadeEntry struct {
+	decl    css.Declaration
+	origin  int
+	a, b, c int
+	order   int
+}
+
+func (e cascadeEntry) before(o cascadeEntry) bool {
+	if e.origin != o.origin {
+		return e.origin < o.origin
+	}
+	if e.a != o.a {
+		return e.a < o.a
+	}
+	if e.b != o.b {
+		return e.b < o.b
+	}
+	if e.c != o.c {
+		return e.c < o.c
+	}
+	return e.order < o.order
+}
+
+func sortCascade(entries []cascadeEntry) {
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].before(entries[j]) })
+}
+
+func computeStyle(n *dom.Node, sheets []*css.Stylesheet, parent *ComputedStyle, vp Viewport) *ComputedStyle {
 	cs := DefaultStyle()
 	if parent != nil {
 		inheritFromParent(&cs, parent)
@@ -397,19 +579,64 @@ func computeStyle(n *dom.Node, sheets []*css.Stylesheet, parent *ComputedStyle) 
 		parentFontSize = parent.FontSize
 	}
 
+	var normal, important []cascadeEntry
+	var allDecls []css.Declaration
+	order := 0
 	for _, sheet := range sheets {
+		origin := 1
+		if sheet == uaSheet {
+			origin = 0
+		}
 		for _, rule := range sheet.Rules {
-			for i, sel := range rule.Selectors {
-				if sel.Matches(n) {
-					a, b, c := sel.Specificity()
-					_ = rule.SelectorStrs[i]
-					applyDeclarations(&cs, rule.Declarations, a, b, c, false, parentFontSize)
+			for _, sel := range rule.Selectors {
+				if !sel.Matches(n) {
+					continue
 				}
+				a, b, c := sel.Specificity()
+				for _, d := range rule.Declarations {
+					e := cascadeEntry{decl: inViewport(d, vp), origin: origin, a: a, b: b, c: c, order: order}
+					order++
+					if d.Important {
+						important = append(important, e)
+					} else {
+						normal = append(normal, e)
+					}
+				}
+				allDecls = append(allDecls, rule.Declarations...)
 			}
 		}
 	}
 
-	applyInlineStyle(&cs, n.GetAttribute("style"), parentFontSize)
+	if inline := n.GetAttribute("style"); inline != "" {
+		decls := parseInlineDeclarations(inline)
+		for _, d := range decls {
+			e := cascadeEntry{decl: inViewport(d, vp), origin: 2, a: 1, b: 1, c: 1, order: order}
+			order++
+			if d.Important {
+				important = append(important, e)
+			} else {
+				normal = append(normal, e)
+			}
+		}
+		allDecls = append(allDecls, decls...)
+	}
+
+	sortCascade(normal)
+	sortCascade(important)
+	for _, e := range normal {
+		applyProperty(&cs, e.decl.Property, e.decl.Value, e.decl.Parsed, parentFontSize)
+	}
+	for _, e := range important {
+		applyProperty(&cs, e.decl.Property, e.decl.Value, e.decl.Parsed, parentFontSize)
+	}
+
+	// A unitless or percentage line-height is a share of the element's own font
+	// size, so it only resolves once that size is final.
+	if cs.LineHeightRatio > 0 {
+		cs.LineHeight = cs.LineHeightRatio * cs.FontSize
+	}
+
+	resolveCurrentColor(&cs, allDecls)
 
 	return &cs
 }
@@ -421,6 +648,7 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.FontWeight = parent.FontWeight
 	cs.FontStyle = parent.FontStyle
 	cs.LineHeight = parent.LineHeight
+	cs.LineHeightRatio = parent.LineHeightRatio
 	cs.TextAlign = parent.TextAlign
 	cs.Visibility = parent.Visibility
 	cs.WhiteSpace = parent.WhiteSpace
@@ -533,7 +761,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 
 	case "margin":
 		t, r, b, l := parseMarginShorthand(value, cs.FontSize)
-		cs.MarginTop = t; cs.MarginRight = r; cs.MarginBottom = b; cs.MarginLeft = l
+		cs.MarginTop = t
+		cs.MarginRight = r
+		cs.MarginBottom = b
+		cs.MarginLeft = l
 	case "margin-top":
 		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "margin-right":
@@ -545,7 +776,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 
 	case "padding":
 		t, r, b, l := parsePaddingShorthand(value, cs.FontSize)
-		cs.PaddingTop = t; cs.PaddingRight = r; cs.PaddingBottom = b; cs.PaddingLeft = l
+		cs.PaddingTop = t
+		cs.PaddingRight = r
+		cs.PaddingBottom = b
+		cs.PaddingLeft = l
 	case "padding-top":
 		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize)
 	case "padding-right":
@@ -555,15 +789,26 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "padding-left":
 		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize)
 
-
 	case "border":
 		w, s, c := parseBorderShorthand(value)
-		cs.BorderTopWidth = w; cs.BorderRightWidth = w; cs.BorderBottomWidth = w; cs.BorderLeftWidth = w
-		cs.BorderTopStyle = s; cs.BorderRightStyle = s; cs.BorderBottomStyle = s; cs.BorderLeftStyle = s
-		cs.BorderTopColor = c; cs.BorderRightColor = c; cs.BorderBottomColor = c; cs.BorderLeftColor = c
+		cs.BorderTopWidth = w
+		cs.BorderRightWidth = w
+		cs.BorderBottomWidth = w
+		cs.BorderLeftWidth = w
+		cs.BorderTopStyle = s
+		cs.BorderRightStyle = s
+		cs.BorderBottomStyle = s
+		cs.BorderLeftStyle = s
+		cs.BorderTopColor = c
+		cs.BorderRightColor = c
+		cs.BorderBottomColor = c
+		cs.BorderLeftColor = c
 	case "border-width":
 		t, r, b, l := parseBoxShorthand(value)
-		cs.BorderTopWidth = t; cs.BorderRightWidth = r; cs.BorderBottomWidth = b; cs.BorderLeftWidth = l
+		cs.BorderTopWidth = t
+		cs.BorderRightWidth = r
+		cs.BorderBottomWidth = b
+		cs.BorderLeftWidth = l
 	case "border-top-width":
 		cs.BorderTopWidth = resolveLength(parsed, 0)
 	case "border-right-width":
@@ -574,7 +819,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BorderLeftWidth = resolveLength(parsed, 0)
 	case "border-style":
 		t, r, b, l := parseBorderStyles(value)
-		cs.BorderTopStyle = t; cs.BorderRightStyle = r; cs.BorderBottomStyle = b; cs.BorderLeftStyle = l
+		cs.BorderTopStyle = t
+		cs.BorderRightStyle = r
+		cs.BorderBottomStyle = b
+		cs.BorderLeftStyle = l
 	case "border-top-style":
 		cs.BorderTopStyle = value
 	case "border-right-style":
@@ -585,8 +833,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BorderLeftStyle = value
 	case "border-color":
 		colors := parseBorderColors(value)
-		cs.BorderTopColor = colors[0]; cs.BorderRightColor = colors[1]
-		cs.BorderBottomColor = colors[2]; cs.BorderLeftColor = colors[3]
+		cs.BorderTopColor = colors[0]
+		cs.BorderRightColor = colors[1]
+		cs.BorderBottomColor = colors[2]
+		cs.BorderLeftColor = colors[3]
 	case "border-top-color":
 		cs.BorderTopColor = parseColorValue(value)
 	case "border-right-color":
@@ -597,38 +847,56 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BorderLeftColor = parseColorValue(value)
 	case "border-top":
 		w, s, c := parseBorderShorthand(value)
-		cs.BorderTopWidth = w; cs.BorderTopStyle = s; cs.BorderTopColor = c
+		cs.BorderTopWidth = w
+		cs.BorderTopStyle = s
+		cs.BorderTopColor = c
 	case "border-right":
 		w, s, c := parseBorderShorthand(value)
-		cs.BorderRightWidth = w; cs.BorderRightStyle = s; cs.BorderRightColor = c
+		cs.BorderRightWidth = w
+		cs.BorderRightStyle = s
+		cs.BorderRightColor = c
 	case "border-bottom":
 		w, s, c := parseBorderShorthand(value)
-		cs.BorderBottomWidth = w; cs.BorderBottomStyle = s; cs.BorderBottomColor = c
+		cs.BorderBottomWidth = w
+		cs.BorderBottomStyle = s
+		cs.BorderBottomColor = c
 	case "border-left":
 		w, s, c := parseBorderShorthand(value)
-		cs.BorderLeftWidth = w; cs.BorderLeftStyle = s; cs.BorderLeftColor = c
+		cs.BorderLeftWidth = w
+		cs.BorderLeftStyle = s
+		cs.BorderLeftColor = c
 	case "border-radius":
-		// simplified: store as border-top-left-radius for now
+		parseBorderRadius(cs, value)
+	case "border-top-left-radius":
+		parseCornerRadius(cs, &cs.BorderRadius[0], value)
+	case "border-top-right-radius":
+		parseCornerRadius(cs, &cs.BorderRadius[1], value)
+	case "border-bottom-right-radius":
+		parseCornerRadius(cs, &cs.BorderRadius[2], value)
+	case "border-bottom-left-radius":
+		parseCornerRadius(cs, &cs.BorderRadius[3], value)
 
 	case "top":
 		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.HasTop = lengthSpecified(parsed)
 	case "right":
 		cs.Right = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.HasRight = lengthSpecified(parsed)
 	case "bottom":
 		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.HasBottom = lengthSpecified(parsed)
 	case "left":
 		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.HasLeft = lengthSpecified(parsed)
 
 	case "color":
 		cs.Color = parseColorValue(value)
 	case "background-color":
 		cs.BackgroundColor = parseColorValue(value)
 	case "background":
-		// Extract the color component from a background shorthand value.
-		// The shorthand may contain url(), position, repeat, and color in
-		// any order; try each whitespace-separated token and take the first
-		// one that parses as a color.
-		cs.BackgroundColor = parseBackgroundColor(value)
+		cs.BackgroundColor, cs.BackgroundGradient = parseBackground(value)
+	case "background-image":
+		cs.BackgroundGradient = parseGradient(value)
 
 	case "font-family":
 		cs.FontFamily = parseFontFamily(value)
@@ -642,6 +910,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseFontShorthand(cs, value, parentFontSize)
 	case "line-height":
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
+		cs.LineHeightRatio = lineHeightRatio(parsed)
 	case "text-align":
 		cs.TextAlign = parseTextAlign(value)
 	case "text-indent":
@@ -683,6 +952,25 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.FlexBasis = resolveLength(parsed, -1)
 	case "gap":
 		cs.Gap = resolveLength(parsed, 0)
+	case "grid-gap":
+		// The superseded name for gap, still what a page declares.
+		cs.Gap = resolveLength(parsed, 0)
+	case "grid-template-columns":
+		cs.GridTemplateColumns = value
+	case "grid-template-rows":
+		cs.GridTemplateRows = value
+	case "grid-template-areas":
+		cs.GridTemplateAreas = value
+	case "grid-area":
+		cs.GridArea = strings.TrimSpace(strings.ToLower(value))
+	case "grid-column":
+		cs.GridColumnSpan = parseGridSpan(value)
+	case "grid-row":
+		cs.GridRowSpan = parseGridSpan(value)
+	case "justify-items":
+		cs.JustifyItems = value
+	case "align-content":
+		cs.AlignContent = value
 	case "flex":
 		parseFlexShorthand(cs, value)
 
@@ -691,7 +979,24 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-collapse":
 		cs.BorderCollapse = value == "collapse"
 	case "border-spacing":
-		// simplified
+		// One value sets both axes; two split between horizontal and vertical.
+		// A negative gap is clamped to zero rather than letting cells overlap.
+		parts := strings.Fields(value)
+		if len(parts) > 0 {
+			h := resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize)
+			v := h
+			if len(parts) > 1 {
+				v = resolveLengthEm(css.ParseValue(parts[1]), 0, cs.FontSize)
+			}
+			if h < 0 {
+				h = 0
+			}
+			if v < 0 {
+				v = 0
+			}
+			cs.BorderSpacingH = h
+			cs.BorderSpacingV = v
+		}
 	}
 }
 
@@ -719,6 +1024,18 @@ func resolveLengthEm(v css.Value, auto, fontSize float32) float32 {
 	return v.ToLengthWithEm(fontSize)
 }
 
+// lengthSpecified reports whether a top/right/bottom/left value is a used
+// length rather than the initial `auto`. A unitless 0 counts: it is the one
+// unitless number CSS accepts as a length, so the number type carries it.
+func lengthSpecified(v css.Value) bool {
+	switch v.Type {
+	case css.ValueLength, css.ValuePercentage:
+		return true
+	case css.ValueNumber:
+		return v.Num == 0
+	}
+	return false
+}
 
 func resolveFontSize(v css.Value, parent float32) float32 {
 	switch v.Type {
@@ -754,6 +1071,25 @@ func resolveFontSize(v css.Value, parent float32) float32 {
 	return float32(v.Num)
 }
 
+// lineHeightRatio reports the inheritable form of a line-height: a number or a
+// percentage. A length, and the keyword normal, return zero because they carry
+// no share of the font size forward.
+func lineHeightRatio(v css.Value) float32 {
+	switch v.Type {
+	case css.ValueNumber:
+		if v.Num <= 0 {
+			return 0
+		}
+		return float32(v.Num)
+	case css.ValuePercentage:
+		if v.Num <= 0 {
+			return 0
+		}
+		return float32(v.Num) / 100
+	}
+	return 0
+}
+
 func resolveLineHeight(v css.Value, fontSize float32) float32 {
 	switch v.Type {
 	case css.ValueNumber:
@@ -784,6 +1120,10 @@ func parseDisplay(v string) Display {
 		return DisplayFlex
 	case "inline-flex":
 		return DisplayInlineFlex
+	case "grid":
+		return DisplayGrid
+	case "inline-grid":
+		return DisplayInlineGrid
 	case "list-item":
 		return DisplayListItem
 	case "table":
@@ -909,12 +1249,65 @@ func parseFontStyle(v string) FontStyle {
 	return FontStyleNormal
 }
 
-func parseFontFamily(v string) string {
-	v = strings.TrimSpace(v)
+// fontFamilies names every family this engine can serve, by the lowercased CSS
+// name. Generic keywords are here too, which is what makes a list like
+// `Georgia, serif` resolve without special-casing the tail.
+//
+// cursive and fantasy have no matching host face here - Blink answers with
+// Apple Chancery and Papyrus - so they take Georgia, the closest available
+// calligraphic serif.
+var fontFamilies = map[string]frame.FontFamily{
+	"serif":              frame.FontTimes,
+	"times":              frame.FontTimes,
+	"times new roman":    frame.FontTimes,
+	"liberation serif":   frame.FontTimes,
+	"sans-serif":         frame.FontArial,
+	"arial":              frame.FontArial,
+	"helvetica":          frame.FontArial,
+	"helvetica neue":     frame.FontArial,
+	"liberation sans":    frame.FontArial,
+	"dejavu sans":        frame.FontArial,
+	"system-ui":          frame.FontArial,
+	"-apple-system":      frame.FontArial,
+	"blinkmacsystemfont": frame.FontArial,
+	"segoe ui":           frame.FontArial,
+	"monospace":          frame.FontCourier,
+	"courier":            frame.FontCourier,
+	"courier new":        frame.FontCourier,
+	"menlo":              frame.FontCourier,
+	"consolas":           frame.FontCourier,
+	"georgia":            frame.FontGeorgia,
+	"cursive":            frame.FontGeorgia,
+	"fantasy":            frame.FontGeorgia,
+	"verdana":            frame.FontVerdana,
+	"tahoma":             frame.FontVerdana,
+	"go":                 frame.FontGo,
+	"go regular":         frame.FontGo,
+}
+
+// parseFontFamily walks a declared font-family list and returns the first family
+// this engine can serve. A name it does not know is unavailable rather than
+// unknown-but-drawn, exactly as a browser skips a family that is not installed,
+// so the list keeps falling through to its generic keyword. An exhausted list
+// lands on the standard font.
+func parseFontFamily(v string) frame.FontFamily {
+	for _, part := range strings.Split(v, ",") {
+		if fam, ok := fontFamilies[normalizeFontName(part)]; ok {
+			return fam
+		}
+	}
+	return frame.FontTimes
+}
+
+// normalizeFontName folds away what CSS allows around a family name: quoting,
+// case, and repeated spaces, so "Times  New Roman" and times new roman are one
+// name.
+func normalizeFontName(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
 	v = strings.Trim(v, "\"'")
-	if idx := strings.Index(v, ","); idx >= 0 {
-		v = strings.TrimSpace(v[:idx])
-		v = strings.Trim(v, "\"'")
+	v = strings.TrimSpace(v)
+	for strings.Contains(v, "  ") {
+		v = strings.ReplaceAll(v, "  ", " ")
 	}
 	return v
 }
@@ -977,6 +1370,81 @@ func parseFlexWrap(v string) FlexWrap {
 func parseColorValue(v string) css.Color {
 	c, _ := css.ParseColor(v)
 	return c
+}
+
+func resolveCurrentColor(cs *ComputedStyle, decls []css.Declaration) {
+	handled := make(map[string]bool)
+	for i := len(decls) - 1; i >= 0; i-- {
+		d := decls[i]
+		lower := strings.TrimSpace(strings.ToLower(d.Value))
+		isCC := lower == "currentcolor"
+
+		switch d.Property {
+		case "border-color":
+			if handled["border-color"] {
+				continue
+			}
+			if isCC {
+				if !handled["border-top-color"] {
+					cs.BorderTopColor = cs.Color
+				}
+				if !handled["border-right-color"] {
+					cs.BorderRightColor = cs.Color
+				}
+				if !handled["border-bottom-color"] {
+					cs.BorderBottomColor = cs.Color
+				}
+				if !handled["border-left-color"] {
+					cs.BorderLeftColor = cs.Color
+				}
+			}
+			handled["border-color"] = true
+			handled["border-top-color"] = true
+			handled["border-right-color"] = true
+			handled["border-bottom-color"] = true
+			handled["border-left-color"] = true
+		case "border-top-color":
+			if handled["border-top-color"] {
+				continue
+			}
+			if isCC {
+				cs.BorderTopColor = cs.Color
+			}
+			handled["border-top-color"] = true
+		case "border-right-color":
+			if handled["border-right-color"] {
+				continue
+			}
+			if isCC {
+				cs.BorderRightColor = cs.Color
+			}
+			handled["border-right-color"] = true
+		case "border-bottom-color":
+			if handled["border-bottom-color"] {
+				continue
+			}
+			if isCC {
+				cs.BorderBottomColor = cs.Color
+			}
+			handled["border-bottom-color"] = true
+		case "border-left-color":
+			if handled["border-left-color"] {
+				continue
+			}
+			if isCC {
+				cs.BorderLeftColor = cs.Color
+			}
+			handled["border-left-color"] = true
+		case "background-color":
+			if handled["background-color"] {
+				continue
+			}
+			if isCC {
+				cs.BackgroundColor = cs.Color
+			}
+			handled["background-color"] = true
+		}
+	}
 }
 
 // parseBackgroundColor extracts the color from a background shorthand value.
@@ -1077,8 +1545,6 @@ func parsePaddingShorthand(v string, fontSize float32) (top, right, bottom, left
 	return
 }
 
-
-
 func parseBoxShorthand(v string) (top, right, bottom, left float32) {
 	parts := strings.Fields(v)
 	switch len(parts) {
@@ -1146,8 +1612,44 @@ func parseBorderStyles(v string) (top, right, bottom, left string) {
 	return
 }
 
+func splitColorTokens(v string) []string {
+	var tokens []string
+	depth := 0
+	start := -1
+	for i := 0; i < len(v); i++ {
+		switch v[i] {
+		case '(':
+			depth++
+			if start < 0 {
+				start = i
+			}
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ' ', '\t':
+			if depth == 0 {
+				if start >= 0 {
+					tokens = append(tokens, strings.TrimSpace(v[start:i]))
+					start = -1
+				}
+			} else if start < 0 {
+				start = i
+			}
+		default:
+			if start < 0 {
+				start = i
+			}
+		}
+	}
+	if start >= 0 {
+		tokens = append(tokens, strings.TrimSpace(v[start:]))
+	}
+	return tokens
+}
+
 func parseBorderColors(v string) [4]css.Color {
-	parts := strings.Fields(v)
+	parts := splitColorTokens(v)
 	var colors [4]css.Color
 	switch len(parts) {
 	case 1:
@@ -1195,6 +1697,69 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32) {
 	}
 }
 
+// parseBorderRadius reads the shorthand: one to four values set the corners, and
+// the group after an optional "/" replaces the vertical radii.
+func parseBorderRadius(cs *ComputedStyle, v string) {
+	horizontal, vertical := v, ""
+	if i := strings.Index(v, "/"); i >= 0 {
+		horizontal, vertical = v[:i], v[i+1:]
+	}
+	hs := radiusGroup(cs, horizontal)
+	vs := hs
+	if strings.TrimSpace(vertical) != "" {
+		vs = radiusGroup(cs, vertical)
+	}
+	for c := 0; c < 4; c++ {
+		cs.BorderRadius[c][0] = hs[c]
+		cs.BorderRadius[c][1] = vs[c]
+	}
+}
+
+// radiusGroup expands a one-to-four value list into the four corners the way the
+// shorthand's repetition rules say: 1 sets all, 2 alternates, 3 mirrors the
+// second onto the bottom left.
+func radiusGroup(cs *ComputedStyle, v string) [4]float32 {
+	vals := make([]float32, 0, 4)
+	for _, p := range strings.Fields(v) {
+		vals = append(vals, resolveLengthEm(css.ParseValue(p), 0, cs.FontSize))
+	}
+	var out [4]float32
+	if len(vals) == 0 {
+		return out
+	}
+	at := func(i int) float32 {
+		if i >= len(vals) {
+			i = len(vals) - 1
+		}
+		return vals[i]
+	}
+	switch len(vals) {
+	case 1:
+		out = [4]float32{vals[0], vals[0], vals[0], vals[0]}
+	case 2:
+		out = [4]float32{vals[0], vals[1], vals[0], vals[1]}
+	case 3:
+		out = [4]float32{vals[0], vals[1], vals[2], vals[1]}
+	default:
+		out = [4]float32{at(0), at(1), at(2), at(3)}
+	}
+	return out
+}
+
+// parseCornerRadius sets one corner, whose value may itself carry "horizontal
+// vertical" for an elliptical corner.
+func parseCornerRadius(cs *ComputedStyle, corner *[2]float32, v string) {
+	parts := strings.Fields(v)
+	if len(parts) == 0 {
+		return
+	}
+	corner[0] = resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize)
+	corner[1] = corner[0]
+	if len(parts) > 1 {
+		corner[1] = resolveLengthEm(css.ParseValue(parts[1]), 0, cs.FontSize)
+	}
+}
+
 func parseFlexShorthand(cs *ComputedStyle, v string) {
 	parts := strings.Fields(v)
 	switch len(parts) {
@@ -1221,4 +1786,36 @@ func parseFlexShorthand(cs *ComputedStyle, v string) {
 		cs.FlexShrink = float32(css.ParseValue(parts[1]).Num)
 		cs.FlexBasis = resolveLength(css.ParseValue(parts[2]), -1)
 	}
+}
+
+// parseGridSpan reduces a grid-column/grid-row value to how many tracks the
+// item occupies. "span N" is the direct form; "A / B" names two lines; anything
+// else (including "auto" and named lines) places a single track.
+func parseGridSpan(v string) int {
+	v = strings.TrimSpace(strings.ToLower(v))
+	if v == "" {
+		return 1
+	}
+	if i := strings.Index(v, "/"); i >= 0 {
+		a, b := gridSpanNum(strings.TrimSpace(v[:i])), gridSpanNum(strings.TrimSpace(v[i+1:]))
+		if a > 0 && b > a {
+			return b - a
+		}
+		return 1
+	}
+	if strings.HasPrefix(v, "span") {
+		if n := gridSpanNum(strings.TrimSpace(strings.TrimPrefix(v, "span"))); n > 0 {
+			return n
+		}
+		return 1
+	}
+	return 1
+}
+
+func gridSpanNum(s string) int {
+	p := css.ParseValue(s)
+	if p.Type != css.ValueNumber || p.Num <= 0 {
+		return 0
+	}
+	return int(p.Num)
 }

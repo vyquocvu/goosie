@@ -14,6 +14,7 @@ package layout
 
 import (
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
@@ -36,16 +37,39 @@ type Object struct {
 	Style  *style.ComputedStyle
 	Parent ObjectID
 
-	FirstKid, LastKid     ObjectID
+	FirstKid, LastKid        ObjectID
 	NextSibling, PrevSibling ObjectID
 
-	X, Y, W, H     float32
-	MarginTop, MarginRight, MarginBottom, MarginLeft float32
+	X, Y, W, H                                           float32
+	MarginTop, MarginRight, MarginBottom, MarginLeft     float32
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
-	BorderTop, BorderRight, BorderBottom, BorderLeft float32
+	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
+
+	// StaticX/StaticY record where an out-of-flow box would have started had it
+	// stayed in the flow. CSS uses that position when an absolutely positioned
+	// box specifies neither the relevant inset nor a static-friendly pair.
+	StaticX, StaticY float32
 
 	Baseline float32
+	flags    uint8
 }
+
+const (
+	flagInlineLaidOut uint8 = 1 << iota
+	// flagOutOfFlow marks a box block layout deliberately left unpositioned -
+	// an absolutely positioned box, which the positioning pass places later. The
+	// inline pass honours the mark so it does not lay the box's text out at the
+	// zero position the box still holds when the main passes run.
+	flagOutOfFlow
+	// flagRowPlaced marks an inline-block that block layout already gave a slot
+	// in a row, so the inline pass must not also drop it onto a text line.
+	flagRowPlaced
+	// flagAnonymous marks a box layout invented to hold inline content that
+	// shares a container with block children. It has no DOM node, and its own
+	// children are the run it wraps, so the wrapping pass must not recurse into
+	// it.
+	flagAnonymous
+)
 
 // ContentRect returns the content box as four edges.
 func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {
@@ -65,19 +89,33 @@ func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
 	return
 }
 
+// BorderH returns the height of the border box. W and H are both content-box
+// dimensions, which is what ContentRect, BorderRect and the explicit-height
+// branch of resolveBoxSizes all assume; this is the one place that spelling is
+// needed as an expression rather than as edges.
+func (o *Object) BorderH() float32 {
+	return o.H + o.PaddingTop + o.PaddingBottom + o.BorderTop + o.BorderBottom
+}
 
 // Metrics supplies per-glyph advance widths so layout measures text with the
 // same numbers paint draws with. The size is the pixel size the glyph is drawn
-// at: layout passes CSS pixels, paint passes device pixels. It lives as an
-// interface rather than a concrete font type because layout may not depend on
-// the raster package; the concrete Fonts type satisfies it structurally, and
-// the binaries wire it in.
+// at: layout passes CSS pixels, paint passes device pixels. The slot is the
+// resolved face - family, weight, slant - because measuring Times and drawing
+// Arial is how text overflows its box. It lives as an interface rather than a
+// concrete font type because layout may not depend on the raster package; the
+// concrete Fonts type satisfies it structurally, and the binaries wire it in.
 //
 // A nil Metrics is valid: measurement falls back to a half-em-per-character
 // estimate. Text with a nil Metrics renders, but spacing drifts from the real
 // font, which is why every binary passes one.
 type Metrics interface {
-	GlyphAdvance(sizePx int32, r rune) int32
+	GlyphAdvance(sizePx int32, r rune, slot frame.FontSlot) int32
+	// LineMetrics reports the face's ascent, descent and the height a line box
+	// takes when line-height is normal, all in device pixels for sizePx. Layout
+	// needs the ascent to place the baseline and the descent to size the content
+	// area; the normal height is the font's own leading, which differs by family
+	// by more than a pixel.
+	LineMetrics(sizePx int32, slot frame.FontSlot) (ascent, descent, normalLineHeight int32)
 }
 
 // Arena is the flat box tree.

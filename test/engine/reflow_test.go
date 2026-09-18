@@ -6,13 +6,18 @@ import (
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
 type fixedMetrics struct{ advance int32 }
 
-func (m *fixedMetrics) GlyphAdvance(_ int32, _ rune) int32 { return m.advance }
+func (m *fixedMetrics) GlyphAdvance(_ int32, _ rune, _ frame.FontSlot) int32 { return m.advance }
+
+func (m *fixedMetrics) LineMetrics(size int32, _ frame.FontSlot) (int32, int32, int32) {
+	return size * 4 / 5, size / 5, size * 6 / 5
+}
 
 func reflow(t *testing.T, s *engine.Session, w float32) error {
 	t.Helper()

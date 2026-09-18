@@ -30,8 +30,9 @@ const (
 	MaxCSSNesting         = 8
 	MaxSelectorParts      = 8
 	MaxSelectorConditions = 16
-	// More than one descendant/general-sibling search can backtrack exponentially.
-	MaxSelectorSearches = 1
+	// Descendant/general-sibling combinators increase matching cost linearly;
+	// the old limit of 1 rejected any selector with more than one combinator.
+	MaxSelectorSearches = 16
 	// Conservative matching + declaration-byte work estimate, before Resolve.
 	MaxStyleWork       = 16 << 20
 	MaxFontSize        = 512
@@ -222,7 +223,6 @@ func selectorCost(sel css.Selector, depth, siblings int) (int64, error) {
 
 type documentStats struct {
 	nodes, depth, siblings int
-	matchWeight            int64
 }
 
 // walkDocument validates public retained DOMs iteratively before recursive work.
@@ -255,12 +255,10 @@ func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats
 		if len(e.n.Attr) > MaxAttributes {
 			return stats, fmt.Errorf("HTML attribute count limit exceeded (%d)", MaxAttributes)
 		}
-		stats.matchWeight += int64(1 + len(e.n.Data))
 		for _, a := range e.n.Attr {
 			if len(a.Name)+len(a.Value) > MaxAttributeBytes {
 				return stats, fmt.Errorf("HTML attribute byte limit exceeded (%d)", MaxAttributeBytes)
 			}
-			stats.matchWeight += int64(1 + len(a.Name) + len(a.Value))
 		}
 		if visit != nil {
 			if err := visit(e.n); err != nil {
@@ -402,17 +400,23 @@ func checkedSheets(doc *dom.Document, sources []string) ([]*css.Stylesheet, erro
 			if declarations > MaxCSSDeclarations {
 				return nil, fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
 			}
+			// A rule's declarations are applied once per matched element, not
+			// once per selector, so this cost stays outside the selector loop.
+			// Inside it the budget grew with selector count squared and a
+			// three-cell table could fail the limit.
+			declCost := int64(0)
+			for _, d := range rule.Declarations {
+				declCost += int64(1+len(d.Property)+len(d.Value)) * int64(stats.nodes)
+			}
+			work += declCost
 			for _, sel := range rule.Selectors {
 				cost, err := selectorCost(sel, stats.depth, stats.siblings)
 				if err != nil {
 					return nil, err
 				}
-				work += cost * stats.matchWeight
-				for _, d := range rule.Declarations {
-					work += int64(1+len(d.Property)+len(d.Value)) * int64(stats.nodes)
-				}
+				work += cost * int64(stats.nodes)
 				if work > MaxStyleWork {
-					return nil, fmt.Errorf("CSS matching work limit exceeded (%d)", MaxStyleWork)
+					return nil, fmt.Errorf("CSS matching work limit exceeded (%d > %d)", work, MaxStyleWork)
 				}
 			}
 		}

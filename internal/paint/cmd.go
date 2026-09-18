@@ -22,6 +22,8 @@ const (
 	CmdText
 	// CmdImage draws a decoded image scaled into a rect.
 	CmdImage
+	// CmdGradient paints a rect filled with a linear colour ramp.
+	CmdGradient
 )
 
 func (k CmdKind) String() string {
@@ -34,6 +36,8 @@ func (k CmdKind) String() string {
 		return "text"
 	case CmdImage:
 		return "image"
+	case CmdGradient:
+		return "gradient"
 	}
 	return "unknown"
 }
@@ -67,11 +71,14 @@ func (b BorderSpec) Empty() bool {
 //
 // X and Y are device pixels in the layer's content space. Size is the pixel
 // size, already scaled by the device ratio, so a face lookup is keyed by
-// (rune, size) alone.
+// (rune, slot, size) alone. Slot is the resolved face rather than a name: a
+// display list is serialized, so it carries a fixed-width comparable value and
+// the rasterizer never resolves a font.
 type GlyphRun struct {
 	Rune rune
 	X, Y int32
 	Size int32
+	Slot frame.FontSlot
 }
 
 // TextRun is a string of glyphs sharing a color. Glyphs are owned by the
@@ -134,12 +141,18 @@ type DisplayCmd struct {
 	Rect   frame.Rect
 	Color  frame.Color
 	Border BorderSpec
+	// Radius rounds a fill or border box's corners, in device pixels. Empty means
+	// square, which is what keeps the whole-row fill path for every other box.
+	Radius frame.Corners
 	// Opacity multiplies the command's coverage. Zero means unset, that is
 	// opaque, so a producer only writes the field when it is not 1; an element
 	// that is fully transparent is dropped before it reaches a list at all.
 	Opacity float32
 	Text    TextRun
 	Image   ImageSpec
+	// Gradient is the ramp a CmdGradient fills its rect with. Its stops are
+	// premultiplied and already carry the command's opacity.
+	Gradient frame.LinearGradient
 
 	// Z orders this command within its layer. The list is sorted once per
 	// content version, never per frame or per tile; see List.SortStable.
@@ -161,6 +174,8 @@ func (d DisplayCmd) Bounds() (frame.Rect, bool) {
 		return d.Rect, !d.Rect.Empty()
 	case CmdFill, CmdImage:
 		return d.Rect, !d.Rect.Empty() && (d.Kind == CmdImage || d.Color.A() > 0)
+	case CmdGradient:
+		return d.Rect, !d.Rect.Empty() && !d.Gradient.Empty()
 	}
 	return frame.Rect{}, false
 }

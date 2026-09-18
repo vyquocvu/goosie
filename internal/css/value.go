@@ -151,6 +151,12 @@ func ParseColor(s string) (Color, bool) {
 	if strings.HasPrefix(s, "rgba(") && strings.HasSuffix(s, ")") {
 		return parseRGBA(s[5 : len(s)-1])
 	}
+	if strings.HasPrefix(s, "hsl(") && strings.HasSuffix(s, ")") {
+		return parseHSL(s[4 : len(s)-1])
+	}
+	if strings.HasPrefix(s, "hsla(") && strings.HasSuffix(s, ")") {
+		return parseHSLA(s[5 : len(s)-1])
+	}
 
 	return Color{}, false
 }
@@ -217,6 +223,80 @@ func parseRGBA(s string) (Color, bool) {
 	b := clampByte(parseComponent(strings.TrimSpace(parts[2])))
 	a := clampByte(parseAlpha(strings.TrimSpace(parts[3])))
 	return Color{R: r, G: g, B: b, A: a}, true
+}
+
+func parseHSL(s string) (Color, bool) {
+	parts := strings.Split(s, ",")
+	if len(parts) != 3 {
+		return Color{}, false
+	}
+	h := parseFloat(strings.TrimSpace(parts[0]))
+	sat := parseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(parts[1]), "%"))) / 100
+	l := parseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(parts[2]), "%"))) / 100
+	r, g, b := hslToRGB(h, sat, l)
+	return Color{R: r, G: g, B: b, A: 255}, true
+}
+
+func parseHSLA(s string) (Color, bool) {
+	parts := strings.Split(s, ",")
+	if len(parts) != 4 {
+		return Color{}, false
+	}
+	h := parseFloat(strings.TrimSpace(parts[0]))
+	sat := parseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(parts[1]), "%"))) / 100
+	l := parseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(parts[2]), "%"))) / 100
+	a := clampByte(parseAlpha(strings.TrimSpace(parts[3])))
+	r, g, b := hslToRGB(h, sat, l)
+	return Color{R: r, G: g, B: b, A: a}, true
+}
+
+func hslToRGB(h, s, l float64) (uint8, uint8, uint8) {
+	h = h / 360.0
+	if h < 0 {
+		h = 0
+	}
+	if h > 1 {
+		h = 1
+	}
+	
+	var r, g, b float64
+	if s == 0 {
+		r = l
+		g = l
+		b = l
+	} else {
+		var q float64
+		if l < 0.5 {
+			q = l * (1 + s)
+		} else {
+			q = l + s - l*s
+		}
+		p := 2*l - q
+		r = hueToRGB(p, q, h+1.0/3.0)
+		g = hueToRGB(p, q, h)
+		b = hueToRGB(p, q, h-1.0/3.0)
+	}
+	
+	return clampByte(r * 255), clampByte(g * 255), clampByte(b * 255)
+}
+
+func hueToRGB(p, q, t float64) float64 {
+	if t < 0 {
+		t += 1
+	}
+	if t > 1 {
+		t -= 1
+	}
+	if t < 1.0/6.0 {
+		return p + (q-p)*6*t
+	}
+	if t < 1.0/2.0 {
+		return q
+	}
+	if t < 2.0/3.0 {
+		return p + (q-p)*(2.0/3.0-t)*6
+	}
+	return p
 }
 
 func parseComponent(s string) float64 {
@@ -312,7 +392,7 @@ func (v Value) ToLength() float32 {
 	case ValueNumber:
 		return float32(v.Num)
 	case ValuePercentage:
-		return 0
+		return -2 - float32(v.Num)
 	}
 	return 0
 }
@@ -365,7 +445,7 @@ func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
 	case ValueNumber:
 		return float32(v.Num)
 	case ValuePercentage:
-		return 0
+		return -2 - float32(v.Num)
 	}
 	return 0
 }

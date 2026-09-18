@@ -2,9 +2,12 @@ package raster
 
 import (
 	"image"
+	"os"
+	"strings"
 	"sync"
 
 	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
@@ -41,24 +44,27 @@ func (g Glyph) Bytes() int64 {
 	return int64(len(g.Mask.Pix))
 }
 
-// faceKey identifies one cached face.
+// faceKey identifies one cached face: a slot at a device-pixel size.
 //
-// A device-pixel size is the whole key. The alternative - keying on
+// The size is all the key carries beyond the slot. The alternative - keying on
 // (CSS size, scale) as well - splits the cache for no gain: 16px at DPR 1 and
 // 16px at DPR 2 are the same bitmap, and paint.GlyphRun already documents its
 // Size as "already scaled by the device ratio" for exactly this reason. Keeping
 // the key narrow is what lets a page that changes zoom reuse every glyph it has
 // already drawn.
 type faceKey struct {
+	slot frame.FontSlot
 	size int32
 }
 
-// Fonts owns the parsed font and the faces derived from it.
+// Fonts owns the parsed faces and the per-size faces derived from them.
 //
-// Exactly one font exists in M1. Go Regular is embedded, so glyph raster is a
-// pure function of (rune, size): the same binary on a fontless Ubuntu CI runner
-// and on a Mac produces byte-identical tiles, which is what lets the frame gate
-// compare hashes instead of eyeballing screenshots.
+// A slot with no host font is served by the embedded Go face instead of failing,
+// so the set of families is a quality difference rather than a correctness one:
+// the same binary on a fontless Ubuntu CI runner and on a Mac draws different
+// typefaces but never missing text. GOOSIE_SYSTEM_FONTS=off pins every slot to
+// the embedded face, which is what a run that compares rendered bytes needs on a
+// host that has the fonts.
 //
 // An opentype.Face reuses internal scratch buffers between calls and is not safe
 // for concurrent use, so faces are guarded here rather than shared. The
@@ -68,7 +74,7 @@ type faceKey struct {
 // hot path.
 type Fonts struct {
 	mu      sync.Mutex
-	src     *opentype.Font
+	sources map[frame.FontSlot]*opentype.Font
 	entries map[faceKey]*faceEntry
 }
 
@@ -78,41 +84,138 @@ type faceEntry struct {
 	missing map[rune]struct{}
 }
 
-// NewFonts parses the embedded font. It is called once at startup; the parse
-// cost is a few hundred microseconds and it is the only place the 900 KB font
-// bytes are read.
+// systemFontDir holds the families macOS ships for documents. Only .ttf files
+// are listed: opentype.Parse cannot read a .ttc collection, so a family that
+// only exists as a collection stays on the embedded fallback.
+const systemFontDir = "/System/Library/Fonts/Supplemental"
+
+// systemFontFiles maps a CSS-resolved slot onto the host file that draws it.
+// A missing or unreadable file is normal - it is what a Linux host looks like -
+// and leaves the slot on the embedded face.
+var systemFontFiles = []struct {
+	slot frame.FontSlot
+	file string
+}{
+	{frame.FontSlot{Family: frame.FontTimes}, "Times New Roman.ttf"},
+	{frame.FontSlot{Family: frame.FontTimes, Bold: true}, "Times New Roman Bold.ttf"},
+	{frame.FontSlot{Family: frame.FontTimes, Italic: true}, "Times New Roman Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontTimes, Bold: true, Italic: true}, "Times New Roman Bold Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontArial}, "Arial.ttf"},
+	{frame.FontSlot{Family: frame.FontArial, Bold: true}, "Arial Bold.ttf"},
+	{frame.FontSlot{Family: frame.FontArial, Italic: true}, "Arial Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontArial, Bold: true, Italic: true}, "Arial Bold Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontCourier}, "Courier New.ttf"},
+	{frame.FontSlot{Family: frame.FontCourier, Bold: true}, "Courier New Bold.ttf"},
+	{frame.FontSlot{Family: frame.FontCourier, Italic: true}, "Courier New Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontCourier, Bold: true, Italic: true}, "Courier New Bold Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontGeorgia}, "Georgia.ttf"},
+	{frame.FontSlot{Family: frame.FontGeorgia, Bold: true}, "Georgia Bold.ttf"},
+	{frame.FontSlot{Family: frame.FontGeorgia, Italic: true}, "Georgia Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontGeorgia, Bold: true, Italic: true}, "Georgia Bold Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontVerdana}, "Verdana.ttf"},
+	{frame.FontSlot{Family: frame.FontVerdana, Bold: true}, "Verdana Bold.ttf"},
+	{frame.FontSlot{Family: frame.FontVerdana, Italic: true}, "Verdana Italic.ttf"},
+	{frame.FontSlot{Family: frame.FontVerdana, Bold: true, Italic: true}, "Verdana Bold Italic.ttf"},
+}
+
+// NewFonts parses the embedded font and every host font it can read. It is
+// called once at startup; the parse cost is a few hundred microseconds per face
+// and it is the only place the font bytes are read.
 func NewFonts() (*Fonts, error) {
-	f, err := opentype.Parse(goregular.TTF)
+	f, err := NewEmbeddedFonts()
 	if err != nil {
 		return nil, err
 	}
-	return &Fonts{src: f, entries: map[faceKey]*faceEntry{}}, nil
+	if systemFontsDisabled() {
+		return f, nil
+	}
+	for _, sf := range systemFontFiles {
+		data, err := os.ReadFile(systemFontDir + "/" + sf.file)
+		if err != nil {
+			continue
+		}
+		parsed, err := opentype.Parse(data)
+		if err != nil {
+			continue
+		}
+		f.sources[sf.slot] = parsed
+	}
+	return f, nil
 }
 
-// Face returns the cached face for a device-pixel size.
+// NewEmbeddedFonts returns a Fonts that serves every slot from the embedded Go
+// faces. A host with no system fonts is in this state anyway, which is why it is
+// a supported configuration rather than a test-only fixture.
+func NewEmbeddedFonts() (*Fonts, error) {
+	regular, err := opentype.Parse(goregular.TTF)
+	if err != nil {
+		return nil, err
+	}
+	bold, err := opentype.Parse(gobold.TTF)
+	if err != nil {
+		return nil, err
+	}
+	return &Fonts{
+		sources: map[frame.FontSlot]*opentype.Font{
+			{}:           regular,
+			{Bold: true}: bold,
+		},
+		entries: map[faceKey]*faceEntry{},
+	}, nil
+}
+
+// systemFontsDisabled reports whether the environment asks for the embedded face
+// in every slot. A gate that compares rendered bytes across machines needs the
+// font set, like the rasterizer, to be a function of the binary alone.
+func systemFontsDisabled() bool {
+	switch strings.ToLower(os.Getenv("GOOSIE_SYSTEM_FONTS")) {
+	case "0", "off", "no", "false":
+		return true
+	}
+	return false
+}
+
+// Face returns the cached face for a slot at a device-pixel size.
 //
 // The returned face is shared and must not be driven concurrently: use Glyph
 // unless the caller already holds this Fonts lock. A size at or below zero
 // yields nil, which callers treat as "draw nothing" rather than a default size,
 // so a layout bug shows up as missing text instead of text at the wrong scale.
-func (f *Fonts) Face(size int32) font.Face {
+func (f *Fonts) Face(size int32, slot frame.FontSlot) font.Face {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if e := f.faceLocked(size); e != nil {
+	if e := f.faceLocked(size, slot); e != nil {
 		return e.face
 	}
 	return nil
 }
 
-func (f *Fonts) faceLocked(size int32) *faceEntry {
+func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 	if size <= 0 {
 		return nil
 	}
-	k := faceKey{size: size}
+	src := f.sources[slot]
+	// A slot the host cannot serve still has to draw: first the same family
+	// without the slant it is missing, then the embedded face at the same
+	// weight. The cache is keyed by the face that ends up being used rather than
+	// by the request, which is what stops five unavailable families from each
+	// holding a private copy of every glyph.
+	if src == nil && slot.Italic {
+		slot.Italic = false
+		src = f.sources[slot]
+	}
+	if src == nil {
+		slot = frame.FontSlot{Bold: slot.Bold}
+		src = f.sources[slot]
+	}
+	if src == nil {
+		return nil
+	}
+	k := faceKey{slot: slot, size: size}
 	if e, ok := f.entries[k]; ok {
 		return e
 	}
-	face, err := opentype.NewFace(f.src, &opentype.FaceOptions{
+	face, err := opentype.NewFace(src, &opentype.FaceOptions{
 		Size: float64(size),
 		DPI:  faceDPI,
 		// No hinting on purpose. Hinting adjusts stem positions to the pixel
@@ -129,13 +232,14 @@ func (f *Fonts) faceLocked(size int32) *faceEntry {
 	return e
 }
 
-// Glyph rasterizes r at a device-pixel size, returning a mask the caller owns
-// (and may keep in a cache). The zero Glyph, with Ok false, means the font has
-// no such glyph, which the text path treats as whitespace rather than an error.
-func (f *Fonts) Glyph(size int32, r rune) Glyph {
+// Glyph rasterizes r in a slot at a device-pixel size, returning a mask the
+// caller owns (and may keep in a cache). The zero Glyph, with Ok false, means
+// no face has such a glyph, which the text path treats as whitespace rather
+// than an error.
+func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	e := f.faceLocked(size)
+	e := f.faceLocked(size, slot)
 	if e == nil {
 		return Glyph{}
 	}
@@ -147,6 +251,15 @@ func (f *Fonts) Glyph(size int32, r rune) Glyph {
 	}
 	g := renderGlyph(e.face, r)
 	if !g.Ok {
+		// A text family that does not cover a rune must not swallow it: the
+		// embedded face carries the arrows, math operators and symbols the
+		// document faces do not. Layout measures through this same function, so
+		// the substitute glyph and the advance it was broken with agree.
+		if fb := f.faceLocked(size, frame.FontSlot{Bold: slot.Bold}); fb != nil && fb != e {
+			g = renderGlyph(fb.face, r)
+		}
+	}
+	if !g.Ok {
 		e.missing[r] = struct{}{}
 		return Glyph{}
 	}
@@ -154,12 +267,32 @@ func (f *Fonts) Glyph(size int32, r rune) Glyph {
 	return g
 }
 
-// GlyphAdvance reports the width r occupies at a device-pixel size, in device
-// pixels. It satisfies layout.Metrics, which is why this method exists as a
-// one-liner beside Glyph: layout measures words with the same numbers the
+// GlyphAdvance reports the width r occupies in a slot at a device-pixel size,
+// in device pixels. It satisfies layout.Metrics, which is why this method exists
+// as a one-liner beside Glyph: layout measures words with the same numbers the
 // rasterizer draws them with, without layout importing raster.
-func (f *Fonts) GlyphAdvance(size int32, r rune) int32 {
-	return f.Glyph(size, r).Advance
+func (f *Fonts) GlyphAdvance(size int32, r rune, slot frame.FontSlot) int32 {
+	return f.Glyph(size, r, slot).Advance
+}
+
+// LineMetrics reports a face's ascent, descent and normal line height in device
+// pixels. Each value is rounded on its own, the way a browser rounds them: the
+// content area is the rounded ascent plus the rounded descent, while a normal
+// line box is the font's own leading-inclusive height, which is a pixel taller
+// for Times than the content area and the same height as it for Courier.
+//
+// A slot the host cannot serve answers 0,0,0 and the caller falls back to its
+// own estimate, which is what keeps a display-less host laying out at all.
+func (f *Fonts) LineMetrics(size int32, slot frame.FontSlot) (int32, int32, int32) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e := f.faceLocked(size, slot)
+	if e == nil {
+		return 0, 0, 0
+	}
+	m := e.face.Metrics()
+	round := func(v fixed.Int26_6) int32 { return int32((int64(v) + 32) >> 6) }
+	return round(m.Ascent), round(m.Descent), round(m.Height)
 }
 
 // renderGlyph copies one glyph's coverage out of a face.

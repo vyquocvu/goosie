@@ -30,7 +30,9 @@ type Session struct {
 	Styles map[dom.NodeID]*style.ComputedStyle
 	Arena  *layout.Arena
 
-	metrics layout.Metrics
+	metrics   layout.Metrics
+	viewportW float32
+	viewportH float32
 }
 
 // Option adjusts how a Session is built.
@@ -41,6 +43,19 @@ type Option func(*Session)
 // layout falls back to a half-em-per-glyph estimate and paint stretches text.
 func WithMetrics(m layout.Metrics) Option {
 	return func(s *Session) { s.metrics = m }
+}
+
+// WithViewportH supplies the height the document's viewport is laid out
+// against. A fixed box resolves `bottom` and a percentage height against it, and
+// the viewport units are a share of it. Without it the initial containing block
+// has no height, so a bottom-pinned box lands above the visible area and `vh`
+// falls back to the size the CSS parser assumed.
+func WithViewportH(h float32) Option {
+	return func(s *Session) {
+		if finite(float64(h)) && h > 0 {
+			s.viewportH = h
+		}
+	}
 }
 
 // NewSession parses HTML and builds the pipeline state. The caller provides the
@@ -55,6 +70,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if err := validateWidth(viewportW); err != nil {
 		return nil, err
 	}
+	s.viewportW = viewportW
 	if len(html) > MaxDocumentBytes {
 		return nil, fmt.Errorf("HTML byte limit exceeded (%d)", MaxDocumentBytes)
 	}
@@ -70,11 +86,27 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	s.Doc = doc
-	s.Styles = style.Resolve(doc, sheets)
+	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport())
 	if err := s.Reflow(viewportW); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// styleViewport is the frame the cascade resolves the viewport units against. A
+// session created without a size leaves them to the parser's fallback.
+func (s *Session) styleViewport() style.Viewport {
+	return style.Viewport{W: s.viewportW, H: s.viewportH}
+}
+
+// recordViewportWidth keeps the session's viewport in step with a layout pass
+// that was handed a new width. A width that is not a usable size is ignored
+// rather than baked into the viewport units, which would poison every length
+// downstream.
+func (s *Session) recordViewportWidth(w float32) {
+	if finite(float64(w)) && w > 0 && w <= MaxGeometry {
+		s.viewportW = w
+	}
 }
 
 // Reflow runs layout only, retaining the document, computed style identities,
@@ -87,6 +119,7 @@ func (s *Session) Reflow(viewportW float32) error {
 	if s == nil {
 		return fmt.Errorf("missing session")
 	}
+	s.viewportW = viewportW
 	if err := s.validateLayoutInput(); err != nil {
 		return err
 	}
@@ -97,6 +130,7 @@ func (s *Session) Reflow(viewportW float32) error {
 		return err
 	}
 	layout.Inline(candidate, layout.ObjectID(1))
+	layout.Positioning(candidate, layout.ObjectID(1), viewportW, s.viewportH)
 	if err := validateArena(candidate); err != nil {
 		return err
 	}

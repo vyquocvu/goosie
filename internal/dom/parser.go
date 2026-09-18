@@ -3,7 +3,6 @@ package dom
 import (
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 // Parse parses an HTML document and returns the Document.
@@ -251,27 +250,9 @@ func (tb *treeBuilder) handleText(p *tokenizer) {
 		p.pos++
 	}
 	text := p.input[start:p.pos]
-	text = normalizeWhitespace(text)
 	if text != "" {
 		tb.insertText(text)
 	}
-}
-
-func normalizeWhitespace(s string) string {
-	var sb strings.Builder
-	prevSpace := false
-	for _, r := range s {
-		if unicode.IsSpace(r) {
-			if !prevSpace {
-				sb.WriteByte(' ')
-				prevSpace = true
-			}
-		} else {
-			sb.WriteRune(r)
-			prevSpace = false
-		}
-	}
-	return sb.String()
 }
 
 func (tb *treeBuilder) handleStartTag(p *tokenizer) {
@@ -387,21 +368,22 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 		return
 	case "tr":
 		tb.ensureBody()
-		tb.closeUntil("tbody", "thead", "tfoot")
+		tb.closeTableRows()
 		tb.insertElement(tag, attrs, false)
 		return
 	case "td", "th":
 		tb.ensureBody()
-		tb.closeUntil("td", "th")
+		tb.closeTableCell()
 		tb.insertElement(tag, attrs, false)
 		return
 	case "tbody", "tfoot", "thead":
 		tb.ensureBody()
-		tb.closeUntil("tbody", "thead", "tfoot")
+		tb.closeTableRows("tbody", "thead", "tfoot")
 		tb.insertElement(tag, attrs, false)
 		return
 	case "table":
 		tb.ensureBody()
+		tb.closePifOpen()
 		tb.insertElement(tag, attrs, false)
 		return
 	case "caption":
@@ -414,6 +396,7 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 		return
 	case "form", "fieldset", "details", "dialog", "menu":
 		tb.ensureBody()
+		tb.closePifOpen()
 		tb.insertElement(tag, attrs, false)
 		return
 	case "select":
@@ -436,8 +419,15 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 		tb.ensureBody()
 		tb.insertElement(tag, attrs, false)
 		return
+	case "a", "abbr", "b", "bdo", "cite", "code", "dfn", "em", "i", "kbd",
+		"mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup",
+		"time", "u", "var", "font", "big":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, selfClose)
+		return
 	default:
 		tb.ensureBody()
+		tb.closePifOpen()
 		tb.insertElement(tag, attrs, selfClose)
 		return
 	}
@@ -453,7 +443,7 @@ func (tb *treeBuilder) ensureBody() {
 	if tb.bodyElem == nil {
 		tb.ensureHead()
 		if tb.headElem != nil {
-			tb.pop()
+			tb.popUntil("head")
 		}
 		tb.insertElement("body", nil, false)
 	}
@@ -461,6 +451,12 @@ func (tb *treeBuilder) ensureBody() {
 
 func (tb *treeBuilder) closeP() {
 	tb.popUntil("p")
+}
+
+func (tb *treeBuilder) closePifOpen() {
+	if tb.hasInScope("p") {
+		tb.closeP()
+	}
 }
 
 func (tb *treeBuilder) closeListItem() {
@@ -496,10 +492,50 @@ func (tb *treeBuilder) closeUntil(tags ...string) {
 	for _, t := range tags {
 		tagSet[t] = true
 	}
-	for i := len(tb.openStack) - 1; i >= 0; i-- {
-		if tagSet[tb.openStack[i].Data] {
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		if tagSet[top.Data] {
+			tb.pop()
 			return
 		}
+		tb.pop()
+	}
+}
+
+// closeTableRows ends the row-level boxes a new `<tr>` or row group closes: the
+// open cells and the row they sit in. It stops at the row group, and at the
+// table itself, because HTML5 bounds these implicit closings by table scope.
+// Popping past the table would leave the next row a sibling of the table rather
+// than its descendant.
+func (tb *treeBuilder) closeTableRows(groups ...string) {
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		switch top.Data {
+		case "td", "th", "tr":
+			tb.pop()
+			continue
+		case "table":
+			return
+		}
+		for _, g := range groups {
+			if top.Data == g {
+				tb.pop()
+			}
+		}
+		return
+	}
+}
+
+// closeTableCell pops an open cell so a following `<td>` starts a new one. The
+// row stays open: it is the cell that ended.
+func (tb *treeBuilder) closeTableCell() {
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		if top.Data == "td" || top.Data == "th" {
+			tb.pop()
+			continue
+		}
+		return
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -13,8 +14,8 @@ import (
 // TestGlyphAdvancesFromMetrics pins the anti-ghosting contract: with a metrics
 // source wired in, paint spaces glyphs by the font's real advance, not by the
 // len*0.5em estimate. "WWWW" is the sharpest probe because W is one of the
-// widest glyphs in Go Regular, so the estimate under-spaces it by nearly half
-// and used to draw visibly overlapping glyphs.
+// widest glyphs in every family this engine loads, so the estimate under-spaces
+// it by nearly half and used to draw visibly overlapping glyphs.
 func TestGlyphAdvancesFromMetrics(t *testing.T) {
 	fonts, err := raster.NewFonts()
 	if err != nil {
@@ -29,7 +30,11 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 
 	list := sess.Paint(1)
 	dl := list.Build(1)
-	want := fonts.GlyphAdvance(16, 'W')
+	// A document that names no family draws in the standard font, and the
+	// advance below has to come from that same face or the run's own spacing
+	// contradicts the box layout measured.
+	slot := frame.FontSlot{Family: frame.FontTimes}
+	want := fonts.GlyphAdvance(16, 'W', slot)
 	if want <= 0 {
 		t.Fatal("font reports no advance for W")
 	}
@@ -41,6 +46,9 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 		g := c.Text.Glyphs
 		if g[0].Rune != 'W' {
 			continue
+		}
+		if g[0].Slot != slot {
+			t.Errorf("glyph slot = %+v, want %+v (the face layout measured with)", g[0].Slot, slot)
 		}
 		found = true
 		for i := 1; i < len(g); i++ {
@@ -80,7 +88,7 @@ func TestLayoutWordWidthFromMetrics(t *testing.T) {
 	if word == nil {
 		t.Fatal("word object for WWWW not found in arena")
 	}
-	want := float32(fonts.GlyphAdvance(16, 'W')) * 4
+	want := float32(fonts.GlyphAdvance(16, 'W', frame.FontSlot{Family: frame.FontTimes})) * 4
 	if diff := word.W - want; diff < -0.5 || diff > 0.5 {
 		t.Errorf("word.W = %v, want %v (sum of real advances)", word.W, want)
 	}

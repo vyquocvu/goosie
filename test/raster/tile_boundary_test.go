@@ -23,7 +23,7 @@ func TestRasterizeTileGlyphInkCrossingTileEdge(t *testing.T) {
 	})
 
 	left := newTile()
-	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), left, f, g); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), left, f, g, frame.TransparentBlack); err != nil {
 		t.Fatalf("left tile: %v", err)
 	}
 	if inkPixels(left) == 0 {
@@ -31,7 +31,7 @@ func TestRasterizeTileGlyphInkCrossingTileEdge(t *testing.T) {
 	}
 
 	right := newTile()
-	if err := raster.RasterizeTile(dl, frame.Rect4(256, 0, 512, 256), right, f, g); err != nil {
+	if err := raster.RasterizeTile(dl, frame.Rect4(256, 0, 512, 256), right, f, g, frame.TransparentBlack); err != nil {
 		t.Fatalf("right tile: %v", err)
 	}
 	if inkPixels(right) == 0 {

@@ -96,9 +96,10 @@ func TestAutoHeight(t *testing.T) {
 	if body == nil {
 		t.Fatal("body not found")
 	}
-	// Body auto height should be: padding-top (10) + child height (100) + padding-bottom (10) = 120
-	if body.H != 120 {
-		t.Errorf("body.H = %v, want 120 (auto height from children + padding)", body.H)
+	// H is the content height: the child's 100px, with the padding added back by
+	// BorderRect at the edges.
+	if body.H != 100 {
+		t.Errorf("body.H = %v, want 100 (auto content height from children)", body.H)
 	}
 }
 
@@ -149,6 +150,138 @@ func TestMarginCollapsing(t *testing.T) {
 	// div2.Y = div1.Y + div1.H + collapsed margin = 20 + 50 + 30 = 100
 	if div2.Y != 100 {
 		t.Errorf("div2.Y = %v, want 100 (margin collapsing)", div2.Y)
+	}
+}
+
+// A wrapper with no border or padding does not push the margins of its own
+// children apart: they meet the wrapper's siblings as if the wrapper were not
+// there, so the largest of them wins once and the wrapper's box starts where that
+// collapsed margin ends.
+func TestMarginCollapsingThroughAWrapper(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<p style="margin: 0 0 16px; height: 18px">one</p>
+<section>
+<h3 style="margin: 20px 0; height: 21px">two</h3>
+<p style="margin: 16px 0; height: 18px">three</p>
+</section>
+<p style="margin: 0 0 40px; height: 10px">four</p>
+</body></html>`, 800)
+
+	ps := findAllByTag(arena, "p")
+	if len(ps) != 3 {
+		t.Fatalf("found %d paragraphs, want 3", len(ps))
+	}
+	section := findByTag(arena, "section")
+	h3 := findByTag(arena, "h3")
+	if section == nil || h3 == nil {
+		t.Fatal("section or h3 not found")
+	}
+
+	// The heading's 20px collapses with the first paragraph's 16px across the
+	// section's top edge, so the section sits 20px below the paragraph rather
+	// than 36px, and the heading is flush inside it.
+	if want := float32(38); !almostEqual(h3.Y, want) {
+		t.Errorf("h3.Y = %v, want %v", h3.Y, want)
+	}
+	if want := float32(38); !almostEqual(section.Y, want) {
+		t.Errorf("section.Y = %v, want %v", section.Y, want)
+	}
+	// The last paragraph's bottom margin carries out of the section instead of
+	// adding to its height, and then collapses with the next sibling's zero top
+	// margin: 16px, not 16px of height plus 16px of gap.
+	if want := float32(59); !almostEqual(section.H, want) {
+		t.Errorf("section.H = %v, want %v", section.H, want)
+	}
+	if want := float32(113); !almostEqual(ps[2].Y, want) {
+		t.Errorf("last p.Y = %v, want %v", ps[2].Y, want)
+	}
+}
+
+// TestBlockInInline covers the block child of an inline box. CSS splits the
+// inline box around it, so the content below takes a line of its own rather than
+// vanishing into the parent's inline run.
+func TestBlockInInline(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div>
+<p style="margin: 0; height: 18px">first</p>
+<span><p style="margin: 0; height: 18px">nested</p></span>
+</div>
+</body></html>`, 800)
+	layout.Inline(arena, layout.ObjectID(1))
+
+	ps := findAllByTag(arena, "p")
+	if len(ps) != 2 {
+		t.Fatalf("found %d paragraphs, want 2", len(ps))
+	}
+	var nested *layout.Object
+	for _, p := range ps {
+		if p.Y > 0 {
+			nested = p
+		}
+	}
+	if nested == nil {
+		t.Fatal("the paragraph inside the span was never placed below the first one")
+	}
+	// An inline box carrying block content fills the line like the anonymous
+	// block CSS splits it into.
+	if want := float32(800); !almostEqual(nested.W, want) {
+		t.Errorf("nested p.W = %v, want %v", nested.W, want)
+	}
+	if want := float32(18); !almostEqual(nested.Y, want) {
+		t.Errorf("nested p.Y = %v, want %v", nested.Y, want)
+	}
+	div := findByTag(arena, "div")
+	if div == nil {
+		t.Fatal("div not found")
+	}
+	if want := float32(36); !almostEqual(div.H, want) {
+		t.Errorf("div.H = %v, want %v", div.H, want)
+	}
+}
+
+// TestFixedPositioning covers the viewport-side of the positioning pass: a fixed
+// box is out of the flow, and its insets resolve against the viewport rect the
+// pass is handed rather than the containing block of the nearest ancestor.
+func TestFixedPositioning(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="position: fixed; top: 0; left: 0; right: 0; height: 40px">bar</div>
+<p>in flow</p>
+<div style="position: fixed; bottom: 0; left: 0; width: 100px">foot</div>
+</body></html>`, 800)
+	layout.Inline(arena, layout.ObjectID(1))
+	layout.Positioning(arena, layout.ObjectID(1), 800, 600)
+
+	divs := findAllByTag(arena, "div")
+	if len(divs) != 2 {
+		t.Fatalf("found %d divs, want 2", len(divs))
+	}
+	bar, foot := divs[0], divs[1]
+	if bar.X != 0 || bar.Y != 0 {
+		t.Errorf("bar origin = %v,%v, want 0,0", bar.X, bar.Y)
+	}
+	if want := float32(800); !almostEqual(bar.W, want) {
+		t.Errorf("bar.W = %v, want %v", bar.W, want)
+	}
+	if want := float32(40); !almostEqual(bar.H, want) {
+		t.Errorf("bar.H = %v, want %v", bar.H, want)
+	}
+	// The bar takes no part in the flow, so the paragraph is placed as if it were
+	// the first child: 16px down, which is its own margin riding out through body
+	// and html, not 40px of bar plus that margin.
+	p := findByTag(arena, "p")
+	if p == nil {
+		t.Fatal("p not found")
+	}
+	if want := float32(16); !almostEqual(p.Y, want) {
+		t.Errorf("p.Y = %v, want %v", p.Y, want)
+	}
+	if want := float32(100); !almostEqual(foot.W, want) {
+		t.Errorf("foot.W = %v, want %v", foot.W, want)
+	}
+	// `bottom` needs a viewport height: the box's bottom edge lands on the
+	// viewport's.
+	if want := float32(600); !almostEqual(foot.Y+foot.H, want) {
+		t.Errorf("foot bottom edge = %v, want %v", foot.Y+foot.H, want)
 	}
 }
 
@@ -251,18 +384,21 @@ func TestLineHeightCentersText(t *testing.T) {
 		t.Fatal("word objects not found")
 	}
 
-	// Half-leading: the 19.2px glyph box centers in the 40px line box, so the
-	// word's top sits (40 - 19.2) / 2 below the line's top.
-	wantY := (float32(40) - 16*1.2) / 2
+	// Half-leading: the run's content area is the face's ascent plus descent,
+	// 16px for a 16px em with no metrics provider, and it centers in the 40px
+	// line box.
+	wantY := (float32(40) - 16) / 2
 	if !almostEqual(hello.Y, wantY) {
 		t.Errorf("hello.Y = %v, want %v (centered in the 40px line)", hello.Y, wantY)
 	}
 	if !almostEqual(divs[0].H, 40) {
 		t.Errorf("div.H = %v, want 40 (one line of the declared line-height)", divs[0].H)
 	}
-	// Without a declaration the 1.2 multiplier still applies.
-	if plain.Y != 0 {
-		t.Errorf("plain.Y = %v, want 0 (default line box starts at the top)", plain.Y)
+	// The second div sits below the first (which has height 40), so its content
+	// top is at Y=40. Its line box is the face's own normal height, so the
+	// content area drops by half the surplus leading.
+	if !almostEqual(plain.Y, 40+(19.2-16)/2) {
+		t.Errorf("plain.Y = %v, want %v (half-leading below the 40px first div)", plain.Y, 40+(19.2-16)/2)
 	}
 	if !almostEqual(divs[1].H, 16*1.2) {
 		t.Errorf("second div.H = %v, want %v (default 1.2 line-height)", divs[1].H, 16*1.2)

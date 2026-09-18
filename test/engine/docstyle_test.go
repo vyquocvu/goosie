@@ -158,11 +158,11 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Fatal("div not found")
 	}
 
-	// With box-sizing: border-box (from UA stylesheet), the 600px declared width
-	// includes the 2*32px padding, so content width div.W = 600 - 64 = 536.
-	// The border box is exactly 600px wide.
-	if divObj.W != 536 {
-		t.Errorf("div.W = %v, want 536", divObj.W)
+	// The UA sheet leaves div at box-sizing: content-box, as Chromium does, so the
+	// 600px declared width is the content width and the 2*32px padding sits outside
+	// it: the border box is 664px.
+	if divObj.W != 600 {
+		t.Errorf("div.W = %v, want 600", divObj.W)
 	}
 	// padding is 2em = 32px
 	if divObj.PaddingLeft != 32 || divObj.PaddingRight != 32 {
@@ -172,9 +172,9 @@ func TestExampleDotComRender(t *testing.T) {
 	if divObj.MarginTop != 80 {
 		t.Errorf("div.MarginTop = %v, want 80", divObj.MarginTop)
 	}
-	// Border box = 600px. Remaining space = 1440 - 600 = 840.
-	// MarginLeft = MarginRight = 840 / 2 = 420.
-	wantMargin := float32(420)
+	// Border box = 664px. Remaining space = 1440 - 664 = 776.
+	// MarginLeft = MarginRight = 776 / 2 = 388.
+	wantMargin := float32(388)
 	if math.Abs(float64(divObj.MarginLeft-wantMargin)) > 1 {
 		t.Errorf("div.MarginLeft = %v, want %v", divObj.MarginLeft, wantMargin)
 	}

@@ -72,16 +72,17 @@ var errUsage = errors.New("usage")
 
 // config is one parsed invocation.
 type config struct {
-	url     string
-	gate    bool
-	bench   bool
-	backend string
-	frames  int
-	scene   string
-	out     string
-	width   int
-	height  int
-	dpr     float64
+	url        string
+	gate       bool
+	bench      bool
+	screenshot bool
+	backend    string
+	frames     int
+	scene      string
+	out        string
+	width      int
+	height     int
+	dpr        float64
 }
 
 // devSize is the surface in device pixels: the units the frame path, the scheduler,
@@ -104,7 +105,7 @@ func (c config) vsyncPeriod() time.Duration {
 
 // paced reports whether this run is driven by a fixed frame count rather than by a
 // person closing the window.
-func (c config) paced() bool { return c.gate || c.bench }
+func (c config) paced() bool { return c.gate || c.bench || c.screenshot }
 
 // parse turns os.Args into a config, and rejects the combinations that would draw
 // something other than what was asked for.
@@ -114,6 +115,7 @@ func parse(args []string) (config, error) {
 	fs.StringVar(&c.url, "url", "", "document to load")
 	fs.BoolVar(&c.gate, "gate", false, "drive -frames scripted scroll frames at real pacing, then report")
 	fs.BoolVar(&c.bench, "bench", false, "run frames as fast as the clock allows, headless, and report the rate")
+	fs.BoolVar(&c.screenshot, "screenshot", false, "render -url to a PNG at -out and exit")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
 	fs.IntVar(&c.frames, "frames", defaultFrames, "frames to draw with -gate and -bench")
 	fs.StringVar(&c.scene, "scene", "checkerboard", "synthetic document: checkerboard or plain")
@@ -143,12 +145,20 @@ func parse(args []string) (config, error) {
 	if _, err := sceneSpec(c.scene); err != nil {
 		return c, err
 	}
-	if c.bench {
+	if c.bench || c.screenshot {
 		// A rate run that depended on a panel's refresh would report the panel, and
 		// the nightly job wants the machine. An explicit -backend still wins, so a
 		// caller who means to measure a real display can say so with -gate.
 		if fs.Lookup("backend").Value.String() == "" {
 			c.backend = platform.Headless
+		}
+	}
+	if c.screenshot {
+		if c.out == "" {
+			return c, fmt.Errorf("%w: -screenshot requires -out <path.png>", errUsage)
+		}
+		if c.url == "" {
+			return c, fmt.Errorf("%w: -screenshot requires -url", errUsage)
 		}
 	}
 	return c, nil
@@ -299,7 +309,7 @@ func (f *framePath) navigate(rawURL string) {
 	}
 
 	go func() {
-		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, float32(f.config.dpr))
+		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
 		if err != nil {
 			// Context cancelled means a newer navigation superseded this one;
 			// don't report it as an error.
@@ -374,7 +384,7 @@ func (f *framePath) navigateNoHistory(rawURL string) {
 	}
 
 	go func() {
-		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, float32(f.config.dpr))
+		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -420,7 +430,7 @@ func (f *framePath) reload() {
 }
 
 // loadURLCtx is like loadURL but respects context cancellation.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
 	// Check context before starting the fetch.
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
@@ -433,7 +443,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
 	}
-	sess, err := engine.NewSession(string(resp.Body), nil, float32(viewportW), engine.WithMetrics(fonts))
+	sess, err := engine.NewSession(string(resp.Body), nil, float32(viewportW), engine.WithMetrics(fonts), engine.WithViewportH(float32(viewportH)))
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -516,7 +526,7 @@ func run(args []string) error {
 
 	// If a URL was provided, start loading it now that the window is visible.
 	// The user sees the toolbar immediately while the page fetches in the background.
-	if c.url != "" && !c.paced() {
+	if c.url != "" && !c.gate && !c.bench {
 		f.navigate(c.url)
 	}
 
@@ -525,9 +535,23 @@ func run(args []string) error {
 	// ticks the display already produces. Everything downstream of it - the loop, the
 	// scheduler, the composer, the present - is the code an interactive run executes.
 	var d *driver
-	if c.paced() {
+	var finish chan struct{}
+	if c.gate || c.bench {
 		d = newDriver(f, c.frames)
 		f.loop = surface.NewLoop(d, f.sched, f.composer, f.rec)
+		finish = d.done
+	} else if c.screenshot {
+		sd := newSteadyDriver(f, c.frames)
+		f.loop = surface.NewLoop(sd, f.sched, f.composer, f.rec)
+		finish = sd.done
+		defer func() {
+			// After the loop exits, write the PNG from the headless window.
+			if hw, ok := f.window.(interface{ WritePNG(string) error }); ok {
+				if err := hw.WritePNG(c.out); err != nil {
+					fmt.Fprintf(os.Stderr, "goosie: write screenshot: %v\n", err)
+				}
+			}
+		}()
 	}
 
 	sig := make(chan os.Signal, 1)
@@ -550,10 +574,6 @@ func run(args []string) error {
 	// goroutine: on a platform with a run loop the main thread is busy turning it, and
 	// closing the window is what stops that loop. An interactive run has no frame
 	// count to finish on, so its finish channel stays nil and never readies.
-	var finish chan struct{}
-	if d != nil {
-		finish = d.done
-	}
 	go func() {
 		select {
 		case <-stopped: // the window's events ran out, which is an orderly shutdown
@@ -577,6 +597,9 @@ func run(args []string) error {
 	<-stopped
 	if err := <-loopErr; err != nil {
 		return fmt.Errorf("goosie: %w", err)
+	}
+	if c.screenshot {
+		return nil
 	}
 	return f.report(d)
 }

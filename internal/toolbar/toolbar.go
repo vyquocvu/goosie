@@ -426,8 +426,10 @@ func (s *State) drawText(backing *frame.Bitmap, text string, x, y int32, c frame
 		return
 	}
 	penX := x
+	// The zero slot is the embedded Go face: the chrome draws the same type it
+	// always has, whatever fonts the host has.
 	for _, rn := range text {
-		g := s.fonts.Glyph(textSize, rn)
+		g := s.fonts.Glyph(textSize, rn, frame.FontSlot{})
 		if !g.Ok || g.Mask == nil {
 			penX += g.Advance
 			continue
@@ -444,7 +446,7 @@ func (s *State) measureText(text string) int32 {
 	}
 	var w int32
 	for _, rn := range text {
-		w += s.fonts.GlyphAdvance(textSize, rn)
+		w += s.fonts.GlyphAdvance(textSize, rn, frame.FontSlot{})
 	}
 	return w
 }

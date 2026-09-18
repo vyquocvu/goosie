@@ -36,11 +36,12 @@ var ErrNoRasterizer = errors.New("raster: pool has no rasterizer")
 // grid's pool, so a worker never allocates a tile and never has to know where
 // buffers come from.
 type Job struct {
-	Layer  *frame.Layer
-	Coord  frame.TileCoord
-	DL     *paint.LayerDL
-	Bounds frame.Rect
-	Out    *frame.Bitmap
+	Layer      *frame.Layer
+	Coord      frame.TileCoord
+	DL         *paint.LayerDL
+	Bounds     frame.Rect
+	Out        *frame.Bitmap
+	Background frame.Color
 }
 
 // Done is one job's result. Out is the same buffer the job carried, whether the
@@ -72,7 +73,7 @@ type RasterFunc func(j Job) error
 // DefaultRaster returns the RasterFunc the frame path uses.
 func DefaultRaster(f *Fonts, g *GlyphAtlas) RasterFunc {
 	return func(j Job) error {
-		return RasterizeTile(j.DL, j.Bounds, j.Out, f, g)
+		return RasterizeTile(j.DL, j.Bounds, j.Out, f, g, j.Background)
 	}
 }
 

@@ -162,10 +162,7 @@ func NewScheduler(l *frame.Layer, pool *Pool, vp frame.Viewport, scale float32, 
 	}
 	if l != nil {
 		s.grid = l.Grid
-		s.scroll = frame.Point{
-			X: clampOffset(vp.Offset.X, l.Bounds.X0, l.Bounds.W()-vp.Size.W),
-			Y: clampOffset(vp.Offset.Y, l.Bounds.Y0, l.Bounds.H()-vp.Size.H),
-		}
+		s.scroll = clampScroll(vp.Offset, l.Bounds, vp.Size)
 		if prefs.Budget > 0 && s.grid != nil {
 			s.grid.SetBudget(prefs.Budget)
 		}
@@ -364,7 +361,7 @@ func (s *Scheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 		painting += tileBytes
 		w.Submitted++
 		s.submitted++
-		if err := s.pool.Submit(Job{Layer: s.layer, Coord: c, DL: dl, Bounds: c.Rect(ts), Out: out}); err != nil {
+		if err := s.pool.Submit(Job{Layer: s.layer, Coord: c, DL: dl, Bounds: c.Rect(ts), Out: out, Background: s.cur.Background}); err != nil {
 			s.grid.Release(c, out)
 			painting -= tileBytes
 			w.Refused++
@@ -611,8 +608,7 @@ func (s *Scheduler) resolve() frame.Viewport {
 		return v
 	}
 	b := s.layer.Bounds
-	v.Offset.X = clampOffset(v.Offset.X, b.X0, b.W()-v.Size.W)
-	v.Offset.Y = clampOffset(v.Offset.Y, b.Y0, b.H()-v.Size.H)
+	v.Offset = clampScroll(v.Offset, b, v.Size)
 	return v
 }
 
@@ -769,6 +765,19 @@ func addSaturate(a, b int32) int32 {
 		return math.MinInt32
 	}
 	return int32(sum)
+}
+
+// clampScroll confines a scroll position to the range in which the layer still covers
+// the surface. The lower bound is the document's own origin rather than the layer
+// bounds origin: content that starts 20px in — a body margin — has to be able to sit
+// 20px in on screen, and a page that does not fill the window parks at the origin
+// instead of being dragged sideways by its margin.
+func clampScroll(p frame.Point, b frame.Rect, size frame.Size) frame.Point {
+	loX, loY := min(int32(0), b.X0), min(int32(0), b.Y0)
+	return frame.Point{
+		X: clampOffset(p.X, loX, b.X1-size.W-loX),
+		Y: clampOffset(p.Y, loY, b.Y1-size.H-loY),
+	}
 }
 
 // clampOffset confines a raw scroll position to [lo, lo+span]. A span below zero means
