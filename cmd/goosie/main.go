@@ -439,11 +439,37 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
 	}
+	// Linked style sheets are fetched with the same client and the same
+	// cancellation: the linker sees absolute http(s) URLs only, because the
+	// engine resolves hrefs against the final document URL before calling.
+	linker := func(base, href string) (string, error) {
+		resp, err := client.Get(ctx, href)
+		if err != nil {
+			return "", err
+		}
+		if refused := resp.Headers["Content-Type"]; net.StyleSheetRefused(refused) {
+			return "", fmt.Errorf("goosie: %s is served as %q, not as a style sheet", href, refused)
+		}
+		return resp.Text(), nil
+	}
+	// Image subresources use the same client and cancellation. The engine hands
+	// absolute http(s) URLs only, so the fetcher just reads the response bytes.
+	imageFetcher := func(base, url string) ([]byte, error) {
+		resp, err := client.Get(ctx, url)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Body, nil
+	}
 	// Check context after the fetch in case it was cancelled during the network call.
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
 	}
-	sess, err := engine.NewSession(string(resp.Body), nil, float32(viewportW), engine.WithMetrics(fonts), engine.WithViewportH(float32(viewportH)))
+	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW),
+		engine.WithMetrics(fonts),
+		engine.WithViewportH(float32(viewportH)),
+		engine.WithLinkedCSS(resp.URL, linker),
+		engine.WithImages(resp.URL, imageFetcher))
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -458,7 +484,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	layer.SetContent(dl)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), nil
 }
-
 
 // normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
 func normalizeURL(raw string) string {
@@ -526,10 +551,24 @@ func run(args []string) error {
 
 	// If a URL was provided, start loading it now that the window is visible.
 	// The user sees the toolbar immediately while the page fetches in the background.
+	// A screenshot run has nobody to watch the background load: the fixed frame
+	// count would present synthetic tiles before the document lands, so it loads
+	// synchronously and the run captures the page it was asked for.
 	if c.url != "" && !c.gate && !c.bench {
-		f.navigate(c.url)
+		if c.screenshot {
+			layer, _, bgColor, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr))
+			if err != nil {
+				return err
+			}
+			f.sched.SetPlan(frame.FramePlan{
+				Serial:     f.navSerial.Add(1),
+				Layers:     []*frame.Layer{layer},
+				Background: bgColor,
+			})
+		} else {
+			f.navigate(c.url)
+		}
 	}
-
 
 	// A paced run cannot wait for a finger, so the driver stamps the scroll onto the
 	// ticks the display already produces. Everything downstream of it - the loop, the
@@ -543,6 +582,13 @@ func run(args []string) error {
 	} else if c.screenshot {
 		sd := newSteadyDriver(f, c.frames)
 		f.loop = surface.NewLoop(sd, f.sched, f.composer, f.rec)
+		sd.watchIdle(func() bool {
+			// Idle is not "nothing needed": a frame can want no tiles while the
+			// tiles it is waiting on are still on order at a worker. Both halves
+			// have to be clear before the pixels in the PNG are all there.
+			st := f.loop.Stats()
+			return st.Last.Needed == 0 && st.Last.PaintingBytes == 0
+		})
 		finish = sd.done
 		defer func() {
 			// After the loop exits, write the PNG from the headless window.

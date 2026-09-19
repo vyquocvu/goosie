@@ -15,6 +15,7 @@ const (
 	FontCourier
 	FontGeorgia
 	FontVerdana
+	FontHelvetica
 )
 
 func (f FontFamily) String() string {
@@ -29,6 +30,8 @@ func (f FontFamily) String() string {
 		return "Georgia"
 	case FontVerdana:
 		return "Verdana"
+	case FontHelvetica:
+		return "Helvetica Neue"
 	}
 	return "Go"
 }
@@ -46,4 +49,8 @@ type FontSlot struct {
 	Family FontFamily
 	Bold   bool
 	Italic bool
+	// Light marks a CSS weight below 400. Only the families with a real light
+	// face on the host serve it; everywhere else it collapses back to the
+	// regular face during the source lookup.
+	Light bool
 }

@@ -15,6 +15,10 @@ type fixedMetrics struct{ advance int32 }
 
 func (m *fixedMetrics) GlyphAdvance(_ int32, _ rune, _ frame.FontSlot) int32 { return m.advance }
 
+func (m *fixedMetrics) GlyphAdvanceFixed(_ int32, _ rune, _ frame.FontSlot) int32 {
+	return m.advance * 64
+}
+
 func (m *fixedMetrics) LineMetrics(size int32, _ frame.FontSlot) (int32, int32, int32) {
 	return size * 4 / 5, size / 5, size * 6 / 5
 }
@@ -74,7 +78,8 @@ func TestReflowFailurePreservesArena(t *testing.T) {
 	old := s.Arena
 	before := append([]layout.Object(nil), old.Objects...)
 	// Valid viewport, but the candidate geometry exceeds the safe range.
-	m.advance = 1 << 29
+	// The advance is in pixels; the fixed-point API multiplies it by 64.
+	m.advance = 1 << 24
 	if err := reflow(t, s, 200); err == nil {
 		t.Fatal("accepted unsafe candidate geometry")
 	}

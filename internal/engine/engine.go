@@ -10,9 +10,15 @@ package engine
 
 import (
 	"fmt"
+	stdimage "image"
+	"strings"
+	"sync"
+	"time"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
+	imgdec "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -26,14 +32,35 @@ import (
 // edit re-runs everything. The session does not own a network client; the
 // caller passes in fetched bytes so the engine stays testable without a network.
 type Session struct {
-	Doc    *dom.Document
-	Styles map[dom.NodeID]*style.ComputedStyle
-	Arena  *layout.Arena
+	Doc         *dom.Document
+	Styles      map[dom.NodeID]*style.ComputedStyle
+	PseudoStyles map[style.PseudoKey]*style.ComputedStyle
+	Arena        *layout.Arena
 
 	metrics   layout.Metrics
 	viewportW float32
 	viewportH float32
+	linkBase  string
+	linker    CSSLinker
+
+	imgBase   string
+	imgFetch  ImageFetcher
+	natural   map[dom.NodeID]layout.NaturalSize
+	images    map[dom.NodeID]stdimage.Image
+	bgImages  map[dom.NodeID]stdimage.Image
 }
+
+// CSSLinker fetches one linked style sheet. base is the document URL the href
+// resolves against; the returned string is the sheet's CSS text. A linker that
+// fails simply contributes no rules for that href; document rendering does not
+// stop for one missing sheet.
+type CSSLinker func(base, href string) (string, error)
+
+// ImageFetcher fetches one image subresource's raw bytes. base is the document
+// URL the src resolves against; the returned bytes are the encoded image. A
+// fetcher that fails leaves that image undecoded, and the box keeps the layout
+// space its attributes reserve, so a missing image does not stop rendering.
+type ImageFetcher func(base, url string) ([]byte, error)
 
 // Option adjusts how a Session is built.
 type Option func(*Session)
@@ -58,6 +85,29 @@ func WithViewportH(h float32) Option {
 	}
 }
 
+// WithLinkedCSS lets the session resolve and fetch <link rel=stylesheet>
+// sheets during the same document walk that collects <style> blocks, so the
+// sheets keep their document-order position in the cascade. base is the
+// document's final URL (after redirects); href resolution happens here so the
+// fetcher only ever sees absolute URLs.
+func WithLinkedCSS(base string, fetch CSSLinker) Option {
+	return func(s *Session) {
+		s.linkBase = base
+		s.linker = fetch
+	}
+}
+
+// WithImages lets the session fetch and decode the <img> subresources a
+// document references during construction, so layout can size each image box
+// from its intrinsic size and paint can draw it. base is the document's final
+// URL, which srcs resolve against.
+func WithImages(base string, fetch ImageFetcher) Option {
+	return func(s *Session) {
+		s.imgBase = base
+		s.imgFetch = fetch
+	}
+}
+
 // NewSession parses HTML and builds the pipeline state. The caller provides the
 // raw HTML and any author style sheets; <style> blocks inside the document are
 // collected automatically, and the UA stylesheet is added internally.
@@ -71,6 +121,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	s.viewportW = viewportW
+	css.SetMediaViewportWidth(viewportW)
 	if len(html) > MaxDocumentBytes {
 		return nil, fmt.Errorf("HTML byte limit exceeded (%d)", MaxDocumentBytes)
 	}
@@ -81,16 +132,139 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if err != nil {
 		return nil, err
 	}
-	sheets, err := checkedSheets(doc, authorCSS)
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker)
 	if err != nil {
 		return nil, err
 	}
 	s.Doc = doc
 	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport())
+	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles)
+	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// maxLoadedImages bounds how many image subresources one document may fetch,
+// so a page that references hundreds cannot stall the first frame.
+const maxLoadedImages = 256
+
+// imageFetchBudget stops subresource fetching past a wall-clock deadline so a
+// slow or unreachable host cannot push the first render past its time limit;
+// images left unfetched simply reserve their box and paint nothing.
+const imageFetchBudget = 6 * time.Second
+
+// loadImages walks the styled document for <img> srcs and background-image
+// URLs, fetches and decodes each unique target, and records the intrinsic size
+// (for <img> layout) and the decoded pixels (for paint). It is a no-op without
+// a fetcher.
+//
+// Fetching runs through a bounded worker pool rather than inline in the walk. A
+// page can carry dozens of images; a sequential walk spends the whole
+// wall-clock budget on the first handful (at ~0.8s each, a 6s budget covers
+// only ~7), leaving the rest to reserve their box and paint nothing. Fetching
+// concurrently lets the same deadline cover the page, which is what a real
+// browser does and what the reference renders assume.
+func (s *Session) loadImages() {
+	if s.imgFetch == nil || s.Doc == nil {
+		return
+	}
+	s.natural = make(map[dom.NodeID]layout.NaturalSize)
+	s.images = make(map[dom.NodeID]stdimage.Image)
+	s.bgImages = make(map[dom.NodeID]stdimage.Image)
+
+	// Collect every reference in document order. A URL can back several nodes
+	// (an <img> and a background), so fetch each unique target once and fan the
+	// decoded pixels back out to all of them.
+	type ref struct {
+		id  dom.NodeID
+		abs string
+		bg  bool
+	}
+	var refs []ref
+	var uniq []string
+	seen := make(map[string]bool)
+	_, _ = walkDocument(s.Doc, func(n *dom.Node) error {
+		if !n.Element() {
+			return nil
+		}
+		if n.Data == "img" {
+			if src := strings.TrimSpace(n.GetAttribute("src")); src != "" {
+				if abs, ok := resolveSheetURL(s.imgBase, src); ok {
+					refs = append(refs, ref{id: n.ID, abs: abs})
+					if !seen[abs] {
+						seen[abs] = true
+						uniq = append(uniq, abs)
+					}
+				}
+			}
+		}
+		if st, ok := s.Styles[n.ID]; ok && st.BackgroundImage != "" {
+			if abs, ok := resolveSheetURL(s.imgBase, st.BackgroundImage); ok {
+				refs = append(refs, ref{id: n.ID, abs: abs, bg: true})
+				if !seen[abs] {
+					seen[abs] = true
+					uniq = append(uniq, abs)
+				}
+			}
+		}
+		return nil
+	})
+
+	byURL := make(map[string]stdimage.Image, len(uniq))
+	var mu sync.Mutex
+	loaded := 0
+	deadline := time.Now().Add(imageFetchBudget)
+	const imageWorkers = 12
+	sem := make(chan struct{}, imageWorkers)
+	var wg sync.WaitGroup
+	for _, u := range uniq {
+		u := u
+		if time.Now().After(deadline) {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			mu.Lock()
+			full := loaded >= maxLoadedImages
+			mu.Unlock()
+			if full {
+				return
+			}
+			data, err := s.imgFetch(s.imgBase, u)
+			if err != nil || len(data) == 0 {
+				return
+			}
+			img, err := imgdec.Decode(data)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			loaded++
+			byURL[u] = img
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	for _, r := range refs {
+		img, ok := byURL[r.abs]
+		if !ok {
+			continue
+		}
+		if r.bg {
+			s.bgImages[r.id] = img
+			continue
+		}
+		if b := img.Bounds(); b.Dx() > 0 && b.Dy() > 0 {
+			s.natural[r.id] = layout.NaturalSize{W: float32(b.Dx()), H: float32(b.Dy())}
+			s.images[r.id] = img
+		}
+	}
 }
 
 // styleViewport is the frame the cascade resolves the viewport units against. A
@@ -123,9 +297,10 @@ func (s *Session) Reflow(viewportW float32) error {
 	if err := s.validateLayoutInput(); err != nil {
 		return err
 	}
-	candidate := layout.Build(s.Doc, s.Styles)
+	candidate := layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 	candidate.Metrics = s.metrics
-	layout.Block(candidate, layout.ObjectID(1), viewportW)
+	candidate.NaturalSizes = s.natural
+	layout.Block(candidate, layout.ObjectID(1), viewportW, s.viewportH)
 	if err := validateArena(candidate); err != nil {
 		return err
 	}
@@ -133,6 +308,20 @@ func (s *Session) Reflow(viewportW float32) error {
 	layout.Positioning(candidate, layout.ObjectID(1), viewportW, s.viewportH)
 	if err := validateArena(candidate); err != nil {
 		return err
+	}
+	// Hand each laid-out image box its decoded pixels so paint can draw it. The
+	// arena is rebuilt every reflow, so this attachment has to run each time.
+	if s.images != nil {
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil {
+				if img, ok := s.images[n.ID]; ok {
+					candidate.Objects[i].Image = img
+				}
+				if img, ok := s.bgImages[n.ID]; ok {
+					candidate.Objects[i].BgImage = img
+				}
+			}
+		}
 	}
 	s.Arena = candidate
 	return nil

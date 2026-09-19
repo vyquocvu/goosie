@@ -92,8 +92,14 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 	// so the inline pass below runs over it.
 	obj.flags &^= flagOutOfFlow
 	// Margins, borders and padding percentages resolve against the containing
-	// block's width, exactly as they do for an in-flow block.
-	resolveBoxSizes(obj, cb.w)
+	// block's width, exactly as they do for an in-flow block. Heights resolve
+	// against its height, and a containing block with no height of its own - an
+	// unset viewport - leaves those percentages auto.
+	sizeH := cb.h
+	if sizeH <= 0 {
+		sizeH = -1
+	}
+	resolveBoxSizes(obj, cb.w, sizeH)
 	obj = a.Get(id)
 	extra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 	vExtra := obj.PaddingTop + obj.PaddingBottom + obj.BorderTop + obj.BorderBottom
@@ -106,9 +112,15 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 	// `right` is the value that gets ignored.
 	x := obj.StaticX
 	w := obj.W
-	shrinkW := s.Width < 0
-	if s.Width >= 0 {
-		shrinkW = false
+	// `auto` is the only width that takes shrink-to-fit sizing. A percentage
+	// width is encoded as a negative sentinel, and resolveBoxSizes has already
+	// turned it into a concrete content width on obj.W (box-sizing included), so
+	// testing `s.Width < 0` here threw `width:50%` away as if it were auto.
+	shrinkW := resolvePctLength(s.Width, cb.w) < 0
+	// stretched marks the one auto width that is not content-driven: both insets
+	// pinned, so the box takes whatever the two leave between them.
+	stretched := false
+	if !shrinkW {
 		switch {
 		case s.HasLeft:
 			x = cb.x0 + obj.MarginLeft + insetL
@@ -121,6 +133,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 			w = 0
 		}
 		shrinkW = false
+		stretched = true
 		x = cb.x0 + obj.MarginLeft + insetL
 	} else if s.HasLeft {
 		x = cb.x0 + obj.MarginLeft + insetL
@@ -133,7 +146,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 
 	y := obj.StaticY
 	h := obj.H
-	explicitH := s.Height >= 0
+	explicitH := resolvePctLength(s.Height, sizeH) >= 0
 	if explicitH {
 		switch {
 		case s.HasTop:
@@ -155,10 +168,17 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 	obj.X, obj.Y = x, y
 	obj.W = w
 	measureW := w + obj.MarginLeft + obj.MarginRight + extra
-	if shrinkW {
+	switch {
+	case shrinkW:
 		// Max-content sizing: lay the box out at a width no text can fill, read
 		// back the extent its content took, and give the box that width.
 		measureW = maxFlexMeasureWidth
+	case !stretched:
+		// The width is already resolved, so the measure width only has to be a
+		// containing block the same resolution lands back on: handing it the
+		// border-box width instead made a percentage grow by its own padding on
+		// every pass, and carry its children out with it.
+		measureW = cb.w
 	}
 	blockInto(a, id, measureW)
 	obj = a.Get(id)

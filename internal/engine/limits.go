@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
@@ -17,27 +18,35 @@ import (
 // Phase 1 resource caps apply per document, including all author/embedded/inline
 // CSS. Geometry is CSS pixels; viewport device limits apply after scaling.
 const (
-	MaxDocumentBytes      = 8 << 20
-	MaxDocumentNodes      = 10000
-	MaxDocumentDepth      = 128
-	MaxAttributes         = 64
-	MaxAttributeBytes     = 4096
-	MaxCSSBytes           = 256 << 10
-	MaxCSSTokens          = 32768
-	MaxCSSRules           = 512
-	MaxCSSSelectors       = 1024
-	MaxCSSDeclarations    = 4096
-	MaxCSSNesting         = 8
-	MaxSelectorParts      = 8
-	MaxSelectorConditions = 16
+	MaxDocumentBytes   = 8 << 20
+	MaxDocumentNodes   = 50000
+	MaxDocumentDepth   = 128
+	MaxAttributes      = 64
+	MaxAttributeBytes  = 65536
+	MaxCSSBytes        = 4 << 20
+	MaxCSSTokens       = 1 << 20
+	MaxCSSRules        = 32768
+	MaxCSSSelectors    = 65536
+	MaxCSSDeclarations = 1 << 18
+	MaxCSSNesting      = 8
+	// A selector's parts and conditions are counted recursively through :not()
+	// arguments, so these bound the whole tree a selector compiles to rather than
+	// its visible compound count. Real stylesheets need the headroom: a MediaWiki
+	// rule such as `html.x body.y:not(.z) .w table:not(.a):not(.b)` is already at
+	// the old limit of 8 parts. Runaway matching is caught by MaxStyleWork, which
+	// prices each selector against the elements carrying its key.
+	MaxSelectorParts      = 64
+	MaxSelectorConditions = 64
 	// Descendant/general-sibling combinators increase matching cost linearly;
 	// the old limit of 1 rejected any selector with more than one combinator.
 	MaxSelectorSearches = 16
-	// Conservative matching + declaration-byte work estimate, before Resolve.
-	MaxStyleWork       = 16 << 20
+	// Matching + declaration-byte work estimate, before Resolve, priced the way the
+	// matcher actually runs: each selector against the elements carrying its key.
+	// Rules past it are clipped rather than failing the document.
+	MaxStyleWork       = 1 << 28
 	MaxFontSize        = 512
 	MaxGeometry        = 1 << 20
-	MaxLayoutObjects   = 65536
+	MaxLayoutObjects   = 131072
 	MaxTextRunes       = 1 << 20
 	MaxDPR             = 8
 	MaxDeviceDimension = 16384
@@ -216,18 +225,65 @@ func selectorCost(sel css.Selector, depth, siblings int) (int64, error) {
 		return 0, fmt.Errorf("CSS selector search limit exceeded (%d)", MaxSelectorSearches)
 	}
 	if searches > 0 {
-		cost *= int64(max(depth, siblings))
+		// Each search combinator walks the ancestor chain once the key part
+		// matches; the walk is bounded by depth, not by total node count.
+		cost += int64(max(depth, 1)) * int64(searches)
 	}
 	return max(cost, 1), nil
 }
 
+// selectorFanOut counts the elements style resolution can test a selector
+// against. The matcher buckets every selector on the id, classes and tag its key
+// (rightmost) compound demands and only tries it on elements carrying one of
+// those keys, so a selector's cost is set by how common its key is rather than by
+// the size of the document. Summing the populations bounds the union of the
+// buckets the selector is filed under, and the document's element count bounds it
+// from above; a selector with no key at all, such as `*` or `[disabled]`, is tried
+// against every element.
+func selectorFanOut(sel css.Selector, stats documentStats) int64 {
+	if len(sel.Parts) == 0 {
+		return 1
+	}
+	key := sel.Parts[len(sel.Parts)-1]
+	sum := int64(0)
+	for _, c := range key.Conditions {
+		switch c.Type {
+		case css.CondID:
+			sum += int64(stats.keyCount[keyID+c.Value])
+		case css.CondClass:
+			sum += int64(stats.keyCount[keyClass+c.Value])
+		case css.CondType:
+			sum += int64(stats.keyCount[keyTag+c.Value])
+		}
+	}
+	if sum < 1 {
+		sum = 1
+	}
+	return min(sum, int64(stats.elements))
+}
+
 type documentStats struct {
 	nodes, depth, siblings int
+	// elements is the count style resolution actually visits; keyCount records how
+	// many elements carry each id, class and tag, prefixed to keep the three
+	// namespaces apart. The style matcher buckets selectors on their key compound,
+	// so these are what a selector's matching can cost.
+	elements int
+	keyCount map[string]int
 }
+
+// keyID, keyClass and keyTag namespace the key counts so an id called "div"
+// cannot be confused with the element of the same name.
+const (
+	keyID    = "i:"
+	keyClass = "c:"
+	keyTag   = "t:"
+)
 
 // walkDocument validates public retained DOMs iteratively before recursive work.
 func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats, error) {
 	var stats documentStats
+	stats.keyCount = make(map[string]int)
 	if doc == nil {
 		return stats, fmt.Errorf("missing document")
 	}
@@ -258,6 +314,16 @@ func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats
 		for _, a := range e.n.Attr {
 			if len(a.Name)+len(a.Value) > MaxAttributeBytes {
 				return stats, fmt.Errorf("HTML attribute byte limit exceeded (%d)", MaxAttributeBytes)
+			}
+		}
+		if e.n.Element() {
+			stats.elements++
+			stats.keyCount[keyTag+e.n.Data]++
+			if id := e.n.GetAttribute("id"); id != "" {
+				stats.keyCount[keyID+id]++
+			}
+			for _, cls := range e.n.ClassList() {
+				stats.keyCount[keyClass+cls]++
 			}
 		}
 		if visit != nil {
@@ -297,7 +363,7 @@ func validateStyle(s *style.ComputedStyle) error {
 	if !safeGeometry(s.Width, s.Height, s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight,
 		s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft, s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft,
 		s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth, s.Top, s.Right, s.Bottom, s.Left,
-		s.LineHeight, s.TextIndent, s.WordSpacing, s.LetterSpacing, s.FlexGrow, s.FlexShrink, s.FlexBasis, s.Gap, s.Opacity) {
+		s.LineHeight, s.TextIndent, s.WordSpacing, s.LetterSpacing, s.FlexGrow, s.FlexShrink, s.FlexBasis, s.RowGap, s.ColumnGap, s.Opacity) {
 		return fmt.Errorf("computed style geometry must be finite with absolute value <= %d CSS pixels", MaxGeometry)
 	}
 	return nil
@@ -364,12 +430,40 @@ func (s *Session) validateLayoutInput() error {
 	return err
 }
 
-func checkedSheets(doc *dom.Document, sources []string) ([]*css.Stylesheet, error) {
+// cssSource is one style sheet text and where it came from. Remote sheets are
+// treated leniently - one bloated or adversarial sheet from the network skips
+// itself rather than killing the document - while sheets the caller supplied
+// keep the hard-fail contract the bounds tests pin down.
+type cssSource struct {
+	text   string
+	remote bool
+}
+
+func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker) ([]*css.Stylesheet, error) {
 	budget := &cssBudget{}
-	all := append([]string(nil), sources...)
+	all := make([]cssSource, 0, len(sources)+8)
+	for _, src := range sources {
+		all = append(all, cssSource{text: src})
+	}
+	linked := map[string]bool{}
+	linksLeft := maxLinkedSheets
 	stats, err := walkDocument(doc, func(n *dom.Node) error {
 		if n.Element() && n.Data == "style" {
-			all = append(all, n.TextContent())
+			all = append(all, cssSource{text: n.TextContent()})
+		}
+		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 {
+			if href := stylesheetHref(n); href != "" {
+				if abs, ok := resolveSheetURL(base, href); ok && !linked[abs] {
+					linked[abs] = true
+					linksLeft--
+					if sheet, err := linker(base, abs); err == nil {
+						// The sheet's own @import statements are spliced in before it is parsed
+						// so an imported theme cascades where the page put the statement.
+						text := absolutizeCSSURLs(sheet, abs)
+						all = append(all, cssSource{text: expandCSSImports(linker, abs, text, linked, 1), remote: true})
+					}
+				}
+			}
 		}
 		for _, a := range n.Attr {
 			if strings.EqualFold(a.Name, "style") {
@@ -387,40 +481,165 @@ func checkedSheets(doc *dom.Document, sources []string) ([]*css.Stylesheet, erro
 	work := int64(0)
 	declarations := 0
 	for _, src := range all {
-		if err := budget.check(src, false); err != nil {
+		if err := budget.check(src.text, false); err != nil {
+			if src.remote {
+				continue
+			}
 			return nil, err
 		}
-		sheet := css.Parse(src)
+		sheet := css.Parse(src.text)
+		kept := sheet.Rules[:0]
+		reject := false
 		for _, rule := range sheet.Rules {
-			budget.selectors += len(rule.Selectors)
-			if budget.selectors > MaxCSSSelectors {
-				return nil, fmt.Errorf("CSS selector count limit exceeded (%d)", MaxCSSSelectors)
+			if reject {
+				break
 			}
+			budget.selectors += len(rule.Selectors)
 			declarations += len(rule.Declarations)
-			if declarations > MaxCSSDeclarations {
+			if budget.selectors > MaxCSSSelectors || declarations > MaxCSSDeclarations {
+				if src.remote {
+					reject = true
+					continue
+				}
+				if budget.selectors > MaxCSSSelectors {
+					return nil, fmt.Errorf("CSS selector count limit exceeded (%d)", MaxCSSSelectors)
+				}
 				return nil, fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
 			}
-			// A rule's declarations are applied once per matched element, not
-			// once per selector, so this cost stays outside the selector loop.
-			// Inside it the budget grew with selector count squared and a
-			// three-cell table could fail the limit.
+			// Declarations are parsed once per sheet and applied only when the
+			// rule matches, so their byte cost is not charged per node.
 			declCost := int64(0)
 			for _, d := range rule.Declarations {
-				declCost += int64(1+len(d.Property)+len(d.Value)) * int64(stats.nodes)
+				declCost += int64(1 + len(d.Property) + len(d.Value))
 			}
 			work += declCost
+			bad := false
 			for _, sel := range rule.Selectors {
 				cost, err := selectorCost(sel, stats.depth, stats.siblings)
 				if err != nil {
+					if src.remote {
+						bad = true
+						break
+					}
 					return nil, err
 				}
-				work += cost * int64(stats.nodes)
-				if work > MaxStyleWork {
-					return nil, fmt.Errorf("CSS matching work limit exceeded (%d > %d)", work, MaxStyleWork)
-				}
+				// A selector is tried against the elements carrying its key, not
+				// against the whole document.
+				work += cost * selectorFanOut(sel, stats)
 			}
+			if bad {
+				continue
+			}
+			// The work estimate is heuristic, so it ends the sheet where it
+			// lands instead of ending the document.
+			if work > MaxStyleWork {
+				break
+			}
+			kept = append(kept, rule)
 		}
+		if reject {
+			continue
+		}
+		sheet.Rules = kept
 		sheets = append(sheets, sheet)
 	}
 	return sheets, nil
+}
+
+// maxLinkedSheets bounds how many <link rel=stylesheet> fetches one document
+// may trigger. Real pages rarely link more than a dozen.
+const maxLinkedSheets = 32
+
+// stylesheetHref returns the href of a link element whose rel token list
+// includes stylesheet, or "" for anything else.
+func stylesheetHref(n *dom.Node) string {
+	isCSS := false
+	for _, tok := range strings.Fields(n.GetAttribute("rel")) {
+		if strings.EqualFold(tok, "stylesheet") {
+			isCSS = true
+		}
+	}
+	if !isCSS {
+		return ""
+	}
+	return strings.TrimSpace(n.GetAttribute("href"))
+}
+
+// resolveSheetURL turns a link href into an absolute http(s) URL against the
+// document's final URL. Anything the fetcher cannot dial is rejected here so
+// the linker only ever sees absolute web URLs.
+func resolveSheetURL(base, href string) (string, bool) {
+	b, err := url.Parse(base)
+	if err != nil {
+		return "", false
+	}
+	r, err := url.Parse(href)
+	if err != nil {
+		return "", false
+	}
+	u := b.ResolveReference(r)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", false
+	}
+	return u.String(), true
+}
+
+// absolutizeCSSURLs rewrites every relative url() reference in a fetched style
+// sheet against the sheet's own absolute URL. CSS resolves subresource URLs
+// against the stylesheet, not the document, so an icon declared as
+// `url(icon_nav.png)` in /rAF/arcticFox.css must load from /rAF/, even though
+// the page lives at a different path. data: URIs, fragments and already-
+// absolute references are left untouched.
+func absolutizeCSSURLs(sheet, sheetURL string) string {
+	lower := strings.ToLower(sheet)
+	var b strings.Builder
+	i := 0
+	for {
+		j := strings.Index(lower[i:], "url(")
+		if j < 0 {
+			b.WriteString(sheet[i:])
+			return b.String()
+		}
+		j += i
+		b.WriteString(sheet[i : j+len("url(")])
+		rest := sheet[j+len("url("):]
+		end := strings.IndexByte(rest, ')')
+		if end < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		inner := rest[:end]
+		trimmed := strings.TrimSpace(inner)
+		var quote byte
+		if len(trimmed) > 0 && (trimmed[0] == '"' || trimmed[0] == '\'') {
+			quote = trimmed[0]
+			trimmed = strings.Trim(trimmed[1:], string(quote))
+		}
+		ref := strings.TrimSpace(trimmed)
+		if out, ok := rewriteURLRef(sheetURL, ref); ok {
+			if quote != 0 {
+				b.WriteByte(quote)
+			}
+			b.WriteString(out)
+			if quote != 0 {
+				b.WriteByte(quote)
+			}
+		} else {
+			b.WriteString(inner)
+		}
+		b.WriteByte(')')
+		i = j + len("url(") + end + 1
+	}
+}
+
+// rewriteURLRef resolves one url() target against the sheet URL, leaving data
+// URIs, fragments, empty and already-absolute references unchanged.
+func rewriteURLRef(sheetURL, ref string) (string, bool) {
+	if ref == "" || strings.HasPrefix(ref, "data:") || strings.HasPrefix(ref, "#") {
+		return "", false
+	}
+	if abs, ok := resolveSheetURL(sheetURL, ref); ok {
+		return abs, true
+	}
+	return "", false
 }

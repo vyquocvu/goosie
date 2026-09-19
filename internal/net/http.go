@@ -21,6 +21,11 @@ import (
 // MaxResponseBytes bounds each decoded HTTP response or local file.
 const MaxResponseBytes = 8 << 20
 
+// userAgent is sent with every request. Sites that gate content by client
+// identity answer a generic Go client with 403s, and parity is measured
+// against what a browser is served.
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
 // ErrResponseTooLarge reports a response that exceeds MaxResponseBytes.
 var ErrResponseTooLarge = errors.New("net: response exceeds 8 MiB limit")
 
@@ -40,6 +45,123 @@ type Response struct {
 	Headers    map[string]string
 	Body       []byte
 	URL        string
+}
+
+// StyleSheetRefused reports whether a response with this Content-Type must be
+// kept out of the cascade. A broken CDN path answers a stylesheet request with
+// an HTML error page, and that page's own rules parse as valid CSS: applied
+// silently, they restyle the real document. Chromium refuses a sheet whose type
+// it can classify as something else, inferring CSS only from a type it does not
+// recognise, so this follows the same split.
+func StyleSheetRefused(contentType string) bool {
+	mt := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if mt == "" || mt == "text/css" {
+		return false
+	}
+	for _, prefix := range []string{"text/html", "application/xhtml", "text/xml", "application/xml",
+		"image/", "font/", "audio/", "video/"} {
+		if strings.HasPrefix(mt, prefix) {
+			return true
+		}
+	}
+	for _, script := range []string{"javascript", "ecmascript", "json"} {
+		if strings.HasSuffix(mt, "/"+script) {
+			return true
+		}
+	}
+	return false
+}
+
+// Text returns the body as UTF-8 text, decoded from whatever single-byte
+// charset the response declares. The parser downstream assumes UTF-8, and the
+// web's remaining non-UTF-8 pages are nearly all Latin-1/Windows-1252;
+// anything else passes through byte-for-byte, which is what UTF-8 source
+// wants and what unknown legacy bytes degrade to.
+func (r *Response) Text() string {
+	charset := ""
+	if ct := r.Headers["Content-Type"]; ct != "" {
+		if _, params, err := mime.ParseMediaType(ct); err == nil {
+			charset = normalizeCharset(params["charset"])
+		}
+	}
+	if !isLegacy8Bit(charset) {
+		charset = sniffCharset(r.Body)
+	}
+	if isLegacy8Bit(charset) {
+		return decodeCP1252(r.Body)
+	}
+	return string(r.Body)
+}
+
+func normalizeCharset(s string) string {
+	s = strings.ToLower(strings.Trim(strings.TrimSpace(s), `"'`))
+	s = strings.ReplaceAll(s, "_", "-")
+	switch s {
+	case "latin1", "iso8859-1", "iso-8859", "8859-1":
+		return "iso-8859-1"
+	case "cp1252", "windows1252", "1252":
+		return "windows-1252"
+	case "ascii", "us":
+		return "us-ascii"
+	}
+	return s
+}
+
+func isLegacy8Bit(charset string) bool {
+	switch charset {
+	case "iso-8859-1", "windows-1252", "us-ascii":
+		return true
+	}
+	return false
+}
+
+// sniffCharset implements the practical half of the HTML encoding sniffing:
+// a charset= declaration in the first 2 KiB of markup.
+func sniffCharset(body []byte) string {
+	head := body
+	if len(head) > 2048 {
+		head = head[:2048]
+	}
+	lower := strings.ToLower(string(head))
+	i := strings.Index(lower, "charset=")
+	if i < 0 {
+		return ""
+	}
+	rest := lower[i+len("charset="):]
+	end := len(rest)
+	for j, c := range rest {
+		if c == '"' || c == '\'' || c == ' ' || c == ';' || c == '>' || c == '/' {
+			end = j
+			break
+		}
+	}
+	return normalizeCharset(rest[:end])
+}
+
+// cp1252High maps the 0x80-0x9F range, where Windows-1252 diverges from
+// Latin-1 with printables. Latin-1's identity mapping covers 0xA0 and above,
+// so one table serves both.
+var cp1252High = [32]rune{
+	0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+	0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+}
+
+func decodeCP1252(body []byte) string {
+	var b strings.Builder
+	b.Grow(len(body) + len(body)/8)
+	for _, c := range body {
+		switch {
+		case c < 0x80:
+			b.WriteByte(c)
+		case c < 0xA0:
+			b.WriteRune(cp1252High[c-0x80])
+		default:
+			b.WriteRune(rune(c))
+		}
+	}
+	return b.String()
 }
 
 // NormalizeURL validates explicit HTTP(S) and local file URLs, and gives bare
@@ -195,6 +317,13 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	if err != nil {
 		return nil, err
 	}
+	// A plain Go client identifies itself as Go-http-client and real sites
+	// (Wikipedia's robots policy among them) answer it with 403. Announcing a
+	// browser-like UA and content acceptance is what gets the same bytes a
+	// browser would render.
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", contentType)
 	}

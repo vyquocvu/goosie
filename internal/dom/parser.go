@@ -2,6 +2,7 @@ package dom
 
 import (
 	"fmt"
+	stdhtml "html"
 	"strings"
 )
 
@@ -250,6 +251,9 @@ func (tb *treeBuilder) handleText(p *tokenizer) {
 		p.pos++
 	}
 	text := p.input[start:p.pos]
+	if strings.IndexByte(text, '&') >= 0 {
+		text = stdhtml.UnescapeString(text)
+	}
 	if text != "" {
 		tb.insertText(text)
 	}
@@ -324,22 +328,23 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 		}
 		return
 	case "body":
-		if tb.bodyElem == nil && tb.headElem != nil {
-			tb.insertElement(tag, attrs, false)
-		} else if tb.bodyElem == nil && tb.htmlElem != nil {
+		if tb.bodyElem == nil {
+			if tb.headElem != nil && tb.onStack(tb.headElem) {
+				tb.popUntil("head")
+			}
 			tb.insertElement(tag, attrs, false)
 		}
 		return
 	case "meta", "link", "base":
-		tb.ensureHead()
+		if tb.headPhase() {
+			tb.ensureHead()
+		}
 		tb.insertElement(tag, attrs, true)
 		return
-	case "title":
-		tb.ensureHead()
-		tb.insertElement(tag, attrs, false)
-		return
-	case "style":
-		tb.ensureHead()
+	case "title", "style":
+		if tb.headPhase() {
+			tb.ensureHead()
+		}
 		tb.insertElement(tag, attrs, false)
 		return
 	case "script":
@@ -439,10 +444,39 @@ func (tb *treeBuilder) ensureHead() {
 	}
 }
 
+// headPhase reports whether a head-level element still belongs in a head: HTML5
+// only routes style/link/meta/title there while the head is the live insertion
+// point. Once a body exists, or an explicit </head> has closed the head, the
+// element goes at the current node instead - synthesizing a head there leaves it
+// open on the stack, and every following element becomes a child of a
+// display:none subtree, which blanks the page rather than mis-rendering it.
+func (tb *treeBuilder) headPhase() bool {
+	if tb.bodyElem != nil {
+		return false
+	}
+	if tb.headElem == nil {
+		return true
+	}
+	return tb.onStack(tb.headElem)
+}
+
+// onStack reports whether n is currently open, i.e. still on the list of open
+// elements. popUntil walks and empties the whole stack when the tag it seeks is
+// absent, so any unconditional pop of a node that has already closed must be
+// guarded - otherwise the stack loses <html> with it.
+func (tb *treeBuilder) onStack(n *Node) bool {
+	for _, o := range tb.openStack {
+		if o == n {
+			return true
+		}
+	}
+	return false
+}
+
 func (tb *treeBuilder) ensureBody() {
 	if tb.bodyElem == nil {
 		tb.ensureHead()
-		if tb.headElem != nil {
+		if tb.headElem != nil && tb.onStack(tb.headElem) {
 			tb.popUntil("head")
 		}
 		tb.insertElement("body", nil, false)
@@ -465,7 +499,14 @@ func (tb *treeBuilder) closeListItem() {
 			tb.popUntil("li")
 			return
 		}
-		if isScopeElement(tb.openStack[i]) && tb.openStack[i].Data != "ul" && tb.openStack[i].Data != "ol" {
+		// A nested list bounds the implicit </li>: HTML5 stops the search at
+		// any special element, and ul/ol are special. Without this an <li>
+		// inside a nested <ul> closes an <li> in an ancestor list, reparenting
+		// the whole sublist out from under its parent.
+		if tb.openStack[i].Data == "ul" || tb.openStack[i].Data == "ol" {
+			return
+		}
+		if isScopeElement(tb.openStack[i]) {
 			return
 		}
 	}
@@ -559,12 +600,12 @@ func (tb *treeBuilder) processEndTag(tag string) {
 	case "html":
 		return
 	case "head":
-		if tb.headElem != nil {
+		if tb.headElem != nil && tb.onStack(tb.headElem) {
 			tb.popUntil("head")
 		}
 		return
 	case "body":
-		if tb.bodyElem != nil {
+		if tb.bodyElem != nil && tb.onStack(tb.bodyElem) {
 			tb.popUntil("body")
 		}
 		return
@@ -782,12 +823,17 @@ func (t *tokenizer) parseAttr() (name, value string) {
 		start = t.pos
 		for t.pos < len(t.input) {
 			c := t.input[t.pos]
-			if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '>' || c == '/' {
+			// Per the HTML spec a `/` is part of an unquoted value, not a
+			// terminator: `<a href=https://x.dev/>` links to a trailing-slash URL.
+			if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '>' {
 				break
 			}
 			t.pos++
 		}
 		value = t.input[start:t.pos]
+	}
+	if strings.IndexByte(value, '&') >= 0 {
+		value = stdhtml.UnescapeString(value)
 	}
 	return name, value
 }

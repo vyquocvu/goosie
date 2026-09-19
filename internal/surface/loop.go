@@ -14,16 +14,21 @@ import (
 // tile grid: it holds a Window, a Composer, and a Scheduler, and knowing which
 // tiles are valid is nobody's business but the grid's.
 //
-// The five fields are a partition with overlaps deliberately allowed: Needed is
-// what the frame wanted, Submitted what actually reached a worker, Refused what
-// a full queue turned away, Accepted what finished in time to be composited, and
-// Reused what was already valid and needed nothing.
+// Needed, Submitted, Refused, Accepted and Reused are a partition with overlaps
+// deliberately allowed: Needed is what the frame wanted, Submitted what actually
+// reached a worker, Refused what a full queue turned away, Accepted what finished
+// in time to be composited, and Reused what was already valid and needed nothing.
 type FrameWork struct {
 	Needed    int
 	Submitted int
 	Refused   int
 	Accepted  int
 	Reused    int
+	// PaintingBytes is the tile buffers already on order at a worker when the
+	// frame began. Needed leaves out tiles in flight, so a frame can want nothing
+	// and still be short of pixels; a caller that treats Needed alone as "settled"
+	// can present a viewport whose tiles never arrived.
+	PaintingBytes int64
 }
 
 // Scheduler is the loop's entire view of content production. It is an interface

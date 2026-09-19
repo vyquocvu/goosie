@@ -16,13 +16,13 @@ func TestSessionRejectsUnboundedInput(t *testing.T) {
 		want       string
 	}{
 		{name: "HTML bytes", html: strings.Repeat(" ", (8<<20)+1), width: 400, want: "HTML"},
-		{name: "nodes", html: strings.Repeat("<br>", 10000), width: 400, want: "node"},
+		{name: "nodes", html: strings.Repeat("<br>", engine.MaxDocumentNodes+1), width: 400, want: "node"},
 		{name: "depth", html: strings.Repeat("<div>", 129), width: 400, want: "depth"},
 		{name: "attributes", html: "<p " + strings.Repeat("a='b' ", 1000) + ">x", width: 400, want: "attribute"},
-		{name: "CSS bytes", css: []string{strings.Repeat(" ", (256<<10)+1)}, width: 400, want: "CSS"},
-		{name: "rules", css: []string{strings.Repeat("p{}", 513)}, width: 400, want: "rule"},
-		{name: "selector list", css: []string{strings.Repeat("p,", 1024) + "p{}"}, width: 400, want: "selector"},
-		{name: "selector chain", css: []string{strings.Repeat("p > ", 9) + "p{}"}, width: 400, want: "selector"},
+		{name: "CSS bytes", css: []string{strings.Repeat(" ", engine.MaxCSSBytes+1)}, width: 400, want: "CSS"},
+		{name: "rules", css: []string{strings.Repeat("p{}", engine.MaxCSSRules+1)}, width: 400, want: "rule"},
+		{name: "selector list", css: []string{strings.Repeat("p,", engine.MaxCSSSelectors) + "p{}"}, width: 400, want: "selector"},
+		{name: "selector chain", css: []string{strings.Repeat("p > ", engine.MaxSelectorParts) + "p{}"}, width: 400, want: "selector"},
 		{name: "recursive selector", css: []string{strings.Repeat(":not(", 20) + "p" + strings.Repeat(")", 20) + "{}"}, width: 400, want: "nesting"},
 		{name: "font", html: `<p style="font-size:513px">x`, width: 400, want: "font"},
 		{name: "geometry", html: `<p style="width:1048577px">x`, width: 400, want: "geometry"},

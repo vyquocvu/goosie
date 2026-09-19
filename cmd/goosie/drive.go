@@ -2,6 +2,7 @@ package main
 
 import (
 	"sync"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -122,14 +123,21 @@ func (d *driver) finish() {
 var _ surface.Window = (*driver)(nil)
 
 // steadyDriver is a window that passes vsyncs through without scrolling and
-// signals done after a fixed number of frames. It is the screenshot mode's
-// driver: the page loads in the background, the loop presents frames, and
-// after enough frames for tiles to rasterize the run exits and writes a PNG.
+// signals done once the surface has nothing left to draw. It is the screenshot
+// mode's driver: the page loads in the background, the loop presents frames, and
+// the run exits when a frame is complete enough to write as a PNG.
 type steadyDriver struct {
 	surface.Window
 	out  chan surface.Event
 	done chan struct{}
 	n    int
+
+	// floor frames: the document needs them to load and to name its tiles.
+	// ceiling frames and deadline bound the wait for a page that never settles.
+	ceiling   int
+	deadline  time.Duration
+	settledFn func() bool
+	settled   int
 
 	mu   sync.Mutex
 	sent int
@@ -137,25 +145,39 @@ type steadyDriver struct {
 
 func newSteadyDriver(f *framePath, frames int) *steadyDriver {
 	d := &steadyDriver{
-		Window: f.window,
-		out:    make(chan surface.Event),
-		done:   make(chan struct{}),
-		n:      frames,
+		Window:   f.window,
+		out:      make(chan surface.Event),
+		done:     make(chan struct{}),
+		n:        frames,
+		ceiling:  frames * 8,
+		deadline: 25 * time.Second,
 	}
 	go d.pump()
 	return d
+}
+
+// watchIdle tells the driver how to ask whether the frame path is idle. The loop
+// is built from the driver, so it can only be attached afterwards, and the getter
+// runs on the pump's thread, which is why Loop.Stats is the only thing it may use.
+func (d *steadyDriver) watchIdle(idle func() bool) {
+	d.mu.Lock()
+	d.settledFn = idle
+	d.mu.Unlock()
 }
 
 func (d *steadyDriver) Events() <-chan surface.Event { return d.out }
 
 func (d *steadyDriver) pump() {
 	defer close(d.out)
+	started := time.Now()
 	for ev := range d.Window.Events() {
 		d.mu.Lock()
 		if ev.Kind == surface.EvVsync {
 			d.sent++
-			if d.sent >= d.n {
-				d.mu.Unlock()
+			d.mu.Unlock()
+			if d.ready(started) {
+				// Forward the frame that settled the run, then end: the PNG is
+				// written from what the loop presents for this last vsync.
 				select {
 				case d.out <- ev:
 				case <-d.done:
@@ -164,14 +186,42 @@ func (d *steadyDriver) pump() {
 				close(d.done)
 				return
 			}
+		} else {
+			d.mu.Unlock()
 		}
-		d.mu.Unlock()
 		select {
 		case d.out <- ev:
 		case <-d.done:
 			return
 		}
 	}
+}
+
+// ready decides whether the run has a frame worth writing. Ending on the frame
+// count alone truncated the viewport: under the parallel load a screenshot sweep
+// puts on the machine, the vsyncs pass while whole 256px tile blocks are still
+// un-rasterized, and the PNG shows the layer background through them. So the
+// count is only the floor, and past it the run waits for frames that need no tile
+// work and hold none on order - twice in a row, because the pump sees the vsync
+// before the loop has composed the frame it names. A ceiling and a deadline keep a
+// page that never settles from hanging the run.
+func (d *steadyDriver) ready(started time.Time) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.sent < d.n {
+		return false
+	}
+	if d.settledFn == nil || d.sent >= d.ceiling || time.Since(started) >= d.deadline {
+		return true
+	}
+	// Loop.Stats takes the loop's own lock and never calls back into the driver,
+	// so holding d.mu across it fixes the order in one direction only by design.
+	if d.settledFn() {
+		d.settled++
+	} else {
+		d.settled = 0
+	}
+	return d.settled >= 2
 }
 
 var _ surface.Window = (*steadyDriver)(nil)

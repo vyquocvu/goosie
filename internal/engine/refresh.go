@@ -27,8 +27,9 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 			sheets = append(sheets, css.Parse(src))
 		}
 		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport())
-		s.Arena = layout.Build(s.Doc, s.Styles)
-		layout.Block(s.Arena, layout.ObjectID(1), viewportW)
+		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles)
+		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
+		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
 		layout.Positioning(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		return true
@@ -44,8 +45,9 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 			sheets = append(sheets, css.Parse(src))
 		}
 		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport())
-		s.Arena = layout.Build(s.Doc, s.Styles)
-		layout.Block(s.Arena, layout.ObjectID(1), viewportW)
+		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles)
+		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
+		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
 		layout.Positioning(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		return true
@@ -72,11 +74,12 @@ func (s *Session) RefreshNode(node *dom.Node, authorCSS []string, viewportW floa
 	// For now, re-run the full style resolution. A production implementation
 	// would only re-style the affected subtree.
 	s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport())
+	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles)
 
 	// Rebuild the arena. A production implementation would only re-layout
 	// the affected subtree.
-	s.Arena = layout.Build(s.Doc, s.Styles)
-	layout.Block(s.Arena, layout.ObjectID(1), viewportW)
+	s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
+	layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 	layout.Inline(s.Arena, layout.ObjectID(1))
 	layout.Positioning(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 }

@@ -341,8 +341,12 @@ func (s *Scheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 	tileBytes := s.tileBytes()
 	ts := s.grid.TileSize()
 	// The running total rather than a fresh grid read per tile: only the drain below
-	// lowers it, and that runs after this loop.
+	// lowers it, and that runs after this frame's submissions are already counted.
 	painting := s.grid.Stats().PaintingBytes
+	// What this frame is about to queue is not yet on order, so this is the work
+	// left over from earlier frames: the pair (Needed, PaintingBytes) says whether
+	// the viewport has any pixels still to arrive.
+	w.PaintingBytes = painting
 
 	for i, c := range needed {
 		if painting+tileBytes > budget {

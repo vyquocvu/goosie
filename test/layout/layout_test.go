@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -16,10 +17,18 @@ func almostEqual(a, b float32) bool {
 
 func session(t *testing.T, html string, viewportW float32) *layout.Arena {
 	t.Helper()
+	return sessionH(t, html, viewportW, 0)
+}
+
+// sessionH lays a document out in a viewport of the given size. The height is
+// what a percentage height on the root element resolves against; pass 0 when no
+// viewport is modelled, which makes a percentage height behave as auto.
+func sessionH(t *testing.T, html string, viewportW, viewportH float32) *layout.Arena {
+	t.Helper()
 	doc := dom.Parse(html)
 	styles := style.Resolve(doc, nil)
-	arena := layout.Build(doc, styles)
-	layout.Block(arena, layout.ObjectID(1), viewportW)
+	arena := layout.Build(doc, styles, nil)
+	layout.Block(arena, layout.ObjectID(1), viewportW, viewportH)
 	return arena
 }
 
@@ -354,6 +363,38 @@ func TestFlexRow(t *testing.T) {
 	}
 }
 
+func TestFlexRowItemWithBlockChild(t *testing.T) {
+	// A flex item whose content is a block child - a nav cell wrapping a
+	// block-level link - has no inline extent of its own. It must still size to
+	// its block content and sit in its justify-content slot, not collapse to
+	// zero width and pile onto its siblings.
+	arena := session(t, `<html><body style="margin: 0;">
+<ul style="display: flex; justify-content: space-between; width: 600px; margin: 0; padding: 0; list-style: none;">
+  <li><span style="display: block;">Alpha</span></li>
+  <li><span style="display: block;">Beta</span></li>
+  <li><span style="display: block;">Gamma</span></li>
+</ul>
+</body></html>`, 800)
+
+	lis := findAllByTag(arena, "li")
+	if len(lis) != 3 {
+		t.Fatalf("found %d li, want 3", len(lis))
+	}
+	first, mid, last := lis[0], lis[1], lis[2]
+	for i, it := range []*layout.Object{first, mid, last} {
+		if it.W <= 0 {
+			t.Errorf("li[%d].W = %v, want > 0 (block content must size the item)", i, it.W)
+		}
+	}
+	if !(first.X < mid.X && mid.X < last.X) {
+		t.Errorf("items not spread: X = %v %v %v", first.X, mid.X, last.X)
+	}
+	// space-between pins the last item's right edge to the container's.
+	if right := last.X + last.W; right < 560 {
+		t.Errorf("last item right edge = %v, want near 600 (space-between)", right)
+	}
+}
+
 // findWordObject returns the inline-pass word object whose text payload is
 // word, or nil. Word objects exist only after the inline pass splits a text
 // node, and paint walks exactly these objects to emit text commands.
@@ -488,6 +529,99 @@ func TestMarginAutoCentering(t *testing.T) {
 	}
 }
 
+// A block whose width comes from max-width rather than width still centres:
+// §10.4 re-solves the margin equation with the clamped width, which is what
+// `max-width: 60rem; margin: 0 auto` - the usual centered page column - needs.
+func TestMarginAutoCenteringAfterMaxWidthClamp(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		style string
+	}{
+		{"auto width", `max-width: 600px; margin: 0 auto`},
+		{"width past the cap", `width: 100%; max-width: 600px; margin: 0 auto`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arena := session(t, `<html><body style="margin: 0;">
+<div style="`+tc.style+`;"></div>
+</body></html>`, 1000)
+			div := findByTag(arena, "div")
+			if div == nil {
+				t.Fatal("div not found")
+			}
+			if !almostEqual(div.W, 600) {
+				t.Errorf("div.W = %v, want 600", div.W)
+			}
+			if !almostEqual(div.MarginLeft, 200) || !almostEqual(div.MarginRight, 200) {
+				t.Errorf("div margins = %v/%v, want 200/200", div.MarginLeft, div.MarginRight)
+			}
+			if !almostEqual(div.X, 200) {
+				t.Errorf("div.X = %v, want 200", div.X)
+			}
+		})
+	}
+}
+
+func TestMarginAutoWithRoomToSpareStaysAtTheStart(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="margin: 0 auto;"></div>
+</body></html>`, 1000)
+	div := findByTag(arena, "div")
+	if div == nil {
+		t.Fatal("div not found")
+	}
+	if !almostEqual(div.W, 1000) {
+		t.Errorf("div.W = %v, want 1000", div.W)
+	}
+	if div.MarginLeft != 0 || div.MarginRight != 0 {
+		t.Errorf("div margins = %v/%v, want 0/0", div.MarginLeft, div.MarginRight)
+	}
+}
+
+// A closed <details> discloses nothing but its summary. The hiding is the
+// widget's own, not the author's, so it belongs to the UA sheet: lobste.rs hangs
+// a dropdown menu off every story row that way, and leaving it in the flow added
+// a line box per row.
+func TestDetailsHidesContentUntilOpen(t *testing.T) {
+	hidden := session(t, `<html><body style="margin:0">
+<details><summary>more</summary><ul><li>a</li></ul></details>
+</body></html>`, 400)
+	ul := findByTag(hidden, "ul")
+	if ul == nil {
+		t.Fatal("ul not found")
+	}
+	if ul.Style.Display != style.DisplayNone {
+		t.Errorf("closed details: ul display = %v, want none", ul.Style.Display)
+	}
+	if li := findByTag(hidden, "li"); li.Style.Display == style.DisplayNone {
+		t.Error("closed details hid the summary's own marker list")
+	}
+
+	opened := session(t, `<html><body style="margin:0">
+<details open><summary>more</summary><ul><li>a</li></ul></details>
+</body></html>`, 400)
+	if ul := findByTag(opened, "ul"); ul.Style.Display == style.DisplayNone {
+		t.Error("an open details still hides its content")
+	}
+}
+
+// An inline-block sitting on a line of text shrinks to its content rather than
+// filling the line, so the siblings after it stay on the same row.
+func TestInlineBlockOnALineShrinksToContent(t *testing.T) {
+	arena := session(t, `<html><body style="margin:0">
+<div style="font-size: 16px">title<span style="display: inline-block"><b>one</b> <b>two</b></span>tail</div>
+</body></html>`, 400)
+	span := findByTag(arena, "span")
+	if span == nil {
+		t.Fatal("span not found")
+	}
+	if span.W >= 400 {
+		t.Errorf("span.W = %v, want the content extent, not the 400px line", span.W)
+	}
+	if span.W < 20 || span.W > 120 {
+		t.Errorf("span.W = %v, want roughly the width of `one two`", span.W)
+	}
+}
+
 func TestTextAlignCenter(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="width: 400px; text-align: center;">word</div>
@@ -506,5 +640,65 @@ func TestTextAlignCenter(t *testing.T) {
 	if !almostEqual(wordObj.X, wantX) {
 		t.Errorf("wordObj.X = %v, want %v", wordObj.X, wantX)
 	}
+}
+
+func TestPseudoElementLayout(t *testing.T) {
+	html := `<html><body><div class="test">hello</div></body></html>`
+	cssText := `.test::before { content: "\25b3"; color: red; }`
+
+	doc := dom.Parse(html)
+	sheets := []*css.Stylesheet{css.Parse(cssText)}
+	styles := style.Resolve(doc, sheets)
+	pseudoStyles := style.ResolvePseudoElements(doc, sheets, styles)
+
+	t.Logf("pseudoStyles count: %d", len(pseudoStyles))
+	for k, v := range pseudoStyles {
+		t.Logf("  key=%v content=%q", k, v.Content)
+	}
+
+	arena := layout.Build(doc, styles, pseudoStyles)
+
+	// Run layout passes
+	layout.Block(arena, layout.ObjectID(1), 800, 600)
+	layout.Inline(arena, layout.ObjectID(1))
+
+	t.Logf("arena has %d objects", len(arena.Objects))
+	for i, obj := range arena.Objects {
+		if obj.Node != nil {
+			t.Logf("  obj[%d]: node=%v type=%d data=%q content=%q", i, obj.Node.ID, obj.Node.Type, obj.Node.Data, obj.Node.DataContent)
+		} else {
+			t.Logf("  obj[%d]: no node", i)
+		}
+	}
+
+	// Find the div
+	div := findByTag(arena, "div")
+	if div == nil {
+		t.Fatal("div not found")
+	}
+
+	t.Logf("div obj: FirstKid=%v LastKid=%v", div.FirstKid, div.LastKid)
+
+	// Walk all children of div
+	for kid := div.FirstKid; kid != 0; kid = arena.Get(kid).NextSibling {
+		k := arena.Get(kid)
+		t.Logf("  child obj[%d]: node=%v type=%d content=%q X=%v Y=%v W=%v H=%v", kid, k.Node.ID, k.Node.Type, k.Node.DataContent, k.X, k.Y, k.W, k.H)
+	}
+
+	// Check that the div has children (the pseudo-element should be first child)
+	if div.FirstKid == 0 {
+		t.Fatal("div has no children, pseudo-element not injected")
+	}
+
+	// The first child should be the ::before pseudo-element
+	firstKid := arena.Get(div.FirstKid)
+	if firstKid.Node == nil || firstKid.Node.Type != 2 {
+		t.Fatalf("first child is not a text node: type=%d", firstKid.Node.Type)
+	}
+	if firstKid.Node.DataContent != "△" {
+		t.Errorf("pseudo-element content = %q, want △", firstKid.Node.DataContent)
+	}
+
+	t.Logf("pseudo-element obj: X=%v Y=%v W=%v H=%v", firstKid.X, firstKid.Y, firstKid.W, firstKid.H)
 }
 

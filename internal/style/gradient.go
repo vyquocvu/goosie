@@ -294,27 +294,69 @@ func splitOutsideParens(s string) []string {
 	return out
 }
 
-// stripFunctions removes function calls from a shorthand value so only the
-// colour tokens are left to scan.
+// stripFunctions removes the image-producing function calls from a background
+// value so the remaining tokens can be read for the colour. It must NOT touch
+// colour functions: `background: rgba(0,0,0,.4)` keeps its rgba(), while
+// `url(...)`, `linear-gradient(...)` and friends are dropped. Only the named
+// image functions are excised, balanced-paren included.
 func stripFunctions(s string) string {
 	var b strings.Builder
-	depth := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '(':
-			if depth == 0 {
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if isIdentStart(c) {
+			j := i
+			for j < len(s) && isIdentChar(s[j]) {
+				j++
+			}
+			name := s[i:j]
+			if j < len(s) && s[j] == '(' && isImageFunc(name) {
+				depth := 0
+				k := j
+				for k < len(s) {
+					if s[k] == '(' {
+						depth++
+					} else if s[k] == ')' {
+						if depth--; depth == 0 {
+							k++
+							break
+						}
+					}
+					k++
+				}
 				b.WriteByte(' ')
+				i = k
+				continue
 			}
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		default:
-			if depth == 0 {
-				b.WriteByte(s[i])
-			}
+			b.WriteString(name)
+			i = j
+			continue
 		}
+		b.WriteByte(c)
+		i++
 	}
 	return b.String()
+}
+
+func isIdentStart(c byte) bool {
+	return c == '-' || c == '_' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+}
+
+func isIdentChar(c byte) bool {
+	return isIdentStart(c) || ('0' <= c && c <= '9')
+}
+
+// isImageFunc reports whether a function name produces an image layer (and so
+// must be stripped before reading the shorthand's colour). It receives the raw
+// identifier; the comparison is case-insensitive.
+func isImageFunc(name string) bool {
+	switch strings.ToLower(name) {
+	case "url", "src", "image", "image-set", "-webkit-image-set",
+		"linear-gradient", "radial-gradient", "conic-gradient",
+		"repeating-linear-gradient", "repeating-radial-gradient", "repeating-conic-gradient",
+		"-webkit-linear-gradient", "-webkit-radial-gradient", "-webkit-gradient",
+		"cross-fade", "cross-fade-url", "element", "paint":
+		return true
+	}
+	return false
 }

@@ -123,6 +123,9 @@ func isFlowBlock(obj *Object) bool {
 	if !isBlock(obj) {
 		return false
 	}
+	if isFlowFloat(obj.Style) {
+		return true
+	}
 	return obj.Style.Display != style.DisplayInlineBlock
 }
 

@@ -52,7 +52,7 @@ func TestFamilyListResolves(t *testing.T) {
 		{"Times New Roman", frame.FontTimes},
 		{"'times new roman'", frame.FontTimes},
 		{"sans-serif", frame.FontArial},
-		{"Helvetica, Arial, sans-serif", frame.FontArial},
+		{"Helvetica, Arial, sans-serif", frame.FontHelvetica},
 		{"monospace", frame.FontCourier},
 		{"'Courier New', monospace", frame.FontCourier},
 		{"Georgia, serif", frame.FontGeorgia},
@@ -78,19 +78,23 @@ func TestWeightAndSlantResolve(t *testing.T) {
 		tag          string
 		wantBold     bool
 		wantItalic   bool
+		wantLight    bool
 	}{
-		{`<html><body><p style="font-weight: 700">x</p></body></html>`, "p", true, false},
-		{`<html><body><p style="font-weight: bold">x</p></body></html>`, "p", true, false},
-		{`<html><body><p style="font-weight: 500">x</p></body></html>`, "p", false, false},
-		{`<html><body><b>x</b></body></html>`, "b", true, false},
-		{`<html><body><p style="font-style: italic">x</p></body></html>`, "p", false, true},
-		{`<html><body><p style="font-style: oblique">x</p></body></html>`, "p", false, true},
-		{`<html><body><em>x</em></body></html>`, "em", false, true},
-		{`<html><body><i style="font-weight: 800">x</i></body></html>`, "i", true, true},
+		{`<html><body><p style="font-weight: 700">x</p></body></html>`, "p", true, false, false},
+		{`<html><body><p style="font-weight: bold">x</p></body></html>`, "p", true, false, false},
+		{`<html><body><p style="font-weight: 500">x</p></body></html>`, "p", false, false, false},
+		{`<html><body><p style="font-weight: 300">x</p></body></html>`, "p", false, false, true},
+		{`<html><body><p style="font-weight: 100">x</p></body></html>`, "p", false, false, true},
+		{`<html><body><p style="font-weight: 400">x</p></body></html>`, "p", false, false, false},
+		{`<html><body><b>x</b></body></html>`, "b", true, false, false},
+		{`<html><body><p style="font-style: italic">x</p></body></html>`, "p", false, true, false},
+		{`<html><body><p style="font-style: oblique">x</p></body></html>`, "p", false, true, false},
+		{`<html><body><em>x</em></body></html>`, "em", false, true, false},
+		{`<html><body><i style="font-weight: 800">x</i></body></html>`, "i", true, true, false},
 	} {
 		got := slotFor(t, tc.html, tc.tag)
-		if got.Bold != tc.wantBold || got.Italic != tc.wantItalic {
-			t.Errorf("%s slot = %+v, want bold=%v italic=%v", tc.tag, got, tc.wantBold, tc.wantItalic)
+		if got.Bold != tc.wantBold || got.Italic != tc.wantItalic || got.Light != tc.wantLight {
+			t.Errorf("%s slot = %+v, want bold=%v italic=%v light=%v", tc.tag, got, tc.wantBold, tc.wantItalic, tc.wantLight)
 		}
 	}
 }

@@ -45,6 +45,18 @@ type Object struct {
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
 
+	// Image carries the decoded pixels of a replaced element so paint can draw
+	// it. It is `any` rather than an image type because layout may not depend
+	// on image decoding; the engine sets it to a concrete decoded image after
+	// layout, and paint reads it back out with a type assertion.
+	Image any
+
+	// BgImage carries the decoded pixels of this box's CSS background-image, if
+	// any. Like Image it is `any` so layout stays free of the image packages;
+	// paint type-asserts it and uses the object's Style for repeat, size and
+	// position.
+	BgImage any
+
 	// StaticX/StaticY record where an out-of-flow box would have started had it
 	// stayed in the flow. CSS uses that position when an absolutely positioned
 	// box specifies neither the relevant inset nor a static-friendly pair.
@@ -110,6 +122,14 @@ func (o *Object) BorderH() float32 {
 // font, which is why every binary passes one.
 type Metrics interface {
 	GlyphAdvance(sizePx int32, r rune, slot frame.FontSlot) int32
+	// GlyphAdvanceFixed reports the same advance in 26.6 fixed-point units
+	// (1/64 px) as an int32. A browser keeps the pen position fractional across
+	// a run and rounds only where a glyph lands; summing per-glyph integer
+	// advances loses a fraction of a pixel per character, which over a text line
+	// is tens of pixels of drift and every word wrapping in the wrong place.
+	// Callers that measure a whole word or place a run use this; GlyphAdvance
+	// remains for one-off widths where the integer is the answer.
+	GlyphAdvanceFixed(sizePx int32, r rune, slot frame.FontSlot) int32
 	// LineMetrics reports the face's ascent, descent and the height a line box
 	// takes when line-height is normal, all in device pixels for sizePx. Layout
 	// needs the ascent to place the baseline and the descent to size the content
@@ -131,7 +151,23 @@ type Arena struct {
 	// Metrics is optional; see the Metrics interface. Set it before the
 	// inline pass runs, which is where text is measured.
 	Metrics Metrics
+
+	// NaturalSizes reports the intrinsic size, in CSS px, of each decoded
+	// replaced element keyed by its DOM node. It is plain floats because
+	// layout may not depend on image decoding; the engine fills it in from the
+	// images it fetched and decoded. A missing entry means the image is not
+	// (yet) available, and sizing falls back to specified attributes.
+	NaturalSizes map[dom.NodeID]NaturalSize
+
+	// ViewportH is the height of the initial containing block, which is the box
+	// a percentage height on the root element resolves against. Block sets it.
+	// Zero means no viewport height is modelled, so every percentage height
+	// behaves as auto.
+	ViewportH float32
 }
+
+// NaturalSize is the intrinsic width and height of a replaced element.
+type NaturalSize struct{ W, H float32 }
 
 // NewArena returns an arena with the root object pre-allocated at index 1.
 func NewArena() *Arena {
@@ -186,8 +222,10 @@ func (a *Arena) Link(parent, kid ObjectID) {
 
 // Build constructs the layout tree from a styled document. Every element node
 // gets one object; text nodes are not objects but contribute runs to their
-// parent's inline content during the inline pass.
-func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle) *Arena {
+// parent's inline content during the inline pass. Pseudo-elements (::before,
+// ::after) with non-normal content get synthetic objects injected as first/last
+// children of their originating element.
+func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle) *Arena {
 	a := NewArena()
 	// Use the pre-allocated root at index 1 for the document node.
 	a.Objects[rootID].Node = &doc.Node
@@ -198,7 +236,7 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle) *Arena
 	// Build the subtree under the document.
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
 		if c.Element() || c.Type == dom.NodeText {
-			kid := buildSubtree(a, c, styles)
+			kid := buildSubtree(a, c, doc, styles, pseudoStyles)
 			a.Link(rootID, kid)
 		}
 	}
@@ -207,7 +245,7 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle) *Arena
 	return a
 }
 
-func buildSubtree(a *Arena, n *dom.Node, styles map[dom.NodeID]*style.ComputedStyle) ObjectID {
+func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle) ObjectID {
 	id, ok := a.ForNode(n.ID)
 	if ok {
 		return id
@@ -218,11 +256,43 @@ func buildSubtree(a *Arena, n *dom.Node, styles map[dom.NodeID]*style.ComputedSt
 	if s, ok := styles[n.ID]; ok {
 		obj.Style = s
 	}
+
+	// Inject ::before pseudo-element as first child if it has content.
+	if n.Element() && pseudoStyles != nil {
+		if beforeStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "before"}]; ok {
+			beforeID := buildPseudoElement(a, doc, beforeStyle)
+			a.Link(id, beforeID)
+		}
+	}
+
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Element() || c.Type == dom.NodeText {
-			kid := buildSubtree(a, c, styles)
+			kid := buildSubtree(a, c, doc, styles, pseudoStyles)
 			a.Link(id, kid)
 		}
 	}
+
+	// Inject ::after pseudo-element as last child if it has content.
+	if n.Element() && pseudoStyles != nil {
+		if afterStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "after"}]; ok {
+			afterID := buildPseudoElement(a, doc, afterStyle)
+			a.Link(id, afterID)
+		}
+	}
+
+	return id
+}
+
+// buildPseudoElement creates a layout object for a pseudo-element with synthetic
+// text content. The object is an anonymous text node.
+func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.ComputedStyle) ObjectID {
+	id, obj := a.Alloc()
+	obj.flags |= flagAnonymous
+	obj.Style = pseudoStyle
+
+	// Create a synthetic text node with the generated content.
+	textNode := doc.NewText(pseudoStyle.Content)
+	obj.Node = textNode
+
 	return id
 }

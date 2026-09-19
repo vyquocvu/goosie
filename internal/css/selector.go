@@ -261,6 +261,83 @@ func (s Selector) Matches(n *dom.Node) bool {
 	return matchParts(s.Parts, len(s.Parts)-1, n)
 }
 
+// MatchesPseudoElement reports whether the selector matches the given
+// pseudo-element (::before, ::after, etc.) of the given node. The key compound
+// must have a CondPseudoElement condition for the given name; the rest of the
+// selector is matched against the node normally.
+func (s Selector) MatchesPseudoElement(n *dom.Node, pseudo string) bool {
+	if len(s.Parts) == 0 {
+		return false
+	}
+	key := s.Parts[len(s.Parts)-1]
+	hasPseudo := false
+	for _, c := range key.Conditions {
+		if c.Type == CondPseudoElement && c.Value == pseudo {
+			hasPseudo = true
+			break
+		}
+	}
+	if !hasPseudo {
+		return false
+	}
+	return matchPartsPseudo(s.Parts, len(s.Parts)-1, n, pseudo)
+}
+
+// matchPartsPseudo is like matchParts but skips CondPseudoElement conditions
+// for the given pseudo name in the key compound.
+func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string) bool {
+	if idx < 0 || n == nil || !n.Element() {
+		return false
+	}
+
+	part := parts[idx]
+	if !matchConditionsPseudo(part.Conditions, n, pseudo, idx == len(parts)-1) {
+		return false
+	}
+
+	if idx == 0 {
+		return true
+	}
+
+	switch part.Combinator {
+	case ' ':
+		for p := n.Parent; p != nil; p = p.Parent {
+			if matchPartsPseudo(parts, idx-1, p, pseudo) {
+				return true
+			}
+		}
+		return false
+	case '>':
+		return matchPartsPseudo(parts, idx-1, n.Parent, pseudo)
+	case '+':
+		sib := prevElement(n)
+		return sib != nil && matchPartsPseudo(parts, idx-1, sib, pseudo)
+	case '~':
+		for sib := prevElement(n); sib != nil; sib = prevElement(sib) {
+			if matchPartsPseudo(parts, idx-1, sib, pseudo) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return false
+}
+
+// matchConditionsPseudo is like matchConditions but skips CondPseudoElement
+// conditions for the given pseudo name when isKey is true.
+func matchConditionsPseudo(conds []Condition, n *dom.Node, pseudo string, isKey bool) bool {
+	for _, c := range conds {
+		if isKey && c.Type == CondPseudoElement && c.Value == pseudo {
+			continue
+		}
+		if !matchCondition(c, n) {
+			return false
+		}
+	}
+	return true
+}
+
 func matchParts(parts []SelectorPart, idx int, n *dom.Node) bool {
 	if idx < 0 || n == nil || !n.Element() {
 		return false
@@ -393,14 +470,13 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		// We have no navigation history, so all links are treated as unvisited.
 		tag := strings.ToLower(n.Data)
 		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
-	case "visited":
-		// Without a history store, treat visited the same as link so author
-		// styles for a:visited still apply (e.g. example.com's color rule).
-		tag := strings.ToLower(n.Data)
-		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
-	case "hover", "focus", "active", "focus-within", "focus-visible":
+	case "visited", "hover", "focus", "active", "focus-within", "focus-visible":
 		// Interaction pseudo-classes require runtime state that the engine
-		// does not track yet. Return false so they never match.
+		// does not track yet, and so does history: with no visit recorded, no
+		// link is ever visited. Returning false matches what a browser shows on
+		// a first load, which is the state every reference render is captured
+		// in - treating `a:visited` as `a:link` painted Wikipedia's links in
+		// MediaWiki's visited purple because that rule comes after the link one.
 		return false
 	case "checked", "disabled", "enabled", "placeholder-shown":
 		return false

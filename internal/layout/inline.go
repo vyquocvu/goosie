@@ -24,14 +24,9 @@ func inlineInto(a *Arena, id ObjectID) {
 	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
 		return
 	}
-	// Skip if already laid out (prevents duplicate word objects when called
-	// from both block layout and the main Inline pass).
 	if obj.flags&flagInlineLaidOut != 0 {
 		return
 	}
-	// An out-of-flow box is placed by the positioning pass, which then runs the
-	// inline pass over it. Laying it out here would position its text against a
-	// box that has no position yet.
 	if obj.flags&flagOutOfFlow != 0 {
 		return
 	}
@@ -41,10 +36,10 @@ func inlineInto(a *Arena, id ObjectID) {
 	var current lineBox
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
-		if k.Style == nil || k.Style.Display == style.DisplayNone {
+		if k.Node == nil || k.Style == nil || k.Style.Display == style.DisplayNone {
 			continue
 		}
-		if k.Node != nil && k.Node.Type == 2 {
+		if k.Node.Type == 2 {
 			collectInline(a, kid, contentW, &lines, &current)
 			continue
 		}
@@ -60,6 +55,11 @@ func inlineInto(a *Arena, id ObjectID) {
 					lines = append(lines, current)
 				}
 				current = lineBox{}
+			}
+			if blockifiesChildren(a.Get(kid).Style) {
+				// A flex or grid container lays its own content out and sizes
+				// it; descending here would re-split the word objects it made.
+				continue
 			}
 			inlineInto(a, kid)
 			continue
@@ -103,8 +103,19 @@ func inlineInto(a *Arena, id ObjectID) {
 	y := obj.Y + obj.PaddingTop + obj.BorderTop
 	lineH := float32(0)
 	contentW = obj.W
+	// The block's own font and line-height form the strut, and every line box is
+	// at least as tall as it even when all the runs inside are smaller. Without
+	// it a `* { line-height: 26px }` reset reaches a 40px heading through the
+	// link wrapping its text and collapses the heading's own line.
+	strut := float32(0)
+	if obj.Style != nil {
+		strut, _ = runHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
+	}
 	justifyExtra := float32(0)
 	for li, line := range lines {
+		if line.h < strut {
+			line.h = strut
+		}
 		justifyExtra = 0
 		baseX := obj.X + obj.PaddingLeft + obj.BorderLeft
 		alignW := line.w
@@ -296,6 +307,14 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 		}
 		return
 	}
+	// An inline replaced image is an unbreakable atomic box on the line, sized
+	// from its own content rather than from text. It has no children to recurse
+	// into, so it is handled before the generic inline-element descent.
+	k = a.Get(nodeID)
+	if k.Node != nil && k.Node.Element() && k.Node.Data == "img" {
+		atomicInlineReplaced(a, nodeID, contentW, lines, current)
+		return
+	}
 	// Inline element (e.g. <a>, <span>, <b>): recursively collect from its children.
 	// Re-fetch k in case Alloc calls during text processing reallocated the arena.
 	k = a.Get(nodeID)
@@ -355,6 +374,60 @@ func atomicInlineBlock(a *Arena, id ObjectID, contentW float32, lines *[]lineBox
 	blockInto(a, id, contentW)
 	inlineInto(a, id)
 	k := a.Get(id)
+	// An auto width shrinks to the content, the way the block pass shrinks a row
+	// of inline-blocks. Filling the line would give the box the whole row and push
+	// every sibling onto a line of its own, which is what turned a title followed
+	// by its tag pills into two lines.
+	if k.Style != nil && resolvePctLength(k.Style.Width, contentW) < 0 {
+		if w := itemMaxContentW(a, id); w > 0 && w < k.W {
+			k.W = w
+			k = a.Get(id)
+			clampWidth(k, contentW)
+			k = a.Get(id)
+			// The interior was laid out for the wide box it has just lost, so its
+			// words are re-wrapped and re-aligned at the width the box settles on.
+			// Without this a centred label keeps the position the wide measure gave
+			// it and paints outside its own button.
+			clearInlineLaidOut(a, id)
+			inlineInto(a, id)
+			k = a.Get(id)
+		}
+	}
+	boxW := k.W + k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
+	lineW := boxW + k.MarginLeft + k.MarginRight
+	lineH := k.BorderH() + k.MarginTop + k.MarginBottom
+	if len(current.runs) > 0 && current.w+lineW > contentW {
+		trimTrailingSpaces(a, current)
+		if len(current.runs) > 0 {
+			*lines = append(*lines, *current)
+		}
+		*current = lineBox{}
+	}
+	current.runs = append(current.runs, textRun{
+		obj:      id,
+		atomic:   true,
+		w:        lineW,
+		lineH:    lineH,
+		contentH: lineH,
+		srcX:     k.X,
+		srcY:     k.Y,
+	})
+	current.w += lineW
+	current.h = maxF(current.h, lineH)
+}
+
+// atomicInlineReplaced adds an inline replaced image to the line being built.
+// Unlike an inline-block, its size is not measured from content: it comes from
+// the CSS/attribute/intrinsic resolution in the block pass helper. The box still
+// behaves as one unbreakable unit on the line.
+func atomicInlineReplaced(a *Arena, id ObjectID, contentW float32, lines *[]lineBox, current *lineBox) {
+	k := a.Get(id)
+	w, h, ok := replacedSize(a, k, contentW)
+	if !ok {
+		return
+	}
+	k.W = w
+	k.H = h
 	boxW := k.W + k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
 	lineW := boxW + k.MarginLeft + k.MarginRight
 	lineH := k.BorderH() + k.MarginTop + k.MarginBottom
@@ -415,11 +488,11 @@ func measureWord(word string, fontSize float32, m Metrics, slot frame.FontSlot, 
 	if m == nil {
 		return float32(n)*fontSize*0.5 + extra
 	}
-	sum := float32(0)
+	sum := int64(0)
 	for _, r := range []rune(word) {
-		sum += float32(m.GlyphAdvance(int32(fontSize), r, slot))
+		sum += int64(m.GlyphAdvanceFixed(int32(fontSize), r, slot))
 	}
-	return sum + extra
+	return float32(sum)/64 + extra
 }
 
 func splitWords(text string) []string {

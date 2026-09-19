@@ -91,17 +91,23 @@ func (b *Bitmap) ScaleOver(src image.Image, srcRect, dst, clip Rect, cov uint8, 
 	}
 	dr := dst.Canon().Intersection(clip).Intersection(b.Bounds())
 	sw, sh := srcRect.W(), srcRect.H()
-	if dr.Empty() || sw <= 0 || sh <= 0 {
+	if dr.Empty() || sw <= 0 || sh <= 0 || dst.Canon().W() <= 0 || dst.Canon().H() <= 0 {
 		return
 	}
 	if writes != nil {
 		*writes += int64(dr.W()) * int64(dr.H())
 	}
-	// Fixed-point step from destination to source coordinates, offset by half a
-	// destination pixel so sampling lands on a texel center rather than a corner.
-	dw, dh := int32(dr.W()), int32(dr.H())
-	sxStep := int32(int64(sw) << 16 / int64(dw))
-	syStep := int32(int64(sh) << 16 / int64(dh))
+	// The fixed-point step is source units per destination pixel measured across
+	// the WHOLE destination box, and each tile's pixels are offset by where the
+	// clipped rect sits inside that box. Deriving the step from the clipped rect
+	// instead would rescale the entire source into every tile, so a background
+	// wider than one tile would repeat in each tile it spans rather than show its
+	// matching slice.
+	full := dst.Canon()
+	fw, fh := int32(full.W()), int32(full.H())
+	sxStep := int32(int64(sw) << 16 / int64(fw))
+	syStep := int32(int64(sh) << 16 / int64(fh))
+	offX, offY := dr.X0-full.X0, dr.Y0-full.Y0
 	sb := src.Bounds()
 	xLo, xHi := int32(sb.Min.X), int32(sb.Max.X)-1
 	yLo, yHi := int32(sb.Min.Y), int32(sb.Max.Y)-1
@@ -123,13 +129,13 @@ func (b *Bitmap) ScaleOver(src image.Image, srcRect, dst, clip Rect, cov uint8, 
 		// the per-pixel index a single multiply and add.
 		base = -int(sb.Min.Y)*stride - int(sb.Min.X)*4
 	}
-	for dy := int32(0); dy < dh; dy++ {
-		fy := dy*syStep + syStep/2
+	for dy := int32(0); dy < dr.H(); dy++ {
+		fy := (dy+offY)*syStep + syStep/2
 		sy0 := clamp32(srcRect.Y0+(fy>>16), yLo, yHi)
 		sy1 := clamp32(srcRect.Y0+(fy>>16)+1, yLo, yHi)
 		wy := uint32((fy & 0xFFFF) >> 10) // 0..63, the weight of the lower row
-		for dx := int32(0); dx < dw; dx++ {
-			fx := dx*sxStep + sxStep/2
+		for dx := int32(0); dx < dr.W(); dx++ {
+			fx := (dx+offX)*sxStep + sxStep/2
 			sx0 := clamp32(srcRect.X0+(fx>>16), xLo, xHi)
 			sx1 := clamp32(srcRect.X0+(fx>>16)+1, xLo, xHi)
 			wx := uint32((fx & 0xFFFF) >> 10)

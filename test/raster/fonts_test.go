@@ -133,3 +133,25 @@ func TestGlyphAtlasKeysSlotsApart(t *testing.T) {
 		t.Error("the same slot re-rasterized instead of hitting the cache")
 	}
 }
+
+// TestGlyphAdvanceFixedIsTheUnroundedAdvance pins the fractional-measurement
+// contract: GlyphAdvanceFixed carries the face's raw 26.6 advance, and the
+// integer GlyphAdvance is exactly that value rounded once. A run measured by
+// summing the fixed values must disagree with summing the rounded ones when
+// the advance has a fraction, which is the whole reason the fixed API exists.
+func TestGlyphAdvanceFixedIsTheUnroundedAdvance(t *testing.T) {
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	const size = int32(16)
+	for _, slot := range fontSlots {
+		fixed := f.GlyphAdvanceFixed(size, 'e', slot)
+		if fixed <= 0 {
+			t.Fatalf("slot %+v: GlyphAdvanceFixed('e') = %d, want a positive advance", slot, fixed)
+		}
+		if got, want := f.GlyphAdvance(size, 'e', slot), (fixed+32)>>6; got != want {
+			t.Errorf("slot %+v: GlyphAdvance = %d, want %d (fixed %d rounded once)", slot, got, want, fixed)
+		}
+	}
+}

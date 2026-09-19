@@ -161,3 +161,40 @@ func TestBlitMaskIsAllocationFree(t *testing.T) {
 		t.Fatalf("ScaleOver allocated %v times per call", n)
 	}
 }
+
+// TestScaleOverSamplesCorrectSliceWhenClipped pins that a scaled image spanning
+// several raster tiles shows its matching slice in each tile, not the whole
+// image rescaled into every tile. A background wider than one tile used to
+// repeat across every tile it spanned because the source step was derived from
+// the clipped rect rather than the full destination box.
+func TestScaleOverSamplesCorrectSliceWhenClipped(t *testing.T) {
+	// 8x4 source: left half red, right half green.
+	src := image.NewRGBA(image.Rect(0, 0, 8, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 8; x++ {
+			if x < 4 {
+				src.Set(x, y, color.RGBA{R: 255, A: 255})
+			} else {
+				src.Set(x, y, color.RGBA{G: 255, A: 255})
+			}
+		}
+	}
+
+	// Draw into an 8-wide destination but clip to the LEFT 4 columns, as the
+	// tile rasterizer does for the tile holding the left half. The correct slice
+	// is red throughout; the old bug would rescale the whole source into the 4px
+	// window and bleed green in at the right edge.
+	left := frame.NewBitmap(8, 4)
+	left.ScaleOver(src, frame.Rect4(0, 0, 8, 4), frame.Rect4(0, 0, 8, 4), frame.Rect4(0, 0, 4, 4), 255, nil)
+	if got := left.At(1, 2); got.G() > 40 || got.R() < 200 {
+		t.Fatalf("left tile at x=1 = %v, want red (source slice [0,4)), not a rescaled whole image", got)
+	}
+
+	// The RIGHT 4 columns must sample the green half, proving the offset tracks
+	// the tile's position within the full destination box.
+	right := frame.NewBitmap(8, 4)
+	right.ScaleOver(src, frame.Rect4(0, 0, 8, 4), frame.Rect4(0, 0, 8, 4), frame.Rect4(4, 0, 8, 4), 255, nil)
+	if got := right.At(6, 2); got.R() > 40 || got.G() < 200 {
+		t.Fatalf("right tile at x=6 = %v, want green (source slice [4,8)), not a rescaled whole image", got)
+	}
+}

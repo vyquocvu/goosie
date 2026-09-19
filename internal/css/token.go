@@ -113,6 +113,11 @@ func (t *Tokenizer) Next() Token {
 		}
 		return Token{Type: TokenStar, Value: "*"}
 	case c == '.':
+		if t.pos+1 < len(t.input) && t.input[t.pos+1] >= '0' && t.input[t.pos+1] <= '9' {
+			// `.` followed by a digit starts a number: `.9em` is a dimension,
+			// not a class token.
+			return t.readNumber()
+		}
 		t.pos++
 		if t.pos < len(t.input) && isIdentStart(t.input[t.pos]) {
 			tok := t.readIdent()
@@ -197,7 +202,27 @@ func (t *Tokenizer) readString(quote byte) Token {
 		}
 		if c == '\\' && t.pos+1 < len(t.input) {
 			t.pos++
-			sb.WriteByte(t.input[t.pos])
+			next := t.input[t.pos]
+			if isHex(next) {
+				start := t.pos
+				for t.pos < len(t.input) && t.pos-start < 6 && isHex(t.input[t.pos]) {
+					t.pos++
+				}
+				cp := uint32(0)
+				for j := start; j < t.pos; j++ {
+					cp = cp*16 + hexVal(t.input[j])
+				}
+				if t.pos < len(t.input) && (t.input[t.pos] == ' ' || t.input[t.pos] == '\t' || t.input[t.pos] == '\n' || t.input[t.pos] == '\r' || t.input[t.pos] == '\f') {
+					t.pos++
+				}
+				if cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {
+					sb.WriteRune('\uFFFD')
+				} else {
+					sb.WriteRune(rune(cp))
+				}
+				continue
+			}
+			sb.WriteByte(next)
 			t.pos++
 			continue
 		}

@@ -66,6 +66,37 @@ func TestLengthLineHeightStillInheritsAsAValue(t *testing.T) {
 	}
 }
 
+func TestEmLineHeightResolvesAgainstOwnFontSize(t *testing.T) {
+	// `line-height: 1em` is a length whose em unit belongs to the element's own
+	// final font size, whichever order the size arrives in. yesterweb's nav links
+	// declare the line-height before the 22px size in the same rule and its
+	// headings declare them in two separate rules; resolving either against the
+	// default 16px shrinks every line box and drags the rest of the page up.
+	t.Run("declared before the size in the same rule", func(t *testing.T) {
+		a := styleFor(t, `<html><body><a href="#">x</a></body></html>`,
+			`a { line-height: 1em; font-size: 22px }`, "a")
+		if a.LineHeight != 22 {
+			t.Errorf("a line-height = %v, want 22", a.LineHeight)
+		}
+	})
+	t.Run("declared in a later rule", func(t *testing.T) {
+		h2 := styleFor(t, `<html><body><h2>x</h2></body></html>`,
+			`h2 { font-size: 25px } h2 { line-height: 1em }`, "h2")
+		if h2.LineHeight != 25 {
+			t.Errorf("h2 line-height = %v, want 25", h2.LineHeight)
+		}
+	})
+	t.Run("inherits as the resolved length", func(t *testing.T) {
+		// The computed value of an em line-height is a length, so a child takes
+		// the 20px the parent worked out rather than re-deriving 2em itself.
+		h1 := styleFor(t, `<html><body><h1>x</h1></body></html>`,
+			`body { font-size: 10px; line-height: 2em } h1 { font-size: 32px }`, "h1")
+		if h1.LineHeight != 20 {
+			t.Errorf("h1 line-height = %v, want 20 (the parent's resolved length)", h1.LineHeight)
+		}
+	})
+}
+
 func TestBackgroundGradientRamp(t *testing.T) {
 	s := styleFor(t, `<html><body><div class="box">x</div></body></html>`,
 		`.box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) }`, "div")

@@ -87,6 +87,11 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 			natural = available
 		}
 		available = natural
+	} else if min := sumOf(colMin); min > available {
+		// A specified width is only a wish: the used width is the greater of it
+		// and the table's minimum content width, so a table narrower than the
+		// cells it cannot shrink still makes room for them.
+		available = min
 	}
 	if available < 0 {
 		available = 0
@@ -115,6 +120,12 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	for ri := range rows {
 		rowY := cursor
 		rowH := reserved[ri]
+		// A row's own height is a floor on the row rather than a fixed size, and
+		// it holds even when the row brings no cell to prop it up: that is how a
+		// list separates its items with an empty spacer row.
+		if rs := a.Get(rows[ri].id).Style; rs != nil && rs.Height >= 0 && rs.Height > rowH {
+			rowH = rs.Height
+		}
 		for _, cid := range rows[ri].cells {
 			c := cellByRef(cells, cid)
 			if c == nil || c.col >= colCount {
@@ -510,9 +521,27 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 			continue
 		}
 		subMin, subMax := measureInlineContent(a, kid)
-		if isBlock(k) {
-			chrome := k.Style.PaddingLeft + k.Style.PaddingRight + k.Style.BorderLeftWidth + k.Style.BorderRightWidth
+		if isBlock(k) || k.Style.Display == style.DisplayInlineBlock {
+			chrome := k.Style.PaddingLeft + k.Style.PaddingRight + k.Style.BorderLeftWidth + k.Style.BorderRightWidth +
+				flexMargin(k.Style.MarginLeft) + flexMargin(k.Style.MarginRight)
 			flush()
+			// A box with a declared width brings that width to the column, whether
+			// or not it holds any text: the vote arrow on Hacker News is an empty
+			// 10px div with 8px of margin, and measuring only its absent words
+			// collapsed the column and slid every title left. A fixed width also
+			// floors the column, since a box that cannot shrink drags the table
+			// wider with it.
+			if own := declaredOuterW(k.Style); own >= 0 {
+				if own > subMax {
+					subMax = own
+				}
+				if own > subMin {
+					subMin = own
+				}
+			}
+			if floor := flexMargin(k.Style.MinWidth); floor > subMin {
+				subMin = floor
+			}
 			if subMax+chrome > maxW {
 				maxW = subMax + chrome
 			}
@@ -528,4 +557,31 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 	}
 	flush()
 	return minW, maxW
+}
+
+// declaredOuterW is the content width a box states for itself - an explicit
+// width held between its own min- and max-width - or -1 when its width is auto.
+// Percentages are absent on purpose: an intrinsic measure runs before the
+// column has a width to resolve them against.
+func declaredOuterW(s *style.ComputedStyle) float32 {
+	if s == nil {
+		return -1
+	}
+	w := s.Width
+	if s.MaxWidth >= 0 && w > s.MaxWidth {
+		w = s.MaxWidth
+	}
+	if s.MinWidth > w {
+		w = s.MinWidth
+	}
+	if w < 0 {
+		return -1
+	}
+	if s.BoxSizing == style.BoxSizingBorderBox {
+		w -= s.PaddingLeft + s.PaddingRight + s.BorderLeftWidth + s.BorderRightWidth
+		if w < 0 {
+			w = 0
+		}
+	}
+	return w
 }

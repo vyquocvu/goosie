@@ -34,8 +34,8 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 	// advance below has to come from that same face or the run's own spacing
 	// contradicts the box layout measured.
 	slot := frame.FontSlot{Family: frame.FontTimes}
-	want := fonts.GlyphAdvance(16, 'W', slot)
-	if want <= 0 {
+	wantFixed := fonts.GlyphAdvanceFixed(16, 'W', slot)
+	if wantFixed <= 0 {
 		t.Fatal("font reports no advance for W")
 	}
 	found := false
@@ -52,8 +52,11 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 		}
 		found = true
 		for i := 1; i < len(g); i++ {
-			if got := g[i].X - g[i-1].X; got != want {
-				t.Errorf("glyph %d advance = %d, want %d (real font advance)", i, got, want)
+			// Positions accumulate the fractional advance and round only at
+			// each glyph, so the spacing between any two glyphs is not constant.
+			want := (int32(i)*wantFixed + 32) >> 6
+			if got := g[i].X - g[0].X; got != want {
+				t.Errorf("glyph %d offset = %d, want %d (fractional advance accumulation)", i, got, want)
 			}
 		}
 	}
@@ -88,7 +91,7 @@ func TestLayoutWordWidthFromMetrics(t *testing.T) {
 	if word == nil {
 		t.Fatal("word object for WWWW not found in arena")
 	}
-	want := float32(fonts.GlyphAdvance(16, 'W', frame.FontSlot{Family: frame.FontTimes})) * 4
+	want := float32(4*fonts.GlyphAdvanceFixed(16, 'W', frame.FontSlot{Family: frame.FontTimes})) / 64
 	if diff := word.W - want; diff < -0.5 || diff > 0.5 {
 		t.Errorf("word.W = %v, want %v (sum of real advances)", word.W, want)
 	}
