@@ -26,14 +26,18 @@ const (
 )
 
 var (
-	buttonColor    = frame.RGB(100, 100, 100)
+	buttonColor    = frame.RGB(80, 80, 80)
+	buttonBg       = frame.RGB(232, 232, 232)
 	barBg          = frame.RGB(255, 255, 255)
-	barBorder      = frame.RGB(200, 200, 200)
-	toolbarBg      = frame.RGB(240, 240, 240)
+	barBorder      = frame.RGB(210, 210, 210)
+	barFocusBorder = frame.RGB(0, 120, 215)
+	toolbarBg      = frame.RGB(245, 245, 245)
 	textColor      = frame.RGB(33, 33, 33)
+	placeholderColor = frame.RGB(150, 150, 150)
 	cursorColor    = frame.RGB(0, 120, 215)
-	disabledColor  = frame.RGB(180, 180, 180)
+	disabledColor  = frame.RGB(190, 190, 190)
 	selectionColor = frame.RGB(180, 210, 250)
+	separatorColor = frame.RGB(200, 200, 200)
 )
 
 // Clipboard is the platform clipboard interface. The darwin package provides
@@ -74,6 +78,10 @@ func NewState(width int32, fonts *raster.Fonts) *State {
 		fonts:     fonts,
 		Clipboard: nopClipboardImpl{},
 	}
+}
+
+func (s *State) SetHistory(h *History) {
+	s.History = h
 }
 
 func (s *State) SetBounds(width int32) {
@@ -300,24 +308,27 @@ func rectContains(r frame.Rect, p frame.Point) bool {
 	return p.X >= r.X0 && p.X < r.X1 && p.Y >= r.Y0 && p.Y < r.Y1
 }
 
-func (s *State) Draw(backing *frame.Bitmap) {
+func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	if backing == nil || backing.Empty() {
 		return
 	}
 	w := int32(backing.W)
 	clip := backing.Bounds()
 
-	bg := frame.Rect4(0, 0, w, ToolbarHeight)
+	bg := frame.Rect4(0, oy, w, oy+ToolbarHeight)
 	backing.FillRect(bg, toolbarBg, nil)
 
-	s.drawButton(backing, ButtonBack, w, clip)
-	s.drawButton(backing, ButtonForward, w, clip)
-	s.drawButton(backing, ButtonReload, w, clip)
-	s.drawAddressBar(backing, w, clip)
+	backing.FillRect(frame.Rect4(0, oy+ToolbarHeight-1, w, oy+ToolbarHeight), separatorColor, nil)
+
+	s.drawButton(backing, ButtonBack, w, clip, oy)
+	s.drawButton(backing, ButtonForward, w, clip, oy)
+	s.drawButton(backing, ButtonReload, w, clip, oy)
+	s.drawAddressBar(backing, w, clip, oy)
 }
 
-func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, clip frame.Rect) {
+func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, clip frame.Rect, oy int32) {
 	r := ButtonRect(btn, toolbarW)
+	r = frame.Rect4(r.X0, r.Y0+oy, r.X1, r.Y1+oy)
 	fg := buttonColor
 	if btn == ButtonBack && !s.History.CanBack() {
 		fg = disabledColor
@@ -327,6 +338,8 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	}
 	cx := (r.X0 + r.X1) / 2
 	cy := (r.Y0 + r.Y1) / 2
+	radius := int32(13)
+	s.drawCircle(backing, cx, cy, radius, buttonBg)
 	switch btn {
 	case ButtonBack:
 		s.drawArrow(backing, cx-4, cy, -1, fg, clip)
@@ -337,15 +350,29 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	}
 }
 
+func (s *State) drawCircle(backing *frame.Bitmap, cx, cy, radius int32, c frame.Color) {
+	for dy := -radius; dy <= radius; dy++ {
+		for dx := -radius; dx <= radius; dx++ {
+			if dx*dx+dy*dy <= radius*radius {
+				px := cx + dx
+				py := cy + dy
+				backing.FillRect(frame.Rect4(px, py, px+1, py+1), c, nil)
+			}
+		}
+	}
+}
+
 func (s *State) drawArrow(backing *frame.Bitmap, x, y int32, dir int32, c frame.Color, clip frame.Rect) {
-	for i := int32(0); i < 6; i++ {
+	for i := int32(0); i < 5; i++ {
 		px := x + dir*i
-		py := y - 3 + i
+		py := y - 4 + i
 		if py >= 0 {
 			backing.FillRect(frame.Rect4(px, py, px+1, py+1), c, nil)
+			backing.FillRect(frame.Rect4(px, py+1, px+1, py+2), c, nil)
 		}
-		py2 := y + 3 - i
+		py2 := y + 4 - i
 		if py2 >= 0 {
+			backing.FillRect(frame.Rect4(px, py2-1, px+1, py2), c, nil)
 			backing.FillRect(frame.Rect4(px, py2, px+1, py2+1), c, nil)
 		}
 	}
@@ -353,48 +380,69 @@ func (s *State) drawArrow(backing *frame.Bitmap, x, y int32, dir int32, c frame.
 }
 
 func (s *State) drawReload(backing *frame.Bitmap, cx, cy int32, c frame.Color, clip frame.Rect) {
-	r := int32(5)
-	for dy := -r; dy <= r; dy++ {
-		for dx := -r; dx <= r; dx++ {
-			dist := dx*dx + dy*dy
-			if dist >= (r-1)*(r-1) && dist <= (r+1)*(r+1) {
-				px := cx + dx
-				py := cy + dy
-				if px >= 0 && py >= 0 {
-					backing.FillRect(frame.Rect4(px, py, px+1, py+1), c, nil)
-				}
-			}
+	r := int32(6)
+	for angle := 0; angle < 300; angle += 3 {
+		rad := float64(angle) * 3.14159 / 180.0
+		sin, cos := sinCos(rad)
+		px := cx + int32(float64(r)*cos)
+		py := cy + int32(float64(r)*sin)
+		if px >= 0 && py >= 0 {
+			backing.FillRect(frame.Rect4(px, py, px+1, py+1), c, nil)
 		}
 	}
-	arrowX := cx + r
+	arrowX := cx + r - 1
 	arrowY := cy - r
-	backing.FillRect(frame.Rect4(arrowX-1, arrowY, arrowX+2, arrowY+1), c, nil)
-	backing.FillRect(frame.Rect4(arrowX+1, arrowY, arrowX+2, arrowY+3), c, nil)
+	backing.FillRect(frame.Rect4(arrowX, arrowY-1, arrowX+3, arrowY), c, nil)
+	backing.FillRect(frame.Rect4(arrowX+2, arrowY-1, arrowX+3, arrowY+2), c, nil)
 	_ = clip
 }
 
-func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame.Rect) {
-	r := AddressBarRect(toolbarW)
-	backing.FillRect(r, barBg, nil)
+func sinCos(rad float64) (float64, float64) {
+	sin := 0.0
+	cos := 1.0
+	x := rad
+	for x > 6.28318 {
+		x -= 6.28318
+	}
+	for x < -6.28318 {
+		x += 6.28318
+	}
+	s := x
+	c := x
+	s2 := s * s
+	c2 := c * c
+	for i := 1; i <= 5; i++ {
+		s *= -s2 / float64(2*i*(2*i+1))
+		sin += s
+		c *= -c2 / float64(2*i*(2*i-1))
+		cos += c
+	}
+	return sin, cos
+}
 
-	border := frame.RGB(200, 200, 200)
-	backing.FillRect(frame.Rect4(r.X0, r.Y0, r.X1, r.Y0+1), border, nil)
-	backing.FillRect(frame.Rect4(r.X0, r.Y1-1, r.X1, r.Y1), border, nil)
-	backing.FillRect(frame.Rect4(r.X0, r.Y0, r.X0+1, r.Y1), border, nil)
-	backing.FillRect(frame.Rect4(r.X1-1, r.Y0, r.X1, r.Y1), border, nil)
+func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame.Rect, oy int32) {
+	r := AddressBarRect(toolbarW)
+	r = frame.Rect4(r.X0, r.Y0+oy, r.X1, r.Y1+oy)
+
+	border := barBorder
+	if s.Focus == FocusAddress {
+		border = barFocusBorder
+	}
+	s.drawRoundedRect(backing, r, 6, barBg, border)
 
 	text := s.Input
 	if s.Focus == FocusNone {
 		text = s.URL
 	}
+	textCol := textColor
 	if text == "" && s.Focus == FocusNone {
 		text = "Enter URL..."
+		textCol = placeholderColor
 	}
 
-	textX := r.X0 + BarPadding
+	textX := r.X0 + BarPadding + 4
 	textY := r.Y0 + (ButtonSize-textSize)/2 + textSize
 
-	// Draw selection highlight behind text.
 	if s.Focus == FocusAddress && s.hasSelection() {
 		runes := []rune(text)
 		sMin := s.selMin()
@@ -409,16 +457,75 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 			selText := string(runes[sMin:sMax])
 			selX0 := textX + s.measureText(string(runes[:sMin]))
 			selX1 := selX0 + s.measureText(selText)
-			backing.FillRect(frame.Rect4(selX0, r.Y0+2, selX1, r.Y1-2), selectionColor, nil)
+			backing.FillRect(frame.Rect4(selX0, r.Y0+3, selX1, r.Y1-3), selectionColor, nil)
 		}
 	}
 
-	s.drawText(backing, text, textX, textY, textColor, clip)
+	s.drawText(backing, text, textX, textY, textCol, clip)
 
 	if s.Focus == FocusAddress {
 		cursorX := textX + s.measureText(text[:s.cursorByte()])
-		backing.FillRect(frame.Rect4(cursorX, r.Y0+4, cursorX+1, r.Y1-4), cursorColor, nil)
+		backing.FillRect(frame.Rect4(cursorX, r.Y0+5, cursorX+1, r.Y1-5), cursorColor, nil)
 	}
+}
+
+func (s *State) drawRoundedRect(backing *frame.Bitmap, r frame.Rect, radius int32, fill, border frame.Color) {
+	corner := func(cx, cy int32, quadrant int) {
+		for dy := int32(0); dy <= radius; dy++ {
+			for dx := int32(0); dx <= radius; dx++ {
+				dist := dx*dx + dy*dy
+				if dist <= radius*radius {
+					var px, py int32
+					switch quadrant {
+					case 0:
+						px, py = cx-radius+dx, cy-radius+dy
+					case 1:
+						px, py = cx+radius-dx, cy-radius+dy
+					case 2:
+						px, py = cx-radius+dx, cy+radius-dy
+					case 3:
+						px, py = cx+radius-dx, cy+radius-dy
+					}
+					if px >= r.X0 && px < r.X1 && py >= r.Y0 && py < r.Y1 {
+						backing.FillRect(frame.Rect4(px, py, px+1, py+1), fill, nil)
+					}
+				}
+			}
+		}
+	}
+	corner(r.X0, r.Y0, 0)
+	corner(r.X1-1, r.Y0, 1)
+	corner(r.X0, r.Y1-1, 2)
+	corner(r.X1-1, r.Y1-1, 3)
+
+	backing.FillRect(frame.Rect4(r.X0+radius, r.Y0, r.X1-radius, r.Y0+1), border, nil)
+	backing.FillRect(frame.Rect4(r.X0+radius, r.Y1-1, r.X1-radius, r.Y1), border, nil)
+	backing.FillRect(frame.Rect4(r.X0, r.Y0+radius, r.X0+1, r.Y1-radius), border, nil)
+	backing.FillRect(frame.Rect4(r.X1-1, r.Y0+radius, r.X1, r.Y1-radius), border, nil)
+
+	backing.FillRect(frame.Rect4(r.X0+radius, r.Y0+1, r.X1-radius, r.Y1-1), fill, nil)
+	backing.FillRect(frame.Rect4(r.X0+1, r.Y0+radius, r.X0+radius, r.Y1-radius), fill, nil)
+	backing.FillRect(frame.Rect4(r.X1-radius, r.Y0+radius, r.X1-1, r.Y1-radius), fill, nil)
+
+	s.drawRoundedBorder(backing, r, radius, border)
+}
+
+func (s *State) drawRoundedBorder(backing *frame.Bitmap, r frame.Rect, radius int32, c frame.Color) {
+	drawArc := func(cx, cy int32, startAngle, endAngle int) {
+		for a := startAngle; a <= endAngle; a += 2 {
+			rad := float64(a) * 3.14159 / 180.0
+			sin, cos := sinCos(rad)
+			px := cx + int32(float64(radius)*cos)
+			py := cy + int32(float64(radius)*sin)
+			if px >= r.X0 && px < r.X1 && py >= r.Y0 && py < r.Y1 {
+				backing.FillRect(frame.Rect4(px, py, px+1, py+1), c, nil)
+			}
+		}
+	}
+	drawArc(r.X0+radius, r.Y0+radius, 90, 180)
+	drawArc(r.X1-radius-1, r.Y0+radius, 0, 90)
+	drawArc(r.X0+radius, r.Y1-radius-1, 180, 270)
+	drawArc(r.X1-radius-1, r.Y1-radius-1, 270, 360)
 }
 
 func (s *State) drawText(backing *frame.Bitmap, text string, x, y int32, c frame.Color, clip frame.Rect) {

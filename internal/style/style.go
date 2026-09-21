@@ -209,6 +209,11 @@ type ComputedStyle struct {
 	OverflowY  Overflow
 	BoxSizing  BoxSizing
 	Visibility string
+	HasClip    bool
+	ClipTop    float32
+	ClipRight  float32
+	ClipBottom float32
+	ClipLeft   float32
 	Opacity    float32
 	ZIndex     int32
 	HasZIndex  bool
@@ -288,7 +293,9 @@ type ComputedStyle struct {
 	// FontFamily is the family resolved from the declared font-family list:
 	// the first entry the engine can serve, or the standard font when none of
 	// them can be. See parseFontFamily.
-	FontFamily frame.FontFamily
+	FontFamily  frame.FontFamily
+	CustomFamily string
+	CustomFontIdx uint16
 	FontSize   float32
 	FontWeight FontWeight
 	FontStyle  FontStyle
@@ -438,12 +445,37 @@ func (cs *ComputedStyle) FontSlot() frame.FontSlot {
 	if cs == nil {
 		return frame.FontSlot{}
 	}
-	return frame.FontSlot{
-		Family: cs.FontFamily,
-		Bold:   cs.FontWeight >= WeightBold,
-		Italic: cs.FontStyle != FontStyleNormal,
-		Light:  cs.FontWeight > 0 && cs.FontWeight < WeightNormal,
+	slot := frame.FontSlot{
+		Family:    cs.FontFamily,
+		Bold:      cs.FontWeight >= WeightBold,
+		Italic:    cs.FontStyle != FontStyleNormal,
+		Light:     cs.FontWeight > 0 && cs.FontWeight < WeightNormal,
+		CustomIdx: cs.CustomFontIdx,
 	}
+	if cs.CustomFamily != "" && slot.CustomIdx == 0 {
+		customFontsMu.RLock()
+		if customFontRegistry != nil {
+			key := CustomFontKey{
+				Family: cs.CustomFamily,
+				Bold:   slot.Bold,
+				Italic: slot.Italic,
+				Light:  slot.Light,
+			}
+			if idx, ok := customFontRegistry[key]; ok {
+				slot.CustomIdx = idx
+			} else {
+				// Fall back to the regular variant of the same family.
+				key.Bold = false
+				key.Italic = false
+				key.Light = false
+				if idx, ok := customFontRegistry[key]; ok {
+					slot.CustomIdx = idx
+				}
+			}
+		}
+		customFontsMu.RUnlock()
+	}
+	return slot
 }
 
 // UserAgentStylesheet returns the default UA stylesheet. It is parsed once and
@@ -1064,6 +1096,8 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.Color = parent.Color
 	cs.FontSize = parent.FontSize
 	cs.FontFamily = parent.FontFamily
+	cs.CustomFamily = parent.CustomFamily
+	cs.CustomFontIdx = parent.CustomFontIdx
 	cs.FontWeight = parent.FontWeight
 	cs.FontStyle = parent.FontStyle
 	cs.LineHeight = parent.LineHeight
@@ -1166,6 +1200,16 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "visibility":
 		cs.Visibility = value
+	case "clip":
+		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
+			cs.HasClip = true
+			cs.ClipTop = resolveLengthEm(parsed.Parts[0], 0, cs.FontSize)
+			cs.ClipRight = resolveLengthEm(parsed.Parts[1], 0, cs.FontSize)
+			cs.ClipBottom = resolveLengthEm(parsed.Parts[2], 0, cs.FontSize)
+			cs.ClipLeft = resolveLengthEm(parsed.Parts[3], 0, cs.FontSize)
+		} else if value == "auto" {
+			cs.HasClip = false
+		}
 	case "content":
 		// Content takes the parsed string value (quotes stripped, escapes decoded)
 		// rather than the raw CSS text, so the generated text is what the author wrote.
@@ -1389,7 +1433,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseBackgroundPosition(cs, value)
 
 	case "font-family":
-		cs.FontFamily = parseFontFamily(value)
+		cs.FontFamily, cs.CustomFamily = parseFontFamily(value)
 	case "font-size":
 		cs.FontSize = clampFontSize(resolveFontSize(parsed, parentFontSize))
 	case "font-weight":
@@ -1897,18 +1941,57 @@ var fontFamilies = map[string]frame.FontFamily{
 	"go regular":         frame.FontGo,
 }
 
+var (
+	customFontsMu sync.RWMutex
+	customFontIdx map[string]uint16
+	customFontRegistry map[CustomFontKey]uint16
+)
+
+type CustomFontKey struct {
+	Family string
+	Bold   bool
+	Italic bool
+	Light  bool
+}
+
+// SetCustomFonts registers the @font-face families the engine has loaded so
+// parseFontFamily can match them. The map keys are lowercase family names; the
+// values are 1-based indices into the rasterizer's custom font table.
+func SetCustomFonts(m map[string]uint16) {
+	customFontsMu.Lock()
+	customFontIdx = m
+	customFontsMu.Unlock()
+}
+
+// SetCustomFontRegistry registers @font-face families with weight/slant variants.
+// The map keys are (family, bold, italic, light) tuples; the values are 1-based
+// indices into the rasterizer's custom font table.
+func SetCustomFontRegistry(m map[CustomFontKey]uint16) {
+	customFontsMu.Lock()
+	customFontRegistry = m
+	customFontsMu.Unlock()
+}
+
 // parseFontFamily walks a declared font-family list and returns the first family
-// this engine can serve. A name it does not know is unavailable rather than
-// unknown-but-drawn, exactly as a browser skips a family that is not installed,
-// so the list keeps falling through to its generic keyword. An exhausted list
-// lands on the standard font.
-func parseFontFamily(v string) frame.FontFamily {
+// this engine can serve plus a custom-font family name when the match is a @font-face
+// family rather than a built-in one. A name it does not know is unavailable
+// rather than unknown-but-drawn, exactly as a browser skips a family that is
+// not installed, so the list keeps falling through to its generic keyword. An
+// exhausted list lands on the standard font.
+func parseFontFamily(v string) (frame.FontFamily, string) {
 	for _, part := range strings.Split(v, ",") {
-		if fam, ok := fontFamilies[normalizeFontName(part)]; ok {
-			return fam
+		name := normalizeFontName(part)
+		if fam, ok := fontFamilies[name]; ok {
+			return fam, ""
+		}
+		customFontsMu.RLock()
+		_, ok := customFontIdx[name]
+		customFontsMu.RUnlock()
+		if ok {
+			return frame.FontGo, name
 		}
 	}
-	return frame.FontTimes
+	return frame.FontTimes, ""
 }
 
 // normalizeFontName folds away what CSS allows around a family name: quoting,
@@ -2602,7 +2685,7 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32) {
 		cs.LineHeightEm = lineHeightEm(parsed)
 	}
 	if fam := strings.TrimSpace(strings.Join(parts[sizeIdx+1:], " ")); fam != "" {
-		cs.FontFamily = parseFontFamily(fam)
+		cs.FontFamily, cs.CustomFamily = parseFontFamily(fam)
 	}
 }
 

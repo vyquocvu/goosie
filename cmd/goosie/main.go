@@ -34,6 +34,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
+	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
@@ -190,13 +191,11 @@ type framePath struct {
 	spec     paint.SceneSpec
 	config   config
 	toolbar  *toolbar.State
+	tabMgr   *tabs.TabManager
 	client   net.HTTP
 	fonts    *raster.Fonts
-	// started is when frames began, so the reported rate excludes window creation and
-	// the scene build: a run's frames-per-second is a claim about the frame path.
-	started time.Time
+	started  time.Time
 
-	// Navigation state. navMu protects navCancel; navSerial is atomic.
 	navMu     sync.Mutex
 	navCancel context.CancelFunc
 	navSerial atomic.Uint64
@@ -264,18 +263,29 @@ func build(c config) (*framePath, error) {
 	}
 	if !c.paced() {
 		f.toolbar = toolbar.NewState(dev.W, fonts)
+		f.tabMgr = tabs.NewManager(func() {
+			if f.window != nil {
+				_ = f.window.Close()
+			}
+		})
+		f.tabMgr.OnChange = func() {
+			f.syncTabToToolbar()
+		}
+		firstTab := f.tabMgr.NewTab()
+		if c.url != "" {
+			firstTab.URL = normalizeURL(c.url)
+			firstTab.Title = firstTab.URL
+		}
+		f.syncTabToToolbar()
+
 		f.toolbar.OnNavigate = func(rawURL string) {
-			f.navigate(rawURL)
+			f.navigateTab(rawURL)
 		}
 		f.toolbar.OnTraverse = func(delta int) {
-			f.traverse(delta)
+			f.traverseTab(delta)
 		}
 		f.toolbar.OnReload = func() {
-			f.reload()
-		}
-		if c.url != "" {
-			f.toolbar.URL = normalizeURL(c.url)
-			f.toolbar.Input = normalizeURL(c.url)
+			f.reloadTab()
 		}
 		if cb := platform.NewClipboard(); cb != nil {
 			f.toolbar.Clipboard = cb
@@ -285,13 +295,30 @@ func build(c config) (*framePath, error) {
 	return f, nil
 }
 
-// navigate loads a new URL on a goroutine and publishes a new plan when it
-// arrives. It cancels any in-flight navigation first, and rejects the result
-// if another navigation started while this one was fetching.
-func (f *framePath) navigate(rawURL string) {
+// syncTabToToolbar copies the active tab's state into the toolbar for display.
+func (f *framePath) syncTabToToolbar() {
+	if f.toolbar == nil || f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
+	f.toolbar.URL = tab.URL
+	f.toolbar.Input = tab.URL
+	f.toolbar.History = tab.History
+	f.toolbar.SetLoading(tab.Loading)
+	f.toolbar.Error = tab.Error
+}
+
+// navigateTab loads a URL on the active tab.
+func (f *framePath) navigateTab(rawURL string) {
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
 	u := normalizeURL(rawURL)
 
-	// Cancel any in-flight navigation.
 	f.navMu.Lock()
 	if f.navCancel != nil {
 		f.navCancel()
@@ -300,41 +327,38 @@ func (f *framePath) navigate(rawURL string) {
 	f.navCancel = cancel
 	f.navMu.Unlock()
 
-	// Capture the serial for stale-result rejection.
 	serial := f.navSerial.Add(1)
-
-	if f.toolbar != nil {
-		f.toolbar.SetLoading(true)
-		f.toolbar.Error = ""
-	}
+	tab.Loading = true
+	tab.Error = ""
+	f.toolbar.SetLoading(true)
+	f.toolbar.Error = ""
 
 	go func() {
 		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
 		if err != nil {
-			// Context cancelled means a newer navigation superseded this one;
-			// don't report it as an error.
 			if ctx.Err() != nil {
 				return
 			}
-			// Stale result: a newer navigation already started.
 			if f.navSerial.Load() != serial {
 				return
 			}
-			if f.toolbar != nil {
-				f.toolbar.SetLoading(false)
-				f.toolbar.Error = err.Error()
-			}
+			tab.Loading = false
+			tab.Error = err.Error()
+			f.toolbar.SetLoading(false)
+			f.toolbar.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		// Stale result check: only apply if this is still the current navigation.
 		if f.navSerial.Load() != serial {
 			return
 		}
-		if f.toolbar != nil {
-			f.toolbar.SetLoading(false)
-			f.toolbar.Navigate(u)
-		}
+		tab.Layer = layer
+		tab.Loading = false
+		tab.URL = u
+		tab.Title = u
+		tab.BGColor = bgColor
+		tab.History.Push(u)
+		f.syncTabToToolbar()
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     serial,
 			Layers:     []*frame.Layer{layer},
@@ -343,29 +367,31 @@ func (f *framePath) navigate(rawURL string) {
 	}()
 }
 
-// traverse loads a URL from history (back/forward). It navigates without
-// pushing to history again, since the history index was already moved.
-func (f *framePath) traverse(delta int) {
-	if f.toolbar == nil {
+// traverseTab handles back/forward on the active tab.
+func (f *framePath) traverseTab(delta int) {
+	tab := f.tabMgr.Active()
+	if tab == nil {
 		return
 	}
 	var url string
 	var ok bool
 	if delta < 0 {
-		url, ok = f.toolbar.History.Back()
+		url, ok = tab.History.Back()
 	} else if delta > 0 {
-		url, ok = f.toolbar.History.Forward()
+		url, ok = tab.History.Forward()
 	}
 	if !ok || url == "" {
 		return
 	}
-	// Navigate without pushing to history again.
-	f.navigateNoHistory(url)
+	f.navigateTabNoHistory(url)
 }
 
-// navigateNoHistory loads a URL without pushing it to history. Used for
-// back/forward traversal where the history index is already correct.
-func (f *framePath) navigateNoHistory(rawURL string) {
+// navigateTabNoHistory loads a URL without pushing to history.
+func (f *framePath) navigateTabNoHistory(rawURL string) {
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
 	u := normalizeURL(rawURL)
 
 	f.navMu.Lock()
@@ -377,11 +403,9 @@ func (f *framePath) navigateNoHistory(rawURL string) {
 	f.navMu.Unlock()
 
 	serial := f.navSerial.Add(1)
-
-	if f.toolbar != nil {
-		f.toolbar.SetLoading(true)
-		f.toolbar.Error = ""
-	}
+	tab.Loading = true
+	tab.Error = ""
+	f.toolbar.SetLoading(true)
 
 	go func() {
 		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
@@ -392,23 +416,22 @@ func (f *framePath) navigateNoHistory(rawURL string) {
 			if f.navSerial.Load() != serial {
 				return
 			}
-			if f.toolbar != nil {
-				f.toolbar.SetLoading(false)
-				f.toolbar.Error = err.Error()
-			}
+			tab.Loading = false
+			tab.Error = err.Error()
+			f.toolbar.SetLoading(false)
+			f.toolbar.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
 		if f.navSerial.Load() != serial {
 			return
 		}
-		if f.toolbar != nil {
-			f.toolbar.SetLoading(false)
-			// Update URL display without pushing to history.
-			f.toolbar.URL = u
-			f.toolbar.Input = u
-			f.toolbar.Focus = toolbar.FocusNone
-		}
+		tab.Layer = layer
+		tab.Loading = false
+		tab.URL = u
+		tab.Title = u
+		tab.BGColor = bgColor
+		f.syncTabToToolbar()
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     serial,
 			Layers:     []*frame.Layer{layer},
@@ -417,16 +440,89 @@ func (f *framePath) navigateNoHistory(rawURL string) {
 	}()
 }
 
-// reload re-fetches the current URL.
-func (f *framePath) reload() {
-	if f.toolbar == nil {
+// reloadTab re-fetches the active tab's URL.
+func (f *framePath) reloadTab() {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.URL == "" {
 		return
 	}
-	url := f.toolbar.URL
-	if url == "" {
+	f.navigateTabNoHistory(tab.URL)
+}
+
+// switchTab saves the current tab's scroll and switches to the given tab.
+func (f *framePath) switchTab(id uint64) {
+	cur := f.tabMgr.Active()
+	if cur != nil {
+		vp := f.sched.Viewport()
+		cur.ScrollY = vp.Offset.Y
+	}
+	f.tabMgr.SwitchTo(id)
+	newTab := f.tabMgr.Active()
+	if newTab == nil {
 		return
 	}
-	f.navigateNoHistory(url)
+	f.syncTabToToolbar()
+	if newTab.Layer != nil {
+		f.sched.SetPlan(frame.FramePlan{
+			Serial:     f.navSerial.Add(1),
+			Layers:     []*frame.Layer{newTab.Layer},
+			Background: newTab.BGColor,
+		})
+	}
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: newTab.ScrollY},
+		Size:   f.config.devSize(),
+	})
+}
+
+// newTab creates a new tab and switches to it.
+func (f *framePath) newTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	cur := f.tabMgr.Active()
+	if cur != nil {
+		vp := f.sched.Viewport()
+		cur.ScrollY = vp.Offset.Y
+	}
+	tab := f.tabMgr.NewTab()
+	f.syncTabToToolbar()
+	spec := paint.SceneSpec{DocHeight: f.config.devSize().H}
+	_, layer := paint.BuildLayer(spec)
+	tab.Layer = layer
+	tab.BGColor = frame.RGB(255, 255, 255)
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     f.navSerial.Add(1),
+		Layers:     []*frame.Layer{layer},
+		Background: tab.BGColor,
+	})
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: 0},
+		Size:   f.config.devSize(),
+	})
+}
+
+// closeTab closes a tab by ID and switches to the remaining active tab.
+func (f *framePath) closeTab(id uint64) {
+	if f.tabMgr == nil {
+		return
+	}
+	f.tabMgr.CloseTab(id)
+	if f.tabMgr.Count() > 0 {
+		tab := f.tabMgr.Active()
+		f.syncTabToToolbar()
+		if tab.Layer != nil {
+			f.sched.SetPlan(frame.FramePlan{
+				Serial:     f.navSerial.Add(1),
+				Layers:     []*frame.Layer{tab.Layer},
+				Background: tab.BGColor,
+			})
+		}
+		f.sched.SetViewport(frame.Viewport{
+			Offset: frame.Point{Y: tab.ScrollY},
+			Size:   f.config.devSize(),
+		})
+	}
 }
 
 // loadURLCtx is like loadURL but respects context cancellation.
@@ -461,6 +557,15 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return resp.Body, nil
 	}
+	// @font-face resources use the same client. The fetcher is the same shape
+	// as the image fetcher; the engine resolves src URLs before calling.
+	fontFetcher := func(base, url string) ([]byte, error) {
+		resp, err := client.Get(ctx, url)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Body, nil
+	}
 	// Check context after the fetch in case it was cancelled during the network call.
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
@@ -469,7 +574,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
-		engine.WithImages(resp.URL, imageFetcher))
+		engine.WithImages(resp.URL, imageFetcher),
+		engine.WithCustomFontLoading(resp.URL, fontFetcher, fonts))
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -509,8 +615,12 @@ func (f *framePath) openWindow() error {
 	if err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}
-	if f.toolbar != nil {
-		f.window = newToolbarWindow(w, f.toolbar)
+	if f.toolbar != nil && f.tabMgr != nil {
+		f.window = newChromeWindow(w, f.toolbar, f.tabMgr,
+			func(id uint64) { f.switchTab(id) },
+			func() { f.newTab() },
+			func(id uint64) { f.closeTab(id) },
+		)
 	} else {
 		f.window = w
 	}
@@ -566,7 +676,7 @@ func run(args []string) error {
 				Background: bgColor,
 			})
 		} else {
-			f.navigate(c.url)
+			f.navigateTab(c.url)
 		}
 	}
 

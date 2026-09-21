@@ -47,42 +47,48 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 	// Determine the clip rect to pass to children. Start with the inherited clip.
 	kidClip := clip
 	if obj.Style != nil {
+		// CSS clip:rect() with zero area hides the element's own painting
+		// (backgrounds, borders, text, images) but children still walk.
+		clipHidden := obj.Style.HasClip && (obj.Style.ClipTop >= obj.Style.ClipBottom || obj.Style.ClipLeft >= obj.Style.ClipRight)
+
 		x0, y0, x1, y1 := obj.BorderRect()
 		rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
 		radius := corners(obj.Style, rect, b.scale)
 		opacity := obj.Style.Opacity
-		if obj.Style.BackgroundColor.A > 0 {
-			b.list.Append(DisplayCmd{
-				Kind:    CmdFill,
-				Rect:    rect,
-				Color:   convertColor(obj.Style.BackgroundColor),
-				Radius:  radius,
-				Opacity: opacity,
-			})
-		}
-		if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
-			b.list.Append(DisplayCmd{
-				Kind:     CmdGradient,
-				Rect:     rect,
-				Gradient: g,
-				Radius:   radius,
-			})
-		}
-		b.paintBackground(obj, opacity)
-		if obj.Style.Display != style.DisplayInline && obj.Style.Display != style.DisplayNone {
-			b.paintBorders(obj, rect, radius, opacity)
-		}
-		if obj.Style.Display == style.DisplayListItem {
-			b.paintMarker(obj, ordinal)
-		}
-		if obj.Node != nil && obj.Node.Type == 2 && obj.Node.DataContent != "" {
-			b.paintText(obj, rect, opacity, clip)
-		}
-		if obj.Node != nil && obj.Node.Data == "input" {
-			b.paintPlaceholder(obj, opacity, clip)
-		}
-		if obj.Node != nil && obj.Node.Data == "img" {
-			b.paintImage(obj, opacity, clip)
+		if !clipHidden {
+			if obj.Style.BackgroundColor.A > 0 {
+				b.list.Append(DisplayCmd{
+					Kind:    CmdFill,
+					Rect:    rect,
+					Color:   convertColor(obj.Style.BackgroundColor),
+					Radius:  radius,
+					Opacity: opacity,
+				})
+			}
+			if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
+				b.list.Append(DisplayCmd{
+					Kind:     CmdGradient,
+					Rect:     rect,
+					Gradient: g,
+					Radius:   radius,
+				})
+			}
+			b.paintBackground(obj, opacity)
+			if obj.Style.Display != style.DisplayInline && obj.Style.Display != style.DisplayNone {
+				b.paintBorders(obj, rect, radius, opacity)
+			}
+			if obj.Style.Display == style.DisplayListItem {
+				b.paintMarker(obj, ordinal)
+			}
+			if obj.Node != nil && obj.Node.Type == 2 && obj.Node.DataContent != "" {
+				b.paintText(obj, rect, opacity, clip)
+			}
+			if obj.Node != nil && obj.Node.Data == "input" {
+				b.paintPlaceholder(obj, opacity, clip)
+			}
+			if obj.Node != nil && obj.Node.Data == "img" {
+				b.paintImage(obj, opacity, clip)
+			}
 		}
 		// If this box has overflow:hidden, compute a content-space clip rect
 		// that children must respect.

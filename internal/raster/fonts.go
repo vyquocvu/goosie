@@ -77,6 +77,7 @@ type Fonts struct {
 	mu      sync.Mutex
 	sources map[frame.FontSlot]*opentype.Font
 	entries map[faceKey]*faceEntry
+	custom  []*opentype.Font
 }
 
 type faceEntry struct {
@@ -200,6 +201,21 @@ func NewEmbeddedFonts() (*Fonts, error) {
 	}, nil
 }
 
+// Register parses a font file's bytes and returns a 1-based index the style
+// resolver threads through FontSlot.CustomIdx. A @font-face rule that names
+// this family sets that index on every ComputedStyle that matches, which is
+// how a face the engine did not ship with ends up rasterizing glyphs.
+func (f *Fonts) Register(data []byte) (uint16, error) {
+	parsed, err := opentype.Parse(data)
+	if err != nil {
+		return 0, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.custom = append(f.custom, parsed)
+	return uint16(len(f.custom)), nil
+}
+
 // systemFontsDisabled reports whether the environment asks for the embedded face
 // in every slot. A gate that compares rendered bytes across machines needs the
 // font set, like the rasterizer, to be a function of the binary alone.
@@ -230,26 +246,31 @@ func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 	if size <= 0 {
 		return nil
 	}
-	src := f.sources[slot]
-	// A slot the host cannot serve still has to draw: first the same family
-	// without the slant it is missing, then the embedded face at the same
-	// weight. The cache is keyed by the face that ends up being used rather than
-	// by the request, which is what stops five unavailable families from each
-	// holding a private copy of every glyph.
-	if src == nil && slot.Italic {
-		slot.Italic = false
+	var src *opentype.Font
+	if slot.CustomIdx != 0 && int(slot.CustomIdx-1) < len(f.custom) {
+		src = f.custom[slot.CustomIdx-1]
+	} else {
 		src = f.sources[slot]
-	}
-	// A light weight is served only by a family the host has a light face for;
-	// everywhere else it settles back onto that family's regular face rather than
-	// dropping the whole family to the embedded face.
-	if src == nil && slot.Light {
-		slot.Light = false
-		src = f.sources[slot]
-	}
-	if src == nil {
-		slot = frame.FontSlot{Bold: slot.Bold}
-		src = f.sources[slot]
+		// A slot the host cannot serve still has to draw: first the same family
+		// without the slant it is missing, then the embedded face at the same
+		// weight. The cache is keyed by the face that ends up being used rather than
+		// by the request, which is what stops five unavailable families from each
+		// holding a private copy of every glyph.
+		if src == nil && slot.Italic {
+			slot.Italic = false
+			src = f.sources[slot]
+		}
+		// A light weight is served only by a family the host has a light face for;
+		// everywhere else it settles back onto that family's regular face rather than
+		// dropping the whole family to the embedded face.
+		if src == nil && slot.Light {
+			slot.Light = false
+			src = f.sources[slot]
+		}
+		if src == nil {
+			slot = frame.FontSlot{Bold: slot.Bold}
+			src = f.sources[slot]
+		}
 	}
 	if src == nil {
 		return nil

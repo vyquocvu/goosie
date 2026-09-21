@@ -48,6 +48,10 @@ type Session struct {
 	natural   map[dom.NodeID]layout.NaturalSize
 	images    map[dom.NodeID]stdimage.Image
 	bgImages  map[dom.NodeID]stdimage.Image
+
+	fontBase  string
+	fontFetch FontFetcher
+	fontReg   FontRegistry
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -61,6 +65,18 @@ type CSSLinker func(base, href string) (string, error)
 // fetcher that fails leaves that image undecoded, and the box keeps the layout
 // space its attributes reserve, so a missing image does not stop rendering.
 type ImageFetcher func(base, url string) ([]byte, error)
+
+// FontFetcher fetches one @font-face resource's raw bytes. Same shape as
+// ImageFetcher: the engine resolves the src URL against the stylesheet base
+// before calling, so the fetcher only sees absolute URLs.
+type FontFetcher func(base, url string) ([]byte, error)
+
+// FontRegistry accepts parsed font bytes and returns a 1-based index. The
+// engine calls it for every @font-face src it fetches; raster.Fonts satisfies
+// this interface.
+type FontRegistry interface {
+	Register(data []byte) (uint16, error)
+}
 
 // Option adjusts how a Session is built.
 type Option func(*Session)
@@ -108,6 +124,18 @@ func WithImages(base string, fetch ImageFetcher) Option {
 	}
 }
 
+// WithCustomFontLoading lets the session fetch @font-face resources and
+// register them before style resolution. base is the document URL that font
+// src URLs resolve against; reg receives the raw font bytes and returns a
+// 1-based index threaded through FontSlot.CustomIdx.
+func WithCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Option {
+	return func(s *Session) {
+		s.fontBase = base
+		s.fontFetch = fetch
+		s.fontReg = reg
+	}
+}
+
 // NewSession parses HTML and builds the pipeline state. The caller provides the
 // raw HTML and any author style sheets; <style> blocks inside the document are
 // collected automatically, and the UA stylesheet is added internally.
@@ -136,6 +164,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if err != nil {
 		return nil, err
 	}
+	s.loadFonts(sheets)
 	s.Doc = doc
 	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport())
 	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles)
@@ -144,6 +173,92 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	return s, nil
+}
+
+// loadFonts extracts @font-face rules from every stylesheet, fetches the font
+// files, registers them with the font registry, and publishes the family→index
+// map so style resolution can match custom family names.
+func (s *Session) loadFonts(sheets []*css.Stylesheet) {
+	if s.fontFetch == nil || s.fontReg == nil {
+		return
+	}
+	familyMap := make(map[string]uint16)
+	registry := make(map[style.CustomFontKey]uint16)
+	for _, sheet := range sheets {
+		for _, ff := range sheet.FontFaces {
+			var family, srcURL, weightStr, styleStr string
+			for _, d := range ff.Declarations {
+				switch d.Property {
+				case "font-family":
+					family = strings.Trim(d.Value, "\"'")
+				case "src":
+					srcURL = extractFontURL(d.Value)
+				case "font-weight":
+					weightStr = strings.TrimSpace(d.Value)
+				case "font-style":
+					styleStr = strings.TrimSpace(d.Value)
+				}
+			}
+			if family == "" || srcURL == "" {
+				continue
+			}
+			abs, ok := resolveSheetURL(s.fontBase, srcURL)
+			if !ok {
+				continue
+			}
+			data, err := s.fontFetch(s.fontBase, abs)
+			if err != nil {
+				continue
+			}
+			idx, err := s.fontReg.Register(data)
+			if err != nil {
+				continue
+			}
+			familyMap[strings.ToLower(family)] = idx
+			
+			// Build the weight/slant key for the registry.
+			bold := weightStr == "bold" || weightStr == "700" || weightStr == "800" || weightStr == "900"
+			light := weightStr == "300" || weightStr == "200" || weightStr == "100"
+			italic := styleStr == "italic" || styleStr == "oblique"
+			key := style.CustomFontKey{
+				Family: strings.ToLower(family),
+				Bold:   bold,
+				Italic: italic,
+				Light:  light,
+			}
+			registry[key] = idx
+		}
+	}
+	if len(familyMap) > 0 {
+		style.SetCustomFonts(familyMap)
+	}
+	if len(registry) > 0 {
+		style.SetCustomFontRegistry(registry)
+	}
+}
+
+// extractFontURL pulls the first url(...) reference out of a @font-face src
+// value. The src property can carry multiple fallback formats; the engine only
+// serves TrueType and OpenType, so the first url() is the one to try.
+func extractFontURL(v string) string {
+	idx := strings.Index(v, "url(")
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(v[idx+4:])
+	if len(rest) > 0 && (rest[0] == '\'' || rest[0] == '"') {
+		quote := rest[0]
+		end := strings.IndexByte(rest[1:], quote)
+		if end < 0 {
+			return ""
+		}
+		return rest[1 : end+1]
+	}
+	end := strings.IndexByte(rest, ')')
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:end])
 }
 
 // maxLoadedImages bounds how many image subresources one document may fetch,

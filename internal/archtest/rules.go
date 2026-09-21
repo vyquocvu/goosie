@@ -48,6 +48,7 @@ var Allowed = map[string][]string{
 	"internal/layout":            {"internal/dom", "internal/style", "internal/frame"},
 	"internal/engine":            {"internal/dom", "internal/css", "internal/style", "internal/layout", "internal/paint", "internal/frame", "internal/image"},
 	"internal/toolbar":           {"internal/frame", "internal/raster", "internal/surface"},
+	"internal/tabs":              {"internal/frame", "internal/toolbar"},
 }
 
 // FreeDirs are the subtrees exempt from the table. Tests and binaries may reach

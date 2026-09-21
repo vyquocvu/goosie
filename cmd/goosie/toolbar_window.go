@@ -4,112 +4,184 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/surface"
+	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// toolbarWindow sits between the platform window and surface.Loop. It draws the
-// toolbar overlay onto the backing store after content composition and routes
-// input: pointer hits in the toolbar area go to toolbar, key events go to toolbar
-// when the address bar is focused, and everything else passes through to the
-// content pipeline unchanged.
-//
-// The pattern is the same one driver uses: embed the window, replace Events and
-// Present. The pump goroutine reads the real window's events, decides whether
-// toolbar wants each one, and forwards the rest.
-type toolbarWindow struct {
+const totalChromeHeight = tabs.TabBarHeight + toolbar.ToolbarHeight
+
+type chromeWindow struct {
 	surface.Window
-	toolbar *toolbar.State
-	events  chan surface.Event
+	toolbar    *toolbar.State
+	tabMgr     *tabs.TabManager
+	events     chan surface.Event
+	onSwitch   func(uint64)
+	onNewTab   func()
+	onCloseTab func(uint64)
 }
 
-func newToolbarWindow(w surface.Window, tb *toolbar.State) *toolbarWindow {
-	tw := &toolbarWindow{
-		Window:  w,
-		toolbar: tb,
-		events:  make(chan surface.Event, 64),
+func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
+	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64)) *chromeWindow {
+	cw := &chromeWindow{
+		Window:     w,
+		toolbar:    tb,
+		tabMgr:     mgr,
+		events:     make(chan surface.Event, 64),
+		onSwitch:   onSwitch,
+		onNewTab:   onNewTab,
+		onCloseTab: onCloseTab,
 	}
-	go tw.pump()
-	return tw
+	go cw.pump()
+	return cw
 }
 
-// Present implements surface.Window. It draws the toolbar overlay on the backing
-// store and then hands the buffer to the real window. The damage list is widened
-// to include the toolbar area so the platform presents the toolbar pixels too.
-func (tw *toolbarWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
-	tw.toolbar.Draw(buf)
-	tbRect := frame.Rect4(0, 0, int32(buf.W), toolbar.ToolbarHeight)
-	merged := append(damage[:len(damage):len(damage)], tbRect)
-	return tw.Window.Present(buf, merged)
+func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
+	tabs.DrawTabBar(buf, cw.tabMgr, 0)
+	cw.toolbar.Draw(buf, tabs.TabBarHeight)
+	chromeRect := frame.Rect4(0, 0, int32(buf.W), totalChromeHeight)
+	merged := append(damage[:len(damage):len(damage)], chromeRect)
+	return cw.Window.Present(buf, merged)
 }
 
-// Events implements surface.Window, returning the toolbar-filtered channel.
-func (tw *toolbarWindow) Events() <-chan surface.Event {
-	return tw.events
+func (cw *chromeWindow) Events() <-chan surface.Event {
+	return cw.events
 }
 
-// Name forwards the underlying window's name so the report identifies the real
-// backend, not the toolbar wrapper.
-func (tw *toolbarWindow) Name() string {
-	if n, ok := tw.Window.(interface{ Name() string }); ok {
+func (cw *chromeWindow) Name() string {
+	if n, ok := cw.Window.(interface{ Name() string }); ok {
 		return n.Name()
 	}
 	return ""
 }
 
-// Run implements platform.Runner by forwarding to the underlying window's Run,
-// if it has one. This is required for native backends (e.g. AppKit/darwin) whose
-// run loop must be turned on the main thread: without this, the type assertion in
-// main.go fails and the NSApplication run loop never starts, so the window is
-// created but never shown on screen.
-func (tw *toolbarWindow) Run() {
-	if r, ok := tw.Window.(platform.Runner); ok {
+func (cw *chromeWindow) Run() {
+	if r, ok := cw.Window.(platform.Runner); ok {
 		r.Run()
 	}
 }
 
-func (tw *toolbarWindow) pump() {
-	defer close(tw.events)
-	for ev := range tw.Window.Events() {
-		if tw.intercept(ev) {
+func (cw *chromeWindow) pump() {
+	defer close(cw.events)
+	for ev := range cw.Window.Events() {
+		if cw.intercept(ev) {
 			continue
 		}
-		tw.events <- ev
+		cw.events <- ev
 	}
 }
 
-// intercept returns true if toolbar consumed the event. Pointer events in the
-// toolbar area become clicks; key events go to the address bar when focused;
-// resize events update the toolbar bounds. Everything else passes through.
-func (tw *toolbarWindow) intercept(ev surface.Event) bool {
+func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	switch ev.Kind {
 	case surface.EvPointer:
-		if ev.Pos.Y < toolbar.ToolbarHeight && ev.Button == surface.ButtonLeft {
-			tw.toolbar.HandleClick(ev.Pos, ev.Button)
+		if ev.Pos.Y < int32(tabs.TabBarHeight) && ev.Button == surface.ButtonLeft {
+			cw.handleTabBarClick(ev.Pos)
 			return true
 		}
-		if ev.Pos.Y < toolbar.ToolbarHeight {
+		if ev.Pos.Y < int32(tabs.TabBarHeight) {
 			return true
 		}
-		// A click outside the toolbar while the address bar is focused: let toolbar
-		// defocus, then forward the event to content.
-		if tw.toolbar.Focus == toolbar.FocusAddress {
-			tw.toolbar.HandleClick(ev.Pos, ev.Button)
+		toolbarY := ev.Pos.Y - int32(tabs.TabBarHeight)
+		if toolbarY >= 0 && toolbarY < toolbar.ToolbarHeight && ev.Button == surface.ButtonLeft {
+			adjusted := ev.Pos
+			adjusted.Y = toolbarY
+			cw.toolbar.HandleClick(adjusted, ev.Button)
+			return true
+		}
+		if toolbarY >= 0 && toolbarY < toolbar.ToolbarHeight {
+			return true
+		}
+		if cw.toolbar.Focus == toolbar.FocusAddress {
+			adjusted := ev.Pos
+			adjusted.Y = toolbarY
+			cw.toolbar.HandleClick(adjusted, ev.Button)
 		}
 		return false
 	case surface.EvKey:
-		if tw.toolbar.Focus == toolbar.FocusAddress {
-			tw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
+		if cw.handleTabShortcut(ev.Key, ev.Mods) {
+			return true
+		}
+		if cw.toolbar.Focus == toolbar.FocusAddress {
+			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
 			return true
 		}
 		return false
 	case surface.EvResize:
-		tw.toolbar.SetBounds(ev.Size.W)
+		cw.toolbar.SetBounds(ev.Size.W)
 		return false
 	default:
 		return false
 	}
 }
 
-var _ surface.Window = (*toolbarWindow)(nil)
+func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
+	tabList := cw.tabMgr.Tabs()
+	for i := range tabList {
+		r := tabs.TabRect(i, 0, int32(len(tabList)), pos.X+100)
+		if pos.X >= r.X0 && pos.X < r.X1 && pos.Y >= r.Y0 && pos.Y < r.Y1 {
+			closeR := tabs.CloseButtonRect(r)
+			if pos.X >= closeR.X0 && pos.X < closeR.X1 && pos.Y >= closeR.Y0 && pos.Y < closeR.Y1 {
+				if cw.onCloseTab != nil {
+					cw.onCloseTab(tabList[i].ID)
+				}
+				return
+			}
+			if cw.onSwitch != nil {
+				cw.onSwitch(tabList[i].ID)
+			}
+			return
+		}
+	}
+	btnR := tabs.NewTabButtonRect(int32(len(tabList)), 0, pos.X+100)
+	if pos.X >= btnR.X0 && pos.X < btnR.X1 && pos.Y >= btnR.Y0 && pos.Y < btnR.Y1 {
+		if cw.onNewTab != nil {
+			cw.onNewTab()
+		}
+	}
+}
 
+func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
+	cmd := mods&surface.ModCommand != 0
+	if !cmd {
+		return false
+	}
+	shift := mods&surface.ModShift != 0
 
+	switch {
+	case key == 't' || key == 'T':
+		if cw.onNewTab != nil {
+			cw.onNewTab()
+			return true
+		}
+	case key == 'w' || key == 'W':
+		active := cw.tabMgr.Active()
+		if active != nil && cw.onCloseTab != nil {
+			cw.onCloseTab(active.ID)
+			return true
+		}
+	case key == '\t':
+		tabList := cw.tabMgr.Tabs()
+		if len(tabList) <= 1 {
+			return true
+		}
+		idx := cw.tabMgr.ActiveIndex()
+		if shift {
+			idx = (idx - 1 + len(tabList)) % len(tabList)
+		} else {
+			idx = (idx + 1) % len(tabList)
+		}
+		if cw.onSwitch != nil {
+			cw.onSwitch(tabList[idx].ID)
+		}
+		return true
+	case key >= '1' && key <= '9':
+		tabList := cw.tabMgr.Tabs()
+		n := int(key - '1')
+		if n < len(tabList) && cw.onSwitch != nil {
+			cw.onSwitch(tabList[n].ID)
+			return true
+		}
+	}
+	return false
+}
+
+var _ surface.Window = (*chromeWindow)(nil)

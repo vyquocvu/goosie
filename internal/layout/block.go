@@ -643,6 +643,12 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				items[i].blockKids = true
 			}
 		}
+		// A replaced element (input, img) has its width set by replacedSize() in
+		// blockInto. If contentWidth is 0 but the element already has a width,
+		// use that instead of overwriting it with 0.
+		if contentWidth == 0 && it.W > 0 {
+			contentWidth = it.W
+		}
 		it.W = contentWidth
 		// Basis is a border-box width.
 		items[i].basis = contentWidth + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
@@ -1405,7 +1411,7 @@ func inlineMinWidth(a *Arena, id ObjectID) float32 {
 // block child's own box on both flanks so its padding, border and margin count.
 // It stops at nested flex and grid containers, which size their own content.
 func itemMaxContentW(a *Arena, id ObjectID) float32 {
-	return maxContentW(a, id, false)
+	return maxContentW(a, id, true)
 }
 
 // maxContentW is itemMaxContentW. `probed` says the caller laid the subtree out
@@ -1445,6 +1451,14 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 			if isBlock(k) && !atomicInlineLevel(k.Style) {
 				// A block sibling ends the inline line the run so far describes.
 				run = 0
+				// A nested flex or grid container sizes its own content, so use
+				// its width rather than walking into it.
+				if blockifiesChildren(k.Style) {
+					if w := origin + trail + lead + k.W + trailBox; w > right {
+						right = w
+					}
+					continue
+				}
 				// A child that brings a width of its own to the line - a fixed-size
 				// figure, a min-width box - is a line of its own as far as
 				// max-content goes, even when the text inside it is narrower.

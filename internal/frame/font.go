@@ -53,4 +53,9 @@ type FontSlot struct {
 	// face on the host serve it; everywhere else it collapses back to the
 	// regular face during the source lookup.
 	Light bool
+	// CustomIdx is a 1-based index into the rasterizer's custom font table,
+	// set when a @font-face rule registers a family the built-in set does not
+	// know. Zero means no custom font, so the zero FontSlot is still the
+	// embedded Go face.
+	CustomIdx uint16
 }

@@ -37,9 +37,15 @@ type Rule struct {
 	Declarations []Declaration
 }
 
+// FontFaceRule is one @font-face rule: declarations only, no selectors.
+type FontFaceRule struct {
+	Declarations []Declaration
+}
+
 // Stylesheet is a parsed CSS stylesheet.
 type Stylesheet struct {
-	Rules []Rule
+	Rules      []Rule
+	FontFaces  []FontFaceRule
 }
 
 // Parse parses a CSS stylesheet.
@@ -120,6 +126,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseMediaRule(sheet)
 			case "supports":
 				p.parseSupportsRule(sheet)
+			case "font-face":
+				p.parseFontFaceRule(sheet)
 			default:
 				p.skipAtRule()
 			}
@@ -250,6 +258,50 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 	if supportsConditionTrue(cond) {
 		inner := &parser{input: body}
 		inner.parseInto(sheet)
+	}
+}
+
+// parseFontFaceRule reads an @font-face block and stores its declarations.
+// Font-face rules have no selectors, only properties like font-family, src,
+// font-weight, and font-style.
+func (p *parser) parseFontFaceRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++
+		return
+	}
+	p.pos++ // the '{'
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	// Parse the declarations inside the font-face block.
+	decls := parseDeclarations(body)
+	if len(decls) > 0 {
+		sheet.FontFaces = append(sheet.FontFaces, FontFaceRule{Declarations: decls})
 	}
 }
 

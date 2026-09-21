@@ -79,7 +79,7 @@ func TestRulesAreNotVacuous(t *testing.T) {
 	if len(pkgs) < 8 {
 		t.Fatalf("go listed %d v2 packages; the tree has more, so the pattern is wrong", len(pkgs))
 	}
-	for _, dir := range []string{"internal/frame", "internal/paint", "internal/surface", "internal/raster"} {
+	for _, dir := range []string{"internal/frame", "internal/paint", "internal/surface", "internal/raster", "internal/tabs"} {
 		if _, ok := archtest.Allowed[dir]; !ok {
 			t.Errorf("the allowed-imports table has no entry for %s", dir)
 		}
