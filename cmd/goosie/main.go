@@ -316,8 +316,11 @@ func (f *framePath) syncTabToToolbar() {
 	}
 	f.toolbar.URL = tab.URL
 	f.toolbar.Input = tab.URL
+	f.toolbar.Cursor = len([]rune(tab.URL))
+	f.toolbar.SelStart = f.toolbar.Cursor
+	f.toolbar.SelEnd = f.toolbar.Cursor
 	f.toolbar.History = tab.History
-	f.toolbar.SetLoading(tab.Loading)
+	f.toolbar.SetLoading(tab.Nav.Loading)
 	f.toolbar.Error = tab.Error
 }
 
@@ -508,6 +511,7 @@ func (f *framePath) newTab() {
 		cur.ScrollY = vp.Offset.Y
 	}
 	tab := f.tabMgr.NewTab()
+	f.tabMgr.SwitchTo(tab.ID)
 	f.syncTabToToolbar()
 	spec := paint.SceneSpec{DocHeight: f.config.devSize().H}
 	_, layer := paint.BuildLayer(spec)
