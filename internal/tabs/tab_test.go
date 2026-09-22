@@ -9,19 +9,19 @@ func TestNavControllerIndependent(t *testing.T) {
 	tab1 := newTab(1)
 	tab2 := newTab(2)
 
-	if &tab1.nav == &tab2.nav {
+	if &tab1.Nav == &tab2.Nav {
 		t.Fatal("tabs share nav controller")
 	}
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	tab1.nav.cancel = cancel1
-	tab1.nav.serial = 1
+	tab1.Nav.Cancel = cancel1
+	tab1.Nav.Serial = 1
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	tab2.nav.cancel = cancel2
-	tab2.nav.serial = 2
+	tab2.Nav.Cancel = cancel2
+	tab2.Nav.Serial = 2
 
-	tab1.nav.cancel()
+	tab1.Nav.Cancel()
 
 	if ctx1.Err() == nil {
 		t.Fatal("tab1 context not cancelled")
@@ -34,12 +34,12 @@ func TestNavControllerIndependent(t *testing.T) {
 func TestNavControllerSerial(t *testing.T) {
 	tab := newTab(1)
 
-	if tab.nav.serial != 0 {
-		t.Fatalf("initial serial = %d, want 0", tab.nav.serial)
+	if tab.Nav.Serial != 0 {
+		t.Fatalf("initial serial = %d, want 0", tab.Nav.Serial)
 	}
 
-	tab.nav.serial++
-	if tab.nav.serial != 1 {
-		t.Fatalf("serial = %d, want 1", tab.nav.serial)
+	tab.Nav.Serial++
+	if tab.Nav.Serial != 1 {
+		t.Fatalf("serial = %d, want 1", tab.Nav.Serial)
 	}
 }

@@ -23,8 +23,6 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,6 +65,16 @@ const (
 	// report: two seconds at 60Hz, which is the window the report is read against.
 	ringFrames = 120
 )
+
+// navResult is the outcome of a per-tab navigation, delivered on navResults.
+type navResult struct {
+	tabID   uint64
+	serial  uint64
+	layer   *frame.Layer
+	bgColor frame.Color
+	err     error
+	url     string
+}
 
 // errUsage marks a bad invocation, which the shell should see as exit status 2 rather
 // than as a failure deep inside a run.
@@ -195,11 +203,8 @@ type framePath struct {
 	tabMgr   *tabs.TabManager
 	client   net.HTTP
 	fonts    *raster.Fonts
-	started  time.Time
-
-	navMu     sync.Mutex
-	navCancel context.CancelFunc
-	navSerial atomic.Uint64
+	started    time.Time
+	navResults chan navResult
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -252,15 +257,19 @@ func build(c config) (*framePath, error) {
 		capacity = c.frames
 	}
 	f := &framePath{
-		sched:    raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
-		pool:     wp,
-		composer: surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
-		layer:    layer,
-		rec:      frame.NewFrameRecorder(capacity),
-		spec:     spec,
-		config:   c,
-		client:   client,
-		fonts:    fonts,
+		sched:      raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
+		pool:       wp,
+		composer:   surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
+		layer:      layer,
+		rec:        frame.NewFrameRecorder(capacity),
+		spec:       spec,
+		config:     c,
+		client:     client,
+		fonts:      fonts,
+		navResults: make(chan navResult, 16),
+	}
+	if !c.paced() {
+		go f.drainNavResults()
 	}
 	if !c.paced() {
 		f.toolbar = toolbar.NewState(dev.W, fonts)
@@ -320,15 +329,17 @@ func (f *framePath) navigateTab(rawURL string) {
 	}
 	u := normalizeURL(rawURL)
 
-	f.navMu.Lock()
-	if f.navCancel != nil {
-		f.navCancel()
+	tab.Nav.Mu.Lock()
+	if tab.Nav.Cancel != nil {
+		tab.Nav.Cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	f.navCancel = cancel
-	f.navMu.Unlock()
+	tab.Nav.Cancel = cancel
+	tab.Nav.Serial++
+	serial := tab.Nav.Serial
+	tab.Nav.Loading = true
+	tab.Nav.Mu.Unlock()
 
-	serial := f.navSerial.Add(1)
 	tab.Loading = true
 	tab.Error = ""
 	f.toolbar.SetLoading(true)
@@ -336,36 +347,64 @@ func (f *framePath) navigateTab(rawURL string) {
 
 	go func() {
 		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			if f.navSerial.Load() != serial {
-				return
-			}
-			tab.Loading = false
-			tab.Error = err.Error()
+		f.navResults <- navResult{
+			tabID:   tab.ID,
+			serial:  serial,
+			layer:   layer,
+			bgColor: bgColor,
+			err:     err,
+			url:     u,
+		}
+	}()
+}
+
+// drainNavResults reads navigation results from the channel and applies them.
+func (f *framePath) drainNavResults() {
+	for result := range f.navResults {
+		f.applyNavResult(result)
+	}
+}
+
+// applyNavResult applies a completed navigation result to its tab.
+func (f *framePath) applyNavResult(result navResult) {
+	tab := f.tabMgr.TabByID(result.tabID)
+	if tab == nil {
+		return
+	}
+
+	tab.Nav.Mu.Lock()
+	if tab.Nav.Serial != result.serial {
+		tab.Nav.Mu.Unlock()
+		return
+	}
+	tab.Nav.Loading = false
+	tab.Nav.Mu.Unlock()
+
+	tab.Loading = false
+	if result.err != nil {
+		tab.Error = result.err.Error()
+		if f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
-			f.toolbar.Error = err.Error()
-			fmt.Fprintln(os.Stderr, err)
-			return
+			f.toolbar.Error = result.err.Error()
 		}
-		if f.navSerial.Load() != serial {
-			return
-		}
-		tab.Layer = layer
-		tab.Loading = false
-		tab.URL = u
-		tab.Title = u
-		tab.BGColor = bgColor
-		tab.History.Push(u)
+		fmt.Fprintln(os.Stderr, result.err)
+		return
+	}
+
+	tab.Layer = result.layer
+	tab.BGColor = result.bgColor
+	tab.URL = result.url
+	tab.Title = result.url
+	tab.History.Push(result.url)
+
+	if f.tabMgr.Active() == tab {
 		f.syncTabToToolbar()
 		f.sched.SetPlan(frame.FramePlan{
-			Serial:     serial,
-			Layers:     []*frame.Layer{layer},
-			Background: bgColor,
+			Serial:     result.serial,
+			Layers:     []*frame.Layer{result.layer},
+			Background: result.bgColor,
 		})
-	}()
+	}
 }
 
 // traverseTab handles back/forward on the active tab.
@@ -395,49 +434,31 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 	}
 	u := normalizeURL(rawURL)
 
-	f.navMu.Lock()
-	if f.navCancel != nil {
-		f.navCancel()
+	tab.Nav.Mu.Lock()
+	if tab.Nav.Cancel != nil {
+		tab.Nav.Cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	f.navCancel = cancel
-	f.navMu.Unlock()
+	tab.Nav.Cancel = cancel
+	tab.Nav.Serial++
+	serial := tab.Nav.Serial
+	tab.Nav.Loading = true
+	tab.Nav.Mu.Unlock()
 
-	serial := f.navSerial.Add(1)
 	tab.Loading = true
 	tab.Error = ""
 	f.toolbar.SetLoading(true)
 
 	go func() {
 		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			if f.navSerial.Load() != serial {
-				return
-			}
-			tab.Loading = false
-			tab.Error = err.Error()
-			f.toolbar.SetLoading(false)
-			f.toolbar.Error = err.Error()
-			fmt.Fprintln(os.Stderr, err)
-			return
+		f.navResults <- navResult{
+			tabID:   tab.ID,
+			serial:  serial,
+			layer:   layer,
+			bgColor: bgColor,
+			err:     err,
+			url:     u,
 		}
-		if f.navSerial.Load() != serial {
-			return
-		}
-		tab.Layer = layer
-		tab.Loading = false
-		tab.URL = u
-		tab.Title = u
-		tab.BGColor = bgColor
-		f.syncTabToToolbar()
-		f.sched.SetPlan(frame.FramePlan{
-			Serial:     serial,
-			Layers:     []*frame.Layer{layer},
-			Background: bgColor,
-		})
 	}()
 }
 
@@ -465,7 +486,7 @@ func (f *framePath) switchTab(id uint64) {
 	f.syncTabToToolbar()
 	if newTab.Layer != nil {
 		f.sched.SetPlan(frame.FramePlan{
-			Serial:     f.navSerial.Add(1),
+			Serial:     newTab.Nav.Serial,
 			Layers:     []*frame.Layer{newTab.Layer},
 			Background: newTab.BGColor,
 		})
@@ -493,7 +514,7 @@ func (f *framePath) newTab() {
 	tab.Layer = layer
 	tab.BGColor = frame.RGB(255, 255, 255)
 	f.sched.SetPlan(frame.FramePlan{
-		Serial:     f.navSerial.Add(1),
+		Serial:     tab.Nav.Serial,
 		Layers:     []*frame.Layer{layer},
 		Background: tab.BGColor,
 	})
@@ -514,7 +535,7 @@ func (f *framePath) closeTab(id uint64) {
 		f.syncTabToToolbar()
 		if tab.Layer != nil {
 			f.sched.SetPlan(frame.FramePlan{
-				Serial:     f.navSerial.Add(1),
+				Serial:     tab.Nav.Serial,
 				Layers:     []*frame.Layer{tab.Layer},
 				Background: tab.BGColor,
 			})
@@ -679,7 +700,7 @@ func run(args []string) error {
 				return err
 			}
 			f.sched.SetPlan(frame.FramePlan{
-				Serial:     f.navSerial.Add(1),
+				Serial:     1,
 				Layers:     []*frame.Layer{layer},
 				Background: bgColor,
 			})

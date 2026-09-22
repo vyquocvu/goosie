@@ -8,11 +8,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-type navController struct {
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	serial  uint64
-	loading bool
+// NavController tracks per-tab navigation state: cancellation, serial, and loading.
+type NavController struct {
+	Mu      sync.Mutex
+	Cancel  context.CancelFunc
+	Serial  uint64
+	Loading bool
 }
 
 // Tab is one browser tab with fully independent state.
@@ -27,7 +28,7 @@ type Tab struct {
 	Error   string
 	BGColor frame.Color
 
-	nav navController
+	Nav NavController
 }
 
 func newTab(id uint64) *Tab {
