@@ -1,9 +1,19 @@
 package tabs
 
 import (
+	"context"
+	"sync"
+
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
+
+type navController struct {
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	serial  uint64
+	loading bool
+}
 
 // Tab is one browser tab with fully independent state.
 type Tab struct {
@@ -16,6 +26,8 @@ type Tab struct {
 	Loading bool
 	Error   string
 	BGColor frame.Color
+
+	nav navController
 }
 
 func newTab(id uint64) *Tab {
