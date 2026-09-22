@@ -114,3 +114,14 @@ func (m *TabManager) fireChange() {
 		m.OnChange()
 	}
 }
+
+func (m *TabManager) TabByID(id uint64) *Tab {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tabs {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
+}
