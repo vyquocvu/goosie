@@ -270,6 +270,37 @@ const maxLoadedImages = 256
 // images left unfetched simply reserve their box and paint nothing.
 const imageFetchBudget = 6 * time.Second
 
+// MaxDocumentDecodedPixels bounds the total decoded pixels one document may
+// retain across all its images and backgrounds.
+const MaxDocumentDecodedPixels = 33554432
+
+// imageReservation tracks per-document decoded pixel reservations.
+type imageReservation struct {
+	limit    int64
+	reserved int64
+	mu       sync.Mutex
+}
+
+func newImageReservation(limit int64) *imageReservation {
+	return &imageReservation{limit: limit}
+}
+
+func (r *imageReservation) reserve(pixels int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if pixels > r.limit-r.reserved {
+		return false
+	}
+	r.reserved += pixels
+	return true
+}
+
+func (r *imageReservation) release(pixels int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reserved -= pixels
+}
+
 // loadImages walks the styled document for <img> srcs and background-image
 // URLs, fetches and decodes each unique target, and records the intrinsic size
 // (for <img> layout) and the decoded pixels (for paint). It is a no-op without
@@ -334,6 +365,7 @@ func (s *Session) loadImages() {
 	const imageWorkers = 12
 	sem := make(chan struct{}, imageWorkers)
 	var wg sync.WaitGroup
+	reservation := newImageReservation(MaxDocumentDecodedPixels)
 	for _, u := range uniq {
 		u := u
 		if time.Now().After(deadline) {
@@ -354,8 +386,17 @@ func (s *Session) loadImages() {
 			if err != nil || len(data) == 0 {
 				return
 			}
+			cfg, err := imgdec.Probe(data)
+			if err != nil {
+				return
+			}
+			pixels := int64(cfg.Width) * int64(cfg.Height)
+			if !reservation.reserve(pixels) {
+				return
+			}
 			img, err := imgdec.Decode(data)
 			if err != nil {
+				reservation.release(pixels)
 				return
 			}
 			mu.Lock()

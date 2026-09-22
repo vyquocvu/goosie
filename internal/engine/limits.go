@@ -94,25 +94,48 @@ func ValidateViewport(width, height int, dpr float64) error {
 	return nil
 }
 
+// documentTiles returns the signed tile span of a document extent, including
+// the origin. It uses floor division via frame.CoordFor so negative coordinates
+// land in the tile that actually covers them.
+func documentTiles(r frame.Rect) (int64, error) {
+	const edge = MaxGeometry * MaxDPR
+	if r.X0 < -edge || r.Y0 < -edge || r.X1 > edge || r.Y1 > edge || r.X1 < r.X0 || r.Y1 < r.Y0 {
+		return 0, fmt.Errorf("unsafe document extent geometry")
+	}
+	if r.X0 == 0 && r.Y0 == 0 && r.X1 == 0 && r.Y1 == 0 {
+		return 0, nil
+	}
+	lo := frame.CoordFor(frame.Point{X: min(r.X0, 0), Y: min(r.Y0, 0)}, frame.TileSize)
+	hi := frame.CoordFor(frame.Point{X: max(r.X1, 0) - 1, Y: max(r.Y1, 0) - 1}, frame.TileSize)
+	cols := int64(hi.Col) - int64(lo.Col) + 1
+	rows := int64(hi.Row) - int64(lo.Row) + 1
+	if cols <= 0 || rows <= 0 || cols > MaxDocumentTiles || rows > MaxDocumentTiles/cols {
+		return 0, fmt.Errorf("document tile metadata limit exceeded (%d)", MaxDocumentTiles)
+	}
+	return cols * rows, nil
+}
+
 // ValidateExtent checks a device-pixel document extent before tile-grid
 // allocation. Unlike a viewport, a scrolling document can exceed 16384 pixels.
 func ValidateExtent(r frame.Rect) error {
-	const edge = MaxGeometry * MaxDPR
-	if r.X0 < -edge || r.Y0 < -edge || r.X1 > edge || r.Y1 > edge || r.X1 < r.X0 || r.Y1 < r.Y0 {
-		return fmt.Errorf("unsafe document extent geometry")
+	_, err := documentTiles(r)
+	return err
+}
+
+// TileCacheBudget returns the tile count and byte capacity for a document's
+// tile cache. It adds 8 tiles of headroom to the document's tile count, capped
+// at MaxTileCacheBytes. Empty content gets a positive cap (8 tiles). Invalid
+// extents return an error with zero usable capacity.
+func TileCacheBudget(r frame.Rect) (tiles int, bytes int64, err error) {
+	docTiles, err := documentTiles(r)
+	if err != nil {
+		return 0, 0, err
 	}
-	// Include the origin: binaries create their document layer from (0,0).
-	w := int64(r.X1) - min(int64(r.X0), 0)
-	h := int64(r.Y1) - min(int64(r.Y0), 0)
-	if w < 0 || h < 0 {
-		return fmt.Errorf("unsafe document extent geometry")
+	cacheTiles := min(docTiles+8, MaxTileCacheBytes/frame.TileSizeBytes())
+	if cacheTiles <= 0 {
+		cacheTiles = 8
 	}
-	cols := (w + int64(frame.TileSize) - 1) / int64(frame.TileSize)
-	rows := (h + int64(frame.TileSize) - 1) / int64(frame.TileSize)
-	if cols*rows > MaxDocumentTiles {
-		return fmt.Errorf("document tile metadata limit exceeded (%d)", MaxDocumentTiles)
-	}
-	return nil
+	return int(cacheTiles), cacheTiles * frame.TileSizeBytes(), nil
 }
 
 type cssBudget struct{ bytes, tokens, rules, selectors, declarations int }

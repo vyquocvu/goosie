@@ -15,10 +15,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
-	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform/headless"
@@ -93,14 +93,23 @@ func run(args []string) error {
 	if c.dpr <= 0 || c.dpr > 8 {
 		return fmt.Errorf("-dpr must be in (0, 8]")
 	}
+	if err := engine.ValidateViewport(c.width, c.height, c.dpr); err != nil {
+		return fmt.Errorf("viewport: %w", err)
+	}
 
-	html, err := os.ReadFile(c.in)
+	f, err := os.Open(c.in)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", c.in, err)
+	}
+	defer f.Close()
+	limited := io.LimitReader(f, engine.MaxDocumentBytes+1)
+	html, err := io.ReadAll(limited)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", c.in, err)
 	}
-
-	doc := dom.Parse(string(html))
-	authorCSS := extractStyleSheets(doc)
+	if len(html) > engine.MaxDocumentBytes {
+		return fmt.Errorf("document exceeds %d bytes", engine.MaxDocumentBytes)
+	}
 
 	dev := c.devSize()
 	scale := float32(c.dpr)
@@ -110,23 +119,25 @@ func run(args []string) error {
 		return fmt.Errorf("init fonts: %w", err)
 	}
 
-	sess, err := engine.NewSession(string(html), authorCSS, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)))
+	sess, err := engine.NewSession(string(html), nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)
 	}
 
-	list := sess.Paint(scale)
+	list, err := sess.PaintChecked(scale)
+	if err != nil {
+		return fmt.Errorf("paint document: %w", err)
+	}
 	dl := list.Build(1)
 	extent := dl.Extent()
 
-	// The grid must be a tile grid: TileSize squares with a pool of matching
-	// buffers, not dev-sized tiles. Budget covers the document plus headroom.
-	docTiles := int64((extent.W()+frame.TileSize-1)/frame.TileSize) *
-		int64((extent.H()+frame.TileSize-1)/frame.TileSize)
-	budgetTiles := docTiles + 8
-	bitmapPool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
+	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+	if err != nil {
+		return fmt.Errorf("size document cache: %w", err)
+	}
+	bitmapPool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layerBounds := frame.Rect{X0: 0, Y0: 0, X1: extent.X1, Y1: extent.Y1}
-	layer := frame.NewLayer(1, layerBounds, budgetTiles*frame.TileSizeBytes(), bitmapPool)
+	layer := frame.NewLayer(1, layerBounds, budgetBytes, bitmapPool)
 	layer.SetContent(dl)
 
 	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))
@@ -181,21 +192,4 @@ func run(args []string) error {
 			return fmt.Errorf("no frame presented within %v", renderTimeout)
 		}
 	}
-}
-
-func extractStyleSheets(doc *dom.Document) []string {
-	var sheets []string
-	var walk func(n *dom.Node)
-	walk = func(n *dom.Node) {
-		if n.Type == 1 && n.Data == "style" && n.FirstChild != nil {
-			if n.FirstChild.Type == 2 {
-				sheets = append(sheets, n.FirstChild.DataContent)
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(&doc.Node)
-	return sheets
 }

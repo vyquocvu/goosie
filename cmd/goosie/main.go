@@ -18,6 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"runtime"
@@ -138,7 +139,7 @@ func parse(args []string) (config, error) {
 	switch {
 	case c.width <= 0 || c.height <= 0:
 		return c, fmt.Errorf("%w: -width and -height must be positive", errUsage)
-	case c.dpr <= 0 || c.dpr > 8:
+	case math.IsNaN(c.dpr) || c.dpr <= 0 || c.dpr > 8:
 		return c, fmt.Errorf("%w: -dpr must be in (0, 8]", errUsage)
 	case c.frames <= 0:
 		return c, fmt.Errorf("%w: -frames must be positive", errUsage)
@@ -527,6 +528,9 @@ func (f *framePath) closeTab(id uint64) {
 
 // loadURLCtx is like loadURL but respects context cancellation.
 func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
+	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: viewport: %w", err)
+	}
 	// Check context before starting the fetch.
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
@@ -579,14 +583,18 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: build session: %w", err)
 	}
-	list := sess.Paint(scale)
+	list, err := sess.PaintChecked(scale)
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: paint document: %w", err)
+	}
 	dl := list.Build(1)
 	extent := dl.Extent()
-	docTiles := int64((extent.W()+frame.TileSize-1)/frame.TileSize) *
-		int64((extent.H()+frame.TileSize-1)/frame.TileSize)
-	budgetTiles := docTiles + 8
-	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
-	layer := frame.NewLayer(frame.LayerID(budgetTiles), extent, budgetTiles*frame.TileSizeBytes(), pool)
+	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: size document cache: %w", err)
+	}
+	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), nil
 }
