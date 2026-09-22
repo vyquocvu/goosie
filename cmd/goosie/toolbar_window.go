@@ -12,12 +12,13 @@ const totalChromeHeight = tabs.TabBarHeight + toolbar.ToolbarHeight
 
 type chromeWindow struct {
 	surface.Window
-	toolbar    *toolbar.State
-	tabMgr     *tabs.TabManager
-	events     chan surface.Event
-	onSwitch   func(uint64)
-	onNewTab   func()
-	onCloseTab func(uint64)
+	toolbar      *toolbar.State
+	tabMgr       *tabs.TabManager
+	events       chan surface.Event
+	onSwitch     func(uint64)
+	onNewTab     func()
+	onCloseTab   func(uint64)
+	chromeBitmap *frame.Bitmap
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
@@ -36,8 +37,18 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 }
 
 func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
-	tabs.DrawTabBar(buf, cw.tabMgr, 0)
-	cw.toolbar.Draw(buf, tabs.TabBarHeight)
+	if cw.chromeBitmap == nil || cw.chromeBitmap.W != buf.W {
+		cw.chromeBitmap = frame.NewBitmap(buf.W, totalChromeHeight)
+	}
+
+	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), int32(cw.chromeBitmap.H)), frame.RGB(255, 255, 255), nil)
+	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0)
+	cw.toolbar.Draw(cw.chromeBitmap, tabs.TabBarHeight)
+
+	for y := 0; y < totalChromeHeight && y < buf.H; y++ {
+		copy(buf.RGBA[y*buf.Stride:y*buf.Stride+buf.Stride], cw.chromeBitmap.RGBA[y*cw.chromeBitmap.Stride:y*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
+	}
+
 	chromeRect := frame.Rect4(0, 0, int32(buf.W), totalChromeHeight)
 	merged := append(damage[:len(damage):len(damage)], chromeRect)
 	return cw.Window.Present(buf, merged)
