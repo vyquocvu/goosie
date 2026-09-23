@@ -15,7 +15,7 @@ func TestDrawTabTextWithGlyphs(t *testing.T) {
 	}
 
 	tabRect := frame.Rect4(0, 0, 150, 36)
-	drawTabText(buf, "Test Tab", tabRect, frame.RGB(30, 30, 30), fonts)
+	drawTabText(buf, "Test Tab", tabRect, frame.RGB(30, 30, 30), fonts, 1)
 
 	hasPixels := false
 	for i := 0; i < len(buf.RGBA); i += 4 {
@@ -39,7 +39,7 @@ func TestDrawTabTextTruncation(t *testing.T) {
 
 	longText := "This is a very long tab title that should be truncated"
 	tabRect := frame.Rect4(0, 0, 80, 36)
-	drawTabText(buf, longText, tabRect, frame.RGB(30, 30, 30), fonts)
+	drawTabText(buf, longText, tabRect, frame.RGB(30, 30, 30), fonts, 1)
 
 	hasPixels := false
 	for i := 0; i < len(buf.RGBA); i += 4 {
@@ -58,5 +58,5 @@ func TestDrawTabTextNilFonts(t *testing.T) {
 	buf := frame.NewBitmap(200, 36)
 	tabRect := frame.Rect4(0, 0, 150, 36)
 	// Should not panic with nil fonts
-	drawTabText(buf, "Test Tab", tabRect, frame.RGB(30, 30, 30), nil)
+	drawTabText(buf, "Test Tab", tabRect, frame.RGB(30, 30, 30), nil, 1)
 }

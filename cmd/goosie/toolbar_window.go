@@ -15,6 +15,7 @@ type chromeWindow struct {
 	surface.Window
 	toolbar      *toolbar.State
 	tabMgr       *tabs.TabManager
+	scale        int32
 	events       chan surface.Event
 	onSwitch     func(uint64)
 	onNewTab     func()
@@ -43,11 +44,15 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onIME func(ev surface.Event) bool,
 	onCopy func() bool,
 	hitTestLink func(contentX, contentY int32) string,
-	fonts *raster.Fonts) *chromeWindow {
+	fonts *raster.Fonts, scale int32) *chromeWindow {
+	if scale < 1 {
+		scale = 1
+	}
 	cw := &chromeWindow{
 		Window:       w,
 		toolbar:      tb,
 		tabMgr:       mgr,
+		scale:        scale,
 		events:       make(chan surface.Event, 64),
 		onSwitch:     onSwitch,
 		onNewTab:     onNewTab,
@@ -68,20 +73,32 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	return cw
 }
 
+func (cw *chromeWindow) sc() int32 {
+	if cw.scale < 1 {
+		return 1
+	}
+	return cw.scale
+}
+
+func (cw *chromeWindow) chromeHeight() int32 {
+	return int32(totalChromeHeight) * cw.sc()
+}
+
 func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
-	if cw.chromeBitmap == nil || cw.chromeBitmap.W != buf.W {
-		cw.chromeBitmap = frame.NewBitmap(buf.W, totalChromeHeight)
+	chromeH := cw.chromeHeight()
+	if cw.chromeBitmap == nil || cw.chromeBitmap.W != buf.W || int32(cw.chromeBitmap.H) != chromeH {
+		cw.chromeBitmap = frame.NewBitmap(buf.W, int(chromeH))
 	}
 
-	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), int32(cw.chromeBitmap.H)), frame.RGB(255, 255, 255), nil)
-	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0, cw.fonts)
-	cw.toolbar.Draw(cw.chromeBitmap, tabs.TabBarHeight)
+	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), chromeH), frame.RGB(255, 255, 255), nil)
+	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0, cw.fonts, cw.sc())
+	cw.toolbar.Draw(cw.chromeBitmap, int32(tabs.TabBarHeight)*cw.sc())
 
-	for y := 0; y < totalChromeHeight && y < buf.H; y++ {
-		copy(buf.RGBA[y*buf.Stride:y*buf.Stride+buf.Stride], cw.chromeBitmap.RGBA[y*cw.chromeBitmap.Stride:y*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
+	for y := int32(0); y < chromeH && y < int32(buf.H); y++ {
+		copy(buf.RGBA[int(y)*buf.Stride:int(y)*buf.Stride+buf.Stride], cw.chromeBitmap.RGBA[int(y)*cw.chromeBitmap.Stride:int(y)*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
 	}
 
-	chromeRect := frame.Rect4(0, 0, int32(buf.W), totalChromeHeight)
+	chromeRect := frame.Rect4(0, 0, int32(buf.W), chromeH)
 	merged := append(damage[:len(damage):len(damage)], chromeRect)
 	return cw.Window.Present(buf, merged)
 }
@@ -116,15 +133,17 @@ func (cw *chromeWindow) pump() {
 func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	switch ev.Kind {
 	case surface.EvPointer:
-		if ev.Pos.Y < int32(tabs.TabBarHeight) && ev.Button == surface.ButtonLeft {
+		tabH := int32(tabs.TabBarHeight) * cw.sc()
+		toolH := int32(toolbar.ToolbarHeight) * cw.sc()
+		if ev.Pos.Y < tabH && ev.Button == surface.ButtonLeft {
 			cw.handleTabBarClick(ev.Pos)
 			return true
 		}
-		if ev.Pos.Y < int32(tabs.TabBarHeight) {
+		if ev.Pos.Y < tabH {
 			return true
 		}
-		toolbarY := ev.Pos.Y - int32(tabs.TabBarHeight)
-		if toolbarY >= 0 && toolbarY < toolbar.ToolbarHeight && ev.Button == surface.ButtonLeft {
+		toolbarY := ev.Pos.Y - tabH
+		if toolbarY >= 0 && toolbarY < toolH && ev.Button == surface.ButtonLeft {
 			adjusted := ev.Pos
 			adjusted.Y = toolbarY
 			cw.toolbar.HandleClick(adjusted, ev.Button)
@@ -133,7 +152,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			}
 			return true
 		}
-		if toolbarY >= 0 && toolbarY < toolbar.ToolbarHeight {
+		if toolbarY >= 0 && toolbarY < toolH {
 			return true
 		}
 		if cw.toolbar.Focus == toolbar.FocusAddress {
@@ -145,7 +164,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		// release must not re-trigger them. Whatever a press leaves behind goes
 		// to the drag selector, which decides per action whether to consume it.
 		contentX := ev.Pos.X
-		contentY := ev.Pos.Y - int32(totalChromeHeight)
+		contentY := ev.Pos.Y - cw.chromeHeight()
 		press := ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft
 		if press {
 			if cw.hitTestLink != nil {
@@ -184,11 +203,14 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	case surface.EvResize:
 		cw.toolbar.SetBounds(ev.Size.W)
 		if cw.onResize != nil {
-			contentH := int(ev.Size.H) - totalChromeHeight
+			// The shim reports device pixels; the host keeps logical sizes and
+			// multiplies by the DPR itself.
+			sc := int(cw.sc())
+			contentH := int(ev.Size.H) - int(cw.chromeHeight())
 			if contentH < 0 {
 				contentH = 0
 			}
-			cw.onResize(int(ev.Size.W), contentH)
+			cw.onResize(int(ev.Size.W)/sc, contentH/sc)
 		}
 		return false
 	default:
@@ -197,12 +219,13 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 }
 
 func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
+	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
 	tabList := cw.tabMgr.Tabs()
 	for i := range tabList {
-		r := tabs.TabRect(i, 0, int32(len(tabList)), pos.X+100)
-		if pos.X >= r.X0 && pos.X < r.X1 && pos.Y >= r.Y0 && pos.Y < r.Y1 {
+		r := tabs.TabRect(i, 0, int32(len(tabList)), lp.X+100)
+		if lp.X >= r.X0 && lp.X < r.X1 && lp.Y >= r.Y0 && lp.Y < r.Y1 {
 			closeR := tabs.CloseButtonRect(r)
-			if pos.X >= closeR.X0 && pos.X < closeR.X1 && pos.Y >= closeR.Y0 && pos.Y < closeR.Y1 {
+			if lp.X >= closeR.X0 && lp.X < closeR.X1 && lp.Y >= closeR.Y0 && lp.Y < closeR.Y1 {
 				if cw.onCloseTab != nil {
 					cw.onCloseTab(tabList[i].ID)
 				}
@@ -214,8 +237,8 @@ func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
 			return
 		}
 	}
-	btnR := tabs.NewTabButtonRect(int32(len(tabList)), 0, pos.X+100)
-	if pos.X >= btnR.X0 && pos.X < btnR.X1 && pos.Y >= btnR.Y0 && pos.Y < btnR.Y1 {
+	btnR := tabs.NewTabButtonRect(int32(len(tabList)), 0, lp.X+100)
+	if lp.X >= btnR.X0 && lp.X < btnR.X1 && lp.Y >= btnR.Y0 && lp.Y < btnR.Y1 {
 		if cw.onNewTab != nil {
 			cw.onNewTab()
 		}

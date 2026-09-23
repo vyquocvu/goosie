@@ -1,11 +1,12 @@
-// Command goosie is v2's browser binary: the M1 frame path behind a window.
+// Command goosie is v2's browser binary: the document engine behind a window.
 //
-// M1 has no document loader, so what it draws is one of the synthetic scenes in
-// paint: a checkerboard page with positioned text over it. That is not a placeholder
-// in the binary's own terms - the frame path's criteria are all about tiles, budgets,
-// and pacing, and a page whose contents are known analytically is what makes them
-// measurable. The flags are the ones a real browser will have: the scene replaces the
-// document, nothing else in the shape of the command changes.
+// An interactive run opens a window on a blank new tab and draws whatever the
+// address bar or -url loads into it. The synthetic scenes in paint are test
+// documents: a checkerboard page with positioned text over it, whose contents
+// are known analytically, which is what makes the frame path's criteria about
+// tiles, budgets, and pacing measurable. A paced run always draws one, and
+// -scene names one for an interactive demo; nothing else in the shape of the
+// command changes.
 //
 // Two modes share one code path. Interactive mode opens a window and draws frames as
 // the display asks for them. Gate mode (-gate) drives a fixed number of scroll frames
@@ -97,18 +98,19 @@ var errUsage = errors.New("usage")
 
 // config is one parsed invocation.
 type config struct {
-	url         string
-	gate        bool
-	bench       bool
-	screenshot  bool
-	backend     string
-	frames      int
-	scene       string
-	out         string
-	width       int
-	height      int
-	dpr         float64
-	downloadDir string
+	url          string
+	gate         bool
+	bench        bool
+	screenshot   bool
+	backend      string
+	frames       int
+	scene        string
+	sceneSet     bool
+	out          string
+	width        int
+	height       int
+	dpr          float64
+	downloadDir  string
 	private      bool
 	profile      string
 	sessionFile  string
@@ -164,7 +166,7 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.screenshot, "screenshot", false, "render -url to a PNG at -out and exit")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
 	fs.IntVar(&c.frames, "frames", defaultFrames, "frames to draw with -gate and -bench")
-	fs.StringVar(&c.scene, "scene", "checkerboard", "synthetic document: checkerboard or plain")
+	fs.StringVar(&c.scene, "scene", "checkerboard", "synthetic test document: checkerboard or plain")
 	fs.StringVar(&c.out, "out", "", "write the frame report as JSON here, or - for stdout")
 	fs.IntVar(&c.width, "width", 1440, "viewport width in CSS pixels")
 	fs.IntVar(&c.height, "height", 900, "viewport height in CSS pixels")
@@ -200,6 +202,11 @@ func parse(args []string) (config, error) {
 	case c.profile == "." || c.profile == ".." || strings.ContainsAny(c.profile, "/\\"):
 		return c, fmt.Errorf("%w: -profile must be a bare name", errUsage)
 	}
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name == "scene" {
+			c.sceneSet = true
+		}
+	})
 	if _, err := sceneSpec(c.scene); err != nil {
 		return c, err
 	}
@@ -241,30 +248,52 @@ func sceneSpec(name string) (paint.SceneSpec, error) {
 	return paint.SceneSpec{}, fmt.Errorf("%w: unknown -scene %q (want checkerboard or plain)", errUsage, name)
 }
 
+// blankLayer is the new-tab document: one white fill the size of the viewport.
+// The synthetic scene builder has no empty setting - every zero field means a
+// default, so even a bare spec builds cells, borders, and text - and a blank
+// page therefore gets its own one-command list. The tile budget covers the
+// viewport once over, plus the slack a scrolled page would want.
+func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
+	list := paint.NewList(1)
+	list.Append(paint.DisplayCmd{
+		Kind:  paint.CmdFill,
+		Rect:  frame.Rect4(0, 0, dev.W, dev.H),
+		Color: frame.RGB(255, 255, 255),
+	})
+	dl := list.Build(1)
+	cols := (dev.W + frame.TileSize - 1) / frame.TileSize
+	rows := (dev.H + frame.TileSize - 1) / frame.TileSize
+	budgetTiles := int64(rows*cols) + 8
+	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, int(budgetTiles))
+	layer := frame.NewLayer(1, dl.Extent(), budgetTiles*frame.TileSizeBytes(), pool)
+	layer.SetContent(dl)
+	return dl, layer
+}
+
 // framePath is the assembled pipeline: everything between a vsync and a Present, with
 // the pieces a report has to name kept reachable.
 type framePath struct {
-	window   surface.Window
-	loop     *surface.Loop
-	sched    *raster.Scheduler
-	pool     *raster.Pool
-	composer *surface.Composer
-	layer    *frame.Layer
-	rec      *frame.FrameRecorder
-	spec     paint.SceneSpec
-	config   config
-	toolbar  *toolbar.State
-	tabMgr   *tabs.TabManager
-	client   net.HTTP
-	fonts    *raster.Fonts
-	bookmarks *bookmarks.Store
-	history   *history.Store
-	started    time.Time
-	navResults chan navResult
-	zoom       float64
-	findMatches []engine.Match
-	findIdx     int
-	selDrag     bool
+	window            surface.Window
+	loop              *surface.Loop
+	sched             *raster.Scheduler
+	pool              *raster.Pool
+	composer          *surface.Composer
+	layer             *frame.Layer
+	rec               *frame.FrameRecorder
+	spec              paint.SceneSpec
+	config            config
+	toolbar           *toolbar.State
+	tabMgr            *tabs.TabManager
+	client            net.HTTP
+	fonts             *raster.Fonts
+	bookmarks         *bookmarks.Store
+	history           *history.Store
+	started           time.Time
+	navResults        chan navResult
+	zoom              float64
+	findMatches       []engine.Match
+	findIdx           int
+	selDrag           bool
 	restoredActiveURL string
 }
 
@@ -310,12 +339,12 @@ func build(c config) (*framePath, error) {
 	var layer *frame.Layer
 	var spec paint.SceneSpec
 
-	if c.url != "" {
-		// Defer URL fetch until after the window opens. Start with a placeholder
-		// layer so the user sees the toolbar immediately, not a blank wait.
-		spec = paint.SceneSpec{DocHeight: dev.H}
-		_, layer = paint.BuildLayer(spec)
-	} else {
+	// The synthetic scenes are test documents: a paced run measures the frame
+	// path against them, and an explicit -scene asks for one by name. An
+	// interactive run with no URL opens on the same blank page the new-tab
+	// button creates, and one with a URL starts on a placeholder layer so the
+	// user sees the toolbar immediately, not a blank wait.
+	if c.url == "" && (c.paced() || c.sceneSet) {
 		spec, err = sceneSpec(c.scene)
 		if err != nil {
 			_ = client.Close()
@@ -334,6 +363,9 @@ func build(c config) (*framePath, error) {
 			spec.DocHeight = interactiveDocHeight
 		}
 		_, layer = paint.BuildLayer(spec)
+	} else {
+		spec = paint.SceneSpec{DocHeight: dev.H}
+		_, layer = blankLayer(dev)
 	}
 
 	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))
@@ -363,6 +395,7 @@ func build(c config) (*framePath, error) {
 	}
 	if !c.paced() {
 		f.toolbar = toolbar.NewState(dev.W, fonts)
+		f.toolbar.SetScale(int32(c.dpr + 0.5))
 		f.tabMgr = tabs.NewManager(func() {
 			if f.window != nil {
 				_ = f.window.Close()
@@ -372,6 +405,8 @@ func build(c config) (*framePath, error) {
 			f.syncTabToToolbar()
 		}
 		firstTab := f.tabMgr.NewTab()
+		firstTab.Layer = layer
+		firstTab.BGColor = frame.RGB(255, 255, 255)
 		if c.url != "" {
 			firstTab.URL = normalizeURL(c.url)
 			firstTab.Title = firstTab.URL
@@ -406,7 +441,11 @@ func build(c config) (*framePath, error) {
 			f.toolbar.Clipboard = cb
 		}
 	}
-	f.sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: frame.RGB(248, 248, 248)})
+	bg := frame.RGB(248, 248, 248)
+	if !c.paced() {
+		bg = frame.RGB(255, 255, 255)
+	}
+	f.sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: bg})
 	return f, nil
 }
 
@@ -1051,8 +1090,7 @@ func (f *framePath) newTab() {
 	tab := f.tabMgr.NewTab()
 	f.tabMgr.SwitchTo(tab.ID)
 	f.syncTabToToolbar()
-	spec := paint.SceneSpec{DocHeight: f.config.devSize().H}
-	_, layer := paint.BuildLayer(spec)
+	_, layer := blankLayer(f.config.devSize())
 	tab.Layer = layer
 	tab.BGColor = frame.RGB(255, 255, 255)
 	f.sched.SetPlan(frame.FramePlan{
@@ -1221,6 +1259,7 @@ func (f *framePath) openWindow() error {
 			f.copySelection,
 			f.hitTestLink,
 			f.fonts,
+			int32(f.config.dpr+0.5),
 		)
 	} else {
 		f.window = w

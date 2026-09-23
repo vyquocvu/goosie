@@ -427,6 +427,29 @@ func TestInterceptDragSelectMotion(t *testing.T) {
 	}
 }
 
+func TestInterceptResizeReportsLogicalContentSize(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+		scale:   2,
+	}
+	var gotW, gotH int
+	cw.onResize = func(w, h int) { gotW, gotH = w, h }
+
+	// The shim reports device pixels; the host must receive logical content size.
+	resize := surface.Event{
+		Kind: surface.EvResize,
+		Size: frame.Size{W: 2880, H: 1800},
+	}
+	if cw.intercept(resize) {
+		t.Fatal("resize consumed")
+	}
+	wantH := (1800 - int(totalChromeHeight)*2) / 2
+	if gotW != 1440 || gotH != wantH {
+		t.Fatalf("resize reported (%d,%d), want (1440,%d)", gotW, gotH, wantH)
+	}
+}
+
 func TestInterceptDragSelectPressOrder(t *testing.T) {
 	cw := &chromeWindow{
 		toolbar: &toolbar.State{},
@@ -483,5 +506,57 @@ func TestInterceptCopyShortcut(t *testing.T) {
 	}
 	if cw.intercept(surface.Event{Kind: surface.EvKey, Key: 'c'}) {
 		t.Fatal("plain C consumed")
+	}
+}
+
+func TestBlankLayerIsSingleWhiteFill(t *testing.T) {
+	dl, layer := blankLayer(frame.Size{W: 512, H: 256})
+	if dl.Len() != 1 {
+		t.Fatalf("blank page holds %d commands, want 1", dl.Len())
+	}
+	cmd := dl.At(0)
+	if cmd.Kind != paint.CmdFill || cmd.Rect != frame.Rect4(0, 0, 512, 256) || cmd.Color != frame.RGB(255, 255, 255) {
+		t.Errorf("blank page command = %+v, want one white fill of the viewport", cmd)
+	}
+	if layer.Bounds != frame.Rect4(0, 0, 512, 256) {
+		t.Errorf("blank layer bounds = %v, want the viewport", layer.Bounds)
+	}
+}
+
+func TestBuildInteractiveOpensBlankPage(t *testing.T) {
+	f, err := build(config{width: 640, height: 480, dpr: 1, private: true, downloadDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.pool.Close()
+	defer f.client.Close()
+	if f.spec.Checkerboard || f.spec.TextRuns != 0 {
+		t.Errorf("startup spec = %+v, want a blank page", f.spec)
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Layer == nil {
+		t.Fatal("first tab has no layer to present")
+	}
+}
+
+func TestBuildKeepsSyntheticSceneForPacedAndExplicitRuns(t *testing.T) {
+	paced, err := build(config{width: 640, height: 480, dpr: 1, gate: true, frames: 4, scene: "checkerboard", private: true, downloadDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer paced.pool.Close()
+	defer paced.client.Close()
+	if !paced.spec.Checkerboard {
+		t.Error("gate run dropped the checkerboard scene")
+	}
+
+	demo, err := build(config{width: 640, height: 480, dpr: 1, scene: "plain", sceneSet: true, private: true, downloadDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer demo.pool.Close()
+	defer demo.client.Close()
+	if demo.spec.Checkerboard || demo.spec.TextRuns == 0 {
+		t.Errorf("explicit -scene spec = %+v, want the plain scene", demo.spec)
 	}
 }
