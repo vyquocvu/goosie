@@ -45,3 +45,4 @@ perf-suite.txt
 !.prompt
 
 node_modules/
+/goosie
