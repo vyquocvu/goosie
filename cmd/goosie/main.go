@@ -34,6 +34,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
+	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -78,6 +79,7 @@ type navResult struct {
 	err          error
 	url          string
 	downloadPath string
+	noHistory    bool
 }
 
 // downloadDone reports a completed download instead of a rendered document;
@@ -97,14 +99,15 @@ type config struct {
 	bench      bool
 	screenshot bool
 	backend    string
-	frames     int
-	scene      string
-	out        string
-	width      int
-	height     int
-	dpr        float64
-	downloadDir string
-	private     bool
+	frames       int
+	scene        string
+	out          string
+	width        int
+	height       int
+	dpr          float64
+	downloadDir  string
+	private      bool
+	sessionFile  string
 }
 
 // devSize is the surface in device pixels: the units the frame path, the scheduler,
@@ -153,6 +156,11 @@ func parse(args []string) (config, error) {
 	}
 	fs.StringVar(&c.downloadDir, "download-dir", dlDir, "directory where downloads are saved")
 	fs.BoolVar(&c.private, "private", false, "run a private session: cookies are dropped on exit")
+	sessionDefault := ".goosie-session.json"
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		sessionDefault = filepath.Join(home, ".goosie", "session.json")
+	}
+	fs.StringVar(&c.sessionFile, "session-file", sessionDefault, "file where the open tabs are saved between runs")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
@@ -225,9 +233,10 @@ type framePath struct {
 	fonts    *raster.Fonts
 	started    time.Time
 	navResults chan navResult
-	zoom     float64
+	zoom       float64
 	findMatches []engine.Match
 	findIdx     int
+	restoredActiveURL string
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -314,6 +323,12 @@ func build(c config) (*framePath, error) {
 		if c.url != "" {
 			firstTab.URL = normalizeURL(c.url)
 			firstTab.Title = firstTab.URL
+		} else if !c.private {
+			if st, err := session.Load(c.sessionFile); err != nil {
+				fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
+			} else if len(st.Tabs) > 0 {
+				f.applySessionState(st)
+			}
 		}
 		f.syncTabToToolbar()
 
@@ -446,7 +461,9 @@ func (f *framePath) applyNavResult(result navResult) {
 	tab.BGColor = result.bgColor
 	tab.URL = result.url
 	tab.Title = result.url
-	tab.History.Push(result.url)
+	if !result.noHistory {
+		tab.History.Push(result.url)
+	}
 
 	if f.tabMgr.Active() == tab {
 		f.syncTabToToolbar()
@@ -503,7 +520,7 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 
 	go func() {
 		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir)
-		res := navResult{tabID: tab.ID, serial: serial, url: u}
+		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true}
 		var dd downloadDone
 		if errors.As(err, &dd) {
 			res.downloadPath = dd.path
@@ -522,6 +539,53 @@ func (f *framePath) reloadTab() {
 		return
 	}
 	f.navigateTabNoHistory(tab.URL)
+}
+
+// applySessionState rebuilds the tab set from a saved session. The first saved
+// tab overwrites the fresh New Tab; background tabs stay unloaded until shown.
+func (f *framePath) applySessionState(st session.State) {
+	tabsList := f.tabMgr.Tabs()
+	if len(tabsList) == 0 || len(st.Tabs) == 0 {
+		return
+	}
+	applyTabState(tabsList[0], st.Tabs[0])
+	for _, ts := range st.Tabs[1:] {
+		applyTabState(f.tabMgr.NewTab(), ts)
+	}
+	if st.Active > 0 {
+		restored := f.tabMgr.Tabs()
+		if st.Active < len(restored) {
+			f.tabMgr.SwitchTo(restored[st.Active].ID)
+		}
+	}
+	if active := f.tabMgr.Active(); active != nil && active.URL != "" {
+		f.restoredActiveURL = active.URL
+	}
+}
+
+func applyTabState(t *tabs.Tab, ts session.TabState) {
+	t.URL = ts.URL
+	t.Title = ts.Title
+	t.History = toolbar.RestoreHistory(ts.History, ts.HistoryIndex)
+	if t.Title == "" {
+		t.Title = "New Tab"
+	}
+}
+
+// sessionState snapshots the open tabs for saving.
+func sessionState(f *framePath) session.State {
+	var st session.State
+	for _, tab := range f.tabMgr.Tabs() {
+		entries, idx := tab.History.Entries()
+		st.Tabs = append(st.Tabs, session.TabState{
+			URL:          tab.URL,
+			Title:        tab.Title,
+			History:      entries,
+			HistoryIndex: idx,
+		})
+	}
+	st.Active = f.tabMgr.ActiveIndex()
+	return st
 }
 
 // handleResize reflows and repaints the active tab after the window is resized.
@@ -934,6 +998,8 @@ func run(args []string) error {
 		} else {
 			f.navigateTab(c.url)
 		}
+	} else if f.restoredActiveURL != "" {
+		f.navigateTabNoHistory(f.restoredActiveURL)
 	}
 
 	// A paced run cannot wait for a finger, so the driver stamps the scroll onto the
@@ -1007,6 +1073,11 @@ func run(args []string) error {
 		r.Run()
 	}
 	<-stopped
+	if !c.paced() && !c.private {
+		if err := session.Save(c.sessionFile, sessionState(f)); err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: save session: %v\n", err)
+		}
+	}
 	if err := <-loopErr; err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}

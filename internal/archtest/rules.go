@@ -44,6 +44,7 @@ var Allowed = map[string][]string{
 	"internal/css":               {"internal/dom"},
 	"internal/net":               nil,
 	"internal/download":          nil,
+	"internal/session":           nil,
 	"internal/image":             nil,
 	"internal/style":             {"internal/css", "internal/dom", "internal/frame"},
 	"internal/layout":            {"internal/dom", "internal/style", "internal/frame"},

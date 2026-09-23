@@ -47,3 +47,24 @@ func (h *History) Current() string {
 	}
 	return h.entries[h.index]
 }
+
+// Entries returns a copy of the URL trail and the current index, for saving.
+func (h *History) Entries() ([]string, int) {
+	out := make([]string, len(h.entries))
+	copy(out, h.entries)
+	return out, h.index
+}
+
+// RestoreHistory rebuilds a history from saved entries, clamping an
+// out-of-range index instead of trusting the state file.
+func RestoreHistory(entries []string, index int) *History {
+	h := &History{entries: make([]string, len(entries)), index: index}
+	copy(h.entries, entries)
+	if h.index < -1 {
+		h.index = -1
+	}
+	if h.index > len(h.entries)-1 {
+		h.index = len(h.entries) - 1
+	}
+	return h
+}
