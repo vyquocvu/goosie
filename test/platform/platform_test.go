@@ -142,6 +142,7 @@ type unnamedWindow struct{ events chan surface.Event }
 func (w *unnamedWindow) Events() <-chan surface.Event              { return w.events }
 func (w *unnamedWindow) Present(*frame.Bitmap, []frame.Rect) error { return nil }
 func (w *unnamedWindow) SetCursor(surface.Cursor)                  {}
+func (w *unnamedWindow) SetIME(bool)                               {}
 func (w *unnamedWindow) ScaleFactor() float32                      { return 1 }
 func (w *unnamedWindow) Close() error                              { return nil }
 

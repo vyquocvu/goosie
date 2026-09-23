@@ -26,6 +26,7 @@ type chromeWindow struct {
 	onFocusClick func(contentX, contentY int32) bool
 	onContentKey func(key rune, mods surface.KeyMod) bool
 	onDragSelect func(action surface.PointerAction, contentX, contentY int32) bool
+	onIME        func(ev surface.Event) bool
 	onCopy       func() bool
 	hitTestLink  func(contentX, contentY int32) string
 	chromeBitmap *frame.Bitmap
@@ -39,6 +40,7 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onFocusClick func(contentX, contentY int32) bool,
 	onContentKey func(key rune, mods surface.KeyMod) bool,
 	onDragSelect func(action surface.PointerAction, contentX, contentY int32) bool,
+	onIME func(ev surface.Event) bool,
 	onCopy func() bool,
 	hitTestLink func(contentX, contentY int32) string,
 	fonts *raster.Fonts) *chromeWindow {
@@ -57,6 +59,7 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		onFocusClick: onFocusClick,
 		onContentKey: onContentKey,
 		onDragSelect: onDragSelect,
+		onIME:        onIME,
 		onCopy:       onCopy,
 		hitTestLink:  hitTestLink,
 		fonts:        fonts,
@@ -125,6 +128,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			adjusted := ev.Pos
 			adjusted.Y = toolbarY
 			cw.toolbar.HandleClick(adjusted, ev.Button)
+			if cw.toolbar.Focus == toolbar.FocusAddress {
+				cw.SetIME(false)
+			}
 			return true
 		}
 		if toolbarY >= 0 && toolbarY < toolbar.ToolbarHeight {
@@ -168,6 +174,11 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		if cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods) {
 			return true
+		}
+		return false
+	case surface.EvIME:
+		if cw.onIME != nil {
+			return cw.onIME(ev)
 		}
 		return false
 	case surface.EvResize:

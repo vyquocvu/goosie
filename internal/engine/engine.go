@@ -32,8 +32,8 @@ import (
 // edit re-runs everything. The session does not own a network client; the
 // caller passes in fetched bytes so the engine stays testable without a network.
 type Session struct {
-	Doc         *dom.Document
-	Styles      map[dom.NodeID]*style.ComputedStyle
+	Doc          *dom.Document
+	Styles       map[dom.NodeID]*style.ComputedStyle
 	PseudoStyles map[style.PseudoKey]*style.ComputedStyle
 	Arena        *layout.Arena
 
@@ -43,11 +43,11 @@ type Session struct {
 	linkBase  string
 	linker    CSSLinker
 
-	imgBase   string
-	imgFetch  ImageFetcher
-	natural   map[dom.NodeID]layout.NaturalSize
-	images    map[dom.NodeID]stdimage.Image
-	bgImages  map[dom.NodeID]stdimage.Image
+	imgBase  string
+	imgFetch ImageFetcher
+	natural  map[dom.NodeID]layout.NaturalSize
+	images   map[dom.NodeID]stdimage.Image
+	bgImages map[dom.NodeID]stdimage.Image
 
 	fontBase  string
 	fontFetch FontFetcher
@@ -55,9 +55,11 @@ type Session struct {
 
 	// Focus state for form editing. focus survives Reflow because reflow
 	// rebuilds only the layout arena, not the DOM; a new session per
-	// navigation starts unfocused.
-	focus *dom.Node
-	caret int
+	// navigation starts unfocused. marked is the IME composition preview at
+	// the caret: painted but not yet the value.
+	focus  *dom.Node
+	caret  int
+	marked string
 
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
@@ -242,7 +244,7 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 				continue
 			}
 			familyMap[strings.ToLower(family)] = idx
-			
+
 			// Build the weight/slant key for the registry.
 			bold := weightStr == "bold" || weightStr == "700" || weightStr == "800" || weightStr == "900"
 			light := weightStr == "300" || weightStr == "200" || weightStr == "100"
@@ -558,7 +560,7 @@ func (s *Session) Paint(scale float32) *paint.List {
 	b := paint.NewBuilder(list, s.Arena, scale, s.metrics)
 	if s.focus != nil {
 		if obj := s.objectFor(s.focus); obj != nil {
-			b.SetFocus(obj, s.caret)
+			b.SetFocus(obj, s.caret, s.marked)
 		}
 	}
 	if spans := s.selectionSpans(); len(spans) > 0 {

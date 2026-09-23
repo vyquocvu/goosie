@@ -53,13 +53,15 @@ func (s *Session) controlAt(x, y float32) *dom.Node {
 
 // FocusControl focuses the control at the document point, blurring any current
 // focus. Clicking empty space blurs; clicking the already-focused control
-// changes nothing. Returns whether focus state changed.
+// changes nothing. Returns whether focus state changed. Any focus change ends
+// composition: the marked text belonged to the control that had focus.
 func (s *Session) FocusControl(x, y float32) bool {
 	n := s.controlAt(x, y)
 	if n == s.focus {
 		return false
 	}
 	s.focus = n
+	s.marked = ""
 	if n != nil {
 		s.caret = len([]rune(s.controlValue(n)))
 	}
@@ -68,6 +70,46 @@ func (s *Session) FocusControl(x, y float32) bool {
 
 // Focused returns the focused control node, or nil.
 func (s *Session) Focused() *dom.Node { return s.focus }
+
+// SetMarked replaces the IME composition preview shown at the focused
+// control's caret. The preview is painted but is not the value until
+// CommitText runs; an empty string ends composition. Returns whether the
+// preview changed, which is when the caller must repaint.
+func (s *Session) SetMarked(text string) bool {
+	if !controlEditable(s.focus) || s.marked == text {
+		return false
+	}
+	s.marked = text
+	return true
+}
+
+// Marked returns the current composition text, empty when not composing.
+func (s *Session) Marked() string { return s.marked }
+
+// CommitText ends composition by inserting text at the focused control's
+// caret, respecting maxlength like any other insert. Returns whether the
+// value changed, which is when the caller must reflow.
+func (s *Session) CommitText(text string) bool {
+	if !controlEditable(s.focus) {
+		return false
+	}
+	s.marked = ""
+	runes := []rune(s.controlValue(s.focus))
+	if s.caret > len(runes) {
+		s.caret = len(runes)
+	}
+	added := []rune(text)
+	if max := maxLen(s.focus); max > 0 && len(runes)+len(added) > max {
+		return false
+	}
+	out := make([]rune, 0, len(runes)+len(added))
+	out = append(out, runes[:s.caret]...)
+	out = append(out, added...)
+	out = append(out, runes[s.caret:]...)
+	s.caret += len(added)
+	s.setControlValue(s.focus, string(out))
+	return true
+}
 
 // Edit applies one keyboard edit to the focused control. It returns whether
 // the value or focus changed, which is when the caller must reflow;
@@ -131,6 +173,7 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		return false
 	case EditEscape:
 		s.focus = nil
+		s.marked = ""
 		return true
 	}
 	return false

@@ -19,13 +19,14 @@ import (
 // operations that paint understands. The builder runs after layout is complete;
 // it does not mutate the arena.
 type Builder struct {
-	list    *List
-	arena   *layout.Arena
-	scale   float32
-	metrics layout.Metrics
-	focus      *layout.Object
-	focusCaret int
-	selection  map[*layout.Object]SelSpan
+	list        *List
+	arena       *layout.Arena
+	scale       float32
+	metrics     layout.Metrics
+	focus       *layout.Object
+	focusCaret  int
+	focusMarked string
+	selection   map[*layout.Object]SelSpan
 }
 
 // NewBuilder returns a builder that will emit commands into list. metrics is
@@ -36,10 +37,12 @@ func NewBuilder(list *List, arena *layout.Arena, scale float32, metrics layout.M
 }
 
 // SetFocus marks the control to paint with a caret and focus ring. caret is a
-// rune index into the control's value.
-func (b *Builder) SetFocus(obj *layout.Object, caret int) {
+// rune index into the control's value; marked is the IME composition preview
+// shown spliced into the value at the caret.
+func (b *Builder) SetFocus(obj *layout.Object, caret int, marked string) {
 	b.focus = obj
 	b.focusCaret = caret
+	b.focusMarked = marked
 }
 
 // SetSelection marks word boxes to paint with the selection highlight. The
@@ -101,7 +104,8 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			if obj.Style.Display == style.DisplayListItem {
 				b.paintMarker(obj, ordinal)
 			}
-			if obj.Node != nil && obj.Node.Type == 2 && obj.Node.DataContent != "" {
+			if obj.Node != nil && obj.Node.Type == 2 &&
+				(obj.Node.DataContent != "" || b.composingTextareaText(obj)) {
 				b.paintText(obj, rect, opacity, clip)
 			}
 			if obj.Node != nil && obj.Node.Data == "input" {
@@ -224,7 +228,11 @@ func corners(s *style.ComputedStyle, r frame.Rect, scale float32) frame.Corners 
 }
 
 func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32, clip *frame.Rect) {
-	if obj.Node == nil || obj.Node.DataContent == "" {
+	text := obj.Node.DataContent
+	if b.composingTextareaText(obj) {
+		text = b.composeControlText(obj, text)
+	}
+	if text == "" {
 		return
 	}
 	if rect.Empty() {
@@ -244,7 +252,26 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	if sp, ok := b.selection[obj]; ok {
 		b.paintSelectionHighlight(obj, rect, s, sp, opacity)
 	}
-	b.appendRun(obj.Node.DataContent, rect, s, convertColor(s.Color), opacity)
+	b.appendRun(text, rect, s, convertColor(s.Color), opacity)
+}
+
+// composingTextareaText reports whether obj paints the first text child of the
+// focused textarea, the one text node a composition preview can splice into.
+// The inline pass paints word copies of the node (same NodeID, new pointer), so
+// match by ID rather than pointer identity.
+func (b *Builder) composingTextareaText(obj *layout.Object) bool {
+	if b.focus == nil || b.focusMarked == "" || obj.Node == nil || b.focus.Node == nil {
+		return false
+	}
+	if obj.Node.Parent != b.focus.Node || !obj.Node.Text() {
+		return false
+	}
+	for c := b.focus.Node.FirstChild; c != nil; c = c.NextSibling {
+		if c.Text() {
+			return obj.Node.ID == c.ID
+		}
+	}
+	return false
 }
 
 // paintImage draws a decoded replaced image into its content box. A box whose
@@ -497,6 +524,10 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	if text == "" || obj.Node.GetAttribute("value") != "" {
 		return
 	}
+	// A composition preview takes the placeholder's place on an empty control.
+	if b.focus == obj && b.focusMarked != "" {
+		return
+	}
 	x0, y0, x1, y1 := obj.ContentRect()
 	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
 	if rect.Empty() {
@@ -511,6 +542,35 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	b.appendRun(text, rect, s, frame.RGB(117, 117, 117), opacity)
 }
 
+// composeControlText returns text with the composition preview spliced at the
+// caret when obj shows the focused control's text — the input itself or a
+// textarea's first text child. The caret bar stays before the marked text, so
+// the preview moves with the caret without moving the caret.
+func (b *Builder) composeControlText(obj *layout.Object, text string) string {
+	if b.focus == nil || b.focusMarked == "" || obj.Node == nil {
+		return text
+	}
+	isInput := obj == b.focus
+	isTextareaText := obj.Node.Parent == b.focus.Node && obj.Node.Text()
+	if !isInput && !isTextareaText {
+		return text
+	}
+	runes := []rune(text)
+	caret := b.focusCaret
+	if caret > len(runes) {
+		caret = len(runes)
+	}
+	if caret < 0 {
+		caret = 0
+	}
+	marked := []rune(b.focusMarked)
+	out := make([]rune, 0, len(runes)+len(marked))
+	out = append(out, runes[:caret]...)
+	out = append(out, marked...)
+	out = append(out, runes[caret:]...)
+	return string(out)
+}
+
 // paintControlValue draws the text an input holds. The value is not in the DOM
 // text flow, so like the placeholder it starts at the content origin bounded
 // by the content box. Textareas paint through the normal text path instead.
@@ -519,7 +579,7 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 	if s == nil || obj.Node == nil || !obj.Node.Element() {
 		return
 	}
-	text := obj.Node.GetAttribute("value")
+	text := b.composeControlText(obj, obj.Node.GetAttribute("value"))
 	if text == "" {
 		return
 	}

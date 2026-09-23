@@ -113,6 +113,7 @@ type Window struct {
 	scale        float32
 	size         frame.Size
 	cursor       surface.Cursor
+	imeEnabled   bool
 	ring         []*frame.Bitmap
 	last         int
 	serial       int64
@@ -280,6 +281,21 @@ func (w *Window) Cursor() surface.Cursor {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.cursor
+}
+
+// SetIME implements surface.Window. A headless window has no input method, so
+// the flag is only remembered for tests that assert the focus path toggled it.
+func (w *Window) SetIME(enabled bool) {
+	w.mu.Lock()
+	w.imeEnabled = enabled
+	w.mu.Unlock()
+}
+
+// IMEEnabled reports the flag last set.
+func (w *Window) IMEEnabled() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.imeEnabled
 }
 
 // ScaleFactor implements surface.Window.

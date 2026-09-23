@@ -722,8 +722,45 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	if !tab.Session.FocusControl(dx, dy) {
 		return false
 	}
+	f.setWindowIME(tab.Session.Focused() != nil)
 	f.repaintTab(tab)
 	return true
+}
+
+// setWindowIME turns the platform input context on while a document control has
+// focus and off whenever focus moves anywhere else, so an IME can only compose
+// into the document.
+func (f *framePath) setWindowIME(on bool) {
+	if f.window != nil {
+		f.window.SetIME(on)
+	}
+}
+
+// imeEvent routes a platform composition event to the active tab's session. A
+// marked update repaints the preview; a commit reflows the value. Both are
+// consumed whether or not the session was waiting, because the platform input
+// context is only ever on for the active tab's control.
+func (f *framePath) imeEvent(ev surface.Event) bool {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return false
+	}
+	switch ev.IME {
+	case surface.IMEMarked:
+		if tab.Session.SetMarked(ev.Text) {
+			f.repaintTab(tab)
+		}
+		return true
+	case surface.IMECommit:
+		if tab.Session.CommitText(ev.Text) {
+			if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+				fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+			}
+		}
+		f.repaintTab(tab)
+		return true
+	}
+	return false
 }
 
 // dragSelect drives text selection from content-area pointer events. A press
@@ -816,6 +853,9 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 
 	changed := tab.Session.Edit(action, key)
 	if changed {
+		if action == engine.EditEscape {
+			f.setWindowIME(false)
+		}
 		if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			return true
@@ -932,6 +972,7 @@ func (f *framePath) closeFind() {
 // switchTab saves the current tab's scroll and switches to the given tab.
 func (f *framePath) switchTab(id uint64) {
 	f.closeFind()
+	f.setWindowIME(false)
 	cur := f.tabMgr.Active()
 	if cur != nil {
 		vp := f.sched.Viewport()
@@ -1134,6 +1175,7 @@ func (f *framePath) openWindow() error {
 			f.focusClick,
 			f.contentKey,
 			f.dragSelect,
+			f.imeEvent,
 			f.copySelection,
 			f.hitTestLink,
 			f.fonts,

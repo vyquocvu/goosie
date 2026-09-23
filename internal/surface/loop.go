@@ -215,6 +215,10 @@ func mergeEvent(dst, src Event) Event {
 		out.Key = src.Key
 		out.Mods = src.Mods
 	}
+	if src.Kind == EvIME {
+		out.Text = src.Text
+		out.IME = src.IME
+	}
 	if src.Size.W != 0 && src.Size.H != 0 {
 		out.Size = src.Size
 	}

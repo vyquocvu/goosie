@@ -69,6 +69,8 @@ func (w *fakeWindow) SetCursor(c surface.Cursor) {
 	w.mu.Unlock()
 }
 
+func (w *fakeWindow) SetIME(bool) {}
+
 func (w *fakeWindow) ScaleFactor() float32 { return 2 }
 
 func (w *fakeWindow) Close() error { return nil }

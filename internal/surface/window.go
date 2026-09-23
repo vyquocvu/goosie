@@ -23,6 +23,8 @@ const (
 	EvKey
 	// EvResize carries a new surface size in Size.
 	EvResize
+	// EvIME carries composition text from the platform input method in Text.
+	EvIME
 )
 
 func (k EventKind) String() string {
@@ -37,9 +39,20 @@ func (k EventKind) String() string {
 		return "key"
 	case EvResize:
 		return "resize"
+	case EvIME:
+		return "ime"
 	}
 	return "unknown"
 }
+
+// IMEAction tells which phase an EvIME event carries. IMEMarked updates the
+// composition preview; IMECommit inserts the final text at the caret.
+type IMEAction uint8
+
+const (
+	IMEMarked IMEAction = iota
+	IMECommit
+)
 
 // Button distinguishes pointer actions that share an event kind.
 type Button uint8
@@ -95,6 +108,8 @@ type Event struct {
 	Action PointerAction // EvPointer: press, release, or motion
 	Key    rune        // EvKey
 	Mods   KeyMod      // EvKey: modifier flags
+	Text   string      // EvIME: UTF-8 composition text
+	IME    IMEAction   // EvIME: marked update or commit
 	Size   frame.Size  // EvResize
 	Scale  float32     // current device pixel ratio
 	At     time.Time
@@ -111,6 +126,10 @@ type Window interface {
 	Events() <-chan Event
 	Present(buf *frame.Bitmap, damage []frame.Rect) error
 	SetCursor(Cursor)
+	// SetIME turns the platform input context on or off. It is called when
+	// document focus enters or leaves an editable control; a backend without
+	// an input method may ignore it.
+	SetIME(bool)
 	ScaleFactor() float32
 	Close() error
 }

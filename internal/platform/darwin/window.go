@@ -198,6 +198,14 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 	case C.GOOSIE_EV_RESIZE:
 		ev.Kind = surface.EvResize
 		ev.Size = frame.Size{W: int32(ce.w), H: int32(ce.h)}
+	case C.GOOSIE_EV_IME:
+		ev.Kind = surface.EvIME
+		ev.Text = C.GoString(&ce.text[0])
+		if ce.ime == C.GOOSIE_IME_COMMIT {
+			ev.IME = surface.IMECommit
+		} else {
+			ev.IME = surface.IMEMarked
+		}
 	default:
 		// GOOSIE_EV_NONE and anything a future shim adds before this file learns it.
 		return ev, false
@@ -282,6 +290,17 @@ func (w *Window) SetCursor(c surface.Cursor) {
 		shape = C.GOOSIE_CURSOR_DEFAULT
 	}
 	C.GoosieSetCursor(w.gw, shape)
+}
+
+// SetIME implements surface.Window. Like SetCursor it is asynchronous by necessity:
+// the engine calls it from focus changes, and the input context lives on the main
+// thread.
+func (w *Window) SetIME(on bool) {
+	v := C.int(0)
+	if on {
+		v = 1
+	}
+	C.GoosieSetIME(w.gw, v)
 }
 
 // ScaleFactor implements surface.Window. It is the ratio the window actually got,

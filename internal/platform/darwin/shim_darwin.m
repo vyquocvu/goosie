@@ -63,12 +63,13 @@ static const double kGoosieIdlePoll = 0.02;
 // sees input. It is layer-backed rather than drawRect: - because the frame path hands
 // over finished pixels, and a view that redrew them through CoreGraphics would be a
 // second rasterizer on the machine.
-@interface GoosieContentView : NSView
+@interface GoosieContentView : NSView <NSTextInputClient>
 // The owner is C memory the view does not own and must not retain: it is the window
 // the shim handed out, reachable only so an input handler can push an event. See
 // GoosieClose for why nothing here is ever freed.
 - (void *)goosieOwner;
 - (void)setGoosieOwner:(void *)owner;
+- (void)setIMEEnabled:(BOOL)on;
 @end
 
 @interface GoosieWindowDelegate : NSObject <NSWindowDelegate>
@@ -271,8 +272,36 @@ static void sendResize(GoosieContentView *v) {
 	push(gw, ev);
 }
 
+// pushIME queues one composition event. The text rides a fixed 256-byte buffer,
+// so a longer composition is cut at a UTF-8 boundary rather than handed to Go as
+// a partial rune.
+static void pushIME(GoosieWindow *gw, int action, NSString *text) {
+	GoosieEvent ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.kind = GOOSIE_EV_IME;
+	ev.ime = action;
+	const char *utf8 = [text UTF8String];
+	size_t n = strlen(utf8);
+	if (n > sizeof(ev.text) - 1) n = sizeof(ev.text) - 1;
+	while (n > 0) {
+		unsigned char b = (unsigned char)utf8[n - 1];
+		if ((b & 0xC0) == 0x80) { n--; continue; }
+		if ((b & 0x80) != 0) n--;  // lead byte whose continuation bytes were cut
+		break;
+	}
+	memcpy(ev.text, utf8, n);
+	ev.text[n] = 0;
+	ev.at_ns = nowNs();
+	push(gw, ev);
+}
+
 @implementation GoosieContentView {
 	GoosieWindow *_ownerRef;
+	// _imeEnabled routes printable key events through NSTextInputClient so an
+	// input method can compose. _imeMarked mirrors the client-side marked state
+	// the input context queries back.
+	BOOL _imeEnabled;
+	BOOL _imeMarked;
 }
 
 // isFlipped puts the view's y axis top-down like the frame path's, so an event's
@@ -285,6 +314,18 @@ static void sendResize(GoosieContentView *v) {
 
 - (void *)goosieOwner { return (void *)_ownerRef; }
 - (void)setGoosieOwner:(void *)owner { _ownerRef = (GoosieWindow *)owner; }
+
+- (void)setIMEEnabled:(BOOL)on {
+	if (_imeEnabled == on) return;
+	_imeEnabled = on;
+	// Turning the context off mid-composition cancels it: the Go side's focus is
+	// gone, so a preview that kept composing would land in a control nobody sees.
+	if (!on && _imeMarked) {
+		_imeMarked = NO;
+		GoosieWindow *gw = (GoosieWindow *)[self goosieOwner];
+		if (gw) pushIME(gw, GOOSIE_IME_MARKED, @"");
+	}
+}
 
 - (void)setFrameSize:(NSSize)newSize {
 	[super setFrameSize:newSize];
@@ -374,6 +415,12 @@ static void sendResize(GoosieContentView *v) {
 		case 115: ev.key = GOOSIE_KEY_HOME; push(gw, ev); return;
 		case 119: ev.key = GOOSIE_KEY_END; push(gw, ev); return;
 	}
+	// With the input context on, printable keys go through NSTextInputClient first so
+	// an IME can compose them. handleEvent returns NO for keys it does not want -
+	// those fall through to the raw path below, unchanged.
+	if (_imeEnabled && !(e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) {
+		if ([[self inputContext] handleEvent:e]) return;
+	}
 	// charactersIgnoringModifiers strips Cmd/Ctrl but keeps Option (dead keys,
 	// compose sequences). Control+letter yields a control code (1-26); convert
 	// back to the base lowercase letter so the Go handler sees the letter with
@@ -397,6 +444,53 @@ static void sendResize(GoosieContentView *v) {
 		}
 	}
 	push(gw, ev);
+}
+
+// NSTextInputClient is the input method's view of this window. It carries no text
+// state of its own: insertions and marked-text updates are pushed to Go as EvIME
+// events and the engine holds the composing string, because the caret and the value
+// live in the document, not in AppKit.
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+	NSString *text = [string isKindOfClass:[NSAttributedString class]] ? [string string] : (NSString *)string;
+	GoosieWindow *gw = (GoosieWindow *)[self goosieOwner];
+	_imeMarked = NO;
+	if (gw) pushIME(gw, GOOSIE_IME_COMMIT, text);
+}
+
+- (void)setMarkedText:(id)string selectedRange:(NSRange)selRange replacementRange:(NSRange)replacementRange {
+	NSString *text = [string isKindOfClass:[NSAttributedString class]] ? [string string] : (NSString *)string;
+	if (!text) text = @"";
+	GoosieWindow *gw = (GoosieWindow *)[self goosieOwner];
+	_imeMarked = text.length > 0;
+	if (gw) pushIME(gw, GOOSIE_IME_MARKED, text);
+}
+
+- (void)unmarkText {
+	GoosieWindow *gw = (GoosieWindow *)[self goosieOwner];
+	_imeMarked = NO;
+	if (gw) pushIME(gw, GOOSIE_IME_MARKED, @"");
+}
+
+- (BOOL)hasMarkedText { return _imeMarked; }
+
+- (NSRange)markedRange { return _imeMarked ? NSMakeRange(0, 1) : NSMakeRange(NSNotFound, 0); }
+
+- (NSRange)selectedRange { return NSMakeRange(0, 0); }
+
+- (NSArray *)validAttributesForMarkedText { return @[]; }
+
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+	return nil;
+}
+
+- (NSUInteger)characterIndexForPoint:(NSPoint)point { return 0; }
+
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+	// The candidate window anchors at the view, not at the caret: reporting the
+	// view's frame keeps the panel near the input, which is the part a v2 without a
+	// text-run-to-caret mapping can honestly answer.
+	NSRect r = [self convertRect:self.bounds toView:nil];
+	return [[self window] convertRectToScreen:r];
 }
 
 @end
@@ -800,6 +894,15 @@ void GoosieSetCursor(GoosieWindow *gw, int cursor) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (gw->quit) return;
 		[cursorFor(cursor) set];
+	});
+}
+
+void GoosieSetIME(GoosieWindow *gw, int enabled) {
+	if (!gw) return;
+	// setIMEEnabled touches the view's input context, an AppKit object: main thread.
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (gw->quit) return;
+		[gw->view setIMEEnabled:enabled ? YES : NO];
 	});
 }
 

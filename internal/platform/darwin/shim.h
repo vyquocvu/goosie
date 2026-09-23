@@ -32,9 +32,16 @@ enum {
 	GOOSIE_EV_POINTER = 2,
 	GOOSIE_EV_KEY = 3,
 	GOOSIE_EV_RESIZE = 4,
+	GOOSIE_EV_IME = 5,
 	// GOOSIE_EV_NONE is what a zeroed event reads as, so a struct that was never
 	// filled cannot be mistaken for a tick.
 	GOOSIE_EV_NONE = 255
+};
+
+// GoosieIMEAction separates the two things an EvIME carries.
+enum {
+	GOOSIE_IME_MARKED = 0,
+	GOOSIE_IME_COMMIT = 1
 };
 
 // GoosiePointerAction separates the three things an EvPointer carries.
@@ -93,6 +100,8 @@ typedef struct GoosieEvent {
 	int button;     // 1 left, 2 right, 3 middle, 0 none
 	int key;        // GOOSIE_EV_KEY: the typed rune, 0 for a control key
 	int mods;       // GOOSIE_EV_KEY: GOOSIE_MOD_* modifier flags
+	int ime;        // GOOSIE_EV_IME: GOOSIE_IME_MARKED or GOOSIE_IME_COMMIT
+	char text[256]; // GOOSIE_EV_IME: UTF-8 composition text, NUL-terminated
 	int w, h;       // GOOSIE_EV_RESIZE: the new surface size, device pixels
 	double scale;   // the device pixel ratio this event was produced under
 	long long at_ns;
@@ -137,6 +146,12 @@ int GoosiePresent(GoosieWindow *gw, const unsigned char *pixels, int w, int h,
 // GoosieSetCursor asks for a pointer shape. Like every other AppKit call it is
 // carried to the main thread rather than made there.
 void GoosieSetCursor(GoosieWindow *gw, int cursor);
+
+// GoosieSetIME turns the window's text input context on or off. Enabled, key
+// events flow through NSTextInputClient so an input method can compose; the
+// composition lands here as GOOSIE_EV_IME events. Disabling drops any marked
+// text. Like every other AppKit call it is carried to the main thread.
+void GoosieSetIME(GoosieWindow *gw, int enabled);
 
 // GoosieScaleFactor is the window's current device pixel ratio. It is readable
 // from any thread, which is what makes a scroll event's delta convertible after
