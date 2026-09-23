@@ -306,6 +306,20 @@ func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 	}}
 }
 
+// DefaultClientWithCookies returns DefaultClient whose jar persists to
+// cookiesPath: cookies saved by an earlier run load at construction, and
+// persistent cookies save back on Close. A missing file is the normal first
+// run. A file that exists but cannot be read or parsed is an error, and no
+// save happens on Close — a broken store must not be silently truncated.
+func DefaultClientWithCookies(cookiesPath string) (HTTP, error) {
+	c := DefaultClient().(*httpClient)
+	if err := c.jar.Load(cookiesPath); err != nil {
+		return nil, err
+	}
+	c.persistPath = cookiesPath
+	return c, nil
+}
+
 func checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) > 10 {
 		return errors.New("net: too many redirects")
@@ -321,9 +335,10 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 }
 
 type httpClient struct {
-	client  *http.Client
-	jar     *CookieJar
-	private bool
+	client      *http.Client
+	jar         *CookieJar
+	private     bool
+	persistPath string
 }
 
 func (c *httpClient) Get(ctx context.Context, raw string) (*Response, error) {
@@ -404,6 +419,11 @@ func (c *httpClient) SetTimeout(d time.Duration) {
 
 func (c *httpClient) Close() error {
 	c.client.CloseIdleConnections()
+	if c.persistPath != "" {
+		if err := c.jar.Save(c.persistPath); err != nil {
+			return err
+		}
+	}
 	if c.private {
 		c.jar.Clear()
 	}

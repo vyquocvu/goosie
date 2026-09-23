@@ -1,8 +1,13 @@
 package net
 
 import (
+	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,6 +89,14 @@ func (j *CookieJar) Store(reqURL *url.URL, setCookies []string) {
 			delete(j.entries, cookieKey(host, c.Name, c.Domain, c.Path))
 			continue
 		}
+		// (name, domain, path) identifies a cookie whatever host first stored
+		// it; a cookie loaded from disk under its Domain must be replaced, not
+		// duplicated, when a later response re-Sets it.
+		for k, old := range j.entries {
+			if old.Name == c.Name && old.Domain == c.Domain && old.Path == c.Path {
+				delete(j.entries, k)
+			}
+		}
 		j.entries[cookieKey(host, c.Name, c.Domain, c.Path)] = c
 		j.evict(host)
 	}
@@ -147,6 +160,107 @@ func (j *CookieJar) Clear() {
 	j.mu.Lock()
 	j.entries = make(map[string]*Cookie)
 	j.mu.Unlock()
+}
+
+// persistedCookie is the on-disk form of a stored cookie.
+type persistedCookie struct {
+	Name     string    `json:"name"`
+	Value    string    `json:"value"`
+	Domain   string    `json:"domain"`
+	Path     string    `json:"path"`
+	Secure   bool      `json:"secure,omitempty"`
+	HttpOnly bool      `json:"httpOnly,omitempty"`
+	Expires  time.Time `json:"expires"`
+	HostOnly bool      `json:"hostOnly,omitempty"`
+}
+
+// Save writes the jar's persistent cookies to path as JSON, atomically.
+// Session cookies are dropped by design: they end with the browsing session,
+// and an exit save is that end.
+func (j *CookieJar) Save(path string) error {
+	if j == nil {
+		return nil
+	}
+	j.mu.Lock()
+	out := make([]persistedCookie, 0, len(j.entries))
+	for _, c := range j.entries {
+		if c.Expires.IsZero() || c.Expires.Before(time.Now()) {
+			continue
+		}
+		out = append(out, persistedCookie{
+			Name:     c.Name,
+			Value:    c.Value,
+			Domain:   c.Domain,
+			Path:     c.Path,
+			Secure:   c.Secure,
+			HttpOnly: c.HttpOnly,
+			Expires:  c.Expires,
+			HostOnly: c.hostOnly,
+		})
+	}
+	j.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".cookies-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// Load merges cookies written by Save into the jar. A missing file is the
+// normal first-run case, not an error; expired and nameless entries are
+// dropped rather than stored. Domain-keyed entries loaded here are replaced,
+// never duplicated, when a later response re-Sets the same cookie.
+func (j *CookieJar) Load(path string) error {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var in []persistedCookie
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, pc := range in {
+		if pc.Name == "" || pc.Domain == "" {
+			continue
+		}
+		if !pc.Expires.IsZero() && pc.Expires.Before(time.Now()) {
+			continue
+		}
+		if pc.Path == "" {
+			pc.Path = "/"
+		}
+		j.entries[cookieKey(pc.Domain, pc.Name, pc.Domain, pc.Path)] = &Cookie{
+			Name:     pc.Name,
+			Value:    pc.Value,
+			Domain:   pc.Domain,
+			Path:     pc.Path,
+			Secure:   pc.Secure,
+			HttpOnly: pc.HttpOnly,
+			Expires:  pc.Expires,
+			hostOnly: pc.HostOnly,
+		}
+	}
+	return nil
 }
 
 // evict enforces the jar limits, called with the lock held. Expired entries go

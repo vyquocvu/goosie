@@ -94,20 +94,36 @@ var errUsage = errors.New("usage")
 
 // config is one parsed invocation.
 type config struct {
-	url        string
-	gate       bool
-	bench      bool
-	screenshot bool
-	backend    string
-	frames       int
-	scene        string
-	out          string
-	width        int
-	height       int
-	dpr          float64
-	downloadDir  string
-	private      bool
-	sessionFile  string
+	url         string
+	gate        bool
+	bench       bool
+	screenshot  bool
+	backend     string
+	frames      int
+	scene       string
+	out         string
+	width       int
+	height      int
+	dpr         float64
+	downloadDir string
+	private     bool
+	profile     string
+	sessionFile string
+	cookieFile  string
+}
+
+// stateDir is where this invocation keeps persistent state: the default
+// profile lives in ~/.goosie, a named one in ~/.goosie/profiles/<name>.
+func (c config) stateDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".goosie"
+	}
+	base := filepath.Join(home, ".goosie")
+	if c.profile == "" {
+		return base
+	}
+	return filepath.Join(base, "profiles", c.profile)
 }
 
 // devSize is the surface in device pixels: the units the frame path, the scheduler,
@@ -156,11 +172,8 @@ func parse(args []string) (config, error) {
 	}
 	fs.StringVar(&c.downloadDir, "download-dir", dlDir, "directory where downloads are saved")
 	fs.BoolVar(&c.private, "private", false, "run a private session: cookies are dropped on exit")
-	sessionDefault := ".goosie-session.json"
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		sessionDefault = filepath.Join(home, ".goosie", "session.json")
-	}
-	fs.StringVar(&c.sessionFile, "session-file", sessionDefault, "file where the open tabs are saved between runs")
+	fs.StringVar(&c.profile, "profile", "", "named profile: state lives under ~/.goosie/profiles/<name> instead of ~/.goosie")
+	fs.StringVar(&c.sessionFile, "session-file", "", "file where the open tabs are saved between runs")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
@@ -179,6 +192,8 @@ func parse(args []string) (config, error) {
 		return c, fmt.Errorf("%w: -dpr must be in (0, 8]", errUsage)
 	case c.frames <= 0:
 		return c, fmt.Errorf("%w: -frames must be positive", errUsage)
+	case c.profile == "." || c.profile == ".." || strings.ContainsAny(c.profile, "/\\"):
+		return c, fmt.Errorf("%w: -profile must be a bare name", errUsage)
 	}
 	if _, err := sceneSpec(c.scene); err != nil {
 		return c, err
@@ -199,6 +214,10 @@ func parse(args []string) (config, error) {
 			return c, fmt.Errorf("%w: -screenshot requires -url", errUsage)
 		}
 	}
+	if c.sessionFile == "" {
+		c.sessionFile = filepath.Join(c.stateDir(), "session.json")
+	}
+	c.cookieFile = filepath.Join(c.stateDir(), "cookies.json")
 	return c, nil
 }
 
@@ -254,7 +273,13 @@ func build(c config) (*framePath, error) {
 	if c.private {
 		client = net.DefaultPrivateClient()
 	} else {
-		client = net.DefaultClient()
+		persistent, err := net.DefaultClientWithCookies(c.cookieFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: cookies: %v\n", err)
+			client = net.DefaultClient()
+		} else {
+			client = persistent
+		}
 	}
 
 	var layer *frame.Layer
@@ -972,7 +997,11 @@ func run(args []string) error {
 		return err
 	}
 	defer func() { _ = f.pool.Close() }()
-	defer func() { _ = f.client.Close() }()
+	defer func() {
+		if err := f.client.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie:", err)
+		}
+	}()
 
 	if err := f.openWindow(); err != nil {
 		return err

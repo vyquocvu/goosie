@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -301,5 +302,43 @@ func TestParseSessionFileFlag(t *testing.T) {
 	}
 	if c.sessionFile != "/tmp/mine.json" {
 		t.Errorf("session file = %q, want /tmp/mine.json", c.sessionFile)
+	}
+}
+
+func TestParseProfileScopesStateFiles(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	c, err := parse([]string{"-profile", "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSession := filepath.Join(home, ".goosie", "profiles", "work", "session.json")
+	if c.sessionFile != wantSession {
+		t.Errorf("profile session file = %q, want %q", c.sessionFile, wantSession)
+	}
+	wantCookies := filepath.Join(home, ".goosie", "profiles", "work", "cookies.json")
+	if c.cookieFile != wantCookies {
+		t.Errorf("profile cookie file = %q, want %q", c.cookieFile, wantCookies)
+	}
+
+	c, err = parse([]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.cookieFile != filepath.Join(home, ".goosie", "cookies.json") {
+		t.Errorf("default cookie file = %q, want under ~/.goosie", c.cookieFile)
+	}
+	if strings.Contains(c.cookieFile, "profiles") {
+		t.Errorf("default cookie file must not live under profiles/: %q", c.cookieFile)
+	}
+}
+
+func TestParseProfileRejectsUnsafeNames(t *testing.T) {
+	for _, name := range []string{"../etc", "a/b", `a\b`, "..", "."} {
+		if _, err := parse([]string{"-profile", name}); err == nil {
+			t.Errorf("parse(-profile %q) succeeded, want a usage error", name)
+		}
 	}
 }
