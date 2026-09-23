@@ -384,7 +384,17 @@ static void sendResize(GoosieContentView *v) {
 		if ((ev.mods & GOOSIE_MOD_CONTROL) && c < 0x20 && c >= 1) {
 			c = 'a' + (c - 1) % 26;
 		}
-		ev.key = (int)c;
+		// Take the first whole UTF-16 scalar, never a lone surrogate: Go's rune
+		// conversion would turn one into U+FFFD and corrupt the edit. A lone
+		// surrogate leaves key 0, which the Go side treats as a control key.
+		if (c >= 0xD800 && c <= 0xDBFF && chars.length > 1) {
+			unichar lo = [chars characterAtIndex:1];
+			if (lo >= 0xDC00 && lo <= 0xDFFF) {
+				ev.key = (int)(0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00));
+			}
+		} else if (c < 0xD800 || c > 0xDFFF) {
+			ev.key = (int)c;
+		}
 	}
 	push(gw, ev);
 }
