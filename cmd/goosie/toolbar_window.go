@@ -31,6 +31,7 @@ type chromeWindow struct {
 	onCopy       func() bool
 	hitTestLink  func(contentX, contentY int32) string
 	chromeBitmap *frame.Bitmap
+	outBitmap    *frame.Bitmap
 	fonts        *raster.Fonts
 }
 
@@ -94,13 +95,35 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0, cw.fonts, cw.sc())
 	cw.toolbar.Draw(cw.chromeBitmap, int32(tabs.TabBarHeight)*cw.sc())
 
-	for y := int32(0); y < chromeH && y < int32(buf.H); y++ {
-		copy(buf.RGBA[int(y)*buf.Stride:int(y)*buf.Stride+buf.Stride], cw.chromeBitmap.RGBA[int(y)*cw.chromeBitmap.Stride:int(y)*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
+	// The loop's backing store is the content viewport, so buf is window-minus-
+	// chrome tall. The window surface is the whole window, so the presented
+	// bitmap has to carry the chrome rows on top and the content rows shifted
+	// down by chromeH; presenting buf directly would show a short frame and let
+	// the chrome paint over the top of the document.
+	outH := int32(buf.H) + chromeH
+	if cw.outBitmap == nil || int32(cw.outBitmap.W) != int32(buf.W) || int32(cw.outBitmap.H) != outH {
+		cw.outBitmap = frame.NewBitmap(buf.W, int(outH))
+	}
+	out := cw.outBitmap
+
+	for y := int32(0); y < chromeH; y++ {
+		copy(out.RGBA[int(y)*out.Stride:int(y)*out.Stride+out.Stride], cw.chromeBitmap.RGBA[int(y)*cw.chromeBitmap.Stride:int(y)*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
+	}
+	for y := int32(0); y < int32(buf.H); y++ {
+		oy := int(y+chromeH) * out.Stride
+		sy := int(y) * buf.Stride
+		copy(out.RGBA[oy:oy+out.Stride], buf.RGBA[sy:sy+buf.Stride])
 	}
 
-	chromeRect := frame.Rect4(0, 0, int32(buf.W), chromeH)
-	merged := append(damage[:len(damage):len(damage)], chromeRect)
-	return cw.Window.Present(buf, merged)
+	merged := make([]frame.Rect, 0, len(damage)+1)
+	merged = append(merged, frame.Rect4(0, 0, int32(out.W), chromeH))
+	for _, r := range damage {
+		if r.Empty() {
+			continue
+		}
+		merged = append(merged, frame.Rect4(r.X0, r.Y0+chromeH, r.X1, r.Y1+chromeH))
+	}
+	return cw.Window.Present(out, merged)
 }
 
 func (cw *chromeWindow) Events() <-chan surface.Event {

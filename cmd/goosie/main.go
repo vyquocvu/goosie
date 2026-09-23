@@ -1233,9 +1233,16 @@ func normalizeURL(raw string) string {
 // openWindow picks the window last, because a backend that cannot open one is a
 // property of the machine the report has to state rather than a construction error.
 func (f *framePath) openWindow() error {
+	// The surface is the whole window: the content viewport plus the chrome the
+	// chromeWindow composites on top of it. config.devSize is the content size
+	// alone, so the chrome band is added back here.
+	size := f.config.devSize()
+	if f.toolbar != nil && f.tabMgr != nil {
+		size.H += int32(totalChromeHeight) * int32(f.config.dpr+0.5)
+	}
 	w, err := platform.Select(platform.Options{
 		Backend:     f.config.backend,
-		Size:        f.config.devSize(),
+		Size:        size,
 		Scale:       float32(f.config.dpr),
 		VsyncPeriod: f.config.vsyncPeriod(),
 		Title:       "Goosie",
