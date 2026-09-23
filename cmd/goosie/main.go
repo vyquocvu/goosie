@@ -27,9 +27,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/bookmarks"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/platform"
@@ -106,10 +108,12 @@ type config struct {
 	height      int
 	dpr         float64
 	downloadDir string
-	private     bool
-	profile     string
-	sessionFile string
-	cookieFile  string
+	private      bool
+	profile      string
+	sessionFile  string
+	cookieFile   string
+	bookmarkFile string
+	historyFile  string
 }
 
 // stateDir is where this invocation keeps persistent state: the default
@@ -218,6 +222,8 @@ func parse(args []string) (config, error) {
 		c.sessionFile = filepath.Join(c.stateDir(), "session.json")
 	}
 	c.cookieFile = filepath.Join(c.stateDir(), "cookies.json")
+	c.bookmarkFile = filepath.Join(c.stateDir(), "bookmarks.json")
+	c.historyFile = filepath.Join(c.stateDir(), "history.json")
 	return c, nil
 }
 
@@ -250,6 +256,8 @@ type framePath struct {
 	tabMgr   *tabs.TabManager
 	client   net.HTTP
 	fonts    *raster.Fonts
+	bookmarks *bookmarks.Store
+	history   *history.Store
 	started    time.Time
 	navResults chan navResult
 	zoom       float64
@@ -279,6 +287,21 @@ func build(c config) (*framePath, error) {
 			client = net.DefaultClient()
 		} else {
 			client = persistent
+		}
+	}
+
+	var bookmarkStore *bookmarks.Store
+	var historyStore *history.Store
+	if !c.private {
+		bookmarkStore, err = bookmarks.Load(c.bookmarkFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: bookmarks: %v\n", err)
+			bookmarkStore = nil
+		}
+		historyStore, err = history.Load(c.historyFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: history: %v\n", err)
+			historyStore = nil
 		}
 	}
 
@@ -328,6 +351,8 @@ func build(c config) (*framePath, error) {
 		config:     c,
 		client:     client,
 		fonts:      fonts,
+		bookmarks:  bookmarkStore,
+		history:    historyStore,
 		navResults: make(chan navResult, 16),
 		zoom:       1.0,
 	}
@@ -489,6 +514,9 @@ func (f *framePath) applyNavResult(result navResult) {
 	if !result.noHistory {
 		tab.History.Push(result.url)
 	}
+	if f.history != nil {
+		f.history.Record(result.url, result.url)
+	}
 
 	if f.tabMgr.Active() == tab {
 		f.syncTabToToolbar()
@@ -497,6 +525,18 @@ func (f *framePath) applyNavResult(result navResult) {
 			Layers:     []*frame.Layer{result.layer},
 			Background: result.bgColor,
 		})
+	}
+}
+
+// toggleBookmark stars or unstars the active tab's page and persists immediately.
+func (f *framePath) toggleBookmark() {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.URL == "" || f.bookmarks == nil {
+		return
+	}
+	f.bookmarks.Toggle(tab.URL, tab.Title)
+	if err := f.bookmarks.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "goosie: save bookmarks: %v\n", err)
 	}
 }
 
@@ -963,6 +1003,7 @@ func (f *framePath) openWindow() error {
 			f.handleResize,
 			f.handleZoom,
 			f.handleLinkClick,
+			f.toggleBookmark,
 			f.hitTestLink,
 			f.fonts,
 		)
@@ -1105,6 +1146,11 @@ func run(args []string) error {
 	if !c.paced() && !c.private {
 		if err := session.Save(c.sessionFile, sessionState(f)); err != nil {
 			fmt.Fprintf(os.Stderr, "goosie: save session: %v\n", err)
+		}
+		if f.history != nil {
+			if err := f.history.Save(); err != nil {
+				fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)
+			}
 		}
 	}
 	if err := <-loopErr; err != nil {

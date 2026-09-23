@@ -22,6 +22,7 @@ type chromeWindow struct {
 	onResize     func(contentW, contentH int)
 	onZoom       func(delta float64)
 	onLinkClick  func(href string)
+	onBookmark   func()
 	hitTestLink  func(contentX, contentY int32) string
 	chromeBitmap *frame.Bitmap
 	fonts        *raster.Fonts
@@ -30,7 +31,8 @@ type chromeWindow struct {
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64),
 	onResize func(contentW, contentH int), onZoom func(delta float64),
-	onLinkClick func(href string), hitTestLink func(contentX, contentY int32) string,
+	onLinkClick func(href string), onBookmark func(),
+	hitTestLink func(contentX, contentY int32) string,
 	fonts *raster.Fonts) *chromeWindow {
 	cw := &chromeWindow{
 		Window:      w,
@@ -43,6 +45,7 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		onResize:    onResize,
 		onZoom:      onZoom,
 		onLinkClick: onLinkClick,
+		onBookmark:  onBookmark,
 		hitTestLink: hitTestLink,
 		fonts:       fonts,
 	}
@@ -197,6 +200,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case key == 'f' || key == 'F':
 		if cw.toolbar != nil {
 			cw.toolbar.OpenFind()
+			return true
+		}
+	case key == 'd' || key == 'D':
+		if cw.onBookmark != nil {
+			cw.onBookmark()
 			return true
 		}
 	case key == 'w' || key == 'W':
