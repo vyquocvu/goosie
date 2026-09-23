@@ -184,8 +184,17 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 	}
 	familyMap := make(map[string]uint16)
 	registry := make(map[style.CustomFontKey]uint16)
+	deadline := time.Now().Add(fontFetchBudget)
+	var fetched int
+	var fetchedBytes int64
 	for _, sheet := range sheets {
 		for _, ff := range sheet.FontFaces {
+			if fetched >= maxFontRequests {
+				return
+			}
+			if time.Now().After(deadline) {
+				return
+			}
 			var family, srcURL, weightStr, styleStr string
 			for _, d := range ff.Declarations {
 				switch d.Property {
@@ -209,6 +218,11 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 			data, err := s.fontFetch(s.fontBase, abs)
 			if err != nil {
 				continue
+			}
+			fetchedBytes += int64(len(data))
+			fetched++
+			if fetchedBytes > maxFontBytes {
+				return
 			}
 			idx, err := s.fontReg.Register(data)
 			if err != nil {
@@ -260,6 +274,20 @@ func extractFontURL(v string) string {
 	}
 	return strings.TrimSpace(rest[:end])
 }
+
+// maxFontRequests caps how many @font-face sources one document may fetch so a
+// stylesheet that references dozens of weights cannot stall first paint.
+const maxFontRequests = 16
+
+// maxFontBytes caps the total font payload one document may download. A single
+// woff2 is typically 20–100 KiB; 10 MiB covers generous real-world pages while
+// blocking a hostile stylesheet that references gigabytes of font data.
+const maxFontBytes = 10 << 20
+
+// fontFetchBudget is the wall-clock deadline for all font fetching. After this
+// elapses, remaining @font-face rules are skipped and the document falls back
+// to system fonts.
+const fontFetchBudget = 6 * time.Second
 
 // maxLoadedImages bounds how many image subresources one document may fetch,
 // so a page that references hundreds cannot stall the first frame.

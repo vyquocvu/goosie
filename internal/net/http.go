@@ -209,6 +209,7 @@ func NormalizeURL(raw string) (string, error) {
 		if (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) || !filepath.IsAbs(u.Path) || u.RawQuery != "" || u.ForceQuery {
 			return "", errors.New("net: file URL requires a local authority, absolute path, and no query")
 		}
+		u.Path = filepath.Clean(u.Path)
 	default:
 		return "", errors.New("net: unsupported URL scheme")
 	}
@@ -344,7 +345,11 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	}
 	headers := make(map[string]string, len(resp.Header))
 	for k, values := range resp.Header {
-		headers[k] = strings.Join(values, ", ")
+		if strings.EqualFold(k, "Set-Cookie") {
+			headers[k] = strings.Join(values, "\n")
+		} else {
+			headers[k] = strings.Join(values, ", ")
+		}
 	}
 	return &Response{
 		StatusCode: resp.StatusCode,
@@ -396,8 +401,9 @@ func readFileURL(ctx context.Context, u *url.URL) (*Response, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	path := filepath.Clean(u.Path)
 	// Check before opening so devices and FIFOs are never deliberately opened.
-	info, err := os.Stat(u.Path)
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("net: stat file: %w", err)
 	}
@@ -409,7 +415,7 @@ func readFileURL(ctx context.Context, u *url.URL) (*Response, error) {
 	}
 	// Nonblocking open prevents a replacement FIFO from hanging between Stat
 	// and Open. Validate the opened descriptor again before reading any bytes.
-	file, err := os.OpenFile(u.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("net: opening file: %w", err)
 	}
@@ -428,7 +434,7 @@ func readFileURL(ctx context.Context, u *url.URL) (*Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("net: reading file: %w", err)
 	}
-	contentType := mime.TypeByExtension(filepath.Ext(u.Path))
+	contentType := mime.TypeByExtension(filepath.Ext(path))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
