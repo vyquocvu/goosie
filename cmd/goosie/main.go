@@ -21,11 +21,13 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/net"
@@ -68,14 +70,21 @@ const (
 
 // navResult is the outcome of a per-tab navigation, delivered on navResults.
 type navResult struct {
-	tabID   uint64
-	serial  uint64
-	layer   *frame.Layer
-	bgColor frame.Color
-	session *engine.Session
-	err     error
-	url     string
+	tabID        uint64
+	serial       uint64
+	layer        *frame.Layer
+	bgColor      frame.Color
+	session      *engine.Session
+	err          error
+	url          string
+	downloadPath string
 }
+
+// downloadDone reports a completed download instead of a rendered document;
+// the navigation goroutine converts it into navResult.downloadPath.
+type downloadDone struct{ path string }
+
+func (e downloadDone) Error() string { return "downloaded to " + e.path }
 
 // errUsage marks a bad invocation, which the shell should see as exit status 2 rather
 // than as a failure deep inside a run.
@@ -94,6 +103,7 @@ type config struct {
 	width      int
 	height     int
 	dpr        float64
+	downloadDir string
 }
 
 // devSize is the surface in device pixels: the units the frame path, the scheduler,
@@ -134,6 +144,13 @@ func parse(args []string) (config, error) {
 	fs.IntVar(&c.width, "width", 1440, "viewport width in CSS pixels")
 	fs.IntVar(&c.height, "height", 900, "viewport height in CSS pixels")
 	fs.Float64Var(&c.dpr, "dpr", 2, "device pixel ratio")
+	dlDir, err := os.UserHomeDir()
+	if err != nil || dlDir == "" {
+		dlDir = "."
+	} else {
+		dlDir = filepath.Join(dlDir, "Downloads")
+	}
+	fs.StringVar(&c.downloadDir, "download-dir", dlDir, "directory where downloads are saved")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
@@ -364,16 +381,16 @@ func (f *framePath) navigateTab(rawURL string) {
 	f.toolbar.Error = ""
 
 	go func() {
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
-		f.navResults <- navResult{
-			tabID:   tab.ID,
-			serial:  serial,
-			layer:   layer,
-			bgColor: bgColor,
-			session: sess,
-			err:     err,
-			url:     u,
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir)
+		res := navResult{tabID: tab.ID, serial: serial, url: u}
+		var dd downloadDone
+		if errors.As(err, &dd) {
+			res.downloadPath = dd.path
+		} else {
+			res.err = err
 		}
+		res.layer, res.bgColor, res.session = layer, bgColor, sess
+		f.navResults <- res
 	}()
 }
 
@@ -400,6 +417,13 @@ func (f *framePath) applyNavResult(result navResult) {
 	tab.Nav.Mu.Unlock()
 
 	tab.Loading = false
+	if result.downloadPath != "" {
+		if f.tabMgr.Active() == tab {
+			f.toolbar.SetLoading(false)
+		}
+		fmt.Fprintf(os.Stderr, "goosie: saved %s\n", result.downloadPath)
+		return
+	}
 	if result.err != nil {
 		tab.Error = result.err.Error()
 		if f.tabMgr.Active() == tab {
@@ -471,16 +495,16 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 	f.toolbar.SetLoading(true)
 
 	go func() {
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
-		f.navResults <- navResult{
-			tabID:   tab.ID,
-			serial:  serial,
-			layer:   layer,
-			bgColor: bgColor,
-			session: sess,
-			err:     err,
-			url:     u,
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir)
+		res := navResult{tabID: tab.ID, serial: serial, url: u}
+		var dd downloadDone
+		if errors.As(err, &dd) {
+			res.downloadPath = dd.path
+		} else {
+			res.err = err
 		}
+		res.layer, res.bgColor, res.session = layer, bgColor, sess
+		f.navResults <- res
 	}()
 }
 
@@ -731,7 +755,7 @@ func (f *framePath) closeTab(id uint64) {
 }
 
 // loadURLCtx is like loadURL but respects context cancellation.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: viewport: %w", err)
 	}
@@ -742,6 +766,14 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	resp, err := client.Get(ctx, rawURL)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
+	}
+	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
+		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
+		savedPath, saveErr := download.Save(downloadDir, name, resp.Body)
+		if saveErr != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, saveErr
+		}
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, downloadDone{path: savedPath}
 	}
 	// Linked style sheets are fetched with the same client and the same
 	// cancellation: the linker sees absolute http(s) URLs only, because the
@@ -883,7 +915,7 @@ func run(args []string) error {
 	// synchronously and the run captures the page it was asked for.
 	if c.url != "" && !c.gate && !c.bench {
 		if c.screenshot {
-			layer, _, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr))
+			layer, _, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir)
 			if err != nil {
 				return err
 			}

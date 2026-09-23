@@ -60,7 +60,7 @@ func TestLoadURLCtxRejectsInvalidViewport(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), tc.w, tc.h, tc.scale)
+			layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), tc.w, tc.h, tc.scale, t.TempDir())
 			if err == nil {
 				t.Fatalf("loadURLCtx(%d,%d,%v) succeeded, want error", tc.w, tc.h, tc.scale)
 			}
@@ -86,7 +86,7 @@ func TestLoadURLCtxValidSmallDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1)
+	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir())
 	if err != nil {
 		t.Fatalf("loadURLCtx failed: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestLoadURLCtxRejectsOversizedDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1)
+	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir())
 	if err == nil {
 		t.Fatal("loadURLCtx succeeded on oversized document")
 	}
