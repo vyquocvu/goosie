@@ -72,6 +72,7 @@ type navResult struct {
 	serial  uint64
 	layer   *frame.Layer
 	bgColor frame.Color
+	session *engine.Session
 	err     error
 	url     string
 }
@@ -349,12 +350,13 @@ func (f *framePath) navigateTab(rawURL string) {
 	f.toolbar.Error = ""
 
 	go func() {
-		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
 		f.navResults <- navResult{
 			tabID:   tab.ID,
 			serial:  serial,
 			layer:   layer,
 			bgColor: bgColor,
+			session: sess,
 			err:     err,
 			url:     u,
 		}
@@ -395,6 +397,7 @@ func (f *framePath) applyNavResult(result navResult) {
 	}
 
 	tab.Layer = result.layer
+	tab.Session = result.session
 	tab.BGColor = result.bgColor
 	tab.URL = result.url
 	tab.Title = result.url
@@ -453,12 +456,13 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 	f.toolbar.SetLoading(true)
 
 	go func() {
-		layer, _, bgColor, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr))
 		f.navResults <- navResult{
 			tabID:   tab.ID,
 			serial:  serial,
 			layer:   layer,
 			bgColor: bgColor,
+			session: sess,
 			err:     err,
 			url:     u,
 		}
@@ -552,17 +556,17 @@ func (f *framePath) closeTab(id uint64) {
 }
 
 // loadURLCtx is like loadURL but respects context cancellation.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: viewport: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: viewport: %w", err)
 	}
 	// Check context before starting the fetch.
 	if ctx.Err() != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, ctx.Err()
 	}
 	resp, err := client.Get(ctx, rawURL)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
 	}
 	// Linked style sheets are fetched with the same client and the same
 	// cancellation: the linker sees absolute http(s) URLs only, because the
@@ -597,7 +601,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	}
 	// Check context after the fetch in case it was cancelled during the network call.
 	if ctx.Err() != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), ctx.Err()
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, ctx.Err()
 	}
 	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW),
 		engine.WithMetrics(fonts),
@@ -606,22 +610,22 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithImages(resp.URL, imageFetcher),
 		engine.WithCustomFontLoading(resp.URL, fontFetcher, fonts))
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: build session: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: build session: %w", err)
 	}
 	list, err := sess.PaintChecked(scale)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: paint document: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: paint document: %w", err)
 	}
 	dl := list.Build(1)
 	extent := dl.Extent()
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), fmt.Errorf("goosie: size document cache: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: size document cache: %w", err)
 	}
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
-	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), nil
+	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, nil
 }
 
 // normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
@@ -653,6 +657,8 @@ func (f *framePath) openWindow() error {
 			func(id uint64) { f.switchTab(id) },
 			func() { f.newTab() },
 			func(id uint64) { f.closeTab(id) },
+			nil,
+			f.fonts,
 		)
 	} else {
 		f.window = w
@@ -699,7 +705,7 @@ func run(args []string) error {
 	// synchronously and the run captures the page it was asked for.
 	if c.url != "" && !c.gate && !c.bench {
 		if c.screenshot {
-			layer, _, bgColor, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr))
+			layer, _, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr))
 			if err != nil {
 				return err
 			}

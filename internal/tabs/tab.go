@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
@@ -24,6 +25,7 @@ type Tab struct {
 	History *toolbar.History
 	ScrollY int32
 	Layer   *frame.Layer
+	Session *engine.Session
 	Loading bool
 	Error   string
 	BGColor frame.Color

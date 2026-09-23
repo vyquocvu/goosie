@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
+	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -18,11 +19,14 @@ type chromeWindow struct {
 	onSwitch     func(uint64)
 	onNewTab     func()
 	onCloseTab   func(uint64)
+	onResize     func(contentW, contentH int)
 	chromeBitmap *frame.Bitmap
+	fonts        *raster.Fonts
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
-	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64)) *chromeWindow {
+	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64),
+	onResize func(contentW, contentH int), fonts *raster.Fonts) *chromeWindow {
 	cw := &chromeWindow{
 		Window:     w,
 		toolbar:    tb,
@@ -31,6 +35,8 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		onSwitch:   onSwitch,
 		onNewTab:   onNewTab,
 		onCloseTab: onCloseTab,
+		onResize:   onResize,
+		fonts:      fonts,
 	}
 	go cw.pump()
 	return cw
@@ -118,6 +124,13 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		return false
 	case surface.EvResize:
 		cw.toolbar.SetBounds(ev.Size.W)
+		if cw.onResize != nil {
+			contentH := int(ev.Size.H) - totalChromeHeight
+			if contentH < 0 {
+				contentH = 0
+			}
+			cw.onResize(int(ev.Size.W), contentH)
+		}
 		return false
 	default:
 		return false
