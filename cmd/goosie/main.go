@@ -478,6 +478,47 @@ func (f *framePath) reloadTab() {
 	f.navigateTabNoHistory(tab.URL)
 }
 
+// handleResize reflows and repaints the active tab after the window is resized.
+func (f *framePath) handleResize(contentW, contentH int) {
+	f.config.width = contentW
+	f.config.height = contentH
+
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return
+	}
+
+	if err := tab.Session.Reflow(float32(contentW)); err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+		return
+	}
+
+	list, err := tab.Session.PaintChecked(float32(f.config.dpr))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: paint after reflow:", err)
+		return
+	}
+
+	dl := list.Build(1)
+	extent := dl.Extent()
+	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: budget after reflow:", err)
+		return
+	}
+
+	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+	layer := frame.NewLayer(1, extent, budgetBytes, pool)
+	layer.SetContent(dl)
+
+	tab.Layer = layer
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     tab.Nav.Serial,
+		Layers:     []*frame.Layer{layer},
+		Background: tab.BGColor,
+	})
+}
+
 // switchTab saves the current tab's scroll and switches to the given tab.
 func (f *framePath) switchTab(id uint64) {
 	cur := f.tabMgr.Active()
@@ -657,7 +698,7 @@ func (f *framePath) openWindow() error {
 			func(id uint64) { f.switchTab(id) },
 			func() { f.newTab() },
 			func(id uint64) { f.closeTab(id) },
-			nil,
+			f.handleResize,
 			f.fonts,
 		)
 	} else {
