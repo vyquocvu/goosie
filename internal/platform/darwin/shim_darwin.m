@@ -96,11 +96,12 @@ struct GoosieWindow {
 	// blocked GoosieNextEvent. Every commit block checks it before touching gw.
 	int quit;
 
-	// The pixel surfaces. surf[i] is C memory, sw/sh[i] its dimensions, cap[i] its
-	// allocation, busy[i] whether Core Animation still owes it a release callback.
+	// The pixel surfaces. surf[i] is C memory, sw/sh[i] its dimensions, ss[i] its stride,
+	// cap[i] its allocation, busy[i] whether Core Animation still owes it a release callback.
 	unsigned char *surf[kGoosieSurfaceSlots];
 	int sw[kGoosieSurfaceSlots];
 	int sh[kGoosieSurfaceSlots];
+	int ss[kGoosieSurfaceSlots];
 	size_t cap[kGoosieSurfaceSlots];
 	int busy[kGoosieSurfaceSlots];
 	// need_full says the next successful present has to upload the whole surface rather
@@ -721,7 +722,7 @@ static void upload(unsigned char *dst, const unsigned char *src, int w, int h, i
 static int claimSurface(GoosieWindow *gw, int w, int h, int stride, int *fresh) {
 	size_t need = (size_t)stride * (size_t)h;
 	for (int i = 0; i < kGoosieSurfaceSlots; i++) {
-		if (!gw->busy[i] && gw->surf[i] && gw->sw[i] == w && gw->sh[i] == h) {
+		if (!gw->busy[i] && gw->surf[i] && gw->sw[i] == w && gw->sh[i] == h && gw->ss[i] == stride) {
 			gw->busy[i] = 1;
 			*fresh = 0;
 			return i;
@@ -737,6 +738,7 @@ static int claimSurface(GoosieWindow *gw, int w, int h, int stride, int *fresh) 
 		if (!gw->surf[i]) continue;
 		gw->sw[i] = w;
 		gw->sh[i] = h;
+		gw->ss[i] = stride;
 		gw->busy[i] = 1;
 		*fresh = 1;
 		return i;
