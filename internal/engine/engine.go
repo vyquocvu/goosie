@@ -563,3 +563,34 @@ func (s *Session) BackgroundColor() frame.Color {
 	}
 	return frame.RGB(255, 255, 255)
 }
+
+// HitTestLink returns the href of the nearest ancestor <a> at the given
+// document-coordinate point (CSS pixels), or empty string if no link is there.
+func (s *Session) HitTestLink(x, y float32) string {
+	if s.Arena == nil {
+		return ""
+	}
+	objs := s.Arena.Objects
+	for i := len(objs) - 1; i >= 1; i-- {
+		obj := &objs[i]
+		x0, y0, x1, y1 := obj.BorderRect()
+		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+			continue
+		}
+		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Node != nil && cur.Node.DataAtom == dom.AtomA {
+				if href := cur.Node.GetAttribute("href"); href != "" {
+					return href
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func parentObj(objs []layout.Object, o *layout.Object) *layout.Object {
+	if o.Parent == 0 || int(o.Parent) >= len(objs) {
+		return nil
+	}
+	return &objs[o.Parent]
+}

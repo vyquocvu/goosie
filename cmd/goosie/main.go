@@ -536,6 +536,26 @@ func (f *framePath) handleZoom(delta float64) {
 	f.handleResize(f.config.width, f.config.height)
 }
 
+func (f *framePath) handleLinkClick(href string) {
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
+	f.navigateTab(href)
+}
+
+func (f *framePath) hitTestLink(contentX, contentY int32) string {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return ""
+	}
+	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	vp := f.sched.Viewport()
+	docX := float32(contentX)/effectiveDPR + float32(vp.Offset.X)/effectiveDPR
+	docY := float32(contentY)/effectiveDPR + float32(vp.Offset.Y)/effectiveDPR
+	return tab.Session.HitTestLink(docX, docY)
+}
+
 // switchTab saves the current tab's scroll and switches to the given tab.
 func (f *framePath) switchTab(id uint64) {
 	cur := f.tabMgr.Active()
@@ -725,6 +745,8 @@ func (f *framePath) openWindow() error {
 			func(id uint64) { f.closeTab(id) },
 			f.handleResize,
 			f.handleZoom,
+			f.handleLinkClick,
+			f.hitTestLink,
 			f.fonts,
 		)
 	} else {
