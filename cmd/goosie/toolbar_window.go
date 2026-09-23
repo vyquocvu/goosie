@@ -20,13 +20,14 @@ type chromeWindow struct {
 	onNewTab     func()
 	onCloseTab   func(uint64)
 	onResize     func(contentW, contentH int)
+	onZoom       func(delta float64)
 	chromeBitmap *frame.Bitmap
 	fonts        *raster.Fonts
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64),
-	onResize func(contentW, contentH int), fonts *raster.Fonts) *chromeWindow {
+	onResize func(contentW, contentH int), onZoom func(delta float64), fonts *raster.Fonts) *chromeWindow {
 	cw := &chromeWindow{
 		Window:     w,
 		toolbar:    tb,
@@ -36,6 +37,7 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		onNewTab:   onNewTab,
 		onCloseTab: onCloseTab,
 		onResize:   onResize,
+		onZoom:     onZoom,
 		fonts:      fonts,
 	}
 	go cw.pump()
@@ -202,6 +204,21 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 		n := int(key - '1')
 		if n < len(tabList) && cw.onSwitch != nil {
 			cw.onSwitch(tabList[n].ID)
+			return true
+		}
+	case key == '=' || key == '+':
+		if cw.onZoom != nil {
+			cw.onZoom(0.1)
+			return true
+		}
+	case key == '-':
+		if cw.onZoom != nil {
+			cw.onZoom(-0.1)
+			return true
+		}
+	case key == '0':
+		if cw.onZoom != nil {
+			cw.onZoom(0)
 			return true
 		}
 	}

@@ -206,6 +206,7 @@ type framePath struct {
 	fonts    *raster.Fonts
 	started    time.Time
 	navResults chan navResult
+	zoom     float64
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -268,6 +269,7 @@ func build(c config) (*framePath, error) {
 		client:     client,
 		fonts:      fonts,
 		navResults: make(chan navResult, 16),
+		zoom:       1.0,
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -493,7 +495,8 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		return
 	}
 
-	list, err := tab.Session.PaintChecked(float32(f.config.dpr))
+	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	list, err := tab.Session.PaintChecked(effectiveDPR)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: paint after reflow:", err)
 		return
@@ -517,6 +520,20 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		Layers:     []*frame.Layer{layer},
 		Background: tab.BGColor,
 	})
+}
+
+func (f *framePath) handleZoom(delta float64) {
+	if delta == 0 {
+		f.zoom = 1.0
+	} else {
+		f.zoom += delta
+		if f.zoom < 0.25 {
+			f.zoom = 0.25
+		} else if f.zoom > 4.0 {
+			f.zoom = 4.0
+		}
+	}
+	f.handleResize(f.config.width, f.config.height)
 }
 
 // switchTab saves the current tab's scroll and switches to the given tab.
@@ -707,6 +724,7 @@ func (f *framePath) openWindow() error {
 			func() { f.newTab() },
 			func(id uint64) { f.closeTab(id) },
 			f.handleResize,
+			f.handleZoom,
 			f.fonts,
 		)
 	} else {
