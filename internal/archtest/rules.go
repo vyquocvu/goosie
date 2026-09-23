@@ -41,6 +41,7 @@ var Allowed = map[string][]string{
 	"internal/platform":          {"internal/frame", "internal/surface", "internal/platform/headless", "internal/platform/darwin"},
 	"internal/archtest":          nil,
 	"internal/dom":               nil,
+	"internal/ax":                nil,
 	"internal/css":               {"internal/dom"},
 	"internal/net":               nil,
 	"internal/download":          nil,
@@ -50,7 +51,7 @@ var Allowed = map[string][]string{
 	"internal/history":           nil,
 	"internal/style":             {"internal/css", "internal/dom", "internal/frame"},
 	"internal/layout":            {"internal/dom", "internal/style", "internal/frame"},
-	"internal/engine":            {"internal/dom", "internal/css", "internal/style", "internal/layout", "internal/paint", "internal/frame", "internal/image"},
+	"internal/engine":            {"internal/ax", "internal/dom", "internal/css", "internal/style", "internal/layout", "internal/paint", "internal/frame", "internal/image"},
 	"internal/toolbar":           {"internal/frame", "internal/raster", "internal/surface"},
 	"internal/tabs":              {"internal/frame", "internal/toolbar", "internal/raster", "internal/engine"},
 }
