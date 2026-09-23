@@ -48,7 +48,7 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	}
 
 	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), int32(cw.chromeBitmap.H)), frame.RGB(255, 255, 255), nil)
-	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0)
+	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0, cw.fonts)
 	cw.toolbar.Draw(cw.chromeBitmap, tabs.TabBarHeight)
 
 	for y := 0; y < totalChromeHeight && y < buf.H; y++ {

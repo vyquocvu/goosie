@@ -1,6 +1,9 @@
 package tabs
 
-import "github.com/vyquocvu/goosie/internal/frame"
+import (
+	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/raster"
+)
 
 var (
 	tabBarBg       = frame.RGB(235, 235, 235)
@@ -15,7 +18,7 @@ var (
 )
 
 // DrawTabBar renders the tab bar onto the top of buf.
-func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32) {
+func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *raster.Fonts) {
 	if buf == nil || buf.Empty() {
 		return
 	}
@@ -55,7 +58,7 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32) {
 		if title == "" {
 			title = "New Tab"
 		}
-		drawTabText(buf, title, r, textColor)
+		drawTabText(buf, title, r, textColor, fonts)
 
 		closeR := CloseButtonRect(r)
 		drawCloseButton(buf, closeR, closeBtnColor)
@@ -71,19 +74,44 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32) {
 	}
 }
 
-func drawTabText(buf *frame.Bitmap, text string, tabRect frame.Rect, color frame.Color) {
+func drawTabText(buf *frame.Bitmap, text string, tabRect frame.Rect, color frame.Color, fonts *raster.Fonts) {
 	textX := tabRect.X0 + 12
-	textY := tabRect.Y0 + (TabBarHeight-6)/2 + 1
+	textY := tabRect.Y0 + (TabBarHeight-14)/2 + 14
 	maxW := tabRect.W() - CloseBtnSize - CloseBtnMargin - 24
 	if maxW < 0 {
 		maxW = 0
 	}
-	textW := int32(len(text)) * 5
-	if textW > maxW {
-		textW = maxW
+
+	if fonts == nil {
+		return
 	}
-	if textW > 0 {
-		buf.FillRect(frame.Rect4(textX, textY, textX+textW, textY+6), color, nil)
+
+	penX := textX
+	runes := []rune(text)
+	for i, rn := range runes {
+		g := fonts.Glyph(14, rn, frame.FontSlot{})
+		if !g.Ok || g.Mask == nil {
+			penX += g.Advance
+			continue
+		}
+
+		if penX+g.Advance-textX > maxW {
+			if i > 0 && len(runes) > 1 {
+				for _, dot := range "..." {
+					dg := fonts.Glyph(14, dot, frame.FontSlot{})
+					if dg.Ok && dg.Mask != nil {
+						origin := frame.Point{X: penX + dg.Bounds.X0, Y: textY - 14 + dg.Bounds.Y0}
+						buf.BlitMask(dg.Mask, origin, color, buf.Bounds(), nil)
+						penX += dg.Advance
+					}
+				}
+			}
+			break
+		}
+
+		origin := frame.Point{X: penX + g.Bounds.X0, Y: textY - 14 + g.Bounds.Y0}
+		buf.BlitMask(g.Mask, origin, color, buf.Bounds(), nil)
+		penX += g.Advance
 	}
 }
 
