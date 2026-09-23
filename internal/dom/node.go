@@ -136,6 +136,19 @@ func (n *Node) GetAttribute(name string) string {
 	return ""
 }
 
+// SetAttribute sets the named attribute, replacing an existing value
+// case-insensitively or appending a new pair.
+func (n *Node) SetAttribute(name, value string) {
+	lower := strings.ToLower(name)
+	for i := range n.Attr {
+		if strings.ToLower(n.Attr[i].Name) == lower {
+			n.Attr[i].Value = value
+			return
+		}
+	}
+	n.Attr = append(n.Attr, Attribute{Name: name, Value: value})
+}
+
 // HasAttribute reports whether the named attribute is present.
 func (n *Node) HasAttribute(name string) bool {
 	lower := strings.ToLower(name)

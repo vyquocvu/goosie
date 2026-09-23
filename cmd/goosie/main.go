@@ -668,10 +668,16 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		return
 	}
 
+	f.repaintTab(tab)
+}
+
+// repaintTab rebuilds the active tab's layer from its session and hands the
+// plan to the scheduler.
+func (f *framePath) repaintTab(tab *tabs.Tab) {
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
 	list, err := tab.Session.PaintChecked(effectiveDPR)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "goosie: paint after reflow:", err)
+		fmt.Fprintln(os.Stderr, "goosie: paint:", err)
 		return
 	}
 
@@ -679,7 +685,7 @@ func (f *framePath) handleResize(contentW, contentH int) {
 	extent := dl.Extent()
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "goosie: budget after reflow:", err)
+		fmt.Fprintln(os.Stderr, "goosie: budget:", err)
 		return
 	}
 
@@ -693,6 +699,71 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		Layers:     []*frame.Layer{layer},
 		Background: tab.BGColor,
 	})
+}
+
+// focusClick focuses or blurs a form control under a content-area click and
+// repaints when focus state changed.
+func (f *framePath) focusClick(contentX, contentY int32) bool {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return false
+	}
+	if !tab.Session.FocusControl(float32(contentX), float32(contentY)) {
+		return false
+	}
+	f.repaintTab(tab)
+	return true
+}
+
+// contentKey applies a keyboard edit to the focused control. The event is
+// consumed whenever a control is focused so the address bar is not the only
+// text sink; the tab reflows when the value changed and repaints otherwise.
+func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil || tab.Session.Focused() == nil {
+		return false
+	}
+
+	cmd := mods&surface.ModCommand != 0 || mods&surface.ModControl != 0
+	if cmd {
+		return false
+	}
+
+	var action engine.EditAction
+	switch {
+	case key == 0xF702:
+		action = engine.EditLeft
+	case key == 0xF703:
+		action = engine.EditRight
+	case key == 0xF700:
+		action = engine.EditUp
+	case key == 0xF701:
+		action = engine.EditDown
+	case key == 0xF704:
+		action = engine.EditHome
+	case key == 0xF705:
+		action = engine.EditEnd
+	case key == 0x7f || key == '\b':
+		action = engine.EditBackspace
+	case key == '\r' || key == '\n':
+		action = engine.EditEnter
+	case key == 0x1b:
+		action = engine.EditEscape
+	case key >= 0x20:
+		action = engine.EditRune
+	default:
+		return false
+	}
+
+	changed := tab.Session.Edit(action, key)
+	if changed {
+		if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+			return true
+		}
+	}
+	f.repaintTab(tab)
+	return true
 }
 
 func (f *framePath) handleZoom(delta float64) {
@@ -1004,6 +1075,8 @@ func (f *framePath) openWindow() error {
 			f.handleZoom,
 			f.handleLinkClick,
 			f.toggleBookmark,
+			f.focusClick,
+			f.contentKey,
 			f.hitTestLink,
 			f.fonts,
 		)

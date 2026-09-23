@@ -23,6 +23,8 @@ type chromeWindow struct {
 	onZoom       func(delta float64)
 	onLinkClick  func(href string)
 	onBookmark   func()
+	onFocusClick func(contentX, contentY int32) bool
+	onContentKey func(key rune, mods surface.KeyMod) bool
 	hitTestLink  func(contentX, contentY int32) string
 	chromeBitmap *frame.Bitmap
 	fonts        *raster.Fonts
@@ -32,22 +34,26 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64),
 	onResize func(contentW, contentH int), onZoom func(delta float64),
 	onLinkClick func(href string), onBookmark func(),
+	onFocusClick func(contentX, contentY int32) bool,
+	onContentKey func(key rune, mods surface.KeyMod) bool,
 	hitTestLink func(contentX, contentY int32) string,
 	fonts *raster.Fonts) *chromeWindow {
 	cw := &chromeWindow{
-		Window:      w,
-		toolbar:     tb,
-		tabMgr:      mgr,
-		events:      make(chan surface.Event, 64),
-		onSwitch:    onSwitch,
-		onNewTab:    onNewTab,
-		onCloseTab:  onCloseTab,
-		onResize:    onResize,
-		onZoom:      onZoom,
-		onLinkClick: onLinkClick,
-		onBookmark:  onBookmark,
-		hitTestLink: hitTestLink,
-		fonts:       fonts,
+		Window:       w,
+		toolbar:      tb,
+		tabMgr:       mgr,
+		events:       make(chan surface.Event, 64),
+		onSwitch:     onSwitch,
+		onNewTab:     onNewTab,
+		onCloseTab:   onCloseTab,
+		onResize:     onResize,
+		onZoom:       onZoom,
+		onLinkClick:  onLinkClick,
+		onBookmark:   onBookmark,
+		onFocusClick: onFocusClick,
+		onContentKey: onContentKey,
+		hitTestLink:  hitTestLink,
+		fonts:        fonts,
 	}
 	go cw.pump()
 	return cw
@@ -123,13 +129,18 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			adjusted.Y = toolbarY
 			cw.toolbar.HandleClick(adjusted, ev.Button)
 		}
-		if ev.Button == surface.ButtonLeft && cw.hitTestLink != nil {
+		if ev.Button == surface.ButtonLeft {
 			contentX := ev.Pos.X
 			contentY := ev.Pos.Y - int32(totalChromeHeight)
-			if href := cw.hitTestLink(contentX, contentY); href != "" {
-				if cw.onLinkClick != nil {
-					cw.onLinkClick(href)
+			if cw.hitTestLink != nil {
+				if href := cw.hitTestLink(contentX, contentY); href != "" {
+					if cw.onLinkClick != nil {
+						cw.onLinkClick(href)
+					}
+					return true
 				}
+			}
+			if cw.onFocusClick != nil && cw.onFocusClick(contentX, contentY) {
 				return true
 			}
 		}
@@ -140,6 +151,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		if cw.toolbar.Focus == toolbar.FocusAddress {
 			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
+			return true
+		}
+		if cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods) {
 			return true
 		}
 		return false

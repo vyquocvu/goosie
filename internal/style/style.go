@@ -556,12 +556,13 @@ fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border
 legend { display: block; padding: 0 0.25em; }
 form { display: block; }
 label { display: inline; }
-select, textarea { display: inline; }
+select { display: inline; }
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
    a widget it cannot reproduce, so they stay inline and take no box. */
 input { display: inline-block; background-color: #ffffff; }
+textarea { display: inline-block; background-color: #ffffff; }
 input[type=submit], input[type=reset], input[type=button], input[type=image],
 input[type=file], input[type=date], input[type=time], input[type=datetime-local],
 input[type=datetime], input[type=month], input[type=week], input[type=color],

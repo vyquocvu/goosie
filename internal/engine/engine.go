@@ -52,6 +52,12 @@ type Session struct {
 	fontBase  string
 	fontFetch FontFetcher
 	fontReg   FontRegistry
+
+	// Focus state for form editing. focus survives Reflow because reflow
+	// rebuilds only the layout arena, not the DOM; a new session per
+	// navigation starts unfocused.
+	focus *dom.Node
+	caret int
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -540,6 +546,11 @@ func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
 func (s *Session) Paint(scale float32) *paint.List {
 	list := &paint.List{}
 	b := paint.NewBuilder(list, s.Arena, scale, s.metrics)
+	if s.focus != nil {
+		if obj := s.objectFor(s.focus); obj != nil {
+			b.SetFocus(obj, s.caret)
+		}
+	}
 	b.Build(layout.ObjectID(1))
 	return list
 }

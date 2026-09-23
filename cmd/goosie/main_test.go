@@ -17,7 +17,9 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/session"
+	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
+	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
 func TestParsePrivateFlag(t *testing.T) {
@@ -340,5 +342,56 @@ func TestParseProfileRejectsUnsafeNames(t *testing.T) {
 		if _, err := parse([]string{"-profile", name}); err == nil {
 			t.Errorf("parse(-profile %q) succeeded, want a usage error", name)
 		}
+	}
+}
+
+func TestInterceptContentKeyConsumedWhenFocused(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+	}
+	key := surface.Event{Kind: surface.EvKey, Key: 'x'}
+	if cw.intercept(key) {
+		t.Fatal("key consumed with no focused control")
+	}
+
+	consumed := false
+	cw.onContentKey = func(k rune, m surface.KeyMod) bool { consumed = true; return true }
+	if !cw.intercept(key) {
+		t.Fatal("key not consumed when onContentKey handled it")
+	}
+	if !consumed {
+		t.Fatal("onContentKey not called")
+	}
+
+	cw.onContentKey = func(k rune, m surface.KeyMod) bool { return false }
+	if cw.intercept(key) {
+		t.Fatal("key consumed when onContentKey declined")
+	}
+}
+
+func TestInterceptFocusClickCoordinates(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+	}
+	var gotX, gotY int32
+	cw.onFocusClick = func(x, y int32) bool { gotX, gotY = x, y; return true }
+
+	click := surface.Event{
+		Kind:   surface.EvPointer,
+		Button: surface.ButtonLeft,
+		Pos:    frame.Point{X: 40, Y: int32(totalChromeHeight) + 12},
+	}
+	if !cw.intercept(click) {
+		t.Fatal("focus click not consumed")
+	}
+	if gotX != 40 || gotY != 12 {
+		t.Fatalf("focus click at (%d,%d), want (40,12)", gotX, gotY)
+	}
+
+	cw.onFocusClick = func(x, y int32) bool { return false }
+	if cw.intercept(click) {
+		t.Fatal("focus click consumed when handler declined")
 	}
 }

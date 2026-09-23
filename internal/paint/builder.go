@@ -4,6 +4,7 @@ import (
 	"image"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -22,6 +23,8 @@ type Builder struct {
 	arena   *layout.Arena
 	scale   float32
 	metrics layout.Metrics
+	focus      *layout.Object
+	focusCaret int
 }
 
 // NewBuilder returns a builder that will emit commands into list. metrics is
@@ -29,6 +32,13 @@ type Builder struct {
 // half-em estimate layout used, which spaces glyphs approximately.
 func NewBuilder(list *List, arena *layout.Arena, scale float32, metrics layout.Metrics) *Builder {
 	return &Builder{list: list, arena: arena, scale: scale, metrics: metrics}
+}
+
+// SetFocus marks the control to paint with a caret and focus ring. caret is a
+// rune index into the control's value.
+func (b *Builder) SetFocus(obj *layout.Object, caret int) {
+	b.focus = obj
+	b.focusCaret = caret
 }
 
 // Build walks the arena starting at root and appends display commands to the
@@ -84,10 +94,14 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 				b.paintText(obj, rect, opacity, clip)
 			}
 			if obj.Node != nil && obj.Node.Data == "input" {
+				b.paintControlValue(obj, opacity, clip)
 				b.paintPlaceholder(obj, opacity, clip)
 			}
 			if obj.Node != nil && obj.Node.Data == "img" {
 				b.paintImage(obj, opacity, clip)
+			}
+			if b.focus != nil && obj == b.focus {
+				b.paintFocus(obj, clip)
 			}
 		}
 		// If this box has overflow:hidden, compute a content-space clip rect
@@ -481,6 +495,137 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 		}
 	}
 	b.appendRun(text, rect, s, frame.RGB(117, 117, 117), opacity)
+}
+
+// paintControlValue draws the text an input holds. The value is not in the DOM
+// text flow, so like the placeholder it starts at the content origin bounded
+// by the content box. Textareas paint through the normal text path instead.
+func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil || !obj.Node.Element() {
+		return
+	}
+	text := obj.Node.GetAttribute("value")
+	if text == "" {
+		return
+	}
+	if obj.Node.GetAttribute("type") == "password" {
+		text = strings.Repeat("•", len([]rune(text)))
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if rect.Empty() {
+		return
+	}
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+		if rect.Empty() {
+			return
+		}
+	}
+	b.appendRun(text, rect, s, frame.RGB(0, 0, 0), opacity)
+}
+
+// paintFocus draws the focused control's caret and focus ring.
+func (b *Builder) paintFocus(obj *layout.Object, clip *frame.Rect) {
+	if obj.Node == nil || obj.Style == nil ||
+		(obj.Node.Data != "input" && obj.Node.Data != "textarea") {
+		return
+	}
+	b.paintCaret(obj, clip)
+	b.paintFocusRing(obj)
+}
+
+// controlText returns the editable text of a form control: the value attribute
+// for input, the first text child for textarea.
+func controlText(obj *layout.Object) string {
+	if obj.Node == nil {
+		return ""
+	}
+	if obj.Node.Data == "input" {
+		return obj.Node.GetAttribute("value")
+	}
+	for c := obj.Node.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == 2 {
+			return c.DataContent
+		}
+	}
+	return ""
+}
+
+// paintCaret draws the 1px bar where the next typed rune goes, one glyph
+// advance past the value's first caret runes.
+func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil {
+		return
+	}
+	runes := []rune(controlText(obj))
+	caret := b.focusCaret
+	if caret > len(runes) {
+		caret = len(runes)
+	}
+	if caret < 0 {
+		caret = 0
+	}
+	fontSize := int32(s.FontSize * b.scale)
+	if fontSize <= 0 {
+		return
+	}
+	slot := s.FontSlot()
+	pen := int32(0)
+	for _, r := range runes[:caret] {
+		if b.metrics != nil {
+			pen += b.metrics.GlyphAdvanceFixed(fontSize, r, slot)
+		} else {
+			pen += fontSize / 2 * 64
+		}
+	}
+	x0, y0, _, y1 := obj.ContentRect()
+	x := x0 + float32((pen+32)>>6)
+	rect := frame.RectF4(x, y0, x+1, y1).ToDevice(b.scale)
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+	}
+	if rect.Empty() {
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   frame.RGB(0, 0, 0),
+		Opacity: 1,
+	})
+}
+
+// paintFocusRing draws a 2px Chromium-blue ring 2px outside the control's
+// border box, as four strips so it works at any size.
+func (b *Builder) paintFocusRing(obj *layout.Object) {
+	x0, y0, x1, y1 := obj.BorderRect()
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	const gap = 2
+	const thick = 2
+	color := frame.RGB(0, 103, 244)
+	outer := frame.RectF4(x0-gap, y0-gap, x1+gap, y1+gap).ToDevice(b.scale)
+	inner := frame.RectF4(x0+thick-gap, y0+thick-gap, x1-thick+gap, y1-thick+gap).ToDevice(b.scale)
+	strip := func(x0, y0, x1, y1 int32) {
+		r := frame.Rect4(x0, y0, x1, y1)
+		if r.Empty() {
+			return
+		}
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    r,
+			Color:   color,
+			Opacity: 1,
+		})
+	}
+	strip(outer.X0, outer.Y0, outer.X1, inner.Y0)
+	strip(outer.X0, inner.Y1, outer.X1, outer.Y1)
+	strip(outer.X0, inner.Y0, inner.X0, inner.Y1)
+	strip(inner.X1, inner.Y0, outer.X1, inner.Y1)
 }
 
 // paintMarker draws the outside marker of a list-item. The marker takes the

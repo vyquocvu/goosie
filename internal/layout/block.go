@@ -1633,8 +1633,18 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 	if obj.Node.Data == "img" {
 		return imgContentSize(a, obj, containingW)
 	}
-	if obj.Node.Data != "input" {
+	if obj.Node.Data != "input" && obj.Node.Data != "textarea" {
 		return 0, 0, false
+	}
+	if obj.Node.Data == "textarea" {
+		w, h = 154, 16
+		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
+			h = lh
+		}
+		if rows, err := strconv.Atoi(obj.Node.GetAttribute("rows")); err == nil && rows > 1 {
+			h *= float32(rows)
+		}
+		return w, h, true
 	}
 	switch strings.ToLower(obj.Node.GetAttribute("type")) {
 	case "checkbox", "radio":
