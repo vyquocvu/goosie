@@ -25,6 +25,8 @@ type chromeWindow struct {
 	onBookmark   func()
 	onFocusClick func(contentX, contentY int32) bool
 	onContentKey func(key rune, mods surface.KeyMod) bool
+	onDragSelect func(action surface.PointerAction, contentX, contentY int32) bool
+	onCopy       func() bool
 	hitTestLink  func(contentX, contentY int32) string
 	chromeBitmap *frame.Bitmap
 	fonts        *raster.Fonts
@@ -36,6 +38,8 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onLinkClick func(href string), onBookmark func(),
 	onFocusClick func(contentX, contentY int32) bool,
 	onContentKey func(key rune, mods surface.KeyMod) bool,
+	onDragSelect func(action surface.PointerAction, contentX, contentY int32) bool,
+	onCopy func() bool,
 	hitTestLink func(contentX, contentY int32) string,
 	fonts *raster.Fonts) *chromeWindow {
 	cw := &chromeWindow{
@@ -52,6 +56,8 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		onBookmark:   onBookmark,
 		onFocusClick: onFocusClick,
 		onContentKey: onContentKey,
+		onDragSelect: onDragSelect,
+		onCopy:       onCopy,
 		hitTestLink:  hitTestLink,
 		fonts:        fonts,
 	}
@@ -129,9 +135,13 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			adjusted.Y = toolbarY
 			cw.toolbar.HandleClick(adjusted, ev.Button)
 		}
-		if ev.Button == surface.ButtonLeft {
-			contentX := ev.Pos.X
-			contentY := ev.Pos.Y - int32(totalChromeHeight)
+		// Link and focus handling is a press concern; a drag's motion and
+		// release must not re-trigger them. Whatever a press leaves behind goes
+		// to the drag selector, which decides per action whether to consume it.
+		contentX := ev.Pos.X
+		contentY := ev.Pos.Y - int32(totalChromeHeight)
+		press := ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft
+		if press {
 			if cw.hitTestLink != nil {
 				if href := cw.hitTestLink(contentX, contentY); href != "" {
 					if cw.onLinkClick != nil {
@@ -143,6 +153,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			if cw.onFocusClick != nil && cw.onFocusClick(contentX, contentY) {
 				return true
 			}
+		}
+		if cw.onDragSelect != nil && cw.onDragSelect(ev.Action, contentX, contentY) {
+			return true
 		}
 		return false
 	case surface.EvKey:
@@ -219,6 +232,10 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case key == 'd' || key == 'D':
 		if cw.onBookmark != nil {
 			cw.onBookmark()
+			return true
+		}
+	case key == 'c' || key == 'C':
+		if cw.onCopy != nil && cw.onCopy() {
 			return true
 		}
 	case key == 'w' || key == 'W':

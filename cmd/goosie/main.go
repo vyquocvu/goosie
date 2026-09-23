@@ -263,6 +263,7 @@ type framePath struct {
 	zoom       float64
 	findMatches []engine.Match
 	findIdx     int
+	selDrag     bool
 	restoredActiveURL string
 }
 
@@ -701,6 +702,15 @@ func (f *framePath) repaintTab(tab *tabs.Tab) {
 	})
 }
 
+// docPoint converts a content-area point to document coordinates through the
+// active zoom and scroll offset.
+func (f *framePath) docPoint(contentX, contentY int32) (float32, float32) {
+	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	vp := f.sched.Viewport()
+	return float32(contentX)/effectiveDPR + float32(vp.Offset.X)/effectiveDPR,
+		float32(contentY)/effectiveDPR + float32(vp.Offset.Y)/effectiveDPR
+}
+
 // focusClick focuses or blurs a form control under a content-area click and
 // repaints when focus state changed.
 func (f *framePath) focusClick(contentX, contentY int32) bool {
@@ -708,10 +718,59 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	if tab == nil || tab.Session == nil {
 		return false
 	}
-	if !tab.Session.FocusControl(float32(contentX), float32(contentY)) {
+	dx, dy := f.docPoint(contentX, contentY)
+	if !tab.Session.FocusControl(dx, dy) {
 		return false
 	}
 	f.repaintTab(tab)
+	return true
+}
+
+// dragSelect drives text selection from content-area pointer events. A press
+// starts a selection unless a form control is focused, motion extends the
+// active one, and release just ends the gesture.
+func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY int32) bool {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return false
+	}
+	switch action {
+	case surface.PointerPress:
+		if tab.Session.Focused() != nil {
+			return false
+		}
+		dx, dy := f.docPoint(contentX, contentY)
+		tab.Session.SelectAt(dx, dy)
+		f.selDrag = true
+		f.repaintTab(tab)
+		return true
+	case surface.PointerMotion:
+		if !f.selDrag {
+			return false
+		}
+		dx, dy := f.docPoint(contentX, contentY)
+		if !tab.Session.SelectTo(dx, dy) {
+			return true
+		}
+		f.repaintTab(tab)
+		return true
+	case surface.PointerRelease:
+		wasDragging := f.selDrag
+		f.selDrag = false
+		return wasDragging
+	}
+	return false
+}
+
+// copySelection puts the selected text on the system clipboard.
+func (f *framePath) copySelection() bool {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil || !tab.Session.HasSelection() {
+		return false
+	}
+	if cb := platform.NewClipboard(); cb != nil {
+		cb.Write(tab.Session.SelectionText())
+	}
 	return true
 }
 
@@ -793,10 +852,7 @@ func (f *framePath) hitTestLink(contentX, contentY int32) string {
 	if tab == nil || tab.Session == nil {
 		return ""
 	}
-	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
-	vp := f.sched.Viewport()
-	docX := float32(contentX)/effectiveDPR + float32(vp.Offset.X)/effectiveDPR
-	docY := float32(contentY)/effectiveDPR + float32(vp.Offset.Y)/effectiveDPR
+	docX, docY := f.docPoint(contentX, contentY)
 	return tab.Session.HitTestLink(docX, docY)
 }
 
@@ -1077,6 +1133,8 @@ func (f *framePath) openWindow() error {
 			f.toggleBookmark,
 			f.focusClick,
 			f.contentKey,
+			f.dragSelect,
+			f.copySelection,
 			f.hitTestLink,
 			f.fonts,
 		)

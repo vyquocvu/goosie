@@ -51,6 +51,16 @@ const (
 	ButtonRight
 )
 
+// PointerAction tells which pointer phase an EvPointer event carries. The
+// zero value is Press so producers that only synthesize clicks need no field.
+type PointerAction uint8
+
+const (
+	PointerPress PointerAction = iota
+	PointerRelease
+	PointerMotion
+)
+
 // Cursor is the platform pointer shape. It is an enum rather than a platform
 // handle so the engine can ask for a cursor without knowing what the toolkit
 // calls one, which is the whole point of the window contract being an interface.
@@ -82,6 +92,7 @@ type Event struct {
 	Delta  frame.Point // EvScroll
 	Pos    frame.Point // EvPointer
 	Button Button      // EvPointer
+	Action PointerAction // EvPointer: press, release, or motion
 	Key    rune        // EvKey
 	Mods   KeyMod      // EvKey: modifier flags
 	Size   frame.Size  // EvResize

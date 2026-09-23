@@ -178,17 +178,18 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 		ev.Kind = surface.EvScroll
 		ev.Delta = frame.Point{X: int32(ce.dx), Y: int32(ce.dy)}
 	case C.GOOSIE_EV_POINTER:
-		// The shim's action distinguishes a press from a release, and surface.Event
-		// has no field for it: M1's frame path has nothing to point at, so the action
-		// is dropped rather than faked. M2's hit testing needs it, and when it does the
-		// right change is a field on Event, not a press smuggled in as a button.
 		ev.Kind = surface.EvPointer
 		ev.Pos = frame.Point{X: int32(ce.px), Y: int32(ce.py)}
 		switch ce.action {
 		case C.GOOSIE_POINTER_PRESS:
+			ev.Action = surface.PointerPress
 			ev.Button = button(ce.button)
+		case C.GOOSIE_POINTER_RELEASE:
+			ev.Action = surface.PointerRelease
+		case C.GOOSIE_POINTER_MOTION:
+			ev.Action = surface.PointerMotion
 		default:
-			ev.Button = surface.ButtonNone
+			ev.Action = surface.PointerMotion
 		}
 	case C.GOOSIE_EV_KEY:
 		ev.Kind = surface.EvKey

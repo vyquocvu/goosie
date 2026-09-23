@@ -25,6 +25,7 @@ type Builder struct {
 	metrics layout.Metrics
 	focus      *layout.Object
 	focusCaret int
+	selection  map[*layout.Object]SelSpan
 }
 
 // NewBuilder returns a builder that will emit commands into list. metrics is
@@ -39,6 +40,16 @@ func NewBuilder(list *List, arena *layout.Arena, scale float32, metrics layout.M
 func (b *Builder) SetFocus(obj *layout.Object, caret int) {
 	b.focus = obj
 	b.focusCaret = caret
+}
+
+// SetSelection marks word boxes to paint with the selection highlight. The
+// spans reference the same layout objects the arena walk visits, so identity
+// in this map is what paintText matches on.
+func (b *Builder) SetSelection(spans []SelSpan) {
+	b.selection = make(map[*layout.Object]SelSpan, len(spans))
+	for _, sp := range spans {
+		b.selection[sp.Obj] = sp
+	}
 }
 
 // Build walks the arena starting at root and appends display commands to the
@@ -229,6 +240,9 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	s := obj.Style
 	if s == nil {
 		return
+	}
+	if sp, ok := b.selection[obj]; ok {
+		b.paintSelectionHighlight(obj, rect, s, sp, opacity)
 	}
 	b.appendRun(obj.Node.DataContent, rect, s, convertColor(s.Color), opacity)
 }

@@ -395,3 +395,93 @@ func TestInterceptFocusClickCoordinates(t *testing.T) {
 		t.Fatal("focus click consumed when handler declined")
 	}
 }
+
+func TestInterceptDragSelectMotion(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+	}
+	var gotAction surface.PointerAction
+	var gotX, gotY int32
+	cw.onDragSelect = func(a surface.PointerAction, x, y int32) bool {
+		gotAction, gotX, gotY = a, x, y
+		return true
+	}
+
+	motion := surface.Event{
+		Kind:   surface.EvPointer,
+		Action: surface.PointerMotion,
+		Button: surface.ButtonNone,
+		Pos:    frame.Point{X: 55, Y: int32(totalChromeHeight) + 7},
+	}
+	if !cw.intercept(motion) {
+		t.Fatal("drag motion not consumed")
+	}
+	if gotAction != surface.PointerMotion || gotX != 55 || gotY != 7 {
+		t.Fatalf("drag select got action %v (%d,%d), want motion (55,7)", gotAction, gotX, gotY)
+	}
+
+	cw.onDragSelect = func(a surface.PointerAction, x, y int32) bool { return false }
+	if cw.intercept(motion) {
+		t.Fatal("drag motion consumed when handler declined")
+	}
+}
+
+func TestInterceptDragSelectPressOrder(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+	}
+	cw.onFocusClick = func(x, y int32) bool { return false }
+	var actions []surface.PointerAction
+	cw.onDragSelect = func(a surface.PointerAction, x, y int32) bool {
+		actions = append(actions, a)
+		return true
+	}
+
+	press := surface.Event{
+		Kind:   surface.EvPointer,
+		Button: surface.ButtonLeft,
+		Pos:    frame.Point{X: 10, Y: int32(totalChromeHeight) + 3},
+	}
+	if !cw.intercept(press) {
+		t.Fatal("press not consumed by drag select")
+	}
+	if len(actions) != 1 || actions[0] != surface.PointerPress {
+		t.Fatalf("drag select saw %v, want one press", actions)
+	}
+
+	actions = nil
+	cw.onFocusClick = func(x, y int32) bool { return true }
+	if !cw.intercept(press) {
+		t.Fatal("press not consumed by focus click")
+	}
+	if len(actions) != 0 {
+		t.Fatal("drag select saw press that focus consumed")
+	}
+}
+
+func TestInterceptCopyShortcut(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+	}
+	copied := false
+	cw.onCopy = func() bool { copied = true; return true }
+
+	key := surface.Event{Kind: surface.EvKey, Key: 'c', Mods: surface.ModCommand}
+	if !cw.intercept(key) {
+		t.Fatal("Cmd+C not consumed")
+	}
+	if !copied {
+		t.Fatal("onCopy not called")
+	}
+
+	cw.onCopy = func() bool { return false }
+	if cw.intercept(key) {
+		t.Fatal("Cmd+C consumed when onCopy declined")
+	}
+	if cw.intercept(surface.Event{Kind: surface.EvKey, Key: 'c'}) {
+		t.Fatal("plain C consumed")
+	}
+}

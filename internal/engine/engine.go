@@ -58,6 +58,13 @@ type Session struct {
 	// navigation starts unfocused.
 	focus *dom.Node
 	caret int
+
+	// Text selection state. selActive and the two ends index the current
+	// arena's word list, so Reflow clears them the same rebuild that moves
+	// every word; a new session starts with nothing selected.
+	selActive bool
+	selAnchor selPos
+	selHead   selPos
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -514,6 +521,9 @@ func (s *Session) Reflow(viewportW float32) error {
 		}
 	}
 	s.Arena = candidate
+	// Selection ends index the old arena's word list; the rebuild just moved
+	// every word, so the highlight would paint on the wrong boxes.
+	s.selActive = false
 	return nil
 }
 
@@ -550,6 +560,9 @@ func (s *Session) Paint(scale float32) *paint.List {
 		if obj := s.objectFor(s.focus); obj != nil {
 			b.SetFocus(obj, s.caret)
 		}
+	}
+	if spans := s.selectionSpans(); len(spans) > 0 {
+		b.SetSelection(spans)
 	}
 	b.Build(layout.ObjectID(1))
 	return list
