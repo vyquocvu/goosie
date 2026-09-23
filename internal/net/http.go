@@ -268,12 +268,29 @@ func validateHTTPHost(u *url.URL) error {
 }
 
 // DefaultClient returns an HTTP client backed by net/http with standard TLS
-// verification and at most ten validated HTTP(S) redirects.
+// verification and at most ten validated HTTP(S) redirects. Its cookie jar
+// lives in memory for the life of the client.
 func DefaultClient() HTTP {
-	return &httpClient{client: &http.Client{
-		Timeout:       30 * time.Second,
-		CheckRedirect: checkRedirect,
-	}}
+	return &httpClient{
+		client: &http.Client{
+			Timeout:       30 * time.Second,
+			CheckRedirect: checkRedirect,
+		},
+		jar: NewCookieJar(),
+	}
+}
+
+// DefaultPrivateClient is DefaultClient with an ephemeral cookie jar that is
+// wiped on Close: nothing a private-mode session learns survives it.
+func DefaultPrivateClient() HTTP {
+	return &httpClient{
+		client: &http.Client{
+			Timeout:       30 * time.Second,
+			CheckRedirect: checkRedirect,
+		},
+		jar:     NewCookieJar(),
+		private: true,
+	}
 }
 
 // DefaultClientWithTLS returns an HTTP client identical to DefaultClient but
@@ -304,7 +321,9 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 }
 
 type httpClient struct {
-	client *http.Client
+	client  *http.Client
+	jar     *CookieJar
+	private bool
 }
 
 func (c *httpClient) Get(ctx context.Context, raw string) (*Response, error) {
@@ -344,6 +363,9 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	if cookie := c.jar.HeaderFor(u); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -363,6 +385,7 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	for k, values := range resp.Header {
 		if strings.EqualFold(k, "Set-Cookie") {
 			headers[k] = strings.Join(values, "\n")
+			c.jar.Store(resp.Request.URL, values)
 		} else {
 			headers[k] = strings.Join(values, ", ")
 		}
@@ -381,6 +404,9 @@ func (c *httpClient) SetTimeout(d time.Duration) {
 
 func (c *httpClient) Close() error {
 	c.client.CloseIdleConnections()
+	if c.private {
+		c.jar.Clear()
+	}
 	return nil
 }
 

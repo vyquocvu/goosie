@@ -104,6 +104,7 @@ type config struct {
 	height     int
 	dpr        float64
 	downloadDir string
+	private     bool
 }
 
 // devSize is the surface in device pixels: the units the frame path, the scheduler,
@@ -151,6 +152,7 @@ func parse(args []string) (config, error) {
 		dlDir = filepath.Join(dlDir, "Downloads")
 	}
 	fs.StringVar(&c.downloadDir, "download-dir", dlDir, "directory where downloads are saved")
+	fs.BoolVar(&c.private, "private", false, "run a private session: cookies are dropped on exit")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
@@ -239,7 +241,12 @@ func build(c config) (*framePath, error) {
 		return nil, fmt.Errorf("goosie: %w", err)
 	}
 
-	client := net.DefaultClient()
+	var client net.HTTP
+	if c.private {
+		client = net.DefaultPrivateClient()
+	} else {
+		client = net.DefaultClient()
+	}
 
 	var layer *frame.Layer
 	var spec paint.SceneSpec

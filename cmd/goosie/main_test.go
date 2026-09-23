@@ -13,6 +13,23 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
+func TestParsePrivateFlag(t *testing.T) {
+	c, err := parse([]string{"-private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.private {
+		t.Fatal("-private did not set config.private")
+	}
+	c, err = parse([]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.private {
+		t.Fatal("default run set config.private")
+	}
+}
+
 func TestParseRejectsInvalidViewport(t *testing.T) {
 	cases := []struct {
 		name string
