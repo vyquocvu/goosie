@@ -193,6 +193,44 @@ char *GoosieClipboardRead(void);
 // clears the clipboard. The call is safe from any thread.
 void GoosieClipboardWrite(const char *text);
 
+// GoosieAxRole is a node's kind, mapped onto the AX tree's roles in Go rather
+// than shared numerically, for the same reason the event kinds are.
+enum {
+	GOOSIE_AX_DOCUMENT = 0,
+	GOOSIE_AX_GROUP = 1,
+	GOOSIE_AX_STATIC_TEXT = 2,
+	GOOSIE_AX_LINK = 3,
+	GOOSIE_AX_BUTTON = 4,
+	GOOSIE_AX_IMAGE = 5,
+	GOOSIE_AX_TEXT_FIELD = 6
+};
+
+// GoosieAxNode is one node of a flattened accessibility tree. The tree arrives
+// flat - first_child and next_sibling are indices into the same array, -1 for
+// none - because a C walk over a linked Go tree would either hold a Go pointer
+// across calls or re-flatten on every frame. Coordinates are window content
+// coordinates in CSS pixels - document pixels minus the scroll offset - and the
+// shim converts those to screen space at query time.
+typedef struct GoosieAxNode {
+	int role;
+	float x0, y0, x1, y1;
+	const char *label;
+	const char *value;
+	const char *href;
+	int first_child;
+	int next_sibling;
+} GoosieAxNode;
+
+// GoosieSetAccessibility replaces the window's accessibility tree with n nodes.
+//
+// The strings are copied during this call: the shim strdups them into its own
+// snapshot before returning, so the caller frees its CStrings as soon as the
+// call returns and nothing of the Go tree is retained. The snapshot itself is
+// installed and the previous one freed on the main thread, then
+// NSAccessibilityLayoutChangedNotification is posted so VoiceOver re-reads.
+// The call is safe from any thread.
+void GoosieSetAccessibility(GoosieWindow *gw, const GoosieAxNode *nodes, int n);
+
 #ifdef __cplusplus
 }
 #endif

@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/surface"
 )
@@ -366,4 +367,72 @@ func (w *Window) Close() error {
 	return nil
 }
 
+// cgoAx carries the state of one flatten pass. The nodes go into a slice whose
+// backing array is handed to the shim, so the strings it points at are kept alive
+// until the call returns and freed right after: the shim copies both array and
+// strings synchronously during the call, which is what makes a pointer into a
+// slice safe for the duration and unsafe a moment longer.
+type cgoAx struct {
+	nodes []C.GoosieAxNode
+	strs  []*C.char
+}
+
+// str copies one string for C, or gives the shim's NULL for an empty one.
+func (f *cgoAx) str(s string) *C.char {
+	if s == "" {
+		return nil
+	}
+	c := C.CString(s)
+	f.strs = append(f.strs, c)
+	return c
+}
+
+// emit appends one run of siblings depth first. Each node is appended with its
+// links unset, then first_child is patched to the index the children append at
+// and next_sibling to the index the next sibling appends at - both computed from
+// len(f.nodes) at the moment the next append is about to happen, so a subtree of
+// any size shifts its following siblings without the indices ever lying.
+func (f *cgoAx) emit(siblings []ax.Node) {
+	for i, n := range siblings {
+		cur := len(f.nodes)
+		f.nodes = append(f.nodes, C.GoosieAxNode{
+			role:         C.int(n.Role),
+			x0:           C.float(n.X0),
+			y0:           C.float(n.Y0),
+			x1:           C.float(n.X1),
+			y1:           C.float(n.Y1),
+			label:        f.str(n.Label),
+			value:        f.str(n.Value),
+			href:         f.str(n.Href),
+			first_child:  -1,
+			next_sibling: -1,
+		})
+		if len(n.Children) > 0 {
+			f.nodes[cur].first_child = C.int(len(f.nodes))
+			f.emit(n.Children)
+		}
+		if i+1 < len(siblings) {
+			f.nodes[cur].next_sibling = C.int(len(f.nodes))
+		}
+	}
+}
+
+// SetAccessibility flattens the tree and hands it to the shim. It implements
+// surface.AccessibilityWindow, so a caller publishing a document's tree reaches
+// the platform through the same capability assertion as every other optional
+// window feature. An empty tree clears what is published.
+func (w *Window) SetAccessibility(nodes []ax.Node) {
+	f := &cgoAx{}
+	f.emit(nodes)
+	if len(f.nodes) > 0 {
+		C.GoosieSetAccessibility(w.gw, &f.nodes[0], C.int(len(f.nodes)))
+	} else {
+		C.GoosieSetAccessibility(w.gw, nil, 0)
+	}
+	for _, c := range f.strs {
+		C.free(unsafe.Pointer(c))
+	}
+}
+
 var _ surface.Window = (*Window)(nil)
+var _ surface.AccessibilityWindow = (*Window)(nil)

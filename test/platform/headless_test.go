@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform/headless"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -267,6 +268,45 @@ func TestCloseIsIdempotentAndStopsTheClock(t *testing.T) {
 	}
 	if err := w.Present(frame.NewBitmap(4, 4), nil); !errors.Is(err, headless.ErrClosed) {
 		t.Fatalf("Present after Close = %v, want ErrClosed", err)
+	}
+}
+
+// TestAccessibilityTreeRecorded covers the headless half of the accessibility
+// contract: whatever the frame path publishes is exactly what a test can read
+// back, which is how UI-level accessibility work gets compared headlessly.
+func TestAccessibilityTreeRecorded(t *testing.T) {
+	w, _ := newWindow(t, headless.Config{Scale: 1})
+	aw, ok := any(w).(surface.AccessibilityWindow)
+	if !ok {
+		t.Fatal("the headless window does not implement surface.AccessibilityWindow")
+	}
+	if got := w.AccessibilityTree(); len(got) != 0 {
+		t.Fatalf("a fresh window exposed %d accessibility nodes, want none", len(got))
+	}
+
+	tree := []ax.Node{
+		{Role: ax.RoleDocument, Label: "Test doc", X0: 0, Y0: 0, X1: 800, Y1: 600,
+			Children: []ax.Node{
+				{Role: ax.RoleStaticText, Label: "hello", X0: 8, Y0: 8, X1: 40, Y1: 24},
+				{Role: ax.RoleLink, Label: "a link", Href: "https://goosie.test/", X0: 8, Y0: 32, X1: 60, Y1: 48},
+			},
+		},
+	}
+	aw.SetAccessibility(tree)
+
+	got := w.AccessibilityTree()
+	if len(got) != 1 || got[0].Role != ax.RoleDocument || got[0].Label != "Test doc" {
+		t.Fatalf("AccessibilityTree() = %+v, want the published document", got)
+	}
+	if len(got[0].Children) != 2 || got[0].Children[1].Role != ax.RoleLink {
+		t.Fatalf("the document's children did not survive: %+v", got[0].Children)
+	}
+
+	// A window whose reader has navigated away from a page must not keep showing
+	// the old page to an assistive client, so an empty publish clears the tree.
+	aw.SetAccessibility(nil)
+	if got := w.AccessibilityTree(); len(got) != 0 {
+		t.Fatalf("after clearing, AccessibilityTree() = %+v, want none", got)
 	}
 }
 

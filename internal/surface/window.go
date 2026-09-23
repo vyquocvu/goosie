@@ -3,6 +3,7 @@ package surface
 import (
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
@@ -132,4 +133,17 @@ type Window interface {
 	SetIME(bool)
 	ScaleFactor() float32
 	Close() error
+}
+
+// AccessibilityWindow is optionally implemented by a Window that can publish a
+// document's accessibility tree to an assistive client. It is a capability
+// found by type assertion, the way platform.Runner is: a backend with no
+// accessibility story - and every test fake built before the feature - keeps
+// satisfying Window alone.
+type AccessibilityWindow interface {
+	Window
+	// SetAccessibility replaces the published tree with the nodes of one
+	// document, in window content coordinates - document CSS pixels minus the
+	// scroll offset. An empty slice clears it.
+	SetAccessibility(nodes []ax.Node)
 }

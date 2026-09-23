@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/bookmarks"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
@@ -526,6 +527,7 @@ func (f *framePath) applyNavResult(result navResult) {
 			Layers:     []*frame.Layer{result.layer},
 			Background: result.bgColor,
 		})
+		f.publishAccessibility()
 	}
 }
 
@@ -700,6 +702,43 @@ func (f *framePath) repaintTab(tab *tabs.Tab) {
 		Layers:     []*frame.Layer{layer},
 		Background: tab.BGColor,
 	})
+	f.publishAccessibility()
+}
+
+// publishAccessibility hands the active document's accessibility tree to a
+// window that can publish it. The tree's coordinates are document CSS pixels;
+// the platform wants window content coordinates, so every rect is shifted by
+// the scroll offset before it leaves. A backend with no accessibility story,
+// or a tab with no session, publishes nothing - clearing what a previous
+// document left behind.
+func (f *framePath) publishAccessibility() {
+	aw, ok := f.window.(surface.AccessibilityWindow)
+	if !ok {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		aw.SetAccessibility(nil)
+		return
+	}
+	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	vp := f.sched.Viewport()
+	aw.SetAccessibility(shiftAx(tab.Session.AccessibilityTree(),
+		float32(vp.Offset.X)/effectiveDPR, float32(vp.Offset.Y)/effectiveDPR))
+}
+
+// shiftAx copies the tree with every rect translated by (dx, dy).
+func shiftAx(nodes []ax.Node, dx, dy float32) []ax.Node {
+	out := make([]ax.Node, len(nodes))
+	for i, n := range nodes {
+		n.X0 -= dx
+		n.Y0 -= dy
+		n.X1 -= dx
+		n.Y1 -= dy
+		n.Children = shiftAx(n.Children, dx, dy)
+		out[i] = n
+	}
+	return out
 }
 
 // docPoint converts a content-area point to document coordinates through the
@@ -995,6 +1034,7 @@ func (f *framePath) switchTab(id uint64) {
 		Offset: frame.Point{Y: newTab.ScrollY},
 		Size:   f.config.devSize(),
 	})
+	f.publishAccessibility()
 }
 
 // newTab creates a new tab and switches to it.
@@ -1024,6 +1064,7 @@ func (f *framePath) newTab() {
 		Offset: frame.Point{Y: 0},
 		Size:   f.config.devSize(),
 	})
+	f.publishAccessibility()
 }
 
 // closeTab closes a tab by ID and switches to the remaining active tab.
@@ -1055,6 +1096,7 @@ func (f *framePath) closeTab(id uint64) {
 			Offset: frame.Point{Y: tab.ScrollY},
 			Size:   f.config.devSize(),
 		})
+		f.publishAccessibility()
 	}
 }
 

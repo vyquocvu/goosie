@@ -59,6 +59,142 @@ enum {
 // display-link tick and the display link does not answer to this loop.
 static const double kGoosieIdlePoll = 0.02;
 
+// ---------------------------------------------------------------------------
+// accessibility
+// ---------------------------------------------------------------------------
+
+// The published tree is the one AppKit object graph the frame path hands over: a
+// GoosieAxElement per node, built from a snapshot when Go pushes one and swapped
+// out whole on the next publish. Strings are copied into NSStrings at build time
+// and the flat C snapshot freed right after, so nothing here points at Go memory.
+// Like the window itself, everything built here lives until the swap that replaces
+// it - an assistive client may still be holding an element when the next publish
+// lands, and per-node lifetimes would turn every query into a race.
+
+static char *goosieAxCopy(const char *s) { return s ? strdup(s) : NULL; }
+
+typedef struct GoosieAxSnapshot {
+	GoosieAxNode *nodes;
+	int n;
+} GoosieAxSnapshot;
+
+// GoosieAxSnapshotFree frees a snapshot and the strings inside it. Safe with NULL.
+static void GoosieAxSnapshotFree(GoosieAxSnapshot *snap) {
+	if (!snap) return;
+	for (int i = 0; i < snap->n; i++) {
+		free((void *)snap->nodes[i].label);
+		free((void *)snap->nodes[i].value);
+		free((void *)snap->nodes[i].href);
+	}
+	free(snap->nodes);
+	free(snap);
+}
+
+// axRoleName maps a GoosieAxRole onto the role string AppKit reports. The web area
+// is spelled out because AppKit exports no constant for it; it is the role both
+// WebKit and Chromium report for a document's content.
+static NSString *axRoleName(int role) {
+	switch (role) {
+		case GOOSIE_AX_DOCUMENT: return @"AXWebArea";
+		case GOOSIE_AX_GROUP: return NSAccessibilityGroupRole;
+		case GOOSIE_AX_STATIC_TEXT: return NSAccessibilityStaticTextRole;
+		case GOOSIE_AX_LINK: return NSAccessibilityLinkRole;
+		case GOOSIE_AX_BUTTON: return NSAccessibilityButtonRole;
+		case GOOSIE_AX_IMAGE: return NSAccessibilityImageRole;
+		case GOOSIE_AX_TEXT_FIELD: return NSAccessibilityTextFieldRole;
+		default: return NSAccessibilityUnknownRole;
+	}
+}
+
+// GoosieAxElement is one published node as an assistive client sees it. It keeps
+// its rect in the content view's own flipped, point-based space and converts on
+// every query, so a window that has moved or changed displays reports the frame it
+// is on now rather than the one it was built on - the reason this is a subclass
+// rather than the frame-at-creation element AppKit's constructor hands out.
+@interface GoosieAxElement : NSAccessibilityElement
+- (instancetype)initWithRole:(int)role
+                      label:(NSString *)label
+                      value:(NSString *)value
+                       href:(NSString *)href
+                      frame:(NSRect)frameInView
+                       view:(NSView *)view
+                    children:(NSArray *)children;
+@end
+
+@implementation GoosieAxElement {
+	int _role;
+	NSString *_label;
+	NSString *_value;
+	NSString *_href;
+	NSRect _frame;
+	// The view outlives every element - the window's own retain is what keeps it
+	// alive - so the reference is deliberately not retained: a retained view here
+	// is a cycle, and the unretained one is always valid.
+	NSView *_view;
+	NSArray *_children;
+}
+
+- (instancetype)initWithRole:(int)role
+                      label:(NSString *)label
+                      value:(NSString *)value
+                       href:(NSString *)href
+                      frame:(NSRect)frameInView
+                       view:(NSView *)view
+                    children:(NSArray *)children {
+	if ((self = [super init])) {
+		_role = role;
+		_label = [label copy];
+		_value = [value copy];
+		_href = [href copy];
+		_frame = frameInView;
+		_view = view;
+		_children = [children copy];
+	}
+	return self;
+}
+
+- (void)dealloc {
+	[_label release];
+	[_value release];
+	[_href release];
+	[_children release];
+	[super dealloc];
+}
+
+// accessibilityFrame converts through the view into screen space. The accessibility
+// APIs report frames with the origin at the top-left of the primary screen, which
+// AppKit's convertRectToScreen does not produce directly - it speaks Cocoa's
+// bottom-left convention - so the y is flipped here, the way every AX bridge does.
+- (NSRect)accessibilityFrame {
+	if (!_view) return NSZeroRect;
+	NSRect win = [_view convertRect:_frame toView:nil];
+	NSRect screen = [[_view window] convertRectToScreen:win];
+	NSScreen *primary = [[NSScreen screens] firstObject];
+	CGFloat h = primary ? primary.frame.size.height : 0;
+	return NSMakeRect(screen.origin.x, h - screen.origin.y - screen.size.height,
+			  screen.size.width, screen.size.height);
+}
+
+- (NSAccessibilityRole)accessibilityRole { return axRoleName(_role); }
+
+- (NSString *)accessibilityLabel { return _label; }
+
+- (NSString *)accessibilityValue {
+	return _value.length > 0 ? _value : [super accessibilityValue];
+}
+
+- (NSURL *)accessibilityURL {
+	return _href.length > 0 ? [NSURL URLWithString:_href] : nil;
+}
+
+- (BOOL)isAccessibilityElement { return YES; }
+
+- (NSArray *)accessibilityChildren {
+	return _children ? _children : @[];
+}
+
+@end
+
 // GoosieContentView is the window's only view and the only thing in the shim that
 // sees input. It is layer-backed rather than drawRect: - because the frame path hands
 // over finished pixels, and a view that redrew them through CoreGraphics would be a
@@ -70,6 +206,7 @@ static const double kGoosieIdlePoll = 0.02;
 - (void *)goosieOwner;
 - (void)setGoosieOwner:(void *)owner;
 - (void)setIMEEnabled:(BOOL)on;
+- (void)setAccessibilityTree:(GoosieAxSnapshot *)snap;
 @end
 
 @interface GoosieWindowDelegate : NSObject <NSWindowDelegate>
@@ -302,6 +439,8 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 	// the input context queries back.
 	BOOL _imeEnabled;
 	BOOL _imeMarked;
+	// _axElements is the tree the accessibility snapshot built, or nil for none.
+	NSArray *_axElements;
 }
 
 // isFlipped puts the view's y axis top-down like the frame path's, so an event's
@@ -491,6 +630,58 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 	// text-run-to-caret mapping can honestly answer.
 	NSRect r = [self convertRect:self.bounds toView:nil];
 	return [[self window] convertRectToScreen:r];
+}
+
+// accessibilityChildren is how the published tree hangs off the window: the view
+// has no subviews of its own, so the override is the whole story - what AX sees
+// under this view is the elements built from the last snapshot, in document order.
+- (NSArray *)accessibilityChildren { return _axElements; }
+
+- (BOOL)isAccessibilityElement { return NO; }
+
+// axElementsFromSnapshot builds one element per node, depth first. The walk reads
+// only the snapshot's own array - children and siblings are indices - and is
+// bounded by the depth cap and by the sibling count against n, so a malformed
+// snapshot (a cycle among the indices, a child pointing outside the array) costs a
+// short walk instead of a hang. Strings become NSStrings here, which is what lets
+// the snapshot itself be freed the moment this method returns.
+- (NSArray *)axElementsFromSnapshot:(GoosieAxSnapshot *)snap index:(int)i depth:(int)depth {
+	NSMutableArray *out = [NSMutableArray array];
+	int count = 0;
+	for (int c = i; c >= 0 && c < snap->n && count < snap->n; c = snap->nodes[c].next_sibling, count++) {
+		GoosieAxNode *n = &snap->nodes[c];
+		NSArray *kids = nil;
+		if (depth < 64 && n->first_child >= 0 && n->first_child < snap->n) {
+			kids = [self axElementsFromSnapshot:snap index:n->first_child depth:depth + 1];
+		}
+		NSString *href = (n->href && n->href[0]) ? [NSString stringWithUTF8String:n->href] : nil;
+		GoosieAxElement *el = [[GoosieAxElement alloc]
+		    initWithRole:n->role
+		    label:(n->label ? [NSString stringWithUTF8String:n->label] : @"")
+		    value:(n->value ? [NSString stringWithUTF8String:n->value] : @"")
+		    href:href
+		    frame:NSMakeRect(n->x0, n->y0, n->x1 - n->x0, n->y1 - n->y0)
+		    view:self
+		    children:kids];
+		[out addObject:el];
+		[el release];
+	}
+	return out;
+}
+
+// setAccessibilityTree replaces the published tree and tells an assistive client
+// the layout changed. The new elements are built before the swap, so a query
+// landing mid-publish sees the previous tree, never a half-built one; the snapshot
+// is freed after building because every string it carried has been copied.
+- (void)setAccessibilityTree:(GoosieAxSnapshot *)snap {
+	NSArray *fresh = snap && snap->n > 0 ? [self axElementsFromSnapshot:snap index:0 depth:0] : nil;
+	NSArray *old = _axElements;
+	_axElements = [fresh retain];
+	[old release];
+	GoosieAxSnapshotFree(snap);
+	if (fresh) {
+		NSAccessibilityPostNotification(self, NSAccessibilityLayoutChangedNotification);
+	}
 }
 
 @end
@@ -903,6 +1094,43 @@ void GoosieSetIME(GoosieWindow *gw, int enabled) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (gw->quit) return;
 		[gw->view setIMEEnabled:enabled ? YES : NO];
+	});
+}
+
+void GoosieSetAccessibility(GoosieWindow *gw, const GoosieAxNode *nodes, int n) {
+	if (!gw) return;
+	// The strings are copied on the calling thread, while the caller's memory is
+	// guaranteed to still be there: when this returns, the caller frees its own
+	// copies and nothing of the Go tree is retained.
+	GoosieAxSnapshot *snap = NULL;
+	if (nodes && n > 0) {
+		snap = malloc(sizeof(*snap));
+		if (snap) {
+			snap->nodes = malloc(sizeof(GoosieAxNode) * (size_t)n);
+			if (!snap->nodes) {
+				free(snap);
+				snap = NULL;
+			} else {
+				memcpy(snap->nodes, nodes, sizeof(GoosieAxNode) * (size_t)n);
+				snap->n = n;
+				for (int i = 0; i < n; i++) {
+					snap->nodes[i].label = goosieAxCopy(snap->nodes[i].label);
+					snap->nodes[i].value = goosieAxCopy(snap->nodes[i].value);
+					snap->nodes[i].href = goosieAxCopy(snap->nodes[i].href);
+				}
+			}
+		}
+	}
+	// Building elements touches AppKit objects, so the install happens on the main
+	// thread like every other one here. The snapshot's ownership moves with the
+	// block: setAccessibilityTree: frees it after copying the strings into elements,
+	// and a window that quit before the block ran frees it here.
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (gw->quit) {
+			GoosieAxSnapshotFree(snap);
+			return;
+		}
+		[gw->view setAccessibilityTree:snap];
 	});
 }
 

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/surface"
 )
@@ -114,6 +115,7 @@ type Window struct {
 	size         frame.Size
 	cursor       surface.Cursor
 	imeEnabled   bool
+	axNodes      []ax.Node
 	ring         []*frame.Bitmap
 	last         int
 	serial       int64
@@ -296,6 +298,23 @@ func (w *Window) IMEEnabled() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.imeEnabled
+}
+
+// SetAccessibility implements surface.AccessibilityWindow. A headless window has
+// no assistive client, so the tree is only remembered - which is exactly what the
+// roadmap's headless-vs-native comparison needs: the same publish call a native
+// window takes, with the result readable instead of invisible.
+func (w *Window) SetAccessibility(nodes []ax.Node) {
+	w.mu.Lock()
+	w.axNodes = nodes
+	w.mu.Unlock()
+}
+
+// AccessibilityTree returns the tree last published.
+func (w *Window) AccessibilityTree() []ax.Node {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.axNodes
 }
 
 // ScaleFactor implements surface.Window.

@@ -34,10 +34,10 @@ const ModulePrefix = "github.com/vyquocvu/goosie/"
 var Allowed = map[string][]string{
 	"internal/frame":             nil,
 	"internal/paint":             {"internal/frame", "internal/css", "internal/layout", "internal/style"},
-	"internal/surface":           {"internal/frame", "internal/paint"},
+	"internal/surface":           {"internal/ax", "internal/frame", "internal/paint"},
 	"internal/raster":            {"internal/frame", "internal/paint", "internal/surface"},
-	"internal/platform/headless": {"internal/frame", "internal/surface"},
-	"internal/platform/darwin":   {"internal/frame", "internal/surface"},
+	"internal/platform/headless": {"internal/ax", "internal/frame", "internal/surface"},
+	"internal/platform/darwin":   {"internal/ax", "internal/frame", "internal/surface"},
 	"internal/platform":          {"internal/frame", "internal/surface", "internal/platform/headless", "internal/platform/darwin"},
 	"internal/archtest":          nil,
 	"internal/dom":               nil,
