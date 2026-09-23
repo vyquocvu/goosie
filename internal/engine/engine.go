@@ -588,6 +588,128 @@ func (s *Session) HitTestLink(x, y float32) string {
 	return ""
 }
 
+// Match is one find result: the document-space rect of an occurrence of the
+// query, in CSS pixels like every other engine coordinate.
+type Match struct {
+	X0, Y0, X1, Y1 float32
+}
+
+// maxFindMatches bounds the work a hostile page can make Find do.
+const maxFindMatches = 1000
+
+// Find returns the rects of every visible occurrence of query, in tree order,
+// case-insensitively. Consecutive word boxes of a run are joined with single
+// spaces, so a query may span word boundaries and line breaks but not element
+// boundaries.
+func (s *Session) Find(query string) []Match {
+	if s.Arena == nil || strings.TrimSpace(query) == "" {
+		return nil
+	}
+	q := strings.ToLower(query)
+
+	objs := s.Arena.Objects
+	var matches []Match
+	var run []*layout.Object
+
+	flushRun := func() {
+		if len(matches) >= maxFindMatches || len(run) == 0 {
+			run = run[:0]
+			return
+		}
+		var words []*layout.Object
+		for _, o := range run {
+			if strings.TrimSpace(o.Node.DataContent) != "" {
+				words = append(words, o)
+			}
+		}
+		run = run[:0]
+		if len(words) == 0 {
+			return
+		}
+		texts := make([]string, len(words))
+		off := make([]int, len(words))
+		pos := 0
+		for i, o := range words {
+			texts[i] = strings.ToLower(o.Node.DataContent)
+			off[i] = pos
+			pos += len(texts[i]) + 1
+		}
+		joined := strings.Join(texts, " ")
+		for at := 0; len(matches) < maxFindMatches; {
+			idx := strings.Index(joined[at:], q)
+			if idx < 0 {
+				break
+			}
+			start := at + idx
+			matches = append(matches, matchRect(words, off, start, start+len(q)))
+			at = start + 1
+		}
+	}
+
+	var walk func(layout.ObjectID)
+	walk = func(id layout.ObjectID) {
+		if id == 0 || int(id) >= len(objs) {
+			return
+		}
+		obj := &objs[id]
+		if obj.Node != nil && obj.Node.Type == dom.NodeText {
+			if x0, y0, x1, y1 := obj.BorderRect(); x0 < x1 && y0 < y1 {
+				if len(run) > 0 && run[len(run)-1].Parent != obj.Parent {
+					flushRun()
+				}
+				run = append(run, obj)
+			}
+		}
+		for k := obj.FirstKid; k != 0; k = objs[k].NextSibling {
+			walk(k)
+		}
+	}
+	walk(1)
+	flushRun()
+	return matches
+}
+
+// matchRect maps a match spanning joined-string offsets [start, end) back onto
+// the word boxes it covers. Edges inside a box are interpolated proportionally
+// to character position, which is exact for full-word matches.
+func matchRect(words []*layout.Object, off []int, start, end int) Match {
+	first, last := 0, len(words)-1
+	for i := range words {
+		if off[i] <= start {
+			first = i
+		}
+		if off[i] < end {
+			last = i
+		}
+	}
+	x0, y0, x1, y1 := words[first].BorderRect()
+	if first == last {
+		if w := len(words[first].Node.DataContent); w > 0 {
+			sx := x0 + (x1-x0)*float32(start-off[first])/float32(w)
+			ex := x0 + (x1-x0)*float32(end-off[first])/float32(w)
+			return Match{X0: sx, Y0: y0, X1: ex, Y1: y1}
+		}
+		return Match{X0: x0, Y0: y0, X1: x1, Y1: y1}
+	}
+	lx0, ly0, lx1, ly1 := words[last].BorderRect()
+	if w := len(words[first].Node.DataContent); w > 0 {
+		x0 = x0 + (x1-x0)*float32(start-off[first])/float32(w)
+	}
+	if w := len(words[last].Node.DataContent); w > 0 {
+		x1 = lx0 + (lx1-lx0)*float32(end-off[last])/float32(w)
+	} else {
+		x1 = lx1
+	}
+	top, bot := y0, y1
+	if ly0 < top {
+		top = ly0
+	}
+	if ly1 > bot {
+		bot = ly1
+	}
+	return Match{x0, top, x1, bot}
+}
+
 func parentObj(objs []layout.Object, o *layout.Object) *layout.Object {
 	if o.Parent == 0 || int(o.Parent) >= len(objs) {
 		return nil

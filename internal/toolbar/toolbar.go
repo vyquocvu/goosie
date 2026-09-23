@@ -1,6 +1,9 @@
 package toolbar
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -62,10 +65,17 @@ type State struct {
 	History    *History
 	Loading    bool
 	Error      string
+	FindActive bool
+	FindQuery  string
+	FindTotal  int
+	FindIndex  int
 	Bounds     frame.Rect
-	OnNavigate func(string)
-	OnTraverse func(int)
-	OnReload   func()
+	OnNavigate   func(string)
+	OnTraverse   func(int)
+	OnReload     func()
+	OnFindChanged func(string)
+	OnFindNext    func(bool)
+	OnFindClose   func()
 	Clipboard  Clipboard
 
 	fonts *raster.Fonts
@@ -102,11 +112,51 @@ func (s *State) SetLoading(loading bool) {
 	s.Loading = loading
 }
 
+// OpenFind reuses the address bar as the find field, restoring the previous
+// query. Total and index reset until the host recomputes them.
+func (s *State) OpenFind() {
+	if s.FindActive {
+		return
+	}
+	s.FindActive = true
+	s.FindTotal = 0
+	s.FindIndex = 0
+	s.Focus = FocusAddress
+	s.Input = s.FindQuery
+	s.Cursor = len([]rune(s.Input))
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
+}
+
+// CloseFind restores the address bar to the current URL and keeps the query
+// for the next OpenFind.
+func (s *State) CloseFind() {
+	if !s.FindActive {
+		return
+	}
+	s.FindActive = false
+	s.FindQuery = s.Input
+	s.FindTotal = 0
+	s.FindIndex = 0
+	s.Input = s.URL
+	s.Cursor = len([]rune(s.Input))
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
+	s.Focus = FocusNone
+}
+
 func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 	if button != surface.ButtonLeft {
 		return
 	}
 	if pos.Y >= ToolbarHeight {
+		if s.FindActive {
+			s.CloseFind()
+			if s.OnFindClose != nil {
+				s.OnFindClose()
+			}
+			return
+		}
 		if s.Focus == FocusAddress {
 			s.Focus = FocusNone
 			s.clearSelection()
@@ -132,6 +182,13 @@ func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 		s.Cursor = len([]rune(s.Input))
 		s.clearSelection()
 	default:
+		if s.FindActive {
+			s.CloseFind()
+			if s.OnFindClose != nil {
+				s.OnFindClose()
+			}
+			return
+		}
 		if s.Focus == FocusAddress {
 			s.Focus = FocusNone
 			s.clearSelection()
@@ -147,23 +204,58 @@ func (s *State) HandleKey(r rune) {
 
 // HandleKeyEvent dispatches a key event with modifier flags.
 func (s *State) HandleKeyEvent(key rune, mods surface.KeyMod) {
+	if s.FindActive {
+		s.handleFindKey(key, mods)
+		return
+	}
 	if s.Focus != FocusAddress {
 		return
 	}
+	if key == '\r' || key == '\n' {
+		if mods&(surface.ModCommand|surface.ModControl) == 0 {
+			s.submitInput()
+		}
+		return
+	}
+	s.editKey(key, mods)
+}
 
+// handleFindKey edits the find query. Enter steps to the next match,
+// Shift+Enter to the previous, Esc closes, and any other edit reports the new
+// query to the host.
+func (s *State) handleFindKey(key rune, mods surface.KeyMod) {
+	switch key {
+	case 0x1b:
+		s.CloseFind()
+		if s.OnFindClose != nil {
+			s.OnFindClose()
+		}
+		return
+	case '\r', '\n':
+		if s.OnFindNext != nil {
+			s.OnFindNext(mods&surface.ModShift != 0)
+		}
+		return
+	}
+	before := s.Input
+	s.editKey(key, mods)
+	if s.Input != before {
+		s.FindQuery = s.Input
+		if s.OnFindChanged != nil {
+			s.OnFindChanged(s.Input)
+		}
+	}
+}
+
+// editKey applies address-bar editing for one key event; it is shared between
+// URL entry and find mode.
+func (s *State) editKey(key rune, mods surface.KeyMod) {
 	cmd := mods&surface.ModCommand != 0
 	ctrl := mods&surface.ModControl != 0
 	shift := mods&surface.ModShift != 0
 	opt := mods&surface.ModOption != 0
 
-	// Handle special keys before backward compat conversion.
-	switch key {
-	case '\r', '\n':
-		if !cmd && !ctrl {
-			s.submitInput()
-		}
-		return
-	case 0x7f, '\b':
+	if key == 0x7f || key == '\b' {
 		s.DeleteBackward()
 		return
 	}
@@ -447,6 +539,9 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	textCol := textColor
 	if s.Focus == FocusNone && s.Error != "" {
 		textCol = frame.RGB(200, 50, 50)
+	} else if text == "" && s.FindActive {
+		text = "Find in page..."
+		textCol = placeholderColor
 	} else if text == "" && s.Focus == FocusNone {
 		text = "Enter URL..."
 		textCol = placeholderColor
@@ -474,6 +569,22 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	}
 
 	s.drawText(backing, text, textX, textY, textCol, clip)
+
+	if s.FindActive {
+		counter := fmt.Sprintf("%d/%d", s.FindIndex+1, s.FindTotal)
+		if s.FindTotal == 0 {
+			counter = "0/0"
+			if strings.TrimSpace(s.Input) == "" {
+				counter = ""
+			}
+		}
+		if counter != "" {
+			cx := r.X1 - BarPadding - 4 - s.measureText(counter)
+			if cx > textX+s.measureText(text)+8 {
+				s.drawText(backing, counter, cx, textY, placeholderColor, clip)
+			}
+		}
+	}
 
 	if s.Focus == FocusAddress {
 		cursorX := textX + s.measureText(text[:s.cursorByte()])

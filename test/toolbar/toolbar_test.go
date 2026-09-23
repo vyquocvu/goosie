@@ -519,3 +519,151 @@ func TestErrorState(t *testing.T) {
 		t.Fatalf("Error = %q, want 'fetch failed'", s.Error)
 	}
 }
+
+func TestFindOpenSwapsInputAndFocus(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.URL = "https://example.com"
+
+	s.OpenFind()
+	if !s.FindActive {
+		t.Fatal("FindActive = false after OpenFind")
+	}
+	if s.Focus != toolbar.FocusAddress {
+		t.Fatalf("Focus = %d after OpenFind, want FocusAddress", s.Focus)
+	}
+	if s.Input != "" {
+		t.Fatalf("Input = %q after first OpenFind, want empty", s.Input)
+	}
+}
+
+func TestFindQueryRestoredOnReopen(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.URL = "https://example.com"
+
+	s.OpenFind()
+	s.HandleKey('n')
+	s.HandleKey('e')
+	s.HandleKey('e')
+	s.HandleKey('d')
+	if s.Input != "need" {
+		t.Fatalf("Input = %q while typing, want need", s.Input)
+	}
+	s.HandleKey(0x1b) // Esc closes and saves.
+	if s.FindActive {
+		t.Fatal("FindActive still true after Esc")
+	}
+
+	s.OpenFind()
+	if s.Input != "need" {
+		t.Fatalf("Input = %q on reopen, want previous query need", s.Input)
+	}
+}
+
+func TestFindCloseRestoresURL(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.URL = "https://example.com"
+
+	s.OpenFind()
+	s.HandleKey('q')
+	s.CloseFind()
+	if s.FindActive {
+		t.Fatal("FindActive still true after CloseFind")
+	}
+	if s.Input != "https://example.com" {
+		t.Fatalf("Input = %q after CloseFind, want the URL", s.Input)
+	}
+	if s.FindQuery != "q" {
+		t.Fatalf("FindQuery = %q after CloseFind, want q", s.FindQuery)
+	}
+	if s.Focus != toolbar.FocusNone {
+		t.Fatalf("Focus = %d after CloseFind, want FocusNone", s.Focus)
+	}
+}
+
+func TestFindEnterStepsAndShiftReverses(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.OpenFind()
+
+	var steps []bool
+	s.OnFindNext = func(backward bool) { steps = append(steps, backward) }
+
+	s.HandleKey('\r')
+	if len(steps) != 1 || steps[0] {
+		t.Fatalf("first Enter = %v, want one forward step", steps)
+	}
+	s.HandleKeyEvent('\r', surface.ModShift)
+	if len(steps) != 2 || !steps[1] {
+		t.Fatalf("Shift+Enter = %v, want one backward step", steps)
+	}
+}
+
+func TestFindEscCallsClose(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.OpenFind()
+
+	closed := false
+	s.OnFindClose = func() { closed = true }
+
+	s.HandleKey(0x1b)
+	if !closed {
+		t.Fatal("OnFindClose not called on Esc")
+	}
+	if s.FindActive {
+		t.Fatal("FindActive still true after Esc")
+	}
+}
+
+func TestFindTypingReportsQuery(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.OpenFind()
+
+	var got string
+	s.OnFindChanged = func(query string) { got = query }
+
+	s.HandleKey('h')
+	s.HandleKey('i')
+	if got != "hi" {
+		t.Fatalf("OnFindChanged = %q after two keys, want hi", got)
+	}
+	if s.FindQuery != "hi" {
+		t.Fatalf("FindQuery = %q, want hi", s.FindQuery)
+	}
+}
+
+func TestFindOutsideClickCloses(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.URL = "https://example.com"
+	s.OpenFind()
+
+	closed := false
+	s.OnFindClose = func() { closed = true }
+
+	s.HandleClick(frame.Point{X: 400, Y: toolbar.ToolbarHeight + 5}, surface.ButtonLeft)
+	if s.FindActive {
+		t.Fatal("FindActive still true after outside click")
+	}
+	if !closed {
+		t.Fatal("OnFindClose not called on outside click")
+	}
+	if s.Input != "https://example.com" {
+		t.Fatalf("Input = %q after outside click, want the URL", s.Input)
+	}
+}
+
+func TestFindBackspaceStillReportsQuery(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.OpenFind()
+	s.HandleKey('a')
+	s.HandleKey('b')
+
+	cleared := ""
+	s.OnFindChanged = func(query string) { cleared = query }
+
+	s.HandleKey(0x7f)
+	if cleared != "a" {
+		t.Fatalf("OnFindChanged = %q after backspace, want a", cleared)
+	}
+	if s.FindQuery != "a" {
+		t.Fatalf("FindQuery = %q after backspace, want a", s.FindQuery)
+	}
+}

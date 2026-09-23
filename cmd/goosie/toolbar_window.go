@@ -194,6 +194,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			cw.onNewTab()
 			return true
 		}
+	case key == 'f' || key == 'F':
+		if cw.toolbar != nil {
+			cw.toolbar.OpenFind()
+			return true
+		}
 	case key == 'w' || key == 'W':
 		active := cw.tabMgr.Active()
 		if active != nil && cw.onCloseTab != nil {

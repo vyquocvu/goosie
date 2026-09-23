@@ -207,6 +207,8 @@ type framePath struct {
 	started    time.Time
 	navResults chan navResult
 	zoom     float64
+	findMatches []engine.Match
+	findIdx     int
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -300,6 +302,15 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnReload = func() {
 			f.reloadTab()
 		}
+		f.toolbar.OnFindChanged = func(query string) {
+			f.runFind(query)
+		}
+		f.toolbar.OnFindNext = func(backward bool) {
+			f.findStep(backward)
+		}
+		f.toolbar.OnFindClose = func() {
+			f.closeFind()
+		}
 		if cb := platform.NewClipboard(); cb != nil {
 			f.toolbar.Clipboard = cb
 		}
@@ -333,6 +344,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	if tab == nil {
 		return
 	}
+	f.closeFind()
 	u := normalizeURL(rawURL)
 
 	tab.Nav.Mu.Lock()
@@ -440,6 +452,7 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 	if tab == nil {
 		return
 	}
+	f.closeFind()
 	u := normalizeURL(rawURL)
 
 	tab.Nav.Mu.Lock()
@@ -556,8 +569,82 @@ func (f *framePath) hitTestLink(contentX, contentY int32) string {
 	return tab.Session.HitTestLink(docX, docY)
 }
 
+// runFind recomputes the match set for a new find query on the active tab and
+// jumps to the first hit.
+func (f *framePath) runFind(query string) {
+	if f.toolbar == nil {
+		return
+	}
+	f.findMatches = nil
+	f.findIdx = 0
+	f.toolbar.FindTotal = 0
+	f.toolbar.FindIndex = 0
+	if strings.TrimSpace(query) == "" {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return
+	}
+	f.findMatches = tab.Session.Find(query)
+	f.toolbar.FindTotal = len(f.findMatches)
+	if len(f.findMatches) > 0 {
+		f.scrollToMatch(0)
+	}
+}
+
+// findStep moves to the next (or previous) match, wrapping around.
+func (f *framePath) findStep(backward bool) {
+	if len(f.findMatches) == 0 {
+		return
+	}
+	if backward {
+		f.findIdx--
+		if f.findIdx < 0 {
+			f.findIdx = len(f.findMatches) - 1
+		}
+	} else {
+		f.findIdx++
+		if f.findIdx >= len(f.findMatches) {
+			f.findIdx = 0
+		}
+	}
+	f.toolbar.FindIndex = f.findIdx
+	f.scrollToMatch(f.findIdx)
+}
+
+// scrollToMatch centers the match's line in the upper part of the viewport.
+func (f *framePath) scrollToMatch(idx int) {
+	if idx < 0 || idx >= len(f.findMatches) {
+		return
+	}
+	m := f.findMatches[idx]
+	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	size := f.config.devSize()
+	offsetY := int32(m.Y0*effectiveDPR) - size.H/4
+	if offsetY < 0 {
+		offsetY = 0
+	}
+	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: offsetY}, Size: size})
+}
+
+// closeFind drops the match state; navigation and tab switches end find mode.
+func (f *framePath) closeFind() {
+	f.findMatches = nil
+	f.findIdx = 0
+	if f.toolbar == nil {
+		return
+	}
+	f.toolbar.FindTotal = 0
+	f.toolbar.FindIndex = 0
+	if f.toolbar.FindActive {
+		f.toolbar.CloseFind()
+	}
+}
+
 // switchTab saves the current tab's scroll and switches to the given tab.
 func (f *framePath) switchTab(id uint64) {
+	f.closeFind()
 	cur := f.tabMgr.Active()
 	if cur != nil {
 		vp := f.sched.Viewport()
@@ -587,6 +674,7 @@ func (f *framePath) newTab() {
 	if f.tabMgr == nil {
 		return
 	}
+	f.closeFind()
 	cur := f.tabMgr.Active()
 	if cur != nil {
 		vp := f.sched.Viewport()
@@ -615,6 +703,7 @@ func (f *framePath) closeTab(id uint64) {
 	if f.tabMgr == nil {
 		return
 	}
+	f.closeFind()
 	if tab := f.tabMgr.TabByID(id); tab != nil {
 		tab.Nav.Mu.Lock()
 		if tab.Nav.Cancel != nil {
