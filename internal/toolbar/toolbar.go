@@ -324,6 +324,12 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	s.drawButton(backing, ButtonForward, w, clip, oy)
 	s.drawButton(backing, ButtonReload, w, clip, oy)
 	s.drawAddressBar(backing, w, clip, oy)
+
+	if s.Loading {
+		progressColor := frame.RGB(70, 140, 220)
+		lineY := oy + ToolbarHeight - 3
+		backing.FillRect(frame.Rect4(0, lineY, w, lineY+2), progressColor, nil)
+	}
 }
 
 func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, clip frame.Rect, oy int32) {
@@ -432,10 +438,16 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 
 	text := s.Input
 	if s.Focus == FocusNone {
-		text = s.URL
+		if s.Error != "" {
+			text = s.Error
+		} else {
+			text = s.URL
+		}
 	}
 	textCol := textColor
-	if text == "" && s.Focus == FocusNone {
+	if s.Focus == FocusNone && s.Error != "" {
+		textCol = frame.RGB(200, 50, 50)
+	} else if text == "" && s.Focus == FocusNone {
 		text = "Enter URL..."
 		textCol = placeholderColor
 	}
