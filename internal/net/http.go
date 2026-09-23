@@ -2,6 +2,7 @@ package net
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -270,21 +271,36 @@ func validateHTTPHost(u *url.URL) error {
 // verification and at most ten validated HTTP(S) redirects.
 func DefaultClient() HTTP {
 	return &httpClient{client: &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > 10 {
-				return errors.New("net: too many redirects")
-			}
-			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-				return errors.New("net: redirect requires HTTP(S)")
-			}
-			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme == "http" {
-				return errors.New("net: HTTPS-to-HTTP redirect denied")
-			}
-			_, err := NormalizeURL(req.URL.String())
-			return err
-		},
+		Timeout:       30 * time.Second,
+		CheckRedirect: checkRedirect,
 	}}
+}
+
+// DefaultClientWithTLS returns an HTTP client identical to DefaultClient but
+// using a caller-supplied TLS configuration. Tests use it to trust the
+// self-signed certificates httptest.NewTLSServer generates.
+func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
+	return &httpClient{client: &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+		CheckRedirect: checkRedirect,
+	}}
+}
+
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > 10 {
+		return errors.New("net: too many redirects")
+	}
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return errors.New("net: redirect requires HTTP(S)")
+	}
+	if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme == "http" {
+		return errors.New("net: HTTPS-to-HTTP redirect denied")
+	}
+	_, err := NormalizeURL(req.URL.String())
+	return err
 }
 
 type httpClient struct {

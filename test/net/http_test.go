@@ -429,6 +429,75 @@ func TestFileBoundaries(t *testing.T) {
 	}
 }
 
+func TestFilePathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("sensitive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(dir, "sub")
+	if err := os.Mkdir(subdir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	client := transport.DefaultClient()
+	defer client.Close()
+	traversal := filepath.Join(subdir, "..", "secret.txt")
+	fileURL := (&url.URL{Scheme: "file", Path: traversal}).String()
+	resp, err := client.Get(context.Background(), fileURL)
+	if err != nil {
+		t.Fatalf("normalized path should resolve: %v", err)
+	}
+	if string(resp.Body) != "sensitive" {
+		t.Fatalf("body = %q, want %q", resp.Body, "sensitive")
+	}
+	cleanURL := (&url.URL{Scheme: "file", Path: secret}).String()
+	if resp.URL != cleanURL {
+		t.Fatalf("URL = %q, want cleaned %q", resp.URL, cleanURL)
+	}
+}
+
+func TestHTTPSDowngradeRedirectBlocked(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "downgraded")
+	}))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL, http.StatusFound)
+	}))
+	defer tls.Close()
+	client := transport.DefaultClientWithTLS(tls.TLS)
+	defer client.Close()
+	if _, err := client.Get(context.Background(), tls.URL); err == nil {
+		t.Fatal("HTTPS-to-HTTP redirect should be blocked")
+	}
+}
+
+func TestSetCookiePreservation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "a=1; Expires=Wed, 09 Jun 2026 10:00:00 GMT")
+		w.Header().Add("Set-Cookie", "b=2; Expires=Thu, 10 Jun 2026 10:00:00 GMT")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer server.Close()
+	client := transport.DefaultClient()
+	defer client.Close()
+	resp, err := client.Get(context.Background(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookies := resp.Headers["Set-Cookie"]
+	if !strings.Contains(cookies, "\n") {
+		t.Fatalf("Set-Cookie should use newline separator, got %q", cookies)
+	}
+	parts := strings.Split(cookies, "\n")
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 cookies, got %d: %q", len(parts), cookies)
+	}
+	if !strings.Contains(parts[0], "a=1") || !strings.Contains(parts[1], "b=2") {
+		t.Fatalf("cookies = %q", cookies)
+	}
+}
+
 func await(t *testing.T, ch <-chan struct{}, description string) {
 	t.Helper()
 	select {

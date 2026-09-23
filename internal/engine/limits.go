@@ -604,6 +604,9 @@ func resolveSheetURL(base, href string) (string, bool) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", false
 	}
+	if b.Scheme == "https" && u.Scheme == "http" {
+		return "", false
+	}
 	return u.String(), true
 }
 
