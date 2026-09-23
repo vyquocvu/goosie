@@ -578,6 +578,14 @@ func (f *framePath) closeTab(id uint64) {
 	if f.tabMgr == nil {
 		return
 	}
+	if tab := f.tabMgr.TabByID(id); tab != nil {
+		tab.Nav.Mu.Lock()
+		if tab.Nav.Cancel != nil {
+			tab.Nav.Cancel()
+			tab.Nav.Cancel = nil
+		}
+		tab.Nav.Mu.Unlock()
+	}
 	f.tabMgr.CloseTab(id)
 	if f.tabMgr.Count() > 0 {
 		tab := f.tabMgr.Active()

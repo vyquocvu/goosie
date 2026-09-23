@@ -277,6 +277,9 @@ func DefaultClient() HTTP {
 			if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 				return errors.New("net: redirect requires HTTP(S)")
 			}
+			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme == "http" {
+				return errors.New("net: HTTPS-to-HTTP redirect denied")
+			}
 			_, err := NormalizeURL(req.URL.String())
 			return err
 		},

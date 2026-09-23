@@ -824,7 +824,7 @@ void GoosieClose(GoosieWindow *gw) {
 
 char *GoosieClipboardRead(void) {
 	__block char *result = NULL;
-	dispatch_sync(dispatch_get_main_queue(), ^{
+	void (^block)(void) = ^{
 		@autoreleasepool {
 			NSPasteboard *pb = [NSPasteboard generalPasteboard];
 			NSString *s = [pb stringForType:NSPasteboardTypeString];
@@ -833,12 +833,13 @@ char *GoosieClipboardRead(void) {
 				if (utf8) result = strdup(utf8);
 			}
 		}
-	});
+	};
+	if ([NSThread isMainThread]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 	return result;
 }
 
 void GoosieClipboardWrite(const char *text) {
-	dispatch_sync(dispatch_get_main_queue(), ^{
+	void (^block)(void) = ^{
 		@autoreleasepool {
 			NSPasteboard *pb = [NSPasteboard generalPasteboard];
 			[pb clearContents];
@@ -847,5 +848,6 @@ void GoosieClipboardWrite(const char *text) {
 				       forType:NSPasteboardTypeString];
 			}
 		}
-	});
+	};
+	if ([NSThread isMainThread]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 }

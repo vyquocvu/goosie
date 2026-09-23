@@ -234,6 +234,9 @@ func (w *Window) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	if buf.Stride < buf.W*4 {
 		return fmt.Errorf("platform/darwin: buffer stride %d is narrower than a %d px row", buf.Stride, buf.W)
 	}
+	if n := int64(buf.Stride) * int64(buf.H); int64(len(buf.RGBA)) < n {
+		return fmt.Errorf("platform/darwin: buffer has %d bytes but stride*height requires %d", len(buf.RGBA), n)
+	}
 	if len(w.dmg) < len(damage) {
 		w.dmg = make([][4]C.int, len(damage))
 	}
