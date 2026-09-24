@@ -86,7 +86,7 @@ func TestLoadURLCtxRejectsInvalidViewport(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), tc.w, tc.h, tc.scale, t.TempDir())
+			layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), tc.w, tc.h, tc.scale, t.TempDir(), false)
 			if err == nil {
 				t.Fatalf("loadURLCtx(%d,%d,%v) succeeded, want error", tc.w, tc.h, tc.scale)
 			}
@@ -112,7 +112,7 @@ func TestLoadURLCtxValidSmallDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir())
+	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir(), false)
 	if err != nil {
 		t.Fatalf("loadURLCtx failed: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestLoadURLCtxRejectsOversizedDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir())
+	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir(), false)
 	if err == nil {
 		t.Fatal("loadURLCtx succeeded on oversized document")
 	}
@@ -178,6 +178,7 @@ func newNavTestPath(t *testing.T) *framePath {
 	f := &framePath{
 		sched:      sched,
 		navResults: make(chan navResult, 16),
+		imgResults: make(chan imgResult, 16),
 	}
 	f.tabMgr = tabs.NewManager(nil)
 	f.tabMgr.NewTab()
@@ -436,17 +437,44 @@ func TestInterceptResizeReportsLogicalContentSize(t *testing.T) {
 	var gotW, gotH int
 	cw.onResize = func(w, h int) { gotW, gotH = w, h }
 
-	// The shim reports device pixels; the host must receive logical content size.
+	// The shim reports the whole window surface in device pixels: the content
+	// viewport plus the chrome band chromeWindow composites on top. The host
+	// must see the logical content size, and the loop must see a resize that
+	// carries the content device size - forwarding the window size makes the
+	// scheduler size a buffer that Present then grows again by the chrome
+	// band, and the stretched bitmap puts every hover a line below its pixels.
 	resize := surface.Event{
-		Kind: surface.EvResize,
-		Size: frame.Size{W: 2880, H: 1800},
+		Kind:  surface.EvResize,
+		Size:  frame.Size{W: 2880, H: 1800},
+		Scale: 2,
 	}
-	if cw.intercept(resize) {
-		t.Fatal("resize consumed")
+	if !cw.intercept(resize) {
+		t.Fatal("resize not consumed")
 	}
 	wantH := (1800 - int(totalChromeHeight)*2) / 2
 	if gotW != 1440 || gotH != wantH {
 		t.Fatalf("resize reported (%d,%d), want (1440,%d)", gotW, gotH, wantH)
+	}
+
+	var fwd surface.Event
+	select {
+	case fwd = <-cw.events:
+	default:
+		t.Fatal("no resized event forwarded to the loop")
+	}
+	if fwd.Kind != surface.EvResize {
+		t.Fatalf("forwarded kind %v, want EvResize", fwd.Kind)
+	}
+	if fwd.Size != (frame.Size{W: 2880, H: int32(wantH) * 2}) {
+		t.Fatalf("forwarded size %+v, want the content device size {2880 %d}", fwd.Size, int32(wantH)*2)
+	}
+	if fwd.Scale != 2 {
+		t.Fatalf("forwarded scale %v, want the window's 2", fwd.Scale)
+	}
+	select {
+	case extra := <-cw.events:
+		t.Fatalf("second forwarded event %+v", extra)
+	default:
 	}
 }
 

@@ -93,6 +93,15 @@ type downloadDone struct{ path string }
 
 func (e downloadDone) Error() string { return "downloaded to " + e.path }
 
+// imgResult reports that a session's deferred images have landed; the drain
+// goroutine reflows and repaints the owning tab if it is still showing the
+// same navigation.
+type imgResult struct {
+	tabID   uint64
+	serial  uint64
+	session *engine.Session
+}
+
 // errUsage marks a bad invocation, which the shell should see as exit status 2 rather
 // than as a failure deep inside a run.
 var errUsage = errors.New("usage")
@@ -291,6 +300,7 @@ type framePath struct {
 	history           *history.Store
 	started           time.Time
 	navResults        chan navResult
+	imgResults        chan imgResult
 	zoom              float64
 	findMatches       []engine.Match
 	findIdx           int
@@ -389,10 +399,12 @@ func build(c config) (*framePath, error) {
 		bookmarks:  bookmarkStore,
 		history:    historyStore,
 		navResults: make(chan navResult, 16),
+		imgResults: make(chan imgResult, 16),
 		zoom:       1.0,
 	}
 	if !c.paced() {
 		go f.drainNavResults()
+		go f.drainImageResults()
 	}
 	if !c.paced() {
 		f.toolbar = toolbar.NewState(dev.W, fonts)
@@ -495,7 +507,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	f.toolbar.Error = ""
 
 	go func() {
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir)
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u}
 		var dd downloadDone
 		if errors.As(err, &dd) {
@@ -569,6 +581,46 @@ func (f *framePath) applyNavResult(result navResult) {
 		})
 		f.publishAccessibility()
 	}
+
+	// The first frame is out with the document, CSS and fonts only; the
+	// images arrive on their own goroutine and repaint when they land.
+	if sess := result.session; sess != nil && sess.DeferredImagesPending() > 0 {
+		tabID, serial := result.tabID, result.serial
+		go sess.LoadDeferredImages(func(loaded int) {
+			if loaded == 0 {
+				return
+			}
+			f.imgResults <- imgResult{tabID: tabID, serial: serial, session: sess}
+		})
+	}
+}
+
+// drainImageResults reads deferred-image completions and applies them.
+func (f *framePath) drainImageResults() {
+	for res := range f.imgResults {
+		f.applyImageResult(res)
+	}
+}
+
+// applyImageResult reflows and repaints the tab whose deferred images just
+// landed, unless a newer navigation (or a reload that rebuilt the session)
+// has superseded it.
+func (f *framePath) applyImageResult(res imgResult) {
+	tab := f.tabMgr.TabByID(res.tabID)
+	if tab == nil || tab.Session != res.session {
+		return
+	}
+	tab.Nav.Mu.Lock()
+	cur := tab.Nav.Serial
+	tab.Nav.Mu.Unlock()
+	if cur != res.serial {
+		return
+	}
+	if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: reflow after images:", err)
+		return
+	}
+	f.repaintTab(tab)
 }
 
 // toggleBookmark stars or unstars the active tab's page and persists immediately.
@@ -627,7 +679,7 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 	f.toolbar.SetLoading(true)
 
 	go func() {
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir)
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true}
 		var dd downloadDone
 		if errors.As(err, &dd) {
@@ -737,11 +789,15 @@ func (f *framePath) repaintTab(tab *tabs.Tab) {
 	layer.SetContent(dl)
 
 	tab.Layer = layer
-	f.sched.SetPlan(frame.FramePlan{
-		Serial:     tab.Nav.Serial,
-		Layers:     []*frame.Layer{layer},
-		Background: tab.BGColor,
-	})
+	// A background tab's repaint must not steal the screen; switchTab
+	// presents the fresh layer when the tab comes forward.
+	if f.tabMgr.Active() == tab {
+		f.sched.SetPlan(frame.FramePlan{
+			Serial:     tab.Nav.Serial,
+			Layers:     []*frame.Layer{layer},
+			Background: tab.BGColor,
+		})
+	}
 	f.publishAccessibility()
 }
 
@@ -1158,8 +1214,11 @@ func (f *framePath) closeTab(id uint64) {
 	}
 }
 
-// loadURLCtx is like loadURL but respects context cancellation.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
+// loadURLCtx is like loadURL but respects context cancellation. With
+// deferImages the session collects image references without fetching them, so
+// the first frame can go out immediately and LoadDeferredImages repaints once
+// they land.
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: viewport: %w", err)
 	}
@@ -1218,7 +1277,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
-		engine.WithImages(resp.URL, imageFetcher),
+		imageOption(deferImages, resp.URL, imageFetcher),
 		engine.WithCustomFontLoading(resp.URL, fontFetcher, fonts))
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: build session: %w", err)
@@ -1239,9 +1298,16 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, nil
 }
 
+// imageOption picks the synchronous or deferred image path for a load.
+func imageOption(deferred bool, base string, fetch engine.ImageFetcher) engine.Option {
+	if deferred {
+		return engine.WithDeferredImages(base, fetch)
+	}
+	return engine.WithImages(base, fetch)
+}
+
 // normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
-func normalizeURL(raw string) string {
-	if raw == "" {
+func normalizeURL(raw string) string {	if raw == "" {
 		return raw
 	}
 	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "file://") {
@@ -1356,7 +1422,7 @@ func run(args []string) error {
 	// synchronously and the run captures the page it was asked for.
 	if c.url != "" && !c.gate && !c.bench {
 		if c.screenshot {
-			layer, _, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir)
+			layer, _, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false)
 			if err != nil {
 				return err
 			}

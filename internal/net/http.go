@@ -276,7 +276,8 @@ func DefaultClient() HTTP {
 			Timeout:       30 * time.Second,
 			CheckRedirect: checkRedirect,
 		},
-		jar: NewCookieJar(),
+		jar:   NewCookieJar(),
+		cache: newResponseCache(),
 	}
 }
 
@@ -289,6 +290,7 @@ func DefaultPrivateClient() HTTP {
 			CheckRedirect: checkRedirect,
 		},
 		jar:     NewCookieJar(),
+		cache:   newResponseCache(),
 		private: true,
 	}
 }
@@ -303,7 +305,7 @@ func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 			TLSClientConfig: tlsConfig,
 		},
 		CheckRedirect: checkRedirect,
-	}}
+	}, cache: newResponseCache()}
 }
 
 // DefaultClientWithCookies returns DefaultClient whose jar persists to
@@ -334,6 +336,7 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 type httpClient struct {
 	client      *http.Client
 	jar         *CookieJar
+	cache       *responseCache
 	private     bool
 	persistPath string
 }
@@ -363,6 +366,11 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 			return nil, errors.New("net: only GET supports file URLs")
 		}
 		return readFileURL(ctx, u)
+	}
+	if method == http.MethodGet && c.cache != nil {
+		if resp, ok := c.cache.get(normalized, time.Now()); ok {
+			return resp, nil
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, normalized, body)
 	if err != nil {
@@ -402,12 +410,16 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 			headers[k] = strings.Join(values, ", ")
 		}
 	}
-	return &Response{
+	out := &Response{
 		StatusCode: resp.StatusCode,
 		Headers:    headers,
 		Body:       data,
 		URL:        resp.Request.URL.String(),
-	}, nil
+	}
+	if method == http.MethodGet && c.cache != nil {
+		c.cache.store(normalized, out, time.Now())
+	}
+	return out, nil
 }
 
 func (c *httpClient) SetTimeout(d time.Duration) {

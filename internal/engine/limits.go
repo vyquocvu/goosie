@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 
 	"github.com/vyquocvu/goosie/internal/css"
@@ -360,6 +362,11 @@ func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats
 			if siblings > MaxDocumentNodes || c.Parent != e.n {
 				return stats, fmt.Errorf("invalid document node links")
 			}
+		}
+		// Push last-child-first so the stack pops in document order: callers
+		// rely on it — linked-sheet cascade order and image fetch priority both
+		// read "in document order" and a reversed walk inverts the cascade.
+		for c := e.n.LastChild; c != nil; c = c.PrevSibling {
 			stack = append(stack, entry{c, e.depth + 1})
 		}
 		stats.siblings = max(stats.siblings, siblings)
@@ -468,7 +475,15 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 	for _, src := range sources {
 		all = append(all, cssSource{text: src})
 	}
+	// A linked sheet is fetched against its own URL and its text spliced into a
+	// reserved slot so the cascade sees sources in document order. The slot is
+	// claimed during the walk and filled after the concurrent fetch below.
+	type pendingLink struct {
+		slot int
+		abs  string
+	}
 	linked := map[string]bool{}
+	var pending []pendingLink
 	linksLeft := maxLinkedSheets
 	stats, err := walkDocument(doc, func(n *dom.Node) error {
 		if n.Element() && n.Data == "style" {
@@ -479,12 +494,8 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				if abs, ok := resolveSheetURL(base, href); ok && !linked[abs] {
 					linked[abs] = true
 					linksLeft--
-					if sheet, err := linker(base, abs); err == nil {
-						// The sheet's own @import statements are spliced in before it is parsed
-						// so an imported theme cascades where the page put the statement.
-						text := absolutizeCSSURLs(sheet, abs)
-						all = append(all, cssSource{text: expandCSSImports(linker, abs, text, linked, 1), remote: true})
-					}
+					all = append(all, cssSource{})
+					pending = append(pending, pendingLink{slot: len(all) - 1, abs: abs})
 				}
 			}
 		}
@@ -497,6 +508,40 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 		}
 		return nil
 	})
+	// Linked sheets are fetched through a bounded pool, the same shape as
+	// loadImages and loadFonts: a page can link a dozen stylesheets, and a
+	// sequential walk spends the whole wall-clock budget on the first slow host
+	// while the rest never load. @import expansion stays on this goroutine so
+	// the shared `linked` set needs no lock.
+	if len(pending) > 0 {
+		texts := make([]*string, len(pending))
+		deadline := time.Now().Add(cssFetchBudget)
+		const cssWorkers = 8
+		sem := make(chan struct{}, cssWorkers)
+		var wg sync.WaitGroup
+		for i, p := range pending {
+			if time.Now().After(deadline) {
+				break
+			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, abs string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if sheet, err := linker(base, abs); err == nil {
+					texts[i] = &sheet
+				}
+			}(i, p.abs)
+		}
+		wg.Wait()
+		for i, p := range pending {
+			if texts[i] == nil {
+				continue
+			}
+			text := absolutizeCSSURLs(*texts[i], p.abs)
+			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, 1), remote: true}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -572,6 +617,11 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 // maxLinkedSheets bounds how many <link rel=stylesheet> fetches one document
 // may trigger. Real pages rarely link more than a dozen.
 const maxLinkedSheets = 32
+
+// cssFetchBudget is the wall-clock deadline for all linked-stylesheet fetches.
+// CSS is render-blocking, so unlike images and fonts it is worth waiting for —
+// but a dead host must not hold the document behind the client's own timeout.
+const cssFetchBudget = 6 * time.Second
 
 // stylesheetHref returns the href of a link element whose rel token list
 // includes stylesheet, or "" for anything else.

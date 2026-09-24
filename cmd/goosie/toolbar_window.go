@@ -232,17 +232,25 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		return false
 	case surface.EvResize:
 		cw.toolbar.SetBounds(ev.Size.W)
+		contentDevH := ev.Size.H - cw.chromeHeight()
+		if contentDevH < 0 {
+			contentDevH = 0
+		}
 		if cw.onResize != nil {
 			// The shim reports device pixels; the host keeps logical sizes and
 			// multiplies by the DPR itself.
 			sc := int(cw.sc())
-			contentH := int(ev.Size.H) - int(cw.chromeHeight())
-			if contentH < 0 {
-				contentH = 0
-			}
-			cw.onResize(int(ev.Size.W)/sc, contentH/sc)
+			cw.onResize(int(ev.Size.W)/sc, int(contentDevH)/sc)
 		}
-		return false
+		// The loop's surface is the content viewport, not the whole window, so
+		// it must learn the content size: forwarding the window size makes the
+		// scheduler size a buffer this method then grows again by the chrome
+		// band, and the platform stretches that over-long bitmap to fit -
+		// putting every pointer event's hit below the pixels it names. The
+		// rewritten event ends the pump's read chain, so the resize is consumed
+		// here rather than returned to the pump.
+		cw.events <- surface.Event{Kind: surface.EvResize, Size: frame.Size{W: ev.Size.W, H: contentDevH}, Scale: ev.Scale}
+		return true
 	default:
 		return false
 	}

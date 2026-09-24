@@ -49,6 +49,18 @@ type Session struct {
 	images   map[dom.NodeID]stdimage.Image
 	bgImages map[dom.NodeID]stdimage.Image
 
+	// imgMu guards the image maps and pendingImgs. LoadDeferredImages runs on
+	// the caller's goroutine and writes these maps while the session owner
+	// keeps reflowing, so every read and write crosses here.
+	imgMu sync.Mutex
+
+	// Progressive paint state. WithDeferredImages collects the document's
+	// image references without fetching them, so the first frame goes out
+	// after document, CSS and fonts only; the refs wait here until
+	// LoadDeferredImages drains them.
+	deferImages bool
+	pendingImgs []imgRef
+
 	fontBase  string
 	fontFetch FontFetcher
 	fontReg   FontRegistry
@@ -72,7 +84,8 @@ type Session struct {
 // CSSLinker fetches one linked style sheet. base is the document URL the href
 // resolves against; the returned string is the sheet's CSS text. A linker that
 // fails simply contributes no rules for that href; document rendering does not
-// stop for one missing sheet.
+// stop for one missing sheet. Linked sheets are fetched concurrently, so a
+// linker may be called from several goroutines at once.
 type CSSLinker func(base, href string) (string, error)
 
 // ImageFetcher fetches one image subresource's raw bytes. base is the document
@@ -83,7 +96,8 @@ type ImageFetcher func(base, url string) ([]byte, error)
 
 // FontFetcher fetches one @font-face resource's raw bytes. Same shape as
 // ImageFetcher: the engine resolves the src URL against the stylesheet base
-// before calling, so the fetcher only sees absolute URLs.
+// before calling, so the fetcher only sees absolute URLs. Fonts are fetched
+// concurrently, so a fetcher may be called from several goroutines at once.
 type FontFetcher func(base, url string) ([]byte, error)
 
 // FontRegistry accepts parsed font bytes and returns a 1-based index. The
@@ -136,6 +150,18 @@ func WithImages(base string, fetch ImageFetcher) Option {
 	return func(s *Session) {
 		s.imgBase = base
 		s.imgFetch = fetch
+	}
+}
+
+// WithDeferredImages is WithImages for the progressive-paint path: the
+// document's image references are collected during construction but nothing
+// is fetched, so the caller can paint the first frame immediately and call
+// LoadDeferredImages to bring the images in afterwards.
+func WithDeferredImages(base string, fetch ImageFetcher) Option {
+	return func(s *Session) {
+		s.imgBase = base
+		s.imgFetch = fetch
+		s.deferImages = true
 	}
 }
 
@@ -193,22 +219,24 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 // loadFonts extracts @font-face rules from every stylesheet, fetches the font
 // files, registers them with the font registry, and publishes the family→index
 // map so style resolution can match custom family names.
+//
+// Fetching runs through a bounded worker pool, the same shape as loadImages:
+// pages declare several families and weights, and a sequential walk spends
+// the whole wall-clock budget on the first handful. Registration stays on
+// this goroutine in document order so registry indices are deterministic and
+// a later rule overwrites the same family exactly as the sequential walk did.
 func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 	if s.fontFetch == nil || s.fontReg == nil {
 		return
 	}
-	familyMap := make(map[string]uint16)
-	registry := make(map[style.CustomFontKey]uint16)
-	deadline := time.Now().Add(fontFetchBudget)
-	var fetched int
-	var fetchedBytes int64
+	type job struct {
+		family, srcURL, weightStr, styleStr string
+	}
+	var jobs []job
 	for _, sheet := range sheets {
 		for _, ff := range sheet.FontFaces {
-			if fetched >= maxFontRequests {
-				return
-			}
-			if time.Now().After(deadline) {
-				return
+			if len(jobs) >= maxFontRequests {
+				break
 			}
 			var family, srcURL, weightStr, styleStr string
 			for _, d := range ff.Declarations {
@@ -230,33 +258,64 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 			if !ok {
 				continue
 			}
-			data, err := s.fontFetch(s.fontBase, abs)
+			jobs = append(jobs, job{family: family, srcURL: abs, weightStr: weightStr, styleStr: styleStr})
+		}
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	data := make([][]byte, len(jobs))
+	deadline := time.Now().Add(fontFetchBudget)
+	const fontWorkers = 8
+	sem := make(chan struct{}, fontWorkers)
+	var wg sync.WaitGroup
+	for i := range jobs {
+		if time.Now().After(deadline) {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fetched, err := s.fontFetch(s.fontBase, jobs[i].srcURL)
 			if err != nil {
-				continue
-			}
-			fetchedBytes += int64(len(data))
-			fetched++
-			if fetchedBytes > maxFontBytes {
 				return
 			}
-			idx, err := s.fontReg.Register(data)
-			if err != nil {
-				continue
-			}
-			familyMap[strings.ToLower(family)] = idx
+			data[i] = fetched
+		}(i)
+	}
+	wg.Wait()
 
-			// Build the weight/slant key for the registry.
-			bold := weightStr == "bold" || weightStr == "700" || weightStr == "800" || weightStr == "900"
-			light := weightStr == "300" || weightStr == "200" || weightStr == "100"
-			italic := styleStr == "italic" || styleStr == "oblique"
-			key := style.CustomFontKey{
-				Family: strings.ToLower(family),
-				Bold:   bold,
-				Italic: italic,
-				Light:  light,
-			}
-			registry[key] = idx
+	familyMap := make(map[string]uint16)
+	registry := make(map[style.CustomFontKey]uint16)
+	var fetchedBytes int64
+	for i, j := range jobs {
+		if len(data[i]) == 0 {
+			continue
 		}
+		fetchedBytes += int64(len(data[i]))
+		if fetchedBytes > maxFontBytes {
+			return
+		}
+		idx, err := s.fontReg.Register(data[i])
+		if err != nil {
+			continue
+		}
+		familyMap[strings.ToLower(j.family)] = idx
+
+		// Build the weight/slant key for the registry.
+		bold := j.weightStr == "bold" || j.weightStr == "700" || j.weightStr == "800" || j.weightStr == "900"
+		light := j.weightStr == "300" || j.weightStr == "200" || j.weightStr == "100"
+		italic := j.styleStr == "italic" || j.styleStr == "oblique"
+		key := style.CustomFontKey{
+			Family: strings.ToLower(j.family),
+			Bold:   bold,
+			Italic: italic,
+			Light:  light,
+		}
+		registry[key] = idx
 	}
 	if len(familyMap) > 0 {
 		style.SetCustomFonts(familyMap)
@@ -344,34 +403,74 @@ func (r *imageReservation) release(pixels int64) {
 	r.reserved -= pixels
 }
 
-// loadImages walks the styled document for <img> srcs and background-image
-// URLs, fetches and decodes each unique target, and records the intrinsic size
-// (for <img> layout) and the decoded pixels (for paint). It is a no-op without
-// a fetcher.
-//
-// Fetching runs through a bounded worker pool rather than inline in the walk. A
-// page can carry dozens of images; a sequential walk spends the whole
-// wall-clock budget on the first handful (at ~0.8s each, a 6s budget covers
-// only ~7), leaving the rest to reserve their box and paint nothing. Fetching
-// concurrently lets the same deadline cover the page, which is what a real
-// browser does and what the reference renders assume.
+// imgRef is one image subresource reference found in the document: the node
+// that wants it, the absolute URL it resolves to, and whether it is a CSS
+// background rather than an <img>.
+type imgRef struct {
+	id  dom.NodeID
+	abs string
+	bg  bool
+}
+
+// loadImages collects the document's image references during NewSession.
+// With WithImages it fetches and applies them before the first layout; with
+// WithDeferredImages it only stores the references for LoadDeferredImages.
 func (s *Session) loadImages() {
 	if s.imgFetch == nil || s.Doc == nil {
 		return
 	}
+	s.initImageMaps()
+	if s.deferImages {
+		s.pendingImgs = s.collectImageRefs()
+		return
+	}
+	refs := s.collectImageRefs()
+	s.applyImages(refs, s.fetchImages(refs))
+}
+
+func (s *Session) initImageMaps() {
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
+}
 
-	// Collect every reference in document order. A URL can back several nodes
-	// (an <img> and a background), so fetch each unique target once and fan the
-	// decoded pixels back out to all of them.
-	type ref struct {
-		id  dom.NodeID
-		abs string
-		bg  bool
+// DeferredImagesPending reports how many image references WithDeferredImages
+// collected but has not fetched yet.
+func (s *Session) DeferredImagesPending() int {
+	s.imgMu.Lock()
+	defer s.imgMu.Unlock()
+	return len(s.pendingImgs)
+}
+
+// LoadDeferredImages fetches and applies the image references that
+// WithDeferredImages postponed, then calls onReady with the number of images
+// that decoded successfully. It blocks for the duration of the fetch, so the
+// interactive caller runs it on its own goroutine; onReady fires from that
+// goroutine once every image has settled, after which a Reflow sees the new
+// intrinsic sizes. Calling it on a session without deferred work reports 0
+// immediately.
+func (s *Session) LoadDeferredImages(onReady func(loaded int)) {
+	s.imgMu.Lock()
+	refs := s.pendingImgs
+	s.pendingImgs = nil
+	s.imgMu.Unlock()
+	loaded := 0
+	if len(refs) > 0 && s.imgFetch != nil {
+		byURL := s.fetchImages(refs)
+		s.applyImages(refs, byURL)
+		loaded = len(byURL)
 	}
-	var refs []ref
+	if onReady != nil {
+		onReady(loaded)
+	}
+}
+
+// collectImageRefs walks the styled document for <img> srcs and
+// background-image URLs in document order. A URL can back several nodes (an
+// <img> and a background), so each unique target is fetched once and fanned
+// back out to all of them.
+func (s *Session) collectImageRefs() []imgRef {
+	var refs []imgRef
 	var uniq []string
 	seen := make(map[string]bool)
 	_, _ = walkDocument(s.Doc, func(n *dom.Node) error {
@@ -381,7 +480,7 @@ func (s *Session) loadImages() {
 		if n.Data == "img" {
 			if src := strings.TrimSpace(n.GetAttribute("src")); src != "" {
 				if abs, ok := resolveSheetURL(s.imgBase, src); ok {
-					refs = append(refs, ref{id: n.ID, abs: abs})
+					refs = append(refs, imgRef{id: n.ID, abs: abs})
 					if !seen[abs] {
 						seen[abs] = true
 						uniq = append(uniq, abs)
@@ -391,7 +490,7 @@ func (s *Session) loadImages() {
 		}
 		if st, ok := s.Styles[n.ID]; ok && st.BackgroundImage != "" {
 			if abs, ok := resolveSheetURL(s.imgBase, st.BackgroundImage); ok {
-				refs = append(refs, ref{id: n.ID, abs: abs, bg: true})
+				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
 				if !seen[abs] {
 					seen[abs] = true
 					uniq = append(uniq, abs)
@@ -400,7 +499,24 @@ func (s *Session) loadImages() {
 		}
 		return nil
 	})
+	return refs
+}
 
+// fetchImages downloads and decodes each unique reference through a bounded
+// worker pool. A page can carry dozens of images; a sequential walk spends
+// the whole wall-clock budget on the first handful (at ~0.8s each, a 6s
+// budget covers only ~7), leaving the rest to reserve their box and paint
+// nothing. Fetching concurrently lets the same deadline cover the page, which
+// is what a real browser does and what the reference renders assume.
+func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
+	uniq := make([]string, 0, len(refs))
+	seen := make(map[string]bool)
+	for _, r := range refs {
+		if !seen[r.abs] {
+			seen[r.abs] = true
+			uniq = append(uniq, r.abs)
+		}
+	}
 	byURL := make(map[string]stdimage.Image, len(uniq))
 	var mu sync.Mutex
 	loaded := 0
@@ -449,7 +565,14 @@ func (s *Session) loadImages() {
 		}()
 	}
 	wg.Wait()
+	return byURL
+}
 
+// applyImages fans decoded pixels back out to the nodes that referenced them
+// and records intrinsic sizes for layout.
+func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
+	s.imgMu.Lock()
+	defer s.imgMu.Unlock()
 	for _, r := range refs {
 		img, ok := byURL[r.abs]
 		if !ok {
@@ -486,6 +609,8 @@ func (s *Session) recordViewportWidth(w float32) {
 // and font metrics. The old arena is untouched unless the candidate validates.
 // Like Paint, this method must be called by the session's single owner.
 func (s *Session) Reflow(viewportW float32) error {
+	s.imgMu.Lock()
+	defer s.imgMu.Unlock()
 	if err := validateWidth(viewportW); err != nil {
 		return err
 	}
