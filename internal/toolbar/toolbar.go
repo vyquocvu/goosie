@@ -165,6 +165,28 @@ func (s *State) CloseFind() {
 	s.Focus = FocusNone
 }
 
+// CursorAt returns the pointer shape for a hover at pos, in device pixels
+// relative to the toolbar's top edge - the same coordinate contract as
+// HandleClick. The nav buttons ask for the hand, the editable bar for the
+// text I-beam, and everything else for the default arrow.
+func (s *State) CursorAt(pos frame.Point) surface.Cursor {
+	if pos.Y >= int32(ToolbarHeight)*s.sc() {
+		return surface.CursorDefault
+	}
+	sc := s.sc()
+	lp := frame.Point{X: pos.X / sc, Y: pos.Y / sc}
+	w := s.Bounds.W() / sc
+	switch {
+	case rectContains(ButtonRect(ButtonBack, w), lp),
+		rectContains(ButtonRect(ButtonForward, w), lp),
+		rectContains(ButtonRect(ButtonReload, w), lp):
+		return surface.CursorPointer
+	case rectContains(AddressBarRect(w), lp):
+		return surface.CursorText
+	}
+	return surface.CursorDefault
+}
+
 func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 	if button != surface.ButtonLeft {
 		return

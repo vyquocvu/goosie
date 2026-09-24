@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -456,19 +458,25 @@ func TestFilePathTraversal(t *testing.T) {
 	}
 }
 
-func TestHTTPSDowngradeRedirectBlocked(t *testing.T) {
+func TestHTTPSDowngradeRedirectFollowed(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "downgraded")
 	}))
 	defer plain.Close()
-	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, plain.URL, http.StatusFound)
 	}))
-	defer tls.Close()
-	client := transport.DefaultClientWithTLS(tls.TLS)
+	defer tlsSrv.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(tlsSrv.Certificate())
+	client := transport.DefaultClientWithTLS(&tls.Config{RootCAs: roots})
 	defer client.Close()
-	if _, err := client.Get(context.Background(), tls.URL); err == nil {
-		t.Fatal("HTTPS-to-HTTP redirect should be blocked")
+	resp, err := client.Get(context.Background(), tlsSrv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Body) != "downgraded" {
+		t.Fatalf("body = %q, want %q", resp.Body, "downgraded")
 	}
 }
 

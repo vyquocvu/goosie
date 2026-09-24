@@ -49,6 +49,18 @@ func (s *Session) selWords() []*layout.Object {
 	return words
 }
 
+// HasTextAt reports whether a laid-out word box contains the document-space
+// point. Hover uses it to ask for the text cursor over selectable text.
+func (s *Session) HasTextAt(x, y float32) bool {
+	for _, w := range s.selWords() {
+		x0, y0, x1, y1 := w.BorderRect()
+		if x >= x0 && x < x1 && y >= y0 && y < y1 {
+			return true
+		}
+	}
+	return false
+}
+
 // posAt maps a document-space point to a selection position. It picks the
 // word whose vertical band contains y (or the nearest band when y falls
 // outside every word, e.g. past the end of the document), expands to the

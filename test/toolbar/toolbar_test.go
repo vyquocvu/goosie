@@ -650,6 +650,35 @@ func TestFindOutsideClickCloses(t *testing.T) {
 	}
 }
 
+func TestCursorAtShapes(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+
+	back := toolbar.ButtonRect(toolbar.ButtonBack, 800)
+	if c := s.CursorAt(frame.Point{X: back.X0 + 1, Y: back.Y0 + 1}); c != surface.CursorPointer {
+		t.Fatalf("CursorAt over Back = %v, want CursorPointer", c)
+	}
+	addr := toolbar.AddressBarRect(800)
+	if c := s.CursorAt(frame.Point{X: addr.X0 + 1, Y: addr.Y0 + 1}); c != surface.CursorText {
+		t.Fatalf("CursorAt over the address bar = %v, want CursorText", c)
+	}
+	if c := s.CursorAt(frame.Point{X: 400, Y: int32(toolbar.ToolbarHeight) + 5}); c != surface.CursorDefault {
+		t.Fatalf("CursorAt below the toolbar = %v, want CursorDefault", c)
+	}
+}
+
+func TestCursorAtScalesWithDevicePixels(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.SetScale(2)
+
+	// CursorAt takes device pixels, like HandleClick: a hover at twice the
+	// logical Back-button rect must still read as the button.
+	back := toolbar.ButtonRect(toolbar.ButtonBack, 800)
+	pos := frame.Point{X: (back.X0+1)*2 + back.W()/2, Y: (back.Y0 + 1) * 2}
+	if c := s.CursorAt(pos); c != surface.CursorPointer {
+		t.Fatalf("CursorAt(%v) at scale 2 = %v, want CursorPointer", pos, c)
+	}
+}
+
 func TestFindBackspaceStillReportsQuery(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.OpenFind()

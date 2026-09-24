@@ -13,26 +13,28 @@ const totalChromeHeight = tabs.TabBarHeight + toolbar.ToolbarHeight
 
 type chromeWindow struct {
 	surface.Window
-	toolbar      *toolbar.State
-	tabMgr       *tabs.TabManager
-	scale        int32
-	events       chan surface.Event
-	onSwitch     func(uint64)
-	onNewTab     func()
-	onCloseTab   func(uint64)
-	onResize     func(contentW, contentH int)
-	onZoom       func(delta float64)
-	onLinkClick  func(href string)
-	onBookmark   func()
-	onFocusClick func(contentX, contentY int32) bool
-	onContentKey func(key rune, mods surface.KeyMod) bool
-	onDragSelect func(action surface.PointerAction, contentX, contentY int32) bool
-	onIME        func(ev surface.Event) bool
-	onCopy       func() bool
-	hitTestLink  func(contentX, contentY int32) string
-	chromeBitmap *frame.Bitmap
-	outBitmap    *frame.Bitmap
-	fonts        *raster.Fonts
+	toolbar       *toolbar.State
+	tabMgr        *tabs.TabManager
+	scale         int32
+	events        chan surface.Event
+	onSwitch      func(uint64)
+	onNewTab      func()
+	onCloseTab    func(uint64)
+	onResize      func(contentW, contentH int)
+	onZoom        func(delta float64)
+	onLinkClick   func(href string)
+	onBookmark    func()
+	onFocusClick  func(contentX, contentY int32) bool
+	onContentKey  func(key rune, mods surface.KeyMod) bool
+	onDragSelect  func(action surface.PointerAction, contentX, contentY int32) bool
+	onIME         func(ev surface.Event) bool
+	onCopy        func() bool
+	hitTestLink   func(contentX, contentY int32) string
+	onHoverCursor func(contentX, contentY int32) surface.Cursor
+	chromeBitmap  *frame.Bitmap
+	outBitmap     *frame.Bitmap
+	fonts         *raster.Fonts
+	hover         surface.Cursor // last shape sent to the platform, for change detection
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
@@ -45,30 +47,32 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onIME func(ev surface.Event) bool,
 	onCopy func() bool,
 	hitTestLink func(contentX, contentY int32) string,
+	onHoverCursor func(contentX, contentY int32) surface.Cursor,
 	fonts *raster.Fonts, scale int32) *chromeWindow {
 	if scale < 1 {
 		scale = 1
 	}
 	cw := &chromeWindow{
-		Window:       w,
-		toolbar:      tb,
-		tabMgr:       mgr,
-		scale:        scale,
-		events:       make(chan surface.Event, 64),
-		onSwitch:     onSwitch,
-		onNewTab:     onNewTab,
-		onCloseTab:   onCloseTab,
-		onResize:     onResize,
-		onZoom:       onZoom,
-		onLinkClick:  onLinkClick,
-		onBookmark:   onBookmark,
-		onFocusClick: onFocusClick,
-		onContentKey: onContentKey,
-		onDragSelect: onDragSelect,
-		onIME:        onIME,
-		onCopy:       onCopy,
-		hitTestLink:  hitTestLink,
-		fonts:        fonts,
+		Window:        w,
+		toolbar:       tb,
+		tabMgr:        mgr,
+		scale:         scale,
+		events:        make(chan surface.Event, 64),
+		onSwitch:      onSwitch,
+		onNewTab:      onNewTab,
+		onCloseTab:    onCloseTab,
+		onResize:      onResize,
+		onZoom:        onZoom,
+		onLinkClick:   onLinkClick,
+		onBookmark:    onBookmark,
+		onFocusClick:  onFocusClick,
+		onContentKey:  onContentKey,
+		onDragSelect:  onDragSelect,
+		onIME:         onIME,
+		onCopy:        onCopy,
+		hitTestLink:   hitTestLink,
+		onHoverCursor: onHoverCursor,
+		fonts:         fonts,
 	}
 	go cw.pump()
 	return cw
@@ -158,6 +162,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	case surface.EvPointer:
 		tabH := int32(tabs.TabBarHeight) * cw.sc()
 		toolH := int32(toolbar.ToolbarHeight) * cw.sc()
+		if ev.Action == surface.PointerMotion && ev.Button == surface.ButtonNone {
+			cw.updateHoverCursor(ev.Pos, tabH+toolH)
+		}
 		if ev.Pos.Y < tabH && ev.Button == surface.ButtonLeft {
 			cw.handleTabBarClick(ev.Pos)
 			return true
@@ -238,6 +245,30 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		return false
 	default:
 		return false
+	}
+}
+
+// updateHoverCursor resolves the pointer shape for buttonless motion: the
+// toolbar hit tests its own buttons and bar, the document area defers to the
+// host's resolver, and everywhere else asks for the default arrow. The shape
+// is only sent to the platform when it changes, because motion arrives per
+// pixel and each call crosses into platform code.
+func (cw *chromeWindow) updateHoverCursor(pos frame.Point, chromeH int32) {
+	c := surface.CursorDefault
+	switch {
+	case pos.Y >= chromeH && cw.onHoverCursor != nil:
+		c = cw.onHoverCursor(pos.X, pos.Y-cw.chromeHeight())
+	case pos.Y >= int32(tabs.TabBarHeight)*cw.sc() && pos.Y < chromeH:
+		adjusted := pos
+		adjusted.Y -= int32(tabs.TabBarHeight) * cw.sc()
+		c = cw.toolbar.CursorAt(adjusted)
+	}
+	if c == cw.hover {
+		return
+	}
+	cw.hover = c
+	if cw.Window != nil {
+		cw.Window.SetCursor(c)
 	}
 }
 

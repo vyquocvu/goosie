@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -962,7 +963,7 @@ func (f *framePath) handleLinkClick(href string) {
 	if tab == nil {
 		return
 	}
-	f.navigateTab(href)
+	f.navigateTab(resolveHref(tab.URL, href))
 }
 
 func (f *framePath) hitTestLink(contentX, contentY int32) string {
@@ -972,6 +973,25 @@ func (f *framePath) hitTestLink(contentX, contentY int32) string {
 	}
 	docX, docY := f.docPoint(contentX, contentY)
 	return tab.Session.HitTestLink(docX, docY)
+}
+
+// hoverCursor resolves the pointer shape for buttonless motion over the
+// document: the hand over a link, the I-beam over editable or selectable
+// text, and the default arrow everywhere else. Link wins over text because
+// a link's words are text too but only the link is clickable.
+func (f *framePath) hoverCursor(contentX, contentY int32) surface.Cursor {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session == nil {
+		return surface.CursorDefault
+	}
+	dx, dy := f.docPoint(contentX, contentY)
+	if tab.Session.HitTestLink(dx, dy) != "" {
+		return surface.CursorPointer
+	}
+	if tab.Session.HasControlAt(dx, dy) || tab.Session.HasTextAt(dx, dy) {
+		return surface.CursorText
+	}
+	return surface.CursorDefault
 }
 
 // runFind recomputes the match set for a new find query on the active tab and
@@ -1230,6 +1250,24 @@ func normalizeURL(raw string) string {
 	return "https://" + raw
 }
 
+// resolveHref turns a clicked link's href into an absolute URL against the
+// document that owns it, per RFC 3986. An unparseable piece falls back to the
+// raw href so address-bar normalization still gets a chance.
+func resolveHref(base, href string) string {
+	if base == "" {
+		return href
+	}
+	b, err := url.Parse(base)
+	if err != nil {
+		return href
+	}
+	r, err := url.Parse(href)
+	if err != nil {
+		return href
+	}
+	return b.ResolveReference(r).String()
+}
+
 // openWindow picks the window last, because a backend that cannot open one is a
 // property of the machine the report has to state rather than a construction error.
 func (f *framePath) openWindow() error {
@@ -1265,6 +1303,7 @@ func (f *framePath) openWindow() error {
 			f.imeEvent,
 			f.copySelection,
 			f.hitTestLink,
+			f.hoverCursor,
 			f.fonts,
 			int32(f.config.dpr+0.5),
 		)

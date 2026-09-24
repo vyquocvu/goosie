@@ -51,6 +51,12 @@ func (s *Session) controlAt(x, y float32) *dom.Node {
 	return nil
 }
 
+// HasControlAt reports whether an editable control is laid out at the
+// document-space point. Hover uses it to ask for the text cursor.
+func (s *Session) HasControlAt(x, y float32) bool {
+	return s.controlAt(x, y) != nil
+}
+
 // FocusControl focuses the control at the document point, blurring any current
 // focus. Clicking empty space blurs; clicking the already-focused control
 // changes nothing. Returns whether focus state changed. Any focus change ends
