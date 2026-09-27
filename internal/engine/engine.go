@@ -43,6 +43,11 @@ type Session struct {
 	linkBase  string
 	linker    CSSLinker
 
+	// sheets are the parsed stylesheets kept for RefreshAfterFonts: when
+	// deferred fonts land, styles must be re-resolved against the now-populated
+	// customFonts table so text picks the web faces instead of system fallbacks.
+	sheets []*css.Stylesheet
+
 	imgBase  string
 	imgFetch ImageFetcher
 	natural  map[dom.NodeID]layout.NaturalSize
@@ -64,6 +69,13 @@ type Session struct {
 	fontBase  string
 	fontFetch FontFetcher
 	fontReg   FontRegistry
+
+	// Deferred font loading mirrors deferred images: the first frame renders
+	// with system fallback fonts while @font-face files download in the
+	// background; LoadDeferredFonts re-resolves styles and reflows when they
+	// arrive so text swaps to the web faces without holding up first paint.
+	deferFonts   bool
+	pendingFonts []fontJob
 
 	// customFonts is this document's @font-face table: the families it declared
 	// and the registry indices that document's rasterizer handed back. The
@@ -183,6 +195,25 @@ func WithCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Opt
 	}
 }
 
+// WithDeferredCustomFontLoading is WithCustomFontLoading for the
+// progressive-paint path: @font-face descriptors are collected during
+// construction but the font files are not fetched, so the first frame renders
+// with system fallback fonts and LoadDeferredFonts brings the web faces in
+// afterwards without holding up first paint.
+func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Option {
+	return func(s *Session) {
+		s.fontBase = base
+		s.fontFetch = fetch
+		s.fontReg = reg
+		s.deferFonts = true
+	}
+}
+
+// fontJob is one @font-face descriptor set queued for fetching.
+type fontJob struct {
+	family, srcURL, weightStr, styleStr string
+}
+
 // NewSession parses HTML and builds the pipeline state. The caller provides the
 // raw HTML and any author style sheets; <style> blocks inside the document are
 // collected automatically, and the UA stylesheet is added internally.
@@ -212,6 +243,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	}
 	s.loadFonts(sheets)
 	s.Doc = doc
+	s.sheets = sheets
 	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport(), s.customFonts)
 	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles, s.customFonts)
 	s.loadImages()
@@ -235,42 +267,57 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 	if s.fontFetch == nil || s.fontReg == nil {
 		return
 	}
-	type job struct {
-		family, srcURL, weightStr, styleStr string
-	}
-	var jobs []job
-	for _, sheet := range sheets {
-		for _, ff := range sheet.FontFaces {
-			if len(jobs) >= maxFontRequests {
-				break
-			}
-			var family, srcURL, weightStr, styleStr string
-			for _, d := range ff.Declarations {
-				switch d.Property {
-				case "font-family":
-					family = strings.Trim(d.Value, "\"'")
-				case "src":
-					srcURL = extractFontURL(d.Value)
-				case "font-weight":
-					weightStr = strings.TrimSpace(d.Value)
-				case "font-style":
-					styleStr = strings.TrimSpace(d.Value)
-				}
-			}
-			if family == "" || srcURL == "" {
-				continue
-			}
-			abs, ok := resolveSheetURL(s.fontBase, srcURL)
-			if !ok {
-				continue
-			}
-			jobs = append(jobs, job{family: family, srcURL: abs, weightStr: weightStr, styleStr: styleStr})
-		}
-	}
+	jobs := collectFontJobs(sheets, s.fontBase)
 	if len(jobs) == 0 {
 		return
 	}
+	if s.deferFonts {
+		s.pendingFonts = jobs
+		return
+	}
+	s.applyFontJobs(jobs)
+}
 
+// DeferredFontsPending reports how many @font-face references were collected
+// but not yet fetched.
+func (s *Session) DeferredFontsPending() int {
+	return len(s.pendingFonts)
+}
+
+// LoadDeferredFonts fetches and registers the @font-face resources that
+// WithDeferredCustomFontLoading postponed, then calls onReady with the number
+// of fonts that registered successfully. The caller runs it on its own
+// goroutine; onReady fires once every font has settled, after which the caller
+// should re-resolve styles and reflow so text swaps to the web faces.
+func (s *Session) LoadDeferredFonts(onReady func(loaded int)) {
+	jobs := s.pendingFonts
+	s.pendingFonts = nil
+	if len(jobs) == 0 {
+		if onReady != nil {
+			onReady(0)
+		}
+		return
+	}
+	s.applyFontJobs(jobs)
+	if onReady != nil {
+		onReady(1)
+	}
+}
+
+// RefreshAfterFonts re-resolves styles against the now-populated customFonts
+// table. Call it after LoadDeferredFonts completes so text picks up the web
+// faces instead of the system fallbacks the first paint used.
+func (s *Session) RefreshAfterFonts() {
+	if len(s.sheets) == 0 {
+		return
+	}
+	s.Styles = style.ResolveViewport(s.Doc, s.sheets, s.styleViewport(), s.customFonts)
+	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, s.sheets, s.Styles, s.customFonts)
+}
+
+// applyFontJobs fetches font bytes through a bounded worker pool and registers
+// each successful result with the font registry, populating s.customFonts.
+func (s *Session) applyFontJobs(jobs []fontJob) {
 	data := make([][]byte, len(jobs))
 	deadline := time.Now().Add(fontFetchBudget)
 	const fontWorkers = 8
@@ -308,15 +355,47 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 		if err != nil {
 			continue
 		}
-
-		// The weight/slant variant the descriptors name decides which face the
-		// cascade picks for a bold or italic run.
 		bold := j.weightStr == "bold" || j.weightStr == "700" || j.weightStr == "800" || j.weightStr == "900"
 		light := j.weightStr == "300" || j.weightStr == "200" || j.weightStr == "100"
 		italic := j.styleStr == "italic" || j.styleStr == "oblique"
 		fonts.Register(j.family, idx, bold, italic, light)
 	}
 	s.customFonts = fonts
+}
+
+// collectFontJobs walks every stylesheet's @font-face rules and builds the
+// fetch job list: family, resolved src URL, weight and style descriptors.
+func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
+	var jobs []fontJob
+	for _, sheet := range sheets {
+		for _, ff := range sheet.FontFaces {
+			if len(jobs) >= maxFontRequests {
+				break
+			}
+			var family, srcURL, weightStr, styleStr string
+			for _, d := range ff.Declarations {
+				switch d.Property {
+				case "font-family":
+					family = strings.Trim(d.Value, "\"'")
+				case "src":
+					srcURL = extractFontURL(d.Value)
+				case "font-weight":
+					weightStr = strings.TrimSpace(d.Value)
+				case "font-style":
+					styleStr = strings.TrimSpace(d.Value)
+				}
+			}
+			if family == "" || srcURL == "" {
+				continue
+			}
+			abs, ok := resolveSheetURL(fontBase, srcURL)
+			if !ok {
+				continue
+			}
+			jobs = append(jobs, fontJob{family: family, srcURL: abs, weightStr: weightStr, styleStr: styleStr})
+		}
+	}
+	return jobs
 }
 
 // extractFontURL pulls the first url(...) reference out of a @font-face src

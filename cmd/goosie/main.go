@@ -525,7 +525,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	f.toolbar.Error = ""
 
 	go func() {
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true)
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u}
 		var dd downloadDone
 		if errors.As(err, &dd) {
@@ -600,16 +600,27 @@ func (f *framePath) applyNavResult(result navResult) {
 		f.publishAccessibility()
 	}
 
-	// The first frame is out with the document, CSS and fonts only; the
-	// images arrive on their own goroutine and repaint when they land.
-	if sess := result.session; sess != nil && sess.DeferredImagesPending() > 0 {
+	// The first frame is out with the document and CSS only; fonts and images
+	// arrive on their own goroutines and repaint when they land.
+	if sess := result.session; sess != nil {
 		tabID, serial := result.tabID, result.serial
-		go sess.LoadDeferredImages(func(loaded int) {
-			if loaded == 0 {
-				return
-			}
-			f.imgResults <- imgResult{tabID: tabID, serial: serial, session: sess}
-		})
+		if sess.DeferredFontsPending() > 0 {
+			go sess.LoadDeferredFonts(func(loaded int) {
+				if loaded == 0 {
+					return
+				}
+				sess.RefreshAfterFonts()
+				f.imgResults <- imgResult{tabID: tabID, serial: serial, session: sess}
+			})
+		}
+		if sess.DeferredImagesPending() > 0 {
+			go sess.LoadDeferredImages(func(loaded int) {
+				if loaded == 0 {
+					return
+				}
+				f.imgResults <- imgResult{tabID: tabID, serial: serial, session: sess}
+			})
+		}
 	}
 }
 
@@ -697,7 +708,7 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 	f.toolbar.SetLoading(true)
 
 	go func() {
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true)
+		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true}
 		var dd downloadDone
 		if errors.As(err, &dd) {
@@ -1236,7 +1247,7 @@ func (f *framePath) closeTab(id uint64) {
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
 // they land.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: viewport: %w", err)
 	}
@@ -1296,7 +1307,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
 		imageOption(deferImages, resp.URL, imageFetcher),
-		engine.WithCustomFontLoading(resp.URL, fontFetcher, fonts))
+		fontOption(deferFonts, resp.URL, fontFetcher, fonts))
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -1322,6 +1333,14 @@ func imageOption(deferred bool, base string, fetch engine.ImageFetcher) engine.O
 		return engine.WithDeferredImages(base, fetch)
 	}
 	return engine.WithImages(base, fetch)
+}
+
+// fontOption picks the synchronous or deferred font path for a load.
+func fontOption(deferred bool, base string, fetch engine.FontFetcher, reg engine.FontRegistry) engine.Option {
+	if deferred {
+		return engine.WithDeferredCustomFontLoading(base, fetch, reg)
+	}
+	return engine.WithCustomFontLoading(base, fetch, reg)
 }
 
 // subresourceCtx is where the browser's two security halves meet, and the only
@@ -1460,7 +1479,7 @@ func run(args []string) error {
 	// page it was asked for.
 	if c.url != "" {
 		if c.paced() {
-			layer, docSpec, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false)
+			layer, docSpec, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
 			if err != nil {
 				return err
 			}
