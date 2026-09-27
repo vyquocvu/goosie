@@ -3009,3 +3009,98 @@ directory. Bash-side file writes in this workspace are not durable; only the Edi
 first read of that state was reported as "the refactor is half-applied", which was wrong in both
 directions: nothing had been applied, and nothing had been reverted. Recorded so the next round uses
 per-site edits for a mechanical sweep instead of losing a cycle to a script that silently does nothing.
+
+## 30. Round 25: gate 6's first sub-project is written as 17 requirements, and the tree is red on purpose
+
+### What §4's backlog asked for
+
+> Roadmap gate 6 (JS runtime, Goja per the chosen ADR) needs its test cases written before the runtime
+> lands.
+
+That bullet survived four rounds of backlog re-ordering because nothing else in the list is worth as much
+per hour: the runtime is the first component in v2 that executes *attacker-chosen code*, and an
+implementation written to no contract becomes the contract. So round 25 writes the contract as tests and
+ships the tree failing.
+
+### The shape that was fixed, and what each piece costs
+
+`internal/js`, sub-project 1 of five (classic scripts in document order, `console`, `window`/`document`
+stubs, interruptibility). Nothing else: no DOM bindings, no tasks or microtasks, no `Fetch`, no CSP.
+
+| API | Requirement it exists to make testable |
+| --- | --- |
+| `New(Options) (*Runtime, error)` | one realm per document, built from a struct — there is no package-level entry point to share |
+| `Options{Timeout, Console, URL, Title}` | every host input arrives at construction, including the writer `console` uses, so nothing reaches `os.Stderr` unasked |
+| `Run(src, sourceURL) error` | one `<script>` element, run to completion, blocking; `sourceURL` is what makes an error attributable |
+| `Global(name) (Value, bool)` | the host reads what the page computed, which is the only way a script's effect is observable from Go |
+| `Title() string` | `document.title` is a tab label before it is a web API |
+| `Interrupt()`, `Close()` | the host stops a script from another goroutine, and a torn-down document stops executing |
+| `DefaultTimeout`, `MaxScriptBytes` | two bounds a reviewer can read out of the source and a test can measure against |
+| `ErrInterrupted`, `ErrClosed`, `ErrTooLarge`, `*Error` | each failure mode is distinguishable with `errors.Is`/`errors.As`, not by string matching a panic |
+
+`internal/archtest`'s table gained `"internal/js": nil`. That entry is the design review: sub-project 1
+imports no v2 package at all, and when sub-project 2 needs `internal/dom` the gate suite will refuse the
+commit until somebody widens the line deliberately.
+
+### The one piece of production code that came first, and why
+
+The stub: the types, the constants, the sentinels, and a `Runtime` whose every method returns
+`ErrNotImplemented`. That is 60 lines of no behaviour, written before the tests were run once, because a
+test against a package that does not exist is a build error and a build error tells you nothing about
+which requirements are hard. With the stub in place each failure names the requirement it is waiting on.
+
+`(*Error).Error()` is the only logic in the file, and its test passes today — it is a formatter over three
+fields, and leaving it unimplemented would have made `errors.As` in the throwing-script test unverifiable
+rather than failed.
+
+### The measured red
+
+`go test -count=1 ./test/js/ -v` → **16 fail, 1 passes**. The one green is
+`TestDefaultTimeoutIsBoundedAndNotZero`, which asserts a constant that exists and is in range; that is the
+whole requirement, so the pass is real.
+
+All 16 others stop at `js.New`. That is the cheapest red to read but the least informative: one unmet
+method hides every assertion behind it. The round that implements `New` will therefore be the first round
+with a real estimate of what `Run` costs, and should be planned as if the surprises are still ahead.
+
+One pass was caught before it was shipped. `TestNewRejectsNegativeTimeout` asserted only `err != nil`, and
+a stub that rejects *everything* satisfies that — the test was green while proving nothing, which is the
+round 20 lesson in a new costume. It now fails `errors.Is(err, ErrNotImplemented)` explicitly, so a
+runtime that rejects all options cannot pass it, and it is red in the list above where it belongs.
+
+### Verification
+
+- `go build ./...`, `gofmt -l internal cmd test` silent, `go vet ./internal/js ./test/js ./internal/archtest` clean.
+- `go test -count=1 ./...` → **29 packages ok, exactly one FAIL: `github.com/vyquocvu/goosie/test/js`**. The
+  red is confined to the new package; every pre-existing suite is untouched.
+- `go test -race ./internal/archtest ./test/gate` → both ok (gate in 254 s). The architecture and cgo rules
+  accept `internal/js`: no cgo, no forbidden edge, no mutable package var.
+- No dependency was added. `go.mod` still requires `golang.org/x/image` and nothing else, because the
+  contract is written against our own API and deliberately does not import Goja yet. Choosing the
+  interpreter is not a test-writing decision, and pinning it here would have made the contract unreviewable
+  on its own terms.
+
+### What this leaves the branch
+
+`go test ./...` on `feat/v2` is red until the runtime lands. That is the point of the round rather than an
+accident of it — §7's operating rule is that an unmet expectation must be visible, and a skipped or
+build-tagged test file is exactly the silent pass that rule forbids. The blast radius is measured: CI
+workflows trigger on `main` and on PRs to `main`, so no pipeline goes red, and `feat/v2` is local. Anyone
+who wants the branch green again has one commit to revert, and the round's value (the table above) survives
+the revert because it is in this file.
+
+### Deferred, with reasons
+
+- The engine side: extracting `<script>` elements during the HTML parse and calling `Run` in document
+  order, blocking. It is the integration half of sub-project 1 and it cannot be tested before the
+  interpreter exists, because it needs a runtime that actually mutates a realm.
+- A goroutine-leak assertion around `Interrupt`. Interrupting a script that never returns is the risky
+  path for a wrapper that parks a VM thread, and it is only worth measuring against a real implementation.
+- Whether `MaxScriptBytes` should be a per-script source bound at all, or whether the engine's
+  `MaxDocumentBytes` already covers inline scripts and this is a second number for the same quantity. It
+  reads as a distinct cost (compile vs. bytes-on-hand) so it is encoded that way; a reviewer may disagree.
+- Sub-projects 2-5 (DOM bindings and mutation/invalidation, tasks and microtasks, `Fetch`, and the
+  cross-origin/CSP/storage sweep). `TestUnsupportedWebAPIsFailLoudly` pins the interim behaviour for three
+  of them: calling `setTimeout`, `document.querySelector` or `fetch` must error and name the missing API.
+- Inline event handlers and `javascript:` URLs remain out of gate 6 sub-project 1 by the ADR's own scope
+  note, and no test here implies they are supported.

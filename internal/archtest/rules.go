@@ -53,6 +53,7 @@ var Allowed = map[string][]string{
 	"internal/download":          nil,
 	"internal/session":           nil,
 	"internal/image":             nil,
+	"internal/js":                nil,
 	"internal/bookmarks":         nil,
 	"internal/history":           nil,
 	"internal/style":             {"internal/css", "internal/dom", "internal/frame"},
