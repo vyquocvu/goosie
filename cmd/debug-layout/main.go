@@ -29,7 +29,7 @@ func main() {
 		tag := ""
 		if obj.Node != nil {
 			tag = obj.Node.Data
-			if obj.Node.Type == 2 {
+			if obj.Node.Text() {
 				tag = "TEXT:" + obj.Node.DataContent
 			}
 		}

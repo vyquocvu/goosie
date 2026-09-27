@@ -72,10 +72,10 @@ func TestCacheSkipsNoStore(t *testing.T) {
 
 func TestCacheSkipsPrivateAndSetCookie(t *testing.T) {
 	cases := map[string]map[string]string{
-		"private":  {"Cache-Control": "private, max-age=60"},
-		"cookie":   {"Cache-Control": "public, max-age=60", "Set-Cookie": "a=1"},
-		"noCache":  {"Cache-Control": "no-cache"},
-		"maxAge0":  {"Cache-Control": "public, max-age=0"},
+		"private": {"Cache-Control": "private, max-age=60"},
+		"cookie":  {"Cache-Control": "public, max-age=60", "Set-Cookie": "a=1"},
+		"noCache": {"Cache-Control": "no-cache"},
+		"maxAge0": {"Cache-Control": "public, max-age=0"},
 	}
 	for name, headers := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -24,10 +24,10 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 	if plan.FullDoc {
 		var sheets []*css.Stylesheet
 		for _, src := range authorCSS {
-			sheets = append(sheets, css.Parse(src))
+			sheets = append(sheets, css.ParseForViewport(src, s.viewportW))
 		}
-		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport())
-		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles)
+		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
+		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
 		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
@@ -42,10 +42,10 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 	if len(plan.Subtree) > 0 || plan.StyleObjects > 0 {
 		var sheets []*css.Stylesheet
 		for _, src := range authorCSS {
-			sheets = append(sheets, css.Parse(src))
+			sheets = append(sheets, css.ParseForViewport(src, s.viewportW))
 		}
-		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport())
-		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles)
+		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
+		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
 		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
@@ -67,14 +67,14 @@ func (s *Session) RefreshNode(node *dom.Node, authorCSS []string, viewportW floa
 	// Re-style this node and its descendants.
 	var sheets []*css.Stylesheet
 	for _, src := range authorCSS {
-		sheets = append(sheets, css.Parse(src))
+		sheets = append(sheets, css.ParseForViewport(src, s.viewportW))
 	}
 
 	// Build a parent chain to compute the node's style context.
 	// For now, re-run the full style resolution. A production implementation
 	// would only re-style the affected subtree.
-	s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport())
-	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles)
+	s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
+	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
 
 	// Rebuild the arena. A production implementation would only re-layout
 	// the affected subtree.

@@ -12,14 +12,23 @@ func main() {
 	dir := "/System/Library/Fonts/Supplemental"
 	for _, f := range os.Args[1:] {
 		data, err := os.ReadFile(dir + "/" + f)
-		if err != nil { fmt.Println(f, "ERR", err); continue }
+		if err != nil {
+			fmt.Println(f, "ERR", err)
+			continue
+		}
 		parsed, err := opentype.Parse(data)
-		if err != nil { fmt.Println(f, "PARSE ERR", err); continue }
+		if err != nil {
+			fmt.Println(f, "PARSE ERR", err)
+			continue
+		}
 		for _, size := range []float64{16, 12, 24, 14} {
 			face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
 				Size: size, DPI: 72, Hinting: font.HintingNone,
 			})
-			if err != nil { fmt.Println(f, "FACE ERR", err); continue }
+			if err != nil {
+				fmt.Println(f, "FACE ERR", err)
+				continue
+			}
 			m := face.Metrics()
 			asc := float64(m.Ascent) / 64
 			dsc := float64(m.Descent) / 64

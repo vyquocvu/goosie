@@ -6,7 +6,7 @@ import "strings"
 type NodeType uint8
 
 const (
-	NodeDocument   NodeType = iota
+	NodeDocument NodeType = iota
 	NodeElement
 	NodeText
 	NodeComment

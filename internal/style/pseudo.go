@@ -15,7 +15,7 @@ type PseudoKey struct {
 // It scans the stylesheet for selectors matching pseudo-elements of each element,
 // computes their styles (inheriting from the originating element), and returns
 // a map keyed by (NodeID, pseudo name).
-func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementStyles map[dom.NodeID]*ComputedStyle) map[PseudoKey]*ComputedStyle {
+func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementStyles map[dom.NodeID]*ComputedStyle, fonts *CustomFonts) map[PseudoKey]*ComputedStyle {
 	allSheets := []*css.Stylesheet{UserAgentStylesheet()}
 	allSheets = append(allSheets, sheets...)
 
@@ -34,7 +34,7 @@ func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementS
 			}
 			if parentStyle != nil {
 				for _, pseudo := range []string{"before", "after"} {
-					cs := computePseudoStyle(n, pseudo, index, parentStyle)
+					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts)
 					if cs != nil && cs.Content != "" && cs.Content != "normal" && cs.Content != "none" {
 						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 					}
@@ -54,7 +54,7 @@ func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementS
 
 // computePseudoStyle computes the style for a pseudo-element of the given node.
 // It returns nil if no rules match.
-func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle) *ComputedStyle {
+func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle, fonts *CustomFonts) *ComputedStyle {
 	candidates := index.candidates(n)
 	var matchingDecls []css.Declaration
 	var matchingOrigins []int
@@ -82,11 +82,12 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 	inheritFromParent(&cs, parent)
 
 	for i, decl := range matchingDecls {
-		applyProperty(&cs, decl.Property, decl.Value, decl.Parsed, parent.FontSize)
+		applyProperty(&cs, decl.Property, decl.Value, decl.Parsed, parent.FontSize, fonts)
 		_ = matchingOrigins[i]
 		_ = matchingABC[i]
 		_ = matchingOrders[i]
 	}
+	resolveCustomFont(&cs, fonts)
 
 	return &cs
 }

@@ -33,8 +33,8 @@ const (
 	// DefaultTextRuns is the spec's glyph-atlas stress: enough positioned runs that the
 	// atlas holds hundreds of distinct (rune, size) entries.
 	DefaultTextRuns int32 = 1200
-	// DefaultBudgetTiles is the layer's tile budget in buffers, 16 MiB at TileSize,
-	// which is room for a 12x8 tile viewport plus several screens of prefetch.
+	// DefaultBudgetTiles is the layer's tile budget in buffers, 64 MiB at TileSize,
+	// which is a 12x8 tile viewport rasterised almost three times over.
 	DefaultBudgetTiles int64 = 256
 	// SceneVersion is the content version a freshly built scene depicts. It is 1 rather
 	// than 0 because 0 is the frame path's "no version yet".

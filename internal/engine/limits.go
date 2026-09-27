@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"math"
+	stdnet "net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -469,7 +470,7 @@ type cssSource struct {
 	remote bool
 }
 
-func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker) ([]*css.Stylesheet, error) {
+func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, viewportW float32) ([]*css.Stylesheet, error) {
 	budget := &cssBudget{}
 	all := make([]cssSource, 0, len(sources)+8)
 	for _, src := range sources {
@@ -555,7 +556,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 			}
 			return nil, err
 		}
-		sheet := css.Parse(src.text)
+		sheet := css.ParseForViewport(src.text, viewportW)
 		kept := sheet.Rules[:0]
 		reject := false
 		for _, rule := range sheet.Rules {
@@ -657,7 +658,107 @@ func resolveSheetURL(base, href string) (string, bool) {
 	if b.Scheme == "https" && u.Scheme == "http" {
 		return "", false
 	}
+	if isLocalAuthority(u.Hostname()) && !initiatorIsLocal(b) {
+		return "", false
+	}
 	return u.String(), true
+}
+
+// initiatorIsLocal reports whether the document or sheet that asked for a
+// subresource is itself on the viewer's machine or private network. The rule is
+// about who is asking, not about the address: refusing loopback outright would
+// break local development, which is the main thing a browser is pointed at on
+// 127.0.0.1. A file:// document counts as local because the viewer opened it.
+func initiatorIsLocal(b *url.URL) bool {
+	return b.Scheme == "file" || isLocalAuthority(b.Hostname())
+}
+
+// InitiatorIsLocal reports whether a document or sheet identified by a URL
+// string is on the viewer's machine or private network, so that the wiring in
+// cmd/goosie can decide whether a subresource fetch from it needs a dial-time
+// address guard at all. A URL that does not parse is reported as not local,
+// which is the safe direction: the guard it would have skipped is a refusal, and
+// resolveSheetURL already rejects the malformed hrefs before a fetch is asked
+// for one.
+func InitiatorIsLocal(raw string) bool {
+	b, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return initiatorIsLocal(b)
+}
+
+// localOnlyPrefixes are the IPv4 ranges that mean "not the public internet"
+// beyond what net.IP's own predicates cover: 0.0.0.0/8 names this host (RFC 1122)
+// and 100.64.0.0/10 is carrier-grade NAT, behind which some providers put their
+// metadata endpoints.
+var localOnlyPrefixes = []*stdnet.IPNet{mustCIDR("0.0.0.0/8"), mustCIDR("100.64.0.0/10")}
+
+// mustCIDR is the regexp.MustCompile convention. A literal that failed to parse
+// would otherwise leave the range it names reachable from a public page, and a
+// silently missing guard in a security rule is the one failure worth aborting on.
+func mustCIDR(cidr string) *stdnet.IPNet {
+	_, n, err := stdnet.ParseCIDR(cidr)
+	if err != nil {
+		panic("engine: bad CIDR literal " + cidr)
+	}
+	return n
+}
+
+// isLocalAuthority reports whether a URL host names an address that only exists
+// on the viewer's machine or local network: loopback, RFC 1918 and 4193 private
+// space, link-local (the /16 that cloud metadata services answer on at
+// 169.254.169.254), multicast scoped to the link or the node, the unspecified
+// address, or one of the special-use names that are never meant to leave a
+// machine (RFC 6761: localhost, .local, .internal, .home.arpa).
+//
+// A hostname that is not special-use is reported as public even if DNS sends it
+// to a private address, because resolution-time code has no address to look at.
+// That other half lives in the transport: internal/net dials through a guard
+// carrying AddressBlocked below, so the address a name resolved to is judged too.
+func isLocalAuthority(host string) bool {
+	if host == "" {
+		return false
+	}
+	if ip := stdnet.ParseIP(host); ip != nil {
+		return AddressBlocked(ip)
+	}
+	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	if name == "localhost" {
+		return true
+	}
+	for _, suffix := range []string{".localhost", ".local", ".internal", ".home.arpa"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// AddressBlocked reports whether an address is one the private-network rule
+// confines: it is the address half of isLocalAuthority, exported so the dial-time
+// guard in internal/net can judge what a name resolved to with the same list
+// that judges what an author wrote. The two rules must not drift. A page refused
+// for naming 169.254.169.254 and served for naming a host that resolves to it
+// would be a guard that reads like one and works like nothing.
+//
+// It deliberately knows nothing about who is asking. InitiatorIsLocal is that
+// question, and the caller deciding whether to install a guard at all owns the
+// answer.
+func AddressBlocked(ip stdnet.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	for _, n := range localOnlyPrefixes {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // absolutizeCSSURLs rewrites every relative url() reference in a fetched style

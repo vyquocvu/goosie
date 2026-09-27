@@ -65,6 +65,12 @@ type Session struct {
 	fontFetch FontFetcher
 	fontReg   FontRegistry
 
+	// customFonts is this document's @font-face table: the families it declared
+	// and the registry indices that document's rasterizer handed back. The
+	// indices only mean something inside s.fontReg, so sharing one process-wide
+	// table made a second document's faces overwrite the first one's.
+	customFonts *style.CustomFonts
+
 	// Focus state for form editing. focus survives Reflow because reflow
 	// rebuilds only the layout arena, not the DOM; a new session per
 	// navigation starts unfocused. marked is the IME composition preview at
@@ -190,7 +196,6 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	s.viewportW = viewportW
-	css.SetMediaViewportWidth(viewportW)
 	if len(html) > MaxDocumentBytes {
 		return nil, fmt.Errorf("HTML byte limit exceeded (%d)", MaxDocumentBytes)
 	}
@@ -201,14 +206,14 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if err != nil {
 		return nil, err
 	}
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker)
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW)
 	if err != nil {
 		return nil, err
 	}
 	s.loadFonts(sheets)
 	s.Doc = doc
-	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport())
-	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles)
+	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport(), s.customFonts)
+	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles, s.customFonts)
 	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
 		return nil, err
@@ -217,8 +222,9 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 }
 
 // loadFonts extracts @font-face rules from every stylesheet, fetches the font
-// files, registers them with the font registry, and publishes the family→index
-// map so style resolution can match custom family names.
+// files, registers them with the font registry, and keeps the resulting
+// family→index table on the session so style resolution can match custom family
+// names against this document's own faces.
 //
 // Fetching runs through a bounded worker pool, the same shape as loadImages:
 // pages declare several families and weights, and a sequential walk spends
@@ -288,8 +294,7 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 	}
 	wg.Wait()
 
-	familyMap := make(map[string]uint16)
-	registry := make(map[style.CustomFontKey]uint16)
+	fonts := &style.CustomFonts{}
 	var fetchedBytes int64
 	for i, j := range jobs {
 		if len(data[i]) == 0 {
@@ -303,26 +308,15 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 		if err != nil {
 			continue
 		}
-		familyMap[strings.ToLower(j.family)] = idx
 
-		// Build the weight/slant key for the registry.
+		// The weight/slant variant the descriptors name decides which face the
+		// cascade picks for a bold or italic run.
 		bold := j.weightStr == "bold" || j.weightStr == "700" || j.weightStr == "800" || j.weightStr == "900"
 		light := j.weightStr == "300" || j.weightStr == "200" || j.weightStr == "100"
 		italic := j.styleStr == "italic" || j.styleStr == "oblique"
-		key := style.CustomFontKey{
-			Family: strings.ToLower(j.family),
-			Bold:   bold,
-			Italic: italic,
-			Light:  light,
-		}
-		registry[key] = idx
+		fonts.Register(j.family, idx, bold, italic, light)
 	}
-	if len(familyMap) > 0 {
-		style.SetCustomFonts(familyMap)
-	}
-	if len(registry) > 0 {
-		style.SetCustomFontRegistry(registry)
-	}
+	s.customFonts = fonts
 }
 
 // extractFontURL pulls the first url(...) reference out of a @font-face src

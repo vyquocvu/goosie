@@ -1,14 +1,15 @@
 package css_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-func rulesText(t *testing.T, src string) []string {
+func rulesTextAt(t *testing.T, width float32, src string) []string {
 	t.Helper()
-	sheet := css.Parse(src)
+	sheet := css.ParseForViewport(src, width)
 	var out []string
 	for _, r := range sheet.Rules {
 		for _, s := range r.SelectorStrs {
@@ -18,8 +19,40 @@ func rulesText(t *testing.T, src string) []string {
 	return out
 }
 
+func rulesText(t *testing.T, src string) []string {
+	t.Helper()
+	return rulesTextAt(t, 1280, src)
+}
+
+// TestMediaWidthTravelsWithTheParseCall is the package-level twin of the
+// per-document scoping the engine needs: two parses of the same source at
+// different widths in one process must each keep their own match, in either
+// order. The width used to be a package global set once per document load, so
+// the second parse answered for the first.
+func TestMediaWidthTravelsWithTheParseCall(t *testing.T) {
+	const src = `@media (max-width: 600px) { .narrow{} } @media (min-width: 601px) { .wide{} }`
+	for _, order := range []struct {
+		name   string
+		widths []float32
+	}{
+		{name: "narrow first", widths: []float32{500, 1280}},
+		{name: "wide first", widths: []float32{1280, 500}},
+	} {
+		var got []string
+		for _, w := range order.widths {
+			got = append(got, strings.Join(rulesTextAt(t, w, src), ","))
+		}
+		want := ".narrow,.wide"
+		if order.widths[0] == 1280 {
+			want = ".wide,.narrow"
+		}
+		if strings.Join(got, ",") != want {
+			t.Errorf("%s: two parses of the same sheet gave %q, want %q", order.name, strings.Join(got, ","), want)
+		}
+	}
+}
+
 func TestMediaRulesGateOnViewport(t *testing.T) {
-	css.SetMediaViewportWidth(1280)
 	src := `
 		a{}
 		@media (max-width: 600px) { .mobile{} }
@@ -42,7 +75,6 @@ func TestMediaRulesGateOnViewport(t *testing.T) {
 }
 
 func TestMediaNestedInsideMedia(t *testing.T) {
-	css.SetMediaViewportWidth(1280)
 	got := rulesText(t, `@media screen { @media (min-width: 100px) { .deep{} } }`)
 	if len(got) != 1 || got[0] != ".deep" {
 		t.Fatalf("got %v, want [.deep]", got)
@@ -50,7 +82,6 @@ func TestMediaNestedInsideMedia(t *testing.T) {
 }
 
 func TestMediaOrderPreserved(t *testing.T) {
-	css.SetMediaViewportWidth(1280)
 	got := rulesText(t, `.before{} @media all { .mid{} } .after{}`)
 	if len(got) != 3 || got[0] != ".before" || got[1] != ".mid" || got[2] != ".after" {
 		t.Fatalf("got %v, want [.before .mid .after]", got)
@@ -64,7 +95,6 @@ func TestMediaOrderPreserved(t *testing.T) {
 // hid the page banner at 1280px and shifted every block below it up. `or` also
 // read as `and`, so one failing alternative killed a group that should match.
 func TestMediaRangeSyntaxAndOr(t *testing.T) {
-	css.SetMediaViewportWidth(1280)
 	src := `
 		@media (width <= 769px) { .narrow{} }
 		@media (width < calc(1rem * 2 + 15rem + 2rem + 31rem)) { .under800{} }
@@ -91,7 +121,6 @@ func TestMediaRangeSyntaxAndOr(t *testing.T) {
 // painted `@media (prefers-color-scheme: dark)` backgrounds onto pages a light
 // Chromium renders white.
 func TestMediaPreferenceFeatures(t *testing.T) {
-	css.SetMediaViewportWidth(1280)
 	src := `
 		@media (prefers-color-scheme: dark) { .dark{} }
 		@media (prefers-color-scheme: light) { .light{} }

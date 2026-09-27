@@ -302,6 +302,58 @@ func TestHTTPStopsAndClosesOversizedBody(t *testing.T) {
 	}
 }
 
+// A server can make the client buffer its whole header block before the first
+// body byte, and the inherited Go default is 10 MiB per response. The measured
+// worst across the project's own 20-site live corpus is 6.4 KiB (Wikipedia,
+// including its redirect hop) with a median of 454 B, so the cap is set where a
+// browser's would be rather than at the transport's default.
+func TestGetRejectsOversizedResponseHeaders(t *testing.T) {
+	const fields = transport.MaxResponseHeaderBytes/1024 + 2
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for i := 0; i < fields; i++ {
+			w.Header().Add("X-Pad", strings.Repeat("y", 1023))
+		}
+		_, _ = w.Write([]byte("body"))
+	}))
+	defer server.Close()
+	client := transport.DefaultClient()
+	defer client.Close()
+	resp, err := client.Get(context.Background(), server.URL)
+	if err == nil {
+		t.Fatalf("accepted a header block over %d bytes (%d fields, body %q)",
+			transport.MaxResponseHeaderBytes, fields, resp.Body)
+	}
+}
+
+// The other half of the rule: the cap has to clear what real sites actually
+// send. 250 fields is 250 KiB - just under the limit and forty times the
+// largest header block in the corpus - and a response that size must still
+// arrive, with its headers intact, rather than being truncated or refused.
+func TestGetAcceptsLargeResponseHeadersUnderTheCap(t *testing.T) {
+	const fields = 250
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for i := 0; i < fields; i++ {
+			w.Header().Add("X-Pad", strings.Repeat("y", 1023))
+		}
+		_, _ = w.Write([]byte("body"))
+	}))
+	defer server.Close()
+	client := transport.DefaultClient()
+	defer client.Close()
+	resp, err := client.Get(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("refused a %d KiB header block under the %d KiB cap: %v",
+			fields, transport.MaxResponseHeaderBytes>>10, err)
+	}
+	pad := resp.Headers["X-Pad"]
+	if want := fields*1023 + (fields-1)*len(", "); len(pad) != want {
+		t.Fatalf("header block arrived as %d bytes, want %d", len(pad), want)
+	}
+	if !bytes.Equal(resp.Body, []byte("body")) {
+		t.Fatalf("body = %q, want %q", resp.Body, "body")
+	}
+}
+
 func TestHTTPRedirectValidation(t *testing.T) {
 	for _, target := range []string{"file:///etc/hosts", "ftp://localhost/file", "http://user@localhost/", "http://localhost:65536", "http://bad-.example/"} {
 		t.Run(target, func(t *testing.T) {

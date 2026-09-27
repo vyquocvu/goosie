@@ -5,17 +5,18 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 func TestResolvePseudoElements(t *testing.T) {
 	html := `<html><body><div class="test">hello</div></body></html>`
 	cssText := `.test::before { content: "\25b3"; color: red; }`
 
-	doc := dom.Parse(html)
+	doc := domtest.Parse(html)
 	sheets := []*css.Stylesheet{css.Parse(cssText)}
-	styles := Resolve(doc, sheets)
+	styles := Resolve(doc, sheets, nil)
 
-	pseudoStyles := ResolvePseudoElements(doc, sheets, styles)
+	pseudoStyles := ResolvePseudoElements(doc, sheets, styles, nil)
 
 	if len(pseudoStyles) == 0 {
 		t.Fatal("expected pseudo-element styles, got none")

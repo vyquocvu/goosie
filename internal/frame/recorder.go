@@ -68,6 +68,34 @@ type Report struct {
 	StylePasses     int64   `json:"style_passes"`
 	LayoutPasses    int64   `json:"layout_passes"`
 	ZeroWorkFrames  int64   `json:"zero_work_frames"`
+	// StartupMS is the time from the instant SetStartupReference named to the first
+	// frame that reached a window - "sub-second cold start" as a measurement rather
+	// than a claim. Nil when either end is unknown, because a zero here is the
+	// fastest startup there is and would gate a run that showed nothing at all.
+	//
+	// It is the one figure in this struct that is not window-scoped: it describes
+	// how the run began, which a rolling window of the last N frames is the wrong
+	// place to look for. A negative value means the reference was stamped after the
+	// first present - a caller that measured the wrong instant - and the gate
+	// refuses it rather than gating it.
+	StartupMS *float64 `json:"startup_ms"`
+	// The tile cache's ledger: what the grid holds, what it was configured to hold, and
+	// how many buffers it evicted to keep the first inside the second. Tile counts alone
+	// cannot tell a cache that filled its configuration from buffers that escaped the
+	// accounting which authorised them, and the gap between held and authorised is what
+	// distinguishes the two. Nil when no ledger was handed in, because zero held bytes
+	// is a cache that never filled - the best result there is - and an uninstrumented
+	// build must not gate as one.
+	TileBytes     *int64 `json:"tile_bytes"`
+	TileBudget    *int64 `json:"tile_budget"`
+	TileEvictions *int64 `json:"tile_evictions"`
+	// Document is the page these frames depict - empty when they depict a synthetic scene -
+	// and DocHeight is that content's laid-out height in device pixels. An artifact that
+	// names no content cannot be attributed to the run that produced it. DocHeight is the
+	// claim behind the name: a blank layer is exactly one viewport tall, so a run that
+	// dropped its document cannot report one many viewports deep.
+	Document  string `json:"document"`
+	DocHeight int64  `json:"doc_height"`
 }
 
 // FrameRecorder keeps the most recent capacity marks in a ring buffer. Record is
@@ -78,6 +106,23 @@ type FrameRecorder struct {
 	next   int
 	filled int
 	count  int64
+
+	// startupRef and firstPresented bracket the startup latency, and are fields
+	// rather than something Report() reads out of the ring for the reason the field
+	// above gives: once the window has wrapped, the frame the user saw first is
+	// exactly the one no longer in it.
+	startupRef     time.Time
+	firstPresented time.Time
+
+	// tiles is the grid's accounting as of the last SetTileLedger call. A pointer so an
+	// unset ledger stays distinguishable from a grid holding nothing, for the reason the
+	// Report fields give.
+	tiles *GridStats
+
+	// content names what the window of frames depicts. The ring times frames; which
+	// document or scene those frames drew is decided above it.
+	content   string
+	docHeight int64
 }
 
 // NewFrameRecorder returns a recorder retaining capacity marks.
@@ -86,6 +131,25 @@ func NewFrameRecorder(capacity int) *FrameRecorder {
 		capacity = 1024
 	}
 	return &FrameRecorder{ring: make([]FrameMark, capacity)}
+}
+
+// SetStartupReference makes t the instant the run's startup latency is measured
+// against - the process's own beginning, which nothing inside the frame path can
+// know. Without it Report leaves StartupMS nil.
+func (r *FrameRecorder) SetStartupReference(t time.Time) { r.startupRef = t }
+
+// SetTileLedger makes g the tile cache's accounting for this report. Like the startup
+// reference, it is a fact the frame path cannot see from inside: the grid lives on the
+// other side of the pipeline from the ring that times it, so the caller hands it in.
+// Only the three ledger fields are read from g; the rest describe work the marks already
+// count.
+func (r *FrameRecorder) SetTileLedger(g GridStats) { r.tiles = &g }
+
+// SetContent names what the run drew: document is the page's URL or "" for a synthetic
+// scene, and docHeight is that content's laid-out height in device pixels. The third fact
+// here that the ring cannot observe, for the same reason as the two above.
+func (r *FrameRecorder) SetContent(document string, docHeight int64) {
+	r.content, r.docHeight = document, docHeight
 }
 
 // Record appends a mark, overwriting the oldest once the window is full.
@@ -99,6 +163,12 @@ func (r *FrameRecorder) Record(m FrameMark) {
 		r.filled++
 	}
 	r.count++
+	// The first mark whose pixels reached a window. An idle frame - a vsync before
+	// the producer published a plan - records a mark with no present stamp, and is
+	// not the frame anyone saw.
+	if r.firstPresented.IsZero() && !m.PresentedAt.IsZero() {
+		r.firstPresented = m.PresentedAt
+	}
 }
 
 // Len returns the number of marks in the retained window.
@@ -108,10 +178,14 @@ func (r *FrameRecorder) Len() int { return r.filled }
 // window has evicted.
 func (r *FrameRecorder) Total() int64 { return r.count }
 
-// Reset empties the window.
+// Reset empties the window, and with it the first present the startup figure names:
+// the run is beginning again, and reporting the previous run's number would be a
+// stale figure rather than a measurement. The startup reference survives, being a
+// fact about the process rather than about the window.
 func (r *FrameRecorder) Reset() {
 	clear(r.ring)
 	r.next, r.filled, r.count = 0, 0, 0
+	r.firstPresented = time.Time{}
 }
 
 // Marks returns the retained window in chronological order. It allocates, so it
@@ -133,6 +207,9 @@ func (r *FrameRecorder) Marks() []FrameMark {
 // that keeps p99 meaningful without inventing an interpolation scheme.
 func (r *FrameRecorder) Report() Report {
 	var rep Report
+	// Set before the window is even consulted: what the run drew is true of the run, not of
+	// the marks still in the ring, and an artifact with no frames in it should still say so.
+	rep.Document, rep.DocHeight = r.content, r.docHeight
 	if r.filled == 0 {
 		return rep
 	}
@@ -185,6 +262,14 @@ func (r *FrameRecorder) Report() Report {
 		}
 		rep.PresentMeanMS = psum / float64(len(presents))
 		rep.PresentP99MS = rank(presents, 0.99)
+	}
+	if !r.startupRef.IsZero() && !r.firstPresented.IsZero() {
+		startup := float64(r.firstPresented.Sub(r.startupRef)) / float64(time.Millisecond)
+		rep.StartupMS = &startup
+	}
+	if r.tiles != nil {
+		held, budget, evictions := r.tiles.Bytes, r.tiles.Budget, r.tiles.Evictions
+		rep.TileBytes, rep.TileBudget, rep.TileEvictions = &held, &budget, &evictions
 	}
 	return rep
 }

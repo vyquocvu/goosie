@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"runtime/debug"
 	"testing"
@@ -65,6 +66,11 @@ const (
 	// unable to tell the two apart.
 	gateQueue = 4096
 
+	// gateComposerBitmaps is the composer's backing ring: how many whole-surface
+	// bitmaps the frame path may hold at once. The footprint gate bounds retained memory
+	// against it, so it has to be named here rather than left as a literal.
+	gateComposerBitmaps = 2
+
 	gateTextRuns = 1200
 	gateSeed     = 7
 )
@@ -115,7 +121,7 @@ func newHarness(tb testing.TB, spec paint.SceneSpec, fn raster.RasterFunc) *harn
 	dl, l := paint.BuildLayer(spec)
 	wp := raster.New(raster.DefaultWorkers(), gateQueue, fn)
 	wp.Start(context.Background())
-	c := surface.NewComposer(gateSize, frame.NewBitmapPool(gateSize, 2))
+	c := surface.NewComposer(gateSize, frame.NewBitmapPool(gateSize, gateComposerBitmaps))
 	clk := headless.NewManualClock(time.Unix(1_700_000_000, 0))
 	w := headless.New(headless.Config{
 		Size:        gateSize,
@@ -310,11 +316,11 @@ func (h *harness) stats() raster.Stats { return h.s.Stats() }
 // For the same reason the collector is off during the window. A GC cycle that a previous
 // test's 126 MB of tiles started allocates mark workers' and span bookkeeping on
 // goroutines this counter cannot exclude, and it lands in the window as a stray 32-byte
-// allocation roughly once in a run - noise that would be indistinguishable from a leak to
-// whoever read the failure, and a flake on the frame path's own rule. Disabling it
-// changes what is counted, not what is: every mallocgc call the frame path makes is still
-// in the total, and one that a real leak would cause is caught by this same window on
-// every runner.
+// allocation. Disabling it lowers that rate without removing it - twenty warm windows on
+// this machine still produced one - so it is not the whole answer: assertZeroAllocs
+// re-measures a dirty window, because what a leak does in one window it does in the next
+// one too. What turning the collector off buys is that the second window is measuring the
+// frame path rather than the collector's own work.
 func allocTotals(runs int, f func()) (avg float64, mallocs, bytes uint64) {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
@@ -331,19 +337,59 @@ func allocTotals(runs int, f func()) (avg float64, mallocs, bytes uint64) {
 	return float64(mallocs / uint64(runs)), mallocs, bytes
 }
 
+// allocWindow is one counted window's totals.
+type allocWindow struct {
+	avg     float64
+	mallocs uint64
+	bytes   uint64
+}
+
+// zeroAllocVerdict decides what two consecutive counted windows of frames frames say
+// about the path they measured, and returns the report to make about it with whether
+// that report is a failure.
+//
+// The rule is reproduction rather than a tolerance, and it exists because the counter
+// cannot be attributed: Mallocs is the process's, so the runtime's own bookkeeping is in
+// the total whatever the path under measurement does. One dirty window therefore says
+// nothing about which of the two made the allocation; two in a row on the same warm path
+// say the path does, because a per-frame allocation is exactly the thing that recurs.
+// The measured cost of the alternative is the stray this file already documents - one
+// 32-byte allocation in about twenty warm windows - which is a leak's signature and a
+// runtime's alike, and a gate that fires on it gets ignored.
+func zeroAllocVerdict(what string, frames int, first, second allocWindow) (string, bool) {
+	if first.mallocs == 0 {
+		return "", false
+	}
+	if second.mallocs == 0 {
+		return fmt.Sprintf("%s: %d allocations (%d bytes) in the first %d-frame window and none in a second on the same warm path, so those %d were the runtime's bookkeeping rather than the frame path's work",
+			what, first.mallocs, first.bytes, frames, first.mallocs), false
+	}
+	return fmt.Sprintf("%s: %d allocations (%d bytes) in the first %d-frame window and %d (%d bytes) in a second on the same warm path, which averaged %g and %g allocs/op: a warm frame path that allocates in both windows allocates whenever it can draw",
+		what, first.mallocs, first.bytes, frames, second.mallocs, second.bytes, first.avg, second.avg), true
+}
+
 // assertZeroAllocs runs f once per frame for frames, and fails unless the frame path
-// allocated nothing at all.
+// allocated nothing at all. A first window that reports allocations is measured again
+// rather than reported, for the reason in zeroAllocVerdict: the second window is what
+// tells the frame path's work from the runtime's, and a real leak pays for it in both.
 func assertZeroAllocs(t *testing.T, what string, frames int, f func()) {
 	t.Helper()
 	avg, mallocs, bytes := allocTotals(frames, f)
-	if mallocs != 0 {
-		t.Errorf("%s: %d allocations (%d bytes) across %d frames, which averaged %g allocs/op: %g bytes per allocation, so this is per-frame work rather than a one-off",
-			what, mallocs, bytes, frames, avg, float64(bytes)/float64(mallocs))
+	first := allocWindow{avg, mallocs, bytes}
+	if first.mallocs == 0 {
+		if first.avg != 0 {
+			t.Errorf("%s: allocs/op = %g with a zero total, which cannot both be true", what, avg)
+		}
 		return
 	}
-	if avg != 0 {
-		t.Errorf("%s: allocs/op = %g with a zero total, which cannot both be true", what, avg)
+	avg, mallocs, bytes = allocTotals(frames, f)
+	second := allocWindow{avg, mallocs, bytes}
+	msg, fail := zeroAllocVerdict(what, frames, first, second)
+	if fail {
+		t.Errorf("%s", msg)
+		return
 	}
+	t.Logf("%s", msg)
 }
 
 // assertBurstAllocatesNothing is the cold criterion, and a cold burst is the one
@@ -360,10 +406,12 @@ func assertZeroAllocs(t *testing.T, what string, frames int, f func()) {
 // list is the example - it grew mid-burst on the first wide frame, and both windows here
 // reported it, which is how the bug got fixed in the composer rather than in this file.
 //
-// What a clean second window lets go is a single unrepeatable allocation by another
-// goroutine, and it is reported, not hidden. The warm criterion above needs none of this:
-// a warm sweep submits no jobs, so no worker runs and the process-wide counter is the
-// frame path's own.
+// What a clean second window lets go is a single unrepeatable allocation, and it is
+// reported, not hidden. The warm criterion above makes the same argument about its own
+// second window; the two differ only in what they rebuild, because a cold burst has to
+// measure a freshly built frame path while a warm sweep is already one. Idle workers are
+// not the reason either of them re-measures: a warm sweep submits no jobs, so nothing but
+// the runtime is awake to allocate, and it still does.
 func assertBurstAllocatesNothing(t *testing.T, what string, frames int, build func() (run func(), done func())) {
 	t.Helper()
 	type stray struct {

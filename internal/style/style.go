@@ -293,13 +293,13 @@ type ComputedStyle struct {
 	// FontFamily is the family resolved from the declared font-family list:
 	// the first entry the engine can serve, or the standard font when none of
 	// them can be. See parseFontFamily.
-	FontFamily  frame.FontFamily
-	CustomFamily string
+	FontFamily    frame.FontFamily
+	CustomFamily  string
 	CustomFontIdx uint16
-	FontSize   float32
-	FontWeight FontWeight
-	FontStyle  FontStyle
-	LineHeight float32
+	FontSize      float32
+	FontWeight    FontWeight
+	FontStyle     FontStyle
+	LineHeight    float32
 	// LineHeightRatio is the number or percentage form of a declared
 	// line-height, which is what actually inherits: each element re-derives its
 	// own height from its own font size, so a 1.6 on the body gives a 32px
@@ -452,45 +452,19 @@ func (cs *ComputedStyle) FontSlot() frame.FontSlot {
 		Light:     cs.FontWeight > 0 && cs.FontWeight < WeightNormal,
 		CustomIdx: cs.CustomFontIdx,
 	}
-	if cs.CustomFamily != "" && slot.CustomIdx == 0 {
-		customFontsMu.RLock()
-		if customFontRegistry != nil {
-			key := CustomFontKey{
-				Family: cs.CustomFamily,
-				Bold:   slot.Bold,
-				Italic: slot.Italic,
-				Light:  slot.Light,
-			}
-			if idx, ok := customFontRegistry[key]; ok {
-				slot.CustomIdx = idx
-			} else {
-				// Fall back to the regular variant of the same family.
-				key.Bold = false
-				key.Italic = false
-				key.Light = false
-				if idx, ok := customFontRegistry[key]; ok {
-					slot.CustomIdx = idx
-				}
-			}
-		}
-		customFontsMu.RUnlock()
-	}
 	return slot
 }
 
-// UserAgentStylesheet returns the default UA stylesheet. It is parsed once and
-// the same pointer comes back every time, which is how the cascade recognises
-// UA rules: origin outranks specificity, so an author `*` declaration beats a
-// UA element rule no matter how the two score on (id, class, type).
-func UserAgentStylesheet() *css.Stylesheet {
-	uaSheetOnce.Do(func() { uaSheet = css.Parse(uaCSS) })
-	return uaSheet
-}
+// UserAgentStylesheet returns the default UA stylesheet: the same pointer every time,
+// which is how the cascade recognises UA rules. Origin outranks specificity, so an author
+// `*` declaration beats a UA element rule no matter how the two score on (id, class, type),
+// and matcher.go's `sheet == uaSheet` test is what makes that origin readable.
+func UserAgentStylesheet() *css.Stylesheet { return uaSheet }
 
-var (
-	uaSheetOnce sync.Once
-	uaSheet     *css.Stylesheet
-)
+// uaSheet is parsed at package initialisation from a constant string, and nothing writes it
+// afterwards: css.Parse takes no state, so the sheet a document sees cannot depend on which
+// document got there first.
+var uaSheet = css.Parse(uaCSS)
 
 var uaCSS = `
 input, button, select, textarea, table {
@@ -624,33 +598,35 @@ func inViewport(d css.Declaration, vp Viewport) css.Declaration {
 
 // Resolve computes the style for every element in a document laid out in an
 // unspecified viewport, which is what the viewport units then fall back to.
-func Resolve(doc *dom.Document, sheets []*css.Stylesheet) map[dom.NodeID]*ComputedStyle {
-	return ResolveViewport(doc, sheets, Viewport{})
+// fonts is the document's own @font-face table, or nil when it declares none.
+func Resolve(doc *dom.Document, sheets []*css.Stylesheet, fonts *CustomFonts) map[dom.NodeID]*ComputedStyle {
+	return ResolveViewport(doc, sheets, Viewport{}, fonts)
 }
 
 // ResolveViewport computes the style for every element in a document laid out in
-// the given viewport.
-func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport) map[dom.NodeID]*ComputedStyle {
+// the given viewport. fonts is the document's own @font-face table, or nil when
+// it declares none.
+func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport, fonts *CustomFonts) map[dom.NodeID]*ComputedStyle {
 	allSheets := []*css.Stylesheet{UserAgentStylesheet()}
 	allSheets = append(allSheets, sheets...)
 
 	index := buildRuleIndex(allSheets)
 	result := make(map[dom.NodeID]*ComputedStyle)
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, index, result, vp)
+		resolveNode(c, index, result, vp, fonts)
 	}
 	return result
 }
 
-func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedStyle, vp Viewport) {
+func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedStyle, vp Viewport, fonts *CustomFonts) {
 	if n == nil {
 		return
 	}
 	if n.Element() {
 		parentStyle := findParentStyle(n, result)
-		cs := computeStyle(n, index, parentStyle, vp)
+		cs := computeStyle(n, index, parentStyle, vp, fonts)
 		result[n.ID] = cs
-	} else if n.Type == 2 {
+	} else if n.Text() {
 		parentStyle := findParentStyle(n, result)
 		if parentStyle != nil {
 			textStyle := inheritStyle(parentStyle)
@@ -658,7 +634,7 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, index, result, vp)
+		resolveNode(c, index, result, vp, fonts)
 	}
 }
 
@@ -709,7 +685,7 @@ func sortCascade(entries []cascadeEntry) {
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].before(entries[j]) })
 }
 
-func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport) *ComputedStyle {
+func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts) *ComputedStyle {
 	cs := DefaultStyle()
 	if parent != nil {
 		inheritFromParent(&cs, parent)
@@ -770,10 +746,10 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	cs.Custom = resolveCustom(parent, normal, important)
 	vars := newVarExpander(cs.Custom)
 	for _, e := range normal {
-		applyCascadeEntry(&cs, e, parentFontSize, vars)
+		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 	}
 	for _, e := range important {
-		applyCascadeEntry(&cs, e, parentFontSize, vars)
+		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 	}
 
 	// A font-relative length is a share of the element's own font size, and that
@@ -782,12 +758,12 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	// `font-size: 88%` no matter which of the two the author wrote first.
 	for _, e := range normal {
 		if againstOwnFont(e.decl.Property) {
-			applyCascadeEntry(&cs, e, parentFontSize, vars)
+			applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 		}
 	}
 	for _, e := range important {
 		if againstOwnFont(e.decl.Property) {
-			applyCascadeEntry(&cs, e, parentFontSize, vars)
+			applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 		}
 	}
 
@@ -847,8 +823,23 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	resolveCurrentColor(&cs, allDecls)
+	resolveCustomFont(&cs, fonts)
 
 	return &cs
+}
+
+// resolveCustomFont fills in the rasterizer index of the @font-face family the
+// cascade landed on, against the document's own table. It runs at the end of the
+// cascade because the index is keyed on the element's final weight and slant,
+// which no single declaration owns. An element that declares no custom family
+// resolves to no face at all, so a family inherited from a parent that has one
+// never carries a stale index.
+func resolveCustomFont(cs *ComputedStyle, fonts *CustomFonts) {
+	if cs.CustomFamily == "" {
+		cs.CustomFontIdx = 0
+		return
+	}
+	cs.CustomFontIdx = fonts.index(cs.CustomFamily, cs.FontWeight >= WeightBold, cs.FontStyle != FontStyleNormal, cs.FontWeight > 0 && cs.FontWeight < WeightNormal)
 }
 
 // presentationalHints maps the legacy HTML presentational attributes onto their
@@ -960,7 +951,7 @@ func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[
 // applyCascadeEntry applies one winning declaration, expanding var()
 // references first. A custom property is not a real property: its value lives
 // in cs.Custom and never reaches applyProperty.
-func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32, vars *varExpander) {
+func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32, vars *varExpander, fonts *CustomFonts) {
 	if strings.HasPrefix(e.decl.Property, "--") {
 		return
 	}
@@ -976,7 +967,7 @@ func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32
 		}
 		parsed = css.ParseValue(value)
 	}
-	applyProperty(cs, e.decl.Property, value, parsed, parentFontSize)
+	applyProperty(cs, e.decl.Property, value, parsed, parentFontSize, fonts)
 }
 
 // maxVarSubstitutions bounds how much a single element may expand. It replaces
@@ -1098,7 +1089,6 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.FontSize = parent.FontSize
 	cs.FontFamily = parent.FontFamily
 	cs.CustomFamily = parent.CustomFamily
-	cs.CustomFontIdx = parent.CustomFontIdx
 	cs.FontWeight = parent.FontWeight
 	cs.FontStyle = parent.FontStyle
 	cs.LineHeight = parent.LineHeight
@@ -1113,14 +1103,6 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.TextDecoration = parent.TextDecoration
 	cs.VerticalAlign = parent.VerticalAlign
 	cs.ListStyleType = parent.ListStyleType
-}
-
-func applyInlineStyle(cs *ComputedStyle, inline string, parentFontSize float32) {
-	if inline == "" {
-		return
-	}
-	decls := parseInlineDeclarations(inline)
-	applyDeclarations(cs, decls, 1, 0, 0, true, parentFontSize)
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -1160,24 +1142,7 @@ type specificity struct {
 	inline  bool
 }
 
-func applyDeclarations(cs *ComputedStyle, decls []css.Declaration, a, b, c int, inline bool, parentFontSize float32) {
-	// Font-relative lengths resolve against the element's own computed font size,
-	// so a rule's `width: 22em` cannot be laid down before the `font-size: 88%`
-	// that gives it meaning. Seed the size from the last font declaration the rule
-	// carries, then let the in-order pass below state everything, including that
-	// size again, so nothing but the seed order changes.
-	for i := len(decls) - 1; i >= 0; i-- {
-		if p := decls[i].Property; p == "font-size" || p == "font" {
-			applyProperty(cs, p, decls[i].Value, decls[i].Parsed, parentFontSize)
-			break
-		}
-	}
-	for _, d := range decls {
-		applyProperty(cs, d.Property, d.Value, d.Parsed, parentFontSize)
-	}
-}
-
-func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, parentFontSize float32) {
+func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, parentFontSize float32, fonts *CustomFonts) {
 	switch prop {
 	case "display":
 		cs.Display = parseDisplay(value)
@@ -1434,7 +1399,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseBackgroundPosition(cs, value)
 
 	case "font-family":
-		cs.FontFamily, cs.CustomFamily = parseFontFamily(value)
+		cs.FontFamily, cs.CustomFamily = parseFontFamily(value, fonts)
 	case "font-size":
 		cs.FontSize = clampFontSize(resolveFontSize(parsed, parentFontSize))
 	case "font-weight":
@@ -1442,7 +1407,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "font-style":
 		cs.FontStyle = parseFontStyle(value)
 	case "font":
-		parseFontShorthand(cs, value, parentFontSize)
+		parseFontShorthand(cs, value, parentFontSize, fonts)
 	case "line-height":
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
@@ -1537,7 +1502,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-spacing":
 		// One value sets both axes; two split between horizontal and vertical.
 		// A negative gap is clamped to zero rather than letting cells overlap.
-		parts := strings.Fields(value)
+		parts := splitTopLevelSpace(value)
 		if len(parts) > 0 {
 			h := resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize)
 			v := h
@@ -1587,8 +1552,13 @@ func splitTopLevelSpace(v string) []string {
 		case '(':
 			depth++
 		case ')':
-			depth--
-		case ' ', '\t', '\n':
+			// Clamped, not decremented: an unmatched `)` in a hand-written or truncated
+			// sheet would otherwise take the depth negative, after which no whitespace is
+			// at top level and the rest of the value never splits.
+			if depth > 0 {
+				depth--
+			}
+		case ' ', '\t', '\n', '\r', '\f':
 			if depth == 0 {
 				if start >= 0 {
 					out = append(out, v[start:i])
@@ -1942,11 +1912,70 @@ var fontFamilies = map[string]frame.FontFamily{
 	"go regular":         frame.FontGo,
 }
 
-var (
-	customFontsMu sync.RWMutex
-	customFontIdx map[string]uint16
-	customFontRegistry map[CustomFontKey]uint16
-)
+// CustomFonts is the set of @font-face families one document loaded, with the
+// 1-based indices that document's own rasterizer table handed back for them. It
+// is per document rather than process-wide because those indices only mean
+// anything inside the registry that issued them: with a shared table, a second
+// document's faces replace the first one's entries and the first document
+// resolves its declared family to nothing, or to another document's face.
+//
+// A nil *CustomFonts is the empty table - the state every document that declares
+// no @font-face is in - so the cascade passes it without checking.
+type CustomFonts struct {
+	mu       sync.RWMutex
+	families map[string]uint16
+	variants map[CustomFontKey]uint16
+}
+
+// Register records a loaded face under its declared family and the weight/slant
+// variant its descriptors name. Family names are stored lowercase because the
+// cascade compares them case-insensitively.
+func (f *CustomFonts) Register(family string, idx uint16, bold, italic, light bool) {
+	if f == nil {
+		return
+	}
+	name := strings.ToLower(family)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.families == nil {
+		f.families = map[string]uint16{}
+	}
+	if f.variants == nil {
+		f.variants = map[CustomFontKey]uint16{}
+	}
+	f.families[name] = idx
+	f.variants[CustomFontKey{Family: name, Bold: bold, Italic: italic, Light: light}] = idx
+}
+
+// has reports whether the document declared this already-normalised family name.
+func (f *CustomFonts) has(name string) bool {
+	if f == nil {
+		return false
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, ok := f.families[name]
+	return ok
+}
+
+// index is the table entry for a declared family at a weight/slant variant,
+// falling back to that family's regular face when the author asked for a variant
+// the document never loaded. Zero means no face, which is what a family the
+// document does not declare resolves to.
+func (f *CustomFonts) index(family string, bold, italic, light bool) uint16 {
+	if f == nil || family == "" {
+		return 0
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if idx, ok := f.variants[CustomFontKey{Family: family, Bold: bold, Italic: italic, Light: light}]; ok {
+		return idx
+	}
+	if idx, ok := f.variants[CustomFontKey{Family: family}]; ok {
+		return idx
+	}
+	return 0
+}
 
 type CustomFontKey struct {
 	Family string
@@ -1955,40 +1984,19 @@ type CustomFontKey struct {
 	Light  bool
 }
 
-// SetCustomFonts registers the @font-face families the engine has loaded so
-// parseFontFamily can match them. The map keys are lowercase family names; the
-// values are 1-based indices into the rasterizer's custom font table.
-func SetCustomFonts(m map[string]uint16) {
-	customFontsMu.Lock()
-	customFontIdx = m
-	customFontsMu.Unlock()
-}
-
-// SetCustomFontRegistry registers @font-face families with weight/slant variants.
-// The map keys are (family, bold, italic, light) tuples; the values are 1-based
-// indices into the rasterizer's custom font table.
-func SetCustomFontRegistry(m map[CustomFontKey]uint16) {
-	customFontsMu.Lock()
-	customFontRegistry = m
-	customFontsMu.Unlock()
-}
-
 // parseFontFamily walks a declared font-family list and returns the first family
 // this engine can serve plus a custom-font family name when the match is a @font-face
 // family rather than a built-in one. A name it does not know is unavailable
 // rather than unknown-but-drawn, exactly as a browser skips a family that is
 // not installed, so the list keeps falling through to its generic keyword. An
 // exhausted list lands on the standard font.
-func parseFontFamily(v string) (frame.FontFamily, string) {
+func parseFontFamily(v string, fonts *CustomFonts) (frame.FontFamily, string) {
 	for _, part := range strings.Split(v, ",") {
 		name := normalizeFontName(part)
 		if fam, ok := fontFamilies[name]; ok {
 			return fam, ""
 		}
-		customFontsMu.RLock()
-		_, ok := customFontIdx[name]
-		customFontsMu.RUnlock()
-		if ok {
+		if fonts.has(name) {
 			return frame.FontGo, name
 		}
 	}
@@ -2207,9 +2215,16 @@ func extractBackgroundURL(v string) string {
 }
 
 // parseBackgroundRepeat reads the background-repeat value. Two-axis forms like
-// `repeat no-repeat` are rare; the first token decides.
+// `repeat no-repeat` are rare; the first token decides. An empty value - `background-repeat:`
+// with nothing after the colon, which a hand-written or truncated sheet can carry - has no
+// token to decide from, so it keeps the initial repeat rather than reading a first token
+// that is not there.
 func parseBackgroundRepeat(v string) BgRepeat {
-	switch strings.ToLower(strings.TrimSpace(strings.Fields(v)[0])) {
+	fields := strings.Fields(v)
+	if len(fields) == 0 {
+		return BgRepeatRepeat
+	}
+	switch strings.ToLower(fields[0]) {
 	case "repeat-x":
 		return BgRepeatRepeatX
 	case "repeat-y":
@@ -2234,7 +2249,7 @@ func parseBackgroundShorthandExtras(cs *ComputedStyle, v string) {
 		if t == "/" {
 			var size []string
 			for j := i + 1; j < len(toks) && toks[j] != "/"; j++ {
-				if !isSizeTok(toks[j]) {
+				if !isSizeTok(cs, toks[j]) {
 					break
 				}
 				size = append(size, toks[j])
@@ -2255,7 +2270,7 @@ func parseBackgroundShorthandExtras(cs *ComputedStyle, v string) {
 		case "no-repeat":
 			cs.BackgroundRepeat = BgRepeatNoRepeat
 		default:
-			if isPositionTok(t) {
+			if isPositionTok(cs, t) {
 				pos = append(pos, t)
 			}
 		}
@@ -2305,29 +2320,24 @@ func tokenizeBackground(v string) []string {
 }
 
 // isPositionTok reports whether a shorthand token can start a background
-// position: a position keyword or a length/percentage offset.
-func isPositionTok(t string) bool {
+// position: a position keyword or a length/percentage offset. It rejects
+// nothing by shape - `url(...)` and `rgba(...)` fail parseBgLen on their type.
+func isPositionTok(cs *ComputedStyle, t string) bool {
 	switch strings.ToLower(t) {
 	case "top", "bottom", "left", "right", "center":
 		return true
 	}
-	if strings.ContainsRune(t, '(') {
-		return false
-	}
-	_, _, ok := parseBgLen(t)
+	_, _, ok := parseBgLen(cs, t)
 	return ok
 }
 
 // isSizeTok reports whether a token can be a background-size value.
-func isSizeTok(t string) bool {
+func isSizeTok(cs *ComputedStyle, t string) bool {
 	switch strings.ToLower(t) {
 	case "auto", "contain", "cover":
 		return true
 	}
-	if strings.ContainsRune(t, '(') {
-		return false
-	}
-	_, _, ok := parseBgLen(t)
+	_, _, ok := parseBgLen(cs, t)
 	return ok
 }
 
@@ -2335,7 +2345,7 @@ func isSizeTok(t string) bool {
 // percentages. An unparseable token falls back to auto, which keeps the image
 // at its natural size rather than collapsing it to zero.
 func parseBackgroundSize(cs *ComputedStyle, v string) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	if len(parts) == 0 {
 		return
 	}
@@ -2350,7 +2360,7 @@ func parseBackgroundSize(cs *ComputedStyle, v string) {
 		cs.BackgroundSize = BgSizeCover
 		return
 	}
-	w, wPct, okW := parseBgLen(parts[0])
+	w, wPct, okW := parseBgLen(cs, parts[0])
 	if !okW {
 		cs.BackgroundSize = BgSizeAuto
 		return
@@ -2359,7 +2369,7 @@ func parseBackgroundSize(cs *ComputedStyle, v string) {
 	cs.BgSizeW, cs.BgSizeWPct = w, wPct
 	cs.BgSizeH = -1
 	if len(parts) > 1 && strings.ToLower(parts[1]) != "auto" {
-		if h, hPct, okH := parseBgLen(parts[1]); okH {
+		if h, hPct, okH := parseBgLen(cs, parts[1]); okH {
 			cs.BgSizeH, cs.BgSizeHPct = h, hPct
 		}
 	}
@@ -2369,7 +2379,7 @@ func parseBackgroundSize(cs *ComputedStyle, v string) {
 // start/center/end; a length is an offset from the start edge. Percentages are
 // treated as the nearest keyword so a centred banner still lands centred.
 func parseBackgroundPosition(cs *ComputedStyle, v string) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	if len(parts) == 0 {
 		return
 	}
@@ -2382,7 +2392,7 @@ func parseBackgroundPosition(cs *ComputedStyle, v string) {
 		case "right":
 			cs.BackgroundPosXMode = BgPosEnd
 		default:
-			if v, pct, ok := parseBgLen(tok); ok {
+			if v, pct, ok := parseBgLen(cs, tok); ok {
 				cs.BackgroundPosXMode = BgPosLength
 				cs.BackgroundPosX, cs.BgPosXPct = v, pct
 			}
@@ -2397,7 +2407,7 @@ func parseBackgroundPosition(cs *ComputedStyle, v string) {
 		case "bottom":
 			cs.BackgroundPosYMode = BgPosEnd
 		default:
-			if v, pct, ok := parseBgLen(tok); ok {
+			if v, pct, ok := parseBgLen(cs, tok); ok {
 				cs.BackgroundPosYMode = BgPosLength
 				cs.BackgroundPosY, cs.BgPosYPct = v, pct
 			}
@@ -2433,10 +2443,11 @@ func isVerticalKeyword(tok string) bool {
 	return false
 }
 
-// parseBgLen reads a background length or percentage. It returns the numeric
-// value, whether it was a percentage (true) or a CSS-px length (false), and
-// whether the token parsed at all. Unitless 0 is accepted as a length.
-func parseBgLen(tok string) (float32, bool, bool) {
+// parseBgLen reads a background length, percentage or length function. It
+// returns the numeric value, whether it was a percentage (true) or a CSS-px
+// length (false), and whether the token parsed at all. Unitless 0 is accepted
+// as a length.
+func parseBgLen(cs *ComputedStyle, tok string) (float32, bool, bool) {
 	tok = strings.ToLower(strings.TrimSpace(tok))
 	if tok == "0" {
 		return 0, false, true
@@ -2455,6 +2466,16 @@ func parseBgLen(tok string) (float32, bool, bool) {
 		}
 		return float32(f), false, true
 	}
+	// A length function is one value written with spaces in it, so it only reaches
+	// here whole - the caller split on top-level whitespace. `Str` is what tells a
+	// `calc`/`min`/`max`/`clamp` expression, which the parser keeps as text, from
+	// every other function: a gradient or a colour has none, and must not read as
+	// zero. An expression mixing a percentage with a length has nowhere to go in a
+	// (value, isPct) pair and reads as unparseable, which the callers turn into
+	// auto, rather than into whichever half happens to parse.
+	if v := css.ParseValue(tok); v.Type == css.ValueFunc && v.Str != "" && !strings.Contains(v.Str, "%") {
+		return resolveLengthEm(v, 0, cs.FontSize), false, true
+	}
 	return 0, false, false
 }
 
@@ -2462,7 +2483,7 @@ func parseBgLen(tok string) (float32, bool, bool) {
 // MarginAuto as the resolved value for "auto". fontSize is used to resolve
 // em-valued lengths against the element's own computed font-size.
 func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
 		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize)
@@ -2490,7 +2511,7 @@ func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left 
 // Padding cannot be "auto", so 0 is always the fallback. fontSize is used to
 // resolve em-valued lengths.
 func parsePaddingShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
 		val := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
@@ -2515,7 +2536,7 @@ func parsePaddingShorthand(v string, fontSize float32) (top, right, bottom, left
 }
 
 func parseBoxShorthand(v string) (top, right, bottom, left float32) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
 		val := resolveLength(css.ParseValue(parts[0]), 0)
@@ -2539,14 +2560,17 @@ func parseBoxShorthand(v string) (top, right, bottom, left float32) {
 	return
 }
 
+// parseBorderShorthand reads `border: <width> <style> <color>` in any order. The tokens are
+// split on whitespace outside parentheses, because the colour is very often a function the
+// author spaced after each comma - `1px solid rgb(0, 136, 238)` - and a plain field split
+// would hand the colour parser "rgb(0," and lose the colour entirely.
 func parseBorderShorthand(v string) (width float32, style string, color css.Color) {
-	parts := strings.Fields(v)
-	for _, p := range parts {
+	for _, p := range splitColorTokens(v) {
 		lower := strings.ToLower(p)
 		if isBorderStyle(lower) {
 			style = lower
-		} else if _, ok := css.ParseColor(lower); ok {
-			color, _ = css.ParseColor(lower)
+		} else if c, ok := css.ParseColor(lower); ok {
+			color = c
 		} else {
 			width = resolveLength(css.ParseValue(p), 0)
 		}
@@ -2645,7 +2669,7 @@ func parseBorderColors(v string) [4]css.Color {
 // parseFontShorthand reads `font: [style] [variant] [weight] size[/line-height] family`.
 // Bare numbers before the size are weights, so the size is the first length,
 // percentage, or absolute font-size keyword that appears.
-func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32) {
+func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32, fonts *CustomFonts) {
 	parts := strings.Fields(v)
 	sizeIdx := -1
 	for i, p := range parts {
@@ -2686,7 +2710,7 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32) {
 		cs.LineHeightEm = lineHeightEm(parsed)
 	}
 	if fam := strings.TrimSpace(strings.Join(parts[sizeIdx+1:], " ")); fam != "" {
-		cs.FontFamily, cs.CustomFamily = parseFontFamily(fam)
+		cs.FontFamily, cs.CustomFamily = parseFontFamily(fam, fonts)
 	}
 }
 
@@ -2729,7 +2753,7 @@ func parseBorderRadius(cs *ComputedStyle, v string) {
 // second onto the bottom left.
 func radiusGroup(cs *ComputedStyle, v string) [4]float32 {
 	vals := make([]float32, 0, 4)
-	for _, p := range strings.Fields(v) {
+	for _, p := range splitTopLevelSpace(v) {
 		vals = append(vals, resolveLengthEm(css.ParseValue(p), 0, cs.FontSize))
 	}
 	var out [4]float32
@@ -2758,7 +2782,7 @@ func radiusGroup(cs *ComputedStyle, v string) [4]float32 {
 // parseCornerRadius sets one corner, whose value may itself carry "horizontal
 // vertical" for an elliptical corner.
 func parseCornerRadius(cs *ComputedStyle, corner *[2]float32, v string) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	if len(parts) == 0 {
 		return
 	}
@@ -2770,7 +2794,7 @@ func parseCornerRadius(cs *ComputedStyle, corner *[2]float32, v string) {
 }
 
 func parseFlexShorthand(cs *ComputedStyle, v string) {
-	parts := strings.Fields(v)
+	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
 		if parts[0] == "none" {
@@ -2793,7 +2817,12 @@ func parseFlexShorthand(cs *ComputedStyle, v string) {
 	case 3:
 		cs.FlexGrow = float32(css.ParseValue(parts[0]).Num)
 		cs.FlexShrink = float32(css.ParseValue(parts[1]).Num)
-		cs.FlexBasis = resolveLength(css.ParseValue(parts[2]), -1)
+		// A third argument that is still a whitespace list - what an unclosed
+		// function degrades to - is not a length, so leave the basis unset
+		// rather than letting it resolve through ToLength to 0.
+		if basis := css.ParseValue(parts[2]); basis.Type != css.ValueList {
+			cs.FlexBasis = resolveLength(basis, -1)
+		}
 	}
 }
 

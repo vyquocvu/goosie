@@ -7,13 +7,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // computedFor returns the computed style of the first element named tag.
 func computedFor(t *testing.T, html, sheet, tag string) *style.ComputedStyle {
 	t.Helper()
-	doc := dom.Parse(html)
-	styles := style.Resolve(doc, []*css.Stylesheet{css.Parse(sheet)})
+	doc := domtest.Parse(html)
+	styles := style.Resolve(doc, []*css.Stylesheet{css.Parse(sheet)}, nil)
 	var found *style.ComputedStyle
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {

@@ -364,3 +364,250 @@ func TestRecorderJSONFieldNamesSayWhatTheyHold(t *testing.T) {
 		}
 	}
 }
+
+// TestRecorderReportsStartupLatency covers the brief's other headline number: how long
+// the process took to put a frame on screen. The recorder is the only instrument that
+// sees every frame, so the first presented mark is in its hands rather than the loop's,
+// and the delta is computed here for the reason the marks' header gives - deltas are not
+// a shell's job.
+func TestRecorderReportsStartupLatency(t *testing.T) {
+	rec := frame.NewFrameRecorder(8)
+	rec.SetStartupReference(frameTime(0))
+	// A vsync that arrived before the producer published a plan stamps no present,
+	// and it is not the frame the user saw.
+	rec.Record(frame.FrameMark{Serial: 1, VsyncAt: frameTime(0)})
+	rec.Record(frame.FrameMark{Serial: 2, VsyncAt: frameTime(16), ComposedAt: frameTime(120), PresentedAt: frameTime(120)})
+	rec.Record(frame.FrameMark{Serial: 3, VsyncAt: frameTime(32), ComposedAt: frameTime(200), PresentedAt: frameTime(200)})
+	got := rec.Report().StartupMS
+	if got == nil {
+		t.Fatal("StartupMS is nil for a run that presented a frame")
+	}
+	if *got < 119.9 || *got > 120.1 {
+		t.Errorf("StartupMS = %v, want the 120ms until the first presented frame, not the 200ms until the last", *got)
+	}
+}
+
+// TestRecorderStartupSurvivesRingEviction is why the first present is held outside the
+// window. A 600-frame gate run evicts its own first frame from a 1024-slot ring only
+// rarely, but a run long enough to wrap the ring would otherwise report the startup of
+// whichever frame happened to still be in it, and the number would read as plausible.
+func TestRecorderStartupSurvivesRingEviction(t *testing.T) {
+	rec := frame.NewFrameRecorder(4)
+	rec.SetStartupReference(frameTime(0))
+	rec.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(250)})
+	for i := 2; i <= 40; i++ {
+		rec.Record(frame.FrameMark{Serial: uint64(i), PresentedAt: frameTime(1000 + i)})
+	}
+	got := rec.Report().StartupMS
+	if got == nil {
+		t.Fatal("StartupMS is nil after the window wrapped")
+	}
+	if *got != 250 {
+		t.Errorf("StartupMS = %v, want the 250ms first present; the window has since evicted it", *got)
+	}
+}
+
+// TestRecorderStartupIsNilWhenNotMeasured keeps "no measurement" out of the artifact as a
+// number. A zero here is the fastest possible startup, so a build that stopped stamping
+// one, or a run whose window never presented, would gate as a sub-second cold start
+// rather than as the missing metric it is.
+func TestRecorderStartupIsNilWhenNotMeasured(t *testing.T) {
+	// Nothing was ever told when the process began.
+	unreferenced := frame.NewFrameRecorder(4)
+	unreferenced.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
+	if got := unreferenced.Report().StartupMS; got != nil {
+		t.Errorf("StartupMS = %v with no startup reference set; want nil", *got)
+	}
+
+	// The reference is known but no frame reached a window.
+	noPresent := frame.NewFrameRecorder(4)
+	noPresent.SetStartupReference(frameTime(0))
+	noPresent.Record(frame.FrameMark{Serial: 1, VsyncAt: frameTime(0)})
+	noPresent.Record(frame.FrameMark{Serial: 2, VsyncAt: frameTime(16)})
+	if got := noPresent.Report().StartupMS; got != nil {
+		t.Errorf("StartupMS = %v for a run that presented nothing; want nil", *got)
+	}
+
+	// Reset empties the window, so the frame it called first is gone with it. The
+	// reference survives: it is a fact about the process, not about the window. The
+	// assertion is the one after the reset rather than an empty-window nil, which the
+	// report's empty-window early return would hand back whether or not Reset worked.
+	rec := frame.NewFrameRecorder(4)
+	rec.SetStartupReference(frameTime(0))
+	rec.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(250)})
+	rec.Reset()
+	rec.Record(frame.FrameMark{Serial: 2, PresentedAt: frameTime(400)})
+	got := rec.Report().StartupMS
+	if got == nil || *got != 400 {
+		t.Errorf("StartupMS = %v after one post-reset present, want 400 rather than the 250 the window no longer holds", got)
+	}
+}
+
+// TestRecorderStartupJSONIsNullRatherThanZero pins the shape the gate script reads. jq
+// answers a missing key and a null the same way, so null is the encoding that lets the
+// script's existing fail-closed check refuse an unmeasured startup.
+func TestRecorderStartupJSONIsNullRatherThanZero(t *testing.T) {
+	var buf bytes.Buffer
+	unmeasured := frame.NewFrameRecorder(4)
+	unmeasured.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
+	if err := unmeasured.WriteJSON(&buf); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var doc struct {
+		Report map[string]any `json:"report"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	v, ok := doc.Report["startup_ms"]
+	if !ok {
+		t.Fatal("the report has no startup_ms key; the gate script reads it")
+	}
+	if v != nil {
+		t.Errorf("startup_ms holds %v (%T) for an unmeasured run; want null", v, v)
+	}
+
+	buf.Reset()
+	measured := frame.NewFrameRecorder(4)
+	measured.SetStartupReference(frameTime(0))
+	measured.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
+	if err := measured.WriteJSON(&buf); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if n, isNum := doc.Report["startup_ms"].(float64); !isNum || n != 80 {
+		t.Errorf("startup_ms holds %v for a measured run; want the number 80", doc.Report["startup_ms"])
+	}
+}
+
+// TestRecorderReportsTileLedger gives the artifact the number the frame timings cannot
+// imply. TilesRasterized counts work, and a run that rasterized 3,000 tiles is the same
+// report whether those buffers are held, were freed back to the pool, or escaped the
+// accounting that authorised them - which is the difference between a cache that filled
+// its configuration and a path that retains memory nobody asked for. The grid knows it
+// and the recorder, which times frames, does not, so it arrives by setter exactly the
+// way the startup reference does.
+func TestRecorderReportsTileLedger(t *testing.T) {
+	rec := frame.NewFrameRecorder(4)
+	rec.SetStartupReference(frameTime(0))
+	rec.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
+	rec.SetTileLedger(frame.GridStats{Bytes: 783286272, Budget: 785383424, Evictions: 7})
+
+	got := rec.Report()
+	for _, want := range []struct {
+		name string
+		held *int64
+		n    int64
+	}{
+		{"TileBytes", got.TileBytes, 783286272},
+		{"TileBudget", got.TileBudget, 785383424},
+		{"TileEvictions", got.TileEvictions, 7},
+	} {
+		if want.held == nil {
+			t.Errorf("%s is nil for a run that reported a ledger", want.name)
+			continue
+		}
+		if *want.held != want.n {
+			t.Errorf("%s = %d, want %d", want.name, *want.held, want.n)
+		}
+	}
+}
+
+// TestRecorderTileLedgerJSONIsMissingRatherThanZero is the fail-closed half of the
+// ledger. An absent field and a zero read the same way to a shell that trusts them, and
+// zero bytes held is a cache that never filled - the best possible result - so a build
+// that stopped handing the grid in would gate as a pass rather than as the missing
+// metric it is. null is what lets the script refuse.
+func TestRecorderTileLedgerJSONIsMissingRatherThanZero(t *testing.T) {
+	read := func(t *testing.T, rec *frame.FrameRecorder) map[string]any {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := rec.WriteJSON(&buf); err != nil {
+			t.Fatalf("WriteJSON: %v", err)
+		}
+		var doc struct {
+			Report map[string]any `json:"report"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return doc.Report
+	}
+
+	unmeasured := frame.NewFrameRecorder(4)
+	unmeasured.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
+	report := read(t, unmeasured)
+	for _, key := range []string{"tile_bytes", "tile_budget", "tile_evictions"} {
+		v, ok := report[key]
+		if !ok {
+			t.Errorf("the report has no %q key; the gate script reads it", key)
+			continue
+		}
+		if v != nil {
+			t.Errorf("%q holds %v (%T) for a run that reported no ledger; want null", key, v, v)
+		}
+	}
+
+	// A measured zero stays a zero. Evictions in particular is a figure a warm
+	// scroll run is meant to reach, and nulling it would make the passing case
+	// indistinguishable from the uninstrumented one.
+	buf := frame.NewFrameRecorder(4)
+	buf.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
+	buf.SetTileLedger(frame.GridStats{Bytes: 262144, Budget: 785383424})
+	report = read(t, buf)
+	for _, want := range []struct {
+		key string
+		n   float64
+	}{
+		{"tile_bytes", 262144},
+		{"tile_budget", 785383424},
+		{"tile_evictions", 0},
+	} {
+		if n, isNum := report[want.key].(float64); !isNum || n != want.n {
+			t.Errorf("%q holds %v (%T); want the number %v", want.key, report[want.key], report[want.key], want.n)
+		}
+	}
+}
+
+// TestRecorderReportsContent is the artifact's provenance. Every timing in a report was
+// taken on something, and the recorder times frames without knowing what those frames
+// depicted - so a caller that handed in the page's name and laid-out height has to be the
+// one saying so, and an artifact with no frames in its window still describes the run.
+func TestRecorderReportsContent(t *testing.T) {
+	rec := frame.NewFrameRecorder(4)
+	rec.SetContent("file:///tmp/tall.html", 16016)
+
+	got := rec.Report()
+	if got.Document != "file:///tmp/tall.html" {
+		t.Errorf("Document = %q, want the page the run was handed", got.Document)
+	}
+	if got.DocHeight != 16016 {
+		t.Errorf("DocHeight = %d, want the laid-out height in device pixels", got.DocHeight)
+	}
+	// The synthetic case is the empty name rather than a made-up one: a gate reading a
+	// scene's artifact must be able to tell it apart from a page's.
+	scene := frame.NewFrameRecorder(4)
+	scene.SetContent("", 63600)
+	if d := scene.Report().Document; d != "" {
+		t.Errorf("Document = %q for a scene run, want empty", d)
+	}
+
+	var buf bytes.Buffer
+	if err := rec.WriteJSON(&buf); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+	var doc struct {
+		Report map[string]any `json:"report"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if s, ok := doc.Report["document"].(string); !ok || s != "file:///tmp/tall.html" {
+		t.Errorf(`"document" holds %v (%T), want the URL as a string`, doc.Report["document"], doc.Report["document"])
+	}
+	if n, ok := doc.Report["doc_height"].(float64); !ok || n != 16016 {
+		t.Errorf(`"doc_height" holds %v (%T), want 16016`, doc.Report["doc_height"], doc.Report["doc_height"])
+	}
+}

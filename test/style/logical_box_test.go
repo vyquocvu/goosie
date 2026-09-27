@@ -6,6 +6,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // `padding-inline` and friends are the only way several modern sheets say it:
@@ -14,12 +15,12 @@ import (
 // renders the whole document flush against both edges.
 func logical(t *testing.T, html, sheet string) *style.ComputedStyle {
 	t.Helper()
-	doc := dom.Parse(html)
+	doc := domtest.Parse(html)
 	var sheets []*css.Stylesheet
 	if sheet != "" {
 		sheets = append(sheets, css.Parse(sheet))
 	}
-	styles := style.ResolveViewport(doc, sheets, style.Viewport{W: 1600, H: 900})
+	styles := style.ResolveViewport(doc, sheets, style.Viewport{W: 1600, H: 900}, nil)
 	var found *style.ComputedStyle
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {

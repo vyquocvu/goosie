@@ -1,11 +1,17 @@
 package archtest
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -363,4 +369,363 @@ func CheckCgo(v2Dir, allowedDir string) ([]string, error) {
 		return nil
 	})
 	return found, err
+}
+
+// UnformattedGoFiles returns every .go file under root whose bytes are not gofmt's own
+// output for them. It is the check CONTRIBUTING.md's `gofmt -w .` never was: -w rewrites
+// the file and exits 0 either way, so a contributor who skipped it saw no failure and the
+// drift accumulated with nobody able to be told which file.
+//
+// go/format is the package cmd/gofmt is built from, so the verdict is the one an editor's
+// format-on-save reaches, with no gofmt binary to find on PATH and no second implementation
+// to keep in step with the first.
+//
+// Dot-directories, node_modules and testdata are pruned. The first two are CheckCgo's
+// reasons and are sharper here: .worktrees/ holds a second full checkout, and `gofmt -l .`
+// at the repo root reports that stale copy's files among the current ones - which is why
+// the documented pre-commit command cannot double as the gate. testdata is what
+// `go list ./...` never builds, and a deliberately malformed fixture is a parser test's
+// input rather than drift.
+//
+// A file that does not parse is an error, not a clean report and not a violation: gofmt has
+// no opinion about how such a file should look, and skipping it would leave the tree reading
+// green while one file is not Go at all.
+func UnformattedGoFiles(root string) ([]string, error) {
+	var drift []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			name := filepath.Base(path)
+			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "testdata") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out, err := format.Source(data)
+		if err != nil {
+			return errUnparseable{file: path, why: "does not parse: " + strings.TrimSpace(err.Error())}
+		}
+		if !bytes.Equal(data, out) {
+			drift = append(drift, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return drift, nil
+}
+
+type errUnparseable struct{ file, why string }
+
+func (e errUnparseable) Error() string {
+	return "archtest: " + e.file + " " + e.why
+}
+
+// GlobalWrite is one assignment to a package-level var at file:line, attributed to the
+// function that writes it so a reader finds the mutation rather than the declaration.
+type GlobalWrite struct {
+	// Pkg is the directory of the package whose var is written; File is the file holding
+	// the assignment, which is not always the same one under a multi-file package.
+	Pkg  string
+	File string
+	Line int
+	Fn   string
+	Var  string
+	// Escape marks the address of a var being handed out (`&counter`) rather than the
+	// var itself being assigned: the write then happens through the pointer, somewhere
+	// this file cannot see.
+	Escape bool
+}
+
+// String renders one write as a single locator line.
+func (g GlobalWrite) String() string {
+	if g.Escape {
+		return fmt.Sprintf("%s:%d: &%s taken in %s()", filepath.ToSlash(g.File), g.Line, g.Var, g.Fn)
+	}
+	return fmt.Sprintf("%s:%d: %s assigned in %s()", filepath.ToSlash(g.File), g.Line, g.Var, g.Fn)
+}
+
+// MutableGlobals walks the .go files under dir - test files excluded, since a test may
+// stage a package var freely - and reports every assignment to a package-level var that is
+// neither part of that var's own declaration nor inside init().
+//
+// Mutation is read as a property of the code, not of a run: the two defects this rule
+// exists to prevent were both invisible to -race until a test happened to drive concurrent
+// document loads, and a global that no current test reaches is still shared by the next tab.
+// A var declared without an initializer and written only by init() is accepted, because
+// after start-up it is a constant: that is `dom.atomLookup` and the platform backend hooks,
+// and it is the difference between state and configuration.
+//
+// An assignment through a composite (`settings[k] = v`, `rows = append(rows, …)`) counts,
+// which is the shape a "don't reassign globals" review comment does not catch: the variable
+// is never re-pointed, and the map behind it still accumulates across documents.
+//
+// What it cannot see: a write from another package into an exported var, which needs
+// whole-program alias analysis, and a write through a pointer that left the package by some
+// route other than `&pkgVar` in a function body (a var whose declaration itself is
+// `var p = &T{}`, which is a value, not an escape). The address-of shape - `return &counter`
+// - is reported since 2026-09-27, which is what made the first blind spot the expensive one
+// rather than the common one.
+//
+// Files are grouped per package rather than analysed one at a time because a package var is
+// visible from every file of its package: the setters this rule would have blocked assigned
+// a var declared in a different file.
+func MutableGlobals(dir string) ([]GlobalWrite, error) {
+	pkgs, err := goFilesByPackage(dir)
+	if err != nil {
+		return nil, err
+	}
+	var found []GlobalWrite
+	// Sorted package dirs so a failure lists the same violations in the same order twice.
+	dirs := make([]string, 0, len(pkgs))
+	for d := range pkgs {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	for _, d := range dirs {
+		vars := map[string]bool{}
+		for _, path := range pkgs[d] {
+			names, err := packageVarNames(path)
+			if err != nil {
+				return nil, err
+			}
+			for _, n := range names {
+				vars[n] = true
+			}
+		}
+		if len(vars) == 0 {
+			continue
+		}
+		for _, path := range pkgs[d] {
+			writes, err := globalWrites(path, vars, d)
+			if err != nil {
+				return nil, err
+			}
+			found = append(found, writes...)
+		}
+	}
+	return found, nil
+}
+
+// goFilesByPackage maps each directory holding buildable Go code to its non-test files. A
+// directory is taken to be one package: the only multi-package directories in this module
+// separate a package from its _test variant, and those files are already excluded.
+//
+// Dot-directories, node_modules and testdata are pruned for UnformattedGoFiles' reasons -
+// a nested worktree is a second full checkout whose stale files are not this tree's, and
+// testdata is input rather than code.
+func goFilesByPackage(dir string) (map[string][]string, error) {
+	pkgs := map[string][]string{}
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			name := filepath.Base(path)
+			if path != dir && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "testdata") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		parent := filepath.Dir(path)
+		pkgs[parent] = append(pkgs[parent], path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pkgs, nil
+}
+
+func parseGo(path string) (*token.FileSet, *ast.File, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil, nil, errUnparseable{file: path, why: "does not parse: " + strings.TrimSpace(err.Error())}
+	}
+	return fset, f, nil
+}
+
+// packageVarNames returns the names of the vars declared at file scope.
+func packageVarNames(path string) ([]string, error) {
+	_, f, err := parseGo(path)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, s := range gd.Specs {
+			for _, id := range s.(*ast.ValueSpec).Names {
+				names = append(names, id.Name)
+			}
+		}
+	}
+	return names, nil
+}
+
+// globalWrites reports the assignments in one file whose left-hand side resolves to a name
+// in vars. A name bound locally anywhere in the enclosing function - a receiver, a parameter,
+// a :=, a range key, a named result - is treated as a shadow and skipped: the rule is about
+// writes that reach the package, and a function that rebinds the name locally reaches nothing.
+func globalWrites(path string, vars map[string]bool, pkgDir string) ([]GlobalWrite, error) {
+	fset, f, err := parseGo(path)
+	if err != nil {
+		return nil, err
+	}
+	var found []GlobalWrite
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		// A method named init on a type is an ordinary function; only the package-level
+		// init is the place a table is allowed to be filled.
+		if fd.Recv == nil && fd.Name.Name == "init" {
+			continue
+		}
+		locals := localNames(fd.Body)
+		for _, name := range fieldNames(fd.Recv, fd.Type.Params, fd.Type.Results) {
+			locals[name] = true
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.AND {
+				// The address of a package var is the var's state on the loose: whoever
+				// holds it can write without ever naming the var, which is the one shape
+				// the assignment scan below structurally cannot see.
+				if name, ok := rootIdent(u.X); ok && name != "_" && !locals[name] && vars[name] {
+					found = append(found, GlobalWrite{
+						Pkg: pkgDir, File: path, Line: fset.Position(n.Pos()).Line,
+						Fn: fd.Name.Name, Var: name, Escape: true,
+					})
+				}
+			}
+			lhs := assignTargets(n)
+			if lhs == nil {
+				return true
+			}
+			for _, expr := range lhs {
+				name, ok := rootIdent(expr)
+				if !ok || name == "_" || locals[name] {
+					continue
+				}
+				if !vars[name] {
+					continue
+				}
+				found = append(found, GlobalWrite{
+					Pkg:  pkgDir,
+					File: path,
+					Line: fset.Position(n.Pos()).Line,
+					Fn:   fd.Name.Name,
+					Var:  name,
+				})
+			}
+			return true
+		})
+	}
+	return found, nil
+}
+
+// assignTargets returns the written-to expressions of an assignment or increment, or nil for
+// any other node.
+func assignTargets(n ast.Node) []ast.Expr {
+	switch x := n.(type) {
+	case *ast.AssignStmt:
+		return x.Lhs
+	case *ast.IncDecStmt:
+		return []ast.Expr{x.X}
+	}
+	return nil
+}
+
+// localNames collects every identifier a function body binds for itself.
+func localNames(body *ast.BlockStmt) map[string]bool {
+	locals := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE {
+				for _, l := range x.Lhs {
+					if id, ok := l.(*ast.Ident); ok {
+						locals[id.Name] = true
+					}
+				}
+			}
+		case *ast.DeclStmt:
+			gd, ok := x.Decl.(*ast.GenDecl)
+			if ok && gd.Tok == token.VAR {
+				for _, s := range gd.Specs {
+					for _, id := range s.(*ast.ValueSpec).Names {
+						locals[id.Name] = true
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			for _, l := range []ast.Expr{x.Key, x.Value} {
+				if id, ok := l.(*ast.Ident); ok {
+					locals[id.Name] = true
+				}
+			}
+		case *ast.FuncLit:
+			for _, name := range fieldNames(x.Type.Params, x.Type.Results) {
+				locals[name] = true
+			}
+		}
+		return true
+	})
+	return locals
+}
+
+// fieldNames returns every identifier bound by the given parameter and result lists. A name
+// so bound shadows a package-level var of the same name for the whole function, so writing to
+// it writes a local. nil lists - an absent receiver, an unparenthesized signature - are skipped.
+func fieldNames(lists ...*ast.FieldList) []string {
+	var out []string
+	for _, fl := range lists {
+		if fl == nil {
+			continue
+		}
+		for _, p := range fl.List {
+			for _, id := range p.Names {
+				out = append(out, id.Name)
+			}
+		}
+	}
+	return out
+}
+
+// rootIdent resolves an assignment target to the identifier it writes through: the name for
+// `counter = 1`, the map or slice for `settings[k] = v`, the struct for `cfg.field = v`.
+func rootIdent(e ast.Expr) (string, bool) {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name, true
+	case *ast.SelectorExpr:
+		return rootIdent(x.X)
+	case *ast.IndexExpr:
+		return rootIdent(x.X)
+	case *ast.IndexListExpr:
+		return rootIdent(x.X)
+	case *ast.StarExpr:
+		return rootIdent(x.X)
+	case *ast.ParenExpr:
+		return rootIdent(x.X)
+	}
+	return "", false
 }

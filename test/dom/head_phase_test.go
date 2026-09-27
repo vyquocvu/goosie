@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // TestHeadLevelElementInBodyDoesNotSwallowContent pins HTML5's insertion point
@@ -24,7 +25,7 @@ func TestHeadLevelElementInBodyDoesNotSwallowContent(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			doc := dom.Parse(c.html)
+			doc := domtest.Parse(c.html)
 			div := find(&doc.Node, "content")
 			if div == nil {
 				t.Fatalf("content div is missing; tree = %s", strings.Join(tags(&doc.Node), " "))
@@ -56,7 +57,7 @@ func TestHeadLevelElementInBodyDoesNotSwallowContent(t *testing.T) {
 // element before any body content must still land in the head, so a document's
 // own <style> does not become a rendered child of the body.
 func TestHeadKeepsContentBeforeTheBody(t *testing.T) {
-	doc := dom.Parse(`<html><head><style>.x{color:red}</style><link rel="stylesheet" href="a.css"></head><body><div class="content">A</div></body></html>`)
+	doc := domtest.Parse(`<html><head><style>.x{color:red}</style><link rel="stylesheet" href="a.css"></head><body><div class="content">A</div></body></html>`)
 	if doc.Head == nil {
 		t.Fatal("no head element")
 	}

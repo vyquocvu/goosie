@@ -103,16 +103,16 @@ const (
 // cannot silently rescale a queued scroll.
 type Event struct {
 	Kind   EventKind
-	Delta  frame.Point // EvScroll
-	Pos    frame.Point // EvPointer
-	Button Button      // EvPointer
+	Delta  frame.Point   // EvScroll
+	Pos    frame.Point   // EvPointer
+	Button Button        // EvPointer
 	Action PointerAction // EvPointer: press, release, or motion
-	Key    rune        // EvKey
-	Mods   KeyMod      // EvKey: modifier flags
-	Text   string      // EvIME: UTF-8 composition text
-	IME    IMEAction   // EvIME: marked update or commit
-	Size   frame.Size  // EvResize
-	Scale  float32     // current device pixel ratio
+	Key    rune          // EvKey
+	Mods   KeyMod        // EvKey: modifier flags
+	Text   string        // EvIME: UTF-8 composition text
+	IME    IMEAction     // EvIME: marked update or commit
+	Size   frame.Size    // EvResize
+	Scale  float32       // current device pixel ratio
 	At     time.Time
 }
 

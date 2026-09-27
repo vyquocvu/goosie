@@ -9,6 +9,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 func almostEqual(a, b float32) bool {
@@ -25,8 +26,8 @@ func session(t *testing.T, html string, viewportW float32) *layout.Arena {
 // viewport is modelled, which makes a percentage height behave as auto.
 func sessionH(t *testing.T, html string, viewportW, viewportH float32) *layout.Arena {
 	t.Helper()
-	doc := dom.Parse(html)
-	styles := style.Resolve(doc, nil)
+	doc := domtest.Parse(html)
+	styles := style.Resolve(doc, nil, nil)
 	arena := layout.Build(doc, styles, nil)
 	layout.Block(arena, layout.ObjectID(1), viewportW, viewportH)
 	return arena
@@ -646,10 +647,10 @@ func TestPseudoElementLayout(t *testing.T) {
 	html := `<html><body><div class="test">hello</div></body></html>`
 	cssText := `.test::before { content: "\25b3"; color: red; }`
 
-	doc := dom.Parse(html)
+	doc := domtest.Parse(html)
 	sheets := []*css.Stylesheet{css.Parse(cssText)}
-	styles := style.Resolve(doc, sheets)
-	pseudoStyles := style.ResolvePseudoElements(doc, sheets, styles)
+	styles := style.Resolve(doc, sheets, nil)
+	pseudoStyles := style.ResolvePseudoElements(doc, sheets, styles, nil)
 
 	t.Logf("pseudoStyles count: %d", len(pseudoStyles))
 	for k, v := range pseudoStyles {
@@ -701,4 +702,3 @@ func TestPseudoElementLayout(t *testing.T) {
 
 	t.Logf("pseudo-element obj: X=%v Y=%v W=%v H=%v", firstKid.X, firstKid.Y, firstKid.W, firstKid.H)
 }
-

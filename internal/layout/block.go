@@ -530,10 +530,10 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		if k.Style == nil || k.Style.Display == style.DisplayNone {
 			continue
 		}
-		if k.Node != nil && k.Node.Type != 1 {
+		if k.Node != nil && !k.Node.Element() {
 			// Skip raw text inside flex containers, but clear the content so
 			// the paint builder doesn't render it at the object's zero position.
-			if k.Node.Type == 2 {
+			if k.Node.Text() {
 				k.Node.DataContent = ""
 			}
 			continue
@@ -1090,8 +1090,8 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		if k.Style == nil || k.Style.Display == style.DisplayNone {
 			continue
 		}
-		if k.Node != nil && k.Node.Type != 1 {
-			if k.Node.Type == 2 {
+		if k.Node != nil && !k.Node.Element() {
+			if k.Node.Text() {
 				k.Node.DataContent = ""
 			}
 			continue
@@ -1388,7 +1388,7 @@ func inlineMinWidth(a *Arena, id ObjectID) float32 {
 			if k.Style == nil || k.Style.Display == style.DisplayNone {
 				continue
 			}
-			if k.Node != nil && k.Node.Type == 2 {
+			if k.Node != nil && k.Node.Text() {
 				if k.W > m && !isSpaceWord(k.Node.DataContent) {
 					m = k.W
 				}
@@ -1436,7 +1436,7 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 			}
 			lead := flexMargin(k.Style.MarginLeft) + k.BorderLeft + k.PaddingLeft
 			trailBox := k.PaddingRight + k.BorderRight + flexMargin(k.Style.MarginRight)
-			if k.Node != nil && k.Node.Type == 2 {
+			if k.Node != nil && k.Node.Text() {
 				// Max-content is the words themselves on one line, so the running
 				// sum of their own widths is the measure. Reading a placed run's
 				// right edge instead takes in where an earlier pass put it, and a
@@ -1534,7 +1534,7 @@ func reflowInlineWords(a *Arena, id ObjectID, finalW, baseX, baseY float32) (flo
 			if k.Style == nil || k.Style.Display == style.DisplayNone {
 				continue
 			}
-			if k.Node != nil && k.Node.Type == 2 {
+			if k.Node != nil && k.Node.Text() {
 				switch k.Style.WhiteSpace {
 				case style.WhiteSpaceNowrap, style.WhiteSpacePre, style.WhiteSpacePrewrite, style.WhiteSpacePreline:
 					supported = false
@@ -2011,7 +2011,7 @@ func flowsInlineContent(a *Arena, obj *Object) bool {
 		if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) {
 			continue
 		}
-		if k.Node != nil && k.Node.Type == 2 {
+		if k.Node != nil && k.Node.Text() {
 			if strings.TrimSpace(k.Node.DataContent) != "" {
 				return true
 			}
@@ -2029,7 +2029,7 @@ func flowsInlineContent(a *Arena, obj *Object) bool {
 // fragment where the inline box used to be, so block flow has to give it a slot.
 func holdsBlockContent(a *Arena, id ObjectID) bool {
 	obj := a.Get(id)
-	if obj.Node == nil || obj.Node.Type != 1 || isBlock(obj) {
+	if obj.Node == nil || !obj.Node.Element() || isBlock(obj) {
 		return false
 	}
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {

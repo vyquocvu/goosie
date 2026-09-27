@@ -333,8 +333,8 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 		if k.Style == nil || k.Style.Display == style.DisplayNone {
 			continue
 		}
-		if k.Node != nil && k.Node.Type != 1 {
-			if k.Node.Type == 2 {
+		if k.Node != nil && !k.Node.Element() {
+			if k.Node.Text() {
 				k.Node.DataContent = ""
 			}
 			continue

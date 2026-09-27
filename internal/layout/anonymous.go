@@ -78,7 +78,7 @@ func wrapTextRuns(a *Arena, id ObjectID) {
 	}
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
-		if k.Node != nil && k.Node.Type == 2 {
+		if k.Node != nil && k.Node.Text() {
 			run = append(run, kid)
 			continue
 		}
@@ -95,7 +95,7 @@ func runGeneratesContent(a *Arena, kids []ObjectID) bool {
 		if k.Node == nil {
 			continue
 		}
-		if k.Node.Type != 2 {
+		if !k.Node.Text() {
 			return true
 		}
 		if strings.TrimSpace(k.Node.DataContent) != "" {
@@ -109,7 +109,7 @@ func runGeneratesContent(a *Arena, kids []ObjectID) bool {
 // The text between block siblings stays in the arena as a text object, but it
 // must not be mistaken for the first or last child a margin can collapse with.
 func isWhitespaceText(k *Object) bool {
-	return k.Node != nil && k.Node.Type != 1 && strings.TrimSpace(k.Node.DataContent) == ""
+	return k.Node != nil && !k.Node.Element() && strings.TrimSpace(k.Node.DataContent) == ""
 }
 
 // isFlowBlock reports whether a box is block-level for the purposes of block
@@ -117,7 +117,7 @@ func isWhitespaceText(k *Object) bool {
 // matter what the flag says, and an inline-block takes part in a line rather
 // than a stack.
 func isFlowBlock(obj *Object) bool {
-	if obj.Node != nil && obj.Node.Type != 1 {
+	if obj.Node != nil && !obj.Node.Element() {
 		return false
 	}
 	if !isBlock(obj) {

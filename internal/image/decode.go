@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	MaxEncodedImageBytes     = 8 << 20
-	MaxImageDimension        = 8192
-	MaxDecodedImagePixels    = 16 * 1024 * 1024
+	MaxEncodedImageBytes  = 8 << 20
+	MaxImageDimension     = 8192
+	MaxDecodedImagePixels = 16 * 1024 * 1024
 )
 
 // Probe checks encoded length and metadata before full decode. It returns the

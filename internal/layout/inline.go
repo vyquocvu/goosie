@@ -39,12 +39,12 @@ func inlineInto(a *Arena, id ObjectID) {
 		if k.Node == nil || k.Style == nil || k.Style.Display == style.DisplayNone {
 			continue
 		}
-		if k.Node.Type == 2 {
+		if k.Node.Text() {
 			collectInline(a, kid, contentW, &lines, &current)
 			continue
 		}
 		if isBlock(k) {
-			if k.Style.Display == style.DisplayInlineBlock && k.Node != nil && k.Node.Type == 1 &&
+			if k.Style.Display == style.DisplayInlineBlock && k.Node != nil && k.Node.Element() &&
 				k.flags&flagRowPlaced == 0 {
 				atomicInlineBlock(a, kid, contentW, &lines, &current)
 				continue
@@ -201,13 +201,13 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 		return
 	}
 	if isBlock(k) {
-		if k.Style.Display == style.DisplayInlineBlock && k.Node != nil && k.Node.Type == 1 &&
+		if k.Style.Display == style.DisplayInlineBlock && k.Node != nil && k.Node.Element() &&
 			k.flags&flagRowPlaced == 0 {
 			atomicInlineBlock(a, nodeID, contentW, lines, current)
 		}
 		return
 	}
-	if k.Node != nil && k.Node.Type == 2 {
+	if k.Node != nil && k.Node.Text() {
 		text := k.Node.DataContent
 		if k.Style.WhiteSpace == style.WhiteSpacePreline {
 			// pre-line: preserve line breaks, collapse other whitespace
@@ -228,6 +228,9 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 			k.Style.WhiteSpace == style.WhiteSpacePre ||
 			k.Style.WhiteSpace == style.WhiteSpacePrewrite
 		words := splitWords(text)
+		if !nowrap {
+			words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
+		}
 		var firstWordID ObjectID
 		var lastWordID ObjectID
 		for _, word := range words {
@@ -479,6 +482,63 @@ func runHeights(m Metrics, size float32, slot frame.FontSlot, styleLineHeight fl
 // estimate. The two must stay the only sources of width so line breaking and
 // painted spacing can't disagree. letterSpacing adds extra space between each
 // pair of characters.
+// maxWordFragment is the widest piece a single unbreakable word may be laid out
+// as. A word beyond it can carry a box's geometry past the engine's finite-width
+// guard all by itself, which used to refuse the whole document for one base64
+// blob. No viewport is anywhere near this wide, so an ordinary word that merely
+// overflows its line is left to overflow exactly as before.
+const maxWordFragment = float32(1 << 16)
+
+// splitOverlongWords breaks a word too wide to bound into rune chunks that fit
+// under maxWordFragment. Advantages accumulate the way measureWord does, so a
+// chunk the splitter calls narrow is still narrow where the line box places it.
+func splitOverlongWords(words []string, fontSize float32, m Metrics, slot frame.FontSlot, letterSpacing float32) []string {
+	advance := func(r rune) float32 {
+		if m == nil {
+			return fontSize * 0.5
+		}
+		return float32(int64(m.GlyphAdvanceFixed(int32(fontSize), r, slot))) / 64
+	}
+	bounded := func(word string) bool {
+		return word == " " || word == "\n" || measureWord(word, fontSize, m, slot, letterSpacing) <= maxWordFragment
+	}
+	for _, word := range words {
+		if !bounded(word) {
+			return breakOverlongWords(words, bounded, advance, letterSpacing)
+		}
+	}
+	return words
+}
+
+// breakOverlongWords rewrites the whole token list, splitting every unbounded
+// word. Tokens already measured as bounded are copied through untouched, so an
+// ordinary overflowing word keeps overflowing on one line.
+func breakOverlongWords(words []string, bounded func(string) bool, advance func(rune) float32, letterSpacing float32) []string {
+	out := make([]string, 0, len(words)+8)
+	for _, word := range words {
+		if bounded(word) {
+			out = append(out, word)
+			continue
+		}
+		runes := []rune(word)
+		start, sum, count := 0, float32(0), 0
+		for i := range runes {
+			next := sum + advance(runes[i])
+			if count > 0 {
+				next += letterSpacing
+			}
+			if count > 0 && next > maxWordFragment {
+				out = append(out, string(runes[start:i]))
+				start, sum, count = i, advance(runes[i]), 1
+				continue
+			}
+			sum, count = next, count+1
+		}
+		out = append(out, string(runes[start:]))
+	}
+	return out
+}
+
 func measureWord(word string, fontSize float32, m Metrics, slot frame.FontSlot, letterSpacing float32) float32 {
 	n := utf8.RuneCountInString(word)
 	if n == 0 {

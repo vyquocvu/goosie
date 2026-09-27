@@ -306,6 +306,20 @@ func TestGate_ArchtestBoundaries(t *testing.T) {
 	for _, path := range found {
 		t.Errorf("%s uses cgo; only internal/platform/darwin may", path)
 	}
+	unformatted, err := archtest.UnformattedGoFiles(root)
+	if err != nil {
+		t.Fatalf("gofmt walk: %v", err)
+	}
+	for _, path := range unformatted {
+		t.Errorf("%s: not gofmt-formatted", path)
+	}
+	globals, err := archtest.MutableGlobals(filepath.Join(root, "internal"))
+	if err != nil {
+		t.Fatalf("global-state walk: %v", err)
+	}
+	for _, g := range globals {
+		t.Errorf("%s: the engine may not mutate a package-level var after init()", g)
+	}
 }
 
 // allocSink keeps an allocation the instrument is meant to count from being optimised

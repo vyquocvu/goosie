@@ -52,8 +52,8 @@ type config struct {
 // devSize is the surface in device pixels.
 func (c config) devSize() frame.Size {
 	return frame.Size{
-		W: int32(float64(c.width) * c.dpr + 0.5),
-		H: int32(float64(c.height) * c.dpr + 0.5),
+		W: int32(float64(c.width)*c.dpr + 0.5),
+		H: int32(float64(c.height)*c.dpr + 0.5),
 	}
 }
 
@@ -146,7 +146,6 @@ func run(args []string) error {
 
 	sched := raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{})
 	sched.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{layer}, Background: sess.BackgroundColor()})
-
 
 	composer := surface.NewComposer(dev, bitmapPool)
 	rec := frame.NewFrameRecorder(2)

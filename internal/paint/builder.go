@@ -104,7 +104,7 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			if obj.Style.Display == style.DisplayListItem {
 				b.paintMarker(obj, ordinal)
 			}
-			if obj.Node != nil && obj.Node.Type == 2 &&
+			if obj.Node != nil && obj.Node.Text() &&
 				(obj.Node.DataContent != "" || b.composingTextareaText(obj)) {
 				b.paintText(obj, rect, opacity, clip)
 			}
@@ -620,7 +620,7 @@ func controlText(obj *layout.Object) string {
 		return obj.Node.GetAttribute("value")
 	}
 	for c := obj.Node.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == 2 {
+		if c.Text() {
 			return c.DataContent
 		}
 	}
@@ -765,7 +765,7 @@ func firstTextObject(a *layout.Arena, obj *layout.Object) *layout.Object {
 		if k.Style != nil && k.Style.Display == style.DisplayNone {
 			continue
 		}
-		if k.Node != nil && k.Node.Type == 2 && k.Node.DataContent != "" {
+		if k.Node != nil && k.Node.Text() && k.Node.DataContent != "" {
 			return k
 		}
 		if d := firstTextObject(a, k); d != nil {

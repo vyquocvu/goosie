@@ -182,7 +182,6 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Errorf("div.X = %v, want %v", divObj.X, wantMargin)
 	}
 
-
 	// 3. Check paint commands
 	list := sess.Paint(1)
 	dl := list.Build(1)
@@ -215,5 +214,3 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Error("no text command with link color #38488f found")
 	}
 }
-
-

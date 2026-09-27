@@ -227,6 +227,17 @@ func (s *Scheduler) Stats() Stats {
 	return st
 }
 
+// GridStats returns the tile grid's own accounting, read live from whichever layer the
+// scheduler is bound to right now. Stats() takes its Bytes and Budget from the same
+// place; this is the rest of it, for a caller that has to report the cache the frame path
+// is actually using rather than the one a tab switch left behind.
+func (s *Scheduler) GridStats() frame.GridStats {
+	if s.grid == nil {
+		return frame.GridStats{}
+	}
+	return s.grid.Stats()
+}
+
 // ScratchAllocs reports how many times a scratch buffer had to grow after
 // construction. Zero is the steady-state contract the CI gate asserts on: a warm
 // scroll must not need a bigger list than the last one, and the only way to prove

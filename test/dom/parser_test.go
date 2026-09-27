@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // find returns the first element whose class attribute contains wantClass.
@@ -37,7 +38,7 @@ func find(root *dom.Node, wantClass string) *dom.Node {
 // dropdown items inside the (display:none) .dropdown-menu <ul>, not leak them
 // into the outer .navbar-nav list where they would render.
 func TestNestedListItemStaysInSublist(t *testing.T) {
-	doc := dom.Parse(`<!doctype html><html><body>
+	doc := domtest.Parse(`<!doctype html><html><body>
 <ul class="navbar-nav">
 <li class="nav-item dropdown">
 <a href="#">Design</a>

@@ -1,8 +1,8 @@
 package style
 
 import (
-	"testing"
 	"github.com/vyquocvu/goosie/internal/css"
+	"testing"
 )
 
 func TestClipProperty(t *testing.T) {
@@ -12,7 +12,9 @@ func TestClipProperty(t *testing.T) {
 		t.Fatal("no rules parsed")
 	}
 	cs := DefaultStyle()
-	applyDeclarations(&cs, sheet.Rules[0].Declarations, 1, 0, 0, true, 16)
+	for _, d := range sheet.Rules[0].Declarations {
+		applyProperty(&cs, d.Property, d.Value, d.Parsed, 16, nil)
+	}
 	if !cs.HasClip {
 		t.Errorf("HasClip should be true, got false")
 	}

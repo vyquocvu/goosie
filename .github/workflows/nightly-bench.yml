@@ -28,6 +28,20 @@ jobs:
       - name: Run all tests
         run: go test -count=1 ./...
 
+      - name: Fuzz the malformed-input entry points
+        run: |
+          # Seed tests already run in `go test ./...`; -fuzz is what searches.
+          # 120s per target is the point where a fresh crasher is worth the nightly
+          # minutes. A finding lands in this step's log; copy it to
+          # <pkg>/testdata/fuzz/<Target>/ to pin it forever.
+          for target in './test/dom:FuzzParseDocument' './test/css:FuzzParseStylesheet' './test/style:FuzzResolveCascade'; do
+            pkg=${target%%:*}
+            name=${target##*:}
+            echo "::group::fuzz $name ($pkg)"
+            go test -fuzz="^${name}\$" -fuzztime=120s -timeout=15m "$pkg"
+            echo "::endgroup::"
+          done
+
       - name: Run the M1 scroll benchmarks
         run: |
           mkdir -p testdata/benchmarks/nightly
@@ -54,7 +68,8 @@ jobs:
         run: |
           scripts/v2-gate-check.sh testdata/benchmarks/nightly/m1-gate.json \
             -mean 16 -p99 33 \
-            -bench testdata/benchmarks/nightly/m1-bench.txt -warm-ms 5 -cold-ms 8
+            -bench testdata/benchmarks/nightly/m1-bench.txt -warm-ms 5 -cold-ms 8 \
+            -startup-ms 1000
 
       - name: Upload measurements
         if: always()

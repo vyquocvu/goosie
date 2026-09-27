@@ -38,7 +38,7 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock) {
 	// Text nodes inherit their parent's style wholesale, including position, so
 	// only elements can position themselves. The document root has no style at
 	// all and only carries the walk.
-	element := obj.Node == nil || obj.Node.Type == 1
+	element := obj.Node == nil || obj.Node.Element()
 	if s != nil && element {
 		switch s.Position {
 		case style.PositionRelative:

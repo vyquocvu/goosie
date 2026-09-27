@@ -5,22 +5,15 @@ import (
 	"strings"
 )
 
-// mediaViewportWidth is the CSS px width @media min/max-width conditions are
-// tested against. The engine sets it per document; the default is the
-// desktop viewport the parity references are captured at.
-var mediaViewportWidth float32 = 1280
+// defaultMediaViewportWidth is the CSS px width @media min/max-width conditions
+// are tested against when the caller has no viewport to name. It is the desktop
+// viewport the parity references are captured at.
+const defaultMediaViewportWidth float32 = 1280
 
 // mediaDevicePixelRatio is the resolution @media device-pixel-ratio conditions
 // are tested against. Rendering is one device pixel per CSS pixel: no backend
 // scales the frame, and the parity references are captured at dpr 1.
 const mediaDevicePixelRatio float32 = 1
-
-// SetMediaViewportWidth points media-query evaluation at a viewport width.
-func SetMediaViewportWidth(w float32) {
-	if w > 0 {
-		mediaViewportWidth = w
-	}
-}
 
 // Declaration is one CSS property-value pair.
 type Declaration struct {
@@ -44,13 +37,23 @@ type FontFaceRule struct {
 
 // Stylesheet is a parsed CSS stylesheet.
 type Stylesheet struct {
-	Rules      []Rule
-	FontFaces  []FontFaceRule
+	Rules     []Rule
+	FontFaces []FontFaceRule
 }
 
-// Parse parses a CSS stylesheet.
+// Parse parses a CSS stylesheet, testing @media width conditions against the
+// default desktop viewport. A caller that knows the document's own width should
+// use ParseForViewport, since media conditions are resolved while parsing.
 func Parse(input string) *Stylesheet {
-	p := &parser{input: stripComments(input)}
+	return ParseForViewport(input, defaultMediaViewportWidth)
+}
+
+// ParseForViewport parses a CSS stylesheet, testing @media width conditions
+// against viewportWidthPx. The engine's viewport is passed here so each
+// document evaluates its media queries against its own width, not a
+// process-global value another document may have set earlier.
+func ParseForViewport(input string, viewportWidthPx float32) *Stylesheet {
+	p := &parser{input: stripComments(input), mediaWidth: viewportWidthPx}
 	return p.parse()
 }
 
@@ -104,6 +107,10 @@ func stripComments(in string) string {
 type parser struct {
 	input string
 	pos   int
+	// mediaWidth is the viewport this parser tests @media width conditions
+	// against. Nested blocks inherit it so an @media inside an @supports or
+	// inside another @media sees the document's width, not the default.
+	mediaWidth float32
 }
 
 func (p *parser) parse() *Stylesheet {
@@ -157,11 +164,11 @@ func (p *parser) atRuleName() string {
 	return name
 }
 
-// parseMediaRule tests an @media condition against the viewport the parser
-// package was told about (SetMediaViewportWidth; 1280 by default) and splices
-// true bodies into the sheet in place. Conditions on features this engine does
-// not vary with - prefers-*, resolution, pointer - read as true, which matches
-// a desktop screen far more often than false does.
+// parseMediaRule tests an @media condition against the viewport width carried by
+// the parser (1280 for a bare Parse) and splices true bodies into the sheet in
+// place. Conditions on features this engine does not vary with - prefers-*,
+// resolution, pointer - read as true, which matches a desktop screen far more
+// often than false does.
 func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	at := p.pos
 	p.pos++ // '@'
@@ -203,8 +210,8 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	if p.pos < len(p.input) {
 		p.pos++ // the final '}'
 	}
-	if mediaConditionTrue(cond) {
-		inner := &parser{input: body}
+	if p.mediaConditionTrue(cond) {
+		inner := &parser{input: body, mediaWidth: p.mediaWidth}
 		inner.parseInto(sheet)
 	}
 }
@@ -256,7 +263,7 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 		p.pos++ // the final '}'
 	}
 	if supportsConditionTrue(cond) {
-		inner := &parser{input: body}
+		inner := &parser{input: body, mediaWidth: p.mediaWidth}
 		inner.parseInto(sheet)
 	}
 }
@@ -390,16 +397,16 @@ func splitOutsideParens(s, sep string) []string {
 }
 
 // mediaConditionTrue reports whether any comma-separated group applies.
-func mediaConditionTrue(cond string) bool {
+func (p *parser) mediaConditionTrue(cond string) bool {
 	for _, group := range splitTopLevel(cond, ',') {
-		if mediaGroupTrue(group) {
+		if p.mediaGroupTrue(group) {
 			return true
 		}
 	}
 	return false
 }
 
-func mediaGroupTrue(group string) bool {
+func (p *parser) mediaGroupTrue(group string) bool {
 	group = strings.TrimSpace(strings.ToLower(group))
 	if group == "" || group == "all" {
 		return true
@@ -409,21 +416,21 @@ func mediaGroupTrue(group string) bool {
 		negate = true
 		group = strings.TrimSpace(strings.TrimPrefix(group, "not"))
 	}
-	result := mediaPartsTrue(group)
+	result := p.mediaPartsTrue(group)
 	if negate {
 		return !result
 	}
 	return result
 }
 
-func mediaPartsTrue(group string) bool {
+func (p *parser) mediaPartsTrue(group string) bool {
 	// `or` binds looser than the implicit `and`, so a group of alternatives is
 	// true when any one of them is. Reading every connector as `and` made
 	// `(A) or (B)` require both, which is how a mobile-only rule survived onto a
 	// desktop viewport.
 	if alts := splitOutsideParens(group, " or "); len(alts) > 1 {
 		for _, a := range alts {
-			if mediaPartsTrue(strings.TrimSpace(a)) {
+			if p.mediaPartsTrue(strings.TrimSpace(a)) {
 				return true
 			}
 		}
@@ -432,7 +439,7 @@ func mediaPartsTrue(group string) bool {
 	for _, part := range splitTopLevel(group, ' ') {
 		// Media Queries 4 range syntax - `(width <= 769px)`, `(400px < width)` -
 		// carries no colon, so the feature switch below cannot see it.
-		if holds, ok := mediaRangeHolds(part); ok {
+		if holds, ok := p.mediaRangeHolds(part); ok {
 			if !holds {
 				return false
 			}
@@ -455,11 +462,11 @@ func mediaPartsTrue(group string) bool {
 		}
 		switch name {
 		case "min-width", "min-device-width":
-			if px, ok := cssPx(val); ok && mediaViewportWidth < px {
+			if px, ok := cssPx(val); ok && p.mediaWidth < px {
 				return false
 			}
 		case "max-width", "max-device-width":
-			if px, ok := cssPx(val); ok && mediaViewportWidth > px {
+			if px, ok := cssPx(val); ok && p.mediaWidth > px {
 				return false
 			}
 		case "orientation":
@@ -624,7 +631,7 @@ func splitRange(inner string) (operands, ops []string) {
 // width. ok=false means "not a width range", leaving the caller to the classic
 // feature handling. The strict operators compare inclusively: the difference is
 // one pixel exactly at the breakpoint, and the engine has no sub-pixel viewport.
-func mediaRangeHolds(part string) (holds bool, ok bool) {
+func (p *parser) mediaRangeHolds(part string) (holds bool, ok bool) {
 	if !strings.HasPrefix(part, "(") || !strings.HasSuffix(part, ")") {
 		return false, false
 	}
@@ -636,11 +643,11 @@ func mediaRangeHolds(part string) (holds bool, ok bool) {
 	case 2:
 		if operands[0] == "width" {
 			px, isLen := cssPx(operands[1])
-			return isLen && widthSatisfies(ops[0], px), isLen
+			return isLen && p.widthSatisfies(ops[0], px), isLen
 		}
 		if operands[1] == "width" {
 			px, isLen := cssPx(operands[0])
-			return isLen && widthSatisfies(flipOp(ops[0]), px), isLen
+			return isLen && p.widthSatisfies(flipOp(ops[0]), px), isLen
 		}
 	case 3:
 		if operands[1] != "width" {
@@ -651,17 +658,17 @@ func mediaRangeHolds(part string) (holds bool, ok bool) {
 		if !okLo || !okHi {
 			return false, false
 		}
-		return widthSatisfies(ops[0], lo) && widthSatisfies(ops[1], hi), true
+		return p.widthSatisfies(ops[0], lo) && p.widthSatisfies(ops[1], hi), true
 	}
 	return false, false
 }
 
-func widthSatisfies(op string, px float32) bool {
+func (p *parser) widthSatisfies(op string, px float32) bool {
 	switch op {
 	case "<", "<=":
-		return mediaViewportWidth <= px
+		return p.mediaWidth <= px
 	case ">", ">=":
-		return mediaViewportWidth >= px
+		return p.mediaWidth >= px
 	}
 	return false
 }

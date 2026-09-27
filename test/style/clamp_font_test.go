@@ -6,16 +6,17 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 func styleAtViewport(t *testing.T, html, sheet, tag string, vp style.Viewport) *style.ComputedStyle {
 	t.Helper()
-	doc := dom.Parse(html)
+	doc := domtest.Parse(html)
 	var sheets []*css.Stylesheet
 	if sheet != "" {
 		sheets = append(sheets, css.Parse(sheet))
 	}
-	styles := style.ResolveViewport(doc, sheets, vp)
+	styles := style.ResolveViewport(doc, sheets, vp, nil)
 	var found *style.ComputedStyle
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {

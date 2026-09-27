@@ -22,6 +22,10 @@ import (
 // MaxResponseBytes bounds each decoded HTTP response or local file.
 const MaxResponseBytes = 8 << 20
 
+// MaxResponseHeaderBytes bounds one response's header block, which the transport
+// would otherwise buffer up to its own 10 MiB default before any body byte.
+const MaxResponseHeaderBytes = 256 << 10
+
 // userAgent is sent with every request. Sites that gate content by client
 // identity answer a generic Go client with 403s, and parity is measured
 // against what a browser is served.
@@ -267,6 +271,17 @@ func validateHTTPHost(u *url.URL) error {
 	return nil
 }
 
+// clientTransport is the shared transport's own proxy, dialing, pooling and
+// HTTP/2 behaviour with this browser's response-header bound set on top. It is
+// a Clone rather than a literal so that the inherited settings stay inherited:
+// a hand-built Transport silently drops HTTP_PROXY support.
+func clientTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxResponseHeaderBytes = MaxResponseHeaderBytes
+	t.DialContext = dialAddressGuarded
+	return t
+}
+
 // DefaultClient returns an HTTP client backed by net/http with standard TLS
 // verification and at most ten validated HTTP(S) redirects. Its cookie jar
 // lives in memory for the life of the client.
@@ -274,6 +289,7 @@ func DefaultClient() HTTP {
 	return &httpClient{
 		client: &http.Client{
 			Timeout:       30 * time.Second,
+			Transport:     clientTransport(),
 			CheckRedirect: checkRedirect,
 		},
 		jar:   NewCookieJar(),
@@ -287,6 +303,7 @@ func DefaultPrivateClient() HTTP {
 	return &httpClient{
 		client: &http.Client{
 			Timeout:       30 * time.Second,
+			Transport:     clientTransport(),
 			CheckRedirect: checkRedirect,
 		},
 		jar:     NewCookieJar(),
@@ -299,11 +316,11 @@ func DefaultPrivateClient() HTTP {
 // using a caller-supplied TLS configuration. Tests use it to trust the
 // self-signed certificates httptest.NewTLSServer generates.
 func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
+	t := clientTransport()
+	t.TLSClientConfig = tlsConfig
 	return &httpClient{client: &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
+		Timeout:       30 * time.Second,
+		Transport:     t,
 		CheckRedirect: checkRedirect,
 	}, cache: newResponseCache()}
 }

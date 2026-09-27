@@ -6,17 +6,18 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // styleFor returns the computed style of the first element named tag.
 func styleFor(t *testing.T, html, sheet, tag string) *style.ComputedStyle {
 	t.Helper()
-	doc := dom.Parse(html)
+	doc := domtest.Parse(html)
 	var sheets []*css.Stylesheet
 	if sheet != "" {
 		sheets = append(sheets, css.Parse(sheet))
 	}
-	styles := style.Resolve(doc, sheets)
+	styles := style.Resolve(doc, sheets, nil)
 	var found *style.ComputedStyle
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -110,7 +111,7 @@ func TestBackgroundGradientRamp(t *testing.T) {
 	if g.Stops[0].At != 0 || g.Stops[1].At != 1 {
 		t.Errorf("stop positions = %v, %v, want 0 and 1", g.Stops[0].At, g.Stops[1].At)
 	}
-	for i, want := range []css.Color{{0x66, 0x7e, 0xea, 255}, {0x76, 0x4b, 0xa2, 255}} {
+	for i, want := range []css.Color{{R: 0x66, G: 0x7e, B: 0xea, A: 255}, {R: 0x76, G: 0x4b, B: 0xa2, A: 255}} {
 		if g.Stops[i].Color != want {
 			t.Errorf("stop %d colour = %+v, want %+v", i, g.Stops[i].Color, want)
 		}
@@ -155,7 +156,7 @@ func TestFlatBackgroundIsNotAGradient(t *testing.T) {
 	if !s.BackgroundGradient.Empty() {
 		t.Errorf("gradient = %+v, want none", s.BackgroundGradient)
 	}
-	if want := (css.Color{0x0a, 0x0b, 0x0c, 255}); s.BackgroundColor != want {
+	if want := (css.Color{R: 0x0a, G: 0x0b, B: 0x0c, A: 255}); s.BackgroundColor != want {
 		t.Errorf("colour = %+v, want %+v", s.BackgroundColor, want)
 	}
 }

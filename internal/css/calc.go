@@ -39,12 +39,33 @@ func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 // viewportTerm matches a viewport unit inside an expression's text.
 var viewportTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(svw|svh|dvw|dvh|lvw|lvh|vw|vh|vmin|vmax)`)
 
+// viewportTermHints is the set of two-letter sequences that every alternative above
+// contains: `vw` carries it outright and so does each s/d/l-prefixed form, `vh` and its
+// prefixed forms carry `vh`, `vmin` carries `mi` and `vmax` carries `ma`.
+var viewportTermHints = []string{"vw", "vh", "mi", "ma"}
+
 // ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
 // leaving every other term alone. A `calc()` only reaches its `em` terms once the
 // cascade has settled the element's font size, and by then the frame's size is no
 // longer in scope, so the two halves of the context are applied where each is
 // known.
+//
+// The cascade runs this on the text of every declaration of every element, so the
+// overwhelmingly common case - a value that says nothing about the viewport - is
+// answered by the hint scan below rather than by the regexp. Skipping the regexp
+// exactly reproduces running it and finding no match, because a string that holds
+// none of those four bigrams cannot hold a viewport unit at all.
 func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
+	possible := false
+	for _, h := range viewportTermHints {
+		if strings.Contains(expr, h) {
+			possible = true
+			break
+		}
+	}
+	if !possible {
+		return expr, false
+	}
 	found := false
 	out := viewportTerm.ReplaceAllStringFunc(expr, func(m string) string {
 		g := viewportTerm.FindStringSubmatch(m)

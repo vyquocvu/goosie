@@ -74,6 +74,13 @@ const (
 	ringFrames = 120
 )
 
+// processStart is the instant this process began its own work. Package
+// initialisation runs before main, so it is closer to exec than any timestamp taken
+// inside main() can be, and it is what the report's startup_ms measures against:
+// "sub-second cold start" as one number a gate can read. What sits outside it is
+// kernel exec, dynamic loading and the runtime's own start-up.
+var processStart = time.Now()
+
 // navResult is the outcome of a per-tab navigation, delivered on navResults.
 type navResult struct {
 	tabID        uint64
@@ -283,25 +290,30 @@ func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
 // framePath is the assembled pipeline: everything between a vsync and a Present, with
 // the pieces a report has to name kept reachable.
 type framePath struct {
-	window            surface.Window
-	loop              *surface.Loop
-	sched             *raster.Scheduler
-	pool              *raster.Pool
-	composer          *surface.Composer
-	layer             *frame.Layer
-	rec               *frame.FrameRecorder
-	spec              paint.SceneSpec
-	config            config
-	toolbar           *toolbar.State
-	tabMgr            *tabs.TabManager
-	client            net.HTTP
-	fonts             *raster.Fonts
-	bookmarks         *bookmarks.Store
-	history           *history.Store
-	started           time.Time
-	navResults        chan navResult
-	imgResults        chan imgResult
-	zoom              float64
+	window     surface.Window
+	loop       *surface.Loop
+	sched      *raster.Scheduler
+	pool       *raster.Pool
+	composer   *surface.Composer
+	layer      *frame.Layer
+	rec        *frame.FrameRecorder
+	spec       paint.SceneSpec
+	config     config
+	toolbar    *toolbar.State
+	tabMgr     *tabs.TabManager
+	client     net.HTTP
+	fonts      *raster.Fonts
+	bookmarks  *bookmarks.Store
+	history    *history.Store
+	started    time.Time
+	navResults chan navResult
+	imgResults chan imgResult
+	zoom       float64
+	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
+	// scene, and its laid-out height in device pixels. Both go into the artifact, which
+	// otherwise carries timings with no statement of what they were taken on.
+	document          string
+	docHeight         int32
 	findMatches       []engine.Match
 	findIdx           int
 	selDrag           bool
@@ -386,12 +398,18 @@ func build(c config) (*framePath, error) {
 	if c.paced() {
 		capacity = c.frames
 	}
+	rec := frame.NewFrameRecorder(capacity)
+	// The recorder writes the artifact the pacing gate reads, so the cold start it
+	// reports has to be measured by the same instrument that measured the frames -
+	// and the one fact it cannot observe is when the process began.
+	rec.SetStartupReference(processStart)
 	f := &framePath{
 		sched:      raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
 		pool:       wp,
 		composer:   surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
 		layer:      layer,
-		rec:        frame.NewFrameRecorder(capacity),
+		docHeight:  spec.DocHeight,
+		rec:        rec,
 		spec:       spec,
 		config:     c,
 		client:     client,
@@ -1242,7 +1260,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// cancellation: the linker sees absolute http(s) URLs only, because the
 	// engine resolves hrefs against the final document URL before calling.
 	linker := func(base, href string) (string, error) {
-		resp, err := client.Get(ctx, href)
+		resp, err := client.Get(subresourceCtx(ctx, base), href)
 		if err != nil {
 			return "", err
 		}
@@ -1254,7 +1272,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// Image subresources use the same client and cancellation. The engine hands
 	// absolute http(s) URLs only, so the fetcher just reads the response bytes.
 	imageFetcher := func(base, url string) ([]byte, error) {
-		resp, err := client.Get(ctx, url)
+		resp, err := client.Get(subresourceCtx(ctx, base), url)
 		if err != nil {
 			return nil, err
 		}
@@ -1263,7 +1281,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// @font-face resources use the same client. The fetcher is the same shape
 	// as the image fetcher; the engine resolves src URLs before calling.
 	fontFetcher := func(base, url string) ([]byte, error) {
-		resp, err := client.Get(ctx, url)
+		resp, err := client.Get(subresourceCtx(ctx, base), url)
 		if err != nil {
 			return nil, err
 		}
@@ -1306,8 +1324,27 @@ func imageOption(deferred bool, base string, fetch engine.ImageFetcher) engine.O
 	return engine.WithImages(base, fetch)
 }
 
+// subresourceCtx is where the browser's two security halves meet, and the only
+// place they can: internal/engine owns the private-network rule but cannot
+// import internal/net, and internal/net owns the dial but must stay policy-free.
+// A subresource fetched for a public page therefore carries the engine's address
+// predicate down to the transport, which resolves the name once, judges every
+// answer, and dials the address it judged - so a host name that resolves to
+// 169.254.169.254 is refused even though the URL itself looked public.
+//
+// A local initiator (127.0.0.1, a development server, a file:// document) gets
+// ctx back untouched. That is the same distinction resolveSheetURL makes about
+// names, and guarding it would refuse a page its own stylesheet.
+func subresourceCtx(ctx context.Context, base string) context.Context {
+	if engine.InitiatorIsLocal(base) {
+		return ctx
+	}
+	return net.WithAddressGuard(ctx, net.AddressGuard{Blocked: engine.AddressBlocked})
+}
+
 // normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
-func normalizeURL(raw string) string {	if raw == "" {
+func normalizeURL(raw string) string {
+	if raw == "" {
 		return raw
 	}
 	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "file://") {
@@ -1417,20 +1454,25 @@ func run(args []string) error {
 
 	// If a URL was provided, start loading it now that the window is visible.
 	// The user sees the toolbar immediately while the page fetches in the background.
-	// A screenshot run has nobody to watch the background load: the fixed frame
-	// count would present synthetic tiles before the document lands, so it loads
-	// synchronously and the run captures the page it was asked for.
-	if c.url != "" && !c.gate && !c.bench {
-		if c.screenshot {
-			layer, _, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false)
+	// A paced run - a screenshot or a measured burst - has nobody to watch that
+	// background load: its fixed frame count would present the placeholder tiles before
+	// the document lands, so it loads synchronously and the run depicts, and reports, the
+	// page it was asked for.
+	if c.url != "" {
+		if c.paced() {
+			layer, docSpec, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false)
 			if err != nil {
 				return err
 			}
+			// The driver's scroll range comes from f.layer, so a paced document run that
+			// swapped the plan but not this field would scroll a one-viewport page.
+			f.layer = layer
 			f.sched.SetPlan(frame.FramePlan{
 				Serial:     1,
 				Layers:     []*frame.Layer{layer},
 				Background: bgColor,
 			})
+			f.document, f.docHeight = c.url, docSpec.DocHeight
 		} else {
 			f.navigateTab(c.url)
 		}

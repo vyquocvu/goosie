@@ -20,6 +20,12 @@ import (
 // one runner is meaningless to the next without them.
 func (f *framePath) report(d *driver) error {
 	c := f.config
+	// The grid's accounting goes into the recorder before the summary comes out of it,
+	// because the tile cache is not part of the window the recorder rolls: it is the one
+	// memory figure in the report that has to be handed in from outside.
+	grid := f.sched.GridStats()
+	f.rec.SetTileLedger(grid)
+	f.rec.SetContent(f.document, int64(f.docHeight))
 	rep := f.rec.Report()
 	st := f.sched.Stats()
 	ls := f.loop.Stats()
@@ -62,15 +68,29 @@ func (f *framePath) report(d *driver) error {
 	if d != nil {
 		stamped = d.Frames()
 	}
+	// The cold start, spelled the way the artifact spells it. A run whose window
+	// never presented a frame has no number to report here rather than a fast one:
+	// a zero would be the best startup possible, which is the opposite of what
+	// happened.
+	startup := "startup_ms=not_measured"
+	if rep.StartupMS != nil {
+		startup = fmt.Sprintf("startup_ms=%.3f", *rep.StartupMS)
+	}
+	// The scene key names what the run was configured to draw; this says what it drew, which
+	// is the same thing except when a document was loaded.
+	doc := ""
+	if f.document != "" {
+		doc = fmt.Sprintf(" document=%q", f.document)
+	}
 
-	fmt.Fprintf(os.Stderr, "goosie: run backend=%s requested=%q interactive=%t frames=%d stamped=%d elapsed_s=%.2f fps=%.1f scene=%s size=%dx%d window=%dx%d dpr=%g\n",
+	fmt.Fprintf(os.Stderr, "goosie: run backend=%s requested=%q interactive=%t frames=%d stamped=%d elapsed_s=%.2f fps=%.1f scene=%s size=%dx%d window=%dx%d dpr=%g %s%s\n",
 		name, backend, interactive, rep.Frames, stamped, elapsed.Seconds(), fps, c.scene,
-		c.devSize().W, c.devSize().H, actual.W, actual.H, c.dpr)
+		c.devSize().W, c.devSize().H, actual.W, actual.H, c.dpr, startup, doc)
 	fmt.Fprintf(os.Stderr, "goosie: timings mean_ms=%.3f p50_ms=%.3f p99_ms=%.3f max_ms=%.3f present_mean_ms=%.3f present_p99_ms=%.3f zero_work_frames=%d\n",
 		rep.MeanMS, rep.P50MS, rep.P99MS, rep.MaxMS, rep.PresentMeanMS, rep.PresentP99MS, rep.ZeroWorkFrames)
-	fmt.Fprintf(os.Stderr, "goosie: counters rasterized=%d reused=%d failed=%d refused=%d deferred=%d panics=%d writes=%d bytes=%d budget=%d miss_pct=%.2f presents=%d idle=%d dropped_vsyncs=%d plans_published=%d plans_superseded=%d\n",
+	fmt.Fprintf(os.Stderr, "goosie: counters rasterized=%d reused=%d failed=%d refused=%d deferred=%d panics=%d writes=%d bytes=%d budget=%d evictions=%d miss_pct=%.2f presents=%d idle=%d dropped_vsyncs=%d plans_published=%d plans_superseded=%d\n",
 		st.Rasterized, st.Reused, st.Failed, st.Refused, st.Deferred, ps.Panics, st.Writes,
-		st.Bytes, st.Budget, miss, ls.Presents, ls.Idle, dropped,
+		grid.Bytes, grid.Budget, grid.Evictions, miss, ls.Presents, ls.Idle, dropped,
 		f.sched.PlanStats().Published, f.sched.PlanStats().Dropped)
 	fmt.Fprintf(os.Stderr, "goosie: env goos=%s goarch=%s go=%s cpu=%d workers=%d\n",
 		runtime.GOOS, runtime.GOARCH, runtime.Version(), runtime.NumCPU(), ps.Workers)

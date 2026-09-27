@@ -6,23 +6,15 @@ import (
 	"strings"
 )
 
-// Parse parses an HTML document and returns the Document.
-func Parse(html string) *Document {
-	doc := NewDocument()
-	tb := &treeBuilder{doc: doc}
-	tb.parse(html)
-	return doc
-}
-
 // ParseLimits bounds allocations while the actual HTML tokenizer builds the tree.
 // Nodes includes the document and implicit elements; depth counts edges from it.
-// Zero limits are only used by the legacy, unchecked Parse entry point.
+// Every field must be positive: there is no unlimited parse in this package.
 type ParseLimits struct {
 	Nodes, Depth, Attributes, AttributeBytes int
 }
 
-// ParseBounded is Parse with resource limits, checked before node allocation.
-// The caller must bound the input byte length before calling it.
+// ParseBounded builds the Document an HTML string describes within limits, checking them
+// before each node allocation. The caller must bound the input byte length first.
 func ParseBounded(html string, limits ParseLimits) (*Document, error) {
 	if limits.Nodes <= 0 || limits.Depth <= 0 || limits.Attributes <= 0 || limits.AttributeBytes <= 0 {
 		return nil, fmt.Errorf("HTML parse limits must be positive")
@@ -53,9 +45,6 @@ type treeBuilder struct {
 func (tb *treeBuilder) allowNode(parent *Node) bool {
 	if tb.err != nil {
 		return false
-	}
-	if tb.limits.Nodes == 0 {
-		return true
 	}
 	if int(tb.doc.nextID) >= tb.limits.Nodes {
 		tb.err = fmt.Errorf("HTML node limit exceeded (%d)", tb.limits.Nodes)
@@ -199,17 +188,13 @@ func (tb *treeBuilder) insertText(data string) {
 		parent = tb.findFosterParent()
 	}
 	if last := parent.LastChild; last != nil && last.Text() {
-		if tb.text == nil {
-			last.DataContent += data
-		} else {
-			b := tb.text[last]
-			if b == nil {
-				b = &strings.Builder{}
-				b.WriteString(last.DataContent)
-				tb.text[last] = b
-			}
-			b.WriteString(data)
+		b := tb.text[last]
+		if b == nil {
+			b = &strings.Builder{}
+			b.WriteString(last.DataContent)
+			tb.text[last] = b
 		}
+		b.WriteString(data)
 		return
 	}
 	if !tb.allowNode(parent) {

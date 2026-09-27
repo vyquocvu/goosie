@@ -24,7 +24,7 @@ body { font-family: 'Roboto', sans-serif; }
 	if len(sheet.Rules) != 1 {
 		t.Fatalf("expected 1 regular rule, got %d", len(sheet.Rules))
 	}
-	
+
 	ff := sheet.FontFaces[0]
 	if len(ff.Declarations) != 2 {
 		t.Fatalf("expected 2 declarations in first font-face, got %d", len(ff.Declarations))

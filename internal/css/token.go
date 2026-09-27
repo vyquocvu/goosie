@@ -40,12 +40,12 @@ const (
 
 // Token is one CSS token.
 type Token struct {
-	Type    TokenType
-	Value   string
-	Unit    string
-	NumVal  float64
-	IntVal  int64
-	IsInt   bool
+	Type   TokenType
+	Value  string
+	Unit   string
+	NumVal float64
+	IntVal int64
+	IsInt  bool
 }
 
 // Tokenizer splits CSS text into tokens.
@@ -186,7 +186,7 @@ func (t *Tokenizer) readIdentOrFunc() Token {
 	}
 	if t.pos < len(t.input) && t.input[t.pos] == '(' {
 		t.pos++
-		return Token{Type: TokenFunction, Value: t.input[start:t.pos-1]}
+		return Token{Type: TokenFunction, Value: t.input[start : t.pos-1]}
 	}
 	return Token{Type: TokenIdent, Value: t.input[start:t.pos]}
 }

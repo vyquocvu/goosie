@@ -6,13 +6,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // slotFor returns the face the first element named tag resolves to.
 func slotFor(t *testing.T, html, tag string) frame.FontSlot {
 	t.Helper()
-	doc := dom.Parse(html)
-	styles := style.Resolve(doc, nil)
+	doc := domtest.Parse(html)
+	styles := style.Resolve(doc, nil, nil)
 	var found *style.ComputedStyle
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -74,11 +75,11 @@ func TestFamilyListResolves(t *testing.T) {
 
 func TestWeightAndSlantResolve(t *testing.T) {
 	for _, tc := range []struct {
-		html         string
-		tag          string
-		wantBold     bool
-		wantItalic   bool
-		wantLight    bool
+		html       string
+		tag        string
+		wantBold   bool
+		wantItalic bool
+		wantLight  bool
 	}{
 		{`<html><body><p style="font-weight: 700">x</p></body></html>`, "p", true, false, false},
 		{`<html><body><p style="font-weight: bold">x</p></body></html>`, "p", true, false, false},
