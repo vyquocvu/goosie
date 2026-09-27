@@ -3010,7 +3010,7 @@ first read of that state was reported as "the refactor is half-applied", which w
 directions: nothing had been applied, and nothing had been reverted. Recorded so the next round uses
 per-site edits for a mechanical sweep instead of losing a cycle to a script that silently does nothing.
 
-## 30. Round 25: gate 6's first sub-project is written as 17 requirements, and the tree is red on purpose
+## 30. Round 25: gate 6's first sub-project is written as 18 requirements, and the tree is red on purpose
 
 ### What §4's backlog asked for
 
@@ -3045,7 +3045,8 @@ commit until somebody widens the line deliberately.
 ### The one piece of production code that came first, and why
 
 The stub: the types, the constants, the sentinels, and a `Runtime` whose every method returns
-`ErrNotImplemented`. That is 60 lines of no behaviour, written before the tests were run once, because a
+`ErrNotImplemented`. That is 117 lines of which the executable part is a dozen returns and a formatter,
+written before the tests were run once, because a
 test against a package that does not exist is a build error and a build error tells you nothing about
 which requirements are hard. With the stub in place each failure names the requirement it is waiting on.
 
@@ -3055,11 +3056,11 @@ rather than failed.
 
 ### The measured red
 
-`go test -count=1 ./test/js/ -v` → **16 fail, 1 passes**. The one green is
+`go test -count=1 ./test/js/ -v` → **17 fail, 1 passes**. The one green is
 `TestDefaultTimeoutIsBoundedAndNotZero`, which asserts a constant that exists and is in range; that is the
 whole requirement, so the pass is real.
 
-All 16 others stop at `js.New`. That is the cheapest red to read but the least informative: one unmet
+All 17 others stop at `js.New`. That is the cheapest red to read but the least informative: one unmet
 method hides every assertion behind it. The round that implements `New` will therefore be the first round
 with a real estimate of what `Run` costs, and should be planned as if the surprises are still ahead.
 
