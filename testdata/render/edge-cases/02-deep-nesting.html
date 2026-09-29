@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Edge Case - Deep Nesting</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        /* Nesting with inherited styles */
+        .level-1 { color: #2c3e50; padding: 5px; border: 1px solid #ecf0f1; }
+        .level-2 { color: #34495e; padding: 5px; border: 1px solid #d5dbdb; margin: 3px; }
+        .level-3 { color: #7f8c8d; padding: 5px; border: 1px solid #bdc3c7; margin: 3px; }
+        .level-4 { color: #95a5a6; padding: 5px; border: 1px solid #aab7b8; margin: 3px; }
+        .level-5 { color: #e74c3c; padding: 5px; border: 1px solid #e74c3c; margin: 3px; }
+
+        /* Deeply nested divs with backgrounds */
+        .nest-bg-1 { background: rgba(231, 76, 60, 0.1); padding: 10px; }
+        .nest-bg-2 { background: rgba(52, 152, 219, 0.1); padding: 10px; }
+        .nest-bg-3 { background: rgba(46, 204, 113, 0.1); padding: 10px; }
+        .nest-bg-4 { background: rgba(243, 156, 18, 0.1); padding: 10px; }
+        .nest-bg-5 { background: rgba(155, 89, 182, 0.1); padding: 10px; }
+        .nest-bg-6 { background: rgba(26, 188, 156, 0.2); padding: 10px; }
+        .nest-bg-7 { background: rgba(230, 126, 34, 0.2); padding: 10px; }
+        .nest-bg-8 { background: rgba(44, 62, 80, 0.1); padding: 10px; }
+
+        /* Nested tables */
+        .outer-table { border-collapse: collapse; width: 100%; }
+        .outer-table td { border: 2px solid #3498db; padding: 10px; vertical-align: top; }
+        .inner-table { border-collapse: collapse; width: 100%; }
+        .inner-table td { border: 1px solid #e74c3c; padding: 6px; vertical-align: top; }
+        .innermost-table { border-collapse: collapse; }
+        .innermost-table td { border: 1px solid #2ecc71; padding: 4px; }
+
+        /* Nested lists */
+        .deep-list { font-size: 14px; }
+
+        /* Nested flex containers */
+        .flex-outer {
+            display: flex;
+            gap: 10px;
+            background: #ecf0f1;
+            padding: 10px;
+        }
+        .flex-middle {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            flex: 1;
+            background: #d5dbdb;
+            padding: 8px;
+        }
+        .flex-inner {
+            display: flex;
+            gap: 5px;
+            background: #bdc3c7;
+            padding: 5px;
+        }
+        .flex-leaf {
+            background: #3498db;
+            color: white;
+            padding: 8px;
+            text-align: center;
+            font-size: 12px;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Edge Case - Deep Nesting</h2>
+
+    <div class="section">
+        <div class="label">Deeply nested divs with colored borders (5 levels)</div>
+        <div class="level-1">
+            Level 1
+            <div class="level-2">
+                Level 2
+                <div class="level-3">
+                    Level 3
+                    <div class="level-4">
+                        Level 4
+                        <div class="level-5">
+                            Level 5 (innermost)
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Deeply nested divs with background colors (8 levels)</div>
+        <div class="nest-bg-1">
+            Level 1
+            <div class="nest-bg-2">
+                Level 2
+                <div class="nest-bg-3">
+                    Level 3
+                    <div class="nest-bg-4">
+                        Level 4
+                        <div class="nest-bg-5">
+                            Level 5
+                            <div class="nest-bg-6">
+                                Level 6
+                                <div class="nest-bg-7">
+                                    Level 7
+                                    <div class="nest-bg-8">
+                                        Level 8 (deepest)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Nested tables (3 levels deep)</div>
+        <table class="outer-table">
+            <tr>
+                <td>
+                    Outer cell A
+                    <table class="inner-table">
+                        <tr>
+                            <td>
+                                Inner cell A1
+                                <table class="innermost-table">
+                                    <tr><td>Deep 1</td><td>Deep 2</td></tr>
+                                    <tr><td>Deep 3</td><td>Deep 4</td></tr>
+                                </table>
+                            </td>
+                            <td>Inner cell A2</td>
+                        </tr>
+                    </table>
+                </td>
+                <td>
+                    Outer cell B
+                    <table class="inner-table">
+                        <tr>
+                            <td>Inner cell B1</td>
+                            <td>Inner cell B2</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <div class="label">Deeply nested lists (4 levels)</div>
+        <ul class="deep-list">
+            <li>Level 1 - Item A
+                <ul>
+                    <li>Level 2 - Item A.1
+                        <ul>
+                            <li>Level 3 - Item A.1.a
+                                <ul>
+                                    <li>Level 4 - Item A.1.a.i</li>
+                                    <li>Level 4 - Item A.1.a.ii</li>
+                                    <li>Level 4 - Item A.1.a.iii</li>
+                                </ul>
+                            </li>
+                            <li>Level 3 - Item A.1.b</li>
+                        </ul>
+                    </li>
+                    <li>Level 2 - Item A.2</li>
+                </ul>
+            </li>
+            <li>Level 1 - Item B
+                <ul>
+                    <li>Level 2 - Item B.1</li>
+                    <li>Level 2 - Item B.2</li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <div class="label">Nested flex containers (3 levels)</div>
+        <div class="flex-outer">
+            <div class="flex-middle">
+                <div class="flex-inner">
+                    <div class="flex-leaf">A1</div>
+                    <div class="flex-leaf">A2</div>
+                </div>
+                <div class="flex-inner">
+                    <div class="flex-leaf">B1</div>
+                    <div class="flex-leaf">B2</div>
+                    <div class="flex-leaf">B3</div>
+                </div>
+            </div>
+            <div class="flex-middle">
+                <div class="flex-inner">
+                    <div class="flex-leaf">C1</div>
+                </div>
+                <div class="flex-inner">
+                    <div class="flex-leaf">D1</div>
+                    <div class="flex-leaf">D2</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

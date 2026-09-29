@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Pseudo-classes</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 20px 0; }
+
+        /* :first-child, :last-child */
+        .list-children li:first-child {
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .list-children li:last-child {
+            font-style: italic;
+            color: #3498db;
+        }
+
+        /* :nth-child */
+        .nth-child-list li:nth-child(odd) {
+            background: #ecf0f1;
+        }
+        .nth-child-list li:nth-child(3n) {
+            border-left: 4px solid #2ecc71;
+            padding-left: 8px;
+        }
+
+        /* :first-of-type, :last-of-type */
+        .mixed-container p:first-of-type {
+            font-weight: bold;
+            color: #9b59b6;
+        }
+        .mixed-container p:last-of-type {
+            border-bottom: 2px solid #9b59b6;
+            padding-bottom: 4px;
+        }
+
+        /* :only-child */
+        .only-child-demo div:only-child {
+            background: #f39c12;
+            color: white;
+            padding: 8px;
+        }
+
+        /* :nth-of-type */
+        .nth-of-type div:nth-of-type(2n) {
+            background: #3498db;
+            color: white;
+            padding: 4px 8px;
+            margin: 2px 0;
+        }
+
+        /* :not() */
+        .not-demo li:not(.highlighted) {
+            color: #999;
+        }
+        .not-demo li.highlighted {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        /* :empty */
+        .empty-demo div:empty {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            background: #e74c3c;
+            margin: 2px;
+        }
+        .empty-demo div:not(:empty) {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            background: #2ecc71;
+            margin: 2px;
+        }
+
+        ul { list-style: none; padding: 0; }
+        li { padding: 4px 8px; }
+    </style>
+</head>
+<body>
+    <h2>CSS Pseudo-classes</h2>
+
+    <div class="section">
+        <h3>:first-child / :last-child</h3>
+        <ul class="list-children">
+            <li>First item (bold, red)</li>
+            <li>Middle item</li>
+            <li>Middle item</li>
+            <li>Last item (italic, blue)</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h3>:nth-child(odd) / :nth-child(3n)</h3>
+        <ul class="nth-child-list">
+            <li>Item 1 (odd bg)</li>
+            <li>Item 2</li>
+            <li>Item 3 (3n border)</li>
+            <li>Item 4 (odd bg)</li>
+            <li>Item 5</li>
+            <li>Item 6 (3n border)</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h3>:first-of-type / :last-of-type</h3>
+        <div class="mixed-container">
+            <span>Span before</span>
+            <p>First paragraph (bold, purple)</p>
+            <span>Span between</span>
+            <p>Second paragraph</p>
+            <p>Last paragraph (border-bottom)</p>
+            <span>Span after</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>:only-child</h3>
+        <div class="only-child-demo">
+            <div>I am the only child (orange)</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>:nth-of-type(2n)</h3>
+        <div class="nth-of-type">
+            <div>Row 1</div>
+            <div>Row 2 (blue)</div>
+            <div>Row 3</div>
+            <div>Row 4 (blue)</div>
+            <div>Row 5</div>
+            <div>Row 6 (blue)</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>:not()</h3>
+        <ul class="not-demo">
+            <li>Normal item</li>
+            <li class="highlighted">Highlighted!</li>
+            <li>Normal item</li>
+            <li class="highlighted">Highlighted!</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h3>:empty</h3>
+        <div class="empty-demo">
+            <div></div>
+            <div>X</div>
+            <div></div>
+            <div>X</div>
+            <div></div>
+        </div>
+        <p style="font-size:12px;color:#666;">Red = empty, Green = has content</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Gradients</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .gradient-box {
+            height: 80px;
+            margin: 15px 0;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+
+        /* Linear gradients */
+        .linear-to-right {
+            background: linear-gradient(to right, #3498db, #2ecc71);
+        }
+        .linear-to-bottom {
+            background: linear-gradient(to bottom, #e74c3c, #f39c12);
+        }
+        .linear-angle {
+            background: linear-gradient(135deg, #9b59b6, #3498db);
+        }
+        .linear-multi {
+            background: linear-gradient(to right, #e74c3c, #f39c12, #2ecc71, #3498db);
+        }
+        .linear-stops {
+            background: linear-gradient(to right,
+                #e74c3c 0%, #e74c3c 25%,
+                #f39c12 25%, #f39c12 50%,
+                #2ecc71 50%, #2ecc71 75%,
+                #3498db 75%, #3498db 100%);
+        }
+
+        /* Radial gradients */
+        .radial-basic {
+            background: radial-gradient(circle, #3498db, #2c3e50);
+        }
+        .radial-ellipse {
+            background: radial-gradient(ellipse at center, #e74c3c, #2c3e50);
+        }
+        .radial-position {
+            background: radial-gradient(circle at top left, #f39c12, #2c3e50);
+        }
+
+        /* Repeating gradients */
+        .repeating-linear {
+            background: repeating-linear-gradient(
+                45deg,
+                #3498db,
+                #3498db 10px,
+                #2ecc71 10px,
+                #2ecc71 20px
+            );
+        }
+        .repeating-radial {
+            background: repeating-radial-gradient(
+                circle,
+                #e74c3c,
+                #e74c3c 10px,
+                #f39c12 10px,
+                #f39c12 20px
+            );
+        }
+
+        /* With transparency */
+        .gradient-alpha {
+            background: linear-gradient(to right,
+                rgba(52, 152, 219, 0.8),
+                rgba(46, 204, 113, 0.2));
+        }
+    </style>
+</head>
+<body>
+    <h2>CSS Gradients</h2>
+
+    <div class="label">linear-gradient(to right, ...)</div>
+    <div class="gradient-box linear-to-right">Linear: to right</div>
+
+    <div class="label">linear-gradient(to bottom, ...)</div>
+    <div class="gradient-box linear-to-bottom">Linear: to bottom</div>
+
+    <div class="label">linear-gradient(135deg, ...)</div>
+    <div class="gradient-box linear-angle">Linear: 135deg</div>
+
+    <div class="label">linear-gradient multi-stop</div>
+    <div class="gradient-box linear-multi">Linear: 4 colors</div>
+
+    <div class="label">linear-gradient hard stops (stripes)</div>
+    <div class="gradient-box linear-stops">Hard color stops</div>
+
+    <div class="label">radial-gradient(circle, ...)</div>
+    <div class="gradient-box radial-basic">Radial: circle</div>
+
+    <div class="label">radial-gradient(ellipse, ...)</div>
+    <div class="gradient-box radial-ellipse">Radial: ellipse</div>
+
+    <div class="label">radial-gradient at position</div>
+    <div class="gradient-box radial-position">Radial: at top left</div>
+
+    <div class="label">repeating-linear-gradient</div>
+    <div class="gradient-box repeating-linear">Repeating linear</div>
+
+    <div class="label">repeating-radial-gradient</div>
+    <div class="gradient-box repeating-radial">Repeating radial</div>
+
+    <div class="label">gradient with alpha</div>
+    <div class="gradient-box gradient-alpha">Alpha gradient</div>
+</body>
+</html>

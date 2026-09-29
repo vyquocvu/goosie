@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Positioning - Complete</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        /* relative positioning */
+        .relative-demo {
+            position: relative;
+            left: 30px;
+            top: 10px;
+            background: #3498db;
+            color: white;
+            padding: 15px;
+            width: 200px;
+        }
+        .relative-placeholder {
+            background: #ecf0f1;
+            padding: 15px;
+            width: 200px;
+            border: 1px dashed #bdc3c7;
+        }
+
+        /* absolute within relative */
+        .absolute-parent {
+            position: relative;
+            width: 400px;
+            height: 200px;
+            background: #ecf0f1;
+            border: 2px solid #bdc3c7;
+        }
+        .absolute-child-tl {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: #e74c3c;
+            color: white;
+            padding: 8px;
+        }
+        .absolute-child-tr {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #2ecc71;
+            color: white;
+            padding: 8px;
+        }
+        .absolute-child-bl {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: #9b59b6;
+            color: white;
+            padding: 8px;
+        }
+        .absolute-child-br {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: #f39c12;
+            color: white;
+            padding: 8px;
+        }
+        .absolute-child-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1abc9c;
+            color: white;
+            padding: 8px;
+        }
+
+        /* z-index stacking */
+        .stack-demo {
+            position: relative;
+            width: 300px;
+            height: 200px;
+        }
+        .stack-1 {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 150px;
+            height: 100px;
+            background: #e74c3c;
+            z-index: 1;
+            opacity: 0.8;
+        }
+        .stack-2 {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 150px;
+            height: 100px;
+            background: #3498db;
+            z-index: 2;
+            opacity: 0.8;
+        }
+        .stack-3 {
+            position: absolute;
+            top: 80px;
+            left: 80px;
+            width: 150px;
+            height: 100px;
+            background: #2ecc71;
+            z-index: 3;
+            opacity: 0.8;
+        }
+
+        /* Nested absolute */
+        .nested-outer {
+            position: relative;
+            width: 400px;
+            height: 250px;
+            background: #ecf0f1;
+            border: 2px solid #bdc3c7;
+        }
+        .nested-inner {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            width: 200px;
+            height: 150px;
+            background: rgba(52, 152, 219, 0.3);
+            border: 2px solid #3498db;
+        }
+        .nested-abs-child {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #e74c3c;
+            color: white;
+            padding: 8px;
+        }
+
+        /* Sticky (may not work in goosie but tests the parsing) */
+        .sticky-demo {
+            height: 200px;
+            overflow: auto;
+            border: 2px solid #bdc3c7;
+        }
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            background: #2c3e50;
+            color: white;
+            padding: 10px;
+            z-index: 10;
+        }
+
+        /* Fixed (within viewport context) */
+        .fixed-demo {
+            position: relative;
+            width: 400px;
+            height: 150px;
+            background: #ecf0f1;
+            border: 2px solid #bdc3c7;
+            overflow: hidden;
+        }
+        .fixed-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #e74c3c;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>CSS Positioning - Complete</h2>
+
+    <div class="section">
+        <div class="label">position: relative (shifted 30px left, 10px top)</div>
+        <div class="relative-placeholder">Original position (placeholder)</div>
+        <div class="relative-demo">Relative (shifted)</div>
+    </div>
+
+    <div class="section">
+        <div class="label">position: absolute within position: relative parent</div>
+        <div class="absolute-parent">
+            <div class="absolute-child-tl">top-left</div>
+            <div class="absolute-child-tr">top-right</div>
+            <div class="absolute-child-bl">bottom-left</div>
+            <div class="absolute-child-br">bottom-right</div>
+            <div class="absolute-child-center">centered</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">z-index stacking (1, 2, 3)</div>
+        <div class="stack-demo">
+            <div class="stack-1">z: 1</div>
+            <div class="stack-2">z: 2</div>
+            <div class="stack-3">z: 3</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Nested positioning (absolute inside absolute)</div>
+        <div class="nested-outer">
+            <div class="nested-inner">
+                <div class="nested-abs-child">Nested abs</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">position: sticky (scroll container)</div>
+        <div class="sticky-demo">
+            <div class="sticky-header">Sticky Header</div>
+            <p>Content line 1</p>
+            <p>Content line 2</p>
+            <p>Content line 3</p>
+            <p>Content line 4</p>
+            <p>Content line 5</p>
+            <p>Content line 6</p>
+            <p>Content line 7</p>
+            <p>Content line 8</p>
+            <p>Content line 9</p>
+            <p>Content line 10</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Badge overlay (absolute in container)</div>
+        <div class="fixed-demo">
+            <p style="padding: 10px;">Container content</p>
+            <div class="fixed-badge">NEW</div>
+        </div>
+    </div>
+</body>
+</html>

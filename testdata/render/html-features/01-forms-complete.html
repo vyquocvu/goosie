@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forms - Complete</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        form { max-width: 600px; }
+        .form-row {
+            margin: 12px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        label {
+            min-width: 140px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        input, select, textarea, button {
+            font-family: sans-serif;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="password"],
+        input[type="tel"],
+        input[type="url"],
+        input[type="number"],
+        input[type="search"] {
+            padding: 6px 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            width: 250px;
+        }
+        select {
+            padding: 6px 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            width: 260px;
+        }
+        textarea {
+            padding: 6px 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            width: 250px;
+            height: 80px;
+            resize: vertical;
+        }
+        fieldset {
+            border: 1px solid #bdc3c7;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        legend {
+            font-weight: bold;
+            padding: 0 8px;
+            color: #2c3e50;
+        }
+        .checkbox-group label,
+        .radio-group label {
+            min-width: auto;
+            font-weight: normal;
+            margin-right: 15px;
+        }
+        .btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-secondary { background: #95a5a6; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .required::after { content: " *"; color: #e74c3c; }
+        .hint { font-size: 12px; color: #7f8c8d; }
+        datalist { display: none; }
+    </style>
+</head>
+<body>
+    <h2>Complete Forms</h2>
+
+    <form>
+        <fieldset>
+            <legend>Personal Information</legend>
+            <div class="form-row">
+                <label for="fname" class="required">First Name:</label>
+                <input type="text" id="fname" name="fname" placeholder="John" required>
+            </div>
+            <div class="form-row">
+                <label for="lname" class="required">Last Name:</label>
+                <input type="text" id="lname" name="lname" placeholder="Doe" required>
+            </div>
+            <div class="form-row">
+                <label for="email" class="required">Email:</label>
+                <input type="email" id="email" name="email" placeholder="john@example.com" required>
+            </div>
+            <div class="form-row">
+                <label for="phone">Phone:</label>
+                <input type="tel" id="phone" name="phone" placeholder="+1 (555) 000-0000">
+            </div>
+            <div class="form-row">
+                <label for="dob">Date of Birth:</label>
+                <input type="date" id="dob" name="dob">
+            </div>
+            <div class="form-row">
+                <label for="website">Website:</label>
+                <input type="url" id="website" name="website" placeholder="https://example.com">
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Account</legend>
+            <div class="form-row">
+                <label for="password" class="required">Password:</label>
+                <input type="password" id="password" name="password" minlength="8" required>
+            </div>
+            <div class="form-row">
+                <label for="role">Role:</label>
+                <select id="role" name="role">
+                    <option value="">-- Select --</option>
+                    <option value="user">User</option>
+                    <option value="editor">Editor</option>
+                    <option value="admin">Administrator</option>
+                    <optgroup label="Special">
+                        <option value="moderator">Moderator</option>
+                        <option value="superadmin">Super Admin</option>
+                    </optgroup>
+                </select>
+            </div>
+            <div class="form-row">
+                <label for="browser">Browser:</label>
+                <input type="text" id="browser" name="browser" list="browsers">
+                <datalist id="browsers">
+                    <option value="Chrome">
+                    <option value="Firefox">
+                    <option value="Safari">
+                    <option value="Edge">
+                </datalist>
+                <span class="hint">(autocomplete)</span>
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Preferences</legend>
+            <div class="form-row radio-group">
+                <label>Theme:</label>
+                <label><input type="radio" name="theme" value="light" checked> Light</label>
+                <label><input type="radio" name="theme" value="dark"> Dark</label>
+                <label><input type="radio" name="theme" value="auto"> Auto</label>
+            </div>
+            <div class="form-row checkbox-group">
+                <label>Notifications:</label>
+                <label><input type="checkbox" name="notif_email" checked> Email</label>
+                <label><input type="checkbox" name="notif_sms"> SMS</label>
+                <label><input type="checkbox" name="notif_push" checked> Push</label>
+            </div>
+            <div class="form-row">
+                <label for="volume">Volume:</label>
+                <input type="range" id="volume" name="volume" min="0" max="100" value="75">
+                <span class="hint">75%</span>
+            </div>
+            <div class="form-row">
+                <label for="color">Accent Color:</label>
+                <input type="color" id="color" name="color" value="#3498db">
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Additional</legend>
+            <div class="form-row">
+                <label for="bio">Bio:</label>
+                <textarea id="bio" name="bio" placeholder="Tell us about yourself..." maxlength="500"></textarea>
+            </div>
+            <div class="form-row">
+                <label for="avatar">Avatar:</label>
+                <input type="file" id="avatar" name="avatar" accept="image/*">
+            </div>
+            <div class="form-row">
+                <label for="rating">Rating:</label>
+                <input type="number" id="rating" name="rating" min="1" max="5" step="1" value="3">
+            </div>
+            <div class="form-row">
+                <label for="quantity">Quantity:</label>
+                <input type="number" id="quantity" name="quantity" min="0" max="100" step="5" value="10">
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Progress & Meter</legend>
+            <div class="form-row">
+                <label>Upload Progress:</label>
+                <progress value="65" max="100" style="width:200px;">65%</progress>
+            </div>
+            <div class="form-row">
+                <label>Disk Usage:</label>
+                <meter value="0.7" min="0" max="1" low="0.3" high="0.7" optimum="0.5" style="width:200px;">70%</meter>
+            </div>
+        </fieldset>
+
+        <div class="form-row" style="margin-top: 20px;">
+            <button type="submit" class="btn btn-primary">Submit</button>
+            <button type="reset" class="btn btn-secondary">Reset</button>
+            <button type="button" class="btn btn-danger" disabled>Disabled</button>
+        </div>
+    </form>
+</body>
+</html>

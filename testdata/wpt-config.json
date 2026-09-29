@@ -1,0 +1,38 @@
+{
+  "commit": "11ae8c1179be2dd38070846b01c2e9338ef81770",
+  "directories": [
+    "css/css-color",
+    "css/css-fonts",
+    "css/css-backgrounds",
+    "css/css-flexbox",
+    "css/css-position",
+    "css/selectors",
+    "css/css-table",
+    "css/css-lists",
+    "html/semantics/text-level-semantics",
+    "html/dom/elements/global-attributes"
+  ],
+  "exclude": [
+    "*animation*",
+    "*transition*",
+    "*canvas*",
+    "*webgl*",
+    "*svg*",
+    "*media*",
+    "*speech*",
+    "*webdriver*",
+    "*service-worker*",
+    "*webusb*",
+    "*web-bluetooth*",
+    "*payment*"
+  ],
+  "pass_threshold": 95.0,
+  "viewport_width": 800,
+  "viewport_height": 600,
+  "dpr": 1.0,
+  "timeout": 30,
+  "goosie_binary": "./goosie",
+  "output_dir": "/tmp/wpt-results",
+  "reference_dir": "/tmp/wpt-references",
+  "generate_references": false
+}

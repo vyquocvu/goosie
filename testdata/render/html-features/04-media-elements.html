@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Media Elements</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        .img-placeholder {
+            width: 300px;
+            height: 200px;
+            background: linear-gradient(135deg, #3498db, #2ecc71);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            border-radius: 8px;
+        }
+
+        /* Image sizing */
+        .img-fixed {
+            width: 200px;
+            height: 150px;
+            object-fit: cover;
+        }
+        .img-contain {
+            width: 200px;
+            height: 150px;
+            object-fit: contain;
+            border: 2px dashed #e74c3c;
+        }
+        .img-fill {
+            width: 200px;
+            height: 150px;
+            object-fit: fill;
+            border: 2px dashed #3498db;
+        }
+
+        /* Figure with image */
+        figure {
+            margin: 15px 0;
+        }
+        figure .img-placeholder {
+            border-radius: 8px 8px 0 0;
+        }
+        figcaption {
+            background: #ecf0f1;
+            padding: 10px;
+            font-size: 13px;
+            color: #7f8c8d;
+            border-radius: 0 0 8px 8px;
+        }
+
+        /* Picture element (source set) */
+        .media-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        /* Video placeholder */
+        .video-placeholder {
+            width: 400px;
+            height: 225px;
+            background: #2c3e50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            border-radius: 8px;
+            position: relative;
+        }
+        .play-btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .play-btn::after {
+            content: "\25B6";
+            font-size: 24px;
+            margin-left: 4px;
+        }
+
+        /* Audio placeholder */
+        .audio-container {
+            background: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            width: 400px;
+        }
+        .audio-track {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 8px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+        }
+        .audio-track .icon {
+            width: 30px;
+            height: 30px;
+            background: #3498db;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+        .audio-track .info {
+            flex: 1;
+        }
+        .audio-track .title {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .audio-track .duration {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+
+        /* Responsive image */
+        .responsive-img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* Image with border-radius */
+        .rounded-img {
+            border-radius: 50%;
+            width: 150px;
+            height: 150px;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+
+        /* Iframe placeholder */
+        .iframe-placeholder {
+            width: 400px;
+            height: 225px;
+            background: #ecf0f1;
+            border: 2px solid #bdc3c7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #7f8c8d;
+        }
+
+        /* Canvas placeholder */
+        .canvas-placeholder {
+            width: 300px;
+            height: 200px;
+            background: #2c3e50;
+            border: 2px solid #34495e;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ecf0f1;
+        }
+    </style>
+</head>
+<body>
+    <h2>Media Elements</h2>
+
+    <div class="section">
+        <div class="label">Image placeholder (gradient)</div>
+        <div class="img-placeholder">300 x 200</div>
+    </div>
+
+    <div class="section">
+        <div class="label">Figure with figcaption</div>
+        <figure>
+            <div class="img-placeholder">Landscape Image</div>
+            <figcaption>Figure 1: A beautiful landscape scene demonstrating the figure element with caption.</figcaption>
+        </figure>
+    </div>
+
+    <div class="section">
+        <div class="label">Video placeholder with play button</div>
+        <div class="video-placeholder">
+            <div class="play-btn"></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Audio player mockup</div>
+        <div class="audio-container">
+            <div class="audio-track">
+                <div class="icon">&#9835;</div>
+                <div class="info">
+                    <div class="title">Track 1: Morning Light</div>
+                    <div class="duration">3:45</div>
+                </div>
+            </div>
+            <div class="audio-track">
+                <div class="icon">&#9835;</div>
+                <div class="info">
+                    <div class="title">Track 2: Ocean Waves</div>
+                    <div class="duration">5:12</div>
+                </div>
+            </div>
+            <div class="audio-track">
+                <div class="icon">&#9835;</div>
+                <div class="info">
+                    <div class="title">Track 3: City Nights</div>
+                    <div class="duration">4:08</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Iframe placeholder (embedded content)</div>
+        <div class="iframe-placeholder">
+            &lt;iframe&gt; Embedded Content Area
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Canvas placeholder</div>
+        <div class="canvas-placeholder">
+            &lt;canvas&gt; Drawing Area
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">SVG inline</div>
+        <svg width="200" height="100" viewBox="0 0 200 100">
+            <rect x="5" y="5" width="190" height="90" rx="10" fill="#3498db"/>
+            <text x="100" y="55" text-anchor="middle" fill="white" font-size="16" font-family="sans-serif">SVG Element</text>
+        </svg>
+    </div>
+
+    <div class="section">
+        <div class="label">SVG with multiple shapes</div>
+        <svg width="300" height="150" viewBox="0 0 300 150">
+            <circle cx="50" cy="75" r="40" fill="#e74c3c" opacity="0.8"/>
+            <rect x="100" y="35" width="80" height="80" fill="#2ecc71" opacity="0.8"/>
+            <polygon points="250,20 290,130 210,130" fill="#f39c12" opacity="0.8"/>
+        </svg>
+    </div>
+</body>
+</html>

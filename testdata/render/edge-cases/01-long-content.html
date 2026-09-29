@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Edge Case - Long Content</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        /* Very long text */
+        .long-text {
+            width: 500px;
+            background: #ecf0f1;
+            padding: 15px;
+            line-height: 1.6;
+        }
+
+        /* Wide table */
+        .wide-table {
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .wide-table th,
+        .wide-table td {
+            border: 1px solid #bdc3c7;
+            padding: 6px 12px;
+            white-space: nowrap;
+        }
+        .wide-table th {
+            background: #2c3e50;
+            color: white;
+        }
+        .wide-table tr:nth-child(even) {
+            background: #ecf0f1;
+        }
+
+        /* Long unbroken string */
+        .long-string {
+            width: 300px;
+            border: 1px solid #e74c3c;
+            padding: 10px;
+            word-break: break-all;
+        }
+
+        /* Many children */
+        .many-children {
+            width: 500px;
+            max-height: 200px;
+            overflow: auto;
+            border: 1px solid #bdc3c7;
+        }
+        .child-item {
+            padding: 6px 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .child-item:nth-child(odd) { background: #f8f9fa; }
+
+        /* Long inline content */
+        .long-inline {
+            width: 400px;
+            background: #ecf0f1;
+            padding: 10px;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Edge Case - Long Content</h2>
+
+    <div class="section">
+        <div class="label">Very long paragraph (10+ sentences)</div>
+        <div class="long-text">
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis sollicitudin mauris. Integer in mauris eu nibh euismod gravida. Duis ac tellus et risus vulputate vehicula. Donec lobortis risus a elit. Etiam tempor. Ut ullamcorper, ligula ut dictum pharetra, nisi nunc fringilla magna, in commodo elit erat nec turpis. Ut pharetra augue nec augue. Nam elit magna, hendrerit sit amet, tincidunt ac, viverra sed, nulla. Donec porta diam eu massa.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Wide table (10 columns, many rows)</div>
+        <div style="overflow-x: auto; width: 760px;">
+            <table class="wide-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Email</th>
+                        <th>Department</th>
+                        <th>Role</th>
+                        <th>Start Date</th>
+                        <th>Salary</th>
+                        <th>Status</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>001</td><td>Alice</td><td>Johnson</td><td>alice@example.com</td><td>Engineering</td><td>Senior Dev</td><td>2020-01-15</td><td>$120,000</td><td>Active</td><td>Team lead</td></tr>
+                    <tr><td>002</td><td>Bob</td><td>Smith</td><td>bob@example.com</td><td>Design</td><td>UI Designer</td><td>2019-06-01</td><td>$95,000</td><td>Active</td><td>-</td></tr>
+                    <tr><td>003</td><td>Carol</td><td>Williams</td><td>carol@example.com</td><td>Product</td><td>PM</td><td>2021-03-20</td><td>$110,000</td><td>Active</td><td>Onboarding</td></tr>
+                    <tr><td>004</td><td>Dave</td><td>Brown</td><td>dave@example.com</td><td>Engineering</td><td>Junior Dev</td><td>2023-09-01</td><td>$75,000</td><td>Active</td><td>-</td></tr>
+                    <tr><td>005</td><td>Eve</td><td>Davis</td><td>eve@example.com</td><td>QA</td><td>QA Lead</td><td>2018-11-15</td><td>$100,000</td><td>Active</td><td>Automation</td></tr>
+                    <tr><td>006</td><td>Frank</td><td>Miller</td><td>frank@example.com</td><td>Engineering</td><td>DevOps</td><td>2022-02-01</td><td>$115,000</td><td>Active</td><td>CI/CD</td></tr>
+                    <tr><td>007</td><td>Grace</td><td>Wilson</td><td>grace@example.com</td><td>Marketing</td><td>Content</td><td>2021-07-10</td><td>$85,000</td><td>Leave</td><td>Maternity</td></tr>
+                    <tr><td>008</td><td>Henry</td><td>Moore</td><td>henry@example.com</td><td>Engineering</td><td>Architect</td><td>2017-04-01</td><td>$150,000</td><td>Active</td><td>System design</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Long unbroken string (word-break: break-all)</div>
+        <div class="long-string">
+            https://example.com/very/long/path/that/keeps/going/and/going/without/any/breaks/whatsoever/and/might/cause/layout/issues/if/not/handled/properly/by/the/browser/engine/rendering/pipeline
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Many children in scrollable container (50 items)</div>
+        <div class="many-children">
+            <div class="child-item">Item 1: Lorem ipsum dolor sit amet</div>
+            <div class="child-item">Item 2: Consectetur adipiscing elit</div>
+            <div class="child-item">Item 3: Sed do eiusmod tempor</div>
+            <div class="child-item">Item 4: Incididunt ut labore et dolore</div>
+            <div class="child-item">Item 5: Magna aliqua ut enim</div>
+            <div class="child-item">Item 6: Ad minim veniam quis</div>
+            <div class="child-item">Item 7: Nostrud exercitation ullamco</div>
+            <div class="child-item">Item 8: Laboris nisi ut aliquip</div>
+            <div class="child-item">Item 9: Ex ea commodo consequat</div>
+            <div class="child-item">Item 10: Duis aute irure dolor</div>
+            <div class="child-item">Item 11: In reprehenderit in voluptate</div>
+            <div class="child-item">Item 12: Velit esse cillum dolore</div>
+            <div class="child-item">Item 13: Eu fugiat nulla pariatur</div>
+            <div class="child-item">Item 14: Excepteur sint occaecat</div>
+            <div class="child-item">Item 15: Cupidatat non proident</div>
+            <div class="child-item">Item 16: Sunt in culpa qui officia</div>
+            <div class="child-item">Item 17: Deserunt mollit anim</div>
+            <div class="child-item">Item 18: Id est laborum curabitur</div>
+            <div class="child-item">Item 19: Pretium tincidunt lacus</div>
+            <div class="child-item">Item 20: Nulla gravida orci a odio</div>
+            <div class="child-item">Item 21: Nullam varius turpis</div>
+            <div class="child-item">Item 22: Et commodo pharetra est</div>
+            <div class="child-item">Item 23: Eros bibendum elit</div>
+            <div class="child-item">Item 24: Nec luctus magna felis</div>
+            <div class="child-item">Item 25: Sollicitudin mauris integer</div>
+            <div class="child-item">Item 26: In mauris eu nibh</div>
+            <div class="child-item">Item 27: Euismod gravida duis</div>
+            <div class="child-item">Item 28: Ac tellus et risus</div>
+            <div class="child-item">Item 29: Vulputate vehicula donec</div>
+            <div class="child-item">Item 30: Lobortis risus a elit</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Long list of inline elements</div>
+        <div class="long-inline">
+            <span style="background:#e74c3c;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 1</span>
+            <span style="background:#3498db;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 2</span>
+            <span style="background:#2ecc71;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 3</span>
+            <span style="background:#f39c12;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 4</span>
+            <span style="background:#9b59b6;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 5</span>
+            <span style="background:#1abc9c;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 6</span>
+            <span style="background:#e67e22;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 7</span>
+            <span style="background:#34495e;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 8</span>
+            <span style="background:#d35400;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 9</span>
+            <span style="background:#c0392b;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 10</span>
+            <span style="background:#16a085;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 11</span>
+            <span style="background:#2980b9;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 12</span>
+            <span style="background:#8e44ad;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 13</span>
+            <span style="background:#27ae60;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 14</span>
+            <span style="background:#f1c40f;color:white;padding:2px 6px;margin:2px;display:inline-block;">Tag 15</span>
+        </div>
+    </div>
+</body>
+</html>

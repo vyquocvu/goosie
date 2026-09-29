@@ -3,7 +3,7 @@ BINARY_NAME=goosie
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*" -not -path "./_v1_old/*")
 
-.PHONY: all build build-small clean test test-race bench gate
+.PHONY: all build build-small clean test test-race bench gate wpt wpt-pilot wpt-unit
 
 all: build
 
@@ -39,3 +39,15 @@ bench:
 gate:
 	@echo "Running gate suite..."
 	go run ./cmd/goosie -gate -scene checkerboard -frames 600 -out /tmp/gate.json
+
+wpt-unit:
+	@echo "Running WPT unit tests..."
+	go test -count=1 -run 'TestWPTCurator|TestWPTServer|TestWPTImageCompare|TestWPTConfigDefaults|TestWPTConfigLoad|TestShouldSkip|TestWPTPilotDiscovery' -v ./test/wpt/
+
+wpt-pilot: build
+	@echo "Running WPT pilot (local reftests)..."
+	go test -count=1 -timeout 10m -run TestWPTPilot -v ./test/wpt/
+
+wpt: build
+	@echo "Running WPT suite..."
+	bash scripts/run-wpt.sh --download

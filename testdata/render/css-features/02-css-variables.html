@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Custom Properties (Variables)</title>
+    <style>
+        :root {
+            --primary: #3498db;
+            --secondary: #2ecc71;
+            --accent: #e74c3c;
+            --text-color: #333;
+            --bg-color: #ecf0f1;
+            --spacing: 16px;
+            --border-radius: 8px;
+            --font-size-base: 14px;
+            --font-size-lg: 18px;
+        }
+
+        body {
+            margin: 20px;
+            font-family: sans-serif;
+            color: var(--text-color);
+            background: var(--bg-color);
+            font-size: var(--font-size-base);
+        }
+
+        .card {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: var(--spacing);
+            margin: var(--spacing) 0;
+            border: 2px solid var(--primary);
+        }
+
+        .card h3 {
+            color: var(--primary);
+            margin: 0 0 8px 0;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--border-radius);
+            font-size: var(--font-size-base);
+        }
+
+        .btn-secondary {
+            background: var(--secondary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--border-radius);
+        }
+
+        .btn-accent {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: var(--border-radius);
+        }
+
+        /* Override via local scope */
+        .dark-section {
+            --primary: #8e44ad;
+            --bg-color: #2c3e50;
+            --text-color: #ecf0f1;
+            background: var(--bg-color);
+            color: var(--text-color);
+            padding: var(--spacing);
+            border-radius: var(--border-radius);
+            margin: var(--spacing) 0;
+        }
+
+        .dark-section h3 { color: var(--primary); }
+
+        /* Fallback value */
+        .fallback {
+            color: var(--undefined-var, #e67e22);
+            font-size: var(--also-undefined, 16px);
+        }
+
+        /* calc with variables */
+        .computed {
+            --base: 100px;
+            width: calc(var(--base) * 2 + 50px);
+            background: var(--secondary);
+            color: white;
+            padding: var(--spacing);
+        }
+    </style>
+</head>
+<body>
+    <h2>CSS Custom Properties</h2>
+
+    <div class="card">
+        <h3>Primary Card</h3>
+        <p>Uses --primary for border and heading color.</p>
+        <button class="btn-primary">Primary</button>
+        <button class="btn-secondary">Secondary</button>
+        <button class="btn-accent">Accent</button>
+    </div>
+
+    <div class="dark-section">
+        <h3>Scoped Override</h3>
+        <p>This section overrides --primary, --bg-color, and --text-color locally.</p>
+    </div>
+
+    <div class="fallback">
+        This text uses fallback values for undefined variables.
+    </div>
+
+    <div class="computed">
+        calc(var(--base) * 2 + 50px) = 250px wide
+    </div>
+</body>
+</html>
