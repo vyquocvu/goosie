@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/dom"
 )
 
 // DefaultTimeout bounds one script's execution when Options.Timeout is zero.
@@ -61,6 +62,11 @@ type Options struct {
 	URL string
 	// Title seeds document.title.
 	Title string
+	// DOM is the parsed document tree. When non-nil, document.querySelector,
+	// document.querySelectorAll, document.createElement and element methods
+	// are available to scripts. When nil, those APIs do not exist on the
+	// document object.
+	DOM *dom.Document
 }
 
 // Kind is the JS type of a Value read back out of a runtime.
@@ -96,13 +102,30 @@ func (e *Error) Error() string {
 	return e.SourceURL + ":" + strconv.Itoa(e.Line) + ": " + e.Message
 }
 
+// timer represents a pending setTimeout or setInterval callback.
+type timer struct {
+	id       int
+	callback goja.Value
+	interval time.Duration
+	nextFire time.Time
+	repeat   bool // true for setInterval, false for setTimeout
+}
+
 // Runtime executes scripts for one document.
 type Runtime struct {
-	vm     *goja.Runtime
-	opts   Options
-	title  string
-	closed bool
-	mu     sync.Mutex
+	vm          *goja.Runtime
+	opts        Options
+	title       string
+	closed      bool
+	mu          sync.Mutex
+	timers      map[int]*timer
+	nextTimerID int
+
+	// DOM bridge state. nil when Options.DOM is nil.
+	domDoc       *dom.Document
+	nodeRegistry map[int]*dom.Node
+	nextNID      int
+	nodeProto    *goja.Object
 }
 
 // New builds a runtime for one document.
@@ -121,14 +144,17 @@ func New(opts Options) (*Runtime, error) {
 	}
 
 	r := &Runtime{
-		opts:  opts,
-		title: opts.Title,
-		vm:    goja.New(),
+		opts:   opts,
+		title:  opts.Title,
+		vm:     goja.New(),
+		timers: make(map[int]*timer),
 	}
 
 	r.setupConsole(consoleWriter)
 	r.setupDocument()
 	r.setupWindow()
+	r.setupDOM()
+	r.setupTimers()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
@@ -188,20 +214,417 @@ func (r *Runtime) setupWindow() {
 }
 
 func (r *Runtime) setupUnsupportedAPIs() {
-	// setTimeout on window
-	_, _ = r.vm.RunString(`
-		window.setTimeout = function() { throw new Error("setTimeout is not implemented"); };
-	`)
-
-	// document.querySelector
-	_, _ = r.vm.RunString(`
-		document.querySelector = function() { throw new Error("querySelector is not implemented"); };
-	`)
-
 	// fetch on window
 	_, _ = r.vm.RunString(`
 		window.fetch = function() { throw new Error("fetch is not implemented"); };
 	`)
+}
+
+// setupDOM installs DOM API bindings on the document object when a DOM tree
+// was provided via Options.DOM. Without a DOM, none of the query or mutation
+// methods exist, so scripts that call them get a clear undefined-function
+// error rather than a silent no-op.
+func (r *Runtime) setupDOM() {
+	if r.opts.DOM == nil {
+		return
+	}
+
+	r.domDoc = r.opts.DOM
+	r.nodeRegistry = make(map[int]*dom.Node)
+	r.nextNID = 1
+
+	// Build a shared prototype for element wrapper objects. Each wrapper
+	// stores a __nid__ (registry key) that the prototype methods use to
+	// look up the real *dom.Node.
+	r.nodeProto = r.vm.NewObject()
+	_ = r.nodeProto.Set("appendChild", func(call goja.FunctionCall) goja.Value {
+		return r.jsAppendChild(call)
+	})
+	_ = r.nodeProto.Set("addEventListener", func(goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	// Set the prototype as a temporary global so RunString can reference it.
+	_ = r.vm.Set("__nodeProto__", r.nodeProto)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__nodeProto__, 'textContent', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getTextContent__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setTextContent__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__nodeProto__", nil)
+
+	doc := r.vm.Get("document").(*goja.Object)
+
+	_ = doc.Set("querySelector", func(call goja.FunctionCall) goja.Value {
+		return r.jsQuerySelector(call)
+	})
+	_ = doc.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
+		return r.jsQuerySelectorAll(call)
+	})
+	_ = doc.Set("createElement", func(call goja.FunctionCall) goja.Value {
+		return r.jsCreateElement(call)
+	})
+
+	// Internal helpers the prototype getter/setter calls back into.
+	_ = doc.Set("__getTextContent__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(node.TextContent())
+	})
+	_ = doc.Set("__setTextContent__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		text := call.Arguments[1].String()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		for node.FirstChild != nil {
+			node.RemoveChild(node.FirstChild)
+		}
+		if text != "" {
+			textNode := node.Doc.NewText(text)
+			node.AppendChild(textNode)
+		}
+		return goja.Undefined()
+	})
+
+	// Dynamic body property: wraps the body element on first access and
+	// caches it. If the body is replaced, the host should re-run setupDOM.
+	if r.domDoc.Body != nil {
+		_ = doc.Set("body", r.wrapNode(r.domDoc.Body))
+	} else {
+		_ = doc.Set("body", goja.Null())
+	}
+}
+
+// wrapNode creates a JS wrapper object for a DOM node. The wrapper inherits
+// from nodeProto (which provides appendChild, textContent, addEventListener)
+// and stores a __nid__ registry key so the prototype methods can find the
+// underlying *dom.Node.
+func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
+	if node == nil {
+		return goja.Null()
+	}
+	nid := r.nextNID
+	r.nextNID++
+	r.nodeRegistry[nid] = node
+
+	obj := r.vm.NewObject()
+	_ = obj.Set("__nid__", nid)
+
+	// Copy prototype properties onto the instance. goja does not support
+	// __proto__ assignment on objects created with NewObject, so we copy
+	// the methods directly.
+	if r.nodeProto != nil {
+		for _, key := range r.nodeProto.Keys() {
+			_ = obj.Set(key, r.nodeProto.Get(key))
+		}
+		// Re-define textContent as an accessor on this instance, since
+		// the copy above only copies the data descriptor, not the
+		// getter/setter.
+		r.defineTextContentAccessor(obj)
+	}
+
+	// Element-specific properties.
+	if node.Element() {
+		_ = obj.Set("tagName", strings.ToUpper(node.Data))
+		_ = obj.Set("nodeName", strings.ToUpper(node.Data))
+		_ = obj.Set("id", node.GetAttribute("id"))
+		_ = obj.Set("className", node.GetAttribute("class"))
+	}
+
+	return obj
+}
+
+// defineTextContentAccessor installs the textContent getter/setter on obj
+// using Object.defineProperty via a RunString helper.
+func (r *Runtime) defineTextContentAccessor(obj *goja.Object) {
+	// We use a temporary global to pass the object to RunString.
+	_ = r.vm.Set("__tcTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__tcTarget__, 'textContent', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getTextContent__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setTextContent__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__tcTarget__", nil)
+}
+
+// getNode extracts the *dom.Node from a JS wrapper object via its __nid__.
+func (r *Runtime) getNode(v goja.Value) *dom.Node {
+	if v == nil || goja.IsNull(v) || goja.IsUndefined(v) {
+		return nil
+	}
+	obj, ok := v.(*goja.Object)
+	if !ok {
+		return nil
+	}
+	nidVal := obj.Get("__nid__")
+	if nidVal == nil || goja.IsUndefined(nidVal) {
+		return nil
+	}
+	nid := int(nidVal.ToInteger())
+	return r.nodeRegistry[nid]
+}
+
+// jsAppendChild implements element.appendChild(child).
+func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
+	parentNode := r.getNode(call.This)
+	if parentNode == nil {
+		return goja.Undefined()
+	}
+	if len(call.Arguments) < 1 {
+		return goja.Undefined()
+	}
+	childNode := r.getNode(call.Arguments[0])
+	if childNode == nil {
+		return goja.Undefined()
+	}
+	parentNode.AppendChild(childNode)
+	// Return the child, matching the DOM spec.
+	return call.Arguments[0]
+}
+
+// jsQuerySelector implements document.querySelector(selector).
+func (r *Runtime) jsQuerySelector(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return goja.Null()
+	}
+	sel := call.Arguments[0].String()
+
+	// Determine the search root: if called on an element wrapper, search
+	// its subtree; otherwise search the whole document.
+	root := &r.domDoc.Node
+	if r.getNode(call.This) != nil {
+		root = r.getNode(call.This)
+	}
+
+	node := r.querySelector(root, sel)
+	if node == nil {
+		return goja.Null()
+	}
+	return r.wrapNode(node)
+}
+
+// jsQuerySelectorAll implements document.querySelectorAll(selector).
+func (r *Runtime) jsQuerySelectorAll(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return newJSArray(r.vm, nil)
+	}
+	sel := call.Arguments[0].String()
+
+	root := &r.domDoc.Node
+	if r.getNode(call.This) != nil {
+		root = r.getNode(call.This)
+	}
+
+	nodes := r.querySelectorAll(root, sel)
+	wrapped := make([]goja.Value, len(nodes))
+	for i, n := range nodes {
+		wrapped[i] = r.wrapNode(n)
+	}
+	return newJSArray(r.vm, wrapped)
+}
+
+// jsCreateElement implements document.createElement(tag).
+func (r *Runtime) jsCreateElement(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return goja.Null()
+	}
+	tag := call.Arguments[0].String()
+	node := r.domDoc.NewElement(tag)
+	return r.wrapNode(node)
+}
+
+// querySelector returns the first descendant of root (depth-first, excluding
+// root itself) that matches sel, or nil.
+func (r *Runtime) querySelector(root *dom.Node, sel string) *dom.Node {
+	for c := root.FirstChild; c != nil; c = c.NextSibling {
+		if r.matchSelector(c, sel) {
+			return c
+		}
+		if found := r.querySelector(c, sel); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// querySelectorAll returns every descendant of root that matches sel.
+func (r *Runtime) querySelectorAll(root *dom.Node, sel string) []*dom.Node {
+	var result []*dom.Node
+	r.collectMatching(root, sel, &result)
+	return result
+}
+
+func (r *Runtime) collectMatching(n *dom.Node, sel string, result *[]*dom.Node) {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if r.matchSelector(c, sel) {
+			*result = append(*result, c)
+		}
+		r.collectMatching(c, sel, result)
+	}
+}
+
+// matchSelector reports whether n matches a simple CSS selector. Supported
+// forms are tag name ("p"), ID ("#main"), and class (".active").
+func (r *Runtime) matchSelector(n *dom.Node, sel string) bool {
+	if !n.Element() {
+		return false
+	}
+	if sel == "" {
+		return false
+	}
+
+	switch {
+	case strings.HasPrefix(sel, "#"):
+		return n.GetAttribute("id") == sel[1:]
+	case strings.HasPrefix(sel, "."):
+		class := sel[1:]
+		for _, c := range n.ClassList() {
+			if c == class {
+				return true
+			}
+		}
+		return false
+	default:
+		return strings.EqualFold(n.Data, sel)
+	}
+}
+
+// newJSArray builds a JS Array from a slice of goja values.
+func newJSArray(vm *goja.Runtime, vals []goja.Value) *goja.Object {
+	arr := vm.NewArray()
+	for i, v := range vals {
+		_ = arr.Set(fmt.Sprintf("%d", i), v)
+	}
+	return arr
+}
+
+// setupTimers installs setTimeout, setInterval, clearTimeout, and clearInterval
+// on both the global scope and the window object, matching the browser model
+// where these are properties of the Window interface and also available as bare
+// globals.
+func (r *Runtime) setupTimers() {
+	setTimeout := func(callback goja.Value, delay goja.Value) int {
+		ms := int64(0)
+		if delay != nil && !goja.IsUndefined(delay) && !goja.IsNull(delay) {
+			ms = delay.ToInteger()
+		}
+		if ms < 0 {
+			ms = 0
+		}
+		r.nextTimerID++
+		id := r.nextTimerID
+		r.timers[id] = &timer{
+			id:       id,
+			callback: callback,
+			interval: time.Duration(ms) * time.Millisecond,
+			nextFire: time.Now().Add(time.Duration(ms) * time.Millisecond),
+			repeat:   false,
+		}
+		return id
+	}
+
+	setInterval := func(callback goja.Value, delay goja.Value) int {
+		ms := int64(0)
+		if delay != nil && !goja.IsUndefined(delay) && !goja.IsNull(delay) {
+			ms = delay.ToInteger()
+		}
+		if ms < 1 {
+			ms = 1 // setInterval with 0 would spin; clamp to 1ms
+		}
+		r.nextTimerID++
+		id := r.nextTimerID
+		r.timers[id] = &timer{
+			id:       id,
+			callback: callback,
+			interval: time.Duration(ms) * time.Millisecond,
+			nextFire: time.Now().Add(time.Duration(ms) * time.Millisecond),
+			repeat:   true,
+		}
+		return id
+	}
+
+	clearTimeout := func(id int) {
+		delete(r.timers, id)
+	}
+
+	clearInterval := func(id int) {
+		delete(r.timers, id)
+	}
+
+	// Install on the global scope (bare names).
+	_ = r.vm.Set("setTimeout", setTimeout)
+	_ = r.vm.Set("setInterval", setInterval)
+	_ = r.vm.Set("clearTimeout", clearTimeout)
+	_ = r.vm.Set("clearInterval", clearInterval)
+
+	// Also install on the window object, matching the browser spec.
+	win := r.vm.Get("window").(*goja.Object)
+	_ = win.Set("setTimeout", setTimeout)
+	_ = win.Set("setInterval", setInterval)
+	_ = win.Set("clearTimeout", clearTimeout)
+	_ = win.Set("clearInterval", clearInterval)
+}
+
+// Tick processes all timers whose fire time has arrived, invoking each
+// callback in the goja runtime. One-shot timers are removed after firing;
+// repeating timers (setInterval) are rescheduled for their next interval.
+//
+// Tick is designed to be called from the same goroutine that calls Run,
+// typically once per vsync or after each script completes. It processes due
+// timers in a loop so that callbacks which schedule new timers with a fire
+// time already past are also drained before Tick returns.
+func (r *Runtime) Tick() {
+	for {
+		now := time.Now()
+		var toFire []*timer
+		for _, t := range r.timers {
+			if !now.Before(t.nextFire) {
+				toFire = append(toFire, t)
+			}
+		}
+		if len(toFire) == 0 {
+			return
+		}
+		for _, t := range toFire {
+			if t.repeat {
+				t.nextFire = now.Add(t.interval)
+			} else {
+				delete(r.timers, t.id)
+			}
+			// Invoke the callback; exceptions are caught and discarded,
+			// matching browser behavior where an uncaught error in a
+			// timer callback does not stop other timers.
+			if fn, ok := goja.AssertFunction(t.callback); ok {
+				_, _ = fn(nil)
+			}
+		}
+	}
 }
 
 // Run evaluates one classic script to completion, returning an *Error for an

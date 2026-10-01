@@ -267,6 +267,28 @@ func (d *Document) NewDoctype(data string) *Node {
 	}
 }
 
+// ElementsByClassName returns all elements that have the given class name
+// among their space-separated class list.
+func (d *Document) ElementsByClassName(class string) []*Node {
+	var result []*Node
+	collectByClass(&d.Node, class, &result)
+	return result
+}
+
+func collectByClass(n *Node, class string, result *[]*Node) {
+	if n.Element() {
+		for _, c := range n.ClassList() {
+			if c == class {
+				*result = append(*result, n)
+				break
+			}
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		collectByClass(c, class, result)
+	}
+}
+
 // ElementByID returns the first element with the given ID, or nil.
 func (d *Document) ElementByID(id string) *Node {
 	return findByID(&d.Node, id)
