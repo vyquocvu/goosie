@@ -19,6 +19,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	imgdec "github.com/vyquocvu/goosie/internal/image"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -97,6 +98,10 @@ type Session struct {
 	selActive bool
 	selAnchor selPos
 	selHead   selPos
+
+	// JS runtime for this document's scripts. nil when the caller did not
+	// supply WithJS, so a session without scripting works exactly as before.
+	jsRT *js.Runtime
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -209,6 +214,15 @@ func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegis
 	}
 }
 
+// WithJS supplies a JavaScript runtime for executing the document's classic
+// scripts. The engine walks <script> elements in document order after the DOM
+// is built and runs each one through the runtime. Script errors are recorded
+// but do not stop the pipeline: a page with a broken ad script still renders.
+// console receives the runtime's console output; pass nil to discard it.
+func WithJS(rt *js.Runtime) Option {
+	return func(s *Session) { s.jsRT = rt }
+}
+
 // fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
@@ -237,12 +251,13 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if err != nil {
 		return nil, err
 	}
+	s.Doc = doc
+	s.runScripts()
 	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW)
 	if err != nil {
 		return nil, err
 	}
 	s.loadFonts(sheets)
-	s.Doc = doc
 	s.sheets = sheets
 	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport(), s.customFonts)
 	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles, s.customFonts)
@@ -939,4 +954,51 @@ func parentObj(objs []layout.Object, o *layout.Object) *layout.Object {
 		return nil
 	}
 	return &objs[o.Parent]
+}
+
+// runScripts walks the DOM for <script> elements in document order and
+// executes each one through the JS runtime. Script errors are silently
+// ignored: a page with a broken script still renders, matching browser
+// behavior where one bad ad tag does not take down the page.
+func (s *Session) runScripts() {
+	if s.jsRT == nil || s.Doc == nil {
+		return
+	}
+	root := s.Doc.HTML
+	if root == nil {
+		root = &s.Doc.Node
+	}
+	walkScripts(root, s.jsRT)
+}
+
+func walkScripts(n *dom.Node, rt *js.Runtime) {
+	if n == nil {
+		return
+	}
+	if n.Element() && n.Data == "script" {
+		src := n.TextContent()
+		if src != "" {
+			_ = rt.Run(src, "inline")
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		walkScripts(c, rt)
+	}
+}
+
+// Close releases resources held by the session. If a JS runtime was supplied,
+// it is closed so the realm is torn down.
+func (s *Session) Close() {
+	if s.jsRT != nil {
+		_ = s.jsRT.Close()
+	}
+}
+
+// JSTitle returns the document title as seen by the JS runtime after script
+// execution. If no runtime was supplied, it returns the empty string.
+func (s *Session) JSTitle() string {
+	if s.jsRT == nil {
+		return ""
+	}
+	return s.jsRT.Title()
 }
