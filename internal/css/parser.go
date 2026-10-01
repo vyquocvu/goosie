@@ -39,6 +39,8 @@ type FontFaceRule struct {
 type Stylesheet struct {
 	Rules     []Rule
 	FontFaces []FontFaceRule
+	// Keyframes holds the parsed @keyframes rules from this stylesheet.
+	Keyframes []KeyframesRule
 }
 
 // Parse parses a CSS stylesheet, testing @media width conditions against the
@@ -135,6 +137,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseSupportsRule(sheet)
 			case "font-face":
 				p.parseFontFaceRule(sheet)
+			case "keyframes", "-webkit-keyframes":
+				p.parseKeyframesRule(sheet)
 			default:
 				p.skipAtRule()
 			}
@@ -310,6 +314,75 @@ func (p *parser) parseFontFaceRule(sheet *Stylesheet) {
 	if len(decls) > 0 {
 		sheet.FontFaces = append(sheet.FontFaces, FontFaceRule{Declarations: decls})
 	}
+}
+
+// parseKeyframesRule reads a @keyframes block: the animation name, then the
+// body between braces (which itself contains nested blocks for each stop).
+func (p *parser) parseKeyframesRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	// Skip past the at-rule keyword ("keyframes" or "-webkit-keyframes").
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' {
+		p.pos++
+	}
+	// Skip whitespace to the animation name.
+	for p.pos < len(p.input) && (p.input[p.pos] == ' ' || p.input[p.pos] == '\t' || p.input[p.pos] == '\n' || p.input[p.pos] == '\r') {
+		p.pos++
+	}
+	// Read the animation name (up to '{' or whitespace).
+	nameStart := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' {
+		p.pos++
+	}
+	name := strings.TrimSpace(p.input[nameStart:p.pos])
+
+	// Skip to the opening brace.
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) || p.input[p.pos] == ';' {
+		if p.pos < len(p.input) {
+			p.pos++
+		}
+		return
+	}
+	p.pos++ // the '{'
+
+	// Read the body, tracking nested brace depth.
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+
+	if name == "" {
+		return
+	}
+
+	stops, err := ParseKeyframes(body)
+	if err != nil || len(stops) == 0 {
+		return
+	}
+
+	sheet.Keyframes = append(sheet.Keyframes, KeyframesRule{
+		Name:  name,
+		Stops: stops,
+	})
 }
 
 // supportsConditionTrue evaluates a CSS @supports condition: an optional leading
@@ -878,4 +951,5 @@ func (s *Stylesheet) Merge(other *Stylesheet) {
 		return
 	}
 	s.Rules = append(s.Rules, other.Rules...)
+	s.Keyframes = append(s.Keyframes, other.Keyframes...)
 }

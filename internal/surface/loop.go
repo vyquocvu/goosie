@@ -120,6 +120,21 @@ type tally struct {
 	plan    uint64
 }
 
+// FrameScheduler is optionally implemented by a Scheduler that drives
+// @keyframes animations. When the loop detects active animations after a
+// frame, it asks the window for another vsync so the next frame can advance
+// the animation clock.
+type FrameScheduler interface {
+	AnimationsActive() bool
+}
+
+// FrameRequester is optionally implemented by a Window that can schedule an
+// extra vsync for animation frames. Windows that already produce continuous
+// vsyncs (headless, darwin) need not implement it.
+type FrameRequester interface {
+	ScheduleFrame()
+}
+
 // NewLoop returns a loop that presents through w, asks s for frames, composes
 // into c, and records into rec. rec may be nil, for a caller that wants the frame
 // path without the timing ring; the loop then runs the same code with the
@@ -283,6 +298,17 @@ func (l *Loop) draw(ev Event) error {
 	m.PresentedAt = time.Now()
 	m.TilesRasterized = int32(w.Accepted)
 	m.TilesReused = int32(w.Reused)
+
+	// If the scheduler reports active animations, ask the window for another
+	// frame so the animation clock advances. Both checks use optional
+	// interfaces: a scheduler without AnimationsActive or a window that
+	// already produces continuous vsyncs works exactly as before.
+	if fs, ok := l.s.(FrameScheduler); ok && fs.AnimationsActive() {
+		if fr, ok := l.w.(FrameRequester); ok {
+			fr.ScheduleFrame()
+		}
+	}
+
 	// StylePasses and LayoutPasses stay zero through M1: there is no engine on
 	// this path yet, and the recorder's report reads those zeros as the assertion
 	// that a scroll frame ran neither.

@@ -32,6 +32,10 @@ const (
 
 	// StylesheetChange is a <style> or <link> mutation, requiring full re-style.
 	StylesheetChange
+
+	// AnimationTick is a @keyframes animation frame advance. It carries no
+	// rects or subtrees; the animation controller interpolates values directly.
+	AnimationTick
 )
 
 // Invalidation accumulates change reasons within a single batch. The engine

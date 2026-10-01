@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -383,6 +384,20 @@ type ComputedStyle struct {
 	// describes one property (or "all") to animate, its duration, timing
 	// function, and delay. Empty means no transitions are declared.
 	Transitions []css.Transition
+
+	// Transform is the parsed CSS transform property. Empty means no transform.
+	Transform []css.TransformFunc
+	// TransformOrigin is the transform origin point. Default is center.
+	TransformOrigin css.TransformOrigin
+
+	// Animation fields for @keyframes animations.
+	AnimationName      string
+	AnimationDuration  time.Duration
+	AnimationTiming    css.TimingFunc
+	AnimationDelay     time.Duration
+	AnimationIterCount int // 0 = infinite
+	AnimationDirection css.AnimationDirection
+	AnimationFillMode  css.AnimationFillMode
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -1546,6 +1561,42 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		applyTransitionTimingFunction(cs, value)
 	case "transition-delay":
 		applyTransitionDelay(cs, value)
+
+	case "transform":
+		cs.Transform = css.ParseTransform(value)
+	case "transform-origin":
+		cs.TransformOrigin = css.ParseTransformOrigin(value)
+
+	case "animation":
+		name, dur, timing, delay, iterCount, dir, fill := css.ParseAnimationShorthand(value)
+		cs.AnimationName = name
+		cs.AnimationDuration = dur
+		cs.AnimationTiming = timing
+		cs.AnimationDelay = delay
+		cs.AnimationIterCount = iterCount
+		cs.AnimationDirection = dir
+		cs.AnimationFillMode = fill
+	case "animation-name":
+		cs.AnimationName = value
+	case "animation-duration":
+		cs.AnimationDuration = css.ParseDuration(value)
+	case "animation-timing-function":
+		cs.AnimationTiming = css.ParseTimingFunc(value)
+	case "animation-delay":
+		cs.AnimationDelay = css.ParseDuration(value)
+	case "animation-iteration-count":
+		if strings.ToLower(strings.TrimSpace(value)) == "infinite" {
+			cs.AnimationIterCount = 0
+		} else {
+			p := css.ParseValue(value)
+			if p.Type == css.ValueNumber {
+				cs.AnimationIterCount = int(p.Num)
+			}
+		}
+	case "animation-direction":
+		cs.AnimationDirection = css.ParseAnimationDirection(value)
+	case "animation-fill-mode":
+		cs.AnimationFillMode = css.ParseAnimationFillMode(value)
 	}
 }
 

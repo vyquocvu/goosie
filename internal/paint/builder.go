@@ -79,6 +79,11 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 		rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
 		radius := corners(obj.Style, rect, b.scale)
 		opacity := obj.Style.Opacity
+
+		// Record the list length before painting this element's own content,
+		// so we can apply the CSS transform to just these commands.
+		cmdStart := b.list.Len()
+
 		if !clipHidden {
 			// Box shadows paint behind the element's background and border.
 			if len(obj.Style.BoxShadow) > 0 {
@@ -122,6 +127,13 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			if b.focus != nil && obj == b.focus {
 				b.paintFocus(obj, clip)
 			}
+		}
+		// Apply CSS transform to this element's own commands. The transform
+		// is resolved around the transform-origin and applied as a matrix to
+		// each command's rect, replacing it with the axis-aligned bounding
+		// box of the transformed corners.
+		if len(obj.Style.Transform) > 0 {
+			b.applyTransform(obj, cmdStart, x0, y0, x1, y1)
 		}
 		// If this box has overflow:hidden, compute a content-space clip rect
 		// that children must respect.
@@ -983,5 +995,43 @@ func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.Compute
 		}
 		color := convertColor(sh.Color)
 		b.appendRun(text, shadowRect, s, color, opacity)
+	}
+}
+
+// applyTransform resolves the element's CSS transform to a matrix and applies
+// it to every command emitted for this element (from cmdStart to end of list).
+// Each command's device-space rect is mapped back to layout space, transformed,
+// then converted to an AABB in device space.
+func (b *Builder) applyTransform(obj *layout.Object, cmdStart int, bx0, by0, bx1, by1 float32) {
+	s := obj.Style
+	if s == nil || len(s.Transform) == 0 {
+		return
+	}
+	elemW := bx1 - bx0
+	elemH := by1 - by0
+	if elemW <= 0 || elemH <= 0 {
+		return
+	}
+	mat := ResolveTransform(s.Transform, s.TransformOrigin, elemW, elemH)
+	if mat.IsIdentity() {
+		return
+	}
+	invScale := float32(1)
+	if b.scale != 0 {
+		invScale = 1.0 / b.scale
+	}
+	cmds := b.list.All()
+	for i := cmdStart; i < len(cmds); i++ {
+		// Map the device-space rect back to layout space, transform, then
+		// convert the AABB back to device space.
+		r := cmds[i].Rect
+		lr := frame.RectF4(
+			float32(r.X0)*invScale,
+			float32(r.Y0)*invScale,
+			float32(r.X1)*invScale,
+			float32(r.Y1)*invScale,
+		)
+		transformed := mat.TransformRect(lr)
+		cmds[i].Rect = transformed.ToDevice(b.scale)
 	}
 }

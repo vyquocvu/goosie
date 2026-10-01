@@ -107,6 +107,10 @@ type Session struct {
 	// nil when no transitions have been started.
 	Transitions *TransitionTracker
 
+	// Animations tracks active @keyframes animations. nil when no animations
+	// have been started.
+	Animations *AnimationController
+
 	// inv is the caller's invalidation batch. When non-nil, JSMutationSink
 	// records DOM mutations into it so the pipeline knows to re-style and
 	// re-layout. Set via WithInvalidation.
@@ -277,6 +281,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.sheets = sheets
 	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport(), s.customFonts)
 	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles, s.customFonts)
+	s.startAnimations()
 	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
 		return nil, err
@@ -1032,5 +1037,85 @@ func (s *Session) JSMutationSink() func() {
 		if s.inv != nil {
 			s.inv.Add(DOMMutation, frame.RectF{}, 0)
 		}
+	}
+}
+
+// TickAnimations advances all active animations to the given time.
+// Returns true if any animation is still active (needs another frame).
+func (s *Session) TickAnimations(now time.Time) bool {
+	if s.Animations == nil {
+		return false
+	}
+	active := s.Animations.Update(now)
+	if !active {
+		s.Animations.RemoveCompleted()
+	}
+	return active
+}
+
+// AnimationsActive reports whether any @keyframes animation is in progress.
+// This is the method the surface loop checks to decide whether to keep
+// producing frames.
+func (s *Session) AnimationsActive() bool {
+	if s.Animations == nil {
+		return false
+	}
+	return s.Animations.HasActive()
+}
+
+// startAnimations scans computed styles for animation declarations and
+// registers them with the AnimationController. Keyframes are looked up from
+// the session's stylesheets.
+func (s *Session) startAnimations() {
+	if s.Styles == nil {
+		return
+	}
+	// Collect keyframes from all stylesheets.
+	kfMap := make(map[string][]css.KeyframeStop)
+	for _, sheet := range s.sheets {
+		for _, kf := range sheet.Keyframes {
+			kfMap[kf.Name] = kf.Stops
+		}
+	}
+	if len(kfMap) == 0 {
+		return
+	}
+	// Check if any style has an animation-name that matches a keyframes rule.
+	hasAnimations := false
+	for _, cs := range s.Styles {
+		if cs.AnimationName != "" {
+			if _, ok := kfMap[cs.AnimationName]; ok {
+				hasAnimations = true
+				break
+			}
+		}
+	}
+	if !hasAnimations {
+		return
+	}
+	if s.Animations == nil {
+		s.Animations = &AnimationController{}
+	}
+	now := time.Now()
+	for id, cs := range s.Styles {
+		if cs.AnimationName == "" {
+			continue
+		}
+		stops, ok := kfMap[cs.AnimationName]
+		if !ok {
+			continue
+		}
+		s.Animations.Add(
+			id,
+			cs.AnimationName,
+			stops,
+			cs.AnimationDuration,
+			cs.AnimationDelay,
+			cs.AnimationTiming,
+			cs.AnimationIterCount,
+			css.AnimationDirection(cs.AnimationDirection),
+			css.AnimationFillMode(cs.AnimationFillMode),
+			now,
+		)
 	}
 }
