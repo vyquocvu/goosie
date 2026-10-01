@@ -495,55 +495,186 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 }
 
 func (s *State) drawArrow(backing *frame.Bitmap, ox, oy, x, y, dir, sc int32, c frame.Color, clip frame.Rect) {
-	put := func(px, py int32) {
-		if px >= 0 && py >= 0 {
-			backing.FillRect(frame.Rect4(ox+px*sc, oy+py*sc, ox+px*sc+sc, oy+py*sc+sc), c, nil)
-		}
+	// Filled triangle with AA coverage, in device pixels. Logical icon:
+	// tip 7px past center, base 5px behind center with half-height 6px.
+	fx := float64(ox) + float64(x)*float64(sc)
+	fy := float64(oy) + float64(y)*float64(sc)
+	tipX := fx + float64(dir)*7*float64(sc)
+	baseX := fx - float64(dir)*5*float64(sc)
+	halfH := 6 * float64(sc)
+	fillTriangleAA(backing, tipX, fy, baseX, fy-halfH, baseX, fy+halfH, c)
+	// Short stem so back/forward read as arrows, not triangles.
+	stemLen := 5 * float64(sc)
+	thick := 2 * float64(sc)
+	if thick < 2 {
+		thick = 2
 	}
-	for i := int32(0); i < 5; i++ {
-		px := x + dir*i
-		py := y - 4 + i
-		put(px, py)
-		put(px, py+1)
-		py2 := y + 4 - i
-		put(px, py2-1)
-		put(px, py2)
-	}
+	x0 := baseX
+	x1 := baseX - float64(dir)*stemLen
+	drawLineAA(backing, x0, fy, x1, fy, thick, c)
 	_ = clip
 }
 
 func (s *State) drawReload(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color, clip frame.Rect) {
-	put := func(px, py int32) {
-		if px >= 0 && py >= 0 {
-			backing.FillRect(frame.Rect4(ox+px*sc, oy+py*sc, ox+px*sc+sc, oy+py*sc+sc), c, nil)
-		}
+	fcx := float64(ox) + float64(cx)*float64(sc)
+	fcy := float64(oy) + float64(cy)*float64(sc)
+	rOut := 6 * float64(sc)
+	thick := 1.8 * float64(sc)
+	if thick < 1.5 {
+		thick = 1.5
 	}
-	r := int32(6)
-	for angle := 300; angle < 600; angle += 2 {
-		rad := float64(angle) * 3.14159 / 180.0
-		sin, cos := math.Sin(rad), math.Cos(rad)
-		for _, rr := range []float64{float64(r), float64(r) - 1} {
-			put(cx+int32(rr*cos), cy+int32(rr*sin))
+	rMid := rOut - thick/2
+	// 300° sweep with a 60° gap at the top-right, matching the old icon.
+	for py := int(fcy - rOut - 1); py <= int(fcy+rOut+1); py++ {
+		for px := int(fcx - rOut - 1); px <= int(fcx+rOut+1); px++ {
+			dx := float64(px) + 0.5 - fcx
+			dy := float64(py) + 0.5 - fcy
+			dist := absF(sqrtF(dx*dx+dy*dy) - rMid)
+			if dist > thick/2+0.5 {
+				continue
+			}
+			ang := atan2F(dy, dx) * 180 / 3.14159
+			if ang < 0 {
+				ang += 360
+			}
+			// Gap centered at -60° (300°): skip 270°..330°.
+			if ang >= 270 && ang <= 330 {
+				continue
+			}
+			cov := thick/2 + 0.5 - dist
+			blendDot(backing, px, py, c, cov)
 		}
 	}
 
-	// The head sits at the end of the sweep and points along the clockwise tangent.
-	rad := float64(240) * 3.14159 / 180.0
-	sin, cos := math.Sin(rad), math.Cos(rad)
-	tipX := float64(cx) + float64(r)*cos
-	tipY := float64(cy) + float64(r)*sin
+	// Arrow head at the end of the sweep (240°) pointing tangentially clockwise.
+	rad := 240.0 * 3.14159 / 180.0
+	sin, cos := sinF(rad), cosF(rad)
+	tipX := fcx + rMid*cos
+	tipY := fcy + rMid*sin
+	// Clockwise tangent.
 	tx, ty := -sin, cos
+	headLen := 5 * float64(sc)
+	headHalf := 3.2 * float64(sc)
+	bx := tipX + tx*headLen
+	by := tipY + ty*headLen
+	// Perpendicular.
 	px_, py_ := -ty, tx
-	for i := int32(0); i < 4; i++ {
-		hw := 2.0 - 0.5*float64(i)
-		x := tipX + float64(i)*tx*1.2
-		y := tipY + float64(i)*ty*1.2
-		x0, y0 := x-hw*px_, y-hw*py_
-		x1, y1 := x+hw*px_+1, y+hw*py_+1
-		backing.FillRect(frame.Rect4(ox+int32(x0)*sc, oy+int32(y0)*sc, ox+int32(x1)*sc, oy+int32(y1)*sc), c, nil)
-	}
+	fillTriangleAA(backing, tipX, tipY,
+		bx+px_*headHalf, by+py_*headHalf,
+		bx-px_*headHalf, by-py_*headHalf, c)
 	_ = clip
 }
+
+func blendDot(backing *frame.Bitmap, x, y int, c frame.Color, cov float64) {
+	if cov <= 0 {
+		return
+	}
+	if cov > 1 {
+		cov = 1
+	}
+	backing.Set(x, y, frame.BlendOver(backing.At(x, y), frame.ScaleColor(c, float32(cov))))
+}
+
+func drawLineAA(backing *frame.Bitmap, x0, y0, x1, y1, thick float64, c frame.Color) {
+	minX := int(floorF(minF(x0, x1) - thick/2 - 1))
+	maxX := int(ceilF(maxF(x0, x1) + thick/2 + 1))
+	minY := int(floorF(minF(y0, y1) - thick/2 - 1))
+	maxY := int(ceilF(maxF(y0, y1) + thick/2 + 1))
+	dx := x1 - x0
+	dy := y1 - y0
+	len2 := dx*dx + dy*dy
+	for py := minY; py <= maxY; py++ {
+		for px := minX; px <= maxX; px++ {
+			fx := float64(px) + 0.5
+			fy := float64(py) + 0.5
+			t := 0.0
+			if len2 > 0 {
+				t = ((fx-x0)*dx + (fy-y0)*dy) / len2
+				if t < 0 {
+					t = 0
+				} else if t > 1 {
+					t = 1
+				}
+			}
+			ddx := fx - (x0 + t*dx)
+			ddy := fy - (y0 + t*dy)
+			dist := sqrtF(ddx*ddx + ddy*ddy)
+			cov := thick/2 + 0.5 - dist
+			blendDot(backing, px, py, c, cov)
+		}
+	}
+}
+
+func fillTriangleAA(backing *frame.Bitmap, ax, ay, bx, by, cx, cy float64, c frame.Color) {
+	minX := int(floorF(minF(ax, minF(bx, cx)) - 1))
+	maxX := int(ceilF(maxF(ax, maxF(bx, cx)) + 1))
+	minY := int(floorF(minF(ay, minF(by, cy)) - 1))
+	maxY := int(ceilF(maxF(ay, maxF(by, cy)) + 1))
+	// Edge lengths for distance normalization.
+	abx, aby := bx-ax, by-ay
+	bcx, bcy := cx-bx, cy-by
+	cax, cay := ax-cx, ay-cy
+	abLen := sqrtF(abx*abx + aby*aby)
+	bcLen := sqrtF(bcx*bcx + bcy*bcy)
+	caLen := sqrtF(cax*cax + cay*cay)
+	if abLen == 0 || bcLen == 0 || caLen == 0 {
+		return
+	}
+	// Winding: inside when all cross products share the sign of the area.
+	area := (bx-ax)*(cy-ay) - (by-ay)*(cx-ax)
+	positive := area > 0
+	for py := minY; py <= maxY; py++ {
+		for px := minX; px <= maxX; px++ {
+			fx := float64(px) + 0.5
+			fy := float64(py) + 0.5
+			c1 := (bx-ax)*(fy-ay) - (by-ay)*(fx-ax)
+			c2 := (cx-bx)*(fy-by) - (cy-by)*(fx-bx)
+			c3 := (ax-cx)*(fy-cy) - (ay-cy)*(fx-cx)
+			inside := c1 >= 0 && c2 >= 0 && c3 >= 0
+			if positive {
+				inside = c1 >= 0 && c2 >= 0 && c3 >= 0
+			} else {
+				inside = c1 <= 0 && c2 <= 0 && c3 <= 0
+			}
+			if !inside {
+				continue
+			}
+			d1 := absF(c1) / abLen
+			d2 := absF(c2) / bcLen
+			d3 := absF(c3) / caLen
+			m := minF(d1, minF(d2, d3))
+			blendDot(backing, px, py, c, m+0.5)
+		}
+	}
+}
+
+func absF(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func minF(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxF(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func floorF(v float64) float64    { return math.Floor(v) }
+func ceilF(v float64) float64     { return math.Ceil(v) }
+func sqrtF(v float64) float64     { return math.Sqrt(v) }
+func sinF(v float64) float64      { return math.Sin(v) }
+func cosF(v float64) float64      { return math.Cos(v) }
+func atan2F(y, x float64) float64 { return math.Atan2(y, x) }
 
 func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame.Rect, oy int32) {
 	sc := s.sc()
@@ -579,7 +710,7 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 
 	textX := r.X0 + (BarPadding+4)*sc
 	size := int32(textSize) * sc
-	textY := r.Y0 + (r.H()-size)/2 + size*4/5
+	textY := s.baselineY(r, size)
 
 	if s.Focus == FocusAddress && s.hasSelection() {
 		runes := []rune(text)
@@ -630,24 +761,31 @@ func (s *State) drawRoundedRect(backing *frame.Bitmap, r frame.Rect, radius int3
 	if radius > r.W()/2 {
 		radius = r.W() / 2
 	}
-	inset := func(y int32) int32 {
-		dy := int32(0)
-		switch {
-		case y < r.Y0+radius:
-			dy = r.Y0 + radius - y
-		case y > r.Y1-1-radius:
-			dy = y - (r.Y1 - 1 - radius)
+	rad := frame.Corners{
+		TL: frame.Radius{X: float32(radius), Y: float32(radius)},
+		TR: frame.Radius{X: float32(radius), Y: float32(radius)},
+		BR: frame.Radius{X: float32(radius), Y: float32(radius)},
+		BL: frame.Radius{X: float32(radius), Y: float32(radius)},
+	}
+	backing.FillRounded(r, rad, fill, nil)
+	thick := s.sc()
+	if thick < 1 {
+		thick = 1
+	}
+	backing.StrokeRounded(r, rad, thick, thick, thick, thick, border, border, border, border, nil)
+}
+
+func (s *State) baselineY(r frame.Rect, size int32) int32 {
+	if s.fonts != nil {
+		asc, desc, _ := s.fonts.LineMetrics(size, frame.FontSlot{})
+		if asc+desc > 0 {
+			if desc < 0 {
+				desc = -desc
+			}
+			return r.Y0 + (r.H()-(asc+desc))/2 + asc
 		}
-		return radius - int32(math.Sqrt(float64(radius*radius-dy*dy)))
 	}
-	for y := r.Y0; y < r.Y1; y++ {
-		i := inset(y)
-		backing.FillRect(frame.Rect4(r.X0+i, y, r.X1-i, y+1), fill, nil)
-		backing.FillRect(frame.Rect4(r.X0+i, y, r.X0+i+1, y+1), border, nil)
-		backing.FillRect(frame.Rect4(r.X1-i-1, y, r.X1-i, y+1), border, nil)
-	}
-	backing.FillRect(frame.Rect4(r.X0+radius, r.Y0, r.X1-radius, r.Y0+1), border, nil)
-	backing.FillRect(frame.Rect4(r.X0+radius, r.Y1-1, r.X1-radius, r.Y1), border, nil)
+	return r.Y0 + (r.H()-size)/2 + size*4/5
 }
 
 func (s *State) drawText(backing *frame.Bitmap, text string, x, y int32, c frame.Color, clip frame.Rect) {
@@ -655,19 +793,23 @@ func (s *State) drawText(backing *frame.Bitmap, text string, x, y int32, c frame
 		return
 	}
 	size := int32(textSize) * s.sc()
-	penX := x
+	// Fractional pen: accumulate 26.6 advances and round only glyph positions,
+	// matching measureText and paint/builder.go so cursor/selection agree.
+	var pen int32
 	// The zero slot is the embedded Go face: the chrome draws the same type it
 	// always has, whatever fonts the host has. y is the baseline; Bounds is
 	// already relative to the pen.
 	for _, rn := range text {
 		g := s.fonts.Glyph(size, rn, frame.FontSlot{})
+		adv := s.fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
+		penX := x + (pen+32)>>6
 		if !g.Ok || g.Mask == nil {
-			penX += g.Advance
+			pen += adv
 			continue
 		}
 		origin := frame.Point{X: penX + g.Bounds.X0, Y: y + g.Bounds.Y0}
 		backing.BlitMask(g.Mask, origin, c, clip, nil)
-		penX += g.Advance
+		pen += adv
 	}
 }
 
@@ -676,9 +818,9 @@ func (s *State) measureText(text string) int32 {
 		return int32(len(text)) * 7 * s.sc()
 	}
 	size := int32(textSize) * s.sc()
-	var w int32
+	var pen int32
 	for _, rn := range text {
-		w += s.fonts.GlyphAdvance(size, rn, frame.FontSlot{})
+		pen += s.fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
 	}
-	return w
+	return (pen + 32) >> 6
 }

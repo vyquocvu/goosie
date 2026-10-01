@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { font-family: sans-serif; padding: 40px; background: #f0f0f0; }
+h1 { text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 20px; }
+
+/* Box shadows */
+.box-shadow-basic {
+  width: 200px; height: 100px; background: white;
+  box-shadow: 5px 5px 10px rgba(0,0,0,0.3);
+  margin-bottom: 20px;
+}
+.box-shadow-spread {
+  width: 200px; height: 100px; background: white;
+  box-shadow: 3px 3px 5px 8px rgba(100,100,255,0.4);
+  margin-bottom: 20px;
+}
+.box-shadow-multiple {
+  width: 200px; height: 100px; background: white;
+  box-shadow: 4px 4px 8px rgba(255,0,0,0.3), -4px -4px 8px rgba(0,0,255,0.3);
+  margin-bottom: 20px;
+}
+.box-shadow-inset {
+  width: 200px; height: 100px; background: #eee;
+  box-shadow: inset 3px 3px 6px rgba(0,0,0,0.4);
+  margin-bottom: 20px;
+}
+.box-shadow-noblur {
+  width: 200px; height: 100px; background: white;
+  box-shadow: 6px 6px 0 black;
+  margin-bottom: 20px;
+}
+
+/* Text shadows */
+.text-shadow-basic {
+  font-size: 24px; font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+  margin-bottom: 20px;
+}
+.text-shadow-glow {
+  font-size: 24px; font-weight: bold; color: #333;
+  text-shadow: 0 0 8px rgba(255,200,0,0.8);
+  margin-bottom: 20px;
+}
+.text-shadow-multiple {
+  font-size: 24px; font-weight: bold;
+  text-shadow: 1px 1px 2px black, 0 0 10px blue, 0 0 20px red;
+  margin-bottom: 20px;
+}
+.text-shadow-offset {
+  font-size: 20px;
+  text-shadow: 3px 3px 0 #ccc;
+  margin-bottom: 20px;
+}
+
+/* Combined */
+.combined {
+  width: 300px; padding: 20px; background: white;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  font-size: 18px;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+}
+</style>
+</head>
+<body>
+<h1>Box Shadow &amp; Text Shadow</h1>
+
+<div class="box-shadow-basic">Basic box-shadow</div>
+<div class="box-shadow-spread">With spread</div>
+<div class="box-shadow-multiple">Multiple shadows</div>
+<div class="box-shadow-inset">Inset shadow</div>
+<div class="box-shadow-noblur">No blur (hard edge)</div>
+
+<p class="text-shadow-basic">Basic text shadow</p>
+<p class="text-shadow-glow">Glowing text</p>
+<p class="text-shadow-multiple">Multiple text shadows</p>
+<p class="text-shadow-offset">Hard offset shadow</p>
+
+<div class="combined">Combined box-shadow and text-shadow on one element.</div>
+</body>
+</html>

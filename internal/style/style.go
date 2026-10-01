@@ -371,6 +371,18 @@ type ComputedStyle struct {
 	// "normal" (default) or "none" means no generated content; any other string
 	// is the text to generate.
 	Content string
+
+	// BoxShadow is the list of box-shadow layers, resolved from the CSS
+	// box-shadow property. nil means no shadow (the initial `none`).
+	BoxShadow []css.BoxShadow
+	// TextShadow is the list of text-shadow layers, resolved from the CSS
+	// text-shadow property. nil means no shadow.
+	TextShadow []css.TextShadow
+
+	// Transitions holds the parsed CSS transition declarations. Each entry
+	// describes one property (or "all") to animate, its duration, timing
+	// function, and delay. Empty means no transitions are declared.
+	Transitions []css.Transition
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -1518,6 +1530,22 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.BorderSpacingH = h
 			cs.BorderSpacingV = v
 		}
+
+	case "box-shadow":
+		cs.BoxShadow = css.ParseBoxShadow(value)
+	case "text-shadow":
+		cs.TextShadow = css.ParseTextShadow(value)
+
+	case "transition":
+		cs.Transitions = css.ParseTransitionShorthand(value)
+	case "transition-property":
+		applyTransitionProperty(cs, value)
+	case "transition-duration":
+		applyTransitionDuration(cs, value)
+	case "transition-timing-function":
+		applyTransitionTimingFunction(cs, value)
+	case "transition-delay":
+		applyTransitionDelay(cs, value)
 	}
 }
 
@@ -2905,4 +2933,65 @@ func gridSpanNum(s string) int {
 		return 0
 	}
 	return int(p.Num)
+}
+
+// applyTransitionProperty applies the transition-property longhand. It sets the
+// property names on existing transitions, or creates one "all" transition if
+// none exist yet (to be filled by duration/timing/delay).
+func applyTransitionProperty(cs *ComputedStyle, value string) {
+	props := css.ParseTransitionProperty(value)
+	if len(cs.Transitions) == 0 {
+		if len(props) == 0 {
+			cs.Transitions = nil
+			return
+		}
+		for _, p := range props {
+			cs.Transitions = append(cs.Transitions, css.Transition{
+				Property: p,
+				Timing:   css.TimingEase,
+			})
+		}
+		return
+	}
+	for i := range cs.Transitions {
+		if i < len(props) {
+			cs.Transitions[i].Property = props[i]
+		}
+	}
+}
+
+// applyTransitionDuration applies the transition-duration longhand.
+func applyTransitionDuration(cs *ComputedStyle, value string) {
+	durations := css.ParseTransitionDuration(value)
+	if len(cs.Transitions) == 0 && len(durations) > 0 {
+		cs.Transitions = append(cs.Transitions, css.Transition{
+			Property: "all",
+			Timing:   css.TimingEase,
+		})
+	}
+	for i := range cs.Transitions {
+		if i < len(durations) {
+			cs.Transitions[i].Duration = durations[i]
+		}
+	}
+}
+
+// applyTransitionTimingFunction applies the transition-timing-function longhand.
+func applyTransitionTimingFunction(cs *ComputedStyle, value string) {
+	funcs := css.ParseTransitionTimingFunction(value)
+	for i := range cs.Transitions {
+		if i < len(funcs) {
+			cs.Transitions[i].Timing = funcs[i]
+		}
+	}
+}
+
+// applyTransitionDelay applies the transition-delay longhand.
+func applyTransitionDelay(cs *ComputedStyle, value string) {
+	delays := css.ParseTransitionDelay(value)
+	for i := range cs.Transitions {
+		if i < len(delays) {
+			cs.Transitions[i].Delay = delays[i]
+		}
+	}
 }

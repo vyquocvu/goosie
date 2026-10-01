@@ -78,12 +78,24 @@ func fillRoundedTop(buf *frame.Bitmap, r frame.Rect, radius int32, c frame.Color
 	if radius > r.H() {
 		radius = r.H()
 	}
-	for dy := int32(0); dy < radius; dy++ {
-		d := radius - dy
-		cut := radius - int32(math.Sqrt(float64(radius*radius-d*d)))
-		buf.FillRect(frame.Rect4(r.X0+cut, r.Y0+dy, r.X1-cut, r.Y0+dy+1), c, nil)
+	rad := frame.Corners{
+		TL: frame.Radius{X: float32(radius), Y: float32(radius)},
+		TR: frame.Radius{X: float32(radius), Y: float32(radius)},
 	}
-	buf.FillRect(frame.Rect4(r.X0, r.Y0+radius, r.X1, r.Y1), c, nil)
+	buf.FillRounded(r, rad, c, nil)
+}
+
+func tabBaseline(tabRect frame.Rect, size int32, fonts *raster.Fonts) int32 {
+	if fonts != nil {
+		asc, desc, _ := fonts.LineMetrics(size, frame.FontSlot{})
+		if asc+desc > 0 {
+			if desc < 0 {
+				desc = -desc
+			}
+			return tabRect.Y0 + (tabRect.H()-(asc+desc))/2 + asc
+		}
+	}
+	return tabRect.Y0 + (tabRect.H()-size)/2 + size*4/5
 }
 
 func drawTabText(buf *frame.Bitmap, text string, tabRect frame.Rect, color frame.Color, fonts *raster.Fonts, scale int32) {
@@ -92,30 +104,36 @@ func drawTabText(buf *frame.Bitmap, text string, tabRect frame.Rect, color frame
 	}
 	size := titleSize * scale
 	textX := tabRect.X0 + 12*scale
-	baseline := tabRect.Y0 + (tabRect.H()-size)/2 + size*4/5
+	baseline := tabBaseline(tabRect, size, fonts)
 	maxW := tabRect.W() - (CloseBtnSize+CloseBtnMargin)*scale - 24*scale
 	if maxW < 0 {
 		maxW = 0
 	}
 
+	var penFixed int32
 	penX := textX
 	runes := []rune(text)
 	for i, rn := range runes {
 		g := fonts.Glyph(size, rn, frame.FontSlot{})
+		advFixed := fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
 		if !g.Ok || g.Mask == nil {
-			penX += g.Advance
+			penFixed += advFixed
+			penX = textX + (penFixed+32)>>6
 			continue
 		}
 
+		penX = textX + (penFixed+32)>>6
 		if penX+g.Advance-textX > maxW {
 			if i > 0 && len(runes) > 1 {
 				for _, dot := range "..." {
 					dg := fonts.Glyph(size, dot, frame.FontSlot{})
+					dadv := fonts.GlyphAdvanceFixed(size, dot, frame.FontSlot{})
+					dx := textX + (penFixed+32)>>6
 					if dg.Ok && dg.Mask != nil {
-						origin := frame.Point{X: penX + dg.Bounds.X0, Y: baseline + dg.Bounds.Y0}
+						origin := frame.Point{X: dx + dg.Bounds.X0, Y: baseline + dg.Bounds.Y0}
 						buf.BlitMask(dg.Mask, origin, color, buf.Bounds(), nil)
-						penX += dg.Advance
 					}
+					penFixed += dadv
 				}
 			}
 			break
@@ -123,7 +141,46 @@ func drawTabText(buf *frame.Bitmap, text string, tabRect frame.Rect, color frame
 
 		origin := frame.Point{X: penX + g.Bounds.X0, Y: baseline + g.Bounds.Y0}
 		buf.BlitMask(g.Mask, origin, color, buf.Bounds(), nil)
-		penX += g.Advance
+		penFixed += advFixed
+	}
+}
+
+func blendDot(buf *frame.Bitmap, x, y int, c frame.Color, cov float64) {
+	if cov <= 0 {
+		return
+	}
+	if cov > 1 {
+		cov = 1
+	}
+	buf.Set(x, y, frame.BlendOver(buf.At(x, y), frame.ScaleColor(c, float32(cov))))
+}
+
+func drawLineAA(buf *frame.Bitmap, x0, y0, x1, y1, thick float64, c frame.Color) {
+	minX := int(math.Floor(math.Min(x0, x1) - thick/2 - 1))
+	maxX := int(math.Ceil(math.Max(x0, x1) + thick/2 + 1))
+	minY := int(math.Floor(math.Min(y0, y1) - thick/2 - 1))
+	maxY := int(math.Ceil(math.Max(y0, y1) + thick/2 + 1))
+	dx := x1 - x0
+	dy := y1 - y0
+	len2 := dx*dx + dy*dy
+	for py := minY; py <= maxY; py++ {
+		for px := minX; px <= maxX; px++ {
+			fx := float64(px) + 0.5
+			fy := float64(py) + 0.5
+			t := 0.0
+			if len2 > 0 {
+				t = ((fx-x0)*dx + (fy-y0)*dy) / len2
+				if t < 0 {
+					t = 0
+				} else if t > 1 {
+					t = 1
+				}
+			}
+			ddx := fx - (x0 + t*dx)
+			ddy := fy - (y0 + t*dy)
+			dist := math.Sqrt(ddx*ddx + ddy*ddy)
+			blendDot(buf, px, py, c, thick/2+0.5-dist)
+		}
 	}
 }
 
@@ -132,24 +189,30 @@ func drawCloseButton(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32
 	if size < 4*scale {
 		return
 	}
-	inset := int32(4) * scale
-	x0 := r.X0 + inset
-	y0 := r.Y0 + inset
-	x1 := r.X1 - inset
-	y1 := r.Y1 - inset
+	inset := float64(4*scale) + 0.5
+	x0 := float64(r.X0) + inset
+	y0 := float64(r.Y0) + inset
+	x1 := float64(r.X1) - inset
+	y1 := float64(r.Y1) - inset
 	if x1 <= x0 || y1 <= y0 {
 		return
 	}
-	for i := int32(0); x0+i < x1 && y0+i < y1; i++ {
-		buf.FillRect(frame.Rect4(x0+i, y0+i, x0+i+scale, y0+i+scale), c, nil)
-		buf.FillRect(frame.Rect4(x1-scale-i, y0+i, x1-i, y0+i+scale), c, nil)
+	thick := float64(scale) * 1.6
+	if thick < 1.5 {
+		thick = 1.5
 	}
+	drawLineAA(buf, x0, y0, x1, y1, thick, c)
+	drawLineAA(buf, x1, y0, x0, y1, thick, c)
 }
 
 func drawNewTabButton(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32) {
-	cx := (r.X0 + r.X1) / 2
-	cy := (r.Y0 + r.Y1) / 2
-	half := int32(7) * scale
-	buf.FillRect(frame.Rect4(cx-half, cy, cx+half+scale, cy+scale), c, nil)
-	buf.FillRect(frame.Rect4(cx, cy-half, cx+scale, cy+half+scale), c, nil)
+	cx := float64(r.X0+r.X1) / 2
+	cy := float64(r.Y0+r.Y1) / 2
+	half := 7 * float64(scale)
+	thick := float64(scale) * 1.6
+	if thick < 1.5 {
+		thick = 1.5
+	}
+	drawLineAA(buf, cx-half, cy, cx+half, cy, thick, c)
+	drawLineAA(buf, cx, cy-half, cx, cy+half, thick, c)
 }

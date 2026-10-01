@@ -80,6 +80,10 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 		radius := corners(obj.Style, rect, b.scale)
 		opacity := obj.Style.Opacity
 		if !clipHidden {
+			// Box shadows paint behind the element's background and border.
+			if len(obj.Style.BoxShadow) > 0 {
+				b.paintBoxShadow(obj, rect, radius, opacity)
+			}
 			if obj.Style.BackgroundColor.A > 0 {
 				b.list.Append(DisplayCmd{
 					Kind:    CmdFill,
@@ -251,6 +255,10 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	}
 	if sp, ok := b.selection[obj]; ok {
 		b.paintSelectionHighlight(obj, rect, s, sp, opacity)
+	}
+	// Text shadows paint behind the main text as offset copies.
+	if len(s.TextShadow) > 0 {
+		b.paintTextShadow(text, rect, s, opacity)
 	}
 	b.appendRun(text, rect, s, convertColor(s.Color), opacity)
 }
@@ -886,4 +894,94 @@ func gradient(g style.Gradient, opacity float32) frame.LinearGradient {
 		stops = append(stops, frame.GradientStop{At: s.At, Color: c})
 	}
 	return frame.LinearGradient{Angle: g.Angle, Stops: stops}
+}
+
+// paintBoxShadow draws each non-inset box-shadow layer as an offset coloured
+// rectangle behind the element. Blur is approximated with up to three
+// concentric layers at decreasing opacity; a real Gaussian blur is not
+// available in the tile rasterizer.
+func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius frame.Corners, opacity float32) {
+	s := obj.Style
+	for _, sh := range s.BoxShadow {
+		if sh.Inset {
+			// Inset shadows paint inside the box; simplified to a no-op for now
+			// since they require clipping to the box interior.
+			continue
+		}
+		dx := int32(sh.OffsetX * b.scale)
+		dy := int32(sh.OffsetY * b.scale)
+		spread := int32(sh.Spread * b.scale)
+		shadowRect := frame.Rect4(
+			rect.X0+dx-spread,
+			rect.Y0+dy-spread,
+			rect.X1+dx+spread,
+			rect.Y1+dy+spread,
+		)
+		if shadowRect.Empty() {
+			continue
+		}
+		color := convertColor(sh.Color)
+		// Approximate blur with concentric layers. Each layer is slightly
+		// larger and more transparent than the one before it.
+		blurLayers := int32(sh.Blur * b.scale)
+		if blurLayers <= 0 {
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    shadowRect,
+				Color:   color,
+				Radius:  radius,
+				Opacity: opacity,
+			})
+			continue
+		}
+		// Draw from outermost (most transparent) to innermost (fully opaque).
+		const maxBlurSteps = 4
+		steps := blurLayers / 2
+		if steps < 1 {
+			steps = 1
+		}
+		if steps > maxBlurSteps {
+			steps = maxBlurSteps
+		}
+		for i := steps; i >= 1; i-- {
+			expand := int32(i) * blurLayers / steps
+			layerRect := frame.Rect4(
+				shadowRect.X0-expand,
+				shadowRect.Y0-expand,
+				shadowRect.X1+expand,
+				shadowRect.Y1+expand,
+			)
+			// Alpha fades from nearly transparent (outermost) to the full
+			// shadow color (innermost).
+			frac := float32(i) / float32(steps)
+			layerOpacity := opacity * frac
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    layerRect,
+				Color:   color,
+				Radius:  radius,
+				Opacity: layerOpacity,
+			})
+		}
+	}
+}
+
+// paintTextShadow draws each text-shadow layer as an offset copy of the text
+// in the shadow colour, painted before the main text so it appears behind.
+func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.ComputedStyle, opacity float32) {
+	for _, sh := range s.TextShadow {
+		dx := int32(sh.OffsetX * b.scale)
+		dy := int32(sh.OffsetY * b.scale)
+		shadowRect := frame.Rect4(
+			rect.X0+dx,
+			rect.Y0+dy,
+			rect.X1+dx,
+			rect.Y1+dy,
+		)
+		if shadowRect.Empty() {
+			continue
+		}
+		color := convertColor(sh.Color)
+		b.appendRun(text, shadowRect, s, color, opacity)
+	}
 }
