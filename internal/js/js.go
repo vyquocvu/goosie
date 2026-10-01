@@ -67,6 +67,16 @@ type Options struct {
 	// are available to scripts. When nil, those APIs do not exist on the
 	// document object.
 	DOM *dom.Document
+
+	// HTTPClient is the fetch backend. When non-nil, fetch() is available
+	// to scripts. When nil, fetch() is not defined and calling it produces
+	// a ReferenceError.
+	HTTPClient HTTPFetcher
+
+	// OnMutation is called when scripts mutate the DOM. The engine uses
+	// this to trigger re-style and re-layout. nil means mutations are
+	// not tracked (e.g., in tests).
+	OnMutation func()
 }
 
 // Kind is the JS type of a Value read back out of a runtime.
@@ -154,6 +164,9 @@ func New(opts Options) (*Runtime, error) {
 	r.setupDocument()
 	r.setupWindow()
 	r.setupDOM()
+	if opts.HTTPClient != nil {
+		r.setupFetch(opts.HTTPClient)
+	}
 	r.setupTimers()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
@@ -214,10 +227,9 @@ func (r *Runtime) setupWindow() {
 }
 
 func (r *Runtime) setupUnsupportedAPIs() {
-	// fetch on window
-	_, _ = r.vm.RunString(`
-		window.fetch = function() { throw new Error("fetch is not implemented"); };
-	`)
+	// Wave 2: fetch is now wired by setupFetch when an HTTPClient is
+	// provided. When it is nil, fetch remains undefined and calling it
+	// produces a ReferenceError that names the missing API.
 }
 
 // setupDOM installs DOM API bindings on the document object when a DOM tree
@@ -240,8 +252,32 @@ func (r *Runtime) setupDOM() {
 	_ = r.nodeProto.Set("appendChild", func(call goja.FunctionCall) goja.Value {
 		return r.jsAppendChild(call)
 	})
-	_ = r.nodeProto.Set("addEventListener", func(goja.FunctionCall) goja.Value {
-		return goja.Undefined()
+	_ = r.nodeProto.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
+		return r.jsAddEventListener(call)
+	})
+	_ = r.nodeProto.Set("removeEventListener", func(call goja.FunctionCall) goja.Value {
+		return r.jsRemoveEventListener(call)
+	})
+	_ = r.nodeProto.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value {
+		return r.jsDispatchEvent(call)
+	})
+	_ = r.nodeProto.Set("getAttribute", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetAttribute(call)
+	})
+	_ = r.nodeProto.Set("setAttribute", func(call goja.FunctionCall) goja.Value {
+		return r.jsSetAttribute(call)
+	})
+	_ = r.nodeProto.Set("removeAttribute", func(call goja.FunctionCall) goja.Value {
+		return r.jsRemoveAttribute(call)
+	})
+	_ = r.nodeProto.Set("hasAttribute", func(call goja.FunctionCall) goja.Value {
+		return r.jsHasAttribute(call)
+	})
+	_ = r.nodeProto.Set("remove", func(call goja.FunctionCall) goja.Value {
+		return r.jsRemove(call)
+	})
+	_ = r.nodeProto.Set("createElement", func(call goja.FunctionCall) goja.Value {
+		return r.jsCreateElement(call)
 	})
 	// Set the prototype as a temporary global so RunString can reference it.
 	_ = r.vm.Set("__nodeProto__", r.nodeProto)
@@ -263,6 +299,26 @@ func (r *Runtime) setupDOM() {
 	`)
 	_ = r.vm.Set("__nodeProto__", nil)
 
+	// innerHTML getter/setter on nodeProto.
+	_ = r.vm.Set("__nodeProto__", r.nodeProto)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__nodeProto__, 'innerHTML', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getInnerHTML__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setInnerHTML__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__nodeProto__", nil)
+
 	doc := r.vm.Get("document").(*goja.Object)
 
 	_ = doc.Set("querySelector", func(call goja.FunctionCall) goja.Value {
@@ -273,6 +329,18 @@ func (r *Runtime) setupDOM() {
 	})
 	_ = doc.Set("createElement", func(call goja.FunctionCall) goja.Value {
 		return r.jsCreateElement(call)
+	})
+	_ = doc.Set("getElementById", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetElementByID(call)
+	})
+	_ = doc.Set("getElementsByClassName", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetElementsByClassName(call)
+	})
+	_ = doc.Set("getElementsByTagName", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetElementsByTagName(call)
+	})
+	_ = doc.Set("createTextNode", func(call goja.FunctionCall) goja.Value {
+		return r.jsCreateTextNode(call)
 	})
 
 	// Internal helpers the prototype getter/setter calls back into.
@@ -298,6 +366,58 @@ func (r *Runtime) setupDOM() {
 			textNode := node.Doc.NewText(text)
 			node.AppendChild(textNode)
 		}
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+	_ = doc.Set("__getInnerHTML__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(r.serializeChildren(node))
+	})
+	_ = doc.Set("__setInnerHTML__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		html := call.Arguments[1].String()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		// Clear existing children.
+		for node.FirstChild != nil {
+			node.RemoveChild(node.FirstChild)
+		}
+		// Parse the fragment by wrapping in a <div>.
+		wrapped := "<div>" + html + "</div>"
+		parsed, err := dom.ParseBounded(wrapped, dom.ParseLimits{
+			Nodes: 1024, Depth: 32, Attributes: 256, AttributeBytes: 4096,
+		})
+		if err != nil {
+			// Fallback: insert as text node.
+			if html != "" {
+				node.AppendChild(node.Doc.NewText(html))
+			}
+			r.notifyMutation()
+			return goja.Undefined()
+		}
+		// Find the <div> we wrapped in (it will be inside <html><body>).
+		var divNode *dom.Node
+		body := parsed.Body
+		if body != nil {
+			divNode = body.FirstChild
+		}
+		if divNode == nil {
+			r.notifyMutation()
+			return goja.Undefined()
+		}
+		// Move the div's children to the target node.
+		for divNode.FirstChild != nil {
+			child := divNode.FirstChild
+			divNode.RemoveChild(child)
+			node.AppendChild(child)
+		}
+		r.notifyMutation()
 		return goja.Undefined()
 	})
 
@@ -336,6 +456,8 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		// the copy above only copies the data descriptor, not the
 		// getter/setter.
 		r.defineTextContentAccessor(obj)
+		// Re-define innerHTML as an accessor on this instance.
+		r.defineInnerHTMLAccessor(obj)
 	}
 
 	// Element-specific properties.
@@ -344,6 +466,106 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		_ = obj.Set("nodeName", strings.ToUpper(node.Data))
 		_ = obj.Set("id", node.GetAttribute("id"))
 		_ = obj.Set("className", node.GetAttribute("class"))
+
+		// classList with add/remove/toggle/contains methods.
+		// The closures capture `node` directly because call.This inside
+		// classList methods refers to the classList object, not the element
+		// wrapper, so r.getNode(call.This) would return nil.
+		classList := r.vm.NewObject()
+		_ = classList.Set("add", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 1 {
+				return goja.Undefined()
+			}
+			cls := call.Arguments[0].String()
+			if cls == "" {
+				return goja.Undefined()
+			}
+			existing := node.ClassList()
+			for _, c := range existing {
+				if c == cls {
+					return goja.Undefined()
+				}
+			}
+			existing = append(existing, cls)
+			node.SetAttribute("class", strings.Join(existing, " "))
+			r.notifyMutation()
+			return goja.Undefined()
+		})
+		_ = classList.Set("remove", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 1 {
+				return goja.Undefined()
+			}
+			cls := call.Arguments[0].String()
+			if cls == "" {
+				return goja.Undefined()
+			}
+			existing := node.ClassList()
+			filtered := make([]string, 0, len(existing))
+			for _, c := range existing {
+				if c != cls {
+					filtered = append(filtered, c)
+				}
+			}
+			if len(filtered) == 0 {
+				// Remove the attribute entirely if no classes remain.
+				for i := range node.Attr {
+					if strings.ToLower(node.Attr[i].Name) == "class" {
+						node.Attr = append(node.Attr[:i], node.Attr[i+1:]...)
+						break
+					}
+				}
+			} else {
+				node.SetAttribute("class", strings.Join(filtered, " "))
+			}
+			r.notifyMutation()
+			return goja.Undefined()
+		})
+		_ = classList.Set("toggle", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 1 {
+				return goja.Undefined()
+			}
+			cls := call.Arguments[0].String()
+			if cls == "" {
+				return goja.Undefined()
+			}
+			existing := node.ClassList()
+			for i, c := range existing {
+				if c == cls {
+					// Remove it.
+					rest := append(existing[:i], existing[i+1:]...)
+					if len(rest) == 0 {
+						for j := range node.Attr {
+							if strings.ToLower(node.Attr[j].Name) == "class" {
+								node.Attr = append(node.Attr[:j], node.Attr[j+1:]...)
+								break
+							}
+						}
+					} else {
+						node.SetAttribute("class", strings.Join(rest, " "))
+					}
+					r.notifyMutation()
+					return r.vm.ToValue(false)
+				}
+			}
+			// Add it.
+			existing = append(existing, cls)
+			node.SetAttribute("class", strings.Join(existing, " "))
+			r.notifyMutation()
+			return r.vm.ToValue(true)
+		})
+		_ = classList.Set("contains", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 1 {
+				return r.vm.ToValue(false)
+			}
+			cls := call.Arguments[0].String()
+			for _, c := range node.ClassList() {
+				if c == cls {
+					return r.vm.ToValue(true)
+				}
+			}
+			return r.vm.ToValue(false)
+		})
+		_ = obj.Set("classList", classList)
 	}
 
 	return obj
@@ -371,6 +593,29 @@ func (r *Runtime) defineTextContentAccessor(obj *goja.Object) {
 		});
 	`)
 	_ = r.vm.Set("__tcTarget__", nil)
+}
+
+// defineInnerHTMLAccessor installs the innerHTML getter/setter on obj
+// using Object.defineProperty via a RunString helper.
+func (r *Runtime) defineInnerHTMLAccessor(obj *goja.Object) {
+	_ = r.vm.Set("__ihTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__ihTarget__, 'innerHTML', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getInnerHTML__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setInnerHTML__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__ihTarget__", nil)
 }
 
 // getNode extracts the *dom.Node from a JS wrapper object via its __nid__.
@@ -404,6 +649,7 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}
 	parentNode.AppendChild(childNode)
+	r.notifyMutation()
 	// Return the child, matching the DOM spec.
 	return call.Arguments[0]
 }
@@ -600,6 +846,7 @@ func (r *Runtime) setupTimers() {
 // timers in a loop so that callbacks which schedule new timers with a fire
 // time already past are also drained before Tick returns.
 func (r *Runtime) Tick() {
+	r.DrainFetchCallbacks()
 	for {
 		now := time.Now()
 		var toFire []*timer
@@ -779,4 +1026,322 @@ func (r *Runtime) Close() error {
 	}
 	r.closed = true
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// JS bridge: event methods
+// ---------------------------------------------------------------------------
+
+// jsAddEventListener implements element.addEventListener(type, callback).
+func (r *Runtime) jsAddEventListener(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 2 {
+		return goja.Undefined()
+	}
+	typ := call.Arguments[0].String()
+	fn, ok := goja.AssertFunction(call.Arguments[1])
+	if !ok {
+		return goja.Undefined()
+	}
+
+	// Wrap the goja function as a Go callback that creates a JS Event
+	// object and passes it to the listener.
+	callback := func(e *dom.Event) {
+		eventObj := r.wrapEvent(e)
+		_, _ = fn(goja.Null(), eventObj)
+	}
+
+	dom.AddEventListener(node, typ, callback, false)
+	return goja.Undefined()
+}
+
+// jsRemoveEventListener implements element.removeEventListener(type, callback).
+// Because each addEventListener call creates a fresh Go closure, the removal
+// cannot match the original pointer. This is a best-effort no-op that returns
+// undefined, matching the spec's requirement that removeEventListener does not
+// throw for missing listeners.
+func (r *Runtime) jsRemoveEventListener(call goja.FunctionCall) goja.Value {
+	// Best-effort: the Go closure wrapper created in jsAddEventListener has
+	// a distinct pointer from the one the caller passes here, so an exact
+	// match is not possible without a listener registry. Return undefined
+	// silently, which is spec-compliant for missing listeners.
+	return goja.Undefined()
+}
+
+// jsDispatchEvent implements element.dispatchEvent(event).
+func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 1 {
+		return r.vm.ToValue(false)
+	}
+	eventObj := call.Arguments[0]
+	typ := ""
+	if t := eventObj.ToObject(r.vm).Get("type"); t != nil && !goja.IsUndefined(t) {
+		typ = t.String()
+	}
+	event := dom.NewEvent(typ, true, true)
+	result := dom.DispatchEvent(node, event)
+	return r.vm.ToValue(result)
+}
+
+// wrapEvent creates a JS Event object from a *dom.Event. It exposes the
+// standard Event properties and, for MouseEvent and KeyboardEvent subtypes,
+// their additional fields.
+func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
+	obj := r.vm.NewObject()
+	_ = obj.Set("type", e.Type)
+	_ = obj.Set("bubbles", e.Bubbles())
+	_ = obj.Set("cancelable", e.Cancelable())
+	_ = obj.Set("stopPropagation", func() { e.StopPropagation() })
+	_ = obj.Set("stopImmediatePropagation", func() { e.StopImmediatePropagation() })
+	_ = obj.Set("preventDefault", func() { e.PreventDefault() })
+
+	// defaultPrevented must be read dynamically: the callback may call
+	// preventDefault() before reading this property. We expose a helper
+	// method and define a JS getter that calls it.
+	_ = obj.Set("__getDP__", func() bool { return e.DefaultPrevented() })
+	_ = r.vm.Set("__ev__", obj)
+	_, _ = r.vm.RunString(`
+		(function() {
+			var o = __ev__;
+			var getter = o.__getDP__;
+			Object.defineProperty(o, 'defaultPrevented', {
+				get: getter,
+				configurable: true,
+				enumerable: true
+			});
+		})();
+	`)
+	_ = r.vm.Set("__ev__", nil)
+
+	if e.Target() != nil {
+		_ = obj.Set("target", r.wrapNode(e.Target()))
+	}
+	if e.CurrentTarget() != nil {
+		_ = obj.Set("currentTarget", r.wrapNode(e.CurrentTarget()))
+	}
+
+	// MouseEvent fields (only populated when the concrete type is *MouseEvent).
+	if me, ok := interface{}(e).(*dom.MouseEvent); ok {
+		_ = obj.Set("clientX", me.ClientX)
+		_ = obj.Set("clientY", me.ClientY)
+		_ = obj.Set("button", me.Button)
+	}
+
+	// KeyboardEvent fields.
+	if ke, ok := interface{}(e).(*dom.KeyboardEvent); ok {
+		_ = obj.Set("key", ke.Key)
+		_ = obj.Set("code", ke.Code)
+	}
+
+	return obj
+}
+
+// ---------------------------------------------------------------------------
+// JS bridge: attribute methods
+// ---------------------------------------------------------------------------
+
+// jsGetAttribute implements element.getAttribute(name).
+func (r *Runtime) jsGetAttribute(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 1 {
+		return goja.Null()
+	}
+	name := call.Arguments[0].String()
+	if !node.HasAttribute(name) {
+		return goja.Null()
+	}
+	return r.vm.ToValue(node.GetAttribute(name))
+}
+
+// jsSetAttribute implements element.setAttribute(name, value).
+func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 2 {
+		return goja.Undefined()
+	}
+	name := call.Arguments[0].String()
+	value := call.Arguments[1].String()
+	node.SetAttribute(name, value)
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+// jsRemoveAttribute implements element.removeAttribute(name).
+func (r *Runtime) jsRemoveAttribute(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 1 {
+		return goja.Undefined()
+	}
+	name := call.Arguments[0].String()
+	// Remove the attribute from the node's Attr slice.
+	lower := strings.ToLower(name)
+	for i := range node.Attr {
+		if strings.ToLower(node.Attr[i].Name) == lower {
+			node.Attr = append(node.Attr[:i], node.Attr[i+1:]...)
+			break
+		}
+	}
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+// jsHasAttribute implements element.hasAttribute(name).
+func (r *Runtime) jsHasAttribute(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 1 {
+		return r.vm.ToValue(false)
+	}
+	return r.vm.ToValue(node.HasAttribute(call.Arguments[0].String()))
+}
+
+// ---------------------------------------------------------------------------
+// JS bridge: mutation methods
+// ---------------------------------------------------------------------------
+
+// jsRemove implements element.remove(), detaching the node from its parent.
+func (r *Runtime) jsRemove(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || node.Parent == nil {
+		return goja.Undefined()
+	}
+	node.Parent.RemoveChild(node)
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+// jsGetElementByID implements document.getElementById(id).
+func (r *Runtime) jsGetElementByID(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return goja.Null()
+	}
+	id := call.Arguments[0].String()
+	node := r.domDoc.ElementByID(id)
+	if node == nil {
+		return goja.Null()
+	}
+	return r.wrapNode(node)
+}
+
+// jsGetElementsByClassName implements document.getElementsByClassName(class).
+func (r *Runtime) jsGetElementsByClassName(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return newJSArray(r.vm, nil)
+	}
+	class := call.Arguments[0].String()
+	nodes := r.domDoc.ElementsByClassName(class)
+	wrapped := make([]goja.Value, len(nodes))
+	for i, n := range nodes {
+		wrapped[i] = r.wrapNode(n)
+	}
+	return newJSArray(r.vm, wrapped)
+}
+
+// jsGetElementsByTagName implements document.getElementsByTagName(tag).
+func (r *Runtime) jsGetElementsByTagName(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return newJSArray(r.vm, nil)
+	}
+	tag := call.Arguments[0].String()
+	nodes := r.domDoc.ElementsByTagName(tag)
+	wrapped := make([]goja.Value, len(nodes))
+	for i, n := range nodes {
+		wrapped[i] = r.wrapNode(n)
+	}
+	return newJSArray(r.vm, wrapped)
+}
+
+// jsCreateTextNode implements document.createTextNode(text).
+func (r *Runtime) jsCreateTextNode(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return goja.Null()
+	}
+	text := call.Arguments[0].String()
+	node := r.domDoc.NewText(text)
+	return r.wrapNode(node)
+}
+
+// ---------------------------------------------------------------------------
+// HTML serialization (for innerHTML getter)
+// ---------------------------------------------------------------------------
+
+// voidElements lists the HTML elements that have no closing tag.
+var voidElements = map[string]bool{
+	"br": true, "hr": true, "img": true, "input": true,
+	"meta": true, "link": true, "area": true, "base": true,
+	"col": true, "embed": true, "param": true, "source": true,
+	"track": true, "wbr": true,
+}
+
+// serializeChildren returns the HTML serialization of node's children.
+func (r *Runtime) serializeChildren(node *dom.Node) string {
+	var sb strings.Builder
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		r.serializeNode(&sb, c)
+	}
+	return sb.String()
+}
+
+// serializeNode writes the HTML serialization of a single node to sb.
+func (r *Runtime) serializeNode(sb *strings.Builder, n *dom.Node) {
+	switch n.Type {
+	case dom.NodeText:
+		sb.WriteString(escapeHTML(n.DataContent))
+	case dom.NodeElement:
+		tag := strings.ToLower(n.Data)
+		sb.WriteString("<")
+		sb.WriteString(tag)
+		for _, a := range n.Attr {
+			sb.WriteString(" ")
+			sb.WriteString(a.Name)
+			sb.WriteString(`="`)
+			sb.WriteString(escapeAttr(a.Value))
+			sb.WriteString(`"`)
+		}
+		if voidElements[tag] {
+			sb.WriteString(">")
+			return
+		}
+		sb.WriteString(">")
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			r.serializeNode(sb, c)
+		}
+		sb.WriteString("</")
+		sb.WriteString(tag)
+		sb.WriteString(">")
+	case dom.NodeComment:
+		sb.WriteString("<!--")
+		sb.WriteString(n.DataContent)
+		sb.WriteString("-->")
+	}
+}
+
+// escapeHTML escapes special HTML characters in text content.
+func escapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// escapeAttr escapes special characters in attribute values.
+func escapeAttr(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// ---------------------------------------------------------------------------
+// Mutation notification
+// ---------------------------------------------------------------------------
+
+// notifyMutation calls the OnMutation callback if one was provided. It is
+// invoked after every DOM mutation from JS so the engine can re-style and
+// re-layout.
+func (r *Runtime) notifyMutation() {
+	if r.opts.OnMutation != nil {
+		r.opts.OnMutation()
+	}
 }

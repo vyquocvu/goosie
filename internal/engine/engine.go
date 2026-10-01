@@ -106,6 +106,11 @@ type Session struct {
 	// Transitions tracks active CSS transitions for animated property changes.
 	// nil when no transitions have been started.
 	Transitions *TransitionTracker
+
+	// inv is the caller's invalidation batch. When non-nil, JSMutationSink
+	// records DOM mutations into it so the pipeline knows to re-style and
+	// re-layout. Set via WithInvalidation.
+	inv *Invalidation
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -225,6 +230,13 @@ func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegis
 // console receives the runtime's console output; pass nil to discard it.
 func WithJS(rt *js.Runtime) Option {
 	return func(s *Session) { s.jsRT = rt }
+}
+
+// WithInvalidation supplies the invalidation batch that JSMutationSink records
+// DOM mutations into. Without it, JSMutationSink is a no-op and the engine
+// does not learn about script-driven DOM changes.
+func WithInvalidation(inv *Invalidation) Option {
+	return func(s *Session) { s.inv = inv }
 }
 
 // fontJob is one @font-face descriptor set queued for fetching.
@@ -1005,4 +1017,20 @@ func (s *Session) JSTitle() string {
 		return ""
 	}
 	return s.jsRT.Title()
+}
+
+// JSMutationSink returns a function suitable for js.Options.OnMutation that
+// records DOM mutations in the session's invalidation batch. The caller passes
+// it to the JS runtime at construction time; when a script mutates the DOM
+// (setAttribute, appendChild, innerHTML, etc.), the runtime fires the callback
+// and the engine learns it must re-style and re-layout.
+//
+// If no invalidation was supplied via WithInvalidation, the returned function
+// is a no-op so a session without invalidation tracking still works.
+func (s *Session) JSMutationSink() func() {
+	return func() {
+		if s.inv != nil {
+			s.inv.Add(DOMMutation, frame.RectF{}, 0)
+		}
+	}
 }
