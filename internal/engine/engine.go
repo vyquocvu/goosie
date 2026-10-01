@@ -87,10 +87,13 @@ type Session struct {
 	// Focus state for form editing. focus survives Reflow because reflow
 	// rebuilds only the layout arena, not the DOM; a new session per
 	// navigation starts unfocused. marked is the IME composition preview at
-	// the caret: painted but not yet the value.
-	focus  *dom.Node
-	caret  int
-	marked string
+	// the caret: painted but not yet the value. focusValue records the
+	// control's value when it gained focus so blur can fire a change event
+	// if the value was modified during the focus session.
+	focus      *dom.Node
+	caret      int
+	marked     string
+	focusValue string
 
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
@@ -846,6 +849,98 @@ func (s *Session) HitTestLink(x, y float32) string {
 		}
 	}
 	return ""
+}
+
+// ClickAt handles a click at the document-coordinate point. It finds an
+// activatable control at the point, fires a "click" event, and performs the
+// default action if the event was not prevented:
+//   - checkbox/radio: toggle the control
+//   - submit button: submit the form
+//   - reset button: reset the form
+//
+// Returns true if an activatable control was found at the point.
+func (s *Session) ClickAt(x, y float32) bool {
+	n := s.activatableAt(x, y)
+	if n == nil {
+		return false
+	}
+	ev := dom.NewEvent("click", true, true)
+	if !dom.DispatchEvent(n, ev) {
+		return true // preventDefault was called
+	}
+	// Default actions.
+	typ := strings.ToLower(n.GetAttribute("type"))
+	switch n.Data {
+	case "input":
+		switch typ {
+		case "checkbox", "radio":
+			s.ToggleControl(n)
+		case "submit":
+			if form := FindForm(n); form != nil {
+				s.SubmitForm(form)
+			}
+		case "reset":
+			if form := FindForm(n); form != nil {
+				s.ResetForm(form)
+			}
+		}
+	case "button":
+		btnType := strings.ToLower(n.GetAttribute("type"))
+		switch btnType {
+		case "submit", "":
+			if form := FindForm(n); form != nil {
+				s.SubmitForm(form)
+			}
+		case "reset":
+			if form := FindForm(n); form != nil {
+				s.ResetForm(form)
+			}
+		}
+	}
+	return true
+}
+
+// activatableAt walks the arena in reverse paint order for the box containing
+// the point, then walks that box's ancestors for an activatable element.
+func (s *Session) activatableAt(x, y float32) *dom.Node {
+	if s.Arena == nil {
+		return nil
+	}
+	objs := s.Arena.Objects
+	for i := len(objs) - 1; i >= 1; i-- {
+		obj := &objs[i]
+		x0, y0, x1, y1 := obj.BorderRect()
+		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+			continue
+		}
+		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if IsActivatable(cur.Node) {
+				return cur.Node
+			}
+		}
+	}
+	return nil
+}
+
+// SubmitForm fires a cancelable "submit" event on the form, then collects form
+// data and encodes it. The actual navigation is the caller's responsibility;
+// the method stores the submission details for the host to retrieve.
+func (s *Session) SubmitForm(form *dom.Node) {
+	ev := dom.NewEvent("submit", true, true)
+	if !dom.DispatchEvent(form, ev) {
+		return // preventDefault was called
+	}
+	_ = CollectFormData(form)
+	_ = FormMethod(form)
+	_ = FormAction(form)
+	// Navigation is the caller's responsibility.
+}
+
+// ResetForm resets the form controls to their default values.
+// Currently a placeholder for future implementation.
+func (s *Session) ResetForm(form *dom.Node) {
+	// Placeholder: reset logic to be implemented.
+	_ = form
 }
 
 // Match is one find result: the document-space rect of an occurrence of the

@@ -160,6 +160,17 @@ func (n *Node) HasAttribute(name string) bool {
 	return false
 }
 
+// RemoveAttribute removes the named attribute from the element.
+func (n *Node) RemoveAttribute(name string) {
+	lower := strings.ToLower(name)
+	for i := range n.Attr {
+		if strings.ToLower(n.Attr[i].Name) == lower {
+			n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
+			return
+		}
+	}
+}
+
 // ClassList returns the space-separated class names on the element.
 func (n *Node) ClassList() []string {
 	v := n.GetAttribute("class")

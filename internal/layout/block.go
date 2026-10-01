@@ -1633,6 +1633,13 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 	if obj.Node.Data == "img" {
 		return imgContentSize(a, obj, containingW)
 	}
+	if obj.Node.Data == "select" {
+		w, h = 154, 20
+		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
+			h = lh
+		}
+		return w, h, true
+	}
 	if obj.Node.Data != "input" && obj.Node.Data != "textarea" {
 		return 0, 0, false
 	}
@@ -1649,6 +1656,28 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 	switch strings.ToLower(obj.Node.GetAttribute("type")) {
 	case "checkbox", "radio":
 		return 13, 13, true
+	case "submit", "reset", "button":
+		// Button-like inputs shrink-wrap their value label with a minimum of 80px.
+		text := obj.Node.GetAttribute("value")
+		if text == "" {
+			switch strings.ToLower(obj.Node.GetAttribute("type")) {
+			case "submit":
+				text = "Submit"
+			case "reset":
+				text = "Reset"
+			}
+		}
+		textW := estimateTextWidth(a, s, text)
+		w = textW + s.PaddingLeft + s.PaddingRight + s.BorderLeftWidth + s.BorderRightWidth
+		if w < 80 {
+			w = 80
+		}
+		h = 20
+		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
+			h = lh
+		}
+		h += s.PaddingTop + s.PaddingBottom + s.BorderTopWidth + s.BorderBottomWidth
+		return w, h, true
 	case "", "text", "password", "email", "tel", "url", "search", "number":
 	default:
 		return 0, 0, false
@@ -1658,6 +1687,35 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		h = lh
 	}
 	return w, h, true
+}
+
+// estimateTextWidth estimates the pixel width of text using the style's font
+// metrics. Falls back to a half-em per character when metrics are unavailable.
+func estimateTextWidth(a *Arena, s *style.ComputedStyle, text string) float32 {
+	if text == "" {
+		return 0
+	}
+	fontSize := int32(s.FontSize)
+	if fontSize <= 0 {
+		return 0
+	}
+	slot := s.FontSlot()
+	runes := []rune(text)
+	if a.Metrics != nil {
+		var pen int32
+		for i, r := range runes {
+			pen += a.Metrics.GlyphAdvanceFixed(fontSize, r, slot)
+			if i < len(runes)-1 {
+				pen += int32(s.LetterSpacing) * 64
+			}
+			if r == ' ' {
+				pen += int32(s.WordSpacing) * 64
+			}
+		}
+		return float32((pen + 32) >> 6)
+	}
+	// Fallback: half-em per character.
+	return float32(len(runes)) * s.FontSize / 2
 }
 
 // imgContentSize resolves an image box's content size the way CSS replaced

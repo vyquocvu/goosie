@@ -118,8 +118,23 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 				b.paintText(obj, rect, opacity, clip)
 			}
 			if obj.Node != nil && obj.Node.Data == "input" {
-				b.paintControlValue(obj, opacity, clip)
-				b.paintPlaceholder(obj, opacity, clip)
+				typ := strings.ToLower(obj.Node.GetAttribute("type"))
+				switch typ {
+				case "checkbox":
+					cbRect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+					b.paintCheckbox(obj, cbRect, opacity)
+				case "radio":
+					rdRect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+					b.paintRadio(obj, rdRect, opacity)
+				case "submit", "reset", "button":
+					b.paintButtonLabel(obj, opacity, clip)
+				default:
+					b.paintControlValue(obj, opacity, clip)
+					b.paintPlaceholder(obj, opacity, clip)
+				}
+			}
+			if obj.Node != nil && obj.Node.Data == "select" {
+				b.paintSelect(obj, opacity, clip)
 			}
 			if obj.Node != nil && obj.Node.Data == "img" {
 				b.paintImage(obj, opacity, clip)
@@ -603,6 +618,13 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 	if text == "" {
 		return
 	}
+	typ := strings.ToLower(obj.Node.GetAttribute("type"))
+	// Checkbox, radio, submit, reset, and button inputs paint through their
+	// own specialised paths; skip them here.
+	switch typ {
+	case "checkbox", "radio", "submit", "reset", "button":
+		return
+	}
 	if obj.Node.GetAttribute("type") == "password" {
 		text = strings.Repeat("•", len([]rune(text)))
 	}
@@ -618,6 +640,220 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 		}
 	}
 	b.appendRun(text, rect, s, frame.RGB(0, 0, 0), opacity)
+}
+
+// paintCheckbox draws a checkbox widget: a small square box with a 1px border.
+// When checked, a checkmark is drawn inside.
+func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity float32) {
+	if rect.Empty() {
+		return
+	}
+	// White background fill.
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   frame.RGB(255, 255, 255),
+		Opacity: opacity,
+	})
+	// 1px border.
+	borderColor := frame.RGB(117, 117, 117)
+	// Top
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+1), Color: borderColor, Opacity: opacity})
+	// Bottom
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-1, rect.X1, rect.Y1), Color: borderColor, Opacity: opacity})
+	// Left
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X0+1, rect.Y1), Color: borderColor, Opacity: opacity})
+	// Right
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-1, rect.Y0, rect.X1, rect.Y1), Color: borderColor, Opacity: opacity})
+
+	// If checked, draw a checkmark.
+	if obj.Node != nil && obj.Node.HasAttribute("checked") {
+		checkColor := frame.RGB(0, 0, 0)
+		// Simple checkmark: a small V shape drawn as filled pixels.
+		cx := (rect.X0 + rect.X1) / 2
+		cy := (rect.Y0 + rect.Y1) / 2
+		// Draw a simple checkmark using a few filled rects.
+		// Left stroke (going down-right):
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx-3, cy-1, cx-2, cy+1), Color: checkColor, Opacity: opacity})
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx-2, cy, cx-1, cy+2), Color: checkColor, Opacity: opacity})
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx-1, cy+1, cx, cy+3), Color: checkColor, Opacity: opacity})
+		// Right stroke (going up-right):
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx, cy, cx+1, cy+2), Color: checkColor, Opacity: opacity})
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx+1, cy-1, cx+2, cy+1), Color: checkColor, Opacity: opacity})
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx+2, cy-2, cx+3, cy), Color: checkColor, Opacity: opacity})
+	}
+}
+
+// paintRadio draws a radio button widget: a small circle with a 1px border.
+// When checked, a filled dot is drawn inside.
+func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float32) {
+	if rect.Empty() {
+		return
+	}
+	// White background fill.
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   frame.RGB(255, 255, 255),
+		Opacity: opacity,
+	})
+	// Draw a circular border using small filled rects approximating a circle.
+	borderColor := frame.RGB(117, 117, 117)
+	cx := (rect.X0 + rect.X1) / 2
+	cy := (rect.Y0 + rect.Y1) / 2
+	rx := (rect.X1 - rect.X0) / 2
+	ry := (rect.Y1 - rect.Y0) / 2
+	// Draw the circle outline by filling pixels near the ellipse boundary.
+	for dy := -ry; dy <= ry; dy++ {
+		for dx := -rx; dx <= rx; dx++ {
+			// Check if this pixel is on the border (near the ellipse edge).
+			dist := float32(dx*dx)/float32(rx*rx) + float32(dy*dy)/float32(ry*ry)
+			if dist >= 0.7 && dist <= 1.1 {
+				b.list.Append(DisplayCmd{
+					Kind:    CmdFill,
+					Rect:    frame.Rect4(cx+dx, cy+dy, cx+dx+1, cy+dy+1),
+					Color:   borderColor,
+					Opacity: opacity,
+				})
+			}
+		}
+	}
+
+	// If checked, draw a filled dot in the center.
+	if obj.Node != nil && obj.Node.HasAttribute("checked") {
+		dotColor := frame.RGB(0, 0, 0)
+		dotR := rx / 3
+		if dotR < 1 {
+			dotR = 1
+		}
+		for dy := -dotR; dy <= dotR; dy++ {
+			for dx := -dotR; dx <= dotR; dx++ {
+				if float32(dx*dx)+float32(dy*dy) <= float32(dotR*dotR)+1 {
+					b.list.Append(DisplayCmd{
+						Kind:    CmdFill,
+						Rect:    frame.Rect4(cx+dx, cy+dy, cx+dx+1, cy+dy+1),
+						Color:   dotColor,
+						Opacity: opacity,
+					})
+				}
+			}
+		}
+	}
+}
+
+// paintButtonLabel draws the value text of a button-like input (submit, reset,
+// button) centered in its box.
+func (b *Builder) paintButtonLabel(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil {
+		return
+	}
+	text := obj.Node.GetAttribute("value")
+	if text == "" {
+		typ := strings.ToLower(obj.Node.GetAttribute("type"))
+		switch typ {
+		case "submit":
+			text = "Submit"
+		case "reset":
+			text = "Reset"
+		}
+	}
+	if text == "" {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if rect.Empty() {
+		return
+	}
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+		if rect.Empty() {
+			return
+		}
+	}
+	// Center the text horizontally.
+	fontSize := int32(s.FontSize * b.scale)
+	if fontSize <= 0 {
+		return
+	}
+	runes := []rune(text)
+	textW := int32(0)
+	slot := s.FontSlot()
+	if b.metrics != nil {
+		for _, r := range runes {
+			textW += b.metrics.GlyphAdvance(fontSize, r, slot)
+		}
+	} else {
+		textW = int32(len(runes)) * fontSize / 2
+	}
+	rectW := rect.X1 - rect.X0
+	if textW < rectW {
+		rect.X0 += (rectW - textW) / 2
+	}
+	b.appendRun(text, rect, s, frame.RGB(0, 0, 0), opacity)
+}
+
+// paintSelect draws the selected option text and a dropdown arrow indicator
+// for a <select> element.
+func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil {
+		return
+	}
+	// Find the selected option.
+	var text string
+	var firstOption string
+	for c := obj.Node.FirstChild; c != nil; c = c.NextSibling {
+		if c.Element() && c.Data == "option" {
+			optText := c.TextContent()
+			if firstOption == "" {
+				firstOption = optText
+			}
+			if c.HasAttribute("selected") {
+				text = optText
+			}
+		}
+	}
+	if text == "" {
+		text = firstOption
+	}
+	if text == "" {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if rect.Empty() {
+		return
+	}
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+		if rect.Empty() {
+			return
+		}
+	}
+	// Leave room for the dropdown arrow on the right.
+	arrowW := int32(12 * b.scale)
+	textRect := rect
+	if rect.X1-rect.X0 > arrowW {
+		textRect.X1 -= arrowW
+	}
+	b.appendRun(text, textRect, s, frame.RGB(0, 0, 0), opacity)
+
+	// Draw a dropdown arrow (small triangle) on the right side.
+	arrowCX := rect.X1 - arrowW/2
+	arrowCY := (rect.Y0 + rect.Y1) / 2
+	arrowColor := frame.RGB(80, 80, 80)
+	// Simple downward triangle: 3 rows of increasing width.
+	for i := int32(0); i < 3; i++ {
+		halfW := i + 1
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(arrowCX-halfW, arrowCY-1+i, arrowCX+halfW, arrowCY+i),
+			Color:   arrowColor,
+			Opacity: opacity,
+		})
+	}
 }
 
 // paintFocus draws the focused control's caret and focus ring.

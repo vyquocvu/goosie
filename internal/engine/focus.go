@@ -2,6 +2,7 @@ package engine
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/layout"
@@ -61,15 +62,29 @@ func (s *Session) HasControlAt(x, y float32) bool {
 // focus. Clicking empty space blurs; clicking the already-focused control
 // changes nothing. Returns whether focus state changed. Any focus change ends
 // composition: the marked text belonged to the control that had focus.
+// Fires "blur" and "focus" events on the affected controls, and a "change"
+// event on the blurred control if its value was modified during focus.
 func (s *Session) FocusControl(x, y float32) bool {
 	n := s.controlAt(x, y)
 	if n == s.focus {
 		return false
 	}
+	prev := s.focus
+	// Fire blur and change on the old control.
+	if prev != nil {
+		dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
+		if s.controlValue(prev) != s.focusValue {
+			dom.DispatchEvent(prev, dom.NewEvent("change", true, true))
+		}
+	}
 	s.focus = n
 	s.marked = ""
 	if n != nil {
 		s.caret = len([]rune(s.controlValue(n)))
+		s.focusValue = s.controlValue(n)
+		dom.DispatchEvent(n, dom.NewEvent("focus", false, false))
+	} else {
+		s.focusValue = ""
 	}
 	return true
 }
@@ -114,6 +129,7 @@ func (s *Session) CommitText(text string) bool {
 	out = append(out, runes[s.caret:]...)
 	s.caret += len(added)
 	s.setControlValue(s.focus, string(out))
+	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
 	return true
 }
 
@@ -146,12 +162,20 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		if r < 0x20 {
 			return false
 		}
-		return insert(string(r))
+		if insert(string(r)) {
+			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+			return true
+		}
+		return false
 	case EditEnter:
 		if s.focus.DataAtom != dom.AtomTextarea {
 			return false
 		}
-		return insert("\n")
+		if insert("\n") {
+			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+			return true
+		}
+		return false
 	case EditBackspace:
 		if s.caret == 0 || len(runes) == 0 {
 			return false
@@ -160,6 +184,7 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		out = append(out, runes[s.caret:]...)
 		s.caret--
 		s.setControlValue(s.focus, string(out))
+		dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
 		return true
 	case EditLeft:
 		if s.caret > 0 {
@@ -223,6 +248,120 @@ func (s *Session) setControlValue(n *dom.Node, v string) {
 	n.SetAttribute("value", v)
 }
 
+// IsChecked reports whether a checkbox or radio input is checked.
+// The checked state is tracked via the "checked" boolean attribute:
+// presence means checked, absence means unchecked.
+func IsChecked(n *dom.Node) bool {
+	if n == nil {
+		return false
+	}
+	return n.HasAttribute("checked")
+}
+
+// SetChecked sets or removes the checked attribute on a node.
+func SetChecked(n *dom.Node, checked bool) {
+	if n == nil {
+		return
+	}
+	if checked {
+		n.SetAttribute("checked", "")
+	} else {
+		n.RemoveAttribute("checked")
+	}
+}
+
+// IsActivatable reports whether a node is a clickable control
+// (button, submit, reset, etc.).
+func IsActivatable(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	switch n.Data {
+	case "button":
+		return true
+	case "input":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		switch typ {
+		case "submit", "reset", "button", "image":
+			return true
+		}
+	}
+	return false
+}
+
+// SelectedOption returns the currently selected <option> node within a <select>.
+// If no option has the "selected" attribute, the first <option> child is returned.
+// Returns nil if selectNode is nil or has no <option> children.
+func SelectedOption(selectNode *dom.Node) *dom.Node {
+	if selectNode == nil {
+		return nil
+	}
+	var first *dom.Node
+	for c := selectNode.FirstChild; c != nil; c = c.NextSibling {
+		if c.Element() && c.Data == "option" {
+			if first == nil {
+				first = c
+			}
+			if c.HasAttribute("selected") {
+				return c
+			}
+		}
+	}
+	return first
+}
+
+// ToggleControl toggles the checked state of a checkbox or radio input.
+// For radio buttons, it also unchecks other radios in the same group
+// (same parent form or document). Returns true if the control was toggled.
+func (s *Session) ToggleControl(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	typ := strings.ToLower(n.GetAttribute("type"))
+	switch typ {
+	case "checkbox":
+		SetChecked(n, !IsChecked(n))
+		dom.DispatchEvent(n, dom.NewEvent("change", true, true))
+		dom.DispatchEvent(n, dom.NewEvent("input", true, true))
+		return true
+	case "radio":
+		// Uncheck all radios in the same group (same name, same form).
+		name := n.GetAttribute("name")
+		// Walk up to find the form ancestor.
+		form := n.Parent
+		for form != nil && form.Data != "form" {
+			form = form.Parent
+		}
+		root := &s.Doc.Node
+		if form != nil {
+			root = form
+		}
+		// Uncheck siblings with the same name.
+		uncheckRadioGroup(root, name, n)
+		n.SetAttribute("checked", "")
+		dom.DispatchEvent(n, dom.NewEvent("change", true, true))
+		dom.DispatchEvent(n, dom.NewEvent("input", true, true))
+		return true
+	}
+	return false
+}
+
+// uncheckRadioGroup walks the subtree rooted at root and removes the checked
+// attribute from every radio input with the given name, except for keep.
+func uncheckRadioGroup(root *dom.Node, name string, keep *dom.Node) {
+	if root == nil {
+		return
+	}
+	if root.Element() && root.Data == "input" &&
+		strings.ToLower(root.GetAttribute("type")) == "radio" &&
+		root.GetAttribute("name") == name && root != keep {
+		root.RemoveAttribute("checked")
+	}
+	for c := root.FirstChild; c != nil; c = c.NextSibling {
+		uncheckRadioGroup(c, name, keep)
+	}
+}
+
 // objectFor returns the arena object laid out for n, or nil when the node has
 // no box (e.g. display:none) or the arena has not been built.
 func (s *Session) objectFor(n *dom.Node) *layout.Object {
@@ -235,4 +374,110 @@ func (s *Session) objectFor(n *dom.Node) *layout.Object {
 		}
 	}
 	return nil
+}
+
+// FocusNext cycles focus to the next tabbable control in the document.
+// Tabbable controls: input (not hidden), textarea, select, button, a[href].
+// Wraps around to the first control when at the end.
+func (s *Session) FocusNext() {
+	if s.Doc == nil {
+		return
+	}
+	controls := tabbableControls(s.Doc)
+	if len(controls) == 0 {
+		return
+	}
+	idx := -1
+	for i, c := range controls {
+		if c == s.focus {
+			idx = i
+			break
+		}
+	}
+	next := controls[(idx+1)%len(controls)]
+	// Fire blur/change on old focus.
+	if s.focus != nil {
+		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
+		if s.controlValue(s.focus) != s.focusValue {
+			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
+		}
+	}
+	s.focus = next
+	s.marked = ""
+	s.caret = len([]rune(s.controlValue(next)))
+	s.focusValue = s.controlValue(next)
+	dom.DispatchEvent(next, dom.NewEvent("focus", false, false))
+}
+
+// FocusPrev cycles focus to the previous tabbable control in the document.
+// Wraps around to the last control when at the beginning.
+func (s *Session) FocusPrev() {
+	if s.Doc == nil {
+		return
+	}
+	controls := tabbableControls(s.Doc)
+	if len(controls) == 0 {
+		return
+	}
+	idx := 0
+	for i, c := range controls {
+		if c == s.focus {
+			idx = i
+			break
+		}
+	}
+	prev := controls[(idx-1+len(controls))%len(controls)]
+	// Fire blur/change on old focus.
+	if s.focus != nil {
+		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
+		if s.controlValue(s.focus) != s.focusValue {
+			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
+		}
+	}
+	s.focus = prev
+	s.marked = ""
+	s.caret = len([]rune(s.controlValue(prev)))
+	s.focusValue = s.controlValue(prev)
+	dom.DispatchEvent(prev, dom.NewEvent("focus", false, false))
+}
+
+// TabbableControls returns all focusable controls in tree order.
+// Tabbable elements: input (not hidden, not disabled), textarea, select,
+// button, and a[href].
+func TabbableControls(doc *dom.Document) []*dom.Node {
+	var result []*dom.Node
+	walkForTabbable(&doc.Node, &result)
+	return result
+}
+
+func tabbableControls(doc *dom.Document) []*dom.Node {
+	return TabbableControls(doc)
+}
+
+func walkForTabbable(n *dom.Node, result *[]*dom.Node) {
+	if n.Element() && isTabbable(n) {
+		*result = append(*result, n)
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		walkForTabbable(c, result)
+	}
+}
+
+func isTabbable(n *dom.Node) bool {
+	if !n.Element() {
+		return false
+	}
+	if n.HasAttribute("disabled") {
+		return false
+	}
+	switch n.Data {
+	case "input":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		return typ != "hidden"
+	case "textarea", "select", "button":
+		return true
+	case "a":
+		return n.HasAttribute("href")
+	}
+	return false
 }
