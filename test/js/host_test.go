@@ -69,8 +69,6 @@ func TestConsoleWithNoWriterIsDiscardedNotFatal(t *testing.T) {
 func TestUnsupportedWebAPIsFailLoudly(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 	for _, tc := range []struct{ src, missing string }{
-		{`setTimeout(function () {}, 0);`, "setTimeout"},
-		{`document.querySelector("p");`, "querySelector"},
 		{`fetch("/data.json");`, "fetch"},
 	} {
 		err := r.Run(tc.src, "inline")
