@@ -102,6 +102,10 @@ type Session struct {
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
+
+	// Transitions tracks active CSS transitions for animated property changes.
+	// nil when no transitions have been started.
+	Transitions *TransitionTracker
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
