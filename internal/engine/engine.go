@@ -760,6 +760,27 @@ func (s *Session) Reflow(viewportW float32) error {
 			}
 		}
 	}
+	// Render canvas elements: replay recorded ops into a bitmap and attach it
+	// as the box's Image so the paint pipeline draws it like any other image.
+	if s.jsRT != nil {
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil && n.Data == "canvas" {
+				ops := s.jsRT.CanvasOps(int(n.ID))
+				if len(ops) > 0 {
+					w, h := s.jsRT.CanvasDimensions(int(n.ID))
+					if w > 0 && h > 0 {
+						b := frame.NewBitmap(w, h)
+						frameOps := make([]frame.CanvasOp, len(ops))
+						for j, op := range ops {
+							frameOps[j] = frame.CanvasOp{Method: op.Method, Args: op.Args}
+						}
+						frame.ReplayCanvasOps(b, frameOps, w, h)
+						candidate.Objects[i].Image = b.AsRGBA()
+					}
+				}
+			}
+		}
+	}
 	s.Arena = candidate
 	// Selection ends index the old arena's word list; the rebuild just moved
 	// every word, so the highlight would paint on the wrong boxes.

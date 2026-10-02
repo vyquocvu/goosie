@@ -148,6 +148,9 @@ type Runtime struct {
 	nodeRegistry map[int]*dom.Node
 	nextNID      int
 	nodeProto    *goja.Object
+
+	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
+	canvasContexts map[int]*canvasContext2D
 }
 
 // New builds a runtime for one document.
@@ -311,6 +314,9 @@ func (r *Runtime) setupDOM() {
 	})
 	_ = r.nodeProto.Set("createElement", func(call goja.FunctionCall) goja.Value {
 		return r.jsCreateElement(call)
+	})
+	_ = r.nodeProto.Set("getContext", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetContext(call)
 	})
 	// Set the prototype as a temporary global so RunString can reference it.
 	_ = r.vm.Set("__nodeProto__", r.nodeProto)
