@@ -168,6 +168,7 @@ func New(opts Options) (*Runtime, error) {
 		r.setupFetch(opts.HTTPClient)
 	}
 	r.setupTimers()
+	r.setupPromise()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 

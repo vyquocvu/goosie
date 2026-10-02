@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/layout"
 )
@@ -72,6 +73,7 @@ func (s *Session) FocusControl(x, y float32) bool {
 	prev := s.focus
 	// Fire blur and change on the old control.
 	if prev != nil {
+		css.SetFocus(prev, false)
 		dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
 		if s.controlValue(prev) != s.focusValue {
 			dom.DispatchEvent(prev, dom.NewEvent("change", true, true))
@@ -82,6 +84,7 @@ func (s *Session) FocusControl(x, y float32) bool {
 	if n != nil {
 		s.caret = len([]rune(s.controlValue(n)))
 		s.focusValue = s.controlValue(n)
+		css.SetFocus(n, true)
 		dom.DispatchEvent(n, dom.NewEvent("focus", false, false))
 	} else {
 		s.focusValue = ""
@@ -480,4 +483,46 @@ func isTabbable(n *dom.Node) bool {
 		return n.HasAttribute("href")
 	}
 	return false
+}
+
+// SetHover updates the hover state for the element at the given document point.
+// It unhoversthe previously hovered element (if any) and hovers the new one.
+// Returns whether the hover state changed.
+func (s *Session) SetHover(x, y float32) bool {
+	if s.Arena == nil {
+		return false
+	}
+
+	// Find the topmost element at the point.
+	var hovered *dom.Node
+	objs := s.Arena.Objects
+	for i := len(objs) - 1; i >= 1; i-- {
+		obj := &objs[i]
+		x0, y0, x1, y1 := obj.BorderRect()
+		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+			continue
+		}
+		if obj.Node != nil && obj.Node.Element() {
+			hovered = obj.Node
+			break
+		}
+	}
+
+	if hovered == s.hovered {
+		return false
+	}
+
+	// Unhover the previous element.
+	if s.hovered != nil {
+		css.SetHover(s.hovered, false)
+	}
+
+	s.hovered = hovered
+
+	// Hover the new element.
+	if hovered != nil {
+		css.SetHover(hovered, true)
+	}
+
+	return true
 }

@@ -470,14 +470,17 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		// We have no navigation history, so all links are treated as unvisited.
 		tag := strings.ToLower(n.Data)
 		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
-	case "visited", "hover", "focus", "active", "focus-within", "focus-visible":
-		// Interaction pseudo-classes require runtime state that the engine
-		// does not track yet, and so does history: with no visit recorded, no
-		// link is ever visited. Returning false matches what a browser shows on
+	case "visited", "active", "focus-within", "focus-visible":
+		// These interaction pseudo-classes require runtime state that the engine
+		// does not track yet. Returning false matches what a browser shows on
 		// a first load, which is the state every reference render is captured
 		// in - treating `a:visited` as `a:link` painted Wikipedia's links in
 		// MediaWiki's visited purple because that rule comes after the link one.
 		return false
+	case "hover":
+		return IsHovered(n)
+	case "focus":
+		return IsFocused(n)
 	case "checked", "disabled", "enabled", "placeholder-shown":
 		return false
 	case "nth-child":

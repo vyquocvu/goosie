@@ -91,6 +91,7 @@ type Session struct {
 	// control's value when it gained focus so blur can fire a change event
 	// if the value was modified during the focus session.
 	focus      *dom.Node
+	hovered    *dom.Node
 	caret      int
 	marked     string
 	focusValue string
