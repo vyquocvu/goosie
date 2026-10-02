@@ -781,6 +781,16 @@ func (s *Session) Reflow(viewportW float32) error {
 			}
 		}
 	}
+	// Update intersection observer geometry and check intersections.
+	if s.jsRT != nil {
+		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil {
+				s.jsRT.SetElementRect(int(n.ID), candidate.Objects[i].X, candidate.Objects[i].Y, candidate.Objects[i].W, candidate.Objects[i].H)
+			}
+		}
+		s.jsRT.CheckIntersections()
+	}
 	s.Arena = candidate
 	// Selection ends index the old arena's word list; the rebuild just moved
 	// every word, so the highlight would paint on the wrong boxes.

@@ -40,6 +40,8 @@ type intersectionState struct {
 	// elementRects maps element IDs to their bounding rects.
 	// The engine updates this during layout.
 	elementRects map[int][4]float32
+	// observers tracks all active observers for CheckIntersections.
+	observers []*IntersectionObserver
 }
 
 const intersectionStateKey = "__intersectionState__"
@@ -144,6 +146,13 @@ func (r *Runtime) constructIntersectionObserver(call goja.ConstructorCall) *goja
 	_ = obj.Set("disconnect", func(call goja.FunctionCall) goja.Value {
 		return r.intersectionDisconnect(call, obs)
 	})
+
+	// Register observer
+	if is := intersectionOf(r); is != nil {
+		is.mu.Lock()
+		is.observers = append(is.observers, obs)
+		is.mu.Unlock()
+	}
 
 	return obj
 }
@@ -265,9 +274,150 @@ func (r *Runtime) intersectionDisconnect(call goja.FunctionCall, obs *Intersecti
 // CheckIntersections checks all observed elements and fires callbacks for changes.
 // Called by the engine after layout/scroll.
 func (r *Runtime) CheckIntersections() {
-	// This would be called on all active observers. For now, we provide a
-	// mechanism for the engine to trigger checks.
-	// In a full implementation, we'd maintain a registry of all observers.
+	is := intersectionOf(r)
+	if is == nil {
+		return
+	}
+
+	is.mu.Lock()
+	observers := make([]*IntersectionObserver, len(is.observers))
+	copy(observers, is.observers)
+	viewportRect := is.viewportRect
+	elementRects := make(map[int][4]float32)
+	for k, v := range is.elementRects {
+		elementRects[k] = v
+	}
+	is.mu.Unlock()
+
+	for _, obs := range observers {
+		obs.mu.Lock()
+		entries := make([]*IntersectionEntry, len(obs.entries))
+		copy(entries, obs.entries)
+		callback := obs.callback
+		threshold := obs.threshold
+		obs.mu.Unlock()
+
+		if callback == nil {
+			continue
+		}
+
+		var changed []*IntersectionEntry
+		for _, entry := range entries {
+			// Get element rect
+			r.mu.Lock()
+			var nodeID int
+			for id := range r.nodeRegistry {
+				// Find the node ID for this target
+				if targetObj, ok := entry.target.Export().(*goja.Object); ok {
+					if nidVal := targetObj.Get("__nid__"); nidVal != nil {
+						if id == int(nidVal.ToInteger()) {
+							nodeID = id
+							break
+						}
+					}
+				}
+			}
+			r.mu.Unlock()
+
+			if nodeID == 0 {
+				continue
+			}
+
+			elemRect, ok := elementRects[nodeID]
+			if !ok {
+				continue
+			}
+
+			// Calculate intersection
+			_ = rectsIntersect(viewportRect, elemRect)
+			ratio := intersectionRatio(viewportRect, elemRect)
+
+			// Check threshold
+			thresholdMet := false
+			for _, t := range threshold {
+				if ratio >= t {
+					thresholdMet = true
+					break
+				}
+			}
+			if len(threshold) == 0 && ratio > 0 {
+				thresholdMet = true
+			}
+
+			// Check if state changed
+			if thresholdMet != entry.lastState {
+				entry.lastState = thresholdMet
+				changed = append(changed, entry)
+			}
+		}
+
+		// Fire callback with changed entries
+		if len(changed) > 0 {
+			r.fireIntersectionCallback(callback, changed, viewportRect)
+		}
+	}
+}
+
+// rectsIntersect checks if two rects [x, y, w, h] intersect.
+func rectsIntersect(a, b [4]float32) bool {
+	aRight := a[0] + a[2]
+	aBottom := a[1] + a[3]
+	bRight := b[0] + b[2]
+	bBottom := b[1] + b[3]
+	return a[0] < bRight && aRight > b[0] && a[1] < bBottom && aBottom > b[1]
+}
+
+// intersectionRatio calculates the intersection ratio of b within a.
+func intersectionRatio(a, b [4]float32) float32 {
+	x0 := max(a[0], b[0])
+	y0 := max(a[1], b[1])
+	x1 := min(a[0]+a[2], b[0]+b[2])
+	y1 := min(a[1]+a[3], b[1]+b[3])
+
+	if x1 <= x0 || y1 <= y0 {
+		return 0
+	}
+
+	intersectArea := (x1 - x0) * (y1 - y0)
+	elemArea := b[2] * b[3]
+	if elemArea <= 0 {
+		return 0
+	}
+	return intersectArea / elemArea
+}
+
+func max(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// fireIntersectionCallback calls the observer callback with intersection entries.
+func (r *Runtime) fireIntersectionCallback(callback goja.Value, entries []*IntersectionEntry, viewportRect [4]float32) {
+	fn, ok := goja.AssertFunction(callback)
+	if !ok {
+		return
+	}
+
+	// Build entries array
+	arr := r.vm.NewArray()
+	for i, entry := range entries {
+		entryObj := r.vm.NewObject()
+		_ = entryObj.Set("target", entry.target)
+		_ = entryObj.Set("isIntersecting", entry.lastState)
+		_ = entryObj.Set("intersectionRatio", intersectionRatio(viewportRect, [4]float32{}))
+		_ = arr.Set(intToString(i), entryObj)
+	}
+
+	_, _ = fn(goja.Undefined(), arr)
 }
 
 // Helper functions.
