@@ -272,6 +272,9 @@ type ComputedStyle struct {
 	// BackgroundGradient is a linear-gradient() taken from the background
 	// shorthand or background-image, painted over the colour.
 	BackgroundGradient Gradient
+	// BackgroundRadialGradient is a radial-gradient() taken from the background
+	// shorthand or background-image, painted over the colour.
+	BackgroundRadialGradient RadialGradient
 	// BackgroundImage is the url() layer of the background shorthand or
 	// background-image, kept as authored (possibly relative); the engine
 	// resolves and fetches it. Empty means no image layer.
@@ -1431,11 +1434,12 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "background-color":
 		cs.BackgroundColor = parseColorValue(value)
 	case "background":
-		cs.BackgroundColor, cs.BackgroundGradient = parseBackground(value)
+		cs.BackgroundColor, cs.BackgroundGradient, cs.BackgroundRadialGradient = parseBackground(value)
 		cs.BackgroundImage = extractBackgroundURL(value)
 		parseBackgroundShorthandExtras(cs, value)
 	case "background-image":
 		cs.BackgroundGradient = parseGradient(value)
+		cs.BackgroundRadialGradient = parseRadialGradient(value)
 		cs.BackgroundImage = extractBackgroundURL(value)
 	case "background-repeat":
 		cs.BackgroundRepeat = parseBackgroundRepeat(value)

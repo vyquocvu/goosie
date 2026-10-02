@@ -24,21 +24,35 @@ type Gradient struct {
 	Stops []GradientStop
 }
 
+// RadialGradient is a radial colour ramp: colours radiate from a centre point.
+// Shape is "circle" or "ellipse" (default). Size is "closest-side",
+// "farthest-side", "closest-corner", or "farthest-corner" (default).
+// Cx, Cy are the centre as fractions of the box (0.5, 0.5 = centre).
+type RadialGradient struct {
+	Shape string  // "circle" or "ellipse"
+	Size  string  // "closest-side", "farthest-side", "closest-corner", "farthest-corner"
+	Cx    float32 // centre x as fraction (0..1)
+	Cy    float32 // centre y as fraction (0..1)
+	Stops []GradientStop
+}
+
 // Empty reports whether there is nothing to paint. A ramp needs two colours to
 // blend between; a single stop is the flat background colour's job.
 func (g Gradient) Empty() bool { return len(g.Stops) < 2 }
 
+// Empty reports whether the radial gradient has nothing to paint.
+func (g RadialGradient) Empty() bool { return len(g.Stops) < 2 }
+
 // parseBackground reads the background shorthand. A gradient in it is the
 // shorthand's image, and the colour is whatever is left once the function calls
 // are out of the way — declaring a gradient alone leaves the colour transparent.
-func parseBackground(v string) (css.Color, Gradient) {
+func parseBackground(v string) (css.Color, Gradient, RadialGradient) {
 	g := parseGradient(v)
-	return parseBackgroundColor(stripFunctions(v)), g
+	rg := parseRadialGradient(v)
+	return parseBackgroundColor(stripFunctions(v)), g, rg
 }
 
-// parseGradient takes the first linear-gradient() in a value. Layered and
-// radial images are a later milestone, and a box that declares them still gets
-// its background colour.
+// parseGradient takes the first linear-gradient() or radial-gradient() in a value.
 func parseGradient(v string) Gradient {
 	lower := strings.ToLower(v)
 	i := strings.Index(lower, "linear-gradient(")
@@ -49,6 +63,24 @@ func parseGradient(v string) Gradient {
 	if !ok {
 		return Gradient{}
 	}
+	return parseLinearGradientArgs(args)
+}
+
+// parseRadialGradient takes the first radial-gradient() in a value.
+func parseRadialGradient(v string) RadialGradient {
+	lower := strings.ToLower(v)
+	i := strings.Index(lower, "radial-gradient(")
+	if i < 0 {
+		return RadialGradient{}
+	}
+	args, ok := callArgs(v[i+len("radial-gradient("):])
+	if !ok {
+		return RadialGradient{}
+	}
+	return parseRadialGradientArgs(args)
+}
+
+func parseLinearGradientArgs(args string) Gradient {
 	parts := splitArgs(args)
 	if len(parts) == 0 {
 		return Gradient{}
@@ -65,6 +97,66 @@ func parseGradient(v string) Gradient {
 		s, ok := parseGradientStop(p)
 		if !ok {
 			return Gradient{}
+		}
+		stops = append(stops, s)
+	}
+	g.Stops = distributeStops(stops)
+	return g
+}
+
+func parseRadialGradientArgs(args string) RadialGradient {
+	parts := splitArgs(args)
+	if len(parts) == 0 {
+		return RadialGradient{}
+	}
+	g := RadialGradient{
+		Shape: "ellipse",
+		Size:  "farthest-corner",
+		Cx:    0.5,
+		Cy:    0.5,
+	}
+	// Parse shape/size/position from the first parts.
+	stopStart := 0
+	for i, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		switch p {
+		case "circle", "ellipse":
+			g.Shape = p
+			stopStart = i + 1
+		case "closest-side", "farthest-side", "closest-corner", "farthest-corner":
+			g.Size = p
+			stopStart = i + 1
+		case "center":
+			g.Cx, g.Cy = 0.5, 0.5
+			stopStart = i + 1
+		case "top":
+			g.Cy = 0
+			stopStart = i + 1
+		case "bottom":
+			g.Cy = 1
+			stopStart = i + 1
+		case "left":
+			g.Cx = 0
+			stopStart = i + 1
+		case "right":
+			g.Cx = 1
+			stopStart = i + 1
+		default:
+			// Check for position keywords combination or percentage.
+			if strings.HasSuffix(p, "%") {
+				// Could be a position percentage.
+				break
+			}
+			// Must be a color stop, so we're done parsing the header.
+			goto parseStops
+		}
+	}
+parseStops:
+	stops := make([]GradientStop, 0, len(parts)-stopStart)
+	for _, p := range parts[stopStart:] {
+		s, ok := parseGradientStop(p)
+		if !ok {
+			return RadialGradient{}
 		}
 		stops = append(stops, s)
 	}

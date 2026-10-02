@@ -17,9 +17,21 @@ type LinearGradient struct {
 	Stops []GradientStop
 }
 
+// RadialGradient is a colour ramp radiating from a centre point.
+// Shape is "circle" or "ellipse". Cx, Cy are the centre as fractions (0..1).
+type RadialGradient struct {
+	Shape string
+	Cx    float32
+	Cy    float32
+	Stops []GradientStop
+}
+
 // Empty reports whether the ramp has too few colours to blend between. A single
 // stop is a flat fill, and the caller keeps its background colour for that.
 func (g LinearGradient) Empty() bool { return len(g.Stops) < 2 }
+
+// Empty reports whether the radial gradient has nothing to paint.
+func (g RadialGradient) Empty() bool { return len(g.Stops) < 2 }
 
 // FillLinearGradient paints r with the ramp, rounding the corners along rad.
 //
@@ -93,6 +105,66 @@ func sampleGradient(stops []GradientStop, t float64) Color {
 		return mixColor(s.Color, e.Color, f)
 	}
 	return last.Color
+}
+
+// FillRadialGradient paints r with a radial gradient. The gradient radiates
+// from the centre point (Cx, Cy) as fractions of the box. For "ellipse" shape,
+// the radius scales with the box aspect ratio; for "circle", it uses the
+// smaller dimension.
+func (b *Bitmap) FillRadialGradient(r Rect, rad Corners, g RadialGradient, writes *int64) {
+	if g.Empty() {
+		return
+	}
+	cl := r.Intersection(b.Bounds())
+	if cl.Empty() {
+		return
+	}
+	if writes != nil {
+		*writes += int64(cl.W()) * int64(cl.H())
+	}
+	cx := float64(r.X0) + float64(g.Cx)*float64(r.W())
+	cy := float64(r.Y0) + float64(g.Cy)*float64(r.H())
+	// Radius: for ellipse, use the distance to the farthest corner; for circle,
+	// use the smaller dimension.
+	var radius float64
+	if g.Shape == "circle" {
+		radius = math.Min(float64(r.W()), float64(r.H())) / 2
+	} else {
+		// Ellipse: use the distance to the farthest corner from centre.
+		dx := math.Max(cx-float64(r.X0), float64(r.X1)-cx)
+		dy := math.Max(cy-float64(r.Y0), float64(r.Y1)-cy)
+		radius = math.Sqrt(dx*dx + dy*dy)
+	}
+	if radius <= 0 {
+		return
+	}
+	for y := int(cl.Y0); y < int(cl.Y1); y++ {
+		x0, x1 := float64(cl.X0), float64(cl.X1)
+		if !rad.Empty() {
+			l, rr := rad.spanAt(r, y)
+			x0, x1 = math.Max(x0, float64(l)), math.Min(x1, float64(rr))
+		}
+		py := float64(y) + 0.5
+		for x := int(math.Floor(x0)); x < int(math.Ceil(x1)); x++ {
+			cov := math.Min(x1, float64(x+1)) - math.Max(x0, float64(x))
+			if cov <= 0 {
+				continue
+			}
+			px := float64(x) + 0.5
+			dx := px - cx
+			dy := py - cy
+			dist := math.Sqrt(dx*dx + dy*dy)
+			t := dist / radius
+			if t > 1 {
+				t = 1
+			}
+			c := sampleGradient(g.Stops, t)
+			if cov < 0.999 {
+				c = ScaleColor(c, float32(cov))
+			}
+			b.Set(x, y, BlendOver(b.At(x, y), c))
+		}
+	}
 }
 
 // mixColor blends two premultiplied colours. Linear interpolation is what keeps

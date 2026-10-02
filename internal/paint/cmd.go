@@ -24,6 +24,8 @@ const (
 	CmdImage
 	// CmdGradient paints a rect filled with a linear colour ramp.
 	CmdGradient
+	// CmdRadialGradient paints a rect filled with a radial colour ramp.
+	CmdRadialGradient
 )
 
 func (k CmdKind) String() string {
@@ -38,6 +40,8 @@ func (k CmdKind) String() string {
 		return "image"
 	case CmdGradient:
 		return "gradient"
+	case CmdRadialGradient:
+		return "radial-gradient"
 	}
 	return "unknown"
 }
@@ -153,6 +157,8 @@ type DisplayCmd struct {
 	// Gradient is the ramp a CmdGradient fills its rect with. Its stops are
 	// premultiplied and already carry the command's opacity.
 	Gradient frame.LinearGradient
+	// RadialGradient is the ramp a CmdRadialGradient fills its rect with.
+	RadialGradient frame.RadialGradient
 
 	// Z orders this command within its layer. The list is sorted once per
 	// content version, never per frame or per tile; see List.SortStable.
@@ -176,6 +182,8 @@ func (d DisplayCmd) Bounds() (frame.Rect, bool) {
 		return d.Rect, !d.Rect.Empty() && (d.Kind == CmdImage || d.Color.A() > 0)
 	case CmdGradient:
 		return d.Rect, !d.Rect.Empty() && !d.Gradient.Empty()
+	case CmdRadialGradient:
+		return d.Rect, !d.Rect.Empty() && !d.RadialGradient.Empty()
 	}
 	return frame.Rect{}, false
 }

@@ -69,6 +69,8 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 			drawImage(out, &c, dx, dy, clip)
 		case paint.CmdGradient:
 			out.FillLinearGradient(c.Rect.Translate(dx, dy), c.Radius, c.Gradient, nil)
+		case paint.CmdRadialGradient:
+			out.FillRadialGradient(c.Rect.Translate(dx, dy), c.Radius, c.RadialGradient, nil)
 		}
 	}
 	return nil

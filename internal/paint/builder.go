@@ -111,6 +111,14 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 					Radius:   radius,
 				})
 			}
+			if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() {
+				b.list.Append(DisplayCmd{
+					Kind:           CmdRadialGradient,
+					Rect:           rect,
+					RadialGradient: rg,
+					Radius:         radius,
+				})
+			}
 			b.paintBackground(obj, opacity)
 			if obj.Style.Display != style.DisplayInline && obj.Style.Display != style.DisplayNone {
 				b.paintBorders(obj, rect, radius, opacity)
@@ -1779,6 +1787,21 @@ func gradient(g style.Gradient, opacity float32) frame.LinearGradient {
 		stops = append(stops, frame.GradientStop{At: s.At, Color: c})
 	}
 	return frame.LinearGradient{Angle: g.Angle, Stops: stops}
+}
+
+func radialGradient(g style.RadialGradient, opacity float32) frame.RadialGradient {
+	if g.Empty() {
+		return frame.RadialGradient{}
+	}
+	stops := make([]frame.GradientStop, 0, len(g.Stops))
+	for _, s := range g.Stops {
+		c := convertColor(s.Color)
+		if opacity > 0 && opacity < 1 {
+			c = frame.ScaleColor(c, opacity)
+		}
+		stops = append(stops, frame.GradientStop{At: s.At, Color: c})
+	}
+	return frame.RadialGradient{Shape: g.Shape, Cx: g.Cx, Cy: g.Cy, Stops: stops}
 }
 
 // paintBoxShadow draws each non-inset box-shadow layer as an offset coloured
