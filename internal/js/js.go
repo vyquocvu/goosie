@@ -185,6 +185,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupRAF()
 	r.setupStorage()
 	r.setupURLAPI()
+	r.setupTextEncoding()
 	r.setupHistory()
 	if opts.WebSocketDialer != nil {
 		r.setupWebSocket(opts.WebSocketDialer)
