@@ -188,6 +188,8 @@ func New(opts Options) (*Runtime, error) {
 	r.setupTextEncoding()
 	r.setupFormData()
 	r.setupAbortController()
+	r.setupCrypto()
+	r.setupPerformance()
 	r.setupHistory()
 	if opts.WebSocketDialer != nil {
 		r.setupWebSocket(opts.WebSocketDialer)
