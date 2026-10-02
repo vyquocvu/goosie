@@ -525,6 +525,18 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		return IsFocused(n)
 	case "checked", "disabled", "enabled", "placeholder-shown":
 		return false
+	case "has":
+		// :has() is a relational pseudo-class: it matches if the selector
+		// argument matches at least one element relative to this element.
+		// The argument may start with a combinator:
+		//   :has(.child)     - descendant
+		//   :has(> .child)   - direct child
+		//   :has(+ .sibling) - adjacent next sibling
+		//   :has(~ .sibling) - general next sibling
+		if c.Pseudo == "" {
+			return false
+		}
+		return matchHas(c.Pseudo, n)
 	case "nth-child":
 		return matchNth(c.Pseudo, n, false, false)
 	case "nth-last-child":
@@ -539,6 +551,92 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		return matchNth("1", n, true, true)
 	case "only-of-type":
 		return matchNth("1", n, true, false) && matchNth("1", n, true, true)
+	}
+	return false
+}
+
+// matchHas implements the :has() relational pseudo-class. The argument is a
+// selector list that may start with a combinator to specify the relationship:
+//
+//	:has(.child)     - any descendant
+//	:has(> .child)   - direct child
+//	:has(+ .sibling) - adjacent next sibling
+//	:has(~ .sibling) - general next sibling
+//
+// Returns true if at least one relative element matches any selector in the list.
+func matchHas(arg string, n *dom.Node) bool {
+	selectors := splitSelectorList(arg)
+	for _, selStr := range selectors {
+		selStr = strings.TrimSpace(selStr)
+		if selStr == "" {
+			continue
+		}
+		// Check for leading combinator
+		combinator := byte(' ') // default: descendant
+		rest := selStr
+		if len(selStr) > 0 {
+			switch selStr[0] {
+			case '>':
+				combinator = '>'
+				rest = strings.TrimSpace(selStr[1:])
+			case '+':
+				combinator = '+'
+				rest = strings.TrimSpace(selStr[1:])
+			case '~':
+				combinator = '~'
+				rest = strings.TrimSpace(selStr[1:])
+			}
+		}
+		if rest == "" {
+			continue
+		}
+		sel := ParseSelector(rest)
+		switch combinator {
+		case '>':
+			// Direct child
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if c.Type == dom.NodeElement && sel.Matches(c) {
+					return true
+				}
+			}
+		case '+':
+			// Adjacent next sibling
+			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
+				if sib.Type == dom.NodeElement {
+					if sel.Matches(sib) {
+						return true
+					}
+					break // only check the first element sibling
+				}
+			}
+		case '~':
+			// General next siblings
+			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
+				if sib.Type == dom.NodeElement && sel.Matches(sib) {
+					return true
+				}
+			}
+		default:
+			// Descendant (any depth)
+			if hasDescendantMatching(n, sel) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasDescendantMatching checks if any descendant of n matches the selector.
+func hasDescendantMatching(n *dom.Node, sel Selector) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == dom.NodeElement {
+			if sel.Matches(c) {
+				return true
+			}
+			if hasDescendantMatching(c, sel) {
+				return true
+			}
+		}
 	}
 	return false
 }
