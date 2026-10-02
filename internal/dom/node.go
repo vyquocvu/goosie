@@ -57,8 +57,19 @@ type Node struct {
 	NextSibling *Node
 	PrevSibling *Node
 
+	// Shadow DOM.
+	ShadowRoot *ShadowRoot
+
 	// Document back-pointer.
 	Doc *Document
+}
+
+// ShadowRoot is the root of a shadow tree attached to a host element.
+type ShadowRoot struct {
+	Host       *Node
+	FirstChild *Node
+	LastChild  *Node
+	Mode       string // "open" or "closed"
 }
 
 // Element reports whether the node is an element.
@@ -123,6 +134,23 @@ func (n *Node) InsertBefore(newChild, refChild *Node) {
 		n.FirstChild = newChild
 	}
 	refChild.PrevSibling = newChild
+}
+
+// AppendChild adds c as the last child of the shadow root.
+func (sr *ShadowRoot) AppendChild(c *Node) {
+	if c.Parent != nil {
+		c.Parent.RemoveChild(c)
+	}
+	c.Parent = sr.Host
+	c.Doc = sr.Host.Doc
+	if sr.LastChild != nil {
+		sr.LastChild.NextSibling = c
+		c.PrevSibling = sr.LastChild
+		sr.LastChild = c
+	} else {
+		sr.FirstChild = c
+		sr.LastChild = c
+	}
 }
 
 // GetAttribute returns the value of the named attribute, or "" if not present.

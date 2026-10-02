@@ -157,6 +157,9 @@ type Runtime struct {
 
 	// nodeWrappers maps DOM node IDs to their JS wrapper objects for lifecycle callbacks.
 	nodeWrappers map[int]*goja.Object
+
+	// shadowRoots maps host node IDs to their shadow root JS wrappers.
+	shadowRoots map[int]*goja.Object
 }
 
 // New builds a runtime for one document.
@@ -207,6 +210,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupResizeObserver()
 	r.setupCanvas()
 	r.setupCustomElements()
+	r.setupShadowDOM()
 	if opts.WorkerDialer != nil {
 		r.setupWorker(opts.WorkerDialer)
 	}
@@ -287,6 +291,7 @@ func (r *Runtime) setupDOM() {
 	r.domDoc = r.opts.DOM
 	r.nodeRegistry = make(map[int]*dom.Node)
 	r.nodeWrappers = make(map[int]*goja.Object)
+	r.shadowRoots = make(map[int]*goja.Object)
 	r.nextNID = 1
 
 	// Build a shared prototype for element wrapper objects. Each wrapper
