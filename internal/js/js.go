@@ -187,6 +187,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupURLAPI()
 	r.setupTextEncoding()
 	r.setupFormData()
+	r.setupAbortController()
 	r.setupHistory()
 	if opts.WebSocketDialer != nil {
 		r.setupWebSocket(opts.WebSocketDialer)
