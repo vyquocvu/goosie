@@ -73,6 +73,14 @@ type Options struct {
 	// a ReferenceError.
 	HTTPClient HTTPFetcher
 
+	// WebSocketDialer is the WebSocket backend. When non-nil, WebSocket is
+	// available to scripts. When nil, WebSocket is not defined.
+	WebSocketDialer WebSocketDialer
+
+	// CSP is the parsed Content-Security-Policy for this document. When
+	// non-nil, script/style/connect sources are checked against it.
+	CSP *CSPPolicy
+
 	// OnMutation is called when scripts mutate the DOM. The engine uses
 	// this to trigger re-style and re-layout. nil means mutations are
 	// not tracked (e.g., in tests).
@@ -173,6 +181,9 @@ func New(opts Options) (*Runtime, error) {
 	r.setupRAF()
 	r.setupStorage()
 	r.setupHistory()
+	if opts.WebSocketDialer != nil {
+		r.setupWebSocket(opts.WebSocketDialer)
+	}
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
