@@ -313,7 +313,73 @@ func (r *Runtime) runFetch(fetchURL string, opts FetchOptions, t *thenableObj) {
 		fs.mu.Unlock()
 	}()
 
+	// CORS enforcement
+	documentURL := r.opts.URL
+	if IsCORSRequest(documentURL, fetchURL) {
+		// Add Origin header for cross-origin requests
+		origin := getOrigin(documentURL)
+		if opts.Headers == nil {
+			opts.Headers = make(map[string]string)
+		}
+		opts.Headers["Origin"] = origin
+
+		// Check if preflight is needed
+		if NeedsPreflight(opts.Method, opts.Headers) {
+			// Send preflight OPTIONS request
+			preflightHeaders := buildPreflightHeaders(origin, opts.Method, opts.Headers)
+			preflightResp, err := fs.client.Fetch(fetchURL, "OPTIONS", preflightHeaders, nil)
+			if err != nil {
+				t.mu.Lock()
+				catchCB := t.catchCB
+				t.mu.Unlock()
+				fs.mu.Lock()
+				fs.callbacks = append(fs.callbacks, fetchCallback{
+					fn:       catchCB,
+					isReject: true,
+					arg:      "preflight failed: " + err.Error(),
+					chain:    t,
+				})
+				fs.mu.Unlock()
+				return
+			}
+			// Check preflight response
+			if !checkCORSResponse(origin, preflightResp.Headers) {
+				t.mu.Lock()
+				catchCB := t.catchCB
+				t.mu.Unlock()
+				fs.mu.Lock()
+				fs.callbacks = append(fs.callbacks, fetchCallback{
+					fn:       catchCB,
+					isReject: true,
+					arg:      "preflight CORS check failed",
+					chain:    t,
+				})
+				fs.mu.Unlock()
+				return
+			}
+		}
+	}
+
 	resp, err := fs.client.Fetch(fetchURL, opts.Method, opts.Headers, []byte(opts.Body))
+
+	// Check CORS on response for cross-origin requests
+	if err == nil && IsCORSRequest(documentURL, fetchURL) {
+		origin := getOrigin(documentURL)
+		if !checkCORSResponse(origin, resp.Headers) {
+			t.mu.Lock()
+			catchCB := t.catchCB
+			t.mu.Unlock()
+			fs.mu.Lock()
+			fs.callbacks = append(fs.callbacks, fetchCallback{
+				fn:       catchCB,
+				isReject: true,
+				arg:      "CORS check failed: Access-Control-Allow-Origin header missing or mismatched",
+				chain:    t,
+			})
+			fs.mu.Unlock()
+			return
+		}
+	}
 
 	t.mu.Lock()
 	thenCB := t.thenCB
