@@ -184,6 +184,9 @@ func New(opts Options) (*Runtime, error) {
 	if opts.WebSocketDialer != nil {
 		r.setupWebSocket(opts.WebSocketDialer)
 	}
+	r.setupMutationObserver()
+	r.setupResizeObserver()
+	r.setupCanvas()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
