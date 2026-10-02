@@ -184,6 +184,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupIntersectionObserver()
 	r.setupRAF()
 	r.setupStorage()
+	r.setupURLAPI()
 	r.setupHistory()
 	if opts.WebSocketDialer != nil {
 		r.setupWebSocket(opts.WebSocketDialer)
