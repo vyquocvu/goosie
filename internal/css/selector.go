@@ -47,7 +47,33 @@ func (s Selector) Specificity() (a, b, c int) {
 			switch cond.Type {
 			case CondID:
 				a++
-			case CondClass, CondAttr, CondPseudoClass:
+			case CondClass, CondAttr:
+				b++
+			case CondPseudoClass:
+				// :is() and :where() have special specificity rules.
+				if cond.Value == "where" {
+					// :where() contributes zero specificity.
+					continue
+				}
+				if cond.Value == "is" {
+					// :is() takes the highest specificity of its arguments.
+					if cond.Pseudo != "" {
+						selectors := splitSelectorList(cond.Pseudo)
+						maxA, maxB, maxC := 0, 0, 0
+						for _, selStr := range selectors {
+							sel := ParseSelector(selStr)
+							sa, sb, sc := sel.Specificity()
+							if CompareSpecificity(sa, sb, sc, maxA, maxB, maxC) > 0 {
+								maxA, maxB, maxC = sa, sb, sc
+							}
+						}
+						a += maxA
+						b += maxB
+						c += maxC
+					}
+					continue
+				}
+				// Other pseudo-classes contribute (0, 1, 0).
 				b++
 			case CondType, CondPseudoElement:
 				c++
@@ -465,6 +491,22 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		}
 		sel := ParseSelector(c.Pseudo)
 		return !sel.Matches(n)
+	case "is", "where":
+		// :is() and :where() take a comma-separated selector list and match if
+		// any selector in the list matches. The difference is specificity:
+		// :is() takes the highest specificity of its arguments, :where() is zero.
+		// Specificity is handled in the Specificity() method; here we just match.
+		if c.Pseudo == "" {
+			return false
+		}
+		selectors := splitSelectorList(c.Pseudo)
+		for _, selStr := range selectors {
+			sel := ParseSelector(selStr)
+			if sel.Matches(n) {
+				return true
+			}
+		}
+		return false
 	case "link", "any-link":
 		// Match any hyperlink element (<a href>, <area href>, <link href>).
 		// We have no navigation history, so all links are treated as unvisited.
@@ -617,4 +659,50 @@ func isLastElementChild(n *dom.Node) bool {
 		}
 	}
 	return false
+}
+
+// splitSelectorList splits a comma-separated selector list into individual selectors.
+// Handles nested parentheses (e.g., :is(.a, .b:not(.c))).
+func splitSelectorList(s string) []string {
+	var result []string
+	var current strings.Builder
+	depth := 0
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch ch {
+		case '(':
+			depth++
+			current.WriteByte(ch)
+		case ')':
+			depth--
+			current.WriteByte(ch)
+		case ',':
+			if depth == 0 {
+				// End of one selector.
+				sel := strings.TrimSpace(current.String())
+				if sel != "" {
+					result = append(result, sel)
+				}
+				current.Reset()
+			} else {
+				current.WriteByte(ch)
+			}
+		default:
+			current.WriteByte(ch)
+		}
+	}
+
+	// Last selector.
+	sel := strings.TrimSpace(current.String())
+	if sel != "" {
+		result = append(result, sel)
+	}
+
+	return result
+}
+
+// SplitSelectorList is the exported version of splitSelectorList for testing.
+func SplitSelectorList(s string) []string {
+	return splitSelectorList(s)
 }

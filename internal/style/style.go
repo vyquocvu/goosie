@@ -390,6 +390,9 @@ type ComputedStyle struct {
 	// TransformOrigin is the transform origin point. Default is center.
 	TransformOrigin css.TransformOrigin
 
+	// Filter is the parsed CSS filter property. Empty means no filter.
+	Filter []css.FilterFunc
+
 	// Animation fields for @keyframes animations.
 	AnimationName      string
 	AnimationDuration  time.Duration
@@ -1566,6 +1569,8 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.Transform = css.ParseTransform(value)
 	case "transform-origin":
 		cs.TransformOrigin = css.ParseTransformOrigin(value)
+	case "filter":
+		cs.Filter = css.ParseFilter(value)
 
 	case "animation":
 		name, dur, timing, delay, iterCount, dir, fill := css.ParseAnimationShorthand(value)
