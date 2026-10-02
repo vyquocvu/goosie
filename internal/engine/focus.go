@@ -512,16 +512,20 @@ func (s *Session) SetHover(x, y float32) bool {
 		return false
 	}
 
-	// Unhover the previous element.
-	if s.hovered != nil {
-		css.SetHover(s.hovered, false)
+	prev := s.hovered
+
+	// Unhover the previous element and fire mouseleave.
+	if prev != nil {
+		css.SetHover(prev, false)
+		dom.DispatchEvent(prev, dom.NewEvent("mouseleave", false, false))
 	}
 
 	s.hovered = hovered
 
-	// Hover the new element.
+	// Hover the new element and fire mouseenter.
 	if hovered != nil {
 		css.SetHover(hovered, true)
+		dom.DispatchEvent(hovered, dom.NewEvent("mouseenter", false, false))
 	}
 
 	return true

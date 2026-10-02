@@ -117,6 +117,102 @@ func TestFocusStateWithCSS(t *testing.T) {
 	}
 }
 
+func TestMouseEnterLeaveEvents(t *testing.T) {
+	html := `<html><body style="margin: 0;"><div id="target" style="width: 100px; height: 100px;">Content</div></body></html>`
+	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	target := s.Doc.ElementByID("target")
+	if target == nil {
+		t.Fatal("target not found")
+	}
+
+	entered := false
+	left := false
+	dom.AddEventListener(target, "mouseenter", func(e *dom.Event) {
+		entered = true
+	}, false)
+	dom.AddEventListener(target, "mouseleave", func(e *dom.Event) {
+		left = true
+	}, false)
+
+	// Hover over the div — should fire mouseenter.
+	s.SetHover(50, 50)
+	if !entered {
+		t.Error("mouseenter was not fired")
+	}
+
+	// Move hover away — should fire mouseleave.
+	s.SetHover(700, 500)
+	if !left {
+		t.Error("mouseleave was not fired")
+	}
+}
+
+func TestMouseEnterLeaveDoNotBubble(t *testing.T) {
+	html := `<html><body style="margin: 0;"><div id="parent" style="width: 200px; height: 200px;"><div id="child" style="width: 50px; height: 50px;">X</div></div></body></html>`
+	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	parent := s.Doc.ElementByID("parent")
+	if parent == nil {
+		t.Fatal("parent not found")
+	}
+
+	parentEntered := false
+	dom.AddEventListener(parent, "mouseenter", func(e *dom.Event) {
+		parentEntered = true
+	}, false)
+
+	// Hover over the child — mouseenter should fire on child only, not bubble to parent.
+	s.SetHover(25, 25)
+	if parentEntered {
+		t.Error("mouseenter should not bubble to parent")
+	}
+}
+
+func TestMouseLeaveOnHoverChange(t *testing.T) {
+	html := `<html><body style="margin: 0;">
+		<div id="a" style="width: 50px; height: 50px;">A</div>
+		<div id="b" style="width: 50px; height: 50px;">B</div>
+	</body></html>`
+	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	a := s.Doc.ElementByID("a")
+	b := s.Doc.ElementByID("b")
+	if a == nil || b == nil {
+		t.Fatal("elements not found")
+	}
+
+	aLeft := false
+	bEntered := false
+	dom.AddEventListener(a, "mouseleave", func(e *dom.Event) {
+		aLeft = true
+	}, false)
+	dom.AddEventListener(b, "mouseenter", func(e *dom.Event) {
+		bEntered = true
+	}, false)
+
+	// Hover over A.
+	s.SetHover(25, 25)
+	// Move to B — should fire mouseleave on A and mouseenter on B.
+	s.SetHover(25, 75)
+
+	if !aLeft {
+		t.Error("mouseleave was not fired on A when moving to B")
+	}
+	if !bEntered {
+		t.Error("mouseenter was not fired on B")
+	}
+}
+
 func TestMultipleHoverTransitions(t *testing.T) {
 	html := `<html><body style="margin: 0;">
 		<div id="a" style="width: 50px; height: 50px;">A</div>
