@@ -151,6 +151,12 @@ type Runtime struct {
 
 	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
+
+	// Custom Elements registry. nil until setupCustomElements() is called.
+	customElementRegistry *CustomElementRegistry
+
+	// nodeWrappers maps DOM node IDs to their JS wrapper objects for lifecycle callbacks.
+	nodeWrappers map[int]*goja.Object
 }
 
 // New builds a runtime for one document.
@@ -200,6 +206,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupMutationObserver()
 	r.setupResizeObserver()
 	r.setupCanvas()
+	r.setupCustomElements()
 	if opts.WorkerDialer != nil {
 		r.setupWorker(opts.WorkerDialer)
 	}
@@ -279,6 +286,7 @@ func (r *Runtime) setupDOM() {
 
 	r.domDoc = r.opts.DOM
 	r.nodeRegistry = make(map[int]*dom.Node)
+	r.nodeWrappers = make(map[int]*goja.Object)
 	r.nextNID = 1
 
 	// Build a shared prototype for element wrapper objects. Each wrapper
@@ -483,6 +491,7 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 
 	obj := r.vm.NewObject()
 	_ = obj.Set("__nid__", nid)
+	r.nodeWrappers[nid] = obj
 
 	// Copy prototype properties onto the instance. goja does not support
 	// __proto__ assignment on objects created with NewObject, so we copy
@@ -689,6 +698,10 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	}
 	parentNode.AppendChild(childNode)
 	r.notifyMutation()
+	// Invoke connectedCallback if child is a custom element
+	if childNode.Type == dom.NodeElement {
+		r.invokeLifecycleCallback(childNode, "connectedCallback")
+	}
 	// Return the child, matching the DOM spec.
 	return call.Arguments[0]
 }
@@ -1246,6 +1259,10 @@ func (r *Runtime) jsRemove(call goja.FunctionCall) goja.Value {
 	}
 	node.Parent.RemoveChild(node)
 	r.notifyMutation()
+	// Invoke disconnectedCallback if node is a custom element
+	if node.Type == dom.NodeElement {
+		r.invokeLifecycleCallback(node, "disconnectedCallback")
+	}
 	return goja.Undefined()
 }
 
