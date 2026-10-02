@@ -77,6 +77,10 @@ type Options struct {
 	// available to scripts. When nil, WebSocket is not defined.
 	WebSocketDialer WebSocketDialer
 
+	// WorkerDialer is the Web Worker backend. When non-nil, Worker is
+	// available to scripts. When nil, Worker is not defined.
+	WorkerDialer WorkerDialer
+
 	// CSP is the parsed Content-Security-Policy for this document. When
 	// non-nil, script/style/connect sources are checked against it.
 	CSP *CSPPolicy
@@ -187,6 +191,10 @@ func New(opts Options) (*Runtime, error) {
 	r.setupMutationObserver()
 	r.setupResizeObserver()
 	r.setupCanvas()
+	if opts.WorkerDialer != nil {
+		r.setupWorker(opts.WorkerDialer)
+	}
+	r.setupServiceWorker()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
