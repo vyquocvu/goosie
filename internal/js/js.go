@@ -169,6 +169,8 @@ func New(opts Options) (*Runtime, error) {
 	}
 	r.setupTimers()
 	r.setupPromise()
+	r.setupIntersectionObserver()
+	r.setupRAF()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
