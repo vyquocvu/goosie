@@ -40,6 +40,7 @@ type treeBuilder struct {
 	limits       ParseLimits
 	err          error
 	text         map[*Node]*strings.Builder
+	svgDepth     int // nesting depth inside <svg>; 0 means we're in HTML
 }
 
 func (tb *treeBuilder) allowNode(parent *Node) bool {
@@ -119,6 +120,32 @@ var voidElements = map[string]bool{
 	"track": true, "wbr": true,
 }
 
+// svgVoidElements are SVG elements that are always self-closing.
+var svgVoidElements = map[string]bool{
+	"circle": true, "ellipse": true, "line": true, "path": true,
+	"polygon": true, "polyline": true, "rect": true, "use": true,
+	"image": true, "stop": true, "animate": true, "animateTransform": true,
+	"animateMotion": true, "set": true, "mpath": true,
+}
+
+// svgElements are all known SVG element names.
+var svgElements = map[string]bool{
+	"svg": true, "g": true, "defs": true, "symbol": true, "use": true,
+	"rect": true, "circle": true, "ellipse": true, "line": true,
+	"polyline": true, "polygon": true, "path": true, "text": true,
+	"tspan": true, "textPath": true, "image": true, "foreignObject": true,
+	"clipPath": true, "mask": true, "pattern": true, "marker": true,
+	"linearGradient": true, "radialGradient": true, "stop": true,
+	"filter": true, "feBlend": true, "feColorMatrix": true,
+	"feComponentTransfer": true, "feComposite": true, "feConvolveMatrix": true,
+	"feDiffuseLighting": true, "feDisplacementMap": true, "feFlood": true,
+	"feGaussianBlur": true, "feImage": true, "feMerge": true,
+	"feMergeNode": true, "feMorphology": true, "feOffset": true,
+	"feSpecularLighting": true, "feTile": true, "feTurbulence": true,
+	"animate": true, "animateTransform": true, "animateMotion": true,
+	"set": true, "mpath": true, "title": true, "desc": true, "metadata": true,
+}
+
 var rawTextElements = map[string]bool{
 	"script": true, "style": true, "textarea": true, "title": true,
 }
@@ -140,6 +167,10 @@ func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bo
 	}
 	n := tb.doc.NewElement(tag)
 	n.Attr = attrs
+	// SVG elements get the SVG namespace.
+	if tb.svgDepth > 0 || tag == "svg" {
+		n.Namespace = NSSVG
+	}
 	parent.AppendChild(n)
 
 	if tag == "html" {
@@ -261,7 +292,11 @@ func (tb *treeBuilder) handleStartTag(p *tokenizer) {
 		return
 	}
 
-	tag = strings.ToLower(tag)
+	// SVG elements are case-sensitive; HTML elements are lowercased.
+	// When inside an <svg> element (svgDepth > 0), preserve the original case.
+	if tb.svgDepth == 0 {
+		tag = strings.ToLower(tag)
+	}
 
 	tb.processStartTag(tag, attrs, selfClose)
 
@@ -301,6 +336,17 @@ func (tb *treeBuilder) consumeRawText(p *tokenizer, tag string) {
 }
 
 func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose bool) {
+	// Handle SVG namespace entry/exit.
+	if tag == "svg" || (tb.svgDepth > 0 && svgElements[tag]) {
+		if tag == "svg" {
+			tb.svgDepth++
+		}
+		// SVG shape elements are always self-closing.
+		sc := selfClose || svgVoidElements[tag]
+		tb.insertElement(tag, attrs, sc)
+		return
+	}
+
 	switch tag {
 	case "html":
 		if tb.htmlElem == nil {
@@ -581,6 +627,18 @@ func (tb *treeBuilder) handleEndTag(p *tokenizer) {
 }
 
 func (tb *treeBuilder) processEndTag(tag string) {
+	// Handle SVG namespace exit.
+	if tb.svgDepth > 0 && tag == "svg" {
+		tb.svgDepth--
+		tb.popUntil(tag)
+		return
+	}
+	// SVG child elements are self-closing, so just pop them.
+	if tb.svgDepth > 0 && svgElements[tag] {
+		tb.popUntil(tag)
+		return
+	}
+
 	switch tag {
 	case "html":
 		return

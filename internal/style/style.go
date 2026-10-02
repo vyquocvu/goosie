@@ -586,6 +586,22 @@ dl dir, dl dl, dl menu, dl ol, dl ul,
 menu dir, menu dl, menu menu, menu ol, menu ul,
 ol dir, ol dl, ol menu, ol ol, ol ul,
 ul dir, ul dl, ul menu, ul ol, ul ul { margin-top: 0; margin-bottom: 0; }
+/* SVG elements: <svg> is a replaced inline box; container and definition elements
+   are not rendered directly; shape and text elements are inline within the SVG
+   coordinate system. */
+svg { display: inline-block; overflow: hidden; }
+g, defs, symbol, clipPath, mask, pattern, marker { display: none; }
+linearGradient, radialGradient, stop, filter,
+feBlend, feColorMatrix, feComponentTransfer, feComposite,
+feConvolveMatrix, feDiffuseLighting, feDisplacementMap, feFlood,
+feGaussianBlur, feImage, feMerge, feMergeNode, feMorphology,
+feOffset, feSpecularLighting, feTile, feTurbulence,
+animate, animateTransform, animateMotion, set, mpath,
+title, desc, metadata { display: none; }
+rect, circle, ellipse, line, polyline, polygon, path { display: inline; }
+text, tspan, textPath { display: inline; }
+foreignObject { display: block; }
+image { display: inline; }
 `
 
 // Viewport is the size a document is laid out in. The viewport units are a share

@@ -3,6 +3,7 @@ package js
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -15,32 +16,50 @@ func (r *Runtime) setupURLAPI() {
 	// URLSearchParams constructor.
 	spCtor := func(call goja.ConstructorCall) *goja.Object {
 		obj := call.This
-		params := make(map[string][]string)
+		// Use ordered entries to preserve insertion order and support sort().
+		type entry struct{ key, val string }
+		entries := make([]entry, 0)
+		params := make(map[string][]string) // for fast lookup
+
+		rebuild := func() {
+			parts := make([]string, 0, len(entries))
+			for _, e := range entries {
+				parts = append(parts, url.QueryEscape(e.key)+"="+url.QueryEscape(e.val))
+			}
+			_ = obj.Set("__string__", strings.Join(parts, "&"))
+		}
 
 		if len(call.Arguments) >= 1 {
 			arg := call.Arguments[0]
 			switch v := arg.Export().(type) {
 			case string:
 				if parsed, err := url.ParseQuery(v); err == nil {
-					for k, vals := range parsed {
-						params[k] = vals
+					// ParseQuery returns a map, so we lose original order.
+					// Sort keys for deterministic output.
+					keys := make([]string, 0, len(parsed))
+					for k := range parsed {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+					for _, k := range keys {
+						for _, val := range parsed[k] {
+							entries = append(entries, entry{k, val})
+							params[k] = append(params[k], val)
+						}
 					}
 				}
 			case map[string]interface{}:
-				for k, val := range v {
-					params[k] = []string{fmt.Sprintf("%v", val)}
+				keys := make([]string, 0, len(v))
+				for k := range v {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					val := fmt.Sprintf("%v", v[k])
+					entries = append(entries, entry{k, val})
+					params[k] = []string{val}
 				}
 			}
-		}
-
-		rebuild := func() {
-			parts := make([]string, 0)
-			for k, vals := range params {
-				for _, v := range vals {
-					parts = append(parts, url.QueryEscape(k)+"="+url.QueryEscape(v))
-				}
-			}
-			_ = obj.Set("__string__", strings.Join(parts, "&"))
 		}
 		rebuild()
 
@@ -50,6 +69,7 @@ func (r *Runtime) setupURLAPI() {
 			}
 			key := call.Arguments[0].String()
 			val := call.Arguments[1].String()
+			entries = append(entries, entry{key, val})
 			params[key] = append(params[key], val)
 			rebuild()
 			return goja.Undefined()
@@ -61,6 +81,14 @@ func (r *Runtime) setupURLAPI() {
 			}
 			key := call.Arguments[0].String()
 			val := call.Arguments[1].String()
+			// Remove existing entries with this key.
+			filtered := make([]entry, 0, len(entries))
+			for _, e := range entries {
+				if e.key != key {
+					filtered = append(filtered, e)
+				}
+			}
+			entries = append(filtered, entry{key, val})
 			params[key] = []string{val}
 			rebuild()
 			return goja.Undefined()
@@ -106,6 +134,13 @@ func (r *Runtime) setupURLAPI() {
 			}
 			key := call.Arguments[0].String()
 			delete(params, key)
+			filtered := make([]entry, 0, len(entries))
+			for _, e := range entries {
+				if e.key != key {
+					filtered = append(filtered, e)
+				}
+			}
+			entries = filtered
 			rebuild()
 			return goja.Undefined()
 		})
@@ -126,78 +161,49 @@ func (r *Runtime) setupURLAPI() {
 			if !ok {
 				return goja.Undefined()
 			}
-			for k, vals := range params {
-				for _, v := range vals {
-					_, _ = fn(goja.Undefined(), r.vm.ToValue(v), r.vm.ToValue(k), obj)
-				}
+			for _, e := range entries {
+				_, _ = fn(goja.Undefined(), r.vm.ToValue(e.val), r.vm.ToValue(e.key), obj)
 			}
 			return goja.Undefined()
 		})
 
 		_ = obj.Set("keys", func(call goja.FunctionCall) goja.Value {
 			arr := r.vm.NewArray()
-			i := 0
-			for k := range params {
-				_ = arr.Set(fmt.Sprintf("%d", i), k)
-				i++
+			for i, e := range entries {
+				_ = arr.Set(fmt.Sprintf("%d", i), e.key)
 			}
 			return arr
 		})
 
 		_ = obj.Set("values", func(call goja.FunctionCall) goja.Value {
 			arr := r.vm.NewArray()
-			i := 0
-			for _, vals := range params {
-				for _, v := range vals {
-					_ = arr.Set(fmt.Sprintf("%d", i), v)
-					i++
-				}
+			for i, e := range entries {
+				_ = arr.Set(fmt.Sprintf("%d", i), e.val)
 			}
 			return arr
 		})
 
 		_ = obj.Set("entries", func(call goja.FunctionCall) goja.Value {
 			arr := r.vm.NewArray()
-			i := 0
-			for k, vals := range params {
-				for _, v := range vals {
-					entry := r.vm.NewArray()
-					_ = entry.Set("0", k)
-					_ = entry.Set("1", v)
-					_ = arr.Set(fmt.Sprintf("%d", i), entry)
-					i++
-				}
+			for i, e := range entries {
+				entry := r.vm.NewArray()
+				_ = entry.Set("0", e.key)
+				_ = entry.Set("1", e.val)
+				_ = arr.Set(fmt.Sprintf("%d", i), entry)
 			}
 			return arr
 		})
 
 		_ = obj.Set("sort", func(call goja.FunctionCall) goja.Value {
-			sorted := make(map[string][]string)
-			keys := make([]string, 0, len(params))
-			for k := range params {
-				keys = append(keys, k)
-			}
-			for j := 0; j < len(keys)-1; j++ {
-				for k := j + 1; k < len(keys); k++ {
-					if keys[j] > keys[k] {
-						keys[j], keys[k] = keys[k], keys[j]
-					}
-				}
-			}
-			for _, k := range keys {
-				sorted[k] = params[k]
-			}
-			for k := range params {
-				delete(params, k)
-			}
-			for k, v := range sorted {
-				params[k] = v
-			}
+			// Sort entries by key, preserving relative order for equal keys.
+			sort.SliceStable(entries, func(i, j int) bool {
+				return entries[i].key < entries[j].key
+			})
 			rebuild()
 			return goja.Undefined()
 		})
 
-		return nil
+		return obj
 	}
 
 	spVal := r.vm.ToValue(spCtor)
