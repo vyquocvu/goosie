@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Checkbox Radio</title></head>
+<body>
+<input type="checkbox" id="cb1">
+<input type="checkbox" id="cb2" checked>
+<input type="radio" name="r" id="r1" value="a">
+<input type="radio" name="r" id="r2" value="b" checked>
+<input type="radio" name="r" id="r3" value="c">
+<script>
+__log = '';
+['cb1','cb2','r1','r2','r3'].forEach(function(id) {
+  var el = document.getElementById(id);
+  el.addEventListener('change', function() {
+    var state = el.type === 'checkbox' ? el.checked : (el.checked ? el.value : 'none');
+    if (__log) __log += ',';
+    __log += id + ':change:' + state;
+  });
+});
+</script>
+</body></html>

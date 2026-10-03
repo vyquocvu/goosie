@@ -980,11 +980,32 @@ func (f *framePath) copySelection() bool {
 // text sink; the tab reflows when the value changed and repaints otherwise.
 func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil || tab.Session.Focused() == nil {
+	if tab == nil || tab.Session == nil {
 		return false
 	}
 
 	cmd := mods&surface.ModCommand != 0 || mods&surface.ModControl != 0
+
+	// Bare Tab drives the full key-event path (keydown → focus-move → keyup).
+	// It must work with nothing focused so it can start the tab cycle, so this
+	// is checked before the focused-control bail below. Cmd/Ctrl+Tab is a
+	// browser-tab shortcut and is consumed earlier in the chrome window.
+	if key == '\t' && !cmd {
+		shift := mods&surface.ModShift != 0
+		alt := mods&surface.ModOption != 0
+		tab.Session.PressKey("Tab", shift, false, alt, false)
+		if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+			return true
+		}
+		f.repaintTab(tab)
+		return true
+	}
+
+	if tab.Session.Focused() == nil {
+		return false
+	}
+
 	if cmd {
 		return false
 	}

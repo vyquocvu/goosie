@@ -285,6 +285,75 @@ func TestPaintUnfocusedNoRing(t *testing.T) {
 	}
 }
 
+// ringBounds returns the union rect of the focus-ring strips (color 0,103,244)
+// in a built display list, or false when no ring is drawn.
+func ringBounds(dl *paint.LayerDL) (frame.Rect, bool) {
+	var r frame.Rect
+	found := false
+	for _, c := range dl.All() {
+		if c.Kind == paint.CmdFill && c.Color == frame.RGB(0, 103, 244) {
+			if !found {
+				r = c.Rect
+				found = true
+				continue
+			}
+			if c.Rect.X0 < r.X0 {
+				r.X0 = c.Rect.X0
+			}
+			if c.Rect.Y0 < r.Y0 {
+				r.Y0 = c.Rect.Y0
+			}
+			if c.Rect.X1 > r.X1 {
+				r.X1 = c.Rect.X1
+			}
+			if c.Rect.Y1 > r.Y1 {
+				r.Y1 = c.Rect.Y1
+			}
+		}
+	}
+	return r, found
+}
+
+// TestPaintKeyboardTabMovesRing is the GOO-04 visual verification: driving a
+// Tab keypress through PressKey must move the painted focus ring from the
+// first input to the second, proving keyboard → SetFocus → paint end to end.
+func TestPaintKeyboardTabMovesRing(t *testing.T) {
+	s := newFocusSession(t, twoInputsHTML)
+	if s.Focused() != nil {
+		t.Fatal("session should start unfocused")
+	}
+
+	// Tab from nothing focuses #a: ring appears around #a's box.
+	s.PressKey("Tab", false, false, false, false)
+	dlA := s.Paint(1).Build(1)
+	ringA, okA := ringBounds(dlA)
+	if !okA {
+		t.Fatal("no focus ring after first Tab")
+	}
+
+	// Tab again focuses #b: the ring must move (its vertical band changes).
+	s.PressKey("Tab", false, false, false, false)
+	dlB := s.Paint(1).Build(1)
+	ringB, okB := ringBounds(dlB)
+	if !okB {
+		t.Fatal("no focus ring after second Tab")
+	}
+	if ringA == ringB {
+		t.Fatalf("focus ring did not move after Tab: both at %v", ringA)
+	}
+
+	// Shift+Tab moves back toward #a: the ring must move again.
+	s.PressKey("Tab", true, false, false, false)
+	dlBack := s.Paint(1).Build(1)
+	ringBack, okBack := ringBounds(dlBack)
+	if !okBack {
+		t.Fatal("no focus ring after Shift+Tab")
+	}
+	if ringBack == ringB {
+		t.Fatalf("Shift+Tab did not move the ring: still at %v", ringB)
+	}
+}
+
 func TestPaintPlaceholderOnlyWhenEmpty(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">
 <input id="full" value="ab" placeholder="hint"><input id="empty" placeholder="hint"></body></html>`)

@@ -17,6 +17,92 @@ import (
 // after block layout so every inline box knows its containing block's width.
 func Inline(a *Arena, root ObjectID) {
 	inlineInto(a, root)
+	// Give display:inline element boxes a box of their own. The line pass above
+	// positions only the word/replaced fragments under an inline element, never
+	// the element itself, so an inline <a> would otherwise stay at the zero rect
+	// and be unhittable, invisible to hover, and reported with no geometry.
+	inlineSelfRects(a, root)
+}
+
+// inlineSelfRects walks the tree and sets every display:inline element box to
+// the union of the laid-out fragments beneath it, so the inline element owns a
+// real border rect the way a browser does. Post-order, so a nested inline
+// element's fragments (and its own box) are resolved before its parent unions
+// them.
+func inlineSelfRects(a *Arena, id ObjectID) {
+	obj := a.Get(id)
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		inlineSelfRects(a, kid)
+	}
+	if obj.Style == nil || obj.Node == nil || !obj.Node.Element() {
+		return
+	}
+	if obj.Style.Display != style.DisplayInline {
+		return
+	}
+	x0, y0, x1, y1, ok := inlineFragmentBounds(a, id)
+	if !ok {
+		return
+	}
+	// Set the content box so BorderRect() equals the union, subtracting this
+	// inline box's own padding/border thicknesses (usually zero for <a>).
+	obj.X = x0
+	obj.Y = y0
+	obj.W = x1 - x0 - obj.PaddingLeft - obj.PaddingRight - obj.BorderLeft - obj.BorderRight
+	obj.H = y1 - y0 - obj.PaddingTop - obj.PaddingBottom - obj.BorderTop - obj.BorderBottom
+	if obj.W < 0 {
+		obj.W = 0
+	}
+	if obj.H < 0 {
+		obj.H = 0
+	}
+}
+
+// inlineFragmentBounds unions the border rects of the positioned non-block
+// descendants of id: word fragments, replaced images, and nested inline boxes.
+// Block/inline-block descendants are atomic slots handled by block layout, so
+// they are skipped here just as inlineExtent skips them.
+func inlineFragmentBounds(a *Arena, id ObjectID) (minX, minY, maxX, maxY float32, ok bool) {
+	obj := a.Get(id)
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		k := a.Get(kid)
+		if k.Style == nil || k.Style.Display == style.DisplayNone || isBlock(k) {
+			continue
+		}
+		x0, y0, x1, y1 := k.BorderRect()
+		if x1 > x0 && y1 > y0 {
+			if !ok || x0 < minX {
+				minX = x0
+			}
+			if !ok || y0 < minY {
+				minY = y0
+			}
+			if !ok || x1 > maxX {
+				maxX = x1
+			}
+			if !ok || y1 > maxY {
+				maxY = y1
+			}
+			ok = true
+		}
+		cx0, cy0, cx1, cy1, cok := inlineFragmentBounds(a, kid)
+		if cok {
+			if !ok || cx0 < minX {
+				minX = cx0
+			}
+			if !ok || cy0 < minY {
+				minY = cy0
+			}
+			if !ok || cx1 > maxX {
+				maxX = cx1
+			}
+			if !ok || cy1 > maxY {
+				maxY = cy1
+			}
+			ok = true
+		}
+	}
+	return
 }
 
 func inlineInto(a *Arena, id ObjectID) {

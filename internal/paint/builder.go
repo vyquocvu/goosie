@@ -90,36 +90,43 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 		cmdStart := b.list.Len()
 
 		if !clipHidden {
-			// Box shadows paint behind the element's background and border.
-			if len(obj.Style.BoxShadow) > 0 {
-				b.paintBoxShadow(obj, rect, radius, opacity)
+			// An inline element's own box carries the union of its fragment
+			// rects, so a background painted there would fill the whole bounding
+			// box across line breaks. The inline pass's word copies are the
+			// fragments that own the visible per-line backgrounds; they share the
+			// element's computed style but are text nodes, so they still paint.
+			if obj.Style.Display != style.DisplayInline || (obj.Node != nil && obj.Node.Text()) {
+				// Box shadows paint behind the element's background and border.
+				if len(obj.Style.BoxShadow) > 0 {
+					b.paintBoxShadow(obj, rect, radius, opacity)
+				}
+				if obj.Style.BackgroundColor.A > 0 {
+					b.list.Append(DisplayCmd{
+						Kind:    CmdFill,
+						Rect:    rect,
+						Color:   convertColor(obj.Style.BackgroundColor),
+						Radius:  radius,
+						Opacity: opacity,
+					})
+				}
+				if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
+					b.list.Append(DisplayCmd{
+						Kind:     CmdGradient,
+						Rect:     rect,
+						Gradient: g,
+						Radius:   radius,
+					})
+				}
+				if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() {
+					b.list.Append(DisplayCmd{
+						Kind:           CmdRadialGradient,
+						Rect:           rect,
+						RadialGradient: rg,
+						Radius:         radius,
+					})
+				}
+				b.paintBackground(obj, opacity)
 			}
-			if obj.Style.BackgroundColor.A > 0 {
-				b.list.Append(DisplayCmd{
-					Kind:    CmdFill,
-					Rect:    rect,
-					Color:   convertColor(obj.Style.BackgroundColor),
-					Radius:  radius,
-					Opacity: opacity,
-				})
-			}
-			if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
-				b.list.Append(DisplayCmd{
-					Kind:     CmdGradient,
-					Rect:     rect,
-					Gradient: g,
-					Radius:   radius,
-				})
-			}
-			if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() {
-				b.list.Append(DisplayCmd{
-					Kind:           CmdRadialGradient,
-					Rect:           rect,
-					RadialGradient: rg,
-					Radius:         radius,
-				})
-			}
-			b.paintBackground(obj, opacity)
 			if obj.Style.Display != style.DisplayInline && obj.Style.Display != style.DisplayNone {
 				b.paintBorders(obj, rect, radius, opacity)
 			}

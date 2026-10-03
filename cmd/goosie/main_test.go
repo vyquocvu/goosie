@@ -371,6 +371,35 @@ func TestInterceptContentKeyConsumedWhenFocused(t *testing.T) {
 	}
 }
 
+// TestInterceptBareTabReachesContentKey asserts a bare Tab is routed to
+// onContentKey (for focus traversal) rather than being swallowed by the
+// browser-tab shortcut, which only fires for Cmd+Tab.
+func TestInterceptBareTabReachesContentKey(t *testing.T) {
+	cw := &chromeWindow{
+		toolbar: &toolbar.State{},
+		events:  make(chan surface.Event, 8),
+	}
+	var gotKey rune
+	var gotMods surface.KeyMod
+	called := false
+	cw.onContentKey = func(k rune, m surface.KeyMod) bool {
+		gotKey, gotMods, called = k, m, true
+		return true
+	}
+	if !cw.intercept(surface.Event{Kind: surface.EvKey, Key: '\t', Mods: surface.ModShift}) {
+		t.Fatal("bare Shift+Tab not consumed")
+	}
+	if !called {
+		t.Fatal("onContentKey not called for bare Tab")
+	}
+	if gotKey != '\t' {
+		t.Errorf("content key = %q, want Tab", gotKey)
+	}
+	if gotMods&surface.ModShift == 0 {
+		t.Error("Shift modifier not forwarded for bare Tab")
+	}
+}
+
 func TestInterceptFocusClickCoordinates(t *testing.T) {
 	cw := &chromeWindow{
 		toolbar: &toolbar.State{},

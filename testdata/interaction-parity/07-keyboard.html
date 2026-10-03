@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Keyboard</title></head>
+<body>
+<input type="text" id="a">
+<input type="text" id="b">
+<input type="text" id="c">
+<script>
+__log = '';
+function L(s) { if (__log) __log += ','; __log += s; }
+['a','b','c'].forEach(function(id) {
+  var el = document.getElementById(id);
+  el.addEventListener('keydown', function(e) { L(id + ':keydown:' + e.key); });
+  el.addEventListener('keyup', function(e) { L(id + ':keyup:' + e.key); });
+  el.addEventListener('focus', function() { L(id + ':focus'); });
+  el.addEventListener('blur', function() { L(id + ':blur'); });
+});
+</script>
+</body></html>

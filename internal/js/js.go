@@ -395,6 +395,24 @@ func (r *Runtime) setupDOM() {
 		return r.jsCreateTextNode(call)
 	})
 
+	// Register the document node so document.addEventListener / dispatchEvent
+	// operate on the same *dom.Node the engine dispatches events on.
+	docNID := r.nextNID
+	r.nextNID++
+	r.nodeRegistry[docNID] = &r.domDoc.Node
+	_ = doc.Set("__nid__", docNID)
+	r.nodeWrappers[docNID] = doc
+
+	_ = doc.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
+		return r.jsAddEventListener(call)
+	})
+	_ = doc.Set("removeEventListener", func(call goja.FunctionCall) goja.Value {
+		return r.jsRemoveEventListener(call)
+	})
+	_ = doc.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value {
+		return r.jsDispatchEvent(call)
+	})
+
 	// Internal helpers the prototype getter/setter calls back into.
 	_ = doc.Set("__getTextContent__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
@@ -473,6 +491,55 @@ func (r *Runtime) setupDOM() {
 		return goja.Undefined()
 	})
 
+	// Form-control helpers for checked/value property accessors.
+	_ = doc.Set("__getChecked__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue(false)
+		}
+		return r.vm.ToValue(node.HasAttribute("checked"))
+	})
+	_ = doc.Set("__setChecked__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		checked := call.Arguments[1].ToBoolean()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		if checked {
+			node.SetAttribute("checked", "")
+		} else {
+			node.RemoveAttribute("checked")
+		}
+		return goja.Undefined()
+	})
+	_ = doc.Set("__getValue__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue("")
+		}
+		if node.HasAttribute("value") {
+			return r.vm.ToValue(node.GetAttribute("value"))
+		}
+		typ := strings.ToLower(node.GetAttribute("type"))
+		if node.Data == "input" && (typ == "checkbox" || typ == "radio") {
+			return r.vm.ToValue("on")
+		}
+		return r.vm.ToValue("")
+	})
+	_ = doc.Set("__setValue__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		v := call.Arguments[1].String()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		node.SetAttribute("value", v)
+		return goja.Undefined()
+	})
+
 	// Dynamic body property: wraps the body element on first access and
 	// caches it. If the body is replaced, the host should re-run setupDOM.
 	if r.domDoc.Body != nil {
@@ -519,6 +586,13 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		_ = obj.Set("nodeName", strings.ToUpper(node.Data))
 		_ = obj.Set("id", node.GetAttribute("id"))
 		_ = obj.Set("className", node.GetAttribute("class"))
+		if node.Data == "input" {
+			typ := strings.ToLower(node.GetAttribute("type"))
+			if typ == "" {
+				typ = "text"
+			}
+			_ = obj.Set("type", typ)
+		}
 
 		// classList with add/remove/toggle/contains methods.
 		// The closures capture `node` directly because call.This inside
@@ -619,6 +693,11 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 			return r.vm.ToValue(false)
 		})
 		_ = obj.Set("classList", classList)
+
+		if node.Data == "input" {
+			r.defineCheckedAccessor(obj)
+			r.defineValueAccessor(obj)
+		}
 	}
 
 	return obj
@@ -669,6 +748,48 @@ func (r *Runtime) defineInnerHTMLAccessor(obj *goja.Object) {
 		});
 	`)
 	_ = r.vm.Set("__ihTarget__", nil)
+}
+
+func (r *Runtime) defineCheckedAccessor(obj *goja.Object) {
+	_ = r.vm.Set("__chkTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__chkTarget__, 'checked', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return false;
+				return document.__getChecked__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setChecked__(nid, !!v);
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__chkTarget__", nil)
+}
+
+func (r *Runtime) defineValueAccessor(obj *goja.Object) {
+	_ = r.vm.Set("__valTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__valTarget__, 'value', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getValue__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setValue__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__valTarget__", nil)
 }
 
 // getNode extracts the *dom.Node from a JS wrapper object via its __nid__.
@@ -1085,6 +1206,25 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
+// SetDOM updates the DOM document reference. The engine calls this after
+// parsing HTML so the runtime's document methods (getElementById, etc.)
+// operate on the same nodes the engine's arena references.
+func (r *Runtime) SetDOM(doc *dom.Document) {
+	r.mu.Lock()
+	r.opts.DOM = doc
+	r.domDoc = doc
+	if r.nodeRegistry == nil {
+		r.nodeRegistry = make(map[int]*dom.Node)
+		r.nodeWrappers = make(map[int]*goja.Object)
+		r.shadowRoots = make(map[int]*goja.Object)
+		r.nextNID = 1
+	}
+	r.mu.Unlock()
+	// Add document methods (getElementById, querySelector, etc.) now that
+	// the DOM reference is set. setupDOM checks r.opts.DOM internally.
+	r.setupDOM()
+}
+
 // ---------------------------------------------------------------------------
 // JS bridge: event methods
 // ---------------------------------------------------------------------------
@@ -1108,7 +1248,11 @@ func (r *Runtime) jsAddEventListener(call goja.FunctionCall) goja.Value {
 		_, _ = fn(goja.Null(), eventObj)
 	}
 
-	dom.AddEventListener(node, typ, callback, false)
+	capture := false
+	if len(call.Arguments) >= 3 {
+		capture = call.Arguments[2].ToBoolean()
+	}
+	dom.AddEventListenerWithKey(node, typ, callback, capture, call.Arguments[1])
 	return goja.Undefined()
 }
 
@@ -1178,17 +1322,29 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("currentTarget", r.wrapNode(e.CurrentTarget()))
 	}
 
-	// MouseEvent fields (only populated when the concrete type is *MouseEvent).
-	if me, ok := interface{}(e).(*dom.MouseEvent); ok {
+	// MouseEvent fields (only populated for a dispatched *MouseEvent, recovered
+	// through the payload back-pointer since listeners receive a *Event).
+	if me := e.AsMouse(); me != nil {
 		_ = obj.Set("clientX", me.ClientX)
 		_ = obj.Set("clientY", me.ClientY)
+		_ = obj.Set("screenX", me.ScreenX)
+		_ = obj.Set("screenY", me.ScreenY)
 		_ = obj.Set("button", me.Button)
+		_ = obj.Set("altKey", me.AltKey)
+		_ = obj.Set("ctrlKey", me.CtrlKey)
+		_ = obj.Set("shiftKey", me.ShiftKey)
+		_ = obj.Set("metaKey", me.MetaKey)
 	}
 
 	// KeyboardEvent fields.
-	if ke, ok := interface{}(e).(*dom.KeyboardEvent); ok {
+	if ke := e.AsKeyboard(); ke != nil {
 		_ = obj.Set("key", ke.Key)
 		_ = obj.Set("code", ke.Code)
+		_ = obj.Set("altKey", ke.AltKey)
+		_ = obj.Set("ctrlKey", ke.CtrlKey)
+		_ = obj.Set("shiftKey", ke.ShiftKey)
+		_ = obj.Set("metaKey", ke.MetaKey)
+		_ = obj.Set("repeat", ke.Repeat)
 	}
 
 	return obj

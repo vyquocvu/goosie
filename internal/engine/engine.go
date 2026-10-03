@@ -276,6 +276,12 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	s.Doc = doc
+	// Wire the parsed document into the JS runtime so getElementById,
+	// querySelector, and event listeners operate on the same nodes the
+	// engine's arena references.
+	if s.jsRT != nil {
+		s.jsRT.SetDOM(doc)
+	}
 	s.runScripts()
 	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW)
 	if err != nil {
@@ -900,7 +906,14 @@ func (s *Session) ClickAt(x, y float32) bool {
 	if !dom.DispatchEvent(n, ev) {
 		return true // preventDefault was called
 	}
-	// Default actions.
+	s.runClickDefault(n)
+	return true
+}
+
+// runClickDefault performs the default action for an activated control:
+// toggling checkbox/radio, or submitting/resetting the owning form for submit
+// and reset controls. Shared by pointer ClickAt and keyboard Enter activation.
+func (s *Session) runClickDefault(n *dom.Node) {
 	typ := strings.ToLower(n.GetAttribute("type"))
 	switch n.Data {
 	case "input":
@@ -929,7 +942,6 @@ func (s *Session) ClickAt(x, y float32) bool {
 			}
 		}
 	}
-	return true
 }
 
 // activatableAt walks the arena in reverse paint order for the box containing

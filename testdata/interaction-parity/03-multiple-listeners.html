@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Multiple Listeners</title></head>
+<body>
+<button id="btn">Click</button>
+<script>
+__log = '';
+var btn = document.getElementById('btn');
+btn.addEventListener('click', function() { if (__log) __log += ','; __log += 'A'; }, false);
+btn.addEventListener('click', function() { if (__log) __log += ','; __log += 'B'; }, false);
+btn.addEventListener('click', function() { if (__log) __log += ','; __log += 'C'; }, false);
+</script>
+</body></html>

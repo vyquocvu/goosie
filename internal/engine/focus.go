@@ -282,10 +282,12 @@ func IsActivatable(n *dom.Node) bool {
 	switch n.Data {
 	case "button":
 		return true
+	case "a":
+		return n.GetAttribute("href") != ""
 	case "input":
 		typ := strings.ToLower(n.GetAttribute("type"))
 		switch typ {
-		case "submit", "reset", "button", "image":
+		case "submit", "reset", "button", "image", "checkbox", "radio":
 			return true
 		}
 	}
@@ -400,6 +402,7 @@ func (s *Session) FocusNext() {
 	next := controls[(idx+1)%len(controls)]
 	// Fire blur/change on old focus.
 	if s.focus != nil {
+		css.SetFocus(s.focus, false)
 		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
 		if s.controlValue(s.focus) != s.focusValue {
 			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
@@ -409,6 +412,7 @@ func (s *Session) FocusNext() {
 	s.marked = ""
 	s.caret = len([]rune(s.controlValue(next)))
 	s.focusValue = s.controlValue(next)
+	css.SetFocus(next, true)
 	dom.DispatchEvent(next, dom.NewEvent("focus", false, false))
 }
 
@@ -432,6 +436,7 @@ func (s *Session) FocusPrev() {
 	prev := controls[(idx-1+len(controls))%len(controls)]
 	// Fire blur/change on old focus.
 	if s.focus != nil {
+		css.SetFocus(s.focus, false)
 		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
 		if s.controlValue(s.focus) != s.focusValue {
 			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
@@ -441,6 +446,7 @@ func (s *Session) FocusPrev() {
 	s.marked = ""
 	s.caret = len([]rune(s.controlValue(prev)))
 	s.focusValue = s.controlValue(prev)
+	css.SetFocus(prev, true)
 	dom.DispatchEvent(prev, dom.NewEvent("focus", false, false))
 }
 

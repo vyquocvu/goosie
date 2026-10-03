@@ -146,8 +146,8 @@ func TestTextInputIsNotActivatable(t *testing.T) {
 	}
 	inp2 := doc.NewElement("input")
 	inp2.SetAttribute("type", "checkbox")
-	if engine.IsActivatable(inp2) {
-		t.Fatal("input[type=checkbox] should NOT be activatable")
+	if !engine.IsActivatable(inp2) {
+		t.Fatal("input[type=checkbox] should be activatable")
 	}
 	if engine.IsActivatable(nil) {
 		t.Fatal("nil should NOT be activatable")

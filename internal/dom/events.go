@@ -36,6 +36,13 @@ type Event struct {
 	stopped          bool // stopPropagation called
 	immediateStopped bool // stopImmediatePropagation called
 	timeStamp        time.Time
+
+	// payload points at the concrete subtype (e.g. *KeyboardEvent) that embeds
+	// this Event. Listeners and dispatch only ever pass *Event, so a type
+	// assertion on that pointer cannot recover the subtype; this back-pointer is
+	// how the JS bridge reads key/mouse fields. Constructors that build a
+	// subtype set it; a plain NewEvent leaves it nil.
+	payload any
 }
 
 // NewEvent creates a new Event with the given type and options.
@@ -104,7 +111,7 @@ type MouseEvent struct {
 
 // NewMouseEvent creates a new mouse event with the given parameters.
 func NewMouseEvent(typ string, bubbles, cancelable bool, clientX, clientY, screenX, screenY int32, button int) *MouseEvent {
-	return &MouseEvent{
+	me := &MouseEvent{
 		Event: Event{
 			Type:       typ,
 			bubbles:    bubbles,
@@ -117,6 +124,8 @@ func NewMouseEvent(typ string, bubbles, cancelable bool, clientX, clientY, scree
 		ScreenY: screenY,
 		Button:  button,
 	}
+	me.Event.payload = me
+	return me
 }
 
 // KeyboardEvent is an event for keyboard interactions.
@@ -133,7 +142,7 @@ type KeyboardEvent struct {
 
 // NewKeyboardEvent creates a new keyboard event with the given parameters.
 func NewKeyboardEvent(typ string, bubbles, cancelable bool, key, code string) *KeyboardEvent {
-	return &KeyboardEvent{
+	ke := &KeyboardEvent{
 		Event: Event{
 			Type:       typ,
 			bubbles:    bubbles,
@@ -143,6 +152,24 @@ func NewKeyboardEvent(typ string, bubbles, cancelable bool, key, code string) *K
 		Key:  key,
 		Code: code,
 	}
+	ke.Event.payload = ke
+	return ke
+}
+
+// AsKeyboard returns the concrete *KeyboardEvent behind this event, or nil when
+// the event is not a keyboard event. Listeners receive a *Event, so the subtype
+// fields are recovered through the payload back-pointer rather than a type
+// assertion on the dispatched pointer.
+func (e *Event) AsKeyboard() *KeyboardEvent {
+	ke, _ := e.payload.(*KeyboardEvent)
+	return ke
+}
+
+// AsMouse returns the concrete *MouseEvent behind this event, or nil when the
+// event is not a mouse event.
+func (e *Event) AsMouse() *MouseEvent {
+	me, _ := e.payload.(*MouseEvent)
+	return me
 }
 
 // EventListener is a registered callback for a specific event type.
@@ -150,6 +177,7 @@ type EventListener struct {
 	Type     string
 	Callback func(*Event)
 	Capture  bool
+	dedupKey interface{} // when non-nil, used for dedup instead of Callback pointer
 }
 
 // ---------------------------------------------------------------------------
@@ -188,12 +216,44 @@ func AddEventListener(n *Node, typ string, callback func(*Event), capture bool) 
 	ls := getListeners(n)
 	// Reject exact duplicates (same type, callback pointer, and capture flag).
 	for _, l := range ls {
-		if l.Type == typ && funcEqual(l.Callback, callback) && l.Capture == capture {
+		if l.Type == typ && listenerMatches(l, callback, nil, capture) {
 			return
 		}
 	}
 	ls = append(ls, &EventListener{Type: typ, Callback: callback, Capture: capture})
 	setListeners(n, ls)
+}
+
+// AddEventListenerWithKey is like AddEventListener but uses key for duplicate
+// detection instead of the callback pointer. This is needed when the callback
+// is a Go closure wrapping a higher-level function reference (e.g. a goja
+// function): Go closures with identical code but different captures share the
+// same code pointer, so funcEqual cannot distinguish them.
+func AddEventListenerWithKey(n *Node, typ string, callback func(*Event), capture bool, key interface{}) {
+	ls := getListeners(n)
+	for _, l := range ls {
+		if l.Type == typ && listenerMatches(l, callback, key, capture) {
+			return
+		}
+	}
+	ls = append(ls, &EventListener{Type: typ, Callback: callback, Capture: capture, dedupKey: key})
+	setListeners(n, ls)
+}
+
+// listenerMatches reports whether listener l matches the given dedup criteria.
+// When key is non-nil, comparison uses the listener's dedupKey; otherwise it
+// falls back to funcEqual on the callback.
+func listenerMatches(l *EventListener, callback func(*Event), key interface{}, capture bool) bool {
+	if l.Capture != capture {
+		return false
+	}
+	if key != nil {
+		return l.dedupKey == key
+	}
+	if l.dedupKey != nil {
+		return false
+	}
+	return funcEqual(l.Callback, callback)
 }
 
 // RemoveEventListener removes a previously registered listener.
@@ -251,12 +311,23 @@ func DispatchEvent(target *Node, event *Event) bool {
 	if !event.stopped {
 		event.phase = AtTarget
 		event.currentTarget = target
-		// At-target fires both capture and bubble listeners in registration order.
-		for _, l := range getListeners(target) {
+		// At-target fires capture listeners first, then bubble listeners,
+		// each group in registration order. This matches Chromium and the
+		// DOM spec's dispatch algorithm.
+		listeners := getListeners(target)
+		for _, l := range listeners {
 			if event.immediateStopped {
 				break
 			}
-			if l.Type == event.Type {
+			if l.Type == event.Type && l.Capture {
+				l.Callback(event)
+			}
+		}
+		for _, l := range listeners {
+			if event.immediateStopped {
+				break
+			}
+			if l.Type == event.Type && !l.Capture {
 				l.Callback(event)
 			}
 		}

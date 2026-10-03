@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Prevent Default</title></head>
+<body>
+<form id="form">
+  <button type="submit" id="btn">Submit</button>
+</form>
+<a href="#target" id="link">Link</a>
+<script>
+__log = '';
+document.getElementById('form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  if (__log) __log += ',';
+  __log += 'form:submit:prevented';
+});
+document.getElementById('link').addEventListener('click', function(e) {
+  e.preventDefault();
+  if (__log) __log += ',';
+  __log += 'link:click:prevented';
+});
+</script>
+</body></html>
