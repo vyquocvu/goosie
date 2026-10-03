@@ -2,12 +2,13 @@
 //
 // WPT is the canonical spec-compliance suite for the web platform. It contains
 // three kinds of tests: testharness.js (JavaScript assertions), reftests (pixel
-// comparison against a reference), and manual tests (human-driven). Goosie has
-// no DOM, no full JS execution, and no Canvas, so only reftests and parse-only
-// tests are runnable. This package curates a subset of WPT directories that
-// exercise HTML parsing and CSS rendering - the two things goosie can do - and
-// measures how many of those tests produce pixel-identical output to a reference
-// browser.
+// comparison against a reference), and manual tests (human-driven). This harness
+// drives goosie in headless screenshot mode and scores pixels, so it only runs
+// reftests and parse-only tests: it never collects the testharness.js
+// result-reporting protocol those assertions publish through. This package
+// curates a subset of WPT directories that exercise HTML parsing and CSS
+// rendering and measures how many of those tests produce pixel-identical output
+// to a reference browser.
 //
 // The runner works by:
 //  1. Downloading (or reusing) a pinned WPT checkout
@@ -37,8 +38,8 @@ type TestType string
 
 const (
 	// TestHarness is a testharness.js test: JavaScript assertions that report
-	// pass/fail through the testharness API. These require a JS engine with DOM
-	// bindings, which goosie does not have.
+	// pass/fail through the testharness API. Running them means collecting that
+	// reporting protocol, which this screenshot-based harness does not do.
 	TestHarness TestType = "testharness"
 
 	// RefTest is a reftest: the test page is rendered and compared pixel-by-pixel
