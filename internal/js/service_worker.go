@@ -46,6 +46,19 @@ const swStateKey = "__swState__"
 type swState struct {
 	mu            sync.Mutex
 	registrations map[string]*serviceWorkerRegistration
+	// pending activations queued by background goroutines; drained on the
+	// VM thread where goja objects may be touched.
+	pending []swActivation
+}
+
+// swActivation records one install→activate completion. The background
+// goroutine fills plain-Go state and appends this; DrainServiceWorkerEvents
+// performs the goja Sets on the main goroutine.
+type swActivation struct {
+	reg    *serviceWorkerRegistration
+	sw     *serviceWorkerObj
+	regObj *goja.Object
+	swObj  *goja.Object
 }
 
 func setSWState(r *Runtime, s *swState) {
@@ -154,21 +167,20 @@ func (r *Runtime) setupServiceWorker() {
 		reg.mu.Unlock()
 		_ = regObj.Set("installing", swObj)
 
-		// Simulate install → activate lifecycle.
+		// Simulate install → activate lifecycle. The background goroutine
+		// touches only plain-Go fields and queues an activation; all goja
+		// Sets happen in DrainServiceWorkerEvents on the VM thread.
 		go func() {
 			sw.mu.Lock()
 			sw.state = SWInstalled
-			_ = swObj.Set("state", SWInstalled)
 			sw.mu.Unlock()
 
 			sw.mu.Lock()
 			sw.state = SWActivating
-			_ = swObj.Set("state", SWActivating)
 			sw.mu.Unlock()
 
 			sw.mu.Lock()
 			sw.state = SWActivated
-			_ = swObj.Set("state", SWActivated)
 			sw.mu.Unlock()
 
 			reg.mu.Lock()
@@ -176,8 +188,14 @@ func (r *Runtime) setupServiceWorker() {
 			reg.installing = nil
 			reg.mu.Unlock()
 
-			_ = regObj.Set("active", swObj)
-			_ = regObj.Set("installing", goja.Null())
+			state.mu.Lock()
+			state.pending = append(state.pending, swActivation{
+				reg:    reg,
+				sw:     sw,
+				regObj: regObj,
+				swObj:  swObj,
+			})
+			state.mu.Unlock()
 		}()
 
 		return regObj
@@ -235,6 +253,34 @@ func (r *Runtime) setupServiceWorker() {
 			if navObj, ok := nav.(*goja.Object); ok {
 				_ = navObj.Set("serviceWorker", swContainer)
 			}
+		}
+	}
+}
+
+// DrainServiceWorkerEvents applies pending install→activate transitions on
+// the VM thread. Call this from Tick; background goroutines never touch goja.
+func (r *Runtime) DrainServiceWorkerEvents() {
+	state := swStateOf(r)
+	if state == nil {
+		return
+	}
+
+	state.mu.Lock()
+	pending := make([]swActivation, len(state.pending))
+	copy(pending, state.pending)
+	state.pending = state.pending[:0]
+	state.mu.Unlock()
+
+	for _, act := range pending {
+		if act.swObj != nil {
+			act.sw.mu.Lock()
+			st := act.sw.state
+			act.sw.mu.Unlock()
+			_ = act.swObj.Set("state", st)
+		}
+		if act.regObj != nil && act.swObj != nil {
+			_ = act.regObj.Set("active", act.swObj)
+			_ = act.regObj.Set("installing", goja.Null())
 		}
 	}
 }

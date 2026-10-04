@@ -244,12 +244,17 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 				ws.mu.Unlock()
 				return
 			}
+			if ws.closed {
+				ws.mu.Unlock()
+				_ = conn.Close()
+				return
+			}
 
 			ws.conn = conn
 			ws.protocol = protocol
 			ws.state = WSOpen
-			_ = obj.Set("readyState", WSOpen)
-			_ = obj.Set("protocol", protocol)
+			// NOTE: no goja access here. DrainWSEvents syncs readyState/protocol
+			// onto the JS object on the VM thread before firing the open event.
 			ws.events = append(ws.events, wsEvent{typ: "open"})
 			ws.mu.Unlock()
 
@@ -320,7 +325,9 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 }
 
 // DrainWSEvents drains pending WebSocket events and fires them on the main
-// goroutine. Call this from Tick.
+// goroutine. Call this from Tick. It also syncs readyState/protocol from the
+// plain-Go fields onto the JS objects, so background goroutines never touch
+// goja values.
 func (r *Runtime) DrainWSEvents() {
 	state := wsStateOf(r)
 	if state == nil {
@@ -337,9 +344,15 @@ func (r *Runtime) DrainWSEvents() {
 		events := make([]wsEvent, len(ws.events))
 		copy(events, ws.events)
 		ws.events = ws.events[:0]
+		readyState := ws.state
+		protocol := ws.protocol
 		obj := ws.obj
 		ws.mu.Unlock()
 
+		if obj != nil {
+			_ = obj.Set("readyState", readyState)
+			_ = obj.Set("protocol", protocol)
+		}
 		for _, ev := range events {
 			fireWSEvent(r, obj, ev)
 		}

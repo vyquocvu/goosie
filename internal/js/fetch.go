@@ -293,7 +293,7 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 
 	t := r.newThenable()
 
-	go r.runFetch(resolvedURL, opts, t)
+	go r.runFetch(fs, resolvedURL, opts, t)
 
 	return t.obj
 }
@@ -301,12 +301,9 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 // runFetch executes on a dedicated goroutine. It calls the HTTP client and
 // queues exactly one callback (resolve or reject) for DrainFetchCallbacks to
 // invoke on the main goroutine. All goja interaction happens in the drain
-// step, not here.
-func (r *Runtime) runFetch(fetchURL string, opts FetchOptions, t *thenableObj) {
-	fs := fetchOf(r)
-	if fs == nil {
-		return
-	}
+// step, not here. fs is captured from doFetch so this goroutine never calls
+// fetchOf (a vm.Get) off the VM thread.
+func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t *thenableObj) {
 	defer func() {
 		fs.mu.Lock()
 		fs.active--

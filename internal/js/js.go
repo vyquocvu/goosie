@@ -1025,6 +1025,9 @@ func (r *Runtime) setupTimers() {
 // time already past are also drained before Tick returns.
 func (r *Runtime) Tick() {
 	r.DrainFetchCallbacks()
+	r.DrainWSEvents()
+	r.DrainWorkerMessages()
+	r.DrainServiceWorkerEvents()
 	for {
 		now := time.Now()
 		var toFire []*timer
