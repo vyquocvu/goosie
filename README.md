@@ -1,6 +1,6 @@
 # Goosie
 
-Goosie is a Go browser engine built around a fixed 256px tile frame path. It implements its own web front end — a real DOM, CSS cascade, style resolution, and layout (see PROJECT.md) — and renders through a CPU tile rasterizer with a worker pool, a damage-blit composer, and a vsync-paced UI loop. The engine pipeline is Parse → Style → Layout → Paint, wired in `internal/engine/engine.go`.
+Goosie is a modern, lightweight browser written in Go — a Go browser engine built around a fixed 256px tile frame path. Vision: a gọn nhẹ, native-first browser; current status: experimental static-document engine (see `docs/roadmap-v2.md`). It implements its own web front end — a real DOM, CSS cascade, style resolution, and layout (see PROJECT.md) — and renders through a CPU tile rasterizer with a worker pool, a damage-blit composer, and a vsync-paced UI loop. The engine pipeline is Parse → Style → Layout → Paint, wired in `internal/engine/engine.go`.
 
 ## Quick start
 
