@@ -467,11 +467,11 @@ func atomicInlineBlock(a *Arena, id ObjectID, contentW float32, lines *[]lineBox
 	// of inline-blocks. Filling the line would give the box the whole row and push
 	// every sibling onto a line of its own, which is what turned a title followed
 	// by its tag pills into two lines.
-	if k.Style != nil && resolvePctLength(k.Style.Width, contentW) < 0 {
+	if k.Style != nil && resolveBoxWidth(a, k.Style, contentW) < 0 {
 		if w := itemMaxContentW(a, id); w > 0 && w < k.W {
 			k.W = w
 			k = a.Get(id)
-			clampWidth(k, contentW)
+			clampWidth(a, k, contentW)
 			k = a.Get(id)
 			// The interior was laid out for the wide box it has just lost, so its
 			// words are re-wrapped and re-aligned at the width the box settles on.

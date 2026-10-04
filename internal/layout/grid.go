@@ -710,7 +710,7 @@ func gridItemMaxContentW(a *Arena, id ObjectID) float32 {
 		it = a.Get(id)
 	}
 	contentW := float32(-1)
-	if resolvePctLength(it.Style.Width, maxFlexMeasureWidth) >= 0 {
+	if resolveBoxWidth(a, it.Style, maxFlexMeasureWidth) >= 0 {
 		contentW = it.W
 	} else if !blockifiesChildren(it.Style) {
 		clearInlineLaidOut(a, id)

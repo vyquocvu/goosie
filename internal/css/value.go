@@ -557,6 +557,13 @@ var namedColors = map[string]Color{
 	"yellowgreen":          {154, 205, 50, 255},
 }
 
+// FuncHasPercent reports whether a math-function value holds a `%` term.
+// Percentages resolve against a length only layout (or a parent font) knows,
+// so the cascade defers such values instead of evaluating them to zero.
+func (v Value) FuncHasPercent() bool {
+	return v.Type == ValueFunc && strings.Contains(v.Str, "%")
+}
+
 // ToLength converts a value to a float32 length in pixels. Returns 0 for
 // non-length values. Unit conversion uses CSS defaults: em/ex default to 16px,
 // rem to 16px, pt to 1.333px, pc to 16px, in to 96px, cm to 37.795px, mm to

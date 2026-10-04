@@ -226,6 +226,19 @@ type ComputedStyle struct {
 	MaxWidth  float32
 	MaxHeight float32
 
+	// A math function holding a `%` cannot resolve at cascade time: the share
+	// speaks the containing block, which only layout knows. The cascade keeps
+	// the expression and its font context here; layout evaluates it against
+	// the containing length it already resolved. The plain float beside each
+	// one carries the auto/unset sentinel while deferred, so every existing
+	// auto-path keeps working.
+	WidthCalc     DeferredLength
+	HeightCalc    DeferredLength
+	MinWidthCalc  DeferredLength
+	MinHeightCalc DeferredLength
+	MaxWidthCalc  DeferredLength
+	MaxHeightCalc DeferredLength
+
 	MarginTop    float32
 	MarginRight  float32
 	MarginBottom float32
@@ -1245,18 +1258,50 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 
 	// Font-relative units in a box size resolve against the element's own font,
 	// the same way margins already do: `width:10em` on a 20px element is 200px.
+	// A math function holding a percentage is deferred to layout, which owns
+	// the containing block the share speaks.
 	case "width":
-		cs.Width = resolveLengthEm(parsed, -1, cs.FontSize)
+		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+			cs.WidthCalc, cs.Width = d, -1
+		} else {
+			cs.WidthCalc = DeferredLength{}
+			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize)
+		}
 	case "height":
-		cs.Height = resolveLengthEm(parsed, -1, cs.FontSize)
+		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+			cs.HeightCalc, cs.Height = d, -1
+		} else {
+			cs.HeightCalc = DeferredLength{}
+			cs.Height = resolveLengthEm(parsed, -1, cs.FontSize)
+		}
 	case "min-width":
-		cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize)
+		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+			cs.MinWidthCalc, cs.MinWidth = d, 0
+		} else {
+			cs.MinWidthCalc = DeferredLength{}
+			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize)
+		}
 	case "min-height":
-		cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize)
+		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+			cs.MinHeightCalc, cs.MinHeight = d, 0
+		} else {
+			cs.MinHeightCalc = DeferredLength{}
+			cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize)
+		}
 	case "max-width":
-		cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize)
+		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+			cs.MaxWidthCalc, cs.MaxWidth = d, -1
+		} else {
+			cs.MaxWidthCalc = DeferredLength{}
+			cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize)
+		}
 	case "max-height":
-		cs.MaxHeight = resolveMaxLength(parsed, cs.FontSize)
+		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+			cs.MaxHeightCalc, cs.MaxHeight = d, -1
+		} else {
+			cs.MaxHeightCalc = DeferredLength{}
+			cs.MaxHeight = resolveMaxLength(parsed, cs.FontSize)
+		}
 
 	case "margin":
 		t, r, b, l := parseMarginShorthand(value, cs.FontSize)
@@ -1699,6 +1744,38 @@ func againstOwnFont(prop string) bool {
 	return false
 }
 
+// DeferredLength holds a math-function box size that contains a percentage,
+// kept for layout-time resolution against the containing block. Expr is the
+// parsed function value, Em the element's font size for em/ch terms once the
+// cascade's font re-application pass has run.
+type DeferredLength struct {
+	Expr css.Value
+	Em   float32
+	Set  bool
+}
+
+// deferPercentFunc captures a math-function value holding a percentage for
+// layout. Any other value reports false and resolves through the usual path.
+// A later cascade entry for the same property re-runs this, so overriding a
+// deferred function with a plain length clears the deferral.
+func deferPercentFunc(v css.Value, fontSize float32) (DeferredLength, bool) {
+	if v.Type == css.ValueFunc && v.FuncHasPercent() {
+		return DeferredLength{Expr: v, Em: fontSize, Set: true}, true
+	}
+	return DeferredLength{}, false
+}
+
+// Resolve evaluates a deferred calc against base, the containing-block length
+// the percentage speaks, with vw/vh for viewport terms. It reports false when
+// nothing was deferred or the expression still cannot answer, and layout then
+// falls back to the auto/unset path.
+func (d DeferredLength) Resolve(base, vw, vh float32) (float32, bool) {
+	if !d.Set {
+		return 0, false
+	}
+	return css.EvalFuncWithBase(d.Expr.Func, d.Expr.Str, d.Em, vw, vh, base)
+}
+
 // resolveMaxLength caps a box. `none` states that there is no cap, which the
 // layout reads as the same -1 an auto size does; reading it as a length turned
 // every `max-width: none` box into a zero-width one.
@@ -1776,10 +1853,16 @@ func resolveFontSize(v css.Value, parent float32) float32 {
 		return v.ToLength()
 	case css.ValueFunc:
 		// Inside a font size, `em` is the parent's size and `rem` the root's, so
-		// the expression is evaluated in the parent's context. A call this engine
-		// cannot answer - one holding a percentage, which has no containing block
-		// yet - leaves the size inherited rather than zero, which would erase the
-		// element's text.
+		// the expression is evaluated in the parent's context. A percentage
+		// speaks the parent font too, so it resolves here with the parent as
+		// its base; anything still unanswerable leaves the size inherited
+		// rather than zero, which would erase the element's text.
+		if v.FuncHasPercent() {
+			if f, ok := css.EvalFuncWithBase(v.Func, v.Str, parent, 0, 0, parent); ok && f > 0 {
+				return f
+			}
+			return parent
+		}
 		if f := v.ToLengthWithEm(parent); f > 0 {
 			return f
 		}

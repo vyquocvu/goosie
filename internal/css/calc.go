@@ -13,7 +13,9 @@ import (
 // property value needs in practice. A percentage is the one term that cannot be
 // answered here: it resolves against the containing block, which a declaration
 // does not know yet. An expression containing one therefore reports itself
-// unsupported rather than returning a sum that silently dropped it.
+// unsupported rather than returning a sum that silently dropped it. Callers
+// that do know the base - layout with the containing block, the cascade with
+// a parent font size - use EvalFuncWithBase instead.
 func EvalCalc(expr string, em, vw, vh float32) (float32, bool) {
 	return EvalFunc("calc", expr, em, vw, vh)
 }
@@ -33,6 +35,25 @@ func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 		vh = 900
 	}
 	p := &calcExpr{em: em, vw: vw, vh: vh}
+	return p.combine(name, splitArgs(expr))
+}
+
+// EvalFuncWithBase is EvalFunc for a caller that can answer percentages: a
+// `%` term resolves against pctBase, the containing-block length the property
+// speaks. Layout passes the containing width (or height) it already resolved;
+// the cascade passes a parent font size for font-relative percentages. A
+// percentage with no base still reports itself unsupported.
+func EvalFuncWithBase(name, expr string, em, vw, vh, pctBase float32) (float32, bool) {
+	if em <= 0 {
+		em = 16
+	}
+	if vw <= 0 {
+		vw = 1440
+	}
+	if vh <= 0 {
+		vh = 900
+	}
+	p := &calcExpr{em: em, vw: vw, vh: vh, pctBase: pctBase, allowPct: true}
 	return p.combine(name, splitArgs(expr))
 }
 
@@ -80,10 +101,13 @@ func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
 	return out, found
 }
 
-func fold(args []string, em, vw, vh float32, smallest bool) (float32, bool) {
+// foldOne evaluates one min()/max() argument list in the caller's context,
+// so a percentage inside any argument sees the same base as the rest of the
+// expression.
+func (p *calcExpr) foldOne(args []string, smallest bool) (float32, bool) {
 	best := float32(0)
 	for i, a := range args {
-		v, ok := evalSum(a, em, vw, vh)
+		v, ok := p.evalSum(a)
 		if !ok {
 			return 0, false
 		}
@@ -94,13 +118,23 @@ func fold(args []string, em, vw, vh float32, smallest bool) (float32, bool) {
 	return best, true
 }
 
-func evalSum(expr string, em, vw, vh float32) (float32, bool) {
-	p := &calcExpr{toks: calcTokens(expr), em: em, vw: vw, vh: vh}
-	v, ok := p.sum()
-	if !ok || p.pos != len(p.toks) {
+func fold(args []string, em, vw, vh float32, smallest bool) (float32, bool) {
+	p := &calcExpr{em: em, vw: vw, vh: vh}
+	return p.foldOne(args, smallest)
+}
+
+func (p *calcExpr) evalSum(expr string) (float32, bool) {
+	q := &calcExpr{toks: calcTokens(expr), em: p.em, vw: p.vw, vh: p.vh, pctBase: p.pctBase, allowPct: p.allowPct}
+	v, ok := q.sum()
+	if !ok || q.pos != len(q.toks) {
 		return 0, false
 	}
 	return v, true
+}
+
+func evalSum(expr string, em, vw, vh float32) (float32, bool) {
+	p := &calcExpr{em: em, vw: vw, vh: vh}
+	return p.evalSum(expr)
 }
 
 // calcTokens splits an expression into numbers-with-units, function names,
@@ -134,6 +168,12 @@ type calcExpr struct {
 	toks       []string
 	pos        int
 	em, vw, vh float32
+	// pctBase answers `%` terms when allowPct is set. It is the
+	// containing-block length for box sizes, or the parent font size for
+	// font-relative percentages. Without it a percentage still reports
+	// itself unsupported rather than silently dropping.
+	pctBase  float32
+	allowPct bool
 }
 
 func (p *calcExpr) sum() (float32, bool) {
@@ -264,27 +304,27 @@ func (p *calcExpr) combine(name string, args []string) (float32, bool) {
 		if len(args) != 1 {
 			return 0, false
 		}
-		return evalSum(args[0], p.em, p.vw, p.vh)
+		return p.evalSum(args[0])
 	case "min":
 		if len(args) < 1 {
 			return 0, false
 		}
-		return fold(args, p.em, p.vw, p.vh, true)
+		return p.foldOne(args, true)
 	case "max":
 		if len(args) < 1 {
 			return 0, false
 		}
-		return fold(args, p.em, p.vw, p.vh, false)
+		return p.foldOne(args, false)
 	case "clamp":
 		// clamp(a, b, c) is max(a, min(b, c)): the value, capped, then floored.
 		if len(args) != 3 {
 			return 0, false
 		}
-		v, ok := fold(args[1:], p.em, p.vw, p.vh, true)
+		v, ok := p.foldOne(args[1:], true)
 		if !ok {
 			return 0, false
 		}
-		lo, ok := evalSum(args[0], p.em, p.vw, p.vh)
+		lo, ok := p.evalSum(args[0])
 		if !ok {
 			return 0, false
 		}
@@ -321,6 +361,14 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 	switch strings.ToLower(tok[n:]) {
 	case "px", "":
 		return num, true
+	case "%":
+		// A percentage only answers when the caller supplied its base: the
+		// containing-block length for box sizes, the parent font for
+		// font-relative percentages. Without one it stays unsupported.
+		if !p.allowPct {
+			return 0, false
+		}
+		return num * p.pctBase / 100, true
 	case "em", "ex":
 		return num * p.em, true
 	case "ch":

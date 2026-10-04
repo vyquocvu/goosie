@@ -99,7 +99,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 	if sizeH <= 0 {
 		sizeH = -1
 	}
-	resolveBoxSizes(obj, cb.w, sizeH)
+	resolveBoxSizes(a, obj, cb.w, sizeH)
 	obj = a.Get(id)
 	extra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 	vExtra := obj.PaddingTop + obj.PaddingBottom + obj.BorderTop + obj.BorderBottom

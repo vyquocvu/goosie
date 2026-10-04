@@ -164,6 +164,10 @@ type Arena struct {
 	// Zero means no viewport height is modelled, so every percentage height
 	// behaves as auto.
 	ViewportH float32
+
+	// ViewportW is the width half of the same pair, for vw units inside
+	// deferred calc() values. Zero falls back to the evaluator default.
+	ViewportW float32
 }
 
 // NaturalSize is the intrinsic width and height of a replaced element.

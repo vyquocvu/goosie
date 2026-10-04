@@ -16,6 +16,7 @@ import (
 // descendants. The pass is a single recursive walk; the recursion is the
 // containing-block stack.
 func Block(a *Arena, root ObjectID, viewportW, viewportH float32) {
+	a.ViewportW = viewportW
 	a.ViewportH = viewportH
 	flattenDisplayContents(a, root)
 	blockInto(a, root, viewportW)
@@ -128,7 +129,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 	childH := parentH
 	var replacedH float32
 	if obj.Style != nil {
-		resolveBoxSizes(obj, containingW, parentH)
+		resolveBoxSizes(a, obj, containingW, parentH)
 		childH = definiteH(a, id)
 		if obj.Style.Display == style.DisplayNone {
 			obj.W = 0
@@ -138,7 +139,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 		if w, h, ok := replacedSize(a, obj, containingW); ok {
 			// An `auto` size on a replaced box is the control's own size. Nothing
 			// downstream can measure it out of content the box does not have.
-			if resolvePctLength(obj.Style.Width, containingW) < 0 {
+			if resolveBoxWidth(a, obj.Style, containingW) < 0 {
 				obj.W = w
 			}
 			replacedH = h
@@ -222,7 +223,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 					// first point a final containing block exists. The box takes
 					// no part in this container's height or margin collapsing, and
 					// does not consume the first-child slot.
-					resolveBoxSizes(k, contentW, childH)
+					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
 					k.StaticX = contentX + k.MarginLeft
 					k.StaticY = contentY + y
@@ -237,7 +238,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 					// the edge of the content box, after any float already placed on
 					// that side.
 					closeRow()
-					resolveBoxSizes(k, contentW, childH)
+					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
 					if k.Style.MarginLeft == style.MarginAuto {
 						k.MarginLeft = 0
@@ -246,7 +247,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 						k.MarginRight = 0
 					}
 					extra := k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
-					if resolvePctLength(k.Style.Width, contentW) < 0 {
+					if resolveBoxWidth(a, k.Style, contentW) < 0 {
 						blockInto(a, kid, contentW)
 						if !blockifiesChildren(a.Get(kid).Style) {
 							inlineInto(a, kid)
@@ -262,7 +263,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 						if w > 0 {
 							k.W = w
 							k = a.Get(kid)
-							clampWidth(k, contentW)
+							clampWidth(a, k, contentW)
 							k = a.Get(kid)
 						}
 					}
@@ -302,7 +303,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 					// Inline-level, so it takes no vertical slot of its own: it
 					// joins the row in progress, or starts a new one after the
 					// content width runs out.
-					resolveBoxSizes(k, contentW, childH)
+					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
 					extra := k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
 					// An auto width shrinks to the content instead of filling the
@@ -310,7 +311,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 					// The measure is the extent the words take at the container's
 					// own width, read back off the placed words rather than off the
 					// box, because a text-align would otherwise be baked into it.
-					shrink := resolvePctLength(k.Style.Width, contentW) < 0
+					shrink := resolveBoxWidth(a, k.Style, contentW) < 0
 					var srcX, measureX, measureY, contentExtent float32
 					measured, shrank := false, false
 					if shrink {
@@ -322,7 +323,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 							srcX, contentExtent, measured = sx, right-sx, true
 							k.W = contentExtent
 							k = a.Get(kid)
-							clampWidth(k, contentW)
+							clampWidth(a, k, contentW)
 							k = a.Get(kid)
 						} else if w := blockMaxContentW(a, kid); w > 0 {
 							// The measure allocated word objects, so the pointer
@@ -330,7 +331,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 							// out of. Write through a fresh one.
 							k = a.Get(kid)
 							k.W = w
-							clampWidth(k, contentW)
+							clampWidth(a, k, contentW)
 							k = a.Get(kid)
 							clearInlineLaidOut(a, kid)
 							shrank = true
@@ -381,7 +382,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 					continue
 				}
 				closeRow()
-				resolveBoxSizes(k, contentW, childH)
+				resolveBoxSizes(a, k, contentW, childH)
 				if !isFlowBlock(k) {
 					// resolveBoxSizes leaves an inline box at width 0. The fragment
 					// CSS splits out around the block content is a block box, so it
@@ -461,7 +462,7 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	// The height children produced is the box's height only until min-height and
 	// max-height have a say, which is why this runs after the stacking above.
-	clampHeight(obj, parentH)
+	clampHeight(a, obj, parentH)
 	return obj.BorderH() + obj.MarginTop + obj.MarginBottom
 }
 
@@ -572,11 +573,12 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			basis = resolvePctLength(s.FlexBasis, contentW)
 		case s.Width >= 0:
 			basis = s.Width
-		case resolvePctLength(s.Width, contentW) >= 0:
+		case resolveBoxWidth(a, s, contentW) >= 0:
 			// A percentage width arrives as a sentinel, so the checks above miss
 			// it. It speaks the container's content box, which is exactly the
-			// basis `width: 100%` gives a flex item.
-			basis = resolvePctLength(s.Width, contentW)
+			// basis `width: 100%` gives a flex item. A deferred calc resolves
+			// against the same box.
+			basis = resolveBoxWidth(a, s, contentW)
 			items[i].pct = -2 - s.Width
 		}
 		if basis < 0 {
@@ -1777,13 +1779,13 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 	// keeps its intrinsic width and overflows into its neighbours. When the width
 	// is clamped and the height was derived from the image (no explicit CSS
 	// height), the height follows the aspect ratio so the picture stays undistorted.
-	if clamped := clampReplaced(w, resolvePctLength(s.MinWidth, containingW), resolvePctLength(s.MaxWidth, containingW)); clamped != w {
+	if clamped := clampReplaced(w, resolveBoxMinWidth(a, s, containingW), resolveBoxMaxWidth(a, s, containingW)); clamped != w {
 		w = clamped
 		if s.Height < 0 && ratio > 0 {
 			h = w * ratio
 		}
 	}
-	h = clampReplaced(h, resolvePctLength(s.MinHeight, containingW), resolvePctLength(s.MaxHeight, containingW))
+	h = clampReplaced(h, resolveBoxMinHeight(a, s, containingW), resolveBoxMaxHeight(a, s, containingW))
 	return w, h, true
 }
 
@@ -1820,7 +1822,7 @@ func attrPx(v string) float32 {
 // borders and content width and height the passes downstream read. containingH is
 // the height this box's percentage heights resolve against, or -1 when the
 // containing block has no definite height and CSS 2.1 §10.5 makes them auto.
-func resolveBoxSizes(obj *Object, containingW, containingH float32) {
+func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 	s := obj.Style
 	if s == nil {
 		return
@@ -1837,7 +1839,7 @@ func resolveBoxSizes(obj *Object, containingW, containingH float32) {
 	innerExtra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 
 	var explicitW float32 = -1
-	widthVal := resolvePctLength(s.Width, containingW)
+	widthVal := resolveBoxWidth(a, s, containingW)
 	if widthVal >= 0 {
 		if s.BoxSizing == style.BoxSizingBorderBox {
 			explicitW = widthVal - innerExtra
@@ -1886,7 +1888,7 @@ func resolveBoxSizes(obj *Object, containingW, containingH float32) {
 	if obj.W < 0 {
 		obj.W = 0
 	}
-	clampWidth(obj, containingW)
+	clampWidth(a, obj, containingW)
 	if s.Display != style.DisplayInline {
 		distributeAutoMargins(obj, leftAuto, rightAuto, containingW, innerExtra)
 	}
@@ -1894,7 +1896,7 @@ func resolveBoxSizes(obj *Object, containingW, containingH float32) {
 	// Height: -1 means auto, resolved later by blockInto from children. A
 	// percentage of an indefinite parent arrives back negative for the same
 	// reason, so it falls into that same auto path.
-	heightVal := resolvePctLength(s.Height, containingH)
+	heightVal := resolveBoxHeight(a, s, containingH)
 	if heightVal >= 0 {
 		if s.BoxSizing == style.BoxSizingBorderBox {
 			obj.H = heightVal - obj.PaddingTop - obj.PaddingBottom - obj.BorderTop - obj.BorderBottom
@@ -1905,7 +1907,7 @@ func resolveBoxSizes(obj *Object, containingW, containingH float32) {
 	if obj.H < 0 {
 		obj.H = 0
 	}
-	clampHeight(obj, containingH)
+	clampHeight(a, obj, containingH)
 }
 
 // distributeAutoMargins gives the line an auto-width or clamped block leaves
@@ -1958,13 +1960,13 @@ func centerBlockChildLead(parent, kid *Object, contentW float32) float32 {
 // clampWidth applies min-width and max-width to a box whose width is otherwise
 // settled. Both constraints speak the same box language as width itself, so
 // under border-sizing they are measured from the border box inward.
-func clampWidth(obj *Object, containingW float32) {
+func clampWidth(a *Arena, obj *Object, containingW float32) {
 	s := obj.Style
 	if s == nil {
 		return
 	}
-	minW := resolvePctLength(s.MinWidth, containingW)
-	maxW := resolvePctLength(s.MaxWidth, containingW)
+	minW := resolveBoxMinWidth(a, s, containingW)
+	maxW := resolveBoxMaxWidth(a, s, containingW)
 	if s.BoxSizing == style.BoxSizingBorderBox {
 		extra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 		if minW >= 0 {
@@ -1990,13 +1992,13 @@ func clampWidth(obj *Object, containingW float32) {
 // clampHeight applies min-height and max-height. min-height raises a box whose
 // content fell short of it; max-height shortens the box and leaves the content
 // over flowing, which is what the box's own overflow then clips.
-func clampHeight(obj *Object, containingH float32) {
+func clampHeight(a *Arena, obj *Object, containingH float32) {
 	s := obj.Style
 	if s == nil {
 		return
 	}
-	minH := resolvePctLength(s.MinHeight, containingH)
-	maxH := resolvePctLength(s.MaxHeight, containingH)
+	minH := resolveBoxMinHeight(a, s, containingH)
+	maxH := resolveBoxMaxHeight(a, s, containingH)
 	if s.BoxSizing == style.BoxSizingBorderBox {
 		extra := obj.PaddingTop + obj.PaddingBottom + obj.BorderTop + obj.BorderBottom
 		if minH >= 0 {
@@ -2300,6 +2302,91 @@ func resolvePctLength(val, containingW float32) float32 {
 		return pct * containingW / 100
 	}
 	return val
+}
+
+// The resolveBox* helpers resolve one box size against the containing length
+// the property speaks (width for widths, height for heights). A deferred
+// calc-with-percentage evaluates first, with the containing length as its
+// percentage base and the arena viewport for vw/vh terms; anything else falls
+// through to the plain percentage/length path. An unanswerable deferred value
+// reports -1, the same auto/unset sentinel the float carries while deferred,
+// so every existing auto-path keeps working.
+func resolveBoxWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
+	if s == nil {
+		return -1
+	}
+	if s.WidthCalc.Set {
+		if v, ok := s.WidthCalc.Resolve(containingW, a.ViewportW, a.ViewportH); ok {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.Width, containingW)
+}
+
+func resolveBoxHeight(a *Arena, s *style.ComputedStyle, containingH float32) float32 {
+	if s == nil {
+		return -1
+	}
+	if s.HeightCalc.Set {
+		if v, ok := s.HeightCalc.Resolve(containingH, a.ViewportW, a.ViewportH); ok {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.Height, containingH)
+}
+
+func resolveBoxMinWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
+	if s == nil {
+		return -1
+	}
+	if s.MinWidthCalc.Set {
+		if v, ok := s.MinWidthCalc.Resolve(containingW, a.ViewportW, a.ViewportH); ok {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.MinWidth, containingW)
+}
+
+func resolveBoxMaxWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
+	if s == nil {
+		return -1
+	}
+	if s.MaxWidthCalc.Set {
+		if v, ok := s.MaxWidthCalc.Resolve(containingW, a.ViewportW, a.ViewportH); ok {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.MaxWidth, containingW)
+}
+
+func resolveBoxMinHeight(a *Arena, s *style.ComputedStyle, containingH float32) float32 {
+	if s == nil {
+		return -1
+	}
+	if s.MinHeightCalc.Set {
+		if v, ok := s.MinHeightCalc.Resolve(containingH, a.ViewportW, a.ViewportH); ok {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.MinHeight, containingH)
+}
+
+func resolveBoxMaxHeight(a *Arena, s *style.ComputedStyle, containingH float32) float32 {
+	if s == nil {
+		return -1
+	}
+	if s.MaxHeightCalc.Set {
+		if v, ok := s.MaxHeightCalc.Resolve(containingH, a.ViewportW, a.ViewportH); ok {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.MaxHeight, containingH)
 }
 
 // isPctLength reports whether a style length carries the percentage sentinel
