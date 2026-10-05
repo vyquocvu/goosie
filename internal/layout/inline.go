@@ -130,7 +130,7 @@ func inlineInto(a *Arena, id ObjectID) {
 			continue
 		}
 		if isBlock(k) {
-			if k.Style.Display == style.DisplayInlineBlock && k.Node != nil && k.Node.Element() &&
+			if atomicInlineLevel(k.Style) && k.Node != nil && k.Node.Element() &&
 				k.flags&flagRowPlaced == 0 {
 				atomicInlineBlock(a, kid, contentW, &lines, &current)
 				continue
@@ -287,7 +287,7 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 		return
 	}
 	if isBlock(k) {
-		if k.Style.Display == style.DisplayInlineBlock && k.Node != nil && k.Node.Element() &&
+		if atomicInlineLevel(k.Style) && k.Node != nil && k.Node.Element() &&
 			k.flags&flagRowPlaced == 0 {
 			atomicInlineBlock(a, nodeID, contentW, lines, current)
 		}
