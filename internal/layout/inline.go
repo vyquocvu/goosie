@@ -9,6 +9,140 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
+// floatIntrusion is one float box narrowing the lines it overlaps, in
+// absolute coordinates over the float's margin box: line boxes avoid floats
+// by their margins, the way block boxes do.
+type floatIntrusion struct {
+	x0, x1, y0, y1 float32
+}
+
+// breakCtx carries float intrusions and the Y cursor for one inline
+// container's line breaking. When no float intrudes every query answers the
+// full width at zero offset, which is exactly the old behavior.
+type breakCtx struct {
+	contentW float32 // full content width, the fallback span
+	x0       float32 // absolute content-box left
+	strut    float32 // container line-height floor for overlap tests
+	in       []floatIntrusion
+	yTop     float32 // absolute top of the line being built
+	xoff     float32 // left inset of the line being built
+	avail    float32 // available width of the line being built
+}
+
+// collectFloatIntrusions gathers the floats whose margin boxes can overlap
+// the lines of id: the container's own float kids (text flowing directly in
+// a float container) and float kids of its ancestors up to the nearest
+// formatting-context boundary (a block kid's lines beside its uncles). The
+// subtree holding id's own lines is skipped, so a float never intrudes into
+// itself. Inline layout runs after block layout, so every float box is final.
+func collectFloatIntrusions(a *Arena, id ObjectID) []floatIntrusion {
+	var out []floatIntrusion
+	prev := ObjectID(0)
+	for c := id; c != 0; {
+		co := a.Get(c)
+		for kid := co.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+			if kid == prev {
+				continue
+			}
+			k := a.Get(kid)
+			if k.Style == nil || k.Style.Display == style.DisplayNone {
+				continue
+			}
+			if k.Style.Float != style.FloatLeft && k.Style.Float != style.FloatRight {
+				continue
+			}
+			if k.flags&flagOutOfFlow != 0 {
+				continue
+			}
+			x0, y0, x1, y1 := k.BorderRect()
+			x0 -= k.MarginLeft
+			y0 -= k.MarginTop
+			x1 += k.MarginRight
+			y1 += k.MarginBottom
+			if x1 <= x0 || y1 <= y0 {
+				continue
+			}
+			out = append(out, floatIntrusion{x0: x0, x1: x1, y0: y0, y1: y1})
+		}
+		if startsNewFC(a, co) {
+			break
+		}
+		prev = c
+		c = co.Parent
+	}
+	return out
+}
+
+// spanAt returns the left inset and available width for a line at yTop with
+// estimated height h, without moving any cursor: the placement pass uses it
+// per line. An empty intrusion list answers the full span.
+func (bc *breakCtx) spanAt(yTop, h float32) (float32, float32) {
+	if len(bc.in) == 0 {
+		return 0, bc.contentW
+	}
+	l, r := float32(0), float32(0)
+	for _, f := range bc.in {
+		if f.y0 >= yTop+h || f.y1 <= yTop {
+			continue
+		}
+		// A float starting at or left of the content edge pushes the line
+		// right; one ending at or past the right edge pulls its end left. A
+		// float wider than the content does both, leaving nothing.
+		if f.x0 <= bc.x0+1 && f.x1 > bc.x0 {
+			if d := f.x1 - bc.x0; d > l {
+				l = d
+			}
+		}
+		if f.x1 >= bc.x0+bc.contentW-1 && f.x0 < bc.x0+bc.contentW {
+			if d := bc.x0 + bc.contentW - f.x0; d > r {
+				r = d
+			}
+		}
+	}
+	if avail := bc.contentW - l - r; avail > 0 {
+		return l, avail
+	}
+	return l, 0
+}
+
+// startLine settles the line beginning at yTop: when floats leave it no
+// width the line slides below the shallowest overlapping float, the way
+// content flows under a float it cannot fit beside. Bounded: each slide ends
+// a float overlap.
+func (bc *breakCtx) startLine(yTop, h float32) {
+	if len(bc.in) == 0 {
+		bc.yTop, bc.xoff, bc.avail = yTop, 0, bc.contentW
+		return
+	}
+	for iter := 0; iter < 8; iter++ {
+		l, avail := bc.spanAt(yTop, h)
+		if avail > 0 {
+			bc.yTop, bc.xoff, bc.avail = yTop, l, avail
+			return
+		}
+		low := float32(-1)
+		for _, f := range bc.in {
+			if f.y0 < yTop+h && f.y1 > yTop && (low < 0 || f.y1 < low) {
+				low = f.y1
+			}
+		}
+		if low < 0 {
+			bc.yTop, bc.xoff, bc.avail = yTop, l, 0
+			return
+		}
+		yTop = low
+	}
+	bc.yTop, bc.xoff, bc.avail = yTop, 0, bc.contentW
+}
+
+// nextLine advances past a completed line of height h and settles the next.
+func (bc *breakCtx) nextLine(h float32) {
+	if h < bc.strut {
+		h = bc.strut
+	}
+	bc.startLine(bc.yTop+h, bc.strut)
+}
+
 // Inline runs the inline layout pass over the arena.
 //
 // Inline layout builds line boxes from inline-level content: text nodes and
@@ -118,6 +252,22 @@ func inlineInto(a *Arena, id ObjectID) {
 	}
 	obj.flags |= flagInlineLaidOut
 	contentW := obj.W
+	// The block's own font and line-height form the strut; it is needed before
+	// the first line breaks (float overlap tests) as well as at placement.
+	strut := float32(0)
+	if obj.Style != nil {
+		strut, _ = runHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
+	}
+	// Floats intruding into this container shorten the lines overlapping
+	// them. Siblings of the container's own text and uncles of nested blocks
+	// both count, up to the nearest formatting-context boundary.
+	bc := &breakCtx{
+		contentW: contentW,
+		x0:       obj.X + obj.PaddingLeft + obj.BorderLeft,
+		strut:    strut,
+		in:       collectFloatIntrusions(a, id),
+	}
+	bc.startLine(obj.Y+obj.PaddingTop+obj.BorderTop, strut)
 	var lines []lineBox
 	var current lineBox
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
@@ -126,21 +276,23 @@ func inlineInto(a *Arena, id ObjectID) {
 			continue
 		}
 		if k.Node.Text() {
-			collectInline(a, kid, contentW, &lines, &current)
+			collectInline(a, kid, &lines, &current, bc)
 			continue
 		}
 		if isBlock(k) {
 			if atomicInlineLevel(k.Style) && k.Node != nil && k.Node.Element() &&
 				k.flags&flagRowPlaced == 0 {
-				atomicInlineBlock(a, kid, contentW, &lines, &current)
+				atomicInlineBlock(a, kid, &lines, &current, bc)
 				continue
 			}
 			if len(current.runs) > 0 {
 				trimTrailingSpaces(a, &current)
 				if len(current.runs) > 0 {
 					lines = append(lines, current)
+					bc.nextLine(current.h)
 				}
 				current = lineBox{}
+				bc.startLine(bc.yTop, strut)
 			}
 			if blockifiesChildren(a.Get(kid).Style) {
 				// A flex or grid container lays its own content out and sizes
@@ -155,6 +307,7 @@ func inlineInto(a *Arena, id ObjectID) {
 				trimTrailingSpaces(a, &current)
 				if len(current.runs) > 0 {
 					lines = append(lines, current)
+					bc.nextLine(current.h)
 				}
 			} else {
 				// A break with nothing before it still occupies a line: the empty
@@ -168,14 +321,16 @@ func inlineInto(a *Arena, id ObjectID) {
 				}
 				h, _ := runHeights(a.Metrics, size, slot, lineHeight)
 				lines = append(lines, lineBox{h: h})
+				bc.nextLine(h)
 			}
 			current = lineBox{}
+			bc.startLine(bc.yTop, strut)
 			continue
 		}
 		// Inline-level child: either a text node or an inline element (<a>, <span>, <b>).
 		// Collect its text runs into the enclosing block's current line box so they are
 		// positioned sequentially inside this block container.
-		collectInline(a, kid, contentW, &lines, &current)
+		collectInline(a, kid, &lines, &current, bc)
 	}
 	if len(current.runs) > 0 {
 		trimTrailingSpaces(a, &current)
@@ -189,31 +344,30 @@ func inlineInto(a *Arena, id ObjectID) {
 	y := obj.Y + obj.PaddingTop + obj.BorderTop
 	lineH := float32(0)
 	contentW = obj.W
-	// The block's own font and line-height form the strut, and every line box is
-	// at least as tall as it even when all the runs inside are smaller. Without
-	// it a `* { line-height: 26px }` reset reaches a 40px heading through the
-	// link wrapping its text and collapses the heading's own line.
-	strut := float32(0)
-	if obj.Style != nil {
-		strut, _ = runHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
-	}
+	// Strut was computed before breaking; every line box is at least as tall.
 	justifyExtra := float32(0)
 	for li, line := range lines {
 		if line.h < strut {
 			line.h = strut
 		}
 		justifyExtra = 0
-		baseX := obj.X + obj.PaddingLeft + obj.BorderLeft
+		// A line overlapping floats lays out inside the shortened span, so
+		// alignment centers within what the floats leave, not the full box.
+		lxoff, lavail := bc.spanAt(y, line.h)
+		if lavail <= 0 {
+			lxoff, lavail = 0, contentW
+		}
+		baseX := obj.X + obj.PaddingLeft + obj.BorderLeft + lxoff
 		alignW := line.w
-		if obj.Style != nil && alignW < contentW {
+		if obj.Style != nil && alignW < lavail {
 			switch obj.Style.TextAlign {
 			case style.TextAlignCenter:
-				baseX += (contentW - alignW) / 2
+				baseX += (lavail - alignW) / 2
 			case style.TextAlignRight:
-				baseX += contentW - alignW
+				baseX += lavail - alignW
 			case style.TextAlignJustify:
 				if li < len(lines)-1 {
-					justifyExtra = computeJustifyExtra(line, contentW, a)
+					justifyExtra = computeJustifyExtra(line, lavail, a)
 				}
 			}
 		}
@@ -281,7 +435,7 @@ func computeJustifyExtra(line lineBox, contentW float32, a *Arena) float32 {
 	return (contentW - line.w) / float32(spaceCount)
 }
 
-func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox, current *lineBox) {
+func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox, bc *breakCtx) {
 	k := a.Get(nodeID)
 	if k.Style == nil || k.Style.Display == style.DisplayNone {
 		return
@@ -289,7 +443,7 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 	if isBlock(k) {
 		if atomicInlineLevel(k.Style) && k.Node != nil && k.Node.Element() &&
 			k.flags&flagRowPlaced == 0 {
-			atomicInlineBlock(a, nodeID, contentW, lines, current)
+			atomicInlineBlock(a, nodeID, lines, current, bc)
 		}
 		return
 	}
@@ -326,6 +480,7 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 					trimTrailingSpaces(a, current)
 					if len(current.runs) > 0 {
 						*lines = append(*lines, *current)
+						bc.nextLine(current.h)
 					}
 					*current = lineBox{}
 				}
@@ -341,10 +496,13 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 			if word == " " && len(current.runs) == 0 {
 				continue
 			}
-			if !nowrap && current.w+wordW > contentW && current.w > 0 {
+			// Wrap against the float-shortened width, not the full content
+			// box: beside a float the line holds fewer words.
+			if !nowrap && current.w+wordW > bc.avail && current.w > 0 {
 				trimTrailingSpaces(a, current)
 				if len(current.runs) > 0 {
 					*lines = append(*lines, *current)
+					bc.nextLine(current.h)
 				}
 				*current = lineBox{}
 			}
@@ -401,14 +559,14 @@ func collectInline(a *Arena, nodeID ObjectID, contentW float32, lines *[]lineBox
 	// into, so it is handled before the generic inline-element descent.
 	k = a.Get(nodeID)
 	if k.Node != nil && k.Node.Element() && k.Node.Data == "img" {
-		atomicInlineReplaced(a, nodeID, contentW, lines, current)
+		atomicInlineReplaced(a, nodeID, lines, current, bc)
 		return
 	}
 	// Inline element (e.g. <a>, <span>, <b>): recursively collect from its children.
 	// Re-fetch k in case Alloc calls during text processing reallocated the arena.
 	k = a.Get(nodeID)
 	for child := k.FirstKid; child != 0; child = a.Get(child).NextSibling {
-		collectInline(a, child, contentW, lines, current)
+		collectInline(a, child, lines, current, bc)
 	}
 }
 
@@ -459,19 +617,19 @@ type textRun struct {
 // built. The box behaves as a single unbreakable word whose glyph is a nested
 // layout: it takes part in the line's horizontal flow and grows the line box,
 // but its own interior is laid out as a block.
-func atomicInlineBlock(a *Arena, id ObjectID, contentW float32, lines *[]lineBox, current *lineBox) {
-	blockInto(a, id, contentW)
+func atomicInlineBlock(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox, bc *breakCtx) {
+	blockInto(a, id, bc.contentW)
 	inlineInto(a, id)
 	k := a.Get(id)
 	// An auto width shrinks to the content, the way the block pass shrinks a row
 	// of inline-blocks. Filling the line would give the box the whole row and push
 	// every sibling onto a line of its own, which is what turned a title followed
 	// by its tag pills into two lines.
-	if k.Style != nil && resolveBoxWidth(a, k.Style, contentW) < 0 {
+	if k.Style != nil && resolveBoxWidth(a, k.Style, bc.contentW) < 0 {
 		if w := itemMaxContentW(a, id); w > 0 && w < k.W {
 			k.W = w
 			k = a.Get(id)
-			clampWidth(a, k, contentW)
+			clampWidth(a, k, bc.contentW)
 			k = a.Get(id)
 			// The interior was laid out for the wide box it has just lost, so its
 			// words are re-wrapped and re-aligned at the width the box settles on.
@@ -485,10 +643,11 @@ func atomicInlineBlock(a *Arena, id ObjectID, contentW float32, lines *[]lineBox
 	boxW := k.W + k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
 	lineW := boxW + k.MarginLeft + k.MarginRight
 	lineH := k.BorderH() + k.MarginTop + k.MarginBottom
-	if len(current.runs) > 0 && current.w+lineW > contentW {
+	if len(current.runs) > 0 && current.w+lineW > bc.avail {
 		trimTrailingSpaces(a, current)
 		if len(current.runs) > 0 {
 			*lines = append(*lines, *current)
+			bc.nextLine(current.h)
 		}
 		*current = lineBox{}
 	}
@@ -509,9 +668,9 @@ func atomicInlineBlock(a *Arena, id ObjectID, contentW float32, lines *[]lineBox
 // Unlike an inline-block, its size is not measured from content: it comes from
 // the CSS/attribute/intrinsic resolution in the block pass helper. The box still
 // behaves as one unbreakable unit on the line.
-func atomicInlineReplaced(a *Arena, id ObjectID, contentW float32, lines *[]lineBox, current *lineBox) {
+func atomicInlineReplaced(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox, bc *breakCtx) {
 	k := a.Get(id)
-	w, h, ok := replacedSize(a, k, contentW)
+	w, h, ok := replacedSize(a, k, bc.contentW)
 	if !ok {
 		return
 	}
@@ -520,10 +679,11 @@ func atomicInlineReplaced(a *Arena, id ObjectID, contentW float32, lines *[]line
 	boxW := k.W + k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
 	lineW := boxW + k.MarginLeft + k.MarginRight
 	lineH := k.BorderH() + k.MarginTop + k.MarginBottom
-	if len(current.runs) > 0 && current.w+lineW > contentW {
+	if len(current.runs) > 0 && current.w+lineW > bc.avail {
 		trimTrailingSpaces(a, current)
 		if len(current.runs) > 0 {
 			*lines = append(*lines, *current)
+			bc.nextLine(current.h)
 		}
 		*current = lineBox{}
 	}
