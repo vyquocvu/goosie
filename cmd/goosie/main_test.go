@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -615,5 +616,76 @@ func TestBuildKeepsSyntheticSceneForPacedAndExplicitRuns(t *testing.T) {
 	defer demo.client.Close()
 	if demo.spec.Checkerboard || demo.spec.TextRuns == 0 {
 		t.Errorf("explicit -scene spec = %+v, want the plain scene", demo.spec)
+	}
+}
+
+// errTraversalBoom stands in for a failed traversal load.
+var errTraversalBoom = errors.New("boom")
+
+// TestApplyNavResultFailedTraversalKeepsCursor guards transactional
+// back/forward: the cursor moves only when the traversal's page displays. A
+// failed load used to strand it on a page that never rendered because Back()
+// moved it before the load started.
+func TestApplyNavResultFailedTraversalKeepsCursor(t *testing.T) {
+	f := newNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History.Push("https://a/")
+	tab.History.Push("https://b/")
+	tab.Nav.Serial = 5
+
+	f.applyNavResult(navResult{
+		tabID: tab.ID, serial: 5, url: "https://a/",
+		err:          errTraversalBoom,
+		noHistory:    true,
+		traverse:     -1,
+		traverseBase: 1,
+	})
+
+	if got := tab.History.Current(); got != "https://b/" {
+		t.Errorf("cursor = %q after failed traversal, want https://b/", got)
+	}
+	if !tab.History.CanBack() {
+		t.Error("CanBack() = false after failed traversal; the trail must survive")
+	}
+}
+
+// TestApplyNavResultSuccessfulTraversalCommitsCursor pins the other half: a
+// peeked step lands when its page displays.
+func TestApplyNavResultSuccessfulTraversalCommitsCursor(t *testing.T) {
+	f := newNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History.Push("https://a/")
+	tab.History.Push("https://b/")
+	tab.History.Push("https://c/")
+	tab.Nav.Serial = 9
+
+	f.applyNavResult(navResult{
+		tabID: tab.ID, serial: 9, url: "https://b.com/",
+		noHistory: true, traverse: -1, traverseBase: 2,
+	})
+
+	if got := tab.History.Current(); got != "https://b/" {
+		t.Errorf("cursor = %q after successful traversal, want https://b/", got)
+	}
+}
+
+// TestApplyNavResultStaleTraversalDrops pins the interleave guard: a typed
+// URL landing first owns the cursor, and the older traversal must not yank
+// it back.
+func TestApplyNavResultStaleTraversalDrops(t *testing.T) {
+	f := newNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History.Push("https://a/")
+	tab.History.Push("https://b/")
+	tab.History.Push("https://d/")
+	tab.Nav.Serial = 9
+
+	f.applyNavResult(navResult{
+		tabID: tab.ID, serial: 9, url: "https://a/",
+		noHistory: true, traverse: -1, traverseBase: 1,
+	})
+
+	if got := tab.History.Current(); got != "https://d/" {
+		t.Errorf("cursor = %q after stale traversal, want https://d/", got)
 	}
 }

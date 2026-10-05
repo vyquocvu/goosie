@@ -696,3 +696,52 @@ func TestFindBackspaceStillReportsQuery(t *testing.T) {
 		t.Fatalf("FindQuery = %q after backspace, want a", s.FindQuery)
 	}
 }
+
+// TestHistoryPeekDoesNotMoveCursor guards the traversal contract: peeking
+// reports the target and the base index while the cursor stays put, so a
+// failed load strands nothing.
+func TestHistoryPeekDoesNotMoveCursor(t *testing.T) {
+	h := toolbar.NewHistory()
+	h.Push("https://a.com")
+	h.Push("https://b.com")
+	h.Push("https://c.com")
+
+	url, base, ok := h.PeekBack()
+	if !ok || url != "https://b.com" || base != 2 {
+		t.Fatalf("PeekBack() = (%q, %d, %v), want (https://b.com, 2, true)", url, base, ok)
+	}
+	if got := h.Current(); got != "https://c.com" {
+		t.Fatalf("Current() = %q after peek, want https://c.com (cursor must not move)", got)
+	}
+	// The peek consumed nothing: a real Back still reaches b, and the trail
+	// back to c survives it.
+	if url, ok := h.Back(); !ok || url != "https://b.com" {
+		t.Fatalf("Back() after peek = (%q, %v), want (https://b.com, true)", url, ok)
+	}
+	if url, ok := h.Forward(); !ok || url != "https://c.com" {
+		t.Fatalf("Forward() after back = (%q, %v), want (https://c.com, true)", url, ok)
+	}
+}
+
+// TestHistoryStepCommitsFromBase guards commit-on-success: a step from the
+// peeked base moves, a stale step (another navigation landed first) drops.
+func TestHistoryStepCommitsFromBase(t *testing.T) {
+	h := toolbar.NewHistory()
+	h.Push("https://a.com")
+	h.Push("https://b.com")
+	h.Push("https://c.com")
+
+	if !h.Step(-1, 2) {
+		t.Fatal("Step(-1, 2) dropped a fresh commit")
+	}
+	if got := h.Current(); got != "https://b.com" {
+		t.Fatalf("Current() = %q, want https://b.com", got)
+	}
+	// Stale: the peek saw base 2 but the cursor has since moved.
+	if h.Step(-1, 2) {
+		t.Fatal("Step(-1, 2) moved a stale cursor (index is now 1)")
+	}
+	if got := h.Current(); got != "https://b.com" {
+		t.Fatalf("Current() = %q after stale step, want https://b.com", got)
+	}
+}

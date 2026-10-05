@@ -92,6 +92,11 @@ type navResult struct {
 	url          string
 	downloadPath string
 	noHistory    bool
+	// traverse commits a back/forward step on success: the delta (-1/+1) and
+	// the cursor index the peek saw. A failed traversal leaves the cursor
+	// where it was instead of stranding it on a page that never loaded.
+	traverse     int
+	traverseBase int
 }
 
 // downloadDone reports a completed download instead of a rendered document;
@@ -562,7 +567,7 @@ func (f *framePath) applyNavResult(result navResult) {
 
 	tab.Loading = false
 	if result.downloadPath != "" {
-		if f.tabMgr.Active() == tab {
+		if f.toolbar != nil && f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
 		}
 		fmt.Fprintf(os.Stderr, "goosie: saved %s\n", result.downloadPath)
@@ -570,7 +575,7 @@ func (f *framePath) applyNavResult(result navResult) {
 	}
 	if result.err != nil {
 		tab.Error = result.err.Error()
-		if f.tabMgr.Active() == tab {
+		if f.toolbar != nil && f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
 			f.toolbar.Error = result.err.Error()
 		}
@@ -585,6 +590,11 @@ func (f *framePath) applyNavResult(result navResult) {
 	tab.Title = result.url
 	if !result.noHistory {
 		tab.History.Push(result.url)
+	}
+	if result.traverse != 0 {
+		// The peeked back/forward step commits only now that its page
+		// displayed; a stale commit (another navigation landed first) drops.
+		tab.History.Step(result.traverse, result.traverseBase)
 	}
 	if f.history != nil {
 		f.history.Record(result.url, result.url)
@@ -664,27 +674,37 @@ func (f *framePath) toggleBookmark() {
 	}
 }
 
-// traverseTab handles back/forward on the active tab.
+// traverseTab handles back/forward on the active tab. The cursor moves only
+// when the traversal's load succeeds (committed in applyNavResult): peeking
+// here keeps a failed load from stranding the cursor on a page that never
+// displayed.
 func (f *framePath) traverseTab(delta int) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
 	}
 	var url string
+	var base int
 	var ok bool
 	if delta < 0 {
-		url, ok = tab.History.Back()
+		url, base, ok = tab.History.PeekBack()
 	} else if delta > 0 {
-		url, ok = tab.History.Forward()
+		url, base, ok = tab.History.PeekForward()
 	}
 	if !ok || url == "" {
 		return
 	}
-	f.navigateTabNoHistory(url)
+	f.navigateTabNoHistoryTraverse(url, delta, base)
 }
 
 // navigateTabNoHistory loads a URL without pushing to history.
 func (f *framePath) navigateTabNoHistory(rawURL string) {
+	f.navigateTabNoHistoryTraverse(rawURL, 0, 0)
+}
+
+// navigateTabNoHistoryTraverse is navigateTabNoHistory carrying a traversal
+// commit: on success the history cursor steps by delta from base.
+func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
@@ -709,7 +729,7 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 
 	go func() {
 		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
-		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true}
+		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		var dd downloadDone
 		if errors.As(err, &dd) {
 			res.downloadPath = dd.path
