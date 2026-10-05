@@ -248,17 +248,42 @@ func (tb *treeBuilder) parse(html string) {
 
 	for p.pos < len(p.input) && tb.err == nil {
 		if p.pos < len(p.input) && p.input[p.pos] == '<' {
-			if p.pos+1 < len(p.input) && p.input[p.pos+1] == '/' {
-				tb.handleEndTag(p)
-			} else if p.pos+1 < len(p.input) && p.input[p.pos+1] == '!' {
-				tb.handleCommentOrDoctype(p)
+			// Tag-open state: only a letter starts a tag. `</` closes,
+			// `<!` declares, `<?` is a bogus comment, and anything else -
+			// "a <= b", "2 < 3", a trailing "<" - is literal text. Routing
+			// `<=` into the tag reader swallowed the real close tag that
+			// followed and nested every later sibling inside the box.
+			if p.pos+1 < len(p.input) {
+				switch c := p.input[p.pos+1]; {
+				case c == '/':
+					tb.handleEndTag(p)
+				case c == '!':
+					tb.handleCommentOrDoctype(p)
+				case c == '?':
+					p.pos += 2
+					p.skipTo('>')
+					if p.pos < len(p.input) {
+						p.pos++
+					}
+				case isASCIILetter(c):
+					tb.handleStartTag(p)
+				default:
+					tb.insertText("<")
+					p.pos++
+				}
 			} else {
-				tb.handleStartTag(p)
+				tb.insertText("<")
+				p.pos++
 			}
 		} else {
 			tb.handleText(p)
 		}
 	}
+}
+
+// isASCIILetter reports whether c opens a tag name in the tag-open state.
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 func (tb *treeBuilder) handleText(p *tokenizer) {
