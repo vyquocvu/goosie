@@ -122,6 +122,14 @@ func (d *driver) finish() {
 
 var _ surface.Window = (*driver)(nil)
 
+// steadyFloorFrames is the screenshot floor: enough vsyncs for the document
+// to load and name its tiles. The gate's 600-frame sweep is pacing
+// measurement, not a render requirement - the -frames flag help says as much
+// ("frames to draw with -gate and -bench"), and completeness past the floor
+// comes from two consecutive idle frames, the same readiness goosie-headless
+// gets from two presents. A 600 floor made every parity fixture pay ~10s.
+const steadyFloorFrames = 8
+
 // steadyDriver is a window that passes vsyncs through without scrolling and
 // signals done once the surface has nothing left to draw. It is the screenshot
 // mode's driver: the page loads in the background, the loop presents frames, and

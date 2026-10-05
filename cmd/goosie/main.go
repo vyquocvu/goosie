@@ -1530,7 +1530,7 @@ func run(args []string) error {
 		f.loop = surface.NewLoop(d, f.sched, f.composer, f.rec)
 		finish = d.done
 	} else if c.screenshot {
-		sd := newSteadyDriver(f, c.frames)
+		sd := newSteadyDriver(f, steadyFloorFrames)
 		f.loop = surface.NewLoop(sd, f.sched, f.composer, f.rec)
 		sd.watchIdle(func() bool {
 			// Idle is not "nothing needed": a frame can want no tiles while the
