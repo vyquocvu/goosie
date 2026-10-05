@@ -144,3 +144,50 @@ func TestBackgroundTabResultLeavesTheForegroundAlone(t *testing.T) {
 		t.Errorf("Published = %d, want %d; a background load repainted the visible tab", got, before)
 	}
 }
+
+// TestOutOfOrderResultsLandOnTheir OwnTabs pins independent tab navigation
+// under completion reorder: the background tab finishing first must not
+// disturb the foreground, and the foreground finishing later lands exactly
+// once with its own history intact.
+func TestOutOfOrderResultsLandOnTheirOwnTabs(t *testing.T) {
+	f := newNavTestPath(t)
+	foreground := f.tabMgr.Active()
+	background := f.tabMgr.NewTab()
+	f.tabMgr.SwitchTo(foreground.ID)
+
+	foreground.History.Push("https://fg-old/")
+	foreground.Nav.Serial = 3
+	background.History.Push("https://bg-old/")
+	background.Nav.Serial = 5
+
+	_, bgLayer := paint.BuildLayer(paint.SceneSpec{DocHeight: 512})
+	f.applyNavResult(navResult{tabID: background.ID, serial: 5, url: "https://bg-new/", layer: bgLayer})
+
+	if background.URL != "https://bg-new/" || background.Layer == nil {
+		t.Errorf("background tab not updated: url=%q layer==nil:%v", background.URL, background.Layer == nil)
+	}
+	if foreground.URL != "" || foreground.Layer != nil {
+		t.Errorf("foreground disturbed by background completion: url=%q layer==nil:%v", foreground.URL, foreground.Layer == nil)
+	}
+	if got := f.sched.PlanStats().Published; got != 0 {
+		t.Errorf("Published = %d, want 0; no active-tab frame was ready", got)
+	}
+
+	_, fgLayer := paint.BuildLayer(paint.SceneSpec{DocHeight: 256})
+	f.applyNavResult(navResult{tabID: foreground.ID, serial: 3, url: "https://fg-new/", layer: fgLayer})
+
+	if foreground.URL != "https://fg-new/" || foreground.Layer == nil {
+		t.Errorf("foreground tab not updated: url=%q layer==nil:%v", foreground.URL, foreground.Layer == nil)
+	}
+	if got := f.sched.PlanStats().Published; got != 1 {
+		t.Errorf("Published = %d, want 1; the foreground result must reach the rasterizer once", got)
+	}
+	fgEntries, _ := foreground.History.Entries()
+	if len(fgEntries) != 2 || fgEntries[1] != "https://fg-new/" {
+		t.Errorf("foreground history = %v, want [fg-old fg-new]", fgEntries)
+	}
+	bgEntries, _ := background.History.Entries()
+	if len(bgEntries) != 2 || bgEntries[1] != "https://bg-new/" {
+		t.Errorf("background history = %v, want [bg-old bg-new]", bgEntries)
+	}
+}
