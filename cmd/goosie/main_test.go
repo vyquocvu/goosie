@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/net"
@@ -750,5 +751,54 @@ func TestApplyNavResultTraverseKeepsScroll(t *testing.T) {
 
 	if y := f.sched.Viewport().Offset.Y; y != 120 {
 		t.Errorf("viewport offset = %d, want 120 (traversal preserves offset)", y)
+	}
+}
+
+// TestShutdownCancelsAndJoinsNavigations guards teardown ordering: in-flight
+// loads root at the run scope, so cancelling it aborts them, and the waiter
+// proves no loader still runs afterwards instead of leaking into teardown.
+func TestShutdownCancelsAndJoinsNavigations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	f := newNavTestPath(t)
+	f.client = net.DefaultClient()
+	defer f.client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.fonts = fonts
+	f.config = config{width: 800, height: 600, dpr: 1}
+	f.runCtx, f.runCancel = context.WithCancel(context.Background())
+
+	f.navigateTab(server.URL + "/hangs")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tab := f.tabMgr.Active()
+		tab.Nav.Mu.Lock()
+		loading := tab.Nav.Loading
+		tab.Nav.Mu.Unlock()
+		if loading || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if tab := f.tabMgr.Active(); !tab.Nav.Loading {
+		t.Fatal("navigation never started loading")
+	}
+
+	f.runCancel()
+	joined := make(chan struct{})
+	go func() {
+		f.navWg.Wait()
+		close(joined)
+	}()
+	select {
+	case <-joined:
+	case <-time.After(10 * time.Second):
+		t.Fatal("navWg.Wait did not return after run-cancel; the loader is not joined")
 	}
 }

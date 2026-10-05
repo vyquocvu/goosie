@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -314,6 +315,13 @@ type framePath struct {
 	navResults chan navResult
 	imgResults chan imgResult
 	zoom       float64
+	// runCtx roots navigation contexts so shutdown cancels in-flight loads
+	// (they used to hang off context.Background and outlive the window);
+	// navWg joins them before the window closes. closeTab still cancels a
+	// tab's own load immediately without waiting on the network.
+	runCtx    context.Context
+	runCancel context.CancelFunc
+	navWg     sync.WaitGroup
 	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
 	// scene, and its laid-out height in device pixels. Both go into the artifact, which
 	// otherwise carries timings with no statement of what they were taken on.
@@ -504,6 +512,15 @@ func (f *framePath) syncTabToToolbar() {
 	f.toolbar.Error = tab.Error
 }
 
+// navContext roots one navigation load: the run scope when it exists so
+// shutdown cancels in-flight loads, Background for bare test harnesses.
+func (f *framePath) navContext() context.Context {
+	if f.runCtx != nil {
+		return f.runCtx
+	}
+	return context.Background()
+}
+
 // navigateTab loads a URL on the active tab.
 func (f *framePath) navigateTab(rawURL string) {
 	tab := f.tabMgr.Active()
@@ -517,7 +534,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	if tab.Nav.Cancel != nil {
 		tab.Nav.Cancel()
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(f.navContext())
 	tab.Nav.Cancel = cancel
 	tab.Nav.Serial++
 	serial := tab.Nav.Serial
@@ -526,10 +543,14 @@ func (f *framePath) navigateTab(rawURL string) {
 
 	tab.Loading = true
 	tab.Error = ""
-	f.toolbar.SetLoading(true)
-	f.toolbar.Error = ""
+	if f.toolbar != nil {
+		f.toolbar.SetLoading(true)
+		f.toolbar.Error = ""
+	}
 
+	f.navWg.Add(1)
 	go func() {
+		defer f.navWg.Done()
 		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u}
 		var dd downloadDone
@@ -727,7 +748,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	if tab.Nav.Cancel != nil {
 		tab.Nav.Cancel()
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(f.navContext())
 	tab.Nav.Cancel = cancel
 	tab.Nav.Serial++
 	serial := tab.Nav.Serial
@@ -736,9 +757,13 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 
 	tab.Loading = true
 	tab.Error = ""
-	f.toolbar.SetLoading(true)
+	if f.toolbar != nil {
+		f.toolbar.SetLoading(true)
+	}
 
+	f.navWg.Add(1)
 	go func() {
+		defer f.navWg.Done()
 		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		var dd downloadDone
@@ -1588,6 +1613,12 @@ func run(args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Navigation loads root here so shutdown cancels them; navWg joins them
+	// before the window closes rather than leaking blocked sends into a
+	// torn-down frame path.
+	f.runCtx, f.runCancel = context.WithCancel(context.Background())
+	defer f.runCancel()
+
 	loopErr := make(chan error, 1)
 	stopped := make(chan struct{})
 	f.started = time.Now()
@@ -1613,6 +1644,11 @@ func run(args []string) error {
 		// frames would exit non-zero for a present nobody asked for.
 		cancel()
 		<-stopped
+		// Stop navigation loads first so their results cannot land mid-teardown,
+		// then join them: a result send into the drain is harmless, but only a
+		// join proves no loader still touches the scheduler or tabs.
+		f.runCancel()
+		f.navWg.Wait()
 		_ = f.window.Close()
 	}()
 
