@@ -651,6 +651,17 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		if contentWidth == 0 && it.W > 0 {
 			contentWidth = it.W
 		}
+		// An auto-basis item still honors min-width/max-width: 34px of text in
+		// a min-width: 60px item measures 60px of content, not 34. Without the
+		// floor every item in the row measured narrow and the whole row packed
+		// left of where Chromium puts it.
+		lo, hi := flexContentBounds(a, it, contentW)
+		if lo > 0 && contentWidth < lo {
+			contentWidth = lo
+		}
+		if hi >= 0 && contentWidth > hi {
+			contentWidth = hi
+		}
 		it.W = contentWidth
 		// Basis is a border-box width.
 		items[i].basis = contentWidth + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
@@ -658,6 +669,12 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		items[i].srcX = srcX
 		items[i].contentW = contentWidth
 		items[i].minW = inlineMinWidth(a, items[i].id) + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
+		if floor := lo + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight; floor > items[i].minW {
+			// The shrink pass may not squeeze the item below its min-width
+			// either: the floor there is min-content by default, but a
+			// declared minimum raises it.
+			items[i].minW = floor
+		}
 	}
 
 	// A row-reverse container reads its items from the container's right edge, so
@@ -1001,6 +1018,30 @@ func clampFlexBasis(obj *Object, basis, containingW float32) float32 {
 		basis = 0
 	}
 	return basis
+}
+
+// flexContentBounds resolves an item's min/max-width to content-box bounds
+// against the container width, for the auto-basis measure path. Border-box
+// shifts the constraint by the decorations, the same adjustment clampWidth
+// applies to laid-out boxes. Unset bounds come back 0/-1 and constrain
+// nothing.
+func flexContentBounds(a *Arena, obj *Object, containingW float32) (float32, float32) {
+	s := obj.Style
+	if s == nil {
+		return 0, -1
+	}
+	lo := resolveBoxMinWidth(a, s, containingW)
+	hi := resolveBoxMaxWidth(a, s, containingW)
+	if s.BoxSizing == style.BoxSizingBorderBox {
+		extra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
+		if lo >= 0 {
+			lo -= extra
+		}
+		if hi >= 0 {
+			hi -= extra
+		}
+	}
+	return lo, hi
 }
 
 // flexMargin resolves an item's margin against the flex rules: `auto` is a
