@@ -57,3 +57,46 @@ jobs:
           cache: true
       - name: Check import boundaries and cgo rules
         run: go test -count=1 ./internal/archtest/
+
+  wpt-pilot:
+    name: WPT pilot reftests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build goosie binary for the harness
+        run: go build -o goosie ./cmd/goosie
+      - name: Run local WPT-style reftests (no checkout download)
+        run: go test -count=1 -timeout 10m -run TestWPTPilot -v ./test/wpt/
+
+  parity:
+    name: Render parity vs Chromium
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build goosie binary for the harness
+        run: go build -o goosie ./cmd/goosie
+      - name: Install Playwright Chromium and scoring deps
+        run: |
+          pip install "playwright==1.49.*" pillow numpy
+          python -m playwright install chromium --with-deps
+      - name: Render both sides fresh and score (fail-closed)
+        run: python3 testdata/parity.py --render --render-chromium --binary ./goosie --junit /tmp/parity-junit.xml --json /tmp/parity.json
+      - name: Upload parity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-report
+          path: |
+            /tmp/parity.json
+            /tmp/parity-junit.xml

@@ -48,6 +48,10 @@ wpt-pilot: build
 	@echo "Running WPT pilot (local reftests)..."
 	go test -count=1 -timeout 10m -run TestWPTPilot -v ./test/wpt/
 
+parity: build
+	@echo "Scoring render parity vs Chromium (fail-closed)..."
+	python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie
+
 wpt: build
 	@echo "Running WPT suite..."
 	bash scripts/run-wpt.sh --download
