@@ -535,9 +535,12 @@ type imgRef struct {
 // With WithImages it fetches and applies them before the first layout; with
 // WithDeferredImages it only stores the references for LoadDeferredImages.
 func (s *Session) loadImages() {
-	if s.imgFetch == nil || s.Doc == nil {
+	if s.Doc == nil {
 		return
 	}
+	// Document-inline data: images resolve without a fetcher, so sessions
+	// without one (headless, tests) still render them; network URLs simply
+	// find nothing to call and stay empty.
 	s.initImageMaps()
 	if s.deferImages {
 		s.pendingImgs = s.collectImageRefs()
@@ -598,6 +601,16 @@ func (s *Session) collectImageRefs() []imgRef {
 		}
 		if n.Data == "img" {
 			if src := strings.TrimSpace(n.GetAttribute("src")); src != "" {
+				// data: payloads are document-inline bytes, not network
+				// subresources: they bypass URL resolution and decode locally.
+				if strings.HasPrefix(src, "data:") {
+					refs = append(refs, imgRef{id: n.ID, abs: src})
+					if !seen[src] {
+						seen[src] = true
+						uniq = append(uniq, src)
+					}
+					return nil
+				}
 				if abs, ok := resolveSheetURL(s.imgBase, src); ok {
 					refs = append(refs, imgRef{id: n.ID, abs: abs})
 					if !seen[abs] {
@@ -608,7 +621,16 @@ func (s *Session) collectImageRefs() []imgRef {
 			}
 		}
 		if st, ok := s.Styles[n.ID]; ok && st.BackgroundImage != "" {
-			if abs, ok := resolveSheetURL(s.imgBase, st.BackgroundImage); ok {
+			bg := st.BackgroundImage
+			if strings.HasPrefix(bg, "data:") {
+				refs = append(refs, imgRef{id: n.ID, abs: bg, bg: true})
+				if !seen[bg] {
+					seen[bg] = true
+					uniq = append(uniq, bg)
+				}
+				return nil
+			}
+			if abs, ok := resolveSheetURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -619,6 +641,20 @@ func (s *Session) collectImageRefs() []imgRef {
 		return nil
 	})
 	return refs
+}
+
+// fetchImageBytes resolves one image reference to raw bytes: data: URIs
+// decode inline (no fetcher needed, no network), everything else goes through
+// the host fetcher. A nil fetcher therefore still renders document-inline
+// images, which is what headless and fetcher-less test sessions need.
+func (s *Session) fetchImageBytes(u string) ([]byte, error) {
+	if strings.HasPrefix(u, "data:") {
+		return decodeDataImageURL(u)
+	}
+	if s.imgFetch == nil {
+		return nil, fmt.Errorf("engine: no image fetcher for %q", u)
+	}
+	return s.imgFetch(s.imgBase, u)
 }
 
 // fetchImages downloads and decodes each unique reference through a bounded
@@ -660,7 +696,7 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 			if full {
 				return
 			}
-			data, err := s.imgFetch(s.imgBase, u)
+			data, err := s.fetchImageBytes(u)
 			if err != nil || len(data) == 0 {
 				return
 			}

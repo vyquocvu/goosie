@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
 	stdnet "net"
@@ -14,6 +15,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
+	imgdec "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/style"
 )
@@ -759,6 +761,62 @@ func AddressBlocked(ip stdnet.IP) bool {
 		}
 	}
 	return false
+}
+
+// decodeDataImageURL decodes a data: image URL to raw bytes without touching
+// the network. data: payloads are document-inline content, not subresource
+// policy, so the engine answers them directly under the same encoded-size cap
+// every other image passes; Probe/Decode still enforce dimensions and pixels
+// afterwards. Only image/* (or mediatype-less, which the decoder sniffs)
+// payloads decode: anything else is another subsystem's business.
+func decodeDataImageURL(u string) ([]byte, error) {
+	rest := strings.TrimPrefix(u, "data:")
+	comma := strings.IndexByte(rest, ',')
+	if comma < 0 {
+		return nil, fmt.Errorf("engine: malformed data URI (no payload)")
+	}
+	meta, payload := rest[:comma], rest[comma+1:]
+	isB64 := strings.HasSuffix(meta, ";base64")
+	media := strings.TrimSuffix(meta, ";base64")
+	if i := strings.IndexByte(media, ';'); i >= 0 {
+		media = media[:i]
+	}
+	media = strings.TrimSpace(media)
+	if media != "" && !strings.HasPrefix(media, "image/") {
+		return nil, fmt.Errorf("engine: data URI is %q, not an image", media)
+	}
+	var data []byte
+	if isB64 {
+		payload = strings.TrimSpace(payload)
+		// Base64 expands by 4/3: bound the encoded form before allocating.
+		if len(payload) > imgdec.MaxEncodedImageBytes*4/3+8 {
+			return nil, fmt.Errorf("engine: data URI payload exceeds image byte limit")
+		}
+		var err error
+		data, err = base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			data, err = base64.RawStdEncoding.DecodeString(payload)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("engine: data URI base64: %w", err)
+		}
+	} else {
+		// Percent-encoding expands by at most 3x. PathUnescape (not
+		// QueryUnescape): "+" is a literal plus in data URIs, and base64
+		// payloads and SVG path data both use it.
+		if len(payload) > imgdec.MaxEncodedImageBytes*3 {
+			return nil, fmt.Errorf("engine: data URI payload exceeds image byte limit")
+		}
+		s, err := url.PathUnescape(payload)
+		if err != nil {
+			return nil, fmt.Errorf("engine: data URI percent-decoding: %w", err)
+		}
+		data = []byte(s)
+	}
+	if len(data) == 0 || len(data) > imgdec.MaxEncodedImageBytes {
+		return nil, fmt.Errorf("engine: data URI decodes to %d bytes, outside the image byte limit", len(data))
+	}
+	return data, nil
 }
 
 // absolutizeCSSURLs rewrites every relative url() reference in a fetched style

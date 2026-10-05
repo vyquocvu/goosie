@@ -1797,7 +1797,12 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 		h, haveH = resolvePctLength(s.Height, containingW), true
 	} else if attrH > 0 {
 		h, haveH = attrH, true
-	} else if natH > 0 {
+	} else if natH > 0 && !haveW {
+		// Intrinsic height counts only when the width is intrinsic too (both
+		// auto): with a specified width and `height: auto` the ratio below
+		// derives the height, which is what keeps `width: 100%` images
+		// undistorted. Taking natH unconditionally pinned every responsive
+		// image to its natural height and shoved the page below it down.
 		h, haveH = natH, true
 	}
 
