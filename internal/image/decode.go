@@ -18,10 +18,25 @@ const (
 )
 
 // Probe checks encoded length and metadata before full decode. It returns the
-// image config if the data passes admission limits.
+// image config if the data passes admission limits. Standalone SVG documents
+// resolve their raster size from width/height, viewBox, or the 300x150
+// replaced-element fallback, under the same dimension/pixel limits.
 func Probe(data []byte) (gimage.Config, error) {
 	if len(data) > MaxEncodedImageBytes {
 		return gimage.Config{}, fmt.Errorf("image: encoded size %d exceeds limit %d", len(data), MaxEncodedImageBytes)
+	}
+	if isSVGData(data) {
+		cfg, err := svgConfig(data)
+		if err != nil {
+			return gimage.Config{}, err
+		}
+		if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > MaxImageDimension || cfg.Height > MaxImageDimension {
+			return gimage.Config{}, fmt.Errorf("image: dimensions %dx%d exceed admission limit %d", cfg.Width, cfg.Height, MaxImageDimension)
+		}
+		if int64(cfg.Width) > MaxDecodedImagePixels/int64(cfg.Height) {
+			return gimage.Config{}, fmt.Errorf("image: pixel count %dx%d exceeds limit %d", cfg.Width, cfg.Height, MaxDecodedImagePixels)
+		}
+		return cfg, nil
 	}
 	cfg, _, err := gimage.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -38,9 +53,13 @@ func Probe(data []byte) (gimage.Config, error) {
 
 // Decode decodes an image from raw bytes. The output is premultiplied RGBA at
 // the original resolution; the caller is responsible for any downscaling.
+// Standalone SVG documents rasterize through the static subset in svg.go.
 func Decode(data []byte) (gimage.Image, error) {
 	if _, err := Probe(data); err != nil {
 		return nil, err
+	}
+	if isSVGData(data) {
+		return decodeSVG(data)
 	}
 	r := bytes.NewReader(data)
 	img, _, err := gimage.Decode(r)
