@@ -79,7 +79,8 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 
 	areaRows, areaCols, areas := parseGridAreas(container.GridTemplateAreas)
-	cols := parseGridTracks(container.GridTemplateColumns, container.FontSize, contentW)
+	cols, colLines := parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW)
+	rowSpecs, rowLines := parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH)
 	switch {
 	case len(cols) == 0:
 		// An untemplated grid still needs one implicit column to place into.
@@ -95,7 +96,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	cols = expandAutoTracks(cols, contentW, gapX)
 
-	items := collectGridItems(a, id, contentX, contentY, container, areas)
+	items := collectGridItems(a, id, contentX, contentY, container, areas, colLines, rowLines, len(cols), len(rowSpecs))
 	if len(items) == 0 {
 		return 0
 	}
@@ -163,8 +164,8 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 
 	// Rows: a declared row keeps its size, and every other row takes the tallest
-	// item sitting wholly inside it.
-	rowSpecs := parseGridTracks(container.GridTemplateRows, container.FontSize, contentH)
+	// item sitting wholly inside it. rowSpecs was parsed with the columns; the
+	// content height it resolved against has not changed since.
 	nRows := len(rowSpecs)
 	if maxRow+1 > nRows {
 		nRows = maxRow + 1
@@ -325,7 +326,7 @@ func shiftBlockKids(a *Arena, id ObjectID, dx, dy float32) {
 // collectGridItems takes the in-flow children of a grid container. Raw text and
 // out-of-flow boxes are not items, but a skipped text node still has its content
 // cleared so the paint pass cannot draw it at the box's zero position.
-func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, container *style.ComputedStyle, areas map[string]gridArea) []gridItem {
+func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, container *style.ComputedStyle, areas map[string]gridArea, colLines, rowLines map[string][]int, nCols, nRows int) []gridItem {
 	obj := a.Get(id)
 	var out []gridItem
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
@@ -375,6 +376,16 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 			p.col, p.row = ar.col, ar.row
 			p.colSpan, p.rowSpan = ar.colSpan, ar.rowSpan
 			p.fixedPos = true
+		}
+		// Explicit line placement pins the item: "2 / 5" and
+		// "sidebar-start / content-end" both reduce to a start line and a
+		// span. A bare "span N" (or anything unresolvable) keeps the
+		// span/auto-placement path the style layer always produced.
+		if st, sp, ok := resolveGridPlacement(k.Style.GridColumn, colLines, nCols); ok {
+			p.col, p.colSpan, p.fixedPos = st, sp, true
+		}
+		if st, sp, ok := resolveGridPlacement(k.Style.GridRow, rowLines, nRows); ok {
+			p.row, p.rowSpan, p.fixedPos = st, sp, true
 		}
 		out = append(out, p)
 	}
@@ -456,14 +467,39 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 // percentage against inlineSize, which is 0 for a track axis with no definite
 // size - a percentage row of an auto-height grid is then left to size itself.
 func parseGridTracks(v string, fontSize, inlineSize float32) []gridTrack {
+	tracks, _ := parseGridTracksAndLines(v, fontSize, inlineSize)
+	return tracks
+}
+
+// parseGridTracksAndLines is parseGridTracks plus the custom-ident line names
+// each "[...]" group declares. N tracks imply N+1 lines, numbered from 1: a
+// group names the line before the next track, so "[a] 200px [b] 1fr [c]" puts
+// a on line 1, b on line 2, c on line 3. A name may repeat; placement takes
+// the first line carrying it. Names match case-insensitively, the same
+// normalization the track parser already applies to the whole list.
+func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrack, map[string][]int) {
 	v = strings.TrimSpace(strings.ToLower(v))
+	lines := map[string][]int{}
 	if v == "" || v == "none" {
-		return nil
+		return nil, lines
 	}
 	var out []gridTrack
+	// line is the 1-based number the next track starts on.
+	line := 1
+	record := func(group string) {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(group, "["), "]"))
+		for _, name := range strings.Fields(inner) {
+			lines[name] = append(lines[name], line)
+		}
+	}
 	for _, tok := range splitGridTracks(v) {
+		if strings.HasPrefix(tok, "[") {
+			record(tok)
+			continue
+		}
 		if !strings.HasPrefix(tok, "repeat(") {
 			out = append(out, parseGridTrack(tok, fontSize, inlineSize))
+			line++
 			continue
 		}
 		inner := strings.TrimSuffix(strings.TrimPrefix(tok, "repeat("), ")")
@@ -478,17 +514,123 @@ func parseGridTracks(v string, fontSize, inlineSize float32) []gridTrack {
 				t.fit = head == "auto-fit"
 				out = append(out, t)
 			}
+			// The repeated count is unknowable until the container measures,
+			// so names inside cannot map to lines yet; the tracks still parse.
+			// The cursor advances by the body's declared tracks so a group
+			// after the repeat still names the right line when the repeat
+			// expands to exactly its body.
+			line += countTopTracks(body)
 			continue
 		}
 		n, err := strconv.Atoi(head)
 		if err != nil || n <= 0 {
 			continue
 		}
+		subTracks, subLines := parseGridTracksAndLines(body, fontSize, inlineSize)
 		for i := 0; i < n; i++ {
-			out = append(out, parseGridTracks(body, fontSize, inlineSize)...)
+			for name, ls := range subLines {
+				for _, l := range ls {
+					lines[name] = append(lines[name], line+l-1)
+				}
+			}
+			out = append(out, subTracks...)
+			line += len(subTracks)
 		}
 	}
-	return out
+	return out, lines
+}
+
+// countTopTracks counts the tracks a repeat body declares without parsing
+// them, for the auto-fill/auto-fit line cursor the engine cannot map names
+// onto anyway. Numeric repeats expand; anything else counts once.
+func countTopTracks(body string) int {
+	n := 0
+	for _, tok := range splitGridTracks(body) {
+		if strings.HasPrefix(tok, "[") {
+			continue
+		}
+		if strings.HasPrefix(tok, "repeat(") {
+			inner := strings.TrimSuffix(strings.TrimPrefix(tok, "repeat("), ")")
+			parts := splitTopLevel(inner)
+			if len(parts) >= 2 {
+				if k, err := strconv.Atoi(parts[0]); err == nil && k > 0 {
+					n += k * countTopTracks(strings.Join(parts[1:], " "))
+					continue
+				}
+			}
+		}
+		n++
+	}
+	return n
+}
+
+// resolveGridLine maps one side of a "start / end" placement to a 1-based line
+// number: a bare number, or the first line carrying a custom-ident name.
+// "span N" is not a line and reports false; the caller keeps the span form.
+func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, bool) {
+	side = strings.TrimSpace(side)
+	if side == "" || side == "auto" {
+		return 0, false
+	}
+	if strings.HasPrefix(side, "span") {
+		return 0, false
+	}
+	if num, err := strconv.Atoi(side); err == nil && num != 0 {
+		if num < 0 {
+			// Negative lines count back from the explicit grid's end line.
+			num = nTracks + 2 + num
+		}
+		if num >= 1 {
+			return num, true
+		}
+		return 0, false
+	}
+	if ls, ok := lines[side]; ok && len(ls) > 0 {
+		return ls[0], true
+	}
+	return 0, false
+}
+
+// resolveGridPlacement reduces a grid-column/grid-row value to a 0-based
+// start and a span against a template of nTracks tracks with the given line
+// names. "a / b" pins both lines; a lone line pins the start with span 1; a
+// bare "span N" (or anything unparseable) reports false and the caller falls
+// back to the span/auto-placement path it always used. Against an explicit
+// template (nTracks > 0) starts clamp into it and spans clamp to fit, because
+// the engine grows implicit rows but never implicit columns; with no template
+// the numbers pass through and rows grow as needed.
+func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (start, span int, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "auto" {
+		return 0, 0, false
+	}
+	if strings.HasPrefix(raw, "span") {
+		return 0, 0, false
+	}
+	if i := strings.Index(raw, "/"); i >= 0 {
+		s, sOk := resolveGridLine(raw[:i], lines, nTracks)
+		e, eOk := resolveGridLine(raw[i+1:], lines, nTracks)
+		if !sOk || !eOk || e <= s {
+			return 0, 0, false
+		}
+		if nTracks > 0 {
+			if s > nTracks {
+				return 0, 0, false
+			}
+			if e > nTracks+1 {
+				e = nTracks + 1
+			}
+		}
+		return s - 1, e - s, true
+	}
+	s, sOk := resolveGridLine(raw, lines, nTracks)
+	if !sOk {
+		return 0, 0, false
+	}
+	if nTracks > 0 && s > nTracks {
+		return 0, 0, false
+	}
+	return s - 1, 1, true
 }
 
 func parseGridTrack(tok string, fontSize, inlineSize float32) gridTrack {
@@ -563,10 +705,14 @@ func gridLen(s string, fontSize, inlineSize float32) (float32, bool) {
 }
 
 // splitGridTracks splits a track list on whitespace and top-level commas so that
-// "repeat(3, minmax(50px, 1fr))" survives as one token.
+// "repeat(3, minmax(50px, 1fr))" survives as one token. A "[name ...]" line-name
+// group survives as one token too: without the bracket depth its inner space
+// would split it into two broken tokens, each of which parsed as a phantom
+// auto track and shifted every column after it.
 func splitGridTracks(v string) []string {
 	var out []string
 	depth := 0
+	brackets := 0
 	start := 0
 	flush := func(end int) {
 		if s := strings.TrimSpace(v[start:end]); s != "" {
@@ -581,8 +727,14 @@ func splitGridTracks(v string) []string {
 			if depth > 0 {
 				depth--
 			}
+		case '[':
+			brackets++
+		case ']':
+			if brackets > 0 {
+				brackets--
+			}
 		case ' ', '\t', '\n', ',':
-			if depth == 0 {
+			if depth == 0 && brackets == 0 {
 				flush(i)
 				start = i + 1
 			}

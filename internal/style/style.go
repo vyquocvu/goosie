@@ -372,6 +372,12 @@ type ComputedStyle struct {
 	GridArea            string
 	GridColumnSpan      int
 	GridRowSpan         int
+	// GridColumn and GridRow keep the declared placement verbatim ("1 / 3",
+	// "sidebar-start / content-end", "span 2") so layout can pin items to
+	// named or numbered lines; the Span beside each is the fallback the
+	// auto-placement path always used. Identifiers stay case-preserved.
+	GridColumn string
+	GridRow    string
 	// Grids use the bare keywords "start" and "end" where flexbox writes
 	// "flex-start" and "flex-end", so each axis keeps its own value.
 	JustifyItems string
@@ -1581,8 +1587,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.GridArea = strings.TrimSpace(value)
 	case "grid-column":
 		cs.GridColumnSpan = parseGridSpan(value)
+		cs.GridColumn = strings.TrimSpace(value)
 	case "grid-row":
 		cs.GridRowSpan = parseGridSpan(value)
+		cs.GridRow = strings.TrimSpace(value)
 	case "justify-items":
 		cs.JustifyItems = value
 	case "align-content":
