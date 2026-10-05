@@ -607,6 +607,17 @@ func (f *framePath) applyNavResult(result navResult) {
 			Layers:     []*frame.Layer{result.layer},
 			Background: result.bgColor,
 		})
+		if !result.noHistory {
+			// A fresh navigation opens at the top: without the reset the
+			// new page inherited whatever offset the old one scrolled to.
+			// Reloads and traversals keep their offset (per-entry restore
+			// is a later feature, not silent loss).
+			tab.ScrollY = 0
+			f.sched.SetViewport(frame.Viewport{
+				Offset: frame.Point{},
+				Size:   f.config.devSize(),
+			})
+		}
 		f.publishAccessibility()
 	}
 

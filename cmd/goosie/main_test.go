@@ -689,3 +689,66 @@ func TestApplyNavResultStaleTraversalDrops(t *testing.T) {
 		t.Errorf("cursor = %q after stale traversal, want https://d/", got)
 	}
 }
+
+// TestApplyNavResultFreshNavResetsScroll guards navigation commitment: a new
+// page opens at the top instead of inheriting the old page's scroll offset.
+// Reloads and traversals keep their offset.
+func TestApplyNavResultFreshNavResetsScroll(t *testing.T) {
+	f := newNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History.Push("https://a/")
+	tab.Nav.Serial = 4
+	tab.ScrollY = 500
+	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 500}, Size: frame.Size{W: 256, H: 256}})
+
+	f.applyNavResult(navResult{tabID: tab.ID, serial: 4, url: "https://b/"})
+
+	if tab.ScrollY != 0 {
+		t.Errorf("tab.ScrollY = %d, want 0 (fresh navigation opens at top)", tab.ScrollY)
+	}
+	if y := f.sched.Viewport().Offset.Y; y != 0 {
+		t.Errorf("viewport offset = %d, want 0", y)
+	}
+}
+
+// tallNavTestPath is newNavTestPath with a scrollable document, so viewport
+// offsets survive the scheduler's clamp and scroll behavior is observable.
+// The scheduler clamps against its construction layer, so the height has to
+// be tall from the start rather than swapped in later.
+func tallNavTestPath(t *testing.T) *framePath {
+	t.Helper()
+	spec := paint.SceneSpec{DocHeight: 2048}
+	_, layer := paint.BuildLayer(spec)
+	pool := raster.New(1, 4, func(j raster.Job) error { return nil })
+	pool.Start(context.Background())
+	t.Cleanup(func() { _ = pool.Close() })
+	sched := raster.NewScheduler(layer, pool, frame.Viewport{Size: frame.Size{W: 256, H: 256}}, 1, raster.Pref{})
+	f := &framePath{
+		sched:      sched,
+		navResults: make(chan navResult, 16),
+		imgResults: make(chan imgResult, 16),
+	}
+	f.tabMgr = tabs.NewManager(nil)
+	f.tabMgr.NewTab()
+	return f
+}
+
+// TestApplyNavResultTraverseKeepsScroll pins the other half: back/forward
+// and reload success leave the viewport offset alone.
+func TestApplyNavResultTraverseKeepsScroll(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History.Push("https://a/")
+	tab.History.Push("https://b/")
+	tab.Nav.Serial = 6
+	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 120}, Size: frame.Size{W: 256, H: 256}})
+
+	f.applyNavResult(navResult{
+		tabID: tab.ID, serial: 6, url: "https://a/",
+		noHistory: true, traverse: -1, traverseBase: 1,
+	})
+
+	if y := f.sched.Viewport().Offset.Y; y != 120 {
+		t.Errorf("viewport offset = %d, want 120 (traversal preserves offset)", y)
+	}
+}
