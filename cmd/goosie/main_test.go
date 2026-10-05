@@ -88,7 +88,7 @@ func TestLoadURLCtxRejectsInvalidViewport(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), tc.w, tc.h, tc.scale, t.TempDir(), false, false)
+			layer, _, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), tc.w, tc.h, tc.scale, t.TempDir(), false, false)
 			if err == nil {
 				t.Fatalf("loadURLCtx(%d,%d,%v) succeeded, want error", tc.w, tc.h, tc.scale)
 			}
@@ -114,7 +114,7 @@ func TestLoadURLCtxValidSmallDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir(), false, false)
+	layer, _, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir(), false, false)
 	if err != nil {
 		t.Fatalf("loadURLCtx failed: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestLoadURLCtxRejectsOversizedDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	layer, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir(), false, false)
+	layer, _, _, _, _, err := loadURLCtx(context.Background(), client, fonts, u.String(), 800, 600, 1, t.TempDir(), false, false)
 	if err == nil {
 		t.Fatal("loadURLCtx succeeded on oversized document")
 	}
@@ -661,7 +661,7 @@ func TestApplyNavResultSuccessfulTraversalCommitsCursor(t *testing.T) {
 	tab.Nav.Serial = 9
 
 	f.applyNavResult(navResult{
-		tabID: tab.ID, serial: 9, url: "https://b.com/",
+		tabID: tab.ID, serial: 9, url: "https://b/",
 		noHistory: true, traverse: -1, traverseBase: 2,
 	})
 
@@ -800,5 +800,66 @@ func TestShutdownCancelsAndJoinsNavigations(t *testing.T) {
 	case <-joined:
 	case <-time.After(10 * time.Second):
 		t.Fatal("navWg.Wait did not return after run-cancel; the loader is not joined")
+	}
+}
+
+// TestLoadURLCtxReportsFinalURLAfterRedirect pins what the address bar and
+// the history must record: the URL that displayed, not the one typed. A
+// redirect used to leave the requested URL committed while subresources
+// resolved against the final one.
+func TestLoadURLCtxReportsFinalURLAfterRedirect(t *testing.T) {
+	html := `<!DOCTYPE html><html><body><div style="width:64px;height:64px;background:red"></div></body></html>`
+	var final string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusFound)
+			return
+		}
+		final = r.URL.Path
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(html))
+	}))
+	defer server.Close()
+	client := net.DefaultClient()
+	defer client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, _, _, got, err := loadURLCtx(context.Background(), client, fonts, server.URL+"/old", 800, 600, 1, t.TempDir(), false, false)
+	if err != nil {
+		t.Fatalf("loadURLCtx redirected: %v", err)
+	}
+	if got != server.URL+"/new" {
+		t.Errorf("final URL = %q, want %q", got, server.URL+"/new")
+	}
+	if final != "/new" {
+		t.Errorf("served path = %q, want /new (redirect not followed)", final)
+	}
+}
+
+// TestApplyNavResultTraversalRewritesRedirectedEntry pins the history side:
+// traversing back to an entry that redirects replaces that entry with the
+// final URL instead of recording the requested one alongside it.
+func TestApplyNavResultTraversalRewritesRedirectedEntry(t *testing.T) {
+	f := newNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History.Push("https://a/")
+	tab.History.Push("https://b/")
+	tab.Nav.Serial = 11
+
+	f.applyNavResult(navResult{
+		tabID: tab.ID, serial: 11, url: "https://a-final/",
+		noHistory: true, traverse: -1, traverseBase: 1,
+	})
+
+	entries, idx := tab.History.Entries()
+	want := []string{"https://a-final/", "https://b/"}
+	if !reflect.DeepEqual(entries, want) || idx != 0 {
+		t.Errorf("history = %v@%d, want %v@0 (entry rewritten in place)", entries, idx, want)
+	}
+	if tab.URL != "https://a-final/" {
+		t.Errorf("tab.URL = %q, want the final URL", tab.URL)
 	}
 }

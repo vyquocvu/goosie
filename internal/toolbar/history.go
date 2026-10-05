@@ -75,6 +75,19 @@ func (h *History) Step(delta, base int) bool {
 	return false
 }
 
+// ReplaceCurrent rewrites the entry under the cursor: a traversal that
+// redirected lands its final URL where the requested one stood, so the
+// address bar and a later reload name what displayed. The forward trail is
+// untouched.
+func (h *History) ReplaceCurrent(url string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.index < 0 || h.index >= len(h.entries) || url == "" {
+		return
+	}
+	h.entries[h.index] = url
+}
+
 func (h *History) backLocked() (string, bool) {
 	if h.index <= 0 {
 		return "", false

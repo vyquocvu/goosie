@@ -74,7 +74,7 @@ func loadFixture(t *testing.T, docURL, sheetURL string, docs map[string]string) 
 		t.Fatal(err)
 	}
 	c := &recordingClient{docs: docs}
-	if _, _, _, _, err := loadURLCtx(context.Background(), c, fonts, docURL, 800, 600, 1, t.TempDir(), false, false); err != nil {
+	if _, _, _, _, _, err := loadURLCtx(context.Background(), c, fonts, docURL, 800, 600, 1, t.TempDir(), false, false); err != nil {
 		t.Fatalf("loadURLCtx(%s): %v", docURL, err)
 	}
 	if _, ok := c.ctxes[sheetURL]; !ok {

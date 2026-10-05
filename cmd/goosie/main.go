@@ -551,8 +551,13 @@ func (f *framePath) navigateTab(rawURL string) {
 	f.navWg.Add(1)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u}
+		if finalURL != "" {
+			// A redirect lands the final URL: the address bar and the
+			// history record what displayed, not what was typed.
+			res.url = finalURL
+		}
 		var dd downloadDone
 		if errors.As(err, &dd) {
 			res.downloadPath = dd.path
@@ -615,7 +620,10 @@ func (f *framePath) applyNavResult(result navResult) {
 	if result.traverse != 0 {
 		// The peeked back/forward step commits only now that its page
 		// displayed; a stale commit (another navigation landed first) drops.
-		tab.History.Step(result.traverse, result.traverseBase)
+		// A redirect rewrites the entry it landed on with the final URL.
+		if tab.History.Step(result.traverse, result.traverseBase) {
+			tab.History.ReplaceCurrent(result.url)
+		}
 	}
 	if f.history != nil {
 		f.history.Record(result.url, result.url)
@@ -764,8 +772,11 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	f.navWg.Add(1)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
+		if finalURL != "" {
+			res.url = finalURL
+		}
 		var dd downloadDone
 		if errors.As(err, &dd) {
 			res.downloadPath = dd.path
@@ -1324,25 +1335,25 @@ func (f *framePath) closeTab(id uint64) {
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
 // they land.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: viewport: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
 	}
 	// Check context before starting the fetch.
 	if ctx.Err() != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, ctx.Err()
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
 	resp, err := client.Get(ctx, rawURL)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
 	}
 	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
 		savedPath, saveErr := download.Save(downloadDir, name, resp.Body)
 		if saveErr != nil {
-			return nil, paint.SceneSpec{}, frame.Color(0), nil, saveErr
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", saveErr
 		}
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, downloadDone{path: savedPath}
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
 	}
 	// Linked style sheets are fetched with the same client and the same
 	// cancellation: the linker sees absolute http(s) URLs only, because the
@@ -1377,7 +1388,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	}
 	// Check context after the fetch in case it was cancelled during the network call.
 	if ctx.Err() != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, ctx.Err()
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
 	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW),
 		engine.WithMetrics(fonts),
@@ -1386,22 +1397,22 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		imageOption(deferImages, resp.URL, imageFetcher),
 		fontOption(deferFonts, resp.URL, fontFetcher, fonts))
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: build session: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build session: %w", err)
 	}
 	list, err := sess.PaintChecked(scale)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: paint document: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint document: %w", err)
 	}
 	dl := list.Build(1)
 	extent := dl.Extent()
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, fmt.Errorf("goosie: size document cache: %w", err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size document cache: %w", err)
 	}
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
-	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, nil
+	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
 }
 
 // imageOption picks the synchronous or deferred image path for a load.
@@ -1556,7 +1567,7 @@ func run(args []string) error {
 	// page it was asked for.
 	if c.url != "" {
 		if c.paced() {
-			layer, docSpec, bgColor, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
+			layer, docSpec, bgColor, _, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
 			if err != nil {
 				return err
 			}
