@@ -48,3 +48,55 @@ func TestFlexMeasuredItemHonorsMaxWidth(t *testing.T) {
 		t.Errorf("item.W = %v, want 40 (max-width caps the text measure)", divs[1].W)
 	}
 }
+
+// TestFlexColumnDeclaredBasisWinsOverMeasure guards column main-axis sizing:
+// a declared flex-basis (or height) is written to the item even when content
+// would measure taller or shorter. Before, the place pass advanced the cursor
+// by the basis but left the measured height on the box.
+func TestFlexColumnDeclaredBasisWinsOverMeasure(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="display: flex; flex-direction: column; height: 200px;">
+  <div style="width: 20px; flex: 0 10px;">a</div>
+  <div style="width: 20px; flex: 0 50px;">b</div>
+</div>
+</body></html>`, 800)
+
+	divs := findAllByTag(arena, "div")
+	if len(divs) != 3 {
+		t.Fatalf("found %d divs, want 3 (container + 2 items)", len(divs))
+	}
+	if !almostEqual(divs[1].H, 10) {
+		t.Errorf("first.H = %v, want 10 (flex-basis)", divs[1].H)
+	}
+	if !almostEqual(divs[2].H, 50) {
+		t.Errorf("second.H = %v, want 50 (flex-basis)", divs[2].H)
+	}
+	if !almostEqual(divs[2].Y, 10) {
+		t.Errorf("second.Y = %v, want 10 (stacked after the 10px basis)", divs[2].Y)
+	}
+}
+
+// TestFlexEmptyFixedAtomicMeasuresItsBox guards max-content measurement of an
+// empty fixed-size atomic: a 15px spacer with no words still occupies 15px.
+// Before, it measured zero and the probe-width fallback upstream committed a
+// 10000px item into the finished row.
+func TestFlexEmptyFixedAtomicMeasuresItsBox(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="display: flex; width: 200px;">
+  <div style="flex: 1 0 30px;">a</div>
+  <div style="flex: none;"><div style="display: inline-block; width: 15px; height: 15px;"></div></div>
+</div>
+</body></html>`, 800)
+
+	divs := findAllByTag(arena, "div")
+	if len(divs) < 3 {
+		t.Fatalf("found %d divs, want at least 3", len(divs))
+	}
+	// divs[0] is the container; divs[1] the growing item; divs[2] the spacer holder.
+	if divs[2].W > 200 {
+		t.Errorf("spacer holder W = %v, want the 15px spacer (probe width leaked)", divs[2].W)
+	}
+	if !almostEqual(divs[2].W, 15) {
+		t.Errorf("spacer holder W = %v, want 15", divs[2].W)
+	}
+}

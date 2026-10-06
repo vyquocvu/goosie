@@ -3000,22 +3000,47 @@ func parseFlexShorthand(cs *ComputedStyle, v string) {
 			cs.FlexGrow = 1
 			cs.FlexShrink = 1
 			cs.FlexBasis = -1
-		} else {
-			cs.FlexGrow = float32(css.ParseValue(parts[0]).Num)
+		} else if v := css.ParseValue(parts[0]); v.Type == css.ValueNumber {
+			cs.FlexGrow = float32(v.Num)
 			cs.FlexShrink = 1
 			cs.FlexBasis = 0
+		} else {
+			// A lone length is the basis (`flex: 10px` grows and shrinks
+			// around 10px); reading its number as grow made a 10px basis
+			// grow tenfold.
+			cs.FlexGrow = 1
+			cs.FlexShrink = 1
+			cs.FlexBasis = resolveLength(v, -1)
 		}
 	case 2:
+		// Two values are grow+shrink only when both are bare numbers; a
+		// length second half is the basis (`flex: 0 10px` is grow 0 with a
+		// 10px basis, not shrink 10). Reading it as a shrink collapsed
+		// every two-part basis item to its content size.
 		cs.FlexGrow = float32(css.ParseValue(parts[0]).Num)
-		cs.FlexShrink = float32(css.ParseValue(parts[1]).Num)
-		cs.FlexBasis = 0
+		if second := css.ParseValue(parts[1]); second.Type == css.ValueNumber {
+			cs.FlexShrink = float32(second.Num)
+			cs.FlexBasis = 0
+		} else {
+			cs.FlexShrink = 1
+			cs.FlexBasis = resolveLength(second, -1)
+		}
 	case 3:
+		basis := css.ParseValue(parts[2])
+		// A unitless nonzero basis is not a <width>: `flex: 0 0 4` is an
+		// invalid declaration, not a 4px basis, so the whole shorthand
+		// drops and the previous value (usually `0 1 auto`) stands. Reading
+		// it as 4px sized every such item to 4px against references laid out
+		// at their width. Unitless zero stays a valid 0 basis.
+		if basis.Type == css.ValueNumber && basis.Num != 0 {
+			return
+		}
 		cs.FlexGrow = float32(css.ParseValue(parts[0]).Num)
 		cs.FlexShrink = float32(css.ParseValue(parts[1]).Num)
 		// A third argument that is still a whitespace list - what an unclosed
 		// function degrades to - is not a length, so leave the basis unset
 		// rather than letting it resolve through ToLength to 0.
-		if basis := css.ParseValue(parts[2]); basis.Type != css.ValueList {
+		if basis.Type != css.ValueList {
 			cs.FlexBasis = resolveLength(basis, -1)
 		}
 	}

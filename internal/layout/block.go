@@ -1257,7 +1257,19 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 	maxBottom := float32(0)
 	for i := range items {
 		it := a.Get(items[i].id)
-		if !items[i].declared && it.Style.Height < 0 && it.Style.FlexGrow > 0 {
+		if items[i].declared {
+			// A declared main size always wins over the measured height:
+			// the basis is a border-box extent, so the content box keeps
+			// what is left after the decorations. Without the write the
+			// item kept its content height while the cursor advanced by
+			// the basis, stacking every declared column item wrong.
+			h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
+			if h < 0 {
+				h = 0
+			}
+			it.H = h
+			it = a.Get(items[i].id)
+		} else if it.Style.Height < 0 && it.Style.FlexGrow > 0 {
 			// Only a grown item outgrows the height its content measured at; an
 			// auto item's basis is that measurement, so it keeps it.
 			h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
@@ -1527,8 +1539,25 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 			// goes on the same line as its siblings, and its own box flanks count
 			// as much as a word's. Measuring only the glyphs inside left a row of
 			// tag pills narrower than their own padding and the text after them
-			// painted straight through the labels.
-			run += lead + walk(kid, trail+run+lead) + trailBox
+			// painted straight through the labels. An empty atomic with a width
+			// of its own (a 15px spacer, a replaced box) has no words at all,
+			// so without a fallback the measure is zero and the flex fallback
+			// upstream keeps the probe width - a 10000px item in the finished
+			// row. Only declared and replaced widths qualify: anything else
+			// (notably percentages) is probe-width dependent and stays zero
+			// rather than poisoning the measure.
+			inner := walk(kid, trail+run+lead)
+			if inner <= 0 {
+				if own := declaredOuterW(k.Style); own >= 0 {
+					inner = own
+				} else if k.Node != nil && k.Node.Element() {
+					switch k.Node.Data {
+					case "img", "input", "select", "textarea", "video", "canvas":
+						inner = k.W
+					}
+				}
+			}
+			run += lead + inner + trailBox
 			if w := origin + trail + run; w > right {
 				right = w
 			}
