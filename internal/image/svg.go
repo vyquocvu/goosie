@@ -295,12 +295,22 @@ func svgAttr(el xml.StartElement, name string) string {
 func svgViewport(el xml.StartElement) (int, int, error) {
 	w, wOk := svgLength(svgAttr(el, "width"), 0)
 	h, hOk := svgLength(svgAttr(el, "height"), 0)
-	if !wOk || !hOk || w <= 0 || h <= 0 {
+	if (!wOk || w <= 0) || (!hOk || h <= 0) {
+		// One definite side plus a viewBox completes through the ratio:
+		// height 32px on a 4x64 viewBox is a 2x32 image, not a missing
+		// dimension. Percentages never resolve here (no viewport yet), so a
+		// percent side counts as missing.
 		vb := strings.Fields(svgAttr(el, "viewBox"))
 		if len(vb) == 4 {
 			if vw, err := strconv.ParseFloat(vb[2], 64); err == nil && vw > 0 {
 				if vh, err := strconv.ParseFloat(vb[3], 64); err == nil && vh > 0 {
-					w, h = vw, vh
+					if (!wOk || w <= 0) && hOk && h > 0 {
+						w = h * vw / vh
+					} else if (!hOk || h <= 0) && wOk && w > 0 {
+						h = w * vh / vw
+					} else if (!wOk || w <= 0) && (!hOk || h <= 0) {
+						w, h = vw, vh
+					}
 				}
 			}
 		}

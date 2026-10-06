@@ -1043,13 +1043,13 @@ const maxBgTiles = 4096
 
 // BGTileSize resolves one background tile's drawn size for paint and for
 // the engine's post-layout vector rasterization, which must agree exactly.
-// A vector image without intrinsic dimensions or ratio (an SVG with neither
-// usable width/height nor viewBox) has nothing to scale from, so automatic
-// axes (auto, cover, contain) are the positioning area and explicit
-// lengths resolve per axis; everything else follows the standard negotiation
-// against the natural size.
-func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, vectorNoIntrinsic bool) (float32, float32) {
-	if vectorNoIntrinsic {
+// vecNoIntrinsic is an SVG with neither usable dimensions nor viewBox;
+// vecIgnoreRatio is preserveAspectRatio=none, which drops ratio keeping for
+// cover/contain. Otherwise negotiation is standard against the natural size.
+func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, vecNoIntrinsic, vecIgnoreRatio bool) (float32, float32) {
+	if vecNoIntrinsic {
+		// Nothing to scale from: automatic axes (auto, cover, contain) are
+		// the positioning area, explicit lengths resolve per axis.
 		tileW, tileH := areaW, areaH
 		if s.BackgroundSize == style.BgSizeLength {
 			if s.BgSizeW >= 0 {
@@ -1068,6 +1068,9 @@ func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, vector
 			}
 		}
 		return tileW, tileH
+	}
+	if vecIgnoreRatio && (s.BackgroundSize == style.BgSizeCover || s.BackgroundSize == style.BgSizeContain) {
+		return areaW, areaH
 	}
 	tileW, tileH := natW, natH
 	switch s.BackgroundSize {
@@ -1135,7 +1138,7 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	}
 	areaW, areaH := ax1-ax0, ay1-ay0
 
-	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgVector)
+	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgVector, obj.BgVectorNoRatio)
 	if tileW <= 0 || tileH <= 0 {
 		return
 	}

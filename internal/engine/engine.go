@@ -58,8 +58,14 @@ type Session struct {
 	// dimensions or ratio: their raster size is the laid-out tile, known
 	// only after layout, so they decode in the Reflow attachment instead of
 	// the fetch pool. Keyed by URL; bgVectorRef maps nodes to it.
-	bgVectorSrc map[string][]byte
-	bgVectorRef map[dom.NodeID]string
+	bgVectorSrc     map[string][]byte
+	bgVectorRef     map[dom.NodeID]string
+	bgVectorNoRatio map[string]bool
+	// imgReservation budgets decoded pixels across fetch and lazy vector
+	// rasterization alike; bgVectorUsed tracks the lazy share so each
+	// Reflow releases the previous tiles before reserving the new ones.
+	imgReservation *imageReservation
+	bgVectorUsed   int64
 
 	// imgMu guards the image maps and pendingImgs. LoadDeferredImages runs on
 	// the caller's goroutine and writes these maps while the session owner
@@ -562,6 +568,9 @@ func (s *Session) initImageMaps() {
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
 	s.bgVectorSrc = make(map[string][]byte)
 	s.bgVectorRef = make(map[dom.NodeID]string)
+	s.bgVectorNoRatio = make(map[string]bool)
+	s.imgReservation = newImageReservation(MaxDocumentDecodedPixels)
+	s.bgVectorUsed = 0
 }
 
 // DeferredImagesPending reports how many image references WithDeferredImages
@@ -691,7 +700,12 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 	const imageWorkers = 12
 	sem := make(chan struct{}, imageWorkers)
 	var wg sync.WaitGroup
-	reservation := newImageReservation(MaxDocumentDecodedPixels)
+	s.imgMu.Lock()
+	if s.imgReservation == nil {
+		s.imgReservation = newImageReservation(MaxDocumentDecodedPixels)
+	}
+	reservation := s.imgReservation
+	s.imgMu.Unlock()
 	for _, u := range uniq {
 		u := u
 		if time.Now().After(deadline) {
@@ -721,12 +735,16 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 			// elements always decode immediately for layout.
 			if bgOnly[u] && imgdec.IsSVG(data) {
 				hasDims, hasRatio := imgdec.SVGIntrinsicKind(data)
-				if (!hasDims && !hasRatio) || imgdec.SVGPreserveNone(data) {
+				noRatio := imgdec.SVGPreserveNone(data)
+				if (!hasDims && !hasRatio) || noRatio {
 					mu.Lock()
 					if s.bgVectorSrc == nil {
 						s.bgVectorSrc = make(map[string][]byte)
 					}
 					s.bgVectorSrc[u] = data
+					if noRatio {
+						s.bgVectorNoRatio[u] = true
+					}
 					mu.Unlock()
 					return
 				}
@@ -784,7 +802,9 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 // attachVectorBackground rasterizes one vector background without intrinsic
 // dimensions at its laid-out tile size and attaches it with the vector flag,
 // so paint negotiates the same tile both sides of the boundary. The caller
-// holds imgMu; admission clamps the tile before a pixel is allocated.
+// holds imgMu; admission clamps the tile before a pixel is allocated, and
+// the tile joins the document pixel budget (releasing happens wholesale per
+// Reflow, see the attach loop).
 func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs string) {
 	data, ok := s.bgVectorSrc[abs]
 	if !ok || len(data) == 0 {
@@ -799,20 +819,30 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	if areaW <= 0 || areaH <= 0 {
 		return
 	}
-	tileW, tileH := paint.BGTileSize(obj.Style, areaW, areaH, 0, 0, true)
+	// Natural dimensions feed the standard negotiation branches (auto with
+	// partial dims, explicit lengths); the vector branches ignore them.
+	var natW, natH float32
+	if cfg, err := imgdec.Probe(data); err == nil {
+		natW, natH = float32(cfg.Width), float32(cfg.Height)
+	}
+	tileW, tileH := paint.BGTileSize(obj.Style, areaW, areaH, natW, natH, true, s.bgVectorNoRatio[abs])
 	tw, th := int(tileW+0.5), int(tileH+0.5)
 	if tw <= 0 || th <= 0 || tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
 		return
 	}
-	if int64(tw) > imgdec.MaxDecodedImagePixels/int64(th) {
+	pixels := int64(tw) * int64(th)
+	if s.imgReservation == nil || !s.imgReservation.reserve(pixels) {
 		return
 	}
 	img, err := imgdec.DecodeSVGAt(data, tw, th)
 	if err != nil {
+		s.imgReservation.release(pixels)
 		return
 	}
+	s.bgVectorUsed += pixels
 	obj.BgImage = img
 	obj.BgVector = true
+	obj.BgVectorNoRatio = s.bgVectorNoRatio[abs]
 }
 
 // styleViewport is the frame the cascade resolves the viewport units against. A
@@ -861,6 +891,12 @@ func (s *Session) Reflow(viewportW float32) error {
 	}
 	// Hand each laid-out image box its decoded pixels so paint can draw it. The
 	// arena is rebuilt every reflow, so this attachment has to run each time.
+	// Lazy vector tiles release wholesale first: they re-rasterize per Reflow
+	// while fetched pixels stay retained, so only the lazy share resets.
+	if s.imgReservation != nil {
+		s.imgReservation.release(s.bgVectorUsed)
+		s.bgVectorUsed = 0
+	}
 	if s.images != nil {
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil {

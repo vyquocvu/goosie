@@ -63,6 +63,11 @@ type Object struct {
 	// rasterizes it at that tile size after layout instead of at decode time.
 	BgVector bool
 
+	// BgVectorNoRatio marks a preserveAspectRatio=none vector background:
+	// cover and contain tile the area instead of scaling by ratio. The
+	// engine rasterizes it at the tile for the same reason as BgVector.
+	BgVectorNoRatio bool
+
 	// StaticX/StaticY record where an out-of-flow box would have started had it
 	// stayed in the flow. CSS uses that position when an absolutely positioned
 	// box specifies neither the relevant inset nor a static-friendly pair.
