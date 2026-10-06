@@ -502,14 +502,10 @@ func (f *framePath) syncTabToToolbar() {
 	if tab == nil {
 		return
 	}
-	f.toolbar.URL = tab.URL
-	f.toolbar.Input = tab.URL
-	f.toolbar.Cursor = len([]rune(tab.URL))
-	f.toolbar.SelStart = f.toolbar.Cursor
-	f.toolbar.SelEnd = f.toolbar.Cursor
-	f.toolbar.History = tab.History
-	f.toolbar.SetLoading(tab.Nav.Loading)
-	f.toolbar.Error = tab.Error
+	tab.Nav.Mu.Lock()
+	loading := tab.Nav.Loading
+	tab.Nav.Mu.Unlock()
+	f.toolbar.SyncFromTab(tab.URL, loading, tab.Error, tab.History)
 }
 
 // navContext roots one navigation load: the run scope when it exists so
@@ -545,7 +541,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	tab.Error = ""
 	if f.toolbar != nil {
 		f.toolbar.SetLoading(true)
-		f.toolbar.Error = ""
+		f.toolbar.SetError("")
 	}
 
 	f.navWg.Add(1)
@@ -603,7 +599,7 @@ func (f *framePath) applyNavResult(result navResult) {
 		tab.Error = result.err.Error()
 		if f.toolbar != nil && f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
-			f.toolbar.Error = result.err.Error()
+			f.toolbar.SetError(result.err.Error())
 		}
 		fmt.Fprintln(os.Stderr, result.err)
 		return
@@ -1175,8 +1171,7 @@ func (f *framePath) runFind(query string) {
 	}
 	f.findMatches = nil
 	f.findIdx = 0
-	f.toolbar.FindTotal = 0
-	f.toolbar.FindIndex = 0
+	f.toolbar.ResetFindCounts()
 	if strings.TrimSpace(query) == "" {
 		return
 	}
@@ -1185,7 +1180,7 @@ func (f *framePath) runFind(query string) {
 		return
 	}
 	f.findMatches = tab.Session.Find(query)
-	f.toolbar.FindTotal = len(f.findMatches)
+	f.toolbar.SetFindResult(len(f.findMatches), 0)
 	if len(f.findMatches) > 0 {
 		f.scrollToMatch(0)
 	}
@@ -1207,7 +1202,7 @@ func (f *framePath) findStep(backward bool) {
 			f.findIdx = 0
 		}
 	}
-	f.toolbar.FindIndex = f.findIdx
+	f.toolbar.SetFindResult(len(f.findMatches), f.findIdx)
 	f.scrollToMatch(f.findIdx)
 }
 
@@ -1233,9 +1228,8 @@ func (f *framePath) closeFind() {
 	if f.toolbar == nil {
 		return
 	}
-	f.toolbar.FindTotal = 0
-	f.toolbar.FindIndex = 0
-	if f.toolbar.FindActive {
+	f.toolbar.ResetFindCounts()
+	if active, _, _ := f.toolbar.FindCounts(); active {
 		f.toolbar.CloseFind()
 	}
 }

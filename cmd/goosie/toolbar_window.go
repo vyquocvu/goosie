@@ -177,7 +177,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			adjusted := ev.Pos
 			adjusted.Y = toolbarY
 			cw.toolbar.HandleClick(adjusted, ev.Button)
-			if cw.toolbar.Focus == toolbar.FocusAddress {
+			if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 				cw.SetIME(false)
 			}
 			return true
@@ -185,7 +185,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if toolbarY >= 0 && toolbarY < toolH {
 			return true
 		}
-		if cw.toolbar.Focus == toolbar.FocusAddress {
+		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 			adjusted := ev.Pos
 			adjusted.Y = toolbarY
 			cw.toolbar.HandleClick(adjusted, ev.Button)
@@ -217,7 +217,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if cw.handleTabShortcut(ev.Key, ev.Mods) {
 			return true
 		}
-		if cw.toolbar.Focus == toolbar.FocusAddress {
+		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
 			return true
 		}

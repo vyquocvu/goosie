@@ -1,10 +1,12 @@
 package toolbar
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
+	"github.com/vyquocvu/goosie/internal/surface"
 )
 
 func TestLoadingIndicator(t *testing.T) {
@@ -141,4 +143,53 @@ func TestNoErrorIndicatorWhenFocused(t *testing.T) {
 	if hasRedPixels {
 		t.Error("error indicator should not appear when address bar is focused")
 	}
+}
+
+// TestConcurrentChromeAccessIsRaceFree hammers the three-thread sharing the
+// browser relies on: typing/clicks (event pump), loading flags and tab sync
+// (navigation drain), and Draw (UI loop). Before the State mutex this trips
+// the race detector; the private-field writes it also performs would not
+// even compile now, which is the point.
+func TestConcurrentChromeAccessIsRaceFree(t *testing.T) {
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := NewState(800, fonts)
+	state.Navigate("https://example.com/very/long/address/that/wraps/around")
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			buf := frame.NewBitmap(800, 40)
+			for j := 0; j < 50; j++ {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				switch i {
+				case 0:
+					state.HandleKeyEvent('x'+rune(j%26), 0)
+					state.HandleClick(frame.Point{X: int32(100 + j), Y: 10}, surface.ButtonLeft)
+				case 1:
+					state.SetLoading(j%2 == 0)
+					state.SetError("boom")
+					state.SetError("")
+				case 2:
+					state.Draw(buf, 0)
+					_ = state.CursorAt(frame.Point{X: 100, Y: 10})
+				case 3:
+					h := NewHistory()
+					h.Push("https://example.com/")
+					state.SyncFromTab("https://example.com/", true, "", h)
+					_, _, _ = state.FindCounts()
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(done)
 }

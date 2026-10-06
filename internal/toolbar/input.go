@@ -2,7 +2,7 @@ package toolbar
 
 import "unicode"
 
-func (s *State) InsertRune(r rune) {
+func (s *State) insertRuneLocked(r rune) {
 	if s.Focus != FocusAddress {
 		return
 	}
@@ -17,7 +17,7 @@ func (s *State) InsertRune(r rune) {
 	s.Cursor++
 }
 
-func (s *State) DeleteBackward() {
+func (s *State) deleteBackwardLocked() {
 	if s.Focus != FocusAddress {
 		return
 	}
@@ -35,7 +35,7 @@ func (s *State) DeleteBackward() {
 	s.Cursor--
 }
 
-func (s *State) DeleteForward() {
+func (s *State) deleteForwardLocked() {
 	if s.Focus != FocusAddress {
 		return
 	}
@@ -52,23 +52,7 @@ func (s *State) DeleteForward() {
 	s.Input = string(append(before, after...))
 }
 
-func (s *State) MoveCursorLeft() {
-	s.moveCursorLeft(false)
-}
-
-func (s *State) MoveCursorRight() {
-	s.moveCursorRight(false)
-}
-
-func (s *State) MoveCursorStart() {
-	s.moveCursorStart(false)
-}
-
-func (s *State) MoveCursorEnd() {
-	s.moveCursorEnd(false)
-}
-
-func (s *State) SelectAll() {
+func (s *State) selectAllLocked() {
 	if s.Focus != FocusAddress {
 		return
 	}
@@ -78,9 +62,9 @@ func (s *State) SelectAll() {
 	s.Cursor = n
 }
 
-func (s *State) Copy() {
+func (s *State) copyLocked() (string, Clipboard) {
 	if !s.hasSelection() {
-		return
+		return "", nil
 	}
 	runes := []rune(s.Input)
 	sMin := s.selMin()
@@ -91,16 +75,24 @@ func (s *State) Copy() {
 	if sMax > len(runes) {
 		sMax = len(runes)
 	}
-	if s.Clipboard != nil {
-		s.Clipboard.Write(string(runes[sMin:sMax]))
+	return string(runes[sMin:sMax]), s.Clipboard
+}
+
+// Copy writes the selection to the clipboard. The clipboard call runs after
+// unlock: the host clipboard may block, and it must never run under the lock.
+func (s *State) Copy() {
+	s.mu.Lock()
+	text, cb := s.copyLocked()
+	s.mu.Unlock()
+	if text != "" && cb != nil {
+		cb.Write(text)
 	}
 }
 
-func (s *State) Paste() {
-	if s.Focus != FocusAddress || s.Clipboard == nil {
+func (s *State) pasteTextLocked(text string) {
+	if s.Focus != FocusAddress {
 		return
 	}
-	text := s.Clipboard.Read()
 	if text == "" {
 		return
 	}
@@ -116,12 +108,44 @@ func (s *State) Paste() {
 	s.Cursor += len(pasted)
 }
 
-func (s *State) Cut() {
-	if !s.hasSelection() {
+// Paste inserts the clipboard text. The clipboard read runs after unlock.
+func (s *State) Paste() {
+	s.mu.Lock()
+	if s.Focus != FocusAddress {
+		s.mu.Unlock()
 		return
 	}
-	s.Copy()
+	cb := s.Clipboard
+	s.mu.Unlock()
+	if cb == nil {
+		return
+	}
+	text := cb.Read()
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	s.pasteTextLocked(text)
+	s.mu.Unlock()
+}
+
+func (s *State) cutLocked() (string, Clipboard) {
+	if !s.hasSelection() {
+		return "", nil
+	}
+	text, cb := s.copyLocked()
 	s.deleteSelection()
+	return text, cb
+}
+
+// Cut removes the selection to the clipboard; the write runs after unlock.
+func (s *State) Cut() {
+	s.mu.Lock()
+	text, cb := s.cutLocked()
+	s.mu.Unlock()
+	if text != "" && cb != nil {
+		cb.Write(text)
+	}
 }
 
 func (s *State) deleteSelection() {
@@ -335,4 +359,55 @@ func nextWordBoundary(runes []rune, pos int) int {
 
 func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}
+
+// Public locking wrappers: these mutate only State fields, so they lock,
+// delegate to the locked bodies above, and unlock. Clipboard and host
+// callbacks never run inside; see Copy, Paste and Cut.
+func (s *State) InsertRune(r rune) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.insertRuneLocked(r)
+}
+
+func (s *State) DeleteBackward() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteBackwardLocked()
+}
+
+func (s *State) DeleteForward() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteForwardLocked()
+}
+
+func (s *State) SelectAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selectAllLocked()
+}
+
+func (s *State) MoveCursorLeft() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.moveCursorLeft(false)
+}
+
+func (s *State) MoveCursorRight() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.moveCursorRight(false)
+}
+
+func (s *State) MoveCursorStart() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.moveCursorStart(false)
+}
+
+func (s *State) MoveCursorEnd() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.moveCursorEnd(false)
 }

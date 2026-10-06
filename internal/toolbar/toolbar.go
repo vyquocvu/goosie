@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -57,6 +58,13 @@ func (nopClipboardImpl) Read() string { return "" }
 func (nopClipboardImpl) Write(string) {}
 
 type State struct {
+	// mu serializes the three threads sharing the chrome: the event pump
+	// (clicks/keys), the navigation drain (loading flags, URL sync, history
+	// swaps), and the UI loop (Draw). Public methods lock; same-package
+	// helpers assume the lock is held. Host callbacks (OnNavigate and
+	// friends) and clipboard calls always run after unlock: the host calls
+	// straight back into these methods.
+	mu            sync.Mutex
 	URL           string
 	Input         string
 	Cursor        int
@@ -96,6 +104,8 @@ func NewState(width int32, fonts *raster.Fonts) *State {
 // SetScale sets the device pixels per logical pixel the chrome draws at.
 // Layout and hit testing stay in logical pixels; only Draw multiplies.
 func (s *State) SetScale(n int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if n < 1 {
 		n = 1
 	}
@@ -111,14 +121,20 @@ func (s *State) sc() int32 {
 }
 
 func (s *State) SetHistory(h *History) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.History = h
 }
 
 func (s *State) SetBounds(width int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Bounds = frame.Rect4(0, 0, width, ToolbarHeight*s.sc())
 }
 
 func (s *State) Navigate(url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.URL = url
 	s.Input = url
 	s.Cursor = len([]rune(url))
@@ -129,12 +145,69 @@ func (s *State) Navigate(url string) {
 }
 
 func (s *State) SetLoading(loading bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Loading = loading
+}
+
+// SetError records a load error for the address bar to display.
+func (s *State) SetError(err string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Error = err
+}
+
+// GetFocus reports where keyboard input currently goes.
+func (s *State) GetFocus() Focus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Focus
+}
+
+// SyncFromTab copies one tab's display state into the toolbar: URL, loading
+// flag, error, and the history object the buttons read. It replaces the
+// direct field writes the navigation drain used to do racily.
+func (s *State) SyncFromTab(url string, loading bool, errStr string, h *History) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.URL = url
+	s.Input = url
+	s.Cursor = len([]rune(url))
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
+	s.History = h
+	s.Loading = loading
+	s.Error = errStr
+}
+
+// FindCounts reports find-mode state for the host to display.
+func (s *State) FindCounts() (active bool, total, index int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.FindActive, s.FindTotal, s.FindIndex
+}
+
+// SetFindResult publishes one find pass outcome.
+func (s *State) SetFindResult(total, index int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.FindTotal = total
+	s.FindIndex = index
+}
+
+// ResetFindCounts clears a finished find pass.
+func (s *State) ResetFindCounts() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.FindTotal = 0
+	s.FindIndex = 0
 }
 
 // OpenFind reuses the address bar as the find field, restoring the previous
 // query. Total and index reset until the host recomputes them.
 func (s *State) OpenFind() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.FindActive {
 		return
 	}
@@ -150,7 +223,7 @@ func (s *State) OpenFind() {
 
 // CloseFind restores the address bar to the current URL and keeps the query
 // for the next OpenFind.
-func (s *State) CloseFind() {
+func (s *State) closeFindLocked() {
 	if !s.FindActive {
 		return
 	}
@@ -170,6 +243,8 @@ func (s *State) CloseFind() {
 // HandleClick. The nav buttons ask for the hand, the editable bar for the
 // text I-beam, and everything else for the default arrow.
 func (s *State) CursorAt(pos frame.Point) surface.Cursor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if pos.Y >= int32(ToolbarHeight)*s.sc() {
 		return surface.CursorDefault
 	}
@@ -188,38 +263,57 @@ func (s *State) CursorAt(pos frame.Point) surface.Cursor {
 }
 
 func (s *State) HandleClick(pos frame.Point, button surface.Button) {
+	s.mu.Lock()
+	pending := s.handleClickLocked(pos, button)
+	s.mu.Unlock()
+	for _, fn := range pending {
+		fn()
+	}
+}
+
+// handleClickLocked applies one click; host callbacks return for the caller
+// to fire after unlock.
+func (s *State) handleClickLocked(pos frame.Point, button surface.Button) []func() {
+	var pending []func()
+	fire := func(fn func()) {
+		pending = append(pending, fn)
+	}
 	if button != surface.ButtonLeft {
-		return
+		return nil
 	}
 	sc := s.sc()
 	if pos.Y >= int32(ToolbarHeight)*sc {
 		if s.FindActive {
-			s.CloseFind()
+			s.closeFindLocked()
 			if s.OnFindClose != nil {
-				s.OnFindClose()
+				cb := s.OnFindClose
+				fire(func() { cb() })
 			}
-			return
+			return pending
 		}
 		if s.Focus == FocusAddress {
 			s.Focus = FocusNone
 			s.clearSelection()
 		}
-		return
+		return nil
 	}
 	lp := frame.Point{X: pos.X / sc, Y: pos.Y / sc}
 	w := s.Bounds.W() / sc
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), lp):
 		if s.History.CanBack() && s.OnTraverse != nil {
-			s.OnTraverse(-1)
+			cb := s.OnTraverse
+			fire(func() { cb(-1) })
 		}
 	case rectContains(ButtonRect(ButtonForward, w), lp):
 		if s.History.CanForward() && s.OnTraverse != nil {
-			s.OnTraverse(1)
+			cb := s.OnTraverse
+			fire(func() { cb(1) })
 		}
 	case rectContains(ButtonRect(ButtonReload, w), lp):
 		if s.OnReload != nil {
-			s.OnReload()
+			cb := s.OnReload
+			fire(func() { cb() })
 		}
 	case rectContains(AddressBarRect(w), lp):
 		s.Focus = FocusAddress
@@ -227,80 +321,113 @@ func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 		s.clearSelection()
 	default:
 		if s.FindActive {
-			s.CloseFind()
+			s.closeFindLocked()
 			if s.OnFindClose != nil {
-				s.OnFindClose()
+				cb := s.OnFindClose
+				fire(func() { cb() })
 			}
-			return
+			return pending
 		}
 		if s.Focus == FocusAddress {
 			s.Focus = FocusNone
 			s.clearSelection()
 		}
 	}
+	return pending
 }
 
 // HandleKey dispatches a key event with no modifier information. It exists
 // for backward compatibility; HandleKeyEvent is the full entry point.
 func (s *State) HandleKey(r rune) {
-	s.HandleKeyEvent(r, 0)
+	s.mu.Lock()
+	pending := s.handleKeyEventLocked(r, 0)
+	s.mu.Unlock()
+	for _, fn := range pending {
+		fn()
+	}
 }
 
 // HandleKeyEvent dispatches a key event with modifier flags.
 func (s *State) HandleKeyEvent(key rune, mods surface.KeyMod) {
+	s.mu.Lock()
+	pending := s.handleKeyEventLocked(key, mods)
+	s.mu.Unlock()
+	for _, fn := range pending {
+		fn()
+	}
+}
+
+// handleKeyEventLocked dispatches a key event; clipboard reads and host
+// callbacks return for the caller to run after unlock.
+func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 	if s.FindActive {
-		s.handleFindKey(key, mods)
-		return
+		return s.handleFindKeyLocked(key, mods)
 	}
 	if s.Focus != FocusAddress {
-		return
+		return nil
 	}
 	if key == '\r' || key == '\n' {
 		if mods&(surface.ModCommand|surface.ModControl) == 0 {
-			s.submitInput()
+			return s.submitInputLocked()
 		}
-		return
+		return nil
 	}
-	s.editKey(key, mods)
+	return s.clipboardPending(s.editKeyLocked(key, mods))
 }
 
-// handleFindKey edits the find query. Enter steps to the next match,
+// clipboardPending wraps deferred clipboard work from an edit into a
+// post-unlock closure.
+func (s *State) clipboardPending(wantPaste bool, copyText string, cb Clipboard) []func() {
+	if (copyText == "" && !wantPaste) || cb == nil {
+		return nil
+	}
+	return []func(){func() { s.finishClipboard(wantPaste, copyText, cb) }}
+}
+
+// handleFindKeyLocked edits the find query. Enter steps to the next match,
 // Shift+Enter to the previous, Esc closes, and any other edit reports the new
 // query to the host.
-func (s *State) handleFindKey(key rune, mods surface.KeyMod) {
+func (s *State) handleFindKeyLocked(key rune, mods surface.KeyMod) []func() {
 	switch key {
 	case 0x1b:
-		s.CloseFind()
+		s.closeFindLocked()
 		if s.OnFindClose != nil {
-			s.OnFindClose()
+			cb := s.OnFindClose
+			return []func(){func() { cb() }}
 		}
-		return
+		return nil
 	case '\r', '\n':
 		if s.OnFindNext != nil {
-			s.OnFindNext(mods&surface.ModShift != 0)
+			cb := s.OnFindNext
+			back := mods&surface.ModShift != 0
+			return []func(){func() { cb(back) }}
 		}
-		return
+		return nil
 	}
 	before := s.Input
-	s.editKey(key, mods)
+	pending := s.clipboardPending(s.editKeyLocked(key, mods))
 	if s.Input != before {
 		s.FindQuery = s.Input
 		if s.OnFindChanged != nil {
-			s.OnFindChanged(s.Input)
+			cb, query := s.OnFindChanged, s.Input
+			pending = append(pending, func() { cb(query) })
 		}
 	}
+	return pending
 }
 
-// editKey applies address-bar editing for one key event; it is shared between
-// URL entry and find mode.
-func (s *State) editKey(key rune, mods surface.KeyMod) {
+// editKeyLocked applies address-bar editing for one key event; it is shared
+// between URL entry and find mode. Clipboard work cannot run under the lock,
+// so a paste request and a copied string return for the caller to finish
+// after unlock.
+func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, copyText string, cb Clipboard) {
 	cmd := mods&surface.ModCommand != 0
 	ctrl := mods&surface.ModControl != 0
 	shift := mods&surface.ModShift != 0
 	opt := mods&surface.ModOption != 0
 
 	if key == 0x7f || key == '\b' {
-		s.DeleteBackward()
+		s.deleteBackwardLocked()
 		return
 	}
 
@@ -339,7 +466,7 @@ func (s *State) editKey(key rune, mods surface.KeyMod) {
 
 	case 'a':
 		if cmd {
-			s.SelectAll()
+			s.selectAllLocked()
 		} else if ctrl {
 			s.moveCursorStart(shift)
 		} else {
@@ -347,19 +474,20 @@ func (s *State) editKey(key rune, mods surface.KeyMod) {
 		}
 	case 'c':
 		if cmd {
-			s.Copy()
+			copyText, cb = s.copyLocked()
 		} else {
 			s.insertChar(key)
 		}
 	case 'v':
 		if cmd {
-			s.Paste()
+			wantPaste = true
+			cb = s.Clipboard
 		} else {
 			s.insertChar(key)
 		}
 	case 'x':
 		if cmd {
-			s.Cut()
+			copyText, cb = s.cutLocked()
 		} else {
 			s.insertChar(key)
 		}
@@ -384,7 +512,7 @@ func (s *State) editKey(key rune, mods surface.KeyMod) {
 				s.Cursor = len([]rune(s.Input))
 				s.clearSelection()
 			case 'd':
-				s.DeleteForward()
+				s.deleteForwardLocked()
 			case 'w':
 				s.deleteWordBackward()
 			}
@@ -392,20 +520,35 @@ func (s *State) editKey(key rune, mods surface.KeyMod) {
 			s.insertChar(key)
 		}
 	}
+	return false, "", nil
 }
 
 func (s *State) insertChar(r rune) {
 	s.deleteSelection()
-	s.InsertRune(r)
+	s.insertRuneLocked(r)
 }
 
-func (s *State) submitInput() {
+func (s *State) submitInputLocked() []func() {
 	url := s.Input
-	if url == "" {
-		return
+	if url == "" || s.OnNavigate == nil {
+		return nil
 	}
-	if s.OnNavigate != nil {
-		s.OnNavigate(url)
+	cb := s.OnNavigate
+	return []func(){func() { cb(url) }}
+}
+
+// finishClipboard runs deferred clipboard work after unlock: a copied string
+// writes out, a paste request reads back in under a fresh lock.
+func (s *State) finishClipboard(wantPaste bool, copyText string, cb Clipboard) {
+	if copyText != "" && cb != nil {
+		cb.Write(copyText)
+	}
+	if wantPaste && cb != nil {
+		if text := cb.Read(); text != "" {
+			s.mu.Lock()
+			s.pasteTextLocked(text)
+			s.mu.Unlock()
+		}
 	}
 }
 
@@ -445,6 +588,8 @@ func rectContains(r frame.Rect, p frame.Point) bool {
 }
 
 func (s *State) Draw(backing *frame.Bitmap, oy int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if backing == nil || backing.Empty() {
 		return
 	}
@@ -823,4 +968,11 @@ func (s *State) measureText(text string) int32 {
 		pen += s.fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
 	}
 	return (pen + 32) >> 6
+}
+
+// CloseFind leaves find mode and restores the address bar.
+func (s *State) CloseFind() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeFindLocked()
 }
