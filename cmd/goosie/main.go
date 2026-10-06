@@ -36,6 +36,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/history"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/platform"
@@ -605,11 +606,16 @@ func (f *framePath) applyNavResult(result navResult) {
 		return
 	}
 
+	oldSession := tab.Session()
 	tab.SetLayer(result.layer)
 	tab.SetSession(result.session)
 	tab.SetBGColor(result.bgColor)
 	tab.SetURL(result.url)
 	tab.SetTitle(result.url)
+	if oldSession != nil && oldSession != result.session {
+		// The replaced document's realm tears down with it.
+		oldSession.Close()
+	}
 	if !result.noHistory {
 		tab.History().Push(result.url)
 	}
@@ -1305,6 +1311,9 @@ func (f *framePath) closeTab(id uint64) {
 			tab.Nav.Cancel = nil
 		}
 		tab.Nav.Mu.Unlock()
+		if sess := tab.Session(); sess != nil {
+			sess.Close()
+		}
 	}
 	f.tabMgr.CloseTab(id)
 	if f.tabMgr.Count() > 0 {
@@ -1384,10 +1393,27 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
+	// A per-document JS runtime executes the page's classic scripts during
+	// the build below. A runtime that fails to construct degrades to no
+	// scripting rather than failing the load. The session owns it
+	// afterwards and closes it with itself (see applyNavResult/closeTab), so
+	// every error return below must close what it created.
+	rt, rtErr := js.New(js.Options{URL: resp.URL})
+	if rtErr != nil {
+		fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
+		rt = nil
+	}
+	completed := false
+	defer func() {
+		if !completed && rt != nil {
+			_ = rt.Close()
+		}
+	}()
 	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW),
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
+		engine.WithJS(rt),
 		imageOption(deferImages, resp.URL, imageFetcher),
 		fontOption(deferFonts, resp.URL, fontFetcher, fonts))
 	if err != nil {
@@ -1406,6 +1432,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
+	completed = true
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
 }
 

@@ -60,3 +60,97 @@ func TestNthOfSpecificity(t *testing.T) {
 		t.Errorf("li:nth-child(2) specificity = (%d,%d,%d), want (0,1,1)", a, b, c)
 	}
 }
+
+// TestLangPseudoClass pins :lang() matching: the nearest ancestor-or-self
+// language wins, lang beats xml:lang on the same element, and BCP47 prefixes
+// match (en covers en-US but not english).
+func TestLangPseudoClass(t *testing.T) {
+	doc := dom.NewDocument()
+	root := doc.NewElement("div")
+	root.SetAttribute("lang", "nl")
+	doc.Node.AppendChild(root)
+	mk := func(parent *dom.Node, tag, lang, xmllang string) *dom.Node {
+		el := doc.NewElement(tag)
+		if lang != "" {
+			el.SetAttribute("lang", lang)
+		}
+		if xmllang != "" {
+			el.SetAttribute("xml:lang", xmllang)
+		}
+		parent.AppendChild(el)
+		return el
+	}
+	enPara := mk(root, "p", "en", "")
+	nlPara := mk(root, "p", "", "")
+	dePara := mk(root, "p", "de-CH", "")
+	mk(root, "p", "english", "")
+
+	for _, c := range []struct {
+		sel string
+		el  *dom.Node
+		ok  bool
+	}{
+		{"p:lang(en)", enPara, true},
+		{"p:lang(nl)", enPara, false},
+		{"p:lang(nl)", nlPara, true}, // inherited from root
+		{"p:lang(de)", dePara, true},
+		{"p:lang(de-CH)", dePara, true},
+		{"p:lang(ch)", dePara, false},
+		{"p:lang(en-US)", enPara, false},
+	} {
+		if got := css.ParseSelector(c.sel).Matches(c.el); got != c.ok {
+			t.Errorf("%s on lang=%q xml:lang=%q = %v, want %v",
+				c.sel, c.el.GetAttribute("lang"), c.el.GetAttribute("xml:lang"), got, c.ok)
+		}
+	}
+}
+
+// TestLangPlainXmlLangInvisible pins what the reference engine does with
+// parser-produced attributes: a literal xml:lang never created by
+// setAttributeNS carries no namespace and :lang() ignores it, so lang alone
+// decides.
+func TestLangPlainXmlLangInvisible(t *testing.T) {
+	doc := dom.NewDocument()
+	root := doc.NewElement("div")
+	doc.Node.AppendChild(root)
+	p := doc.NewElement("p")
+	p.SetAttribute("lang", "de")
+	p.SetAttribute("xml:lang", "en")
+	root.AppendChild(p)
+
+	for _, c := range []struct {
+		sel string
+		ok  bool
+	}{
+		{"p:lang(de)", true},
+		{"p:lang(en)", false},
+	} {
+		if got := css.ParseSelector(c.sel).Matches(p); got != c.ok {
+			t.Errorf("%s = %v, want %v (plain xml:lang is invisible)", c.sel, got, c.ok)
+		}
+	}
+}
+
+// TestLangNamespacedXmlLangWins pins the setAttributeNS half: an
+// XML-namespaced xml:lang decides its level ahead of a plain lang.
+func TestLangNamespacedXmlLangWins(t *testing.T) {
+	doc := dom.NewDocument()
+	root := doc.NewElement("div")
+	doc.Node.AppendChild(root)
+	p := doc.NewElement("p")
+	p.SetAttribute("lang", "de")
+	p.Attr = append(p.Attr, dom.Attribute{Name: "xml:lang", Namespace: dom.NSXML, Value: "en"})
+	root.AppendChild(p)
+
+	for _, c := range []struct {
+		sel string
+		ok  bool
+	}{
+		{"p:lang(en)", true},
+		{"p:lang(de)", false},
+	} {
+		if got := css.ParseSelector(c.sel).Matches(p); got != c.ok {
+			t.Errorf("%s = %v, want %v", c.sel, got, c.ok)
+		}
+	}
+}

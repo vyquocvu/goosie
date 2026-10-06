@@ -375,3 +375,50 @@ func TestQuerySelectorUndefinedWithoutDOM(t *testing.T) {
 		t.Error("expected error when calling querySelector without a DOM, got nil")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// setAttributeNS and id reflection
+// ---------------------------------------------------------------------------
+
+func TestSetAttributeNSStoresQualifiedName(t *testing.T) {
+	d := testDOM(t)
+	r := newDOMRuntime(t, d)
+
+	if err := r.Run(`
+		var el = document.createElement("p");
+		document.body.appendChild(el);
+		el.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:lang", "en");
+		el.setAttributeNS(null, "lang", "de");
+		var xmll = el.getAttribute("xml:lang");
+		var lang = el.getAttribute("lang");
+	`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("xmll"); v.Str != "en" {
+		t.Errorf("xml:lang = %q, want en", v.Str)
+	}
+	if v, _ := r.Global("lang"); v.Str != "de" {
+		t.Errorf("lang = %q, want de", v.Str)
+	}
+}
+
+func TestIDPropertyReflectsAttribute(t *testing.T) {
+	d := testDOM(t)
+	r := newDOMRuntime(t, d)
+
+	if err := r.Run(`
+		var el = document.createElement("div");
+		document.body.appendChild(el);
+		el.id = "g";
+		var readBack = el.id;
+		var found = document.getElementById("g") !== null;
+	`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("readBack"); v.Str != "g" {
+		t.Errorf("id read-back = %q, want g", v.Str)
+	}
+	if v, _ := r.Global("found"); !v.Bool {
+		t.Error("getElementById did not find the element after id assignment")
+	}
+}

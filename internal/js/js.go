@@ -316,6 +316,9 @@ func (r *Runtime) setupDOM() {
 	_ = r.nodeProto.Set("setAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsSetAttribute(call)
 	})
+	_ = r.nodeProto.Set("setAttributeNS", func(call goja.FunctionCall) goja.Value {
+		return r.jsSetAttributeNS(call)
+	})
 	_ = r.nodeProto.Set("removeAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsRemoveAttribute(call)
 	})
@@ -539,6 +542,25 @@ func (r *Runtime) setupDOM() {
 		node.SetAttribute("value", v)
 		return goja.Undefined()
 	})
+	_ = doc.Set("__getId__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(node.GetAttribute("id"))
+	})
+	_ = doc.Set("__setId__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		v := call.Arguments[1].String()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		node.SetAttribute("id", v)
+		r.notifyMutation()
+		return goja.Undefined()
+	})
 
 	// Dynamic body property: wraps the body element on first access and
 	// caches it. If the body is replaced, the host should re-run setupDOM.
@@ -584,7 +606,7 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	if node.Element() {
 		_ = obj.Set("tagName", strings.ToUpper(node.Data))
 		_ = obj.Set("nodeName", strings.ToUpper(node.Data))
-		_ = obj.Set("id", node.GetAttribute("id"))
+		r.defineIdAccessor(obj)
 		_ = obj.Set("className", node.GetAttribute("class"))
 		if node.Data == "input" {
 			typ := strings.ToLower(node.GetAttribute("type"))
@@ -790,6 +812,30 @@ func (r *Runtime) defineValueAccessor(obj *goja.Object) {
 		});
 	`)
 	_ = r.vm.Set("__valTarget__", nil)
+}
+
+// defineIdAccessor installs a live id getter/setter on obj: reading reflects
+// the current attribute (not the wrap-time snapshot) and writing sets it, so
+// `div.id = "g"` retargets getElementById and #g selectors.
+func (r *Runtime) defineIdAccessor(obj *goja.Object) {
+	_ = r.vm.Set("__idTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__idTarget__, 'id', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getId__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setId__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__idTarget__", nil)
 }
 
 // getNode extracts the *dom.Node from a JS wrapper object via its __nid__.
@@ -1379,6 +1425,45 @@ func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	name := call.Arguments[0].String()
 	value := call.Arguments[1].String()
 	node.SetAttribute(name, value)
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+// jsSetAttributeNS implements element.setAttributeNS(ns, name, value). A null
+// namespace behaves exactly like setAttribute. The XML namespace stores the
+// qualified name marked NSXML, which is the only xml:lang :lang() honors -
+// the HTML parser never creates namespaced attributes, so static xml:lang
+// stays invisible to language matching exactly like the reference engine.
+func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 3 {
+		return goja.Undefined()
+	}
+	var ns string
+	if nsArg := call.Arguments[0]; nsArg != nil && !goja.IsNull(nsArg) && !goja.IsUndefined(nsArg) {
+		ns = nsArg.String()
+	}
+	name := call.Arguments[1].String()
+	value := call.Arguments[2].String()
+	if ns == "" {
+		node.SetAttribute(name, value)
+	} else if ns == "http://www.w3.org/XML/1998/namespace" {
+		replaced := false
+		for i := range node.Attr {
+			if node.Attr[i].Namespace == dom.NSXML && strings.EqualFold(node.Attr[i].Name, name) {
+				node.Attr[i].Value = value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			node.Attr = append(node.Attr, dom.Attribute{Name: name, Namespace: dom.NSXML, Value: value})
+		}
+	} else {
+		// Other namespaces have no engine semantics; keep the qualified
+		// name as a plain attribute rather than dropping the write.
+		node.SetAttribute(name, value)
+	}
 	r.notifyMutation()
 	return goja.Undefined()
 }

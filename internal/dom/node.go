@@ -25,6 +25,10 @@ const (
 	NSHTML Namespace = iota
 	NSSVG
 	NSMathML
+	// NSXML marks attributes in the XML namespace, which only
+	// setAttributeNS can create: the HTML parser never puts xml:lang there,
+	// and :lang() only honors the namespaced form.
+	NSXML
 )
 
 // Attribute is one name-value pair on an element.

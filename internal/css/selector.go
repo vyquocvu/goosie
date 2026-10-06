@@ -531,6 +531,8 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		// We have no navigation history, so all links are treated as unvisited.
 		tag := strings.ToLower(n.Data)
 		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
+	case "lang":
+		return matchLang(c.Pseudo, n)
 	case "visited", "active", "focus-within", "focus-visible":
 		// These interaction pseudo-classes require runtime state that the engine
 		// does not track yet. Returning false matches what a browser shows on
@@ -695,6 +697,66 @@ func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
 	}
 	d := i - b
 	return d%a == 0 && d/a >= 0
+}
+
+// matchLang implements :lang(): any comma-separated range matching wins. A
+// range matches when the nearest ancestor-or-self language (lang, else
+// xml:lang) equals it or starts with it plus a hyphen (BCP47 prefix rule).
+// An empty range list never matches; `*` matches every element.
+func matchLang(arg string, n *dom.Node) bool {
+	matched := false
+	for _, part := range splitSelectorList(arg) {
+		lang := strings.ToLower(strings.TrimSpace(part))
+		if lang == "" {
+			continue
+		}
+		if lang == "*" {
+			return true
+		}
+		if matchOneLang(lang, n) {
+			matched = true
+			break
+		}
+	}
+	return matched
+}
+
+func matchOneLang(lang string, n *dom.Node) bool {
+	// Each level decides in order: an XML-namespaced xml:lang wins ties on
+	// its own level, plain lang answers otherwise, and an empty level defers
+	// upward. Only setAttributeNS creates namespaced attributes - the HTML
+	// parser never does, so static xml:lang stays invisible here exactly
+	// like the reference engine.
+	for el := n; el != nil; el = el.Parent {
+		if !el.Element() {
+			continue
+		}
+		if v := xmlLangOf(el); v != "" {
+			return langMatches(v, lang)
+		}
+		if v := el.GetAttribute("lang"); v != "" {
+			return langMatches(v, lang)
+		}
+	}
+	return false
+}
+
+// xmlLangOf reads the XML-namespaced xml:lang only; a parser-produced
+// literal of the same spelling does not count.
+func xmlLangOf(el *dom.Node) string {
+	for _, a := range el.Attr {
+		if a.Namespace == dom.NSXML && strings.EqualFold(a.Name, "xml:lang") {
+			return a.Value
+		}
+	}
+	return ""
+}
+
+// langMatches reports BCP47 prefix equality: en covers en-US but not
+// english or fr.
+func langMatches(have, want string) bool {
+	have = strings.ToLower(strings.TrimSpace(have))
+	return have == want || strings.HasPrefix(have, want+"-")
 }
 
 // splitNthOf splits "An+B of S1, S2" into the microsyntax and the selector
