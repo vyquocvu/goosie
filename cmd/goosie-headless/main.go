@@ -21,6 +21,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/platform/headless"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -62,6 +63,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "goosie-headless: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// mustJSRuntime builds the per-document runtime for classic scripts, or nil
+// when construction fails so the render degrades to no scripting instead of
+// failing. The session owns it afterwards via Close.
+func mustJSRuntime(docURL string) *js.Runtime {
+	rt, err := js.New(js.Options{URL: docURL})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goosie-headless: js runtime: %v\n", err)
+		return nil
+	}
+	return rt
 }
 
 func run(args []string) error {
@@ -119,10 +132,11 @@ func run(args []string) error {
 		return fmt.Errorf("init fonts: %w", err)
 	}
 
-	sess, err := engine.NewSession(string(html), nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)))
+	sess, err := engine.NewSession(string(html), nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)), engine.WithJS(mustJSRuntime(c.in)))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)
 	}
+	defer sess.Close()
 
 	list, err := sess.PaintChecked(scale)
 	if err != nil {
