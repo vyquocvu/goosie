@@ -35,6 +35,11 @@ type Cookie struct {
 	HttpOnly bool
 	Expires  time.Time // zero means session cookie
 	hostOnly bool
+	// seq orders eviction: the insertion sequence, refreshed on overwrite.
+	// Map iteration order is random per run, so without it the victim was
+	// whoever the map happened to yield first and the newest cookie could
+	// go out before older ones.
+	seq uint64
 }
 
 // CookieJar stores cookies between requests with policy enforcement: a Domain
@@ -43,6 +48,7 @@ type Cookie struct {
 type CookieJar struct {
 	mu      sync.Mutex
 	entries map[string]*Cookie
+	nextSeq uint64
 }
 
 func NewCookieJar() *CookieJar {
@@ -97,6 +103,8 @@ func (j *CookieJar) Store(reqURL *url.URL, setCookies []string) {
 				delete(j.entries, k)
 			}
 		}
+		c.seq = j.nextSeq
+		j.nextSeq++
 		j.entries[cookieKey(host, c.Name, c.Domain, c.Path)] = c
 		j.evict(host)
 	}
@@ -258,17 +266,25 @@ func (j *CookieJar) Load(path string) error {
 			HttpOnly: pc.HttpOnly,
 			Expires:  pc.Expires,
 			hostOnly: pc.HostOnly,
+			seq:      j.nextSeq,
 		}
+		j.nextSeq++
 	}
 	return nil
 }
 
-// evict enforces the jar limits, called with the lock held. Expired entries go
-// first, then the soonest-to-expire, then the longest idle ones.
+// evict enforces the jar limits, called with the lock held. Expired entries
+// go first, then the soonest-to-expire, then the longest-stored; session
+// cookies (no expiry) outrank expiring ones. The order is total: equal keys
+// break by name, so the victim never depends on map iteration order.
 func (j *CookieJar) evict(host string) {
 	total := len(j.entries)
 	var perHost int
-	var candidates []*Cookie
+	type candidate struct {
+		key string
+		c   *Cookie
+	}
+	var candidates []candidate
 	for k, c := range j.entries {
 		if strings.HasPrefix(k, host+"\x00") {
 			perHost++
@@ -281,29 +297,36 @@ func (j *CookieJar) evict(host string) {
 			}
 			continue
 		}
-		candidates = append(candidates, c)
+		candidates = append(candidates, candidate{key: k, c: c})
 	}
+	sort.Slice(candidates, func(i, k int) bool {
+		a, b := candidates[i].c, candidates[k].c
+		ae, be := !a.Expires.IsZero(), !b.Expires.IsZero()
+		if ae != be {
+			return ae
+		}
+		if ae && !a.Expires.Equal(b.Expires) {
+			return a.Expires.Before(b.Expires)
+		}
+		if a.seq != b.seq {
+			return a.seq < b.seq
+		}
+		return candidates[i].key < candidates[k].key
+	})
 	for perHost > MaxCookiesPerHost || total > MaxTotalCookies {
 		if len(candidates) == 0 {
 			return
 		}
 		victim := candidates[0]
-		victimKey := ""
-		for k, c := range j.entries {
-			if c == victim {
-				victimKey = k
-				break
-			}
+		candidates = candidates[1:]
+		if _, ok := j.entries[victim.key]; !ok {
+			continue
 		}
-		if victimKey == "" {
-			return
-		}
-		delete(j.entries, victimKey)
+		delete(j.entries, victim.key)
 		total--
-		if strings.HasPrefix(victimKey, host+"\x00") {
+		if strings.HasPrefix(victim.key, host+"\x00") {
 			perHost--
 		}
-		candidates = candidates[1:]
 	}
 }
 
