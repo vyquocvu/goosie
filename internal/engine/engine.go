@@ -54,6 +54,12 @@ type Session struct {
 	natural  map[dom.NodeID]layout.NaturalSize
 	images   map[dom.NodeID]stdimage.Image
 	bgImages map[dom.NodeID]stdimage.Image
+	// bgVectorSrc holds raw bytes for vector backgrounds without intrinsic
+	// dimensions or ratio: their raster size is the laid-out tile, known
+	// only after layout, so they decode in the Reflow attachment instead of
+	// the fetch pool. Keyed by URL; bgVectorRef maps nodes to it.
+	bgVectorSrc map[string][]byte
+	bgVectorRef map[dom.NodeID]string
 
 	// imgMu guards the image maps and pendingImgs. LoadDeferredImages runs on
 	// the caller's goroutine and writes these maps while the session owner
@@ -554,6 +560,8 @@ func (s *Session) initImageMaps() {
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
+	s.bgVectorSrc = make(map[string][]byte)
+	s.bgVectorRef = make(map[dom.NodeID]string)
 }
 
 // DeferredImagesPending reports how many image references WithDeferredImages
@@ -666,10 +674,14 @@ func (s *Session) fetchImageBytes(u string) ([]byte, error) {
 func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 	uniq := make([]string, 0, len(refs))
 	seen := make(map[string]bool)
+	bgOnly := make(map[string]bool)
 	for _, r := range refs {
 		if !seen[r.abs] {
 			seen[r.abs] = true
 			uniq = append(uniq, r.abs)
+			bgOnly[r.abs] = r.bg
+		} else if !r.bg {
+			bgOnly[r.abs] = false
 		}
 	}
 	byURL := make(map[string]stdimage.Image, len(uniq))
@@ -700,6 +712,25 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 			if err != nil || len(data) == 0 {
 				return
 			}
+			// Vector backgrounds without intrinsic dimensions or ratio
+			// rasterize after layout at their tile size (see Reflow):
+			// decoding now could only guess a viewport. So do
+			// preserveAspectRatio=none images, which never keep a ratio
+			// and always tile the area. Stash the bounded bytes instead;
+			// anything else decodes as before. URLs backing <img>
+			// elements always decode immediately for layout.
+			if bgOnly[u] && imgdec.IsSVG(data) {
+				hasDims, hasRatio := imgdec.SVGIntrinsicKind(data)
+				if (!hasDims && !hasRatio) || imgdec.SVGPreserveNone(data) {
+					mu.Lock()
+					if s.bgVectorSrc == nil {
+						s.bgVectorSrc = make(map[string][]byte)
+					}
+					s.bgVectorSrc[u] = data
+					mu.Unlock()
+					return
+				}
+			}
 			cfg, err := imgdec.Probe(data)
 			if err != nil {
 				return
@@ -729,6 +760,12 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 	s.imgMu.Lock()
 	defer s.imgMu.Unlock()
 	for _, r := range refs {
+		if r.bg {
+			if _, ok := s.bgVectorSrc[r.abs]; ok {
+				s.bgVectorRef[r.id] = r.abs
+				continue
+			}
+		}
 		img, ok := byURL[r.abs]
 		if !ok {
 			continue
@@ -742,6 +779,40 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 			s.images[r.id] = img
 		}
 	}
+}
+
+// attachVectorBackground rasterizes one vector background without intrinsic
+// dimensions at its laid-out tile size and attaches it with the vector flag,
+// so paint negotiates the same tile both sides of the boundary. The caller
+// holds imgMu; admission clamps the tile before a pixel is allocated.
+func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs string) {
+	data, ok := s.bgVectorSrc[abs]
+	if !ok || len(data) == 0 {
+		return
+	}
+	obj := &candidate.Objects[i]
+	if obj.Style == nil {
+		return
+	}
+	x0, y0, x1, y1 := obj.BorderRect()
+	areaW, areaH := x1-x0, y1-y0
+	if areaW <= 0 || areaH <= 0 {
+		return
+	}
+	tileW, tileH := paint.BGTileSize(obj.Style, areaW, areaH, 0, 0, true)
+	tw, th := int(tileW+0.5), int(tileH+0.5)
+	if tw <= 0 || th <= 0 || tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
+		return
+	}
+	if int64(tw) > imgdec.MaxDecodedImagePixels/int64(th) {
+		return
+	}
+	img, err := imgdec.DecodeSVGAt(data, tw, th)
+	if err != nil {
+		return
+	}
+	obj.BgImage = img
+	obj.BgVector = true
 }
 
 // styleViewport is the frame the cascade resolves the viewport units against. A
@@ -798,6 +869,14 @@ func (s *Session) Reflow(viewportW float32) error {
 				}
 				if img, ok := s.bgImages[n.ID]; ok {
 					candidate.Objects[i].BgImage = img
+				}
+				// Vector backgrounds without intrinsics rasterize here, at
+				// the laid-out tile size, because only now is the tile
+				// known. Skipped boxes (zero area, over-limit tiles, decode
+				// failures) keep no image and paint nothing, like any
+				// missing subresource.
+				if abs, ok := s.bgVectorRef[n.ID]; ok {
+					s.attachVectorBackground(candidate, i, abs)
 				}
 			}
 		}

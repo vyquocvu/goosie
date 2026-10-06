@@ -1041,6 +1041,68 @@ func fitCoverSrcBox(srcBox image.Rectangle, w, h float32) (image.Rectangle, bool
 // list without limit.
 const maxBgTiles = 4096
 
+// BGTileSize resolves one background tile's drawn size for paint and for
+// the engine's post-layout vector rasterization, which must agree exactly.
+// A vector image without intrinsic dimensions or ratio (an SVG with neither
+// usable width/height nor viewBox) has nothing to scale from, so automatic
+// axes (auto, cover, contain) are the positioning area and explicit
+// lengths resolve per axis; everything else follows the standard negotiation
+// against the natural size.
+func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, vectorNoIntrinsic bool) (float32, float32) {
+	if vectorNoIntrinsic {
+		tileW, tileH := areaW, areaH
+		if s.BackgroundSize == style.BgSizeLength {
+			if s.BgSizeW >= 0 {
+				if s.BgSizeWPct {
+					tileW = areaW * s.BgSizeW
+				} else {
+					tileW = s.BgSizeW
+				}
+			}
+			if s.BgSizeH >= 0 {
+				if s.BgSizeHPct {
+					tileH = areaH * s.BgSizeH
+				} else {
+					tileH = s.BgSizeH
+				}
+			}
+		}
+		return tileW, tileH
+	}
+	tileW, tileH := natW, natH
+	switch s.BackgroundSize {
+	case style.BgSizeContain:
+		k := areaW / natW
+		if h := areaH / natH; h < k {
+			k = h
+		}
+		tileW, tileH = natW*k, natH*k
+	case style.BgSizeCover:
+		k := areaW / natW
+		if h := areaH / natH; h > k {
+			k = h
+		}
+		tileW, tileH = natW*k, natH*k
+	case style.BgSizeLength:
+		if s.BgSizeWPct {
+			tileW = areaW * s.BgSizeW
+		} else {
+			tileW = s.BgSizeW
+		}
+		switch {
+		case s.BgSizeH < 0: // height auto: preserve the image aspect ratio
+			if tileW > 0 {
+				tileH = natH * (tileW / natW)
+			}
+		case s.BgSizeHPct:
+			tileH = areaH * s.BgSizeH
+		default:
+			tileH = s.BgSizeH
+		}
+	}
+	return tileW, tileH
+}
+
 // paintBackground draws a box's CSS background-image. The repeat modes tile the
 // image across the border box; no-repeat places it once. background-size selects
 // the tile's drawn size and background-position selects its origin. A tile that
@@ -1073,37 +1135,7 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	}
 	areaW, areaH := ax1-ax0, ay1-ay0
 
-	tileW, tileH := natW, natH
-	switch s.BackgroundSize {
-	case style.BgSizeContain:
-		k := areaW / natW
-		if h := areaH / natH; h < k {
-			k = h
-		}
-		tileW, tileH = natW*k, natH*k
-	case style.BgSizeCover:
-		k := areaW / natW
-		if h := areaH / natH; h > k {
-			k = h
-		}
-		tileW, tileH = natW*k, natH*k
-	case style.BgSizeLength:
-		if s.BgSizeWPct {
-			tileW = areaW * s.BgSizeW
-		} else {
-			tileW = s.BgSizeW
-		}
-		switch {
-		case s.BgSizeH < 0: // height auto: preserve the image aspect ratio
-			if tileW > 0 {
-				tileH = natH * (tileW / natW)
-			}
-		case s.BgSizeHPct:
-			tileH = areaH * s.BgSizeH
-		default:
-			tileH = s.BgSizeH
-		}
-	}
+	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgVector)
 	if tileW <= 0 || tileH <= 0 {
 		return
 	}

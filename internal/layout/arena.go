@@ -57,6 +57,12 @@ type Object struct {
 	// position.
 	BgImage any
 
+	// BgVector marks a vector background without intrinsic dimensions or
+	// ratio (an SVG with neither usable width/height nor viewBox): its tile
+	// is the positioning area rather than the decoded size, and the engine
+	// rasterizes it at that tile size after layout instead of at decode time.
+	BgVector bool
+
 	// StaticX/StaticY record where an out-of-flow box would have started had it
 	// stayed in the flow. CSS uses that position when an absolutely positioned
 	// box specifies neither the relevant inset nor a static-friendly pair.

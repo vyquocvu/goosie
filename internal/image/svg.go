@@ -64,6 +64,11 @@ type svgState struct {
 	ctm          [6]float64 // a b c d e f: dx = a*x+c*y+e, dy = b*x+d*y+f
 }
 
+// IsSVG reports whether data sniffs as a standalone SVG document.
+func IsSVG(data []byte) bool {
+	return isSVGData(data)
+}
+
 // isSVGData sniffs standalone SVG markup: optional XML prolog, comments and
 // whitespace, then a root <svg> element. Anything else is not ours.
 func isSVGData(data []byte) bool {
@@ -556,8 +561,16 @@ func (st svgState) invert() ([6]float64, bool) {
 // devScale is the device px per shape unit, for stroke widths: the mean of
 // the matrix column norms, exact under uniform scale.
 func (st svgState) devScale() float64 {
-	a, b, c, d := st.ctm[0], st.ctm[1], st.ctm[2], st.ctm[3]
-	return (math.Hypot(a, b) + math.Hypot(c, d)) / 2
+	return (st.devScaleX() + st.devScaleY()) / 2
+}
+
+// devScaleX/devScaleY are the per-axis scales the percentage resolver needs.
+func (st svgState) devScaleX() float64 {
+	return math.Hypot(st.ctm[0], st.ctm[1])
+}
+
+func (st svgState) devScaleY() float64 {
+	return math.Hypot(st.ctm[2], st.ctm[3])
 }
 
 // devBox maps shape-space corners to a clipped device bbox.
@@ -782,6 +795,47 @@ func (c *svgCanvas) paintPoly(st svgState, pts [][2]float64, closed bool, fill, 
 	}
 }
 
+// dim resolves one geometry attribute in shape space. Percentages resolve
+// against the tile (viewport) through the axis scale: a non-uniform map
+// needs each axis separately, since averaging them (as a single mean scale
+// would) collapses percentages on the squashed axis. Anything unparseable is
+// zero, matching SVG error handling for geometry.
+func (c *svgCanvas) dim(st svgState, el xml.StartElement, name string, isX bool) float64 {
+	s := svgAttr(el, name)
+	base := 0.0
+	if strings.Contains(s, "%") {
+		sc := st.devScaleX()
+		if !isX {
+			sc = st.devScaleY()
+		}
+		if sc <= 0 {
+			sc = 1
+		}
+		if isX {
+			base = float64(c.w) / sc
+		} else {
+			base = float64(c.h) / sc
+		}
+	}
+	v, _ := svgLength(s, base)
+	return v
+}
+
+// dimR resolves r, whose percentage is the normalized viewport diagonal.
+func (c *svgCanvas) dimR(st svgState, el xml.StartElement) float64 {
+	s := svgAttr(el, "r")
+	base := 0.0
+	if strings.Contains(s, "%") {
+		sc := st.devScale()
+		if sc <= 0 {
+			sc = 1
+		}
+		base = math.Hypot(float64(c.w), float64(c.h)) / math.Sqrt2 / sc
+	}
+	v, _ := svgLength(s, base)
+	return v
+}
+
 // paintShape dispatches one element, folding the cumulative opacity into the
 // resolved paints exactly once. It reports false for elements with no paint
 // of their own (groups are expanded by the walker, the rest skipped).
@@ -794,10 +848,10 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 	stroke.a *= st.opacity
 	switch el.Name.Local {
 	case "rect":
-		x, _ := svgLength(svgAttr(el, "x"), 0)
-		y, _ := svgLength(svgAttr(el, "y"), 0)
-		w, _ := svgLength(svgAttr(el, "width"), 0)
-		h, _ := svgLength(svgAttr(el, "height"), 0)
+		x := c.dim(st, el, "x", true)
+		y := c.dim(st, el, "y", false)
+		w := c.dim(st, el, "width", true)
+		h := c.dim(st, el, "height", false)
 		if w <= 0 || h <= 0 {
 			return
 		}
@@ -807,9 +861,9 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 			c.paintRectStroke(st, x, y, w, h, sw, stroke, fill)
 		}
 	case "circle":
-		cx, _ := svgLength(svgAttr(el, "cx"), 0)
-		cy, _ := svgLength(svgAttr(el, "cy"), 0)
-		r, _ := svgLength(svgAttr(el, "r"), 0)
+		cx := c.dim(st, el, "cx", true)
+		cy := c.dim(st, el, "cy", false)
+		r := c.dimR(st, el)
 		if r <= 0 {
 			return
 		}
@@ -819,10 +873,10 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 			c.paintEllipseStroke(st, cx, cy, r, r, sw, stroke, fill)
 		}
 	case "ellipse":
-		cx, _ := svgLength(svgAttr(el, "cx"), 0)
-		cy, _ := svgLength(svgAttr(el, "cy"), 0)
-		rx, _ := svgLength(svgAttr(el, "rx"), 0)
-		ry, _ := svgLength(svgAttr(el, "ry"), 0)
+		cx := c.dim(st, el, "cx", true)
+		cy := c.dim(st, el, "cy", false)
+		rx := c.dim(st, el, "rx", true)
+		ry := c.dim(st, el, "ry", false)
 		if rx <= 0 || ry <= 0 {
 			return
 		}
@@ -832,10 +886,10 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 			c.paintEllipseStroke(st, cx, cy, rx, ry, sw, stroke, fill)
 		}
 	case "line":
-		x1, _ := svgLength(svgAttr(el, "x1"), 0)
-		y1, _ := svgLength(svgAttr(el, "y1"), 0)
-		x2, _ := svgLength(svgAttr(el, "x2"), 0)
-		y2, _ := svgLength(svgAttr(el, "y2"), 0)
+		x1 := c.dim(st, el, "x1", true)
+		y1 := c.dim(st, el, "y1", false)
+		x2 := c.dim(st, el, "x2", true)
+		y2 := c.dim(st, el, "y2", false)
 		c.paintPoly(st, [][2]float64{{x1, y1}, {x2, y2}}, false, svgColor{none: true}, stroke, sw)
 	case "polyline":
 		pts := svgPoints(svgAttr(el, "points"))
@@ -871,7 +925,7 @@ func svgRootState(el xml.StartElement, w, h int) svgState {
 // parseSVG parses a standalone SVG document with admission guards. Shapes
 // rasterize onto cv as encountered (document order); every pushed state pops
 // exactly once, including shapes and the root.
-func parseSVG(data []byte, cv *svgCanvas) (w, h int, err error) {
+func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err error) {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return 0, 0, err
 	}
@@ -908,9 +962,13 @@ func parseSVG(data []byte, cv *svgCanvas) (w, h int, err error) {
 				}
 				haveRoot = true
 				var err error
-				w, h, err = svgViewport(t)
-				if err != nil {
-					return 0, 0, err
+				if forceW > 0 && forceH > 0 {
+					w, h = forceW, forceH
+				} else {
+					w, h, err = svgViewport(t)
+					if err != nil {
+						return 0, 0, err
+					}
 				}
 				if cv != nil {
 					cv.w, cv.h = w, h
@@ -968,7 +1026,7 @@ func parseSVG(data []byte, cv *svgCanvas) (w, h int, err error) {
 
 // svgProbeDims returns the raster size without painting.
 func svgProbeDims(data []byte) (int, int, error) {
-	w, h, err := parseSVG(data, nil)
+	w, h, err := parseSVG(data, nil, 0, 0)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -978,7 +1036,7 @@ func svgProbeDims(data []byte) (int, int, error) {
 // decodeSVG rasterizes a standalone SVG document to premultiplied RGBA.
 func decodeSVG(data []byte) (gimage.Image, error) {
 	cv := &svgCanvas{}
-	w, h, err := parseSVG(data, cv)
+	w, h, err := parseSVG(data, cv, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -986,6 +1044,85 @@ func decodeSVG(data []byte) (gimage.Image, error) {
 		return nil, fmt.Errorf("image: svg produced no raster")
 	}
 	return cv.px, nil
+}
+
+// DecodeSVGAt rasterizes a standalone SVG document at an explicit size,
+// for vector backgrounds whose tile (not the intrinsic size) establishes
+// the viewport. Dimensions outside admission fail before allocating.
+func DecodeSVGAt(data []byte, w, h int) (gimage.Image, error) {
+	if w <= 0 || h <= 0 || w > MaxImageDimension || h > MaxImageDimension {
+		return nil, fmt.Errorf("image: svg raster size %dx%d outside admission", w, h)
+	}
+	if int64(w) > MaxDecodedImagePixels/int64(h) {
+		return nil, fmt.Errorf("image: svg raster pixel count %dx%d exceeds limit %d", w, h, MaxDecodedImagePixels)
+	}
+	cv := &svgCanvas{}
+	if _, _, err := parseSVG(data, cv, w, h); err != nil {
+		return nil, err
+	}
+	if cv.px == nil {
+		return nil, fmt.Errorf("image: svg produced no raster")
+	}
+	return cv.px, nil
+}
+
+// SVGPreserveNone reports whether the root disables aspect preservation.
+// With it the image never keeps a ratio, so cover/contain/auto all tile the
+// positioning area instead of scaling one. Non-SVG input is false.
+func SVGPreserveNone(data []byte) bool {
+	if err := rejectSVGAttackSurface(data); err != nil {
+		return false
+	}
+	dec := xml.NewDecoder(bytes.NewReader(bytes.TrimSpace(data)))
+	dec.Strict = true
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			if start.Name.Local != "svg" {
+				return false
+			}
+			par := strings.ToLower(strings.TrimSpace(svgAttr(start, "preserveAspectRatio")))
+			return par == "none" || strings.HasPrefix(par, "none ")
+		}
+	}
+}
+
+// SVGIntrinsicKind reports whether a standalone SVG carries intrinsic
+// dimensions (absolute width and height) and an intrinsic ratio (a usable
+// viewBox). Percentages are not intrinsic without a viewport to resolve
+// against. Non-SVG input reports false, false with no error.
+func SVGIntrinsicKind(data []byte) (hasDims, hasRatio bool) {
+	if err := rejectSVGAttackSurface(data); err != nil {
+		return false, false
+	}
+	dec := xml.NewDecoder(bytes.NewReader(bytes.TrimSpace(data)))
+	dec.Strict = true
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false, false
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			if start.Name.Local != "svg" {
+				return false, false
+			}
+			w, wok := svgLength(svgAttr(start, "width"), 0)
+			h, hok := svgLength(svgAttr(start, "height"), 0)
+			hasDims = wok && hok && w > 0 && h > 0
+			vb := strings.Fields(svgAttr(start, "viewBox"))
+			if len(vb) == 4 {
+				if vw, err := strconv.ParseFloat(vb[2], 64); err == nil && vw > 0 {
+					if vh, err := strconv.ParseFloat(vb[3], 64); err == nil && vh > 0 {
+						hasRatio = true
+					}
+				}
+			}
+			return hasDims, hasRatio
+		}
+	}
 }
 
 // svgConfig adapts SVG dimensions to an image.Config for Probe.

@@ -1,0 +1,49 @@
+package image
+
+import (
+	"testing"
+)
+
+// TestSVGIntrinsicKind distinguishes dimensioned, ratio-only and bare SVGs:
+// backgrounds rasterize bare ones at their tile, everything else at
+// intrinsic size.
+func TestSVGIntrinsicKind(t *testing.T) {
+	for _, c := range []struct {
+		doc         string
+		dims, ratio bool
+	}{
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"></svg>`, true, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20" viewBox="0 0 5 5"></svg>`, true, true},
+		{`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5"></svg>`, false, true},
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="50%"></svg>`, false, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg"></svg>`, false, false},
+		{`<html></html>`, false, false},
+	} {
+		dims, ratio := SVGIntrinsicKind([]byte(c.doc))
+		if dims != c.dims || ratio != c.ratio {
+			t.Errorf("SVGIntrinsicKind(%q) = (%v,%v), want (%v,%v)", c.doc, dims, ratio, c.dims, c.ratio)
+		}
+	}
+}
+
+// TestDecodeSVGAtPercentShapes pins tile-sized rasterization with viewport
+// percentages: a full-bleed percent rect covers the forced size, even under
+// an extreme non-uniform viewBox where a mean scale would collapse a whole
+// axis to nothing.
+func TestDecodeSVGAtPercentShapes(t *testing.T) {
+	doc := `<svg xmlns="http://www.w3.org/2000/svg" height="8px" viewBox="0 0 1 2147483647" preserveAspectRatio="none"><rect y="0" width="100%" height="100%" fill="lime"/></svg>`
+	if !SVGPreserveNone([]byte(doc)) {
+		t.Fatal("preserveAspectRatio=none not detected")
+	}
+	img, err := DecodeSVGAt([]byte(doc), 258, 770)
+	if err != nil {
+		t.Fatalf("DecodeSVGAt: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != 258 || b.Dy() != 770 {
+		t.Fatalf("bounds = %v, want 258x770", b)
+	}
+	r, g, b, _ := img.At(128, 100).RGBA()
+	if r>>8 != 0 || g>>8 != 255 || b>>8 != 0 {
+		t.Errorf("interior = (%d,%d,%d), want lime", r>>8, g>>8, b>>8)
+	}
+}
