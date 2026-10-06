@@ -46,3 +46,5 @@ perf-suite.txt
 
 node_modules/
 /goosie
+
+.codegraph/
