@@ -100,3 +100,30 @@ func TestFlexEmptyFixedAtomicMeasuresItsBox(t *testing.T) {
 		t.Errorf("spacer holder W = %v, want 15", divs[2].W)
 	}
 }
+
+// TestFlexAlignStartShrinkWrapsLikeFlexStart guards logical alignment in
+// fit-content measurement: `align-self: start` shrink-wraps exactly like
+// flex-start. Before, only the physical keywords measured, so a start-aligned
+// item kept the full line width.
+func TestFlexAlignStartShrinkWrapsLikeFlexStart(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="display: flex; flex-direction: column;">
+  <div style="align-self: start;">
+    <div style="width: 100px; height: 50px;"></div>
+    <div style="padding-bottom: 50%;"></div>
+  </div>
+</div>
+</body></html>`, 800)
+
+	divs := findAllByTag(arena, "div")
+	if len(divs) < 2 {
+		t.Fatalf("found %d divs, want at least 2", len(divs))
+	}
+	// divs[0] is the container; divs[1] the item, shrink-wrapped to 100px.
+	if !almostEqual(divs[1].W, 100) {
+		t.Errorf("item.W = %v, want 100 (shrink-wrapped, not the 800 line)", divs[1].W)
+	}
+	if !almostEqual(divs[1].H, 100) {
+		t.Errorf("item.H = %v, want 100 (50 content + 50%% padding of 100)", divs[1].H)
+	}
+}

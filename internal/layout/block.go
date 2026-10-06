@@ -981,7 +981,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				it = a.Get(items[i].id)
 			}
 			if spare := cross - it.BorderH() - mTop - mBottom; spare > 0 {
-				switch align {
+				switch normalizeAxis(align) {
 				case "flex-end":
 					it.Y += spare
 					shiftInlineContent(a, items[i].id, 0, spare)
@@ -1295,7 +1295,7 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 			// moves by the difference: assigning X and then shifting by the same
 			// amount would move the box twice while its content moved once.
 			targetX := contentX + items[i].mLeft
-			switch align {
+			switch normalizeAxis(align) {
 			case "center":
 				targetX = contentX + (contentW-items[i].crossW)/2 + it.MarginLeft
 			case "flex-end":
@@ -1329,11 +1329,15 @@ func fitContentCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32, 
 	if s == nil || s.Width >= 0 || isPctLength(s.Width) {
 		return 0, false
 	}
+	// Logical start/end resolve like their physical twins: `align-self:
+	// start` shrink-wraps exactly like flex-start, and without it the item
+	// kept the full line width. Normalization happens after the empty-item
+	// fallback so an explicit stretch still wins over a centered container.
 	align := s.AlignSelf
 	if align == "" {
 		align = alignItems
 	}
-	switch align {
+	switch normalizeAxis(align) {
 	case "center", "flex-start", "flex-end":
 	default:
 		return 0, false
