@@ -73,8 +73,27 @@ func (s Selector) Specificity() (a, b, c int) {
 					}
 					continue
 				}
-				// Other pseudo-classes contribute (0, 1, 0).
+				// Other pseudo-classes contribute (0, 1, 0), and an `of`
+				// selector list in a functional one adds its most specific
+				// argument on top, the way `:nth-child(2 of #id)` outranks a
+				// lone class.
 				b++
+				switch cond.Value {
+				case "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type":
+					if _, of := splitNthOf(cond.Pseudo); len(of) > 0 {
+						maxA, maxB, maxC := 0, 0, 0
+						for _, selStr := range of {
+							sel := ParseSelector(selStr)
+							sa, sb, sc := sel.Specificity()
+							if CompareSpecificity(sa, sb, sc, maxA, maxB, maxC) > 0 {
+								maxA, maxB, maxC = sa, sb, sc
+							}
+						}
+						a += maxA
+						b += maxB
+						c += maxC
+					}
+				}
 			case CondType, CondPseudoElement:
 				c++
 			}
@@ -644,11 +663,27 @@ func hasDescendantMatching(n *dom.Node, sel Selector) bool {
 // matchNth resolves an An+B expression against the node's position among its
 // element siblings.
 func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
-	a, b, ok := parseNth(arg)
+	expr, ofSels := splitNthOf(arg)
+	a, b, ok := parseNth(expr)
 	if !ok {
 		return false
 	}
-	i, total := nthIndex(n, ofType)
+	// `:nth-child(An+B of S)` counts only siblings matching S, and the
+	// element itself must match one of them. Without the filter every `of`
+	// form silently matched nothing.
+	if len(ofSels) > 0 {
+		matched := false
+		for _, selStr := range ofSels {
+			if ParseSelector(selStr).Matches(n) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	i, total := nthIndexFiltered(n, ofType, ofSels)
 	if i == 0 {
 		return false
 	}
@@ -662,15 +697,63 @@ func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
 	return d%a == 0 && d/a >= 0
 }
 
+// splitNthOf splits "An+B of S1, S2" into the microsyntax and the selector
+// list. `of` needs whitespace around it; without it there is no filter.
+func splitNthOf(arg string) (expr string, of []string) {
+	lower := strings.ToLower(arg)
+	for i := 0; i+4 <= len(arg); i++ {
+		if lower[i] != ' ' && lower[i] != '\t' && lower[i] != '\n' {
+			continue
+		}
+		j := i + 1
+		for j < len(arg) && (arg[j] == ' ' || arg[j] == '\t' || arg[j] == '\n') {
+			j++
+		}
+		if j+2 < len(arg) && lower[j] == 'o' && lower[j+1] == 'f' {
+			k := j + 2
+			if k < len(arg) && arg[k] != ' ' && arg[k] != '\t' && arg[k] != '\n' {
+				continue
+			}
+			return strings.TrimSpace(arg[:i]), splitSelectorList(strings.TrimSpace(arg[k:]))
+		}
+	}
+	return arg, nil
+}
+
 // nthIndex returns the node's 1-based position among its element siblings and
 // how many such siblings exist. ofType restricts both counts to the same tag
 // name, which is what separates nth-child from nth-of-type.
 func nthIndex(n *dom.Node, ofType bool) (index, total int) {
+	return nthIndexFiltered(n, ofType, nil)
+}
+
+// nthIndexFiltered is nthIndex with an additional selector filter for the
+// `:nth-child(An+B of S)` form: only siblings matching one of the selectors
+// count.
+func nthIndexFiltered(n *dom.Node, ofType bool, of []string) (index, total int) {
 	if n.Parent == nil {
 		return 0, 0
 	}
-	for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
+	var filters []Selector
+	for _, selStr := range of {
+		filters = append(filters, ParseSelector(selStr))
+	}
+	counts := func(c *dom.Node) bool {
 		if !c.Element() || (ofType && c.Data != n.Data) {
+			return false
+		}
+		if len(filters) == 0 {
+			return true
+		}
+		for _, f := range filters {
+			if f.Matches(c) {
+				return true
+			}
+		}
+		return false
+	}
+	for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
+		if !counts(c) {
 			continue
 		}
 		total++
