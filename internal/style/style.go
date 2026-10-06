@@ -2565,6 +2565,17 @@ func parseBackgroundSize(cs *ComputedStyle, v string) {
 	}
 	switch strings.ToLower(parts[0]) {
 	case "auto":
+		// A lone auto keeps the natural size, but `auto <length>` resolves
+		// the width from the height: dropping the second token paints the
+		// intrinsic tile instead of the declared one.
+		if len(parts) > 1 && strings.ToLower(parts[1]) != "auto" {
+			if h, hPct, okH := parseBgLen(cs, parts[1]); okH {
+				cs.BackgroundSize = BgSizeLength
+				cs.BgSizeW, cs.BgSizeWPct = -1, false
+				cs.BgSizeH, cs.BgSizeHPct = h, hPct
+				return
+			}
+		}
 		cs.BackgroundSize = BgSizeAuto
 		return
 	case "contain":

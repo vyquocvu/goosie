@@ -1043,72 +1043,68 @@ const maxBgTiles = 4096
 
 // BGTileSize resolves one background tile's drawn size for paint and for
 // the engine's post-layout vector rasterization, which must agree exactly.
-// lazyVector marks SVGs rasterized at tile size (no usable intrinsic
-// dimensions, or preserveAspectRatio=none whose mapping depends on the tile);
-// ignoreRatio is preserveAspectRatio=none, which drops ratio keeping for
-// cover/contain. Otherwise negotiation is standard against the natural size.
+// noRatio marks a source with no intrinsic ratio (no usable dimensions and
+// no viewBox): cover and contain fill the positioning area instead of ratio
+// math. Otherwise negotiation is standard against the natural size.
 //
 // Auto always tiles at the natural size: the decoder bakes the aspect
 // handling (meet centering, none stretching) into the raster, so paint
-// places it 1:1. Only cover/contain scale, and only lengths resolve axes.
-func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, lazyVector, ignoreRatio bool) (float32, float32) {
-	if s.BackgroundSize == style.BgSizeAuto {
-		return natW, natH
-	}
-	if lazyVector {
-		// Nothing to scale from: cover and contain fill the positioning
-		// area, explicit lengths resolve per axis.
-		tileW, tileH := areaW, areaH
-		if s.BackgroundSize == style.BgSizeLength {
-			if s.BgSizeW >= 0 {
-				if s.BgSizeWPct {
-					tileW = areaW * s.BgSizeW
-				} else {
-					tileW = s.BgSizeW
-				}
-			}
-			if s.BgSizeH >= 0 {
-				if s.BgSizeHPct {
-					tileH = areaH * s.BgSizeH
-				} else {
-					tileH = s.BgSizeH
-				}
-			}
-		}
-		return tileW, tileH
-	}
-	if ignoreRatio && (s.BackgroundSize == style.BgSizeCover || s.BackgroundSize == style.BgSizeContain) {
-		return areaW, areaH
-	}
+// places it 1:1. Only cover/contain scale, and only lengths resolve axes;
+// an auto axis follows the ratio, falling back to the natural dimension.
+func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, noRatio bool) (float32, float32) {
 	tileW, tileH := natW, natH
 	switch s.BackgroundSize {
 	case style.BgSizeContain:
+		if noRatio {
+			tileW, tileH = areaW, areaH
+			break
+		}
 		k := areaW / natW
 		if h := areaH / natH; h < k {
 			k = h
 		}
 		tileW, tileH = natW*k, natH*k
 	case style.BgSizeCover:
+		if noRatio {
+			tileW, tileH = areaW, areaH
+			break
+		}
 		k := areaW / natW
 		if h := areaH / natH; h > k {
 			k = h
 		}
 		tileW, tileH = natW*k, natH*k
 	case style.BgSizeLength:
+		wAuto := !s.BgSizeWPct && s.BgSizeW < 0
+		hAuto := !s.BgSizeHPct && s.BgSizeH < 0
 		if s.BgSizeWPct {
 			tileW = areaW * s.BgSizeW
-		} else {
+		} else if !wAuto {
 			tileW = s.BgSizeW
 		}
-		switch {
-		case s.BgSizeH < 0: // height auto: preserve the image aspect ratio
-			if tileW > 0 {
-				tileH = natH * (tileW / natW)
-			}
-		case s.BgSizeHPct:
+		if s.BgSizeHPct {
 			tileH = areaH * s.BgSizeH
-		default:
+		} else if !hAuto {
 			tileH = s.BgSizeH
+		}
+		switch {
+		case wAuto && hAuto:
+			tileW, tileH = natW, natH
+		case wAuto:
+			// Width auto resolves from the height through the ratio;
+			// without one it keeps the natural width.
+			if !noRatio && tileH > 0 && natW > 0 && natH > 0 {
+				tileW = tileH * natW / natH
+			} else {
+				tileW = natW
+			}
+		case hAuto:
+			// Height auto: preserve the image aspect ratio.
+			if !noRatio && tileW > 0 && natW > 0 && natH > 0 {
+				tileH = tileW * natH / natW
+			} else {
+				tileH = natH
+			}
 		}
 	}
 	return tileW, tileH
@@ -1146,7 +1142,7 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	}
 	areaW, areaH := ax1-ax0, ay1-ay0
 
-	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgVector, obj.BgVectorNoRatio)
+	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgNoRatio)
 	if tileW <= 0 || tileH <= 0 {
 		return
 	}

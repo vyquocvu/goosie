@@ -58,9 +58,9 @@ type Session struct {
 	// dimensions or ratio: their raster size is the laid-out tile, known
 	// only after layout, so they decode in the Reflow attachment instead of
 	// the fetch pool. Keyed by URL; bgVectorRef maps nodes to it.
-	bgVectorSrc     map[string][]byte
-	bgVectorRef     map[dom.NodeID]string
-	bgVectorNoRatio map[string]bool
+	bgVectorSrc map[string][]byte
+	bgVectorRef map[dom.NodeID]string
+	bgNoRatio   map[string]bool
 	// imgReservation budgets decoded pixels across fetch and lazy vector
 	// rasterization alike; bgVectorUsed tracks the lazy share so each
 	// Reflow releases the previous tiles before reserving the new ones.
@@ -568,7 +568,7 @@ func (s *Session) initImageMaps() {
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
 	s.bgVectorSrc = make(map[string][]byte)
 	s.bgVectorRef = make(map[dom.NodeID]string)
-	s.bgVectorNoRatio = make(map[string]bool)
+	s.bgNoRatio = make(map[string]bool)
 	s.imgReservation = newImageReservation(MaxDocumentDecodedPixels)
 	s.bgVectorUsed = 0
 }
@@ -735,15 +735,17 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 			// elements always decode immediately for layout.
 			if bgOnly[u] && imgdec.IsSVG(data) {
 				hasDims, hasRatio := imgdec.SVGIntrinsicKind(data)
-				noRatio := imgdec.SVGPreserveNone(data)
-				if (!hasDims && !hasRatio) || noRatio {
+				if (!hasDims && !hasRatio) || imgdec.SVGPreserveNone(data) {
 					mu.Lock()
 					if s.bgVectorSrc == nil {
 						s.bgVectorSrc = make(map[string][]byte)
 					}
 					s.bgVectorSrc[u] = data
-					if noRatio {
-						s.bgVectorNoRatio[u] = true
+					if !hasDims && !hasRatio {
+						if s.bgNoRatio == nil {
+							s.bgNoRatio = make(map[string]bool)
+						}
+						s.bgNoRatio[u] = true
 					}
 					mu.Unlock()
 					return
@@ -825,7 +827,7 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	if cfg, err := imgdec.Probe(data); err == nil {
 		natW, natH = float32(cfg.Width), float32(cfg.Height)
 	}
-	tileW, tileH := paint.BGTileSize(obj.Style, areaW, areaH, natW, natH, true, s.bgVectorNoRatio[abs])
+	tileW, tileH := paint.BGTileSize(obj.Style, areaW, areaH, natW, natH, s.bgNoRatio[abs])
 	tw, th := int(tileW+0.5), int(tileH+0.5)
 	if tw <= 0 || th <= 0 || tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
 		return
@@ -842,7 +844,7 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	s.bgVectorUsed += pixels
 	obj.BgImage = img
 	obj.BgVector = true
-	obj.BgVectorNoRatio = s.bgVectorNoRatio[abs]
+	obj.BgNoRatio = s.bgNoRatio[abs]
 }
 
 // styleViewport is the frame the cascade resolves the viewport units against. A

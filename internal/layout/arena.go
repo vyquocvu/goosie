@@ -57,16 +57,17 @@ type Object struct {
 	// position.
 	BgImage any
 
-	// BgVector marks a vector background without intrinsic dimensions or
-	// ratio (an SVG with neither usable width/height nor viewBox): its tile
-	// is the positioning area rather than the decoded size, and the engine
-	// rasterizes it at that tile size after layout instead of at decode time.
+	// BgVector marks a vector background rasterized at tile size after layout
+	// instead of at decode time (no intrinsic dimensions, or a mapping that
+	// depends on the tile). Paint negotiates the same tile it decoded at.
 	BgVector bool
 
-	// BgVectorNoRatio marks a preserveAspectRatio=none vector background:
-	// cover and contain tile the area instead of scaling by ratio. The
-	// engine rasterizes it at the tile for the same reason as BgVector.
-	BgVectorNoRatio bool
+	// BgNoRatio marks a background whose source carries no intrinsic ratio
+	// (neither usable dimensions nor viewBox): cover and contain fill the
+	// positioning area instead of scaling by ratio. preserveAspectRatio=none
+	// does not set this: the viewBox ratio still sizes the tile, and none
+	// only stretches the content the decoder already baked in.
+	BgNoRatio bool
 
 	// StaticX/StaticY record where an out-of-flow box would have started had it
 	// stayed in the flow. CSS uses that position when an absolutely positioned

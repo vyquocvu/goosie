@@ -314,9 +314,10 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 	}
 	w, wOk := svgLength(svgAttr(el, "width"), 0)
 	h, hOk := svgLength(svgAttr(el, "height"), 0)
+	completed := false
 	if (!wOk || w <= 0) || (!hOk || h <= 0) {
 		// One definite side plus a viewBox completes through the ratio:
-		// height 32px on a 4x64 viewBox is a 2x32 image, not a missing
+		// width 8px on a 4x64 viewBox is an 8x128 image, not a missing
 		// dimension. Percentages never resolve here (no viewport yet), so a
 		// percent side counts as missing.
 		vb := strings.Fields(svgAttr(el, "viewBox"))
@@ -325,8 +326,10 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 				if vh, err := strconv.ParseFloat(vb[3], 64); err == nil && vh > 0 {
 					if (!wOk || w <= 0) && hOk && h > 0 {
 						w = h * vw / vh
+						completed = true
 					} else if (!hOk || h <= 0) && wOk && w > 0 {
 						h = w * vh / vw
+						completed = true
 					} else if (!wOk || w <= 0) && (!hOk || h <= 0) {
 						w, h = vw, vh
 					}
@@ -334,8 +337,19 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 			}
 		}
 	}
-	if w <= 0 || h <= 0 {
-		w, h = defaultSVGSize, defaultSVGSizeH
+	if completed && ((w > 0 && w < 1) || (h > 0 && h < 1)) {
+		// A ratio completion below one pixel is degenerate (an extreme
+		// viewBox against a few px): fail closed instead of rounding up
+		// to a 1px side with a fabricated ratio.
+		return 0, 0, fmt.Errorf("image: svg ratio completion %gx%g collapses", w, h)
+	}
+	// Each indefinite side falls back to its own default object size, so a
+	// definite width is never swallowed by a missing height.
+	if w <= 0 {
+		w = defaultSVGSize
+	}
+	if h <= 0 {
+		h = defaultSVGSizeH
 	}
 	wi, hi := int(math.Ceil(w)), int(math.Ceil(h))
 	if wi <= 0 || hi <= 0 || wi > MaxImageDimension || hi > MaxImageDimension {
