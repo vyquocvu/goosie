@@ -199,7 +199,16 @@ func (b *cssBudget) check(src string, inline bool) error {
 				}
 				continue
 			}
-			if !finite(n) || math.Abs(n) > MaxGeometry || !finite(t.NumVal) || math.Abs(t.NumVal) > MaxGeometry {
+			if !finite(n) || !finite(t.NumVal) {
+				return fmt.Errorf("CSS numeric value outside safe geometry range")
+			}
+			// The magnitude cap is geometry protection, so it applies to
+			// dimensions and percentages - the things that become box sizes -
+			// not to plain numbers. Counters, z-index, order, flex factors
+			// and the like are legally huge (a 2-billion counter reset is a
+			// conformance test), and refusing the whole document over one
+			// blanked the entire page.
+			if t.Type != css.TokenNumber && (math.Abs(n) > MaxGeometry || math.Abs(t.NumVal) > MaxGeometry) {
 				return fmt.Errorf("CSS numeric value outside safe geometry range")
 			}
 		}
