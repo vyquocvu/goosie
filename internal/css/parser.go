@@ -62,7 +62,9 @@ func ParseForViewport(input string, viewportWidthPx float32) *Stylesheet {
 // stripComments removes /* ... */ comment blocks from CSS source. A comment
 // cannot start or continue inside a quoted string, so the scan tracks quote
 // state and leaves anything between a real quote pair untouched, including a
-// `/*` that appears inside url("...").
+// `/*` that appears inside url("..."). Each comment is replaced by one space,
+// not nothing: the tokenizer reads `120/*c*/75%` as the two tokens `120` and
+// `75%`, and deleting the comment outright would fuse them into `12075%`.
 func stripComments(in string) string {
 	if !strings.Contains(in, "/*") {
 		return in
@@ -98,6 +100,7 @@ func stripComments(in string) string {
 				break
 			}
 			i += 2 + end + 2
+			b.WriteByte(' ')
 			continue
 		}
 		b.WriteByte(c)

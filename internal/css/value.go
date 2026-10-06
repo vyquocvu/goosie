@@ -41,6 +41,11 @@ type Color struct {
 
 // ParseValue parses a CSS value string into a Value.
 func ParseValue(s string) Value {
+	// Inline style attributes never pass the stylesheet parser, so comments
+	// would reach the value tokenizer raw; strip them here the same way.
+	if strings.Contains(s, "/*") {
+		s = stripComments(s)
+	}
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Value{Type: ValueKeyword, Str: ""}
@@ -173,6 +178,9 @@ func splitArgs(s string) []string {
 }
 
 func ParseColor(s string) (Color, bool) {
+	if strings.Contains(s, "/*") {
+		s = stripComments(s)
+	}
 	s = strings.TrimSpace(s)
 	lower := strings.ToLower(s)
 
@@ -189,6 +197,24 @@ func ParseColor(s string) (Color, bool) {
 	}
 	if body, ok := colorFunctionArgs(s, "hsl", "hsla"); ok {
 		return parseHSLLike(body)
+	}
+	if body, ok := colorFunctionArgs(s, "hwb"); ok {
+		return parseColor4Like("hwb", body)
+	}
+	if body, ok := colorFunctionArgs(s, "lab"); ok {
+		return parseColor4Like("lab", body)
+	}
+	if body, ok := colorFunctionArgs(s, "lch"); ok {
+		return parseColor4Like("lch", body)
+	}
+	if body, ok := colorFunctionArgs(s, "oklab"); ok {
+		return parseColor4Like("oklab", body)
+	}
+	if body, ok := colorFunctionArgs(s, "oklch"); ok {
+		return parseColor4Like("oklch", body)
+	}
+	if body, ok := colorFunctionArgs(s, "color"); ok {
+		return parseColorFunc(body)
 	}
 
 	return Color{}, false

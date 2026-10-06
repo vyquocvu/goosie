@@ -1,6 +1,7 @@
 package css
 
 import (
+	"math"
 	"strings"
 	"unicode"
 )
@@ -321,6 +322,32 @@ func parseFloat(s string) float64 {
 			v += float64(s[i]-'0') * frac
 			frac *= 0.1
 			i++
+		}
+	}
+	// Scientific notation is part of the CSS number grammar (`1.2e2` is 120,
+	// and several WPT color swatches spell hues that way). Without it the
+	// exponent silently dropped and a green hue read as near-red.
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		j := i + 1
+		negExp := false
+		if j < len(s) && (s[j] == '+' || s[j] == '-') {
+			negExp = s[j] == '-'
+			j++
+		}
+		k := j
+		for k < len(s) && s[k] >= '0' && s[k] <= '9' {
+			k++
+		}
+		if k > j {
+			exp := 0
+			for _, c := range s[j:k] {
+				exp = exp*10 + int(c-'0')
+			}
+			if negExp {
+				exp = -exp
+			}
+			v *= math.Pow(10, float64(exp))
+			i = k
 		}
 	}
 	if neg {

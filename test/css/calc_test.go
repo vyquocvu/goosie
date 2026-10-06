@@ -47,3 +47,21 @@ func TestEvalCalcLeavesUnresolvableTermsUnsupported(t *testing.T) {
 		}
 	}
 }
+
+// TestScientificNotationNumbers pins exponent support in the number grammar:
+// `1.2e2` is 120, and several WPT color swatches spell hues that way. The
+// hand-rolled parser used to stop at the `e`, reading a green 120-degree hue
+// as near-red 1.2.
+func TestScientificNotationNumbers(t *testing.T) {
+	got, ok := css.ParseColor("hsl(1.2e2, 75%, 50%)")
+	if !ok {
+		t.Fatal("ParseColor(hsl with exponent hue) reported itself unsupported")
+	}
+	plain, ok := css.ParseColor("hsl(120, 75%, 50%)")
+	if !ok {
+		t.Fatal("ParseColor(hsl plain hue) reported itself unsupported")
+	}
+	if got != plain {
+		t.Errorf("hsl(1.2e2, ...) = %+v, want %+v (same as hue 120)", got, plain)
+	}
+}
