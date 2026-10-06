@@ -449,11 +449,11 @@ func build(c config) (*framePath, error) {
 			f.syncTabToToolbar()
 		}
 		firstTab := f.tabMgr.NewTab()
-		firstTab.Layer = layer
-		firstTab.BGColor = frame.RGB(255, 255, 255)
+		firstTab.SetLayer(layer)
+		firstTab.SetBGColor(frame.RGB(255, 255, 255))
 		if c.url != "" {
-			firstTab.URL = normalizeURL(c.url)
-			firstTab.Title = firstTab.URL
+			firstTab.SetURL(normalizeURL(c.url))
+			firstTab.SetTitle(firstTab.URL())
 		} else if !c.private {
 			if st, err := session.Load(c.sessionFile); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
@@ -505,7 +505,7 @@ func (f *framePath) syncTabToToolbar() {
 	tab.Nav.Mu.Lock()
 	loading := tab.Nav.Loading
 	tab.Nav.Mu.Unlock()
-	f.toolbar.SyncFromTab(tab.URL, loading, tab.Error, tab.History)
+	f.toolbar.SyncFromTab(tab.URL(), loading, tab.Error(), tab.History())
 }
 
 // navContext roots one navigation load: the run scope when it exists so
@@ -537,8 +537,8 @@ func (f *framePath) navigateTab(rawURL string) {
 	tab.Nav.Loading = true
 	tab.Nav.Mu.Unlock()
 
-	tab.Loading = true
-	tab.Error = ""
+	tab.SetLoading(true)
+	tab.SetError("")
 	if f.toolbar != nil {
 		f.toolbar.SetLoading(true)
 		f.toolbar.SetError("")
@@ -548,7 +548,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	go func() {
 		defer f.navWg.Done()
 		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
-		res := navResult{tabID: tab.ID, serial: serial, url: u}
+		res := navResult{tabID: tab.ID(), serial: serial, url: u}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
 			// history record what displayed, not what was typed.
@@ -587,7 +587,7 @@ func (f *framePath) applyNavResult(result navResult) {
 	tab.Nav.Loading = false
 	tab.Nav.Mu.Unlock()
 
-	tab.Loading = false
+	tab.SetLoading(false)
 	if result.downloadPath != "" {
 		if f.toolbar != nil && f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
@@ -596,7 +596,7 @@ func (f *framePath) applyNavResult(result navResult) {
 		return
 	}
 	if result.err != nil {
-		tab.Error = result.err.Error()
+		tab.SetError(result.err.Error())
 		if f.toolbar != nil && f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
 			f.toolbar.SetError(result.err.Error())
@@ -605,20 +605,20 @@ func (f *framePath) applyNavResult(result navResult) {
 		return
 	}
 
-	tab.Layer = result.layer
-	tab.Session = result.session
-	tab.BGColor = result.bgColor
-	tab.URL = result.url
-	tab.Title = result.url
+	tab.SetLayer(result.layer)
+	tab.SetSession(result.session)
+	tab.SetBGColor(result.bgColor)
+	tab.SetURL(result.url)
+	tab.SetTitle(result.url)
 	if !result.noHistory {
-		tab.History.Push(result.url)
+		tab.History().Push(result.url)
 	}
 	if result.traverse != 0 {
 		// The peeked back/forward step commits only now that its page
 		// displayed; a stale commit (another navigation landed first) drops.
 		// A redirect rewrites the entry it landed on with the final URL.
-		if tab.History.Step(result.traverse, result.traverseBase) {
-			tab.History.ReplaceCurrent(result.url)
+		if tab.History().Step(result.traverse, result.traverseBase) {
+			tab.History().ReplaceCurrent(result.url)
 		}
 	}
 	if f.history != nil {
@@ -637,7 +637,7 @@ func (f *framePath) applyNavResult(result navResult) {
 			// new page inherited whatever offset the old one scrolled to.
 			// Reloads and traversals keep their offset (per-entry restore
 			// is a later feature, not silent loss).
-			tab.ScrollY = 0
+			tab.SetScrollY(0)
 			f.sched.SetViewport(frame.Viewport{
 				Offset: frame.Point{},
 				Size:   f.config.devSize(),
@@ -682,7 +682,7 @@ func (f *framePath) drainImageResults() {
 // has superseded it.
 func (f *framePath) applyImageResult(res imgResult) {
 	tab := f.tabMgr.TabByID(res.tabID)
-	if tab == nil || tab.Session != res.session {
+	if tab == nil || tab.Session() != res.session {
 		return
 	}
 	tab.Nav.Mu.Lock()
@@ -691,7 +691,7 @@ func (f *framePath) applyImageResult(res imgResult) {
 	if cur != res.serial {
 		return
 	}
-	if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+	if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow after images:", err)
 		return
 	}
@@ -701,10 +701,10 @@ func (f *framePath) applyImageResult(res imgResult) {
 // toggleBookmark stars or unstars the active tab's page and persists immediately.
 func (f *framePath) toggleBookmark() {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.URL == "" || f.bookmarks == nil {
+	if tab == nil || tab.URL() == "" || f.bookmarks == nil {
 		return
 	}
-	f.bookmarks.Toggle(tab.URL, tab.Title)
+	f.bookmarks.Toggle(tab.URL(), tab.Title())
 	if err := f.bookmarks.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "goosie: save bookmarks: %v\n", err)
 	}
@@ -723,9 +723,9 @@ func (f *framePath) traverseTab(delta int) {
 	var base int
 	var ok bool
 	if delta < 0 {
-		url, base, ok = tab.History.PeekBack()
+		url, base, ok = tab.History().PeekBack()
 	} else if delta > 0 {
-		url, base, ok = tab.History.PeekForward()
+		url, base, ok = tab.History().PeekForward()
 	}
 	if !ok || url == "" {
 		return
@@ -759,8 +759,8 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	tab.Nav.Loading = true
 	tab.Nav.Mu.Unlock()
 
-	tab.Loading = true
-	tab.Error = ""
+	tab.SetLoading(true)
+	tab.SetError("")
 	if f.toolbar != nil {
 		f.toolbar.SetLoading(true)
 	}
@@ -769,7 +769,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	go func() {
 		defer f.navWg.Done()
 		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
-		res := navResult{tabID: tab.ID, serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
+		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		if finalURL != "" {
 			res.url = finalURL
 		}
@@ -787,10 +787,10 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 // reloadTab re-fetches the active tab's URL.
 func (f *framePath) reloadTab() {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.URL == "" {
+	if tab == nil || tab.URL() == "" {
 		return
 	}
-	f.navigateTabNoHistory(tab.URL)
+	f.navigateTabNoHistory(tab.URL())
 }
 
 // applySessionState rebuilds the tab set from a saved session. The first saved
@@ -807,20 +807,20 @@ func (f *framePath) applySessionState(st session.State) {
 	if st.Active > 0 {
 		restored := f.tabMgr.Tabs()
 		if st.Active < len(restored) {
-			f.tabMgr.SwitchTo(restored[st.Active].ID)
+			f.tabMgr.SwitchTo(restored[st.Active].ID())
 		}
 	}
-	if active := f.tabMgr.Active(); active != nil && active.URL != "" {
-		f.restoredActiveURL = active.URL
+	if active := f.tabMgr.Active(); active != nil && active.URL() != "" {
+		f.restoredActiveURL = active.URL()
 	}
 }
 
 func applyTabState(t *tabs.Tab, ts session.TabState) {
-	t.URL = ts.URL
-	t.Title = ts.Title
-	t.History = toolbar.RestoreHistory(ts.History, ts.HistoryIndex)
-	if t.Title == "" {
-		t.Title = "New Tab"
+	t.SetURL(ts.URL)
+	t.SetTitle(ts.Title)
+	t.SetHistory(toolbar.RestoreHistory(ts.History, ts.HistoryIndex))
+	if t.Title() == "" {
+		t.SetTitle("New Tab")
 	}
 }
 
@@ -828,10 +828,10 @@ func applyTabState(t *tabs.Tab, ts session.TabState) {
 func sessionState(f *framePath) session.State {
 	var st session.State
 	for _, tab := range f.tabMgr.Tabs() {
-		entries, idx := tab.History.Entries()
+		entries, idx := tab.History().Entries()
 		st.Tabs = append(st.Tabs, session.TabState{
-			URL:          tab.URL,
-			Title:        tab.Title,
+			URL:          tab.URL(),
+			Title:        tab.Title(),
 			History:      entries,
 			HistoryIndex: idx,
 		})
@@ -846,11 +846,11 @@ func (f *framePath) handleResize(contentW, contentH int) {
 	f.config.height = contentH
 
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return
 	}
 
-	if err := tab.Session.Reflow(float32(contentW)); err != nil {
+	if err := tab.Session().Reflow(float32(contentW)); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		return
 	}
@@ -862,7 +862,7 @@ func (f *framePath) handleResize(contentW, contentH int) {
 // plan to the scheduler.
 func (f *framePath) repaintTab(tab *tabs.Tab) {
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
-	list, err := tab.Session.PaintChecked(effectiveDPR)
+	list, err := tab.Session().PaintChecked(effectiveDPR)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: paint:", err)
 		return
@@ -880,14 +880,14 @@ func (f *framePath) repaintTab(tab *tabs.Tab) {
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
 
-	tab.Layer = layer
+	tab.SetLayer(layer)
 	// A background tab's repaint must not steal the screen; switchTab
 	// presents the fresh layer when the tab comes forward.
 	if f.tabMgr.Active() == tab {
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     tab.Nav.Serial,
 			Layers:     []*frame.Layer{layer},
-			Background: tab.BGColor,
+			Background: tab.BGColor(),
 		})
 	}
 	f.publishAccessibility()
@@ -905,13 +905,13 @@ func (f *framePath) publishAccessibility() {
 		return
 	}
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		aw.SetAccessibility(nil)
 		return
 	}
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
 	vp := f.sched.Viewport()
-	aw.SetAccessibility(shiftAx(tab.Session.AccessibilityTree(),
+	aw.SetAccessibility(shiftAx(tab.Session().AccessibilityTree(),
 		float32(vp.Offset.X)/effectiveDPR, float32(vp.Offset.Y)/effectiveDPR))
 }
 
@@ -942,14 +942,14 @@ func (f *framePath) docPoint(contentX, contentY int32) (float32, float32) {
 // repaints when focus state changed.
 func (f *framePath) focusClick(contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return false
 	}
 	dx, dy := f.docPoint(contentX, contentY)
-	if !tab.Session.FocusControl(dx, dy) {
+	if !tab.Session().FocusControl(dx, dy) {
 		return false
 	}
-	f.setWindowIME(tab.Session.Focused() != nil)
+	f.setWindowIME(tab.Session().Focused() != nil)
 	f.repaintTab(tab)
 	return true
 }
@@ -969,18 +969,18 @@ func (f *framePath) setWindowIME(on bool) {
 // context is only ever on for the active tab's control.
 func (f *framePath) imeEvent(ev surface.Event) bool {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return false
 	}
 	switch ev.IME {
 	case surface.IMEMarked:
-		if tab.Session.SetMarked(ev.Text) {
+		if tab.Session().SetMarked(ev.Text) {
 			f.repaintTab(tab)
 		}
 		return true
 	case surface.IMECommit:
-		if tab.Session.CommitText(ev.Text) {
-			if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+		if tab.Session().CommitText(ev.Text) {
+			if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
 				fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			}
 		}
@@ -995,16 +995,16 @@ func (f *framePath) imeEvent(ev surface.Event) bool {
 // active one, and release just ends the gesture.
 func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return false
 	}
 	switch action {
 	case surface.PointerPress:
-		if tab.Session.Focused() != nil {
+		if tab.Session().Focused() != nil {
 			return false
 		}
 		dx, dy := f.docPoint(contentX, contentY)
-		tab.Session.SelectAt(dx, dy)
+		tab.Session().SelectAt(dx, dy)
 		f.selDrag = true
 		f.repaintTab(tab)
 		return true
@@ -1013,7 +1013,7 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 			return false
 		}
 		dx, dy := f.docPoint(contentX, contentY)
-		if !tab.Session.SelectTo(dx, dy) {
+		if !tab.Session().SelectTo(dx, dy) {
 			return true
 		}
 		f.repaintTab(tab)
@@ -1029,11 +1029,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 // copySelection puts the selected text on the system clipboard.
 func (f *framePath) copySelection() bool {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil || !tab.Session.HasSelection() {
+	if tab == nil || tab.Session() == nil || !tab.Session().HasSelection() {
 		return false
 	}
 	if cb := platform.NewClipboard(); cb != nil {
-		cb.Write(tab.Session.SelectionText())
+		cb.Write(tab.Session().SelectionText())
 	}
 	return true
 }
@@ -1043,7 +1043,7 @@ func (f *framePath) copySelection() bool {
 // text sink; the tab reflows when the value changed and repaints otherwise.
 func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return false
 	}
 
@@ -1056,8 +1056,8 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	if key == '\t' && !cmd {
 		shift := mods&surface.ModShift != 0
 		alt := mods&surface.ModOption != 0
-		tab.Session.PressKey("Tab", shift, false, alt, false)
-		if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+		tab.Session().PressKey("Tab", shift, false, alt, false)
+		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			return true
 		}
@@ -1065,7 +1065,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		return true
 	}
 
-	if tab.Session.Focused() == nil {
+	if tab.Session().Focused() == nil {
 		return false
 	}
 
@@ -1099,12 +1099,12 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		return false
 	}
 
-	changed := tab.Session.Edit(action, key)
+	changed := tab.Session().Edit(action, key)
 	if changed {
 		if action == engine.EditEscape {
 			f.setWindowIME(false)
 		}
-		if err := tab.Session.Reflow(float32(f.config.width)); err != nil {
+		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			return true
 		}
@@ -1132,16 +1132,16 @@ func (f *framePath) handleLinkClick(href string) {
 	if tab == nil {
 		return
 	}
-	f.navigateTab(resolveHref(tab.URL, href))
+	f.navigateTab(resolveHref(tab.URL(), href))
 }
 
 func (f *framePath) hitTestLink(contentX, contentY int32) string {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return ""
 	}
 	docX, docY := f.docPoint(contentX, contentY)
-	return tab.Session.HitTestLink(docX, docY)
+	return tab.Session().HitTestLink(docX, docY)
 }
 
 // hoverCursor resolves the pointer shape for buttonless motion over the
@@ -1150,14 +1150,14 @@ func (f *framePath) hitTestLink(contentX, contentY int32) string {
 // a link's words are text too but only the link is clickable.
 func (f *framePath) hoverCursor(contentX, contentY int32) surface.Cursor {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return surface.CursorDefault
 	}
 	dx, dy := f.docPoint(contentX, contentY)
-	if tab.Session.HitTestLink(dx, dy) != "" {
+	if tab.Session().HitTestLink(dx, dy) != "" {
 		return surface.CursorPointer
 	}
-	if tab.Session.HasControlAt(dx, dy) || tab.Session.HasTextAt(dx, dy) {
+	if tab.Session().HasControlAt(dx, dy) || tab.Session().HasTextAt(dx, dy) {
 		return surface.CursorText
 	}
 	return surface.CursorDefault
@@ -1176,10 +1176,10 @@ func (f *framePath) runFind(query string) {
 		return
 	}
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Session == nil {
+	if tab == nil || tab.Session() == nil {
 		return
 	}
-	f.findMatches = tab.Session.Find(query)
+	f.findMatches = tab.Session().Find(query)
 	f.toolbar.SetFindResult(len(f.findMatches), 0)
 	if len(f.findMatches) > 0 {
 		f.scrollToMatch(0)
@@ -1241,7 +1241,7 @@ func (f *framePath) switchTab(id uint64) {
 	cur := f.tabMgr.Active()
 	if cur != nil {
 		vp := f.sched.Viewport()
-		cur.ScrollY = vp.Offset.Y
+		cur.SetScrollY(vp.Offset.Y)
 	}
 	f.tabMgr.SwitchTo(id)
 	newTab := f.tabMgr.Active()
@@ -1249,15 +1249,15 @@ func (f *framePath) switchTab(id uint64) {
 		return
 	}
 	f.syncTabToToolbar()
-	if newTab.Layer != nil {
+	if newTab.Layer() != nil {
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     newTab.Nav.Serial,
-			Layers:     []*frame.Layer{newTab.Layer},
-			Background: newTab.BGColor,
+			Layers:     []*frame.Layer{newTab.Layer()},
+			Background: newTab.BGColor(),
 		})
 	}
 	f.sched.SetViewport(frame.Viewport{
-		Offset: frame.Point{Y: newTab.ScrollY},
+		Offset: frame.Point{Y: newTab.ScrollY()},
 		Size:   f.config.devSize(),
 	})
 	f.publishAccessibility()
@@ -1272,18 +1272,18 @@ func (f *framePath) newTab() {
 	cur := f.tabMgr.Active()
 	if cur != nil {
 		vp := f.sched.Viewport()
-		cur.ScrollY = vp.Offset.Y
+		cur.SetScrollY(vp.Offset.Y)
 	}
 	tab := f.tabMgr.NewTab()
-	f.tabMgr.SwitchTo(tab.ID)
+	f.tabMgr.SwitchTo(tab.ID())
 	f.syncTabToToolbar()
 	_, layer := blankLayer(f.config.devSize())
-	tab.Layer = layer
-	tab.BGColor = frame.RGB(255, 255, 255)
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(255, 255, 255))
 	f.sched.SetPlan(frame.FramePlan{
 		Serial:     tab.Nav.Serial,
 		Layers:     []*frame.Layer{layer},
-		Background: tab.BGColor,
+		Background: tab.BGColor(),
 	})
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: 0},
@@ -1310,15 +1310,15 @@ func (f *framePath) closeTab(id uint64) {
 	if f.tabMgr.Count() > 0 {
 		tab := f.tabMgr.Active()
 		f.syncTabToToolbar()
-		if tab.Layer != nil {
+		if tab.Layer() != nil {
 			f.sched.SetPlan(frame.FramePlan{
 				Serial:     tab.Nav.Serial,
-				Layers:     []*frame.Layer{tab.Layer},
-				Background: tab.BGColor,
+				Layers:     []*frame.Layer{tab.Layer()},
+				Background: tab.BGColor(),
 			})
 		}
 		f.sched.SetViewport(frame.Viewport{
-			Offset: frame.Point{Y: tab.ScrollY},
+			Offset: frame.Point{Y: tab.ScrollY()},
 			Size:   f.config.devSize(),
 		})
 		f.publishAccessibility()

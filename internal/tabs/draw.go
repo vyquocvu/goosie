@@ -51,7 +51,7 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 			textColor = tabTextActive
 		}
 
-		title := tab.Title
+		title := tab.Title()
 		if title == "" {
 			title = "New Tab"
 		}

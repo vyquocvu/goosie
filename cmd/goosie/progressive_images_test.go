@@ -54,12 +54,12 @@ func TestApplyNavResultTriggersDeferredImages(t *testing.T) {
 	s := deferredImgSession(t)
 	layer := layerForSession(t, s)
 
-	f.applyNavResult(navResult{tabID: tab.ID, serial: 9, url: "https://p/", layer: layer, session: s})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 9, url: "https://p/", layer: layer, session: s})
 
 	select {
 	case res := <-f.imgResults:
-		if res.tabID != tab.ID || res.serial != 9 || res.session != s {
-			t.Errorf("imgResult = %+v, want tab %d serial 9 session %p", res, tab.ID, s)
+		if res.tabID != tab.ID() || res.serial != 9 || res.session != s {
+			t.Errorf("imgResult = %+v, want tab %d serial 9 session %p", res, tab.ID(), s)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("applyNavResult never reported deferred images")
@@ -72,14 +72,14 @@ func TestImageResultReflowsAndRepaints(t *testing.T) {
 	tab := f.tabMgr.Active()
 	tab.Nav.Serial = 9
 	s := deferredImgSession(t)
-	tab.Layer = layerForSession(t, s)
-	before := tab.Layer
+	tab.SetLayer(layerForSession(t, s))
+	before := tab.Layer()
 
-	f.applyNavResult(navResult{tabID: tab.ID, serial: 9, url: "https://p/", layer: tab.Layer, session: s})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 9, url: "https://p/", layer: tab.Layer(), session: s})
 	res := <-f.imgResults
 	f.applyImageResult(res)
 
-	if tab.Layer == before {
+	if tab.Layer() == before {
 		t.Error("tab.Layer unchanged after images landed; repaint did not run")
 	}
 	if p := s.DeferredImagesPending(); p != 0 {
@@ -93,17 +93,17 @@ func TestImageResultIgnoredWhenNavMovedOn(t *testing.T) {
 	tab := f.tabMgr.Active()
 	tab.Nav.Serial = 9
 	s := deferredImgSession(t)
-	tab.Layer = layerForSession(t, s)
-	before := tab.Layer
+	tab.SetLayer(layerForSession(t, s))
+	before := tab.Layer()
 
-	f.applyNavResult(navResult{tabID: tab.ID, serial: 9, url: "https://p/", layer: tab.Layer, session: s})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 9, url: "https://p/", layer: tab.Layer(), session: s})
 	res := <-f.imgResults
 	// A new navigation superseded this one before the images landed.
 	tab.Nav.Serial = 10
 
 	f.applyImageResult(res)
 
-	if tab.Layer != before {
+	if tab.Layer() != before {
 		t.Error("stale image result repainted a superseded navigation")
 	}
 }

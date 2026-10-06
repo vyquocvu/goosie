@@ -25,25 +25,25 @@ func TestCloseActiveTabSelectsNearest(t *testing.T) {
 	t3 := mgr.NewTab()
 
 	// Switch to the middle tab.
-	mgr.SwitchTo(t2.ID)
+	mgr.SwitchTo(t2.ID())
 	if mgr.Active() != t2 {
 		t.Fatal("t2 should be active")
 	}
 
 	// Closing the middle tab should leave the active index at 1, which
 	// now points to t3.
-	mgr.CloseTab(t2.ID)
+	mgr.CloseTab(t2.ID())
 	if mgr.Active() != t3 {
-		t.Fatalf("active = %d, want t3 (%d) after closing middle tab", mgr.Active().ID, t3.ID)
+		t.Fatalf("active = %d, want t3 (%d) after closing middle tab", mgr.Active().ID(), t3.ID())
 	}
 	if mgr.Count() != 2 {
 		t.Fatalf("count = %d, want 2", mgr.Count())
 	}
 
 	// Now the active tab is the last one; closing it should move left.
-	mgr.CloseTab(t3.ID)
+	mgr.CloseTab(t3.ID())
 	if mgr.Active() != t1 {
-		t.Fatalf("active = %d, want t1 (%d) after closing last tab", mgr.Active().ID, t1.ID)
+		t.Fatalf("active = %d, want t1 (%d) after closing last tab", mgr.Active().ID(), t1.ID())
 	}
 
 	_ = t1
@@ -59,15 +59,15 @@ func TestCloseFirstTabKeepsIndexAtZero(t *testing.T) {
 	_ = mgr.NewTab()
 
 	// Active is t1 (index 0). Switch to t2 (index 1).
-	mgr.SwitchTo(t2.ID)
+	mgr.SwitchTo(t2.ID())
 	if mgr.ActiveIndex() != 1 {
 		t.Fatalf("active index = %d, want 1", mgr.ActiveIndex())
 	}
 
 	// Close t1 (before active). Active index should drop to 0, still t2.
-	mgr.CloseTab(t1.ID)
+	mgr.CloseTab(t1.ID())
 	if mgr.Active() != t2 {
-		t.Fatalf("active = %d, want t2 (%d)", mgr.Active().ID, t2.ID)
+		t.Fatalf("active = %d, want t2 (%d)", mgr.Active().ID(), t2.ID())
 	}
 	if mgr.ActiveIndex() != 0 {
 		t.Fatalf("active index = %d, want 0", mgr.ActiveIndex())
@@ -83,9 +83,9 @@ func TestTabByIDReturnsCorrectTab(t *testing.T) {
 	t3 := mgr.NewTab()
 
 	for _, tc := range []*tabs.Tab{t1, t2, t3} {
-		got := mgr.TabByID(tc.ID)
+		got := mgr.TabByID(tc.ID())
 		if got != tc {
-			t.Errorf("TabByID(%d) = %v, want %v", tc.ID, got, tc)
+			t.Errorf("TabByID(%d) = %v, want %v", tc.ID(), got, tc)
 		}
 	}
 }
@@ -107,9 +107,9 @@ func TestTabByIDAfterClose(t *testing.T) {
 	t1 := mgr.NewTab()
 	mgr.NewTab()
 
-	mgr.CloseTab(t1.ID)
-	if got := mgr.TabByID(t1.ID); got != nil {
-		t.Errorf("TabByID(%d) = %v after close, want nil", t1.ID, got)
+	mgr.CloseTab(t1.ID())
+	if got := mgr.TabByID(t1.ID()); got != nil {
+		t.Errorf("TabByID(%d) = %v after close, want nil", t1.ID(), got)
 	}
 }
 
@@ -122,20 +122,20 @@ func TestTabScrollPositionIsIndependent(t *testing.T) {
 	t1 := mgr.NewTab()
 	t2 := mgr.NewTab()
 
-	t1.ScrollY = 500
-	t2.ScrollY = 1200
+	t1.SetScrollY(500)
+	t2.SetScrollY(1200)
 
-	mgr.SwitchTo(t2.ID)
-	if t1.ScrollY != 500 {
-		t.Errorf("t1.ScrollY = %d, want 500: switching away changed it", t1.ScrollY)
+	mgr.SwitchTo(t2.ID())
+	if t1.ScrollY() != 500 {
+		t.Errorf("t1.ScrollY = %d, want 500: switching away changed it", t1.ScrollY())
 	}
-	if t2.ScrollY != 1200 {
-		t.Errorf("t2.ScrollY = %d, want 1200", t2.ScrollY)
+	if t2.ScrollY() != 1200 {
+		t.Errorf("t2.ScrollY = %d, want 1200", t2.ScrollY())
 	}
 
-	mgr.SwitchTo(t1.ID)
-	if t1.ScrollY != 500 {
-		t.Errorf("t1.ScrollY = %d after switching back, want 500: scroll was not preserved", t1.ScrollY)
+	mgr.SwitchTo(t1.ID())
+	if t1.ScrollY() != 500 {
+		t.Errorf("t1.ScrollY = %d after switching back, want 500: scroll was not preserved", t1.ScrollY())
 	}
 }
 
@@ -147,14 +147,14 @@ func TestTabHistoryIsolation(t *testing.T) {
 	t1 := mgr.NewTab()
 	t2 := mgr.NewTab()
 
-	t1.History.Push("https://a.example/")
-	t1.History.Push("https://a.example/page2")
+	t1.History().Push("https://a.example/")
+	t1.History().Push("https://a.example/page2")
 
-	if t2.History.Current() != "" {
-		t.Errorf("t2 history has %q, want empty: histories are shared", t2.History.Current())
+	if t2.History().Current() != "" {
+		t.Errorf("t2 history has %q, want empty: histories are shared", t2.History().Current())
 	}
-	if t1.History.Current() != "https://a.example/page2" {
-		t.Errorf("t1 history current = %q, want the last pushed URL", t1.History.Current())
+	if t1.History().Current() != "https://a.example/page2" {
+		t.Errorf("t1 history current = %q, want the last pushed URL", t1.History().Current())
 	}
 }
 
@@ -200,11 +200,11 @@ func TestConcurrentTabOperations(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < opsPerGoroutine; i++ {
 				tab := mgr.NewTab()
-				_ = mgr.TabByID(tab.ID)
+				_ = mgr.TabByID(tab.ID())
 				_ = mgr.Active()
 				_ = mgr.Count()
 				_ = mgr.Tabs()
-				mgr.CloseTab(tab.ID)
+				mgr.CloseTab(tab.ID())
 			}
 		}()
 	}
@@ -234,7 +234,7 @@ func TestOnChangeFiresForNewAndClose(t *testing.T) {
 		t.Fatalf("changes = %d after second NewTab, want 2", changes)
 	}
 
-	mgr.CloseTab(t2.ID)
+	mgr.CloseTab(t2.ID())
 	if changes != 3 {
 		t.Fatalf("changes = %d after CloseTab, want 3", changes)
 	}

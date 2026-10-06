@@ -289,12 +289,12 @@ func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
 			closeR := tabs.CloseButtonRect(r)
 			if lp.X >= closeR.X0 && lp.X < closeR.X1 && lp.Y >= closeR.Y0 && lp.Y < closeR.Y1 {
 				if cw.onCloseTab != nil {
-					cw.onCloseTab(tabList[i].ID)
+					cw.onCloseTab(tabList[i].ID())
 				}
 				return
 			}
 			if cw.onSwitch != nil {
-				cw.onSwitch(tabList[i].ID)
+				cw.onSwitch(tabList[i].ID())
 			}
 			return
 		}
@@ -337,7 +337,7 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case key == 'w' || key == 'W':
 		active := cw.tabMgr.Active()
 		if active != nil && cw.onCloseTab != nil {
-			cw.onCloseTab(active.ID)
+			cw.onCloseTab(active.ID())
 			return true
 		}
 	case key == '\t':
@@ -352,14 +352,14 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			idx = (idx + 1) % len(tabList)
 		}
 		if cw.onSwitch != nil {
-			cw.onSwitch(tabList[idx].ID)
+			cw.onSwitch(tabList[idx].ID())
 		}
 		return true
 	case key >= '1' && key <= '9':
 		tabList := cw.tabMgr.Tabs()
 		n := int(key - '1')
 		if n < len(tabList) && cw.onSwitch != nil {
-			cw.onSwitch(tabList[n].ID)
+			cw.onSwitch(tabList[n].ID())
 			return true
 		}
 	case key == '=' || key == '+':

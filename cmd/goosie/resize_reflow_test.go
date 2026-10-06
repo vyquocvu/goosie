@@ -16,7 +16,7 @@ func TestResizeReflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tab.Session = sess
+	tab.SetSession(sess)
 
 	list, err := sess.PaintChecked(1.0)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestResizeReflowWithNilSession(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	tab := mgr.NewTab()
 
-	if tab.Session != nil {
+	if tab.Session() != nil {
 		t.Fatal("new tab should have nil session")
 	}
 }

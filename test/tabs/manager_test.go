@@ -11,22 +11,22 @@ func TestNewTabHasCorrectInitialState(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	tab := mgr.NewTab()
 
-	if tab.ID == 0 {
+	if tab.ID() == 0 {
 		t.Fatal("new tab should have non-zero ID")
 	}
-	if tab.URL != "" {
-		t.Fatalf("new tab URL should be empty, got %q", tab.URL)
+	if tab.URL() != "" {
+		t.Fatalf("new tab URL should be empty, got %q", tab.URL())
 	}
-	if tab.Title != "New Tab" {
-		t.Fatalf("new tab title should be 'New Tab', got %q", tab.Title)
+	if tab.Title() != "New Tab" {
+		t.Fatalf("new tab title should be 'New Tab', got %q", tab.Title())
 	}
-	if tab.Loading {
+	if tab.Loading() {
 		t.Fatal("new tab should not be loading")
 	}
-	if tab.ScrollY != 0 {
-		t.Fatalf("new tab scroll should be 0, got %d", tab.ScrollY)
+	if tab.ScrollY() != 0 {
+		t.Fatalf("new tab scroll should be 0, got %d", tab.ScrollY())
 	}
-	if tab.History == nil {
+	if tab.History() == nil {
 		t.Fatal("new tab should have a history")
 	}
 }
@@ -37,8 +37,8 @@ func TestTabIDsAreUniqueAndMonotonic(t *testing.T) {
 	t2 := mgr.NewTab()
 	t3 := mgr.NewTab()
 
-	if t1.ID >= t2.ID || t2.ID >= t3.ID {
-		t.Fatalf("IDs should be monotonically increasing: %d, %d, %d", t1.ID, t2.ID, t3.ID)
+	if t1.ID() >= t2.ID() || t2.ID() >= t3.ID() {
+		t.Fatalf("IDs should be monotonically increasing: %d, %d, %d", t1.ID(), t2.ID(), t3.ID())
 	}
 }
 
@@ -57,11 +57,11 @@ func TestNewTabStartsWithOwnHistory(t *testing.T) {
 	t1 := mgr.NewTab()
 	t2 := mgr.NewTab()
 
-	if t1.History == t2.History {
+	if t1.History() == t2.History() {
 		t.Fatal("each tab should have its own history instance")
 	}
-	t1.History.Push("https://example.com")
-	if t2.History.Current() != "" {
+	t1.History().Push("https://example.com")
+	if t2.History().Current() != "" {
 		t.Fatal("pushing to t1 history should not affect t2")
 	}
 }
@@ -71,12 +71,12 @@ func TestCloseTabRemovesTab(t *testing.T) {
 	t1 := mgr.NewTab()
 	_ = mgr.NewTab()
 
-	mgr.CloseTab(t1.ID)
+	mgr.CloseTab(t1.ID())
 
 	if mgr.Count() != 1 {
 		t.Fatalf("expected 1 tab, got %d", mgr.Count())
 	}
-	if mgr.Active().ID == t1.ID {
+	if mgr.Active().ID() == t1.ID() {
 		t.Fatal("closed tab should not be active")
 	}
 }
@@ -86,7 +86,7 @@ func TestCloseLastTabCallsOnCloseLast(t *testing.T) {
 	mgr := tabs.NewManager(func() { close(done) })
 	t1 := mgr.NewTab()
 
-	mgr.CloseTab(t1.ID)
+	mgr.CloseTab(t1.ID())
 
 	select {
 	case <-done:
@@ -107,12 +107,12 @@ func TestSwitchToChangesActiveTab(t *testing.T) {
 		t.Fatal("t1 should be active initially")
 	}
 
-	mgr.SwitchTo(t2.ID)
+	mgr.SwitchTo(t2.ID())
 	if mgr.Active() != t2 {
 		t.Fatal("t2 should be active after SwitchTo")
 	}
 
-	mgr.SwitchTo(t1.ID)
+	mgr.SwitchTo(t1.ID())
 	if mgr.Active() != t1 {
 		t.Fatal("t1 should be active after switching back")
 	}
@@ -126,12 +126,12 @@ func TestSwitchToFiresOnChange(t *testing.T) {
 	_ = mgr.NewTab()
 
 	before := changes
-	mgr.SwitchTo(t1.ID)
+	mgr.SwitchTo(t1.ID())
 	if changes != before {
 		t.Fatal("switching to already-active tab should not fire OnChange")
 	}
 
-	t2ID := mgr.Tabs()[1].ID
+	t2ID := mgr.Tabs()[1].ID()
 	mgr.SwitchTo(t2ID)
 	if changes != before+1 {
 		t.Fatal("switching to different tab should fire OnChange once")

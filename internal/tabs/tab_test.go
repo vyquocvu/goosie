@@ -2,6 +2,7 @@ package tabs
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
@@ -42,4 +43,53 @@ func TestNavControllerSerial(t *testing.T) {
 	if tab.Nav.Serial != 1 {
 		t.Fatalf("serial = %d, want 1", tab.Nav.Serial)
 	}
+}
+
+// TestConcurrentTabAccessIsRaceFree hammers the pump/drain/Present sharing:
+// tab switches and collection reads, field writes and reads, and history ops
+// from several goroutines at once. Bare fields tripped the detector here
+// before privatization.
+func TestConcurrentTabAccessIsRaceFree(t *testing.T) {
+	mgr := NewManager(nil)
+	a := mgr.NewTab()
+	b := mgr.NewTab()
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				switch i {
+				case 0:
+					mgr.SwitchTo(a.ID())
+					mgr.SwitchTo(b.ID())
+					_ = mgr.Active()
+					_ = mgr.Tabs()
+					_ = mgr.Count()
+				case 1:
+					a.SetURL("https://example.com/page")
+					a.SetTitle("Example")
+					a.SetScrollY(int32(j))
+					a.SetLoading(j%2 == 0)
+					_ = a.URL()
+					_ = a.Title()
+					_ = a.ScrollY()
+					_ = a.Loading()
+				case 2:
+					b.SetURL("https://example.org/other")
+					b.SetError("boom")
+					b.SetBGColor(1)
+					_ = b.URL()
+					_ = b.Error()
+					_ = b.BGColor()
+				case 3:
+					a.History().Push("https://example.com/")
+					_, _, _ = a.History().PeekBack()
+					b.History().Push("https://example.org/")
+					_, _ = b.History().Entries()
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
 }

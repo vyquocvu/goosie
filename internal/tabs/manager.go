@@ -44,7 +44,7 @@ func (m *TabManager) CloseTab(id uint64) {
 	m.mu.Lock()
 	idx := -1
 	for i, t := range m.tabs {
-		if t.ID == id {
+		if t.ID() == id {
 			idx = i
 			break
 		}
@@ -75,7 +75,7 @@ func (m *TabManager) CloseTab(id uint64) {
 func (m *TabManager) SwitchTo(id uint64) {
 	m.mu.Lock()
 	for i, t := range m.tabs {
-		if t.ID == id {
+		if t.ID() == id {
 			if i == m.activeIdx {
 				m.mu.Unlock()
 				return
@@ -119,7 +119,7 @@ func (m *TabManager) TabByID(id uint64) *Tab {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, t := range m.tabs {
-		if t.ID == id {
+		if t.ID() == id {
 			return t
 		}
 	}

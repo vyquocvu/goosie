@@ -190,36 +190,36 @@ func newNavTestPath(t *testing.T) *framePath {
 func TestApplyNavResultNoHistoryPreservesForwardTrail(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
-	tab.History.Push("https://b/")
-	tab.History.Push("https://c/")
-	tab.History.Back()
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
+	tab.History().Push("https://c/")
+	tab.History().Back()
 	tab.Nav.Serial = 7
 
-	f.applyNavResult(navResult{tabID: tab.ID, serial: 7, url: "https://b/", noHistory: true})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 7, url: "https://b/", noHistory: true})
 
-	entries, _ := tab.History.Entries()
+	entries, _ := tab.History().Entries()
 	want := []string{"https://a/", "https://b/", "https://c/"}
 	if !reflect.DeepEqual(entries, want) {
 		t.Errorf("history = %v, want %v; forward trail must survive a back-navigation", entries, want)
 	}
-	if !tab.History.CanForward() {
+	if !tab.History().CanForward() {
 		t.Error("CanForward() = false after back-navigation; forward history was destroyed")
 	}
-	if tab.URL != "https://b/" {
-		t.Errorf("tab.URL = %q, want https://b/", tab.URL)
+	if tab.URL() != "https://b/" {
+		t.Errorf("tab.URL = %q, want https://b/", tab.URL())
 	}
 }
 
 func TestApplyNavResultNormalNavPushesHistory(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
+	tab.History().Push("https://a/")
 	tab.Nav.Serial = 3
 
-	f.applyNavResult(navResult{tabID: tab.ID, serial: 3, url: "https://b/"})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 3, url: "https://b/"})
 
-	entries, _ := tab.History.Entries()
+	entries, _ := tab.History().Entries()
 	want := []string{"https://a/", "https://b/"}
 	if !reflect.DeepEqual(entries, want) {
 		t.Errorf("history = %v, want %v", entries, want)
@@ -242,10 +242,10 @@ func TestApplySessionStateRebuildsTabs(t *testing.T) {
 		t.Fatalf("tab count = %d, want 3", got)
 	}
 	active := f.tabMgr.Active()
-	if active.URL != "https://b/" || active.Title != "B" {
-		t.Errorf("active tab = %q/%q, want https://b//B", active.URL, active.Title)
+	if active.URL() != "https://b/" || active.Title() != "B" {
+		t.Errorf("active tab = %q/%q, want https://b//B", active.URL(), active.Title())
 	}
-	if _, idx := active.History.Entries(); idx != 1 {
+	if _, idx := active.History().Entries(); idx != 1 {
 		t.Errorf("active history index = %d, want 1", idx)
 	}
 	if f.restoredActiveURL != "https://b/" {
@@ -256,12 +256,12 @@ func TestApplySessionStateRebuildsTabs(t *testing.T) {
 func TestSessionStateRoundTrip(t *testing.T) {
 	src := newNavTestPath(t)
 	t1 := src.tabMgr.Active()
-	t1.URL = "https://b/"
-	t1.History.Push("https://a/")
-	t1.History.Push("https://b/")
+	t1.SetURL("https://b/")
+	t1.History().Push("https://a/")
+	t1.History().Push("https://b/")
 	t2 := src.tabMgr.NewTab()
-	t2.URL = "https://c/"
-	t2.History.Push("https://c/")
+	t2.SetURL("https://c/")
+	t2.History().Push("https://c/")
 
 	path := filepath.Join(t.TempDir(), "session.json")
 	if err := session.Save(path, sessionState(src)); err != nil {
@@ -278,15 +278,15 @@ func TestSessionStateRoundTrip(t *testing.T) {
 		t.Fatalf("restored %d tabs, want 2", dst.tabMgr.Count())
 	}
 	first := dst.tabMgr.Tabs()[0]
-	if entries, _ := first.History.Entries(); !reflect.DeepEqual(entries, []string{"https://a/", "https://b/"}) {
+	if entries, _ := first.History().Entries(); !reflect.DeepEqual(entries, []string{"https://a/", "https://b/"}) {
 		t.Errorf("first tab history = %v", entries)
 	}
-	if first.URL != "https://b/" {
-		t.Errorf("first tab URL = %q, want https://b/", first.URL)
+	if first.URL() != "https://b/" {
+		t.Errorf("first tab URL = %q, want https://b/", first.URL())
 	}
 	second := dst.tabMgr.Tabs()[1]
-	if second.URL != "https://c/" {
-		t.Errorf("second tab URL = %q, want https://c/", second.URL)
+	if second.URL() != "https://c/" {
+		t.Errorf("second tab URL = %q, want https://c/", second.URL())
 	}
 	if dst.tabMgr.ActiveIndex() != 0 {
 		t.Errorf("active index = %d, want 0", dst.tabMgr.ActiveIndex())
@@ -593,7 +593,7 @@ func TestBuildInteractiveOpensBlankPage(t *testing.T) {
 		t.Errorf("startup spec = %+v, want a blank page", f.spec)
 	}
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.Layer == nil {
+	if tab == nil || tab.Layer() == nil {
 		t.Fatal("first tab has no layer to present")
 	}
 }
@@ -630,22 +630,22 @@ var errTraversalBoom = errors.New("boom")
 func TestApplyNavResultFailedTraversalKeepsCursor(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
-	tab.History.Push("https://b/")
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
 	tab.Nav.Serial = 5
 
 	f.applyNavResult(navResult{
-		tabID: tab.ID, serial: 5, url: "https://a/",
+		tabID: tab.ID(), serial: 5, url: "https://a/",
 		err:          errTraversalBoom,
 		noHistory:    true,
 		traverse:     -1,
 		traverseBase: 1,
 	})
 
-	if got := tab.History.Current(); got != "https://b/" {
+	if got := tab.History().Current(); got != "https://b/" {
 		t.Errorf("cursor = %q after failed traversal, want https://b/", got)
 	}
-	if !tab.History.CanBack() {
+	if !tab.History().CanBack() {
 		t.Error("CanBack() = false after failed traversal; the trail must survive")
 	}
 }
@@ -655,17 +655,17 @@ func TestApplyNavResultFailedTraversalKeepsCursor(t *testing.T) {
 func TestApplyNavResultSuccessfulTraversalCommitsCursor(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
-	tab.History.Push("https://b/")
-	tab.History.Push("https://c/")
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
+	tab.History().Push("https://c/")
 	tab.Nav.Serial = 9
 
 	f.applyNavResult(navResult{
-		tabID: tab.ID, serial: 9, url: "https://b/",
+		tabID: tab.ID(), serial: 9, url: "https://b/",
 		noHistory: true, traverse: -1, traverseBase: 2,
 	})
 
-	if got := tab.History.Current(); got != "https://b/" {
+	if got := tab.History().Current(); got != "https://b/" {
 		t.Errorf("cursor = %q after successful traversal, want https://b/", got)
 	}
 }
@@ -676,17 +676,17 @@ func TestApplyNavResultSuccessfulTraversalCommitsCursor(t *testing.T) {
 func TestApplyNavResultStaleTraversalDrops(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
-	tab.History.Push("https://b/")
-	tab.History.Push("https://d/")
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
+	tab.History().Push("https://d/")
 	tab.Nav.Serial = 9
 
 	f.applyNavResult(navResult{
-		tabID: tab.ID, serial: 9, url: "https://a/",
+		tabID: tab.ID(), serial: 9, url: "https://a/",
 		noHistory: true, traverse: -1, traverseBase: 1,
 	})
 
-	if got := tab.History.Current(); got != "https://d/" {
+	if got := tab.History().Current(); got != "https://d/" {
 		t.Errorf("cursor = %q after stale traversal, want https://d/", got)
 	}
 }
@@ -697,15 +697,15 @@ func TestApplyNavResultStaleTraversalDrops(t *testing.T) {
 func TestApplyNavResultFreshNavResetsScroll(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
+	tab.History().Push("https://a/")
 	tab.Nav.Serial = 4
-	tab.ScrollY = 500
+	tab.SetScrollY(500)
 	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 500}, Size: frame.Size{W: 256, H: 256}})
 
-	f.applyNavResult(navResult{tabID: tab.ID, serial: 4, url: "https://b/"})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 4, url: "https://b/"})
 
-	if tab.ScrollY != 0 {
-		t.Errorf("tab.ScrollY = %d, want 0 (fresh navigation opens at top)", tab.ScrollY)
+	if tab.ScrollY() != 0 {
+		t.Errorf("tab.ScrollY = %d, want 0 (fresh navigation opens at top)", tab.ScrollY())
 	}
 	if y := f.sched.Viewport().Offset.Y; y != 0 {
 		t.Errorf("viewport offset = %d, want 0", y)
@@ -739,13 +739,13 @@ func tallNavTestPath(t *testing.T) *framePath {
 func TestApplyNavResultTraverseKeepsScroll(t *testing.T) {
 	f := tallNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
-	tab.History.Push("https://b/")
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
 	tab.Nav.Serial = 6
 	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 120}, Size: frame.Size{W: 256, H: 256}})
 
 	f.applyNavResult(navResult{
-		tabID: tab.ID, serial: 6, url: "https://a/",
+		tabID: tab.ID(), serial: 6, url: "https://a/",
 		noHistory: true, traverse: -1, traverseBase: 1,
 	})
 
@@ -845,21 +845,21 @@ func TestLoadURLCtxReportsFinalURLAfterRedirect(t *testing.T) {
 func TestApplyNavResultTraversalRewritesRedirectedEntry(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
-	tab.History.Push("https://a/")
-	tab.History.Push("https://b/")
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
 	tab.Nav.Serial = 11
 
 	f.applyNavResult(navResult{
-		tabID: tab.ID, serial: 11, url: "https://a-final/",
+		tabID: tab.ID(), serial: 11, url: "https://a-final/",
 		noHistory: true, traverse: -1, traverseBase: 1,
 	})
 
-	entries, idx := tab.History.Entries()
+	entries, idx := tab.History().Entries()
 	want := []string{"https://a-final/", "https://b/"}
 	if !reflect.DeepEqual(entries, want) || idx != 0 {
 		t.Errorf("history = %v@%d, want %v@0 (entry rewritten in place)", entries, idx, want)
 	}
-	if tab.URL != "https://a-final/" {
-		t.Errorf("tab.URL = %q, want the final URL", tab.URL)
+	if tab.URL() != "https://a-final/" {
+		t.Errorf("tab.URL = %q, want the final URL", tab.URL())
 	}
 }
