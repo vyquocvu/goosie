@@ -1043,13 +1043,21 @@ const maxBgTiles = 4096
 
 // BGTileSize resolves one background tile's drawn size for paint and for
 // the engine's post-layout vector rasterization, which must agree exactly.
-// vecNoIntrinsic is an SVG with neither usable dimensions nor viewBox;
-// vecIgnoreRatio is preserveAspectRatio=none, which drops ratio keeping for
+// lazyVector marks SVGs rasterized at tile size (no usable intrinsic
+// dimensions, or preserveAspectRatio=none whose mapping depends on the tile);
+// ignoreRatio is preserveAspectRatio=none, which drops ratio keeping for
 // cover/contain. Otherwise negotiation is standard against the natural size.
-func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, vecNoIntrinsic, vecIgnoreRatio bool) (float32, float32) {
-	if vecNoIntrinsic {
-		// Nothing to scale from: automatic axes (auto, cover, contain) are
-		// the positioning area, explicit lengths resolve per axis.
+//
+// Auto always tiles at the natural size: the decoder bakes the aspect
+// handling (meet centering, none stretching) into the raster, so paint
+// places it 1:1. Only cover/contain scale, and only lengths resolve axes.
+func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, lazyVector, ignoreRatio bool) (float32, float32) {
+	if s.BackgroundSize == style.BgSizeAuto {
+		return natW, natH
+	}
+	if lazyVector {
+		// Nothing to scale from: cover and contain fill the positioning
+		// area, explicit lengths resolve per axis.
 		tileW, tileH := areaW, areaH
 		if s.BackgroundSize == style.BgSizeLength {
 			if s.BgSizeW >= 0 {
@@ -1069,7 +1077,7 @@ func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, vecNoI
 		}
 		return tileW, tileH
 	}
-	if vecIgnoreRatio && (s.BackgroundSize == style.BgSizeCover || s.BackgroundSize == style.BgSizeContain) {
+	if ignoreRatio && (s.BackgroundSize == style.BgSizeCover || s.BackgroundSize == style.BgSizeContain) {
 		return areaW, areaH
 	}
 	tileW, tileH := natW, natH

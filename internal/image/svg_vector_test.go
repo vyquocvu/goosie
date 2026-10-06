@@ -47,3 +47,16 @@ func TestDecodeSVGAtPercentShapes(t *testing.T) {
 		t.Errorf("interior = (%d,%d,%d), want lime", r>>8, g>>8, b>>8)
 	}
 }
+
+// TestSVGZeroViewBoxFailsClosed pins admission for degenerate viewBoxes: a
+// zero width or height disables rendering per SVG 1.1 section 7.7, so Probe
+// rejects the document instead of rasterizing a fallback the page never
+// drew (background-size-vector zero-ratio reftests expect empty).
+func TestSVGZeroViewBoxFailsClosed(t *testing.T) {
+	for _, vb := range []string{"0 0 0 8", "0 0 8 0", "0 0 -4 8", "0 0 0 0"} {
+		doc := `<svg xmlns="http://www.w3.org/2000/svg" width="8px" viewBox="` + vb + `" preserveAspectRatio="none"><rect width="100%" height="100%" fill="lime"/></svg>`
+		if _, err := Probe([]byte(doc)); err == nil {
+			t.Errorf("Probe(viewBox %q) succeeded, want rejection", vb)
+		}
+	}
+}

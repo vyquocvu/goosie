@@ -8,9 +8,10 @@ import (
 )
 
 // TestBGTileVectorNoIntrinsic pins tile negotiation for vector images
-// without intrinsic dimensions or ratio: automatic axes are the positioning
-// area, explicit lengths resolve per axis. The engine rasterizes these at
-// the same tile, so both sides of the boundary must agree.
+// without intrinsic dimensions or ratio: auto keeps the natural (fallback)
+// size the decoder already baked the mapping into, cover/contain fill the
+// positioning area, explicit lengths resolve per axis. The engine rasterizes
+// these at the same tile, so both sides of the boundary must agree.
 func TestBGTileVectorNoIntrinsic(t *testing.T) {
 	mk := func(size style.BgSize, w, h float32, wpct, hpct bool) *style.ComputedStyle {
 		return &style.ComputedStyle{BackgroundSize: size, BgSizeW: w, BgSizeH: h, BgSizeWPct: wpct, BgSizeHPct: hpct}
@@ -18,16 +19,18 @@ func TestBGTileVectorNoIntrinsic(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		style *style.ComputedStyle
+		natW  float32
+		natH  float32
 		tw    float32
 		th    float32
 	}{
-		{"auto", mk(style.BgSizeAuto, 0, 0, false, false), 256, 768},
-		{"cover", mk(style.BgSizeCover, 0, 0, false, false), 256, 768},
-		{"contain", mk(style.BgSizeContain, 0, 0, false, false), 256, 768},
-		{"length", mk(style.BgSizeLength, 100, 50, false, false), 100, 50},
-		{"mixed", mk(style.BgSizeLength, 100, -1, false, false), 100, 768},
+		{"auto", mk(style.BgSizeAuto, 0, 0, false, false), 300, 150, 300, 150},
+		{"cover", mk(style.BgSizeCover, 0, 0, false, false), 0, 0, 256, 768},
+		{"contain", mk(style.BgSizeContain, 0, 0, false, false), 0, 0, 256, 768},
+		{"length", mk(style.BgSizeLength, 100, 50, false, false), 0, 0, 100, 50},
+		{"mixed", mk(style.BgSizeLength, 100, -1, false, false), 0, 0, 100, 768},
 	} {
-		tw, th := paint.BGTileSize(c.style, 256, 768, 0, 0, true, false)
+		tw, th := paint.BGTileSize(c.style, 256, 768, c.natW, c.natH, true, false)
 		if tw != c.tw || th != c.th {
 			t.Errorf("%s: tile = %vx%v, want %vx%v", c.name, tw, th, c.tw, c.th)
 		}

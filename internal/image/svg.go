@@ -289,10 +289,29 @@ func svgAttr(el xml.StartElement, name string) string {
 	return ""
 }
 
+// rejectDegenerateViewBox fails a root whose viewBox carries a zero width
+// or height: per SVG 1.1 section 7.7 that disables rendering. svgViewport
+// shares it so forced rasters and probed sizes agree.
+func rejectDegenerateViewBox(el xml.StartElement) error {
+	if vb := strings.Fields(svgAttr(el, "viewBox")); len(vb) == 4 {
+		vw, vwErr := strconv.ParseFloat(vb[2], 64)
+		vh, vhErr := strconv.ParseFloat(vb[3], 64)
+		if vwErr == nil && vhErr == nil && (vw <= 0 || vh <= 0) {
+			return fmt.Errorf("image: svg viewBox %q has no area", svgAttr(el, "viewBox"))
+		}
+	}
+	return nil
+}
+
 // svgViewport resolves the raster size: width/height win, else the viewBox,
 // else the 300x150 replaced-element fallback. Anything non-positive or past
-// the admission limits fails before a pixel is allocated.
+// the admission limits fails before a pixel is allocated. A viewBox with a
+// zero width or height disables rendering per SVG 1.1 section 7.7, so it
+// fails closed here rather than rasterizing a fallback the page never drew.
 func svgViewport(el xml.StartElement) (int, int, error) {
+	if err := rejectDegenerateViewBox(el); err != nil {
+		return 0, 0, err
+	}
 	w, wOk := svgLength(svgAttr(el, "width"), 0)
 	h, hOk := svgLength(svgAttr(el, "height"), 0)
 	if (!wOk || w <= 0) || (!hOk || h <= 0) {
@@ -973,6 +992,12 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 				haveRoot = true
 				var err error
 				if forceW > 0 && forceH > 0 {
+					// A forced raster still honors a degenerate viewBox:
+					// zero width or height disables rendering, so fail
+					// closed instead of stretching nothing across pixels.
+					if err := rejectDegenerateViewBox(t); err != nil {
+						return 0, 0, err
+					}
 					w, h = forceW, forceH
 				} else {
 					w, h, err = svgViewport(t)
