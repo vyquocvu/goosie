@@ -120,6 +120,21 @@ func definiteH(a *Arena, id ObjectID) float32 {
 }
 
 func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
+	return blockIntoInner(a, id, containingW, true)
+}
+
+// blockIntoSized lays content out in a box whose own sizes are already
+// settled: unlike blockInto it does not resolve them first. The float path
+// uses it for the content pass because the box was sized against the
+// containing block while the settled width here is the box itself -
+// re-resolving would answer percentages (`33%` of 267 instead of 800)
+// and auto margins against the wrong base, then lay the children out
+// inside the corrupted box.
+func blockIntoSized(a *Arena, id ObjectID, containingW float32) float32 {
+	return blockIntoInner(a, id, containingW, false)
+}
+
+func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) float32 {
 	obj := a.Get(id)
 	// Two heights travel down this pass: parentH, which this box resolves its own
 	// percentage height against, and childH, which it hands to its children. Both
@@ -129,7 +144,9 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 	childH := parentH
 	var replacedH float32
 	if obj.Style != nil {
-		resolveBoxSizes(a, obj, containingW, parentH)
+		if resolve {
+			resolveBoxSizes(a, obj, containingW, parentH)
+		}
 		childH = definiteH(a, id)
 		if obj.Style.Display == style.DisplayNone {
 			obj.W = 0
@@ -280,7 +297,10 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 						floatTrail += outer
 					}
 					k.Y = contentY + y + k.MarginTop
-					blockInto(a, kid, boxW)
+					// Sized against the containing block above; the settled
+					// width here is the box itself, which would answer
+					// percentages against the wrong base.
+					blockIntoSized(a, kid, boxW)
 					if !blockifiesChildren(a.Get(kid).Style) {
 						inlineInto(a, kid)
 					}
@@ -1232,84 +1252,220 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 	for i := range items {
 		totalBasis += items[i].basis
 	}
-	free := availForItems - totalBasis
-	if free < 0 {
-		free = 0
-	}
-	for i := range items {
-		if items[i].grow > 0 && growSum > 0 {
-			items[i].basis += free * items[i].grow / growSum
-		}
-	}
-	remaining := availForItems
-	for i := range items {
-		remaining -= items[i].basis
-	}
-	if remaining < 0 {
-		remaining = 0
-	}
-	lead, trackGap := distributeFlex(obj.Style.JustifyContent, obj.Style.FlexDirection == style.FlexColumnReverse, remaining, gap, n)
+	_ = totalBasis
 
-	// Place pass: the cross positions are already final, so only the vertical
-	// origin moves, and it takes the item's whole subtree with it because block
-	// descendants were positioned from that origin.
-	cursor := contentY + lead
+	// Lines: a nowrap container - or an auto-height one, which has no definite
+	// main size to break against - keeps every item on one line. Otherwise
+	// items wrap past the container height into a new line, the vertical image
+	// of the row pass breaking past its width. Single-line layout below is
+	// untouched by lines: with one line every per-line total equals the old
+	// global one.
+	wrap := obj.Style.FlexWrap
+	lineOf := make([]int, n)
+	lineCount := 1
+	if wrap != style.FlexNowrap && contentH > 0 {
+		lineCount = 0
+		used := float32(0)
+		lineOpen := false
+		for i := range items {
+			outer := items[i].basis + items[i].mTop + items[i].mBottom
+			if lineOpen {
+				if used+gap+outer > contentH {
+					lineCount++
+					lineOpen = false
+					used = 0
+				} else {
+					used += gap
+				}
+			}
+			lineOf[i] = lineCount
+			used += outer
+			lineOpen = true
+		}
+		lineCount++
+	}
+
+	// A line's cross size is its widest item; the single line spans the whole
+	// container so alignment keeps meeting the content box exactly as before.
+	// Default packing stretches lines across evenly (the reference floats
+	// equal columns); any other align-content packs content-sized lines.
+	lineCross := make([]float32, lineCount)
+	if lineCount == 1 {
+		lineCross[0] = contentW
+	} else if ac := normalizeAxis(obj.Style.AlignContent); ac == "" {
+		for l := range lineCross {
+			lineCross[l] = contentW / float32(lineCount)
+		}
+	} else {
+		for l := 0; l < lineCount; l++ {
+			for i := range items {
+				if lineOf[i] != l {
+					continue
+				}
+				if w, ok := probeCrossW(a, items[i].id, contentX, contentY, contentW); ok && w > lineCross[l] {
+					lineCross[l] = w
+				}
+			}
+			if lineCross[l] <= 0 {
+				lineCross[l] = contentW
+			}
+		}
+	}
+	// Lines pack across from the cross start (or end for wrap-reverse) under
+	// align-content; a lone line fills the axis and the packing is a no-op.
+	crossUsed := float32(0)
+	for l := 0; l < lineCount; l++ {
+		crossUsed += lineCross[l]
+	}
+	if lineCount > 1 {
+		crossUsed += obj.Style.ColumnGap * float32(lineCount-1)
+	}
+	crossRemaining := contentW - crossUsed
+	if crossRemaining < 0 {
+		crossRemaining = 0
+	}
+	wrapReverse := wrap == style.FlexWrapReverse
+	crossLead, crossTrackGap := distributeFlex(obj.Style.AlignContent, wrapReverse, crossRemaining, obj.Style.ColumnGap, lineCount)
+	lineX := make([]float32, lineCount)
+	x := contentX + crossLead
+	for order := 0; order < lineCount; order++ {
+		l := order
+		if wrapReverse {
+			l = lineCount - 1 - order
+		}
+		lineX[l] = x
+		x += lineCross[l] + crossTrackGap
+	}
+
+	mainReverse := obj.Style.FlexDirection == style.FlexColumnReverse
 	maxBottom := float32(0)
-	for i := range items {
-		it := a.Get(items[i].id)
-		if items[i].declared {
-			// A declared main size always wins over the measured height:
-			// the basis is a border-box extent, so the content box keeps
-			// what is left after the decorations. Without the write the
-			// item kept its content height while the cursor advanced by
-			// the basis, stacking every declared column item wrong.
-			h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
-			if h < 0 {
-				h = 0
-			}
-			it.H = h
-			it = a.Get(items[i].id)
-		} else if it.Style.Height < 0 && it.Style.FlexGrow > 0 {
-			// Only a grown item outgrows the height its content measured at; an
-			// auto item's basis is that measurement, so it keeps it.
-			h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
-			if h < 0 {
-				h = 0
-			}
-			it.H = h
-			it = a.Get(items[i].id)
+	for order := 0; order < lineCount; order++ {
+		l := order
+		if wrapReverse {
+			l = lineCount - 1 - order
 		}
-		// The measure pass left the whole subtree positioned from contentY, so a
-		// single shift moves the item box and its descendants together. Setting
-		// it.Y first and then shifting by the same delta would move only the box.
-		if dy := (cursor + items[i].mTop) - it.Y; dy != 0 {
-			shiftSubtree(a, items[i].id, 0, dy)
-			it = a.Get(items[i].id)
-		}
-		align := it.Style.AlignSelf
-		if align == "" {
-			align = alignItems
-		}
-		if contentW > items[i].crossW {
-			// The measure pass left the box at the start of the line, so the item
-			// moves by the difference: assigning X and then shifting by the same
-			// amount would move the box twice while its content moved once.
-			targetX := contentX + items[i].mLeft
-			switch normalizeAxis(align) {
-			case "center":
-				targetX = contentX + (contentW-items[i].crossW)/2 + it.MarginLeft
-			case "flex-end":
-				targetX = contentX + contentW - items[i].crossW - it.MarginRight
+		var line []int
+		for i := range items {
+			if lineOf[i] == l {
+				line = append(line, i)
 			}
-			if dx := targetX - it.X; dx != 0 {
-				shiftSubtree(a, items[i].id, dx, 0)
+		}
+		if len(line) == 0 {
+			continue
+		}
+		var lineBasis, lineMargins, lineGrow float32
+		for _, i := range line {
+			lineBasis += items[i].basis
+			lineMargins += items[i].mTop + items[i].mBottom
+			lineGrow += items[i].grow
+		}
+		avail := contentH - lineMargins - gap*float32(len(line)-1)
+		if avail < 0 {
+			avail = 0
+		}
+		free := avail - lineBasis
+		if free < 0 {
+			free = 0
+		}
+		for _, i := range line {
+			if items[i].grow > 0 && lineGrow > 0 {
+				items[i].basis += free * items[i].grow / lineGrow
+			}
+		}
+		remaining := avail
+		for _, i := range line {
+			remaining -= items[i].basis
+		}
+		if remaining < 0 {
+			remaining = 0
+		}
+		lead, trackGap := distributeFlex(obj.Style.JustifyContent, mainReverse, remaining, gap, len(line))
+
+		// Place pass: the cross positions are already final, so only the vertical
+		// origin moves, and it takes the item's whole subtree with it because block
+		// descendants were positioned from that origin.
+		cursor := contentY + lead
+		lineOriginX := lineX[l]
+		for _, i := range line {
+			it := a.Get(items[i].id)
+			if lineCross[l] < contentW {
+				// A stretched item on a narrowed line re-lays out at the
+				// line width instead of keeping the full-axis measure: its
+				// words rewrap into the column it actually occupies.
+				alignN := it.Style.AlignSelf
+				if alignN == "" {
+					alignN = alignItems
+				}
+				if normalizeAxis(alignN) == "" && it.Style.Width < 0 && !isPctLength(it.Style.Width) {
+					w := lineCross[l] - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
+					if w < 0 {
+						w = 0
+					}
+					it.X = lineOriginX + items[i].mLeft
+					blockInto(a, items[i].id, w)
+					it = a.Get(items[i].id)
+					if !blockifiesChildren(a.Get(items[i].id).Style) {
+						inlineInto(a, items[i].id)
+						it = a.Get(items[i].id)
+					}
+				}
+			}
+			if items[i].declared {
+				// A declared main size always wins over the measured height:
+				// the basis is a border-box extent, so the content box keeps
+				// what is left after the decorations. Without the write the
+				// item kept its content height while the cursor advanced by
+				// the basis, stacking every declared column item wrong.
+				h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
+				if h < 0 {
+					h = 0
+				}
+				it.H = h
+				it = a.Get(items[i].id)
+			} else if it.Style.Height < 0 && it.Style.FlexGrow > 0 {
+				// Only a grown item outgrows the height its content measured at; an
+				// auto item's basis is that measurement, so it keeps it.
+				h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
+				if h < 0 {
+					h = 0
+				}
+				it.H = h
 				it = a.Get(items[i].id)
 			}
+			// The measure pass left the whole subtree positioned from contentY, so a
+			// single shift moves the item box and its descendants together. Setting
+			// it.Y first and then shifting by the same delta would move only the box.
+			if dy := (cursor + items[i].mTop) - it.Y; dy != 0 {
+				shiftSubtree(a, items[i].id, 0, dy)
+				it = a.Get(items[i].id)
+			}
+			align := it.Style.AlignSelf
+			if align == "" {
+				align = alignItems
+			}
+			if lineCross[l] > items[i].crossW {
+				// The measure pass left the box at the start of the line, so the item
+				// moves by the difference: assigning X and then shifting by the same
+				// amount would move the box twice while its content moved once.
+				// Alignment meets the line's own cross size, which is the container
+				// box for a lone line.
+				targetX := lineOriginX + items[i].mLeft
+				switch normalizeAxis(align) {
+				case "center":
+					targetX = lineOriginX + (lineCross[l]-items[i].crossW)/2 + it.MarginLeft
+				case "flex-end":
+					targetX = lineOriginX + lineCross[l] - items[i].crossW - it.MarginRight
+				}
+				if dx := targetX - it.X; dx != 0 {
+					shiftSubtree(a, items[i].id, dx, 0)
+					it = a.Get(items[i].id)
+				}
+			}
+			if bottom := (it.Y - contentY) + items[i].mBottom + it.BorderH(); bottom > maxBottom {
+				maxBottom = bottom
+			}
+			cursor = it.Y + it.BorderH() + items[i].mBottom + trackGap
 		}
-		if bottom := (it.Y - contentY) + items[i].mBottom + it.BorderH(); bottom > maxBottom {
-			maxBottom = bottom
-		}
-		cursor = it.Y + it.BorderH() + items[i].mBottom + trackGap
 	}
 	return maxBottom
 }
@@ -1342,7 +1498,13 @@ func fitContentCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32, 
 	default:
 		return 0, false
 	}
+	return probeCrossW(a, id, contentX, contentY, avail)
+}
 
+// probeCrossW measures one item's fit-content cross width without any
+// alignment gate: the hypothetical size its line contributes when lines pack
+// by content. False means the content needs the whole axis.
+func probeCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32) (float32, bool) {
 	it := a.Get(id)
 	it.X, it.Y = contentX, contentY
 	blockInto(a, id, maxFlexMeasureWidth)

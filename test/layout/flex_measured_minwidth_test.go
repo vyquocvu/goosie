@@ -127,3 +127,49 @@ func TestFlexAlignStartShrinkWrapsLikeFlexStart(t *testing.T) {
 		t.Errorf("item.H = %v, want 100 (50 content + 50%% padding of 100)", divs[1].H)
 	}
 }
+
+// TestFlexColumnWrapBreaksLines guards multi-line column flex: items wrap
+// past the container height into lines that pack across, each line laying
+// its items bottom-up for column-reverse. Before, every item piled into one
+// overflowing line.
+func TestFlexColumnWrapBreaksLines(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="display: flex; flex-direction: column-reverse; flex-wrap: wrap; height: 300px; width: 300px;">
+  <div style="height: 90px;">a</div>
+  <div style="height: 90px;">b</div>
+  <div style="height: 90px;">c</div>
+  <div style="height: 140px;">d</div>
+  <div style="height: 140px;">e</div>
+  <div style="height: 290px;">f</div>
+</div>
+</body></html>`, 800)
+
+	divs := findAllByTag(arena, "div")
+	if len(divs) != 7 {
+		t.Fatalf("found %d divs, want 7 (container + 6 items)", len(divs))
+	}
+	// Three lines of 100px across: f alone left, d/e middle, a/b/c right.
+	if !almostEqual(divs[6].X, 0) || !almostEqual(divs[6].W, 100) {
+		t.Errorf("f = {X:%v W:%v}, want the 100px first line", divs[6].X, divs[6].W)
+	}
+	xs := map[float32]bool{}
+	for _, d := range divs[1:] {
+		xs[d.X] = true
+	}
+	if len(xs) != 3 {
+		t.Errorf("items span %d distinct columns, want 3", len(xs))
+	}
+	// Column-reverse stacks bottom-up: a (first in DOM) sits lowest.
+	var aY, cY float32
+	for i, d := range divs[1:] {
+		if i == 0 {
+			aY = d.Y
+		}
+		if i == 2 {
+			cY = d.Y
+		}
+	}
+	if !(aY > cY) {
+		t.Errorf("a.Y = %v, c.Y = %v, want a below c (column-reverse)", aY, cY)
+	}
+}

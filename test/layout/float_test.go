@@ -129,3 +129,28 @@ func TestInlineBlockOfBlockContentShrinksToItsChildren(t *testing.T) {
 		t.Errorf("ol.X = %v, want it after the ul that ends at %v", ol.X, ul.X+ul.W)
 	}
 }
+
+// TestFloatPercentWidthResolvesAgainstContainer guards percentage widths on
+// floats: the share speaks the containing block, but the content pass used
+// to re-resolve it against the settled box (`33%` of 267 instead of 800,
+// yielding 89px columns).
+func TestFloatPercentWidthResolvesAgainstContainer(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="float: left; width: 33.3333%; height: 100px;">a</div>
+<div style="float: left; width: 33.3333%; height: 100px;">b</div>
+</body></html>`, 800)
+
+	divs := findAllByTag(arena, "div")
+	if len(divs) != 2 {
+		t.Fatalf("found %d divs, want 2", len(divs))
+	}
+	// 33.3333% of 800 = 266.67.
+	for i, d := range divs {
+		if d.W < 266 || d.W > 267 {
+			t.Errorf("div[%d].W = %v, want ~266.67", i, d.W)
+		}
+	}
+	if !almostEqual(divs[1].X, divs[0].W) {
+		t.Errorf("second.X = %v, want %v (beside the first)", divs[1].X, divs[0].W)
+	}
+}
