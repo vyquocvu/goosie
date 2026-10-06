@@ -1540,6 +1540,8 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.FlexDirection = parseFlexDirection(value)
 	case "flex-wrap":
 		cs.FlexWrap = parseFlexWrap(value)
+	case "flex-flow":
+		parseFlexFlow(cs, value)
 	case "justify-content":
 		cs.JustifyContent = value
 	case "align-items":
@@ -2264,6 +2266,21 @@ func parseFlexWrap(v string) FlexWrap {
 		return FlexWrapReverse
 	}
 	return FlexNowrap
+}
+
+// parseFlexFlow expands `flex-flow: <direction> || <wrap>` in either order.
+// Longhands win on conflict per the cascade, so an unknown half leaves its
+// axis alone instead of resetting it: without the shorthand a `column wrap`
+// container laid out as a row.
+func parseFlexFlow(cs *ComputedStyle, v string) {
+	for _, part := range splitTopLevelSpace(v) {
+		switch lower := strings.ToLower(strings.TrimSpace(part)); lower {
+		case "row", "row-reverse", "column", "column-reverse":
+			cs.FlexDirection = parseFlexDirection(lower)
+		case "nowrap", "wrap", "wrap-reverse":
+			cs.FlexWrap = parseFlexWrap(lower)
+		}
+	}
 }
 
 func parseColorValue(v string) css.Color {

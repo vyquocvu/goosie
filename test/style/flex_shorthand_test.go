@@ -84,3 +84,44 @@ func TestFlexShorthandInvalidUnitlessBasis(t *testing.T) {
 			cs.FlexGrow, cs.FlexShrink, cs.FlexBasis)
 	}
 }
+
+// TestFlexFlowShorthand pins `flex-flow: <direction> || <wrap>` in either
+// order, with unknown halves leaving their axis alone. Without it a `column
+// wrap` container laid out as a row.
+func TestFlexFlowShorthand(t *testing.T) {
+	for _, c := range []struct {
+		declared string
+		dir      style.FlexDirection
+		wrap     style.FlexWrap
+	}{
+		{"column wrap", style.FlexColumn, style.FlexWrapValue},
+		{"wrap column", style.FlexColumn, style.FlexWrapValue},
+		{"row-reverse wrap-reverse", style.FlexRowReverse, style.FlexWrapReverse},
+		{"column", style.FlexColumn, style.FlexNowrap},
+		{"wrap", style.FlexRow, style.FlexWrapValue},
+		{"column bogus", style.FlexColumn, style.FlexNowrap},
+	} {
+		doc := domtest.Parse(`<html><body><div style="flex-flow: ` + c.declared + `;">x</div></body></html>`)
+		styles := style.Resolve(doc, nil, nil)
+		var div *dom.Node
+		var walk func(n *dom.Node)
+		walk = func(n *dom.Node) {
+			for k := n.FirstChild; k != nil && div == nil; k = k.NextSibling {
+				if k.Element() && k.Data == "div" {
+					div = k
+					return
+				}
+				walk(k)
+			}
+		}
+		walk(&doc.Node)
+		if div == nil {
+			t.Fatalf("div not parsed for %q", c.declared)
+		}
+		cs := styles[div.ID]
+		if cs.FlexDirection != c.dir || cs.FlexWrap != c.wrap {
+			t.Errorf("flex-flow: %s = (%v, %v), want (%v, %v)",
+				c.declared, cs.FlexDirection, cs.FlexWrap, c.dir, c.wrap)
+		}
+	}
+}
