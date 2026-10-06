@@ -1200,7 +1200,9 @@ func parseInlineDeclarations(s string) []css.Declaration {
 		if part == "" {
 			continue
 		}
-		decls = append(decls, parseInlineDeclaration(part))
+		// Comments survive into inline values (and even property names)
+		// because style attributes never pass the stylesheet parser.
+		decls = append(decls, parseInlineDeclaration(css.StripComments(part)))
 	}
 	return decls
 }

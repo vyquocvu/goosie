@@ -109,6 +109,14 @@ func stripComments(in string) string {
 	return b.String()
 }
 
+// StripComments exposes comment stripping for declaration sources that never
+// pass through a stylesheet parse, notably inline style attributes: a comment
+// can sit inside the property name itself (`background/**/:limegreen`), and
+// only a pre-split strip keeps the declaration alive.
+func StripComments(in string) string {
+	return stripComments(in)
+}
+
 type parser struct {
 	input string
 	pos   int

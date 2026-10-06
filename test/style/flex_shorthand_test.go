@@ -125,3 +125,41 @@ func TestFlexFlowShorthand(t *testing.T) {
 		}
 	}
 }
+
+// TestInlineCommentSeparators pins comment stripping for inline style
+// attributes, which never pass the stylesheet parser: comments can sit in
+// values and even inside property names, and each one separates tokens.
+func TestInlineCommentSeparators(t *testing.T) {
+	for _, c := range []struct {
+		declared string
+		r, g, b  uint8
+	}{
+		{"background:limegreen", 50, 205, 50},
+		{"background/**/:limegreen", 50, 205, 50},
+		{"background:/**/limegreen", 50, 205, 50},
+		{"background:limegreen/**/", 50, 205, 50},
+	} {
+		doc := domtest.Parse(`<html><body><div style="` + c.declared + `">x</div></body></html>`)
+		styles := style.Resolve(doc, nil, nil)
+		var div *dom.Node
+		var walk func(n *dom.Node)
+		walk = func(n *dom.Node) {
+			for k := n.FirstChild; k != nil && div == nil; k = k.NextSibling {
+				if k.Element() && k.Data == "div" {
+					div = k
+					return
+				}
+				walk(k)
+			}
+		}
+		walk(&doc.Node)
+		if div == nil {
+			t.Fatalf("div not parsed for %q", c.declared)
+		}
+		got := styles[div.ID].BackgroundColor
+		if got.R != c.r || got.G != c.g || got.B != c.b {
+			t.Errorf("%q -> (%d,%d,%d), want (%d,%d,%d)",
+				c.declared, got.R, got.G, got.B, c.r, c.g, c.b)
+		}
+	}
+}
