@@ -18,12 +18,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Defaults.
+# Defaults. WPT_COMMIT must match the "commit" pin in testdata/wpt-config.json
+# (and DefaultWPTCommit in test/wpt/wpt.go): a stale default 404s the tarball
+# download and the harness wipes the checkout it cannot verify.
 WPT_DIR="${WPT_DIR:-/tmp/goosie-wpt}"
 WPT_GOOSIE_BINARY="${WPT_GOOSIE_BINARY:-$PROJECT_ROOT/goosie}"
 WPT_CONFIG="${WPT_CONFIG:-$PROJECT_ROOT/testdata/wpt-config.json}"
 WPT_OUTPUT_DIR="${WPT_OUTPUT_DIR:-/tmp/wpt-results}"
-WPT_COMMIT="${WPT_COMMIT:-623eb3a3e1b6b04b4b098a1e8a7b3e6b0e8c4d2a}"
+WPT_COMMIT="${WPT_COMMIT:-11ae8c1179be2dd38070846b01c2e9338ef81770}"
 WPT_DIRS=""
 DOWNLOAD=false
 REPORT_ONLY=false
