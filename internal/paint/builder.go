@@ -121,21 +121,11 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 						Opacity: opacity,
 					})
 				}
-				if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() && !clipRect.Empty() {
-					b.list.Append(DisplayCmd{
-						Kind:     CmdGradient,
-						Rect:     clipRect,
-						Gradient: g,
-						Radius:   clipRadius,
-					})
+				if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
+					b.paintGradientTiles(obj, clipRect, clipRadius, g, false, frame.RadialGradient{})
 				}
-				if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() && !clipRect.Empty() {
-					b.list.Append(DisplayCmd{
-						Kind:           CmdRadialGradient,
-						Rect:           clipRect,
-						RadialGradient: rg,
-						Radius:         clipRadius,
-					})
+				if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() {
+					b.paintGradientTiles(obj, clipRect, clipRadius, frame.LinearGradient{}, true, rg)
 				}
 				b.paintBackground(obj, opacity)
 			}
@@ -1118,16 +1108,20 @@ func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, noRati
 			tileW, tileH = natW, natH
 		case wAuto:
 			// Width auto resolves from the height through the ratio;
-			// without one it keeps the natural width.
+			// without one it keeps the natural width: only the height
+			// axis defaults to the positioning area (see hAuto).
 			if !noRatio && tileH > 0 && natW > 0 && natH > 0 {
 				tileW = tileH * natW / natH
 			} else {
 				tileW = natW
 			}
 		case hAuto:
-			// Height auto: preserve the image aspect ratio.
+			// Height auto: preserve the image aspect ratio, or fill the
+			// positioning area height when there is no ratio at all.
 			if !noRatio && tileW > 0 && natW > 0 && natH > 0 {
 				tileH = tileW * natH / natW
+			} else if noRatio {
+				tileH = areaH
 			} else {
 				tileH = natH
 			}
@@ -1155,6 +1149,85 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	if natW <= 0 || natH <= 0 {
 		return
 	}
+	tiles := bgLayerTiles(s, obj, natW, natH, obj.BgNoRatio)
+	for _, t := range tiles {
+		vx0, vy0, vx1, vy1 := t.vx0, t.vy0, t.vx1, t.vy1
+		// Map the visible destination slice back to the image's source
+		// sub-rectangle, at the tile's scale.
+		sx0 := int32(float64(sb.Min.X) + (vx0-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
+		sx1 := int32(float64(sb.Min.X) + (vx1-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
+		sy0 := int32(float64(sb.Min.Y) + (vy0-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
+		sy1 := int32(float64(sb.Min.Y) + (vy1-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
+		if sx1 <= sx0 {
+			sx1 = sx0 + 1
+		}
+		if sy1 <= sy0 {
+			sy1 = sy0 + 1
+		}
+		dst := frame.RectF4(float32(vx0), float32(vy0), float32(vx1), float32(vy1)).ToDevice(b.scale)
+		if dst.Empty() {
+			continue
+		}
+		b.list.Append(DisplayCmd{
+			Kind:    CmdImage,
+			Rect:    dst,
+			Image:   ImageSpec{Src: src, SrcBox: image.Rect(int(sx0), int(sy0), int(sx1), int(sy1))},
+			Opacity: opacity,
+		})
+	}
+}
+
+// paintGradientTiles paints one gradient layer through the background
+// tile machinery: gradients carry no intrinsic size, so the positioning
+// area is both the size they resolve auto axes against and the natural
+// size negotiation starts from. Each tile maps the ramp to itself, which
+// is what makes repeat tile a gradient instead of stretching one.
+func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, g frame.LinearGradient, isRadial bool, rg frame.RadialGradient) {
+	s := obj.Style
+	if s == nil {
+		return
+	}
+	px0, py0, px1, py1 := obj.BgAreaRect(s.BackgroundOrigin)
+	areaW, areaH := px1-px0, py1-py0
+	if areaW <= 0 || areaH <= 0 {
+		return
+	}
+	for _, t := range bgLayerTiles(s, obj, areaW, areaH, true) {
+		dst := frame.RectF4(float32(t.vx0), float32(t.vy0), float32(t.vx1), float32(t.vy1)).ToDevice(b.scale)
+		if dst.Empty() {
+			continue
+		}
+		if isRadial {
+			b.list.Append(DisplayCmd{
+				Kind:           CmdRadialGradient,
+				Rect:           dst,
+				RadialGradient: rg,
+				Radius:         radius,
+			})
+		} else {
+			b.list.Append(DisplayCmd{
+				Kind:     CmdGradient,
+				Rect:     dst,
+				Gradient: g,
+				Radius:   radius,
+			})
+		}
+	}
+}
+
+// bgTile is one painted tile: cx/cy is the tile origin and tw/th its size
+// (for mapping back to source pixels); vx0..vy1 is the visible slice after
+// clipping, in CSS px.
+type bgTile struct {
+	cx, cy, tw, th     float32
+	vx0, vy0, vx1, vy1 float64
+}
+
+// bgLayerTiles lays one background layer's tiles: size from BGTileSize
+// against the origin box, round rescaling, positions from background-
+// position, spans covering the clip box (space stays in the origin box).
+// Every returned tile is non-empty and clipped to the clip box.
+func bgLayerTiles(s *style.ComputedStyle, obj *layout.Object, natW, natH float32, noRatio bool) []bgTile {
 	// Tiles position within the origin box and paint inside the clip box.
 	px0, py0, px1, py1 := obj.BgAreaRect(s.BackgroundOrigin)
 	cx0, cy0, cx1, cy1 := obj.BgAreaRect(s.BackgroundClip)
@@ -1172,13 +1245,13 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	}
 	areaW, areaH := px1-px0, py1-py0
 	if areaW <= 0 || areaH <= 0 {
-		return
+		return nil
 	}
-	ax0, ay0, ax1, ay1 := px0, py0, px1, py1
+	ax0, ay0 := px0, py0
 
-	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgNoRatio)
+	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, noRatio)
 	if tileW <= 0 || tileH <= 0 {
-		return
+		return nil
 	}
 
 	rx, ry := bgRepeatAxis(s.BackgroundRepeat, true), bgRepeatAxis(s.BackgroundRepeatY, false)
@@ -1200,16 +1273,17 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	sx0, sx1 := cx0, cx1
 	sy0, sy1 := cy0, cy1
 	if rx == style.BgRepeatSpace {
-		sx0, sx1 = ax0, ax1
+		sx0, sx1 = ax0, px1
 	}
 	if ry == style.BgRepeatSpace {
-		sy0, sy1 = ay0, ay1
+		sy0, sy1 = ay0, py1
 	}
 	xs := bgAxisSpans(rx, ox, tileW, sx0, sx1, areaW)
 	ys := bgAxisSpans(ry, oy, tileH, sy0, sy1, areaH)
 	if len(xs)*len(ys) == 0 || len(xs)*len(ys) > maxBgTiles {
-		return
+		return nil
 	}
+	var out []bgTile
 	for _, cx := range xs {
 		for _, cy := range ys {
 			vx0, vy0 := float64(cx), float64(cy)
@@ -1231,30 +1305,10 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 			if vx1 <= vx0 || vy1 <= vy0 {
 				continue
 			}
-			// Map the visible destination slice back to the image's source
-			// sub-rectangle, at the tile's scale.
-			sx0 := int32(float64(sb.Min.X) + (vx0-float64(cx))/float64(tileW)*float64(sb.Dx()))
-			sx1 := int32(float64(sb.Min.X) + (vx1-float64(cx))/float64(tileW)*float64(sb.Dx()))
-			sy0 := int32(float64(sb.Min.Y) + (vy0-float64(cy))/float64(tileH)*float64(sb.Dy()))
-			sy1 := int32(float64(sb.Min.Y) + (vy1-float64(cy))/float64(tileH)*float64(sb.Dy()))
-			if sx1 <= sx0 {
-				sx1 = sx0 + 1
-			}
-			if sy1 <= sy0 {
-				sy1 = sy0 + 1
-			}
-			dst := frame.RectF4(float32(vx0), float32(vy0), float32(vx1), float32(vy1)).ToDevice(b.scale)
-			if dst.Empty() {
-				continue
-			}
-			b.list.Append(DisplayCmd{
-				Kind:    CmdImage,
-				Rect:    dst,
-				Image:   ImageSpec{Src: src, SrcBox: image.Rect(int(sx0), int(sy0), int(sx1), int(sy1))},
-				Opacity: opacity,
-			})
+			out = append(out, bgTile{cx: cx, cy: cy, tw: tileW, th: tileH, vx0: vx0, vy0: vy0, vx1: vx1, vy1: vy1})
 		}
 	}
+	return out
 }
 
 // bgOrigin resolves one background-position axis into a CSS-px coordinate where

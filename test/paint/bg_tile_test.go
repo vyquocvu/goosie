@@ -28,7 +28,7 @@ func TestBGTileVectorNoRatio(t *testing.T) {
 		{"cover", mk(style.BgSizeCover, 0, 0, false, false), 300, 150, 256, 768},
 		{"contain", mk(style.BgSizeContain, 0, 0, false, false), 300, 150, 256, 768},
 		{"length", mk(style.BgSizeLength, 100, 50, false, false), 300, 150, 100, 50},
-		{"mixed", mk(style.BgSizeLength, 100, -1, false, false), 300, 150, 100, 150},
+		{"mixed", mk(style.BgSizeLength, 100, -1, false, false), 300, 150, 100, 768},
 	} {
 		tw, th := paint.BGTileSize(c.style, 256, 768, c.natW, c.natH, true)
 		if tw != c.tw || th != c.th {

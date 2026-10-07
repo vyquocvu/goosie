@@ -2543,7 +2543,7 @@ func isRepeatTok(t string) bool {
 // longhand through `background` still has to reach those fields or the layer
 // lands at its default top-left origin.
 func parseBackgroundShorthandExtras(cs *ComputedStyle, v string) {
-	toks := tokenizeBackground(v)
+	toks := firstBackgroundLayer(tokenizeBackground(v))
 	var pos []string
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
@@ -2620,6 +2620,38 @@ func tokenizeBackground(v string) []string {
 		}
 	}
 	flush()
+	return toks
+}
+
+// firstBackgroundLayer cuts shorthand tokens at the first top-level comma:
+// only the first background layer is supported, and later layers' position,
+// size and repeat must not bleed into its fields. A comma inside parens
+// (rgba(), gradients) belongs to its function, so only a depth-zero comma
+// ends the layer.
+func firstBackgroundLayer(toks []string) []string {
+	for i, t := range toks {
+		depth := 0
+		for j := 0; j < len(t); j++ {
+			switch t[j] {
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			case ',':
+				if depth == 0 {
+					head := strings.TrimSpace(t[:j])
+					out := make([]string, 0, i+1)
+					out = append(out, toks[:i]...)
+					if head != "" {
+						out = append(out, head)
+					}
+					return out
+				}
+			}
+		}
+	}
 	return toks
 }
 

@@ -476,3 +476,20 @@ func TestBackgroundPositionThreeFourValues(t *testing.T) {
 		t.Errorf("y = (%v,%v,%v), want (start-offset,0.75,pct)", s.BackgroundPosYMode, s.BackgroundPosY, s.BgPosYPct)
 	}
 }
+
+// TestBackgroundShorthandKeepsFirstLayer pins that later comma-separated
+// layers never bleed into the painted layer's fields: their positions,
+// sizes and repeats belong to layers the painter does not draw.
+func TestBackgroundShorthandKeepsFirstLayer(t *testing.T) {
+	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
+		`.x { background: linear-gradient(to right, yellow 50%, blue 50%) 0 0 / 100% 100% no-repeat, radial-gradient(farthest-side at 0 50%, black, transparent) 0 0 / 20px 100% no-repeat; }`, "div")
+	if s.BackgroundRepeat != style.BgRepeatNoRepeat || s.BackgroundRepeatY != style.BgRepeatNoRepeat {
+		t.Errorf("repeat = (%v,%v), want (no-repeat,no-repeat)", s.BackgroundRepeat, s.BackgroundRepeatY)
+	}
+	if s.BgSizeW != 1 || !s.BgSizeWPct || s.BgSizeH != 1 || !s.BgSizeHPct {
+		t.Errorf("size = (%v,%v,%v,%v), want (1,pct,1,pct)", s.BgSizeW, s.BgSizeWPct, s.BgSizeH, s.BgSizeHPct)
+	}
+	if s.BackgroundPosXMode != style.BgPosLength || s.BackgroundPosX != 0 || s.BackgroundPosYMode != style.BgPosLength || s.BackgroundPosY != 0 {
+		t.Errorf("pos = (%v,%v,%v,%v), want lengths 0,0", s.BackgroundPosXMode, s.BackgroundPosX, s.BackgroundPosYMode, s.BackgroundPosY)
+	}
+}
