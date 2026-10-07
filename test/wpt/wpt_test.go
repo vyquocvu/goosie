@@ -370,3 +370,51 @@ func writeTestPNG(t *testing.T, path string, w, h int, c [4]byte) {
 		t.Fatal(err)
 	}
 }
+
+// TestReadFuzzyMeta pins fuzzy-tolerance parsing: the most lenient
+// allowance wins, unparseable metas are ignored, and files without the
+// meta report ok=false so strict scoring still applies.
+func TestReadFuzzyMeta(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := dir + "/" + name
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	md, ta, ok := readFuzzyMeta(write("a.html", `<meta name="fuzzy" content="maxDifference=0-96;totalPixels=0-400">`))
+	if !ok || md != 96 || ta != 400 {
+		t.Errorf("fuzzy = (%d,%d,%v), want (96,400,true)", md, ta, ok)
+	}
+	md, ta, ok = readFuzzyMeta(write("b.html", `<meta name=fuzzy content='maxDifference=0-10; totalPixels=0-5'>`))
+	if !ok || md != 10 || ta != 5 {
+		t.Errorf("single-quote fuzzy = (%d,%d,%v), want (10,5,true)", md, ta, ok)
+	}
+	_, _, ok = readFuzzyMeta(write("c.html", `<meta name="viewport" content="width=1">`))
+	if ok {
+		t.Error("non-fuzzy meta reported ok=true")
+	}
+}
+
+// TestFuzzyPasses pins the tolerance recount: identical images pass any
+// allowance, fully different images fail a zero allowance but pass a
+// lenient one.
+func TestFuzzyPasses(t *testing.T) {
+	tmpDir := t.TempDir()
+	imgA := filepath.Join(tmpDir, "a.png")
+	imgB := filepath.Join(tmpDir, "b.png")
+	writeTestPNG(t, imgA, 2, 2, [4]byte{255, 0, 0, 255})
+	writeTestPNG(t, imgB, 2, 2, [4]byte{255, 0, 0, 255})
+	if !fuzzyPasses(imgA, imgB, 0, 0) {
+		t.Error("identical images fail fuzzy 0/0")
+	}
+	imgC := filepath.Join(tmpDir, "c.png")
+	writeTestPNG(t, imgC, 2, 2, [4]byte{0, 255, 0, 255})
+	if fuzzyPasses(imgA, imgC, 0, 0) {
+		t.Error("different images pass fuzzy 0/0")
+	}
+	if !fuzzyPasses(imgA, imgC, 255, 4) {
+		t.Error("different images fail fuzzy 255/4")
+	}
+}

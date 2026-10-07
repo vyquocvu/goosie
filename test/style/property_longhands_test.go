@@ -114,10 +114,8 @@ func TestBackgroundRepeatLonghand(t *testing.T) {
 		{"background-repeat: REPEAT-Y", style.BgRepeatRepeatY},
 		{"background-repeat: no-repeat", style.BgRepeatNoRepeat},
 		{"background-repeat:  repeat-x ", style.BgRepeatRepeatX},
-		// Two-axis form: the first token decides, per the parser's own contract.
-		{"background-repeat: repeat no-repeat", style.BgRepeatRepeat},
-		{"background-repeat: space", style.BgRepeatRepeat},
-		{"background-repeat: round", style.BgRepeatRepeat},
+		{"background-repeat: space", style.BgRepeatSpace},
+		{"background-repeat: round", style.BgRepeatRound},
 	} {
 		t.Run(tc.decl, func(t *testing.T) {
 			s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
@@ -399,4 +397,60 @@ func resolveSurvives(t *testing.T, f func()) {
 		}
 	}()
 	f()
+}
+
+// TestInlineDataURIBackgroundSurvivesSemicolons pins declaration splitting
+// for style attributes carrying base64 data URIs: the semicolon in
+// `data:image/png;base64,...` sits inside url(...) and must not end the
+// background-image declaration, or the image silently vanishes while a
+// later background-size still parses.
+func TestInlineDataURIBackgroundSurvivesSemicolons(t *testing.T) {
+	s := styleFor(t,
+		`<html><body><div style="background-image:url('data:image/png;base64,iVBORw0KGgo=');background-size:50px">x</div></body></html>`,
+		"", "div")
+	if s.BackgroundImage != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Errorf("BackgroundImage = %q, want the data URI intact", s.BackgroundImage)
+	}
+	if s.BackgroundSize != style.BgSizeLength || s.BgSizeW != 50 || s.BgSizeH != -1 {
+		t.Errorf("BackgroundSize = (%v,%v,%v), want (Length,50,auto)", s.BackgroundSize, s.BgSizeW, s.BgSizeH)
+	}
+}
+
+// TestBackgroundRepeatTwoAxes pins per-axis repeat parsing: `repeat round`
+// repeats horizontally and rounds vertically, and each axis falls back
+// independently.
+func TestBackgroundRepeatTwoAxes(t *testing.T) {
+	for _, c := range []struct {
+		decl string
+		x, y style.BgRepeat
+	}{
+		{"background-repeat: repeat round", style.BgRepeatRepeat, style.BgRepeatRound},
+		{"background-repeat: round repeat", style.BgRepeatRound, style.BgRepeatRepeat},
+		{"background-repeat: space no-repeat", style.BgRepeatSpace, style.BgRepeatNoRepeat},
+		{"background-repeat: repeat-x", style.BgRepeatRepeatX, style.BgRepeatRepeatX},
+	} {
+		s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
+			`.x { `+c.decl+` }`, "div")
+		if s.BackgroundRepeat != c.x || s.BackgroundRepeatY != c.y {
+			t.Errorf("%s -> (%v,%v), want (%v,%v)", c.decl, s.BackgroundRepeat, s.BackgroundRepeatY, c.x, c.y)
+		}
+	}
+}
+
+// TestBackgroundOriginClipBoxes pins the box keywords and their initials:
+// origins position against the padding box, clips paint through the border
+// box, and clip:text parses for the cascade even though paint cannot mask it.
+func TestBackgroundOriginClipBoxes(t *testing.T) {
+	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
+		`.x { background-origin: content-box; background-clip: text; }`, "div")
+	if s.BackgroundOrigin != style.BgBoxContent {
+		t.Errorf("BackgroundOrigin = %v, want content-box", s.BackgroundOrigin)
+	}
+	if s.BackgroundClip != style.BgBoxText {
+		t.Errorf("BackgroundClip = %v, want text", s.BackgroundClip)
+	}
+	d := styleFor(t, `<html><body><div>x</div></body></html>`, "", "div")
+	if d.BackgroundOrigin != style.BgBoxPadding || d.BackgroundClip != style.BgBoxBorder {
+		t.Errorf("initials = (%v,%v), want (padding,border)", d.BackgroundOrigin, d.BackgroundClip)
+	}
 }

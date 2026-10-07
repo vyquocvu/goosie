@@ -133,6 +133,22 @@ const (
 	BgRepeatRepeatX
 	BgRepeatRepeatY
 	BgRepeatNoRepeat
+	BgRepeatRound
+	BgRepeatSpace
+)
+
+// BgBox selects which box backgrounds position against (origin) or paint
+// inside (clip): the border, padding, or content box. Text is only valid
+// for background-clip and needs glyph masking the painter does not do yet;
+// it parses so the cascade stays honest, and paint falls back to the
+// border box exactly as the missing property did.
+type BgBox uint8
+
+const (
+	BgBoxBorder BgBox = iota
+	BgBoxPadding
+	BgBoxContent
+	BgBoxText
 )
 
 // BgSize is the CSS background-size keyword family.
@@ -293,7 +309,16 @@ type ComputedStyle struct {
 	// resolves and fetches it. Empty means no image layer.
 	BackgroundImage  string
 	BackgroundRepeat BgRepeat
-	BackgroundSize   BgSize
+	// BackgroundRepeatY carries the second axis when background-repeat names
+	// two modes (`repeat round`); single modes mirror into both axes.
+	BackgroundRepeatY BgRepeat
+	BackgroundSize    BgSize
+	// BackgroundOrigin selects the background-positioning area; the initial
+	// padding-box matches CSS, not the border box paint historically used.
+	BackgroundOrigin BgBox
+	// BackgroundClip selects where backgrounds paint; the initial
+	// border-box clips nothing paint did not already clip.
+	BackgroundClip BgBox
 	// BgSizeW/BgSizeH are the explicit background-size lengths; -1 means auto
 	// for that axis. When the matching Pct flag is set the value is a fraction
 	// of the positioning area (0.2 for 20%), otherwise it is CSS px. Only
@@ -482,6 +507,10 @@ func DefaultStyle() ComputedStyle {
 		WhiteSpace: WhiteSpaceNormal,
 		FlexBasis:  -1,
 		Content:    "normal",
+		// CSS initials: backgrounds position against the padding box and
+		// paint through the border box.
+		BackgroundOrigin: BgBoxPadding,
+		BackgroundClip:   BgBoxBorder,
 	}
 }
 
@@ -1195,7 +1224,7 @@ func parseInlineDeclaration(s string) css.Declaration {
 
 func parseInlineDeclarations(s string) []css.Declaration {
 	var decls []css.Declaration
-	for _, part := range strings.Split(s, ";") {
+	for _, part := range css.SplitDeclarations(s) {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -1495,7 +1524,11 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BackgroundRadialGradient = parseRadialGradient(value)
 		cs.BackgroundImage = extractBackgroundURL(value)
 	case "background-repeat":
-		cs.BackgroundRepeat = parseBackgroundRepeat(value)
+		cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(value)
+	case "background-origin":
+		cs.BackgroundOrigin = parseBackgroundBox(value, false)
+	case "background-clip":
+		cs.BackgroundClip = parseBackgroundBox(value, true)
 	case "background-size":
 		parseBackgroundSize(cs, value)
 	case "background-position":
@@ -2428,26 +2461,78 @@ func extractBackgroundURL(v string) string {
 	return target
 }
 
-// parseBackgroundRepeat reads the background-repeat value. Two-axis forms like
-// `repeat no-repeat` are rare; the first token decides. An empty value - `background-repeat:`
-// with nothing after the colon, which a hand-written or truncated sheet can carry - has no
-// token to decide from, so it keeps the initial repeat rather than reading a first token
-// that is not there.
-func parseBackgroundRepeat(v string) BgRepeat {
+// parseBackgroundRepeat reads the one- or two-axis background-repeat value.
+// A single mode mirrors to both axes (`round` tiles both ways); two modes
+// split per axis (`repeat round` repeats horizontally and rounds
+// vertically). repeat-x/y are the single-axis shorthands. An empty value -
+// `background-repeat:` with nothing after the colon, which a hand-written
+// or truncated sheet can carry - has no token to decide from, so it keeps
+// the initial repeat rather than reading a first token that is not there.
+func parseBackgroundRepeat(v string) (BgRepeat, BgRepeat) {
 	fields := strings.Fields(v)
 	if len(fields) == 0 {
-		return BgRepeatRepeat
+		return BgRepeatRepeat, BgRepeatRepeat
 	}
-	switch strings.ToLower(fields[0]) {
-	case "repeat-x":
-		return BgRepeatRepeatX
-	case "repeat-y":
-		return BgRepeatRepeatY
-	case "no-repeat":
-		return BgRepeatNoRepeat
-	default:
-		return BgRepeatRepeat
+	one := func(tok string) BgRepeat {
+		switch strings.ToLower(tok) {
+		case "repeat-x":
+			return BgRepeatRepeatX
+		case "repeat-y":
+			return BgRepeatRepeatY
+		case "no-repeat":
+			return BgRepeatNoRepeat
+		case "round":
+			return BgRepeatRound
+		case "space":
+			return BgRepeatSpace
+		default:
+			return BgRepeatRepeat
+		}
 	}
+	x := one(fields[0])
+	if len(fields) < 2 {
+		// Single modes mirror to both axes axis-tagged: repeat-x stays
+		// RepeatX in both fields and paint reads the axis it lays out.
+		return x, x
+	}
+	y := one(fields[1])
+	if y == BgRepeatRepeatX {
+		y = BgRepeatRepeat
+	}
+	if y == BgRepeatRepeatY {
+		y = BgRepeatNoRepeat
+	}
+	return x, y
+}
+
+// parseBackgroundBox reads background-origin/clip box keywords. Text is
+// only legal for clip; elsewhere it falls back to the property initial.
+func parseBackgroundBox(v string, allowText bool) BgBox {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "padding-box":
+		return BgBoxPadding
+	case "content-box":
+		return BgBoxContent
+	case "text":
+		if allowText {
+			return BgBoxText
+		}
+	case "border-box":
+		return BgBoxBorder
+	}
+	if allowText {
+		return BgBoxBorder
+	}
+	return BgBoxPadding
+}
+
+// isRepeatTok reports whether a background-shorthand token names a repeat mode.
+func isRepeatTok(t string) bool {
+	switch strings.ToLower(t) {
+	case "repeat", "repeat-x", "repeat-y", "no-repeat", "round", "space":
+		return true
+	}
+	return false
 }
 
 // parseBackgroundShorthandExtras pulls the repeat, position and size out of a
@@ -2474,15 +2559,18 @@ func parseBackgroundShorthandExtras(cs *ComputedStyle, v string) {
 			}
 			continue
 		}
+		if isRepeatTok(t) {
+			// One- or two-axis repeat (`round`, `repeat round`): a pair
+			// consumes together so the axes split correctly.
+			if i+1 < len(toks) && isRepeatTok(toks[i+1]) {
+				cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(t + " " + toks[i+1])
+				i++
+			} else {
+				cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(t)
+			}
+			continue
+		}
 		switch strings.ToLower(t) {
-		case "repeat":
-			cs.BackgroundRepeat = BgRepeatRepeat
-		case "repeat-x":
-			cs.BackgroundRepeat = BgRepeatRepeatX
-		case "repeat-y":
-			cs.BackgroundRepeat = BgRepeatRepeatY
-		case "no-repeat":
-			cs.BackgroundRepeat = BgRepeatNoRepeat
 		default:
 			if isPositionTok(cs, t) {
 				pos = append(pos, t)

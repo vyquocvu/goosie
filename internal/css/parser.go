@@ -55,8 +55,21 @@ func Parse(input string) *Stylesheet {
 // document evaluates its media queries against its own width, not a
 // process-global value another document may have set earlier.
 func ParseForViewport(input string, viewportWidthPx float32) *Stylesheet {
-	p := &parser{input: stripComments(input), mediaWidth: viewportWidthPx}
+	p := &parser{input: stripComments(stripCDATAMarkers(input)), mediaWidth: viewportWidthPx}
 	return p.parse()
+}
+
+// stripCDATAMarkers removes `<![CDATA[` ... `]]>` wrappers from stylesheet
+// text. XHTML reference pages wrap their <style> content in CDATA, and the
+// DOM hands that text through verbatim; without stripping, the opener fuses
+// onto the first selector (`<![CDATA[ img`) and no rule ever matches. Only
+// the marker delimiters go - the CSS between them stays intact.
+func stripCDATAMarkers(in string) string {
+	if !strings.Contains(in, "<![CDATA[") {
+		return in
+	}
+	s := strings.ReplaceAll(in, "<![CDATA[", " ")
+	return strings.ReplaceAll(s, "]]>", " ")
 }
 
 // stripComments removes /* ... */ comment blocks from CSS source. A comment
@@ -934,15 +947,35 @@ func parseDeclarations(s string) []Declaration {
 }
 
 func splitDeclarations(s string) []string {
+	return SplitDeclarations(s)
+}
+
+// SplitDeclarations cuts a declaration block on top-level semicolons.
+// Semicolons inside url(...) parens or quotes never split: a base64 data
+// URI (`url('data:image/png;base64,...')`) or a quoted string value would
+// otherwise truncate the declaration it sits in.
+func SplitDeclarations(s string) []string {
 	var parts []string
 	depth := 0
+	var quote byte
 	start := 0
 	for i := 0; i < len(s); i++ {
-		switch s[i] {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
 		case '(':
 			depth++
 		case ')':
-			depth--
+			if depth > 0 {
+				depth--
+			}
 		case ';':
 			if depth == 0 {
 				parts = append(parts, s[start:i])

@@ -816,7 +816,9 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	if obj.Style == nil {
 		return
 	}
-	x0, y0, x1, y1 := obj.BorderRect()
+	// The tile negotiates against the background-positioning area, exactly
+	// like paint: anything else decodes a raster paint would slice apart.
+	x0, y0, x1, y1 := obj.BgAreaRect(obj.Style.BackgroundOrigin)
 	areaW, areaH := x1-x0, y1-y0
 	if areaW <= 0 || areaH <= 0 {
 		return

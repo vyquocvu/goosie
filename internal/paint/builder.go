@@ -84,6 +84,18 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 		rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
 		radius := corners(obj.Style, rect, b.scale)
 		opacity := obj.Style.Opacity
+		// Backgrounds paint inside the clip box, not the border box it
+		// defaults to: content-box (or padding-box) clip shrinks every
+		// background layer - colour, gradients, and the image below.
+		cx0, cy0, cx1, cy1 := obj.BgAreaRect(obj.Style.BackgroundClip)
+		bgClip := frame.RectF4(cx0, cy0, cx1, cy1).ToDevice(b.scale)
+		clipRect := rect.Intersection(bgClip)
+		// A clipped fill follows the inner curve: each corner loses the
+		// border+padding thickness meeting it, per the corner-shaping rule
+		// the fuzz-tolerant radius tests pin down.
+		clipRadius := radius.Shrunk(
+			clipRect.Y0-rect.Y0, rect.X1-clipRect.X1,
+			rect.Y1-clipRect.Y1, clipRect.X0-rect.X0)
 
 		// Record the list length before painting this element's own content,
 		// so we can apply the CSS transform to just these commands.
@@ -100,29 +112,29 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 				if len(obj.Style.BoxShadow) > 0 {
 					b.paintBoxShadow(obj, rect, radius, opacity)
 				}
-				if obj.Style.BackgroundColor.A > 0 {
+				if obj.Style.BackgroundColor.A > 0 && !clipRect.Empty() {
 					b.list.Append(DisplayCmd{
 						Kind:    CmdFill,
-						Rect:    rect,
+						Rect:    clipRect,
 						Color:   convertColor(obj.Style.BackgroundColor),
-						Radius:  radius,
+						Radius:  clipRadius,
 						Opacity: opacity,
 					})
 				}
-				if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
+				if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() && !clipRect.Empty() {
 					b.list.Append(DisplayCmd{
 						Kind:     CmdGradient,
-						Rect:     rect,
+						Rect:     clipRect,
 						Gradient: g,
-						Radius:   radius,
+						Radius:   clipRadius,
 					})
 				}
-				if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() {
+				if rg := radialGradient(obj.Style.BackgroundRadialGradient, opacity); !rg.Empty() && !clipRect.Empty() {
 					b.list.Append(DisplayCmd{
 						Kind:           CmdRadialGradient,
-						Rect:           rect,
+						Rect:           clipRect,
 						RadialGradient: rg,
-						Radius:         radius,
+						Radius:         clipRadius,
 					})
 				}
 				b.paintBackground(obj, opacity)
@@ -1129,39 +1141,79 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	if natW <= 0 || natH <= 0 {
 		return
 	}
-	x0, y0, x1, y1 := obj.BorderRect()
-	if x1 <= x0 || y1 <= y0 {
+	// Tiles position within the origin box and paint inside the clip box.
+	px0, py0, px1, py1 := obj.BgAreaRect(s.BackgroundOrigin)
+	cx0, cy0, cx1, cy1 := obj.BgAreaRect(s.BackgroundClip)
+	if px1 < px0 {
+		px0, px1 = px1, px0
+	}
+	if py1 < py0 {
+		py0, py1 = py1, py0
+	}
+	if cx1 < cx0 {
+		cx0, cx1 = cx1, cx0
+	}
+	if cy1 < cy0 {
+		cy0, cy1 = cy1, cy0
+	}
+	areaW, areaH := px1-px0, py1-py0
+	if areaW <= 0 || areaH <= 0 {
 		return
 	}
-	ax0, ay0, ax1, ay1 := x0, y0, x1, y1
-	if ax1 < ax0 {
-		ax0, ax1 = ax1, ax0
-	}
-	if ay1 < ay0 {
-		ay0, ay1 = ay1, ay0
-	}
-	areaW, areaH := ax1-ax0, ay1-ay0
+	ax0, ay0, ax1, ay1 := px0, py0, px1, py1
 
 	tileW, tileH := BGTileSize(s, areaW, areaH, natW, natH, obj.BgNoRatio)
 	if tileW <= 0 || tileH <= 0 {
 		return
 	}
 
-	repeatX := s.BackgroundRepeat == style.BgRepeatRepeat || s.BackgroundRepeat == style.BgRepeatRepeatX
-	repeatY := s.BackgroundRepeat == style.BgRepeatRepeat || s.BackgroundRepeat == style.BgRepeatRepeatY
+	rx, ry := bgRepeatAxis(s.BackgroundRepeat, true), bgRepeatAxis(s.BackgroundRepeatY, false)
+	// Round rescales the tile so a whole number fits the positioning area.
+	if rx == style.BgRepeatRound {
+		tileW = bgRoundTile(areaW, tileW)
+	}
+	if ry == style.BgRepeatRound {
+		tileH = bgRoundTile(areaH, tileH)
+	}
 
 	ox := bgOrigin(s.BackgroundPosXMode, s.BackgroundPosX, s.BgPosXPct, ax0, areaW, tileW)
 	oy := bgOrigin(s.BackgroundPosYMode, s.BackgroundPosY, s.BgPosYPct, ay0, areaH, tileH)
 
-	xs := bgSpans(ox, tileW, ax0, ax1, repeatX)
-	ys := bgSpans(oy, tileH, ay0, ay1, repeatY)
+	// Repeating tiles cover the whole clip box, phased from the
+	// positioning origin: a padding-box origin on a bordered box still
+	// repeats under the transparent border. Space distributes within the
+	// positioning area itself.
+	sx0, sx1 := cx0, cx1
+	sy0, sy1 := cy0, cy1
+	if rx == style.BgRepeatSpace {
+		sx0, sx1 = ax0, ax1
+	}
+	if ry == style.BgRepeatSpace {
+		sy0, sy1 = ay0, ay1
+	}
+	xs := bgAxisSpans(rx, ox, tileW, sx0, sx1, areaW)
+	ys := bgAxisSpans(ry, oy, tileH, sy0, sy1, areaH)
 	if len(xs)*len(ys) == 0 || len(xs)*len(ys) > maxBgTiles {
 		return
 	}
 	for _, cx := range xs {
 		for _, cy := range ys {
-			vx0, vy0 := math.Max(float64(cx), float64(ax0)), math.Max(float64(cy), float64(ay0))
-			vx1, vy1 := math.Min(float64(cx+tileW), float64(ax1)), math.Min(float64(cy+tileH), float64(ay1))
+			vx0, vy0 := float64(cx), float64(cy)
+			vx1, vy1 := float64(cx+tileW), float64(cy+tileH)
+			// Painting clips to the clip box, which may extend past the
+			// positioning area the tiles phase from.
+			if float32(vx0) < cx0 {
+				vx0 = float64(cx0)
+			}
+			if float32(vy0) < cy0 {
+				vy0 = float64(cy0)
+			}
+			if float32(vx1) > cx1 {
+				vx1 = float64(cx1)
+			}
+			if float32(vy1) > cy1 {
+				vy1 = float64(cy1)
+			}
 			if vx1 <= vx0 || vy1 <= vy0 {
 				continue
 			}
@@ -1211,23 +1263,81 @@ func bgOrigin(mode style.BgPosMode, length float32, isPct bool, base, areaLen, t
 	}
 }
 
-// bgSpans lists the start coordinate of every tile along one axis. A repeating
-// axis phases from origin and fills the whole [min,max) span; a non-repeating
-// axis contributes only the single placed tile.
-func bgSpans(origin, size, lo, hi float32, repeat bool) []float32 {
-	if !repeat {
+// bgRepeatAxis normalizes one repeat mode for the axis being laid out: the
+// legacy repeat-x/repeat-y spellings repeat only on their own axis, while
+// every other mode applies wherever it is stored.
+func bgRepeatAxis(mode style.BgRepeat, isX bool) style.BgRepeat {
+	switch mode {
+	case style.BgRepeatRepeat:
+		return style.BgRepeatRepeat
+	case style.BgRepeatRepeatX:
+		if isX {
+			return style.BgRepeatRepeat
+		}
+		return style.BgRepeatNoRepeat
+	case style.BgRepeatRepeatY:
+		if !isX {
+			return style.BgRepeatRepeat
+		}
+		return style.BgRepeatNoRepeat
+	default:
+		return mode
+	}
+}
+
+// bgRoundTile rescales a tile so a whole number fits the positioning area:
+// the count is the nearest whole number of tiles, at least one, and the
+// tile stretches or squeezes to exactly fill the area with that count.
+func bgRoundTile(areaLen, tileLen float32) float32 {
+	if tileLen <= 0 || areaLen <= 0 {
+		return tileLen
+	}
+	n := int(areaLen/tileLen + 0.5)
+	if n < 1 {
+		n = 1
+	}
+	return areaLen / float32(n)
+}
+
+// bgAxisSpans lists the start coordinate of every tile along one axis. A
+// repeating (or round, which repeats its rescaled tile) axis phases from
+// the origin and fills the whole span; space lays whole unclipped tiles
+// flush with both edges and spreads the leftover evenly, centering a lone
+// tile; anything else contributes only the single placed tile.
+func bgAxisSpans(mode style.BgRepeat, origin, size, lo, hi, areaLen float32) []float32 {
+	switch mode {
+	case style.BgRepeatSpace:
+		if size <= 0 {
+			return nil
+		}
+		n := int(areaLen / size)
+		if n <= 1 {
+			// One tile (or none fitting): center it in the area.
+			return []float32{lo + (areaLen-size)/2}
+		}
+		if n > maxBgTiles {
+			n = maxBgTiles
+		}
+		gap := (areaLen - float32(n)*size) / float32(n-1)
+		out := make([]float32, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, lo+float32(i)*(size+gap))
+		}
+		return out
+	case style.BgRepeatRepeat, style.BgRepeatRound:
+		start := origin
+		// Walk the phase back to the edge so tiling covers the whole area.
+		for i := 0; start > lo && i < maxBgTiles; i++ {
+			start -= size
+		}
+		var out []float32
+		for x := start; x < hi && len(out) < maxBgTiles; x += size {
+			out = append(out, x)
+		}
+		return out
+	default:
 		return []float32{origin}
 	}
-	start := origin
-	// Walk the phase back to the left edge so tiling covers the whole area.
-	for i := 0; start > lo && i < maxBgTiles; i++ {
-		start -= size
-	}
-	var out []float32
-	for x := start; x < hi && len(out) < maxBgTiles; x += size {
-		out = append(out, x)
-	}
-	return out
 }
 
 // paintPlaceholder draws the hint a control shows while it holds no value. The

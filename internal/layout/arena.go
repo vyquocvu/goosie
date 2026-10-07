@@ -113,6 +113,28 @@ func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
 	return
 }
 
+// BgAreaRect resolves one background box to CSS-px edges: the border box,
+// the padding box (inside the border), or the content box (inside the
+// padding). Text falls back to the border box; glyph masking is not
+// implemented.
+func (o *Object) BgAreaRect(box style.BgBox) (x0, y0, x1, y1 float32) {
+	x0, y0, x1, y1 = o.BorderRect()
+	switch box {
+	case style.BgBoxPadding, style.BgBoxContent:
+		x0 += o.BorderLeft
+		y0 += o.BorderTop
+		x1 -= o.BorderRight
+		y1 -= o.BorderBottom
+		if box == style.BgBoxContent {
+			x0 += o.PaddingLeft
+			y0 += o.PaddingTop
+			x1 -= o.PaddingRight
+			y1 -= o.PaddingBottom
+		}
+	}
+	return x0, y0, x1, y1
+}
+
 // BorderH returns the height of the border box. W and H are both content-box
 // dimensions, which is what ContentRect, BorderRect and the explicit-height
 // branch of resolveBoxSizes all assume; this is the one place that spelling is

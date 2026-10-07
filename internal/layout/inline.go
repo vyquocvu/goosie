@@ -670,6 +670,28 @@ func atomicInlineBlock(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox
 // behaves as one unbreakable unit on the line.
 func atomicInlineReplaced(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox, bc *breakCtx) {
 	k := a.Get(id)
+	// Replaced boxes never passed through resolveBoxSizes, so their style
+	// padding/border/margin stayed zero and padding on an <img> silently
+	// vanished. Copy them here the same way so the content box (where
+	// paint draws the pixels) sits inside them.
+	if s := k.Style; s != nil {
+		k.PaddingTop = resolvePctLength(s.PaddingTop, bc.contentW)
+		k.PaddingRight = resolvePctLength(s.PaddingRight, bc.contentW)
+		k.PaddingBottom = resolvePctLength(s.PaddingBottom, bc.contentW)
+		k.PaddingLeft = resolvePctLength(s.PaddingLeft, bc.contentW)
+		k.BorderTop, k.BorderRight = s.BorderTopWidth, s.BorderRightWidth
+		k.BorderBottom, k.BorderLeft = s.BorderBottomWidth, s.BorderLeftWidth
+		margins := [4]float32{s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft}
+		dst := [4]*float32{&k.MarginTop, &k.MarginRight, &k.MarginBottom, &k.MarginLeft}
+		for i, m := range margins {
+			if m == style.MarginAuto {
+				*dst[i] = 0
+			} else {
+				*dst[i] = resolvePctLength(m, bc.contentW)
+			}
+		}
+		k = a.Get(id)
+	}
 	w, h, ok := replacedSize(a, k, bc.contentW)
 	if !ok {
 		return

@@ -32,3 +32,20 @@ func TestParseValueStringWithEscape(t *testing.T) {
 		t.Errorf("expected △, got %q", v.Str)
 	}
 }
+
+// TestStripCDATAMarkers pins XHTML style handling: reference pages wrap
+// <style> in CDATA, and the markers must not fuse onto the first selector
+// (which silently unmatched every rule in the sheet).
+func TestStripCDATAMarkers(t *testing.T) {
+	sh := Parse("<![CDATA[\n  img\n  {\n  height: 50px;\n  width: 50px;\n  }\n  ]]>")
+	if len(sh.Rules) != 1 {
+		t.Fatalf("rules = %d, want 1", len(sh.Rules))
+	}
+	if len(sh.Rules[0].SelectorStrs) != 1 || sh.Rules[0].SelectorStrs[0] != "img" {
+		t.Errorf("selector = %q, want [img]", sh.Rules[0].SelectorStrs)
+	}
+	plain := Parse("img { width: 50px; }")
+	if len(plain.Rules) != 1 || plain.Rules[0].SelectorStrs[0] != "img" {
+		t.Errorf("plain sheet broke: %+v", plain.Rules)
+	}
+}

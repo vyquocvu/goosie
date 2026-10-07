@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -201,6 +203,9 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 	if isMatch {
 		if score >= r.cfg.PassThreshold {
 			tr.Status = "pass"
+		} else if maxDiff, totalAllowed, ok := readFuzzyMeta(dt.AbsPath); ok && fuzzyPasses(testPNG, refPNG, maxDiff, totalAllowed) {
+			tr.Status = "pass"
+			tr.Message = fmt.Sprintf("fuzzy maxDifference=%d totalPixels=%d", maxDiff, totalAllowed)
 		} else {
 			tr.Status = "fail"
 			tr.Message = fmt.Sprintf("pixel match %.1f%% < threshold %.1f%%", score, r.cfg.PassThreshold)
@@ -311,6 +316,113 @@ func absDiff(a, b int) int {
 		return -d
 	}
 	return d
+}
+
+// readFuzzyMeta parses the test's `<meta name="fuzzy">` allowance, e.g.
+// `content="maxDifference=0-96;totalPixels=0-400"`. Multiple metas combine
+// by taking the most lenient allowance of each kind. ok is false when the
+// file declares nothing parseable.
+func readFuzzyMeta(testPath string) (maxDiff, totalAllowed int, ok bool) {
+	data, err := os.ReadFile(testPath)
+	if err != nil {
+		return 0, 0, false
+	}
+	// Find meta tags naming fuzzy (quoted or not), then read the content
+	// value of each. RE2 has no backreferences, so the name check compares
+	// the unquoted value instead.
+	tagRe := regexp.MustCompile(`(?i)<meta[^>]*>`)
+	attrRe := regexp.MustCompile(`(?i)\b(name|content)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))`)
+	for _, tag := range tagRe.FindAllString(string(data), -1) {
+		name, content := "", ""
+		for _, m := range attrRe.FindAllStringSubmatch(tag, -1) {
+			val := m[3]
+			if val == "" {
+				val = m[4]
+			}
+			if val == "" {
+				val = m[5]
+			}
+			if strings.EqualFold(m[1], "name") {
+				name = strings.ToLower(val)
+			} else {
+				content = val
+			}
+		}
+		if name != "fuzzy" || content == "" {
+			continue
+		}
+		for _, part := range strings.Split(content, ";") {
+			kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			lo, hi, found := strings.Cut(strings.TrimSpace(kv[1]), "-")
+			if !found {
+				continue
+			}
+			_ = lo
+			n, err := strconv.Atoi(strings.TrimSpace(hi))
+			if err != nil {
+				continue
+			}
+			switch strings.TrimSpace(strings.ToLower(kv[0])) {
+			case "maxdifference":
+				if n > maxDiff {
+					maxDiff = n
+				}
+				ok = true
+			case "totalpixels":
+				if n > totalAllowed {
+					totalAllowed = n
+				}
+				ok = true
+			}
+		}
+	}
+	return maxDiff, totalAllowed, ok
+}
+
+// fuzzyPasses recounts the comparison with the test's own tolerance: at
+// most totalAllowed pixels may differ by more than maxDiff in any channel.
+// This is the WPT reftest rule for anti-aliasing and rounding slop, applied
+// only when the strict threshold already failed.
+func fuzzyPasses(pathA, pathB string, maxDiff, totalAllowed int) bool {
+	imgA, err := loadPNG(pathA)
+	if err != nil {
+		return false
+	}
+	imgB, err := loadPNG(pathB)
+	if err != nil {
+		return false
+	}
+	boundsA := imgA.Bounds()
+	boundsB := imgB.Bounds()
+	w := min(boundsA.Dx(), boundsB.Dx())
+	h := min(boundsA.Dy(), boundsB.Dy())
+	if w == 0 || h == 0 {
+		return false
+	}
+	over := 0
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r1, g1, b1, _ := imgA.At(boundsA.Min.X+x, boundsA.Min.Y+y).RGBA()
+			r2, g2, b2, _ := imgB.At(boundsB.Min.X+x, boundsB.Min.Y+y).RGBA()
+			d := absDiff(int(r1>>8), int(r2>>8))
+			if v := absDiff(int(g1>>8), int(g2>>8)); v > d {
+				d = v
+			}
+			if v := absDiff(int(b1>>8), int(b2>>8)); v > d {
+				d = v
+			}
+			if d > maxDiff {
+				over++
+				if over > totalAllowed {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 func min(a, b int) int {
