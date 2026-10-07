@@ -823,14 +823,57 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	}
 	// Natural dimensions feed the standard negotiation branches (auto with
 	// partial dims, explicit lengths); the vector branches ignore them.
+	// A source deferring both sides has nothing to size from, so auto
+	// tiles the area instead of the 300x150 fallback.
 	var natW, natH float32
 	if cfg, err := imgdec.Probe(data); err == nil {
 		natW, natH = float32(cfg.Width), float32(cfg.Height)
 	}
+	if obj.Style.BackgroundSize == style.BgSizeAuto && imgdec.SVGDefersBothSides(data) {
+		natW, natH = areaW, areaH
+	}
+	// Cover and contain scale by ratio: without full intrinsic dimensions
+	// use the true viewBox ratio, not pixel-completed dimensions, so an
+	// extreme ratio still sizes to ~zero (contain drops) or astronomic
+	// (cover clamps to the area) instead of a rounded fabrication. Full
+	// dimensions govern their own tile.
+	if bs := obj.Style.BackgroundSize; bs == style.BgSizeCover || bs == style.BgSizeContain {
+		if hasDims, _ := imgdec.SVGIntrinsicKind(data); !hasDims {
+			if rw, rh, ok := imgdec.SVGRatio(data); ok {
+				natW, natH = float32(rw), float32(rh)
+			}
+		}
+	}
 	tileW, tileH := paint.BGTileSize(obj.Style, areaW, areaH, natW, natH, s.bgNoRatio[abs])
 	tw, th := int(tileW+0.5), int(tileH+0.5)
-	if tw <= 0 || th <= 0 || tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
+	if tw <= 0 || th <= 0 {
 		return
+	}
+	if tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
+		// Only cover can overshoot admission (its tile covers the area by
+		// scaling up): shrink the raster ratio-preserving instead of
+		// dropping the background. Paint recomputes the same tile geometry
+		// from the clamped raster's preserved ratio and upscales. Lengths
+		// stay fail-closed so paint cannot negotiate a different tile.
+		if obj.Style.BackgroundSize != style.BgSizeCover {
+			return
+		}
+		scale := float64(imgdec.MaxImageDimension) / float64(tw)
+		if s := float64(imgdec.MaxImageDimension) / float64(th); s < scale {
+			scale = s
+		}
+		tw = int(float64(tw)*scale + 0.5)
+		th = int(float64(th)*scale + 0.5)
+		if tw <= 0 || th <= 0 {
+			// An extreme ratio collapses a side to nothing even clamped:
+			// rasterize the area itself, stretched. Paint places an auto
+			// tile 1:1 at the same area.
+			tw = int(areaW + 0.5)
+			th = int(areaH + 0.5)
+		}
+		if tw <= 0 || th <= 0 || tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
+			return
+		}
 	}
 	pixels := int64(tw) * int64(th)
 	if s.imgReservation == nil || !s.imgReservation.reserve(pixels) {

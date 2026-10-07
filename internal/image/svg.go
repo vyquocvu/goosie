@@ -1107,8 +1107,9 @@ func DecodeSVGAt(data []byte, w, h int) (gimage.Image, error) {
 }
 
 // SVGPreserveNone reports whether the root disables aspect preservation.
-// With it the image never keeps a ratio, so cover/contain/auto all tile the
-// positioning area instead of scaling one. Non-SVG input is false.
+// It affects only how the decoder maps the viewBox into the raster
+// (stretch instead of meet): the viewBox ratio still sizes cover/contain
+// tiles. Non-SVG input is false.
 func SVGPreserveNone(data []byte) bool {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return false
@@ -1161,6 +1162,81 @@ func SVGIntrinsicKind(data []byte) (hasDims, hasRatio bool) {
 				}
 			}
 			return hasDims, hasRatio
+		}
+	}
+}
+
+// SVGDefersBothSides reports whether a standalone SVG leaves both sides
+// indefinite: no absolute width, no absolute height, and no usable viewBox
+// to complete through. Percentages count as indefinite (no viewport here).
+// Callers sizing such sources against a positioning area use the area, not
+// the 300x150 fallback. Non-SVG input reports false.
+func SVGDefersBothSides(data []byte) bool {
+	if err := rejectSVGAttackSurface(data); err != nil {
+		return false
+	}
+	dec := xml.NewDecoder(bytes.NewReader(bytes.TrimSpace(data)))
+	dec.Strict = true
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			if start.Name.Local != "svg" {
+				return false
+			}
+			w, wok := svgLength(svgAttr(start, "width"), 0)
+			h, hok := svgLength(svgAttr(start, "height"), 0)
+			if wok && w > 0 || hok && h > 0 {
+				return false
+			}
+			vb := strings.Fields(svgAttr(start, "viewBox"))
+			if len(vb) == 4 {
+				if vw, err := strconv.ParseFloat(vb[2], 64); err == nil && vw > 0 {
+					if vh, err := strconv.ParseFloat(vb[3], 64); err == nil && vh > 0 {
+						return false
+					}
+				}
+			}
+			return true
+		}
+	}
+}
+
+// SVGRatio reports the root viewBox ratio (width, height) when usable.
+// Partial dimensions complete through this ratio, so cover/contain size
+// from it directly: completing to pixels first would round an extreme
+// ratio into a fabricated one. Non-SVG input or no usable viewBox reports
+// ok=false.
+func SVGRatio(data []byte) (rw, rh float64, ok bool) {
+	if err := rejectSVGAttackSurface(data); err != nil {
+		return 0, 0, false
+	}
+	dec := xml.NewDecoder(bytes.NewReader(bytes.TrimSpace(data)))
+	dec.Strict = true
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return 0, 0, false
+		}
+		if start, ok := tok.(xml.StartElement); ok {
+			if start.Name.Local != "svg" {
+				return 0, 0, false
+			}
+			vb := strings.Fields(svgAttr(start, "viewBox"))
+			if len(vb) != 4 {
+				return 0, 0, false
+			}
+			vw, err := strconv.ParseFloat(vb[2], 64)
+			if err != nil || vw <= 0 {
+				return 0, 0, false
+			}
+			vh, err := strconv.ParseFloat(vb[3], 64)
+			if err != nil || vh <= 0 {
+				return 0, 0, false
+			}
+			return vw, vh, true
 		}
 	}
 }

@@ -60,3 +60,45 @@ func TestSVGZeroViewBoxFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// TestSVGDefersBothSides pins the no-information signal: omitted/percent
+// sides with no viewBox defer to the positioning area, while any absolute
+// side or usable viewBox keeps intrinsic sizing.
+func TestSVGDefersBothSides(t *testing.T) {
+	for _, c := range []struct {
+		doc  string
+		want bool
+	}{
+		{`<svg xmlns="http://www.w3.org/2000/svg"></svg>`, true},
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="50%"></svg>`, true},
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="8px"></svg>`, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg" height="32px"></svg>`, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="8px" height="32px"></svg>`, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 64"></svg>`, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg" width="50%" viewBox="0 0 4 64"></svg>`, false},
+		{`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 8"></svg>`, true},
+		{`<html></html>`, false},
+	} {
+		if got := SVGDefersBothSides([]byte(c.doc)); got != c.want {
+			t.Errorf("SVGDefersBothSides(%q) = %v, want %v", c.doc, got, c.want)
+		}
+	}
+}
+
+// TestSVGRatio pins the true viewBox ratio: cover/contain size from it
+// directly so extreme ratios are not rounded away by pixel completion.
+func TestSVGRatio(t *testing.T) {
+	rw, rh, ok := SVGRatio([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 64"></svg>`))
+	if !ok || rw != 4 || rh != 64 {
+		t.Errorf("SVGRatio(viewBox) = (%v,%v,%v), want (4,64,true)", rw, rh, ok)
+	}
+	if _, _, ok := SVGRatio([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 8"></svg>`)); ok {
+		t.Error("SVGRatio(zero viewBox) ok, want false")
+	}
+	if _, _, ok := SVGRatio([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="8px"></svg>`)); ok {
+		t.Error("SVGRatio(no viewBox) ok, want false")
+	}
+	if _, _, ok := SVGRatio([]byte(`<html></html>`)); ok {
+		t.Error("SVGRatio(non-svg) ok, want false")
+	}
+}
