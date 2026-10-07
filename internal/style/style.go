@@ -922,9 +922,48 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	resolveCurrentColor(&cs, allDecls)
+	resolveShadowColors(&cs, parent, normal, important)
 	resolveCustomFont(&cs, fonts)
 
 	return &cs
+}
+
+// resolveShadowColors finishes box-shadow and text-shadow after every other
+// declaration has spoken. Only the `inherit` keyword settles here: it copies
+// the parent's computed layers, flags included, so a `currentcolor` layer
+// keeps resolving against whichever element uses it. Explicit and omitted
+// `currentcolor` stay flagged through the cascade; paint resolves them against
+// the owning element's final `color`.
+func resolveShadowColors(cs *ComputedStyle, parent *ComputedStyle, normal, important []cascadeEntry) {
+	if v, ok := winningDeclValue("box-shadow", normal, important); ok && strings.EqualFold(strings.TrimSpace(v), "inherit") {
+		cs.BoxShadow = nil
+		if parent != nil && len(parent.BoxShadow) > 0 {
+			cs.BoxShadow = append([]css.BoxShadow(nil), parent.BoxShadow...)
+		}
+	}
+	if v, ok := winningDeclValue("text-shadow", normal, important); ok && strings.EqualFold(strings.TrimSpace(v), "inherit") {
+		cs.TextShadow = nil
+		if parent != nil && len(parent.TextShadow) > 0 {
+			cs.TextShadow = append([]css.TextShadow(nil), parent.TextShadow...)
+		}
+	}
+}
+
+// winningDeclValue reports the value of the declaration that won the cascade
+// for prop: important entries outrank normal ones, and within each pass later
+// entries outrank earlier ones.
+func winningDeclValue(prop string, normal, important []cascadeEntry) (string, bool) {
+	for i := len(important) - 1; i >= 0; i-- {
+		if important[i].decl.Property == prop {
+			return important[i].decl.Value, true
+		}
+	}
+	for i := len(normal) - 1; i >= 0; i-- {
+		if normal[i].decl.Property == prop {
+			return normal[i].decl.Value, true
+		}
+	}
+	return "", false
 }
 
 // resolveCustomFont fills in the rasterizer index of the @font-face family the

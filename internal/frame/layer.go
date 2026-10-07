@@ -31,10 +31,25 @@ type Layer struct {
 
 // NewLayer returns a layer with its own tile grid over the given extent and byte
 // budget. The pool supplies tile buffers and must be sized to the tile size.
+//
+// Tile coordinates start at (0,0) - TileCoord.Rect is origin-agnostic and the
+// rasterizer reads job bounds in content space - so a negative-origin extent
+// (a blurred shadow spilling past the viewport edge, say) is clamped to zero.
+// Otherwise the scroll clamp reads the negative origin as overscroll room and
+// parks the viewport at a negative offset, shifting every blit right by the
+// spill. Content in the clipped spill does not rasterize; that matches the
+// headless path, which has always clamped the same way.
 func NewLayer(id LayerID, bounds Rect, budget int64, pool *BitmapPool) *Layer {
+	bounds = bounds.Canon()
+	if bounds.X0 < 0 {
+		bounds.X0 = 0
+	}
+	if bounds.Y0 < 0 {
+		bounds.Y0 = 0
+	}
 	return &Layer{
 		ID:     id,
-		Bounds: bounds.Canon(),
+		Bounds: bounds,
 		Grid:   NewGrid(bounds, TileSize, budget, pool),
 	}
 }

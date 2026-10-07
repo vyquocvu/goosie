@@ -544,3 +544,18 @@ func TestReleaseHandsBackOnlyWhatTheGridDoesNotOwn(t *testing.T) {
 		t.Fatal("Release of a nil buffer reported a return")
 	}
 }
+
+// TestNewLayerClampsNegativeOrigin pins the tile-space invariant: tile
+// coordinates start at (0,0), so a negative-origin extent (a blurred shadow
+// spilling past the content edge) clamps to zero instead of parking the
+// scroll clamp at a negative offset and shifting every blit.
+func TestNewLayerClampsNegativeOrigin(t *testing.T) {
+	pool := frame.NewBitmapPool(frame.Size{W: 256, H: 256}, 4)
+	l := frame.NewLayer(1, frame.Rect4(-50, -50, 750, 300), 1<<20, pool)
+	if l.Bounds.X0 != 0 || l.Bounds.Y0 != 0 {
+		t.Errorf("bounds origin = (%d,%d), want (0,0)", l.Bounds.X0, l.Bounds.Y0)
+	}
+	if l.Bounds.X1 != 750 || l.Bounds.Y1 != 300 {
+		t.Errorf("bounds far edge = (%d,%d), want (750,300)", l.Bounds.X1, l.Bounds.Y1)
+	}
+}

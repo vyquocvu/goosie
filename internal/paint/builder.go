@@ -2042,9 +2042,11 @@ func radialGradient(g style.RadialGradient, opacity float32) frame.RadialGradien
 }
 
 // paintBoxShadow draws each non-inset box-shadow layer as an offset coloured
-// rectangle behind the element. Blur is approximated with up to three
-// concentric layers at decreasing opacity; a real Gaussian blur is not
-// available in the tile rasterizer.
+// rectangle behind the element. An outer shadow is clipped to the outside of
+// the border box (CSS Backgrounds §7.1.1): the element covers its own
+// interior, so only the ring outside `rect` is emitted. Blur is approximated
+// with up to three concentric layers at decreasing opacity; a real Gaussian
+// blur is not available in the tile rasterizer.
 func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius frame.Corners, opacity float32) {
 	s := obj.Style
 	for _, sh := range s.BoxShadow {
@@ -2062,21 +2064,21 @@ func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius fra
 			rect.X1+dx+spread,
 			rect.Y1+dy+spread,
 		)
-		if shadowRect.Empty() {
+		// A zero-size box still casts when blurred or spread: the layers below
+		// inflate the rect. Only a truly empty shadow (no size, no blur, no
+		// spread) paints nothing.
+		blurLayers := int32(sh.Blur * b.scale)
+		if shadowRect.Empty() && blurLayers <= 0 {
 			continue
 		}
 		color := convertColor(sh.Color)
+		if sh.ColorIsCurrent {
+			color = convertColor(s.Color)
+		}
 		// Approximate blur with concentric layers. Each layer is slightly
 		// larger and more transparent than the one before it.
-		blurLayers := int32(sh.Blur * b.scale)
 		if blurLayers <= 0 {
-			b.list.Append(DisplayCmd{
-				Kind:    CmdFill,
-				Rect:    shadowRect,
-				Color:   color,
-				Radius:  radius,
-				Opacity: opacity,
-			})
+			b.appendShadowRing(shadowRect, rect, radius, color, opacity)
 			continue
 		}
 		// Draw from outermost (most transparent) to innermost (fully opaque).
@@ -2100,14 +2102,48 @@ func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius fra
 			// shadow color (innermost).
 			frac := float32(i) / float32(steps)
 			layerOpacity := opacity * frac
-			b.list.Append(DisplayCmd{
-				Kind:    CmdFill,
-				Rect:    layerRect,
-				Color:   color,
-				Radius:  radius,
-				Opacity: layerOpacity,
-			})
+			b.appendShadowRing(layerRect, rect, radius, color, layerOpacity)
 		}
+	}
+}
+
+// appendShadowRing emits layerRect minus the border-box interior: an outer
+// shadow never paints under its own element. Square corners decompose into
+// four exact strips; rounded corners keep the full rect because the rasterizer
+// has no rounded hole-punch and the element's own background covers the
+// interior on every opaque test.
+func (b *Builder) appendShadowRing(layerRect, borderBox frame.Rect, radius frame.Corners, color frame.Color, opacity float32) {
+	if layerRect.Empty() {
+		return
+	}
+	if !radius.Empty() {
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    layerRect,
+			Color:   color,
+			Radius:  radius,
+			Opacity: opacity,
+		})
+		return
+	}
+	strips := []frame.Rect{
+		// Top and bottom span the full shadow width.
+		frame.Rect4(layerRect.X0, layerRect.Y0, layerRect.X1, borderBox.Y0),
+		frame.Rect4(layerRect.X0, borderBox.Y1, layerRect.X1, layerRect.Y1),
+		// Left and right fill between them.
+		frame.Rect4(layerRect.X0, borderBox.Y0, borderBox.X0, borderBox.Y1),
+		frame.Rect4(borderBox.X1, borderBox.Y0, layerRect.X1, borderBox.Y1),
+	}
+	for _, r := range strips {
+		if r.Empty() {
+			continue
+		}
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    r,
+			Color:   color,
+			Opacity: opacity,
+		})
 	}
 }
 
@@ -2127,6 +2163,9 @@ func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.Compute
 			continue
 		}
 		color := convertColor(sh.Color)
+		if sh.ColorIsCurrent {
+			color = convertColor(s.Color)
+		}
 		b.appendRun(text, shadowRect, s, color, opacity)
 	}
 }

@@ -63,3 +63,22 @@ func TestTableCellHonoursChildMinMaxWidth(t *testing.T) {
 		t.Errorf("max-width td.W = %v, want 40", tds[1].W)
 	}
 }
+
+// TestTableEmptyFixedWidthCellHoldsColumnOpen pins the specified-width floor:
+// an empty cell with `width: 200px` still holds its column at 200, so the
+// auto-width table around it measures 200 instead of collapsing to zero and
+// the row's shadow has a box to cast from.
+func TestTableEmptyFixedWidthCellHoldsColumnOpen(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<table><tr><td style="width: 200px; height: 200px;"></td></tr></table>
+</body></html>`, 800)
+
+	tables := findAllByTag(arena, "table")
+	if len(tables) != 1 {
+		t.Fatalf("found %d tables, want 1", len(tables))
+	}
+	// 200 of column plus the default 2px separated spacing on each side.
+	if !almostEqual(tables[0].W, 204) {
+		t.Errorf("table.W = %v, want 204 (the empty fixed-width cell holds its column open)", tables[0].W)
+	}
+}

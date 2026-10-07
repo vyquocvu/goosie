@@ -146,9 +146,8 @@ func TestParseBoxShadowDefaultColor(t *testing.T) {
 		t.Fatalf("expected 1 shadow, got %d", len(shadows))
 	}
 	s := shadows[0]
-	if s.Color.R != 0 || s.Color.G != 0 || s.Color.B != 0 || s.Color.A != 255 {
-		t.Errorf("default color = (%d,%d,%d,%d), want (0,0,0,255)",
-			s.Color.R, s.Color.G, s.Color.B, s.Color.A)
+	if !s.ColorIsCurrent {
+		t.Errorf("omitted color should mark ColorIsCurrent, got %+v", s)
 	}
 }
 
@@ -257,16 +256,15 @@ func TestParseTextShadowNoBlur(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowDefaultColor verifies default color is opaque black.
+// TestParseTextShadowDefaultColor verifies omitted color marks currentcolor.
 func TestParseTextShadowDefaultColor(t *testing.T) {
 	shadows := css.ParseTextShadow("1px 1px")
 	if len(shadows) != 1 {
 		t.Fatalf("expected 1 shadow, got %d", len(shadows))
 	}
 	s := shadows[0]
-	if s.Color.R != 0 || s.Color.G != 0 || s.Color.B != 0 || s.Color.A != 255 {
-		t.Errorf("default color = (%d,%d,%d,%d), want (0,0,0,255)",
-			s.Color.R, s.Color.G, s.Color.B, s.Color.A)
+	if !s.ColorIsCurrent {
+		t.Errorf("omitted color should mark ColorIsCurrent, got %+v", s)
 	}
 }
 
@@ -294,5 +292,50 @@ func TestParseTextShadowColorFirst(t *testing.T) {
 	}
 	if s.Color.R != 0 || s.Color.G != 0 || s.Color.B != 255 {
 		t.Errorf("Color = (%d,%d,%d), want blue", s.Color.R, s.Color.G, s.Color.B)
+	}
+}
+
+// TestParseBoxShadowOneBadLayerDropsAll pins whole-declaration invalidity: a
+// `none` layer among valid ones drops everything, so a previous valid
+// declaration (not these layers) is what the cascade keeps.
+func TestParseBoxShadowOneBadLayerDropsAll(t *testing.T) {
+	for _, v := range []string{
+		"none, red 0px -100px",
+		"red 0px -100px, none",
+		"red 0px -100px, bogus!!!",
+		"10px",
+		"10px 10px 10px 10px 10px",
+		"10px 10px -5px red",
+		"10px 10px 5px -2px red",
+	} {
+		if got := css.ParseBoxShadow(v); len(got) != 0 {
+			t.Errorf("ParseBoxShadow(%q) = %v, want nil (whole declaration invalid)", v, got)
+		}
+	}
+}
+
+// TestParseTextShadowOneBadLayerDropsAll pins the same rule for text-shadow,
+// including the 3-length cap and negative blur.
+func TestParseTextShadowOneBadLayerDropsAll(t *testing.T) {
+	for _, v := range []string{
+		"1px 1px red, none",
+		"1px 1px 2px 3px red",
+		"1px 1px -2px red",
+		"1px 1px inset red",
+	} {
+		if got := css.ParseTextShadow(v); len(got) != 0 {
+			t.Errorf("ParseTextShadow(%q) = %v, want nil (whole declaration invalid)", v, got)
+		}
+	}
+}
+
+// TestParseShadowCurrentColor pins the currentcolor marker for both an
+// explicit keyword and the omitted-color default.
+func TestParseShadowCurrentColor(t *testing.T) {
+	for _, v := range []string{"10px 5px 5px currentcolor", "-3em 0em"} {
+		got := css.ParseBoxShadow(v)
+		if len(got) != 1 || !got[0].ColorIsCurrent {
+			t.Errorf("ParseBoxShadow(%q) should mark ColorIsCurrent, got %+v", v, got)
+		}
 	}
 }

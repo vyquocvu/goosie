@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // These longhands reach the layout and paint layers but no test fed them, so the code that
@@ -491,5 +494,88 @@ func TestBackgroundShorthandKeepsFirstLayer(t *testing.T) {
 	}
 	if s.BackgroundPosXMode != style.BgPosLength || s.BackgroundPosX != 0 || s.BackgroundPosYMode != style.BgPosLength || s.BackgroundPosY != 0 {
 		t.Errorf("pos = (%v,%v,%v,%v), want lengths 0,0", s.BackgroundPosXMode, s.BackgroundPosX, s.BackgroundPosYMode, s.BackgroundPosY)
+	}
+}
+
+// TestBoxShadowCurrentColorResolvesAgainstOwnColor pins used-value timing:
+// an omitted shadow color stays flagged through the cascade (paint resolves
+// it against the element's own final `color`), and an explicit color survives
+// untouched.
+func TestBoxShadowCurrentColorResolvesAgainstOwnColor(t *testing.T) {
+	s := styleFor(t, `<html><body><span>x</span></body></html>`,
+		`span { color: limegreen; box-shadow: -3em 0em; }`, "span")
+	if len(s.BoxShadow) != 1 {
+		t.Fatalf("expected 1 shadow, got %v", s.BoxShadow)
+	}
+	if !s.BoxShadow[0].ColorIsCurrent {
+		t.Errorf("omitted shadow color should stay flagged, got %+v", s.BoxShadow[0])
+	}
+	s2 := styleFor(t, `<html><body><span>x</span></body></html>`,
+		`span { color: limegreen; box-shadow: 10px 5px 5px red; }`, "span")
+	if len(s2.BoxShadow) != 1 || s2.BoxShadow[0].ColorIsCurrent || s2.BoxShadow[0].Color.R != 255 {
+		t.Errorf("explicit shadow color should survive, got %+v", s2.BoxShadow)
+	}
+}
+
+// TestBoxShadowInheritCopiesParentLayers pins the `inherit` keyword: the
+// child takes the parent's computed layers verbatim.
+func TestBoxShadowInheritCopiesParentLayers(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div><p>x</p></div></body></html>`)
+	sheets := []*css.Stylesheet{css.Parse(`
+		div { box-shadow: 10px 5px 5px red; }
+		p { box-shadow: inherit; }`)}
+	styles := style.Resolve(doc, sheets, nil)
+	var divS, pS *style.ComputedStyle
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		for c := n; c != nil; c = c.NextSibling {
+			if c.Element() {
+				if c.Data == "div" {
+					divS = styles[c.ID]
+				}
+				if c.Data == "p" {
+					pS = styles[c.ID]
+				}
+			}
+			walk(c.FirstChild)
+		}
+	}
+	walk(&doc.Node)
+	if divS == nil || pS == nil {
+		t.Fatalf("missing styles: div=%v p=%v", divS != nil, pS != nil)
+	}
+	if len(pS.BoxShadow) != 1 || pS.BoxShadow[0].OffsetX != 10 || pS.BoxShadow[0].OffsetY != 5 {
+		t.Errorf("inherited shadow = %+v, want parent's 10px/5px layer", pS.BoxShadow)
+	}
+	if pS.BoxShadow[0].Color.R != 255 || pS.BoxShadow[0].ColorIsCurrent {
+		t.Errorf("inherited shadow color = %+v, want resolved red", pS.BoxShadow[0])
+	}
+}
+
+// TestBoxShadowInheritKeepsCurrentColorFlag pins that an inherited
+// `currentcolor` layer stays flagged: paint resolves it against the child,
+// not the parent whose cascade already ran.
+func TestBoxShadowInheritKeepsCurrentColorFlag(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div><p>x</p></div></body></html>`)
+	sheets := []*css.Stylesheet{css.Parse(`
+		div { color: transparent; box-shadow: 10px 5px 5px currentcolor; }
+		p { color: limegreen; box-shadow: inherit; }`)}
+	styles := style.Resolve(doc, sheets, nil)
+	var pS *style.ComputedStyle
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		for c := n; c != nil; c = c.NextSibling {
+			if c.Element() && c.Data == "p" {
+				pS = styles[c.ID]
+			}
+			walk(c.FirstChild)
+		}
+	}
+	walk(&doc.Node)
+	if pS == nil || len(pS.BoxShadow) != 1 {
+		t.Fatalf("expected 1 inherited shadow, got %+v", pS)
+	}
+	if !pS.BoxShadow[0].ColorIsCurrent {
+		t.Errorf("inherited currentcolor layer should stay flagged, got %+v", pS.BoxShadow[0])
 	}
 }

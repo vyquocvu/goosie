@@ -4,7 +4,9 @@ import (
 	"strings"
 )
 
-// BoxShadow is one resolved box-shadow layer.
+// BoxShadow is one resolved box-shadow layer. ColorIsCurrent marks a layer
+// whose color is the element's own `color` (explicit `currentcolor` or the
+// omitted-color default); the style cascade resolves it once `color` is final.
 type BoxShadow struct {
 	OffsetX float32
 	OffsetY float32
@@ -12,6 +14,8 @@ type BoxShadow struct {
 	Spread  float32
 	Color   Color
 	Inset   bool
+	// ColorIsCurrent resolves Color against the element's `color` property.
+	ColorIsCurrent bool
 }
 
 // TextShadow is one resolved text-shadow layer.
@@ -20,10 +24,16 @@ type TextShadow struct {
 	OffsetY float32
 	Blur    float32
 	Color   Color
+	// ColorIsCurrent resolves Color against the element's `color` property.
+	ColorIsCurrent bool
 }
 
 // ParseBoxShadow parses a box-shadow property value into one or more shadow
 // layers. Returns nil when the value is "none" or unparseable.
+//
+// A single invalid layer invalidates the whole declaration (CSS Backgrounds
+// §6.1.1), so `box-shadow: none, red 0 -100px` drops everything rather than
+// painting the valid-looking layers.
 //
 // Syntax: [inset? <offset-x> <offset-y> <blur-radius>? <spread-distance>? <color>?]#
 func ParseBoxShadow(value string) []BoxShadow {
@@ -36,11 +46,11 @@ func ParseBoxShadow(value string) []BoxShadow {
 	for _, layer := range layers {
 		layer = strings.TrimSpace(layer)
 		if layer == "" {
-			continue
+			return nil
 		}
 		s, ok := parseOneBoxShadow(layer)
 		if !ok {
-			continue
+			return nil
 		}
 		shadows = append(shadows, s)
 	}
@@ -48,7 +58,8 @@ func ParseBoxShadow(value string) []BoxShadow {
 }
 
 // ParseTextShadow parses a text-shadow property value into one or more shadow
-// layers. Returns nil when the value is "none" or unparseable.
+// layers. Returns nil when the value is "none" or unparseable. Like
+// ParseBoxShadow, one bad layer drops the whole declaration.
 //
 // Syntax: [<offset-x> <offset-y> <blur-radius>? <color>?]#
 func ParseTextShadow(value string) []TextShadow {
@@ -61,11 +72,11 @@ func ParseTextShadow(value string) []TextShadow {
 	for _, layer := range layers {
 		layer = strings.TrimSpace(layer)
 		if layer == "" {
-			continue
+			return nil
 		}
 		s, ok := parseOneTextShadow(layer)
 		if !ok {
-			continue
+			return nil
 		}
 		shadows = append(shadows, s)
 	}
@@ -110,6 +121,11 @@ func parseOneBoxShadow(s string) (BoxShadow, bool) {
 			shadow.Inset = true
 			continue
 		}
+		if lower == "currentcolor" {
+			shadow.ColorIsCurrent = true
+			colorFound = true
+			continue
+		}
 		if c, ok := ParseColor(lower); ok {
 			shadow.Color = c
 			colorFound = true
@@ -121,11 +137,19 @@ func parseOneBoxShadow(s string) (BoxShadow, bool) {
 			lengths = append(lengths, l)
 			continue
 		}
-		// Unknown token - skip.
+		// Unknown token: the layer - and with it the declaration - is invalid.
+		return shadow, false
 	}
 
-	// Need at least offsetX and offsetY.
-	if len(lengths) < 2 {
+	// Need exactly offsetX and offsetY, plus optional blur and spread.
+	// Negative blur and spread radii are invalid; offsets may be negative.
+	if len(lengths) < 2 || len(lengths) > 4 {
+		return shadow, false
+	}
+	if len(lengths) >= 3 && lengths[2] < 0 {
+		return shadow, false
+	}
+	if len(lengths) >= 4 && lengths[3] < 0 {
 		return shadow, false
 	}
 	shadow.OffsetX = lengths[0]
@@ -137,8 +161,8 @@ func parseOneBoxShadow(s string) (BoxShadow, bool) {
 		shadow.Spread = lengths[3]
 	}
 	if !colorFound {
-		// Default color is currentColor, represented as opaque black here.
-		shadow.Color = Color{R: 0, G: 0, B: 0, A: 255}
+		// Omitted color defaults to currentcolor; the cascade fills it in.
+		shadow.ColorIsCurrent = true
 	}
 	return shadow, true
 }
@@ -152,6 +176,11 @@ func parseOneTextShadow(s string) (TextShadow, bool) {
 
 	for _, tok := range tokens {
 		lower := strings.ToLower(tok)
+		if lower == "currentcolor" {
+			shadow.ColorIsCurrent = true
+			colorFound = true
+			continue
+		}
 		if c, ok := ParseColor(lower); ok {
 			shadow.Color = c
 			colorFound = true
@@ -162,9 +191,15 @@ func parseOneTextShadow(s string) (TextShadow, bool) {
 			lengths = append(lengths, l)
 			continue
 		}
+		// Unknown token: the layer - and with it the declaration - is invalid.
+		return shadow, false
 	}
 
-	if len(lengths) < 2 {
+	if len(lengths) < 2 || len(lengths) > 3 {
+		return shadow, false
+	}
+	// A negative blur radius is invalid; offsets may be negative.
+	if len(lengths) >= 3 && lengths[2] < 0 {
 		return shadow, false
 	}
 	shadow.OffsetX = lengths[0]
@@ -173,7 +208,8 @@ func parseOneTextShadow(s string) (TextShadow, bool) {
 		shadow.Blur = lengths[2]
 	}
 	if !colorFound {
-		shadow.Color = Color{R: 0, G: 0, B: 0, A: 255}
+		// Omitted color defaults to currentcolor; the cascade fills it in.
+		shadow.ColorIsCurrent = true
 	}
 	return shadow, true
 }

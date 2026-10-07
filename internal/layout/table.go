@@ -78,7 +78,7 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	if s.BorderCollapse {
 		available = contentW
 	}
-	colMin, colMax := columnExtents(a, cells, colCount, spacingH, s.BorderCollapse)
+	colMin, colMax := columnExtents(a, cells, colCount, spacingH, s.BorderCollapse, containingW)
 	if resolvePctLength(s.Width, containingW) < 0 {
 		// An auto width shrinks to the content, capped by what the container
 		// allows, which is why a narrow table does not fill the line.
@@ -320,12 +320,12 @@ func cellByRef(cells []tableCell, id ObjectID) *tableCell {
 // columnExtents reports the narrowest and widest each column can go. A spanning
 // cell adds its own share to the columns it covers, since those together have to
 // hold it.
-func columnExtents(a *Arena, cells []tableCell, colCount int, spacingH float32, collapse bool) ([]float32, []float32) {
+func columnExtents(a *Arena, cells []tableCell, colCount int, spacingH float32, collapse bool, containingW float32) ([]float32, []float32) {
 	colMin := make([]float32, colCount)
 	colMax := make([]float32, colCount)
 	for i := range cells {
 		c := &cells[i]
-		c.minW, c.maxW = cellExtents(a, c.id, spacingH, collapse)
+		c.minW, c.maxW = cellExtents(a, c.id, spacingH, collapse, containingW)
 		if c.colSpan == 1 {
 			if c.col < colCount {
 				if c.minW > colMin[c.col] {
@@ -414,7 +414,7 @@ func sumOf(v []float32) float32 {
 // it has to keep room for. A collapsing cell owns only its left edge, so its
 // right border belongs to the next column; a separated one also reserves the gap
 // after it.
-func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool) (float32, float32) {
+func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool, containingW float32) (float32, float32) {
 	obj := a.Get(id)
 	minW, maxW := measureInlineContent(a, id)
 	if obj.Style == nil {
@@ -434,7 +434,27 @@ func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool) (float3
 	if maxW > 0 {
 		maxW += chrome
 	}
+	// A specified cell width floors the column's max-content width: an empty
+	// fixed-width cell still holds its column open (CSS 2.1 §17.5.2.2 treats
+	// the used width as a minimum over the content measure). Percentage and
+	// calc widths resolve against the table's containing block; an
+	// unresolvable one contributes nothing rather than collapsing the column.
+	if w := cellSpecifiedWidth(a, s, containingW); w > maxW {
+		maxW = w
+	}
 	return minW, maxW
+}
+
+// cellSpecifiedWidth reports the cell's declared width as a definite length,
+// or -1 when it is auto or unresolvable here.
+func cellSpecifiedWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
+	if s.WidthCalc.Set {
+		if v, ok := s.WidthCalc.Resolve(containingW, a.ViewportW, a.ViewportH); ok && v >= 0 {
+			return v
+		}
+		return -1
+	}
+	return resolvePctLength(s.Width, containingW)
 }
 
 // outerBorder is the line a collapsing table draws on its right edge: the widest
