@@ -165,10 +165,12 @@ const (
 type BgPosMode uint8
 
 const (
-	BgPosStart  BgPosMode = iota // left/top edge
-	BgPosCenter                  // centred on that axis
-	BgPosEnd                     // right/bottom edge
-	BgPosLength                  // offset in px from the start edge
+	BgPosStart       BgPosMode = iota // left/top edge
+	BgPosCenter                       // centred on that axis
+	BgPosEnd                          // right/bottom edge
+	BgPosLength                       // offset in px from the start edge
+	BgPosStartOffset                  // `left 50px`: offset from the start edge
+	BgPosEndOffset                    // `right 25px`: offset from the end edge
 )
 
 // BoxSizing is the CSS box-sizing property.
@@ -2697,34 +2699,10 @@ func parseBackgroundPosition(cs *ComputedStyle, v string) {
 		return
 	}
 	setX := func(tok string) {
-		switch strings.ToLower(tok) {
-		case "left":
-			cs.BackgroundPosXMode = BgPosStart
-		case "center":
-			cs.BackgroundPosXMode = BgPosCenter
-		case "right":
-			cs.BackgroundPosXMode = BgPosEnd
-		default:
-			if v, pct, ok := parseBgLen(cs, tok); ok {
-				cs.BackgroundPosXMode = BgPosLength
-				cs.BackgroundPosX, cs.BgPosXPct = v, pct
-			}
-		}
+		setPosX(cs, tok)
 	}
 	setY := func(tok string) {
-		switch strings.ToLower(tok) {
-		case "top":
-			cs.BackgroundPosYMode = BgPosStart
-		case "center":
-			cs.BackgroundPosYMode = BgPosCenter
-		case "bottom":
-			cs.BackgroundPosYMode = BgPosEnd
-		default:
-			if v, pct, ok := parseBgLen(cs, tok); ok {
-				cs.BackgroundPosYMode = BgPosLength
-				cs.BackgroundPosY, cs.BgPosYPct = v, pct
-			}
-		}
+		setPosY(cs, tok)
 	}
 	if len(parts) == 1 {
 		lower := strings.ToLower(parts[0])
@@ -2737,6 +2715,15 @@ func parseBackgroundPosition(cs *ComputedStyle, v string) {
 		}
 		return
 	}
+	if len(parts) >= 3 {
+		// Three/four values: `left 50px center`, `right 25px top 75%`.
+		// Each run is a horizontal or vertical keyword plus its offset;
+		// center takes no offset. Either axis may come first.
+		if parsePositionRun(cs, parts) {
+			return
+		}
+		// Falls through to two-token handling when the runs fail.
+	}
 	// Two tokens: order is x then y, but CSS also allows y-first when the first
 	// token is a vertical keyword.
 	if isVerticalKeyword(parts[0]) {
@@ -2746,6 +2733,133 @@ func parseBackgroundPosition(cs *ComputedStyle, v string) {
 		setX(parts[0])
 		setY(parts[1])
 	}
+}
+
+// setPosX sets one horizontal position token: a keyword, or a length
+// offset from the start edge.
+func setPosX(cs *ComputedStyle, tok string) {
+	switch strings.ToLower(tok) {
+	case "left":
+		cs.BackgroundPosXMode = BgPosStart
+	case "center":
+		cs.BackgroundPosXMode = BgPosCenter
+	case "right":
+		cs.BackgroundPosXMode = BgPosEnd
+	default:
+		if v, pct, ok := parseBgLen(cs, tok); ok {
+			cs.BackgroundPosXMode = BgPosLength
+			cs.BackgroundPosX, cs.BgPosXPct = v, pct
+		}
+	}
+}
+
+// setPosY sets one vertical position token: a keyword, or a length
+// offset from the start edge.
+func setPosY(cs *ComputedStyle, tok string) {
+	switch strings.ToLower(tok) {
+	case "top":
+		cs.BackgroundPosYMode = BgPosStart
+	case "center":
+		cs.BackgroundPosYMode = BgPosCenter
+	case "bottom":
+		cs.BackgroundPosYMode = BgPosEnd
+	default:
+		if v, pct, ok := parseBgLen(cs, tok); ok {
+			cs.BackgroundPosYMode = BgPosLength
+			cs.BackgroundPosY, cs.BgPosYPct = v, pct
+		}
+	}
+}
+
+// parsePositionRun reads one horizontal and one vertical run from a 3-4
+// token position: each run is left/right/top/bottom/center plus an optional
+// offset length, in either axis order. A bare length where a keyword belongs
+// fails the run so the caller falls back to two-token handling.
+func parsePositionRun(cs *ComputedStyle, parts []string) bool {
+	type run struct {
+		key, off string
+		isX      bool
+	}
+	isOff := func(s string) bool {
+		_, _, ok := parseBgLen(cs, s)
+		return ok
+	}
+	var runs []run
+	i := 0
+	for i < len(parts) && len(runs) < 2 {
+		k := parts[i]
+		lk := strings.ToLower(k)
+		var isX bool
+		switch lk {
+		case "left", "right":
+			isX = true
+		case "top", "bottom":
+			isX = false
+		case "center":
+			// The first center goes horizontal; the second goes vertical.
+			isX = len(runs) == 0
+		default:
+			return false
+		}
+		r := run{key: k, isX: isX}
+		if i+1 < len(parts) && isOff(parts[i+1]) {
+			// Center never takes an offset; anything else pairs with it.
+			if lk == "center" {
+				return false
+			}
+			r.off = parts[i+1]
+			i++
+		}
+		runs = append(runs, r)
+		i++
+	}
+	if i != len(parts) || len(runs) != 2 || runs[0].isX == runs[1].isX {
+		return false
+	}
+	apply := func(r run) {
+		lk := strings.ToLower(r.key)
+		var start string
+		if r.isX {
+			start = "left"
+		} else {
+			start = "top"
+		}
+		if r.off == "" {
+			if r.isX {
+				setPosX(cs, r.key)
+			} else {
+				setPosY(cs, r.key)
+			}
+			return
+		}
+		v, isPct, ok := parseBgLen(cs, r.off)
+		if !ok {
+			if r.isX {
+				setPosX(cs, r.key)
+			} else {
+				setPosY(cs, r.key)
+			}
+			return
+		}
+		if r.isX {
+			cs.BackgroundPosX, cs.BgPosXPct = v, isPct
+			if lk == start {
+				cs.BackgroundPosXMode = BgPosStartOffset
+			} else {
+				cs.BackgroundPosXMode = BgPosEndOffset
+			}
+		} else {
+			cs.BackgroundPosY, cs.BgPosYPct = v, isPct
+			if lk == start {
+				cs.BackgroundPosYMode = BgPosStartOffset
+			} else {
+				cs.BackgroundPosYMode = BgPosEndOffset
+			}
+		}
+	}
+	apply(runs[0])
+	apply(runs[1])
+	return true
 }
 
 func isVerticalKeyword(tok string) bool {

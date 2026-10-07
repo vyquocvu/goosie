@@ -454,3 +454,25 @@ func TestBackgroundOriginClipBoxes(t *testing.T) {
 		t.Errorf("initials = (%v,%v), want (padding,border)", d.BackgroundOrigin, d.BackgroundClip)
 	}
 }
+
+// TestBackgroundPositionThreeFourValues pins keyword-plus-offset positions:
+// `left 50px` offsets from the start edge, `right 25px` from the end edge,
+// and a percentage offset resolves against the free space.
+func TestBackgroundPositionThreeFourValues(t *testing.T) {
+	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
+		`.x { background-position: left 50px center; }`, "div")
+	if s.BackgroundPosXMode != style.BgPosStartOffset || s.BackgroundPosX != 50 {
+		t.Errorf("x = (%v,%v), want (start-offset,50)", s.BackgroundPosXMode, s.BackgroundPosX)
+	}
+	if s.BackgroundPosYMode != style.BgPosCenter {
+		t.Errorf("y = %v, want center", s.BackgroundPosYMode)
+	}
+	s = styleFor(t, `<html><body><div class="x">x</div></body></html>`,
+		`.x { background-position: right 25px top 75%; }`, "div")
+	if s.BackgroundPosXMode != style.BgPosEndOffset || s.BackgroundPosX != 25 {
+		t.Errorf("x = (%v,%v), want (end-offset,25)", s.BackgroundPosXMode, s.BackgroundPosX)
+	}
+	if s.BackgroundPosYMode != style.BgPosStartOffset || s.BackgroundPosY != 0.75 || !s.BgPosYPct {
+		t.Errorf("y = (%v,%v,%v), want (start-offset,0.75,pct)", s.BackgroundPosYMode, s.BackgroundPosY, s.BgPosYPct)
+	}
+}

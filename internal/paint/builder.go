@@ -218,19 +218,33 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 	}
 	// The widths come off the box, not the style: layout is what decides which
 	// edges a box actually draws, and a collapsed table border is exactly the
-	// case where the two disagree.
+	// case where the two disagree. A nonzero width always paints at least one
+	// device pixel: truncating 0.1px to zero would erase the hairlines the
+	// small-values tests require to be visible.
+	toDevice := func(cssPx float32) int32 {
+		if cssPx <= 0 {
+			return 0
+		}
+		// Floor, with a one-pixel floor for nonzero widths: 1.9px snaps
+		// to 1px (never rounds up to 2px), while 0.1px still paints its
+		// hairline instead of vanishing.
+		if w := int32(cssPx * b.scale); w > 0 {
+			return w
+		}
+		return 1
+	}
 	border := BorderSpec{}
 	if obj.BorderTop > 0 {
-		border.Top = SideSpec{Width: int32(obj.BorderTop), Color: convertColor(s.BorderTopColor)}
+		border.Top = SideSpec{Width: toDevice(obj.BorderTop), Color: convertColor(s.BorderTopColor)}
 	}
 	if obj.BorderRight > 0 {
-		border.Right = SideSpec{Width: int32(obj.BorderRight), Color: convertColor(s.BorderRightColor)}
+		border.Right = SideSpec{Width: toDevice(obj.BorderRight), Color: convertColor(s.BorderRightColor)}
 	}
 	if obj.BorderBottom > 0 {
-		border.Bottom = SideSpec{Width: int32(obj.BorderBottom), Color: convertColor(s.BorderBottomColor)}
+		border.Bottom = SideSpec{Width: toDevice(obj.BorderBottom), Color: convertColor(s.BorderBottomColor)}
 	}
 	if obj.BorderLeft > 0 {
-		border.Left = SideSpec{Width: int32(obj.BorderLeft), Color: convertColor(s.BorderLeftColor)}
+		border.Left = SideSpec{Width: toDevice(obj.BorderLeft), Color: convertColor(s.BorderLeftColor)}
 	}
 	if border.Top.Width > 0 || border.Right.Width > 0 || border.Bottom.Width > 0 || border.Left.Width > 0 {
 		b.list.Append(DisplayCmd{
@@ -1246,18 +1260,31 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 // bgOrigin resolves one background-position axis into a CSS-px coordinate where
 // a tile of the given size begins within a span of `areaLen` starting at `base`.
 // A percentage aligns `length` of the image with `length` of the free space; a
-// length is a plain offset from the start edge.
+// length is a plain offset from the start edge. The three/four-value offsets
+// measure from their own keyword edge instead: `right 25px` sits 25px left of
+// the end, and a percentage offset resolves against the free space.
 func bgOrigin(mode style.BgPosMode, length float32, isPct bool, base, areaLen, tileSize float32) float32 {
+	free := areaLen - tileSize
 	switch mode {
 	case style.BgPosCenter:
-		return base + (areaLen-tileSize)/2
+		return base + free/2
 	case style.BgPosEnd:
-		return base + areaLen - tileSize
+		return base + free
 	case style.BgPosLength:
 		if isPct {
-			return base + (areaLen-tileSize)*length
+			return base + free*length
 		}
 		return base + length
+	case style.BgPosStartOffset:
+		if isPct {
+			return base + free*length
+		}
+		return base + length
+	case style.BgPosEndOffset:
+		if isPct {
+			return base + free - free*length
+		}
+		return base + free - length
 	default: // BgPosStart
 		return base
 	}
