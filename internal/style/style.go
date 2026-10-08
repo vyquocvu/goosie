@@ -149,6 +149,11 @@ const (
 	BgBoxPadding
 	BgBoxContent
 	BgBoxText
+	// BgBoxBorderArea paints only the border area: the border box minus the
+	// padding box. It is a ring, not a rect; paint subtracts the inner box
+	// at emission. Anything rounded falls back to the border box because
+	// the rasterizer has no rounded hole-punch.
+	BgBoxBorderArea
 )
 
 // BgSize is the CSS background-size keyword family.
@@ -2554,6 +2559,8 @@ func parseBackgroundBox(v string, allowText bool) BgBox {
 		return BgBoxPadding
 	case "content-box":
 		return BgBoxContent
+	case "border-area":
+		return BgBoxBorderArea
 	case "text":
 		if allowText {
 			return BgBoxText

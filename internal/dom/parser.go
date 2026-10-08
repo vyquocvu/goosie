@@ -410,7 +410,7 @@ func (tb *treeBuilder) consumeRawText(p *tokenizer, tag string) {
 		p.pos++
 	}
 	if p.pos > start {
-		tb.insertText(p.input[start:p.pos])
+		tb.insertRawText(p.input[start:p.pos])
 	}
 	if p.pos < len(p.input) {
 		idx := strings.Index(p.input[p.pos:], ">")

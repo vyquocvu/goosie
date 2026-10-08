@@ -579,3 +579,15 @@ func TestBoxShadowInheritKeepsCurrentColorFlag(t *testing.T) {
 		t.Errorf("inherited currentcolor layer should stay flagged, got %+v", pS.BoxShadow[0])
 	}
 }
+
+// TestBackgroundClipBorderAreaParses pins the border-area keyword for clip
+// (and origin, where it sizes like the border box): the ring between the
+// border box and the padding box is what shows a background through a
+// transparent border.
+func TestBackgroundClipBorderAreaParses(t *testing.T) {
+	s := styleFor(t, `<html><body><div>x</div></body></html>`,
+		`div { background-clip: border-area; }`, "div")
+	if s.BackgroundClip != style.BgBoxBorderArea {
+		t.Errorf("BackgroundClip = %v, want BgBoxBorderArea", s.BackgroundClip)
+	}
+}

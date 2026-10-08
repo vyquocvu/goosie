@@ -113,13 +113,7 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 					b.paintBoxShadow(obj, rect, radius, opacity)
 				}
 				if obj.Style.BackgroundColor.A > 0 && !clipRect.Empty() {
-					b.list.Append(DisplayCmd{
-						Kind:    CmdFill,
-						Rect:    clipRect,
-						Color:   convertColor(obj.Style.BackgroundColor),
-						Radius:  clipRadius,
-						Opacity: opacity,
-					})
+					b.appendBgFill(obj, clipRect, clipRadius, convertColor(obj.Style.BackgroundColor), opacity)
 				}
 				if g := gradient(obj.Style.BackgroundGradient, opacity); !g.Empty() {
 					b.paintGradientTiles(obj, clipRect, clipRadius, g, false, frame.RadialGradient{})
@@ -1150,30 +1144,44 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 		return
 	}
 	tiles := bgLayerTiles(s, obj, natW, natH, obj.BgNoRatio)
+	// A border-area clip shows only the ring between the border box and the
+	// padding box: each tile's visible slice is cut against the inner box
+	// before source mapping, so every piece keeps its own pixels.
+	var ring *[4]float32
+	if s.BackgroundClip == style.BgBoxBorderArea {
+		px0, py0, px1, py1 := obj.BgAreaRect(style.BgBoxPadding)
+		ring = &[4]float32{px0, py0, px1, py1}
+	}
 	for _, t := range tiles {
-		vx0, vy0, vx1, vy1 := t.vx0, t.vy0, t.vx1, t.vy1
-		// Map the visible destination slice back to the image's source
-		// sub-rectangle, at the tile's scale.
-		sx0 := int32(float64(sb.Min.X) + (vx0-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
-		sx1 := int32(float64(sb.Min.X) + (vx1-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
-		sy0 := int32(float64(sb.Min.Y) + (vy0-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
-		sy1 := int32(float64(sb.Min.Y) + (vy1-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
-		if sx1 <= sx0 {
-			sx1 = sx0 + 1
+		pieces := [][4]float64{{t.vx0, t.vy0, t.vx1, t.vy1}}
+		if ring != nil {
+			pieces = splitSlice([4]float64{t.vx0, t.vy0, t.vx1, t.vy1}, ring)
 		}
-		if sy1 <= sy0 {
-			sy1 = sy0 + 1
+		for _, pc := range pieces {
+			vx0, vy0, vx1, vy1 := pc[0], pc[1], pc[2], pc[3]
+			// Map the visible destination slice back to the image's source
+			// sub-rectangle, at the tile's scale.
+			sx0 := int32(float64(sb.Min.X) + (vx0-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
+			sx1 := int32(float64(sb.Min.X) + (vx1-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
+			sy0 := int32(float64(sb.Min.Y) + (vy0-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
+			sy1 := int32(float64(sb.Min.Y) + (vy1-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
+			if sx1 <= sx0 {
+				sx1 = sx0 + 1
+			}
+			if sy1 <= sy0 {
+				sy1 = sy0 + 1
+			}
+			dst := frame.RectF4(float32(vx0), float32(vy0), float32(vx1), float32(vy1)).ToDevice(b.scale)
+			if dst.Empty() {
+				continue
+			}
+			b.list.Append(DisplayCmd{
+				Kind:    CmdImage,
+				Rect:    dst,
+				Image:   ImageSpec{Src: src, SrcBox: image.Rect(int(sx0), int(sy0), int(sx1), int(sy1))},
+				Opacity: opacity,
+			})
 		}
-		dst := frame.RectF4(float32(vx0), float32(vy0), float32(vx1), float32(vy1)).ToDevice(b.scale)
-		if dst.Empty() {
-			continue
-		}
-		b.list.Append(DisplayCmd{
-			Kind:    CmdImage,
-			Rect:    dst,
-			Image:   ImageSpec{Src: src, SrcBox: image.Rect(int(sx0), int(sy0), int(sx1), int(sy1))},
-			Opacity: opacity,
-		})
 	}
 }
 
@@ -2107,11 +2115,106 @@ func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius fra
 	}
 }
 
-// appendShadowRing emits layerRect minus the border-box interior: an outer
-// shadow never paints under its own element. Square corners decompose into
-// four exact strips; rounded corners keep the full rect because the rasterizer
-// has no rounded hole-punch and the element's own background covers the
-// interior on every opaque test.
+// appendBgFill emits one background-color fill. A border-area clip paints
+// only the ring between the border box and the padding box (square corners;
+// rounded ones keep the full border box because the rasterizer has no
+// rounded hole-punch).
+func (b *Builder) appendBgFill(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, color frame.Color, opacity float32) {
+	if obj.Style.BackgroundClip == style.BgBoxBorderArea && radius.Empty() {
+		px0, py0, px1, py1 := obj.BgAreaRect(style.BgBoxPadding)
+		inner := frame.RectF4(px0, py0, px1, py1).ToDevice(b.scale)
+		for _, r := range subtractRect(clipRect, inner) {
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    r,
+				Color:   color,
+				Opacity: opacity,
+			})
+		}
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    clipRect,
+		Color:   color,
+		Radius:  radius,
+		Opacity: opacity,
+	})
+}
+
+// splitSlice cuts a visible tile slice out of a ring's inner box, in the
+// float CSS-px space bgLayerTiles works in. Non-overlap returns the slice
+// whole; an empty result returns nothing.
+func splitSlice(v [4]float64, inner *[4]float32) [][4]float64 {
+	ix0, iy0 := float64(inner[0]), float64(inner[1])
+	if ix0 < v[0] {
+		ix0 = v[0]
+	}
+	if iy0 < v[1] {
+		iy0 = v[1]
+	}
+	ix1, iy1 := float64(inner[2]), float64(inner[3])
+	if ix1 > v[2] {
+		ix1 = v[2]
+	}
+	if iy1 > v[3] {
+		iy1 = v[3]
+	}
+	if ix0 >= ix1 || iy0 >= iy1 {
+		return [][4]float64{v}
+	}
+	var out [][4]float64
+	for _, r := range [][4]float64{
+		{v[0], v[1], v[2], iy0},
+		{v[0], iy1, v[2], v[3]},
+		{v[0], iy0, ix0, iy1},
+		{ix1, iy0, v[2], iy1},
+	} {
+		if r[2] > r[0] && r[3] > r[1] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// subtractRect cuts inner out of outer: the up-to-four axis-aligned strips
+// that cover outer minus inner. A non-overlapping inner returns outer whole;
+// an empty result returns nothing.
+func subtractRect(outer, inner frame.Rect) []frame.Rect {
+	ix0, iy0 := outer.X0, outer.Y0
+	if inner.X0 > ix0 {
+		ix0 = inner.X0
+	}
+	if inner.Y0 > iy0 {
+		iy0 = inner.Y0
+	}
+	ix1, iy1 := outer.X1, outer.Y1
+	if inner.X1 < ix1 {
+		ix1 = inner.X1
+	}
+	if inner.Y1 < iy1 {
+		iy1 = inner.Y1
+	}
+	if ix0 >= ix1 || iy0 >= iy1 {
+		if outer.Empty() {
+			return nil
+		}
+		return []frame.Rect{outer}
+	}
+	var out []frame.Rect
+	// Top and bottom span the full width; left and right fill between them.
+	for _, r := range []frame.Rect{
+		frame.Rect4(outer.X0, outer.Y0, outer.X1, iy0),
+		frame.Rect4(outer.X0, iy1, outer.X1, outer.Y1),
+		frame.Rect4(outer.X0, iy0, ix0, iy1),
+		frame.Rect4(ix1, iy0, outer.X1, iy1),
+	} {
+		if !r.Empty() {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 func (b *Builder) appendShadowRing(layerRect, borderBox frame.Rect, radius frame.Corners, color frame.Color, opacity float32) {
 	if layerRect.Empty() {
 		return
