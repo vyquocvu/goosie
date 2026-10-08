@@ -95,3 +95,19 @@ func TestBackgroundColorAuthorCSS(t *testing.T) {
 		t.Errorf("BackgroundColor() = %v, want author CSS body background %v", got, want)
 	}
 }
+
+// TestBackgroundColorImpliedHtmlBeatsBody pins canvas resolution for documents
+// that omit the <html> tag: the implied html element carries its background,
+// so html green wins the canvas over body red (not the other way round).
+func TestBackgroundColorImpliedHtmlBeatsBody(t *testing.T) {
+	html := `<!DOCTYPE html><title>t</title><style>html { background-color: green; } body { background-color: red; margin: 0; }</style><p>x</p>`
+	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := s.BackgroundColor()
+	want := frame.RGB(0, 128, 0)
+	if got != want {
+		t.Errorf("BackgroundColor() = %v, want green %v (implied html beats body)", got, want)
+	}
+}

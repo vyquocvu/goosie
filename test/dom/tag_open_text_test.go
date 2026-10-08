@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
@@ -48,5 +49,46 @@ func TestBareLessThanAtEndIsText(t *testing.T) {
 	}
 	if txt := a.TextContent(); !strings.Contains(txt, "trailing <") {
 		t.Errorf(".a text = %q, want the trailing \"<\" kept as text", txt)
+	}
+}
+
+// TestImpliedHtmlElementExists pins the always-there html element: a document
+// that omits <html> still grows one, so `html { background: ... }` matches and
+// canvas resolution sees it. Before the seed, Doc.HTML stayed nil and the
+// body's background wrongly won the canvas.
+func TestImpliedHtmlElementExists(t *testing.T) {
+	doc := domtest.Parse(`<!DOCTYPE html><title>t</title><body><p>x</p></body>`)
+	if doc.HTML == nil || doc.HTML.Data != "html" {
+		t.Fatalf("Doc.HTML = %v, want the implied html element", doc.HTML)
+	}
+	if doc.Body == nil || doc.Head == nil {
+		t.Errorf("Doc.Head = %v Doc.Body = %v, want both implied", doc.Head, doc.Body)
+	}
+}
+
+// TestExplicitHtmlAttrsMerge pins attribute merging: an explicit <html> tag
+// keeps contributing lang/class onto the seeded element instead of being
+// dropped (or duplicating the element).
+func TestExplicitHtmlAttrsMerge(t *testing.T) {
+	doc := domtest.Parse(`<!DOCTYPE html><html lang="en" class="a"><body><p>x</p></body></html>`)
+	if doc.HTML == nil {
+		t.Fatal("no html element")
+	}
+	if doc.HTML.GetAttribute("lang") != "en" {
+		t.Errorf("lang = %q, want en", doc.HTML.GetAttribute("lang"))
+	}
+	count := 0
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Element() && c.Data == "html" {
+				count++
+			}
+			walk(c)
+		}
+	}
+	walk(&doc.Node)
+	if count != 1 {
+		t.Errorf("found %d html elements, want exactly 1", count)
 	}
 }

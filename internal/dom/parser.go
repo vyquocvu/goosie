@@ -157,6 +157,17 @@ var rawTextEndTags = map[string]string{
 	"title":    "</title",
 }
 
+// mergeAttrs adds the token's attributes the element does not already carry.
+// An explicit <html>, <head> or <body> tag that arrives after its element was
+// implied still contributes e.g. lang or class; present attributes win.
+func (tb *treeBuilder) mergeAttrs(n *Node, attrs []Attribute) {
+	for _, a := range attrs {
+		if n.GetAttribute(a.Name) == "" && !n.HasAttribute(a.Name) {
+			n.Attr = append(n.Attr, a)
+		}
+	}
+}
+
 func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bool) *Node {
 	parent := tb.current()
 	if tb.fosterParent && isTableElement(parent) {
@@ -214,6 +225,14 @@ func (tb *treeBuilder) insertText(data string) {
 	if data == "" {
 		return
 	}
+	// A non-whitespace character with no body yet starts it: the "in head"
+	// insertion mode pops the head and reprocesses the token in the body.
+	// Whitespace between head elements stays where it is. Raw-text element
+	// content (style, script, title, textarea) bypasses this through
+	// insertRawText - the CSS or script source must not imply a body.
+	if tb.bodyElem == nil && hasNonSpace(data) {
+		tb.ensureBody()
+	}
 	parent := tb.current()
 	if tb.fosterParent && isTableElement(parent) {
 		parent = tb.findFosterParent()
@@ -235,6 +254,43 @@ func (tb *treeBuilder) insertText(data string) {
 	parent.AppendChild(n)
 }
 
+// insertRawText appends raw-text element content (style, script, title,
+// textarea) to the current node without implying a body: the source text of a
+// <style> block is not page content.
+func (tb *treeBuilder) insertRawText(data string) {
+	if data == "" {
+		return
+	}
+	parent := tb.current()
+	if last := parent.LastChild; last != nil && last.Text() {
+		b := tb.text[last]
+		if b == nil {
+			b = &strings.Builder{}
+			b.WriteString(last.DataContent)
+			tb.text[last] = b
+		}
+		b.WriteString(data)
+		return
+	}
+	if !tb.allowNode(parent) {
+		return
+	}
+	n := tb.doc.NewText(data)
+	parent.AppendChild(n)
+}
+
+// hasNonSpace reports whether s holds anything but HTML whitespace.
+func hasNonSpace(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case ' ', '\t', '\n', '\f', '\r':
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 func (tb *treeBuilder) insertComment(data string) {
 	if !tb.allowNode(tb.current()) {
 		return
@@ -245,6 +301,13 @@ func (tb *treeBuilder) insertComment(data string) {
 
 func (tb *treeBuilder) parse(html string) {
 	p := &tokenizer{input: html, limits: tb.limits}
+
+	// The html element always exists, tag or no tag: seeding it up front is
+	// what the "before html" insertion mode does for a document that omits
+	// <html>. Without it an implied-html document grows no html box at all,
+	// so `html { background: ... }` matches nothing and canvas-background
+	// resolution falls through to the body.
+	tb.insertElement("html", nil, false)
 
 	for p.pos < len(p.input) && tb.err == nil {
 		if p.pos < len(p.input) && p.input[p.pos] == '<' {
@@ -376,11 +439,17 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 	case "html":
 		if tb.htmlElem == nil {
 			tb.insertElement(tag, attrs, false)
+		} else {
+			// The element was seeded (or an earlier tag created it): an
+			// explicit <html> still contributes the attributes it carries.
+			tb.mergeAttrs(tb.htmlElem, attrs)
 		}
 		return
 	case "head":
 		if tb.headElem == nil && tb.htmlElem != nil {
 			tb.insertElement(tag, attrs, false)
+		} else if tb.headElem != nil {
+			tb.mergeAttrs(tb.headElem, attrs)
 		}
 		return
 	case "body":
@@ -389,6 +458,8 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 				tb.popUntil("head")
 			}
 			tb.insertElement(tag, attrs, false)
+		} else {
+			tb.mergeAttrs(tb.bodyElem, attrs)
 		}
 		return
 	case "meta", "link", "base":

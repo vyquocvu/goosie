@@ -1047,15 +1047,19 @@ func (s *Session) Paint(scale float32) *paint.List {
 // If html has a non-transparent background, that is used. Otherwise if body
 // has a non-transparent background, that is used. If both are transparent,
 // white RGB(255, 255, 255) is returned.
+//
+// A display:none root contributes nothing: with no box the background has
+// nothing to propagate from, so html (or body) with display:none reads as
+// absent here.
 func (s *Session) BackgroundColor() frame.Color {
 	if s.Doc != nil {
 		if s.Doc.HTML != nil {
-			if st, ok := s.Styles[s.Doc.HTML.ID]; ok && st.BackgroundColor.A > 0 {
+			if st, ok := s.Styles[s.Doc.HTML.ID]; ok && st.BackgroundColor.A > 0 && st.Display != style.DisplayNone {
 				return frame.RGBA(st.BackgroundColor.R, st.BackgroundColor.G, st.BackgroundColor.B, st.BackgroundColor.A)
 			}
 		}
 		if s.Doc.Body != nil {
-			if st, ok := s.Styles[s.Doc.Body.ID]; ok && st.BackgroundColor.A > 0 {
+			if st, ok := s.Styles[s.Doc.Body.ID]; ok && st.BackgroundColor.A > 0 && st.Display != style.DisplayNone {
 				return frame.RGBA(st.BackgroundColor.R, st.BackgroundColor.G, st.BackgroundColor.B, st.BackgroundColor.A)
 			}
 		}
