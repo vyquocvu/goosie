@@ -15,7 +15,12 @@ const maxImportDepth = 4
 // since the engine has no media evaluation for them: a page that ships its
 // light and dark themes as conditioned imports then resolves to the
 // unconditional one, which is what a default desktop browser loads too.
-func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]bool, depth int) string {
+//
+// Breadth is capped at maxCSSImports distinct targets across the whole
+// expansion (the seen set doubles as the counter) and every fetched payload
+// charges the shared subresource budget; over either, the statement imports
+// nothing rather than failing the document.
+func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]bool, sub *subBudget, depth int) string {
 	if linker == nil || depth > maxImportDepth {
 		return text
 	}
@@ -42,10 +47,10 @@ func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]b
 				end := statementEnd(text, i)
 				if end > 0 {
 					if ref, ok := importRef(text[i:end]); ok {
-						if abs, ok := resolveSheetURL(sheetURL, ref); ok && !seen[abs] {
+						if abs, ok := resolveSheetURL(sheetURL, ref); ok && !seen[abs] && len(seen) < maxCSSImports {
 							seen[abs] = true
-							if sheet, err := linker(sheetURL, abs); err == nil {
-								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, depth+1)
+							if sheet, err := linker(sheetURL, abs); err == nil && sub.take(len(sheet)) {
+								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, sub, depth+1)
 								if importUsable(inner) {
 									b.WriteString(inner)
 								}

@@ -510,7 +510,7 @@ func TestFilePathTraversal(t *testing.T) {
 	}
 }
 
-func TestHTTPSDowngradeRedirectFollowed(t *testing.T) {
+func TestHTTPSDowngradeRedirectRejected(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "downgraded")
 	}))
@@ -523,12 +523,12 @@ func TestHTTPSDowngradeRedirectFollowed(t *testing.T) {
 	roots.AddCert(tlsSrv.Certificate())
 	client := transport.DefaultClientWithTLS(&tls.Config{RootCAs: roots})
 	defer client.Close()
-	resp, err := client.Get(context.Background(), tlsSrv.URL)
-	if err != nil {
-		t.Fatal(err)
+	_, err := client.Get(context.Background(), tlsSrv.URL)
+	if err == nil {
+		t.Fatal("HTTPS-to-HTTP redirect should be rejected")
 	}
-	if string(resp.Body) != "downgraded" {
-		t.Fatalf("body = %q, want %q", resp.Body, "downgraded")
+	if !strings.Contains(err.Error(), "refusing HTTPS-to-HTTP downgrade") {
+		t.Errorf("error = %v, want 'refusing HTTPS-to-HTTP downgrade'", err)
 	}
 }
 

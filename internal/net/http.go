@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -346,6 +347,11 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 		return errors.New("net: redirect requires HTTP(S)")
 	}
+	// A secure origin never downgrades mid-navigation: an https page that
+	// bounces through http exposes the session to the network it just left.
+	if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme == "http" {
+		return errors.New("net: refusing HTTPS-to-HTTP downgrade redirect")
+	}
 	_, err := NormalizeURL(req.URL.String())
 	return err
 }
@@ -356,6 +362,71 @@ type httpClient struct {
 	cache       *responseCache
 	private     bool
 	persistPath string
+	// hsts remembers Strict-Transport-Security max-age per exact host for
+	// the client's lifetime (memory only; persistence rides with profiles
+	// in gate 5). includeSubDomains is not honored: subdomains keep their
+	// own entries rather than inheriting trust they never earned.
+	hstsMu sync.Mutex
+	hsts   map[string]time.Time
+}
+
+// noteHSTS records one response's transport-security policy: an https
+// response bearing max-age pins its exact host until the age lapses, and
+// max-age=0 unpins it. Anything else (http delivery, unparsable age)
+// changes nothing.
+func (c *httpClient) noteHSTS(reqURL *url.URL, header http.Header) {
+	if reqURL == nil || reqURL.Scheme != "https" {
+		return
+	}
+	host := strings.ToLower(reqURL.Hostname())
+	if host == "" {
+		return
+	}
+	maxAge := int64(-1)
+	for _, part := range strings.Split(header.Get("Strict-Transport-Security"), ";") {
+		part = strings.TrimSpace(part)
+		if len(part) > 8 && strings.EqualFold(part[:8], "max-age=") {
+			if n, err := strconv.ParseInt(strings.TrimSpace(part[8:]), 10, 64); err == nil && n >= 0 {
+				maxAge = n
+			}
+		}
+	}
+	if maxAge < 0 {
+		return
+	}
+	c.hstsMu.Lock()
+	defer c.hstsMu.Unlock()
+	if maxAge == 0 {
+		delete(c.hsts, host)
+		return
+	}
+	if c.hsts == nil {
+		c.hsts = make(map[string]time.Time)
+	}
+	c.hsts[host] = time.Now().Add(time.Duration(maxAge) * time.Second)
+}
+
+// upgradeHSTS rewrites an http URL to https when its exact host is pinned.
+// Lapsed pins are swept on sight rather than on a timer.
+func (c *httpClient) upgradeHSTS(u *url.URL) {
+	if u == nil || u.Scheme != "http" {
+		return
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return
+	}
+	c.hstsMu.Lock()
+	defer c.hstsMu.Unlock()
+	exp, ok := c.hsts[host]
+	if !ok {
+		return
+	}
+	if time.Now().After(exp) {
+		delete(c.hsts, host)
+		return
+	}
+	u.Scheme = "https"
 }
 
 func (c *httpClient) Get(ctx context.Context, raw string) (*Response, error) {

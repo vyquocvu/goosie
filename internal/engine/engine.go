@@ -69,6 +69,11 @@ type Session struct {
 	// Reflow releases the previous tiles before reserving the new ones.
 	imgReservation *imageReservation
 	bgVectorUsed   int64
+	// sub budgets raw subresource bytes across linked sheets, @imports,
+	// fonts and images alike: per-class caps bound each family, but only a
+	// shared total stops a page from spending the maximum on every family
+	// at once.
+	sub *subBudget
 
 	// imgMu guards the image maps and pendingImgs. LoadDeferredImages runs on
 	// the caller's goroutine and writes these maps while the session owner
@@ -272,7 +277,7 @@ type fontJob struct {
 // collected automatically, and the UA stylesheet is added internally.
 // The returned session has a fully laid-out arena ready for paint.
 func NewSession(html string, authorCSS []string, viewportW float32, opts ...Option) (*Session, error) {
-	s := &Session{}
+	s := &Session{sub: &subBudget{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -298,7 +303,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		s.jsRT.SetDOM(doc)
 	}
 	s.runScripts()
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW)
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW, s.sub)
 	if err != nil {
 		return nil, err
 	}
@@ -395,6 +400,12 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 			defer func() { <-sem }()
 			fetched, err := s.fontFetch(s.fontBase, jobs[i].srcURL)
 			if err != nil {
+				return
+			}
+			// The shared subresource total prices fonts against the same
+			// bytes stylesheets and images spend: over budget, the face
+			// stays unfetched and text keeps its fallback.
+			if !s.sub.take(len(fetched)) {
 				return
 			}
 			data[i] = fetched
@@ -745,6 +756,13 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 			}
 			data, err := s.fetchImageBytes(u)
 			if err != nil || len(data) == 0 {
+				return
+			}
+			// Raw image bytes join the shared subresource total before
+			// anything decodes them: the pixel reservation bounds decoded
+			// cost, but 256 individually-capped responses could still spend
+			// gigabytes encoded without this.
+			if !s.sub.take(len(data)) {
 				return
 			}
 			// Vector backgrounds without intrinsic dimensions or ratio

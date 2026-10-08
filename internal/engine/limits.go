@@ -481,7 +481,7 @@ type cssSource struct {
 	remote bool
 }
 
-func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, viewportW float32) ([]*css.Stylesheet, error) {
+func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, viewportW float32, sub *subBudget) ([]*css.Stylesheet, error) {
 	budget := &cssBudget{}
 	all := make([]cssSource, 0, len(sources)+8)
 	for _, src := range sources {
@@ -541,7 +541,9 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				defer wg.Done()
 				defer func() { <-sem }()
 				if sheet, err := linker(base, abs); err == nil {
-					texts[i] = &sheet
+					if sub.take(len(sheet)) {
+						texts[i] = &sheet
+					}
 				}
 			}(i, p.abs)
 		}
@@ -551,7 +553,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				continue
 			}
 			text := absolutizeCSSURLs(*texts[i], p.abs)
-			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, 1), remote: true}
+			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, sub, 1), remote: true}
 		}
 	}
 	if err != nil {
@@ -624,6 +626,40 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 		sheets = append(sheets, sheet)
 	}
 	return sheets, nil
+}
+
+// maxSubresourceBytes caps total raw bytes fetched for one document across
+// linked sheets, @import expansion, fonts and images. Per-class caps bound
+// each family, but a page could otherwise spend every maximum at once; the
+// shared budget prices each payload once, whatever its family.
+const maxSubresourceBytes = 128 << 20
+
+// maxCSSImports caps how many distinct @import targets one document may pull
+// in. Depth is already bounded; this bounds breadth: a sheet naming a
+// thousand imports would otherwise fetch them all one deadline at a time.
+const maxCSSImports = 64
+
+// subBudget is a shared byte total with fail-closed accounting: take reports
+// whether n bytes fit, charging them only on success.
+type subBudget struct {
+	mu   sync.Mutex
+	used int64
+}
+
+func (b *subBudget) take(n int) bool {
+	if b == nil {
+		return true
+	}
+	if n < 0 {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.used+int64(n) > maxSubresourceBytes {
+		return false
+	}
+	b.used += int64(n)
+	return true
 }
 
 // maxLinkedSheets bounds how many <link rel=stylesheet> fetches one document

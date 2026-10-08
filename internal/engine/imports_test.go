@@ -19,7 +19,7 @@ func TestExpandCSSImportsSplicesUnconditionedSheetsInPlace(t *testing.T) {
 		return "", errors.New("missing")
 	}
 	in := "@import url(\"theme.css\");\nbody { color: blue }"
-	out := expandCSSImports(linker, "https://e/x/page.css", in, map[string]bool{"https://e/x/page.css": true}, 1)
+	out := expandCSSImports(linker, "https://e/x/page.css", in, map[string]bool{"https://e/x/page.css": true}, &subBudget{}, 1)
 	if !strings.Contains(out, "--c: red") {
 		t.Fatalf("imported sheet missing from:\n%s", out)
 	}
@@ -43,7 +43,7 @@ func TestExpandCSSImportsSkipsConditionedAndCyclicStatements(t *testing.T) {
 		return "", errors.New("missing")
 	}
 	in := "@import url(\"dark.css\") (prefers-color-scheme: dark);\n@import url(\"print.css\") print;\n@import url(\"a.css\");"
-	out := expandCSSImports(linker, "https://e/page.css", in, map[string]bool{}, 1)
+	out := expandCSSImports(linker, "https://e/page.css", in, map[string]bool{}, &subBudget{}, 1)
 	if strings.Contains(out, "dark") || strings.Contains(out, "print") {
 		t.Errorf("conditioned imports must not be fetched:\n%s", out)
 	}
