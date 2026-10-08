@@ -606,7 +606,8 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			continue
 		}
 		if s.BoxSizing != style.BoxSizingBorderBox {
-			basis += s.PaddingLeft + s.PaddingRight + s.BorderLeftWidth + s.BorderRightWidth
+			ubw := s.UsedBorderWidths()
+			basis += s.PaddingLeft + s.PaddingRight + ubw[1] + ubw[3]
 		}
 		clamped := clampFlexBasis(a.Get(items[i].id), basis, contentW)
 		items[i].basis = clamped
@@ -1191,7 +1192,8 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		if declared >= 0 {
 			it.basis = declared
 			if s.BoxSizing != style.BoxSizingBorderBox {
-				it.basis += s.PaddingTop + s.PaddingBottom + s.BorderTopWidth + s.BorderBottomWidth
+				ubw := s.UsedBorderWidths()
+				it.basis += s.PaddingTop + s.PaddingBottom + ubw[0] + ubw[2]
 			}
 			it.declared = true
 		}
@@ -1906,7 +1908,8 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 			}
 		}
 		textW := estimateTextWidth(a, s, text)
-		w = textW + s.PaddingLeft + s.PaddingRight + s.BorderLeftWidth + s.BorderRightWidth
+		ubw := s.UsedBorderWidths()
+		w = textW + s.PaddingLeft + s.PaddingRight + ubw[1] + ubw[3]
 		if w < 80 {
 			w = 80
 		}
@@ -1914,7 +1917,7 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
 			h = lh
 		}
-		h += s.PaddingTop + s.PaddingBottom + s.BorderTopWidth + s.BorderBottomWidth
+		h += s.PaddingTop + s.PaddingBottom + ubw[0] + ubw[2]
 		return w, h, true
 	case "", "text", "password", "email", "tel", "url", "search", "number":
 	default:
@@ -2072,10 +2075,9 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 	obj.PaddingRight = resolvePctLength(s.PaddingRight, containingW)
 	obj.PaddingBottom = resolvePctLength(s.PaddingBottom, containingW)
 	obj.PaddingLeft = resolvePctLength(s.PaddingLeft, containingW)
-	obj.BorderTop = s.BorderTopWidth
-	obj.BorderRight = s.BorderRightWidth
-	obj.BorderBottom = s.BorderBottomWidth
-	obj.BorderLeft = s.BorderLeftWidth
+	ubw := s.UsedBorderWidths()
+	obj.BorderTop, obj.BorderRight = ubw[0], ubw[1]
+	obj.BorderBottom, obj.BorderLeft = ubw[2], ubw[3]
 
 	innerExtra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 

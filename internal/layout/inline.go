@@ -679,8 +679,9 @@ func atomicInlineReplaced(a *Arena, id ObjectID, lines *[]lineBox, current *line
 		k.PaddingRight = resolvePctLength(s.PaddingRight, bc.contentW)
 		k.PaddingBottom = resolvePctLength(s.PaddingBottom, bc.contentW)
 		k.PaddingLeft = resolvePctLength(s.PaddingLeft, bc.contentW)
-		k.BorderTop, k.BorderRight = s.BorderTopWidth, s.BorderRightWidth
-		k.BorderBottom, k.BorderLeft = s.BorderBottomWidth, s.BorderLeftWidth
+		ubw := s.UsedBorderWidths()
+		k.BorderTop, k.BorderRight = ubw[0], ubw[1]
+		k.BorderBottom, k.BorderLeft = ubw[2], ubw[3]
 		margins := [4]float32{s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft}
 		dst := [4]*float32{&k.MarginTop, &k.MarginRight, &k.MarginBottom, &k.MarginLeft}
 		for i, m := range margins {

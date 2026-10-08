@@ -54,6 +54,9 @@ type Session struct {
 	natural  map[dom.NodeID]layout.NaturalSize
 	images   map[dom.NodeID]stdimage.Image
 	bgImages map[dom.NodeID]stdimage.Image
+	// borderImages holds decoded border-image sources by node, attached to
+	// the layout object's BorderImage like backgrounds (never natural).
+	borderImages map[dom.NodeID]stdimage.Image
 	// bgVectorSrc holds raw bytes for vector backgrounds without intrinsic
 	// dimensions or ratio: their raster size is the laid-out tile, known
 	// only after layout, so they decode in the Reflow attachment instead of
@@ -541,6 +544,9 @@ type imgRef struct {
 	id  dom.NodeID
 	abs string
 	bg  bool
+	// border marks a border-image source: fetched and budgeted like a
+	// background (no layout natural size), attached to BorderImage.
+	border bool
 }
 
 // loadImages collects the document's image references during NewSession.
@@ -566,6 +572,7 @@ func (s *Session) initImageMaps() {
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
+	s.borderImages = make(map[dom.NodeID]stdimage.Image)
 	s.bgVectorSrc = make(map[string][]byte)
 	s.bgVectorRef = make(map[dom.NodeID]string)
 	s.bgNoRatio = make(map[string]bool)
@@ -645,10 +652,24 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[bg] = true
 					uniq = append(uniq, bg)
 				}
-				return nil
-			}
-			if abs, ok := resolveSheetURL(s.imgBase, bg); ok {
+			} else if abs, ok := resolveSheetURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
+				if !seen[abs] {
+					seen[abs] = true
+					uniq = append(uniq, abs)
+				}
+			}
+		}
+		if st, ok := s.Styles[n.ID]; ok && st.BorderImage.Source != "" {
+			src := st.BorderImage.Source
+			if strings.HasPrefix(src, "data:") {
+				refs = append(refs, imgRef{id: n.ID, abs: src, bg: true, border: true})
+				if !seen[src] {
+					seen[src] = true
+					uniq = append(uniq, src)
+				}
+			} else if abs, ok := resolveSheetURL(s.imgBase, src); ok {
+				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true, border: true})
 				if !seen[abs] {
 					seen[abs] = true
 					uniq = append(uniq, abs)
@@ -782,12 +803,21 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 	for _, r := range refs {
 		if r.bg {
 			if _, ok := s.bgVectorSrc[r.abs]; ok {
+				// Intrinsic-less SVGs deferred for tile-size raster have
+				// no border-image use; drop them instead of misattaching.
+				if r.border {
+					continue
+				}
 				s.bgVectorRef[r.id] = r.abs
 				continue
 			}
 		}
 		img, ok := byURL[r.abs]
 		if !ok {
+			continue
+		}
+		if r.border {
+			s.borderImages[r.id] = img
 			continue
 		}
 		if r.bg {
@@ -952,6 +982,9 @@ func (s *Session) Reflow(viewportW float32) error {
 				}
 				if img, ok := s.bgImages[n.ID]; ok {
 					candidate.Objects[i].BgImage = img
+				}
+				if img, ok := s.borderImages[n.ID]; ok {
+					candidate.Objects[i].BorderImage = img
 				}
 				// Vector backgrounds without intrinsics rasterize here, at
 				// the laid-out tile size, because only now is the tile

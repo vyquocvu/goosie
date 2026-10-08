@@ -591,3 +591,22 @@ func TestBackgroundClipBorderAreaParses(t *testing.T) {
 		t.Errorf("BackgroundClip = %v, want BgBoxBorderArea", s.BackgroundClip)
 	}
 }
+
+// TestUsedBorderWidthsZeroesStylelessSides pins CSS 2.1 8.5.3: none/hidden
+// (or absent) style forces the used width to zero while the declared width
+// stays put for number-multiple resolutions.
+func TestUsedBorderWidthsZeroesStylelessSides(t *testing.T) {
+	s := styleFor(t, `<html><body><div>x</div></body></html>`,
+		`div { border: red 100px; }`, "div")
+	if got := s.UsedBorderWidths(); got != [4]float32{0, 0, 0, 0} {
+		t.Errorf("used = %v, want zeros (no border style)", got)
+	}
+	if s.BorderTopWidth != 100 {
+		t.Errorf("declared width = %v, want 100 (computed value preserved)", s.BorderTopWidth)
+	}
+	s2 := styleFor(t, `<html><body><div>x</div></body></html>`,
+		`div { border: solid red 100px; }`, "div")
+	if got := s2.UsedBorderWidths(); got != [4]float32{100, 100, 100, 100} {
+		t.Errorf("used = %v, want 100s (solid style)", got)
+	}
+}

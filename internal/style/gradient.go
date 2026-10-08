@@ -94,11 +94,11 @@ func parseLinearGradientArgs(args string) Gradient {
 	}
 	stops := make([]GradientStop, 0, len(parts))
 	for _, p := range parts {
-		s, ok := parseGradientStop(p)
+		ss, ok := parseGradientStops(p)
 		if !ok {
 			return Gradient{}
 		}
-		stops = append(stops, s)
+		stops = append(stops, ss...)
 	}
 	g.Stops = distributeStops(stops)
 	return g
@@ -154,11 +154,11 @@ func parseRadialGradientArgs(args string) RadialGradient {
 parseStops:
 	stops := make([]GradientStop, 0, len(parts)-stopStart)
 	for _, p := range parts[stopStart:] {
-		s, ok := parseGradientStop(p)
+		ss, ok := parseGradientStops(p)
 		if !ok {
 			return RadialGradient{}
 		}
-		stops = append(stops, s)
+		stops = append(stops, ss...)
 	}
 	g.Stops = distributeStops(stops)
 	return g
@@ -244,32 +244,56 @@ func gradientKeywordAngle(s string) (float32, bool) {
 // parseGradientStop reads one stop: a colour and an optional percentage
 // position.
 func parseGradientStop(s string) (GradientStop, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	stops, ok := parseGradientStops(s)
+	if !ok || len(stops) != 1 {
 		return GradientStop{}, false
 	}
+	return stops[0], true
+}
+
+// parseGradientStops reads one stop, expanding a double position
+// (color 25% 75%) into the solid band it denotes: two stops sharing the
+// colour at each position. Single positions and bare colours behave as
+// before.
+func parseGradientStops(s string) ([]GradientStop, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
 	toks := splitOutsideParens(s)
-	at := float32(-1)
-	if n := len(toks); n > 1 {
-		last := toks[n-1]
-		if strings.HasSuffix(last, "%") {
-			p, err := strconv.ParseFloat(strings.TrimSuffix(last, "%"), 64)
-			if err != nil {
-				return GradientStop{}, false
-			}
-			at = float32(p / 100)
-			toks = toks[:n-1]
+	var pos []float32
+	for len(toks) > 1 {
+		last := toks[len(toks)-1]
+		if !strings.HasSuffix(last, "%") {
+			break
+		}
+		p, err := strconv.ParseFloat(strings.TrimSuffix(last, "%"), 64)
+		if err != nil {
+			return nil, false
+		}
+		pos = append([]float32{float32(p / 100)}, pos...)
+		toks = toks[:len(toks)-1]
+		if len(pos) == 2 {
+			break
 		}
 	}
 	c, ok := css.ParseColor(strings.Join(toks, " "))
 	if !ok {
-		return GradientStop{}, false
+		return nil, false
 	}
-	if at < 0 {
+	switch len(pos) {
+	case 0:
 		// Unpositioned: distributeStops gives it an even share of the line.
-		return GradientStop{Color: c, At: -1}, true
+		return []GradientStop{{Color: c, At: -1}}, true
+	case 1:
+		return []GradientStop{{Color: c, At: pos[0]}}, true
+	default:
+		lo, hi := pos[0], pos[1]
+		if hi < lo {
+			hi = lo
+		}
+		return []GradientStop{{Color: c, At: lo}, {Color: c, At: hi}}, true
 	}
-	return GradientStop{Color: c, At: at}, true
 }
 
 // distributeStops fills in the positions the declaration left out. The ends

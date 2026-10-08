@@ -57,6 +57,11 @@ type Object struct {
 	// position.
 	BgImage any
 
+	// BorderImage carries the decoded pixels of this box's border-image
+	// source, if any. Paint nine-slices it against the style's slice/width
+	// repeat; without a decoded image normal borders paint.
+	BorderImage any
+
 	// BgVector marks a vector background rasterized at tile size after layout
 	// instead of at decode time (no intrinsic dimensions, or a mapping that
 	// depends on the tile). Paint negotiates the same tile it decoded at.

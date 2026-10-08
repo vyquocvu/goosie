@@ -142,7 +142,7 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 				// The column width counts the cell's own left edge but not its
 				// right one, which the cell beside it draws. Hand the extra back
 				// to the content box, which is where the collapsed model puts it.
-				cellW += cell.Style.BorderRightWidth
+				cellW += cell.Style.UsedBorderWidths()[1]
 			}
 			blockInto(a, cid, cellW)
 			inlineInto(a, cid)
@@ -421,10 +421,11 @@ func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool, contain
 		return minW, maxW
 	}
 	s := obj.Style
+	ubw := s.UsedBorderWidths()
 	chrome := resolvePctLength(s.PaddingLeft, obj.W) + resolvePctLength(s.PaddingRight, obj.W) +
-		s.BorderLeftWidth + s.BorderRightWidth
+		ubw[3] + ubw[1]
 	if collapse {
-		chrome = resolvePctLength(s.PaddingLeft, obj.W) + resolvePctLength(s.PaddingRight, obj.W) + s.BorderLeftWidth
+		chrome = resolvePctLength(s.PaddingLeft, obj.W) + resolvePctLength(s.PaddingRight, obj.W) + ubw[3]
 	} else {
 		chrome += spacingH
 	}
@@ -462,7 +463,7 @@ func cellSpecifiedWidth(a *Arena, s *style.ComputedStyle, containingW float32) f
 func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32 {
 	best := float32(0)
 	if s := a.Get(id).Style; s != nil {
-		best = s.BorderRightWidth
+		best = s.UsedBorderWidths()[1]
 	}
 	for i := range cells {
 		c := &cells[i]
@@ -470,8 +471,8 @@ func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32
 			continue
 		}
 		obj := a.Get(c.id)
-		if obj.Style != nil && obj.Style.BorderRightWidth > best {
-			best = obj.Style.BorderRightWidth
+		if obj.Style != nil && obj.Style.UsedBorderWidths()[1] > best {
+			best = obj.Style.UsedBorderWidths()[1]
 		}
 	}
 	return best
@@ -482,7 +483,7 @@ func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32
 func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) float32 {
 	best := float32(0)
 	if s := a.Get(id).Style; s != nil {
-		best = s.BorderBottomWidth
+		best = s.UsedBorderWidths()[2]
 	}
 	for i := range cells {
 		c := &cells[i]
@@ -490,8 +491,8 @@ func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) float
 			continue
 		}
 		obj := a.Get(c.id)
-		if obj.Style != nil && obj.Style.BorderBottomWidth > best {
-			best = obj.Style.BorderBottomWidth
+		if obj.Style != nil && obj.Style.UsedBorderWidths()[2] > best {
+			best = obj.Style.UsedBorderWidths()[2]
 		}
 	}
 	return best

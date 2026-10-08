@@ -287,6 +287,12 @@ type ComputedStyle struct {
 	BorderBottomColor css.Color
 	BorderLeftColor   css.Color
 
+	// BorderImage carries the parsed border-image longhands. Source empty
+	// means no image (none/unparseable) and normal borders paint. The engine
+	// resolves Source against the document base and fetches it like a
+	// background image; paint nine-slices the decoded pixels.
+	BorderImage css.BorderImage
+
 	// BorderRadius is each corner's horizontal and vertical radius in the order
 	// top-left, top-right, bottom-right, bottom-left. A percentage arrives still
 	// encoded as one, the way every other box length does: a radius is a share of
@@ -526,6 +532,20 @@ func DefaultStyle() ComputedStyle {
 //
 // Layout measures with this and paint draws with it, which is the only way a
 // word's width and its glyphs can't disagree. CSS weights are coarser here than
+// UsedBorderWidths reports the border thicknesses layout and paint consume:
+// a none, hidden, or absent style forces its side to zero (CSS 2.1 §8.5.3)
+// while the declared widths stay on the fields.
+func (s *ComputedStyle) UsedBorderWidths() [4]float32 {
+	w := [4]float32{s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth}
+	st := [4]string{s.BorderTopStyle, s.BorderRightStyle, s.BorderBottomStyle, s.BorderLeftStyle}
+	for i, t := range st {
+		if t == "" || t == "none" || t == "hidden" {
+			w[i] = 0
+		}
+	}
+	return w
+}
+
 // in a browser with a variable font - this engine loads one regular and one bold
 // file per family - so anything at or above 700 is the bold face. Oblique takes
 // the italic face rather than synthesizing a slant.
@@ -1287,6 +1307,66 @@ type specificity struct {
 	inline  bool
 }
 
+// mergeBorderImage folds one longhand's parse into the shorthand state: only
+// the fields that longhand owns move, so border-image-slice never clobbers a
+// previously declared width.
+func mergeBorderImage(dst *css.BorderImage, src css.BorderImage) {
+	if src.HasSlice {
+		dst.Slice, dst.SlicePct, dst.HasSlice, dst.Fill = src.Slice, src.SlicePct, src.HasSlice, src.Fill
+	}
+	if src.HasWidth {
+		dst.Width, dst.WidthU, dst.HasWidth = src.Width, src.WidthU, src.HasWidth
+	}
+	if src.HasOutset {
+		dst.Outset, dst.OutsetN, dst.HasOutset = src.Outset, src.OutsetN, src.HasOutset
+	}
+	if src.HasRepeat {
+		dst.RepeatX, dst.RepeatY, dst.HasRepeat = src.RepeatX, src.RepeatY, src.HasRepeat
+	}
+}
+
+// applyBorderImageShorthand parses border-image: source slice / width /
+// outset repeat into the longhands. Per CSS the shorthand resets every
+// longhand first, so the parse lands on a zero value, not merged. An invalid
+// shorthand drops the whole declaration.
+func applyBorderImageShorthand(cs *ComputedStyle, value string) {
+	source, slice, width, outset, repeat, ok := css.ParseBorderImageShorthand(value)
+	if !ok {
+		return
+	}
+	var bi css.BorderImage
+	bi.Source = css.ParseBorderImageSource(source)
+	if slice != "" {
+		s, ok := css.ParseBorderImageSlice(slice)
+		if !ok {
+			return
+		}
+		mergeBorderImage(&bi, s)
+	}
+	if width != "" {
+		w, ok := css.ParseBorderImageWidth(width)
+		if !ok {
+			return
+		}
+		mergeBorderImage(&bi, w)
+	}
+	if outset != "" {
+		o, ok := css.ParseBorderImageOutset(outset)
+		if !ok {
+			return
+		}
+		mergeBorderImage(&bi, o)
+	}
+	if repeat != "" {
+		r, ok := css.ParseBorderImageRepeat(repeat)
+		if !ok {
+			return
+		}
+		mergeBorderImage(&bi, r)
+	}
+	cs.BorderImage = bi
+}
+
 func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, parentFontSize float32, fonts *CustomFonts) {
 	switch prop {
 	case "display":
@@ -1536,7 +1616,26 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseCornerRadius(cs, &cs.BorderRadius[2], value)
 	case "border-bottom-left-radius":
 		parseCornerRadius(cs, &cs.BorderRadius[3], value)
-
+	case "border-image-source":
+		cs.BorderImage.Source = css.ParseBorderImageSource(value)
+	case "border-image-slice":
+		if bi, ok := css.ParseBorderImageSlice(value); ok {
+			mergeBorderImage(&cs.BorderImage, bi)
+		}
+	case "border-image-width":
+		if bi, ok := css.ParseBorderImageWidth(value); ok {
+			mergeBorderImage(&cs.BorderImage, bi)
+		}
+	case "border-image-outset":
+		if bi, ok := css.ParseBorderImageOutset(value); ok {
+			mergeBorderImage(&cs.BorderImage, bi)
+		}
+	case "border-image-repeat":
+		if bi, ok := css.ParseBorderImageRepeat(value); ok {
+			mergeBorderImage(&cs.BorderImage, bi)
+		}
+	case "border-image":
+		applyBorderImageShorthand(cs, value)
 	case "top":
 		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize)
 		cs.HasTop = lengthSpecified(parsed)
