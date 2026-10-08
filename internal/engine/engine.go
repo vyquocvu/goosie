@@ -1321,6 +1321,50 @@ func (s *Session) Find(query string) []Match {
 	return matches
 }
 
+// ScrollToID scrolls to the first element with the given ID in the document,
+// returning its Y coordinate (CSS pixels). If no matching element is found,
+// returns 0. Search order is document order for first-match semantics.
+func (s *Session) ScrollToID(targetID string) float32 {
+	if s.Arena == nil || targetID == "" {
+		return 0
+	}
+
+	objs := s.Arena.Objects
+	var walk func(layout.ObjectID)
+	foundY := float32(0)
+	
+	walk = func(objID layout.ObjectID) {
+		if objID == 0 || int(objID) >= len(objs) {
+			return
+		}
+		obj := &objs[objID]
+		
+		// Check this node for matching ID attribute
+		if obj.Node != nil {
+			for _, attr := range obj.Node.Attr {
+				if strings.EqualFold(attr.Name, "id") && attr.Value == targetID {
+					// Found target: get its top position
+					_, y, _, _ := obj.BorderRect()
+					if y > 0 {
+						foundY = y
+					}
+					return
+				}
+			}
+		}
+		
+		// Continue walking children (first match wins in document order)
+		if foundY == 0 {
+			for k := obj.FirstKid; k != 0 && foundY == 0; k = objs[k].NextSibling {
+				walk(k)
+			}
+		}
+	}
+	
+	walk(1)
+	return foundY
+}
+
 // matchRect maps a match spanning joined-string offsets [start, end) back onto
 // the word boxes it covers. Edges inside a box are interpolated proportionally
 // to character position, which is exact for full-word matches.

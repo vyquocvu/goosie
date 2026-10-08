@@ -636,7 +636,7 @@ func (f *framePath) applyNavResult(result navResult) {
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     result.serial,
 			Layers:     []*frame.Layer{result.layer},
-			Background: result.bgColor,
+			Background: tab.BGColor(),
 		})
 		if !result.noHistory {
 			// A fresh navigation opens at the top: without the reset the
@@ -648,6 +648,11 @@ func (f *framePath) applyNavResult(result navResult) {
 				Offset: frame.Point{},
 				Size:   f.config.devSize(),
 			})
+			
+			// If the URL has a fragment (#anchor), scroll to the element
+			if href := result.url; strings.Contains(href, "#") {
+				f.scrollToAnchor(tab, href)
+			}
 		}
 		f.publishAccessibility()
 	}
@@ -797,6 +802,35 @@ func (f *framePath) reloadTab() {
 		return
 	}
 	f.navigateTabNoHistory(tab.URL())
+}
+
+// scrollToAnchor scrolls the active tab's viewport to an element with matching ID.
+// It extracts the fragment from the URL and finds the corresponding layout object.
+func (f *framePath) scrollToAnchor(tab *tabs.Tab, href string) {
+	sess := tab.Session()
+	if sess == nil {
+		return
+	}
+	
+	// Extract fragment from URL
+	u, err := url.Parse(href)
+	if err != nil {
+		return
+	}
+	fragment := u.Fragment
+	if fragment == "" {
+		return
+	}
+	
+	// Find target element by scrolling to its position
+	targetY := sess.ScrollToID(fragment)
+	if targetY > 0 {
+		tab.SetScrollY(int32(targetY))
+		f.sched.SetViewport(frame.Viewport{
+			Offset: frame.Point{X: 0, Y: int32(targetY)},
+			Size:   f.config.devSize(),
+		})
+	}
 }
 
 // applySessionState rebuilds the tab set from a saved session. The first saved
