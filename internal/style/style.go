@@ -488,6 +488,37 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	return &s
 }
 
+// AnonymousTableStyle builds the style for a synthesized table row or cell.
+// Like AnonymousBlockStyle it inherits text properties from the parent but
+// owns no box decoration of its own: borders, backgrounds, shadows and
+// images stay on the real elements, so the wrapper neither doubles their
+// paint nor invents spacing.
+func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
+	var s ComputedStyle
+	if parent == nil {
+		s = DefaultStyle()
+	} else {
+		s = *parent
+	}
+	s.Display = d
+	s.Position = PositionStatic
+	s.Width = -1
+	s.Height = -1
+	s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight = 0, 0, -1, -1
+	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
+	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
+	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
+	s.BorderRadius = [4][2]float32{}
+	s.BackgroundColor = css.Color{}
+	s.BackgroundImage = ""
+	s.BackgroundGradient = Gradient{}
+	s.BackgroundRadialGradient = RadialGradient{}
+	s.BoxShadow = nil
+	s.TextShadow = nil
+	s.BorderImage = css.BorderImage{}
+	return &s
+}
+
 // DefaultStyle returns the initial computed style with CSS defaults.
 func DefaultStyle() ComputedStyle {
 	return ComputedStyle{

@@ -177,9 +177,12 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// Inline content that shares a container with block children needs a block
 	// box of its own to occupy a slot in the flow. A flex or grid container
 	// blockifies its children instead, so only its text runs need a wrapper.
+	// Tables are exempt entirely: layoutTable generates missing rows and
+	// cells itself, and the generic pass would box table-column elements
+	// and stray text into block wrappers that hide the grid from it.
 	if blockifiesChildren(obj.Style) {
 		wrapTextRuns(a, id)
-	} else {
+	} else if !isTableStructure(obj.Style) {
 		wrapInlineRuns(a, id)
 	}
 	// Re-fetch: the anonymous boxes just allocated may have grown the arena

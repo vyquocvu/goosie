@@ -82,3 +82,64 @@ func TestTableEmptyFixedWidthCellHoldsColumnOpen(t *testing.T) {
 		t.Errorf("table.W = %v, want 204 (the empty fixed-width cell holds its column open)", tables[0].W)
 	}
 }
+
+// TestEmptyTableKeepsPaddingBox pins that a column-less table still paints
+// its padding and borders: W/H stay content-sized (zero) so BorderRect adds
+// the padding exactly once, yielding a 312x312 border box for 155px padding
+// and a 1px border instead of a zero-height collapse.
+func TestEmptyTableKeepsPaddingBox(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<div style="display: table; background: green; border: 1px solid black; padding: 155px;"></div>
+</body></html>`, 800)
+
+	tables := findAllByTag(arena, "div")
+	if len(tables) != 1 {
+		t.Fatalf("found %d tables, want 1", len(tables))
+	}
+	if tables[0].W != 0 || tables[0].H != 0 {
+		t.Errorf("table content = %vx%v, want 0x0 (no columns)", tables[0].W, tables[0].H)
+	}
+	x0, y0, x1, y1 := tables[0].BorderRect()
+	if x1-x0 != 312 || y1-y0 != 312 {
+		t.Errorf("table border box = %vx%v, want 312x312", x1-x0, y1-y0)
+	}
+}
+
+// TestAnonymousTableBoxesWrapStrayContent pins missing-structure generation:
+// blocks directly under a table gain an anonymous row and cell, so an
+// <html display:table> wrapping body content still grids instead of
+// collapsing to zero.
+func TestAnonymousTableBoxesWrapStrayContent(t *testing.T) {
+	arena := session(t, `<html style="display: table; border: 10px solid green; border-spacing: 0; padding: 0; margin: auto;"><body style="padding: 0; margin: 0;"><div style="width:200px;height:300px;display:inline-block;"></div><div style="width:80px;height:300px;display:inline-block;"></div></body></html>`, 800)
+
+	html := findAllByTag(arena, "html")
+	if len(html) != 1 {
+		t.Fatalf("found %d html elements, want 1", len(html))
+	}
+	// Content 280 plus the 20px border, centred in the 800 viewport.
+	if !almostEqual(html[0].W, 280) {
+		t.Errorf("table.W = %v, want 280 (both inline-blocks side by side)", html[0].W)
+	}
+	if !almostEqual(html[0].X, 250) {
+		t.Errorf("table.X = %v, want 250 (margin auto centres)", html[0].X)
+	}
+}
+
+// TestColDefinitionsSizeTheGrid pins <col> handling two ways: definitions
+// floor their columns (three 50px cols hold 150 even with an empty cell) and
+// extend the grid past the cells, so a colspan=4 cell in a 3-col grid still
+// fits instead of outgrowing it. The void </col> close must not eject the
+// table either (pinned in test/dom).
+func TestColDefinitionsSizeTheGrid(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<table style="border-collapse: collapse; table-layout: fixed;"><col style="width: 50px;"><col style="width: 50px;"><col style="width: 50px;"><td colspan="1" style="height: 50px;"></td></table>
+</body></html>`, 800)
+
+	tables := findAllByTag(arena, "table")
+	if len(tables) != 1 {
+		t.Fatalf("found %d tables, want 1", len(tables))
+	}
+	if tables[0].W < 140 {
+		t.Errorf("table.W = %v, want ~150 (three cols hold the grid open)", tables[0].W)
+	}
+}

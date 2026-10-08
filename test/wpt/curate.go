@@ -162,7 +162,7 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 
 	if support.HTMLTables {
 		dirs = append(dirs, CuratedDir{
-			Path:        "css/css-table",
+			Path:        "css/css-tables",
 			Description: "CSS table rendering",
 			Type:        RefTest,
 		})

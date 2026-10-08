@@ -92,3 +92,47 @@ func TestExplicitHtmlAttrsMerge(t *testing.T) {
 		t.Errorf("found %d html elements, want exactly 1", count)
 	}
 }
+
+// TestVoidEndTagsIgnored pins void end-tag handling: </col> (and its void
+// kin) is a dropped parse error, never a stack unwind. Without this one
+// </col> ejects the table and every later sibling lands outside it.
+func TestVoidEndTagsIgnored(t *testing.T) {
+	doc := domtest.Parse(`<table><col></col><col></col><td></td></table>`)
+	var table, colCount int
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Element() {
+				if c.Data == "table" {
+					table++
+				}
+				if c.Data == "col" {
+					colCount++
+				}
+			}
+			walk(c)
+		}
+	}
+	walk(&doc.Node)
+	if table != 1 || colCount != 2 {
+		t.Errorf("table=%d cols=%d, want 1 table holding both cols", table, colCount)
+	}
+	// The td must nest inside the table, not beside it.
+	var findTdParent func(n *dom.Node) string
+	findTdParent = func(n *dom.Node) string {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Element() && c.Data == "td" {
+				if p := c.Parent; p != nil {
+					return p.Data
+				}
+			}
+			if got := findTdParent(c); got != "" {
+				return got
+			}
+		}
+		return ""
+	}
+	if got := findTdParent(&doc.Node); got != "table" {
+		t.Errorf("td parent = %q, want table", got)
+	}
+}

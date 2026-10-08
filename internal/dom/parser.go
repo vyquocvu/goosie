@@ -734,6 +734,18 @@ func (tb *treeBuilder) processEndTag(tag string) {
 		tb.popUntil(tag)
 		return
 	}
+	// A stray </br> is a start tag; every other void end tag (</col>,
+	// </link>, </meta>, ...) is a parse error the tokenizer drops. Without
+	// this, popUntil's empty-the-stack fallback for an absent tag unwinds
+	// the whole open stack: one </col> ejects the table and every later
+	// sibling lands outside it.
+	if tag == "br" {
+		tb.insertElement("br", nil, false)
+		return
+	}
+	if voidElements[tag] {
+		return
+	}
 
 	switch tag {
 	case "html":
