@@ -1,8 +1,8 @@
 # Goosie v2 — Production Readiness Review and Delivery Roadmap
 
-- Updated: 2026-09-23
-- Reviewed baseline: `feat/v2` at `ba66721`
-- Status: proposed; this review does not authorize implementation or release
+- Updated: 2026-10-09
+- Reviewed baseline: `feat/v2` at `f027b4a`
+- Status: implemented features verified against gates
 
 ## 1. Recommendation and product scope
 
@@ -201,3 +201,45 @@ Deferred means outside this one implementation change, not optional for producti
 - Estimate dates only after scope, team capacity and acceptance budgets are agreed. Report completed gates and remaining blockers, not speculative completion percentages.
 
 Historical context remains in the existing architecture and feature specs; their approval labels do not override current code or acceptance evidence. No implementation, CI configuration, repository permission, dependency, fixture, commit or release was changed by this review.
+
+## 8. Completion-loop record (2026-10-09, uncommitted working tree on `feat/v2@f027b4a`)
+
+Work-test-verify passes over §§1–4 this session, each with a failing-first regression. Nothing below was committed; file:line evidence is against the working tree.
+
+### Closed this session
+
+| Item | Evidence |
+| --- | --- |
+| Gate 2: scheduler viewport ownership | `internal/raster/scheduler.go` `vpMu` guards size/scroll/dir/layer binding; `SetPlan/SetViewport/Viewport/SubmitScroll` safe from any goroutine; `test/raster/scheduler_test.go:TestViewportConcurrentAccess` fails pre-fix under `-race`, passes post-fix |
+| Gate 3: tab-strip overflow | `internal/tabs/layout.go:TabWidthFor` shrink-to-fit to `MinTabWidth`, one geometry owner for draw + hit-test (`cmd/goosie/toolbar_window.go` uses toolbar bounds, not click-derived width); `TestTabStripShrinksToFit`, `TestTabStripMinWidthClamp`, `TestTabBarClicksFollowShrunkTabs` |
+| Gate 3: tab scrolling + active visibility | `TabManager.tabScroll` (mutex), `StripMaxOffset`/`EnsureTabVisible`, `EvScroll` position routing in `chromeWindow.intercept`, `ensureActiveTabVisible` in switch/new/close; scroll position plumbed through the darwin shim (`shim.h:97-98`, `shim_darwin.m:scrollWheel`, `window.go:translate`) reusing `px/py` (no ABI change); chevron controls (`ChevronRects`/`TabScrollPage`, shared draw/hit-test geometry, opaque overpaint) for wheel-less scrolling past the minimum |
+| Gate 3: origin display | `toolbar.go:drawPadlock` closed lock for https, broken lock for http, neither for off-network origins or shown errors; `TestSecureLockDrawnForHTTPS`, `TestInsecureMarkDrawnForHTTP`, `TestNoMarkWithoutNetworkOrigin`, `TestNoSecureLockWhenError`; cert-failure end-to-end `TestCertFailureReachesAddressBar` (untrusted TLS server → x509 error into red address-bar text, loading cleared) |
+| Gate 4: image attempt ceiling | `engine.go:fetchImages` selects first-256 unique URLs before spawning workers; `test/engine/adversarial_test.go:TestImageFloodCostsAtMost256Attempts` (257 failing URLs cost 256 fetches); `TestOversizedImageHeaderRejectedBeforeDecode` pins pre-decode admission |
+| Gate 4: in-flight deadlines | `engine.CSS/Image/FontFetchBudget` exported; `loadURLCtx` wraps sync-family fetchers in deadline children of the nav context (deferred keeps nav ctx by design); `TestSlowImageAbortsAtFetchBudget`: 30.0s → 6.0s |
+
+Verification after each item: targeted `-race`, `archtest`, `test/gate`, `test/entrypoints`; full `go test ./...` green at session checkpoints.
+
+### Review findings corrected as stale (verified, not re-planned)
+
+- R1: both binaries use `PaintChecked` (`cmd/goosie/main.go:905,1456`, `cmd/goosie-headless/main.go:141`) with `TileCacheBudget`; headless input is bounded pre-parse (`:118-125`).
+- R2: `image.Probe` gates all decode entrypoints; per-document pixel reservations with rollback (`engine.go:524-549,798-803`).
+- R4 cursor panic: `SyncFromTab` resets cursor/selection (`toolbar.go:170-181`).
+- R5 chrome-over-document: `chromeWindow.Present` composites chrome rows above the content viewport (`toolbar_window.go:102-120`); tab labels are vector glyphs with ellipsis (`tabs/draw.go:101-146`).
+- R6 transactionality: peek/step history commit, run-scoped nav contexts with join (`main.go:1716-1718`), per-tab cancel on close.
+- R8 Go-side Present validates backing length (`darwin/window.go:241-250`); shim `claimSurface` checks w/h/stride before reuse; clipboard is main-thread-safe (`shim_darwin.m:1185,1200`). Remaining native work is listed below, not these items.
+- R9 "no JS runtime": a per-document goja runtime exists (`internal/js`: timers, promises, fetch+CORS+CSP, workers, storage, WebSocket, observers, canvas) with timeout interrupts.
+- R10 release smoke executes the artifact (`scripts/release-smoke.sh`, contract `test/gatecheck/release_smoke_test.go`); vet failure in `test/style` fixed.
+- R11 parity is fail-closed (`testdata/parity.py`: strict-by-default missing/dimension errors, exit 1 on failures).
+
+### Still open (code)
+
+- Gate 3: closed code-wise (origin marks, overflow shrink, wheel/keyboard/chevron scrolling, resize reflow, links/anchors). Left: tab drag-reorder, non-https treatment beyond the broken-lock mark, native IME/screen-reader journeys.
+- Gate 4: font CORS (deferred to Gate 6 cross-origin work); native stride-reuse under changed capacity is checked, clipboard/shutdown paths reviewed but not stress-proven.
+- Gate 5: clear-site-data UX, bookmark/history panels, profile switching UI, native a11y journeys. Backends (cookies with Secure/host-only/expiry policy, session/history/bookmarks stores, private-mode isolation + clearing) are implemented and tested.
+- Gate 6: full API matrix, event-loop/task/microtask conformance evidence, cross-origin/CSP/storage test matrix, interruptibility under load. Runtime surface is broad; qualification is the work.
+- Gate 7: pinned-fixture freshness + artifact recency checks around the (now fail-closed) parity harness, dependency scans, sanitizer runs, 1,000-cycle/load/crash evidence, privacy review.
+- Gate 8: signed/notarized artifacts, install/upgrade/migration tests, authenticated updates, ownership sign-off.
+
+### Cannot close in this loop (needs decisions, humans, or time)
+
+Process isolation/IPC boundaries (architecture decision), signing/notarization/update infrastructure, 14-day release-candidate observation, native interactive journeys and screen-reader passes, supported-site workflow approval and release sign-off, calendar estimates.
