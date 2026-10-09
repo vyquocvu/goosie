@@ -43,6 +43,9 @@ var (
 	disabledColor    = frame.RGB(205, 205, 205)
 	selectionColor   = frame.RGB(180, 210, 250)
 	separatorColor   = frame.RGB(222, 222, 222)
+	// secureColor marks the https lock: distinct from body text so the
+	// origin signal reads at a glance rather than as another word.
+	secureColor = frame.RGB(30, 130, 70)
 )
 
 // Clipboard is the platform clipboard interface. The darwin package provides
@@ -130,6 +133,15 @@ func (s *State) SetBounds(width int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Bounds = frame.Rect4(0, 0, width, ToolbarHeight*s.sc())
+}
+
+// BoundsWidth reports the full window device width the last resize delivered.
+// The tab strip spans the same width, so the host's tab-bar hit testing
+// derives its logical strip width from here rather than from the click point.
+func (s *State) BoundsWidth() int32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Bounds.W()
 }
 
 func (s *State) Navigate(url string) {
@@ -854,6 +866,25 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	}
 
 	textX := r.X0 + (BarPadding+4)*sc
+	// Origin marks: a lock for https, a broken lock for http, nothing for
+	// origins off the network. A shown error suppresses both — a certificate
+	// failure must never sit next to a reassuring lock. Cursor, selection and
+	// the find counter all derive from textX, so shifting it here moves the
+	// whole row right of either icon.
+	if s.Error == "" {
+		switch {
+		case isSecureScheme(s.URL):
+			fcx := float64(r.X0) + 11*float64(sc)
+			fcy := float64(r.Y0+r.Y1)/2 - 1.5*float64(sc)
+			s.drawPadlock(backing, fcx, fcy, sc, secureColor, false)
+			textX = r.X0 + 22*sc
+		case isInsecureScheme(s.URL):
+			fcx := float64(r.X0) + 11*float64(sc)
+			fcy := float64(r.Y0+r.Y1)/2 - 1.5*float64(sc)
+			s.drawPadlock(backing, fcx, fcy, sc, buttonColor, true)
+			textX = r.X0 + 22*sc
+		}
+	}
 	size := int32(textSize) * sc
 	textY := s.baselineY(r, size)
 
@@ -897,6 +928,98 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 		cursorX := textX + s.measureText(text[:s.cursorByte()])
 		backing.FillRect(frame.Rect4(cursorX, r.Y0+5*sc, cursorX+sc, r.Y1-5*sc), cursorColor, nil)
 	}
+}
+
+// isInsecureScheme reports whether url uses plain http, case-insensitively
+// and without allocating. "https://" fails at the fifth byte (s vs :), so no
+// separate exclusion is needed.
+func isInsecureScheme(url string) bool {
+	const p = "http://"
+	if len(url) < len(p) {
+		return false
+	}
+	for i := 0; i < len(p); i++ {
+		c := url[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != p[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// isSecureScheme reports whether url uses https, case-insensitively and
+// without allocating: the address bar checks it on every Draw.
+func isSecureScheme(url string) bool {
+	const p = "https://"
+	if len(url) < len(p) {
+		return false
+	}
+	for i := 0; i < len(p); i++ {
+		c := url[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != p[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// drawPadlock paints a padlock icon for an origin mark: an arched shackle over
+// a rounded body, ~12x13 logical pixels centered near (fcx, fcy) in device
+// pixels. open breaks the shackle on the upper left for the http mark. Same
+// pixel techniques as the reload icon (arc sweep + fill), so no new
+// rasterizer machinery.
+func (s *State) drawPadlock(backing *frame.Bitmap, fcx, fcy float64, sc int32, c frame.Color, open bool) {
+	fsc := float64(sc)
+	rOut := 5 * fsc
+	thick := 1.8 * fsc
+	if thick < 1.5 {
+		thick = 1.5
+	}
+	rMid := rOut - thick/2
+	// Shackle: the upper half of the ring (angles 180..360), whose legs land
+	// on the body's top edge at the shackle center line. Open starts the arc
+	// at 230, leaving the upper-left quadrant missing.
+	lo := 180.0
+	if open {
+		lo = 230.0
+	}
+	for py := int(fcy - rOut - 1); py <= int(fcy+1); py++ {
+		for px := int(fcx - rOut - 1); px <= int(fcx+rOut+1); px++ {
+			dx := float64(px) + 0.5 - fcx
+			dy := float64(py) + 0.5 - fcy
+			dist := absF(sqrtF(dx*dx+dy*dy) - rMid)
+			if dist > thick/2+0.5 {
+				continue
+			}
+			ang := atan2F(dy, dx) * 180 / 3.14159
+			if ang < 0 {
+				ang += 360
+			}
+			if ang < lo || ang > 360 {
+				continue
+			}
+			blendDot(backing, px, py, c, thick/2+0.5-dist)
+		}
+	}
+	if open {
+		// The surviving right leg plugs into the body it hangs from.
+		drawLineAA(backing, fcx+rMid, fcy-1, fcx+rMid, fcy+3*fsc, thick, c)
+	}
+	// Body: rounded box from the shackle line down 8 logical pixels.
+	body := frame.Rect4(int32(fcx-5*fsc+0.5), int32(fcy+0.5), int32(fcx+5*fsc+0.5), int32(fcy+8*fsc+0.5))
+	rad := frame.Corners{
+		TL: frame.Radius{X: float32(2 * sc), Y: float32(2 * sc)},
+		TR: frame.Radius{X: float32(2 * sc), Y: float32(2 * sc)},
+		BR: frame.Radius{X: float32(2 * sc), Y: float32(2 * sc)},
+		BL: frame.Radius{X: float32(2 * sc), Y: float32(2 * sc)},
+	}
+	backing.FillRounded(body, rad, c, nil)
 }
 
 func (s *State) drawRoundedRect(backing *frame.Bitmap, r frame.Rect, radius int32, fill, border frame.Color) {

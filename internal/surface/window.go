@@ -16,7 +16,10 @@ type EventKind uint8
 const (
 	// EvVsync is the pacing tick. Every frame starts from one.
 	EvVsync EventKind = iota
-	// EvScroll carries a device-pixel delta in Delta.
+	// EvScroll carries a device-pixel delta in Delta and the gesture's
+	// location in Pos. Chrome uses the location to route tab-strip scrolls;
+	// producers that cannot locate a scroll leave Pos zero, which reads as
+	// the tab strip and falls through to the document when it fits.
 	EvScroll
 	// EvPointer carries a press, release, or move at Pos.
 	EvPointer
@@ -104,7 +107,7 @@ const (
 type Event struct {
 	Kind   EventKind
 	Delta  frame.Point   // EvScroll
-	Pos    frame.Point   // EvPointer
+	Pos    frame.Point   // EvPointer position; EvScroll gesture location
 	Button Button        // EvPointer
 	Action PointerAction // EvPointer: press, release, or motion
 	Key    rune          // EvKey

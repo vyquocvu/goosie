@@ -648,7 +648,7 @@ func (f *framePath) applyNavResult(result navResult) {
 				Offset: frame.Point{},
 				Size:   f.config.devSize(),
 			})
-			
+
 			// If the URL has a fragment (#anchor), scroll to the element
 			if href := result.url; strings.Contains(href, "#") {
 				f.scrollToAnchor(tab, href)
@@ -811,7 +811,7 @@ func (f *framePath) scrollToAnchor(tab *tabs.Tab, href string) {
 	if sess == nil {
 		return
 	}
-	
+
 	// Extract fragment from URL
 	u, err := url.Parse(href)
 	if err != nil {
@@ -821,7 +821,7 @@ func (f *framePath) scrollToAnchor(tab *tabs.Tab, href string) {
 	if fragment == "" {
 		return
 	}
-	
+
 	// Find target element by scrolling to its position
 	targetY := sess.ScrollToID(fragment)
 	if targetY > 0 {
@@ -1288,6 +1288,7 @@ func (f *framePath) switchTab(id uint64) {
 	if newTab == nil {
 		return
 	}
+	f.ensureActiveTabVisible()
 	f.syncTabToToolbar()
 	if newTab.Layer() != nil {
 		f.sched.SetPlan(frame.FramePlan{
@@ -1316,6 +1317,7 @@ func (f *framePath) newTab() {
 	}
 	tab := f.tabMgr.NewTab()
 	f.tabMgr.SwitchTo(tab.ID())
+	f.ensureActiveTabVisible()
 	f.syncTabToToolbar()
 	_, layer := blankLayer(f.config.devSize())
 	tab.SetLayer(layer)
@@ -1330,6 +1332,19 @@ func (f *framePath) newTab() {
 		Size:   f.config.devSize(),
 	})
 	f.publishAccessibility()
+}
+
+// ensureActiveTabVisible scrolls a clipped tab strip just enough to show the
+// active tab: keyboard switches, new tabs and session restores land on tabs
+// the pointer could never reach otherwise.
+func (f *framePath) ensureActiveTabVisible() {
+	if f.tabMgr == nil {
+		return
+	}
+	n := int32(f.tabMgr.Count())
+	w := int32(f.config.width)
+	idx := f.tabMgr.ActiveIndex()
+	f.tabMgr.SetTabScroll(tabs.EnsureTabVisible(idx, n, w, f.tabMgr.TabScroll()), n, w)
 }
 
 // closeTab closes a tab by ID and switches to the remaining active tab.
@@ -1352,6 +1367,7 @@ func (f *framePath) closeTab(id uint64) {
 	f.tabMgr.CloseTab(id)
 	if f.tabMgr.Count() > 0 {
 		tab := f.tabMgr.Active()
+		f.ensureActiveTabVisible()
 		f.syncTabToToolbar()
 		if tab.Layer() != nil {
 			f.sched.SetPlan(frame.FramePlan{
@@ -1392,11 +1408,33 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
 	}
+	// Family deadline contexts: the engine's fetch budgets stop new spawns past
+	// their deadline, but only context aborts work already in flight. Each
+	// synchronous family gets a deadline child of the navigation context, so a
+	// hung host settles at the budget instead of the 30s client timeout; tab
+	// close and shutdown still cancel everything through the parent. Deferred
+	// families keep the plain navigation context: their work starts after this
+	// function returns, and post-paint arrivals carry no total deadline by
+	// design (superseded results are still dropped by serial).
+	cssCtx, cssCancel := context.WithTimeout(ctx, engine.CSSFetchBudget)
+	defer cssCancel()
+	imgCtx := ctx
+	if !deferImages {
+		var imgCancel context.CancelFunc
+		imgCtx, imgCancel = context.WithTimeout(ctx, engine.ImageFetchBudget)
+		defer imgCancel()
+	}
+	fontCtx := ctx
+	if !deferFonts {
+		var fontCancel context.CancelFunc
+		fontCtx, fontCancel = context.WithTimeout(ctx, engine.FontFetchBudget)
+		defer fontCancel()
+	}
 	// Linked style sheets are fetched with the same client and the same
 	// cancellation: the linker sees absolute http(s) URLs only, because the
 	// engine resolves hrefs against the final document URL before calling.
 	linker := func(base, href string) (string, error) {
-		resp, err := client.Get(subresourceCtx(ctx, base), href)
+		resp, err := client.Get(subresourceCtx(cssCtx, base), href)
 		if err != nil {
 			return "", err
 		}
@@ -1408,7 +1446,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// Image subresources use the same client and cancellation. The engine hands
 	// absolute http(s) URLs only, so the fetcher just reads the response bytes.
 	imageFetcher := func(base, url string) ([]byte, error) {
-		resp, err := client.Get(subresourceCtx(ctx, base), url)
+		resp, err := client.Get(subresourceCtx(imgCtx, base), url)
 		if err != nil {
 			return nil, err
 		}
@@ -1417,7 +1455,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// @font-face resources use the same client. The fetcher is the same shape
 	// as the image fetcher; the engine resolves src URLs before calling.
 	fontFetcher := func(base, url string) ([]byte, error) {
-		resp, err := client.Get(subresourceCtx(ctx, base), url)
+		resp, err := client.Get(subresourceCtx(fontCtx, base), url)
 		if err != nil {
 			return nil, err
 		}

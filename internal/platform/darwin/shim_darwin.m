@@ -499,6 +499,11 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 	ev.kind = GOOSIE_EV_SCROLL;
 	ev.dx = (int)(e.scrollingDeltaX * factor);
 	ev.dy = (int)(e.scrollingDeltaY * factor);
+	// The view is flipped, so this is a top-down device-pixel offset like a
+	// pointer position: chrome routes tab-strip scrolls by it.
+	NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+	ev.px = (int)(p.x * s);
+	ev.py = (int)(p.y * s);
 	ev.scale = s;
 	ev.at_ns = nowNs();
 	if (ev.dx == 0 && ev.dy == 0) return;

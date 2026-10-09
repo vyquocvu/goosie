@@ -178,6 +178,7 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 	case C.GOOSIE_EV_SCROLL:
 		ev.Kind = surface.EvScroll
 		ev.Delta = frame.Point{X: int32(ce.dx), Y: int32(ce.dy)}
+		ev.Pos = frame.Point{X: int32(ce.px), Y: int32(ce.py)}
 	case C.GOOSIE_EV_POINTER:
 		ev.Kind = surface.EvPointer
 		ev.Pos = frame.Point{X: int32(ce.px), Y: int32(ce.py)}

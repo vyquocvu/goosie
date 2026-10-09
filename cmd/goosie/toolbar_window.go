@@ -96,7 +96,16 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	}
 
 	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), chromeH), frame.RGB(255, 255, 255), nil)
-	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, 0, cw.fonts, cw.sc())
+	// Draw and hit-testing share one clamped strip offset: TabScrollFor keeps
+	// the value inside the legal range for the painted width, so a resize
+	// cannot strand the strip past its content between wheel events.
+	n := int32(cw.tabMgr.Count())
+	stripW := int32(cw.chromeBitmap.W) / cw.sc()
+	stripOff := cw.tabMgr.TabScroll()
+	if max := tabs.StripMaxOffset(n, stripW); stripOff > max {
+		stripOff = max
+	}
+	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, stripOff, cw.fonts, cw.sc())
 	cw.toolbar.Draw(cw.chromeBitmap, int32(tabs.TabBarHeight)*cw.sc())
 
 	// The loop's backing store is the content viewport, so buf is window-minus-
@@ -230,6 +239,22 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			return cw.onIME(ev)
 		}
 		return false
+	case surface.EvScroll:
+		// A scroll over the tab bar moves the strip when tabs overflow; anywhere
+		// else, or when everything fits, it belongs to the document and falls
+		// through to the loop. Both axes feed the strip, so a vertical wheel
+		// over the tabs behaves like every other browser's.
+		tabH := int32(tabs.TabBarHeight) * cw.sc()
+		if ev.Pos.Y < tabH && cw.toolbar != nil {
+			stripW := cw.toolbar.BoundsWidth() / cw.sc()
+			n := int32(cw.tabMgr.Count())
+			if tabs.StripMaxOffset(n, stripW) > 0 {
+				d := ev.Delta.X + ev.Delta.Y
+				cw.tabMgr.SetTabScroll(cw.tabMgr.TabScroll()+d/cw.sc(), n, stripW)
+				return true
+			}
+		}
+		return false
 	case surface.EvResize:
 		cw.toolbar.SetBounds(ev.Size.W)
 		contentDevH := ev.Size.H - cw.chromeHeight()
@@ -282,9 +307,36 @@ func (cw *chromeWindow) updateHoverCursor(pos frame.Point, chromeH int32) {
 
 func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
 	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
+	// The strip is as wide as the window: the toolbar bounds carry the same
+	// device width DrawTabBar painted at, so clicks map onto the tabs the
+	// pixels show. Without painted geometry yet there is nothing to hit.
+	var stripW int32
+	if cw.toolbar != nil {
+		stripW = cw.toolbar.BoundsWidth() / cw.sc()
+	}
+	if stripW <= 0 {
+		return
+	}
 	tabList := cw.tabMgr.Tabs()
+	n := int32(len(tabList))
+	stripOff := cw.tabMgr.TabScroll()
+	if max := tabs.StripMaxOffset(n, stripW); stripOff > max {
+		stripOff = max
+	}
+	// The scroll chevrons overlay the strip's right end, so they win ties
+	// against the tabs sliding underneath. Same rects DrawTabBar painted.
+	if left, right, ok := tabs.ChevronRects(n, stripW); ok {
+		if lp.X >= left.X0 && lp.X < left.X1 && lp.Y >= left.Y0 && lp.Y < left.Y1 {
+			cw.tabMgr.SetTabScroll(stripOff-tabs.TabScrollPage(n, stripW), n, stripW)
+			return
+		}
+		if lp.X >= right.X0 && lp.X < right.X1 && lp.Y >= right.Y0 && lp.Y < right.Y1 {
+			cw.tabMgr.SetTabScroll(stripOff+tabs.TabScrollPage(n, stripW), n, stripW)
+			return
+		}
+	}
 	for i := range tabList {
-		r := tabs.TabRect(i, 0, int32(len(tabList)), lp.X+100)
+		r := tabs.TabRect(i, stripOff, n, stripW)
 		if lp.X >= r.X0 && lp.X < r.X1 && lp.Y >= r.Y0 && lp.Y < r.Y1 {
 			closeR := tabs.CloseButtonRect(r)
 			if lp.X >= closeR.X0 && lp.X < closeR.X1 && lp.Y >= closeR.Y0 && lp.Y < closeR.Y1 {
@@ -299,7 +351,7 @@ func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
 			return
 		}
 	}
-	btnR := tabs.NewTabButtonRect(int32(len(tabList)), 0, lp.X+100)
+	btnR := tabs.NewTabButtonRect(n, stripOff, stripW)
 	if lp.X >= btnR.X0 && lp.X < btnR.X1 && lp.Y >= btnR.Y0 && lp.Y < btnR.Y1 {
 		if cw.onNewTab != nil {
 			cw.onNewTab()

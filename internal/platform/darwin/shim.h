@@ -95,7 +95,7 @@ enum {
 typedef struct GoosieEvent {
 	int kind;
 	int dx, dy;     // GOOSIE_EV_SCROLL, device pixels
-	int px, py;     // GOOSIE_EV_POINTER
+	int px, py;     // GOOSIE_EV_POINTER position, GOOSIE_EV_SCROLL gesture location
 	int action;     // GOOSIE_POINTER_*
 	int button;     // 1 left, 2 right, 3 middle, 0 none
 	int key;        // GOOSIE_EV_KEY: the typed rune, 0 for a control key

@@ -863,3 +863,260 @@ func TestApplyNavResultTraversalRewritesRedirectedEntry(t *testing.T) {
 		t.Errorf("tab.URL = %q, want the final URL", tab.URL())
 	}
 }
+
+// TestCertFailureReachesAddressBar pins the Gate 3 security display for the
+// failure half: a TLS server whose certificate the default client does not
+// trust must fail the load with a certificate error, and that error must land
+// in the address bar (red text) with loading cleared — never a silent blank.
+func TestCertFailureReachesAddressBar(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<html></html>"))
+	}))
+	defer server.Close()
+	client := net.DefaultClient()
+	defer client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, _, _, _, loadErr := loadURLCtx(context.Background(), client, fonts, server.URL, 800, 600, 1, t.TempDir(), false, false)
+	if loadErr == nil {
+		t.Fatal("loadURLCtx against an untrusted TLS server succeeded, want a certificate error")
+	}
+	if !strings.Contains(strings.ToLower(loadErr.Error()), "certificate") {
+		t.Fatalf("load error = %v, want a certificate failure", loadErr)
+	}
+
+	f := newNavTestPath(t)
+	f.toolbar = toolbar.NewState(800, nil)
+	tab := f.tabMgr.Active()
+	tab.Nav.Serial = 21
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 21, url: server.URL, err: loadErr})
+
+	if tab.Loading() {
+		t.Error("tab still loading after a failed navigation")
+	}
+	if got := f.toolbar.Error; !strings.Contains(strings.ToLower(got), "certificate") {
+		t.Errorf("address bar error = %q, want the certificate failure", got)
+	}
+}
+
+// TestSlowImageAbortsAtFetchBudget pins in-flight cancellation: the engine's
+// image budget stops new spawns past its deadline, but a hung host must also
+// abort the workers already fetching instead of riding the 30s client
+// timeout. The page itself still builds; the stalled image is omitted.
+func TestSlowImageAbortsAtFetchBudget(t *testing.T) {
+	img := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done() // hang until the client gives up
+	}))
+	defer img.Close()
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><body><img src="` + img.URL + `/p.png"></body></html>`))
+	}))
+	defer page.Close()
+	client := net.DefaultClient()
+	defer client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	_, _, _, sess, _, err := loadURLCtx(context.Background(), client, fonts, page.URL, 800, 600, 1, t.TempDir(), false, false)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("loadURLCtx with a hung image: %v (images must degrade, not fail)", err)
+	}
+	if sess == nil {
+		t.Fatal("session is nil")
+	}
+	if elapsed >= 25*time.Second {
+		t.Fatalf("load took %v, want the ~6s fetch budget, not the 30s client timeout", elapsed)
+	}
+	t.Logf("hung-image load settled in %v", elapsed)
+}
+
+// TestTabStripWheelScrollsWhenOverflowing pins wheel ownership: a scroll over
+// the tab bar moves the strip when tabs overflow, and is consumed so the
+// document underneath does not scroll too.
+func TestTabStripWheelScrollsWhenOverflowing(t *testing.T) {
+	mgr := tabs.NewManager(nil)
+	for i := 0; i < 40; i++ {
+		mgr.NewTab()
+	}
+	cw := &chromeWindow{
+		toolbar: toolbar.NewState(1000, nil),
+		tabMgr:  mgr,
+		events:  make(chan surface.Event, 8),
+		scale:   1,
+	}
+	wheel := surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 120}, Pos: frame.Point{X: 500, Y: 10}}
+	if !cw.intercept(wheel) {
+		t.Fatal("wheel over tab bar not consumed")
+	}
+	if got := mgr.TabScroll(); got != 120 {
+		t.Fatalf("TabScroll() = %d, want 120", got)
+	}
+	huge := surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 99999}, Pos: frame.Point{X: 500, Y: 10}}
+	if !cw.intercept(huge) {
+		t.Fatal("over-scroll not consumed")
+	}
+	if got := mgr.TabScroll(); got != 2016 {
+		t.Fatalf("TabScroll() = %d, want 2016 (clamped to max)", got)
+	}
+	// Over the document the same wheel must reach the loop, not the strip.
+	content := surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 120}, Pos: frame.Point{X: 500, Y: 200}}
+	if cw.intercept(content) {
+		t.Fatal("wheel over document consumed by tab strip")
+	}
+	if got := mgr.TabScroll(); got != 2016 {
+		t.Fatalf("TabScroll() = %d, want 2016 (content scroll must not move strip)", got)
+	}
+}
+
+// TestTabStripWheelFallsThroughWhenFitting: with no overflow the strip cannot
+// scroll, so the wheel always belongs to the document.
+func TestTabStripWheelFallsThroughWhenFitting(t *testing.T) {
+	mgr := tabs.NewManager(nil)
+	for i := 0; i < 3; i++ {
+		mgr.NewTab()
+	}
+	cw := &chromeWindow{
+		toolbar: toolbar.NewState(1000, nil),
+		tabMgr:  mgr,
+		events:  make(chan surface.Event, 8),
+		scale:   1,
+	}
+	wheel := surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 120}, Pos: frame.Point{X: 500, Y: 10}}
+	if cw.intercept(wheel) {
+		t.Fatal("wheel consumed by a fitting strip (max offset 0)")
+	}
+}
+
+// TestSwitchTabScrollsActiveIntoView: switching to a clipped tab (keyboard,
+// session restore) must bring it on screen, since the pointer cannot reach
+// what the strip clipped away.
+func TestSwitchTabScrollsActiveIntoView(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config.width = 1000
+	for i := 0; i < 39; i++ {
+		f.tabMgr.NewTab()
+	}
+	last := f.tabMgr.Tabs()[39]
+	f.switchTab(last.ID())
+	if got := f.tabMgr.TabScroll(); got != 2016 {
+		t.Fatalf("TabScroll() = %d, want 2016 (last tab scrolled into view)", got)
+	}
+	first := f.tabMgr.Tabs()[0]
+	f.switchTab(first.ID())
+	if got := f.tabMgr.TabScroll(); got != 0 {
+		t.Fatalf("TabScroll() = %d, want 0 (first tab resets strip)", got)
+	}
+}
+
+// TestTabStripChevronClicksScrollByPage pins the last mouse-only path past
+// the minimum: the right chevron pages forward, the left pages back, both
+// clamped to the strip range. With no overflow the same points hit nothing.
+func TestTabStripChevronClicksScrollByPage(t *testing.T) {
+	mgr := tabs.NewManager(nil)
+	for i := 0; i < 40; i++ {
+		mgr.NewTab()
+	}
+	cw := &chromeWindow{
+		toolbar: toolbar.NewState(1000, nil),
+		tabMgr:  mgr,
+		events:  make(chan surface.Event, 8),
+		scale:   1,
+	}
+	press := func(x, y int32) surface.Event {
+		return surface.Event{Kind: surface.EvPointer, Action: surface.PointerPress, Button: surface.ButtonLeft, Pos: frame.Point{X: x, Y: y}}
+	}
+	left, right, ok := tabs.ChevronRects(40, 1000)
+	if !ok {
+		t.Fatal("no chevrons for 40 tabs at 1000px")
+	}
+	step := tabs.TabScrollPage(40, 1000)
+	rx, ry := (right.X0+right.X1)/2, (right.Y0+right.Y1)/2
+	if !cw.intercept(press(rx, ry)) {
+		t.Fatal("right chevron press not consumed")
+	}
+	if got := mgr.TabScroll(); got != step {
+		t.Fatalf("TabScroll() = %d, want one page %d", got, step)
+	}
+	lx, ly := (left.X0+left.X1)/2, (left.Y0+left.Y1)/2
+	if !cw.intercept(press(lx, ly)) {
+		t.Fatal("left chevron press not consumed")
+	}
+	if got := mgr.TabScroll(); got != 0 {
+		t.Fatalf("TabScroll() = %d, want 0 (paged back, clamped)", got)
+	}
+
+	fitting := tabs.NewManager(nil)
+	for i := 0; i < 3; i++ {
+		fitting.NewTab()
+	}
+	cw.tabMgr = fitting
+	switched, opened := false, false
+	cw.onSwitch = func(uint64) { switched = true }
+	cw.onNewTab = func() { opened = true }
+	// A press in an empty tab-bar region is still consumed (the strip owns
+	// its band), but it must fire nothing and move nothing.
+	cw.intercept(press(rx, ry))
+	if switched || opened {
+		t.Fatal("chevron-zone press with no chevrons switched or opened a tab")
+	}
+	if got := fitting.TabScroll(); got != 0 {
+		t.Fatalf("TabScroll() = %d, want 0", got)
+	}
+}
+
+// TestTabBarClicksFollowShrunkTabs pins draw/click agreement under overflow:
+// with ten tabs at 1000 logical pixels the strip shrinks every tab, so a press
+// at the drawn center of tab 5 must switch to tab 5 (not whichever fixed-200px
+// tab happens to cover that point), and a press on the drawn new-tab button
+// must open a tab (not fall past a button stranded off-screen).
+func TestTabBarClicksFollowShrunkTabs(t *testing.T) {
+	const tabCount, width = 10, 1000
+	mgr := tabs.NewManager(nil)
+	for i := 0; i < tabCount; i++ {
+		mgr.NewTab()
+	}
+	list := mgr.Tabs()
+	cw := &chromeWindow{
+		toolbar: toolbar.NewState(width, nil),
+		tabMgr:  mgr,
+		events:  make(chan surface.Event, 8),
+		scale:   1,
+	}
+	var switched uint64
+	cw.onSwitch = func(id uint64) { switched = id }
+	press := func(x, y int32) surface.Event {
+		return surface.Event{Kind: surface.EvPointer, Action: surface.PointerPress, Button: surface.ButtonLeft, Pos: frame.Point{X: x, Y: y}}
+	}
+
+	r := tabs.TabRect(5, 0, tabCount, width)
+	if r.W() >= int32(tabs.TabWidth) {
+		t.Fatalf("tab 5 width = %d, want shrunk below %d", r.W(), tabs.TabWidth)
+	}
+	cx, cy := (r.X0+r.X1)/2, int32(tabs.TabBarHeight)/2
+	if !cw.intercept(press(cx, cy)) {
+		t.Fatal("press on tab 5 not consumed")
+	}
+	if switched != list[5].ID() {
+		t.Fatalf("switched to tab %d, want tab 5 (id %d)", switched, list[5].ID())
+	}
+
+	btn := tabs.NewTabButtonRect(tabCount, 0, width)
+	if btn.X1 > width {
+		t.Fatalf("new-tab button ends at %d, beyond clickable width %d", btn.X1, width)
+	}
+	opened := false
+	cw.onNewTab = func() { opened = true }
+	if !cw.intercept(press((btn.X0+btn.X1)/2, (btn.Y0+btn.Y1)/2)) {
+		t.Fatal("press on new-tab button not consumed")
+	}
+	if !opened {
+		t.Fatal("press on new-tab button did not open a tab")
+	}
+}

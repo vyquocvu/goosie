@@ -66,6 +66,16 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 			drawNewTabButton(buf, btnR, newTabBtnColor, scale)
 		}
 	}
+
+	// Scroll chevrons overlay the strip's right end once tabs overflow. The
+	// zone is repainted opaque first: clipped tabs sliding underneath must
+	// not bleed through the controls.
+	if left, right, ok := ChevronRects(int32(len(tabsList)), w); ok {
+		lr := scaleRect(frame.Rect4(left.X0, 0, right.X1, TabBarHeight), scale)
+		buf.FillRect(frame.Rect4(lr.X0, 0, lr.X1, int32(TabBarHeight)*scale), tabBarBg, nil)
+		drawChevron(buf, scaleRect(left, scale), -1, newTabBtnColor, scale)
+		drawChevron(buf, scaleRect(right, scale), 1, newTabBtnColor, scale)
+	}
 }
 
 func scaleRect(r frame.Rect, scale int32) frame.Rect {
@@ -203,6 +213,25 @@ func drawCloseButton(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32
 	}
 	drawLineAA(buf, x0, y0, x1, y1, thick, c)
 	drawLineAA(buf, x1, y0, x0, y1, thick, c)
+}
+
+// drawChevron paints one scroll control: a ‹ (dir -1) or › (dir +1) centered
+// in r, in device pixels. Two stroked segments, the same AA technique as the
+// close button's cross.
+func drawChevron(buf *frame.Bitmap, r frame.Rect, dir int32, c frame.Color, scale int32) {
+	cx := float64(r.X0+r.X1) / 2
+	cy := float64(r.Y0+r.Y1) / 2
+	arm := 7 * float64(scale)
+	half := 6 * float64(scale)
+	thick := float64(scale) * 1.6
+	if thick < 1.5 {
+		thick = 1.5
+	}
+	// The tip leads toward dir: ‹ (dir -1) points left, › (dir +1) right.
+	tipX := cx + float64(dir)*arm
+	endX := cx - float64(dir)*arm
+	drawLineAA(buf, tipX, cy, endX, cy-half, thick, c)
+	drawLineAA(buf, tipX, cy, endX, cy+half, thick, c)
 }
 
 func drawNewTabButton(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32) {

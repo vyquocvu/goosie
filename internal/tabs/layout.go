@@ -10,21 +10,144 @@ const (
 	NewTabBtnSize  = 32
 	CloseBtnSize   = 16
 	CloseBtnMargin = 8
+	// MinTabWidth is the narrowest a tab shrinks under strip pressure: wide
+	// enough for an ellipsis plus the close affordance. Beyond it the strip
+	// scrolls under the chevron controls; every tab stays reachable.
+	MinTabWidth = 72
+	// ChevronReserve is the strip's right end kept for the two scroll
+	// chevrons once tabs overflow: two 24px buttons, a 4px gap between them,
+	// and a 4px right margin.
+	ChevronReserve = 56
+	ChevronSize    = 24
 )
 
+// TabWidthFor shares contentWidth across tabCount tabs so the whole strip,
+// including the new-tab button, fits: full TabWidth while it fits, shrinking
+// uniformly to MinTabWidth under pressure. Drawing (DrawTabBar) and hit
+// testing (the host's tab-bar click handler) both derive rects from this one
+// function, so a press always lands on the tab the pixels show.
+func TabWidthFor(tabCount, contentWidth int32) int32 {
+	if tabCount <= 0 {
+		return TabWidth
+	}
+	avail := contentWidth - int32(LeftMargin) - int32(NewTabBtnSize) - int32(TabGap)
+	w := avail/tabCount - int32(TabGap)
+	if w > TabWidth {
+		return TabWidth
+	}
+	if w < MinTabWidth {
+		return MinTabWidth
+	}
+	return w
+}
+
 // TabRect returns the bounding rect for the tab at index idx given scrollOffset
-// and total tabCount. contentWidth is the window width (unused for basic layout).
+// and total tabCount. contentWidth is the logical tab-strip width the tabs
+// shrink to fit; scrollOffset shifts the strip under the chevron controls.
 func TabRect(idx int, scrollOffset, tabCount, contentWidth int32) frame.Rect {
-	x := int32(LeftMargin) + int32(idx)*(TabWidth+TabGap) - scrollOffset
-	return frame.Rect4(x, 0, x+TabWidth, TabBarHeight)
+	w := TabWidthFor(tabCount, contentWidth)
+	x := int32(LeftMargin) + int32(idx)*(w+int32(TabGap)) - scrollOffset
+	return frame.Rect4(x, 0, x+w, TabBarHeight)
 }
 
 // NewTabButtonRect returns the "+" button rect positioned after the last tab.
 func NewTabButtonRect(tabCount int32, scrollOffset, contentWidth int32) frame.Rect {
-	lastX := int32(LeftMargin) + tabCount*(TabWidth+TabGap) - TabGap - scrollOffset
-	x := lastX + TabGap
+	w := TabWidthFor(tabCount, contentWidth)
+	lastX := int32(LeftMargin) + tabCount*(w+int32(TabGap)) - int32(TabGap) - scrollOffset
+	x := lastX + int32(TabGap)
 	y := int32((TabBarHeight - NewTabBtnSize) / 2)
 	return frame.Rect4(x, y, x+int32(NewTabBtnSize), y+int32(NewTabBtnSize))
+}
+
+// stripTotal is the strip's full logical width: tabs plus the new-tab button.
+// Chevrons overlay the right end rather than shrinking tabs further, so the
+// total is independent of scrolling.
+func stripTotal(tabCount, contentWidth int32) int32 {
+	if tabCount <= 0 {
+		return 0
+	}
+	w := TabWidthFor(tabCount, contentWidth)
+	return int32(LeftMargin) + tabCount*(w+int32(TabGap)) + int32(NewTabBtnSize)
+}
+
+// ChevronsShown reports whether a strip of tabCount tabs over contentWidth
+// logical pixels needs its scroll controls: exactly when shrinking to
+// MinTabWidth still does not fit.
+func ChevronsShown(tabCount, contentWidth int32) bool {
+	return stripTotal(tabCount, contentWidth) > contentWidth
+}
+
+// ChevronRects returns the left/right scroll-button rects pinned to the
+// strip's right end, or ok=false when the strip fits and has no controls.
+// Draw and hit-testing share these rects so a press lands on the control the
+// pixels show.
+func ChevronRects(tabCount, contentWidth int32) (left, right frame.Rect, ok bool) {
+	if !ChevronsShown(tabCount, contentWidth) {
+		return frame.Rect{}, frame.Rect{}, false
+	}
+	y0 := int32(TabBarHeight-ChevronSize) / 2
+	rx0 := contentWidth - 4 - ChevronSize
+	lx0 := rx0 - 4 - ChevronSize
+	return frame.Rect4(lx0, y0, lx0+ChevronSize, y0+ChevronSize),
+		frame.Rect4(rx0, y0, rx0+ChevronSize, y0+ChevronSize), true
+}
+
+// TabScrollPage is one chevron click of travel: the visible strip minus one
+// tab of context, floored at one tab so a narrow strip still moves.
+func TabScrollPage(tabCount, contentWidth int32) int32 {
+	w := TabWidthFor(tabCount, contentWidth)
+	vis := contentWidth - int32(LeftMargin)
+	if ChevronsShown(tabCount, contentWidth) {
+		vis -= ChevronReserve
+	}
+	step := vis - w
+	if step < w {
+		step = w
+	}
+	if step < 1 {
+		step = 1
+	}
+	return step
+}
+
+// StripMaxOffset is the legal scroll range for a strip of tabCount tabs over
+// contentWidth logical pixels: zero while shrinking fits everything, and once
+// chevrons show, the offset that parks the new-tab button just left of them.
+func StripMaxOffset(tabCount, contentWidth int32) int32 {
+	if !ChevronsShown(tabCount, contentWidth) {
+		return 0
+	}
+	return stripTotal(tabCount, contentWidth) - (contentWidth - ChevronReserve)
+}
+
+// EnsureTabVisible returns the strip offset keeping idx on screen: the offset
+// moves just enough to show a clipped tab, keeps the new-tab button reachable
+// past the last tab, and never leaves [0, StripMaxOffset]. Pure so draw,
+// hit-testing and tab switching share one definition of visible.
+func EnsureTabVisible(idx int, tabCount, contentWidth, current int32) int32 {
+	max := StripMaxOffset(tabCount, contentWidth)
+	if max <= 0 {
+		return 0
+	}
+	reserve := int32(0)
+	if ChevronsShown(tabCount, contentWidth) {
+		reserve = ChevronReserve
+	}
+	r := TabRect(idx, 0, tabCount, contentWidth)
+	off := current
+	if r.X0-off < int32(LeftMargin) {
+		off = r.X0 - int32(LeftMargin)
+	}
+	if r.X1-off > contentWidth-reserve-int32(NewTabBtnSize)-int32(TabGap) {
+		off = r.X1 - (contentWidth - reserve - int32(NewTabBtnSize) - int32(TabGap))
+	}
+	if off < 0 {
+		return 0
+	}
+	if off > max {
+		return max
+	}
+	return off
 }
 
 // CloseButtonRect returns the close button rect within a tab.

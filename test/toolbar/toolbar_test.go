@@ -745,3 +745,74 @@ func TestHistoryStepCommitsFromBase(t *testing.T) {
 		t.Fatalf("Current() = %q after stale step, want https://b.com", got)
 	}
 }
+
+// lockZoneMarkCount counts dark pixels in the address bar's indicator zone:
+// the lock glyph is the only thing ever drawn there (text starts past it, and
+// these states draw no text without fonts), so the count is the indicator.
+func lockZoneMarkCount(t *testing.T, s *toolbar.State) int {
+	t.Helper()
+	const width = 800
+	bar := toolbar.AddressBarRect(width)
+	// Indicator zone: the first 30 logical pixels of the bar.
+	x0, x1 := bar.X0, bar.X0+30
+	if x1 > bar.X1 {
+		t.Fatalf("indicator zone exceeds address bar %+v", bar)
+	}
+	shot := frame.NewBitmap(width, toolbar.ToolbarHeight)
+	s.Draw(shot, 0)
+	n := 0
+	for y := bar.Y0; y < bar.Y1; y++ {
+		for x := x0; x < x1; x++ {
+			// frame.Color.RGBA returns 8-bit channels (not the std 16-bit).
+			c := shot.At(int(x), int(y)).RGBA()
+			if (int(c.R)+int(c.G)+int(c.B))/3 < 200 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestSecureLockDrawnForHTTPS pins the Gate 3 origin display: an https page
+// shows a lock mark at the left of the address bar.
+func TestSecureLockDrawnForHTTPS(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.SyncFromTab("https://example.com/", false, "", toolbar.NewHistory())
+	if n := lockZoneMarkCount(t, s); n < 10 {
+		t.Fatalf("indicator zone has %d dark pixels, want a lock mark (>= 10)", n)
+	}
+}
+
+// TestInsecureMarkDrawnForHTTP: a plain-http page shows the broken-lock mark
+// in the same indicator zone — http must never look as bare as a page that
+// simply has no origin yet.
+func TestInsecureMarkDrawnForHTTP(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.SyncFromTab("http://example.com/", false, "", toolbar.NewHistory())
+	if n := lockZoneMarkCount(t, s); n < 10 {
+		t.Fatalf("indicator zone has %d dark pixels for http, want an insecure mark (>= 10)", n)
+	}
+}
+
+// TestNoMarkWithoutNetworkOrigin: new tabs and local files show no mark —
+// nothing to assert about an origin that is not on the network.
+func TestNoMarkWithoutNetworkOrigin(t *testing.T) {
+	for _, url := range []string{"", "file:///Users/me/notes/index.html"} {
+		s := toolbar.NewState(800, nil)
+		s.SyncFromTab(url, false, "", toolbar.NewHistory())
+		if n := lockZoneMarkCount(t, s); n != 0 {
+			t.Fatalf("indicator zone has %d dark pixels for %q, want none", n, url)
+		}
+	}
+}
+
+// TestNoSecureLockWhenError: a failed navigation shows the error instead of
+// the lock, even when the attempted URL was https (a certificate failure must
+// never sit next to a reassuring lock).
+func TestNoSecureLockWhenError(t *testing.T) {
+	s := toolbar.NewState(800, nil)
+	s.SyncFromTab("https://example.com/", false, "certificate signed by unknown authority", toolbar.NewHistory())
+	if n := lockZoneMarkCount(t, s); n != 0 {
+		t.Fatalf("indicator zone has %d dark pixels with an error shown, want none", n)
+	}
+}

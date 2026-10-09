@@ -10,6 +10,10 @@ type TabManager struct {
 	nextID      uint64
 	onCloseLast func()
 	OnChange    func()
+	// tabScroll is the strip's horizontal offset in logical pixels. The wheel
+	// handler, the draw path and hit testing share this one value under mu so
+	// a press always lands on the tab the pixels show.
+	tabScroll int32
 }
 
 func NewManager(onCloseLast func()) *TabManager {
@@ -124,4 +128,26 @@ func (m *TabManager) TabByID(id uint64) *Tab {
 		}
 	}
 	return nil
+}
+
+// TabScroll reports the strip's horizontal offset in logical pixels.
+func (m *TabManager) TabScroll() int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.tabScroll
+}
+
+// SetTabScroll moves the strip, clamped to [0, StripMaxOffset] for the given
+// geometry so an over-scroll or a resize can never park it past its content.
+func (m *TabManager) SetTabScroll(off, tabCount, contentWidth int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	max := StripMaxOffset(tabCount, contentWidth)
+	if off < 0 {
+		off = 0
+	}
+	if off > max {
+		off = max
+	}
+	m.tabScroll = off
 }
