@@ -527,7 +527,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 	// the shared `linked` set needs no lock.
 	if len(pending) > 0 {
 		texts := make([]*string, len(pending))
-		deadline := time.Now().Add(cssFetchBudget)
+		deadline := time.Now().Add(CSSFetchBudget)
 		const cssWorkers = 8
 		sem := make(chan struct{}, cssWorkers)
 		var wg sync.WaitGroup
@@ -666,10 +666,13 @@ func (b *subBudget) take(n int) bool {
 // may trigger. Real pages rarely link more than a dozen.
 const maxLinkedSheets = 32
 
-// cssFetchBudget is the wall-clock deadline for all linked-stylesheet fetches.
+// CSSFetchBudget is the wall-clock deadline for all linked-stylesheet fetches.
 // CSS is render-blocking, so unlike images and fonts it is worth waiting for —
 // but a dead host must not hold the document behind the client's own timeout.
-const cssFetchBudget = 6 * time.Second
+//
+// Like the image and font budgets it bounds spawn scheduling; hosts cancel
+// in-flight work with it around their stylesheet fetcher for the same reason.
+const CSSFetchBudget = 6 * time.Second
 
 // stylesheetHref returns the href of a link element whose rel token list
 // includes stylesheet, or "" for anything else.

@@ -385,7 +385,7 @@ func (s *Session) RefreshAfterFonts() {
 // each successful result with the font registry, populating s.customFonts.
 func (s *Session) applyFontJobs(jobs []fontJob) {
 	data := make([][]byte, len(jobs))
-	deadline := time.Now().Add(fontFetchBudget)
+	deadline := time.Now().Add(FontFetchBudget)
 	const fontWorkers = 8
 	sem := make(chan struct{}, fontWorkers)
 	var wg sync.WaitGroup
@@ -503,19 +503,26 @@ const maxFontRequests = 16
 // blocking a hostile stylesheet that references gigabytes of font data.
 const maxFontBytes = 10 << 20
 
-// fontFetchBudget is the wall-clock deadline for all font fetching. After this
+// FontFetchBudget is the wall-clock deadline for all font fetching. After this
 // elapses, remaining @font-face rules are skipped and the document falls back
 // to system fonts.
-const fontFetchBudget = 6 * time.Second
+//
+// It bounds spawn scheduling inside the engine; hosts also cancel in-flight
+// work with it (a deadline context around their fetchers), because a hung
+// host would otherwise ride out the transport timeout instead.
+const FontFetchBudget = 6 * time.Second
 
 // maxLoadedImages bounds how many image subresources one document may fetch,
 // so a page that references hundreds cannot stall the first frame.
 const maxLoadedImages = 256
 
-// imageFetchBudget stops subresource fetching past a wall-clock deadline so a
+// ImageFetchBudget stops subresource fetching past a wall-clock deadline so a
 // slow or unreachable host cannot push the first render past its time limit;
 // images left unfetched simply reserve their box and paint nothing.
-const imageFetchBudget = 6 * time.Second
+//
+// Like FontFetchBudget it bounds spawn scheduling; hosts cancel in-flight
+// work with it around their fetchers for the same reason.
+const ImageFetchBudget = 6 * time.Second
 
 // MaxDocumentDecodedPixels bounds the total decoded pixels one document may
 // retain across all its images and backgrounds.
@@ -728,7 +735,15 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 	byURL := make(map[string]stdimage.Image, len(uniq))
 	var mu sync.Mutex
 	loaded := 0
-	deadline := time.Now().Add(imageFetchBudget)
+	// The attempt ceiling counts attempts, not successes: only the first
+	// maxLoadedImages unique references in document order ever reach a worker.
+	// Failed requests do not replenish the allowance, so 257 failing URLs cost
+	// 256 fetches rather than an unbounded burst of dials. The in-worker
+	// loaded check below stays as defense in depth.
+	if len(uniq) > maxLoadedImages {
+		uniq = uniq[:maxLoadedImages]
+	}
+	deadline := time.Now().Add(ImageFetchBudget)
 	const imageWorkers = 12
 	sem := make(chan struct{}, imageWorkers)
 	var wg sync.WaitGroup
@@ -1332,13 +1347,13 @@ func (s *Session) ScrollToID(targetID string) float32 {
 	objs := s.Arena.Objects
 	var walk func(layout.ObjectID)
 	foundY := float32(0)
-	
+
 	walk = func(objID layout.ObjectID) {
 		if objID == 0 || int(objID) >= len(objs) {
 			return
 		}
 		obj := &objs[objID]
-		
+
 		// Check this node for matching ID attribute
 		if obj.Node != nil {
 			for _, attr := range obj.Node.Attr {
@@ -1352,7 +1367,7 @@ func (s *Session) ScrollToID(targetID string) float32 {
 				}
 			}
 		}
-		
+
 		// Continue walking children (first match wins in document order)
 		if foundY == 0 {
 			for k := obj.FirstKid; k != 0 && foundY == 0; k = objs[k].NextSibling {
@@ -1360,7 +1375,7 @@ func (s *Session) ScrollToID(targetID string) float32 {
 			}
 		}
 	}
-	
+
 	walk(1)
 	return foundY
 }
