@@ -97,6 +97,37 @@ type SuiteResult struct {
 	Duration float64 `json:"duration_s"`
 }
 
+// MeetsMinPassRate reports whether the suite's pass rate clears a floor.
+// An empty run never meets any positive floor: zero discovered tests is a
+// harness failure, not a passing suite. A non-positive floor disables the
+// check so ad-hoc runs can still report without gating.
+func (r SuiteResult) MeetsMinPassRate(min float64) bool {
+	if min <= 0 {
+		return true
+	}
+	if r.Total-r.Skipped <= 0 {
+		return false
+	}
+	return r.PassRate >= min
+}
+
+// CheckSuiteThreshold enforces the suite-level pass-rate floor, returning a
+// descriptive error when the run lands below it. A non-positive floor
+// disables the check for ad-hoc runs. Empty runs report through
+// MeetsMinPassRate as failures; callers that skip those explicitly do so
+// before calling here.
+func CheckSuiteThreshold(result SuiteResult, minRate float64) error {
+	if minRate <= 0 {
+		return nil
+	}
+	if result.MeetsMinPassRate(minRate) {
+		return nil
+	}
+	return fmt.Errorf("wpt: pass rate %.1f%% below floor %.1f%% (%d/%d passed, %d failed, %d errored)",
+		result.PassRate, minRate, result.Passed, result.Total-result.Skipped,
+		result.Failed, result.Errored)
+}
+
 // Config is the WPT harness configuration, loaded from testdata/wpt-config.json.
 type Config struct {
 	// WPTDir is the local path to the WPT checkout. If empty, the harness
@@ -111,6 +142,11 @@ type Config struct {
 	// PassThreshold is the pixel-match percentage required for a reftest to pass.
 	// Defaults to 95.0.
 	PassThreshold float64 `json:"pass_threshold"`
+	// MinPassRate is the suite-level pass-rate floor: TestWPTSuite fails when
+	// the run's PassRate lands below it. Zero (or absent) disables the gate
+	// for ad-hoc runs. Raise it as rendering support grows; never lower it to
+	// make a red run green.
+	MinPassRate float64 `json:"min_pass_rate"`
 	// ViewportWidth is the viewport width in CSS pixels for rendering.
 	ViewportWidth int `json:"viewport_width"`
 	// ViewportHeight is the viewport height in CSS pixels for rendering.

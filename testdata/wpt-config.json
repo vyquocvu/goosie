@@ -27,6 +27,7 @@
     "*payment*"
   ],
   "pass_threshold": 95.0,
+  "min_pass_rate": 85.0,
   "viewport_width": 800,
   "viewport_height": 600,
   "dpr": 1.0,

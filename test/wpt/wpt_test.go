@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,11 +62,14 @@ func TestWPTSuite(t *testing.T) {
 		t.Logf("wpt: HTML report: %s", htmlPath)
 	}
 
-	// The test passes if we have a positive pass rate. Individual test failures
-	// are reported but do not fail the suite (yet - as goosie's CSS support
-	// grows, the threshold should increase).
+	// The suite fails below its configured floor (ratchet: set to the measured
+	// rate, raised as rendering support grows, never lowered to green a red
+	// run). Individual failures below that are still listed per-test above.
 	if result.Total == 0 {
 		t.Skip("no WPT tests discovered")
+	}
+	if err := CheckSuiteThreshold(*result, cfg.MinPassRate); err != nil {
+		t.Error(err)
 	}
 	if result.Passed == 0 && result.Failed > 0 {
 		t.Errorf("wpt: 0/%d tests passed (%.1f%% pass rate)",
@@ -416,5 +420,48 @@ func TestFuzzyPasses(t *testing.T) {
 	}
 	if !fuzzyPasses(imgA, imgC, 255, 4) {
 		t.Error("different images fail fuzzy 255/4")
+	}
+}
+
+// TestWPTMinPassRateFloor pins the suite-level ratchet: a floor of zero
+// disables (ad-hoc runs still report), an empty run never meets a positive
+// floor, and the boundary is inclusive so a floor set to today's measured
+// rate stays green until support regresses.
+func TestWPTMinPassRateFloor(t *testing.T) {
+	full := SuiteResult{Total: 100, Passed: 80, Failed: 20, PassRate: 80.0}
+	if !full.MeetsMinPassRate(0) {
+		t.Error("zero floor must disable the check")
+	}
+	if !full.MeetsMinPassRate(80.0) {
+		t.Error("80% run must meet an 80.0 floor (inclusive boundary)")
+	}
+	if full.MeetsMinPassRate(80.1) {
+		t.Error("80% run must not meet an 80.1 floor")
+	}
+	empty := SuiteResult{}
+	if empty.MeetsMinPassRate(1.0) {
+		t.Error("empty run must not meet a positive floor (harness failure, not a pass)")
+	}
+	allSkipped := SuiteResult{Total: 10, Skipped: 10}
+	if allSkipped.MeetsMinPassRate(1.0) {
+		t.Error("all-skipped run must not meet a positive floor")
+	}
+}
+
+// TestWPTSuiteThresholdCheck pins the enforcement the suite itself calls: a
+// disabled floor never errors, a run at the floor passes, and anything below
+// errors with the counts attached.
+func TestWPTSuiteThresholdCheck(t *testing.T) {
+	full := SuiteResult{Total: 100, Passed: 80, Failed: 20, PassRate: 80.0}
+	if err := CheckSuiteThreshold(full, 0); err != nil {
+		t.Errorf("disabled floor errored: %v", err)
+	}
+	if err := CheckSuiteThreshold(full, 80.0); err != nil {
+		t.Errorf("run at floor errored: %v", err)
+	}
+	if err := CheckSuiteThreshold(full, 85.0); err == nil {
+		t.Error("80% run against an 85.0 floor did not error")
+	} else if got := err.Error(); !strings.Contains(got, "80/100") {
+		t.Errorf("threshold error = %q, want the counts attached", got)
 	}
 }
