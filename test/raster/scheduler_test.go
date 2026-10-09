@@ -767,6 +767,53 @@ func TestSubmitScrollAndEventDeltasFoldIdentically(t *testing.T) {
 	}
 }
 
+// SetViewport, Viewport and SubmitScroll are called from navigation drain
+// goroutines (applyNavResult, scrollToAnchor, repaintTab) and the event thread
+// (switchTab saves the scroll offset) while surface.Loop runs BeginFrame on
+// its own thread. That cross-thread viewport access has to be race-clean;
+// SetPlan alone being safe is not enough for Gate 2 single-ownership.
+func TestViewportConcurrentAccess(t *testing.T) {
+	vp := frame.Viewport{Size: frame.Size{W: 800, H: 600}}
+	s := raster.NewScheduler(nil, nil, vp, 1, raster.Pref{})
+	s.SetPlan(frame.FramePlan{Serial: 1})
+	var wg sync.WaitGroup
+	// Drain/event threads: tab switches, anchor jumps, deferred-image repaints.
+	for i := int32(0); i < 8; i++ {
+		wg.Add(1)
+		go func(i int32) {
+			defer wg.Done()
+			for j := int32(0); j < 50; j++ {
+				s.SetViewport(frame.Viewport{Offset: frame.Point{X: i*100 + j}, Size: frame.Size{W: 800, H: 600}})
+				_ = s.Viewport()
+				_ = s.SubmitScroll(frame.Point{Y: 1}, time.Now())
+			}
+		}(i)
+	}
+	// Content producer: plans may arrive from any goroutine.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 0; j < 100; j++ {
+			s.SetPlan(frame.FramePlan{Serial: uint64(j + 2)})
+		}
+	}()
+	// The loop thread is the only BeginFrame caller; it runs while the other
+	// goroutines move the viewport underneath it.
+	for j := 0; j < 100; j++ {
+		s.BeginFrame(surface.Event{Delta: frame.Point{Y: 3}})
+	}
+	wg.Wait()
+	// Deterministic final state: a serialized write followed by a read.
+	s.SetViewport(frame.Viewport{Offset: frame.Point{X: 42, Y: 7}, Size: frame.Size{W: 800, H: 600}})
+	got := s.Viewport()
+	if got.Offset.X != 42 || got.Offset.Y != 7 {
+		t.Fatalf("Viewport() = %+v, want offset {42 7}", got)
+	}
+	if got.Size.W != 800 || got.Size.H != 600 {
+		t.Fatalf("Viewport() = %+v, want size {800 600}", got)
+	}
+}
+
 func containsCoord(list []frame.TileCoord, c frame.TileCoord) bool {
 	for _, x := range list {
 		if x == c {

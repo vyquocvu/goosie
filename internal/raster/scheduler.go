@@ -3,6 +3,7 @@ package raster
 import (
 	"errors"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -20,17 +21,29 @@ import (
 // frame is the dependency leaf the grid's validity rule is proved against, and a
 // scheduler that imported it upward would put the pool below the composer.
 //
-// One Scheduler belongs to one UI thread. Nothing in it locks, with a single
-// documented exception: SetPlan publishes into a frame.Plan, which is the handoff a
-// content-producing goroutine uses. Every other method must be called from the thread
+// One Scheduler belongs to one UI thread for frame planning, but the viewport
+// state is shared: navigation drain goroutines call SetViewport (repaints,
+// anchor jumps), the event thread calls Viewport to save a tab's scroll offset,
+// and non-loop drivers call SubmitScroll. vpMu guards size, scroll, dir and the
+// layer binding resolve reads, so SetPlan, SetViewport, Viewport and SubmitScroll
+// are safe from any goroutine. Every other method must be called from the thread
 // that runs the frame, including HandleDone - which is also why Submit's drain loop
 // is a Poll and never a Wait.
+//
+// Lock order is vpMu before the plan slot and the tile grid; nothing takes those
+// in the reverse order, so holding vpMu across BeginFrame cannot deadlock.
 type Scheduler struct {
 	layer *frame.Layer
 	grid  *frame.Grid
 	pool  *Pool
 	slot  frame.Plan
 	prefs Pref
+
+	// vpMu guards the viewport state below. Tab switches, anchor jumps and
+	// deferred-image repaints write it from navigation drain goroutines while
+	// the loop thread plans frames; the event thread reads it to preserve a
+	// tab's scroll offset across switches.
+	vpMu sync.RWMutex
 
 	// size and scale are the surface the platform last reported, and scroll is the
 	// accumulated input in device pixels. The two are kept apart so a flick that ran
@@ -174,10 +187,10 @@ func NewScheduler(l *frame.Layer, pool *Pool, vp frame.Viewport, scale float32, 
 	return s
 }
 
-// SetPlan hands the scheduler the newest description of the content. It is the one
-// method safe to call from another goroutine, and the only thing it does is publish
-// into a depth-1 slot: a plan superseded before the next frame is drawn is counted
-// rather than queued, which is the frame path's whole back-pressure story.
+// SetPlan hands the scheduler the newest description of the content. It is safe
+// to call from another goroutine - it only publishes into a depth-1 slot: a plan
+// superseded before the next frame is drawn is counted rather than queued, which
+// is the frame path's whole back-pressure story.
 //
 // The plan's Viewport and Scale are deliberately ignored. The scroll offset belongs to
 // whoever is watching the page, and a producer that republished a plan with its own
@@ -191,8 +204,12 @@ func (s *Scheduler) PlanStats() frame.PlanStats { return s.slot.Stats() }
 
 // SetViewport is how a driver that is not a window says "show this much, starting
 // here": a headless run, a test, an anchor jump. An empty size leaves the size alone,
-// so a caller that only wants to move can pass an offset.
+// so a caller that only wants to move can pass an offset. It is safe to call from
+// any goroutine: tab switches and navigation completions move the viewport from
+// drain goroutines while the loop thread is planning frames.
 func (s *Scheduler) SetViewport(vp frame.Viewport) {
+	s.vpMu.Lock()
+	defer s.vpMu.Unlock()
 	if !vp.Size.Empty() {
 		s.size = vp.Size
 		s.reserveScratch(true)
@@ -202,8 +219,13 @@ func (s *Scheduler) SetViewport(vp frame.Viewport) {
 
 // Viewport returns the viewport the next frame will draw, with the scroll offset
 // already clamped into the document. It is the position the composer's tiles will be
-// laid over, which is why it is resolved rather than stored.
-func (s *Scheduler) Viewport() frame.Viewport { return s.resolve() }
+// laid over, which is why it is resolved rather than stored. It is safe to call
+// from any goroutine.
+func (s *Scheduler) Viewport() frame.Viewport {
+	s.vpMu.RLock()
+	defer s.vpMu.RUnlock()
+	return s.resolveLocked()
+}
 
 // Stats returns the scheduler's counters with the grid's memory read live, so a
 // caller watching a plateau does not have to reach past the scheduler to do it.
@@ -256,6 +278,12 @@ func (s *Scheduler) Damage() []frame.Rect { return s.damage }
 // waits for a worker, and nothing here allocates on a steady-state frame.
 func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.TileCoord) {
 	s.frames++
+	// The viewport state is shared with drain goroutines (SetViewport) and the
+	// event thread (Viewport), so the whole planning pass holds vpMu: folding
+	// input, swapping the layer binding and resolving the viewport are one
+	// atomic step with respect to tab switches and anchor jumps.
+	s.vpMu.Lock()
+	defer s.vpMu.Unlock()
 	s.fold(ev.Delta)
 	if !ev.Size.Empty() {
 		s.size = ev.Size
@@ -274,14 +302,15 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 		return nil, nil
 	}
 	// A plan whose first layer changed is a page navigation: swap the grid to
-	// match. This runs on the UI thread inside BeginFrame, so no lock is needed;
-	// the cross-thread publish is handled by the Plan slot's own mutex.
+	// match. The cross-thread publish is handled by the Plan slot's own mutex,
+	// and the binding swap itself is under vpMu because drain goroutines read
+	// it through Viewport.
 	if len(p.Layers) > 0 && p.Layers[0] != s.layer {
 		s.layer = p.Layers[0]
 		s.grid = s.layer.Grid
 		s.haveDone = false
 	}
-	vp := s.resolve()
+	vp := s.resolveLocked()
 	s.cur = frame.FramePlan{
 		Serial:     p.Serial,
 		Viewport:   vp,
@@ -589,8 +618,10 @@ func (s *Scheduler) HandleDone(d Done) error {
 //
 // at is the event's timestamp, forwarded from surface.Event so a driver can hand over an
 // event's fields unchanged. Nothing in this fold is time-dependent: a scroll is a
-// position, and coalescing deltas is exact.
+// position, and coalescing deltas is exact. It is safe to call from any goroutine.
 func (s *Scheduler) SubmitScroll(delta frame.Point, at time.Time) error {
+	s.vpMu.Lock()
+	defer s.vpMu.Unlock()
 	if s.size.Empty() {
 		return ErrNoViewport
 	}
@@ -600,7 +631,7 @@ func (s *Scheduler) SubmitScroll(delta frame.Point, at time.Time) error {
 
 // fold accumulates a coalesced scroll delta. Saturating arithmetic rather than wrapping:
 // a trackpad that reported a wild delta must not be able to move the page to the
-// opposite end of an int32.
+// opposite end of an int32. The caller must hold vpMu.
 func (s *Scheduler) fold(delta frame.Point) {
 	if delta.X == 0 && delta.Y == 0 {
 		return
@@ -616,8 +647,10 @@ func (s *Scheduler) fold(delta frame.Point) {
 }
 
 // resolve turns the accumulated scroll into the viewport this frame draws, clamped so
-// the document always covers the surface it is larger than.
-func (s *Scheduler) resolve() frame.Viewport {
+// the document always covers the surface it is larger than. The caller must hold
+// vpMu (read or write): the layer binding is swapped by BeginFrame while drain
+// goroutines resolve the viewport to preserve a tab's scroll offset.
+func (s *Scheduler) resolveLocked() frame.Viewport {
 	v := frame.Viewport{Offset: s.scroll, Size: s.size}
 	if s.layer == nil {
 		return v
