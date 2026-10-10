@@ -1,6 +1,7 @@
 package bookmarks_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,6 +96,49 @@ func TestBookmarkSaveLeavesNoTempFiles(t *testing.T) {
 	for _, e := range entries {
 		if name := e.Name(); name != "bookmarks.json" {
 			t.Errorf("Save left %q behind; want only bookmarks.json", name)
+		}
+	}
+}
+
+// TestBookmarksLoadBoundsHostileFile pins migration safety: a legacy or
+// hand-edited file with duplicates, unnavigable empty URLs and far more
+// entries than any real profile loads bounded, deduplicated and clean.
+// Valid stores already satisfy all three, so ordinary profiles are untouched.
+func TestBookmarksLoadBoundsHostileFile(t *testing.T) {
+	type entry struct {
+		URL   string `json:"url"`
+		Title string `json:"title,omitempty"`
+	}
+	list := []entry{{URL: "", Title: "empty"}, {URL: "https://dup.example/", Title: "a"}, {URL: "https://dup.example/", Title: "b"}}
+	for i := 0; i < bookmarks.MaxBookmarks+5; i++ {
+		list = append(list, entry{URL: "https://page.example/" + string(rune('a'+i%26)) + "/" + string(rune('a'+(i/26)%26)) + "/" + string(rune('0'+i%10)) + "/" + string(rune('0'+(i/10)%10)) + "/" + string(rune('0'+(i/100)%10))})
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "bookmarks.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := bookmarks.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := s.List()
+	if len(got) > bookmarks.MaxBookmarks {
+		t.Fatalf("loaded %d bookmarks, want at most MaxBookmarks %d", len(got), bookmarks.MaxBookmarks)
+	}
+	seen := map[string]int{}
+	for _, e := range got {
+		if e.URL == "" {
+			t.Fatal("loaded an empty-URL bookmark")
+		}
+		seen[e.URL]++
+	}
+	for url, n := range seen {
+		if n > 1 {
+			t.Fatalf("bookmark %q loaded %d times, want deduplicated", url, n)
 		}
 	}
 }

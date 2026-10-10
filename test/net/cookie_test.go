@@ -2,12 +2,16 @@ package net_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/net"
 )
@@ -217,4 +221,66 @@ func mustURL(t *testing.T, raw string) *url.URL {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// TestLoadEnforcesJarLimits pins migration safety: a hostile or legacy
+// cookie file past the jar invariants must load bounded exactly as if the
+// cookies had arrived live (per-host and total eviction), never unbounded.
+func TestLoadEnforcesJarLimits(t *testing.T) {
+	type persisted struct {
+		Name    string    `json:"name"`
+		Value   string    `json:"value"`
+		Domain  string    `json:"domain"`
+		Path    string    `json:"path"`
+		Expires time.Time `json:"expires"`
+	}
+	exp := time.Now().Add(24 * time.Hour)
+	var list []persisted
+	for i := 0; i < 60; i++ {
+		list = append(list, persisted{Name: fmt.Sprintf("a%d", i), Value: "v", Domain: "a.example", Path: "/", Expires: exp})
+	}
+	for h := 0; h < 62; h++ {
+		for i := 0; i < 50; i++ {
+			list = append(list, persisted{Name: fmt.Sprintf("n%d", i), Value: "v", Domain: fmt.Sprintf("h%d.example", h), Path: "/", Expires: exp})
+		}
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	in := filepath.Join(dir, "cookies.json")
+	if err := os.WriteFile(in, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jar := net.NewCookieJar()
+	if err := jar.Load(in); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Count through a Save round-trip: session cookies persist here (future
+	// expiry), so the saved file reflects exactly what the jar holds.
+	out := filepath.Join(dir, "out.json")
+	if err := jar.Save(out); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	saved, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []persisted
+	if err := json.Unmarshal(saved, &kept); err != nil {
+		t.Fatalf("saved jar is not valid JSON: %v", err)
+	}
+	if len(kept) > 3000 {
+		t.Fatalf("jar holds %d cookies after Load, want at most 3000 total", len(kept))
+	}
+	var hostA int
+	for _, c := range kept {
+		if c.Domain == "a.example" {
+			hostA++
+		}
+	}
+	if hostA > 50 {
+		t.Fatalf("host a.example holds %d cookies, want at most 50", hostA)
+	}
 }

@@ -33,6 +33,12 @@ func NewStore(path string) *Store {
 	return &Store{path: path}
 }
 
+// MaxBookmarks caps how many entries Load keeps: ten times a heavy real
+// profile. Only hostile or hand-edited files ever reach it; Toggle can never
+// create duplicates or empties through the API, so valid stores load byte
+// for byte as before.
+const MaxBookmarks = 10000
+
 // Load reads the bookmark file. A missing file is an empty store, not an
 // error; a file that exists but cannot be parsed is an error so a corrupt
 // store is never overwritten on the next Save.
@@ -48,7 +54,22 @@ func Load(path string) (*Store, error) {
 	if err := json.Unmarshal(data, &list); err != nil {
 		return nil, err
 	}
-	return &Store{path: path, list: list}, nil
+	// Migration bound: drop unnavigable empties, fold duplicates keeping
+	// first-seen order, and cap the total. Valid stores already satisfy all
+	// three, so ordinary profiles load unchanged.
+	seen := make(map[string]bool, len(list))
+	kept := make([]Entry, 0, len(list))
+	for _, e := range list {
+		if e.URL == "" || seen[e.URL] {
+			continue
+		}
+		seen[e.URL] = true
+		kept = append(kept, e)
+		if len(kept) >= MaxBookmarks {
+			break
+		}
+	}
+	return &Store{path: path, list: kept}, nil
 }
 
 // Toggle adds url (keeping insertion order) or removes it, and reports whether

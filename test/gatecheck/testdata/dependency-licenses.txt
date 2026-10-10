@@ -1,0 +1,18 @@
+# Pinned distribution provenance for the release artifacts (./cmd/goosie,
+# ./cmd/goosie-headless): every externally-authored module linked into them,
+# with the audited license. Gate 8 evidence.
+#
+# Format: "<module>@<version> <SPDX license id>", one per line, "#" comments.
+# The licenses_test.go gate fails on ANY drift: a new dependency, a version
+# bump, or an unlisted license. To update: re-audit the license text in the
+# module cache (go list -m -f '{{.Dir}}' <module>), confirm it stays in the
+# permitted set (MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC), and amend
+# this file in the same commit as the go.mod change. Copyleft (GPL/AGPL/LGPL)
+# is never permitted here: it would change what distribution means.
+github.com/dlclark/regexp2/v2@v2.5.2 MIT
+github.com/dop251/goja@v0.0.0-20260926152631-39ec2650adc9 MIT
+github.com/go-sourcemap/sourcemap@v2.1.3+incompatible BSD-3-Clause
+github.com/google/pprof@v0.0.0-20230207041349-798e818bf904 Apache-2.0
+golang.org/x/image@v0.45.0 BSD-3-Clause
+golang.org/x/net@v0.60.0 BSD-3-Clause
+golang.org/x/text@v0.42.0 BSD-3-Clause

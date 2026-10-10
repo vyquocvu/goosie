@@ -1,6 +1,7 @@
 package history_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,5 +83,34 @@ func TestHistoryLoadCorruptFileIsError(t *testing.T) {
 	}
 	if _, err := history.Load(path); err == nil {
 		t.Fatal("Load of a corrupt file succeeded, want an error")
+	}
+}
+
+// TestHistoryLoadCapsOversizedFile: a legacy file past the cap loads only
+// the newest MaxEntries visits, matching what Record keeps at runtime.
+func TestHistoryLoadCapsOversizedFile(t *testing.T) {
+	type entry struct {
+		URL   string    `json:"url"`
+		Title string    `json:"title"`
+		At    time.Time `json:"at"`
+	}
+	var list []entry
+	for i := 0; i < history.MaxEntries+100; i++ {
+		list = append(list, entry{URL: "https://page.example/" + time.Unix(int64(i), 0).String(), At: time.Unix(int64(i), 0)})
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "history.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := history.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := len(s.Entries()); got != history.MaxEntries {
+		t.Fatalf("loaded %d visits, want the cap %d (newest kept)", got, history.MaxEntries)
 	}
 }

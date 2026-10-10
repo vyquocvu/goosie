@@ -247,6 +247,7 @@ func (j *CookieJar) Load(path string) error {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	hosts := make(map[string]bool)
 	for _, pc := range in {
 		if pc.Name == "" || pc.Domain == "" {
 			continue
@@ -269,6 +270,13 @@ func (j *CookieJar) Load(path string) error {
 			seq:      j.nextSeq,
 		}
 		j.nextSeq++
+		hosts[pc.Domain] = true
+	}
+	// Migration bound: a hostile or legacy file may carry more than the
+	// runtime invariants allow. Re-run the same eviction the live Store path
+	// uses so a loaded jar is indistinguishable from a built one.
+	for h := range hosts {
+		j.evict(h)
 	}
 	return nil
 }
