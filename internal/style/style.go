@@ -195,6 +195,13 @@ const (
 	ListStyleCircle
 	ListStyleSquare
 	ListStyleDecimal
+	ListStyleDecimalLeadingZero
+	ListStyleUpperRoman
+	ListStyleLowerRoman
+	ListStyleUpperAlpha
+	ListStyleLowerAlpha
+	ListStyleGeorgian
+	ListStyleArmenian
 )
 
 // FlexDirection is the CSS flex-direction.
@@ -430,8 +437,17 @@ type ComputedStyle struct {
 
 	// Content is the CSS content property for ::before/::after pseudo-elements.
 	// "normal" (default) or "none" means no generated content; any other string
-	// is the text to generate.
-	Content string
+	// is the text to generate. Structured counter() content instead lives in
+	// ContentParts (evaluated against tree counter scopes at layout); Content
+	// is empty then so raw function text can never leak into a render.
+	Content      string
+	ContentParts []ContentPart
+	// CounterReset/Set/Increment hold parsed counter declarations by name.
+	// Nil means absent. Counters are not inherited computed values: layout
+	// threads CounterScope state through the tree in document order.
+	CounterReset     map[string]int
+	CounterSet       map[string]int
+	CounterIncrement map[string]int
 
 	// BoxShadow is the list of box-shadow layers, resolved from the CSS
 	// box-shadow property. nil means no shadow (the initial `none`).
@@ -1435,11 +1451,24 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "content":
 		// Content takes the parsed string value (quotes stripped, escapes decoded)
 		// rather than the raw CSS text, so the generated text is what the author wrote.
+		// counter()/counters() functions parse into parts evaluated against
+		// tree scopes at layout; anything else keeps raw behavior.
 		if parsed.Type == css.ValueString {
 			cs.Content = parsed.Str
+		} else if parts, ok := ParseContentParts(value); ok {
+			cs.Content = ""
+			cs.ContentParts = parts
 		} else {
 			cs.Content = value
 		}
+	case "counter-reset":
+		// Bare names reset to 0. A nil result (none/invalid) clears.
+		cs.CounterReset = ParseCounterDecls(value, 0)
+	case "counter-set":
+		cs.CounterSet = ParseCounterDecls(value, 0)
+	case "counter-increment":
+		// Bare names increment by 1.
+		cs.CounterIncrement = ParseCounterDecls(value, 1)
 	case "opacity":
 		cs.Opacity = float32(parsed.Num)
 	case "z-index":
@@ -2453,6 +2482,20 @@ func parseListStyleType(v string) ListStyleType {
 		return ListStyleSquare
 	case "decimal":
 		return ListStyleDecimal
+	case "decimal-leading-zero":
+		return ListStyleDecimalLeadingZero
+	case "upper-roman":
+		return ListStyleUpperRoman
+	case "lower-roman":
+		return ListStyleLowerRoman
+	case "upper-alpha", "upper-latin":
+		return ListStyleUpperAlpha
+	case "lower-alpha", "lower-latin":
+		return ListStyleLowerAlpha
+	case "georgian":
+		return ListStyleGeorgian
+	case "armenian", "upper-armenian", "lower-armenian":
+		return ListStyleArmenian
 	}
 	return ListStyleDisc
 }

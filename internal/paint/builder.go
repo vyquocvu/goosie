@@ -1996,6 +1996,30 @@ func (b *Builder) paintFocusRing(obj *layout.Object) {
 	strip(inner.X1, inner.Y0, outer.X1, inner.Y1)
 }
 
+// listCounterStyle maps a marker type to the counter-style name FormatCounter
+// understands. Ordinals come from sibling order (custom ol start/reversed and
+// scoped counters do not feed markers yet); formatting is still per-type.
+func listCounterStyle(t style.ListStyleType) string {
+	switch t {
+	case style.ListStyleDecimalLeadingZero:
+		return "decimal-leading-zero"
+	case style.ListStyleUpperRoman:
+		return "upper-roman"
+	case style.ListStyleLowerRoman:
+		return "lower-roman"
+	case style.ListStyleUpperAlpha:
+		return "upper-alpha"
+	case style.ListStyleLowerAlpha:
+		return "lower-alpha"
+	case style.ListStyleGeorgian:
+		return "georgian"
+	case style.ListStyleArmenian:
+		return "armenian"
+	default:
+		return "decimal"
+	}
+}
+
 // paintMarker draws the outside marker of a list-item. The marker takes the
 // item's own font and color, is right-aligned to the item's content edge, and
 // sits on the baseline of the first text line inside it.
@@ -2014,6 +2038,11 @@ func (b *Builder) paintMarker(obj *layout.Object, ordinal int) {
 		text = "▪"
 	case style.ListStyleDecimal:
 		text = strconv.Itoa(ordinal) + "."
+	case style.ListStyleDecimalLeadingZero,
+		style.ListStyleUpperRoman, style.ListStyleLowerRoman,
+		style.ListStyleUpperAlpha, style.ListStyleLowerAlpha,
+		style.ListStyleGeorgian, style.ListStyleArmenian:
+		text = style.FormatCounter(ordinal, listCounterStyle(s.ListStyleType)) + "."
 	default:
 		return
 	}

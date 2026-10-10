@@ -276,10 +276,12 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 		a.Objects[rootID].Style = s
 	}
 	a.byNode[doc.Node.ID] = rootID
-	// Build the subtree under the document.
+	// Build the subtree under the document. Counter scopes thread through
+	// the walk in document order from an empty root.
+	rootScope := &style.CounterScope{}
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
 		if c.Element() || c.Type == dom.NodeText {
-			kid := buildSubtree(a, c, doc, styles, pseudoStyles)
+			kid := buildSubtree(a, c, doc, styles, pseudoStyles, rootScope)
 			a.Link(rootID, kid)
 		}
 	}
@@ -288,7 +290,7 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 	return a
 }
 
-func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle) ObjectID {
+func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
 	id, ok := a.ForNode(n.ID)
 	if ok {
 		return id
@@ -300,17 +302,26 @@ func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeI
 		obj.Style = s
 	}
 
+	// CSS counters apply in document order: the element's own reset/set
+	// establishes its scope, its increment adjusts the innermost instance,
+	// and both are visible to ::before/::after (which count as children).
+	if n.Element() && obj.Style != nil {
+		scope = scope.ApplyReset(obj.Style.CounterReset)
+		scope = scope.ApplySet(obj.Style.CounterSet)
+		scope = scope.ApplyIncrement(obj.Style.CounterIncrement)
+	}
+
 	// Inject ::before pseudo-element as first child if it has content.
 	if n.Element() && pseudoStyles != nil {
 		if beforeStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "before"}]; ok {
-			beforeID := buildPseudoElement(a, doc, beforeStyle)
+			beforeID := buildPseudoElement(a, doc, beforeStyle, scope)
 			a.Link(id, beforeID)
 		}
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Element() || c.Type == dom.NodeText {
-			kid := buildSubtree(a, c, doc, styles, pseudoStyles)
+			kid := buildSubtree(a, c, doc, styles, pseudoStyles, scope)
 			a.Link(id, kid)
 		}
 	}
@@ -318,7 +329,7 @@ func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeI
 	// Inject ::after pseudo-element as last child if it has content.
 	if n.Element() && pseudoStyles != nil {
 		if afterStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "after"}]; ok {
-			afterID := buildPseudoElement(a, doc, afterStyle)
+			afterID := buildPseudoElement(a, doc, afterStyle, scope)
 			a.Link(id, afterID)
 		}
 	}
@@ -327,14 +338,20 @@ func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeI
 }
 
 // buildPseudoElement creates a layout object for a pseudo-element with synthetic
-// text content. The object is an anonymous text node.
-func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.ComputedStyle) ObjectID {
+// text content. The object is an anonymous text node. Structured counter()
+// content evaluates against the originating element's scope; plain strings
+// pass through exactly as before.
+func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.ComputedStyle, scope *style.CounterScope) ObjectID {
 	id, obj := a.Alloc()
 	obj.flags |= flagAnonymous
 	obj.Style = pseudoStyle
 
 	// Create a synthetic text node with the generated content.
-	textNode := doc.NewText(pseudoStyle.Content)
+	text := pseudoStyle.Content
+	if len(pseudoStyle.ContentParts) > 0 {
+		text = style.EvaluateContent(pseudoStyle.ContentParts, scope)
+	}
+	textNode := doc.NewText(text)
 	obj.Node = textNode
 
 	return id

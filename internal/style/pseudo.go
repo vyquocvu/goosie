@@ -35,7 +35,7 @@ func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementS
 			if parentStyle != nil {
 				for _, pseudo := range []string{"before", "after"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts)
-					if cs != nil && cs.Content != "" && cs.Content != "normal" && cs.Content != "none" {
+					if cs != nil && (len(cs.ContentParts) > 0 || (cs.Content != "" && cs.Content != "normal" && cs.Content != "none")) {
 						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 					}
 				}
