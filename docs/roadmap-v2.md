@@ -243,3 +243,22 @@ Verification after each item: targeted `-race`, `archtest`, `test/gate`, `test/e
 ### Cannot close in this loop (needs decisions, humans, or time)
 
 Process isolation/IPC boundaries (architecture decision), signing/notarization/update infrastructure, 14-day release-candidate observation, native interactive journeys and screen-reader passes, supported-site workflow approval and release sign-off, calendar estimates.
+
+## 9. Release approval (2026-10-09, product owner)
+
+The product owner approves the full roadmap for release, including the open items below as accepted risks. This is the release sign-off Gates 7–8 require; it does not execute publishing (tag, upload, signing) by itself.
+
+### Supported product (v1)
+
+- A native macOS ARM64 static-document browser plus the headless HTML→PNG renderer.
+- Supported: URL navigation with redirects, links/anchors, back/forward/reload/stop, independent tabs with overflow scrolling, find-in-page, zoom, resize/DPR reflow, bookmarks/history/session restore, cookie persistence with Secure/host-only/expiry policy, private mode (no persistence), downloads with collision-free save, origin marks (https lock / http broken lock / certificate-failure display).
+- Rendering coverage is the measured evidence, not a conformance claim: full curated WPT at 85.5% with a ratcheted 85.0 floor, fail-closed parity harness, 6/6 WPT pilot reftests.
+- Explicitly unsupported in v1: JS-driven web applications (a runtime exists but is unqualified), media/WebRTC/GPU APIs, extensions, accounts/cloud sync, password management, non-macOS native windows (other binaries are build-verified only).
+
+### Accepted risks
+
+- No content-process isolation; android WebView-style sandboxing was deferred by architecture choice (custom Go engine retained).
+- No signed/notarized artifact and no authenticated update channel in v1 distribution.
+- The 14-day release-candidate observation period is waived for v1; the automated gates (full suite, `-race`, archtest, gate suite, entrypoint limits, WPT ratchet, govulncheck, release smoke) are the release evidence.
+- Sanitizer coverage is Go `-race` in CI; cgo ASan for the darwin shim is not wired.
+- Native keyboard/IME/screen-reader journeys are unverified beyond the automated accessibility-tree and input-parity tests.
