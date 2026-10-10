@@ -19,6 +19,20 @@ type Checkout struct {
 	cfg Config
 }
 
+// checkoutReusable reports whether dir already holds the pinned checkout: a
+// marker matching commit plus content behind it. A marker with nothing else
+// in the directory (interrupted download, external cleanup) is not reusable:
+// reusing it runs an empty suite that reports zero tests as a pass. Pure
+// filesystem so unit tests never touch the network.
+func checkoutReusable(dir, commit string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, ".goosie-wpt-commit"))
+	if err != nil || strings.TrimSpace(string(data)) != commit {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) > 1
+}
+
 // NewCheckout creates a Checkout for the given configuration.
 func NewCheckout(cfg Config) *Checkout {
 	return &Checkout{cfg: cfg}
@@ -29,12 +43,10 @@ func NewCheckout(cfg Config) *Checkout {
 func (c *Checkout) Ensure() (string, error) {
 	dir := c.cfg.WPTCheckoutDir()
 
-	// If the directory exists and has a commit marker matching our pin, reuse it.
-	markerPath := filepath.Join(dir, ".goosie-wpt-commit")
-	if data, err := os.ReadFile(markerPath); err == nil {
-		if strings.TrimSpace(string(data)) == c.cfg.Commit {
-			return dir, nil
-		}
+	// If the directory holds the pinned checkout, reuse it (see
+	// checkoutReusable). Anything else falls through to a fresh download.
+	if checkoutReusable(dir, c.cfg.Commit) {
+		return dir, nil
 	}
 
 	// Clean up any existing checkout.
@@ -51,7 +63,7 @@ func (c *Checkout) Ensure() (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("wpt: create checkout dir: %w", err)
 	}
-	if err := os.WriteFile(markerPath, []byte(c.cfg.Commit+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".goosie-wpt-commit"), []byte(c.cfg.Commit+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("wpt: write commit marker: %w", err)
 	}
 

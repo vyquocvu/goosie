@@ -423,6 +423,43 @@ func TestFuzzyPasses(t *testing.T) {
 	}
 }
 
+// TestWPTCheckoutReusable pins the stale-checkout contract: a matching
+// marker reuses only when content sits behind it. A marker alone (truncated
+// download, external cleanup) must re-download, never run an empty suite.
+func TestWPTCheckoutReusable(t *testing.T) {
+	const pin = "abc123"
+	if checkoutReusable(t.TempDir(), pin) {
+		t.Error("missing checkout reported reusable")
+	}
+	only := t.TempDir()
+	if err := os.WriteFile(filepath.Join(only, ".goosie-wpt-commit"), []byte(pin+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if checkoutReusable(only, pin) {
+		t.Error("marker-only checkout reported reusable")
+	}
+	stale := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stale, ".goosie-wpt-commit"), []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "css"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if checkoutReusable(stale, pin) {
+		t.Error("wrong-commit checkout reported reusable")
+	}
+	full := t.TempDir()
+	if err := os.WriteFile(filepath.Join(full, ".goosie-wpt-commit"), []byte(pin+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(full, "css"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !checkoutReusable(full, pin) {
+		t.Error("pinned checkout with content not reused")
+	}
+}
+
 // TestWPTMinPassRateFloor pins the suite-level ratchet: a floor of zero
 // disables (ad-hoc runs still report), an empty run never meets a positive
 // floor, and the boundary is inclusive so a floor set to today's measured

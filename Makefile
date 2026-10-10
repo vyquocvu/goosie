@@ -42,7 +42,7 @@ gate:
 
 wpt-unit:
 	@echo "Running WPT unit tests..."
-	go test -count=1 -run 'TestWPTCurator|TestWPTServer|TestWPTImageCompare|TestWPTConfigDefaults|TestWPTConfigLoad|TestWPTMinPassRateFloor|TestWPTSuiteThreshold|TestShouldSkip|TestWPTPilotDiscovery' -v ./test/wpt/
+	go test -count=1 -run 'TestWPTCurator|TestWPTServer|TestWPTImageCompare|TestWPTConfigDefaults|TestWPTConfigLoad|TestWPTMinPassRateFloor|TestWPTSuiteThreshold|TestWPTCheckoutReusable|TestShouldSkip|TestWPTPilotDiscovery' -v ./test/wpt/
 
 wpt-pilot: build
 	@echo "Running WPT pilot (local reftests)..."

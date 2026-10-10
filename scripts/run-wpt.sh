@@ -101,6 +101,9 @@ if [[ "$DOWNLOAD" == "true" ]] || [[ ! -d "$WPT_DIR" ]]; then
   rm -rf "$WPT_DIR"
   mkdir -p "$WPT_DIR"
   tar xzf "$TARBALL" -C "$WPT_DIR" --strip-components=1
+  # The marker is the harness's reuse contract (test/wpt/wpt_checkout.go):
+  # without it the next Ensure() wipes this checkout and downloads again.
+  printf '%s\n' "$WPT_COMMIT" > "$WPT_DIR/.goosie-wpt-commit"
   echo "WPT extracted to $WPT_DIR"
 fi
 
