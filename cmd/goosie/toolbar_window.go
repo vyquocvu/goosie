@@ -182,22 +182,27 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			return true
 		}
 		toolbarY := ev.Pos.Y - tabH
-		if toolbarY >= 0 && toolbarY < toolH && ev.Button == surface.ButtonLeft {
+		if toolbarY >= 0 && toolbarY < toolH {
+			// Every phase reaches the toolbar so a press can start a drag
+			// selection, motion extends it, and release ends it. Non-left
+			// presses are ignored inside; hover motion is a no-op there.
 			adjusted := ev.Pos
 			adjusted.Y = toolbarY
-			cw.toolbar.HandleClick(adjusted, ev.Button)
+			cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
 			if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 				cw.SetIME(false)
 			}
 			return true
 		}
-		if toolbarY >= 0 && toolbarY < toolH {
-			return true
-		}
 		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
-			adjusted := ev.Pos
-			adjusted.Y = toolbarY
-			cw.toolbar.HandleClick(adjusted, ev.Button)
+			// Presses and releases outside defocus the bar; motion extends
+			// an active drag so it clamps to the nearer end like a normal
+			// input instead of freezing at the bar's edge.
+			if ev.Action == surface.PointerPress || ev.Action == surface.PointerRelease || ev.Action == surface.PointerMotion {
+				adjusted := ev.Pos
+				adjusted.Y = toolbarY
+				cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
+			}
 		}
 		// Link and focus handling is a press concern; a drag's motion and
 		// release must not re-trigger them. Whatever a press leaves behind goes
@@ -223,6 +228,13 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvKey:
+		// Address-bar edit shortcuts win over browser shortcuts while the
+		// bar is focused: Cmd+C there copies the URL selection, it must not
+		// fall through to the content copy below.
+		if cw.toolbar.GetFocus() == toolbar.FocusAddress && addressEditKey(ev.Key, ev.Mods) {
+			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
+			return true
+		}
 		if cw.handleTabShortcut(ev.Key, ev.Mods) {
 			return true
 		}
@@ -367,6 +379,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	shift := mods&surface.ModShift != 0
 
 	switch {
+	case key == 'l' || key == 'L':
+		if cw.toolbar != nil {
+			cw.toolbar.FocusURL()
+			return true
+		}
 	case key == 't' || key == 'T':
 		if cw.onNewTab != nil {
 			cw.onNewTab()
@@ -429,6 +446,21 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			cw.onZoom(0)
 			return true
 		}
+	}
+	return false
+}
+
+// addressEditKey reports whether a key event is an address-bar edit shortcut
+// that must reach the focused URL bar rather than a browser shortcut. Cmd+C
+// with the bar focused copies the URL selection; without this priority the
+// content copy in handleTabShortcut would steal it.
+func addressEditKey(key rune, mods surface.KeyMod) bool {
+	if mods&(surface.ModCommand|surface.ModControl) == 0 {
+		return false
+	}
+	switch key {
+	case 'a', 'A', 'c', 'C', 'v', 'V', 'x', 'X', 'z', 'Z', 'y', 'Y':
+		return true
 	}
 	return false
 }

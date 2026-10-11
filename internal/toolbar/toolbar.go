@@ -92,6 +92,10 @@ type State struct {
 
 	fonts *raster.Fonts
 	scale int32
+	// dragging tracks an in-progress address-bar drag selection: press sets
+	// dragAnchor, motion extends to the cursor, release ends it.
+	dragging   bool
+	dragAnchor int
 }
 
 func NewState(width int32, fonts *raster.Fonts) *State {
@@ -154,6 +158,7 @@ func (s *State) Navigate(url string) {
 	s.SelEnd = s.Cursor
 	s.History.Push(url)
 	s.Focus = FocusNone
+	s.dragging = false
 }
 
 func (s *State) SetLoading(loading bool) {
@@ -190,6 +195,7 @@ func (s *State) SyncFromTab(url string, loading bool, errStr string, h *History)
 	s.History = h
 	s.Loading = loading
 	s.Error = errStr
+	s.dragging = false
 }
 
 // FindCounts reports find-mode state for the host to display.
@@ -231,6 +237,7 @@ func (s *State) OpenFind() {
 	s.Cursor = len([]rune(s.Input))
 	s.SelStart = s.Cursor
 	s.SelEnd = s.Cursor
+	s.dragging = false
 }
 
 // CloseFind restores the address bar to the current URL and keeps the query
@@ -275,25 +282,237 @@ func (s *State) CursorAt(pos frame.Point) surface.Cursor {
 }
 
 func (s *State) HandleClick(pos frame.Point, button surface.Button) {
+	s.HandlePointer(pos, button, surface.PointerPress)
+}
+
+// HandlePointer routes a full press/motion/release gesture. Presses on the
+// buttons fire, presses in the address bar focus and start a drag selection,
+// motion extends it, and release ends it - the same shape as a normal input.
+func (s *State) HandlePointer(pos frame.Point, button surface.Button, action surface.PointerAction) {
 	s.mu.Lock()
-	pending := s.handleClickLocked(pos, button)
+	pending := s.handlePointerLocked(pos, button, action)
 	s.mu.Unlock()
 	for _, fn := range pending {
 		fn()
 	}
 }
 
+// blurLocked leaves the address bar like a normal input: focus goes, the drag
+// ends, and an uncommitted URL edit reverts to the committed URL so the next
+// focus starts from what the page shows.
+func (s *State) blurLocked() {
+	s.Focus = FocusNone
+	s.dragging = false
+	if !s.FindActive {
+		s.Input = s.URL
+		s.Cursor = len([]rune(s.Input))
+	}
+	s.clearSelection()
+}
+
+// FocusURL focuses the address bar and selects all, exiting find mode. It is
+// the Cmd+L entry point: host callbacks return for the caller to fire after
+// unlock.
+func (s *State) FocusURL() {
+	s.mu.Lock()
+	pending := s.focusURLLocked()
+	s.mu.Unlock()
+	for _, fn := range pending {
+		fn()
+	}
+}
+
+func (s *State) focusURLLocked() []func() {
+	var pending []func()
+	if s.FindActive {
+		s.closeFindLocked()
+		if s.OnFindClose != nil {
+			cb := s.OnFindClose
+			pending = append(pending, func() { cb() })
+		}
+	}
+	s.Focus = FocusAddress
+	s.Input = s.URL
+	s.selectAllLocked()
+	s.dragging = false
+	return pending
+}
+
+// displayTextLocked reports what drawAddressBar paints, so hit testing maps
+// onto the same string the pixels show.
+func (s *State) displayTextLocked() string {
+	if s.Focus == FocusAddress || s.FindActive {
+		return s.Input
+	}
+	if s.Error != "" {
+		return s.Error
+	}
+	if s.URL != "" {
+		return s.URL
+	}
+	return s.Input
+}
+
+// addressTextXDev returns the device-pixel X where the address text starts,
+// mirroring drawAddressBar: the default padding, or the lock-icon offset when
+// an origin mark is drawn.
+func (s *State) addressTextXDev(toolbarW int32) int32 {
+	sc := s.sc()
+	lr := AddressBarRect(toolbarW)
+	x := lr.X0*sc + (BarPadding+4)*sc
+	if s.Error == "" && (isSecureScheme(s.URL) || isInsecureScheme(s.URL)) {
+		x = lr.X0*sc + 22*sc
+	}
+	return x
+}
+
+// hitCursorDev maps a device-pixel X to a rune index in the displayed text,
+// clamping drags that run past either end. Boundaries advance in 26.6 fixed
+// point exactly like drawText and measureText, and the nearest boundary wins
+// so a click lands on the closer side of a glyph.
+func (s *State) hitCursorDev(devX int32, toolbarW int32) int {
+	sc := s.sc()
+	text := s.displayTextLocked()
+	runes := []rune(text)
+	n := len(runes)
+	textX := s.addressTextXDev(toolbarW)
+	if devX <= textX {
+		return 0
+	}
+	if s.fonts == nil {
+		adv := int32(7) * sc
+		if adv <= 0 {
+			adv = 1
+		}
+		off := int((devX - textX + adv/2) / adv)
+		if off < 0 {
+			return 0
+		}
+		if off > n {
+			return n
+		}
+		return off
+	}
+	size := int32(textSize) * sc
+	var pen int32
+	best := 0
+	bestDist := devX - textX
+	if bestDist < 0 {
+		bestDist = -bestDist
+	}
+	for i, rn := range runes {
+		pen += s.fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
+		b := textX + (pen+32)>>6
+		d := b - devX
+		if d < 0 {
+			d = -d
+		}
+		if d < bestDist {
+			bestDist = d
+			best = i + 1
+		}
+		// Boundaries only move right, so once the overshoot exceeds the
+		// best distance no later boundary can win.
+		if b > devX && b-devX > bestDist {
+			break
+		}
+	}
+	return best
+}
+
+// pressAddressLocked focuses the bar and starts a drag. A press on an
+// unfocused bar selects all (so typing replaces and Cmd+C copies the URL);
+// the press point stays the drag anchor so a press-and-drag still selects a
+// range instead of keeping the select-all. A press on a focused bar places
+// the caret.
+func (s *State) pressAddressLocked(devX int32, toolbarW int32) {
+	if s.FindActive {
+		s.Focus = FocusAddress
+		at := s.hitCursorDev(devX, toolbarW)
+		s.Cursor = at
+		s.SelStart = at
+		s.SelEnd = at
+		s.dragging = true
+		s.dragAnchor = at
+		return
+	}
+	if s.Focus != FocusAddress {
+		s.Focus = FocusAddress
+		s.Input = s.URL
+		s.selectAllLocked()
+		s.dragging = true
+		s.dragAnchor = s.hitCursorDev(devX, toolbarW)
+		return
+	}
+	at := s.hitCursorDev(devX, toolbarW)
+	s.Cursor = at
+	s.SelStart = at
+	s.SelEnd = at
+	s.dragging = true
+	s.dragAnchor = at
+}
+
+// dragAddressLocked extends the press's selection to the current pointer.
+func (s *State) dragAddressLocked(devX int32, toolbarW int32) {
+	if !s.dragging || s.Focus != FocusAddress {
+		return
+	}
+	at := s.hitCursorDev(devX, toolbarW)
+	s.Cursor = at
+	s.SelStart = s.dragAnchor
+	s.SelEnd = at
+}
+
 // handleClickLocked applies one click; host callbacks return for the caller
 // to fire after unlock.
 func (s *State) handleClickLocked(pos frame.Point, button surface.Button) []func() {
+	return s.handlePointerLocked(pos, button, surface.PointerPress)
+}
+
+// handlePointerLocked applies one pointer phase; host callbacks return for
+// the caller to fire after unlock.
+func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, action surface.PointerAction) []func() {
 	var pending []func()
 	fire := func(fn func()) {
 		pending = append(pending, fn)
 	}
+	sc := s.sc()
+	// Release always ends a drag, wherever it lands.
+	if action == surface.PointerRelease {
+		s.dragging = false
+		if button != surface.ButtonLeft && button != surface.ButtonNone {
+			return nil
+		}
+		// A release outside the chrome defocuses like a press there; a
+		// release inside needs no further work.
+		if pos.Y >= int32(ToolbarHeight)*sc {
+			if s.FindActive {
+				s.closeFindLocked()
+				if s.OnFindClose != nil {
+					cb := s.OnFindClose
+					fire(func() { cb() })
+				}
+				return pending
+			}
+			if s.Focus == FocusAddress {
+				s.blurLocked()
+			}
+			return pending
+		}
+		return pending
+	}
+	if action == surface.PointerMotion {
+		// A drag that runs outside the bar clamps to the nearer end, like a
+		// normal input; anything else is a hover.
+		if s.dragging && s.Focus == FocusAddress {
+			w := s.Bounds.W() / sc
+			s.dragAddressLocked(pos.X, w)
+		}
+		return nil
+	}
 	if button != surface.ButtonLeft {
 		return nil
 	}
-	sc := s.sc()
 	if pos.Y >= int32(ToolbarHeight)*sc {
 		if s.FindActive {
 			s.closeFindLocked()
@@ -304,8 +523,7 @@ func (s *State) handleClickLocked(pos frame.Point, button surface.Button) []func
 			return pending
 		}
 		if s.Focus == FocusAddress {
-			s.Focus = FocusNone
-			s.clearSelection()
+			s.blurLocked()
 		}
 		return nil
 	}
@@ -313,24 +531,25 @@ func (s *State) handleClickLocked(pos frame.Point, button surface.Button) []func
 	w := s.Bounds.W() / sc
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), lp):
+		s.dragging = false
 		if s.History.CanBack() && s.OnTraverse != nil {
 			cb := s.OnTraverse
 			fire(func() { cb(-1) })
 		}
 	case rectContains(ButtonRect(ButtonForward, w), lp):
+		s.dragging = false
 		if s.History.CanForward() && s.OnTraverse != nil {
 			cb := s.OnTraverse
 			fire(func() { cb(1) })
 		}
 	case rectContains(ButtonRect(ButtonReload, w), lp):
+		s.dragging = false
 		if s.OnReload != nil {
 			cb := s.OnReload
 			fire(func() { cb() })
 		}
 	case rectContains(AddressBarRect(w), lp):
-		s.Focus = FocusAddress
-		s.Cursor = len([]rune(s.Input))
-		s.clearSelection()
+		s.pressAddressLocked(pos.X, w)
 	default:
 		if s.FindActive {
 			s.closeFindLocked()
@@ -341,8 +560,7 @@ func (s *State) handleClickLocked(pos frame.Point, button surface.Button) []func
 			return pending
 		}
 		if s.Focus == FocusAddress {
-			s.Focus = FocusNone
-			s.clearSelection()
+			s.blurLocked()
 		}
 	}
 	return pending
@@ -382,6 +600,12 @@ func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 		if mods&(surface.ModCommand|surface.ModControl) == 0 {
 			return s.submitInputLocked()
 		}
+		return nil
+	}
+	if key == 0x1b {
+		// Esc reverts an uncommitted edit and leaves the bar, like a normal
+		// input; find mode has its own Esc path above.
+		s.blurLocked()
 		return nil
 	}
 	return s.clipboardPending(s.editKeyLocked(key, mods))
@@ -437,6 +661,9 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 	ctrl := mods&surface.ModControl != 0
 	shift := mods&surface.ModShift != 0
 	opt := mods&surface.ModOption != 0
+	// Ctrl+C/V/X/A mirror Cmd on non-macOS platforms where the command key
+	// does not exist; a normal input accepts both.
+	editMod := cmd || ctrl
 
 	if key == 0x7f || key == '\b' {
 		s.deleteBackwardLocked()
@@ -476,7 +703,7 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 	case keyEnd:
 		s.moveCursorEnd(shift)
 
-	case 'a':
+	case 'a', 'A':
 		if cmd {
 			s.selectAllLocked()
 		} else if ctrl {
@@ -484,34 +711,34 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 		} else {
 			s.insertChar(key)
 		}
-	case 'c':
-		if cmd {
+	case 'c', 'C':
+		if editMod {
 			copyText, cb = s.copyLocked()
 		} else {
 			s.insertChar(key)
 		}
-	case 'v':
-		if cmd {
+	case 'v', 'V':
+		if editMod {
 			wantPaste = true
 			cb = s.Clipboard
 		} else {
 			s.insertChar(key)
 		}
-	case 'x':
-		if cmd {
+	case 'x', 'X':
+		if editMod {
 			copyText, cb = s.cutLocked()
 		} else {
 			s.insertChar(key)
 		}
-	case 'z':
-		if cmd {
+	case 'z', 'Z':
+		if editMod {
 			// Undo: no-op for now
 		} else {
 			s.insertChar(key)
 		}
 
 	default:
-		if ctrl {
+		if ctrl && !cmd {
 			switch key {
 			case 'e':
 				s.moveCursorEnd(shift)
@@ -532,7 +759,7 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 			s.insertChar(key)
 		}
 	}
-	return false, "", nil
+	return wantPaste, copyText, cb
 }
 
 func (s *State) insertChar(r rune) {

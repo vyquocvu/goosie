@@ -183,14 +183,17 @@ func (s *Session) runeOffset(w *layout.Object, x float32) int {
 }
 
 // SelectAt starts a selection gesture at a document-space point, replacing any
-// selection in progress. It always reports a change: a press may clear an
-// existing highlight even when it lands on the same spot.
+// selection in progress. It reports whether anything visible changed: a press
+// collapses to an empty point, so it only clears a previous highlight. A press
+// with no highlight before and none after changes no pixel and returns false,
+// letting the caller skip a repaint (and the full re-raster flash behind it).
 func (s *Session) SelectAt(x, y float32) bool {
+	had := s.HasSelection()
 	p := s.posAt(s.selWords(), x, y)
 	s.selAnchor = p
 	s.selHead = p
 	s.selActive = true
-	return true
+	return had
 }
 
 // SelectTo extends the active selection to a document-space point. It reports

@@ -1,6 +1,22 @@
 package toolbar
 
-import "unicode"
+import (
+	"strings"
+	"unicode"
+)
+
+// sanitizePaste strips carriage returns and newlines a clipboard can carry.
+// The address bar submits on Enter, so a pasted newline must never become
+// part of the value; surrounding whitespace is left for navigation to trim.
+func sanitizePaste(text string) string {
+	if strings.IndexAny(text, "\r\n") < 0 {
+		return text
+	}
+	text = strings.ReplaceAll(text, "\r\n", "")
+	text = strings.ReplaceAll(text, "\r", "")
+	text = strings.ReplaceAll(text, "\n", "")
+	return text
+}
 
 func (s *State) insertRuneLocked(r rune) {
 	if s.Focus != FocusAddress {
@@ -93,6 +109,9 @@ func (s *State) pasteTextLocked(text string) {
 	if s.Focus != FocusAddress {
 		return
 	}
+	// A normal input never admits a newline from the clipboard: it would
+	// submit mid-paste or smuggle a control character into the URL.
+	text = sanitizePaste(text)
 	if text == "" {
 		return
 	}

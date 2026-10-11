@@ -1044,9 +1044,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 			return false
 		}
 		dx, dy := f.docPoint(contentX, contentY)
-		tab.Session().SelectAt(dx, dy)
+		changed := tab.Session().SelectAt(dx, dy)
 		f.selDrag = true
-		f.repaintTab(tab)
+		if changed {
+			f.repaintTab(tab)
+		}
 		return true
 	case surface.PointerMotion:
 		if !f.selDrag {
