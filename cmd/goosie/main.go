@@ -898,6 +898,27 @@ func (f *framePath) handleResize(contentW, contentH int) {
 	f.repaintTab(tab)
 }
 
+// pumpJS runs one event-loop turn for the active tab and repaints on change.
+// Background tabs stay frozen (and cheap) until shown. It runs on the chrome
+// pump thread like every input callback; see the wiring at openWindow.
+func (f *framePath) pumpJS() {
+	if f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
+	sess := tab.Session()
+	if sess == nil {
+		return
+	}
+	if !sess.PumpJS(float32(f.config.width)) {
+		return
+	}
+	f.repaintTab(tab)
+}
+
 // repaintTab rebuilds the active tab's layer from its session and hands the
 // plan to the scheduler.
 func (f *framePath) repaintTab(tab *tabs.Tab) {
@@ -1488,6 +1509,10 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
 		engine.WithJS(rt),
+		// Every load gets a fresh invalidation batch: JS-driven DOM
+		// mutations record here so the vsync pump reflows exactly the
+		// documents that changed.
+		engine.WithInvalidation(&engine.Invalidation{}),
 		imageOption(deferImages, resp.URL, imageFetcher),
 		fontOption(deferFonts, resp.URL, fontFetcher, fonts))
 	if err != nil {
@@ -1612,6 +1637,16 @@ func (f *framePath) openWindow() error {
 			f.fonts,
 			int32(f.config.dpr+0.5),
 		)
+		// The JS pump rides the chrome event thread at display cadence: one
+		// event-loop turn per tick for the active tab, so timers, fetch
+		// completions and RAF callbacks fire in a living browser instead of
+		// only in unit tests. Same thread as every input callback, so no new
+		// thread touches sessions; shutdown needs no join (the pump dies with
+		// the window's event stream).
+		if cw, ok := f.window.(*chromeWindow); ok {
+			cw.tickInterval = f.config.vsyncPeriod()
+			cw.onTick = f.pumpJS
+		}
 	} else {
 		f.window = w
 	}

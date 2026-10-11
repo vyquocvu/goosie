@@ -1015,6 +1015,88 @@ func TestSwitchTabScrollsActiveIntoView(t *testing.T) {
 	}
 }
 
+// tickWin is a chromeWindow backend with a drivable event channel.
+type tickWin struct {
+	events chan surface.Event
+}
+
+func (w *tickWin) Events() <-chan surface.Event              { return w.events }
+func (w *tickWin) Present(*frame.Bitmap, []frame.Rect) error { return nil }
+func (w *tickWin) SetCursor(surface.Cursor)                  {}
+func (w *tickWin) SetIME(bool)                               {}
+func (w *tickWin) ScaleFactor() float32                      { return 1 }
+func (w *tickWin) Close() error                              { return nil }
+
+// TestChromePumpFiresTickCallbacks pins the pump's periodic hook: the tick
+// callback runs while events flow, and the pump still exits when the window
+// closes. A zero interval disables ticks (all existing constructions).
+func TestChromePumpFiresTickCallbacks(t *testing.T) {
+	evs := make(chan surface.Event, 8)
+	ticks := make(chan struct{}, 64)
+	cw := &chromeWindow{
+		Window:       &tickWin{events: evs},
+		toolbar:      toolbar.NewState(800, nil),
+		tabMgr:       tabs.NewManager(nil),
+		events:       make(chan surface.Event, 8),
+		scale:        1,
+		tickInterval: time.Millisecond,
+		onTick: func() {
+			select {
+			case ticks <- struct{}{}:
+			default:
+			}
+		},
+	}
+	done := make(chan struct{})
+	go func() { cw.pump(); close(done) }()
+	evs <- surface.Event{Kind: surface.EvPointer, Action: surface.PointerMotion, Button: surface.ButtonNone, Pos: frame.Point{X: 700, Y: 500}}
+	time.Sleep(30 * time.Millisecond)
+	close(evs)
+	<-done
+	if n := len(ticks); n < 1 {
+		t.Fatalf("onTick fired %d times in 30ms at 1ms cadence, want >= 1", n)
+	}
+}
+
+// TestPumpJSRepaintsMutatedTab is the host half of the event loop: a timer
+// mutation applied by PumpJS must reach a fresh layer and a published plan,
+// and a quiescent tab must publish nothing further.
+func TestPumpJSRepaintsMutatedTab(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><body><p id="t">waiting</p><script>setTimeout(function(){document.getElementById('t').textContent='fired';},0);</script></body></html>`))
+	}))
+	defer server.Close()
+	client := net.DefaultClient()
+	defer client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newNavTestPath(t)
+	f.config.width = 800
+	f.config.dpr = 1
+	f.zoom = 1
+	_, _, _, sess, _, err := loadURLCtx(context.Background(), client, fonts, server.URL, 800, 600, 1, t.TempDir(), false, false)
+	if err != nil {
+		t.Fatalf("loadURLCtx: %v", err)
+	}
+	tab := f.tabMgr.Active()
+	tab.SetSession(sess)
+	before := f.sched.PlanStats().Published
+	f.pumpJS()
+	if tab.Layer() == nil {
+		t.Fatal("no layer after pumpJS with a due timer")
+	}
+	if got := f.sched.PlanStats().Published; got <= before {
+		t.Fatal("pumpJS with a mutation published no frame plan")
+	}
+	published := f.sched.PlanStats().Published
+	f.pumpJS()
+	if got := f.sched.PlanStats().Published; got != published {
+		t.Fatal("quiescent pumpJS published a plan")
+	}
+}
+
 // TestTabStripChevronClicksScrollByPage pins the last mouse-only path past
 // the minimum: the right chevron pages forward, the left pages back, both
 // clamped to the strip range. With no overflow the same points hit nothing.

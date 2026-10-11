@@ -13,6 +13,7 @@ import (
 	stdimage "image"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/css"
@@ -139,6 +140,21 @@ type Session struct {
 	// records DOM mutations into it so the pipeline knows to re-style and
 	// re-layout. Set via WithInvalidation.
 	inv *Invalidation
+
+	// opMu serializes pipeline operations across threads: the UI pump
+	// (input handlers, the JS pump, repaints) and navigation drains
+	// (session install/teardown, deferred completions) share sessions, and
+	// pipeline state (Styles, Arena, focus, selection) must move atomically
+	// between them. Lock order is opMu before imgMu; nothing takes those in
+	// reverse, and no opMu-guarded method calls another one. Leaf helpers
+	// (layout/paint/metrics, the JS runtime, invalidation records) never
+	// take opMu.
+	opMu sync.Mutex
+	// deferredActive counts in-flight deferred font/image loads, which write
+	// image and font tables outside opMu by design. PumpJS skips reflowing
+	// while it is nonzero and retries next tick, so a pump reflow never
+	// reads a half-attached document.
+	deferredActive int32
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -364,6 +380,10 @@ func (s *Session) LoadDeferredFonts(onReady func(loaded int)) {
 		}
 		return
 	}
+	// In-flight deferred work gates PumpJS reflows (see deferredActive):
+	// the font table attaches outside opMu by design.
+	atomic.AddInt32(&s.deferredActive, 1)
+	defer atomic.AddInt32(&s.deferredActive, -1)
 	s.applyFontJobs(jobs)
 	if onReady != nil {
 		onReady(1)
@@ -374,6 +394,8 @@ func (s *Session) LoadDeferredFonts(onReady func(loaded int)) {
 // table. Call it after LoadDeferredFonts completes so text picks up the web
 // faces instead of the system fallbacks the first paint used.
 func (s *Session) RefreshAfterFonts() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if len(s.sheets) == 0 {
 		return
 	}
@@ -432,7 +454,12 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 		italic := j.styleStr == "italic" || j.styleStr == "oblique"
 		fonts.Register(j.family, idx, bold, italic, light)
 	}
+	// The table publishes under opMu so a concurrent pump reflow resolving
+	// styles never reads a half-attached table. Fetching above stays
+	// outside the lock: holding it across network I/O would stall the pump.
+	s.opMu.Lock()
 	s.customFonts = fonts
+	s.opMu.Unlock()
 }
 
 // collectFontJobs walks every stylesheet's @font-face rules and builds the
@@ -620,6 +647,8 @@ func (s *Session) LoadDeferredImages(onReady func(loaded int)) {
 	s.imgMu.Unlock()
 	loaded := 0
 	if len(refs) > 0 && s.imgFetch != nil {
+		atomic.AddInt32(&s.deferredActive, 1)
+		defer atomic.AddInt32(&s.deferredActive, -1)
 		byURL := s.fetchImages(refs)
 		s.applyImages(refs, byURL)
 		loaded = len(byURL)
@@ -975,6 +1004,8 @@ func (s *Session) recordViewportWidth(w float32) {
 // and font metrics. The old arena is untouched unless the candidate validates.
 // Like Paint, this method must be called by the session's single owner.
 func (s *Session) Reflow(viewportW float32) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	s.imgMu.Lock()
 	defer s.imgMu.Unlock()
 	if err := validateWidth(viewportW); err != nil {
@@ -1071,6 +1102,8 @@ func (s *Session) Reflow(viewportW float32) error {
 // PaintChecked validates geometry and scale before any device-coordinate
 // conversion, then checks tile metadata bounds before handing off the list.
 func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if err := validateScale(float64(scale)); err != nil {
 		return nil, err
 	}
@@ -1269,6 +1302,8 @@ const maxFindMatches = 1000
 // spaces, so a query may span word boundaries and line breaks but not element
 // boundaries.
 func (s *Session) Find(query string) []Match {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if s.Arena == nil || strings.TrimSpace(query) == "" {
 		return nil
 	}
@@ -1461,6 +1496,8 @@ func walkScripts(n *dom.Node, rt *js.Runtime) {
 // Close releases resources held by the session. If a JS runtime was supplied,
 // it is closed so the realm is torn down.
 func (s *Session) Close() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if s.jsRT != nil {
 		_ = s.jsRT.Close()
 	}
@@ -1473,6 +1510,54 @@ func (s *Session) JSTitle() string {
 		return ""
 	}
 	return s.jsRT.Title()
+}
+
+// PumpJS runs one event-loop turn for the document: timer, fetch, worker and
+// RAF callbacks Fire, then the pipeline reflows if the turn changed anything
+// observable. It reports whether the document changed, which is when the
+// caller must repaint.
+//
+// A tick with no runtime, no fired callbacks and no pending invalidations is
+// a no-op returning false. While deferred font/image loads are in flight the
+// reflow is skipped (their tables attach outside opMu by design) and retried
+// next tick; timers still fire, so work is delayed, never lost.
+func (s *Session) PumpJS(viewportW float32) bool {
+	if s.jsRT == nil {
+		return false
+	}
+	fired := s.jsRT.Tick()
+	raf := false
+	if s.jsRT.HasPendingRAF() {
+		s.jsRT.TickRAF(time.Now())
+		raf = true
+	}
+	dirty := fired || raf
+	if s.inv != nil {
+		if !s.inv.Empty() {
+			dirty = true
+		}
+		s.inv.Reset()
+	}
+	if !dirty {
+		return false
+	}
+	if atomic.LoadInt32(&s.deferredActive) > 0 {
+		return false
+	}
+	// Re-resolve before reflowing: scripts may have added nodes or classes
+	// the load-time cascade never saw, and unstyled nodes are skipped by
+	// layout. Stored sheets (linked and imported, in order) resolve exactly
+	// as at load. Reflow takes opMu itself; PumpJS composes locked
+	// primitives and never holds it, so reflow cannot deadlock against a
+	// concurrent Close.
+	s.opMu.Lock()
+	s.Styles = style.ResolveViewport(s.Doc, s.sheets, s.styleViewport(), s.customFonts)
+	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, s.sheets, s.Styles, s.customFonts)
+	s.opMu.Unlock()
+	if err := s.Reflow(viewportW); err != nil {
+		return false
+	}
+	return true
 }
 
 // JSMutationSink returns a function suitable for js.Options.OnMutation that

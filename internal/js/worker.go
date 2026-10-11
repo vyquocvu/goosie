@@ -247,7 +247,9 @@ func (r *Runtime) DrainWorkerMessages() {
 			}
 			errObj := r.vm.NewObject()
 			_ = errObj.Set("message", msg.errMsg)
-			_, _ = fn(obj, errObj)
+			if _, err := r.callBounded(func() (goja.Value, error) { return fn(obj, errObj) }); err != nil {
+				return
+			}
 		} else {
 			handler := obj.Get("onmessage")
 			if handler == nil || goja.IsNull(handler) || goja.IsUndefined(handler) {
@@ -260,7 +262,9 @@ func (r *Runtime) DrainWorkerMessages() {
 			eventObj := r.vm.NewObject()
 			_ = eventObj.Set("data", msg.data)
 			_ = eventObj.Set("type", "message")
-			_, _ = fn(obj, eventObj)
+			if _, err := r.callBounded(func() (goja.Value, error) { return fn(obj, eventObj) }); err != nil {
+				return
+			}
 		}
 	}
 }

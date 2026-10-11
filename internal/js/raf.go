@@ -100,7 +100,16 @@ func (r *Runtime) setupRAF() {
 // TickRAF invokes all pending requestAnimationFrame callbacks.
 // Called by the engine once per frame (typically 60fps).
 // The timestamp parameter is the current time in milliseconds.
+// Each callback runs under the runtime timeout; an interrupt stops the pass
+// with the remaining callbacks dropped (they re-register next frame by
+// design). A closed runtime is a no-op.
 func (r *Runtime) TickRAF(timestamp time.Time) {
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return
+	}
 	fs := rafOf(r)
 	if fs == nil {
 		return
@@ -121,7 +130,9 @@ func (r *Runtime) TickRAF(timestamp time.Time) {
 	// Invoke all callbacks with the timestamp.
 	for _, cb := range callbacks {
 		if f, ok := goja.AssertFunction(cb); ok {
-			_, _ = f(nil, r.vm.ToValue(ts))
+			if _, err := r.callBounded(func() (goja.Value, error) { return f(nil, r.vm.ToValue(ts)) }); err != nil {
+				return
+			}
 		}
 	}
 }

@@ -354,21 +354,23 @@ func (r *Runtime) DrainWSEvents() {
 			_ = obj.Set("protocol", protocol)
 		}
 		for _, ev := range events {
-			fireWSEvent(r, obj, ev)
+			if err := fireWSEvent(r, obj, ev); err != nil {
+				return
+			}
 		}
 	}
 }
 
-func fireWSEvent(r *Runtime, obj *goja.Object, ev wsEvent) {
+func fireWSEvent(r *Runtime, obj *goja.Object, ev wsEvent) error {
 	handlerName := "on" + ev.typ
 	handler := obj.Get(handlerName)
 	if handler == nil || goja.IsNull(handler) || goja.IsUndefined(handler) {
-		return
+		return nil
 	}
 
 	fn, ok := goja.AssertFunction(handler)
 	if !ok {
-		return
+		return nil
 	}
 
 	eventObj := r.vm.NewObject()
@@ -387,5 +389,8 @@ func fireWSEvent(r *Runtime, obj *goja.Object, ev wsEvent) {
 		_ = eventObj.Set("wasClean", ev.wasClean)
 	}
 
-	_, _ = fn(obj, eventObj)
+	if _, err := r.callBounded(func() (goja.Value, error) { return fn(obj, eventObj) }); err != nil {
+		return err
+	}
+	return nil
 }

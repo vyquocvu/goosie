@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -35,6 +37,11 @@ type chromeWindow struct {
 	outBitmap     *frame.Bitmap
 	fonts         *raster.Fonts
 	hover         surface.Cursor // last shape sent to the platform, for change detection
+	// tickInterval paces the onTick hook (the host's JS pump); zero disables
+	// it, which keeps every literal construction (tests especially) exactly
+	// as before.
+	tickInterval time.Duration
+	onTick       func()
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
@@ -158,11 +165,29 @@ func (cw *chromeWindow) Run() {
 
 func (cw *chromeWindow) pump() {
 	defer close(cw.events)
-	for ev := range cw.Window.Events() {
-		if cw.intercept(ev) {
-			continue
+	// The tick shares the pump select so the JS pump runs on the same thread
+	// as every input callback: sessions never see two threads at once from
+	// this side. No extra lifecycle: the ticker dies with the pump, which
+	// dies when the window's events run out.
+	var tick <-chan time.Time
+	if cw.onTick != nil && cw.tickInterval > 0 {
+		ticker := time.NewTicker(cw.tickInterval)
+		defer ticker.Stop()
+		tick = ticker.C
+	}
+	for {
+		select {
+		case ev, ok := <-cw.Window.Events():
+			if !ok {
+				return
+			}
+			if cw.intercept(ev) {
+				continue
+			}
+			cw.events <- ev
+		case <-tick:
+			cw.onTick()
 		}
-		cw.events <- ev
 	}
 }
 

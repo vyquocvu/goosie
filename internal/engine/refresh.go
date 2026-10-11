@@ -14,6 +14,8 @@ import (
 // The method returns true if any work was done, false if the plan was a
 // scroll-only update or empty.
 func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	// Scroll-only or empty plan: no work needed.
 	if plan.FullDoc == false && len(plan.Subtree) == 0 && plan.StyleObjects == 0 {
 		return false
@@ -59,6 +61,8 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 // RefreshNode re-styles and re-layouts a single node and its descendants.
 // This is the granular refresh path for hover, style changes, and DOM mutations.
 func (s *Session) RefreshNode(node *dom.Node, authorCSS []string, viewportW float32) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if node == nil {
 		return
 	}

@@ -118,3 +118,18 @@ func TestRunawayMicrotasksInterrupt(t *testing.T) {
 		t.Fatalf("Run err = %v, want ErrInterrupted", err)
 	}
 }
+
+// TestHangingTimerCallbackDoesNotWedgeTick pins the pump bound: a timer
+// callback that never returns ends the Tick at the runtime timeout instead
+// of hanging the pump thread.
+func TestHangingTimerCallbackDoesNotWedgeTick(t *testing.T) {
+	r := newRuntime(t, js.Options{URL: "https://example.test/", Timeout: 200 * time.Millisecond})
+	if err := r.Run(`setTimeout(function() { while(true) {} }, 0);`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	start := time.Now()
+	r.Tick()
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("Tick with a hung callback took %v, want the ~200ms bound", elapsed)
+	}
+}

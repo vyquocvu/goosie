@@ -56,6 +56,8 @@ func (s *Session) controlAt(x, y float32) *dom.Node {
 // HasControlAt reports whether an editable control is laid out at the
 // document-space point. Hover uses it to ask for the text cursor.
 func (s *Session) HasControlAt(x, y float32) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	return s.controlAt(x, y) != nil
 }
 
@@ -66,6 +68,8 @@ func (s *Session) HasControlAt(x, y float32) bool {
 // Fires "blur" and "focus" events on the affected controls, and a "change"
 // event on the blurred control if its value was modified during focus.
 func (s *Session) FocusControl(x, y float32) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	n := s.controlAt(x, y)
 	if n == s.focus {
 		return false
@@ -93,13 +97,19 @@ func (s *Session) FocusControl(x, y float32) bool {
 }
 
 // Focused returns the focused control node, or nil.
-func (s *Session) Focused() *dom.Node { return s.focus }
+func (s *Session) Focused() *dom.Node {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.focus
+}
 
 // SetMarked replaces the IME composition preview shown at the focused
 // control's caret. The preview is painted but is not the value until
 // CommitText runs; an empty string ends composition. Returns whether the
 // preview changed, which is when the caller must repaint.
 func (s *Session) SetMarked(text string) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if !controlEditable(s.focus) || s.marked == text {
 		return false
 	}
@@ -108,12 +118,18 @@ func (s *Session) SetMarked(text string) bool {
 }
 
 // Marked returns the current composition text, empty when not composing.
-func (s *Session) Marked() string { return s.marked }
+func (s *Session) Marked() string {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.marked
+}
 
 // CommitText ends composition by inserting text at the focused control's
 // caret, respecting maxlength like any other insert. Returns whether the
 // value changed, which is when the caller must reflow.
 func (s *Session) CommitText(text string) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if !controlEditable(s.focus) {
 		return false
 	}
@@ -140,6 +156,8 @@ func (s *Session) CommitText(text string) bool {
 // the value or focus changed, which is when the caller must reflow;
 // caret-only movement returns false but still needs a repaint.
 func (s *Session) Edit(action EditAction, r rune) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if !controlEditable(s.focus) {
 		return false
 	}
@@ -319,6 +337,8 @@ func SelectedOption(selectNode *dom.Node) *dom.Node {
 // For radio buttons, it also unchecks other radios in the same group
 // (same parent form or document). Returns true if the control was toggled.
 func (s *Session) ToggleControl(n *dom.Node) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if n == nil || !n.Element() {
 		return false
 	}
@@ -385,6 +405,8 @@ func (s *Session) objectFor(n *dom.Node) *layout.Object {
 // Tabbable controls: input (not hidden), textarea, select, button, a[href].
 // Wraps around to the first control when at the end.
 func (s *Session) FocusNext() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if s.Doc == nil {
 		return
 	}
@@ -419,6 +441,8 @@ func (s *Session) FocusNext() {
 // FocusPrev cycles focus to the previous tabbable control in the document.
 // Wraps around to the last control when at the beginning.
 func (s *Session) FocusPrev() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if s.Doc == nil {
 		return
 	}
@@ -495,6 +519,8 @@ func isTabbable(n *dom.Node) bool {
 // It unhoversthe previously hovered element (if any) and hovers the new one.
 // Returns whether the hover state changed.
 func (s *Session) SetHover(x, y float32) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
 	if s.Arena == nil {
 		return false
 	}

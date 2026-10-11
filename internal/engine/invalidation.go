@@ -177,3 +177,10 @@ func (inv *Invalidation) Reset() {
 	inv.subtrees = inv.subtrees[:0]
 	inv.fullDoc = false
 }
+
+// Empty reports whether the batch holds nothing. PumpJS uses it to skip
+// quiescent ticks. Like Add/Resolve/Reset it is single-owner (the pump
+// thread): JSMutationSink records there and PumpJS consumes there.
+func (inv *Invalidation) Empty() bool {
+	return inv == nil || inv.reasons == 0
+}

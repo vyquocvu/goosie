@@ -44,6 +44,33 @@ const MaxScriptBytes = 1 << 20
 // admission limit in the engine.
 const MaxMicrotasksPerCheckpoint = 100000
 
+// timeout returns the bound for one user-code invocation: the configured
+// timeout or the default. Run, Tick and the pump-driven callbacks all share
+// it, so a hung callback wedges its frame rather than its thread.
+func (r *Runtime) timeout() time.Duration {
+	if r.opts.Timeout > 0 {
+		return r.opts.Timeout
+	}
+	return DefaultTimeout
+}
+
+// callBounded invokes fn under the runtime timeout, reporting ErrInterrupted
+// when the bound fires. Non-interrupt failures pass through untouched, so
+// callers keep their existing error semantics and only add the stop rule.
+func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error) {
+	t := time.AfterFunc(r.timeout(), func() { r.vm.Interrupt(ErrInterrupted) })
+	defer t.Stop()
+	v, err := fn()
+	if err == nil {
+		return v, nil
+	}
+	var ie *goja.InterruptedError
+	if errors.As(err, &ie) {
+		return v, ErrInterrupted
+	}
+	return v, err
+}
+
 var (
 	// ErrInterrupted reports a script stopped by its timeout or by Interrupt.
 	ErrInterrupted = errors.New("js: script execution interrupted")
@@ -1082,7 +1109,19 @@ func (r *Runtime) setupTimers() {
 // typically once per vsync or after each script completes. It processes due
 // timers in a loop so that callbacks which schedule new timers with a fire
 // time already past are also drained before Tick returns.
-func (r *Runtime) Tick() {
+//
+// It reports whether any timer callback ran. Every callback runs under the
+// runtime timeout, and the loop itself is bounded by it too, so a hung or
+// self-rescheduling callback wedges one pump step rather than the thread;
+// an interrupt stops the drain with the remaining timers left for next time.
+// A closed runtime is a no-op.
+func (r *Runtime) Tick() bool {
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return false
+	}
 	r.DrainFetchCallbacks()
 	r.DrainWSEvents()
 	r.DrainWorkerMessages()
@@ -1090,9 +1129,16 @@ func (r *Runtime) Tick() {
 	// Checkpoint after the I/O callbacks: a fetch resolving promises queues
 	// reactions that must run before the next timer task, not after Tick.
 	if err := r.drainMicrotasks(); err != nil {
-		return
+		return false
 	}
+	start := time.Now()
+	fired := false
 	for {
+		// A 1ms interval reschedules into the same tick forever; the budget
+		// ends the pass instead of the thread.
+		if fired && time.Since(start) > r.timeout() {
+			return true
+		}
 		now := time.Now()
 		var toFire []*timer
 		for _, t := range r.timers {
@@ -1101,7 +1147,7 @@ func (r *Runtime) Tick() {
 			}
 		}
 		if len(toFire) == 0 {
-			return
+			return fired
 		}
 		for _, t := range toFire {
 			if t.repeat {
@@ -1113,13 +1159,15 @@ func (r *Runtime) Tick() {
 			// matching browser behavior where an uncaught error in a
 			// timer callback does not stop other timers.
 			if fn, ok := goja.AssertFunction(t.callback); ok {
-				_, _ = fn(nil)
+				fired = true
+				if _, err := r.callBounded(func() (goja.Value, error) { return fn(nil) }); err != nil {
+					return true
+				}
 			}
 			// Per-task checkpoint: reactions a callback queued drain
-			// before the next timer fires. Timer callbacks run without a
-			// timeout bound (as in browsers); Run's bound covers scripts.
+			// before the next timer fires.
 			if err := r.drainMicrotasks(); err != nil {
-				return
+				return true
 			}
 		}
 	}

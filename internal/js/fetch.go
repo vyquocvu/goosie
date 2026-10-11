@@ -698,7 +698,12 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 		arg = r.vm.ToValue(msg)
 	}
 
-	ret, _ := f(nil, arg)
+	ret, err := r.callBounded(func() (goja.Value, error) { return f(nil, arg) })
+	if err != nil {
+		// An interrupt drops this response rather than wedging the drain;
+		// timers and RAF re-arm by design, one-shot completions do not.
+		return
+	}
 
 	if cb.chain != nil {
 		r.propagateToChain(ret, cb.chain)
