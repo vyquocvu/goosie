@@ -1284,3 +1284,91 @@ func tabIDsOf(list []*tabs.Tab) []uint64 {
 	}
 	return out
 }
+
+// TestClearDataRemovesTracesKeepsBookmarks pins the v1 clear-data contract:
+// cookies, history and session files go; starred bookmarks stay. Missing
+// files are fine (idempotent); anything else is an error, not a half-clear.
+func TestClearDataRemovesTracesKeepsBookmarks(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("cookies.json", `[]`)
+	write("history.json", `[]`)
+	write("session.json", `{"tabs":[]}`)
+	write("bookmarks.json", `[{"url":"https://keep.example/"}]`)
+	c := config{
+		cookieFile:   filepath.Join(dir, "cookies.json"),
+		historyFile:  filepath.Join(dir, "history.json"),
+		sessionFile:  filepath.Join(dir, "session.json"),
+		bookmarkFile: filepath.Join(dir, "bookmarks.json"),
+	}
+	removed, err := c.clearBrowsingData()
+	if err != nil {
+		t.Fatalf("clearBrowsingData: %v", err)
+	}
+	if len(removed) != 3 {
+		t.Fatalf("removed %d files, want 3 (cookies, history, session)", len(removed))
+	}
+	for _, name := range []string{"cookies.json", "history.json", "session.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after clear", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bookmarks.json")); err != nil {
+		t.Fatalf("bookmarks.json missing after clear: %v (bookmarks are kept)", err)
+	}
+	// Idempotent: clearing twice is not an error.
+	if _, err := c.clearBrowsingData(); err != nil {
+		t.Fatalf("second clearBrowsingData: %v", err)
+	}
+}
+
+// TestParseClearDataFlag pins the CLI surface of the v1 clear-data control.
+func TestParseClearDataFlag(t *testing.T) {
+	c, err := parse([]string{"-clear-data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.clearData {
+		t.Fatal("-clear-data did not set config.clearData")
+	}
+	c, err = parse([]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.clearData {
+		t.Fatal("default run set config.clearData")
+	}
+}
+
+// TestRunClearDataEndToEnd pins the flag wiring: -clear-data with a scratch
+// HOME clears the default profile's traces and exits success without opening
+// anything.
+func TestRunClearDataEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	statedir := filepath.Join(home, ".goosie")
+	if err := os.MkdirAll(statedir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cookies.json", "history.json", "session.json", "bookmarks.json"} {
+		if err := os.WriteFile(filepath.Join(statedir, name), []byte(`[]`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := run([]string{"-clear-data"}); err != nil {
+		t.Fatalf("run -clear-data: %v", err)
+	}
+	for _, name := range []string{"cookies.json", "history.json", "session.json"} {
+		if _, err := os.Stat(filepath.Join(statedir, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s survives -clear-data", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(statedir, "bookmarks.json")); err != nil {
+		t.Fatalf("bookmarks.json missing after -clear-data: %v", err)
+	}
+}

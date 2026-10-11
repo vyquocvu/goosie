@@ -137,6 +137,7 @@ type config struct {
 	downloadDir  string
 	private      bool
 	profile      string
+	clearData    bool
 	sessionFile  string
 	cookieFile   string
 	bookmarkFile string
@@ -205,6 +206,7 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.private, "private", false, "run a private session: cookies are dropped on exit")
 	fs.StringVar(&c.profile, "profile", "", "named profile: state lives under ~/.goosie/profiles/<name> instead of ~/.goosie")
 	fs.StringVar(&c.sessionFile, "session-file", "", "file where the open tabs are saved between runs")
+	fs.BoolVar(&c.clearData, "clear-data", false, "clear browsing data (cookies, history, session; keeps bookmarks) and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
@@ -1669,10 +1671,40 @@ func main() {
 	}
 }
 
+// clearBrowsingData removes browsing traces (cookies, history, open-tab
+// session) for the v1 clear-data control. Starred bookmarks are user-curated
+// and stay, matching what clear-history means everywhere else. Missing files
+// are fine (idempotent); any other failure aborts with what was removed so
+// far so a half-clear is visible, not silent.
+func (c config) clearBrowsingData() ([]string, error) {
+	var removed []string
+	for _, path := range []string{c.cookieFile, c.historyFile, c.sessionFile} {
+		if path == "" {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return removed, fmt.Errorf("goosie: clear data: %w", err)
+		}
+		removed = append(removed, path)
+	}
+	return removed, nil
+}
+
 func run(args []string) error {
 	c, err := parse(args)
 	if err != nil {
 		return err
+	}
+	if c.clearData {
+		removed, err := c.clearBrowsingData()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "goosie: cleared %d file(s)\n", len(removed))
+		return nil
 	}
 	f, err := build(c)
 	if err != nil {
