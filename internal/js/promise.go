@@ -1,6 +1,7 @@
 package js
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -97,7 +98,27 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 		return obj
 	}
 
-	resolve := func(call goja.FunctionCall) goja.Value {
+	// The executor runs synchronously during construction, per spec. A throw
+	// rejects the promise it was building instead of escaping — except an
+	// interrupt, which must keep propagating so Run still reports timeouts
+	// that fire mid-executor.
+	resolve := r.resolveFunc(p)
+	reject := r.rejectFunc(p)
+	if _, err := executor(nil, r.vm.ToValue(resolve), r.vm.ToValue(reject)); err != nil {
+		var ie *goja.InterruptedError
+		if errors.As(err, &ie) {
+			panic(err)
+		}
+		r.rejectPromise(p, r.vm.ToValue(err.Error()))
+	}
+
+	return obj
+}
+
+// resolveFunc builds the resolve callback handed to executors and thenables:
+// settling always enqueues, so user code never runs on a foreign goroutine.
+func (r *Runtime) resolveFunc(p *promiseObj) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
 		var val goja.Value
 		if len(call.Arguments) > 0 {
 			val = call.Arguments[0]
@@ -107,8 +128,11 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 		r.resolvePromise(p, val)
 		return goja.Undefined()
 	}
+}
 
-	reject := func(call goja.FunctionCall) goja.Value {
+// rejectFunc builds the matching reject callback.
+func (r *Runtime) rejectFunc(p *promiseObj) func(goja.FunctionCall) goja.Value {
+	return func(call goja.FunctionCall) goja.Value {
 		var val goja.Value
 		if len(call.Arguments) > 0 {
 			val = call.Arguments[0]
@@ -118,67 +142,118 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 		r.rejectPromise(p, val)
 		return goja.Undefined()
 	}
-
-	_, _ = executor(nil, r.vm.ToValue(resolve), r.vm.ToValue(reject))
-
-	return obj
 }
 
-// resolvePromise settles a promise as fulfilled.
-func (r *Runtime) resolvePromise(p *promiseObj, val goja.Value) {
-	p.mu.Lock()
-	if p.state != promisePending {
-		p.mu.Unlock()
-		return
-	}
+// queueMicrotask appends a reaction job. Producers on any goroutine only
+// ever append; only the Run/Tick goroutine drains, so user callbacks always
+// run on the runtime's own thread even when a network event settled.
+func (r *Runtime) queueMicrotask(job func() error) {
+	r.mu.Lock()
+	r.microtasks = append(r.microtasks, job)
+	r.mu.Unlock()
+}
 
-	// If the value is a thenable (promise-like), adopt its state.
-	if obj, ok := val.(*goja.Object); ok {
-		if thenFn := obj.Get("then"); thenFn != nil {
-			if f, ok := goja.AssertFunction(thenFn); ok {
-				p.mu.Unlock()
-				_, _ = f(obj, r.vm.ToValue(func(v goja.Value) {
-					r.resolvePromise(p, v)
-				}), r.vm.ToValue(func(v goja.Value) {
-					r.rejectPromise(p, v)
-				}))
-				return
-			}
+// drainMicrotasks runs queued jobs FIFO until empty: one microtask
+// checkpoint. A job that settles further promises only enqueues, so chains
+// cannot grow the Go stack no matter how deep they run. The first error
+// stops the drain; only interrupts produce errors.
+func (r *Runtime) drainMicrotasks() error {
+	for i := 0; ; i++ {
+		if i >= MaxMicrotasksPerCheckpoint {
+			return ErrInterrupted
+		}
+		r.mu.Lock()
+		if len(r.microtasks) == 0 {
+			r.mu.Unlock()
+			return nil
+		}
+		job := r.microtasks[0]
+		r.microtasks[0] = nil
+		r.microtasks = r.microtasks[1:]
+		r.mu.Unlock()
+		if err := job(); err != nil {
+			return err
 		}
 	}
-
-	p.state = promiseFulfilled
-	p.result = val
-	reactions := p.reactions
-	p.reactions = nil
-	p.mu.Unlock()
-
-	for _, reaction := range reactions {
-		r.triggerReaction(reaction, false, val)
-	}
 }
 
-// rejectPromise settles a promise as rejected.
-func (r *Runtime) rejectPromise(p *promiseObj, val goja.Value) {
-	p.mu.Lock()
-	if p.state != promisePending {
+// resolvePromise settles a promise as fulfilled. Everything past the enqueue
+// runs on the drain goroutine: thenable getters and assimilation call user
+// code, which must never run on a foreign (e.g. network) thread or inline
+// inside whatever settled.
+func (r *Runtime) resolvePromise(p *promiseObj, val goja.Value) {
+	r.queueMicrotask(func() error {
+		p.mu.Lock()
+		if p.state != promisePending {
+			p.mu.Unlock()
+			return nil
+		}
+		if obj, ok := val.(*goja.Object); ok {
+			p.mu.Unlock()
+			thenVal := obj.Get("then")
+			if thenVal != nil {
+				if f, ok := goja.AssertFunction(thenVal); ok {
+					_, err := f(obj, r.vm.ToValue(r.resolveFunc(p)), r.vm.ToValue(r.rejectFunc(p)))
+					if err != nil {
+						var ie *goja.InterruptedError
+						if errors.As(err, &ie) {
+							return ErrInterrupted
+						}
+						r.rejectPromise(p, r.vm.ToValue(err.Error()))
+					}
+					return nil
+				}
+			}
+			p.mu.Lock()
+			if p.state != promisePending {
+				// The getter settled us while reading `then`.
+				p.mu.Unlock()
+				return nil
+			}
+		}
+		p.state = promiseFulfilled
+		p.result = val
+		reactions := p.reactions
+		p.reactions = nil
 		p.mu.Unlock()
-		return
-	}
 
-	p.state = promiseRejected
-	p.result = val
-	reactions := p.reactions
-	p.reactions = nil
-	p.mu.Unlock()
-
-	for _, reaction := range reactions {
-		r.triggerReaction(reaction, true, val)
-	}
+		for _, reaction := range reactions {
+			if err := r.runReaction(reaction, false, val); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// triggerReaction invokes a reaction callback with the promise's result.
-func (r *Runtime) triggerReaction(reaction promiseReaction, isRejected bool, val goja.Value) {
+// rejectPromise settles a promise as rejected, same queuing as resolve.
+func (r *Runtime) rejectPromise(p *promiseObj, val goja.Value) {
+	r.queueMicrotask(func() error {
+		p.mu.Lock()
+		if p.state != promisePending {
+			p.mu.Unlock()
+			return nil
+		}
+		p.state = promiseRejected
+		p.result = val
+		reactions := p.reactions
+		p.reactions = nil
+		p.mu.Unlock()
+
+		for _, reaction := range reactions {
+			if err := r.runReaction(reaction, true, val); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// runReaction invokes one reaction callback with the promise's result,
+// settling the chained promise with whatever it returns. It reports only
+// interrupts; ordinary callback failures become rejections of the chained
+// promise. It runs on the drain goroutine, never inline in a settler.
+func (r *Runtime) runReaction(reaction promiseReaction, isRejected bool, val goja.Value) error {
 	var callback goja.Value
 	if isRejected {
 		callback = reaction.onRejected
@@ -192,7 +267,7 @@ func (r *Runtime) triggerReaction(reaction promiseReaction, isRejected bool, val
 		} else {
 			r.resolvePromise(reaction.promise, val)
 		}
-		return
+		return nil
 	}
 
 	f, ok := goja.AssertFunction(callback)
@@ -202,16 +277,21 @@ func (r *Runtime) triggerReaction(reaction promiseReaction, isRejected bool, val
 		} else {
 			r.resolvePromise(reaction.promise, val)
 		}
-		return
+		return nil
 	}
 
 	ret, err := f(nil, val)
 	if err != nil {
+		var ie *goja.InterruptedError
+		if errors.As(err, &ie) {
+			return ErrInterrupted
+		}
 		r.rejectPromise(reaction.promise, r.vm.ToValue(err.Error()))
-		return
+		return nil
 	}
 
 	r.resolvePromise(reaction.promise, ret)
+	return nil
 }
 
 // promiseThen implements promise.then(onFulfilled, onRejected).
@@ -237,10 +317,27 @@ func (r *Runtime) promiseThen(call goja.FunctionCall, p *promiseObj) goja.Value 
 		p.reactions = append(p.reactions, reaction)
 		p.mu.Unlock()
 	} else {
-		isRejected := p.state == promiseRejected
-		result := p.result
+		// Already settled: the reaction still queues rather than running
+		// inline, so attach order always wins over settle order.
+		p.reactions = append(p.reactions, reaction)
 		p.mu.Unlock()
-		r.triggerReaction(reaction, isRejected, result)
+		r.queueMicrotask(func() error {
+			p.mu.Lock()
+			reactions := p.reactions
+			p.reactions = nil
+			st := p.state
+			res := p.result
+			p.mu.Unlock()
+			if st == promisePending {
+				return nil
+			}
+			for _, rt := range reactions {
+				if err := r.runReaction(rt, st == promiseRejected, res); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
 
 	return chained.obj

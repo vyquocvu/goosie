@@ -37,6 +37,13 @@ const DefaultTimeout = 5 * time.Second
 // literal is refused before it is parsed rather than after.
 const MaxScriptBytes = 1 << 20
 
+// MaxMicrotasksPerCheckpoint bounds one microtask drain. A chain that
+// schedules forever without touching the VM would otherwise spin past the
+// timeout interrupt (which only lands on VM calls); the bound ends it with
+// ErrInterrupted like any other runaway, consistent with every other
+// admission limit in the engine.
+const MaxMicrotasksPerCheckpoint = 100000
+
 var (
 	// ErrInterrupted reports a script stopped by its timeout or by Interrupt.
 	ErrInterrupted = errors.New("js: script execution interrupted")
@@ -142,6 +149,12 @@ type Runtime struct {
 	mu          sync.Mutex
 	timers      map[int]*timer
 	nextTimerID int
+
+	// microtasks is the FIFO promise-reaction queue. Producers on any
+	// goroutine only ever append (queueMicrotask); only the Run/Tick
+	// goroutine drains (drainMicrotasks), so user callbacks always run on
+	// the runtime's own thread even when a network event settled.
+	microtasks []func() error
 
 	// DOM bridge state. nil when Options.DOM is nil.
 	domDoc       *dom.Document
@@ -1074,6 +1087,11 @@ func (r *Runtime) Tick() {
 	r.DrainWSEvents()
 	r.DrainWorkerMessages()
 	r.DrainServiceWorkerEvents()
+	// Checkpoint after the I/O callbacks: a fetch resolving promises queues
+	// reactions that must run before the next timer task, not after Tick.
+	if err := r.drainMicrotasks(); err != nil {
+		return
+	}
 	for {
 		now := time.Now()
 		var toFire []*timer
@@ -1096,6 +1114,12 @@ func (r *Runtime) Tick() {
 			// timer callback does not stop other timers.
 			if fn, ok := goja.AssertFunction(t.callback); ok {
 				_, _ = fn(nil)
+			}
+			// Per-task checkpoint: reactions a callback queued drain
+			// before the next timer fires. Timer callbacks run without a
+			// timeout bound (as in browsers); Run's bound covers scripts.
+			if err := r.drainMicrotasks(); err != nil {
+				return
 			}
 		}
 	}
@@ -1121,22 +1145,33 @@ func (r *Runtime) Run(src, sourceURL string) error {
 		timeout = DefaultTimeout
 	}
 
-	// Arm the timeout interrupt.
+	// Arm the timeout interrupt. It stays armed across the microtask
+	// checkpoint below so a self-perpetuating reaction chain ends in
+	// ErrInterrupted rather than a hang.
 	timer := time.AfterFunc(timeout, func() {
 		r.vm.Interrupt(ErrInterrupted)
 	})
-	defer timer.Stop()
 
 	// Compile first to catch syntax errors before execution.
 	prog, err := goja.Compile(sourceURL, src, false)
 	if err != nil {
+		timer.Stop()
 		return r.mapError(err, sourceURL)
 	}
 
 	// Run the compiled program.
-	_, err = r.vm.RunProgram(prog)
-	if err != nil {
-		return r.mapError(err, sourceURL)
+	_, runErr := r.vm.RunProgram(prog)
+
+	// Microtask checkpoint: reactions queued during the task drain before
+	// Run returns, even when the program threw. A checkpoint failure
+	// (interrupt) is reported unless the program already failed first.
+	drainErr := r.drainMicrotasks()
+	timer.Stop()
+	if runErr != nil {
+		return r.mapError(runErr, sourceURL)
+	}
+	if drainErr != nil {
+		return drainErr
 	}
 
 	return nil
