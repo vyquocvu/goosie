@@ -209,9 +209,19 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		placed[ri] = rowBox{rowY, rowH}
 		if row := a.Get(rows[ri].id); row.Style != nil {
+			// The row's border box sits inside the table's border spacing:
+			// separated borders leave spacingH on each side, collapsed
+			// borders (spacing zero) span the full width as before.
 			row.X = contentX
-			row.Y = rowY
 			row.W = available + gaps
+			if !s.BorderCollapse {
+				row.X += spacingH
+				row.W -= 2 * spacingH
+				if row.W < 0 {
+					row.W = 0
+				}
+			}
+			row.Y = rowY
 			row.H = rowH
 		}
 		cursor = rowY + rowH + spacingV
@@ -247,9 +257,10 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 
 	height := cursor - contentY
-	if !s.BorderCollapse {
-		height += spacingV
-	}
+	// No trailing spacing: the per-row cursor already ends past the last
+	// row's bottom spacing (each iteration adds spacingV after its row),
+	// and the leading spacing went in at cursor init. Counting another one
+	// double-books it.
 
 	obj = a.Get(id)
 	obj.W = available + gaps

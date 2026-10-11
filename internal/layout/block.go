@@ -205,6 +205,9 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// current flow height, and the deepest one reserves the container's height
 	// only when that container establishes a formatting context.
 	var floatLead, floatTrail, floatBottom float32
+	// Per-side bottoms feed clearance: clear:left cares only about left
+	// floats. floatBottom stays the max for container-height purposes.
+	var floatBottomL, floatBottomR float32
 	closeRow := func() {
 		if !rowActive {
 			return
@@ -310,8 +313,21 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					// Re-read the box: laying its content out may have grown the
 					// arena and left the captured pointer pointing at the old slice.
 					placed := a.Get(kid)
-					if bottom := y + placed.MarginTop + placed.BorderH() + placed.MarginBottom; bottom > floatBottom {
+					bottom := y + placed.MarginTop + placed.BorderH() + placed.MarginBottom
+					if bottom > floatBottom {
 						floatBottom = bottom
+					}
+					if placed.Style != nil {
+						switch placed.Style.Float {
+						case style.FloatLeft:
+							if bottom > floatBottomL {
+								floatBottomL = bottom
+							}
+						case style.FloatRight:
+							if bottom > floatBottomR {
+								floatBottomR = bottom
+							}
+						}
 					}
 					continue
 				}
@@ -433,6 +449,15 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					}
 				} else {
 					topMargin = collapseMargin(prevBottomMargin, carryTop(a, kid))
+				}
+				// Clearance: a block that clears floats it would otherwise
+				// overlap drops its border-top edge to the float bottom. Only
+				// the requested sides count, and an already-past float needs
+				// nothing. Margin collapsing runs as computed; the shift only
+				// moves the box, which is exact for marginless cases and a
+				// bounded approximation otherwise.
+				if f := clearanceFloor(k.Style, floatBottomL, floatBottomR); y+topMargin < f {
+					y = f - topMargin
 				}
 				k.X = contentX + k.MarginLeft + centerBlockChildLead(obj, k, contentW)
 				k.Y = contentY + y + topMargin
@@ -2639,4 +2664,28 @@ func resolveBoxMaxHeight(a *Arena, s *style.ComputedStyle, containingH float32) 
 // rather than a length or the -1 auto keyword.
 func isPctLength(val float32) bool {
 	return val <= -2 && val >= -102
+}
+
+// clearanceFloor returns the content-relative Y a clearing block's
+// border-top edge must reach: the deepest float bottom on the cleared
+// sides, or 0 when clearing is off. Callers compare against the
+// hypothetical position (cursor plus collapsed top margin) and shift down
+// only on overlap.
+func clearanceFloor(s *style.ComputedStyle, floatBottomL, floatBottomR float32) float32 {
+	if s == nil {
+		return 0
+	}
+	switch s.Clear {
+	case style.ClearLeft:
+		return floatBottomL
+	case style.ClearRight:
+		return floatBottomR
+	case style.ClearBoth:
+		if floatBottomL > floatBottomR {
+			return floatBottomL
+		}
+		return floatBottomR
+	default:
+		return 0
+	}
 }
