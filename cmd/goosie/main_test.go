@@ -1153,6 +1153,25 @@ func TestTabStripChevronClicksScrollByPage(t *testing.T) {
 	}
 }
 
+// TestLoadErrorsOmitQuerySecrets: navigation failures surface redacted URLs
+// (diagnostics must omit query secrets by default), keeping the host.
+func TestLoadErrorsOmitQuerySecrets(t *testing.T) {
+	client := net.DefaultClient()
+	defer client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _, _, err = loadURLCtx(context.Background(), client, fonts,
+		"http://127.0.0.1:1/unreachable?token=secret123", 800, 600, 1, t.TempDir(), false, false)
+	if err == nil {
+		t.Fatal("loadURLCtx against a closed port succeeded")
+	}
+	if strings.Contains(err.Error(), "secret123") {
+		t.Fatalf("load error leaks query secret: %v", err)
+	}
+}
+
 // TestTabBarClicksFollowShrunkTabs pins draw/click agreement under overflow:
 // with ten tabs at 1000 logical pixels the strip shrinks every tab, so a press
 // at the drawn center of tab 5 must switch to tab 5 (not whichever fixed-200px

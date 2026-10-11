@@ -1421,7 +1421,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	}
 	resp, err := client.Get(ctx, rawURL)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", rawURL, err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(rawURL), err)
 	}
 	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
@@ -1462,7 +1462,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			return "", err
 		}
 		if refused := resp.Headers["Content-Type"]; net.StyleSheetRefused(refused) {
-			return "", fmt.Errorf("goosie: %s is served as %q, not as a style sheet", href, refused)
+			return "", fmt.Errorf("goosie: %s is served as %q, not as a style sheet", net.RedactURL(href), refused)
 		}
 		return resp.Text(), nil
 	}

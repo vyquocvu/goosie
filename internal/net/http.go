@@ -222,6 +222,36 @@ func NormalizeURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
+// scrubURLError rewrites *url.Error values to carry the redacted URL. The
+// stdlib formats request errors with the full request URL inline
+// (Get "https://host/path?secret=...": ...), so wrapping is not enough: the
+// inner text must be scrubbed where the error is made. Values are fresh per
+// call, so mutating in place is safe.
+func scrubURLError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		uerr.URL = RedactURL(uerr.URL)
+	}
+	return err
+}
+
+// RedactURL strips what diagnostics must never carry: userinfo credentials
+// and query/fragment secrets. Scheme, host and path stay for diagnosis.
+// Unparseable input reports a fixed token rather than echoing (which could
+// itself be the secret). Callers formatting URLs into errors and logs use
+// this, not the raw string.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" && u.Host == "" && u.Path == "" && u.Opaque == "" {
+		return "(unparseable URL)"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.RawFragment = ""
+	return u.String()
+}
+
 func hasControl(s string) bool {
 	return strings.ContainsFunc(s, unicode.IsControl)
 }
@@ -462,7 +492,7 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	}
 	req, err := http.NewRequestWithContext(ctx, method, normalized, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("net: request %s: %w", RedactURL(normalized), scrubURLError(err))
 	}
 	// A plain Go client identifies itself as Go-http-client and real sites
 	// (Wikipedia's robots policy among them) answer it with 403. Announcing a
@@ -479,7 +509,9 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		// The stdlib error embeds the request URL verbatim; redact before
+		// it joins our chain, or query secrets ride along into diagnostics.
+		return nil, fmt.Errorf("net: fetch %s: %w", RedactURL(normalized), scrubURLError(err))
 	}
 	defer resp.Body.Close()
 	if resp.ContentLength > MaxResponseBytes {

@@ -566,3 +566,43 @@ func await(t *testing.T, ch <-chan struct{}, description string) {
 		t.Fatalf("timed out waiting for %s", description)
 	}
 }
+
+// TestRedactURL pins diagnostic hygiene: error and log paths print redacted
+// URLs that keep scheme/host/path for diagnosis but never carry userinfo,
+// query secrets or fragments (which is what ends up pasted into bug
+// reports). Unparseable input reports a fixed token rather than echoing.
+func TestRedactURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://example.com/search?q=token123&page=2", "https://example.com/search"},
+		{"https://user:pass@example.com/", "https://example.com/"},
+		{"https://example.com/page#secret-fragment", "https://example.com/page"},
+		{"https://example.com/a?x=1#y", "https://example.com/a"},
+		{"http://127.0.0.1:8080/p?k=v", "http://127.0.0.1:8080/p"},
+		{"https://example.com/", "https://example.com/"},
+		{"file:///tmp/page.html", "file:///tmp/page.html"},
+		{"://bad url", "(unparseable URL)"},
+	}
+	for _, tc := range cases {
+		if got := transport.RedactURL(tc.in); got != tc.want {
+			t.Errorf("RedactURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestClientErrorsOmitQuerySecrets: a failed request (closed port fails
+// fast, no timeout) must not leak the query string through the stdlib error
+// chain, while keeping the host for diagnosis.
+func TestClientErrorsOmitQuerySecrets(t *testing.T) {
+	client := transport.DefaultClient()
+	defer client.Close()
+	_, err := client.Get(context.Background(), "http://127.0.0.1:1/unreachable?token=secret123")
+	if err == nil {
+		t.Fatal("Get against a closed port succeeded")
+	}
+	if strings.Contains(err.Error(), "secret123") {
+		t.Fatalf("client error leaks query secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("client error = %v, want the host kept for diagnosis", err)
+	}
+}
