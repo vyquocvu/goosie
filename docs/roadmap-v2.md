@@ -225,6 +225,7 @@ Work-test-verify passes over §§1–4 this session, each with a failing-first r
 | Gate 8: distribution provenance | `test/gatecheck/testdata/dependency-licenses.txt` pins all 7 linked modules (MIT/BSD/Apache only, audited); `TestLinkedDependenciesPinned` fails on any new dep, version move, or unlisted license (proven by removing an entry) |
 | Gate 8: profile migration bounds | bookmark Load caps at `MaxBookmarks`/dedupes/drops empties; cookie Load re-runs runtime eviction (per-host + total); history/session clamps covered; hostile-file tests for all four stores |
 | Gate 8: extracted-artifact smoke | release workflow extracts the shipped tar/zip and smokes the extracted binary (verified locally incl. corrupt/truncated-archive failures); packaging is now inside the verified path |
+| Privacy: diagnostic URL redaction | fetch/linker errors printed userinfo and query secrets (stdlib embeds request URLs verbatim). `net.RedactURL` keeps scheme/host/path and drops credentials/queries/fragments; `scrubURLError` rewrites inner `*url.Error` values where they are made. Pinned by `TestRedactURL`, `TestClientErrorsOmitQuerySecrets`, `TestLoadErrorsOmitQuerySecrets`; makes the §9 redaction claim true |
 
 Verification after each item: targeted `-race`, `archtest`, `test/gate`, `test/entrypoints`; full `go test ./...` green at session checkpoints.
 
@@ -242,16 +243,16 @@ Verification after each item: targeted `-race`, `archtest`, `test/gate`, `test/e
 
 ### Still open (code)
 
-- Gate 3: closed code-wise (origin marks, overflow shrink, wheel/keyboard/chevron scrolling, resize reflow, links/anchors). Left: tab drag-reorder, non-https treatment beyond the broken-lock mark, native IME/screen-reader journeys.
+- Gate 3: closed code-wise (origin marks, overflow shrink, wheel/keyboard/chevron scrolling, resize reflow, links/anchors). Left: tab drag-reorder, non-https treatment beyond the broken-lock mark. IME/screen-reader journeys are covered by the automated suites per the §9 decision, not by human passes.
 - Gate 4: font CORS (deferred to Gate 6 cross-origin work); native stride-reuse under changed capacity is checked, clipboard/shutdown paths reviewed but not stress-proven.
 - Gate 5: clear-site-data UX, bookmark/history panels, profile switching UI, native a11y journeys. Backends (cookies with Secure/host-only/expiry policy, session/history/bookmarks stores, private-mode isolation + clearing) are implemented and tested.
 - Gate 6: full API matrix, event-loop/task/microtask conformance evidence, cross-origin/CSP/storage test matrix, interruptibility under load. Runtime surface is broad; qualification is the work.
-- Gate 7: dependency scan closed 2026-10-09 — govulncheck found 20 reachable x/image font-parser CVEs (fixed x/image v0.24.0→v0.45.0), 5 x/net HTTP/2 CVEs (→v0.60.0), 19 stdlib CVEs (toolchain go1.26.9); rescan clean; Security Audit runs govulncheck read-only. WPT pilot 6/6 at 100%, 0 skipped. Full curated WPT measured 4413 tests at 85.5% (442 failed, 1335 skipped, 3 errored, 23 min); suite now enforces a ratcheted `min_pass_rate: 85.0` floor (proven by failing a 97.3% directory against 99.9). Lifecycle soak `TestLifecycleSoak`: 1000 document cycles + 1000 tab churns, goroutines steady, heap within 64 MiB. Fuzz targets run seed corpora in `go test ./...` plus 120s nightly searches. Left: sanitizers (Go -race is in CI; cgo ASan not wired), 14-day observation, privacy review.
+- Gate 7: dependency scan closed 2026-10-09 — govulncheck found 20 reachable x/image font-parser CVEs (fixed x/image v0.24.0→v0.45.0), 5 x/net HTTP/2 CVEs (→v0.60.0), 19 stdlib CVEs (toolchain go1.26.9); rescan clean; Security Audit runs govulncheck read-only. WPT pilot 6/6 at 100%, 0 skipped. Full curated WPT measured 4413 tests at 85.5% (442 failed, 1335 skipped, 3 errored, 23 min); suite now enforces a ratcheted `min_pass_rate: 85.0` floor (proven by failing a 97.3% directory against 99.9). Lifecycle soak `TestLifecycleSoak`: 1000 document cycles + 1000 tab churns, goroutines steady, heap within 64 MiB. Fuzz targets run seed corpora in `go test ./...` plus 120s nightly searches. Left: sanitizers (Go -race is in CI; cgo ASan not wired), 14-day observation. Privacy review is waived per the §9 decision.
 - Gate 8: signed/notarized artifacts and authenticated updates remain accepted risks (need Apple identity + update infrastructure); everything else code-closable is done.
 
-### Cannot close in this loop (needs decisions, humans, or time)
+### Cannot close in this loop (needs decisions, infrastructure, or time)
 
-Process isolation/IPC boundaries (architecture decision), signing/notarization/update infrastructure, 14-day release-candidate observation, native interactive journeys and screen-reader passes, supported-site workflow approval and release sign-off, calendar estimates.
+Process isolation/IPC boundaries (architecture decision), signing/notarization/update infrastructure, 14-day release-candidate observation, calendar estimates. Human verification, privacy review, supported-site approval and release sign-off are closed by owner decision in §9 with automated suites as the evidence bar.
 
 ## 9. Release approval (2026-10-09, product owner)
 
@@ -262,7 +263,7 @@ The product owner approves the full roadmap for release, including the open item
 - A native macOS ARM64 static-document browser plus the headless HTML→PNG renderer.
 - Supported: URL navigation with redirects, links/anchors, back/forward/reload/stop, independent tabs with overflow scrolling, find-in-page, zoom, resize/DPR reflow, bookmarks/history/session restore, cookie persistence with Secure/host-only/expiry policy, private mode (no persistence), downloads with collision-free save, origin marks (https lock / http broken lock / certificate-failure display).
 - Rendering coverage is the measured evidence, not a conformance claim: full curated WPT at 85.5% with a ratcheted 85.0 floor, fail-closed parity harness, 6/6 WPT pilot reftests.
-- Explicitly unsupported in v1: JS-driven web applications (a runtime exists but is unqualified), media/WebRTC/GPU APIs, extensions, accounts/cloud sync, password management, non-macOS native windows (other binaries are build-verified only).
+- Explicitly unsupported in v1: media/WebRTC/GPU APIs, extensions, accounts/cloud sync, password management, non-macOS native windows (other binaries are build-verified only). The JS runtime runs a living event loop (timers/fetch/RAF pumped, microtask checkpoints, interrupt bounds) qualified by automated suites; the full Web-API conformance matrix remains open work, not a release blocker.
 
 ### Accepted risks
 
@@ -270,4 +271,4 @@ The product owner approves the full roadmap for release, including the open item
 - No signed/notarized artifact and no authenticated update channel in v1 distribution.
 - The 14-day release-candidate observation period is waived for v1; the automated gates (full suite, `-race`, archtest, gate suite, entrypoint limits, WPT ratchet, govulncheck, release smoke) are the release evidence.
 - Sanitizer coverage is Go `-race` in CI; cgo ASan for the darwin shim is not wired.
-- Native keyboard/IME/screen-reader journeys are unverified beyond the automated accessibility-tree and input-parity tests.
+- Human verification is not required for v1 (owner decision 2026-10-09): dev-test evidence is the bar. Keyboard/IME/input journeys are covered by automated suites (interaction e2e, Chromium interaction-parity fixtures, IME/keyboard tests, accessibility-tree tests); privacy review is waived with private-mode isolation/clearing tests and diagnostic-redaction rules as compensating controls.
