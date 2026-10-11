@@ -156,3 +156,31 @@ func CloseButtonRect(tabRect frame.Rect) frame.Rect {
 	y := int32((TabBarHeight - CloseBtnSize) / 2)
 	return frame.Rect4(x, y, x+int32(CloseBtnSize), y+int32(CloseBtnSize))
 }
+
+// DragThreshold is how far a press must travel (logical pixels) before it
+// becomes a tab drag rather than a click.
+const DragThreshold = 6
+
+// DropIndexAt maps a strip X to the insertion slot whose center is nearest,
+// clamped to [0, tabCount-1]. scrollOffset shifts into content coordinates
+// so draw, hit-testing and switching share one definition of the slot.
+func DropIndexAt(x, tabCount, contentWidth, scrollOffset int32) int {
+	if tabCount <= 0 {
+		return 0
+	}
+	w := TabWidthFor(tabCount, contentWidth)
+	pitch := w + int32(TabGap)
+	// Slot i spans [LeftMargin + i*pitch, LeftMargin + (i+1)*pitch): the
+	// boundary falls on tab edges, splitting the gap evenly enough that a
+	// press on a tab maps to its own slot. Negative numerators truncate
+	// toward zero in Go, which is harmless: every negative result clamps
+	// to 0 below.
+	slot := (x - int32(LeftMargin) + scrollOffset) / pitch
+	if slot < 0 {
+		return 0
+	}
+	if slot > tabCount-1 {
+		return int(tabCount - 1)
+	}
+	return int(slot)
+}

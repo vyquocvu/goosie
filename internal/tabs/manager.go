@@ -14,6 +14,11 @@ type TabManager struct {
 	// handler, the draw path and hit testing share this one value under mu so
 	// a press always lands on the tab the pixels show.
 	tabScroll int32
+	// drag tracks a pointer tab-reorder: the dragged tab and its current
+	// strip X. Draw and hit-testing share it under mu with everything else.
+	dragID uint64
+	dragX  int32
+	dragOn bool
 }
 
 func NewManager(onCloseLast func()) *TabManager {
@@ -150,4 +155,82 @@ func (m *TabManager) SetTabScroll(off, tabCount, contentWidth int32) {
 		off = max
 	}
 	m.tabScroll = off
+}
+
+// MoveTab reorders tabID to final index toIndex (clamped), keeping the
+// active tab stable by identity rather than position. It reports whether
+// anything moved. Change notification fires after unlock, like every other
+// mutator: callbacks reenter the manager.
+func (m *TabManager) MoveTab(id uint64, toIndex int) bool {
+	m.mu.Lock()
+	from := -1
+	for i, t := range m.tabs {
+		if t.ID() == id {
+			from = i
+			break
+		}
+	}
+	if from < 0 {
+		m.mu.Unlock()
+		return false
+	}
+	to := toIndex
+	if to < 0 {
+		to = 0
+	}
+	if to >= len(m.tabs) {
+		to = len(m.tabs) - 1
+	}
+	if from == to {
+		m.mu.Unlock()
+		return false
+	}
+	activeID := m.tabs[m.activeIdx].ID()
+	tab := m.tabs[from]
+	m.tabs = append(m.tabs[:from], m.tabs[from+1:]...)
+	if to > len(m.tabs) {
+		to = len(m.tabs)
+	}
+	m.tabs = append(m.tabs, nil)
+	copy(m.tabs[to+1:], m.tabs[to:])
+	m.tabs[to] = tab
+	for i, t := range m.tabs {
+		if t.ID() == activeID {
+			m.activeIdx = i
+			break
+		}
+	}
+	m.mu.Unlock()
+	m.fireChange()
+	return true
+}
+
+// StartDrag begins a pointer reorder of the given tab at strip X.
+func (m *TabManager) StartDrag(id uint64, x int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dragID, m.dragX, m.dragOn = id, x, true
+}
+
+// MoveDrag moves the in-progress reorder to strip X.
+func (m *TabManager) MoveDrag(x int32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.dragOn {
+		m.dragX = x
+	}
+}
+
+// Dragging reports the in-progress reorder, if any.
+func (m *TabManager) Dragging() (id uint64, x int32, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.dragID, m.dragX, m.dragOn
+}
+
+// EndDrag clears any in-progress reorder.
+func (m *TabManager) EndDrag() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dragOn = false
 }

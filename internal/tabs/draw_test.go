@@ -98,3 +98,39 @@ func TestDrawTabBarChevrons(t *testing.T) {
 		t.Fatalf("chevron zone has %d dark pixels with 3 tabs, want none", n)
 	}
 }
+
+// TestDrawTabBarDragIndicator pins the drop feedback: with a drag active the
+// strip draws an insertion line at the drop slot; without one the same band
+// is clean background.
+func TestDrawTabBarDragIndicator(t *testing.T) {
+	mgr := NewManager(nil)
+	for i := 0; i < 4; i++ {
+		mgr.NewTab()
+	}
+	band := func() int {
+		buf := frame.NewBitmap(1000, TabBarHeight)
+		DrawTabBar(buf, mgr, 0, nil, 1)
+		n := 0
+		for y := int32(0); y < TabBarHeight; y++ {
+			for x := int32(408); x < int32(414); x++ {
+				c := buf.At(int(x), int(y)).RGBA()
+				if (int(c.R)+int(c.G)+int(c.B))/3 < 200 {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	if n := band(); n != 0 {
+		t.Fatalf("drop band has %d dark pixels with no drag, want none", n)
+	}
+	tabs := mgr.Tabs()
+	mgr.StartDrag(tabs[0].ID(), 600)
+	if n := band(); n < 20 {
+		t.Fatalf("drop band has %d dark pixels mid-drag, want the insertion line (>= 20)", n)
+	}
+	mgr.EndDrag()
+	if n := band(); n != 0 {
+		t.Fatalf("drop band has %d dark pixels after EndDrag, want none", n)
+	}
+}

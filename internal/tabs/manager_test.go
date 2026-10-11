@@ -46,3 +46,72 @@ func TestTabScrollClampsToStripRange(t *testing.T) {
 		t.Fatalf("TabScroll() = %d, want 0 (fitting strip never scrolls)", got)
 	}
 }
+
+// TestMoveTabReordersAndKeepsActive pins drag-reorder ownership: moving a tab
+// reorders by final index, clamps out-of-range targets, ignores unknown IDs,
+// and keeps the ACTIVE tab (by identity, not position) across the move.
+func TestMoveTabReordersAndKeepsActive(t *testing.T) {
+	mgr := NewManager(nil)
+	a := mgr.NewTab()
+	b := mgr.NewTab()
+	c := mgr.NewTab()
+	mgr.SwitchTo(b.ID())
+	if !mgr.MoveTab(a.ID(), 2) {
+		t.Fatal("MoveTab(first, last) reported no move")
+	}
+	ids := tabIDs(mgr)
+	if len(ids) != 3 || ids[0] != b.ID() || ids[1] != c.ID() || ids[2] != a.ID() {
+		t.Fatalf("order = %v, want [b c a]", ids)
+	}
+	if got := mgr.Active(); got != b {
+		t.Fatal("active tab changed across a reorder of another tab")
+	}
+	mgr.MoveTab(c.ID(), -99)
+	if ids := tabIDs(mgr); ids[0] != c.ID() {
+		t.Fatalf("order = %v, want c clamped to front", ids)
+	}
+	mgr.MoveTab(c.ID(), 99)
+	if ids := tabIDs(mgr); ids[2] != c.ID() {
+		t.Fatalf("order = %v, want c clamped to back", ids)
+	}
+	if mgr.MoveTab(9999, 0) {
+		t.Fatal("MoveTab(unknown) reported a move")
+	}
+	if mgr.MoveTab(b.ID(), 0) {
+		t.Fatal("MoveTab to the same index reported a move")
+	}
+	if got := mgr.Active(); got != b {
+		t.Fatal("active tab changed across clamping moves")
+	}
+}
+
+func tabIDs(mgr *TabManager) []uint64 {
+	var out []uint64
+	for _, tab := range mgr.Tabs() {
+		out = append(out, tab.ID())
+	}
+	return out
+}
+
+// TestDragStateRoundtrip pins the shared drag handoff between hit-testing
+// and drawing: one mutex-held value, cleared on end.
+func TestDragStateRoundtrip(t *testing.T) {
+	mgr := NewManager(nil)
+	tab := mgr.NewTab()
+	if _, _, ok := mgr.Dragging(); ok {
+		t.Fatal("Dragging() set with no drag")
+	}
+	mgr.StartDrag(tab.ID(), 120)
+	id, x, ok := mgr.Dragging()
+	if !ok || id != tab.ID() || x != 120 {
+		t.Fatalf("Dragging() = (%d, %d, %v), want (%d, 120, true)", id, x, ok, tab.ID())
+	}
+	mgr.MoveDrag(200)
+	if _, x, _ := mgr.Dragging(); x != 200 {
+		t.Fatalf("MoveDrag x = %d, want 200", x)
+	}
+	mgr.EndDrag()
+	if _, _, ok := mgr.Dragging(); ok {
+		t.Fatal("Dragging() still set after EndDrag")
+	}
+}

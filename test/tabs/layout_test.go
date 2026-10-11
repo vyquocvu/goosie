@@ -173,3 +173,25 @@ func TestTabScrollPage(t *testing.T) {
 		t.Fatalf("TabScrollPage(40, 1000) = %d, want 864", got)
 	}
 }
+
+// DropIndexAt maps a strip X to the insertion slot whose center is nearest,
+// clamped to the strip: drop geometry shared by hit-testing and drawing.
+func TestDropIndexAt(t *testing.T) {
+	// 4 full-width tabs at 1000: slots start every 201px from x=8.
+	if got := tabs.DropIndexAt(50, 4, 1000, 0); got != 0 {
+		t.Fatalf("DropIndexAt(50) = %d, want 0", got)
+	}
+	if got := tabs.DropIndexAt(250, 4, 1000, 0); got != 1 {
+		t.Fatalf("DropIndexAt(250) = %d, want 1", got)
+	}
+	if got := tabs.DropIndexAt(-500, 4, 1000, 0); got != 0 {
+		t.Fatalf("DropIndexAt(-500) = %d, want 0 (clamped)", got)
+	}
+	if got := tabs.DropIndexAt(5000, 4, 1000, 0); got != 3 {
+		t.Fatalf("DropIndexAt(5000) = %d, want 3 (clamped)", got)
+	}
+	// Scrolled strips measure in content coordinates.
+	if got := tabs.DropIndexAt(600, 40, 1000, 1000); got != 21 {
+		t.Fatalf("DropIndexAt(600, off 1000) = %d, want 21", got)
+	}
+}

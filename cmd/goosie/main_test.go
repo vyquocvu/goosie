@@ -1221,3 +1221,66 @@ func TestTabBarClicksFollowShrunkTabs(t *testing.T) {
 		t.Fatal("press on new-tab button did not open a tab")
 	}
 }
+
+// TestTabBarDragReordersTabs pins pointer reordering: press switches (as
+// before), a motion past the threshold drags, and release commits the drop
+// slot. A press-release without motion leaves the order alone.
+func TestTabBarDragReordersTabs(t *testing.T) {
+	const tabCount, width = 4, 1000
+	mgr := tabs.NewManager(nil)
+	for i := 0; i < tabCount; i++ {
+		mgr.NewTab()
+	}
+	list := mgr.Tabs()
+	cw := &chromeWindow{
+		toolbar: toolbar.NewState(width, nil),
+		tabMgr:  mgr,
+		events:  make(chan surface.Event, 8),
+		scale:   1,
+	}
+	var switched uint64
+	cw.onSwitch = func(id uint64) { switched = id }
+	press := func(x, y int32) surface.Event {
+		return surface.Event{Kind: surface.EvPointer, Action: surface.PointerPress, Button: surface.ButtonLeft, Pos: frame.Point{X: x, Y: y}}
+	}
+	motion := func(x, y int32) surface.Event {
+		return surface.Event{Kind: surface.EvPointer, Action: surface.PointerMotion, Button: surface.ButtonLeft, Pos: frame.Point{X: x, Y: y}}
+	}
+	release := func(x, y int32) surface.Event {
+		return surface.Event{Kind: surface.EvPointer, Action: surface.PointerRelease, Button: surface.ButtonLeft, Pos: frame.Point{X: x, Y: y}}
+	}
+
+	// Drag tab 0 past tab 1: press, move well beyond the threshold, release.
+	r0 := tabs.TabRect(0, 0, tabCount, width)
+	cx, cy := (r0.X0+r0.X1)/2, int32(tabs.TabBarHeight)/2
+	cw.intercept(press(cx, cy))
+	if switched != list[0].ID() {
+		t.Fatalf("press switched to %d, want tab 0", switched)
+	}
+	cw.intercept(motion(cx+150, cy))
+	cw.intercept(release(cx+150, cy))
+	got := mgr.Tabs()
+	if len(got) != tabCount || got[0].ID() != list[1].ID() || got[1].ID() != list[0].ID() {
+		t.Fatalf("order after drag = %v, want tab 0 moved past tab 1", tabIDsOf(got))
+	}
+	if active := mgr.Active(); active.ID() != list[0].ID() {
+		t.Fatal("active tab changed across a drag of itself")
+	}
+
+	// Plain press-release without motion keeps the order.
+	before := tabIDsOf(mgr.Tabs())
+	r1 := tabs.TabRect(1, 0, tabCount, width)
+	cw.intercept(press((r1.X0+r1.X1)/2, cy))
+	cw.intercept(release((r1.X0+r1.X1)/2, cy))
+	if after := tabIDsOf(mgr.Tabs()); !reflect.DeepEqual(before, after) {
+		t.Fatalf("order changed without drag: %v -> %v", before, after)
+	}
+}
+
+func tabIDsOf(list []*tabs.Tab) []uint64 {
+	out := make([]uint64, len(list))
+	for i, tab := range list {
+		out[i] = tab.ID()
+	}
+	return out
+}

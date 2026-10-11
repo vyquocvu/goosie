@@ -38,26 +38,46 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 
 	tabsList := mgr.Tabs()
 	activeIdx := mgr.ActiveIndex()
+	n := int32(len(tabsList))
+	dragID, dragX, dragging := mgr.Dragging()
 
 	for i, tab := range tabsList {
-		lr := TabRect(i, scrollOffset, int32(len(tabsList)), w)
+		// The dragged tab leaves its slot and rides the pointer, drawn
+		// last on top.
+		if dragging && tab.ID() == dragID {
+			continue
+		}
+		lr := TabRect(i, scrollOffset, n, w)
 		r := scaleRect(lr, scale)
 		if r.X1 <= 0 || r.X0 >= int32(buf.W) {
 			continue
 		}
-		textColor := tabTextColor
-		if i == activeIdx {
-			fillRoundedTop(buf, r, tabRadius*scale, activeTabBg)
-			textColor = tabTextActive
-		}
+		drawTabBody(buf, tab, lr, r, i == activeIdx, fonts, scale)
+	}
 
-		title := tab.Title()
-		if title == "" {
-			title = "New Tab"
+	// The dragged tab follows the pointer, clamped to the strip, with an
+	// insertion line at the slot it would land in.
+	if dragging {
+		tw := TabWidthFor(n, w)
+		dx := dragX
+		if dx < int32(LeftMargin)+tw/2 {
+			dx = int32(LeftMargin) + tw/2
 		}
-		drawTabText(buf, title, r, textColor, fonts, scale)
-
-		drawCloseButton(buf, scaleRect(CloseButtonRect(lr), scale), closeBtnColor, scale)
+		if dx > w-tw/2 {
+			dx = w - tw/2
+		}
+		idx := DropIndexAt(dx, n, w, scrollOffset)
+		bx := int32(LeftMargin) + int32(idx)*(tw+int32(TabGap)) - scrollOffset
+		lx := bx * scale
+		buf.FillRect(frame.Rect4(lx-1*scale, 0, lx+1*scale, int32(TabBarHeight)*scale), tabTextActive, nil)
+		for _, tab := range tabsList {
+			if tab.ID() != dragID {
+				continue
+			}
+			lr := frame.Rect4(dx-tw/2, 0, dx+tw-tw/2, TabBarHeight)
+			r := scaleRect(lr, scale)
+			drawTabBody(buf, tab, lr, r, true, fonts, scale)
+		}
 	}
 
 	if len(tabsList) > 0 {
@@ -76,6 +96,25 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 		drawChevron(buf, scaleRect(left, scale), -1, newTabBtnColor, scale)
 		drawChevron(buf, scaleRect(right, scale), 1, newTabBtnColor, scale)
 	}
+}
+
+// drawTabBody paints one tab: background, title text and close button.
+// lr is the logical rect (for text layout and the close button), r is the
+// scaled device rect.
+func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fonts *raster.Fonts, scale int32) {
+	textColor := tabTextColor
+	if active {
+		fillRoundedTop(buf, r, tabRadius*scale, activeTabBg)
+		textColor = tabTextActive
+	}
+
+	title := tab.Title()
+	if title == "" {
+		title = "New Tab"
+	}
+	drawTabText(buf, title, r, textColor, fonts, scale)
+
+	drawCloseButton(buf, scaleRect(CloseButtonRect(lr), scale), closeBtnColor, scale)
 }
 
 func scaleRect(r frame.Rect, scale int32) frame.Rect {

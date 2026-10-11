@@ -37,6 +37,11 @@ type chromeWindow struct {
 	outBitmap     *frame.Bitmap
 	fonts         *raster.Fonts
 	hover         surface.Cursor // last shape sent to the platform, for change detection
+	// pressTab/pressX/pressing track a press that may become a tab drag.
+	// Pump-thread only, like everything else in intercept.
+	pressTab uint64
+	pressX   int32
+	pressing bool
 	// tickInterval paces the onTick hook (the host's JS pump); zero disables
 	// it, which keeps every literal construction (tests especially) exactly
 	// as before.
@@ -199,12 +204,27 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if ev.Action == surface.PointerMotion && ev.Button == surface.ButtonNone {
 			cw.updateHoverCursor(ev.Pos, tabH+toolH)
 		}
-		if ev.Pos.Y < tabH && ev.Button == surface.ButtonLeft {
-			cw.handleTabBarClick(ev.Pos)
-			return true
+		if ev.Action == surface.PointerRelease {
+			if _, _, dragging := cw.tabMgr.Dragging(); dragging {
+				if ev.Button == surface.ButtonRight {
+					cw.tabMgr.EndDrag()
+				} else {
+					cw.handleTabBarRelease(ev.Pos)
+				}
+				return true
+			}
 		}
 		if ev.Pos.Y < tabH {
-			return true
+			switch {
+			case ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft:
+				cw.handleTabBarPress(ev.Pos)
+				return true
+			case ev.Action == surface.PointerMotion && ev.Button == surface.ButtonLeft:
+				cw.handleTabBarDrag(ev.Pos)
+				return true
+			default:
+				return true
+			}
 		}
 		toolbarY := ev.Pos.Y - tabH
 		if toolbarY >= 0 && toolbarY < toolH {
@@ -342,23 +362,33 @@ func (cw *chromeWindow) updateHoverCursor(pos frame.Point, chromeH int32) {
 	}
 }
 
-func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
-	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
-	// The strip is as wide as the window: the toolbar bounds carry the same
-	// device width DrawTabBar painted at, so clicks map onto the tabs the
-	// pixels show. Without painted geometry yet there is nothing to hit.
-	var stripW int32
+// stripGeom returns the tab strip's tab list, count, logical width and
+// clamped scroll offset. A non-positive width means nothing is painted yet
+// and there is nothing to hit.
+func (cw *chromeWindow) stripGeom() (tabList []*tabs.Tab, n, stripW, stripOff int32) {
 	if cw.toolbar != nil {
 		stripW = cw.toolbar.BoundsWidth() / cw.sc()
 	}
 	if stripW <= 0 {
-		return
+		return nil, 0, 0, 0
 	}
-	tabList := cw.tabMgr.Tabs()
-	n := int32(len(tabList))
-	stripOff := cw.tabMgr.TabScroll()
+	tabList = cw.tabMgr.Tabs()
+	n = int32(len(tabList))
+	stripOff = cw.tabMgr.TabScroll()
 	if max := tabs.StripMaxOffset(n, stripW); stripOff > max {
 		stripOff = max
+	}
+	return tabList, n, stripW, stripOff
+}
+
+func (cw *chromeWindow) handleTabBarPress(pos frame.Point) {
+	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
+	// The strip is as wide as the window: the toolbar bounds carry the same
+	// device width DrawTabBar painted at, so clicks map onto the tabs the
+	// pixels show. Without painted geometry yet there is nothing to hit.
+	tabList, n, stripW, stripOff := cw.stripGeom()
+	if stripW <= 0 {
+		return
 	}
 	// The scroll chevrons overlay the strip's right end, so they win ties
 	// against the tabs sliding underneath. Same rects DrawTabBar painted.
@@ -385,6 +415,9 @@ func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
 			if cw.onSwitch != nil {
 				cw.onSwitch(tabList[i].ID())
 			}
+			cw.pressing = true
+			cw.pressTab = tabList[i].ID()
+			cw.pressX = lp.X
 			return
 		}
 	}
@@ -393,6 +426,53 @@ func (cw *chromeWindow) handleTabBarClick(pos frame.Point) {
 		if cw.onNewTab != nil {
 			cw.onNewTab()
 		}
+	}
+}
+
+// handleTabBarDrag extends a press into a reorder once it travels past the
+// threshold; smaller motions stay clicks. The dragged tab follows the
+// pointer through the manager state DrawTabBar reads.
+func (cw *chromeWindow) handleTabBarDrag(pos frame.Point) {
+	if !cw.pressing {
+		return
+	}
+	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
+	_, n, stripW, _ := cw.stripGeom()
+	if stripW <= 0 || n <= 0 {
+		return
+	}
+	dx := lp.X - cw.pressX
+	if dx < 0 {
+		dx = -dx
+	}
+	if _, _, dragging := cw.tabMgr.Dragging(); !dragging {
+		if dx < tabs.DragThreshold {
+			return
+		}
+		cw.tabMgr.StartDrag(cw.pressTab, lp.X)
+		return
+	}
+	cw.tabMgr.MoveDrag(lp.X)
+}
+
+// handleTabBarRelease commits a drag to its drop slot and ends the gesture.
+// A release without a drag is a no-op: the press already switched, closed
+// or opened whatever it hit.
+func (cw *chromeWindow) handleTabBarRelease(pos frame.Point) {
+	cw.pressing = false
+	id, x, dragging := cw.tabMgr.Dragging()
+	if !dragging {
+		return
+	}
+	cw.tabMgr.EndDrag()
+	_, n, stripW, stripOff := cw.stripGeom()
+	if stripW <= 0 || n <= 0 {
+		return
+	}
+	if cw.tabMgr.MoveTab(id, int(tabs.DropIndexAt(x, n, stripW, stripOff))) {
+		// The moved tab is active (press switched first): keep it visible
+		// the same way a keyboard switch does.
+		cw.tabMgr.SetTabScroll(tabs.EnsureTabVisible(cw.tabMgr.ActiveIndex(), n, stripW, cw.tabMgr.TabScroll()), n, stripW)
 	}
 }
 
