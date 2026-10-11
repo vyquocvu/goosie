@@ -1476,13 +1476,14 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		return resp.Body, nil
 	}
 	// @font-face resources use the same client. The fetcher is the same shape
-	// as the image fetcher; the engine resolves src URLs before calling.
-	fontFetcher := func(base, url string) ([]byte, error) {
+	// as the image fetcher, plus the response headers the engine's font CORS
+	// check reads; the engine resolves src URLs before calling.
+	fontFetcher := func(base, url string) (engine.FontResult, error) {
 		resp, err := client.Get(subresourceCtx(fontCtx, base), url)
 		if err != nil {
-			return nil, err
+			return engine.FontResult{}, err
 		}
-		return resp.Body, nil
+		return engine.FontResult{Data: resp.Body, Headers: resp.Headers}, nil
 	}
 	// Check context after the fetch in case it was cancelled during the network call.
 	if ctx.Err() != nil {

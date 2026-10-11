@@ -23,7 +23,9 @@ func fontFaceSession(t *testing.T, family string, reg engine.FontRegistry) *engi
 	t.Helper()
 	html := `<html><body><p id="p" style="font-family: '` + family + `'">hi</p></body></html>`
 	css := `@font-face { font-family: '` + family + `'; src: url(/face.ttf); }`
-	fetch := func(base, url string) ([]byte, error) { return []byte("font bytes"), nil }
+	fetch := func(base, url string) (engine.FontResult, error) {
+		return engine.FontResult{Data: []byte("font bytes")}, nil
+	}
 	s, err := engine.NewSession(html, []string{css}, 800,
 		engine.WithCustomFontLoading("https://example.com/", fetch, reg))
 	if err != nil {

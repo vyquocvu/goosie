@@ -170,11 +170,19 @@ type CSSLinker func(base, href string) (string, error)
 // space its attributes reserve, so a missing image does not stop rendering.
 type ImageFetcher func(base, url string) ([]byte, error)
 
-// FontFetcher fetches one @font-face resource's raw bytes. Same shape as
-// ImageFetcher: the engine resolves the src URL against the stylesheet base
-// before calling, so the fetcher only sees absolute URLs. Fonts are fetched
-// concurrently, so a fetcher may be called from several goroutines at once.
-type FontFetcher func(base, url string) ([]byte, error)
+// FontResult is one fetched @font-face resource: raw bytes plus the
+// response headers the CORS check reads. Headers may be nil for
+// non-network sources, which the check treats as same-origin-safe.
+type FontResult struct {
+	Data    []byte
+	Headers map[string]string
+}
+
+// FontFetcher fetches one @font-face resource. Same shape as ImageFetcher,
+// but the result carries response headers: cross-origin faces require an
+// Access-Control-Allow-Origin grant (see fontCORSAllowed), so the engine
+// must see more than bytes.
+type FontFetcher func(base, url string) (FontResult, error)
 
 // FontRegistry accepts parsed font bytes and returns a 1-based index. The
 // engine calls it for every @font-face src it fetches; raster.Fonts satisfies
@@ -286,6 +294,9 @@ func WithInvalidation(inv *Invalidation) Option {
 // fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
+	// base is the document URL the src resolved against: the CORS origin
+	// the response headers are judged against.
+	base string
 }
 
 // NewSession parses HTML and builds the pipeline state. The caller provides the
@@ -406,7 +417,7 @@ func (s *Session) RefreshAfterFonts() {
 // applyFontJobs fetches font bytes through a bounded worker pool and registers
 // each successful result with the font registry, populating s.customFonts.
 func (s *Session) applyFontJobs(jobs []fontJob) {
-	data := make([][]byte, len(jobs))
+	data := make([]FontResult, len(jobs))
 	deadline := time.Now().Add(FontFetchBudget)
 	const fontWorkers = 8
 	sem := make(chan struct{}, fontWorkers)
@@ -427,7 +438,7 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 			// The shared subresource total prices fonts against the same
 			// bytes stylesheets and images spend: over budget, the face
 			// stays unfetched and text keeps its fallback.
-			if !s.sub.take(len(fetched)) {
+			if !s.sub.take(len(fetched.Data)) {
 				return
 			}
 			data[i] = fetched
@@ -438,14 +449,20 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 	fonts := &style.CustomFonts{}
 	var fetchedBytes int64
 	for i, j := range jobs {
-		if len(data[i]) == 0 {
+		if len(data[i].Data) == 0 {
 			continue
 		}
-		fetchedBytes += int64(len(data[i]))
+		fetchedBytes += int64(len(data[i].Data))
 		if fetchedBytes > maxFontBytes {
 			return
 		}
-		idx, err := s.fontReg.Register(data[i])
+		// Bytes transferred still count above; use is a separate question.
+		// A cross-origin face without a CORS grant never registers, and
+		// text keeps its fallback exactly as for a corrupt download.
+		if !fontCORSAllowed(jobs[i].base, jobs[i].srcURL, data[i].Headers) {
+			continue
+		}
+		idx, err := s.fontReg.Register(data[i].Data)
 		if err != nil {
 			continue
 		}
@@ -491,7 +508,7 @@ func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 			if !ok {
 				continue
 			}
-			jobs = append(jobs, fontJob{family: family, srcURL: abs, weightStr: weightStr, styleStr: styleStr})
+			jobs = append(jobs, fontJob{family: family, srcURL: abs, weightStr: weightStr, styleStr: styleStr, base: fontBase})
 		}
 	}
 	return jobs

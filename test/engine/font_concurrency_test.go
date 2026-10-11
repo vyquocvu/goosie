@@ -29,7 +29,7 @@ func TestLoadFontsFetchesConcurrently(t *testing.T) {
 
 	var inFlight, peak, fetched int64
 	var css strings.Builder
-	fetcher := func(base, url string) ([]byte, error) {
+	fetcher := func(base, url string) (engine.FontResult, error) {
 		cur := atomic.AddInt64(&inFlight, 1)
 		for {
 			old := atomic.LoadInt64(&peak)
@@ -42,7 +42,7 @@ func TestLoadFontsFetchesConcurrently(t *testing.T) {
 		atomic.AddInt64(&fetched, 1)
 		// Garbage bytes: the fetch is what is timed; registration fails and
 		// the loop moves on, exactly as a corrupt download would.
-		return []byte{1, 2, 3}, nil
+		return engine.FontResult{Data: []byte{1, 2, 3}}, nil
 	}
 	for i := 0; i < count; i++ {
 		fmt.Fprintf(&css, "@font-face { font-family: F%d; src: url(\"/f%d.woff\"); }\n", i, i)

@@ -15,7 +15,9 @@ func (r *seqRegistry) Register([]byte) (uint16, error) { r.n++; return r.n, nil 
 
 func faceSession(t *testing.T, html, css string) *engine.Session {
 	t.Helper()
-	fetch := func(base, url string) ([]byte, error) { return []byte("font bytes"), nil }
+	fetch := func(base, url string) (engine.FontResult, error) {
+		return engine.FontResult{Data: []byte("font bytes")}, nil
+	}
 	s, err := engine.NewSession(html, []string{css}, 800,
 		engine.WithCustomFontLoading("https://example.com/", fetch, &seqRegistry{}))
 	if err != nil {
