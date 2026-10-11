@@ -67,7 +67,7 @@ func TestLocalStorageClear(t *testing.T) {
 		localStorage.setItem('key1', 'value1');
 		localStorage.setItem('key2', 'value2');
 		localStorage.clear();
-		var len = localStorage.length();
+		var len = localStorage.length;
 	`, "test.js")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -93,7 +93,7 @@ func TestLocalStorageLength(t *testing.T) {
 		localStorage.setItem('key1', 'value1');
 		localStorage.setItem('key2', 'value2');
 		localStorage.setItem('key3', 'value3');
-		var len = localStorage.length();
+		var len = localStorage.length;
 	`, "test.js")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -276,5 +276,89 @@ func TestHistoryOnWindow(t *testing.T) {
 	}
 	if val.Num != 1 {
 		t.Errorf("history length = %v, want 1", val.Num)
+	}
+}
+
+// TestLocalStorageLengthIsProperty pins Web Storage conformance: length is
+// a live numeric property, not a callable. Pages read it as a number.
+func TestLocalStorageLengthIsProperty(t *testing.T) {
+	r := newRuntime(t, js.Options{URL: "https://example.test/"})
+	if err := r.Run(`
+		localStorage.setItem('a', '1');
+		localStorage.setItem('b', '2');
+		var isNum = (typeof localStorage.length === 'number');
+		var len = localStorage.length;
+	`, "test.js"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, ok := r.Global("isNum"); !ok || !v.Bool {
+		t.Fatal("localStorage.length is not a number")
+	}
+	if v, ok := r.Global("len"); !ok || v.Num != 2 {
+		t.Fatalf("localStorage.length = %v, want 2", v)
+	}
+}
+
+// TestLocalStorageQuotaEnforced pins the 5 MiB admission bound: writes past
+// it throw a QuotaExceededError-named failure, keep prior contents, and do
+// not grow the store.
+func TestLocalStorageQuotaEnforced(t *testing.T) {
+	r := newRuntime(t, js.Options{URL: "https://example.test/"})
+	if err := r.Run(`
+		var MB = new Array(900*1024+1).join('x');
+		var caught = '';
+		for (var i = 0; i < 5; i++) { localStorage.setItem('k'+i, MB); }
+		try { localStorage.setItem('over', MB); } catch (e) { caught = e && e.name || String(e); }
+		var len = localStorage.length;
+		var kept = localStorage.getItem('k0') === MB;
+	`, "test.js"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("caught"); v.Str != "QuotaExceededError" {
+		t.Fatalf("over-quota error name = %q, want QuotaExceededError", v.Str)
+	}
+	if v, _ := r.Global("len"); v.Num != 5 {
+		t.Fatalf("length after refused write = %v, want 5 (no growth)", v.Num)
+	}
+	if v, _ := r.Global("kept"); !v.Bool {
+		t.Fatal("prior contents disturbed by a refused write")
+	}
+}
+
+// TestStorageQuotaIsPerStore: one store hitting quota must not spend the
+// other's budget.
+func TestStorageQuotaIsPerStore(t *testing.T) {
+	r := newRuntime(t, js.Options{URL: "https://example.test/"})
+	if err := r.Run(`
+		var MB = new Array(900*1024+1).join('x');
+		for (var i = 0; i < 5; i++) { localStorage.setItem('k'+i, MB); }
+		var sessionOK = true;
+		try { sessionStorage.setItem('s', MB); } catch (e) { sessionOK = false; }
+	`, "test.js"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("sessionOK"); !v.Bool {
+		t.Fatal("sessionStorage refused while only localStorage is full: budgets must be per store")
+	}
+}
+
+// TestStorageRemoveFreesQuota: deleting frees budget for new writes.
+func TestStorageRemoveFreesQuota(t *testing.T) {
+	r := newRuntime(t, js.Options{URL: "https://example.test/"})
+	if err := r.Run(`
+		var MB = new Array(900*1024+1).join('x');
+		for (var i = 0; i < 5; i++) { localStorage.setItem('k'+i, MB); }
+		localStorage.removeItem('k0');
+		var ok = true;
+		try { localStorage.setItem('fresh', MB); } catch (e) { ok = false; }
+		var len = localStorage.length;
+	`, "test.js"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("ok"); !v.Bool {
+		t.Fatal("write after removeItem refused: deletion must free budget")
+	}
+	if v, _ := r.Global("len"); v.Num != 5 {
+		t.Fatalf("length = %v, want 5 after replace", v.Num)
 	}
 }
