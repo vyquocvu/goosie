@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -396,62 +397,112 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 // grid-template-areas keeps that rectangle, and the rest take the first free slot
 // scanning row-major from the placement cursor, which is CSS's sparse packing. It
 // reports the deepest row used.
+//
+// Performance optimization using per-row interval tracking:
+// - Each row maintains sorted intervals of occupied cells [start, end)
+// - Finding available position: O(intervals_per_row × span_check) per item
+// - Marking position: O(intervals_per_row) with merge
+// - Typical case (sparse grid): O(n) where n = number of items
+// - Worst case (dense grid): O(n × m) where m = average intervals per row (usually << k)
 func autoPlaceGridItems(items []gridItem, k int) int {
 	if k < 1 {
 		k = 1
 	}
-	used := make([][]bool, 0, 8)
-	free := func(row, col, rowSpan, colSpan int) bool {
-		for r := row; r < row+rowSpan; r++ {
-			if r >= len(used) {
-				return true
-			}
-			for c := col; c < col+colSpan; c++ {
-				if c >= k || used[r][c] {
-					return false
-				}
+
+	// occupied[row] holds sorted, non-overlapping [start, end) intervals
+	type iv struct{ s, e int }
+	occupied := make([][]iv, 4096)
+
+	// fits checks if [c, c+span) fits in row r without overlapping occupied intervals
+	fits := func(r, c, span int) bool {
+		if r < 0 || r >= len(occupied) || c+span > k {
+			return false
+		}
+		for _, iv := range occupied[r] {
+			// Overlap: c < iv.e && iv.s < c+span
+			if c < iv.e && iv.s < c+span {
+				return false
 			}
 		}
 		return true
 	}
-	mark := func(row, col, rowSpan, colSpan int) {
-		for len(used) < row+rowSpan {
-			used = append(used, make([]bool, k))
+
+	// mark reserves [c, c+span) in row r by merging overlapping intervals
+	mark := func(r, c, span int) {
+		if r < 0 || r >= len(occupied) {
+			return
 		}
-		for r := row; r < row+rowSpan; r++ {
-			for c := col; c < col+colSpan && c < k; c++ {
-				used[r][c] = true
+		newIV := iv{c, c + span}
+		var merged, result []iv
+		skipped := false
+
+		for _, existing := range occupied[r] {
+			if merged == nil {
+				// First pass: detect overlap and create merged interval
+				if existing.s <= newIV.e && newIV.s < existing.e {
+					// Overlaps - extend merged interval
+					skipped = true
+					if existing.s < newIV.s {
+						newIV.s = existing.s
+					}
+					if existing.e > newIV.e {
+						newIV.e = existing.e
+					}
+				} else {
+					merged = append(merged, existing)
+				}
+			} else {
+				// Second pass: collect remaining intervals
+				result = append(result, existing)
 			}
 		}
+
+		if skipped {
+			result = append(result, merged...)
+			result = append(result, newIV)
+			sort.Slice(result, func(i, j int) bool { return result[i].s < result[j].s })
+			occupied[r] = result
+		} else {
+			occupied[r] = append(occupied[r], newIV)
+		}
 	}
+
+	// First pass: reserve positions for fixed-position items
 	for i := range items {
 		if items[i].colSpan > k {
 			items[i].colSpan = k
 		}
 		if items[i].fixedPos {
-			mark(items[i].row, items[i].col, items[i].rowSpan, items[i].colSpan)
+			mark(items[i].row, items[i].col, items[i].colSpan)
 		}
 	}
-	curRow, curCol := 0, 0
+
+	// Second pass: auto-place remaining items incrementally
+	curRow := 0
 	for i := range items {
 		p := &items[i]
 		if p.fixedPos {
 			continue
 		}
-		for curRow < 4096 {
-			if curCol+p.colSpan > k {
-				curCol = 0
+
+		placed := false
+		for curRow < 4096 && !placed {
+			// Search for first fitting column position
+			for col := 0; col <= k-p.colSpan; col++ {
+				if fits(curRow, col, p.colSpan) {
+					p.row, p.col = curRow, col
+					mark(curRow, p.col, p.colSpan)
+					placed = true
+					break
+				}
+			}
+			if !placed {
 				curRow++
-				continue
 			}
-			if free(curRow, curCol, p.rowSpan, p.colSpan) {
-				p.row, p.col = curRow, curCol
-				mark(curRow, curCol, p.rowSpan, p.colSpan)
-				break
-			}
-			curCol++
 		}
 	}
+
+	// Compute highest row used
 	lowest := 0
 	for _, p := range items {
 		if end := p.row + p.rowSpan; end > lowest {
