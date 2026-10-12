@@ -708,7 +708,7 @@ func (f *framePath) applyImageResult(res imgResult) {
 		fmt.Fprintln(os.Stderr, "goosie: reflow after images:", err)
 		return
 	}
-	f.repaintTab(tab)
+	f.repaintTab(tab, frame.Rect{})
 }
 
 // toggleBookmark stars or unstars the active tab's page and persists immediately.
@@ -897,7 +897,7 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		return
 	}
 
-	f.repaintTab(tab)
+	f.repaintTab(tab, frame.Rect{})
 }
 
 // pumpJS runs one event-loop turn for the active tab and repaints on change.
@@ -918,12 +918,76 @@ func (f *framePath) pumpJS() {
 	if !sess.PumpJS(float32(f.config.width)) {
 		return
 	}
-	f.repaintTab(tab)
+	f.repaintTab(tab, frame.Rect{})
+}
+
+// selectionDamage unions the previous selection bounds with the current
+// ones, scaled to device pixels: a highlight change damages exactly where
+// ink appeared or disappeared. Either side may be absent (a collapsed caret
+// paints nothing, a cleared highlight leaves nothing); both absent yields an
+// empty rect, which repaintTab reads as full damage.
+func (f *framePath) selectionDamage(tab *tabs.Tab, oldR frame.Rect, oldOK bool) frame.Rect {
+	scale := float32(f.config.dpr) * float32(f.zoom)
+	var x0, y0, x1, y1 int32
+	first := true
+	add := func(r frame.Rect) {
+		dx0 := int32(math.Floor(float64(r.X0) * float64(scale)))
+		dy0 := int32(math.Floor(float64(r.Y0) * float64(scale)))
+		dx1 := int32(math.Ceil(float64(r.X1) * float64(scale)))
+		dy1 := int32(math.Ceil(float64(r.Y1) * float64(scale)))
+		if first || dx0 < x0 {
+			x0 = dx0
+		}
+		if first || dy0 < y0 {
+			y0 = dy0
+		}
+		if first || dx1 > x1 {
+			x1 = dx1
+		}
+		if first || dy1 > y1 {
+			y1 = dy1
+		}
+		first = false
+	}
+	if oldOK {
+		add(oldR)
+	}
+	if newR, ok := tab.Session().SelectionBounds(); ok {
+		add(newR)
+	}
+	if first {
+		return frame.Rect{}
+	}
+	return frame.Rect{X0: x0, Y0: y0, X1: x1, Y1: y1}
+}
+
+// dirtyOrFull resolves a repaint damage rect: an empty rect (callers that
+// cannot know better: navigation-adjacent, focus, IME) falls back to the
+// whole extent, which is always correct and only less optimal.
+func dirtyOrFull(dirty, extent frame.Rect) frame.Rect {
+	if dirty.Empty() {
+		return extent
+	}
+	return dirty
 }
 
 // repaintTab rebuilds the active tab's layer from its session and hands the
-// plan to the scheduler.
-func (f *framePath) repaintTab(tab *tabs.Tab) {
+// plan to the scheduler. dirty is the device-pixel damage in layer space;
+// an empty rect means the whole extent.
+//
+// When the tab already holds a layer over the same extent and budget, the
+// layer (and its tile cache and pool) is reused: the new content is
+// attached and only dirty tiles go stale via InvalidateRect, and no plan is
+// republished — the loop re-reads the shared layer pointer every frame and
+// re-rasterizes exactly what went stale. A new layer (and full plan) happens
+// only when geometry demands it.
+//
+// Versions deliberately do not advance on reuse: bumping the content version
+// would skew any frame already rasterizing the previous list (its completion
+// arrives stamped with the old display-list version and would be dropped as
+// stale forever, requeued every frame). Invalidating dirty tiles at a fixed
+// version converges by construction instead.
+func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
 	list, err := tab.Session().PaintChecked(effectiveDPR)
 	if err != nil {
@@ -936,6 +1000,26 @@ func (f *framePath) repaintTab(tab *tabs.Tab) {
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: budget:", err)
+		return
+	}
+	layerBounds := extent.Canon()
+	if layerBounds.X0 < 0 {
+		layerBounds.X0 = 0
+	}
+	if layerBounds.Y0 < 0 {
+		layerBounds.Y0 = 0
+	}
+
+	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Stats().Budget == budgetBytes {
+		// Reuse: keep the tile cache and pool. Attach first, then stale:
+		// a frame racing between the two paints old pixels that the
+		// invalidation immediately marks for redo, so it converges on the
+		// next frame instead of sticking. Versions stay fixed, so every
+		// completion stamps the layer's own version and nothing is dropped
+		// as stale.
+		lyr.SetContent(dl)
+		lyr.InvalidateRect(dirtyOrFull(dirty, layerBounds))
+		f.publishAccessibility()
 		return
 	}
 
@@ -1013,7 +1097,7 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 		return false
 	}
 	f.setWindowIME(tab.Session().Focused() != nil)
-	f.repaintTab(tab)
+	f.repaintTab(tab, frame.Rect{})
 	return true
 }
 
@@ -1038,7 +1122,7 @@ func (f *framePath) imeEvent(ev surface.Event) bool {
 	switch ev.IME {
 	case surface.IMEMarked:
 		if tab.Session().SetMarked(ev.Text) {
-			f.repaintTab(tab)
+			f.repaintTab(tab, frame.Rect{})
 		}
 		return true
 	case surface.IMECommit:
@@ -1047,7 +1131,7 @@ func (f *framePath) imeEvent(ev surface.Event) bool {
 				fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			}
 		}
-		f.repaintTab(tab)
+		f.repaintTab(tab, frame.Rect{})
 		return true
 	}
 	return false
@@ -1067,10 +1151,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 			return false
 		}
 		dx, dy := f.docPoint(contentX, contentY)
+		oldR, oldOK := tab.Session().SelectionBounds()
 		changed := tab.Session().SelectAt(dx, dy)
 		f.selDrag = true
 		if changed {
-			f.repaintTab(tab)
+			f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
 		}
 		return true
 	case surface.PointerMotion:
@@ -1078,10 +1163,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 			return false
 		}
 		dx, dy := f.docPoint(contentX, contentY)
+		oldR, oldOK := tab.Session().SelectionBounds()
 		if !tab.Session().SelectTo(dx, dy) {
 			return true
 		}
-		f.repaintTab(tab)
+		f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
 		return true
 	case surface.PointerRelease:
 		wasDragging := f.selDrag
@@ -1126,7 +1212,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			return true
 		}
-		f.repaintTab(tab)
+		f.repaintTab(tab, frame.Rect{})
 		return true
 	}
 
@@ -1174,7 +1260,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			return true
 		}
 	}
-	f.repaintTab(tab)
+	f.repaintTab(tab, frame.Rect{})
 	return true
 }
 

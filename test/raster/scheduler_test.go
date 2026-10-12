@@ -822,3 +822,26 @@ func containsCoord(list []frame.TileCoord, c frame.TileCoord) bool {
 	}
 	return false
 }
+
+// TestSameLayerContentUpdateReusesTiles pins the incremental present path a
+// selection repaint relies on: after a version bump with a small dirty rect,
+// the next frame re-rasterizes (about) the dirty tiles and reuses the rest,
+// instead of the whole visible set.
+func TestSameLayerContentUpdateReusesTiles(t *testing.T) {
+	h := newSched(t, 4, 4, 32, frame.Size{W: 512, H: 512}, raster.Pref{PrefetchRows: 0})
+	h.warm(t)
+	before := h.s.Stats()
+	// One 10x10 device-pixel dirty rect inside the top-left tile.
+	h.l.Bump(2, frame.Rect4(0, 0, 10, 10))
+	w := h.frame(t, vsync(0))
+	if w.Needed > 2 {
+		t.Fatalf("Needed = %d after a one-tile dirty bump, want only the dirty tile(s)", w.Needed)
+	}
+	if w.Reused == 0 {
+		t.Fatal("Reused = 0 after a one-tile dirty bump; everything re-rasterized")
+	}
+	after := h.s.Stats()
+	if after.Rasterized-before.Rasterized > 2 {
+		t.Fatalf("rasterized %d tiles for a one-tile change", after.Rasterized-before.Rasterized)
+	}
+}

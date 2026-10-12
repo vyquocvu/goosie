@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -179,6 +180,7 @@ func newNavTestPath(t *testing.T) *framePath {
 	sched := raster.NewScheduler(layer, pool, frame.Viewport{Size: frame.Size{W: 256, H: 256}}, 1, raster.Pref{})
 	f := &framePath{
 		sched:      sched,
+		pool:       pool,
 		navResults: make(chan navResult, 16),
 		imgResults: make(chan imgResult, 16),
 	}
@@ -726,6 +728,7 @@ func tallNavTestPath(t *testing.T) *framePath {
 	sched := raster.NewScheduler(layer, pool, frame.Viewport{Size: frame.Size{W: 256, H: 256}}, 1, raster.Pref{})
 	f := &framePath{
 		sched:      sched,
+		pool:       pool,
 		navResults: make(chan navResult, 16),
 		imgResults: make(chan imgResult, 16),
 	}
@@ -1370,5 +1373,128 @@ func TestRunClearDataEndToEnd(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(statedir, "bookmarks.json")); err != nil {
 		t.Fatalf("bookmarks.json missing after -clear-data: %v", err)
+	}
+}
+
+// TestRepaintTabReusesLayerOnSameExtent pins the incremental present path:
+// repainting the same document must keep the tab's layer (and its tile
+// cache and pool) instead of allocating afresh. Selection damage then
+// stales only the selection's tiles: the flicker proof below settles every
+// tile through real frames, drag-selects one word, and requires the rest
+// to be reused with only dirty tiles re-rasterized.
+func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><body><p>stable content for repaint</p>` +
+			`<p>filler line two</p><p>filler line three</p><p>filler line four</p>` +
+			`<p>filler line five</p><p>filler line six</p><p>filler line seven</p>` +
+			`<p>filler line eight</p><p>filler line nine</p><p>filler line ten</p>` +
+			`<p>filler line eleven</p><p>filler line twelve</p><p>filler line thirteen</p>` +
+			`<p>filler line fourteen</p><p>filler line fifteen</p><p>filler line sixteen</p>` +
+			`<p>filler line seventeen</p><p>filler line eighteen</p><p>filler line nineteen</p>` +
+			`<p>filler line twenty</p></body></html>`))
+	}))
+	defer server.Close()
+	client := net.DefaultClient()
+	defer client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newNavTestPath(t)
+	f.config.width = 800
+	f.config.dpr = 1
+	f.zoom = 1
+	_, _, _, sess, _, err := loadURLCtx(context.Background(), client, fonts, server.URL, 800, 600, 1, t.TempDir(), false, false)
+	if err != nil {
+		t.Fatalf("loadURLCtx: %v", err)
+	}
+	tab := f.tabMgr.Active()
+	tab.SetSession(sess)
+	f.repaintTab(tab, frame.Rect{})
+	first := tab.Layer()
+	if first == nil {
+		t.Fatal("no layer after first repaintTab")
+	}
+	f.repaintTab(tab, frame.Rect{})
+	second := tab.Layer()
+	if second == nil {
+		t.Fatal("no layer after second repaintTab")
+	}
+	if second != first {
+		t.Fatal("repaintTab allocated a new layer for an unchanged extent: tile cache discarded")
+	}
+
+	// Settle every tile through real frames (BeginFrame/Submit/drain until
+	// quiet), mirroring the raster harness drain.
+	f.sched.SetViewport(frame.Viewport{Size: frame.Size{W: 800, H: 600}})
+	settle := func(t *testing.T) {
+		t.Helper()
+		for i := 0; i < 500; i++ {
+			plan, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+			if plan == nil {
+				t.Fatal("BeginFrame returned no plan")
+			}
+			f.sched.Submit(needed)
+			for {
+				d, ok := f.pool.Poll()
+				if !ok {
+					break
+				}
+				_ = f.sched.HandleDone(d)
+			}
+			// Give the pool worker a chance to pick up jobs before
+			// judging quiet, mirroring the raster harness drain.
+			runtime.Gosched()
+			if second.Grid.Stats().PaintingBytes == 0 {
+				_, check := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+				w := f.sched.Submit(check)
+				if w.Needed == 0 {
+					return
+				}
+			}
+		}
+		t.Fatal("tiles never settled")
+	}
+	settle(t)
+	rasterized := f.sched.Stats().Rasterized
+	matches := sess.Find("stable")
+	if len(matches) == 0 {
+		t.Fatal("Find(stable) found nothing to drag across")
+	}
+	m := matches[0]
+	oldR, oldOK := sess.SelectionBounds()
+	midY := (m.Y0 + m.Y1) / 2
+	sess.SelectAt(m.X0+1, midY)
+	sess.SelectTo(m.X1-1, midY)
+	f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
+
+	// Damage scoping, synchronously: the selection's tile is stale, a far
+	// tile in the same layer is still current.
+	selTile := frame.CoordFor(frame.Point{X: int32(m.X0) + 1, Y: int32(midY)}, frame.TileSize)
+	if !second.Needs(selTile) {
+		t.Fatal("selection tile not stale after a selection repaint")
+	}
+	b := second.Bounds
+	farTile := frame.CoordFor(frame.Point{X: b.X1 - 10, Y: b.Y1 - 10}, frame.TileSize)
+	if second.Needs(farTile) {
+		t.Fatal("far tile stale after a word-sized selection change: damage escaped")
+	}
+
+	// The test document is one tile wide: one dirty tile is the whole
+	// damage, so Needed and the re-raster delta cap at one plus margin while
+	// any surviving reuse proves the cache lived. Layer identity above (same
+	// pointer across repaints) plus far-tile freshness below are what fail
+	// pre-fix, when every repaint allocated a cold layer.
+	_, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+	w := f.sched.Submit(needed)
+	if w.Needed > 2 {
+		t.Fatalf("Needed = %d after a word-sized selection change, want only dirty tiles", w.Needed)
+	}
+	if w.Reused < 1 {
+		t.Fatalf("Reused = %d after a word-sized selection change, want surviving reuse", w.Reused)
+	}
+	settle(t)
+	if got := f.sched.Stats().Rasterized - rasterized; got > 2 {
+		t.Fatalf("re-rasterized %d tiles for a word-sized selection change", got)
 	}
 }

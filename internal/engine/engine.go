@@ -11,6 +11,7 @@ package engine
 import (
 	"fmt"
 	stdimage "image"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1386,6 +1387,51 @@ func (s *Session) Find(query string) []Match {
 	walk(1)
 	flushRun()
 	return matches
+}
+
+// SelectionBounds returns the union of selected word boxes in document
+// pixels, or false with no selection. Repaints damage exactly this (plus
+// the previous bounds across an update) instead of the whole document.
+func (s *Session) SelectionBounds() (frame.Rect, bool) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	words, from, to, ok := s.selCoverage()
+	if !ok || len(words) == 0 {
+		return frame.Rect{}, false
+	}
+	if from.word < 0 {
+		from.word = 0
+	}
+	if to.word >= len(words) {
+		to.word = len(words) - 1
+	}
+	if from.word > to.word {
+		return frame.Rect{}, false
+	}
+	first := true
+	var x0, y0, x1, y1 float32
+	for i := from.word; i <= to.word; i++ {
+		cx0, cy0, cx1, cy1 := words[i].ContentRect()
+		if first || cx0 < x0 {
+			x0 = cx0
+		}
+		if first || cy0 < y0 {
+			y0 = cy0
+		}
+		if first || cx1 > x1 {
+			x1 = cx1
+		}
+		if first || cy1 > y1 {
+			y1 = cy1
+		}
+		first = false
+	}
+	if x1 <= x0 || y1 <= y0 {
+		return frame.Rect{}, false
+	}
+	// Outward rounding: damage must cover every touched pixel.
+	return frame.Rect4(int32(math.Floor(float64(x0))), int32(math.Floor(float64(y0))),
+		int32(math.Ceil(float64(x1))), int32(math.Ceil(float64(y1)))), true
 }
 
 // ScrollToID scrolls to the first element with the given ID in the document,

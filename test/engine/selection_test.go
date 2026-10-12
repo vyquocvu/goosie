@@ -139,3 +139,23 @@ func TestPaintWithoutSelectionNoHighlight(t *testing.T) {
 		t.Fatalf("unselected page painted %d highlight fills", n)
 	}
 }
+
+// TestSelectionBoundsUnion pins the damage source repaints use: the union of
+// selected word boxes in document pixels, or ok=false with no selection.
+func TestSelectionBoundsUnion(t *testing.T) {
+	s := newFocusSession(t, selParagraphHTML)
+	if _, ok := s.SelectionBounds(); ok {
+		t.Fatal("SelectionBounds ok with no selection")
+	}
+	hx0, hy0, _, hy1 := selWord(t, s, "hello")
+	_, wy0, wx1, wy1 := selWord(t, s, "world")
+	s.SelectAt(hx0-1, (hy0+hy1)/2)
+	s.SelectTo(wx1+1, (wy0+wy1)/2)
+	r, ok := s.SelectionBounds()
+	if !ok {
+		t.Fatal("SelectionBounds not ok after drag")
+	}
+	if float32(r.X0) > hx0 || float32(r.Y0) > hy0+1 || float32(r.X1) < wx1 || float32(r.Y1) < wy1-1 {
+		t.Fatalf("bounds %+v do not cover hello->world", r)
+	}
+}
