@@ -881,6 +881,10 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 		return nil
 	}
 	out := make([]float32, len(cols))
+
+	// Track which items we've already measured to avoid redundant work
+	measured := make(map[ObjectID]bool)
+
 	for i := range items {
 		p := &items[i]
 		if p.colSpan != 1 || p.col < 0 || p.col >= len(cols) {
@@ -893,6 +897,13 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 		if !c.content && frs == 0 {
 			continue
 		}
+
+		// Skip if already measured this item
+		if measured[p.id] {
+			continue
+		}
+		measured[p.id] = true
+
 		if w := gridItemMaxContentW(a, p.id); w > out[p.col] {
 			out[p.col] = w
 		}
