@@ -758,6 +758,14 @@ func inViewport(d css.Declaration, vp Viewport) css.Declaration {
 	// are rewritten there and the parsed form rebuilt from it. Both copies have to
 	// agree: one resolved and the not-yet-resolved is enough to make a property
 	// disagree with itself.
+	//
+	// A viewport term is a number glued to its unit, so a value without a digit
+	// cannot hold one: skipping the rewrite below exactly reproduces running it
+	// and finding no match, while also skipping the regexp closure it builds for
+	// every other value.
+	if strings.IndexAny(d.Value, "0123456789") < 0 {
+		return d
+	}
 	text, ok := css.ResolveViewportUnits(d.Value, vp.W, vp.H)
 	if !ok {
 		return d
@@ -819,6 +827,14 @@ func findParentStyle(n *dom.Node, result map[dom.NodeID]*ComputedStyle) *Compute
 }
 
 func inheritStyle(parent *ComputedStyle) *ComputedStyle {
+	// A text run draws exactly its parent's style with an inline display. When
+	// the parent is already inline the copy would be identical, so the text
+	// shares the parent's pointer: styles are never mutated after Resolve (the
+	// Custom map's read-only sharing already relies on that), and every
+	// consumer only reads through the map.
+	if parent.Display == DisplayInline {
+		return parent
+	}
 	cs := *parent
 	cs.Display = DisplayInline
 	return &cs
@@ -853,6 +869,9 @@ func (e cascadeEntry) before(o cascadeEntry) bool {
 }
 
 func sortCascade(entries []cascadeEntry) {
+	if len(entries) < 2 {
+		return
+	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].before(entries[j]) })
 }
 
@@ -868,16 +887,52 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	var normal, important []cascadeEntry
-	var allDecls []css.Declaration
 	order := index.declCount
 	// Candidates arrive in sheet, rule and selector order, so the cascade sees the
 	// same sequence it would from walking every sheet: the index narrows which
 	// selectors get tested, never how they rank. Declarations that share a
 	// selector share its rank and keep their relative order through the stable sort.
-	for _, cand := range index.candidates(n) {
+	//
+	// cands is freshly allocated per element, so matches are compacted to its
+	// front in place: no second slice, and the declaration counts below let the
+	// cascade slices be sized exactly instead of regrown by append.
+	cands := index.candidates(n)
+	matched := cands[:0]
+	ruleDecls, ruleImportant := 0, 0
+	for _, cand := range cands {
 		if !cand.sel.Matches(n) {
 			continue
 		}
+		matched = append(matched, cand)
+		for _, d := range cand.rule.Declarations {
+			ruleDecls++
+			if d.Important {
+				ruleImportant++
+			}
+		}
+	}
+
+	var inlineDecls []css.Declaration
+	if inline := n.GetAttribute("style"); inline != "" {
+		inlineDecls = parseInlineDeclarations(inline)
+	}
+
+	// Legacy presentational attributes (bgcolor, color) are author-origin hints
+	// with zero specificity: they beat the UA default but lose to any real
+	// author rule for the same property. Pages like news.ycombinator.com paint
+	// their whole header bar through <td bgcolor>, with no CSS fallback.
+	hintDecls := presentationalHints(n)
+
+	// The caps overshoot by at most the inline declarations (their
+	// normal/important split is only known while appending): one backing array
+	// each either way, instead of the growth chain append would regrow.
+	if cap := ruleDecls - ruleImportant + len(inlineDecls) + len(hintDecls); cap > 0 {
+		normal = make([]cascadeEntry, 0, cap)
+	}
+	if cap := ruleImportant + len(inlineDecls); cap > 0 {
+		important = make([]cascadeEntry, 0, cap)
+	}
+	for _, cand := range matched {
 		for _, d := range cand.rule.Declarations {
 			e := cascadeEntry{decl: inViewport(d, vp), origin: cand.origin, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
 			if d.Important {
@@ -886,36 +941,26 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 				normal = append(normal, e)
 			}
 		}
-		allDecls = append(allDecls, cand.rule.Declarations...)
 	}
 
-	if inline := n.GetAttribute("style"); inline != "" {
-		decls := parseInlineDeclarations(inline)
-		for _, d := range decls {
-			e := cascadeEntry{decl: inViewport(d, vp), origin: 2, a: 1, b: 1, c: 1, order: order}
-			order++
-			if d.Important {
-				important = append(important, e)
-			} else {
-				normal = append(normal, e)
-			}
+	for _, d := range inlineDecls {
+		e := cascadeEntry{decl: inViewport(d, vp), origin: 2, a: 1, b: 1, c: 1, order: order}
+		order++
+		if d.Important {
+			important = append(important, e)
+		} else {
+			normal = append(normal, e)
 		}
-		allDecls = append(allDecls, decls...)
 	}
 
-	// Legacy presentational attributes (bgcolor, color) are author-origin hints
-	// with zero specificity: they beat the UA default but lose to any real
-	// author rule for the same property. Pages like news.ycombinator.com paint
-	// their whole header bar through <td bgcolor>, with no CSS fallback.
-	for _, d := range presentationalHints(n) {
+	for _, d := range hintDecls {
 		normal = append(normal, cascadeEntry{decl: d, origin: 1, a: 0, b: 0, c: 0, order: -1})
-		allDecls = append(allDecls, d)
 	}
 
 	sortCascade(normal)
 	sortCascade(important)
 	cs.Custom = resolveCustom(parent, normal, important)
-	vars := newVarExpander(cs.Custom)
+	vars := expanderFor(cs.Custom, normal, important)
 	for _, e := range normal {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 	}
@@ -993,7 +1038,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 		cs.LineHeight = cs.LineHeightEm * cs.FontSize
 	}
 
-	resolveCurrentColor(&cs, allDecls)
+	resolveCurrentColor(&cs, matched, inlineDecls, hintDecls)
 	resolveShadowColors(&cs, parent, normal, important)
 	resolveCustomFont(&cs, fonts)
 
@@ -1128,21 +1173,27 @@ func declaresTextAlign(normal, important []cascadeEntry) bool {
 // of the inherited set. Elements that declare none share the parent's map
 // read-only; anything that mutates must copy first.
 func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[string]string {
-	declares := false
+	custom := 0
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
 			if strings.HasPrefix(e.decl.Property, "--") {
-				declares = true
+				custom++
 			}
 		}
 	}
-	if !declares {
+	if custom == 0 {
 		if parent != nil {
 			return parent.Custom
 		}
 		return nil
 	}
-	m := map[string]string{}
+	// Size for the inherited entries plus the overriding ones: duplicate names
+	// for the same property only overshoot, never grow the map twice.
+	n := custom
+	if parent != nil {
+		n += len(parent.Custom)
+	}
+	m := make(map[string]string, n)
 	if parent != nil {
 		for k, v := range parent.Custom {
 			m[k] = v
@@ -1166,7 +1217,7 @@ func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32
 		return
 	}
 	value, parsed := e.decl.Value, e.decl.Parsed
-	if strings.Contains(value, "var(") {
+	if vars != nil && strings.Contains(value, "var(") {
 		value = vars.expand(value)
 		if strings.TrimSpace(value) == "" {
 			// Nothing resolved and no fallback was given: the declaration is
@@ -1198,6 +1249,22 @@ type varExpander struct {
 	done     map[string]string
 	visiting map[string]bool
 	budget   int
+}
+
+// expanderFor returns the var() expander for one element's custom properties,
+// or nil when no applied value references var(): the expander is a heap object
+// per element otherwise, and most elements never use one. A nil expander is
+// safe to pass to applyCascadeEntry precisely because the scan below proved no
+// value can reach the expansion branch.
+func expanderFor(custom map[string]string, normal, important []cascadeEntry) *varExpander {
+	for _, es := range [][]cascadeEntry{normal, important} {
+		for _, e := range es {
+			if strings.Contains(e.decl.Value, "var(") {
+				return newVarExpander(custom)
+			}
+		}
+	}
+	return nil
 }
 
 func newVarExpander(custom map[string]string) *varExpander {
@@ -1323,9 +1390,13 @@ func parseInlineDeclaration(s string) css.Declaration {
 	prop := strings.TrimSpace(s[:colonIdx])
 	val := strings.TrimSpace(s[colonIdx+1:])
 	important := false
-	if idx := strings.Index(strings.ToLower(val), "!important"); idx >= 0 {
-		important = true
-		val = strings.TrimSpace(val[:idx])
+	// Lowercasing the value only to look for !important allocates on every
+	// inline declaration; values without a bang cannot hold one.
+	if strings.Contains(val, "!") {
+		if idx := strings.Index(strings.ToLower(val), "!important"); idx >= 0 {
+			important = true
+			val = strings.TrimSpace(val[:idx])
+		}
 	}
 	return css.Declaration{
 		Property:  strings.ToLower(prop),
@@ -1744,7 +1815,13 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "font-size":
 		cs.FontSize = clampFontSize(resolveFontSize(parsed, parentFontSize))
 	case "font-weight":
-		cs.FontWeight = parseFontWeight(value)
+		// A numeric weight reuses the already-parsed value instead of parsing
+		// the text a second time; keywords take the name path as before.
+		if parsed.Type == css.ValueNumber {
+			cs.FontWeight = FontWeight(parsed.Num)
+		} else {
+			cs.FontWeight = parseFontWeight(value)
+		}
 	case "font-style":
 		cs.FontStyle = parseFontStyle(value)
 	case "font":
@@ -2542,77 +2619,116 @@ func parseColorValue(v string) css.Color {
 	return c
 }
 
-func resolveCurrentColor(cs *ComputedStyle, decls []css.Declaration) {
-	handled := make(map[string]bool)
-	for i := len(decls) - 1; i >= 0; i-- {
-		d := decls[i]
-		lower := strings.TrimSpace(strings.ToLower(d.Value))
-		isCC := lower == "currentcolor"
+// isCurrentColor reports whether v names the currentcolor keyword, ASCII
+// case-insensitively the way CSS compares keywords. It replaces the
+// TrimSpace(ToLower(v)) == "currentcolor" test without the lowercase copy: no
+// non-ASCII rune lowercases to one of these twelve ASCII letters, so the two
+// agree on every input.
+func isCurrentColor(v string) bool {
+	v = strings.TrimSpace(v)
+	const want = "currentcolor"
+	if len(v) != len(want) {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != want[i] {
+			return false
+		}
+	}
+	return true
+}
 
-		switch d.Property {
+func resolveCurrentColor(cs *ComputedStyle, matched []*indexedSelector, inline, hints []css.Declaration) {
+	// Whether each property already met its winning declaration while walking
+	// back: a later shorthand marks its longhands handled too, so an earlier
+	// currentcolor cannot win over the explicit colour that beat it.
+	var border, top, right, bottom, left, bg bool
+	visit := func(prop, value string) {
+		if !isCurrentColor(value) {
+			switch prop {
+			case "border-color":
+				border, top, right, bottom, left = true, true, true, true, true
+			case "border-top-color":
+				top = true
+			case "border-right-color":
+				right = true
+			case "border-bottom-color":
+				bottom = true
+			case "border-left-color":
+				left = true
+			case "background-color":
+				bg = true
+			}
+			return
+		}
+		switch prop {
 		case "border-color":
-			if handled["border-color"] {
-				continue
+			if border {
+				return
 			}
-			if isCC {
-				if !handled["border-top-color"] {
-					cs.BorderTopColor = cs.Color
-				}
-				if !handled["border-right-color"] {
-					cs.BorderRightColor = cs.Color
-				}
-				if !handled["border-bottom-color"] {
-					cs.BorderBottomColor = cs.Color
-				}
-				if !handled["border-left-color"] {
-					cs.BorderLeftColor = cs.Color
-				}
-			}
-			handled["border-color"] = true
-			handled["border-top-color"] = true
-			handled["border-right-color"] = true
-			handled["border-bottom-color"] = true
-			handled["border-left-color"] = true
-		case "border-top-color":
-			if handled["border-top-color"] {
-				continue
-			}
-			if isCC {
+			if !top {
 				cs.BorderTopColor = cs.Color
 			}
-			handled["border-top-color"] = true
-		case "border-right-color":
-			if handled["border-right-color"] {
-				continue
-			}
-			if isCC {
+			if !right {
 				cs.BorderRightColor = cs.Color
 			}
-			handled["border-right-color"] = true
-		case "border-bottom-color":
-			if handled["border-bottom-color"] {
-				continue
-			}
-			if isCC {
+			if !bottom {
 				cs.BorderBottomColor = cs.Color
 			}
-			handled["border-bottom-color"] = true
-		case "border-left-color":
-			if handled["border-left-color"] {
-				continue
-			}
-			if isCC {
+			if !left {
 				cs.BorderLeftColor = cs.Color
 			}
-			handled["border-left-color"] = true
+			border, top, right, bottom, left = true, true, true, true, true
+		case "border-top-color":
+			if top {
+				return
+			}
+			cs.BorderTopColor = cs.Color
+			top = true
+		case "border-right-color":
+			if right {
+				return
+			}
+			cs.BorderRightColor = cs.Color
+			right = true
+		case "border-bottom-color":
+			if bottom {
+				return
+			}
+			cs.BorderBottomColor = cs.Color
+			bottom = true
+		case "border-left-color":
+			if left {
+				return
+			}
+			cs.BorderLeftColor = cs.Color
+			left = true
 		case "background-color":
-			if handled["background-color"] {
-				continue
+			if bg {
+				return
 			}
-			if isCC {
-				cs.BackgroundColor = cs.Color
-			}
-			handled["background-color"] = true
+			cs.BackgroundColor = cs.Color
+			bg = true
+		}
+	}
+	// The cascade collected matched rules, then the style attribute, then the
+	// presentational hints: walking back visits the winning declaration first,
+	// exactly as scanning the old allDecls slice in reverse did, but without
+	// building it (or the per-element handled map and lowercase copies).
+	for i := len(hints) - 1; i >= 0; i-- {
+		visit(hints[i].Property, hints[i].Value)
+	}
+	for i := len(inline) - 1; i >= 0; i-- {
+		visit(inline[i].Property, inline[i].Value)
+	}
+	for i := len(matched) - 1; i >= 0; i-- {
+		decls := matched[i].rule.Declarations
+		for j := len(decls) - 1; j >= 0; j-- {
+			visit(decls[j].Property, decls[j].Value)
 		}
 	}
 }

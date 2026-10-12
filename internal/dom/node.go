@@ -158,10 +158,12 @@ func (sr *ShadowRoot) AppendChild(c *Node) {
 }
 
 // GetAttribute returns the value of the named attribute, or "" if not present.
+// Attribute names are lowercased by the HTML parser, so the exact match below
+// hits without allocating; the EqualFold fallback only serves mixed-case names
+// installed via SetAttribute from script.
 func (n *Node) GetAttribute(name string) string {
-	lower := strings.ToLower(name)
 	for _, a := range n.Attr {
-		if strings.ToLower(a.Name) == lower {
+		if a.Name == name || strings.EqualFold(a.Name, name) {
 			return a.Value
 		}
 	}
@@ -171,9 +173,8 @@ func (n *Node) GetAttribute(name string) string {
 // SetAttribute sets the named attribute, replacing an existing value
 // case-insensitively or appending a new pair.
 func (n *Node) SetAttribute(name, value string) {
-	lower := strings.ToLower(name)
 	for i := range n.Attr {
-		if strings.ToLower(n.Attr[i].Name) == lower {
+		if n.Attr[i].Name == name || strings.EqualFold(n.Attr[i].Name, name) {
 			n.Attr[i].Value = value
 			return
 		}
@@ -183,9 +184,8 @@ func (n *Node) SetAttribute(name, value string) {
 
 // HasAttribute reports whether the named attribute is present.
 func (n *Node) HasAttribute(name string) bool {
-	lower := strings.ToLower(name)
 	for _, a := range n.Attr {
-		if strings.ToLower(a.Name) == lower {
+		if a.Name == name || strings.EqualFold(a.Name, name) {
 			return true
 		}
 	}
@@ -194,9 +194,8 @@ func (n *Node) HasAttribute(name string) bool {
 
 // RemoveAttribute removes the named attribute from the element.
 func (n *Node) RemoveAttribute(name string) {
-	lower := strings.ToLower(name)
 	for i := range n.Attr {
-		if strings.ToLower(n.Attr[i].Name) == lower {
+		if n.Attr[i].Name == name || strings.EqualFold(n.Attr[i].Name, name) {
 			n.Attr = append(n.Attr[:i], n.Attr[i+1:]...)
 			return
 		}

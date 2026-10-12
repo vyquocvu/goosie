@@ -25,6 +25,93 @@ type Condition struct {
 	Attr   string
 	Op     string
 	Pseudo string
+	// compiled holds the Pseudo selector arguments parsed once at stylesheet
+	// parse time. Functional pseudo-classes otherwise re-parse their argument
+	// on every element they test (:not, :is, :has, nth-of), which is O(argument
+	// length) of tokenizer work per element per candidate. The pointer is
+	// shared by every copy of the Condition; nil means precompilation did not
+	// apply (a hand-built Condition, or a pseudo without selector args), and
+	// match falls back to parsing live.
+	compiled *pseudoCompiled
+}
+
+// pseudoCompiled holds selector arguments parsed once.
+type pseudoCompiled struct {
+	// sels serves :not (exactly one) and :is/:where (the comma-separated list).
+	sels []Selector
+	// has serves :has alternatives with their leading combinators preserved.
+	has []hasArg
+	// of serves :nth-child(An+B of S) filters.
+	of []Selector
+	// nthExpr is the An+B microsyntax before `of`, so match skips the split.
+	nthExpr string
+	hasNth  bool
+}
+
+// hasArg is one :has() alternative: the relationship plus the selector it applies to.
+type hasArg struct {
+	combinator byte
+	sel        Selector
+}
+
+// precompile parses the selector arguments of functional pseudo-classes once.
+// It runs at stylesheet parse time; match code uses the result when present
+// and parses live otherwise, so behavior is identical either way.
+func (c *Condition) precompile() {
+	if c.Type != CondPseudoClass || c.Pseudo == "" {
+		return
+	}
+	switch c.Value {
+	case "not":
+		c.compiled = &pseudoCompiled{sels: []Selector{ParseSelector(c.Pseudo)}}
+	case "is", "where":
+		var sels []Selector
+		for _, selStr := range splitSelectorList(c.Pseudo) {
+			sels = append(sels, ParseSelector(selStr))
+		}
+		c.compiled = &pseudoCompiled{sels: sels}
+	case "has":
+		c.compiled = &pseudoCompiled{has: compileHasArgs(c.Pseudo)}
+	case "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type":
+		if _, of := splitNthOf(c.Pseudo); len(of) > 0 {
+			pc := &pseudoCompiled{hasNth: true}
+			pc.nthExpr, _ = splitNthOf(c.Pseudo)
+			for _, selStr := range of {
+				pc.of = append(pc.of, ParseSelector(selStr))
+			}
+			c.compiled = pc
+		}
+	}
+}
+
+// compileHasArgs splits a :has() argument the way matchHas evaluates it: comma
+// alternatives, each with an optional leading combinator.
+func compileHasArgs(arg string) []hasArg {
+	var out []hasArg
+	for _, selStr := range splitSelectorList(arg) {
+		selStr = strings.TrimSpace(selStr)
+		if selStr == "" {
+			continue
+		}
+		combinator := byte(' ')
+		rest := selStr
+		switch selStr[0] {
+		case '>':
+			combinator = '>'
+			rest = strings.TrimSpace(selStr[1:])
+		case '+':
+			combinator = '+'
+			rest = strings.TrimSpace(selStr[1:])
+		case '~':
+			combinator = '~'
+			rest = strings.TrimSpace(selStr[1:])
+		}
+		if rest == "" {
+			continue
+		}
+		out = append(out, hasArg{combinator: combinator, sel: ParseSelector(rest)})
+	}
+	return out
 }
 
 // ConditionType identifies the kind of selector condition.
@@ -277,7 +364,9 @@ func parseCondition(s string, i int) (Condition, int) {
 			if i < len(s) {
 				i++
 			}
-			return Condition{Type: CondPseudoClass, Value: name, Pseudo: arg}, i
+			cond := Condition{Type: CondPseudoClass, Value: name, Pseudo: arg}
+			cond.precompile()
+			return cond, i
 		}
 		return Condition{Type: CondPseudoClass, Value: name}, i
 
@@ -508,6 +597,9 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		if c.Pseudo == "" {
 			return true
 		}
+		if c.compiled != nil && len(c.compiled.sels) == 1 {
+			return !c.compiled.sels[0].Matches(n)
+		}
 		sel := ParseSelector(c.Pseudo)
 		return !sel.Matches(n)
 	case "is", "where":
@@ -516,6 +608,14 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		// :is() takes the highest specificity of its arguments, :where() is zero.
 		// Specificity is handled in the Specificity() method; here we just match.
 		if c.Pseudo == "" {
+			return false
+		}
+		if c.compiled != nil {
+			for _, sel := range c.compiled.sels {
+				if sel.Matches(n) {
+					return true
+				}
+			}
 			return false
 		}
 		selectors := splitSelectorList(c.Pseudo)
@@ -557,15 +657,18 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		if c.Pseudo == "" {
 			return false
 		}
+		if c.compiled != nil {
+			return matchHasCompiled(c.compiled.has, n)
+		}
 		return matchHas(c.Pseudo, n)
 	case "nth-child":
-		return matchNth(c.Pseudo, n, false, false)
+		return matchNthC(c, n, false, false)
 	case "nth-last-child":
-		return matchNth(c.Pseudo, n, false, true)
+		return matchNthC(c, n, false, true)
 	case "nth-of-type":
-		return matchNth(c.Pseudo, n, true, false)
+		return matchNthC(c, n, true, false)
 	case "nth-last-of-type":
-		return matchNth(c.Pseudo, n, true, true)
+		return matchNthC(c, n, true, true)
 	case "first-of-type":
 		return matchNth("1", n, true, false)
 	case "last-of-type":
@@ -647,6 +750,45 @@ func matchHas(arg string, n *dom.Node) bool {
 	return false
 }
 
+// matchHasCompiled evaluates :has() against pre-parsed alternatives: same
+// relationships as matchHas, without re-splitting or re-parsing per element.
+func matchHasCompiled(args []hasArg, n *dom.Node) bool {
+	for _, a := range args {
+		switch a.combinator {
+		case '>':
+			// Direct child
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if c.Type == dom.NodeElement && a.sel.Matches(c) {
+					return true
+				}
+			}
+		case '+':
+			// Adjacent next sibling
+			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
+				if sib.Type == dom.NodeElement {
+					if a.sel.Matches(sib) {
+						return true
+					}
+					break // only check the first element sibling
+				}
+			}
+		case '~':
+			// General next siblings
+			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
+				if sib.Type == dom.NodeElement && a.sel.Matches(sib) {
+					return true
+				}
+			}
+		default:
+			// Descendant (any depth)
+			if hasDescendantMatching(n, a.sel) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // hasDescendantMatching checks if any descendant of n matches the selector.
 func hasDescendantMatching(n *dom.Node, sel Selector) bool {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -665,7 +807,24 @@ func hasDescendantMatching(n *dom.Node, sel Selector) bool {
 // matchNth resolves an An+B expression against the node's position among its
 // element siblings.
 func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
-	expr, ofSels := splitNthOf(arg)
+	expr, ofStrs := splitNthOf(arg)
+	var of []Selector
+	for _, selStr := range ofStrs {
+		of = append(of, ParseSelector(selStr))
+	}
+	return matchNthParsed(expr, of, n, ofType, fromEnd)
+}
+
+// matchNthC is matchNth for a parsed Condition: precompiled `of` filters and
+// the An+B microsyntax come from the sidecar, so matching parses nothing.
+func matchNthC(c Condition, n *dom.Node, ofType, fromEnd bool) bool {
+	if c.compiled != nil && c.compiled.hasNth {
+		return matchNthParsed(c.compiled.nthExpr, c.compiled.of, n, ofType, fromEnd)
+	}
+	return matchNth(c.Pseudo, n, ofType, fromEnd)
+}
+
+func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd bool) bool {
 	a, b, ok := parseNth(expr)
 	if !ok {
 		return false
@@ -673,10 +832,10 @@ func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
 	// `:nth-child(An+B of S)` counts only siblings matching S, and the
 	// element itself must match one of them. Without the filter every `of`
 	// form silently matched nothing.
-	if len(ofSels) > 0 {
+	if len(of) > 0 {
 		matched := false
-		for _, selStr := range ofSels {
-			if ParseSelector(selStr).Matches(n) {
+		for _, sel := range of {
+			if sel.Matches(n) {
 				matched = true
 				break
 			}
@@ -685,7 +844,7 @@ func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
 			return false
 		}
 	}
-	i, total := nthIndexFiltered(n, ofType, ofSels)
+	i, total := nthIndexFilteredSel(n, ofType, of)
 	if i == 0 {
 		return false
 	}
@@ -791,14 +950,20 @@ func nthIndex(n *dom.Node, ofType bool) (index, total int) {
 
 // nthIndexFiltered is nthIndex with an additional selector filter for the
 // `:nth-child(An+B of S)` form: only siblings matching one of the selectors
-// count.
+// count. Filters arrive pre-parsed: parsing them here would redo the work for
+// every sibling of every tested element.
 func nthIndexFiltered(n *dom.Node, ofType bool, of []string) (index, total int) {
-	if n.Parent == nil {
-		return 0, 0
-	}
 	var filters []Selector
 	for _, selStr := range of {
 		filters = append(filters, ParseSelector(selStr))
+	}
+	return nthIndexFilteredSel(n, ofType, filters)
+}
+
+// nthIndexFilteredSel is nthIndexFiltered over pre-parsed filters.
+func nthIndexFilteredSel(n *dom.Node, ofType bool, filters []Selector) (index, total int) {
+	if n.Parent == nil {
+		return 0, 0
 	}
 	counts := func(c *dom.Node) bool {
 		if !c.Element() || (ofType && c.Data != n.Data) {

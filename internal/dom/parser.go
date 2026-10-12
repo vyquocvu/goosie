@@ -51,6 +51,22 @@ func (tb *treeBuilder) allowNode(parent *Node) bool {
 		tb.err = fmt.Errorf("HTML node limit exceeded (%d)", tb.limits.Nodes)
 		return false
 	}
+	// Depth is O(1) from the open-element stack: the stack holds the open
+	// elements outermost-first, so the current node's depth is len(openStack)
+	// (the document root is depth 0) and a new child of it is one deeper.
+	// Only the foster-parent path passes a parent that is not the current
+	// node; it is rare, so the parent-chain walk survives as a fallback there.
+	if parent == tb.current() || parent == &tb.doc.Node {
+		depth := 1
+		if parent != &tb.doc.Node {
+			depth = len(tb.openStack) + 1
+		}
+		if depth > tb.limits.Depth {
+			tb.err = fmt.Errorf("HTML tree depth limit exceeded (%d)", tb.limits.Depth)
+			return false
+		}
+		return true
+	}
 	depth := 0
 	for p := parent; p != nil; p = p.Parent {
 		depth++

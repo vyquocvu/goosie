@@ -138,6 +138,20 @@ func (ix *ruleIndex) candidates(n *dom.Node) []*indexedSelector {
 	}
 	collect(ix.byTag[n.Data])
 	collect(ix.unkeyed)
-	sort.Slice(out, func(i, j int) bool { return out[i].rank < out[j].rank })
+	// Each bucket is already in rank order (buildRuleIndex appends in sheet
+	// order), so the merged slice is nearly sorted and almost always tiny:
+	// skip the sort for 0-1 candidates and insertion-sort the common small
+	// case instead of paying sort.Slice's interface dispatch per element.
+	switch len(out) {
+	case 0, 1:
+	case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16:
+		for i := 1; i < len(out); i++ {
+			for j := i; j > 0 && out[j].rank < out[j-1].rank; j-- {
+				out[j], out[j-1] = out[j-1], out[j]
+			}
+		}
+	default:
+		sort.Slice(out, func(i, j int) bool { return out[i].rank < out[j].rank })
+	}
 	return out
 }

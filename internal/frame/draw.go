@@ -57,21 +57,34 @@ func (b *Bitmap) BlitMask(mask *image.Alpha, origin Point, c Color, clip Rect, w
 	// straight index arithmetic.
 	mx0 := int(dr.X0) - int(origin.X) + mr.Min.X
 	my0 := int(dr.Y0) - int(origin.Y) + mr.Min.Y
+	// An opaque colour at full coverage blends to itself whatever is underneath
+	// (BlendOver's sa==255 path returns src), so solid glyph cores take a
+	// direct store. Partial coverage keeps the exact scale-and-blend path.
+	opaque := c.Opaque()
 	for y, my := int(dr.Y0), my0; y < int(dr.Y1); y, my = y+1, my+1 {
 		row := my*mask.Stride + mx0
-		do := y * b.Stride
+		drowBase := y*b.Stride + int(dr.X0)*4
+		drow := b.RGBA[drowBase : drowBase+int(dr.X1-dr.X0)*4]
 		for x := int(dr.X0); x < int(dr.X1); x, row = x+1, row+1 {
 			cov := mask.Pix[row]
 			if cov == 0 {
 				continue
 			}
-			o := do + x*4
-			dst := Color(uint32(b.RGBA[o])<<24 | uint32(b.RGBA[o+1])<<16 | uint32(b.RGBA[o+2])<<8 | uint32(b.RGBA[o+3]))
+			ox := (x - int(dr.X0)) * 4
+			p := drow[ox : ox+4 : ox+4]
+			if cov == 255 && opaque {
+				p[0] = byte(c >> 24)
+				p[1] = byte(c >> 16)
+				p[2] = byte(c >> 8)
+				p[3] = byte(c)
+				continue
+			}
+			dst := Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
 			out := BlendOver(dst, ScaleAlpha(c, cov))
-			b.RGBA[o] = byte(out >> 24)
-			b.RGBA[o+1] = byte(out >> 16)
-			b.RGBA[o+2] = byte(out >> 8)
-			b.RGBA[o+3] = byte(out)
+			p[0] = byte(out >> 24)
+			p[1] = byte(out >> 16)
+			p[2] = byte(out >> 8)
+			p[3] = byte(out)
 		}
 	}
 }
@@ -129,6 +142,35 @@ func (b *Bitmap) ScaleOver(src image.Image, srcRect, dst, clip Rect, cov uint8, 
 		// the per-pixel index a single multiply and add.
 		base = -int(sb.Min.Y)*stride - int(sb.Min.X)*4
 	}
+	// cov is uniform for the call, so the coverage branch is hoisted out of the
+	// pixel loop: full coverage skips the per-pixel ScaleAlpha check entirely.
+	// Both loops below are otherwise the same bilinear resample and blend.
+	if cov == 255 {
+		for dy := int32(0); dy < dr.H(); dy++ {
+			fy := (dy+offY)*syStep + syStep/2
+			sy0 := clamp32(srcRect.Y0+(fy>>16), yLo, yHi)
+			sy1 := clamp32(srcRect.Y0+(fy>>16)+1, yLo, yHi)
+			wy := uint32((fy & 0xFFFF) >> 10) // 0..63, the weight of the lower row
+			for dx := int32(0); dx < dr.W(); dx++ {
+				fx := (dx+offX)*sxStep + sxStep/2
+				sx0 := clamp32(srcRect.X0+(fx>>16), xLo, xHi)
+				sx1 := clamp32(srcRect.X0+(fx>>16)+1, xLo, xHi)
+				wx := uint32((fx & 0xFFFF) >> 10)
+				c := blendBilinear(
+					sample(src, pix, stride, direct, base, sx0, sy0), sample(src, pix, stride, direct, base, sx1, sy0),
+					sample(src, pix, stride, direct, base, sx0, sy1), sample(src, pix, stride, direct, base, sx1, sy1), wx, wy)
+				o := int(dy+dr.Y0)*b.Stride + int(dx+dr.X0)*4
+				p := b.RGBA[o : o+4 : o+4]
+				dstC := Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
+				out := BlendOver(dstC, c)
+				p[0] = byte(out >> 24)
+				p[1] = byte(out >> 16)
+				p[2] = byte(out >> 8)
+				p[3] = byte(out)
+			}
+		}
+		return
+	}
 	for dy := int32(0); dy < dr.H(); dy++ {
 		fy := (dy+offY)*syStep + syStep/2
 		sy0 := clamp32(srcRect.Y0+(fy>>16), yLo, yHi)
@@ -142,16 +184,16 @@ func (b *Bitmap) ScaleOver(src image.Image, srcRect, dst, clip Rect, cov uint8, 
 			c := blendBilinear(
 				sample(src, pix, stride, direct, base, sx0, sy0), sample(src, pix, stride, direct, base, sx1, sy0),
 				sample(src, pix, stride, direct, base, sx0, sy1), sample(src, pix, stride, direct, base, sx1, sy1), wx, wy)
-			if cov != 255 {
-				c = ScaleAlpha(c, cov)
-			}
+			// The cov==255 case returned above, so coverage always applies here.
+			c = ScaleAlpha(c, cov)
 			o := int(dy+dr.Y0)*b.Stride + int(dx+dr.X0)*4
-			dstC := Color(uint32(b.RGBA[o])<<24 | uint32(b.RGBA[o+1])<<16 | uint32(b.RGBA[o+2])<<8 | uint32(b.RGBA[o+3]))
+			p := b.RGBA[o : o+4 : o+4]
+			dstC := Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
 			out := BlendOver(dstC, c)
-			b.RGBA[o] = byte(out >> 24)
-			b.RGBA[o+1] = byte(out >> 16)
-			b.RGBA[o+2] = byte(out >> 8)
-			b.RGBA[o+3] = byte(out)
+			p[0] = byte(out >> 24)
+			p[1] = byte(out >> 16)
+			p[2] = byte(out >> 8)
+			p[3] = byte(out)
 		}
 	}
 }

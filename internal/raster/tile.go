@@ -23,9 +23,10 @@ var ErrNilDestination = errors.New("raster: nil tile destination")
 // viewport happens to be, which is the property that lets a scrolled-back tile
 // be reused instead of re-rendered.
 //
-// The list is read through Intersecting, so a tile over whitespace walks one
-// contiguous span instead of the whole page. Nothing here takes a lock: the
-// display list is frozen, and the glyph caches synchronize themselves.
+// The list is read through its frozen bounds sidecar, so a tile over
+// whitespace walks one cheap pass instead of re-walking glyphs per command.
+// Nothing here takes a lock: the display list is frozen, and the glyph caches
+// synchronize themselves.
 //
 // g is the glyph cache and is what a frame path passes. It may be nil, in which
 // case glyphs come straight from f unshared - a slower rendering that exists so a
@@ -48,10 +49,15 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 	b := bounds.Canon()
 	dx, dy := -b.X0, -b.Y0
 	clip := out.Bounds()
-	for _, c := range dl.Intersecting(b) {
-		if !c.Intersects(b) {
+	// One index pass with frozen bounds: Intersecting would scan the list for
+	// the span and then re-test every command inside it (a glyph walk per text
+	// command per tile). CachedIntersects answers the same predicate in O(1),
+	// so a single pass both selects and filters with no second walk.
+	for i := 0; i < dl.Len(); i++ {
+		if !dl.CachedIntersects(i, b) {
 			continue
 		}
+		c := dl.At(i)
 		switch c.Kind {
 		case paint.CmdFill:
 			if c.Radius.Empty() {

@@ -449,11 +449,18 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 	}
 	if k.Node != nil && k.Node.Text() {
 		text := k.Node.DataContent
+		// The whitespace-collapse path (normal, nowrap) fuses collapsing and
+		// splitting into one pass below, so the raw text is kept: collapsing
+		// first would allocate a normalized copy just to re-scan it. The
+		// pre-line path keeps its own collapse (it preserves newlines and
+		// trims edges, which the fusion does not do) and the pre paths split
+		// the raw text so exact space runes survive.
+		useMerged := false
 		if k.Style.WhiteSpace == style.WhiteSpacePreline {
 			// pre-line: preserve line breaks, collapse other whitespace
 			text = collapseWhitespacePreserveNewlines(text)
 		} else if shouldCollapseWhitespace(k) {
-			text = collapseWhitespace(text)
+			useMerged = true
 		}
 		if text == "" {
 			k.Node = nil
@@ -467,7 +474,12 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		nowrap := k.Style.WhiteSpace == style.WhiteSpaceNowrap ||
 			k.Style.WhiteSpace == style.WhiteSpacePre ||
 			k.Style.WhiteSpace == style.WhiteSpacePrewrite
-		words := splitWords(text)
+		var words []string
+		if useMerged {
+			words = splitCollapsedWords(text)
+		} else {
+			words = splitWords(text)
+		}
 		if !nowrap {
 			words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
 		}
@@ -818,10 +830,60 @@ func measureWord(word string, fontSize float32, m Metrics, slot frame.FontSlot, 
 		return float32(n)*fontSize*0.5 + extra
 	}
 	sum := int64(0)
-	for _, r := range []rune(word) {
+	for _, r := range word {
 		sum += int64(m.GlyphAdvanceFixed(int32(fontSize), r, slot))
 	}
 	return float32(sum)/64 + extra
+}
+
+// splitCollapsedWords fuses collapseWhitespace and splitWords for the
+// whitespace-collapse path (normal, nowrap): each maximal whitespace run
+// becomes one shared " " token and each maximal non-space run becomes a
+// substring of text, so neither a normalized copy nor a per-word Builder is
+// built. The output is identical to splitWords(collapseWhitespace(text)):
+// the collapse step normalizes every whitespace run to a single ASCII space
+// (so the shared " " token matches exactly, including "\n" and "\t" runs),
+// and non-space runs pass through byte-for-byte (so the substrings match).
+// Only the collapse path may use it: the pre modes need exact space runes
+// and pre-line preserves newlines and trims edges, neither of which this does.
+func splitCollapsedWords(text string) []string {
+	// Advisory capacity from a cheap byte pre-scan: ASCII whitespace covers
+	// every separator except exotic Unicode spaces, prose holds about one
+	// space token per word, and a miscount only costs a slice regrow, never
+	// correctness.
+	nword, inWord := 0, false
+	for i := 0; i < len(text); i++ {
+		if b := text[i]; b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == 0x0b || b == 0x0c {
+			inWord = false
+		} else if !inWord {
+			inWord = true
+			nword++
+		}
+	}
+	out := make([]string, 0, 2*nword+1)
+	start := -1 // byte offset of the open word run, -1 when none
+	spaced := false
+	for i, r := range text {
+		if unicode.IsSpace(r) {
+			if start >= 0 {
+				out = append(out, text[start:i])
+				start = -1
+			}
+			if !spaced {
+				out = append(out, " ")
+				spaced = true
+			}
+		} else {
+			if start < 0 {
+				start = i
+			}
+			spaced = false
+		}
+	}
+	if start >= 0 {
+		out = append(out, text[start:])
+	}
+	return out
 }
 
 func splitWords(text string) []string {

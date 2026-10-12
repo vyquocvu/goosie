@@ -176,8 +176,18 @@ func (b *Bitmap) FillRect(r Rect, c Color, writes *int64) {
 		return
 	}
 	for y := int(cl.Y0); y < int(cl.Y1); y++ {
+		rowBase := y*b.Stride + int(cl.X0)*4
+		row := b.RGBA[rowBase : rowBase+int(cl.X1-cl.X0)*4]
+		o := 0
 		for x := int(cl.X0); x < int(cl.X1); x++ {
-			b.Set(x, y, BlendOver(b.At(x, y), c))
+			p := row[o : o+4 : o+4]
+			dst := Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
+			out := BlendOver(dst, c)
+			p[0] = byte(out >> 24)
+			p[1] = byte(out >> 16)
+			p[2] = byte(out >> 8)
+			p[3] = byte(out)
+			o += 4
 		}
 	}
 }

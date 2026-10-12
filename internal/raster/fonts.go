@@ -73,10 +73,19 @@ type faceKey struct {
 // image.Alpha, so the lock covers a cache miss and never a warm tile raster -
 // which is the difference between parallel rasterization and a mutex in the
 // hot path.
+//
+// The lock is a RWMutex so warm lookups run concurrently: a hit in a face's
+// glyph or advance memo only takes the read lock, while driving a face (a miss)
+// takes the write lock. The per-face memos are only ever touched under this
+// lock, so no per-face lock is needed.
 type Fonts struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	sources map[frame.FontSlot]*opentype.Font
 	entries map[faceKey]*faceEntry
+	// fbCache memoizes fallbackLocked's chain per requested (slot, size). It is
+	// only read and written under the write lock, and it is dropped whenever a
+	// new face entry appears, so a cached chain always equals a fresh one.
+	fbCache map[faceKey][]*faceEntry
 	custom  []*opentype.Font
 }
 
@@ -84,6 +93,13 @@ type faceEntry struct {
 	face    font.Face
 	glyphs  map[rune]Glyph
 	missing map[rune]struct{}
+	// adv memoizes GlyphAdvanceFixed's 26.6 result per rune, including the
+	// fallback-resolved value; advMiss memoizes the "no face has it" answer.
+	// Both are populated only by the GlyphAdvanceFixed path from the exact
+	// values it used to compute, so a cached hit is bit-identical to a fresh
+	// call. The Glyph path keeps its own glyphs/missing memo untouched.
+	adv     map[rune]int32
+	advMiss map[rune]struct{}
 }
 
 // systemFontDir holds the families macOS ships for documents.
@@ -198,6 +214,7 @@ func NewEmbeddedFonts() (*Fonts, error) {
 			{Bold: true}: bold,
 		},
 		entries: map[faceKey]*faceEntry{},
+		fbCache: map[faceKey][]*faceEntry{},
 	}, nil
 }
 
@@ -246,6 +263,40 @@ func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 	if size <= 0 {
 		return nil
 	}
+	slot, src := f.resolveLocked(slot)
+	if src == nil {
+		return nil
+	}
+	k := faceKey{slot: slot, size: size}
+	if e, ok := f.entries[k]; ok {
+		return e
+	}
+	face, err := opentype.NewFace(src, &opentype.FaceOptions{
+		Size: float64(size),
+		DPI:  faceDPI,
+		// No hinting on purpose. Hinting adjusts stem positions to the pixel
+		// grid, and the grid differs between a Retina display and a 1x monitor,
+		// so a hinted rendering is not a function of size alone. Determinism
+		// across machines is worth more here than a slightly crisper stem.
+		Hinting: font.HintingNone,
+	})
+	if err != nil {
+		return nil
+	}
+	e := &faceEntry{face: face, glyphs: map[rune]Glyph{}, missing: map[rune]struct{}{}, adv: map[rune]int32{}, advMiss: map[rune]struct{}{}}
+	f.entries[k] = e
+	// A new face can join a previously computed fallback chain, so any chain
+	// cached before it existed is stale. Face creation happens a handful of
+	// times per document (one per slot/size), so dropping the whole memo is
+	// cheaper than versioning it.
+	f.fbCache = map[faceKey][]*faceEntry{}
+	return e
+}
+
+// resolveLocked maps a requested slot onto the slot and parsed font that serves
+// it, applying the same degradation faceLocked does. It only reads shared maps,
+// so it is safe under either the read or the write lock. Callers hold f.mu.
+func (f *Fonts) resolveLocked(slot frame.FontSlot) (frame.FontSlot, *opentype.Font) {
 	var src *opentype.Font
 	if slot.CustomIdx != 0 && int(slot.CustomIdx-1) < len(f.custom) {
 		src = f.custom[slot.CustomIdx-1]
@@ -272,28 +323,21 @@ func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 			src = f.sources[slot]
 		}
 	}
+	return slot, src
+}
+
+// lookupLocked returns the cached face entry without creating one, for read-lock
+// fast paths. A nil result means the caller must take the write lock and go
+// through faceLocked. Callers hold f.mu (read or write).
+func (f *Fonts) lookupLocked(size int32, slot frame.FontSlot) *faceEntry {
+	if size <= 0 {
+		return nil
+	}
+	slot, src := f.resolveLocked(slot)
 	if src == nil {
 		return nil
 	}
-	k := faceKey{slot: slot, size: size}
-	if e, ok := f.entries[k]; ok {
-		return e
-	}
-	face, err := opentype.NewFace(src, &opentype.FaceOptions{
-		Size: float64(size),
-		DPI:  faceDPI,
-		// No hinting on purpose. Hinting adjusts stem positions to the pixel
-		// grid, and the grid differs between a Retina display and a 1x monitor,
-		// so a hinted rendering is not a function of size alone. Determinism
-		// across machines is worth more here than a slightly crisper stem.
-		Hinting: font.HintingNone,
-	})
-	if err != nil {
-		return nil
-	}
-	e := &faceEntry{face: face, glyphs: map[rune]Glyph{}, missing: map[rune]struct{}{}}
-	f.entries[k] = e
-	return e
+	return f.entries[faceKey{slot: slot, size: size}]
 }
 
 // fallbackLocked returns the faces to try for a rune the requested face does not
@@ -301,9 +345,20 @@ func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 // family the host served. The order is sorted rather than map-random because a
 // substitute glyph has to be the same glyph on every run of one document.
 //
-// Callers hold f.mu. faceLocked degrades a slot it cannot serve, so the same
+// Callers hold f.mu for writing: resolving the chain can create faces.
+// faceLocked degrades a slot it cannot serve, so the same
 // face can come back for several slots and is offered once.
+//
+// The chain for a requested (size, slot) never changes without a new face entry
+// appearing - the sources map is fixed after NewFonts - and faceLocked drops the
+// memo whenever that happens, so a cached chain is the chain a fresh computation
+// would return, including its order. The returned slice is shared and must only
+// be iterated, never mutated.
 func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
+	k := faceKey{slot: slot, size: size}
+	if fb, ok := f.fbCache[k]; ok {
+		return fb
+	}
 	var out []*faceEntry
 	if fb := f.faceLocked(size, frame.FontSlot{Bold: slot.Bold}); fb != nil {
 		out = append(out, fb)
@@ -344,6 +399,7 @@ func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
 			out = append(out, fb)
 		}
 	}
+	f.fbCache[k] = out
 	return out
 }
 
@@ -352,6 +408,19 @@ func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
 // no face has such a glyph, which the text path treats as whitespace rather
 // than an error.
 func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
+	// Fast path: a cached hit (or a memoized miss) needs no face and no writer.
+	f.mu.RLock()
+	if e := f.lookupLocked(size, slot); e != nil {
+		if g, ok := e.glyphs[r]; ok {
+			f.mu.RUnlock()
+			return g
+		}
+		if _, bad := e.missing[r]; bad {
+			f.mu.RUnlock()
+			return Glyph{}
+		}
+	}
+	f.mu.RUnlock()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e := f.faceLocked(size, slot)
@@ -400,10 +469,30 @@ func (f *Fonts) GlyphAdvance(size int32, r rune, slot frame.FontSlot) int32 {
 // place or measure more than one glyph must accumulate these, not the rounded
 // GlyphAdvance values.
 func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32 {
+	// Fast path: a memoized advance (or miss) is the value a fresh call would
+	// compute, with no face involved, so readers share the lock.
+	f.mu.RLock()
+	if e := f.lookupLocked(size, slot); e != nil {
+		if adv, ok := e.adv[r]; ok {
+			f.mu.RUnlock()
+			return adv
+		}
+		if _, bad := e.advMiss[r]; bad {
+			f.mu.RUnlock()
+			return 0
+		}
+	}
+	f.mu.RUnlock()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e := f.faceLocked(size, slot)
 	if e == nil {
+		return 0
+	}
+	if adv, ok := e.adv[r]; ok {
+		return adv
+	}
+	if _, bad := e.advMiss[r]; bad {
 		return 0
 	}
 	adv, ok := e.face.GlyphAdvance(r)
@@ -416,10 +505,13 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 			}
 		}
 		if !ok {
+			e.advMiss[r] = struct{}{}
 			return 0
 		}
 	}
-	return int32(adv)
+	v := int32(adv)
+	e.adv[r] = v
+	return v
 }
 
 // LineMetrics reports a face's ascent, descent and normal line height in device

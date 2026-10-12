@@ -1146,7 +1146,15 @@ func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
 // the builder multiplies every CSS-pixel coordinate by it to produce device
 // pixels.
 func (s *Session) Paint(scale float32) *paint.List {
-	list := &paint.List{}
+	// Size the slab from the box count so a first paint does not grow it
+	// repeatedly: each growth copies every DisplayCmd published so far, and a
+	// DisplayCmd is a wide value. A box emits a small handful of commands, so
+	// 2x the box count covers the common case without over-reserving.
+	n := 0
+	if s.Arena != nil {
+		n = 2 * len(s.Arena.Objects)
+	}
+	list := paint.NewList(n)
 	b := paint.NewBuilder(list, s.Arena, scale, s.metrics)
 	if s.focus != nil {
 		if obj := s.objectFor(s.focus); obj != nil {

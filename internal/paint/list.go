@@ -97,6 +97,18 @@ func (l *List) SortStable() {
 // the published list safe for concurrent reads.
 func (l *List) Build(version uint64) *LayerDL {
 	dl := &LayerDL{cmds: l.cmds, version: version, bounds: l.bounds}
+	// Freeze each command's bounds once: Intersecting runs per tile per frame,
+	// and a text command's bounds walk its glyphs, so recomputing them there
+	// costs O(tiles x commands x glyphs) per frame. The sidecar pays the same
+	// walk exactly once per content version; values are identical to Bounds().
+	if n := len(l.cmds); n > 0 {
+		cb := make([]cmdBounds, n)
+		for i := range l.cmds {
+			r, ok := l.cmds[i].Bounds()
+			cb[i] = cmdBounds{r: r, ok: ok}
+		}
+		dl.cb = cb
+	}
 	l.cmds = nil
 	l.bounds = frame.Rect{}
 	return dl
@@ -112,6 +124,16 @@ type LayerDL struct {
 	version   uint64
 	bounds    frame.Rect
 	published bool
+	// cb caches Bounds() per command, filled by Build. Intersecting reads it
+	// instead of re-walking glyphs per tile; nil (a LayerDL built outside
+	// List.Build, only in tests) falls back to live Bounds calls.
+	cb []cmdBounds
+}
+
+// cmdBounds is one frozen command bounds entry.
+type cmdBounds struct {
+	r  frame.Rect
+	ok bool
 }
 
 // Publish freezes the list and returns it for chaining. Calling it twice panics
@@ -160,16 +182,39 @@ func (d *LayerDL) All() []DisplayCmd { return d.cmds }
 // so the only cost of the over-approximation is a bounds test per command in the
 // span. Returns nil when nothing intersects, which is the common case for tiles
 // over whitespace and is why the empty result is worth distinguishing.
+// CachedIntersects reports whether command i touches r using the frozen bounds
+// sidecar instead of re-walking glyphs. It answers exactly what At(i).Intersects
+// would, so the rasterizer's per-tile filter stays identical while dropping
+// from O(glyphs) to O(1) per command.
+func (d *LayerDL) CachedIntersects(i int, r frame.Rect) bool {
+	if len(d.cb) == len(d.cmds) && i >= 0 && i < len(d.cmds) {
+		return d.cb[i].ok && d.cb[i].r.Intersects(r)
+	}
+	return d.cmds[i].Intersects(r)
+}
+
 func (d *LayerDL) Intersecting(r frame.Rect) []DisplayCmd {
 	lo, hi := -1, -1
-	for i := range d.cmds {
-		if !d.cmds[i].Intersects(r) {
-			continue
+	if len(d.cb) == len(d.cmds) {
+		for i := range d.cmds {
+			if !d.cb[i].ok || !d.cb[i].r.Intersects(r) {
+				continue
+			}
+			if lo < 0 {
+				lo = i
+			}
+			hi = i
 		}
-		if lo < 0 {
-			lo = i
+	} else {
+		for i := range d.cmds {
+			if !d.cmds[i].Intersects(r) {
+				continue
+			}
+			if lo < 0 {
+				lo = i
+			}
+			hi = i
 		}
-		hi = i
 	}
 	if lo < 0 {
 		return nil

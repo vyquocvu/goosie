@@ -70,8 +70,25 @@ func NewGlyphAtlas(budget int64, f *Fonts) *GlyphAtlas {
 
 // Get returns the rendering of r in a slot at a device-pixel size, rasterizing
 // it on a miss. The zero Glyph means the font has no such glyph.
+//
+// A miss rasterizes outside the atlas lock: holding it across Fonts.Glyph would
+// serialize every worker on one mutex (and stack the atlas lock under the Fonts
+// lock on every tile). Two workers can rasterize the same missing glyph at once;
+// the second insert then finds the first's entry and counts a hit, exactly as if
+// it had waited. Single-threaded behavior - one miss counted, one entry stored -
+// is unchanged.
 func (a *GlyphAtlas) Get(r rune, size int32, slot frame.FontSlot) Glyph {
 	k := glyphKey{r: r, size: size, slot: slot}
+	a.mu.Lock()
+	if el, ok := a.index[k]; ok {
+		a.order.MoveToFront(el)
+		a.stats.Hits++
+		g := el.Value.(*glyphVal).g
+		a.mu.Unlock()
+		return g
+	}
+	a.mu.Unlock()
+	g := a.fonts.Glyph(size, r, slot)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if el, ok := a.index[k]; ok {
@@ -80,7 +97,6 @@ func (a *GlyphAtlas) Get(r rune, size int32, slot frame.FontSlot) Glyph {
 		return el.Value.(*glyphVal).g
 	}
 	a.stats.Misses++
-	g := a.fonts.Glyph(size, r, slot)
 	if !g.Ok || g.Mask == nil {
 		// Uncached: a miss with nothing to store. Repeated lookups for the same
 		// absent glyph stay cheap because Fonts memoizes its own answer.

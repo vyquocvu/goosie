@@ -387,8 +387,12 @@ func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats
 }
 
 func safeGeometry(values ...float32) bool {
+	// NaN-idiom instead of finite(float64(v)): v != v is true only for NaN,
+	// and infinities fail the range test, so one expression covers finiteness
+	// and range with no conversion or call per value. This runs per style per
+	// object on every validation pass, so the constant matters.
 	for _, v := range values {
-		if !finite(float64(v)) || v < -MaxGeometry || v > MaxGeometry {
+		if v != v || v > MaxGeometry || v < -MaxGeometry {
 			return false
 		}
 	}
@@ -399,7 +403,7 @@ func validateStyle(s *style.ComputedStyle) error {
 	if s == nil {
 		return nil
 	}
-	if !finite(float64(s.FontSize)) || s.FontSize < 0 || s.FontSize > MaxFontSize {
+	if s.FontSize != s.FontSize || s.FontSize < 0 || s.FontSize > MaxFontSize {
 		return fmt.Errorf("font size must be finite and in [0, %d] CSS pixels", MaxFontSize)
 	}
 	if !safeGeometry(s.Width, s.Height, s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight,
@@ -440,14 +444,31 @@ func (s *Session) validateLayoutInput() error {
 		}
 	}
 	objects, runes := 1, 0
+	// hidden memoizes "inside display:none" per node. walkDocument visits in
+	// document order (parents before children), so the parent's entry is
+	// always computed before the child reads it: each text node resolves in
+	// O(1) amortized instead of walking to the root, turning O(N*D) into O(N).
+	hidden := make(map[dom.NodeID]bool)
+	var isHidden func(n *dom.Node) bool
+	isHidden = func(n *dom.Node) bool {
+		if h, ok := hidden[n.ID]; ok {
+			return h
+		}
+		h := false
+		if st := s.Styles[n.ID]; st != nil && st.Display == style.DisplayNone {
+			h = true
+		} else if n.Parent != nil {
+			h = isHidden(n.Parent)
+		}
+		hidden[n.ID] = h
+		return h
+	}
 	_, err := walkDocument(s.Doc, func(n *dom.Node) error {
 		objects++
 		if n.Type == dom.NodeText {
 			// Hidden subtrees never enter inline layout.
-			for p := n; p != nil; p = p.Parent {
-				if st := s.Styles[p.ID]; st != nil && st.Display == style.DisplayNone {
-					return nil
-				}
+			if isHidden(n) {
+				return nil
 			}
 			inWord := false
 			for _, r := range n.DataContent {

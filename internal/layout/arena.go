@@ -270,6 +270,27 @@ func (a *Arena) Link(parent, kid ObjectID) {
 // children of their originating element.
 func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle) *Arena {
 	a := NewArena()
+	// Pre-size the slab and the node index from a cheap pointer walk: without
+	// it every Alloc past the initial 64 pays doubling copies of all previous
+	// objects, and Object is a wide value. Element and text nodes each take at
+	// most one object; pseudo-elements add at most two per originating element.
+	if doc != nil {
+		if n := countLayoutNodes(&doc.Node); n > 0 {
+			need := n + 2*len(pseudoStyles) + 2
+			if need > cap(a.Objects) {
+				objs := make([]Object, len(a.Objects), need)
+				copy(objs, a.Objects)
+				a.Objects = objs
+			}
+			if need > 0 {
+				byNode := make(map[dom.NodeID]ObjectID, need)
+				for k, v := range a.byNode {
+					byNode[k] = v
+				}
+				a.byNode = byNode
+			}
+		}
+	}
 	// Use the pre-allocated root at index 1 for the document node.
 	a.Objects[rootID].Node = &doc.Node
 	if s, ok := styles[doc.Node.ID]; ok {
@@ -288,6 +309,27 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 	a.Objects[rootID].X = 0
 	a.Objects[rootID].Y = 0
 	return a
+}
+
+// countLayoutNodes counts the nodes buildSubtree turns into objects (elements
+// and text) with an iterative walk: no allocation, no recursion, safe on deep
+// trees. It sizes the arena slab, never a limit check.
+func countLayoutNodes(root *dom.Node) int {
+	n := 0
+	stack := []*dom.Node{root}
+	for len(stack) > 0 {
+		top := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for c := top.FirstChild; c != nil; c = c.NextSibling {
+			if c.Element() || c.Type == dom.NodeText {
+				n++
+			}
+			if c.FirstChild != nil {
+				stack = append(stack, c)
+			}
+		}
+	}
+	return n
 }
 
 func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
