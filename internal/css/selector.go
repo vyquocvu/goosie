@@ -7,6 +7,43 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
+// formatSel returns a compact string representation of sel for caching purposes.
+func formatSel(sel Selector) string {
+	var b strings.Builder
+	for i, part := range sel.Parts {
+		if i > 0 && part.Combinator != 0 {
+			b.WriteByte(part.Combinator)
+			b.WriteByte(' ')
+		}
+		for _, cond := range part.Conditions {
+			switch cond.Type {
+			case CondType:
+				b.WriteString(cond.Value)
+			case CondID:
+				b.WriteByte('#')
+				b.WriteString(cond.Value)
+			case CondClass:
+				b.WriteByte('.')
+				b.WriteString(cond.Value)
+			case CondPseudoClass:
+				b.WriteByte(':')
+				b.WriteString(cond.Pseudo)
+				if cond.Pseudo == "has" && cond.compiled != nil && len(cond.compiled.has) > 0 {
+					b.WriteByte('(')
+					for h, arg := range cond.compiled.has {
+						if h > 0 {
+							b.WriteString(", ")
+						}
+						b.WriteString(formatSel(arg.sel))
+					}
+					b.WriteByte(')')
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
 // Selector is a compiled CSS selector.
 type Selector struct {
 	Parts []SelectorPart
@@ -389,10 +426,23 @@ func parseCondition(s string, i int) (Condition, int) {
 
 // Matches reports whether the selector matches the given node.
 func (s Selector) Matches(n *dom.Node) bool {
+	return s.MatchesIndexed(n, nil)
+}
+
+// MatchesIndexed is Matches with a per-pass sibling cache. A style
+// resolution pass tests thousands of elements against selectors containing
+// :nth-child/:nth-of-type/:has, and the naive evaluation counts element
+// siblings per tested node: O(siblings) each, O(siblings²) per parent. A
+// 4000-row list with `li:nth-child(2n)` spends ~50ms in counting alone.
+// The index builds each touched parent's element order once per pass, so
+// counting drops to O(1) amortized. DOM is frozen during a pass, hence no
+// invalidation. A nil index keeps the old live-walk behavior for callers
+// outside a resolution pass.
+func (s Selector) MatchesIndexed(n *dom.Node, ix *SiblingIndex) bool {
 	if len(s.Parts) == 0 {
 		return false
 	}
-	return matchParts(s.Parts, len(s.Parts)-1, n)
+	return matchParts(s.Parts, len(s.Parts)-1, n, ix)
 }
 
 // MatchesPseudoElement reports whether the selector matches the given
@@ -400,6 +450,11 @@ func (s Selector) Matches(n *dom.Node) bool {
 // must have a CondPseudoElement condition for the given name; the rest of the
 // selector is matched against the node normally.
 func (s Selector) MatchesPseudoElement(n *dom.Node, pseudo string) bool {
+	return s.MatchesPseudoElementIndexed(n, pseudo, nil)
+}
+
+// MatchesPseudoElementIndexed is MatchesPseudoElement with a sibling cache.
+func (s Selector) MatchesPseudoElementIndexed(n *dom.Node, pseudo string, ix *SiblingIndex) bool {
 	if len(s.Parts) == 0 {
 		return false
 	}
@@ -414,18 +469,18 @@ func (s Selector) MatchesPseudoElement(n *dom.Node, pseudo string) bool {
 	if !hasPseudo {
 		return false
 	}
-	return matchPartsPseudo(s.Parts, len(s.Parts)-1, n, pseudo)
+	return matchPartsPseudo(s.Parts, len(s.Parts)-1, n, pseudo, ix)
 }
 
 // matchPartsPseudo is like matchParts but skips CondPseudoElement conditions
 // for the given pseudo name in the key compound.
-func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string) bool {
+func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string, ix *SiblingIndex) bool {
 	if idx < 0 || n == nil || !n.Element() {
 		return false
 	}
 
 	part := parts[idx]
-	if !matchConditionsPseudo(part.Conditions, n, pseudo, idx == len(parts)-1) {
+	if !matchConditionsPseudo(part.Conditions, n, pseudo, idx == len(parts)-1, ix) {
 		return false
 	}
 
@@ -436,19 +491,19 @@ func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string)
 	switch part.Combinator {
 	case ' ':
 		for p := n.Parent; p != nil; p = p.Parent {
-			if matchPartsPseudo(parts, idx-1, p, pseudo) {
+			if matchPartsPseudo(parts, idx-1, p, pseudo, ix) {
 				return true
 			}
 		}
 		return false
 	case '>':
-		return matchPartsPseudo(parts, idx-1, n.Parent, pseudo)
+		return matchPartsPseudo(parts, idx-1, n.Parent, pseudo, ix)
 	case '+':
 		sib := prevElement(n)
-		return sib != nil && matchPartsPseudo(parts, idx-1, sib, pseudo)
+		return sib != nil && matchPartsPseudo(parts, idx-1, sib, pseudo, ix)
 	case '~':
 		for sib := prevElement(n); sib != nil; sib = prevElement(sib) {
-			if matchPartsPseudo(parts, idx-1, sib, pseudo) {
+			if matchPartsPseudo(parts, idx-1, sib, pseudo, ix) {
 				return true
 			}
 		}
@@ -460,25 +515,25 @@ func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string)
 
 // matchConditionsPseudo is like matchConditions but skips CondPseudoElement
 // conditions for the given pseudo name when isKey is true.
-func matchConditionsPseudo(conds []Condition, n *dom.Node, pseudo string, isKey bool) bool {
+func matchConditionsPseudo(conds []Condition, n *dom.Node, pseudo string, isKey bool, ix *SiblingIndex) bool {
 	for _, c := range conds {
 		if isKey && c.Type == CondPseudoElement && c.Value == pseudo {
 			continue
 		}
-		if !matchCondition(c, n) {
+		if !matchCondition(c, n, ix) {
 			return false
 		}
 	}
 	return true
 }
 
-func matchParts(parts []SelectorPart, idx int, n *dom.Node) bool {
+func matchParts(parts []SelectorPart, idx int, n *dom.Node, ix *SiblingIndex) bool {
 	if idx < 0 || n == nil || !n.Element() {
 		return false
 	}
 
 	part := parts[idx]
-	if !matchConditions(part.Conditions, n) {
+	if !matchConditions(part.Conditions, n, ix) {
 		return false
 	}
 
@@ -489,19 +544,19 @@ func matchParts(parts []SelectorPart, idx int, n *dom.Node) bool {
 	switch part.Combinator {
 	case ' ':
 		for p := n.Parent; p != nil; p = p.Parent {
-			if matchParts(parts, idx-1, p) {
+			if matchParts(parts, idx-1, p, ix) {
 				return true
 			}
 		}
 		return false
 	case '>':
-		return matchParts(parts, idx-1, n.Parent)
+		return matchParts(parts, idx-1, n.Parent, ix)
 	case '+':
 		sib := prevElement(n)
-		return sib != nil && matchParts(parts, idx-1, sib)
+		return sib != nil && matchParts(parts, idx-1, sib, ix)
 	case '~':
 		for sib := prevElement(n); sib != nil; sib = prevElement(sib) {
-			if matchParts(parts, idx-1, sib) {
+			if matchParts(parts, idx-1, sib, ix) {
 				return true
 			}
 		}
@@ -520,16 +575,16 @@ func prevElement(n *dom.Node) *dom.Node {
 	return nil
 }
 
-func matchConditions(conds []Condition, n *dom.Node) bool {
+func matchConditions(conds []Condition, n *dom.Node, ix *SiblingIndex) bool {
 	for _, c := range conds {
-		if !matchCondition(c, n) {
+		if !matchCondition(c, n, ix) {
 			return false
 		}
 	}
 	return true
 }
 
-func matchCondition(c Condition, n *dom.Node) bool {
+func matchCondition(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	switch c.Type {
 	case CondUniversal:
 		return true
@@ -547,7 +602,7 @@ func matchCondition(c Condition, n *dom.Node) bool {
 	case CondAttr:
 		return matchAttr(c, n)
 	case CondPseudoClass:
-		return matchPseudoClass(c, n)
+		return matchPseudoClass(c, n, ix)
 	case CondPseudoElement:
 		return false
 	}
@@ -581,7 +636,7 @@ func matchAttr(c Condition, n *dom.Node) bool {
 	return false
 }
 
-func matchPseudoClass(c Condition, n *dom.Node) bool {
+func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	switch c.Value {
 	case "first-child":
 		return isFirstElementChild(n)
@@ -598,10 +653,10 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 			return true
 		}
 		if c.compiled != nil && len(c.compiled.sels) == 1 {
-			return !c.compiled.sels[0].Matches(n)
+			return !c.compiled.sels[0].MatchesIndexed(n, ix)
 		}
 		sel := ParseSelector(c.Pseudo)
-		return !sel.Matches(n)
+		return !sel.MatchesIndexed(n, ix)
 	case "is", "where":
 		// :is() and :where() take a comma-separated selector list and match if
 		// any selector in the list matches. The difference is specificity:
@@ -612,7 +667,7 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		}
 		if c.compiled != nil {
 			for _, sel := range c.compiled.sels {
-				if sel.Matches(n) {
+				if sel.MatchesIndexed(n, ix) {
 					return true
 				}
 			}
@@ -621,7 +676,7 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 		selectors := splitSelectorList(c.Pseudo)
 		for _, selStr := range selectors {
 			sel := ParseSelector(selStr)
-			if sel.Matches(n) {
+			if sel.MatchesIndexed(n, ix) {
 				return true
 			}
 		}
@@ -658,23 +713,23 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 			return false
 		}
 		if c.compiled != nil {
-			return matchHasCompiled(c.compiled.has, n)
+			return matchHasCompiled(c.compiled.has, n, ix)
 		}
-		return matchHas(c.Pseudo, n)
+		return matchHas(c.Pseudo, n, ix)
 	case "nth-child":
-		return matchNthC(c, n, false, false)
+		return matchNthC(c, n, false, false, ix)
 	case "nth-last-child":
-		return matchNthC(c, n, false, true)
+		return matchNthC(c, n, false, true, ix)
 	case "nth-of-type":
-		return matchNthC(c, n, true, false)
+		return matchNthC(c, n, true, false, ix)
 	case "nth-last-of-type":
-		return matchNthC(c, n, true, true)
+		return matchNthC(c, n, true, true, ix)
 	case "first-of-type":
-		return matchNth("1", n, true, false)
+		return matchNth("1", n, true, false, ix)
 	case "last-of-type":
-		return matchNth("1", n, true, true)
+		return matchNth("1", n, true, true, ix)
 	case "only-of-type":
-		return matchNth("1", n, true, false) && matchNth("1", n, true, true)
+		return matchNth("1", n, true, false, ix) && matchNth("1", n, true, true, ix)
 	}
 	return false
 }
@@ -688,7 +743,7 @@ func matchPseudoClass(c Condition, n *dom.Node) bool {
 //	:has(~ .sibling) - general next sibling
 //
 // Returns true if at least one relative element matches any selector in the list.
-func matchHas(arg string, n *dom.Node) bool {
+func matchHas(arg string, n *dom.Node, ix *SiblingIndex) bool {
 	selectors := splitSelectorList(arg)
 	for _, selStr := range selectors {
 		selStr = strings.TrimSpace(selStr)
@@ -719,7 +774,7 @@ func matchHas(arg string, n *dom.Node) bool {
 		case '>':
 			// Direct child
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				if c.Type == dom.NodeElement && sel.Matches(c) {
+				if c.Type == dom.NodeElement && sel.MatchesIndexed(c, ix) {
 					return true
 				}
 			}
@@ -727,7 +782,7 @@ func matchHas(arg string, n *dom.Node) bool {
 			// Adjacent next sibling
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
 				if sib.Type == dom.NodeElement {
-					if sel.Matches(sib) {
+					if sel.MatchesIndexed(sib, ix) {
 						return true
 					}
 					break // only check the first element sibling
@@ -736,13 +791,13 @@ func matchHas(arg string, n *dom.Node) bool {
 		case '~':
 			// General next siblings
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
-				if sib.Type == dom.NodeElement && sel.Matches(sib) {
+				if sib.Type == dom.NodeElement && sel.MatchesIndexed(sib, ix) {
 					return true
 				}
 			}
 		default:
 			// Descendant (any depth)
-			if hasDescendantMatching(n, sel) {
+			if hasDescendantMatching(n, sel, ix) {
 				return true
 			}
 		}
@@ -752,13 +807,13 @@ func matchHas(arg string, n *dom.Node) bool {
 
 // matchHasCompiled evaluates :has() against pre-parsed alternatives: same
 // relationships as matchHas, without re-splitting or re-parsing per element.
-func matchHasCompiled(args []hasArg, n *dom.Node) bool {
+func matchHasCompiled(args []hasArg, n *dom.Node, ix *SiblingIndex) bool {
 	for _, a := range args {
 		switch a.combinator {
 		case '>':
 			// Direct child
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				if c.Type == dom.NodeElement && a.sel.Matches(c) {
+				if c.Type == dom.NodeElement && a.sel.MatchesIndexed(c, ix) {
 					return true
 				}
 			}
@@ -766,7 +821,7 @@ func matchHasCompiled(args []hasArg, n *dom.Node) bool {
 			// Adjacent next sibling
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
 				if sib.Type == dom.NodeElement {
-					if a.sel.Matches(sib) {
+					if a.sel.MatchesIndexed(sib, ix) {
 						return true
 					}
 					break // only check the first element sibling
@@ -775,13 +830,13 @@ func matchHasCompiled(args []hasArg, n *dom.Node) bool {
 		case '~':
 			// General next siblings
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
-				if sib.Type == dom.NodeElement && a.sel.Matches(sib) {
+				if sib.Type == dom.NodeElement && a.sel.MatchesIndexed(sib, ix) {
 					return true
 				}
 			}
 		default:
 			// Descendant (any depth)
-			if hasDescendantMatching(n, a.sel) {
+			if hasDescendantMatching(n, a.sel, ix) {
 				return true
 			}
 		}
@@ -790,41 +845,62 @@ func matchHasCompiled(args []hasArg, n *dom.Node) bool {
 }
 
 // hasDescendantMatching checks if any descendant of n matches the selector.
-func hasDescendantMatching(n *dom.Node, sel Selector) bool {
+func hasDescendantMatching(n *dom.Node, sel Selector, ix *SiblingIndex) bool {
+	// Use cached result if available (from :has() matching on same parent+sel)
+	if ix != nil {
+		selKey := formatSel(sel)
+		key := descCacheKey{parent: n, sel: selKey}
+		if cached := ix.hasDesc[key]; cached {
+			return true
+		}
+	}
+
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == dom.NodeElement {
-			if sel.Matches(c) {
+			if sel.MatchesIndexed(c, ix) {
+				if ix != nil {
+					ix.hasDesc[descCacheKey{parent: n, sel: formatSel(sel)}] = true
+				}
 				return true
 			}
-			if hasDescendantMatching(c, sel) {
+			if hasDescendantMatching(c, sel, ix) {
+				// Cache intermediate results when found in subtree
+				if ix != nil {
+					ix.hasDesc[descCacheKey{parent: n, sel: formatSel(sel)}] = true
+				}
 				return true
 			}
 		}
+	}
+
+	// Cache negative result too to avoid re-computation
+	if ix != nil {
+		ix.hasDesc[descCacheKey{parent: n, sel: formatSel(sel)}] = false
 	}
 	return false
 }
 
 // matchNth resolves an An+B expression against the node's position among its
 // element siblings.
-func matchNth(arg string, n *dom.Node, ofType, fromEnd bool) bool {
+func matchNth(arg string, n *dom.Node, ofType, fromEnd bool, ix *SiblingIndex) bool {
 	expr, ofStrs := splitNthOf(arg)
 	var of []Selector
 	for _, selStr := range ofStrs {
 		of = append(of, ParseSelector(selStr))
 	}
-	return matchNthParsed(expr, of, n, ofType, fromEnd)
+	return matchNthParsed(expr, of, n, ofType, fromEnd, ix, nil)
 }
 
 // matchNthC is matchNth for a parsed Condition: precompiled `of` filters and
 // the An+B microsyntax come from the sidecar, so matching parses nothing.
-func matchNthC(c Condition, n *dom.Node, ofType, fromEnd bool) bool {
+func matchNthC(c Condition, n *dom.Node, ofType, fromEnd bool, ix *SiblingIndex) bool {
 	if c.compiled != nil && c.compiled.hasNth {
-		return matchNthParsed(c.compiled.nthExpr, c.compiled.of, n, ofType, fromEnd)
+		return matchNthParsed(c.compiled.nthExpr, c.compiled.of, n, ofType, fromEnd, ix, any(c.compiled))
 	}
-	return matchNth(c.Pseudo, n, ofType, fromEnd)
+	return matchNth(c.Pseudo, n, ofType, fromEnd, ix)
 }
 
-func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd bool) bool {
+func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd bool, ix *SiblingIndex, fkey any) bool {
 	a, b, ok := parseNth(expr)
 	if !ok {
 		return false
@@ -835,7 +911,7 @@ func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd boo
 	if len(of) > 0 {
 		matched := false
 		for _, sel := range of {
-			if sel.Matches(n) {
+			if sel.MatchesIndexed(n, ix) {
 				matched = true
 				break
 			}
@@ -844,7 +920,7 @@ func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd boo
 			return false
 		}
 	}
-	i, total := nthIndexFilteredSel(n, ofType, of)
+	i, total := nthIndexFilteredSel(n, ofType, of, ix, fkey)
 	if i == 0 {
 		return false
 	}
@@ -941,6 +1017,111 @@ func splitNthOf(arg string) (expr string, of []string) {
 	return arg, nil
 }
 
+// SiblingIndex caches per-parent element-child order for one style resolution
+// pass, turning :nth-child/:nth-of-type counting from O(siblings) per tested
+// node into O(1) amortized. The DOM is frozen while a pass runs, so entries
+// need no invalidation; the whole index is dropped with the pass.
+type SiblingIndex struct {
+	lists   map[*dom.Node]*siblingList
+	filt    map[filterKey]*filteredSibs
+	hasDesc map[descCacheKey]bool // caches has() descendant matches by (parent, selString)
+}
+
+// siblingList is one parent's element children in document order plus the
+// ranks derived from it in the same single walk.
+type siblingList struct {
+	elems    []*dom.Node
+	pos      map[*dom.Node]int
+	tagRank  map[*dom.Node]int
+	tagTotal map[string]int
+}
+
+// descCacheKey identifies one :has() descendant check on a parent.
+// Reserved for future caching; currently unused but kept to document the
+// intended key shape.
+type descCacheKey struct {
+	parent *dom.Node
+	sel    string
+}
+
+// filterKey identifies one `:nth-child(An+B of S)` filter set on one parent.
+// cond is the Condition's *pseudoCompiled: shared by every copy of the
+// Condition, distinct per parsed rule, hence a correct cache identity. A nil
+// cond (hand-built Condition) disables caching for that call.
+type filterKey struct {
+	parent *dom.Node
+	cond   any
+}
+
+// filteredSibs is the per-child rank among filter-matching siblings.
+type filteredSibs struct {
+	rank  []int
+	total int
+}
+
+// NewSiblingIndex returns an empty per-pass cache.
+func NewSiblingIndex() *SiblingIndex {
+	return &SiblingIndex{
+		lists:   make(map[*dom.Node]*siblingList),
+		filt:    make(map[filterKey]*filteredSibs),
+		hasDesc: make(map[descCacheKey]bool),
+	}
+}
+
+// listOf returns parent's element children, building the entry once.
+func (ix *SiblingIndex) listOf(parent *dom.Node) *siblingList {
+	if l, ok := ix.lists[parent]; ok {
+		return l
+	}
+	l := &siblingList{}
+	for c := parent.FirstChild; c != nil; c = c.NextSibling {
+		if !c.Element() {
+			continue
+		}
+		if l.pos == nil {
+			l.pos = make(map[*dom.Node]int)
+			l.tagRank = make(map[*dom.Node]int)
+			l.tagTotal = make(map[string]int)
+		}
+		l.elems = append(l.elems, c)
+		l.pos[c] = len(l.elems)
+		l.tagTotal[c.Data]++
+		l.tagRank[c] = l.tagTotal[c.Data]
+	}
+	ix.lists[parent] = l
+	return l
+}
+
+// filteredOf returns the matching-rank table for one filter set on a parent,
+// building it once per (parent, cond). A nil cond still uses the cached child
+// list but rebuilds ranks every call, exactly like the old live walk.
+func (ix *SiblingIndex) filteredOf(parent *dom.Node, key any, filters []Selector) *filteredSibs {
+	if key != nil {
+		k := filterKey{parent: parent, cond: key}
+		if f, ok := ix.filt[k]; ok {
+			return f
+		}
+		f := buildFiltered(ix.listOf(parent), filters, ix)
+		ix.filt[k] = f
+		return f
+	}
+	return buildFiltered(ix.listOf(parent), filters, ix)
+}
+
+func buildFiltered(l *siblingList, filters []Selector, ix *SiblingIndex) *filteredSibs {
+	f := &filteredSibs{rank: make([]int, len(l.elems))}
+	for i, c := range l.elems {
+		for _, s := range filters {
+			if s.MatchesIndexed(c, ix) {
+				f.total++
+				f.rank[i] = f.total
+				break
+			}
+		}
+	}
+	return f
+}
+
 // nthIndex returns the node's 1-based position among its element siblings and
 // how many such siblings exist. ofType restricts both counts to the same tag
 // name, which is what separates nth-child from nth-of-type.
@@ -957,14 +1138,39 @@ func nthIndexFiltered(n *dom.Node, ofType bool, of []string) (index, total int) 
 	for _, selStr := range of {
 		filters = append(filters, ParseSelector(selStr))
 	}
-	return nthIndexFilteredSel(n, ofType, filters)
+	return nthIndexFilteredSel(n, ofType, filters, nil, nil)
 }
 
-// nthIndexFilteredSel is nthIndexFiltered over pre-parsed filters.
-func nthIndexFilteredSel(n *dom.Node, ofType bool, filters []Selector) (index, total int) {
+// nthIndexFilteredSel is nthIndexFiltered over pre-parsed filters with an
+// optional per-pass sibling cache. With a cache, unfiltered counting is two
+// map lookups and a filtered one is a table read; a nil cache walks siblings
+// exactly like the old code. fkey identifies the filter set for caching and
+// must be the Condition's *pseudoCompiled (or nil to disable filter caching).
+func nthIndexFilteredSel(n *dom.Node, ofType bool, filters []Selector, ix *SiblingIndex, fkey any) (index, total int) {
 	if n.Parent == nil {
 		return 0, 0
 	}
+	if ix == nil {
+		return nthIndexLive(n, ofType, filters)
+	}
+	l := ix.listOf(n.Parent)
+	if len(filters) == 0 {
+		if ofType {
+			return l.tagRank[n], l.tagTotal[n.Data]
+		}
+		return l.pos[n], len(l.elems)
+	}
+	f := ix.filteredOf(n.Parent, fkey, filters)
+	p := l.pos[n]
+	if p < 1 || p > len(f.rank) {
+		return 0, f.total
+	}
+	return f.rank[p-1], f.total
+}
+
+// nthIndexLive is the original sibling walk, kept for callers outside a
+// cached resolution pass.
+func nthIndexLive(n *dom.Node, ofType bool, filters []Selector) (index, total int) {
 	counts := func(c *dom.Node) bool {
 		if !c.Element() || (ofType && c.Data != n.Data) {
 			return false
