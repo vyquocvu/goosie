@@ -146,6 +146,15 @@ type steadyDriver struct {
 	deadline  time.Duration
 	settledFn func() bool
 	settled   int
+	// progressFn reports rasterized-work totals so the ceiling can tell a
+	// progressing run from a stuck one (see ready). Set alongside watchIdle.
+	progressFn func() (done, outstanding int64)
+	// stallBudget bounds a run that stops making raster progress. Only
+	// consulted while tile work is still on order; the absolute deadline
+	// above caps everything regardless.
+	stallBudget  time.Duration
+	lastProgress int64
+	lastMove     time.Time
 
 	mu   sync.Mutex
 	sent int
@@ -153,15 +162,25 @@ type steadyDriver struct {
 
 func newSteadyDriver(f *framePath, frames int) *steadyDriver {
 	d := &steadyDriver{
-		Window:   f.window,
-		out:      make(chan surface.Event),
-		done:     make(chan struct{}),
-		n:        frames,
-		ceiling:  frames * 8,
-		deadline: 25 * time.Second,
+		Window:      f.window,
+		out:         make(chan surface.Event),
+		done:        make(chan struct{}),
+		n:           frames,
+		ceiling:     frames * 8,
+		deadline:    25 * time.Second,
+		stallBudget: 5 * time.Second,
 	}
 	go d.pump()
 	return d
+}
+
+// watchProgress tells the driver how to ask how much raster work has landed
+// and how much is still on order. Loop.Stats is the only thing the getter
+// may touch, for the same reason as watchIdle.
+func (d *steadyDriver) watchProgress(progress func() (done, outstanding int64)) {
+	d.mu.Lock()
+	d.progressFn = progress
+	d.mu.Unlock()
 }
 
 // watchIdle tells the driver how to ask whether the frame path is idle. The loop
@@ -219,7 +238,30 @@ func (d *steadyDriver) ready(started time.Time) bool {
 	if d.sent < d.n {
 		return false
 	}
-	if d.settledFn == nil || d.sent >= d.ceiling || time.Since(started) >= d.deadline {
+	if d.settledFn == nil || time.Since(started) >= d.deadline {
+		return true
+	}
+	// The frame ceiling only counts stalled frames: under parallel load the
+	// vsyncs pass in microseconds while whole tile blocks are still queued
+	// at workers, so a raw frame budget exits before the first rows finish
+	// (a screenshot sweep showed 64 frames in 8ms with 26 tiles still on
+	// order). As long as rasterized work is still landing, the run is
+	// progressing and the ceiling must not fire; only a run making no
+	// progress waits out the stall budget, and the deadline caps everything.
+	if d.progressFn != nil {
+		done, outstanding := d.progressFn()
+		// The clock starts on the first observation past the floor, not at
+		// construction: document load happens before the loop runs, and must
+		// not count as raster stall.
+		if d.lastMove.IsZero() || done != d.lastProgress {
+			d.lastProgress = done
+			d.lastMove = time.Now()
+		}
+		if outstanding > 0 {
+			return time.Since(d.lastMove) > d.stallBudget
+		}
+	}
+	if d.sent >= d.ceiling {
 		return true
 	}
 	// Loop.Stats takes the loop's own lock and never calls back into the driver,

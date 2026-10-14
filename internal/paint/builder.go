@@ -1786,8 +1786,10 @@ func (b *Builder) paintButtonLabel(obj *layout.Object, opacity float32, clip *fr
 	if s == nil || obj.Node == nil {
 		return
 	}
-	text := obj.Node.GetAttribute("value")
-	if text == "" {
+	var text string
+	if obj.Node.HasAttribute("value") {
+		text = obj.Node.GetAttribute("value")
+	} else {
 		typ := strings.ToLower(obj.Node.GetAttribute("type"))
 		switch typ {
 		case "submit":
@@ -2305,6 +2307,15 @@ func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius fra
 // rounded ones keep the full border box because the rasterizer has no
 // rounded hole-punch).
 func (b *Builder) appendBgFill(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, color frame.Color, opacity float32) {
+	// A mask-image multiplies the background fill's coverage (icon pattern:
+	// solid colour showing through a glyph-shaped mask). The mask stretches
+	// over the fill rect; mask-size/position/repeat are deferred.
+	var mask image.Image
+	if m, ok := obj.MaskImage.(image.Image); ok && m != nil {
+		if b := m.Bounds(); b.Dx() > 0 && b.Dy() > 0 {
+			mask = m
+		}
+	}
 	if obj.Style.BackgroundClip == style.BgBoxBorderArea && radius.Empty() {
 		px0, py0, px1, py1 := obj.BgAreaRect(style.BgBoxPadding)
 		inner := frame.RectF4(px0, py0, px1, py1).ToDevice(b.scale)
@@ -2314,6 +2325,7 @@ func (b *Builder) appendBgFill(obj *layout.Object, clipRect frame.Rect, radius f
 				Rect:    r,
 				Color:   color,
 				Opacity: opacity,
+				Mask:    mask,
 			})
 		}
 		return
@@ -2324,6 +2336,7 @@ func (b *Builder) appendBgFill(obj *layout.Object, clipRect frame.Rect, radius f
 		Color:   color,
 		Radius:  radius,
 		Opacity: opacity,
+		Mask:    mask,
 	})
 }
 

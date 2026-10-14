@@ -937,6 +937,29 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 			return
 		}
 		c.paintPoly(st, pts, true, fill, stroke, sw)
+	case "path":
+		// Paths fill even-odd (see svgPath) and stroke like polylines; an
+		// unparseable d ends the path, never the document. An open subpath
+		// still fills its implicit closure, but the closing edge itself is
+		// never stroked, so that takes two passes.
+		for _, sub := range svgPath(svgAttr(el, "d")) {
+			if len(sub.pts) < 2 {
+				continue
+			}
+			if sub.closed {
+				if len(sub.pts) >= 3 {
+					c.paintPoly(st, sub.pts, true, fill, stroke, sw)
+				} else {
+					c.paintPoly(st, sub.pts, false, svgColor{none: true}, stroke, sw)
+				}
+				continue
+			}
+			if !fill.none && len(sub.pts) >= 3 {
+				closed := append(append([][2]float64{}, sub.pts...), sub.pts[0])
+				c.paintPoly(st, closed, true, fill, svgColor{none: true}, sw)
+			}
+			c.paintPoly(st, sub.pts, false, svgColor{none: true}, stroke, sw)
+		}
 	}
 	// path, text, image, use, foreignObject, filter, mask, clipPath and
 	// everything else: skipped with their subtrees by the walker.
@@ -1024,7 +1047,7 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 				// <a> without link semantics paints its children; hrefs are
 				// never followed.
 				stack = append(stack, svgElementState(parent, t))
-			case "rect", "circle", "ellipse", "line", "polyline", "polygon":
+			case "rect", "circle", "ellipse", "line", "polyline", "polygon", "path":
 				st := svgElementState(parent, t)
 				stack = append(stack, st)
 				if cv != nil {
@@ -1033,7 +1056,7 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 			case "title", "desc", "defs", "mask", "clipPath", "pattern",
 				"linearGradient", "radialGradient", "filter", "text", "tspan",
 				"image", "use", "foreignObject", "script", "style", "animate",
-				"animateTransform", "animateMotion", "set", "path", "switch",
+				"animateTransform", "animateMotion", "set", "switch",
 				"symbol", "marker", "view":
 				// Unsupported or metadata: skip the subtree. Script never
 				// runs, external references never resolve, animation never

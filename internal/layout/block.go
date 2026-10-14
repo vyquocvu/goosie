@@ -208,10 +208,27 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// Per-side bottoms feed clearance: clear:left cares only about left
 	// floats. floatBottom stays the max for container-height purposes.
 	var floatBottomL, floatBottomR float32
+	var rowKids []ObjectID
 	closeRow := func() {
 		if !rowActive {
 			return
 		}
+		st := a.Get(id).Style
+		if st != nil && (st.TextAlign == style.TextAlignCenter || st.TextAlign == style.TextAlignRight) {
+			spare := contentW - rowCursor
+			if spare > 0 {
+				extra := float32(0)
+				if st.TextAlign == style.TextAlignCenter {
+					extra = spare / 2
+				} else {
+					extra = spare
+				}
+				for _, rk := range rowKids {
+					shiftSubtree(a, rk, extra, 0)
+				}
+			}
+		}
+		rowKids = rowKids[:0]
 		if bottom := rowTop + rowH; bottom > y {
 			y = bottom
 		}
@@ -387,6 +404,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					k.X = contentX + rowCursor + k.MarginLeft
 					k.Y = contentY + rowTop + k.MarginTop
 					k.flags |= flagRowPlaced
+					rowKids = append(rowKids, kid)
 					if measured {
 						// The content is still where the measure left it, so it
 						// travels to the box rather than being laid out a second
@@ -442,7 +460,12 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					// starts flush with the content edge rather than pushing the
 					// box down a second time. Only reached for non-flex containers;
 					// flex parents never collapse margins with their items.
-					if collapsesThroughTop(a, obj) && k.Style.Position == style.PositionStatic {
+					// Relatively positioned boxes are in-flow (CSS 2.1 §8.3.1):
+					// their margins collapse here and the relative shift applies
+					// afterwards in the positioning pass. Only out-of-flow boxes
+					// (absolute/fixed, which never reach this path with a slot)
+					// are excluded, matching outOfFlowForCollapse.
+					if collapsesThroughTop(a, obj) && !isOutOfFlow(k.Style) {
 						topMargin = 0
 					} else {
 						topMargin = carryTop(a, kid)
@@ -696,8 +719,11 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		// A replaced element (input, img) has its width set by replacedSize() in
 		// blockInto. If contentWidth is 0 but the element already has a width,
-		// use that instead of overwriting it with 0.
-		if contentWidth == 0 && it.W > 0 {
+		// use that instead of overwriting it with 0. This must stay limited
+		// to replaced elements: any other box holding a width here carries
+		// the probe width blockInto measured it at, and keeping that strands
+		// 10000px flex items across pages.
+		if contentWidth == 0 && it.W > 0 && isReplacedElement(it) {
 			contentWidth = it.W
 		}
 		// An auto-basis item still honors min-width/max-width: 34px of text in
@@ -1665,6 +1691,20 @@ func itemMaxContentW(a *Arena, id ObjectID) float32 {
 	return maxContentW(a, id, true)
 }
 
+// isReplacedElement reports the elements whose auto size comes from outside
+// the box model (intrinsic dimensions, widget metrics), matching the tags
+// replacedSize handles.
+func isReplacedElement(obj *Object) bool {
+	if obj == nil || obj.Node == nil || !obj.Node.Element() {
+		return false
+	}
+	switch obj.Node.Data {
+	case "img", "input", "select", "textarea", "video", "canvas":
+		return true
+	}
+	return false
+}
+
 // maxContentW is itemMaxContentW. `probed` says the caller laid the subtree out
 // at maxFlexMeasureWidth first, which is what makes reading a block container's
 // placed words safe; without it a box that blockifies its children is still
@@ -1926,8 +1966,10 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		return 13, 13, true
 	case "submit", "reset", "button":
 		// Button-like inputs shrink-wrap their value label with a minimum of 80px.
-		text := obj.Node.GetAttribute("value")
-		if text == "" {
+		var text string
+		if obj.Node.HasAttribute("value") {
+			text = obj.Node.GetAttribute("value")
+		} else {
 			switch strings.ToLower(obj.Node.GetAttribute("type")) {
 			case "submit":
 				text = "Submit"
@@ -1938,7 +1980,7 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		textW := estimateTextWidth(a, s, text)
 		ubw := s.UsedBorderWidths()
 		w = textW + s.PaddingLeft + s.PaddingRight + ubw[1] + ubw[3]
-		if w < 80 {
+		if text != "" && w < 80 {
 			w = 80
 		}
 		h = 20

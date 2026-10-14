@@ -410,26 +410,28 @@ func (tb *treeBuilder) handleStartTag(p *tokenizer) {
 }
 
 func (tb *treeBuilder) consumeRawText(p *tokenizer, tag string) {
-	endTag := rawTextEndTags[tag]
 	start := p.pos
 	for p.pos < len(p.input) {
-		idx := strings.Index(p.input[p.pos:], endTag)
+		idx := strings.Index(p.input[p.pos:], "</")
 		if idx < 0 {
 			p.pos = len(p.input)
 			break
 		}
 		p.pos += idx
-		endPos := p.pos + len(endTag)
-		if endPos >= len(p.input) || p.input[endPos] == '>' || p.input[endPos] == ' ' {
-			break
+		tagStart := p.pos + 2
+		tagEnd := tagStart + len(tag)
+		if tagEnd <= len(p.input) && strings.EqualFold(p.input[tagStart:tagEnd], tag) {
+			if tagEnd >= len(p.input) || isRawTextEndDelimiter(p.input[tagEnd]) {
+				break
+			}
 		}
-		p.pos++
+		p.pos += 2
 	}
 	if p.pos > start {
 		tb.insertRawText(p.input[start:p.pos])
 	}
 	if p.pos < len(p.input) {
-		idx := strings.Index(p.input[p.pos:], ">")
+		idx := strings.IndexByte(p.input[p.pos:], '>')
 		if idx >= 0 {
 			p.pos += idx + 1
 		} else {
@@ -437,6 +439,10 @@ func (tb *treeBuilder) consumeRawText(p *tokenizer, tag string) {
 		}
 	}
 	tb.popUntil(tag)
+}
+
+func isRawTextEndDelimiter(c byte) bool {
+	return c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose bool) {
@@ -603,6 +609,18 @@ func (tb *treeBuilder) headPhase() bool {
 	return tb.onStack(tb.headElem)
 }
 
+// hasOpenTag reports whether any open element carries tag. End-tag handling
+// uses it to tell a paired close from a stray one: HTML5 ignores an end tag
+// with no matching open element instead of unwinding the stack for it.
+func (tb *treeBuilder) hasOpenTag(tag string) bool {
+	for _, o := range tb.openStack {
+		if o.Data == tag {
+			return true
+		}
+	}
+	return false
+}
+
 // onStack reports whether n is currently open, i.e. still on the list of open
 // elements. popUntil walks and empties the whole stack when the tag it seeks is
 // absent, so any unconditional pop of a node that has already closed must be
@@ -742,12 +760,21 @@ func (tb *treeBuilder) processEndTag(tag string) {
 	// Handle SVG namespace exit.
 	if tb.svgDepth > 0 && tag == "svg" {
 		tb.svgDepth--
-		tb.popUntil(tag)
+		if tb.hasOpenTag(tag) {
+			tb.popUntil(tag)
+		}
 		return
 	}
-	// SVG child elements are self-closing, so just pop them.
+	// SVG child elements are self-closing, so just pop them. A void-marked
+	// element may still carry an explicit end tag (<path>...</path>, as
+	// served by Google's header icons): with nothing open to pop, the token
+	// is a parse error to ignore. Popping unconditionally would run
+	// popUntil's absent-tag fallback, unwinding the stack through <html> and
+	// reparenting the rest of the document outside it.
 	if tb.svgDepth > 0 && svgElements[tag] {
-		tb.popUntil(tag)
+		if tb.hasOpenTag(tag) {
+			tb.popUntil(tag)
+		}
 		return
 	}
 	// A stray </br> is a start tag; every other void end tag (</col>,

@@ -179,6 +179,7 @@ func (b *cssBudget) check(src string, inline bool) error {
 		}
 	}
 	tok := css.NewTokenizer(src)
+	urlDepth := 0
 	for {
 		t := tok.Next()
 		if t.Type == css.TokenEOF {
@@ -187,6 +188,26 @@ func (b *cssBudget) check(src string, inline bool) error {
 		b.tokens++
 		if b.tokens > MaxCSSTokens {
 			return fmt.Errorf("CSS token limit exceeded (%d)", MaxCSSTokens)
+		}
+		// A url() body is an address, not a value: cache-busting query
+		// strings (sort_both.svg?0e440, as served by MediaWiki) lex as
+		// number tokens with NaN values. Policing them as geometry would
+		// refuse the whole sheet over an address that can never become a
+		// box size, so the range check skips the function body while the
+		// token count above still bounds it. Quoted urls never reach here
+		// as numbers (the tokenizer folds them into one string token).
+		if t.Type == css.TokenFunction && strings.EqualFold(t.Value, "url") {
+			urlDepth++
+			continue
+		}
+		if urlDepth > 0 {
+			switch t.Type {
+			case css.TokenLParen:
+				urlDepth++
+			case css.TokenRParen:
+				urlDepth--
+			}
+			continue
 		}
 		switch t.Type {
 		case css.TokenNumber, css.TokenDimension, css.TokenPercentage:

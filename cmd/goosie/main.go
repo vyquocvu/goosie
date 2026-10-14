@@ -15,11 +15,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -1541,6 +1543,24 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		fontCtx, fontCancel = context.WithTimeout(ctx, engine.FontFetchBudget)
 		defer fontCancel()
 	}
+	// External scripts are a synchronous family like stylesheets: the
+	// document cannot run them before they arrive, so they share the
+	// deadline-child shape. The engine resolves srcs before calling.
+	scriptCtx, scriptCancel := context.WithTimeout(ctx, engine.ScriptFetchBudget)
+	defer scriptCancel()
+	scriptFetcher := func(base, url string) ([]byte, error) {
+		resp, err := client.Get(subresourceCtx(scriptCtx, base), url)
+		if err != nil {
+			return nil, err
+		}
+		return resp.Body, nil
+	}
+	// fetch()/XMLHttpRequest transport for page scripts. Unlike the
+	// families above these fire after the load (event handlers, beacons),
+	// so they ride the navigation context rather than a load-scoped
+	// deadline: post-paint arrivals carry no total deadline by the same
+	// design as deferred images and fonts.
+	jsFetch := jsTransport{client: client, ctx: subresourceCtx(ctx, resp.URL)}
 	// Linked style sheets are fetched with the same client and the same
 	// cancellation: the linker sees absolute http(s) URLs only, because the
 	// engine resolves hrefs against the final document URL before calling.
@@ -1582,7 +1602,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// scripting rather than failing the load. The session owns it
 	// afterwards and closes it with itself (see applyNavResult/closeTab), so
 	// every error return below must close what it created.
-	rt, rtErr := js.New(js.Options{URL: resp.URL})
+	rt, rtErr := js.New(js.Options{URL: resp.URL, HTTPClient: jsFetch})
 	if rtErr != nil {
 		fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
 		rt = nil
@@ -1597,6 +1617,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
+		engine.WithScripts(resp.URL, scriptFetcher),
 		engine.WithJS(rt),
 		// Every load gets a fresh invalidation batch: JS-driven DOM
 		// mutations record here so the vsync pump reflows exactly the
@@ -1614,9 +1635,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	dl := list.Build(1)
 	extent := dl.Extent()
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
-	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size document cache: %w", err)
-	}
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
@@ -1638,6 +1656,54 @@ func fontOption(deferred bool, base string, fetch engine.FontFetcher, reg engine
 		return engine.WithDeferredCustomFontLoading(base, fetch, reg)
 	}
 	return engine.WithCustomFontLoading(base, fetch, reg)
+}
+
+// jsTransport adapts the browser HTTP client to the js.HTTPFetcher contract
+// the fetch()/XMLHttpRequest bindings call. GET maps straight through; POST
+// carries the Content-Type header (defaulting to the spec's text/plain for
+// string bodies) because the client interface exposes only Get and Post.
+// Other methods and per-request headers beyond Content-Type are not carried
+// by this interface yet, so those requests fail through the bindings' error
+// paths rather than silently misbehaving.
+type jsTransport struct {
+	client net.HTTP
+	ctx    context.Context
+}
+
+func (t jsTransport) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+	ctx := t.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var resp *net.Response
+	var err error
+	switch method {
+	case "GET", "":
+		resp, err = t.client.Get(ctx, url)
+	case "POST":
+		contentType := "text/plain;charset=UTF-8"
+		for k, v := range headers {
+			if strings.EqualFold(k, "Content-Type") {
+				contentType = v
+				break
+			}
+		}
+		resp, err = t.client.Post(ctx, url, contentType, bytes.NewReader(body))
+	default:
+		return nil, fmt.Errorf("goosie: fetch method %q is not supported", method)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &js.FetchResponse{
+		Status:     resp.StatusCode,
+		StatusText: http.StatusText(resp.StatusCode),
+		Headers:    resp.Headers,
+		Body:       resp.Body,
+		URL:        resp.URL,
+		OK:         resp.StatusCode >= 200 && resp.StatusCode < 300,
+	}
+	return out, nil
 }
 
 // subresourceCtx is where the browser's two security halves meet, and the only
@@ -1854,6 +1920,11 @@ func run(args []string) error {
 			// have to be clear before the pixels in the PNG are all there.
 			st := f.loop.Stats()
 			return st.Last.Needed == 0 && st.Last.PaintingBytes == 0
+		})
+		sd.watchProgress(func() (done, outstanding int64) {
+			st := f.loop.Stats()
+			outstanding = int64(st.Last.Needed) + st.Last.PaintingBytes
+			return st.Rasterize, outstanding
 		})
 		finish = sd.done
 		defer func() {

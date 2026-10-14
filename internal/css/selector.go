@@ -405,6 +405,14 @@ func parseCondition(s string, i int) (Condition, int) {
 			cond.precompile()
 			return cond, i
 		}
+		// The four original pseudo-elements keep their single-colon spellings
+		// for compatibility (CSS 2.1 §5.12.3): :before means ::before, and
+		// matching them as pseudo-classes would never find an element. Every
+		// float clearfix in the wild (.row:after) depends on this.
+		switch strings.ToLower(name) {
+		case "before", "after", "first-line", "first-letter":
+			return Condition{Type: CondPseudoElement, Value: strings.ToLower(name)}, i
+		}
 		return Condition{Type: CondPseudoClass, Value: name}, i
 
 	case '*':

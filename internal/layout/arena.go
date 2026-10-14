@@ -57,6 +57,11 @@ type Object struct {
 	// position.
 	BgImage any
 
+	// MaskImage carries the decoded pixels of this box's CSS mask-image, if
+	// any. Same ownership as BgImage; paint multiplies fill coverage by the
+	// mask alpha (luminance where the image has no alpha).
+	MaskImage any
+
 	// BorderImage carries the decoded pixels of this box's border-image
 	// source, if any. Paint nine-slices it against the style's slice/width
 	// repeat; without a decoded image normal borders paint.
@@ -333,12 +338,15 @@ func countLayoutNodes(root *dom.Node) int {
 }
 
 func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
-	id, ok := a.ForNode(n.ID)
-	if ok {
-		return id
+	if n.ID != 0 {
+		if id, ok := a.ForNode(n.ID); ok {
+			return id
+		}
 	}
 	id, obj := a.Alloc()
-	a.byNode[n.ID] = id
+	if n.ID != 0 {
+		a.byNode[n.ID] = id
+	}
 	obj.Node = n
 	if s, ok := styles[n.ID]; ok {
 		obj.Style = s

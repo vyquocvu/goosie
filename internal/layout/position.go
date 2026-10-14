@@ -202,6 +202,36 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 			// no alignment has anywhere to spread.
 			shiftInlineContent(a, id, obj.X+obj.BorderLeft+obj.PaddingLeft-srcX, 0)
 			obj = a.Get(id)
+		} else {
+			// No inline extent: the content is block-level (or there is no
+			// content at all), so there are no words to read back. Fall back
+			// to the block preferred width rather than keeping the probe
+			// width, which stranded 10000px abspos boxes across pages (and
+			// blew every overflow clip and document extent around them). An
+			// empty box measures zero, which is its correct shrink-to-fit,
+			// and min/max-width still constrain the result. The subtree keeps
+			// its probe layout and spills visibly past the shrunk box instead
+			// of rewrapping: a rewrap needs a second full layout pass, while
+			// the spill matches overflow:visible, the common case.
+			bw, _ := absposContentW(a, id)
+			avail := cb.w - obj.MarginLeft - obj.MarginRight
+			if s.HasLeft {
+				avail -= insetL
+			}
+			if s.HasRight {
+				avail -= insetR
+			}
+			if avail < 0 {
+				avail = 0
+			}
+			if bw > avail {
+				bw = avail
+			}
+			obj.W = clampFlexBasis(obj, bw, cb.w)
+			if s.HasRight && !s.HasLeft {
+				obj.X = cb.x0 + cb.w - obj.MarginRight - insetR - (obj.W + extra)
+			}
+			obj = a.Get(id)
 		}
 	}
 	if explicitH {
@@ -212,6 +242,47 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 	}
 	// The children blockInto positioned sit relative to this box's origin, which
 	// was final before the layout calls above, so nothing further is needed.
+}
+
+// absposContentW measures the max-content width of an abspos box's subtree,
+// including words under block children. inlineExtent stops at blocks (by
+// design: flex items with block content take the itemMaxContentW path), and
+// itemMaxContentW only reads placed text runs and declared widths, so words
+// wrapped inside a plain block child are invisible to both. This walks every
+// in-flow descendant leaf with a measured width instead. Out-of-flow
+// descendants contribute nothing, matching maxContentW.
+func absposContentW(a *Arena, id ObjectID) (float32, bool) {
+	var minX, maxX float32
+	ok := false
+	var walk func(ObjectID)
+	walk = func(cid ObjectID) {
+		for kid := a.Get(cid).FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+			k := a.Get(kid)
+			if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) {
+				continue
+			}
+			if k.FirstKid == 0 {
+				if k.W <= 0 {
+					continue
+				}
+				x1 := k.X + k.W
+				if !ok || k.X < minX {
+					minX = k.X
+				}
+				if !ok || x1 > maxX {
+					maxX = x1
+				}
+				ok = true
+				continue
+			}
+			walk(kid)
+		}
+	}
+	walk(id)
+	if !ok || maxX <= minX {
+		return 0, false
+	}
+	return maxX - minX, true
 }
 
 // shiftSubtree moves a box and everything inside it. Unlike shiftInlineContent

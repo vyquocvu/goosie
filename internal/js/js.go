@@ -107,6 +107,11 @@ type Options struct {
 	// a ReferenceError.
 	HTTPClient HTTPFetcher
 
+	// Cookies is the cookie jar document.cookie reads and writes. When nil,
+	// the binding keeps a per-document memory jar instead, which round-trips
+	// script-set values for the document's own URL.
+	Cookies CookieStore
+
 	// WebSocketDialer is the WebSocket backend. When non-nil, WebSocket is
 	// available to scripts. When nil, WebSocket is not defined.
 	WebSocketDialer WebSocketDialer
@@ -188,6 +193,14 @@ type Runtime struct {
 	nodeRegistry map[int]*dom.Node
 	nextNID      int
 	nodeProto    *goja.Object
+	// wrapCache maps a DOM node to its single wrapper nid, so repeated
+	// queries over the same nodes reuse one wrapper instead of compiling
+	// accessors and closures per hit. Wrapping the same node twice used to
+	// cost two RunString compiles plus dozens of sets per hit and leaked a
+	// registry entry per query; it also broke `===` identity the DOM spec
+	// requires. Snapshots (tagName/className/type) refresh on reuse, so a
+	// cached wrapper reads exactly what a fresh one would.
+	wrapCache map[*dom.Node]int
 
 	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
@@ -231,8 +244,14 @@ func New(opts Options) (*Runtime, error) {
 	if opts.HTTPClient != nil {
 		r.setupFetch(opts.HTTPClient)
 	}
+	// XHR installs regardless: without a transport the constructor still
+	// exists and send() fails through the error event, so capability
+	// probes never see a missing constructor.
+	r.setupXHR(opts.HTTPClient)
 	r.setupTimers()
 	r.setupPromise()
+	r.setupCookies()
+	r.setupFonts()
 	r.setupIntersectionObserver()
 	r.setupRAF()
 	r.setupStorage()
@@ -308,9 +327,25 @@ func (r *Runtime) setupWindow() {
 	loc := r.vm.NewObject()
 	_ = loc.Set("href", r.opts.URL)
 
-	win := r.vm.NewObject()
+	// The window object IS the global scope (HTML spec: Window is the
+	// global object). An earlier stub installed window as a separate
+	// object, so `window.google = ns` followed by bare `google` died with
+	// "google is not defined" - the exact shape every dynamic page's boot
+	// script takes. Aliasing keeps one identity: assignments in either
+	// direction are visible in the other, and the later dual-installs
+	// (global + window) below degenerate to the same store.
+	win := r.vm.GlobalObject()
 	_ = win.Set("location", loc)
-	_ = r.vm.Set("window", win)
+	_ = win.Set("window", win)
+	_ = win.Set("self", win)
+	_ = win.Set("globalThis", win)
+	nav := r.vm.NewObject()
+	_ = nav.Set("userAgent", "Goosie/2.0")
+	_ = nav.Set("language", "en-US")
+	_ = nav.Set("languages", r.vm.ToValue([]string{"en-US", "en"}))
+	_ = nav.Set("cookieEnabled", true)
+	_ = nav.Set("onLine", true)
+	_ = win.Set("navigator", nav)
 }
 
 func (r *Runtime) setupUnsupportedAPIs() {
@@ -332,6 +367,7 @@ func (r *Runtime) setupDOM() {
 	r.nodeRegistry = make(map[int]*dom.Node)
 	r.nodeWrappers = make(map[int]*goja.Object)
 	r.shadowRoots = make(map[int]*goja.Object)
+	r.wrapCache = make(map[*dom.Node]int)
 	r.nextNID = 1
 
 	// Build a shared prototype for element wrapper objects. Each wrapper
@@ -373,6 +409,24 @@ func (r *Runtime) setupDOM() {
 	})
 	_ = r.nodeProto.Set("getContext", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetContext(call)
+	})
+	// ParentNode query roots: jsQuerySelector(All) already resolve the root
+	// from call.This, so the same handlers serve document and elements with
+	// document-order, subtree-scoped results.
+	_ = r.nodeProto.Set("querySelector", func(call goja.FunctionCall) goja.Value {
+		return r.jsQuerySelector(call)
+	})
+	_ = r.nodeProto.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
+		return r.jsQuerySelectorAll(call)
+	})
+	_ = r.nodeProto.Set("insertAdjacentHTML", func(call goja.FunctionCall) goja.Value {
+		return r.jsInsertAdjacentHTML(call)
+	})
+	_ = r.nodeProto.Set("prepend", func(call goja.FunctionCall) goja.Value {
+		return r.jsPrepend(call)
+	})
+	_ = r.nodeProto.Set("append", func(call goja.FunctionCall) goja.Value {
+		return r.jsAppend(call)
 	})
 	// Set the prototype as a temporary global so RunString can reference it.
 	_ = r.vm.Set("__nodeProto__", r.nodeProto)
@@ -533,6 +587,37 @@ func (r *Runtime) setupDOM() {
 		r.notifyMutation()
 		return goja.Undefined()
 	})
+	_ = doc.Set("prepend", func(call goja.FunctionCall) goja.Value {
+		return r.jsPrepend(call)
+	})
+	_ = doc.Set("append", func(call goja.FunctionCall) goja.Value {
+		return r.jsAppend(call)
+	})
+	_ = doc.Set("__getChildren__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue([]any{})
+		}
+		var list []goja.Value
+		for c := node.FirstChild; c != nil; c = c.NextSibling {
+			if c.Element() {
+				list = append(list, r.wrapNode(c))
+			}
+		}
+		if list == nil {
+			list = []goja.Value{}
+		}
+		return r.vm.ToValue(list)
+	})
+	_ = doc.Set("__getParentElement__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil || node.Parent == nil || !node.Parent.Element() {
+			return goja.Null()
+		}
+		return r.wrapNode(node.Parent)
+	})
 
 	// Form-control helpers for checked/value property accessors.
 	_ = doc.Set("__getChecked__", func(call goja.FunctionCall) goja.Value {
@@ -601,6 +686,102 @@ func (r *Runtime) setupDOM() {
 		r.notifyMutation()
 		return goja.Undefined()
 	})
+	_ = doc.Set("__getDataset__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		m := r.vm.NewObject()
+		if node == nil || !node.Element() {
+			return m
+		}
+		for _, a := range node.Attr {
+			key, ok := datasetKey(strings.ToLower(a.Name))
+			if !ok {
+				continue
+			}
+			attrName := a.Name
+			getter := r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+				cur := r.nodeRegistry[nid]
+				if cur == nil {
+					return goja.Undefined()
+				}
+				return r.vm.ToValue(cur.GetAttribute(attrName))
+			})
+			setter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+				cur := r.nodeRegistry[nid]
+				if cur == nil {
+					return goja.Undefined()
+				}
+				var v string
+				if len(call.Arguments) > 0 && call.Arguments[0] != nil {
+					v = call.Arguments[0].String()
+				}
+				cur.SetAttribute(attrName, v)
+				r.notifyMutation()
+				return goja.Undefined()
+			})
+			_ = m.DefineAccessorProperty(key, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
+		}
+		// The registry key rides along non-enumerably so Object.keys sees
+		// only the data properties, as on a real DOMStringMap.
+		_ = m.DefineDataProperty("__nid__", r.vm.ToValue(nid), goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE)
+		return m
+	})
+	_ = doc.Set("__getDatasetAttr__", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) < 2 {
+			return goja.Null()
+		}
+		node := r.nodeRegistry[int(call.Arguments[0].ToInteger())]
+		if node == nil || !node.Element() {
+			return goja.Null()
+		}
+		attr := call.Arguments[1].String()
+		for _, a := range node.Attr {
+			if strings.EqualFold(a.Name, attr) {
+				return r.vm.ToValue(a.Value)
+			}
+		}
+		return goja.Null()
+	})
+	_ = doc.Set("__setDatasetAttr__", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) < 4 {
+			return goja.Undefined()
+		}
+		target, _ := call.Arguments[0].(*goja.Object)
+		nid := int(call.Arguments[1].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil || !node.Element() || target == nil {
+			return goja.Undefined()
+		}
+		attr, v := call.Arguments[2].String(), call.Arguments[3].String()
+		node.SetAttribute(attr, v)
+		r.notifyMutation()
+		// Define the live pair on the map so later reads and Object.keys
+		// see the new attribute exactly like a parsed one.
+		if key, ok := datasetKey(strings.ToLower(attr)); ok {
+			attrName := attr
+			getter := r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+				if cur := r.nodeRegistry[nid]; cur != nil {
+					return r.vm.ToValue(cur.GetAttribute(attrName))
+				}
+				return goja.Undefined()
+			})
+			setter := r.vm.ToValue(func(setCall goja.FunctionCall) goja.Value {
+				cur := r.nodeRegistry[nid]
+				if cur == nil {
+					return goja.Undefined()
+				}
+				var sv string
+				if len(setCall.Arguments) > 0 && setCall.Arguments[0] != nil {
+					sv = setCall.Arguments[0].String()
+				}
+				cur.SetAttribute(attrName, sv)
+				r.notifyMutation()
+				return goja.Undefined()
+			})
+			_ = target.DefineAccessorProperty(key, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
+		}
+		return goja.Undefined()
+	})
 
 	// Dynamic body property: wraps the body element on first access and
 	// caches it. If the body is replaced, the host should re-run setupDOM.
@@ -608,6 +789,19 @@ func (r *Runtime) setupDOM() {
 		_ = doc.Set("body", r.wrapNode(r.domDoc.Body))
 	} else {
 		_ = doc.Set("body", goja.Null())
+	}
+	// documentElement and head: boot scripts hang global listeners off the
+	// root (document.documentElement.addEventListener("click", ...)) and
+	// probe head for script/style placement. Same wrap-once rule as body.
+	if r.domDoc.HTML != nil {
+		_ = doc.Set("documentElement", r.wrapNode(r.domDoc.HTML))
+	} else {
+		_ = doc.Set("documentElement", goja.Null())
+	}
+	if r.domDoc.Head != nil {
+		_ = doc.Set("head", r.wrapNode(r.domDoc.Head))
+	} else {
+		_ = doc.Set("head", goja.Null())
 	}
 }
 
@@ -619,9 +813,24 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	if node == nil {
 		return goja.Null()
 	}
+	// One wrapper per node: a repeat wrap refreshes the snapshot data
+	// properties and returns the same object. This keeps `===` identity
+	// across queries (per DOM spec) and avoids recompiling the
+	// textContent/innerHTML/id accessors plus dozens of sets per hit —
+	// querySelectorAll over thousands of nodes used to spend seconds here.
+	if r.wrapCache == nil {
+		r.wrapCache = make(map[*dom.Node]int)
+	}
+	if nid, ok := r.wrapCache[node]; ok {
+		if obj := r.nodeWrappers[nid]; obj != nil {
+			r.refreshWrapSnapshots(obj, node)
+			return obj
+		}
+	}
 	nid := r.nextNID
 	r.nextNID++
 	r.nodeRegistry[nid] = node
+	r.wrapCache[node] = nid
 
 	obj := r.vm.NewObject()
 	_ = obj.Set("__nid__", nid)
@@ -640,6 +849,10 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		r.defineTextContentAccessor(obj)
 		// Re-define innerHTML as an accessor on this instance.
 		r.defineInnerHTMLAccessor(obj)
+		// Live dataset map, re-defined per instance like the accessors above.
+		r.defineDatasetAccessor(obj)
+		// Live element accessors: children, parentElement, firstElementChild, etc.
+		r.defineElementAccessors(obj)
 	}
 
 	// Element-specific properties.
@@ -648,6 +861,8 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		_ = obj.Set("nodeName", strings.ToUpper(node.Data))
 		r.defineIdAccessor(obj)
 		_ = obj.Set("className", node.GetAttribute("class"))
+		_ = obj.Set("lang", node.GetAttribute("lang"))
+		_ = obj.Set("dir", node.GetAttribute("dir"))
 		if node.Data == "input" {
 			typ := strings.ToLower(node.GetAttribute("type"))
 			if typ == "" {
@@ -700,6 +915,9 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 				for i := range node.Attr {
 					if strings.ToLower(node.Attr[i].Name) == "class" {
 						node.Attr = append(node.Attr[:i], node.Attr[i+1:]...)
+						if node.Doc != nil {
+							node.Doc.MarkQueryDirty()
+						}
 						break
 					}
 				}
@@ -726,6 +944,9 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 						for j := range node.Attr {
 							if strings.ToLower(node.Attr[j].Name) == "class" {
 								node.Attr = append(node.Attr[:j], node.Attr[j+1:]...)
+								if node.Doc != nil {
+									node.Doc.MarkQueryDirty()
+								}
 								break
 							}
 						}
@@ -763,6 +984,28 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	}
 
 	return obj
+}
+
+// refreshWrapSnapshots rewrites the data properties a fresh wrapNode would
+// set, so a reused wrapper reads exactly what a new one would. Accessors
+// (textContent/innerHTML/id/value/checked) and the classList closures are
+// already installed and stay live against the same node.
+func (r *Runtime) refreshWrapSnapshots(obj *goja.Object, node *dom.Node) {
+	if !node.Element() {
+		return
+	}
+	_ = obj.Set("tagName", strings.ToUpper(node.Data))
+	_ = obj.Set("nodeName", strings.ToUpper(node.Data))
+	_ = obj.Set("className", node.GetAttribute("class"))
+	_ = obj.Set("lang", node.GetAttribute("lang"))
+	_ = obj.Set("dir", node.GetAttribute("dir"))
+	if node.Data == "input" {
+		typ := strings.ToLower(node.GetAttribute("type"))
+		if typ == "" {
+			typ = "text"
+		}
+		_ = obj.Set("type", typ)
+	}
 }
 
 // defineTextContentAccessor installs the textContent getter/setter on obj
@@ -878,6 +1121,273 @@ func (r *Runtime) defineIdAccessor(obj *goja.Object) {
 	_ = r.vm.Set("__idTarget__", nil)
 }
 
+// defineDatasetAccessor installs a live dataset (DOMStringMap) getter on obj.
+// Each access builds a fresh map object for the element's current data-*
+// attributes, wrapped in a Proxy so brand-new keys assign straight through
+// to setAttribute instead of dying as dead JS properties. Reads of unknown
+// keys stay undefined, as in browsers.
+func (r *Runtime) defineDatasetAccessor(obj *goja.Object) {
+	_ = r.vm.Set("__dsTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__dsTarget__, 'dataset', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return {};
+				var map = document.__getDataset__(nid);
+				var toAttr = function(k) {
+					return 'data-' + String(k).replace(/[A-Z]/g, function(c) {
+						return '-' + c.toLowerCase();
+					});
+				};
+				return new Proxy(map, {
+					get: function(t, k) {
+						if (typeof k !== 'string') return t[k];
+						var cur = t[k];
+						if (cur !== undefined) return cur;
+						if (k === '__nid__') return nid;
+						var v = document.__getDatasetAttr__(nid, toAttr(k));
+						return v === null ? undefined : v;
+					},
+					set: function(t, k, v) {
+						if (typeof k !== 'string' || k === '__nid__') return true;
+						document.__setDatasetAttr__(map, nid, toAttr(k), String(v));
+						return true;
+					}
+				});
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__dsTarget__", nil)
+}
+
+func (r *Runtime) defineElementAccessors(obj *goja.Object) {
+	_ = r.vm.Set("__elTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperties(__elTarget__, {
+			children: {
+				get: function() {
+					var nid = this.__nid__;
+					if (nid === undefined) return [];
+					return document.__getChildren__(nid);
+				},
+				configurable: true,
+				enumerable: true
+			},
+			firstElementChild: {
+				get: function() {
+					var ch = this.children;
+					return (ch && ch.length > 0) ? ch[0] : null;
+				},
+				configurable: true,
+				enumerable: true
+			},
+			lastElementChild: {
+				get: function() {
+					var ch = this.children;
+					return (ch && ch.length > 0) ? ch[ch.length - 1] : null;
+				},
+				configurable: true,
+				enumerable: true
+			},
+			parentElement: {
+				get: function() {
+					var nid = this.__nid__;
+					if (nid === undefined) return null;
+					return document.__getParentElement__(nid);
+				},
+				configurable: true,
+				enumerable: true
+			},
+			parentNode: {
+				get: function() {
+					return this.parentElement;
+				},
+				configurable: true,
+				enumerable: true
+			}
+		});
+	`)
+	_ = r.vm.Set("__elTarget__", nil)
+}
+
+func (r *Runtime) jsInsertAdjacentHTML(call goja.FunctionCall) goja.Value {
+	thisObj := call.This.ToObject(r.vm)
+	nidVal := thisObj.Get("__nid__")
+	if nidVal == nil || goja.IsUndefined(nidVal) {
+		return goja.Undefined()
+	}
+	nid := int(nidVal.ToInteger())
+	node := r.nodeRegistry[nid]
+	if node == nil {
+		return goja.Undefined()
+	}
+	if len(call.Arguments) < 2 {
+		return goja.Undefined()
+	}
+	position := strings.ToLower(call.Arguments[0].String())
+	html := call.Arguments[1].String()
+	if html == "" {
+		return goja.Undefined()
+	}
+
+	wrapped := "<div>" + html + "</div>"
+	parsed, err := dom.ParseBounded(wrapped, dom.ParseLimits{
+		Nodes: 1024, Depth: 32, Attributes: 256, AttributeBytes: 4096,
+	})
+	if err != nil {
+		return goja.Undefined()
+	}
+	var divNode *dom.Node
+	if parsed.Body != nil {
+		divNode = parsed.Body.FirstChild
+	}
+	if divNode == nil {
+		return goja.Undefined()
+	}
+
+	var children []*dom.Node
+	for c := divNode.FirstChild; c != nil; c = c.NextSibling {
+		children = append(children, c)
+	}
+
+	switch position {
+	case "beforebegin":
+		if node.Parent == nil {
+			return goja.Undefined()
+		}
+		for _, child := range children {
+			divNode.RemoveChild(child)
+			node.Parent.InsertBefore(child, node)
+		}
+	case "afterbegin":
+		ref := node.FirstChild
+		for _, child := range children {
+			divNode.RemoveChild(child)
+			node.InsertBefore(child, ref)
+		}
+	case "beforeend":
+		for _, child := range children {
+			divNode.RemoveChild(child)
+			node.AppendChild(child)
+		}
+	case "afterend":
+		if node.Parent == nil {
+			return goja.Undefined()
+		}
+		ref := node.NextSibling
+		for _, child := range children {
+			divNode.RemoveChild(child)
+			node.Parent.InsertBefore(child, ref)
+		}
+	}
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+func (r *Runtime) jsPrepend(call goja.FunctionCall) goja.Value {
+	thisObj := call.This.ToObject(r.vm)
+	nidVal := thisObj.Get("__nid__")
+	if nidVal == nil || goja.IsUndefined(nidVal) {
+		return goja.Undefined()
+	}
+	node := r.nodeRegistry[int(nidVal.ToInteger())]
+	if node == nil {
+		return goja.Undefined()
+	}
+	ref := node.FirstChild
+	for _, arg := range call.Arguments {
+		if obj, ok := arg.(*goja.Object); ok {
+			if knidVal := obj.Get("__nid__"); knidVal != nil && !goja.IsUndefined(knidVal) {
+				if kidNode := r.nodeRegistry[int(knidVal.ToInteger())]; kidNode != nil {
+					if kidNode == ref {
+						ref = kidNode.NextSibling
+						continue
+					}
+					node.InsertBefore(kidNode, ref)
+					continue
+				}
+			}
+		}
+		text := arg.String()
+		node.InsertBefore(node.Doc.NewText(text), ref)
+	}
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+func (r *Runtime) jsAppend(call goja.FunctionCall) goja.Value {
+	thisObj := call.This.ToObject(r.vm)
+	nidVal := thisObj.Get("__nid__")
+	if nidVal == nil || goja.IsUndefined(nidVal) {
+		return goja.Undefined()
+	}
+	node := r.nodeRegistry[int(nidVal.ToInteger())]
+	if node == nil {
+		return goja.Undefined()
+	}
+	for _, arg := range call.Arguments {
+		if obj, ok := arg.(*goja.Object); ok {
+			if knidVal := obj.Get("__nid__"); knidVal != nil && !goja.IsUndefined(knidVal) {
+				if kidNode := r.nodeRegistry[int(knidVal.ToInteger())]; kidNode != nil {
+					node.AppendChild(kidNode)
+					continue
+				}
+			}
+		}
+		text := arg.String()
+		node.AppendChild(node.Doc.NewText(text))
+	}
+	r.notifyMutation()
+	return goja.Undefined()
+}
+
+// datasetKey converts a data-* attribute name to its dataset property key:
+// data-foo-bar becomes fooBar. Only lowercase-dashed names convert; anything
+// else is not exposed on the map.
+func datasetKey(attr string) (string, bool) {
+	if !strings.HasPrefix(attr, "data-") || len(attr) <= 5 {
+		return "", false
+	}
+	rest := attr[5:]
+	var sb strings.Builder
+	upperNext := false
+	for _, c := range rest {
+		switch {
+		case c == '-':
+			upperNext = true
+		case c >= 'A' && c <= 'Z':
+			// Uppercase in the attribute name never appears from the HTML
+			// parser (it lowercases); reject defensively.
+			return "", false
+		case upperNext && c >= 'a' && c <= 'z':
+			sb.WriteRune(c - ('a' - 'A'))
+			upperNext = false
+		default:
+			sb.WriteRune(c)
+			upperNext = false
+		}
+	}
+	return sb.String(), true
+}
+
+// datasetAttr converts a dataset property key back to its data-* attribute
+// name: fooBar becomes data-foo-bar.
+func datasetAttr(key string) string {
+	var sb strings.Builder
+	sb.WriteString("data-")
+	for _, c := range key {
+		if c >= 'A' && c <= 'Z' {
+			sb.WriteByte('-')
+			sb.WriteRune(c + ('a' - 'A'))
+		} else {
+			sb.WriteRune(c)
+		}
+	}
+	return sb.String()
+}
+
 // getNode extracts the *dom.Node from a JS wrapper object via its __nid__.
 func (r *Runtime) getNode(v goja.Value) *dom.Node {
 	if v == nil || goja.IsNull(v) || goja.IsUndefined(v) {
@@ -972,6 +1482,9 @@ func (r *Runtime) jsCreateElement(call goja.FunctionCall) goja.Value {
 // querySelector returns the first descendant of root (depth-first, excluding
 // root itself) that matches sel, or nil.
 func (r *Runtime) querySelector(root *dom.Node, sel string) *dom.Node {
+	if node, ok := r.querySelectorIndexed(root, sel); ok {
+		return node
+	}
 	for c := root.FirstChild; c != nil; c = c.NextSibling {
 		if r.matchSelector(c, sel) {
 			return c
@@ -983,11 +1496,135 @@ func (r *Runtime) querySelector(root *dom.Node, sel string) *dom.Node {
 	return nil
 }
 
+// querySelectorIndexed answers simple selectors from the document indexes:
+// O(matches) instead of O(subtree). Reports ok==false when the walk must
+// still run (compound/unknown shapes, or an #id resolving outside the
+// subtree where a deeper duplicate may still match). Results equal the walk:
+// indexes enumerate in document order and containment+exclusion mirror it.
+func (r *Runtime) querySelectorIndexed(root *dom.Node, sel string) (*dom.Node, bool) {
+	if root == nil || r.domDoc == nil || sel == "" {
+		if sel == "" {
+			return nil, true
+		}
+		return nil, false
+	}
+	switch {
+	case len(sel) > 1 && sel[0] == '#':
+		return r.querySelectorID(root, sel)
+	case len(sel) > 1 && sel[0] == '.':
+		for _, n := range r.domDoc.ElementsByClassName(sel[1:]) {
+			if containedStrict(root, n) {
+				return n, true
+			}
+		}
+		return nil, true
+	default:
+		// A lone "#" is an empty-id lookup, not a tag: the walk matches
+		// elements without ids there, so it must run.
+		if sel[0] == '#' || !isLowerTag(sel) {
+			return nil, false
+		}
+		for _, n := range r.domDoc.ElementsByTagName(sel) {
+			if containedStrict(root, n) {
+				return n, true
+			}
+		}
+		return nil, true
+	}
+}
+
+// containedStrict reports whether n is a proper descendant of root.
+func containedStrict(root, n *dom.Node) bool {
+	if n == nil || n == root {
+		return false
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p == root {
+			return true
+		}
+	}
+	return false
+}
+
+// isLowerTag reports whether sel is already lowercase ASCII: only then does
+// the atom-indexed tag lookup answer exactly what the case-insensitive walk
+// would (parsed documents always carry lowercase tags).
+func isLowerTag(sel string) bool {
+	if sel == "" {
+		return false
+	}
+	for i := 0; i < len(sel); i++ {
+		if c := sel[i]; c >= 'A' && c <= 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// querySelectorID answers a bare #id query from the document index: O(depth)
+// instead of O(subtree). It reports ok==false when the walk must still run:
+// a hit on root itself (the walk never tests root, but a deeper duplicate
+// still matches) or a hit outside an element-rooted subtree. A document-wide
+// miss answers nil directly: no element carries that id, so the walk could
+// only return nil too.
+func (r *Runtime) querySelectorID(root *dom.Node, sel string) (node *dom.Node, ok bool) {
+	if root == nil || r.domDoc == nil || len(sel) < 2 || sel[0] != '#' {
+		return nil, false
+	}
+	node = r.domDoc.ElementByID(sel[1:])
+	if node == nil {
+		return nil, true
+	}
+	if node == root {
+		return nil, false
+	}
+	for p := node.Parent; p != nil; p = p.Parent {
+		if p == root {
+			return node, true
+		}
+	}
+	return nil, false
+}
+
 // querySelectorAll returns every descendant of root that matches sel.
 func (r *Runtime) querySelectorAll(root *dom.Node, sel string) []*dom.Node {
+	if nodes, ok := r.querySelectorAllIndexed(root, sel); ok {
+		return nodes
+	}
 	var result []*dom.Node
 	r.collectMatching(root, sel, &result)
 	return result
+}
+
+// querySelectorAllIndexed answers simple selectors from the document
+// indexes, filtering to the rooted subtree. Same ordering and membership as
+// the walk; ok==false falls back to it.
+func (r *Runtime) querySelectorAllIndexed(root *dom.Node, sel string) ([]*dom.Node, bool) {
+	if root == nil || r.domDoc == nil || sel == "" {
+		if sel == "" {
+			return nil, true
+		}
+		return nil, false
+	}
+	var all []*dom.Node
+	switch {
+	case len(sel) > 1 && sel[0] == '.':
+		all = r.domDoc.ElementsByClassName(sel[1:])
+	case isLowerTag(sel) && sel[0] != '#':
+		all = r.domDoc.ElementsByTagName(sel)
+	default:
+		return nil, false
+	}
+	if root == &r.domDoc.Node {
+		return all, true
+	}
+	var out []*dom.Node
+	for _, n := range all {
+		if containedStrict(root, n) {
+			out = append(out, n)
+		}
+	}
+	return out, true
 }
 
 func (r *Runtime) collectMatching(n *dom.Node, sel string, result *[]*dom.Node) {
@@ -1020,9 +1657,44 @@ func (r *Runtime) matchSelector(n *dom.Node, sel string) bool {
 			}
 		}
 		return false
+	case len(sel) > 2 && sel[0] == '[' && sel[len(sel)-1] == ']':
+		// Bare attribute selector: [name] or [name=value] with an
+		// optionally quoted value. Compounds (tag[attr], [a][b]) stay
+		// unsupported and report no match, as pinned by the query tests.
+		return matchAttrSelector(n, sel[1:len(sel)-1])
 	default:
 		return strings.EqualFold(n.Data, sel)
 	}
+}
+
+// matchAttrSelector matches one [name] or [name=value] selector against an
+// element. Attribute names compare case-insensitively (HTML); values compare
+// exactly after stripping one layer of matching quotes.
+func matchAttrSelector(n *dom.Node, inner string) bool {
+	name, value, hasValue := inner, "", false
+	if i := strings.IndexByte(inner, '='); i >= 0 {
+		name, value, hasValue = inner[:i], inner[i+1:], true
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || strings.ContainsAny(name, " \t\n\"'[]") {
+		return false
+	}
+	actual, present := "", false
+	for _, a := range n.Attr {
+		if strings.EqualFold(a.Name, name) {
+			actual, present = a.Value, true
+			break
+		}
+	}
+	if !hasValue {
+		return present
+	}
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
+		(value[0] == '\'' && value[len(value)-1] == '\'')) {
+		value = value[1 : len(value)-1]
+	}
+	return present && actual == value
 }
 
 // newJSArray builds a JS Array from a slice of goja values.
@@ -1349,6 +2021,7 @@ func (r *Runtime) SetDOM(doc *dom.Document) {
 		r.nodeRegistry = make(map[int]*dom.Node)
 		r.nodeWrappers = make(map[int]*goja.Object)
 		r.shadowRoots = make(map[int]*goja.Object)
+		r.wrapCache = make(map[*dom.Node]int)
 		r.nextNID = 1
 	}
 	r.mu.Unlock()
@@ -1542,6 +2215,11 @@ func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
 		if !replaced {
 			node.Attr = append(node.Attr, dom.Attribute{Name: name, Namespace: dom.NSXML, Value: value})
 		}
+		// A namespaced write spells its name the same way GetAttribute
+		// reads it, so an xml "id" would retarget the id index.
+		if node.Doc != nil && strings.EqualFold(name, "id") {
+			node.Doc.MarkQueryDirty()
+		}
 	} else {
 		// Other namespaces have no engine semantics; keep the qualified
 		// name as a plain attribute rather than dropping the write.
@@ -1563,6 +2241,10 @@ func (r *Runtime) jsRemoveAttribute(call goja.FunctionCall) goja.Value {
 	for i := range node.Attr {
 		if strings.ToLower(node.Attr[i].Name) == lower {
 			node.Attr = append(node.Attr[:i], node.Attr[i+1:]...)
+			// A removed id retargets getElementById: drop the index.
+			if node.Doc != nil && lower == "id" {
+				node.Doc.MarkQueryDirty()
+			}
 			break
 		}
 	}
@@ -1731,5 +2413,22 @@ func escapeAttr(s string) string {
 func (r *Runtime) notifyMutation() {
 	if r.opts.OnMutation != nil {
 		r.opts.OnMutation()
+	}
+}
+
+// ChainOnMutation appends fn to the mutation callback chain instead of
+// replacing it: the engine uses this to observe DOM writes on a runtime the
+// caller constructed (and may have given its own OnMutation). A nil fn is
+// ignored. Safe for concurrent use; callbacks fire on the mutating thread.
+func (r *Runtime) ChainOnMutation(fn func()) {
+	if fn == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if prev := r.opts.OnMutation; prev != nil {
+		r.opts.OnMutation = func() { prev(); fn() }
+	} else {
+		r.opts.OnMutation = fn
 	}
 }

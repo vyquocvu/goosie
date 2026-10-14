@@ -422,3 +422,52 @@ func TestIDPropertyReflectsAttribute(t *testing.T) {
 		t.Error("getElementById did not find the element after id assignment")
 	}
 }
+
+func TestInsertAdjacentHTMLAndChildren(t *testing.T) {
+	d := testDOM(t)
+	r := newDOMRuntime(t, d)
+
+	script := `
+		var b = document.body;
+		var initialCount = b.children.length;
+		b.children[0].insertAdjacentHTML("afterend", "<p id='inserted'>Inserted</p>");
+		var inserted = document.getElementById("inserted");
+		var parentTag = inserted.parentElement.tagName.toLowerCase();
+		var newCount = b.children.length;
+	`
+	if err := r.Run(script, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("parentTag"); v.Str != "body" {
+		t.Errorf("parentTag = %q, want body", v.Str)
+	}
+	if v, _ := r.Global("newCount"); v.Num != 4 {
+		t.Errorf("newCount = %v, want 4", v.Num)
+	}
+}
+
+func TestPrependAndAppend(t *testing.T) {
+	d := testDOM(t)
+	r := newDOMRuntime(t, d)
+
+	script := `
+		var b = document.body;
+		var pFirst = document.createElement("p");
+		pFirst.id = "first";
+		b.prepend(pFirst);
+		var pLast = document.createElement("p");
+		pLast.id = "last";
+		b.append(pLast);
+		var firstId = b.firstElementChild.id;
+		var lastId = b.lastElementChild.id;
+	`
+	if err := r.Run(script, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("firstId"); v.Str != "first" {
+		t.Errorf("firstId = %q, want first", v.Str)
+	}
+	if v, _ := r.Global("lastId"); v.Str != "last" {
+		t.Errorf("lastId = %q, want last", v.Str)
+	}
+}

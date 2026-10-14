@@ -152,8 +152,12 @@ type DisplayCmd struct {
 	// opaque, so a producer only writes the field when it is not 1; an element
 	// that is fully transparent is dropped before it reaches a list at all.
 	Opacity float32
-	Text    TextRun
-	Image   ImageSpec
+	// Mask, when non-nil, multiplies a fill's coverage by the image's alpha
+	// (luminance where the image has no alpha channel), stretched over Rect.
+	// Only fills carry masks: masking text, borders and images is deferred.
+	Mask  image.Image
+	Text  TextRun
+	Image ImageSpec
 	// Gradient is the ramp a CmdGradient fills its rect with. Its stops are
 	// premultiplied and already carry the command's opacity.
 	Gradient frame.LinearGradient

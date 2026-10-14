@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/paint"
@@ -60,7 +61,9 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 		c := dl.At(i)
 		switch c.Kind {
 		case paint.CmdFill:
-			if c.Radius.Empty() {
+			if c.Mask != nil {
+				drawMaskedFill(out, c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), c.Mask, clip)
+			} else if c.Radius.Empty() {
 				out.FillRect(c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), nil)
 			} else {
 				out.FillRounded(c.Rect.Translate(dx, dy), c.Radius, applyOpacity(c.Color, c.Opacity), nil)
@@ -80,6 +83,80 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 		}
 	}
 	return nil
+}
+
+// drawMaskedFill paints color over dst, multiplied by a mask stretched over
+// the fill rect. The mask resolves per the match-source rule: images with
+// real translucency gate on alpha, alpha-less images on luminance. Rounded
+// corners do not apply under a mask (icons, the motivating case, are square);
+// mask-size/position/repeat are deferred, so the single layer always covers.
+func drawMaskedFill(out *frame.Bitmap, dst frame.Rect, color frame.Color, mask image.Image, clip frame.Rect) {
+	mb := mask.Bounds()
+	mw, mh := mb.Dx(), mb.Dy()
+	if mw <= 0 || mh <= 0 || dst.Empty() {
+		return
+	}
+	rgba, ok := mask.(*image.RGBA)
+	if !ok {
+		tmp := image.NewRGBA(image.Rect(0, 0, mw, mh))
+		draw.Draw(tmp, tmp.Bounds(), mask, mb.Min, draw.Src)
+		rgba = tmp
+	}
+	useAlpha := false
+	for i, n := 0, len(rgba.Pix)/4; i < n && i < 2048; i++ {
+		if rgba.Pix[i*4+3] < 250 {
+			useAlpha = true
+			break
+		}
+	}
+	cl := dst.Intersection(clip).Intersection(out.Bounds())
+	if cl.Empty() {
+		return
+	}
+	dw, dh := dst.W(), dst.H()
+	if dw <= 0 || dh <= 0 {
+		return
+	}
+	cr, cg, cb, ca := uint32(color.R()), uint32(color.G()), uint32(color.B()), uint32(color.A())
+	for y := int(cl.Y0); y < int(cl.Y1); y++ {
+		my := (y - int(dst.Y0)) * mh / int(dh)
+		if my < 0 {
+			my = 0
+		} else if my >= mh {
+			my = mh - 1
+		}
+		rowBase := y*out.Stride + int(cl.X0)*4
+		row := out.RGBA[rowBase : rowBase+int(cl.X1-cl.X0)*4]
+		o := 0
+		for x := int(cl.X0); x < int(cl.X1); x++ {
+			mx := (x - int(dst.X0)) * mw / int(dw)
+			if mx < 0 {
+				mx = 0
+			} else if mx >= mw {
+				mx = mw - 1
+			}
+			off := (my+mb.Min.Y)*rgba.Stride + (mx+mb.Min.X)*4
+			var ma uint32
+			if useAlpha {
+				ma = uint32(rgba.Pix[off+3])
+			} else {
+				ma = (uint32(rgba.Pix[off])*2126 + uint32(rgba.Pix[off+1])*7152 + uint32(rgba.Pix[off+2])*722) / 10000
+			}
+			if ma == 0 {
+				o += 4
+				continue
+			}
+			p := row[o : o+4 : o+4]
+			dstc := frame.Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
+			src := frame.Color(cr*ma/255<<24 | cg*ma/255<<16 | cb*ma/255<<8 | ca*ma/255)
+			outc := frame.BlendOver(dstc, src)
+			p[0] = byte(outc >> 24)
+			p[1] = byte(outc >> 16)
+			p[2] = byte(outc >> 8)
+			p[3] = byte(outc)
+			o += 4
+		}
+	}
 }
 
 // applyOpacity folds a command's opacity into its premultiplied color by scaling

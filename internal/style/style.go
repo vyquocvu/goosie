@@ -327,7 +327,11 @@ type ComputedStyle struct {
 	// BackgroundImage is the url() layer of the background shorthand or
 	// background-image, kept as authored (possibly relative); the engine
 	// resolves and fetches it. Empty means no image layer.
-	BackgroundImage  string
+	BackgroundImage string
+	// MaskImage is the url() layer of mask-image (or -webkit-mask-image),
+	// kept as authored like BackgroundImage. Only a single url() layer is
+	// supported; additional layers are dropped at parse. Empty means no mask.
+	MaskImage        string
 	BackgroundRepeat BgRepeat
 	// BackgroundRepeatY carries the second axis when background-repeat names
 	// two modes (`repeat round`); single modes mirror into both axes.
@@ -527,6 +531,7 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.BorderRadius = [4][2]float32{}
 	s.BackgroundColor = css.Color{}
 	s.BackgroundImage = ""
+	s.MaskImage = ""
 	s.BackgroundGradient = Gradient{}
 	s.BackgroundRadialGradient = RadialGradient{}
 	s.BoxShadow = nil
@@ -692,10 +697,15 @@ select { display: inline; }
    a widget it cannot reproduce, so they stay inline and take no box. */
 input { display: inline-block; background-color: #ffffff; }
 textarea { display: inline-block; background-color: #ffffff; }
-input[type=submit], input[type=reset], input[type=button], input[type=image],
+input[type=image],
 input[type=file], input[type=date], input[type=time], input[type=datetime-local],
 input[type=datetime], input[type=month], input[type=week], input[type=color],
 input[type=range] { display: inline; }
+/* Chrome lays button-like inputs out as inline-level boxes that shrink-wrap
+   their value label. display:inline would send them down the generic inline
+   descent with no children to measure, collapsing every submit button to 0x0,
+   so they are inline-block like <button> below and sized by replacedSize. */
+input[type=submit], input[type=reset], input[type=button] { display: inline-block; }
 input[type=hidden] { display: none; }
 /* Chrome lays a button out as an inline-level box that shrinks to its label, so
    a row of buttons sits side by side. */
@@ -791,19 +801,22 @@ func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport, f
 
 	index := buildRuleIndex(allSheets)
 	result := make(map[dom.NodeID]*ComputedStyle)
+	// One sibling cache for the whole pass: :nth-child counting would
+	// otherwise walk siblings per tested element (O(siblings²) per parent).
+	six := css.NewSiblingIndex()
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, index, result, vp, fonts)
+		resolveNode(c, index, result, vp, fonts, six)
 	}
 	return result
 }
 
-func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedStyle, vp Viewport, fonts *CustomFonts) {
+func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) {
 	if n == nil {
 		return
 	}
 	if n.Element() {
 		parentStyle := findParentStyle(n, result)
-		cs := computeStyle(n, index, parentStyle, vp, fonts)
+		cs := computeStyle(n, index, parentStyle, vp, fonts, six)
 		result[n.ID] = cs
 	} else if n.Text() {
 		parentStyle := findParentStyle(n, result)
@@ -813,7 +826,7 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, index, result, vp, fonts)
+		resolveNode(c, index, result, vp, fonts, six)
 	}
 }
 
@@ -875,7 +888,7 @@ func sortCascade(entries []cascadeEntry) {
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].before(entries[j]) })
 }
 
-func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts) *ComputedStyle {
+func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
 	cs := DefaultStyle()
 	if parent != nil {
 		inheritFromParent(&cs, parent)
@@ -900,7 +913,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	matched := cands[:0]
 	ruleDecls, ruleImportant := 0, 0
 	for _, cand := range cands {
-		if !cand.sel.Matches(n) {
+		if !cand.sel.MatchesIndexed(n, six) {
 			continue
 		}
 		matched = append(matched, cand)
@@ -1139,8 +1152,14 @@ func presentationalHints(n *dom.Node) []css.Declaration {
 	addLen("height", n.GetAttribute("height"))
 	addLen("border-spacing", n.GetAttribute("cellspacing"))
 	// `cellpadding` is declared on the table and paid for by its cells, and
-	// `align` on a cell is its text alignment.
-	if n.Data == "td" || n.Data == "th" {
+	// `align` on blocks, table sections, and cells is its text alignment.
+	switch n.Data {
+	case "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "tbody", "thead", "tfoot":
+		switch v := strings.ToLower(strings.TrimSpace(n.GetAttribute("align"))); v {
+		case "left", "right", "center", "justify":
+			out = append(out, css.Declaration{Property: "text-align", Value: v, Parsed: css.ParseValue(v)})
+		}
+	case "td", "th":
 		for p := n.Parent; p != nil; p = p.Parent {
 			if p.Data == "table" {
 				addLen("padding", p.GetAttribute("cellpadding"))
@@ -1799,6 +1818,11 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BackgroundGradient = parseGradient(value)
 		cs.BackgroundRadialGradient = parseRadialGradient(value)
 		cs.BackgroundImage = extractBackgroundURL(value)
+	case "mask-image", "-webkit-mask-image":
+		// One url() layer; anything else (none, additional layers,
+		// gradients) leaves the field empty. Both spellings feed the same
+		// field in cascade order so the later declaration wins.
+		cs.MaskImage = extractBackgroundURL(value)
 	case "background-repeat":
 		cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(value)
 	case "background-origin":

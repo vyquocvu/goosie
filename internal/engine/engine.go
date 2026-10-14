@@ -46,6 +46,9 @@ type Session struct {
 	linkBase  string
 	linker    CSSLinker
 
+	scriptBase  string
+	scriptFetch ScriptFetcher
+
 	// sheets are the parsed stylesheets kept for RefreshAfterFonts: when
 	// deferred fonts land, styles must be re-resolved against the now-populated
 	// customFonts table so text picks the web faces instead of system fallbacks.
@@ -59,6 +62,9 @@ type Session struct {
 	// borderImages holds decoded border-image sources by node, attached to
 	// the layout object's BorderImage like backgrounds (never natural).
 	borderImages map[dom.NodeID]stdimage.Image
+	// masks holds decoded mask-image sources by node, attached to the
+	// layout object's MaskImage like backgrounds (never natural).
+	masks map[dom.NodeID]stdimage.Image
 	// bgVectorSrc holds raw bytes for vector backgrounds without intrinsic
 	// dimensions or ratio: their raster size is the laid-out tile, known
 	// only after layout, so they decode in the Reflow attachment instead of
@@ -276,6 +282,18 @@ func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegis
 	}
 }
 
+// WithScripts lets the session fetch <script src> bundles during construction
+// so external scripts run in document order between the inline ones. base is
+// the document's final URL (after redirects); srcs resolve against it and the
+// fetcher only ever sees absolute http(s) URLs. Without it, only inline
+// scripts run and bundle-booted pages stay shells.
+func WithScripts(base string, fetch ScriptFetcher) Option {
+	return func(s *Session) {
+		s.scriptBase = base
+		s.scriptFetch = fetch
+	}
+}
+
 // WithJS supplies a JavaScript runtime for executing the document's classic
 // scripts. The engine walks <script> elements in document order after the DOM
 // is built and runs each one through the runtime. Script errors are recorded
@@ -329,6 +347,12 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// engine's arena references.
 	if s.jsRT != nil {
 		s.jsRT.SetDOM(doc)
+		// Observe DOM writes for the pump: without this, PumpJS cannot tell
+		// a mutation tick from a canvas-only one and must re-resolve on
+		// every fired timer/RAF. Chained, never replacing a caller callback.
+		if s.inv != nil {
+			s.jsRT.ChainOnMutation(s.JSMutationSink())
+		}
 	}
 	s.runScripts()
 	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW, s.sub)
@@ -561,6 +585,23 @@ const FontFetchBudget = 6 * time.Second
 // so a page that references hundreds cannot stall the first frame.
 const maxLoadedImages = 256
 
+// ScriptFetcher fetches one external classic script. base is the document URL
+// the src resolves against; the returned bytes are the script source. A
+// fetcher that fails leaves that bundle unexecuted, and the page keeps the
+// globals its other scripts set, so one missing bundle does not stop
+// rendering. Concurrent calls must be safe; the engine fetches through a
+// bounded pool.
+type ScriptFetcher func(base, url string) ([]byte, error)
+
+// maxExternalScripts bounds how many <script src> bundles one document may
+// fetch, mirroring maxLinkedSheets: a page that references hundreds cannot
+// stall the first frame behind them.
+const maxExternalScripts = 32
+
+// ScriptFetchBudget stops external-script fetching past a wall-clock
+// deadline; bundles left unfetched are skipped exactly like failed ones.
+const ScriptFetchBudget = 6 * time.Second
+
 // ImageFetchBudget stops subresource fetching past a wall-clock deadline so a
 // slow or unreachable host cannot push the first render past its time limit;
 // images left unfetched simply reserve their box and paint nothing.
@@ -610,6 +651,9 @@ type imgRef struct {
 	// border marks a border-image source: fetched and budgeted like a
 	// background (no layout natural size), attached to BorderImage.
 	border bool
+	// mask marks a mask-image source: fetched and budgeted like a
+	// background (no layout natural size), attached to MaskImage.
+	mask bool
 }
 
 // loadImages collects the document's image references during NewSession.
@@ -636,6 +680,7 @@ func (s *Session) initImageMaps() {
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
 	s.borderImages = make(map[dom.NodeID]stdimage.Image)
+	s.masks = make(map[dom.NodeID]stdimage.Image)
 	s.bgVectorSrc = make(map[string][]byte)
 	s.bgVectorRef = make(map[dom.NodeID]string)
 	s.bgNoRatio = make(map[string]bool)
@@ -719,6 +764,22 @@ func (s *Session) collectImageRefs() []imgRef {
 				}
 			} else if abs, ok := resolveSheetURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
+				if !seen[abs] {
+					seen[abs] = true
+					uniq = append(uniq, abs)
+				}
+			}
+		}
+		if st, ok := s.Styles[n.ID]; ok && st.MaskImage != "" {
+			m := st.MaskImage
+			if strings.HasPrefix(m, "data:") {
+				refs = append(refs, imgRef{id: n.ID, abs: m, mask: true})
+				if !seen[m] {
+					seen[m] = true
+					uniq = append(uniq, m)
+				}
+			} else if abs, ok := resolveSheetURL(s.imgBase, m); ok {
+				refs = append(refs, imgRef{id: n.ID, abs: abs, mask: true})
 				if !seen[abs] {
 					seen[abs] = true
 					uniq = append(uniq, abs)
@@ -881,6 +942,15 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 	s.imgMu.Lock()
 	defer s.imgMu.Unlock()
 	for _, r := range refs {
+		// Masks resolve before the vector-background deferral below: an
+		// intrinsic-less mask SVG has no tile-size raster path yet, so it
+		// stays unattached (painting unmasked) rather than joining one.
+		if r.mask {
+			if img, ok := byURL[r.abs]; ok {
+				s.masks[r.id] = img
+			}
+			continue
+		}
 		if r.bg {
 			if _, ok := s.bgVectorSrc[r.abs]; ok {
 				// Intrinsic-less SVGs deferred for tile-size raster have
@@ -1064,6 +1134,9 @@ func (s *Session) Reflow(viewportW float32) error {
 				}
 				if img, ok := s.bgImages[n.ID]; ok {
 					candidate.Objects[i].BgImage = img
+				}
+				if img, ok := s.masks[n.ID]; ok {
+					candidate.Objects[i].MaskImage = img
 				}
 				if img, ok := s.borderImages[n.ID]; ok {
 					candidate.Objects[i].BorderImage = img
@@ -1546,22 +1619,108 @@ func (s *Session) runScripts() {
 	if root == nil {
 		root = &s.Doc.Node
 	}
-	walkScripts(root, s.jsRT)
-}
-
-func walkScripts(n *dom.Node, rt *js.Runtime) {
-	if n == nil {
-		return
+	// Collect scripts in document order. Inline sources run from the tree;
+	// external bundles reserve a slot, fetch concurrently below, and run
+	// from their slot so execution order matches document order even
+	// though the bytes arrive out of order. async/defer refine this in a
+	// later change; v1 runs every classic script in document order.
+	type scriptItem struct {
+		text string // inline source, or fetched bundle once filled
+		ext  string // absolute bundle URL when external, else ""
+		name string // sourceURL reported in stack traces
 	}
-	if n.Element() && n.Data == "script" {
-		src := n.TextContent()
-		if src != "" {
-			_ = rt.Run(src, "inline")
+	var items []scriptItem
+	extLeft := maxExternalScripts
+	var collect func(n *dom.Node)
+	collect = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.Element() && n.Data == "script" && isClassicScript(n) {
+			if src := scriptSrc(n); src != "" {
+				// A src tag's inline text is ignored, per HTML.
+				if s.scriptFetch != nil && extLeft > 0 {
+					if abs, ok := resolveSheetURL(s.scriptBase, src); ok {
+						extLeft--
+						items = append(items, scriptItem{ext: abs, name: abs})
+					}
+				}
+			} else if text := n.TextContent(); text != "" {
+				items = append(items, scriptItem{text: text, name: "inline"})
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			collect(c)
 		}
 	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		walkScripts(c, rt)
+	collect(root)
+
+	// External bundles fetch through a bounded pool, the same shape as
+	// linked stylesheets: sequential fetching stalls the document behind
+	// the first slow host. Failures leave the slot empty and execution
+	// skips it, so one dead bundle never stops the page.
+	deadline := time.Now().Add(ScriptFetchBudget)
+	const scriptWorkers = 8
+	sem := make(chan struct{}, scriptWorkers)
+	var wg sync.WaitGroup
+	for i, it := range items {
+		if it.ext == "" || time.Now().After(deadline) {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, abs string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if data, err := s.scriptFetch(s.scriptBase, abs); err == nil && len(data) > 0 {
+				items[i].text = string(data)
+			}
+		}(i, it.ext)
 	}
+	wg.Wait()
+
+	for _, it := range items {
+		if it.text == "" {
+			continue
+		}
+		// Script errors are silently ignored: a page with a broken script
+		// still renders, matching browser behavior where one bad ad tag
+		// does not take down the page.
+		_ = s.jsRT.Run(it.text, it.name)
+	}
+}
+
+// scriptSrc returns the src attribute of a script tag, or "" when inline.
+func scriptSrc(n *dom.Node) string {
+	for _, a := range n.Attr {
+		if strings.EqualFold(a.Name, "src") {
+			return strings.TrimSpace(a.Value)
+		}
+	}
+	return ""
+}
+
+// isClassicScript reports whether a script tag holds executable classic
+// JavaScript: no type (or a JavaScript MIME type) runs, while modules and
+// non-JS payloads (JSON-LD, templates) never do. nomodule scripts run:
+// without module support this engine is exactly the fallback audience.
+func isClassicScript(n *dom.Node) bool {
+	for _, a := range n.Attr {
+		if !strings.EqualFold(a.Name, "type") {
+			continue
+		}
+		t := strings.ToLower(strings.TrimSpace(a.Value))
+		switch t {
+		case "", "text/javascript", "application/javascript",
+			"application/ecmascript", "application/x-ecmascript",
+			"application/x-javascript", "text/ecmascript",
+			"text/jscript", "text/livescript":
+			return true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Close releases resources held by the session. If a JS runtime was supplied,
@@ -1602,18 +1761,28 @@ func (s *Session) PumpJS(viewportW float32) bool {
 		s.jsRT.TickRAF(time.Now())
 		raf = true
 	}
-	dirty := fired || raf
+	// Mutation state is captured before Reset: it decides between a full
+	// re-resolve and skipping straight to repaint below.
+	mutated := false
 	if s.inv != nil {
-		if !s.inv.Empty() {
-			dirty = true
-		}
+		mutated = !s.inv.Empty()
 		s.inv.Reset()
 	}
-	if !dirty {
+	if !fired && !raf && !mutated {
 		return false
 	}
 	if atomic.LoadInt32(&s.deferredActive) > 0 {
 		return false
+	}
+	if !mutated {
+		// Timers/RAF ran but recorded no DOM mutation (canvas animation,
+		// state-only work): every DOM write notifies the sink, so styles
+		// and layout are unchanged and the two full resolves plus reflow
+		// would only recompute identical trees. A rAF canvas loop used to
+		// pay that per frame — 60 full pipelines a second on a large
+		// document. Still report dirty: canvas ops are read live at paint
+		// time and need the repaint.
+		return true
 	}
 	// Re-resolve before reflowing: scripts may have added nodes or classes
 	// the load-time cascade never saw, and unstyled nodes are skipped by

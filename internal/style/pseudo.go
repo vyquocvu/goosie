@@ -21,6 +21,7 @@ func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementS
 
 	index := buildRuleIndex(allSheets)
 	result := make(map[PseudoKey]*ComputedStyle)
+	six := css.NewSiblingIndex()
 
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -34,8 +35,13 @@ func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementS
 			}
 			if parentStyle != nil {
 				for _, pseudo := range []string{"before", "after"} {
-					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts)
-					if cs != nil && (len(cs.ContentParts) > 0 || (cs.Content != "" && cs.Content != "normal" && cs.Content != "none")) {
+					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
+					// An explicitly set empty string (content:"") is generated
+					// content - an empty box - not no content: float-clearing
+					// clearfixes depend on that box existing. Only the unset
+					// default ("normal", which computes to none on pseudos) and
+					// an explicit none suppress generation.
+					if cs != nil && (len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none")) {
 						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 					}
 				}
@@ -54,7 +60,7 @@ func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementS
 
 // computePseudoStyle computes the style for a pseudo-element of the given node.
 // It returns nil if no rules match.
-func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle, fonts *CustomFonts) *ComputedStyle {
+func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
 	candidates := index.candidates(n)
 	var matchingDecls []css.Declaration
 	var matchingOrigins []int
@@ -62,7 +68,7 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 	var matchingOrders []int
 
 	for _, entry := range candidates {
-		if !entry.sel.MatchesPseudoElement(n, pseudo) {
+		if !entry.sel.MatchesPseudoElementIndexed(n, pseudo, six) {
 			continue
 		}
 		a, b, c := entry.sel.Specificity()
