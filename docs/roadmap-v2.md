@@ -1,6 +1,6 @@
 # Goosie v2 — Production Readiness Review and Delivery Roadmap
 
-- Updated: 2026-10-09
+- Updated: 2026-10-14
 - Reviewed baseline: `feat/v2` at `f027b4a`
 - Status: implemented features verified against gates
 
@@ -276,3 +276,51 @@ The product owner approves the full roadmap for release, including the open item
 - The 14-day release-candidate observation period is waived for v1; the automated gates (full suite, `-race`, archtest, gate suite, entrypoint limits, WPT ratchet, govulncheck, release smoke) are the release evidence.
 - Sanitizer coverage is Go `-race` in CI; cgo ASan for the darwin shim is not wired.
 - Human verification is not required for v1 (owner decision 2026-10-09): dev-test evidence is the bar. Keyboard/IME/input journeys are covered by automated suites (interaction e2e, Chromium interaction-parity fixtures, IME/keyboard tests, accessibility-tree tests); privacy review is waived with private-mode isolation/clearing tests and diagnostic-redaction rules as compensating controls.
+
+## 10. Everyday Web Browser Experience Roadmap (End-User Features)
+
+> **Strategic Focus:** Transition Goosie from a headless/document engine into a complete, comfortable, everyday graphical web browser (comparable in UX to Safari and Chrome). The core rendering and backend stores already exist; this roadmap delivers the user-facing chrome, interactions, management panels, and standard desktop browser expectations.
+
+### Milestone 1: Smart Omnibox & Core Navigation UX
+
+| Feature ID | Feature Name | User Experience & Technical Implementation | Primary Files | Acceptance Criteria |
+| --- | --- | --- | --- | --- |
+| **M1.1** | **Search Engine Integration** | Typing search terms (non-URL text) in the address bar automatically queries the default search engine (Google / DuckDuckGo). | `internal/toolbar/`, `cmd/goosie/main.go` | Non-URLs automatically navigate to `https://www.google.com/search?q=...` or DuckDuckGo |
+| **M1.2** | **Omnibox Suggestions Dropdown** | Dropdown overlay beneath the address bar showing matches from History, Bookmarks, and search queries as the user types. | `internal/toolbar/`, `internal/history/`, `internal/bookmarks/` | Arrow keys navigate suggestions; Enter selects; clicking outside dismisses popup |
+| **M1.3** | **Dynamic Navigation Button States** | Back and Forward toolbar buttons dynamically grey out / disable when history boundary is reached; Reload with Shift bypasses cache. | `internal/toolbar/`, `cmd/goosie/toolbar_window.go` | Back is disabled on initial tab load; re-enables on subsequent navigations; Shift-click forces cache skip |
+| **M1.4** | **Page Zoom Controls & Badge** | Keyboard shortcuts `Cmd +`, `Cmd -`, `Cmd 0` with a temporary or persistent zoom percentage badge in the Omnibox. | `internal/toolbar/`, `internal/engine/engine.go` | Zooming reflows viewport accurately; badge shows `125%`, clicking resets to 100% |
+
+### Milestone 2: Tab Strip & Window Experience
+
+| Feature ID | Feature Name | User Experience & Technical Implementation | Primary Files | Acceptance Criteria |
+| --- | --- | --- | --- | --- |
+| **M2.1** | **New Tab Button & Per-Tab Close** | Visible `+` button at the right end of the tab strip; visible `x` button on tab hover to close the specific tab. | `internal/tabs/draw.go`, `internal/tabs/layout.go` | Clicking `+` opens a blank/new tab; clicking `x` closes targeted tab without switching active selection |
+| **M2.2** | **Tab Context Menu** | Right-clicking on any tab opens a native/custom menu: *Close Tab*, *Close Other Tabs*, *Pin Tab*, *Duplicate Tab*, *Reopen Closed Tab* (`Cmd+Shift+T`). | `internal/tabs/`, `cmd/goosie/toolbar_window.go` | Right-click triggers action menu; closing other tabs preserves pinned and selected tab |
+| **M2.3** | **Private Browsing Window** | `Cmd+Shift+N` opens a dedicated Private Window with distinct dark/incognito chrome theme and isolated in-memory stores. | `cmd/goosie/main.go`, `internal/session/` | Zero cookies, history, or cache written to disk upon closing Private Window |
+| **M2.4** | **Session Restore on Startup** | Option to "Open tabs from previous session" on browser launch, restoring tab URLs and scroll positions. | `internal/session/`, `cmd/goosie/main.go` | Browser restart reloads previous tab state and positions cleanly |
+
+### Milestone 3: Bookmarks, History & Download Manager UI
+
+| Feature ID | Feature Name | User Experience & Technical Implementation | Primary Files | Acceptance Criteria |
+| --- | --- | --- | --- | --- |
+| **M3.1** | **Bookmarks Bar & Quick Star** | Star icon (`⭐`) in the Omnibox to save page; horizontal Bookmarks Bar below toolbar for single-click access to favorite sites. | `internal/toolbar/`, `internal/bookmarks/` | Star toggles fill when bookmarked; clicking bookmarks bar entry loads URL |
+| **M3.2** | **History Manager Popover** | History button / shortcut (`Cmd+Y`) opening a search-enabled popover of visited pages categorized by date/time. | `internal/history/`, `cmd/goosie/toolbar_window.go` | Filter history by keyword; click to navigate; individual entry delete |
+| **M3.3** | **Downloads Manager Popover** | Toolbar download icon showing download progress ring/bar; clicking opens list of downloaded files with *"Show in Finder"*. | `internal/download/`, `internal/toolbar/` | In-flight downloads show progress; completed files revealable in macOS Finder |
+| **M3.4** | **Clear Browsing Data Modal** | Hộp thoại `Cmd+Shift+Delete` allowing user to select time range (Past hour, 24h, All time) and checkboxes (History, Cookies, Cache). | `cmd/goosie/`, `internal/net/`, `internal/history/` | Triggering clear completely purges selected stores from disk and active memory |
+
+### Milestone 4: In-Page Navigation & Reader Tools
+
+| Feature ID | Feature Name | User Experience & Technical Implementation | Primary Files | Acceptance Criteria |
+| --- | --- | --- | --- | --- |
+| **M4.1** | **Find in Page (`Cmd+F`)** | Floating search bar in top-right corner; highlights matching text occurrences on page; shows match counter (`1 of 12`); `Enter`/`Shift+Enter` jumps. | `cmd/goosie/`, `internal/engine/find.go`, `internal/paint/` | Matches highlighted with yellow/orange indicator; viewport auto-scrolls to active match |
+| **M4.2** | **Page Context Menu** | Right-clicking document content displays contextual menu: *Back*, *Forward*, *Reload*, *Copy Link Address*, *Open Link in New Tab*, *Save Image As*, *Inspect Element*. | `cmd/goosie/toolbar_window.go`, `internal/engine/` | Right-click detects clicked node type (link, image, plain text) and displays appropriate options |
+| **M4.3** | **Distraction-Free Reader Mode** | Reader Mode button in Omnibox for articles; extracts main article content, strips ads/sidebars, and presents styled typography with Dark/Sepia/Light themes. | `internal/dom/`, `internal/style/`, `internal/engine/` | Reading view formats text cleanly; customizable font size |
+| **M4.4** | **Print & Export to PDF (`Cmd+P`)** | Print dialog or direct export to PDF capturing the full laid-out document. | `cmd/goosie/`, `internal/paint/`, `internal/raster/` | Generates valid, printable PDF file of current document |
+
+### Milestone 5: Settings, Forms & Developer Inspection
+
+| Feature ID | Feature Name | User Experience & Technical Implementation | Primary Files | Acceptance Criteria |
+| --- | --- | --- | --- | --- |
+| **M5.1** | **Preferences / Settings Window (`Cmd+,`)** | Settings UI: Default Search Engine, Default Download Location, Startup Behavior, and Privacy Toggles. | `cmd/goosie/`, `internal/session/` | Changing search engine or download path persists to user profile JSON |
+| **M5.2** | **Standard Form Controls & Basic Autofill** | Render native/styled HTML form controls: `<select>` dropdowns, checkboxes, radio buttons, password reveal button; basic credentials remember. | `internal/layout/`, `internal/paint/`, `internal/dom/` | Form inputs allow typing, selection changes, and form submission via Enter / click |
+| **M5.3** | **View Source & Simple Inspector (`Cmd+Option+U`, `Cmd+Option+I`)** | *View Source* opens syntax-highlighted HTML; *Inspect* highlights hovered DOM elements with bounding box and computed CSS rules. | `cmd/goosie/`, `internal/dom/`, `internal/style/` | Inspecting an element displays its tag, attributes, box model metrics (padding/border/margin) |

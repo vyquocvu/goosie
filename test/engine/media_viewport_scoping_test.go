@@ -81,3 +81,18 @@ func TestConcurrentLoadsDoNotShareMediaWidth(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestPrintStyleAndLinkSkippedOnScreen(t *testing.T) {
+	html := `<html><head>
+		<style media="print">p { color: rgb(255, 0, 0); }</style>
+		<style media="screen">p { color: rgb(0, 255, 0); }</style>
+	</head><body><p id="p">text</p></body></html>`
+	s, err := engine.NewSession(html, nil, 1000)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	green := css.Color{R: 0, G: 255, B: 0, A: 255}
+	if got := mediaColor(t, s); got != green {
+		t.Fatalf("expected green (%+v) on screen, got %+v", green, got)
+	}
+}

@@ -340,12 +340,32 @@ func (r *Runtime) setupWindow() {
 	_ = win.Set("self", win)
 	_ = win.Set("globalThis", win)
 	nav := r.vm.NewObject()
-	_ = nav.Set("userAgent", "Goosie/2.0")
+	_ = nav.Set("userAgent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0")
 	_ = nav.Set("language", "en-US")
 	_ = nav.Set("languages", r.vm.ToValue([]string{"en-US", "en"}))
 	_ = nav.Set("cookieEnabled", true)
 	_ = nav.Set("onLine", true)
 	_ = win.Set("navigator", nav)
+
+	_ = win.Set("matchMedia", func(call goja.FunctionCall) goja.Value {
+		q := ""
+		if len(call.Arguments) > 0 {
+			q = call.Arguments[0].String()
+		}
+		mql := r.vm.NewObject()
+		_ = mql.Set("media", q)
+		matches := true
+		lq := strings.ToLower(q)
+		if strings.Contains(lq, "print") && !strings.Contains(lq, "not") {
+			matches = false
+		}
+		_ = mql.Set("matches", matches)
+		_ = mql.Set("addListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+		_ = mql.Set("removeListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+		_ = mql.Set("addEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+		_ = mql.Set("removeEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
+		return mql
+	})
 }
 
 func (r *Runtime) setupUnsupportedAPIs() {

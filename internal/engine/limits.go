@@ -541,15 +541,19 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 	linksLeft := maxLinkedSheets
 	stats, err := walkDocument(doc, func(n *dom.Node) error {
 		if n.Element() && n.Data == "style" {
-			all = append(all, cssSource{text: n.TextContent()})
+			if css.MatchMedia(n.GetAttribute("media"), viewportW) {
+				all = append(all, cssSource{text: n.TextContent()})
+			}
 		}
 		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 {
-			if href := stylesheetHref(n); href != "" {
-				if abs, ok := resolveSheetURL(base, href); ok && !linked[abs] {
-					linked[abs] = true
-					linksLeft--
-					all = append(all, cssSource{})
-					pending = append(pending, pendingLink{slot: len(all) - 1, abs: abs})
+			if css.MatchMedia(n.GetAttribute("media"), viewportW) {
+				if href := stylesheetHref(n); href != "" {
+					if abs, ok := resolveSheetURL(base, href); ok && !linked[abs] {
+						linked[abs] = true
+						linksLeft--
+						all = append(all, cssSource{})
+						pending = append(pending, pendingLink{slot: len(all) - 1, abs: abs})
+					}
 				}
 			}
 		}

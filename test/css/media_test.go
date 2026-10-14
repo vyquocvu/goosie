@@ -143,3 +143,24 @@ func TestMediaPreferenceFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchMedia(t *testing.T) {
+	if !css.MatchMedia("", 1280) {
+		t.Error("expected empty media to match")
+	}
+	if !css.MatchMedia("all", 1280) {
+		t.Error("expected 'all' to match")
+	}
+	if !css.MatchMedia("screen", 1280) {
+		t.Error("expected 'screen' to match")
+	}
+	if css.MatchMedia("print", 1280) {
+		t.Error("expected 'print' to not match on screen")
+	}
+	if css.MatchMedia("only print", 1280) {
+		t.Error("expected 'only print' to not match on screen")
+	}
+	if !css.MatchMedia("not print", 1280) {
+		t.Error("expected 'not print' to match on screen")
+	}
+}

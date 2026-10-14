@@ -27,10 +27,10 @@ const MaxResponseBytes = 8 << 20
 // would otherwise buffer up to its own 10 MiB default before any body byte.
 const MaxResponseHeaderBytes = 256 << 10
 
-// userAgent is sent with every request. Sites that gate content by client
-// identity answer a generic Go client with 403s, and parity is measured
-// against what a browser is served.
-const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+// userAgent is sent with every request. We identify as Goosie rather than
+// spoofing Chrome, because Cloudflare and other CDNs detect TLS fingerprint
+// mismatches (Go crypto/tls vs Chrome JA3/JA4) and trigger bot challenges.
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0"
 
 // ErrResponseTooLarge reports a response that exceeds MaxResponseBytes.
 var ErrResponseTooLarge = errors.New("net: response exceeds 8 MiB limit")

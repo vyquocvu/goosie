@@ -493,6 +493,16 @@ func splitOutsideParens(s, sep string) []string {
 	return append(out, strings.TrimSpace(s[start:]))
 }
 
+// MatchMedia reports whether a media condition matches on screen for the given viewport width.
+func MatchMedia(cond string, viewportWidth float32) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" || strings.EqualFold(cond, "all") {
+		return true
+	}
+	p := &parser{mediaWidth: viewportWidth}
+	return p.mediaConditionTrue(cond)
+}
+
 // mediaConditionTrue reports whether any comma-separated group applies.
 func (p *parser) mediaConditionTrue(cond string) bool {
 	for _, group := range splitTopLevel(cond, ',') {
