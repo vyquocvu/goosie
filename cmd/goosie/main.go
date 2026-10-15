@@ -1725,13 +1725,21 @@ func subresourceCtx(ctx context.Context, base string) context.Context {
 }
 
 // normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
+// If the input contains spaces, it's treated as a search query and redirected
+// to Google Search. Single words without dots are assumed to be domain names.
 func normalizeURL(raw string) string {
 	if raw == "" {
 		return raw
 	}
+	// Check if this looks like a URL with scheme
 	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "file://") {
 		return raw
 	}
+	// If input contains spaces, treat it as a search query
+	if strings.ContainsAny(raw, " \t") {
+		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
+	}
+	// Looks like a domain or IP, add https:// prefix
 	return "https://" + raw
 }
 
