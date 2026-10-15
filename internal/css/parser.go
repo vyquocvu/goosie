@@ -159,6 +159,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseMediaRule(sheet)
 			case "supports":
 				p.parseSupportsRule(sheet)
+			case "layer":
+				p.parseLayerRule(sheet)
 			case "font-face":
 				p.parseFontFaceRule(sheet)
 			case "keyframes", "-webkit-keyframes":
@@ -173,6 +175,48 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 			sheet.Rules = append(sheet.Rules, rule)
 		}
 	}
+}
+
+// parseLayerRule enters a named or anonymous @layer block and appends its
+// rules in source order. Layer precedence is not modeled yet, but parsing the
+// block keeps the ordinary declarations available to the cascade; skipping an
+// entire layer left modern utility-CSS pages completely unstyled.
+func (p *parser) parseLayerRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++ // layer-order statement; source order is the available fallback
+		return
+	}
+	p.pos++ // the '{'
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	inner := &parser{input: body, mediaWidth: p.mediaWidth}
+	inner.parseInto(sheet)
 }
 
 // atRuleName reads an @rule name without consuming past its prelude, so the

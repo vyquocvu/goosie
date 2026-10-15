@@ -1,9 +1,8 @@
 // Render testdata/urls.txt with Playwright Chromium into
 // /tmp/playwright-url-renders/<slug>.png for the parity scorer.
 //
-// JS is disabled in the reference: goosie has no script engine, so the
-// comparison scores HTML+CSS rendering, which is the parity target. Images
-// stay enabled because <img> loading is a feature goosie must grow.
+// JavaScript is disabled by default for the legacy HTML+CSS parity corpus.
+// Set GOOSIE_PARITY_JS=1 to compare dynamic pages with scripts enabled.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -21,12 +20,11 @@ function slug(url) {
 async function main() {
   const only = process.argv.slice(2);
   // URLS_JSON points at [{"url","out"}] pairs the parity harness froze from a
-  // single fetch; without it the corpus is urls.txt and each output is named
-  // after its slug.
+  // single fetch. URLS_FILE selects a plain URL list; by default it is urls.txt.
   const fromManifest = process.env.URLS_JSON
     ? JSON.parse(fs.readFileSync(process.env.URLS_JSON, 'utf8'))
     : fs
-        .readFileSync(path.join(__dirname, 'urls.txt'), 'utf8')
+        .readFileSync(process.env.URLS_FILE || path.join(__dirname, 'urls.txt'), 'utf8')
         .split('\n')
         .map((s) => s.trim())
         .filter((s) => s && !s.startsWith('#'))
@@ -38,7 +36,7 @@ async function main() {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 1,
-    javaScriptEnabled: false,
+    javaScriptEnabled: process.env.GOOSIE_PARITY_JS === '1',
     locale: 'en-US',
   });
   for (const { url, out } of fromManifest) {

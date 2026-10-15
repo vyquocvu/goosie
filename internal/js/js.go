@@ -359,6 +359,20 @@ func (r *Runtime) setupWindow() {
 		if strings.Contains(lq, "print") && !strings.Contains(lq, "not") {
 			matches = false
 		}
+		// Goosie has no host appearance setting yet, so its document environment
+		// follows the browser's default light color scheme. Returning true for
+		// every query made common boot scripts (including rust-lang/book) select
+		// their dark palette even though CSS media matching uses light mode.
+		if strings.Contains(lq, "prefers-color-scheme") {
+			dark := strings.Contains(lq, "dark")
+			light := strings.Contains(lq, "light")
+			if dark {
+				matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+			}
+			if light {
+				matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+			}
+		}
 		_ = mql.Set("matches", matches)
 		_ = mql.Set("addListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		_ = mql.Set("removeListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })

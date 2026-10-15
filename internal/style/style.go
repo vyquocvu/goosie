@@ -363,6 +363,7 @@ type ComputedStyle struct {
 	CustomFamily  string
 	CustomFontIdx uint16
 	FontSize      float32
+	rootFontSize  float32
 	FontWeight    FontWeight
 	FontStyle     FontStyle
 	LineHeight    float32
@@ -543,18 +544,19 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 // DefaultStyle returns the initial computed style with CSS defaults.
 func DefaultStyle() ComputedStyle {
 	return ComputedStyle{
-		Display:    DisplayInline,
-		Position:   PositionStatic,
-		Opacity:    1.0,
-		Width:      -1,
-		Height:     -1,
-		MinWidth:   0,
-		MinHeight:  0,
-		MaxWidth:   -1,
-		MaxHeight:  -1,
-		Color:      css.Color{R: 0, G: 0, B: 0, A: 255},
-		FontSize:   16,
-		FontWeight: WeightNormal,
+		Display:      DisplayInline,
+		Position:     PositionStatic,
+		Opacity:      1.0,
+		Width:        -1,
+		Height:       -1,
+		MinWidth:     0,
+		MinHeight:    0,
+		MaxWidth:     -1,
+		MaxHeight:    -1,
+		Color:        css.Color{R: 0, G: 0, B: 0, A: 255},
+		FontSize:     16,
+		rootFontSize: 16,
+		FontWeight:   WeightNormal,
 		// -1 means unset: a declared line-height resolves to a px value in
 		// resolveLineHeight, but the initial value cannot be one because a
 		// unitless multiplier recomputes per element's font size. Consumers
@@ -1054,6 +1056,12 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	resolveCurrentColor(&cs, matched, inlineDecls, hintDecls)
 	resolveShadowColors(&cs, parent, normal, important)
 	resolveCustomFont(&cs, fonts)
+	if parent == nil {
+		// Descendant rem units use the computed root size. The root's own rem
+		// values still resolve against the initial 16px size while its cascade
+		// is being computed.
+		cs.rootFontSize = cs.FontSize
+	}
 
 	return &cs
 }
@@ -1383,6 +1391,7 @@ func clampFontSize(f float32) float32 {
 func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.Color = parent.Color
 	cs.FontSize = parent.FontSize
+	cs.rootFontSize = parent.rootFontSize
 	cs.FontFamily = parent.FontFamily
 	cs.CustomFamily = parent.CustomFamily
 	cs.FontWeight = parent.FontWeight
@@ -1837,7 +1846,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "font-family":
 		cs.FontFamily, cs.CustomFamily = parseFontFamily(value, fonts)
 	case "font-size":
-		cs.FontSize = clampFontSize(resolveFontSize(parsed, parentFontSize))
+		cs.FontSize = clampFontSize(resolveFontSize(parsed, parentFontSize, cs.rootFontSize))
 	case "font-weight":
 		// A numeric weight reuses the already-parsed value instead of parsing
 		// the text a second time; keywords take the name path as before.
@@ -1849,7 +1858,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "font-style":
 		cs.FontStyle = parseFontStyle(value)
 	case "font":
-		parseFontShorthand(cs, value, parentFontSize, fonts)
+		parseFontShorthand(cs, value, parentFontSize, cs.rootFontSize, fonts)
 	case "line-height":
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
@@ -2168,7 +2177,7 @@ func lengthSpecified(v css.Value) bool {
 	return false
 }
 
-func resolveFontSize(v css.Value, parent float32) float32 {
+func resolveFontSize(v css.Value, parent, root float32) float32 {
 	switch v.Type {
 	case css.ValueKeyword:
 		switch v.Str {
@@ -2195,8 +2204,10 @@ func resolveFontSize(v css.Value, parent float32) float32 {
 		return parent * float32(v.Num) / 100
 	case css.ValueLength:
 		if v.Unit == "rem" {
-			// rem is the root font size, which goosie leaves at the 16px default.
-			return float32(v.Num) * 16
+			if root <= 0 {
+				root = 16
+			}
+			return float32(v.Num) * root
 		}
 		if v.Unit == "em" || v.Unit == "ex" {
 			return parent * float32(v.Num)
@@ -3487,7 +3498,7 @@ func parseBorderColors(v string) [4]css.Color {
 // parseFontShorthand reads `font: [style] [variant] [weight] size[/line-height] family`.
 // Bare numbers before the size are weights, so the size is the first length,
 // percentage, or absolute font-size keyword that appears.
-func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32, fonts *CustomFonts) {
+func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSize float32, fonts *CustomFonts) {
 	parts := strings.Fields(v)
 	sizeIdx := -1
 	for i, p := range parts {
@@ -3517,7 +3528,7 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize float32, fon
 	if j := strings.Index(sizeTok, "/"); j >= 0 {
 		sizeTok, line = sizeTok[:j], sizeTok[j+1:]
 	}
-	cs.FontSize = clampFontSize(resolveFontSize(css.ParseValue(sizeTok), parentFontSize))
+	cs.FontSize = clampFontSize(resolveFontSize(css.ParseValue(sizeTok), parentFontSize, rootFontSize))
 	if line != "" {
 		parsed := css.ParseValue(line)
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)

@@ -411,22 +411,22 @@ func corners(s *style.ComputedStyle, r frame.Rect, scale float32) frame.Corners 
 	if declared == ([4][2]float32{}) {
 		return frame.Corners{}
 	}
-	w, h := float32(r.W()), float32(r.H())
-	resolve := func(v, side float32) float32 {
+	w, h := float64(r.W()), float64(r.H())
+	resolve := func(v float32, side float64) float64 {
 		if v < -2 {
-			return (-2 - v) * side / 100
+			return float64(-2-v) * side / 100
 		}
 		if v <= 0 {
 			return 0
 		}
-		return v * scale
+		return float64(v) * float64(scale)
 	}
-	var c [4][2]float32
+	var c [4][2]float64
 	for i := 0; i < 4; i++ {
 		c[i][0] = resolve(declared[i][0], w)
 		c[i][1] = resolve(declared[i][1], h)
 	}
-	fit := func(sum, side float32) float32 {
+	fit := func(sum, side float64) float64 {
 		if sum <= side || sum <= 0 {
 			return 1
 		}
@@ -443,7 +443,7 @@ func corners(s *style.ComputedStyle, r frame.Rect, scale float32) frame.Corners 
 		k = v
 	}
 	rad := func(i int) frame.Radius {
-		return frame.Radius{X: c[i][0] * k, Y: c[i][1] * k}
+		return frame.Radius{X: float32(c[i][0] * k), Y: float32(c[i][1] * k)}
 	}
 	return frame.Corners{TL: rad(0), TR: rad(1), BR: rad(2), BL: rad(3)}
 }

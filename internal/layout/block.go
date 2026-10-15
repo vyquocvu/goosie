@@ -1743,12 +1743,37 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 				// A block sibling ends the inline line the run so far describes.
 				run = 0
 				// A nested flex or grid container sizes its own content, so use
-				// its width rather than walking into it.
+				// its width rather than walking into it - but only when that
+				// width is definite. An auto or percentage width resolved against
+				// the 10000px probe, so the box carries the measure width rather
+				// than its content: a flex item holding `width:100%` measured the
+				// whole probe and stranded viewport-wide strips across pages.
 				if blockifiesChildren(k.Style) {
-					if w := origin + trail + lead + k.W + trailBox; w > right {
-						right = w
+					if definiteWidth(k.Style) {
+						if w := origin + trail + lead + k.W + trailBox; w > right {
+							right = w
+						}
+						continue
 					}
-					continue
+					if dir := k.Style.FlexDirection; k.Style.Display == style.DisplayFlex ||
+						k.Style.Display == style.DisplayInlineFlex {
+						if dir == style.FlexRow || dir == style.FlexRowReverse {
+							if w := origin + trail + lead + rowFlexMaxContent(a, kid) + trailBox; w > right {
+								right = w
+							}
+							continue
+						}
+						// A column flex stacks its items, so the generic walk
+						// below - max of children - already matches its
+						// max-content. Fall through to it.
+					} else {
+						// Grid intrinsic sizing needs track resolution; keep
+						// trusting the probe layout rather than guessing.
+						if w := origin + trail + lead + k.W + trailBox; w > right {
+							right = w
+						}
+						continue
+					}
 				}
 				// A child that brings a width of its own to the line - a fixed-size
 				// figure, a min-width box - is a line of its own as far as
@@ -1806,6 +1831,72 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 		w = 0
 	}
 	return w
+}
+
+// definiteWidth reports whether the style's width resolves independently of
+// the containing block (and hence of the probe width): a plain length with no
+// percentage in the width or its clamps. declaredOuterW cannot answer this -
+// the default min-width:0 clamp folds auto and every percentage into 0, so it
+// reads indefinite widths as a definite zero. Percentages, auto, and deferred
+// calc-with-percentage (WidthCalc is only set for percentage-bearing
+// functions) all speak the container, so a box measured at the probe width
+// carries the probe.
+func definiteWidth(s *style.ComputedStyle) bool {
+	if s == nil {
+		return false
+	}
+	if s.Width < 0 || s.WidthCalc.Set {
+		return false
+	}
+	if isPctLength(s.MinWidth) || isPctLength(s.MaxWidth) {
+		return false
+	}
+	if s.MinWidthCalc.Set || s.MaxWidthCalc.Set {
+		return false
+	}
+	return true
+}
+
+// rowFlexMaxContent measures the max-content width of a row-direction flex
+// container whose own width is indefinite (auto or percentage), so its
+// laid-out width is probe artifact rather than content. A row's intrinsic
+// width is the sum of its items': each item's own max-content plus its
+// flanks, joined by the column gap. Words were laid out at the probe width
+// with nothing to wrap against, so their placed widths are already the
+// unwrapped ones; blocks resolve through maxContentW, which recurses here
+// for deeper indefinite rows. Definite and replaced widths short-circuit
+// the walk the way the generic measure does.
+func rowFlexMaxContent(a *Arena, id ObjectID) float32 {
+	obj := a.Get(id)
+	run := float32(0)
+	n := 0
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		k := a.Get(kid)
+		if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) {
+			continue
+		}
+		var inner float32
+		if k.Node != nil && k.Node.Text() {
+			if isSpaceWord(k.Node.DataContent) {
+				continue
+			}
+			inner = k.W
+		} else {
+			inner = maxContentW(a, kid, true)
+			if own := declaredOuterW(k.Style); own > inner {
+				inner = own
+			}
+			if inner <= 0 && isReplacedElement(k) {
+				inner = k.W
+			}
+		}
+		if n > 0 {
+			run += obj.Style.ColumnGap
+		}
+		run += flexMargin(k.Style.MarginLeft) + k.BorderLeft + k.PaddingLeft + inner + k.PaddingRight + k.BorderRight + flexMargin(k.Style.MarginRight)
+		n++
+	}
+	return run
 }
 
 // clearInlineLaidOut drops the inline-laid-out flag down an item's subtree so a

@@ -43,6 +43,17 @@ func TestWindowSelfReferences(t *testing.T) {
 	}
 }
 
+func TestMatchMediaUsesDefaultLightColorScheme(t *testing.T) {
+	r := newRuntime(t, jsOpts())
+	src := `var out = window.matchMedia('(prefers-color-scheme: light)').matches + "/" + window.matchMedia('(prefers-color-scheme: dark)').matches;`
+	if err := r.Run(src, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, ok := r.Global("out"); !ok || v.Str != "true/false" {
+		t.Fatalf("matchMedia color scheme = %+v, want true/false", v)
+	}
+}
+
 // Google's namespace bootstrap, verbatim shape: publish on window in one
 // breath, read back bare in the next.
 func TestGoogleNamespaceBootstrap(t *testing.T) {

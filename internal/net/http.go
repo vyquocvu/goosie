@@ -21,7 +21,7 @@ import (
 )
 
 // MaxResponseBytes bounds each decoded HTTP response or local file.
-const MaxResponseBytes = 8 << 20
+const MaxResponseBytes = 16 << 20
 
 // MaxResponseHeaderBytes bounds one response's header block, which the transport
 // would otherwise buffer up to its own 10 MiB default before any body byte.
@@ -33,7 +33,7 @@ const MaxResponseHeaderBytes = 256 << 10
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0"
 
 // ErrResponseTooLarge reports a response that exceeds MaxResponseBytes.
-var ErrResponseTooLarge = errors.New("net: response exceeds 8 MiB limit")
+var ErrResponseTooLarge = errors.New("net: response exceeds 16 MiB limit")
 
 // HTTP is the 4-method interface the engine depends on. Declaring it here
 // rather than using *http.Client directly keeps navigation mockable in tests.

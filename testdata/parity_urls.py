@@ -45,6 +45,7 @@ GOOSIE_DIR = Path("/tmp/goosie-url-renders")
 CHROMIUM_DIR = Path("/tmp/playwright-url-renders")
 SNAP_DIR = Path("/tmp/goosie-url-snapshots")
 MANIFEST = Path("testdata/urls.txt")
+JS_REFERENCE = False
 USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
@@ -56,8 +57,13 @@ def slug(url: str) -> str:
     return re.sub(r"^_+|_+$", "", s)[:80]
 
 
-def urls():
-    return [l.strip() for l in MANIFEST.read_text().splitlines()
+def matches_only(url: str, only: str) -> bool:
+    return not only or only in url or only in slug(url) or slug(only) in slug(url)
+
+
+def urls(manifest=None):
+    source = Path(manifest) if manifest else MANIFEST
+    return [l.strip() for l in source.read_text().splitlines()
             if l.strip() and not l.startswith("#")]
 
 
@@ -310,7 +316,7 @@ def render_snapshots(binary: str, only: str = None) -> None:
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
     GOOSIE_DIR.mkdir(parents=True, exist_ok=True)
     CHROMIUM_DIR.mkdir(parents=True, exist_ok=True)
-    corpus = [u for u in urls() if not only or only in u]
+    corpus = [u for u in urls() if matches_only(u, only)]
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         names = [n for n in ex.map(snapshot_one, corpus) if n]
     httpd = serve_snaps()
@@ -334,7 +340,7 @@ def refresh_snapshot(binary: str, only: str = None) -> None:
     a rotating site a fresh chance to move. After an engine change the frozen copy
     is still the one Chromium drew, so only goosie has to look at it again.
     """
-    names = sorted(p.stem for p in SNAP_DIR.glob("*.html") if not only or only in p.stem)
+    names = sorted(p.stem for p in SNAP_DIR.glob("*.html") if matches_only(p.stem, only))
     if not names:
         print("refresh: no snapshot pages on disk, run --snapshot first", file=sys.stderr)
         return
@@ -351,7 +357,7 @@ def refresh_snapshot(binary: str, only: str = None) -> None:
 def render_all(binary: str, only: str = None) -> None:
     corpus = urls()
     if only:
-        corpus = [u for u in corpus if slug(u) in only or only in u]
+        corpus = [u for u in corpus if matches_only(u, only)]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
         list(ex.map(lambda u: render_one(binary, u), corpus))
 
@@ -363,6 +369,14 @@ def render_refs(only=None, manifest=None) -> None:
         env["URLS_JSON"] = manifest
     elif "URLS_JSON" in env:
         del env["URLS_JSON"]
+    if MANIFEST != Path("testdata/urls.txt"):
+        env["URLS_FILE"] = str(MANIFEST.resolve())
+    else:
+        env.pop("URLS_FILE", None)
+    if JS_REFERENCE:
+        env["GOOSIE_PARITY_JS"] = "1"
+    else:
+        env.pop("GOOSIE_PARITY_JS", None)
     if only:
         cmd.append(only)
     subprocess.run(cmd, check=False, env=env)
@@ -378,7 +392,7 @@ def render_paired(binary: str, only: str = None) -> None:
     """
     GOOSIE_DIR.mkdir(parents=True, exist_ok=True)
     for url in urls():
-        if only and only not in url:
+        if not matches_only(url, only):
             continue
         render_refs(url)
         try:
@@ -441,6 +455,7 @@ def inspect(name, band):
 
 
 def main() -> int:
+    global MANIFEST, JS_REFERENCE
     ap = argparse.ArgumentParser()
     ap.add_argument("--render", action="store_true", help="render URLs with goosie")
     ap.add_argument("--render-ref", action="store_true", help="render references with playwright")
@@ -450,15 +465,21 @@ def main() -> int:
                     help="fetch each document once and render both engines from that copy")
     ap.add_argument("--update-refs", action="store_true", help="cache references to testdata/url-refs")
     ap.add_argument("--binary", default="./goosie")
+    ap.add_argument("--manifest", type=Path, default=MANIFEST,
+                    help="URL list to render (default: testdata/urls.txt)")
+    ap.add_argument("--js-reference", action="store_true",
+                    help="execute page scripts in Chromium references, matching Goosie's JS mode")
     ap.add_argument("--live-refs", action="store_true", help="score against /tmp refs instead of cached")
     ap.add_argument("--refresh", action="store_true",
                     help="re-render goosie from the snapshot already on disk, keeping Chromium's refs")
     ap.add_argument("--freeze-assets", action="store_true",
                     help="with --snapshot, also download images and stylesheets locally")
-    ap.add_argument("--only", metavar="SUBSTR", help="score only slugs containing SUBSTR")
+    ap.add_argument("--only", metavar="SUBSTR", help="select URL or output slug containing SUBSTR")
     ap.add_argument("--inspect", metavar="NAME.png", help="print mismatch bands for one render")
     ap.add_argument("--band", type=int, default=32)
     args = ap.parse_args()
+    MANIFEST = args.manifest
+    JS_REFERENCE = args.js_reference
 
     if args.inspect:
         inspect(args.inspect, args.band)
@@ -482,7 +503,8 @@ def main() -> int:
     refs = CHROMIUM_DIR if (args.live_refs or args.snapshot or args.refresh) else Path("testdata/url-refs")
     rows = score(refs)
     if args.only:
-        rows = [r for r in rows if args.only in r[2]]
+        selected = {slug(url) for url in urls() if matches_only(url, args.only)}
+        rows = [r for r in rows if Path(r[2]).stem in selected]
     if not rows:
         print("no renders found", file=sys.stderr)
         return 1

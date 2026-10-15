@@ -26,6 +26,21 @@ func TestRemResolvesAgainstRootNotElement(t *testing.T) {
 	near("PaddingTop", cs.PaddingTop, 16) // 1rem * 16
 }
 
+func TestRemUsesComputedRootFontSize(t *testing.T) {
+	sheet := `:root { font-size: 62.5%; } body { font-size: 1.6rem; } h1 { font-size: 2.4rem; }`
+	body := styleFor(t, `<html><body><h1>x</h1></body></html>`, sheet, "body")
+	h1 := styleFor(t, `<html><body><h1>x</h1></body></html>`, sheet, "h1")
+	if body == nil || h1 == nil {
+		t.Fatal("missing computed style")
+	}
+	if math.Abs(float64(body.FontSize-16)) > 0.01 {
+		t.Errorf("body FontSize = %v, want 16 (1.6rem of a 10px root)", body.FontSize)
+	}
+	if math.Abs(float64(h1.FontSize-24)) > 0.01 {
+		t.Errorf("h1 FontSize = %v, want 24 (2.4rem of a 10px root)", h1.FontSize)
+	}
+}
+
 // em, by contrast, stays relative to the element's own font size.
 func TestEmStillResolvesAgainstElementFontSize(t *testing.T) {
 	sheet := `h1 { font-size: 40px; margin-top: 2em; }`

@@ -23,11 +23,11 @@ import (
 // Phase 1 resource caps apply per document, including all author/embedded/inline
 // CSS. Geometry is CSS pixels; viewport device limits apply after scaling.
 const (
-	MaxDocumentBytes   = 8 << 20
-	MaxDocumentNodes   = 50000
+	MaxDocumentBytes   = 16 << 20
+	MaxDocumentNodes   = 1000000
 	MaxDocumentDepth   = 128
 	MaxAttributes      = 64
-	MaxAttributeBytes  = 65536
+	MaxAttributeBytes  = 1 << 20
 	MaxCSSBytes        = 4 << 20
 	MaxCSSTokens       = 1 << 20
 	MaxCSSRules        = 32768
@@ -50,13 +50,13 @@ const (
 	// Rules past it are clipped rather than failing the document.
 	MaxStyleWork       = 1 << 28
 	MaxFontSize        = 512
-	MaxGeometry        = 1 << 20
-	MaxLayoutObjects   = 131072
-	MaxTextRunes       = 1 << 20
+	MaxGeometry        = 2 << 20
+	MaxLayoutObjects   = 4 << 20
+	MaxTextRunes       = 8 << 20
 	MaxDPR             = 8
 	MaxDeviceDimension = 16384
 	MaxDevicePixels    = 16 * 1024 * 1024
-	MaxDocumentTiles   = 65536
+	MaxDocumentTiles   = 524288
 	MaxTileCacheBytes  = 64 << 20
 )
 
@@ -211,6 +211,13 @@ func (b *cssBudget) check(src string, inline bool) error {
 		}
 		switch t.Type {
 		case css.TokenNumber, css.TokenDimension, css.TokenPercentage:
+			property := cssPropertyAt(src, tok.Offset())
+			// Unicode-range is a font glyph selector (for example U+1E80), not
+			// a geometry value. The tokenizer sees its hexadecimal digits as a
+			// number, so don't apply float or layout bounds to this declaration.
+			if property == "unicode-range" {
+				continue
+			}
 			n, err := strconv.ParseFloat(t.Value, 64)
 			if err != nil {
 				// Check if this is an overflow error (value too large for float64).
@@ -229,7 +236,8 @@ func (b *cssBudget) check(src string, inline bool) error {
 			// and the like are legally huge (a 2-billion counter reset is a
 			// conformance test), and refusing the whole document over one
 			// blanked the entire page.
-			if t.Type != css.TokenNumber && (math.Abs(n) > MaxGeometry || math.Abs(t.NumVal) > MaxGeometry) {
+			if t.Type != css.TokenNumber && !isBorderRadiusProperty(property) &&
+				(math.Abs(n) > MaxGeometry || math.Abs(t.NumVal) > MaxGeometry) {
 				return fmt.Errorf("CSS numeric value outside safe geometry range")
 			}
 		}
@@ -241,6 +249,26 @@ func (b *cssBudget) check(src string, inline bool) error {
 		return fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
 	}
 	return nil
+}
+
+func cssPropertyAt(src string, offset int) string {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(src) {
+		offset = len(src)
+	}
+	start := strings.LastIndexAny(src[:offset], "{;") + 1
+	colon := strings.IndexByte(src[start:offset], ':')
+	if colon < 0 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(src[start : start+colon]))
+}
+
+func isBorderRadiusProperty(property string) bool {
+	return property == "border-radius" ||
+		(strings.HasPrefix(property, "border-") && strings.HasSuffix(property, "-radius"))
 }
 
 // selectorCost includes recursively evaluated :not arguments. Search combinators

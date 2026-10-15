@@ -36,3 +36,16 @@ func TestSupportsOrderPreserved(t *testing.T) {
 		t.Fatalf("got %v, want [.before .mid .after]", got)
 	}
 }
+
+func TestLayerRulesAreParsedInSourceOrder(t *testing.T) {
+	got := rulesText(t, `@layer reset, components, utilities; @layer base { h1{} } @layer utilities { .text{} } .outside{}`)
+	want := []string{"h1", ".text", ".outside"}
+	if len(got) != len(want) {
+		t.Fatalf("got rules %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got rules %v, want %v", got, want)
+		}
+	}
+}

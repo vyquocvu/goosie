@@ -51,8 +51,9 @@ type Token struct {
 
 // Tokenizer splits CSS text into tokens.
 type Tokenizer struct {
-	input string
-	pos   int
+	input     string
+	pos       int
+	lastStart int
 }
 
 // NewTokenizer returns a tokenizer for the given CSS text.
@@ -63,6 +64,7 @@ func NewTokenizer(input string) *Tokenizer {
 // Next returns the next token.
 func (t *Tokenizer) Next() Token {
 	t.skipWhitespaceAndComments()
+	t.lastStart = t.pos
 	if t.pos >= len(t.input) {
 		return Token{Type: TokenEOF}
 	}
@@ -150,6 +152,10 @@ func (t *Tokenizer) Next() Token {
 		return Token{Type: TokenDelim, Value: string(c)}
 	}
 }
+
+// Offset reports the source byte offset of the token returned by the most
+// recent Next call. It is useful to associate tokens with their declaration.
+func (t *Tokenizer) Offset() int { return t.lastStart }
 
 func (t *Tokenizer) skipWhitespaceAndComments() {
 	for t.pos < len(t.input) {
