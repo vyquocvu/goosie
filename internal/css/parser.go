@@ -1,681 +1,1053 @@
 package css
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
-// ParseConfig controls parsing limits and behavior (M3.1)
-type ParseConfig struct {
-	// MaxBytes is the maximum total bytes of CSS to parse (0 = unlimited)
-	MaxBytes int
-	// MaxImportDepth is the maximum depth of @import nesting (0 = no @import following)
-	MaxImportDepth int
-	// Origin is the origin to assign to parsed rules (default: OriginAuthor)
-	Origin Origin
+// defaultMediaViewportWidth is the CSS px width @media min/max-width conditions
+// are tested against when the caller has no viewport to name. It is the desktop
+// viewport the parity references are captured at.
+const defaultMediaViewportWidth float32 = 1280
+
+// mediaDevicePixelRatio is the resolution @media device-pixel-ratio conditions
+// are tested against. Rendering is one device pixel per CSS pixel: no backend
+// scales the frame, and the parity references are captured at dpr 1.
+const mediaDevicePixelRatio float32 = 1
+
+// Declaration is one CSS property-value pair.
+type Declaration struct {
+	Property  string
+	Value     string
+	Parsed    Value
+	Important bool
 }
 
-// DefaultParseConfig returns a ParseConfig with sensible defaults
-func DefaultParseConfig() ParseConfig {
-	return ParseConfig{
-		MaxBytes:       0, // unlimited for backward compatibility
-		MaxImportDepth: 0, // no @import following
-		Origin:         OriginAuthor,
-	}
+// Rule is one CSS rule: selectors + declarations.
+type Rule struct {
+	Selectors    []Selector
+	SelectorStrs []string
+	Declarations []Declaration
 }
 
-// Parser processes CSS text and builds a StyleSheet.
-type Parser struct {
-	input       string
-	pos         int
-	config      ParseConfig // M3.1
-	sourceOrder uint32      // M3.1: tracks declaration order
+// FontFaceRule is one @font-face rule: declarations only, no selectors.
+type FontFaceRule struct {
+	Declarations []Declaration
 }
 
-// NewParser creates a new Parser.
-func NewParser(input string) *Parser {
-	return &Parser{
-		input:  strings.TrimPrefix(input, "\ufeff"),
-		config: DefaultParseConfig(),
-	}
+// Stylesheet is a parsed CSS stylesheet.
+type Stylesheet struct {
+	Rules     []Rule
+	FontFaces []FontFaceRule
+	// Keyframes holds the parsed @keyframes rules from this stylesheet.
+	Keyframes []KeyframesRule
 }
 
-// NewParserWithConfig creates a new Parser with custom configuration (M3.1)
-func NewParserWithConfig(input string, config ParseConfig) *Parser {
-	return &Parser{
-		input:  strings.TrimPrefix(input, "\ufeff"),
-		config: config,
-	}
+// Parse parses a CSS stylesheet, testing @media width conditions against the
+// default desktop viewport. A caller that knows the document's own width should
+// use ParseForViewport, since media conditions are resolved while parsing.
+func Parse(input string) *Stylesheet {
+	return ParseForViewport(input, defaultMediaViewportWidth)
 }
 
-// ParseStyleAttribute parses the content of a style attribute (e.g., "color: red; margin: 10px")
-func ParseStyleAttribute(input string) ([]Declaration, error) {
-	parser := NewParser(input)
-	// parseDeclarations expects to consume until '}' or EOF
-	// It doesn't require a starting '{'
-	declarations := parser.parseDeclarations()
-	return declarations, nil
+// ParseForViewport parses a CSS stylesheet, testing @media width conditions
+// against viewportWidthPx. The engine's viewport is passed here so each
+// document evaluates its media queries against its own width, not a
+// process-global value another document may have set earlier.
+func ParseForViewport(input string, viewportWidthPx float32) *Stylesheet {
+	p := &parser{input: stripComments(stripCDATAMarkers(input)), mediaWidth: viewportWidthPx}
+	return p.parse()
 }
 
-// Parse parses the CSS input and returns a StyleSheet.
-func (p *Parser) Parse() (*StyleSheet, error) {
-	// M3.1: Enforce MaxBytes limit
-	input := p.input
-	if p.config.MaxBytes > 0 && len(input) > p.config.MaxBytes {
-		input = input[:p.config.MaxBytes]
-		p.input = input
+// stripCDATAMarkers removes `<![CDATA[` ... `]]>` wrappers from stylesheet
+// text. XHTML reference pages wrap their <style> content in CDATA, and the
+// DOM hands that text through verbatim; without stripping, the opener fuses
+// onto the first selector (`<![CDATA[ img`) and no rule ever matches. Only
+// the marker delimiters go - the CSS between them stays intact.
+func stripCDATAMarkers(in string) string {
+	if !strings.Contains(in, "<![CDATA[") {
+		return in
 	}
-
-	stylesheet := &StyleSheet{}
-	p.consumeWhitespaceAndComments()
-
-	for p.pos < len(p.input) {
-		// Check for at-rules
-		if p.peek() == '@' {
-			atRule, err := p.parseAtRule()
-			if err != nil {
-				// Skip this at-rule on error
-				p.skipToNextRule()
-				p.consumeWhitespaceAndComments()
-				continue
-			}
-			stylesheet.AtRules = append(stylesheet.AtRules, atRule)
-			p.consumeWhitespaceAndComments()
-			continue
-		}
-
-		// Parse regular rules
-		selectors, err := p.parseSelectorSequences()
-		if err != nil {
-			p.skipToNextRule()
-			p.consumeWhitespaceAndComments()
-			continue
-		}
-		p.consumeWhitespaceAndComments()
-		if !p.consumeChar('{') {
-			p.skipToNextRule()
-			p.consumeWhitespaceAndComments()
-			continue
-		}
-		p.consumeWhitespaceAndComments()
-		declarations := p.parseDeclarations()
-		p.consumeWhitespaceAndComments()
-		if !p.consumeChar('}') {
-			p.skipToNextRule()
-			p.consumeWhitespaceAndComments()
-			continue
-		}
-		// M3.1: Assign source order and origin
-		p.sourceOrder++
-		stylesheet.Rules = append(stylesheet.Rules, Rule{
-			Selectors:    selectors,
-			Declarations: declarations,
-			SourceOrder:  p.sourceOrder,
-			Origin:       p.config.Origin,
-		})
-		p.consumeWhitespaceAndComments()
-	}
-	return stylesheet, nil
+	s := strings.ReplaceAll(in, "<![CDATA[", " ")
+	return strings.ReplaceAll(s, "]]>", " ")
 }
 
-// skipToNextRule skips input until it finds a point where a new rule or at-rule can start.
-func (p *Parser) skipToNextRule() {
-	braceCount := 0
-	for p.pos < len(p.input) {
-		ch := p.peek()
-		if ch == '{' {
-			braceCount++
-			p.pos++
-		} else if ch == '}' {
-			braceCount--
-			p.pos++
-			if braceCount <= 0 {
-				break
-			}
-		} else if ch == ';' && braceCount == 0 {
-			p.pos++
-			break
-		} else {
-			p.pos++
-		}
+// stripComments removes /* ... */ comment blocks from CSS source. A comment
+// cannot start or continue inside a quoted string, so the scan tracks quote
+// state and leaves anything between a real quote pair untouched, including a
+// `/*` that appears inside url("..."). Each comment is replaced by one space,
+// not nothing: the tokenizer reads `120/*c*/75%` as the two tokens `120` and
+// `75%`, and deleting the comment outright would fuse them into `12075%`.
+func stripComments(in string) string {
+	if !strings.Contains(in, "/*") {
+		return in
 	}
-}
-
-// parseAtRule parses an at-rule like @media, @import, @keyframes
-func (p *Parser) parseAtRule() (AtRule, error) {
-	atRule := AtRule{}
-
-	if !p.consumeChar('@') {
-		return atRule, fmt.Errorf("expected '@'")
-	}
-
-	atRule.Name = p.consumeIdentifier()
-	p.consumeWhitespaceAndComments()
-
-	// Parse prelude (everything before { or ;)
-	prelude := ""
-	for p.pos < len(p.input) && p.peek() != '{' && p.peek() != ';' {
-		prelude += string(p.peek())
-		p.pos++
-	}
-	atRule.Prelude = strings.TrimSpace(prelude)
-
-	p.consumeWhitespaceAndComments()
-
-	// If it has a block, parse it
-	if p.peek() == '{' {
-		p.consumeChar('{')
-		p.consumeWhitespaceAndComments()
-
-		// For @media and similar, parse nested rules
-		if atRule.Name == "media" || atRule.Name == "supports" {
-			for p.peek() != '}' && p.pos < len(p.input) {
-				if p.peek() == '@' {
-					nested, err := p.parseAtRule()
-					if err != nil {
-						return atRule, fmt.Errorf("error parsing nested at-rule: %w", err)
-					}
-					atRule.AtRules = append(atRule.AtRules, nested)
-					p.consumeWhitespaceAndComments()
+	var b strings.Builder
+	b.Grow(len(in))
+	for i := 0; i < len(in); {
+		c := in[i]
+		if c == '\'' || c == '"' {
+			quote := c
+			b.WriteByte(c)
+			i++
+			for i < len(in) {
+				if in[i] == '\\' && i+1 < len(in) {
+					b.WriteByte(in[i])
+					b.WriteByte(in[i+1])
+					i += 2
 					continue
 				}
-				selectors, err := p.parseSelectorSequences()
-				if err != nil {
-					return atRule, fmt.Errorf("error parsing nested rule selectors: %w", err)
-				}
-				p.consumeWhitespaceAndComments()
-				if !p.consumeChar('{') {
-					return atRule, fmt.Errorf("expected '{' in nested rule")
-				}
-				p.consumeWhitespaceAndComments()
-				declarations := p.parseDeclarations()
-				p.consumeWhitespaceAndComments()
-				if !p.consumeChar('}') {
-					return atRule, fmt.Errorf("expected '}' in nested rule")
-				}
-				atRule.Rules = append(atRule.Rules, Rule{Selectors: selectors, Declarations: declarations})
-				p.consumeWhitespaceAndComments()
-			}
-		} else if atRule.Name == "keyframes" || strings.HasSuffix(atRule.Name, "keyframes") {
-			// For @keyframes, parse nested rules with simple selectors (identifiers or percentages)
-			for p.peek() != '}' && p.pos < len(p.input) {
-				p.consumeWhitespaceAndComments()
-				if p.peek() == '}' {
+				b.WriteByte(in[i])
+				if in[i] == quote {
+					i++
 					break
 				}
-
-				var selectors []SelectorSequence
-
-				// Parse comma-separated selectors
-				for {
-					// Consume until comma or open brace
-					var selectorPart string
-					for p.pos < len(p.input) {
-						ch := p.peek()
-						if ch == ',' || ch == '{' {
-							break
-						}
-						selectorPart += string(ch)
-						p.pos++
-					}
-					selectorPart = strings.TrimSpace(selectorPart)
-					if selectorPart != "" {
-						selectors = append(selectors, SelectorSequence{
-							Simple: SimpleSelector{TagName: selectorPart},
-						})
-					}
-
-					p.consumeWhitespaceAndComments()
-					if p.peek() == ',' {
-						p.pos++ // consume comma
-						p.consumeWhitespaceAndComments()
-					} else {
-						break
-					}
-				}
-
-				if !p.consumeChar('{') {
-					return atRule, fmt.Errorf("expected '{' in keyframe rule")
-				}
-
-				p.consumeWhitespaceAndComments()
-				declarations := p.parseDeclarations()
-				p.consumeWhitespaceAndComments()
-				if !p.consumeChar('}') {
-					return atRule, fmt.Errorf("expected '}' in keyframe rule")
-				}
-
-				atRule.Rules = append(atRule.Rules, Rule{Selectors: selectors, Declarations: declarations})
-				p.consumeWhitespaceAndComments()
+				i++
 			}
-		} else {
-			// For others, just parse declarations
-			atRule.Declarations = p.parseDeclarations()
+			continue
 		}
-
-		p.consumeWhitespaceAndComments()
-		if !p.consumeChar('}') {
-			return atRule, fmt.Errorf("expected '}'")
+		if c == '/' && i+1 < len(in) && in[i+1] == '*' {
+			end := strings.Index(in[i+2:], "*/")
+			if end < 0 {
+				// Unterminated comment swallows the rest of the sheet.
+				break
+			}
+			i += 2 + end + 2
+			b.WriteByte(' ')
+			continue
 		}
-	} else if p.peek() == ';' {
-		p.consumeChar(';')
+		b.WriteByte(c)
+		i++
 	}
-
-	return atRule, nil
+	return b.String()
 }
 
-// parseSelectorSequences parses a comma-separated list of selector sequences
-func (p *Parser) parseSelectorSequences() ([]SelectorSequence, error) {
-	var sequences []SelectorSequence
-	for {
-		seq, err := p.parseSelectorSequence()
-		if err != nil {
-			return nil, err
-		}
-		sequences = append(sequences, seq)
-
-		p.consumeWhitespaceAndComments()
-		if p.peek() == ',' {
-			p.consumeChar(',')
-			p.consumeWhitespaceAndComments()
-		} else {
-			break
-		}
-	}
-	return sequences, nil
+// StripComments exposes comment stripping for declaration sources that never
+// pass through a stylesheet parse, notably inline style attributes: a comment
+// can sit inside the property name itself (`background/**/:limegreen`), and
+// only a pre-split strip keeps the declaration alive.
+func StripComments(in string) string {
+	return stripComments(in)
 }
 
-// parseSelectorSequence parses a single selector sequence with combinators
-// e.g., "div > p.class" or "h1 + p span"
-func (p *Parser) parseSelectorSequence() (SelectorSequence, error) {
-	var root SelectorSequence
-	current := &root
+type parser struct {
+	input string
+	pos   int
+	// mediaWidth is the viewport this parser tests @media width conditions
+	// against. Nested blocks inherit it so an @media inside an @supports or
+	// inside another @media sees the document's width, not the default.
+	mediaWidth float32
+}
 
-	for {
-		simple, err := p.parseSimpleSelector()
-		if err != nil {
-			return root, err
-		}
-		current.Simple = simple
+func (p *parser) parse() *Stylesheet {
+	sheet := &Stylesheet{}
+	p.parseInto(sheet)
+	return sheet
+}
 
-		// Save position before consuming whitespace
-		savedPos := p.pos
-		p.consumeWhitespace() // Don't consume comments here to detect combinators
-		hadWhitespace := p.pos > savedPos
-
-		// Check for combinator
+// parseInto runs the top-level rule loop against a caller-owned sheet so that
+// an @media body can recurse into the same accumulation (Media Merge semantics).
+func (p *parser) parseInto(sheet *Stylesheet) {
+	for p.pos < len(p.input) {
+		p.skipWhitespace()
 		if p.pos >= len(p.input) {
 			break
 		}
-
-		ch := p.peek()
-		if ch == ',' || ch == '{' || ch == ')' {
-			break
+		if p.input[p.pos] == '@' {
+			switch p.atRuleName() {
+			case "media":
+				p.parseMediaRule(sheet)
+			case "supports":
+				p.parseSupportsRule(sheet)
+			case "layer":
+				p.parseLayerRule(sheet)
+			case "font-face":
+				p.parseFontFaceRule(sheet)
+			case "keyframes", "-webkit-keyframes":
+				p.parseKeyframesRule(sheet)
+			default:
+				p.skipAtRule()
+			}
+			continue
 		}
-
-		combinator := ""
-		if ch == '>' {
-			combinator = ">"
-			p.consumeChar('>')
-		} else if ch == '+' {
-			combinator = "+"
-			p.consumeChar('+')
-		} else if ch == '~' {
-			combinator = "~"
-			p.consumeChar('~')
-		} else if hadWhitespace && (isIdentifierStart(ch) || ch == '*' || ch == '#' || ch == '.' || ch == ':' || ch == '[') {
-			// We had whitespace and now there's another selector, so it's a descendant combinator
-			combinator = " "
-		} else {
-			break
-		}
-
-		if combinator != "" {
-			p.consumeWhitespaceAndComments()
-			current.Combinator = combinator
-			current.Next = &SelectorSequence{}
-			current = current.Next
-		} else {
-			break
+		rule := p.parseRule()
+		if len(rule.Selectors) > 0 {
+			sheet.Rules = append(sheet.Rules, rule)
 		}
 	}
-
-	return root, nil
 }
 
-// parseSimpleSelector parses a simple selector like "div.class#id:hover[attr]"
-func (p *Parser) parseSimpleSelector() (SimpleSelector, error) {
-	selector := SimpleSelector{}
-	p.consumeWhitespaceAndComments()
-
-	// Check for universal selector
-	if p.peek() == '*' {
-		p.consumeChar('*')
-		selector.Universal = true
-	} else if isIdentifierStart(p.peek()) {
-		// Parse tag name
-		selector.TagName = p.consumeIdentifier()
-	}
-
-	// Parse classes, IDs, pseudo-classes, pseudo-elements, and attributes
-	for {
-		ch := p.peek()
-		if ch == '#' {
-			p.consumeChar('#')
-			selector.ID = p.consumeIdentifier()
-		} else if ch == '.' {
-			p.consumeChar('.')
-			selector.Classes = append(selector.Classes, p.consumeIdentifier())
-		} else if ch == ':' {
-			p.consumeChar(':')
-			// Check for pseudo-element (::)
-			if p.peek() == ':' {
-				p.consumeChar(':')
-				pseudoElement := p.consumeIdentifier()
-				// Handle functional pseudo-elements
-				if p.peek() == '(' {
-					pseudoElement += p.consumeFunctionArgs()
-				}
-				selector.PseudoElements = append(selector.PseudoElements, pseudoElement)
-			} else {
-				// Pseudo-class
-				pseudoClass := p.consumeIdentifier()
-				// Handle functional pseudo-classes like :nth-child(2)
-				if p.peek() == '(' {
-					pseudoClass += p.consumeFunctionArgs()
-				}
-				selector.PseudoClasses = append(selector.PseudoClasses, pseudoClass)
-			}
-		} else if ch == '[' {
-			attr, err := p.parseAttributeSelector()
-			if err != nil {
-				return selector, err
-			}
-			selector.Attributes = append(selector.Attributes, attr)
-		} else {
-			break
-		}
-	}
-
-	return selector, nil
-}
-
-// parseAttributeSelector parses an attribute selector like [type="text"]
-func (p *Parser) parseAttributeSelector() (AttributeSelector, error) {
-	attr := AttributeSelector{}
-
-	if !p.consumeChar('[') {
-		return attr, fmt.Errorf("expected '['")
-	}
-
-	p.consumeWhitespaceAndComments()
-	attr.Name = p.consumeIdentifier()
-	p.consumeWhitespaceAndComments()
-
-	// Check for operator
-	if p.peek() == '=' {
-		attr.Operator = "="
-		p.consumeChar('=')
-	} else if p.peek() == '~' || p.peek() == '|' || p.peek() == '^' || p.peek() == '$' || p.peek() == '*' {
-		attr.Operator = string(p.peek())
+// parseLayerRule enters a named or anonymous @layer block and appends its
+// rules in source order. Layer precedence is not modeled yet, but parsing the
+// block keeps the ordinary declarations available to the cascade; skipping an
+// entire layer left modern utility-CSS pages completely unstyled.
+func (p *parser) parseLayerRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
-		if p.peek() == '=' {
-			attr.Operator += "="
-			p.consumeChar('=')
-		}
 	}
-
-	if attr.Operator != "" {
-		p.consumeWhitespaceAndComments()
-		// Parse value (can be quoted or unquoted)
-		if p.peek() == '"' || p.peek() == '\'' {
-			quote := p.peek()
-			p.pos++
-			attr.Value = p.consumeUntilChar(quote)
-			p.consumeChar(quote)
-		} else {
-			attr.Value = p.consumeIdentifier()
-		}
+	if p.pos >= len(p.input) {
+		return
 	}
-
-	p.consumeWhitespaceAndComments()
-	if !p.consumeChar(']') {
-		return attr, fmt.Errorf("expected ']'")
+	if p.input[p.pos] == ';' {
+		p.pos++ // layer-order statement; source order is the available fallback
+		return
 	}
-
-	return attr, nil
-}
-
-// consumeFunctionArgs consumes function arguments including parentheses
-func (p *Parser) consumeFunctionArgs() string {
-	if p.peek() != '(' {
-		return ""
-	}
-
-	result := "("
-	p.pos++
+	p.pos++ // the '{'
+	bodyStart := p.pos
 	depth := 1
-
 	for p.pos < len(p.input) && depth > 0 {
-		ch := p.peek()
-		if ch == '(' {
+		switch p.input[p.pos] {
+		case '{':
 			depth++
-		} else if ch == ')' {
+		case '}':
 			depth--
+			if depth == 0 {
+				break
+			}
 		}
-		result += string(ch)
+		if depth == 0 {
+			break
+		}
 		p.pos++
 	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	inner := &parser{input: body, mediaWidth: p.mediaWidth}
+	inner.parseInto(sheet)
+}
 
+// atRuleName reads an @rule name without consuming past its prelude, so the
+// caller can decide whether the block is entered (media) or skipped.
+func (p *parser) atRuleName() string {
+	save := p.pos
+	p.pos++ // '@'
+	for p.pos < len(p.input) {
+		c := p.input[p.pos]
+		if c == '{' || c == ';' || c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			break
+		}
+		p.pos++
+	}
+	name := strings.ToLower(p.input[save+1 : p.pos])
+	p.pos = save
+	return name
+}
+
+// parseMediaRule tests an @media condition against the viewport width carried by
+// the parser (1280 for a bare Parse) and splices true bodies into the sheet in
+// place. Conditions on features this engine does not vary with - prefers-*,
+// resolution, pointer - read as true, which matches a desktop screen far more
+// often than false does.
+func (p *parser) parseMediaRule(sheet *Stylesheet) {
+	at := p.pos
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++
+		return
+	}
+	cond := strings.TrimSpace(p.input[at:p.pos])
+	if sp := strings.IndexByte(cond, ' '); sp >= 0 {
+		cond = strings.TrimSpace(cond[sp+1:])
+	} else {
+		cond = strings.TrimSpace(strings.TrimPrefix(cond, "@media"))
+	}
+	p.pos++ // the '{'
+	depth := 1
+	bodyStart := p.pos
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	if p.mediaConditionTrue(cond) {
+		inner := &parser{input: body, mediaWidth: p.mediaWidth}
+		inner.parseInto(sheet)
+	}
+}
+
+// parseSupportsRule reads an @supports block and splices its body into the sheet
+// only when the condition tests a feature this engine actually lays out with, so
+// a progressive-enhancement rule (cards that only go flex once grid works) matches
+// the browser reference rather than silently dropping. Conditions we cannot judge
+// - selector(), an unknown property, a feature we lack - read as false and skip.
+func (p *parser) parseSupportsRule(sheet *Stylesheet) {
+	at := p.pos
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++
+		return
+	}
+	cond := strings.TrimSpace(p.input[at:p.pos])
+	if sp := strings.IndexByte(cond, ' '); sp >= 0 {
+		cond = strings.TrimSpace(cond[sp+1:])
+	} else {
+		cond = strings.TrimSpace(strings.TrimPrefix(cond, "@supports"))
+	}
+	p.pos++ // the '{'
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	if supportsConditionTrue(cond) {
+		inner := &parser{input: body, mediaWidth: p.mediaWidth}
+		inner.parseInto(sheet)
+	}
+}
+
+// parseFontFaceRule reads an @font-face block and stores its declarations.
+// Font-face rules have no selectors, only properties like font-family, src,
+// font-weight, and font-style.
+func (p *parser) parseFontFaceRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++
+		return
+	}
+	p.pos++ // the '{'
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	// Parse the declarations inside the font-face block.
+	decls := parseDeclarations(body)
+	if len(decls) > 0 {
+		sheet.FontFaces = append(sheet.FontFaces, FontFaceRule{Declarations: decls})
+	}
+}
+
+// parseKeyframesRule reads a @keyframes block: the animation name, then the
+// body between braces (which itself contains nested blocks for each stop).
+func (p *parser) parseKeyframesRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	// Skip past the at-rule keyword ("keyframes" or "-webkit-keyframes").
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' {
+		p.pos++
+	}
+	// Skip whitespace to the animation name.
+	for p.pos < len(p.input) && (p.input[p.pos] == ' ' || p.input[p.pos] == '\t' || p.input[p.pos] == '\n' || p.input[p.pos] == '\r') {
+		p.pos++
+	}
+	// Read the animation name (up to '{' or whitespace).
+	nameStart := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' {
+		p.pos++
+	}
+	name := strings.TrimSpace(p.input[nameStart:p.pos])
+
+	// Skip to the opening brace.
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) || p.input[p.pos] == ';' {
+		if p.pos < len(p.input) {
+			p.pos++
+		}
+		return
+	}
+	p.pos++ // the '{'
+
+	// Read the body, tracking nested brace depth.
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+
+	if name == "" {
+		return
+	}
+
+	stops, err := ParseKeyframes(body)
+	if err != nil || len(stops) == 0 {
+		return
+	}
+
+	sheet.Keyframes = append(sheet.Keyframes, KeyframesRule{
+		Name:  name,
+		Stops: stops,
+	})
+}
+
+// supportsConditionTrue evaluates a CSS @supports condition: an optional leading
+// `not`, and the boolean operators `or` (lowest precedence) then `and`, over
+// parenthesized `<prop>: <value>` tests.
+func supportsConditionTrue(cond string) bool {
+	cond = strings.TrimSpace(strings.ToLower(cond))
+	if strings.HasPrefix(cond, "not") {
+		return !supportsConditionTrue(strings.TrimSpace(strings.TrimPrefix(cond, "not")))
+	}
+	if groups := splitOutsideParens(cond, " or "); len(groups) > 1 {
+		for _, g := range groups {
+			if supportsConditionTrue(g) {
+				return true
+			}
+		}
+		return false
+	}
+	if groups := splitOutsideParens(cond, " and "); len(groups) > 1 {
+		for _, g := range groups {
+			if !supportsConditionTrue(g) {
+				return false
+			}
+		}
+		return true
+	}
+	return supportsFeatureTrue(cond)
+}
+
+// supportsFeatureTrue judges a single `(prop: value)` test against what the engine
+// implements. Only `display` is consulted; every other property - or a selector
+// test - reads false so an @supports block gated on it stays out.
+func supportsFeatureTrue(test string) bool {
+	test = strings.TrimSpace(test)
+	if !strings.HasPrefix(test, "(") || !strings.HasSuffix(test, ")") {
+		return false
+	}
+	inner := strings.TrimSpace(test[1 : len(test)-1])
+	colon := strings.IndexByte(inner, ':')
+	if colon < 0 {
+		return false
+	}
+	prop := strings.TrimSpace(inner[:colon])
+	value := strings.TrimSpace(inner[colon+1:])
+	if prop != "display" {
+		return false
+	}
+	switch value {
+	case "grid", "inline-grid", "flex", "inline-flex", "subgrid":
+		// subgrid is named for completeness but the engine has no subgrid layout,
+		// so it is reported as unsupported alongside anything absent here.
+		return value != "subgrid"
+	case "block", "inline-block", "table", "table-row", "table-cell", "table-row-group":
+		return true
+	}
+	return false
+}
+
+// splitOutsideParens splits s on sep occurrences that sit at paren depth zero,
+// so `or`/`and` inside a `(...)` test are not treated as operators.
+func splitOutsideParens(s, sep string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '(':
+			depth++
+			i++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			i++
+		default:
+			if depth == 0 && i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
+				out = append(out, strings.TrimSpace(s[start:i]))
+				i += len(sep)
+				start = i
+				continue
+			}
+			i++
+		}
+	}
+	return append(out, strings.TrimSpace(s[start:]))
+}
+
+// MatchMedia reports whether a media condition matches on screen for the given viewport width.
+func MatchMedia(cond string, viewportWidth float32) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" || strings.EqualFold(cond, "all") {
+		return true
+	}
+	p := &parser{mediaWidth: viewportWidth}
+	return p.mediaConditionTrue(cond)
+}
+
+// mediaConditionTrue reports whether any comma-separated group applies.
+func (p *parser) mediaConditionTrue(cond string) bool {
+	for _, group := range splitTopLevel(cond, ',') {
+		if p.mediaGroupTrue(group) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *parser) mediaGroupTrue(group string) bool {
+	group = strings.TrimSpace(strings.ToLower(group))
+	if group == "" || group == "all" {
+		return true
+	}
+	negate := false
+	if strings.HasPrefix(group, "not") {
+		negate = true
+		group = strings.TrimSpace(strings.TrimPrefix(group, "not"))
+	}
+	result := p.mediaPartsTrue(group)
+	if negate {
+		return !result
+	}
 	return result
 }
 
-func (p *Parser) parseDeclarations() []Declaration {
-	var declarations []Declaration
-	for {
-		p.consumeWhitespaceAndComments()
-		if p.peek() == '}' || p.pos >= len(p.input) {
-			break
+func (p *parser) mediaPartsTrue(group string) bool {
+	// `or` binds looser than the implicit `and`, so a group of alternatives is
+	// true when any one of them is. Reading every connector as `and` made
+	// `(A) or (B)` require both, which is how a mobile-only rule survived onto a
+	// desktop viewport.
+	if alts := splitOutsideParens(group, " or "); len(alts) > 1 {
+		for _, a := range alts {
+			if p.mediaPartsTrue(strings.TrimSpace(a)) {
+				return true
+			}
 		}
-
-		property := p.consumeIdentifier()
-		if property == "" {
-			// Skip malformed declaration
-			// Consume until we find ; or }
-			for p.pos < len(p.input) && p.peek() != ';' && p.peek() != '}' {
-				p.pos++
-			}
-			if p.peek() == ';' {
-				p.consumeChar(';')
-			}
-			continue
-		}
-
-		p.consumeWhitespaceAndComments()
-		if !p.consumeChar(':') {
-			// Skip malformed declaration
-			for p.pos < len(p.input) && p.peek() != ';' && p.peek() != '}' {
-				p.pos++
-			}
-			if p.peek() == ';' {
-				p.consumeChar(';')
+		return false
+	}
+	for _, part := range splitTopLevel(group, ' ') {
+		// Media Queries 4 range syntax - `(width <= 769px)`, `(400px < width)` -
+		// carries no colon, so the feature switch below cannot see it.
+		if holds, ok := p.mediaRangeHolds(part); ok {
+			if !holds {
+				return false
 			}
 			continue
 		}
-		p.consumeWhitespaceAndComments()
-
-		value := p.consumeDeclarationValue()
-		important := false
-
-		// Check for !important
-		trimmedValue := strings.TrimSpace(value)
-		if strings.HasSuffix(trimmedValue, "!important") {
-			important = true
-			value = strings.TrimSpace(strings.TrimSuffix(trimmedValue, "!important"))
+		part = strings.TrimSpace(part)
+		if part == "" || part == "and" || part == "only" {
+			continue
 		}
-
-		p.consumeWhitespaceAndComments()
-		if p.peek() == ';' {
-			p.consumeChar(';')
+		// A bare media type: anything but print applies on screen.
+		if !strings.Contains(part, "(") {
+			if part == "print" {
+				return false
+			}
+			continue
 		}
-
-		// M3.1: Intern property name and classify as hot/cold
-		propAtom := InternPropertyName(property)
-		isHot := IsHotProperty(property)
-
-		declarations = append(declarations, Declaration{
-			Property:     property,
-			Value:        value,
-			Important:    important,
-			PropertyAtom: propAtom,
-			IsHot:        isHot,
-		})
-		p.consumeWhitespaceAndComments()
-		if p.peek() == '}' {
-			break
+		name, val, ok := mediaFeature(part)
+		if !ok {
+			continue
+		}
+		switch name {
+		case "min-width", "min-device-width":
+			if px, ok := cssPx(val); ok && p.mediaWidth < px {
+				return false
+			}
+		case "max-width", "max-device-width":
+			if px, ok := cssPx(val); ok && p.mediaWidth > px {
+				return false
+			}
+		case "orientation":
+			if val == "portrait" {
+				return false
+			}
+		case "prefers-color-scheme":
+			// The engine has no dark palette and the references are captured in a
+			// light Chromium, so `dark` asks for a look neither one paints.
+			if val == "dark" {
+				return false
+			}
+		case "prefers-reduced-motion":
+			if val == "reduce" {
+				return false
+			}
+		case "prefers-contrast":
+			// A bare `(prefers-contrast)` only asks whether the feature exists, and
+			// it does; only a non-default value asks for one we do not render.
+			if val != "" && val != "no-preference" {
+				return false
+			}
+		case "min-device-pixel-ratio", "-webkit-min-device-pixel-ratio":
+			if f, err := strconv.ParseFloat(val, 32); err == nil && mediaDevicePixelRatio < float32(f) {
+				return false
+			}
 		}
 	}
-	return declarations
+	return true
 }
 
-// consumeDeclarationValue consumes a declaration value, handling nested functions and strings
-func (p *Parser) consumeDeclarationValue() string {
-	var result string
+// cssPx resolves the width units media queries actually use.
+func cssPx(v string) (float32, bool) {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "calc(") && strings.HasSuffix(v, ")") {
+		return calcPx(v[len("calc(") : len(v)-1])
+	}
+	switch {
+	case strings.HasSuffix(v, "px"):
+		f, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 32)
+		return float32(f), err == nil
+	case strings.HasSuffix(v, "rem"), strings.HasSuffix(v, "em"):
+		unit := "rem"
+		if strings.HasSuffix(v, "em") && !strings.HasSuffix(v, "rem") {
+			unit = "em"
+		}
+		f, err := strconv.ParseFloat(strings.TrimSuffix(v, unit), 32)
+		return float32(f) * 16, err == nil
+	}
+	return 0, false
+}
+
+func mediaFeature(part string) (name, value string, ok bool) {
+	if !strings.HasPrefix(part, "(") || !strings.HasSuffix(part, ")") {
+		return "", "", false
+	}
+	inner := part[1 : len(part)-1]
+	if colon := strings.Index(inner, ":"); colon >= 0 {
+		return strings.TrimSpace(inner[:colon]), strings.TrimSpace(inner[colon+1:]), true
+	}
+	return strings.TrimSpace(inner), "", true
+}
+
+// calcPx evaluates the arithmetic media queries use: a sum of lengths, each
+// optionally scaled by a plain number (`1rem * 2`). No function other than calc
+// itself is resolved, and anything unparseable fails the whole expression - a
+// media feature the engine cannot measure must not read as satisfied.
+func calcPx(expr string) (float32, bool) {
+	expr = strings.ReplaceAll(expr, " ", "")
+	if expr == "" {
+		return 0, false
+	}
+	// Split on the top-level + and - that separate terms, keeping the sign.
+	var terms []string
+	start := 0
 	depth := 0
-
-	for p.pos < len(p.input) {
-		ch := p.peek()
-
-		// Stop at ; or } if not inside parentheses or quotes
-		if depth == 0 && (ch == ';' || ch == '}') {
-			break
-		}
-
-		if ch == '(' {
+	for i := 0; i < len(expr); i++ {
+		switch expr[i] {
+		case '(':
 			depth++
-		} else if ch == ')' {
+		case ')':
 			depth--
-		} else if ch == '"' || ch == '\'' {
-			// Handle quoted strings
-			quote := ch
-			result += string(ch)
-			p.pos++
-			for p.pos < len(p.input) {
-				ch = p.peek()
-				result += string(ch)
-				p.pos++
-				if ch == quote {
-					break
-				}
-				if ch == '\\' && p.pos < len(p.input) {
-					// Escape sequence
-					result += string(p.peek())
-					p.pos++
-				}
+		case '+', '-':
+			if depth == 0 && i > start {
+				terms = append(terms, expr[start:i])
+				start = i
 			}
-			continue
 		}
-
-		result += string(ch)
-		p.pos++
 	}
-
-	return strings.TrimSpace(result)
-}
-
-func (p *Parser) consumeIdentifier() string {
-	var result string
-	for p.pos < len(p.input) {
-		ch := p.peek()
-		if isIdentifierChar(ch) {
-			result += string(p.input[p.pos])
-			p.pos++
-		} else if ch == '\\' {
-			// Handle escape sequence
-			p.pos++ // consume backslash
-			if p.pos < len(p.input) {
-				// For now, just consume the next character literally
-				// This handles cases like .w-1\/2 -> class "w-1/2"
-				result += string(p.input[p.pos])
-				p.pos++
-			}
+	terms = append(terms, expr[start:])
+	total := float32(0)
+	for _, t := range terms {
+		neg := strings.HasPrefix(t, "-")
+		if neg || strings.HasPrefix(t, "+") {
+			t = t[1:]
+		}
+		px, ok := productPx(t)
+		if !ok {
+			return 0, false
+		}
+		if neg {
+			total -= px
 		} else {
-			break
+			total += px
 		}
 	}
-	return result
+	return total, true
 }
 
-func (p *Parser) consumeUntilChar(stopChar byte) string {
-	var result string
-	for p.pos < len(p.input) && p.peek() != stopChar {
-		ch := p.peek()
-		if ch == '\\' && p.pos+1 < len(p.input) {
-			// Escape sequence
-			p.pos++
-			result += string(p.peek())
+// productPx reads `LENGTH * N` or `N * LENGTH`, the only product a media query
+// can legally contain. A calc with no length term is not a length.
+func productPx(term string) (float32, bool) {
+	scale := float32(1)
+	base := float32(-1)
+	for _, f := range strings.Split(term, "*") {
+		if n, err := strconv.ParseFloat(f, 32); err == nil {
+			scale *= float32(n)
+			continue
+		}
+		px, ok := cssPx(f)
+		if !ok || base >= 0 {
+			return 0, false
+		}
+		base = px
+	}
+	if base < 0 {
+		return 0, false
+	}
+	return base * scale, true
+}
+
+// splitRange breaks a media range expression on its comparison operators,
+// keeping each operand verbatim so a `calc(1rem * 2 + 15rem)` with internal
+// spaces survives as one operand instead of shattering into words.
+func splitRange(inner string) (operands, ops []string) {
+	start, depth := 0, 0
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case '<', '>':
+			if depth != 0 {
+				continue
+			}
+			operands = append(operands, inner[start:i])
+			k := i
+			for k < len(inner) && (inner[k] == '<' || inner[k] == '>' || inner[k] == '=') {
+				k++
+			}
+			ops = append(ops, inner[i:k])
+			start = k
+			i = k - 1
+		}
+	}
+	return append(operands, inner[start:]), ops
+}
+
+// mediaRangeHolds evaluates a Media Queries 4 range expression - `(width <=
+// 769px)`, `(769px > width)`, `(400px <= width < 1200px)` - against the viewport
+// width. ok=false means "not a width range", leaving the caller to the classic
+// feature handling. The strict operators compare inclusively: the difference is
+// one pixel exactly at the breakpoint, and the engine has no sub-pixel viewport.
+func (p *parser) mediaRangeHolds(part string) (holds bool, ok bool) {
+	if !strings.HasPrefix(part, "(") || !strings.HasSuffix(part, ")") {
+		return false, false
+	}
+	operands, ops := splitRange(part[1 : len(part)-1])
+	for i := range operands {
+		operands[i] = strings.TrimSpace(operands[i])
+	}
+	switch len(operands) {
+	case 2:
+		if operands[0] == "width" {
+			px, isLen := cssPx(operands[1])
+			return isLen && p.widthSatisfies(ops[0], px), isLen
+		}
+		if operands[1] == "width" {
+			px, isLen := cssPx(operands[0])
+			return isLen && p.widthSatisfies(flipOp(ops[0]), px), isLen
+		}
+	case 3:
+		if operands[1] != "width" {
+			return false, false
+		}
+		lo, okLo := cssPx(operands[0])
+		hi, okHi := cssPx(operands[2])
+		if !okLo || !okHi {
+			return false, false
+		}
+		return p.widthSatisfies(ops[0], lo) && p.widthSatisfies(ops[1], hi), true
+	}
+	return false, false
+}
+
+func (p *parser) widthSatisfies(op string, px float32) bool {
+	switch op {
+	case "<", "<=":
+		return p.mediaWidth <= px
+	case ">", ">=":
+		return p.mediaWidth >= px
+	}
+	return false
+}
+
+func flipOp(op string) string {
+	switch op {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	}
+	return op
+}
+
+// splitTopLevel splits on sep outside parentheses and brackets.
+func splitTopLevel(s string, sep byte) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(', '[':
+			depth++
+		case ')', ']':
+			if depth > 0 {
+				depth--
+			}
+		case sep:
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, s[start:])
+}
+
+func (p *parser) skipWhitespace() {
+	for p.pos < len(p.input) {
+		if p.input[p.pos] == ' ' || p.input[p.pos] == '\t' ||
+			p.input[p.pos] == '\n' || p.input[p.pos] == '\r' {
 			p.pos++
 			continue
 		}
-		result += string(ch)
-		p.pos++
-	}
-	return result
-}
-
-func (p *Parser) consumeWhitespace() {
-	for p.pos < len(p.input) && isWhitespace(p.peek()) {
-		p.pos++
-	}
-}
-
-func (p *Parser) consumeWhitespaceAndComments() {
-	for {
-		// Consume whitespace
-		for p.pos < len(p.input) && isWhitespace(p.peek()) {
-			p.pos++
-		}
-
-		// Check for comment
-		if p.pos < len(p.input)-1 && p.input[p.pos] == '/' && p.input[p.pos+1] == '*' {
-			// Consume comment
+		if p.pos+1 < len(p.input) && p.input[p.pos] == '/' && p.input[p.pos+1] == '*' {
 			p.pos += 2
-			for p.pos < len(p.input)-1 {
+			for p.pos+1 < len(p.input) {
 				if p.input[p.pos] == '*' && p.input[p.pos+1] == '/' {
 					p.pos += 2
 					break
 				}
 				p.pos++
 			}
-		} else {
-			break
+			continue
+		}
+		break
+	}
+}
+
+func (p *parser) skipAtRule() {
+	p.pos++
+	for p.pos < len(p.input) && p.input[p.pos] != ';' && p.input[p.pos] != '{' {
+		p.pos++
+	}
+	if p.pos < len(p.input) && p.input[p.pos] == '{' {
+		depth := 1
+		p.pos++
+		for p.pos < len(p.input) && depth > 0 {
+			if p.input[p.pos] == '{' {
+				depth++
+			} else if p.input[p.pos] == '}' {
+				depth--
+			}
+			p.pos++
+		}
+	} else if p.pos < len(p.input) {
+		p.pos++
+	}
+}
+
+func (p *parser) parseRule() Rule {
+	var rule Rule
+
+	selectorStart := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' {
+		p.pos++
+	}
+	selectorText := strings.TrimSpace(p.input[selectorStart:p.pos])
+
+	if p.pos >= len(p.input) {
+		return rule
+	}
+	p.pos++
+
+	p.skipWhitespace()
+	declStart := p.pos
+	depth := 0
+	for p.pos < len(p.input) {
+		if p.input[p.pos] == '{' {
+			depth++
+		} else if p.input[p.pos] == '}' {
+			if depth == 0 {
+				break
+			}
+			depth--
+		}
+		p.pos++
+	}
+	declText := p.input[declStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++
+	}
+
+	for _, sel := range splitSelectors(selectorText) {
+		sel = strings.TrimSpace(sel)
+		if sel != "" {
+			rule.Selectors = append(rule.Selectors, ParseSelector(sel))
+			rule.SelectorStrs = append(rule.SelectorStrs, sel)
 		}
 	}
+
+	rule.Declarations = parseDeclarations(declText)
+	return rule
 }
 
-func (p *Parser) peek() byte {
-	if p.pos >= len(p.input) {
-		return 0
+func splitSelectors(s string) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
 	}
-	return p.input[p.pos]
+	parts = append(parts, s[start:])
+	return parts
 }
 
-func (p *Parser) consumeChar(char byte) bool {
-	if p.peek() == char {
-		p.pos++
-		return true
+func parseDeclarations(s string) []Declaration {
+	var decls []Declaration
+	for _, part := range splitDeclarations(s) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		colonIdx := strings.Index(part, ":")
+		if colonIdx < 0 {
+			continue
+		}
+		prop := strings.TrimSpace(part[:colonIdx])
+		val := strings.TrimSpace(part[colonIdx+1:])
+
+		important := false
+		if idx := strings.Index(strings.ToLower(val), "!important"); idx >= 0 {
+			important = true
+			val = strings.TrimSpace(val[:idx])
+		}
+
+		decls = append(decls, Declaration{
+			Property:  strings.ToLower(prop),
+			Value:     val,
+			Parsed:    ParseValue(val),
+			Important: important,
+		})
 	}
-	return false
+	return decls
 }
 
-func isWhitespace(char byte) bool {
-	return char == ' ' || char == '\n' || char == '\t' || char == '\r'
+func splitDeclarations(s string) []string {
+	return SplitDeclarations(s)
 }
 
-func isIdentifierChar(char byte) bool {
-	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_'
+// SplitDeclarations cuts a declaration block on top-level semicolons.
+// Semicolons inside url(...) parens or quotes never split: a base64 data
+// URI (`url('data:image/png;base64,...')`) or a quoted string value would
+// otherwise truncate the declaration it sits in.
+func SplitDeclarations(s string) []string {
+	var parts []string
+	depth := 0
+	var quote byte
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ';':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	if start < len(s) {
+		parts = append(parts, s[start:])
+	}
+	return parts
 }
 
-func isIdentifierStart(char byte) bool {
-	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '-' || char == '_'
+// Merge merges two stylesheets, appending rules from other after those in the receiver.
+func (s *Stylesheet) Merge(other *Stylesheet) {
+	if other == nil {
+		return
+	}
+	s.Rules = append(s.Rules, other.Rules...)
+	s.Keyframes = append(s.Keyframes, other.Keyframes...)
 }

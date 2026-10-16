@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Goosie Parity Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        h1 { color: #58a6ff; margin-bottom: 8px; }
+        h2 { color: #8b949e; font-size: 14px; font-weight: 500; margin-bottom: 20px; }
+        h3 { color: #c9d1d9; font-size: 16px; margin-bottom: 12px; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 24px;
+        }
+        .header .meta {
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        /* Score cards */
+        .score-row {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .score-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 160px;
+            flex: 1;
+        }
+        .score-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #58a6ff;
+        }
+        .score-card .value.pass { color: #3fb950; }
+        .score-card .value.fail { color: #f85149; }
+        .score-card .value.warn { color: #d29922; }
+        .score-card .label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        /* Progress bar */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #21262d;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .progress-fill.good { background: #3fb950; }
+        .progress-fill.ok { background: #d29922; }
+        .progress-fill.bad { background: #f85149; }
+
+        /* Category breakdown */
+        .categories {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .cat-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 14px;
+        }
+        .cat-card .cat-name {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .cat-card .cat-stats {
+            font-size: 12px;
+            color: #8b949e;
+        }
+        .cat-card .cat-stats span {
+            margin-right: 12px;
+        }
+        .cat-pass { color: #3fb950; }
+        .cat-fail { color: #f85149; }
+        .cat-error { color: #d29922; }
+
+        /* Fixture table */
+        .fixture-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            overflow: hidden;
+            font-size: 13px;
+        }
+        .fixture-table th {
+            background: #21262d;
+            padding: 10px 14px;
+            text-align: left;
+            font-weight: 600;
+            color: #8b949e;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .fixture-table td {
+            padding: 8px 14px;
+            border-top: 1px solid #21262d;
+        }
+        .fixture-table tr:hover td {
+            background: #1c2128;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .status-pass { background: #0d3117; color: #3fb950; }
+        .status-fail { background: #3d1117; color: #f85149; }
+        .status-error { background: #3d2e00; color: #d29922; }
+        .status-missing { background: #30363d; color: #8b949e; }
+
+        .pct-bar {
+            display: inline-block;
+            width: 80px;
+            height: 6px;
+            background: #21262d;
+            border-radius: 3px;
+            overflow: hidden;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        .pct-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        /* Filter controls */
+        .controls {
+            margin-bottom: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .filter-btn:hover { background: #30363d; }
+        .filter-btn.active { background: #388bfd26; border-color: #388bfd; color: #58a6ff; }
+
+        /* Error / loading states */
+        .error-msg {
+            background: #3d1117;
+            border: 1px solid #f8514933;
+            color: #f85149;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #8b949e;
+        }
+
+        /* Diff image links */
+        .diff-link {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        .diff-link:hover { text-decoration: underline; }
+
+        /* Section spacing */
+        .section { margin-bottom: 32px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>Goosie Parity Dashboard</h1>
+            <h2>Chromium render comparison</h2>
+        </div>
+        <div class="meta" id="meta-info">Loading...</div>
+    </div>
+
+    <div id="error-container"></div>
+
+    <div id="dashboard-content">
+        <div class="loading">Loading report data...</div>
+    </div>
+
+    <script>
+        // Configuration: path to the JSON report (relative to this file).
+        // Override via URL param: ?report=path/to/report.json
+        const REPORT_PATH = new URLSearchParams(window.location.search)
+            .get('report') || 'parity-report.json';
+
+        const DIFF_BASE = new URLSearchParams(window.location.search)
+            .get('diffs') || 'diffs/';
+
+        const REFRESH_INTERVAL = 30000; // 30s auto-refresh
+
+        async function loadReport() {
+            try {
+                const resp = await fetch(REPORT_PATH + '?t=' + Date.now());
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+                const data = await resp.json();
+                render(data);
+            } catch (err) {
+                showError(
+                    `Could not load report from <code>${REPORT_PATH}</code>: ${err.message}<br><br>` +
+                    `Run <code>python3 testdata/parity.py --json testdata/${REPORT_PATH}</code> ` +
+                    `to generate the report, then serve this directory with an HTTP server.`
+                );
+            }
+        }
+
+        function showError(html) {
+            document.getElementById('error-container').innerHTML =
+                `<div class="error-msg">${html}</div>`;
+            document.getElementById('dashboard-content').innerHTML = '';
+        }
+
+        function render(data) {
+            const s = data.summary;
+            const cats = data.categories;
+            const fixtures = data.fixtures;
+
+            // Meta
+            document.getElementById('meta-info').innerHTML =
+                `Generated: ${new Date().toLocaleString()}<br>` +
+                `Threshold: ${s.threshold} | Pass at: ${s.pass_at}% | ` +
+                `Elapsed: ${s.elapsed_seconds}s`;
+
+            // Score cards
+            const pctClass = s.all_pass ? 'pass' : (s.avg_match_pct >= 80 ? 'warn' : 'fail');
+            const passRate = s.total > 0 ? (s.passing / s.total * 100) : 0;
+            const rateClass = passRate >= 90 ? 'pass' : (passRate >= 70 ? 'warn' : 'fail');
+
+            let html = `
+            <div class="score-row">
+                <div class="score-card">
+                    <div class="value ${pctClass}">${s.avg_match_pct.toFixed(1)}%</div>
+                    <div class="label">Average Match</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill ${pctClass}" style="width:${s.avg_match_pct}%"></div>
+                    </div>
+                </div>
+                <div class="score-card">
+                    <div class="value ${rateClass}">${s.passing}/${s.total}</div>
+                    <div class="label">Fixtures Passing</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill ${rateClass}" style="width:${passRate}%"></div>
+                    </div>
+                </div>
+                <div class="score-card">
+                    <div class="value pass">${s.passing}</div>
+                    <div class="label">Passing</div>
+                </div>
+                <div class="score-card">
+                    <div class="value fail">${s.failing}</div>
+                    <div class="label">Failing</div>
+                </div>
+                <div class="score-card">
+                    <div class="value warn">${s.errors}</div>
+                    <div class="label">Errors</div>
+                </div>
+            </div>`;
+
+            // Category breakdown
+            html += `<div class="section"><h3>Categories</h3><div class="categories">`;
+            for (const [name, cat] of Object.entries(cats).sort()) {
+                const catPct = cat.avg_match_pct !== null ? cat.avg_match_pct.toFixed(1) : 'N/A';
+                const catRate = cat.total > 0 ? (cat.pass / cat.total * 100) : 0;
+                const barClass = catRate >= 90 ? 'good' : (catRate >= 70 ? 'ok' : 'bad');
+                html += `
+                <div class="cat-card">
+                    <div class="cat-name">
+                        <span>${name}</span>
+                        <span>${catPct}%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill ${barClass}" style="width:${catRate}%"></div>
+                    </div>
+                    <div class="cat-stats">
+                        <span class="cat-pass">${cat.pass} pass</span>
+                        <span class="cat-fail">${cat.fail} fail</span>
+                        <span class="cat-error">${cat.error} error</span>
+                        <span>${cat.total} total</span>
+                    </div>
+                </div>`;
+            }
+            html += `</div></div>`;
+
+            // Top failing fixtures
+            const failing = fixtures.filter(f => f.status === 'FAIL' || f.status === 'ERROR' || f.status === 'MISSING');
+            if (failing.length > 0) {
+                html += `<div class="section"><h3>Top Failing Fixtures</h3>`;
+                html += `<table class="fixture-table"><thead><tr>
+                    <th>Fixture</th><th>Status</th><th>Match %</th><th>Details</th><th>Diff</th>
+                </tr></thead><tbody>`;
+                for (const f of failing.sort((a, b) => a.match_pct - b.match_pct).slice(0, 20)) {
+                    const statusClass = `status-${f.status.toLowerCase()}`;
+                    const pctColor = f.match_pct >= 80 ? '#d29922' : '#f85149';
+                    const diffPath = DIFF_BASE + f.fixture;
+                    html += `<tr>
+                        <td><code>${f.fixture}</code></td>
+                        <td><span class="status-badge ${statusClass}">${f.status}</span></td>
+                        <td>
+                            <span class="pct-bar"><span class="pct-fill" style="width:${f.match_pct}%;background:${pctColor}"></span></span>
+                            ${f.match_pct.toFixed(2)}%
+                        </td>
+                        <td style="font-size:12px;color:#8b949e;">${f.error || ''}</td>
+                        <td>${f.status === 'FAIL' ? `<a class="diff-link" href="${diffPath}">view</a>` : '-'}</td>
+                    </tr>`;
+                }
+                html += `</tbody></table></div>`;
+            }
+
+            // Full fixture list
+            html += `<div class="section"><h3>All Fixtures</h3>`;
+            html += `<div class="controls">
+                <button class="filter-btn active" onclick="filterFixtures('all')">All (${fixtures.length})</button>
+                <button class="filter-btn" onclick="filterFixtures('PASS')">Pass (${s.passing})</button>
+                <button class="filter-btn" onclick="filterFixtures('FAIL')">Fail (${s.failing})</button>
+                <button class="filter-btn" onclick="filterFixtures('error')">Errors (${s.errors})</button>
+            </div>`;
+            html += `<table class="fixture-table" id="fixture-table"><thead><tr>
+                <th>Fixture</th><th>Category</th><th>Status</th><th>Match %</th><th>Size</th>
+            </tr></thead><tbody>`;
+            for (const f of fixtures) {
+                const cat = f.fixture.split('/')[0] || 'uncategorized';
+                const statusClass = `status-${f.status.toLowerCase()}`;
+                const pctColor = f.status === 'PASS' ? '#3fb950' : (f.match_pct >= 80 ? '#d29922' : '#f85149');
+                const size = f.goosie_size ? `${f.goosie_size[0]}x${f.goosie_size[1]}` : '-';
+                const sizeMismatch = f.chromium_size && f.goosie_size &&
+                    (f.goosie_size[0] !== f.chromium_size[0] || f.goosie_size[1] !== f.chromium_size[1])
+                    ? ` <span style="color:#f85149;">(vs ${f.chromium_size[0]}x${f.chromium_size[1]})</span>` : '';
+
+                html += `<tr data-status="${f.status}">
+                    <td><code>${f.fixture}</code></td>
+                    <td style="font-size:12px;color:#8b949e;">${cat}</td>
+                    <td><span class="status-badge ${statusClass}">${f.status}</span></td>
+                    <td>
+                        <span class="pct-bar"><span class="pct-fill" style="width:${f.match_pct}%;background:${pctColor}"></span></span>
+                        ${f.match_pct.toFixed(2)}%
+                    </td>
+                    <td style="font-size:12px;">${size}${sizeMismatch}</td>
+                </tr>`;
+            }
+            html += `</tbody></table></div>`;
+
+            document.getElementById('dashboard-content').innerHTML = html;
+        }
+
+        function filterFixtures(status) {
+            // Update buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.textContent.toLowerCase().includes(status.toLowerCase()));
+            });
+
+            // Filter rows
+            document.querySelectorAll('#fixture-table tbody tr').forEach(row => {
+                if (status === 'all') {
+                    row.style.display = '';
+                } else if (status === 'error') {
+                    const s = row.dataset.status;
+                    row.style.display = (s === 'ERROR' || s === 'MISSING') ? '' : 'none';
+                } else {
+                    row.style.display = row.dataset.status === status ? '' : 'none';
+                }
+            });
+        }
+
+        // Initial load and auto-refresh
+        loadReport();
+        setInterval(loadReport, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>

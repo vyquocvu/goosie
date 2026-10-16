@@ -15,15 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
       - name: Build all packages
         run: go build ./...
 
@@ -32,111 +27,76 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
       - name: Run unit tests
-        run: go test -short ./...
+        run: go test -count=1 ./...
 
   race:
     name: Race Detector
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
       - name: Run tests with race detector
-        run: go test -race -short ./test/internal/engine/... ./test/internal/js/... ./test/internal/net/...
+        run: go test -race ./...
 
-  smoke:
-    name: Smoke Test
+  arch:
+    name: Architecture boundaries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Check import boundaries and cgo rules
+        run: go test -count=1 ./internal/archtest/
 
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
-      - name: Run smoke tests
-        run: make smoke-test
-
-  golden:
-    name: Golden Images
+  wpt-pilot:
+    name: WPT pilot reftests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - name: Build goosie binary for the harness
+        run: go build -o goosie ./cmd/goosie
+      - name: Run local WPT-style reftests (no checkout download)
+        run: go test -count=1 -timeout 10m -run TestWPTPilot -v ./test/wpt/
 
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
-      - name: Run golden image tests
-        run: |
-          go test -v -count=1 ./test/internal/renderer/frame/golden/ \
-            -run 'TestGolden(Fill|Border|Clipped|Opacity|Composite|Nested|Empty)'
-
-      - name: Verify mismatch detection
-        run: |
-          go test -v -count=1 ./test/internal/renderer/frame/golden/ \
-            -run TestGoldenMismatchDetection
-
-      - name: Upload golden artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: golden-artifacts-${{ github.run_id }}
-          path: |
-            test/internal/renderer/frame/golden/testdata/golden-update/
-          retention-days: 5
-
-  benchmark:
-    name: Benchmarks
+  parity:
+    name: Render parity vs Chromium
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
-      - name: Run CI benchmarks
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build goosie binary for the harness
+        run: go build -o goosie ./cmd/goosie
+      - name: Install Playwright Chromium and scoring deps
         run: |
-          chmod +x scripts/bench-ci.sh
-          scripts/bench-ci.sh run-only
-        env:
-          BENCHTIME: 100ms
-
-      - name: Upload benchmark results
+          pip install "playwright==1.49.*" pillow numpy
+          python -m playwright install chromium --with-deps
+      - name: Render both sides fresh and score (fail-closed)
+        run: python3 testdata/parity.py --render --render-chromium --binary ./goosie --junit /tmp/parity-junit.xml --json /tmp/parity.json
+      - name: Upload parity report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results-${{ github.run_id }}
-          path: testdata/benchmarks/
-          retention-days: 14
+          name: parity-report
+          path: |
+            /tmp/parity.json
+            /tmp/parity-junit.xml

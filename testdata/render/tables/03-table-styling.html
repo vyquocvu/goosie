@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tables - Styling</title>
+    <style>
+        body { margin: 20px; }
+
+        .table-striped {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .table-striped th, .table-striped td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        .table-striped th {
+            background-color: #3498db;
+            color: white;
+        }
+        .table-striped tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .table-striped tr:hover {
+            background-color: #ddd;
+        }
+
+        .table-bordered {
+            border: 3px solid #34495e;
+            border-collapse: separate;
+            border-spacing: 5px;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .table-bordered th, .table-bordered td {
+            border: 2px solid #34495e;
+            padding: 10px;
+        }
+        .table-bordered th {
+            background-color: #2ecc71;
+            color: white;
+        }
+
+        .table-compact {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .table-compact th, .table-compact td {
+            border: 1px solid #95a5a6;
+            padding: 4px 8px;
+            font-size: 14px;
+        }
+        .table-compact th {
+            background-color: #9b59b6;
+            color: white;
+        }
+
+        .table-colored {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .table-colored th, .table-colored td {
+            border: 1px solid #fff;
+            padding: 10px;
+            color: white;
+        }
+        .table-colored th {
+            background-color: #e74c3c;
+        }
+        .table-colored tr:nth-child(1) td { background-color: #e74c3c; }
+        .table-colored tr:nth-child(2) td { background-color: #e67e22; }
+        .table-colored tr:nth-child(3) td { background-color: #f39c12; }
+        .table-colored tr:nth-child(4) td { background-color: #27ae60; }
+    </style>
+</head>
+<body>
+    <h2>Striped Table</h2>
+    <table class="table-striped">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Price</th>
+                <th>Stock</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>Laptop</td><td>$999</td><td>50</td></tr>
+            <tr><td>Mouse</td><td>$25</td><td>200</td></tr>
+            <tr><td>Keyboard</td><td>$75</td><td>150</td></tr>
+            <tr><td>Monitor</td><td>$299</td><td>75</td></tr>
+            <tr><td>Headphones</td><td>$150</td><td>100</td></tr>
+        </tbody>
+    </table>
+
+    <h2>Bordered Table with Spacing</h2>
+    <table class="table-bordered">
+        <tr>
+            <th>Feature</th>
+            <th>Basic</th>
+            <th>Pro</th>
+        </tr>
+        <tr>
+            <td>Storage</td>
+            <td>10GB</td>
+            <td>100GB</td>
+        </tr>
+        <tr>
+            <td>Support</td>
+            <td>Email</td>
+            <td>24/7</td>
+        </tr>
+    </table>
+
+    <h2>Compact Table</h2>
+    <table class="table-compact">
+        <tr><th>A</th><th>B</th><th>C</th><th>D</th></tr>
+        <tr><td>1</td><td>2</td><td>3</td><td>4</td></tr>
+        <tr><td>5</td><td>6</td><td>7</td><td>8</td></tr>
+        <tr><td>9</td><td>10</td><td>11</td><td>12</td></tr>
+    </table>
+
+    <h2>Color-coded Table</h2>
+    <table class="table-colored">
+        <tr><th>Level</th><th>Status</th></tr>
+        <tr><td>Critical</td><td>System Down</td></tr>
+        <tr><td>High</td><td>Degraded</td></tr>
+        <tr><td>Medium</td><td>Warning</td></tr>
+        <tr><td>Low</td><td>Normal</td></tr>
+    </table>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Advanced Tables</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* border-collapse */
+        .collapse-table {
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .collapse-table th,
+        .collapse-table td {
+            border: 1px solid #333;
+            padding: 8px 12px;
+        }
+
+        /* border-separate */
+        .separate-table {
+            border-collapse: separate;
+            border-spacing: 8px;
+            margin: 15px 0;
+        }
+        .separate-table th,
+        .separate-table td {
+            border: 2px solid #3498db;
+            padding: 8px 12px;
+            background: #ecf0f1;
+        }
+
+        /* caption */
+        .captioned-table caption {
+            caption-side: top;
+            font-weight: bold;
+            font-size: 16px;
+            color: #2c3e50;
+            padding: 8px;
+        }
+        .caption-bottom caption {
+            caption-side: bottom;
+        }
+
+        /* Styled table */
+        .styled-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .styled-table thead th {
+            background: #2c3e50;
+            color: white;
+            padding: 10px;
+            text-align: left;
+        }
+        .styled-table tbody td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        .styled-table tbody tr:nth-child(even) {
+            background: #ecf0f1;
+        }
+        .styled-table tbody tr:hover {
+            background: #d5dbdb;
+        }
+        .styled-table tfoot td {
+            padding: 8px 10px;
+            background: #bdc3c7;
+            font-weight: bold;
+        }
+
+        /* Nested table */
+        .nested-table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }
+        .nested-table th,
+        .nested-table td {
+            border: 1px solid #7f8c8d;
+            padding: 8px;
+            vertical-align: top;
+        }
+        .inner-table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        .inner-table td {
+            border: 1px solid #bdc3c7;
+            padding: 4px;
+            background: #ecf0f1;
+        }
+
+        /* Column spanning */
+        .colspan-table {
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .colspan-table th,
+        .colspan-table td {
+            border: 1px solid #333;
+            padding: 8px 12px;
+        }
+
+        /* Vertical alignment */
+        .valign-table {
+            border-collapse: collapse;
+            height: 120px;
+            margin: 15px 0;
+        }
+        .valign-table td {
+            border: 1px solid #333;
+            padding: 8px;
+            width: 25%;
+        }
+        .valign-top { vertical-align: top; }
+        .valign-middle { vertical-align: middle; }
+        .valign-bottom { vertical-align: bottom; }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Advanced Tables</h2>
+
+    <div class="label">border-collapse: collapse</div>
+    <table class="collapse-table">
+        <thead>
+            <tr><th>Name</th><th>Role</th><th>Department</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Alice</td><td>Engineer</td><td>Platform</td></tr>
+            <tr><td>Bob</td><td>Designer</td><td>Product</td></tr>
+        </tbody>
+    </table>
+
+    <div class="label">border-collapse: separate, border-spacing: 8px</div>
+    <table class="separate-table">
+        <tr><th>A</th><th>B</th><th>C</th></tr>
+        <tr><td>1</td><td>2</td><td>3</td></tr>
+        <tr><td>4</td><td>5</td><td>6</td></tr>
+    </table>
+
+    <div class="label">caption-side: top</div>
+    <table class="collapse-table captioned-table">
+        <caption>Employee Directory</caption>
+        <tr><th>Name</th><th>Title</th></tr>
+        <tr><td>Carol</td><td>Manager</td></tr>
+    </table>
+
+    <div class="label">Full styled table with thead, tbody, tfoot, zebra striping</div>
+    <table class="styled-table">
+        <thead>
+            <tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Widget A</td><td>10</td><td>$5.00</td><td>$50.00</td></tr>
+            <tr><td>Widget B</td><td>5</td><td>$12.00</td><td>$60.00</td></tr>
+            <tr><td>Widget C</td><td>3</td><td>$25.00</td><td>$75.00</td></tr>
+            <tr><td>Widget D</td><td>7</td><td>$8.00</td><td>$56.00</td></tr>
+        </tbody>
+        <tfoot>
+            <tr><td colspan="3">Grand Total</td><td>$241.00</td></tr>
+        </tfoot>
+    </table>
+
+    <div class="label">Nested table</div>
+    <table class="nested-table">
+        <tr>
+            <th>Category</th>
+            <th>Details</th>
+        </tr>
+        <tr>
+            <td>Electronics</td>
+            <td>
+                <table class="inner-table">
+                    <tr><td>Phone</td><td>$599</td></tr>
+                    <tr><td>Laptop</td><td>$1299</td></tr>
+                    <tr><td>Tablet</td><td>$449</td></tr>
+                </table>
+            </td>
+        </tr>
+        <tr>
+            <td>Clothing</td>
+            <td>
+                <table class="inner-table">
+                    <tr><td>Shirt</td><td>$29</td></tr>
+                    <tr><td>Pants</td><td>$49</td></tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <div class="label">colspan and rowspan</div>
+    <table class="colspan-table">
+        <tr>
+            <th colspan="3">Q1 Report</th>
+        </tr>
+        <tr>
+            <th>Month</th>
+            <th>Revenue</th>
+            <th>Expenses</th>
+        </tr>
+        <tr>
+            <td rowspan="2">Jan-Feb</td>
+            <td>$50,000</td>
+            <td>$35,000</td>
+        </tr>
+        <tr>
+            <td>$55,000</td>
+            <td>$38,000</td>
+        </tr>
+        <tr>
+            <td>March</td>
+            <td colspan="2">$70,000 combined</td>
+        </tr>
+    </table>
+
+    <div class="label">Vertical alignment: top, middle, bottom</div>
+    <table class="valign-table">
+        <tr>
+            <td class="valign-top">Top aligned content that is short.</td>
+            <td class="valign-middle">Middle aligned content with a bit more text to demonstrate the vertical centering behavior.</td>
+            <td class="valign-bottom">Bottom aligned.</td>
+        </tr>
+    </table>
+</body>
+</html>

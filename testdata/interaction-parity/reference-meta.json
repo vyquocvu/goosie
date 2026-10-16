@@ -1,0 +1,23 @@
+{
+  "playwrightVersion": "1.63.0",
+  "browserVersion": "153.0.8010.12",
+  "executablePath": "/Users/vyquocvu/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+  "executableSha256": "8319963f6625accf51c0dd4f55091ceaf9f09ed39e7a52fed4fae12b2a6b668a",
+  "launchConfig": {
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "deviceScaleFactor": 1
+  },
+  "fixtureSha256": {
+    "01-event-order.html": "56ae571d5e66de2bdb9562c1d7b0d2f1827be6efc2c5b9d5cb75bd028130232b",
+    "02-stop-propagation.html": "d1eedbaba1c7522bf40cda3cacd3f4127d31e5b0016f01332d9ccfc878688062",
+    "03-multiple-listeners.html": "2fedc300aa57dfc39400e027b42ad891df10b7bec0ebd88ab219a251b87f64f6",
+    "04-checkbox-radio.html": "f16728a069f6cba7a3afcb7175b9d3a836521915e26eeeaa0f69cbfc73c2bf2e",
+    "05-focus-tab.html": "a69e5dc43850167336dc89f03829ef41ff4612a785070cdaddee78a9bf4c0713",
+    "06-prevent-default.html": "8ce0d814e41a8d02544bf007bb44463ef207fcb913a196b15c5f5b9ab3b9f056",
+    "07-keyboard.html": "81d5f7a8911b56dec68bb7ca8975bf126234ef4bfe65de3ffd8e646323e6ba43"
+  },
+  "capturedAtConfigNote": "file:// fixtures, headless chromium, single click/keyboard actions"
+}

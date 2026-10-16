@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complex Layout - E-commerce Product Page</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: sans-serif; line-height: 1.6; color: #333; }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .product-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin: 30px 0;
+        }
+
+        .product-gallery {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .main-image {
+            width: 100%;
+            height: 400px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+        }
+        .thumbnail-row {
+            display: flex;
+            gap: 10px;
+        }
+        .thumbnail {
+            width: 80px;
+            height: 80px;
+            background: #ecf0f1;
+            border: 2px solid #bdc3c7;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .thumbnail:hover {
+            border-color: #3498db;
+        }
+
+        .product-info h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        .rating {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .stars {
+            color: #f39c12;
+            font-size: 20px;
+        }
+        .price {
+            font-size: 36px;
+            color: #e74c3c;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .original-price {
+            text-decoration: line-through;
+            color: #95a5a6;
+            font-size: 24px;
+            margin-left: 10px;
+        }
+        .discount {
+            background: #e74c3c;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+
+        .description {
+            margin: 20px 0;
+            color: #666;
+        }
+
+        .options {
+            margin: 20px 0;
+        }
+        .option-group {
+            margin: 15px 0;
+        }
+        .option-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        .color-options, .size-options {
+            display: flex;
+            gap: 10px;
+        }
+        .color-option {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+        }
+        .color-option:hover {
+            border-color: #3498db;
+        }
+        .size-option {
+            padding: 10px 20px;
+            border: 2px solid #bdc3c7;
+            border-radius: 4px;
+            cursor: pointer;
+            background: white;
+        }
+        .size-option:hover {
+            border-color: #3498db;
+        }
+
+        .quantity-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .qty-btn {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #3498db;
+            background: white;
+            color: #3498db;
+            font-size: 20px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .qty-input {
+            width: 60px;
+            height: 40px;
+            text-align: center;
+            border: 2px solid #3498db;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin: 30px 0;
+        }
+        .btn {
+            flex: 1;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        .btn-secondary {
+            background: white;
+            color: #3498db;
+            border: 2px solid #3498db;
+        }
+
+        .product-details {
+            margin-top: 50px;
+            border-top: 2px solid #ecf0f1;
+            padding-top: 30px;
+        }
+        .tabs {
+            display: flex;
+            gap: 20px;
+            border-bottom: 2px solid #ecf0f1;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }
+        .tab.active {
+            border-bottom-color: #3498db;
+            color: #3498db;
+            font-weight: bold;
+        }
+        .tab-content {
+            padding: 20px 0;
+        }
+        .specs-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .specs-table td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .specs-table td:first-child {
+            font-weight: bold;
+            width: 200px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>TechStore</h1>
+    </header>
+
+    <div class="container">
+        <div class="product-layout">
+            <div class="product-gallery">
+                <div class="main-image">Product Image</div>
+                <div class="thumbnail-row">
+                    <div class="thumbnail"></div>
+                    <div class="thumbnail"></div>
+                    <div class="thumbnail"></div>
+                    <div class="thumbnail"></div>
+                </div>
+            </div>
+
+            <div class="product-info">
+                <h1>Premium Wireless Headphones</h1>
+
+                <div class="rating">
+                    <div class="stars">★★★★☆</div>
+                    <span>4.5 (2,847 reviews)</span>
+                </div>
+
+                <div class="price">
+                    $199.99
+                    <span class="original-price">$299.99</span>
+                    <span class="discount">-33%</span>
+                </div>
+
+                <div class="description">
+                    <p>Experience premium sound quality with our latest wireless headphones. Featuring active noise cancellation, 30-hour battery life, and ultra-comfortable design for all-day wear.</p>
+                </div>
+
+                <div class="options">
+                    <div class="option-group">
+                        <label>Color:</label>
+                        <div class="color-options">
+                            <div class="color-option" style="background: #2c3e50;"></div>
+                            <div class="color-option" style="background: #ecf0f1;"></div>
+                            <div class="color-option" style="background: #e74c3c;"></div>
+                            <div class="color-option" style="background: #3498db;"></div>
+                        </div>
+                    </div>
+
+                    <div class="option-group">
+                        <label>Size:</label>
+                        <div class="size-options">
+                            <div class="size-option">Standard</div>
+                            <div class="size-option">Large</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="quantity-selector">
+                    <label>Quantity:</label>
+                    <button class="qty-btn">-</button>
+                    <input type="number" class="qty-input" value="1" min="1">
+                    <button class="qty-btn">+</button>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-primary">Add to Cart</button>
+                    <button class="btn btn-secondary">Add to Wishlist</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="product-details">
+            <div class="tabs">
+                <div class="tab active">Description</div>
+                <div class="tab">Specifications</div>
+                <div class="tab">Reviews</div>
+            </div>
+
+            <div class="tab-content">
+                <h3>Product Specifications</h3>
+                <table class="specs-table">
+                    <tr><td>Brand</td><td>TechStore</td></tr>
+                    <tr><td>Model</td><td>Premium Wireless Pro</td></tr>
+                    <tr><td>Color</td><td>Black, White, Red, Blue</td></tr>
+                    <tr><td>Connectivity</td><td>Bluetooth 5.0</td></tr>
+                    <tr><td>Battery Life</td><td>30 hours</td></tr>
+                    <tr><td>Charging Time</td><td>2 hours</td></tr>
+                    <tr><td>Weight</td><td>250g</td></tr>
+                    <tr><td>Warranty</td><td>2 years</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

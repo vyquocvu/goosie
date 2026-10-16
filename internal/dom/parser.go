@@ -1,791 +1,1033 @@
 package dom
 
 import (
-	"io"
+	"fmt"
+	stdhtml "html"
 	"strings"
-
-	"golang.org/x/net/html"
 )
 
-// Parser handles HTML parsing
-type Parser struct{}
-
-// NewParser creates a new Parser instance
-func NewParser() *Parser {
-	return &Parser{}
+// ParseLimits bounds allocations while the actual HTML tokenizer builds the tree.
+// Nodes includes the document and implicit elements; depth counts edges from it.
+// Every field must be positive: there is no unlimited parse in this package.
+type ParseLimits struct {
+	Nodes, Depth, Attributes, AttributeBytes int
 }
 
-// ParseDocument parses HTML from an io.Reader and returns the root *html.Node.
-// This enables streaming: the caller can pass an HTTP response body directly,
-// avoiding an intermediate string copy. The reader is consumed fully before
-// return; callers should close it afterwards.
-func (p *Parser) ParseDocument(r io.Reader) (*html.Node, error) {
-	return html.Parse(r)
+// ParseBounded builds the Document an HTML string describes within limits, checking them
+// before each node allocation. The caller must bound the input byte length first.
+func ParseBounded(html string, limits ParseLimits) (*Document, error) {
+	if limits.Nodes <= 0 || limits.Depth <= 0 || limits.Attributes <= 0 || limits.AttributeBytes <= 0 {
+		return nil, fmt.Errorf("HTML parse limits must be positive")
+	}
+	tb := &treeBuilder{doc: NewDocument(), limits: limits, text: make(map[*Node]*strings.Builder)}
+	tb.parse(html)
+	if tb.err != nil {
+		return nil, tb.err
+	}
+	for n, text := range tb.text {
+		n.DataContent = text.String()
+	}
+	return tb.doc, nil
 }
 
-// ParseBodyText extracts text content from the body element
-func (p *Parser) ParseBodyText(htmlContent string) (string, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return "", err
-	}
-
-	var bodyText strings.Builder
-	var extractText func(*html.Node)
-	extractText = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "body" {
-			p.getTextFromNode(n, &bodyText)
-			return
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			extractText(c)
-		}
-	}
-
-	extractText(doc)
-	return strings.TrimSpace(bodyText.String()), nil
+type treeBuilder struct {
+	doc          *Document
+	openStack    []*Node
+	headElem     *Node
+	bodyElem     *Node
+	htmlElem     *Node
+	fosterParent bool
+	limits       ParseLimits
+	err          error
+	text         map[*Node]*strings.Builder
+	svgDepth     int // nesting depth inside <svg>; 0 means we're in HTML
 }
 
-// getTextFromNode extracts text from a node and its children
-func (p *Parser) getTextFromNode(n *html.Node, builder *strings.Builder) {
-	if n.Type == html.TextNode {
-		text := strings.TrimSpace(n.Data)
-		if text != "" {
-			if builder.Len() > 0 {
-				builder.WriteString(" ")
-			}
-			builder.WriteString(text)
-		}
-	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		p.getTextFromNode(c, builder)
-	}
-}
-
-// Element represents a DOM element with its properties
-type Element struct {
-	TagName     string
-	ID          string
-	Classes     []string
-	Attributes  map[string]string
-	TextContent string
-	Node        *html.Node
-}
-
-// GetElementByID searches for an element by ID (basic implementation)
-func (p *Parser) GetElementByID(htmlContent, id string) (string, error) {
-	elem, err := p.GetElementByIDFull(htmlContent, id)
-	if err != nil || elem == nil {
-		return "", err
-	}
-	return elem.TextContent, nil
-}
-
-// GetElementByIDFull returns the full Element object by ID
-func (p *Parser) GetElementByIDFull(htmlContent, id string) (*Element, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return nil, err
-	}
-
-	var result *Element
-	var findElement func(*html.Node)
-	findElement = func(n *html.Node) {
-		if n.Type == html.ElementNode {
-			for _, attr := range n.Attr {
-				if attr.Key == "id" && attr.Val == id {
-					result = p.nodeToElement(n)
-					return
-				}
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if result == nil {
-				findElement(c)
-			}
-		}
-	}
-
-	findElement(doc)
-	return result, nil
-}
-
-// GetElementsByClassName returns all elements with the specified class name
-func (p *Parser) GetElementsByClassName(htmlContent, className string) ([]*Element, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return nil, err
-	}
-
-	var elements []*Element
-	var findElements func(*html.Node)
-	findElements = func(n *html.Node) {
-		if n.Type == html.ElementNode {
-			for _, attr := range n.Attr {
-				if attr.Key == "class" && hasMatchingClass(attr.Val, className) {
-					elements = append(elements, p.nodeToElement(n))
-					break
-				}
-			}
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			findElements(c)
-		}
-	}
-
-	findElements(doc)
-	return elements, nil
-}
-
-// GetElementsByTagName returns all elements with the specified tag name
-func (p *Parser) GetElementsByTagName(htmlContent, tagName string) ([]*Element, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return nil, err
-	}
-
-	tagName = strings.ToLower(tagName)
-	var elements []*Element
-	var findElements func(*html.Node)
-	findElements = func(n *html.Node) {
-		if n.Type == html.ElementNode && strings.ToLower(n.Data) == tagName {
-			elements = append(elements, p.nodeToElement(n))
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			findElements(c)
-		}
-	}
-
-	findElements(doc)
-	return elements, nil
-}
-
-// QuerySelector returns the first element matching the CSS selector
-func (p *Parser) QuerySelector(htmlContent, selector string) (*Element, error) {
-	elements, err := p.QuerySelectorAll(htmlContent, selector)
-	if err != nil {
-		return nil, err
-	}
-	if len(elements) == 0 {
-		return nil, nil
-	}
-	return elements[0], nil
-}
-
-// QuerySelectorAll returns all elements matching the CSS selector
-func (p *Parser) QuerySelectorAll(htmlContent, selector string) ([]*Element, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return nil, err
-	}
-
-	var elements []*Element
-	var findElements func(*html.Node)
-	findElements = func(n *html.Node) {
-		if n.Type == html.ElementNode && p.matchesSelector(n, selector) {
-			elements = append(elements, p.nodeToElement(n))
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			findElements(c)
-		}
-	}
-
-	findElements(doc)
-	return elements, nil
-}
-
-// hasMatchingClass checks if classAttr contains className without allocating slices.
-func hasMatchingClass(classAttr, className string) bool {
-	for classAttr != "" {
-		i := 0
-		for i < len(classAttr) && (classAttr[i] == ' ' || classAttr[i] == '\t' || classAttr[i] == '\n' || classAttr[i] == '\r' || classAttr[i] == '\f') {
-			i++
-		}
-		classAttr = classAttr[i:]
-		if classAttr == "" {
-			break
-		}
-		j := 0
-		for j < len(classAttr) && !(classAttr[j] == ' ' || classAttr[j] == '\t' || classAttr[j] == '\n' || classAttr[j] == '\r' || classAttr[j] == '\f') {
-			j++
-		}
-		if classAttr[:j] == className {
-			return true
-		}
-		classAttr = classAttr[j:]
-	}
-	return false
-}
-
-type domAttrMatcher struct {
-	name     string
-	operator string // "", "=", "^=", "$=", "*=", "~=", "|="
-	value    string
-}
-
-type domCompoundStep struct {
-	combinator string // "", " ", ">", "+", "~"
-	tag        string
-	ids        []string
-	classes    []string
-	attrs      []domAttrMatcher
-	pseudos    []string
-}
-
-func getParentElem(n *html.Node) *html.Node {
-	if n == nil {
-		return nil
-	}
-	for p := n.Parent; p != nil; p = p.Parent {
-		if p.Type == html.ElementNode {
-			return p
-		}
-	}
-	return nil
-}
-
-func getPrevElemSibling(n *html.Node) *html.Node {
-	if n == nil {
-		return nil
-	}
-	for s := n.PrevSibling; s != nil; s = s.PrevSibling {
-		if s.Type == html.ElementNode {
-			return s
-		}
-	}
-	return nil
-}
-
-func getNextElemSibling(n *html.Node) *html.Node {
-	if n == nil {
-		return nil
-	}
-	for s := n.NextSibling; s != nil; s = s.NextSibling {
-		if s.Type == html.ElementNode {
-			return s
-		}
-	}
-	return nil
-}
-
-func splitSelectorList(sel string) []string {
-	var results []string
-	var current strings.Builder
-	inQuotes := false
-	var quoteChar rune
-	bracketDepth := 0
-
-	for _, r := range sel {
-		if inQuotes {
-			current.WriteRune(r)
-			if r == quoteChar {
-				inQuotes = false
-			}
-			continue
-		}
-		if r == '"' || r == '\'' {
-			inQuotes = true
-			quoteChar = r
-			current.WriteRune(r)
-			continue
-		}
-		if r == '[' {
-			bracketDepth++
-			current.WriteRune(r)
-			continue
-		}
-		if r == ']' {
-			if bracketDepth > 0 {
-				bracketDepth--
-			}
-			current.WriteRune(r)
-			continue
-		}
-		if r == ',' && bracketDepth == 0 {
-			part := strings.TrimSpace(current.String())
-			if part != "" {
-				results = append(results, part)
-			}
-			current.Reset()
-			continue
-		}
-		current.WriteRune(r)
-	}
-	if part := strings.TrimSpace(current.String()); part != "" {
-		results = append(results, part)
-	}
-	return results
-}
-
-func parseAttrSelector(raw string) domAttrMatcher {
-	raw = strings.TrimSpace(raw)
-	for _, op := range []string{"^=", "$=", "*=", "~=", "|=", "="} {
-		if idx := strings.Index(raw, op); idx != -1 {
-			name := strings.TrimSpace(raw[:idx])
-			val := strings.TrimSpace(raw[idx+len(op):])
-			val = strings.Trim(val, "\"'")
-			return domAttrMatcher{
-				name:     name,
-				operator: op,
-				value:    val,
-			}
-		}
-	}
-	return domAttrMatcher{
-		name:     strings.TrimSpace(raw),
-		operator: "",
-		value:    "",
-	}
-}
-
-func parseCompoundStep(s string, comb string) domCompoundStep {
-	step := domCompoundStep{combinator: comb}
-	runes := []rune(s)
-	i := 0
-
-	var tagBuilder strings.Builder
-	for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
-		tagBuilder.WriteRune(runes[i])
-		i++
-	}
-	step.tag = strings.TrimSpace(tagBuilder.String())
-
-	for i < len(runes) {
-		r := runes[i]
-		if r == '#' {
-			i++
-			var idBuilder strings.Builder
-			for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
-				idBuilder.WriteRune(runes[i])
-				i++
-			}
-			if id := idBuilder.String(); id != "" {
-				step.ids = append(step.ids, id)
-			}
-		} else if r == '.' {
-			i++
-			var classBuilder strings.Builder
-			for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
-				classBuilder.WriteRune(runes[i])
-				i++
-			}
-			if cls := classBuilder.String(); cls != "" {
-				step.classes = append(step.classes, cls)
-			}
-		} else if r == '[' {
-			i++
-			var attrBuilder strings.Builder
-			inQuotes := false
-			var quoteChar rune
-			for i < len(runes) {
-				ar := runes[i]
-				if inQuotes {
-					attrBuilder.WriteRune(ar)
-					if ar == quoteChar {
-						inQuotes = false
-					}
-					i++
-					continue
-				}
-				if ar == '"' || ar == '\'' {
-					inQuotes = true
-					quoteChar = ar
-					attrBuilder.WriteRune(ar)
-					i++
-					continue
-				}
-				if ar == ']' {
-					i++
-					break
-				}
-				attrBuilder.WriteRune(ar)
-				i++
-			}
-			raw := attrBuilder.String()
-			am := parseAttrSelector(raw)
-			step.attrs = append(step.attrs, am)
-		} else if r == ':' {
-			i++
-			var pseudoBuilder strings.Builder
-			for i < len(runes) && runes[i] != '#' && runes[i] != '.' && runes[i] != '[' && runes[i] != ':' {
-				pseudoBuilder.WriteRune(runes[i])
-				i++
-			}
-			if p := strings.ToLower(strings.TrimSpace(pseudoBuilder.String())); p != "" {
-				step.pseudos = append(step.pseudos, p)
-			}
-		} else {
-			i++
-		}
-	}
-
-	return step
-}
-
-func parseSelectorSequence(seq string) []domCompoundStep {
-	var steps []domCompoundStep
-	currentComb := ""
-	var currentToken strings.Builder
-
-	inQuotes := false
-	var quoteChar rune
-	bracketDepth := 0
-
-	flush := func() {
-		tok := strings.TrimSpace(currentToken.String())
-		currentToken.Reset()
-		if tok == "" {
-			return
-		}
-		step := parseCompoundStep(tok, currentComb)
-		steps = append(steps, step)
-		currentComb = " "
-	}
-
-	runes := []rune(seq)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		if inQuotes {
-			currentToken.WriteRune(r)
-			if r == quoteChar {
-				inQuotes = false
-			}
-			continue
-		}
-		if r == '"' || r == '\'' {
-			inQuotes = true
-			quoteChar = r
-			currentToken.WriteRune(r)
-			continue
-		}
-		if r == '[' {
-			bracketDepth++
-			currentToken.WriteRune(r)
-			continue
-		}
-		if r == ']' {
-			if bracketDepth > 0 {
-				bracketDepth--
-			}
-			currentToken.WriteRune(r)
-			continue
-		}
-
-		if bracketDepth == 0 {
-			if r == '>' || r == '+' || r == '~' {
-				flush()
-				currentComb = string(r)
-				continue
-			}
-			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-				j := i + 1
-				for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t' || runes[j] == '\n' || runes[j] == '\r') {
-					j++
-				}
-				if j < len(runes) && (runes[j] == '>' || runes[j] == '+' || runes[j] == '~') {
-					flush()
-					currentComb = string(runes[j])
-					i = j
-					continue
-				}
-				if currentToken.Len() > 0 {
-					flush()
-					currentComb = " "
-				}
-				continue
-			}
-		}
-
-		currentToken.WriteRune(r)
-	}
-
-	flush()
-	return steps
-}
-
-func matchCompound(n *html.Node, step *domCompoundStep) bool {
-	if n == nil || n.Type != html.ElementNode {
+func (tb *treeBuilder) allowNode(parent *Node) bool {
+	if tb.err != nil {
 		return false
 	}
-	if step.tag != "" && step.tag != "*" {
-		if !strings.EqualFold(n.Data, step.tag) {
+	if int(tb.doc.nextID) >= tb.limits.Nodes {
+		tb.err = fmt.Errorf("HTML node limit exceeded (%d)", tb.limits.Nodes)
+		return false
+	}
+	// Depth is O(1) from the open-element stack: the stack holds the open
+	// elements outermost-first, so the current node's depth is len(openStack)
+	// (the document root is depth 0) and a new child of it is one deeper.
+	// Only the foster-parent path passes a parent that is not the current
+	// node; it is rare, so the parent-chain walk survives as a fallback there.
+	if parent == tb.current() || parent == &tb.doc.Node {
+		depth := 1
+		if parent != &tb.doc.Node {
+			depth = len(tb.openStack) + 1
+		}
+		if depth > tb.limits.Depth {
+			tb.err = fmt.Errorf("HTML tree depth limit exceeded (%d)", tb.limits.Depth)
 			return false
 		}
+		return true
 	}
-	for _, id := range step.ids {
-		found := false
-		for _, a := range n.Attr {
-			if a.Key == "id" && a.Val == id {
-				found = true
-				break
-			}
-		}
-		if !found {
+	depth := 0
+	for p := parent; p != nil; p = p.Parent {
+		depth++
+		if depth > tb.limits.Depth {
+			tb.err = fmt.Errorf("HTML tree depth limit exceeded (%d)", tb.limits.Depth)
 			return false
-		}
-	}
-	for _, cls := range step.classes {
-		found := false
-		for _, a := range n.Attr {
-			if a.Key == "class" && hasMatchingClass(a.Val, cls) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	for _, am := range step.attrs {
-		found := false
-		var val string
-		for _, a := range n.Attr {
-			if strings.EqualFold(a.Key, am.name) {
-				found = true
-				val = a.Val
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-		switch am.operator {
-		case "":
-			// Existence
-		case "=":
-			if val != am.value {
-				return false
-			}
-		case "^=":
-			if am.value == "" || !strings.HasPrefix(val, am.value) {
-				return false
-			}
-		case "$=":
-			if am.value == "" || !strings.HasSuffix(val, am.value) {
-				return false
-			}
-		case "*=":
-			if am.value == "" || !strings.Contains(val, am.value) {
-				return false
-			}
-		case "~=":
-			if !hasMatchingClass(val, am.value) {
-				return false
-			}
-		case "|=":
-			if val != am.value && !strings.HasPrefix(val, am.value+"-") {
-				return false
-			}
-		}
-	}
-	for _, pseudo := range step.pseudos {
-		switch pseudo {
-		case "first-child":
-			if getPrevElemSibling(n) != nil {
-				return false
-			}
-		case "last-child":
-			if getNextElemSibling(n) != nil {
-				return false
-			}
-		case "only-child":
-			if getPrevElemSibling(n) != nil || getNextElemSibling(n) != nil {
-				return false
-			}
-		case "scope":
-			// matches
 		}
 	}
 	return true
 }
 
-func matchSelectorSequence(n *html.Node, steps []domCompoundStep, stepIdx int) bool {
-	if stepIdx < 0 {
-		return true
+func (tb *treeBuilder) current() *Node {
+	if len(tb.openStack) > 0 {
+		return tb.openStack[len(tb.openStack)-1]
 	}
-	if !matchCompound(n, &steps[stepIdx]) {
-		return false
+	return &tb.doc.Node
+}
+
+func (tb *treeBuilder) push(n *Node) {
+	tb.openStack = append(tb.openStack, n)
+}
+
+func (tb *treeBuilder) pop() *Node {
+	if len(tb.openStack) == 0 {
+		return nil
 	}
-	if stepIdx == 0 {
-		return true
-	}
-	comb := steps[stepIdx].combinator
-	switch comb {
-	case ">":
-		parent := getParentElem(n)
-		if parent == nil {
-			return false
+	n := tb.openStack[len(tb.openStack)-1]
+	tb.openStack = tb.openStack[:len(tb.openStack)-1]
+	return n
+}
+
+func (tb *treeBuilder) popUntil(tag string) {
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		tb.pop()
+		if top.Data == tag {
+			return
 		}
-		return matchSelectorSequence(parent, steps, stepIdx-1)
-	case " ":
-		for curr := getParentElem(n); curr != nil; curr = getParentElem(curr) {
-			if matchSelectorSequence(curr, steps, stepIdx-1) {
-				return true
-			}
-		}
-		return false
-	case "+":
-		sib := getPrevElemSibling(n)
-		if sib == nil {
-			return false
-		}
-		return matchSelectorSequence(sib, steps, stepIdx-1)
-	case "~":
-		for sib := getPrevElemSibling(n); sib != nil; sib = getPrevElemSibling(sib) {
-			if matchSelectorSequence(sib, steps, stepIdx-1) {
-				return true
-			}
-		}
-		return false
-	default:
-		return true
 	}
 }
 
-// matchesSelector checks if a node matches a CSS selector
-func (p *Parser) matchesSelector(n *html.Node, selector string) bool {
-	if n == nil || n.Type != html.ElementNode {
-		return false
-	}
-	selectorList := splitSelectorList(selector)
-	for _, sel := range selectorList {
-		steps := parseSelectorSequence(sel)
-		if len(steps) == 0 {
-			continue
+func (tb *treeBuilder) hasInScope(tag string) bool {
+	for i := len(tb.openStack) - 1; i >= 0; i-- {
+		if tb.openStack[i].Data == tag {
+			return true
 		}
-		if matchSelectorSequence(n, steps, len(steps)-1) {
+		if isScopeElement(tb.openStack[i]) {
+			return false
+		}
+	}
+	return false
+}
+
+func isScopeElement(n *Node) bool {
+	switch n.Data {
+	case "applet", "caption", "html", "table", "td", "th",
+		"marquee", "object", "template":
+		return true
+	}
+	return false
+}
+
+var voidElements = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true,
+	"embed": true, "hr": true, "img": true, "input": true,
+	"link": true, "meta": true, "param": true, "source": true,
+	"track": true, "wbr": true,
+}
+
+// svgVoidElements are SVG elements that are always self-closing.
+var svgVoidElements = map[string]bool{
+	"circle": true, "ellipse": true, "line": true, "path": true,
+	"polygon": true, "polyline": true, "rect": true, "use": true,
+	"image": true, "stop": true, "animate": true, "animateTransform": true,
+	"animateMotion": true, "set": true, "mpath": true,
+}
+
+// svgElements are all known SVG element names.
+var svgElements = map[string]bool{
+	"svg": true, "g": true, "defs": true, "symbol": true, "use": true,
+	"rect": true, "circle": true, "ellipse": true, "line": true,
+	"polyline": true, "polygon": true, "path": true, "text": true,
+	"tspan": true, "textPath": true, "image": true, "foreignObject": true,
+	"clipPath": true, "mask": true, "pattern": true, "marker": true,
+	"linearGradient": true, "radialGradient": true, "stop": true,
+	"filter": true, "feBlend": true, "feColorMatrix": true,
+	"feComponentTransfer": true, "feComposite": true, "feConvolveMatrix": true,
+	"feDiffuseLighting": true, "feDisplacementMap": true, "feFlood": true,
+	"feGaussianBlur": true, "feImage": true, "feMerge": true,
+	"feMergeNode": true, "feMorphology": true, "feOffset": true,
+	"feSpecularLighting": true, "feTile": true, "feTurbulence": true,
+	"animate": true, "animateTransform": true, "animateMotion": true,
+	"set": true, "mpath": true, "title": true, "desc": true, "metadata": true,
+}
+
+var rawTextElements = map[string]bool{
+	"script": true, "style": true, "textarea": true, "title": true,
+}
+
+var rawTextEndTags = map[string]string{
+	"script":   "</script",
+	"style":    "</style",
+	"textarea": "</textarea",
+	"title":    "</title",
+}
+
+// mergeAttrs adds the token's attributes the element does not already carry.
+// An explicit <html>, <head> or <body> tag that arrives after its element was
+// implied still contributes e.g. lang or class; present attributes win.
+func (tb *treeBuilder) mergeAttrs(n *Node, attrs []Attribute) {
+	for _, a := range attrs {
+		if n.GetAttribute(a.Name) == "" && !n.HasAttribute(a.Name) {
+			n.Attr = append(n.Attr, a)
+		}
+	}
+}
+
+func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bool) *Node {
+	parent := tb.current()
+	if tb.fosterParent && isTableElement(parent) {
+		parent = tb.findFosterParent()
+	}
+	if !tb.allowNode(parent) {
+		return nil
+	}
+	n := tb.doc.NewElement(tag)
+	n.Attr = attrs
+	// SVG elements get the SVG namespace.
+	if tb.svgDepth > 0 || tag == "svg" {
+		n.Namespace = NSSVG
+	}
+	parent.AppendChild(n)
+
+	if tag == "html" {
+		tb.htmlElem = n
+		tb.doc.HTML = n
+	} else if tag == "head" {
+		tb.headElem = n
+		tb.doc.Head = n
+	} else if tag == "body" {
+		tb.bodyElem = n
+		tb.doc.Body = n
+	}
+
+	if !selfClose && !voidElements[tag] {
+		tb.push(n)
+	}
+	return n
+}
+
+func isTableElement(n *Node) bool {
+	switch n.Data {
+	case "table", "tbody", "thead", "tfoot", "tr":
+		return true
+	}
+	return false
+}
+
+func (tb *treeBuilder) findFosterParent() *Node {
+	for i := len(tb.openStack) - 1; i >= 0; i-- {
+		if tb.openStack[i].Data == "table" {
+			if i > 0 {
+				return tb.openStack[i-1]
+			}
+			return tb.openStack[i]
+		}
+	}
+	return &tb.doc.Node
+}
+
+func (tb *treeBuilder) insertText(data string) {
+	if data == "" {
+		return
+	}
+	// A non-whitespace character with no body yet starts it: the "in head"
+	// insertion mode pops the head and reprocesses the token in the body.
+	// Whitespace between head elements stays where it is. Raw-text element
+	// content (style, script, title, textarea) bypasses this through
+	// insertRawText - the CSS or script source must not imply a body.
+	if tb.bodyElem == nil && hasNonSpace(data) {
+		tb.ensureBody()
+	}
+	parent := tb.current()
+	if tb.fosterParent && isTableElement(parent) {
+		parent = tb.findFosterParent()
+	}
+	if last := parent.LastChild; last != nil && last.Text() {
+		b := tb.text[last]
+		if b == nil {
+			b = &strings.Builder{}
+			b.WriteString(last.DataContent)
+			tb.text[last] = b
+		}
+		b.WriteString(data)
+		return
+	}
+	if !tb.allowNode(parent) {
+		return
+	}
+	n := tb.doc.NewText(data)
+	parent.AppendChild(n)
+}
+
+// insertRawText appends raw-text element content (style, script, title,
+// textarea) to the current node without implying a body: the source text of a
+// <style> block is not page content.
+func (tb *treeBuilder) insertRawText(data string) {
+	if data == "" {
+		return
+	}
+	parent := tb.current()
+	if last := parent.LastChild; last != nil && last.Text() {
+		b := tb.text[last]
+		if b == nil {
+			b = &strings.Builder{}
+			b.WriteString(last.DataContent)
+			tb.text[last] = b
+		}
+		b.WriteString(data)
+		return
+	}
+	if !tb.allowNode(parent) {
+		return
+	}
+	n := tb.doc.NewText(data)
+	parent.AppendChild(n)
+}
+
+// hasNonSpace reports whether s holds anything but HTML whitespace.
+func hasNonSpace(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case ' ', '\t', '\n', '\f', '\r':
+		default:
 			return true
 		}
 	}
 	return false
 }
 
-// nodeToElement converts an html.Node to an Element
-func (p *Parser) nodeToElement(n *html.Node) *Element {
-	elem := &Element{
-		TagName:    strings.ToLower(n.Data),
-		Attributes: make(map[string]string),
-		Node:       n,
+func (tb *treeBuilder) insertComment(data string) {
+	if !tb.allowNode(tb.current()) {
+		return
 	}
-
-	for _, attr := range n.Attr {
-		elem.Attributes[attr.Key] = attr.Val
-		if attr.Key == "id" {
-			elem.ID = attr.Val
-		} else if attr.Key == "class" {
-			elem.Classes = strings.Fields(attr.Val)
-		}
-	}
-
-	var textBuilder strings.Builder
-	p.getTextFromNode(n, &textBuilder)
-	elem.TextContent = textBuilder.String()
-
-	return elem
+	n := tb.doc.NewComment(data)
+	tb.current().AppendChild(n)
 }
 
-// ParseBodyHTML extracts HTML content from the body element and converts to markdown-like format
-func (p *Parser) ParseBodyHTML(htmlContent string) (string, error) {
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		return "", err
+func (tb *treeBuilder) parse(html string) {
+	p := &tokenizer{input: html, limits: tb.limits}
+
+	// The html element always exists, tag or no tag: seeding it up front is
+	// what the "before html" insertion mode does for a document that omits
+	// <html>. Without it an implied-html document grows no html box at all,
+	// so `html { background: ... }` matches nothing and canvas-background
+	// resolution falls through to the body.
+	tb.insertElement("html", nil, false)
+
+	for p.pos < len(p.input) && tb.err == nil {
+		if p.pos < len(p.input) && p.input[p.pos] == '<' {
+			// Tag-open state: only a letter starts a tag. `</` closes,
+			// `<!` declares, `<?` is a bogus comment, and anything else -
+			// "a <= b", "2 < 3", a trailing "<" - is literal text. Routing
+			// `<=` into the tag reader swallowed the real close tag that
+			// followed and nested every later sibling inside the box.
+			if p.pos+1 < len(p.input) {
+				switch c := p.input[p.pos+1]; {
+				case c == '/':
+					tb.handleEndTag(p)
+				case c == '!':
+					tb.handleCommentOrDoctype(p)
+				case c == '?':
+					p.pos += 2
+					p.skipTo('>')
+					if p.pos < len(p.input) {
+						p.pos++
+					}
+				case isASCIILetter(c):
+					tb.handleStartTag(p)
+				default:
+					tb.insertText("<")
+					p.pos++
+				}
+			} else {
+				tb.insertText("<")
+				p.pos++
+			}
+		} else {
+			tb.handleText(p)
+		}
+	}
+}
+
+// isASCIILetter reports whether c opens a tag name in the tag-open state.
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func (tb *treeBuilder) handleText(p *tokenizer) {
+	start := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '<' {
+		p.pos++
+	}
+	text := p.input[start:p.pos]
+	if strings.IndexByte(text, '&') >= 0 {
+		text = stdhtml.UnescapeString(text)
+	}
+	if text != "" {
+		tb.insertText(text)
+	}
+}
+
+func (tb *treeBuilder) handleStartTag(p *tokenizer) {
+	p.pos++
+	if p.pos >= len(p.input) {
+		tb.insertText("<")
+		return
 	}
 
-	var markdown strings.Builder
-	var extractHTML func(*html.Node)
-	extractHTML = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "body" {
-			p.convertToMarkdown(n, &markdown)
+	tag, attrs, selfClose := p.parseTag()
+	if p.err != nil {
+		tb.err = p.err
+		return
+	}
+	if tag == "" {
+		tb.insertText("<")
+		return
+	}
+
+	// SVG elements are case-sensitive; HTML elements are lowercased.
+	// When inside an <svg> element (svgDepth > 0), preserve the original case.
+	if tb.svgDepth == 0 {
+		tag = strings.ToLower(tag)
+	}
+
+	tb.processStartTag(tag, attrs, selfClose)
+
+	if rawTextElements[tag] {
+		tb.consumeRawText(p, tag)
+	}
+}
+
+func (tb *treeBuilder) consumeRawText(p *tokenizer, tag string) {
+	start := p.pos
+	for p.pos < len(p.input) {
+		idx := strings.Index(p.input[p.pos:], "</")
+		if idx < 0 {
+			p.pos = len(p.input)
+			break
+		}
+		p.pos += idx
+		tagStart := p.pos + 2
+		tagEnd := tagStart + len(tag)
+		if tagEnd <= len(p.input) && strings.EqualFold(p.input[tagStart:tagEnd], tag) {
+			if tagEnd >= len(p.input) || isRawTextEndDelimiter(p.input[tagEnd]) {
+				break
+			}
+		}
+		p.pos += 2
+	}
+	if p.pos > start {
+		tb.insertRawText(p.input[start:p.pos])
+	}
+	if p.pos < len(p.input) {
+		idx := strings.IndexByte(p.input[p.pos:], '>')
+		if idx >= 0 {
+			p.pos += idx + 1
+		} else {
+			p.pos = len(p.input)
+		}
+	}
+	tb.popUntil(tag)
+}
+
+func isRawTextEndDelimiter(c byte) bool {
+	return c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose bool) {
+	// Handle SVG namespace entry/exit.
+	if tag == "svg" || (tb.svgDepth > 0 && svgElements[tag]) {
+		if tag == "svg" {
+			tb.svgDepth++
+		}
+		// SVG shape elements are always self-closing.
+		sc := selfClose || svgVoidElements[tag]
+		tb.insertElement(tag, attrs, sc)
+		return
+	}
+
+	switch tag {
+	case "html":
+		if tb.htmlElem == nil {
+			tb.insertElement(tag, attrs, false)
+		} else {
+			// The element was seeded (or an earlier tag created it): an
+			// explicit <html> still contributes the attributes it carries.
+			tb.mergeAttrs(tb.htmlElem, attrs)
+		}
+		return
+	case "head":
+		if tb.headElem == nil && tb.htmlElem != nil {
+			tb.insertElement(tag, attrs, false)
+		} else if tb.headElem != nil {
+			tb.mergeAttrs(tb.headElem, attrs)
+		}
+		return
+	case "body":
+		if tb.bodyElem == nil {
+			if tb.headElem != nil && tb.onStack(tb.headElem) {
+				tb.popUntil("head")
+			}
+			tb.insertElement(tag, attrs, false)
+		} else {
+			tb.mergeAttrs(tb.bodyElem, attrs)
+		}
+		return
+	case "meta", "link", "base":
+		if tb.headPhase() {
+			tb.ensureHead()
+		}
+		tb.insertElement(tag, attrs, true)
+		return
+	case "title", "style":
+		if tb.headPhase() {
+			tb.ensureHead()
+		}
+		tb.insertElement(tag, attrs, false)
+		return
+	case "script":
+		tb.insertElement(tag, attrs, false)
+		return
+	case "br", "hr", "img", "input", "embed", "wbr", "col", "area", "source", "track":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, true)
+		return
+	case "p":
+		tb.ensureBody()
+		if tb.hasInScope("p") {
+			tb.closeP()
+		}
+		tb.insertElement(tag, attrs, false)
+		return
+	case "li":
+		tb.ensureBody()
+		tb.closeListItem()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "dd", "dt":
+		tb.ensureBody()
+		tb.closeDefinition()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "tr":
+		tb.ensureBody()
+		tb.closeTableRows()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "td", "th":
+		tb.ensureBody()
+		tb.closeTableCell()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "tbody", "tfoot", "thead":
+		tb.ensureBody()
+		tb.closeTableRows("tbody", "thead", "tfoot")
+		tb.insertElement(tag, attrs, false)
+		return
+	case "table":
+		tb.ensureBody()
+		tb.closePifOpen()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "caption":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "colgroup":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "form", "fieldset", "details", "dialog", "menu":
+		tb.ensureBody()
+		tb.closePifOpen()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "select":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "option", "optgroup":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "textarea":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "label", "button", "output", "progress", "meter":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "datalist":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "a", "abbr", "b", "bdo", "cite", "code", "dfn", "em", "i", "kbd",
+		"mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup",
+		"time", "u", "var", "font", "big":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, selfClose)
+		return
+	default:
+		tb.ensureBody()
+		tb.closePifOpen()
+		tb.insertElement(tag, attrs, selfClose)
+		return
+	}
+}
+
+func (tb *treeBuilder) ensureHead() {
+	if tb.headElem == nil && tb.htmlElem != nil {
+		tb.insertElement("head", nil, false)
+	}
+}
+
+// headPhase reports whether a head-level element still belongs in a head: HTML5
+// only routes style/link/meta/title there while the head is the live insertion
+// point. Once a body exists, or an explicit </head> has closed the head, the
+// element goes at the current node instead - synthesizing a head there leaves it
+// open on the stack, and every following element becomes a child of a
+// display:none subtree, which blanks the page rather than mis-rendering it.
+func (tb *treeBuilder) headPhase() bool {
+	if tb.bodyElem != nil {
+		return false
+	}
+	if tb.headElem == nil {
+		return true
+	}
+	return tb.onStack(tb.headElem)
+}
+
+// hasOpenTag reports whether any open element carries tag. End-tag handling
+// uses it to tell a paired close from a stray one: HTML5 ignores an end tag
+// with no matching open element instead of unwinding the stack for it.
+func (tb *treeBuilder) hasOpenTag(tag string) bool {
+	for _, o := range tb.openStack {
+		if o.Data == tag {
+			return true
+		}
+	}
+	return false
+}
+
+// onStack reports whether n is currently open, i.e. still on the list of open
+// elements. popUntil walks and empties the whole stack when the tag it seeks is
+// absent, so any unconditional pop of a node that has already closed must be
+// guarded - otherwise the stack loses <html> with it.
+func (tb *treeBuilder) onStack(n *Node) bool {
+	for _, o := range tb.openStack {
+		if o == n {
+			return true
+		}
+	}
+	return false
+}
+
+func (tb *treeBuilder) ensureBody() {
+	if tb.bodyElem == nil {
+		tb.ensureHead()
+		if tb.headElem != nil && tb.onStack(tb.headElem) {
+			tb.popUntil("head")
+		}
+		tb.insertElement("body", nil, false)
+	}
+}
+
+func (tb *treeBuilder) closeP() {
+	tb.popUntil("p")
+}
+
+func (tb *treeBuilder) closePifOpen() {
+	if tb.hasInScope("p") {
+		tb.closeP()
+	}
+}
+
+func (tb *treeBuilder) closeListItem() {
+	for i := len(tb.openStack) - 1; i >= 0; i-- {
+		if tb.openStack[i].Data == "li" {
+			tb.popUntil("li")
 			return
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			extractHTML(c)
+		// A nested list bounds the implicit </li>: HTML5 stops the search at
+		// any special element, and ul/ol are special. Without this an <li>
+		// inside a nested <ul> closes an <li> in an ancestor list, reparenting
+		// the whole sublist out from under its parent.
+		if tb.openStack[i].Data == "ul" || tb.openStack[i].Data == "ol" {
+			return
+		}
+		if isScopeElement(tb.openStack[i]) {
+			return
 		}
 	}
-
-	extractHTML(doc)
-	return strings.TrimSpace(markdown.String()), nil
 }
 
-// convertToMarkdown converts HTML nodes to markdown-like format
-func (p *Parser) convertToMarkdown(n *html.Node, builder *strings.Builder) {
-	switch n.Type {
-	case html.TextNode:
-		text := strings.TrimSpace(n.Data)
-		if text != "" {
-			builder.WriteString(text)
+func (tb *treeBuilder) closeDefinition() {
+	for i := len(tb.openStack) - 1; i >= 0; i-- {
+		if tb.openStack[i].Data == "dt" || tb.openStack[i].Data == "dd" {
+			if tb.openStack[i].Data == "dd" {
+				tb.popUntil("dd")
+			} else {
+				tb.popUntil("dt")
+			}
+			return
 		}
-	case html.ElementNode:
-		switch n.Data {
-		case "h1":
-			builder.WriteString("\n# ")
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("\n\n")
-		case "h2":
-			builder.WriteString("\n## ")
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("\n\n")
-		case "h3":
-			builder.WriteString("\n### ")
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("\n\n")
-		case "p":
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("\n\n")
-		case "a":
-			href := ""
-			for _, attr := range n.Attr {
-				if attr.Key == "href" {
-					href = attr.Val
-					break
-				}
-			}
-			builder.WriteString("[")
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("]")
-			if href != "" {
-				builder.WriteString("(")
-				builder.WriteString(href)
-				builder.WriteString(")")
-			}
-		case "strong", "b":
-			builder.WriteString("**")
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("**")
-		case "em", "i":
-			builder.WriteString("*")
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("*")
-		case "br":
-			builder.WriteString("\n")
-		case "div":
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-			builder.WriteString("\n")
-		default:
-			// For other elements, just process children
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				p.convertToMarkdown(c, builder)
-			}
-		}
-	default:
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			p.convertToMarkdown(c, builder)
+		if isScopeElement(tb.openStack[i]) {
+			return
 		}
 	}
+}
+
+func (tb *treeBuilder) closeUntil(tags ...string) {
+	tagSet := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		tagSet[t] = true
+	}
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		if tagSet[top.Data] {
+			tb.pop()
+			return
+		}
+		tb.pop()
+	}
+}
+
+// closeTableRows ends the row-level boxes a new `<tr>` or row group closes: the
+// open cells and the row they sit in. It stops at the row group, and at the
+// table itself, because HTML5 bounds these implicit closings by table scope.
+// Popping past the table would leave the next row a sibling of the table rather
+// than its descendant.
+func (tb *treeBuilder) closeTableRows(groups ...string) {
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		switch top.Data {
+		case "td", "th", "tr":
+			tb.pop()
+			continue
+		case "table":
+			return
+		}
+		for _, g := range groups {
+			if top.Data == g {
+				tb.pop()
+			}
+		}
+		return
+	}
+}
+
+// closeTableCell pops an open cell so a following `<td>` starts a new one. The
+// row stays open: it is the cell that ended.
+func (tb *treeBuilder) closeTableCell() {
+	for len(tb.openStack) > 0 {
+		top := tb.openStack[len(tb.openStack)-1]
+		if top.Data == "td" || top.Data == "th" {
+			tb.pop()
+			continue
+		}
+		return
+	}
+}
+
+func (tb *treeBuilder) handleEndTag(p *tokenizer) {
+	p.pos += 2
+	tag := p.readTagName()
+	if tag == "" {
+		return
+	}
+	p.skipTo('>')
+	if p.pos < len(p.input) {
+		p.pos++
+	}
+
+	tag = strings.ToLower(tag)
+	tb.processEndTag(tag)
+}
+
+func (tb *treeBuilder) processEndTag(tag string) {
+	// Handle SVG namespace exit.
+	if tb.svgDepth > 0 && tag == "svg" {
+		tb.svgDepth--
+		if tb.hasOpenTag(tag) {
+			tb.popUntil(tag)
+		}
+		return
+	}
+	// SVG child elements are self-closing, so just pop them. A void-marked
+	// element may still carry an explicit end tag (<path>...</path>, as
+	// served by Google's header icons): with nothing open to pop, the token
+	// is a parse error to ignore. Popping unconditionally would run
+	// popUntil's absent-tag fallback, unwinding the stack through <html> and
+	// reparenting the rest of the document outside it.
+	if tb.svgDepth > 0 && svgElements[tag] {
+		if tb.hasOpenTag(tag) {
+			tb.popUntil(tag)
+		}
+		return
+	}
+	// A stray </br> is a start tag; every other void end tag (</col>,
+	// </link>, </meta>, ...) is a parse error the tokenizer drops. Without
+	// this, popUntil's empty-the-stack fallback for an absent tag unwinds
+	// the whole open stack: one </col> ejects the table and every later
+	// sibling lands outside it.
+	if tag == "br" {
+		tb.insertElement("br", nil, false)
+		return
+	}
+	if voidElements[tag] {
+		return
+	}
+
+	switch tag {
+	case "html":
+		return
+	case "head":
+		if tb.headElem != nil && tb.onStack(tb.headElem) {
+			tb.popUntil("head")
+		}
+		return
+	case "body":
+		if tb.bodyElem != nil && tb.onStack(tb.bodyElem) {
+			tb.popUntil("body")
+		}
+		return
+	case "p":
+		if !tb.hasInScope("p") {
+			tb.insertElement("p", nil, false)
+		}
+		tb.closeP()
+		return
+	case "li":
+		tb.popUntil("li")
+		return
+	case "dd", "dt":
+		tb.popUntil(tag)
+		return
+	case "td", "th":
+		tb.popUntil(tag)
+		return
+	case "tr":
+		tb.popUntil("tr")
+		return
+	case "tbody", "tfoot", "thead":
+		tb.popUntil(tag)
+		return
+	case "table":
+		tb.popUntil("table")
+		return
+	case "caption":
+		tb.popUntil("caption")
+		return
+	case "colgroup":
+		tb.popUntil("colgroup")
+		return
+	case "form", "fieldset", "details", "dialog", "menu":
+		tb.popUntil(tag)
+		return
+	case "select":
+		tb.popUntil("select")
+		return
+	case "option", "optgroup":
+		tb.popUntil(tag)
+		return
+	case "textarea":
+		tb.popUntil("textarea")
+		return
+	case "script", "style":
+		tb.popUntil(tag)
+		return
+	default:
+		tb.popUntil(tag)
+		return
+	}
+}
+
+func (tb *treeBuilder) handleCommentOrDoctype(p *tokenizer) {
+	p.pos += 2
+	if p.pos+1 < len(p.input) && p.input[p.pos] == '-' && p.input[p.pos+1] == '-' {
+		p.pos += 2
+		end := strings.Index(p.input[p.pos:], "-->")
+		if end >= 0 {
+			tb.insertComment(p.input[p.pos : p.pos+end])
+			p.pos += end + 3
+		} else {
+			p.pos = len(p.input)
+		}
+		return
+	}
+	if len(p.input)-p.pos >= 7 && strings.EqualFold(p.input[p.pos:p.pos+7], "DOCTYPE") {
+		p.pos += 7
+		end := strings.Index(p.input[p.pos:], ">")
+		if end >= 0 {
+			if !tb.allowNode(&tb.doc.Node) {
+				return
+			}
+			data := strings.TrimSpace(p.input[p.pos : p.pos+end])
+			dt := tb.doc.NewDoctype(data)
+			tb.doc.Node.AppendChild(dt)
+			tb.doc.DocType = dt
+			p.pos += end + 1
+		} else {
+			p.pos = len(p.input)
+		}
+		return
+	}
+	p.skipTo('>')
+	if p.pos < len(p.input) {
+		p.pos++
+	}
+}
+
+type tokenizer struct {
+	input  string
+	pos    int
+	limits ParseLimits
+	err    error
+}
+
+func (t *tokenizer) readTagName() string {
+	start := t.pos
+	for t.pos < len(t.input) {
+		c := t.input[t.pos]
+		if c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			break
+		}
+		t.pos++
+	}
+	return t.input[start:t.pos]
+}
+
+func (t *tokenizer) skipTo(c byte) {
+	for t.pos < len(t.input) && t.input[t.pos] != c {
+		t.pos++
+	}
+}
+
+func (t *tokenizer) parseTag() (tag string, attrs []Attribute, selfClose bool) {
+	t.skipWhitespace()
+	tag = t.readTagName()
+	if tag == "" {
+		t.skipTo('>')
+		if t.pos < len(t.input) {
+			t.pos++
+		}
+		return "", nil, false
+	}
+
+	for t.pos < len(t.input) {
+		t.skipWhitespace()
+		if t.pos >= len(t.input) {
+			break
+		}
+		c := t.input[t.pos]
+		if c == '>' {
+			t.pos++
+			return
+		}
+		if c == '/' {
+			t.pos++
+			if t.pos < len(t.input) && t.input[t.pos] == '>' {
+				t.pos++
+			}
+			selfClose = true
+			return
+		}
+		name, value := t.parseAttr()
+		if name != "" {
+			if t.limits.Attributes > 0 && len(attrs) >= t.limits.Attributes {
+				t.err = fmt.Errorf("HTML attribute count limit exceeded (%d)", t.limits.Attributes)
+				return
+			}
+			if t.limits.AttributeBytes > 0 && len(name)+len(value) > t.limits.AttributeBytes {
+				t.err = fmt.Errorf("HTML attribute byte limit exceeded (%d)", t.limits.AttributeBytes)
+				return
+			}
+			attrs = append(attrs, Attribute{
+				Name:     name,
+				NameAtom: LookupAttr(name),
+				Value:    value,
+			})
+		}
+	}
+	return
+}
+
+func (t *tokenizer) skipWhitespace() {
+	for t.pos < len(t.input) {
+		c := t.input[t.pos]
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' {
+			break
+		}
+		t.pos++
+	}
+}
+
+func (t *tokenizer) parseAttr() (name, value string) {
+	start := t.pos
+	for t.pos < len(t.input) {
+		c := t.input[t.pos]
+		if c == '=' || c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			break
+		}
+		t.pos++
+	}
+	name = strings.ToLower(t.input[start:t.pos])
+	if name == "" {
+		if t.pos < len(t.input) {
+			t.pos++
+		}
+		return "", ""
+	}
+
+	t.skipWhitespace()
+	if t.pos >= len(t.input) || t.input[t.pos] != '=' {
+		return name, ""
+	}
+	t.pos++
+	t.skipWhitespace()
+
+	if t.pos >= len(t.input) {
+		return name, ""
+	}
+
+	quote := t.input[t.pos]
+	if quote == '"' || quote == '\'' {
+		t.pos++
+		start = t.pos
+		for t.pos < len(t.input) && t.input[t.pos] != quote {
+			t.pos++
+		}
+		value = t.input[start:t.pos]
+		if t.pos < len(t.input) {
+			t.pos++
+		}
+	} else {
+		start = t.pos
+		for t.pos < len(t.input) {
+			c := t.input[t.pos]
+			// Per the HTML spec a `/` is part of an unquoted value, not a
+			// terminator: `<a href=https://x.dev/>` links to a trailing-slash URL.
+			if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '>' {
+				break
+			}
+			t.pos++
+		}
+		value = t.input[start:t.pos]
+	}
+	if strings.IndexByte(value, '&') >= 0 {
+		value = stdhtml.UnescapeString(value)
+	}
+	return name, value
 }

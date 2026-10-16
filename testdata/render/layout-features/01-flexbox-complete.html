@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flexbox - Complete Properties</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        .flex-container {
+            display: flex;
+            background: #ecf0f1;
+            padding: 10px;
+            margin: 15px 0;
+            border: 2px solid #bdc3c7;
+        }
+        .flex-item {
+            background: #3498db;
+            color: white;
+            padding: 15px;
+            margin: 3px;
+            text-align: center;
+            min-width: 60px;
+        }
+
+        /* align-self */
+        .align-self-demo { height: 120px; align-items: flex-start; }
+        .align-self-start { align-self: flex-start; }
+        .align-self-center { align-self: center; }
+        .align-self-end { align-self: flex-end; }
+        .align-self-stretch { align-self: stretch; }
+        .align-self-baseline { align-self: baseline; }
+
+        /* order */
+        .order-demo .o-neg { order: -1; background: #e74c3c; }
+        .order-demo .o-zero { order: 0; }
+        .order-demo .o-pos { order: 1; background: #2ecc71; }
+        .order-demo .o-high { order: 10; background: #9b59b6; }
+
+        /* flex-shrink */
+        .shrink-demo { width: 400px; }
+        .shrink-0 { flex-shrink: 0; width: 200px; background: #e74c3c; }
+        .shrink-1 { flex-shrink: 1; width: 200px; }
+        .shrink-2 { flex-shrink: 2; width: 200px; background: #f39c12; }
+
+        /* align-content (needs flex-wrap) */
+        .align-content-demo {
+            flex-wrap: wrap;
+            height: 200px;
+            align-content: flex-start;
+        }
+        .align-content-center {
+            align-content: center;
+        }
+        .align-content-space-between {
+            align-content: space-between;
+        }
+        .align-content-space-around {
+            align-content: space-around;
+        }
+        .align-content-demo .flex-item {
+            flex: 0 0 30%;
+        }
+
+        /* margin auto */
+        .margin-auto-demo { }
+        .margin-auto-demo .push-right { margin-left: auto; background: #e74c3c; }
+        .margin-auto-demo .push-down { margin-top: auto; background: #2ecc71; }
+
+        /* flex with min/max-width/height */
+        .constraints-demo .constrained {
+            min-width: 100px;
+            max-width: 200px;
+            flex-grow: 1;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Flexbox - Complete Properties</h2>
+
+    <div class="label">align-self on each item</div>
+    <div class="flex-container align-self-demo">
+        <div class="flex-item align-self-start">start</div>
+        <div class="flex-item align-self-center">center</div>
+        <div class="flex-item align-self-end">end</div>
+        <div class="flex-item align-self-stretch">stretch</div>
+        <div class="flex-item align-self-baseline">baseline</div>
+    </div>
+
+    <div class="label">order: negative, 0, positive, high</div>
+    <div class="flex-container order-demo">
+        <div class="flex-item o-zero">order: 0 (A)</div>
+        <div class="flex-item o-pos">order: 1 (B)</div>
+        <div class="flex-item o-neg">order: -1 (C)</div>
+        <div class="flex-item o-high">order: 10 (D)</div>
+    </div>
+
+    <div class="label">flex-shrink: 0, 1, 2 (container 400px, items 200px each)</div>
+    <div class="flex-container shrink-demo">
+        <div class="flex-item shrink-0">shrink: 0</div>
+        <div class="flex-item shrink-1">shrink: 1</div>
+        <div class="flex-item shrink-2">shrink: 2</div>
+    </div>
+
+    <div class="label">align-content: flex-start (wrapped)</div>
+    <div class="flex-container align-content-demo">
+        <div class="flex-item">1</div>
+        <div class="flex-item">2</div>
+        <div class="flex-item">3</div>
+        <div class="flex-item">4</div>
+        <div class="flex-item">5</div>
+    </div>
+
+    <div class="label">align-content: center (wrapped)</div>
+    <div class="flex-container align-content-demo align-content-center">
+        <div class="flex-item">1</div>
+        <div class="flex-item">2</div>
+        <div class="flex-item">3</div>
+        <div class="flex-item">4</div>
+        <div class="flex-item">5</div>
+    </div>
+
+    <div class="label">align-content: space-between (wrapped)</div>
+    <div class="flex-container align-content-demo align-content-space-between">
+        <div class="flex-item">1</div>
+        <div class="flex-item">2</div>
+        <div class="flex-item">3</div>
+        <div class="flex-item">4</div>
+        <div class="flex-item">5</div>
+    </div>
+
+    <div class="label">margin-left: auto (push right)</div>
+    <div class="flex-container margin-auto-demo">
+        <div class="flex-item">Left</div>
+        <div class="flex-item">Middle</div>
+        <div class="flex-item push-right">Pushed right</div>
+    </div>
+
+    <div class="label">min-width / max-width constraints with flex-grow</div>
+    <div class="flex-container constraints-demo">
+        <div class="flex-item constrained">min:100 max:200</div>
+        <div class="flex-item constrained">min:100 max:200</div>
+        <div class="flex-item constrained">min:100 max:200</div>
+    </div>
+</body>
+</html>

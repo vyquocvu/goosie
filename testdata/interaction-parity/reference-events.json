@@ -1,0 +1,9 @@
+{
+  "01-event-order": "capture:outer:click,capture:inner:click,capture:btn:click,bubble:btn:click,bubble:inner:click,bubble:outer:click",
+  "02-stop-propagation": "bubble:btn:click,bubble:inner:click",
+  "03-multiple-listeners": "A,B,C",
+  "04-checkbox-radio": "cb1:change:true,cb2:change:false,r1:change:a,r3:change:c",
+  "05-focus-tab": "a:focus,a:blur,b:focus,b:blur,c:focus,c:blur,d:focus",
+  "06-prevent-default": "form:submit:prevented,link:click:prevented",
+  "07-keyboard": "a:focus,a:keydown:Tab,a:blur,b:focus,b:keyup:Tab,b:keydown:Tab,b:blur,c:focus,c:keyup:Tab"
+}

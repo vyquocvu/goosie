@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Typography - White Space</title>
+    <style>
+        body { margin: 20px; }
+        .box {
+            width: 300px;
+            border: 2px solid #3498db;
+            padding: 10px;
+            margin: 20px 0;
+            background-color: #ecf0f1;
+        }
+        .white-space-normal { white-space: normal; }
+        .white-space-nowrap { white-space: nowrap; }
+        .white-space-pre { white-space: pre; }
+        .white-space-pre-wrap { white-space: pre-wrap; }
+        .white-space-pre-line { white-space: pre-line; }
+    </style>
+</head>
+<body>
+    <h2>White Space</h2>
+
+    <h3>Normal (default) - wraps and collapses whitespace</h3>
+    <div class="box white-space-normal">
+        This    text    has    multiple    spaces
+        and a line break.
+    </div>
+
+    <h3>Nowrap - no wrapping, collapses whitespace</h3>
+    <div class="box white-space-nowrap">
+        This    text    has    multiple    spaces    and    a    very    long    line    that    should    not    wrap.
+    </div>
+
+    <h3>Pre - preserves whitespace and no wrapping</h3>
+    <div class="box white-space-pre">
+        This    text    has    multiple    spaces
+        and a line break.
+            Indented line.
+    </div>
+
+    <h3>Pre-wrap - preserves whitespace and wraps</h3>
+    <div class="box white-space-pre-wrap">
+        This    text    has    multiple    spaces
+        and a line break.
+            Indented line that is very long and should wrap to the next line.
+    </div>
+
+    <h3>Pre-line - preserves line breaks, collapses spaces, wraps</h3>
+    <div class="box white-space-pre-line">
+        This    text    has    multiple    spaces
+        and a line break.
+            Indented line that is very long and should wrap to the next line.
+    </div>
+</body>
+</html>

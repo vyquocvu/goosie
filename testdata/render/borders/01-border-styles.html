@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Borders - Styles and Widths</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .box {
+            width: 200px;
+            height: 100px;
+            margin: 20px;
+            display: inline-block;
+            vertical-align: top;
+            background-color: #ecf0f1;
+            text-align: center;
+            line-height: 100px;
+        }
+        .border-none { border: none; }
+        .border-solid { border: 3px solid #3498db; }
+        .border-dashed { border: 3px dashed #e74c3c; }
+        .border-dotted { border: 3px dotted #2ecc71; }
+        .border-double { border: 5px double #9b59b6; }
+        .border-thin { border: 1px solid #333; }
+        .border-medium { border: 3px solid #333; }
+        .border-thick { border: 6px solid #333; }
+        .border-mixed {
+            border-top: 4px solid #e74c3c;
+            border-right: 3px dashed #3498db;
+            border-bottom: 2px dotted #2ecc71;
+            border-left: 6px double #9b59b6;
+        }
+    </style>
+</head>
+<body>
+    <h2>Border Styles</h2>
+
+    <div class="box border-none">No border</div>
+    <div class="box border-solid">Solid</div>
+    <div class="box border-dashed">Dashed</div>
+    <div class="box border-dotted">Dotted</div>
+    <div class="box border-double">Double</div>
+
+    <h2>Border Widths</h2>
+
+    <div class="box border-thin">Thin (1px)</div>
+    <div class="box border-medium">Medium (3px)</div>
+    <div class="box border-thick">Thick (6px)</div>
+
+    <h2>Mixed Borders</h2>
+
+    <div class="box border-mixed">Mixed styles</div>
+</body>
+</html>

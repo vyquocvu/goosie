@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Grid Layout - Basic</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        .grid-container {
+            display: grid;
+            gap: 10px;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #ecf0f1;
+        }
+
+        .grid-item {
+            background-color: #3498db;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 18px;
+        }
+
+        /* Fixed columns */
+        .grid-fixed {
+            grid-template-columns: 200px 200px 200px;
+        }
+
+        /* Flexible columns */
+        .grid-flex {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
+        /* Mixed columns */
+        .grid-mixed {
+            grid-template-columns: 200px 1fr 2fr;
+        }
+
+        /* Auto-fill */
+        .grid-auto-fill {
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        }
+
+        /* Auto-fit */
+        .grid-auto-fit {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        }
+
+        /* Fixed rows */
+        .grid-rows {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 100px 150px 100px;
+        }
+
+        /* Spanning columns */
+        .grid-span-col {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+        .span-2 {
+            grid-column: span 2;
+        }
+        .span-3 {
+            grid-column: span 3;
+        }
+
+        /* Spanning rows */
+        .grid-span-row {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 100px 100px 100px;
+        }
+        .span-row-2 {
+            grid-row: span 2;
+        }
+
+        /* Grid areas */
+        .grid-areas {
+            grid-template-areas:
+                "header header header"
+                "sidebar main main"
+                "footer footer footer";
+            grid-template-columns: 200px 1fr 1fr;
+            grid-template-rows: 80px 200px 60px;
+        }
+        .area-header { grid-area: header; background-color: #e74c3c; }
+        .area-sidebar { grid-area: sidebar; background-color: #2ecc71; }
+        .area-main { grid-area: main; background-color: #3498db; }
+        .area-footer { grid-area: footer; background-color: #9b59b6; }
+    </style>
+</head>
+<body>
+    <h1>CSS Grid Layout Tests</h1>
+
+    <h2>Fixed Column Widths</h2>
+    <div class="grid-container grid-fixed">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item">5</div>
+        <div class="grid-item">6</div>
+    </div>
+
+    <h2>Flexible Columns (1fr 1fr 1fr)</h2>
+    <div class="grid-container grid-flex">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item">5</div>
+        <div class="grid-item">6</div>
+    </div>
+
+    <h2>Mixed Columns (200px 1fr 2fr)</h2>
+    <div class="grid-container grid-mixed">
+        <div class="grid-item">1 (200px)</div>
+        <div class="grid-item">2 (1fr)</div>
+        <div class="grid-item">3 (2fr)</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item">5</div>
+        <div class="grid-item">6</div>
+    </div>
+
+    <h2>Auto-fill (minmax(150px, 1fr))</h2>
+    <div class="grid-container grid-auto-fill">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item">5</div>
+        <div class="grid-item">6</div>
+    </div>
+
+    <h2>Auto-fit (minmax(150px, 1fr))</h2>
+    <div class="grid-container grid-auto-fit">
+        <div class="grid-item">1</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item">5</div>
+        <div class="grid-item">6</div>
+    </div>
+
+    <h2>Fixed Row Heights</h2>
+    <div class="grid-container grid-rows">
+        <div class="grid-item">1 (100px)</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3 (150px)</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item">5 (100px)</div>
+        <div class="grid-item">6</div>
+    </div>
+
+    <h2>Column Spanning</h2>
+    <div class="grid-container grid-span-col">
+        <div class="grid-item span-2">Spans 2 columns</div>
+        <div class="grid-item">3</div>
+        <div class="grid-item">4</div>
+        <div class="grid-item span-2">Spans 2 columns</div>
+        <div class="grid-item span-3">Spans all 3 columns</div>
+    </div>
+
+    <h2>Row Spanning</h2>
+    <div class="grid-container grid-span-row">
+        <div class="grid-item span-row-2">Spans 2 rows</div>
+        <div class="grid-item">2</div>
+        <div class="grid-item">3</div>
+        <div class="grid-item">4</div>
+    </div>
+
+    <h2>Grid Template Areas</h2>
+    <div class="grid-container grid-areas">
+        <div class="grid-item area-header">Header</div>
+        <div class="grid-item area-sidebar">Sidebar</div>
+        <div class="grid-item area-main">Main Content</div>
+        <div class="grid-item area-footer">Footer</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flexbox - Gap</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .flex-container {
+            display: flex;
+            background-color: #ecf0f1;
+            padding: 10px;
+            margin: 20px 0;
+            border: 2px solid #3498db;
+        }
+        .flex-item {
+            background-color: #1abc9c;
+            color: white;
+            padding: 20px;
+        }
+        .gap-10 { gap: 10px; }
+        .gap-20 { gap: 20px; }
+        .gap-30 { gap: 30px; }
+        .gap-row-column { gap: 10px 30px; }
+    </style>
+</head>
+<body>
+    <h2>Flex Gap</h2>
+
+    <h3>Gap: 10px</h3>
+    <div class="flex-container gap-10">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>Gap: 20px</h3>
+    <div class="flex-container gap-20">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>Gap: 30px</h3>
+    <div class="flex-container gap-30">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>Gap: 10px 30px (row column)</h3>
+    <div class="flex-container gap-row-column" style="flex-wrap: wrap;">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+        <div class="flex-item">Item 4</div>
+        <div class="flex-item">Item 5</div>
+        <div class="flex-item">Item 6</div>
+    </div>
+</body>
+</html>

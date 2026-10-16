@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   nightly:
-    name: Nightly benchmark suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    name: Nightly frame-path benchmarks (macOS, real CVDisplayLink)
+    runs-on: macos-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -25,97 +25,59 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
+      - name: Run all tests
+        run: go test -count=1 ./...
 
-      - name: Run navigation lifecycle benchmarks
+      - name: Fuzz the malformed-input entry points
         run: |
-          go test -run='^$' -bench='BenchmarkSession' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/engine/session
+          # Seed tests already run in `go test ./...`; -fuzz is what searches.
+          # 120s per target is the point where a fresh crasher is worth the nightly
+          # minutes. A finding lands in this step's log; copy it to
+          # <pkg>/testdata/fuzz/<Target>/ to pin it forever.
+          for target in './test/dom:FuzzParseDocument' './test/css:FuzzParseStylesheet' './test/style:FuzzResolveCascade'; do
+            pkg=${target%%:*}
+            name=${target##*:}
+            echo "::group::fuzz $name ($pkg)"
+            go test -fuzz="^${name}\$" -fuzztime=120s -timeout=15m "$pkg"
+            echo "::endgroup::"
+          done
 
-      - name: Run parser benchmarks (longer)
-        run: |
-          go test -run='^$' -bench='BenchmarkParseBody' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/dom
-
-      - name: Run selector benchmarks (longer)
-        run: |
-          go test -run='^$' -bench='BenchmarkParseSelector|BenchmarkMatch' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/css
-
-      - name: Run scrolling benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkViewportScroll' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/renderer
-
-      - name: Run full-pipeline benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkFullPipeline' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/renderer
-
-      - name: Run testpages corpus benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkGet|BenchmarkGetContext' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/engine/testpages
-
-      - name: Run JS runtime benchmarks
-        run: |
-          go test -run='^$' -bench='BenchmarkJS|BenchmarkRuntime' -benchmem -benchtime=1s -timeout=10m \
-            ./test/internal/js || true
-
-      - name: Fuzz HTML parser and CSS selector matcher
-        # Cross-Cutting Workstreams → A. Testing → Parser and selector fuzz tests.
-        # Each fuzz target has a bounded input size (4 KiB) so the runtime never
-        # OOMs; failures surface as test panics or assertion violations.
-        run: |
-          go test -fuzz=FuzzHTMLParseDocument -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzHTMLParseDocumentCancelContext -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzHTMLGetElementByID -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzHTMLParseBodyText -fuzztime=30s ./test/internal/dom/
-          go test -fuzz=FuzzCSSParser -fuzztime=30s ./test/internal/css/
-          go test -fuzz=FuzzSelectorMatcher -fuzztime=30s ./test/internal/css/
-
-      - name: Run race-detected benchmarks
-        run: |
-          go test -race -run='^$' -bench='BenchmarkSessionConcurrentNavigate|BenchmarkGetScrolling' \
-            -benchmem -benchtime=200ms -timeout=10m \
-            ./test/internal/engine/...
-
-      - name: Collect all results
+      - name: Run the M1 scroll benchmarks
         run: |
           mkdir -p testdata/benchmarks/nightly
-          go test -run='^$' -bench='.' -benchmem -benchtime=500ms -timeout=30m \
-            ./test/internal/dom \
-            ./test/internal/css \
-            ./test/internal/renderer \
-            ./test/internal/engine/... \
-            > testdata/benchmarks/nightly/full-suite.txt 2>&1 || true
-          echo "Nightly suite collected: $(wc -l < testdata/benchmarks/nightly/full-suite.txt) lines"
+          go test -run='^$' -bench='BenchmarkWarmScroll|BenchmarkColdScrollBurst' \
+            -benchmem -benchtime=200x -count=3 -timeout=20m ./test/gate \
+            > testdata/benchmarks/nightly/m1-bench.txt 2>&1
+          cat testdata/benchmarks/nightly/m1-bench.txt
 
-      - name: Upload benchmark artifacts
+      - name: Run the gate through a real window
+        run: |
+          go run ./cmd/goosie -gate -backend native -scene checkerboard -frames 600 \
+            -out testdata/benchmarks/nightly/m1-gate.json \
+            2> testdata/benchmarks/nightly/m1-report.txt
+          cat testdata/benchmarks/nightly/m1-report.txt
+
+      - name: Require that the run was paced by a display
+        run: |
+          if ! grep -q 'backend=darwin' testdata/benchmarks/nightly/m1-report.txt; then
+            echo "::error::the gate run did not open a macOS window; this runner has no display session to pace it"
+            exit 1
+          fi
+
+      - name: Assert the M1 budgets
+        run: |
+          scripts/v2-gate-check.sh testdata/benchmarks/nightly/m1-gate.json \
+            -mean 16 -p99 33 \
+            -bench testdata/benchmarks/nightly/m1-bench.txt -warm-ms 5 -cold-ms 8 \
+            -startup-ms 1000
+
+      - name: Upload measurements
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-benchmarks-${{ github.run_id }}
-          path: testdata/benchmarks/nightly/
+          name: nightly-macos-${{ github.run_id }}
+          path: |
+            testdata/benchmarks/nightly/m1-bench.txt
+            testdata/benchmarks/nightly/m1-report.txt
+            testdata/benchmarks/nightly/m1-gate.json
           retention-days: 90
-
-      - name: Compare against last nightly
-        continue-on-error: true
-        run: |
-          go install golang.org/x/perf/cmd/benchstat@latest
-          LATEST=$(gh run list --workflow "Nightly Benchmarks" --branch main \
-            --limit 2 --json databaseId -q '.[1].databaseId' 2>/dev/null || echo "")
-          if [ -n "$LATEST" ]; then
-            gh run download "$LATEST" --repo "${{ github.repository }}" \
-              --dir /tmp/prev-nightly 2>/dev/null || true
-            if [ -f "/tmp/prev-nightly/nightly-benchmarks-$LATEST/full-suite.txt" ]; then
-              benchstat \
-                "/tmp/prev-nightly/nightly-benchmarks-$LATEST/full-suite.txt" \
-                testdata/benchmarks/nightly/full-suite.txt \
-                > testdata/benchmarks/nightly/delta.txt 2>&1 || true
-              echo "=== Delta vs previous nightly ==="
-              cat testdata/benchmarks/nightly/delta.txt
-            fi
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forms - Fieldset and Legend</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        fieldset {
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        legend {
+            font-weight: bold;
+            color: #3498db;
+            padding: 0 10px;
+            font-size: 18px;
+        }
+        .form-row {
+            margin: 15px 0;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 250px;
+        }
+        .styled-fieldset {
+            border-color: #e74c3c;
+            background-color: #fdf2f2;
+        }
+        .styled-fieldset legend {
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <h2>Fieldset and Legend</h2>
+
+    <form>
+        <fieldset>
+            <legend>Personal Information</legend>
+
+            <div class="form-row">
+                <label for="first-name">First Name:</label>
+                <input type="text" id="first-name" name="first-name">
+            </div>
+
+            <div class="form-row">
+                <label for="last-name">Last Name:</label>
+                <input type="text" id="last-name" name="last-name">
+            </div>
+
+            <div class="form-row">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email">
+            </div>
+
+            <div class="form-row">
+                <label for="phone">Phone:</label>
+                <input type="tel" id="phone" name="phone">
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Address</legend>
+
+            <div class="form-row">
+                <label for="street">Street:</label>
+                <input type="text" id="street" name="street">
+            </div>
+
+            <div class="form-row">
+                <label for="city">City:</label>
+                <input type="text" id="city" name="city">
+            </div>
+
+            <div class="form-row">
+                <label for="state">State:</label>
+                <input type="text" id="state" name="state">
+            </div>
+
+            <div class="form-row">
+                <label for="zip">ZIP Code:</label>
+                <input type="text" id="zip" name="zip">
+            </div>
+        </fieldset>
+
+        <fieldset class="styled-fieldset">
+            <legend>Styled Fieldset</legend>
+
+            <div class="form-row">
+                <label for="custom1">Field 1:</label>
+                <input type="text" id="custom1" name="custom1">
+            </div>
+
+            <div class="form-row">
+                <label for="custom2">Field 2:</label>
+                <input type="text" id="custom2" name="custom2">
+            </div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Payment Information</legend>
+
+            <div class="form-row">
+                <label for="card-name">Name on Card:</label>
+                <input type="text" id="card-name" name="card-name">
+            </div>
+
+            <div class="form-row">
+                <label for="card-number">Card Number:</label>
+                <input type="text" id="card-number" name="card-number" placeholder="1234 5678 9012 3456">
+            </div>
+
+            <div class="form-row">
+                <label for="expiry">Expiry Date:</label>
+                <input type="text" id="expiry" name="expiry" placeholder="MM/YY">
+            </div>
+
+            <div class="form-row">
+                <label for="cvv">CVV:</label>
+                <input type="text" id="cvv" name="cvv" placeholder="123">
+            </div>
+        </fieldset>
+    </form>
+</body>
+</html>

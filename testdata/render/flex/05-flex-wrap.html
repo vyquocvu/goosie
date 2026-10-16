@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flexbox - Flex Wrap</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .flex-container {
+            display: flex;
+            width: 400px;
+            background-color: #ecf0f1;
+            padding: 10px;
+            margin: 20px 0;
+            border: 2px solid #3498db;
+        }
+        .flex-item {
+            background-color: #f39c12;
+            color: white;
+            padding: 20px;
+            margin: 5px;
+            width: 150px;
+        }
+        .wrap-nowrap { flex-wrap: nowrap; }
+        .wrap-wrap { flex-wrap: wrap; }
+        .wrap-wrap-reverse { flex-wrap: wrap-reverse; }
+    </style>
+</head>
+<body>
+    <h2>Flex Wrap</h2>
+
+    <h3>nowrap (default) - items overflow</h3>
+    <div class="flex-container wrap-nowrap">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+        <div class="flex-item">Item 4</div>
+    </div>
+
+    <h3>wrap - items wrap to next line</h3>
+    <div class="flex-container wrap-wrap">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+        <div class="flex-item">Item 4</div>
+    </div>
+
+    <h3>wrap-reverse - items wrap to previous line</h3>
+    <div class="flex-container wrap-wrap-reverse">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+        <div class="flex-item">Item 4</div>
+    </div>
+</body>
+</html>

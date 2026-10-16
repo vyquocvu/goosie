@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Stop Propagation</title></head>
+<body>
+<div id="outer">
+  <div id="inner">
+    <button id="btn">Click</button>
+  </div>
+</div>
+<script>
+__log = '';
+function log(phase, id, type) {
+  if (__log) __log += ',';
+  __log += phase + ':' + id + ':' + type;
+}
+document.getElementById('outer').addEventListener('click', function() { log('bubble', 'outer', 'click'); }, false);
+document.getElementById('inner').addEventListener('click', function(e) {
+  log('bubble', 'inner', 'click');
+  e.stopPropagation();
+}, false);
+document.getElementById('btn').addEventListener('click', function() { log('bubble', 'btn', 'click'); }, false);
+</script>
+</body></html>

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Pseudo-elements</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        /* ::before */
+        .before-demo::before {
+            content: "BEFORE: ";
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        /* ::after */
+        .after-demo::after {
+            content: " :AFTER";
+            color: #3498db;
+            font-weight: bold;
+        }
+
+        /* Combined ::before and ::after */
+        .quote {
+            font-style: italic;
+            color: #555;
+            padding: 10px 20px;
+            border-left: 4px solid #3498db;
+            margin: 10px 0;
+        }
+        .quote::before {
+            content: "\201C";
+            font-size: 24px;
+            color: #3498db;
+            vertical-align: -6px;
+            margin-right: 4px;
+        }
+        .quote::after {
+            content: "\201D";
+            font-size: 24px;
+            color: #3498db;
+            vertical-align: -6px;
+            margin-left: 4px;
+        }
+
+        /* ::first-letter */
+        .first-letter-demo::first-letter {
+            font-size: 32px;
+            font-weight: bold;
+            color: #e74c3c;
+            float: left;
+            margin-right: 4px;
+            line-height: 1;
+        }
+
+        /* ::first-line */
+        .first-line-demo::first-line {
+            font-weight: bold;
+            color: #2ecc71;
+            background: #ecf0f1;
+        }
+
+        /* ::selection */
+        .selection-demo::selection {
+            background: #e74c3c;
+            color: white;
+        }
+
+        /* Decorative ::before with display: block */
+        .decorated {
+            position: relative;
+            padding: 15px;
+            background: #ecf0f1;
+            border-radius: 6px;
+        }
+        .decorated::before {
+            content: "";
+            display: block;
+            width: 40px;
+            height: 40px;
+            background: #3498db;
+            border-radius: 50%;
+            margin-bottom: 10px;
+        }
+
+        /* Counter with ::before */
+        .counter-list {
+            counter-reset: item;
+            list-style: none;
+            padding: 0;
+        }
+        .counter-list li {
+            padding: 6px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .counter-list li::before {
+            counter-increment: item;
+            content: counter(item) ". ";
+            font-weight: bold;
+            color: #9b59b6;
+        }
+
+        /* Icon via ::before */
+        .icon-link::before {
+            content: "\1F517";
+            margin-right: 6px;
+        }
+        .icon-warning::before {
+            content: "\26A0";
+            margin-right: 6px;
+        }
+        .icon-check::before {
+            content: "\2713";
+            margin-right: 6px;
+            color: #2ecc71;
+        }
+    </style>
+</head>
+<body>
+    <h2>CSS Pseudo-elements</h2>
+
+    <div class="section">
+        <h3>::before</h3>
+        <p class="before-demo">This element has a ::before pseudo-element.</p>
+    </div>
+
+    <div class="section">
+        <h3>::after</h3>
+        <p class="after-demo">This element has an ::after pseudo-element.</p>
+    </div>
+
+    <div class="section">
+        <h3>::before + ::after (quotation marks)</h3>
+        <p class="quote">This text is wrapped in decorative quotation marks.</p>
+    </div>
+
+    <div class="section">
+        <h3>::first-letter</h3>
+        <p class="first-letter-demo">The first letter of this paragraph is styled as a drop cap with a larger size and different color.</p>
+    </div>
+
+    <div class="section">
+        <h3>::first-line</h3>
+        <p class="first-line-demo">The first line of this paragraph is styled differently from the rest. This effect is commonly used in typography to draw attention to the beginning of a paragraph. The remaining text flows normally without any special styling applied to it.</p>
+    </div>
+
+    <div class="section">
+        <h3>Decorative ::before (block element)</h3>
+        <div class="decorated">
+            This box has a decorative circle inserted via ::before.
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Counter with ::before</h3>
+        <ol class="counter-list">
+            <li>Auto-numbered item</li>
+            <li>Auto-numbered item</li>
+            <li>Auto-numbered item</li>
+            <li>Auto-numbered item</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h3>Icons via ::before</h3>
+        <p>
+            <span class="icon-check">Task completed</span><br>
+            <span class="icon-link">External link</span><br>
+            <span class="icon-warning">Be careful</span>
+        </p>
+    </div>
+</body>
+</html>

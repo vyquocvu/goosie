@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flexbox - Justify Content</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .flex-container {
+            display: flex;
+            width: 600px;
+            background-color: #ecf0f1;
+            padding: 10px;
+            margin: 20px 0;
+            border: 2px solid #3498db;
+        }
+        .flex-item {
+            background-color: #e74c3c;
+            color: white;
+            padding: 15px 25px;
+            margin: 5px;
+        }
+        .justify-start { justify-content: flex-start; }
+        .justify-end { justify-content: flex-end; }
+        .justify-center { justify-content: center; }
+        .justify-between { justify-content: space-between; }
+        .justify-around { justify-content: space-around; }
+        .justify-evenly { justify-content: space-evenly; }
+    </style>
+</head>
+<body>
+    <h2>Justify Content</h2>
+
+    <h3>flex-start (default)</h3>
+    <div class="flex-container justify-start">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>flex-end</h3>
+    <div class="flex-container justify-end">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>center</h3>
+    <div class="flex-container justify-center">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>space-between</h3>
+    <div class="flex-container justify-between">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>space-around</h3>
+    <div class="flex-container justify-around">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+
+    <h3>space-evenly</h3>
+    <div class="flex-container justify-evenly">
+        <div class="flex-item">Item 1</div>
+        <div class="flex-item">Item 2</div>
+        <div class="flex-item">Item 3</div>
+    </div>
+</body>
+</html>

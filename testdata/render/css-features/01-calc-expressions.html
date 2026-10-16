@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS calc(), min(), max(), clamp()</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .box { background: #3498db; color: white; padding: 10px; margin: 10px 0; }
+
+        /* calc() */
+        .calc-width { width: calc(100% - 100px); }
+        .calc-font { font-size: calc(14px + 0.5vw); }
+        .calc-padding { padding: calc(10px * 2); }
+        .calc-mixed { width: calc(50% + 20px); background: #2ecc71; }
+
+        /* min() */
+        .min-width { width: min(400px, 80%); background: #e74c3c; }
+
+        /* max() */
+        .max-width { width: max(200px, 50%); background: #9b59b6; }
+
+        /* clamp() */
+        .clamp-font { font-size: clamp(14px, 2vw + 10px, 28px); }
+        .clamp-width { width: clamp(200px, 60%, 500px); background: #f39c12; }
+
+        /* Nested */
+        .nested { width: calc(min(500px, 80%) - 20px); background: #1abc9c; }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>CSS Math Functions</h2>
+
+    <div class="label">calc(100% - 100px)</div>
+    <div class="box calc-width">calc(100% - 100px)</div>
+
+    <div class="label">calc(14px + 0.5vw)</div>
+    <div class="box calc-font">calc font size</div>
+
+    <div class="label">calc(10px * 2) padding</div>
+    <div class="box calc-padding">calc padding</div>
+
+    <div class="label">calc(50% + 20px)</div>
+    <div class="box calc-mixed">calc mixed units</div>
+
+    <div class="label">min(400px, 80%)</div>
+    <div class="box min-width">min width</div>
+
+    <div class="label">max(200px, 50%)</div>
+    <div class="box max-width">max width</div>
+
+    <div class="label">clamp(14px, 2vw + 10px, 28px) font</div>
+    <div class="box clamp-font">clamp font size</div>
+
+    <div class="label">clamp(200px, 60%, 500px)</div>
+    <div class="box clamp-width">clamp width</div>
+
+    <div class="label">calc(min(500px, 80%) - 20px) nested</div>
+    <div class="box nested">nested math functions</div>
+</body>
+</html>

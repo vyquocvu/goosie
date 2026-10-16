@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Event Order</title></head>
+<body>
+<div id="outer">
+  <div id="inner">
+    <button id="btn">Click</button>
+  </div>
+</div>
+<script>
+__log = '';
+function log(phase, id, type) {
+  if (__log) __log += ',';
+  __log += phase + ':' + id + ':' + type;
+}
+['outer','inner','btn'].forEach(function(id) {
+  var el = document.getElementById(id);
+  el.addEventListener('click', function(e) { log('bubble', id, 'click'); }, false);
+  el.addEventListener('click', function(e) { log('capture', id, 'click'); }, true);
+});
+</script>
+</body></html>

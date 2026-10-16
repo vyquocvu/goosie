@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Floats and Clear</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        /* Basic float */
+        .float-left {
+            float: left;
+            width: 150px;
+            height: 100px;
+            background: #3498db;
+            color: white;
+            padding: 10px;
+            margin-right: 15px;
+        }
+        .float-right {
+            float: right;
+            width: 150px;
+            height: 100px;
+            background: #e74c3c;
+            color: white;
+            padding: 10px;
+            margin-left: 15px;
+        }
+
+        /* Float with text wrapping */
+        .text-wrap-demo {
+            width: 400px;
+            background: #ecf0f1;
+            padding: 15px;
+        }
+        .text-wrap-demo .float-left {
+            width: 120px;
+            height: 80px;
+        }
+
+        /* Clear */
+        .clear-demo {
+            width: 400px;
+            background: #ecf0f1;
+            padding: 15px;
+        }
+        .clear-both {
+            clear: both;
+            background: #2ecc71;
+            color: white;
+            padding: 10px;
+        }
+
+        /* Float-based columns */
+        .float-columns {
+            width: 600px;
+        }
+        .float-columns::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+        .float-col {
+            float: left;
+            width: 31.33%;
+            margin-right: 3%;
+            background: #9b59b6;
+            color: white;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        .float-col:last-child {
+            margin-right: 0;
+        }
+
+        /* Multiple floats same direction */
+        .multi-float {
+            width: 400px;
+            background: #ecf0f1;
+            padding: 15px;
+        }
+        .multi-float .box {
+            float: left;
+            width: 80px;
+            height: 60px;
+            margin: 5px;
+            padding: 5px;
+            color: white;
+            text-align: center;
+        }
+
+        /* Overflow hidden to contain floats */
+        .overflow-container {
+            overflow: hidden;
+            background: #ecf0f1;
+            padding: 15px;
+            width: 400px;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+
+        /* Image with float */
+        .image-float {
+            width: 400px;
+            background: #ecf0f1;
+            padding: 15px;
+        }
+        .image-placeholder {
+            float: left;
+            width: 100px;
+            height: 100px;
+            background: #bdc3c7;
+            margin-right: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #7f8c8d;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h2>CSS Floats and Clear</h2>
+
+    <div class="section">
+        <div class="label">float: left with text wrapping</div>
+        <div class="text-wrap-demo">
+            <div class="float-left">Float Left</div>
+            <p>This text wraps around the floated element on the right side. The float takes up space on the left and the inline content flows around it naturally. This is the classic float behavior used in print layouts for decades.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">float: right with text wrapping</div>
+        <div class="text-wrap-demo">
+            <div class="float-right">Float Right</div>
+            <p>This text wraps around the floated element on the left side. The float takes up space on the right and the inline content flows around it naturally, demonstrating the opposite direction.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">clear: both</div>
+        <div class="clear-demo">
+            <div class="float-left" style="width:100px;height:60px;">Left</div>
+            <div class="float-right" style="width:100px;height:60px;">Right</div>
+            <div class="clear-both">This clears both floats</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Float-based three-column layout (clearfix)</div>
+        <div class="float-columns">
+            <div class="float-col">Column 1</div>
+            <div class="float-col">Column 2</div>
+            <div class="float-col">Column 3</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Multiple floats: left (wrapping)</div>
+        <div class="multi-float">
+            <div class="box" style="background:#e74c3c;">1</div>
+            <div class="box" style="background:#e67e22;">2</div>
+            <div class="box" style="background:#f1c40f;">3</div>
+            <div class="box" style="background:#2ecc71;">4</div>
+            <div class="box" style="background:#3498db;">5</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">overflow: hidden to contain floats</div>
+        <div class="overflow-container">
+            <div style="float:left;width:120px;height:80px;background:#3498db;color:white;padding:8px;">Float A</div>
+            <div style="float:right;width:120px;height:80px;background:#e74c3c;color:white;padding:8px;">Float B</div>
+        </div>
+        <p>Content after the overflow:hidden container (should be below).</p>
+    </div>
+
+    <div class="section">
+        <div class="label">Image-style float with text</div>
+        <div class="image-float">
+            <div class="image-placeholder">IMG</div>
+            <p>This paragraph flows around a floated placeholder that represents an image. The text wraps naturally around the floated block, similar to how images are typically floated in articles and blog posts.</p>
+        </div>
+    </div>
+</body>
+</html>

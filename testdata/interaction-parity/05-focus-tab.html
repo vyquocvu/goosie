@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Focus Tab</title></head>
+<body>
+<input type="text" id="a" tabindex="1">
+<input type="text" id="b" tabindex="2">
+<button id="c" tabindex="3">Btn</button>
+<input type="text" id="d" tabindex="4">
+<script>
+__log = '';
+['a','b','c','d'].forEach(function(id) {
+  var el = document.getElementById(id);
+  el.addEventListener('focus', function() { if (__log) __log += ','; __log += id + ':focus'; });
+  el.addEventListener('blur', function() { if (__log) __log += ','; __log += id + ':blur'; });
+});
+</script>
+</body></html>

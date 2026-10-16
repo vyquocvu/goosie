@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Media Queries</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* Base styles */
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #ecf0f1;
+            border-radius: 8px;
+        }
+
+        .box {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+            background: #3498db;
+            color: white;
+        }
+
+        .responsive-text {
+            font-size: 16px;
+        }
+
+        .layout-demo {
+            display: flex;
+            gap: 10px;
+        }
+        .layout-demo .col {
+            flex: 1;
+            background: #2ecc71;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        /* Print media query */
+        @media print {
+            .print-only { display: block; color: black; }
+            .screen-only { display: none; }
+        }
+
+        .print-only { display: none; }
+        .screen-only { display: block; }
+
+        /* Min-width queries */
+        @media (min-width: 600px) {
+            .box-wide {
+                background: #e74c3c;
+                border: 3px solid #c0392b;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .box-large {
+                background: #9b59b6;
+                border: 3px solid #8e44ad;
+            }
+        }
+
+        /* Max-width queries */
+        @media (max-width: 500px) {
+            .box-narrow {
+                background: #f39c12;
+                border: 3px solid #e67e22;
+            }
+        }
+
+        /* Prefers color scheme */
+        @media (prefers-color-scheme: dark) {
+            .theme-aware {
+                background: #2c3e50;
+                color: #ecf0f1;
+            }
+        }
+
+        @media (prefers-color-scheme: light) {
+            .theme-aware {
+                background: #ecf0f1;
+                color: #2c3e50;
+            }
+        }
+
+        /* Prefers reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            .motion-element {
+                animation: none;
+                transition: none;
+            }
+        }
+
+        .motion-element {
+            background: #1abc9c;
+            color: white;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        /* Orientation */
+        @media (orientation: landscape) {
+            .orientation-demo {
+                background: #e67e22;
+            }
+            .orientation-demo::after {
+                content: " (landscape)";
+            }
+        }
+
+        @media (orientation: portrait) {
+            .orientation-demo {
+                background: #16a085;
+            }
+            .orientation-demo::after {
+                content: " (portrait)";
+            }
+        }
+
+        /* Combined conditions */
+        @media (min-width: 400px) and (max-width: 900px) {
+            .range-box {
+                background: #d35400;
+                border: 3px dashed #e74c3c;
+            }
+        }
+
+        .label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>CSS Media Queries</h2>
+
+        <div class="label">Screen-only content</div>
+        <div class="box screen-only">This is visible on screen (hidden in print).</div>
+
+        <div class="label">Print-only content</div>
+        <div class="box print-only">This is visible only when printed.</div>
+
+        <div class="label">@media (min-width: 600px)</div>
+        <div class="box box-wide">Red when viewport >= 600px</div>
+
+        <div class="label">@media (min-width: 1024px)</div>
+        <div class="box box-large">Purple when viewport >= 1024px</div>
+
+        <div class="label">@media (max-width: 500px)</div>
+        <div class="box box-narrow">Orange when viewport <= 500px</div>
+
+        <div class="label">@media (prefers-color-scheme)</div>
+        <div class="box theme-aware">Adapts to light/dark preference</div>
+
+        <div class="label">@media (prefers-reduced-motion)</div>
+        <div class="motion-element">Respects reduced motion preference</div>
+
+        <div class="label">@media (orientation)</div>
+        <div class="box orientation-demo">Orientation</div>
+
+        <div class="label">@media combined (400px - 900px)</div>
+        <div class="box range-box">Dashed border in range</div>
+
+        <div class="label">Flex layout</div>
+        <div class="layout-demo">
+            <div class="col">Column 1</div>
+            <div class="col">Column 2</div>
+            <div class="col">Column 3</div>
+        </div>
+    </div>
+</body>
+</html>

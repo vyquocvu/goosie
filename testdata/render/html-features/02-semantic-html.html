@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Semantic HTML - Complete</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+
+        header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+        }
+        header h1 { margin: 0; }
+        header p { margin: 5px 0 0; color: #bdc3c7; }
+
+        nav.top-nav {
+            background: #34495e;
+            padding: 0;
+        }
+        nav.top-nav ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+        }
+        nav.top-nav li a {
+            display: block;
+            padding: 12px 20px;
+            color: #ecf0f1;
+            text-decoration: none;
+        }
+        nav.top-nav li a.active {
+            background: #3498db;
+        }
+
+        main {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        article {
+            margin: 25px 0;
+            border: 1px solid #ecf0f1;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        article header {
+            background: #3498db;
+            padding: 15px 20px;
+        }
+        article header h2 { margin: 0; color: white; }
+        article .meta {
+            font-size: 12px;
+            color: #bdc3c7;
+            margin-top: 5px;
+        }
+        article .body {
+            padding: 20px;
+        }
+
+        section {
+            margin: 20px 0;
+        }
+        section h3 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 5px;
+        }
+
+        aside {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+        aside h4 {
+            margin: 0 0 10px;
+            color: #2c3e50;
+        }
+
+        figure {
+            margin: 15px 0;
+            text-align: center;
+        }
+        figure .placeholder-img {
+            width: 300px;
+            height: 200px;
+            background: #bdc3c7;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #7f8c8d;
+            border-radius: 4px;
+        }
+        figcaption {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        details {
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        details summary {
+            padding: 10px 15px;
+            cursor: pointer;
+            background: #ecf0f1;
+            font-weight: bold;
+        }
+        details[open] summary {
+            border-bottom: 1px solid #bdc3c7;
+        }
+        details .content {
+            padding: 15px;
+        }
+
+        address {
+            font-style: normal;
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+
+        time {
+            color: #3498db;
+            font-weight: bold;
+        }
+
+        mark {
+            background: #f1c40f;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        abbr {
+            border-bottom: 1px dotted #7f8c8d;
+            cursor: help;
+        }
+
+        footer {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            margin-top: 40px;
+        }
+        footer .footer-grid {
+            display: flex;
+            gap: 40px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        footer h4 { margin: 0 0 10px; }
+        footer ul { list-style: none; padding: 0; margin: 0; }
+        footer li { margin: 5px 0; }
+        footer a { color: #bdc3c7; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>The Goosie Gazette</h1>
+        <p>A demonstration of semantic HTML elements</p>
+    </header>
+
+    <nav class="top-nav">
+        <ul>
+            <li><a href="#" class="active">Home</a></li>
+            <li><a href="#">Articles</a></li>
+            <li><a href="#">Categories</a></li>
+            <li><a href="#">About</a></li>
+            <li><a href="#">Contact</a></li>
+        </ul>
+    </nav>
+
+    <main>
+        <article>
+            <header>
+                <h2>Understanding Semantic HTML</h2>
+                <div class="meta">
+                    By <address style="display:inline;background:none;padding:0;">Jane Doe</address>
+                    | Published <time datetime="2024-03-15">March 15, 2024</time>
+                </div>
+            </header>
+            <div class="body">
+                <p>
+                    Semantic HTML provides <mark>meaning to structure</mark>.
+                    Elements like <abbr title="HyperText Markup Language">HTML</abbr>
+                    &lt;article&gt;, &lt;section&gt;, and &lt;nav&gt; describe
+                    their content's role on the page.
+                </p>
+
+                <section>
+                    <h3>Why Semantic HTML Matters</h3>
+                    <p>Using the right elements improves accessibility, SEO, and code maintainability. Screen readers and search engines rely on semantic structure to understand page content.</p>
+                </section>
+
+                <section>
+                    <h3>Key Elements</h3>
+                    <figure>
+                        <div class="placeholder-img">Diagram Placeholder</div>
+                        <figcaption>Figure 1: Semantic HTML element hierarchy</figcaption>
+                    </figure>
+                </section>
+
+                <aside>
+                    <h4>Related Reading</h4>
+                    <ul>
+                        <li>Web Accessibility Guidelines (WCAG)</li>
+                        <li>HTML5 Specification</li>
+                        <li>SEO Best Practices</li>
+                    </ul>
+                </aside>
+            </div>
+        </article>
+
+        <article>
+            <header>
+                <h2>Interactive Elements</h2>
+                <div class="meta">Published <time datetime="2024-03-16">March 16, 2024</time></div>
+            </header>
+            <div class="body">
+                <details>
+                    <summary>What is details/summary?</summary>
+                    <div class="content">
+                        <p>The &lt;details&gt; element creates a disclosure widget. The &lt;summary&gt; element provides the clickable heading. Click to expand and collapse content.</p>
+                    </div>
+                </details>
+
+                <details open>
+                    <summary>Already open details</summary>
+                    <div class="content">
+                        <p>This details element starts in the open state. Users can still click the summary to collapse it.</p>
+                    </div>
+                </details>
+
+                <details>
+                    <summary>Another collapsible section</summary>
+                    <div class="content">
+                        <p>Multiple details elements can exist on a page, each functioning independently.</p>
+                    </div>
+                </details>
+            </div>
+        </article>
+    </main>
+
+    <footer>
+        <div class="footer-grid">
+            <div>
+                <h4>About</h4>
+                <p style="color:#bdc3c7;font-size:13px;">A semantic HTML demonstration page for the Goosie browser engine.</p>
+            </div>
+            <div>
+                <h4>Links</h4>
+                <ul>
+                    <li><a href="#">Documentation</a></li>
+                    <li><a href="#">Source Code</a></li>
+                    <li><a href="#">Issue Tracker</a></li>
+                </ul>
+            </div>
+            <div>
+                <h4>Contact</h4>
+                <address style="background:none;padding:0;color:#bdc3c7;font-size:13px;">
+                    Email: info@goosie.dev<br>
+                    GitHub: github.com/goosie
+                </address>
+            </div>
+        </div>
+        <p style="text-align:center;color:#7f8c8d;margin-top:20px;font-size:12px;">
+            &copy; 2024 Goosie Project
+        </p>
+    </footer>
+</body>
+</html>

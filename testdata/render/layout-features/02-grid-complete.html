@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Grid - Complete Properties</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        .grid-container {
+            display: grid;
+            gap: 8px;
+            margin: 15px 0;
+            padding: 10px;
+            background: #ecf0f1;
+        }
+        .grid-item {
+            background: #3498db;
+            color: white;
+            padding: 15px;
+            text-align: center;
+        }
+
+        /* Explicit line placement */
+        .explicit-placement {
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 80px);
+        }
+        .ep-1 { grid-column: 1 / 3; grid-row: 1 / 2; background: #e74c3c; }
+        .ep-2 { grid-column: 3 / 5; grid-row: 1 / 3; background: #2ecc71; }
+        .ep-3 { grid-column: 1 / 2; grid-row: 2 / 4; background: #9b59b6; }
+        .ep-4 { grid-column: 2 / 4; grid-row: 3 / 4; background: #f39c12; }
+
+        /* Named grid lines */
+        .named-lines {
+            grid-template-columns: [sidebar-start] 200px [sidebar-end content-start] 1fr [content-end];
+            grid-template-rows: [header-start] 60px [header-end main-start] 1fr [main-end footer-start] 40px [footer-end];
+        }
+        .nl-header {
+            grid-column: sidebar-start / content-end;
+            grid-row: header-start / header-end;
+            background: #e74c3c;
+        }
+        .nl-sidebar {
+            grid-column: sidebar-start / sidebar-end;
+            grid-row: main-start / main-end;
+            background: #2ecc71;
+        }
+        .nl-content {
+            grid-column: content-start / content-end;
+            grid-row: main-start / main-end;
+            background: #3498db;
+        }
+        .nl-footer {
+            grid-column: sidebar-start / content-end;
+            grid-row: footer-start / footer-end;
+            background: #9b59b6;
+        }
+
+        /* justify-self / align-self on items */
+        .self-demo {
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(2, 80px);
+        }
+        .self-start { justify-self: start; align-self: start; background: #e74c3c; }
+        .self-end { justify-self: end; align-self: end; background: #2ecc71; }
+        .self-center { justify-self: center; align-self: center; background: #f39c12; }
+        .self-stretch { justify-self: stretch; align-self: stretch; background: #9b59b6; }
+
+        /* Subgrid (where supported) */
+        .parent-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .subgrid-parent {
+            display: grid;
+            grid-template-columns: subgrid;
+            grid-column: span 2;
+            gap: 5px;
+        }
+        .subgrid-child {
+            background: #1abc9c;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+
+        /* Grid auto-flow: dense */
+        .dense-flow {
+            grid-template-columns: repeat(3, 1fr);
+            grid-auto-flow: dense;
+        }
+        .dense-big {
+            grid-column: span 2;
+            grid-row: span 2;
+            background: #e74c3c;
+        }
+
+        /* minmax with auto */
+        .minmax-auto {
+            grid-template-columns: minmax(100px, auto) 1fr 1fr;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Grid - Complete Properties</h2>
+
+    <div class="label">Explicit line placement (grid-column/grid-row with line numbers)</div>
+    <div class="grid-container explicit-placement">
+        <div class="grid-item ep-1">1/3, 1/2</div>
+        <div class="grid-item ep-2">3/5, 1/3</div>
+        <div class="grid-item ep-3">1/2, 2/4</div>
+        <div class="grid-item ep-4">2/4, 3/4</div>
+    </div>
+
+    <div class="label">Named grid lines</div>
+    <div class="grid-container named-lines" style="height: 200px;">
+        <div class="grid-item nl-header">Header</div>
+        <div class="grid-item nl-sidebar">Sidebar</div>
+        <div class="grid-item nl-content">Content</div>
+        <div class="grid-item nl-footer">Footer</div>
+    </div>
+
+    <div class="label">justify-self / align-self on individual items</div>
+    <div class="grid-container self-demo">
+        <div class="grid-item self-start">start/start</div>
+        <div class="grid-item self-end">end/end</div>
+        <div class="grid-item self-center">center/center</div>
+        <div class="grid-item self-stretch">stretch/stretch</div>
+        <div class="grid-item">default</div>
+        <div class="grid-item">default</div>
+    </div>
+
+    <div class="label">grid-auto-flow: dense (gap filling)</div>
+    <div class="grid-container dense-flow">
+        <div class="grid-item dense-big">Big (2x2)</div>
+        <div class="grid-item">A</div>
+        <div class="grid-item">B</div>
+        <div class="grid-item">C</div>
+        <div class="grid-item">D (fills gap)</div>
+        <div class="grid-item">E</div>
+    </div>
+
+    <div class="label">minmax(100px, auto) 1fr 1fr</div>
+    <div class="grid-container minmax-auto">
+        <div class="grid-item">Auto sized (min 100px)</div>
+        <div class="grid-item">1fr</div>
+        <div class="grid-item">1fr</div>
+    </div>
+</body>
+</html>

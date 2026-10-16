@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lists - Complete</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+        .side-by-side {
+            display: flex;
+            gap: 40px;
+        }
+        .side-by-side > div { flex: 1; }
+
+        /* Custom list styles */
+        .custom-disc { list-style-type: "\2713\0020"; }
+        .custom-arrow { list-style-type: "\2192\0020"; }
+
+        /* Styled list */
+        .styled-list {
+            list-style: none;
+            padding: 0;
+        }
+        .styled-list li {
+            padding: 8px 12px;
+            border-left: 3px solid #3498db;
+            margin: 4px 0;
+            background: #ecf0f1;
+        }
+        .styled-list li:hover {
+            background: #d5dbdb;
+        }
+
+        /* Horizontal list */
+        .horizontal-list {
+            list-style: none;
+            padding: 0;
+            display: flex;
+            gap: 15px;
+        }
+        .horizontal-list li {
+            padding: 6px 12px;
+            background: #3498db;
+            color: white;
+            border-radius: 4px;
+        }
+
+        /* Definition list styled */
+        .styled-dl dt {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-top: 12px;
+            padding: 4px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .styled-dl dd {
+            margin-left: 20px;
+            padding: 4px 0;
+            color: #555;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Lists - Complete</h2>
+
+    <div class="side-by-side">
+        <div class="section">
+            <div class="label">Ordered list (default decimal)</div>
+            <ol>
+                <li>First item</li>
+                <li>Second item</li>
+                <li>Third item</li>
+                <li>Fourth item</li>
+                <li>Fifth item</li>
+            </ol>
+        </div>
+
+        <div class="section">
+            <div class="label">Ordered list (type="a")</div>
+            <ol type="a">
+                <li>Item a</li>
+                <li>Item b</li>
+                <li>Item c</li>
+                <li>Item d</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="side-by-side">
+        <div class="section">
+            <div class="label">Ordered list (type="A", start=5)</div>
+            <ol type="A" start="5">
+                <li>Item E</li>
+                <li>Item F</li>
+                <li>Item G</li>
+            </ol>
+        </div>
+
+        <div class="section">
+            <div class="label">Ordered list (type="i")</div>
+            <ol type="i">
+                <li>Item i</li>
+                <li>Item ii</li>
+                <li>Item iii</li>
+                <li>Item iv</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="side-by-side">
+        <div class="section">
+            <div class="label">Unordered list (default disc)</div>
+            <ul>
+                <li>Apple</li>
+                <li>Banana</li>
+                <li>Cherry</li>
+                <li>Date</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <div class="label">Unordered list (type="square")</div>
+            <ul type="square">
+                <li>Red</li>
+                <li>Green</li>
+                <li>Blue</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Unordered list (type="circle")</div>
+        <ul type="circle">
+            <li>Mercury</li>
+            <li>Venus</li>
+            <li>Earth</li>
+            <li>Mars</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <div class="label">Nested lists (mixed types)</div>
+        <ol>
+            <li>Chapter 1
+                <ul>
+                    <li>Section 1.1</li>
+                    <li>Section 1.2
+                        <ol type="a">
+                            <li>Subsection a</li>
+                            <li>Subsection b</li>
+                            <li>Subsection c</li>
+                        </ol>
+                    </li>
+                    <li>Section 1.3</li>
+                </ul>
+            </li>
+            <li>Chapter 2
+                <ul>
+                    <li>Section 2.1</li>
+                    <li>Section 2.2</li>
+                </ul>
+            </li>
+            <li>Chapter 3</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <div class="label">Definition list</div>
+        <dl>
+            <dt>HTML</dt>
+            <dd>HyperText Markup Language - the standard markup language for documents designed to be displayed in a web browser.</dd>
+
+            <dt>CSS</dt>
+            <dd>Cascading Style Sheets - a style sheet language used for describing the presentation of a document written in HTML.</dd>
+
+            <dt>JavaScript</dt>
+            <dd>A high-level, interpreted programming language that conforms to the ECMAScript specification.</dd>
+
+            <dt>Goosie</dt>
+            <dd>A Go-based browser engine built around a fixed 256px tile frame path.</dd>
+        </dl>
+    </div>
+
+    <div class="section">
+        <div class="label">Definition list with multiple terms per definition</div>
+        <dl>
+            <dt>HTTP</dt>
+            <dt>HTTPS</dt>
+            <dd>Protocols for transmitting hypertext between web browsers and servers.</dd>
+
+            <dt>FTP</dt>
+            <dt>SFTP</dt>
+            <dd>Protocols for file transfer across networks.</dd>
+        </dl>
+    </div>
+
+    <div class="section">
+        <div class="label">Styled list (custom appearance)</div>
+        <ul class="styled-list">
+            <li>Dashboard overview</li>
+            <li>User management</li>
+            <li>System settings</li>
+            <li>Audit logs</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <div class="label">Horizontal list (navigation-style)</div>
+        <ul class="horizontal-list">
+            <li>Home</li>
+            <li>Products</li>
+            <li>Services</li>
+            <li>About</li>
+            <li>Contact</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <div class="label">Deeply nested definition list</div>
+        <dl>
+            <dt>Programming Languages</dt>
+            <dd>
+                <dl>
+                    <dt>Compiled</dt>
+                    <dd>
+                        <dl>
+                            <dt>Go</dt>
+                            <dd>Statically typed, compiled language with garbage collection.</dd>
+                            <dt>Rust</dt>
+                            <dd>Memory-safe language without garbage collector.</dd>
+                        </dl>
+                    </dd>
+                    <dt>Interpreted</dt>
+                    <dd>
+                        <dl>
+                            <dt>Python</dt>
+                            <dd>Dynamic, high-level language emphasizing readability.</dd>
+                            <dt>JavaScript</dt>
+                            <dd>The language of the web, runs in browsers and servers.</dd>
+                        </dl>
+                    </dd>
+                </dl>
+            </dd>
+        </dl>
+    </div>
+</body>
+</html>

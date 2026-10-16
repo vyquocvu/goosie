@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complex Layout - Blog Article</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Georgia, serif; line-height: 1.8; color: #333; }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .header .tagline {
+            font-size: 18px;
+            opacity: 0.9;
+        }
+
+        .nav {
+            background: #34495e;
+            padding: 15px;
+            text-align: center;
+        }
+        .nav a {
+            color: white;
+            text-decoration: none;
+            margin: 0 20px;
+            font-family: sans-serif;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        article {
+            background: white;
+        }
+
+        .article-header {
+            margin-bottom: 40px;
+        }
+        .article-header h1 {
+            font-size: 42px;
+            line-height: 1.2;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        .meta {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            color: #666;
+            font-family: sans-serif;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .author {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .author-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #3498db;
+        }
+        .tags {
+            display: flex;
+            gap: 10px;
+        }
+        .tag {
+            background: #ecf0f1;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .featured-image {
+            width: 100%;
+            height: 400px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            margin: 30px 0;
+        }
+
+        .content {
+            font-size: 18px;
+        }
+        .content p {
+            margin-bottom: 25px;
+        }
+        .content h2 {
+            font-size: 32px;
+            margin: 40px 0 20px 0;
+            color: #2c3e50;
+        }
+        .content h3 {
+            font-size: 24px;
+            margin: 30px 0 15px 0;
+            color: #34495e;
+        }
+        .content blockquote {
+            margin: 30px 0;
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            font-style: italic;
+            font-size: 20px;
+        }
+        .content ul, .content ol {
+            margin: 20px 0;
+            padding-left: 30px;
+        }
+        .content li {
+            margin: 10px 0;
+        }
+        .content code {
+            background: #f8f9fa;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+        }
+        .content pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        .content pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+        }
+
+        .share-buttons {
+            display: flex;
+            gap: 15px;
+            margin: 40px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .share-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-weight: bold;
+        }
+        .share-twitter { background: #1da1f2; color: white; }
+        .share-facebook { background: #4267b2; color: white; }
+        .share-linkedin { background: #0077b5; color: white; }
+
+        .author-box {
+            display: flex;
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin: 40px 0;
+        }
+        .author-box-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: #3498db;
+            flex-shrink: 0;
+        }
+        .author-box h3 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+
+        .comments-section {
+            margin-top: 50px;
+            border-top: 2px solid #ecf0f1;
+            padding-top: 30px;
+        }
+        .comment {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .comment-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #95a5a6;
+            flex-shrink: 0;
+        }
+        .comment-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-family: sans-serif;
+        }
+        .comment-author {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .comment-date {
+            color: #95a5a6;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>The Tech Blog</h1>
+        <p class="tagline">Insights on modern web development</p>
+    </header>
+
+    <nav class="nav">
+        <a href="#home">Home</a>
+        <a href="#articles">Articles</a>
+        <a href="#tutorials">Tutorials</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+    </nav>
+
+    <div class="container">
+        <article>
+            <div class="article-header">
+                <h1>Understanding Modern CSS Layout Techniques</h1>
+
+                <div class="meta">
+                    <div class="author">
+                        <div class="author-avatar"></div>
+                        <div>
+                            <div style="font-weight: bold;">Jane Smith</div>
+                            <div>Senior Frontend Developer</div>
+                        </div>
+                    </div>
+                    <div>Published on January 15, 2024</div>
+                    <div>10 min read</div>
+                </div>
+
+                <div class="tags">
+                    <span class="tag">CSS</span>
+                    <span class="tag">Layout</span>
+                    <span class="tag">Frontend</span>
+                </div>
+            </div>
+
+            <div class="featured-image"></div>
+
+            <div class="content">
+                <p>CSS has evolved significantly over the years, introducing powerful layout systems that make it easier than ever to create complex, responsive designs. In this article, we'll explore the modern CSS layout techniques every developer should know.</p>
+
+                <h2>The Evolution of CSS Layout</h2>
+
+                <p>Gone are the days when we relied on floats and positioning hacks to create layouts. Modern CSS provides us with purpose-built layout systems that are both powerful and intuitive.</p>
+
+                <blockquote>
+                    "The best layout technique is the one that solves your specific problem with the least amount of code and the most semantic markup."
+                </blockquote>
+
+                <h2>Flexbox: One-Dimensional Layout</h2>
+
+                <p>Flexbox excels at distributing space along a single axis, making it perfect for navigation bars, card layouts, and centering content.</p>
+
+                <h3>Key Flexbox Properties</h3>
+
+                <ul>
+                    <li><code>display: flex</code> - Activates flexbox on a container</li>
+                    <li><code>justify-content</code> - Aligns items along the main axis</li>
+                    <li><code>align-items</code> - Aligns items along the cross axis</li>
+                    <li><code>flex-direction</code> - Defines the main axis direction</li>
+                    <li><code>flex-wrap</code> - Controls whether items wrap to new lines</li>
+                </ul>
+
+                <h2>CSS Grid: Two-Dimensional Layout</h2>
+
+                <p>CSS Grid is designed for two-dimensional layouts, allowing you to control both rows and columns simultaneously. It's ideal for page layouts, image galleries, and any design that requires precise control over both dimensions.</p>
+
+                <h3>Grid Example</h3>
+
+                <pre><code>.container {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-gap: 20px;
+}</code></pre>
+
+                <h2>When to Use Each</h2>
+
+                <p>Choose Flexbox when you need to lay out items in a single direction—either as a row or a column. Use Grid when you need to control layout in both dimensions simultaneously.</p>
+
+                <ol>
+                    <li>Navigation menus → Flexbox</li>
+                    <li>Card layouts → Flexbox or Grid</li>
+                    <li>Page layouts → Grid</li>
+                    <li>Form layouts → Grid</li>
+                    <li>Centering content → Flexbox</li>
+                </ol>
+
+                <h2>Conclusion</h2>
+
+                <p>Modern CSS layout techniques have revolutionized how we build web interfaces. By understanding when and how to use Flexbox and Grid, you can create complex, responsive layouts with clean, maintainable code.</p>
+            </div>
+
+            <div class="share-buttons">
+                <button class="share-btn share-twitter">Share on Twitter</button>
+                <button class="share-btn share-facebook">Share on Facebook</button>
+                <button class="share-btn share-linkedin">Share on LinkedIn</button>
+            </div>
+
+            <div class="author-box">
+                <div class="author-box-avatar"></div>
+                <div>
+                    <h3>About Jane Smith</h3>
+                    <p>Jane is a senior frontend developer with over 10 years of experience building modern web applications. She specializes in CSS architecture, performance optimization, and design systems.</p>
+                </div>
+            </div>
+        </article>
+
+        <section class="comments-section">
+            <h2>Comments (3)</h2>
+
+            <div class="comment">
+                <div class="comment-avatar"></div>
+                <div>
+                    <div class="comment-header">
+                        <span class="comment-author">John Doe</span>
+                        <span class="comment-date">2 hours ago</span>
+                    </div>
+                    <p>Great article! I've been struggling with when to use Grid vs Flexbox. This really clarifies things.</p>
+                </div>
+            </div>
+
+            <div class="comment">
+                <div class="comment-avatar"></div>
+                <div>
+                    <div class="comment-header">
+                        <span class="comment-author">Alice Johnson</span>
+                        <span class="comment-date">5 hours ago</span>
+                    </div>
+                    <p>Thanks for the practical examples. The code snippets are especially helpful.</p>
+                </div>
+            </div>
+
+            <div class="comment">
+                <div class="comment-avatar"></div>
+                <div>
+                    <div class="comment-header">
+                        <span class="comment-author">Bob Wilson</span>
+                        <span class="comment-date">1 day ago</span>
+                    </div>
+                    <p>I'd love to see a follow-up article on CSS Grid areas. They're incredibly powerful for complex layouts.</p>
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>

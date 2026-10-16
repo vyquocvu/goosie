@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forms - Buttons</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .button-group {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+        }
+        .btn-primary {
+            background-color: #3498db;
+            color: white;
+        }
+        .btn-secondary {
+            background-color: #95a5a6;
+            color: white;
+        }
+        .btn-success {
+            background-color: #2ecc71;
+            color: white;
+        }
+        .btn-danger {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .btn-warning {
+            background-color: #f39c12;
+            color: white;
+        }
+        .btn-outline {
+            background-color: transparent;
+            border: 2px solid #3498db;
+            color: #3498db;
+        }
+        .btn-large {
+            padding: 15px 30px;
+            font-size: 18px;
+        }
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .btn-disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        input[type="submit"],
+        input[type="reset"],
+        input[type="button"] {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background-color: #ecf0f1;
+        }
+    </style>
+</head>
+<body>
+    <h2>Button Elements</h2>
+
+    <div class="button-group">
+        <h3>Button types</h3>
+        <button type="button">Button</button>
+        <button type="submit">Submit</button>
+        <button type="reset">Reset</button>
+    </div>
+
+    <div class="button-group">
+        <h3>Button colors</h3>
+        <button class="btn-primary">Primary</button>
+        <button class="btn-secondary">Secondary</button>
+        <button class="btn-success">Success</button>
+        <button class="btn-danger">Danger</button>
+        <button class="btn-warning">Warning</button>
+        <button class="btn-outline">Outline</button>
+    </div>
+
+    <div class="button-group">
+        <h3>Button sizes</h3>
+        <button class="btn-primary btn-large">Large Button</button>
+        <button class="btn-primary">Normal Button</button>
+        <button class="btn-primary btn-small">Small Button</button>
+    </div>
+
+    <div class="button-group">
+        <h3>Button states</h3>
+        <button class="btn-primary">Normal</button>
+        <button class="btn-primary" disabled>Disabled</button>
+        <button class="btn-disabled">Disabled Style</button>
+    </div>
+
+    <div class="button-group">
+        <h3>Input buttons</h3>
+        <input type="button" value="Input Button">
+        <input type="submit" value="Input Submit">
+        <input type="reset" value="Input Reset">
+    </div>
+
+    <div class="button-group">
+        <h3>Buttons with icons (text representation)</h3>
+        <button class="btn-primary">← Back</button>
+        <button class="btn-primary">Next →</button>
+        <button class="btn-success">✓ Save</button>
+        <button class="btn-danger">✕ Delete</button>
+    </div>
+
+    <div class="button-group">
+        <h3>Full-width button</h3>
+        <button class="btn-primary" style="width: 100%; padding: 15px;">Full Width Button</button>
+    </div>
+</body>
+</html>

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("<0><BodY 000\x87\x87")

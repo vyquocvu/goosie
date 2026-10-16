@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Semantic HTML - Aside and Figure</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+            line-height: 1.6;
+        }
+        .container {
+            display: flex;
+            max-width: 1200px;
+            margin: 0 auto;
+            gap: 20px;
+        }
+        main {
+            flex: 3;
+        }
+        aside {
+            flex: 1;
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        aside h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        aside ul {
+            list-style: none;
+            padding: 0;
+        }
+        aside li {
+            padding: 8px 0;
+            border-bottom: 1px solid #ddd;
+        }
+        aside li:last-child {
+            border-bottom: none;
+        }
+        figure {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #ecf0f1;
+            border-radius: 8px;
+        }
+        figure img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+        figcaption {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+            text-align: center;
+        }
+        blockquote {
+            margin: 20px 0;
+            padding: 15px 20px;
+            background-color: #e8f4f8;
+            border-left: 4px solid #3498db;
+            font-style: italic;
+        }
+        blockquote cite {
+            display: block;
+            margin-top: 10px;
+            font-style: normal;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <main>
+            <h1>Main Content with Sidebar</h1>
+
+            <p>This layout demonstrates the use of <code>&lt;aside&gt;</code> for sidebar content and <code>&lt;figure&gt;</code> for media with captions.</p>
+
+            <figure>
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400'%3E%3Crect fill='%233498db' width='600' height='400'/%3E%3Ctext fill='white' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EPlaceholder Image%3C/text%3E%3C/svg%3E" alt="Placeholder image">
+                <figcaption>Figure 1: An example image with a descriptive caption</figcaption>
+            </figure>
+
+            <p>The aside element represents content that is tangentially related to the main content. This could be sidebars, call-out boxes, or related links.</p>
+
+            <blockquote>
+                <p>"The best way to predict the future is to invent it."</p>
+                <cite>— Alan Kay</cite>
+            </blockquote>
+
+            <figure>
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='300'%3E%3Crect fill='%23e74c3c' width='600' height='300'/%3E%3Ctext fill='white' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3EAnother Image%3C/text%3E%3C/svg%3E" alt="Another placeholder">
+                <figcaption>Figure 2: Multiple figures can be used throughout the content</figcaption>
+            </figure>
+
+            <p>Using semantic elements like figure and figcaption provides better accessibility and structure for media content.</p>
+        </main>
+
+        <aside>
+            <h3>Related Articles</h3>
+            <ul>
+                <li><a href="#article1">Getting Started with HTML5</a></li>
+                <li><a href="#article2">CSS Grid Layout Guide</a></li>
+                <li><a href="#article3">JavaScript Best Practices</a></li>
+                <li><a href="#article4">Responsive Design Tips</a></li>
+                <li><a href="#article5">Web Accessibility Basics</a></li>
+            </ul>
+
+            <h3>Categories</h3>
+            <ul>
+                <li><a href="#html">HTML (15)</a></li>
+                <li><a href="#css">CSS (23)</a></li>
+                <li><a href="#javascript">JavaScript (31)</a></li>
+                <li><a href="#design">Design (12)</a></li>
+            </ul>
+
+            <h3>Archive</h3>
+            <ul>
+                <li><a href="#2024-01">January 2024</a></li>
+                <li><a href="#2023-12">December 2023</a></li>
+                <li><a href="#2023-11">November 2023</a></li>
+            </ul>
+        </aside>
+    </div>
+</body>
+</html>

@@ -22,11 +22,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install Linux GUI dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev
-
       - name: Build
         run: go build ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -count=1 ./...
+
+      - name: Race detector
+        run: go test -race ./...

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Selectors - Pseudo-classes</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* Link pseudo-classes */
+        a:link { color: blue; }
+        a:visited { color: purple; }
+        a:hover { color: red; text-decoration: underline; }
+        a:active { color: orange; }
+
+        /* Dynamic pseudo-classes */
+        input:focus { outline: 2px solid #3498db; background-color: #e8f4f8; }
+        button:hover { background-color: #2ecc71; }
+        button:active { transform: scale(0.95); }
+
+        /* UI element states */
+        input:disabled { background-color: #ecf0f1; cursor: not-allowed; }
+        input:enabled { background-color: white; }
+        input:checked { outline: 2px solid #2ecc71; }
+        input:required { border-left: 3px solid #e74c3c; }
+        input:optional { border-left: 3px solid #95a5a6; }
+        input:valid { border: 2px solid #2ecc71; }
+        input:invalid { border: 2px solid #e74c3c; }
+
+        /* Structural pseudo-classes */
+        p:first-child { font-weight: bold; color: #3498db; }
+        p:last-child { font-style: italic; color: #e74c3c; }
+        li:nth-child(odd) { background-color: #ecf0f1; }
+        li:nth-child(even) { background-color: #fff; }
+        li:nth-child(3n) { color: #9b59b6; font-weight: bold; }
+        li:first-child { border-top: 2px solid #333; }
+        li:last-child { border-bottom: 2px solid #333; }
+
+        /* :not() pseudo-class */
+        p:not(.special) { color: #666; }
+        p.special { color: #e74c3c; font-weight: bold; }
+
+        /* :empty pseudo-class */
+        div:empty {
+            width: 100px;
+            height: 100px;
+            background-color: #f39c12;
+            margin: 10px;
+        }
+
+        /* :root pseudo-class */
+        :root {
+            --primary-color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pseudo-classes Test</h1>
+
+    <h2>Link States</h2>
+    <p><a href="#unvisited">Unvisited link (blue)</a></p>
+    <p><a href="#hover">Hover over me (turns red)</a></p>
+
+    <h2>Form States</h2>
+    <form>
+        <p><input type="text" placeholder="Focus me (blue outline)"></p>
+        <p><input type="text" disabled value="Disabled input"></p>
+        <p><input type="email" required placeholder="Required field (red left border)"></p>
+        <p><input type="text" optional placeholder="Optional field (gray left border)"></p>
+        <p><input type="email" value="invalid-email" placeholder="Invalid email (red border)"></p>
+        <p><input type="email" value="valid@example.com" placeholder="Valid email (green border)"></p>
+        <p><input type="checkbox" checked> Checked checkbox</p>
+        <p><button type="button">Hover me (green)</button></p>
+    </form>
+
+    <h2>Structural Pseudo-classes</h2>
+    <div>
+        <p>First child (bold, blue)</p>
+        <p>Middle child (normal)</p>
+        <p>Last child (italic, red)</p>
+    </div>
+
+    <h2>nth-child Selectors</h2>
+    <ul>
+        <li>Item 1 (odd, gray bg)</li>
+        <li>Item 2 (even, white bg)</li>
+        <li>Item 3 (odd, 3n, purple bold)</li>
+        <li>Item 4 (even, white bg)</li>
+        <li>Item 5 (odd, gray bg)</li>
+        <li>Item 6 (even, 3n, purple bold)</li>
+        <li>Item 7 (odd, gray bg)</li>
+        <li>Item 8 (even, white bg)</li>
+    </ul>
+
+    <h2>:not() Selector</h2>
+    <p>Normal paragraph (gray)</p>
+    <p class="special">Special paragraph (red, bold)</p>
+    <p>Another normal paragraph (gray)</p>
+
+    <h2>:empty Selector</h2>
+    <div></div>
+    <div>Not empty</div>
+    <div></div>
+</body>
+</html>

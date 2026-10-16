@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Forms - Selection Controls</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .form-group {
+            margin: 20px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        .radio-group, .checkbox-group {
+            margin: 10px 0;
+        }
+        .radio-group label, .checkbox-group label {
+            display: inline-block;
+            margin-right: 20px;
+            font-weight: normal;
+            cursor: pointer;
+        }
+        select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        select[multiple] {
+            height: 120px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Selection Controls</h2>
+
+    <form>
+        <div class="form-group">
+            <label>Radio Buttons (single selection):</label>
+            <div class="radio-group">
+                <label><input type="radio" name="color" value="red"> Red</label>
+                <label><input type="radio" name="color" value="green"> Green</label>
+                <label><input type="radio" name="color" value="blue" checked> Blue (default)</label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Checkboxes (multiple selection):</label>
+            <div class="checkbox-group">
+                <label><input type="checkbox" name="topping" value="cheese" checked> Cheese</label>
+                <label><input type="checkbox" name="topping" value="pepperoni"> Pepperoni</label>
+                <label><input type="checkbox" name="topping" value="mushrooms"> Mushrooms</label>
+                <label><input type="checkbox" name="topping" value="olives"> Olives</label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="dropdown">Dropdown (single select):</label>
+            <select id="dropdown" name="dropdown">
+                <option value="">-- Select an option --</option>
+                <option value="option1">Option 1</option>
+                <option value="option2">Option 2</option>
+                <option value="option3">Option 3</option>
+                <option value="option4">Option 4</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="dropdown-grouped">Dropdown with groups:</label>
+            <select id="dropdown-grouped" name="dropdown-grouped">
+                <optgroup label="Fruits">
+                    <option value="apple">Apple</option>
+                    <option value="banana">Banana</option>
+                    <option value="orange">Orange</option>
+                </optgroup>
+                <optgroup label="Vegetables">
+                    <option value="carrot">Carrot</option>
+                    <option value="broccoli">Broccoli</option>
+                    <option value="spinach">Spinach</option>
+                </optgroup>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="multi-select">Multi-select list:</label>
+            <select id="multi-select" name="multi-select" multiple>
+                <option value="item1">Item 1</option>
+                <option value="item2">Item 2</option>
+                <option value="item3">Item 3</option>
+                <option value="item4">Item 4</option>
+                <option value="item5">Item 5</option>
+                <option value="item6">Item 6</option>
+            </select>
+            <div style="font-size: 12px; color: #666; margin-top: 5px;">Hold Ctrl/Cmd to select multiple</div>
+        </div>
+
+        <div class="form-group">
+            <label>Single checkbox (boolean):</label>
+            <label style="font-weight: normal;">
+                <input type="checkbox" name="terms" required> I agree to the terms and conditions
+            </label>
+        </div>
+    </form>
+</body>
+</html>

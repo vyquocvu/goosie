@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Overflow - Text Overflow</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .container {
+            width: 300px;
+            margin: 20px 0;
+            border: 2px solid #3498db;
+            padding: 10px;
+            background-color: #ecf0f1;
+        }
+        .text-overflow-clip {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: clip;
+        }
+        .text-overflow-ellipsis {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .word-wrap-normal {
+            word-wrap: normal;
+            overflow-wrap: normal;
+        }
+        .word-wrap-break {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        .long-text {
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Text Overflow</h2>
+
+    <h3>Text-overflow: clip</h3>
+    <div class="container text-overflow-clip long-text">
+        This is a very long text that should be clipped at the edge of the container without any ellipsis
+    </div>
+
+    <h3>Text-overflow: ellipsis</h3>
+    <div class="container text-overflow-ellipsis long-text">
+        This is a very long text that should have an ellipsis at the end when it overflows
+    </div>
+
+    <h3>Word-wrap: normal (default)</h3>
+    <div class="container word-wrap-normal long-text">
+        Supercalifragilisticexpialidocious is a very long word that may not break properly
+    </div>
+
+    <h3>Word-wrap: break-word</h3>
+    <div class="container word-wrap-break long-text">
+        Supercalifragilisticexpialidocious is a very long word that should break to fit
+    </div>
+
+    <h3>Multiple lines with overflow hidden</h3>
+    <div class="container" style="height: 60px; overflow: hidden;">
+        <p>Line 1 - This is some text content</p>
+        <p>Line 2 - More text that should be hidden</p>
+        <p>Line 3 - This line should not be visible</p>
+    </div>
+</body>
+</html>

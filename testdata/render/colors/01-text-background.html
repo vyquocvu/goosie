@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Colors - Text and Background</title>
+    <style>
+        body { margin: 20px; }
+        .box {
+            padding: 20px;
+            margin: 10px 0;
+            border: 2px solid #333;
+        }
+        .color-named { color: red; background-color: yellow; }
+        .color-hex { color: #00ff00; background-color: #0000ff; }
+        .color-hex-short { color: #f00; background-color: #0f0; }
+        .color-rgb { color: rgb(255, 255, 0); background-color: rgb(128, 0, 128); }
+        .color-rgba { color: rgba(255, 0, 0, 1); background-color: rgba(0, 255, 255, 0.5); }
+        .color-hsl { color: hsl(0, 100%, 50%); background-color: hsl(120, 100%, 50%); }
+        .color-hsla { color: hsla(240, 100%, 50%, 1); background-color: hsla(60, 100%, 50%, 0.5); }
+        .color-transparent { color: black; background-color: transparent; }
+    </style>
+</head>
+<body>
+    <h2>Color Formats</h2>
+
+    <div class="box color-named">Named colors: red text on yellow background</div>
+
+    <div class="box color-hex">Hex colors: #00ff00 text on #0000ff background</div>
+
+    <div class="box color-hex-short">Short hex: #f00 text on #0f0 background</div>
+
+    <div class="box color-rgb">RGB: rgb(255, 255, 0) text on rgb(128, 0, 128) background</div>
+
+    <div class="box color-rgba">RGBA: rgba with full opacity text on semi-transparent background</div>
+
+    <div class="box color-hsl">HSL: hsl(0, 100%, 50%) text on hsl(120, 100%, 50%) background</div>
+
+    <div class="box color-hsla">HSLA: hsla with opacity</div>
+
+    <div class="box color-transparent">Transparent background (inherits from parent)</div>
+
+    <h3>Nested colors</h3>
+    <div style="color: blue; background-color: lightgray; padding: 20px;">
+        Parent: blue on lightgray
+        <div style="color: green; background-color: white; padding: 10px; margin: 10px;">
+            Child: green on white (overrides parent)
+        </div>
+        Back to parent color
+    </div>
+</body>
+</html>

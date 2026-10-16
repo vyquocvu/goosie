@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Inline Formatting Context</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .section { margin: 25px 0; }
+
+        /* Mixed inline/block */
+        .mixed-content {
+            width: 500px;
+            background: #ecf0f1;
+            padding: 15px;
+        }
+        .mixed-content p {
+            margin: 10px 0;
+        }
+        .mixed-content span {
+            background: #3498db;
+            color: white;
+            padding: 2px 6px;
+        }
+
+        /* Inline-block */
+        .inline-block-demo {
+            background: #ecf0f1;
+            padding: 15px;
+            width: 500px;
+        }
+        .ib {
+            display: inline-block;
+            width: 100px;
+            height: 60px;
+            margin: 5px;
+            padding: 8px;
+            color: white;
+            text-align: center;
+            vertical-align: top;
+        }
+
+        /* Line height with mixed sizes */
+        .mixed-sizes {
+            background: #ecf0f1;
+            padding: 15px;
+            width: 500px;
+        }
+        .big { font-size: 24px; }
+        .small { font-size: 12px; }
+        .normal { font-size: 16px; }
+
+        /* Vertical align in inline context */
+        .valign-demo {
+            background: #ecf0f1;
+            padding: 15px;
+            width: 500px;
+            line-height: 40px;
+        }
+        .va-top { vertical-align: top; }
+        .va-middle { vertical-align: middle; }
+        .va-bottom { vertical-align: bottom; }
+        .va-super { vertical-align: super; }
+        .va-sub { vertical-align: sub; }
+        .va-px { vertical-align: 10px; }
+
+        /* White-space handling */
+        .ws-normal { white-space: normal; background: #ecf0f1; padding: 10px; width: 300px; }
+        .ws-nowrap { white-space: nowrap; background: #d5f5e3; padding: 10px; width: 300px; overflow: hidden; }
+        .ws-pre { white-space: pre; background: #fdebd0; padding: 10px; width: 300px; overflow: auto; }
+
+        /* Word break */
+        .word-break-demo {
+            width: 200px;
+            border: 1px solid #bdc3c7;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .wb-normal { word-break: normal; }
+        .wb-break-all { word-break: break-all; }
+        .ow-break { overflow-wrap: break-word; }
+
+        /* Text overflow */
+        .text-overflow-demo {
+            width: 200px;
+            border: 1px solid #bdc3c7;
+            padding: 8px;
+            margin: 10px 0;
+        }
+        .to-clip {
+            overflow: hidden;
+            text-overflow: clip;
+            white-space: nowrap;
+        }
+        .to-ellipsis {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h2>Inline Formatting Context</h2>
+
+    <div class="section">
+        <div class="label">Mixed inline and block content</div>
+        <div class="mixed-content">
+            <p>This is a paragraph with <span>inline span</span> elements mixed in.</p>
+            <p>Another paragraph with <strong>bold</strong>, <em>italic</em>, and <span>styled</span> inline elements.</p>
+            <div style="background:#2ecc71;color:white;padding:10px;">Block div between paragraphs</div>
+            <p>Paragraph after the block div.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">display: inline-block (varying heights, vertical-align: top)</div>
+        <div class="inline-block-demo">
+            <div class="ib" style="background:#e74c3c;height:40px;">Short</div>
+            <div class="ib" style="background:#3498db;height:60px;">Medium</div>
+            <div class="ib" style="background:#2ecc71;height:80px;">Tall</div>
+            <div class="ib" style="background:#f39c12;height:50px;">Mid</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Mixed font sizes on one line</div>
+        <div class="mixed-sizes">
+            <span class="small">small</span>
+            <span class="normal">normal</span>
+            <span class="big">BIG</span>
+            <span class="normal">normal</span>
+            <span class="small">small</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">vertical-align values</div>
+        <div class="valign-demo">
+            <span class="va-top" style="background:#e74c3c;color:white;padding:4px;">top</span>
+            <span class="va-middle" style="background:#3498db;color:white;padding:4px;">middle</span>
+            <span class="va-bottom" style="background:#2ecc71;color:white;padding:4px;">bottom</span>
+            <span class="va-super" style="background:#9b59b6;color:white;padding:4px;">super</span>
+            <span class="va-sub" style="background:#f39c12;color:white;padding:4px;">sub</span>
+            <span class="va-px" style="background:#e67e22;color:white;padding:4px;">10px</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">white-space: normal</div>
+        <div class="ws-normal">This    text    has    multiple    spaces    that    collapse    normally    and    wraps    at    the    edge    of    the    container.</div>
+    </div>
+
+    <div class="section">
+        <div class="label">white-space: nowrap</div>
+        <div class="ws-nowrap">This text does not wrap at all and overflows the container boundary instead.</div>
+    </div>
+
+    <div class="section">
+        <div class="label">white-space: pre</div>
+        <div class="ws-pre">Line 1
+  Line 2 (indented)
+    Line 3 (more indent)
+Line 4</div>
+    </div>
+
+    <div class="section">
+        <div class="label">word-break: break-all</div>
+        <div class="word-break-demo wb-break-all">Supercalifragilisticexpialidocious is a very long word that should break anywhere.</div>
+    </div>
+
+    <div class="section">
+        <div class="label">overflow-wrap: break-word</div>
+        <div class="word-break-demo ow-break">Supercalifragilisticexpialidocious is a very long word that wraps at word boundaries when possible.</div>
+    </div>
+
+    <div class="section">
+        <div class="label">text-overflow: clip</div>
+        <div class="text-overflow-demo to-clip">This is a very long text that will be clipped at the overflow boundary.</div>
+    </div>
+
+    <div class="section">
+        <div class="label">text-overflow: ellipsis</div>
+        <div class="text-overflow-demo to-ellipsis">This is a very long text that will show an ellipsis at the overflow point.</div>
+    </div>
+</body>
+</html>
