@@ -193,3 +193,78 @@ func TestConcurrentChromeAccessIsRaceFree(t *testing.T) {
 	wg.Wait()
 	close(done)
 }
+
+func TestToolbarButtonDisabledState(t *testing.T) {
+	state := NewState(800, nil)
+	var traverseDelta int
+	state.OnTraverse = func(delta int) {
+		traverseDelta = delta
+	}
+
+	// Initially empty history: neither back nor forward should fire
+	backRect := ButtonRect(ButtonBack, 800)
+	clickPt := frame.Point{X: backRect.X0 + 5, Y: backRect.Y0 + 5}
+	state.HandleClick(clickPt, surface.ButtonLeft)
+	if traverseDelta != 0 {
+		t.Fatalf("traversed on empty history back: got delta %d", traverseDelta)
+	}
+
+	forwardRect := ButtonRect(ButtonForward, 800)
+	clickPt = frame.Point{X: forwardRect.X0 + 5, Y: forwardRect.Y0 + 5}
+	state.HandleClick(clickPt, surface.ButtonLeft)
+	if traverseDelta != 0 {
+		t.Fatalf("traversed on empty history forward: got delta %d", traverseDelta)
+	}
+
+	// Push 2 pages: back enabled, forward disabled
+	state.History.Push("https://a/")
+	state.History.Push("https://b/")
+
+	clickPt = frame.Point{X: backRect.X0 + 5, Y: backRect.Y0 + 5}
+	state.HandleClick(clickPt, surface.ButtonLeft)
+	if traverseDelta != -1 {
+		t.Fatalf("expected traverse -1, got %d", traverseDelta)
+	}
+
+	traverseDelta = 0
+	clickPt = frame.Point{X: forwardRect.X0 + 5, Y: forwardRect.Y0 + 5}
+	state.HandleClick(clickPt, surface.ButtonLeft)
+	if traverseDelta != 0 {
+		t.Fatalf("traversed on forward at head of history: got delta %d", traverseDelta)
+	}
+
+	// Move cursor back: back disabled, forward enabled
+	state.History.Back()
+	clickPt = frame.Point{X: forwardRect.X0 + 5, Y: forwardRect.Y0 + 5}
+	state.HandleClick(clickPt, surface.ButtonLeft)
+	if traverseDelta != 1 {
+		t.Fatalf("expected traverse 1, got %d", traverseDelta)
+	}
+}
+
+func TestToolbarNilHistorySafe(t *testing.T) {
+	state := NewState(800, nil)
+	state.History = nil
+	var traversed bool
+	state.OnTraverse = func(delta int) { traversed = true }
+
+	// Should not panic on Navigate with nil history
+	state.Navigate("https://example.com")
+
+	// Should not panic on HandleClick for Back/Forward
+	backRect := ButtonRect(ButtonBack, 800)
+	state.HandleClick(frame.Point{X: backRect.X0 + 5, Y: backRect.Y0 + 5}, surface.ButtonLeft)
+	if traversed {
+		t.Fatal("traversed should not fire with nil History")
+	}
+
+	forwardRect := ButtonRect(ButtonForward, 800)
+	state.HandleClick(frame.Point{X: forwardRect.X0 + 5, Y: forwardRect.Y0 + 5}, surface.ButtonLeft)
+	if traversed {
+		t.Fatal("traversed should not fire with nil History")
+	}
+
+	// Should not panic on Draw
+	buf := frame.NewBitmap(800, 60)
+	state.Draw(buf, 0)
+}

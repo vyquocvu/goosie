@@ -607,6 +607,35 @@ func (f *framePath) applyNavResult(result navResult) {
 			f.toolbar.SetError(result.err.Error())
 		}
 		fmt.Fprintln(os.Stderr, result.err)
+
+		// Build in-viewport error page so the tab is not left blank or showing obsolete content.
+		if !errors.Is(result.err, context.Canceled) {
+			errLayer, errSess, errBG := f.buildErrorPage(result.url, result.err)
+			if errLayer != nil {
+				oldSession := tab.Session()
+				tab.SetLayer(errLayer)
+				tab.SetSession(errSess)
+				tab.SetBGColor(errBG)
+				tab.SetURL(result.url)
+				tab.SetTitle("Problem loading page")
+				if oldSession != nil && oldSession != errSess {
+					oldSession.Close()
+				}
+				if f.tabMgr.Active() == tab {
+					f.syncTabToToolbar()
+					f.sched.SetPlan(frame.FramePlan{
+						Serial:     result.serial,
+						Layers:     []*frame.Layer{errLayer},
+						Background: tab.BGColor(),
+					})
+					f.sched.SetViewport(frame.Viewport{
+						Offset: frame.Point{},
+						Size:   f.config.devSize(),
+					})
+					f.publishAccessibility()
+				}
+			}
+		}
 		return
 	}
 

@@ -156,7 +156,9 @@ func (s *State) Navigate(url string) {
 	s.Cursor = len([]rune(url))
 	s.SelStart = s.Cursor
 	s.SelEnd = s.Cursor
-	s.History.Push(url)
+	if s.History != nil {
+		s.History.Push(url)
+	}
 	s.Focus = FocusNone
 	s.dragging = false
 }
@@ -532,13 +534,13 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), lp):
 		s.dragging = false
-		if s.History.CanBack() && s.OnTraverse != nil {
+		if s.History != nil && s.History.CanBack() && s.OnTraverse != nil {
 			cb := s.OnTraverse
 			fire(func() { cb(-1) })
 		}
 	case rectContains(ButtonRect(ButtonForward, w), lp):
 		s.dragging = false
-		if s.History.CanForward() && s.OnTraverse != nil {
+		if s.History != nil && s.History.CanForward() && s.OnTraverse != nil {
 			cb := s.OnTraverse
 			fire(func() { cb(1) })
 		}
@@ -860,10 +862,10 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	ox := r.X0 * sc
 	oyd := oy + r.Y0*sc
 	fg := buttonColor
-	if btn == ButtonBack && !s.History.CanBack() {
+	if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
 		fg = disabledColor
 	}
-	if btn == ButtonForward && !s.History.CanForward() {
+	if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
 		fg = disabledColor
 	}
 	cx := int32(ButtonSize) / 2
