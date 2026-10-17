@@ -128,7 +128,7 @@ func TestLoadURLCtxValidSmallDocument(t *testing.T) {
 }
 
 func TestLoadURLCtxRejectsOversizedDocument(t *testing.T) {
-	html := `<!DOCTYPE html><html><body><div style="width:65537px;height:65536px;background:red"></div></body></html>`
+	html := `<!DOCTYPE html><html><body><div style="width:131073px;height:262144px;background:red"></div></body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(html))

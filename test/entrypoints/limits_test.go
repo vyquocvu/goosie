@@ -70,7 +70,7 @@ func TestGoosieHeadlessRejectsOversizedDocument(t *testing.T) {
 
 	tmp := t.TempDir()
 	html := filepath.Join(tmp, "oversized.html")
-	content := `<!DOCTYPE html><html><body><div style="width:65537px;height:65536px;background:red"></div></body></html>`
+	content := `<!DOCTYPE html><html><body><div style="width:131073px;height:262144px;background:red"></div></body></html>`
 	if err := os.WriteFile(html, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -176,8 +176,8 @@ func TestGoosieHeadlessRejectsOversizedInput(t *testing.T) {
 
 	tmp := t.TempDir()
 	html := filepath.Join(tmp, "huge.html")
-	// Create a file just over 8 MiB.
-	hugeContent := strings.Repeat("x", 8<<20+1)
+	// Create a file just over 16 MiB.
+	hugeContent := strings.Repeat("x", 16<<20+1)
 	if err := os.WriteFile(html, []byte(hugeContent), 0644); err != nil {
 		t.Fatal(err)
 	}

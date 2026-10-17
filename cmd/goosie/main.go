@@ -1635,6 +1635,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	dl := list.Build(1)
 	extent := dl.Extent()
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size document cache: %w", err)
+	}
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)

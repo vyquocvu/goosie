@@ -45,7 +45,7 @@ func TestGetFinalResponseURL(t *testing.T) {
 
 func TestGetRejectsOversizedBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(bytes.Repeat([]byte("x"), (8<<20)+1))
+		_, _ = w.Write(bytes.Repeat([]byte("x"), (16<<20)+1))
 	}))
 	defer server.Close()
 	client := transport.DefaultClient()
@@ -225,7 +225,7 @@ func TestHTTPCancellation(t *testing.T) {
 }
 
 func TestHTTPResponseByteLimit(t *testing.T) {
-	if transport.MaxResponseBytes != 8<<20 {
+	if transport.MaxResponseBytes != 16<<20 {
 		t.Fatalf("MaxResponseBytes = %d", transport.MaxResponseBytes)
 	}
 	for _, mode := range []string{"declared", "chunked", "gzip"} {
