@@ -1727,22 +1727,37 @@ func subresourceCtx(ctx context.Context, base string) context.Context {
 	return net.WithAddressGuard(ctx, net.AddressGuard{Blocked: engine.AddressBlocked})
 }
 
-// normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
-// If the input contains spaces, it's treated as a search query and redirected
-// to Google Search. Single words without dots are assumed to be domain names.
+// normalizeURL normalizes address bar input into either a dialable URL or a search query.
+// It trims surrounding whitespace, normalizes supported schemes (http, https, file),
+// treats queries with whitespace or search/punctuation symbols as Google search queries,
+// and prefixes bare domains or IPs with https://.
 func normalizeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
 	}
-	// Check if this looks like a URL with scheme
-	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "file://") {
-		return raw
+	// Case-insensitive scheme check for http, https, and file.
+	lower := strings.ToLower(raw)
+	for _, scheme := range []string{"https://", "http://", "file://"} {
+		if strings.HasPrefix(lower, scheme) {
+			return scheme + raw[len(scheme):]
+		}
 	}
-	// If input contains spaces, treat it as a search query
-	if strings.ContainsAny(raw, " \t") {
+	// If input contains whitespace (space, tab, newline), it is a search query.
+	if strings.ContainsAny(raw, " \t\r\n") {
 		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
 	}
-	// Looks like a domain or IP, add https:// prefix
+	// If host portion (before any '/') contains symbols invalid in a domain name
+	// (such as '?', '+', '&', '=', '%', '!', '^', '*', '(', ')', '<', '>', ';'),
+	// treat it as a search query.
+	hostPart := raw
+	if slash := strings.IndexByte(raw, '/'); slash >= 0 {
+		hostPart = raw[:slash]
+	}
+	if strings.ContainsAny(hostPart, "?+&=%!^*()<>;\"'") {
+		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
+	}
+	// Bare domain, IP, or localhost: add https:// prefix
 	return "https://" + raw
 }
 

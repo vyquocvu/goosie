@@ -288,3 +288,86 @@ func TestNormalizeURLPerformance(t *testing.T) {
 		t.Logf("Long query expansion from %d to %d characters", len(longQuery), len(result))
 	}
 }
+
+func TestSmartOmniboxDisambiguation(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "trimmed URL",
+			input:    "   https://golang.org   ",
+			expected: "https://golang.org",
+		},
+		{
+			name:     "trimmed domain",
+			input:    "  google.com  ",
+			expected: "https://google.com",
+		},
+		{
+			name:     "trimmed search query",
+			input:    "  weather in hanoi  ",
+			expected: "https://www.google.com/search?q=weather+in+hanoi",
+		},
+		{
+			name:     "case-insensitive HTTPS scheme",
+			input:    "HTTPS://EXAMPLE.COM/PATH",
+			expected: "https://EXAMPLE.COM/PATH",
+		},
+		{
+			name:     "case-insensitive HTTP scheme",
+			input:    "Http://MyServer.local",
+			expected: "http://MyServer.local",
+		},
+		{
+			name:     "case-insensitive file scheme",
+			input:    "FILE:///etc/hosts",
+			expected: "file:///etc/hosts",
+		},
+		{
+			name:     "vietnamese unicode search query",
+			input:    "thời tiết hà nội",
+			expected: "https://www.google.com/search?q=th%E1%BB%9Di+ti%E1%BA%BFt+h%C3%A0+n%E1%BB%99i",
+		},
+		{
+			name:     "single word with question mark (search)",
+			input:    "golang?",
+			expected: "https://www.google.com/search?q=golang%3F",
+		},
+		{
+			name:     "programming symbol search (c++)",
+			input:    "c++",
+			expected: "https://www.google.com/search?q=c%2B%2B",
+		},
+		{
+			name:     "math query (100%)",
+			input:    "100%",
+			expected: "https://www.google.com/search?q=100%25",
+		},
+		{
+			name:     "equation query (5+5)",
+			input:    "5+5",
+			expected: "https://www.google.com/search?q=5%2B5",
+		},
+		{
+			name:     "domain with path and query parameters",
+			input:    "example.com/search?q=test&lang=en",
+			expected: "https://example.com/search?q=test&lang=en",
+		},
+		{
+			name:     "newline in search input",
+			input:    "search\nquery",
+			expected: "https://www.google.com/search?q=search%0Aquery",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeURL(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
