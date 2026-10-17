@@ -115,3 +115,106 @@ func TestDragStateRoundtrip(t *testing.T) {
 		t.Fatal("Dragging() still set after EndDrag")
 	}
 }
+
+func TestReopenTabStateAndStack(t *testing.T) {
+	mgr := NewManager(nil)
+	tab1 := mgr.NewTab()
+	tab1.SetURL("https://example.com/1")
+	tab1.SetTitle("Page 1")
+	tab1.History().Push("https://example.com/1")
+	tab1.History().Push("https://example.com/1b")
+	tab1.SetScrollY(150)
+
+	tab2 := mgr.NewTab()
+	tab2.SetURL("https://example.com/2")
+	tab2.SetTitle("Page 2")
+	tab2.History().Push("https://example.com/2")
+	tab2.SetScrollY(300)
+
+	tab1ID := tab1.ID()
+	tab2ID := tab2.ID()
+
+	mgr.CloseTab(tab1ID)
+	if mgr.ClosedTabCount() != 1 {
+		t.Fatalf("ClosedTabCount() = %d, want 1", mgr.ClosedTabCount())
+	}
+	if !mgr.CanReopenTab() {
+		t.Fatal("CanReopenTab() want true")
+	}
+
+	mgr.CloseTab(tab2ID)
+	if mgr.ClosedTabCount() != 2 {
+		t.Fatalf("ClosedTabCount() = %d, want 2", mgr.ClosedTabCount())
+	}
+
+	// First reopen restores tab2 (LIFO)
+	restored2, ok := mgr.ReopenTab()
+	if !ok || restored2 == nil {
+		t.Fatalf("ReopenTab() failed for tab2: ok=%v", ok)
+	}
+	if restored2.URL() != "https://example.com/2" {
+		t.Errorf("restored2 URL = %q, want %q", restored2.URL(), "https://example.com/2")
+	}
+	if restored2.Title() != "Page 2" {
+		t.Errorf("restored2 Title = %q, want %q", restored2.Title(), "Page 2")
+	}
+	if restored2.ScrollY() != 300 {
+		t.Errorf("restored2 ScrollY = %d, want 300", restored2.ScrollY())
+	}
+	if restored2.ID() == tab2ID {
+		t.Errorf("restored2 ID should be newly allocated, got same %d", tab2ID)
+	}
+
+	// Second reopen restores tab1
+	restored1, ok := mgr.ReopenTab()
+	if !ok || restored1 == nil {
+		t.Fatalf("ReopenTab() failed for tab1: ok=%v", ok)
+	}
+	if restored1.URL() != "https://example.com/1" {
+		t.Errorf("restored1 URL = %q, want %q", restored1.URL(), "https://example.com/1")
+	}
+	if restored1.Title() != "Page 1" {
+		t.Errorf("restored1 Title = %q, want %q", restored1.Title(), "Page 1")
+	}
+	if restored1.ScrollY() != 150 {
+		t.Errorf("restored1 ScrollY = %d, want 150", restored1.ScrollY())
+	}
+	entries, idx := restored1.History().Entries()
+	if len(entries) != 2 || entries[0] != "https://example.com/1" || entries[1] != "https://example.com/1b" || idx != 1 {
+		t.Errorf("restored1 history mismatch: entries=%v, idx=%d", entries, idx)
+	}
+
+	// Third reopen has nothing left
+	empty, ok := mgr.ReopenTab()
+	if ok || empty != nil {
+		t.Fatalf("ReopenTab() on empty stack = (%v, %v), want (nil, false)", empty, ok)
+	}
+	if mgr.CanReopenTab() {
+		t.Fatal("CanReopenTab() should be false when stack is empty")
+	}
+}
+
+func TestReopenTabIgnoresBlankTabs(t *testing.T) {
+	mgr := NewManager(nil)
+	tab := mgr.NewTab() // Blank tab with no URL and no history entries
+	mgr.CloseTab(tab.ID())
+
+	if mgr.CanReopenTab() {
+		t.Fatal("CanReopenTab() should be false for blank tab")
+	}
+	if count := mgr.ClosedTabCount(); count != 0 {
+		t.Fatalf("ClosedTabCount() = %d, want 0", count)
+	}
+}
+
+func TestReopenTabStackCapacityBounded(t *testing.T) {
+	mgr := NewManager(nil)
+	for i := 0; i < 35; i++ {
+		tab := mgr.NewTab()
+		tab.SetURL("https://example.com/test")
+		mgr.CloseTab(tab.ID())
+	}
+	if count := mgr.ClosedTabCount(); count != maxClosedTabs {
+		t.Fatalf("ClosedTabCount() = %d, want %d", count, maxClosedTabs)
+	}
+}

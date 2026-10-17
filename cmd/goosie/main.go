@@ -1497,6 +1497,41 @@ func (f *framePath) closeTab(id uint64) {
 	}
 }
 
+// reopenTab restores the most recently closed tab and loads its URL.
+func (f *framePath) reopenTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	f.closeFind()
+	cur := f.tabMgr.Active()
+	if cur != nil {
+		vp := f.sched.Viewport()
+		cur.SetScrollY(vp.Offset.Y)
+	}
+	tab, ok := f.tabMgr.ReopenTab()
+	if !ok || tab == nil {
+		return
+	}
+	f.ensureActiveTabVisible()
+	f.syncTabToToolbar()
+	_, layer := blankLayer(f.config.devSize())
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(255, 255, 255))
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     tab.Nav.Serial,
+		Layers:     []*frame.Layer{layer},
+		Background: tab.BGColor(),
+	})
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: tab.ScrollY()},
+		Size:   f.config.devSize(),
+	})
+	f.publishAccessibility()
+	if u := tab.URL(); u != "" {
+		f.navigateTabNoHistory(u)
+	}
+}
+
 // loadURLCtx is like loadURL but respects context cancellation. With
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
@@ -1804,6 +1839,7 @@ func (f *framePath) openWindow() error {
 			func(id uint64) { f.switchTab(id) },
 			func() { f.newTab() },
 			func(id uint64) { f.closeTab(id) },
+			func() { f.reopenTab() },
 			f.handleResize,
 			f.handleZoom,
 			f.handleLinkClick,

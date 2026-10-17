@@ -22,6 +22,7 @@ type chromeWindow struct {
 	onSwitch      func(uint64)
 	onNewTab      func()
 	onCloseTab    func(uint64)
+	onReopenTab   func()
 	onResize      func(contentW, contentH int)
 	onZoom        func(delta float64)
 	onLinkClick   func(href string)
@@ -50,7 +51,7 @@ type chromeWindow struct {
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
-	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64),
+	onSwitch func(uint64), onNewTab func(), onCloseTab func(uint64), onReopenTab func(),
 	onResize func(contentW, contentH int), onZoom func(delta float64),
 	onLinkClick func(href string), onBookmark func(),
 	onFocusClick func(contentX, contentY int32) bool,
@@ -73,6 +74,7 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		onSwitch:      onSwitch,
 		onNewTab:      onNewTab,
 		onCloseTab:    onCloseTab,
+		onReopenTab:   onReopenTab,
 		onResize:      onResize,
 		onZoom:        onZoom,
 		onLinkClick:   onLinkClick,
@@ -490,7 +492,12 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			return true
 		}
 	case key == 't' || key == 'T':
-		if cw.onNewTab != nil {
+		if shift {
+			if cw.onReopenTab != nil {
+				cw.onReopenTab()
+				return true
+			}
+		} else if cw.onNewTab != nil {
 			cw.onNewTab()
 			return true
 		}

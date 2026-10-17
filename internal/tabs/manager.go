@@ -1,6 +1,21 @@
 package tabs
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/vyquocvu/goosie/internal/toolbar"
+)
+
+// maxClosedTabs is the maximum number of closed tab snapshots preserved for reopening.
+const maxClosedTabs = 25
+
+// ClosedTab holds snapshot state of a closed tab to support ReopenTab (Cmd+Shift+T).
+type ClosedTab struct {
+	URL     string
+	Title   string
+	History *toolbar.History
+	ScrollY int32
+}
 
 // TabManager owns all tabs and tracks which is active.
 type TabManager struct {
@@ -8,6 +23,7 @@ type TabManager struct {
 	tabs        []*Tab
 	activeIdx   int
 	nextID      uint64
+	closedTabs  []ClosedTab
 	onCloseLast func()
 	OnChange    func()
 	// tabScroll is the strip's horizontal offset in logical pixels. The wheel
@@ -62,6 +78,29 @@ func (m *TabManager) CloseTab(id uint64) {
 		m.mu.Unlock()
 		return
 	}
+	closingTab := m.tabs[idx]
+	var histClone *toolbar.History
+	var hasHistory bool
+	if h := closingTab.History(); h != nil {
+		entries, histIdx := h.Entries()
+		if len(entries) > 0 {
+			hasHistory = true
+			histClone = toolbar.RestoreHistory(entries, histIdx)
+		}
+	}
+	url := closingTab.URL()
+	if url != "" || hasHistory {
+		m.closedTabs = append(m.closedTabs, ClosedTab{
+			URL:     url,
+			Title:   closingTab.Title(),
+			History: histClone,
+			ScrollY: closingTab.ScrollY(),
+		})
+		if len(m.closedTabs) > maxClosedTabs {
+			m.closedTabs = m.closedTabs[len(m.closedTabs)-maxClosedTabs:]
+		}
+	}
+
 	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
 	if len(m.tabs) == 0 {
 		m.activeIdx = 0
@@ -79,6 +118,65 @@ func (m *TabManager) CloseTab(id uint64) {
 	}
 	m.mu.Unlock()
 	m.fireChange()
+}
+
+// ReopenTab creates a new tab restoring the state of the most recently closed tab,
+// appends it, activates it, and returns the tab and true. If no closed tab is
+// available, it returns nil, false.
+func (m *TabManager) ReopenTab() (*Tab, bool) {
+	m.mu.Lock()
+	if len(m.closedTabs) == 0 {
+		m.mu.Unlock()
+		return nil, false
+	}
+	n := len(m.closedTabs) - 1
+	rec := m.closedTabs[n]
+	m.closedTabs = m.closedTabs[:n]
+
+	m.nextID++
+	tab := newTab(m.nextID)
+	tab.SetURL(rec.URL)
+	if rec.Title != "" {
+		tab.SetTitle(rec.Title)
+	}
+	if rec.History != nil {
+		entries, idx := rec.History.Entries()
+		tab.SetHistory(toolbar.RestoreHistory(entries, idx))
+	}
+	tab.SetScrollY(rec.ScrollY)
+
+	m.tabs = append(m.tabs, tab)
+	m.activeIdx = len(m.tabs) - 1
+	m.mu.Unlock()
+	m.fireChange()
+	return tab, true
+}
+
+// CanReopenTab reports whether there are closed tabs available to reopen.
+func (m *TabManager) CanReopenTab() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.closedTabs) > 0
+}
+
+// ClosedTabCount reports the number of closed tabs in the reopen stack.
+func (m *TabManager) ClosedTabCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.closedTabs)
+}
+
+// PopClosedTab pops and returns the most recently closed tab record without creating a tab.
+func (m *TabManager) PopClosedTab() (ClosedTab, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.closedTabs) == 0 {
+		return ClosedTab{}, false
+	}
+	n := len(m.closedTabs) - 1
+	rec := m.closedTabs[n]
+	m.closedTabs = m.closedTabs[:n]
+	return rec, true
 }
 
 func (m *TabManager) SwitchTo(id uint64) {
