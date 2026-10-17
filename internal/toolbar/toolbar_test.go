@@ -1,6 +1,7 @@
 package toolbar
 
 import (
+	"strings"
 	"sync"
 	"testing"
 
@@ -267,4 +268,100 @@ func TestToolbarNilHistorySafe(t *testing.T) {
 	// Should not panic on Draw
 	buf := frame.NewBitmap(800, 60)
 	state.Draw(buf, 0)
+}
+
+func TestToolbarSuggestionsLifecycle(t *testing.T) {
+	state := NewState(800, nil)
+	var navigatedURL string
+	state.OnNavigate = func(url string) {
+		navigatedURL = url
+	}
+	state.OnQuerySuggest = func(q string) []Suggestion {
+		if strings.HasPrefix(q, "go") {
+			return []Suggestion{
+				{Title: "Search go", URL: "https://google.com/search?q=go", Kind: SuggestSearch},
+				{Title: "Go Website", URL: "https://golang.org", Kind: SuggestBookmark},
+			}
+		}
+		return nil
+	}
+
+	state.FocusURL()
+	state.HandleKeyEvent('g', 0)
+	state.HandleKeyEvent('o', 0)
+
+	if !state.HasSuggestions() {
+		t.Fatal("suggestions should be active after typing 'go'")
+	}
+	if state.SuggestionCount() != 2 {
+		t.Fatalf("SuggestionCount() = %d, want 2", state.SuggestionCount())
+	}
+	if state.SelectedSuggestion() != -1 {
+		t.Fatalf("SelectedSuggestion() initially = %d, want -1", state.SelectedSuggestion())
+	}
+
+	// Arrow down selects first suggestion
+	state.HandleKeyEvent(keyDown, 0)
+	if state.SelectedSuggestion() != 0 {
+		t.Fatalf("SelectedSuggestion() after down = %d, want 0", state.SelectedSuggestion())
+	}
+
+	// Arrow down again selects second suggestion
+	state.HandleKeyEvent(keyDown, 0)
+	if state.SelectedSuggestion() != 1 {
+		t.Fatalf("SelectedSuggestion() after down = %d, want 1", state.SelectedSuggestion())
+	}
+
+	// Arrow up wraps back to first suggestion
+	state.HandleKeyEvent(keyUp, 0)
+	if state.SelectedSuggestion() != 0 {
+		t.Fatalf("SelectedSuggestion() after up = %d, want 0", state.SelectedSuggestion())
+	}
+
+	// Enter submits selected suggestion URL
+	state.HandleKeyEvent('\r', 0)
+	if navigatedURL != "https://google.com/search?q=go" {
+		t.Errorf("navigatedURL = %q, want https://google.com/search?q=go", navigatedURL)
+	}
+	if state.HasSuggestions() {
+		t.Error("suggestions should be closed after submit")
+	}
+
+	// Test Esc dismisses suggestions
+	state.HandleKeyEvent('g', 0)
+	state.HandleKeyEvent('o', 0)
+	if !state.HasSuggestions() {
+		t.Fatal("suggestions should be active again")
+	}
+	state.HandleKeyEvent(0x1b, 0) // Esc
+	if state.HasSuggestions() {
+		t.Error("Esc should close suggestions")
+	}
+}
+
+func TestToolbarSuggestionsHitAndDraw(t *testing.T) {
+	state := NewState(800, nil)
+	state.Suggestions = []Suggestion{
+		{Title: "Golang", URL: "https://golang.org", Kind: SuggestBookmark},
+		{Title: "Google", URL: "https://google.com", Kind: SuggestSearch},
+	}
+	state.SelectedSuggest = 0
+
+	rect := state.SuggestionsRect(64)
+	if rect.Empty() {
+		t.Fatal("SuggestionsRect should not be empty")
+	}
+
+	// Hit test on first suggestion row
+	sug, ok := state.HitSuggestion(frame.Point{X: rect.X0 + 10, Y: 64 + 10}, 64)
+	if !ok || sug.URL != "https://golang.org" {
+		t.Fatalf("HitSuggestion row 0 = (%v, %v), want golang.org", sug, ok)
+	}
+
+	// Draw onto bitmap
+	state.Suggestions = []Suggestion{
+		{Title: "Golang", URL: "https://golang.org", Kind: SuggestBookmark},
+	}
+	buf := frame.NewBitmap(800, 300)
+	state.DrawSuggestions(buf, 64)
 }

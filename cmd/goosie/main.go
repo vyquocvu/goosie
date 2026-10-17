@@ -486,6 +486,9 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnFindClose = func() {
 			f.closeFind()
 		}
+		f.toolbar.OnQuerySuggest = func(query string) []toolbar.Suggestion {
+			return f.querySuggestions(query)
+		}
 		if cb := platform.NewClipboard(); cb != nil {
 			f.toolbar.Clipboard = cb
 		}
@@ -511,6 +514,68 @@ func (f *framePath) syncTabToToolbar() {
 	loading := tab.Nav.Loading
 	tab.Nav.Mu.Unlock()
 	f.toolbar.SyncFromTab(tab.URL(), loading, tab.Error(), tab.History())
+}
+
+// querySuggestions searches bookmarks, visit history, and search engine completions for omnibox query.
+func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil
+	}
+	lowerQ := strings.ToLower(q)
+	var out []toolbar.Suggestion
+	seen := make(map[string]bool)
+
+	// 1. Search Google query suggestion
+	searchURL := "https://www.google.com/search?q=" + url.QueryEscape(q)
+	out = append(out, toolbar.Suggestion{
+		Title: "Search Google for " + q,
+		URL:   searchURL,
+		Kind:  toolbar.SuggestSearch,
+	})
+	seen[searchURL] = true
+
+	// 2. Bookmarks matching query
+	if f.bookmarks != nil {
+		for _, bm := range f.bookmarks.List() {
+			if strings.Contains(strings.ToLower(bm.URL), lowerQ) || strings.Contains(strings.ToLower(bm.Title), lowerQ) {
+				if !seen[bm.URL] {
+					seen[bm.URL] = true
+					out = append(out, toolbar.Suggestion{
+						Title: bm.Title,
+						URL:   bm.URL,
+						Kind:  toolbar.SuggestBookmark,
+					})
+					if len(out) >= 6 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	// 3. History visits matching query (newest first)
+	if f.history != nil {
+		entries := f.history.Entries()
+		for i := len(entries) - 1; i >= 0; i-- {
+			h := entries[i]
+			if strings.Contains(strings.ToLower(h.URL), lowerQ) || strings.Contains(strings.ToLower(h.Title), lowerQ) {
+				if !seen[h.URL] {
+					seen[h.URL] = true
+					out = append(out, toolbar.Suggestion{
+						Title: h.Title,
+						URL:   h.URL,
+						Kind:  toolbar.SuggestHistory,
+					})
+					if len(out) >= 6 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	return out
 }
 
 // navContext roots one navigation load: the run scope when it exists so

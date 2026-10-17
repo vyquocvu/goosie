@@ -142,13 +142,21 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 		copy(out.RGBA[oy:oy+out.Stride], buf.RGBA[sy:sy+buf.Stride])
 	}
 
-	merged := make([]frame.Rect, 0, len(damage)+1)
+	merged := make([]frame.Rect, 0, len(damage)+2)
 	merged = append(merged, frame.Rect4(0, 0, int32(out.W), chromeH))
 	for _, r := range damage {
 		if r.Empty() {
 			continue
 		}
 		merged = append(merged, frame.Rect4(r.X0, r.Y0+chromeH, r.X1, r.Y1+chromeH))
+	}
+
+	if cw.toolbar != nil && cw.toolbar.HasSuggestions() {
+		cw.toolbar.DrawSuggestions(out, chromeH)
+		sugRect := cw.toolbar.SuggestionsRect(chromeH)
+		if !sugRect.Empty() {
+			merged = append(merged, sugRect)
+		}
 	}
 	return cw.Window.Present(out, merged)
 }
@@ -240,6 +248,23 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				cw.SetIME(false)
 			}
 			return true
+		}
+		if cw.toolbar != nil && cw.toolbar.HasSuggestions() {
+			sugRect := cw.toolbar.SuggestionsRect(cw.chromeHeight())
+			if !sugRect.Empty() && ev.Pos.X >= sugRect.X0 && ev.Pos.X < sugRect.X1 && ev.Pos.Y >= sugRect.Y0 && ev.Pos.Y < sugRect.Y1 {
+				if ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft {
+					if sug, ok := cw.toolbar.HitSuggestion(ev.Pos, cw.chromeHeight()); ok {
+						if cw.onLinkClick != nil {
+							cw.onLinkClick(sug.URL)
+						}
+						return true
+					}
+				}
+				if ev.Action == surface.PointerMotion {
+					cw.toolbar.HoverSuggestion(ev.Pos, cw.chromeHeight())
+					return true
+				}
+			}
 		}
 		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 			// Presses and releases outside defocus the bar; motion extends

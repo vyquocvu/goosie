@@ -18,6 +18,22 @@ const (
 	FocusAddress
 )
 
+// SuggestionKind distinguishes search suggestions, bookmarks, and history entries.
+type SuggestionKind int
+
+const (
+	SuggestSearch SuggestionKind = iota
+	SuggestBookmark
+	SuggestHistory
+)
+
+// Suggestion is one autocompleted destination displayed in the omnibox dropdown.
+type Suggestion struct {
+	Title string
+	URL   string
+	Kind  SuggestionKind
+}
+
 const textSize = 14
 
 // Special key codes matching the darwin shim's GOOSIE_KEY_* constants.
@@ -90,6 +106,10 @@ type State struct {
 	OnFindClose   func()
 	Clipboard     Clipboard
 
+	Suggestions     []Suggestion
+	SelectedSuggest int
+	OnQuerySuggest  func(string) []Suggestion
+
 	fonts *raster.Fonts
 	scale int32
 	// dragging tracks an in-progress address-bar drag selection: press sets
@@ -100,11 +120,12 @@ type State struct {
 
 func NewState(width int32, fonts *raster.Fonts) *State {
 	return &State{
-		History:   NewHistory(),
-		Bounds:    frame.Rect4(0, 0, width, ToolbarHeight),
-		fonts:     fonts,
-		Clipboard: nopClipboardImpl{},
-		scale:     1,
+		History:         NewHistory(),
+		Bounds:          frame.Rect4(0, 0, width, ToolbarHeight),
+		fonts:           fonts,
+		Clipboard:       nopClipboardImpl{},
+		scale:           1,
+		SelectedSuggest: -1,
 	}
 }
 
@@ -305,6 +326,7 @@ func (s *State) HandlePointer(pos frame.Point, button surface.Button, action sur
 func (s *State) blurLocked() {
 	s.Focus = FocusNone
 	s.dragging = false
+	s.closeSuggestionsLocked()
 	if !s.FindActive {
 		s.Input = s.URL
 		s.Cursor = len([]rune(s.Input))
@@ -337,6 +359,10 @@ func (s *State) focusURLLocked() []func() {
 	s.Input = s.URL
 	s.selectAllLocked()
 	s.dragging = false
+	if s.OnQuerySuggest != nil && s.Input != "" {
+		s.Suggestions = s.OnQuerySuggest(s.Input)
+		s.SelectedSuggest = -1
+	}
 	return pending
 }
 
@@ -444,6 +470,10 @@ func (s *State) pressAddressLocked(devX int32, toolbarW int32) {
 		s.selectAllLocked()
 		s.dragging = true
 		s.dragAnchor = s.hitCursorDev(devX, toolbarW)
+		if s.OnQuerySuggest != nil && s.Input != "" {
+			s.Suggestions = s.OnQuerySuggest(s.Input)
+			s.SelectedSuggest = -1
+		}
 		return
 	}
 	at := s.hitCursorDev(devX, toolbarW)
@@ -605,12 +635,25 @@ func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 		return nil
 	}
 	if key == 0x1b {
-		// Esc reverts an uncommitted edit and leaves the bar, like a normal
-		// input; find mode has its own Esc path above.
+		// Esc closes suggestions dropdown if open, or reverts uncommitted edit.
+		if len(s.Suggestions) > 0 {
+			s.closeSuggestionsLocked()
+			return nil
+		}
 		s.blurLocked()
 		return nil
 	}
-	return s.clipboardPending(s.editKeyLocked(key, mods))
+	beforeInput := s.Input
+	pending := s.clipboardPending(s.editKeyLocked(key, mods))
+	if s.Input != beforeInput {
+		if s.OnQuerySuggest != nil && s.Input != "" {
+			s.Suggestions = s.OnQuerySuggest(s.Input)
+			s.SelectedSuggest = -1
+		} else {
+			s.closeSuggestionsLocked()
+		}
+	}
+	return pending
 }
 
 // clipboardPending wraps deferred clipboard work from an edit into a
@@ -697,8 +740,16 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 			s.moveCursorRight(shift)
 		}
 	case keyUp:
+		if len(s.Suggestions) > 0 {
+			s.selectPrevSuggestLocked()
+			return
+		}
 		s.moveCursorStart(shift)
 	case keyDown:
+		if len(s.Suggestions) > 0 {
+			s.selectNextSuggestLocked()
+			return
+		}
 		s.moveCursorEnd(shift)
 	case keyHome:
 		s.moveCursorStart(shift)
@@ -771,6 +822,10 @@ func (s *State) insertChar(r rune) {
 
 func (s *State) submitInputLocked() []func() {
 	url := s.Input
+	if s.SelectedSuggest >= 0 && s.SelectedSuggest < len(s.Suggestions) {
+		url = s.Suggestions[s.SelectedSuggest].URL
+	}
+	s.closeSuggestionsLocked()
 	if url == "" || s.OnNavigate == nil {
 		return nil
 	}
@@ -1327,4 +1382,194 @@ func (s *State) CloseFind() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeFindLocked()
+}
+
+func (s *State) selectNextSuggestLocked() {
+	if len(s.Suggestions) == 0 {
+		return
+	}
+	s.SelectedSuggest++
+	if s.SelectedSuggest >= len(s.Suggestions) {
+		s.SelectedSuggest = 0
+	}
+}
+
+func (s *State) selectPrevSuggestLocked() {
+	if len(s.Suggestions) == 0 {
+		return
+	}
+	s.SelectedSuggest--
+	if s.SelectedSuggest < 0 {
+		s.SelectedSuggest = len(s.Suggestions) - 1
+	}
+}
+
+func (s *State) closeSuggestionsLocked() {
+	s.Suggestions = nil
+	s.SelectedSuggest = -1
+}
+
+// CloseSuggestions clears the current suggestions dropdown.
+func (s *State) CloseSuggestions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeSuggestionsLocked()
+}
+
+// HasSuggestions reports whether the suggestions dropdown is currently visible.
+func (s *State) HasSuggestions() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Suggestions) > 0
+}
+
+// SuggestionCount reports how many suggestions are in the dropdown.
+func (s *State) SuggestionCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Suggestions)
+}
+
+// SelectedSuggestion reports the index of the highlighted suggestion, or -1.
+func (s *State) SelectedSuggestion() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SelectedSuggest
+}
+
+// SuggestionsRect returns the bounding rectangle of the suggestions dropdown.
+func (s *State) SuggestionsRect(topOffset int32) frame.Rect {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 {
+		return frame.Rect{}
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	itemH := int32(36) * sc
+	totalH := int32(len(s.Suggestions)) * itemH
+	return frame.Rect4(bar.X0*sc, topOffset, bar.X1*sc, topOffset+totalH)
+}
+
+// HitSuggestion reports which suggestion was clicked, if any, and closes the dropdown.
+func (s *State) HitSuggestion(pos frame.Point, topOffset int32) (Suggestion, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 {
+		return Suggestion{}, false
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	barX0 := bar.X0 * sc
+	barX1 := bar.X1 * sc
+	if pos.X < barX0 || pos.X >= barX1 {
+		return Suggestion{}, false
+	}
+	itemH := int32(36) * sc
+	relY := pos.Y - topOffset
+	if relY < 0 {
+		return Suggestion{}, false
+	}
+	idx := int(relY / itemH)
+	if idx >= 0 && idx < len(s.Suggestions) {
+		sug := s.Suggestions[idx]
+		s.closeSuggestionsLocked()
+		return sug, true
+	}
+	return Suggestion{}, false
+}
+
+// HoverSuggestion updates the highlighted suggestion based on pointer movement.
+func (s *State) HoverSuggestion(pos frame.Point, topOffset int32) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 {
+		return -1
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	barX0 := bar.X0 * sc
+	barX1 := bar.X1 * sc
+	if pos.X < barX0 || pos.X >= barX1 {
+		return -1
+	}
+	itemH := int32(36) * sc
+	relY := pos.Y - topOffset
+	if relY < 0 {
+		return -1
+	}
+	idx := int(relY / itemH)
+	if idx >= 0 && idx < len(s.Suggestions) {
+		s.SelectedSuggest = idx
+		return idx
+	}
+	return -1
+}
+
+// DrawSuggestions renders the autocomplete dropdown box beneath the address bar.
+func (s *State) DrawSuggestions(backing *frame.Bitmap, topOffset int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 || backing == nil {
+		return
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	itemH := int32(36) * sc
+	totalH := int32(len(s.Suggestions)) * itemH
+	box := frame.Rect4(bar.X0*sc, topOffset, bar.X1*sc, topOffset+totalH)
+
+	bgCol := frame.RGB(255, 255, 255)
+	borderCol := frame.RGB(218, 220, 224)
+	s.drawRoundedRect(backing, box, 4*sc, bgCol, borderCol)
+
+	clip := box
+	fontSize := int32(13) * sc
+
+	for i, sug := range s.Suggestions {
+		rowY0 := topOffset + int32(i)*itemH
+		rowY1 := rowY0 + itemH
+		rowRect := frame.Rect4(box.X0, rowY0, box.X1, rowY1)
+
+		if i == s.SelectedSuggest {
+			selectedBg := frame.RGB(232, 240, 254)
+			backing.FillRect(rowRect, selectedBg, nil)
+		} else if i > 0 {
+			sepCol := frame.RGB(241, 243, 244)
+			backing.FillRect(frame.Rect4(box.X0, rowY0, box.X1, rowY0+sc), sepCol, nil)
+		}
+
+		badgeText := "[Search]"
+		badgeCol := frame.RGB(26, 115, 232)
+		switch sug.Kind {
+		case SuggestBookmark:
+			badgeText = "[★ Bookmark]"
+			badgeCol = frame.RGB(227, 116, 0)
+		case SuggestHistory:
+			badgeText = "[History]"
+			badgeCol = frame.RGB(95, 99, 104)
+		}
+
+		textY := s.baselineY(rowRect, fontSize)
+		curX := rowRect.X0 + 12*sc
+		s.drawText(backing, badgeText, curX, textY, badgeCol, clip)
+		curX += s.measureText(badgeText) + 8*sc
+
+		titleText := sug.Title
+		if titleText == "" {
+			titleText = sug.URL
+		}
+		titleCol := frame.RGB(32, 33, 36)
+		s.drawText(backing, titleText, curX, textY, titleCol, clip)
+		curX += s.measureText(titleText) + 12*sc
+
+		if sug.Title != "" && sug.URL != "" && sug.Title != sug.URL {
+			urlCol := frame.RGB(128, 134, 139)
+			s.drawText(backing, sug.URL, curX, textY, urlCol, clip)
+		}
+	}
 }
