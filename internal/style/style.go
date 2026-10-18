@@ -576,6 +576,11 @@ type ComputedStyle struct {
 	WordBreak string  // "normal", "break-all", "keep-all", "break-word". Default "normal"
 	Hyphens   string  // "none", "manual", "auto". Default "manual"
 	TabSize   float32 // number of spaces or px length. Default 8
+
+	// CSS Writing Modes Level 3 & Fonts Level 3
+	WritingMode        string // "horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr". Default "horizontal-tb"
+	TextOrientation    string // "mixed", "upright", "sideways". Default "mixed"
+	FontVariantNumeric string // "normal", "ordinal", "slashed-zero", etc. Default "normal"
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -708,6 +713,9 @@ func DefaultStyle() ComputedStyle {
 		WordBreak:              "normal",
 		Hyphens:                "manual",
 		TabSize:                8,
+		WritingMode:            "horizontal-tb",
+		TextOrientation:        "mixed",
+		FontVariantNumeric:     "normal",
 	}
 }
 
@@ -2342,6 +2350,15 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	if parent.TabSize > 0 {
 		cs.TabSize = parent.TabSize
 	}
+	if parent.WritingMode != "" {
+		cs.WritingMode = parent.WritingMode
+	}
+	if parent.TextOrientation != "" {
+		cs.TextOrientation = parent.TextOrientation
+	}
+	if parent.FontVariantNumeric != "" {
+		cs.FontVariantNumeric = parent.FontVariantNumeric
+	}
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3426,6 +3443,32 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.TabSize = float32(parsed.Num)
 		} else if parsed.Type == css.ValueLength {
 			cs.TabSize = resolveLengthEm(parsed, 8, cs.FontSize, cs.rootFontSize)
+		}
+
+	case "writing-mode":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr":
+			cs.WritingMode = v
+		case "initial", "unset":
+			cs.WritingMode = "horizontal-tb"
+		}
+
+	case "text-orientation":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "mixed", "upright", "sideways":
+			cs.TextOrientation = v
+		case "initial", "unset":
+			cs.TextOrientation = "mixed"
+		}
+
+	case "font-variant-numeric":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "initial" || v == "unset" {
+			cs.FontVariantNumeric = "normal"
+		} else if v != "" {
+			cs.FontVariantNumeric = v
 		}
 
 	case "vertical-align":

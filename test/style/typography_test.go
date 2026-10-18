@@ -72,3 +72,71 @@ func TestTypographyProperties(t *testing.T) {
 		t.Errorf("d3 Hyphens = %q, want manual", s3.Hyphens)
 	}
 }
+
+func TestWritingModesAndFontVariantNumeric(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	doc.Node.AppendChild(html)
+	body := doc.NewElement("body")
+	html.AppendChild(body)
+
+	parent := doc.NewElement("div")
+	parent.SetAttribute("id", "parent")
+	body.AppendChild(parent)
+
+	child := doc.NewElement("span")
+	child.SetAttribute("id", "child")
+	parent.AppendChild(child)
+
+	dCustom := doc.NewElement("div")
+	dCustom.SetAttribute("id", "custom")
+	body.AppendChild(dCustom)
+
+	sheet := css.Parse(`
+		#parent {
+			writing-mode: vertical-rl;
+			text-orientation: upright;
+			font-variant-numeric: tabular-nums slashed-zero;
+		}
+		#custom {
+			writing-mode: vertical-lr;
+			text-orientation: sideways;
+			font-variant-numeric: lining-nums;
+		}
+	`)
+
+	styles := style.Resolve(doc, []*css.Stylesheet{sheet}, nil)
+
+	sp := styles[parent.ID]
+	if sp.WritingMode != "vertical-rl" {
+		t.Errorf("parent WritingMode = %q, want vertical-rl", sp.WritingMode)
+	}
+	if sp.TextOrientation != "upright" {
+		t.Errorf("parent TextOrientation = %q, want upright", sp.TextOrientation)
+	}
+	if sp.FontVariantNumeric != "tabular-nums slashed-zero" {
+		t.Errorf("parent FontVariantNumeric = %q, want 'tabular-nums slashed-zero'", sp.FontVariantNumeric)
+	}
+
+	sc := styles[child.ID]
+	if sc.WritingMode != "vertical-rl" {
+		t.Errorf("child inherited WritingMode = %q, want vertical-rl", sc.WritingMode)
+	}
+	if sc.TextOrientation != "upright" {
+		t.Errorf("child inherited TextOrientation = %q, want upright", sc.TextOrientation)
+	}
+	if sc.FontVariantNumeric != "tabular-nums slashed-zero" {
+		t.Errorf("child inherited FontVariantNumeric = %q, want 'tabular-nums slashed-zero'", sc.FontVariantNumeric)
+	}
+
+	sCust := styles[dCustom.ID]
+	if sCust.WritingMode != "vertical-lr" {
+		t.Errorf("custom WritingMode = %q, want vertical-lr", sCust.WritingMode)
+	}
+	if sCust.TextOrientation != "sideways" {
+		t.Errorf("custom TextOrientation = %q, want sideways", sCust.TextOrientation)
+	}
+	if sCust.FontVariantNumeric != "lining-nums" {
+		t.Errorf("custom FontVariantNumeric = %q, want lining-nums", sCust.FontVariantNumeric)
+	}
+}
