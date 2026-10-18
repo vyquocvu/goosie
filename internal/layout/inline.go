@@ -656,10 +656,28 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			words = splitWords(text)
 		}
 		if !nowrap {
-			words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
+			if k.Style.WordBreak == "break-all" {
+				var charWords []string
+				for _, w := range words {
+					if w == " " || w == "\n" {
+						charWords = append(charWords, w)
+					} else {
+						for _, r := range w {
+							charWords = append(charWords, string(r))
+						}
+					}
+				}
+				words = charWords
+			} else {
+				words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
+			}
 		}
 		var firstWordID ObjectID
 		var lastWordID ObjectID
+		tabSpaces := int(k.Style.TabSize)
+		if tabSpaces <= 0 {
+			tabSpaces = 8
+		}
 		for _, word := range words {
 			// Newline: force line break, don't add as a run
 			if word == "\n" {
@@ -676,6 +694,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			wordW := measureWord(word, fontSize, a.Metrics, slot, letterSpacing)
 			if word == " " {
 				wordW += wordSpacing
+			} else if word == "\t" {
+				singleSpaceW := measureWord(" ", fontSize, a.Metrics, slot, letterSpacing) + wordSpacing
+				wordW = float32(tabSpaces) * singleSpaceW
 			}
 			// A space at the start of a line is collapsible whitespace that
 			// has nowhere to separate anything: drop it rather than indenting

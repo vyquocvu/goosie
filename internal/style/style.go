@@ -571,6 +571,11 @@ type ComputedStyle struct {
 	// CSS Overscroll Behavior Module Level 1
 	OverscrollBehaviorX string // "auto", "contain", "none". Default "auto"
 	OverscrollBehaviorY string // "auto", "contain", "none". Default "auto"
+
+	// CSS Text Module Level 3 & 4
+	WordBreak string  // "normal", "break-all", "keep-all", "break-word". Default "normal"
+	Hyphens   string  // "none", "manual", "auto". Default "manual"
+	TabSize   float32 // number of spaces or px length. Default 8
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -700,6 +705,9 @@ func DefaultStyle() ComputedStyle {
 		CaretColor:             css.Color{}, // auto: resolves to currentColor
 		OverscrollBehaviorX:    "auto",
 		OverscrollBehaviorY:    "auto",
+		WordBreak:              "normal",
+		Hyphens:                "manual",
+		TabSize:                8,
 	}
 }
 
@@ -2325,6 +2333,15 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	if parent.CaretColor.A > 0 {
 		cs.CaretColor = parent.CaretColor
 	}
+	if parent.WordBreak != "" {
+		cs.WordBreak = parent.WordBreak
+	}
+	if parent.Hyphens != "" {
+		cs.Hyphens = parent.Hyphens
+	}
+	if parent.TabSize > 0 {
+		cs.TabSize = parent.TabSize
+	}
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3381,6 +3398,34 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		switch v {
 		case "auto", "contain", "none":
 			cs.OverscrollBehaviorY = v
+		}
+
+	case "word-break":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "normal", "break-all", "keep-all", "break-word":
+			cs.WordBreak = v
+		case "initial", "unset":
+			cs.WordBreak = "normal"
+		}
+
+	case "hyphens", "-webkit-hyphens":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "none", "manual", "auto":
+			cs.Hyphens = v
+		case "initial", "unset":
+			cs.Hyphens = "manual"
+		}
+
+	case "tab-size":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "initial" || v == "unset" {
+			cs.TabSize = 8
+		} else if parsed.Type == css.ValueNumber && parsed.Num >= 0 {
+			cs.TabSize = float32(parsed.Num)
+		} else if parsed.Type == css.ValueLength {
+			cs.TabSize = resolveLengthEm(parsed, 8, cs.FontSize, cs.rootFontSize)
 		}
 
 	case "vertical-align":

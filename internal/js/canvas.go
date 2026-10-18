@@ -391,6 +391,34 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
+	_ = obj.Set("clip", func(call goja.FunctionCall) goja.Value {
+		ctx.mu.Lock()
+		defer ctx.mu.Unlock()
+		rule := "nonzero"
+		args := []interface{}{}
+		if len(call.Arguments) > 0 {
+			if pathObj, ok := call.Arguments[0].(*goja.Object); ok {
+				if pOpsVal := pathObj.Get("__path_ops__"); pOpsVal != nil && !goja.IsUndefined(pOpsVal) {
+					if fn, ok := goja.AssertFunction(pOpsVal); ok {
+						if res, err := fn(pathObj); err == nil {
+							if pOps, ok := res.Export().([]canvasDrawOp); ok {
+								ctx.ops = append(ctx.ops, pOps...)
+							}
+						}
+					}
+				}
+				if len(call.Arguments) > 1 {
+					rule = call.Arguments[1].String()
+				}
+			} else {
+				rule = call.Arguments[0].String()
+			}
+		}
+		args = append(args, rule)
+		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "clip", Args: args})
+		return goja.Undefined()
+	})
+
 	// Text methods
 	_ = obj.Set("fillText", func(call goja.FunctionCall) goja.Value {
 		text := ""
@@ -904,6 +932,34 @@ func (r *Runtime) setupCanvas() {
 			ctx.mu.Lock()
 			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "stroke"})
 			ctx.mu.Unlock()
+			return goja.Undefined()
+		})
+
+		_ = obj.Set("clip", func(call goja.FunctionCall) goja.Value {
+			ctx.mu.Lock()
+			defer ctx.mu.Unlock()
+			rule := "nonzero"
+			args := []interface{}{}
+			if len(call.Arguments) > 0 {
+				if pathObj, ok := call.Arguments[0].(*goja.Object); ok {
+					if pOpsVal := pathObj.Get("__path_ops__"); pOpsVal != nil && !goja.IsUndefined(pOpsVal) {
+						if fn, ok := goja.AssertFunction(pOpsVal); ok {
+							if res, err := fn(pathObj); err == nil {
+								if pOps, ok := res.Export().([]canvasDrawOp); ok {
+									ctx.ops = append(ctx.ops, pOps...)
+								}
+							}
+						}
+					}
+					if len(call.Arguments) > 1 {
+						rule = call.Arguments[1].String()
+					}
+				} else {
+					rule = call.Arguments[0].String()
+				}
+			}
+			args = append(args, rule)
+			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "clip", Args: args})
 			return goja.Undefined()
 		})
 
