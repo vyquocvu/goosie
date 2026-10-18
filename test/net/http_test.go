@@ -606,3 +606,55 @@ func TestClientErrorsOmitQuerySecrets(t *testing.T) {
 		t.Fatalf("client error = %v, want the host kept for diagnosis", err)
 	}
 }
+
+func TestNetworkLogRecording(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello network log"))
+	}))
+	defer ts.Close()
+
+	client := transport.DefaultClient()
+	defer client.Close()
+
+	nl := client.NetworkLog()
+	if nl == nil {
+		t.Fatal("expected non-nil NetworkLog from DefaultClient()")
+	}
+	nl.Clear()
+
+	resp, err := client.Get(context.Background(), ts.URL+"/test-path")
+	if err != nil {
+		t.Fatalf("client.Get: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status code = %d, want 200", resp.StatusCode)
+	}
+
+	traces := nl.List()
+	if len(traces) != 1 {
+		t.Fatalf("expected 1 trace, got %d", len(traces))
+	}
+	tr := traces[0]
+	if tr.Method != "GET" {
+		t.Errorf("Method = %q, want GET", tr.Method)
+	}
+	if tr.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", tr.StatusCode)
+	}
+	if !strings.Contains(tr.URL, "/test-path") {
+		t.Errorf("URL = %q, want containing /test-path", tr.URL)
+	}
+	if tr.Bytes != len("hello network log") {
+		t.Errorf("Bytes = %d, want %d", tr.Bytes, len("hello network log"))
+	}
+	if tr.Duration < 0 {
+		t.Errorf("Duration = %v, want >= 0", tr.Duration)
+	}
+
+	nl.Clear()
+	if len(nl.List()) != 0 {
+		t.Errorf("expected empty traces after Clear(), got %d", len(nl.List()))
+	}
+}

@@ -58,11 +58,19 @@ type chromeWindow struct {
 	onContextMenuAction func(action, data string)
 	onPrintPDF          func()
 
+	// Full screen mode & sizing
+	fullscreen          bool
+	lastWinW            int32
+	lastWinH            int32
+	onFullscreenChanged func(fullscreen bool)
+	onDeviceEmulation   func()
+
 	// pressTab/pressX/pressing track a press that may become a tab drag.
 	// Pump-thread only, like everything else in intercept.
 	pressTab uint64
 	pressX   int32
 	pressing bool
+
 	// tickInterval paces the onTick hook (the host's JS pump); zero disables
 	// it, which keeps every literal construction (tests especially) exactly
 	// as before.
@@ -122,6 +130,9 @@ func (cw *chromeWindow) sc() int32 {
 }
 
 func (cw *chromeWindow) chromeHeight() int32 {
+	if cw.fullscreen {
+		return 0
+	}
 	h := int32(totalChromeHeight)
 	if cw.showBookmarksBar {
 		h += bookmarksBarHeight
@@ -131,6 +142,25 @@ func (cw *chromeWindow) chromeHeight() int32 {
 
 func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	chromeH := cw.chromeHeight()
+	if cw.fullscreen {
+		if cw.outBitmap == nil || cw.outBitmap.W != buf.W || cw.outBitmap.H != buf.H {
+			cw.outBitmap = frame.NewBitmap(buf.W, buf.H)
+		}
+		cw.lastWinW = int32(buf.W)
+		cw.lastWinH = int32(buf.H)
+		copy(cw.outBitmap.RGBA, buf.RGBA)
+		merged := damage
+		if cw.contextMenu != nil && cw.contextMenu.Visible {
+			cw.contextMenu.Draw(cw.outBitmap, cw.fonts, cw.sc())
+			mRect := cw.contextMenu.Rect()
+			if !mRect.Empty() {
+				merged = append(make([]frame.Rect, 0, len(damage)+1), damage...)
+				merged = append(merged, mRect)
+			}
+		}
+		return cw.Window.Present(cw.outBitmap, merged)
+	}
+
 	if cw.chromeBitmap == nil || cw.chromeBitmap.W != buf.W || int32(cw.chromeBitmap.H) != chromeH {
 		cw.chromeBitmap = frame.NewBitmap(buf.W, int(chromeH))
 	}
@@ -160,11 +190,14 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	if cw.outBitmap == nil || int32(cw.outBitmap.W) != int32(buf.W) || int32(cw.outBitmap.H) != outH {
 		cw.outBitmap = frame.NewBitmap(buf.W, int(outH))
 	}
+	cw.lastWinW = int32(buf.W)
+	cw.lastWinH = outH
 	out := cw.outBitmap
 
 	for y := int32(0); y < chromeH; y++ {
 		copy(out.RGBA[int(y)*out.Stride:int(y)*out.Stride+out.Stride], cw.chromeBitmap.RGBA[int(y)*cw.chromeBitmap.Stride:int(y)*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
 	}
+
 	for y := int32(0); y < int32(buf.H); y++ {
 		oy := int(y+chromeH) * out.Stride
 		sy := int(y) * buf.Stride
@@ -284,85 +317,87 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if ev.Action == surface.PointerMotion && ev.Button == surface.ButtonNone {
 			cw.updateHoverCursor(ev.Pos, cw.chromeHeight())
 		}
-		if ev.Action == surface.PointerRelease {
-			if _, _, dragging := cw.tabMgr.Dragging(); dragging {
-				if ev.Button == surface.ButtonRight {
-					cw.tabMgr.EndDrag()
-				} else {
-					cw.handleTabBarRelease(ev.Pos)
-				}
-				return true
-			}
-		}
-		if ev.Pos.Y < tabH {
-			switch {
-			case ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft:
-				cw.handleTabBarPress(ev.Pos)
-				return true
-			case ev.Action == surface.PointerMotion && ev.Button == surface.ButtonLeft:
-				cw.handleTabBarDrag(ev.Pos)
-				return true
-			default:
-				return true
-			}
-		}
-		toolbarY := ev.Pos.Y - tabH
-		if toolbarY >= 0 && toolbarY < toolH {
-			// Every phase reaches the toolbar so a press can start a drag
-			// selection, motion extends it, and release ends it. Non-left
-			// presses are ignored inside; hover motion is a no-op there.
-			adjusted := ev.Pos
-			adjusted.Y = toolbarY
-			cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
-			if cw.toolbar.GetFocus() == toolbar.FocusAddress {
-				cw.SetIME(false)
-			}
-			return true
-		}
-		if cw.toolbar != nil && cw.toolbar.HasSuggestions() {
-			sugRect := cw.toolbar.SuggestionsRect(cw.chromeHeight())
-			if !sugRect.Empty() && ev.Pos.X >= sugRect.X0 && ev.Pos.X < sugRect.X1 && ev.Pos.Y >= sugRect.Y0 && ev.Pos.Y < sugRect.Y1 {
-				if ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft {
-					if sug, ok := cw.toolbar.HitSuggestion(ev.Pos, cw.chromeHeight()); ok {
-						if cw.onLinkClick != nil {
-							cw.onLinkClick(sug.URL)
-						}
-						return true
+		if !cw.fullscreen {
+			if ev.Action == surface.PointerRelease {
+				if _, _, dragging := cw.tabMgr.Dragging(); dragging {
+					if ev.Button == surface.ButtonRight {
+						cw.tabMgr.EndDrag()
+					} else {
+						cw.handleTabBarRelease(ev.Pos)
 					}
-				}
-				if ev.Action == surface.PointerMotion {
-					cw.toolbar.HoverSuggestion(ev.Pos, cw.chromeHeight())
 					return true
 				}
 			}
-		}
-		if cw.showBookmarksBar && cw.bookmarks != nil {
-			barY := int32(totalChromeHeight) * cw.sc()
-			barH := int32(bookmarksBarHeight) * cw.sc()
-			if ev.Pos.Y >= barY && ev.Pos.Y < barY+barH {
-				if ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft {
-					if entry, ok := cw.hitBookmark(ev.Pos); ok {
-						if cw.onLinkClick != nil {
-							cw.onLinkClick(entry.URL)
-						}
-						return true
-					}
-				}
-				if ev.Action == surface.PointerMotion {
-					cw.updateBookmarkHover(ev.Pos)
+			if ev.Pos.Y < tabH {
+				switch {
+				case ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft:
+					cw.handleTabBarPress(ev.Pos)
+					return true
+				case ev.Action == surface.PointerMotion && ev.Button == surface.ButtonLeft:
+					cw.handleTabBarDrag(ev.Pos)
+					return true
+				default:
 					return true
 				}
-				return true
 			}
-		}
-		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
-			// Presses and releases outside defocus the bar; motion extends
-			// an active drag so it clamps to the nearer end like a normal
-			// input instead of freezing at the bar's edge.
-			if ev.Action == surface.PointerPress || ev.Action == surface.PointerRelease || ev.Action == surface.PointerMotion {
+			toolbarY := ev.Pos.Y - tabH
+			if toolbarY >= 0 && toolbarY < toolH {
+				// Every phase reaches the toolbar so a press can start a drag
+				// selection, motion extends it, and release ends it. Non-left
+				// presses are ignored inside; hover motion is a no-op there.
 				adjusted := ev.Pos
 				adjusted.Y = toolbarY
 				cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
+				if cw.toolbar.GetFocus() == toolbar.FocusAddress {
+					cw.SetIME(false)
+				}
+				return true
+			}
+			if cw.toolbar != nil && cw.toolbar.HasSuggestions() {
+				sugRect := cw.toolbar.SuggestionsRect(cw.chromeHeight())
+				if !sugRect.Empty() && ev.Pos.X >= sugRect.X0 && ev.Pos.X < sugRect.X1 && ev.Pos.Y >= sugRect.Y0 && ev.Pos.Y < sugRect.Y1 {
+					if ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft {
+						if sug, ok := cw.toolbar.HitSuggestion(ev.Pos, cw.chromeHeight()); ok {
+							if cw.onLinkClick != nil {
+								cw.onLinkClick(sug.URL)
+							}
+							return true
+						}
+					}
+					if ev.Action == surface.PointerMotion {
+						cw.toolbar.HoverSuggestion(ev.Pos, cw.chromeHeight())
+						return true
+					}
+				}
+			}
+			if cw.showBookmarksBar && cw.bookmarks != nil {
+				barY := int32(totalChromeHeight) * cw.sc()
+				barH := int32(bookmarksBarHeight) * cw.sc()
+				if ev.Pos.Y >= barY && ev.Pos.Y < barY+barH {
+					if ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft {
+						if entry, ok := cw.hitBookmark(ev.Pos); ok {
+							if cw.onLinkClick != nil {
+								cw.onLinkClick(entry.URL)
+							}
+							return true
+						}
+					}
+					if ev.Action == surface.PointerMotion {
+						cw.updateBookmarkHover(ev.Pos)
+						return true
+					}
+					return true
+				}
+			}
+			if cw.toolbar.GetFocus() == toolbar.FocusAddress {
+				// Presses and releases outside defocus the bar; motion extends
+				// an active drag so it clamps to the nearer end like a normal
+				// input instead of freezing at the bar's edge.
+				if ev.Action == surface.PointerPress || ev.Action == surface.PointerRelease || ev.Action == surface.PointerMotion {
+					adjusted := ev.Pos
+					adjusted.Y = toolbarY
+					cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
+				}
 			}
 		}
 		// Link and focus handling is a press concern; a drag's motion and
@@ -395,6 +430,14 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				return true
 			}
 		}
+		if cw.fullscreen && ev.Key == 0x1B { // Escape exits fullscreen
+			cw.toggleFullscreen()
+			return true
+		}
+		if ev.Key == 0xF70E || ev.Key == 0xFFC8 { // F11 toggles fullscreen
+			cw.toggleFullscreen()
+			return true
+		}
 		// Address-bar edit shortcuts win over browser shortcuts while the
 		// bar is focused: Cmd+C there copies the URL selection, it must not
 		// fall through to the content copy below.
@@ -413,6 +456,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			return true
 		}
 		return false
+
 	case surface.EvIME:
 		if cw.onIME != nil {
 			return cw.onIME(ev)
@@ -435,8 +479,11 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvResize:
+		cw.lastWinW = ev.Size.W
+		cw.lastWinH = ev.Size.H
 		cw.toolbar.SetBounds(ev.Size.W)
 		contentDevH := ev.Size.H - cw.chromeHeight()
+
 		if contentDevH < 0 {
 			contentDevH = 0
 		}
@@ -650,10 +697,20 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 		cw.toggleBookmarksBar()
 		return true
 	case key == 'f' || key == 'F':
+		if shift {
+			cw.toggleFullscreen()
+			return true
+		}
 		if cw.toolbar != nil {
 			cw.toolbar.OpenFind()
 			return true
 		}
+	case (key == 'm' || key == 'M') && shift:
+		if cw.onDeviceEmulation != nil {
+			cw.onDeviceEmulation()
+			return true
+		}
+
 	case key == 'd' || key == 'D':
 		if shift {
 			if cw.onDuplicateTab != nil {
@@ -863,22 +920,62 @@ func (cw *chromeWindow) measureTextWidth(text string, size int32) int32 {
 	return (penFixed + 32) >> 6
 }
 
-func (cw *chromeWindow) toggleBookmarksBar() {
-	cw.showBookmarksBar = !cw.showBookmarksBar
-	if cw.chromeBitmap != nil && cw.Window != nil {
-		contentDevH := int32(cw.outBitmap.H) - cw.chromeHeight()
-		if contentDevH < 0 {
-			contentDevH = 0
-		}
-		sc := int(cw.sc())
-		if cw.onResize != nil {
-			cw.onResize(int(cw.chromeBitmap.W)/sc, int(contentDevH)/sc)
-		}
+func (cw *chromeWindow) notifyContentResize() {
+	if cw.Window == nil {
+		return
+	}
+	var winW, winH int32
+	if cw.lastWinW > 0 && cw.lastWinH > 0 {
+		winW = cw.lastWinW
+		winH = cw.lastWinH
+	} else if cw.outBitmap != nil {
+		winW = int32(cw.outBitmap.W)
+		winH = int32(cw.outBitmap.H)
+	} else if cw.chromeBitmap != nil {
+		winW = int32(cw.chromeBitmap.W)
+		winH = int32(cw.chromeBitmap.W) * 3 / 4
+	} else {
+		winW = 800 * cw.sc()
+		winH = 600 * cw.sc()
+	}
+
+	contentDevH := winH - cw.chromeHeight()
+	if contentDevH < 0 {
+		contentDevH = 0
+	}
+	sc := int(cw.sc())
+	if cw.onResize != nil {
+		cw.onResize(int(winW)/sc, int(contentDevH)/sc)
+	}
+	if cw.events != nil {
 		cw.events <- surface.Event{
 			Kind:  surface.EvResize,
-			Size:  frame.Size{W: int32(cw.chromeBitmap.W), H: contentDevH},
+			Size:  frame.Size{W: winW, H: contentDevH},
 			Scale: float32(cw.sc()),
 		}
+	}
+}
+
+func (cw *chromeWindow) toggleBookmarksBar() {
+	cw.showBookmarksBar = !cw.showBookmarksBar
+	cw.notifyContentResize()
+}
+
+func (cw *chromeWindow) toggleFullscreen() {
+	cw.fullscreen = !cw.fullscreen
+	cw.notifyContentResize()
+	if cw.onFullscreenChanged != nil {
+		cw.onFullscreenChanged(cw.fullscreen)
+	}
+}
+
+func (cw *chromeWindow) IsFullscreen() bool {
+	return cw.fullscreen
+}
+
+func (cw *chromeWindow) SetFullscreen(fs bool) {
+	if cw.fullscreen != fs {
+		cw.toggleFullscreen()
 	}
 }
 

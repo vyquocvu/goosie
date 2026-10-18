@@ -59,9 +59,10 @@ func (c *recordingClient) Post(ctx context.Context, u, contentType string, body 
 	return nil, fmt.Errorf("recordingClient: Post(%s) is not part of a page load", u)
 }
 
-func (c *recordingClient) SetTimeout(d time.Duration) {}
-func (c *recordingClient) Close() error               { return nil }
-func (c *recordingClient) Jar() *net.CookieJar        { return nil }
+func (c *recordingClient) SetTimeout(d time.Duration)  {}
+func (c *recordingClient) Close() error                { return nil }
+func (c *recordingClient) Jar() *net.CookieJar         { return nil }
+func (c *recordingClient) NetworkLog() *net.NetworkLog { return nil }
 
 // docWithSheet is the smallest document whose load fetches a second URL: the
 // linked sheet is the subresource, and its href is relative, so the engine - not

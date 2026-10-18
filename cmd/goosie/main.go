@@ -351,6 +351,7 @@ type framePath struct {
 	restoredActiveURL string
 	storage           *js.OriginStorageRegistry
 	incognitoStorage  *js.OriginStorageRegistry
+	emulationPreset   *DevicePreset
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -1131,7 +1132,12 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		return
 	}
 
-	if err := tab.Session().Reflow(float32(contentW)); err != nil {
+	reflowW := float32(contentW)
+	if f.emulationPreset != nil {
+		reflowW = float32(f.emulationPreset.Width)
+	}
+
+	if err := tab.Session().Reflow(reflowW); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		return
 	}
@@ -1228,7 +1234,11 @@ func dirtyOrFull(dirty, extent frame.Rect) frame.Rect {
 // version converges by construction instead.
 func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	if f.emulationPreset != nil {
+		effectiveDPR = f.emulationPreset.DPR * float32(f.zoom)
+	}
 	list, err := tab.Session().PaintChecked(effectiveDPR)
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: paint:", err)
 		return
@@ -2432,7 +2442,9 @@ func (f *framePath) openWindow() error {
 			cw.onContextMenu = f.handleContextMenu
 			cw.onContextMenuAction = f.handleContextMenuAction
 			cw.onPrintPDF = f.printActiveTabToPDF
+			cw.onDeviceEmulation = func() { f.cycleDeviceEmulation() }
 		}
+
 	} else {
 		f.window = w
 	}

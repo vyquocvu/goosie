@@ -15,6 +15,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
@@ -543,9 +544,21 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	u, _ := url.Parse(rawURL)
 	targetIDStr := ""
 	evalExpr := ""
+	action := ""
+	device := ""
 	if u != nil {
 		targetIDStr = u.Query().Get("tab")
 		evalExpr = u.Query().Get("eval")
+		action = u.Query().Get("action")
+		device = u.Query().Get("device")
+	}
+
+	if action == "emulate" {
+		if device == "reset" || device == "" {
+			f.SetDeviceEmulation(nil)
+		} else if preset := DevicePresetByID(device); preset != nil {
+			f.SetDeviceEmulation(preset)
+		}
 	}
 
 	var targetTab *tabs.Tab
@@ -675,6 +688,75 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		b.WriteString(`<table><thead><tr><th>#</th><th>Origin</th><th>Rules</th></tr></thead><tbody>`)
 		for i, s := range sheets {
 			b.WriteString(fmt.Sprintf(`<tr><td>%d</td><td>%s</td><td>%d rules</td></tr>`, i+1, "Author Stylesheet", len(s.Rules)))
+		}
+		b.WriteString(`</tbody></table>`)
+	}
+	b.WriteString(`</div>`)
+
+	// Device Emulation Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Device Emulation (Cmd+Shift+M)</h2>`)
+	b.WriteString(`<p style="color: #5f6368;">Test responsive layouts across mobile and tablet viewports.</p>`)
+	b.WriteString(`<div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">`)
+	activeDevID := ""
+	if f.emulationPreset != nil {
+		activeDevID = f.emulationPreset.ID
+	}
+	resetClass := "btn-action secondary"
+	if activeDevID == "" {
+		resetClass = "btn-action"
+	}
+	b.WriteString(fmt.Sprintf(`<a class="%s" href="goosie://inspect?action=emulate&device=reset">Desktop (Responsive)</a>`, resetClass))
+	for _, p := range DevicePresets {
+		btnClass := "btn-action secondary"
+		if activeDevID == p.ID {
+			btnClass = "btn-action"
+		}
+		b.WriteString(fmt.Sprintf(`<a class="%s" href="goosie://inspect?action=emulate&device=%s">%s (%d &times; %d @ %.1fx)</a>`,
+			btnClass, url.QueryEscape(p.ID), html.EscapeString(p.Name), p.Width, p.Height, p.DPR))
+	}
+	b.WriteString(`</div>`)
+	if f.emulationPreset != nil {
+		b.WriteString(fmt.Sprintf(`<p style="margin-top: 10px; font-size: 13px; color: #1a73e8;"><b>Active Emulation:</b> %s (%d &times; %d px, DPR %.2f)</p>`,
+			html.EscapeString(f.emulationPreset.Name), f.emulationPreset.Width, f.emulationPreset.Height, f.emulationPreset.DPR))
+	} else {
+		b.WriteString(`<p style="margin-top: 10px; font-size: 13px; color: #5f6368;"><b>Active Emulation:</b> Desktop (Window Native)</p>`)
+	}
+	b.WriteString(`</div>`)
+
+	// Network Activity Log Card
+	b.WriteString(`<div class="card">`)
+
+	b.WriteString(`<h2>Network Activity</h2>`)
+	var traces []net.RequestTrace
+	if f.client != nil && f.client.NetworkLog() != nil {
+		traces = f.client.NetworkLog().List()
+	}
+	if len(traces) == 0 {
+		b.WriteString(`<p style="color: #5f6368;">No HTTP requests recorded in session yet.</p>`)
+	} else {
+		b.WriteString(`<table><thead><tr><th>Status</th><th>Method</th><th>URL</th><th>Type</th><th>Size</th><th>Time</th></tr></thead><tbody>`)
+		for i := len(traces) - 1; i >= 0 && i >= len(traces)-50; i-- {
+			tr := traces[i]
+			statusBadge := fmt.Sprintf(`<span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; background-color: #e6f4ea; color: #137333;">%d</span>`, tr.StatusCode)
+			if tr.Blocked {
+				statusBadge = `<span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; background-color: #fce8e6; color: #c5221f;">BLOCKED</span>`
+			} else if tr.StatusCode >= 400 {
+				statusBadge = fmt.Sprintf(`<span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; background-color: #fce8e6; color: #c5221f;">%d</span>`, tr.StatusCode)
+			} else if tr.StatusCode == 304 {
+				statusBadge = `<span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px; background-color: #e8f0fe; color: #1a73e8;">304</span>`
+			}
+			sizeStr := fmt.Sprintf("%.1f KB", float64(tr.Bytes)/1024.0)
+			if tr.Bytes < 1024 {
+				sizeStr = fmt.Sprintf("%d B", tr.Bytes)
+			}
+			timeStr := fmt.Sprintf("%.1f ms", float64(tr.Duration.Microseconds())/1000.0)
+			shortURL := tr.URL
+			if len(shortURL) > 50 {
+				shortURL = shortURL[:47] + "..."
+			}
+			b.WriteString(fmt.Sprintf(`<tr><td>%s</td><td><b>%s</b></td><td title="%s" style="word-break: break-all; font-family: monospace; font-size: 12px;">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+				statusBadge, html.EscapeString(tr.Method), html.EscapeString(tr.URL), html.EscapeString(shortURL), html.EscapeString(tr.ContentType), sizeStr, timeStr))
 		}
 		b.WriteString(`</tbody></table>`)
 	}

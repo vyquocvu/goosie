@@ -43,6 +43,61 @@ type HTTP interface {
 	SetTimeout(d time.Duration)
 	Close() error
 	Jar() *CookieJar
+	NetworkLog() *NetworkLog
+}
+
+// RequestTrace represents one recorded HTTP network transaction.
+type RequestTrace struct {
+	URL           string        `json:"url"`
+	Method        string        `json:"method"`
+	StatusCode    int           `json:"statusCode"`
+	ContentType   string        `json:"contentType"`
+	Bytes         int           `json:"bytes"`
+	Duration      time.Duration `json:"duration"`
+	Timestamp     time.Time     `json:"timestamp"`
+	Blocked       bool          `json:"blocked,omitempty"`
+	BlockedReason string        `json:"blockedReason,omitempty"`
+}
+
+// NetworkLog records recent network transactions in a thread-safe circular buffer.
+type NetworkLog struct {
+	mu      sync.RWMutex
+	traces  []RequestTrace
+	maxSize int
+}
+
+// NewNetworkLog creates a new network log capped at maxSize entries.
+func NewNetworkLog(maxSize int) *NetworkLog {
+	if maxSize <= 0 {
+		maxSize = 200
+	}
+	return &NetworkLog{maxSize: maxSize}
+}
+
+// Record appends a request trace to the log.
+func (nl *NetworkLog) Record(t RequestTrace) {
+	nl.mu.Lock()
+	defer nl.mu.Unlock()
+	if len(nl.traces) >= nl.maxSize {
+		nl.traces = nl.traces[1:]
+	}
+	nl.traces = append(nl.traces, t)
+}
+
+// List returns a copy of recorded traces in chronological order.
+func (nl *NetworkLog) List() []RequestTrace {
+	nl.mu.RLock()
+	defer nl.mu.RUnlock()
+	out := make([]RequestTrace, len(nl.traces))
+	copy(out, nl.traces)
+	return out
+}
+
+// Clear resets the recorded traces.
+func (nl *NetworkLog) Clear() {
+	nl.mu.Lock()
+	defer nl.mu.Unlock()
+	nl.traces = nil
 }
 
 // Response is a simplified HTTP response. Repeated header values are joined
@@ -327,6 +382,7 @@ func DefaultClient() HTTP {
 		jar:    NewCookieJar(),
 		cache:  newResponseCache(),
 		filter: NewFilterEngine(),
+		netLog: NewNetworkLog(200),
 	}
 }
 
@@ -342,6 +398,7 @@ func DefaultPrivateClient() HTTP {
 		jar:     NewCookieJar(),
 		cache:   newResponseCache(),
 		filter:  NewFilterEngine(),
+		netLog:  NewNetworkLog(200),
 		private: true,
 	}
 }
@@ -358,8 +415,10 @@ func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 			Transport:     t,
 			CheckRedirect: checkRedirect,
 		},
+		jar:    NewCookieJar(),
 		cache:  newResponseCache(),
 		filter: NewFilterEngine(),
+		netLog: NewNetworkLog(200),
 	}
 }
 
@@ -398,6 +457,7 @@ type httpClient struct {
 	jar         *CookieJar
 	cache       *responseCache
 	filter      *FilterEngine
+	netLog      *NetworkLog
 	private     bool
 	persistPath string
 	// hsts remembers Strict-Transport-Security max-age per exact host for
@@ -406,6 +466,11 @@ type httpClient struct {
 	// own entries rather than inheriting trust they never earned.
 	hstsMu sync.Mutex
 	hsts   map[string]time.Time
+}
+
+// NetworkLog returns the client's network transaction log.
+func (c *httpClient) NetworkLog() *NetworkLog {
+	return c.netLog
 }
 
 // Jar returns the client's cookie jar.
@@ -491,6 +556,7 @@ func (c *httpClient) Post(ctx context.Context, raw, contentType string, body io.
 }
 
 func (c *httpClient) request(ctx context.Context, method, raw, contentType string, body io.Reader) (*Response, error) {
+	start := time.Now()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -506,15 +572,47 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 		if method != http.MethodGet {
 			return nil, errors.New("net: only GET supports file URLs")
 		}
-		return readFileURL(ctx, u)
+		res, err := readFileURL(ctx, u)
+		if c.netLog != nil && err == nil {
+			c.netLog.Record(RequestTrace{
+				URL:         normalized,
+				Method:      method,
+				StatusCode:  200,
+				ContentType: res.Headers["Content-Type"],
+				Bytes:       len(res.Body),
+				Duration:    time.Since(start),
+				Timestamp:   start,
+			})
+		}
+		return res, err
 	}
 	if c.filter != nil && c.filter.IsEnabled() {
 		if blocked, reason := c.filter.ShouldBlock(normalized); blocked {
+			if c.netLog != nil {
+				c.netLog.Record(RequestTrace{
+					URL:           normalized,
+					Method:        method,
+					Blocked:       true,
+					BlockedReason: reason,
+					Timestamp:     start,
+				})
+			}
 			return nil, fmt.Errorf("%w: %s (%s)", ErrBlockedByFilter, RedactURL(normalized), reason)
 		}
 	}
 	if method == http.MethodGet && c.cache != nil {
 		if resp, ok := c.cache.get(normalized, time.Now()); ok {
+			if c.netLog != nil {
+				c.netLog.Record(RequestTrace{
+					URL:         normalized,
+					Method:      method,
+					StatusCode:  304,
+					ContentType: resp.Headers["Content-Type"],
+					Bytes:       len(resp.Body),
+					Duration:    time.Since(start),
+					Timestamp:   start,
+				})
+			}
 			return resp, nil
 		}
 	}
@@ -566,6 +664,17 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	}
 	if method == http.MethodGet && c.cache != nil {
 		c.cache.store(normalized, out, time.Now())
+	}
+	if c.netLog != nil {
+		c.netLog.Record(RequestTrace{
+			URL:         normalized,
+			Method:      method,
+			StatusCode:  resp.StatusCode,
+			ContentType: resp.Header.Get("Content-Type"),
+			Bytes:       len(data),
+			Duration:    time.Since(start),
+			Timestamp:   start,
+		})
 	}
 	return out, nil
 }
