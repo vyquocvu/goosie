@@ -161,6 +161,12 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			if obj.Node != nil && obj.Node.Data == "audio" {
 				b.paintAudio(obj, opacity, clip)
 			}
+			if obj.Node != nil && obj.Node.Data == "progress" {
+				b.paintProgress(obj, rect, opacity)
+			}
+			if obj.Node != nil && obj.Node.Data == "meter" {
+				b.paintMeter(obj, rect, opacity)
+			}
 			// SVG shape elements paint through their own path.
 			if obj.Node != nil && obj.Node.Namespace == svgNamespace && isSVGShape(obj.Node.Data) {
 				b.paintSVGShape(obj, opacity)
@@ -2922,5 +2928,141 @@ func (b *Builder) applyTransform(obj *layout.Object, cmdStart int, bx0, by0, bx1
 		)
 		transformed := mat.TransformRect(lr)
 		cmds[i].Rect = transformed.ToDevice(b.scale)
+	}
+}
+
+func (b *Builder) paintProgress(obj *layout.Object, rect frame.Rect, opacity float32) {
+	if rect.Empty() || obj.Node == nil {
+		return
+	}
+	trackBg := frame.RGB(230, 230, 230)
+	borderColor := frame.RGB(204, 204, 204)
+	b.list.Append(DisplayCmd{
+		Kind:  CmdFill,
+		Rect:  rect,
+		Color: trackBg,
+	})
+	b.list.Append(DisplayCmd{
+		Kind: CmdBorder,
+		Rect: rect,
+		Border: BorderSpec{
+			Top:    SideSpec{Width: 1, Color: borderColor},
+			Right:  SideSpec{Width: 1, Color: borderColor},
+			Bottom: SideSpec{Width: 1, Color: borderColor},
+			Left:   SideSpec{Width: 1, Color: borderColor},
+		},
+	})
+	valStr := obj.Node.GetAttribute("value")
+	if valStr == "" {
+		return
+	}
+	val, errVal := strconv.ParseFloat(valStr, 64)
+	maxVal := 1.0
+	if maxStr := obj.Node.GetAttribute("max"); maxStr != "" {
+		if m, err := strconv.ParseFloat(maxStr, 64); err == nil && m > 0 {
+			maxVal = m
+		}
+	}
+	if errVal != nil || val < 0 {
+		val = 0
+	}
+	if val > maxVal {
+		val = maxVal
+	}
+	frac := float32(val / maxVal)
+	if frac > 0 {
+		fillW := int32(float32(rect.W()) * frac)
+		if fillW > rect.W() {
+			fillW = rect.W()
+		}
+		fillRect := frame.Rect4(rect.X0, rect.Y0, rect.X0+fillW, rect.Y1)
+		barColor := frame.RGB(0, 117, 255)
+		b.list.Append(DisplayCmd{
+			Kind:  CmdFill,
+			Rect:  fillRect,
+			Color: barColor,
+		})
+	}
+}
+
+func (b *Builder) paintMeter(obj *layout.Object, rect frame.Rect, opacity float32) {
+	if rect.Empty() || obj.Node == nil {
+		return
+	}
+	trackBg := frame.RGB(230, 230, 230)
+	borderColor := frame.RGB(204, 204, 204)
+	b.list.Append(DisplayCmd{
+		Kind:  CmdFill,
+		Rect:  rect,
+		Color: trackBg,
+	})
+	b.list.Append(DisplayCmd{
+		Kind: CmdBorder,
+		Rect: rect,
+		Border: BorderSpec{
+			Top:    SideSpec{Width: 1, Color: borderColor},
+			Right:  SideSpec{Width: 1, Color: borderColor},
+			Bottom: SideSpec{Width: 1, Color: borderColor},
+			Left:   SideSpec{Width: 1, Color: borderColor},
+		},
+	})
+
+	parseF := func(name string, def float64) float64 {
+		s := obj.Node.GetAttribute(name)
+		if s == "" {
+			return def
+		}
+		if v, err := strconv.ParseFloat(s, 64); err == nil {
+			return v
+		}
+		return def
+	}
+	minVal := parseF("min", 0)
+	maxVal := parseF("max", 1)
+	if maxVal <= minVal {
+		maxVal = minVal + 1
+	}
+	val := parseF("value", minVal)
+	if val < minVal {
+		val = minVal
+	}
+	if val > maxVal {
+		val = maxVal
+	}
+	low := parseF("low", minVal)
+	high := parseF("high", maxVal)
+	opt := parseF("optimum", (minVal+maxVal)/2)
+
+	meterColor := frame.RGB(40, 167, 69) // Green
+	if opt >= high {
+		if val < low {
+			meterColor = frame.RGB(220, 53, 69) // Red
+		} else if val < high {
+			meterColor = frame.RGB(255, 193, 7) // Yellow
+		}
+	} else if opt <= low {
+		if val > high {
+			meterColor = frame.RGB(220, 53, 69)
+		} else if val > low {
+			meterColor = frame.RGB(255, 193, 7)
+		}
+	} else {
+		if val < low || val > high {
+			meterColor = frame.RGB(255, 193, 7)
+		}
+	}
+
+	frac := float32((val - minVal) / (maxVal - minVal))
+	if frac > 0 {
+		fillW := int32(float32(rect.W()) * frac)
+		if fillW > rect.W() {
+			fillW = rect.W()
+		}
+		fillRect := frame.Rect4(rect.X0, rect.Y0, rect.X0+fillW, rect.Y1)
+		b.list.Append(DisplayCmd{
+			Kind:  CmdFill,
+			Rect:  fillRect,
+			Color: meterColor,
+		})
 	}
 }

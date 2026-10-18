@@ -409,7 +409,28 @@ func parseCondition(s string, i int) (Condition, int) {
 			for i < len(s) && isIdentChar(s[i]) {
 				i++
 			}
-			return Condition{Type: CondPseudoElement, Value: s[start:i]}, i
+			name := s[start:i]
+			arg := ""
+			if i < len(s) && s[i] == '(' {
+				i++
+				depth := 1
+				argStart := i
+				for i < len(s) && depth > 0 {
+					if s[i] == '(' {
+						depth++
+					} else if s[i] == ')' {
+						depth--
+					}
+					if depth > 0 {
+						i++
+					}
+				}
+				arg = s[argStart:i]
+				if i < len(s) {
+					i++
+				}
+			}
+			return Condition{Type: CondPseudoElement, Value: name, Pseudo: arg}, i
 		}
 		start := i
 		for i < len(s) && isIdentChar(s[i]) {

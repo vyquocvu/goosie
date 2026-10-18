@@ -483,3 +483,25 @@ func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.Computed
 
 	return id
 }
+
+// ViewTransitionRect represents the snapshot bounds of a view-transition-named box.
+type ViewTransitionRect struct {
+	Name           string
+	X0, Y0, X1, Y1 float32
+}
+
+// FindViewTransitions returns the bounds of all boxes that declare a non-none view-transition-name.
+func (a *Arena) FindViewTransitions() []ViewTransitionRect {
+	var result []ViewTransitionRect
+	for i := range a.Objects {
+		obj := &a.Objects[i]
+		if obj.Node != nil && obj.Node.Element() && obj.Style != nil && obj.Style.ViewTransitionName != "" && obj.Style.ViewTransitionName != "none" {
+			x0, y0, x1, y1 := obj.BorderRect()
+			result = append(result, ViewTransitionRect{
+				Name: obj.Style.ViewTransitionName,
+				X0:   x0, Y0: y0, X1: x1, Y1: y1,
+			})
+		}
+	}
+	return result
+}

@@ -184,3 +184,39 @@ func TestAccessibilitySearchLandmark(t *testing.T) {
 		t.Fatalf("found %d RoleSearch nodes, want 2 (one <search> and one role=search); tree: %+v", len(searchNodes), flat)
 	}
 }
+
+func TestProgressBarAndMeterAccessibility(t *testing.T) {
+	s := newFocusSession(t, `<html><body>
+<label for="p">Loading</label>
+<progress id="p" value="70" max="100"></progress>
+<label for="m">Disk</label>
+<meter id="m" value="0.6"></meter>
+</body></html>`)
+
+	tree := s.AccessibilityTree()
+	flat := axFlatten(tree)
+
+	var progNode, meterNode *ax.Node
+	for i := range flat {
+		if flat[i].Role == ax.RoleProgressBar {
+			progNode = &flat[i]
+		}
+		if flat[i].Role == ax.RoleMeter {
+			meterNode = &flat[i]
+		}
+	}
+
+	if progNode == nil {
+		t.Fatal("RoleProgressBar node not found in accessibility tree")
+	}
+	if progNode.Value != "70/100" {
+		t.Errorf("progNode.Value = %q, want 70/100", progNode.Value)
+	}
+
+	if meterNode == nil {
+		t.Fatal("RoleMeter node not found in accessibility tree")
+	}
+	if meterNode.Value != "0.6" {
+		t.Errorf("meterNode.Value = %q, want 0.6", meterNode.Value)
+	}
+}

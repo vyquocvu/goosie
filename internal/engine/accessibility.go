@@ -104,6 +104,22 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
 		}
 		return emit(ax.RoleSearch, label, "", ""), axBubble{}
+	case dom.AtomProgress:
+		if !visible {
+			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+		}
+		val := n.GetAttribute("value")
+		max := n.GetAttribute("max")
+		if max == "" {
+			max = "1"
+		}
+		return emit(ax.RoleProgressBar, label, val+"/"+max, ""), axBubble{}
+	case dom.AtomMeter:
+		if !visible {
+			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+		}
+		val := n.GetAttribute("value")
+		return emit(ax.RoleMeter, label, val, ""), axBubble{}
 	case dom.AtomA:
 		if href := n.GetAttribute("href"); href != "" && visible {
 			return emit(ax.RoleLink, label, "", href), axBubble{}

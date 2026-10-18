@@ -265,6 +265,10 @@ type ComputedStyle struct {
 	WidthAnchor            string
 	HeightAnchor           string
 
+	TextWrap           string
+	LineClamp          int
+	ViewTransitionName string
+
 	HasClip    bool
 	ClipTop    float32
 	ClipRight  float32
@@ -614,6 +618,9 @@ func DefaultStyle() ComputedStyle {
 		ContentVisibility:      "visible",
 		ContainIntrinsicWidth:  -1,
 		ContainIntrinsicHeight: -1,
+		TextWrap:               "wrap",
+		LineClamp:              0,
+		ViewTransitionName:     "none",
 	}
 }
 
@@ -733,6 +740,8 @@ legend { display: block; padding: 0 0.25em; }
 form { display: block; }
 label { display: inline; }
 select { display: inline; }
+progress { display: inline-block; width: 10em; height: 1em; vertical-align: -0.2em; }
+meter { display: inline-block; width: 5em; height: 1em; vertical-align: -0.2em; }
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
@@ -2388,6 +2397,25 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.AnchorName = strings.TrimSpace(value)
 	case "position-anchor":
 		cs.PositionAnchor = strings.TrimSpace(value)
+	case "text-wrap", "text-wrap-mode", "text-wrap-style":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "wrap" || val == "nowrap" || val == "balance" || val == "pretty" {
+			cs.TextWrap = val
+		}
+	case "line-clamp", "-webkit-line-clamp":
+		val := strings.TrimSpace(value)
+		if strings.EqualFold(val, "none") {
+			cs.LineClamp = 0
+		} else if n, err := strconv.Atoi(val); err == nil && n >= 0 {
+			cs.LineClamp = n
+		}
+	case "view-transition-name":
+		val := strings.TrimSpace(value)
+		if strings.EqualFold(val, "none") {
+			cs.ViewTransitionName = "none"
+		} else {
+			cs.ViewTransitionName = val
+		}
 	case "clip":
 		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
 			cs.HasClip = true

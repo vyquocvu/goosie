@@ -338,6 +338,19 @@ func inlineInto(a *Arena, id ObjectID) {
 			lines = append(lines, current)
 		}
 	}
+	if obj.Style != nil && obj.Style.TextWrap == "balance" && len(lines) >= 2 && len(lines) <= 10 {
+		lines = balanceLines(a, lines, contentW)
+	}
+	if obj.Style != nil && obj.Style.LineClamp > 0 && len(lines) > obj.Style.LineClamp {
+		clamp := obj.Style.LineClamp
+		for _, line := range lines[clamp:] {
+			for _, run := range line.runs {
+				rObj := a.Get(run.obj)
+				rObj.W, rObj.H = 0, 0
+			}
+		}
+		lines = lines[:clamp]
+	}
 	// Re-fetch obj: the Alloc calls in the text path may have reallocated the
 	// arena slice, so the pointer captured at function entry is stale.
 	obj = a.Get(id)
@@ -473,7 +486,8 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		wordSpacing := k.Style.WordSpacing
 		nowrap := k.Style.WhiteSpace == style.WhiteSpaceNowrap ||
 			k.Style.WhiteSpace == style.WhiteSpacePre ||
-			k.Style.WhiteSpace == style.WhiteSpacePrewrite
+			k.Style.WhiteSpace == style.WhiteSpacePrewrite ||
+			k.Style.TextWrap == "nowrap"
 		var words []string
 		if useMerged {
 			words = splitCollapsedWords(text)
@@ -607,6 +621,42 @@ func trimTrailingSpaces(a *Arena, lb *lineBox) {
 		lb.w -= last.w
 		lb.runs = lb.runs[:len(lb.runs)-1]
 	}
+}
+
+func balanceLines(a *Arena, lines []lineBox, contentW float32) []lineBox {
+	if len(lines) <= 1 || len(lines) > 10 || contentW <= 0 {
+		return lines
+	}
+	var allRuns []textRun
+	totalW := float32(0)
+	for _, l := range lines {
+		allRuns = append(allRuns, l.runs...)
+		totalW += l.w
+	}
+	targetW := totalW / float32(len(lines))
+	var newLines []lineBox
+	var cur lineBox
+	curH := lines[0].h
+	for i, r := range allRuns {
+		if cur.w > 0 && cur.w+r.w > targetW*1.15 && len(newLines) < len(lines)-1 {
+			trimTrailingSpaces(a, &cur)
+			newLines = append(newLines, cur)
+			cur = lineBox{h: curH}
+		}
+		cur.runs = append(cur.runs, r)
+		cur.w += r.w
+		if r.lineH > cur.h {
+			cur.h = r.lineH
+		}
+		if i == len(allRuns)-1 {
+			trimTrailingSpaces(a, &cur)
+			newLines = append(newLines, cur)
+		}
+	}
+	if len(newLines) == len(lines) {
+		return newLines
+	}
+	return lines
 }
 
 type textRun struct {
