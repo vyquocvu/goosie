@@ -281,6 +281,9 @@ type ComputedStyle struct {
 	OffsetDistance float32
 	OffsetRotate   string
 
+	ShapeOutside string
+	ShapeMargin  float32
+
 	HasClip    bool
 	ClipTop    float32
 	ClipRight  float32
@@ -643,6 +646,8 @@ func DefaultStyle() ComputedStyle {
 		OffsetPath:             "none",
 		OffsetDistance:         0,
 		OffsetRotate:           "auto",
+		ShapeOutside:           "none",
+		ShapeMargin:            0,
 	}
 }
 
@@ -768,6 +773,8 @@ datalist { display: none; }
 ruby { display: inline; }
 rt { display: inline-block; font-size: 50%; line-height: 1; vertical-align: super; }
 rp { display: none; }
+picture { display: inline; }
+source { display: none; }
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
@@ -859,7 +866,7 @@ func inViewport(d css.Declaration, vp Viewport) css.Declaration {
 	v := d.Parsed
 	if v.Type == css.ValueLength {
 		switch v.Unit {
-		case "vw", "vh", "vmin", "vmax", "svw", "svh", "dvw", "dvh", "lvw", "lvh":
+		case "vw", "vh", "vmin", "vmax", "svw", "svh", "dvw", "dvh", "lvw", "lvh", "vi", "vb", "svmin", "svmax", "dvmin", "dvmax", "lvmin", "lvmax":
 		default:
 			return d
 		}
@@ -2525,6 +2532,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 				}
 			}
 		}
+	case "shape-outside":
+		cs.ShapeOutside = strings.TrimSpace(value)
+	case "shape-margin":
+		cs.ShapeMargin = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "clip":
 		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
 			cs.HasClip = true

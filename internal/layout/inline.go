@@ -1,6 +1,8 @@
 package layout
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -15,6 +17,9 @@ import (
 // by their margins, the way block boxes do.
 type floatIntrusion struct {
 	x0, x1, y0, y1 float32
+	isLeft         bool
+	shapeOutside   string
+	shapeMargin    float32
 }
 
 // breakCtx carries float intrusions and the Y cursor for one inline
@@ -63,7 +68,18 @@ func collectFloatIntrusions(a *Arena, id ObjectID) []floatIntrusion {
 			if x1 <= x0 || y1 <= y0 {
 				continue
 			}
-			out = append(out, floatIntrusion{x0: x0, x1: x1, y0: y0, y1: y1})
+			fi := floatIntrusion{
+				x0:     x0,
+				x1:     x1,
+				y0:     y0,
+				y1:     y1,
+				isLeft: k.Style.Float == style.FloatLeft,
+			}
+			if k.Style.ShapeOutside != "" && k.Style.ShapeOutside != "none" {
+				fi.shapeOutside = k.Style.ShapeOutside
+				fi.shapeMargin = k.Style.ShapeMargin
+			}
+			out = append(out, fi)
 		}
 		if startsNewFC(a, co) {
 			break
@@ -86,16 +102,23 @@ func (bc *breakCtx) spanAt(yTop, h float32) (float32, float32) {
 		if f.y0 >= yTop+h || f.y1 <= yTop {
 			continue
 		}
+		fx0, fx1 := f.x0, f.x1
+		if f.shapeOutside != "" {
+			if sx0, sx1, ok := computeShapeBounds(f, yTop, h); ok {
+				fx0, fx1 = sx0, sx1
+			}
+		}
+
 		// A float starting at or left of the content edge pushes the line
 		// right; one ending at or past the right edge pulls its end left. A
 		// float wider than the content does both, leaving nothing.
-		if f.x0 <= bc.x0+1 && f.x1 > bc.x0 {
-			if d := f.x1 - bc.x0; d > l {
+		if fx0 <= bc.x0+1 && fx1 > bc.x0 {
+			if d := fx1 - bc.x0; d > l {
 				l = d
 			}
 		}
-		if f.x1 >= bc.x0+bc.contentW-1 && f.x0 < bc.x0+bc.contentW {
-			if d := bc.x0 + bc.contentW - f.x0; d > r {
+		if fx1 >= bc.x0+bc.contentW-1 && fx0 < bc.x0+bc.contentW {
+			if d := bc.x0 + bc.contentW - fx0; d > r {
 				r = d
 			}
 		}
@@ -104,6 +127,94 @@ func (bc *breakCtx) spanAt(yTop, h float32) (float32, float32) {
 		return l, avail
 	}
 	return l, 0
+}
+
+func computeShapeBounds(f floatIntrusion, yTop, h float32) (float32, float32, bool) {
+	shape := strings.ToLower(strings.TrimSpace(f.shapeOutside))
+	if strings.HasPrefix(shape, "circle") {
+		bw := f.x1 - f.x0
+		bh := f.y1 - f.y0
+		r := bw
+		if bh < r {
+			r = bh
+		}
+		r /= 2
+		cx := (f.x0 + f.x1) / 2
+		cy := (f.y0 + f.y1) / 2
+
+		if open := strings.Index(shape, "("); open >= 0 {
+			if close := strings.LastIndex(shape, ")"); close > open {
+				inner := strings.TrimSpace(shape[open+1 : close])
+				if inner != "" {
+					parts := strings.Split(inner, "at")
+					rPart := strings.TrimSpace(parts[0])
+					if rPart != "" {
+						if strings.HasSuffix(rPart, "%") {
+							if val, err := strconv.ParseFloat(strings.TrimSuffix(rPart, "%"), 64); err == nil {
+								r = float32(val/100) * (bw + bh) / 4
+							}
+						} else if val, err := strconv.ParseFloat(strings.TrimSuffix(rPart, "px"), 64); err == nil {
+							r = float32(val)
+						}
+					}
+					if len(parts) > 1 {
+						posFields := strings.Fields(parts[1])
+						if len(posFields) >= 1 {
+							if strings.HasSuffix(posFields[0], "%") {
+								if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[0], "%"), 64); err == nil {
+									cx = f.x0 + float32(val/100)*bw
+								}
+							} else if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[0], "px"), 64); err == nil {
+								cx = f.x0 + float32(val)
+							}
+						}
+						if len(posFields) >= 2 {
+							if strings.HasSuffix(posFields[1], "%") {
+								if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[1], "%"), 64); err == nil {
+									cy = f.y0 + float32(val/100)*bh
+								}
+							} else if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[1], "px"), 64); err == nil {
+								cy = f.y0 + float32(val)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		effR := r + f.shapeMargin
+		y0 := yTop
+		if f.y0 > y0 {
+			y0 = f.y0
+		}
+		y1 := yTop + h
+		if f.y1 < y1 {
+			y1 = f.y1
+		}
+
+		var dy float32
+		if cy >= y0 && cy <= y1 {
+			dy = 0
+		} else if cy < y0 {
+			dy = y0 - cy
+		} else {
+			dy = cy - y1
+		}
+
+		if dy >= effR {
+			if f.isLeft {
+				return f.x0, f.x0, true
+			}
+			return f.x1, f.x1, true
+		}
+
+		dx := float32(math.Sqrt(float64(effR*effR - dy*dy)))
+		if f.isLeft {
+			return f.x0, cx + dx, true
+		}
+		return cx - dx, f.x1, true
+	}
+	return f.x0, f.x1, false
 }
 
 // startLine settles the line beginning at yTop: when floats leave it no

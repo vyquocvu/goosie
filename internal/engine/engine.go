@@ -766,7 +766,7 @@ func (s *Session) collectImageRefs() []imgRef {
 			return nil
 		}
 		if n.Data == "img" {
-			if src := strings.TrimSpace(n.GetAttribute("src")); src != "" {
+			if src := strings.TrimSpace(resolveImgSource(n, s.viewportW)); src != "" {
 				// data: payloads are document-inline bytes, not network
 				// subresources: they bypass URL resolution and decode locally.
 				if strings.HasPrefix(src, "data:") {
@@ -1339,12 +1339,49 @@ func (s *Session) HitTestImage(x, y float32) string {
 			continue
 		}
 		if obj.Node != nil && obj.Node.DataAtom == dom.AtomImg {
-			if src := obj.Node.GetAttribute("src"); src != "" {
+			if src := resolveImgSource(obj.Node, s.viewportW); src != "" {
 				return src
 			}
 		}
 	}
 	return ""
+}
+
+// resolveImgSource returns the effective image URL for an <img> element,
+// evaluating any parent <picture> and <source> elements against the current viewport.
+func resolveImgSource(n *dom.Node, viewportW float32) string {
+	if n.Parent != nil && n.Parent.Data == "picture" {
+		for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
+			if c == n {
+				break
+			}
+			if c.Element() && c.Data == "source" {
+				if typ := c.GetAttribute("type"); typ != "" && !isSupportedImageType(typ) {
+					continue
+				}
+				if media := c.GetAttribute("media"); media != "" {
+					if !css.MatchMedia(media, viewportW) {
+						continue
+					}
+				}
+				if srcset := strings.TrimSpace(c.GetAttribute("srcset")); srcset != "" {
+					fields := strings.Fields(srcset)
+					if len(fields) > 0 {
+						return fields[0]
+					}
+				}
+			}
+		}
+	}
+	return n.GetAttribute("src")
+}
+
+func isSupportedImageType(typ string) bool {
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/svg+xml", "image/bmp":
+		return true
+	}
+	return false
 }
 
 // ClickAt handles a click at the document-coordinate point. It finds an

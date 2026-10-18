@@ -75,12 +75,11 @@ func EvalFuncWithBase(name, expr string, em, vw, vh, pctBase float32) (float32, 
 }
 
 // viewportTerm matches a viewport unit inside an expression's text.
-var viewportTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(svw|svh|dvw|dvh|lvw|lvh|vw|vh|vmin|vmax)`)
+var viewportTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(svmin|svmax|dvmin|dvmax|lvmin|lvmax|svw|svh|dvw|dvh|lvw|lvh|vi|vb|vw|vh|vmin|vmax)`)
 
 // viewportTermHints is the set of two-letter sequences that every alternative above
-// contains: `vw` carries it outright and so does each s/d/l-prefixed form, `vh` and its
-// prefixed forms carry `vh`, `vmin` carries `mi` and `vmax` carries `ma`.
-var viewportTermHints = []string{"vw", "vh", "mi", "ma"}
+// contains.
+var viewportTermHints = []string{"vw", "vh", "vi", "vb", "mi", "ma"}
 
 // ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
 // leaving every other term alone. A `calc()` only reaches its `em` terms once the
@@ -723,17 +722,17 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 		return num * 96 / 2.54, true
 	case "mm":
 		return num * 96 / 25.4, true
-	case "vw", "svw", "dvw", "lvw", "cqw", "cqi":
+	case "vw", "svw", "dvw", "lvw", "vi", "cqw", "cqi":
 		return num * p.vw / 100, true
-	case "vh", "svh", "dvh", "lvh", "cqh", "cqb":
+	case "vh", "svh", "dvh", "lvh", "vb", "cqh", "cqb":
 		return num * p.vh / 100, true
-	case "vmin", "cqmin":
+	case "vmin", "svmin", "dvmin", "lvmin", "cqmin":
 		m := p.vw
 		if p.vh < m {
 			m = p.vh
 		}
 		return num * m / 100, true
-	case "vmax", "cqmax":
+	case "vmax", "svmax", "dvmax", "lvmax", "cqmax":
 		m := p.vw
 		if p.vh > m {
 			m = p.vh

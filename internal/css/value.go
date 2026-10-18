@@ -690,17 +690,17 @@ func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 		return 0
 	case ValueLength:
 		switch v.Unit {
-		case "vw", "svw", "dvw", "lvw":
+		case "vw", "svw", "dvw", "lvw", "vi":
 			return float32(v.Num) * vw / 100
-		case "vh", "svh", "dvh", "lvh":
+		case "vh", "svh", "dvh", "lvh", "vb":
 			return float32(v.Num) * vh / 100
-		case "vmin":
+		case "vmin", "svmin", "dvmin", "lvmin":
 			m := vw
 			if vh < m {
 				m = vh
 			}
 			return float32(v.Num) * m / 100
-		case "vmax":
+		case "vmax", "svmax", "dvmax", "lvmax":
 			m := vw
 			if vh > m {
 				m = vh
@@ -807,13 +807,13 @@ func toPixels(num float64, unit string) float32 {
 		return float32(num * 96 / 2.54)
 	case "mm":
 		return float32(num * 96 / 25.4)
-	case "vw", "cqw", "cqi":
+	case "vw", "svw", "dvw", "lvw", "vi", "cqw", "cqi":
 		return float32(num * 1440 / 100)
-	case "vh", "cqh", "cqb":
+	case "vh", "svh", "dvh", "lvh", "vb", "cqh", "cqb":
 		return float32(num * 900 / 100)
-	case "vmin", "cqmin":
+	case "vmin", "svmin", "dvmin", "lvmin", "cqmin":
 		return float32(num * 900 / 100)
-	case "vmax", "cqmax":
+	case "vmax", "svmax", "dvmax", "lvmax", "cqmax":
 		return float32(num * 1440 / 100)
 	}
 	return float32(num)
