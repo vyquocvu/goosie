@@ -617,21 +617,36 @@ func (v Value) ToLength() float32 {
 // that e.g. "0.67em" on an h1 with font-size:32px correctly yields 21.44px
 // instead of 10.72px.
 func (v Value) ToLengthWithEm(fontSize float32) float32 {
-	return v.ToLengthWithContext(fontSize, 1440, 900)
+	return v.ToLengthWithFullContext(fontSize, 16, 1440, 900)
+}
+
+// ToLengthWithEmAndRem resolves em against the element's font-size and rem against
+// the root font-size.
+func (v Value) ToLengthWithEmAndRem(fontSize, rootFontSize float32) float32 {
+	return v.ToLengthWithFullContext(fontSize, rootFontSize, 1440, 900)
 }
 
 // ToLengthWithContext resolves length units with full context: font size for
 // em/rem/ex, and viewport width/height for vw/vh/vmin/vmax.
 func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
+	return v.ToLengthWithFullContext(em, 16, vw, vh)
+}
+
+// ToLengthWithFullContext resolves length units with full context: font size for
+// em/ex, root font size for rem, and viewport width/height for vw/vh/vmin/vmax.
+func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 	if vw <= 0 {
 		vw = 1440
 	}
 	if vh <= 0 {
 		vh = 900
 	}
+	if rem <= 0 {
+		rem = 16
+	}
 	switch v.Type {
 	case ValueFunc:
-		if f, ok := EvalFunc(v.Func, v.Str, em, vw, vh); ok {
+		if f, ok := EvalFuncWithRem(v.Func, v.Str, em, rem, vw, vh); ok {
 			return f
 		}
 		return 0
@@ -669,11 +684,8 @@ func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
 			return float32(v.Num) * em * 0.5
 		case "rem":
 			// rem is relative to the root element's font size, not the element's
-			// own. Resolving it against `em` (as this once did) inflates every rem
-			// on a large-font element: an h1 with font-size:40px and margin-top:
-			// 6.5rem got 260px instead of 104px. The root defaults to 16px, which
-			// is what the overwhelming majority of documents leave it at.
-			return float32(v.Num) * 16
+			// own.
+			return float32(v.Num) * rem
 		default:
 			return toPixels(v.Num, v.Unit)
 		}

@@ -20,13 +20,13 @@ func EvalCalc(expr string, em, vw, vh float32) (float32, bool) {
 	return EvalFunc("calc", expr, em, vw, vh)
 }
 
-// EvalFunc resolves one of the value-bearing CSS functions - `calc()`,
-// `min()`, `max()`, and `clamp(min, val, max)`. Each argument is its own
-// expression in calc()'s grammar, so a clamp can nest a calc and a max can nest
-// a clamp.
-func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
+// EvalFuncWithRem resolves one of the value-bearing CSS functions with rem support.
+func EvalFuncWithRem(name, expr string, em, rem, vw, vh float32) (float32, bool) {
 	if em <= 0 {
 		em = 16
+	}
+	if rem <= 0 {
+		rem = 16
 	}
 	if vw <= 0 {
 		vw = 1440
@@ -34,7 +34,33 @@ func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 	if vh <= 0 {
 		vh = 900
 	}
-	p := &calcExpr{em: em, vw: vw, vh: vh}
+	p := &calcExpr{em: em, rem: rem, vw: vw, vh: vh}
+	return p.combine(name, splitArgs(expr))
+}
+
+// EvalFunc resolves one of the value-bearing CSS functions - `calc()`,
+// `min()`, `max()`, and `clamp(min, val, max)`. Each argument is its own
+// expression in calc()'s grammar, so a clamp can nest a calc and a max can nest
+// a clamp.
+func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
+	return EvalFuncWithRem(name, expr, em, 16, vw, vh)
+}
+
+// EvalFuncWithBaseAndRem is EvalFuncWithRem for a caller that can answer percentages.
+func EvalFuncWithBaseAndRem(name, expr string, em, rem, vw, vh, pctBase float32) (float32, bool) {
+	if em <= 0 {
+		em = 16
+	}
+	if rem <= 0 {
+		rem = 16
+	}
+	if vw <= 0 {
+		vw = 1440
+	}
+	if vh <= 0 {
+		vh = 900
+	}
+	p := &calcExpr{em: em, rem: rem, vw: vw, vh: vh, pctBase: pctBase, allowPct: true}
 	return p.combine(name, splitArgs(expr))
 }
 
@@ -44,17 +70,7 @@ func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 // the cascade passes a parent font size for font-relative percentages. A
 // percentage with no base still reports itself unsupported.
 func EvalFuncWithBase(name, expr string, em, vw, vh, pctBase float32) (float32, bool) {
-	if em <= 0 {
-		em = 16
-	}
-	if vw <= 0 {
-		vw = 1440
-	}
-	if vh <= 0 {
-		vh = 900
-	}
-	p := &calcExpr{em: em, vw: vw, vh: vh, pctBase: pctBase, allowPct: true}
-	return p.combine(name, splitArgs(expr))
+	return EvalFuncWithBaseAndRem(name, expr, em, 16, vw, vh, pctBase)
 }
 
 // viewportTerm matches a viewport unit inside an expression's text.
@@ -124,7 +140,7 @@ func fold(args []string, em, vw, vh float32, smallest bool) (float32, bool) {
 }
 
 func (p *calcExpr) evalSum(expr string) (float32, bool) {
-	q := &calcExpr{toks: calcTokens(expr), em: p.em, vw: p.vw, vh: p.vh, pctBase: p.pctBase, allowPct: p.allowPct}
+	q := &calcExpr{toks: calcTokens(expr), em: p.em, rem: p.rem, vw: p.vw, vh: p.vh, pctBase: p.pctBase, allowPct: p.allowPct}
 	v, ok := q.sum()
 	if !ok || q.pos != len(q.toks) {
 		return 0, false
@@ -133,7 +149,7 @@ func (p *calcExpr) evalSum(expr string) (float32, bool) {
 }
 
 func evalSum(expr string, em, vw, vh float32) (float32, bool) {
-	p := &calcExpr{em: em, vw: vw, vh: vh}
+	p := &calcExpr{em: em, rem: 16, vw: vw, vh: vh}
 	return p.evalSum(expr)
 }
 
@@ -165,9 +181,9 @@ func calcTokens(s string) []string {
 }
 
 type calcExpr struct {
-	toks       []string
-	pos        int
-	em, vw, vh float32
+	toks            []string
+	pos             int
+	em, rem, vw, vh float32
 	// pctBase answers `%` terms when allowPct is set. It is the
 	// containing-block length for box sizes, or the parent font size for
 	// font-relative percentages. Without it a percentage still reports
@@ -374,7 +390,11 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 	case "ch":
 		return num * p.em * 0.5, true
 	case "rem":
-		return num * 16, true
+		rem := p.rem
+		if rem <= 0 {
+			rem = 16
+		}
+		return num * rem, true
 	case "pt":
 		return num * 96 / 72, true
 	case "pc":

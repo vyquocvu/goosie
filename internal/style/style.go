@@ -1245,8 +1245,9 @@ func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32
 	}
 	value, parsed := e.decl.Value, e.decl.Parsed
 	if vars != nil && strings.Contains(value, "var(") {
+		vars.failed = false
 		value = vars.expand(value)
-		if strings.TrimSpace(value) == "" {
+		if vars.failed || strings.TrimSpace(value) == "" {
 			// Nothing resolved and no fallback was given: the declaration is
 			// invalid at computed-value time, so the property keeps the value it
 			// would have had without it. Parsing the empty string instead would
@@ -1276,6 +1277,7 @@ type varExpander struct {
 	done     map[string]string
 	visiting map[string]bool
 	budget   int
+	failed   bool
 }
 
 // expanderFor returns the var() expander for one element's custom properties,
@@ -1321,6 +1323,7 @@ func (e *varExpander) expand(value string) string {
 			j++
 		}
 		if paren != 0 {
+			e.failed = true
 			return value[:i]
 		}
 		e.budget--
@@ -1336,6 +1339,8 @@ func (e *varExpander) expand(value string) string {
 			repl = v
 		} else if hasFallback {
 			repl = e.expand(fallback)
+		} else {
+			e.failed = true
 		}
 		// A resolved value is var-free by construction, so each pass retires one
 		// reference and the loop always terminates.
@@ -1367,11 +1372,19 @@ func (e *varExpander) resolve(name string) (string, bool) {
 		return "", false
 	}
 	e.visiting[name] = true
+	prevFailed := e.failed
+	e.failed = false
 	v := e.expand(raw)
+	hadFailure := e.failed
+	e.failed = prevFailed
 	delete(e.visiting, name)
 	// A cycle deeper in this property's definition tree poisoned this name on the
 	// way through; it stays invalid so the reference above falls back.
 	if existing, bad := e.done[name]; bad && existing == varInvalid {
+		return "", false
+	}
+	if hadFailure {
+		e.done[name] = varInvalid
 		return "", false
 	}
 	e.done[name] = v
@@ -1583,77 +1596,77 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	// A math function holding a percentage is deferred to layout, which owns
 	// the containing block the share speaks.
 	case "width":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.WidthCalc, cs.Width = d, -1
 		} else {
 			cs.WidthCalc = DeferredLength{}
-			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize)
+			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
 	case "height":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.HeightCalc, cs.Height = d, -1
 		} else {
 			cs.HeightCalc = DeferredLength{}
-			cs.Height = resolveLengthEm(parsed, -1, cs.FontSize)
+			cs.Height = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
 	case "min-width":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinWidthCalc, cs.MinWidth = d, 0
 		} else {
 			cs.MinWidthCalc = DeferredLength{}
-			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize)
+			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
 	case "min-height":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinHeightCalc, cs.MinHeight = d, 0
 		} else {
 			cs.MinHeightCalc = DeferredLength{}
-			cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize)
+			cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
 	case "max-width":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MaxWidthCalc, cs.MaxWidth = d, -1
 		} else {
 			cs.MaxWidthCalc = DeferredLength{}
-			cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize)
+			cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize, cs.rootFontSize)
 		}
 	case "max-height":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MaxHeightCalc, cs.MaxHeight = d, -1
 		} else {
 			cs.MaxHeightCalc = DeferredLength{}
-			cs.MaxHeight = resolveMaxLength(parsed, cs.FontSize)
+			cs.MaxHeight = resolveMaxLength(parsed, cs.FontSize, cs.rootFontSize)
 		}
 
 	case "margin":
-		t, r, b, l := parseMarginShorthand(value, cs.FontSize)
+		t, r, b, l := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop = t
 		cs.MarginRight = r
 		cs.MarginBottom = b
 		cs.MarginLeft = l
 	case "margin-top":
-		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-right":
-		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-bottom":
-		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-left":
-		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 
 	case "padding":
-		t, r, b, l := parsePaddingShorthand(value, cs.FontSize)
+		t, r, b, l := parsePaddingShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.PaddingTop = t
 		cs.PaddingRight = r
 		cs.PaddingBottom = b
 		cs.PaddingLeft = l
 	case "padding-top":
-		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-right":
-		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-bottom":
-		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-left":
-		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 
 	// Logical box properties. goosie lays out left-to-right, so inline maps onto
 	// the horizontal axis and block onto the vertical one, start onto left and
@@ -1661,33 +1674,33 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	// gutters with `padding-inline: var(...)` and nothing else, so without the
 	// alias the whole page loses its side padding.
 	case "margin-block":
-		a, b := logicalPair(value, 0, cs.FontSize)
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop, cs.MarginBottom = a, b
 	case "margin-inline":
-		a, b := logicalPair(value, MarginAuto, cs.FontSize)
+		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
 		cs.MarginLeft, cs.MarginRight = a, b
 	case "margin-block-start":
-		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-block-end":
-		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-start":
-		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-end":
-		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "padding-block":
-		a, b := logicalPair(value, 0, cs.FontSize)
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.PaddingTop, cs.PaddingBottom = a, b
 	case "padding-inline":
-		a, b := logicalPair(value, 0, cs.FontSize)
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.PaddingLeft, cs.PaddingRight = a, b
 	case "padding-block-start":
-		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-block-end":
-		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-inline-start":
-		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-inline-end":
-		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 
 	case "border":
 		w, s, c := parseBorderShorthand(value)
@@ -1796,16 +1809,16 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-image":
 		applyBorderImageShorthand(cs, value)
 	case "top":
-		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		cs.HasTop = lengthSpecified(parsed)
 	case "right":
-		cs.Right = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.Right = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		cs.HasRight = lengthSpecified(parsed)
 	case "bottom":
-		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		cs.HasBottom = lengthSpecified(parsed)
 	case "left":
-		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		cs.HasLeft = lengthSpecified(parsed)
 
 	case "color":
@@ -1911,19 +1924,21 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "object-fit":
 		cs.ObjectFit = value
-	case "gap":
-		g := resolveLength(parsed, 0)
-		cs.RowGap, cs.ColumnGap = g, g
-	case "grid-gap":
-		// The superseded name for gap, still what a page declares.
-		g := resolveLength(parsed, 0)
-		cs.RowGap, cs.ColumnGap = g, g
-	case "row-gap":
-		cs.RowGap = resolveLength(parsed, 0)
-	case "column-gap":
+	case "gap", "grid-gap":
+		parts := splitTopLevelSpace(value)
+		if len(parts) == 1 {
+			g := resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize, cs.rootFontSize)
+			cs.RowGap, cs.ColumnGap = g, g
+		} else if len(parts) >= 2 {
+			cs.RowGap = resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize, cs.rootFontSize)
+			cs.ColumnGap = resolveLengthEm(css.ParseValue(parts[1]), 0, cs.FontSize, cs.rootFontSize)
+		}
+	case "row-gap", "grid-row-gap":
+		cs.RowGap = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "column-gap", "grid-column-gap":
 		// A grid spends this on its column axis; a row-direction flexbox on its
 		// main axis. Wikipedia's page grid declares only this and no `gap`.
-		cs.ColumnGap = resolveLength(parsed, 0)
+		cs.ColumnGap = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "grid-template-columns":
 		cs.GridTemplateColumns = value
 	case "grid-template-rows":
@@ -2038,16 +2053,16 @@ const MarginAuto float32 = -1
 
 // logicalPair reads a `-inline`/`-block` shorthand: one length for both sides,
 // or the start and end side separately.
-func logicalPair(v string, auto, fontSize float32) (float32, float32) {
+func logicalPair(v string, auto, fontSize float32, rootFontSize ...float32) (float32, float32) {
 	parts := splitTopLevelSpace(v)
 	if len(parts) == 0 {
 		return auto, auto
 	}
-	a := resolveLengthEm(css.ParseValue(parts[0]), auto, fontSize)
+	a := resolveLengthEm(css.ParseValue(parts[0]), auto, fontSize, rootFontSize...)
 	if len(parts) < 2 {
 		return a, a
 	}
-	return a, resolveLengthEm(css.ParseValue(parts[1]), auto, fontSize)
+	return a, resolveLengthEm(css.ParseValue(parts[1]), auto, fontSize, rootFontSize...)
 }
 
 // splitTopLevelSpace cuts a value on the whitespace outside its parentheses.
@@ -2107,10 +2122,11 @@ func againstOwnFont(prop string) bool {
 // DeferredLength holds a math-function box size that contains a percentage,
 // kept for layout-time resolution against the containing block. Expr is the
 // parsed function value, Em the element's font size for em/ch terms once the
-// cascade's font re-application pass has run.
+// cascade's font re-application pass has run, and Rem the root element's font size.
 type DeferredLength struct {
 	Expr css.Value
 	Em   float32
+	Rem  float32
 	Set  bool
 }
 
@@ -2118,9 +2134,13 @@ type DeferredLength struct {
 // layout. Any other value reports false and resolves through the usual path.
 // A later cascade entry for the same property re-runs this, so overriding a
 // deferred function with a plain length clears the deferral.
-func deferPercentFunc(v css.Value, fontSize float32) (DeferredLength, bool) {
+func deferPercentFunc(v css.Value, fontSize float32, rootFontSize ...float32) (DeferredLength, bool) {
 	if v.Type == css.ValueFunc && v.FuncHasPercent() {
-		return DeferredLength{Expr: v, Em: fontSize, Set: true}, true
+		rem := float32(16)
+		if len(rootFontSize) > 0 && rootFontSize[0] > 0 {
+			rem = rootFontSize[0]
+		}
+		return DeferredLength{Expr: v, Em: fontSize, Rem: rem, Set: true}, true
 	}
 	return DeferredLength{}, false
 }
@@ -2133,17 +2153,17 @@ func (d DeferredLength) Resolve(base, vw, vh float32) (float32, bool) {
 	if !d.Set {
 		return 0, false
 	}
-	return css.EvalFuncWithBase(d.Expr.Func, d.Expr.Str, d.Em, vw, vh, base)
+	return css.EvalFuncWithBaseAndRem(d.Expr.Func, d.Expr.Str, d.Em, d.Rem, vw, vh, base)
 }
 
 // resolveMaxLength caps a box. `none` states that there is no cap, which the
 // layout reads as the same -1 an auto size does; reading it as a length turned
 // every `max-width: none` box into a zero-width one.
-func resolveMaxLength(v css.Value, fontSize float32) float32 {
+func resolveMaxLength(v css.Value, fontSize float32, rootFontSize ...float32) float32 {
 	if v.Type == css.ValueKeyword && v.Str == "none" {
 		return -1
 	}
-	return resolveLengthEm(v, -1, fontSize)
+	return resolveLengthEm(v, -1, fontSize, rootFontSize...)
 }
 
 func resolveLength(v css.Value, auto float32) float32 {
@@ -2153,15 +2173,18 @@ func resolveLength(v css.Value, auto float32) float32 {
 	return v.ToLength()
 }
 
-// resolveLengthEm is like resolveLength but passes fontSize to ToLengthWithEm
-// so that em units are computed against the element's own font-size instead of
-// the hardcoded 16px fallback in ToLength. Use this for all box-model lengths
-// (margin, padding, top/right/bottom/left, width when not percentage, etc.).
-func resolveLengthEm(v css.Value, auto, fontSize float32) float32 {
+// resolveLengthEm is like resolveLength but passes fontSize and rootFontSize to
+// ToLengthWithEmAndRem so that em and rem units are computed against the element's
+// own font-size and the document root font-size respectively.
+func resolveLengthEm(v css.Value, auto, fontSize float32, rootFontSize ...float32) float32 {
 	if v.Type == css.ValueKeyword && (v.Str == "auto" || v.Str == "") {
 		return auto
 	}
-	return v.ToLengthWithEm(fontSize)
+	rem := float32(16)
+	if len(rootFontSize) > 0 && rootFontSize[0] > 0 {
+		rem = rootFontSize[0]
+	}
+	return v.ToLengthWithEmAndRem(fontSize, rem)
 }
 
 // lengthSpecified reports whether a top/right/bottom/left value is a used
@@ -3311,26 +3334,26 @@ func parseBgLen(cs *ComputedStyle, tok string) (float32, bool, bool) {
 // parseMarginShorthand parses the CSS margin shorthand (1–4 values), using
 // MarginAuto as the resolved value for "auto". fontSize is used to resolve
 // em-valued lengths against the element's own computed font-size.
-func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
+func parseMarginShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32) {
 	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
-		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize)
+		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
 		return val, val, val, val
 	case 2:
-		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
+		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
 		return tb, rl, tb, rl
 	case 3:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
 		return top, rl, bottom, rl
 	case 4:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
-		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
+		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize, rootFontSize...)
 		return
 	}
 	return
@@ -3339,26 +3362,26 @@ func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left 
 // parsePaddingShorthand parses the CSS padding shorthand (1–4 values).
 // Padding cannot be "auto", so 0 is always the fallback. fontSize is used to
 // resolve em-valued lengths.
-func parsePaddingShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
+func parsePaddingShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32) {
 	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
-		val := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		val := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
 		return val, val, val, val
 	case 2:
-		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
+		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize, rootFontSize...)
 		return tb, rl, tb, rl
 	case 3:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
 		return top, rl, bottom, rl
 	case 4:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		right = resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
-		left = resolveLengthEm(css.ParseValue(parts[3]), 0, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		right = resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
+		left = resolveLengthEm(css.ParseValue(parts[3]), 0, fontSize, rootFontSize...)
 		return
 	}
 	return
