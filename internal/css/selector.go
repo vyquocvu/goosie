@@ -779,6 +779,10 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return IsHovered(n)
 	case "focus":
 		return IsFocused(n)
+	case "scope":
+		return n.IsScopeRoot
+	case "popover-open":
+		return n.IsPopoverOpen
 	case "checked", "disabled", "enabled", "placeholder-shown":
 		return false
 	case "has":

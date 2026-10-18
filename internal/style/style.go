@@ -698,6 +698,8 @@ summary { display: block; }
 details:not([open]) > *:not(summary) { display: none; }
 dialog { display: none; position: absolute; left: 0; right: 0; margin: auto; border: solid 1px; padding: 1em; background: white; color: black; }
 dialog[open] { display: block; }
+[popover] { display: none; position: fixed; inset: 0; margin: auto; border: solid 1px; padding: 0.5em; background: white; color: black; }
+[popover]:popover-open { display: block; }
 fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove; }
 legend { display: block; padding: 0 0.25em; }
 form { display: block; }
@@ -1381,6 +1383,7 @@ type cascadeEntry struct {
 	decl       css.Declaration
 	origin     int
 	layerOrder int
+	scopeDist  int
 	a, b, c    int
 	order      int
 }
@@ -1422,6 +1425,18 @@ func (e cascadeEntry) before(o cascadeEntry) bool {
 	if e.c != o.c {
 		return e.c < o.c
 	}
+	// Scoping proximity:
+	// A scoped declaration outranks an unscoped declaration when specificity is equal;
+	// among scoped declarations, shorter distance to the scope root wins.
+	if e.scopeDist != o.scopeDist {
+		if e.scopeDist == 0 && o.scopeDist > 0 {
+			return true // o (scoped) wins over e (unscoped)
+		}
+		if e.scopeDist > 0 && o.scopeDist == 0 {
+			return false // e (scoped) wins over o (unscoped)
+		}
+		return e.scopeDist > o.scopeDist // lower distance wins
+	}
 	return e.order < o.order
 }
 
@@ -1457,8 +1472,51 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	matched := cands[:0]
 	ruleDecls, ruleImportant := 0, 0
 	for _, cand := range cands {
-		if !cand.sel.MatchesIndexed(n, six) {
-			continue
+		if cand.rule.ScopeRoot != "" || cand.rule.ScopeLimit != "" {
+			var rootNode *dom.Node
+			if cand.rule.ScopeRoot == "" {
+				if n.Doc != nil {
+					rootNode = &n.Doc.Node
+				}
+			} else {
+				rootSel := css.ParseSelector(cand.rule.ScopeRoot)
+				if rootSel.Matches(n) {
+					rootNode = n
+				} else {
+					for cur := n.Parent; cur != nil; cur = cur.Parent {
+						if cur.Element() && rootSel.Matches(cur) {
+							rootNode = cur
+							break
+						}
+					}
+				}
+			}
+			if rootNode == nil {
+				continue
+			}
+			if cand.rule.ScopeLimit != "" {
+				limitSel := css.ParseSelector(cand.rule.ScopeLimit)
+				blocked := false
+				for cur := n; cur != nil && cur != rootNode; cur = cur.Parent {
+					if cur.Element() && limitSel.Matches(cur) {
+						blocked = true
+						break
+					}
+				}
+				if blocked {
+					continue
+				}
+			}
+			rootNode.IsScopeRoot = true
+			matchedSel := cand.sel.MatchesIndexed(n, six)
+			rootNode.IsScopeRoot = false
+			if !matchedSel {
+				continue
+			}
+		} else {
+			if !cand.sel.MatchesIndexed(n, six) {
+				continue
+			}
 		}
 		if cand.rule.ContainerQuery != "" && !matchesContainerQuery(n, cand.rule.ContainerQuery, result, vp) {
 			continue
@@ -1495,9 +1553,10 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 
 	cqW, cqH := findNearestContainerDimensions(n, result, vp)
 	for _, cand := range matched {
+		dist := computeScopeDist(n, cand.rule.ScopeRoot)
 		for _, d := range cand.rule.Declarations {
 			d = inContainerUnits(inViewport(d, vp), cqW, cqH)
-			e := cascadeEntry{decl: d, origin: cand.origin, layerOrder: cand.layerOrder, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
+			e := cascadeEntry{decl: d, origin: cand.origin, layerOrder: cand.layerOrder, scopeDist: dist, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
 			if d.Important {
 				important = append(important, e)
 			} else {
@@ -1613,6 +1672,24 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	return &cs
+}
+
+func computeScopeDist(n *dom.Node, scopeRoot string) int {
+	if scopeRoot == "" || n == nil {
+		return 0
+	}
+	rootSel := css.ParseSelector(scopeRoot)
+	hops := 1
+	if rootSel.Matches(n) {
+		return hops
+	}
+	for cur := n.Parent; cur != nil; cur = cur.Parent {
+		hops++
+		if cur.Element() && rootSel.Matches(cur) {
+			return hops
+		}
+	}
+	return 0
 }
 
 // resolveShadowColors finishes box-shadow and text-shadow after every other

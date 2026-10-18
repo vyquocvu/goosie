@@ -1356,9 +1356,12 @@ func (s *Session) HitTestImage(x, y float32) string {
 //
 // Returns true if an activatable control was found at the point.
 func (s *Session) ClickAt(x, y float32) bool {
+	hitNode := s.nodeAt(x, y)
+	dismissed := s.dismissAutoPopoversExcept(hitNode)
+
 	n := s.activatableAt(x, y)
 	if n == nil {
-		return false
+		return dismissed
 	}
 	ev := dom.NewEvent("click", true, true)
 	if !dom.DispatchEvent(n, ev) {
@@ -1375,6 +1378,11 @@ func (s *Session) runClickDefault(n *dom.Node) {
 	typ := strings.ToLower(n.GetAttribute("type"))
 	switch n.Data {
 	case "input":
+		if targetID := n.GetAttribute("popovertarget"); targetID != "" {
+			action := strings.ToLower(n.GetAttribute("popovertargetaction"))
+			s.handlePopoverTarget(targetID, action)
+			return
+		}
 		switch typ {
 		case "checkbox", "radio":
 			s.ToggleControl(n)
@@ -1400,6 +1408,11 @@ func (s *Session) runClickDefault(n *dom.Node) {
 			}
 		}
 	case "button":
+		if targetID := n.GetAttribute("popovertarget"); targetID != "" {
+			action := strings.ToLower(n.GetAttribute("popovertargetaction"))
+			s.handlePopoverTarget(targetID, action)
+			return
+		}
 		btnType := strings.ToLower(n.GetAttribute("type"))
 		switch btnType {
 		case "submit", "":

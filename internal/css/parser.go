@@ -30,6 +30,8 @@ type Rule struct {
 	Declarations   []Declaration
 	Layer          string
 	ContainerQuery string
+	ScopeRoot      string
+	ScopeLimit     string
 }
 
 // FontFaceRule is one @font-face rule: declarations only, no selectors.
@@ -166,6 +168,8 @@ type parser struct {
 	highContrast          bool
 	currentLayer          string
 	currentContainerQuery string
+	currentScopeRoot      string
+	currentScopeLimit     string
 	anonLayerCount        int
 }
 
@@ -193,6 +197,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseLayerRule(sheet)
 			case "container":
 				p.parseContainerRule(sheet)
+			case "scope":
+				p.parseScopeRule(sheet)
 			case "font-face":
 				p.parseFontFaceRule(sheet)
 			case "keyframes", "-webkit-keyframes":
@@ -202,7 +208,7 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 			}
 			continue
 		}
-		rule := p.parseRule()
+		rule, nestedRules := p.parseRule()
 		if len(rule.Selectors) > 0 {
 			if p.currentLayer != "" && rule.Layer == "" {
 				rule.Layer = p.currentLayer
@@ -210,8 +216,15 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 			if p.currentContainerQuery != "" && rule.ContainerQuery == "" {
 				rule.ContainerQuery = p.currentContainerQuery
 			}
+			if p.currentScopeRoot != "" && rule.ScopeRoot == "" {
+				rule.ScopeRoot = p.currentScopeRoot
+			}
+			if p.currentScopeLimit != "" && rule.ScopeLimit == "" {
+				rule.ScopeLimit = p.currentScopeLimit
+			}
 			sheet.Rules = append(sheet.Rules, rule)
 		}
+		sheet.Rules = append(sheet.Rules, nestedRules...)
 	}
 }
 
@@ -283,6 +296,8 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 		highContrast:          p.highContrast,
 		currentLayer:          layerName,
 		currentContainerQuery: p.currentContainerQuery,
+		currentScopeRoot:      p.currentScopeRoot,
+		currentScopeLimit:     p.currentScopeLimit,
 		anonLayerCount:        p.anonLayerCount,
 	}
 	inner.parseInto(sheet)
@@ -342,6 +357,93 @@ func (p *parser) parseContainerRule(sheet *Stylesheet) {
 		highContrast:          p.highContrast,
 		currentLayer:          p.currentLayer,
 		currentContainerQuery: cq,
+		currentScopeRoot:      p.currentScopeRoot,
+		currentScopeLimit:     p.currentScopeLimit,
+		anonLayerCount:        p.anonLayerCount,
+	}
+	inner.parseInto(sheet)
+	p.anonLayerCount = inner.anonLayerCount
+}
+
+// parseScopeRule parses an @scope at-rule and associates its scoping root
+// and optional scoping limit with the contained style rules.
+func (p *parser) parseScopeRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	p.skipWhitespace()
+	preludeStart := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++
+		return
+	}
+	prelude := strings.TrimSpace(p.input[preludeStart:p.pos])
+	p.pos++ // the '{'
+
+	var root, limit string
+	open1 := strings.Index(prelude, "(")
+	if open1 >= 0 {
+		close1 := strings.Index(prelude[open1:], ")")
+		if close1 >= 0 {
+			close1 += open1
+			before := strings.TrimSpace(prelude[:open1])
+			if before == "to" {
+				limit = strings.TrimSpace(prelude[open1+1 : close1])
+			} else {
+				root = strings.TrimSpace(prelude[open1+1 : close1])
+				rest := strings.TrimSpace(prelude[close1+1:])
+				if strings.HasPrefix(rest, "to") {
+					rest = strings.TrimSpace(rest[2:])
+					open2 := strings.Index(rest, "(")
+					if open2 >= 0 {
+						close2 := strings.Index(rest[open2:], ")")
+						if close2 >= 0 {
+							limit = strings.TrimSpace(rest[open2+1 : open2+close2])
+						}
+					}
+				}
+			}
+		}
+	}
+
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+
+	inner := &parser{
+		input:                 body,
+		mediaWidth:            p.mediaWidth,
+		darkMode:              p.darkMode,
+		highContrast:          p.highContrast,
+		currentLayer:          p.currentLayer,
+		currentContainerQuery: p.currentContainerQuery,
+		currentScopeRoot:      root,
+		currentScopeLimit:     limit,
 		anonLayerCount:        p.anonLayerCount,
 	}
 	inner.parseInto(sheet)
@@ -419,6 +521,8 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 			highContrast:          p.highContrast,
 			currentLayer:          p.currentLayer,
 			currentContainerQuery: p.currentContainerQuery,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
 			anonLayerCount:        p.anonLayerCount,
 		}
 		inner.parseInto(sheet)
@@ -480,6 +584,8 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 			highContrast:          p.highContrast,
 			currentLayer:          p.currentLayer,
 			currentContainerQuery: p.currentContainerQuery,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
 			anonLayerCount:        p.anonLayerCount,
 		}
 		inner.parseInto(sheet)
@@ -1083,27 +1189,46 @@ func (p *parser) skipAtRule() {
 	}
 }
 
-func (p *parser) parseRule() Rule {
+func (p *parser) parseRule() (Rule, []Rule) {
 	var rule Rule
 
 	selectorStart := p.pos
-	for p.pos < len(p.input) && p.input[p.pos] != '{' {
+	var quote byte
+	for p.pos < len(p.input) {
+		c := p.input[p.pos]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+		} else if c == '\'' || c == '"' {
+			quote = c
+		} else if c == '{' {
+			break
+		}
 		p.pos++
 	}
 	selectorText := strings.TrimSpace(p.input[selectorStart:p.pos])
 
 	if p.pos >= len(p.input) {
-		return rule
+		return rule, nil
 	}
-	p.pos++
+	p.pos++ // skip '{'
 
 	p.skipWhitespace()
 	declStart := p.pos
 	depth := 0
+	quote = 0
 	for p.pos < len(p.input) {
-		if p.input[p.pos] == '{' {
+		c := p.input[p.pos]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+		} else if c == '\'' || c == '"' {
+			quote = c
+		} else if c == '{' {
 			depth++
-		} else if p.input[p.pos] == '}' {
+		} else if c == '}' {
 			if depth == 0 {
 				break
 			}
@@ -1113,7 +1238,7 @@ func (p *parser) parseRule() Rule {
 	}
 	declText := p.input[declStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++
+		p.pos++ // skip '}'
 	}
 
 	for _, sel := range splitSelectors(selectorText) {
@@ -1124,8 +1249,410 @@ func (p *parser) parseRule() Rule {
 		}
 	}
 
-	rule.Declarations = parseDeclarations(declText)
-	return rule
+	decls, nestedRules := p.parseBlockWithRules(declText, rule.SelectorStrs)
+	rule.Declarations = decls
+	return rule, nestedRules
+}
+
+func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]Declaration, []Rule) {
+	var decls []Declaration
+	var nestedRules []Rule
+	i := 0
+	n := len(body)
+	for i < n {
+		// Skip whitespace
+		for i < n && (body[i] == ' ' || body[i] == '\t' || body[i] == '\n' || body[i] == '\r') {
+			i++
+		}
+		if i >= n {
+			break
+		}
+		// Skip CSS comments
+		if i+1 < n && body[i] == '/' && body[i+1] == '*' {
+			end := strings.Index(body[i+2:], "*/")
+			if end < 0 {
+				break
+			}
+			i += end + 4
+			continue
+		}
+		// Nested at-rule
+		if body[i] == '@' {
+			atStart := i
+			for i < n && body[i] != ' ' && body[i] != '\t' && body[i] != '\n' && body[i] != '\r' && body[i] != '{' && body[i] != ';' {
+				i++
+			}
+			atName := strings.ToLower(strings.TrimSpace(body[atStart+1 : i]))
+			preludeStart := i
+			var quote byte
+			for i < n {
+				c := body[i]
+				if quote != 0 {
+					if c == quote {
+						quote = 0
+					}
+				} else if c == '\'' || c == '"' {
+					quote = c
+				} else if c == '{' || c == ';' {
+					break
+				}
+				i++
+			}
+			prelude := strings.TrimSpace(body[preludeStart:i])
+			if i < n && body[i] == ';' {
+				i++
+				continue
+			}
+			if i >= n {
+				break
+			}
+			i++ // skip '{'
+			innerBodyStart := i
+			depth := 1
+			quote = 0
+			for i < n && depth > 0 {
+				c := body[i]
+				if quote != 0 {
+					if c == quote {
+						quote = 0
+					}
+				} else if c == '\'' || c == '"' {
+					quote = c
+				} else if c == '{' {
+					depth++
+				} else if c == '}' {
+					depth--
+					if depth == 0 {
+						break
+					}
+				}
+				i++
+			}
+			innerBody := body[innerBodyStart:i]
+			if i < n {
+				i++ // skip '}'
+			}
+			atRules := p.handleNestedAtRule(atName, prelude, innerBody, parentSelectors)
+			nestedRules = append(nestedRules, atRules...)
+			continue
+		}
+
+		// Either a declaration or a nested style rule
+		stmtStart := i
+		var quote byte
+		depth := 0
+		hitChar := byte(0)
+		hitPos := -1
+		for i < n {
+			c := body[i]
+			if quote != 0 {
+				if c == quote {
+					quote = 0
+				}
+			} else if c == '\'' || c == '"' {
+				quote = c
+			} else if c == '(' {
+				depth++
+			} else if c == ')' {
+				if depth > 0 {
+					depth--
+				}
+			} else if depth == 0 {
+				if c == ';' || c == '{' {
+					hitChar = c
+					hitPos = i
+					break
+				}
+			}
+			i++
+		}
+
+		if hitChar == ';' {
+			stmt := strings.TrimSpace(body[stmtStart:hitPos])
+			i = hitPos + 1
+			if stmt != "" {
+				decls = append(decls, parseDeclarations(stmt)...)
+			}
+		} else if hitChar == '{' {
+			nestedSelText := strings.TrimSpace(body[stmtStart:hitPos])
+			i = hitPos + 1
+			innerBodyStart := i
+			depth := 1
+			quote = 0
+			for i < n && depth > 0 {
+				c := body[i]
+				if quote != 0 {
+					if c == quote {
+						quote = 0
+					}
+				} else if c == '\'' || c == '"' {
+					quote = c
+				} else if c == '{' {
+					depth++
+				} else if c == '}' {
+					depth--
+					if depth == 0 {
+						break
+					}
+				}
+				i++
+			}
+			innerBody := body[innerBodyStart:i]
+			if i < n {
+				i++ // skip '}'
+			}
+			expandedSelectors := ExpandNestedSelectors(parentSelectors, splitSelectors(nestedSelText))
+			if len(expandedSelectors) > 0 {
+				rules := p.parseNestedStyleRule(expandedSelectors, innerBody)
+				nestedRules = append(nestedRules, rules...)
+			}
+		} else {
+			trailing := strings.TrimSpace(body[stmtStart:])
+			if trailing != "" && strings.Contains(trailing, ":") {
+				decls = append(decls, parseDeclarations(trailing)...)
+			}
+			break
+		}
+	}
+	return decls, nestedRules
+}
+
+func (p *parser) parseNestedStyleRule(expandedSelectors []string, innerBody string) []Rule {
+	var rules []Rule
+	var rule Rule
+	for _, sel := range expandedSelectors {
+		sel = strings.TrimSpace(sel)
+		if sel != "" {
+			rule.Selectors = append(rule.Selectors, ParseSelector(sel))
+			rule.SelectorStrs = append(rule.SelectorStrs, sel)
+		}
+	}
+	rule.Layer = p.currentLayer
+	rule.ContainerQuery = p.currentContainerQuery
+	rule.ScopeRoot = p.currentScopeRoot
+	rule.ScopeLimit = p.currentScopeLimit
+
+	innerDecls, deeperRules := p.parseBlockWithRules(innerBody, expandedSelectors)
+	rule.Declarations = innerDecls
+
+	if len(rule.Selectors) > 0 && len(rule.Declarations) > 0 {
+		rules = append(rules, rule)
+	}
+	rules = append(rules, deeperRules...)
+	return rules
+}
+
+func (p *parser) handleNestedAtRule(atName, prelude, innerBody string, parentSelectors []string) []Rule {
+	var rules []Rule
+	switch atName {
+	case "media":
+		cond := prelude
+		if !p.mediaConditionTrue(cond) {
+			return nil
+		}
+		inner := &parser{
+			input:                 innerBody,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          p.currentLayer,
+			currentContainerQuery: p.currentContainerQuery,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
+			anonLayerCount:        p.anonLayerCount,
+		}
+		decls, nested := inner.parseBlockWithRules(innerBody, parentSelectors)
+		if len(decls) > 0 && len(parentSelectors) > 0 {
+			var r Rule
+			for _, sel := range parentSelectors {
+				r.Selectors = append(r.Selectors, ParseSelector(sel))
+				r.SelectorStrs = append(r.SelectorStrs, sel)
+			}
+			r.Declarations = decls
+			r.Layer = p.currentLayer
+			r.ContainerQuery = p.currentContainerQuery
+			r.ScopeRoot = p.currentScopeRoot
+			r.ScopeLimit = p.currentScopeLimit
+			rules = append(rules, r)
+		}
+		rules = append(rules, nested...)
+		p.anonLayerCount = inner.anonLayerCount
+	case "container":
+		cq := prelude
+		if p.currentContainerQuery != "" {
+			cq = p.currentContainerQuery + " and " + cq
+		}
+		inner := &parser{
+			input:                 innerBody,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          p.currentLayer,
+			currentContainerQuery: cq,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
+			anonLayerCount:        p.anonLayerCount,
+		}
+		decls, nested := inner.parseBlockWithRules(innerBody, parentSelectors)
+		if len(decls) > 0 && len(parentSelectors) > 0 {
+			var r Rule
+			for _, sel := range parentSelectors {
+				r.Selectors = append(r.Selectors, ParseSelector(sel))
+				r.SelectorStrs = append(r.SelectorStrs, sel)
+			}
+			r.Declarations = decls
+			r.Layer = p.currentLayer
+			r.ContainerQuery = cq
+			r.ScopeRoot = p.currentScopeRoot
+			r.ScopeLimit = p.currentScopeLimit
+			rules = append(rules, r)
+		}
+		rules = append(rules, nested...)
+		p.anonLayerCount = inner.anonLayerCount
+	case "layer":
+		layerName := prelude
+		if layerName == "" {
+			p.anonLayerCount++
+			layerName = "anon#" + strconv.Itoa(p.anonLayerCount)
+		} else if p.currentLayer != "" {
+			layerName = p.currentLayer + "." + layerName
+		}
+		inner := &parser{
+			input:                 innerBody,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          layerName,
+			currentContainerQuery: p.currentContainerQuery,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
+			anonLayerCount:        p.anonLayerCount,
+		}
+		decls, nested := inner.parseBlockWithRules(innerBody, parentSelectors)
+		if len(decls) > 0 && len(parentSelectors) > 0 {
+			var r Rule
+			for _, sel := range parentSelectors {
+				r.Selectors = append(r.Selectors, ParseSelector(sel))
+				r.SelectorStrs = append(r.SelectorStrs, sel)
+			}
+			r.Declarations = decls
+			r.Layer = layerName
+			r.ContainerQuery = p.currentContainerQuery
+			r.ScopeRoot = p.currentScopeRoot
+			r.ScopeLimit = p.currentScopeLimit
+			rules = append(rules, r)
+		}
+		rules = append(rules, nested...)
+		p.anonLayerCount = inner.anonLayerCount
+	case "supports":
+		cond := prelude
+		if !supportsConditionTrue(cond) {
+			return nil
+		}
+		inner := &parser{
+			input:                 innerBody,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          p.currentLayer,
+			currentContainerQuery: p.currentContainerQuery,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
+			anonLayerCount:        p.anonLayerCount,
+		}
+		decls, nested := inner.parseBlockWithRules(innerBody, parentSelectors)
+		if len(decls) > 0 && len(parentSelectors) > 0 {
+			var r Rule
+			for _, sel := range parentSelectors {
+				r.Selectors = append(r.Selectors, ParseSelector(sel))
+				r.SelectorStrs = append(r.SelectorStrs, sel)
+			}
+			r.Declarations = decls
+			r.Layer = p.currentLayer
+			r.ContainerQuery = p.currentContainerQuery
+			r.ScopeRoot = p.currentScopeRoot
+			r.ScopeLimit = p.currentScopeLimit
+			rules = append(rules, r)
+		}
+		rules = append(rules, nested...)
+		p.anonLayerCount = inner.anonLayerCount
+	}
+	return rules
+}
+
+// ExpandNestedSelectors expands parent selectors into nested selectors.
+func ExpandNestedSelectors(parentSelectors, nestedSelectors []string) []string {
+	if len(parentSelectors) == 0 {
+		return nestedSelectors
+	}
+	var result []string
+	for _, nested := range nestedSelectors {
+		nested = strings.TrimSpace(nested)
+		if nested == "" {
+			continue
+		}
+		for _, parent := range parentSelectors {
+			parent = strings.TrimSpace(parent)
+			if parent == "" {
+				continue
+			}
+			exp := ExpandSingleNestedSelector(parent, nested)
+			if exp != "" {
+				result = append(result, exp)
+			}
+		}
+	}
+	return result
+}
+
+// ExpandSingleNestedSelector combines one parent selector with one nested selector.
+func ExpandSingleNestedSelector(parent, nested string) string {
+	hasAmpersand := false
+	var quote byte
+	for i := 0; i < len(nested); i++ {
+		c := nested[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+		} else if c == '\'' || c == '"' {
+			quote = c
+		} else if c == '&' {
+			hasAmpersand = true
+			break
+		}
+	}
+
+	if hasAmpersand {
+		var buf strings.Builder
+		quote = 0
+		for i := 0; i < len(nested); i++ {
+			c := nested[i]
+			if quote != 0 {
+				if c == quote {
+					quote = 0
+				}
+				buf.WriteByte(c)
+			} else if c == '\'' || c == '"' {
+				quote = c
+				buf.WriteByte(c)
+			} else if c == '&' {
+				buf.WriteString(parent)
+			} else {
+				buf.WriteByte(c)
+			}
+		}
+		return buf.String()
+	}
+
+	trimmed := strings.TrimLeft(nested, " \t\r\n")
+	if len(trimmed) > 0 && (trimmed[0] == '>' || trimmed[0] == '+' || trimmed[0] == '~') {
+		return parent + " " + trimmed
+	}
+	if len(trimmed) > 0 && trimmed[0] == ':' {
+		return parent + trimmed
+	}
+	return parent + " " + trimmed
 }
 
 func splitSelectors(s string) []string {

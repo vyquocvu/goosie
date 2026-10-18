@@ -68,6 +68,12 @@ type Node struct {
 	IsModal     bool
 	ReturnValue string
 
+	// Popover element state.
+	IsPopoverOpen bool
+
+	// CSS Scoping state.
+	IsScopeRoot bool
+
 	// Document back-pointer.
 	Doc *Document
 }

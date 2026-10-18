@@ -199,6 +199,9 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if action == EditEscape {
+		if s.closeTopmostAutoPopoverLocked() {
+			return true
+		}
 		closedDialog := s.closeTopmostModalDialogLocked()
 		if s.focus != nil {
 			prev := s.focus

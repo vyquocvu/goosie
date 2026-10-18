@@ -780,6 +780,36 @@ func (r *Runtime) setupDOM() {
 		node.ReturnValue = v
 		return goja.Undefined()
 	})
+	_ = doc.Set("__getPopover__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil || !node.HasAttribute("popover") {
+			return goja.Null()
+		}
+		val := node.GetAttribute("popover")
+		if val == "" || strings.EqualFold(val, "auto") {
+			return r.vm.ToValue("auto")
+		}
+		if strings.EqualFold(val, "manual") {
+			return r.vm.ToValue("manual")
+		}
+		return r.vm.ToValue(val)
+	})
+	_ = doc.Set("__setPopover__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		if len(call.Arguments) < 2 || goja.IsNull(call.Arguments[1]) || goja.IsUndefined(call.Arguments[1]) {
+			node.RemoveAttribute("popover")
+			node.IsPopoverOpen = false
+		} else {
+			node.SetAttribute("popover", call.Arguments[1].String())
+		}
+		r.notifyMutation()
+		return goja.Undefined()
+	})
 	_ = doc.Set("__getId__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -1097,6 +1127,7 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		if node.Data == "dialog" {
 			r.defineDialogElement(obj, node)
 		}
+		r.definePopoverMethods(obj, node)
 	}
 
 	return obj
@@ -1280,6 +1311,141 @@ func (r *Runtime) defineDialogElement(obj *goja.Object, node *dom.Node) {
 		});
 	`)
 	_ = r.vm.Set("__dlgTarget__", nil)
+}
+
+func (r *Runtime) definePopoverMethods(obj *goja.Object, node *dom.Node) {
+	_ = obj.Set("showPopover", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("popover") {
+			panic(r.vm.NewTypeError("Failed to execute 'showPopover' on 'HTMLElement': Not supported on elements that do not have a valid 'popover' attribute."))
+		}
+		if node.IsPopoverOpen {
+			panic(r.vm.NewTypeError("Failed to execute 'showPopover' on 'HTMLElement': The popover is already open."))
+		}
+		pType := strings.ToLower(node.GetAttribute("popover"))
+		if pType == "" || pType == "auto" {
+			r.closeOpenAutoPopovers(node)
+		}
+		beforeEv := dom.NewEvent("beforetoggle", false, true)
+		if !dom.DispatchEvent(node, beforeEv) {
+			return goja.Undefined()
+		}
+		node.IsPopoverOpen = true
+		dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("hidePopover", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("popover") {
+			panic(r.vm.NewTypeError("Failed to execute 'hidePopover' on 'HTMLElement': Not supported on elements that do not have a valid 'popover' attribute."))
+		}
+		if !node.IsPopoverOpen {
+			panic(r.vm.NewTypeError("Failed to execute 'hidePopover' on 'HTMLElement': The popover is not open."))
+		}
+		beforeEv := dom.NewEvent("beforetoggle", false, true)
+		if !dom.DispatchEvent(node, beforeEv) {
+			return goja.Undefined()
+		}
+		node.IsPopoverOpen = false
+		dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("togglePopover", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("popover") {
+			panic(r.vm.NewTypeError("Failed to execute 'togglePopover' on 'HTMLElement': Not supported on elements that do not have a valid 'popover' attribute."))
+		}
+		var force *bool
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
+			b := call.Arguments[0].ToBoolean()
+			force = &b
+		}
+		if force != nil {
+			if *force && !node.IsPopoverOpen {
+				pType := strings.ToLower(node.GetAttribute("popover"))
+				if pType == "" || pType == "auto" {
+					r.closeOpenAutoPopovers(node)
+				}
+				beforeEv := dom.NewEvent("beforetoggle", false, true)
+				if dom.DispatchEvent(node, beforeEv) {
+					node.IsPopoverOpen = true
+					dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+					r.notifyMutation()
+				}
+			} else if !*force && node.IsPopoverOpen {
+				beforeEv := dom.NewEvent("beforetoggle", false, true)
+				if dom.DispatchEvent(node, beforeEv) {
+					node.IsPopoverOpen = false
+					dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+					r.notifyMutation()
+				}
+			}
+			return r.vm.ToValue(node.IsPopoverOpen)
+		}
+		if node.IsPopoverOpen {
+			beforeEv := dom.NewEvent("beforetoggle", false, true)
+			if dom.DispatchEvent(node, beforeEv) {
+				node.IsPopoverOpen = false
+				dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+				r.notifyMutation()
+			}
+		} else {
+			pType := strings.ToLower(node.GetAttribute("popover"))
+			if pType == "" || pType == "auto" {
+				r.closeOpenAutoPopovers(node)
+			}
+			beforeEv := dom.NewEvent("beforetoggle", false, true)
+			if dom.DispatchEvent(node, beforeEv) {
+				node.IsPopoverOpen = true
+				dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+				r.notifyMutation()
+			}
+		}
+		return r.vm.ToValue(node.IsPopoverOpen)
+	})
+
+	_ = r.vm.Set("__popoverTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__popoverTarget__, 'popover', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return null;
+				return document.__getPopover__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setPopover__(nid, v === null || v === undefined ? null : String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__popoverTarget__", nil)
+}
+
+func (r *Runtime) closeOpenAutoPopovers(except *dom.Node) {
+	if r.domDoc == nil {
+		return
+	}
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n != except && n.Element() && n.IsPopoverOpen {
+			pType := strings.ToLower(n.GetAttribute("popover"))
+			if pType == "" || pType == "auto" {
+				n.IsPopoverOpen = false
+				dom.DispatchEvent(n, dom.NewEvent("toggle", false, false))
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(&r.domDoc.Node)
 }
 
 // defineIdAccessor installs a live id getter/setter on obj: reading reflects
