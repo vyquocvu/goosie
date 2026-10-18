@@ -2107,6 +2107,7 @@ func (f *framePath) openWindow() error {
 			cw.tickInterval = f.config.vsyncPeriod()
 			cw.onTick = f.pumpJS
 			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
+			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
 		}
 	} else {
 		f.window = w

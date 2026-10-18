@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/bookmarks"
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/history"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/raster"
+	"github.com/vyquocvu/goosie/internal/surface"
 )
 
 func TestNormalizeURLInternalPages(t *testing.T) {
@@ -151,5 +155,121 @@ func TestNavigateToInternalPage(t *testing.T) {
 	}
 	if tab.Error() != "" {
 		t.Errorf("tab.Error() = %q, want empty", tab.Error())
+	}
+}
+
+func TestInspectPageHTMLWithoutTabs(t *testing.T) {
+	f := newNavTestPath(t)
+	title, htmlContent := f.buildInternalPageHTML("goosie://inspect")
+	if title != "Web Inspector" {
+		t.Errorf("title = %q, want 'Web Inspector'", title)
+	}
+	if !strings.Contains(htmlContent, "Web Inspector") {
+		t.Errorf("HTML should contain 'Web Inspector'")
+	}
+	if !strings.Contains(htmlContent, "No active web document found to inspect") {
+		t.Errorf("HTML should indicate no active document")
+	}
+}
+
+func TestInspectPageHTMLWithActiveTab(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+
+	// Create a web tab with an actual HTML document
+	sampleHTML := `<!DOCTYPE html><html><head><title>Test Subject</title><style>h1 { color: red; }</style></head><body><h1 id="headline" class="title">Hello World</h1><p class="desc">A sample paragraph.</p></body></html>`
+	sess, err := engine.NewSession(sampleHTML, nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	tab := f.tabMgr.NewTab()
+	tab.SetURL("https://example.com/test")
+	tab.SetTitle("Test Subject")
+	tab.SetSession(sess)
+	f.tabMgr.SwitchTo(tab.ID())
+
+	// Build inspector page inspecting this active tab
+	title, htmlContent := f.buildInternalPageHTML("goosie://inspect")
+	if title != "Web Inspector" {
+		t.Errorf("title = %q, want 'Web Inspector'", title)
+	}
+	if !strings.Contains(htmlContent, "Test Subject") {
+		t.Errorf("HTML should show title 'Test Subject'")
+	}
+	if !strings.Contains(htmlContent, "https://example.com/test") {
+		t.Errorf("HTML should show URL 'https://example.com/test'")
+	}
+	// Verify DOM tree serialization
+	if !strings.Contains(htmlContent, "headline") || !strings.Contains(htmlContent, "title") {
+		t.Errorf("HTML should show DOM node attributes 'headline' and 'title'")
+	}
+	if !strings.Contains(htmlContent, "Hello World") {
+		t.Errorf("HTML should show text content 'Hello World'")
+	}
+	// Verify metrics summary
+	if !strings.Contains(htmlContent, "DOM Nodes") || !strings.Contains(htmlContent, "Tree Depth") {
+		t.Errorf("HTML should show DOM metrics summary")
+	}
+	// Verify CSS Box Model
+	if !strings.Contains(htmlContent, "Computed CSS Box Model") {
+		t.Errorf("HTML should contain box model visualizer")
+	}
+}
+
+func TestInspectPageHTMLEval(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+
+	tab := f.tabMgr.NewTab()
+	tab.SetURL("https://example.com/eval")
+	tab.SetTitle("Eval Tab")
+
+	// Session with JS runtime
+	rt, err := js.New(js.Options{URL: "https://example.com/eval"})
+	if err != nil {
+		t.Fatalf("js.New failed: %v", err)
+	}
+	defer rt.Close()
+
+	sess, err := engine.NewSession("<html><body><h1>JS</h1></body></html>", nil, 800, engine.WithJS(rt))
+	if err != nil {
+		t.Fatalf("NewSession with JS failed: %v", err)
+	}
+	tab.SetSession(sess)
+	f.tabMgr.SwitchTo(tab.ID())
+
+	// Evaluate 10 + 20
+	_, htmlContent := f.buildInternalPageHTML(fmt.Sprintf("goosie://inspect?tab=%d&eval=10+%%2B+20", tab.ID()))
+	if !strings.Contains(htmlContent, "10 + 20") {
+		t.Errorf("HTML should contain eval expression '10 + 20'")
+	}
+	if !strings.Contains(htmlContent, "30") {
+		t.Errorf("HTML should contain evaluated result '30'")
+	}
+}
+
+func TestInspectShortcut(t *testing.T) {
+	inspectCalls := 0
+	cw := &chromeWindow{
+		onInspect: func() { inspectCalls++ },
+	}
+
+	// Cmd+Option+I -> onInspect
+	handled := cw.handleTabShortcut('i', surface.ModCommand|surface.ModOption)
+	if !handled || inspectCalls != 1 {
+		t.Fatalf("Cmd+Option+I ('i'): handled=%v, inspectCalls=%d", handled, inspectCalls)
+	}
+
+	// Cmd+Option+I (uppercase 'I') -> onInspect
+	handled = cw.handleTabShortcut('I', surface.ModCommand|surface.ModOption)
+	if !handled || inspectCalls != 2 {
+		t.Fatalf("Cmd+Option+I ('I'): handled=%v, inspectCalls=%d", handled, inspectCalls)
+	}
+
+	// Plain Cmd+I (without Option) should not trigger inspect
+	handled = cw.handleTabShortcut('i', surface.ModCommand)
+	if handled || inspectCalls != 2 {
+		t.Fatalf("Plain Cmd+I should not trigger inspect: handled=%v, inspectCalls=%d", handled, inspectCalls)
 	}
 }

@@ -1931,6 +1931,43 @@ func (r *Runtime) Run(src, sourceURL string) error {
 	return nil
 }
 
+// Evaluate executes a JavaScript expression, returning its string representation or an error.
+func (r *Runtime) Evaluate(expr string) (string, error) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return "", ErrClosed
+	}
+	r.mu.Unlock()
+
+	if len(expr) > MaxScriptBytes {
+		return "", ErrTooLarge
+	}
+
+	timeout := r.opts.Timeout
+	if timeout == 0 {
+		timeout = DefaultTimeout
+	}
+
+	timer := time.AfterFunc(timeout, func() {
+		r.vm.Interrupt(ErrInterrupted)
+	})
+	defer timer.Stop()
+
+	val, err := r.vm.RunString(expr)
+	_ = r.drainMicrotasks()
+	if err != nil {
+		return "", r.mapError(err, "eval")
+	}
+	if val == nil || goja.IsUndefined(val) {
+		return "undefined", nil
+	}
+	if goja.IsNull(val) {
+		return "null", nil
+	}
+	return val.String(), nil
+}
+
 func (r *Runtime) mapError(err error, sourceURL string) error {
 	if err == nil {
 		return nil

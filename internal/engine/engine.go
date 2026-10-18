@@ -9,6 +9,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	stdimage "image"
 	"math"
@@ -1894,4 +1895,49 @@ func (s *Session) startAnimations() {
 			now,
 		)
 	}
+}
+
+// Stylesheets returns a slice of parsed stylesheets applied to this session.
+func (s *Session) Stylesheets() []*css.Stylesheet {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	out := make([]*css.Stylesheet, len(s.sheets))
+	copy(out, s.sheets)
+	return out
+}
+
+// DOMStats computes the total node count and maximum depth of the session's DOM tree.
+func (s *Session) DOMStats() (nodeCount int, maxDepth int) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.Doc == nil {
+		return 0, 0
+	}
+	var walk func(n *dom.Node, depth int)
+	walk = func(n *dom.Node, depth int) {
+		if n == nil {
+			return
+		}
+		nodeCount++
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, depth+1)
+		}
+	}
+	walk(&s.Doc.Node, 1)
+	return nodeCount, maxDepth
+}
+
+// EvaluateJS runs a JavaScript expression against the document's JS runtime
+// and returns its string result.
+func (s *Session) EvaluateJS(expr string) (string, error) {
+	s.opMu.Lock()
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if rt == nil {
+		return "", errors.New("engine: JS runtime not active")
+	}
+	return rt.Evaluate(expr)
 }

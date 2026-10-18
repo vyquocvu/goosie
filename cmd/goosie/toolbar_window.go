@@ -28,6 +28,7 @@ type chromeWindow struct {
 	onZoom            func(delta float64)
 	onLinkClick       func(href string)
 	onBookmark        func()
+	onInspect         func()
 	onFocusClick      func(contentX, contentY int32) bool
 	onContentKey      func(key rune, mods surface.KeyMod) bool
 	onDragSelect      func(action surface.PointerAction, contentX, contentY int32) bool
@@ -540,6 +541,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case key == 'd' || key == 'D':
 		if cw.onBookmark != nil {
 			cw.onBookmark()
+			return true
+		}
+	case (key == 'i' || key == 'I') && (mods&surface.ModOption != 0):
+		if cw.onInspect != nil {
+			cw.onInspect()
 			return true
 		}
 	case key == 'c' || key == 'C':

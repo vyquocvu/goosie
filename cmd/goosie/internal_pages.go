@@ -8,12 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/paint"
+	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
 // internalNavHeader returns standard top navigation for all goosie:// internal pages.
@@ -27,6 +30,7 @@ func internalNavHeader(active string) string {
 		{"bookmarks", "Bookmarks", "goosie://bookmarks"},
 		{"history", "History", "goosie://history"},
 		{"downloads", "Downloads", "goosie://downloads"},
+		{"inspect", "Inspector", "goosie://inspect"},
 	}
 
 	var b strings.Builder
@@ -512,6 +516,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildHistoryPageHTML(f)
 	case "downloads":
 		return buildDownloadsPageHTML(f, rawURL)
+	case "inspect", "devtools":
+		return buildInspectPageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">
@@ -522,10 +528,205 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
         <li><a class="list-link" href="goosie://bookmarks">goosie://bookmarks</a> &mdash; Manage saved bookmarks</li>
         <li><a class="list-link" href="goosie://history">goosie://history</a> &mdash; Browsing history</li>
         <li><a class="list-link" href="goosie://downloads">goosie://downloads</a> &mdash; Downloaded files</li>
+        <li><a class="list-link" href="goosie://inspect">goosie://inspect</a> &mdash; Web Inspector &amp; DOM/CSS Tree Explorer (Cmd+Option+I)</li>
       </ul>
     </div>`
 		return "Goosie Pages", internalPageTemplate("", "Goosie Pages", body)
 	}
+}
+
+// buildInspectPageHTML generates the Web Inspector page inspecting a live browser tab.
+func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
+	u, _ := url.Parse(rawURL)
+	targetIDStr := ""
+	evalExpr := ""
+	if u != nil {
+		targetIDStr = u.Query().Get("tab")
+		evalExpr = u.Query().Get("eval")
+	}
+
+	var targetTab *tabs.Tab
+	var allTabs []*tabs.Tab
+	if f.tabMgr != nil {
+		allTabs = f.tabMgr.Tabs()
+	}
+
+	if targetIDStr != "" && f.tabMgr != nil {
+		if id, err := strconv.ParseUint(targetIDStr, 10, 64); err == nil {
+			targetTab = f.tabMgr.TabByID(id)
+		}
+	}
+	if targetTab == nil && f.tabMgr != nil {
+		active := f.tabMgr.Active()
+		if active != nil && !strings.HasPrefix(strings.ToLower(active.URL()), "goosie://inspect") {
+			targetTab = active
+		} else {
+			for _, t := range allTabs {
+				if !strings.HasPrefix(strings.ToLower(t.URL()), "goosie://") {
+					targetTab = t
+					break
+				}
+			}
+		}
+	}
+
+	if targetTab == nil || targetTab.Session() == nil {
+		body := `<div class="card">
+      <h1>Web Inspector</h1>
+      <p style="color: #5f6368;">No active web document found to inspect.</p>
+      <p>Navigate to any webpage (e.g. <code>https://news.ycombinator.com</code>) in a browser tab, then press <code>Cmd+Option+I</code> to inspect its live DOM tree, computed CSS box model, and JavaScript runtime.</p>
+    </div>`
+		return "Web Inspector", internalPageTemplate("inspect", "Web Inspector", body)
+	}
+
+	sess := targetTab.Session()
+	nodeCount, maxDepth := sess.DOMStats()
+	sheets := sess.Stylesheets()
+
+	var b strings.Builder
+
+	// Header card with tab picker
+	b.WriteString(`<div class="card">`)
+	b.WriteString(fmt.Sprintf(`<h1>Web Inspector &mdash; %s</h1>`, html.EscapeString(targetTab.Title())))
+	b.WriteString(fmt.Sprintf(`<p style="color: #5f6368; word-break: break-all;">Inspecting: <a href="%s" style="color: #1a73e8;">%s</a></p>`, html.EscapeString(targetTab.URL()), html.EscapeString(targetTab.URL())))
+
+	// Open tabs pill list
+	if len(allTabs) > 0 {
+		b.WriteString(`<div style="margin-top: 12px; margin-bottom: 8px;"><b style="font-size: 13px;">Open Tabs:</b> `)
+		for _, t := range allTabs {
+			if strings.HasPrefix(strings.ToLower(t.URL()), "goosie://inspect") {
+				continue
+			}
+			activeStyle := "background-color: #e8f0fe; color: #1a73e8; border: 1px solid #1a73e8; font-weight: bold;"
+			if t.ID() != targetTab.ID() {
+				activeStyle = "background-color: #f1f3f4; color: #3c4043; border: 1px solid #dadce0;"
+			}
+			b.WriteString(fmt.Sprintf(`<a href="goosie://inspect?tab=%d" style="display: inline-block; padding: 4px 10px; margin-right: 6px; margin-bottom: 4px; border-radius: 12px; text-decoration: none; font-size: 12px; %s">%s</a> `, t.ID(), activeStyle, html.EscapeString(t.Title())))
+		}
+		b.WriteString(`</div>`)
+	}
+
+	// Metrics summary cards
+	b.WriteString(`<div style="display: flex; gap: 16px; margin-top: 16px;">`)
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #1a73e8;">%d</div><div style="font-size: 12px; color: #5f6368;">DOM Nodes</div></div>`, nodeCount))
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #188038;">%d</div><div style="font-size: 12px; color: #5f6368;">Tree Depth</div></div>`, maxDepth))
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #e37400;">%d</div><div style="font-size: 12px; color: #5f6368;">Stylesheets</div></div>`, len(sheets)))
+	b.WriteString(`</div></div>`)
+
+	// DOM Elements Tree Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Elements (DOM Tree)</h2>`)
+	b.WriteString(`<div style="background-color: #282c34; color: #abb2bf; font-family: monospace; font-size: 13px; padding: 16px; border-radius: 6px; overflow-x: auto; line-height: 1.6;">`)
+	if sess.Doc != nil {
+		renderDOMTreeHTML(&b, &sess.Doc.Node, 0, 150)
+	} else {
+		b.WriteString(`<em>Empty Document</em>`)
+	}
+	b.WriteString(`</div></div>`)
+
+	// CSS Box Model Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Computed CSS Box Model</h2>`)
+	b.WriteString(`<div style="margin: 16px auto; max-width: 480px; background-color: #fce8b2; border: 1px dashed #f29900; border-radius: 6px; padding: 14px; text-align: center; font-family: monospace; font-size: 12px;">
+      <div style="color: #b06000; font-weight: bold; margin-bottom: 6px;">margin (auto)</div>
+      <div style="background-color: #fef7e0; border: 1px solid #f9ab00; border-radius: 4px; padding: 12px;">
+        <div style="color: #b06000; font-weight: bold; margin-bottom: 6px;">border (1px)</div>
+        <div style="background-color: #e6f4ea; border: 1px solid #34a853; border-radius: 4px; padding: 12px;">
+          <div style="color: #137333; font-weight: bold; margin-bottom: 6px;">padding (16px)</div>
+          <div style="background-color: #c2e7ff; border: 1px solid #1a73e8; border-radius: 4px; padding: 14px; color: #0b57d0; font-weight: bold;">
+            content (viewport)
+          </div>
+        </div>
+      </div>
+    </div></div>`)
+
+	// Active Stylesheets Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Active Stylesheets</h2>`)
+	if len(sheets) == 0 {
+		b.WriteString(`<p style="color: #5f6368;">No external or inline stylesheets found (Default User-Agent styling applies).</p>`)
+	} else {
+		b.WriteString(`<table><thead><tr><th>#</th><th>Origin</th><th>Rules</th></tr></thead><tbody>`)
+		for i, s := range sheets {
+			b.WriteString(fmt.Sprintf(`<tr><td>%d</td><td>%s</td><td>%d rules</td></tr>`, i+1, "Author Stylesheet", len(s.Rules)))
+		}
+		b.WriteString(`</tbody></table>`)
+	}
+	b.WriteString(`</div>`)
+
+	// Console REPL Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Console REPL</h2>`)
+	if evalExpr != "" {
+		res, err := sess.EvaluateJS(evalExpr)
+		b.WriteString(fmt.Sprintf(`<div style="background: #f1f3f4; padding: 10px; border-radius: 4px; font-family: monospace; margin-bottom: 12px;"><b>&gt;</b> %s</div>`, html.EscapeString(evalExpr)))
+		if err != nil {
+			b.WriteString(fmt.Sprintf(`<div style="color: #d93025; font-family: monospace; margin-bottom: 12px;"><b>Error:</b> %s</div>`, html.EscapeString(err.Error())))
+		} else {
+			b.WriteString(fmt.Sprintf(`<div style="color: #188038; font-family: monospace; margin-bottom: 12px;"><b>&lt;</b> %s</div>`, html.EscapeString(res)))
+		}
+	}
+	b.WriteString(fmt.Sprintf(`
+      <form action="goosie://inspect" method="GET">
+        <input type="hidden" name="tab" value="%d">
+        <div style="display: flex; gap: 8px;">
+          <input type="text" name="eval" placeholder="document.title, location.href, 2 + 2..." style="flex: 1; padding: 8px 12px; border: 1px solid #dadce0; border-radius: 4px; font-family: monospace;" value="%s">
+          <button type="submit" class="btn-action" style="border: none; cursor: pointer;">Execute</button>
+        </div>
+      </form>
+    </div>`, targetTab.ID(), html.EscapeString(evalExpr)))
+
+	return "Web Inspector", internalPageTemplate("inspect", "Web Inspector", b.String())
+}
+
+// renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.
+func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int) int {
+	if n == nil || limit <= 0 {
+		return limit
+	}
+	indent := strings.Repeat("&nbsp;&nbsp;", depth)
+
+	switch n.Type {
+	case dom.NodeElement:
+		b.WriteString(indent)
+		b.WriteString(fmt.Sprintf(`&lt;<span style="color: #e06c75; font-weight: bold;">%s</span>`, html.EscapeString(n.Data)))
+		if len(n.Attr) > 0 {
+			for _, a := range n.Attr {
+				b.WriteString(fmt.Sprintf(` <span style="color: #d19a66;">%s</span>=<span style="color: #98c379;">&quot;%s&quot;</span>`, html.EscapeString(a.Name), html.EscapeString(a.Value)))
+			}
+		}
+		if n.FirstChild == nil {
+			b.WriteString(` /&gt;<br>`)
+			return limit - 1
+		}
+		b.WriteString(`&gt;<br>`)
+		limit--
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			if limit <= 0 {
+				b.WriteString(indent + `&nbsp;&nbsp;<span style="color: #5c6370;">... (more child nodes truncated)</span><br>`)
+				break
+			}
+			limit = renderDOMTreeHTML(b, child, depth+1, limit)
+		}
+		b.WriteString(fmt.Sprintf(`%s&lt;/<span style="color: #e06c75; font-weight: bold;">%s</span>&gt;<br>`, indent, html.EscapeString(n.Data)))
+	case dom.NodeText:
+		text := strings.TrimSpace(n.Data)
+		if text == "" {
+			text = strings.TrimSpace(n.DataContent)
+		}
+		if text != "" {
+			if len(text) > 80 {
+				text = text[:80] + "..."
+			}
+			b.WriteString(fmt.Sprintf(`%s<span style="color: #5c6370;">&quot;%s&quot;</span><br>`, indent, html.EscapeString(text)))
+			limit--
+		}
+	case dom.NodeDocument:
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			limit = renderDOMTreeHTML(b, child, depth, limit)
+		}
+	}
+	return limit
 }
 
 // renderInternalPage compiles a goosie:// internal page into a frame Layer and engine Session.
