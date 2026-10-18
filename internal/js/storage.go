@@ -365,3 +365,110 @@ func quotaExceededError(r *Runtime) goja.Value {
 	_ = e.Set("message", "Storage quota exceeded")
 	return e
 }
+
+// StorageEntry represents a key-value entry in web storage.
+type StorageEntry struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// DumpLocalStorage returns a snapshot of all entries in localStorage for an origin.
+func (r *OriginStorageRegistry) DumpLocalStorage(origin string) []StorageEntry {
+	if r == nil {
+		return nil
+	}
+	if origin == "" {
+		origin = "null"
+	}
+	r.mu.Lock()
+	s, ok := r.localStores[origin]
+	if !ok {
+		s = newStorageObj()
+		if r.baseDir != "" && !r.incognito && origin != "null" {
+			r.loadOriginLocked(origin, s)
+		}
+		r.localStores[origin] = s
+	}
+	r.mu.Unlock()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]StorageEntry, 0, len(s.order))
+	for _, k := range s.order {
+		if v, ok := s.data[k]; ok {
+			out = append(out, StorageEntry{Key: k, Value: v})
+		}
+	}
+	return out
+}
+
+// ClearLocalStorage drops all keys in localStorage for an origin.
+func (r *OriginStorageRegistry) ClearLocalStorage(origin string) {
+	if r == nil {
+		return
+	}
+	if origin == "" {
+		origin = "null"
+	}
+	r.mu.Lock()
+	s, ok := r.localStores[origin]
+	r.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.data = make(map[string]string)
+	s.order = nil
+	s.used = 0
+	onChange := s.onChange
+	s.mu.Unlock()
+	if onChange != nil {
+		onChange()
+	}
+}
+
+// SetLocalStorageItem sets a key-value pair in localStorage for an origin.
+func (r *OriginStorageRegistry) SetLocalStorageItem(origin, key, val string) {
+	if r == nil {
+		return
+	}
+	s := r.GetLocalStorage(origin)
+	s.mu.Lock()
+	if _, exists := s.data[key]; !exists {
+		s.order = append(s.order, key)
+	}
+	s.data[key] = val
+	onChange := s.onChange
+	s.mu.Unlock()
+	if onChange != nil {
+		onChange()
+	}
+}
+
+// RemoveLocalStorageItem removes a key from localStorage for an origin.
+func (r *OriginStorageRegistry) RemoveLocalStorageItem(origin, key string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	s, ok := r.localStores[origin]
+	r.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	if _, exists := s.data[key]; exists {
+		delete(s.data, key)
+		for i, k := range s.order {
+			if k == key {
+				s.order = append(s.order[:i], s.order[i+1:]...)
+				break
+			}
+		}
+	}
+	onChange := s.onChange
+	s.mu.Unlock()
+	if onChange != nil {
+		onChange()
+	}
+}

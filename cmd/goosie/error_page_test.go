@@ -35,6 +35,16 @@ func TestCategorizeError(t *testing.T) {
 			wantHeading: "Connection Timed Out",
 		},
 		{
+			err:         errors.New("dial tcp: connect: network is unreachable"),
+			wantCode:    "ERR_INTERNET_DISCONNECTED",
+			wantHeading: "No Internet Connection",
+		},
+		{
+			err:         errors.New("net: request blocked by ad/tracker filter: tracker.com"),
+			wantCode:    "ERR_BLOCKED_BY_CLIENT",
+			wantHeading: "Blocked by Shield",
+		},
+		{
 			err:         errors.New("some generic network pipe broken error"),
 			wantCode:    "ERR_CONNECTION_FAILED",
 			wantHeading: "This Site Can’t Be Reached",
@@ -68,6 +78,12 @@ func TestFormatErrorPageHTMLSanitization(t *testing.T) {
 	}
 	if strings.Contains(htmlContent, "<b>bold</b>") {
 		t.Fatal("HTML should escape tags in error message")
+	}
+	if !strings.Contains(htmlContent, "Try Again") {
+		t.Fatal("HTML should contain Try Again action button")
+	}
+	if !strings.Contains(htmlContent, "Diagnostics") {
+		t.Fatal("HTML should contain Diagnostics link to goosie://version")
 	}
 }
 

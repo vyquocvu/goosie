@@ -1,12 +1,29 @@
 package net
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 )
+
+type shieldsDisabledKey struct{}
+
+// WithShieldsDisabled returns a copy of parent context with the shields disabled flag set.
+func WithShieldsDisabled(ctx context.Context, disabled bool) context.Context {
+	return context.WithValue(ctx, shieldsDisabledKey{}, disabled)
+}
+
+// IsShieldsDisabled reports whether ad/tracker shields are disabled in ctx.
+func IsShieldsDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, ok := ctx.Value(shieldsDisabledKey{}).(bool)
+	return ok && v
+}
 
 // ErrBlockedByFilter reports that a request was refused by the ad/tracker filter.
 var ErrBlockedByFilter = errors.New("net: request blocked by ad/tracker filter")

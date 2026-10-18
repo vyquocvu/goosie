@@ -542,3 +542,42 @@ func parseSetCookie(raw string) *Cookie {
 	}
 	return c
 }
+
+// AllCookies returns a snapshot of all active cookies currently held in the jar.
+func (j *CookieJar) AllCookies() []Cookie {
+	if j == nil {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	now := time.Now()
+	out := make([]Cookie, 0, len(j.entries))
+	for _, c := range j.entries {
+		if !c.Expires.IsZero() && c.Expires.Before(now) {
+			continue
+		}
+		out = append(out, *c)
+	}
+	return out
+}
+
+// CookiesForHost returns all active cookies matching the given hostname.
+func (j *CookieJar) CookiesForHost(host string) []Cookie {
+	if j == nil {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	host = strings.ToLower(host)
+	now := time.Now()
+	var out []Cookie
+	for _, c := range j.entries {
+		if !c.Expires.IsZero() && c.Expires.Before(now) {
+			continue
+		}
+		if hostMatchesDomain(host, c.Domain) {
+			out = append(out, *c)
+		}
+	}
+	return out
+}

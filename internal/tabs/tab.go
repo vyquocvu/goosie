@@ -26,19 +26,21 @@ type NavController struct {
 // keeps its (it is a locked type already), and the ID never changes after
 // creation.
 type Tab struct {
-	mu        sync.RWMutex
-	id        uint64
-	url       string
-	title     string
-	history   *toolbar.History
-	scrollY   int32
-	layer     *frame.Layer
-	session   *engine.Session
-	loading   bool
-	err       string
-	bgColor   frame.Color
-	incognito bool
-	pinned    bool
+	mu              sync.RWMutex
+	id              uint64
+	url             string
+	title           string
+	history         *toolbar.History
+	scrollY         int32
+	layer           *frame.Layer
+	session         *engine.Session
+	loading         bool
+	err             string
+	bgColor         frame.Color
+	incognito       bool
+	pinned          bool
+	shieldsDisabled bool
+	blockedTrackers int
 
 	Nav NavController
 }
@@ -49,6 +51,41 @@ func newTab(id uint64) *Tab {
 		title:   "New Tab",
 		history: toolbar.NewHistory(),
 	}
+}
+
+// ShieldsEnabled reports whether ad and tracker blocking shields are active for this tab.
+func (t *Tab) ShieldsEnabled() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return !t.shieldsDisabled
+}
+
+// SetShieldsEnabled toggles ad and tracker blocking shields for this tab.
+func (t *Tab) SetShieldsEnabled(enabled bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.shieldsDisabled = !enabled
+}
+
+// BlockedTrackers returns the number of requests blocked by shields on this tab.
+func (t *Tab) BlockedTrackers() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.blockedTrackers
+}
+
+// IncrementBlockedTrackers increments the blocked request counter.
+func (t *Tab) IncrementBlockedTrackers() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.blockedTrackers++
+}
+
+// ResetBlockedTrackers resets the blocked request counter.
+func (t *Tab) ResetBlockedTrackers() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.blockedTrackers = 0
 }
 
 // Incognito reports whether the tab is running in private incognito mode.

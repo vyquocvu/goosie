@@ -704,7 +704,11 @@ func (f *framePath) navigateTab(rawURL string) {
 		tab.Nav.Cancel()
 	}
 	ctx, cancel := context.WithCancel(f.navContext())
+	if !tab.ShieldsEnabled() {
+		ctx = net.WithShieldsDisabled(ctx, true)
+	}
 	tab.Nav.Cancel = cancel
+
 	tab.Nav.Serial++
 	serial := tab.Nav.Serial
 	tab.Nav.Loading = true

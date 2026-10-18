@@ -15,6 +15,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/tabs"
@@ -259,6 +260,14 @@ func buildVersionPageHTML(f *framePath) (string, string) {
       <tr><td class="label">MaxDocumentNodes</td><td class="val">%s</td></tr>
       <tr><td class="label">MaxLayoutObjects</td><td class="val">%s</td></tr>
       <tr><td class="label">MaxDocumentTiles</td><td class="val">%s tiles</td></tr>
+    </table>
+
+    <h2>Network & Security Posture</h2>
+    <table>
+      <tr><td class="label">Ad & Tracker Shield</td><td class="val"><span class="badge badge-completed">Active</span></td></tr>
+      <tr><td class="label">DNS-over-HTTPS</td><td class="val">RFC 8484 Compliant Resolver</td></tr>
+      <tr><td class="label">Cookie Security</td><td class="val">RFC 6265 with HttpOnly & SameSite Isolation</td></tr>
+      <tr><td class="label">Web Storage API</td><td class="val">Origin-Scoped Atomic Persistence</td></tr>
     </table>
 
     <h2>Active Session Metrics</h2>
@@ -586,6 +595,28 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		}
 	}
 
+	if targetTab != nil {
+		switch action {
+		case "toggle_shields":
+			targetTab.SetShieldsEnabled(!targetTab.ShieldsEnabled())
+		case "storage_del":
+			key := u.Query().Get("key")
+			origin := js.OriginOf(targetTab.URL())
+			if f.storage != nil && key != "" {
+				f.storage.RemoveLocalStorageItem(origin, key)
+			}
+		case "storage_clear":
+			origin := js.OriginOf(targetTab.URL())
+			if f.storage != nil {
+				f.storage.ClearLocalStorage(origin)
+			}
+		case "cookies_clear":
+			if f.client != nil && f.client.Jar() != nil {
+				f.client.Jar().Clear()
+			}
+		}
+	}
+
 	if targetTab == nil || targetTab.Session() == nil {
 		body := `<div class="card">
       <h1>Web Inspector</h1>
@@ -721,6 +752,91 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			html.EscapeString(f.emulationPreset.Name), f.emulationPreset.Width, f.emulationPreset.Height, f.emulationPreset.DPR))
 	} else {
 		b.WriteString(`<p style="margin-top: 10px; font-size: 13px; color: #5f6368;"><b>Active Emulation:</b> Desktop (Window Native)</p>`)
+	}
+	b.WriteString(`</div>`)
+
+	// Shields & Privacy Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Shields &amp; Privacy</h2>`)
+	shieldsBadge := `<span class="badge badge-completed">Protection Active</span>`
+	toggleActionText := "Disable for this tab"
+	toggleBtnClass := "btn-action secondary"
+	if !targetTab.ShieldsEnabled() {
+		shieldsBadge = `<span class="badge badge-failed">Protection Disabled</span>`
+		toggleActionText = "Enable Protection"
+		toggleBtnClass = "btn-action"
+	}
+	b.WriteString(fmt.Sprintf(`
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          %s
+          <span style="margin-left: 10px; font-size: 14px; color: #5f6368;">Blocked Trackers / Ads: <b>%d</b></span>
+        </div>
+        <a class="%s" href="goosie://inspect?action=toggle_shields&tab=%d">%s</a>
+      </div>`, shieldsBadge, targetTab.BlockedTrackers(), toggleBtnClass, targetTab.ID(), toggleActionText))
+	b.WriteString(`</div>`)
+
+	// Web Storage (localStorage) Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Web Storage (localStorage)</h2>`)
+	origin := js.OriginOf(targetTab.URL())
+	b.WriteString(fmt.Sprintf(`<p style="color: #5f6368; font-size: 13px;">Origin: <code>%s</code></p>`, html.EscapeString(origin)))
+	var localEntries []js.StorageEntry
+	if f.storage != nil {
+		localEntries = f.storage.DumpLocalStorage(origin)
+	}
+	if len(localEntries) == 0 {
+		b.WriteString(`<p style="color: #5f6368;">No localStorage keys stored for this origin.</p>`)
+	} else {
+		b.WriteString(`<table><thead><tr><th>Key</th><th>Value</th><th>Action</th></tr></thead><tbody>`)
+		for _, e := range localEntries {
+			delLink := fmt.Sprintf(`goosie://inspect?action=storage_del&key=%s&tab=%d`, url.QueryEscape(e.Key), targetTab.ID())
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-family: monospace; font-weight: bold;">%s</td><td style="font-family: monospace; word-break: break-all;">%s</td><td><a class="btn-action danger" href="%s">Delete</a></td></tr>`,
+				html.EscapeString(e.Key), html.EscapeString(e.Value), delLink))
+		}
+		b.WriteString(`</tbody></table>`)
+		clearLink := fmt.Sprintf(`goosie://inspect?action=storage_clear&tab=%d`, targetTab.ID())
+		b.WriteString(fmt.Sprintf(`<div style="margin-top: 12px;"><a class="btn-action danger" href="%s">Clear All LocalStorage</a></div>`, clearLink))
+	}
+	b.WriteString(`</div>`)
+
+	// Cookies Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Cookies (Active Jar)</h2>`)
+	var docHost string
+	if parsedU, err := url.Parse(targetTab.URL()); err == nil {
+		docHost = parsedU.Hostname()
+	}
+	var cookies []net.Cookie
+	if f.client != nil && f.client.Jar() != nil {
+		if docHost != "" {
+			cookies = f.client.Jar().CookiesForHost(docHost)
+		} else {
+			cookies = f.client.Jar().AllCookies()
+		}
+	}
+	if len(cookies) == 0 {
+		b.WriteString(`<p style="color: #5f6368;">No active cookies found for this host.</p>`)
+	} else {
+		b.WriteString(`<table><thead><tr><th>Name</th><th>Value</th><th>Domain</th><th>Path</th><th>Expires</th><th>Flags</th></tr></thead><tbody>`)
+		for _, c := range cookies {
+			flags := ""
+			if c.HttpOnly {
+				flags += `<span class="badge" style="background:#e8f0fe; color:#1a73e8; margin-right:4px;">HttpOnly</span>`
+			}
+			if c.Secure {
+				flags += `<span class="badge" style="background:#e6f4ea; color:#137333;">Secure</span>`
+			}
+			expStr := "Session"
+			if !c.Expires.IsZero() {
+				expStr = c.Expires.Format("Jan 02, 2006 15:04")
+			}
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-family: monospace; font-weight: bold;">%s</td><td style="font-family: monospace; word-break: break-all;">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+				html.EscapeString(c.Name), html.EscapeString(c.Value), html.EscapeString(c.Domain), html.EscapeString(c.Path), expStr, flags))
+		}
+		b.WriteString(`</tbody></table>`)
+		clearCookiesLink := fmt.Sprintf(`goosie://inspect?action=cookies_clear&tab=%d`, targetTab.ID())
+		b.WriteString(fmt.Sprintf(`<div style="margin-top: 12px;"><a class="btn-action danger" href="%s">Clear All Cookies</a></div>`, clearCookiesLink))
 	}
 	b.WriteString(`</div>`)
 

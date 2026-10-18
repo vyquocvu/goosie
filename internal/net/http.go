@@ -586,8 +586,9 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 		}
 		return res, err
 	}
-	if c.filter != nil && c.filter.IsEnabled() {
+	if c.filter != nil && c.filter.IsEnabled() && !IsShieldsDisabled(ctx) {
 		if blocked, reason := c.filter.ShouldBlock(normalized); blocked {
+
 			if c.netLog != nil {
 				c.netLog.Record(RequestTrace{
 					URL:           normalized,

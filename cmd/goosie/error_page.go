@@ -16,6 +16,11 @@ func categorizeError(err error) (code, heading, summary string) {
 	}
 	s := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(s, "blocked by") || strings.Contains(s, "tracker filter") || strings.Contains(s, "filterengine") || strings.Contains(s, "ad/tracker"):
+		return "ERR_BLOCKED_BY_CLIENT", "Blocked by Shield", "This page or resource was blocked by Goosie Ad & Tracker Protection."
+
+	case strings.Contains(s, "network is unreachable") || strings.Contains(s, "no internet") || strings.Contains(s, "offline") || strings.Contains(s, "host is down") || strings.Contains(s, "no route to host"):
+		return "ERR_INTERNET_DISCONNECTED", "No Internet Connection", "Your computer is offline. Check your network connection, Wi-Fi, and router."
 	case strings.Contains(s, "no such host") || strings.Contains(s, "lookup") || strings.Contains(s, "server misbehaving"):
 		return "ERR_NAME_NOT_RESOLVED", "Server Not Found", "Goosie cannot find the server at this address."
 	case strings.Contains(s, "connection refused"):
@@ -118,9 +123,13 @@ ul {
       <li>Checking your network connection and cables</li>
       <li>Checking your firewall and proxy settings</li>
     </ul>
+    <div style="margin-top: 24px; display: flex; gap: 12px;">
+      <a href="%s" style="display: inline-block; background-color: #1a73e8; color: #ffffff; text-decoration: none; padding: 8px 16px; border-radius: 4px; font-weight: 500; font-size: 14px;">Try Again</a>
+      <a href="goosie://version" style="display: inline-block; background-color: #f1f3f4; color: #3c4043; text-decoration: none; padding: 8px 16px; border-radius: 4px; font-weight: 500; font-size: 14px;">Diagnostics</a>
+    </div>
   </div>
 </body>
-</html>`, heading, escapedURL, summary, code, escapedErr)
+</html>`, heading, escapedURL, summary, code, escapedErr, escapedURL)
 }
 
 // buildErrorPage renders the error HTML page into a frame Layer for in-viewport display.
