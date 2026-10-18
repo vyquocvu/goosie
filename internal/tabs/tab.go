@@ -26,17 +26,18 @@ type NavController struct {
 // keeps its (it is a locked type already), and the ID never changes after
 // creation.
 type Tab struct {
-	mu      sync.RWMutex
-	id      uint64
-	url     string
-	title   string
-	history *toolbar.History
-	scrollY int32
-	layer   *frame.Layer
-	session *engine.Session
-	loading bool
-	err     string
-	bgColor frame.Color
+	mu        sync.RWMutex
+	id        uint64
+	url       string
+	title     string
+	history   *toolbar.History
+	scrollY   int32
+	layer     *frame.Layer
+	session   *engine.Session
+	loading   bool
+	err       string
+	bgColor   frame.Color
+	incognito bool
 
 	Nav NavController
 }
@@ -47,6 +48,20 @@ func newTab(id uint64) *Tab {
 		title:   "New Tab",
 		history: toolbar.NewHistory(),
 	}
+}
+
+// Incognito reports whether the tab is running in private incognito mode.
+func (t *Tab) Incognito() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.incognito
+}
+
+// SetIncognito configures the tab's private incognito mode.
+func (t *Tab) SetIncognito(incognito bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.incognito = incognito
 }
 
 // ID identifies the tab; it never changes after creation.

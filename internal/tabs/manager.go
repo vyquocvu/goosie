@@ -56,6 +56,22 @@ func (m *TabManager) NewTab() *Tab {
 	return tab
 }
 
+// NewIncognitoTab creates a new private incognito tab.
+func (m *TabManager) NewIncognitoTab() *Tab {
+	m.mu.Lock()
+	m.nextID++
+	tab := newTab(m.nextID)
+	tab.incognito = true
+	tab.title = "New Incognito Tab"
+	m.tabs = append(m.tabs, tab)
+	if len(m.tabs) == 1 {
+		m.activeIdx = 0
+	}
+	m.mu.Unlock()
+	m.fireChange()
+	return tab
+}
+
 func (m *TabManager) Active() *Tab {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -89,7 +105,8 @@ func (m *TabManager) CloseTab(id uint64) {
 		}
 	}
 	url := closingTab.URL()
-	if url != "" || hasHistory {
+	// Incognito tabs are ephemeral and leave zero trace in closed tab history.
+	if !closingTab.Incognito() && (url != "" || hasHistory) {
 		m.closedTabs = append(m.closedTabs, ClosedTab{
 			URL:     url,
 			Title:   closingTab.Title(),

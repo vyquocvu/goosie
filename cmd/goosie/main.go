@@ -301,26 +301,27 @@ func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
 // framePath is the assembled pipeline: everything between a vsync and a Present, with
 // the pieces a report has to name kept reachable.
 type framePath struct {
-	window     surface.Window
-	loop       *surface.Loop
-	sched      *raster.Scheduler
-	pool       *raster.Pool
-	composer   *surface.Composer
-	layer      *frame.Layer
-	rec        *frame.FrameRecorder
-	spec       paint.SceneSpec
-	config     config
-	toolbar    *toolbar.State
-	tabMgr     *tabs.TabManager
-	client     net.HTTP
-	fonts      *raster.Fonts
-	bookmarks  *bookmarks.Store
-	history    *history.Store
-	downloads  *download.Manager
-	started    time.Time
-	navResults chan navResult
-	imgResults chan imgResult
-	zoom       float64
+	window        surface.Window
+	loop          *surface.Loop
+	sched         *raster.Scheduler
+	pool          *raster.Pool
+	composer      *surface.Composer
+	layer         *frame.Layer
+	rec           *frame.FrameRecorder
+	spec          paint.SceneSpec
+	config        config
+	toolbar       *toolbar.State
+	tabMgr        *tabs.TabManager
+	client        net.HTTP
+	privateClient net.HTTP
+	fonts         *raster.Fonts
+	bookmarks     *bookmarks.Store
+	history       *history.Store
+	downloads     *download.Manager
+	started       time.Time
+	navResults    chan navResult
+	imgResults    chan imgResult
+	zoom          float64
 	// runCtx roots navigation contexts so shutdown cancels in-flight loads
 	// (they used to hang off context.Background and outlive the window);
 	// navWg joins them before the window closes. closeTab still cancels a
@@ -423,22 +424,23 @@ func build(c config) (*framePath, error) {
 	// and the one fact it cannot observe is when the process began.
 	rec.SetStartupReference(processStart)
 	f := &framePath{
-		sched:      raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
-		pool:       wp,
-		composer:   surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
-		layer:      layer,
-		docHeight:  spec.DocHeight,
-		rec:        rec,
-		spec:       spec,
-		config:     c,
-		client:     client,
-		fonts:      fonts,
-		bookmarks:  bookmarkStore,
-		history:    historyStore,
-		downloads:  download.NewManager(c.downloadDir),
-		navResults: make(chan navResult, 16),
-		imgResults: make(chan imgResult, 16),
-		zoom:       1.0,
+		sched:         raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
+		pool:          wp,
+		composer:      surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
+		layer:         layer,
+		docHeight:     spec.DocHeight,
+		rec:           rec,
+		spec:          spec,
+		config:        c,
+		client:        client,
+		privateClient: net.DefaultPrivateClient(),
+		fonts:         fonts,
+		bookmarks:     bookmarkStore,
+		history:       historyStore,
+		downloads:     download.NewManager(c.downloadDir),
+		navResults:    make(chan navResult, 16),
+		imgResults:    make(chan imgResult, 16),
+		zoom:          1.0,
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -526,6 +528,26 @@ func (f *framePath) syncTabToToolbar() {
 	loading := tab.Nav.Loading
 	tab.Nav.Mu.Unlock()
 	f.toolbar.SyncFromTab(tab.URL(), loading, tab.Error(), tab.History())
+	f.toolbar.SetIncognito(tab.Incognito())
+}
+
+// clientForTab returns the ephemeral private client for incognito tabs or the default client.
+func (f *framePath) clientForTab(tab *tabs.Tab) net.HTTP {
+	if tab != nil && tab.Incognito() && f.privateClient != nil {
+		return f.privateClient
+	}
+	return f.client
+}
+
+// newIncognitoTab opens a new private incognito tab.
+func (f *framePath) newIncognitoTab() *tabs.Tab {
+	tab := f.tabMgr.NewIncognitoTab()
+	dev := frame.Size{W: int32(f.config.width), H: int32(f.config.height)}
+	_, layer := blankLayer(dev)
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(40, 44, 52))
+	f.switchTab(tab.ID())
+	return tab
 }
 
 // querySuggestions searches bookmarks, visit history, and search engine completions for omnibox query.
@@ -677,9 +699,10 @@ func (f *framePath) navigateTab(rawURL string) {
 	}
 
 	f.navWg.Add(1)
+	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
@@ -698,11 +721,14 @@ func (f *framePath) navigateTab(rawURL string) {
 }
 
 // loadDocumentCtx loads an internal page (goosie://) or a network/file resource.
-func (f *framePath) loadDocumentCtx(ctx context.Context, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if strings.HasPrefix(strings.ToLower(u), "goosie://") {
 		return f.renderInternalPage(ctx, u, viewportW, viewportH, scale)
 	}
-	return loadURLCtx(ctx, f.client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads)
+	if client == nil {
+		client = f.client
+	}
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -805,7 +831,7 @@ func (f *framePath) applyNavResult(result navResult) {
 			tab.History().ReplaceCurrent(result.url)
 		}
 	}
-	if f.history != nil {
+	if !tab.Incognito() && f.history != nil && !strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
 		f.history.Record(result.url, result.url)
 	}
 
@@ -955,9 +981,10 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	}
 
 	f.navWg.Add(1)
+	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		if finalURL != "" {
 			res.url = finalURL
@@ -1045,7 +1072,15 @@ func applyTabState(t *tabs.Tab, ts session.TabState) {
 // sessionState snapshots the open tabs for saving.
 func sessionState(f *framePath) session.State {
 	var st session.State
+	activeTab := f.tabMgr.Active()
+	savedActiveIdx := 0
 	for _, tab := range f.tabMgr.Tabs() {
+		if tab.Incognito() {
+			continue // Incognito tabs are ephemeral and never persisted
+		}
+		if tab == activeTab {
+			savedActiveIdx = len(st.Tabs)
+		}
 		entries, idx := tab.History().Entries()
 		st.Tabs = append(st.Tabs, session.TabState{
 			URL:          tab.URL(),
@@ -1054,7 +1089,7 @@ func sessionState(f *framePath) session.State {
 			HistoryIndex: idx,
 		})
 	}
-	st.Active = f.tabMgr.ActiveIndex()
+	st.Active = savedActiveIdx
 	return st
 }
 
@@ -2062,6 +2097,7 @@ func (f *framePath) openWindow() error {
 		if cw, ok := f.window.(*chromeWindow); ok {
 			cw.tickInterval = f.config.vsyncPeriod()
 			cw.onTick = f.pumpJS
+			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
 		}
 	} else {
 		f.window = w
@@ -2242,6 +2278,9 @@ func run(args []string) error {
 		f.runCancel()
 		f.navWg.Wait()
 		_ = f.window.Close()
+		if f.privateClient != nil {
+			_ = f.privateClient.Close()
+		}
 	}()
 
 	if r, ok := f.window.(platform.Runner); ok {

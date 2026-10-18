@@ -114,6 +114,7 @@ type State struct {
 	ActiveDownloads  int
 	DownloadProgress float64
 	OnDownloads      func()
+	Incognito        bool
 
 	fonts *raster.Fonts
 	scale int32
@@ -209,6 +210,13 @@ func (s *State) SetDownloadStats(activeCount, totalCount int, progress float64) 
 	s.ActiveDownloads = activeCount
 	s.DownloadsCount = totalCount
 	s.DownloadProgress = progress
+}
+
+// SetIncognito updates whether the toolbar draws in private incognito dark mode.
+func (s *State) SetIncognito(incognito bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Incognito = incognito
 }
 
 // GetFocus reports where keyboard input currently goes.
@@ -916,9 +924,15 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	barH := int32(ToolbarHeight) * sc
 
 	bg := frame.Rect4(0, oy, int32(backing.W), oy+barH)
-	backing.FillRect(bg, toolbarBg, nil)
+	bgCol := toolbarBg
+	sepCol := separatorColor
+	if s.Incognito {
+		bgCol = frame.RGB(40, 44, 52)
+		sepCol = frame.RGB(32, 35, 42)
+	}
+	backing.FillRect(bg, bgCol, nil)
 
-	backing.FillRect(frame.Rect4(0, oy+barH-1, int32(backing.W), oy+barH), separatorColor, nil)
+	backing.FillRect(frame.Rect4(0, oy+barH-1, int32(backing.W), oy+barH), sepCol, nil)
 
 	s.drawButton(backing, ButtonBack, w, clip, oy)
 	s.drawButton(backing, ButtonForward, w, clip, oy)
@@ -939,11 +953,21 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	ox := r.X0 * sc
 	oyd := oy + r.Y0*sc
 	fg := buttonColor
-	if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
-		fg = disabledColor
-	}
-	if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
-		fg = disabledColor
+	if s.Incognito {
+		fg = frame.RGB(200, 204, 212)
+		if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
+			fg = frame.RGB(90, 94, 102)
+		}
+		if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
+			fg = frame.RGB(90, 94, 102)
+		}
+	} else {
+		if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
+			fg = disabledColor
+		}
+		if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
+			fg = disabledColor
+		}
 	}
 	cx := int32(ButtonSize) / 2
 	cy := int32(ButtonSize) / 2
@@ -1198,7 +1222,14 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 
 	fill := barBg
 	border := barBorder
-	if s.Focus == FocusAddress {
+	if s.Incognito {
+		fill = frame.RGB(32, 35, 42)
+		border = frame.RGB(60, 64, 72)
+		if s.Focus == FocusAddress {
+			fill = frame.RGB(40, 44, 52)
+			border = frame.RGB(100, 160, 240)
+		}
+	} else if s.Focus == FocusAddress {
 		fill = barFocusBg
 		border = barFocusBorder
 	}
@@ -1213,14 +1244,25 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 		}
 	}
 	textCol := textColor
+	if s.Incognito {
+		textCol = frame.RGB(240, 240, 240)
+	}
 	if s.Focus == FocusNone && s.Error != "" {
 		textCol = frame.RGB(200, 50, 50)
 	} else if text == "" && s.FindActive {
 		text = "Find in page..."
-		textCol = placeholderColor
+		if s.Incognito {
+			textCol = frame.RGB(140, 144, 154)
+		} else {
+			textCol = placeholderColor
+		}
 	} else if text == "" && s.Focus == FocusNone {
 		text = "Enter URL..."
-		textCol = placeholderColor
+		if s.Incognito {
+			textCol = frame.RGB(140, 144, 154)
+		} else {
+			textCol = placeholderColor
+		}
 	}
 
 	textX := r.X0 + (BarPadding+4)*sc

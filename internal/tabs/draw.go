@@ -103,18 +103,38 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 // scaled device rect.
 func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fonts *raster.Fonts, scale int32) {
 	textColor := tabTextColor
+	isIncognito := tab.Incognito()
+
 	if active {
-		fillRoundedTop(buf, r, tabRadius*scale, activeTabBg)
-		textColor = tabTextActive
+		bg := activeTabBg
+		if isIncognito {
+			bg = frame.RGB(40, 44, 52)
+			textColor = frame.RGB(240, 240, 240)
+		} else {
+			textColor = tabTextActive
+		}
+		fillRoundedTop(buf, r, tabRadius*scale, bg)
+	} else if isIncognito {
+		bg := frame.RGB(60, 64, 72)
+		fillRoundedTop(buf, r, tabRadius*scale, bg)
+		textColor = frame.RGB(190, 194, 202)
 	}
 
 	title := tab.Title()
 	if title == "" {
-		title = "New Tab"
+		if isIncognito {
+			title = "Incognito"
+		} else {
+			title = "New Tab"
+		}
 	}
 	drawTabText(buf, title, r, textColor, fonts, scale)
 
-	drawCloseButton(buf, scaleRect(CloseButtonRect(lr), scale), closeBtnColor, scale)
+	btnColor := closeBtnColor
+	if isIncognito {
+		btnColor = frame.RGB(190, 194, 202)
+	}
+	drawCloseButton(buf, scaleRect(CloseButtonRect(lr), scale), btnColor, scale)
 }
 
 func scaleRect(r frame.Rect, scale int32) frame.Rect {

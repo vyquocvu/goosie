@@ -15,29 +15,30 @@ const totalChromeHeight = tabs.TabBarHeight + toolbar.ToolbarHeight
 
 type chromeWindow struct {
 	surface.Window
-	toolbar       *toolbar.State
-	tabMgr        *tabs.TabManager
-	scale         int32
-	events        chan surface.Event
-	onSwitch      func(uint64)
-	onNewTab      func()
-	onCloseTab    func(uint64)
-	onReopenTab   func()
-	onResize      func(contentW, contentH int)
-	onZoom        func(delta float64)
-	onLinkClick   func(href string)
-	onBookmark    func()
-	onFocusClick  func(contentX, contentY int32) bool
-	onContentKey  func(key rune, mods surface.KeyMod) bool
-	onDragSelect  func(action surface.PointerAction, contentX, contentY int32) bool
-	onIME         func(ev surface.Event) bool
-	onCopy        func() bool
-	hitTestLink   func(contentX, contentY int32) string
-	onHoverCursor func(contentX, contentY int32) surface.Cursor
-	chromeBitmap  *frame.Bitmap
-	outBitmap     *frame.Bitmap
-	fonts         *raster.Fonts
-	hover         surface.Cursor // last shape sent to the platform, for change detection
+	toolbar           *toolbar.State
+	tabMgr            *tabs.TabManager
+	scale             int32
+	events            chan surface.Event
+	onSwitch          func(uint64)
+	onNewTab          func()
+	onNewIncognitoTab func()
+	onCloseTab        func(uint64)
+	onReopenTab       func()
+	onResize          func(contentW, contentH int)
+	onZoom            func(delta float64)
+	onLinkClick       func(href string)
+	onBookmark        func()
+	onFocusClick      func(contentX, contentY int32) bool
+	onContentKey      func(key rune, mods surface.KeyMod) bool
+	onDragSelect      func(action surface.PointerAction, contentX, contentY int32) bool
+	onIME             func(ev surface.Event) bool
+	onCopy            func() bool
+	hitTestLink       func(contentX, contentY int32) string
+	onHoverCursor     func(contentX, contentY int32) surface.Cursor
+	chromeBitmap      *frame.Bitmap
+	outBitmap         *frame.Bitmap
+	fonts             *raster.Fonts
+	hover             surface.Cursor // last shape sent to the platform, for change detection
 	// pressTab/pressX/pressing track a press that may become a tab drag.
 	// Pump-thread only, like everything else in intercept.
 	pressTab uint64
@@ -524,6 +525,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			}
 		} else if cw.onNewTab != nil {
 			cw.onNewTab()
+			return true
+		}
+	case (key == 'n' || key == 'N' || key == 'p' || key == 'P') && shift:
+		if cw.onNewIncognitoTab != nil {
+			cw.onNewIncognitoTab()
 			return true
 		}
 	case key == 'f' || key == 'F':

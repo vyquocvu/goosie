@@ -218,3 +218,22 @@ func TestReopenTabStackCapacityBounded(t *testing.T) {
 		t.Fatalf("ClosedTabCount() = %d, want %d", count, maxClosedTabs)
 	}
 }
+
+func TestIncognitoTabNotSavedToClosedTabs(t *testing.T) {
+	mgr := NewManager(nil)
+	tab := mgr.NewIncognitoTab()
+	if !tab.Incognito() {
+		t.Fatal("tab.Incognito() should be true")
+	}
+	tab.SetURL("https://secret.example.com")
+	tab.History().Push("https://secret.example.com")
+
+	mgr.CloseTab(tab.ID())
+
+	if mgr.CanReopenTab() {
+		t.Fatal("CanReopenTab() should be false after closing an incognito tab")
+	}
+	if count := mgr.ClosedTabCount(); count != 0 {
+		t.Fatalf("ClosedTabCount() = %d, want 0 for incognito tabs", count)
+	}
+}
