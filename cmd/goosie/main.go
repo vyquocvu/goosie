@@ -535,6 +535,35 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	})
 	seen[searchURL] = true
 
+	// Internal system pages (goosie://)
+	internalPages := []struct {
+		Title string
+		URL   string
+	}{
+		{"About Goosie (Version & Diagnostics)", "goosie://version"},
+		{"Bookmarks Manager", "goosie://bookmarks"},
+		{"Browsing History", "goosie://history"},
+		{"Downloads Manager", "goosie://downloads"},
+	}
+	for _, p := range internalPages {
+		pagePath := strings.TrimPrefix(p.URL, "goosie://")
+		matchScheme := strings.HasPrefix(lowerQ, "goosie") || strings.HasPrefix(lowerQ, "about")
+		matchContent := strings.Contains(strings.ToLower(p.Title), lowerQ) || strings.Contains(pagePath, lowerQ)
+		if matchScheme || matchContent {
+			if !seen[p.URL] {
+				seen[p.URL] = true
+				out = append(out, toolbar.Suggestion{
+					Title: p.Title,
+					URL:   p.URL,
+					Kind:  toolbar.SuggestBookmark,
+				})
+				if len(out) >= 8 {
+					return out
+				}
+			}
+		}
+	}
+
 	// 2. Bookmarks matching query
 	if f.bookmarks != nil {
 		for _, bm := range f.bookmarks.List() {
@@ -546,7 +575,28 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 						URL:   bm.URL,
 						Kind:  toolbar.SuggestBookmark,
 					})
-					if len(out) >= 6 {
+					if len(out) >= 8 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	// 3. History visits matching query (newest first)
+	if f.history != nil {
+		entries := f.history.Entries()
+		for i := len(entries) - 1; i >= 0; i-- {
+			h := entries[i]
+			if strings.Contains(strings.ToLower(h.URL), lowerQ) || strings.Contains(strings.ToLower(h.Title), lowerQ) {
+				if !seen[h.URL] {
+					seen[h.URL] = true
+					out = append(out, toolbar.Suggestion{
+						Title: h.Title,
+						URL:   h.URL,
+						Kind:  toolbar.SuggestHistory,
+					})
+					if len(out) >= 8 {
 						return out
 					}
 				}
@@ -617,7 +667,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	f.navWg.Add(1)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
@@ -633,6 +683,14 @@ func (f *framePath) navigateTab(rawURL string) {
 		res.layer, res.bgColor, res.session = layer, bgColor, sess
 		f.navResults <- res
 	}()
+}
+
+// loadDocumentCtx loads an internal page (goosie://) or a network/file resource.
+func (f *framePath) loadDocumentCtx(ctx context.Context, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+	if strings.HasPrefix(strings.ToLower(u), "goosie://") {
+		return f.renderInternalPage(ctx, u, viewportW, viewportH, scale)
+	}
+	return loadURLCtx(ctx, f.client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -709,7 +767,14 @@ func (f *framePath) applyNavResult(result navResult) {
 	tab.SetSession(result.session)
 	tab.SetBGColor(result.bgColor)
 	tab.SetURL(result.url)
-	tab.SetTitle(result.url)
+	tabTitle := result.url
+	if strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
+		title, _ := f.buildInternalPageHTML(result.url)
+		if title != "" {
+			tabTitle = title
+		}
+	}
+	tab.SetTitle(tabTitle)
 	if oldSession != nil && oldSession != result.session {
 		// The replaced document's realm tears down with it.
 		oldSession.Close()
@@ -877,7 +942,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	f.navWg.Add(1)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		if finalURL != "" {
 			res.url = finalURL
@@ -1871,6 +1936,16 @@ func normalizeURL(raw string) string {
 		if strings.HasPrefix(lower, scheme) {
 			return scheme + raw[len(scheme):]
 		}
+	}
+	if strings.HasPrefix(lower, "goosie://") {
+		return "goosie://" + strings.ToLower(raw[len("goosie://"):])
+	}
+	if strings.HasPrefix(lower, "about:") {
+		target := strings.TrimPrefix(lower, "about:")
+		if target == "" {
+			target = "version"
+		}
+		return "goosie://" + target
 	}
 	// If input contains whitespace (space, tab, newline), it is a search query.
 	if strings.ContainsAny(raw, " \t\r\n") {
