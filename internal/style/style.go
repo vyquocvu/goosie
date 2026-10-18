@@ -269,6 +269,13 @@ type ComputedStyle struct {
 	LineClamp          int
 	ViewTransitionName string
 
+	ScrollTimelineName string
+	ScrollTimelineAxis string
+	ViewTimelineName   string
+	ViewTimelineAxis   string
+	ViewTimelineInset  string
+	AnimationTimeline  string
+
 	HasClip    bool
 	ClipTop    float32
 	ClipRight  float32
@@ -621,6 +628,12 @@ func DefaultStyle() ComputedStyle {
 		TextWrap:               "wrap",
 		LineClamp:              0,
 		ViewTransitionName:     "none",
+		ScrollTimelineName:     "none",
+		ScrollTimelineAxis:     "block",
+		ViewTimelineName:       "none",
+		ViewTimelineAxis:       "block",
+		ViewTimelineInset:      "auto",
+		AnimationTimeline:      "auto",
 	}
 }
 
@@ -742,6 +755,7 @@ label { display: inline; }
 select { display: inline; }
 progress { display: inline-block; width: 10em; height: 1em; vertical-align: -0.2em; }
 meter { display: inline-block; width: 5em; height: 1em; vertical-align: -0.2em; }
+datalist { display: none; }
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
@@ -2416,6 +2430,44 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		} else {
 			cs.ViewTransitionName = val
 		}
+	case "scroll-timeline-name":
+		cs.ScrollTimelineName = strings.TrimSpace(value)
+	case "scroll-timeline-axis":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "block" || val == "inline" || val == "x" || val == "y" {
+			cs.ScrollTimelineAxis = val
+		}
+	case "scroll-timeline":
+		fields := strings.Fields(strings.TrimSpace(value))
+		for _, f := range fields {
+			lower := strings.ToLower(f)
+			if lower == "block" || lower == "inline" || lower == "x" || lower == "y" {
+				cs.ScrollTimelineAxis = lower
+			} else {
+				cs.ScrollTimelineName = f
+			}
+		}
+	case "view-timeline-name":
+		cs.ViewTimelineName = strings.TrimSpace(value)
+	case "view-timeline-axis":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "block" || val == "inline" || val == "x" || val == "y" {
+			cs.ViewTimelineAxis = val
+		}
+	case "view-timeline-inset":
+		cs.ViewTimelineInset = strings.TrimSpace(value)
+	case "view-timeline":
+		fields := strings.Fields(strings.TrimSpace(value))
+		for _, f := range fields {
+			lower := strings.ToLower(f)
+			if lower == "block" || lower == "inline" || lower == "x" || lower == "y" {
+				cs.ViewTimelineAxis = lower
+			} else {
+				cs.ViewTimelineName = f
+			}
+		}
+	case "animation-timeline":
+		cs.AnimationTimeline = strings.TrimSpace(value)
 	case "clip":
 		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
 			cs.HasClip = true

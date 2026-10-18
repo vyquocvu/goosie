@@ -586,6 +586,44 @@ func findByID(n *Node, id string) *Node {
 	return nil
 }
 
+// DatalistOptions returns the suggested values associated with an input element
+// via its list attribute pointing to a <datalist id="..."> element.
+func (d *Document) DatalistOptions(input *Node) []string {
+	if input == nil || input.Doc == nil {
+		return nil
+	}
+	listID := input.GetAttribute("list")
+	if listID == "" {
+		return nil
+	}
+	dl := input.Doc.ElementByID(listID)
+	if dl == nil || dl.Data != "datalist" {
+		return nil
+	}
+	var options []string
+	dl.Walk(func(n *Node) bool {
+		if n.Element() && n.Data == "option" {
+			val := n.GetAttribute("value")
+			if val == "" {
+				val = strings.TrimSpace(n.TextContent())
+			}
+			if val != "" {
+				options = append(options, val)
+			}
+		}
+		return true
+	})
+	return options
+}
+
+// DatalistOptions returns the list options if n is an input with a valid list attribute.
+func (n *Node) DatalistOptions() []string {
+	if n == nil || n.Doc == nil {
+		return nil
+	}
+	return n.Doc.DatalistOptions(n)
+}
+
 // ElementsByTagName returns all elements with the given tag name.
 func (d *Document) ElementsByTagName(tag string) []*Node {
 	atom := Lookup(tag)

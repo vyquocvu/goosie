@@ -384,42 +384,73 @@ func inlineInto(a *Arena, id ObjectID) {
 				}
 			}
 		}
-		x := baseX
-		for _, run := range line.runs {
-			runObj := a.Get(run.obj)
-			if run.atomic {
-				// The box's bottom margin edge sits on the line's baseline. This
-				// model centres text runs rather than sitting them on a baseline,
-				// and the line's own descent is a few pixels, so bottom-aligning
-				// against the line box puts it where Chromium puts it.
-				k := a.Get(run.obj)
-				dx := (x + k.MarginLeft) - run.srcX
-				dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
-				shiftSubtree(a, run.obj, dx, dy)
-				x += run.w
-				continue
+		isRTL := obj.Style != nil && obj.Style.Direction == "rtl"
+		if isRTL {
+			x := baseX + alignW
+			for _, run := range line.runs {
+				runObj := a.Get(run.obj)
+				if run.atomic {
+					k := a.Get(run.obj)
+					x -= run.w
+					dx := (x + k.MarginLeft) - run.srcX
+					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+					shiftSubtree(a, run.obj, dx, dy)
+					continue
+				}
+				letterSpacing := float32(0)
+				if runObj.Style != nil {
+					letterSpacing = runObj.Style.LetterSpacing
+				}
+				wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
+				if run.text == " " && runObj.Style != nil {
+					wordW += runObj.Style.WordSpacing
+				}
+				x -= wordW
+				if runObj.X == 0 && runObj.Y == 0 {
+					runObj.X = x
+					runObj.Y = y + (line.h-run.contentH)/2
+				}
+				runObj.W = wordW
+				runObj.H = run.contentH
 			}
-			letterSpacing := float32(0)
-			if runObj.Style != nil {
-				letterSpacing = runObj.Style.LetterSpacing
-			}
-			wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
-			if run.text == " " && runObj.Style != nil {
-				wordW += runObj.Style.WordSpacing
-			}
-			if runObj.X == 0 && runObj.Y == 0 {
-				runObj.X = x
-				// The content area sits in the middle of the line box: the
-				// surplus leading splits evenly above and below it, so the
-				// baseline lands at half-leading + ascent. Paint reads the
-				// ascent back out of the same metrics.
-				runObj.Y = y + (line.h-run.contentH)/2
-			}
-			runObj.W = wordW
-			runObj.H = run.contentH
-			x += wordW
-			if justifyExtra > 0 && isSpaceWord(run.text) {
-				x += justifyExtra
+		} else {
+			x := baseX
+			for _, run := range line.runs {
+				runObj := a.Get(run.obj)
+				if run.atomic {
+					// The box's bottom margin edge sits on the line's baseline. This
+					// model centres text runs rather than sitting them on a baseline,
+					// and the line's own descent is a few pixels, so bottom-aligning
+					// against the line box puts it where Chromium puts it.
+					k := a.Get(run.obj)
+					dx := (x + k.MarginLeft) - run.srcX
+					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+					shiftSubtree(a, run.obj, dx, dy)
+					x += run.w
+					continue
+				}
+				letterSpacing := float32(0)
+				if runObj.Style != nil {
+					letterSpacing = runObj.Style.LetterSpacing
+				}
+				wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
+				if run.text == " " && runObj.Style != nil {
+					wordW += runObj.Style.WordSpacing
+				}
+				if runObj.X == 0 && runObj.Y == 0 {
+					runObj.X = x
+					// The content area sits in the middle of the line box: the
+					// surplus leading splits evenly above and below it, so the
+					// baseline lands at half-leading + ascent. Paint reads the
+					// ascent back out of the same metrics.
+					runObj.Y = y + (line.h-run.contentH)/2
+				}
+				runObj.W = wordW
+				runObj.H = run.contentH
+				x += wordW
+				if justifyExtra > 0 && isSpaceWord(run.text) {
+					x += justifyExtra
+				}
 			}
 		}
 		y += line.h
