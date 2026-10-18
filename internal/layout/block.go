@@ -237,7 +237,15 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 		rowH = 0
 		rowCursor = 0
 	}
-	if obj.Style != nil && obj.Style.Display == style.DisplayTable {
+	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
+		if obj.Style.Width < 0 && obj.Style.ContainIntrinsicWidth > 0 {
+			obj.W = obj.Style.ContainIntrinsicWidth
+		}
+		if obj.Style.Height < 0 && obj.Style.ContainIntrinsicHeight > 0 {
+			obj.H = obj.Style.ContainIntrinsicHeight
+			y = obj.H
+		}
+	} else if obj.Style != nil && obj.Style.Display == style.DisplayTable {
 		y = layoutTable(a, id, containingW)
 	} else if obj.Style != nil && (obj.Style.Display == style.DisplayGrid || obj.Style.Display == style.DisplayInlineGrid) {
 		y = layoutGrid(a, id, containingW)
@@ -2338,6 +2346,8 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		} else {
 			obj.H = heightVal
 		}
+	} else if s.ContentVisibility == "hidden" && s.ContainIntrinsicHeight > 0 {
+		obj.H = s.ContainIntrinsicHeight
 	}
 	if obj.H < 0 {
 		obj.H = 0

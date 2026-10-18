@@ -261,12 +261,30 @@ func (n *Node) SetAttribute(name, value string) {
 			if n.Doc != nil && isQueryAttr(name) {
 				n.Doc.MarkQueryDirty()
 			}
+			n.checkExclusiveDetails(name)
 			return
 		}
 	}
 	n.Attr = append(n.Attr, Attribute{Name: name, Value: value})
 	if n.Doc != nil && isQueryAttr(name) {
 		n.Doc.MarkQueryDirty()
+	}
+	n.checkExclusiveDetails(name)
+}
+
+func (n *Node) checkExclusiveDetails(attrName string) {
+	if n.Element() && n.Data == "details" && strings.EqualFold(attrName, "open") {
+		if nameAttr := n.GetAttribute("name"); nameAttr != "" && n.Doc != nil {
+			n.Doc.Node.Walk(func(other *Node) bool {
+				if other != n && other.Element() && other.Data == "details" && other.GetAttribute("name") == nameAttr {
+					if other.HasAttribute("open") {
+						other.RemoveAttribute("open")
+						DispatchEvent(other, NewEvent("toggle", false, false))
+					}
+				}
+				return true
+			})
+		}
 	}
 }
 
@@ -328,6 +346,23 @@ func (n *Node) collectText(sb *strings.Builder) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		c.collectText(sb)
 	}
+}
+
+// Walk traverses the subtree rooted at n in pre-order depth-first order.
+// If fn returns false, the walk stops early.
+func (n *Node) Walk(fn func(*Node) bool) bool {
+	if n == nil {
+		return true
+	}
+	if !fn(n) {
+		return false
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if !c.Walk(fn) {
+			return false
+		}
+	}
+	return true
 }
 
 // Document is the root of a DOM tree. It owns the node-ID allocator and

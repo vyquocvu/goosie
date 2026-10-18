@@ -156,6 +156,11 @@ func (o *Object) BgAreaRect(box style.BgBox) (x0, y0, x1, y1 float32) {
 	return x0, y0, x1, y1
 }
 
+// BorderW returns the width of the border box.
+func (o *Object) BorderW() float32 {
+	return o.W + o.PaddingLeft + o.PaddingRight + o.BorderLeft + o.BorderRight
+}
+
 // BorderH returns the height of the border box. W and H are both content-box
 // dimensions, which is what ContentRect, BorderRect and the explicit-height
 // branch of resolveBoxSizes all assume; this is the one place that spelling is

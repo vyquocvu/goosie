@@ -252,14 +252,27 @@ type ComputedStyle struct {
 	Visibility  string
 	ColorScheme string
 	isDark      bool
-	HasClip     bool
-	ClipTop     float32
-	ClipRight   float32
-	ClipBottom  float32
-	ClipLeft    float32
-	Opacity     float32
-	ZIndex      int32
-	HasZIndex   bool
+
+	ContentVisibility      string
+	ContainIntrinsicWidth  float32
+	ContainIntrinsicHeight float32
+	AnchorName             string
+	PositionAnchor         string
+	TopAnchor              string
+	RightAnchor            string
+	BottomAnchor           string
+	LeftAnchor             string
+	WidthAnchor            string
+	HeightAnchor           string
+
+	HasClip    bool
+	ClipTop    float32
+	ClipRight  float32
+	ClipBottom float32
+	ClipLeft   float32
+	Opacity    float32
+	ZIndex     int32
+	HasZIndex  bool
 
 	Width     float32
 	Height    float32
@@ -594,10 +607,13 @@ func DefaultStyle() ComputedStyle {
 		Content:    "normal",
 		// CSS initials: backgrounds position against the padding box and
 		// paint through the border box.
-		BackgroundOrigin: BgBoxPadding,
-		BackgroundClip:   BgBoxBorder,
-		ContainerType:    "normal",
-		ContainerName:    "",
+		BackgroundOrigin:       BgBoxPadding,
+		BackgroundClip:         BgBoxBorder,
+		ContainerType:          "normal",
+		ContainerName:          "",
+		ContentVisibility:      "visible",
+		ContainIntrinsicWidth:  -1,
+		ContainIntrinsicHeight: -1,
 	}
 }
 
@@ -2320,6 +2336,58 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "visibility":
 		cs.Visibility = value
+	case "content-visibility":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "hidden" || val == "auto" || val == "visible" {
+			cs.ContentVisibility = val
+		}
+	case "contain-intrinsic-size":
+		fields := strings.Fields(strings.ToLower(value))
+		var lens []float32
+		for _, f := range fields {
+			if f == "auto" || f == "none" {
+				continue
+			}
+			v := css.ParseValue(f)
+			if lengthSpecified(v) {
+				lens = append(lens, resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize))
+			}
+		}
+		if len(lens) == 1 {
+			cs.ContainIntrinsicWidth = lens[0]
+			cs.ContainIntrinsicHeight = lens[0]
+		} else if len(lens) >= 2 {
+			cs.ContainIntrinsicWidth = lens[0]
+			cs.ContainIntrinsicHeight = lens[1]
+		}
+	case "contain-intrinsic-width":
+		fields := strings.Fields(strings.ToLower(value))
+		for _, f := range fields {
+			if f == "auto" || f == "none" {
+				continue
+			}
+			v := css.ParseValue(f)
+			if lengthSpecified(v) {
+				cs.ContainIntrinsicWidth = resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize)
+				break
+			}
+		}
+	case "contain-intrinsic-height":
+		fields := strings.Fields(strings.ToLower(value))
+		for _, f := range fields {
+			if f == "auto" || f == "none" {
+				continue
+			}
+			v := css.ParseValue(f)
+			if lengthSpecified(v) {
+				cs.ContainIntrinsicHeight = resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize)
+				break
+			}
+		}
+	case "anchor-name":
+		cs.AnchorName = strings.TrimSpace(value)
+	case "position-anchor":
+		cs.PositionAnchor = strings.TrimSpace(value)
 	case "clip":
 		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
 			cs.HasClip = true
@@ -2407,14 +2475,18 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	// A math function holding a percentage is deferred to layout, which owns
 	// the containing block the share speaks.
 	case "width", "inline-size":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
+		if isAnchorSizeFunc(value) {
+			cs.WidthAnchor = extractAnchorArgs(value)
+		} else if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.WidthCalc, cs.Width = d, -1
 		} else {
 			cs.WidthCalc = DeferredLength{}
 			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
 	case "height", "block-size":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
+		if isAnchorSizeFunc(value) {
+			cs.HeightAnchor = extractAnchorArgs(value)
+		} else if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.HeightCalc, cs.Height = d, -1
 		} else {
 			cs.HeightCalc = DeferredLength{}
@@ -2735,17 +2807,37 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-image":
 		applyBorderImageShorthand(cs, value)
 	case "top":
-		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
-		cs.HasTop = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.TopAnchor = extractAnchorArgs(value)
+			cs.HasTop = true
+		} else {
+			cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasTop = lengthSpecified(parsed)
+		}
 	case "right":
-		cs.Right = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
-		cs.HasRight = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.RightAnchor = extractAnchorArgs(value)
+			cs.HasRight = true
+		} else {
+			cs.Right = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasRight = lengthSpecified(parsed)
+		}
 	case "bottom":
-		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
-		cs.HasBottom = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.BottomAnchor = extractAnchorArgs(value)
+			cs.HasBottom = true
+		} else {
+			cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasBottom = lengthSpecified(parsed)
+		}
 	case "left":
-		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
-		cs.HasLeft = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.LeftAnchor = extractAnchorArgs(value)
+			cs.HasLeft = true
+		} else {
+			cs.Left = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasLeft = lengthSpecified(parsed)
+		}
 	case "inset":
 		t, r, b, l := parseBoxShorthand(value)
 		cs.Top, cs.Right, cs.Bottom, cs.Left = t, r, b, l
@@ -4893,4 +4985,23 @@ func applyTransitionDelay(cs *ComputedStyle, value string) {
 			cs.Transitions[i].Delay = delays[i]
 		}
 	}
+}
+
+func isAnchorFunc(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.HasPrefix(s, "anchor(") && strings.HasSuffix(s, ")")
+}
+
+func isAnchorSizeFunc(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.HasPrefix(s, "anchor-size(") && strings.HasSuffix(s, ")")
+}
+
+func extractAnchorArgs(s string) string {
+	s = strings.TrimSpace(s)
+	idx := strings.IndexByte(s, '(')
+	if idx >= 0 && strings.HasSuffix(s, ")") {
+		return strings.TrimSpace(s[idx+1 : len(s)-1])
+	}
+	return s
 }

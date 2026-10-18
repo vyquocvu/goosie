@@ -189,6 +189,9 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			}
 		}
 	}
+	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
+		return
+	}
 	item := 0
 	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
 		ord := 0
