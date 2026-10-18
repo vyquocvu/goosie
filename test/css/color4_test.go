@@ -55,7 +55,7 @@ func TestColor4UnknownSpaceDrops(t *testing.T) {
 	for _, src := range []string{
 		"color(bogus-space 1 0 0)",
 		"color(display-p3 1 0)",
-		"color-mix(in srgb, red, blue)",
+		"color-contrast(red vs white)",
 	} {
 		if _, ok := css.ParseColor(src); ok {
 			t.Errorf("ParseColor(%q) succeeded, want unsupported", src)

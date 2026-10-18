@@ -178,6 +178,11 @@ func splitArgs(s string) []string {
 }
 
 func ParseColor(s string) (Color, bool) {
+	return ParseColorWithScheme(s, "")
+}
+
+// ParseColorWithScheme parses a CSS color value in the context of a color scheme ("light" or "dark").
+func ParseColorWithScheme(s, colorScheme string) (Color, bool) {
 	if strings.Contains(s, "/*") {
 		s = stripComments(s)
 	}
@@ -193,28 +198,58 @@ func ParseColor(s string) (Color, bool) {
 	}
 
 	if body, ok := colorFunctionArgs(s, "rgb", "rgba"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("rgb", body, colorScheme)
+		}
 		return parseRGBLike(body)
 	}
 	if body, ok := colorFunctionArgs(s, "hsl", "hsla"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("hsl", body, colorScheme)
+		}
 		return parseHSLLike(body)
 	}
 	if body, ok := colorFunctionArgs(s, "hwb"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("hwb", body, colorScheme)
+		}
 		return parseColor4Like("hwb", body)
 	}
 	if body, ok := colorFunctionArgs(s, "lab"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("lab", body, colorScheme)
+		}
 		return parseColor4Like("lab", body)
 	}
 	if body, ok := colorFunctionArgs(s, "lch"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("lch", body, colorScheme)
+		}
 		return parseColor4Like("lch", body)
 	}
 	if body, ok := colorFunctionArgs(s, "oklab"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("oklab", body, colorScheme)
+		}
 		return parseColor4Like("oklab", body)
 	}
 	if body, ok := colorFunctionArgs(s, "oklch"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("oklch", body, colorScheme)
+		}
 		return parseColor4Like("oklch", body)
 	}
 	if body, ok := colorFunctionArgs(s, "color"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("color", body, colorScheme)
+		}
 		return parseColorFunc(body)
+	}
+	if body, ok := colorFunctionArgs(s, "color-mix"); ok {
+		return parseColorMix(body)
+	}
+	if body, ok := colorFunctionArgs(s, "light-dark"); ok {
+		return parseLightDark(body, colorScheme)
 	}
 
 	return Color{}, false

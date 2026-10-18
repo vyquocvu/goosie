@@ -47,9 +47,13 @@ func (g RadialGradient) Empty() bool { return len(g.Stops) < 2 }
 // shorthand's image, and the colour is whatever is left once the function calls
 // are out of the way — declaring a gradient alone leaves the colour transparent.
 func parseBackground(v string) (css.Color, Gradient, RadialGradient) {
+	return parseBackgroundWithScheme(v, "")
+}
+
+func parseBackgroundWithScheme(v, scheme string) (css.Color, Gradient, RadialGradient) {
 	g := parseGradient(v)
 	rg := parseRadialGradient(v)
-	return parseBackgroundColor(stripFunctions(v)), g, rg
+	return parseBackgroundColorWithScheme(stripFunctions(v), scheme), g, rg
 }
 
 // parseGradient takes the first linear-gradient() or radial-gradient() in a value.

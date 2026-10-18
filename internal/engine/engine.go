@@ -1107,7 +1107,7 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 // styleViewport is the frame the cascade resolves the viewport units against. A
 // session created without a size leaves them to the parser's fallback.
 func (s *Session) styleViewport() style.Viewport {
-	return style.Viewport{W: s.viewportW, H: s.viewportH}
+	return style.Viewport{W: s.viewportW, H: s.viewportH, DarkMode: s.darkMode}
 }
 
 // recordViewportWidth keeps the session's viewport in step with a layout pass

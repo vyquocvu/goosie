@@ -36,7 +36,7 @@ func TestUnresolvableVarLeavesThePropertyAlone(t *testing.T) {
 // reads as a blank gap between the parentheses around them.
 func TestUnparseableColorLeavesTheInheritedOne(t *testing.T) {
 	const html = `<html><body><p>text</p></body></html>`
-	for _, value := range []string{"initial", "initial #fff", "notacolor", "light-dark(#000000,#ffffff)"} {
+	for _, value := range []string{"initial", "initial #fff", "notacolor", "unsupported-func(#000000,#ffffff)"} {
 		p := styleFor(t, html, `body { color: #112233 } p { color: `+value+` }`, "p")
 		if want := col(0x11, 0x22, 0x33, 0xff); p.Color != want {
 			t.Errorf("color: %s -> %+v, want %+v (the inherited color)", value, p.Color, want)

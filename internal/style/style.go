@@ -231,24 +231,26 @@ type ComputedStyle struct {
 	// authored; var() references are expanded against this map when the real
 	// properties apply. It is inherited, and shared read-only with the parent
 	// when an element declares none of its own.
-	Custom     map[string]string
-	Display    Display
-	Position   Position
-	Float      Float
-	Clear      Clear
-	Overflow   Overflow
-	OverflowX  Overflow
-	OverflowY  Overflow
-	BoxSizing  BoxSizing
-	Visibility string
-	HasClip    bool
-	ClipTop    float32
-	ClipRight  float32
-	ClipBottom float32
-	ClipLeft   float32
-	Opacity    float32
-	ZIndex     int32
-	HasZIndex  bool
+	Custom      map[string]string
+	Display     Display
+	Position    Position
+	Float       Float
+	Clear       Clear
+	Overflow    Overflow
+	OverflowX   Overflow
+	OverflowY   Overflow
+	BoxSizing   BoxSizing
+	Visibility  string
+	ColorScheme string
+	isDark      bool
+	HasClip     bool
+	ClipTop     float32
+	ClipRight   float32
+	ClipBottom  float32
+	ClipLeft    float32
+	Opacity     float32
+	ZIndex      int32
+	HasZIndex   bool
 
 	Width     float32
 	Height    float32
@@ -759,7 +761,30 @@ image { display: inline; }
 // Viewport is the size a document is laid out in. The viewport units are a share
 // of it, and nothing else in the cascade depends on the frame's size.
 type Viewport struct {
-	W, H float32
+	W, H     float32
+	DarkMode bool
+}
+
+func (cs *ComputedStyle) effectiveColorScheme(vp Viewport) string {
+	if cs != nil {
+		if strings.Contains(cs.ColorScheme, "dark") {
+			return "dark"
+		}
+		if strings.Contains(cs.ColorScheme, "light") {
+			return "light"
+		}
+	}
+	if vp.DarkMode {
+		return "dark"
+	}
+	return "light"
+}
+
+func (cs *ComputedStyle) scheme() string {
+	if cs != nil && cs.isDark {
+		return "dark"
+	}
+	return "light"
 }
 
 // inViewport rewrites a declaration's viewport units as the pixels they stand
@@ -1583,6 +1608,14 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	sortCascade(normal)
 	sortCascade(important)
 	cs.Custom = resolveCustom(parent, normal, important)
+	cs.ColorScheme = resolveColorScheme(parent, normal, important)
+	if strings.Contains(cs.ColorScheme, "dark") {
+		cs.isDark = true
+	} else if strings.Contains(cs.ColorScheme, "light") {
+		cs.isDark = false
+	} else {
+		cs.isDark = vp.DarkMode
+	}
 	vars := expanderFor(cs.Custom, normal, important)
 	for _, e := range normal {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
@@ -1862,6 +1895,24 @@ func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[
 	return m
 }
 
+func resolveColorScheme(parent *ComputedStyle, normal, important []cascadeEntry) string {
+	scheme := ""
+	if parent != nil {
+		scheme = parent.ColorScheme
+	}
+	for _, es := range [][]cascadeEntry{normal, important} {
+		for _, e := range es {
+			if e.decl.Property == "color-scheme" {
+				val := strings.ToLower(strings.TrimSpace(e.decl.Value))
+				if val != "" {
+					scheme = val
+				}
+			}
+		}
+	}
+	return scheme
+}
+
 // applyCascadeEntry applies one winning declaration, expanding var()
 // references first. A custom property is not a real property: its value lives
 // in cs.Custom and never reaches applyProperty.
@@ -2052,6 +2103,7 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.TextDecoration = parent.TextDecoration
 	cs.VerticalAlign = parent.VerticalAlign
 	cs.ListStyleType = parent.ListStyleType
+	cs.ColorScheme = parent.ColorScheme
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -2465,29 +2517,29 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-block-end-style":
 		cs.BorderBottomStyle = value
 	case "border-inline-color":
-		clr := parseColorValue(value)
+		clr := parseColorValueWithScheme(value, cs.scheme())
 		cs.BorderLeftColor, cs.BorderRightColor = clr, clr
 	case "border-block-color":
-		clr := parseColorValue(value)
+		clr := parseColorValueWithScheme(value, cs.scheme())
 		cs.BorderTopColor, cs.BorderBottomColor = clr, clr
 	case "border-inline-start-color":
-		clr := parseColorValue(value)
+		clr := parseColorValueWithScheme(value, cs.scheme())
 		if cs.Direction == "rtl" {
 			cs.BorderRightColor = clr
 		} else {
 			cs.BorderLeftColor = clr
 		}
 	case "border-inline-end-color":
-		clr := parseColorValue(value)
+		clr := parseColorValueWithScheme(value, cs.scheme())
 		if cs.Direction == "rtl" {
 			cs.BorderLeftColor = clr
 		} else {
 			cs.BorderRightColor = clr
 		}
 	case "border-block-start-color":
-		cs.BorderTopColor = parseColorValue(value)
+		cs.BorderTopColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-block-end-color":
-		cs.BorderBottomColor = parseColorValue(value)
+		cs.BorderBottomColor = parseColorValueWithScheme(value, cs.scheme())
 
 	case "border":
 		w, s, c := parseBorderShorthand(value)
@@ -2532,19 +2584,19 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-left-style":
 		cs.BorderLeftStyle = value
 	case "border-color":
-		colors := parseBorderColors(value)
+		colors := parseBorderColorsWithScheme(value, cs.scheme())
 		cs.BorderTopColor = colors[0]
 		cs.BorderRightColor = colors[1]
 		cs.BorderBottomColor = colors[2]
 		cs.BorderLeftColor = colors[3]
 	case "border-top-color":
-		cs.BorderTopColor = parseColorValue(value)
+		cs.BorderTopColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-right-color":
-		cs.BorderRightColor = parseColorValue(value)
+		cs.BorderRightColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-bottom-color":
-		cs.BorderBottomColor = parseColorValue(value)
+		cs.BorderBottomColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-left-color":
-		cs.BorderLeftColor = parseColorValue(value)
+		cs.BorderLeftColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-top":
 		w, s, c := parseBorderShorthand(value)
 		cs.BorderTopWidth = w
@@ -2644,19 +2696,21 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.HasRight = lengthSpecified(parsed)
 		}
 
+	case "color-scheme":
+		cs.ColorScheme = strings.ToLower(strings.TrimSpace(value))
+		if strings.Contains(cs.ColorScheme, "dark") {
+			cs.isDark = true
+		} else if strings.Contains(cs.ColorScheme, "light") {
+			cs.isDark = false
+		}
 	case "color":
-		// A value that is not a colour at all - `initial`, a `light-dark()` this
-		// engine does not evaluate, the residue of a var() that never resolved -
-		// is invalid at computed-value time, so the property keeps the colour it
-		// inherited. Storing the zero instead paints the text transparent, which
-		// reads as a blank gap where a word should be.
-		if c, ok := css.ParseColor(value); ok {
+		if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
 			cs.Color = c
 		}
 	case "background-color":
-		cs.BackgroundColor = parseColorValue(value)
+		cs.BackgroundColor = parseColorValueWithScheme(value, cs.scheme())
 	case "background":
-		cs.BackgroundColor, cs.BackgroundGradient, cs.BackgroundRadialGradient = parseBackground(value)
+		cs.BackgroundColor, cs.BackgroundGradient, cs.BackgroundRadialGradient = parseBackgroundWithScheme(value, cs.scheme())
 		cs.BackgroundImage = extractBackgroundURL(value)
 		parseBackgroundShorthandExtras(cs, value)
 	case "background-image":
@@ -3527,7 +3581,11 @@ func parseFlexFlow(cs *ComputedStyle, v string) {
 }
 
 func parseColorValue(v string) css.Color {
-	c, _ := css.ParseColor(v)
+	return parseColorValueWithScheme(v, "")
+}
+
+func parseColorValueWithScheme(v, scheme string) css.Color {
+	c, _ := css.ParseColorWithScheme(v, scheme)
 	return c
 }
 
@@ -3651,8 +3709,12 @@ func resolveCurrentColor(cs *ComputedStyle, matched []*indexedSelector, inline, 
 // separated token (skipping url() function calls) and returns the first one
 // that parses as a valid color.
 func parseBackgroundColor(v string) css.Color {
+	return parseBackgroundColorWithScheme(v, "")
+}
+
+func parseBackgroundColorWithScheme(v, scheme string) css.Color {
 	// Try the whole value first (handles plain "background: #fff").
-	if c, ok := css.ParseColor(v); ok {
+	if c, ok := css.ParseColorWithScheme(v, scheme); ok {
 		return c
 	}
 	// Skip past any url(...) call, then try each token.
@@ -3680,7 +3742,7 @@ func parseBackgroundColor(v string) css.Color {
 		s = strings.TrimSpace(s[end:])
 	}
 	for _, tok := range strings.Fields(s) {
-		if c, ok := css.ParseColor(tok); ok {
+		if c, ok := css.ParseColorWithScheme(tok, scheme); ok {
 			return c
 		}
 	}
@@ -4348,26 +4410,30 @@ func splitColorTokens(v string) []string {
 }
 
 func parseBorderColors(v string) [4]css.Color {
+	return parseBorderColorsWithScheme(v, "")
+}
+
+func parseBorderColorsWithScheme(v, scheme string) [4]css.Color {
 	parts := splitColorTokens(v)
 	var colors [4]css.Color
 	switch len(parts) {
 	case 1:
-		c, _ := css.ParseColor(parts[0])
+		c, _ := css.ParseColorWithScheme(parts[0], scheme)
 		return [4]css.Color{c, c, c, c}
 	case 2:
-		t, _ := css.ParseColor(parts[0])
-		r, _ := css.ParseColor(parts[1])
+		t, _ := css.ParseColorWithScheme(parts[0], scheme)
+		r, _ := css.ParseColorWithScheme(parts[1], scheme)
 		return [4]css.Color{t, r, t, r}
 	case 3:
-		colors[0], _ = css.ParseColor(parts[0])
-		colors[1], _ = css.ParseColor(parts[1])
-		colors[2], _ = css.ParseColor(parts[2])
+		colors[0], _ = css.ParseColorWithScheme(parts[0], scheme)
+		colors[1], _ = css.ParseColorWithScheme(parts[1], scheme)
+		colors[2], _ = css.ParseColorWithScheme(parts[2], scheme)
 		colors[3] = colors[1]
 	case 4:
-		colors[0], _ = css.ParseColor(parts[0])
-		colors[1], _ = css.ParseColor(parts[1])
-		colors[2], _ = css.ParseColor(parts[2])
-		colors[3], _ = css.ParseColor(parts[3])
+		colors[0], _ = css.ParseColorWithScheme(parts[0], scheme)
+		colors[1], _ = css.ParseColorWithScheme(parts[1], scheme)
+		colors[2], _ = css.ParseColorWithScheme(parts[2], scheme)
+		colors[3], _ = css.ParseColorWithScheme(parts[3], scheme)
 	}
 	return colors
 }
