@@ -15,6 +15,7 @@ const (
 	RoleButton
 	RoleImage
 	RoleTextField
+	RoleSearch
 )
 
 // Node is one accessible object. Bounds are document coordinates in CSS pixels,

@@ -80,8 +80,67 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 
 	areaRows, areaCols, areas := parseGridAreas(container.GridTemplateAreas)
-	cols, colLines := parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW)
-	rowSpecs, rowLines := parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH)
+	var cols []gridTrack
+	var colLines map[string][]int
+	var rowSpecs []gridTrack
+	var rowLines map[string][]int
+
+	if isSubgrid(container.GridTemplateColumns) {
+		pGridID := findParentGrid(a, id)
+		if pGridID != 0 {
+			pObj := a.Get(pGridID)
+			subStart := a.Get(id).GridCol
+			subSpan := a.Get(id).GridColSpan
+			if subSpan < 1 {
+				subSpan = 1
+			}
+			if subStart < len(pObj.GridCols) {
+				end := subStart + subSpan
+				if end > len(pObj.GridCols) {
+					end = len(pObj.GridCols)
+				}
+				for _, w := range pObj.GridCols[subStart:end] {
+					cols = append(cols, gridTrack{min: w, max: w})
+				}
+			}
+			if container.ColumnGap == 0 && pObj.Style != nil {
+				gapX = pObj.Style.ColumnGap
+			}
+			colLines = parseSubgridLines(container.GridTemplateColumns)
+		}
+	}
+	if len(cols) == 0 && !isSubgrid(container.GridTemplateColumns) {
+		cols, colLines = parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW)
+	}
+
+	if isSubgrid(container.GridTemplateRows) {
+		pGridID := findParentGrid(a, id)
+		if pGridID != 0 {
+			pObj := a.Get(pGridID)
+			subStart := a.Get(id).GridRow
+			subSpan := a.Get(id).GridRowSpan
+			if subSpan < 1 {
+				subSpan = 1
+			}
+			if subStart < len(pObj.GridRows) {
+				end := subStart + subSpan
+				if end > len(pObj.GridRows) {
+					end = len(pObj.GridRows)
+				}
+				for _, h := range pObj.GridRows[subStart:end] {
+					rowSpecs = append(rowSpecs, gridTrack{min: h, max: h})
+				}
+			}
+			if container.RowGap == 0 && pObj.Style != nil {
+				gapY = pObj.Style.RowGap
+			}
+			rowLines = parseSubgridLines(container.GridTemplateRows)
+		}
+	}
+	if len(rowSpecs) == 0 && !isSubgrid(container.GridTemplateRows) {
+		rowSpecs, rowLines = parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH)
+	}
+
 	switch {
 	case len(cols) == 0:
 		// An untemplated grid still needs one implicit column to place into.
@@ -119,6 +178,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	colW := make([]float32, len(cols))
 	sizeGridTracks(cols, colW, contentW, gapX, normalizeAxis(container.JustifyContent) == "",
 		measureAutoCols(a, items, cols))
+	a.Get(id).GridCols = colW
 	colLead, colGap := axisPacking(container.JustifyContent, contentW, gapX, len(cols), colW)
 	xs := make([]float32, len(cols))
 	for i := range colW {
@@ -129,6 +189,14 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
+	initRows := make([]float32, len(rowSpecs))
+	for r, tr := range rowSpecs {
+		if tr.min > 0 {
+			initRows[r] = tr.min
+		}
+	}
+	a.Get(id).GridRows = initRows
+
 	for i := range items {
 		p := &items[i]
 		last := p.col + p.colSpan - 1
@@ -137,6 +205,10 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		colRect := xs[last] + colW[last] - xs[p.col]
 		it := a.Get(p.id)
+		it.GridCol = p.col
+		it.GridRow = p.row
+		it.GridColSpan = p.colSpan
+		it.GridRowSpan = p.rowSpan
 		// The horizontal origin is already final, so descendants block layout puts
 		// under this item land where they belong; only Y moves after sizing.
 		it.X = xs[p.col]
@@ -245,6 +317,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			ys[i] = ys[i-1] + rowH[i-1] + rowGap
 		}
 	}
+	a.Get(id).GridRows = rowH
 
 	maxBottom := float32(0)
 	for i := range items {
@@ -1282,4 +1355,39 @@ func quotedStrings(v string) []string {
 		i = j
 	}
 	return out
+}
+
+func isSubgrid(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "subgrid" || strings.HasPrefix(v, "subgrid ") || strings.HasPrefix(v, "subgrid[")
+}
+
+func findParentGrid(a *Arena, id ObjectID) ObjectID {
+	for pID := a.Get(id).Parent; pID != 0; pID = a.Get(pID).Parent {
+		st := a.Get(pID).Style
+		if st != nil && (st.Display == style.DisplayGrid || st.Display == style.DisplayInlineGrid) {
+			return pID
+		}
+	}
+	return 0
+}
+
+func parseSubgridLines(v string) map[string][]int {
+	lines := map[string][]int{}
+	v = strings.TrimSpace(strings.ToLower(v))
+	if !strings.HasPrefix(v, "subgrid") {
+		return lines
+	}
+	rem := strings.TrimSpace(strings.TrimPrefix(v, "subgrid"))
+	line := 1
+	for _, tok := range splitGridTracks(rem) {
+		if strings.HasPrefix(tok, "[") {
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(tok, "["), "]"))
+			for _, name := range strings.Fields(inner) {
+				lines[name] = append(lines[name], line)
+			}
+			line++
+		}
+	}
+	return lines
 }

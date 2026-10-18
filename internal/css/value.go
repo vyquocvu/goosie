@@ -136,7 +136,10 @@ func lengthFuncName(s string) (string, bool) {
 		return "", false
 	}
 	switch lower := strings.ToLower(s[:idx]); lower {
-	case "calc", "min", "max", "clamp":
+	case "calc", "min", "max", "clamp",
+		"sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+		"pow", "sqrt", "hypot", "log", "exp", "abs", "sign",
+		"round", "mod", "rem":
 		// The trailing ')' has to close this function: `max(1px,2px) * 2` is an
 		// expression around the call, not a call around the expression.
 		depth := 0

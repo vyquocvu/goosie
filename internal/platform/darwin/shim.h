@@ -202,7 +202,8 @@ enum {
 	GOOSIE_AX_LINK = 3,
 	GOOSIE_AX_BUTTON = 4,
 	GOOSIE_AX_IMAGE = 5,
-	GOOSIE_AX_TEXT_FIELD = 6
+	GOOSIE_AX_TEXT_FIELD = 6,
+	GOOSIE_AX_SEARCH = 7
 };
 
 // GoosieAxNode is one node of a flattened accessibility tree. The tree arrives

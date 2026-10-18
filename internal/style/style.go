@@ -695,6 +695,7 @@ sup { font-size: 0.83em; vertical-align: super; }
 header, footer { display: block; }
 nav { display: block; }
 main { display: block; }
+search { display: block; }
 section { display: block; }
 article { display: block; }
 aside { display: block; }

@@ -92,7 +92,18 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 	}
 
 	n := obj.Node
+	if n.GetAttribute("role") == "search" {
+		if !visible {
+			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+		}
+		return emit(ax.RoleSearch, label, "", ""), axBubble{}
+	}
 	switch n.DataAtom {
+	case dom.AtomSearch:
+		if !visible {
+			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+		}
+		return emit(ax.RoleSearch, label, "", ""), axBubble{}
 	case dom.AtomA:
 		if href := n.GetAttribute("href"); href != "" && visible {
 			return emit(ax.RoleLink, label, "", href), axBubble{}

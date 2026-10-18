@@ -154,3 +154,33 @@ func TestAccessibilityTextRunsAroundLink(t *testing.T) {
 		t.Fatalf("runs out of document order: Hello=%d link=%d world=%d", hello, link, world)
 	}
 }
+
+func TestAccessibilitySearchLandmark(t *testing.T) {
+	s := newFocusSession(t, `<html><body style="margin: 0;">
+<search>
+  <input type="text" placeholder="Search the web">
+  <button>Find</button>
+</search>
+<div role="search">
+  <input type="text" placeholder="Site search">
+</div>
+</body></html>`)
+
+	tree := s.AccessibilityTree()
+	searchTagNode := axFind(tree, ax.RoleSearch, "Search the web Find")
+	if searchTagNode == nil {
+		// Or label could be without button text or composite
+		searchTagNode = axFind(tree, ax.RoleSearch, "")
+	}
+	// Check all search role nodes in flattened tree
+	flat := axFlatten(tree)
+	var searchNodes []ax.Node
+	for _, n := range flat {
+		if n.Role == ax.RoleSearch {
+			searchNodes = append(searchNodes, n)
+		}
+	}
+	if len(searchNodes) != 2 {
+		t.Fatalf("found %d RoleSearch nodes, want 2 (one <search> and one role=search); tree: %+v", len(searchNodes), flat)
+	}
+}

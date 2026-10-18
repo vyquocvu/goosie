@@ -102,6 +102,7 @@ static NSString *axRoleName(int role) {
 		case GOOSIE_AX_BUTTON: return NSAccessibilityButtonRole;
 		case GOOSIE_AX_IMAGE: return NSAccessibilityImageRole;
 		case GOOSIE_AX_TEXT_FIELD: return NSAccessibilityTextFieldRole;
+		case GOOSIE_AX_SEARCH: return NSAccessibilityGroupRole;
 		default: return NSAccessibilityUnknownRole;
 	}
 }

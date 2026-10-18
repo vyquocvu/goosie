@@ -1,6 +1,7 @@
 package css
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -416,8 +417,237 @@ func (p *calcExpr) combine(name string, args []string) (float32, bool) {
 			v = lo
 		}
 		return v, true
+	case "sin":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Sin(float64(v))), true
+	case "cos":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Cos(float64(v))), true
+	case "tan":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Tan(float64(v))), true
+	case "asin":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok || v < -1 || v > 1 {
+			return 0, false
+		}
+		return float32(math.Asin(float64(v))), true
+	case "acos":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok || v < -1 || v > 1 {
+			return 0, false
+		}
+		return float32(math.Acos(float64(v))), true
+	case "atan":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Atan(float64(v))), true
+	case "atan2":
+		if len(args) != 2 {
+			return 0, false
+		}
+		y, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		x, ok := p.evalSum(args[1])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Atan2(float64(y), float64(x))), true
+	case "pow":
+		if len(args) != 2 {
+			return 0, false
+		}
+		base, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		exp, ok := p.evalSum(args[1])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Pow(float64(base), float64(exp))), true
+	case "sqrt":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok || v < 0 {
+			return 0, false
+		}
+		return float32(math.Sqrt(float64(v))), true
+	case "hypot":
+		if len(args) < 1 {
+			return 0, false
+		}
+		var sumSq float64
+		for _, a := range args {
+			v, ok := p.evalSum(a)
+			if !ok {
+				return 0, false
+			}
+			sumSq += float64(v) * float64(v)
+		}
+		return float32(math.Sqrt(sumSq)), true
+	case "log":
+		if len(args) == 1 {
+			v, ok := p.evalSum(args[0])
+			if !ok || v <= 0 {
+				return 0, false
+			}
+			return float32(math.Log(float64(v))), true
+		} else if len(args) == 2 {
+			v, ok := p.evalSum(args[0])
+			if !ok || v <= 0 {
+				return 0, false
+			}
+			base, ok := p.evalSum(args[1])
+			if !ok || base <= 0 || base == 1 {
+				return 0, false
+			}
+			return float32(math.Log(float64(v)) / math.Log(float64(base))), true
+		}
+		return 0, false
+	case "exp":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Exp(float64(v))), true
+	case "abs":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		if v < 0 {
+			v = -v
+		}
+		return v, true
+	case "sign":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		if v > 0 {
+			return 1, true
+		}
+		if v < 0 {
+			return -1, true
+		}
+		return 0, true
+	case "round":
+		argsToUse := args
+		strat := "nearest"
+		if len(args) > 0 {
+			first := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(args[0])), " ", "")
+			if first == "nearest" || first == "up" || first == "down" || first == "to-zero" {
+				strat = first
+				argsToUse = args[1:]
+			}
+		}
+		if len(argsToUse) == 1 {
+			v, ok := p.evalSum(argsToUse[0])
+			if !ok {
+				return 0, false
+			}
+			return roundWithStrategy(v, 1, strat), true
+		} else if len(argsToUse) == 2 {
+			v, ok := p.evalSum(argsToUse[0])
+			if !ok {
+				return 0, false
+			}
+			step, ok := p.evalSum(argsToUse[1])
+			if !ok || step == 0 {
+				return 0, false
+			}
+			return roundWithStrategy(v, step, strat), true
+		}
+		return 0, false
+	case "mod":
+		if len(args) != 2 {
+			return 0, false
+		}
+		a, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		b, ok := p.evalSum(args[1])
+		if !ok || b == 0 {
+			return 0, false
+		}
+		return a - b*float32(math.Floor(float64(a/b))), true
+	case "rem":
+		if len(args) != 2 {
+			return 0, false
+		}
+		a, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		b, ok := p.evalSum(args[1])
+		if !ok || b == 0 {
+			return 0, false
+		}
+		return a - b*float32(math.Trunc(float64(a/b))), true
 	}
 	return 0, false
+}
+
+func roundWithStrategy(v, step float32, strat string) float32 {
+	if step < 0 {
+		step = -step
+	}
+	ratio := float64(v / step)
+	switch strat {
+	case "up":
+		ratio = math.Ceil(ratio)
+	case "down":
+		ratio = math.Floor(ratio)
+	case "to-zero":
+		ratio = math.Trunc(ratio)
+	default: // "nearest"
+		ratio = math.Round(ratio)
+	}
+	return float32(ratio * float64(step))
 }
 
 func (p *calcExpr) slice(lo, hi int) string {
@@ -430,6 +660,18 @@ func isNumericToken(tok string) bool {
 }
 
 func (p *calcExpr) length(tok string) (float32, bool) {
+	lower := strings.ToLower(tok)
+	switch lower {
+	case "pi":
+		return float32(math.Pi), true
+	case "e":
+		return float32(math.E), true
+	case "infinity", "inf":
+		return float32(math.Inf(1)), true
+	case "-infinity", "-inf":
+		return float32(math.Inf(-1)), true
+	}
+
 	n := 0
 	for n < len(tok) && (tok[n] >= '0' && tok[n] <= '9' || tok[n] == '.') {
 		n++
@@ -445,6 +687,14 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 	switch strings.ToLower(tok[n:]) {
 	case "px", "":
 		return num, true
+	case "deg":
+		return num * math.Pi / 180, true
+	case "grad":
+		return num * math.Pi / 200, true
+	case "rad":
+		return num, true
+	case "turn":
+		return num * 2 * math.Pi, true
 	case "%":
 		// A percentage only answers when the caller supplied its base: the
 		// containing-block length for box sizes, the parent font for

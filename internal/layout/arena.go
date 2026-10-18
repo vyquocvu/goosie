@@ -47,6 +47,15 @@ type Object struct {
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
 
+	// GridCols and GridRows record the resolved track sizes (in px) of a grid
+	// container so subgrids can inherit track slices from their parent.
+	GridCols    []float32
+	GridRows    []float32
+	GridCol     int
+	GridRow     int
+	GridColSpan int
+	GridRowSpan int
+
 	// Image carries the decoded pixels of a replaced element so paint can draw
 	// it. It is `any` rather than an image type because layout may not depend
 	// on image decoding; the engine sets it to a concrete decoded image after

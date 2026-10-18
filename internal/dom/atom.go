@@ -114,6 +114,7 @@ const (
 	AtomCol
 	AtomColgroup
 	AtomCaption
+	AtomSearch
 
 	atomSentinel
 )
@@ -224,6 +225,7 @@ var atomNames = [...]string{
 	AtomCol:        "col",
 	AtomColgroup:   "colgroup",
 	AtomCaption:    "caption",
+	AtomSearch:     "search",
 }
 
 var atomLookup map[string]Atom
