@@ -2,6 +2,7 @@ package js
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/dop251/goja"
@@ -318,15 +319,41 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 	// Drawing methods
 	_ = obj.Set("fill", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
+		defer ctx.mu.Unlock()
+		if len(call.Arguments) > 0 {
+			if pathObj, ok := call.Arguments[0].(*goja.Object); ok {
+				if pOpsVal := pathObj.Get("__path_ops__"); pOpsVal != nil && !goja.IsUndefined(pOpsVal) {
+					if fn, ok := goja.AssertFunction(pOpsVal); ok {
+						if res, err := fn(pathObj); err == nil {
+							if pOps, ok := res.Export().([]canvasDrawOp); ok {
+								ctx.ops = append(ctx.ops, pOps...)
+							}
+						}
+					}
+				}
+			}
+		}
 		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "fill"})
-		ctx.mu.Unlock()
 		return goja.Undefined()
 	})
 
 	_ = obj.Set("stroke", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
+		defer ctx.mu.Unlock()
+		if len(call.Arguments) > 0 {
+			if pathObj, ok := call.Arguments[0].(*goja.Object); ok {
+				if pOpsVal := pathObj.Get("__path_ops__"); pOpsVal != nil && !goja.IsUndefined(pOpsVal) {
+					if fn, ok := goja.AssertFunction(pOpsVal); ok {
+						if res, err := fn(pathObj); err == nil {
+							if pOps, ok := res.Export().([]canvasDrawOp); ok {
+								ctx.ops = append(ctx.ops, pOps...)
+							}
+						}
+					}
+				}
+			}
+		}
 		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "stroke"})
-		ctx.mu.Unlock()
 		return goja.Undefined()
 	})
 
@@ -343,10 +370,14 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		if len(call.Arguments) >= 3 {
 			y = call.Arguments[2].ToFloat()
 		}
+		args := []interface{}{text, x, y}
+		if len(call.Arguments) >= 4 {
+			args = append(args, call.Arguments[3].ToFloat())
+		}
 		ctx.mu.Lock()
 		ctx.ops = append(ctx.ops, canvasDrawOp{
 			Method: "fillText",
-			Args:   []interface{}{text, x, y},
+			Args:   args,
 		})
 		ctx.mu.Unlock()
 		return goja.Undefined()
@@ -364,13 +395,40 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		if len(call.Arguments) >= 3 {
 			y = call.Arguments[2].ToFloat()
 		}
+		args := []interface{}{text, x, y}
+		if len(call.Arguments) >= 4 {
+			args = append(args, call.Arguments[3].ToFloat())
+		}
 		ctx.mu.Lock()
 		ctx.ops = append(ctx.ops, canvasDrawOp{
 			Method: "strokeText",
-			Args:   []interface{}{text, x, y},
+			Args:   args,
 		})
 		ctx.mu.Unlock()
 		return goja.Undefined()
+	})
+
+	_ = obj.Set("measureText", func(call goja.FunctionCall) goja.Value {
+		text := ""
+		if len(call.Arguments) >= 1 {
+			text = call.Arguments[0].String()
+		}
+		fontSize := 10.0
+		if fontVal := obj.Get("font"); fontVal != nil && !goja.IsUndefined(fontVal) {
+			fs := fontVal.String()
+			for _, part := range strings.Fields(fs) {
+				if strings.HasSuffix(part, "px") {
+					if n, err := strconv.ParseFloat(strings.TrimSuffix(part, "px"), 64); err == nil && n > 0 {
+						fontSize = n
+						break
+					}
+				}
+			}
+		}
+		width := float64(len([]rune(text))) * (fontSize * 0.6)
+		res := r.vm.NewObject()
+		_ = res.Set("width", width)
+		return res
 	})
 
 	// Transform methods
@@ -760,6 +818,161 @@ func (r *Runtime) setupCanvas() {
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("CanvasRenderingContext2D", ctor)
+		}
+	}
+
+	r.setupPath2D()
+}
+
+type path2DData struct {
+	mu  sync.Mutex
+	ops []canvasDrawOp
+}
+
+func (r *Runtime) setupPath2D() {
+	path2DCtor := func(call goja.ConstructorCall) *goja.Object {
+		pData := &path2DData{}
+		if len(call.Arguments) > 0 {
+			if existing, ok := call.Arguments[0].(*goja.Object); ok {
+				if pOpsVal := existing.Get("__path_ops__"); pOpsVal != nil && !goja.IsUndefined(pOpsVal) {
+					if fn, ok := goja.AssertFunction(pOpsVal); ok {
+						if res, err := fn(existing); err == nil {
+							if existingOps, ok := res.Export().([]canvasDrawOp); ok {
+								pData.ops = append(pData.ops, existingOps...)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		obj := call.This
+		_ = obj.Set("__is_path2d__", true)
+		_ = obj.Set("__path_ops__", func() []canvasDrawOp {
+			pData.mu.Lock()
+			defer pData.mu.Unlock()
+			cp := make([]canvasDrawOp, len(pData.ops))
+			copy(cp, pData.ops)
+			return cp
+		})
+
+		_ = obj.Set("beginPath", func(call goja.FunctionCall) goja.Value {
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{Method: "beginPath"})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("closePath", func(call goja.FunctionCall) goja.Value {
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{Method: "closePath"})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("moveTo", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0)
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "moveTo",
+				Args:   []interface{}{args[0], args[1]},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("lineTo", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0)
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "lineTo",
+				Args:   []interface{}{args[0], args[1]},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("arc", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0, 0)
+			ccw := false
+			if len(call.Arguments) >= 6 {
+				ccw = call.Arguments[5].ToBoolean()
+			}
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "arc",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], ccw},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("rect", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0)
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "rect",
+				Args:   []interface{}{args[0], args[1], args[2], args[3]},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("bezierCurveTo", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0)
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "bezierCurveTo",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], args[5]},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("quadraticCurveTo", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0)
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "quadraticCurveTo",
+				Args:   []interface{}{args[0], args[1], args[2], args[3]},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("ellipse", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0, 0)
+			ccw := false
+			if len(call.Arguments) >= 8 {
+				ccw = call.Arguments[7].ToBoolean()
+			}
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "ellipse",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], args[5], args[6], ccw},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("addPath", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) > 0 {
+				if other, ok := call.Arguments[0].(*goja.Object); ok {
+					if pOpsVal := other.Get("__path_ops__"); pOpsVal != nil && !goja.IsUndefined(pOpsVal) {
+						if fn, ok := goja.AssertFunction(pOpsVal); ok {
+							if res, err := fn(other); err == nil {
+								if ops, ok := res.Export().([]canvasDrawOp); ok {
+									pData.mu.Lock()
+									pData.ops = append(pData.ops, ops...)
+									pData.mu.Unlock()
+								}
+							}
+						}
+					}
+				}
+			}
+			return goja.Undefined()
+		})
+
+		return nil
+	}
+
+	ctorVal := r.vm.ToValue(path2DCtor)
+	_ = r.vm.Set("Path2D", ctorVal)
+	if win := r.vm.Get("window"); win != nil {
+		if winObj, ok := win.(*goja.Object); ok {
+			_ = winObj.Set("Path2D", ctorVal)
 		}
 	}
 }

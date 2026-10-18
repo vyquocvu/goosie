@@ -544,6 +544,20 @@ type ComputedStyle struct {
 	// Container query properties (CSS Containment Level 3).
 	ContainerType string // "normal", "size", "inline-size"
 	ContainerName string // custom-ident or space-separated identifiers
+
+	// CSS Scroll Snap Module Level 1
+	ScrollSnapType       string // "none", "x", "y", "block", "inline", "both"
+	ScrollSnapStrictness string // "mandatory", "proximity"
+	ScrollSnapAlign      string // "none", "start", "end", "center"
+	ScrollSnapStop       string // "normal", "always"
+	ScrollPaddingTop     float32
+	ScrollPaddingRight   float32
+	ScrollPaddingBottom  float32
+	ScrollPaddingLeft    float32
+	ScrollMarginTop      float32
+	ScrollMarginRight    float32
+	ScrollMarginBottom   float32
+	ScrollMarginLeft     float32
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -664,6 +678,10 @@ func DefaultStyle() ComputedStyle {
 		Quotes:                 []string{"“", "”", "‘", "’"},
 		AccentColor:            css.Color{}, // Default/zero means browser's default accent color
 		AspectRatio:            0,
+		ScrollSnapType:         "none",
+		ScrollSnapStrictness:   "proximity",
+		ScrollSnapAlign:        "none",
+		ScrollSnapStop:         "normal",
 	}
 }
 
@@ -2516,6 +2534,58 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "animation-timeline":
 		cs.AnimationTimeline = strings.TrimSpace(value)
+	case "scroll-snap-type":
+		fields := strings.Fields(strings.ToLower(value))
+		if len(fields) == 1 {
+			if fields[0] == "none" {
+				cs.ScrollSnapType = "none"
+			} else if fields[0] == "mandatory" || fields[0] == "proximity" {
+				cs.ScrollSnapStrictness = fields[0]
+			} else {
+				cs.ScrollSnapType = fields[0]
+			}
+		} else if len(fields) >= 2 {
+			for _, f := range fields {
+				switch f {
+				case "none", "x", "y", "block", "inline", "both":
+					cs.ScrollSnapType = f
+				case "mandatory", "proximity":
+					cs.ScrollSnapStrictness = f
+				}
+			}
+		}
+	case "scroll-snap-align":
+		cs.ScrollSnapAlign = strings.TrimSpace(strings.ToLower(value))
+	case "scroll-snap-stop":
+		cs.ScrollSnapStop = strings.TrimSpace(strings.ToLower(value))
+	case "scroll-padding":
+		t, r, b, l := parsePaddingShorthand(value, cs.FontSize, cs.rootFontSize)
+		cs.ScrollPaddingTop = t
+		cs.ScrollPaddingRight = r
+		cs.ScrollPaddingBottom = b
+		cs.ScrollPaddingLeft = l
+	case "scroll-padding-top":
+		cs.ScrollPaddingTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-padding-right":
+		cs.ScrollPaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-padding-bottom":
+		cs.ScrollPaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-padding-left":
+		cs.ScrollPaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin":
+		t, r, b, l := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
+		cs.ScrollMarginTop = t
+		cs.ScrollMarginRight = r
+		cs.ScrollMarginBottom = b
+		cs.ScrollMarginLeft = l
+	case "scroll-margin-top":
+		cs.ScrollMarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin-right":
+		cs.ScrollMarginRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin-bottom":
+		cs.ScrollMarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin-left":
+		cs.ScrollMarginLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "font-palette":
 		cs.FontPalette = strings.TrimSpace(value)
 	case "offset-path":
@@ -3132,9 +3202,17 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "white-space":
 		cs.WhiteSpace = parseWhiteSpace(value)
 	case "word-spacing":
-		cs.WordSpacing = resolveLength(parsed, 0)
+		if strings.TrimSpace(strings.ToLower(value)) == "normal" {
+			cs.WordSpacing = 0
+		} else {
+			cs.WordSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 	case "letter-spacing":
-		cs.LetterSpacing = resolveLength(parsed, 0)
+		if strings.TrimSpace(strings.ToLower(value)) == "normal" {
+			cs.LetterSpacing = 0
+		} else {
+			cs.LetterSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 
 	case "vertical-align":
 		cs.VerticalAlign = value
