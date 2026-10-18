@@ -6,6 +6,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/manifest"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
@@ -41,6 +42,8 @@ type Tab struct {
 	pinned          bool
 	shieldsDisabled bool
 	blockedTrackers int
+	manifest        *manifest.Manifest
+	standaloneApp   bool
 
 	Nav NavController
 }
@@ -225,4 +228,32 @@ func (t *Tab) SetPinned(pinned bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.pinned = pinned
+}
+
+// Manifest returns the parsed PWA web app manifest for this tab, or nil if none.
+func (t *Tab) Manifest() *manifest.Manifest {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.manifest
+}
+
+// SetManifest sets the parsed PWA web app manifest for this tab.
+func (t *Tab) SetManifest(m *manifest.Manifest) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.manifest = m
+}
+
+// IsStandaloneApp reports whether this tab is presented in standalone PWA application mode.
+func (t *Tab) IsStandaloneApp() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.standaloneApp
+}
+
+// SetStandaloneApp configures whether this tab is in standalone PWA application mode.
+func (t *Tab) SetStandaloneApp(standalone bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.standaloneApp = standalone
 }

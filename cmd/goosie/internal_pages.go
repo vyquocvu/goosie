@@ -19,6 +19,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/tabs"
+	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
 // internalNavHeader returns standard top navigation for all goosie:// internal pages.
@@ -33,6 +34,7 @@ func internalNavHeader(active string) string {
 		{"history", "History", "goosie://history"},
 		{"downloads", "Downloads", "goosie://downloads"},
 		{"inspect", "Inspector", "goosie://inspect"},
+		{"extensions", "Extensions", "goosie://extensions"},
 	}
 
 	var b strings.Builder
@@ -565,6 +567,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildReaderPageHTML(f, rawURL)
 	case "restore":
 		return buildRestorePageHTML(f, rawURL)
+	case "extensions", "userscripts":
+		return buildExtensionsPageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">
@@ -576,6 +580,7 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
         <li><a class="list-link" href="goosie://history">goosie://history</a> &mdash; Browsing history</li>
         <li><a class="list-link" href="goosie://downloads">goosie://downloads</a> &mdash; Downloaded files</li>
         <li><a class="list-link" href="goosie://inspect">goosie://inspect</a> &mdash; Web Inspector &amp; DOM/CSS Tree Explorer (Cmd+Option+I)</li>
+        <li><a class="list-link" href="goosie://extensions">goosie://extensions</a> &mdash; Extensions &amp; User Scripts Manager</li>
         <li><a class="list-link" href="goosie://reader">goosie://reader</a> &mdash; Distraction-Free Reader Mode (Cmd+Shift+R)</li>
         <li><a class="list-link" href="goosie://restore">goosie://restore</a> &mdash; Session Crash Recovery &amp; Restore Prompt</li>
       </ul>
@@ -654,6 +659,11 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			t := u.Query().Get("theme")
 			if t != "" {
 				f.setTheme(t)
+			}
+		case "toggle_standalone":
+			targetTab.SetStandaloneApp(!targetTab.IsStandaloneApp())
+			if cw, ok := f.window.(*chromeWindow); ok {
+				cw.notifyContentResize()
 			}
 		}
 	}
@@ -962,6 +972,57 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
       </form>
     </div>`, targetTab.ID(), html.EscapeString(evalExpr)))
 
+	// Progressive Web App (PWA) & Manifest Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Progressive Web App (PWA) &amp; Manifest</h2>`)
+	m := targetTab.Manifest()
+	if m == nil {
+		b.WriteString(`<p style="color: #5f6368;">No W3C Web App Manifest detected for this page (no <code>&lt;link rel="manifest"&gt;</code>).</p>`)
+		isStandalone := targetTab.IsStandaloneApp()
+		statusText := "Browser Mode"
+		actionBtnText := "Switch to Standalone Mode"
+		if isStandalone {
+			statusText = "Standalone App Mode (Chromeless)"
+			actionBtnText = "Switch to Browser Mode"
+		}
+		b.WriteString(fmt.Sprintf(`<p style="font-size: 13px; color: #3c4043; margin-top: 8px;">Current Presentation: <b>%s</b></p>`, statusText))
+		toggleLink := fmt.Sprintf(`goosie://inspect?action=toggle_standalone&tab=%d`, targetTab.ID())
+		b.WriteString(fmt.Sprintf(`<div style="margin-top: 10px;"><a class="btn-action secondary" href="%s">%s</a></div>`, toggleLink, actionBtnText))
+	} else {
+		b.WriteString(`<table><tbody>`)
+		b.WriteString(fmt.Sprintf(`<tr><td style="width: 140px; font-weight: bold;">App Name</td><td>%s</td></tr>`, html.EscapeString(m.EffectiveName())))
+		if m.ShortName != "" {
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Short Name</td><td>%s</td></tr>`, html.EscapeString(m.ShortName)))
+		}
+		if m.Description != "" {
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Description</td><td>%s</td></tr>`, html.EscapeString(m.Description)))
+		}
+		b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Start URL</td><td><code>%s</code></td></tr>`, html.EscapeString(m.ResolveStartURL(targetTab.URL()))))
+		b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Display Mode</td><td><code>%s</code></td></tr>`, html.EscapeString(string(m.Display))))
+		if m.ThemeColor != "" {
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Theme Color</td><td><span style="display:inline-block;width:12px;height:12px;background:%s;border:1px solid #ccc;vertical-align:middle;margin-right:6px;"></span><code>%s</code></td></tr>`, html.EscapeString(m.ThemeColor), html.EscapeString(m.ThemeColor)))
+		}
+		if m.BackgroundColor != "" {
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Background Color</td><td><span style="display:inline-block;width:12px;height:12px;background:%s;border:1px solid #ccc;vertical-align:middle;margin-right:6px;"></span><code>%s</code></td></tr>`, html.EscapeString(m.BackgroundColor), html.EscapeString(m.BackgroundColor)))
+		}
+		if len(m.Icons) > 0 {
+			b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Icons</td><td>%d icon(s) declared</td></tr>`, len(m.Icons)))
+		}
+		isStandalone := targetTab.IsStandaloneApp()
+		statusText := "Browser Mode"
+		actionBtnText := "Switch to Standalone App Mode"
+		if isStandalone {
+			statusText = "Standalone App Mode (Chromeless)"
+			actionBtnText = "Switch to Browser Tab Mode"
+		}
+		b.WriteString(fmt.Sprintf(`<tr><td style="font-weight: bold;">Current Presentation</td><td><b>%s</b></td></tr>`, statusText))
+		b.WriteString(`</tbody></table>`)
+
+		toggleLink := fmt.Sprintf(`goosie://inspect?action=toggle_standalone&tab=%d`, targetTab.ID())
+		b.WriteString(fmt.Sprintf(`<div style="margin-top: 12px;"><a class="btn-action" href="%s">%s</a></div>`, toggleLink, actionBtnText))
+	}
+	b.WriteString(`</div>`)
+
 	return "Web Inspector", internalPageTemplate("inspect", "Web Inspector", b.String())
 }
 
@@ -1091,6 +1152,103 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	b.WriteString(`</div>`)
 
 	return "Restore Session - Goosie", internalPageTemplate("restore", "Restore Session - Goosie", b.String())
+}
+
+// buildExtensionsPageHTML generates the user scripts & extensions management page.
+func buildExtensionsPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
+	u, _ := url.Parse(rawURL)
+	action := ""
+	id := ""
+	if u != nil {
+		action = u.Query().Get("action")
+		id = u.Query().Get("id")
+	}
+
+	if action == "toggle" && id != "" && f.userscripts != nil {
+		s := f.userscripts.ScriptByID(id)
+		if s != nil {
+			f.userscripts.SetEnabled(id, !s.Enabled)
+		}
+	}
+
+	var scripts []*userscript.Script
+	dir := ""
+	if f.userscripts != nil {
+		scripts = f.userscripts.Scripts()
+		dir = f.userscripts.Dir()
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="card">
+      <h1>Extensions &amp; User Scripts</h1>
+      <p style="color: #5f6368; font-size: 14px;">
+        Manage custom user scripts and extensions. Drop <code>*.user.js</code> scripts into your profile's scripts folder to automatically inject custom styling and behavior.
+      </p>`)
+
+	if dir != "" {
+		b.WriteString(fmt.Sprintf(`<p style="font-size: 13px; color: #5f6368; margin-top: 8px;">Folder: <code>%s</code></p>`, html.EscapeString(dir)))
+	}
+	b.WriteString(`</div>`)
+
+	if len(scripts) == 0 {
+		b.WriteString(`<div class="card empty-state">
+      <p style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">No User Scripts Installed</p>
+      <p style="color: #5f6368; font-size: 13px;">Save Greasemonkey / Tampermonkey compatible <code>.user.js</code> files to your userscripts directory to customize any website.</p>
+    </div>`)
+		return "Extensions - Goosie", internalPageTemplate("extensions", "Extensions - Goosie", b.String())
+	}
+
+	b.WriteString(`<div class="card">
+      <h2>Installed Scripts (` + strconv.Itoa(len(scripts)) + `)</h2>`)
+
+	for _, s := range scripts {
+		statusBadge := `<span class="badge badge-completed">Enabled</span>`
+		toggleBtn := fmt.Sprintf(`<a class="btn-action secondary" href="goosie://extensions?action=toggle&id=%s">Disable</a>`, url.QueryEscape(s.ID))
+		if !s.Enabled {
+			statusBadge = `<span class="badge badge-canceled">Disabled</span>`
+			toggleBtn = fmt.Sprintf(`<a class="btn-action" href="goosie://extensions?action=toggle&id=%s">Enable</a>`, url.QueryEscape(s.ID))
+		}
+
+		desc := s.Description
+		if desc == "" {
+			desc = "No description provided."
+		}
+
+		matchSummary := strings.Join(s.Matches, ", ")
+		if matchSummary == "" {
+			matchSummary = strings.Join(s.Includes, ", ")
+		}
+		if matchSummary == "" {
+			matchSummary = "All URLs (<all_urls>)"
+		}
+
+		b.WriteString(fmt.Sprintf(`
+      <div class="list-item" style="padding: 16px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <div class="list-title" style="font-size: 16px;">%s <span style="font-size: 12px; font-weight: normal; color: #5f6368;">v%s</span> %s</div>
+            <div style="font-size: 13px; color: #3c4043; margin-top: 4px;">%s</div>
+            <div class="list-meta" style="margin-top: 6px;">
+              <strong>Matches:</strong> <code>%s</code> &bull; <strong>Run-at:</strong> <code>%s</code>
+            </div>
+          </div>
+          <div style="margin-left: 16px; white-space: nowrap;">
+            %s
+          </div>
+        </div>
+      </div>`,
+			html.EscapeString(s.Name),
+			html.EscapeString(s.Version),
+			statusBadge,
+			html.EscapeString(desc),
+			html.EscapeString(matchSummary),
+			html.EscapeString(string(s.RunAt)),
+			toggleBtn,
+		))
+	}
+	b.WriteString(`</div>`)
+
+	return "Extensions - Goosie", internalPageTemplate("extensions", "Extensions - Goosie", b.String())
 }
 
 // renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.

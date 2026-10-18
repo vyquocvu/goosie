@@ -129,8 +129,18 @@ func (cw *chromeWindow) sc() int32 {
 	return cw.scale
 }
 
+func (cw *chromeWindow) isStandalone() bool {
+	if cw.tabMgr != nil {
+		active := cw.tabMgr.Active()
+		if active != nil && active.IsStandaloneApp() {
+			return true
+		}
+	}
+	return false
+}
+
 func (cw *chromeWindow) chromeHeight() int32 {
-	if cw.fullscreen {
+	if cw.fullscreen || cw.isStandalone() {
 		return 0
 	}
 	h := int32(totalChromeHeight)
@@ -142,7 +152,7 @@ func (cw *chromeWindow) chromeHeight() int32 {
 
 func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	chromeH := cw.chromeHeight()
-	if cw.fullscreen {
+	if cw.fullscreen || cw.isStandalone() {
 		if cw.outBitmap == nil || cw.outBitmap.W != buf.W || cw.outBitmap.H != buf.H {
 			cw.outBitmap = frame.NewBitmap(buf.W, buf.H)
 		}
@@ -317,7 +327,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if ev.Action == surface.PointerMotion && ev.Button == surface.ButtonNone {
 			cw.updateHoverCursor(ev.Pos, cw.chromeHeight())
 		}
-		if !cw.fullscreen {
+		if !cw.fullscreen && !cw.isStandalone() {
 			if ev.Action == surface.PointerRelease {
 				if _, _, dragging := cw.tabMgr.Dragging(); dragging {
 					if ev.Button == surface.ButtonRight {
@@ -468,7 +478,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		// through to the loop. Both axes feed the strip, so a vertical wheel
 		// over the tabs behaves like every other browser's.
 		tabH := int32(tabs.TabBarHeight) * cw.sc()
-		if ev.Pos.Y < tabH && cw.toolbar != nil {
+		if !cw.fullscreen && !cw.isStandalone() && ev.Pos.Y < tabH && cw.toolbar != nil {
 			stripW := cw.toolbar.BoundsWidth() / cw.sc()
 			n := int32(cw.tabMgr.Count())
 			if tabs.StripMaxOffset(n, stripW) > 0 {

@@ -35,19 +35,23 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/bookmarks"
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/internal/manifest"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
+	"github.com/vyquocvu/goosie/internal/pdf"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
+	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
 const (
@@ -148,6 +152,8 @@ type config struct {
 	bookmarkFile      string
 	historyFile       string
 	theme             string
+	userscriptDir     string
+	appURL            string
 }
 
 // stateDir is where this invocation keeps persistent state: the default
@@ -214,9 +220,11 @@ func parse(args []string) (config, error) {
 	fs.StringVar(&c.profile, "profile", "", "named profile: state lives under ~/.goosie/profiles/<name> instead of ~/.goosie")
 	fs.StringVar(&c.sessionFile, "session-file", "", "file where the open tabs are saved between runs")
 	fs.StringVar(&c.theme, "theme", "system", "appearance theme: system, light, dark, high-contrast")
+	fs.StringVar(&c.appURL, "app", "", "launch as a standalone web application (PWA mode)")
 	fs.BoolVar(&c.clearData, "clear-data", false, "clear browsing data (cookies, history, session; keeps bookmarks) and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
+		fmt.Fprintln(fs.Output(), "       goosie -app <url>  (launch standalone web application)")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
 		fs.PrintDefaults()
 	}
@@ -268,6 +276,9 @@ func parse(args []string) (config, error) {
 			c.url = fs.Args()[0]
 		}
 	}
+	if c.appURL != "" && c.url == "" {
+		c.url = c.appURL
+	}
 	if c.sessionFile == "" {
 		c.sessionFile = filepath.Join(c.stateDir(), "session.json")
 	}
@@ -275,6 +286,7 @@ func parse(args []string) (config, error) {
 	c.cookieFile = filepath.Join(c.stateDir(), "cookies.json")
 	c.bookmarkFile = filepath.Join(c.stateDir(), "bookmarks.json")
 	c.historyFile = filepath.Join(c.stateDir(), "history.json")
+	c.userscriptDir = filepath.Join(c.stateDir(), "userscripts")
 	return c, nil
 }
 
@@ -358,6 +370,7 @@ type framePath struct {
 	emulationPreset   *DevicePreset
 	theme             string
 	crashedSession    *session.State
+	userscripts       *userscript.Manager
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -464,9 +477,13 @@ func build(c config) (*framePath, error) {
 		storage:          js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
 		incognitoStorage: js.NewOriginStorageRegistry("", true),
 		theme:            c.theme,
+		userscripts:      userscript.NewManager(c.userscriptDir),
 	}
 	if f.theme == "" {
 		f.theme = "system"
+	}
+	if !c.paced() && f.userscripts != nil {
+		_ = f.userscripts.Load()
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -485,6 +502,9 @@ func build(c config) (*framePath, error) {
 			f.saveActiveSession()
 		}
 		firstTab := f.tabMgr.NewTab()
+		if c.appURL != "" {
+			firstTab.SetStandaloneApp(true)
+		}
 		firstTab.SetLayer(layer)
 		if f.isDarkMode() {
 			firstTab.SetBGColor(frame.RGB(24, 24, 24))
@@ -837,7 +857,7 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 		}
 	}
 	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
-	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode)
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -990,6 +1010,26 @@ func (f *framePath) applyNavResult(result navResult) {
 				}
 				f.imgResults <- imgResult{tabID: tabID, serial: serial, session: sess}
 			})
+		}
+		if sess.Doc != nil && f.client != nil {
+			if manifestURL := findManifestLink(&sess.Doc.Node, result.url); manifestURL != "" {
+				go func(mURL string, t *tabs.Tab) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					resp, err := f.client.Get(ctx, mURL)
+					if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 400 {
+						return
+					}
+					m, err := manifest.Parse(resp.Body)
+					if err != nil || m == nil {
+						return
+					}
+					t.SetManifest(m)
+					if t.IsStandaloneApp() && m.EffectiveName() != "" {
+						t.SetTitle(m.EffectiveName())
+					}
+				}(manifestURL, tab)
+			}
 		}
 	}
 	f.saveActiveSession()
@@ -2219,6 +2259,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var storageReg *js.OriginStorageRegistry
 	var sessionID string
 	var appMode appearanceMode
+	var userscriptMgr *userscript.Manager
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -2229,9 +2270,56 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			sessionID = v
 		case appearanceMode:
 			appMode = v
+		case *userscript.Manager:
+			userscriptMgr = v
 		}
 	}
-	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
+
+	contentType := resp.Headers["Content-Type"]
+	contentDisposition := resp.Headers["Content-Disposition"]
+	isAttachment := strings.Contains(strings.ToLower(contentDisposition), "attachment")
+
+	if !isAttachment && pdf.IsPDF(resp.Body, contentType, resp.URL) {
+		fallbackTitle := download.FileName(contentDisposition, resp.URL)
+		pdfDoc, pdfErr := pdf.Parse(resp.Body, fallbackTitle)
+		if pdfErr == nil && pdfDoc != nil {
+			pdfHTML := pdf.RenderHTML(pdfDoc, resp.URL)
+			rt, _ := js.New(js.Options{
+				URL:          resp.URL,
+				DarkMode:     appMode.dark,
+				HighContrast: appMode.highContrast,
+			})
+			sessOpts := []engine.Option{
+				engine.WithMetrics(fonts),
+				engine.WithViewportH(float32(viewportH)),
+				engine.WithDarkMode(appMode.dark),
+				engine.WithHighContrast(appMode.highContrast),
+			}
+			if rt != nil {
+				sessOpts = append(sessOpts, engine.WithJS(rt))
+			}
+			sess, err := engine.NewSession(pdfHTML, nil, float32(viewportW), sessOpts...)
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build pdf session: %w", err)
+			}
+			list, err := sess.PaintChecked(scale)
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint pdf document: %w", err)
+			}
+			dl := list.Build(1)
+			extent := dl.Extent()
+			budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size pdf tile cache: %w", err)
+			}
+			pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+			layer := frame.NewLayer(1, extent, budgetBytes, pool)
+			layer.SetContent(dl)
+			return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
+		}
+	}
+
+	if download.ShouldDownload(contentType, contentDisposition) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
 		var itemID string
 		if mgr != nil {
@@ -2354,7 +2442,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			_ = rt.Close()
 		}
 	}()
-	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW),
+	sessOpts := []engine.Option{
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
@@ -2367,7 +2455,17 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		// documents that changed.
 		engine.WithInvalidation(&engine.Invalidation{}),
 		imageOption(deferImages, resp.URL, imageFetcher),
-		fontOption(deferFonts, resp.URL, fontFetcher, fonts))
+		fontOption(deferFonts, resp.URL, fontFetcher, fonts),
+	}
+	if userscriptMgr != nil {
+		start := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentStart)
+		end := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentEnd)
+		matched := append(start, end...)
+		if len(matched) > 0 {
+			sessOpts = append(sessOpts, engine.WithUserScripts(matched))
+		}
+	}
+	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW), sessOpts...)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -2823,4 +2921,53 @@ func run(args []string) error {
 		return nil
 	}
 	return f.report(d)
+}
+
+// findManifestLink searches the DOM tree for a <link rel="manifest" href="..."> tag and resolves its URL.
+func findManifestLink(root *dom.Node, baseURL string) string {
+	if root == nil {
+		return ""
+	}
+	var href string
+	var walk func(*dom.Node)
+	walk = func(n *dom.Node) {
+		if href != "" || n == nil {
+			return
+		}
+		if strings.EqualFold(n.Data, "link") {
+			isManifest := false
+			linkHref := ""
+			for _, attr := range n.Attr {
+				if strings.EqualFold(attr.Name, "rel") {
+					for _, val := range strings.Fields(attr.Value) {
+						if strings.EqualFold(val, "manifest") {
+							isManifest = true
+						}
+					}
+				} else if strings.EqualFold(attr.Name, "href") {
+					linkHref = strings.TrimSpace(attr.Value)
+				}
+			}
+			if isManifest && linkHref != "" {
+				href = linkHref
+				return
+			}
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	if href == "" {
+		return ""
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return href
+	}
+	ref, err := url.Parse(href)
+	if err != nil {
+		return href
+	}
+	return base.ResolveReference(ref).String()
 }

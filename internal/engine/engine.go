@@ -26,6 +26,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
 // Session is one document's pipeline state.
@@ -153,6 +154,9 @@ type Session struct {
 	// Appearance preferences for media query evaluation.
 	darkMode     bool
 	highContrast bool
+
+	// userScripts configured for injection into this document.
+	userScripts []*userscript.Script
 
 	// opMu serializes pipeline operations across threads: the UI pump
 	// (input handlers, the JS pump, repaints) and navigation drains
@@ -330,6 +334,13 @@ func WithHighContrast(enabled bool) Option {
 	}
 }
 
+// WithUserScripts configures user scripts to execute during the document lifecycle.
+func WithUserScripts(scripts []*userscript.Script) Option {
+	return func(s *Session) {
+		s.userScripts = scripts
+	}
+}
+
 // fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
@@ -373,6 +384,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		if s.inv != nil {
 			s.jsRT.ChainOnMutation(s.JSMutationSink())
 		}
+		s.runUserScripts(userscript.RunAtDocumentStart)
 	}
 	s.runScripts()
 	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
@@ -1826,6 +1838,28 @@ func (s *Session) runScripts() {
 		// still renders, matching browser behavior where one bad ad tag
 		// does not take down the page.
 		_ = s.jsRT.Run(it.text, it.name)
+	}
+	s.runUserScripts(userscript.RunAtDocumentEnd)
+}
+
+// runUserScripts runs any configured user scripts matching the target lifecycle stage.
+func (s *Session) runUserScripts(stage userscript.RunAt) {
+	if s.jsRT == nil || len(s.userScripts) == 0 {
+		return
+	}
+	for _, us := range s.userScripts {
+		if !us.Enabled {
+			continue
+		}
+		if us.RunAt != stage {
+			if !(stage == userscript.RunAtDocumentEnd && us.RunAt == userscript.RunAtDocumentIdle) {
+				continue
+			}
+		}
+		if us.Code != "" {
+			name := "userscript:" + us.Name
+			_ = s.jsRT.Run(us.Code, name)
+		}
 	}
 }
 
