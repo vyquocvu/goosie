@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -116,6 +117,10 @@ type State struct {
 	OnDownloads      func()
 	Incognito        bool
 
+	Zoom           float64
+	ZoomBadgeUntil time.Time
+	OnResetZoom    func()
+
 	fonts *raster.Fonts
 	scale int32
 	// dragging tracks an in-progress address-bar drag selection: press sets
@@ -132,6 +137,7 @@ func NewState(width int32, fonts *raster.Fonts) *State {
 		Clipboard:       nopClipboardImpl{},
 		scale:           1,
 		SelectedSuggest: -1,
+		Zoom:            1.0,
 	}
 }
 
@@ -217,6 +223,38 @@ func (s *State) SetIncognito(incognito bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Incognito = incognito
+}
+
+// SetZoom updates the current zoom level and activates the transient zoom badge.
+func (s *State) SetZoom(z float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Zoom = z
+	s.ZoomBadgeUntil = time.Now().Add(2500 * time.Millisecond)
+}
+
+// ResetZoom resets the zoom to 100%.
+func (s *State) ResetZoom() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Zoom = 1.0
+	s.ZoomBadgeUntil = time.Time{}
+}
+
+func (s *State) zoomBadgeRect(r frame.Rect, sc int32) (frame.Rect, bool) {
+	if s.FindActive || s.Zoom <= 0 || (s.Zoom == 1.0 && time.Now().After(s.ZoomBadgeUntil)) {
+		return frame.Rect{}, false
+	}
+	zoomStr := fmt.Sprintf("%d%%", int(s.Zoom*100+0.5))
+	badgeW := s.measureText(zoomStr) + 12*sc
+	if badgeW < 36*sc {
+		badgeW = 36 * sc
+	}
+	badgeX1 := r.X1 - 8*sc
+	badgeX0 := badgeX1 - badgeW
+	badgeY0 := r.Y0 + 4*sc
+	badgeY1 := r.Y1 - 4*sc
+	return frame.Rect4(badgeX0, badgeY0, badgeX1, badgeY1), true
 }
 
 // GetFocus reports where keyboard input currently goes.
@@ -322,6 +360,10 @@ func (s *State) CursorAt(pos frame.Point) surface.Cursor {
 		rectContains(ButtonRect(ButtonDownloads, w), lp):
 		return surface.CursorPointer
 	case rectContains(AddressBarRect(w), lp):
+		r := frame.Rect4(AddressBarRect(w).X0*sc, AddressBarRect(w).Y0*sc, AddressBarRect(w).X1*sc, AddressBarRect(w).Y1*sc)
+		if zRect, ok := s.zoomBadgeRect(r, sc); ok && rectContains(zRect, pos) {
+			return surface.CursorPointer
+		}
 		return surface.CursorText
 	}
 	return surface.CursorDefault
@@ -610,6 +652,16 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 			fire(func() { cb() })
 		}
 	case rectContains(AddressBarRect(w), lp):
+		r := frame.Rect4(AddressBarRect(w).X0*sc, AddressBarRect(w).Y0*sc, AddressBarRect(w).X1*sc, AddressBarRect(w).Y1*sc)
+		if zRect, ok := s.zoomBadgeRect(r, sc); ok && rectContains(zRect, pos) {
+			s.Zoom = 1.0
+			s.ZoomBadgeUntil = time.Time{}
+			if s.OnResetZoom != nil {
+				cb := s.OnResetZoom
+				fire(func() { cb() })
+			}
+			return pending
+		}
 		s.pressAddressLocked(pos.X, w)
 	default:
 		if s.FindActive {
@@ -1307,6 +1359,21 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	}
 
 	s.drawText(backing, text, textX, textY, textCol, clip)
+
+	if zRect, ok := s.zoomBadgeRect(r, sc); ok {
+		zoomStr := fmt.Sprintf("%d%%", int(s.Zoom*100+0.5))
+		badgeBg := frame.RGB(232, 240, 254)
+		badgeFg := frame.RGB(26, 115, 232)
+		if s.Incognito {
+			badgeBg = frame.RGB(50, 54, 62)
+			badgeFg = frame.RGB(138, 180, 248)
+		}
+		s.drawRoundedRect(backing, zRect, zRect.H()/2, badgeBg, badgeBg)
+		textW := s.measureText(zoomStr)
+		tx := zRect.X0 + (zRect.W()-textW)/2
+		ty := textY
+		s.drawText(backing, zoomStr, tx, ty, badgeFg, clip)
+	}
 
 	if s.FindActive {
 		counter := fmt.Sprintf("%d/%d", s.FindIndex+1, s.FindTotal)

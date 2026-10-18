@@ -183,6 +183,7 @@ func newNavTestPath(t *testing.T) *framePath {
 		pool:       pool,
 		navResults: make(chan navResult, 16),
 		imgResults: make(chan imgResult, 16),
+		zoom:       1.0,
 	}
 	f.tabMgr = tabs.NewManager(nil)
 	f.tabMgr.NewTab()

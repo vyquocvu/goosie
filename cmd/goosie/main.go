@@ -503,6 +503,9 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnQuerySuggest = func(query string) []toolbar.Suggestion {
 			return f.querySuggestions(query)
 		}
+		f.toolbar.OnResetZoom = func() {
+			f.handleZoom(0)
+		}
 		if cb := platform.NewClipboard(); cb != nil {
 			f.toolbar.Clipboard = cb
 		}
@@ -1476,6 +1479,9 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 }
 
 func (f *framePath) handleZoom(delta float64) {
+	if f.zoom <= 0 {
+		f.zoom = 1.0
+	}
 	if delta == 0 {
 		f.zoom = 1.0
 	} else {
@@ -1485,6 +1491,9 @@ func (f *framePath) handleZoom(delta float64) {
 		} else if f.zoom > 4.0 {
 			f.zoom = 4.0
 		}
+	}
+	if f.toolbar != nil {
+		f.toolbar.SetZoom(f.zoom)
 	}
 	f.handleResize(f.config.width, f.config.height)
 }
