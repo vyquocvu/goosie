@@ -155,6 +155,12 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			if obj.Node != nil && obj.Node.Data == "img" {
 				b.paintImage(obj, opacity, clip)
 			}
+			if obj.Node != nil && obj.Node.Data == "video" {
+				b.paintVideo(obj, opacity, clip)
+			}
+			if obj.Node != nil && obj.Node.Data == "audio" {
+				b.paintAudio(obj, opacity, clip)
+			}
 			// SVG shape elements paint through their own path.
 			if obj.Node != nil && obj.Node.Namespace == svgNamespace && isSVGShape(obj.Node.Data) {
 				b.paintSVGShape(obj, opacity)
@@ -448,6 +454,11 @@ func corners(s *style.ComputedStyle, r frame.Rect, scale float32) frame.Corners 
 	return frame.Corners{TL: rad(0), TR: rad(1), BR: rad(2), BL: rad(3)}
 }
 
+func uniformCorners(r float32) frame.Corners {
+	rad := frame.Radius{X: r, Y: r}
+	return frame.Corners{TL: rad, TR: rad, BR: rad, BL: rad}
+}
+
 func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32, clip *frame.Rect) {
 	text := obj.Node.DataContent
 	if b.composingTextareaText(obj) {
@@ -544,6 +555,302 @@ func (b *Builder) paintImage(obj *layout.Object, opacity float32, clip *frame.Re
 		Image:   ImageSpec{Src: src, SrcBox: srcBox},
 		Opacity: opacity,
 	})
+}
+
+// paintVideo draws a video element placeholder with a media frame and controls.
+func (b *Builder) paintVideo(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if rect.Empty() {
+		return
+	}
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+		if rect.Empty() {
+			return
+		}
+	}
+
+	// Dark video viewport background
+	bgColor := frame.RGB(20, 20, 24)
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   bgColor,
+		Opacity: opacity,
+	})
+
+	w := rect.X1 - rect.X0
+	h := rect.Y1 - rect.Y0
+
+	// Draw large centered play button
+	if w >= 40 && h >= 40 {
+		cx := rect.X0 + w/2
+		cy := rect.Y0 + h/2
+		playSize := int32(48 * b.scale)
+		if playSize > w/3 {
+			playSize = w / 3
+		}
+		if playSize > h/3 {
+			playSize = h / 3
+		}
+		if playSize >= 16 {
+			playRect := frame.Rect4(cx-playSize/2, cy-playSize/2, cx+playSize/2, cy+playSize/2)
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    playRect,
+				Color:   frame.RGBA(0, 0, 0, 160),
+				Radius:  uniformCorners(float32(playSize / 2)),
+				Opacity: opacity,
+			})
+			symFontSize := playSize * 3 / 5
+			b.list.Append(DisplayCmd{
+				Kind: CmdText,
+				Rect: playRect,
+				Text: TextRun{
+					Glyphs: []GlyphRun{{
+						Rune: '▶',
+						X:    cx - symFontSize/4,
+						Y:    cy + symFontSize/3,
+						Size: symFontSize,
+						Slot: s.FontSlot(),
+					}},
+					Color: frame.RGB(255, 255, 255),
+				},
+				Opacity: opacity,
+			})
+		}
+	}
+
+	// Bottom control bar (when controls attribute is present or tall enough)
+	if obj.Node.HasAttribute("controls") && h >= 32 {
+		barH := int32(32 * b.scale)
+		if barH > h {
+			barH = h
+		}
+		barRect := frame.Rect4(rect.X0, rect.Y1-barH, rect.X1, rect.Y1)
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    barRect,
+			Color:   frame.RGBA(28, 28, 30, 220),
+			Opacity: opacity,
+		})
+
+		ctrlY := rect.Y1 - barH/2
+		btnSize := int32(14 * b.scale)
+
+		// Play glyph at left
+		b.list.Append(DisplayCmd{
+			Kind: CmdText,
+			Rect: frame.Rect4(rect.X0+int32(10*b.scale), rect.Y1-barH, rect.X0+int32(26*b.scale), rect.Y1),
+			Text: TextRun{
+				Glyphs: []GlyphRun{{
+					Rune: '▶',
+					X:    rect.X0 + int32(12*b.scale),
+					Y:    ctrlY + btnSize/3,
+					Size: btnSize,
+					Slot: s.FontSlot(),
+				}},
+				Color: frame.RGB(230, 230, 230),
+			},
+			Opacity: opacity,
+		})
+
+		// Timeline track
+		trackLeft := rect.X0 + int32(34*b.scale)
+		trackRight := rect.X1 - int32(80*b.scale)
+		if trackRight > trackLeft+int32(30*b.scale) {
+			trackH := int32(4 * b.scale)
+			if trackH < 2 {
+				trackH = 2
+			}
+			trackY0 := ctrlY - trackH/2
+			trackY1 := trackY0 + trackH
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    frame.Rect4(trackLeft, trackY0, trackRight, trackY1),
+				Color:   frame.RGB(80, 80, 80),
+				Opacity: opacity,
+			})
+			playedW := (trackRight - trackLeft) / 4
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    frame.Rect4(trackLeft, trackY0, trackLeft+playedW, trackY1),
+				Color:   frame.RGB(66, 133, 244),
+				Opacity: opacity,
+			})
+			scrubR := int32(5 * b.scale)
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    frame.Rect4(trackLeft+playedW-scrubR, ctrlY-scrubR, trackLeft+playedW+scrubR, ctrlY+scrubR),
+				Color:   frame.RGB(255, 255, 255),
+				Radius:  uniformCorners(float32(scrubR)),
+				Opacity: opacity,
+			})
+		}
+
+		// Elapsed time badge
+		timeX := rect.X1 - int32(70*b.scale)
+		if timeX > trackLeft {
+			timeStr := "0:00"
+			tsize := int32(11 * b.scale)
+			var gr []GlyphRun
+			px := timeX
+			for _, r := range timeStr {
+				gr = append(gr, GlyphRun{Rune: r, X: px, Y: ctrlY + tsize/3, Size: tsize, Slot: s.FontSlot()})
+				px += tsize * 3 / 5
+			}
+			b.list.Append(DisplayCmd{
+				Kind: CmdText,
+				Rect: frame.Rect4(timeX, rect.Y1-barH, rect.X1, rect.Y1),
+				Text: TextRun{
+					Glyphs: gr,
+					Color:  frame.RGB(200, 200, 200),
+				},
+				Opacity: opacity,
+			})
+		}
+	}
+}
+
+// paintAudio draws an audio element control bar placeholder.
+func (b *Builder) paintAudio(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil {
+		return
+	}
+	if !obj.Node.HasAttribute("controls") && (obj.W <= 0 || obj.H <= 0) {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if rect.Empty() {
+		return
+	}
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+		if rect.Empty() {
+			return
+		}
+	}
+
+	cornerRadius := int32(8 * b.scale)
+	barBg := frame.RGB(241, 243, 244)
+	barBorder := frame.RGB(218, 220, 224)
+
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   barBg,
+		Radius:  uniformCorners(float32(cornerRadius)),
+		Opacity: opacity,
+	})
+	b.list.Append(DisplayCmd{
+		Kind: CmdBorder,
+		Rect: rect,
+		Border: BorderSpec{
+			Top:    SideSpec{Width: 1, Color: barBorder},
+			Right:  SideSpec{Width: 1, Color: barBorder},
+			Bottom: SideSpec{Width: 1, Color: barBorder},
+			Left:   SideSpec{Width: 1, Color: barBorder},
+		},
+		Radius:  uniformCorners(float32(cornerRadius)),
+		Opacity: opacity,
+	})
+
+	h := rect.Y1 - rect.Y0
+	cy := rect.Y0 + h/2
+
+	// Play button circle
+	playBtnR := int32(11 * b.scale)
+	if playBtnR > h/2-2 {
+		playBtnR = h/2 - 2
+	}
+	playBtnX := rect.X0 + int32(16*b.scale)
+	if playBtnX+playBtnR < rect.X1 {
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(playBtnX-playBtnR, cy-playBtnR, playBtnX+playBtnR, cy+playBtnR),
+			Color:   frame.RGB(32, 33, 36),
+			Radius:  uniformCorners(float32(playBtnR)),
+			Opacity: opacity,
+		})
+		iconSize := playBtnR * 4 / 5
+		b.list.Append(DisplayCmd{
+			Kind: CmdText,
+			Rect: frame.Rect4(playBtnX-playBtnR, cy-playBtnR, playBtnX+playBtnR, cy+playBtnR),
+			Text: TextRun{
+				Glyphs: []GlyphRun{{
+					Rune: '▶',
+					X:    playBtnX - iconSize/4,
+					Y:    cy + iconSize/3,
+					Size: iconSize,
+					Slot: s.FontSlot(),
+				}},
+				Color: frame.RGB(255, 255, 255),
+			},
+			Opacity: opacity,
+		})
+	}
+
+	// Elapsed time
+	timeX := playBtnX + playBtnR + int32(10*b.scale)
+	timeSize := int32(11 * b.scale)
+	timeStr := "0:00 / 0:00"
+	timeW := int32(len(timeStr)) * timeSize * 3 / 5
+	if timeX+timeW < rect.X1-int32(20*b.scale) {
+		var gr []GlyphRun
+		px := timeX
+		for _, r := range timeStr {
+			gr = append(gr, GlyphRun{Rune: r, X: px, Y: cy + timeSize/3, Size: timeSize, Slot: s.FontSlot()})
+			px += timeSize * 3 / 5
+		}
+		b.list.Append(DisplayCmd{
+			Kind: CmdText,
+			Rect: frame.Rect4(timeX, cy-timeSize, timeX+timeW, cy+timeSize),
+			Text: TextRun{
+				Glyphs: gr,
+				Color:  frame.RGB(95, 99, 104),
+			},
+			Opacity: opacity,
+		})
+	}
+
+	// Progress track
+	trackLeft := timeX + timeW + int32(12*b.scale)
+	trackRight := rect.X1 - int32(16*b.scale)
+	if trackRight > trackLeft+int32(20*b.scale) {
+		trackH := int32(4 * b.scale)
+		if trackH < 2 {
+			trackH = 2
+		}
+		trackY0 := cy - trackH/2
+		trackY1 := trackY0 + trackH
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(trackLeft, trackY0, trackRight, trackY1),
+			Color:   frame.RGB(218, 220, 224),
+			Opacity: opacity,
+		})
+		thumbR := int32(4 * b.scale)
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(trackLeft-thumbR, cy-thumbR, trackLeft+thumbR, cy+thumbR),
+			Color:   frame.RGB(26, 115, 232),
+			Radius:  uniformCorners(float32(thumbR)),
+			Opacity: opacity,
+		})
+	}
 }
 
 // paintSVGShape draws an SVG shape element (rect, circle, ellipse, line,

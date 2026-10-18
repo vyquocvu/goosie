@@ -125,27 +125,29 @@ var errUsage = errors.New("usage")
 
 // config is one parsed invocation.
 type config struct {
-	url          string
-	gate         bool
-	bench        bool
-	screenshot   bool
-	printPDF     string
-	backend      string
-	frames       int
-	scene        string
-	sceneSet     bool
-	out          string
-	width        int
-	height       int
-	dpr          float64
-	downloadDir  string
-	private      bool
-	profile      string
-	clearData    bool
-	sessionFile  string
-	cookieFile   string
-	bookmarkFile string
-	historyFile  string
+	url               string
+	gate              bool
+	bench             bool
+	screenshot        bool
+	printPDF          string
+	backend           string
+	frames            int
+	scene             string
+	sceneSet          bool
+	out               string
+	width             int
+	height            int
+	dpr               float64
+	downloadDir       string
+	private           bool
+	profile           string
+	clearData         bool
+	sessionFile       string
+	sessionActiveFile string
+	cookieFile        string
+	bookmarkFile      string
+	historyFile       string
+	theme             string
 }
 
 // stateDir is where this invocation keeps persistent state: the default
@@ -211,6 +213,7 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.private, "private", false, "run a private session: cookies are dropped on exit")
 	fs.StringVar(&c.profile, "profile", "", "named profile: state lives under ~/.goosie/profiles/<name> instead of ~/.goosie")
 	fs.StringVar(&c.sessionFile, "session-file", "", "file where the open tabs are saved between runs")
+	fs.StringVar(&c.theme, "theme", "system", "appearance theme: system, light, dark, high-contrast")
 	fs.BoolVar(&c.clearData, "clear-data", false, "clear browsing data (cookies, history, session; keeps bookmarks) and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
@@ -268,6 +271,7 @@ func parse(args []string) (config, error) {
 	if c.sessionFile == "" {
 		c.sessionFile = filepath.Join(c.stateDir(), "session.json")
 	}
+	c.sessionActiveFile = filepath.Join(c.stateDir(), "session_active.json")
 	c.cookieFile = filepath.Join(c.stateDir(), "cookies.json")
 	c.bookmarkFile = filepath.Join(c.stateDir(), "bookmarks.json")
 	c.historyFile = filepath.Join(c.stateDir(), "history.json")
@@ -352,6 +356,8 @@ type framePath struct {
 	storage           *js.OriginStorageRegistry
 	incognitoStorage  *js.OriginStorageRegistry
 	emulationPreset   *DevicePreset
+	theme             string
+	crashedSession    *session.State
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -457,6 +463,10 @@ func build(c config) (*framePath, error) {
 		zoom:             1.0,
 		storage:          js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
 		incognitoStorage: js.NewOriginStorageRegistry("", true),
+		theme:            c.theme,
+	}
+	if f.theme == "" {
+		f.theme = "system"
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -472,13 +482,29 @@ func build(c config) (*framePath, error) {
 		})
 		f.tabMgr.OnChange = func() {
 			f.syncTabToToolbar()
+			f.saveActiveSession()
 		}
 		firstTab := f.tabMgr.NewTab()
 		firstTab.SetLayer(layer)
-		firstTab.SetBGColor(frame.RGB(255, 255, 255))
+		if f.isDarkMode() {
+			firstTab.SetBGColor(frame.RGB(24, 24, 24))
+		} else {
+			firstTab.SetBGColor(frame.RGB(255, 255, 255))
+		}
+		if !c.private && !c.paced() && c.sessionActiveFile != "" {
+			if info, err := os.Stat(c.sessionActiveFile); err == nil && !info.IsDir() {
+				if st, err := session.Load(c.sessionActiveFile); err == nil && len(st.Tabs) > 0 {
+					f.crashedSession = &st
+				}
+			}
+		}
 		if c.url != "" {
 			firstTab.SetURL(normalizeURL(c.url))
 			firstTab.SetTitle(firstTab.URL())
+		} else if f.crashedSession != nil {
+			firstTab.SetURL("goosie://restore")
+			firstTab.SetTitle("Restore Session - Goosie")
+			f.restoredActiveURL = "goosie://restore"
 		} else if !c.private {
 			if st, err := session.Load(c.sessionFile); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
@@ -567,6 +593,55 @@ func (f *framePath) newIncognitoTab() *tabs.Tab {
 	tab.SetBGColor(frame.RGB(40, 44, 52))
 	f.switchTab(tab.ID())
 	return tab
+}
+
+// isDarkMode reports whether dark appearance mode is active.
+func (f *framePath) isDarkMode() bool {
+	if f == nil {
+		return false
+	}
+	switch strings.ToLower(f.theme) {
+	case "dark":
+		return true
+	case "light", "high-contrast":
+		return false
+	default:
+		return false
+	}
+}
+
+// isHighContrast reports whether high contrast appearance mode is active.
+func (f *framePath) isHighContrast() bool {
+	if f == nil {
+		return false
+	}
+	return strings.ToLower(f.theme) == "high-contrast"
+}
+
+// setTheme updates the browser appearance theme.
+func (f *framePath) setTheme(theme string) {
+	if f == nil {
+		return
+	}
+	f.theme = strings.ToLower(strings.TrimSpace(theme))
+	if f.tabMgr != nil {
+		for _, tab := range f.tabMgr.Tabs() {
+			if tab.Incognito() {
+				tab.SetBGColor(frame.RGB(40, 44, 52))
+			} else if f.isDarkMode() {
+				tab.SetBGColor(frame.RGB(24, 24, 24))
+			} else {
+				tab.SetBGColor(frame.RGB(255, 255, 255))
+			}
+			if s := tab.Session(); s != nil {
+				s.SetDarkMode(f.isDarkMode())
+				s.SetHighContrast(f.isHighContrast())
+			}
+		}
+	}
+	if f.client != nil {
+		f.reloadTab()
+	}
 }
 
 // querySuggestions searches bookmarks, visit history, and search engine completions for omnibox query.
@@ -761,7 +836,8 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 			tabID = strconv.FormatUint(active.ID(), 10)
 		}
 	}
-	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID)
+	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -916,6 +992,7 @@ func (f *framePath) applyNavResult(result navResult) {
 			})
 		}
 	}
+	f.saveActiveSession()
 }
 
 // drainImageResults reads deferred-image completions and applies them.
@@ -1124,6 +1201,60 @@ func sessionState(f *framePath) session.State {
 	}
 	st.Active = savedActiveIdx
 	return st
+}
+
+// saveActiveSession persists the current open tab state to sessionActiveFile.
+// This acts as a crash recovery journal: on clean exit the file is deleted. If the
+// process crashes or is killed, the file survives so the session can be
+// recovered on next launch.
+func (f *framePath) saveActiveSession() {
+	if f == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" {
+		return
+	}
+	if f.crashedSession != nil {
+		// Do not overwrite the crashed journal while the restore prompt is active.
+		return
+	}
+	if f.tabMgr == nil {
+		return
+	}
+	st := sessionState(f)
+	if len(st.Tabs) == 0 {
+		return
+	}
+	// Do not persist a state consisting solely of the restore prompt itself
+	if len(st.Tabs) == 1 && strings.HasPrefix(strings.ToLower(st.Tabs[0].URL), "goosie://restore") {
+		return
+	}
+	_ = session.Save(f.config.sessionActiveFile, st)
+}
+
+// restoreCrashedSession restores the tabs from a previous crashed session.
+func (f *framePath) restoreCrashedSession(st session.State) {
+	if len(st.Tabs) == 0 || f.tabMgr == nil {
+		return
+	}
+	tabsList := f.tabMgr.Tabs()
+	// If the active/only tab is the restore page, overwrite it with the first crashed tab.
+	if len(tabsList) == 1 && strings.HasPrefix(strings.ToLower(tabsList[0].URL()), "goosie://restore") {
+		f.applySessionState(st)
+	} else {
+		for _, ts := range st.Tabs {
+			t := f.tabMgr.NewTab()
+			applyTabState(t, ts)
+		}
+		if st.Active >= 0 {
+			all := f.tabMgr.Tabs()
+			idx := len(all) - len(st.Tabs) + st.Active
+			if idx >= 0 && idx < len(all) {
+				f.tabMgr.SwitchTo(all[idx].ID())
+			}
+		}
+	}
+	if active := f.tabMgr.Active(); active != nil && active.URL() != "" && !strings.HasPrefix(strings.ToLower(active.URL()), "goosie://restore") {
+		f.navigateTab(active.URL())
+	}
+	f.saveActiveSession()
 }
 
 // handleResize reflows and repaints the active tab after the window is resized.
@@ -2063,6 +2194,11 @@ func (f *framePath) toggleReaderMode() {
 	}
 }
 
+type appearanceMode struct {
+	dark         bool
+	highContrast bool
+}
+
 // loadURLCtx is like loadURL but respects context cancellation. With
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
@@ -2082,6 +2218,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var mgr *download.Manager
 	var storageReg *js.OriginStorageRegistry
 	var sessionID string
+	var appMode appearanceMode
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -2090,6 +2227,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			storageReg = v
 		case string:
 			sessionID = v
+		case appearanceMode:
+			appMode = v
 		}
 	}
 	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
@@ -2197,11 +2336,13 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		cookieStore = client.Jar()
 	}
 	rt, rtErr := js.New(js.Options{
-		URL:        resp.URL,
-		HTTPClient: jsFetch,
-		Cookies:    cookieStore,
-		Storage:    storageReg,
-		SessionID:  sessionID,
+		URL:          resp.URL,
+		HTTPClient:   jsFetch,
+		Cookies:      cookieStore,
+		Storage:      storageReg,
+		SessionID:    sessionID,
+		DarkMode:     appMode.dark,
+		HighContrast: appMode.highContrast,
 	})
 	if rtErr != nil {
 		fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
@@ -2219,6 +2360,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithLinkedCSS(resp.URL, linker),
 		engine.WithScripts(resp.URL, scriptFetcher),
 		engine.WithJS(rt),
+		engine.WithDarkMode(appMode.dark),
+		engine.WithHighContrast(appMode.highContrast),
 		// Every load gets a fresh invalidation batch: JS-driven DOM
 		// mutations record here so the vsync pump reflows exactly the
 		// documents that changed.
@@ -2477,7 +2620,7 @@ func main() {
 // far so a half-clear is visible, not silent.
 func (c config) clearBrowsingData() ([]string, error) {
 	var removed []string
-	for _, path := range []string{c.cookieFile, c.historyFile, c.sessionFile} {
+	for _, path := range []string{c.cookieFile, c.historyFile, c.sessionFile, c.sessionActiveFile} {
 		if path == "" {
 			continue
 		}
@@ -2668,6 +2811,9 @@ func run(args []string) error {
 			if err := f.history.Save(); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)
 			}
+		}
+		if c.sessionActiveFile != "" {
+			_ = os.Remove(c.sessionActiveFile)
 		}
 	}
 	if err := <-loopErr; err != nil {

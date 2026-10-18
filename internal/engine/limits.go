@@ -551,7 +551,7 @@ type cssSource struct {
 	remote bool
 }
 
-func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, viewportW float32, sub *subBudget) ([]*css.Stylesheet, error) {
+func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, mediaOpts css.MediaOptions, sub *subBudget) ([]*css.Stylesheet, error) {
 	budget := &cssBudget{}
 	all := make([]cssSource, 0, len(sources)+8)
 	for _, src := range sources {
@@ -569,12 +569,12 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 	linksLeft := maxLinkedSheets
 	stats, err := walkDocument(doc, func(n *dom.Node) error {
 		if n.Element() && n.Data == "style" {
-			if css.MatchMedia(n.GetAttribute("media"), viewportW) {
+			if css.MatchMediaWithOptions(n.GetAttribute("media"), mediaOpts) {
 				all = append(all, cssSource{text: n.TextContent()})
 			}
 		}
 		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 {
-			if css.MatchMedia(n.GetAttribute("media"), viewportW) {
+			if css.MatchMediaWithOptions(n.GetAttribute("media"), mediaOpts) {
 				if href := stylesheetHref(n); href != "" {
 					if abs, ok := resolveSheetURL(base, href); ok && !linked[abs] {
 						linked[abs] = true
@@ -643,7 +643,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 			}
 			return nil, err
 		}
-		sheet := css.ParseForViewport(src.text, viewportW)
+		sheet := css.ParseWithOptions(src.text, mediaOpts)
 		kept := sheet.Rules[:0]
 		reject := false
 		for _, rule := range sheet.Rules {

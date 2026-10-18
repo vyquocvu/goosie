@@ -135,6 +135,12 @@ type Options struct {
 
 	// SessionID identifies the tab/browsing context for sessionStorage isolation.
 	SessionID string
+
+	// DarkMode indicates whether the host environment prefers a dark color scheme.
+	DarkMode bool
+
+	// HighContrast indicates whether the host environment prefers increased contrast.
+	HighContrast bool
 }
 
 // Kind is the JS type of a Value read back out of a runtime.
@@ -366,18 +372,42 @@ func (r *Runtime) setupWindow() {
 		if strings.Contains(lq, "print") && !strings.Contains(lq, "not") {
 			matches = false
 		}
-		// Goosie has no host appearance setting yet, so its document environment
-		// follows the browser's default light color scheme. Returning true for
-		// every query made common boot scripts (including rust-lang/book) select
-		// their dark palette even though CSS media matching uses light mode.
 		if strings.Contains(lq, "prefers-color-scheme") {
 			dark := strings.Contains(lq, "dark")
 			light := strings.Contains(lq, "light")
-			if dark {
-				matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+			if r.opts.DarkMode {
+				if dark {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if light {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+			} else {
+				if dark {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if light {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
 			}
-			if light {
-				matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+		}
+		if strings.Contains(lq, "prefers-contrast") {
+			more := strings.Contains(lq, "more")
+			noPref := strings.Contains(lq, "no-preference")
+			if r.opts.HighContrast {
+				if more {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if noPref {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+			} else {
+				if more {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if noPref {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
 			}
 		}
 		_ = mql.Set("matches", matches)

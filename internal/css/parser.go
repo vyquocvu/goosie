@@ -43,6 +43,13 @@ type Stylesheet struct {
 	Keyframes []KeyframesRule
 }
 
+// MediaOptions configures environment features for media query evaluation.
+type MediaOptions struct {
+	ViewportWidth float32
+	DarkMode      bool
+	HighContrast  bool
+}
+
 // Parse parses a CSS stylesheet, testing @media width conditions against the
 // default desktop viewport. A caller that knows the document's own width should
 // use ParseForViewport, since media conditions are resolved while parsing.
@@ -50,13 +57,27 @@ func Parse(input string) *Stylesheet {
 	return ParseForViewport(input, defaultMediaViewportWidth)
 }
 
+// ParseWithOptions parses a CSS stylesheet with explicit media query options.
+func ParseWithOptions(input string, opts MediaOptions) *Stylesheet {
+	vw := opts.ViewportWidth
+	if vw <= 0 {
+		vw = defaultMediaViewportWidth
+	}
+	p := &parser{
+		input:        stripComments(stripCDATAMarkers(input)),
+		mediaWidth:   vw,
+		darkMode:     opts.DarkMode,
+		highContrast: opts.HighContrast,
+	}
+	return p.parse()
+}
+
 // ParseForViewport parses a CSS stylesheet, testing @media width conditions
 // against viewportWidthPx. The engine's viewport is passed here so each
 // document evaluates its media queries against its own width, not a
 // process-global value another document may have set earlier.
 func ParseForViewport(input string, viewportWidthPx float32) *Stylesheet {
-	p := &parser{input: stripComments(stripCDATAMarkers(input)), mediaWidth: viewportWidthPx}
-	return p.parse()
+	return ParseWithOptions(input, MediaOptions{ViewportWidth: viewportWidthPx})
 }
 
 // stripCDATAMarkers removes `<![CDATA[` ... `]]>` wrappers from stylesheet
@@ -136,7 +157,9 @@ type parser struct {
 	// mediaWidth is the viewport this parser tests @media width conditions
 	// against. Nested blocks inherit it so an @media inside an @supports or
 	// inside another @media sees the document's width, not the default.
-	mediaWidth float32
+	mediaWidth   float32
+	darkMode     bool
+	highContrast bool
 }
 
 func (p *parser) parse() *Stylesheet {
@@ -215,7 +238,7 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 	if p.pos < len(p.input) {
 		p.pos++ // the final '}'
 	}
-	inner := &parser{input: body, mediaWidth: p.mediaWidth}
+	inner := &parser{input: body, mediaWidth: p.mediaWidth, darkMode: p.darkMode, highContrast: p.highContrast}
 	inner.parseInto(sheet)
 }
 
@@ -283,7 +306,7 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 		p.pos++ // the final '}'
 	}
 	if p.mediaConditionTrue(cond) {
-		inner := &parser{input: body, mediaWidth: p.mediaWidth}
+		inner := &parser{input: body, mediaWidth: p.mediaWidth, darkMode: p.darkMode, highContrast: p.highContrast}
 		inner.parseInto(sheet)
 	}
 }
@@ -537,14 +560,27 @@ func splitOutsideParens(s, sep string) []string {
 	return append(out, strings.TrimSpace(s[start:]))
 }
 
-// MatchMedia reports whether a media condition matches on screen for the given viewport width.
-func MatchMedia(cond string, viewportWidth float32) bool {
+// MatchMediaWithOptions reports whether a media condition matches with custom options.
+func MatchMediaWithOptions(cond string, opts MediaOptions) bool {
 	cond = strings.TrimSpace(cond)
 	if cond == "" || strings.EqualFold(cond, "all") {
 		return true
 	}
-	p := &parser{mediaWidth: viewportWidth}
+	vw := opts.ViewportWidth
+	if vw <= 0 {
+		vw = defaultMediaViewportWidth
+	}
+	p := &parser{
+		mediaWidth:   vw,
+		darkMode:     opts.DarkMode,
+		highContrast: opts.HighContrast,
+	}
 	return p.mediaConditionTrue(cond)
+}
+
+// MatchMedia reports whether a media condition matches on screen for the given viewport width.
+func MatchMedia(cond string, viewportWidth float32) bool {
+	return MatchMediaWithOptions(cond, MediaOptions{ViewportWidth: viewportWidth})
 }
 
 // mediaConditionTrue reports whether any comma-separated group applies.
@@ -625,20 +661,28 @@ func (p *parser) mediaPartsTrue(group string) bool {
 				return false
 			}
 		case "prefers-color-scheme":
-			// The engine has no dark palette and the references are captured in a
-			// light Chromium, so `dark` asks for a look neither one paints.
-			if val == "dark" {
-				return false
+			if p.darkMode {
+				if val == "light" {
+					return false
+				}
+			} else {
+				if val == "dark" {
+					return false
+				}
 			}
 		case "prefers-reduced-motion":
 			if val == "reduce" {
 				return false
 			}
 		case "prefers-contrast":
-			// A bare `(prefers-contrast)` only asks whether the feature exists, and
-			// it does; only a non-default value asks for one we do not render.
-			if val != "" && val != "no-preference" {
-				return false
+			if p.highContrast {
+				if val != "" && val != "more" && val != "custom" {
+					return false
+				}
+			} else {
+				if val != "" && val != "no-preference" {
+					return false
+				}
 			}
 		case "min-device-pixel-ratio", "-webkit-min-device-pixel-ratio":
 			if f, err := strconv.ParseFloat(val, 32); err == nil && mediaDevicePixelRatio < float32(f) {

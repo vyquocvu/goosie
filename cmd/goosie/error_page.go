@@ -149,6 +149,8 @@ func (f *framePath) buildErrorPage(rawURL string, err error) (*frame.Layer, *eng
 	sess, sessErr := engine.NewSession(htmlStr, nil, float32(w),
 		engine.WithMetrics(f.fonts),
 		engine.WithViewportH(float32(h)),
+		engine.WithDarkMode(f.isDarkMode()),
+		engine.WithHighContrast(f.isHighContrast()),
 	)
 	if sessErr != nil {
 		return nil, nil, frame.RGB(255, 255, 255)

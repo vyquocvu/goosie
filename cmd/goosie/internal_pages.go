@@ -206,6 +206,31 @@ td.val {
   background-color: #1a73e8;
   height: 100%%;
 }
+@media (prefers-color-scheme: dark) {
+  body { background-color: #121212; color: #e8eaed; }
+  .header { background-color: #1e1e1e; border-bottom: 1px solid #333333; }
+  .logo { color: #8ab4f8; }
+  .nav-link { color: #9aa0a6; }
+  .nav-link.active { color: #8ab4f8; border-bottom: 2px solid #8ab4f8; }
+  .card { background-color: #1e1e1e; border: 1px solid #333333; }
+  h1 { color: #e8eaed; }
+  h2 { color: #bdc1c6; }
+  td { border-bottom: 1px solid #2d2e30; }
+  td.label { color: #9aa0a6; }
+  td.val { color: #e8eaed; }
+  .list-item { border-bottom: 1px solid #2d2e30; }
+  .list-link { color: #8ab4f8; }
+  .list-meta { color: #9aa0a6; }
+  .empty-state { color: #9aa0a6; }
+  .btn-action.secondary { background-color: #2d2e30; color: #e8eaed; border: 1px solid #3c4043; }
+  .badge-completed { background: #0d381e; color: #81c995; }
+  .badge-failed { background: #441210; color: #f28b82; }
+  .badge-canceled { background: #2d2e30; color: #9aa0a6; }
+}
+@media (prefers-contrast: more) {
+  body { font-weight: 500; }
+  .card { border: 2px solid #000000; }
+}
 </style>
 </head>
 <body>
@@ -270,6 +295,13 @@ func buildVersionPageHTML(f *framePath) (string, string) {
       <tr><td class="label">Web Storage API</td><td class="val">Origin-Scoped Atomic Persistence</td></tr>
     </table>
 
+    <h2>Appearance &amp; Theme Mode</h2>
+    <table>
+      <tr><td class="label">Configured Theme</td><td class="val"><span class="badge badge-completed">%s</span></td></tr>
+      <tr><td class="label">Dark Scheme Active</td><td class="val">%t</td></tr>
+      <tr><td class="label">High Contrast Active</td><td class="val">%t</td></tr>
+    </table>
+
     <h2>Active Session Metrics</h2>
     <table>
       <tr><td class="label">Open Tabs</td><td class="val">%d</td></tr>
@@ -281,6 +313,7 @@ func buildVersionPageHTML(f *framePath) (string, string) {
 `, runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(),
 		engine.MaxDocumentBytes/(1024*1024), engine.MaxDocumentBytes,
 		"1,000,000", "4,194,304", "524,288",
+		f.theme, f.isDarkMode(), f.isHighContrast(),
 		tabCount, closedCount, bmCount, histCount)
 
 	return "About Goosie", internalPageTemplate("version", "About Goosie", body)
@@ -530,6 +563,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildInspectPageHTML(f, rawURL)
 	case "reader":
 		return buildReaderPageHTML(f, rawURL)
+	case "restore":
+		return buildRestorePageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">
@@ -542,6 +577,7 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
         <li><a class="list-link" href="goosie://downloads">goosie://downloads</a> &mdash; Downloaded files</li>
         <li><a class="list-link" href="goosie://inspect">goosie://inspect</a> &mdash; Web Inspector &amp; DOM/CSS Tree Explorer (Cmd+Option+I)</li>
         <li><a class="list-link" href="goosie://reader">goosie://reader</a> &mdash; Distraction-Free Reader Mode (Cmd+Shift+R)</li>
+        <li><a class="list-link" href="goosie://restore">goosie://restore</a> &mdash; Session Crash Recovery &amp; Restore Prompt</li>
       </ul>
     </div>`
 		return "Goosie Pages", internalPageTemplate("", "Goosie Pages", body)
@@ -613,6 +649,11 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		case "cookies_clear":
 			if f.client != nil && f.client.Jar() != nil {
 				f.client.Jar().Clear()
+			}
+		case "set_theme":
+			t := u.Query().Get("theme")
+			if t != "" {
+				f.setTheme(t)
 			}
 		}
 	}
@@ -775,6 +816,27 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
         <a class="%s" href="goosie://inspect?action=toggle_shields&tab=%d">%s</a>
       </div>`, shieldsBadge, targetTab.BlockedTrackers(), toggleBtnClass, targetTab.ID(), toggleActionText))
 	b.WriteString(`</div>`)
+
+	// Appearance & Theme Mode Card
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Appearance &amp; Theme Mode</h2>`)
+	b.WriteString(`<p style="color: #5f6368; font-size: 13px;">Toggle browser theme and CSS <code>prefers-color-scheme</code> / <code>prefers-contrast</code> media query resolution.</p>`)
+	activeTheme := f.theme
+	if activeTheme == "" {
+		activeTheme = "system"
+	}
+	pillStyle := func(thm string) string {
+		if strings.EqualFold(activeTheme, thm) {
+			return "background-color: #1a73e8; color: #ffffff; font-weight: bold; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 13px; display: inline-block;"
+		}
+		return "background-color: #f1f3f4; color: #3c4043; border: 1px solid #dadce0; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 13px; display: inline-block;"
+	}
+	b.WriteString(`<div style="display: flex; gap: 10px; margin-top: 12px;">`)
+	b.WriteString(fmt.Sprintf(`<a style="%s" href="goosie://inspect?action=set_theme&theme=system&tab=%d">System Default</a> `, pillStyle("system"), targetTab.ID()))
+	b.WriteString(fmt.Sprintf(`<a style="%s" href="goosie://inspect?action=set_theme&theme=light&tab=%d">Light Mode</a> `, pillStyle("light"), targetTab.ID()))
+	b.WriteString(fmt.Sprintf(`<a style="%s" href="goosie://inspect?action=set_theme&theme=dark&tab=%d">Dark Mode</a> `, pillStyle("dark"), targetTab.ID()))
+	b.WriteString(fmt.Sprintf(`<a style="%s" href="goosie://inspect?action=set_theme&theme=high-contrast&tab=%d">High Contrast</a> `, pillStyle("high-contrast"), targetTab.ID()))
+	b.WriteString(`</div></div>`)
 
 	// Web Storage (localStorage) Card
 	b.WriteString(`<div class="card">`)
@@ -949,6 +1011,88 @@ func buildReaderPageHTML(f *framePath, rawURL string) (title, htmlContent string
 	return art.Title + " - Reader Mode", RenderReaderPageHTML(art)
 }
 
+// buildRestorePageHTML generates the session crash recovery and restore interface.
+func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent string) {
+	u, _ := url.Parse(rawURL)
+	action := ""
+	if u != nil {
+		action = u.Query().Get("action")
+	}
+
+	if action == "restore" {
+		if f.crashedSession != nil && len(f.crashedSession.Tabs) > 0 {
+			crashed := *f.crashedSession
+			f.crashedSession = nil
+			if f.config.sessionActiveFile != "" {
+				_ = os.Remove(f.config.sessionActiveFile)
+			}
+			f.restoreCrashedSession(crashed)
+			body := fmt.Sprintf(`<div class="card">
+      <h1 style="color: #137333;">Session Restored</h1>
+      <p style="color: #5f6368; font-size: 15px;">Successfully restored %d tabs from your previous session.</p>
+      <p style="margin-top: 16px;"><a class="list-link" href="goosie://version">About Goosie</a> &bull; <a class="list-link" href="goosie://history">History</a></p>
+    </div>`, len(crashed.Tabs))
+			return "Session Restored - Goosie", internalPageTemplate("restore", "Session Restored - Goosie", body)
+		}
+	} else if action == "dismiss" {
+		f.crashedSession = nil
+		if f.config.sessionActiveFile != "" {
+			_ = os.Remove(f.config.sessionActiveFile)
+		}
+		body := `<div class="card">
+      <h1>Session Dismissed</h1>
+      <p style="color: #5f6368; font-size: 15px;">Previous session data has been discarded.</p>
+      <p style="margin-top: 16px;"><a class="list-link" href="goosie://version">About Goosie</a> &bull; <a class="list-link" href="goosie://bookmarks">Bookmarks</a></p>
+    </div>`
+		return "Session Dismissed - Goosie", internalPageTemplate("restore", "Session Dismissed - Goosie", body)
+	}
+
+	if f.crashedSession == nil || len(f.crashedSession.Tabs) == 0 {
+		body := `<div class="card">
+      <h1>Session Restore</h1>
+      <p style="color: #5f6368; font-size: 15px;">No crashed session was detected. All tabs were closed normally.</p>
+      <p style="margin-top: 16px;"><a class="list-link" href="goosie://version">About Goosie</a> &bull; <a class="list-link" href="goosie://history">History</a></p>
+    </div>`
+		return "Session Restore - Goosie", internalPageTemplate("restore", "Session Restore - Goosie", body)
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<div class="card" style="border-left: 4px solid #ea4335;">
+      <h1 style="color: #d93025;">Goosie did not shut down cleanly</h1>
+      <p style="color: #5f6368; font-size: 15px; line-height: 1.5;">
+        Goosie closed unexpectedly while tabs were open. You can restore your open tabs and navigation history below, or start fresh.
+      </p>
+      <div style="margin: 20px 0 10px 0;">
+        <a class="btn-action" href="goosie://restore?action=restore" style="padding: 8px 16px; font-size: 14px;">Restore %d Tabs</a>
+        <a class="btn-action secondary" href="goosie://restore?action=dismiss" style="padding: 8px 16px; font-size: 14px;">Don't Restore</a>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Tabs to restore (%d):</h2>`, len(f.crashedSession.Tabs), len(f.crashedSession.Tabs)))
+
+	for i, t := range f.crashedSession.Tabs {
+		titleText := t.Title
+		if titleText == "" {
+			titleText = t.URL
+		}
+		if titleText == "" {
+			titleText = "Untitled Tab"
+		}
+		activeBadge := ""
+		if i == f.crashedSession.Active {
+			activeBadge = ` <span class="badge badge-active" style="margin-left: 6px;">Active</span>`
+		}
+		b.WriteString(fmt.Sprintf(`
+      <div class="list-item">
+        <div class="list-title">%s%s</div>
+        <div class="list-meta" style="word-break: break-all;">%s</div>
+      </div>`, html.EscapeString(titleText), activeBadge, html.EscapeString(t.URL)))
+	}
+	b.WriteString(`</div>`)
+
+	return "Restore Session - Goosie", internalPageTemplate("restore", "Restore Session - Goosie", b.String())
+}
+
 // renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.
 func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int) int {
 	if n == nil || limit <= 0 {
@@ -1014,7 +1158,11 @@ func (f *framePath) renderInternalPage(ctx context.Context, rawURL string, viewp
 	if f.fonts != nil {
 		opts = append(opts, engine.WithMetrics(f.fonts))
 	}
-	opts = append(opts, engine.WithViewportH(float32(viewportH)))
+	opts = append(opts,
+		engine.WithViewportH(float32(viewportH)),
+		engine.WithDarkMode(f.isDarkMode()),
+		engine.WithHighContrast(f.isHighContrast()),
+	)
 
 	sess, err := engine.NewSession(htmlStr, nil, float32(viewportW), opts...)
 	if err != nil {

@@ -150,6 +150,10 @@ type Session struct {
 	// re-layout. Set via WithInvalidation.
 	inv *Invalidation
 
+	// Appearance preferences for media query evaluation.
+	darkMode     bool
+	highContrast bool
+
 	// opMu serializes pipeline operations across threads: the UI pump
 	// (input handlers, the JS pump, repaints) and navigation drains
 	// (session install/teardown, deferred completions) share sessions, and
@@ -312,6 +316,20 @@ func WithInvalidation(inv *Invalidation) Option {
 	return func(s *Session) { s.inv = inv }
 }
 
+// WithDarkMode configures whether the session matches (prefers-color-scheme: dark).
+func WithDarkMode(enabled bool) Option {
+	return func(s *Session) {
+		s.darkMode = enabled
+	}
+}
+
+// WithHighContrast configures whether the session matches (prefers-contrast: more).
+func WithHighContrast(enabled bool) Option {
+	return func(s *Session) {
+		s.highContrast = enabled
+	}
+}
+
 // fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
@@ -357,7 +375,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		}
 	}
 	s.runScripts()
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW, s.sub)
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
 	if err != nil {
 		return nil, err
 	}
@@ -2060,4 +2078,40 @@ func (s *Session) EvaluateJS(expr string) (string, error) {
 		return "", errors.New("engine: JS runtime not active")
 	}
 	return rt.Evaluate(expr)
+}
+
+// DarkMode reports whether the session is operating under dark color scheme.
+func (s *Session) DarkMode() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.darkMode
+}
+
+// HighContrast reports whether the session is operating under high contrast mode.
+func (s *Session) HighContrast() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.highContrast
+}
+
+// SetDarkMode updates the dark color scheme mode for the session.
+func (s *Session) SetDarkMode(enabled bool) {
+	s.opMu.Lock()
+	s.darkMode = enabled
+	s.opMu.Unlock()
+}
+
+// SetHighContrast updates the high contrast mode for the session.
+func (s *Session) SetHighContrast(enabled bool) {
+	s.opMu.Lock()
+	s.highContrast = enabled
+	s.opMu.Unlock()
+}
+
+func (s *Session) mediaOptions() css.MediaOptions {
+	return css.MediaOptions{
+		ViewportWidth: s.viewportW,
+		DarkMode:      s.darkMode,
+		HighContrast:  s.highContrast,
+	}
 }

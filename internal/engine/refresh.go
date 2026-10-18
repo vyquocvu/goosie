@@ -26,7 +26,7 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 	if plan.FullDoc {
 		var sheets []*css.Stylesheet
 		for _, src := range authorCSS {
-			sheets = append(sheets, css.ParseForViewport(src, s.viewportW))
+			sheets = append(sheets, css.ParseWithOptions(src, s.mediaOptions()))
 		}
 		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
 		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
@@ -44,7 +44,7 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 	if len(plan.Subtree) > 0 || plan.StyleObjects > 0 {
 		var sheets []*css.Stylesheet
 		for _, src := range authorCSS {
-			sheets = append(sheets, css.ParseForViewport(src, s.viewportW))
+			sheets = append(sheets, css.ParseWithOptions(src, s.mediaOptions()))
 		}
 		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
 		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
@@ -71,7 +71,7 @@ func (s *Session) RefreshNode(node *dom.Node, authorCSS []string, viewportW floa
 	// Re-style this node and its descendants.
 	var sheets []*css.Stylesheet
 	for _, src := range authorCSS {
-		sheets = append(sheets, css.ParseForViewport(src, s.viewportW))
+		sheets = append(sheets, css.ParseWithOptions(src, s.mediaOptions()))
 	}
 
 	// Build a parent chain to compute the node's style context.

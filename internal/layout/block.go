@@ -1699,7 +1699,7 @@ func isReplacedElement(obj *Object) bool {
 		return false
 	}
 	switch obj.Node.Data {
-	case "img", "input", "select", "textarea", "video", "canvas", "svg":
+	case "img", "input", "select", "textarea", "video", "audio", "canvas", "svg":
 		return true
 	}
 	return false
@@ -1813,7 +1813,7 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 					inner = own
 				} else if k.Node != nil && k.Node.Element() {
 					switch k.Node.Data {
-					case "img", "input", "select", "textarea", "video", "canvas", "svg":
+					case "img", "input", "select", "textarea", "video", "audio", "canvas", "svg":
 						inner = k.W
 					}
 				}
@@ -2039,8 +2039,25 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		}
 		return w, h, true
 	}
-	if obj.Node.Data == "svg" {
+	if obj.Node.Data == "svg" || obj.Node.Data == "video" || obj.Node.Data == "canvas" {
 		w, h = 300, 150
+		if wAttr := obj.Node.GetAttribute("width"); wAttr != "" {
+			if parsedW, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && parsedW > 0 {
+				w = float32(parsedW)
+			}
+		}
+		if hAttr := obj.Node.GetAttribute("height"); hAttr != "" {
+			if parsedH, err := strconv.ParseFloat(strings.TrimSuffix(hAttr, "px"), 32); err == nil && parsedH > 0 {
+				h = float32(parsedH)
+			}
+		}
+		return w, h, true
+	}
+	if obj.Node.Data == "audio" {
+		if !obj.Node.HasAttribute("controls") && !obj.Node.HasAttribute("width") && !obj.Node.HasAttribute("height") {
+			return 0, 0, true
+		}
+		w, h = 300, 32
 		if wAttr := obj.Node.GetAttribute("width"); wAttr != "" {
 			if parsedW, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && parsedW > 0 {
 				w = float32(parsedW)

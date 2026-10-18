@@ -723,6 +723,9 @@ dl dir, dl dl, dl menu, dl ol, dl ul,
 menu dir, menu dl, menu menu, menu ol, menu ul,
 ol dir, ol dl, ol menu, ol ol, ol ul,
 ul dir, ul dl, ul menu, ul ol, ul ul { margin-top: 0; margin-bottom: 0; }
+video, canvas { display: inline-block; }
+audio { display: inline-block; }
+audio:not([controls]) { display: none; }
 /* SVG elements: <svg> is a replaced inline box; container and definition elements
    are not rendered directly; shape and text elements are inline within the SVG
    coordinate system. */
