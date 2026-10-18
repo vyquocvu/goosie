@@ -47,9 +47,10 @@ type HTTPFetcher interface {
 // engine currently supports are present; the rest are silently ignored so a
 // script that passes them does not get a confusing error.
 type FetchOptions struct {
-	Method  string
-	Headers map[string]string
-	Body    string
+	Method      string
+	Headers     map[string]string
+	Body        string
+	Credentials string
 }
 
 // FetchResponse is the result of a fetch, exposed to JS as a Response-like
@@ -218,6 +219,9 @@ func parseFetchOpts(vm *goja.Runtime, val goja.Value) FetchOptions {
 	if v := obj.Get("body"); v != nil && !goja.IsUndefined(v) {
 		opts.Body = v.String()
 	}
+	if v := obj.Get("credentials"); v != nil && !goja.IsUndefined(v) {
+		opts.Credentials = strings.ToLower(v.String())
+	}
 	if v := obj.Get("headers"); v != nil && !goja.IsUndefined(v) {
 		if hObj, ok := v.(*goja.Object); ok {
 			opts.Headers = make(map[string]string)
@@ -310,6 +314,8 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		fs.mu.Unlock()
 	}()
 
+	withCredentials := opts.Credentials == "include"
+
 	// CORS enforcement
 	documentURL := r.opts.URL
 	if IsCORSRequest(documentURL, fetchURL) {
@@ -340,7 +346,7 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 				return
 			}
 			// Check preflight response
-			if !checkCORSResponse(origin, preflightResp.Headers) {
+			if !CheckPreflightResponse(origin, opts.Method, opts.Headers, preflightResp.Headers, withCredentials) {
 				t.mu.Lock()
 				catchCB := t.catchCB
 				t.mu.Unlock()
@@ -362,7 +368,7 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 	// Check CORS on response for cross-origin requests
 	if err == nil && IsCORSRequest(documentURL, fetchURL) {
 		origin := getOrigin(documentURL)
-		if !checkCORSResponse(origin, resp.Headers) {
+		if !CheckCORSResponse(origin, resp.Headers, withCredentials) {
 			t.mu.Lock()
 			catchCB := t.catchCB
 			t.mu.Unlock()

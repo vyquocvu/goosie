@@ -323,8 +323,9 @@ func DefaultClient() HTTP {
 			Transport:     clientTransport(),
 			CheckRedirect: checkRedirect,
 		},
-		jar:   NewCookieJar(),
-		cache: newResponseCache(),
+		jar:    NewCookieJar(),
+		cache:  newResponseCache(),
+		filter: NewFilterEngine(),
 	}
 }
 
@@ -339,6 +340,7 @@ func DefaultPrivateClient() HTTP {
 		},
 		jar:     NewCookieJar(),
 		cache:   newResponseCache(),
+		filter:  NewFilterEngine(),
 		private: true,
 	}
 }
@@ -349,11 +351,15 @@ func DefaultPrivateClient() HTTP {
 func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 	t := clientTransport()
 	t.TLSClientConfig = tlsConfig
-	return &httpClient{client: &http.Client{
-		Timeout:       30 * time.Second,
-		Transport:     t,
-		CheckRedirect: checkRedirect,
-	}, cache: newResponseCache()}
+	return &httpClient{
+		client: &http.Client{
+			Timeout:       30 * time.Second,
+			Transport:     t,
+			CheckRedirect: checkRedirect,
+		},
+		cache:  newResponseCache(),
+		filter: NewFilterEngine(),
+	}
 }
 
 // DefaultClientWithCookies returns DefaultClient whose jar persists to
@@ -390,6 +396,7 @@ type httpClient struct {
 	client      *http.Client
 	jar         *CookieJar
 	cache       *responseCache
+	filter      *FilterEngine
 	private     bool
 	persistPath string
 	// hsts remembers Strict-Transport-Security max-age per exact host for
@@ -398,6 +405,16 @@ type httpClient struct {
 	// own entries rather than inheriting trust they never earned.
 	hstsMu sync.Mutex
 	hsts   map[string]time.Time
+}
+
+// Filter returns the client's ad/tracker filter engine.
+func (c *httpClient) Filter() *FilterEngine {
+	return c.filter
+}
+
+// SetFilter replaces the client's ad/tracker filter engine.
+func (c *httpClient) SetFilter(f *FilterEngine) {
+	c.filter = f
 }
 
 // noteHSTS records one response's transport-security policy: an https
@@ -484,6 +501,11 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 			return nil, errors.New("net: only GET supports file URLs")
 		}
 		return readFileURL(ctx, u)
+	}
+	if c.filter != nil && c.filter.IsEnabled() {
+		if blocked, reason := c.filter.ShouldBlock(normalized); blocked {
+			return nil, fmt.Errorf("%w: %s (%s)", ErrBlockedByFilter, RedactURL(normalized), reason)
+		}
 	}
 	if method == http.MethodGet && c.cache != nil {
 		if resp, ok := c.cache.get(normalized, time.Now()); ok {
