@@ -92,6 +92,17 @@ var viewportTermHints = []string{"vw", "vh", "mi", "ma"}
 // answered by the hint scan below rather than by the regexp. Skipping the regexp
 // exactly reproduces running it and finding no match, because a string that holds
 // none of those four bigrams cannot hold a viewport unit at all.
+// ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
+// leaving every other term alone. A `calc()` only reaches its `em` terms once the
+// cascade has settled the element's font size, and by then the frame's size is no
+// longer in scope, so the two halves of the context are applied where each is
+// known.
+//
+// The cascade runs this on the text of every declaration of every element, so the
+// overwhelmingly common case - a value that says nothing about the viewport - is
+// answered by the hint scan below rather than by the regexp. Skipping the regexp
+// exactly reproduces running it and finding no match, because a string that holds
+// none of those four bigrams cannot hold a viewport unit at all.
 func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
 	possible := false
 	for _, h := range viewportTermHints {
@@ -113,6 +124,63 @@ func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
 		found = true
 		v := Value{Type: ValueLength, Num: n, Unit: g[2]}
 		return strconv.FormatFloat(float64(v.ToLengthWithContext(0, vw, vh)), 'f', -1, 32) + "px"
+	})
+	return out, found
+}
+
+// containerTerm matches a container query unit inside an expression's text.
+var containerTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(cqw|cqh|cqi|cqb|cqmin|cqmax)`)
+
+var containerTermHints = []string{"cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"}
+
+// ResolveContainerUnits rewrites the container query unit terms in an expression as pixels.
+func ResolveContainerUnits(expr string, cqW, cqH float32) (string, bool) {
+	possible := false
+	for _, h := range containerTermHints {
+		if strings.Contains(expr, h) {
+			possible = true
+			break
+		}
+	}
+	if !possible {
+		return expr, false
+	}
+	if cqW <= 0 {
+		cqW = 1440
+	}
+	if cqH <= 0 {
+		cqH = 900
+	}
+	cqmin := cqW
+	if cqH < cqmin {
+		cqmin = cqH
+	}
+	cqmax := cqW
+	if cqH > cqmax {
+		cqmax = cqH
+	}
+	found := false
+	out := containerTerm.ReplaceAllStringFunc(expr, func(m string) string {
+		g := containerTerm.FindStringSubmatch(m)
+		n, err := strconv.ParseFloat(g[1], 32)
+		if err != nil {
+			return m
+		}
+		found = true
+		var px float32
+		switch g[2] {
+		case "cqw", "cqi":
+			px = float32(n) * cqW / 100
+		case "cqh", "cqb":
+			px = float32(n) * cqH / 100
+		case "cqmin":
+			px = float32(n) * cqmin / 100
+		case "cqmax":
+			px = float32(n) * cqmax / 100
+		default:
+			return m
+		}
+		return strconv.FormatFloat(float64(px), 'f', -1, 32) + "px"
 	})
 	return out, found
 }
@@ -405,17 +473,17 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 		return num * 96 / 2.54, true
 	case "mm":
 		return num * 96 / 25.4, true
-	case "vw", "svw", "dvw", "lvw":
+	case "vw", "svw", "dvw", "lvw", "cqw", "cqi":
 		return num * p.vw / 100, true
-	case "vh", "svh", "dvh", "lvh":
+	case "vh", "svh", "dvh", "lvh", "cqh", "cqb":
 		return num * p.vh / 100, true
-	case "vmin":
+	case "vmin", "cqmin":
 		m := p.vw
 		if p.vh < m {
 			m = p.vh
 		}
 		return num * m / 100, true
-	case "vmax":
+	case "vmax", "cqmax":
 		m := p.vw
 		if p.vh > m {
 			m = p.vh

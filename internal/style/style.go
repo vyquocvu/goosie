@@ -1,6 +1,7 @@
 package style
 
 import (
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -483,6 +484,10 @@ type ComputedStyle struct {
 	AnimationIterCount int // 0 = infinite
 	AnimationDirection css.AnimationDirection
 	AnimationFillMode  css.AnimationFillMode
+
+	// Container query properties (CSS Containment Level 3).
+	ContainerType string // "normal", "size", "inline-size"
+	ContainerName string // custom-ident or space-separated identifiers
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -580,6 +585,8 @@ func DefaultStyle() ComputedStyle {
 		// paint through the border box.
 		BackgroundOrigin: BgBoxPadding,
 		BackgroundClip:   BgBoxBorder,
+		ContainerType:    "normal",
+		ContainerName:    "",
 	}
 }
 
@@ -689,7 +696,8 @@ summary { display: block; }
    sheet. Every story row on lobste.rs carries a dropdown menu this left in the
    flow, adding a line box per row. */
 details:not([open]) > *:not(summary) { display: none; }
-dialog { display: none; }
+dialog { display: none; position: absolute; left: 0; right: 0; margin: auto; border: solid 1px; padding: 1em; background: white; color: black; }
+dialog[open] { display: block; }
 fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove; }
 legend { display: block; padding: 0 0.25em; }
 form { display: block; }
@@ -792,6 +800,431 @@ func inViewport(d css.Declaration, vp Viewport) css.Declaration {
 	return d
 }
 
+// inContainerUnits rewrites container query units (cqw, cqh, cqi, cqb, cqmin, cqmax)
+// into pixels based on the nearest query container's dimensions.
+func inContainerUnits(d css.Declaration, cqW, cqH float32) css.Declaration {
+	if cqW <= 0 {
+		cqW = 1440
+	}
+	if cqH <= 0 {
+		cqH = 900
+	}
+	v := d.Parsed
+	if v.Type == css.ValueLength {
+		switch v.Unit {
+		case "cqw", "cqi", "cqh", "cqb", "cqmin", "cqmax":
+			px := v.ToLengthWithContainerContext(16, 16, cqW, cqH, cqW, cqH)
+			d.Parsed = css.Value{Type: css.ValueLength, Num: float64(px), Unit: "px"}
+			return d
+		}
+	}
+	if strings.IndexAny(d.Value, "0123456789") < 0 {
+		return d
+	}
+	text, ok := css.ResolveContainerUnits(d.Value, cqW, cqH)
+	if !ok {
+		return d
+	}
+	d.Value = text
+	d.Parsed = css.ParseValue(text)
+	return d
+}
+
+// findNearestContainerDimensions returns the width and height of the nearest query container
+// for node n. If no ancestor container exists, it falls back to the viewport size.
+func findNearestContainerDimensions(n *dom.Node, result map[dom.NodeID]*ComputedStyle, vp Viewport) (float32, float32) {
+	contNode, contStyle := findQueryContainer(n, "", false, result)
+	if contNode == nil || contStyle == nil {
+		vw, vh := vp.W, vp.H
+		if vw <= 0 {
+			vw = 1440
+		}
+		if vh <= 0 {
+			vh = 900
+		}
+		return vw, vh
+	}
+	return getContainerDimensions(contNode, contStyle, result, vp)
+}
+
+// findQueryContainer finds the nearest ancestor container for node n matching
+// the optional container name and axis requirement.
+func findQueryContainer(n *dom.Node, name string, needsBlock bool, result map[dom.NodeID]*ComputedStyle) (*dom.Node, *ComputedStyle) {
+	if n == nil {
+		return nil, nil
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		cs := result[p.ID]
+		if cs == nil {
+			continue
+		}
+		if name != "" {
+			matchedName := false
+			if strings.EqualFold(cs.ContainerName, name) {
+				matchedName = true
+			} else {
+				for _, f := range strings.Fields(cs.ContainerName) {
+					if strings.EqualFold(f, name) {
+						matchedName = true
+						break
+					}
+				}
+			}
+			if !matchedName {
+				continue
+			}
+		}
+		if needsBlock {
+			if cs.ContainerType == "size" {
+				return p, cs
+			}
+		} else {
+			if cs.ContainerType == "inline-size" || cs.ContainerType == "size" {
+				return p, cs
+			}
+		}
+	}
+	return nil, nil
+}
+
+func getContainingBlockWidth(n *dom.Node, result map[dom.NodeID]*ComputedStyle, vp Viewport) float32 {
+	if n == nil {
+		if vp.W > 0 {
+			return vp.W
+		}
+		return 1280
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		cs := result[p.ID]
+		if cs == nil {
+			continue
+		}
+		if cs.Width >= 0 {
+			return cs.Width
+		}
+		if cs.Width < -2 {
+			pct := -2 - cs.Width
+			base := getContainingBlockWidth(p, result, vp)
+			return pct * base / 100
+		}
+	}
+	if vp.W > 0 {
+		return vp.W
+	}
+	return 1280
+}
+
+func getContainingBlockHeight(n *dom.Node, result map[dom.NodeID]*ComputedStyle, vp Viewport) float32 {
+	if n == nil {
+		if vp.H > 0 {
+			return vp.H
+		}
+		return 900
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		cs := result[p.ID]
+		if cs == nil {
+			continue
+		}
+		if cs.Height >= 0 {
+			return cs.Height
+		}
+		if cs.Height < -2 {
+			pct := -2 - cs.Height
+			base := getContainingBlockHeight(p, result, vp)
+			return pct * base / 100
+		}
+	}
+	if vp.H > 0 {
+		return vp.H
+	}
+	return 900
+}
+
+func getContainerDimensions(n *dom.Node, cs *ComputedStyle, result map[dom.NodeID]*ComputedStyle, vp Viewport) (float32, float32) {
+	var w, h float32
+	if cs.Width >= 0 {
+		w = cs.Width
+	} else if cs.Width < -2 {
+		pct := -2 - cs.Width
+		baseW := getContainingBlockWidth(n, result, vp)
+		w = pct * baseW / 100
+	} else {
+		w = getContainingBlockWidth(n, result, vp)
+		if cs.BoxSizing == BoxSizingContentBox {
+			w -= (cs.PaddingLeft + cs.PaddingRight + cs.BorderLeftWidth + cs.BorderRightWidth)
+			if w < 0 {
+				w = 0
+			}
+		}
+	}
+
+	if cs.Height >= 0 {
+		h = cs.Height
+	} else if cs.Height < -2 {
+		pct := -2 - cs.Height
+		baseH := getContainingBlockHeight(n, result, vp)
+		h = pct * baseH / 100
+	} else {
+		h = 0
+	}
+	return w, h
+}
+
+func matchesContainerQuery(n *dom.Node, query string, result map[dom.NodeID]*ComputedStyle, vp Viewport) bool {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return true
+	}
+	clauses := css.SplitOutsideParens(query, " and ")
+	for _, clause := range clauses {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			continue
+		}
+		name := ""
+		cond := clause
+		if idx := strings.IndexByte(clause, '('); idx > 0 {
+			name = strings.TrimSpace(clause[:idx])
+			cond = strings.TrimSpace(clause[idx:])
+		}
+		condLower := strings.ToLower(cond)
+		needsBlock := strings.Contains(condLower, "height") || strings.Contains(condLower, "block-size")
+		contNode, contStyle := findQueryContainer(n, name, needsBlock, result)
+		if contNode == nil || contStyle == nil {
+			return false
+		}
+		w, h := getContainerDimensions(contNode, contStyle, result, vp)
+		if !evalContainerCondition(cond, w, h) {
+			return false
+		}
+	}
+	return true
+}
+
+func evalContainerCondition(cond string, w, h float32) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return true
+	}
+	for _, group := range css.SplitTopLevel(cond, ',') {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if evalContainerGroup(group, w, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func evalContainerGroup(group string, w, h float32) bool {
+	if alts := css.SplitOutsideParens(group, " or "); len(alts) > 1 {
+		for _, alt := range alts {
+			if evalContainerGroup(strings.TrimSpace(alt), w, h) {
+				return true
+			}
+		}
+		return false
+	}
+	if parts := css.SplitOutsideParens(group, " and "); len(parts) > 1 {
+		for _, part := range parts {
+			if !evalContainerGroup(strings.TrimSpace(part), w, h) {
+				return false
+			}
+		}
+		return true
+	}
+	if strings.HasPrefix(strings.ToLower(group), "not ") {
+		return !evalContainerGroup(strings.TrimSpace(group[4:]), w, h)
+	}
+	test := strings.TrimSpace(group)
+	if strings.HasPrefix(test, "(") && strings.HasSuffix(test, ")") {
+		test = strings.TrimSpace(test[1 : len(test)-1])
+	}
+	if strings.ContainsAny(test, "<>=") {
+		return evalContainerRange(test, w, h)
+	}
+	colon := strings.IndexByte(test, ':')
+	if colon < 0 {
+		return false
+	}
+	feature := strings.ToLower(strings.TrimSpace(test[:colon]))
+	val := strings.TrimSpace(test[colon+1:])
+	return evalSingleContainerFeature(feature, val, w, h)
+}
+
+func evalSingleContainerFeature(feature, val string, w, h float32) bool {
+	switch feature {
+	case "min-width", "min-inline-size":
+		if px, ok := parseCSSPx(val); ok {
+			return w >= px
+		}
+	case "max-width", "max-inline-size":
+		if px, ok := parseCSSPx(val); ok {
+			return w <= px
+		}
+	case "width", "inline-size":
+		if px, ok := parseCSSPx(val); ok {
+			return float32(math.Abs(float64(w-px))) < 0.5
+		}
+	case "min-height", "min-block-size":
+		if px, ok := parseCSSPx(val); ok {
+			return h >= px
+		}
+	case "max-height", "max-block-size":
+		if px, ok := parseCSSPx(val); ok {
+			return h <= px
+		}
+	case "height", "block-size":
+		if px, ok := parseCSSPx(val); ok {
+			return float32(math.Abs(float64(h-px))) < 0.5
+		}
+	case "orientation":
+		v := strings.ToLower(strings.TrimSpace(val))
+		if v == "portrait" {
+			return h > w
+		} else if v == "landscape" {
+			return w >= h
+		}
+	case "aspect-ratio":
+		parts := strings.Split(val, "/")
+		if len(parts) == 2 {
+			rW, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+			rH, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+			if err1 == nil && err2 == nil && rH > 0 && h > 0 {
+				ratio := float32(rW / rH)
+				actual := w / h
+				return float32(math.Abs(float64(actual-ratio))) < 0.05
+			}
+		}
+	}
+	return false
+}
+
+func evalContainerRange(expr string, w, h float32) bool {
+	var tokens []string
+	var ops []string
+	start := 0
+	i := 0
+	for i < len(expr) {
+		if expr[i] == '<' || expr[i] == '>' || expr[i] == '=' {
+			token := strings.TrimSpace(expr[start:i])
+			if token != "" {
+				tokens = append(tokens, token)
+			}
+			opStart := i
+			for i < len(expr) && (expr[i] == '<' || expr[i] == '>' || expr[i] == '=') {
+				i++
+			}
+			ops = append(ops, expr[opStart:i])
+			start = i
+			continue
+		}
+		i++
+	}
+	if start < len(expr) {
+		token := strings.TrimSpace(expr[start:])
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	if len(tokens) == 2 && len(ops) == 1 {
+		featIdx, valIdx := -1, -1
+		if isContainerFeatureName(tokens[0]) {
+			featIdx, valIdx = 0, 1
+		} else if isContainerFeatureName(tokens[1]) {
+			featIdx, valIdx = 1, 0
+		} else {
+			return false
+		}
+		valPx, ok := parseCSSPx(tokens[valIdx])
+		if !ok {
+			return false
+		}
+		valDim := getFeatureDim(tokens[featIdx], w, h)
+		op := ops[0]
+		if featIdx == 1 {
+			op = flipContainerOp(op)
+		}
+		return compareDim(valDim, op, valPx)
+	} else if len(tokens) == 3 && len(ops) == 2 {
+		if !isContainerFeatureName(tokens[1]) {
+			return false
+		}
+		loPx, okLo := parseCSSPx(tokens[0])
+		hiPx, okHi := parseCSSPx(tokens[2])
+		if !okLo || !okHi {
+			return false
+		}
+		valDim := getFeatureDim(tokens[1], w, h)
+		op1 := flipContainerOp(ops[0])
+		op2 := ops[1]
+		return compareDim(valDim, op1, loPx) && compareDim(valDim, op2, hiPx)
+	}
+	return false
+}
+
+func isContainerFeatureName(name string) bool {
+	switch strings.ToLower(name) {
+	case "width", "inline-size", "height", "block-size":
+		return true
+	}
+	return false
+}
+
+func getFeatureDim(name string, w, h float32) float32 {
+	switch strings.ToLower(name) {
+	case "height", "block-size":
+		return h
+	default:
+		return w
+	}
+}
+
+func flipContainerOp(op string) string {
+	switch op {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	}
+	return op
+}
+
+func compareDim(dim float32, op string, target float32) bool {
+	switch op {
+	case "<":
+		return dim < target
+	case "<=":
+		return dim <= target
+	case ">":
+		return dim > target
+	case ">=":
+		return dim >= target
+	case "=", "==":
+		return float32(math.Abs(float64(dim-target))) < 0.5
+	}
+	return false
+}
+
+func parseCSSPx(val string) (float32, bool) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return 0, false
+	}
+	v := css.ParseValue(val)
+	if v.Type == css.ValueLength || v.Type == css.ValueNumber {
+		return v.ToLength(), true
+	}
+	return 0, false
+}
+
 // Resolve computes the style for every element in a document laid out in an
 // unspecified viewport, which is what the viewport units then fall back to.
 // fonts is the document's own @font-face table, or nil when it declares none.
@@ -823,7 +1256,7 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 	}
 	if n.Element() {
 		parentStyle := findParentStyle(n, result)
-		cs := computeStyle(n, index, parentStyle, vp, fonts, six)
+		cs := computeStyle(n, index, parentStyle, vp, fonts, six, result)
 		result[n.ID] = cs
 	} else if n.Text() {
 		parentStyle := findParentStyle(n, result)
@@ -999,7 +1432,7 @@ func sortCascade(entries []cascadeEntry) {
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].before(entries[j]) })
 }
 
-func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
+func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex, result map[dom.NodeID]*ComputedStyle) *ComputedStyle {
 	cs := DefaultStyle()
 	if parent != nil {
 		inheritFromParent(&cs, parent)
@@ -1025,6 +1458,9 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	ruleDecls, ruleImportant := 0, 0
 	for _, cand := range cands {
 		if !cand.sel.MatchesIndexed(n, six) {
+			continue
+		}
+		if cand.rule.ContainerQuery != "" && !matchesContainerQuery(n, cand.rule.ContainerQuery, result, vp) {
 			continue
 		}
 		matched = append(matched, cand)
@@ -1056,9 +1492,12 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	if cap := ruleImportant + len(inlineDecls); cap > 0 {
 		important = make([]cascadeEntry, 0, cap)
 	}
+
+	cqW, cqH := findNearestContainerDimensions(n, result, vp)
 	for _, cand := range matched {
 		for _, d := range cand.rule.Declarations {
-			e := cascadeEntry{decl: inViewport(d, vp), origin: cand.origin, layerOrder: cand.layerOrder, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
+			d = inContainerUnits(inViewport(d, vp), cqW, cqH)
+			e := cascadeEntry{decl: d, origin: cand.origin, layerOrder: cand.layerOrder, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
 			if d.Important {
 				important = append(important, e)
 			} else {
@@ -1068,7 +1507,8 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	for _, d := range inlineDecls {
-		e := cascadeEntry{decl: inViewport(d, vp), origin: 2, a: 1, b: 1, c: 1, order: order}
+		d = inContainerUnits(inViewport(d, vp), cqW, cqH)
+		e := cascadeEntry{decl: d, origin: 2, a: 1, b: 1, c: 1, order: order}
 		order++
 		if d.Important {
 			important = append(important, e)
@@ -1703,6 +2143,47 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		} else {
 			cs.HasZIndex = true
 			cs.ZIndex = int32(parsed.Num)
+		}
+
+	case "container-type":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "normal", "size", "inline-size":
+			cs.ContainerType = v
+		default:
+			cs.ContainerType = "normal"
+		}
+	case "container-name":
+		cs.ContainerName = strings.TrimSpace(value)
+	case "container":
+		parts := strings.Split(value, "/")
+		if len(parts) == 2 {
+			name := strings.TrimSpace(parts[0])
+			typ := strings.ToLower(strings.TrimSpace(parts[1]))
+			if name == "none" {
+				cs.ContainerName = ""
+			} else {
+				cs.ContainerName = name
+			}
+			switch typ {
+			case "normal", "size", "inline-size":
+				cs.ContainerType = typ
+			default:
+				cs.ContainerType = "normal"
+			}
+		} else {
+			val := strings.TrimSpace(value)
+			valLower := strings.ToLower(val)
+			if valLower == "normal" || valLower == "size" || valLower == "inline-size" {
+				cs.ContainerType = valLower
+				cs.ContainerName = ""
+			} else if valLower == "none" {
+				cs.ContainerName = ""
+				cs.ContainerType = "normal"
+			} else {
+				cs.ContainerName = val
+				cs.ContainerType = "normal"
+			}
 		}
 
 	// Font-relative units in a box size resolve against the element's own font,

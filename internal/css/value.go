@@ -668,6 +668,22 @@ func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 				m = vh
 			}
 			return float32(v.Num) * m / 100
+		case "cqw", "cqi":
+			return float32(v.Num) * vw / 100
+		case "cqh", "cqb":
+			return float32(v.Num) * vh / 100
+		case "cqmin":
+			m := vw
+			if vh < m {
+				m = vh
+			}
+			return float32(v.Num) * m / 100
+		case "cqmax":
+			m := vw
+			if vh > m {
+				m = vh
+			}
+			return float32(v.Num) * m / 100
 		case "em", "ex":
 			if em > 0 {
 				return float32(v.Num) * em
@@ -697,6 +713,44 @@ func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 	return 0
 }
 
+// ToLengthWithContainerContext resolves length units taking container width/height into account
+// for container query units (cqw, cqh, cqi, cqb, cqmin, cqmax).
+func (v Value) ToLengthWithContainerContext(em, rem, vw, vh, cqW, cqH float32) float32 {
+	if cqW <= 0 {
+		cqW = vw
+		if cqW <= 0 {
+			cqW = 1440
+		}
+	}
+	if cqH <= 0 {
+		cqH = vh
+		if cqH <= 0 {
+			cqH = 900
+		}
+	}
+	if v.Type == ValueLength {
+		switch v.Unit {
+		case "cqw", "cqi":
+			return float32(v.Num) * cqW / 100
+		case "cqh", "cqb":
+			return float32(v.Num) * cqH / 100
+		case "cqmin":
+			m := cqW
+			if cqH < m {
+				m = cqH
+			}
+			return float32(v.Num) * m / 100
+		case "cqmax":
+			m := cqW
+			if cqH > m {
+				m = cqH
+			}
+			return float32(v.Num) * m / 100
+		}
+	}
+	return v.ToLengthWithFullContext(em, rem, vw, vh)
+}
+
 func toPixels(num float64, unit string) float32 {
 	switch unit {
 	case "px", "":
@@ -715,13 +769,13 @@ func toPixels(num float64, unit string) float32 {
 		return float32(num * 96 / 2.54)
 	case "mm":
 		return float32(num * 96 / 25.4)
-	case "vw":
+	case "vw", "cqw", "cqi":
 		return float32(num * 1440 / 100)
-	case "vh":
+	case "vh", "cqh", "cqb":
 		return float32(num * 900 / 100)
-	case "vmin":
+	case "vmin", "cqmin":
 		return float32(num * 900 / 100)
-	case "vmax":
+	case "vmax", "cqmax":
 		return float32(num * 1440 / 100)
 	}
 	return float32(num)

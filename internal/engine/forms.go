@@ -141,12 +141,14 @@ func EncodeFormURLEncoded(data []FormData) string {
 	return buf.String()
 }
 
-// FormMethod returns the HTTP method for a form (GET or POST).
+// FormMethod returns the HTTP method for a form (GET, POST, or dialog).
 func FormMethod(form *dom.Node) string {
 	method := form.GetAttribute("method")
 	switch strings.ToLower(method) {
 	case "post":
 		return "POST"
+	case "dialog":
+		return "dialog"
 	default:
 		return "GET"
 	}

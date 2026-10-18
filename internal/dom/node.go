@@ -64,6 +64,10 @@ type Node struct {
 	// Shadow DOM.
 	ShadowRoot *ShadowRoot
 
+	// Dialog element state.
+	IsModal     bool
+	ReturnValue string
+
 	// Document back-pointer.
 	Doc *Document
 }

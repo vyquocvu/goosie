@@ -738,6 +738,48 @@ func (r *Runtime) setupDOM() {
 		node.SetAttribute("value", v)
 		return goja.Undefined()
 	})
+	_ = doc.Set("__getDialogOpen__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue(false)
+		}
+		return r.vm.ToValue(node.HasAttribute("open"))
+	})
+	_ = doc.Set("__setDialogOpen__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		open := call.Arguments[1].ToBoolean()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		if open {
+			node.SetAttribute("open", "")
+		} else {
+			node.RemoveAttribute("open")
+			node.IsModal = false
+		}
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+	_ = doc.Set("__getDialogReturnValue__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(node.ReturnValue)
+	})
+	_ = doc.Set("__setDialogReturnValue__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		v := call.Arguments[1].String()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		node.ReturnValue = v
+		return goja.Undefined()
+	})
 	_ = doc.Set("__getId__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -1052,6 +1094,9 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 			r.defineCheckedAccessor(obj)
 			r.defineValueAccessor(obj)
 		}
+		if node.Data == "dialog" {
+			r.defineDialogElement(obj, node)
+		}
 	}
 
 	return obj
@@ -1166,6 +1211,75 @@ func (r *Runtime) defineValueAccessor(obj *goja.Object) {
 		});
 	`)
 	_ = r.vm.Set("__valTarget__", nil)
+}
+
+func (r *Runtime) defineDialogElement(obj *goja.Object, node *dom.Node) {
+	_ = obj.Set("show", func(call goja.FunctionCall) goja.Value {
+		if node.HasAttribute("open") {
+			return goja.Undefined()
+		}
+		node.SetAttribute("open", "")
+		node.IsModal = false
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("showModal", func(call goja.FunctionCall) goja.Value {
+		if node.HasAttribute("open") {
+			panic(r.vm.NewTypeError("Failed to execute 'showModal' on 'HTMLDialogElement': The dialog is already open."))
+		}
+		node.SetAttribute("open", "")
+		node.IsModal = true
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("close", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("open") {
+			return goja.Undefined()
+		}
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
+			node.ReturnValue = call.Arguments[0].String()
+		}
+		node.RemoveAttribute("open")
+		node.IsModal = false
+		dom.DispatchEvent(node, dom.NewEvent("close", false, false))
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = r.vm.Set("__dlgTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__dlgTarget__, 'open', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return false;
+				return document.__getDialogOpen__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setDialogOpen__(nid, !!v);
+			},
+			configurable: true,
+			enumerable: true
+		});
+		Object.defineProperty(__dlgTarget__, 'returnValue', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getDialogReturnValue__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setDialogReturnValue__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__dlgTarget__", nil)
 }
 
 // defineIdAccessor installs a live id getter/setter on obj: reading reflects

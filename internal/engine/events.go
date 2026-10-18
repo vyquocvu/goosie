@@ -68,6 +68,8 @@ func (s *Session) keyDefaultAction(key string, shift bool) {
 		if n := s.focus; n != nil && IsActivatable(n) {
 			s.runClickDefault(n)
 		}
+	case "Escape":
+		s.Edit(EditEscape, 0x1b)
 	}
 }
 

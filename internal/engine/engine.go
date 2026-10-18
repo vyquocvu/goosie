@@ -1463,6 +1463,17 @@ func (s *Session) submitFormLocked(form *dom.Node) {
 	}
 	data := CollectFormData(form)
 	method := FormMethod(form)
+	if strings.EqualFold(method, "dialog") {
+		for cur := form.Parent; cur != nil; cur = cur.Parent {
+			if cur.Element() && cur.Data == "dialog" {
+				cur.RemoveAttribute("open")
+				cur.IsModal = false
+				dom.DispatchEvent(cur, dom.NewEvent("close", false, false))
+				return
+			}
+		}
+		return
+	}
 	action := FormAction(form)
 	encoded := EncodeFormURLEncoded(data)
 

@@ -25,10 +25,11 @@ type Declaration struct {
 
 // Rule is one CSS rule: selectors + declarations.
 type Rule struct {
-	Selectors    []Selector
-	SelectorStrs []string
-	Declarations []Declaration
-	Layer        string
+	Selectors      []Selector
+	SelectorStrs   []string
+	Declarations   []Declaration
+	Layer          string
+	ContainerQuery string
 }
 
 // FontFaceRule is one @font-face rule: declarations only, no selectors.
@@ -160,11 +161,12 @@ type parser struct {
 	// mediaWidth is the viewport this parser tests @media width conditions
 	// against. Nested blocks inherit it so an @media inside an @supports or
 	// inside another @media sees the document's width, not the default.
-	mediaWidth     float32
-	darkMode       bool
-	highContrast   bool
-	currentLayer   string
-	anonLayerCount int
+	mediaWidth            float32
+	darkMode              bool
+	highContrast          bool
+	currentLayer          string
+	currentContainerQuery string
+	anonLayerCount        int
 }
 
 func (p *parser) parse() *Stylesheet {
@@ -189,6 +191,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseSupportsRule(sheet)
 			case "layer":
 				p.parseLayerRule(sheet)
+			case "container":
+				p.parseContainerRule(sheet)
 			case "font-face":
 				p.parseFontFaceRule(sheet)
 			case "keyframes", "-webkit-keyframes":
@@ -202,6 +206,9 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 		if len(rule.Selectors) > 0 {
 			if p.currentLayer != "" && rule.Layer == "" {
 				rule.Layer = p.currentLayer
+			}
+			if p.currentContainerQuery != "" && rule.ContainerQuery == "" {
+				rule.ContainerQuery = p.currentContainerQuery
 			}
 			sheet.Rules = append(sheet.Rules, rule)
 		}
@@ -270,12 +277,72 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 		p.pos++ // the final '}'
 	}
 	inner := &parser{
-		input:          body,
-		mediaWidth:     p.mediaWidth,
-		darkMode:       p.darkMode,
-		highContrast:   p.highContrast,
-		currentLayer:   layerName,
-		anonLayerCount: p.anonLayerCount,
+		input:                 body,
+		mediaWidth:            p.mediaWidth,
+		darkMode:              p.darkMode,
+		highContrast:          p.highContrast,
+		currentLayer:          layerName,
+		currentContainerQuery: p.currentContainerQuery,
+		anonLayerCount:        p.anonLayerCount,
+	}
+	inner.parseInto(sheet)
+	p.anonLayerCount = inner.anonLayerCount
+}
+
+// parseContainerRule parses an @container at-rule and associates its condition
+// with the contained style rules.
+func (p *parser) parseContainerRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	p.skipWhitespace()
+	preludeStart := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) {
+		return
+	}
+	if p.input[p.pos] == ';' {
+		p.pos++
+		return
+	}
+	prelude := strings.TrimSpace(p.input[preludeStart:p.pos])
+	p.pos++ // the '{'
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		if depth == 0 {
+			break
+		}
+		p.pos++
+	}
+	body := p.input[bodyStart:p.pos]
+	if p.pos < len(p.input) {
+		p.pos++ // the final '}'
+	}
+	cq := prelude
+	if p.currentContainerQuery != "" {
+		cq = p.currentContainerQuery + " and " + prelude
+	}
+	inner := &parser{
+		input:                 body,
+		mediaWidth:            p.mediaWidth,
+		darkMode:              p.darkMode,
+		highContrast:          p.highContrast,
+		currentLayer:          p.currentLayer,
+		currentContainerQuery: cq,
+		anonLayerCount:        p.anonLayerCount,
 	}
 	inner.parseInto(sheet)
 	p.anonLayerCount = inner.anonLayerCount
@@ -346,12 +413,13 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	}
 	if p.mediaConditionTrue(cond) {
 		inner := &parser{
-			input:          body,
-			mediaWidth:     p.mediaWidth,
-			darkMode:       p.darkMode,
-			highContrast:   p.highContrast,
-			currentLayer:   p.currentLayer,
-			anonLayerCount: p.anonLayerCount,
+			input:                 body,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          p.currentLayer,
+			currentContainerQuery: p.currentContainerQuery,
+			anonLayerCount:        p.anonLayerCount,
 		}
 		inner.parseInto(sheet)
 		p.anonLayerCount = inner.anonLayerCount
@@ -406,12 +474,13 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 	}
 	if supportsConditionTrue(cond) {
 		inner := &parser{
-			input:          body,
-			mediaWidth:     p.mediaWidth,
-			darkMode:       p.darkMode,
-			highContrast:   p.highContrast,
-			currentLayer:   p.currentLayer,
-			anonLayerCount: p.anonLayerCount,
+			input:                 body,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          p.currentLayer,
+			currentContainerQuery: p.currentContainerQuery,
+			anonLayerCount:        p.anonLayerCount,
 		}
 		inner.parseInto(sheet)
 		p.anonLayerCount = inner.anonLayerCount
@@ -585,6 +654,12 @@ func supportsFeatureTrue(test string) bool {
 		return true
 	}
 	return false
+}
+
+// SplitOutsideParens splits s on sep occurrences that sit at paren depth zero,
+// so `or`/`and` inside a `(...)` test are not treated as operators.
+func SplitOutsideParens(s, sep string) []string {
+	return splitOutsideParens(s, sep)
 }
 
 // splitOutsideParens splits s on sep occurrences that sit at paren depth zero,
@@ -935,6 +1010,11 @@ func flipOp(op string) string {
 		return "<="
 	}
 	return op
+}
+
+// SplitTopLevel splits on sep outside parentheses and brackets.
+func SplitTopLevel(s string, sep byte) []string {
+	return splitTopLevel(s, sep)
 }
 
 // splitTopLevel splits on sep outside parentheses and brackets.

@@ -277,6 +277,13 @@ func TestFormMethod(t *testing.T) {
 	if got := engine.FormMethod(form3); got != "GET" {
 		t.Errorf("FormMethod(default) = %q, want GET", got)
 	}
+
+	// Dialog
+	form4 := doc.NewElement("form")
+	form4.SetAttribute("method", "dialog")
+	if got := engine.FormMethod(form4); got != "dialog" {
+		t.Errorf("FormMethod(dialog) = %q, want dialog", got)
+	}
 }
 
 func TestFormAction(t *testing.T) {

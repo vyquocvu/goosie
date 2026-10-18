@@ -152,12 +152,64 @@ func (s *Session) CommitText(text string) bool {
 	return true
 }
 
+// CloseTopmostModalDialog finds and closes the topmost open modal dialog element.
+// It fires a cancelable "cancel" event; if not canceled, it removes the open attribute,
+// clears the modal flag, and fires a "close" event.
+func (s *Session) CloseTopmostModalDialog() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.closeTopmostModalDialogLocked()
+}
+
+func (s *Session) closeTopmostModalDialogLocked() bool {
+	if s.Doc == nil {
+		return false
+	}
+	var topmost *dom.Node
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.Element() && n.Data == "dialog" && n.IsModal && n.HasAttribute("open") {
+			topmost = n
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(&s.Doc.Node)
+	if topmost == nil {
+		return false
+	}
+	cancelEv := dom.NewEvent("cancel", false, true)
+	if !dom.DispatchEvent(topmost, cancelEv) {
+		return false // preventDefault was called
+	}
+	topmost.RemoveAttribute("open")
+	topmost.IsModal = false
+	dom.DispatchEvent(topmost, dom.NewEvent("close", false, false))
+	return true
+}
+
 // Edit applies one keyboard edit to the focused control. It returns whether
 // the value or focus changed, which is when the caller must reflow;
 // caret-only movement returns false but still needs a repaint.
 func (s *Session) Edit(action EditAction, r rune) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if action == EditEscape {
+		closedDialog := s.closeTopmostModalDialogLocked()
+		if s.focus != nil {
+			prev := s.focus
+			s.focus = nil
+			s.marked = ""
+			css.SetFocus(prev, false)
+			dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
+			return true
+		}
+		return closedDialog
+	}
 	if !controlEditable(s.focus) {
 		return false
 	}
