@@ -490,13 +490,31 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		width := float64(len([]rune(text))) * (fontSize * 0.6)
 		res := r.vm.NewObject()
 		_ = res.Set("width", width)
+
+		align := "start"
+		if alignVal := obj.Get("textAlign"); alignVal != nil && !goja.IsUndefined(alignVal) {
+			align = strings.ToLower(alignVal.String())
+		}
+		var left, right float64
+		switch align {
+		case "center":
+			left = -width / 2.0
+			right = width / 2.0
+		case "right", "end":
+			left = -width
+			right = 0.0
+		default: // "left", "start"
+			left = 0.0
+			right = width
+		}
+
 		// Standard TextMetrics font and bounding box metrics
 		_ = res.Set("actualBoundingBoxAscent", fontSize*0.8)
 		_ = res.Set("actualBoundingBoxDescent", fontSize*0.2)
 		_ = res.Set("fontBoundingBoxAscent", fontSize*0.85)
 		_ = res.Set("fontBoundingBoxDescent", fontSize*0.25)
-		_ = res.Set("actualBoundingBoxLeft", 0.0)
-		_ = res.Set("actualBoundingBoxRight", width)
+		_ = res.Set("actualBoundingBoxLeft", left)
+		_ = res.Set("actualBoundingBoxRight", right)
 		_ = res.Set("emHeightAscent", fontSize*0.8)
 		_ = res.Set("emHeightDescent", fontSize*0.2)
 		_ = res.Set("alphabeticBaseline", 0.0)

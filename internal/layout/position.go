@@ -67,6 +67,46 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 			}
 			shiftSubtree(a, id, dx, dy)
 			obj = a.Get(id)
+		case style.PositionSticky:
+			// Sticky positioning behaves like relative positioning within its
+			// containing block's bounds.
+			rel := containingBlock{cb.x0, cb.y0, cb.w, cb.h}
+			parentObj := a.Get(obj.Parent)
+			if parentObj != nil && parentObj.Style != nil {
+				x0, y0, x1, y1 := parentObj.ContentRect()
+				rel = containingBlock{x0, y0, x1 - x0, y1 - y0}
+			}
+			dx := float32(0)
+			if s.HasLeft {
+				dx = resolvePctLength(s.Left, rel.w)
+			} else if s.HasRight {
+				dx = -resolvePctLength(s.Right, rel.w)
+			}
+			dy := float32(0)
+			if s.HasTop {
+				dy = resolvePctLength(s.Top, rel.h)
+			} else if s.HasBottom {
+				dy = -resolvePctLength(s.Bottom, rel.h)
+			}
+			// Clamp sticky offset so the element stays within its parent's content rect
+			if parentObj != nil && parentObj.Style != nil {
+				_, py0, _, py1 := parentObj.ContentRect()
+				if dy > 0 && obj.Y+obj.H+dy > py1 {
+					dy = py1 - (obj.Y + obj.H)
+					if dy < 0 {
+						dy = 0
+					}
+				} else if dy < 0 && obj.Y+dy < py0 {
+					dy = py0 - obj.Y
+					if dy > 0 {
+						dy = 0
+					}
+				}
+			}
+			if dx != 0 || dy != 0 {
+				shiftSubtree(a, id, dx, dy)
+				obj = a.Get(id)
+			}
 		case style.PositionAbsolute:
 			placeOutOfFlow(a, id, cb, anchors)
 			obj = a.Get(id)

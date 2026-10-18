@@ -62,3 +62,32 @@ func TestTextTransformFullWidth(t *testing.T) {
 		t.Errorf("expected text-transform: full-width to convert ASCII characters to full-width variants")
 	}
 }
+
+func TestPositionStickyClamping(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html><body style="margin: 0;">
+<div id="parent" style="position: relative; width: 400px; height: 300px; margin: 0; padding: 0;">
+	<div id="sticky" style="position: sticky; top: 50px; height: 100px; width: 200px;">sticky box</div>
+</div>
+</body></html>`
+
+	sess, err := engine.NewSession(html, nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	foundSticky := false
+	for i := range sess.Arena.Objects {
+		obj := &sess.Arena.Objects[i]
+		if obj.Node != nil && obj.Node.GetAttribute("id") == "sticky" {
+			foundSticky = true
+			if obj.Y < 50 {
+				t.Errorf("expected sticky element Y >= 50, got %f", obj.Y)
+			}
+			break
+		}
+	}
+	if !foundSticky {
+		t.Fatalf("sticky element not found in arena")
+	}
+}

@@ -56,6 +56,15 @@ func TestCanvasTextMetrics(t *testing.T) {
 		if (typeof metrics.actualBoundingBoxRight !== "number" || metrics.actualBoundingBoxRight !== metrics.width) {
 			throw new Error("Invalid actualBoundingBoxRight: " + metrics.actualBoundingBoxRight);
 		}
+
+		ctx.textAlign = "center";
+		var centerMetrics = ctx.measureText("Hello World");
+		if (centerMetrics.actualBoundingBoxLeft !== -centerMetrics.width / 2) {
+			throw new Error("Invalid centered actualBoundingBoxLeft: " + centerMetrics.actualBoundingBoxLeft);
+		}
+		if (centerMetrics.actualBoundingBoxRight !== centerMetrics.width / 2) {
+			throw new Error("Invalid centered actualBoundingBoxRight: " + centerMetrics.actualBoundingBoxRight);
+		}
 	`
 
 	if err := r.Run(script, "metrics_test.js"); err != nil {
