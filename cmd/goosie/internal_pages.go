@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/paint"
@@ -155,6 +156,50 @@ td.val {
   color: #5f6368;
   font-size: 15px;
 }
+.btn-action {
+  display: inline-block;
+  background-color: #1a73e8;
+  color: #ffffff;
+  padding: 4px 10px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 6px;
+}
+.btn-action.secondary {
+  background-color: #f1f3f4;
+  color: #3c4043;
+  border: 1px solid #dadce0;
+}
+.btn-action.danger {
+  background-color: #fce8e6;
+  color: #c5221f;
+  border: 1px solid #fad2cf;
+}
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.badge-active { background: #e8f0fe; color: #1a73e8; }
+.badge-completed { background: #e6f4ea; color: #137333; }
+.badge-failed { background: #fce8e6; color: #c5221f; }
+.badge-canceled { background: #f1f3f4; color: #5f6368; }
+.progress-track {
+  background-color: #e8eaed;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress-bar {
+  background-color: #1a73e8;
+  height: 100%%;
+}
 </style>
 </head>
 <body>
@@ -281,43 +326,151 @@ func buildHistoryPageHTML(f *framePath) (string, string) {
 }
 
 // buildDownloadsPageHTML generates the goosie://downloads viewer page.
-func buildDownloadsPageHTML(f *framePath) (string, string) {
+func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
+	if u, err := url.Parse(rawURL); err == nil {
+		action := u.Query().Get("action")
+		switch action {
+		case "reveal":
+			p := u.Query().Get("path")
+			if p != "" {
+				_ = download.ShowInFolder(p)
+			}
+		case "open":
+			p := u.Query().Get("path")
+			if p != "" {
+				_ = download.OpenFile(p)
+			}
+		case "clear":
+			if f.downloads != nil {
+				f.downloads.ClearCompleted()
+			}
+		case "cancel":
+			id := u.Query().Get("id")
+			if f.downloads != nil && id != "" {
+				f.downloads.Cancel(id)
+			}
+		}
+	}
+
 	var b strings.Builder
-	b.WriteString(`<div class="card"><h1>Downloads</h1>`)
+	b.WriteString(`<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h1 style="margin: 0;">Downloads</h1>
+      <div>
+        <a class="btn-action secondary" href="goosie://downloads?action=clear">Clear Finished</a>
+      </div>
+    </div>`)
 
 	dir := f.config.downloadDir
 	if dir == "" {
 		dir = "~/Downloads"
 	}
-	b.WriteString(fmt.Sprintf(`<p style="color: #5f6368; font-size: 13px;">Save directory: <code style="background: #f1f3f4; padding: 2px 6px; border-radius: 3px;">%s</code></p>`, html.EscapeString(dir)))
+	b.WriteString(fmt.Sprintf(`<p style="color: #5f6368; font-size: 13px; margin-bottom: 18px;">Save directory: <code style="background: #f1f3f4; padding: 2px 6px; border-radius: 3px;">%s</code></p>`, html.EscapeString(dir)))
 
-	files, err := os.ReadDir(dir)
-	if err != nil || len(files) == 0 {
-		b.WriteString(`<div class="empty-state">No downloaded files found in the download directory.</div>`)
-	} else {
-		count := 0
-		for _, fi := range files {
-			if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
-				continue
+	renderedFiles := make(map[string]bool)
+	hasItems := false
+
+	// 1. Render items from download manager (active and recent)
+	if f.downloads != nil {
+		items := f.downloads.Items()
+		for i := len(items) - 1; i >= 0; i-- {
+			it := items[i]
+			hasItems = true
+			if it.LocalPath != "" {
+				renderedFiles[it.LocalPath] = true
 			}
-			info, err := fi.Info()
-			if err != nil {
-				continue
+
+			badgeClass := "badge-completed"
+			switch it.Status {
+			case download.StatusActive:
+				badgeClass = "badge-active"
+			case download.StatusFailed:
+				badgeClass = "badge-failed"
+			case download.StatusCanceled:
+				badgeClass = "badge-canceled"
 			}
-			count++
-			sizeStr := formatFileSize(info.Size())
-			modStr := info.ModTime().Format("Jan 02, 2006 15:04")
-			fullPath := filepath.Join(dir, fi.Name())
-			fileURL := "file://" + fullPath
-			b.WriteString(fmt.Sprintf(`
+
+			b.WriteString(`<div class="list-item">`)
+			b.WriteString(fmt.Sprintf(`<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <span class="list-title">%s</span>
+          <span class="badge %s" style="margin-left: 8px;">%s</span>
+        </div>`, html.EscapeString(it.Filename), badgeClass, html.EscapeString(string(it.Status))))
+
+			// Action buttons on the right
+			b.WriteString(`<div>`)
+			if it.Status == download.StatusActive {
+				b.WriteString(fmt.Sprintf(`<a class="btn-action danger" href="goosie://downloads?action=cancel&id=%s">Cancel</a>`, html.EscapeString(it.ID)))
+			} else if it.Status == download.StatusCompleted && it.LocalPath != "" {
+				b.WriteString(fmt.Sprintf(`<a class="btn-action" href="goosie://downloads?action=open&path=%s">Open</a>`, url.QueryEscape(it.LocalPath)))
+				b.WriteString(fmt.Sprintf(`<a class="btn-action secondary" href="goosie://downloads?action=reveal&path=%s">Show in Finder</a>`, url.QueryEscape(it.LocalPath)))
+			}
+			b.WriteString(`</div></div>`)
+
+			// Meta info
+			meta := it.FormattedSize()
+			if it.Status == download.StatusActive {
+				if it.Speed() > 0 {
+					meta += fmt.Sprintf(" &bull; %s", it.FormattedSpeed())
+				}
+				if pct := it.Percent(); pct >= 0 {
+					meta += fmt.Sprintf(" &bull; %.0f%%", pct)
+				}
+			} else if !it.EndTime.IsZero() {
+				meta += fmt.Sprintf(" &bull; %s", it.EndTime.Format("Jan 02, 2006 15:04"))
+			}
+			if it.Error != "" {
+				meta += fmt.Sprintf(" &bull; <span style='color: #c5221f;'>%s</span>", html.EscapeString(it.Error))
+			}
+			b.WriteString(fmt.Sprintf(`<div class="list-meta">%s</div>`, meta))
+
+			// Progress bar for active downloads
+			if it.Status == download.StatusActive {
+				pct := it.Percent()
+				if pct < 0 {
+					pct = 100 // indeterminate
+				}
+				b.WriteString(fmt.Sprintf(`<div class="progress-track"><div class="progress-bar" style="width: %.1f%%;"></div></div>`, pct))
+			}
+			b.WriteString(`</div>`)
+		}
+	}
+
+	// 2. Discover preexisting files on disk in the download directory
+	files, _ := os.ReadDir(dir)
+	for _, fi := range files {
+		if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
+			continue
+		}
+		fullPath := filepath.Join(dir, fi.Name())
+		if renderedFiles[fullPath] {
+			continue
+		}
+		info, err := fi.Info()
+		if err != nil {
+			continue
+		}
+		hasItems = true
+		sizeStr := formatFileSize(info.Size())
+		modStr := info.ModTime().Format("Jan 02, 2006 15:04")
+		b.WriteString(fmt.Sprintf(`
       <div class="list-item">
-        <div class="list-title"><a class="list-link" href="%s">%s</a></div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <span class="list-title">%s</span>
+            <span class="badge badge-completed" style="margin-left: 8px;">Saved</span>
+          </div>
+          <div>
+            <a class="btn-action" href="goosie://downloads?action=open&path=%s">Open</a>
+            <a class="btn-action secondary" href="goosie://downloads?action=reveal&path=%s">Show in Finder</a>
+          </div>
+        </div>
         <div class="list-meta">%s &bull; Modified %s &bull; <span style="font-family: monospace;">%s</span></div>
-      </div>`, html.EscapeString(fileURL), html.EscapeString(fi.Name()), sizeStr, modStr, html.EscapeString(fullPath)))
-		}
-		if count == 0 {
-			b.WriteString(`<div class="empty-state">No downloaded files found.</div>`)
-		}
+      </div>`, html.EscapeString(fi.Name()), url.QueryEscape(fullPath), url.QueryEscape(fullPath), sizeStr, modStr, html.EscapeString(fullPath)))
+	}
+
+	if !hasItems {
+		b.WriteString(`<div class="empty-state">No downloaded files found.</div>`)
 	}
 	b.WriteString(`</div>`)
 	return "Downloads", internalPageTemplate("downloads", "Downloads", b.String())
@@ -358,7 +511,7 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 	case "history":
 		return buildHistoryPageHTML(f)
 	case "downloads":
-		return buildDownloadsPageHTML(f)
+		return buildDownloadsPageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">

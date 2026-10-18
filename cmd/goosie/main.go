@@ -316,6 +316,7 @@ type framePath struct {
 	fonts      *raster.Fonts
 	bookmarks  *bookmarks.Store
 	history    *history.Store
+	downloads  *download.Manager
 	started    time.Time
 	navResults chan navResult
 	imgResults chan imgResult
@@ -434,6 +435,7 @@ func build(c config) (*framePath, error) {
 		fonts:      fonts,
 		bookmarks:  bookmarkStore,
 		history:    historyStore,
+		downloads:  download.NewManager(c.downloadDir),
 		navResults: make(chan navResult, 16),
 		imgResults: make(chan imgResult, 16),
 		zoom:       1.0,
@@ -485,6 +487,16 @@ func build(c config) (*framePath, error) {
 		}
 		f.toolbar.OnFindClose = func() {
 			f.closeFind()
+		}
+		f.toolbar.OnDownloads = func() {
+			f.navigateTab("goosie://downloads")
+		}
+		if f.downloads != nil {
+			f.downloads.Subscribe(func(it *download.Item) {
+				if f.toolbar != nil {
+					f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
+				}
+			})
 		}
 		f.toolbar.OnQuerySuggest = func(query string) []toolbar.Suggestion {
 			return f.querySuggestions(query)
@@ -690,7 +702,7 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, u string, viewportW, vi
 	if strings.HasPrefix(strings.ToLower(u), "goosie://") {
 		return f.renderInternalPage(ctx, u, viewportW, viewportH, scale)
 	}
-	return loadURLCtx(ctx, f.client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts)
+	return loadURLCtx(ctx, f.client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -721,6 +733,9 @@ func (f *framePath) applyNavResult(result navResult) {
 			f.toolbar.SetLoading(false)
 		}
 		fmt.Fprintf(os.Stderr, "goosie: saved %s\n", result.downloadPath)
+		if f.toolbar != nil && f.downloads != nil {
+			f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
+		}
 		return
 	}
 	if result.err != nil {
@@ -1695,7 +1710,7 @@ func (f *framePath) reopenTab() {
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
 // they land.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, dlMgr ...*download.Manager) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
 	}
@@ -1709,9 +1724,24 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	}
 	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
+		var itemID string
+		var mgr *download.Manager
+		if len(dlMgr) > 0 {
+			mgr = dlMgr[0]
+		}
+		if mgr != nil {
+			it := mgr.CreateItem(resp.URL, name, int64(len(resp.Body)))
+			itemID = it.ID
+		}
 		savedPath, saveErr := download.Save(downloadDir, name, resp.Body)
 		if saveErr != nil {
+			if mgr != nil && itemID != "" {
+				mgr.Fail(itemID, saveErr)
+			}
 			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", saveErr
+		}
+		if mgr != nil && itemID != "" {
+			mgr.Complete(itemID, savedPath)
 		}
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
 	}

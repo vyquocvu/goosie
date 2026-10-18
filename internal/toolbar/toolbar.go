@@ -110,6 +110,11 @@ type State struct {
 	SelectedSuggest int
 	OnQuerySuggest  func(string) []Suggestion
 
+	DownloadsCount   int
+	ActiveDownloads  int
+	DownloadProgress float64
+	OnDownloads      func()
+
 	fonts *raster.Fonts
 	scale int32
 	// dragging tracks an in-progress address-bar drag selection: press sets
@@ -195,6 +200,15 @@ func (s *State) SetError(err string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Error = err
+}
+
+// SetDownloadStats updates the toolbar download indicators.
+func (s *State) SetDownloadStats(activeCount, totalCount int, progress float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ActiveDownloads = activeCount
+	s.DownloadsCount = totalCount
+	s.DownloadProgress = progress
 }
 
 // GetFocus reports where keyboard input currently goes.
@@ -296,7 +310,8 @@ func (s *State) CursorAt(pos frame.Point) surface.Cursor {
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), lp),
 		rectContains(ButtonRect(ButtonForward, w), lp),
-		rectContains(ButtonRect(ButtonReload, w), lp):
+		rectContains(ButtonRect(ButtonReload, w), lp),
+		rectContains(ButtonRect(ButtonDownloads, w), lp):
 		return surface.CursorPointer
 	case rectContains(AddressBarRect(w), lp):
 		return surface.CursorText
@@ -578,6 +593,12 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 		s.dragging = false
 		if s.OnReload != nil {
 			cb := s.OnReload
+			fire(func() { cb() })
+		}
+	case rectContains(ButtonRect(ButtonDownloads, w), lp):
+		s.dragging = false
+		if s.OnDownloads != nil {
+			cb := s.OnDownloads
 			fire(func() { cb() })
 		}
 	case rectContains(AddressBarRect(w), lp):
@@ -902,6 +923,7 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	s.drawButton(backing, ButtonBack, w, clip, oy)
 	s.drawButton(backing, ButtonForward, w, clip, oy)
 	s.drawButton(backing, ButtonReload, w, clip, oy)
+	s.drawButton(backing, ButtonDownloads, w, clip, oy)
 	s.drawAddressBar(backing, w, clip, oy)
 
 	if s.Loading {
@@ -932,7 +954,59 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 		s.drawArrow(backing, ox, oyd, cx+4, cy, 1, sc, fg, clip)
 	case ButtonReload:
 		s.drawReload(backing, ox, oyd, cx, cy, sc, fg, clip)
+	case ButtonDownloads:
+		s.drawDownloads(backing, ox, oyd, cx, cy, sc, fg, clip)
 	}
+}
+
+func (s *State) drawDownloads(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color, clip frame.Rect) {
+	fcx := float64(ox) + float64(cx)*float64(sc)
+	fcy := float64(oy) + float64(cy)*float64(sc)
+	thick := 1.8 * float64(sc)
+	if thick < 1.5 {
+		thick = 1.5
+	}
+
+	// Tray: bottom horizontal bar and two upturned sides
+	trayHalfW := 6.0 * float64(sc)
+	trayBottomY := fcy + 4.5*float64(sc)
+	trayTopY := fcy + 1.5*float64(sc)
+	drawLineAA(backing, fcx-trayHalfW, trayBottomY, fcx+trayHalfW, trayBottomY, thick, c)
+	drawLineAA(backing, fcx-trayHalfW, trayTopY, fcx-trayHalfW, trayBottomY, thick, c)
+	drawLineAA(backing, fcx+trayHalfW, trayTopY, fcx+trayHalfW, trayBottomY, thick, c)
+
+	// Downward arrow stem
+	stemTopY := fcy - 6.0*float64(sc)
+	stemBottomY := fcy + 1.0*float64(sc)
+	drawLineAA(backing, fcx, stemTopY, fcx, stemBottomY, thick, c)
+
+	// Downward arrow head
+	tipY := fcy + 3.0*float64(sc)
+	baseY := fcy - 0.5*float64(sc)
+	headHalfW := 3.5 * float64(sc)
+	fillTriangleAA(backing, fcx, tipY, fcx-headHalfW, baseY, fcx+headHalfW, baseY, c)
+
+	// Active download progress indicator
+	if s.ActiveDownloads > 0 {
+		activeColor := frame.RGB(0, 120, 215)
+		barY := oy + (int32(ButtonSize)-3)*sc
+		barW := int32(ButtonSize-6) * sc
+		barX := ox + 3*sc
+		backing.FillRect(frame.Rect4(barX, barY, barX+barW, barY+2*sc), frame.RGB(210, 210, 215), nil)
+		p := s.DownloadProgress
+		if p <= 0 {
+			p = 100.0
+		}
+		fillW := int32(float64(barW) * (p / 100.0))
+		if fillW < 2*sc {
+			fillW = 2 * sc
+		}
+		if fillW > barW {
+			fillW = barW
+		}
+		backing.FillRect(frame.Rect4(barX, barY, barX+fillW, barY+2*sc), activeColor, nil)
+	}
+	_ = clip
 }
 
 func (s *State) drawArrow(backing *frame.Bitmap, ox, oy, x, y, dir, sc int32, c frame.Color, clip frame.Rect) {

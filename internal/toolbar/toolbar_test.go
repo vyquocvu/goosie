@@ -365,3 +365,50 @@ func TestToolbarSuggestionsHitAndDraw(t *testing.T) {
 	buf := frame.NewBitmap(800, 300)
 	state.DrawSuggestions(buf, 64)
 }
+
+func TestToolbarDownloadsButton(t *testing.T) {
+	state := NewState(800, nil)
+	downloadsClicked := false
+	state.OnDownloads = func() {
+		downloadsClicked = true
+	}
+
+	btnRect := ButtonRect(ButtonDownloads, 800)
+	midX := (btnRect.X0 + btnRect.X1) / 2
+	midY := (btnRect.Y0 + btnRect.Y1) / 2
+
+	// 1. Cursor check
+	cur := state.CursorAt(frame.Point{X: midX, Y: midY})
+	if cur != surface.CursorPointer {
+		t.Errorf("CursorAt downloads button = %v, want CursorPointer", cur)
+	}
+
+	// 2. Click fires OnDownloads callback
+	state.HandleClick(frame.Point{X: midX, Y: midY}, surface.ButtonLeft)
+	if !downloadsClicked {
+		t.Error("clicking downloads button did not fire OnDownloads callback")
+	}
+
+	// 3. Draw with active progress
+	state.SetDownloadStats(1, 2, 45.0)
+	buf := frame.NewBitmap(800, 40)
+	state.Draw(buf, 0)
+
+	// Check that active blue progress bar is drawn on the downloads button
+	hasBluePixel := false
+	for y := btnRect.Y0; y < btnRect.Y1; y++ {
+		for x := btnRect.X0; x < btnRect.X1; x++ {
+			idx := int(y)*buf.Stride + int(x)*4
+			if idx+3 < len(buf.RGBA) {
+				r, g, b := buf.RGBA[idx], buf.RGBA[idx+1], buf.RGBA[idx+2]
+				if r == 0 && g == 120 && b == 215 {
+					hasBluePixel = true
+					break
+				}
+			}
+		}
+	}
+	if !hasBluePixel {
+		t.Error("expected blue active download progress bar in downloads button")
+	}
+}
