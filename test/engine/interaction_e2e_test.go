@@ -504,3 +504,142 @@ func TestInteraction_DirectEventDispatch(t *testing.T) {
 		t.Error("Go-level click listener did not fire")
 	}
 }
+
+func TestFormSubmitOnEnter(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html><body>
+<form id="f1" action="/search" method="GET">
+  <input type="text" id="q" name="query" value="goosie browser">
+</form>
+</body></html>`
+	sess, _ := newJSSession(t, html)
+
+	// Focus the input
+	focused := false
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node != nil && obj.Node.GetAttribute("id") == "q" {
+			x0, y0, x1, y1 := obj.BorderRect()
+			focused = sess.FocusControl((x0+x1)/2, (y0+y1)/2)
+			break
+		}
+	}
+	if !focused {
+		t.Fatal("failed to focus input")
+	}
+
+	// Press Enter (EditEnter)
+	changed := sess.Edit(engine.EditEnter, 0)
+	if !changed {
+		t.Fatal("expected EditEnter on input to trigger submit")
+	}
+
+	// Pop submitted form
+	sub, ok := sess.PopSubmittedForm()
+	if !ok || sub == nil {
+		t.Fatal("expected pending form submission")
+	}
+	if sub.Action != "/search" {
+		t.Errorf("expected action /search, got %q", sub.Action)
+	}
+	if sub.Method != "GET" {
+		t.Errorf("expected method GET, got %q", sub.Method)
+	}
+	if sub.Encoded != "query=goosie+browser" {
+		t.Errorf("expected encoded query=goosie+browser, got %q", sub.Encoded)
+	}
+
+	// Verify pop cleared the submission
+	if _, ok := sess.PopSubmittedForm(); ok {
+		t.Error("expected PopSubmittedForm to clear pending submission")
+	}
+}
+
+func TestFormSubmitButtonClick(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html><body>
+<form id="login" action="https://auth.example/login" method="POST">
+  <input type="text" name="user" value="alice">
+  <input type="submit" id="btn-submit" value="Sign In">
+</form>
+</body></html>`
+	sess, _ := newJSSession(t, html)
+
+	// Click submit button
+	if !clickCenter(t, sess, "btn-submit") {
+		t.Fatal("failed to click submit button")
+	}
+
+	sub, ok := sess.PopSubmittedForm()
+	if !ok || sub == nil {
+		t.Fatal("expected submitted form from submit button click")
+	}
+	if sub.Action != "https://auth.example/login" {
+		t.Errorf("expected action https://auth.example/login, got %q", sub.Action)
+	}
+	if sub.Method != "POST" {
+		t.Errorf("expected method POST, got %q", sub.Method)
+	}
+	if sub.Encoded != "user=alice" {
+		t.Errorf("expected encoded user=alice, got %q", sub.Encoded)
+	}
+}
+
+func TestFormReset(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html><body>
+<form id="f1">
+  <input type="text" id="inp" name="title" value="Initial">
+  <input type="checkbox" id="chk" name="agree" checked>
+</form>
+</body></html>`
+	sess, _ := newJSSession(t, html)
+
+	var formNode, inpNode, chkNode *dom.Node
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node == nil {
+			continue
+		}
+		if obj.Node.GetAttribute("id") == "f1" {
+			formNode = obj.Node
+		} else if obj.Node.GetAttribute("id") == "inp" {
+			inpNode = obj.Node
+		} else if obj.Node.GetAttribute("id") == "chk" {
+			chkNode = obj.Node
+		}
+	}
+	if formNode == nil || inpNode == nil || chkNode == nil {
+		t.Fatal("nodes not found")
+	}
+
+	// Focus inp and edit it with EditRune
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node == inpNode {
+			x0, y0, x1, y1 := obj.BorderRect()
+			sess.FocusControl((x0+x1)/2, (y0+y1)/2)
+			break
+		}
+	}
+	sess.Edit(engine.EditRune, 'X')
+
+	// Click checkbox to toggle off
+	clickCenter(t, sess, "chk")
+
+	if inpNode.GetAttribute("value") == "Initial" {
+		t.Errorf("expected input value to be modified before reset")
+	}
+	if chkNode.HasAttribute("checked") {
+		t.Errorf("expected checkbox to be unchecked before reset")
+	}
+
+	// Reset form
+	sess.ResetForm(formNode)
+
+	// Inp should be restored to Initial
+	if inpNode.GetAttribute("value") != "Initial" {
+		t.Errorf("expected input to reset to 'Initial', got %q", inpNode.GetAttribute("value"))
+	}
+	// Chk should be restored to checked
+	if !chkNode.HasAttribute("checked") {
+		t.Errorf("expected checkbox to reset to checked")
+	}
+}

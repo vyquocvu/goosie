@@ -119,11 +119,12 @@ type Session struct {
 	// the caret: painted but not yet the value. focusValue records the
 	// control's value when it gained focus so blur can fire a change event
 	// if the value was modified during the focus session.
-	focus      *dom.Node
-	hovered    *dom.Node
-	caret      int
-	marked     string
-	focusValue string
+	focus         *dom.Node
+	hovered       *dom.Node
+	caret         int
+	marked        string
+	focusValue    string
+	submittedForm *FormSubmission
 
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
@@ -1367,25 +1368,118 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 	return nil
 }
 
+// FormSubmission represents a form ready to be dispatched by the browser host.
+type FormSubmission struct {
+	Action  string
+	Method  string
+	Data    []FormData
+	Encoded string
+}
+
 // SubmitForm fires a cancelable "submit" event on the form, then collects form
-// data and encodes it. The actual navigation is the caller's responsibility;
-// the method stores the submission details for the host to retrieve.
+// data and encodes it. The submission details are stored on the session for
+// the host to retrieve via PopSubmittedForm.
 func (s *Session) SubmitForm(form *dom.Node) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.submitFormLocked(form)
+}
+
+func (s *Session) submitFormLocked(form *dom.Node) {
+	if form == nil {
+		return
+	}
 	ev := dom.NewEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
-	_ = CollectFormData(form)
-	_ = FormMethod(form)
-	_ = FormAction(form)
-	// Navigation is the caller's responsibility.
+	data := CollectFormData(form)
+	method := FormMethod(form)
+	action := FormAction(form)
+	encoded := EncodeFormURLEncoded(data)
+
+	s.submittedForm = &FormSubmission{
+		Action:  action,
+		Method:  method,
+		Data:    data,
+		Encoded: encoded,
+	}
 }
 
-// ResetForm resets the form controls to their default values.
-// Currently a placeholder for future implementation.
+// PopSubmittedForm returns and clears the pending form submission, if any.
+func (s *Session) PopSubmittedForm() (*FormSubmission, bool) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.submittedForm == nil {
+		return nil, false
+	}
+	sub := s.submittedForm
+	s.submittedForm = nil
+	return sub, true
+}
+
+// ResetForm resets the form controls to their default values and fires a "reset" event.
 func (s *Session) ResetForm(form *dom.Node) {
-	// Placeholder: reset logic to be implemented.
-	_ = form
+	if form == nil {
+		return
+	}
+	ev := dom.NewEvent("reset", true, true)
+	if !dom.DispatchEvent(form, ev) {
+		return // preventDefault was called
+	}
+
+	var resetNode func(n *dom.Node)
+	resetNode = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.Element() {
+			switch n.Data {
+			case "input":
+				typ := strings.ToLower(n.GetAttribute("type"))
+				switch typ {
+				case "checkbox", "radio":
+					if n.HasAttribute("data-default-checked") {
+						if n.GetAttribute("data-default-checked") == "true" {
+							n.SetAttribute("checked", "")
+						} else {
+							n.RemoveAttribute("checked")
+						}
+					} else if n.HasAttribute("checked") {
+						n.SetAttribute("checked", "")
+					} else {
+						n.RemoveAttribute("checked")
+					}
+				case "submit", "reset", "button", "image":
+					// No-op
+				default:
+					defVal := ""
+					if n.HasAttribute("data-default-value") {
+						defVal = n.GetAttribute("data-default-value")
+					} else if n.HasAttribute("defaultValue") {
+						defVal = n.GetAttribute("defaultValue")
+					} else {
+						defVal = n.GetAttribute("value")
+					}
+					n.SetAttribute("value", defVal)
+				}
+			case "textarea":
+				defVal := ""
+				if n.HasAttribute("data-default-value") {
+					defVal = n.GetAttribute("data-default-value")
+				} else if n.HasAttribute("defaultValue") {
+					defVal = n.GetAttribute("defaultValue")
+				} else {
+					defVal = n.TextContent()
+				}
+				s.setControlValue(n, defVal)
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			resetNode(c)
+		}
+	}
+	resetNode(form)
 }
 
 // Match is one find result: the document-space rect of an occurrence of the

@@ -1299,14 +1299,28 @@ func (f *framePath) docPoint(contentX, contentY int32) (float32, float32) {
 		float32(contentY)/effectiveDPR + float32(vp.Offset.Y)/effectiveDPR
 }
 
-// focusClick focuses or blurs a form control under a content-area click and
-// repaints when focus state changed.
+// focusClick focuses or blurs a form control under a content-area click, handles
+// activatable controls (checkbox, radio, submit/reset button), and repaints.
 func (f *framePath) focusClick(contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
 		return false
 	}
 	dx, dy := f.docPoint(contentX, contentY)
+
+	// Check if click hit an activatable control (checkbox, radio, submit button, reset button)
+	if tab.Session().ClickAt(dx, dy) {
+		if sub, ok := tab.Session().PopSubmittedForm(); ok {
+			f.handleFormSubmission(tab, sub)
+			return true
+		}
+		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+		}
+		f.repaintTab(tab, frame.Rect{})
+		return true
+	}
+
 	if !tab.Session().FocusControl(dx, dy) {
 		return false
 	}
@@ -1465,6 +1479,10 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	changed := tab.Session().Edit(action, key)
+	if sub, ok := tab.Session().PopSubmittedForm(); ok {
+		f.handleFormSubmission(tab, sub)
+		return true
+	}
 	if changed {
 		if action == engine.EditEscape {
 			f.setWindowIME(false)
@@ -1476,6 +1494,30 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 	f.repaintTab(tab, frame.Rect{})
 	return true
+}
+
+// handleFormSubmission dispatches a form submission by resolving action and encoding parameters.
+func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmission) {
+	if tab == nil || sub == nil {
+		return
+	}
+	targetURL := resolveHref(tab.URL(), sub.Action)
+	if targetURL == "" {
+		targetURL = tab.URL()
+	}
+	method := strings.ToUpper(sub.Method)
+	if method == "" || method == "GET" {
+		if sub.Encoded != "" {
+			if strings.Contains(targetURL, "?") {
+				targetURL = targetURL + "&" + sub.Encoded
+			} else {
+				targetURL = targetURL + "?" + sub.Encoded
+			}
+		}
+		f.navigateTab(targetURL)
+	} else if method == "POST" {
+		f.navigateTab(targetURL)
+	}
 }
 
 func (f *framePath) handleZoom(delta float64) {

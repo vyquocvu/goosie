@@ -15,7 +15,7 @@ import (
 // svgNamespace is the NSSVG constant value (defined in internal/dom).
 // We duplicate it here to avoid importing dom from paint, which would
 // violate the import boundary rules.
-const svgNamespace = 2
+const svgNamespace = 1
 
 // Builder walks a layout arena and emits display commands into a List.
 //
@@ -550,10 +550,22 @@ func (b *Builder) paintImage(obj *layout.Object, opacity float32, clip *frame.Re
 // polygon, polyline, path) using the element's geometry attributes and
 // presentation style. Shapes are rasterized into fill/stroke commands.
 func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
-	if obj.Node == nil || obj.Node.Namespace != 2 { // NSSVG
+	if obj.Node == nil || obj.Node.Namespace != svgNamespace { // NSSVG
 		return
 	}
-	x0, y0, x1, y1 := obj.ContentRect()
+	// Locate enclosing <svg> element to obtain viewport origin and bounds.
+	svgObj := obj
+	for svgObj != nil && (svgObj.Node == nil || svgObj.Node.Data != "svg") {
+		if svgObj.Parent == 0 {
+			svgObj = nil
+			break
+		}
+		svgObj = b.arena.Get(svgObj.Parent)
+	}
+	if svgObj == nil {
+		return
+	}
+	x0, y0, x1, y1 := svgObj.ContentRect()
 	if x1 <= x0 || y1 <= y0 {
 		return
 	}
@@ -581,21 +593,37 @@ func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
 	}
 }
 
-// parseSVGPaint returns the fill/stroke color for an SVG element, checking
-// the computed style first, then the presentation attribute.
+// parseSVGPaint returns the fill/stroke color for an SVG element. It checks
+// presentation attributes, inline style declarations, and currentColor.
 func (b *Builder) parseSVGPaint(obj *layout.Object, attr, fallback string) frame.Color {
-	if obj.Style != nil && obj.Style.Color.A > 0 {
-		return convertColor(obj.Style.Color)
+	if obj.Node == nil {
+		return 0
 	}
 	v := obj.Node.GetAttribute(attr)
 	if v == "" {
+		if styleAttr := obj.Node.GetAttribute("style"); styleAttr != "" {
+			for _, decl := range strings.Split(styleAttr, ";") {
+				parts := strings.SplitN(decl, ":", 2)
+				if len(parts) == 2 && strings.TrimSpace(parts[0]) == attr {
+					v = strings.TrimSpace(parts[1])
+					break
+				}
+			}
+		}
+	}
+	if v == "" {
 		v = fallback
 	}
-	if v == "none" {
+	if v == "" || v == "none" {
 		return 0
 	}
-	c := parseSVGColor(v)
-	return c
+	if v == "currentColor" {
+		if obj.Style != nil {
+			return convertColor(obj.Style.Color)
+		}
+		return frame.RGB(0, 0, 0)
+	}
+	return parseSVGColor(v)
 }
 
 // parseSVGLength parses an SVG length attribute, returning the value in
@@ -615,53 +643,14 @@ func (b *Builder) parseSVGLength(obj *layout.Object, attr string, fallback float
 	return float32(f)
 }
 
-// parseSVGColor parses a simple CSS color value.
+// parseSVGColor parses a CSS color string using css.ParseColor.
 func parseSVGColor(s string) frame.Color {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if s == "" || s == "none" {
 		return 0
 	}
-	// Handle hex colors.
-	if len(s) == 4 && s[0] == '#' {
-		r, _ := strconv.ParseUint(s[1:2]+s[1:2], 16, 8)
-		g, _ := strconv.ParseUint(s[2:3]+s[2:3], 16, 8)
-		b, _ := strconv.ParseUint(s[3:4]+s[3:4], 16, 8)
-		return frame.RGBA(uint8(r), uint8(g), uint8(b), 255)
-	}
-	if len(s) == 7 && s[0] == '#' {
-		r, _ := strconv.ParseUint(s[1:3], 16, 8)
-		g, _ := strconv.ParseUint(s[3:5], 16, 8)
-		b, _ := strconv.ParseUint(s[5:7], 16, 8)
-		return frame.RGBA(uint8(r), uint8(g), uint8(b), 255)
-	}
-	// Named colors.
-	switch s {
-	case "black":
-		return frame.RGB(0, 0, 0)
-	case "white":
-		return frame.RGB(255, 255, 255)
-	case "red":
-		return frame.RGB(255, 0, 0)
-	case "green":
-		return frame.RGB(0, 128, 0)
-	case "blue":
-		return frame.RGB(0, 0, 255)
-	case "yellow":
-		return frame.RGB(255, 255, 0)
-	case "cyan":
-		return frame.RGB(0, 255, 255)
-	case "magenta":
-		return frame.RGB(255, 0, 255)
-	case "gray", "grey":
-		return frame.RGB(128, 128, 128)
-	case "orange":
-		return frame.RGB(255, 165, 0)
-	case "purple":
-		return frame.RGB(128, 0, 128)
-	case "pink":
-		return frame.RGB(255, 192, 203)
-	case "brown":
-		return frame.RGB(165, 42, 42)
+	if c, ok := css.ParseColor(s); ok {
+		return frame.RGBA(c.R, c.G, c.B, c.A)
 	}
 	return 0
 }
@@ -675,7 +664,7 @@ func (b *Builder) paintSVGRect(obj *layout.Object, bx0, by0, bx1, by1 float32, f
 	ry := b.parseSVGLengthAttr(obj, "ry", rx)
 
 	scale := b.scale
-	rect := frame.RectF4(bx0+x*scale, by0+y*scale, bx0+(x+w)*scale, by0+(y+h)*scale).ToDevice(scale)
+	rect := frame.RectF4(bx0+x, by0+y, bx0+x+w, by0+y+h).ToDevice(scale)
 	if rect.Empty() {
 		return
 	}
@@ -696,8 +685,8 @@ func (b *Builder) paintSVGCircle(obj *layout.Object, bx0, by0, bx1, by1 float32,
 		return
 	}
 	scale := b.scale
-	cxp := bx0 + cx*scale
-	cyp := by0 + cy*scale
+	cxp := (bx0 + cx) * scale
+	cyp := (by0 + cy) * scale
 	rp := r * scale
 
 	if fill.A() > 0 {
@@ -717,8 +706,8 @@ func (b *Builder) paintSVGEllipse(obj *layout.Object, bx0, by0, bx1, by1 float32
 		return
 	}
 	scale := b.scale
-	cxp := bx0 + cx*scale
-	cyp := by0 + cy*scale
+	cxp := (bx0 + cx) * scale
+	cyp := (by0 + cy) * scale
 	rxp := rx * scale
 	ryp := ry * scale
 
@@ -739,7 +728,7 @@ func (b *Builder) paintSVGLine(obj *layout.Object, bx0, by0, bx1, by1 float32, s
 		return
 	}
 	scale := b.scale
-	b.paintSVGLineSegment(bx0+x1*scale, by0+y1*scale, bx0+x2*scale, by0+y2*scale, stroke, strokeW, opacity)
+	b.paintSVGLineSegment((bx0+x1)*scale, (by0+y1)*scale, (bx0+x2)*scale, (by0+y2)*scale, stroke, strokeW, opacity)
 }
 
 func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, open bool, opacity float32) {
@@ -752,10 +741,10 @@ func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32
 		return
 	}
 	scale := b.scale
-	// Offset points to the box origin.
+	// Offset points to the SVG box origin and scale to device pixels.
 	for i := range points {
-		points[i][0] = bx0 + points[i][0]*scale
-		points[i][1] = by0 + points[i][1]*scale
+		points[i][0] = (bx0 + points[i][0]) * scale
+		points[i][1] = (by0 + points[i][1]) * scale
 	}
 
 	if !open && fill.A() > 0 {
@@ -776,13 +765,13 @@ func (b *Builder) paintSVGPath(obj *layout.Object, bx0, by0, bx1, by1 float32, f
 		return
 	}
 	scale := b.scale
-	// Offset to box origin.
+	// Offset to SVG box origin and scale to device pixels.
 	for i := range segments {
 		for j := range segments[i] {
 			if j%2 == 0 {
-				segments[i][j] = bx0 + segments[i][j]*scale
+				segments[i][j] = (bx0 + segments[i][j]) * scale
 			} else {
-				segments[i][j] = by0 + segments[i][j]*scale
+				segments[i][j] = (by0 + segments[i][j]) * scale
 			}
 		}
 	}
@@ -814,16 +803,27 @@ func (b *Builder) parseSVGLengthAttr(obj *layout.Object, attr string, fallback f
 }
 
 func (b *Builder) paintSVGStrokeRect(rect frame.Rect, color frame.Color, width, rx, ry float32, opacity float32) {
-	hw := width / 2
+	sw := int32(math.Ceil(float64(width)))
+	if sw < 1 {
+		sw = 1
+	}
+	w := rect.W()
+	h := rect.H()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if sw*2 >= w || sw*2 >= h {
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity})
+		return
+	}
 	// Top
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+int32(width)), Color: color, Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+sw), Color: color, Opacity: opacity})
 	// Bottom
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-int32(width), rect.X1, rect.Y1), Color: color, Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-sw, rect.X1, rect.Y1), Color: color, Opacity: opacity})
 	// Left
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X0+int32(width), rect.Y1), Color: color, Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0+sw, rect.X0+sw, rect.Y1-sw), Color: color, Opacity: opacity})
 	// Right
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-int32(width), rect.Y0, rect.X1, rect.Y1), Color: color, Opacity: opacity})
-	_ = hw
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-sw, rect.Y0+sw, rect.X1, rect.Y1-sw), Color: color, Opacity: opacity})
 	_ = rx
 	_ = ry
 }

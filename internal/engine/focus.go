@@ -189,12 +189,18 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		}
 		return false
 	case EditEnter:
-		if s.focus.DataAtom != dom.AtomTextarea {
+		if s.focus.DataAtom == dom.AtomTextarea {
+			if insert("\n") {
+				dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+				return true
+			}
 			return false
 		}
-		if insert("\n") {
-			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
-			return true
+		if s.focus.DataAtom == dom.AtomInput {
+			if form := FindForm(s.focus); form != nil {
+				s.submitFormLocked(form)
+				return true
+			}
 		}
 		return false
 	case EditBackspace:
@@ -257,6 +263,9 @@ func (s *Session) controlValue(n *dom.Node) string {
 
 func (s *Session) setControlValue(n *dom.Node, v string) {
 	if n.DataAtom == dom.AtomTextarea {
+		if !n.HasAttribute("data-default-value") {
+			n.SetAttribute("data-default-value", s.controlValue(n))
+		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			if c.Text() {
 				c.DataContent = v
@@ -265,6 +274,9 @@ func (s *Session) setControlValue(n *dom.Node, v string) {
 		}
 		n.AppendChild(&dom.Node{Type: dom.NodeText, DataContent: v})
 		return
+	}
+	if !n.HasAttribute("data-default-value") {
+		n.SetAttribute("data-default-value", n.GetAttribute("value"))
 	}
 	n.SetAttribute("value", v)
 }
@@ -345,11 +357,25 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 	typ := strings.ToLower(n.GetAttribute("type"))
 	switch typ {
 	case "checkbox":
+		if !n.HasAttribute("data-default-checked") {
+			if IsChecked(n) {
+				n.SetAttribute("data-default-checked", "true")
+			} else {
+				n.SetAttribute("data-default-checked", "false")
+			}
+		}
 		SetChecked(n, !IsChecked(n))
 		dom.DispatchEvent(n, dom.NewEvent("change", true, true))
 		dom.DispatchEvent(n, dom.NewEvent("input", true, true))
 		return true
 	case "radio":
+		if !n.HasAttribute("data-default-checked") {
+			if IsChecked(n) {
+				n.SetAttribute("data-default-checked", "true")
+			} else {
+				n.SetAttribute("data-default-checked", "false")
+			}
+		}
 		// Uncheck all radios in the same group (same name, same form).
 		name := n.GetAttribute("name")
 		// Walk up to find the form ancestor.
