@@ -558,6 +558,10 @@ type ComputedStyle struct {
 	ScrollMarginRight    float32
 	ScrollMarginBottom   float32
 	ScrollMarginLeft     float32
+
+	// CSS Text Decoration Level 4
+	TextUnderlineOffset     float32
+	TextDecorationThickness float32
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -2296,6 +2300,8 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 		cs.Quotes = parent.Quotes
 	}
 	cs.AccentColor = parent.AccentColor
+	cs.TextUnderlineOffset = parent.TextUnderlineOffset
+	cs.TextDecorationThickness = parent.TextDecorationThickness
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3230,7 +3236,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(value)
 	case "background-origin":
 		cs.BackgroundOrigin = parseBackgroundBox(value, false)
-	case "background-clip":
+	case "background-clip", "-webkit-background-clip":
 		cs.BackgroundClip = parseBackgroundBox(value, true)
 	case "background-size":
 		parseBackgroundSize(cs, value)
@@ -3270,6 +3276,19 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.TextTransform = value
 	case "text-decoration":
 		cs.TextDecoration = parseTextDecoration(value)
+	case "text-underline-offset":
+		if strings.TrimSpace(strings.ToLower(value)) == "auto" {
+			cs.TextUnderlineOffset = 0
+		} else {
+			cs.TextUnderlineOffset = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+	case "text-decoration-thickness":
+		vLower := strings.TrimSpace(strings.ToLower(value))
+		if vLower == "auto" || vLower == "from-font" {
+			cs.TextDecorationThickness = 0
+		} else {
+			cs.TextDecorationThickness = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 	case "white-space":
 		cs.WhiteSpace = parseWhiteSpace(value)
 	case "word-spacing":

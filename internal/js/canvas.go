@@ -431,6 +431,22 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return res
 	})
 
+	// Gradient methods
+	_ = obj.Set("createLinearGradient", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0, 0)
+		return r.newCanvasGradient("linear", args)
+	})
+
+	_ = obj.Set("createRadialGradient", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0)
+		return r.newCanvasGradient("radial", args)
+	})
+
+	_ = obj.Set("createConicGradient", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0)
+		return r.newCanvasGradient("conic", args)
+	})
+
 	// Transform methods
 	_ = obj.Set("save", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
@@ -822,6 +838,57 @@ func (r *Runtime) setupCanvas() {
 	}
 
 	r.setupPath2D()
+	r.setupCanvasGradient()
+}
+
+type canvasGradientData struct {
+	mu    sync.Mutex
+	kind  string // "linear", "radial", "conic"
+	args  []float64
+	stops []gradientStop
+}
+
+type gradientStop struct {
+	offset float64
+	color  string
+}
+
+func (r *Runtime) newCanvasGradient(kind string, args []float64) *goja.Object {
+	gData := &canvasGradientData{
+		kind: kind,
+		args: args,
+	}
+	obj := r.vm.NewObject()
+	_ = obj.Set("__is_gradient__", true)
+	_ = obj.Set("__kind__", kind)
+	_ = obj.Set("addColorStop", func(call goja.FunctionCall) goja.Value {
+		offset := 0.0
+		color := ""
+		if len(call.Arguments) >= 1 {
+			offset = call.Arguments[0].ToFloat()
+		}
+		if len(call.Arguments) >= 2 {
+			color = call.Arguments[1].String()
+		}
+		gData.mu.Lock()
+		gData.stops = append(gData.stops, gradientStop{offset: offset, color: color})
+		gData.mu.Unlock()
+		return goja.Undefined()
+	})
+	return obj
+}
+
+func (r *Runtime) setupCanvasGradient() {
+	ctor := func(call goja.ConstructorCall) *goja.Object {
+		return r.newCanvasGradient("linear", nil)
+	}
+	ctorVal := r.vm.ToValue(ctor)
+	_ = r.vm.Set("CanvasGradient", ctorVal)
+	if win := r.vm.Get("window"); win != nil {
+		if winObj, ok := win.(*goja.Object); ok {
+			_ = winObj.Set("CanvasGradient", ctorVal)
+		}
+	}
 }
 
 type path2DData struct {

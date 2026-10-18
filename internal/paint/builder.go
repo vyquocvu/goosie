@@ -2506,10 +2506,17 @@ func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle
 	// pixel thick, and scales both with the font.
 	if s.TextDecoration&style.TextDecorationUnderline != 0 && !isBlankText(text) {
 		thick := (s.FontSize * b.scale) / 16
+		if s.TextDecorationThickness > 0 {
+			thick = s.TextDecorationThickness * b.scale
+		}
 		if thick < 1 {
 			thick = 1
 		}
-		y0 := baseline + int32(thick)
+		offset := float32(thick)
+		if s.TextUnderlineOffset != 0 {
+			offset = s.TextUnderlineOffset * b.scale
+		}
+		y0 := baseline + int32(offset)
 		b.list.Append(DisplayCmd{
 			Kind:    CmdFill,
 			Rect:    frame.Rect4(rect.X0, y0, rect.X1, y0+int32(thick)),
