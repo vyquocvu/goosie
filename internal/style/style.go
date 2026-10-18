@@ -537,6 +537,10 @@ type ComputedStyle struct {
 	AnimationDirection css.AnimationDirection
 	AnimationFillMode  css.AnimationFillMode
 
+	// AccentColor is the accent color for form controls like checkboxes and radios.
+	// CSS Basic UI Module Level 4: if A > 0, use this color; zero means default browser color.
+	AccentColor css.Color
+
 	// Container query properties (CSS Containment Level 3).
 	ContainerType string // "normal", "size", "inline-size"
 	ContainerName string // custom-ident or space-separated identifiers
@@ -658,6 +662,7 @@ func DefaultStyle() ComputedStyle {
 		ShapeOutside:           "none",
 		ShapeMargin:            0,
 		Quotes:                 []string{"“", "”", "‘", "’"},
+		AccentColor:            css.Color{}, // Default/zero means browser's default accent color
 		AspectRatio:            0,
 	}
 }
@@ -786,6 +791,13 @@ rt { display: inline-block; font-size: 50%; line-height: 1; vertical-align: supe
 rp { display: none; }
 picture { display: inline; }
 source { display: none; }
+/* MathML Core Foundation - basic display rules for MathML elements */
+math { display: inline-block; }
+mrow { display: inline; }
+mfrac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; }
+msup, msub { display: inline; font-size: 0.8em; }
+msqrt { display: inline-block; }
+
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
@@ -2265,6 +2277,7 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	if len(parent.Quotes) > 0 {
 		cs.Quotes = parent.Quotes
 	}
+	cs.AccentColor = parent.AccentColor
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3049,6 +3062,13 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "color":
 		if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
 			cs.Color = c
+		}
+	case "accent-color":
+		v := strings.TrimSpace(strings.ToLower(value))
+		if v == "auto" {
+			cs.AccentColor = css.Color{}
+		} else if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
+			cs.AccentColor = c
 		}
 	case "background-color":
 		cs.BackgroundColor = parseColorValueWithScheme(value, cs.scheme())

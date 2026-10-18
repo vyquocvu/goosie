@@ -1110,17 +1110,23 @@ func (p *parser) mediaRangeHolds(part string) (holds bool, ok bool) {
 		if !okLo || !okHi {
 			return false, false
 		}
-		return p.widthSatisfies(ops[0], lo) && p.widthSatisfies(ops[1], hi), true
+		return p.widthSatisfies(flipOp(ops[0]), lo) && p.widthSatisfies(ops[1], hi), true
 	}
 	return false, false
 }
 
 func (p *parser) widthSatisfies(op string, px float32) bool {
 	switch op {
-	case "<", "<=":
+	case "<":
+		return p.mediaWidth < px
+	case "<=":
 		return p.mediaWidth <= px
-	case ">", ">=":
+	case ">":
+		return p.mediaWidth > px
+	case ">=":
 		return p.mediaWidth >= px
+	case "=":
+		return p.mediaWidth == px
 	}
 	return false
 }

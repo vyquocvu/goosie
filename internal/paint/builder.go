@@ -2036,6 +2036,10 @@ func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity flo
 	// If checked, draw a checkmark.
 	if obj.Node != nil && obj.Node.HasAttribute("checked") {
 		checkColor := frame.RGB(0, 0, 0)
+		// Apply accent-color if set and has alpha > 0
+		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
+			checkColor = frame.RGBA(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B, 255)
+		}
 		// Simple checkmark: a small V shape drawn as filled pixels.
 		cx := (rect.X0 + rect.X1) / 2
 		cy := (rect.Y0 + rect.Y1) / 2
@@ -2089,6 +2093,10 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 	// If checked, draw a filled dot in the center.
 	if obj.Node != nil && obj.Node.HasAttribute("checked") {
 		dotColor := frame.RGB(0, 0, 0)
+		// Apply accent-color if set and has alpha > 0
+		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
+			dotColor = frame.RGBA(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B, 255)
+		}
 		dotR := rx / 3
 		if dotR < 1 {
 			dotR = 1
