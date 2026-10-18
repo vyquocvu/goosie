@@ -42,6 +42,14 @@ type FontFaceRule struct {
 	Declarations []Declaration
 }
 
+// FontPaletteValuesRule is one @font-palette-values rule.
+type FontPaletteValuesRule struct {
+	Name           string
+	FontFamily     string
+	BasePalette    string
+	OverrideColors map[int]string
+}
+
 // Stylesheet is a parsed CSS stylesheet.
 type Stylesheet struct {
 	Rules     []Rule
@@ -52,6 +60,8 @@ type Stylesheet struct {
 	Layers []string
 	// Properties holds parsed @property descriptors from this stylesheet.
 	Properties []dom.PropertyDefinition
+	// FontPalettes holds parsed @font-palette-values rules from this stylesheet.
+	FontPalettes []FontPaletteValuesRule
 }
 
 // MediaOptions configures environment features for media query evaluation.
@@ -210,6 +220,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseKeyframesRule(sheet)
 			case "property":
 				p.parsePropertyRule(sheet)
+			case "font-palette-values":
+				p.parseFontPaletteValuesRule(sheet)
 			case "starting-style":
 				p.parseStartingStyleRule(sheet)
 			default:

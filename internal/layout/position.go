@@ -74,6 +74,13 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 			placeOutOfFlow(a, id, icb, anchors)
 			obj = a.Get(id)
 		}
+		if s.OffsetPath != "" && s.OffsetPath != "none" && s.OffsetDistance != 0 {
+			dx, dy := computeMotionOffset(s.OffsetPath, s.OffsetDistance)
+			if dx != 0 || dy != 0 {
+				shiftSubtree(a, id, dx, dy)
+				obj = a.Get(id)
+			}
+		}
 	}
 
 	childCB := cb

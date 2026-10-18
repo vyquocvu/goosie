@@ -1,6 +1,7 @@
 package css
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -172,4 +173,65 @@ func (p *parser) parseStartingStyleRule(sheet *Stylesheet) {
 		sheet.Rules = append(sheet.Rules, innerSheet.Rules[i])
 	}
 	sheet.Properties = append(sheet.Properties, innerSheet.Properties...)
+}
+
+// parseFontPaletteValuesRule parses an @font-palette-values --name { ... } at-rule.
+func (p *parser) parseFontPaletteValuesRule(sheet *Stylesheet) {
+	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' {
+		p.pos++
+	}
+	p.skipWhitespace()
+	preludeStart := p.pos
+	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	if p.pos >= len(p.input) || p.input[p.pos] != '{' {
+		return
+	}
+	name := strings.TrimSpace(p.input[preludeStart:p.pos])
+	p.pos++ // '{'
+
+	bodyStart := p.pos
+	depth := 1
+	for p.pos < len(p.input) && depth > 0 {
+		switch p.input[p.pos] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+		p.pos++
+	}
+	bodyEnd := p.pos - 1
+	if depth > 0 {
+		return
+	}
+	body := p.input[bodyStart:bodyEnd]
+
+	rule := FontPaletteValuesRule{
+		Name:           name,
+		OverrideColors: make(map[int]string),
+	}
+
+	decls := parseDeclarations(body)
+	for _, d := range decls {
+		switch strings.ToLower(d.Property) {
+		case "font-family":
+			rule.FontFamily = strings.Trim(strings.TrimSpace(d.Value), `"'`)
+		case "base-palette":
+			rule.BasePalette = strings.TrimSpace(d.Value)
+		case "override-colors":
+			items := strings.Split(d.Value, ",")
+			for _, item := range items {
+				fields := strings.Fields(strings.TrimSpace(item))
+				if len(fields) >= 2 {
+					if idx, err := strconv.Atoi(fields[0]); err == nil {
+						rule.OverrideColors[idx] = fields[1]
+					}
+				}
+			}
+		}
+	}
+	sheet.FontPalettes = append(sheet.FontPalettes, rule)
 }

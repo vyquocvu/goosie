@@ -5,6 +5,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
 )
@@ -394,6 +395,11 @@ func inlineInto(a *Arena, id ObjectID) {
 					x -= run.w
 					dx := (x + k.MarginLeft) - run.srcX
 					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+					if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
+						dy -= line.h * 0.4
+					} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
+						dy += line.h * 0.2
+					}
 					shiftSubtree(a, run.obj, dx, dy)
 					continue
 				}
@@ -408,7 +414,13 @@ func inlineInto(a *Arena, id ObjectID) {
 				x -= wordW
 				if runObj.X == 0 && runObj.Y == 0 {
 					runObj.X = x
-					runObj.Y = y + (line.h-run.contentH)/2
+					baseY := y + (line.h-run.contentH)/2
+					if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
+						baseY -= run.contentH * 0.5
+					} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
+						baseY += run.contentH * 0.3
+					}
+					runObj.Y = baseY
 				}
 				runObj.W = wordW
 				runObj.H = run.contentH
@@ -425,6 +437,11 @@ func inlineInto(a *Arena, id ObjectID) {
 					k := a.Get(run.obj)
 					dx := (x + k.MarginLeft) - run.srcX
 					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+					if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
+						dy -= line.h * 0.4
+					} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
+						dy += line.h * 0.2
+					}
 					shiftSubtree(a, run.obj, dx, dy)
 					x += run.w
 					continue
@@ -439,11 +456,13 @@ func inlineInto(a *Arena, id ObjectID) {
 				}
 				if runObj.X == 0 && runObj.Y == 0 {
 					runObj.X = x
-					// The content area sits in the middle of the line box: the
-					// surplus leading splits evenly above and below it, so the
-					// baseline lands at half-leading + ascent. Paint reads the
-					// ascent back out of the same metrics.
-					runObj.Y = y + (line.h-run.contentH)/2
+					baseY := y + (line.h-run.contentH)/2
+					if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
+						baseY -= run.contentH * 0.5
+					} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
+						baseY += run.contentH * 0.3
+					}
+					runObj.Y = baseY
 				}
 				runObj.W = wordW
 				runObj.H = run.contentH
@@ -1057,4 +1076,23 @@ func collapseWhitespacePreserveNewlines(s string) string {
 		}
 	}
 	return strings.TrimRight(out.String(), " \t")
+}
+
+// isRubyAnnotation checks if an object is an <rt> ruby text annotation or descendant thereof.
+func isRubyAnnotation(obj *Object, a *Arena) bool {
+	for curr := obj; curr != nil; {
+		if curr.Node != nil {
+			if curr.Node.DataAtom == dom.AtomRt {
+				return true
+			}
+			if curr.Node.Parent != nil && curr.Node.Parent.DataAtom == dom.AtomRt {
+				return true
+			}
+		}
+		if curr.Parent == 0 {
+			break
+		}
+		curr = a.Get(curr.Parent)
+	}
+	return false
 }

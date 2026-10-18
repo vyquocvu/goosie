@@ -276,6 +276,11 @@ type ComputedStyle struct {
 	ViewTimelineInset  string
 	AnimationTimeline  string
 
+	FontPalette    string
+	OffsetPath     string
+	OffsetDistance float32
+	OffsetRotate   string
+
 	HasClip    bool
 	ClipTop    float32
 	ClipRight  float32
@@ -634,6 +639,10 @@ func DefaultStyle() ComputedStyle {
 		ViewTimelineAxis:       "block",
 		ViewTimelineInset:      "auto",
 		AnimationTimeline:      "auto",
+		FontPalette:            "normal",
+		OffsetPath:             "none",
+		OffsetDistance:         0,
+		OffsetRotate:           "auto",
 	}
 }
 
@@ -756,6 +765,9 @@ select { display: inline; }
 progress { display: inline-block; width: 10em; height: 1em; vertical-align: -0.2em; }
 meter { display: inline-block; width: 5em; height: 1em; vertical-align: -0.2em; }
 datalist { display: none; }
+ruby { display: inline; }
+rt { display: inline-block; font-size: 50%; line-height: 1; vertical-align: super; }
+rp { display: none; }
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
@@ -2468,6 +2480,51 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "animation-timeline":
 		cs.AnimationTimeline = strings.TrimSpace(value)
+	case "font-palette":
+		cs.FontPalette = strings.TrimSpace(value)
+	case "offset-path":
+		cs.OffsetPath = strings.TrimSpace(value)
+	case "offset-distance":
+		cs.OffsetDistance = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "offset-rotate":
+		cs.OffsetRotate = strings.TrimSpace(value)
+	case "offset":
+		val := strings.TrimSpace(value)
+		if strings.EqualFold(val, "none") {
+			cs.OffsetPath = "none"
+			cs.OffsetDistance = 0
+			cs.OffsetRotate = "auto"
+		} else {
+			pathStr := ""
+			rem := val
+			if idx := strings.Index(val, "path("); idx != -1 {
+				closeIdx := strings.Index(val[idx:], ")")
+				if closeIdx != -1 {
+					pathStr = val[idx : idx+closeIdx+1]
+					rem = strings.TrimSpace(val[:idx] + " " + val[idx+closeIdx+1:])
+				}
+			} else if idx := strings.Index(val, "ray("); idx != -1 {
+				closeIdx := strings.Index(val[idx:], ")")
+				if closeIdx != -1 {
+					pathStr = val[idx : idx+closeIdx+1]
+					rem = strings.TrimSpace(val[:idx] + " " + val[idx+closeIdx+1:])
+				}
+			}
+			if pathStr != "" {
+				cs.OffsetPath = pathStr
+			}
+			fields := strings.Fields(rem)
+			for _, f := range fields {
+				p := css.ParseValue(f)
+				if p.Type == css.ValueLength || (p.Type == css.ValueNumber && p.Num == 0) {
+					cs.OffsetDistance = resolveLengthEm(p, 0, cs.FontSize, cs.rootFontSize)
+				} else if strings.EqualFold(f, "auto") || strings.EqualFold(f, "reverse") || strings.HasSuffix(f, "deg") || strings.HasSuffix(f, "rad") || strings.HasSuffix(f, "turn") {
+					cs.OffsetRotate = f
+				} else if cs.OffsetPath == "" {
+					cs.OffsetPath = f
+				}
+			}
+		}
 	case "clip":
 		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
 			cs.HasClip = true
