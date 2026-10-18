@@ -160,6 +160,127 @@ func (j *CookieJar) HeaderFor(reqURL *url.URL) string {
 	return strings.Join(pairs, "; ")
 }
 
+// CookiesForDocument returns the "a=b; c=d" cookie string for rawURL,
+// excluding HttpOnly cookies which scripts must never see per RFC 6265.
+func (j *CookieJar) CookiesForDocument(rawURL string) string {
+	if j == nil {
+		return ""
+	}
+	reqURL, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(reqURL.Hostname())
+	secure := reqURL.Scheme == "https"
+	path := reqURL.Path
+	if path == "" {
+		path = "/"
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var matches []*Cookie
+	for _, c := range j.entries {
+		if c.HttpOnly {
+			continue // Scripts must never read HttpOnly cookies
+		}
+		if c.Secure && !secure {
+			continue
+		}
+		if c.hostOnly {
+			if c.Domain != host {
+				continue
+			}
+		} else if !hostMatchesDomain(host, c.Domain) {
+			continue
+		}
+		if !cookiePathMatch(path, c.Path) {
+			continue
+		}
+		if !c.Expires.IsZero() && c.Expires.Before(time.Now()) {
+			continue
+		}
+		matches = append(matches, c)
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	sort.SliceStable(matches, func(i, k int) bool {
+		if len(matches[i].Path) != len(matches[k].Path) {
+			return len(matches[i].Path) > len(matches[k].Path)
+		}
+		return matches[i].Expires.Before(matches[k].Expires)
+	})
+	pairs := make([]string, len(matches))
+	for i, c := range matches {
+		pairs[i] = c.Name + "=" + c.Value
+	}
+	return strings.Join(pairs, "; ")
+}
+
+// SetCookieFromDocument stores one document.cookie assignment for rawURL.
+// Any HttpOnly attribute set by script is ignored (forced to false),
+// and an existing HttpOnly cookie cannot be overwritten by script.
+func (j *CookieJar) SetCookieFromDocument(rawURL, assignment string) {
+	if j == nil {
+		return
+	}
+	reqURL, err := url.Parse(rawURL)
+	if err != nil {
+		return
+	}
+	c := parseSetCookie(assignment)
+	if c == nil {
+		return
+	}
+	// Per RFC 6265: document.cookie cannot set HttpOnly cookies.
+	c.HttpOnly = false
+
+	host := strings.ToLower(reqURL.Hostname())
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if c.Domain != "" {
+		if !hostMatchesDomain(host, c.Domain) || !strings.Contains(c.Domain, ".") {
+			return
+		}
+		c.hostOnly = false
+	} else {
+		c.Domain = host
+		c.hostOnly = true
+	}
+	if c.Path == "" {
+		c.Path = defaultCookiePath(reqURL.Path)
+	} else if !strings.HasPrefix(c.Path, "/") {
+		return
+	}
+
+	key := cookieKey(host, c.Name, c.Domain, c.Path)
+
+	// A script must NOT overwrite an existing HttpOnly cookie.
+	for _, old := range j.entries {
+		if old.Name == c.Name && old.Domain == c.Domain && old.Path == c.Path {
+			if old.HttpOnly {
+				return
+			}
+		}
+	}
+
+	if c.Expires.Before(time.Now()) && !c.Expires.IsZero() {
+		delete(j.entries, key)
+		return
+	}
+
+	for k, old := range j.entries {
+		if old.Name == c.Name && old.Domain == c.Domain && old.Path == c.Path {
+			delete(j.entries, k)
+		}
+	}
+	c.seq = j.nextSeq
+	j.nextSeq++
+	j.entries[key] = c
+	j.evict(host)
+}
+
 // Clear drops every stored cookie, including session cookies.
 func (j *CookieJar) Clear() {
 	if j == nil {
@@ -407,7 +528,14 @@ func parseSetCookie(raw string) *Cookie {
 				c.Expires = time.Now().Add(time.Duration(secs) * time.Second)
 			}
 		case "expires":
+			val = strings.Trim(val, `"'`)
 			if t, err := http.ParseTime(val); err == nil {
+				c.Expires = t
+			} else if t, err := time.Parse(time.RFC1123, val); err == nil {
+				c.Expires = t
+			} else if t, err := time.Parse(time.RFC1123Z, val); err == nil {
+				c.Expires = t
+			} else if t, err := time.Parse("Mon, 02 Jan 2006 15:04:05 MST", val); err == nil {
 				c.Expires = t
 			}
 		}

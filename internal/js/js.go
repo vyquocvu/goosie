@@ -128,6 +128,13 @@ type Options struct {
 	// this to trigger re-style and re-layout. nil means mutations are
 	// not tracked (e.g., in tests).
 	OnMutation func()
+
+	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
+	// When nil, ephemeral in-memory storage is created per runtime.
+	Storage *OriginStorageRegistry
+
+	// SessionID identifies the tab/browsing context for sessionStorage isolation.
+	SessionID string
 }
 
 // Kind is the JS type of a Value read back out of a runtime.

@@ -247,6 +247,67 @@ func maxLen(n *dom.Node) int {
 	return 0
 }
 
+// InsertText inserts text into the currently focused editable control at the caret
+// position, respecting maxlength and firing an "input" event.
+func (s *Session) InsertText(text string) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !controlEditable(s.focus) || text == "" {
+		return false
+	}
+	runes := []rune(s.controlValue(s.focus))
+	if s.caret > len(runes) {
+		s.caret = len(runes)
+	}
+	added := []rune(text)
+	if max := maxLen(s.focus); max > 0 {
+		avail := max - len(runes)
+		if avail <= 0 {
+			return false
+		}
+		if len(added) > avail {
+			added = added[:avail]
+		}
+	}
+	out := make([]rune, 0, len(runes)+len(added))
+	out = append(out, runes[:s.caret]...)
+	out = append(out, added...)
+	out = append(out, runes[s.caret:]...)
+	s.caret += len(added)
+	s.setControlValue(s.focus, string(out))
+	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+	return true
+}
+
+// FocusedText returns the current value of the focused control, or empty if none.
+func (s *Session) FocusedText() string {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.focus == nil {
+		return ""
+	}
+	return s.controlValue(s.focus)
+}
+
+// FocusedEditable reports whether the currently focused control is editable.
+func (s *Session) FocusedEditable() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return controlEditable(s.focus)
+}
+
+// SelectAllControl positions the caret at the end of the focused control.
+func (s *Session) SelectAllControl() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !controlEditable(s.focus) {
+		return false
+	}
+	runes := []rune(s.controlValue(s.focus))
+	s.caret = len(runes)
+	return true
+}
+
 // controlValue reads the editable value: the value attribute for input, the
 // first text child for textarea.
 func (s *Session) controlValue(n *dom.Node) string {

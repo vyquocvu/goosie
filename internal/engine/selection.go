@@ -305,3 +305,31 @@ func (s *Session) selectionSpans() []paint.SelSpan {
 	}
 	return spans
 }
+
+// SelectAll selects all text in the document. It returns true if there is text to select.
+func (s *Session) SelectAll() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	words := s.selWords()
+	if len(words) == 0 {
+		return false
+	}
+	s.selAnchor = selPos{word: 0, rune: 0}
+	lastWord := len(words) - 1
+	s.selHead = selPos{word: lastWord, rune: runeLen(words[lastWord])}
+	s.selActive = true
+	return true
+}
+
+// ClearSelection removes any active document text selection.
+func (s *Session) ClearSelection() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !s.selActive {
+		return false
+	}
+	s.selActive = false
+	s.selAnchor = selPos{}
+	s.selHead = selPos{}
+	return true
+}

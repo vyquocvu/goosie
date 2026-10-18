@@ -42,6 +42,7 @@ type HTTP interface {
 	Post(ctx context.Context, url, contentType string, body io.Reader) (*Response, error)
 	SetTimeout(d time.Duration)
 	Close() error
+	Jar() *CookieJar
 }
 
 // Response is a simplified HTTP response. Repeated header values are joined
@@ -405,6 +406,11 @@ type httpClient struct {
 	// own entries rather than inheriting trust they never earned.
 	hstsMu sync.Mutex
 	hsts   map[string]time.Time
+}
+
+// Jar returns the client's cookie jar.
+func (c *httpClient) Jar() *CookieJar {
+	return c.jar
 }
 
 // Filter returns the client's ad/tracker filter engine.

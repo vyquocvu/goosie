@@ -27,6 +27,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -338,6 +339,8 @@ type framePath struct {
 	findIdx           int
 	selDrag           bool
 	restoredActiveURL string
+	storage           *js.OriginStorageRegistry
+	incognitoStorage  *js.OriginStorageRegistry
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -424,23 +427,25 @@ func build(c config) (*framePath, error) {
 	// and the one fact it cannot observe is when the process began.
 	rec.SetStartupReference(processStart)
 	f := &framePath{
-		sched:         raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
-		pool:          wp,
-		composer:      surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
-		layer:         layer,
-		docHeight:     spec.DocHeight,
-		rec:           rec,
-		spec:          spec,
-		config:        c,
-		client:        client,
-		privateClient: net.DefaultPrivateClient(),
-		fonts:         fonts,
-		bookmarks:     bookmarkStore,
-		history:       historyStore,
-		downloads:     download.NewManager(c.downloadDir),
-		navResults:    make(chan navResult, 16),
-		imgResults:    make(chan imgResult, 16),
-		zoom:          1.0,
+		sched:            raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
+		pool:             wp,
+		composer:         surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
+		layer:            layer,
+		docHeight:        spec.DocHeight,
+		rec:              rec,
+		spec:             spec,
+		config:           c,
+		client:           client,
+		privateClient:    net.DefaultPrivateClient(),
+		fonts:            fonts,
+		bookmarks:        bookmarkStore,
+		history:          historyStore,
+		downloads:        download.NewManager(c.downloadDir),
+		navResults:       make(chan navResult, 16),
+		imgResults:       make(chan imgResult, 16),
+		zoom:             1.0,
+		storage:          js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
+		incognitoStorage: js.NewOriginStorageRegistry("", true),
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -731,7 +736,17 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 	if client == nil {
 		client = f.client
 	}
-	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads)
+	storage := f.storage
+	if client == f.privateClient {
+		storage = f.incognitoStorage
+	}
+	tabID := ""
+	if f.tabMgr != nil {
+		if active := f.tabMgr.Active(); active != nil {
+			tabID = strconv.FormatUint(active.ID(), 10)
+		}
+	}
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -1445,10 +1460,55 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	if tab.Session().Focused() == nil {
+		if cmd && (key == 'a' || key == 'A') {
+			if tab.Session().SelectAll() {
+				f.repaintTab(tab, frame.Rect{})
+				return true
+			}
+		}
 		return false
 	}
 
 	if cmd {
+		switch key {
+		case 'v', 'V':
+			if tab.Session().FocusedEditable() {
+				if cb := platform.NewClipboard(); cb != nil {
+					clipText := cb.Read()
+					if clipText != "" {
+						if tab.Session().InsertText(clipText) {
+							if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+								fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+							}
+							f.repaintTab(tab, frame.Rect{})
+							return true
+						}
+					}
+				}
+			}
+		case 'a', 'A':
+			if tab.Session().FocusedEditable() {
+				if tab.Session().SelectAllControl() {
+					f.repaintTab(tab, frame.Rect{})
+					return true
+				}
+			} else {
+				if tab.Session().SelectAll() {
+					f.repaintTab(tab, frame.Rect{})
+					return true
+				}
+			}
+		case 'c', 'C':
+			if tab.Session().FocusedEditable() {
+				txt := tab.Session().FocusedText()
+				if txt != "" {
+					if cb := platform.NewClipboard(); cb != nil {
+						cb.Write(txt)
+						return true
+					}
+				}
+			}
+		}
 		return false
 	}
 
@@ -1857,7 +1917,7 @@ func (f *framePath) toggleReaderMode() {
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
 // they land.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, dlMgr ...*download.Manager) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, extra ...any) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
 	}
@@ -1869,13 +1929,22 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(rawURL), err)
 	}
+	var mgr *download.Manager
+	var storageReg *js.OriginStorageRegistry
+	var sessionID string
+	for _, ex := range extra {
+		switch v := ex.(type) {
+		case *download.Manager:
+			mgr = v
+		case *js.OriginStorageRegistry:
+			storageReg = v
+		case string:
+			sessionID = v
+		}
+	}
 	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
 		var itemID string
-		var mgr *download.Manager
-		if len(dlMgr) > 0 {
-			mgr = dlMgr[0]
-		}
 		if mgr != nil {
 			it := mgr.CreateItem(resp.URL, name, int64(len(resp.Body)))
 			itemID = it.ID
@@ -1973,7 +2042,17 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// scripting rather than failing the load. The session owns it
 	// afterwards and closes it with itself (see applyNavResult/closeTab), so
 	// every error return below must close what it created.
-	rt, rtErr := js.New(js.Options{URL: resp.URL, HTTPClient: jsFetch})
+	var cookieStore js.CookieStore
+	if client != nil {
+		cookieStore = client.Jar()
+	}
+	rt, rtErr := js.New(js.Options{
+		URL:        resp.URL,
+		HTTPClient: jsFetch,
+		Cookies:    cookieStore,
+		Storage:    storageReg,
+		SessionID:  sessionID,
+	})
 	if rtErr != nil {
 		fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
 		rt = nil

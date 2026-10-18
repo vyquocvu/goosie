@@ -61,6 +61,7 @@ func (c *recordingClient) Post(ctx context.Context, u, contentType string, body 
 
 func (c *recordingClient) SetTimeout(d time.Duration) {}
 func (c *recordingClient) Close() error               { return nil }
+func (c *recordingClient) Jar() *net.CookieJar        { return nil }
 
 // docWithSheet is the smallest document whose load fetches a second URL: the
 // linked sheet is the subresource, and its href is relative, so the engine - not

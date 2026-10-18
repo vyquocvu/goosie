@@ -1,13 +1,19 @@
 package js
 
 import (
+	"encoding/json"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/dop251/goja"
 )
 
 // Web Storage API implementation for localStorage and sessionStorage.
-// localStorage persists across sessions, sessionStorage is per-tab.
+// localStorage persists across sessions and is scoped per-origin.
+// sessionStorage is per-tab session and scoped per-origin.
 
 // MaxStorageBytes is the per-store quota, matching the ~5 MiB browsers
 // grant each origin. Keys and values both count, in UTF-8 bytes (close to
@@ -24,6 +30,8 @@ type storageObj struct {
 	order []string
 	// used prices stored bytes (keys plus values) against MaxStorageBytes.
 	used int64
+	// onChange is an optional callback triggered when data changes (e.g. for disk persistence).
+	onChange func()
 }
 
 // newStorageObj creates a new empty storage object.
@@ -34,16 +42,175 @@ func newStorageObj() *storageObj {
 	}
 }
 
+// OriginStorageRegistry provides thread-safe, origin-scoped Web Storage
+// instances. It optionally persists localStorage to disk as JSON files,
+// while sessionStorage remains in-memory and isolated per session/tab.
+type OriginStorageRegistry struct {
+	mu           sync.RWMutex
+	localStores  map[string]*storageObj
+	sessionStore map[string]*storageObj // keyed by sessionID + "\x00" + origin
+	baseDir      string
+	incognito    bool
+}
+
+// NewOriginStorageRegistry creates a storage registry. If baseDir is non-empty
+// and incognito is false, localStorage data is persisted to disk under baseDir.
+func NewOriginStorageRegistry(baseDir string, incognito bool) *OriginStorageRegistry {
+	return &OriginStorageRegistry{
+		localStores:  make(map[string]*storageObj),
+		sessionStore: make(map[string]*storageObj),
+		baseDir:      baseDir,
+		incognito:    incognito,
+	}
+}
+
+// GetLocalStorage returns the shared localStorage object for the given origin.
+func (r *OriginStorageRegistry) GetLocalStorage(origin string) *storageObj {
+	if origin == "" {
+		origin = "null"
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if s, ok := r.localStores[origin]; ok {
+		return s
+	}
+
+	s := newStorageObj()
+	if r.baseDir != "" && !r.incognito && origin != "null" {
+		r.loadOriginLocked(origin, s)
+		baseDir := r.baseDir
+		s.onChange = func() {
+			saveOrigin(baseDir, origin, s)
+		}
+	}
+	r.localStores[origin] = s
+	return s
+}
+
+// GetSessionStorage returns the sessionStorage object for the given tab session and origin.
+func (r *OriginStorageRegistry) GetSessionStorage(sessionID, origin string) *storageObj {
+	if origin == "" {
+		origin = "null"
+	}
+	key := sessionID + "\x00" + origin
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if s, ok := r.sessionStore[key]; ok {
+		return s
+	}
+	s := newStorageObj()
+	r.sessionStore[key] = s
+	return s
+}
+
+func (r *OriginStorageRegistry) loadOriginLocked(origin string, s *storageObj) {
+	targetFile := filepath.Join(r.baseDir, escapeOrigin(origin)+".json")
+	data, err := os.ReadFile(targetFile)
+	if err != nil {
+		return
+	}
+	var loaded map[string]string
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return
+	}
+	s.data = loaded
+	s.order = make([]string, 0, len(loaded))
+	s.used = 0
+	for k, v := range loaded {
+		s.order = append(s.order, k)
+		s.used += int64(len(k) + len(v))
+	}
+}
+
+func saveOrigin(baseDir, origin string, s *storageObj) {
+	if baseDir == "" || origin == "" || origin == "null" {
+		return
+	}
+	s.mu.RLock()
+	dataCopy := make(map[string]string, len(s.data))
+	for k, v := range s.data {
+		dataCopy[k] = v
+	}
+	s.mu.RUnlock()
+
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		return
+	}
+	encoded, err := json.MarshalIndent(dataCopy, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(baseDir, ".storage-*")
+	if err != nil {
+		return
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(encoded); err != nil {
+		_ = tmp.Close()
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		return
+	}
+	targetFile := filepath.Join(baseDir, escapeOrigin(origin)+".json")
+	_ = os.Rename(tmp.Name(), targetFile)
+}
+
+func escapeOrigin(origin string) string {
+	var b strings.Builder
+	for _, r := range origin {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+// OriginOf parses the origin (scheme + "://" + host + port) of a URL string.
+func OriginOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return "null"
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" && scheme != "file" {
+		return "null"
+	}
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else if scheme == "http" {
+			port = "80"
+		}
+	}
+	if port != "" {
+		return scheme + "://" + host + ":" + port
+	}
+	return scheme + "://" + host
+}
+
 // setupStorage installs localStorage and sessionStorage on the global scope.
 func (r *Runtime) setupStorage() {
-	// localStorage: persists across sessions (in real browser, backed by disk).
-	// For now, we use in-memory storage that persists for the runtime lifetime.
-	localStorage := newStorageObj()
-	r.installStorage("localStorage", localStorage)
+	origin := OriginOf(r.opts.URL)
+	var localStore *storageObj
+	var sessionStore *storageObj
 
-	// sessionStorage: per-tab, cleared when tab closes.
-	sessionStorage := newStorageObj()
-	r.installStorage("sessionStorage", sessionStorage)
+	if r.opts.Storage != nil {
+		localStore = r.opts.Storage.GetLocalStorage(origin)
+		sessionStore = r.opts.Storage.GetSessionStorage(r.opts.SessionID, origin)
+	} else {
+		localStore = newStorageObj()
+		sessionStore = newStorageObj()
+	}
+
+	r.installStorage("localStorage", localStore)
+	r.installStorage("sessionStorage", sessionStore)
 }
 
 // installStorage installs a storage object on the global scope and window.
@@ -91,7 +258,12 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		}
 		storage.data[key] = value
 		storage.used = storage.used - int64(old) + int64(len(key)+len(value))
+		cb := storage.onChange
 		storage.mu.Unlock()
+
+		if cb != nil {
+			cb()
+		}
 
 		return goja.Undefined()
 	})
@@ -104,6 +276,7 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		key := call.Arguments[0].String()
 
 		storage.mu.Lock()
+		changed := false
 		if prev, exists := storage.data[key]; exists {
 			storage.used -= int64(len(key) + len(prev))
 			delete(storage.data, key)
@@ -114,8 +287,14 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 					break
 				}
 			}
+			changed = true
 		}
+		cb := storage.onChange
 		storage.mu.Unlock()
+
+		if changed && cb != nil {
+			cb()
+		}
 
 		return goja.Undefined()
 	})
@@ -126,7 +305,12 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		storage.data = make(map[string]string)
 		storage.order = make([]string, 0)
 		storage.used = 0
+		cb := storage.onChange
 		storage.mu.Unlock()
+
+		if cb != nil {
+			cb()
+		}
 
 		return goja.Undefined()
 	})

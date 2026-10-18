@@ -1182,7 +1182,7 @@ char *GoosieClipboardRead(void) {
 			}
 		}
 	};
-	if ([NSThread isMainThread]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
+	if ([NSThread isMainThread] || NSApp == nil || ![NSApp isRunning]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 	return result;
 }
 
@@ -1197,5 +1197,5 @@ void GoosieClipboardWrite(const char *text) {
 			}
 		}
 	};
-	if ([NSThread isMainThread]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
+	if ([NSThread isMainThread] || NSApp == nil || ![NSApp isRunning]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 }
