@@ -129,6 +129,7 @@ type config struct {
 	gate         bool
 	bench        bool
 	screenshot   bool
+	printPDF     string
 	backend      string
 	frames       int
 	scene        string
@@ -192,6 +193,7 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.gate, "gate", false, "drive -frames scripted scroll frames at real pacing, then report")
 	fs.BoolVar(&c.bench, "bench", false, "run frames as fast as the clock allows, headless, and report the rate")
 	fs.BoolVar(&c.screenshot, "screenshot", false, "render -url to a PNG at -out and exit")
+	fs.StringVar(&c.printPDF, "print-pdf", "", "export document to PDF at path and exit")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
 	fs.IntVar(&c.frames, "frames", defaultFrames, "frames to draw with -gate and -bench")
 	fs.StringVar(&c.scene, "scene", "checkerboard", "synthetic test document: checkerboard or plain")
@@ -253,6 +255,14 @@ func parse(args []string) (config, error) {
 		}
 		if c.url == "" {
 			return c, fmt.Errorf("%w: -screenshot requires -url", errUsage)
+		}
+	}
+	if c.printPDF != "" {
+		if fs.Lookup("backend").Value.String() == "" {
+			c.backend = platform.Headless
+		}
+		if c.url == "" && len(fs.Args()) > 0 {
+			c.url = fs.Args()[0]
 		}
 	}
 	if c.sessionFile == "" {
@@ -1580,6 +1590,132 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 	}
 }
 
+// handleContextMenu constructs the context menu for the clicked element.
+func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
+	cw, ok := f.window.(*chromeWindow)
+	if !ok || cw.contextMenu == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	docX, docY := f.docPoint(contentX, contentY)
+	linkURL := tab.Session().HitTestLink(docX, docY)
+	if linkURL != "" {
+		linkURL = resolveHref(tab.URL(), linkURL)
+	}
+	imageURL := tab.Session().HitTestImage(docX, docY)
+	if imageURL != "" {
+		imageURL = resolveHref(tab.URL(), imageURL)
+	}
+	selText := tab.Session().SelectionText()
+	isEditable := tab.Session().FocusedEditable()
+	focusedText := tab.Session().FocusedText()
+	_, _, canBack := tab.History().PeekBack()
+	_, _, canForward := tab.History().PeekForward()
+
+	items := BuildContextMenuItems(linkURL, imageURL, selText, focusedText, isEditable, canBack, canForward)
+	winW := int32(f.config.width) * cw.sc()
+	winH := int32(f.config.height) * cw.sc()
+	if cw.chromeBitmap != nil {
+		winW = int32(cw.chromeBitmap.W)
+	}
+	if cw.outBitmap != nil {
+		winH = int32(cw.outBitmap.H)
+	}
+	cw.contextMenu.Show(winX, winY, winW, winH, items, cw.sc())
+}
+
+// handleContextMenuAction executes the action chosen from the context menu.
+func (f *framePath) handleContextMenuAction(action, data string) {
+	switch action {
+	case "open_new_tab":
+		f.newTab()
+		if data != "" {
+			f.navigateTab(data)
+		}
+	case "copy_link", "copy_image":
+		if cb := platform.NewClipboard(); cb != nil {
+			cb.Write(data)
+		}
+	case "open_image_tab":
+		f.newTab()
+		if data != "" {
+			f.navigateTab(data)
+		}
+	case "copy":
+		if data != "" {
+			if cb := platform.NewClipboard(); cb != nil {
+				cb.Write(data)
+			}
+		} else {
+			f.copySelection()
+		}
+	case "cut":
+		if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+			txt := tab.Session().FocusedText()
+			if cb := platform.NewClipboard(); cb != nil {
+				cb.Write(txt)
+			}
+			tab.Session().SelectAllControl()
+			tab.Session().InsertText("")
+			f.repaintTab(tab, frame.Rect{})
+		}
+	case "paste":
+		if cb := platform.NewClipboard(); cb != nil {
+			if text := cb.Read(); text != "" {
+				if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+					if tab.Session().InsertText(text) {
+						if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+							fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+						}
+					}
+					f.repaintTab(tab, frame.Rect{})
+				}
+			}
+		}
+	case "select_all":
+		if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+			if tab.Session().FocusedEditable() {
+				tab.Session().SelectAllControl()
+			} else {
+				tab.Session().SelectAll()
+			}
+			f.repaintTab(tab, frame.Rect{})
+		}
+	case "search_google":
+		if data != "" {
+			searchURL := "https://www.google.com/search?q=" + url.QueryEscape(data)
+			f.navigateTab(searchURL)
+		}
+	case "back":
+		f.traverseTab(-1)
+	case "forward":
+		f.traverseTab(1)
+	case "reload":
+		f.reloadTab()
+	case "inspect":
+		f.navigateTab("goosie://inspect")
+	case "print_pdf":
+		f.printActiveTabToPDF()
+	}
+}
+
+// printActiveTabToPDF exports the currently active tab document to PDF.
+func (f *framePath) printActiveTabToPDF() {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	outPath := filepath.Join(f.config.downloadDir, "print.pdf")
+	if err := ExportSessionToPDF(tab.Session(), f.fonts, float32(f.config.dpr), outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "goosie: print to PDF error: %v\n", err)
+		return
+	}
+	fmt.Printf("goosie: document printed to PDF at %s\n", outPath)
+}
+
 func (f *framePath) handleZoom(delta float64) {
 	if f.zoom <= 0 {
 		f.zoom = 1.0
@@ -2292,6 +2428,10 @@ func (f *framePath) openWindow() error {
 			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
 			cw.onDuplicateTab = func() { f.duplicateTab() }
 			cw.onReaderMode = func() { f.toggleReaderMode() }
+			cw.bookmarks = f.bookmarks
+			cw.onContextMenu = f.handleContextMenu
+			cw.onContextMenuAction = f.handleContextMenuAction
+			cw.onPrintPDF = f.printActiveTabToPDF
 		}
 	} else {
 		f.window = w
@@ -2347,6 +2487,27 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "goosie: cleared %d file(s)\n", len(removed))
+		return nil
+	}
+	if c.printPDF != "" {
+		if c.url == "" {
+			return fmt.Errorf("%w: -print-pdf requires a URL", errUsage)
+		}
+		fonts, err := raster.NewFonts()
+		if err != nil {
+			return fmt.Errorf("goosie: fonts: %w", err)
+		}
+		client := net.DefaultClient()
+		defer client.Close()
+		_, _, _, sess, _, err := loadURLCtx(context.Background(), client, fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
+		if err != nil {
+			return fmt.Errorf("goosie: load URL: %w", err)
+		}
+		defer sess.Close()
+		if err := ExportSessionToPDF(sess, fonts, float32(c.dpr), c.printPDF); err != nil {
+			return fmt.Errorf("goosie: export PDF: %w", err)
+		}
+		fmt.Printf("goosie: exported %s to %s\n", c.url, c.printPDF)
 		return nil
 	}
 	f, err := build(c)

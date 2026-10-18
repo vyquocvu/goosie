@@ -1090,6 +1090,11 @@ func (s *Session) recordViewportWidth(w float32) {
 	}
 }
 
+// Viewport returns the configured viewport width and height of the session.
+func (s *Session) Viewport() (w, h float32) {
+	return s.viewportW, s.viewportH
+}
+
 // Reflow runs layout only, retaining the document, computed style identities,
 // and font metrics. The old arena is untouched unless the candidate validates.
 // Like Paint, this method must be called by the session's single owner.
@@ -1285,6 +1290,27 @@ func (s *Session) HitTestLink(x, y float32) string {
 				if href := cur.Node.GetAttribute("href"); href != "" {
 					return href
 				}
+			}
+		}
+	}
+	return ""
+}
+
+// HitTestImage returns the src of the nearest <img> at the given document point.
+func (s *Session) HitTestImage(x, y float32) string {
+	if s.Arena == nil {
+		return ""
+	}
+	objs := s.Arena.Objects
+	for i := len(objs) - 1; i >= 1; i-- {
+		obj := &objs[i]
+		x0, y0, x1, y1 := obj.BorderRect()
+		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+			continue
+		}
+		if obj.Node != nil && obj.Node.DataAtom == dom.AtomImg {
+			if src := obj.Node.GetAttribute("src"); src != "" {
+				return src
 			}
 		}
 	}

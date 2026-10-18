@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/bookmarks"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -11,7 +12,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-const totalChromeHeight = tabs.TabBarHeight + toolbar.ToolbarHeight
+const (
+	totalChromeHeight  = tabs.TabBarHeight + toolbar.ToolbarHeight
+	bookmarksBarHeight = 28
+)
 
 type chromeWindow struct {
 	surface.Window
@@ -42,6 +46,18 @@ type chromeWindow struct {
 	outBitmap         *frame.Bitmap
 	fonts             *raster.Fonts
 	hover             surface.Cursor // last shape sent to the platform, for change detection
+
+	// Bookmarks bar
+	bookmarks        *bookmarks.Store
+	showBookmarksBar bool
+	hoverBookmark    int
+
+	// Context menu
+	contextMenu         *ContextMenu
+	onContextMenu       func(contentX, contentY, winX, winY int32)
+	onContextMenuAction func(action, data string)
+	onPrintPDF          func()
+
 	// pressTab/pressX/pressing track a press that may become a tab drag.
 	// Pump-thread only, like everything else in intercept.
 	pressTab uint64
@@ -91,6 +107,8 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		hitTestLink:   hitTestLink,
 		onHoverCursor: onHoverCursor,
 		fonts:         fonts,
+		hoverBookmark: -1,
+		contextMenu:   NewContextMenu(),
 	}
 	go cw.pump()
 	return cw
@@ -104,7 +122,11 @@ func (cw *chromeWindow) sc() int32 {
 }
 
 func (cw *chromeWindow) chromeHeight() int32 {
-	return int32(totalChromeHeight) * cw.sc()
+	h := int32(totalChromeHeight)
+	if cw.showBookmarksBar {
+		h += bookmarksBarHeight
+	}
+	return h * cw.sc()
 }
 
 func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
@@ -125,6 +147,9 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	}
 	tabs.DrawTabBar(cw.chromeBitmap, cw.tabMgr, stripOff, cw.fonts, cw.sc())
 	cw.toolbar.Draw(cw.chromeBitmap, int32(tabs.TabBarHeight)*cw.sc())
+	if cw.showBookmarksBar && cw.bookmarks != nil {
+		cw.drawBookmarksBar(cw.chromeBitmap)
+	}
 
 	// The loop's backing store is the content viewport, so buf is window-minus-
 	// chrome tall. The window surface is the whole window, so the presented
@@ -146,7 +171,7 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 		copy(out.RGBA[oy:oy+out.Stride], buf.RGBA[sy:sy+buf.Stride])
 	}
 
-	merged := make([]frame.Rect, 0, len(damage)+2)
+	merged := make([]frame.Rect, 0, len(damage)+3)
 	merged = append(merged, frame.Rect4(0, 0, int32(out.W), chromeH))
 	for _, r := range damage {
 		if r.Empty() {
@@ -160,6 +185,13 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 		sugRect := cw.toolbar.SuggestionsRect(chromeH)
 		if !sugRect.Empty() {
 			merged = append(merged, sugRect)
+		}
+	}
+	if cw.contextMenu != nil && cw.contextMenu.Visible {
+		cw.contextMenu.Draw(out, cw.fonts, cw.sc())
+		mRect := cw.contextMenu.Rect()
+		if !mRect.Empty() {
+			merged = append(merged, mRect)
 		}
 	}
 	return cw.Window.Present(out, merged)
@@ -213,10 +245,44 @@ func (cw *chromeWindow) pump() {
 func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	switch ev.Kind {
 	case surface.EvPointer:
+		if cw.contextMenu != nil && cw.contextMenu.Visible {
+			if ev.Action == surface.PointerMotion {
+				cw.contextMenu.UpdateHover(ev.Pos, cw.sc())
+				mRect := cw.contextMenu.Rect()
+				if ev.Pos.X >= mRect.X0 && ev.Pos.X < mRect.X1 && ev.Pos.Y >= mRect.Y0 && ev.Pos.Y < mRect.Y1 {
+					return true
+				}
+			}
+			if ev.Action == surface.PointerPress {
+				if it, ok := cw.contextMenu.HitItem(ev.Pos, cw.sc()); ok {
+					cw.contextMenu.Hide()
+					if cw.onContextMenuAction != nil {
+						cw.onContextMenuAction(it.Action, it.Data)
+					}
+					return true
+				}
+				cw.contextMenu.Hide()
+				if ev.Button == surface.ButtonLeft {
+					return true
+				}
+			}
+		}
+
+		if ev.Action == surface.PointerPress && ev.Button == surface.ButtonRight {
+			if ev.Pos.Y >= cw.chromeHeight() {
+				contentX := ev.Pos.X
+				contentY := ev.Pos.Y - cw.chromeHeight()
+				if cw.onContextMenu != nil {
+					cw.onContextMenu(contentX, contentY, ev.Pos.X, ev.Pos.Y)
+					return true
+				}
+			}
+		}
+
 		tabH := int32(tabs.TabBarHeight) * cw.sc()
 		toolH := int32(toolbar.ToolbarHeight) * cw.sc()
 		if ev.Action == surface.PointerMotion && ev.Button == surface.ButtonNone {
-			cw.updateHoverCursor(ev.Pos, tabH+toolH)
+			cw.updateHoverCursor(ev.Pos, cw.chromeHeight())
 		}
 		if ev.Action == surface.PointerRelease {
 			if _, _, dragging := cw.tabMgr.Dragging(); dragging {
@@ -270,6 +336,25 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				}
 			}
 		}
+		if cw.showBookmarksBar && cw.bookmarks != nil {
+			barY := int32(totalChromeHeight) * cw.sc()
+			barH := int32(bookmarksBarHeight) * cw.sc()
+			if ev.Pos.Y >= barY && ev.Pos.Y < barY+barH {
+				if ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft {
+					if entry, ok := cw.hitBookmark(ev.Pos); ok {
+						if cw.onLinkClick != nil {
+							cw.onLinkClick(entry.URL)
+						}
+						return true
+					}
+				}
+				if ev.Action == surface.PointerMotion {
+					cw.updateBookmarkHover(ev.Pos)
+					return true
+				}
+				return true
+			}
+		}
 		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 			// Presses and releases outside defocus the bar; motion extends
 			// an active drag so it clamps to the nearer end like a normal
@@ -304,6 +389,12 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvKey:
+		if cw.contextMenu != nil && cw.contextMenu.Visible {
+			if ev.Key == 0x1B { // Escape
+				cw.contextMenu.Hide()
+				return true
+			}
+		}
 		// Address-bar edit shortcuts win over browser shortcuts while the
 		// bar is focused: Cmd+C there copies the URL selection, it must not
 		// fall through to the content copy below.
@@ -379,7 +470,13 @@ func (cw *chromeWindow) updateHoverCursor(pos frame.Point, chromeH int32) {
 	switch {
 	case pos.Y >= chromeH && cw.onHoverCursor != nil:
 		c = cw.onHoverCursor(pos.X, pos.Y-cw.chromeHeight())
-	case pos.Y >= int32(tabs.TabBarHeight)*cw.sc() && pos.Y < chromeH:
+	case cw.showBookmarksBar && pos.Y >= int32(totalChromeHeight)*cw.sc() && pos.Y < chromeH:
+		if cw.hoverBookmark >= 0 {
+			c = surface.CursorPointer
+		} else {
+			c = surface.CursorDefault
+		}
+	case pos.Y >= int32(tabs.TabBarHeight)*cw.sc() && pos.Y < int32(totalChromeHeight)*cw.sc():
 		adjusted := pos
 		adjusted.Y -= int32(tabs.TabBarHeight) * cw.sc()
 		c = cw.toolbar.CursorAt(adjusted)
@@ -532,11 +629,26 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			cw.onNewTab()
 			return true
 		}
-	case (key == 'n' || key == 'N' || key == 'p' || key == 'P') && shift:
+	case (key == 'n' || key == 'N') && shift:
 		if cw.onNewIncognitoTab != nil {
 			cw.onNewIncognitoTab()
 			return true
 		}
+	case key == 'p' || key == 'P':
+		if shift {
+			if cw.onNewIncognitoTab != nil {
+				cw.onNewIncognitoTab()
+				return true
+			}
+		} else {
+			if cw.onPrintPDF != nil {
+				cw.onPrintPDF()
+				return true
+			}
+		}
+	case (key == 'b' || key == 'B') && shift:
+		cw.toggleBookmarksBar()
+		return true
 	case key == 'f' || key == 'F':
 		if cw.toolbar != nil {
 			cw.toolbar.OpenFind()
@@ -628,6 +740,146 @@ func addressEditKey(key rune, mods surface.KeyMod) bool {
 		return true
 	}
 	return false
+}
+
+func (cw *chromeWindow) drawBookmarksBar(buf *frame.Bitmap) {
+	scale := cw.sc()
+	barY := int32(totalChromeHeight) * scale
+	barH := int32(bookmarksBarHeight) * scale
+	barW := int32(buf.W)
+
+	// Background and 1px separator line at bottom
+	buf.FillRect(frame.Rect4(0, barY, barW, barY+barH), frame.RGB(248, 249, 250), nil)
+	buf.FillRect(frame.Rect4(0, barY+barH-scale, barW, barY+barH), frame.RGB(218, 220, 224), nil)
+
+	pills := cw.bookmarkPills()
+	fontSize := int32(11 * scale)
+	textCol := frame.RGB(60, 64, 67)
+	hoverBg := frame.RGB(232, 240, 254)
+	hoverText := frame.RGB(26, 115, 232)
+
+	for i, p := range pills {
+		col := textCol
+		if i == cw.hoverBookmark {
+			buf.FillRounded(p.rect, pillCorners(float32(4*scale)), hoverBg, nil)
+			col = hoverText
+		}
+		textX := p.rect.X0 + 6*scale
+		textY := p.rect.Y0 + (p.rect.H()-fontSize)/2 + fontSize*4/5
+		drawMenuText(buf, cw.fonts, p.label, textX, textY, fontSize, col)
+	}
+}
+
+func pillCorners(r float32) frame.Corners {
+	rad := frame.Radius{X: r, Y: r}
+	return frame.Corners{TL: rad, TR: rad, BR: rad, BL: rad}
+}
+
+type bookmarkPill struct {
+	entry bookmarks.Entry
+	label string
+	rect  frame.Rect
+}
+
+func (cw *chromeWindow) bookmarkPills() []bookmarkPill {
+	if cw.bookmarks == nil {
+		return nil
+	}
+	scale := cw.sc()
+	barY := int32(totalChromeHeight) * scale
+	barH := int32(bookmarksBarHeight) * scale
+	pillH := int32(20) * scale
+	pillY := barY + (barH-pillH)/2
+	pillX := int32(8) * scale
+	fontSize := int32(11 * scale)
+
+	entries := cw.bookmarks.List()
+	pills := make([]bookmarkPill, 0, len(entries))
+
+	maxW := int32(1440) * scale
+	if cw.toolbar != nil && cw.toolbar.BoundsWidth() > 0 {
+		maxW = cw.toolbar.BoundsWidth()
+	}
+	if cw.chromeBitmap != nil {
+		maxW = int32(cw.chromeBitmap.W)
+	}
+
+	for _, bm := range entries {
+		label := bm.Title
+		if label == "" {
+			label = bm.URL
+		}
+		if len(label) > 20 {
+			label = label[:18] + "..."
+		}
+		label = "★ " + label
+		textW := cw.measureTextWidth(label, fontSize)
+		pillW := textW + 12*scale
+		if pillX+pillW > maxW-8*scale {
+			break
+		}
+		rect := frame.Rect4(pillX, pillY, pillX+pillW, pillY+pillH)
+		pills = append(pills, bookmarkPill{
+			entry: bm,
+			label: label,
+			rect:  rect,
+		})
+		pillX += pillW + 4*scale
+	}
+	return pills
+}
+
+func (cw *chromeWindow) hitBookmark(pos frame.Point) (bookmarks.Entry, bool) {
+	pills := cw.bookmarkPills()
+	for _, p := range pills {
+		if pos.X >= p.rect.X0 && pos.X < p.rect.X1 && pos.Y >= p.rect.Y0 && pos.Y < p.rect.Y1 {
+			return p.entry, true
+		}
+	}
+	return bookmarks.Entry{}, false
+}
+
+func (cw *chromeWindow) updateBookmarkHover(pos frame.Point) bool {
+	pills := cw.bookmarkPills()
+	oldHover := cw.hoverBookmark
+	cw.hoverBookmark = -1
+	for i, p := range pills {
+		if pos.X >= p.rect.X0 && pos.X < p.rect.X1 && pos.Y >= p.rect.Y0 && pos.Y < p.rect.Y1 {
+			cw.hoverBookmark = i
+			break
+		}
+	}
+	return cw.hoverBookmark != oldHover
+}
+
+func (cw *chromeWindow) measureTextWidth(text string, size int32) int32 {
+	if cw.fonts == nil {
+		return int32(len(text)) * size / 2
+	}
+	var penFixed int32
+	for _, rn := range text {
+		penFixed += cw.fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
+	}
+	return (penFixed + 32) >> 6
+}
+
+func (cw *chromeWindow) toggleBookmarksBar() {
+	cw.showBookmarksBar = !cw.showBookmarksBar
+	if cw.chromeBitmap != nil && cw.Window != nil {
+		contentDevH := int32(cw.outBitmap.H) - cw.chromeHeight()
+		if contentDevH < 0 {
+			contentDevH = 0
+		}
+		sc := int(cw.sc())
+		if cw.onResize != nil {
+			cw.onResize(int(cw.chromeBitmap.W)/sc, int(contentDevH)/sc)
+		}
+		cw.events <- surface.Event{
+			Kind:  surface.EvResize,
+			Size:  frame.Size{W: int32(cw.chromeBitmap.W), H: contentDevH},
+			Scale: float32(cw.sc()),
+		}
+	}
 }
 
 var _ surface.Window = (*chromeWindow)(nil)
