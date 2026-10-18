@@ -273,3 +273,103 @@ func TestInspectShortcut(t *testing.T) {
 		t.Fatalf("Plain Cmd+I should not trigger inspect: handled=%v, inspectCalls=%d", handled, inspectCalls)
 	}
 }
+
+func TestPerformanceMemoryMeter(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+
+	tab := f.tabMgr.NewTab()
+	tab.SetURL("https://example.com/meter")
+	tab.SetTitle("Meter Tab")
+
+	sess, err := engine.NewSession("<html><body><h1>Stats</h1></body></html>", nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	tab.SetSession(sess)
+	f.tabMgr.SwitchTo(tab.ID())
+
+	_, htmlContent := f.buildInternalPageHTML(fmt.Sprintf("goosie://inspect?tab=%d", tab.ID()))
+	if !strings.Contains(htmlContent, "Performance &amp; Memory Meter") {
+		t.Errorf("HTML should contain Performance & Memory Meter section")
+	}
+	if !strings.Contains(htmlContent, "Heap In-Use") {
+		t.Errorf("HTML should contain Heap In-Use metric")
+	}
+	if !strings.Contains(htmlContent, "OS Reserved") {
+		t.Errorf("HTML should contain OS Reserved metric")
+	}
+	if !strings.Contains(htmlContent, "Goroutines / CPUs") {
+		t.Errorf("HTML should contain Goroutines / CPUs metric")
+	}
+}
+
+func TestReaderInternalPage(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+
+	tab := f.tabMgr.NewTab()
+	tab.SetURL("https://example.com/article")
+	tab.SetTitle("Sample Article")
+
+	articleHTML := `<html><head><title>Article Title</title></head><body>
+		<article>
+			<h1>Article Title</h1>
+			<p>First paragraph of the substantive article text here.</p>
+			<p>Second paragraph expanding on the topic with key details.</p>
+		</article>
+	</body></html>`
+	sess, err := engine.NewSession(articleHTML, nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+	tab.SetSession(sess)
+	f.tabMgr.SwitchTo(tab.ID())
+
+	title, htmlContent := f.buildInternalPageHTML("goosie://reader?url=https%3A%2F%2Fexample.com%2Farticle&theme=dark")
+	if !strings.Contains(title, "Article Title") {
+		t.Errorf("reader title %q should contain Article Title", title)
+	}
+	if !strings.Contains(htmlContent, "#1e1e24") {
+		t.Errorf("dark theme reader page should contain dark background #1e1e24")
+	}
+	if !strings.Contains(htmlContent, "substantive article text") {
+		t.Errorf("reader page should contain article text")
+	}
+	if !strings.Contains(htmlContent, "Back to original page") {
+		t.Errorf("reader page should contain Back to original page")
+	}
+}
+
+func TestShortcutsDuplicateAndReader(t *testing.T) {
+	dupCalls := 0
+	readerCalls := 0
+	cw := &chromeWindow{
+		onDuplicateTab: func() { dupCalls++ },
+		onReaderMode:   func() { readerCalls++ },
+	}
+
+	// Cmd+Shift+D -> onDuplicateTab
+	handled := cw.handleTabShortcut('d', surface.ModCommand|surface.ModShift)
+	if !handled || dupCalls != 1 {
+		t.Fatalf("Cmd+Shift+D ('d'): handled=%v, dupCalls=%d", handled, dupCalls)
+	}
+
+	// Cmd+Shift+D uppercase 'D' -> onDuplicateTab
+	handled = cw.handleTabShortcut('D', surface.ModCommand|surface.ModShift)
+	if !handled || dupCalls != 2 {
+		t.Fatalf("Cmd+Shift+D ('D'): handled=%v, dupCalls=%d", handled, dupCalls)
+	}
+
+	// Cmd+Shift+R -> onReaderMode
+	handled = cw.handleTabShortcut('r', surface.ModCommand|surface.ModShift)
+	if !handled || readerCalls != 1 {
+		t.Fatalf("Cmd+Shift+R ('r'): handled=%v, readerCalls=%d", handled, readerCalls)
+	}
+
+	// Cmd+Shift+R uppercase 'R' -> onReaderMode
+	handled = cw.handleTabShortcut('R', surface.ModCommand|surface.ModShift)
+	if !handled || readerCalls != 2 {
+		t.Fatalf("Cmd+Shift+R ('R'): handled=%v, readerCalls=%d", handled, readerCalls)
+	}
+}

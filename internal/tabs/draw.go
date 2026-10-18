@@ -130,11 +130,13 @@ func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fon
 	}
 	drawTabText(buf, title, r, textColor, fonts, scale)
 
-	btnColor := closeBtnColor
-	if isIncognito {
-		btnColor = frame.RGB(190, 194, 202)
+	if !tab.Pinned() {
+		btnColor := closeBtnColor
+		if isIncognito {
+			btnColor = frame.RGB(190, 194, 202)
+		}
+		drawCloseButton(buf, scaleRect(CloseButtonRect(lr), scale), btnColor, scale)
 	}
-	drawCloseButton(buf, scaleRect(CloseButtonRect(lr), scale), btnColor, scale)
 }
 
 func scaleRect(r frame.Rect, scale int32) frame.Rect {

@@ -38,6 +38,7 @@ type Tab struct {
 	err       string
 	bgColor   frame.Color
 	incognito bool
+	pinned    bool
 
 	Nav NavController
 }
@@ -173,4 +174,18 @@ func (t *Tab) SetBGColor(c frame.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.bgColor = c
+}
+
+// Pinned reports whether the tab is pinned.
+func (t *Tab) Pinned() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.pinned
+}
+
+// SetPinned sets whether the tab is pinned.
+func (t *Tab) SetPinned(pinned bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pinned = pinned
 }

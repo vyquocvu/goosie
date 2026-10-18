@@ -1750,6 +1750,67 @@ func (f *framePath) reopenTab() {
 	}
 }
 
+// duplicateTab clones the active tab and navigates it to the same page.
+func (f *framePath) duplicateTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	f.closeFind()
+	active := f.tabMgr.Active()
+	if active == nil {
+		return
+	}
+	vp := f.sched.Viewport()
+	active.SetScrollY(vp.Offset.Y)
+
+	tab, ok := f.tabMgr.DuplicateTab(active.ID())
+	if !ok || tab == nil {
+		return
+	}
+	f.ensureActiveTabVisible()
+	f.syncTabToToolbar()
+	_, layer := blankLayer(f.config.devSize())
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(255, 255, 255))
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     tab.Nav.Serial,
+		Layers:     []*frame.Layer{layer},
+		Background: tab.BGColor(),
+	})
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: tab.ScrollY()},
+		Size:   f.config.devSize(),
+	})
+	f.publishAccessibility()
+	if u := tab.URL(); u != "" {
+		f.navigateTabNoHistory(u)
+	}
+}
+
+// toggleReaderMode switches the active tab between Reader Mode and original view.
+func (f *framePath) toggleReaderMode() {
+	if f.tabMgr == nil {
+		return
+	}
+	active := f.tabMgr.Active()
+	if active == nil {
+		return
+	}
+	currURL := active.URL()
+	if strings.HasPrefix(strings.ToLower(currURL), "goosie://reader") {
+		if u, err := url.Parse(currURL); err == nil {
+			if orig := u.Query().Get("url"); orig != "" {
+				f.navigateTab(orig)
+				return
+			}
+		}
+		return
+	}
+	if currURL != "" && !strings.HasPrefix(strings.ToLower(currURL), "goosie://") {
+		f.navigateTab("goosie://reader?url=" + url.QueryEscape(currURL))
+	}
+}
+
 // loadURLCtx is like loadURL but respects context cancellation. With
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
@@ -2108,6 +2169,8 @@ func (f *framePath) openWindow() error {
 			cw.onTick = f.pumpJS
 			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
 			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
+			cw.onDuplicateTab = func() { f.duplicateTab() }
+			cw.onReaderMode = func() { f.toggleReaderMode() }
 		}
 	} else {
 		f.window = w

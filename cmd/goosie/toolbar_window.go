@@ -29,6 +29,8 @@ type chromeWindow struct {
 	onLinkClick       func(href string)
 	onBookmark        func()
 	onInspect         func()
+	onDuplicateTab    func()
+	onReaderMode      func()
 	onFocusClick      func(contentX, contentY int32) bool
 	onContentKey      func(key rune, mods surface.KeyMod) bool
 	onDragSelect      func(action surface.PointerAction, contentX, contentY int32) bool
@@ -434,12 +436,14 @@ func (cw *chromeWindow) handleTabBarPress(pos frame.Point) {
 	for i := range tabList {
 		r := tabs.TabRect(i, stripOff, n, stripW)
 		if lp.X >= r.X0 && lp.X < r.X1 && lp.Y >= r.Y0 && lp.Y < r.Y1 {
-			closeR := tabs.CloseButtonRect(r)
-			if lp.X >= closeR.X0 && lp.X < closeR.X1 && lp.Y >= closeR.Y0 && lp.Y < closeR.Y1 {
-				if cw.onCloseTab != nil {
-					cw.onCloseTab(tabList[i].ID())
+			if !tabList[i].Pinned() {
+				closeR := tabs.CloseButtonRect(r)
+				if lp.X >= closeR.X0 && lp.X < closeR.X1 && lp.Y >= closeR.Y0 && lp.Y < closeR.Y1 {
+					if cw.onCloseTab != nil {
+						cw.onCloseTab(tabList[i].ID())
+					}
+					return
 				}
-				return
 			}
 			if cw.onSwitch != nil {
 				cw.onSwitch(tabList[i].ID())
@@ -539,9 +543,21 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			return true
 		}
 	case key == 'd' || key == 'D':
-		if cw.onBookmark != nil {
+		if shift {
+			if cw.onDuplicateTab != nil {
+				cw.onDuplicateTab()
+				return true
+			}
+		} else if cw.onBookmark != nil {
 			cw.onBookmark()
 			return true
+		}
+	case key == 'r' || key == 'R':
+		if shift {
+			if cw.onReaderMode != nil {
+				cw.onReaderMode()
+				return true
+			}
 		}
 	case (key == 'i' || key == 'I') && (mods&surface.ModOption != 0):
 		if cw.onInspect != nil {

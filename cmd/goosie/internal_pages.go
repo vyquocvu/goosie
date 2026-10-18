@@ -518,6 +518,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildDownloadsPageHTML(f, rawURL)
 	case "inspect", "devtools":
 		return buildInspectPageHTML(f, rawURL)
+	case "reader":
+		return buildReaderPageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">
@@ -529,6 +531,7 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
         <li><a class="list-link" href="goosie://history">goosie://history</a> &mdash; Browsing history</li>
         <li><a class="list-link" href="goosie://downloads">goosie://downloads</a> &mdash; Downloaded files</li>
         <li><a class="list-link" href="goosie://inspect">goosie://inspect</a> &mdash; Web Inspector &amp; DOM/CSS Tree Explorer (Cmd+Option+I)</li>
+        <li><a class="list-link" href="goosie://reader">goosie://reader</a> &mdash; Distraction-Free Reader Mode (Cmd+Shift+R)</li>
       </ul>
     </div>`
 		return "Goosie Pages", internalPageTemplate("", "Goosie Pages", body)
@@ -613,6 +616,29 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #e37400;">%d</div><div style="font-size: 12px; color: #5f6368;">Stylesheets</div></div>`, len(sheets)))
 	b.WriteString(`</div></div>`)
 
+	// Performance & Memory Meter Card
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	allocMB := float64(mem.Alloc) / (1024 * 1024)
+	sysMB := float64(mem.Sys) / (1024 * 1024)
+	gcPauseUS := float64(0)
+	if mem.NumGC > 0 {
+		gcPauseUS = float64(mem.PauseNs[(mem.NumGC+255)%256]) / 1000.0
+	}
+	numGoroutines := runtime.NumGoroutine()
+	numCPU := runtime.NumCPU()
+
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Performance &amp; Memory Meter</h2>`)
+	b.WriteString(`<div style="display: flex; gap: 12px; margin-bottom: 12px;">`)
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #e8f0fe; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 18px; font-weight: 700; color: #1a73e8;">%.2f MB</div><div style="font-size: 11px; color: #5f6368;">Heap In-Use</div></div>`, allocMB))
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #e6f4ea; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 18px; font-weight: 700; color: #188038;">%.2f MB</div><div style="font-size: 11px; color: #5f6368;">OS Reserved</div></div>`, sysMB))
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #fef7e0; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 18px; font-weight: 700; color: #b06000;">%.1f &mu;s</div><div style="font-size: 11px; color: #5f6368;">Last GC Pause</div></div>`, gcPauseUS))
+	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f1f3f4; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 18px; font-weight: 700; color: #3c4043;">%d / %d</div><div style="font-size: 11px; color: #5f6368;">Goroutines / CPUs</div></div>`, numGoroutines, numCPU))
+	b.WriteString(`</div>`)
+	b.WriteString(fmt.Sprintf(`<div style="font-size: 12px; color: #5f6368;">Total GC Cycles: <b>%d</b> &bull; Cumulative Allocated: <b>%.2f MB</b></div>`, mem.NumGC, float64(mem.TotalAlloc)/(1024*1024)))
+	b.WriteString(`</div>`)
+
 	// DOM Elements Tree Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Elements (DOM Tree)</h2>`)
@@ -677,6 +703,52 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
     </div>`, targetTab.ID(), html.EscapeString(evalExpr)))
 
 	return "Web Inspector", internalPageTemplate("inspect", "Web Inspector", b.String())
+}
+
+// buildReaderPageHTML renders the distraction-free Reader Mode page.
+func buildReaderPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
+	u, _ := url.Parse(rawURL)
+	targetURL := ""
+	theme := "light"
+	if u != nil {
+		targetURL = u.Query().Get("url")
+		if t := u.Query().Get("theme"); t != "" {
+			theme = t
+		}
+	}
+
+	var targetTab *tabs.Tab
+	if f.tabMgr != nil {
+		if targetURL != "" {
+			for _, t := range f.tabMgr.Tabs() {
+				if t.URL() == targetURL {
+					targetTab = t
+					break
+				}
+			}
+		}
+		if targetTab == nil {
+			active := f.tabMgr.Active()
+			if active != nil && !strings.HasPrefix(strings.ToLower(active.URL()), "goosie://reader") {
+				targetTab = active
+				if targetURL == "" {
+					targetURL = active.URL()
+				}
+			}
+		}
+	}
+
+	if targetTab == nil || targetTab.Session() == nil || targetTab.Session().Doc == nil {
+		body := `<div class="card">
+      <h1>Reader Mode</h1>
+      <p style="color: #5f6368;">No readable document is currently available.</p>
+      <p>Navigate to an article or blog post in any tab and press <code>Cmd+Shift+R</code> to view it in distraction-free Reader Mode.</p>
+    </div>`
+		return "Reader Mode", internalPageTemplate("", "Reader Mode", body)
+	}
+
+	art := ExtractArticle(targetTab.Session().Doc, targetURL, theme)
+	return art.Title + " - Reader Mode", RenderReaderPageHTML(art)
 }
 
 // renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.

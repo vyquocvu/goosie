@@ -81,6 +81,33 @@ func (m *TabManager) Active() *Tab {
 	return m.tabs[m.activeIdx]
 }
 
+func (m *TabManager) archiveClosedTabLocked(closingTab *Tab) {
+	if closingTab == nil || closingTab.Incognito() {
+		return
+	}
+	var histClone *toolbar.History
+	var hasHistory bool
+	if h := closingTab.History(); h != nil {
+		entries, histIdx := h.Entries()
+		if len(entries) > 0 {
+			hasHistory = true
+			histClone = toolbar.RestoreHistory(entries, histIdx)
+		}
+	}
+	url := closingTab.URL()
+	if url != "" || hasHistory {
+		m.closedTabs = append(m.closedTabs, ClosedTab{
+			URL:     url,
+			Title:   closingTab.Title(),
+			History: histClone,
+			ScrollY: closingTab.ScrollY(),
+		})
+		if len(m.closedTabs) > maxClosedTabs {
+			m.closedTabs = m.closedTabs[len(m.closedTabs)-maxClosedTabs:]
+		}
+	}
+}
+
 func (m *TabManager) CloseTab(id uint64) {
 	m.mu.Lock()
 	idx := -1
@@ -95,28 +122,7 @@ func (m *TabManager) CloseTab(id uint64) {
 		return
 	}
 	closingTab := m.tabs[idx]
-	var histClone *toolbar.History
-	var hasHistory bool
-	if h := closingTab.History(); h != nil {
-		entries, histIdx := h.Entries()
-		if len(entries) > 0 {
-			hasHistory = true
-			histClone = toolbar.RestoreHistory(entries, histIdx)
-		}
-	}
-	url := closingTab.URL()
-	// Incognito tabs are ephemeral and leave zero trace in closed tab history.
-	if !closingTab.Incognito() && (url != "" || hasHistory) {
-		m.closedTabs = append(m.closedTabs, ClosedTab{
-			URL:     url,
-			Title:   closingTab.Title(),
-			History: histClone,
-			ScrollY: closingTab.ScrollY(),
-		})
-		if len(m.closedTabs) > maxClosedTabs {
-			m.closedTabs = m.closedTabs[len(m.closedTabs)-maxClosedTabs:]
-		}
-	}
+	m.archiveClosedTabLocked(closingTab)
 
 	m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
 	if len(m.tabs) == 0 {
@@ -135,6 +141,215 @@ func (m *TabManager) CloseTab(id uint64) {
 	}
 	m.mu.Unlock()
 	m.fireChange()
+}
+
+// DuplicateTab clones the tab identified by id, inserts it immediately after
+// the source tab, activates it, and returns the new tab.
+func (m *TabManager) DuplicateTab(id uint64) (*Tab, bool) {
+	m.mu.Lock()
+	idx := -1
+	for i, t := range m.tabs {
+		if t.ID() == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		m.mu.Unlock()
+		return nil, false
+	}
+	src := m.tabs[idx]
+	m.nextID++
+	dup := newTab(m.nextID)
+	dup.SetURL(src.URL())
+	dup.SetTitle(src.Title())
+	dup.SetIncognito(src.Incognito())
+	dup.SetScrollY(src.ScrollY())
+	if h := src.History(); h != nil {
+		entries, histIdx := h.Entries()
+		dup.SetHistory(toolbar.RestoreHistory(entries, histIdx))
+	}
+	newIdx := idx + 1
+	m.tabs = append(m.tabs, nil)
+	copy(m.tabs[newIdx+1:], m.tabs[newIdx:])
+	m.tabs[newIdx] = dup
+	m.activeIdx = newIdx
+	m.mu.Unlock()
+	m.fireChange()
+	return dup, true
+}
+
+// CloseOtherTabs closes all tabs except the tab with keepID and any pinned tabs.
+// Closed tabs are archived in closedTabs for reopening.
+func (m *TabManager) CloseOtherTabs(keepID uint64) {
+	m.mu.Lock()
+	var remaining []*Tab
+	var targetTab *Tab
+	for _, t := range m.tabs {
+		if t.ID() == keepID {
+			remaining = append(remaining, t)
+			targetTab = t
+		} else if t.Pinned() {
+			remaining = append(remaining, t)
+		} else {
+			m.archiveClosedTabLocked(t)
+		}
+	}
+	m.tabs = remaining
+	if len(m.tabs) == 0 {
+		m.activeIdx = 0
+		m.mu.Unlock()
+		m.fireChange()
+		if m.onCloseLast != nil {
+			go m.onCloseLast()
+		}
+		return
+	}
+	m.activeIdx = 0
+	if targetTab != nil {
+		for i, t := range m.tabs {
+			if t.ID() == targetTab.ID() {
+				m.activeIdx = i
+				break
+			}
+		}
+	}
+	m.mu.Unlock()
+	m.fireChange()
+}
+
+// CloseTabsToRight closes all unpinned tabs positioned to the right of fromID.
+func (m *TabManager) CloseTabsToRight(fromID uint64) {
+	m.mu.Lock()
+	fromIdx := -1
+	for i, t := range m.tabs {
+		if t.ID() == fromID {
+			fromIdx = i
+			break
+		}
+	}
+	if fromIdx < 0 {
+		m.mu.Unlock()
+		return
+	}
+	activeID := uint64(0)
+	if m.activeIdx >= 0 && m.activeIdx < len(m.tabs) {
+		activeID = m.tabs[m.activeIdx].ID()
+	}
+
+	var remaining []*Tab
+	for i := 0; i <= fromIdx; i++ {
+		remaining = append(remaining, m.tabs[i])
+	}
+	for i := fromIdx + 1; i < len(m.tabs); i++ {
+		t := m.tabs[i]
+		if t.Pinned() {
+			remaining = append(remaining, t)
+		} else {
+			m.archiveClosedTabLocked(t)
+		}
+	}
+	m.tabs = remaining
+	if len(m.tabs) == 0 {
+		m.activeIdx = 0
+		m.mu.Unlock()
+		m.fireChange()
+		if m.onCloseLast != nil {
+			go m.onCloseLast()
+		}
+		return
+	}
+	newActiveIdx := 0
+	foundActive := false
+	for i, t := range m.tabs {
+		if t.ID() == activeID {
+			newActiveIdx = i
+			foundActive = true
+			break
+		}
+	}
+	if !foundActive {
+		newActiveIdx = fromIdx
+		if newActiveIdx >= len(m.tabs) {
+			newActiveIdx = len(m.tabs) - 1
+		}
+	}
+	m.activeIdx = newActiveIdx
+	m.mu.Unlock()
+	m.fireChange()
+}
+
+// PinTab pins the tab identified by id and moves it after existing pinned tabs.
+func (m *TabManager) PinTab(id uint64) bool {
+	m.mu.Lock()
+	idx := -1
+	for i, t := range m.tabs {
+		if t.ID() == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		m.mu.Unlock()
+		return false
+	}
+	tab := m.tabs[idx]
+	tab.SetPinned(true)
+	// Reorder tab to right after the last existing pinned tab before this index
+	lastPinnedIdx := -1
+	for i, t := range m.tabs {
+		if t.Pinned() && t.ID() != id {
+			lastPinnedIdx = i
+		}
+	}
+	targetIdx := lastPinnedIdx + 1
+	if targetIdx < idx {
+		m.tabs = append(m.tabs[:idx], m.tabs[idx+1:]...)
+		m.tabs = append(m.tabs, nil)
+		copy(m.tabs[targetIdx+1:], m.tabs[targetIdx:])
+		m.tabs[targetIdx] = tab
+		for i, t := range m.tabs {
+			if t.ID() == id {
+				m.activeIdx = i
+				break
+			}
+		}
+	}
+	m.mu.Unlock()
+	m.fireChange()
+	return true
+}
+
+// UnpinTab unpins the tab identified by id.
+func (m *TabManager) UnpinTab(id uint64) bool {
+	m.mu.Lock()
+	for _, t := range m.tabs {
+		if t.ID() == id {
+			t.SetPinned(false)
+			m.mu.Unlock()
+			m.fireChange()
+			return true
+		}
+	}
+	m.mu.Unlock()
+	return false
+}
+
+// TogglePin toggles the pinned state of the tab identified by id.
+func (m *TabManager) TogglePin(id uint64) bool {
+	m.mu.Lock()
+	for _, t := range m.tabs {
+		if t.ID() == id {
+			pinned := !t.Pinned()
+			m.mu.Unlock()
+			if pinned {
+				return m.PinTab(id)
+			}
+			return m.UnpinTab(id)
+		}
+	}
+	m.mu.Unlock()
+	return false
 }
 
 // ReopenTab creates a new tab restoring the state of the most recently closed tab,
