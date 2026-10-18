@@ -371,7 +371,7 @@ func IsActivatable(n *dom.Node) bool {
 		return false
 	}
 	switch n.Data {
-	case "button":
+	case "button", "summary":
 		return true
 	case "a":
 		return n.GetAttribute("href") != ""

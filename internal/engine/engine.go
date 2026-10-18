@@ -1387,6 +1387,18 @@ func (s *Session) runClickDefault(n *dom.Node) {
 				s.ResetForm(form)
 			}
 		}
+	case "summary":
+		for p := n.Parent; p != nil; p = p.Parent {
+			if p.Element() && p.Data == "details" {
+				if p.HasAttribute("open") {
+					p.RemoveAttribute("open")
+				} else {
+					p.SetAttribute("open", "")
+				}
+				dom.DispatchEvent(p, dom.NewEvent("toggle", false, false))
+				break
+			}
+		}
 	case "button":
 		btnType := strings.ToLower(n.GetAttribute("type"))
 		switch btnType {

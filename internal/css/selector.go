@@ -100,7 +100,7 @@ func (c *Condition) precompile() {
 		return
 	}
 	switch c.Value {
-	case "not", "is", "where":
+	case "not", "is", "where", "host":
 		var sels []Selector
 		for _, selStr := range splitSelectorList(c.Pseudo) {
 			sels = append(sels, ParseSelector(selStr))
@@ -177,8 +177,11 @@ func (s Selector) Specificity() (a, b, c int) {
 				if cond.Value == "where" {
 					continue
 				}
-				// :is() and :not() take the highest specificity of their arguments.
-				if cond.Value == "is" || cond.Value == "not" {
+				// :is(), :not(), and :host() take the specificity of their arguments.
+				if cond.Value == "is" || cond.Value == "not" || cond.Value == "host" {
+					if cond.Value == "host" {
+						b++ // :host itself contributes 1 pseudo-class
+					}
 					var sels []Selector
 					if cond.compiled != nil && len(cond.compiled.sels) > 0 {
 						sels = cond.compiled.sels
@@ -748,6 +751,29 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		// a first load, which is the state every reference render is captured
 		// in - treating `a:visited` as `a:link` painted Wikipedia's links in
 		// MediaWiki's visited purple because that rule comes after the link one.
+		return false
+	case "host":
+		if n.ShadowRoot == nil {
+			return false
+		}
+		if c.Pseudo == "" {
+			return true
+		}
+		if c.compiled != nil && len(c.compiled.sels) > 0 {
+			for _, sel := range c.compiled.sels {
+				if sel.MatchesIndexed(n, ix) {
+					return true
+				}
+			}
+			return false
+		}
+		selectors := splitSelectorList(c.Pseudo)
+		for _, selStr := range selectors {
+			sel := ParseSelector(selStr)
+			if sel.MatchesIndexed(n, ix) {
+				return true
+			}
+		}
 		return false
 	case "hover":
 		return IsHovered(n)

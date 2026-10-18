@@ -13,6 +13,8 @@
 package layout
 
 import (
+	"strings"
+
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -325,6 +327,16 @@ func countLayoutNodes(root *dom.Node) int {
 	for len(stack) > 0 {
 		top := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+		if top.ShadowRoot != nil {
+			for c := top.ShadowRoot.FirstChild; c != nil; c = c.NextSibling {
+				if c.Element() || c.Type == dom.NodeText {
+					n++
+				}
+				if c.FirstChild != nil {
+					stack = append(stack, c)
+				}
+			}
+		}
 		for c := top.FirstChild; c != nil; c = c.NextSibling {
 			if c.Element() || c.Type == dom.NodeText {
 				n++
@@ -338,6 +350,10 @@ func countLayoutNodes(root *dom.Node) int {
 }
 
 func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
+	return buildSubtreeWithHost(a, n, nil, doc, styles, pseudoStyles, scope)
+}
+
+func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
 	if n.ID != 0 {
 		if id, ok := a.ForNode(n.ID); ok {
 			return id
@@ -369,11 +385,58 @@ func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeI
 		}
 	}
 
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Element() || c.Type == dom.NodeText {
-			kid := buildSubtree(a, c, doc, styles, pseudoStyles, scope)
-			a.Link(id, kid)
+	var childHead *dom.Node
+	currentHost := shadowHost
+	if n.ShadowRoot != nil {
+		childHead = n.ShadowRoot.FirstChild
+		currentHost = n
+	} else {
+		childHead = n.FirstChild
+	}
+
+	for c := childHead; c != nil; c = c.NextSibling {
+		if !c.Element() && c.Type != dom.NodeText {
+			continue
 		}
+		if c.Element() && c.Data == "slot" && currentHost != nil {
+			slotName := c.GetAttribute("name")
+			var assigned []*dom.Node
+			for lc := currentHost.FirstChild; lc != nil; lc = lc.NextSibling {
+				if !lc.Element() && lc.Type != dom.NodeText {
+					continue
+				}
+				if lc.Type == dom.NodeText && strings.TrimSpace(lc.DataContent) == "" {
+					continue
+				}
+				if slotName != "" {
+					if lc.Element() && lc.GetAttribute("slot") == slotName {
+						assigned = append(assigned, lc)
+					}
+				} else {
+					if !lc.Element() || lc.GetAttribute("slot") == "" {
+						assigned = append(assigned, lc)
+					}
+				}
+			}
+			if len(assigned) > 0 {
+				for _, ak := range assigned {
+					kid := buildSubtreeWithHost(a, ak, nil, doc, styles, pseudoStyles, scope)
+					a.Link(id, kid)
+				}
+			} else {
+				// Slot fallback content
+				for sc := c.FirstChild; sc != nil; sc = sc.NextSibling {
+					if sc.Element() || sc.Type == dom.NodeText {
+						kid := buildSubtreeWithHost(a, sc, currentHost, doc, styles, pseudoStyles, scope)
+						a.Link(id, kid)
+					}
+				}
+			}
+			continue
+		}
+
+		kid := buildSubtreeWithHost(a, c, currentHost, doc, styles, pseudoStyles, scope)
+		a.Link(id, kid)
 	}
 
 	// Inject ::after pseudo-element as last child if it has content.

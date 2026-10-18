@@ -32,10 +32,11 @@ type ruleIndex struct {
 // indexedSelector is one selector of one rule plus the cascade facts derived
 // from it, so a resolution pass never revisits the sheet structure.
 type indexedSelector struct {
-	rule    *css.Rule
-	sel     css.Selector
-	origin  int
-	a, b, c int
+	rule       *css.Rule
+	sel        css.Selector
+	origin     int
+	layerOrder int
+	a, b, c    int
 	// rank counts the declarations that precede this selector's own block in
 	// sheet, rule and selector order. Walking matches in rank order reproduces
 	// exactly the plain traversal the cascade is defined on, which is what keeps
@@ -52,6 +53,20 @@ func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
 		byClass: make(map[string][]*indexedSelector),
 		byTag:   make(map[string][]*indexedSelector),
 	}
+
+	layerSeq := 0
+	layerMap := make(map[string]int)
+
+	// Step 1: Record all explicitly ordered layers across sheets (@layer name1, name2;)
+	for _, sheet := range sheets {
+		for _, name := range sheet.Layers {
+			if _, ok := layerMap[name]; !ok {
+				layerSeq++
+				layerMap[name] = layerSeq
+			}
+		}
+	}
+
 	for _, sheet := range sheets {
 		origin := 1
 		if sheet == uaSheet {
@@ -59,13 +74,24 @@ func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
 		}
 		for i := range sheet.Rules {
 			rule := &sheet.Rules[i]
+			layerOrder := 0
+			if rule.Layer != "" {
+				if order, ok := layerMap[rule.Layer]; ok {
+					layerOrder = order
+				} else {
+					layerSeq++
+					layerMap[rule.Layer] = layerSeq
+					layerOrder = layerSeq
+				}
+			}
 			for _, sel := range rule.Selectors {
 				a, b, c := sel.Specificity()
 				e := &indexedSelector{
-					rule:   rule,
-					sel:    sel,
-					origin: origin,
-					a:      a, b: b, c: c,
+					rule:       rule,
+					sel:        sel,
+					origin:     origin,
+					layerOrder: layerOrder,
+					a:          a, b: b, c: c,
 					rank: ix.declCount,
 				}
 				ix.declCount += len(rule.Declarations)

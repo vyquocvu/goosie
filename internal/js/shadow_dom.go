@@ -123,6 +123,37 @@ func (r *Runtime) jsGetShadowRoot(call goja.FunctionCall) goja.Value {
 	if srObj, ok := r.shadowRoots[nodeID]; ok {
 		return srObj
 	}
+
+	// Check if the underlying DOM node has a shadow root (e.g. Declarative Shadow DOM)
+	if node, ok := r.nodeRegistry[nodeID]; ok && node.ShadowRoot != nil {
+		if node.ShadowRoot.Mode == "closed" {
+			return goja.Null()
+		}
+		srObj := r.vm.NewObject()
+		_ = srObj.Set("mode", node.ShadowRoot.Mode)
+		if hostVal := r.wrapNode(node); hostVal != nil {
+			_ = srObj.Set("host", hostVal)
+		}
+		sr := node.ShadowRoot
+		_ = srObj.Set("appendChild", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 1 {
+				return goja.Undefined()
+			}
+			childNode := r.getNode(call.Arguments[0])
+			if childNode == nil {
+				return goja.Undefined()
+			}
+			sr.AppendChild(childNode)
+			r.notifyMutation()
+			if childNode.Type == dom.NodeElement {
+				r.invokeLifecycleCallback(childNode, "connectedCallback")
+			}
+			return call.Arguments[0]
+		})
+		r.shadowRoots[nodeID] = srObj
+		return srObj
+	}
+
 	return goja.Null()
 }
 

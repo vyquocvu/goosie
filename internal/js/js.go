@@ -1277,6 +1277,15 @@ func (r *Runtime) defineElementAccessors(obj *goja.Object) {
 				},
 				configurable: true,
 				enumerable: true
+			},
+			shadowRoot: {
+				get: function() {
+					var nid = this.__nid__;
+					if (nid === undefined) return null;
+					return document.__getShadowRoot__(nid);
+				},
+				configurable: true,
+				enumerable: true
 			}
 		});
 	`)

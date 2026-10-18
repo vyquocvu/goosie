@@ -832,8 +832,87 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 			result[n.ID] = textStyle
 		}
 	}
+	if n.ShadowRoot != nil {
+		var shadowSheets []*css.Stylesheet
+		collectShadowStyleSheets(n.ShadowRoot.FirstChild, &shadowSheets)
+		shadowIndex := index
+		if len(shadowSheets) > 0 {
+			allShadowSheets := []*css.Stylesheet{UserAgentStylesheet()}
+			allShadowSheets = append(allShadowSheets, shadowSheets...)
+			shadowIndex = buildRuleIndex(allShadowSheets)
+
+			// Apply :host rules from shadow stylesheets to host element's style
+			pSize := float32(16)
+			if pStyle := findParentStyle(n, result); pStyle != nil {
+				pSize = pStyle.FontSize
+			}
+			applyHostStyles(n, shadowSheets, result[n.ID], pSize, vp, fonts, six)
+		}
+		for sc := n.ShadowRoot.FirstChild; sc != nil; sc = sc.NextSibling {
+			resolveNode(sc, shadowIndex, result, vp, fonts, six)
+		}
+	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		resolveNode(c, index, result, vp, fonts, six)
+	}
+}
+
+func collectShadowStyleSheets(root *dom.Node, sheets *[]*css.Stylesheet) {
+	for c := root; c != nil; c = c.NextSibling {
+		if c.Element() && c.Data == "style" {
+			text := c.TextContent()
+			if strings.TrimSpace(text) != "" {
+				*sheets = append(*sheets, css.Parse(text))
+			}
+		}
+		if c.FirstChild != nil {
+			collectShadowStyleSheets(c.FirstChild, sheets)
+		}
+	}
+}
+
+func applyHostStyles(n *dom.Node, shadowSheets []*css.Stylesheet, cs *ComputedStyle, parentFontSize float32, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) {
+	if cs == nil || n == nil {
+		return
+	}
+	var normal, important []cascadeEntry
+	order := 0
+	for _, sheet := range shadowSheets {
+		for i := range sheet.Rules {
+			rule := &sheet.Rules[i]
+			matches := false
+			for _, sel := range rule.Selectors {
+				if sel.MatchesIndexed(n, six) {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				for _, d := range rule.Declarations {
+					e := cascadeEntry{
+						decl:       inViewport(d, vp),
+						origin:     2,
+						layerOrder: 0,
+						order:      order,
+					}
+					order++
+					if d.Important {
+						important = append(important, e)
+					} else {
+						normal = append(normal, e)
+					}
+				}
+			}
+		}
+	}
+	sortCascade(normal)
+	sortCascade(important)
+	vars := expanderFor(cs.Custom, normal, important)
+	for _, e := range normal {
+		applyCascadeEntry(cs, e, parentFontSize, vars, fonts)
+	}
+	for _, e := range important {
+		applyCascadeEntry(cs, e, parentFontSize, vars, fonts)
 	}
 }
 
@@ -866,15 +945,40 @@ func inheritStyle(parent *ComputedStyle) *ComputedStyle {
 // splits the list into two passes, then origin outranks specificity, and
 // specificity outranks document order.
 type cascadeEntry struct {
-	decl    css.Declaration
-	origin  int
-	a, b, c int
-	order   int
+	decl       css.Declaration
+	origin     int
+	layerOrder int
+	a, b, c    int
+	order      int
+}
+
+func layerPrecedenceRank(layerOrder int, important bool) int {
+	if !important {
+		// Normal author declarations:
+		// Layer 1 < Layer 2 < ... < Layer N < Unlayered
+		if layerOrder == 0 {
+			return 1_000_000_000
+		}
+		return layerOrder
+	}
+	// Important author declarations:
+	// Unlayered < Layer N < ... < Layer 2 < Layer 1
+	if layerOrder == 0 {
+		return 0
+	}
+	return 1_000_000_000 - layerOrder
 }
 
 func (e cascadeEntry) before(o cascadeEntry) bool {
 	if e.origin != o.origin {
 		return e.origin < o.origin
+	}
+	if e.origin > 0 { // Author rules & hints
+		rE := layerPrecedenceRank(e.layerOrder, e.decl.Important)
+		rO := layerPrecedenceRank(o.layerOrder, o.decl.Important)
+		if rE != rO {
+			return rE < rO
+		}
 	}
 	if e.a != o.a {
 		return e.a < o.a
@@ -954,7 +1058,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 	for _, cand := range matched {
 		for _, d := range cand.rule.Declarations {
-			e := cascadeEntry{decl: inViewport(d, vp), origin: cand.origin, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
+			e := cascadeEntry{decl: inViewport(d, vp), origin: cand.origin, layerOrder: cand.layerOrder, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
 			if d.Important {
 				important = append(important, e)
 			} else {

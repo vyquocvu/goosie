@@ -28,6 +28,7 @@ type Rule struct {
 	Selectors    []Selector
 	SelectorStrs []string
 	Declarations []Declaration
+	Layer        string
 }
 
 // FontFaceRule is one @font-face rule: declarations only, no selectors.
@@ -41,6 +42,8 @@ type Stylesheet struct {
 	FontFaces []FontFaceRule
 	// Keyframes holds the parsed @keyframes rules from this stylesheet.
 	Keyframes []KeyframesRule
+	// Layers holds layer names declared via `@layer name1, name2;`.
+	Layers []string
 }
 
 // MediaOptions configures environment features for media query evaluation.
@@ -157,9 +160,11 @@ type parser struct {
 	// mediaWidth is the viewport this parser tests @media width conditions
 	// against. Nested blocks inherit it so an @media inside an @supports or
 	// inside another @media sees the document's width, not the default.
-	mediaWidth   float32
-	darkMode     bool
-	highContrast bool
+	mediaWidth     float32
+	darkMode       bool
+	highContrast   bool
+	currentLayer   string
+	anonLayerCount int
 }
 
 func (p *parser) parse() *Stylesheet {
@@ -195,28 +200,54 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 		}
 		rule := p.parseRule()
 		if len(rule.Selectors) > 0 {
+			if p.currentLayer != "" && rule.Layer == "" {
+				rule.Layer = p.currentLayer
+			}
 			sheet.Rules = append(sheet.Rules, rule)
 		}
 	}
 }
 
 // parseLayerRule enters a named or anonymous @layer block and appends its
-// rules in source order. Layer precedence is not modeled yet, but parsing the
-// block keeps the ordinary declarations available to the cascade; skipping an
-// entire layer left modern utility-CSS pages completely unstyled.
+// rules with layer metadata. It also records layer-order statements (@layer a, b;).
 func (p *parser) parseLayerRule(sheet *Stylesheet) {
 	p.pos++ // '@'
+	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+		p.pos++
+	}
+	p.skipWhitespace()
+	preludeStart := p.pos
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
 	if p.pos >= len(p.input) {
 		return
 	}
+	prelude := strings.TrimSpace(p.input[preludeStart:p.pos])
 	if p.input[p.pos] == ';' {
-		p.pos++ // layer-order statement; source order is the available fallback
+		p.pos++ // ';'
+		if prelude != "" {
+			parts := strings.Split(prelude, ",")
+			for _, part := range parts {
+				name := strings.TrimSpace(part)
+				if name != "" {
+					if p.currentLayer != "" {
+						name = p.currentLayer + "." + name
+					}
+					sheet.Layers = append(sheet.Layers, name)
+				}
+			}
+		}
 		return
 	}
 	p.pos++ // the '{'
+	layerName := prelude
+	if layerName == "" {
+		p.anonLayerCount++
+		layerName = "anon#" + strconv.Itoa(p.anonLayerCount)
+	} else if p.currentLayer != "" {
+		layerName = p.currentLayer + "." + layerName
+	}
 	bodyStart := p.pos
 	depth := 1
 	for p.pos < len(p.input) && depth > 0 {
@@ -238,8 +269,16 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 	if p.pos < len(p.input) {
 		p.pos++ // the final '}'
 	}
-	inner := &parser{input: body, mediaWidth: p.mediaWidth, darkMode: p.darkMode, highContrast: p.highContrast}
+	inner := &parser{
+		input:          body,
+		mediaWidth:     p.mediaWidth,
+		darkMode:       p.darkMode,
+		highContrast:   p.highContrast,
+		currentLayer:   layerName,
+		anonLayerCount: p.anonLayerCount,
+	}
 	inner.parseInto(sheet)
+	p.anonLayerCount = inner.anonLayerCount
 }
 
 // atRuleName reads an @rule name without consuming past its prelude, so the
@@ -306,8 +345,16 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 		p.pos++ // the final '}'
 	}
 	if p.mediaConditionTrue(cond) {
-		inner := &parser{input: body, mediaWidth: p.mediaWidth, darkMode: p.darkMode, highContrast: p.highContrast}
+		inner := &parser{
+			input:          body,
+			mediaWidth:     p.mediaWidth,
+			darkMode:       p.darkMode,
+			highContrast:   p.highContrast,
+			currentLayer:   p.currentLayer,
+			anonLayerCount: p.anonLayerCount,
+		}
 		inner.parseInto(sheet)
+		p.anonLayerCount = inner.anonLayerCount
 	}
 }
 
@@ -358,8 +405,16 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 		p.pos++ // the final '}'
 	}
 	if supportsConditionTrue(cond) {
-		inner := &parser{input: body, mediaWidth: p.mediaWidth}
+		inner := &parser{
+			input:          body,
+			mediaWidth:     p.mediaWidth,
+			darkMode:       p.darkMode,
+			highContrast:   p.highContrast,
+			currentLayer:   p.currentLayer,
+			anonLayerCount: p.anonLayerCount,
+		}
 		inner.parseInto(sheet)
+		p.anonLayerCount = inner.anonLayerCount
 	}
 }
 
