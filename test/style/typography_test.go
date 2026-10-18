@@ -140,3 +140,64 @@ func TestWritingModesAndFontVariantNumeric(t *testing.T) {
 		t.Errorf("custom FontVariantNumeric = %q, want lining-nums", sCust.FontVariantNumeric)
 	}
 }
+
+func TestMaskProperties(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	doc.Node.AppendChild(html)
+	body := doc.NewElement("body")
+	html.AppendChild(body)
+
+	d1 := doc.NewElement("div")
+	d1.SetAttribute("id", "m1")
+	body.AppendChild(d1)
+
+	d2 := doc.NewElement("div")
+	d2.SetAttribute("id", "m2")
+	body.AppendChild(d2)
+
+	sheet := css.Parse(`
+		#m1 {
+			mask-image: url('mask.png');
+			mask-repeat: no-repeat;
+			mask-size: contain;
+			mask-position: center;
+		}
+		#m2 {
+			-webkit-mask-image: url('webkit-mask.png');
+			-webkit-mask-repeat: repeat-x;
+			-webkit-mask-size: cover;
+			-webkit-mask-position: top left;
+		}
+	`)
+
+	styles := style.Resolve(doc, []*css.Stylesheet{sheet}, nil)
+
+	s1 := styles[d1.ID]
+	if s1.MaskImage != "mask.png" {
+		t.Errorf("m1 MaskImage = %q, want mask.png", s1.MaskImage)
+	}
+	if s1.MaskRepeat != "no-repeat" {
+		t.Errorf("m1 MaskRepeat = %q, want no-repeat", s1.MaskRepeat)
+	}
+	if s1.MaskSize != "contain" {
+		t.Errorf("m1 MaskSize = %q, want contain", s1.MaskSize)
+	}
+	if s1.MaskPosition != "center" {
+		t.Errorf("m1 MaskPosition = %q, want center", s1.MaskPosition)
+	}
+
+	s2 := styles[d2.ID]
+	if s2.MaskImage != "webkit-mask.png" {
+		t.Errorf("m2 MaskImage = %q, want webkit-mask.png", s2.MaskImage)
+	}
+	if s2.MaskRepeat != "repeat-x" {
+		t.Errorf("m2 MaskRepeat = %q, want repeat-x", s2.MaskRepeat)
+	}
+	if s2.MaskSize != "cover" {
+		t.Errorf("m2 MaskSize = %q, want cover", s2.MaskSize)
+	}
+	if s2.MaskPosition != "top left" {
+		t.Errorf("m2 MaskPosition = %q, want 'top left'", s2.MaskPosition)
+	}
+}

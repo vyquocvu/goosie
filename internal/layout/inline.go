@@ -623,6 +623,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 	}
 	if k.Node != nil && k.Node.Text() {
 		text := k.Node.DataContent
+		if k.Style.TextTransform != "" {
+			text = applyTextTransform(text, k.Style.TextTransform)
+		}
 		// The whitespace-collapse path (normal, nowrap) fuses collapsing and
 		// splitting into one pass below, so the raw text is kept: collapsing
 		// first would allocate a normalized copy just to re-scan it. The
@@ -1227,4 +1230,81 @@ func isRubyAnnotation(obj *Object, a *Arena) bool {
 		curr = a.Get(curr.Parent)
 	}
 	return false
+}
+
+// applyTextTransform applies CSS text-transform to an input string.
+func applyTextTransform(text string, transform string) string {
+	if text == "" || transform == "" || transform == "none" {
+		return text
+	}
+	switch transform {
+	case "uppercase":
+		return strings.ToUpper(text)
+	case "lowercase":
+		return strings.ToLower(text)
+	case "capitalize":
+		return strings.Title(text)
+	case "full-width":
+		var b strings.Builder
+		for _, r := range text {
+			if r >= 0x21 && r <= 0x7E {
+				// ASCII 0x21 (!) to 0x7E (~) map to full-width 0xFF01 to 0xFF5E
+				b.WriteRune(r + 0xFEE0)
+			} else if r == 0x20 {
+				// Space maps to ideographic space 0x3000
+				b.WriteRune(0x3000)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	case "full-size-kana":
+		var b strings.Builder
+		for _, r := range text {
+			// Convert small hiragana/katakana to full-size equivalents
+			switch r {
+			case 'ぁ':
+				b.WriteRune('あ')
+			case 'ぃ':
+				b.WriteRune('い')
+			case 'ぅ':
+				b.WriteRune('う')
+			case 'ぇ':
+				b.WriteRune('え')
+			case 'ぉ':
+				b.WriteRune('お')
+			case 'っ':
+				b.WriteRune('つ')
+			case 'ゃ':
+				b.WriteRune('や')
+			case 'ゅ':
+				b.WriteRune('ゆ')
+			case 'ょ':
+				b.WriteRune('よ')
+			case 'ァ':
+				b.WriteRune('ア')
+			case 'ィ':
+				b.WriteRune('イ')
+			case 'ゥ':
+				b.WriteRune('ウ')
+			case 'ェ':
+				b.WriteRune('エ')
+			case 'ォ':
+				b.WriteRune('オ')
+			case 'ッ':
+				b.WriteRune('ツ')
+			case 'ャ':
+				b.WriteRune('ヤ')
+			case 'ュ':
+				b.WriteRune('ユ')
+			case 'ョ':
+				b.WriteRune('ヨ')
+			default:
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	default:
+		return text
+	}
 }

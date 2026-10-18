@@ -948,6 +948,10 @@ func (r *Runtime) setupDOM() {
 	} else {
 		_ = doc.Set("head", goja.Null())
 	}
+
+	_ = doc.Set("__getShadowRoot__", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetShadowRoot(call)
+	})
 }
 
 // wrapNode creates a JS wrapper object for a DOM node. The wrapper inherits

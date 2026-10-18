@@ -33,3 +33,32 @@ abcdefghijklmnopqrstuvwxyz
 		t.Errorf("expected many split text word tokens under break-all, got %d", textWords)
 	}
 }
+
+func TestTextTransformFullWidth(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html><body style="margin: 0;">
+<div id="fw" style="text-transform: full-width;">abc 123!</div>
+</body></html>`
+
+	sess, err := engine.NewSession(html, nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	foundFullWidth := false
+	for i := range sess.Arena.Objects {
+		obj := &sess.Arena.Objects[i]
+		if obj.Node != nil && obj.Node.Text() {
+			// Check for full-width 'ａ' (U+FF41) or '！' (U+FF01)
+			for _, r := range obj.Node.DataContent {
+				if r == 0xFF41 || r == 0xFF01 {
+					foundFullWidth = true
+					break
+				}
+			}
+		}
+	}
+	if !foundFullWidth {
+		t.Errorf("expected text-transform: full-width to convert ASCII characters to full-width variants")
+	}
+}

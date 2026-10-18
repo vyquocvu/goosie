@@ -376,6 +376,9 @@ type ComputedStyle struct {
 	// kept as authored like BackgroundImage. Only a single url() layer is
 	// supported; additional layers are dropped at parse. Empty means no mask.
 	MaskImage        string
+	MaskRepeat       string // "repeat", "repeat-x", "repeat-y", "no-repeat", "space", "round"
+	MaskSize         string // "auto", "contain", "cover", or length/percent
+	MaskPosition     string // "center", "top", "bottom", "left", "right", etc.
 	BackgroundRepeat BgRepeat
 	// BackgroundRepeatY carries the second axis when background-repeat names
 	// two modes (`repeat round`); single modes mirror into both axes.
@@ -632,6 +635,9 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.BackgroundColor = css.Color{}
 	s.BackgroundImage = ""
 	s.MaskImage = ""
+	s.MaskRepeat = ""
+	s.MaskSize = ""
+	s.MaskPosition = ""
 	s.BackgroundGradient = Gradient{}
 	s.BackgroundRadialGradient = RadialGradient{}
 	s.BoxShadow = nil
@@ -3289,6 +3295,17 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		// gradients) leaves the field empty. Both spellings feed the same
 		// field in cascade order so the later declaration wins.
 		cs.MaskImage = extractBackgroundURL(value)
+	case "mask-repeat", "-webkit-mask-repeat":
+		cs.MaskRepeat = strings.ToLower(strings.TrimSpace(value))
+	case "mask-size", "-webkit-mask-size":
+		cs.MaskSize = strings.ToLower(strings.TrimSpace(value))
+	case "mask-position", "-webkit-mask-position":
+		cs.MaskPosition = strings.ToLower(strings.TrimSpace(value))
+	case "mask", "-webkit-mask":
+		v := strings.TrimSpace(value)
+		if u := extractBackgroundURL(v); u != "" {
+			cs.MaskImage = u
+		}
 	case "background-repeat":
 		cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(value)
 	case "background-origin":
@@ -3330,7 +3347,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "text-indent":
 		cs.TextIndent = resolveLength(parsed, 0)
 	case "text-transform":
-		cs.TextTransform = value
+		cs.TextTransform = strings.ToLower(strings.TrimSpace(value))
 	case "text-decoration":
 		cs.TextDecoration = parseTextDecoration(value)
 	case "text-underline-offset":

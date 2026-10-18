@@ -519,6 +519,18 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return r.newCanvasGradient("conic", args)
 	})
 
+	_ = obj.Set("createPattern", func(call goja.FunctionCall) goja.Value {
+		repetition := "repeat"
+		if len(call.Arguments) >= 2 {
+			repetition = strings.ToLower(call.Arguments[1].String())
+		}
+		var imageObj interface{}
+		if len(call.Arguments) >= 1 {
+			imageObj = call.Arguments[0].Export()
+		}
+		return r.newCanvasPattern(imageObj, repetition)
+	})
+
 	// Transform methods
 	_ = obj.Set("save", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
@@ -1198,6 +1210,7 @@ func (r *Runtime) setupCanvas() {
 
 	r.setupPath2D()
 	r.setupCanvasGradient()
+	r.setupCanvasPattern()
 }
 
 type canvasGradientData struct {
@@ -1246,6 +1259,46 @@ func (r *Runtime) setupCanvasGradient() {
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("CanvasGradient", ctorVal)
+		}
+	}
+}
+
+type canvasPatternData struct {
+	mu         sync.Mutex
+	image      interface{}
+	repetition string
+	matrix     []float64
+}
+
+func (r *Runtime) newCanvasPattern(image interface{}, repetition string) *goja.Object {
+	pData := &canvasPatternData{
+		image:      image,
+		repetition: repetition,
+	}
+	obj := r.vm.NewObject()
+	_ = obj.Set("__is_pattern__", true)
+	_ = obj.Set("setTransform", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 1 {
+			if domMatrix, ok := call.Arguments[0].Export().([]float64); ok {
+				pData.mu.Lock()
+				pData.matrix = domMatrix
+				pData.mu.Unlock()
+			}
+		}
+		return goja.Undefined()
+	})
+	return obj
+}
+
+func (r *Runtime) setupCanvasPattern() {
+	ctor := func(call goja.ConstructorCall) *goja.Object {
+		return r.newCanvasPattern(nil, "repeat")
+	}
+	ctorVal := r.vm.ToValue(ctor)
+	_ = r.vm.Set("CanvasPattern", ctorVal)
+	if win := r.vm.Get("window"); win != nil {
+		if winObj, ok := win.(*goja.Object); ok {
+			_ = winObj.Set("CanvasPattern", ctorVal)
 		}
 	}
 }
