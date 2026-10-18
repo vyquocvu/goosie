@@ -287,6 +287,7 @@ func New(opts Options) (*Runtime, error) {
 		r.setupWorker(opts.WorkerDialer)
 	}
 	r.setupServiceWorker()
+	r.setupCSS()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 

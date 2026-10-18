@@ -224,6 +224,14 @@ const (
 	FlexWrapReverse
 )
 
+// StartingStyle holds the initial entry styles defined via @starting-style.
+type StartingStyle struct {
+	Opacity    float32
+	HasOpacity bool
+	Display    Display
+	Values     map[string]string
+}
+
 // ComputedStyle holds every CSS property fully resolved to concrete values.
 // Every length is float32 in CSS pixels; no parse step remains for layout.
 type ComputedStyle struct {
@@ -232,6 +240,7 @@ type ComputedStyle struct {
 	// properties apply. It is inherited, and shared read-only with the parent
 	// when an element declares none of its own.
 	Custom      map[string]string
+	Starting    *StartingStyle
 	Display     Display
 	Position    Position
 	Float       Float
@@ -1267,6 +1276,7 @@ func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport, f
 	allSheets = append(allSheets, sheets...)
 
 	index := buildRuleIndex(allSheets)
+	index.loadDocumentProperties(doc)
 	result := make(map[dom.NodeID]*ComputedStyle)
 	// One sibling cache for the whole pass: :nth-child counting would
 	// otherwise walk siblings per tested element (O(siblings²) per parent).
@@ -1300,6 +1310,9 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 			allShadowSheets := []*css.Stylesheet{UserAgentStylesheet()}
 			allShadowSheets = append(allShadowSheets, shadowSheets...)
 			shadowIndex = buildRuleIndex(allShadowSheets)
+			if n.Doc != nil {
+				shadowIndex.loadDocumentProperties(n.Doc)
+			}
 
 			// Apply :host rules from shadow stylesheets to host element's style
 			pSize := float32(16)
@@ -1367,7 +1380,7 @@ func applyHostStyles(n *dom.Node, shadowSheets []*css.Stylesheet, cs *ComputedSt
 	}
 	sortCascade(normal)
 	sortCascade(important)
-	vars := expanderFor(cs.Custom, normal, important)
+	vars := expanderFor(cs.Custom, normal, important, nil)
 	for _, e := range normal {
 		applyCascadeEntry(cs, e, parentFontSize, vars, fonts)
 	}
@@ -1495,8 +1508,13 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	// cascade slices be sized exactly instead of regrown by append.
 	cands := index.candidates(n)
 	matched := cands[:0]
+	var startingMatched []*indexedSelector
 	ruleDecls, ruleImportant := 0, 0
 	for _, cand := range cands {
+		if cand.rule.StartingStyle {
+			startingMatched = append(startingMatched, cand)
+			continue
+		}
 		if cand.rule.ScopeRoot != "" || cand.rule.ScopeLimit != "" {
 			var rootNode *dom.Node
 			if cand.rule.ScopeRoot == "" {
@@ -1607,7 +1625,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 
 	sortCascade(normal)
 	sortCascade(important)
-	cs.Custom = resolveCustom(parent, normal, important)
+	cs.Custom = resolveCustom(parent, normal, important, index.properties)
 	cs.ColorScheme = resolveColorScheme(parent, normal, important)
 	if strings.Contains(cs.ColorScheme, "dark") {
 		cs.isDark = true
@@ -1616,12 +1634,15 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	} else {
 		cs.isDark = vp.DarkMode
 	}
-	vars := expanderFor(cs.Custom, normal, important)
+	vars := expanderFor(cs.Custom, normal, important, index.properties)
 	for _, e := range normal {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 	}
 	for _, e := range important {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
+	}
+	if len(startingMatched) > 0 {
+		cs.Starting = resolveStartingStyle(startingMatched, vp, fonts, parentFontSize, vars)
 	}
 
 	// A font-relative length is a share of the element's own font size, and that
@@ -1723,6 +1744,46 @@ func computeScopeDist(n *dom.Node, scopeRoot string) int {
 		}
 	}
 	return 0
+}
+
+func resolveStartingStyle(matched []*indexedSelector, vp Viewport, fonts *CustomFonts, parentFontSize float32, vars *varExpander) *StartingStyle {
+	var normal, important []cascadeEntry
+	for _, cand := range matched {
+		for _, d := range cand.rule.Declarations {
+			d = inViewport(d, vp)
+			e := cascadeEntry{decl: d, origin: cand.origin, layerOrder: cand.layerOrder, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
+			if d.Important {
+				important = append(important, e)
+			} else {
+				normal = append(normal, e)
+			}
+		}
+	}
+	sortCascade(normal)
+	sortCascade(important)
+
+	st := &StartingStyle{
+		Values: make(map[string]string),
+	}
+	for _, es := range [][]cascadeEntry{normal, important} {
+		for _, e := range es {
+			val := e.decl.Value
+			if vars != nil && strings.Contains(val, "var(") {
+				val = vars.expand(val)
+			}
+			st.Values[e.decl.Property] = val
+			switch e.decl.Property {
+			case "opacity":
+				if op, err := strconv.ParseFloat(val, 32); err == nil {
+					st.Opacity = float32(op)
+					st.HasOpacity = true
+				}
+			case "display":
+				st.Display = parseDisplay(val)
+			}
+		}
+	}
+	return st
 }
 
 // resolveShadowColors finishes box-shadow and text-shadow after every other
@@ -1856,9 +1917,9 @@ func declaresTextAlign(normal, important []cascadeEntry) bool {
 }
 
 // resolveCustom collects the winning --* declarations in cascade order on top
-// of the inherited set. Elements that declare none share the parent's map
-// read-only; anything that mutates must copy first.
-func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[string]string {
+// of the inherited set. It respects @property registered descriptors, dropping
+// values that fail syntax validation and preventing inheritance when inherits: false.
+func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry, registered map[string]dom.PropertyDefinition) map[string]string {
 	custom := 0
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
@@ -1867,28 +1928,47 @@ func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[
 			}
 		}
 	}
-	if custom == 0 {
+	if custom == 0 && len(registered) == 0 {
 		if parent != nil {
 			return parent.Custom
 		}
 		return nil
 	}
-	// Size for the inherited entries plus the overriding ones: duplicate names
-	// for the same property only overshoot, never grow the map twice.
-	n := custom
+	n := custom + len(registered)
 	if parent != nil {
 		n += len(parent.Custom)
 	}
 	m := make(map[string]string, n)
 	if parent != nil {
 		for k, v := range parent.Custom {
+			if reg, ok := registered[k]; ok && !reg.Inherits {
+				continue // do not inherit non-inherited custom properties
+			}
 			m[k] = v
 		}
 	}
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
 			if strings.HasPrefix(e.decl.Property, "--") {
-				m[e.decl.Property] = e.decl.Value
+				val := e.decl.Value
+				if reg, ok := registered[e.decl.Property]; ok && reg.Syntax != "*" {
+					if !css.MatchesPropertySyntax(reg.Syntax, val) {
+						if reg.InitialValue != "" {
+							m[e.decl.Property] = reg.InitialValue
+						} else {
+							delete(m, e.decl.Property)
+						}
+						continue
+					}
+				}
+				m[e.decl.Property] = val
+			}
+		}
+	}
+	for k, reg := range registered {
+		if _, ok := m[k]; !ok && reg.InitialValue != "" {
+			if !reg.Inherits || parent == nil {
+				m[k] = reg.InitialValue
 			}
 		}
 	}
@@ -1950,11 +2030,12 @@ const maxVarSubstitutions = 4096
 // A property already being expanded is reported as missing, so a definition
 // that reaches itself falls back or collapses instead of looping forever.
 type varExpander struct {
-	custom   map[string]string
-	done     map[string]string
-	visiting map[string]bool
-	budget   int
-	failed   bool
+	custom     map[string]string
+	registered map[string]dom.PropertyDefinition
+	done       map[string]string
+	visiting   map[string]bool
+	budget     int
+	failed     bool
 }
 
 // expanderFor returns the var() expander for one element's custom properties,
@@ -1962,19 +2043,19 @@ type varExpander struct {
 // per element otherwise, and most elements never use one. A nil expander is
 // safe to pass to applyCascadeEntry precisely because the scan below proved no
 // value can reach the expansion branch.
-func expanderFor(custom map[string]string, normal, important []cascadeEntry) *varExpander {
+func expanderFor(custom map[string]string, normal, important []cascadeEntry, registered map[string]dom.PropertyDefinition) *varExpander {
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
 			if strings.Contains(e.decl.Value, "var(") {
-				return newVarExpander(custom)
+				return newVarExpander(custom, registered)
 			}
 		}
 	}
 	return nil
 }
 
-func newVarExpander(custom map[string]string) *varExpander {
-	return &varExpander{custom: custom, budget: maxVarSubstitutions}
+func newVarExpander(custom map[string]string, registered map[string]dom.PropertyDefinition) *varExpander {
+	return &varExpander{custom: custom, registered: registered, budget: maxVarSubstitutions}
 }
 
 // expand substitutes every var() call in value, leaving the text alone once the
@@ -2042,6 +2123,11 @@ func (e *varExpander) resolve(name string) (string, bool) {
 	}
 	raw, ok := e.custom[name]
 	if !ok {
+		if e.registered != nil {
+			if reg, rok := e.registered[name]; rok && reg.InitialValue != "" {
+				return reg.InitialValue, true
+			}
+		}
 		return "", false
 	}
 	if e.visiting[name] {

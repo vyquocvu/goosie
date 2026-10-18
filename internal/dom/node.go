@@ -1,6 +1,9 @@
 package dom
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // NodeType identifies the kind of node in the DOM tree.
 type NodeType uint8
@@ -342,11 +345,13 @@ type Document struct {
 	// together lazily on query after any structural, id, or class mutation
 	// (MarkQueryDirty). Linear scans per query are O(N); scripts polling
 	// these APIs turn them into O(queries×N), seconds on large documents.
-	idIdx     map[string]*Node
-	tagIdx    map[Atom][]*Node
-	tagStrIdx map[string][]*Node
-	classIdx  map[string][]*Node
-	qValid    bool
+	idIdx        map[string]*Node
+	tagIdx       map[Atom][]*Node
+	tagStrIdx    map[string][]*Node
+	classIdx     map[string][]*Node
+	qValid       bool
+	propertiesMu sync.RWMutex
+	properties   map[string]PropertyDefinition
 }
 
 // MarkQueryDirty drops the id/tag/class caches after a structural edit
@@ -578,4 +583,52 @@ func collectByTag(n *Node, tag string, atom Atom, result *[]*Node) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		collectByTag(c, tag, atom, result)
 	}
+}
+
+// PropertyDefinition describes a CSS custom property registered via @property or CSS.registerProperty.
+type PropertyDefinition struct {
+	Name         string
+	Syntax       string
+	Inherits     bool
+	InitialValue string
+}
+
+// RegisterProperty registers a CSS custom property descriptor on the document.
+// It returns false if the property was already registered.
+func (d *Document) RegisterProperty(def PropertyDefinition) bool {
+	d.propertiesMu.Lock()
+	defer d.propertiesMu.Unlock()
+	if d.properties == nil {
+		d.properties = make(map[string]PropertyDefinition)
+	}
+	if _, exists := d.properties[def.Name]; exists {
+		return false
+	}
+	d.properties[def.Name] = def
+	return true
+}
+
+// GetProperty retrieves a registered CSS custom property descriptor if present.
+func (d *Document) GetProperty(name string) (PropertyDefinition, bool) {
+	d.propertiesMu.RLock()
+	defer d.propertiesMu.RUnlock()
+	if d.properties == nil {
+		return PropertyDefinition{}, false
+	}
+	def, ok := d.properties[name]
+	return def, ok
+}
+
+// RegisteredProperties returns a snapshot map of all registered custom properties.
+func (d *Document) RegisteredProperties() map[string]PropertyDefinition {
+	d.propertiesMu.RLock()
+	defer d.propertiesMu.RUnlock()
+	if len(d.properties) == 0 {
+		return nil
+	}
+	out := make(map[string]PropertyDefinition, len(d.properties))
+	for k, v := range d.properties {
+		out[k] = v
+	}
+	return out
 }

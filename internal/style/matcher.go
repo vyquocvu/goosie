@@ -25,8 +25,9 @@ type ruleIndex struct {
 	unkeyed []*indexedSelector
 	// declCount is the total declaration slots across all sheets, used to rank
 	// inline styles after every authored declaration.
-	declCount int
-	stamp     int
+	declCount  int
+	stamp      int
+	properties map[string]dom.PropertyDefinition
 }
 
 // indexedSelector is one selector of one rule plus the cascade facts derived
@@ -49,9 +50,16 @@ type indexedSelector struct {
 
 func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
 	ix := &ruleIndex{
-		byID:    make(map[string][]*indexedSelector),
-		byClass: make(map[string][]*indexedSelector),
-		byTag:   make(map[string][]*indexedSelector),
+		byID:       make(map[string][]*indexedSelector),
+		byClass:    make(map[string][]*indexedSelector),
+		byTag:      make(map[string][]*indexedSelector),
+		properties: make(map[string]dom.PropertyDefinition),
+	}
+
+	for _, sheet := range sheets {
+		for _, prop := range sheet.Properties {
+			ix.properties[prop.Name] = prop
+		}
 	}
 
 	layerSeq := 0
@@ -180,4 +188,18 @@ func (ix *ruleIndex) candidates(n *dom.Node) []*indexedSelector {
 		sort.Slice(out, func(i, j int) bool { return out[i].rank < out[j].rank })
 	}
 	return out
+}
+
+func (ix *ruleIndex) loadDocumentProperties(doc *dom.Document) {
+	if doc == nil {
+		return
+	}
+	if reg := doc.RegisteredProperties(); len(reg) > 0 {
+		if ix.properties == nil {
+			ix.properties = make(map[string]dom.PropertyDefinition, len(reg))
+		}
+		for k, v := range reg {
+			ix.properties[k] = v
+		}
+	}
 }

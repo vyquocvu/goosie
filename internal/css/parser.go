@@ -3,6 +3,8 @@ package css
 import (
 	"strconv"
 	"strings"
+
+	"github.com/vyquocvu/goosie/internal/dom"
 )
 
 // defaultMediaViewportWidth is the CSS px width @media min/max-width conditions
@@ -32,6 +34,7 @@ type Rule struct {
 	ContainerQuery string
 	ScopeRoot      string
 	ScopeLimit     string
+	StartingStyle  bool
 }
 
 // FontFaceRule is one @font-face rule: declarations only, no selectors.
@@ -47,6 +50,8 @@ type Stylesheet struct {
 	Keyframes []KeyframesRule
 	// Layers holds layer names declared via `@layer name1, name2;`.
 	Layers []string
+	// Properties holds parsed @property descriptors from this stylesheet.
+	Properties []dom.PropertyDefinition
 }
 
 // MediaOptions configures environment features for media query evaluation.
@@ -203,6 +208,10 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 				p.parseFontFaceRule(sheet)
 			case "keyframes", "-webkit-keyframes":
 				p.parseKeyframesRule(sheet)
+			case "property":
+				p.parsePropertyRule(sheet)
+			case "starting-style":
+				p.parseStartingStyleRule(sheet)
 			default:
 				p.skipAtRule()
 			}
@@ -1576,6 +1585,38 @@ func (p *parser) handleNestedAtRule(atName, prelude, innerBody string, parentSel
 		}
 		rules = append(rules, nested...)
 		p.anonLayerCount = inner.anonLayerCount
+	case "starting-style":
+		inner := &parser{
+			input:                 innerBody,
+			mediaWidth:            p.mediaWidth,
+			darkMode:              p.darkMode,
+			highContrast:          p.highContrast,
+			currentLayer:          p.currentLayer,
+			currentContainerQuery: p.currentContainerQuery,
+			currentScopeRoot:      p.currentScopeRoot,
+			currentScopeLimit:     p.currentScopeLimit,
+			anonLayerCount:        p.anonLayerCount,
+		}
+		decls, nested := inner.parseBlockWithRules(innerBody, parentSelectors)
+		if len(decls) > 0 && len(parentSelectors) > 0 {
+			var r Rule
+			for _, sel := range parentSelectors {
+				r.Selectors = append(r.Selectors, ParseSelector(sel))
+				r.SelectorStrs = append(r.SelectorStrs, sel)
+			}
+			r.Declarations = decls
+			r.Layer = p.currentLayer
+			r.ContainerQuery = p.currentContainerQuery
+			r.ScopeRoot = p.currentScopeRoot
+			r.ScopeLimit = p.currentScopeLimit
+			r.StartingStyle = true
+			rules = append(rules, r)
+		}
+		for i := range nested {
+			nested[i].StartingStyle = true
+		}
+		rules = append(rules, nested...)
+		p.anonLayerCount = inner.anonLayerCount
 	}
 	return rules
 }
@@ -1756,4 +1797,5 @@ func (s *Stylesheet) Merge(other *Stylesheet) {
 	}
 	s.Rules = append(s.Rules, other.Rules...)
 	s.Keyframes = append(s.Keyframes, other.Keyframes...)
+	s.Properties = append(s.Properties, other.Properties...)
 }
