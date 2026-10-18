@@ -562,6 +562,10 @@ type ComputedStyle struct {
 	// CSS Text Decoration Level 4
 	TextUnderlineOffset     float32
 	TextDecorationThickness float32
+
+	// CSS Basic User Interface Module Level 4
+	PointerEvents string // "auto", "none", etc. Default "auto"
+	UserSelect    string // "auto", "text", "none", "contain", "all". Default "auto"
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -686,6 +690,8 @@ func DefaultStyle() ComputedStyle {
 		ScrollSnapStrictness:   "proximity",
 		ScrollSnapAlign:        "none",
 		ScrollSnapStop:         "normal",
+		PointerEvents:          "auto",
+		UserSelect:             "auto",
 	}
 }
 
@@ -2302,6 +2308,12 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.AccentColor = parent.AccentColor
 	cs.TextUnderlineOffset = parent.TextUnderlineOffset
 	cs.TextDecorationThickness = parent.TextDecorationThickness
+	if parent.PointerEvents != "" {
+		cs.PointerEvents = parent.PointerEvents
+	}
+	if parent.UserSelect == "none" || parent.UserSelect == "all" || parent.UserSelect == "contain" {
+		cs.UserSelect = parent.UserSelect
+	}
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3302,6 +3314,23 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.LetterSpacing = 0
 		} else {
 			cs.LetterSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+
+	case "pointer-events":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "none", "visiblepainted", "visiblefill", "visiblestroke", "visible", "painted", "fill", "stroke", "all":
+			cs.PointerEvents = v
+		case "initial", "unset":
+			cs.PointerEvents = "auto"
+		}
+	case "user-select", "-webkit-user-select":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "text", "none", "contain", "all":
+			cs.UserSelect = v
+		case "initial", "unset":
+			cs.UserSelect = "auto"
 		}
 
 	case "vertical-align":

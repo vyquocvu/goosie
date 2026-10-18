@@ -123,3 +123,30 @@ func TestHitTestLinkNoArena(t *testing.T) {
 		t.Fatalf("HitTestLink with empty arena = %q, want empty", href)
 	}
 }
+
+func TestHitTestPointerEventsNone(t *testing.T) {
+	sess, err := engine.NewSession(`<html><body style="margin: 0;">
+<a href="https://example.com" style="pointer-events: none; display: block; width: 100px; height: 50px;">Click me</a>
+</body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	href := sess.HitTestLink(50, 25)
+	if href != "" {
+		t.Fatalf("HitTestLink with pointer-events: none = %q, want empty", href)
+	}
+}
+
+func TestHitTestPointerEventsNoneBypass(t *testing.T) {
+	sess, err := engine.NewSession(`<html><body style="margin: 0; position: relative;">
+<a href="https://underlying.org" style="display: block; width: 100px; height: 50px;">Under</a>
+<div style="position: absolute; top: 0; left: 0; width: 100px; height: 50px; pointer-events: none;">Overlay</div>
+</body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	href := sess.HitTestLink(50, 25)
+	if href != "https://underlying.org" {
+		t.Fatalf("HitTestLink through pointer-events: none overlay = %q, want %q", href, "https://underlying.org")
+	}
+}

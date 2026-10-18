@@ -497,6 +497,116 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		ctx.mu.Unlock()
 		return goja.Undefined()
 	})
+
+	// State and smoothing properties
+	_ = obj.Set("imageSmoothingEnabled", true)
+	_ = obj.Set("imageSmoothingQuality", "low")
+	_ = obj.Set("filter", "none")
+	_ = obj.Set("globalAlpha", 1.0)
+	_ = obj.Set("globalCompositeOperation", "source-over")
+	_ = obj.Set("shadowBlur", 0.0)
+	_ = obj.Set("shadowColor", "rgba(0, 0, 0, 0)")
+	_ = obj.Set("shadowOffsetX", 0.0)
+	_ = obj.Set("shadowOffsetY", 0.0)
+	_ = obj.Set("lineCap", "butt")
+	_ = obj.Set("lineJoin", "miter")
+	_ = obj.Set("miterLimit", 10.0)
+	_ = obj.Set("lineDashOffset", 0.0)
+
+	var lineDash []float64
+	_ = obj.Set("setLineDash", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			if arr, ok := call.Arguments[0].Export().([]interface{}); ok {
+				lineDash = make([]float64, 0, len(arr))
+				for _, v := range arr {
+					switch n := v.(type) {
+					case int64:
+						lineDash = append(lineDash, float64(n))
+					case float64:
+						lineDash = append(lineDash, n)
+					}
+				}
+			}
+		}
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("getLineDash", func(call goja.FunctionCall) goja.Value {
+		res := make([]float64, len(lineDash))
+		copy(res, lineDash)
+		return r.vm.ToValue(res)
+	})
+
+	// Image drawing
+	_ = obj.Set("drawImage", func(call goja.FunctionCall) goja.Value {
+		args := make([]interface{}, len(call.Arguments))
+		for i, arg := range call.Arguments {
+			args[i] = arg.Export()
+		}
+		ctx.mu.Lock()
+		ctx.ops = append(ctx.ops, canvasDrawOp{
+			Method: "drawImage",
+			Args:   args,
+		})
+		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
+
+	// Pixel manipulation
+	_ = obj.Set("createImageData", func(call goja.FunctionCall) goja.Value {
+		w, h := 1, 1
+		if len(call.Arguments) >= 2 {
+			w = int(call.Arguments[0].ToInteger())
+			h = int(call.Arguments[1].ToInteger())
+		} else if len(call.Arguments) == 1 {
+			if o, ok := call.Arguments[0].(*goja.Object); ok {
+				if wv := o.Get("width"); wv != nil {
+					w = int(wv.ToInteger())
+				}
+				if hv := o.Get("height"); hv != nil {
+					h = int(hv.ToInteger())
+				}
+			}
+		}
+		if w <= 0 {
+			w = 1
+		}
+		if h <= 0 {
+			h = 1
+		}
+		imgData := r.vm.NewObject()
+		_ = imgData.Set("width", w)
+		_ = imgData.Set("height", h)
+		data := make([]int, w*h*4)
+		_ = imgData.Set("data", data)
+		return imgData
+	})
+
+	_ = obj.Set("getImageData", func(call goja.FunctionCall) goja.Value {
+		args := parseIntArgs(call, 0, 0, 0, 0)
+		x, y, w, h := args[0], args[1], args[2], args[3]
+		if w <= 0 {
+			w = 1
+		}
+		if h <= 0 {
+			h = 1
+		}
+		imgData := r.vm.NewObject()
+		_ = imgData.Set("width", w)
+		_ = imgData.Set("height", h)
+		data := make([]int, w*h*4)
+		_ = imgData.Set("data", data)
+		_ = imgData.Set("x", x)
+		_ = imgData.Set("y", y)
+		return imgData
+	})
+
+	_ = obj.Set("putImageData", func(call goja.FunctionCall) goja.Value {
+		ctx.mu.Lock()
+		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "putImageData"})
+		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
 }
 
 // setupCanvas installs the Canvas 2D API.
@@ -533,6 +643,19 @@ func (r *Runtime) setupCanvas() {
 		_ = obj.Set("font", ctx.font)
 		_ = obj.Set("textAlign", ctx.textAlign)
 		_ = obj.Set("textBaseline", ctx.textBaseline)
+		_ = obj.Set("imageSmoothingEnabled", true)
+		_ = obj.Set("imageSmoothingQuality", "low")
+		_ = obj.Set("filter", "none")
+		_ = obj.Set("globalAlpha", 1.0)
+		_ = obj.Set("globalCompositeOperation", "source-over")
+		_ = obj.Set("shadowBlur", 0.0)
+		_ = obj.Set("shadowColor", "rgba(0, 0, 0, 0)")
+		_ = obj.Set("shadowOffsetX", 0.0)
+		_ = obj.Set("shadowOffsetY", 0.0)
+		_ = obj.Set("lineCap", "butt")
+		_ = obj.Set("lineJoin", "miter")
+		_ = obj.Set("miterLimit", 10.0)
+		_ = obj.Set("lineDashOffset", 0.0)
 
 		// Rect methods
 		_ = obj.Set("fillRect", func(call goja.FunctionCall) goja.Value {
@@ -823,6 +946,30 @@ func (r *Runtime) setupCanvas() {
 			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "putImageData"})
 			ctx.mu.Unlock()
 			return goja.Undefined()
+		})
+
+		var lineDash []float64
+		_ = obj.Set("setLineDash", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) > 0 {
+				if arr, ok := call.Arguments[0].Export().([]interface{}); ok {
+					lineDash = make([]float64, 0, len(arr))
+					for _, v := range arr {
+						switch n := v.(type) {
+						case int64:
+							lineDash = append(lineDash, float64(n))
+						case float64:
+							lineDash = append(lineDash, n)
+						}
+					}
+				}
+			}
+			return goja.Undefined()
+		})
+
+		_ = obj.Set("getLineDash", func(call goja.FunctionCall) goja.Value {
+			res := make([]float64, len(lineDash))
+			copy(res, lineDash)
+			return r.vm.ToValue(res)
 		})
 
 		return nil

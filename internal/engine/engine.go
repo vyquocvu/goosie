@@ -1311,11 +1311,17 @@ func (s *Session) HitTestLink(x, y float32) string {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Style != nil && cur.Style.PointerEvents == "none" {
+				break
+			}
 			if cur.Node != nil && cur.Node.DataAtom == dom.AtomA {
 				if href := cur.Node.GetAttribute("href"); href != "" {
 					return href
@@ -1334,6 +1340,9 @@ func (s *Session) HitTestImage(x, y float32) string {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
@@ -1473,11 +1482,17 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Style != nil && cur.Style.PointerEvents == "none" {
+				break
+			}
 			if IsActivatable(cur.Node) {
 				return cur.Node
 			}

@@ -37,8 +37,10 @@ func (s *Session) selWords() []*layout.Object {
 		}
 		obj := &objs[id]
 		if obj.Node != nil && obj.Node.Type == dom.NodeText && strings.TrimSpace(obj.Node.DataContent) != "" {
-			if x0, y0, x1, y1 := obj.BorderRect(); x0 < x1 && y0 < y1 {
-				words = append(words, obj)
+			if obj.Style == nil || obj.Style.UserSelect != "none" {
+				if x0, y0, x1, y1 := obj.BorderRect(); x0 < x1 && y0 < y1 {
+					words = append(words, obj)
+				}
 			}
 		}
 		for k := obj.FirstKid; k != 0; k = objs[k].NextSibling {
