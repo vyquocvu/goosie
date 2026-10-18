@@ -379,6 +379,7 @@ type ComputedStyle struct {
 	// cascade. Like a length it never inherits - a child takes the resolved
 	// px value - so it is left out of the inherit pass. Zero means none.
 	LineHeightEm   float32
+	Direction      string // "ltr" or "rtl"
 	TextAlign      TextAlign
 	TextIndent     float32
 	TextTransform  string
@@ -546,6 +547,7 @@ func DefaultStyle() ComputedStyle {
 	return ComputedStyle{
 		Display:      DisplayInline,
 		Position:     PositionStatic,
+		Direction:    "ltr",
 		Opacity:      1.0,
 		Width:        -1,
 		Height:       -1,
@@ -1415,6 +1417,11 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.LineHeight = parent.LineHeight
 	cs.LineHeightRatio = parent.LineHeightRatio
 	cs.TextAlign = parent.TextAlign
+	if parent.Direction != "" {
+		cs.Direction = parent.Direction
+	} else {
+		cs.Direction = "ltr"
+	}
 	cs.Visibility = parent.Visibility
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.WordSpacing = parent.WordSpacing
@@ -1598,42 +1605,42 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	// the same way margins already do: `width:10em` on a 20px element is 200px.
 	// A math function holding a percentage is deferred to layout, which owns
 	// the containing block the share speaks.
-	case "width":
+	case "width", "inline-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.WidthCalc, cs.Width = d, -1
 		} else {
 			cs.WidthCalc = DeferredLength{}
 			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
-	case "height":
+	case "height", "block-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.HeightCalc, cs.Height = d, -1
 		} else {
 			cs.HeightCalc = DeferredLength{}
 			cs.Height = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
-	case "min-width":
+	case "min-width", "min-inline-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinWidthCalc, cs.MinWidth = d, 0
 		} else {
 			cs.MinWidthCalc = DeferredLength{}
 			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
-	case "min-height":
+	case "min-height", "min-block-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinHeightCalc, cs.MinHeight = d, 0
 		} else {
 			cs.MinHeightCalc = DeferredLength{}
 			cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
-	case "max-width":
+	case "max-width", "max-inline-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MaxWidthCalc, cs.MaxWidth = d, -1
 		} else {
 			cs.MaxWidthCalc = DeferredLength{}
 			cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize, cs.rootFontSize)
 		}
-	case "max-height":
+	case "max-height", "max-block-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MaxHeightCalc, cs.MaxHeight = d, -1
 		} else {
@@ -1687,9 +1694,17 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "margin-block-end":
 		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-start":
-		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		}
 	case "margin-inline-end":
-		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		}
 	case "padding-block":
 		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.PaddingTop, cs.PaddingBottom = a, b
@@ -1701,9 +1716,116 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "padding-block-end":
 		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-inline-start":
-		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 	case "padding-inline-end":
-		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+
+	case "border-inline":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderLeftWidth, cs.BorderRightWidth = w, w
+		cs.BorderLeftStyle, cs.BorderRightStyle = s, s
+		cs.BorderLeftColor, cs.BorderRightColor = c, c
+	case "border-block":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderTopWidth, cs.BorderBottomWidth = w, w
+		cs.BorderTopStyle, cs.BorderBottomStyle = s, s
+		cs.BorderTopColor, cs.BorderBottomColor = c, c
+	case "border-inline-start":
+		w, s, c := parseBorderShorthand(value)
+		if cs.Direction == "rtl" {
+			cs.BorderRightWidth, cs.BorderRightStyle, cs.BorderRightColor = w, s, c
+		} else {
+			cs.BorderLeftWidth, cs.BorderLeftStyle, cs.BorderLeftColor = w, s, c
+		}
+	case "border-inline-end":
+		w, s, c := parseBorderShorthand(value)
+		if cs.Direction == "rtl" {
+			cs.BorderLeftWidth, cs.BorderLeftStyle, cs.BorderLeftColor = w, s, c
+		} else {
+			cs.BorderRightWidth, cs.BorderRightStyle, cs.BorderRightColor = w, s, c
+		}
+	case "border-block-start":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderTopWidth, cs.BorderTopStyle, cs.BorderTopColor = w, s, c
+	case "border-block-end":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderBottomWidth, cs.BorderBottomStyle, cs.BorderBottomColor = w, s, c
+	case "border-inline-width":
+		w := resolveLength(parsed, 0)
+		cs.BorderLeftWidth, cs.BorderRightWidth = w, w
+	case "border-block-width":
+		w := resolveLength(parsed, 0)
+		cs.BorderTopWidth, cs.BorderBottomWidth = w, w
+	case "border-inline-start-width":
+		w := resolveLength(parsed, 0)
+		if cs.Direction == "rtl" {
+			cs.BorderRightWidth = w
+		} else {
+			cs.BorderLeftWidth = w
+		}
+	case "border-inline-end-width":
+		w := resolveLength(parsed, 0)
+		if cs.Direction == "rtl" {
+			cs.BorderLeftWidth = w
+		} else {
+			cs.BorderRightWidth = w
+		}
+	case "border-block-start-width":
+		cs.BorderTopWidth = resolveLength(parsed, 0)
+	case "border-block-end-width":
+		cs.BorderBottomWidth = resolveLength(parsed, 0)
+	case "border-inline-style":
+		cs.BorderLeftStyle, cs.BorderRightStyle = value, value
+	case "border-block-style":
+		cs.BorderTopStyle, cs.BorderBottomStyle = value, value
+	case "border-inline-start-style":
+		if cs.Direction == "rtl" {
+			cs.BorderRightStyle = value
+		} else {
+			cs.BorderLeftStyle = value
+		}
+	case "border-inline-end-style":
+		if cs.Direction == "rtl" {
+			cs.BorderLeftStyle = value
+		} else {
+			cs.BorderRightStyle = value
+		}
+	case "border-block-start-style":
+		cs.BorderTopStyle = value
+	case "border-block-end-style":
+		cs.BorderBottomStyle = value
+	case "border-inline-color":
+		clr := parseColorValue(value)
+		cs.BorderLeftColor, cs.BorderRightColor = clr, clr
+	case "border-block-color":
+		clr := parseColorValue(value)
+		cs.BorderTopColor, cs.BorderBottomColor = clr, clr
+	case "border-inline-start-color":
+		clr := parseColorValue(value)
+		if cs.Direction == "rtl" {
+			cs.BorderRightColor = clr
+		} else {
+			cs.BorderLeftColor = clr
+		}
+	case "border-inline-end-color":
+		clr := parseColorValue(value)
+		if cs.Direction == "rtl" {
+			cs.BorderLeftColor = clr
+		} else {
+			cs.BorderRightColor = clr
+		}
+	case "border-block-start-color":
+		cs.BorderTopColor = parseColorValue(value)
+	case "border-block-end-color":
+		cs.BorderBottomColor = parseColorValue(value)
 
 	case "border":
 		w, s, c := parseBorderShorthand(value)
@@ -1823,6 +1945,42 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "left":
 		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		cs.HasLeft = lengthSpecified(parsed)
+	case "inset":
+		t, r, b, l := parseBoxShorthand(value)
+		cs.Top, cs.Right, cs.Bottom, cs.Left = t, r, b, l
+		cs.HasTop, cs.HasRight, cs.HasBottom, cs.HasLeft = true, true, true, true
+	case "inset-block":
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
+		cs.Top, cs.Bottom = a, b
+		cs.HasTop, cs.HasBottom = true, true
+	case "inset-inline":
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
+		cs.Left, cs.Right = a, b
+		cs.HasLeft, cs.HasRight = true, true
+	case "inset-block-start":
+		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.HasTop = lengthSpecified(parsed)
+	case "inset-block-end":
+		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.HasBottom = lengthSpecified(parsed)
+	case "inset-inline-start":
+		val := resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.Right = val
+			cs.HasRight = lengthSpecified(parsed)
+		} else {
+			cs.Left = val
+			cs.HasLeft = lengthSpecified(parsed)
+		}
+	case "inset-inline-end":
+		val := resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.Left = val
+			cs.HasLeft = lengthSpecified(parsed)
+		} else {
+			cs.Right = val
+			cs.HasRight = lengthSpecified(parsed)
+		}
 
 	case "color":
 		// A value that is not a colour at all - `initial`, a `light-dark()` this
@@ -1879,8 +2037,13 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
 		cs.LineHeightEm = lineHeightEm(parsed)
+	case "direction":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "rtl" || v == "ltr" {
+			cs.Direction = v
+		}
 	case "text-align":
-		cs.TextAlign = parseTextAlign(value)
+		cs.TextAlign = parseTextAlign(value, cs.Direction)
 	case "text-indent":
 		cs.TextIndent = resolveLength(parsed, 0)
 	case "text-transform":
@@ -1956,11 +2119,23 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		// area unmatched and the item fell through to auto-placement.
 		cs.GridArea = strings.TrimSpace(value)
 	case "grid-column":
-		cs.GridColumnSpan = parseGridSpan(value)
 		cs.GridColumn = strings.TrimSpace(value)
+		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
+	case "grid-column-start":
+		cs.GridColumn = buildGridPlacement(strings.TrimSpace(value), extractGridEnd(cs.GridColumn))
+		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
+	case "grid-column-end":
+		cs.GridColumn = buildGridPlacement(extractGridStart(cs.GridColumn), strings.TrimSpace(value))
+		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
 	case "grid-row":
-		cs.GridRowSpan = parseGridSpan(value)
 		cs.GridRow = strings.TrimSpace(value)
+		cs.GridRowSpan = parseGridSpan(cs.GridRow)
+	case "grid-row-start":
+		cs.GridRow = buildGridPlacement(strings.TrimSpace(value), extractGridEnd(cs.GridRow))
+		cs.GridRowSpan = parseGridSpan(cs.GridRow)
+	case "grid-row-end":
+		cs.GridRow = buildGridPlacement(extractGridStart(cs.GridRow), strings.TrimSpace(value))
+		cs.GridRowSpan = parseGridSpan(cs.GridRow)
 	case "justify-items":
 		cs.JustifyItems = value
 	case "align-content":
@@ -2110,13 +2285,16 @@ func splitTopLevelSpace(v string) []string {
 func againstOwnFont(prop string) bool {
 	switch prop {
 	case "width", "height", "min-width", "min-height", "max-width", "max-height",
+		"inline-size", "block-size", "min-inline-size", "min-block-size", "max-inline-size", "max-block-size",
 		"margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
 		"margin-block", "margin-block-start", "margin-block-end",
 		"margin-inline", "margin-inline-start", "margin-inline-end",
 		"padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
 		"padding-block", "padding-block-start", "padding-block-end",
 		"padding-inline", "padding-inline-start", "padding-inline-end",
-		"top", "right", "bottom", "left":
+		"top", "right", "bottom", "left",
+		"inset", "inset-block", "inset-block-start", "inset-block-end",
+		"inset-inline", "inset-inline-start", "inset-inline-end":
 		return true
 	}
 	return false
@@ -2398,7 +2576,8 @@ func parseOverflowProp(v string) Overflow {
 	return OverflowVisible
 }
 
-func parseTextAlign(v string) TextAlign {
+func parseTextAlign(v, dir string) TextAlign {
+	v = strings.TrimSpace(strings.ToLower(v))
 	switch v {
 	case "right":
 		return TextAlignRight
@@ -2406,6 +2585,16 @@ func parseTextAlign(v string) TextAlign {
 		return TextAlignCenter
 	case "justify":
 		return TextAlignJustify
+	case "start":
+		if dir == "rtl" {
+			return TextAlignRight
+		}
+		return TextAlignLeft
+	case "end":
+		if dir == "rtl" {
+			return TextAlignLeft
+		}
+		return TextAlignRight
 	}
 	return TextAlignLeft
 }
@@ -3756,15 +3945,27 @@ func parseGridTemplateShorthand(cs *ComputedStyle, v string) {
 }
 
 // parseGridSpan reduces a grid-column/grid-row value to how many tracks the
-// item occupies. "span N" is the direct form; "A / B" names two lines; anything
-// else (including "auto" and named lines) places a single track.
+// item occupies. "span N" is the direct form; "A / B" names two lines or line / span N;
+// anything else (including "auto" and named lines) places a single track.
 func parseGridSpan(v string) int {
 	v = strings.TrimSpace(strings.ToLower(v))
-	if v == "" {
+	if v == "" || v == "auto" {
 		return 1
 	}
 	if i := strings.Index(v, "/"); i >= 0 {
-		a, b := gridSpanNum(strings.TrimSpace(v[:i])), gridSpanNum(strings.TrimSpace(v[i+1:]))
+		left := strings.TrimSpace(v[:i])
+		right := strings.TrimSpace(v[i+1:])
+		if strings.HasPrefix(left, "span") {
+			if n := gridSpanNum(strings.TrimSpace(strings.TrimPrefix(left, "span"))); n > 0 {
+				return n
+			}
+		}
+		if strings.HasPrefix(right, "span") {
+			if n := gridSpanNum(strings.TrimSpace(strings.TrimPrefix(right, "span"))); n > 0 {
+				return n
+			}
+		}
+		a, b := gridSpanNum(left), gridSpanNum(right)
 		if a > 0 && b > a {
 			return b - a
 		}
@@ -3777,6 +3978,37 @@ func parseGridSpan(v string) int {
 		return 1
 	}
 	return 1
+}
+
+func buildGridPlacement(start, end string) string {
+	start = strings.TrimSpace(start)
+	end = strings.TrimSpace(end)
+	if start == "" && end == "" {
+		return ""
+	}
+	if start != "" && end != "" {
+		return start + " / " + end
+	}
+	if start != "" {
+		return start
+	}
+	return "auto / " + end
+}
+
+func extractGridStart(combined string) string {
+	combined = strings.TrimSpace(combined)
+	if i := strings.Index(combined, "/"); i >= 0 {
+		return strings.TrimSpace(combined[:i])
+	}
+	return combined
+}
+
+func extractGridEnd(combined string) string {
+	combined = strings.TrimSpace(combined)
+	if i := strings.Index(combined, "/"); i >= 0 {
+		return strings.TrimSpace(combined[i+1:])
+	}
+	return ""
 }
 
 func gridSpanNum(s string) int {

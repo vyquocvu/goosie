@@ -384,9 +384,13 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 		// span/auto-placement path the style layer always produced.
 		if st, sp, ok := resolveGridPlacement(k.Style.GridColumn, colLines, nCols); ok {
 			p.col, p.colSpan, p.fixedPos = st, sp, true
+		} else if sp > 0 {
+			p.colSpan = sp
 		}
 		if st, sp, ok := resolveGridPlacement(k.Style.GridRow, rowLines, nRows); ok {
 			p.row, p.rowSpan, p.fixedPos = st, sp, true
+		} else if sp > 0 {
+			p.rowSpan = sp
 		}
 		out = append(out, p)
 	}
@@ -642,25 +646,84 @@ func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, boo
 	return 0, false
 }
 
+func parseGridSpanValue(s string) int {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if strings.HasPrefix(s, "span") {
+		s = strings.TrimSpace(strings.TrimPrefix(s, "span"))
+	}
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return n
+	}
+	return 1
+}
+
 // resolveGridPlacement reduces a grid-column/grid-row value to a 0-based
 // start and a span against a template of nTracks tracks with the given line
 // names. "a / b" pins both lines; a lone line pins the start with span 1; a
-// bare "span N" (or anything unparseable) reports false and the caller falls
-// back to the span/auto-placement path it always used. Against an explicit
-// template (nTracks > 0) starts clamp into it and spans clamp to fit, because
-// the engine grows implicit rows but never implicit columns; with no template
-// the numbers pass through and rows grow as needed.
+// bare "span N" reports false with span N for auto-placement.
+// Against an explicit template (nTracks > 0) starts clamp into it and spans clamp to fit.
 func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (start, span int, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "auto" {
 		return 0, 0, false
 	}
-	if strings.HasPrefix(raw, "span") {
-		return 0, 0, false
+	if strings.HasPrefix(raw, "span") && !strings.Contains(raw, "/") {
+		return 0, parseGridSpanValue(raw), false
 	}
 	if i := strings.Index(raw, "/"); i >= 0 {
-		s, sOk := resolveGridLine(raw[:i], lines, nTracks)
-		e, eOk := resolveGridLine(raw[i+1:], lines, nTracks)
+		left := strings.TrimSpace(raw[:i])
+		right := strings.TrimSpace(raw[i+1:])
+
+		// Case 1: left is "span N", right is a line: span N / line
+		if strings.HasPrefix(left, "span") {
+			sp := parseGridSpanValue(left)
+			e, eOk := resolveGridLine(right, lines, nTracks)
+			if !eOk {
+				return 0, sp, false
+			}
+			s := e - sp
+			if s < 1 {
+				s = 1
+			}
+			if nTracks > 0 {
+				if s > nTracks {
+					return 0, 0, false
+				}
+				if e > nTracks+1 {
+					e = nTracks + 1
+				}
+				sp = e - s
+				if sp < 1 {
+					sp = 1
+				}
+			}
+			return s - 1, sp, true
+		}
+
+		// Case 2: left is a line, right is "span N": line / span N
+		if strings.HasPrefix(right, "span") {
+			s, sOk := resolveGridLine(left, lines, nTracks)
+			if !sOk {
+				return 0, 0, false
+			}
+			sp := parseGridSpanValue(right)
+			if nTracks > 0 {
+				if s > nTracks {
+					return 0, 0, false
+				}
+				if s+sp > nTracks+1 {
+					sp = nTracks + 1 - s
+					if sp < 1 {
+						sp = 1
+					}
+				}
+			}
+			return s - 1, sp, true
+		}
+
+		// Case 3: both are lines
+		s, sOk := resolveGridLine(left, lines, nTracks)
+		e, eOk := resolveGridLine(right, lines, nTracks)
 		if !sOk || !eOk || e <= s {
 			return 0, 0, false
 		}
@@ -698,6 +761,12 @@ func parseGridTrack(tok string, fontSize, inlineSize float32) gridTrack {
 				t.content = true
 			}
 			return t
+		}
+	}
+	if strings.HasPrefix(tok, "fit-content(") {
+		inner := strings.TrimSuffix(strings.TrimPrefix(tok, "fit-content("), ")")
+		if maxLen, ok := gridLen(inner, fontSize, inlineSize); ok {
+			return gridTrack{min: -1, max: maxLen, content: true}
 		}
 	}
 	if tok == "min-content" || tok == "max-content" {
@@ -822,33 +891,50 @@ func splitTopLevel(v string) []string {
 // expandAutoTracks resolves repeat(auto-fill|auto-fit, ...) into as many copies as
 // fit at their own minimum, never zero.
 func expandAutoTracks(tracks []gridTrack, avail, gap float32) []gridTrack {
-	idx := -1
+	start := -1
+	end := -1
 	for i, t := range tracks {
 		if t.autoRepeat {
-			idx = i
+			if start < 0 {
+				start = i
+			}
+			end = i + 1
+		} else if start >= 0 {
 			break
 		}
 	}
-	if idx < 0 {
+	if start < 0 {
 		return tracks
 	}
-	t := tracks[idx]
-	min := t.min
-	if min <= 0 {
-		min = 1
+	repeatSlice := tracks[start:end]
+	var groupMin float32
+	for i, t := range repeatSlice {
+		m := t.min
+		if m <= 0 {
+			m = 1
+		}
+		groupMin += m
+		if i > 0 {
+			groupMin += gap
+		}
 	}
-	n := int((avail + gap) / (min + gap))
+	if groupMin <= 0 {
+		groupMin = 1
+	}
+	n := int((avail + gap) / (groupMin + gap))
 	if n < 1 {
 		n = 1
 	}
-	out := make([]gridTrack, 0, len(tracks)+n)
-	out = append(out, tracks[:idx]...)
+	out := make([]gridTrack, 0, len(tracks)-len(repeatSlice)+n*len(repeatSlice))
+	out = append(out, tracks[:start]...)
 	for i := 0; i < n; i++ {
-		o := t
-		o.autoRepeat = false
-		out = append(out, o)
+		for _, t := range repeatSlice {
+			o := t
+			o.autoRepeat = false
+			out = append(out, o)
+		}
 	}
-	return append(out, tracks[idx+1:]...)
+	return append(out, tracks[end:]...)
 }
 
 func autoTracks(n int) []gridTrack {

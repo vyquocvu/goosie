@@ -79,3 +79,83 @@ func TestLogicalPaddingEvaluatesAFunctionOfViewportUnits(t *testing.T) {
 		t.Errorf("padding-inline = %v/%v, want 96/96 (50vw - 720px + 1rem at a 1600px frame)", s.PaddingLeft, s.PaddingRight)
 	}
 }
+
+func TestLogicalSizingProperties(t *testing.T) {
+	s := logical(t, "<div>x</div>", "div { inline-size: 250px; block-size: 150px; min-inline-size: 100px; max-inline-size: 400px; min-block-size: 50px; max-block-size: 300px; }")
+	if s.Width != 250 {
+		t.Errorf("inline-size = %v, want 250", s.Width)
+	}
+	if s.Height != 150 {
+		t.Errorf("block-size = %v, want 150", s.Height)
+	}
+	if s.MinWidth != 100 {
+		t.Errorf("min-inline-size = %v, want 100", s.MinWidth)
+	}
+	if s.MaxWidth != 400 {
+		t.Errorf("max-inline-size = %v, want 400", s.MaxWidth)
+	}
+	if s.MinHeight != 50 {
+		t.Errorf("min-block-size = %v, want 50", s.MinHeight)
+	}
+	if s.MaxHeight != 300 {
+		t.Errorf("max-block-size = %v, want 300", s.MaxHeight)
+	}
+}
+
+func TestLogicalBordersAndInsets(t *testing.T) {
+	s := logical(t, "<div>x</div>", "div { border-inline: 2px solid red; border-block: 4px dashed blue; inset-inline: 15px 25px; inset-block: 5px 10px; }")
+	if s.BorderLeftWidth != 2 || s.BorderRightWidth != 2 {
+		t.Errorf("border-inline width = %v/%v, want 2/2", s.BorderLeftWidth, s.BorderRightWidth)
+	}
+	if s.BorderTopWidth != 4 || s.BorderBottomWidth != 4 {
+		t.Errorf("border-block width = %v/%v, want 4/4", s.BorderTopWidth, s.BorderBottomWidth)
+	}
+	if s.Left != 15 || s.Right != 25 {
+		t.Errorf("inset-inline = %v/%v, want 15/25", s.Left, s.Right)
+	}
+	if s.Top != 5 || s.Bottom != 10 {
+		t.Errorf("inset-block = %v/%v, want 5/10", s.Top, s.Bottom)
+	}
+}
+
+func TestLogicalDirectionRTL(t *testing.T) {
+	// LTR
+	sLTR := logical(t, "<div>x</div>", "div { direction: ltr; margin-inline-start: 10px; margin-inline-end: 20px; text-align: start; }")
+	if sLTR.Direction != "ltr" {
+		t.Errorf("direction = %q, want 'ltr'", sLTR.Direction)
+	}
+	if sLTR.MarginLeft != 10 || sLTR.MarginRight != 20 {
+		t.Errorf("LTR margin-inline-start/end = %v/%v, want 10/20", sLTR.MarginLeft, sLTR.MarginRight)
+	}
+	if sLTR.TextAlign != style.TextAlignLeft {
+		t.Errorf("LTR text-align: start = %v, want TextAlignLeft", sLTR.TextAlign)
+	}
+
+	// RTL
+	sRTL := logical(t, "<div>x</div>", "div { direction: rtl; margin-inline-start: 10px; margin-inline-end: 20px; text-align: start; }")
+	if sRTL.Direction != "rtl" {
+		t.Errorf("direction = %q, want 'rtl'", sRTL.Direction)
+	}
+	if sRTL.MarginRight != 10 || sRTL.MarginLeft != 20 {
+		t.Errorf("RTL margin-inline-start/end = %v/%v, want MarginRight=10 MarginLeft=20", sRTL.MarginRight, sRTL.MarginLeft)
+	}
+	if sRTL.TextAlign != style.TextAlignRight {
+		t.Errorf("RTL text-align: start = %v, want TextAlignRight", sRTL.TextAlign)
+	}
+}
+
+func TestGridPlacementLonghands(t *testing.T) {
+	s := logical(t, "<div>x</div>", "div { grid-column-start: 2; grid-column-end: span 3; grid-row-start: 1; grid-row-end: 4; }")
+	if s.GridColumn != "2 / span 3" {
+		t.Errorf("grid-column = %q, want '2 / span 3'", s.GridColumn)
+	}
+	if s.GridColumnSpan != 3 {
+		t.Errorf("grid-column-span = %d, want 3", s.GridColumnSpan)
+	}
+	if s.GridRow != "1 / 4" {
+		t.Errorf("grid-row = %q, want '1 / 4'", s.GridRow)
+	}
+	if s.GridRowSpan != 3 {
+		t.Errorf("grid-row-span = %d, want 3", s.GridRowSpan)
+	}
+}
