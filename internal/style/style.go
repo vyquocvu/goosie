@@ -3033,6 +3033,30 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseCornerRadius(cs, &cs.BorderRadius[2], value)
 	case "border-bottom-left-radius":
 		parseCornerRadius(cs, &cs.BorderRadius[3], value)
+	case "border-start-start-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[1], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[0], value)
+		}
+	case "border-start-end-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[0], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[1], value)
+		}
+	case "border-end-start-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[2], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[3], value)
+		}
+	case "border-end-end-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[3], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[2], value)
+		}
 	case "border-image-source":
 		cs.BorderImage.Source = css.ParseBorderImageSource(value)
 	case "border-image-slice":
@@ -3086,16 +3110,63 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.HasLeft = lengthSpecified(parsed)
 		}
 	case "inset":
-		t, r, b, l := parseBoxShorthand(value)
-		cs.Top, cs.Right, cs.Bottom, cs.Left = t, r, b, l
-		cs.HasTop, cs.HasRight, cs.HasBottom, cs.HasLeft = true, true, true, true
+		parts := splitTopLevelSpace(value)
+		switch len(parts) {
+		case 1:
+			v := css.ParseValue(parts[0])
+			val := resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize)
+			has := lengthSpecified(v)
+			cs.Top, cs.Right, cs.Bottom, cs.Left = val, val, val, val
+			cs.HasTop, cs.HasRight, cs.HasBottom, cs.HasLeft = has, has, has, has
+		case 2:
+			v0 := css.ParseValue(parts[0])
+			v1 := css.ParseValue(parts[1])
+			tb := resolveLengthEm(v0, 0, cs.FontSize, cs.rootFontSize)
+			rl := resolveLengthEm(v1, 0, cs.FontSize, cs.rootFontSize)
+			hasTB := lengthSpecified(v0)
+			hasRL := lengthSpecified(v1)
+			cs.Top, cs.Bottom = tb, tb
+			cs.Right, cs.Left = rl, rl
+			cs.HasTop, cs.HasBottom = hasTB, hasTB
+			cs.HasRight, cs.HasLeft = hasRL, hasRL
+		case 3:
+			v0 := css.ParseValue(parts[0])
+			v1 := css.ParseValue(parts[1])
+			v2 := css.ParseValue(parts[2])
+			t := resolveLengthEm(v0, 0, cs.FontSize, cs.rootFontSize)
+			rl := resolveLengthEm(v1, 0, cs.FontSize, cs.rootFontSize)
+			b := resolveLengthEm(v2, 0, cs.FontSize, cs.rootFontSize)
+			cs.Top = t
+			cs.Right, cs.Left = rl, rl
+			cs.Bottom = b
+			cs.HasTop = lengthSpecified(v0)
+			cs.HasRight, cs.HasLeft = lengthSpecified(v1), lengthSpecified(v1)
+			cs.HasBottom = lengthSpecified(v2)
+		case 4:
+			v0 := css.ParseValue(parts[0])
+			v1 := css.ParseValue(parts[1])
+			v2 := css.ParseValue(parts[2])
+			v3 := css.ParseValue(parts[3])
+			cs.Top = resolveLengthEm(v0, 0, cs.FontSize, cs.rootFontSize)
+			cs.Right = resolveLengthEm(v1, 0, cs.FontSize, cs.rootFontSize)
+			cs.Bottom = resolveLengthEm(v2, 0, cs.FontSize, cs.rootFontSize)
+			cs.Left = resolveLengthEm(v3, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasTop = lengthSpecified(v0)
+			cs.HasRight = lengthSpecified(v1)
+			cs.HasBottom = lengthSpecified(v2)
+			cs.HasLeft = lengthSpecified(v3)
+		}
 	case "inset-block":
 		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.Top, cs.Bottom = a, b
 		cs.HasTop, cs.HasBottom = true, true
 	case "inset-inline":
 		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
-		cs.Left, cs.Right = a, b
+		if cs.Direction == "rtl" {
+			cs.Right, cs.Left = a, b
+		} else {
+			cs.Left, cs.Right = a, b
+		}
 		cs.HasLeft, cs.HasRight = true, true
 	case "inset-block-start":
 		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)

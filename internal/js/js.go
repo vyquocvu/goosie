@@ -288,6 +288,7 @@ func New(opts Options) (*Runtime, error) {
 	}
 	r.setupServiceWorker()
 	r.setupCSS()
+	r.setupDragDrop()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
@@ -2550,7 +2551,89 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("repeat", ke.Repeat)
 	}
 
+	// DragEvent fields.
+	if de := e.AsDrag(); de != nil {
+		_ = obj.Set("dataTransfer", r.wrapDataTransfer(de.DataTransfer))
+	}
+
 	return obj
+}
+
+func (r *Runtime) wrapDataTransfer(dt *dom.DataTransfer) *goja.Object {
+	if dt == nil {
+		dt = dom.NewDataTransfer()
+	}
+	obj := r.vm.NewObject()
+	_ = obj.Set("dropEffect", dt.DropEffect)
+	_ = obj.Set("effectAllowed", dt.EffectAllowed)
+	_ = obj.Set("setData", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			dt.SetData(call.Arguments[0].String(), call.Arguments[1].String())
+		}
+		return goja.Undefined()
+	})
+	_ = obj.Set("getData", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 1 {
+			return r.vm.ToValue(dt.GetData(call.Arguments[0].String()))
+		}
+		return r.vm.ToValue("")
+	})
+	_ = obj.Set("clearData", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 1 {
+			dt.ClearData(call.Arguments[0].String())
+		} else {
+			dt.ClearData()
+		}
+		return goja.Undefined()
+	})
+	_ = obj.Set("__getTypes__", func() []string {
+		t := dt.Types()
+		if t == nil {
+			return []string{}
+		}
+		return t
+	})
+	_ = r.vm.Set("__dt__", obj)
+	_, _ = r.vm.RunString(`
+		(function() {
+			var o = __dt__;
+			Object.defineProperty(o, 'types', {
+				get: function() { return o.__getTypes__(); },
+				configurable: true,
+				enumerable: true
+			});
+		})();
+	`)
+	_ = r.vm.Set("__dt__", nil)
+	return obj
+}
+
+func (r *Runtime) setupDragDrop() {
+	dtCtor := func(call goja.ConstructorCall) *goja.Object {
+		dt := dom.NewDataTransfer()
+		return r.wrapDataTransfer(dt)
+	}
+	dtVal := r.vm.ToValue(dtCtor)
+	_ = r.vm.Set("DataTransfer", dtVal)
+
+	dragEventCtor := func(call goja.ConstructorCall) *goja.Object {
+		eventType := ""
+		if len(call.Arguments) > 0 {
+			eventType = call.Arguments[0].String()
+		}
+		dt := dom.NewDataTransfer()
+		de := dom.NewDragEvent(eventType, dom.MouseEvent{}, dt)
+		return r.wrapEvent(de).(*goja.Object)
+	}
+	deVal := r.vm.ToValue(dragEventCtor)
+	_ = r.vm.Set("DragEvent", deVal)
+
+	if win := r.vm.Get("window"); win != nil {
+		if winObj, ok := win.(*goja.Object); ok {
+			_ = winObj.Set("DataTransfer", dtVal)
+			_ = winObj.Set("DragEvent", deVal)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
