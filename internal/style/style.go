@@ -566,6 +566,11 @@ type ComputedStyle struct {
 	// CSS Basic User Interface Module Level 4
 	PointerEvents string // "auto", "none", etc. Default "auto"
 	UserSelect    string // "auto", "text", "none", "contain", "all". Default "auto"
+	CaretColor    css.Color
+
+	// CSS Overscroll Behavior Module Level 1
+	OverscrollBehaviorX string // "auto", "contain", "none". Default "auto"
+	OverscrollBehaviorY string // "auto", "contain", "none". Default "auto"
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -692,6 +697,9 @@ func DefaultStyle() ComputedStyle {
 		ScrollSnapStop:         "normal",
 		PointerEvents:          "auto",
 		UserSelect:             "auto",
+		CaretColor:             css.Color{}, // auto: resolves to currentColor
+		OverscrollBehaviorX:    "auto",
+		OverscrollBehaviorY:    "auto",
 	}
 }
 
@@ -2314,6 +2322,9 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	if parent.UserSelect == "none" || parent.UserSelect == "all" || parent.UserSelect == "contain" {
 		cs.UserSelect = parent.UserSelect
 	}
+	if parent.CaretColor.A > 0 {
+		cs.CaretColor = parent.CaretColor
+	}
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3331,6 +3342,45 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.UserSelect = v
 		case "initial", "unset":
 			cs.UserSelect = "auto"
+		}
+
+	case "caret-color":
+		v := strings.TrimSpace(strings.ToLower(value))
+		if v == "auto" {
+			cs.CaretColor = css.Color{}
+		} else if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
+			cs.CaretColor = c
+		}
+
+	case "overscroll-behavior":
+		parts := strings.Fields(strings.ToLower(strings.TrimSpace(value)))
+		if len(parts) == 1 {
+			switch parts[0] {
+			case "auto", "contain", "none":
+				cs.OverscrollBehaviorX = parts[0]
+				cs.OverscrollBehaviorY = parts[0]
+			}
+		} else if len(parts) >= 2 {
+			switch parts[0] {
+			case "auto", "contain", "none":
+				cs.OverscrollBehaviorX = parts[0]
+			}
+			switch parts[1] {
+			case "auto", "contain", "none":
+				cs.OverscrollBehaviorY = parts[1]
+			}
+		}
+	case "overscroll-behavior-x", "overscroll-behavior-inline":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "contain", "none":
+			cs.OverscrollBehaviorX = v
+		}
+	case "overscroll-behavior-y", "overscroll-behavior-block":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "contain", "none":
+			cs.OverscrollBehaviorY = v
 		}
 
 	case "vertical-align":

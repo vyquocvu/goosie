@@ -18,17 +18,29 @@ type canvasDrawOp struct {
 
 // canvasContext2D holds the internal state of one 2D rendering context.
 type canvasContext2D struct {
-	mu           sync.Mutex
-	width        int
-	height       int
-	fillStyle    string
-	strokeStyle  string
-	lineWidth    float64
-	font         string
-	textAlign    string
-	textBaseline string
-	ops          []canvasDrawOp
-	nodeID       int // DOM node ID of the canvas element, 0 if unbound
+	mu                       sync.Mutex
+	width                    int
+	height                   int
+	fillStyle                string
+	strokeStyle              string
+	lineWidth                float64
+	font                     string
+	textAlign                string
+	textBaseline             string
+	imageSmoothingEnabled    bool
+	imageSmoothingQuality    string
+	filter                   string
+	globalAlpha              float64
+	globalCompositeOperation string
+	shadowBlur               float64
+	shadowColor              string
+	shadowOffsetX            float64
+	shadowOffsetY            float64
+	lineCap                  string
+	lineJoin                 string
+	miterLimit               float64
+	ops                      []canvasDrawOp
+	nodeID                   int // DOM node ID of the canvas element, 0 if unbound
 }
 
 // CanvasOp is one recorded canvas drawing operation, exposed to the engine
@@ -279,6 +291,28 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
+	_ = obj.Set("roundRect", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0, 0)
+		var radii []interface{}
+		if len(call.Arguments) >= 5 {
+			arg := call.Arguments[4]
+			if arr, ok := arg.Export().([]interface{}); ok {
+				radii = arr
+			} else {
+				radii = []interface{}{arg.ToFloat()}
+			}
+		} else {
+			radii = []interface{}{0.0}
+		}
+		ctx.mu.Lock()
+		ctx.ops = append(ctx.ops, canvasDrawOp{
+			Method: "roundRect",
+			Args:   []interface{}{args[0], args[1], args[2], args[3], radii},
+		})
+		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
+
 	_ = obj.Set("bezierCurveTo", func(call goja.FunctionCall) goja.Value {
 		args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0)
 		ctx.mu.Lock()
@@ -495,6 +529,51 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 			Args:   []interface{}{args[0], args[1]},
 		})
 		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("reset", func(call goja.FunctionCall) goja.Value {
+		ctx.mu.Lock()
+		ctx.fillStyle = "#000000"
+		ctx.strokeStyle = "#000000"
+		ctx.lineWidth = 1.0
+		ctx.font = "10px sans-serif"
+		ctx.textAlign = "start"
+		ctx.textBaseline = "alphabetic"
+		ctx.imageSmoothingEnabled = true
+		ctx.imageSmoothingQuality = "low"
+		ctx.filter = "none"
+		ctx.globalAlpha = 1.0
+		ctx.globalCompositeOperation = "source-over"
+		ctx.shadowBlur = 0.0
+		ctx.shadowColor = "rgba(0, 0, 0, 0)"
+		ctx.shadowOffsetX = 0.0
+		ctx.shadowOffsetY = 0.0
+		ctx.lineCap = "butt"
+		ctx.lineJoin = "miter"
+		ctx.miterLimit = 10.0
+		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "reset"})
+		ctx.mu.Unlock()
+
+		_ = obj.Set("fillStyle", "#000000")
+		_ = obj.Set("strokeStyle", "#000000")
+		_ = obj.Set("lineWidth", 1.0)
+		_ = obj.Set("font", "10px sans-serif")
+		_ = obj.Set("textAlign", "start")
+		_ = obj.Set("textBaseline", "alphabetic")
+		_ = obj.Set("imageSmoothingEnabled", true)
+		_ = obj.Set("imageSmoothingQuality", "low")
+		_ = obj.Set("filter", "none")
+		_ = obj.Set("globalAlpha", 1.0)
+		_ = obj.Set("globalCompositeOperation", "source-over")
+		_ = obj.Set("shadowBlur", 0.0)
+		_ = obj.Set("shadowColor", "rgba(0, 0, 0, 0)")
+		_ = obj.Set("shadowOffsetX", 0.0)
+		_ = obj.Set("shadowOffsetY", 0.0)
+		_ = obj.Set("lineCap", "butt")
+		_ = obj.Set("lineJoin", "miter")
+		_ = obj.Set("miterLimit", 10.0)
+		_ = obj.Set("lineDashOffset", 0.0)
 		return goja.Undefined()
 	})
 
@@ -754,6 +833,28 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
+		_ = obj.Set("roundRect", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0)
+			var radii []interface{}
+			if len(call.Arguments) >= 5 {
+				arg := call.Arguments[4]
+				if arr, ok := arg.Export().([]interface{}); ok {
+					radii = arr
+				} else {
+					radii = []interface{}{arg.ToFloat()}
+				}
+			} else {
+				radii = []interface{}{0.0}
+			}
+			ctx.mu.Lock()
+			ctx.ops = append(ctx.ops, canvasDrawOp{
+				Method: "roundRect",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], radii},
+			})
+			ctx.mu.Unlock()
+			return goja.Undefined()
+		})
+
 		_ = obj.Set("bezierCurveTo", func(call goja.FunctionCall) goja.Value {
 			args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0)
 			ctx.mu.Lock()
@@ -897,6 +998,51 @@ func (r *Runtime) setupCanvas() {
 				Args:   []interface{}{args[0], args[1]},
 			})
 			ctx.mu.Unlock()
+			return goja.Undefined()
+		})
+
+		_ = obj.Set("reset", func(call goja.FunctionCall) goja.Value {
+			ctx.mu.Lock()
+			ctx.fillStyle = "#000000"
+			ctx.strokeStyle = "#000000"
+			ctx.lineWidth = 1.0
+			ctx.font = "10px sans-serif"
+			ctx.textAlign = "start"
+			ctx.textBaseline = "alphabetic"
+			ctx.imageSmoothingEnabled = true
+			ctx.imageSmoothingQuality = "low"
+			ctx.filter = "none"
+			ctx.globalAlpha = 1.0
+			ctx.globalCompositeOperation = "source-over"
+			ctx.shadowBlur = 0.0
+			ctx.shadowColor = "rgba(0, 0, 0, 0)"
+			ctx.shadowOffsetX = 0.0
+			ctx.shadowOffsetY = 0.0
+			ctx.lineCap = "butt"
+			ctx.lineJoin = "miter"
+			ctx.miterLimit = 10.0
+			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "reset"})
+			ctx.mu.Unlock()
+
+			_ = obj.Set("fillStyle", "#000000")
+			_ = obj.Set("strokeStyle", "#000000")
+			_ = obj.Set("lineWidth", 1.0)
+			_ = obj.Set("font", "10px sans-serif")
+			_ = obj.Set("textAlign", "start")
+			_ = obj.Set("textBaseline", "alphabetic")
+			_ = obj.Set("imageSmoothingEnabled", true)
+			_ = obj.Set("imageSmoothingQuality", "low")
+			_ = obj.Set("filter", "none")
+			_ = obj.Set("globalAlpha", 1.0)
+			_ = obj.Set("globalCompositeOperation", "source-over")
+			_ = obj.Set("shadowBlur", 0.0)
+			_ = obj.Set("shadowColor", "rgba(0, 0, 0, 0)")
+			_ = obj.Set("shadowOffsetX", 0.0)
+			_ = obj.Set("shadowOffsetY", 0.0)
+			_ = obj.Set("lineCap", "butt")
+			_ = obj.Set("lineJoin", "miter")
+			_ = obj.Set("miterLimit", 10.0)
+			_ = obj.Set("lineDashOffset", 0.0)
 			return goja.Undefined()
 		})
 
@@ -1122,6 +1268,27 @@ func (r *Runtime) setupPath2D() {
 			pData.ops = append(pData.ops, canvasDrawOp{
 				Method: "rect",
 				Args:   []interface{}{args[0], args[1], args[2], args[3]},
+			})
+			pData.mu.Unlock()
+			return goja.Undefined()
+		})
+		_ = obj.Set("roundRect", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0)
+			var radii []interface{}
+			if len(call.Arguments) >= 5 {
+				arg := call.Arguments[4]
+				if arr, ok := arg.Export().([]interface{}); ok {
+					radii = arr
+				} else {
+					radii = []interface{}{arg.ToFloat()}
+				}
+			} else {
+				radii = []interface{}{0.0}
+			}
+			pData.mu.Lock()
+			pData.ops = append(pData.ops, canvasDrawOp{
+				Method: "roundRect",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], radii},
 			})
 			pData.mu.Unlock()
 			return goja.Undefined()

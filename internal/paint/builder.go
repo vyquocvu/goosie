@@ -2297,11 +2297,15 @@ func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
 	if rect.Empty() {
 		return
 	}
+	caretColor := s.Color
+	if s.CaretColor.A > 0 {
+		caretColor = s.CaretColor
+	}
 	b.list.Append(DisplayCmd{
 		Kind:    CmdFill,
 		Rect:    rect,
-		Color:   frame.RGB(0, 0, 0),
-		Opacity: 1,
+		Color:   frame.RGB(caretColor.R, caretColor.G, caretColor.B),
+		Opacity: float32(caretColor.A) / 255.0,
 	})
 }
 
