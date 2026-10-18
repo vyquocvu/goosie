@@ -260,6 +260,7 @@ func BuildContextMenuItems(linkURL, imageURL, selText, focusedText string, isEdi
 	items = append(items, ContextMenuItem{Label: "Forward", Action: "forward", Disabled: !canForward})
 	items = append(items, ContextMenuItem{Label: "Reload", Action: "reload"})
 	items = append(items, ContextMenuItem{Separator: true})
+	items = append(items, ContextMenuItem{Label: "View Page Source", Action: "view_source"})
 	items = append(items, ContextMenuItem{Label: "Inspect Element", Action: "inspect"})
 	items = append(items, ContextMenuItem{Label: "Print to PDF", Action: "print_pdf"})
 

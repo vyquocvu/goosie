@@ -38,6 +38,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/flags"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
@@ -45,6 +46,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/pdf"
+	"github.com/vyquocvu/goosie/internal/perms"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/session"
@@ -52,6 +54,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 	"github.com/vyquocvu/goosie/internal/userscript"
+	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
 const (
@@ -154,6 +157,8 @@ type config struct {
 	theme             string
 	userscriptDir     string
 	appURL            string
+	flagsFile         string
+	permsFile         string
 }
 
 // stateDir is where this invocation keeps persistent state: the default
@@ -287,6 +292,8 @@ func parse(args []string) (config, error) {
 	c.bookmarkFile = filepath.Join(c.stateDir(), "bookmarks.json")
 	c.historyFile = filepath.Join(c.stateDir(), "history.json")
 	c.userscriptDir = filepath.Join(c.stateDir(), "userscripts")
+	c.flagsFile = filepath.Join(c.stateDir(), "flags.json")
+	c.permsFile = filepath.Join(c.stateDir(), "permissions.json")
 	return c, nil
 }
 
@@ -371,6 +378,8 @@ type framePath struct {
 	theme             string
 	crashedSession    *session.State
 	userscripts       *userscript.Manager
+	flags             *flags.Manager
+	perms             *perms.Manager
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -478,12 +487,20 @@ func build(c config) (*framePath, error) {
 		incognitoStorage: js.NewOriginStorageRegistry("", true),
 		theme:            c.theme,
 		userscripts:      userscript.NewManager(c.userscriptDir),
+		flags:            flags.NewManager(c.flagsFile),
+		perms:            perms.NewManager(c.permsFile),
 	}
 	if f.theme == "" {
 		f.theme = "system"
 	}
 	if !c.paced() && f.userscripts != nil {
 		_ = f.userscripts.Load()
+	}
+	if !c.paced() && f.flags != nil {
+		_ = f.flags.Load()
+	}
+	if !c.paced() && f.perms != nil {
+		_ = f.perms.Load()
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -857,7 +874,7 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 		}
 	}
 	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
-	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts)
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts, f.perms)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -1880,11 +1897,26 @@ func (f *framePath) handleContextMenuAction(action, data string) {
 		f.traverseTab(1)
 	case "reload":
 		f.reloadTab()
+	case "view_source":
+		f.viewSourceCurrentTab()
 	case "inspect":
 		f.navigateTab("goosie://inspect")
 	case "print_pdf":
 		f.printActiveTabToPDF()
 	}
+}
+
+// viewSourceCurrentTab opens the view-source representation of the current tab in a new tab.
+func (f *framePath) viewSourceCurrentTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	active := f.tabMgr.Active()
+	if active == nil || active.URL() == "" {
+		return
+	}
+	f.newTab()
+	f.navigateTab(viewsource.WrapViewSourceURL(active.URL()))
 }
 
 // printActiveTabToPDF exports the currently active tab document to PDF.
@@ -2251,15 +2283,21 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
-	resp, err := client.Get(ctx, rawURL)
+	fetchURL := rawURL
+	targetURL, isViewSource := viewsource.IsViewSourceURL(rawURL)
+	if isViewSource {
+		fetchURL = targetURL
+	}
+	resp, err := client.Get(ctx, fetchURL)
 	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(rawURL), err)
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(fetchURL), err)
 	}
 	var mgr *download.Manager
 	var storageReg *js.OriginStorageRegistry
 	var sessionID string
 	var appMode appearanceMode
 	var userscriptMgr *userscript.Manager
+	var permsMgr *perms.Manager
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -2272,7 +2310,37 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			appMode = v
 		case *userscript.Manager:
 			userscriptMgr = v
+		case *perms.Manager:
+			permsMgr = v
 		}
+	}
+
+	if isViewSource {
+		viewHTML := viewsource.RenderHTML(resp.Text(), resp.URL, appMode.dark)
+		sessOpts := []engine.Option{
+			engine.WithMetrics(fonts),
+			engine.WithViewportH(float32(viewportH)),
+			engine.WithDarkMode(appMode.dark),
+			engine.WithHighContrast(appMode.highContrast),
+		}
+		sess, err := engine.NewSession(viewHTML, nil, float32(viewportW), sessOpts...)
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build view-source session: %w", err)
+		}
+		list, err := sess.PaintChecked(scale)
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint view-source document: %w", err)
+		}
+		dl := list.Build(1)
+		extent := dl.Extent()
+		budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size view-source tile cache: %w", err)
+		}
+		pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+		layer := frame.NewLayer(1, extent, budgetBytes, pool)
+		layer.SetContent(dl)
+		return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, viewsource.WrapViewSourceURL(resp.URL), nil
 	}
 
 	contentType := resp.Headers["Content-Type"]
@@ -2365,7 +2433,15 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// deadline-child shape. The engine resolves srcs before calling.
 	scriptCtx, scriptCancel := context.WithTimeout(ctx, engine.ScriptFetchBudget)
 	defer scriptCancel()
+	origin := perms.NormalizeOrigin(resp.URL)
+	jsAllowed := permsMgr == nil || permsMgr.IsAllowed(origin, perms.PermissionJavaScript)
+	imgAllowed := permsMgr == nil || permsMgr.IsAllowed(origin, perms.PermissionImages)
+	cookiesAllowed := permsMgr == nil || permsMgr.IsAllowed(origin, perms.PermissionCookies)
+
 	scriptFetcher := func(base, url string) ([]byte, error) {
+		if !jsAllowed {
+			return nil, fmt.Errorf("goosie: scripts blocked by site permissions")
+		}
 		resp, err := client.Get(subresourceCtx(scriptCtx, base), url)
 		if err != nil {
 			return nil, err
@@ -2394,6 +2470,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// Image subresources use the same client and cancellation. The engine hands
 	// absolute http(s) URLs only, so the fetcher just reads the response bytes.
 	imageFetcher := func(base, url string) ([]byte, error) {
+		if !imgAllowed {
+			return nil, fmt.Errorf("goosie: image loading blocked by site permissions")
+		}
 		resp, err := client.Get(subresourceCtx(imgCtx, base), url)
 		if err != nil {
 			return nil, err
@@ -2420,21 +2499,25 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// afterwards and closes it with itself (see applyNavResult/closeTab), so
 	// every error return below must close what it created.
 	var cookieStore js.CookieStore
-	if client != nil {
+	if client != nil && cookiesAllowed {
 		cookieStore = client.Jar()
 	}
-	rt, rtErr := js.New(js.Options{
-		URL:          resp.URL,
-		HTTPClient:   jsFetch,
-		Cookies:      cookieStore,
-		Storage:      storageReg,
-		SessionID:    sessionID,
-		DarkMode:     appMode.dark,
-		HighContrast: appMode.highContrast,
-	})
-	if rtErr != nil {
-		fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
-		rt = nil
+	var rt *js.Runtime
+	if jsAllowed {
+		var rtErr error
+		rt, rtErr = js.New(js.Options{
+			URL:          resp.URL,
+			HTTPClient:   jsFetch,
+			Cookies:      cookieStore,
+			Storage:      storageReg,
+			SessionID:    sessionID,
+			DarkMode:     appMode.dark,
+			HighContrast: appMode.highContrast,
+		})
+		if rtErr != nil {
+			fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
+			rt = nil
+		}
 	}
 	completed := false
 	defer func() {
@@ -2457,7 +2540,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		imageOption(deferImages, resp.URL, imageFetcher),
 		fontOption(deferFonts, resp.URL, fontFetcher, fonts),
 	}
-	if userscriptMgr != nil {
+	if userscriptMgr != nil && jsAllowed {
 		start := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentStart)
 		end := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentEnd)
 		matched := append(start, end...)
@@ -2577,6 +2660,9 @@ func normalizeURL(raw string) string {
 	if raw == "" {
 		return raw
 	}
+	if target, isVS := viewsource.IsViewSourceURL(raw); isVS {
+		return viewsource.WrapViewSourceURL(normalizeURL(target))
+	}
 	// Case-insensitive scheme check for http, https, and file.
 	lower := strings.ToLower(raw)
 	for _, scheme := range []string{"https://", "http://", "file://"} {
@@ -2681,6 +2767,7 @@ func (f *framePath) openWindow() error {
 			cw.onTick = f.pumpJS
 			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
 			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
+			cw.onViewSource = f.viewSourceCurrentTab
 			cw.onDuplicateTab = func() { f.duplicateTab() }
 			cw.onReaderMode = func() { f.toggleReaderMode() }
 			cw.bookmarks = f.bookmarks
@@ -2908,6 +2995,11 @@ func run(args []string) error {
 		if f.history != nil {
 			if err := f.history.Save(); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)
+			}
+		}
+		if f.flags != nil {
+			if err := f.flags.Save(); err != nil {
+				fmt.Fprintf(os.Stderr, "goosie: save flags: %v\n", err)
 			}
 		}
 		if c.sessionActiveFile != "" {

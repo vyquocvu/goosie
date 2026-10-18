@@ -33,6 +33,7 @@ type chromeWindow struct {
 	onLinkClick       func(href string)
 	onBookmark        func()
 	onInspect         func()
+	onViewSource      func()
 	onDuplicateTab    func()
 	onReaderMode      func()
 	onFocusClick      func(contentX, contentY int32) bool
@@ -741,6 +742,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case (key == 'i' || key == 'I') && (mods&surface.ModOption != 0):
 		if cw.onInspect != nil {
 			cw.onInspect()
+			return true
+		}
+	case (key == 'u' || key == 'U') && (mods&surface.ModOption != 0):
+		if cw.onViewSource != nil {
+			cw.onViewSource()
 			return true
 		}
 	case key == 'c' || key == 'C':

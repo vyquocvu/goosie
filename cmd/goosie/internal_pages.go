@@ -14,10 +14,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/flags"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
+	"github.com/vyquocvu/goosie/internal/perms"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/userscript"
 )
@@ -35,6 +37,7 @@ func internalNavHeader(active string) string {
 		{"downloads", "Downloads", "goosie://downloads"},
 		{"inspect", "Inspector", "goosie://inspect"},
 		{"extensions", "Extensions", "goosie://extensions"},
+		{"flags", "Flags", "goosie://flags"},
 	}
 
 	var b strings.Builder
@@ -569,6 +572,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildRestorePageHTML(f, rawURL)
 	case "extensions", "userscripts":
 		return buildExtensionsPageHTML(f, rawURL)
+	case "flags":
+		return buildFlagsPageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">
@@ -581,6 +586,7 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
         <li><a class="list-link" href="goosie://downloads">goosie://downloads</a> &mdash; Downloaded files</li>
         <li><a class="list-link" href="goosie://inspect">goosie://inspect</a> &mdash; Web Inspector &amp; DOM/CSS Tree Explorer (Cmd+Option+I)</li>
         <li><a class="list-link" href="goosie://extensions">goosie://extensions</a> &mdash; Extensions &amp; User Scripts Manager</li>
+        <li><a class="list-link" href="goosie://flags">goosie://flags</a> &mdash; Experiments &amp; Feature Flags</li>
         <li><a class="list-link" href="goosie://reader">goosie://reader</a> &mdash; Distraction-Free Reader Mode (Cmd+Shift+R)</li>
         <li><a class="list-link" href="goosie://restore">goosie://restore</a> &mdash; Session Crash Recovery &amp; Restore Prompt</li>
       </ul>
@@ -664,6 +670,17 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			targetTab.SetStandaloneApp(!targetTab.IsStandaloneApp())
 			if cw, ok := f.window.(*chromeWindow); ok {
 				cw.notifyContentResize()
+			}
+		case "perm_set":
+			p := perms.Permission(u.Query().Get("perm"))
+			st := perms.PermissionState(u.Query().Get("state"))
+			orig := u.Query().Get("origin")
+			if orig == "" {
+				orig = perms.NormalizeOrigin(targetTab.URL())
+			}
+			if f.perms != nil && p != "" && st != "" {
+				f.perms.Set(orig, p, st)
+				_ = f.perms.Save()
 			}
 		}
 	}
@@ -1023,6 +1040,64 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
+	// Site Permissions & Content Settings Card
+	origin = perms.NormalizeOrigin(targetTab.URL())
+	b.WriteString(`<div class="card">`)
+	b.WriteString(`<h2>Site Permissions &amp; Content Settings</h2>`)
+	b.WriteString(fmt.Sprintf(`<p style="color: #5f6368; font-size: 13px;">Permissions for origin: <code>%s</code></p>`, html.EscapeString(origin)))
+	b.WriteString(`<table><thead><tr><th style="text-align: left;">Capability</th><th style="text-align: left;">Status</th><th style="text-align: right;">Action</th></tr></thead><tbody>`)
+
+	capabilities := []struct {
+		perm perms.Permission
+		name string
+	}{
+		{perms.PermissionJavaScript, "JavaScript Execution"},
+		{perms.PermissionImages, "Image Loading"},
+		{perms.PermissionCookies, "Cookie Storage"},
+	}
+
+	for _, cap := range capabilities {
+		currState := perms.StateDefault
+		if f.perms != nil {
+			currState = f.perms.State(origin, cap.perm)
+		}
+		var statusLabel string
+		var nextState perms.PermissionState
+		var btnLabel string
+		btnClass := "btn-action danger"
+
+		switch currState {
+		case perms.StateBlock:
+			statusLabel = `<span style="color:#c5221f; font-weight:bold;">Blocked</span>`
+			nextState = perms.StateAllow
+			btnLabel = "Allow"
+			btnClass = "btn-action secondary"
+		case perms.StateAllow:
+			statusLabel = `<span style="color:#137333; font-weight:bold;">Allowed (Explicit)</span>`
+			nextState = perms.StateBlock
+			btnLabel = "Block"
+			btnClass = "btn-action danger"
+		default:
+			statusLabel = `<span style="color:#137333;">Allowed (Default)</span>`
+			nextState = perms.StateBlock
+			btnLabel = "Block"
+			btnClass = "btn-action danger"
+		}
+
+		toggleURL := fmt.Sprintf(`goosie://inspect?action=perm_set&origin=%s&perm=%s&state=%s&tab=%d`,
+			url.QueryEscape(origin), url.QueryEscape(string(cap.perm)), url.QueryEscape(string(nextState)), targetTab.ID())
+		resetURL := fmt.Sprintf(`goosie://inspect?action=perm_set&origin=%s&perm=%s&state=%s&tab=%d`,
+			url.QueryEscape(origin), url.QueryEscape(string(cap.perm)), url.QueryEscape(string(perms.StateDefault)), targetTab.ID())
+
+		actionsHTML := fmt.Sprintf(`<a class="%s" style="padding:2px 8px;font-size:11px;" href="%s">%s</a>`, btnClass, toggleURL, btnLabel)
+		if currState != perms.StateDefault {
+			actionsHTML += fmt.Sprintf(` <a class="btn-action secondary" style="padding:2px 8px;font-size:11px;" href="%s">Reset</a>`, resetURL)
+		}
+
+		b.WriteString(fmt.Sprintf(`<tr><td><b>%s</b></td><td>%s</td><td style="text-align: right;">%s</td></tr>`, html.EscapeString(cap.name), statusLabel, actionsHTML))
+	}
+	b.WriteString(`</tbody></table></div>`)
+
 	return "Web Inspector", internalPageTemplate("inspect", "Web Inspector", b.String())
 }
 
@@ -1249,6 +1324,137 @@ func buildExtensionsPageHTML(f *framePath, rawURL string) (title, htmlContent st
 	b.WriteString(`</div>`)
 
 	return "Extensions - Goosie", internalPageTemplate("extensions", "Extensions - Goosie", b.String())
+}
+
+// buildFlagsPageHTML generates the experimental feature flags configuration page.
+func buildFlagsPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
+	u, _ := url.Parse(rawURL)
+	action := ""
+	id := ""
+	query := ""
+	if u != nil {
+		action = u.Query().Get("action")
+		id = u.Query().Get("id")
+		query = strings.ToLower(strings.TrimSpace(u.Query().Get("q")))
+	}
+
+	if f.flags != nil {
+		switch action {
+		case "toggle":
+			if id != "" {
+				f.flags.SetEnabled(id, !f.flags.IsEnabled(id))
+				_ = f.flags.Save()
+			}
+		case "reset":
+			f.flags.ResetAll()
+			_ = f.flags.Save()
+		}
+	}
+
+	var allFlags []flags.Flag
+	hasModified := false
+	if f.flags != nil {
+		allFlags = f.flags.Flags()
+		hasModified = f.flags.HasNonDefault()
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="card">
+      <h1>Experiments &amp; Feature Flags</h1>
+      <p style="color: #5f6368; font-size: 14px; margin-top: 4px;">
+        Configure advanced engine capabilities and experimental features. Use caution: experimental features may impact browser performance, stability, or web compatibility.
+      </p>`)
+
+	if hasModified {
+		b.WriteString(`<div style="background-color: #fef7e0; border: 1px solid #f9ab00; border-radius: 6px; padding: 12px 16px; margin-top: 14px; color: #b06000; font-size: 13px; font-weight: 500;">
+        <strong>Warning:</strong> You have modified experimental feature flags. Your changes will take full effect after restarting Goosie.
+      </div>`)
+	}
+
+	b.WriteString(`<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+        <form action="goosie://flags" method="GET" style="display: flex; gap: 8px; flex: 1; max-width: 400px;">
+          <input type="text" name="q" placeholder="Search flags..." value="` + html.EscapeString(query) + `" style="flex: 1; padding: 6px 10px; border: 1px solid #dadce0; border-radius: 4px; font-size: 13px;">
+          <button type="submit" class="btn-action" style="cursor: pointer; border: none;">Search</button>
+        </form>
+        <div>
+          <a class="btn-action secondary" href="goosie://flags?action=reset">Reset All to Default</a>
+        </div>
+      </div>
+    </div>`)
+
+	// Filter flags if query present
+	var filtered []flags.Flag
+	for _, fl := range allFlags {
+		if query == "" || strings.Contains(strings.ToLower(fl.Name), query) || strings.Contains(strings.ToLower(fl.Description), query) || strings.Contains(strings.ToLower(fl.ID), query) {
+			filtered = append(filtered, fl)
+		}
+	}
+
+	if len(filtered) == 0 {
+		b.WriteString(`<div class="card empty-state">
+        <p style="font-size: 15px; font-weight: 500;">No flags match your search query.</p>
+        <p style="color: #5f6368; font-size: 13px; margin-top: 6px;"><a href="goosie://flags" style="color: #1a73e8;">Clear search</a> to view all available feature flags.</p>
+      </div>`)
+		return "Experiments - Goosie", internalPageTemplate("flags", "Experiments - Goosie", b.String())
+	}
+
+	b.WriteString(`<div class="card">
+      <h2>Available Feature Flags (` + strconv.Itoa(len(filtered)) + `)</h2>`)
+
+	for _, fl := range filtered {
+		statusBadge := `<span class="badge" style="background:#f1f3f4; color:#5f6368;">Default</span>`
+		if fl.Enabled != fl.Default {
+			if fl.Enabled {
+				statusBadge = `<span class="badge badge-completed">Enabled</span>`
+			} else {
+				statusBadge = `<span class="badge badge-canceled">Disabled</span>`
+			}
+		}
+
+		toggleText := "Disable"
+		btnCls := "secondary"
+		if !fl.Enabled {
+			toggleText = "Enable"
+			btnCls = ""
+		}
+		toggleLink := fmt.Sprintf(`goosie://flags?action=toggle&id=%s`, url.QueryEscape(fl.ID))
+		if query != "" {
+			toggleLink += "&q=" + url.QueryEscape(query)
+		}
+
+		defaultDesc := "Default: Enabled"
+		if !fl.Default {
+			defaultDesc = "Default: Disabled"
+		}
+
+		b.WriteString(fmt.Sprintf(`
+      <div class="list-item" style="padding: 16px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <div class="list-title" style="font-size: 15px;">%s %s</div>
+            <div style="font-size: 13px; color: #3c4043; margin-top: 4px;">%s</div>
+            <div class="list-meta" style="margin-top: 6px;">
+              <code>#%s</code> &bull; <span style="color: #5f6368;">%s</span>
+            </div>
+          </div>
+          <div style="margin-left: 16px; white-space: nowrap;">
+            <a class="btn-action %s" href="%s">%s</a>
+          </div>
+        </div>
+      </div>`,
+			html.EscapeString(fl.Name),
+			statusBadge,
+			html.EscapeString(fl.Description),
+			html.EscapeString(fl.ID),
+			defaultDesc,
+			btnCls,
+			toggleLink,
+			toggleText,
+		))
+	}
+
+	b.WriteString(`</div>`)
+	return "Experiments - Goosie", internalPageTemplate("flags", "Experiments - Goosie", b.String())
 }
 
 // renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.
