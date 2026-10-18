@@ -383,7 +383,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						blockInto(a, kid, contentW)
 						inlineInto(a, kid)
 						k = a.Get(kid)
-						if sx, right, ok := inlineExtent(a, kid); ok && right > sx {
+						if k.Style != nil && k.Style.AspectRatio > 0 && k.H > 0 {
+							k.W = k.H * k.Style.AspectRatio
+							clampWidth(a, k, contentW)
+							k = a.Get(kid)
+						} else if sx, right, ok := inlineExtent(a, kid); ok && right > sx {
 							srcX, contentExtent, measured = sx, right-sx, true
 							k.W = contentExtent
 							k = a.Get(kid)
@@ -531,7 +535,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// only counts here when it resolved, which is why the test reads the height
 	// through the containing block rather than the raw declaration.
 	if obj.Style != nil && resolvePctLength(obj.Style.Height, parentH) < 0 {
-		obj.H = y
+		if obj.Style.AspectRatio > 0 && obj.W > 0 {
+			obj.H = obj.W / obj.Style.AspectRatio
+		} else {
+			obj.H = y
+		}
 		if replacedH > obj.H {
 			obj.H = replacedH
 		}
@@ -2176,7 +2184,9 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 	attrH := attrPx(obj.Node.GetAttribute("height"))
 
 	ratio := float32(0)
-	if natW > 0 && natH > 0 {
+	if s.AspectRatio > 0 {
+		ratio = 1.0 / s.AspectRatio
+	} else if natW > 0 && natH > 0 {
 		ratio = natH / natW
 	} else if attrW > 0 && attrH > 0 {
 		ratio = attrH / attrW
@@ -2348,11 +2358,19 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		}
 	} else if s.ContentVisibility == "hidden" && s.ContainIntrinsicHeight > 0 {
 		obj.H = s.ContainIntrinsicHeight
+	} else if s.AspectRatio > 0 && obj.W > 0 {
+		obj.H = obj.W / s.AspectRatio
 	}
 	if obj.H < 0 {
 		obj.H = 0
 	}
 	clampHeight(a, obj, containingH)
+
+	// If width was auto and height was definite, aspect-ratio resolves width
+	if explicitW < 0 && s.AspectRatio > 0 && obj.H > 0 && s.Display != style.DisplayBlock {
+		obj.W = obj.H * s.AspectRatio
+		clampWidth(a, obj, containingW)
+	}
 }
 
 // distributeAutoMargins gives the line an auto-width or clamped block leaves

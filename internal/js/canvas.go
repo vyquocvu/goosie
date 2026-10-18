@@ -125,6 +125,12 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 		// Return the existing context wrapper
 		return r.vm.ToValue(ctx)
 	}
+	if node.ID != 0 {
+		if ctx, exists := r.canvasContexts[int(node.ID)]; exists {
+			r.mu.Unlock()
+			return r.vm.ToValue(ctx)
+		}
+	}
 	r.mu.Unlock()
 
 	// Create a new context
@@ -153,6 +159,9 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	}
 
 	r.BindCanvasContext(nodeID, ctx)
+	if node.ID != 0 && int(node.ID) != nodeID {
+		r.BindCanvasContext(int(node.ID), ctx)
+	}
 
 	// Create the JS wrapper object
 	obj := r.vm.NewObject()
@@ -264,6 +273,43 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		ctx.ops = append(ctx.ops, canvasDrawOp{
 			Method: "rect",
 			Args:   []interface{}{args[0], args[1], args[2], args[3]},
+		})
+		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("bezierCurveTo", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0)
+		ctx.mu.Lock()
+		ctx.ops = append(ctx.ops, canvasDrawOp{
+			Method: "bezierCurveTo",
+			Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], args[5]},
+		})
+		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("quadraticCurveTo", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0, 0)
+		ctx.mu.Lock()
+		ctx.ops = append(ctx.ops, canvasDrawOp{
+			Method: "quadraticCurveTo",
+			Args:   []interface{}{args[0], args[1], args[2], args[3]},
+		})
+		ctx.mu.Unlock()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("ellipse", func(call goja.FunctionCall) goja.Value {
+		args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0, 0)
+		ccw := false
+		if len(call.Arguments) >= 8 {
+			ccw = call.Arguments[7].ToBoolean()
+		}
+		ctx.mu.Lock()
+		ctx.ops = append(ctx.ops, canvasDrawOp{
+			Method: "ellipse",
+			Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], args[5], args[6], ccw},
 		})
 		ctx.mu.Unlock()
 		return goja.Undefined()
@@ -506,6 +552,43 @@ func (r *Runtime) setupCanvas() {
 			ctx.ops = append(ctx.ops, canvasDrawOp{
 				Method: "rect",
 				Args:   []interface{}{args[0], args[1], args[2], args[3]},
+			})
+			ctx.mu.Unlock()
+			return goja.Undefined()
+		})
+
+		_ = obj.Set("bezierCurveTo", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0)
+			ctx.mu.Lock()
+			ctx.ops = append(ctx.ops, canvasDrawOp{
+				Method: "bezierCurveTo",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], args[5]},
+			})
+			ctx.mu.Unlock()
+			return goja.Undefined()
+		})
+
+		_ = obj.Set("quadraticCurveTo", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0)
+			ctx.mu.Lock()
+			ctx.ops = append(ctx.ops, canvasDrawOp{
+				Method: "quadraticCurveTo",
+				Args:   []interface{}{args[0], args[1], args[2], args[3]},
+			})
+			ctx.mu.Unlock()
+			return goja.Undefined()
+		})
+
+		_ = obj.Set("ellipse", func(call goja.FunctionCall) goja.Value {
+			args := parseFloatArgs(call, 0, 0, 0, 0, 0, 0, 0)
+			ccw := false
+			if len(call.Arguments) >= 8 {
+				ccw = call.Arguments[7].ToBoolean()
+			}
+			ctx.mu.Lock()
+			ctx.ops = append(ctx.ops, canvasDrawOp{
+				Method: "ellipse",
+				Args:   []interface{}{args[0], args[1], args[2], args[3], args[4], args[5], args[6], ccw},
 			})
 			ctx.mu.Unlock()
 			return goja.Undefined()

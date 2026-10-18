@@ -524,6 +524,10 @@ type ComputedStyle struct {
 	// Quotes is the parsed CSS quotes property: pairs of open and close quotes.
 	Quotes []string
 
+	// AspectRatio is the preferred aspect ratio (w/h) from the CSS aspect-ratio property.
+	// 0 means auto (no preferred aspect ratio).
+	AspectRatio float32
+
 	// Animation fields for @keyframes animations.
 	AnimationName      string
 	AnimationDuration  time.Duration
@@ -654,6 +658,7 @@ func DefaultStyle() ComputedStyle {
 		ShapeOutside:           "none",
 		ShapeMargin:            0,
 		Quotes:                 []string{"“", "”", "‘", "’"},
+		AspectRatio:            0,
 	}
 }
 
@@ -3278,7 +3283,37 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BackdropFilter = css.ParseFilter(value)
 	case "quotes":
 		cs.Quotes = parseQuotes(value)
+	case "aspect-ratio":
+		cs.AspectRatio = parseAspectRatio(value)
 	}
+}
+
+// parseAspectRatio parses the CSS aspect-ratio property value (e.g., "16 / 9", "1", "auto 16/9").
+func parseAspectRatio(v string) float32 {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "none" || v == "auto" {
+		return 0
+	}
+	lower := strings.ToLower(v)
+	if strings.HasPrefix(lower, "auto ") {
+		v = strings.TrimSpace(v[5:])
+	}
+	parts := strings.Split(v, "/")
+	if len(parts) == 2 {
+		w, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+		h, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+		if err1 == nil && err2 == nil && w > 0 && h > 0 {
+			return float32(w / h)
+		}
+		return 0
+	}
+	if len(parts) == 1 {
+		w, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+		if err == nil && w > 0 {
+			return float32(w)
+		}
+	}
+	return 0
 }
 
 // parseQuotes parses a CSS quotes property value into a slice of quote string pairs.

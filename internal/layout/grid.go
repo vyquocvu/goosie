@@ -94,12 +94,23 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			if subSpan < 1 {
 				subSpan = 1
 			}
-			if subStart < len(pObj.GridCols) {
-				end := subStart + subSpan
-				if end > len(pObj.GridCols) {
-					end = len(pObj.GridCols)
+			parentCols := pObj.GridCols
+			if len(parentCols) == 0 && pObj.Style != nil && pObj.Style.GridTemplateColumns != "" && !isSubgrid(pObj.Style.GridTemplateColumns) {
+				pColTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateColumns, pObj.Style.FontSize, contentW)
+				for _, tc := range pColTracks {
+					w := tc.max
+					if w <= 0 {
+						w = tc.min
+					}
+					parentCols = append(parentCols, w)
 				}
-				for _, w := range pObj.GridCols[subStart:end] {
+			}
+			if subStart < len(parentCols) {
+				end := subStart + subSpan
+				if end > len(parentCols) {
+					end = len(parentCols)
+				}
+				for _, w := range parentCols[subStart:end] {
 					cols = append(cols, gridTrack{min: w, max: w})
 				}
 			}
@@ -122,12 +133,23 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			if subSpan < 1 {
 				subSpan = 1
 			}
-			if subStart < len(pObj.GridRows) {
-				end := subStart + subSpan
-				if end > len(pObj.GridRows) {
-					end = len(pObj.GridRows)
+			parentRows := pObj.GridRows
+			if len(parentRows) == 0 && pObj.Style != nil && pObj.Style.GridTemplateRows != "" && !isSubgrid(pObj.Style.GridTemplateRows) {
+				pRowTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateRows, pObj.Style.FontSize, contentH)
+				for _, tr := range pRowTracks {
+					h := tr.max
+					if h <= 0 {
+						h = tr.min
+					}
+					parentRows = append(parentRows, h)
 				}
-				for _, h := range pObj.GridRows[subStart:end] {
+			}
+			if subStart < len(parentRows) {
+				end := subStart + subSpan
+				if end > len(parentRows) {
+					end = len(parentRows)
+				}
+				for _, h := range parentRows[subStart:end] {
 					rowSpecs = append(rowSpecs, gridTrack{min: h, max: h})
 				}
 			}
