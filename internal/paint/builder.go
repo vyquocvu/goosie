@@ -182,6 +182,19 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 		if len(obj.Style.Transform) > 0 {
 			b.applyTransform(obj, cmdStart, x0, y0, x1, y1)
 		}
+		if len(obj.Style.Filter) > 0 || len(obj.Style.BackdropFilter) > 0 {
+			filterStr := css.FormatFilter(obj.Style.Filter)
+			backdropStr := css.FormatFilter(obj.Style.BackdropFilter)
+			cmds := b.list.All()
+			for i := cmdStart; i < len(cmds); i++ {
+				if len(obj.Style.Filter) > 0 {
+					cmds[i].Filter = filterStr
+				}
+				if len(obj.Style.BackdropFilter) > 0 {
+					cmds[i].BackdropFilter = backdropStr
+				}
+			}
+		}
 		// If this box has overflow:hidden, compute a content-space clip rect
 		// that children must respect.
 		if obj.Style.Overflow == style.OverflowHidden || obj.Style.OverflowX == style.OverflowHidden || obj.Style.OverflowY == style.OverflowHidden {

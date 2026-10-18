@@ -14,6 +14,7 @@ const (
 	NodeText
 	NodeComment
 	NodeDoctype
+	NodeDocumentFragment
 )
 
 // NodeID is a stable, unique identifier for a node within a document. It is
@@ -94,6 +95,66 @@ func (n *Node) Element() bool { return n.Type == NodeElement }
 
 // Text reports whether the node is a text node.
 func (n *Node) Text() bool { return n.Type == NodeText }
+
+// DocumentFragment reports whether the node is a document fragment.
+func (n *Node) DocumentFragment() bool { return n.Type == NodeDocumentFragment }
+
+// CloneNode returns a duplicate of node n. If deep is true, descendants are also recursively cloned.
+func (n *Node) CloneNode(deep bool) *Node {
+	if n == nil {
+		return nil
+	}
+	clone := &Node{
+		Type:        n.Type,
+		Namespace:   n.Namespace,
+		Data:        n.Data,
+		DataAtom:    n.DataAtom,
+		DataContent: n.DataContent,
+		Doc:         n.Doc,
+	}
+	if n.Doc != nil {
+		clone.ID = n.Doc.allocID()
+	}
+	if len(n.Attr) > 0 {
+		clone.Attr = make([]Attribute, len(n.Attr))
+		copy(clone.Attr, n.Attr)
+	}
+	if deep {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			childClone := c.CloneNode(true)
+			clone.AppendChild(childClone)
+		}
+	}
+	return clone
+}
+
+// TemplateContent returns the document fragment holding the template's cloned children.
+func (n *Node) TemplateContent() *Node {
+	if n == nil || n.DataAtom != AtomTemplate {
+		return nil
+	}
+	frag := &Node{
+		Type: NodeDocumentFragment,
+		Doc:  n.Doc,
+	}
+	if n.Doc != nil {
+		frag.ID = n.Doc.allocID()
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		frag.AppendChild(c.CloneNode(true))
+	}
+	return frag
+}
+
+// ImportNode creates a copy of a node from an external document and adopts it into d.
+func (d *Document) ImportNode(n *Node, deep bool) *Node {
+	if n == nil || d == nil {
+		return nil
+	}
+	clone := n.CloneNode(deep)
+	clone.adopt(d)
+	return clone
+}
 
 // adopt assigns targetDoc and allocates new NodeIDs throughout the subtree
 // rooted at n if n comes from another document or lacks a valid NodeID.

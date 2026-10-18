@@ -160,9 +160,12 @@ type DisplayCmd struct {
 	Image ImageSpec
 	// Gradient is the ramp a CmdGradient fills its rect with. Its stops are
 	// premultiplied and already carry the command's opacity.
-	Gradient frame.LinearGradient
-	// RadialGradient is the ramp a CmdRadialGradient fills its rect with.
+	Gradient       frame.LinearGradient
 	RadialGradient frame.RadialGradient
+	// Filter carries the serialized CSS filter property value for this command.
+	Filter string
+	// BackdropFilter carries the serialized CSS backdrop-filter property value for this command.
+	BackdropFilter string
 
 	// Z orders this command within its layer. The list is sorted once per
 	// content version, never per frame or per tile; see List.SortStable.

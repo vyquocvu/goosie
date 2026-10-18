@@ -518,6 +518,11 @@ type ComputedStyle struct {
 
 	// Filter is the parsed CSS filter property. Empty means no filter.
 	Filter []css.FilterFunc
+	// BackdropFilter is the parsed CSS backdrop-filter property. Empty means no filter.
+	BackdropFilter []css.FilterFunc
+
+	// Quotes is the parsed CSS quotes property: pairs of open and close quotes.
+	Quotes []string
 
 	// Animation fields for @keyframes animations.
 	AnimationName      string
@@ -648,6 +653,7 @@ func DefaultStyle() ComputedStyle {
 		OffsetRotate:           "auto",
 		ShapeOutside:           "none",
 		ShapeMargin:            0,
+		Quotes:                 []string{"“", "”", "‘", "’"},
 	}
 }
 
@@ -824,6 +830,8 @@ rect, circle, ellipse, line, polyline, polygon, path { display: inline; }
 text, tspan, textPath { display: inline; }
 foreignObject { display: block; }
 image { display: inline; }
+q::before { content: open-quote; }
+q::after { content: close-quote; }
 `
 
 // Viewport is the size a document is laid out in. The viewport units are a share
@@ -2249,6 +2257,9 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.VerticalAlign = parent.VerticalAlign
 	cs.ListStyleType = parent.ListStyleType
 	cs.ColorScheme = parent.ColorScheme
+	if len(parent.Quotes) > 0 {
+		cs.Quotes = parent.Quotes
+	}
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -3263,7 +3274,66 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.AnimationDirection = css.ParseAnimationDirection(value)
 	case "animation-fill-mode":
 		cs.AnimationFillMode = css.ParseAnimationFillMode(value)
+	case "backdrop-filter", "-webkit-backdrop-filter":
+		cs.BackdropFilter = css.ParseFilter(value)
+	case "quotes":
+		cs.Quotes = parseQuotes(value)
 	}
+}
+
+// parseQuotes parses a CSS quotes property value into a slice of quote string pairs.
+func parseQuotes(value string) []string {
+	v := strings.TrimSpace(value)
+	lower := strings.ToLower(v)
+	if lower == "none" {
+		return []string{}
+	}
+	if lower == "auto" {
+		return []string{"“", "”", "‘", "’"}
+	}
+	var quotes []string
+	i := 0
+	for i < len(v) {
+		for i < len(v) && (v[i] == ' ' || v[i] == '\t' || v[i] == '\n' || v[i] == '\r') {
+			i++
+		}
+		if i >= len(v) {
+			break
+		}
+		if v[i] == '"' || v[i] == '\'' {
+			quoteChar := v[i]
+			i++
+			var sb strings.Builder
+			for i < len(v) {
+				if v[i] == '\\' && i+1 < len(v) {
+					sb.WriteByte(v[i])
+					i++
+					sb.WriteByte(v[i])
+					i++
+					continue
+				}
+				if v[i] == quoteChar {
+					break
+				}
+				sb.WriteByte(v[i])
+				i++
+			}
+			str := css.DecodeEscapes(sb.String())
+			quotes = append(quotes, str)
+			if i < len(v) && v[i] == quoteChar {
+				i++
+			}
+		} else {
+			i++
+		}
+	}
+	if len(quotes)%2 != 0 {
+		quotes = quotes[:len(quotes)-1]
+	}
+	if len(quotes) == 0 {
+		return []string{}
+	}
+	return quotes
 }
 
 // MarginAuto is the sentinel value stored in a margin field when the CSS

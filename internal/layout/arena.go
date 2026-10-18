@@ -228,6 +228,9 @@ type Arena struct {
 	// ViewportW is the width half of the same pair, for vw units inside
 	// deferred calc() values. Zero falls back to the evaluator default.
 	ViewportW float32
+
+	// QuoteDepth tracks the current nested quotation mark depth in document order.
+	QuoteDepth int
 }
 
 // NaturalSize is the intrinsic width and height of a replaced element.
@@ -476,7 +479,7 @@ func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.Computed
 	// Create a synthetic text node with the generated content.
 	text := pseudoStyle.Content
 	if len(pseudoStyle.ContentParts) > 0 {
-		text = style.EvaluateContent(pseudoStyle.ContentParts, scope)
+		text = style.EvaluateContentWithQuotes(pseudoStyle.ContentParts, scope, pseudoStyle.Quotes, &a.QuoteDepth)
 	}
 	textNode := doc.NewText(text)
 	obj.Node = textNode
