@@ -29,6 +29,9 @@ const (
 	EvResize
 	// EvIME carries composition text from the platform input method in Text.
 	EvIME
+	// EvAXSetValue carries a text-field value set by an accessibility client.
+	// Pos is the center of the field in window device pixels.
+	EvAXSetValue
 )
 
 func (k EventKind) String() string {
@@ -45,6 +48,8 @@ func (k EventKind) String() string {
 		return "resize"
 	case EvIME:
 		return "ime"
+	case EvAXSetValue:
+		return "accessibility-value"
 	}
 	return "unknown"
 }
@@ -56,6 +61,14 @@ type IMEAction uint8
 const (
 	IMEMarked IMEAction = iota
 	IMECommit
+)
+
+// AXTarget identifies the UI control family receiving an AXValue write.
+type AXTarget uint8
+
+const (
+	AXTargetContent AXTarget = iota
+	AXTargetAddressBar
 )
 
 // Button distinguishes pointer actions that share an event kind.
@@ -105,18 +118,19 @@ const (
 // no handler needs the scale factor to interpret an event, and a DPR change
 // cannot silently rescale a queued scroll.
 type Event struct {
-	Kind   EventKind
-	Delta  frame.Point   // EvScroll
-	Pos    frame.Point   // EvPointer position; EvScroll gesture location
-	Button Button        // EvPointer
-	Action PointerAction // EvPointer: press, release, or motion
-	Key    rune          // EvKey
-	Mods   KeyMod        // EvKey: modifier flags
-	Text   string        // EvIME: UTF-8 composition text
-	IME    IMEAction     // EvIME: marked update or commit
-	Size   frame.Size    // EvResize
-	Scale  float32       // current device pixel ratio
-	At     time.Time
+	Kind     EventKind
+	Delta    frame.Point   // EvScroll
+	Pos      frame.Point   // EvPointer position; EvScroll gesture location
+	Button   Button        // EvPointer
+	Action   PointerAction // EvPointer: press, release, or motion
+	Key      rune          // EvKey
+	Mods     KeyMod        // EvKey: modifier flags
+	Text     string        // EvIME: UTF-8 composition text
+	IME      IMEAction     // EvIME: marked update or commit
+	AXTarget AXTarget      // EvAXSetValue: content field or address bar
+	Size     frame.Size    // EvResize
+	Scale    float32       // current device pixel ratio
+	At       time.Time
 }
 
 // Window is what a platform must provide. Present takes the composed backing
@@ -138,15 +152,15 @@ type Window interface {
 	Close() error
 }
 
-// AccessibilityWindow is optionally implemented by a Window that can publish a
-// document's accessibility tree to an assistive client. It is a capability
+// AccessibilityWindow is optionally implemented by a Window that can publish an
+// accessibility tree to an assistive client. It is a capability
 // found by type assertion, the way platform.Runner is: a backend with no
 // accessibility story - and every test fake built before the feature - keeps
 // satisfying Window alone.
 type AccessibilityWindow interface {
 	Window
-	// SetAccessibility replaces the published tree with the nodes of one
-	// document, in window content coordinates - document CSS pixels minus the
-	// scroll offset. An empty slice clears it.
+	// SetAccessibility replaces the published tree. Document nodes use window
+	// content coordinates (document CSS pixels minus scroll); native chrome nodes
+	// use logical points in the same content view. An empty slice clears it.
 	SetAccessibility(nodes []ax.Node)
 }

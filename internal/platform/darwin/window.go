@@ -208,6 +208,13 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 		} else {
 			ev.IME = surface.IMEMarked
 		}
+	case C.GOOSIE_EV_AX_SET_VALUE:
+		ev.Kind = surface.EvAXSetValue
+		ev.Pos = frame.Point{X: int32(ce.px), Y: int32(ce.py)}
+		if ce.ax_target == C.GOOSIE_AX_TARGET_ADDRESS {
+			ev.AXTarget = surface.AXTargetAddressBar
+		}
+		ev.Text = C.GoString(&ce.text[0])
 	default:
 		// GOOSIE_EV_NONE and anything a future shim adds before this file learns it.
 		return ev, false
@@ -397,14 +404,16 @@ func (f *cgoAx) emit(siblings []ax.Node) {
 	for i, n := range siblings {
 		cur := len(f.nodes)
 		f.nodes = append(f.nodes, C.GoosieAxNode{
-			role:         C.int(n.Role),
+			role:         axRoleCode(n.Role),
 			x0:           C.float(n.X0),
 			y0:           C.float(n.Y0),
 			x1:           C.float(n.X1),
 			y1:           C.float(n.Y1),
+			identifier:   f.str(n.ID),
 			label:        f.str(n.Label),
 			value:        f.str(n.Value),
 			href:         f.str(n.Href),
+			flags:        axFlags(n),
 			first_child:  -1,
 			next_sibling: -1,
 		})
@@ -416,6 +425,54 @@ func (f *cgoAx) emit(siblings []ax.Node) {
 			f.nodes[cur].next_sibling = C.int(len(f.nodes))
 		}
 	}
+}
+
+func axRoleCode(role ax.Role) C.int {
+	switch role {
+	case ax.RoleDocument:
+		return C.GOOSIE_AX_DOCUMENT
+	case ax.RoleGroup:
+		return C.GOOSIE_AX_GROUP
+	case ax.RoleStaticText:
+		return C.GOOSIE_AX_STATIC_TEXT
+	case ax.RoleLink:
+		return C.GOOSIE_AX_LINK
+	case ax.RoleButton:
+		return C.GOOSIE_AX_BUTTON
+	case ax.RoleImage:
+		return C.GOOSIE_AX_IMAGE
+	case ax.RoleTextField:
+		return C.GOOSIE_AX_TEXT_FIELD
+	case ax.RoleSearch:
+		return C.GOOSIE_AX_SEARCH
+	case ax.RoleProgressBar:
+		return C.GOOSIE_AX_PROGRESS
+	case ax.RoleMeter:
+		return C.GOOSIE_AX_METER
+	case ax.RoleTabGroup:
+		return C.GOOSIE_AX_TAB_GROUP
+	case ax.RoleTab:
+		return C.GOOSIE_AX_TAB
+	default:
+		return C.GOOSIE_AX_GROUP
+	}
+}
+
+func axFlags(n ax.Node) C.int {
+	var flags C.int
+	if n.Selected {
+		flags |= C.GOOSIE_AX_SELECTED
+	}
+	if n.Disabled {
+		flags |= C.GOOSIE_AX_DISABLED
+	}
+	if n.AddressBar {
+		flags |= C.GOOSIE_AX_ADDRESS_BAR
+	}
+	if n.Focused {
+		flags |= C.GOOSIE_AX_FOCUSED
+	}
+	return flags
 }
 
 // SetAccessibility flattens the tree and hands it to the shim. It implements

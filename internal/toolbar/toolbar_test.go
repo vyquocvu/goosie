@@ -43,6 +43,50 @@ func TestLoadingIndicator(t *testing.T) {
 	}
 }
 
+func TestReloadButtonStopsWhileLoading(t *testing.T) {
+	state := NewState(800, nil)
+	reloads, stops := 0, 0
+	state.OnReload = func() { reloads++ }
+	state.OnStop = func() { stops++ }
+	button := ButtonRect(ButtonReload, 800)
+	click := func() {
+		state.HandleClick(frame.Point{X: button.X0 + 1, Y: button.Y0 + 1}, surface.ButtonLeft)
+	}
+
+	state.SetLoading(true)
+	click()
+	if stops != 1 || reloads != 0 {
+		t.Fatalf("while loading: stops=%d reloads=%d, want 1 and 0", stops, reloads)
+	}
+
+	state.SetLoading(false)
+	click()
+	if reloads != 1 || stops != 1 {
+		t.Fatalf("while idle: stops=%d reloads=%d, want 1 and 1", stops, reloads)
+	}
+}
+
+func TestReloadButtonDrawsStopIconWhileLoading(t *testing.T) {
+	state := NewState(800, nil)
+	loading := frame.NewBitmap(800, ToolbarHeight)
+	state.SetLoading(true)
+	state.Draw(loading, 0)
+
+	idle := frame.NewBitmap(800, ToolbarHeight)
+	state.SetLoading(false)
+	state.Draw(idle, 0)
+
+	button := ButtonRect(ButtonReload, 800)
+	cx := int(button.X0 + ButtonSize/2)
+	cy := int(button.Y0 + ButtonSize/2)
+	if got := loading.At(cx, cy); got != buttonColor {
+		t.Fatalf("loading button center = %v, want stop-square color %v", got, buttonColor)
+	}
+	if got := idle.At(cx, cy); got == buttonColor {
+		t.Fatalf("idle reload center = %v, want open center", got)
+	}
+}
+
 func TestNoLoadingIndicatorWhenNotLoading(t *testing.T) {
 	fonts, err := raster.NewFonts()
 	if err != nil {

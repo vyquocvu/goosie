@@ -357,6 +357,32 @@ func (s *Session) FocusedEditable() bool {
 	return controlEditable(s.focus)
 }
 
+// SetFocusedText replaces the value of the focused editable control. It is the
+// programmatic equivalent of selecting all and typing, used by accessibility
+// clients that set a text field's AXValue. Like ordinary typing it respects
+// maxlength, dispatches input only when the value changes, and leaves focus in
+// the control with the caret at the end.
+func (s *Session) SetFocusedText(value string) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !controlEditable(s.focus) {
+		return false
+	}
+	runes := []rune(value)
+	if max := maxLen(s.focus); max > 0 && len(runes) > max {
+		return false
+	}
+	old := s.controlValue(s.focus)
+	s.marked = ""
+	s.caret = len(runes)
+	if old == value {
+		return false
+	}
+	s.setControlValue(s.focus, value)
+	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+	return true
+}
+
 // SelectAllControl positions the caret at the end of the focused control.
 func (s *Session) SelectAllControl() bool {
 	s.opMu.Lock()

@@ -2004,24 +2004,22 @@ func (s *Session) JSTitle() string {
 }
 
 // PumpJS runs one event-loop turn for the document: timer, fetch, worker and
-// RAF callbacks Fire, then the pipeline reflows if the turn changed anything
-// observable. It reports whether the document changed, which is when the
-// caller must repaint.
+// RAF callbacks fire, then the pipeline reflows if the turn changed the DOM.
+// It reports whether the caller must repaint for a DOM or canvas change.
 //
-// A tick with no runtime, no fired callbacks and no pending invalidations is
-// a no-op returning false. While deferred font/image loads are in flight the
-// reflow is skipped (their tables attach outside opMu by design) and retried
-// next tick; timers still fire, so work is delayed, never lost.
+// State-only callbacks do not repaint. While deferred font/image loads are in
+// flight the DOM reflow is skipped (their tables attach outside opMu by
+// design) and retried next tick; timers still fire, so work is delayed.
 func (s *Session) PumpJS(viewportW float32) bool {
 	if s.jsRT == nil {
 		return false
 	}
-	fired := s.jsRT.Tick()
-	raf := false
+	canvasBefore := s.jsRT.CanvasVisualStamp()
+	s.jsRT.Tick()
 	if s.jsRT.HasPendingRAF() {
 		s.jsRT.TickRAF(time.Now())
-		raf = true
 	}
+	canvasChanged := canvasBefore != s.jsRT.CanvasVisualStamp()
 	// Mutation state is captured before Reset: it decides between a full
 	// re-resolve and skipping straight to repaint below.
 	mutated := false
@@ -2029,21 +2027,15 @@ func (s *Session) PumpJS(viewportW float32) bool {
 		mutated = !s.inv.Empty()
 		s.inv.Reset()
 	}
-	if !fired && !raf && !mutated {
-		return false
+	if !mutated {
+		// Timers/RAF can contain state-only work and even a continuously
+		// rescheduled no-op animation loop. Every DOM write notifies the sink;
+		// canvas operations are the other observable output in this runtime.
+		// Avoid full frame commits when neither changed.
+		return canvasChanged
 	}
 	if atomic.LoadInt32(&s.deferredActive) > 0 {
 		return false
-	}
-	if !mutated {
-		// Timers/RAF ran but recorded no DOM mutation (canvas animation,
-		// state-only work): every DOM write notifies the sink, so styles
-		// and layout are unchanged and the two full resolves plus reflow
-		// would only recompute identical trees. A rAF canvas loop used to
-		// pay that per frame — 60 full pipelines a second on a large
-		// document. Still report dirty: canvas ops are read live at paint
-		// time and need the repaint.
-		return true
 	}
 	// Re-resolve before reflowing: scripts may have added nodes or classes
 	// the load-time cascade never saw, and unstyled nodes are skipped by

@@ -72,6 +72,36 @@ func (r *Runtime) CanvasOps(nodeID int) []CanvasOp {
 	return nil
 }
 
+// CanvasVisualStamp returns a compact signature for the canvas state that the
+// paint pipeline can observe. Drawing operations are append-only in the
+// current Canvas 2D implementation, so node identity, dimensions, and the
+// operation count are sufficient to detect newly recorded canvas output
+// without copying or hashing every operation on each animation-frame turn.
+func (r *Runtime) CanvasVisualStamp() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var stamp uint64
+	for nodeID, ctx := range r.canvasContexts {
+		if ctx == nil {
+			continue
+		}
+		ctx.mu.Lock()
+		width, height, opCount := ctx.width, ctx.height, len(ctx.ops)
+		ctx.mu.Unlock()
+
+		value := uint64(uint32(nodeID))<<32 | uint64(uint32(width))
+		value ^= uint64(uint32(height)) * 0x9e3779b185ebca87
+		value ^= uint64(opCount) * 0xc2b2ae3d27d4eb4f
+		value ^= value >> 30
+		value *= 0xbf58476d1ce4e5b9
+		value ^= value >> 27
+		value *= 0x94d049bb133111eb
+		value ^= value >> 31
+		stamp += value
+	}
+	return stamp
+}
+
 // CanvasDimensions returns the width and height of the canvas context bound
 // to the given DOM node ID. Returns 0, 0 if no context is bound.
 func (r *Runtime) CanvasDimensions(nodeID int) (int, int) {

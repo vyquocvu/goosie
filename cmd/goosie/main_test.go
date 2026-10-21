@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
@@ -24,6 +26,29 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
+
+type recordingAccessibilityWindow struct {
+	surface.Window
+	called bool
+	nodes  []ax.Node
+}
+
+func (w *recordingAccessibilityWindow) SetAccessibility(nodes []ax.Node) {
+	w.called = true
+	w.nodes = nodes
+}
+
+func TestPublishAccessibilityWithoutTabManagerClearsTree(t *testing.T) {
+	w := &recordingAccessibilityWindow{}
+	f := &framePath{window: w}
+	f.publishAccessibility()
+	if !w.called {
+		t.Fatal("publishAccessibility did not clear the accessibility tree")
+	}
+	if w.nodes != nil {
+		t.Fatalf("published nodes = %v, want nil", w.nodes)
+	}
+}
 
 func TestParsePrivateFlag(t *testing.T) {
 	c, err := parse([]string{"-private"})
@@ -188,6 +213,83 @@ func newNavTestPath(t *testing.T) *framePath {
 	f.tabMgr = tabs.NewManager(nil)
 	f.tabMgr.NewTab()
 	return f
+}
+
+func TestContentKeyPageNavigationScrollsDocument(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	sess, err := engine.NewSession("<html><body>long page</body></html>", nil, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab.SetSession(sess)
+
+	if !f.contentKey(keyPageDown, 0) {
+		t.Fatal("PageDown was not handled")
+	}
+	if got, want := f.sched.Viewport().Offset.Y, int32(230); got != want {
+		t.Fatalf("PageDown scroll offset = %d, want %d", got, want)
+	}
+	if got := tab.ScrollY(); got != 230 {
+		t.Fatalf("tab scroll offset = %d, want 230", got)
+	}
+
+	if !f.contentKey(keyPageUp, 0) {
+		t.Fatal("PageUp was not handled")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("PageUp scroll offset = %d, want 0", got)
+	}
+	if !f.contentKey(0xF705, 0) { // End
+		t.Fatal("End was not handled")
+	}
+	if got, want := f.sched.Viewport().Offset.Y, int32(1792); got != want {
+		t.Fatalf("End scroll offset = %d, want %d", got, want)
+	}
+	if !f.contentKey(0xF704, 0) { // Home
+		t.Fatal("Home was not handled")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("Home scroll offset = %d, want 0", got)
+	}
+}
+
+func TestContentKeyPageNavigationDoesNotScrollFocusedEditable(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := engine.NewSession(`<html><body><input id="keep" value="keep"></body></html>`, nil, 256, engine.WithMetrics(fonts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab.SetSession(sess)
+	var inputX, inputY float32
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node == nil || obj.Node.GetAttribute("id") != "keep" {
+			continue
+		}
+		x0, y0, x1, y1 := obj.BorderRect()
+		inputX, inputY = (x0+x1)/2, (y0+y1)/2
+		break
+	}
+	if !sess.FocusControl(inputX, inputY) {
+		t.Fatal("could not focus editable control")
+	}
+
+	if !f.contentKey(keyPageDown, 0) {
+		t.Fatal("PageDown in an editable control was not consumed")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("editable PageDown scrolled document to %d, want 0", got)
+	}
+	if got := sess.FocusedText(); got != "keep" {
+		t.Fatalf("PageDown changed editable value to %q", got)
+	}
 }
 
 func TestApplyNavResultNoHistoryPreservesForwardTrail(t *testing.T) {
@@ -734,7 +836,8 @@ func tallNavTestPath(t *testing.T) *framePath {
 		imgResults: make(chan imgResult, 16),
 	}
 	f.tabMgr = tabs.NewManager(nil)
-	f.tabMgr.NewTab()
+	tab := f.tabMgr.NewTab()
+	tab.SetLayer(layer)
 	return f
 }
 

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"strconv"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/bookmarks"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
@@ -45,6 +48,7 @@ type chromeWindow struct {
 	onHoverCursor     func(contentX, contentY int32) surface.Cursor
 	chromeBitmap      *frame.Bitmap
 	outBitmap         *frame.Bitmap
+	lastChromeH       int32
 	fonts             *raster.Fonts
 	hover             surface.Cursor // last shape sent to the platform, for change detection
 
@@ -54,10 +58,12 @@ type chromeWindow struct {
 	hoverBookmark    int
 
 	// Context menu
-	contextMenu         *ContextMenu
-	onContextMenu       func(contentX, contentY, winX, winY int32)
-	onContextMenuAction func(action, data string)
-	onPrintPDF          func()
+	contextMenu             *ContextMenu
+	onContextMenu           func(contentX, contentY, winX, winY int32)
+	onContextMenuAction     func(action, data string)
+	onPrintPDF              func()
+	onAccessibilitySetValue func(contentX, contentY int32, value string) bool
+	onAccessibilityChanged  func()
 
 	// Full screen mode & sizing
 	fullscreen          bool
@@ -130,6 +136,153 @@ func (cw *chromeWindow) sc() int32 {
 	return cw.scale
 }
 
+// SetAccessibility preserves the document tree while adding the browser's
+// own tabs and toolbar controls. chromeWindow embeds surface.Window, which
+// otherwise hides optional capabilities from framePath's type assertion.
+func (cw *chromeWindow) SetAccessibility(nodes []ax.Node) {
+	aw, ok := cw.Window.(surface.AccessibilityWindow)
+	if !ok {
+		return
+	}
+	if offset := cw.chromeHeight() / cw.sc(); offset > 0 {
+		nodes = shiftAccessibilityY(nodes, float32(offset))
+	}
+	combined := cw.accessibilityChrome()
+	combined = append(combined, nodes...)
+	aw.SetAccessibility(combined)
+}
+
+func shiftAccessibilityY(nodes []ax.Node, dy float32) []ax.Node {
+	out := make([]ax.Node, len(nodes))
+	for i, node := range nodes {
+		node.Y0 += dy
+		node.Y1 += dy
+		node.Children = shiftAccessibilityY(node.Children, dy)
+		out[i] = node
+	}
+	return out
+}
+
+func (cw *chromeWindow) accessibilityChrome() []ax.Node {
+	if cw.fullscreen || cw.isStandalone() || cw.toolbar == nil || cw.tabMgr == nil {
+		return nil
+	}
+	width := cw.toolbar.BoundsWidth() / cw.sc()
+	if width <= 0 {
+		return nil
+	}
+	var roots []ax.Node
+	tabList := cw.tabMgr.Tabs()
+	count := int32(len(tabList))
+	scroll := cw.tabMgr.TabScroll()
+	visibleRight := width
+	if tabs.ChevronsShown(count, width) {
+		visibleRight -= tabs.ChevronReserve
+	}
+	clip := func(r frame.Rect, right int32) (frame.Rect, bool) {
+		if r.X0 < 0 {
+			r.X0 = 0
+		}
+		if r.X1 > right {
+			r.X1 = right
+		}
+		return r, r.X0 < r.X1 && r.Y0 < r.Y1
+	}
+	toNode := func(role ax.Role, id, label, value string, r frame.Rect) ax.Node {
+		return ax.Node{Role: role, ID: id, Label: label, Value: value,
+			X0: float32(r.X0), Y0: float32(r.Y0), X1: float32(r.X1), Y1: float32(r.Y1)}
+	}
+	activeID := uint64(0)
+	if active := cw.tabMgr.Active(); active != nil {
+		activeID = active.ID()
+	}
+	tabNodes := make([]ax.Node, 0, len(tabList)+3)
+	for i, tab := range tabList {
+		r, ok := clip(tabs.TabRect(i, scroll, count, width), visibleRight)
+		if !ok {
+			continue
+		}
+		label := tab.Title()
+		if label == "" || label == "New Tab" {
+			label = tab.URL()
+		}
+		if label == "" {
+			label = "New Tab"
+		}
+		id := strconv.FormatUint(tab.ID(), 10)
+		node := toNode(ax.RoleTab, "goosie.tab."+id, label, "", r)
+		node.Selected = tab.ID() == activeID
+		if !tab.Pinned() {
+			closeRect, shown := clip(tabs.CloseButtonRect(tabs.TabRect(i, scroll, count, width)), visibleRight)
+			if shown {
+				close := toNode(ax.RoleButton, "goosie.tab."+id+".close", "Close tab "+label, "", closeRect)
+				node.Children = append(node.Children, close)
+			}
+		}
+		tabNodes = append(tabNodes, node)
+	}
+	newTabRect, shown := clip(tabs.NewTabButtonRect(count, scroll, width), visibleRight)
+	if shown {
+		tabNodes = append(tabNodes, toNode(ax.RoleButton, "goosie.new-tab", "New tab", "", newTabRect))
+	}
+	if left, right, ok := tabs.ChevronRects(count, width); ok {
+		if r, visible := clip(left, width); visible {
+			tabNodes = append(tabNodes, toNode(ax.RoleButton, "goosie.tabs.scroll-left", "Scroll tabs left", "", r))
+		}
+		if r, visible := clip(right, width); visible {
+			tabNodes = append(tabNodes, toNode(ax.RoleButton, "goosie.tabs.scroll-right", "Scroll tabs right", "", r))
+		}
+	}
+	tabGroup := ax.Node{Role: ax.RoleTabGroup, ID: "goosie.tabs", Label: "Tabs",
+		X0: 0, Y0: 0, X1: float32(width), Y1: tabs.TabBarHeight, Children: tabNodes}
+	roots = append(roots, tabGroup)
+
+	value, addressFocused, findActive, loading, canBack, canForward, activeDownloads := cw.toolbar.AccessibilitySnapshot()
+	toolY := int32(tabs.TabBarHeight)
+	toolChildren := make([]ax.Node, 0, 5)
+	appendTool := func(id, label, value string, r frame.Rect, disabled, addressBar bool) {
+		r, visible := clip(translateAxRect(r, toolY), width)
+		if !visible {
+			return
+		}
+		node := toNode(ax.RoleButton, id, label, value, r)
+		node.Disabled = disabled
+		node.AddressBar = addressBar
+		toolChildren = append(toolChildren, node)
+	}
+	appendTool("goosie.back", "Back", "", toolbar.ButtonRect(toolbar.ButtonBack, width), !canBack, false)
+	appendTool("goosie.forward", "Forward", "", toolbar.ButtonRect(toolbar.ButtonForward, width), !canForward, false)
+	reloadLabel := "Reload"
+	if loading {
+		reloadLabel = "Stop loading"
+	}
+	appendTool("goosie.reload", reloadLabel, "", toolbar.ButtonRect(toolbar.ButtonReload, width), false, false)
+	if addressRect, visible := clip(translateAxRect(toolbar.AddressBarRect(width), toolY), width); visible {
+		label := "Address and search"
+		if findActive {
+			label = "Find in page"
+		}
+		address := toNode(ax.RoleTextField, "goosie.address", label, value, addressRect)
+		address.AddressBar = true
+		address.Focused = addressFocused
+		toolChildren = append(toolChildren, address)
+	}
+	downloadValue := ""
+	if activeDownloads > 0 {
+		downloadValue = strconv.Itoa(activeDownloads) + " active"
+	}
+	appendTool("goosie.downloads", "Downloads", downloadValue, toolbar.ButtonRect(toolbar.ButtonDownloads, width), false, false)
+	roots = append(roots, ax.Node{Role: ax.RoleGroup, ID: "goosie.toolbar", Label: "Browser toolbar",
+		X0: 0, Y0: float32(toolY), X1: float32(width), Y1: float32(toolY + toolbar.ToolbarHeight), Children: toolChildren})
+	return roots
+}
+
+func translateAxRect(r frame.Rect, dy int32) frame.Rect {
+	r.Y0 += dy
+	r.Y1 += dy
+	return r
+}
+
 func (cw *chromeWindow) isStandalone() bool {
 	if cw.tabMgr != nil {
 		active := cw.tabMgr.Active()
@@ -198,30 +351,49 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	// down by chromeH; presenting buf directly would show a short frame and let
 	// the chrome paint over the top of the document.
 	outH := int32(buf.H) + chromeH
-	if cw.outBitmap == nil || int32(cw.outBitmap.W) != int32(buf.W) || int32(cw.outBitmap.H) != outH {
+	outResized := cw.outBitmap == nil || int32(cw.outBitmap.W) != int32(buf.W) || int32(cw.outBitmap.H) != outH
+	if outResized {
 		cw.outBitmap = frame.NewBitmap(buf.W, int(outH))
 	}
 	cw.lastWinW = int32(buf.W)
 	cw.lastWinH = outH
 	out := cw.outBitmap
+	chromeHeightChanged := cw.lastChromeH != chromeH
+	chromeChanged := outResized || chromeHeightChanged || !bitmapRegionEqual(cw.chromeBitmap, out, chromeH)
+	fullCopy := outResized || chromeHeightChanged
 
-	for y := int32(0); y < chromeH; y++ {
-		copy(out.RGBA[int(y)*out.Stride:int(y)*out.Stride+out.Stride], cw.chromeBitmap.RGBA[int(y)*cw.chromeBitmap.Stride:int(y)*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
+	if fullCopy || chromeChanged {
+		for y := int32(0); y < chromeH; y++ {
+			copy(out.RGBA[int(y)*out.Stride:int(y)*out.Stride+out.Stride], cw.chromeBitmap.RGBA[int(y)*cw.chromeBitmap.Stride:int(y)*cw.chromeBitmap.Stride+cw.chromeBitmap.Stride])
+		}
 	}
-
-	for y := int32(0); y < int32(buf.H); y++ {
-		oy := int(y+chromeH) * out.Stride
-		sy := int(y) * buf.Stride
-		copy(out.RGBA[oy:oy+out.Stride], buf.RGBA[sy:sy+buf.Stride])
+	if fullCopy {
+		copyBitmapRegion(out, buf, buf.Bounds(), chromeH)
+	} else {
+		// The loop's backing bitmap is updated in place, but out is the coherent
+		// window image retained by the platform. Copy only pixels the composer
+		// says changed; copying the entire document here on every vsync made an
+		// idle page a full-surface memory copy at display refresh rate.
+		for _, r := range damage {
+			copyBitmapRegion(out, buf, r, chromeH)
+		}
 	}
 
 	merged := make([]frame.Rect, 0, len(damage)+3)
-	merged = append(merged, frame.Rect4(0, 0, int32(out.W), chromeH))
-	for _, r := range damage {
-		if r.Empty() {
-			continue
+	if outResized || chromeHeightChanged {
+		merged = append(merged, out.Bounds())
+	} else if chromeChanged {
+		if chromeH > 0 {
+			merged = append(merged, frame.Rect4(0, 0, int32(out.W), chromeH))
 		}
-		merged = append(merged, frame.Rect4(r.X0, r.Y0+chromeH, r.X1, r.Y1+chromeH))
+	}
+	if !fullCopy {
+		for _, r := range damage {
+			if r.Empty() {
+				continue
+			}
+			merged = append(merged, frame.Rect4(r.X0, r.Y0+chromeH, r.X1, r.Y1+chromeH))
+		}
 	}
 
 	if cw.toolbar != nil && cw.toolbar.HasSuggestions() {
@@ -238,7 +410,68 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 			merged = append(merged, mRect)
 		}
 	}
+	cw.lastChromeH = chromeH
 	return cw.Window.Present(out, merged)
+}
+
+// bitmapRegionEqual checks the chrome rows against the last composed window
+// image. The chrome is redrawn into chromeBitmap each frame, but unchanged pixels
+// do not need to be uploaded to the native surface or recommitted to Core Animation.
+func bitmapRegionEqual(a, b *frame.Bitmap, rows int32) bool {
+	if a == nil || b == nil || a.W != b.W || rows < 0 || rows > int32(a.H) || rows > int32(b.H) {
+		return false
+	}
+	rowBytes := int(a.W) * 4
+	for y := 0; y < int(rows); y++ {
+		aStart := y * a.Stride
+		bStart := y * b.Stride
+		if !bytes.Equal(a.RGBA[aStart:aStart+rowBytes], b.RGBA[bStart:bStart+rowBytes]) {
+			return false
+		}
+	}
+	return true
+}
+
+// copyBitmapRegion updates only a source rectangle in the retained window image.
+// dy maps content coordinates below the browser chrome; it is zero for chrome-free
+// surfaces. Both rectangles are clipped so a damaged edge can safely touch a bitmap
+// boundary.
+func copyBitmapRegion(dst, src *frame.Bitmap, r frame.Rect, dy int32) {
+	if dst == nil || src == nil || r.Empty() {
+		return
+	}
+	x0, y0 := r.X0, r.Y0
+	x1, y1 := r.X1, r.Y1
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > int32(src.W) {
+		x1 = int32(src.W)
+	}
+	if x1 > int32(dst.W) {
+		x1 = int32(dst.W)
+	}
+	if y1 > int32(src.H) {
+		y1 = int32(src.H)
+	}
+	if y0+dy < 0 {
+		y0 = -dy
+	}
+	if y1+dy > int32(dst.H) {
+		y1 = int32(dst.H) - dy
+	}
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	rowBytes := int(x1-x0) * 4
+	for y := y0; y < y1; y++ {
+		srcStart := int(y)*src.Stride + int(x0)*4
+		dstStart := int(y+dy)*dst.Stride + int(x0)*4
+		copy(dst.RGBA[dstStart:dstStart+rowBytes], src.RGBA[srcStart:srcStart+rowBytes])
+	}
 }
 
 func (cw *chromeWindow) Events() <-chan surface.Event {
@@ -288,6 +521,22 @@ func (cw *chromeWindow) pump() {
 
 func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	switch ev.Kind {
+	case surface.EvAXSetValue:
+		if ev.AXTarget == surface.AXTargetAddressBar {
+			if !cw.fullscreen && !cw.isStandalone() && cw.toolbar != nil {
+				cw.toolbar.SetAccessibilityValue(ev.Text)
+				cw.SetIME(false)
+				if cw.onAccessibilityChanged != nil {
+					cw.onAccessibilityChanged()
+				}
+			}
+			return true
+		}
+		contentY := ev.Pos.Y - cw.chromeHeight()
+		if contentY >= 0 && cw.onAccessibilitySetValue != nil {
+			cw.onAccessibilitySetValue(ev.Pos.X, contentY, ev.Text)
+		}
+		return true
 	case surface.EvPointer:
 		if cw.contextMenu != nil && cw.contextMenu.Visible {
 			if ev.Action == surface.PointerMotion {
@@ -361,6 +610,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
 				if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 					cw.SetIME(false)
+				}
+				if ev.Action == surface.PointerPress {
+					cw.notifyAccessibilityChanged()
 				}
 				return true
 			}
@@ -454,6 +706,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		// fall through to the content copy below.
 		if cw.toolbar.GetFocus() == toolbar.FocusAddress && addressEditKey(ev.Key, ev.Mods) {
 			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
+			cw.notifyAccessibilityChanged()
 			return true
 		}
 		if cw.handleTabShortcut(ev.Key, ev.Mods) {
@@ -461,6 +714,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		if cw.toolbar.GetFocus() == toolbar.FocusAddress {
 			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
+			cw.notifyAccessibilityChanged()
 			return true
 		}
 		if cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods) {
@@ -485,6 +739,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			if tabs.StripMaxOffset(n, stripW) > 0 {
 				d := ev.Delta.X + ev.Delta.Y
 				cw.tabMgr.SetTabScroll(cw.tabMgr.TabScroll()+d/cw.sc(), n, stripW)
+				cw.notifyAccessibilityChanged()
 				return true
 			}
 		}
@@ -493,6 +748,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		cw.lastWinW = ev.Size.W
 		cw.lastWinH = ev.Size.H
 		cw.toolbar.SetBounds(ev.Size.W)
+		cw.notifyAccessibilityChanged()
 		contentDevH := ev.Size.H - cw.chromeHeight()
 
 		if contentDevH < 0 {
@@ -581,10 +837,12 @@ func (cw *chromeWindow) handleTabBarPress(pos frame.Point) {
 	if left, right, ok := tabs.ChevronRects(n, stripW); ok {
 		if lp.X >= left.X0 && lp.X < left.X1 && lp.Y >= left.Y0 && lp.Y < left.Y1 {
 			cw.tabMgr.SetTabScroll(stripOff-tabs.TabScrollPage(n, stripW), n, stripW)
+			cw.notifyAccessibilityChanged()
 			return
 		}
 		if lp.X >= right.X0 && lp.X < right.X1 && lp.Y >= right.Y0 && lp.Y < right.Y1 {
 			cw.tabMgr.SetTabScroll(stripOff+tabs.TabScrollPage(n, stripW), n, stripW)
+			cw.notifyAccessibilityChanged()
 			return
 		}
 	}
@@ -675,6 +933,8 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case key == 'l' || key == 'L':
 		if cw.toolbar != nil {
 			cw.toolbar.FocusURL()
+			cw.SetIME(false)
+			cw.notifyAccessibilityChanged()
 			return true
 		}
 	case key == 't' || key == 'T':
@@ -714,6 +974,8 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 		}
 		if cw.toolbar != nil {
 			cw.toolbar.OpenFind()
+			cw.SetIME(false)
+			cw.notifyAccessibilityChanged()
 			return true
 		}
 	case (key == 'm' || key == 'M') && shift:
@@ -975,13 +1237,21 @@ func (cw *chromeWindow) notifyContentResize() {
 func (cw *chromeWindow) toggleBookmarksBar() {
 	cw.showBookmarksBar = !cw.showBookmarksBar
 	cw.notifyContentResize()
+	cw.notifyAccessibilityChanged()
 }
 
 func (cw *chromeWindow) toggleFullscreen() {
 	cw.fullscreen = !cw.fullscreen
 	cw.notifyContentResize()
+	cw.notifyAccessibilityChanged()
 	if cw.onFullscreenChanged != nil {
 		cw.onFullscreenChanged(cw.fullscreen)
+	}
+}
+
+func (cw *chromeWindow) notifyAccessibilityChanged() {
+	if cw.onAccessibilityChanged != nil {
+		cw.onAccessibilityChanged()
 	}
 }
 
@@ -996,3 +1266,4 @@ func (cw *chromeWindow) SetFullscreen(fs bool) {
 }
 
 var _ surface.Window = (*chromeWindow)(nil)
+var _ surface.AccessibilityWindow = (*chromeWindow)(nil)

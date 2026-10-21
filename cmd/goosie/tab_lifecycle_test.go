@@ -7,6 +7,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/tabs"
+	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
 func TestIndependentTabNavigation(t *testing.T) {
@@ -110,6 +111,62 @@ func TestCurrentNavResultIsApplied(t *testing.T) {
 	}
 	if tab.Nav.Loading || tab.Loading() {
 		t.Error("the tab is still marked loading after its own result landed")
+	}
+}
+
+func TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument(t *testing.T) {
+	f := newNavTestPath(t)
+	tab := f.tabMgr.Active()
+	other := f.tabMgr.NewTab()
+	f.tabMgr.SwitchTo(tab.ID())
+
+	tab.SetURL("https://current/")
+	_, currentLayer := paint.BuildLayer(paint.SceneSpec{DocHeight: 256})
+	tab.SetLayer(currentLayer)
+	tab.SetLoading(true)
+	activeCtx, activeCancel := context.WithCancel(context.Background())
+	tab.Nav.Mu.Lock()
+	tab.Nav.Cancel = activeCancel
+	tab.Nav.Serial = 9
+	tab.Nav.Loading = true
+	tab.Nav.Mu.Unlock()
+
+	otherCtx, otherCancel := context.WithCancel(context.Background())
+	t.Cleanup(otherCancel)
+	other.Nav.Cancel = otherCancel
+	other.Nav.Serial = 3
+	other.Nav.Loading = true
+
+	f.toolbar = toolbar.NewState(800, nil)
+	f.toolbar.SyncFromTab("https://typed-destination/", true, "", tab.History())
+	f.stopTab()
+
+	if activeCtx.Err() != context.Canceled {
+		t.Fatal("Stop did not cancel the active tab's navigation")
+	}
+	if otherCtx.Err() != nil {
+		t.Fatal("Stop canceled a background tab's navigation")
+	}
+	if tab.Nav.Loading || tab.Loading() {
+		t.Fatal("active tab still reports loading after Stop")
+	}
+	if tab.Nav.Cancel != nil {
+		t.Fatal("active tab retained its canceled navigation function")
+	}
+	if tab.URL() != "https://current/" || tab.Layer() != currentLayer {
+		t.Fatalf("Stop changed displayed document: URL=%q layer=%p, want current URL and layer %p", tab.URL(), tab.Layer(), currentLayer)
+	}
+	if tab.Error() != "" {
+		t.Fatalf("tab error = %q after Stop, want empty", tab.Error())
+	}
+	if f.toolbar.Loading || f.toolbar.Error != "" || f.toolbar.URL != tab.URL() || f.toolbar.Input != tab.URL() {
+		t.Fatalf("toolbar after Stop = loading:%v error:%q URL:%q Input:%q", f.toolbar.Loading, f.toolbar.Error, f.toolbar.URL, f.toolbar.Input)
+	}
+
+	_, staleLayer := paint.BuildLayer(paint.SceneSpec{DocHeight: 512})
+	f.applyNavResult(navResult{tabID: tab.ID(), serial: 9, url: "https://stopped/", layer: staleLayer, err: context.Canceled})
+	if tab.URL() != "https://current/" || tab.Layer() != currentLayer || tab.Error() != "" {
+		t.Fatal("late canceled result changed the displayed page or surfaced an error")
 	}
 }
 

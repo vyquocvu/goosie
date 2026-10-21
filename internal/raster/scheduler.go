@@ -113,8 +113,8 @@ var errForeignResult = errors.New("raster: result is for a different layer")
 const PrefetchOff int32 = -1
 
 // Pref is the scheduler's tuning surface. Both fields are zero-value safe: the
-// default ring is one viewport of tile rows on each side, and the default budget is
-// whatever the layer was built with.
+// default ring is one viewport along the active scroll axis on each side, and the
+// default budget is whatever the layer was built with.
 type Pref struct {
 	// PrefetchRows is how many tile rows to warm ahead of and behind the viewport.
 	// Zero means one viewport; a negative value disables the ring.
@@ -666,7 +666,7 @@ func (s *Scheduler) resolveLocked() frame.Viewport {
 // already current is not work, and counting it would make Prefetched mean something it
 // does not.
 func (s *Scheduler) ring(vp frame.Viewport) int {
-	rows := s.ringRows()
+	rows := s.ringRowsFor(s.dir)
 	if rows <= 0 {
 		return 0
 	}
@@ -696,9 +696,11 @@ func (s *Scheduler) ring(vp frame.Viewport) int {
 	return added
 }
 
-// ringRows is the configured band thickness: an explicit count, one viewport when unset,
-// or nothing at all when switched off.
-func (s *Scheduler) ringRows() int {
+// ringRowsFor is the configured band thickness: an explicit count, one viewport along
+// the active scroll axis when unset, or nothing at all when switched off. Using the
+// larger viewport dimension for both axes can make a landscape window prefetch more
+// tiles than the cache can hold, so the ring never settles after a scroll.
+func (s *Scheduler) ringRowsFor(dir frame.Point) int {
 	if s.prefs.PrefetchRows < 0 || s.grid == nil {
 		return 0
 	}
@@ -709,7 +711,11 @@ func (s *Scheduler) ringRows() int {
 	if ts <= 0 {
 		return 0
 	}
-	return int(max32Of(s.size.H/ts, s.size.W/ts)) + 1
+	span := s.size.H
+	if dir.Y == 0 && dir.X != 0 {
+		span = s.size.W
+	}
+	return int(span/ts) + 1
 }
 
 func (s *Scheduler) tileSize() int32 {
@@ -768,9 +774,9 @@ func (s *Scheduler) maxCoords() int {
 	cols := maxInt(int(s.size.W)/ts+3, 4)
 	rows := maxInt(int(s.size.H)/ts+3, 4)
 	n := cols * rows
-	if r := s.ringRows(); r > 0 {
-		n += 2 * r * cols
-	}
+	verticalRing := s.ringRowsFor(frame.Point{Y: 1})
+	horizontalRing := s.ringRowsFor(frame.Point{X: 1})
+	n += maxInt(2*verticalRing*cols, 2*horizontalRing*rows)
 	return n
 }
 
@@ -844,13 +850,6 @@ func clampOffset(cur, lo, span int32) int32 {
 		return hi
 	}
 	return cur
-}
-
-func max32Of(a, b int32) int32 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func maxInt(a, b int) int {

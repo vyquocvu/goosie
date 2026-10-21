@@ -222,7 +222,7 @@ func mergeEvent(dst, src Event) Event {
 		out.Delta.X += src.Delta.X
 		out.Delta.Y += src.Delta.Y
 	}
-	if src.Pos != (frame.Point{}) || src.Kind == EvPointer {
+	if src.Pos != (frame.Point{}) || src.Kind == EvPointer || src.Kind == EvAXSetValue {
 		out.Pos = src.Pos
 		out.Button = src.Button
 	}
@@ -230,9 +230,13 @@ func mergeEvent(dst, src Event) Event {
 		out.Key = src.Key
 		out.Mods = src.Mods
 	}
-	if src.Kind == EvIME {
+	if src.Kind == EvIME || src.Kind == EvAXSetValue {
 		out.Text = src.Text
-		out.IME = src.IME
+		if src.Kind == EvIME {
+			out.IME = src.IME
+		} else {
+			out.AXTarget = src.AXTarget
+		}
 	}
 	if src.Size.W != 0 && src.Size.H != 0 {
 		out.Size = src.Size

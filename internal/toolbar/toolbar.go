@@ -102,6 +102,7 @@ type State struct {
 	OnNavigate    func(string)
 	OnTraverse    func(int)
 	OnReload      func()
+	OnStop        func()
 	OnFindChanged func(string)
 	OnFindNext    func(bool)
 	OnFindClose   func()
@@ -200,6 +201,50 @@ func (s *State) SetLoading(loading bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Loading = loading
+}
+
+// AccessibilitySnapshot returns the current address-bar and navigation state
+// for the native accessibility tree. The history cursor has its own lock, so
+// both availability checks happen while this toolbar snapshot is stable.
+func (s *State) AccessibilitySnapshot() (value string, focused, findActive, loading, canBack, canForward bool, downloads int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value = s.URL
+	if s.Focus == FocusAddress {
+		value = s.Input
+		focused = true
+	}
+	findActive = s.FindActive
+	loading = s.Loading
+	if s.History != nil {
+		canBack = s.History.CanBack()
+		canForward = s.History.CanForward()
+	}
+	downloads = s.ActiveDownloads
+	return
+}
+
+// SetAccessibilityValue applies an AXValue write to the address field without
+// submitting it. Navigation remains an explicit Enter/Go action, matching a
+// person typing into the omnibox.
+func (s *State) SetAccessibilityValue(value string) {
+	s.mu.Lock()
+	var closeFind func()
+	if s.FindActive {
+		s.closeFindLocked()
+		closeFind = s.OnFindClose
+	}
+	s.Focus = FocusAddress
+	s.Input = sanitizePaste(value)
+	s.Cursor = len([]rune(s.Input))
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
+	s.dragging = false
+	s.closeSuggestionsLocked()
+	s.mu.Unlock()
+	if closeFind != nil {
+		closeFind()
+	}
 }
 
 // SetError records a load error for the address bar to display.
@@ -641,7 +686,12 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 		}
 	case rectContains(ButtonRect(ButtonReload, w), lp):
 		s.dragging = false
-		if s.OnReload != nil {
+		if s.Loading {
+			if s.OnStop != nil {
+				cb := s.OnStop
+				fire(func() { cb() })
+			}
+		} else if s.OnReload != nil {
 			cb := s.OnReload
 			fire(func() { cb() })
 		}
@@ -1029,7 +1079,11 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	case ButtonForward:
 		s.drawArrow(backing, ox, oyd, cx+4, cy, 1, sc, fg, clip)
 	case ButtonReload:
-		s.drawReload(backing, ox, oyd, cx, cy, sc, fg, clip)
+		if s.Loading {
+			s.drawStop(backing, ox, oyd, cx, cy, sc, fg)
+		} else {
+			s.drawReload(backing, ox, oyd, cx, cy, sc, fg, clip)
+		}
 	case ButtonDownloads:
 		s.drawDownloads(backing, ox, oyd, cx, cy, sc, fg, clip)
 	}
@@ -1104,6 +1158,14 @@ func (s *State) drawArrow(backing *frame.Bitmap, ox, oy, x, y, dir, sc int32, c 
 	x1 := baseX - float64(dir)*stemLen
 	drawLineAA(backing, x0, fy, x1, fy, thick, c)
 	_ = clip
+}
+
+func (s *State) drawStop(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color) {
+	const halfSize = 5
+	x := ox + cx*sc
+	y := oy + cy*sc
+	size := int32(halfSize) * sc
+	backing.FillRect(frame.Rect4(x-size, y-size, x+size, y+size), c, nil)
 }
 
 func (s *State) drawReload(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color, clip frame.Rect) {

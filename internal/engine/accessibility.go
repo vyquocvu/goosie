@@ -19,7 +19,7 @@ func (s *Session) AccessibilityTree() []ax.Node {
 	if s.Arena == nil || len(s.Arena.Objects) < 2 {
 		return nil
 	}
-	b := &axBuilder{session: s, objs: s.Arena.Objects}
+	b := &axBuilder{session: s, objs: s.Arena.Objects, focused: s.Focused()}
 	root, bubble := b.visit(1)
 	if root == nil {
 		if bubble.text == "" {
@@ -30,6 +30,7 @@ func (s *Session) AccessibilityTree() []ax.Node {
 	}
 	doc := ax.Node{
 		Role: ax.RoleDocument,
+		ID:   "goosie.document",
 		X0:   root.X0, Y0: root.Y0, X1: root.X1, Y1: root.Y1,
 	}
 	if root.Role == ax.RoleStaticText {
@@ -43,6 +44,7 @@ func (s *Session) AccessibilityTree() []ax.Node {
 type axBuilder struct {
 	session *Session
 	objs    []layout.Object
+	focused *dom.Node
 }
 
 // axBubble is the text a box contributes to its nearest emitted ancestor, with
@@ -87,8 +89,9 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 	x0, y0, x1, y1 := b.bounds(obj, kids)
 	visible := x0 < x1 && y0 < y1
 	emit := func(role ax.Role, lab, val, href string) *ax.Node {
-		return &ax.Node{Role: role, Label: lab, Value: val, Href: href,
-			X0: x0, Y0: y0, X1: x1, Y1: y1, Children: kids}
+		return &ax.Node{Role: role, ID: obj.Node.GetAttribute("id"), Label: lab, Value: val, Href: href,
+			Focused: obj.Node == b.focused,
+			X0:      x0, Y0: y0, X1: x1, Y1: y1, Children: kids}
 	}
 
 	n := obj.Node

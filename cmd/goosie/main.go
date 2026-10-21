@@ -62,6 +62,10 @@ const (
 	// same 100px the warm criterion in test/gate walks with, so the two runs
 	// measure the same travel.
 	gateScrollStep = 100
+	// The Darwin shim maps PageUp/PageDown to these private-use runes alongside
+	// the existing arrow, Home, and End mappings.
+	keyPageUp   rune = 0xF706
+	keyPageDown rune = 0xF707
 	// defaultFrames is -frames' default: the gate's 600-frame sweep.
 	defaultFrames = 600
 	// displayPeriod stands in for a 60Hz panel when the backend is paced by a clock
@@ -560,6 +564,9 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnReload = func() {
 			f.reloadTab()
 		}
+		f.toolbar.OnStop = func() {
+			f.stopTab()
+		}
 		f.toolbar.OnFindChanged = func(query string) {
 			f.runFind(query)
 		}
@@ -576,6 +583,7 @@ func build(c config) (*framePath, error) {
 			f.downloads.Subscribe(func(it *download.Item) {
 				if f.toolbar != nil {
 					f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
+					f.publishAccessibility()
 				}
 			})
 		}
@@ -611,6 +619,7 @@ func (f *framePath) syncTabToToolbar() {
 	tab.Nav.Mu.Unlock()
 	f.toolbar.SyncFromTab(tab.URL(), loading, tab.Error(), tab.History())
 	f.toolbar.SetIncognito(tab.Incognito())
+	f.publishAccessibility()
 }
 
 // clientForTab returns the ephemeral private client for incognito tabs or the default client.
@@ -832,6 +841,7 @@ func (f *framePath) navigateTab(rawURL string) {
 		f.toolbar.SetLoading(true)
 		f.toolbar.SetError("")
 	}
+	f.publishAccessibility()
 
 	f.navWg.Add(1)
 	client := f.clientForTab(tab)
@@ -1146,6 +1156,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	if f.toolbar != nil {
 		f.toolbar.SetLoading(true)
 	}
+	f.publishAccessibility()
 
 	f.navWg.Add(1)
 	client := f.clientForTab(tab)
@@ -1174,6 +1185,39 @@ func (f *framePath) reloadTab() {
 		return
 	}
 	f.navigateTabNoHistory(tab.URL())
+}
+
+// stopTab cancels only the active tab's in-flight navigation. Advancing the
+// serial before canceling makes any result already queued by that load stale,
+// so it cannot replace the document that is still displayed.
+func (f *framePath) stopTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
+
+	tab.Nav.Mu.Lock()
+	if !tab.Nav.Loading {
+		tab.Nav.Mu.Unlock()
+		return
+	}
+	cancel := tab.Nav.Cancel
+	tab.Nav.Cancel = nil
+	tab.Nav.Serial++
+	tab.Nav.Loading = false
+	tab.Nav.Mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	tab.SetLoading(false)
+	tab.SetError("")
+	if f.tabMgr.Active() == tab {
+		f.syncTabToToolbar()
+	}
 }
 
 // scrollToAnchor scrolls the active tab's viewport to an element with matching ID.
@@ -1492,6 +1536,10 @@ func (f *framePath) publishAccessibility() {
 	if !ok {
 		return
 	}
+	if f.tabMgr == nil {
+		aw.SetAccessibility(nil)
+		return
+	}
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
 		aw.SetAccessibility(nil)
@@ -1648,12 +1696,24 @@ func (f *framePath) copySelection() bool {
 // consumed whenever a control is focused so the address bar is not the only
 // text sink; the tab reflows when the value changed and repaints otherwise.
 func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
+	if f.tabMgr == nil {
+		return false
+	}
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
 		return false
 	}
 
 	cmd := mods&surface.ModCommand != 0 || mods&surface.ModControl != 0
+	if !cmd && !tab.Session().FocusedEditable() {
+		if f.scrollContentKey(tab, key) {
+			return true
+		}
+	} else if !cmd && (key == keyPageUp || key == keyPageDown) {
+		// Page keys must never be treated as printable private-use characters by
+		// an editable control. Textarea-specific paging is not implemented yet.
+		return true
+	}
 
 	// Bare Tab drives the full key-event path (keydown → focus-move → keyup).
 	// It must work with nothing focused so it can start the tab cycle, so this
@@ -1765,6 +1825,54 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		}
 	}
 	f.repaintTab(tab, frame.Rect{})
+	return true
+}
+
+// scrollContentKey handles document navigation keys when an editable control does
+// not own focus. The viewport stores device pixels, so a page step uses its device
+// height and the active layer supplies the legal bottom edge.
+func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune) bool {
+	if f.sched == nil || tab == nil || tab.Layer() == nil {
+		return false
+	}
+	vp := f.sched.Viewport()
+	page := vp.Size.H * 9 / 10
+	if page < 1 {
+		page = 1
+	}
+	switch key {
+	case keyPageUp:
+		return f.scrollContentTo(tab, vp, vp.Offset.Y-page)
+	case keyPageDown:
+		return f.scrollContentTo(tab, vp, vp.Offset.Y+page)
+	case 0xF704: // Home
+		return f.scrollContentTo(tab, vp, 0)
+	case 0xF705: // End
+		return f.scrollContentTo(tab, vp, tab.Layer().Bounds.Y1-vp.Size.H)
+	default:
+		return false
+	}
+}
+
+func (f *framePath) scrollContentTo(tab *tabs.Tab, vp frame.Viewport, y int32) bool {
+	if tab == nil || tab.Layer() == nil || f.sched == nil {
+		return false
+	}
+	maxY := tab.Layer().Bounds.Y1 - vp.Size.H
+	if maxY < 0 {
+		maxY = 0
+	}
+	if y < 0 {
+		y = 0
+	} else if y > maxY {
+		y = maxY
+	}
+	if vp.Offset.Y != y {
+		vp.Offset.Y = y
+		f.sched.SetViewport(vp)
+		tab.SetScrollY(y)
+		f.publishAccessibility()
+	}
 	return true
 }
 
@@ -2775,11 +2883,33 @@ func (f *framePath) openWindow() error {
 			cw.onContextMenuAction = f.handleContextMenuAction
 			cw.onPrintPDF = f.printActiveTabToPDF
 			cw.onDeviceEmulation = func() { f.cycleDeviceEmulation() }
+			cw.onAccessibilityChanged = f.publishAccessibility
+			cw.onAccessibilitySetValue = func(contentX, contentY int32, value string) bool {
+				tab := f.tabMgr.Active()
+				if tab == nil || tab.Session() == nil {
+					return false
+				}
+				sx, sy := f.docPoint(contentX, contentY)
+				focusChanged := tab.Session().FocusControl(sx, sy)
+				if !tab.Session().FocusedEditable() {
+					return false
+				}
+				f.setWindowIME(true)
+				valueChanged := tab.Session().SetFocusedText(value)
+				if focusChanged || valueChanged {
+					if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+						fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+					}
+				}
+				f.repaintTab(tab, frame.Rect{})
+				return true
+			}
 		}
 
 	} else {
 		f.window = w
 	}
+	f.publishAccessibility()
 	f.loop = surface.NewLoop(f.window, f.sched, f.composer, f.rec)
 	return nil
 }

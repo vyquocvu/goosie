@@ -321,6 +321,28 @@ func TestPrefetchAheadOfScrollDirection(t *testing.T) {
 	}
 }
 
+// A wide viewport has many more horizontal tile columns than vertical rows.
+// The default vertical prefetch ring must use the viewport height, otherwise
+// both rings can exceed the bounded cache and continuously evict one another.
+func TestDefaultVerticalPrefetchSettlesWithinLandscapeCacheBudget(t *testing.T) {
+	const (
+		cols       = 12
+		rows       = 40
+		viewRows   = 6
+		cacheTiles = 256
+	)
+	vp := frame.Size{W: cols * frame.TileSize, H: viewRows * frame.TileSize}
+	h := newSchedVP(t, cols, rows, cacheTiles, frame.Viewport{
+		Offset: frame.Point{Y: 16 * frame.TileSize},
+		Size:   vp,
+	}, raster.Pref{})
+
+	h.untilQuiet(t)
+	if work := h.pump(); work.Needed != 0 {
+		t.Fatalf("default prefetch did not settle: %d tiles still requested", work.Needed)
+	}
+}
+
 // The memory half of M1 exit criterion 1: a long scroll into content nobody has
 // looked at yet holds tile memory at the ceiling rather than growing with the
 // document. The scheduler, not the grid, is what guarantees it, because the grid is

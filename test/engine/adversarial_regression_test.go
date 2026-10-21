@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -71,7 +72,10 @@ func TestManyQuerySelectorAll(t *testing.T) {
 	}
 	sb.WriteString("</ul></body></html>")
 	doc := advDoc(t, sb.String())
-	r, err := js.New(js.Options{URL: "https://example.test/", DOM: doc})
+	// Race instrumentation slows wrapper construction beyond the production
+	// default even though this case's contract is result correctness, not a
+	// five-second performance budget. Keep the larger bound scoped to this test.
+	r, err := js.New(js.Options{Timeout: 15 * time.Second, URL: "https://example.test/", DOM: doc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,19 +96,17 @@ func TestManyQuerySelectorAll(t *testing.T) {
 	}
 }
 
-// TestPumpJSRAFWithoutMutationRepaints pins the mutation check: a RAF-only
-// turn with no DOM write must still report dirty (canvas reads live at
-// paint) while skipping the re-resolve, and the turn after must be quiet.
-func TestPumpJSRAFWithoutMutationRepaints(t *testing.T) {
+// TestPumpJSNoopRAFDoesNotRepaint guards against a common animation pattern:
+// a callback continually schedules another RAF but does not change output.
+func TestPumpJSNoopRAFDoesNotRepaint(t *testing.T) {
 	html := `<html><body><canvas id="c" width="10" height="10"></canvas></body></html>`
 	sess, rt, _ := pumpSession(t, html, true)
-	if err := rt.Run(`requestAnimationFrame(function(){});`, "inline"); err != nil {
+	if err := rt.Run(`function tick(){requestAnimationFrame(tick);} requestAnimationFrame(tick);`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	if !sess.PumpJS(800) {
-		t.Fatal("PumpJS reported no work for a ran RAF callback")
-	}
-	if sess.PumpJS(800) {
-		t.Fatal("second PumpJS reported work on a quiescent document")
+	for i := 0; i < 3; i++ {
+		if sess.PumpJS(800) {
+			t.Fatalf("PumpJS reported repaint work for no-op RAF turn %d", i+1)
+		}
 	}
 }
