@@ -45,6 +45,11 @@ type Scheduler struct {
 	// tab's scroll offset across switches.
 	vpMu sync.RWMutex
 
+	// updMu guards the pending content swap below, which a producer thread
+	// publishes and only the frame thread applies.
+	updMu   sync.Mutex
+	pending *layerUpdate
+
 	// size and scale are the surface the platform last reported, and scroll is the
 	// accumulated input in device pixels. The two are kept apart so a flick that ran
 	// past the end of the page does not lose the overshoot the user would feel on
@@ -198,6 +203,79 @@ func NewScheduler(l *frame.Layer, pool *Pool, vp frame.Viewport, scale float32, 
 // scroll arrives as input instead, through SubmitScroll or a window event.
 func (s *Scheduler) SetPlan(p frame.FramePlan) { s.slot.Publish(p) }
 
+// layerUpdate is one content swap waiting for the frame thread.
+type layerUpdate struct {
+	layer   *frame.Layer
+	content frame.Content
+	dirty   frame.Rect
+}
+
+// UpdateLayer hands the scheduler new content for a layer it is already drawing,
+// from a thread that is not the frame thread.
+//
+// This is the only supported way to change a retained layer's content while the
+// loop is running. Layer.SetContent and Grid.Invalidate are frame-thread
+// operations: calling them from a producer races with BeginFrame reading the same
+// fields, and - because Invalidate deliberately leaves a painting tile alone so
+// the current frame can still be presented - a swap made while one of the dirty
+// tiles is in flight can leave that tile showing content nothing displays any
+// more. A page that repaints on a timer turns that from a corner case into the
+// normal path, which is what a playing video is.
+//
+// One update is held per scheduler and the newest replaces the oldest, so a
+// producer running faster than the display drops frames rather than queueing
+// them. dirty is in layer content space; an empty rect means the whole extent.
+// The swap is applied at the top of a later BeginFrame, once no rasterization is
+// in flight for a tile it would dirty, so a video frame can land one vsync after
+// it was produced. It reports false when there is nothing to apply it to.
+func (s *Scheduler) UpdateLayer(l *frame.Layer, content frame.Content, dirty frame.Rect) bool {
+	if l == nil || content == nil {
+		return false
+	}
+	s.updMu.Lock()
+	s.pending = &layerUpdate{layer: l, content: content, dirty: dirty}
+	s.updMu.Unlock()
+	return true
+}
+
+// applyPendingUpdate installs a queued content swap. Frame thread only.
+func (s *Scheduler) applyPendingUpdate() {
+	s.updMu.Lock()
+	u := s.pending
+	s.updMu.Unlock()
+	if u == nil {
+		return
+	}
+	// A layer that is no longer the one being drawn is a navigation that already
+	// published its own plan; the update it superseded has nothing left to paint
+	// into, and holding it would apply another document's content to this one.
+	if s.layer == nil || s.grid == nil || u.layer != s.layer {
+		s.clearPending(u)
+		return
+	}
+	dirty := u.dirty
+	if dirty.Empty() {
+		dirty = s.layer.Bounds
+	}
+	if s.grid.InFlightIn(dirty) != 0 {
+		// Something is still painting a tile this update would stale. Waiting is
+		// cheaper than the alternative: a job in flight finishes within a frame
+		// or two, and the pixels it installs are the ones being presented now.
+		return
+	}
+	u.layer.SetContent(u.content)
+	u.layer.InvalidateRect(dirty)
+	s.clearPending(u)
+}
+
+func (s *Scheduler) clearPending(u *layerUpdate) {
+	s.updMu.Lock()
+	if s.pending == u {
+		s.pending = nil
+	}
+	s.updMu.Unlock()
+}
+
 // PlanStats reports publishes and superseded plans, which is how a caller tells
 // "content outpaces display" apart from a page that is simply idle.
 func (s *Scheduler) PlanStats() frame.PlanStats { return s.slot.Stats() }
@@ -321,6 +399,12 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 	if s.grid == nil {
 		return &s.cur, s.need
 	}
+	// A queued content swap goes in here, after the layer binding above has had
+	// its say: a plan that changed the layer supersedes an update queued for the
+	// one before it, and the identity check inside is what notices. Applying it
+	// before the visible set is computed is what lets the tiles it stales be
+	// rasterized this frame rather than the next.
+	s.applyPendingUpdate()
 	s.reserveScratch(true)
 	s.grid.Tick()
 

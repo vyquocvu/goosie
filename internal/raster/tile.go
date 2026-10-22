@@ -59,23 +59,32 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 			continue
 		}
 		c := dl.At(i)
+		// A command's own clip narrows the tile clip; the tile clip alone is what
+		// every other command draws against.
+		cmdClip := clip
+		if !c.Clip.Empty() {
+			cmdClip = clip.Intersection(c.Clip.Translate(dx, dy))
+			if cmdClip.Empty() {
+				continue
+			}
+		}
 		switch c.Kind {
 		case paint.CmdFill:
 			if c.Mask != nil {
-				drawMaskedFill(out, c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), c.Mask, clip)
+				drawMaskedFill(out, c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), c.Mask, cmdClip)
 			} else if c.Radius.Empty() {
 				out.FillRect(c.Rect.Translate(dx, dy), applyOpacity(c.Color, c.Opacity), nil)
 			} else {
 				out.FillRounded(c.Rect.Translate(dx, dy), c.Radius, applyOpacity(c.Color, c.Opacity), nil)
 			}
 		case paint.CmdBorder:
-			drawBorder(out, &c, dx, dy, clip)
+			drawBorder(out, &c, dx, dy, cmdClip)
 		case paint.CmdText:
-			if err := drawText(out, &c, dx, dy, clip, f, g); err != nil {
+			if err := drawText(out, &c, dx, dy, cmdClip, f, g); err != nil {
 				return err
 			}
 		case paint.CmdImage:
-			drawImage(out, &c, dx, dy, clip)
+			drawImage(out, &c, dx, dy, cmdClip)
 		case paint.CmdGradient:
 			out.FillLinearGradient(c.Rect.Translate(dx, dy), c.Radius, c.Gradient, nil)
 		case paint.CmdRadialGradient:

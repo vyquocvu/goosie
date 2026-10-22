@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/ax"
@@ -78,11 +79,40 @@ type chromeWindow struct {
 	pressX   int32
 	pressing bool
 
-	// tickInterval paces the onTick hook (the host's JS pump); zero disables
-	// it, which keeps every literal construction (tests especially) exactly
-	// as before.
+	// tickInterval paces the onTick hook (the host's JS and media pumps); zero
+	// disables it, which keeps every literal construction (tests especially)
+	// exactly as before. Both are read by the pump under tickMu, because the host
+	// installs them after constructing the window.
+	tickMu       sync.Mutex
 	tickInterval time.Duration
 	onTick       func()
+
+	// onMediaControl is consulted on a left press before links and focus, so a
+	// click on a video's painted controls reaches the player instead of starting a
+	// text selection over it. It reports whether it handled the press.
+	onMediaControl func(contentX, contentY int32) bool
+}
+
+// setTick installs the host's per-vsync hook. It is safe after construction,
+// which is how the host wires it: the pump reads the configuration each time
+// around its loop rather than snapshotting it once at startup.
+//
+// Snapshotting was a race the pump usually lost by luck. The constructor starts
+// the pump, the host assigns the hook on the next line, and whichever ran first
+// decided whether the browser ever ticked at all — no timers, no fetch
+// completions, and no video frames. Reading under a mutex makes the order
+// irrelevant instead of fortunate.
+func (cw *chromeWindow) setTick(interval time.Duration, fn func()) {
+	cw.tickMu.Lock()
+	cw.tickInterval = interval
+	cw.onTick = fn
+	cw.tickMu.Unlock()
+}
+
+func (cw *chromeWindow) tickConfig() (time.Duration, func()) {
+	cw.tickMu.Lock()
+	defer cw.tickMu.Unlock()
+	return cw.tickInterval, cw.onTick
 }
 
 func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
@@ -493,17 +523,29 @@ func (cw *chromeWindow) Run() {
 
 func (cw *chromeWindow) pump() {
 	defer close(cw.events)
-	// The tick shares the pump select so the JS pump runs on the same thread
-	// as every input callback: sessions never see two threads at once from
-	// this side. No extra lifecycle: the ticker dies with the pump, which
-	// dies when the window's events run out.
+	// The tick shares the pump select so the host's pumps run on the same thread
+	// as every input callback: sessions never see two threads at once from this
+	// side. No extra lifecycle: the ticker dies with the pump, which dies when the
+	// window's events run out.
+	//
+	// The ticker is built on the first iteration that finds a hook installed
+	// rather than before the loop, so a host that configures the window a moment
+	// after constructing it still gets its ticks.
 	var tick <-chan time.Time
-	if cw.onTick != nil && cw.tickInterval > 0 {
-		ticker := time.NewTicker(cw.tickInterval)
-		defer ticker.Stop()
-		tick = ticker.C
-	}
+	var tickFn func()
+	var ticker *time.Ticker
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
 	for {
+		if tickFn == nil {
+			if interval, fn := cw.tickConfig(); fn != nil && interval > 0 {
+				ticker = time.NewTicker(interval)
+				tick, tickFn = ticker.C, fn
+			}
+		}
 		select {
 		case ev, ok := <-cw.Window.Events():
 			if !ok {
@@ -514,7 +556,7 @@ func (cw *chromeWindow) pump() {
 			}
 			cw.events <- ev
 		case <-tick:
-			cw.onTick()
+			tickFn()
 		}
 	}
 }
@@ -670,6 +712,13 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		contentY := ev.Pos.Y - cw.chromeHeight()
 		press := ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft
 		if press {
+			// Media controls come first. A video's painted buttons sit inside the
+			// document, so without this a press on the play button would fall
+			// through to focus and then to the drag selector and start a text
+			// selection over the thing the user was aiming at.
+			if cw.onMediaControl != nil && cw.onMediaControl(contentX, contentY) {
+				return true
+			}
 			if cw.hitTestLink != nil {
 				if href := cw.hitTestLink(contentX, contentY); href != "" {
 					if cw.onLinkClick != nil {

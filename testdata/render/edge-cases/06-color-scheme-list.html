@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Light and dark color scheme fallback</title>
+  <style>
+    html { color-scheme: light dark; background: light-dark(#eee, #222); }
+    body {
+      font: 16px/1.6 system-ui, sans-serif;
+      max-width: 26em;
+      margin: auto;
+      padding: 25vh 2em 2em;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <p>Text should remain readable with the light color-scheme preference.</p>
+</body>
+</html>

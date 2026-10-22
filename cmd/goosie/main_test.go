@@ -1572,8 +1572,14 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 	sess.SelectTo(m.X1-1, midY)
 	f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
 
-	// Damage scoping, synchronously: the selection's tile is stale, a far
-	// tile in the same layer is still current.
+	// repaintTab hands the new content to the scheduler rather than writing it
+	// into the layer here, because it runs on the chrome pump thread while the
+	// frame thread reads the same layer fields. One BeginFrame is what installs
+	// the swap; the assertions below then read the damage that frame scoped.
+	_, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+
+	// Damage scoping: the selection's tile is stale, a far tile in the same
+	// layer is still current.
 	selTile := frame.CoordFor(frame.Point{X: int32(m.X0) + 1, Y: int32(midY)}, frame.TileSize)
 	if !second.Needs(selTile) {
 		t.Fatal("selection tile not stale after a selection repaint")
@@ -1589,7 +1595,6 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 	// any surviving reuse proves the cache lived. Layer identity above (same
 	// pointer across repaints) plus far-tile freshness below are what fail
 	// pre-fix, when every repaint allocated a cold layer.
-	_, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
 	w := f.sched.Submit(needed)
 	if w.Needed > 2 {
 		t.Fatalf("Needed = %d after a word-sized selection change, want only dirty tiles", w.Needed)

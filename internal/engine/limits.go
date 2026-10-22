@@ -576,7 +576,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 {
 			if css.MatchMediaWithOptions(n.GetAttribute("media"), mediaOpts) {
 				if href := stylesheetHref(n); href != "" {
-					if abs, ok := resolveSheetURL(base, href); ok && !linked[abs] {
+					if abs, ok := resolveSubresourceURL(base, href); ok && !linked[abs] {
 						linked[abs] = true
 						linksLeft--
 						all = append(all, cssSource{})
@@ -763,10 +763,13 @@ func stylesheetHref(n *dom.Node) string {
 	return strings.TrimSpace(n.GetAttribute("href"))
 }
 
-// resolveSheetURL turns a link href into an absolute http(s) URL against the
-// document's final URL. Anything the fetcher cannot dial is rejected here so
-// the linker only ever sees absolute web URLs.
-func resolveSheetURL(base, href string) (string, bool) {
+// resolveSubresourceURL turns a subresource reference into an absolute http(s)
+// URL against the document's final URL. Anything the fetcher cannot dial is
+// rejected here, so a linker, an image loader, a script loader and a media
+// loader all see absolute web URLs and none of them gets its own copy of the
+// rules: no non-web scheme, no downgrade out of a secure document, and no
+// public page reaching a private address.
+func resolveSubresourceURL(base, href string) (string, bool) {
 	b, err := url.Parse(base)
 	if err != nil {
 		return "", false
@@ -802,8 +805,8 @@ func initiatorIsLocal(b *url.URL) bool {
 // cmd/goosie can decide whether a subresource fetch from it needs a dial-time
 // address guard at all. A URL that does not parse is reported as not local,
 // which is the safe direction: the guard it would have skipped is a refusal, and
-// resolveSheetURL already rejects the malformed hrefs before a fetch is asked
-// for one.
+// resolveSubresourceURL already rejects the malformed hrefs before a fetch is
+// asked for one.
 func InitiatorIsLocal(raw string) bool {
 	b, err := url.Parse(raw)
 	if err != nil {
@@ -995,7 +998,7 @@ func rewriteURLRef(sheetURL, ref string) (string, bool) {
 	if ref == "" || strings.HasPrefix(ref, "data:") || strings.HasPrefix(ref, "#") {
 		return "", false
 	}
-	if abs, ok := resolveSheetURL(sheetURL, ref); ok {
+	if abs, ok := resolveSubresourceURL(sheetURL, ref); ok {
 		return abs, true
 	}
 	return "", false

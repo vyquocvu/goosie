@@ -43,6 +43,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/manifest"
+	"github.com/vyquocvu/goosie/internal/media"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/pdf"
@@ -379,11 +380,16 @@ type framePath struct {
 	storage           *js.OriginStorageRegistry
 	incognitoStorage  *js.OriginStorageRegistry
 	emulationPreset   *DevicePreset
-	theme             string
-	crashedSession    *session.State
-	userscripts       *userscript.Manager
-	flags             *flags.Manager
-	perms             *perms.Manager
+	// mediaBackend plays this run's video, and is nil when the window that was
+	// opened has no way to: a headless run, or a platform with no decoder. It
+	// comes from the window rather than from the machine so a headless run on a
+	// Mac does not claim a capability it is not using.
+	mediaBackend   media.Backend
+	theme          string
+	crashedSession *session.State
+	userscripts    *userscript.Manager
+	flags          *flags.Manager
+	perms          *perms.Manager
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -884,7 +890,7 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 		}
 	}
 	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
-	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts, f.perms)
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts, f.perms, f.mediaBackend)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -898,12 +904,24 @@ func (f *framePath) drainNavResults() {
 func (f *framePath) applyNavResult(result navResult) {
 	tab := f.tabMgr.TabByID(result.tabID)
 	if tab == nil {
+		// The tab was closed while its load was in flight. The session this result
+		// carries was built for it and nothing else will ever reach it, so it has
+		// to be released here: a session now owns media, and an unreleased one is a
+		// decoder, a temporary file and possibly audio with no tab to stop it from.
+		if result.session != nil {
+			result.session.Close()
+		}
 		return
 	}
 
 	tab.Nav.Mu.Lock()
 	if tab.Nav.Serial != result.serial {
 		tab.Nav.Mu.Unlock()
+		// Superseded by a newer navigation to the same tab: same reasoning as a
+		// vanished tab. The newer load owns its own session.
+		if result.session != nil {
+			result.session.Close()
+		}
 		return
 	}
 	tab.Nav.Loading = false
@@ -1496,14 +1514,27 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	}
 
 	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Stats().Budget == budgetBytes {
-		// Reuse: keep the tile cache and pool. Attach first, then stale:
-		// a frame racing between the two paints old pixels that the
-		// invalidation immediately marks for redo, so it converges on the
-		// next frame instead of sticking. Versions stay fixed, so every
-		// completion stamps the layer's own version and nothing is dropped
-		// as stale.
-		lyr.SetContent(dl)
-		lyr.InvalidateRect(dirtyOrFull(dirty, layerBounds))
+		// Reuse: keep the tile cache and pool. How the new content is attached
+		// depends on whether the frame thread is reading this layer.
+		damage := dirtyOrFull(dirty, layerBounds)
+		if f.tabMgr.Active() == tab {
+			// Handed to the scheduler rather than written here, because this runs
+			// on the chrome pump thread and SetContent/InvalidateRect are
+			// frame-thread operations. Writing them directly races BeginFrame's
+			// read of the same fields, and since Invalidate leaves a painting tile
+			// alone, a swap made while one of the damaged tiles is in flight can
+			// leave it showing content nothing displays any more. A repaint driven
+			// by a video frame is that case thirty times a second rather than once
+			// in a while. The scheduler applies the swap on its own thread once no
+			// rasterization is in flight for a tile the damage covers.
+			f.sched.UpdateLayer(lyr, dl, damage)
+		} else {
+			// A background tab's layer is not the one being drawn, so no frame
+			// thread is reading it and attaching directly cannot race. Doing it
+			// here is also what keeps the tab current for when it comes forward.
+			lyr.SetContent(dl)
+			lyr.InvalidateRect(damage)
+		}
 		f.publishAccessibility()
 		return
 	}
@@ -1584,7 +1615,14 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	dx, dy := f.docPoint(contentX, contentY)
 
 	// Check if click hit an activatable control (checkbox, radio, submit button, reset button)
-	if tab.Session().ClickAt(dx, dy) {
+	// The click is a trusted gesture, and marking it as one around the dispatch is
+	// what lets a page's own click handler start playback: the engine refuses a
+	// play() that arrives from a timer or a synthetic event, and only the host can
+	// tell the difference.
+	tab.Session().SetMediaActivation(true)
+	activated := tab.Session().ClickAt(dx, dy)
+	tab.Session().SetMediaActivation(false)
+	if activated {
 		if sub, ok := tab.Session().PopSubmittedForm(); ok {
 			f.handleFormSubmission(tab, sub)
 			return true
@@ -1705,6 +1743,12 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	cmd := mods&surface.ModCommand != 0 || mods&surface.ModControl != 0
+	// A focused video owns the media keys before scrolling and before the page:
+	// space on a playing video is a pause, not a page down. The press is a trusted
+	// gesture, which is what lets the element start playing in response to it.
+	if !cmd && f.mediaKey(tab, key) {
+		return true
+	}
 	if !cmd && !tab.Session().FocusedEditable() {
 		if f.scrollContentKey(tab, key) {
 			return true
@@ -2176,6 +2220,10 @@ func (f *framePath) switchTab(id uint64) {
 	if cur != nil {
 		vp := f.sched.Viewport()
 		cur.SetScrollY(vp.Offset.Y)
+		// The departing tab stops making noise. Nothing resumes it when the user
+		// comes back, which is the same bargain a real browser strikes: a tab that
+		// restarts on its own is a tab that starts playing without being asked.
+		f.pauseMedia(cur)
 	}
 	f.tabMgr.SwitchTo(id)
 	newTab := f.tabMgr.Active()
@@ -2406,6 +2454,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var appMode appearanceMode
 	var userscriptMgr *userscript.Manager
 	var permsMgr *perms.Manager
+	var mediaBackend media.Backend
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -2420,6 +2469,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			userscriptMgr = v
 		case *perms.Manager:
 			permsMgr = v
+		case media.Backend:
+			mediaBackend = v
 		}
 	}
 
@@ -2656,6 +2707,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			sessOpts = append(sessOpts, engine.WithUserScripts(matched))
 		}
 	}
+	if opt := mediaOption(mediaBackend, client, resp.URL); opt != nil {
+		sessOpts = append(sessOpts, opt)
+	}
 	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW), sessOpts...)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build session: %w", err)
@@ -2750,8 +2804,8 @@ func (t jsTransport) Fetch(url, method string, headers map[string]string, body [
 // 169.254.169.254 is refused even though the URL itself looked public.
 //
 // A local initiator (127.0.0.1, a development server, a file:// document) gets
-// ctx back untouched. That is the same distinction resolveSheetURL makes about
-// names, and guarding it would refuse a page its own stylesheet.
+// ctx back untouched. That is the same distinction resolveSubresourceURL makes
+// about names, and guarding it would refuse a page its own stylesheet.
 func subresourceCtx(ctx context.Context, base string) context.Context {
 	if engine.InitiatorIsLocal(base) {
 		return ctx
@@ -2779,7 +2833,14 @@ func normalizeURL(raw string) string {
 		}
 	}
 	if strings.HasPrefix(lower, "goosie://") {
-		return "goosie://" + strings.ToLower(raw[len("goosie://"):])
+		// Lowercase only the page name (host); the query carries case-sensitive
+		// action parameters (URLs, titles, file paths) and must survive intact.
+		rest := raw[len("goosie://"):]
+		host := rest
+		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+			host = rest[:i]
+		}
+		return "goosie://" + strings.ToLower(host) + rest[len(host):]
 	}
 	if strings.HasPrefix(lower, "about:") {
 		target := strings.TrimPrefix(lower, "about:")
@@ -2844,6 +2905,10 @@ func (f *framePath) openWindow() error {
 	if err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}
+	// Asked of the window rather than of the platform: a headless run on a Mac
+	// would otherwise be told the machine can play video, and every <video> in it
+	// would report a position no frame ever followed.
+	f.mediaBackend = platform.MediaBackend(w)
 	if f.toolbar != nil && f.tabMgr != nil {
 		f.window = newChromeWindow(w, f.toolbar, f.tabMgr,
 			func(id uint64) { f.switchTab(id) },
@@ -2871,8 +2936,8 @@ func (f *framePath) openWindow() error {
 		// thread touches sessions; shutdown needs no join (the pump dies with
 		// the window's event stream).
 		if cw, ok := f.window.(*chromeWindow); ok {
-			cw.tickInterval = f.config.vsyncPeriod()
-			cw.onTick = f.pumpJS
+			cw.setTick(f.config.vsyncPeriod(), f.pumpChrome)
+			cw.onMediaControl = f.handleMediaControl
 			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
 			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
 			cw.onViewSource = f.viewSourceCurrentTab
@@ -3106,6 +3171,13 @@ func run(args []string) error {
 		// join proves no loader still touches the scheduler or tabs.
 		f.runCancel()
 		f.navWg.Wait()
+		// Every document goes before the window does. Stopping a video means
+		// stopping audio on the process main thread, and the window closing is what
+		// stops the loop that services that thread — so after this point there is
+		// nothing left that could answer. Doing it here is also what makes "the app
+		// quit" mean "the video stopped", rather than relying on process exit to
+		// take the audio device with it.
+		f.closeAllSessions()
 		_ = f.window.Close()
 		if f.privateClient != nil {
 			_ = f.privateClient.Close()

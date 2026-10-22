@@ -9,6 +9,8 @@ import (
 	"io"
 
 	_ "image/gif"
+
+	_ "golang.org/x/image/webp"
 )
 
 const (

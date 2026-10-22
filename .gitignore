@@ -36,6 +36,13 @@ Thumbs.db
 
 # Screenshots and perf artifacts
 /screenshots
+/artifacts/
+/parity-artifacts/
+/verify-phase*.png
+/docs/*.visual-check.*
+/audit-results.json
+/gate.json
+/m3-native.json
 screenshot.png
 perf-suite.txt
 .gstack/
@@ -46,5 +53,6 @@ perf-suite.txt
 
 node_modules/
 /goosie
+/goosie-headless
 
 .codegraph/

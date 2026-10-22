@@ -78,6 +78,14 @@ type Object struct {
 	// repeat; without a decoded image normal borders paint.
 	BorderImage any
 
+	// Media carries a video element's presentation state: the frame to draw
+	// plus the position and condition its controls show. Like Image it is `any`
+	// so layout stays free of the packages that produce it; the engine attaches
+	// it and paint reads it back with a type assertion. It is reattached on
+	// every reflow and refreshed in place between them, because a new frame is
+	// not a layout change.
+	Media any
+
 	// BgVector marks a vector background rasterized at tile size after layout
 	// instead of at decode time (no intrinsic dimensions, or a mapping that
 	// depends on the tile). Paint negotiates the same tile it decoded at.

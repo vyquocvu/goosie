@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -71,6 +72,45 @@ func (s *Store) Entries() []Entry {
 	defer s.mu.Unlock()
 	out := make([]Entry, len(s.entries))
 	copy(out, s.entries)
+	return out
+}
+
+// DeleteEntry removes the single visit for url recorded at exactly at and
+// reports whether it existed. Like Record, it only mutates memory; the
+// caller decides when to persist with Save. Timestamps round-trip through
+// RFC3339Nano encoding and JSON without loss of precision.
+func (s *Store) DeleteEntry(url string, at time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.entries {
+		if e.URL == url && e.At.Equal(at) {
+			s.entries = append(s.entries[:i:i], s.entries[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// Clear empties the log in memory. The caller decides when to persist with
+// Save.
+func (s *Store) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = nil
+}
+
+// Search returns visits whose URL or title contains query case-insensitively,
+// oldest first. An empty query returns the full log, matching Entries.
+func (s *Store) Search(query string) []Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := strings.ToLower(strings.TrimSpace(query))
+	out := make([]Entry, 0, len(s.entries))
+	for _, e := range s.entries {
+		if q == "" || strings.Contains(strings.ToLower(e.URL), q) || strings.Contains(strings.ToLower(e.Title), q) {
+			out = append(out, e)
+		}
+	}
 	return out
 }
 

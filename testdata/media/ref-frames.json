@@ -1,0 +1,19 @@
+{
+  "comment": "Reference decode of clip.mp4, taken outside the browser: ffmpeg -ss T -i clip.mp4 -frames:v 1. Each entry is the mean R, G and B of one cell of a 4x3 grid over the 320x180 frame, row-major. Chromium drawing the same paused seek into a canvas agreed with these to within 2.2 per channel. Goosie's AVFoundation decode measured 3.87 worst channel at t=0.5 and 3.85 at t=1.5; the tolerance is twice that. Per-pixel, the error is chroma siting at the pattern's hard colour edges (6% of pixels on gradient>=64 boundaries average 73) while the 68% of pixels on flat colour average 0.78, so a block mean is the right instrument and a per-pixel one is not.",
+  "clip": "clip.mp4",
+  "size": [320, 180],
+  "grid": [4, 3],
+  "tolerancePerChannel": 8.0,
+  "frames": {
+    "0.5": [
+      [110.2, 71.8, 4.7], [174.3, 224.7, 1.9], [81.3, 9.2, 245.5], [79.4, 175.7, 251.2],
+      [181.4, 95.9, 0.7], [122.9, 252.7, 33.7], [72.7, 16.2, 252.6], [86.5, 167.5, 252.6],
+      [174.5, 80.1, 22.5], [170.0, 232.5, 22.5], [74.8, 13.9, 247.5], [121.4, 134.2, 216.8]
+    ],
+    "1.5": [
+      [109.7, 52.2, 2.9], [174.7, 224.7, 2.0], [78.3, 12.1, 242.7], [85.1, 169.8, 250.1],
+      [178.1, 76.4, 6.7], [169.9, 244.6, 10.4], [80.0, 2.9, 253.2], [88.2, 167.9, 251.4],
+      [173.5, 114.1, 13.4], [134.2, 229.4, 65.3], [86.5, 15.7, 246.2], [118.2, 147.5, 201.2]
+    ]
+  }
+}

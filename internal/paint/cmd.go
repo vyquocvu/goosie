@@ -167,6 +167,14 @@ type DisplayCmd struct {
 	// BackdropFilter carries the serialized CSS backdrop-filter property value for this command.
 	BackdropFilter string
 
+	// Clip, when non-empty, limits where this command paints. It exists for the
+	// one case a destination rectangle cannot express: an image whose box is
+	// partly outside an ancestor's overflow. Intersecting the destination instead
+	// would squeeze the whole picture into the visible part, and the element's
+	// own bounds are the right thing to clip against only where the painter knows
+	// them, which is here rather than in the rasterizer.
+	Clip frame.Rect
+
 	// Z orders this command within its layer. The list is sorted once per
 	// content version, never per frame or per tile; see List.SortStable.
 	Z uint32

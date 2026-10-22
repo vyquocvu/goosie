@@ -49,6 +49,11 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 | Quyền riêng tư | Mở cửa sổ riêng tư từ menu/phím tắt; giao diện xóa history, cookie, cache, phiên theo phạm vi hỗ trợ | Dữ liệu bị xóa cả trong bộ nhớ lẫn trên đĩa; cửa sổ riêng tư không ghi vào profile thường; UI nói rõ loại dữ liệu nào được xóa |
 | Cài đặt cơ bản | Công cụ tìm kiếm, thư mục tải xuống, hành vi khởi động và quyền riêng tư | Đổi cài đặt có hiệu lực rõ ràng, lưu qua lần mở sau và xử lý cấu hình lỗi an toàn |
 
+**Trạng thái "Bookmark và history" (cập nhật 2026-10-22):**
+- **Đã có trong mã:** trang quản lý `goosie://bookmarks` (tìm kiếm, đổi tên tiêu đề qua form GET, xóa mục, mở URL an toàn — chỉ http/https/file mới render thành link) và `goosie://history` (tìm kiếm, xóa từng entry theo URL+timestamp, xóa toàn bộ có bước xác nhận). Store có API đột biến mới (`bookmarks.Delete/Rename/Search`, `history.DeleteEntry/Clear/Search`); mọi đột biến ghi tệp atomic ngay và lỗi lưu tệp hiển thị banner trong UI. Phiên private (store nil) hiện thông báo và không có nút đột biến. Trang truy cập được qua nav header của mọi trang `goosie://` và gợi ý omnibox ("Bookmarks Manager", "Browsing History"). `normalizeURL` giữ nguyên hoa/thường query của URL `goosie://` để tham số hành động không bị hỏng.
+- **Kiểm thử tự động:** test store (`test/bookmarks`, `test/history`) và test tích hợp `cmd/goosie` (xóa/rename/search, escape title/URL thù địch, phản hồi lỗi lưu, ranh giới private, routing) **PASS** ngày 2026-10-22; `go test ./...`, `go test -race ./...`, `go vet -all ./...`, archtest và gate suite đều PASS. `make parity` đạt 80/80 fixture, trung bình 95.99% so với Chromium.
+- **Chưa kiểm chứng:** thao tác native macOS (CUA) trên app thật và so sánh visual/parity riêng cho giao diện quản lý mới. CUA bị BLOCKED do phiên kiểm thử không có display khả dụng; corpus parity hiện tại không chứa Chromium reference cho hai trang nội bộ.
+
 **Cổng P1:** kiểm tra hành trình qua hai lần khởi động ứng dụng, hai tab, một cửa sổ riêng tư và một tệp tải xuống; xác minh dữ liệu lưu/xóa thực tế.
 
 ### P2 — Tương tác với website được hỗ trợ

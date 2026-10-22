@@ -24,6 +24,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/media"
 )
 
 // DefaultTimeout bounds one script's execution when Options.Timeout is zero.
@@ -217,6 +218,15 @@ type Runtime struct {
 
 	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
+
+	// Media bridge. mediaProvider is installed by the engine before any page
+	// script runs; mediaCtrls caches one controller per element so a repeated
+	// property read does not ask the engine to make another one; pendingPlays
+	// holds the play() promises that are waiting for a backend to say playback
+	// actually started, keyed by the operation id the controller handed out.
+	mediaProvider MediaProvider
+	mediaCtrls    map[*dom.Node]media.Controller
+	pendingPlays  map[uint64]*promiseObj
 
 	// Custom Elements registry. nil until setupCustomElements() is called.
 	customElementRegistry *CustomElementRegistry
@@ -831,6 +841,7 @@ func (r *Runtime) setupDOM() {
 		r.notifyMutation()
 		return goja.Undefined()
 	})
+	r.installMediaBridge(doc)
 	_ = doc.Set("__getDataset__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -1129,6 +1140,9 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		if node.Data == "input" {
 			r.defineCheckedAccessor(obj)
 			r.defineValueAccessor(obj)
+		}
+		if node.Data == "video" {
+			r.defineMediaAccessors(obj)
 		}
 		if node.Data == "dialog" {
 			r.defineDialogElement(obj, node)

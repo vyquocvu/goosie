@@ -47,7 +47,7 @@ func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]b
 				end := statementEnd(text, i)
 				if end > 0 {
 					if ref, ok := importRef(text[i:end]); ok {
-						if abs, ok := resolveSheetURL(sheetURL, ref); ok && !seen[abs] && len(seen) < maxCSSImports {
+						if abs, ok := resolveSubresourceURL(sheetURL, ref); ok && !seen[abs] && len(seen) < maxCSSImports {
 							seen[abs] = true
 							if sheet, err := linker(sheetURL, abs); err == nil && sub.take(len(sheet)) {
 								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, sub, depth+1)

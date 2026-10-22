@@ -104,3 +104,33 @@ func TestStyle_LightDark_ElementColorSchemeOverride(t *testing.T) {
 		t.Errorf("lightChild: expected light background (255, 255, 255), got %+v", csLight.BackgroundColor)
 	}
 }
+
+func TestStyle_ColorSchemeListUsesViewportPreference(t *testing.T) {
+	html := `<!DOCTYPE html><html id="root"><body>Readable text</body></html>`
+	sheet := css.Parse(`
+    html {
+      color-scheme: light dark;
+      background-color: light-dark(#eeeeee, #222222);
+    }
+  `)
+
+	for _, tc := range []struct {
+		name      string
+		darkMode  bool
+		wantColor uint8
+	}{
+		{name: "light preference", darkMode: false, wantColor: 0xee},
+		{name: "dark preference", darkMode: true, wantColor: 0x22},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := domtest.Parse(html)
+			vp := style.Viewport{W: 800, H: 600, DarkMode: tc.darkMode}
+			styles := style.ResolveViewport(doc, []*css.Stylesheet{sheet}, vp, nil)
+			root := doc.ElementByID("root")
+			cs := styles[root.ID]
+			if got := cs.BackgroundColor; got.R != tc.wantColor || got.G != tc.wantColor || got.B != tc.wantColor {
+				t.Fatalf("background for darkMode=%t = %+v, want gray #%02x", tc.darkMode, got, tc.wantColor)
+			}
+		})
+	}
+}

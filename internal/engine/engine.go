@@ -138,6 +138,12 @@ type Session struct {
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
 
+	// media owns this document's video playback: one controller per element,
+	// the downloaded files behind them, and the backend that decodes them. nil
+	// when the caller did not supply WithMedia, so a session without a playback
+	// backend leaves <video> as the placeholder paint already draws.
+	media *mediaRegistry
+
 	// Transitions tracks active CSS transitions for animated property changes.
 	// nil when no transitions have been started.
 	Transitions *TransitionTracker
@@ -378,6 +384,12 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// engine's arena references.
 	if s.jsRT != nil {
 		s.jsRT.SetDOM(doc)
+		// The media bridge goes in before any script runs, so a page that reads
+		// video.readyState while parsing sees the same element a later script
+		// does, and so play() cannot be reached before the controller exists.
+		if s.media != nil {
+			s.jsRT.SetMediaProvider(s.MediaController)
+		}
 		// Observe DOM writes for the pump: without this, PumpJS cannot tell
 		// a mutation tick from a canvas-only one and must re-resolve on
 		// every fired timer/RAF. Chained, never replacing a caller callback.
@@ -561,7 +573,7 @@ func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 			if family == "" || srcURL == "" {
 				continue
 			}
-			abs, ok := resolveSheetURL(fontBase, srcURL)
+			abs, ok := resolveSubresourceURL(fontBase, srcURL)
 			if !ok {
 				continue
 			}
@@ -777,7 +789,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					}
 					return nil
 				}
-				if abs, ok := resolveSheetURL(s.imgBase, src); ok {
+				if abs, ok := resolveSubresourceURL(s.imgBase, src); ok {
 					refs = append(refs, imgRef{id: n.ID, abs: abs})
 					if !seen[abs] {
 						seen[abs] = true
@@ -794,7 +806,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[bg] = true
 					uniq = append(uniq, bg)
 				}
-			} else if abs, ok := resolveSheetURL(s.imgBase, bg); ok {
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -810,7 +822,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[m] = true
 					uniq = append(uniq, m)
 				}
-			} else if abs, ok := resolveSheetURL(s.imgBase, m); ok {
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, m); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, mask: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -826,7 +838,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[src] = true
 					uniq = append(uniq, src)
 				}
-			} else if abs, ok := resolveSheetURL(s.imgBase, src); ok {
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, src); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true, border: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -1185,6 +1197,32 @@ func (s *Session) Reflow(viewportW float32) error {
 				// missing subresource.
 				if abs, ok := s.bgVectorRef[n.ID]; ok {
 					s.attachVectorBackground(candidate, i, abs)
+				}
+			}
+		}
+	}
+	// Hand each video box its current presentation state. The arena is rebuilt
+	// here while frames arrive between reflows, so without this a style change
+	// would blank a playing video until its next frame.
+	if s.media != nil {
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil && n.Data == "video" {
+				if c := s.media.controllerByID(n.ID); c != nil {
+					candidate.Objects[i].Media = c.View()
+				}
+			}
+		}
+	} else {
+		// No backend was installed, so nothing in this document can ever play.
+		// The view says so rather than leaving the element looking like a video
+		// that has not started yet, and the builder drops the control bar with
+		// it: a bar that can never do anything is the worse of the two.
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil && n.Data == "video" {
+				candidate.Objects[i].Media = paint.VideoView{
+					State:       paint.VideoFailed,
+					Message:     "playback unsupported",
+					Unsupported: true,
 				}
 			}
 		}
@@ -1879,7 +1917,7 @@ func (s *Session) runScripts() {
 			if src := scriptSrc(n); src != "" {
 				// A src tag's inline text is ignored, per HTML.
 				if s.scriptFetch != nil && extLeft > 0 {
-					if abs, ok := resolveSheetURL(s.scriptBase, src); ok {
+					if abs, ok := resolveSubresourceURL(s.scriptBase, src); ok {
 						extLeft--
 						items = append(items, scriptItem{ext: abs, name: abs})
 					}
@@ -1985,13 +2023,53 @@ func isClassicScript(n *dom.Node) bool {
 }
 
 // Close releases resources held by the session. If a JS runtime was supplied,
-// it is closed so the realm is torn down.
+// it is closed so the realm is torn down; any media elements stop and release
+// their downloaded files, because a document that is going away must not leave
+// audio playing behind it.
 func (s *Session) Close() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if s.media != nil {
+		s.media.closeAll()
+	}
 	if s.jsRT != nil {
 		_ = s.jsRT.Close()
 	}
+}
+
+// PumpMedia advances every media controller one step and returns the
+// document-space rectangles whose painting changed. It applies whatever the
+// download workers produced, polls the backends for new frames and positions,
+// attaches the results to the laid-out video boxes, closes the elements that left
+// the document, and hands any transitions to the JavaScript runtime.
+//
+// It never reflows. A decoded frame is not a style change, and paying a layout
+// pass per video frame would put the document's cost on the display's clock
+// instead of on the page's own edits. Callers repaint the returned rectangles and
+// nothing else; an empty result means the tick was worth nothing.
+func (s *Session) PumpMedia() []frame.RectF {
+	if s.media == nil {
+		return nil
+	}
+	s.opMu.Lock()
+	if s.Doc == nil {
+		s.opMu.Unlock()
+		return nil
+	}
+	dmg := s.media.pump(&s.Doc.Node, s.Arena)
+	// Drained under the lock, dispatched outside it: running a page's listener is
+	// user code, and user code must not run while the pipeline state is held.
+	var dispatch []mediaDispatch
+	if s.jsRT != nil {
+		dispatch = s.media.drainEvents()
+	}
+	rt := s.jsRT
+	s.opMu.Unlock()
+
+	for _, d := range dispatch {
+		rt.DispatchMediaEvents(d.node, d.events)
+	}
+	return dmg
 }
 
 // JSTitle returns the document title as seen by the JS runtime after script

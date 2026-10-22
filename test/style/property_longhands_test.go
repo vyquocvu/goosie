@@ -140,6 +140,8 @@ func TestBorderShorthandPartsInAnyOrder(t *testing.T) {
 		{"canonical", "border: 2px solid red", 2, "solid", 255, 0, 0, 255},
 		{"style last", "border: 2px red solid", 2, "solid", 255, 0, 0, 255},
 		{"width last", "border: solid red 2px", 2, "solid", 255, 0, 0, 255},
+		{"explicit zero width", "border: 0 solid red", 0, "solid", 255, 0, 0, 255},
+		{"explicit zero length", "border: 0px solid red", 0, "solid", 255, 0, 0, 255},
 		// `medium` is the initial border-width, and the engine spells it 3px.
 		{"style only", "border: solid", 3, "solid", 0, 0, 0, 0},
 		{"none stays zero", "border: none", 0, "none", 0, 0, 0, 0},

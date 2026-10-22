@@ -2,7 +2,12 @@
 
 package darwin
 
-import "github.com/vyquocvu/goosie/internal/frame"
+import (
+	"time"
+
+	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/media"
+)
 
 // This is the whole package on a platform v2 has no shim for, and on any platform
 // built with CGO_ENABLED=0. It exists so that the import graph is the same everywhere:
@@ -31,3 +36,12 @@ func Available() bool { return false }
 // be able to tell "no shim" apart from "shim refused", and cmd/goosie's report is what
 // reads the difference.
 func Open(Config) (*Window, error) { return nil, ErrPlatformUnavailable }
+
+// NewMediaBackend reports that this build has no decoder. The nil is the answer
+// rather than an omission, and it is nil rather than a backend whose Open fails:
+// a caller that gets a backend has to decide whether a video is broken, while a
+// caller that gets nothing knows there was never anything to break.
+func NewMediaBackend() media.Backend { return nil }
+
+// PumpMainRunLoopForTest has no run loop to service on a build with no shim.
+func PumpMainRunLoopForTest(time.Duration) {}

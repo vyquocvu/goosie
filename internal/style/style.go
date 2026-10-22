@@ -916,14 +916,39 @@ type Viewport struct {
 	DarkMode bool
 }
 
-func (cs *ComputedStyle) effectiveColorScheme(vp Viewport) string {
-	if cs != nil {
-		if strings.Contains(cs.ColorScheme, "dark") {
+// usedColorScheme selects the scheme a document can render in, respecting the
+// user's preference when the document supports both light and dark.
+func usedColorScheme(supported string, prefersDark bool) string {
+	light, dark := false, false
+	for _, token := range strings.Fields(strings.ToLower(supported)) {
+		switch token {
+		case "light":
+			light = true
+		case "dark":
+			dark = true
+		}
+	}
+	if light && dark {
+		if prefersDark {
 			return "dark"
 		}
-		if strings.Contains(cs.ColorScheme, "light") {
-			return "light"
-		}
+		return "light"
+	}
+	if dark {
+		return "dark"
+	}
+	if light {
+		return "light"
+	}
+	if prefersDark {
+		return "dark"
+	}
+	return "light"
+}
+
+func (cs *ComputedStyle) effectiveColorScheme(vp Viewport) string {
+	if cs != nil {
+		return usedColorScheme(cs.ColorScheme, vp.DarkMode)
 	}
 	if vp.DarkMode {
 		return "dark"
@@ -1769,13 +1794,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	sortCascade(important)
 	cs.Custom = resolveCustom(parent, normal, important, index.properties)
 	cs.ColorScheme = resolveColorScheme(parent, normal, important)
-	if strings.Contains(cs.ColorScheme, "dark") {
-		cs.isDark = true
-	} else if strings.Contains(cs.ColorScheme, "light") {
-		cs.isDark = false
-	} else {
-		cs.isDark = vp.DarkMode
-	}
+	cs.isDark = usedColorScheme(cs.ColorScheme, vp.DarkMode) == "dark"
 	vars := expanderFor(cs.Custom, normal, important, index.properties)
 	for _, e := range normal {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
@@ -3264,11 +3283,9 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 
 	case "color-scheme":
 		cs.ColorScheme = strings.ToLower(strings.TrimSpace(value))
-		if strings.Contains(cs.ColorScheme, "dark") {
-			cs.isDark = true
-		} else if strings.Contains(cs.ColorScheme, "light") {
-			cs.isDark = false
-		}
+		// The used scheme is selected from the winning cascaded value and
+		// viewport preference before declarations are applied, so source order
+		// cannot change how light-dark() colors resolve.
 	case "color":
 		if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
 			cs.Color = c
@@ -5137,6 +5154,7 @@ func parseBoxShorthand(v string) (top, right, bottom, left float32) {
 // author spaced after each comma - `1px solid rgb(0, 136, 238)` - and a plain field split
 // would hand the colour parser "rgb(0," and lose the colour entirely.
 func parseBorderShorthand(v string) (width float32, style string, color css.Color) {
+	widthSpecified := false
 	for _, p := range splitColorTokens(v) {
 		lower := strings.ToLower(p)
 		if isBorderStyle(lower) {
@@ -5144,10 +5162,14 @@ func parseBorderShorthand(v string) (width float32, style string, color css.Colo
 		} else if c, ok := css.ParseColor(lower); ok {
 			color = c
 		} else {
-			width = resolveLength(css.ParseValue(p), 0)
+			parsed := css.ParseValue(p)
+			if parsed.Type == css.ValueNumber || parsed.Type == css.ValueLength || parsed.Type == css.ValueFunc {
+				width = resolveLength(parsed, 0)
+				widthSpecified = true
+			}
 		}
 	}
-	if width == 0 && style != "" && style != "none" && style != "hidden" {
+	if !widthSpecified && style != "" && style != "none" && style != "hidden" {
 		width = 3
 	}
 	return

@@ -1,11 +1,27 @@
 package paint_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/media"
 	"github.com/vyquocvu/goosie/internal/paint"
 )
+
+// stubBackend makes the session a playable one. Without a backend the video
+// paints its unsupported message and no control bar at all, and the bar is what
+// this test is about. Nothing is ever opened: Open declines, which leaves the
+// element failed rather than unsupported, and a failed element still owns its
+// controls.
+type stubBackend struct{}
+
+func (stubBackend) Name() string { return "stub" }
+
+func (stubBackend) Open(string) (media.Player, error) {
+	return nil, errors.New("this test opens nothing")
+}
 
 func TestVideoAndAudioPainting(t *testing.T) {
 	html := `<!DOCTYPE html>
@@ -14,7 +30,12 @@ func TestVideoAndAudioPainting(t *testing.T) {
 <audio controls></audio>
 </body></html>`
 
-	sess, err := engine.NewSession(html, nil, 800)
+	sess, err := engine.NewSession(html, nil, 800,
+		engine.WithMedia(stubBackend{},
+			func(context.Context, string) (engine.MediaResponse, error) {
+				return engine.MediaResponse{}, errors.New("this test fetches nothing")
+			}, "http://example.test/"),
+	)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -41,7 +62,7 @@ func TestVideoAndAudioPainting(t *testing.T) {
 	for _, cmd := range commands {
 		if cmd.Kind == paint.CmdText {
 			for _, g := range cmd.Text.Glyphs {
-				if g.Rune == '▶' {
+				if g.Rune == '►' {
 					hasPlayGlyph = true
 				}
 			}
@@ -60,7 +81,7 @@ func TestVideoAndAudioPainting(t *testing.T) {
 	}
 
 	if !hasPlayGlyph {
-		t.Errorf("expected paint commands to contain play symbol '▶'")
+		t.Errorf("expected paint commands to contain play symbol '►'")
 	}
 	if !hasAudioBorder {
 		t.Errorf("expected paint commands to contain rounded audio border")

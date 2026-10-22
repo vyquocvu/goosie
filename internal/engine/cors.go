@@ -9,8 +9,8 @@ import (
 // on CORS: a same-origin face loads freely, a cross-origin one needs an
 // Access-Control-Allow-Origin grant. (The Fetch API's fuller CORS machinery
 // lives in internal/js, which the engine cannot import; this is the small
-// subresource half, kept beside resolveSheetURL's scheme and private-network
-// checks.)
+// subresource half, kept beside resolveSubresourceURL's scheme and
+// private-network checks.)
 //
 // Only http(s)-against-http(s) pairs are judged: other schemes (a file://
 // document loading any face) are allowed, the same leniency the

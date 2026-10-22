@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
@@ -324,54 +325,266 @@ func buildVersionPageHTML(f *framePath) (string, string) {
 	return "About Goosie", internalPageTemplate("version", "About Goosie", body)
 }
 
-// buildBookmarksPageHTML generates the goosie://bookmarks management page.
-func buildBookmarksPageHTML(f *framePath) (string, string) {
+// mgmtNoticeHTML renders an action-feedback banner on the management pages.
+// The message is escaped; kind is "ok" or "err".
+func mgmtNoticeHTML(kind, msg string) string {
+	bg, border, fg := "#e6f4ea", "#34a853", "#137333"
+	if kind == "err" {
+		bg, border, fg = "#fce8e6", "#ea4335", "#c5221f"
+	}
+	return fmt.Sprintf(`<div role="status" style="background:%s;border:1px solid %s;color:%s;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px;">%s</div>`,
+		bg, border, fg, html.EscapeString(msg))
+}
+
+// mgmtSearchFormHTML renders the shared search box used by the bookmarks and
+// history management pages. GET submission re-renders the page filtered by q.
+func mgmtSearchFormHTML(page, placeholder, query string) string {
+	return fmt.Sprintf(`
+      <form action="goosie://%s" method="GET" style="display:flex;gap:8px;margin-bottom:16px;max-width:480px;">
+        <input type="text" name="q" value="%s" placeholder="%s" aria-label="%s" style="flex:1;padding:6px 10px;border:1px solid #dadce0;border-radius:4px;font-size:13px;">
+        <button type="submit" class="btn-action" style="border:none;cursor:pointer;">Search</button>
+      </form>`, page, html.EscapeString(query), placeholder, placeholder)
+}
+
+// isLinkableURL reports whether a stored URL is safe to expose as a clickable
+// link. Only http, https and file URLs are navigable by the shell; anything
+// else (javascript:, data:, hostile schemes) is rendered as inert text.
+func isLinkableURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "file":
+		return true
+	}
+	return false
+}
+
+// mgmtEntryTitleHTML renders an entry title as a link when the target URL is
+// navigable, or as inert escaped text otherwise.
+func mgmtEntryTitleHTML(targetURL, title string) string {
+	if isLinkableURL(targetURL) {
+		return fmt.Sprintf(`<a class="list-link" href="%s">%s</a>`, html.EscapeString(targetURL), html.EscapeString(title))
+	}
+	return fmt.Sprintf(`<span>%s</span>`, html.EscapeString(title))
+}
+
+// buildBookmarksPageHTML generates the goosie://bookmarks management page:
+// search, rename, delete and open for every saved bookmark. Mutations are
+// applied to the store and persisted immediately; failures surface as a
+// banner on the re-rendered page.
+func buildBookmarksPageHTML(f *framePath, rawURL string) (string, string) {
+	u, _ := url.Parse(rawURL)
+	action, targetURL, newTitle, query := "", "", "", ""
+	if u != nil {
+		action = u.Query().Get("action")
+		targetURL = u.Query().Get("url")
+		newTitle = u.Query().Get("title")
+		query = strings.TrimSpace(u.Query().Get("q"))
+	}
+
 	var b strings.Builder
 	b.WriteString(`<div class="card"><h1>Bookmarks</h1>`)
 
-	if f.bookmarks == nil || len(f.bookmarks.List()) == 0 {
-		b.WriteString(`<div class="empty-state">No bookmarks saved yet.<br><small style="margin-top: 8px; display:inline-block;">Tip: Press <b>Cmd+D</b> while browsing to star your favorite pages.</small></div>`)
-	} else {
-		for _, bm := range f.bookmarks.List() {
-			title := bm.Title
-			if title == "" {
-				title = bm.URL
+	if f.bookmarks == nil {
+		b.WriteString(`<div class="empty-state">Bookmark storage is unavailable in this session.<br><small style="margin-top: 8px; display:inline-block;">Private sessions never read or write your profile's bookmarks.</small></div></div>`)
+		return "Bookmarks", internalPageTemplate("bookmarks", "Bookmarks", b.String())
+	}
+
+	notice := ""
+	switch action {
+	case "delete":
+		if targetURL == "" {
+			notice = mgmtNoticeHTML("err", "Delete failed: no bookmark URL was provided.")
+		} else if f.bookmarks.Delete(targetURL) {
+			if err := f.bookmarks.Save(); err != nil {
+				notice = mgmtNoticeHTML("err", fmt.Sprintf("Bookmark removed for this session, but saving to disk failed: %v", err))
+			} else {
+				notice = mgmtNoticeHTML("ok", "Bookmark removed and saved.")
 			}
-			dateStr := bm.Added.Format("Jan 02, 2006 15:04")
-			b.WriteString(fmt.Sprintf(`
-      <div class="list-item">
-        <div class="list-title"><a class="list-link" href="%s">%s</a></div>
-        <div class="list-meta">★ Starred on %s &bull; <span style="font-family: monospace;">%s</span></div>
-      </div>`, html.EscapeString(bm.URL), html.EscapeString(title), dateStr, html.EscapeString(bm.URL)))
+		} else {
+			notice = mgmtNoticeHTML("err", "Bookmark not found; it may already have been removed.")
 		}
+	case "rename":
+		trimmed := strings.TrimSpace(newTitle)
+		if targetURL == "" || trimmed == "" {
+			notice = mgmtNoticeHTML("err", "Rename failed: a bookmark URL and a non-empty title are required.")
+		} else if f.bookmarks.Rename(targetURL, trimmed) {
+			if err := f.bookmarks.Save(); err != nil {
+				notice = mgmtNoticeHTML("err", fmt.Sprintf("Title updated for this session, but saving to disk failed: %v", err))
+			} else {
+				notice = mgmtNoticeHTML("ok", "Bookmark title updated and saved.")
+			}
+		} else {
+			notice = mgmtNoticeHTML("err", "Bookmark not found; it may already have been removed.")
+		}
+	}
+	b.WriteString(notice)
+
+	b.WriteString(mgmtSearchFormHTML("bookmarks", "Search bookmarks by title or URL...", query))
+	if query != "" {
+		b.WriteString(fmt.Sprintf(`<p style="font-size:13px;color:#5f6368;margin:-8px 0 14px 0;">Filtered by "%s" &bull; <a class="list-link" href="goosie://bookmarks">Clear search</a></p>`, html.EscapeString(query)))
+	}
+
+	entries := f.bookmarks.Search(query)
+	if len(entries) == 0 {
+		if query != "" {
+			b.WriteString(`<div class="empty-state">No bookmarks match your search.</div>`)
+		} else {
+			b.WriteString(`<div class="empty-state">No bookmarks saved yet.<br><small style="margin-top: 8px; display:inline-block;">Tip: Press <b>Cmd+D</b> while browsing to star your favorite pages.</small></div>`)
+		}
+	}
+
+	qSuffix := ""
+	if query != "" {
+		qSuffix = "&q=" + url.QueryEscape(query)
+	}
+	for _, bm := range entries {
+		title := bm.Title
+		if title == "" {
+			title = bm.URL
+		}
+		dateStr := bm.Added.Format("Jan 02, 2006 15:04")
+		delLink := fmt.Sprintf(`goosie://bookmarks?action=delete&url=%s%s`, url.QueryEscape(bm.URL), qSuffix)
+		qHidden := ""
+		if query != "" {
+			qHidden = fmt.Sprintf(`<input type="hidden" name="q" value="%s">`, html.EscapeString(query))
+		}
+		b.WriteString(fmt.Sprintf(`
+      <div class="list-item">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+          <div style="min-width:0;flex:1;">
+            <div class="list-title">%s</div>
+            <div class="list-meta" style="word-break:break-all;">★ Starred on %s &bull; <span style="font-family: monospace;">%s</span></div>
+            <form action="goosie://bookmarks" method="GET" style="display:flex;gap:6px;margin-top:8px;max-width:420px;">
+              <input type="hidden" name="action" value="rename">
+              <input type="hidden" name="url" value="%s">
+              %s
+              <input type="text" name="title" value="%s" aria-label="Title for %s" style="flex:1;padding:4px 8px;border:1px solid #dadce0;border-radius:4px;font-size:12px;">
+              <button type="submit" class="btn-action secondary" style="border:1px solid #dadce0;cursor:pointer;">Rename</button>
+            </form>
+          </div>
+          <div style="white-space:nowrap;"><a class="btn-action danger" href="%s">Delete</a></div>
+        </div>
+      </div>`,
+			mgmtEntryTitleHTML(bm.URL, title),
+			dateStr, html.EscapeString(bm.URL),
+			html.EscapeString(bm.URL),
+			qHidden,
+			html.EscapeString(bm.Title), html.EscapeString(bm.URL),
+			delLink))
 	}
 	b.WriteString(`</div>`)
 	return "Bookmarks", internalPageTemplate("bookmarks", "Bookmarks", b.String())
 }
 
-// buildHistoryPageHTML generates the goosie://history chronological visit page.
-func buildHistoryPageHTML(f *framePath) (string, string) {
-	var b strings.Builder
-	b.WriteString(`<div class="card"><h1>Browsing History</h1>`)
+// buildHistoryPageHTML generates the goosie://history management page:
+// search, per-entry delete and clear-all (with a confirmation step) over the
+// visit log. Mutations persist immediately; failures surface as a banner.
+func buildHistoryPageHTML(f *framePath, rawURL string) (string, string) {
+	u, _ := url.Parse(rawURL)
+	action, targetURL, atParam, confirm, query := "", "", "", "", ""
+	if u != nil {
+		action = u.Query().Get("action")
+		targetURL = u.Query().Get("url")
+		atParam = u.Query().Get("at")
+		confirm = u.Query().Get("confirm")
+		query = strings.TrimSpace(u.Query().Get("q"))
+	}
 
-	if f.history == nil || len(f.history.Entries()) == 0 {
-		b.WriteString(`<div class="empty-state">Your browsing history is currently empty.</div>`)
-	} else {
-		entries := f.history.Entries()
-		// Show newest first
-		for i := len(entries) - 1; i >= 0; i-- {
-			h := entries[i]
-			title := h.Title
-			if title == "" {
-				title = h.URL
+	var b strings.Builder
+	b.WriteString(`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h1 style="margin:0;">Browsing History</h1>`)
+	if f.history != nil {
+		b.WriteString(`<a class="btn-action danger" href="goosie://history?action=clear">Clear All History</a>`)
+	}
+	b.WriteString(`</div>`)
+
+	if f.history == nil {
+		b.WriteString(`<div class="empty-state">History storage is unavailable in this session.<br><small style="margin-top: 8px; display:inline-block;">Private sessions never read or write your profile's history.</small></div></div>`)
+		return "Browsing History", internalPageTemplate("history", "Browsing History", b.String())
+	}
+
+	notice := ""
+	switch action {
+	case "delete":
+		at, err := time.Parse(time.RFC3339Nano, atParam)
+		switch {
+		case targetURL == "" || atParam == "" || err != nil:
+			notice = mgmtNoticeHTML("err", "Delete failed: the history entry reference was missing or malformed.")
+		case f.history.DeleteEntry(targetURL, at):
+			if err := f.history.Save(); err != nil {
+				notice = mgmtNoticeHTML("err", fmt.Sprintf("Entry removed for this session, but saving to disk failed: %v", err))
+			} else {
+				notice = mgmtNoticeHTML("ok", "History entry removed and saved.")
 			}
-			dateStr := h.At.Format("Jan 02, 2006 15:04:05")
-			b.WriteString(fmt.Sprintf(`
-      <div class="list-item">
-        <div class="list-title"><a class="list-link" href="%s">%s</a></div>
-        <div class="list-meta">Visited at %s &bull; <span style="font-family: monospace;">%s</span></div>
-      </div>`, html.EscapeString(h.URL), html.EscapeString(title), dateStr, html.EscapeString(h.URL)))
+		default:
+			notice = mgmtNoticeHTML("err", "History entry not found; it may already have been removed.")
 		}
+	case "clear":
+		if confirm == "1" {
+			f.history.Clear()
+			if err := f.history.Save(); err != nil {
+				notice = mgmtNoticeHTML("err", fmt.Sprintf("History cleared for this session, but saving to disk failed: %v", err))
+			} else {
+				notice = mgmtNoticeHTML("ok", "Browsing history cleared and saved.")
+			}
+		} else {
+			count := len(f.history.Entries())
+			b.WriteString(fmt.Sprintf(`<div role="alertdialog" aria-label="Confirm clearing history" style="background:#fef7e0;border:1px solid #f9ab00;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#b06000;">
+        <b>Clear all browsing history?</b> This permanently removes %d visit(s) from this profile. Bookmarks are kept.
+        <div style="margin-top:10px;">
+          <a class="btn-action danger" href="goosie://history?action=clear&confirm=1">Yes, Clear History</a>
+          <a class="btn-action secondary" href="goosie://history">Cancel</a>
+        </div>
+      </div>`, count))
+		}
+	}
+	b.WriteString(notice)
+
+	b.WriteString(mgmtSearchFormHTML("history", "Search history by title or URL...", query))
+	if query != "" {
+		b.WriteString(fmt.Sprintf(`<p style="font-size:13px;color:#5f6368;margin:-8px 0 14px 0;">Filtered by "%s" &bull; <a class="list-link" href="goosie://history">Clear search</a></p>`, html.EscapeString(query)))
+	}
+
+	entries := f.history.Search(query)
+	if len(entries) == 0 {
+		if query != "" {
+			b.WriteString(`<div class="empty-state">No history entries match your search.</div>`)
+		} else {
+			b.WriteString(`<div class="empty-state">Your browsing history is currently empty.</div>`)
+		}
+	}
+
+	qSuffix := ""
+	if query != "" {
+		qSuffix = "&q=" + url.QueryEscape(query)
+	}
+	// Show newest first
+	for i := len(entries) - 1; i >= 0; i-- {
+		h := entries[i]
+		title := h.Title
+		if title == "" {
+			title = h.URL
+		}
+		dateStr := h.At.Format("Jan 02, 2006 15:04:05")
+		delLink := fmt.Sprintf(`goosie://history?action=delete&url=%s&at=%s%s`,
+			url.QueryEscape(h.URL), url.QueryEscape(h.At.Format(time.RFC3339Nano)), qSuffix)
+		b.WriteString(fmt.Sprintf(`
+      <div class="list-item">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+          <div style="min-width:0;flex:1;">
+            <div class="list-title">%s</div>
+            <div class="list-meta" style="word-break:break-all;">Visited at %s &bull; <span style="font-family: monospace;">%s</span></div>
+          </div>
+          <div style="white-space:nowrap;"><a class="btn-action danger" href="%s">Delete</a></div>
+        </div>
+      </div>`,
+			mgmtEntryTitleHTML(h.URL, title),
+			dateStr, html.EscapeString(h.URL),
+			delLink))
 	}
 	b.WriteString(`</div>`)
 	return "Browsing History", internalPageTemplate("history", "Browsing History", b.String())
@@ -559,9 +772,9 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 	case "version", "about":
 		return buildVersionPageHTML(f)
 	case "bookmarks":
-		return buildBookmarksPageHTML(f)
+		return buildBookmarksPageHTML(f, rawURL)
 	case "history":
-		return buildHistoryPageHTML(f)
+		return buildHistoryPageHTML(f, rawURL)
 	case "downloads":
 		return buildDownloadsPageHTML(f, rawURL)
 	case "inspect", "devtools":
