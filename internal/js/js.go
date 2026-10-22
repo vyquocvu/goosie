@@ -24,6 +24,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/media"
 )
 
 // DefaultTimeout bounds one script's execution when Options.Timeout is zero.
@@ -128,6 +129,19 @@ type Options struct {
 	// this to trigger re-style and re-layout. nil means mutations are
 	// not tracked (e.g., in tests).
 	OnMutation func()
+
+	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
+	// When nil, ephemeral in-memory storage is created per runtime.
+	Storage *OriginStorageRegistry
+
+	// SessionID identifies the tab/browsing context for sessionStorage isolation.
+	SessionID string
+
+	// DarkMode indicates whether the host environment prefers a dark color scheme.
+	DarkMode bool
+
+	// HighContrast indicates whether the host environment prefers increased contrast.
+	HighContrast bool
 }
 
 // Kind is the JS type of a Value read back out of a runtime.
@@ -205,6 +219,15 @@ type Runtime struct {
 	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
 
+	// Media bridge. mediaProvider is installed by the engine before any page
+	// script runs; mediaCtrls caches one controller per element so a repeated
+	// property read does not ask the engine to make another one; pendingPlays
+	// holds the play() promises that are waiting for a backend to say playback
+	// actually started, keyed by the operation id the controller handed out.
+	mediaProvider MediaProvider
+	mediaCtrls    map[*dom.Node]media.Controller
+	pendingPlays  map[uint64]*promiseObj
+
 	// Custom Elements registry. nil until setupCustomElements() is called.
 	customElementRegistry *CustomElementRegistry
 
@@ -274,6 +297,8 @@ func New(opts Options) (*Runtime, error) {
 		r.setupWorker(opts.WorkerDialer)
 	}
 	r.setupServiceWorker()
+	r.setupCSS()
+	r.setupDragDrop()
 	r.setupUnsupportedAPIs()
 	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
 
@@ -359,18 +384,42 @@ func (r *Runtime) setupWindow() {
 		if strings.Contains(lq, "print") && !strings.Contains(lq, "not") {
 			matches = false
 		}
-		// Goosie has no host appearance setting yet, so its document environment
-		// follows the browser's default light color scheme. Returning true for
-		// every query made common boot scripts (including rust-lang/book) select
-		// their dark palette even though CSS media matching uses light mode.
 		if strings.Contains(lq, "prefers-color-scheme") {
 			dark := strings.Contains(lq, "dark")
 			light := strings.Contains(lq, "light")
-			if dark {
-				matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+			if r.opts.DarkMode {
+				if dark {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if light {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+			} else {
+				if dark {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if light {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
 			}
-			if light {
-				matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+		}
+		if strings.Contains(lq, "prefers-contrast") {
+			more := strings.Contains(lq, "more")
+			noPref := strings.Contains(lq, "no-preference")
+			if r.opts.HighContrast {
+				if more {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if noPref {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+			} else {
+				if more {
+					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
+				if noPref {
+					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
+				}
 			}
 		}
 		_ = mql.Set("matches", matches)
@@ -701,6 +750,78 @@ func (r *Runtime) setupDOM() {
 		node.SetAttribute("value", v)
 		return goja.Undefined()
 	})
+	_ = doc.Set("__getDialogOpen__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue(false)
+		}
+		return r.vm.ToValue(node.HasAttribute("open"))
+	})
+	_ = doc.Set("__setDialogOpen__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		open := call.Arguments[1].ToBoolean()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		if open {
+			node.SetAttribute("open", "")
+		} else {
+			node.RemoveAttribute("open")
+			node.IsModal = false
+		}
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+	_ = doc.Set("__getDialogReturnValue__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(node.ReturnValue)
+	})
+	_ = doc.Set("__setDialogReturnValue__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		v := call.Arguments[1].String()
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		node.ReturnValue = v
+		return goja.Undefined()
+	})
+	_ = doc.Set("__getPopover__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil || !node.HasAttribute("popover") {
+			return goja.Null()
+		}
+		val := node.GetAttribute("popover")
+		if val == "" || strings.EqualFold(val, "auto") {
+			return r.vm.ToValue("auto")
+		}
+		if strings.EqualFold(val, "manual") {
+			return r.vm.ToValue("manual")
+		}
+		return r.vm.ToValue(val)
+	})
+	_ = doc.Set("__setPopover__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
+			return goja.Undefined()
+		}
+		if len(call.Arguments) < 2 || goja.IsNull(call.Arguments[1]) || goja.IsUndefined(call.Arguments[1]) {
+			node.RemoveAttribute("popover")
+			node.IsPopoverOpen = false
+		} else {
+			node.SetAttribute("popover", call.Arguments[1].String())
+		}
+		r.notifyMutation()
+		return goja.Undefined()
+	})
 	_ = doc.Set("__getId__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -720,6 +841,7 @@ func (r *Runtime) setupDOM() {
 		r.notifyMutation()
 		return goja.Undefined()
 	})
+	r.installMediaBridge(doc)
 	_ = doc.Set("__getDataset__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -837,6 +959,10 @@ func (r *Runtime) setupDOM() {
 	} else {
 		_ = doc.Set("head", goja.Null())
 	}
+
+	_ = doc.Set("__getShadowRoot__", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetShadowRoot(call)
+	})
 }
 
 // wrapNode creates a JS wrapper object for a DOM node. The wrapper inherits
@@ -1015,6 +1141,13 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 			r.defineCheckedAccessor(obj)
 			r.defineValueAccessor(obj)
 		}
+		if node.Data == "video" {
+			r.defineMediaAccessors(obj)
+		}
+		if node.Data == "dialog" {
+			r.defineDialogElement(obj, node)
+		}
+		r.definePopoverMethods(obj, node)
 	}
 
 	return obj
@@ -1131,6 +1264,210 @@ func (r *Runtime) defineValueAccessor(obj *goja.Object) {
 	_ = r.vm.Set("__valTarget__", nil)
 }
 
+func (r *Runtime) defineDialogElement(obj *goja.Object, node *dom.Node) {
+	_ = obj.Set("show", func(call goja.FunctionCall) goja.Value {
+		if node.HasAttribute("open") {
+			return goja.Undefined()
+		}
+		node.SetAttribute("open", "")
+		node.IsModal = false
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("showModal", func(call goja.FunctionCall) goja.Value {
+		if node.HasAttribute("open") {
+			panic(r.vm.NewTypeError("Failed to execute 'showModal' on 'HTMLDialogElement': The dialog is already open."))
+		}
+		node.SetAttribute("open", "")
+		node.IsModal = true
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("close", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("open") {
+			return goja.Undefined()
+		}
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
+			node.ReturnValue = call.Arguments[0].String()
+		}
+		node.RemoveAttribute("open")
+		node.IsModal = false
+		dom.DispatchEvent(node, dom.NewEvent("close", false, false))
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = r.vm.Set("__dlgTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__dlgTarget__, 'open', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return false;
+				return document.__getDialogOpen__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setDialogOpen__(nid, !!v);
+			},
+			configurable: true,
+			enumerable: true
+		});
+		Object.defineProperty(__dlgTarget__, 'returnValue', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return '';
+				return document.__getDialogReturnValue__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setDialogReturnValue__(nid, String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__dlgTarget__", nil)
+}
+
+func (r *Runtime) definePopoverMethods(obj *goja.Object, node *dom.Node) {
+	_ = obj.Set("showPopover", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("popover") {
+			panic(r.vm.NewTypeError("Failed to execute 'showPopover' on 'HTMLElement': Not supported on elements that do not have a valid 'popover' attribute."))
+		}
+		if node.IsPopoverOpen {
+			panic(r.vm.NewTypeError("Failed to execute 'showPopover' on 'HTMLElement': The popover is already open."))
+		}
+		pType := strings.ToLower(node.GetAttribute("popover"))
+		if pType == "" || pType == "auto" {
+			r.closeOpenAutoPopovers(node)
+		}
+		beforeEv := dom.NewEvent("beforetoggle", false, true)
+		if !dom.DispatchEvent(node, beforeEv) {
+			return goja.Undefined()
+		}
+		node.IsPopoverOpen = true
+		dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("hidePopover", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("popover") {
+			panic(r.vm.NewTypeError("Failed to execute 'hidePopover' on 'HTMLElement': Not supported on elements that do not have a valid 'popover' attribute."))
+		}
+		if !node.IsPopoverOpen {
+			panic(r.vm.NewTypeError("Failed to execute 'hidePopover' on 'HTMLElement': The popover is not open."))
+		}
+		beforeEv := dom.NewEvent("beforetoggle", false, true)
+		if !dom.DispatchEvent(node, beforeEv) {
+			return goja.Undefined()
+		}
+		node.IsPopoverOpen = false
+		dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+		r.notifyMutation()
+		return goja.Undefined()
+	})
+
+	_ = obj.Set("togglePopover", func(call goja.FunctionCall) goja.Value {
+		if !node.HasAttribute("popover") {
+			panic(r.vm.NewTypeError("Failed to execute 'togglePopover' on 'HTMLElement': Not supported on elements that do not have a valid 'popover' attribute."))
+		}
+		var force *bool
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
+			b := call.Arguments[0].ToBoolean()
+			force = &b
+		}
+		if force != nil {
+			if *force && !node.IsPopoverOpen {
+				pType := strings.ToLower(node.GetAttribute("popover"))
+				if pType == "" || pType == "auto" {
+					r.closeOpenAutoPopovers(node)
+				}
+				beforeEv := dom.NewEvent("beforetoggle", false, true)
+				if dom.DispatchEvent(node, beforeEv) {
+					node.IsPopoverOpen = true
+					dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+					r.notifyMutation()
+				}
+			} else if !*force && node.IsPopoverOpen {
+				beforeEv := dom.NewEvent("beforetoggle", false, true)
+				if dom.DispatchEvent(node, beforeEv) {
+					node.IsPopoverOpen = false
+					dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+					r.notifyMutation()
+				}
+			}
+			return r.vm.ToValue(node.IsPopoverOpen)
+		}
+		if node.IsPopoverOpen {
+			beforeEv := dom.NewEvent("beforetoggle", false, true)
+			if dom.DispatchEvent(node, beforeEv) {
+				node.IsPopoverOpen = false
+				dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+				r.notifyMutation()
+			}
+		} else {
+			pType := strings.ToLower(node.GetAttribute("popover"))
+			if pType == "" || pType == "auto" {
+				r.closeOpenAutoPopovers(node)
+			}
+			beforeEv := dom.NewEvent("beforetoggle", false, true)
+			if dom.DispatchEvent(node, beforeEv) {
+				node.IsPopoverOpen = true
+				dom.DispatchEvent(node, dom.NewEvent("toggle", false, false))
+				r.notifyMutation()
+			}
+		}
+		return r.vm.ToValue(node.IsPopoverOpen)
+	})
+
+	_ = r.vm.Set("__popoverTarget__", obj)
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__popoverTarget__, 'popover', {
+			get: function() {
+				var nid = this.__nid__;
+				if (nid === undefined) return null;
+				return document.__getPopover__(nid);
+			},
+			set: function(v) {
+				var nid = this.__nid__;
+				if (nid === undefined) return;
+				document.__setPopover__(nid, v === null || v === undefined ? null : String(v));
+			},
+			configurable: true,
+			enumerable: true
+		});
+	`)
+	_ = r.vm.Set("__popoverTarget__", nil)
+}
+
+func (r *Runtime) closeOpenAutoPopovers(except *dom.Node) {
+	if r.domDoc == nil {
+		return
+	}
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n != except && n.Element() && n.IsPopoverOpen {
+			pType := strings.ToLower(n.GetAttribute("popover"))
+			if pType == "" || pType == "auto" {
+				n.IsPopoverOpen = false
+				dom.DispatchEvent(n, dom.NewEvent("toggle", false, false))
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(&r.domDoc.Node)
+}
+
 // defineIdAccessor installs a live id getter/setter on obj: reading reflects
 // the current attribute (not the wrap-time snapshot) and writing sets it, so
 // `div.id = "g"` retargets getElementById and #g selectors.
@@ -1237,6 +1574,15 @@ func (r *Runtime) defineElementAccessors(obj *goja.Object) {
 			parentNode: {
 				get: function() {
 					return this.parentElement;
+				},
+				configurable: true,
+				enumerable: true
+			},
+			shadowRoot: {
+				get: function() {
+					var nid = this.__nid__;
+					if (nid === undefined) return null;
+					return document.__getShadowRoot__(nid);
 				},
 				configurable: true,
 				enumerable: true
@@ -1931,6 +2277,43 @@ func (r *Runtime) Run(src, sourceURL string) error {
 	return nil
 }
 
+// Evaluate executes a JavaScript expression, returning its string representation or an error.
+func (r *Runtime) Evaluate(expr string) (string, error) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return "", ErrClosed
+	}
+	r.mu.Unlock()
+
+	if len(expr) > MaxScriptBytes {
+		return "", ErrTooLarge
+	}
+
+	timeout := r.opts.Timeout
+	if timeout == 0 {
+		timeout = DefaultTimeout
+	}
+
+	timer := time.AfterFunc(timeout, func() {
+		r.vm.Interrupt(ErrInterrupted)
+	})
+	defer timer.Stop()
+
+	val, err := r.vm.RunString(expr)
+	_ = r.drainMicrotasks()
+	if err != nil {
+		return "", r.mapError(err, "eval")
+	}
+	if val == nil || goja.IsUndefined(val) {
+		return "undefined", nil
+	}
+	if goja.IsNull(val) {
+		return "null", nil
+	}
+	return val.String(), nil
+}
+
 func (r *Runtime) mapError(err error, sourceURL string) error {
 	if err == nil {
 		return nil
@@ -2186,7 +2569,89 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("repeat", ke.Repeat)
 	}
 
+	// DragEvent fields.
+	if de := e.AsDrag(); de != nil {
+		_ = obj.Set("dataTransfer", r.wrapDataTransfer(de.DataTransfer))
+	}
+
 	return obj
+}
+
+func (r *Runtime) wrapDataTransfer(dt *dom.DataTransfer) *goja.Object {
+	if dt == nil {
+		dt = dom.NewDataTransfer()
+	}
+	obj := r.vm.NewObject()
+	_ = obj.Set("dropEffect", dt.DropEffect)
+	_ = obj.Set("effectAllowed", dt.EffectAllowed)
+	_ = obj.Set("setData", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 2 {
+			dt.SetData(call.Arguments[0].String(), call.Arguments[1].String())
+		}
+		return goja.Undefined()
+	})
+	_ = obj.Set("getData", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 1 {
+			return r.vm.ToValue(dt.GetData(call.Arguments[0].String()))
+		}
+		return r.vm.ToValue("")
+	})
+	_ = obj.Set("clearData", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) >= 1 {
+			dt.ClearData(call.Arguments[0].String())
+		} else {
+			dt.ClearData()
+		}
+		return goja.Undefined()
+	})
+	_ = obj.Set("__getTypes__", func() []string {
+		t := dt.Types()
+		if t == nil {
+			return []string{}
+		}
+		return t
+	})
+	_ = r.vm.Set("__dt__", obj)
+	_, _ = r.vm.RunString(`
+		(function() {
+			var o = __dt__;
+			Object.defineProperty(o, 'types', {
+				get: function() { return o.__getTypes__(); },
+				configurable: true,
+				enumerable: true
+			});
+		})();
+	`)
+	_ = r.vm.Set("__dt__", nil)
+	return obj
+}
+
+func (r *Runtime) setupDragDrop() {
+	dtCtor := func(call goja.ConstructorCall) *goja.Object {
+		dt := dom.NewDataTransfer()
+		return r.wrapDataTransfer(dt)
+	}
+	dtVal := r.vm.ToValue(dtCtor)
+	_ = r.vm.Set("DataTransfer", dtVal)
+
+	dragEventCtor := func(call goja.ConstructorCall) *goja.Object {
+		eventType := ""
+		if len(call.Arguments) > 0 {
+			eventType = call.Arguments[0].String()
+		}
+		dt := dom.NewDataTransfer()
+		de := dom.NewDragEvent(eventType, dom.MouseEvent{}, dt)
+		return r.wrapEvent(de).(*goja.Object)
+	}
+	deVal := r.vm.ToValue(dragEventCtor)
+	_ = r.vm.Set("DragEvent", deVal)
+
+	if win := r.vm.Get("window"); win != nil {
+		if winObj, ok := win.(*goja.Object); ok {
+			_ = winObj.Set("DataTransfer", dtVal)
+			_ = winObj.Set("DragEvent", deVal)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

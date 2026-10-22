@@ -237,7 +237,15 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 		rowH = 0
 		rowCursor = 0
 	}
-	if obj.Style != nil && obj.Style.Display == style.DisplayTable {
+	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
+		if obj.Style.Width < 0 && obj.Style.ContainIntrinsicWidth > 0 {
+			obj.W = obj.Style.ContainIntrinsicWidth
+		}
+		if obj.Style.Height < 0 && obj.Style.ContainIntrinsicHeight > 0 {
+			obj.H = obj.Style.ContainIntrinsicHeight
+			y = obj.H
+		}
+	} else if obj.Style != nil && obj.Style.Display == style.DisplayTable {
 		y = layoutTable(a, id, containingW)
 	} else if obj.Style != nil && (obj.Style.Display == style.DisplayGrid || obj.Style.Display == style.DisplayInlineGrid) {
 		y = layoutGrid(a, id, containingW)
@@ -375,7 +383,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						blockInto(a, kid, contentW)
 						inlineInto(a, kid)
 						k = a.Get(kid)
-						if sx, right, ok := inlineExtent(a, kid); ok && right > sx {
+						if k.Style != nil && k.Style.AspectRatio > 0 && k.H > 0 {
+							k.W = k.H * k.Style.AspectRatio
+							clampWidth(a, k, contentW)
+							k = a.Get(kid)
+						} else if sx, right, ok := inlineExtent(a, kid); ok && right > sx {
 							srcX, contentExtent, measured = sx, right-sx, true
 							k.W = contentExtent
 							k = a.Get(kid)
@@ -523,7 +535,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// only counts here when it resolved, which is why the test reads the height
 	// through the containing block rather than the raw declaration.
 	if obj.Style != nil && resolvePctLength(obj.Style.Height, parentH) < 0 {
-		obj.H = y
+		if obj.Style.AspectRatio > 0 && obj.W > 0 {
+			obj.H = obj.W / obj.Style.AspectRatio
+		} else {
+			obj.H = y
+		}
 		if replacedH > obj.H {
 			obj.H = replacedH
 		}
@@ -1699,7 +1715,7 @@ func isReplacedElement(obj *Object) bool {
 		return false
 	}
 	switch obj.Node.Data {
-	case "img", "input", "select", "textarea", "video", "canvas":
+	case "img", "input", "select", "textarea", "video", "audio", "canvas", "svg":
 		return true
 	}
 	return false
@@ -1813,7 +1829,7 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 					inner = own
 				} else if k.Node != nil && k.Node.Element() {
 					switch k.Node.Data {
-					case "img", "input", "select", "textarea", "video", "canvas":
+					case "img", "input", "select", "textarea", "video", "audio", "canvas", "svg":
 						inner = k.W
 					}
 				}
@@ -2039,6 +2055,37 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		}
 		return w, h, true
 	}
+	if obj.Node.Data == "svg" || obj.Node.Data == "video" || obj.Node.Data == "canvas" {
+		w, h = 300, 150
+		if wAttr := obj.Node.GetAttribute("width"); wAttr != "" {
+			if parsedW, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && parsedW > 0 {
+				w = float32(parsedW)
+			}
+		}
+		if hAttr := obj.Node.GetAttribute("height"); hAttr != "" {
+			if parsedH, err := strconv.ParseFloat(strings.TrimSuffix(hAttr, "px"), 32); err == nil && parsedH > 0 {
+				h = float32(parsedH)
+			}
+		}
+		return w, h, true
+	}
+	if obj.Node.Data == "audio" {
+		if !obj.Node.HasAttribute("controls") && !obj.Node.HasAttribute("width") && !obj.Node.HasAttribute("height") {
+			return 0, 0, true
+		}
+		w, h = 300, 32
+		if wAttr := obj.Node.GetAttribute("width"); wAttr != "" {
+			if parsedW, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && parsedW > 0 {
+				w = float32(parsedW)
+			}
+		}
+		if hAttr := obj.Node.GetAttribute("height"); hAttr != "" {
+			if parsedH, err := strconv.ParseFloat(strings.TrimSuffix(hAttr, "px"), 32); err == nil && parsedH > 0 {
+				h = float32(parsedH)
+			}
+		}
+		return w, h, true
+	}
 	if obj.Node.Data != "input" && obj.Node.Data != "textarea" {
 		return 0, 0, false
 	}
@@ -2137,7 +2184,9 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 	attrH := attrPx(obj.Node.GetAttribute("height"))
 
 	ratio := float32(0)
-	if natW > 0 && natH > 0 {
+	if s.AspectRatio > 0 {
+		ratio = 1.0 / s.AspectRatio
+	} else if natW > 0 && natH > 0 {
 		ratio = natH / natW
 	} else if attrW > 0 && attrH > 0 {
 		ratio = attrH / attrW
@@ -2307,11 +2356,21 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		} else {
 			obj.H = heightVal
 		}
+	} else if s.ContentVisibility == "hidden" && s.ContainIntrinsicHeight > 0 {
+		obj.H = s.ContainIntrinsicHeight
+	} else if s.AspectRatio > 0 && obj.W > 0 {
+		obj.H = obj.W / s.AspectRatio
 	}
 	if obj.H < 0 {
 		obj.H = 0
 	}
 	clampHeight(a, obj, containingH)
+
+	// If width was auto and height was definite, aspect-ratio resolves width
+	if explicitW < 0 && s.AspectRatio > 0 && obj.H > 0 && s.Display != style.DisplayBlock {
+		obj.W = obj.H * s.AspectRatio
+		clampWidth(a, obj, containingW)
+	}
 }
 
 // distributeAutoMargins gives the line an auto-width or clamped block leaves

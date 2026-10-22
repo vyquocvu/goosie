@@ -15,10 +15,16 @@ const (
 	ButtonBack Button = iota
 	ButtonForward
 	ButtonReload
-	ButtonGo
+	ButtonDownloads
+	ButtonGo = ButtonDownloads
 )
 
 func ButtonRect(btn Button, toolbarWidth int32) frame.Rect {
+	if btn == ButtonDownloads {
+		x := toolbarWidth - ButtonSize - ButtonGap
+		y := int32((ToolbarHeight - ButtonSize) / 2)
+		return frame.Rect4(x, y, x+ButtonSize, y+ButtonSize)
+	}
 	x := int32(ButtonGap) + int32(btn)*(ButtonSize+ButtonGap)
 	y := int32((ToolbarHeight - ButtonSize) / 2)
 	return frame.Rect4(x, y, x+ButtonSize, y+ButtonSize)

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,8 +20,9 @@ type Entry struct {
 	Added time.Time `json:"added"`
 }
 
-// Store is an ordered bookmark list. It is safe for concurrent use; Toggle
-// callers decide when to persist with Save.
+// Store is an ordered bookmark list. It is safe for concurrent use; mutators
+// (Toggle, Delete, Rename) only change memory and callers decide when to
+// persist with Save.
 type Store struct {
 	mu   sync.Mutex
 	path string
@@ -85,6 +87,52 @@ func (s *Store) Toggle(url, title string) bool {
 	}
 	s.list = append(s.list, Entry{URL: url, Title: title, Added: time.Now()})
 	return true
+}
+
+// Delete removes the bookmark for url and reports whether it existed. Like
+// Toggle, it only mutates memory; the caller decides when to persist with
+// Save.
+func (s *Store) Delete(url string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.list {
+		if e.URL == url {
+			s.list = append(s.list[:i:i], s.list[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// Rename sets the display title of the bookmark for url and reports whether
+// it existed. The title is stored verbatim; presentation layers are
+// responsible for escaping it.
+func (s *Store) Rename(url, title string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.list {
+		if e.URL == url {
+			s.list[i].Title = title
+			return true
+		}
+	}
+	return false
+}
+
+// Search returns bookmarks whose URL or title contains query
+// case-insensitively, in insertion order. An empty query returns the full
+// list, matching List.
+func (s *Store) Search(query string) []Entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := strings.ToLower(strings.TrimSpace(query))
+	out := make([]Entry, 0, len(s.list))
+	for _, e := range s.list {
+		if q == "" || strings.Contains(strings.ToLower(e.URL), q) || strings.Contains(strings.ToLower(e.Title), q) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Contains reports whether url is bookmarked.

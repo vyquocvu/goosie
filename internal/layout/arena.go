@@ -13,6 +13,8 @@
 package layout
 
 import (
+	"strings"
+
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -45,6 +47,15 @@ type Object struct {
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
 
+	// GridCols and GridRows record the resolved track sizes (in px) of a grid
+	// container so subgrids can inherit track slices from their parent.
+	GridCols    []float32
+	GridRows    []float32
+	GridCol     int
+	GridRow     int
+	GridColSpan int
+	GridRowSpan int
+
 	// Image carries the decoded pixels of a replaced element so paint can draw
 	// it. It is `any` rather than an image type because layout may not depend
 	// on image decoding; the engine sets it to a concrete decoded image after
@@ -66,6 +77,14 @@ type Object struct {
 	// source, if any. Paint nine-slices it against the style's slice/width
 	// repeat; without a decoded image normal borders paint.
 	BorderImage any
+
+	// Media carries a video element's presentation state: the frame to draw
+	// plus the position and condition its controls show. Like Image it is `any`
+	// so layout stays free of the packages that produce it; the engine attaches
+	// it and paint reads it back with a type assertion. It is reattached on
+	// every reflow and refreshed in place between them, because a new frame is
+	// not a layout change.
+	Media any
 
 	// BgVector marks a vector background rasterized at tile size after layout
 	// instead of at decode time (no intrinsic dimensions, or a mapping that
@@ -145,6 +164,11 @@ func (o *Object) BgAreaRect(box style.BgBox) (x0, y0, x1, y1 float32) {
 	return x0, y0, x1, y1
 }
 
+// BorderW returns the width of the border box.
+func (o *Object) BorderW() float32 {
+	return o.W + o.PaddingLeft + o.PaddingRight + o.BorderLeft + o.BorderRight
+}
+
 // BorderH returns the height of the border box. W and H are both content-box
 // dimensions, which is what ContentRect, BorderRect and the explicit-height
 // branch of resolveBoxSizes all assume; this is the one place that spelling is
@@ -212,6 +236,9 @@ type Arena struct {
 	// ViewportW is the width half of the same pair, for vw units inside
 	// deferred calc() values. Zero falls back to the evaluator default.
 	ViewportW float32
+
+	// QuoteDepth tracks the current nested quotation mark depth in document order.
+	QuoteDepth int
 }
 
 // NaturalSize is the intrinsic width and height of a replaced element.
@@ -325,6 +352,16 @@ func countLayoutNodes(root *dom.Node) int {
 	for len(stack) > 0 {
 		top := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+		if top.ShadowRoot != nil {
+			for c := top.ShadowRoot.FirstChild; c != nil; c = c.NextSibling {
+				if c.Element() || c.Type == dom.NodeText {
+					n++
+				}
+				if c.FirstChild != nil {
+					stack = append(stack, c)
+				}
+			}
+		}
 		for c := top.FirstChild; c != nil; c = c.NextSibling {
 			if c.Element() || c.Type == dom.NodeText {
 				n++
@@ -338,6 +375,10 @@ func countLayoutNodes(root *dom.Node) int {
 }
 
 func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
+	return buildSubtreeWithHost(a, n, nil, doc, styles, pseudoStyles, scope)
+}
+
+func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle, scope *style.CounterScope) ObjectID {
 	if n.ID != 0 {
 		if id, ok := a.ForNode(n.ID); ok {
 			return id
@@ -369,11 +410,58 @@ func buildSubtree(a *Arena, n *dom.Node, doc *dom.Document, styles map[dom.NodeI
 		}
 	}
 
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Element() || c.Type == dom.NodeText {
-			kid := buildSubtree(a, c, doc, styles, pseudoStyles, scope)
-			a.Link(id, kid)
+	var childHead *dom.Node
+	currentHost := shadowHost
+	if n.ShadowRoot != nil {
+		childHead = n.ShadowRoot.FirstChild
+		currentHost = n
+	} else {
+		childHead = n.FirstChild
+	}
+
+	for c := childHead; c != nil; c = c.NextSibling {
+		if !c.Element() && c.Type != dom.NodeText {
+			continue
 		}
+		if c.Element() && c.Data == "slot" && currentHost != nil {
+			slotName := c.GetAttribute("name")
+			var assigned []*dom.Node
+			for lc := currentHost.FirstChild; lc != nil; lc = lc.NextSibling {
+				if !lc.Element() && lc.Type != dom.NodeText {
+					continue
+				}
+				if lc.Type == dom.NodeText && strings.TrimSpace(lc.DataContent) == "" {
+					continue
+				}
+				if slotName != "" {
+					if lc.Element() && lc.GetAttribute("slot") == slotName {
+						assigned = append(assigned, lc)
+					}
+				} else {
+					if !lc.Element() || lc.GetAttribute("slot") == "" {
+						assigned = append(assigned, lc)
+					}
+				}
+			}
+			if len(assigned) > 0 {
+				for _, ak := range assigned {
+					kid := buildSubtreeWithHost(a, ak, nil, doc, styles, pseudoStyles, scope)
+					a.Link(id, kid)
+				}
+			} else {
+				// Slot fallback content
+				for sc := c.FirstChild; sc != nil; sc = sc.NextSibling {
+					if sc.Element() || sc.Type == dom.NodeText {
+						kid := buildSubtreeWithHost(a, sc, currentHost, doc, styles, pseudoStyles, scope)
+						a.Link(id, kid)
+					}
+				}
+			}
+			continue
+		}
+
+		kid := buildSubtreeWithHost(a, c, currentHost, doc, styles, pseudoStyles, scope)
+		a.Link(id, kid)
 	}
 
 	// Inject ::after pseudo-element as last child if it has content.
@@ -399,10 +487,32 @@ func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.Computed
 	// Create a synthetic text node with the generated content.
 	text := pseudoStyle.Content
 	if len(pseudoStyle.ContentParts) > 0 {
-		text = style.EvaluateContent(pseudoStyle.ContentParts, scope)
+		text = style.EvaluateContentWithQuotes(pseudoStyle.ContentParts, scope, pseudoStyle.Quotes, &a.QuoteDepth)
 	}
 	textNode := doc.NewText(text)
 	obj.Node = textNode
 
 	return id
+}
+
+// ViewTransitionRect represents the snapshot bounds of a view-transition-named box.
+type ViewTransitionRect struct {
+	Name           string
+	X0, Y0, X1, Y1 float32
+}
+
+// FindViewTransitions returns the bounds of all boxes that declare a non-none view-transition-name.
+func (a *Arena) FindViewTransitions() []ViewTransitionRect {
+	var result []ViewTransitionRect
+	for i := range a.Objects {
+		obj := &a.Objects[i]
+		if obj.Node != nil && obj.Node.Element() && obj.Style != nil && obj.Style.ViewTransitionName != "" && obj.Style.ViewTransitionName != "none" {
+			x0, y0, x1, y1 := obj.BorderRect()
+			result = append(result, ViewTransitionRect{
+				Name: obj.Style.ViewTransitionName,
+				X0:   x0, Y0: y0, X1: x1, Y1: y1,
+			})
+		}
+	}
+	return result
 }

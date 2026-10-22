@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Goosie media journey</title>
+<style>
+  body { font: 14px/1.5 -apple-system, sans-serif; margin: 24px; background: #fff; color: #111; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.note { color: #555; margin: 0 0 20px; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 14px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+  video { background: #000; display: block; }
+  #log { font: 12px/1.4 ui-monospace, Menlo, monospace; background: #f5f5f7; border: 1px solid #ddd;
+         padding: 8px; height: 120px; overflow-y: auto; white-space: pre-wrap; margin: 0; }
+  button { font: inherit; padding: 4px 10px; margin-right: 6px; }
+  .clipped { height: 120px; overflow: hidden; border: 1px dashed #c00; }
+  table { border-collapse: collapse; font: 12px ui-monospace, Menlo, monospace; }
+  td, th { border: 1px solid #ddd; padding: 2px 8px; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Goosie media journey</h1>
+<p class="note">Served over HTTP so the browser's own download pipeline, cookie jar and
+address policy are all in the path. Nothing here uses a <code>file:</code> URL.</p>
+
+<section>
+  <h2>1. Native controls, no script</h2>
+  <p class="note">Play, pause, seek and mute must all work from the painted control bar
+  alone. This element has no JavaScript attached to it at all.</p>
+  <video id="plain" src="clip.mp4" controls width="320" height="180"></video>
+</section>
+
+<section>
+  <h2>2. Scripted controls</h2>
+  <p class="note">The buttons call the media API. <code>play()</code> is called from a real
+  click handler, which is a trusted gesture; a <code>setTimeout</code> calling it must be
+  refused with <code>NotAllowedError</code>, and the log below says which happened.</p>
+  <video id="scripted" src="clip.mp4" width="320" height="180"></video>
+  <p>
+    <button id="play">play()</button>
+    <button id="pause">pause()</button>
+    <button id="seek">currentTime = 1.0</button>
+    <button id="mute">toggle muted</button>
+    <button id="autoplay">play() from a timer (must be refused)</button>
+  </p>
+  <table>
+    <tr><th>readyState</th><td id="rs">-</td><th>paused</th><td id="ps">-</td></tr>
+    <tr><th>currentTime</th><td id="ct">-</td><th>duration</th><td id="du">-</td></tr>
+    <tr><th>videoWidth</th><td id="vw">-</td><th>videoHeight</th><td id="vh">-</td></tr>
+    <tr><th>muted</th><td id="mu">-</td><th>currentSrc</th><td id="cs">-</td></tr>
+  </table>
+  <pre id="log"></pre>
+</section>
+
+<section>
+  <h2>3. Clipped by an ancestor</h2>
+  <p class="note">The dashed box is 120px tall and the video is 180px, so the control bar
+  is cut in half. The controls must stay where the element puts them — they used to be
+  laid out against the clipped rectangle, which made them slide as the page scrolled.</p>
+  <div class="clipped">
+    <video id="clipped" src="clip.mp4" controls width="320" height="180"></video>
+  </div>
+</section>
+
+<section>
+  <h2>4. Unsupported source</h2>
+  <p class="note">This one names a file that does not exist. It must report an error
+  rather than sit there looking like a video that has not started.</p>
+  <video id="broken" src="missing.mp4" controls width="320" height="180"></video>
+</section>
+
+<section>
+  <h2>5. Silent clip, no audio track</h2>
+  <video id="silent" src="silent.mp4" controls width="320" height="180"></video>
+</section>
+
+<script>
+(function () {
+  var v = document.getElementById('scripted');
+  var log = document.getElementById('log');
+  function say(msg) {
+    log.textContent += msg + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+  function refresh() {
+    document.getElementById('rs').textContent = v.readyState;
+    document.getElementById('ps').textContent = v.paused;
+    document.getElementById('ct').textContent = v.currentTime.toFixed(2);
+    document.getElementById('du').textContent = isNaN(v.duration) ? 'NaN' : v.duration.toFixed(2);
+    document.getElementById('vw').textContent = v.videoWidth;
+    document.getElementById('vh').textContent = v.videoHeight;
+    document.getElementById('mu').textContent = v.muted;
+    document.getElementById('cs').textContent = v.currentSrc;
+  }
+  ['loadstart','loadedmetadata','loadeddata','canplay','play','playing','pause',
+   'seeking','seeked','timeupdate','volumechange','ended','emptied','error'].forEach(function (n) {
+    v.addEventListener(n, function () {
+      say(n + (n === 'timeupdate' ? ' @ ' + v.currentTime.toFixed(2) : ''));
+      refresh();
+    });
+  });
+
+  document.getElementById('play').addEventListener('click', function () {
+    var p = v.play();
+    say('play() -> ' + (p && p.then ? 'promise' : typeof p));
+    if (p && p.then) {
+      p.then(function () { say('  resolved: playback started'); refresh(); },
+             function (e) { say('  rejected: ' + e.name); refresh(); });
+    }
+  });
+  document.getElementById('pause').addEventListener('click', function () { v.pause(); say('pause()'); });
+  document.getElementById('seek').addEventListener('click', function () { v.currentTime = 1.0; say('currentTime = 1.0'); });
+  document.getElementById('mute').addEventListener('click', function () {
+    v.muted = !v.muted;
+    say('muted = ' + v.muted);
+  });
+  document.getElementById('autoplay').addEventListener('click', function () {
+    // The click is trusted, but the timer callback that runs later is not: this is
+    // the case a page uses to autoplay, and it has to be refused.
+    setTimeout(function () {
+      var p = v.play();
+      if (p && p.then) {
+        p.then(function () { say('timer play() RESOLVED (should have been refused)'); },
+               function (e) { say('timer play() rejected: ' + e.name + ' (correct)'); });
+      }
+    }, 50);
+  });
+
+  var broken = document.getElementById('broken');
+  broken.addEventListener('error', function () {
+    say('broken: error event, code ' + (broken.error ? broken.error.code : '?'));
+  });
+  refresh();
+})();
+</script>
+</body>
+</html>

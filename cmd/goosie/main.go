@@ -27,6 +27,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,19 +35,27 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/bookmarks"
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/flags"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/internal/manifest"
+	"github.com/vyquocvu/goosie/internal/media"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
+	"github.com/vyquocvu/goosie/internal/pdf"
+	"github.com/vyquocvu/goosie/internal/perms"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
+	"github.com/vyquocvu/goosie/internal/userscript"
+	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
 const (
@@ -54,6 +63,10 @@ const (
 	// same 100px the warm criterion in test/gate walks with, so the two runs
 	// measure the same travel.
 	gateScrollStep = 100
+	// The Darwin shim maps PageUp/PageDown to these private-use runes alongside
+	// the existing arrow, Home, and End mappings.
+	keyPageUp   rune = 0xF706
+	keyPageDown rune = 0xF707
 	// defaultFrames is -frames' default: the gate's 600-frame sweep.
 	defaultFrames = 600
 	// displayPeriod stands in for a 60Hz panel when the backend is paced by a clock
@@ -124,26 +137,33 @@ var errUsage = errors.New("usage")
 
 // config is one parsed invocation.
 type config struct {
-	url          string
-	gate         bool
-	bench        bool
-	screenshot   bool
-	backend      string
-	frames       int
-	scene        string
-	sceneSet     bool
-	out          string
-	width        int
-	height       int
-	dpr          float64
-	downloadDir  string
-	private      bool
-	profile      string
-	clearData    bool
-	sessionFile  string
-	cookieFile   string
-	bookmarkFile string
-	historyFile  string
+	url               string
+	gate              bool
+	bench             bool
+	screenshot        bool
+	printPDF          string
+	backend           string
+	frames            int
+	scene             string
+	sceneSet          bool
+	out               string
+	width             int
+	height            int
+	dpr               float64
+	downloadDir       string
+	private           bool
+	profile           string
+	clearData         bool
+	sessionFile       string
+	sessionActiveFile string
+	cookieFile        string
+	bookmarkFile      string
+	historyFile       string
+	theme             string
+	userscriptDir     string
+	appURL            string
+	flagsFile         string
+	permsFile         string
 }
 
 // stateDir is where this invocation keeps persistent state: the default
@@ -191,6 +211,7 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.gate, "gate", false, "drive -frames scripted scroll frames at real pacing, then report")
 	fs.BoolVar(&c.bench, "bench", false, "run frames as fast as the clock allows, headless, and report the rate")
 	fs.BoolVar(&c.screenshot, "screenshot", false, "render -url to a PNG at -out and exit")
+	fs.StringVar(&c.printPDF, "print-pdf", "", "export document to PDF at path and exit")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
 	fs.IntVar(&c.frames, "frames", defaultFrames, "frames to draw with -gate and -bench")
 	fs.StringVar(&c.scene, "scene", "checkerboard", "synthetic test document: checkerboard or plain")
@@ -208,9 +229,12 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.private, "private", false, "run a private session: cookies are dropped on exit")
 	fs.StringVar(&c.profile, "profile", "", "named profile: state lives under ~/.goosie/profiles/<name> instead of ~/.goosie")
 	fs.StringVar(&c.sessionFile, "session-file", "", "file where the open tabs are saved between runs")
+	fs.StringVar(&c.theme, "theme", "system", "appearance theme: system, light, dark, high-contrast")
+	fs.StringVar(&c.appURL, "app", "", "launch as a standalone web application (PWA mode)")
 	fs.BoolVar(&c.clearData, "clear-data", false, "clear browsing data (cookies, history, session; keeps bookmarks) and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie [-scene checkerboard] [-width 1440] [-height 900] [-dpr 2]")
+		fmt.Fprintln(fs.Output(), "       goosie -app <url>  (launch standalone web application)")
 		fmt.Fprintln(fs.Output(), "       goosie -gate -frames 600 -out gate.json")
 		fs.PrintDefaults()
 	}
@@ -254,12 +278,27 @@ func parse(args []string) (config, error) {
 			return c, fmt.Errorf("%w: -screenshot requires -url", errUsage)
 		}
 	}
+	if c.printPDF != "" {
+		if fs.Lookup("backend").Value.String() == "" {
+			c.backend = platform.Headless
+		}
+		if c.url == "" && len(fs.Args()) > 0 {
+			c.url = fs.Args()[0]
+		}
+	}
+	if c.appURL != "" && c.url == "" {
+		c.url = c.appURL
+	}
 	if c.sessionFile == "" {
 		c.sessionFile = filepath.Join(c.stateDir(), "session.json")
 	}
+	c.sessionActiveFile = filepath.Join(c.stateDir(), "session_active.json")
 	c.cookieFile = filepath.Join(c.stateDir(), "cookies.json")
 	c.bookmarkFile = filepath.Join(c.stateDir(), "bookmarks.json")
 	c.historyFile = filepath.Join(c.stateDir(), "history.json")
+	c.userscriptDir = filepath.Join(c.stateDir(), "userscripts")
+	c.flagsFile = filepath.Join(c.stateDir(), "flags.json")
+	c.permsFile = filepath.Join(c.stateDir(), "permissions.json")
 	return c, nil
 }
 
@@ -301,25 +340,27 @@ func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
 // framePath is the assembled pipeline: everything between a vsync and a Present, with
 // the pieces a report has to name kept reachable.
 type framePath struct {
-	window     surface.Window
-	loop       *surface.Loop
-	sched      *raster.Scheduler
-	pool       *raster.Pool
-	composer   *surface.Composer
-	layer      *frame.Layer
-	rec        *frame.FrameRecorder
-	spec       paint.SceneSpec
-	config     config
-	toolbar    *toolbar.State
-	tabMgr     *tabs.TabManager
-	client     net.HTTP
-	fonts      *raster.Fonts
-	bookmarks  *bookmarks.Store
-	history    *history.Store
-	started    time.Time
-	navResults chan navResult
-	imgResults chan imgResult
-	zoom       float64
+	window        surface.Window
+	loop          *surface.Loop
+	sched         *raster.Scheduler
+	pool          *raster.Pool
+	composer      *surface.Composer
+	layer         *frame.Layer
+	rec           *frame.FrameRecorder
+	spec          paint.SceneSpec
+	config        config
+	toolbar       *toolbar.State
+	tabMgr        *tabs.TabManager
+	client        net.HTTP
+	privateClient net.HTTP
+	fonts         *raster.Fonts
+	bookmarks     *bookmarks.Store
+	history       *history.Store
+	downloads     *download.Manager
+	started       time.Time
+	navResults    chan navResult
+	imgResults    chan imgResult
+	zoom          float64
 	// runCtx roots navigation contexts so shutdown cancels in-flight loads
 	// (they used to hang off context.Background and outlive the window);
 	// navWg joins them before the window closes. closeTab still cancels a
@@ -336,6 +377,19 @@ type framePath struct {
 	findIdx           int
 	selDrag           bool
 	restoredActiveURL string
+	storage           *js.OriginStorageRegistry
+	incognitoStorage  *js.OriginStorageRegistry
+	emulationPreset   *DevicePreset
+	// mediaBackend plays this run's video, and is nil when the window that was
+	// opened has no way to: a headless run, or a platform with no decoder. It
+	// comes from the window rather than from the machine so a headless run on a
+	// Mac does not claim a capability it is not using.
+	mediaBackend   media.Backend
+	theme          string
+	crashedSession *session.State
+	userscripts    *userscript.Manager
+	flags          *flags.Manager
+	perms          *perms.Manager
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -422,21 +476,41 @@ func build(c config) (*framePath, error) {
 	// and the one fact it cannot observe is when the process began.
 	rec.SetStartupReference(processStart)
 	f := &framePath{
-		sched:      raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
-		pool:       wp,
-		composer:   surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
-		layer:      layer,
-		docHeight:  spec.DocHeight,
-		rec:        rec,
-		spec:       spec,
-		config:     c,
-		client:     client,
-		fonts:      fonts,
-		bookmarks:  bookmarkStore,
-		history:    historyStore,
-		navResults: make(chan navResult, 16),
-		imgResults: make(chan imgResult, 16),
-		zoom:       1.0,
+		sched:            raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
+		pool:             wp,
+		composer:         surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
+		layer:            layer,
+		docHeight:        spec.DocHeight,
+		rec:              rec,
+		spec:             spec,
+		config:           c,
+		client:           client,
+		privateClient:    net.DefaultPrivateClient(),
+		fonts:            fonts,
+		bookmarks:        bookmarkStore,
+		history:          historyStore,
+		downloads:        download.NewManager(c.downloadDir),
+		navResults:       make(chan navResult, 16),
+		imgResults:       make(chan imgResult, 16),
+		zoom:             1.0,
+		storage:          js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
+		incognitoStorage: js.NewOriginStorageRegistry("", true),
+		theme:            c.theme,
+		userscripts:      userscript.NewManager(c.userscriptDir),
+		flags:            flags.NewManager(c.flagsFile),
+		perms:            perms.NewManager(c.permsFile),
+	}
+	if f.theme == "" {
+		f.theme = "system"
+	}
+	if !c.paced() && f.userscripts != nil {
+		_ = f.userscripts.Load()
+	}
+	if !c.paced() && f.flags != nil {
+		_ = f.flags.Load()
+	}
+	if !c.paced() && f.perms != nil {
+		_ = f.perms.Load()
 	}
 	if !c.paced() {
 		go f.drainNavResults()
@@ -452,13 +526,32 @@ func build(c config) (*framePath, error) {
 		})
 		f.tabMgr.OnChange = func() {
 			f.syncTabToToolbar()
+			f.saveActiveSession()
 		}
 		firstTab := f.tabMgr.NewTab()
+		if c.appURL != "" {
+			firstTab.SetStandaloneApp(true)
+		}
 		firstTab.SetLayer(layer)
-		firstTab.SetBGColor(frame.RGB(255, 255, 255))
+		if f.isDarkMode() {
+			firstTab.SetBGColor(frame.RGB(24, 24, 24))
+		} else {
+			firstTab.SetBGColor(frame.RGB(255, 255, 255))
+		}
+		if !c.private && !c.paced() && c.sessionActiveFile != "" {
+			if info, err := os.Stat(c.sessionActiveFile); err == nil && !info.IsDir() {
+				if st, err := session.Load(c.sessionActiveFile); err == nil && len(st.Tabs) > 0 {
+					f.crashedSession = &st
+				}
+			}
+		}
 		if c.url != "" {
 			firstTab.SetURL(normalizeURL(c.url))
 			firstTab.SetTitle(firstTab.URL())
+		} else if f.crashedSession != nil {
+			firstTab.SetURL("goosie://restore")
+			firstTab.SetTitle("Restore Session - Goosie")
+			f.restoredActiveURL = "goosie://restore"
 		} else if !c.private {
 			if st, err := session.Load(c.sessionFile); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
@@ -477,6 +570,9 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnReload = func() {
 			f.reloadTab()
 		}
+		f.toolbar.OnStop = func() {
+			f.stopTab()
+		}
 		f.toolbar.OnFindChanged = func(query string) {
 			f.runFind(query)
 		}
@@ -485,6 +581,23 @@ func build(c config) (*framePath, error) {
 		}
 		f.toolbar.OnFindClose = func() {
 			f.closeFind()
+		}
+		f.toolbar.OnDownloads = func() {
+			f.navigateTab("goosie://downloads")
+		}
+		if f.downloads != nil {
+			f.downloads.Subscribe(func(it *download.Item) {
+				if f.toolbar != nil {
+					f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
+					f.publishAccessibility()
+				}
+			})
+		}
+		f.toolbar.OnQuerySuggest = func(query string) []toolbar.Suggestion {
+			return f.querySuggestions(query)
+		}
+		f.toolbar.OnResetZoom = func() {
+			f.handleZoom(0)
 		}
 		if cb := platform.NewClipboard(); cb != nil {
 			f.toolbar.Clipboard = cb
@@ -511,6 +624,188 @@ func (f *framePath) syncTabToToolbar() {
 	loading := tab.Nav.Loading
 	tab.Nav.Mu.Unlock()
 	f.toolbar.SyncFromTab(tab.URL(), loading, tab.Error(), tab.History())
+	f.toolbar.SetIncognito(tab.Incognito())
+	f.publishAccessibility()
+}
+
+// clientForTab returns the ephemeral private client for incognito tabs or the default client.
+func (f *framePath) clientForTab(tab *tabs.Tab) net.HTTP {
+	if tab != nil && tab.Incognito() && f.privateClient != nil {
+		return f.privateClient
+	}
+	return f.client
+}
+
+// newIncognitoTab opens a new private incognito tab.
+func (f *framePath) newIncognitoTab() *tabs.Tab {
+	tab := f.tabMgr.NewIncognitoTab()
+	dev := frame.Size{W: int32(f.config.width), H: int32(f.config.height)}
+	_, layer := blankLayer(dev)
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(40, 44, 52))
+	f.switchTab(tab.ID())
+	return tab
+}
+
+// isDarkMode reports whether dark appearance mode is active.
+func (f *framePath) isDarkMode() bool {
+	if f == nil {
+		return false
+	}
+	switch strings.ToLower(f.theme) {
+	case "dark":
+		return true
+	case "light", "high-contrast":
+		return false
+	default:
+		return false
+	}
+}
+
+// isHighContrast reports whether high contrast appearance mode is active.
+func (f *framePath) isHighContrast() bool {
+	if f == nil {
+		return false
+	}
+	return strings.ToLower(f.theme) == "high-contrast"
+}
+
+// setTheme updates the browser appearance theme.
+func (f *framePath) setTheme(theme string) {
+	if f == nil {
+		return
+	}
+	f.theme = strings.ToLower(strings.TrimSpace(theme))
+	if f.tabMgr != nil {
+		for _, tab := range f.tabMgr.Tabs() {
+			if tab.Incognito() {
+				tab.SetBGColor(frame.RGB(40, 44, 52))
+			} else if f.isDarkMode() {
+				tab.SetBGColor(frame.RGB(24, 24, 24))
+			} else {
+				tab.SetBGColor(frame.RGB(255, 255, 255))
+			}
+			if s := tab.Session(); s != nil {
+				s.SetDarkMode(f.isDarkMode())
+				s.SetHighContrast(f.isHighContrast())
+			}
+		}
+	}
+	if f.client != nil {
+		f.reloadTab()
+	}
+}
+
+// querySuggestions searches bookmarks, visit history, and search engine completions for omnibox query.
+func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return nil
+	}
+	lowerQ := strings.ToLower(q)
+	var out []toolbar.Suggestion
+	seen := make(map[string]bool)
+
+	// 1. Search Google query suggestion
+	searchURL := "https://www.google.com/search?q=" + url.QueryEscape(q)
+	out = append(out, toolbar.Suggestion{
+		Title: "Search Google for " + q,
+		URL:   searchURL,
+		Kind:  toolbar.SuggestSearch,
+	})
+	seen[searchURL] = true
+
+	// Internal system pages (goosie://)
+	internalPages := []struct {
+		Title string
+		URL   string
+	}{
+		{"About Goosie (Version & Diagnostics)", "goosie://version"},
+		{"Bookmarks Manager", "goosie://bookmarks"},
+		{"Browsing History", "goosie://history"},
+		{"Downloads Manager", "goosie://downloads"},
+	}
+	for _, p := range internalPages {
+		pagePath := strings.TrimPrefix(p.URL, "goosie://")
+		matchScheme := strings.HasPrefix(lowerQ, "goosie") || strings.HasPrefix(lowerQ, "about")
+		matchContent := strings.Contains(strings.ToLower(p.Title), lowerQ) || strings.Contains(pagePath, lowerQ)
+		if matchScheme || matchContent {
+			if !seen[p.URL] {
+				seen[p.URL] = true
+				out = append(out, toolbar.Suggestion{
+					Title: p.Title,
+					URL:   p.URL,
+					Kind:  toolbar.SuggestBookmark,
+				})
+				if len(out) >= 8 {
+					return out
+				}
+			}
+		}
+	}
+
+	// 2. Bookmarks matching query
+	if f.bookmarks != nil {
+		for _, bm := range f.bookmarks.List() {
+			if strings.Contains(strings.ToLower(bm.URL), lowerQ) || strings.Contains(strings.ToLower(bm.Title), lowerQ) {
+				if !seen[bm.URL] {
+					seen[bm.URL] = true
+					out = append(out, toolbar.Suggestion{
+						Title: bm.Title,
+						URL:   bm.URL,
+						Kind:  toolbar.SuggestBookmark,
+					})
+					if len(out) >= 8 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	// 3. History visits matching query (newest first)
+	if f.history != nil {
+		entries := f.history.Entries()
+		for i := len(entries) - 1; i >= 0; i-- {
+			h := entries[i]
+			if strings.Contains(strings.ToLower(h.URL), lowerQ) || strings.Contains(strings.ToLower(h.Title), lowerQ) {
+				if !seen[h.URL] {
+					seen[h.URL] = true
+					out = append(out, toolbar.Suggestion{
+						Title: h.Title,
+						URL:   h.URL,
+						Kind:  toolbar.SuggestHistory,
+					})
+					if len(out) >= 8 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	// 3. History visits matching query (newest first)
+	if f.history != nil {
+		entries := f.history.Entries()
+		for i := len(entries) - 1; i >= 0; i-- {
+			h := entries[i]
+			if strings.Contains(strings.ToLower(h.URL), lowerQ) || strings.Contains(strings.ToLower(h.Title), lowerQ) {
+				if !seen[h.URL] {
+					seen[h.URL] = true
+					out = append(out, toolbar.Suggestion{
+						Title: h.Title,
+						URL:   h.URL,
+						Kind:  toolbar.SuggestHistory,
+					})
+					if len(out) >= 6 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	return out
 }
 
 // navContext roots one navigation load: the run scope when it exists so
@@ -536,7 +831,11 @@ func (f *framePath) navigateTab(rawURL string) {
 		tab.Nav.Cancel()
 	}
 	ctx, cancel := context.WithCancel(f.navContext())
+	if !tab.ShieldsEnabled() {
+		ctx = net.WithShieldsDisabled(ctx, true)
+	}
 	tab.Nav.Cancel = cancel
+
 	tab.Nav.Serial++
 	serial := tab.Nav.Serial
 	tab.Nav.Loading = true
@@ -548,11 +847,13 @@ func (f *framePath) navigateTab(rawURL string) {
 		f.toolbar.SetLoading(true)
 		f.toolbar.SetError("")
 	}
+	f.publishAccessibility()
 
 	f.navWg.Add(1)
+	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
@@ -570,6 +871,28 @@ func (f *framePath) navigateTab(rawURL string) {
 	}()
 }
 
+// loadDocumentCtx loads an internal page (goosie://) or a network/file resource.
+func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+	if strings.HasPrefix(strings.ToLower(u), "goosie://") {
+		return f.renderInternalPage(ctx, u, viewportW, viewportH, scale)
+	}
+	if client == nil {
+		client = f.client
+	}
+	storage := f.storage
+	if client == f.privateClient {
+		storage = f.incognitoStorage
+	}
+	tabID := ""
+	if f.tabMgr != nil {
+		if active := f.tabMgr.Active(); active != nil {
+			tabID = strconv.FormatUint(active.ID(), 10)
+		}
+	}
+	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts, f.perms, f.mediaBackend)
+}
+
 // drainNavResults reads navigation results from the channel and applies them.
 func (f *framePath) drainNavResults() {
 	for result := range f.navResults {
@@ -581,12 +904,24 @@ func (f *framePath) drainNavResults() {
 func (f *framePath) applyNavResult(result navResult) {
 	tab := f.tabMgr.TabByID(result.tabID)
 	if tab == nil {
+		// The tab was closed while its load was in flight. The session this result
+		// carries was built for it and nothing else will ever reach it, so it has
+		// to be released here: a session now owns media, and an unreleased one is a
+		// decoder, a temporary file and possibly audio with no tab to stop it from.
+		if result.session != nil {
+			result.session.Close()
+		}
 		return
 	}
 
 	tab.Nav.Mu.Lock()
 	if tab.Nav.Serial != result.serial {
 		tab.Nav.Mu.Unlock()
+		// Superseded by a newer navigation to the same tab: same reasoning as a
+		// vanished tab. The newer load owns its own session.
+		if result.session != nil {
+			result.session.Close()
+		}
 		return
 	}
 	tab.Nav.Loading = false
@@ -598,6 +933,9 @@ func (f *framePath) applyNavResult(result navResult) {
 			f.toolbar.SetLoading(false)
 		}
 		fmt.Fprintf(os.Stderr, "goosie: saved %s\n", result.downloadPath)
+		if f.toolbar != nil && f.downloads != nil {
+			f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
+		}
 		return
 	}
 	if result.err != nil {
@@ -607,6 +945,35 @@ func (f *framePath) applyNavResult(result navResult) {
 			f.toolbar.SetError(result.err.Error())
 		}
 		fmt.Fprintln(os.Stderr, result.err)
+
+		// Build in-viewport error page so the tab is not left blank or showing obsolete content.
+		if !errors.Is(result.err, context.Canceled) {
+			errLayer, errSess, errBG := f.buildErrorPage(result.url, result.err)
+			if errLayer != nil {
+				oldSession := tab.Session()
+				tab.SetLayer(errLayer)
+				tab.SetSession(errSess)
+				tab.SetBGColor(errBG)
+				tab.SetURL(result.url)
+				tab.SetTitle("Problem loading page")
+				if oldSession != nil && oldSession != errSess {
+					oldSession.Close()
+				}
+				if f.tabMgr.Active() == tab {
+					f.syncTabToToolbar()
+					f.sched.SetPlan(frame.FramePlan{
+						Serial:     result.serial,
+						Layers:     []*frame.Layer{errLayer},
+						Background: tab.BGColor(),
+					})
+					f.sched.SetViewport(frame.Viewport{
+						Offset: frame.Point{},
+						Size:   f.config.devSize(),
+					})
+					f.publishAccessibility()
+				}
+			}
+		}
 		return
 	}
 
@@ -615,7 +982,14 @@ func (f *framePath) applyNavResult(result navResult) {
 	tab.SetSession(result.session)
 	tab.SetBGColor(result.bgColor)
 	tab.SetURL(result.url)
-	tab.SetTitle(result.url)
+	tabTitle := result.url
+	if strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
+		title, _ := f.buildInternalPageHTML(result.url)
+		if title != "" {
+			tabTitle = title
+		}
+	}
+	tab.SetTitle(tabTitle)
 	if oldSession != nil && oldSession != result.session {
 		// The replaced document's realm tears down with it.
 		oldSession.Close()
@@ -631,7 +1005,7 @@ func (f *framePath) applyNavResult(result navResult) {
 			tab.History().ReplaceCurrent(result.url)
 		}
 	}
-	if f.history != nil {
+	if !tab.Incognito() && f.history != nil && !strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
 		f.history.Record(result.url, result.url)
 	}
 
@@ -682,7 +1056,28 @@ func (f *framePath) applyNavResult(result navResult) {
 				f.imgResults <- imgResult{tabID: tabID, serial: serial, session: sess}
 			})
 		}
+		if sess.Doc != nil && f.client != nil {
+			if manifestURL := findManifestLink(&sess.Doc.Node, result.url); manifestURL != "" {
+				go func(mURL string, t *tabs.Tab) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					resp, err := f.client.Get(ctx, mURL)
+					if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 400 {
+						return
+					}
+					m, err := manifest.Parse(resp.Body)
+					if err != nil || m == nil {
+						return
+					}
+					t.SetManifest(m)
+					if t.IsStandaloneApp() && m.EffectiveName() != "" {
+						t.SetTitle(m.EffectiveName())
+					}
+				}(manifestURL, tab)
+			}
+		}
 	}
+	f.saveActiveSession()
 }
 
 // drainImageResults reads deferred-image completions and applies them.
@@ -779,11 +1174,13 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	if f.toolbar != nil {
 		f.toolbar.SetLoading(true)
 	}
+	f.publishAccessibility()
 
 	f.navWg.Add(1)
+	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := loadURLCtx(ctx, f.client, f.fonts, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		if finalURL != "" {
 			res.url = finalURL
@@ -806,6 +1203,39 @@ func (f *framePath) reloadTab() {
 		return
 	}
 	f.navigateTabNoHistory(tab.URL())
+}
+
+// stopTab cancels only the active tab's in-flight navigation. Advancing the
+// serial before canceling makes any result already queued by that load stale,
+// so it cannot replace the document that is still displayed.
+func (f *framePath) stopTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
+
+	tab.Nav.Mu.Lock()
+	if !tab.Nav.Loading {
+		tab.Nav.Mu.Unlock()
+		return
+	}
+	cancel := tab.Nav.Cancel
+	tab.Nav.Cancel = nil
+	tab.Nav.Serial++
+	tab.Nav.Loading = false
+	tab.Nav.Mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	tab.SetLoading(false)
+	tab.SetError("")
+	if f.tabMgr.Active() == tab {
+		f.syncTabToToolbar()
+	}
 }
 
 // scrollToAnchor scrolls the active tab's viewport to an element with matching ID.
@@ -871,7 +1301,15 @@ func applyTabState(t *tabs.Tab, ts session.TabState) {
 // sessionState snapshots the open tabs for saving.
 func sessionState(f *framePath) session.State {
 	var st session.State
+	activeTab := f.tabMgr.Active()
+	savedActiveIdx := 0
 	for _, tab := range f.tabMgr.Tabs() {
+		if tab.Incognito() {
+			continue // Incognito tabs are ephemeral and never persisted
+		}
+		if tab == activeTab {
+			savedActiveIdx = len(st.Tabs)
+		}
 		entries, idx := tab.History().Entries()
 		st.Tabs = append(st.Tabs, session.TabState{
 			URL:          tab.URL(),
@@ -880,8 +1318,62 @@ func sessionState(f *framePath) session.State {
 			HistoryIndex: idx,
 		})
 	}
-	st.Active = f.tabMgr.ActiveIndex()
+	st.Active = savedActiveIdx
 	return st
+}
+
+// saveActiveSession persists the current open tab state to sessionActiveFile.
+// This acts as a crash recovery journal: on clean exit the file is deleted. If the
+// process crashes or is killed, the file survives so the session can be
+// recovered on next launch.
+func (f *framePath) saveActiveSession() {
+	if f == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" {
+		return
+	}
+	if f.crashedSession != nil {
+		// Do not overwrite the crashed journal while the restore prompt is active.
+		return
+	}
+	if f.tabMgr == nil {
+		return
+	}
+	st := sessionState(f)
+	if len(st.Tabs) == 0 {
+		return
+	}
+	// Do not persist a state consisting solely of the restore prompt itself
+	if len(st.Tabs) == 1 && strings.HasPrefix(strings.ToLower(st.Tabs[0].URL), "goosie://restore") {
+		return
+	}
+	_ = session.Save(f.config.sessionActiveFile, st)
+}
+
+// restoreCrashedSession restores the tabs from a previous crashed session.
+func (f *framePath) restoreCrashedSession(st session.State) {
+	if len(st.Tabs) == 0 || f.tabMgr == nil {
+		return
+	}
+	tabsList := f.tabMgr.Tabs()
+	// If the active/only tab is the restore page, overwrite it with the first crashed tab.
+	if len(tabsList) == 1 && strings.HasPrefix(strings.ToLower(tabsList[0].URL()), "goosie://restore") {
+		f.applySessionState(st)
+	} else {
+		for _, ts := range st.Tabs {
+			t := f.tabMgr.NewTab()
+			applyTabState(t, ts)
+		}
+		if st.Active >= 0 {
+			all := f.tabMgr.Tabs()
+			idx := len(all) - len(st.Tabs) + st.Active
+			if idx >= 0 && idx < len(all) {
+				f.tabMgr.SwitchTo(all[idx].ID())
+			}
+		}
+	}
+	if active := f.tabMgr.Active(); active != nil && active.URL() != "" && !strings.HasPrefix(strings.ToLower(active.URL()), "goosie://restore") {
+		f.navigateTab(active.URL())
+	}
+	f.saveActiveSession()
 }
 
 // handleResize reflows and repaints the active tab after the window is resized.
@@ -894,7 +1386,12 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		return
 	}
 
-	if err := tab.Session().Reflow(float32(contentW)); err != nil {
+	reflowW := float32(contentW)
+	if f.emulationPreset != nil {
+		reflowW = float32(f.emulationPreset.Width)
+	}
+
+	if err := tab.Session().Reflow(reflowW); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		return
 	}
@@ -991,7 +1488,11 @@ func dirtyOrFull(dirty, extent frame.Rect) frame.Rect {
 // version converges by construction instead.
 func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
+	if f.emulationPreset != nil {
+		effectiveDPR = f.emulationPreset.DPR * float32(f.zoom)
+	}
 	list, err := tab.Session().PaintChecked(effectiveDPR)
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: paint:", err)
 		return
@@ -1013,14 +1514,27 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	}
 
 	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Stats().Budget == budgetBytes {
-		// Reuse: keep the tile cache and pool. Attach first, then stale:
-		// a frame racing between the two paints old pixels that the
-		// invalidation immediately marks for redo, so it converges on the
-		// next frame instead of sticking. Versions stay fixed, so every
-		// completion stamps the layer's own version and nothing is dropped
-		// as stale.
-		lyr.SetContent(dl)
-		lyr.InvalidateRect(dirtyOrFull(dirty, layerBounds))
+		// Reuse: keep the tile cache and pool. How the new content is attached
+		// depends on whether the frame thread is reading this layer.
+		damage := dirtyOrFull(dirty, layerBounds)
+		if f.tabMgr.Active() == tab {
+			// Handed to the scheduler rather than written here, because this runs
+			// on the chrome pump thread and SetContent/InvalidateRect are
+			// frame-thread operations. Writing them directly races BeginFrame's
+			// read of the same fields, and since Invalidate leaves a painting tile
+			// alone, a swap made while one of the damaged tiles is in flight can
+			// leave it showing content nothing displays any more. A repaint driven
+			// by a video frame is that case thirty times a second rather than once
+			// in a while. The scheduler applies the swap on its own thread once no
+			// rasterization is in flight for a tile the damage covers.
+			f.sched.UpdateLayer(lyr, dl, damage)
+		} else {
+			// A background tab's layer is not the one being drawn, so no frame
+			// thread is reading it and attaching directly cannot race. Doing it
+			// here is also what keeps the tab current for when it comes forward.
+			lyr.SetContent(dl)
+			lyr.InvalidateRect(damage)
+		}
 		f.publishAccessibility()
 		return
 	}
@@ -1051,6 +1565,10 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 func (f *framePath) publishAccessibility() {
 	aw, ok := f.window.(surface.AccessibilityWindow)
 	if !ok {
+		return
+	}
+	if f.tabMgr == nil {
+		aw.SetAccessibility(nil)
 		return
 	}
 	tab := f.tabMgr.Active()
@@ -1087,14 +1605,35 @@ func (f *framePath) docPoint(contentX, contentY int32) (float32, float32) {
 		float32(contentY)/effectiveDPR + float32(vp.Offset.Y)/effectiveDPR
 }
 
-// focusClick focuses or blurs a form control under a content-area click and
-// repaints when focus state changed.
+// focusClick focuses or blurs a form control under a content-area click, handles
+// activatable controls (checkbox, radio, submit/reset button), and repaints.
 func (f *framePath) focusClick(contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
 		return false
 	}
 	dx, dy := f.docPoint(contentX, contentY)
+
+	// Check if click hit an activatable control (checkbox, radio, submit button, reset button)
+	// The click is a trusted gesture, and marking it as one around the dispatch is
+	// what lets a page's own click handler start playback: the engine refuses a
+	// play() that arrives from a timer or a synthetic event, and only the host can
+	// tell the difference.
+	tab.Session().SetMediaActivation(true)
+	activated := tab.Session().ClickAt(dx, dy)
+	tab.Session().SetMediaActivation(false)
+	if activated {
+		if sub, ok := tab.Session().PopSubmittedForm(); ok {
+			f.handleFormSubmission(tab, sub)
+			return true
+		}
+		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+		}
+		f.repaintTab(tab, frame.Rect{})
+		return true
+	}
+
 	if !tab.Session().FocusControl(dx, dy) {
 		return false
 	}
@@ -1195,12 +1734,30 @@ func (f *framePath) copySelection() bool {
 // consumed whenever a control is focused so the address bar is not the only
 // text sink; the tab reflows when the value changed and repaints otherwise.
 func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
+	if f.tabMgr == nil {
+		return false
+	}
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
 		return false
 	}
 
 	cmd := mods&surface.ModCommand != 0 || mods&surface.ModControl != 0
+	// A focused video owns the media keys before scrolling and before the page:
+	// space on a playing video is a pause, not a page down. The press is a trusted
+	// gesture, which is what lets the element start playing in response to it.
+	if !cmd && f.mediaKey(tab, key) {
+		return true
+	}
+	if !cmd && !tab.Session().FocusedEditable() {
+		if f.scrollContentKey(tab, key) {
+			return true
+		}
+	} else if !cmd && (key == keyPageUp || key == keyPageDown) {
+		// Page keys must never be treated as printable private-use characters by
+		// an editable control. Textarea-specific paging is not implemented yet.
+		return true
+	}
 
 	// Bare Tab drives the full key-event path (keydown → focus-move → keyup).
 	// It must work with nothing focused so it can start the tab cycle, so this
@@ -1219,10 +1776,55 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	if tab.Session().Focused() == nil {
+		if cmd && (key == 'a' || key == 'A') {
+			if tab.Session().SelectAll() {
+				f.repaintTab(tab, frame.Rect{})
+				return true
+			}
+		}
 		return false
 	}
 
 	if cmd {
+		switch key {
+		case 'v', 'V':
+			if tab.Session().FocusedEditable() {
+				if cb := platform.NewClipboard(); cb != nil {
+					clipText := cb.Read()
+					if clipText != "" {
+						if tab.Session().InsertText(clipText) {
+							if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+								fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+							}
+							f.repaintTab(tab, frame.Rect{})
+							return true
+						}
+					}
+				}
+			}
+		case 'a', 'A':
+			if tab.Session().FocusedEditable() {
+				if tab.Session().SelectAllControl() {
+					f.repaintTab(tab, frame.Rect{})
+					return true
+				}
+			} else {
+				if tab.Session().SelectAll() {
+					f.repaintTab(tab, frame.Rect{})
+					return true
+				}
+			}
+		case 'c', 'C':
+			if tab.Session().FocusedEditable() {
+				txt := tab.Session().FocusedText()
+				if txt != "" {
+					if cb := platform.NewClipboard(); cb != nil {
+						cb.Write(txt)
+						return true
+					}
+				}
+			}
+		}
 		return false
 	}
 
@@ -1253,6 +1855,10 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	changed := tab.Session().Edit(action, key)
+	if sub, ok := tab.Session().PopSubmittedForm(); ok {
+		f.handleFormSubmission(tab, sub)
+		return true
+	}
 	if changed {
 		if action == engine.EditEscape {
 			f.setWindowIME(false)
@@ -1266,7 +1872,223 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	return true
 }
 
+// scrollContentKey handles document navigation keys when an editable control does
+// not own focus. The viewport stores device pixels, so a page step uses its device
+// height and the active layer supplies the legal bottom edge.
+func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune) bool {
+	if f.sched == nil || tab == nil || tab.Layer() == nil {
+		return false
+	}
+	vp := f.sched.Viewport()
+	page := vp.Size.H * 9 / 10
+	if page < 1 {
+		page = 1
+	}
+	switch key {
+	case keyPageUp:
+		return f.scrollContentTo(tab, vp, vp.Offset.Y-page)
+	case keyPageDown:
+		return f.scrollContentTo(tab, vp, vp.Offset.Y+page)
+	case 0xF704: // Home
+		return f.scrollContentTo(tab, vp, 0)
+	case 0xF705: // End
+		return f.scrollContentTo(tab, vp, tab.Layer().Bounds.Y1-vp.Size.H)
+	default:
+		return false
+	}
+}
+
+func (f *framePath) scrollContentTo(tab *tabs.Tab, vp frame.Viewport, y int32) bool {
+	if tab == nil || tab.Layer() == nil || f.sched == nil {
+		return false
+	}
+	maxY := tab.Layer().Bounds.Y1 - vp.Size.H
+	if maxY < 0 {
+		maxY = 0
+	}
+	if y < 0 {
+		y = 0
+	} else if y > maxY {
+		y = maxY
+	}
+	if vp.Offset.Y != y {
+		vp.Offset.Y = y
+		f.sched.SetViewport(vp)
+		tab.SetScrollY(y)
+		f.publishAccessibility()
+	}
+	return true
+}
+
+// handleFormSubmission dispatches a form submission by resolving action and encoding parameters.
+func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmission) {
+	if tab == nil || sub == nil {
+		return
+	}
+	targetURL := resolveHref(tab.URL(), sub.Action)
+	if targetURL == "" {
+		targetURL = tab.URL()
+	}
+	method := strings.ToUpper(sub.Method)
+	if method == "" || method == "GET" {
+		if sub.Encoded != "" {
+			if strings.Contains(targetURL, "?") {
+				targetURL = targetURL + "&" + sub.Encoded
+			} else {
+				targetURL = targetURL + "?" + sub.Encoded
+			}
+		}
+		f.navigateTab(targetURL)
+	} else if method == "POST" {
+		f.navigateTab(targetURL)
+	}
+}
+
+// handleContextMenu constructs the context menu for the clicked element.
+func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
+	cw, ok := f.window.(*chromeWindow)
+	if !ok || cw.contextMenu == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	docX, docY := f.docPoint(contentX, contentY)
+	linkURL := tab.Session().HitTestLink(docX, docY)
+	if linkURL != "" {
+		linkURL = resolveHref(tab.URL(), linkURL)
+	}
+	imageURL := tab.Session().HitTestImage(docX, docY)
+	if imageURL != "" {
+		imageURL = resolveHref(tab.URL(), imageURL)
+	}
+	selText := tab.Session().SelectionText()
+	isEditable := tab.Session().FocusedEditable()
+	focusedText := tab.Session().FocusedText()
+	_, _, canBack := tab.History().PeekBack()
+	_, _, canForward := tab.History().PeekForward()
+
+	items := BuildContextMenuItems(linkURL, imageURL, selText, focusedText, isEditable, canBack, canForward)
+	winW := int32(f.config.width) * cw.sc()
+	winH := int32(f.config.height) * cw.sc()
+	if cw.chromeBitmap != nil {
+		winW = int32(cw.chromeBitmap.W)
+	}
+	if cw.outBitmap != nil {
+		winH = int32(cw.outBitmap.H)
+	}
+	cw.contextMenu.Show(winX, winY, winW, winH, items, cw.sc())
+}
+
+// handleContextMenuAction executes the action chosen from the context menu.
+func (f *framePath) handleContextMenuAction(action, data string) {
+	switch action {
+	case "open_new_tab":
+		f.newTab()
+		if data != "" {
+			f.navigateTab(data)
+		}
+	case "copy_link", "copy_image":
+		if cb := platform.NewClipboard(); cb != nil {
+			cb.Write(data)
+		}
+	case "open_image_tab":
+		f.newTab()
+		if data != "" {
+			f.navigateTab(data)
+		}
+	case "copy":
+		if data != "" {
+			if cb := platform.NewClipboard(); cb != nil {
+				cb.Write(data)
+			}
+		} else {
+			f.copySelection()
+		}
+	case "cut":
+		if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+			txt := tab.Session().FocusedText()
+			if cb := platform.NewClipboard(); cb != nil {
+				cb.Write(txt)
+			}
+			tab.Session().SelectAllControl()
+			tab.Session().InsertText("")
+			f.repaintTab(tab, frame.Rect{})
+		}
+	case "paste":
+		if cb := platform.NewClipboard(); cb != nil {
+			if text := cb.Read(); text != "" {
+				if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+					if tab.Session().InsertText(text) {
+						if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+							fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+						}
+					}
+					f.repaintTab(tab, frame.Rect{})
+				}
+			}
+		}
+	case "select_all":
+		if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+			if tab.Session().FocusedEditable() {
+				tab.Session().SelectAllControl()
+			} else {
+				tab.Session().SelectAll()
+			}
+			f.repaintTab(tab, frame.Rect{})
+		}
+	case "search_google":
+		if data != "" {
+			searchURL := "https://www.google.com/search?q=" + url.QueryEscape(data)
+			f.navigateTab(searchURL)
+		}
+	case "back":
+		f.traverseTab(-1)
+	case "forward":
+		f.traverseTab(1)
+	case "reload":
+		f.reloadTab()
+	case "view_source":
+		f.viewSourceCurrentTab()
+	case "inspect":
+		f.navigateTab("goosie://inspect")
+	case "print_pdf":
+		f.printActiveTabToPDF()
+	}
+}
+
+// viewSourceCurrentTab opens the view-source representation of the current tab in a new tab.
+func (f *framePath) viewSourceCurrentTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	active := f.tabMgr.Active()
+	if active == nil || active.URL() == "" {
+		return
+	}
+	f.newTab()
+	f.navigateTab(viewsource.WrapViewSourceURL(active.URL()))
+}
+
+// printActiveTabToPDF exports the currently active tab document to PDF.
+func (f *framePath) printActiveTabToPDF() {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	outPath := filepath.Join(f.config.downloadDir, "print.pdf")
+	if err := ExportSessionToPDF(tab.Session(), f.fonts, float32(f.config.dpr), outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "goosie: print to PDF error: %v\n", err)
+		return
+	}
+	fmt.Printf("goosie: document printed to PDF at %s\n", outPath)
+}
+
 func (f *framePath) handleZoom(delta float64) {
+	if f.zoom <= 0 {
+		f.zoom = 1.0
+	}
 	if delta == 0 {
 		f.zoom = 1.0
 	} else {
@@ -1276,6 +2098,9 @@ func (f *framePath) handleZoom(delta float64) {
 		} else if f.zoom > 4.0 {
 			f.zoom = 4.0
 		}
+	}
+	if f.toolbar != nil {
+		f.toolbar.SetZoom(f.zoom)
 	}
 	f.handleResize(f.config.width, f.config.height)
 }
@@ -1395,6 +2220,10 @@ func (f *framePath) switchTab(id uint64) {
 	if cur != nil {
 		vp := f.sched.Viewport()
 		cur.SetScrollY(vp.Offset.Y)
+		// The departing tab stops making noise. Nothing resumes it when the user
+		// comes back, which is the same bargain a real browser strikes: a tab that
+		// restarts on its own is a tab that starts playing without being asked.
+		f.pauseMedia(cur)
 	}
 	f.tabMgr.SwitchTo(id)
 	newTab := f.tabMgr.Active()
@@ -1497,11 +2326,112 @@ func (f *framePath) closeTab(id uint64) {
 	}
 }
 
+// reopenTab restores the most recently closed tab and loads its URL.
+func (f *framePath) reopenTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	f.closeFind()
+	cur := f.tabMgr.Active()
+	if cur != nil {
+		vp := f.sched.Viewport()
+		cur.SetScrollY(vp.Offset.Y)
+	}
+	tab, ok := f.tabMgr.ReopenTab()
+	if !ok || tab == nil {
+		return
+	}
+	f.ensureActiveTabVisible()
+	f.syncTabToToolbar()
+	_, layer := blankLayer(f.config.devSize())
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(255, 255, 255))
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     tab.Nav.Serial,
+		Layers:     []*frame.Layer{layer},
+		Background: tab.BGColor(),
+	})
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: tab.ScrollY()},
+		Size:   f.config.devSize(),
+	})
+	f.publishAccessibility()
+	if u := tab.URL(); u != "" {
+		f.navigateTabNoHistory(u)
+	}
+}
+
+// duplicateTab clones the active tab and navigates it to the same page.
+func (f *framePath) duplicateTab() {
+	if f.tabMgr == nil {
+		return
+	}
+	f.closeFind()
+	active := f.tabMgr.Active()
+	if active == nil {
+		return
+	}
+	vp := f.sched.Viewport()
+	active.SetScrollY(vp.Offset.Y)
+
+	tab, ok := f.tabMgr.DuplicateTab(active.ID())
+	if !ok || tab == nil {
+		return
+	}
+	f.ensureActiveTabVisible()
+	f.syncTabToToolbar()
+	_, layer := blankLayer(f.config.devSize())
+	tab.SetLayer(layer)
+	tab.SetBGColor(frame.RGB(255, 255, 255))
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     tab.Nav.Serial,
+		Layers:     []*frame.Layer{layer},
+		Background: tab.BGColor(),
+	})
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: tab.ScrollY()},
+		Size:   f.config.devSize(),
+	})
+	f.publishAccessibility()
+	if u := tab.URL(); u != "" {
+		f.navigateTabNoHistory(u)
+	}
+}
+
+// toggleReaderMode switches the active tab between Reader Mode and original view.
+func (f *framePath) toggleReaderMode() {
+	if f.tabMgr == nil {
+		return
+	}
+	active := f.tabMgr.Active()
+	if active == nil {
+		return
+	}
+	currURL := active.URL()
+	if strings.HasPrefix(strings.ToLower(currURL), "goosie://reader") {
+		if u, err := url.Parse(currURL); err == nil {
+			if orig := u.Query().Get("url"); orig != "" {
+				f.navigateTab(orig)
+				return
+			}
+		}
+		return
+	}
+	if currURL != "" && !strings.HasPrefix(strings.ToLower(currURL), "goosie://") {
+		f.navigateTab("goosie://reader?url=" + url.QueryEscape(currURL))
+	}
+}
+
+type appearanceMode struct {
+	dark         bool
+	highContrast bool
+}
+
 // loadURLCtx is like loadURL but respects context cancellation. With
 // deferImages the session collects image references without fetching them, so
 // the first frame can go out immediately and LoadDeferredImages repaints once
 // they land.
-func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, extra ...any) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
 	}
@@ -1509,15 +2439,129 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
-	resp, err := client.Get(ctx, rawURL)
-	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(rawURL), err)
+	fetchURL := rawURL
+	targetURL, isViewSource := viewsource.IsViewSourceURL(rawURL)
+	if isViewSource {
+		fetchURL = targetURL
 	}
-	if download.ShouldDownload(resp.Headers["Content-Type"], resp.Headers["Content-Disposition"]) {
+	resp, err := client.Get(ctx, fetchURL)
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(fetchURL), err)
+	}
+	var mgr *download.Manager
+	var storageReg *js.OriginStorageRegistry
+	var sessionID string
+	var appMode appearanceMode
+	var userscriptMgr *userscript.Manager
+	var permsMgr *perms.Manager
+	var mediaBackend media.Backend
+	for _, ex := range extra {
+		switch v := ex.(type) {
+		case *download.Manager:
+			mgr = v
+		case *js.OriginStorageRegistry:
+			storageReg = v
+		case string:
+			sessionID = v
+		case appearanceMode:
+			appMode = v
+		case *userscript.Manager:
+			userscriptMgr = v
+		case *perms.Manager:
+			permsMgr = v
+		case media.Backend:
+			mediaBackend = v
+		}
+	}
+
+	if isViewSource {
+		viewHTML := viewsource.RenderHTML(resp.Text(), resp.URL, appMode.dark)
+		sessOpts := []engine.Option{
+			engine.WithMetrics(fonts),
+			engine.WithViewportH(float32(viewportH)),
+			engine.WithDarkMode(appMode.dark),
+			engine.WithHighContrast(appMode.highContrast),
+		}
+		sess, err := engine.NewSession(viewHTML, nil, float32(viewportW), sessOpts...)
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build view-source session: %w", err)
+		}
+		list, err := sess.PaintChecked(scale)
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint view-source document: %w", err)
+		}
+		dl := list.Build(1)
+		extent := dl.Extent()
+		budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size view-source tile cache: %w", err)
+		}
+		pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+		layer := frame.NewLayer(1, extent, budgetBytes, pool)
+		layer.SetContent(dl)
+		return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, viewsource.WrapViewSourceURL(resp.URL), nil
+	}
+
+	contentType := resp.Headers["Content-Type"]
+	contentDisposition := resp.Headers["Content-Disposition"]
+	isAttachment := strings.Contains(strings.ToLower(contentDisposition), "attachment")
+
+	if !isAttachment && pdf.IsPDF(resp.Body, contentType, resp.URL) {
+		fallbackTitle := download.FileName(contentDisposition, resp.URL)
+		pdfDoc, pdfErr := pdf.Parse(resp.Body, fallbackTitle)
+		if pdfErr == nil && pdfDoc != nil {
+			pdfHTML := pdf.RenderHTML(pdfDoc, resp.URL)
+			rt, _ := js.New(js.Options{
+				URL:          resp.URL,
+				DarkMode:     appMode.dark,
+				HighContrast: appMode.highContrast,
+			})
+			sessOpts := []engine.Option{
+				engine.WithMetrics(fonts),
+				engine.WithViewportH(float32(viewportH)),
+				engine.WithDarkMode(appMode.dark),
+				engine.WithHighContrast(appMode.highContrast),
+			}
+			if rt != nil {
+				sessOpts = append(sessOpts, engine.WithJS(rt))
+			}
+			sess, err := engine.NewSession(pdfHTML, nil, float32(viewportW), sessOpts...)
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build pdf session: %w", err)
+			}
+			list, err := sess.PaintChecked(scale)
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint pdf document: %w", err)
+			}
+			dl := list.Build(1)
+			extent := dl.Extent()
+			budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size pdf tile cache: %w", err)
+			}
+			pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+			layer := frame.NewLayer(1, extent, budgetBytes, pool)
+			layer.SetContent(dl)
+			return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
+		}
+	}
+
+	if download.ShouldDownload(contentType, contentDisposition) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
+		var itemID string
+		if mgr != nil {
+			it := mgr.CreateItem(resp.URL, name, int64(len(resp.Body)))
+			itemID = it.ID
+		}
 		savedPath, saveErr := download.Save(downloadDir, name, resp.Body)
 		if saveErr != nil {
+			if mgr != nil && itemID != "" {
+				mgr.Fail(itemID, saveErr)
+			}
 			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", saveErr
+		}
+		if mgr != nil && itemID != "" {
+			mgr.Complete(itemID, savedPath)
 		}
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
 	}
@@ -1548,7 +2592,15 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// deadline-child shape. The engine resolves srcs before calling.
 	scriptCtx, scriptCancel := context.WithTimeout(ctx, engine.ScriptFetchBudget)
 	defer scriptCancel()
+	origin := perms.NormalizeOrigin(resp.URL)
+	jsAllowed := permsMgr == nil || permsMgr.IsAllowed(origin, perms.PermissionJavaScript)
+	imgAllowed := permsMgr == nil || permsMgr.IsAllowed(origin, perms.PermissionImages)
+	cookiesAllowed := permsMgr == nil || permsMgr.IsAllowed(origin, perms.PermissionCookies)
+
 	scriptFetcher := func(base, url string) ([]byte, error) {
+		if !jsAllowed {
+			return nil, fmt.Errorf("goosie: scripts blocked by site permissions")
+		}
 		resp, err := client.Get(subresourceCtx(scriptCtx, base), url)
 		if err != nil {
 			return nil, err
@@ -1577,6 +2629,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// Image subresources use the same client and cancellation. The engine hands
 	// absolute http(s) URLs only, so the fetcher just reads the response bytes.
 	imageFetcher := func(base, url string) ([]byte, error) {
+		if !imgAllowed {
+			return nil, fmt.Errorf("goosie: image loading blocked by site permissions")
+		}
 		resp, err := client.Get(subresourceCtx(imgCtx, base), url)
 		if err != nil {
 			return nil, err
@@ -1602,10 +2657,26 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	// scripting rather than failing the load. The session owns it
 	// afterwards and closes it with itself (see applyNavResult/closeTab), so
 	// every error return below must close what it created.
-	rt, rtErr := js.New(js.Options{URL: resp.URL, HTTPClient: jsFetch})
-	if rtErr != nil {
-		fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
-		rt = nil
+	var cookieStore js.CookieStore
+	if client != nil && cookiesAllowed {
+		cookieStore = client.Jar()
+	}
+	var rt *js.Runtime
+	if jsAllowed {
+		var rtErr error
+		rt, rtErr = js.New(js.Options{
+			URL:          resp.URL,
+			HTTPClient:   jsFetch,
+			Cookies:      cookieStore,
+			Storage:      storageReg,
+			SessionID:    sessionID,
+			DarkMode:     appMode.dark,
+			HighContrast: appMode.highContrast,
+		})
+		if rtErr != nil {
+			fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
+			rt = nil
+		}
 	}
 	completed := false
 	defer func() {
@@ -1613,18 +2684,33 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			_ = rt.Close()
 		}
 	}()
-	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW),
+	sessOpts := []engine.Option{
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
 		engine.WithScripts(resp.URL, scriptFetcher),
 		engine.WithJS(rt),
+		engine.WithDarkMode(appMode.dark),
+		engine.WithHighContrast(appMode.highContrast),
 		// Every load gets a fresh invalidation batch: JS-driven DOM
 		// mutations record here so the vsync pump reflows exactly the
 		// documents that changed.
 		engine.WithInvalidation(&engine.Invalidation{}),
 		imageOption(deferImages, resp.URL, imageFetcher),
-		fontOption(deferFonts, resp.URL, fontFetcher, fonts))
+		fontOption(deferFonts, resp.URL, fontFetcher, fonts),
+	}
+	if userscriptMgr != nil && jsAllowed {
+		start := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentStart)
+		end := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentEnd)
+		matched := append(start, end...)
+		if len(matched) > 0 {
+			sessOpts = append(sessOpts, engine.WithUserScripts(matched))
+		}
+	}
+	if opt := mediaOption(mediaBackend, client, resp.URL); opt != nil {
+		sessOpts = append(sessOpts, opt)
+	}
+	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW), sessOpts...)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -1635,6 +2721,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	dl := list.Build(1)
 	extent := dl.Extent()
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size document cache: %w", err)
+	}
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
@@ -1715,8 +2804,8 @@ func (t jsTransport) Fetch(url, method string, headers map[string]string, body [
 // 169.254.169.254 is refused even though the URL itself looked public.
 //
 // A local initiator (127.0.0.1, a development server, a file:// document) gets
-// ctx back untouched. That is the same distinction resolveSheetURL makes about
-// names, and guarding it would refuse a page its own stylesheet.
+// ctx back untouched. That is the same distinction resolveSubresourceURL makes
+// about names, and guarding it would refuse a page its own stylesheet.
 func subresourceCtx(ctx context.Context, base string) context.Context {
 	if engine.InitiatorIsLocal(base) {
 		return ctx
@@ -1724,14 +2813,57 @@ func subresourceCtx(ctx context.Context, base string) context.Context {
 	return net.WithAddressGuard(ctx, net.AddressGuard{Blocked: engine.AddressBlocked})
 }
 
-// normalizeURL adds https:// to bare domains so the fetcher has a scheme to dial.
+// normalizeURL normalizes address bar input into either a dialable URL or a search query.
+// It trims surrounding whitespace, normalizes supported schemes (http, https, file),
+// treats queries with whitespace or search/punctuation symbols as Google search queries,
+// and prefixes bare domains or IPs with https://.
 func normalizeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
 	}
-	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "file://") {
-		return raw
+	if target, isVS := viewsource.IsViewSourceURL(raw); isVS {
+		return viewsource.WrapViewSourceURL(normalizeURL(target))
 	}
+	// Case-insensitive scheme check for http, https, and file.
+	lower := strings.ToLower(raw)
+	for _, scheme := range []string{"https://", "http://", "file://"} {
+		if strings.HasPrefix(lower, scheme) {
+			return scheme + raw[len(scheme):]
+		}
+	}
+	if strings.HasPrefix(lower, "goosie://") {
+		// Lowercase only the page name (host); the query carries case-sensitive
+		// action parameters (URLs, titles, file paths) and must survive intact.
+		rest := raw[len("goosie://"):]
+		host := rest
+		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+			host = rest[:i]
+		}
+		return "goosie://" + strings.ToLower(host) + rest[len(host):]
+	}
+	if strings.HasPrefix(lower, "about:") {
+		target := strings.TrimPrefix(lower, "about:")
+		if target == "" {
+			target = "version"
+		}
+		return "goosie://" + target
+	}
+	// If input contains whitespace (space, tab, newline), it is a search query.
+	if strings.ContainsAny(raw, " \t\r\n") {
+		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
+	}
+	// If host portion (before any '/') contains symbols invalid in a domain name
+	// (such as '?', '+', '&', '=', '%', '!', '^', '*', '(', ')', '<', '>', ';'),
+	// treat it as a search query.
+	hostPart := raw
+	if slash := strings.IndexByte(raw, '/'); slash >= 0 {
+		hostPart = raw[:slash]
+	}
+	if strings.ContainsAny(hostPart, "?+&=%!^*()<>;\"'") {
+		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
+	}
+	// Bare domain, IP, or localhost: add https:// prefix
 	return "https://" + raw
 }
 
@@ -1773,11 +2905,16 @@ func (f *framePath) openWindow() error {
 	if err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}
+	// Asked of the window rather than of the platform: a headless run on a Mac
+	// would otherwise be told the machine can play video, and every <video> in it
+	// would report a position no frame ever followed.
+	f.mediaBackend = platform.MediaBackend(w)
 	if f.toolbar != nil && f.tabMgr != nil {
 		f.window = newChromeWindow(w, f.toolbar, f.tabMgr,
 			func(id uint64) { f.switchTab(id) },
 			func() { f.newTab() },
 			func(id uint64) { f.closeTab(id) },
+			func() { f.reopenTab() },
 			f.handleResize,
 			f.handleZoom,
 			f.handleLinkClick,
@@ -1799,12 +2936,45 @@ func (f *framePath) openWindow() error {
 		// thread touches sessions; shutdown needs no join (the pump dies with
 		// the window's event stream).
 		if cw, ok := f.window.(*chromeWindow); ok {
-			cw.tickInterval = f.config.vsyncPeriod()
-			cw.onTick = f.pumpJS
+			cw.setTick(f.config.vsyncPeriod(), f.pumpChrome)
+			cw.onMediaControl = f.handleMediaControl
+			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
+			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
+			cw.onViewSource = f.viewSourceCurrentTab
+			cw.onDuplicateTab = func() { f.duplicateTab() }
+			cw.onReaderMode = func() { f.toggleReaderMode() }
+			cw.bookmarks = f.bookmarks
+			cw.onContextMenu = f.handleContextMenu
+			cw.onContextMenuAction = f.handleContextMenuAction
+			cw.onPrintPDF = f.printActiveTabToPDF
+			cw.onDeviceEmulation = func() { f.cycleDeviceEmulation() }
+			cw.onAccessibilityChanged = f.publishAccessibility
+			cw.onAccessibilitySetValue = func(contentX, contentY int32, value string) bool {
+				tab := f.tabMgr.Active()
+				if tab == nil || tab.Session() == nil {
+					return false
+				}
+				sx, sy := f.docPoint(contentX, contentY)
+				focusChanged := tab.Session().FocusControl(sx, sy)
+				if !tab.Session().FocusedEditable() {
+					return false
+				}
+				f.setWindowIME(true)
+				valueChanged := tab.Session().SetFocusedText(value)
+				if focusChanged || valueChanged {
+					if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+						fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+					}
+				}
+				f.repaintTab(tab, frame.Rect{})
+				return true
+			}
 		}
+
 	} else {
 		f.window = w
 	}
+	f.publishAccessibility()
 	f.loop = surface.NewLoop(f.window, f.sched, f.composer, f.rec)
 	return nil
 }
@@ -1830,7 +3000,7 @@ func main() {
 // far so a half-clear is visible, not silent.
 func (c config) clearBrowsingData() ([]string, error) {
 	var removed []string
-	for _, path := range []string{c.cookieFile, c.historyFile, c.sessionFile} {
+	for _, path := range []string{c.cookieFile, c.historyFile, c.sessionFile, c.sessionActiveFile} {
 		if path == "" {
 			continue
 		}
@@ -1856,6 +3026,27 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "goosie: cleared %d file(s)\n", len(removed))
+		return nil
+	}
+	if c.printPDF != "" {
+		if c.url == "" {
+			return fmt.Errorf("%w: -print-pdf requires a URL", errUsage)
+		}
+		fonts, err := raster.NewFonts()
+		if err != nil {
+			return fmt.Errorf("goosie: fonts: %w", err)
+		}
+		client := net.DefaultClient()
+		defer client.Close()
+		_, _, _, sess, _, err := loadURLCtx(context.Background(), client, fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
+		if err != nil {
+			return fmt.Errorf("goosie: load URL: %w", err)
+		}
+		defer sess.Close()
+		if err := ExportSessionToPDF(sess, fonts, float32(c.dpr), c.printPDF); err != nil {
+			return fmt.Errorf("goosie: export PDF: %w", err)
+		}
+		fmt.Printf("goosie: exported %s to %s\n", c.url, c.printPDF)
 		return nil
 	}
 	f, err := build(c)
@@ -1980,7 +3171,17 @@ func run(args []string) error {
 		// join proves no loader still touches the scheduler or tabs.
 		f.runCancel()
 		f.navWg.Wait()
+		// Every document goes before the window does. Stopping a video means
+		// stopping audio on the process main thread, and the window closing is what
+		// stops the loop that services that thread — so after this point there is
+		// nothing left that could answer. Doing it here is also what makes "the app
+		// quit" mean "the video stopped", rather than relying on process exit to
+		// take the audio device with it.
+		f.closeAllSessions()
 		_ = f.window.Close()
+		if f.privateClient != nil {
+			_ = f.privateClient.Close()
+		}
 	}()
 
 	if r, ok := f.window.(platform.Runner); ok {
@@ -1998,6 +3199,14 @@ func run(args []string) error {
 				fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)
 			}
 		}
+		if f.flags != nil {
+			if err := f.flags.Save(); err != nil {
+				fmt.Fprintf(os.Stderr, "goosie: save flags: %v\n", err)
+			}
+		}
+		if c.sessionActiveFile != "" {
+			_ = os.Remove(c.sessionActiveFile)
+		}
 	}
 	if err := <-loopErr; err != nil {
 		return fmt.Errorf("goosie: %w", err)
@@ -2006,4 +3215,53 @@ func run(args []string) error {
 		return nil
 	}
 	return f.report(d)
+}
+
+// findManifestLink searches the DOM tree for a <link rel="manifest" href="..."> tag and resolves its URL.
+func findManifestLink(root *dom.Node, baseURL string) string {
+	if root == nil {
+		return ""
+	}
+	var href string
+	var walk func(*dom.Node)
+	walk = func(n *dom.Node) {
+		if href != "" || n == nil {
+			return
+		}
+		if strings.EqualFold(n.Data, "link") {
+			isManifest := false
+			linkHref := ""
+			for _, attr := range n.Attr {
+				if strings.EqualFold(attr.Name, "rel") {
+					for _, val := range strings.Fields(attr.Value) {
+						if strings.EqualFold(val, "manifest") {
+							isManifest = true
+						}
+					}
+				} else if strings.EqualFold(attr.Name, "href") {
+					linkHref = strings.TrimSpace(attr.Value)
+				}
+			}
+			if isManifest && linkHref != "" {
+				href = linkHref
+				return
+			}
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	if href == "" {
+		return ""
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return href
+	}
+	ref, err := url.Parse(href)
+	if err != nil {
+		return href
+	}
+	return base.ResolveReference(ref).String()
 }

@@ -29,6 +29,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/QuartzCore.h>
+#include <stdint.h>
 #include <stdatomic.h>
 #import <pthread.h>
 #import <stdlib.h>
@@ -63,13 +64,12 @@ static const double kGoosieIdlePoll = 0.02;
 // accessibility
 // ---------------------------------------------------------------------------
 
-// The published tree is the one AppKit object graph the frame path hands over: a
-// GoosieAxElement per node, built from a snapshot when Go pushes one and swapped
-// out whole on the next publish. Strings are copied into NSStrings at build time
-// and the flat C snapshot freed right after, so nothing here points at Go memory.
-// Like the window itself, everything built here lives until the swap that replaces
-// it - an assistive client may still be holding an element when the next publish
-// lands, and per-node lifetimes would turn every query into a race.
+// The published tree is the one AppKit object graph the frame path hands over.
+// Nodes with stable identifiers are reused and updated on later publishes, which
+// lets assistive clients keep referencing persistent controls such as the address
+// field while their value or focus changes. Anonymous nodes are rebuilt. Strings
+// are copied into NSStrings and the flat C snapshot freed after each publish, so
+// nothing here points at Go memory.
 
 static char *goosieAxCopy(const char *s) { return s ? strdup(s) : NULL; }
 
@@ -82,6 +82,7 @@ typedef struct GoosieAxSnapshot {
 static void GoosieAxSnapshotFree(GoosieAxSnapshot *snap) {
 	if (!snap) return;
 	for (int i = 0; i < snap->n; i++) {
+		free((void *)snap->nodes[i].identifier);
 		free((void *)snap->nodes[i].label);
 		free((void *)snap->nodes[i].value);
 		free((void *)snap->nodes[i].href);
@@ -102,6 +103,11 @@ static NSString *axRoleName(int role) {
 		case GOOSIE_AX_BUTTON: return NSAccessibilityButtonRole;
 		case GOOSIE_AX_IMAGE: return NSAccessibilityImageRole;
 		case GOOSIE_AX_TEXT_FIELD: return NSAccessibilityTextFieldRole;
+		case GOOSIE_AX_SEARCH: return NSAccessibilityGroupRole;
+		case GOOSIE_AX_PROGRESS: return NSAccessibilityProgressIndicatorRole;
+		case GOOSIE_AX_METER: return NSAccessibilityLevelIndicatorRole;
+		case GOOSIE_AX_TAB_GROUP: return NSAccessibilityTabGroupRole;
+		case GOOSIE_AX_TAB: return NSAccessibilityRadioButtonRole;
 		default: return NSAccessibilityUnknownRole;
 	}
 }
@@ -111,18 +117,37 @@ static NSString *axRoleName(int role) {
 // every query, so a window that has moved or changed displays reports the frame it
 // is on now rather than the one it was built on - the reason this is a subclass
 // rather than the frame-at-creation element AppKit's constructor hands out.
+@class GoosieContentView;
+
 @interface GoosieAxElement : NSAccessibilityElement
 - (instancetype)initWithRole:(int)role
+	              identifier:(NSString *)identifier
+	                   flags:(int)flags
                       label:(NSString *)label
                       value:(NSString *)value
                        href:(NSString *)href
                       frame:(NSRect)frameInView
                        view:(NSView *)view
                     children:(NSArray *)children;
+- (void)updateWithRole:(int)role
+	            flags:(int)flags
+	            label:(NSString *)label
+	            value:(NSString *)value
+	             href:(NSString *)href
+	            frame:(NSRect)frameInView
+	             view:(NSView *)view
+	         children:(NSArray *)children;
+- (BOOL)accessibilityPerformPress;
+- (void)setAccessibilityValue:(id)value;
 @end
+
+static void goosieAXPress(GoosieContentView *view, NSRect rect);
+static void goosieAXSetValue(GoosieContentView *view, NSRect rect, id value, BOOL addressField);
 
 @implementation GoosieAxElement {
 	int _role;
+	int _flags;
+	NSString *_identifier;
 	NSString *_label;
 	NSString *_value;
 	NSString *_href;
@@ -135,6 +160,8 @@ static NSString *axRoleName(int role) {
 }
 
 - (instancetype)initWithRole:(int)role
+	              identifier:(NSString *)identifier
+	                   flags:(int)flags
                       label:(NSString *)label
                       value:(NSString *)value
                        href:(NSString *)href
@@ -142,18 +169,37 @@ static NSString *axRoleName(int role) {
                        view:(NSView *)view
                     children:(NSArray *)children {
 	if ((self = [super init])) {
-		_role = role;
-		_label = [label copy];
-		_value = [value copy];
-		_href = [href copy];
-		_frame = frameInView;
-		_view = view;
-		_children = [children copy];
+		_identifier = [identifier copy];
+		[self updateWithRole:role flags:flags label:label value:value href:href
+		              frame:frameInView view:view children:children];
 	}
 	return self;
 }
 
+- (void)updateWithRole:(int)role
+	            flags:(int)flags
+	            label:(NSString *)label
+	            value:(NSString *)value
+	             href:(NSString *)href
+	            frame:(NSRect)frameInView
+	             view:(NSView *)view
+	         children:(NSArray *)children {
+	_role = role;
+	_flags = flags;
+	[_label release];
+	_label = [label copy];
+	[_value release];
+	_value = [value copy];
+	[_href release];
+	_href = [href copy];
+	_frame = frameInView;
+	_view = view;
+	[_children release];
+	_children = [children copy];
+}
+
 - (void)dealloc {
+	[_identifier release];
 	[_label release];
 	[_value release];
 	[_href release];
@@ -177,14 +223,64 @@ static NSString *axRoleName(int role) {
 
 - (NSAccessibilityRole)accessibilityRole { return axRoleName(_role); }
 
+- (NSString *)accessibilityIdentifier { return _identifier; }
+
 - (NSString *)accessibilityLabel { return _label; }
 
-- (NSString *)accessibilityValue {
+- (id)accessibilityValue {
+	if (_role == GOOSIE_AX_TAB) return @((_flags & GOOSIE_AX_SELECTED) != 0);
+	// Keep an empty text field's AXValue present. AppKit otherwise treats a blank
+	// omnibox as having no value attribute, so assistive clients cannot set it.
+	if (_role == GOOSIE_AX_TEXT_FIELD) return _value ?: @"";
 	return _value.length > 0 ? _value : [super accessibilityValue];
 }
 
 - (NSURL *)accessibilityURL {
 	return _href.length > 0 ? [NSURL URLWithString:_href] : nil;
+}
+
+- (BOOL)isAccessibilitySelected { return (_flags & GOOSIE_AX_SELECTED) != 0; }
+
+- (BOOL)isAccessibilityEnabled { return (_flags & GOOSIE_AX_DISABLED) == 0; }
+
+- (BOOL)isAccessibilityValueSettable { return _role == GOOSIE_AX_TEXT_FIELD; }
+
+- (BOOL)accessibilityIsAttributeSettable:(NSAccessibilityAttributeName)attribute {
+	if ([attribute isEqualToString:NSAccessibilityValueAttribute]) {
+		return _role == GOOSIE_AX_TEXT_FIELD;
+	}
+	return [super accessibilityIsAttributeSettable:attribute];
+}
+
+- (void)accessibilitySetValue:(id)value forAttribute:(NSAccessibilityAttributeName)attribute {
+	if ([attribute isEqualToString:NSAccessibilityValueAttribute]) {
+		[self setAccessibilityValue:value];
+		return;
+	}
+	[super accessibilitySetValue:value forAttribute:attribute];
+}
+
+- (BOOL)accessibilityPerformPress {
+	if ((_flags & GOOSIE_AX_DISABLED) != 0) return NO;
+	switch (_role) {
+		case GOOSIE_AX_BUTTON:
+		case GOOSIE_AX_LINK:
+		case GOOSIE_AX_TEXT_FIELD:
+		case GOOSIE_AX_TAB:
+			goosieAXPress((GoosieContentView *)_view, _frame);
+			return YES;
+		default:
+			return NO;
+	}
+}
+
+- (BOOL)isAccessibilityFocused { return (_flags & GOOSIE_AX_FOCUSED) != 0; }
+
+- (void)setAccessibilityValue:(id)value {
+	if (_role == GOOSIE_AX_TEXT_FIELD) {
+		goosieAXSetValue((GoosieContentView *)_view, _frame, value,
+		    (_flags & GOOSIE_AX_ADDRESS_BAR) != 0);
+	}
 }
 
 - (BOOL)isAccessibilityElement { return YES; }
@@ -226,6 +322,8 @@ struct GoosieWindow {
 	CVDisplayLinkRef link;
 
 	pthread_mutex_t mu;
+	// Serialize presentation and protect each slot's complete-frame version.
+	pthread_mutex_t presentMu;
 	pthread_cond_t cv;
 	GoosieEvent queue[kGoosieEventQueue];
 	int head;
@@ -240,8 +338,18 @@ struct GoosieWindow {
 	int sw[kGoosieSurfaceSlots];
 	int sh[kGoosieSurfaceSlots];
 	int ss[kGoosieSurfaceSlots];
+	uint64_t surfVersion[kGoosieSurfaceSlots];
+	// pendingDamage is the bounding rect of all committed pixel changes since a
+	// slot's surfVersion. It lets a retired ring slot catch up with changed pixels
+	// only; a dropped present still invalidates every slot and forces a full upload.
+	int pendingDamage[kGoosieSurfaceSlots][4];
+	int pendingDamageValid[kGoosieSurfaceSlots];
 	size_t cap[kGoosieSurfaceSlots];
 	int busy[kGoosieSurfaceSlots];
+	uint64_t contentVersion;
+	int lastW;
+	int lastH;
+	int lastStride;
 	// need_full says the next successful present has to upload the whole surface rather
 	// than its own damage list, because what a slot holds no longer matches what the
 	// frame path composed. It starts set - a freshly malloc'd surface is garbage - and is
@@ -393,6 +501,55 @@ static int deviceHeight(GoosieContentView *v) {
 	return (int)(v.bounds.size.height * viewScale(v) + 0.5);
 }
 
+// goosieAXPress sends an AXPress through the same pointer queue the window's
+// mouse handler uses. Coordinates are in the flipped content view and converted
+// to device pixels here, so toolbar and document hit testing share one path.
+static void goosieAXPress(GoosieContentView *view, NSRect rect) {
+	GoosieWindow *gw = (GoosieWindow *)[view goosieOwner];
+	if (!gw || NSIsEmptyRect(rect)) return;
+	double scale = viewScale(view);
+	NSPoint center = NSMakePoint(NSMidX(rect), NSMidY(rect));
+	GoosieEvent ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.kind = GOOSIE_EV_POINTER;
+	ev.px = (int)(center.x * scale + 0.5);
+	ev.py = (int)(center.y * scale + 0.5);
+	ev.button = 1;
+	ev.scale = scale;
+	ev.at_ns = nowNs();
+	ev.action = GOOSIE_POINTER_PRESS;
+	push(gw, ev);
+	ev.action = GOOSIE_POINTER_RELEASE;
+	ev.at_ns = nowNs();
+	push(gw, ev);
+}
+
+// goosieAXSetValue transports a text-field AXValue write to the Go input pump.
+// A bounded payload keeps the native event ring fixed-size and never retains a
+// pointer owned by AppKit or an accessibility client.
+static void goosieAXSetValue(GoosieContentView *view, NSRect rect, id value, BOOL addressField) {
+	GoosieWindow *gw = (GoosieWindow *)[view goosieOwner];
+	if (!gw || NSIsEmptyRect(rect)) return;
+	if ([value isKindOfClass:[NSAttributedString class]]) value = [value string];
+	if (![value isKindOfClass:[NSString class]]) return;
+	const char *utf8 = [(NSString *)value UTF8String];
+	size_t n = strlen(utf8);
+	if (n >= GOOSIE_EVENT_TEXT_MAX) return;
+	double scale = viewScale(view);
+	NSPoint center = NSMakePoint(NSMidX(rect), NSMidY(rect));
+	GoosieEvent ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.kind = GOOSIE_EV_AX_SET_VALUE;
+	ev.ax_target = addressField ? GOOSIE_AX_TARGET_ADDRESS : GOOSIE_AX_TARGET_CONTENT;
+	ev.px = (int)(center.x * scale + 0.5);
+	ev.py = (int)(center.y * scale + 0.5);
+	ev.scale = scale;
+	ev.at_ns = nowNs();
+	memcpy(ev.text, utf8, n);
+	ev.text[n] = 0;
+	push(gw, ev);
+}
+
 static void sendResize(GoosieContentView *v) {
 	GoosieWindow *gw = (GoosieWindow *)[v goosieOwner];
 	if (!gw) return;
@@ -409,7 +566,7 @@ static void sendResize(GoosieContentView *v) {
 	push(gw, ev);
 }
 
-// pushIME queues one composition event. The text rides a fixed 256-byte buffer,
+// pushIME queues one composition event. The text rides a fixed buffer,
 // so a longer composition is cut at a UTF-8 boundary rather than handed to Go as
 // a partial rune.
 static void pushIME(GoosieWindow *gw, int action, NSString *text) {
@@ -441,6 +598,9 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 	BOOL _imeMarked;
 	// _axElements is the tree the accessibility snapshot built, or nil for none.
 	NSArray *_axElements;
+	// Stable identifiers keep assistive clients' element references valid across
+	// value, focus, and layout updates that republish the same logical controls.
+	NSMutableDictionary *_axElementsByIdentifier;
 }
 
 // isFlipped puts the view's y axis top-down like the frame path's, so an event's
@@ -558,6 +718,8 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 		case 124: ev.key = GOOSIE_KEY_RIGHT; push(gw, ev); return;
 		case 115: ev.key = GOOSIE_KEY_HOME; push(gw, ev); return;
 		case 119: ev.key = GOOSIE_KEY_END; push(gw, ev); return;
+		case 116: ev.key = GOOSIE_KEY_PAGE_UP; push(gw, ev); return;
+		case 121: ev.key = GOOSIE_KEY_PAGE_DOWN; push(gw, ev); return;
 	}
 	// With the input context on, printable keys go through NSTextInputClient first so
 	// an IME can compose them. handleEvent returns NO for keys it does not want -
@@ -650,41 +812,63 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 // snapshot (a cycle among the indices, a child pointing outside the array) costs a
 // short walk instead of a hang. Strings become NSStrings here, which is what lets
 // the snapshot itself be freed the moment this method returns.
-- (NSArray *)axElementsFromSnapshot:(GoosieAxSnapshot *)snap index:(int)i depth:(int)depth {
+- (NSArray *)axElementsFromSnapshot:(GoosieAxSnapshot *)snap
+	                          index:(int)i
+	                          depth:(int)depth
+	                           seen:(NSMutableSet *)seen
+	                           next:(NSMutableDictionary *)next {
 	NSMutableArray *out = [NSMutableArray array];
 	int count = 0;
 	for (int c = i; c >= 0 && c < snap->n && count < snap->n; c = snap->nodes[c].next_sibling, count++) {
 		GoosieAxNode *n = &snap->nodes[c];
 		NSArray *kids = nil;
 		if (depth < 64 && n->first_child >= 0 && n->first_child < snap->n) {
-			kids = [self axElementsFromSnapshot:snap index:n->first_child depth:depth + 1];
+			kids = [self axElementsFromSnapshot:snap index:n->first_child depth:depth + 1
+			                                  seen:seen next:next];
 		}
+		NSString *identifier = (n->identifier && n->identifier[0]) ? [NSString stringWithUTF8String:n->identifier] : nil;
 		NSString *href = (n->href && n->href[0]) ? [NSString stringWithUTF8String:n->href] : nil;
-		GoosieAxElement *el = [[GoosieAxElement alloc]
-		    initWithRole:n->role
-		    label:(n->label ? [NSString stringWithUTF8String:n->label] : @"")
-		    value:(n->value ? [NSString stringWithUTF8String:n->value] : @"")
-		    href:href
-		    frame:NSMakeRect(n->x0, n->y0, n->x1 - n->x0, n->y1 - n->y0)
-		    view:self
-		    children:kids];
+		NSString *label = n->label ? [NSString stringWithUTF8String:n->label] : @"";
+		NSString *value = n->value ? [NSString stringWithUTF8String:n->value] : @"";
+		NSRect frame = NSMakeRect(n->x0, n->y0, n->x1 - n->x0, n->y1 - n->y0);
+		BOOL stable = identifier.length > 0 && ![seen containsObject:identifier];
+		if (stable) [seen addObject:identifier];
+		GoosieAxElement *el = stable ? [_axElementsByIdentifier objectForKey:identifier] : nil;
+		BOOL created = el == nil;
+		if (created) {
+			el = [[GoosieAxElement alloc] initWithRole:n->role identifier:identifier flags:n->flags
+			                                  label:label value:value href:href frame:frame
+			                                   view:self children:kids];
+		} else {
+			[el updateWithRole:n->role flags:n->flags label:label value:value href:href
+			            frame:frame view:self children:kids];
+		}
+		if (stable) [next setObject:el forKey:identifier];
 		[out addObject:el];
-		[el release];
+		if (created) [el release];
 	}
 	return out;
 }
 
-// setAccessibilityTree replaces the published tree and tells an assistive client
-// the layout changed. The new elements are built before the swap, so a query
-// landing mid-publish sees the previous tree, never a half-built one; the snapshot
-// is freed after building because every string it carried has been copied.
+// setAccessibilityTree installs the published tree and tells assistive clients the
+// layout changed. It runs on AppKit's main queue; the hierarchy and stable-ID map
+// are swapped after the snapshot has been traversed, then the copied C snapshot is
+// freed.
 - (void)setAccessibilityTree:(GoosieAxSnapshot *)snap {
-	NSArray *fresh = snap && snap->n > 0 ? [self axElementsFromSnapshot:snap index:0 depth:0] : nil;
+	if (!_axElementsByIdentifier) _axElementsByIdentifier = [[NSMutableDictionary alloc] init];
+	NSMutableDictionary *next = [NSMutableDictionary dictionary];
+	NSMutableSet *seen = [NSMutableSet set];
+	NSArray *fresh = snap && snap->n > 0
+	    ? [self axElementsFromSnapshot:snap index:0 depth:0 seen:seen next:next] : nil;
 	NSArray *old = _axElements;
+	BOOL changed = fresh != nil || old != nil;
 	_axElements = [fresh retain];
 	[old release];
+	NSMutableDictionary *oldByIdentifier = _axElementsByIdentifier;
+	_axElementsByIdentifier = [next mutableCopy];
+	[oldByIdentifier release];
 	GoosieAxSnapshotFree(snap);
-	if (fresh) {
+	if (changed) {
 		NSAccessibilityPostNotification(self, NSAccessibilityLayoutChangedNotification);
 	}
 }
@@ -800,6 +984,7 @@ static void commitSurface(GoosieWindow *gw, int slot, int w, int h, int stride) 
 			free(r);
 			pthread_mutex_lock(&gw->mu);
 			gw->busy[slot] = 0;
+			gw->need_full = 1;
 			pthread_mutex_unlock(&gw->mu);
 			return;
 		}
@@ -815,6 +1000,7 @@ static void commitSurface(GoosieWindow *gw, int slot, int w, int h, int stride) 
 		if (!image) {
 			pthread_mutex_lock(&gw->mu);
 			gw->busy[slot] = 0;
+			gw->need_full = 1;
 			pthread_mutex_unlock(&gw->mu);
 			return;
 		}
@@ -858,6 +1044,7 @@ GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 		return NULL;
 	}
 	pthread_mutex_init(&gw->mu, NULL);
+	pthread_mutex_init(&gw->presentMu, NULL);
 	pthread_cond_init(&gw->cv, NULL);
 
 	@autoreleasepool {
@@ -1010,6 +1197,41 @@ static void upload(unsigned char *dst, const unsigned char *src, int w, int h, i
 	}
 }
 
+static int clipDamageRect(const int *rect, int w, int h, int out[4]) {
+	int x0 = rect[0], y0 = rect[1], x1 = rect[2], y1 = rect[3];
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > w) x1 = w;
+	if (y1 > h) y1 = h;
+	if (x1 <= x0 || y1 <= y0) return 0;
+	out[0] = x0; out[1] = y0; out[2] = x1; out[3] = y1;
+	return 1;
+}
+
+static void includeDamageRect(int bounds[4], int *valid, const int rect[4]) {
+	if (!*valid) {
+		memcpy(bounds, rect, 4 * sizeof(int));
+		*valid = 1;
+		return;
+	}
+	if (rect[0] < bounds[0]) bounds[0] = rect[0];
+	if (rect[1] < bounds[1]) bounds[1] = rect[1];
+	if (rect[2] > bounds[2]) bounds[2] = rect[2];
+	if (rect[3] > bounds[3]) bounds[3] = rect[3];
+}
+
+static void accumulateDamage(GoosieWindow *gw, int slot, const int *damage, int n,
+							 int w, int h, int stride) {
+	if (!gw->surf[slot] || gw->surfVersion[slot] == 0 || gw->sw[slot] != w ||
+		gw->sh[slot] != h || gw->ss[slot] != stride || !damage || n <= 0) return;
+	for (int i = 0; i < n; i++) {
+		int rect[4];
+		if (clipDamageRect(damage + 4 * i, w, h, rect)) {
+			includeDamageRect(gw->pendingDamage[slot], &gw->pendingDamageValid[slot], rect);
+		}
+	}
+}
+
 // claimSurface returns the index of a surface this present can write into, resizing the
 // slot when it does not match, or -1 when every surface is still owed to Core Animation.
 // Call it with gw->mu held; it leaves the chosen slot busy, which is what makes copying
@@ -1034,6 +1256,8 @@ static int claimSurface(GoosieWindow *gw, int w, int h, int stride, int *fresh) 
 			free(gw->surf[i]);
 			gw->surf[i] = (unsigned char *)malloc(need);
 			gw->cap[i] = gw->surf[i] ? need : 0;
+			gw->surfVersion[i] = 0;
+			gw->pendingDamageValid[i] = 0;
 		}
 		if (!gw->surf[i]) continue;
 		gw->sw[i] = w;
@@ -1051,10 +1275,21 @@ int GoosiePresent(GoosieWindow *gw, const unsigned char *pixels, int w, int h,
 			  int stride, const int *damage, int n) {
 	if (!gw || !pixels || w <= 0 || h <= 0 || stride < w * 4) return GOOSIE_CLOSED;
 
+	pthread_mutex_lock(&gw->presentMu);
 	pthread_mutex_lock(&gw->mu);
 	if (gw->quit) {
 		pthread_mutex_unlock(&gw->mu);
+		pthread_mutex_unlock(&gw->presentMu);
 		return GOOSIE_CLOSED;
+	}
+	// An unchanged frame is already on screen. Avoid copying the whole buffer and
+	// recommitting an identical CGImage on every display tick. A dropped frame,
+	// initial present, or resize still forces a fresh upload below.
+	if (n <= 0 && !gw->need_full && gw->contentVersion > 0 &&
+	    gw->lastW == w && gw->lastH == h && gw->lastStride == stride) {
+		pthread_mutex_unlock(&gw->mu);
+		pthread_mutex_unlock(&gw->presentMu);
+		return GOOSIE_OK;
 	}
 	int fresh = 0;
 	int slot = claimSurface(gw, w, h, stride, &fresh);
@@ -1066,9 +1301,35 @@ int GoosiePresent(GoosieWindow *gw, const unsigned char *pixels, int w, int h,
 		atomic_fetch_add(&gw->dropped, 1);
 		gw->need_full = 1;
 		pthread_mutex_unlock(&gw->mu);
+		pthread_mutex_unlock(&gw->presentMu);
 		return GOOSIE_DROPPED;
 	}
-	int whole = fresh || gw->need_full;
+	// A stale ring slot can be patched from the current composed backing store as long
+	// as every committed change since its version was recorded. If a present was dropped
+	// or that history is missing, force a full upload and invalidate the other baselines.
+	int forceOtherFull = gw->need_full;
+	int whole = fresh || gw->need_full || gw->surfVersion[slot] == 0;
+	int applyDamage[4];
+	const int *uploadDamage = damage;
+	int uploadDamageCount = n;
+	if (!whole && gw->surfVersion[slot] != gw->contentVersion) {
+		if (!gw->pendingDamageValid[slot]) {
+			whole = 1;
+			forceOtherFull = 1;
+		} else {
+			int valid = 0;
+			memcpy(applyDamage, gw->pendingDamage[slot], sizeof(applyDamage));
+			valid = 1;
+			for (int i = 0; i < n; i++) {
+				int rect[4];
+				if (clipDamageRect(damage + 4 * i, w, h, rect)) {
+					includeDamageRect(applyDamage, &valid, rect);
+				}
+			}
+			uploadDamage = applyDamage;
+			uploadDamageCount = valid ? 1 : 0;
+		}
+	}
 	if (whole) gw->need_full = 0; // this present carried every pixel the surface will show
 	unsigned char *dst = gw->surf[slot];
 	pthread_mutex_unlock(&gw->mu);
@@ -1076,10 +1337,27 @@ int GoosiePresent(GoosieWindow *gw, const unsigned char *pixels, int w, int h,
 	if (whole) {
 		upload(dst, pixels, w, h, stride, NULL, 0);
 	} else {
-		upload(dst, pixels, w, h, stride, damage, n);
+		upload(dst, pixels, w, h, stride, uploadDamage, uploadDamageCount);
 	}
+	pthread_mutex_lock(&gw->mu);
+	gw->surfVersion[slot] = ++gw->contentVersion;
+	gw->pendingDamageValid[slot] = 0;
+	gw->lastW = w;
+	gw->lastH = h;
+	gw->lastStride = stride;
+	for (int i = 0; i < kGoosieSurfaceSlots; i++) {
+		if (i == slot) continue;
+		if (forceOtherFull) {
+			gw->surfVersion[i] = 0;
+			gw->pendingDamageValid[i] = 0;
+			continue;
+		}
+		accumulateDamage(gw, i, damage, n, w, h, stride);
+	}
+	pthread_mutex_unlock(&gw->mu);
 	atomic_fetch_add(&gw->queued, 1);
 	commitSurface(gw, slot, w, h, stride);
+	pthread_mutex_unlock(&gw->presentMu);
 	return GOOSIE_OK;
 }
 
@@ -1119,6 +1397,7 @@ void GoosieSetAccessibility(GoosieWindow *gw, const GoosieAxNode *nodes, int n) 
 				memcpy(snap->nodes, nodes, sizeof(GoosieAxNode) * (size_t)n);
 				snap->n = n;
 				for (int i = 0; i < n; i++) {
+					snap->nodes[i].identifier = goosieAxCopy(snap->nodes[i].identifier);
 					snap->nodes[i].label = goosieAxCopy(snap->nodes[i].label);
 					snap->nodes[i].value = goosieAxCopy(snap->nodes[i].value);
 					snap->nodes[i].href = goosieAxCopy(snap->nodes[i].href);
@@ -1182,7 +1461,7 @@ char *GoosieClipboardRead(void) {
 			}
 		}
 	};
-	if ([NSThread isMainThread]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
+	if ([NSThread isMainThread] || NSApp == nil || ![NSApp isRunning]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 	return result;
 }
 
@@ -1197,5 +1476,5 @@ void GoosieClipboardWrite(const char *text) {
 			}
 		}
 	};
-	if ([NSThread isMainThread]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
+	if ([NSThread isMainThread] || NSApp == nil || ![NSApp isRunning]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 }

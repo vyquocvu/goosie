@@ -1,6 +1,7 @@
 package css
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,13 +21,13 @@ func EvalCalc(expr string, em, vw, vh float32) (float32, bool) {
 	return EvalFunc("calc", expr, em, vw, vh)
 }
 
-// EvalFunc resolves one of the value-bearing CSS functions - `calc()`,
-// `min()`, `max()`, and `clamp(min, val, max)`. Each argument is its own
-// expression in calc()'s grammar, so a clamp can nest a calc and a max can nest
-// a clamp.
-func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
+// EvalFuncWithRem resolves one of the value-bearing CSS functions with rem support.
+func EvalFuncWithRem(name, expr string, em, rem, vw, vh float32) (float32, bool) {
 	if em <= 0 {
 		em = 16
+	}
+	if rem <= 0 {
+		rem = 16
 	}
 	if vw <= 0 {
 		vw = 1440
@@ -34,7 +35,33 @@ func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 	if vh <= 0 {
 		vh = 900
 	}
-	p := &calcExpr{em: em, vw: vw, vh: vh}
+	p := &calcExpr{em: em, rem: rem, vw: vw, vh: vh}
+	return p.combine(name, splitArgs(expr))
+}
+
+// EvalFunc resolves one of the value-bearing CSS functions - `calc()`,
+// `min()`, `max()`, and `clamp(min, val, max)`. Each argument is its own
+// expression in calc()'s grammar, so a clamp can nest a calc and a max can nest
+// a clamp.
+func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
+	return EvalFuncWithRem(name, expr, em, 16, vw, vh)
+}
+
+// EvalFuncWithBaseAndRem is EvalFuncWithRem for a caller that can answer percentages.
+func EvalFuncWithBaseAndRem(name, expr string, em, rem, vw, vh, pctBase float32) (float32, bool) {
+	if em <= 0 {
+		em = 16
+	}
+	if rem <= 0 {
+		rem = 16
+	}
+	if vw <= 0 {
+		vw = 1440
+	}
+	if vh <= 0 {
+		vh = 900
+	}
+	p := &calcExpr{em: em, rem: rem, vw: vw, vh: vh, pctBase: pctBase, allowPct: true}
 	return p.combine(name, splitArgs(expr))
 }
 
@@ -44,27 +71,27 @@ func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 // the cascade passes a parent font size for font-relative percentages. A
 // percentage with no base still reports itself unsupported.
 func EvalFuncWithBase(name, expr string, em, vw, vh, pctBase float32) (float32, bool) {
-	if em <= 0 {
-		em = 16
-	}
-	if vw <= 0 {
-		vw = 1440
-	}
-	if vh <= 0 {
-		vh = 900
-	}
-	p := &calcExpr{em: em, vw: vw, vh: vh, pctBase: pctBase, allowPct: true}
-	return p.combine(name, splitArgs(expr))
+	return EvalFuncWithBaseAndRem(name, expr, em, 16, vw, vh, pctBase)
 }
 
 // viewportTerm matches a viewport unit inside an expression's text.
-var viewportTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(svw|svh|dvw|dvh|lvw|lvh|vw|vh|vmin|vmax)`)
+var viewportTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(svmin|svmax|dvmin|dvmax|lvmin|lvmax|svw|svh|dvw|dvh|lvw|lvh|vi|vb|vw|vh|vmin|vmax)`)
 
 // viewportTermHints is the set of two-letter sequences that every alternative above
-// contains: `vw` carries it outright and so does each s/d/l-prefixed form, `vh` and its
-// prefixed forms carry `vh`, `vmin` carries `mi` and `vmax` carries `ma`.
-var viewportTermHints = []string{"vw", "vh", "mi", "ma"}
+// contains.
+var viewportTermHints = []string{"vw", "vh", "vi", "vb", "mi", "ma"}
 
+// ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
+// leaving every other term alone. A `calc()` only reaches its `em` terms once the
+// cascade has settled the element's font size, and by then the frame's size is no
+// longer in scope, so the two halves of the context are applied where each is
+// known.
+//
+// The cascade runs this on the text of every declaration of every element, so the
+// overwhelmingly common case - a value that says nothing about the viewport - is
+// answered by the hint scan below rather than by the regexp. Skipping the regexp
+// exactly reproduces running it and finding no match, because a string that holds
+// none of those four bigrams cannot hold a viewport unit at all.
 // ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
 // leaving every other term alone. A `calc()` only reaches its `em` terms once the
 // cascade has settled the element's font size, and by then the frame's size is no
@@ -101,6 +128,63 @@ func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
 	return out, found
 }
 
+// containerTerm matches a container query unit inside an expression's text.
+var containerTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(cqw|cqh|cqi|cqb|cqmin|cqmax)`)
+
+var containerTermHints = []string{"cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"}
+
+// ResolveContainerUnits rewrites the container query unit terms in an expression as pixels.
+func ResolveContainerUnits(expr string, cqW, cqH float32) (string, bool) {
+	possible := false
+	for _, h := range containerTermHints {
+		if strings.Contains(expr, h) {
+			possible = true
+			break
+		}
+	}
+	if !possible {
+		return expr, false
+	}
+	if cqW <= 0 {
+		cqW = 1440
+	}
+	if cqH <= 0 {
+		cqH = 900
+	}
+	cqmin := cqW
+	if cqH < cqmin {
+		cqmin = cqH
+	}
+	cqmax := cqW
+	if cqH > cqmax {
+		cqmax = cqH
+	}
+	found := false
+	out := containerTerm.ReplaceAllStringFunc(expr, func(m string) string {
+		g := containerTerm.FindStringSubmatch(m)
+		n, err := strconv.ParseFloat(g[1], 32)
+		if err != nil {
+			return m
+		}
+		found = true
+		var px float32
+		switch g[2] {
+		case "cqw", "cqi":
+			px = float32(n) * cqW / 100
+		case "cqh", "cqb":
+			px = float32(n) * cqH / 100
+		case "cqmin":
+			px = float32(n) * cqmin / 100
+		case "cqmax":
+			px = float32(n) * cqmax / 100
+		default:
+			return m
+		}
+		return strconv.FormatFloat(float64(px), 'f', -1, 32) + "px"
+	})
+	return out, found
+}
+
 // foldOne evaluates one min()/max() argument list in the caller's context,
 // so a percentage inside any argument sees the same base as the rest of the
 // expression.
@@ -124,7 +208,7 @@ func fold(args []string, em, vw, vh float32, smallest bool) (float32, bool) {
 }
 
 func (p *calcExpr) evalSum(expr string) (float32, bool) {
-	q := &calcExpr{toks: calcTokens(expr), em: p.em, vw: p.vw, vh: p.vh, pctBase: p.pctBase, allowPct: p.allowPct}
+	q := &calcExpr{toks: calcTokens(expr), em: p.em, rem: p.rem, vw: p.vw, vh: p.vh, pctBase: p.pctBase, allowPct: p.allowPct}
 	v, ok := q.sum()
 	if !ok || q.pos != len(q.toks) {
 		return 0, false
@@ -133,7 +217,7 @@ func (p *calcExpr) evalSum(expr string) (float32, bool) {
 }
 
 func evalSum(expr string, em, vw, vh float32) (float32, bool) {
-	p := &calcExpr{em: em, vw: vw, vh: vh}
+	p := &calcExpr{em: em, rem: 16, vw: vw, vh: vh}
 	return p.evalSum(expr)
 }
 
@@ -165,9 +249,9 @@ func calcTokens(s string) []string {
 }
 
 type calcExpr struct {
-	toks       []string
-	pos        int
-	em, vw, vh float32
+	toks            []string
+	pos             int
+	em, rem, vw, vh float32
 	// pctBase answers `%` terms when allowPct is set. It is the
 	// containing-block length for box sizes, or the parent font size for
 	// font-relative percentages. Without it a percentage still reports
@@ -332,8 +416,237 @@ func (p *calcExpr) combine(name string, args []string) (float32, bool) {
 			v = lo
 		}
 		return v, true
+	case "sin":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Sin(float64(v))), true
+	case "cos":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Cos(float64(v))), true
+	case "tan":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Tan(float64(v))), true
+	case "asin":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok || v < -1 || v > 1 {
+			return 0, false
+		}
+		return float32(math.Asin(float64(v))), true
+	case "acos":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok || v < -1 || v > 1 {
+			return 0, false
+		}
+		return float32(math.Acos(float64(v))), true
+	case "atan":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Atan(float64(v))), true
+	case "atan2":
+		if len(args) != 2 {
+			return 0, false
+		}
+		y, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		x, ok := p.evalSum(args[1])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Atan2(float64(y), float64(x))), true
+	case "pow":
+		if len(args) != 2 {
+			return 0, false
+		}
+		base, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		exp, ok := p.evalSum(args[1])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Pow(float64(base), float64(exp))), true
+	case "sqrt":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok || v < 0 {
+			return 0, false
+		}
+		return float32(math.Sqrt(float64(v))), true
+	case "hypot":
+		if len(args) < 1 {
+			return 0, false
+		}
+		var sumSq float64
+		for _, a := range args {
+			v, ok := p.evalSum(a)
+			if !ok {
+				return 0, false
+			}
+			sumSq += float64(v) * float64(v)
+		}
+		return float32(math.Sqrt(sumSq)), true
+	case "log":
+		if len(args) == 1 {
+			v, ok := p.evalSum(args[0])
+			if !ok || v <= 0 {
+				return 0, false
+			}
+			return float32(math.Log(float64(v))), true
+		} else if len(args) == 2 {
+			v, ok := p.evalSum(args[0])
+			if !ok || v <= 0 {
+				return 0, false
+			}
+			base, ok := p.evalSum(args[1])
+			if !ok || base <= 0 || base == 1 {
+				return 0, false
+			}
+			return float32(math.Log(float64(v)) / math.Log(float64(base))), true
+		}
+		return 0, false
+	case "exp":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		return float32(math.Exp(float64(v))), true
+	case "abs":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		if v < 0 {
+			v = -v
+		}
+		return v, true
+	case "sign":
+		if len(args) != 1 {
+			return 0, false
+		}
+		v, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		if v > 0 {
+			return 1, true
+		}
+		if v < 0 {
+			return -1, true
+		}
+		return 0, true
+	case "round":
+		argsToUse := args
+		strat := "nearest"
+		if len(args) > 0 {
+			first := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(args[0])), " ", "")
+			if first == "nearest" || first == "up" || first == "down" || first == "to-zero" {
+				strat = first
+				argsToUse = args[1:]
+			}
+		}
+		if len(argsToUse) == 1 {
+			v, ok := p.evalSum(argsToUse[0])
+			if !ok {
+				return 0, false
+			}
+			return roundWithStrategy(v, 1, strat), true
+		} else if len(argsToUse) == 2 {
+			v, ok := p.evalSum(argsToUse[0])
+			if !ok {
+				return 0, false
+			}
+			step, ok := p.evalSum(argsToUse[1])
+			if !ok || step == 0 {
+				return 0, false
+			}
+			return roundWithStrategy(v, step, strat), true
+		}
+		return 0, false
+	case "mod":
+		if len(args) != 2 {
+			return 0, false
+		}
+		a, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		b, ok := p.evalSum(args[1])
+		if !ok || b == 0 {
+			return 0, false
+		}
+		return a - b*float32(math.Floor(float64(a/b))), true
+	case "rem":
+		if len(args) != 2 {
+			return 0, false
+		}
+		a, ok := p.evalSum(args[0])
+		if !ok {
+			return 0, false
+		}
+		b, ok := p.evalSum(args[1])
+		if !ok || b == 0 {
+			return 0, false
+		}
+		return a - b*float32(math.Trunc(float64(a/b))), true
 	}
 	return 0, false
+}
+
+func roundWithStrategy(v, step float32, strat string) float32 {
+	if step < 0 {
+		step = -step
+	}
+	ratio := float64(v / step)
+	switch strat {
+	case "up":
+		ratio = math.Ceil(ratio)
+	case "down":
+		ratio = math.Floor(ratio)
+	case "to-zero":
+		ratio = math.Trunc(ratio)
+	default: // "nearest"
+		ratio = math.Round(ratio)
+	}
+	return float32(ratio * float64(step))
 }
 
 func (p *calcExpr) slice(lo, hi int) string {
@@ -346,6 +659,18 @@ func isNumericToken(tok string) bool {
 }
 
 func (p *calcExpr) length(tok string) (float32, bool) {
+	lower := strings.ToLower(tok)
+	switch lower {
+	case "pi":
+		return float32(math.Pi), true
+	case "e":
+		return float32(math.E), true
+	case "infinity", "inf":
+		return float32(math.Inf(1)), true
+	case "-infinity", "-inf":
+		return float32(math.Inf(-1)), true
+	}
+
 	n := 0
 	for n < len(tok) && (tok[n] >= '0' && tok[n] <= '9' || tok[n] == '.') {
 		n++
@@ -361,6 +686,14 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 	switch strings.ToLower(tok[n:]) {
 	case "px", "":
 		return num, true
+	case "deg":
+		return num * math.Pi / 180, true
+	case "grad":
+		return num * math.Pi / 200, true
+	case "rad":
+		return num, true
+	case "turn":
+		return num * 2 * math.Pi, true
 	case "%":
 		// A percentage only answers when the caller supplied its base: the
 		// containing-block length for box sizes, the parent font for
@@ -374,7 +707,11 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 	case "ch":
 		return num * p.em * 0.5, true
 	case "rem":
-		return num * 16, true
+		rem := p.rem
+		if rem <= 0 {
+			rem = 16
+		}
+		return num * rem, true
 	case "pt":
 		return num * 96 / 72, true
 	case "pc":
@@ -385,17 +722,17 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 		return num * 96 / 2.54, true
 	case "mm":
 		return num * 96 / 25.4, true
-	case "vw", "svw", "dvw", "lvw":
+	case "vw", "svw", "dvw", "lvw", "vi", "cqw", "cqi":
 		return num * p.vw / 100, true
-	case "vh", "svh", "dvh", "lvh":
+	case "vh", "svh", "dvh", "lvh", "vb", "cqh", "cqb":
 		return num * p.vh / 100, true
-	case "vmin":
+	case "vmin", "svmin", "dvmin", "lvmin", "cqmin":
 		m := p.vw
 		if p.vh < m {
 			m = p.vh
 		}
 		return num * m / 100, true
-	case "vmax":
+	case "vmax", "svmax", "dvmax", "lvmax", "cqmax":
 		m := p.vw
 		if p.vh > m {
 			m = p.vh

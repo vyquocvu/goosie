@@ -9,6 +9,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	stdimage "image"
 	"math"
@@ -25,6 +26,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/style"
+	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
 // Session is one document's pipeline state.
@@ -118,11 +120,12 @@ type Session struct {
 	// the caret: painted but not yet the value. focusValue records the
 	// control's value when it gained focus so blur can fire a change event
 	// if the value was modified during the focus session.
-	focus      *dom.Node
-	hovered    *dom.Node
-	caret      int
-	marked     string
-	focusValue string
+	focus         *dom.Node
+	hovered       *dom.Node
+	caret         int
+	marked        string
+	focusValue    string
+	submittedForm *FormSubmission
 
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
@@ -134,6 +137,12 @@ type Session struct {
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
+
+	// media owns this document's video playback: one controller per element,
+	// the downloaded files behind them, and the backend that decodes them. nil
+	// when the caller did not supply WithMedia, so a session without a playback
+	// backend leaves <video> as the placeholder paint already draws.
+	media *mediaRegistry
 
 	// Transitions tracks active CSS transitions for animated property changes.
 	// nil when no transitions have been started.
@@ -147,6 +156,13 @@ type Session struct {
 	// records DOM mutations into it so the pipeline knows to re-style and
 	// re-layout. Set via WithInvalidation.
 	inv *Invalidation
+
+	// Appearance preferences for media query evaluation.
+	darkMode     bool
+	highContrast bool
+
+	// userScripts configured for injection into this document.
+	userScripts []*userscript.Script
 
 	// opMu serializes pipeline operations across threads: the UI pump
 	// (input handlers, the JS pump, repaints) and navigation drains
@@ -310,6 +326,27 @@ func WithInvalidation(inv *Invalidation) Option {
 	return func(s *Session) { s.inv = inv }
 }
 
+// WithDarkMode configures whether the session matches (prefers-color-scheme: dark).
+func WithDarkMode(enabled bool) Option {
+	return func(s *Session) {
+		s.darkMode = enabled
+	}
+}
+
+// WithHighContrast configures whether the session matches (prefers-contrast: more).
+func WithHighContrast(enabled bool) Option {
+	return func(s *Session) {
+		s.highContrast = enabled
+	}
+}
+
+// WithUserScripts configures user scripts to execute during the document lifecycle.
+func WithUserScripts(scripts []*userscript.Script) Option {
+	return func(s *Session) {
+		s.userScripts = scripts
+	}
+}
+
 // fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
@@ -347,15 +384,22 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// engine's arena references.
 	if s.jsRT != nil {
 		s.jsRT.SetDOM(doc)
+		// The media bridge goes in before any script runs, so a page that reads
+		// video.readyState while parsing sees the same element a later script
+		// does, and so play() cannot be reached before the controller exists.
+		if s.media != nil {
+			s.jsRT.SetMediaProvider(s.MediaController)
+		}
 		// Observe DOM writes for the pump: without this, PumpJS cannot tell
 		// a mutation tick from a canvas-only one and must re-resolve on
 		// every fired timer/RAF. Chained, never replacing a caller callback.
 		if s.inv != nil {
 			s.jsRT.ChainOnMutation(s.JSMutationSink())
 		}
+		s.runUserScripts(userscript.RunAtDocumentStart)
 	}
 	s.runScripts()
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, viewportW, s.sub)
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +573,7 @@ func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 			if family == "" || srcURL == "" {
 				continue
 			}
-			abs, ok := resolveSheetURL(fontBase, srcURL)
+			abs, ok := resolveSubresourceURL(fontBase, srcURL)
 			if !ok {
 				continue
 			}
@@ -734,7 +778,7 @@ func (s *Session) collectImageRefs() []imgRef {
 			return nil
 		}
 		if n.Data == "img" {
-			if src := strings.TrimSpace(n.GetAttribute("src")); src != "" {
+			if src := strings.TrimSpace(resolveImgSource(n, s.viewportW)); src != "" {
 				// data: payloads are document-inline bytes, not network
 				// subresources: they bypass URL resolution and decode locally.
 				if strings.HasPrefix(src, "data:") {
@@ -745,7 +789,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					}
 					return nil
 				}
-				if abs, ok := resolveSheetURL(s.imgBase, src); ok {
+				if abs, ok := resolveSubresourceURL(s.imgBase, src); ok {
 					refs = append(refs, imgRef{id: n.ID, abs: abs})
 					if !seen[abs] {
 						seen[abs] = true
@@ -762,7 +806,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[bg] = true
 					uniq = append(uniq, bg)
 				}
-			} else if abs, ok := resolveSheetURL(s.imgBase, bg); ok {
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -778,7 +822,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[m] = true
 					uniq = append(uniq, m)
 				}
-			} else if abs, ok := resolveSheetURL(s.imgBase, m); ok {
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, m); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, mask: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -794,7 +838,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[src] = true
 					uniq = append(uniq, src)
 				}
-			} else if abs, ok := resolveSheetURL(s.imgBase, src); ok {
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, src); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true, border: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -1075,7 +1119,7 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 // styleViewport is the frame the cascade resolves the viewport units against. A
 // session created without a size leaves them to the parser's fallback.
 func (s *Session) styleViewport() style.Viewport {
-	return style.Viewport{W: s.viewportW, H: s.viewportH}
+	return style.Viewport{W: s.viewportW, H: s.viewportH, DarkMode: s.darkMode}
 }
 
 // recordViewportWidth keeps the session's viewport in step with a layout pass
@@ -1086,6 +1130,11 @@ func (s *Session) recordViewportWidth(w float32) {
 	if finite(float64(w)) && w > 0 && w <= MaxGeometry {
 		s.viewportW = w
 	}
+}
+
+// Viewport returns the configured viewport width and height of the session.
+func (s *Session) Viewport() (w, h float32) {
+	return s.viewportW, s.viewportH
 }
 
 // Reflow runs layout only, retaining the document, computed style identities,
@@ -1148,6 +1197,32 @@ func (s *Session) Reflow(viewportW float32) error {
 				// missing subresource.
 				if abs, ok := s.bgVectorRef[n.ID]; ok {
 					s.attachVectorBackground(candidate, i, abs)
+				}
+			}
+		}
+	}
+	// Hand each video box its current presentation state. The arena is rebuilt
+	// here while frames arrive between reflows, so without this a style change
+	// would blank a playing video until its next frame.
+	if s.media != nil {
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil && n.Data == "video" {
+				if c := s.media.controllerByID(n.ID); c != nil {
+					candidate.Objects[i].Media = c.View()
+				}
+			}
+		}
+	} else {
+		// No backend was installed, so nothing in this document can ever play.
+		// The view says so rather than leaving the element looking like a video
+		// that has not started yet, and the builder drops the control bar with
+		// it: a bar that can never do anything is the worse of the two.
+		for i := range candidate.Objects {
+			if n := candidate.Objects[i].Node; n != nil && n.Data == "video" {
+				candidate.Objects[i].Media = paint.VideoView{
+					State:       paint.VideoFailed,
+					Message:     "playback unsupported",
+					Unsupported: true,
 				}
 			}
 		}
@@ -1274,11 +1349,17 @@ func (s *Session) HitTestLink(x, y float32) string {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Style != nil && cur.Style.PointerEvents == "none" {
+				break
+			}
 			if cur.Node != nil && cur.Node.DataAtom == dom.AtomA {
 				if href := cur.Node.GetAttribute("href"); href != "" {
 					return href
@@ -1287,6 +1368,67 @@ func (s *Session) HitTestLink(x, y float32) string {
 		}
 	}
 	return ""
+}
+
+// HitTestImage returns the src of the nearest <img> at the given document point.
+func (s *Session) HitTestImage(x, y float32) string {
+	if s.Arena == nil {
+		return ""
+	}
+	objs := s.Arena.Objects
+	for i := len(objs) - 1; i >= 1; i-- {
+		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
+		x0, y0, x1, y1 := obj.BorderRect()
+		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+			continue
+		}
+		if obj.Node != nil && obj.Node.DataAtom == dom.AtomImg {
+			if src := resolveImgSource(obj.Node, s.viewportW); src != "" {
+				return src
+			}
+		}
+	}
+	return ""
+}
+
+// resolveImgSource returns the effective image URL for an <img> element,
+// evaluating any parent <picture> and <source> elements against the current viewport.
+func resolveImgSource(n *dom.Node, viewportW float32) string {
+	if n.Parent != nil && n.Parent.Data == "picture" {
+		for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
+			if c == n {
+				break
+			}
+			if c.Element() && c.Data == "source" {
+				if typ := c.GetAttribute("type"); typ != "" && !isSupportedImageType(typ) {
+					continue
+				}
+				if media := c.GetAttribute("media"); media != "" {
+					if !css.MatchMedia(media, viewportW) {
+						continue
+					}
+				}
+				if srcset := strings.TrimSpace(c.GetAttribute("srcset")); srcset != "" {
+					fields := strings.Fields(srcset)
+					if len(fields) > 0 {
+						return fields[0]
+					}
+				}
+			}
+		}
+	}
+	return n.GetAttribute("src")
+}
+
+func isSupportedImageType(typ string) bool {
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/svg+xml", "image/bmp":
+		return true
+	}
+	return false
 }
 
 // ClickAt handles a click at the document-coordinate point. It finds an
@@ -1298,9 +1440,12 @@ func (s *Session) HitTestLink(x, y float32) string {
 //
 // Returns true if an activatable control was found at the point.
 func (s *Session) ClickAt(x, y float32) bool {
+	hitNode := s.nodeAt(x, y)
+	dismissed := s.dismissAutoPopoversExcept(hitNode)
+
 	n := s.activatableAt(x, y)
 	if n == nil {
-		return false
+		return dismissed
 	}
 	ev := dom.NewEvent("click", true, true)
 	if !dom.DispatchEvent(n, ev) {
@@ -1317,6 +1462,11 @@ func (s *Session) runClickDefault(n *dom.Node) {
 	typ := strings.ToLower(n.GetAttribute("type"))
 	switch n.Data {
 	case "input":
+		if targetID := n.GetAttribute("popovertarget"); targetID != "" {
+			action := strings.ToLower(n.GetAttribute("popovertargetaction"))
+			s.handlePopoverTarget(targetID, action)
+			return
+		}
 		switch typ {
 		case "checkbox", "radio":
 			s.ToggleControl(n)
@@ -1329,7 +1479,24 @@ func (s *Session) runClickDefault(n *dom.Node) {
 				s.ResetForm(form)
 			}
 		}
+	case "summary":
+		for p := n.Parent; p != nil; p = p.Parent {
+			if p.Element() && p.Data == "details" {
+				if p.HasAttribute("open") {
+					p.RemoveAttribute("open")
+				} else {
+					p.SetAttribute("open", "")
+				}
+				dom.DispatchEvent(p, dom.NewEvent("toggle", false, false))
+				break
+			}
+		}
 	case "button":
+		if targetID := n.GetAttribute("popovertarget"); targetID != "" {
+			action := strings.ToLower(n.GetAttribute("popovertargetaction"))
+			s.handlePopoverTarget(targetID, action)
+			return
+		}
 		btnType := strings.ToLower(n.GetAttribute("type"))
 		switch btnType {
 		case "submit", "":
@@ -1353,11 +1520,17 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Style != nil && cur.Style.PointerEvents == "none" {
+				break
+			}
 			if IsActivatable(cur.Node) {
 				return cur.Node
 			}
@@ -1366,25 +1539,129 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 	return nil
 }
 
+// FormSubmission represents a form ready to be dispatched by the browser host.
+type FormSubmission struct {
+	Action  string
+	Method  string
+	Data    []FormData
+	Encoded string
+}
+
 // SubmitForm fires a cancelable "submit" event on the form, then collects form
-// data and encodes it. The actual navigation is the caller's responsibility;
-// the method stores the submission details for the host to retrieve.
+// data and encodes it. The submission details are stored on the session for
+// the host to retrieve via PopSubmittedForm.
 func (s *Session) SubmitForm(form *dom.Node) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.submitFormLocked(form)
+}
+
+func (s *Session) submitFormLocked(form *dom.Node) {
+	if form == nil {
+		return
+	}
 	ev := dom.NewEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
-	_ = CollectFormData(form)
-	_ = FormMethod(form)
-	_ = FormAction(form)
-	// Navigation is the caller's responsibility.
+	data := CollectFormData(form)
+	method := FormMethod(form)
+	if strings.EqualFold(method, "dialog") {
+		for cur := form.Parent; cur != nil; cur = cur.Parent {
+			if cur.Element() && cur.Data == "dialog" {
+				cur.RemoveAttribute("open")
+				cur.IsModal = false
+				dom.DispatchEvent(cur, dom.NewEvent("close", false, false))
+				return
+			}
+		}
+		return
+	}
+	action := FormAction(form)
+	encoded := EncodeFormURLEncoded(data)
+
+	s.submittedForm = &FormSubmission{
+		Action:  action,
+		Method:  method,
+		Data:    data,
+		Encoded: encoded,
+	}
 }
 
-// ResetForm resets the form controls to their default values.
-// Currently a placeholder for future implementation.
+// PopSubmittedForm returns and clears the pending form submission, if any.
+func (s *Session) PopSubmittedForm() (*FormSubmission, bool) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.submittedForm == nil {
+		return nil, false
+	}
+	sub := s.submittedForm
+	s.submittedForm = nil
+	return sub, true
+}
+
+// ResetForm resets the form controls to their default values and fires a "reset" event.
 func (s *Session) ResetForm(form *dom.Node) {
-	// Placeholder: reset logic to be implemented.
-	_ = form
+	if form == nil {
+		return
+	}
+	ev := dom.NewEvent("reset", true, true)
+	if !dom.DispatchEvent(form, ev) {
+		return // preventDefault was called
+	}
+
+	var resetNode func(n *dom.Node)
+	resetNode = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.Element() {
+			switch n.Data {
+			case "input":
+				typ := strings.ToLower(n.GetAttribute("type"))
+				switch typ {
+				case "checkbox", "radio":
+					if n.HasAttribute("data-default-checked") {
+						if n.GetAttribute("data-default-checked") == "true" {
+							n.SetAttribute("checked", "")
+						} else {
+							n.RemoveAttribute("checked")
+						}
+					} else if n.HasAttribute("checked") {
+						n.SetAttribute("checked", "")
+					} else {
+						n.RemoveAttribute("checked")
+					}
+				case "submit", "reset", "button", "image":
+					// No-op
+				default:
+					defVal := ""
+					if n.HasAttribute("data-default-value") {
+						defVal = n.GetAttribute("data-default-value")
+					} else if n.HasAttribute("defaultValue") {
+						defVal = n.GetAttribute("defaultValue")
+					} else {
+						defVal = n.GetAttribute("value")
+					}
+					n.SetAttribute("value", defVal)
+				}
+			case "textarea":
+				defVal := ""
+				if n.HasAttribute("data-default-value") {
+					defVal = n.GetAttribute("data-default-value")
+				} else if n.HasAttribute("defaultValue") {
+					defVal = n.GetAttribute("defaultValue")
+				} else {
+					defVal = n.TextContent()
+				}
+				s.setControlValue(n, defVal)
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			resetNode(c)
+		}
+	}
+	resetNode(form)
 }
 
 // Match is one find result: the document-space rect of an occurrence of the
@@ -1640,7 +1917,7 @@ func (s *Session) runScripts() {
 			if src := scriptSrc(n); src != "" {
 				// A src tag's inline text is ignored, per HTML.
 				if s.scriptFetch != nil && extLeft > 0 {
-					if abs, ok := resolveSheetURL(s.scriptBase, src); ok {
+					if abs, ok := resolveSubresourceURL(s.scriptBase, src); ok {
 						extLeft--
 						items = append(items, scriptItem{ext: abs, name: abs})
 					}
@@ -1688,6 +1965,28 @@ func (s *Session) runScripts() {
 		// does not take down the page.
 		_ = s.jsRT.Run(it.text, it.name)
 	}
+	s.runUserScripts(userscript.RunAtDocumentEnd)
+}
+
+// runUserScripts runs any configured user scripts matching the target lifecycle stage.
+func (s *Session) runUserScripts(stage userscript.RunAt) {
+	if s.jsRT == nil || len(s.userScripts) == 0 {
+		return
+	}
+	for _, us := range s.userScripts {
+		if !us.Enabled {
+			continue
+		}
+		if us.RunAt != stage {
+			if !(stage == userscript.RunAtDocumentEnd && us.RunAt == userscript.RunAtDocumentIdle) {
+				continue
+			}
+		}
+		if us.Code != "" {
+			name := "userscript:" + us.Name
+			_ = s.jsRT.Run(us.Code, name)
+		}
+	}
 }
 
 // scriptSrc returns the src attribute of a script tag, or "" when inline.
@@ -1724,13 +2023,53 @@ func isClassicScript(n *dom.Node) bool {
 }
 
 // Close releases resources held by the session. If a JS runtime was supplied,
-// it is closed so the realm is torn down.
+// it is closed so the realm is torn down; any media elements stop and release
+// their downloaded files, because a document that is going away must not leave
+// audio playing behind it.
 func (s *Session) Close() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if s.media != nil {
+		s.media.closeAll()
+	}
 	if s.jsRT != nil {
 		_ = s.jsRT.Close()
 	}
+}
+
+// PumpMedia advances every media controller one step and returns the
+// document-space rectangles whose painting changed. It applies whatever the
+// download workers produced, polls the backends for new frames and positions,
+// attaches the results to the laid-out video boxes, closes the elements that left
+// the document, and hands any transitions to the JavaScript runtime.
+//
+// It never reflows. A decoded frame is not a style change, and paying a layout
+// pass per video frame would put the document's cost on the display's clock
+// instead of on the page's own edits. Callers repaint the returned rectangles and
+// nothing else; an empty result means the tick was worth nothing.
+func (s *Session) PumpMedia() []frame.RectF {
+	if s.media == nil {
+		return nil
+	}
+	s.opMu.Lock()
+	if s.Doc == nil {
+		s.opMu.Unlock()
+		return nil
+	}
+	dmg := s.media.pump(&s.Doc.Node, s.Arena)
+	// Drained under the lock, dispatched outside it: running a page's listener is
+	// user code, and user code must not run while the pipeline state is held.
+	var dispatch []mediaDispatch
+	if s.jsRT != nil {
+		dispatch = s.media.drainEvents()
+	}
+	rt := s.jsRT
+	s.opMu.Unlock()
+
+	for _, d := range dispatch {
+		rt.DispatchMediaEvents(d.node, d.events)
+	}
+	return dmg
 }
 
 // JSTitle returns the document title as seen by the JS runtime after script
@@ -1743,24 +2082,22 @@ func (s *Session) JSTitle() string {
 }
 
 // PumpJS runs one event-loop turn for the document: timer, fetch, worker and
-// RAF callbacks Fire, then the pipeline reflows if the turn changed anything
-// observable. It reports whether the document changed, which is when the
-// caller must repaint.
+// RAF callbacks fire, then the pipeline reflows if the turn changed the DOM.
+// It reports whether the caller must repaint for a DOM or canvas change.
 //
-// A tick with no runtime, no fired callbacks and no pending invalidations is
-// a no-op returning false. While deferred font/image loads are in flight the
-// reflow is skipped (their tables attach outside opMu by design) and retried
-// next tick; timers still fire, so work is delayed, never lost.
+// State-only callbacks do not repaint. While deferred font/image loads are in
+// flight the DOM reflow is skipped (their tables attach outside opMu by
+// design) and retried next tick; timers still fire, so work is delayed.
 func (s *Session) PumpJS(viewportW float32) bool {
 	if s.jsRT == nil {
 		return false
 	}
-	fired := s.jsRT.Tick()
-	raf := false
+	canvasBefore := s.jsRT.CanvasVisualStamp()
+	s.jsRT.Tick()
 	if s.jsRT.HasPendingRAF() {
 		s.jsRT.TickRAF(time.Now())
-		raf = true
 	}
+	canvasChanged := canvasBefore != s.jsRT.CanvasVisualStamp()
 	// Mutation state is captured before Reset: it decides between a full
 	// re-resolve and skipping straight to repaint below.
 	mutated := false
@@ -1768,21 +2105,15 @@ func (s *Session) PumpJS(viewportW float32) bool {
 		mutated = !s.inv.Empty()
 		s.inv.Reset()
 	}
-	if !fired && !raf && !mutated {
-		return false
+	if !mutated {
+		// Timers/RAF can contain state-only work and even a continuously
+		// rescheduled no-op animation loop. Every DOM write notifies the sink;
+		// canvas operations are the other observable output in this runtime.
+		// Avoid full frame commits when neither changed.
+		return canvasChanged
 	}
 	if atomic.LoadInt32(&s.deferredActive) > 0 {
 		return false
-	}
-	if !mutated {
-		// Timers/RAF ran but recorded no DOM mutation (canvas animation,
-		// state-only work): every DOM write notifies the sink, so styles
-		// and layout are unchanged and the two full resolves plus reflow
-		// would only recompute identical trees. A rAF canvas loop used to
-		// pay that per frame — 60 full pipelines a second on a large
-		// document. Still report dirty: canvas ops are read live at paint
-		// time and need the repaint.
-		return true
 	}
 	// Re-resolve before reflowing: scripts may have added nodes or classes
 	// the load-time cascade never saw, and unstyled nodes are skipped by
@@ -1893,5 +2224,86 @@ func (s *Session) startAnimations() {
 			css.AnimationFillMode(cs.AnimationFillMode),
 			now,
 		)
+	}
+}
+
+// Stylesheets returns a slice of parsed stylesheets applied to this session.
+func (s *Session) Stylesheets() []*css.Stylesheet {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	out := make([]*css.Stylesheet, len(s.sheets))
+	copy(out, s.sheets)
+	return out
+}
+
+// DOMStats computes the total node count and maximum depth of the session's DOM tree.
+func (s *Session) DOMStats() (nodeCount int, maxDepth int) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.Doc == nil {
+		return 0, 0
+	}
+	var walk func(n *dom.Node, depth int)
+	walk = func(n *dom.Node, depth int) {
+		if n == nil {
+			return
+		}
+		nodeCount++
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child, depth+1)
+		}
+	}
+	walk(&s.Doc.Node, 1)
+	return nodeCount, maxDepth
+}
+
+// EvaluateJS runs a JavaScript expression against the document's JS runtime
+// and returns its string result.
+func (s *Session) EvaluateJS(expr string) (string, error) {
+	s.opMu.Lock()
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if rt == nil {
+		return "", errors.New("engine: JS runtime not active")
+	}
+	return rt.Evaluate(expr)
+}
+
+// DarkMode reports whether the session is operating under dark color scheme.
+func (s *Session) DarkMode() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.darkMode
+}
+
+// HighContrast reports whether the session is operating under high contrast mode.
+func (s *Session) HighContrast() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.highContrast
+}
+
+// SetDarkMode updates the dark color scheme mode for the session.
+func (s *Session) SetDarkMode(enabled bool) {
+	s.opMu.Lock()
+	s.darkMode = enabled
+	s.opMu.Unlock()
+}
+
+// SetHighContrast updates the high contrast mode for the session.
+func (s *Session) SetHighContrast(enabled bool) {
+	s.opMu.Lock()
+	s.highContrast = enabled
+	s.opMu.Unlock()
+}
+
+func (s *Session) mediaOptions() css.MediaOptions {
+	return css.MediaOptions{
+		ViewportWidth: s.viewportW,
+		DarkMode:      s.darkMode,
+		HighContrast:  s.highContrast,
 	}
 }

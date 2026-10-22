@@ -2,6 +2,7 @@ package dom
 
 import (
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -170,6 +171,88 @@ func (e *Event) AsKeyboard() *KeyboardEvent {
 func (e *Event) AsMouse() *MouseEvent {
 	me, _ := e.payload.(*MouseEvent)
 	return me
+}
+
+// DataTransfer holds the drag-and-drop payload and formats.
+type DataTransfer struct {
+	DropEffect    string
+	EffectAllowed string
+	data          map[string]string
+}
+
+// NewDataTransfer creates an empty DataTransfer object.
+func NewDataTransfer() *DataTransfer {
+	return &DataTransfer{
+		DropEffect:    "none",
+		EffectAllowed: "uninitialized",
+		data:          make(map[string]string),
+	}
+}
+
+// SetData stores data for the given MIME type or format.
+func (dt *DataTransfer) SetData(format, data string) {
+	if dt.data == nil {
+		dt.data = make(map[string]string)
+	}
+	dt.data[strings.ToLower(format)] = data
+}
+
+// GetData retrieves data for the given MIME type or format.
+func (dt *DataTransfer) GetData(format string) string {
+	if dt.data == nil {
+		return ""
+	}
+	return dt.data[strings.ToLower(format)]
+}
+
+// ClearData removes stored data for the given format, or all data if no format given.
+func (dt *DataTransfer) ClearData(format ...string) {
+	if dt.data == nil {
+		return
+	}
+	if len(format) == 0 {
+		clear(dt.data)
+		return
+	}
+	delete(dt.data, strings.ToLower(format[0]))
+}
+
+// Types returns the list of formats currently stored in the DataTransfer.
+func (dt *DataTransfer) Types() []string {
+	if len(dt.data) == 0 {
+		return nil
+	}
+	types := make([]string, 0, len(dt.data))
+	for k := range dt.data {
+		types = append(types, k)
+	}
+	return types
+}
+
+// DragEvent represents a DOM drag-and-drop interaction.
+type DragEvent struct {
+	MouseEvent
+	DataTransfer *DataTransfer
+}
+
+// NewDragEvent creates a new DragEvent.
+func NewDragEvent(eventType string, me MouseEvent, dt *DataTransfer) *Event {
+	if dt == nil {
+		dt = NewDataTransfer()
+	}
+	de := &DragEvent{
+		MouseEvent:   me,
+		DataTransfer: dt,
+	}
+	e := NewEvent(eventType, true, true)
+	e.payload = de
+	return e
+}
+
+// AsDrag returns the concrete *DragEvent behind this event, or nil.
+func (e *Event) AsDrag() *DragEvent {
+	de, _ := e.payload.(*DragEvent)
+	return de
 }
 
 // EventListener is a registered callback for a specific event type.

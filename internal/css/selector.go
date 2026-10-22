@@ -57,11 +57,12 @@ type SelectorPart struct {
 
 // Condition is one test on a node.
 type Condition struct {
-	Type   ConditionType
-	Value  string
-	Attr   string
-	Op     string
-	Pseudo string
+	Type            ConditionType
+	Value           string
+	Attr            string
+	Op              string
+	Pseudo          string
+	CaseInsensitive bool
 	// compiled holds the Pseudo selector arguments parsed once at stylesheet
 	// parse time. Functional pseudo-classes otherwise re-parse their argument
 	// on every element they test (:not, :is, :has, nth-of), which is O(argument
@@ -99,9 +100,7 @@ func (c *Condition) precompile() {
 		return
 	}
 	switch c.Value {
-	case "not":
-		c.compiled = &pseudoCompiled{sels: []Selector{ParseSelector(c.Pseudo)}}
-	case "is", "where":
+	case "not", "is", "where", "host":
 		var sels []Selector
 		for _, selStr := range splitSelectorList(c.Pseudo) {
 			sels = append(sels, ParseSelector(selStr))
@@ -174,27 +173,53 @@ func (s Selector) Specificity() (a, b, c int) {
 			case CondClass, CondAttr:
 				b++
 			case CondPseudoClass:
-				// :is() and :where() have special specificity rules.
+				// :where() contributes zero specificity.
 				if cond.Value == "where" {
-					// :where() contributes zero specificity.
 					continue
 				}
-				if cond.Value == "is" {
-					// :is() takes the highest specificity of its arguments.
-					if cond.Pseudo != "" {
-						selectors := splitSelectorList(cond.Pseudo)
-						maxA, maxB, maxC := 0, 0, 0
-						for _, selStr := range selectors {
-							sel := ParseSelector(selStr)
-							sa, sb, sc := sel.Specificity()
-							if CompareSpecificity(sa, sb, sc, maxA, maxB, maxC) > 0 {
-								maxA, maxB, maxC = sa, sb, sc
-							}
-						}
-						a += maxA
-						b += maxB
-						c += maxC
+				// :is(), :not(), and :host() take the specificity of their arguments.
+				if cond.Value == "is" || cond.Value == "not" || cond.Value == "host" {
+					if cond.Value == "host" {
+						b++ // :host itself contributes 1 pseudo-class
 					}
+					var sels []Selector
+					if cond.compiled != nil && len(cond.compiled.sels) > 0 {
+						sels = cond.compiled.sels
+					} else if cond.Pseudo != "" {
+						for _, selStr := range splitSelectorList(cond.Pseudo) {
+							sels = append(sels, ParseSelector(selStr))
+						}
+					}
+					maxA, maxB, maxC := 0, 0, 0
+					for _, sel := range sels {
+						sa, sb, sc := sel.Specificity()
+						if CompareSpecificity(sa, sb, sc, maxA, maxB, maxC) > 0 {
+							maxA, maxB, maxC = sa, sb, sc
+						}
+					}
+					a += maxA
+					b += maxB
+					c += maxC
+					continue
+				}
+				// :has() takes the highest specificity of its arguments.
+				if cond.Value == "has" {
+					var args []hasArg
+					if cond.compiled != nil && len(cond.compiled.has) > 0 {
+						args = cond.compiled.has
+					} else if cond.Pseudo != "" {
+						args = compileHasArgs(cond.Pseudo)
+					}
+					maxA, maxB, maxC := 0, 0, 0
+					for _, arg := range args {
+						sa, sb, sc := arg.sel.Specificity()
+						if CompareSpecificity(sa, sb, sc, maxA, maxB, maxC) > 0 {
+							maxA, maxB, maxC = sa, sb, sc
+						}
+					}
+					a += maxA
+					b += maxB
+					c += maxC
 					continue
 				}
 				// Other pseudo-classes contribute (0, 1, 0), and an `of`
@@ -363,8 +388,16 @@ func parseCondition(s string, i int) (Condition, int) {
 				op = rest[:2]
 				val = rest[2:]
 			}
-			val = strings.Trim(val, "\"' ")
-			return Condition{Type: CondAttr, Attr: name, Op: op, Value: val}, i
+			valStr := strings.TrimSpace(val)
+			caseInsensitive := false
+			if strings.HasSuffix(valStr, " i") || strings.HasSuffix(valStr, " I") {
+				caseInsensitive = true
+				valStr = strings.TrimSpace(valStr[:len(valStr)-2])
+			} else if strings.HasSuffix(valStr, " s") || strings.HasSuffix(valStr, " S") {
+				valStr = strings.TrimSpace(valStr[:len(valStr)-2])
+			}
+			valStr = strings.Trim(valStr, "\"' ")
+			return Condition{Type: CondAttr, Attr: name, Op: op, Value: valStr, CaseInsensitive: caseInsensitive}, i
 		}
 		return Condition{Type: CondAttr, Attr: strings.TrimSpace(attr)}, i
 
@@ -376,7 +409,28 @@ func parseCondition(s string, i int) (Condition, int) {
 			for i < len(s) && isIdentChar(s[i]) {
 				i++
 			}
-			return Condition{Type: CondPseudoElement, Value: s[start:i]}, i
+			name := s[start:i]
+			arg := ""
+			if i < len(s) && s[i] == '(' {
+				i++
+				depth := 1
+				argStart := i
+				for i < len(s) && depth > 0 {
+					if s[i] == '(' {
+						depth++
+					} else if s[i] == ')' {
+						depth--
+					}
+					if depth > 0 {
+						i++
+					}
+				}
+				arg = s[argStart:i]
+				if i < len(s) {
+					i++
+				}
+			}
+			return Condition{Type: CondPseudoElement, Value: name, Pseudo: arg}, i
 		}
 		start := i
 		for i < len(s) && isIdentChar(s[i]) {
@@ -622,24 +676,29 @@ func matchAttr(c Condition, n *dom.Node) bool {
 		return n.HasAttribute(c.Attr)
 	}
 	val := n.GetAttribute(c.Attr)
+	targetVal := c.Value
+	if c.CaseInsensitive {
+		val = strings.ToLower(val)
+		targetVal = strings.ToLower(targetVal)
+	}
 	switch c.Op {
 	case "=":
-		return val == c.Value
+		return val == targetVal
 	case "~=":
 		for _, v := range strings.Fields(val) {
-			if v == c.Value {
+			if v == targetVal {
 				return true
 			}
 		}
 		return false
 	case "|=":
-		return val == c.Value || strings.HasPrefix(val, c.Value+"-")
+		return val == targetVal || strings.HasPrefix(val, targetVal+"-")
 	case "^=":
-		return strings.HasPrefix(val, c.Value)
+		return strings.HasPrefix(val, targetVal)
 	case "$=":
-		return strings.HasSuffix(val, c.Value)
+		return strings.HasSuffix(val, targetVal)
 	case "*=":
-		return strings.Contains(val, c.Value)
+		return strings.Contains(val, targetVal)
 	}
 	return false
 }
@@ -660,11 +719,22 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		if c.Pseudo == "" {
 			return true
 		}
-		if c.compiled != nil && len(c.compiled.sels) == 1 {
-			return !c.compiled.sels[0].MatchesIndexed(n, ix)
+		if c.compiled != nil && len(c.compiled.sels) > 0 {
+			for _, sel := range c.compiled.sels {
+				if sel.MatchesIndexed(n, ix) {
+					return false
+				}
+			}
+			return true
 		}
-		sel := ParseSelector(c.Pseudo)
-		return !sel.MatchesIndexed(n, ix)
+		selectors := splitSelectorList(c.Pseudo)
+		for _, selStr := range selectors {
+			sel := ParseSelector(selStr)
+			if sel.MatchesIndexed(n, ix) {
+				return false
+			}
+		}
+		return true
 	case "is", "where":
 		// :is() and :where() take a comma-separated selector list and match if
 		// any selector in the list matches. The difference is specificity:
@@ -703,10 +773,37 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		// in - treating `a:visited` as `a:link` painted Wikipedia's links in
 		// MediaWiki's visited purple because that rule comes after the link one.
 		return false
+	case "host":
+		if n.ShadowRoot == nil {
+			return false
+		}
+		if c.Pseudo == "" {
+			return true
+		}
+		if c.compiled != nil && len(c.compiled.sels) > 0 {
+			for _, sel := range c.compiled.sels {
+				if sel.MatchesIndexed(n, ix) {
+					return true
+				}
+			}
+			return false
+		}
+		selectors := splitSelectorList(c.Pseudo)
+		for _, selStr := range selectors {
+			sel := ParseSelector(selStr)
+			if sel.MatchesIndexed(n, ix) {
+				return true
+			}
+		}
+		return false
 	case "hover":
 		return IsHovered(n)
 	case "focus":
 		return IsFocused(n)
+	case "scope":
+		return n.IsScopeRoot
+	case "popover-open":
+		return n.IsPopoverOpen
 	case "checked", "disabled", "enabled", "placeholder-shown":
 		return false
 	case "has":

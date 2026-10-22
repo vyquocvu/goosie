@@ -18,10 +18,11 @@ func ScaleAlpha(c Color, cov uint8) Color {
 	if cov == 0 {
 		return TransparentBlack
 	}
-	a := uint32(cov)
-	r := uint32(c.R()) * a / 255
-	g := uint32(c.G()) * a / 255
-	b := uint32(c.B()) * a / 255
+	ca := uint32(cov)
+	r := uint32(c.R()) * ca / 255
+	g := uint32(c.G()) * ca / 255
+	b := uint32(c.B()) * ca / 255
+	a := uint32(c.A()) * ca / 255
 	return Color(r<<24 | g<<16 | b<<8 | a)
 }
 
@@ -80,7 +81,12 @@ func (b *Bitmap) BlitMask(mask *image.Alpha, origin Point, c Color, clip Rect, w
 				continue
 			}
 			dst := Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
-			out := BlendOver(dst, ScaleAlpha(c, cov))
+			var out Color
+			if opaque {
+				out = BlendOverCoverage(dst, c, cov)
+			} else {
+				out = BlendOver(dst, ScaleAlpha(c, cov))
+			}
 			p[0] = byte(out >> 24)
 			p[1] = byte(out >> 16)
 			p[2] = byte(out >> 8)

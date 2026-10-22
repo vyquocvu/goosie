@@ -308,6 +308,10 @@ const (
 	ContentText ContentPartKind = iota
 	ContentCounter
 	ContentCounters
+	ContentOpenQuote
+	ContentCloseQuote
+	ContentNoOpenQuote
+	ContentNoCloseQuote
 )
 
 // ContentPart carries a counter() or counters() reference with its style.
@@ -326,13 +330,10 @@ type ContentPart struct {
 // strings on its existing path); only values naming counter() or counters()
 // do.
 func ParseContentParts(value string) (parts []ContentPart, ok bool) {
-	if !hasCounterFunc(value) {
+	if !hasCounterFunc(value) && !hasQuoteKeyword(value) {
 		return nil, false
 	}
-	// A top-level counter()/counters() outside any string is required: a
-	// quoted literal merely mentioning one stays on the plain-string path,
-	// which decodes hex escapes exactly as before.
-	if !hasTopLevelCounterFunc(value) {
+	if !hasTopLevelCounterFunc(value) && !hasQuoteKeyword(value) {
 		return nil, false
 	}
 	var out []ContentPart
@@ -361,14 +362,33 @@ func ParseContentParts(value string) (parts []ContentPart, ok bool) {
 			}
 			name := value[i:j]
 			lower := strings.ToLower(name)
-			if (lower == "counter" || lower == "counters") && j < len(value) && value[j] == '(' {
-				part, next, good := parseCounterFunc(lower == "counters", value, j)
-				if !good {
-					return nil, false
-				}
-				out = append(out, part)
-				i = next
+			switch lower {
+			case "open-quote":
+				out = append(out, ContentPart{Kind: ContentOpenQuote})
+				i = j
 				continue
+			case "close-quote":
+				out = append(out, ContentPart{Kind: ContentCloseQuote})
+				i = j
+				continue
+			case "no-open-quote":
+				out = append(out, ContentPart{Kind: ContentNoOpenQuote})
+				i = j
+				continue
+			case "no-close-quote":
+				out = append(out, ContentPart{Kind: ContentNoCloseQuote})
+				i = j
+				continue
+			case "counter", "counters":
+				if j < len(value) && value[j] == '(' {
+					part, next, good := parseCounterFunc(lower == "counters", value, j)
+					if !good {
+						return nil, false
+					}
+					out = append(out, part)
+					i = next
+					continue
+				}
 			}
 			return nil, false
 		}
@@ -378,6 +398,11 @@ func ParseContentParts(value string) (parts []ContentPart, ok bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+func hasQuoteKeyword(v string) bool {
+	lower := strings.ToLower(v)
+	return strings.Contains(lower, "open-quote") || strings.Contains(lower, "close-quote")
 }
 
 func hasCounterFunc(value string) bool {
@@ -653,28 +678,66 @@ func (s *CounterScope) Levels(name string) []int {
 	return rev
 }
 
-// EvaluateContent renders parsed content parts against a scope. Counter
-// styles default to decimal; a counter with no instance anywhere renders 0.
-func EvaluateContent(parts []ContentPart, scope *CounterScope) string {
+// EvaluateContentWithQuotes renders parsed content parts against a scope and quote pairs.
+func EvaluateContentWithQuotes(parts []ContentPart, scope *CounterScope, quotes []string, quoteDepth *int) string {
+	if quotes == nil {
+		quotes = []string{"“", "”", "‘", "’"}
+	}
+	var dummyDepth int
+	if quoteDepth == nil {
+		quoteDepth = &dummyDepth
+	}
+	numPairs := len(quotes) / 2
+
 	var b strings.Builder
 	for _, p := range parts {
 		switch p.Kind {
 		case ContentText:
 			b.WriteString(p.Text)
 		case ContentCounter:
-			v, _ := scope.Lookup(p.Name)
-			b.WriteString(FormatCounter(v, p.Style))
+			if scope != nil {
+				v, _ := scope.Lookup(p.Name)
+				b.WriteString(FormatCounter(v, p.Style))
+			}
 		case ContentCounters:
-			levels := scope.Levels(p.Name)
-			if len(levels) == 0 {
-				levels = []int{0}
+			if scope != nil {
+				levels := scope.Levels(p.Name)
+				if len(levels) == 0 {
+					levels = []int{0}
+				}
+				strs := make([]string, len(levels))
+				for i, v := range levels {
+					strs[i] = FormatCounter(v, p.Style)
+				}
+				b.WriteString(strings.Join(strs, p.Sep))
 			}
-			strs := make([]string, len(levels))
-			for i, v := range levels {
-				strs[i] = FormatCounter(v, p.Style)
+		case ContentOpenQuote:
+			if numPairs > 0 {
+				pairIdx := *quoteDepth % numPairs
+				b.WriteString(quotes[pairIdx*2])
 			}
-			b.WriteString(strings.Join(strs, p.Sep))
+			(*quoteDepth)++
+		case ContentCloseQuote:
+			if *quoteDepth > 0 {
+				(*quoteDepth)--
+			}
+			if numPairs > 0 {
+				pairIdx := *quoteDepth % numPairs
+				b.WriteString(quotes[pairIdx*2+1])
+			}
+		case ContentNoOpenQuote:
+			(*quoteDepth)++
+		case ContentNoCloseQuote:
+			if *quoteDepth > 0 {
+				(*quoteDepth)--
+			}
 		}
 	}
 	return b.String()
+}
+
+// EvaluateContent renders parsed content parts against a scope. Counter
+// styles default to decimal; a counter with no instance anywhere renders 0.
+func EvaluateContent(parts []ContentPart, scope *CounterScope) string {
+	return EvaluateContentWithQuotes(parts, scope, nil, nil)
 }

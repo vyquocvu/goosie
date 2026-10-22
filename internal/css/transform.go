@@ -227,6 +227,12 @@ func parseTransformAngle(args []string, idx int) float32 {
 // "grad" must be checked before "rad" because "grad" ends with "rad".
 func parseAngleValue(s string) float32 {
 	lower := strings.ToLower(s)
+	if fn, ok := lengthFuncName(s); ok {
+		inner := s[strings.IndexByte(s, '(')+1 : len(s)-1]
+		if v, ok := EvalFunc(fn, inner, 16, 1440, 900); ok {
+			return v
+		}
+	}
 	if strings.HasSuffix(lower, "grad") {
 		return float32(parseFloat(s[:len(s)-4])) * math.Pi / 200
 	}

@@ -1,6 +1,7 @@
 package style
 
 import (
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -223,6 +224,14 @@ const (
 	FlexWrapReverse
 )
 
+// StartingStyle holds the initial entry styles defined via @starting-style.
+type StartingStyle struct {
+	Opacity    float32
+	HasOpacity bool
+	Display    Display
+	Values     map[string]string
+}
+
 // ComputedStyle holds every CSS property fully resolved to concrete values.
 // Every length is float32 in CSS pixels; no parse step remains for layout.
 type ComputedStyle struct {
@@ -230,16 +239,51 @@ type ComputedStyle struct {
 	// authored; var() references are expanded against this map when the real
 	// properties apply. It is inherited, and shared read-only with the parent
 	// when an element declares none of its own.
-	Custom     map[string]string
-	Display    Display
-	Position   Position
-	Float      Float
-	Clear      Clear
-	Overflow   Overflow
-	OverflowX  Overflow
-	OverflowY  Overflow
-	BoxSizing  BoxSizing
-	Visibility string
+	Custom      map[string]string
+	Starting    *StartingStyle
+	Display     Display
+	Position    Position
+	Float       Float
+	Clear       Clear
+	Overflow    Overflow
+	OverflowX   Overflow
+	OverflowY   Overflow
+	BoxSizing   BoxSizing
+	Visibility  string
+	ColorScheme string
+	isDark      bool
+
+	ContentVisibility      string
+	ContainIntrinsicWidth  float32
+	ContainIntrinsicHeight float32
+	AnchorName             string
+	PositionAnchor         string
+	TopAnchor              string
+	RightAnchor            string
+	BottomAnchor           string
+	LeftAnchor             string
+	WidthAnchor            string
+	HeightAnchor           string
+
+	TextWrap           string
+	LineClamp          int
+	ViewTransitionName string
+
+	ScrollTimelineName string
+	ScrollTimelineAxis string
+	ViewTimelineName   string
+	ViewTimelineAxis   string
+	ViewTimelineInset  string
+	AnimationTimeline  string
+
+	FontPalette    string
+	OffsetPath     string
+	OffsetDistance float32
+	OffsetRotate   string
+
+	ShapeOutside string
+	ShapeMargin  float32
+
 	HasClip    bool
 	ClipTop    float32
 	ClipRight  float32
@@ -332,6 +376,9 @@ type ComputedStyle struct {
 	// kept as authored like BackgroundImage. Only a single url() layer is
 	// supported; additional layers are dropped at parse. Empty means no mask.
 	MaskImage        string
+	MaskRepeat       string // "repeat", "repeat-x", "repeat-y", "no-repeat", "space", "round"
+	MaskSize         string // "auto", "contain", "cover", or length/percent
+	MaskPosition     string // "center", "top", "bottom", "left", "right", etc.
 	BackgroundRepeat BgRepeat
 	// BackgroundRepeatY carries the second axis when background-repeat names
 	// two modes (`repeat round`); single modes mirror into both axes.
@@ -379,6 +426,7 @@ type ComputedStyle struct {
 	// cascade. Like a length it never inherits - a child takes the resolved
 	// px value - so it is left out of the inherit pass. Zero means none.
 	LineHeightEm   float32
+	Direction      string // "ltr" or "rtl"
 	TextAlign      TextAlign
 	TextIndent     float32
 	TextTransform  string
@@ -473,6 +521,15 @@ type ComputedStyle struct {
 
 	// Filter is the parsed CSS filter property. Empty means no filter.
 	Filter []css.FilterFunc
+	// BackdropFilter is the parsed CSS backdrop-filter property. Empty means no filter.
+	BackdropFilter []css.FilterFunc
+
+	// Quotes is the parsed CSS quotes property: pairs of open and close quotes.
+	Quotes []string
+
+	// AspectRatio is the preferred aspect ratio (w/h) from the CSS aspect-ratio property.
+	// 0 means auto (no preferred aspect ratio).
+	AspectRatio float32
 
 	// Animation fields for @keyframes animations.
 	AnimationName      string
@@ -482,6 +539,51 @@ type ComputedStyle struct {
 	AnimationIterCount int // 0 = infinite
 	AnimationDirection css.AnimationDirection
 	AnimationFillMode  css.AnimationFillMode
+
+	// AccentColor is the accent color for form controls like checkboxes and radios.
+	// CSS Basic UI Module Level 4: if A > 0, use this color; zero means default browser color.
+	AccentColor css.Color
+
+	// Container query properties (CSS Containment Level 3).
+	ContainerType string // "normal", "size", "inline-size"
+	ContainerName string // custom-ident or space-separated identifiers
+
+	// CSS Scroll Snap Module Level 1
+	ScrollSnapType       string // "none", "x", "y", "block", "inline", "both"
+	ScrollSnapStrictness string // "mandatory", "proximity"
+	ScrollSnapAlign      string // "none", "start", "end", "center"
+	ScrollSnapStop       string // "normal", "always"
+	ScrollPaddingTop     float32
+	ScrollPaddingRight   float32
+	ScrollPaddingBottom  float32
+	ScrollPaddingLeft    float32
+	ScrollMarginTop      float32
+	ScrollMarginRight    float32
+	ScrollMarginBottom   float32
+	ScrollMarginLeft     float32
+
+	// CSS Text Decoration Level 4
+	TextUnderlineOffset     float32
+	TextDecorationThickness float32
+
+	// CSS Basic User Interface Module Level 4
+	PointerEvents string // "auto", "none", etc. Default "auto"
+	UserSelect    string // "auto", "text", "none", "contain", "all". Default "auto"
+	CaretColor    css.Color
+
+	// CSS Overscroll Behavior Module Level 1
+	OverscrollBehaviorX string // "auto", "contain", "none". Default "auto"
+	OverscrollBehaviorY string // "auto", "contain", "none". Default "auto"
+
+	// CSS Text Module Level 3 & 4
+	WordBreak string  // "normal", "break-all", "keep-all", "break-word". Default "normal"
+	Hyphens   string  // "none", "manual", "auto". Default "manual"
+	TabSize   float32 // number of spaces or px length. Default 8
+
+	// CSS Writing Modes Level 3 & Fonts Level 3
+	WritingMode        string // "horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr". Default "horizontal-tb"
+	TextOrientation    string // "mixed", "upright", "sideways". Default "mixed"
+	FontVariantNumeric string // "normal", "ordinal", "slashed-zero", etc. Default "normal"
 }
 
 // AnonymousBlockStyle is the style of the block box layout invents to hold
@@ -533,6 +635,9 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.BackgroundColor = css.Color{}
 	s.BackgroundImage = ""
 	s.MaskImage = ""
+	s.MaskRepeat = ""
+	s.MaskSize = ""
+	s.MaskPosition = ""
 	s.BackgroundGradient = Gradient{}
 	s.BackgroundRadialGradient = RadialGradient{}
 	s.BoxShadow = nil
@@ -546,6 +651,7 @@ func DefaultStyle() ComputedStyle {
 	return ComputedStyle{
 		Display:      DisplayInline,
 		Position:     PositionStatic,
+		Direction:    "ltr",
 		Opacity:      1.0,
 		Width:        -1,
 		Height:       -1,
@@ -576,8 +682,46 @@ func DefaultStyle() ComputedStyle {
 		Content:    "normal",
 		// CSS initials: backgrounds position against the padding box and
 		// paint through the border box.
-		BackgroundOrigin: BgBoxPadding,
-		BackgroundClip:   BgBoxBorder,
+		BackgroundOrigin:       BgBoxPadding,
+		BackgroundClip:         BgBoxBorder,
+		ContainerType:          "normal",
+		ContainerName:          "",
+		ContentVisibility:      "visible",
+		ContainIntrinsicWidth:  -1,
+		ContainIntrinsicHeight: -1,
+		TextWrap:               "wrap",
+		LineClamp:              0,
+		ViewTransitionName:     "none",
+		ScrollTimelineName:     "none",
+		ScrollTimelineAxis:     "block",
+		ViewTimelineName:       "none",
+		ViewTimelineAxis:       "block",
+		ViewTimelineInset:      "auto",
+		AnimationTimeline:      "auto",
+		FontPalette:            "normal",
+		OffsetPath:             "none",
+		OffsetDistance:         0,
+		OffsetRotate:           "auto",
+		ShapeOutside:           "none",
+		ShapeMargin:            0,
+		Quotes:                 []string{"“", "”", "‘", "’"},
+		AccentColor:            css.Color{}, // Default/zero means browser's default accent color
+		AspectRatio:            0,
+		ScrollSnapType:         "none",
+		ScrollSnapStrictness:   "proximity",
+		ScrollSnapAlign:        "none",
+		ScrollSnapStop:         "normal",
+		PointerEvents:          "auto",
+		UserSelect:             "auto",
+		CaretColor:             css.Color{}, // auto: resolves to currentColor
+		OverscrollBehaviorX:    "auto",
+		OverscrollBehaviorY:    "auto",
+		WordBreak:              "normal",
+		Hyphens:                "manual",
+		TabSize:                8,
+		WritingMode:            "horizontal-tb",
+		TextOrientation:        "mixed",
+		FontVariantNumeric:     "normal",
 	}
 }
 
@@ -675,6 +819,7 @@ sup { font-size: 0.83em; vertical-align: super; }
 header, footer { display: block; }
 nav { display: block; }
 main { display: block; }
+search { display: block; }
 section { display: block; }
 article { display: block; }
 aside { display: block; }
@@ -687,12 +832,30 @@ summary { display: block; }
    sheet. Every story row on lobste.rs carries a dropdown menu this left in the
    flow, adding a line box per row. */
 details:not([open]) > *:not(summary) { display: none; }
-dialog { display: none; }
+dialog { display: none; position: absolute; left: 0; right: 0; margin: auto; border: solid 1px; padding: 1em; background: white; color: black; }
+dialog[open] { display: block; }
+[popover] { display: none; position: fixed; inset: 0; margin: auto; border: solid 1px; padding: 0.5em; background: white; color: black; }
+[popover]:popover-open { display: block; }
 fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove; }
 legend { display: block; padding: 0 0.25em; }
 form { display: block; }
 label { display: inline; }
 select { display: inline; }
+progress { display: inline-block; width: 10em; height: 1em; vertical-align: -0.2em; }
+meter { display: inline-block; width: 5em; height: 1em; vertical-align: -0.2em; }
+datalist { display: none; }
+ruby { display: inline; }
+rt { display: inline-block; font-size: 50%; line-height: 1; vertical-align: super; }
+rp { display: none; }
+picture { display: inline; }
+source { display: none; }
+/* MathML Core Foundation - basic display rules for MathML elements */
+math { display: inline-block; }
+mrow { display: inline; }
+mfrac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; }
+msup, msub { display: inline; font-size: 0.8em; }
+msqrt { display: inline-block; }
+
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
    whose size comes from the control rather than from content. The other input
    types shrink to a label the engine does not read out of an attribute, or draw
@@ -723,6 +886,9 @@ dl dir, dl dl, dl menu, dl ol, dl ul,
 menu dir, menu dl, menu menu, menu ol, menu ul,
 ol dir, ol dl, ol menu, ol ol, ol ul,
 ul dir, ul dl, ul menu, ul ol, ul ul { margin-top: 0; margin-bottom: 0; }
+video, canvas { display: inline-block; }
+audio { display: inline-block; }
+audio:not([controls]) { display: none; }
 /* SVG elements: <svg> is a replaced inline box; container and definition elements
    are not rendered directly; shape and text elements are inline within the SVG
    coordinate system. */
@@ -739,12 +905,62 @@ rect, circle, ellipse, line, polyline, polygon, path { display: inline; }
 text, tspan, textPath { display: inline; }
 foreignObject { display: block; }
 image { display: inline; }
+q::before { content: open-quote; }
+q::after { content: close-quote; }
 `
 
 // Viewport is the size a document is laid out in. The viewport units are a share
 // of it, and nothing else in the cascade depends on the frame's size.
 type Viewport struct {
-	W, H float32
+	W, H     float32
+	DarkMode bool
+}
+
+// usedColorScheme selects the scheme a document can render in, respecting the
+// user's preference when the document supports both light and dark.
+func usedColorScheme(supported string, prefersDark bool) string {
+	light, dark := false, false
+	for _, token := range strings.Fields(strings.ToLower(supported)) {
+		switch token {
+		case "light":
+			light = true
+		case "dark":
+			dark = true
+		}
+	}
+	if light && dark {
+		if prefersDark {
+			return "dark"
+		}
+		return "light"
+	}
+	if dark {
+		return "dark"
+	}
+	if light {
+		return "light"
+	}
+	if prefersDark {
+		return "dark"
+	}
+	return "light"
+}
+
+func (cs *ComputedStyle) effectiveColorScheme(vp Viewport) string {
+	if cs != nil {
+		return usedColorScheme(cs.ColorScheme, vp.DarkMode)
+	}
+	if vp.DarkMode {
+		return "dark"
+	}
+	return "light"
+}
+
+func (cs *ComputedStyle) scheme() string {
+	if cs != nil && cs.isDark {
+		return "dark"
+	}
+	return "light"
 }
 
 // inViewport rewrites a declaration's viewport units as the pixels they stand
@@ -758,7 +974,7 @@ func inViewport(d css.Declaration, vp Viewport) css.Declaration {
 	v := d.Parsed
 	if v.Type == css.ValueLength {
 		switch v.Unit {
-		case "vw", "vh", "vmin", "vmax", "svw", "svh", "dvw", "dvh", "lvw", "lvh":
+		case "vw", "vh", "vmin", "vmax", "svw", "svh", "dvw", "dvh", "lvw", "lvh", "vi", "vb", "svmin", "svmax", "dvmin", "dvmax", "lvmin", "lvmax":
 		default:
 			return d
 		}
@@ -787,6 +1003,431 @@ func inViewport(d css.Declaration, vp Viewport) css.Declaration {
 	return d
 }
 
+// inContainerUnits rewrites container query units (cqw, cqh, cqi, cqb, cqmin, cqmax)
+// into pixels based on the nearest query container's dimensions.
+func inContainerUnits(d css.Declaration, cqW, cqH float32) css.Declaration {
+	if cqW <= 0 {
+		cqW = 1440
+	}
+	if cqH <= 0 {
+		cqH = 900
+	}
+	v := d.Parsed
+	if v.Type == css.ValueLength {
+		switch v.Unit {
+		case "cqw", "cqi", "cqh", "cqb", "cqmin", "cqmax":
+			px := v.ToLengthWithContainerContext(16, 16, cqW, cqH, cqW, cqH)
+			d.Parsed = css.Value{Type: css.ValueLength, Num: float64(px), Unit: "px"}
+			return d
+		}
+	}
+	if strings.IndexAny(d.Value, "0123456789") < 0 {
+		return d
+	}
+	text, ok := css.ResolveContainerUnits(d.Value, cqW, cqH)
+	if !ok {
+		return d
+	}
+	d.Value = text
+	d.Parsed = css.ParseValue(text)
+	return d
+}
+
+// findNearestContainerDimensions returns the width and height of the nearest query container
+// for node n. If no ancestor container exists, it falls back to the viewport size.
+func findNearestContainerDimensions(n *dom.Node, result map[dom.NodeID]*ComputedStyle, vp Viewport) (float32, float32) {
+	contNode, contStyle := findQueryContainer(n, "", false, result)
+	if contNode == nil || contStyle == nil {
+		vw, vh := vp.W, vp.H
+		if vw <= 0 {
+			vw = 1440
+		}
+		if vh <= 0 {
+			vh = 900
+		}
+		return vw, vh
+	}
+	return getContainerDimensions(contNode, contStyle, result, vp)
+}
+
+// findQueryContainer finds the nearest ancestor container for node n matching
+// the optional container name and axis requirement.
+func findQueryContainer(n *dom.Node, name string, needsBlock bool, result map[dom.NodeID]*ComputedStyle) (*dom.Node, *ComputedStyle) {
+	if n == nil {
+		return nil, nil
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		cs := result[p.ID]
+		if cs == nil {
+			continue
+		}
+		if name != "" {
+			matchedName := false
+			if strings.EqualFold(cs.ContainerName, name) {
+				matchedName = true
+			} else {
+				for _, f := range strings.Fields(cs.ContainerName) {
+					if strings.EqualFold(f, name) {
+						matchedName = true
+						break
+					}
+				}
+			}
+			if !matchedName {
+				continue
+			}
+		}
+		if needsBlock {
+			if cs.ContainerType == "size" {
+				return p, cs
+			}
+		} else {
+			if cs.ContainerType == "inline-size" || cs.ContainerType == "size" {
+				return p, cs
+			}
+		}
+	}
+	return nil, nil
+}
+
+func getContainingBlockWidth(n *dom.Node, result map[dom.NodeID]*ComputedStyle, vp Viewport) float32 {
+	if n == nil {
+		if vp.W > 0 {
+			return vp.W
+		}
+		return 1280
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		cs := result[p.ID]
+		if cs == nil {
+			continue
+		}
+		if cs.Width >= 0 {
+			return cs.Width
+		}
+		if cs.Width < -2 {
+			pct := -2 - cs.Width
+			base := getContainingBlockWidth(p, result, vp)
+			return pct * base / 100
+		}
+	}
+	if vp.W > 0 {
+		return vp.W
+	}
+	return 1280
+}
+
+func getContainingBlockHeight(n *dom.Node, result map[dom.NodeID]*ComputedStyle, vp Viewport) float32 {
+	if n == nil {
+		if vp.H > 0 {
+			return vp.H
+		}
+		return 900
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		cs := result[p.ID]
+		if cs == nil {
+			continue
+		}
+		if cs.Height >= 0 {
+			return cs.Height
+		}
+		if cs.Height < -2 {
+			pct := -2 - cs.Height
+			base := getContainingBlockHeight(p, result, vp)
+			return pct * base / 100
+		}
+	}
+	if vp.H > 0 {
+		return vp.H
+	}
+	return 900
+}
+
+func getContainerDimensions(n *dom.Node, cs *ComputedStyle, result map[dom.NodeID]*ComputedStyle, vp Viewport) (float32, float32) {
+	var w, h float32
+	if cs.Width >= 0 {
+		w = cs.Width
+	} else if cs.Width < -2 {
+		pct := -2 - cs.Width
+		baseW := getContainingBlockWidth(n, result, vp)
+		w = pct * baseW / 100
+	} else {
+		w = getContainingBlockWidth(n, result, vp)
+		if cs.BoxSizing == BoxSizingContentBox {
+			w -= (cs.PaddingLeft + cs.PaddingRight + cs.BorderLeftWidth + cs.BorderRightWidth)
+			if w < 0 {
+				w = 0
+			}
+		}
+	}
+
+	if cs.Height >= 0 {
+		h = cs.Height
+	} else if cs.Height < -2 {
+		pct := -2 - cs.Height
+		baseH := getContainingBlockHeight(n, result, vp)
+		h = pct * baseH / 100
+	} else {
+		h = 0
+	}
+	return w, h
+}
+
+func matchesContainerQuery(n *dom.Node, query string, result map[dom.NodeID]*ComputedStyle, vp Viewport) bool {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return true
+	}
+	clauses := css.SplitOutsideParens(query, " and ")
+	for _, clause := range clauses {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			continue
+		}
+		name := ""
+		cond := clause
+		if idx := strings.IndexByte(clause, '('); idx > 0 {
+			name = strings.TrimSpace(clause[:idx])
+			cond = strings.TrimSpace(clause[idx:])
+		}
+		condLower := strings.ToLower(cond)
+		needsBlock := strings.Contains(condLower, "height") || strings.Contains(condLower, "block-size")
+		contNode, contStyle := findQueryContainer(n, name, needsBlock, result)
+		if contNode == nil || contStyle == nil {
+			return false
+		}
+		w, h := getContainerDimensions(contNode, contStyle, result, vp)
+		if !evalContainerCondition(cond, w, h) {
+			return false
+		}
+	}
+	return true
+}
+
+func evalContainerCondition(cond string, w, h float32) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return true
+	}
+	for _, group := range css.SplitTopLevel(cond, ',') {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if evalContainerGroup(group, w, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func evalContainerGroup(group string, w, h float32) bool {
+	if alts := css.SplitOutsideParens(group, " or "); len(alts) > 1 {
+		for _, alt := range alts {
+			if evalContainerGroup(strings.TrimSpace(alt), w, h) {
+				return true
+			}
+		}
+		return false
+	}
+	if parts := css.SplitOutsideParens(group, " and "); len(parts) > 1 {
+		for _, part := range parts {
+			if !evalContainerGroup(strings.TrimSpace(part), w, h) {
+				return false
+			}
+		}
+		return true
+	}
+	if strings.HasPrefix(strings.ToLower(group), "not ") {
+		return !evalContainerGroup(strings.TrimSpace(group[4:]), w, h)
+	}
+	test := strings.TrimSpace(group)
+	if strings.HasPrefix(test, "(") && strings.HasSuffix(test, ")") {
+		test = strings.TrimSpace(test[1 : len(test)-1])
+	}
+	if strings.ContainsAny(test, "<>=") {
+		return evalContainerRange(test, w, h)
+	}
+	colon := strings.IndexByte(test, ':')
+	if colon < 0 {
+		return false
+	}
+	feature := strings.ToLower(strings.TrimSpace(test[:colon]))
+	val := strings.TrimSpace(test[colon+1:])
+	return evalSingleContainerFeature(feature, val, w, h)
+}
+
+func evalSingleContainerFeature(feature, val string, w, h float32) bool {
+	switch feature {
+	case "min-width", "min-inline-size":
+		if px, ok := parseCSSPx(val); ok {
+			return w >= px
+		}
+	case "max-width", "max-inline-size":
+		if px, ok := parseCSSPx(val); ok {
+			return w <= px
+		}
+	case "width", "inline-size":
+		if px, ok := parseCSSPx(val); ok {
+			return float32(math.Abs(float64(w-px))) < 0.5
+		}
+	case "min-height", "min-block-size":
+		if px, ok := parseCSSPx(val); ok {
+			return h >= px
+		}
+	case "max-height", "max-block-size":
+		if px, ok := parseCSSPx(val); ok {
+			return h <= px
+		}
+	case "height", "block-size":
+		if px, ok := parseCSSPx(val); ok {
+			return float32(math.Abs(float64(h-px))) < 0.5
+		}
+	case "orientation":
+		v := strings.ToLower(strings.TrimSpace(val))
+		if v == "portrait" {
+			return h > w
+		} else if v == "landscape" {
+			return w >= h
+		}
+	case "aspect-ratio":
+		parts := strings.Split(val, "/")
+		if len(parts) == 2 {
+			rW, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+			rH, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+			if err1 == nil && err2 == nil && rH > 0 && h > 0 {
+				ratio := float32(rW / rH)
+				actual := w / h
+				return float32(math.Abs(float64(actual-ratio))) < 0.05
+			}
+		}
+	}
+	return false
+}
+
+func evalContainerRange(expr string, w, h float32) bool {
+	var tokens []string
+	var ops []string
+	start := 0
+	i := 0
+	for i < len(expr) {
+		if expr[i] == '<' || expr[i] == '>' || expr[i] == '=' {
+			token := strings.TrimSpace(expr[start:i])
+			if token != "" {
+				tokens = append(tokens, token)
+			}
+			opStart := i
+			for i < len(expr) && (expr[i] == '<' || expr[i] == '>' || expr[i] == '=') {
+				i++
+			}
+			ops = append(ops, expr[opStart:i])
+			start = i
+			continue
+		}
+		i++
+	}
+	if start < len(expr) {
+		token := strings.TrimSpace(expr[start:])
+		if token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	if len(tokens) == 2 && len(ops) == 1 {
+		featIdx, valIdx := -1, -1
+		if isContainerFeatureName(tokens[0]) {
+			featIdx, valIdx = 0, 1
+		} else if isContainerFeatureName(tokens[1]) {
+			featIdx, valIdx = 1, 0
+		} else {
+			return false
+		}
+		valPx, ok := parseCSSPx(tokens[valIdx])
+		if !ok {
+			return false
+		}
+		valDim := getFeatureDim(tokens[featIdx], w, h)
+		op := ops[0]
+		if featIdx == 1 {
+			op = flipContainerOp(op)
+		}
+		return compareDim(valDim, op, valPx)
+	} else if len(tokens) == 3 && len(ops) == 2 {
+		if !isContainerFeatureName(tokens[1]) {
+			return false
+		}
+		loPx, okLo := parseCSSPx(tokens[0])
+		hiPx, okHi := parseCSSPx(tokens[2])
+		if !okLo || !okHi {
+			return false
+		}
+		valDim := getFeatureDim(tokens[1], w, h)
+		op1 := flipContainerOp(ops[0])
+		op2 := ops[1]
+		return compareDim(valDim, op1, loPx) && compareDim(valDim, op2, hiPx)
+	}
+	return false
+}
+
+func isContainerFeatureName(name string) bool {
+	switch strings.ToLower(name) {
+	case "width", "inline-size", "height", "block-size":
+		return true
+	}
+	return false
+}
+
+func getFeatureDim(name string, w, h float32) float32 {
+	switch strings.ToLower(name) {
+	case "height", "block-size":
+		return h
+	default:
+		return w
+	}
+}
+
+func flipContainerOp(op string) string {
+	switch op {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
+	}
+	return op
+}
+
+func compareDim(dim float32, op string, target float32) bool {
+	switch op {
+	case "<":
+		return dim < target
+	case "<=":
+		return dim <= target
+	case ">":
+		return dim > target
+	case ">=":
+		return dim >= target
+	case "=", "==":
+		return float32(math.Abs(float64(dim-target))) < 0.5
+	}
+	return false
+}
+
+func parseCSSPx(val string) (float32, bool) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return 0, false
+	}
+	v := css.ParseValue(val)
+	if v.Type == css.ValueLength || v.Type == css.ValueNumber {
+		return v.ToLength(), true
+	}
+	return 0, false
+}
+
 // Resolve computes the style for every element in a document laid out in an
 // unspecified viewport, which is what the viewport units then fall back to.
 // fonts is the document's own @font-face table, or nil when it declares none.
@@ -802,6 +1443,7 @@ func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport, f
 	allSheets = append(allSheets, sheets...)
 
 	index := buildRuleIndex(allSheets)
+	index.loadDocumentProperties(doc)
 	result := make(map[dom.NodeID]*ComputedStyle)
 	// One sibling cache for the whole pass: :nth-child counting would
 	// otherwise walk siblings per tested element (O(siblings²) per parent).
@@ -818,7 +1460,7 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 	}
 	if n.Element() {
 		parentStyle := findParentStyle(n, result)
-		cs := computeStyle(n, index, parentStyle, vp, fonts, six)
+		cs := computeStyle(n, index, parentStyle, vp, fonts, six, result)
 		result[n.ID] = cs
 	} else if n.Text() {
 		parentStyle := findParentStyle(n, result)
@@ -827,8 +1469,90 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 			result[n.ID] = textStyle
 		}
 	}
+	if n.ShadowRoot != nil {
+		var shadowSheets []*css.Stylesheet
+		collectShadowStyleSheets(n.ShadowRoot.FirstChild, &shadowSheets)
+		shadowIndex := index
+		if len(shadowSheets) > 0 {
+			allShadowSheets := []*css.Stylesheet{UserAgentStylesheet()}
+			allShadowSheets = append(allShadowSheets, shadowSheets...)
+			shadowIndex = buildRuleIndex(allShadowSheets)
+			if n.Doc != nil {
+				shadowIndex.loadDocumentProperties(n.Doc)
+			}
+
+			// Apply :host rules from shadow stylesheets to host element's style
+			pSize := float32(16)
+			if pStyle := findParentStyle(n, result); pStyle != nil {
+				pSize = pStyle.FontSize
+			}
+			applyHostStyles(n, shadowSheets, result[n.ID], pSize, vp, fonts, six)
+		}
+		for sc := n.ShadowRoot.FirstChild; sc != nil; sc = sc.NextSibling {
+			resolveNode(sc, shadowIndex, result, vp, fonts, six)
+		}
+	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		resolveNode(c, index, result, vp, fonts, six)
+	}
+}
+
+func collectShadowStyleSheets(root *dom.Node, sheets *[]*css.Stylesheet) {
+	for c := root; c != nil; c = c.NextSibling {
+		if c.Element() && c.Data == "style" {
+			text := c.TextContent()
+			if strings.TrimSpace(text) != "" {
+				*sheets = append(*sheets, css.Parse(text))
+			}
+		}
+		if c.FirstChild != nil {
+			collectShadowStyleSheets(c.FirstChild, sheets)
+		}
+	}
+}
+
+func applyHostStyles(n *dom.Node, shadowSheets []*css.Stylesheet, cs *ComputedStyle, parentFontSize float32, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) {
+	if cs == nil || n == nil {
+		return
+	}
+	var normal, important []cascadeEntry
+	order := 0
+	for _, sheet := range shadowSheets {
+		for i := range sheet.Rules {
+			rule := &sheet.Rules[i]
+			matches := false
+			for _, sel := range rule.Selectors {
+				if sel.MatchesIndexed(n, six) {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				for _, d := range rule.Declarations {
+					e := cascadeEntry{
+						decl:       inViewport(d, vp),
+						origin:     2,
+						layerOrder: 0,
+						order:      order,
+					}
+					order++
+					if d.Important {
+						important = append(important, e)
+					} else {
+						normal = append(normal, e)
+					}
+				}
+			}
+		}
+	}
+	sortCascade(normal)
+	sortCascade(important)
+	vars := expanderFor(cs.Custom, normal, important, nil)
+	for _, e := range normal {
+		applyCascadeEntry(cs, e, parentFontSize, vars, fonts)
+	}
+	for _, e := range important {
+		applyCascadeEntry(cs, e, parentFontSize, vars, fonts)
 	}
 }
 
@@ -861,15 +1585,41 @@ func inheritStyle(parent *ComputedStyle) *ComputedStyle {
 // splits the list into two passes, then origin outranks specificity, and
 // specificity outranks document order.
 type cascadeEntry struct {
-	decl    css.Declaration
-	origin  int
-	a, b, c int
-	order   int
+	decl       css.Declaration
+	origin     int
+	layerOrder int
+	scopeDist  int
+	a, b, c    int
+	order      int
+}
+
+func layerPrecedenceRank(layerOrder int, important bool) int {
+	if !important {
+		// Normal author declarations:
+		// Layer 1 < Layer 2 < ... < Layer N < Unlayered
+		if layerOrder == 0 {
+			return 1_000_000_000
+		}
+		return layerOrder
+	}
+	// Important author declarations:
+	// Unlayered < Layer N < ... < Layer 2 < Layer 1
+	if layerOrder == 0 {
+		return 0
+	}
+	return 1_000_000_000 - layerOrder
 }
 
 func (e cascadeEntry) before(o cascadeEntry) bool {
 	if e.origin != o.origin {
 		return e.origin < o.origin
+	}
+	if e.origin > 0 { // Author rules & hints
+		rE := layerPrecedenceRank(e.layerOrder, e.decl.Important)
+		rO := layerPrecedenceRank(o.layerOrder, o.decl.Important)
+		if rE != rO {
+			return rE < rO
+		}
 	}
 	if e.a != o.a {
 		return e.a < o.a
@@ -879,6 +1629,18 @@ func (e cascadeEntry) before(o cascadeEntry) bool {
 	}
 	if e.c != o.c {
 		return e.c < o.c
+	}
+	// Scoping proximity:
+	// A scoped declaration outranks an unscoped declaration when specificity is equal;
+	// among scoped declarations, shorter distance to the scope root wins.
+	if e.scopeDist != o.scopeDist {
+		if e.scopeDist == 0 && o.scopeDist > 0 {
+			return true // o (scoped) wins over e (unscoped)
+		}
+		if e.scopeDist > 0 && o.scopeDist == 0 {
+			return false // e (scoped) wins over o (unscoped)
+		}
+		return e.scopeDist > o.scopeDist // lower distance wins
 	}
 	return e.order < o.order
 }
@@ -890,7 +1652,7 @@ func sortCascade(entries []cascadeEntry) {
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].before(entries[j]) })
 }
 
-func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
+func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex, result map[dom.NodeID]*ComputedStyle) *ComputedStyle {
 	cs := DefaultStyle()
 	if parent != nil {
 		inheritFromParent(&cs, parent)
@@ -913,9 +1675,60 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	// cascade slices be sized exactly instead of regrown by append.
 	cands := index.candidates(n)
 	matched := cands[:0]
+	var startingMatched []*indexedSelector
 	ruleDecls, ruleImportant := 0, 0
 	for _, cand := range cands {
-		if !cand.sel.MatchesIndexed(n, six) {
+		if cand.rule.StartingStyle {
+			startingMatched = append(startingMatched, cand)
+			continue
+		}
+		if cand.rule.ScopeRoot != "" || cand.rule.ScopeLimit != "" {
+			var rootNode *dom.Node
+			if cand.rule.ScopeRoot == "" {
+				if n.Doc != nil {
+					rootNode = &n.Doc.Node
+				}
+			} else {
+				rootSel := css.ParseSelector(cand.rule.ScopeRoot)
+				if rootSel.Matches(n) {
+					rootNode = n
+				} else {
+					for cur := n.Parent; cur != nil; cur = cur.Parent {
+						if cur.Element() && rootSel.Matches(cur) {
+							rootNode = cur
+							break
+						}
+					}
+				}
+			}
+			if rootNode == nil {
+				continue
+			}
+			if cand.rule.ScopeLimit != "" {
+				limitSel := css.ParseSelector(cand.rule.ScopeLimit)
+				blocked := false
+				for cur := n; cur != nil && cur != rootNode; cur = cur.Parent {
+					if cur.Element() && limitSel.Matches(cur) {
+						blocked = true
+						break
+					}
+				}
+				if blocked {
+					continue
+				}
+			}
+			rootNode.IsScopeRoot = true
+			matchedSel := cand.sel.MatchesIndexed(n, six)
+			rootNode.IsScopeRoot = false
+			if !matchedSel {
+				continue
+			}
+		} else {
+			if !cand.sel.MatchesIndexed(n, six) {
+				continue
+			}
+		}
+		if cand.rule.ContainerQuery != "" && !matchesContainerQuery(n, cand.rule.ContainerQuery, result, vp) {
 			continue
 		}
 		matched = append(matched, cand)
@@ -947,9 +1760,13 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	if cap := ruleImportant + len(inlineDecls); cap > 0 {
 		important = make([]cascadeEntry, 0, cap)
 	}
+
+	cqW, cqH := findNearestContainerDimensions(n, result, vp)
 	for _, cand := range matched {
+		dist := computeScopeDist(n, cand.rule.ScopeRoot)
 		for _, d := range cand.rule.Declarations {
-			e := cascadeEntry{decl: inViewport(d, vp), origin: cand.origin, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
+			d = inContainerUnits(inViewport(d, vp), cqW, cqH)
+			e := cascadeEntry{decl: d, origin: cand.origin, layerOrder: cand.layerOrder, scopeDist: dist, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
 			if d.Important {
 				important = append(important, e)
 			} else {
@@ -959,7 +1776,8 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	for _, d := range inlineDecls {
-		e := cascadeEntry{decl: inViewport(d, vp), origin: 2, a: 1, b: 1, c: 1, order: order}
+		d = inContainerUnits(inViewport(d, vp), cqW, cqH)
+		e := cascadeEntry{decl: d, origin: 2, a: 1, b: 1, c: 1, order: order}
 		order++
 		if d.Important {
 			important = append(important, e)
@@ -974,13 +1792,18 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 
 	sortCascade(normal)
 	sortCascade(important)
-	cs.Custom = resolveCustom(parent, normal, important)
-	vars := expanderFor(cs.Custom, normal, important)
+	cs.Custom = resolveCustom(parent, normal, important, index.properties)
+	cs.ColorScheme = resolveColorScheme(parent, normal, important)
+	cs.isDark = usedColorScheme(cs.ColorScheme, vp.DarkMode) == "dark"
+	vars := expanderFor(cs.Custom, normal, important, index.properties)
 	for _, e := range normal {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
 	}
 	for _, e := range important {
 		applyCascadeEntry(&cs, e, parentFontSize, vars, fonts)
+	}
+	if len(startingMatched) > 0 {
+		cs.Starting = resolveStartingStyle(startingMatched, vp, fonts, parentFontSize, vars)
 	}
 
 	// A font-relative length is a share of the element's own font size, and that
@@ -1064,6 +1887,64 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	return &cs
+}
+
+func computeScopeDist(n *dom.Node, scopeRoot string) int {
+	if scopeRoot == "" || n == nil {
+		return 0
+	}
+	rootSel := css.ParseSelector(scopeRoot)
+	hops := 1
+	if rootSel.Matches(n) {
+		return hops
+	}
+	for cur := n.Parent; cur != nil; cur = cur.Parent {
+		hops++
+		if cur.Element() && rootSel.Matches(cur) {
+			return hops
+		}
+	}
+	return 0
+}
+
+func resolveStartingStyle(matched []*indexedSelector, vp Viewport, fonts *CustomFonts, parentFontSize float32, vars *varExpander) *StartingStyle {
+	var normal, important []cascadeEntry
+	for _, cand := range matched {
+		for _, d := range cand.rule.Declarations {
+			d = inViewport(d, vp)
+			e := cascadeEntry{decl: d, origin: cand.origin, layerOrder: cand.layerOrder, a: cand.a, b: cand.b, c: cand.c, order: cand.rank}
+			if d.Important {
+				important = append(important, e)
+			} else {
+				normal = append(normal, e)
+			}
+		}
+	}
+	sortCascade(normal)
+	sortCascade(important)
+
+	st := &StartingStyle{
+		Values: make(map[string]string),
+	}
+	for _, es := range [][]cascadeEntry{normal, important} {
+		for _, e := range es {
+			val := e.decl.Value
+			if vars != nil && strings.Contains(val, "var(") {
+				val = vars.expand(val)
+			}
+			st.Values[e.decl.Property] = val
+			switch e.decl.Property {
+			case "opacity":
+				if op, err := strconv.ParseFloat(val, 32); err == nil {
+					st.Opacity = float32(op)
+					st.HasOpacity = true
+				}
+			case "display":
+				st.Display = parseDisplay(val)
+			}
+		}
+	}
+	return st
 }
 
 // resolveShadowColors finishes box-shadow and text-shadow after every other
@@ -1197,9 +2078,9 @@ func declaresTextAlign(normal, important []cascadeEntry) bool {
 }
 
 // resolveCustom collects the winning --* declarations in cascade order on top
-// of the inherited set. Elements that declare none share the parent's map
-// read-only; anything that mutates must copy first.
-func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[string]string {
+// of the inherited set. It respects @property registered descriptors, dropping
+// values that fail syntax validation and preventing inheritance when inherits: false.
+func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry, registered map[string]dom.PropertyDefinition) map[string]string {
 	custom := 0
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
@@ -1208,32 +2089,69 @@ func resolveCustom(parent *ComputedStyle, normal, important []cascadeEntry) map[
 			}
 		}
 	}
-	if custom == 0 {
+	if custom == 0 && len(registered) == 0 {
 		if parent != nil {
 			return parent.Custom
 		}
 		return nil
 	}
-	// Size for the inherited entries plus the overriding ones: duplicate names
-	// for the same property only overshoot, never grow the map twice.
-	n := custom
+	n := custom + len(registered)
 	if parent != nil {
 		n += len(parent.Custom)
 	}
 	m := make(map[string]string, n)
 	if parent != nil {
 		for k, v := range parent.Custom {
+			if reg, ok := registered[k]; ok && !reg.Inherits {
+				continue // do not inherit non-inherited custom properties
+			}
 			m[k] = v
 		}
 	}
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
 			if strings.HasPrefix(e.decl.Property, "--") {
-				m[e.decl.Property] = e.decl.Value
+				val := e.decl.Value
+				if reg, ok := registered[e.decl.Property]; ok && reg.Syntax != "*" {
+					if !css.MatchesPropertySyntax(reg.Syntax, val) {
+						if reg.InitialValue != "" {
+							m[e.decl.Property] = reg.InitialValue
+						} else {
+							delete(m, e.decl.Property)
+						}
+						continue
+					}
+				}
+				m[e.decl.Property] = val
+			}
+		}
+	}
+	for k, reg := range registered {
+		if _, ok := m[k]; !ok && reg.InitialValue != "" {
+			if !reg.Inherits || parent == nil {
+				m[k] = reg.InitialValue
 			}
 		}
 	}
 	return m
+}
+
+func resolveColorScheme(parent *ComputedStyle, normal, important []cascadeEntry) string {
+	scheme := ""
+	if parent != nil {
+		scheme = parent.ColorScheme
+	}
+	for _, es := range [][]cascadeEntry{normal, important} {
+		for _, e := range es {
+			if e.decl.Property == "color-scheme" {
+				val := strings.ToLower(strings.TrimSpace(e.decl.Value))
+				if val != "" {
+					scheme = val
+				}
+			}
+		}
+	}
+	return scheme
 }
 
 // applyCascadeEntry applies one winning declaration, expanding var()
@@ -1245,8 +2163,9 @@ func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32
 	}
 	value, parsed := e.decl.Value, e.decl.Parsed
 	if vars != nil && strings.Contains(value, "var(") {
+		vars.failed = false
 		value = vars.expand(value)
-		if strings.TrimSpace(value) == "" {
+		if vars.failed || strings.TrimSpace(value) == "" {
 			// Nothing resolved and no fallback was given: the declaration is
 			// invalid at computed-value time, so the property keeps the value it
 			// would have had without it. Parsing the empty string instead would
@@ -1272,10 +2191,12 @@ const maxVarSubstitutions = 4096
 // A property already being expanded is reported as missing, so a definition
 // that reaches itself falls back or collapses instead of looping forever.
 type varExpander struct {
-	custom   map[string]string
-	done     map[string]string
-	visiting map[string]bool
-	budget   int
+	custom     map[string]string
+	registered map[string]dom.PropertyDefinition
+	done       map[string]string
+	visiting   map[string]bool
+	budget     int
+	failed     bool
 }
 
 // expanderFor returns the var() expander for one element's custom properties,
@@ -1283,19 +2204,19 @@ type varExpander struct {
 // per element otherwise, and most elements never use one. A nil expander is
 // safe to pass to applyCascadeEntry precisely because the scan below proved no
 // value can reach the expansion branch.
-func expanderFor(custom map[string]string, normal, important []cascadeEntry) *varExpander {
+func expanderFor(custom map[string]string, normal, important []cascadeEntry, registered map[string]dom.PropertyDefinition) *varExpander {
 	for _, es := range [][]cascadeEntry{normal, important} {
 		for _, e := range es {
 			if strings.Contains(e.decl.Value, "var(") {
-				return newVarExpander(custom)
+				return newVarExpander(custom, registered)
 			}
 		}
 	}
 	return nil
 }
 
-func newVarExpander(custom map[string]string) *varExpander {
-	return &varExpander{custom: custom, budget: maxVarSubstitutions}
+func newVarExpander(custom map[string]string, registered map[string]dom.PropertyDefinition) *varExpander {
+	return &varExpander{custom: custom, registered: registered, budget: maxVarSubstitutions}
 }
 
 // expand substitutes every var() call in value, leaving the text alone once the
@@ -1321,6 +2242,7 @@ func (e *varExpander) expand(value string) string {
 			j++
 		}
 		if paren != 0 {
+			e.failed = true
 			return value[:i]
 		}
 		e.budget--
@@ -1336,6 +2258,8 @@ func (e *varExpander) expand(value string) string {
 			repl = v
 		} else if hasFallback {
 			repl = e.expand(fallback)
+		} else {
+			e.failed = true
 		}
 		// A resolved value is var-free by construction, so each pass retires one
 		// reference and the loop always terminates.
@@ -1360,6 +2284,11 @@ func (e *varExpander) resolve(name string) (string, bool) {
 	}
 	raw, ok := e.custom[name]
 	if !ok {
+		if e.registered != nil {
+			if reg, rok := e.registered[name]; rok && reg.InitialValue != "" {
+				return reg.InitialValue, true
+			}
+		}
 		return "", false
 	}
 	if e.visiting[name] {
@@ -1367,11 +2296,19 @@ func (e *varExpander) resolve(name string) (string, bool) {
 		return "", false
 	}
 	e.visiting[name] = true
+	prevFailed := e.failed
+	e.failed = false
 	v := e.expand(raw)
+	hadFailure := e.failed
+	e.failed = prevFailed
 	delete(e.visiting, name)
 	// A cycle deeper in this property's definition tree poisoned this name on the
 	// way through; it stays invalid so the reference above falls back.
 	if existing, bad := e.done[name]; bad && existing == varInvalid {
+		return "", false
+	}
+	if hadFailure {
+		e.done[name] = varInvalid
 		return "", false
 	}
 	e.done[name] = v
@@ -1399,6 +2336,11 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.LineHeight = parent.LineHeight
 	cs.LineHeightRatio = parent.LineHeightRatio
 	cs.TextAlign = parent.TextAlign
+	if parent.Direction != "" {
+		cs.Direction = parent.Direction
+	} else {
+		cs.Direction = "ltr"
+	}
 	cs.Visibility = parent.Visibility
 	cs.WhiteSpace = parent.WhiteSpace
 	cs.WordSpacing = parent.WordSpacing
@@ -1408,6 +2350,40 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.TextDecoration = parent.TextDecoration
 	cs.VerticalAlign = parent.VerticalAlign
 	cs.ListStyleType = parent.ListStyleType
+	cs.ColorScheme = parent.ColorScheme
+	if len(parent.Quotes) > 0 {
+		cs.Quotes = parent.Quotes
+	}
+	cs.AccentColor = parent.AccentColor
+	cs.TextUnderlineOffset = parent.TextUnderlineOffset
+	cs.TextDecorationThickness = parent.TextDecorationThickness
+	if parent.PointerEvents != "" {
+		cs.PointerEvents = parent.PointerEvents
+	}
+	if parent.UserSelect == "none" || parent.UserSelect == "all" || parent.UserSelect == "contain" {
+		cs.UserSelect = parent.UserSelect
+	}
+	if parent.CaretColor.A > 0 {
+		cs.CaretColor = parent.CaretColor
+	}
+	if parent.WordBreak != "" {
+		cs.WordBreak = parent.WordBreak
+	}
+	if parent.Hyphens != "" {
+		cs.Hyphens = parent.Hyphens
+	}
+	if parent.TabSize > 0 {
+		cs.TabSize = parent.TabSize
+	}
+	if parent.WritingMode != "" {
+		cs.WritingMode = parent.WritingMode
+	}
+	if parent.TextOrientation != "" {
+		cs.TextOrientation = parent.TextOrientation
+	}
+	if parent.FontVariantNumeric != "" {
+		cs.FontVariantNumeric = parent.FontVariantNumeric
+	}
 }
 
 func parseInlineDeclaration(s string) css.Declaration {
@@ -1537,6 +2513,216 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "visibility":
 		cs.Visibility = value
+	case "content-visibility":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "hidden" || val == "auto" || val == "visible" {
+			cs.ContentVisibility = val
+		}
+	case "contain-intrinsic-size":
+		fields := strings.Fields(strings.ToLower(value))
+		var lens []float32
+		for _, f := range fields {
+			if f == "auto" || f == "none" {
+				continue
+			}
+			v := css.ParseValue(f)
+			if lengthSpecified(v) {
+				lens = append(lens, resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize))
+			}
+		}
+		if len(lens) == 1 {
+			cs.ContainIntrinsicWidth = lens[0]
+			cs.ContainIntrinsicHeight = lens[0]
+		} else if len(lens) >= 2 {
+			cs.ContainIntrinsicWidth = lens[0]
+			cs.ContainIntrinsicHeight = lens[1]
+		}
+	case "contain-intrinsic-width":
+		fields := strings.Fields(strings.ToLower(value))
+		for _, f := range fields {
+			if f == "auto" || f == "none" {
+				continue
+			}
+			v := css.ParseValue(f)
+			if lengthSpecified(v) {
+				cs.ContainIntrinsicWidth = resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize)
+				break
+			}
+		}
+	case "contain-intrinsic-height":
+		fields := strings.Fields(strings.ToLower(value))
+		for _, f := range fields {
+			if f == "auto" || f == "none" {
+				continue
+			}
+			v := css.ParseValue(f)
+			if lengthSpecified(v) {
+				cs.ContainIntrinsicHeight = resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize)
+				break
+			}
+		}
+	case "anchor-name":
+		cs.AnchorName = strings.TrimSpace(value)
+	case "position-anchor":
+		cs.PositionAnchor = strings.TrimSpace(value)
+	case "text-wrap", "text-wrap-mode", "text-wrap-style":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "wrap" || val == "nowrap" || val == "balance" || val == "pretty" {
+			cs.TextWrap = val
+		}
+	case "line-clamp", "-webkit-line-clamp":
+		val := strings.TrimSpace(value)
+		if strings.EqualFold(val, "none") {
+			cs.LineClamp = 0
+		} else if n, err := strconv.Atoi(val); err == nil && n >= 0 {
+			cs.LineClamp = n
+		}
+	case "view-transition-name":
+		val := strings.TrimSpace(value)
+		if strings.EqualFold(val, "none") {
+			cs.ViewTransitionName = "none"
+		} else {
+			cs.ViewTransitionName = val
+		}
+	case "scroll-timeline-name":
+		cs.ScrollTimelineName = strings.TrimSpace(value)
+	case "scroll-timeline-axis":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "block" || val == "inline" || val == "x" || val == "y" {
+			cs.ScrollTimelineAxis = val
+		}
+	case "scroll-timeline":
+		fields := strings.Fields(strings.TrimSpace(value))
+		for _, f := range fields {
+			lower := strings.ToLower(f)
+			if lower == "block" || lower == "inline" || lower == "x" || lower == "y" {
+				cs.ScrollTimelineAxis = lower
+			} else {
+				cs.ScrollTimelineName = f
+			}
+		}
+	case "view-timeline-name":
+		cs.ViewTimelineName = strings.TrimSpace(value)
+	case "view-timeline-axis":
+		val := strings.ToLower(strings.TrimSpace(value))
+		if val == "block" || val == "inline" || val == "x" || val == "y" {
+			cs.ViewTimelineAxis = val
+		}
+	case "view-timeline-inset":
+		cs.ViewTimelineInset = strings.TrimSpace(value)
+	case "view-timeline":
+		fields := strings.Fields(strings.TrimSpace(value))
+		for _, f := range fields {
+			lower := strings.ToLower(f)
+			if lower == "block" || lower == "inline" || lower == "x" || lower == "y" {
+				cs.ViewTimelineAxis = lower
+			} else {
+				cs.ViewTimelineName = f
+			}
+		}
+	case "animation-timeline":
+		cs.AnimationTimeline = strings.TrimSpace(value)
+	case "scroll-snap-type":
+		fields := strings.Fields(strings.ToLower(value))
+		if len(fields) == 1 {
+			if fields[0] == "none" {
+				cs.ScrollSnapType = "none"
+			} else if fields[0] == "mandatory" || fields[0] == "proximity" {
+				cs.ScrollSnapStrictness = fields[0]
+			} else {
+				cs.ScrollSnapType = fields[0]
+			}
+		} else if len(fields) >= 2 {
+			for _, f := range fields {
+				switch f {
+				case "none", "x", "y", "block", "inline", "both":
+					cs.ScrollSnapType = f
+				case "mandatory", "proximity":
+					cs.ScrollSnapStrictness = f
+				}
+			}
+		}
+	case "scroll-snap-align":
+		cs.ScrollSnapAlign = strings.TrimSpace(strings.ToLower(value))
+	case "scroll-snap-stop":
+		cs.ScrollSnapStop = strings.TrimSpace(strings.ToLower(value))
+	case "scroll-padding":
+		t, r, b, l := parsePaddingShorthand(value, cs.FontSize, cs.rootFontSize)
+		cs.ScrollPaddingTop = t
+		cs.ScrollPaddingRight = r
+		cs.ScrollPaddingBottom = b
+		cs.ScrollPaddingLeft = l
+	case "scroll-padding-top":
+		cs.ScrollPaddingTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-padding-right":
+		cs.ScrollPaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-padding-bottom":
+		cs.ScrollPaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-padding-left":
+		cs.ScrollPaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin":
+		t, r, b, l := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
+		cs.ScrollMarginTop = t
+		cs.ScrollMarginRight = r
+		cs.ScrollMarginBottom = b
+		cs.ScrollMarginLeft = l
+	case "scroll-margin-top":
+		cs.ScrollMarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin-right":
+		cs.ScrollMarginRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin-bottom":
+		cs.ScrollMarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "scroll-margin-left":
+		cs.ScrollMarginLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "font-palette":
+		cs.FontPalette = strings.TrimSpace(value)
+	case "offset-path":
+		cs.OffsetPath = strings.TrimSpace(value)
+	case "offset-distance":
+		cs.OffsetDistance = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "offset-rotate":
+		cs.OffsetRotate = strings.TrimSpace(value)
+	case "offset":
+		val := strings.TrimSpace(value)
+		if strings.EqualFold(val, "none") {
+			cs.OffsetPath = "none"
+			cs.OffsetDistance = 0
+			cs.OffsetRotate = "auto"
+		} else {
+			pathStr := ""
+			rem := val
+			if idx := strings.Index(val, "path("); idx != -1 {
+				closeIdx := strings.Index(val[idx:], ")")
+				if closeIdx != -1 {
+					pathStr = val[idx : idx+closeIdx+1]
+					rem = strings.TrimSpace(val[:idx] + " " + val[idx+closeIdx+1:])
+				}
+			} else if idx := strings.Index(val, "ray("); idx != -1 {
+				closeIdx := strings.Index(val[idx:], ")")
+				if closeIdx != -1 {
+					pathStr = val[idx : idx+closeIdx+1]
+					rem = strings.TrimSpace(val[:idx] + " " + val[idx+closeIdx+1:])
+				}
+			}
+			if pathStr != "" {
+				cs.OffsetPath = pathStr
+			}
+			fields := strings.Fields(rem)
+			for _, f := range fields {
+				p := css.ParseValue(f)
+				if p.Type == css.ValueLength || (p.Type == css.ValueNumber && p.Num == 0) {
+					cs.OffsetDistance = resolveLengthEm(p, 0, cs.FontSize, cs.rootFontSize)
+				} else if strings.EqualFold(f, "auto") || strings.EqualFold(f, "reverse") || strings.HasSuffix(f, "deg") || strings.HasSuffix(f, "rad") || strings.HasSuffix(f, "turn") {
+					cs.OffsetRotate = f
+				} else if cs.OffsetPath == "" {
+					cs.OffsetPath = f
+				}
+			}
+		}
+	case "shape-outside":
+		cs.ShapeOutside = strings.TrimSpace(value)
+	case "shape-margin":
+		cs.ShapeMargin = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "clip":
 		if parsed.Type == css.ValueFunc && strings.EqualFold(parsed.Func, "rect") && len(parsed.Parts) == 4 {
 			cs.HasClip = true
@@ -1578,82 +2764,127 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.ZIndex = int32(parsed.Num)
 		}
 
+	case "container-type":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "normal", "size", "inline-size":
+			cs.ContainerType = v
+		default:
+			cs.ContainerType = "normal"
+		}
+	case "container-name":
+		cs.ContainerName = strings.TrimSpace(value)
+	case "container":
+		parts := strings.Split(value, "/")
+		if len(parts) == 2 {
+			name := strings.TrimSpace(parts[0])
+			typ := strings.ToLower(strings.TrimSpace(parts[1]))
+			if name == "none" {
+				cs.ContainerName = ""
+			} else {
+				cs.ContainerName = name
+			}
+			switch typ {
+			case "normal", "size", "inline-size":
+				cs.ContainerType = typ
+			default:
+				cs.ContainerType = "normal"
+			}
+		} else {
+			val := strings.TrimSpace(value)
+			valLower := strings.ToLower(val)
+			if valLower == "normal" || valLower == "size" || valLower == "inline-size" {
+				cs.ContainerType = valLower
+				cs.ContainerName = ""
+			} else if valLower == "none" {
+				cs.ContainerName = ""
+				cs.ContainerType = "normal"
+			} else {
+				cs.ContainerName = val
+				cs.ContainerType = "normal"
+			}
+		}
+
 	// Font-relative units in a box size resolve against the element's own font,
 	// the same way margins already do: `width:10em` on a 20px element is 200px.
 	// A math function holding a percentage is deferred to layout, which owns
 	// the containing block the share speaks.
-	case "width":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+	case "width", "inline-size":
+		if isAnchorSizeFunc(value) {
+			cs.WidthAnchor = extractAnchorArgs(value)
+		} else if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.WidthCalc, cs.Width = d, -1
 		} else {
 			cs.WidthCalc = DeferredLength{}
-			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize)
+			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
-	case "height":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+	case "height", "block-size":
+		if isAnchorSizeFunc(value) {
+			cs.HeightAnchor = extractAnchorArgs(value)
+		} else if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.HeightCalc, cs.Height = d, -1
 		} else {
 			cs.HeightCalc = DeferredLength{}
-			cs.Height = resolveLengthEm(parsed, -1, cs.FontSize)
+			cs.Height = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
 		}
-	case "min-width":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+	case "min-width", "min-inline-size":
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinWidthCalc, cs.MinWidth = d, 0
 		} else {
 			cs.MinWidthCalc = DeferredLength{}
-			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize)
+			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
-	case "min-height":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+	case "min-height", "min-block-size":
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinHeightCalc, cs.MinHeight = d, 0
 		} else {
 			cs.MinHeightCalc = DeferredLength{}
-			cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize)
+			cs.MinHeight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
-	case "max-width":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+	case "max-width", "max-inline-size":
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MaxWidthCalc, cs.MaxWidth = d, -1
 		} else {
 			cs.MaxWidthCalc = DeferredLength{}
-			cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize)
+			cs.MaxWidth = resolveMaxLength(parsed, cs.FontSize, cs.rootFontSize)
 		}
-	case "max-height":
-		if d, ok := deferPercentFunc(parsed, cs.FontSize); ok {
+	case "max-height", "max-block-size":
+		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MaxHeightCalc, cs.MaxHeight = d, -1
 		} else {
 			cs.MaxHeightCalc = DeferredLength{}
-			cs.MaxHeight = resolveMaxLength(parsed, cs.FontSize)
+			cs.MaxHeight = resolveMaxLength(parsed, cs.FontSize, cs.rootFontSize)
 		}
 
 	case "margin":
-		t, r, b, l := parseMarginShorthand(value, cs.FontSize)
+		t, r, b, l := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop = t
 		cs.MarginRight = r
 		cs.MarginBottom = b
 		cs.MarginLeft = l
 	case "margin-top":
-		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-right":
-		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-bottom":
-		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-left":
-		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 
 	case "padding":
-		t, r, b, l := parsePaddingShorthand(value, cs.FontSize)
+		t, r, b, l := parsePaddingShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.PaddingTop = t
 		cs.PaddingRight = r
 		cs.PaddingBottom = b
 		cs.PaddingLeft = l
 	case "padding-top":
-		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-right":
-		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-bottom":
-		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-left":
-		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 
 	// Logical box properties. goosie lays out left-to-right, so inline maps onto
 	// the horizontal axis and block onto the vertical one, start onto left and
@@ -1661,33 +2892,148 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	// gutters with `padding-inline: var(...)` and nothing else, so without the
 	// alias the whole page loses its side padding.
 	case "margin-block":
-		a, b := logicalPair(value, 0, cs.FontSize)
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop, cs.MarginBottom = a, b
 	case "margin-inline":
-		a, b := logicalPair(value, MarginAuto, cs.FontSize)
+		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
 		cs.MarginLeft, cs.MarginRight = a, b
 	case "margin-block-start":
-		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-block-end":
-		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-start":
-		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		if cs.Direction == "rtl" {
+			cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		}
 	case "margin-inline-end":
-		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize)
+		if cs.Direction == "rtl" {
+			cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
+		}
 	case "padding-block":
-		a, b := logicalPair(value, 0, cs.FontSize)
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.PaddingTop, cs.PaddingBottom = a, b
 	case "padding-inline":
-		a, b := logicalPair(value, 0, cs.FontSize)
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
 		cs.PaddingLeft, cs.PaddingRight = a, b
 	case "padding-block-start":
-		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-block-end":
-		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize)
+		cs.PaddingBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "padding-inline-start":
-		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize)
+		if cs.Direction == "rtl" {
+			cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 	case "padding-inline-end":
-		cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize)
+		if cs.Direction == "rtl" {
+			cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		} else {
+			cs.PaddingRight = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+
+	case "border-inline":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderLeftWidth, cs.BorderRightWidth = w, w
+		cs.BorderLeftStyle, cs.BorderRightStyle = s, s
+		cs.BorderLeftColor, cs.BorderRightColor = c, c
+	case "border-block":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderTopWidth, cs.BorderBottomWidth = w, w
+		cs.BorderTopStyle, cs.BorderBottomStyle = s, s
+		cs.BorderTopColor, cs.BorderBottomColor = c, c
+	case "border-inline-start":
+		w, s, c := parseBorderShorthand(value)
+		if cs.Direction == "rtl" {
+			cs.BorderRightWidth, cs.BorderRightStyle, cs.BorderRightColor = w, s, c
+		} else {
+			cs.BorderLeftWidth, cs.BorderLeftStyle, cs.BorderLeftColor = w, s, c
+		}
+	case "border-inline-end":
+		w, s, c := parseBorderShorthand(value)
+		if cs.Direction == "rtl" {
+			cs.BorderLeftWidth, cs.BorderLeftStyle, cs.BorderLeftColor = w, s, c
+		} else {
+			cs.BorderRightWidth, cs.BorderRightStyle, cs.BorderRightColor = w, s, c
+		}
+	case "border-block-start":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderTopWidth, cs.BorderTopStyle, cs.BorderTopColor = w, s, c
+	case "border-block-end":
+		w, s, c := parseBorderShorthand(value)
+		cs.BorderBottomWidth, cs.BorderBottomStyle, cs.BorderBottomColor = w, s, c
+	case "border-inline-width":
+		w := resolveLength(parsed, 0)
+		cs.BorderLeftWidth, cs.BorderRightWidth = w, w
+	case "border-block-width":
+		w := resolveLength(parsed, 0)
+		cs.BorderTopWidth, cs.BorderBottomWidth = w, w
+	case "border-inline-start-width":
+		w := resolveLength(parsed, 0)
+		if cs.Direction == "rtl" {
+			cs.BorderRightWidth = w
+		} else {
+			cs.BorderLeftWidth = w
+		}
+	case "border-inline-end-width":
+		w := resolveLength(parsed, 0)
+		if cs.Direction == "rtl" {
+			cs.BorderLeftWidth = w
+		} else {
+			cs.BorderRightWidth = w
+		}
+	case "border-block-start-width":
+		cs.BorderTopWidth = resolveLength(parsed, 0)
+	case "border-block-end-width":
+		cs.BorderBottomWidth = resolveLength(parsed, 0)
+	case "border-inline-style":
+		cs.BorderLeftStyle, cs.BorderRightStyle = value, value
+	case "border-block-style":
+		cs.BorderTopStyle, cs.BorderBottomStyle = value, value
+	case "border-inline-start-style":
+		if cs.Direction == "rtl" {
+			cs.BorderRightStyle = value
+		} else {
+			cs.BorderLeftStyle = value
+		}
+	case "border-inline-end-style":
+		if cs.Direction == "rtl" {
+			cs.BorderLeftStyle = value
+		} else {
+			cs.BorderRightStyle = value
+		}
+	case "border-block-start-style":
+		cs.BorderTopStyle = value
+	case "border-block-end-style":
+		cs.BorderBottomStyle = value
+	case "border-inline-color":
+		clr := parseColorValueWithScheme(value, cs.scheme())
+		cs.BorderLeftColor, cs.BorderRightColor = clr, clr
+	case "border-block-color":
+		clr := parseColorValueWithScheme(value, cs.scheme())
+		cs.BorderTopColor, cs.BorderBottomColor = clr, clr
+	case "border-inline-start-color":
+		clr := parseColorValueWithScheme(value, cs.scheme())
+		if cs.Direction == "rtl" {
+			cs.BorderRightColor = clr
+		} else {
+			cs.BorderLeftColor = clr
+		}
+	case "border-inline-end-color":
+		clr := parseColorValueWithScheme(value, cs.scheme())
+		if cs.Direction == "rtl" {
+			cs.BorderLeftColor = clr
+		} else {
+			cs.BorderRightColor = clr
+		}
+	case "border-block-start-color":
+		cs.BorderTopColor = parseColorValueWithScheme(value, cs.scheme())
+	case "border-block-end-color":
+		cs.BorderBottomColor = parseColorValueWithScheme(value, cs.scheme())
 
 	case "border":
 		w, s, c := parseBorderShorthand(value)
@@ -1732,19 +3078,19 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-left-style":
 		cs.BorderLeftStyle = value
 	case "border-color":
-		colors := parseBorderColors(value)
+		colors := parseBorderColorsWithScheme(value, cs.scheme())
 		cs.BorderTopColor = colors[0]
 		cs.BorderRightColor = colors[1]
 		cs.BorderBottomColor = colors[2]
 		cs.BorderLeftColor = colors[3]
 	case "border-top-color":
-		cs.BorderTopColor = parseColorValue(value)
+		cs.BorderTopColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-right-color":
-		cs.BorderRightColor = parseColorValue(value)
+		cs.BorderRightColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-bottom-color":
-		cs.BorderBottomColor = parseColorValue(value)
+		cs.BorderBottomColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-left-color":
-		cs.BorderLeftColor = parseColorValue(value)
+		cs.BorderLeftColor = parseColorValueWithScheme(value, cs.scheme())
 	case "border-top":
 		w, s, c := parseBorderShorthand(value)
 		cs.BorderTopWidth = w
@@ -1775,6 +3121,30 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseCornerRadius(cs, &cs.BorderRadius[2], value)
 	case "border-bottom-left-radius":
 		parseCornerRadius(cs, &cs.BorderRadius[3], value)
+	case "border-start-start-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[1], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[0], value)
+		}
+	case "border-start-end-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[0], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[1], value)
+		}
+	case "border-end-start-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[2], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[3], value)
+		}
+	case "border-end-end-radius":
+		if cs.Direction == "rtl" {
+			parseCornerRadius(cs, &cs.BorderRadius[3], value)
+		} else {
+			parseCornerRadius(cs, &cs.BorderRadius[2], value)
+		}
 	case "border-image-source":
 		cs.BorderImage.Source = css.ParseBorderImageSource(value)
 	case "border-image-slice":
@@ -1796,31 +3166,141 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "border-image":
 		applyBorderImageShorthand(cs, value)
 	case "top":
-		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize)
-		cs.HasTop = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.TopAnchor = extractAnchorArgs(value)
+			cs.HasTop = true
+		} else {
+			cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasTop = lengthSpecified(parsed)
+		}
 	case "right":
-		cs.Right = resolveLengthEm(parsed, 0, cs.FontSize)
-		cs.HasRight = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.RightAnchor = extractAnchorArgs(value)
+			cs.HasRight = true
+		} else {
+			cs.Right = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasRight = lengthSpecified(parsed)
+		}
 	case "bottom":
-		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize)
-		cs.HasBottom = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.BottomAnchor = extractAnchorArgs(value)
+			cs.HasBottom = true
+		} else {
+			cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasBottom = lengthSpecified(parsed)
+		}
 	case "left":
-		cs.Left = resolveLengthEm(parsed, 0, cs.FontSize)
-		cs.HasLeft = lengthSpecified(parsed)
+		if isAnchorFunc(value) {
+			cs.LeftAnchor = extractAnchorArgs(value)
+			cs.HasLeft = true
+		} else {
+			cs.Left = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasLeft = lengthSpecified(parsed)
+		}
+	case "inset":
+		parts := splitTopLevelSpace(value)
+		switch len(parts) {
+		case 1:
+			v := css.ParseValue(parts[0])
+			val := resolveLengthEm(v, 0, cs.FontSize, cs.rootFontSize)
+			has := lengthSpecified(v)
+			cs.Top, cs.Right, cs.Bottom, cs.Left = val, val, val, val
+			cs.HasTop, cs.HasRight, cs.HasBottom, cs.HasLeft = has, has, has, has
+		case 2:
+			v0 := css.ParseValue(parts[0])
+			v1 := css.ParseValue(parts[1])
+			tb := resolveLengthEm(v0, 0, cs.FontSize, cs.rootFontSize)
+			rl := resolveLengthEm(v1, 0, cs.FontSize, cs.rootFontSize)
+			hasTB := lengthSpecified(v0)
+			hasRL := lengthSpecified(v1)
+			cs.Top, cs.Bottom = tb, tb
+			cs.Right, cs.Left = rl, rl
+			cs.HasTop, cs.HasBottom = hasTB, hasTB
+			cs.HasRight, cs.HasLeft = hasRL, hasRL
+		case 3:
+			v0 := css.ParseValue(parts[0])
+			v1 := css.ParseValue(parts[1])
+			v2 := css.ParseValue(parts[2])
+			t := resolveLengthEm(v0, 0, cs.FontSize, cs.rootFontSize)
+			rl := resolveLengthEm(v1, 0, cs.FontSize, cs.rootFontSize)
+			b := resolveLengthEm(v2, 0, cs.FontSize, cs.rootFontSize)
+			cs.Top = t
+			cs.Right, cs.Left = rl, rl
+			cs.Bottom = b
+			cs.HasTop = lengthSpecified(v0)
+			cs.HasRight, cs.HasLeft = lengthSpecified(v1), lengthSpecified(v1)
+			cs.HasBottom = lengthSpecified(v2)
+		case 4:
+			v0 := css.ParseValue(parts[0])
+			v1 := css.ParseValue(parts[1])
+			v2 := css.ParseValue(parts[2])
+			v3 := css.ParseValue(parts[3])
+			cs.Top = resolveLengthEm(v0, 0, cs.FontSize, cs.rootFontSize)
+			cs.Right = resolveLengthEm(v1, 0, cs.FontSize, cs.rootFontSize)
+			cs.Bottom = resolveLengthEm(v2, 0, cs.FontSize, cs.rootFontSize)
+			cs.Left = resolveLengthEm(v3, 0, cs.FontSize, cs.rootFontSize)
+			cs.HasTop = lengthSpecified(v0)
+			cs.HasRight = lengthSpecified(v1)
+			cs.HasBottom = lengthSpecified(v2)
+			cs.HasLeft = lengthSpecified(v3)
+		}
+	case "inset-block":
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
+		cs.Top, cs.Bottom = a, b
+		cs.HasTop, cs.HasBottom = true, true
+	case "inset-inline":
+		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.Right, cs.Left = a, b
+		} else {
+			cs.Left, cs.Right = a, b
+		}
+		cs.HasLeft, cs.HasRight = true, true
+	case "inset-block-start":
+		cs.Top = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.HasTop = lengthSpecified(parsed)
+	case "inset-block-end":
+		cs.Bottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.HasBottom = lengthSpecified(parsed)
+	case "inset-inline-start":
+		val := resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.Right = val
+			cs.HasRight = lengthSpecified(parsed)
+		} else {
+			cs.Left = val
+			cs.HasLeft = lengthSpecified(parsed)
+		}
+	case "inset-inline-end":
+		val := resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if cs.Direction == "rtl" {
+			cs.Left = val
+			cs.HasLeft = lengthSpecified(parsed)
+		} else {
+			cs.Right = val
+			cs.HasRight = lengthSpecified(parsed)
+		}
 
+	case "color-scheme":
+		cs.ColorScheme = strings.ToLower(strings.TrimSpace(value))
+		// The used scheme is selected from the winning cascaded value and
+		// viewport preference before declarations are applied, so source order
+		// cannot change how light-dark() colors resolve.
 	case "color":
-		// A value that is not a colour at all - `initial`, a `light-dark()` this
-		// engine does not evaluate, the residue of a var() that never resolved -
-		// is invalid at computed-value time, so the property keeps the colour it
-		// inherited. Storing the zero instead paints the text transparent, which
-		// reads as a blank gap where a word should be.
-		if c, ok := css.ParseColor(value); ok {
+		if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
 			cs.Color = c
 		}
+	case "accent-color":
+		v := strings.TrimSpace(strings.ToLower(value))
+		if v == "auto" {
+			cs.AccentColor = css.Color{}
+		} else if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
+			cs.AccentColor = c
+		}
 	case "background-color":
-		cs.BackgroundColor = parseColorValue(value)
+		cs.BackgroundColor = parseColorValueWithScheme(value, cs.scheme())
 	case "background":
-		cs.BackgroundColor, cs.BackgroundGradient, cs.BackgroundRadialGradient = parseBackground(value)
+		cs.BackgroundColor, cs.BackgroundGradient, cs.BackgroundRadialGradient = parseBackgroundWithScheme(value, cs.scheme())
 		cs.BackgroundImage = extractBackgroundURL(value)
 		parseBackgroundShorthandExtras(cs, value)
 	case "background-image":
@@ -1832,11 +3312,22 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		// gradients) leaves the field empty. Both spellings feed the same
 		// field in cascade order so the later declaration wins.
 		cs.MaskImage = extractBackgroundURL(value)
+	case "mask-repeat", "-webkit-mask-repeat":
+		cs.MaskRepeat = strings.ToLower(strings.TrimSpace(value))
+	case "mask-size", "-webkit-mask-size":
+		cs.MaskSize = strings.ToLower(strings.TrimSpace(value))
+	case "mask-position", "-webkit-mask-position":
+		cs.MaskPosition = strings.ToLower(strings.TrimSpace(value))
+	case "mask", "-webkit-mask":
+		v := strings.TrimSpace(value)
+		if u := extractBackgroundURL(v); u != "" {
+			cs.MaskImage = u
+		}
 	case "background-repeat":
 		cs.BackgroundRepeat, cs.BackgroundRepeatY = parseBackgroundRepeat(value)
 	case "background-origin":
 		cs.BackgroundOrigin = parseBackgroundBox(value, false)
-	case "background-clip":
+	case "background-clip", "-webkit-background-clip":
 		cs.BackgroundClip = parseBackgroundBox(value, true)
 	case "background-size":
 		parseBackgroundSize(cs, value)
@@ -1863,20 +3354,156 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
 		cs.LineHeightEm = lineHeightEm(parsed)
+	case "direction":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "rtl" || v == "ltr" {
+			cs.Direction = v
+		}
 	case "text-align":
-		cs.TextAlign = parseTextAlign(value)
+		cs.TextAlign = parseTextAlign(value, cs.Direction)
 	case "text-indent":
 		cs.TextIndent = resolveLength(parsed, 0)
 	case "text-transform":
-		cs.TextTransform = value
+		cs.TextTransform = strings.ToLower(strings.TrimSpace(value))
 	case "text-decoration":
 		cs.TextDecoration = parseTextDecoration(value)
+	case "text-underline-offset":
+		if strings.TrimSpace(strings.ToLower(value)) == "auto" {
+			cs.TextUnderlineOffset = 0
+		} else {
+			cs.TextUnderlineOffset = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+	case "text-decoration-thickness":
+		vLower := strings.TrimSpace(strings.ToLower(value))
+		if vLower == "auto" || vLower == "from-font" {
+			cs.TextDecorationThickness = 0
+		} else {
+			cs.TextDecorationThickness = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 	case "white-space":
 		cs.WhiteSpace = parseWhiteSpace(value)
 	case "word-spacing":
-		cs.WordSpacing = resolveLength(parsed, 0)
+		if strings.TrimSpace(strings.ToLower(value)) == "normal" {
+			cs.WordSpacing = 0
+		} else {
+			cs.WordSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
 	case "letter-spacing":
-		cs.LetterSpacing = resolveLength(parsed, 0)
+		if strings.TrimSpace(strings.ToLower(value)) == "normal" {
+			cs.LetterSpacing = 0
+		} else {
+			cs.LetterSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+
+	case "pointer-events":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "none", "visiblepainted", "visiblefill", "visiblestroke", "visible", "painted", "fill", "stroke", "all":
+			cs.PointerEvents = v
+		case "initial", "unset":
+			cs.PointerEvents = "auto"
+		}
+	case "user-select", "-webkit-user-select":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "text", "none", "contain", "all":
+			cs.UserSelect = v
+		case "initial", "unset":
+			cs.UserSelect = "auto"
+		}
+
+	case "caret-color":
+		v := strings.TrimSpace(strings.ToLower(value))
+		if v == "auto" {
+			cs.CaretColor = css.Color{}
+		} else if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
+			cs.CaretColor = c
+		}
+
+	case "overscroll-behavior":
+		parts := strings.Fields(strings.ToLower(strings.TrimSpace(value)))
+		if len(parts) == 1 {
+			switch parts[0] {
+			case "auto", "contain", "none":
+				cs.OverscrollBehaviorX = parts[0]
+				cs.OverscrollBehaviorY = parts[0]
+			}
+		} else if len(parts) >= 2 {
+			switch parts[0] {
+			case "auto", "contain", "none":
+				cs.OverscrollBehaviorX = parts[0]
+			}
+			switch parts[1] {
+			case "auto", "contain", "none":
+				cs.OverscrollBehaviorY = parts[1]
+			}
+		}
+	case "overscroll-behavior-x", "overscroll-behavior-inline":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "contain", "none":
+			cs.OverscrollBehaviorX = v
+		}
+	case "overscroll-behavior-y", "overscroll-behavior-block":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "auto", "contain", "none":
+			cs.OverscrollBehaviorY = v
+		}
+
+	case "word-break":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "normal", "break-all", "keep-all", "break-word":
+			cs.WordBreak = v
+		case "initial", "unset":
+			cs.WordBreak = "normal"
+		}
+
+	case "hyphens", "-webkit-hyphens":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "none", "manual", "auto":
+			cs.Hyphens = v
+		case "initial", "unset":
+			cs.Hyphens = "manual"
+		}
+
+	case "tab-size":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "initial" || v == "unset" {
+			cs.TabSize = 8
+		} else if parsed.Type == css.ValueNumber && parsed.Num >= 0 {
+			cs.TabSize = float32(parsed.Num)
+		} else if parsed.Type == css.ValueLength {
+			cs.TabSize = resolveLengthEm(parsed, 8, cs.FontSize, cs.rootFontSize)
+		}
+
+	case "writing-mode":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr":
+			cs.WritingMode = v
+		case "initial", "unset":
+			cs.WritingMode = "horizontal-tb"
+		}
+
+	case "text-orientation":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "mixed", "upright", "sideways":
+			cs.TextOrientation = v
+		case "initial", "unset":
+			cs.TextOrientation = "mixed"
+		}
+
+	case "font-variant-numeric":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v == "initial" || v == "unset" {
+			cs.FontVariantNumeric = "normal"
+		} else if v != "" {
+			cs.FontVariantNumeric = v
+		}
 
 	case "vertical-align":
 		cs.VerticalAlign = value
@@ -1911,19 +3538,21 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 	case "object-fit":
 		cs.ObjectFit = value
-	case "gap":
-		g := resolveLength(parsed, 0)
-		cs.RowGap, cs.ColumnGap = g, g
-	case "grid-gap":
-		// The superseded name for gap, still what a page declares.
-		g := resolveLength(parsed, 0)
-		cs.RowGap, cs.ColumnGap = g, g
-	case "row-gap":
-		cs.RowGap = resolveLength(parsed, 0)
-	case "column-gap":
+	case "gap", "grid-gap":
+		parts := splitTopLevelSpace(value)
+		if len(parts) == 1 {
+			g := resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize, cs.rootFontSize)
+			cs.RowGap, cs.ColumnGap = g, g
+		} else if len(parts) >= 2 {
+			cs.RowGap = resolveLengthEm(css.ParseValue(parts[0]), 0, cs.FontSize, cs.rootFontSize)
+			cs.ColumnGap = resolveLengthEm(css.ParseValue(parts[1]), 0, cs.FontSize, cs.rootFontSize)
+		}
+	case "row-gap", "grid-row-gap":
+		cs.RowGap = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+	case "column-gap", "grid-column-gap":
 		// A grid spends this on its column axis; a row-direction flexbox on its
 		// main axis. Wikipedia's page grid declares only this and no `gap`.
-		cs.ColumnGap = resolveLength(parsed, 0)
+		cs.ColumnGap = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "grid-template-columns":
 		cs.GridTemplateColumns = value
 	case "grid-template-rows":
@@ -1938,11 +3567,23 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		// area unmatched and the item fell through to auto-placement.
 		cs.GridArea = strings.TrimSpace(value)
 	case "grid-column":
-		cs.GridColumnSpan = parseGridSpan(value)
 		cs.GridColumn = strings.TrimSpace(value)
+		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
+	case "grid-column-start":
+		cs.GridColumn = buildGridPlacement(strings.TrimSpace(value), extractGridEnd(cs.GridColumn))
+		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
+	case "grid-column-end":
+		cs.GridColumn = buildGridPlacement(extractGridStart(cs.GridColumn), strings.TrimSpace(value))
+		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
 	case "grid-row":
-		cs.GridRowSpan = parseGridSpan(value)
 		cs.GridRow = strings.TrimSpace(value)
+		cs.GridRowSpan = parseGridSpan(cs.GridRow)
+	case "grid-row-start":
+		cs.GridRow = buildGridPlacement(strings.TrimSpace(value), extractGridEnd(cs.GridRow))
+		cs.GridRowSpan = parseGridSpan(cs.GridRow)
+	case "grid-row-end":
+		cs.GridRow = buildGridPlacement(extractGridStart(cs.GridRow), strings.TrimSpace(value))
+		cs.GridRowSpan = parseGridSpan(cs.GridRow)
 	case "justify-items":
 		cs.JustifyItems = value
 	case "align-content":
@@ -2027,7 +3668,96 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.AnimationDirection = css.ParseAnimationDirection(value)
 	case "animation-fill-mode":
 		cs.AnimationFillMode = css.ParseAnimationFillMode(value)
+	case "backdrop-filter", "-webkit-backdrop-filter":
+		cs.BackdropFilter = css.ParseFilter(value)
+	case "quotes":
+		cs.Quotes = parseQuotes(value)
+	case "aspect-ratio":
+		cs.AspectRatio = parseAspectRatio(value)
 	}
+}
+
+// parseAspectRatio parses the CSS aspect-ratio property value (e.g., "16 / 9", "1", "auto 16/9").
+func parseAspectRatio(v string) float32 {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "none" || v == "auto" {
+		return 0
+	}
+	lower := strings.ToLower(v)
+	if strings.HasPrefix(lower, "auto ") {
+		v = strings.TrimSpace(v[5:])
+	}
+	parts := strings.Split(v, "/")
+	if len(parts) == 2 {
+		w, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+		h, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+		if err1 == nil && err2 == nil && w > 0 && h > 0 {
+			return float32(w / h)
+		}
+		return 0
+	}
+	if len(parts) == 1 {
+		w, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+		if err == nil && w > 0 {
+			return float32(w)
+		}
+	}
+	return 0
+}
+
+// parseQuotes parses a CSS quotes property value into a slice of quote string pairs.
+func parseQuotes(value string) []string {
+	v := strings.TrimSpace(value)
+	lower := strings.ToLower(v)
+	if lower == "none" {
+		return []string{}
+	}
+	if lower == "auto" {
+		return []string{"“", "”", "‘", "’"}
+	}
+	var quotes []string
+	i := 0
+	for i < len(v) {
+		for i < len(v) && (v[i] == ' ' || v[i] == '\t' || v[i] == '\n' || v[i] == '\r') {
+			i++
+		}
+		if i >= len(v) {
+			break
+		}
+		if v[i] == '"' || v[i] == '\'' {
+			quoteChar := v[i]
+			i++
+			var sb strings.Builder
+			for i < len(v) {
+				if v[i] == '\\' && i+1 < len(v) {
+					sb.WriteByte(v[i])
+					i++
+					sb.WriteByte(v[i])
+					i++
+					continue
+				}
+				if v[i] == quoteChar {
+					break
+				}
+				sb.WriteByte(v[i])
+				i++
+			}
+			str := css.DecodeEscapes(sb.String())
+			quotes = append(quotes, str)
+			if i < len(v) && v[i] == quoteChar {
+				i++
+			}
+		} else {
+			i++
+		}
+	}
+	if len(quotes)%2 != 0 {
+		quotes = quotes[:len(quotes)-1]
+	}
+	if len(quotes) == 0 {
+		return []string{}
+	}
+	return quotes
 }
 
 // MarginAuto is the sentinel value stored in a margin field when the CSS
@@ -2038,16 +3768,16 @@ const MarginAuto float32 = -1
 
 // logicalPair reads a `-inline`/`-block` shorthand: one length for both sides,
 // or the start and end side separately.
-func logicalPair(v string, auto, fontSize float32) (float32, float32) {
+func logicalPair(v string, auto, fontSize float32, rootFontSize ...float32) (float32, float32) {
 	parts := splitTopLevelSpace(v)
 	if len(parts) == 0 {
 		return auto, auto
 	}
-	a := resolveLengthEm(css.ParseValue(parts[0]), auto, fontSize)
+	a := resolveLengthEm(css.ParseValue(parts[0]), auto, fontSize, rootFontSize...)
 	if len(parts) < 2 {
 		return a, a
 	}
-	return a, resolveLengthEm(css.ParseValue(parts[1]), auto, fontSize)
+	return a, resolveLengthEm(css.ParseValue(parts[1]), auto, fontSize, rootFontSize...)
 }
 
 // splitTopLevelSpace cuts a value on the whitespace outside its parentheses.
@@ -2092,13 +3822,16 @@ func splitTopLevelSpace(v string) []string {
 func againstOwnFont(prop string) bool {
 	switch prop {
 	case "width", "height", "min-width", "min-height", "max-width", "max-height",
+		"inline-size", "block-size", "min-inline-size", "min-block-size", "max-inline-size", "max-block-size",
 		"margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
 		"margin-block", "margin-block-start", "margin-block-end",
 		"margin-inline", "margin-inline-start", "margin-inline-end",
 		"padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
 		"padding-block", "padding-block-start", "padding-block-end",
 		"padding-inline", "padding-inline-start", "padding-inline-end",
-		"top", "right", "bottom", "left":
+		"top", "right", "bottom", "left",
+		"inset", "inset-block", "inset-block-start", "inset-block-end",
+		"inset-inline", "inset-inline-start", "inset-inline-end":
 		return true
 	}
 	return false
@@ -2107,10 +3840,11 @@ func againstOwnFont(prop string) bool {
 // DeferredLength holds a math-function box size that contains a percentage,
 // kept for layout-time resolution against the containing block. Expr is the
 // parsed function value, Em the element's font size for em/ch terms once the
-// cascade's font re-application pass has run.
+// cascade's font re-application pass has run, and Rem the root element's font size.
 type DeferredLength struct {
 	Expr css.Value
 	Em   float32
+	Rem  float32
 	Set  bool
 }
 
@@ -2118,9 +3852,13 @@ type DeferredLength struct {
 // layout. Any other value reports false and resolves through the usual path.
 // A later cascade entry for the same property re-runs this, so overriding a
 // deferred function with a plain length clears the deferral.
-func deferPercentFunc(v css.Value, fontSize float32) (DeferredLength, bool) {
+func deferPercentFunc(v css.Value, fontSize float32, rootFontSize ...float32) (DeferredLength, bool) {
 	if v.Type == css.ValueFunc && v.FuncHasPercent() {
-		return DeferredLength{Expr: v, Em: fontSize, Set: true}, true
+		rem := float32(16)
+		if len(rootFontSize) > 0 && rootFontSize[0] > 0 {
+			rem = rootFontSize[0]
+		}
+		return DeferredLength{Expr: v, Em: fontSize, Rem: rem, Set: true}, true
 	}
 	return DeferredLength{}, false
 }
@@ -2133,17 +3871,17 @@ func (d DeferredLength) Resolve(base, vw, vh float32) (float32, bool) {
 	if !d.Set {
 		return 0, false
 	}
-	return css.EvalFuncWithBase(d.Expr.Func, d.Expr.Str, d.Em, vw, vh, base)
+	return css.EvalFuncWithBaseAndRem(d.Expr.Func, d.Expr.Str, d.Em, d.Rem, vw, vh, base)
 }
 
 // resolveMaxLength caps a box. `none` states that there is no cap, which the
 // layout reads as the same -1 an auto size does; reading it as a length turned
 // every `max-width: none` box into a zero-width one.
-func resolveMaxLength(v css.Value, fontSize float32) float32 {
+func resolveMaxLength(v css.Value, fontSize float32, rootFontSize ...float32) float32 {
 	if v.Type == css.ValueKeyword && v.Str == "none" {
 		return -1
 	}
-	return resolveLengthEm(v, -1, fontSize)
+	return resolveLengthEm(v, -1, fontSize, rootFontSize...)
 }
 
 func resolveLength(v css.Value, auto float32) float32 {
@@ -2153,15 +3891,18 @@ func resolveLength(v css.Value, auto float32) float32 {
 	return v.ToLength()
 }
 
-// resolveLengthEm is like resolveLength but passes fontSize to ToLengthWithEm
-// so that em units are computed against the element's own font-size instead of
-// the hardcoded 16px fallback in ToLength. Use this for all box-model lengths
-// (margin, padding, top/right/bottom/left, width when not percentage, etc.).
-func resolveLengthEm(v css.Value, auto, fontSize float32) float32 {
+// resolveLengthEm is like resolveLength but passes fontSize and rootFontSize to
+// ToLengthWithEmAndRem so that em and rem units are computed against the element's
+// own font-size and the document root font-size respectively.
+func resolveLengthEm(v css.Value, auto, fontSize float32, rootFontSize ...float32) float32 {
 	if v.Type == css.ValueKeyword && (v.Str == "auto" || v.Str == "") {
 		return auto
 	}
-	return v.ToLengthWithEm(fontSize)
+	rem := float32(16)
+	if len(rootFontSize) > 0 && rootFontSize[0] > 0 {
+		rem = rootFontSize[0]
+	}
+	return v.ToLengthWithEmAndRem(fontSize, rem)
 }
 
 // lengthSpecified reports whether a top/right/bottom/left value is a used
@@ -2372,7 +4113,8 @@ func parseOverflowProp(v string) Overflow {
 	return OverflowVisible
 }
 
-func parseTextAlign(v string) TextAlign {
+func parseTextAlign(v, dir string) TextAlign {
+	v = strings.TrimSpace(strings.ToLower(v))
 	switch v {
 	case "right":
 		return TextAlignRight
@@ -2380,6 +4122,16 @@ func parseTextAlign(v string) TextAlign {
 		return TextAlignCenter
 	case "justify":
 		return TextAlignJustify
+	case "start":
+		if dir == "rtl" {
+			return TextAlignRight
+		}
+		return TextAlignLeft
+	case "end":
+		if dir == "rtl" {
+			return TextAlignLeft
+		}
+		return TextAlignRight
 	}
 	return TextAlignLeft
 }
@@ -2650,7 +4402,11 @@ func parseFlexFlow(cs *ComputedStyle, v string) {
 }
 
 func parseColorValue(v string) css.Color {
-	c, _ := css.ParseColor(v)
+	return parseColorValueWithScheme(v, "")
+}
+
+func parseColorValueWithScheme(v, scheme string) css.Color {
+	c, _ := css.ParseColorWithScheme(v, scheme)
 	return c
 }
 
@@ -2774,8 +4530,12 @@ func resolveCurrentColor(cs *ComputedStyle, matched []*indexedSelector, inline, 
 // separated token (skipping url() function calls) and returns the first one
 // that parses as a valid color.
 func parseBackgroundColor(v string) css.Color {
+	return parseBackgroundColorWithScheme(v, "")
+}
+
+func parseBackgroundColorWithScheme(v, scheme string) css.Color {
 	// Try the whole value first (handles plain "background: #fff").
-	if c, ok := css.ParseColor(v); ok {
+	if c, ok := css.ParseColorWithScheme(v, scheme); ok {
 		return c
 	}
 	// Skip past any url(...) call, then try each token.
@@ -2803,7 +4563,7 @@ func parseBackgroundColor(v string) css.Color {
 		s = strings.TrimSpace(s[end:])
 	}
 	for _, tok := range strings.Fields(s) {
-		if c, ok := css.ParseColor(tok); ok {
+		if c, ok := css.ParseColorWithScheme(tok, scheme); ok {
 			return c
 		}
 	}
@@ -3311,26 +5071,26 @@ func parseBgLen(cs *ComputedStyle, tok string) (float32, bool, bool) {
 // parseMarginShorthand parses the CSS margin shorthand (1–4 values), using
 // MarginAuto as the resolved value for "auto". fontSize is used to resolve
 // em-valued lengths against the element's own computed font-size.
-func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
+func parseMarginShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32) {
 	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
-		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize)
+		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
 		return val, val, val, val
 	case 2:
-		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
+		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
 		return tb, rl, tb, rl
 	case 3:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
 		return top, rl, bottom, rl
 	case 4:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
-		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
+		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize, rootFontSize...)
 		return
 	}
 	return
@@ -3339,26 +5099,26 @@ func parseMarginShorthand(v string, fontSize float32) (top, right, bottom, left 
 // parsePaddingShorthand parses the CSS padding shorthand (1–4 values).
 // Padding cannot be "auto", so 0 is always the fallback. fontSize is used to
 // resolve em-valued lengths.
-func parsePaddingShorthand(v string, fontSize float32) (top, right, bottom, left float32) {
+func parsePaddingShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32) {
 	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
-		val := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
+		val := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
 		return val, val, val, val
 	case 2:
-		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
+		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize, rootFontSize...)
 		return tb, rl, tb, rl
 	case 3:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		rl := resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
 		return top, rl, bottom, rl
 	case 4:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize)
-		right = resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize)
-		left = resolveLengthEm(css.ParseValue(parts[3]), 0, fontSize)
+		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		right = resolveLengthEm(css.ParseValue(parts[1]), 0, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
+		left = resolveLengthEm(css.ParseValue(parts[3]), 0, fontSize, rootFontSize...)
 		return
 	}
 	return
@@ -3394,6 +5154,7 @@ func parseBoxShorthand(v string) (top, right, bottom, left float32) {
 // author spaced after each comma - `1px solid rgb(0, 136, 238)` - and a plain field split
 // would hand the colour parser "rgb(0," and lose the colour entirely.
 func parseBorderShorthand(v string) (width float32, style string, color css.Color) {
+	widthSpecified := false
 	for _, p := range splitColorTokens(v) {
 		lower := strings.ToLower(p)
 		if isBorderStyle(lower) {
@@ -3401,10 +5162,14 @@ func parseBorderShorthand(v string) (width float32, style string, color css.Colo
 		} else if c, ok := css.ParseColor(lower); ok {
 			color = c
 		} else {
-			width = resolveLength(css.ParseValue(p), 0)
+			parsed := css.ParseValue(p)
+			if parsed.Type == css.ValueNumber || parsed.Type == css.ValueLength || parsed.Type == css.ValueFunc {
+				width = resolveLength(parsed, 0)
+				widthSpecified = true
+			}
 		}
 	}
-	if width == 0 && style != "" && style != "none" && style != "hidden" {
+	if !widthSpecified && style != "" && style != "none" && style != "hidden" {
 		width = 3
 	}
 	return
@@ -3471,26 +5236,30 @@ func splitColorTokens(v string) []string {
 }
 
 func parseBorderColors(v string) [4]css.Color {
+	return parseBorderColorsWithScheme(v, "")
+}
+
+func parseBorderColorsWithScheme(v, scheme string) [4]css.Color {
 	parts := splitColorTokens(v)
 	var colors [4]css.Color
 	switch len(parts) {
 	case 1:
-		c, _ := css.ParseColor(parts[0])
+		c, _ := css.ParseColorWithScheme(parts[0], scheme)
 		return [4]css.Color{c, c, c, c}
 	case 2:
-		t, _ := css.ParseColor(parts[0])
-		r, _ := css.ParseColor(parts[1])
+		t, _ := css.ParseColorWithScheme(parts[0], scheme)
+		r, _ := css.ParseColorWithScheme(parts[1], scheme)
 		return [4]css.Color{t, r, t, r}
 	case 3:
-		colors[0], _ = css.ParseColor(parts[0])
-		colors[1], _ = css.ParseColor(parts[1])
-		colors[2], _ = css.ParseColor(parts[2])
+		colors[0], _ = css.ParseColorWithScheme(parts[0], scheme)
+		colors[1], _ = css.ParseColorWithScheme(parts[1], scheme)
+		colors[2], _ = css.ParseColorWithScheme(parts[2], scheme)
 		colors[3] = colors[1]
 	case 4:
-		colors[0], _ = css.ParseColor(parts[0])
-		colors[1], _ = css.ParseColor(parts[1])
-		colors[2], _ = css.ParseColor(parts[2])
-		colors[3], _ = css.ParseColor(parts[3])
+		colors[0], _ = css.ParseColorWithScheme(parts[0], scheme)
+		colors[1], _ = css.ParseColorWithScheme(parts[1], scheme)
+		colors[2], _ = css.ParseColorWithScheme(parts[2], scheme)
+		colors[3], _ = css.ParseColorWithScheme(parts[3], scheme)
 	}
 	return colors
 }
@@ -3730,15 +5499,27 @@ func parseGridTemplateShorthand(cs *ComputedStyle, v string) {
 }
 
 // parseGridSpan reduces a grid-column/grid-row value to how many tracks the
-// item occupies. "span N" is the direct form; "A / B" names two lines; anything
-// else (including "auto" and named lines) places a single track.
+// item occupies. "span N" is the direct form; "A / B" names two lines or line / span N;
+// anything else (including "auto" and named lines) places a single track.
 func parseGridSpan(v string) int {
 	v = strings.TrimSpace(strings.ToLower(v))
-	if v == "" {
+	if v == "" || v == "auto" {
 		return 1
 	}
 	if i := strings.Index(v, "/"); i >= 0 {
-		a, b := gridSpanNum(strings.TrimSpace(v[:i])), gridSpanNum(strings.TrimSpace(v[i+1:]))
+		left := strings.TrimSpace(v[:i])
+		right := strings.TrimSpace(v[i+1:])
+		if strings.HasPrefix(left, "span") {
+			if n := gridSpanNum(strings.TrimSpace(strings.TrimPrefix(left, "span"))); n > 0 {
+				return n
+			}
+		}
+		if strings.HasPrefix(right, "span") {
+			if n := gridSpanNum(strings.TrimSpace(strings.TrimPrefix(right, "span"))); n > 0 {
+				return n
+			}
+		}
+		a, b := gridSpanNum(left), gridSpanNum(right)
 		if a > 0 && b > a {
 			return b - a
 		}
@@ -3751,6 +5532,37 @@ func parseGridSpan(v string) int {
 		return 1
 	}
 	return 1
+}
+
+func buildGridPlacement(start, end string) string {
+	start = strings.TrimSpace(start)
+	end = strings.TrimSpace(end)
+	if start == "" && end == "" {
+		return ""
+	}
+	if start != "" && end != "" {
+		return start + " / " + end
+	}
+	if start != "" {
+		return start
+	}
+	return "auto / " + end
+}
+
+func extractGridStart(combined string) string {
+	combined = strings.TrimSpace(combined)
+	if i := strings.Index(combined, "/"); i >= 0 {
+		return strings.TrimSpace(combined[:i])
+	}
+	return combined
+}
+
+func extractGridEnd(combined string) string {
+	combined = strings.TrimSpace(combined)
+	if i := strings.Index(combined, "/"); i >= 0 {
+		return strings.TrimSpace(combined[i+1:])
+	}
+	return ""
 }
 
 func gridSpanNum(s string) int {
@@ -3820,4 +5632,23 @@ func applyTransitionDelay(cs *ComputedStyle, value string) {
 			cs.Transitions[i].Delay = delays[i]
 		}
 	}
+}
+
+func isAnchorFunc(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.HasPrefix(s, "anchor(") && strings.HasSuffix(s, ")")
+}
+
+func isAnchorSizeFunc(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return strings.HasPrefix(s, "anchor-size(") && strings.HasSuffix(s, ")")
+}
+
+func extractAnchorArgs(s string) string {
+	s = strings.TrimSpace(s)
+	idx := strings.IndexByte(s, '(')
+	if idx >= 0 && strings.HasSuffix(s, ")") {
+		return strings.TrimSpace(s[idx+1 : len(s)-1])
+	}
+	return s
 }

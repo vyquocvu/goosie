@@ -142,3 +142,90 @@ func TestBookmarksLoadBoundsHostileFile(t *testing.T) {
 		}
 	}
 }
+
+func TestBookmarkDeleteAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.json")
+	s := bookmarks.NewStore(path)
+	s.Toggle("https://a.example", "A")
+	s.Toggle("https://b.example", "B")
+	if !s.Delete("https://a.example") {
+		t.Fatal("Delete of an existing bookmark = false, want true")
+	}
+	if s.Delete("https://a.example") {
+		t.Fatal("second Delete of the same bookmark = true, want false")
+	}
+	if s.Delete("https://never.example") {
+		t.Fatal("Delete of an unknown bookmark = true, want false")
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	s2, err := bookmarks.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := s2.List()
+	if len(got) != 1 || got[0].URL != "https://b.example" {
+		t.Fatalf("reloaded List() = %+v, want only the surviving b.example entry", got)
+	}
+}
+
+func TestBookmarkRenameAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bookmarks.json")
+	s := bookmarks.NewStore(path)
+	s.Toggle("https://a.example", "Old Title")
+	if !s.Rename("https://a.example", "New Title") {
+		t.Fatal("Rename of an existing bookmark = false, want true")
+	}
+	if s.Rename("https://never.example", "X") {
+		t.Fatal("Rename of an unknown bookmark = true, want false")
+	}
+	// Rename stores verbatim, including hostile markup: escaping is the
+	// presentation layer's job.
+	hostile := `<script>alert("xss")</script>`
+	if !s.Rename("https://a.example", hostile) {
+		t.Fatal("Rename with hostile title = false, want true")
+	}
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	s2, err := bookmarks.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := s2.List()
+	if len(got) != 1 || got[0].Title != hostile || got[0].URL != "https://a.example" {
+		t.Fatalf("reloaded List() = %+v, want the renamed entry with verbatim title", got)
+	}
+}
+
+func TestBookmarkSearch(t *testing.T) {
+	s := bookmarks.NewStore(filepath.Join(t.TempDir(), "bookmarks.json"))
+	s.Toggle("https://golang.org/doc", "Go Documentation")
+	s.Toggle("https://example.com", "Example Domain")
+	s.Toggle("https://blog.example.net", "")
+
+	if got := s.Search(""); len(got) != 3 {
+		t.Fatalf("Search(\"\") = %d entries, want all 3", len(got))
+	}
+	got := s.Search("golang")
+	if len(got) != 1 || got[0].URL != "https://golang.org/doc" {
+		t.Fatalf("Search(golang) = %+v, want the golang.org entry", got)
+	}
+	// Case-insensitive, matches title or URL.
+	if got := s.Search("EXAMPLE"); len(got) != 2 {
+		t.Fatalf("Search(EXAMPLE) = %d entries, want 2 (title + URL matches)", len(got))
+	}
+	if got := s.Search("documentation"); len(got) != 1 || got[0].Title != "Go Documentation" {
+		t.Fatalf("Search(documentation) = %+v, want the title match", got)
+	}
+	if got := s.Search("nomatchxyz"); len(got) != 0 {
+		t.Fatalf("Search(nomatchxyz) = %+v, want empty", got)
+	}
+	// Search results are copies: mutating them must not touch the store.
+	got = s.Search("golang")
+	got[0].Title = "mutated"
+	if s.List()[0].Title != "Go Documentation" {
+		t.Fatal("Search returned aliases into the store's entries")
+	}
+}

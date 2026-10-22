@@ -1,0 +1,233 @@
+# Goosie — catalog test case chi tiết
+
+- Cập nhật: 2026-10-22
+- Phạm vi: ứng dụng Goosie trên macOS, engine headless, browser chrome và các luồng kiểm soát an toàn đầu vào.
+- Kế hoạch cấp release, DoD và lịch sử smoke: xem [qa-test-plan.md](qa-test-plan.md).
+- Tổng: **180 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
+
+## Cách đọc và quy tắc ghi kết quả
+
+Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước chính và điều kiện pass. `CUA` là thao tác native; `INT` là unit/integration Go; `PARITY` là so sánh render/event với Chromium; `SEC` là kiểm tra an toàn/adversarial. Một case có thể dùng nhiều phương pháp. Tất cả case bắt đầu ở `NOT RUN`, trừ case roadmap-gap được ghi `DEFERRED`.
+
+`DEFERRED` chỉ áp dụng cho chức năng được roadmap ghi nhận chưa có hoặc chưa hoàn chỉnh; đây không phải PASS, cũng không được tính là lỗi hồi quy của build hiện tại. Khi tính năng được triển khai, bỏ nhãn gap và chuyển thành gate theo tiêu chí chấp nhận ở case. Case live phải ghi thời gian, build SHA, OS, kích thước cửa sổ, zoom, profile và tình trạng mạng. Case tự động phải lưu lệnh, exit code và artifact.
+
+## A. Khởi chạy, thanh địa chỉ và điều hướng — BR-001–BR-022
+
+- **BR-001 | P0 | CUA | NOT RUN** — Khởi chạy app với profile sạch, nhập URL HTTPS đầy đủ vào thanh địa chỉ và nhấn Enter → app còn hoạt động, URL cuối và nội dung cùng nguồn.
+- **BR-002 | P0 | CUA, INT | NOT RUN** — Mở URL HTTP hợp lệ → trang tải được, scheme không bị đổi ngoài redirect đã nhận.
+- **BR-003 | P0 | CUA, INT | NOT RUN** — Nhập hostname không có scheme → app chuẩn hóa URL theo quy tắc đã công bố và mở đúng host.
+- **BR-004 | P1 | CUA, INT | NOT RUN** — Nhập URL có path, query và fragment → request giữ path/query và tài liệu giữ fragment.
+- **BR-005 | P1 | CUA, INT | NOT RUN** — Nhập URL Unicode/IDN hợp lệ → hostname được xử lý nhất quán, không crash hoặc điều hướng nhầm host.
+- **BR-006 | P1 | CUA, INT | NOT RUN** — Nhập URL có khoảng trắng đầu/cuối và ký tự cần encode → URL được chuẩn hóa hoặc báo lỗi rõ; không phát request tới host sai.
+- **BR-007 | P0 | CUA, INT | NOT RUN** — Nhập scheme không hỗ trợ hoặc URL sai cú pháp → hiển thị lỗi có thể phục hồi, app không treo và không dùng URL cũ như thể thành công.
+- **BR-008 | P1 | CUA, INT | NOT RUN** — Mở trang trả redirect một bước → thanh địa chỉ hiển thị URL đích cuối và Back quay về trang trước.
+- **BR-009 | P1 | INT, SEC | NOT RUN** — Mở chuỗi redirect nhiều bước hợp lệ trong giới hạn → nội dung/URL cuối khớp nhau và giới hạn redirect được tuân thủ.
+- **BR-010 | P1 | INT, SEC | NOT RUN** — Tạo redirect loop → điều hướng kết thúc bằng lỗi giới hạn, không loop vô hạn.
+- **BR-011 | P1 | INT, SEC | NOT RUN** — Endpoint HTTPS redirect xuống HTTP → downgrade bị chặn theo policy và không render response đích.
+- **BR-012 | P0 | CUA, INT | NOT RUN** — Điều hướng tới server không chạy → trạng thái lỗi dễ nhận biết, app vẫn nhận URL kế tiếp.
+- **BR-013 | P1 | CUA, INT | NOT RUN** — Mở trang phản hồi chậm rồi bấm Stop → request hiện tại dừng và tài liệu đang hiển thị không bị xóa ngoài policy.
+- **BR-014 | P0 | INT | NOT RUN** — Điều hướng A chậm rồi chuyển sang B; A trả về sau B → kết quả A cũ không ghi đè B.
+- **BR-015 | P1 | CUA, INT | NOT RUN** — Bấm link thường trong cùng tab → URL, tài liệu và history đồng bộ.
+- **BR-016 | P1 | CUA, INT | NOT RUN** — Bấm anchor cùng trang và anchor từ trang khác → fragment đúng và viewport tới đúng mục.
+- **BR-017 | P0 | CUA, INT | NOT RUN** — Dùng Back/Forward qua ít nhất 5 navigation → mỗi bước khôi phục đúng entry, URL và tài liệu.
+- **BR-018 | P2 | GAP | DEFERRED** — Nhập cụm từ không phải URL vào thanh địa chỉ → chạy tìm kiếm theo search provider đã cấu hình; không báo lỗi URL thô.
+- **BR-019 | P2 | GAP | DEFERRED** — Gõ từng phần URL/từ khóa vào thanh địa chỉ → gợi ý lịch sử/bookmark/tìm kiếm xuất hiện, chọn bằng bàn phím được.
+- **BR-020 | P1 | CUA, INT | NOT RUN** — Reload trang có query/fragment → tải lại URL hiện hành, không thêm entry history giả.
+- **BR-021 | P1 | CUA, INT | NOT RUN** — Refresh khi response cũ còn pending → chỉ kết quả navigation mới nhất được áp dụng.
+- **BR-022 | P1 | CUA | NOT RUN** — Focus thanh địa chỉ, chọn toàn URL, thay URL bằng bàn phím → không nhập ký tự vào document phía sau.
+
+## B. Tab, vòng đời và cách ly — BR-023–BR-042
+
+- **BR-023 | P0 | CUA, INT | NOT RUN** — Mở cửa sổ/app ban đầu → có một tab dùng được và nội dung rỗng/khởi đầu đúng thiết kế.
+- **BR-024 | P1 | CUA, INT | NOT RUN** — Mở tab mới bằng nút và shortcut → tab mới được focus và có thể nhập URL.
+- **BR-025 | P1 | CUA, INT | NOT RUN** — Mở link trong tab mới qua hành vi được hỗ trợ → tab hiện hành không điều hướng ngoài ý muốn.
+- **BR-026 | P0 | CUA, INT | NOT RUN** — Chuyển qua lại 3 tab đang tải các URL khác nhau → URL/title/nội dung đúng tab.
+- **BR-027 | P1 | CUA, INT | NOT RUN** — Tải xong tài liệu ở background tab → nội dung tab foreground không đổi.
+- **BR-028 | P1 | INT | NOT RUN** — Hoàn thành response tab A sau tab B dù thứ tự request đảo → mỗi response gắn đúng tab sở hữu.
+- **BR-029 | P1 | CUA, INT | NOT RUN** — Đóng tab nền → tab đang active vẫn giữ nguyên URL và history.
+- **BR-030 | P0 | CUA, INT | NOT RUN** — Đóng tab active khi còn các tab khác → tab kế tiếp được chọn, app không crash.
+- **BR-031 | P1 | CUA, INT | NOT RUN** — Đóng tab cuối → hành vi đúng thiết kế (tab mới hoặc cửa sổ đóng), không để UI ở trạng thái chết.
+- **BR-032 | P1 | CUA | NOT RUN** — Kéo đổi thứ tự 4 tab → thứ tự hiển thị và tab được chọn khớp sau thao tác.
+- **BR-033 | P1 | CUA | NOT RUN** — Mở đủ tab làm tràn thanh tab → overflow cho phép thấy/chọn mọi tab, không che thao tác đóng.
+- **BR-034 | P1 | CUA, INT | NOT RUN** — Đổi tab khi một tab có scroll offset riêng → khi quay lại, đúng tài liệu và vị trí cuộn được giữ theo behavior công bố.
+- **BR-035 | P1 | CUA, INT | NOT RUN** — Đổi tab sau khi mỗi tab có Back/Forward riêng → lịch sử không bị dùng chung.
+- **BR-036 | P1 | CUA, INT | NOT RUN** — Dừng navigation tab A khi tab B đang tải → chỉ A bị dừng.
+- **BR-037 | P1 | INT | NOT RUN** — Hủy/đóng tab khi request đang chạy → callback đến muộn không dereference tab đã dispose hoặc làm crash.
+- **BR-038 | P1 | INT | NOT RUN** — Tạo/đóng nhiều tab liên tục → số tab, tài liệu sống và tài nguyên được giải phóng nhất quán.
+- **BR-039 | P2 | GAP | DEFERRED** — Đóng tab có nội dung rồi dùng Reopen Closed Tab → tab, URL và history gần nhất được khôi phục.
+- **BR-040 | P2 | GAP | DEFERRED** — Mở menu ngữ cảnh tab → các hành động được công bố có label, thao tác được và chỉ tác động đúng tab.
+- **BR-041 | P2 | GAP | DEFERRED** — Mở nhiều cửa sổ browser → mỗi cửa sổ quản lý tab, active state và đóng độc lập.
+- **BR-042 | P1 | INT, CUA | NOT RUN** — Phục hồi session có nhiều tab theo thứ tự đã lưu → tab và URL phục hồi đúng, không phục hồi response cũ đang dang dở.
+
+## C. History, bookmark, session và dữ liệu người dùng — BR-043–BR-058
+
+- **BR-043 | P1 | INT | NOT RUN** — Điều hướng nhiều trang thường → history ghi URL/title theo policy và không tạo bản ghi trùng do repaint.
+- **BR-044 | P1 | INT | NOT RUN** — Dùng Back rồi đi URL mới → Forward branch cũ bị loại theo quy tắc history.
+- **BR-045 | P1 | INT | NOT RUN** — Reload trang → history không thêm visit ngoài policy.
+- **BR-046 | P1 | INT | NOT RUN** — Thêm bookmark bằng Cmd+D → URL/title được lưu một lần và persistence qua restart.
+- **BR-047 | P1 | CUA, INT | NOT RUN** — Mở bookmark đã lưu → tab điều hướng tới URL đã lưu.
+- **BR-048 | P1 | INT | NOT RUN** — Thêm bookmark cùng URL lần nữa → không tạo duplicate ngoài thiết kế.
+- **BR-049 | P1 | INT | NOT RUN** — Khởi động lại sau khi đóng app bình thường → session tab được khôi phục theo policy.
+- **BR-050 | P2 | CUA, INT, SEC | BLOCKED** — Mở trang quản lý bookmark (`goosie://bookmarks`) → xem, tìm (form GET `q=`), đổi tên tiêu đề, xóa bookmark; kết quả lưu atomic qua restart; title/URL thù địch bị escape, scheme không điều hướng được (vd `javascript:`) không render thành link. **Automated INT/SEC PASS** (`test/bookmarks`, `cmd/goosie/mgmt_pages_test.go`, `go test ./...` và `go test -race ./...`); native CUA thao tác trang bị BLOCKED do phiên không có display khả dụng.
+- **BR-051 | P2 | CUA, INT, SEC | BLOCKED** — Mở trang quản lý history (`goosie://history`) → tìm, xóa một entry (URL + timestamp RFC3339Nano) hoặc xóa toàn bộ qua bước xác nhận; persistence qua restart; lỗi lưu tệp hiển thị banner. **Automated INT/SEC PASS** (`test/history`, `cmd/goosie/mgmt_pages_test.go`, full test và race suites); native CUA thao tác trang bị BLOCKED do phiên không có display khả dụng.
+- **BR-052 | P2 | CUA, INT | NOT RUN** — Truy cập trang bookmark/history qua main menu. Hiện các trang có thể mở qua nav header trên `goosie://` và omnibox suggestions, nhưng chưa có mục main-menu chuyên dụng; native reachability chưa kiểm chứng vì CUA không có display. `make parity` corpus không có Chromium reference cho trang nội bộ.
+- **BR-053 | P1 | INT | NOT RUN** — Khởi chạy với cờ clear-data → dữ liệu thuộc phạm vi được công bố bị xóa, app tiếp tục khởi động.
+- **BR-054 | P1 | INT | NOT RUN** — Chạy chế độ private qua entrypoint/cờ hiện có → session/history private không được ghi vào kho thường.
+- **BR-055 | P1 | INT | NOT RUN** — Duyệt thường, private, rồi thường → cookie/session của hai chế độ không rò sang nhau.
+- **BR-056 | P1 | INT | NOT RUN** — Đóng private session và khởi động lại → URL/history private không xuất hiện trong restore thường.
+- **BR-057 | P2 | GAP | DEFERRED** — Mở Private Window từ UI → cửa sổ riêng biệt có affordance rõ và persistence bị tắt.
+- **BR-058 | P2 | GAP | DEFERRED** — Mở Settings/Privacy UI và xóa cookies/history/session → xác nhận phạm vi xóa, dữ liệu mục tiêu mất sau restart.
+
+## D. Render, CSS, layout, ảnh và repaint — BR-059–BR-087
+
+- **BR-059 | P0 | PARITY, INT | NOT RUN** — Render fixture HTML cơ bản có heading, paragraph, list, link → cấu trúc và thứ tự nội dung khớp kỳ vọng/reference.
+- **BR-060 | P1 | PARITY | NOT RUN** — Render block/inline lồng nhau → line box, wrap và thứ tự đọc không chồng lấn.
+- **BR-061 | P1 | PARITY | NOT RUN** — Áp dụng selector type/class/id kết hợp → style cascade lên đúng node.
+- **BR-062 | P1 | PARITY | NOT RUN** — Xung đột specificity và thứ tự stylesheet → computed style theo cascade đã hỗ trợ.
+- **BR-063 | P1 | PARITY | NOT RUN** — Inherit font/color/line-height vào descendant → giá trị kế thừa và bố cục ổn định.
+- **BR-064 | P1 | PARITY | NOT RUN** — Thay đổi margin/padding/border/box sizing trên fixture → kích thước outer/inner khớp expected.
+- **BR-065 | P1 | PARITY | NOT RUN** — Đổi font-size, weight, line-height và text dài → wrapping và chiều cao phần tử cập nhật.
+- **BR-066 | P1 | PARITY | NOT RUN** — Render flex row/column, gap, align và wrap trong fixture hỗ trợ → item order, kích thước và alignment đúng.
+- **BR-067 | P1 | PARITY | NOT RUN** — Render grid có nhiều track và gap → item vào đúng cell, không vượt container bất thường.
+- **BR-068 | P1 | PARITY | NOT RUN** — Render table có header/row/cell và border → cột/hàng căn chỉnh, nội dung không mất.
+- **BR-069 | P1 | PARITY | NOT RUN** — Render float cùng text → text bao quanh float và vùng sau float được giải phóng đúng.
+- **BR-070 | P1 | PARITY | NOT RUN** — Render relative/absolute/fixed positioning → containing block và vị trí khớp fixture.
+- **BR-071 | P1 | PARITY | NOT RUN** — Render stacking context/z-index → thứ tự phủ đúng trong trường hợp engine công bố hỗ trợ.
+- **BR-072 | P1 | PARITY | NOT RUN** — Render overflow hidden/scroll và nội dung vượt khung → clipping/scroll vùng đúng, không vẽ ra ngoài.
+- **BR-073 | P2 | PARITY | NOT RUN** — Render border radius, outline và box shadow → hiệu ứng không làm sai bounds/hit testing.
+- **BR-074 | P2 | PARITY | NOT RUN** — Render màu, opacity và gradient đơn giản → màu không nhấp nháy khi idle hoặc scroll.
+- **BR-075 | P1 | PARITY | NOT RUN** — Render pseudo-elements ::before/::after và pseudo-state được hỗ trợ → generated content và style chỉ xuất hiện đúng điều kiện.
+- **BR-076 | P1 | PARITY | NOT RUN** — Cập nhật CSS class/style qua DOM sau load → style và layout mới được paint, không giữ pixel cũ.
+- **BR-077 | P1 | PARITY | NOT RUN** — Resize viewport rộng→hẹp→rộng → layout reflow, không để lại dải pixel của kích thước trước.
+- **BR-078 | P1 | CUA, INT | NOT RUN** — Thay zoom 100%→125%→100% → text/layout scale, click target vẫn khớp và ảnh cũ bị xóa.
+- **BR-079 | P1 | PARITY | NOT RUN** — Scroll trang dài qua nhiều tile → phần mới lộ ra được rasterize, vùng cũ được reuse hợp lệ.
+- **BR-080 | P1 | INT, PARITY | NOT RUN** — Thay đổi nhỏ DOM gây damage một phần → pixel ngoài damage không đổi và vùng damage được cập nhật.
+- **BR-081 | P1 | INT | NOT RUN** — Không có thay đổi DOM/style/viewport trong idle → không lặp layout/paint vô ích theo counter gate.
+- **BR-082 | P1 | INT | NOT RUN** — RAF/timer không thay đổi nội dung → scheduler không quay vô hạn hoặc tăng work không giới hạn.
+- **BR-083 | P1 | INT, PARITY | NOT RUN** — Font tải thành công và font lỗi → fallback hiển thị, reflow nếu có là nhất quán, trang không trắng.
+- **BR-084 | P1 | INT, PARITY | NOT RUN** — Ảnh tải chậm sau first paint → ảnh xuất hiện và layout cập nhật đúng; navigation mới không bị ảnh cũ ghi đè.
+- **BR-085 | P1 | CUA, PARITY | NOT RUN** — Mở about.google/products ở viewport cố định, chụp 5 frame idle rồi reload và chụp lại → vùng tĩnh ổn định; mọi vùng thiếu/viền đỏ được lưu bằng chứng, đối chiếu trình duyệt tham chiếu.
+- **BR-086 | P1 | INT, PARITY | NOT RUN** — Trang dài cuộn xuống rồi Back/Forward → scroll restoration theo behavior đã công bố, không nhảy liên tục.
+- **BR-087 | P2 | PARITY | NOT RUN** — Render tiếng Việt/CJK, emoji, RTL và chuỗi dài → ký tự không bị cắt/đảo thứ tự ngoài giới hạn font đã biết.
+
+## E. JavaScript, sự kiện, biểu mẫu và thao tác trang — BR-088–BR-124
+
+- **BR-088 | P0 | INT | NOT RUN** — Chạy script inline trước/sau DOMContentLoaded theo fixture → DOM nhìn thấy phản ánh đúng thứ tự thực thi được hỗ trợ.
+- **BR-089 | P1 | INT | NOT RUN** — Script thay đổi text node/attribute → DOM, accessibility tree và paint đồng bộ.
+- **BR-090 | P1 | INT | NOT RUN** — Script đổi style/class → style recalc/layout đúng, không cần reload.
+- **BR-091 | P1 | INT | NOT RUN** — Script ném exception → lỗi được cô lập, nội dung và thao tác sau vẫn hoạt động.
+- **BR-092 | P1 | INT | NOT RUN** — Script gọi API DOM không hợp lệ hoặc trên node đã bỏ → lỗi không làm sập runtime của tab.
+- **BR-093 | P1 | INT | NOT RUN** — Event listener capture/target/bubble trên fixture → thứ tự propagation khớp event model đã hỗ trợ.
+- **BR-094 | P1 | INT, PARITY | NOT RUN** — preventDefault trên link → URL không đổi; không preventDefault → navigation mặc định diễn ra.
+- **BR-095 | P1 | INT | NOT RUN** — stopPropagation trong descendant → ancestor listener không chạy ngoài quy tắc propagation.
+- **BR-096 | P1 | INT | NOT RUN** — Add/remove event listener nhiều lần → handler không bị nhân đôi và handler đã gỡ không được gọi.
+- **BR-097 | P1 | CUA, INT | NOT RUN** — Focus text input, gõ, select-all, sửa → giá trị và caret đúng.
+- **BR-098 | P1 | CUA, INT | NOT RUN** — Nhập/paste vào textarea nhiều dòng → newline và thứ tự ký tự giữ nguyên.
+- **BR-099 | P1 | CUA, INT | NOT RUN** — Toggle checkbox bằng click và Space → trạng thái checked và event cập nhật một lần.
+- **BR-100 | P1 | CUA, INT | NOT RUN** — Chọn một radio trong group → radio cũ bỏ chọn và chỉ một giá trị được submit.
+- **BR-101 | P1 | CUA, INT | NOT RUN** — Chọn option trong select bằng chuột/bàn phím → value, focus và paint khớp lựa chọn.
+- **BR-102 | P1 | CUA, INT | NOT RUN** — Tab/Shift+Tab qua form → focus theo thứ tự DOM khả kiến và focus indicator nhìn thấy.
+- **BR-103 | P1 | CUA, INT | NOT RUN** — Submit form bằng Enter trong input → submit event/default action chạy đúng một lần.
+- **BR-104 | P1 | CUA, INT | NOT RUN** — Submit cùng form bằng nút → dữ liệu gửi đúng control name/value.
+- **BR-105 | P1 | INT | NOT RUN** — Submit form thiếu required/value sai type → validation ngăn submit và giữ nội dung nhập.
+- **BR-106 | P1 | INT | NOT RUN** — Submit form hợp lệ → URL/body/method/encoding theo thuộc tính form được hỗ trợ.
+- **BR-107 | P1 | INT | NOT RUN** — Form có button submit phụ với name/value riêng → chỉ submitter kích hoạt được gửi.
+- **BR-108 | P1 | CUA, INT | NOT RUN** — Chọn văn bản bằng chuột và Shift+Arrow → range được highlight chính xác.
+- **BR-109 | P1 | CUA, INT | NOT RUN** — Copy selection bằng shortcut/menu hiện có rồi paste vào input ngoài → đúng text, không markup thừa.
+- **BR-110 | P1 | CUA | NOT RUN** — Nhấn Cmd+A trong input/editable → chỉ nội dung control được chọn; ngoài control chọn document theo policy.
+- **BR-111 | P2 | CUA, INT | NOT RUN** — Nhập tiếng Việt bằng IME/composition → ký tự ghép không lặp hoặc mất dấu.
+- **BR-112 | P1 | INT | NOT RUN** — Thêm/bỏ node trong DOM → layout, hit testing và accessibility không giữ reference node cũ.
+- **BR-113 | P1 | INT | NOT RUN** — Dùng requestAnimationFrame cập nhật một lần → callback chạy theo frame và nội dung được paint.
+- **BR-114 | P1 | INT | NOT RUN** — Hủy RAF/timer trước khi chạy → callback không tác động tài liệu.
+- **BR-115 | P2 | INT | NOT RUN** — Canvas vẽ primitive được hỗ trợ → bitmap xuất hiện đúng kích thước, thao tác không crash.
+- **BR-116 | P2 | INT | NOT RUN** — Resize canvas → buffer và vùng render tuân theo width/height mới, không giữ frame cũ.
+- **BR-117 | P2 | INT | NOT RUN** — ResizeObserver/MutationObserver nếu API được hỗ trợ → callback nhận thay đổi đúng một lần; nếu chưa hỗ trợ, API fail rõ và an toàn.
+- **BR-118 | P2 | INT | NOT RUN** — Custom element lifecycle hoặc shadow DOM theo mức hỗ trợ → không làm hỏng DOM ngoài; unsupported behavior được ghi rõ.
+- **BR-119 | P1 | INT, SEC | NOT RUN** — Script gọi fetch tới same-origin fixture → response/status/body đúng và promise settle một lần.
+- **BR-120 | P1 | INT, SEC | NOT RUN** — Script fetch cross-origin → CORS policy được áp dụng; dữ liệu bị chặn không lộ vào JS.
+- **BR-121 | P1 | INT | NOT RUN** — Đọc/ghi localStorage trong một origin rồi reload → dữ liệu persistence theo policy.
+- **BR-122 | P1 | INT | NOT RUN** — Truy cập storage khác origin hoặc private session → dữ liệu được cách ly.
+- **BR-123 | P1 | INT | NOT RUN** — AbortController hủy fetch chậm → promise báo abort, không áp dụng response muộn.
+- **BR-124 | P1 | INT | NOT RUN** — Gọi URLSearchParams, URL và FormData trên dữ liệu ký tự đặc biệt → serialize/parse nhất quán, không làm sai URL hoặc form.
+
+## F. Browser chrome, Find, zoom, accessibility và trang nội bộ — BR-125–BR-144
+
+- **BR-125 | P0 | CUA | NOT RUN** — Dùng Cmd+L → thanh địa chỉ nhận focus, nội dung được chọn để thay thế.
+- **BR-126 | P1 | CUA | NOT RUN** — Khi không có history, Back/Forward → nút disabled hoặc không-op, app không đổi trang.
+- **BR-127 | P1 | CUA | NOT RUN** — Khi request chạy, Stop → nút/action có hiệu lực; sau khi hoàn tất, Stop không phá tài liệu.
+- **BR-128 | P1 | CUA | NOT RUN** — Reload trang → nút trạng thái và nội dung phản ánh reload, không kích hoạt Stop nhầm.
+- **BR-129 | P1 | CUA | NOT RUN** — Cmd+Plus tăng zoom liên tiếp → indicator và tỷ lệ nội dung cập nhật đúng.
+- **BR-130 | P1 | CUA | NOT RUN** — Cmd+Minus giảm zoom tới biên → không vượt giới hạn hoặc làm cửa sổ mất khả năng điều khiển.
+- **BR-131 | P1 | CUA | NOT RUN** — Cmd+0 reset zoom → indicator về 100%, layout được tính lại.
+- **BR-132 | P1 | CUA | NOT RUN** — Chuyển tab sau khi zoom tab A → zoom scope được giữ theo policy, tab B không bị áp sai.
+- **BR-133 | P1 | CUA | NOT RUN** — Cmd+F tìm chuỗi có trong trang → overlay mở, số kết quả và highlight đúng.
+- **BR-134 | P1 | CUA | NOT RUN** — Tìm chuỗi không có → hiển thị zero-match, nội dung không bị thay đổi.
+- **BR-135 | P1 | CUA | NOT RUN** — Tìm chuỗi có nhiều lần xuất hiện rồi Next/Previous → wrap và index đúng.
+- **BR-136 | P1 | CUA | NOT RUN** — Tìm từ có chữ hoa/thường và tiếng Việt → behavior phân biệt hoa/thường và Unicode nhất quán.
+- **BR-137 | P1 | CUA | NOT RUN** — Đóng Find bằng Escape/nút đóng → overlay mất, focus trở lại trang hợp lý.
+- **BR-138 | P1 | CUA | NOT RUN** — Mở trang nội bộ Downloads/History/Bookmarks được hỗ trợ bằng URL → nội dung tải được và link thao tác đúng.
+- **BR-139 | P1 | INT | NOT RUN** — Accessibility tree trên trang có heading/link/button/input → role, name, value, href phản ánh DOM.
+- **BR-140 | P1 | CUA, INT | NOT RUN** — Điều khiển nội dung chỉ bằng keyboard → focus không kẹt và action kích hoạt được.
+- **BR-141 | P1 | CUA | NOT RUN** — Chuyển theme nếu app có lựa chọn hiện tại → toolbar, nội dung chrome và indicator không lệch màu.
+- **BR-142 | P2 | CUA | NOT RUN** — Dùng Inspector/internal diagnostics hiện có để chọn node → node được highlight và selection không làm đổi DOM.
+- **BR-143 | P2 | CUA, INT | NOT RUN** — Thay kích thước cửa sổ nhỏ/lớn → toolbar/tab/address controls còn truy cập được, không chồng lấn.
+- **BR-144 | P2 | GAP | DEFERRED** — Bật responsive device emulation từ UI → viewport/device scale thay đổi, page layout cập nhật và có thể reset.
+
+## G. Mạng, tải xuống, privacy và giới hạn an toàn — BR-145–BR-168
+
+- **BR-145 | P1 | INT | NOT RUN** — Tải response text UTF-8 → ký tự hiển thị đúng encoding.
+- **BR-146 | P1 | INT | NOT RUN** — Tải response có charset/Content-Type thiếu hoặc sai → fallback xác định, không crash.
+- **BR-147 | P1 | INT | NOT RUN** — Server gửi header lớn/không hợp lệ → request bị xử lý có giới hạn và lỗi được trả về rõ.
+- **BR-148 | P1 | INT | NOT RUN** — Server đóng kết nối giữa body → tài liệu báo lỗi hoặc partial theo policy, app còn dùng được.
+- **BR-149 | P1 | INT | NOT RUN** — Tải attachment với Content-Disposition → file được lưu và không render nhầm như HTML.
+- **BR-150 | P1 | INT | NOT RUN** — Tải cùng tên hai lần → tên file được deduplicate, file trước không bị overwrite.
+- **BR-151 | P1 | SEC, INT | NOT RUN** — Filename có ../, slash, backslash, control char hoặc tên rỗng → output được sanitize, không thoát download directory.
+- **BR-152 | P1 | INT | NOT RUN** — Download directory không ghi được/đầy → lỗi hiển thị, file tạm được dọn, app tiếp tục chạy.
+- **BR-153 | P1 | INT | NOT RUN** — Tải file binary lớn trong giới hạn → bytes và kích thước lưu khớp response.
+- **BR-154 | P2 | GAP | DEFERRED** — Mở Downloads UI khi file đang tải → progress cập nhật, cancel dừng ghi file và trạng thái cuối đúng.
+- **BR-155 | P2 | GAP | DEFERRED** — Chọn Save As/đổi download folder qua UI → file chỉ được ghi vào vị trí người dùng chọn.
+- **BR-156 | P2 | GAP | DEFERRED** — Chọn Show in Finder/Open Download từ UI → hành động tác động đúng file đã tải.
+- **BR-157 | P1 | INT | NOT RUN** — Server đặt cookie rồi điều hướng cùng origin → cookie được gửi theo domain/path/secure/expiry.
+- **BR-158 | P1 | INT | NOT RUN** — Cookie từ origin khác hoặc private session → không được gửi/đọc ngoài scope.
+- **BR-159 | P1 | SEC, INT | NOT RUN** — Public page yêu cầu ảnh/script tại loopback/private IP → request bị chặn theo guard.
+- **BR-160 | P1 | SEC, INT | NOT RUN** — Redirect public origin sang private IP → kiểm tra guard lại ở đích và chặn truy cập.
+- **BR-161 | P1 | SEC, INT | NOT RUN** — URL dùng biến thể IPv4/IPv6, hostname resolve private hoặc dạng mã hóa tương đương → guard không bị bypass.
+- **BR-162 | P0 | SEC, INT | NOT RUN** — HTML vượt document byte cap → bị từ chối trước parse đầy đủ, app không treo/crash.
+- **BR-163 | P0 | SEC, INT | NOT RUN** — DOM có số node/depth vượt limit → bị giới hạn với lỗi xác định và không stack overflow.
+- **BR-164 | P1 | SEC, INT | NOT RUN** — CSS/input selector cực lớn hoặc lặp bất lợi → admission limit áp dụng, CPU/memory không tăng vô hạn.
+- **BR-165 | P0 | SEC, INT | NOT RUN** — Ảnh encoded vượt size cap → từ chối trước decode.
+- **BR-166 | P0 | SEC, INT | NOT RUN** — Ảnh dimensions/pixel count vượt ngưỡng dù file nén nhỏ → từ chối trước allocation/decode.
+- **BR-167 | P1 | SEC, INT | NOT RUN** — JavaScript chạy quá giới hạn tài nguyên/thời gian → bị dừng/cô lập, browser chrome vẫn thao tác được.
+- **BR-168 | P1 | INT, SEC | NOT RUN** — Mở link/file URL scheme không thuộc allowlist → không thực thi native handler hoặc rò dữ liệu local.
+
+## H. Độ bền, hiệu năng đo bằng counter, parity và release — BR-169–BR-180
+
+- **BR-169 | P1 | CUA, INT | NOT RUN** — Duyệt 20 URL qua 10 tab, chuyển tab và đóng một nửa → app không crash, mỗi tab giữ trạng thái hợp lệ.
+- **BR-170 | P1 | INT | NOT RUN** — Gửi liên tiếp navigation nhanh rồi đóng tab → không có stale paint, panic hay goroutine leak được test harness phát hiện.
+- **BR-171 | P1 | INT | NOT RUN** — Ảnh/font/script async về theo thứ tự ngược → chỉ cập nhật document còn hiệu lực.
+- **BR-172 | P1 | INT | NOT RUN** — Inject lỗi worker/tile theo test seam hiện có → frame lỗi được báo, scheduler phục hồi frame kế tiếp.
+- **BR-173 | P1 | INT | NOT RUN** — Chạy gate trên trang tĩnh không đổi → style/layout/paint/tile counters không tăng lặp vô ích sau khi settle.
+- **BR-174 | P1 | INT | NOT RUN** — Scroll qua trang có tile cache → tile expose mới được rasterize, tile còn hợp lệ được reuse đúng.
+- **BR-175 | P1 | INT | NOT RUN** — Chạy headless trên máy không có display → loop/scheduler/composer/Present chạy bằng headless backend.
+- **BR-176 | P1 | PARITY | NOT RUN** — Chạy render parity corpus → mọi fixture có reference cho kết quả; diff được xuất để xem và không âm thầm bỏ fixture fail.
+- **BR-177 | P1 | PARITY | NOT RUN** — Thiếu Chromium/reference artifact rồi chạy parity → lệnh fail-closed hoặc báo BLOCKED, không báo PASS giả.
+- **BR-178 | P1 | PARITY | NOT RUN** — Chạy interaction parity cho click/focus/key fixtures → thứ tự event và trạng thái cuối so sánh với reference.
+- **BR-179 | P0 | INT | NOT RUN** — Chạy go test ./..., go vet -all ./..., archtest và gate suite trên commit ứng viên → tất cả lệnh exit 0; lưu log/artifact.
+- **BR-180 | P0 | CUA, PARITY | NOT RUN** — Trên build release candidate, chạy lại toàn bộ P0/P1 CUA liên quan và visual parity, gồm Google Products live smoke sau fixture → không còn lỗi P0/P1 mở, evidence đủ và sign-off theo DoD.
+
+## Ma trận thực thi theo nhịp phát hành
+
+| Nhịp | Phạm vi tối thiểu | Kết quả cần lưu |
+| --- | --- | --- |
+| Mỗi thay đổi | Các INT/SEC liên quan; archtest; parity nếu đổi DOM/style/layout/paint | Commit SHA, lệnh, exit code, log và diff ảnh khi có |
+| PR / build tích hợp | P0 tự động, unit/integration của miền bị ảnh hưởng, gate suite | CI link/log, test summary, regressions |
+| Nightly macOS | Race, vet, gate, timing budget theo script nightly, stress tab/render | Log, counters, crash/hang và timing report |
+| Release candidate | Mọi P0/P1 tự động; P0/P1 CUA trên profile sạch; parity; các case bảo mật; rà soát P2 và mọi DEFERRED | Build/OS/profile, artifact, defect list, waiver có chủ sở hữu và ngày xử lý |
+
+## Tiêu chí đóng một test run
+
+- Không đổi `NOT RUN` thành `PASS` nếu thiếu expected result hoặc bằng chứng cần thiết.
+- `FAIL` phải có bước tái hiện ngắn nhất, expected/actual, severity, tần suất, build SHA và artifact đã khử dữ liệu nhạy cảm.
+- `BLOCKED` phải ghi phụ thuộc/môi trường ngăn chạy và người chịu trách nhiệm gỡ block.
+- `DEFERRED` phải gắn roadmap item/owner; trước phát hành cần xác nhận sản phẩm đã loại tính năng khỏi phạm vi công bố hoặc chuyển thành acceptance gate.
+- Lỗi P0/P1 chưa giải quyết chặn sign-off; bug GOOSIE-RENDER-001 vẫn mở cho đến khi có fixture tái hiện ổn định, fix và retest đạt.

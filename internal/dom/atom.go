@@ -114,6 +114,19 @@ const (
 	AtomCol
 	AtomColgroup
 	AtomCaption
+	AtomSearch
+	AtomRuby
+	AtomRt
+	AtomRp
+	AtomMath
+	AtomMrow
+	AtomMfrac
+	AtomMsup
+	AtomMsub
+	AtomMsqrt
+	AtomMo
+	AtomMi
+	AtomMn
 
 	atomSentinel
 )
@@ -224,6 +237,19 @@ var atomNames = [...]string{
 	AtomCol:        "col",
 	AtomColgroup:   "colgroup",
 	AtomCaption:    "caption",
+	AtomSearch:     "search",
+	AtomRuby:       "ruby",
+	AtomRt:         "rt",
+	AtomRp:         "rp",
+	AtomMath:       "math",
+	AtomMrow:       "mrow",
+	AtomMfrac:      "mfrac",
+	AtomMsup:       "msup",
+	AtomMsub:       "msub",
+	AtomMsqrt:      "msqrt",
+	AtomMo:         "mo",
+	AtomMi:         "mi",
+	AtomMn:         "mn",
 }
 
 var atomLookup map[string]Atom

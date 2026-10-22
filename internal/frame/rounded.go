@@ -154,16 +154,40 @@ func (b *Bitmap) fillRowCover(y int, x0, x1 float32, c Color) {
 		b.FillRect(Rect4(int32(x0), int32(y), int32(x1), int32(y)+1), c, nil)
 		return
 	}
-	for x := int(math.Floor(float64(x0))); x < int(math.Ceil(float64(x1))); x++ {
-		cov := math.Min(float64(x1), float64(x+1)) - math.Max(float64(x0), float64(x))
-		if cov <= 0 {
-			continue
+	leftPixel := int(math.Floor(float64(x0)))
+	rightPixel := int(math.Floor(float64(x1)))
+
+	if leftPixel == rightPixel {
+		cov := x1 - x0
+		if cov > 0.001 {
+			if cov >= 0.999 {
+				b.FillRect(Rect4(int32(leftPixel), int32(y), int32(leftPixel+1), int32(y)+1), c, nil)
+			} else {
+				b.Set(leftPixel, y, BlendOver(b.At(leftPixel, y), ScaleColor(c, cov)))
+			}
 		}
-		if cov >= 0.999 {
-			b.Set(x, y, c)
-			continue
-		}
-		b.Set(x, y, BlendOver(b.At(x, y), ScaleColor(c, float32(cov))))
+		return
+	}
+
+	// Left partial pixel
+	leftCov := float32(float64(leftPixel+1) - float64(x0))
+	if leftCov >= 0.999 {
+		b.FillRect(Rect4(int32(leftPixel), int32(y), int32(leftPixel+1), int32(y)+1), c, nil)
+	} else if leftCov > 0.001 {
+		b.Set(leftPixel, y, BlendOver(b.At(leftPixel, y), ScaleColor(c, leftCov)))
+	}
+
+	// Middle integer pixels (fully covered)
+	if rightPixel > leftPixel+1 {
+		b.FillRect(Rect4(int32(leftPixel+1), int32(y), int32(rightPixel), int32(y)+1), c, nil)
+	}
+
+	// Right partial pixel
+	rightCov := float32(float64(x1) - float64(rightPixel))
+	if rightCov >= 0.999 {
+		b.FillRect(Rect4(int32(rightPixel), int32(y), int32(rightPixel+1), int32(y)+1), c, nil)
+	} else if rightCov > 0.001 {
+		b.Set(rightPixel, y, BlendOver(b.At(rightPixel, y), ScaleColor(c, rightCov)))
 	}
 }
 

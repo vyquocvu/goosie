@@ -6,6 +6,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/manifest"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
@@ -26,17 +27,23 @@ type NavController struct {
 // keeps its (it is a locked type already), and the ID never changes after
 // creation.
 type Tab struct {
-	mu      sync.RWMutex
-	id      uint64
-	url     string
-	title   string
-	history *toolbar.History
-	scrollY int32
-	layer   *frame.Layer
-	session *engine.Session
-	loading bool
-	err     string
-	bgColor frame.Color
+	mu              sync.RWMutex
+	id              uint64
+	url             string
+	title           string
+	history         *toolbar.History
+	scrollY         int32
+	layer           *frame.Layer
+	session         *engine.Session
+	loading         bool
+	err             string
+	bgColor         frame.Color
+	incognito       bool
+	pinned          bool
+	shieldsDisabled bool
+	blockedTrackers int
+	manifest        *manifest.Manifest
+	standaloneApp   bool
 
 	Nav NavController
 }
@@ -47,6 +54,55 @@ func newTab(id uint64) *Tab {
 		title:   "New Tab",
 		history: toolbar.NewHistory(),
 	}
+}
+
+// ShieldsEnabled reports whether ad and tracker blocking shields are active for this tab.
+func (t *Tab) ShieldsEnabled() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return !t.shieldsDisabled
+}
+
+// SetShieldsEnabled toggles ad and tracker blocking shields for this tab.
+func (t *Tab) SetShieldsEnabled(enabled bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.shieldsDisabled = !enabled
+}
+
+// BlockedTrackers returns the number of requests blocked by shields on this tab.
+func (t *Tab) BlockedTrackers() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.blockedTrackers
+}
+
+// IncrementBlockedTrackers increments the blocked request counter.
+func (t *Tab) IncrementBlockedTrackers() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.blockedTrackers++
+}
+
+// ResetBlockedTrackers resets the blocked request counter.
+func (t *Tab) ResetBlockedTrackers() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.blockedTrackers = 0
+}
+
+// Incognito reports whether the tab is running in private incognito mode.
+func (t *Tab) Incognito() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.incognito
+}
+
+// SetIncognito configures the tab's private incognito mode.
+func (t *Tab) SetIncognito(incognito bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.incognito = incognito
 }
 
 // ID identifies the tab; it never changes after creation.
@@ -158,4 +214,46 @@ func (t *Tab) SetBGColor(c frame.Color) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.bgColor = c
+}
+
+// Pinned reports whether the tab is pinned.
+func (t *Tab) Pinned() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.pinned
+}
+
+// SetPinned sets whether the tab is pinned.
+func (t *Tab) SetPinned(pinned bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pinned = pinned
+}
+
+// Manifest returns the parsed PWA web app manifest for this tab, or nil if none.
+func (t *Tab) Manifest() *manifest.Manifest {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.manifest
+}
+
+// SetManifest sets the parsed PWA web app manifest for this tab.
+func (t *Tab) SetManifest(m *manifest.Manifest) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.manifest = m
+}
+
+// IsStandaloneApp reports whether this tab is presented in standalone PWA application mode.
+func (t *Tab) IsStandaloneApp() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.standaloneApp
+}
+
+// SetStandaloneApp configures whether this tab is in standalone PWA application mode.
+func (t *Tab) SetStandaloneApp(standalone bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.standaloneApp = standalone
 }

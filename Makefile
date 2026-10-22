@@ -3,7 +3,7 @@ BINARY_NAME=goosie
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*" -not -path "./_v1_old/*")
 
-.PHONY: all build build-small clean test test-race bench gate wpt wpt-pilot wpt-unit
+.PHONY: all build build-small macos-app clean test test-race bench gate wpt wpt-pilot wpt-unit
 
 all: build
 
@@ -18,6 +18,13 @@ build-small:
 	@mkdir -p $(BUILD_DIR)
 	go build -trimpath -ldflags "-s -w -buildid=" -o $(BUILD_DIR)/$(BINARY_NAME)-small ./cmd/goosie
 	@echo "Size-optimized build complete: $(BUILD_DIR)/$(BINARY_NAME)-small"
+
+macos-app:
+	@test "$$(go env GOOS)" = "darwin" || (echo "macos-app requires macOS"; exit 1)
+	@mkdir -p $(BUILD_DIR)/Goosie.app/Contents/MacOS
+	go build -trimpath -ldflags "-s -w" -o $(BUILD_DIR)/Goosie.app/Contents/MacOS/$(BINARY_NAME) ./cmd/goosie
+	cp cmd/goosie/macos/Info.plist $(BUILD_DIR)/Goosie.app/Contents/Info.plist
+	@echo "Packaged native app: $(BUILD_DIR)/Goosie.app"
 
 clean:
 	@echo "Cleaning..."

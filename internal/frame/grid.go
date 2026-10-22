@@ -528,6 +528,32 @@ func (g *Grid) InFlight(c TileCoord) bool {
 	return t != nil && t.painting != nil
 }
 
+// InFlightIn counts the tiles intersecting r that have a rasterization on order.
+//
+// It is the question a caller has to ask before swapping a layer's content: a tile
+// still being painted from the display list that is about to be replaced would
+// install those pixels after the swap, and Invalidate deliberately does not stale a
+// painting tile — it keeps the old pixels on screen so the frame can be presented
+// now. The two together mean a content swap made while a tile is in flight can
+// leave that tile showing content nothing is displaying any more, permanently.
+// Bounded by the rect's own tile count, which for one video box is a handful.
+func (g *Grid) InFlightIn(r Rect) int {
+	rr := r.Intersection(g.extent)
+	lo, hi, ok := g.CoordRange(rr)
+	if !ok {
+		return 0
+	}
+	n := 0
+	for row := lo.Row; row <= hi.Row; row++ {
+		for col := lo.Col; col <= hi.Col; col++ {
+			if t := g.tiles[TileCoord{Col: col, Row: row}]; t != nil && t.painting != nil {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // Attempts returns how many rasterizations have been tried for a tile.
 func (g *Grid) Attempts(c TileCoord) int {
 	t := g.tiles[c]

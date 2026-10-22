@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/ax"
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
@@ -24,6 +26,29 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
+
+type recordingAccessibilityWindow struct {
+	surface.Window
+	called bool
+	nodes  []ax.Node
+}
+
+func (w *recordingAccessibilityWindow) SetAccessibility(nodes []ax.Node) {
+	w.called = true
+	w.nodes = nodes
+}
+
+func TestPublishAccessibilityWithoutTabManagerClearsTree(t *testing.T) {
+	w := &recordingAccessibilityWindow{}
+	f := &framePath{window: w}
+	f.publishAccessibility()
+	if !w.called {
+		t.Fatal("publishAccessibility did not clear the accessibility tree")
+	}
+	if w.nodes != nil {
+		t.Fatalf("published nodes = %v, want nil", w.nodes)
+	}
+}
 
 func TestParsePrivateFlag(t *testing.T) {
 	c, err := parse([]string{"-private"})
@@ -128,7 +153,7 @@ func TestLoadURLCtxValidSmallDocument(t *testing.T) {
 }
 
 func TestLoadURLCtxRejectsOversizedDocument(t *testing.T) {
-	html := `<!DOCTYPE html><html><body><div style="width:65537px;height:65536px;background:red"></div></body></html>`
+	html := `<!DOCTYPE html><html><body><div style="width:131073px;height:262144px;background:red"></div></body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(html))
@@ -183,10 +208,88 @@ func newNavTestPath(t *testing.T) *framePath {
 		pool:       pool,
 		navResults: make(chan navResult, 16),
 		imgResults: make(chan imgResult, 16),
+		zoom:       1.0,
 	}
 	f.tabMgr = tabs.NewManager(nil)
 	f.tabMgr.NewTab()
 	return f
+}
+
+func TestContentKeyPageNavigationScrollsDocument(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	sess, err := engine.NewSession("<html><body>long page</body></html>", nil, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab.SetSession(sess)
+
+	if !f.contentKey(keyPageDown, 0) {
+		t.Fatal("PageDown was not handled")
+	}
+	if got, want := f.sched.Viewport().Offset.Y, int32(230); got != want {
+		t.Fatalf("PageDown scroll offset = %d, want %d", got, want)
+	}
+	if got := tab.ScrollY(); got != 230 {
+		t.Fatalf("tab scroll offset = %d, want 230", got)
+	}
+
+	if !f.contentKey(keyPageUp, 0) {
+		t.Fatal("PageUp was not handled")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("PageUp scroll offset = %d, want 0", got)
+	}
+	if !f.contentKey(0xF705, 0) { // End
+		t.Fatal("End was not handled")
+	}
+	if got, want := f.sched.Viewport().Offset.Y, int32(1792); got != want {
+		t.Fatalf("End scroll offset = %d, want %d", got, want)
+	}
+	if !f.contentKey(0xF704, 0) { // Home
+		t.Fatal("Home was not handled")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("Home scroll offset = %d, want 0", got)
+	}
+}
+
+func TestContentKeyPageNavigationDoesNotScrollFocusedEditable(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := engine.NewSession(`<html><body><input id="keep" value="keep"></body></html>`, nil, 256, engine.WithMetrics(fonts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab.SetSession(sess)
+	var inputX, inputY float32
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node == nil || obj.Node.GetAttribute("id") != "keep" {
+			continue
+		}
+		x0, y0, x1, y1 := obj.BorderRect()
+		inputX, inputY = (x0+x1)/2, (y0+y1)/2
+		break
+	}
+	if !sess.FocusControl(inputX, inputY) {
+		t.Fatal("could not focus editable control")
+	}
+
+	if !f.contentKey(keyPageDown, 0) {
+		t.Fatal("PageDown in an editable control was not consumed")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("editable PageDown scrolled document to %d, want 0", got)
+	}
+	if got := sess.FocusedText(); got != "keep" {
+		t.Fatalf("PageDown changed editable value to %q", got)
+	}
 }
 
 func TestApplyNavResultNoHistoryPreservesForwardTrail(t *testing.T) {
@@ -733,7 +836,8 @@ func tallNavTestPath(t *testing.T) *framePath {
 		imgResults: make(chan imgResult, 16),
 	}
 	f.tabMgr = tabs.NewManager(nil)
-	f.tabMgr.NewTab()
+	tab := f.tabMgr.NewTab()
+	tab.SetLayer(layer)
 	return f
 }
 
@@ -1468,8 +1572,14 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 	sess.SelectTo(m.X1-1, midY)
 	f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
 
-	// Damage scoping, synchronously: the selection's tile is stale, a far
-	// tile in the same layer is still current.
+	// repaintTab hands the new content to the scheduler rather than writing it
+	// into the layer here, because it runs on the chrome pump thread while the
+	// frame thread reads the same layer fields. One BeginFrame is what installs
+	// the swap; the assertions below then read the damage that frame scoped.
+	_, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+
+	// Damage scoping: the selection's tile is stale, a far tile in the same
+	// layer is still current.
 	selTile := frame.CoordFor(frame.Point{X: int32(m.X0) + 1, Y: int32(midY)}, frame.TileSize)
 	if !second.Needs(selTile) {
 		t.Fatal("selection tile not stale after a selection repaint")
@@ -1485,7 +1595,6 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 	// any surviving reuse proves the cache lived. Layer identity above (same
 	// pointer across repaints) plus far-tile freshness below are what fail
 	// pre-fix, when every repaint allocated a cold layer.
-	_, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
 	w := f.sched.Submit(needed)
 	if w.Needed > 2 {
 		t.Fatalf("Needed = %d after a word-sized selection change, want only dirty tiles", w.Needed)

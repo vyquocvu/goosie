@@ -134,3 +134,30 @@ func TestDrawTabBarDragIndicator(t *testing.T) {
 		t.Fatalf("drop band has %d dark pixels after EndDrag, want none", n)
 	}
 }
+
+func TestDrawIncognitoTabDarkTheme(t *testing.T) {
+	mgr := NewManager(nil)
+	tab := mgr.NewIncognitoTab()
+
+	buf := frame.NewBitmap(400, TabBarHeight)
+	DrawTabBar(buf, mgr, 0, nil, 1)
+
+	// An active incognito tab body should have dark background frame.RGB(40, 44, 52)
+	hasDarkPixels := false
+	for y := int32(4); y < TabBarHeight-2; y++ {
+		for x := int32(20); x < int32(100); x++ {
+			c := buf.At(int(x), int(y)).RGBA()
+			if c.R == 40 && c.G == 44 && c.B == 52 {
+				hasDarkPixels = true
+				break
+			}
+		}
+		if hasDarkPixels {
+			break
+		}
+	}
+	if !hasDarkPixels {
+		t.Error("expected stealth dark pixels frame.RGB(40, 44, 52) in active incognito tab")
+	}
+	_ = tab
+}

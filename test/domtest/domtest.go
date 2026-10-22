@@ -20,10 +20,10 @@ import (
 // package var so this package holds no state a test can rewrite out from under another.
 func fixtureLimits() dom.ParseLimits {
 	return dom.ParseLimits{
-		Nodes:          50000,
+		Nodes:          1000000,
 		Depth:          128,
 		Attributes:     64,
-		AttributeBytes: 65536,
+		AttributeBytes: 1048576,
 	}
 }
 

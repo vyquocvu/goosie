@@ -1,6 +1,9 @@
 package dom
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // NodeType identifies the kind of node in the DOM tree.
 type NodeType uint8
@@ -11,6 +14,7 @@ const (
 	NodeText
 	NodeComment
 	NodeDoctype
+	NodeDocumentFragment
 )
 
 // NodeID is a stable, unique identifier for a node within a document. It is
@@ -64,6 +68,16 @@ type Node struct {
 	// Shadow DOM.
 	ShadowRoot *ShadowRoot
 
+	// Dialog element state.
+	IsModal     bool
+	ReturnValue string
+
+	// Popover element state.
+	IsPopoverOpen bool
+
+	// CSS Scoping state.
+	IsScopeRoot bool
+
 	// Document back-pointer.
 	Doc *Document
 }
@@ -81,6 +95,66 @@ func (n *Node) Element() bool { return n.Type == NodeElement }
 
 // Text reports whether the node is a text node.
 func (n *Node) Text() bool { return n.Type == NodeText }
+
+// DocumentFragment reports whether the node is a document fragment.
+func (n *Node) DocumentFragment() bool { return n.Type == NodeDocumentFragment }
+
+// CloneNode returns a duplicate of node n. If deep is true, descendants are also recursively cloned.
+func (n *Node) CloneNode(deep bool) *Node {
+	if n == nil {
+		return nil
+	}
+	clone := &Node{
+		Type:        n.Type,
+		Namespace:   n.Namespace,
+		Data:        n.Data,
+		DataAtom:    n.DataAtom,
+		DataContent: n.DataContent,
+		Doc:         n.Doc,
+	}
+	if n.Doc != nil {
+		clone.ID = n.Doc.allocID()
+	}
+	if len(n.Attr) > 0 {
+		clone.Attr = make([]Attribute, len(n.Attr))
+		copy(clone.Attr, n.Attr)
+	}
+	if deep {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			childClone := c.CloneNode(true)
+			clone.AppendChild(childClone)
+		}
+	}
+	return clone
+}
+
+// TemplateContent returns the document fragment holding the template's cloned children.
+func (n *Node) TemplateContent() *Node {
+	if n == nil || n.DataAtom != AtomTemplate {
+		return nil
+	}
+	frag := &Node{
+		Type: NodeDocumentFragment,
+		Doc:  n.Doc,
+	}
+	if n.Doc != nil {
+		frag.ID = n.Doc.allocID()
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		frag.AppendChild(c.CloneNode(true))
+	}
+	return frag
+}
+
+// ImportNode creates a copy of a node from an external document and adopts it into d.
+func (d *Document) ImportNode(n *Node, deep bool) *Node {
+	if n == nil || d == nil {
+		return nil
+	}
+	clone := n.CloneNode(deep)
+	clone.adopt(d)
+	return clone
+}
 
 // adopt assigns targetDoc and allocates new NodeIDs throughout the subtree
 // rooted at n if n comes from another document or lacks a valid NodeID.
@@ -248,12 +322,30 @@ func (n *Node) SetAttribute(name, value string) {
 			if n.Doc != nil && isQueryAttr(name) {
 				n.Doc.MarkQueryDirty()
 			}
+			n.checkExclusiveDetails(name)
 			return
 		}
 	}
 	n.Attr = append(n.Attr, Attribute{Name: name, Value: value})
 	if n.Doc != nil && isQueryAttr(name) {
 		n.Doc.MarkQueryDirty()
+	}
+	n.checkExclusiveDetails(name)
+}
+
+func (n *Node) checkExclusiveDetails(attrName string) {
+	if n.Element() && n.Data == "details" && strings.EqualFold(attrName, "open") {
+		if nameAttr := n.GetAttribute("name"); nameAttr != "" && n.Doc != nil {
+			n.Doc.Node.Walk(func(other *Node) bool {
+				if other != n && other.Element() && other.Data == "details" && other.GetAttribute("name") == nameAttr {
+					if other.HasAttribute("open") {
+						other.RemoveAttribute("open")
+						DispatchEvent(other, NewEvent("toggle", false, false))
+					}
+				}
+				return true
+			})
+		}
 	}
 }
 
@@ -317,6 +409,23 @@ func (n *Node) collectText(sb *strings.Builder) {
 	}
 }
 
+// Walk traverses the subtree rooted at n in pre-order depth-first order.
+// If fn returns false, the walk stops early.
+func (n *Node) Walk(fn func(*Node) bool) bool {
+	if n == nil {
+		return true
+	}
+	if !fn(n) {
+		return false
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if !c.Walk(fn) {
+			return false
+		}
+	}
+	return true
+}
+
 // Document is the root of a DOM tree. It owns the node-ID allocator and
 // provides the entry points for tree queries.
 type Document struct {
@@ -332,11 +441,13 @@ type Document struct {
 	// together lazily on query after any structural, id, or class mutation
 	// (MarkQueryDirty). Linear scans per query are O(N); scripts polling
 	// these APIs turn them into O(queries×N), seconds on large documents.
-	idIdx     map[string]*Node
-	tagIdx    map[Atom][]*Node
-	tagStrIdx map[string][]*Node
-	classIdx  map[string][]*Node
-	qValid    bool
+	idIdx        map[string]*Node
+	tagIdx       map[Atom][]*Node
+	tagStrIdx    map[string][]*Node
+	classIdx     map[string][]*Node
+	qValid       bool
+	propertiesMu sync.RWMutex
+	properties   map[string]PropertyDefinition
 }
 
 // MarkQueryDirty drops the id/tag/class caches after a structural edit
@@ -536,6 +647,44 @@ func findByID(n *Node, id string) *Node {
 	return nil
 }
 
+// DatalistOptions returns the suggested values associated with an input element
+// via its list attribute pointing to a <datalist id="..."> element.
+func (d *Document) DatalistOptions(input *Node) []string {
+	if input == nil || input.Doc == nil {
+		return nil
+	}
+	listID := input.GetAttribute("list")
+	if listID == "" {
+		return nil
+	}
+	dl := input.Doc.ElementByID(listID)
+	if dl == nil || dl.Data != "datalist" {
+		return nil
+	}
+	var options []string
+	dl.Walk(func(n *Node) bool {
+		if n.Element() && n.Data == "option" {
+			val := n.GetAttribute("value")
+			if val == "" {
+				val = strings.TrimSpace(n.TextContent())
+			}
+			if val != "" {
+				options = append(options, val)
+			}
+		}
+		return true
+	})
+	return options
+}
+
+// DatalistOptions returns the list options if n is an input with a valid list attribute.
+func (n *Node) DatalistOptions() []string {
+	if n == nil || n.Doc == nil {
+		return nil
+	}
+	return n.Doc.DatalistOptions(n)
+}
+
 // ElementsByTagName returns all elements with the given tag name.
 func (d *Document) ElementsByTagName(tag string) []*Node {
 	atom := Lookup(tag)
@@ -568,4 +717,52 @@ func collectByTag(n *Node, tag string, atom Atom, result *[]*Node) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		collectByTag(c, tag, atom, result)
 	}
+}
+
+// PropertyDefinition describes a CSS custom property registered via @property or CSS.registerProperty.
+type PropertyDefinition struct {
+	Name         string
+	Syntax       string
+	Inherits     bool
+	InitialValue string
+}
+
+// RegisterProperty registers a CSS custom property descriptor on the document.
+// It returns false if the property was already registered.
+func (d *Document) RegisterProperty(def PropertyDefinition) bool {
+	d.propertiesMu.Lock()
+	defer d.propertiesMu.Unlock()
+	if d.properties == nil {
+		d.properties = make(map[string]PropertyDefinition)
+	}
+	if _, exists := d.properties[def.Name]; exists {
+		return false
+	}
+	d.properties[def.Name] = def
+	return true
+}
+
+// GetProperty retrieves a registered CSS custom property descriptor if present.
+func (d *Document) GetProperty(name string) (PropertyDefinition, bool) {
+	d.propertiesMu.RLock()
+	defer d.propertiesMu.RUnlock()
+	if d.properties == nil {
+		return PropertyDefinition{}, false
+	}
+	def, ok := d.properties[name]
+	return def, ok
+}
+
+// RegisteredProperties returns a snapshot map of all registered custom properties.
+func (d *Document) RegisteredProperties() map[string]PropertyDefinition {
+	d.propertiesMu.RLock()
+	defer d.propertiesMu.RUnlock()
+	if len(d.properties) == 0 {
+		return nil
+	}
+	out := make(map[string]PropertyDefinition, len(d.properties))
+	for k, v := range d.properties {
+		out[k] = v
+	}
+	return out
 }

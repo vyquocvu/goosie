@@ -33,10 +33,14 @@ enum {
 	GOOSIE_EV_KEY = 3,
 	GOOSIE_EV_RESIZE = 4,
 	GOOSIE_EV_IME = 5,
+	GOOSIE_EV_AX_SET_VALUE = 6,
 	// GOOSIE_EV_NONE is what a zeroed event reads as, so a struct that was never
 	// filled cannot be mistaken for a tick.
 	GOOSIE_EV_NONE = 255
 };
+
+// Text capacity shared by IME commits and accessibility value writes.
+#define GOOSIE_EVENT_TEXT_MAX 4096
 
 // GoosieIMEAction separates the two things an EvIME carries.
 enum {
@@ -87,6 +91,8 @@ enum {
 	GOOSIE_KEY_RIGHT = 0xF703,
 	GOOSIE_KEY_HOME  = 0xF704,
 	GOOSIE_KEY_END   = 0xF705,
+	GOOSIE_KEY_PAGE_UP = 0xF706,
+	GOOSIE_KEY_PAGE_DOWN = 0xF707,
 };
 
 // GoosieEvent is one platform input, in device pixels. at_ns is the shim's clock
@@ -98,10 +104,11 @@ typedef struct GoosieEvent {
 	int px, py;     // GOOSIE_EV_POINTER position, GOOSIE_EV_SCROLL gesture location
 	int action;     // GOOSIE_POINTER_*
 	int button;     // 1 left, 2 right, 3 middle, 0 none
+	int ax_target;  // GOOSIE_AX_TARGET_* for GOOSIE_EV_AX_SET_VALUE
 	int key;        // GOOSIE_EV_KEY: the typed rune, 0 for a control key
 	int mods;       // GOOSIE_EV_KEY: GOOSIE_MOD_* modifier flags
 	int ime;        // GOOSIE_EV_IME: GOOSIE_IME_MARKED or GOOSIE_IME_COMMIT
-	char text[256]; // GOOSIE_EV_IME: UTF-8 composition text, NUL-terminated
+	char text[GOOSIE_EVENT_TEXT_MAX]; // UTF-8 input payload, NUL-terminated
 	int w, h;       // GOOSIE_EV_RESIZE: the new surface size, device pixels
 	double scale;   // the device pixel ratio this event was produced under
 	long long at_ns;
@@ -202,7 +209,24 @@ enum {
 	GOOSIE_AX_LINK = 3,
 	GOOSIE_AX_BUTTON = 4,
 	GOOSIE_AX_IMAGE = 5,
-	GOOSIE_AX_TEXT_FIELD = 6
+	GOOSIE_AX_TEXT_FIELD = 6,
+	GOOSIE_AX_SEARCH = 7,
+	GOOSIE_AX_PROGRESS = 8,
+	GOOSIE_AX_METER = 9,
+	GOOSIE_AX_TAB_GROUP = 10,
+	GOOSIE_AX_TAB = 11
+};
+
+enum {
+	GOOSIE_AX_SELECTED = 1 << 0,
+	GOOSIE_AX_DISABLED = 1 << 1,
+	GOOSIE_AX_ADDRESS_BAR = 1 << 2,
+	GOOSIE_AX_FOCUSED = 1 << 3
+};
+
+enum {
+	GOOSIE_AX_TARGET_CONTENT = 0,
+	GOOSIE_AX_TARGET_ADDRESS = 1
 };
 
 // GoosieAxNode is one node of a flattened accessibility tree. The tree arrives
@@ -214,9 +238,11 @@ enum {
 typedef struct GoosieAxNode {
 	int role;
 	float x0, y0, x1, y1;
+	const char *identifier;
 	const char *label;
 	const char *value;
 	const char *href;
+	int flags;
 	int first_child;
 	int next_sibling;
 } GoosieAxNode;

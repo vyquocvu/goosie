@@ -34,9 +34,9 @@ func TestValidateExtentCountsSignedTileSpans(t *testing.T) {
 		rect  frame.Rect
 		valid bool
 	}{
-		{"aligned limit", frame.Rect4(0, 0, 65536, 65536), true},
-		{"one extra column", frame.Rect4(0, 0, 65537, 65536), false},
-		{"negative partial tiles", frame.Rect4(-1, -1, 65535, 65535), false},
+		{"aligned limit", frame.Rect4(0, 0, 131072, 262144), true},
+		{"one extra column", frame.Rect4(0, 0, 131073, 262144), false},
+		{"negative partial tiles", frame.Rect4(-1, -1, 131071, 262143), false},
 		{"one negative tile", frame.Rect4(-256, -256, 0, 0), true},
 		{"empty", frame.Rect4(0, 0, 0, 0), true},
 		{"inverted", frame.Rect4(1, 0, 0, 1), false},

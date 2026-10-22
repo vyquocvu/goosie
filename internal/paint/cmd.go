@@ -160,9 +160,20 @@ type DisplayCmd struct {
 	Image ImageSpec
 	// Gradient is the ramp a CmdGradient fills its rect with. Its stops are
 	// premultiplied and already carry the command's opacity.
-	Gradient frame.LinearGradient
-	// RadialGradient is the ramp a CmdRadialGradient fills its rect with.
+	Gradient       frame.LinearGradient
 	RadialGradient frame.RadialGradient
+	// Filter carries the serialized CSS filter property value for this command.
+	Filter string
+	// BackdropFilter carries the serialized CSS backdrop-filter property value for this command.
+	BackdropFilter string
+
+	// Clip, when non-empty, limits where this command paints. It exists for the
+	// one case a destination rectangle cannot express: an image whose box is
+	// partly outside an ancestor's overflow. Intersecting the destination instead
+	// would squeeze the whole picture into the visible part, and the element's
+	// own bounds are the right thing to clip against only where the painter knows
+	// them, which is here rather than in the rasterizer.
+	Clip frame.Rect
 
 	// Z orders this command within its layer. The list is sorted once per
 	// content version, never per frame or per tile; see List.SortStable.

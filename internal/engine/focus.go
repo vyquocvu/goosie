@@ -40,11 +40,17 @@ func (s *Session) controlAt(x, y float32) *dom.Node {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Style != nil && cur.Style.PointerEvents == "none" {
+				break
+			}
 			if controlEditable(cur.Node) {
 				return cur.Node
 			}
@@ -152,12 +158,67 @@ func (s *Session) CommitText(text string) bool {
 	return true
 }
 
+// CloseTopmostModalDialog finds and closes the topmost open modal dialog element.
+// It fires a cancelable "cancel" event; if not canceled, it removes the open attribute,
+// clears the modal flag, and fires a "close" event.
+func (s *Session) CloseTopmostModalDialog() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.closeTopmostModalDialogLocked()
+}
+
+func (s *Session) closeTopmostModalDialogLocked() bool {
+	if s.Doc == nil {
+		return false
+	}
+	var topmost *dom.Node
+	var walk func(n *dom.Node)
+	walk = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.Element() && n.Data == "dialog" && n.IsModal && n.HasAttribute("open") {
+			topmost = n
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(&s.Doc.Node)
+	if topmost == nil {
+		return false
+	}
+	cancelEv := dom.NewEvent("cancel", false, true)
+	if !dom.DispatchEvent(topmost, cancelEv) {
+		return false // preventDefault was called
+	}
+	topmost.RemoveAttribute("open")
+	topmost.IsModal = false
+	dom.DispatchEvent(topmost, dom.NewEvent("close", false, false))
+	return true
+}
+
 // Edit applies one keyboard edit to the focused control. It returns whether
 // the value or focus changed, which is when the caller must reflow;
 // caret-only movement returns false but still needs a repaint.
 func (s *Session) Edit(action EditAction, r rune) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if action == EditEscape {
+		if s.closeTopmostAutoPopoverLocked() {
+			return true
+		}
+		closedDialog := s.closeTopmostModalDialogLocked()
+		if s.focus != nil {
+			prev := s.focus
+			s.focus = nil
+			s.marked = ""
+			css.SetFocus(prev, false)
+			dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
+			return true
+		}
+		return closedDialog
+	}
 	if !controlEditable(s.focus) {
 		return false
 	}
@@ -189,12 +250,18 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		}
 		return false
 	case EditEnter:
-		if s.focus.DataAtom != dom.AtomTextarea {
+		if s.focus.DataAtom == dom.AtomTextarea {
+			if insert("\n") {
+				dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+				return true
+			}
 			return false
 		}
-		if insert("\n") {
-			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
-			return true
+		if s.focus.DataAtom == dom.AtomInput {
+			if form := FindForm(s.focus); form != nil {
+				s.submitFormLocked(form)
+				return true
+			}
 		}
 		return false
 	case EditBackspace:
@@ -241,6 +308,93 @@ func maxLen(n *dom.Node) int {
 	return 0
 }
 
+// InsertText inserts text into the currently focused editable control at the caret
+// position, respecting maxlength and firing an "input" event.
+func (s *Session) InsertText(text string) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !controlEditable(s.focus) || text == "" {
+		return false
+	}
+	runes := []rune(s.controlValue(s.focus))
+	if s.caret > len(runes) {
+		s.caret = len(runes)
+	}
+	added := []rune(text)
+	if max := maxLen(s.focus); max > 0 {
+		avail := max - len(runes)
+		if avail <= 0 {
+			return false
+		}
+		if len(added) > avail {
+			added = added[:avail]
+		}
+	}
+	out := make([]rune, 0, len(runes)+len(added))
+	out = append(out, runes[:s.caret]...)
+	out = append(out, added...)
+	out = append(out, runes[s.caret:]...)
+	s.caret += len(added)
+	s.setControlValue(s.focus, string(out))
+	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+	return true
+}
+
+// FocusedText returns the current value of the focused control, or empty if none.
+func (s *Session) FocusedText() string {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.focus == nil {
+		return ""
+	}
+	return s.controlValue(s.focus)
+}
+
+// FocusedEditable reports whether the currently focused control is editable.
+func (s *Session) FocusedEditable() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return controlEditable(s.focus)
+}
+
+// SetFocusedText replaces the value of the focused editable control. It is the
+// programmatic equivalent of selecting all and typing, used by accessibility
+// clients that set a text field's AXValue. Like ordinary typing it respects
+// maxlength, dispatches input only when the value changes, and leaves focus in
+// the control with the caret at the end.
+func (s *Session) SetFocusedText(value string) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !controlEditable(s.focus) {
+		return false
+	}
+	runes := []rune(value)
+	if max := maxLen(s.focus); max > 0 && len(runes) > max {
+		return false
+	}
+	old := s.controlValue(s.focus)
+	s.marked = ""
+	s.caret = len(runes)
+	if old == value {
+		return false
+	}
+	s.setControlValue(s.focus, value)
+	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+	return true
+}
+
+// SelectAllControl positions the caret at the end of the focused control.
+func (s *Session) SelectAllControl() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !controlEditable(s.focus) {
+		return false
+	}
+	runes := []rune(s.controlValue(s.focus))
+	s.caret = len(runes)
+	return true
+}
+
 // controlValue reads the editable value: the value attribute for input, the
 // first text child for textarea.
 func (s *Session) controlValue(n *dom.Node) string {
@@ -257,6 +411,9 @@ func (s *Session) controlValue(n *dom.Node) string {
 
 func (s *Session) setControlValue(n *dom.Node, v string) {
 	if n.DataAtom == dom.AtomTextarea {
+		if !n.HasAttribute("data-default-value") {
+			n.SetAttribute("data-default-value", s.controlValue(n))
+		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			if c.Text() {
 				c.DataContent = v
@@ -265,6 +422,9 @@ func (s *Session) setControlValue(n *dom.Node, v string) {
 		}
 		n.AppendChild(&dom.Node{Type: dom.NodeText, DataContent: v})
 		return
+	}
+	if !n.HasAttribute("data-default-value") {
+		n.SetAttribute("data-default-value", n.GetAttribute("value"))
 	}
 	n.SetAttribute("value", v)
 }
@@ -298,7 +458,7 @@ func IsActivatable(n *dom.Node) bool {
 		return false
 	}
 	switch n.Data {
-	case "button":
+	case "button", "summary":
 		return true
 	case "a":
 		return n.GetAttribute("href") != ""
@@ -345,11 +505,25 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 	typ := strings.ToLower(n.GetAttribute("type"))
 	switch typ {
 	case "checkbox":
+		if !n.HasAttribute("data-default-checked") {
+			if IsChecked(n) {
+				n.SetAttribute("data-default-checked", "true")
+			} else {
+				n.SetAttribute("data-default-checked", "false")
+			}
+		}
 		SetChecked(n, !IsChecked(n))
 		dom.DispatchEvent(n, dom.NewEvent("change", true, true))
 		dom.DispatchEvent(n, dom.NewEvent("input", true, true))
 		return true
 	case "radio":
+		if !n.HasAttribute("data-default-checked") {
+			if IsChecked(n) {
+				n.SetAttribute("data-default-checked", "true")
+			} else {
+				n.SetAttribute("data-default-checked", "false")
+			}
+		}
 		// Uncheck all radios in the same group (same name, same form).
 		name := n.GetAttribute("name")
 		// Walk up to find the form ancestor.

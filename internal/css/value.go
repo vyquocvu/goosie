@@ -136,7 +136,10 @@ func lengthFuncName(s string) (string, bool) {
 		return "", false
 	}
 	switch lower := strings.ToLower(s[:idx]); lower {
-	case "calc", "min", "max", "clamp":
+	case "calc", "min", "max", "clamp",
+		"sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+		"pow", "sqrt", "hypot", "log", "exp", "abs", "sign",
+		"round", "mod", "rem":
 		// The trailing ')' has to close this function: `max(1px,2px) * 2` is an
 		// expression around the call, not a call around the expression.
 		depth := 0
@@ -178,6 +181,11 @@ func splitArgs(s string) []string {
 }
 
 func ParseColor(s string) (Color, bool) {
+	return ParseColorWithScheme(s, "")
+}
+
+// ParseColorWithScheme parses a CSS color value in the context of a color scheme ("light" or "dark").
+func ParseColorWithScheme(s, colorScheme string) (Color, bool) {
 	if strings.Contains(s, "/*") {
 		s = stripComments(s)
 	}
@@ -193,28 +201,58 @@ func ParseColor(s string) (Color, bool) {
 	}
 
 	if body, ok := colorFunctionArgs(s, "rgb", "rgba"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("rgb", body, colorScheme)
+		}
 		return parseRGBLike(body)
 	}
 	if body, ok := colorFunctionArgs(s, "hsl", "hsla"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("hsl", body, colorScheme)
+		}
 		return parseHSLLike(body)
 	}
 	if body, ok := colorFunctionArgs(s, "hwb"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("hwb", body, colorScheme)
+		}
 		return parseColor4Like("hwb", body)
 	}
 	if body, ok := colorFunctionArgs(s, "lab"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("lab", body, colorScheme)
+		}
 		return parseColor4Like("lab", body)
 	}
 	if body, ok := colorFunctionArgs(s, "lch"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("lch", body, colorScheme)
+		}
 		return parseColor4Like("lch", body)
 	}
 	if body, ok := colorFunctionArgs(s, "oklab"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("oklab", body, colorScheme)
+		}
 		return parseColor4Like("oklab", body)
 	}
 	if body, ok := colorFunctionArgs(s, "oklch"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("oklch", body, colorScheme)
+		}
 		return parseColor4Like("oklch", body)
 	}
 	if body, ok := colorFunctionArgs(s, "color"); ok {
+		if isRelativeColor(body) {
+			return parseRelativeColor("color", body, colorScheme)
+		}
 		return parseColorFunc(body)
+	}
+	if body, ok := colorFunctionArgs(s, "color-mix"); ok {
+		return parseColorMix(body)
+	}
+	if body, ok := colorFunctionArgs(s, "light-dark"); ok {
+		return parseLightDark(body, colorScheme)
 	}
 
 	return Color{}, false
@@ -617,37 +655,68 @@ func (v Value) ToLength() float32 {
 // that e.g. "0.67em" on an h1 with font-size:32px correctly yields 21.44px
 // instead of 10.72px.
 func (v Value) ToLengthWithEm(fontSize float32) float32 {
-	return v.ToLengthWithContext(fontSize, 1440, 900)
+	return v.ToLengthWithFullContext(fontSize, 16, 1440, 900)
+}
+
+// ToLengthWithEmAndRem resolves em against the element's font-size and rem against
+// the root font-size.
+func (v Value) ToLengthWithEmAndRem(fontSize, rootFontSize float32) float32 {
+	return v.ToLengthWithFullContext(fontSize, rootFontSize, 1440, 900)
 }
 
 // ToLengthWithContext resolves length units with full context: font size for
 // em/rem/ex, and viewport width/height for vw/vh/vmin/vmax.
 func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
+	return v.ToLengthWithFullContext(em, 16, vw, vh)
+}
+
+// ToLengthWithFullContext resolves length units with full context: font size for
+// em/ex, root font size for rem, and viewport width/height for vw/vh/vmin/vmax.
+func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 	if vw <= 0 {
 		vw = 1440
 	}
 	if vh <= 0 {
 		vh = 900
 	}
+	if rem <= 0 {
+		rem = 16
+	}
 	switch v.Type {
 	case ValueFunc:
-		if f, ok := EvalFunc(v.Func, v.Str, em, vw, vh); ok {
+		if f, ok := EvalFuncWithRem(v.Func, v.Str, em, rem, vw, vh); ok {
 			return f
 		}
 		return 0
 	case ValueLength:
 		switch v.Unit {
-		case "vw", "svw", "dvw", "lvw":
+		case "vw", "svw", "dvw", "lvw", "vi":
 			return float32(v.Num) * vw / 100
-		case "vh", "svh", "dvh", "lvh":
+		case "vh", "svh", "dvh", "lvh", "vb":
 			return float32(v.Num) * vh / 100
-		case "vmin":
+		case "vmin", "svmin", "dvmin", "lvmin":
 			m := vw
 			if vh < m {
 				m = vh
 			}
 			return float32(v.Num) * m / 100
-		case "vmax":
+		case "vmax", "svmax", "dvmax", "lvmax":
+			m := vw
+			if vh > m {
+				m = vh
+			}
+			return float32(v.Num) * m / 100
+		case "cqw", "cqi":
+			return float32(v.Num) * vw / 100
+		case "cqh", "cqb":
+			return float32(v.Num) * vh / 100
+		case "cqmin":
+			m := vw
+			if vh < m {
+				m = vh
+			}
+			return float32(v.Num) * m / 100
+		case "cqmax":
 			m := vw
 			if vh > m {
 				m = vh
@@ -669,11 +738,8 @@ func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
 			return float32(v.Num) * em * 0.5
 		case "rem":
 			// rem is relative to the root element's font size, not the element's
-			// own. Resolving it against `em` (as this once did) inflates every rem
-			// on a large-font element: an h1 with font-size:40px and margin-top:
-			// 6.5rem got 260px instead of 104px. The root defaults to 16px, which
-			// is what the overwhelming majority of documents leave it at.
-			return float32(v.Num) * 16
+			// own.
+			return float32(v.Num) * rem
 		default:
 			return toPixels(v.Num, v.Unit)
 		}
@@ -683,6 +749,44 @@ func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
 		return -2 - float32(v.Num)
 	}
 	return 0
+}
+
+// ToLengthWithContainerContext resolves length units taking container width/height into account
+// for container query units (cqw, cqh, cqi, cqb, cqmin, cqmax).
+func (v Value) ToLengthWithContainerContext(em, rem, vw, vh, cqW, cqH float32) float32 {
+	if cqW <= 0 {
+		cqW = vw
+		if cqW <= 0 {
+			cqW = 1440
+		}
+	}
+	if cqH <= 0 {
+		cqH = vh
+		if cqH <= 0 {
+			cqH = 900
+		}
+	}
+	if v.Type == ValueLength {
+		switch v.Unit {
+		case "cqw", "cqi":
+			return float32(v.Num) * cqW / 100
+		case "cqh", "cqb":
+			return float32(v.Num) * cqH / 100
+		case "cqmin":
+			m := cqW
+			if cqH < m {
+				m = cqH
+			}
+			return float32(v.Num) * m / 100
+		case "cqmax":
+			m := cqW
+			if cqH > m {
+				m = cqH
+			}
+			return float32(v.Num) * m / 100
+		}
+	}
+	return v.ToLengthWithFullContext(em, rem, vw, vh)
 }
 
 func toPixels(num float64, unit string) float32 {
@@ -703,13 +807,13 @@ func toPixels(num float64, unit string) float32 {
 		return float32(num * 96 / 2.54)
 	case "mm":
 		return float32(num * 96 / 25.4)
-	case "vw":
+	case "vw", "svw", "dvw", "lvw", "vi", "cqw", "cqi":
 		return float32(num * 1440 / 100)
-	case "vh":
+	case "vh", "svh", "dvh", "lvh", "vb", "cqh", "cqb":
 		return float32(num * 900 / 100)
-	case "vmin":
+	case "vmin", "svmin", "dvmin", "lvmin", "cqmin":
 		return float32(num * 900 / 100)
-	case "vmax":
+	case "vmax", "svmax", "dvmax", "lvmax", "cqmax":
 		return float32(num * 1440 / 100)
 	}
 	return float32(num)

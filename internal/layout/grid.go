@@ -80,8 +80,89 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 
 	areaRows, areaCols, areas := parseGridAreas(container.GridTemplateAreas)
-	cols, colLines := parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW)
-	rowSpecs, rowLines := parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH)
+	var cols []gridTrack
+	var colLines map[string][]int
+	var rowSpecs []gridTrack
+	var rowLines map[string][]int
+
+	if isSubgrid(container.GridTemplateColumns) {
+		pGridID := findParentGrid(a, id)
+		if pGridID != 0 {
+			pObj := a.Get(pGridID)
+			subStart := a.Get(id).GridCol
+			subSpan := a.Get(id).GridColSpan
+			if subSpan < 1 {
+				subSpan = 1
+			}
+			parentCols := pObj.GridCols
+			if len(parentCols) == 0 && pObj.Style != nil && pObj.Style.GridTemplateColumns != "" && !isSubgrid(pObj.Style.GridTemplateColumns) {
+				pColTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateColumns, pObj.Style.FontSize, contentW)
+				for _, tc := range pColTracks {
+					w := tc.max
+					if w <= 0 {
+						w = tc.min
+					}
+					parentCols = append(parentCols, w)
+				}
+			}
+			if subStart < len(parentCols) {
+				end := subStart + subSpan
+				if end > len(parentCols) {
+					end = len(parentCols)
+				}
+				for _, w := range parentCols[subStart:end] {
+					cols = append(cols, gridTrack{min: w, max: w})
+				}
+			}
+			if container.ColumnGap == 0 && pObj.Style != nil {
+				gapX = pObj.Style.ColumnGap
+			}
+			colLines = parseSubgridLines(container.GridTemplateColumns)
+		}
+	}
+	if len(cols) == 0 && !isSubgrid(container.GridTemplateColumns) {
+		cols, colLines = parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW)
+	}
+
+	if isSubgrid(container.GridTemplateRows) {
+		pGridID := findParentGrid(a, id)
+		if pGridID != 0 {
+			pObj := a.Get(pGridID)
+			subStart := a.Get(id).GridRow
+			subSpan := a.Get(id).GridRowSpan
+			if subSpan < 1 {
+				subSpan = 1
+			}
+			parentRows := pObj.GridRows
+			if len(parentRows) == 0 && pObj.Style != nil && pObj.Style.GridTemplateRows != "" && !isSubgrid(pObj.Style.GridTemplateRows) {
+				pRowTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateRows, pObj.Style.FontSize, contentH)
+				for _, tr := range pRowTracks {
+					h := tr.max
+					if h <= 0 {
+						h = tr.min
+					}
+					parentRows = append(parentRows, h)
+				}
+			}
+			if subStart < len(parentRows) {
+				end := subStart + subSpan
+				if end > len(parentRows) {
+					end = len(parentRows)
+				}
+				for _, h := range parentRows[subStart:end] {
+					rowSpecs = append(rowSpecs, gridTrack{min: h, max: h})
+				}
+			}
+			if container.RowGap == 0 && pObj.Style != nil {
+				gapY = pObj.Style.RowGap
+			}
+			rowLines = parseSubgridLines(container.GridTemplateRows)
+		}
+	}
+	if len(rowSpecs) == 0 && !isSubgrid(container.GridTemplateRows) {
+		rowSpecs, rowLines = parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH)
+	}
+
 	switch {
 	case len(cols) == 0:
 		// An untemplated grid still needs one implicit column to place into.
@@ -119,6 +200,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	colW := make([]float32, len(cols))
 	sizeGridTracks(cols, colW, contentW, gapX, normalizeAxis(container.JustifyContent) == "",
 		measureAutoCols(a, items, cols))
+	a.Get(id).GridCols = colW
 	colLead, colGap := axisPacking(container.JustifyContent, contentW, gapX, len(cols), colW)
 	xs := make([]float32, len(cols))
 	for i := range colW {
@@ -129,6 +211,14 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
+	initRows := make([]float32, len(rowSpecs))
+	for r, tr := range rowSpecs {
+		if tr.min > 0 {
+			initRows[r] = tr.min
+		}
+	}
+	a.Get(id).GridRows = initRows
+
 	for i := range items {
 		p := &items[i]
 		last := p.col + p.colSpan - 1
@@ -137,6 +227,10 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		colRect := xs[last] + colW[last] - xs[p.col]
 		it := a.Get(p.id)
+		it.GridCol = p.col
+		it.GridRow = p.row
+		it.GridColSpan = p.colSpan
+		it.GridRowSpan = p.rowSpan
 		// The horizontal origin is already final, so descendants block layout puts
 		// under this item land where they belong; only Y moves after sizing.
 		it.X = xs[p.col]
@@ -245,6 +339,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			ys[i] = ys[i-1] + rowH[i-1] + rowGap
 		}
 	}
+	a.Get(id).GridRows = rowH
 
 	maxBottom := float32(0)
 	for i := range items {
@@ -384,9 +479,13 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 		// span/auto-placement path the style layer always produced.
 		if st, sp, ok := resolveGridPlacement(k.Style.GridColumn, colLines, nCols); ok {
 			p.col, p.colSpan, p.fixedPos = st, sp, true
+		} else if sp > 0 {
+			p.colSpan = sp
 		}
 		if st, sp, ok := resolveGridPlacement(k.Style.GridRow, rowLines, nRows); ok {
 			p.row, p.rowSpan, p.fixedPos = st, sp, true
+		} else if sp > 0 {
+			p.rowSpan = sp
 		}
 		out = append(out, p)
 	}
@@ -642,25 +741,84 @@ func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, boo
 	return 0, false
 }
 
+func parseGridSpanValue(s string) int {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if strings.HasPrefix(s, "span") {
+		s = strings.TrimSpace(strings.TrimPrefix(s, "span"))
+	}
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return n
+	}
+	return 1
+}
+
 // resolveGridPlacement reduces a grid-column/grid-row value to a 0-based
 // start and a span against a template of nTracks tracks with the given line
 // names. "a / b" pins both lines; a lone line pins the start with span 1; a
-// bare "span N" (or anything unparseable) reports false and the caller falls
-// back to the span/auto-placement path it always used. Against an explicit
-// template (nTracks > 0) starts clamp into it and spans clamp to fit, because
-// the engine grows implicit rows but never implicit columns; with no template
-// the numbers pass through and rows grow as needed.
+// bare "span N" reports false with span N for auto-placement.
+// Against an explicit template (nTracks > 0) starts clamp into it and spans clamp to fit.
 func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (start, span int, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "auto" {
 		return 0, 0, false
 	}
-	if strings.HasPrefix(raw, "span") {
-		return 0, 0, false
+	if strings.HasPrefix(raw, "span") && !strings.Contains(raw, "/") {
+		return 0, parseGridSpanValue(raw), false
 	}
 	if i := strings.Index(raw, "/"); i >= 0 {
-		s, sOk := resolveGridLine(raw[:i], lines, nTracks)
-		e, eOk := resolveGridLine(raw[i+1:], lines, nTracks)
+		left := strings.TrimSpace(raw[:i])
+		right := strings.TrimSpace(raw[i+1:])
+
+		// Case 1: left is "span N", right is a line: span N / line
+		if strings.HasPrefix(left, "span") {
+			sp := parseGridSpanValue(left)
+			e, eOk := resolveGridLine(right, lines, nTracks)
+			if !eOk {
+				return 0, sp, false
+			}
+			s := e - sp
+			if s < 1 {
+				s = 1
+			}
+			if nTracks > 0 {
+				if s > nTracks {
+					return 0, 0, false
+				}
+				if e > nTracks+1 {
+					e = nTracks + 1
+				}
+				sp = e - s
+				if sp < 1 {
+					sp = 1
+				}
+			}
+			return s - 1, sp, true
+		}
+
+		// Case 2: left is a line, right is "span N": line / span N
+		if strings.HasPrefix(right, "span") {
+			s, sOk := resolveGridLine(left, lines, nTracks)
+			if !sOk {
+				return 0, 0, false
+			}
+			sp := parseGridSpanValue(right)
+			if nTracks > 0 {
+				if s > nTracks {
+					return 0, 0, false
+				}
+				if s+sp > nTracks+1 {
+					sp = nTracks + 1 - s
+					if sp < 1 {
+						sp = 1
+					}
+				}
+			}
+			return s - 1, sp, true
+		}
+
+		// Case 3: both are lines
+		s, sOk := resolveGridLine(left, lines, nTracks)
+		e, eOk := resolveGridLine(right, lines, nTracks)
 		if !sOk || !eOk || e <= s {
 			return 0, 0, false
 		}
@@ -698,6 +856,12 @@ func parseGridTrack(tok string, fontSize, inlineSize float32) gridTrack {
 				t.content = true
 			}
 			return t
+		}
+	}
+	if strings.HasPrefix(tok, "fit-content(") {
+		inner := strings.TrimSuffix(strings.TrimPrefix(tok, "fit-content("), ")")
+		if maxLen, ok := gridLen(inner, fontSize, inlineSize); ok {
+			return gridTrack{min: -1, max: maxLen, content: true}
 		}
 	}
 	if tok == "min-content" || tok == "max-content" {
@@ -822,33 +986,50 @@ func splitTopLevel(v string) []string {
 // expandAutoTracks resolves repeat(auto-fill|auto-fit, ...) into as many copies as
 // fit at their own minimum, never zero.
 func expandAutoTracks(tracks []gridTrack, avail, gap float32) []gridTrack {
-	idx := -1
+	start := -1
+	end := -1
 	for i, t := range tracks {
 		if t.autoRepeat {
-			idx = i
+			if start < 0 {
+				start = i
+			}
+			end = i + 1
+		} else if start >= 0 {
 			break
 		}
 	}
-	if idx < 0 {
+	if start < 0 {
 		return tracks
 	}
-	t := tracks[idx]
-	min := t.min
-	if min <= 0 {
-		min = 1
+	repeatSlice := tracks[start:end]
+	var groupMin float32
+	for i, t := range repeatSlice {
+		m := t.min
+		if m <= 0 {
+			m = 1
+		}
+		groupMin += m
+		if i > 0 {
+			groupMin += gap
+		}
 	}
-	n := int((avail + gap) / (min + gap))
+	if groupMin <= 0 {
+		groupMin = 1
+	}
+	n := int((avail + gap) / (groupMin + gap))
 	if n < 1 {
 		n = 1
 	}
-	out := make([]gridTrack, 0, len(tracks)+n)
-	out = append(out, tracks[:idx]...)
+	out := make([]gridTrack, 0, len(tracks)-len(repeatSlice)+n*len(repeatSlice))
+	out = append(out, tracks[:start]...)
 	for i := 0; i < n; i++ {
-		o := t
-		o.autoRepeat = false
-		out = append(out, o)
+		for _, t := range repeatSlice {
+			o := t
+			o.autoRepeat = false
+			out = append(out, o)
+		}
 	}
-	return append(out, tracks[idx+1:]...)
+	return append(out, tracks[end:]...)
 }
 
 func autoTracks(n int) []gridTrack {
@@ -1196,4 +1377,39 @@ func quotedStrings(v string) []string {
 		i = j
 	}
 	return out
+}
+
+func isSubgrid(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "subgrid" || strings.HasPrefix(v, "subgrid ") || strings.HasPrefix(v, "subgrid[")
+}
+
+func findParentGrid(a *Arena, id ObjectID) ObjectID {
+	for pID := a.Get(id).Parent; pID != 0; pID = a.Get(pID).Parent {
+		st := a.Get(pID).Style
+		if st != nil && (st.Display == style.DisplayGrid || st.Display == style.DisplayInlineGrid) {
+			return pID
+		}
+	}
+	return 0
+}
+
+func parseSubgridLines(v string) map[string][]int {
+	lines := map[string][]int{}
+	v = strings.TrimSpace(strings.ToLower(v))
+	if !strings.HasPrefix(v, "subgrid") {
+		return lines
+	}
+	rem := strings.TrimSpace(strings.TrimPrefix(v, "subgrid"))
+	line := 1
+	for _, tok := range splitGridTracks(rem) {
+		if strings.HasPrefix(tok, "[") {
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(tok, "["), "]"))
+			for _, name := range strings.Fields(inner) {
+				lines[name] = append(lines[name], line)
+			}
+			line++
+		}
+	}
+	return lines
 }

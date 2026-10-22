@@ -1,6 +1,9 @@
 package layout
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
@@ -26,10 +29,17 @@ type containingBlock struct {
 // to the viewport's top edge, so a fixed box pinned by `bottom` lands above it.
 func Positioning(a *Arena, root ObjectID, viewportW, viewportH float32) {
 	icb := containingBlock{w: viewportW, h: viewportH}
-	positionSubtree(a, root, icb, icb)
+	anchors := map[string]ObjectID{}
+	for i := range a.Objects {
+		obj := &a.Objects[i]
+		if obj.Node != nil && obj.Node.Element() && obj.Style != nil && obj.Style.AnchorName != "" {
+			anchors[obj.Style.AnchorName] = ObjectID(i)
+		}
+	}
+	positionSubtree(a, root, icb, icb, anchors)
 }
 
-func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock) {
+func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map[string]ObjectID) {
 	obj := a.Get(id)
 	s := obj.Style
 	if s != nil && s.Display == style.DisplayNone {
@@ -57,12 +67,59 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock) {
 			}
 			shiftSubtree(a, id, dx, dy)
 			obj = a.Get(id)
+		case style.PositionSticky:
+			// Sticky positioning behaves like relative positioning within its
+			// containing block's bounds.
+			rel := containingBlock{cb.x0, cb.y0, cb.w, cb.h}
+			parentObj := a.Get(obj.Parent)
+			if parentObj != nil && parentObj.Style != nil {
+				x0, y0, x1, y1 := parentObj.ContentRect()
+				rel = containingBlock{x0, y0, x1 - x0, y1 - y0}
+			}
+			dx := float32(0)
+			if s.HasLeft {
+				dx = resolvePctLength(s.Left, rel.w)
+			} else if s.HasRight {
+				dx = -resolvePctLength(s.Right, rel.w)
+			}
+			dy := float32(0)
+			if s.HasTop {
+				dy = resolvePctLength(s.Top, rel.h)
+			} else if s.HasBottom {
+				dy = -resolvePctLength(s.Bottom, rel.h)
+			}
+			// Clamp sticky offset so the element stays within its parent's content rect
+			if parentObj != nil && parentObj.Style != nil {
+				_, py0, _, py1 := parentObj.ContentRect()
+				if dy > 0 && obj.Y+obj.H+dy > py1 {
+					dy = py1 - (obj.Y + obj.H)
+					if dy < 0 {
+						dy = 0
+					}
+				} else if dy < 0 && obj.Y+dy < py0 {
+					dy = py0 - obj.Y
+					if dy > 0 {
+						dy = 0
+					}
+				}
+			}
+			if dx != 0 || dy != 0 {
+				shiftSubtree(a, id, dx, dy)
+				obj = a.Get(id)
+			}
 		case style.PositionAbsolute:
-			placeOutOfFlow(a, id, cb)
+			placeOutOfFlow(a, id, cb, anchors)
 			obj = a.Get(id)
 		case style.PositionFixed:
-			placeOutOfFlow(a, id, icb)
+			placeOutOfFlow(a, id, icb, anchors)
 			obj = a.Get(id)
+		}
+		if s.OffsetPath != "" && s.OffsetPath != "none" && s.OffsetDistance != 0 {
+			dx, dy := computeMotionOffset(s.OffsetPath, s.OffsetDistance)
+			if dx != 0 || dy != 0 {
+				shiftSubtree(a, id, dx, dy)
+				obj = a.Get(id)
+			}
 		}
 	}
 
@@ -76,7 +133,7 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock) {
 		}
 	}
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
-		positionSubtree(a, kid, childCB, icb)
+		positionSubtree(a, kid, childCB, icb, anchors)
 	}
 }
 
@@ -85,7 +142,7 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock) {
 // leaves out-of-flow children to this pass so they take no part in the flow. The
 // caller hands over the containing block, which is the parent's for an absolute
 // box and the viewport's for a fixed one.
-func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
+func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[string]ObjectID) {
 	obj := a.Get(id)
 	s := obj.Style
 	// The box's own layout is this pass's job: clear the mark block layout left
@@ -165,6 +222,62 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 		y = cb.y0 + obj.MarginTop + insetT
 	}
 
+	if s.WidthAnchor != "" {
+		if asz, ok := resolveAnchorSize(a, s.WidthAnchor, s.PositionAnchor, anchors, false); ok {
+			w = asz - extra
+			if w < 0 {
+				w = 0
+			}
+			shrinkW = false
+		}
+	}
+	if s.HeightAnchor != "" {
+		if asz, ok := resolveAnchorSize(a, s.HeightAnchor, s.PositionAnchor, anchors, true); ok {
+			h = asz - vExtra
+			if h < 0 {
+				h = 0
+			}
+			explicitH = true
+		}
+	}
+
+	if s.TopAnchor != "" {
+		if ay, ok := resolveAnchor(a, s.TopAnchor, s.PositionAnchor, anchors, true); ok {
+			y = ay + obj.MarginTop
+		}
+	}
+	if s.BottomAnchor != "" {
+		if ay, ok := resolveAnchor(a, s.BottomAnchor, s.PositionAnchor, anchors, true); ok {
+			if explicitH {
+				y = ay - (h + vExtra) - obj.MarginBottom
+			} else if s.TopAnchor != "" {
+				h = ay - y - vExtra - obj.MarginBottom
+				if h < 0 {
+					h = 0
+				}
+				explicitH = true
+			}
+		}
+	}
+	if s.LeftAnchor != "" {
+		if ax, ok := resolveAnchor(a, s.LeftAnchor, s.PositionAnchor, anchors, false); ok {
+			x = ax + obj.MarginLeft
+		}
+	}
+	if s.RightAnchor != "" {
+		if ax, ok := resolveAnchor(a, s.RightAnchor, s.PositionAnchor, anchors, false); ok {
+			if !shrinkW {
+				x = ax - (w + extra) - obj.MarginRight
+			} else if s.LeftAnchor != "" {
+				w = ax - x - extra - obj.MarginRight
+				if w < 0 {
+					w = 0
+				}
+				shrinkW = false
+			}
+		}
+	}
+
 	obj.X, obj.Y = x, y
 	obj.W = w
 	measureW := w + obj.MarginLeft + obj.MarginRight + extra
@@ -178,12 +291,22 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock) {
 		// containing block the same resolution lands back on: handing it the
 		// border-box width instead made a percentage grow by its own padding on
 		// every pass, and carry its children out with it.
-		measureW = cb.w
+		if s.WidthAnchor != "" {
+			measureW = w
+		} else {
+			measureW = cb.w
+		}
 	}
 	blockInto(a, id, measureW)
 	obj = a.Get(id)
 	inlineInto(a, id)
 	obj = a.Get(id)
+	if s.WidthAnchor != "" {
+		obj.W = w
+	}
+	if s.HeightAnchor != "" {
+		obj.H = h
+	}
 
 	if shrinkW {
 		srcX, right, ok := inlineExtent(a, id)
@@ -304,4 +427,116 @@ func shiftSubtree(a *Arena, id ObjectID, dx, dy float32) {
 		}
 		shiftSubtree(a, kid, dx, dy)
 	}
+}
+
+func resolveAnchor(a *Arena, expr, defaultAnchor string, anchors map[string]ObjectID, vertical bool) (float32, bool) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return 0, false
+	}
+	parts := strings.Split(expr, ",")
+	first := strings.TrimSpace(parts[0])
+	fallback := ""
+	if len(parts) > 1 {
+		fallback = strings.TrimSpace(parts[1])
+	}
+	tokens := strings.Fields(first)
+	anchorName := defaultAnchor
+	side := ""
+	for _, tok := range tokens {
+		if strings.HasPrefix(tok, "--") {
+			anchorName = tok
+		} else {
+			side = strings.ToLower(tok)
+		}
+	}
+	ancID, ok := anchors[anchorName]
+	if !ok {
+		if fallback != "" {
+			return parseFallbackLength(fallback), true
+		}
+		return 0, false
+	}
+	anc := a.Get(ancID)
+	switch side {
+	case "top":
+		return anc.Y, true
+	case "bottom":
+		return anc.Y + anc.BorderH(), true
+	case "left":
+		return anc.X, true
+	case "right":
+		return anc.X + anc.BorderW(), true
+	case "center":
+		if vertical {
+			return anc.Y + anc.BorderH()/2, true
+		}
+		return anc.X + anc.BorderW()/2, true
+	case "start":
+		if vertical {
+			return anc.Y, true
+		}
+		return anc.X, true
+	case "end":
+		if vertical {
+			return anc.Y + anc.BorderH(), true
+		}
+		return anc.X + anc.BorderW(), true
+	}
+	if fallback != "" {
+		return parseFallbackLength(fallback), true
+	}
+	return 0, false
+}
+
+func resolveAnchorSize(a *Arena, expr, defaultAnchor string, anchors map[string]ObjectID, vertical bool) (float32, bool) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return 0, false
+	}
+	parts := strings.Split(expr, ",")
+	first := strings.TrimSpace(parts[0])
+	fallback := ""
+	if len(parts) > 1 {
+		fallback = strings.TrimSpace(parts[1])
+	}
+	tokens := strings.Fields(first)
+	anchorName := defaultAnchor
+	axis := ""
+	for _, tok := range tokens {
+		if strings.HasPrefix(tok, "--") {
+			anchorName = tok
+		} else {
+			axis = strings.ToLower(tok)
+		}
+	}
+	ancID, ok := anchors[anchorName]
+	if !ok {
+		if fallback != "" {
+			return parseFallbackLength(fallback), true
+		}
+		return 0, false
+	}
+	anc := a.Get(ancID)
+	switch axis {
+	case "width":
+		return anc.BorderW(), true
+	case "height":
+		return anc.BorderH(), true
+	default:
+		if vertical {
+			return anc.BorderH(), true
+		}
+		return anc.BorderW(), true
+	}
+}
+
+func parseFallbackLength(s string) float32 {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "px")
+	f, err := strconv.ParseFloat(s, 32)
+	if err != nil {
+		return 0
+	}
+	return float32(f)
 }

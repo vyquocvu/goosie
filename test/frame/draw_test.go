@@ -198,3 +198,76 @@ func TestScaleOverSamplesCorrectSliceWhenClipped(t *testing.T) {
 		t.Fatalf("right tile at x=6 = %v, want green (source slice [4,8)), not a rescaled whole image", got)
 	}
 }
+
+func TestScaleAlphaProportional(t *testing.T) {
+	// Opaque red (255, 0, 0, 255) scaled by 50% (128/255)
+	c := frame.RGBA(255, 0, 0, 255)
+	scaled := frame.ScaleAlpha(c, 128)
+	if scaled.A() < 126 || scaled.A() > 130 {
+		t.Errorf("scaled opaque alpha = %d, want ~128", scaled.A())
+	}
+	if scaled.R() < 126 || scaled.R() > 130 {
+		t.Errorf("scaled opaque red = %d, want ~128", scaled.R())
+	}
+
+	// Translucent blue (0, 0, 200, 200) scaled by 50% (128/255)
+	// Alpha should scale proportionally: 200 * 128 / 255 ≈ 100
+	cTrans := frame.RGBA(0, 0, 255, 200)
+	scaledTrans := frame.ScaleAlpha(cTrans, 128)
+	if scaledTrans.A() < 98 || scaledTrans.A() > 103 {
+		t.Errorf("scaled translucent alpha = %d, want ~100", scaledTrans.A())
+	}
+	if scaledTrans.B() < 98 || scaledTrans.B() > 103 {
+		t.Errorf("scaled translucent blue = %d, want ~100", scaledTrans.B())
+	}
+}
+
+func TestBlendOverCoverageDirectFormula(t *testing.T) {
+	white := frame.RGB(255, 255, 255)
+	black := frame.RGB(0, 0, 0)
+
+	// Coverage 0 -> untouched destination (white)
+	if got := frame.BlendOverCoverage(white, black, 0); got != white {
+		t.Errorf("cov 0 got %v, want white", got)
+	}
+
+	// Coverage 255 -> full source (black)
+	if got := frame.BlendOverCoverage(white, black, 255); got != black {
+		t.Errorf("cov 255 got %v, want black", got)
+	}
+
+	// Coverage 128 -> midpoint gray (~128)
+	mid := frame.BlendOverCoverage(white, black, 128)
+	if mid.R() < 125 || mid.R() > 130 {
+		t.Errorf("cov 128 gray level = %d, want ~127", mid.R())
+	}
+}
+
+func TestFillRoundedFastSpanCoverage(t *testing.T) {
+	b := frame.NewBitmap(20, 10)
+	red := frame.RGB(255, 0, 0)
+	rad := frame.Corners{
+		TL: frame.Radius{X: 4, Y: 4},
+		TR: frame.Radius{X: 4, Y: 4},
+		BR: frame.Radius{X: 4, Y: 4},
+		BL: frame.Radius{X: 4, Y: 4},
+	}
+	b.FillRounded(frame.Rect4(0, 0, 20, 10), rad, red, nil)
+
+	// Center pixel (10, 5) must be solid red
+	if got := b.At(10, 5); got != red {
+		t.Errorf("center pixel (10, 5) = %v, want solid red", got)
+	}
+
+	// Outer top-left corner (0, 0) should be outside radius (transparent black or very faint)
+	if got := b.At(0, 0); got == red {
+		t.Errorf("corner (0, 0) should be cut by radius, got solid red")
+	}
+
+	// Middle row (5) across all columns [0, 20) should be solid red because middle rows are outside corner bands
+	for x := 0; x < 20; x++ {
+		if got := b.At(x, 5); got != red {
+			t.Errorf("middle row pixel (%d, 5) = %v, want solid red", x, got)
+		}
+	}
+}

@@ -61,6 +61,23 @@ func TestPumpJSRunsRAF(t *testing.T) {
 	}
 }
 
+// Canvas drawing is visible output even when its callback does not mutate the
+// DOM, so PumpJS must request one repaint for the new recorded operations.
+func TestPumpJSCanvasRAFRepaintsOnlyWhenDrawingChanges(t *testing.T) {
+	html := `<html><body><canvas id="c" width="10" height="10"></canvas><script>
+		var ctx = document.getElementById('c').getContext('2d');
+		function tick(){requestAnimationFrame(tick);}
+		requestAnimationFrame(function(){ctx.fillRect(0, 0, 5, 5); tick();});
+	</script></body></html>`
+	sess, _, _ := pumpSession(t, html, true)
+	if !sess.PumpJS(800) {
+		t.Fatal("PumpJS reported no work for a canvas drawing callback")
+	}
+	if sess.PumpJS(800) {
+		t.Fatal("PumpJS reported repaint work for a subsequent no-op RAF callback")
+	}
+}
+
 // TestPumpJSWithoutRuntime is the headless/no-JS contract: no runtime, no
 // work, no panic.
 func TestPumpJSWithoutRuntime(t *testing.T) {

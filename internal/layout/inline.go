@@ -1,10 +1,13 @@
 package layout
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
 )
@@ -14,6 +17,9 @@ import (
 // by their margins, the way block boxes do.
 type floatIntrusion struct {
 	x0, x1, y0, y1 float32
+	isLeft         bool
+	shapeOutside   string
+	shapeMargin    float32
 }
 
 // breakCtx carries float intrusions and the Y cursor for one inline
@@ -62,7 +68,18 @@ func collectFloatIntrusions(a *Arena, id ObjectID) []floatIntrusion {
 			if x1 <= x0 || y1 <= y0 {
 				continue
 			}
-			out = append(out, floatIntrusion{x0: x0, x1: x1, y0: y0, y1: y1})
+			fi := floatIntrusion{
+				x0:     x0,
+				x1:     x1,
+				y0:     y0,
+				y1:     y1,
+				isLeft: k.Style.Float == style.FloatLeft,
+			}
+			if k.Style.ShapeOutside != "" && k.Style.ShapeOutside != "none" {
+				fi.shapeOutside = k.Style.ShapeOutside
+				fi.shapeMargin = k.Style.ShapeMargin
+			}
+			out = append(out, fi)
 		}
 		if startsNewFC(a, co) {
 			break
@@ -85,16 +102,23 @@ func (bc *breakCtx) spanAt(yTop, h float32) (float32, float32) {
 		if f.y0 >= yTop+h || f.y1 <= yTop {
 			continue
 		}
+		fx0, fx1 := f.x0, f.x1
+		if f.shapeOutside != "" {
+			if sx0, sx1, ok := computeShapeBounds(f, yTop, h); ok {
+				fx0, fx1 = sx0, sx1
+			}
+		}
+
 		// A float starting at or left of the content edge pushes the line
 		// right; one ending at or past the right edge pulls its end left. A
 		// float wider than the content does both, leaving nothing.
-		if f.x0 <= bc.x0+1 && f.x1 > bc.x0 {
-			if d := f.x1 - bc.x0; d > l {
+		if fx0 <= bc.x0+1 && fx1 > bc.x0 {
+			if d := fx1 - bc.x0; d > l {
 				l = d
 			}
 		}
-		if f.x1 >= bc.x0+bc.contentW-1 && f.x0 < bc.x0+bc.contentW {
-			if d := bc.x0 + bc.contentW - f.x0; d > r {
+		if fx1 >= bc.x0+bc.contentW-1 && fx0 < bc.x0+bc.contentW {
+			if d := bc.x0 + bc.contentW - fx0; d > r {
 				r = d
 			}
 		}
@@ -103,6 +127,94 @@ func (bc *breakCtx) spanAt(yTop, h float32) (float32, float32) {
 		return l, avail
 	}
 	return l, 0
+}
+
+func computeShapeBounds(f floatIntrusion, yTop, h float32) (float32, float32, bool) {
+	shape := strings.ToLower(strings.TrimSpace(f.shapeOutside))
+	if strings.HasPrefix(shape, "circle") {
+		bw := f.x1 - f.x0
+		bh := f.y1 - f.y0
+		r := bw
+		if bh < r {
+			r = bh
+		}
+		r /= 2
+		cx := (f.x0 + f.x1) / 2
+		cy := (f.y0 + f.y1) / 2
+
+		if open := strings.Index(shape, "("); open >= 0 {
+			if close := strings.LastIndex(shape, ")"); close > open {
+				inner := strings.TrimSpace(shape[open+1 : close])
+				if inner != "" {
+					parts := strings.Split(inner, "at")
+					rPart := strings.TrimSpace(parts[0])
+					if rPart != "" {
+						if strings.HasSuffix(rPart, "%") {
+							if val, err := strconv.ParseFloat(strings.TrimSuffix(rPart, "%"), 64); err == nil {
+								r = float32(val/100) * (bw + bh) / 4
+							}
+						} else if val, err := strconv.ParseFloat(strings.TrimSuffix(rPart, "px"), 64); err == nil {
+							r = float32(val)
+						}
+					}
+					if len(parts) > 1 {
+						posFields := strings.Fields(parts[1])
+						if len(posFields) >= 1 {
+							if strings.HasSuffix(posFields[0], "%") {
+								if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[0], "%"), 64); err == nil {
+									cx = f.x0 + float32(val/100)*bw
+								}
+							} else if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[0], "px"), 64); err == nil {
+								cx = f.x0 + float32(val)
+							}
+						}
+						if len(posFields) >= 2 {
+							if strings.HasSuffix(posFields[1], "%") {
+								if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[1], "%"), 64); err == nil {
+									cy = f.y0 + float32(val/100)*bh
+								}
+							} else if val, err := strconv.ParseFloat(strings.TrimSuffix(posFields[1], "px"), 64); err == nil {
+								cy = f.y0 + float32(val)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		effR := r + f.shapeMargin
+		y0 := yTop
+		if f.y0 > y0 {
+			y0 = f.y0
+		}
+		y1 := yTop + h
+		if f.y1 < y1 {
+			y1 = f.y1
+		}
+
+		var dy float32
+		if cy >= y0 && cy <= y1 {
+			dy = 0
+		} else if cy < y0 {
+			dy = y0 - cy
+		} else {
+			dy = cy - y1
+		}
+
+		if dy >= effR {
+			if f.isLeft {
+				return f.x0, f.x0, true
+			}
+			return f.x1, f.x1, true
+		}
+
+		dx := float32(math.Sqrt(float64(effR*effR - dy*dy)))
+		if f.isLeft {
+			return f.x0, cx + dx, true
+		}
+		return cx - dx, f.x1, true
+	}
+	return f.x0, f.x1, false
 }
 
 // startLine settles the line beginning at yTop: when floats leave it no
@@ -338,6 +450,19 @@ func inlineInto(a *Arena, id ObjectID) {
 			lines = append(lines, current)
 		}
 	}
+	if obj.Style != nil && obj.Style.TextWrap == "balance" && len(lines) >= 2 && len(lines) <= 10 {
+		lines = balanceLines(a, lines, contentW)
+	}
+	if obj.Style != nil && obj.Style.LineClamp > 0 && len(lines) > obj.Style.LineClamp {
+		clamp := obj.Style.LineClamp
+		for _, line := range lines[clamp:] {
+			for _, run := range line.runs {
+				rObj := a.Get(run.obj)
+				rObj.W, rObj.H = 0, 0
+			}
+		}
+		lines = lines[:clamp]
+	}
 	// Re-fetch obj: the Alloc calls in the text path may have reallocated the
 	// arena slice, so the pointer captured at function entry is stale.
 	obj = a.Get(id)
@@ -371,42 +496,91 @@ func inlineInto(a *Arena, id ObjectID) {
 				}
 			}
 		}
-		x := baseX
-		for _, run := range line.runs {
-			runObj := a.Get(run.obj)
-			if run.atomic {
-				// The box's bottom margin edge sits on the line's baseline. This
-				// model centres text runs rather than sitting them on a baseline,
-				// and the line's own descent is a few pixels, so bottom-aligning
-				// against the line box puts it where Chromium puts it.
-				k := a.Get(run.obj)
-				dx := (x + k.MarginLeft) - run.srcX
-				dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
-				shiftSubtree(a, run.obj, dx, dy)
-				x += run.w
-				continue
+		isRTL := obj.Style != nil && obj.Style.Direction == "rtl"
+		if isRTL {
+			x := baseX + alignW
+			for _, run := range line.runs {
+				runObj := a.Get(run.obj)
+				if run.atomic {
+					k := a.Get(run.obj)
+					x -= run.w
+					dx := (x + k.MarginLeft) - run.srcX
+					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+					if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
+						dy -= line.h * 0.4
+					} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
+						dy += line.h * 0.2
+					}
+					shiftSubtree(a, run.obj, dx, dy)
+					continue
+				}
+				letterSpacing := float32(0)
+				if runObj.Style != nil {
+					letterSpacing = runObj.Style.LetterSpacing
+				}
+				wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
+				if run.text == " " && runObj.Style != nil {
+					wordW += runObj.Style.WordSpacing
+				}
+				x -= wordW
+				if runObj.X == 0 && runObj.Y == 0 {
+					runObj.X = x
+					baseY := y + (line.h-run.contentH)/2
+					if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
+						baseY -= run.contentH * 0.5
+					} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
+						baseY += run.contentH * 0.3
+					}
+					runObj.Y = baseY
+				}
+				runObj.W = wordW
+				runObj.H = run.contentH
 			}
-			letterSpacing := float32(0)
-			if runObj.Style != nil {
-				letterSpacing = runObj.Style.LetterSpacing
-			}
-			wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
-			if run.text == " " && runObj.Style != nil {
-				wordW += runObj.Style.WordSpacing
-			}
-			if runObj.X == 0 && runObj.Y == 0 {
-				runObj.X = x
-				// The content area sits in the middle of the line box: the
-				// surplus leading splits evenly above and below it, so the
-				// baseline lands at half-leading + ascent. Paint reads the
-				// ascent back out of the same metrics.
-				runObj.Y = y + (line.h-run.contentH)/2
-			}
-			runObj.W = wordW
-			runObj.H = run.contentH
-			x += wordW
-			if justifyExtra > 0 && isSpaceWord(run.text) {
-				x += justifyExtra
+		} else {
+			x := baseX
+			for _, run := range line.runs {
+				runObj := a.Get(run.obj)
+				if run.atomic {
+					// The box's bottom margin edge sits on the line's baseline. This
+					// model centres text runs rather than sitting them on a baseline,
+					// and the line's own descent is a few pixels, so bottom-aligning
+					// against the line box puts it where Chromium puts it.
+					k := a.Get(run.obj)
+					dx := (x + k.MarginLeft) - run.srcX
+					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+					if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
+						dy -= line.h * 0.4
+					} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
+						dy += line.h * 0.2
+					}
+					shiftSubtree(a, run.obj, dx, dy)
+					x += run.w
+					continue
+				}
+				letterSpacing := float32(0)
+				if runObj.Style != nil {
+					letterSpacing = runObj.Style.LetterSpacing
+				}
+				wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
+				if run.text == " " && runObj.Style != nil {
+					wordW += runObj.Style.WordSpacing
+				}
+				if runObj.X == 0 && runObj.Y == 0 {
+					runObj.X = x
+					baseY := y + (line.h-run.contentH)/2
+					if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
+						baseY -= run.contentH * 0.5
+					} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
+						baseY += run.contentH * 0.3
+					}
+					runObj.Y = baseY
+				}
+				runObj.W = wordW
+				runObj.H = run.contentH
+				x += wordW
+				if justifyExtra > 0 && isSpaceWord(run.text) {
+					x += justifyExtra
+				}
 			}
 		}
 		y += line.h
@@ -449,6 +623,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 	}
 	if k.Node != nil && k.Node.Text() {
 		text := k.Node.DataContent
+		if k.Style.TextTransform != "" {
+			text = applyTextTransform(text, k.Style.TextTransform)
+		}
 		// The whitespace-collapse path (normal, nowrap) fuses collapsing and
 		// splitting into one pass below, so the raw text is kept: collapsing
 		// first would allocate a normalized copy just to re-scan it. The
@@ -473,7 +650,8 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		wordSpacing := k.Style.WordSpacing
 		nowrap := k.Style.WhiteSpace == style.WhiteSpaceNowrap ||
 			k.Style.WhiteSpace == style.WhiteSpacePre ||
-			k.Style.WhiteSpace == style.WhiteSpacePrewrite
+			k.Style.WhiteSpace == style.WhiteSpacePrewrite ||
+			k.Style.TextWrap == "nowrap"
 		var words []string
 		if useMerged {
 			words = splitCollapsedWords(text)
@@ -481,10 +659,28 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			words = splitWords(text)
 		}
 		if !nowrap {
-			words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
+			if k.Style.WordBreak == "break-all" {
+				var charWords []string
+				for _, w := range words {
+					if w == " " || w == "\n" {
+						charWords = append(charWords, w)
+					} else {
+						for _, r := range w {
+							charWords = append(charWords, string(r))
+						}
+					}
+				}
+				words = charWords
+			} else {
+				words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
+			}
 		}
 		var firstWordID ObjectID
 		var lastWordID ObjectID
+		tabSpaces := int(k.Style.TabSize)
+		if tabSpaces <= 0 {
+			tabSpaces = 8
+		}
 		for _, word := range words {
 			// Newline: force line break, don't add as a run
 			if word == "\n" {
@@ -501,6 +697,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			wordW := measureWord(word, fontSize, a.Metrics, slot, letterSpacing)
 			if word == " " {
 				wordW += wordSpacing
+			} else if word == "\t" {
+				singleSpaceW := measureWord(" ", fontSize, a.Metrics, slot, letterSpacing) + wordSpacing
+				wordW = float32(tabSpaces) * singleSpaceW
 			}
 			// A space at the start of a line is collapsible whitespace that
 			// has nowhere to separate anything: drop it rather than indenting
@@ -607,6 +806,42 @@ func trimTrailingSpaces(a *Arena, lb *lineBox) {
 		lb.w -= last.w
 		lb.runs = lb.runs[:len(lb.runs)-1]
 	}
+}
+
+func balanceLines(a *Arena, lines []lineBox, contentW float32) []lineBox {
+	if len(lines) <= 1 || len(lines) > 10 || contentW <= 0 {
+		return lines
+	}
+	var allRuns []textRun
+	totalW := float32(0)
+	for _, l := range lines {
+		allRuns = append(allRuns, l.runs...)
+		totalW += l.w
+	}
+	targetW := totalW / float32(len(lines))
+	var newLines []lineBox
+	var cur lineBox
+	curH := lines[0].h
+	for i, r := range allRuns {
+		if cur.w > 0 && cur.w+r.w > targetW*1.15 && len(newLines) < len(lines)-1 {
+			trimTrailingSpaces(a, &cur)
+			newLines = append(newLines, cur)
+			cur = lineBox{h: curH}
+		}
+		cur.runs = append(cur.runs, r)
+		cur.w += r.w
+		if r.lineH > cur.h {
+			cur.h = r.lineH
+		}
+		if i == len(allRuns)-1 {
+			trimTrailingSpaces(a, &cur)
+			newLines = append(newLines, cur)
+		}
+	}
+	if len(newLines) == len(lines) {
+		return newLines
+	}
+	return lines
 }
 
 type textRun struct {
@@ -976,4 +1211,100 @@ func collapseWhitespacePreserveNewlines(s string) string {
 		}
 	}
 	return strings.TrimRight(out.String(), " \t")
+}
+
+// isRubyAnnotation checks if an object is an <rt> ruby text annotation or descendant thereof.
+func isRubyAnnotation(obj *Object, a *Arena) bool {
+	for curr := obj; curr != nil; {
+		if curr.Node != nil {
+			if curr.Node.DataAtom == dom.AtomRt {
+				return true
+			}
+			if curr.Node.Parent != nil && curr.Node.Parent.DataAtom == dom.AtomRt {
+				return true
+			}
+		}
+		if curr.Parent == 0 {
+			break
+		}
+		curr = a.Get(curr.Parent)
+	}
+	return false
+}
+
+// applyTextTransform applies CSS text-transform to an input string.
+func applyTextTransform(text string, transform string) string {
+	if text == "" || transform == "" || transform == "none" {
+		return text
+	}
+	switch transform {
+	case "uppercase":
+		return strings.ToUpper(text)
+	case "lowercase":
+		return strings.ToLower(text)
+	case "capitalize":
+		return strings.Title(text)
+	case "full-width":
+		var b strings.Builder
+		for _, r := range text {
+			if r >= 0x21 && r <= 0x7E {
+				// ASCII 0x21 (!) to 0x7E (~) map to full-width 0xFF01 to 0xFF5E
+				b.WriteRune(r + 0xFEE0)
+			} else if r == 0x20 {
+				// Space maps to ideographic space 0x3000
+				b.WriteRune(0x3000)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	case "full-size-kana":
+		var b strings.Builder
+		for _, r := range text {
+			// Convert small hiragana/katakana to full-size equivalents
+			switch r {
+			case 'ぁ':
+				b.WriteRune('あ')
+			case 'ぃ':
+				b.WriteRune('い')
+			case 'ぅ':
+				b.WriteRune('う')
+			case 'ぇ':
+				b.WriteRune('え')
+			case 'ぉ':
+				b.WriteRune('お')
+			case 'っ':
+				b.WriteRune('つ')
+			case 'ゃ':
+				b.WriteRune('や')
+			case 'ゅ':
+				b.WriteRune('ゆ')
+			case 'ょ':
+				b.WriteRune('よ')
+			case 'ァ':
+				b.WriteRune('ア')
+			case 'ィ':
+				b.WriteRune('イ')
+			case 'ゥ':
+				b.WriteRune('ウ')
+			case 'ェ':
+				b.WriteRune('エ')
+			case 'ォ':
+				b.WriteRune('オ')
+			case 'ッ':
+				b.WriteRune('ツ')
+			case 'ャ':
+				b.WriteRune('ヤ')
+			case 'ュ':
+				b.WriteRune('ユ')
+			case 'ョ':
+				b.WriteRune('ヨ')
+			default:
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	default:
+		return text
+	}
 }

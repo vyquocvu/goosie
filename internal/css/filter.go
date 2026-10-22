@@ -1,6 +1,7 @@
 package css
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -8,6 +9,29 @@ import (
 type FilterFunc struct {
 	Name string  // e.g., "blur", "brightness"
 	Arg  float32 // argument value (interpretation depends on function)
+	Raw  string  // raw argument string
+}
+
+// FormatFilter formats a slice of FilterFunc back into a CSS filter string.
+func FormatFilter(funcs []FilterFunc) string {
+	if len(funcs) == 0 {
+		return "none"
+	}
+	var b strings.Builder
+	for i, f := range funcs {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(f.Name)
+		b.WriteByte('(')
+		if f.Raw != "" {
+			b.WriteString(f.Raw)
+		} else {
+			b.WriteString(strconv.FormatFloat(float64(f.Arg), 'f', -1, 32))
+		}
+		b.WriteByte(')')
+	}
+	return b.String()
 }
 
 // ParseFilter parses a CSS filter property value.
@@ -62,7 +86,7 @@ func ParseFilter(s string) []FilterFunc {
 
 		// Parse the argument value.
 		arg := parseFilterArg(name, argStr)
-		funcs = append(funcs, FilterFunc{Name: name, Arg: arg})
+		funcs = append(funcs, FilterFunc{Name: name, Arg: arg, Raw: argStr})
 	}
 
 	return funcs

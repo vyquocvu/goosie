@@ -116,6 +116,80 @@ func ReplayCanvasOps(b *Bitmap, ops []CanvasOp, width, height int) {
 				pathOp{kind: pathLine, x: x, y: y},
 			)
 
+		case "bezierCurveTo":
+			if len(op.Args) < 6 {
+				continue
+			}
+			cp1x, cp1y := toFloat(op.Args[0]), toFloat(op.Args[1])
+			cp2x, cp2y := toFloat(op.Args[2]), toFloat(op.Args[3])
+			x, y := toFloat(op.Args[4]), toFloat(op.Args[5])
+			x0, y0 := 0.0, 0.0
+			if len(path) > 0 {
+				x0, y0 = path[len(path)-1].x, path[len(path)-1].y
+			}
+			steps := 16
+			for s := 1; s <= steps; s++ {
+				t := float64(s) / float64(steps)
+				it := 1.0 - t
+				bx := it*it*it*x0 + 3*it*it*t*cp1x + 3*it*t*t*cp2x + t*t*t*x
+				by := it*it*it*y0 + 3*it*it*t*cp1y + 3*it*t*t*cp2y + t*t*t*y
+				path = append(path, pathOp{kind: pathLine, x: bx, y: by})
+			}
+
+		case "quadraticCurveTo":
+			if len(op.Args) < 4 {
+				continue
+			}
+			cpx, cpy := toFloat(op.Args[0]), toFloat(op.Args[1])
+			x, y := toFloat(op.Args[2]), toFloat(op.Args[3])
+			x0, y0 := 0.0, 0.0
+			if len(path) > 0 {
+				x0, y0 = path[len(path)-1].x, path[len(path)-1].y
+			}
+			steps := 16
+			for s := 1; s <= steps; s++ {
+				t := float64(s) / float64(steps)
+				it := 1.0 - t
+				bx := it*it*x0 + 2*it*t*cpx + t*t*x
+				by := it*it*y0 + 2*it*t*cpy + t*t*y
+				path = append(path, pathOp{kind: pathLine, x: bx, y: by})
+			}
+
+		case "ellipse":
+			if len(op.Args) < 7 {
+				continue
+			}
+			cx, cy := toFloat(op.Args[0]), toFloat(op.Args[1])
+			rx, ry := toFloat(op.Args[2]), toFloat(op.Args[3])
+			rot := toFloat(op.Args[4])
+			a0, a1 := toFloat(op.Args[5]), toFloat(op.Args[6])
+			ccw := false
+			if len(op.Args) >= 8 {
+				if bVal, ok := op.Args[7].(bool); ok {
+					ccw = bVal
+				}
+			}
+			cosRot, sinRot := math.Cos(rot), math.Sin(rot)
+			delta := a1 - a0
+			if !ccw && delta < 0 {
+				delta += 2 * math.Pi
+			} else if ccw && delta > 0 {
+				delta -= 2 * math.Pi
+			}
+			steps := 32
+			for s := 0; s <= steps; s++ {
+				t := a0 + delta*float64(s)/float64(steps)
+				px := rx * math.Cos(t)
+				py := ry * math.Sin(t)
+				ex := cx + px*cosRot - py*sinRot
+				ey := cy + px*sinRot + py*cosRot
+				if s == 0 && len(path) == 0 {
+					path = append(path, pathOp{kind: pathMove, x: ex, y: ey})
+				} else {
+					path = append(path, pathOp{kind: pathLine, x: ex, y: ey})
+				}
+			}
+
 		case "fill":
 			if inPath {
 				fillPath(b, path, fillStyle)
@@ -334,27 +408,27 @@ func strokePath(b *Bitmap, path []pathOp, lineWidth float64, c color.RGBA) {
 }
 
 func strokeLine(b *Bitmap, x0, y0, x1, y1 float64, lineWidth float64, c color.RGBA) {
-	// Bresenham-like line with thickness
-	dx := math.Abs(x1 - x0)
-	dy := math.Abs(y1 - y0)
-	sx := 1.0
-	if x0 > x1 {
+	ix0, iy0 := int(math.Round(x0)), int(math.Round(y0))
+	ix1, iy1 := int(math.Round(x1)), int(math.Round(y1))
+	dx := math.Abs(float64(ix1 - ix0))
+	dy := math.Abs(float64(iy1 - iy0))
+	sx := 1
+	if ix0 > ix1 {
 		sx = -1
 	}
-	sy := 1.0
-	if y0 > y1 {
+	sy := 1
+	if iy0 > iy1 {
 		sy = -1
 	}
 	err := dx - dy
 	col := packColor(c)
-	half := lineWidth / 2
+	half := int(math.Ceil(lineWidth / 2))
+	if half < 1 {
+		half = 1
+	}
 	for {
-		// Draw a small square at (x0, y0) with lineWidth thickness. The stamp
-		// is clipped once per step instead of bounds-checked per pixel; the
-		// pixels, order, and blends are the same, only the ignored
-		// out-of-range writes are skipped.
-		py0, py1 := int(math.Floor(y0-half)), int(math.Ceil(y0+half))
-		px0, px1 := int(math.Floor(x0-half)), int(math.Ceil(x0+half))
+		py0, py1 := iy0-half, iy0+half
+		px0, px1 := ix0-half, ix0+half
 		if px0 < 0 {
 			px0 = 0
 		}
@@ -367,7 +441,6 @@ func strokeLine(b *Bitmap, x0, y0, x1, y1 float64, lineWidth float64, c color.RG
 		if py1 >= b.H {
 			py1 = b.H - 1
 		}
-		// A stamp fully outside the bitmap draws nothing; Set ignored those.
 		if px0 <= px1 && py0 <= py1 {
 			for py := py0; py <= py1; py++ {
 				rowBase := py*b.Stride + px0*4
@@ -385,17 +458,17 @@ func strokeLine(b *Bitmap, x0, y0, x1, y1 float64, lineWidth float64, c color.RG
 				}
 			}
 		}
-		if x0 == x1 && y0 == y1 {
+		if ix0 == ix1 && iy0 == iy1 {
 			break
 		}
 		e2 := 2 * err
 		if e2 > -dy {
 			err -= dy
-			x0 += sx
+			ix0 += sx
 		}
 		if e2 < dx {
 			err += dx
-			y0 += sy
+			iy0 += sy
 		}
 	}
 }

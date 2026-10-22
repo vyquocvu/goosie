@@ -37,8 +37,10 @@ func (s *Session) selWords() []*layout.Object {
 		}
 		obj := &objs[id]
 		if obj.Node != nil && obj.Node.Type == dom.NodeText && strings.TrimSpace(obj.Node.DataContent) != "" {
-			if x0, y0, x1, y1 := obj.BorderRect(); x0 < x1 && y0 < y1 {
-				words = append(words, obj)
+			if obj.Style == nil || obj.Style.UserSelect != "none" {
+				if x0, y0, x1, y1 := obj.BorderRect(); x0 < x1 && y0 < y1 {
+					words = append(words, obj)
+				}
 			}
 		}
 		for k := obj.FirstKid; k != 0; k = objs[k].NextSibling {
@@ -304,4 +306,32 @@ func (s *Session) selectionSpans() []paint.SelSpan {
 		spans = append(spans, paint.SelSpan{Obj: words[i], Start: start, End: end})
 	}
 	return spans
+}
+
+// SelectAll selects all text in the document. It returns true if there is text to select.
+func (s *Session) SelectAll() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	words := s.selWords()
+	if len(words) == 0 {
+		return false
+	}
+	s.selAnchor = selPos{word: 0, rune: 0}
+	lastWord := len(words) - 1
+	s.selHead = selPos{word: lastWord, rune: runeLen(words[lastWord])}
+	s.selActive = true
+	return true
+}
+
+// ClearSelection removes any active document text selection.
+func (s *Session) ClearSelection() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if !s.selActive {
+		return false
+	}
+	s.selActive = false
+	s.selAnchor = selPos{}
+	s.selHead = selPos{}
+	return true
 }

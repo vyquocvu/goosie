@@ -127,9 +127,9 @@ both use it; only the `cmd/dump-paint` diagnostic calls unchecked `Paint`.
 ## Resource Limits
 
 Per-document admission caps are declared in `internal/engine/limits.go:23-59` and
-`internal/image/decode.go:14-18`. Notable ones: `MaxDocumentBytes` 8 MiB,
-`MaxDocumentNodes` 50000, `MaxDocumentDepth` 128, `MaxCSSBytes` 4 MiB,
-`MaxLayoutObjects` 131072, `MaxDocumentTiles` 65536, `MaxTileCacheBytes` 64 MiB,
+`internal/image/decode.go:14-18`. Notable ones: `MaxDocumentBytes` 16 MiB,
+`MaxDocumentNodes` 1000000, `MaxDocumentDepth` 128, `MaxCSSBytes` 4 MiB,
+`MaxLayoutObjects` 4194304, `MaxDocumentTiles` 524288, `MaxTileCacheBytes` 64 MiB,
 `MaxImageDimension` 8192, `MaxDecodedImagePixels` 16 M. Image data is probed for encoded
 size, dimensions, and pixel count *before* full decode, then re-checked after.
 

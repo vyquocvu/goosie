@@ -15,7 +15,7 @@ import (
 // svgNamespace is the NSSVG constant value (defined in internal/dom).
 // We duplicate it here to avoid importing dom from paint, which would
 // violate the import boundary rules.
-const svgNamespace = 2
+const svgNamespace = 1
 
 // Builder walks a layout arena and emits display commands into a List.
 //
@@ -155,6 +155,18 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 			if obj.Node != nil && obj.Node.Data == "img" {
 				b.paintImage(obj, opacity, clip)
 			}
+			if obj.Node != nil && obj.Node.Data == "video" {
+				b.paintVideo(obj, opacity, clip)
+			}
+			if obj.Node != nil && obj.Node.Data == "audio" {
+				b.paintAudio(obj, opacity, clip)
+			}
+			if obj.Node != nil && obj.Node.Data == "progress" {
+				b.paintProgress(obj, rect, opacity)
+			}
+			if obj.Node != nil && obj.Node.Data == "meter" {
+				b.paintMeter(obj, rect, opacity)
+			}
 			// SVG shape elements paint through their own path.
 			if obj.Node != nil && obj.Node.Namespace == svgNamespace && isSVGShape(obj.Node.Data) {
 				b.paintSVGShape(obj, opacity)
@@ -170,6 +182,19 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 		if len(obj.Style.Transform) > 0 {
 			b.applyTransform(obj, cmdStart, x0, y0, x1, y1)
 		}
+		if len(obj.Style.Filter) > 0 || len(obj.Style.BackdropFilter) > 0 {
+			filterStr := css.FormatFilter(obj.Style.Filter)
+			backdropStr := css.FormatFilter(obj.Style.BackdropFilter)
+			cmds := b.list.All()
+			for i := cmdStart; i < len(cmds); i++ {
+				if len(obj.Style.Filter) > 0 {
+					cmds[i].Filter = filterStr
+				}
+				if len(obj.Style.BackdropFilter) > 0 {
+					cmds[i].BackdropFilter = backdropStr
+				}
+			}
+		}
 		// If this box has overflow:hidden, compute a content-space clip rect
 		// that children must respect.
 		if obj.Style.Overflow == style.OverflowHidden || obj.Style.OverflowX == style.OverflowHidden || obj.Style.OverflowY == style.OverflowHidden {
@@ -182,6 +207,9 @@ func (b *Builder) paintBox(id layout.ObjectID, clip *frame.Rect, ordinal int) {
 				kidClip = &cr
 			}
 		}
+	}
+	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
+		return
 	}
 	item := 0
 	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
@@ -448,6 +476,11 @@ func corners(s *style.ComputedStyle, r frame.Rect, scale float32) frame.Corners 
 	return frame.Corners{TL: rad(0), TR: rad(1), BR: rad(2), BL: rad(3)}
 }
 
+func uniformCorners(r float32) frame.Corners {
+	rad := frame.Radius{X: r, Y: r}
+	return frame.Corners{TL: rad, TR: rad, BR: rad, BL: rad}
+}
+
 func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32, clip *frame.Rect) {
 	text := obj.Node.DataContent
 	if b.composingTextareaText(obj) {
@@ -546,14 +579,508 @@ func (b *Builder) paintImage(obj *layout.Object, opacity float32, clip *frame.Re
 	})
 }
 
+// paintVideo draws a video element: the decoded frame when there is one, the
+// element's own status message when there is not, and the control bar over the
+// bottom when the author asked for controls.
+//
+// The element's box is measured uncut and the ancestor clip is applied per
+// command. Deriving geometry from an already-intersected rectangle is what made
+// the controls slide around as the element scrolled out of view: the bar belongs
+// to the element, and only its ink is clipped.
+func (b *Builder) paintVideo(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	box := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if box.Empty() {
+		return
+	}
+	vis := box
+	if clip != nil {
+		vis = box.Intersection(*clip)
+		if vis.Empty() {
+			return
+		}
+	}
+	view, _ := obj.Media.(VideoView)
+
+	// A dark viewport behind everything, so an element with no frame yet is a
+	// letterbox rather than a hole showing whatever was painted underneath.
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    vis,
+		Color:   frame.RGB(20, 20, 24),
+		Opacity: opacity,
+	})
+
+	if view.HasFrame() {
+		b.paintVideoFrame(obj, view, x0, y0, x1-x0, y1-y0, clip, opacity)
+	} else {
+		b.paintVideoMessage(view, vis, opacity, s)
+	}
+	if obj.Node.HasAttribute("controls") && !view.Unsupported {
+		b.paintVideoControls(view, box, vis, opacity, s)
+	}
+}
+
+// paintVideoFrame draws the decoded picture, fitted the same way an <img> is.
+func (b *Builder) paintVideoFrame(obj *layout.Object, view VideoView, x0, y0, cw, ch float32, clip *frame.Rect, opacity float32) {
+	src := view.Pixels.Bounds()
+	if src.Dx() <= 0 || src.Dy() <= 0 {
+		return
+	}
+	x1, y1 := x0+cw, y0+ch
+	dest := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	srcBox := src
+	if s := obj.Style; s != nil {
+		switch s.ObjectFit {
+		case "contain", "scale-down":
+			if r, ok := fitContain(src, cw, ch); ok {
+				dest = frame.RectF4(r.X0+x0, r.Y0+y0, r.X1+x0, r.Y1+y0).ToDevice(b.scale)
+			}
+		case "cover":
+			if sb, ok := fitCoverSrcBox(src, cw, ch); ok {
+				srcBox = sb
+			}
+		}
+	}
+	cmd := DisplayCmd{
+		Kind:    CmdImage,
+		Rect:    dest,
+		Image:   ImageSpec{Src: view.Pixels, SrcBox: srcBox},
+		Opacity: opacity,
+	}
+	// The frame is the part of the element that must not spill outside an
+	// ancestor's overflow. Clipping the destination instead would squeeze the
+	// whole picture into the visible part, which is the artefact this field
+	// exists to avoid.
+	if clip != nil {
+		cmd.Clip = *clip
+	}
+	b.list.Append(cmd)
+}
+
+// glyphAdvance is the width r occupies at size, or the half-em estimate when the
+// builder was constructed without font metrics to ask. Measuring is a luxury the
+// display list can do without: the runs carry their size and slot, and the
+// rasterizer resolves the real advances when it draws them.
+func (b *Builder) glyphAdvance(size int32, r rune, slot frame.FontSlot) int32 {
+	if b.metrics == nil {
+		return size * 3 / 5
+	}
+	return b.metrics.GlyphAdvance(size, r, slot)
+}
+
+// paintVideoMessage is the loading and error text shown in place of a frame.
+func (b *Builder) paintVideoMessage(view VideoView, vis frame.Rect, opacity float32, s *style.ComputedStyle) {
+	if view.Message == "" {
+		return
+	}
+	w, h := vis.X1-vis.X0, vis.Y1-vis.Y0
+	size := int32(12 * b.scale)
+	if size < 8 {
+		size = 8
+	}
+	if size > h/2 {
+		size = h / 2
+	}
+	if size < 6 {
+		return
+	}
+	color := frame.RGB(170, 170, 176)
+	if view.State == VideoFailed {
+		color = frame.RGB(224, 130, 122)
+	}
+	slot := s.FontSlot()
+	var total int32
+	for _, r := range view.Message {
+		total += b.glyphAdvance(size, r, slot)
+	}
+	px := vis.X0 + (w-total)/2
+	py := vis.Y0 + (h+size)/3
+	var glyphs []GlyphRun
+	for _, r := range view.Message {
+		glyphs = append(glyphs, GlyphRun{Rune: r, X: px, Y: py, Size: size, Slot: slot})
+		px += b.glyphAdvance(size, r, slot)
+	}
+	if len(glyphs) == 0 {
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind: CmdText,
+		Rect: vis,
+		Text: TextRun{Glyphs: glyphs, Color: color},
+		// The message is drawn inside the viewport but must not escape the clip
+		// that produced that viewport.
+		Clip:    vis,
+		Opacity: opacity,
+	})
+}
+
+// paintVideoControls draws the bar over the bottom of the element, from geometry
+// the hit tester shares so the two cannot disagree about where a button is.
+func (b *Builder) paintVideoControls(view VideoView, box, vis frame.Rect, opacity float32, s *style.ComputedStyle) {
+	c := VideoControlLayout(box, b.scale)
+	if !c.Has {
+		return
+	}
+	barRect := c.Bar.Intersection(vis)
+	if barRect.Empty() {
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    barRect,
+		Color:   frame.RGBA(28, 28, 30, 220),
+		Opacity: opacity,
+		Clip:    vis,
+	})
+
+	ctrlY := c.Bar.Y1 - (c.Bar.Y1-c.Bar.Y0)/2
+	btnSize := int32(14 * b.scale)
+	if btnSize < 8 {
+		btnSize = 8
+	}
+
+	// Play, or two bars while it is running. The pause mark is drawn rather than
+	// taken from a glyph, because a font that has ▶ is not a font that has ⏸.
+	playRect := c.Play.Intersection(vis)
+	if !playRect.Empty() {
+		if view.State == VideoPlaying {
+			gap := btnSize / 4
+			half := (c.Play.X1 - c.Play.X0 - gap) / 2
+			for _, x := range []int32{c.Play.X0 + gap/2, c.Play.X0 + gap/2 + half + gap} {
+				b.list.Append(DisplayCmd{
+					Kind:    CmdFill,
+					Rect:    frame.Rect4(x, ctrlY-btnSize/2, x+half, ctrlY+btnSize/2).Intersection(vis),
+					Color:   frame.RGB(230, 230, 230),
+					Opacity: opacity,
+					Clip:    vis,
+				})
+			}
+		} else {
+			b.list.Append(DisplayCmd{
+				Kind: CmdText,
+				Rect: playRect,
+				Text: TextRun{
+					Glyphs: []GlyphRun{{
+						// U+25BA, not U+25B6: the font this builds with has the
+						// pointer and not the black triangle, and a glyph the
+						// font lacks paints nothing at all - an invisible play
+						// button on every video.
+						Rune: '►',
+						X:    c.Play.X0 + (c.Play.X1-c.Play.X0)/2 - btnSize/4,
+						Y:    ctrlY + btnSize/3,
+						Size: btnSize,
+						Slot: s.FontSlot(),
+					}},
+					Color: frame.RGB(230, 230, 230),
+				},
+				Clip:    vis,
+				Opacity: opacity,
+			})
+		}
+	}
+
+	if !c.Track.Empty() {
+		trackH := int32(4 * b.scale)
+		if trackH < 2 {
+			trackH = 2
+		}
+		trackY0 := ctrlY - trackH/2
+		trackY1 := trackY0 + trackH
+		trackRect := frame.Rect4(c.Track.X0, trackY0, c.Track.X1, trackY1)
+		if r := trackRect.Intersection(vis); !r.Empty() {
+			b.list.Append(DisplayCmd{
+				Kind:    CmdFill,
+				Rect:    r,
+				Color:   frame.RGB(80, 80, 80),
+				Opacity: opacity,
+				Clip:    vis,
+			})
+			// Progress from the real position. A duration that is not known yet
+			// paints an empty track: guessing a quarter of the way along, which is
+			// what a placeholder does, is a claim about the video.
+			if frac := videoProgress(view); frac > 0 {
+				played := int32(float64(c.Track.X1-c.Track.X0) * frac)
+				if played > 0 {
+					if r := frame.Rect4(c.Track.X0, trackY0, c.Track.X0+played, trackY1).Intersection(vis); !r.Empty() {
+						b.list.Append(DisplayCmd{
+							Kind:    CmdFill,
+							Rect:    r,
+							Color:   frame.RGB(66, 133, 244),
+							Opacity: opacity,
+							Clip:    vis,
+						})
+					}
+				}
+				scrubR := int32(5 * b.scale)
+				if scrubR < 2 {
+					scrubR = 2
+				}
+				kx := c.Track.X0 + played
+				if r := frame.Rect4(kx-scrubR, ctrlY-scrubR, kx+scrubR, ctrlY+scrubR).Intersection(vis); !r.Empty() {
+					b.list.Append(DisplayCmd{
+						Kind:    CmdFill,
+						Rect:    r,
+						Color:   frame.RGB(255, 255, 255),
+						Radius:  uniformCorners(float32(scrubR)),
+						Opacity: opacity,
+						Clip:    vis,
+					})
+				}
+			}
+		}
+	}
+
+	if !c.Mute.Empty() {
+		if r := c.Mute.Intersection(vis); !r.Empty() {
+			b.paintVideoMute(view, c.Mute, ctrlY, vis, opacity, s.FontSlot())
+		}
+	}
+
+	// Elapsed over duration, or just elapsed while the length is unknown.
+	label := VideoTimeLabel(view.Position)
+	if !math.IsNaN(view.Duration) && view.Duration > 0 {
+		label += " / " + VideoTimeLabel(view.Duration)
+	}
+	timeX := box.X1 - int32(videoTimeWidth*b.scale)
+	if r := frame.Rect4(timeX, c.Bar.Y0, box.X1, c.Bar.Y1).Intersection(vis); !r.Empty() && timeX > c.Track.X0 {
+		tsize := int32(11 * b.scale)
+		if tsize < 7 {
+			tsize = 7
+		}
+		var glyphs []GlyphRun
+		px := timeX + int32(4*b.scale)
+		for _, run := range label {
+			glyphs = append(glyphs, GlyphRun{Rune: run, X: px, Y: ctrlY + tsize/3, Size: tsize, Slot: s.FontSlot()})
+			px += b.glyphAdvance(tsize, run, s.FontSlot())
+		}
+		if len(glyphs) > 0 {
+			b.list.Append(DisplayCmd{
+				Kind:    CmdText,
+				Rect:    r,
+				Text:    TextRun{Glyphs: glyphs, Color: frame.RGB(200, 200, 200)},
+				Clip:    vis,
+				Opacity: opacity,
+			})
+		}
+	}
+}
+
+// paintVideoMute draws the speaker out of rects because the font this builds
+// with has no speaker glyph at all, and a glyph the font lacks paints nothing:
+// an invisible mute button. Unmuted adds two sound waves; muted puts a
+// multiplication sign where they were.
+func (b *Builder) paintVideoMute(view VideoView, m frame.Rect, ctrlY int32, vis frame.Rect, opacity float32, slot frame.FontSlot) {
+	w, h := m.X1-m.X0, m.Y1-m.Y0
+	if w < 8 || h < 8 {
+		return
+	}
+	col := frame.RGB(230, 230, 230)
+	fill := func(x0, y0, x1, y1 int32) {
+		if r := frame.Rect4(x0, y0, x1, y1).Intersection(vis); !r.Empty() {
+			b.list.Append(DisplayCmd{Kind: CmdFill, Rect: r, Color: col, Opacity: opacity, Clip: vis})
+		}
+	}
+	fill(m.X0+w/12, ctrlY-h/7, m.X0+w*4/12, ctrlY+h/7)
+	fill(m.X0+w*4/12, ctrlY-h/4, m.X0+w*6/12, ctrlY+h/4)
+	fill(m.X0+w*6/12, ctrlY-h/3, m.X0+w*8/12, ctrlY+h/3)
+	if view.Muted {
+		size := h * 3 / 5
+		// Right-aligned to the button's own edge: the mark's advance would
+		// otherwise run into the time label that sits against it.
+		x := m.X1 - b.glyphAdvance(size, '×', slot)
+		if r := frame.Rect4(x, m.Y0, m.X1, m.Y1).Intersection(vis); !r.Empty() {
+			b.list.Append(DisplayCmd{
+				Kind: CmdText,
+				Rect: r,
+				Text: TextRun{
+					Glyphs: []GlyphRun{{Rune: '×', X: x, Y: ctrlY + size/3, Size: size, Slot: slot}},
+					Color:  col,
+				},
+				Clip:    vis,
+				Opacity: opacity,
+			})
+		}
+		return
+	}
+	fill(m.X0+w*9/12, ctrlY-h/5, m.X0+w*10/12, ctrlY+h/5)
+	fill(m.X0+w*10/12, ctrlY-h/3, m.X0+w*11/12, ctrlY+h/3)
+}
+
+// videoProgress is how much of the asset has played, in 0..1. An unknown duration
+// reports 0 rather than a guess: the bar is the one control that makes a claim
+// about the video, and a wrong claim there is worse than an empty one.
+func videoProgress(view VideoView) float64 {
+	if math.IsNaN(view.Duration) || view.Duration <= 0 || math.IsNaN(view.Position) || view.Position < 0 {
+		return 0
+	}
+	f := view.Position / view.Duration
+	if f > 1 {
+		return 1
+	}
+	return f
+}
+
+// paintAudio draws an audio element control bar placeholder.
+func (b *Builder) paintAudio(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	s := obj.Style
+	if s == nil || obj.Node == nil {
+		return
+	}
+	if !obj.Node.HasAttribute("controls") && (obj.W <= 0 || obj.H <= 0) {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if rect.Empty() {
+		return
+	}
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+		if rect.Empty() {
+			return
+		}
+	}
+
+	cornerRadius := int32(8 * b.scale)
+	barBg := frame.RGB(241, 243, 244)
+	barBorder := frame.RGB(218, 220, 224)
+
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   barBg,
+		Radius:  uniformCorners(float32(cornerRadius)),
+		Opacity: opacity,
+	})
+	b.list.Append(DisplayCmd{
+		Kind: CmdBorder,
+		Rect: rect,
+		Border: BorderSpec{
+			Top:    SideSpec{Width: 1, Color: barBorder},
+			Right:  SideSpec{Width: 1, Color: barBorder},
+			Bottom: SideSpec{Width: 1, Color: barBorder},
+			Left:   SideSpec{Width: 1, Color: barBorder},
+		},
+		Radius:  uniformCorners(float32(cornerRadius)),
+		Opacity: opacity,
+	})
+
+	h := rect.Y1 - rect.Y0
+	cy := rect.Y0 + h/2
+
+	// Play button circle
+	playBtnR := int32(11 * b.scale)
+	if playBtnR > h/2-2 {
+		playBtnR = h/2 - 2
+	}
+	playBtnX := rect.X0 + int32(16*b.scale)
+	if playBtnX+playBtnR < rect.X1 {
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(playBtnX-playBtnR, cy-playBtnR, playBtnX+playBtnR, cy+playBtnR),
+			Color:   frame.RGB(32, 33, 36),
+			Radius:  uniformCorners(float32(playBtnR)),
+			Opacity: opacity,
+		})
+		iconSize := playBtnR * 4 / 5
+		b.list.Append(DisplayCmd{
+			Kind: CmdText,
+			Rect: frame.Rect4(playBtnX-playBtnR, cy-playBtnR, playBtnX+playBtnR, cy+playBtnR),
+			Text: TextRun{
+				Glyphs: []GlyphRun{{
+					Rune: '▶',
+					X:    playBtnX - iconSize/4,
+					Y:    cy + iconSize/3,
+					Size: iconSize,
+					Slot: s.FontSlot(),
+				}},
+				Color: frame.RGB(255, 255, 255),
+			},
+			Opacity: opacity,
+		})
+	}
+
+	// Elapsed time
+	timeX := playBtnX + playBtnR + int32(10*b.scale)
+	timeSize := int32(11 * b.scale)
+	timeStr := "0:00 / 0:00"
+	timeW := int32(len(timeStr)) * timeSize * 3 / 5
+	if timeX+timeW < rect.X1-int32(20*b.scale) {
+		var gr []GlyphRun
+		px := timeX
+		for _, r := range timeStr {
+			gr = append(gr, GlyphRun{Rune: r, X: px, Y: cy + timeSize/3, Size: timeSize, Slot: s.FontSlot()})
+			px += timeSize * 3 / 5
+		}
+		b.list.Append(DisplayCmd{
+			Kind: CmdText,
+			Rect: frame.Rect4(timeX, cy-timeSize, timeX+timeW, cy+timeSize),
+			Text: TextRun{
+				Glyphs: gr,
+				Color:  frame.RGB(95, 99, 104),
+			},
+			Opacity: opacity,
+		})
+	}
+
+	// Progress track
+	trackLeft := timeX + timeW + int32(12*b.scale)
+	trackRight := rect.X1 - int32(16*b.scale)
+	if trackRight > trackLeft+int32(20*b.scale) {
+		trackH := int32(4 * b.scale)
+		if trackH < 2 {
+			trackH = 2
+		}
+		trackY0 := cy - trackH/2
+		trackY1 := trackY0 + trackH
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(trackLeft, trackY0, trackRight, trackY1),
+			Color:   frame.RGB(218, 220, 224),
+			Opacity: opacity,
+		})
+		thumbR := int32(4 * b.scale)
+		b.list.Append(DisplayCmd{
+			Kind:    CmdFill,
+			Rect:    frame.Rect4(trackLeft-thumbR, cy-thumbR, trackLeft+thumbR, cy+thumbR),
+			Color:   frame.RGB(26, 115, 232),
+			Radius:  uniformCorners(float32(thumbR)),
+			Opacity: opacity,
+		})
+	}
+}
+
 // paintSVGShape draws an SVG shape element (rect, circle, ellipse, line,
 // polygon, polyline, path) using the element's geometry attributes and
 // presentation style. Shapes are rasterized into fill/stroke commands.
 func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
-	if obj.Node == nil || obj.Node.Namespace != 2 { // NSSVG
+	if obj.Node == nil || obj.Node.Namespace != svgNamespace { // NSSVG
 		return
 	}
-	x0, y0, x1, y1 := obj.ContentRect()
+	// Locate enclosing <svg> element to obtain viewport origin and bounds.
+	svgObj := obj
+	for svgObj != nil && (svgObj.Node == nil || svgObj.Node.Data != "svg") {
+		if svgObj.Parent == 0 {
+			svgObj = nil
+			break
+		}
+		svgObj = b.arena.Get(svgObj.Parent)
+	}
+	if svgObj == nil {
+		return
+	}
+	x0, y0, x1, y1 := svgObj.ContentRect()
 	if x1 <= x0 || y1 <= y0 {
 		return
 	}
@@ -581,21 +1108,37 @@ func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
 	}
 }
 
-// parseSVGPaint returns the fill/stroke color for an SVG element, checking
-// the computed style first, then the presentation attribute.
+// parseSVGPaint returns the fill/stroke color for an SVG element. It checks
+// presentation attributes, inline style declarations, and currentColor.
 func (b *Builder) parseSVGPaint(obj *layout.Object, attr, fallback string) frame.Color {
-	if obj.Style != nil && obj.Style.Color.A > 0 {
-		return convertColor(obj.Style.Color)
+	if obj.Node == nil {
+		return 0
 	}
 	v := obj.Node.GetAttribute(attr)
 	if v == "" {
+		if styleAttr := obj.Node.GetAttribute("style"); styleAttr != "" {
+			for _, decl := range strings.Split(styleAttr, ";") {
+				parts := strings.SplitN(decl, ":", 2)
+				if len(parts) == 2 && strings.TrimSpace(parts[0]) == attr {
+					v = strings.TrimSpace(parts[1])
+					break
+				}
+			}
+		}
+	}
+	if v == "" {
 		v = fallback
 	}
-	if v == "none" {
+	if v == "" || v == "none" {
 		return 0
 	}
-	c := parseSVGColor(v)
-	return c
+	if v == "currentColor" {
+		if obj.Style != nil {
+			return convertColor(obj.Style.Color)
+		}
+		return frame.RGB(0, 0, 0)
+	}
+	return parseSVGColor(v)
 }
 
 // parseSVGLength parses an SVG length attribute, returning the value in
@@ -615,53 +1158,14 @@ func (b *Builder) parseSVGLength(obj *layout.Object, attr string, fallback float
 	return float32(f)
 }
 
-// parseSVGColor parses a simple CSS color value.
+// parseSVGColor parses a CSS color string using css.ParseColor.
 func parseSVGColor(s string) frame.Color {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if s == "" || s == "none" {
 		return 0
 	}
-	// Handle hex colors.
-	if len(s) == 4 && s[0] == '#' {
-		r, _ := strconv.ParseUint(s[1:2]+s[1:2], 16, 8)
-		g, _ := strconv.ParseUint(s[2:3]+s[2:3], 16, 8)
-		b, _ := strconv.ParseUint(s[3:4]+s[3:4], 16, 8)
-		return frame.RGBA(uint8(r), uint8(g), uint8(b), 255)
-	}
-	if len(s) == 7 && s[0] == '#' {
-		r, _ := strconv.ParseUint(s[1:3], 16, 8)
-		g, _ := strconv.ParseUint(s[3:5], 16, 8)
-		b, _ := strconv.ParseUint(s[5:7], 16, 8)
-		return frame.RGBA(uint8(r), uint8(g), uint8(b), 255)
-	}
-	// Named colors.
-	switch s {
-	case "black":
-		return frame.RGB(0, 0, 0)
-	case "white":
-		return frame.RGB(255, 255, 255)
-	case "red":
-		return frame.RGB(255, 0, 0)
-	case "green":
-		return frame.RGB(0, 128, 0)
-	case "blue":
-		return frame.RGB(0, 0, 255)
-	case "yellow":
-		return frame.RGB(255, 255, 0)
-	case "cyan":
-		return frame.RGB(0, 255, 255)
-	case "magenta":
-		return frame.RGB(255, 0, 255)
-	case "gray", "grey":
-		return frame.RGB(128, 128, 128)
-	case "orange":
-		return frame.RGB(255, 165, 0)
-	case "purple":
-		return frame.RGB(128, 0, 128)
-	case "pink":
-		return frame.RGB(255, 192, 203)
-	case "brown":
-		return frame.RGB(165, 42, 42)
+	if c, ok := css.ParseColor(s); ok {
+		return frame.RGBA(c.R, c.G, c.B, c.A)
 	}
 	return 0
 }
@@ -675,7 +1179,7 @@ func (b *Builder) paintSVGRect(obj *layout.Object, bx0, by0, bx1, by1 float32, f
 	ry := b.parseSVGLengthAttr(obj, "ry", rx)
 
 	scale := b.scale
-	rect := frame.RectF4(bx0+x*scale, by0+y*scale, bx0+(x+w)*scale, by0+(y+h)*scale).ToDevice(scale)
+	rect := frame.RectF4(bx0+x, by0+y, bx0+x+w, by0+y+h).ToDevice(scale)
 	if rect.Empty() {
 		return
 	}
@@ -696,8 +1200,8 @@ func (b *Builder) paintSVGCircle(obj *layout.Object, bx0, by0, bx1, by1 float32,
 		return
 	}
 	scale := b.scale
-	cxp := bx0 + cx*scale
-	cyp := by0 + cy*scale
+	cxp := (bx0 + cx) * scale
+	cyp := (by0 + cy) * scale
 	rp := r * scale
 
 	if fill.A() > 0 {
@@ -717,8 +1221,8 @@ func (b *Builder) paintSVGEllipse(obj *layout.Object, bx0, by0, bx1, by1 float32
 		return
 	}
 	scale := b.scale
-	cxp := bx0 + cx*scale
-	cyp := by0 + cy*scale
+	cxp := (bx0 + cx) * scale
+	cyp := (by0 + cy) * scale
 	rxp := rx * scale
 	ryp := ry * scale
 
@@ -739,7 +1243,7 @@ func (b *Builder) paintSVGLine(obj *layout.Object, bx0, by0, bx1, by1 float32, s
 		return
 	}
 	scale := b.scale
-	b.paintSVGLineSegment(bx0+x1*scale, by0+y1*scale, bx0+x2*scale, by0+y2*scale, stroke, strokeW, opacity)
+	b.paintSVGLineSegment((bx0+x1)*scale, (by0+y1)*scale, (bx0+x2)*scale, (by0+y2)*scale, stroke, strokeW, opacity)
 }
 
 func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, open bool, opacity float32) {
@@ -752,10 +1256,10 @@ func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32
 		return
 	}
 	scale := b.scale
-	// Offset points to the box origin.
+	// Offset points to the SVG box origin and scale to device pixels.
 	for i := range points {
-		points[i][0] = bx0 + points[i][0]*scale
-		points[i][1] = by0 + points[i][1]*scale
+		points[i][0] = (bx0 + points[i][0]) * scale
+		points[i][1] = (by0 + points[i][1]) * scale
 	}
 
 	if !open && fill.A() > 0 {
@@ -776,13 +1280,13 @@ func (b *Builder) paintSVGPath(obj *layout.Object, bx0, by0, bx1, by1 float32, f
 		return
 	}
 	scale := b.scale
-	// Offset to box origin.
+	// Offset to SVG box origin and scale to device pixels.
 	for i := range segments {
 		for j := range segments[i] {
 			if j%2 == 0 {
-				segments[i][j] = bx0 + segments[i][j]*scale
+				segments[i][j] = (bx0 + segments[i][j]) * scale
 			} else {
-				segments[i][j] = by0 + segments[i][j]*scale
+				segments[i][j] = (by0 + segments[i][j]) * scale
 			}
 		}
 	}
@@ -814,16 +1318,27 @@ func (b *Builder) parseSVGLengthAttr(obj *layout.Object, attr string, fallback f
 }
 
 func (b *Builder) paintSVGStrokeRect(rect frame.Rect, color frame.Color, width, rx, ry float32, opacity float32) {
-	hw := width / 2
+	sw := int32(math.Ceil(float64(width)))
+	if sw < 1 {
+		sw = 1
+	}
+	w := rect.W()
+	h := rect.H()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if sw*2 >= w || sw*2 >= h {
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity})
+		return
+	}
 	// Top
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+int32(width)), Color: color, Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+sw), Color: color, Opacity: opacity})
 	// Bottom
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-int32(width), rect.X1, rect.Y1), Color: color, Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-sw, rect.X1, rect.Y1), Color: color, Opacity: opacity})
 	// Left
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X0+int32(width), rect.Y1), Color: color, Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0+sw, rect.X0+sw, rect.Y1-sw), Color: color, Opacity: opacity})
 	// Right
-	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-int32(width), rect.Y0, rect.X1, rect.Y1), Color: color, Opacity: opacity})
-	_ = hw
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-sw, rect.Y0+sw, rect.X1, rect.Y1-sw), Color: color, Opacity: opacity})
 	_ = rx
 	_ = ry
 }
@@ -1707,6 +2222,10 @@ func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity flo
 	// If checked, draw a checkmark.
 	if obj.Node != nil && obj.Node.HasAttribute("checked") {
 		checkColor := frame.RGB(0, 0, 0)
+		// Apply accent-color if set and has alpha > 0
+		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
+			checkColor = frame.RGBA(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B, 255)
+		}
 		// Simple checkmark: a small V shape drawn as filled pixels.
 		cx := (rect.X0 + rect.X1) / 2
 		cy := (rect.Y0 + rect.Y1) / 2
@@ -1760,6 +2279,10 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 	// If checked, draw a filled dot in the center.
 	if obj.Node != nil && obj.Node.HasAttribute("checked") {
 		dotColor := frame.RGB(0, 0, 0)
+		// Apply accent-color if set and has alpha > 0
+		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
+			dotColor = frame.RGBA(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B, 255)
+		}
 		dotR := rx / 3
 		if dotR < 1 {
 			dotR = 1
@@ -1960,11 +2483,15 @@ func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
 	if rect.Empty() {
 		return
 	}
+	caretColor := s.Color
+	if s.CaretColor.A > 0 {
+		caretColor = s.CaretColor
+	}
 	b.list.Append(DisplayCmd{
 		Kind:    CmdFill,
 		Rect:    rect,
-		Color:   frame.RGB(0, 0, 0),
-		Opacity: 1,
+		Color:   frame.RGB(caretColor.R, caretColor.G, caretColor.B),
+		Opacity: float32(caretColor.A) / 255.0,
 	})
 }
 
@@ -2169,10 +2696,17 @@ func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle
 	// pixel thick, and scales both with the font.
 	if s.TextDecoration&style.TextDecorationUnderline != 0 && !isBlankText(text) {
 		thick := (s.FontSize * b.scale) / 16
+		if s.TextDecorationThickness > 0 {
+			thick = s.TextDecorationThickness * b.scale
+		}
 		if thick < 1 {
 			thick = 1
 		}
-		y0 := baseline + int32(thick)
+		offset := float32(thick)
+		if s.TextUnderlineOffset != 0 {
+			offset = s.TextUnderlineOffset * b.scale
+		}
+		y0 := baseline + int32(offset)
 		b.list.Append(DisplayCmd{
 			Kind:    CmdFill,
 			Rect:    frame.Rect4(rect.X0, y0, rect.X1, y0+int32(thick)),
@@ -2612,5 +3146,141 @@ func (b *Builder) applyTransform(obj *layout.Object, cmdStart int, bx0, by0, bx1
 		)
 		transformed := mat.TransformRect(lr)
 		cmds[i].Rect = transformed.ToDevice(b.scale)
+	}
+}
+
+func (b *Builder) paintProgress(obj *layout.Object, rect frame.Rect, opacity float32) {
+	if rect.Empty() || obj.Node == nil {
+		return
+	}
+	trackBg := frame.RGB(230, 230, 230)
+	borderColor := frame.RGB(204, 204, 204)
+	b.list.Append(DisplayCmd{
+		Kind:  CmdFill,
+		Rect:  rect,
+		Color: trackBg,
+	})
+	b.list.Append(DisplayCmd{
+		Kind: CmdBorder,
+		Rect: rect,
+		Border: BorderSpec{
+			Top:    SideSpec{Width: 1, Color: borderColor},
+			Right:  SideSpec{Width: 1, Color: borderColor},
+			Bottom: SideSpec{Width: 1, Color: borderColor},
+			Left:   SideSpec{Width: 1, Color: borderColor},
+		},
+	})
+	valStr := obj.Node.GetAttribute("value")
+	if valStr == "" {
+		return
+	}
+	val, errVal := strconv.ParseFloat(valStr, 64)
+	maxVal := 1.0
+	if maxStr := obj.Node.GetAttribute("max"); maxStr != "" {
+		if m, err := strconv.ParseFloat(maxStr, 64); err == nil && m > 0 {
+			maxVal = m
+		}
+	}
+	if errVal != nil || val < 0 {
+		val = 0
+	}
+	if val > maxVal {
+		val = maxVal
+	}
+	frac := float32(val / maxVal)
+	if frac > 0 {
+		fillW := int32(float32(rect.W()) * frac)
+		if fillW > rect.W() {
+			fillW = rect.W()
+		}
+		fillRect := frame.Rect4(rect.X0, rect.Y0, rect.X0+fillW, rect.Y1)
+		barColor := frame.RGB(0, 117, 255)
+		b.list.Append(DisplayCmd{
+			Kind:  CmdFill,
+			Rect:  fillRect,
+			Color: barColor,
+		})
+	}
+}
+
+func (b *Builder) paintMeter(obj *layout.Object, rect frame.Rect, opacity float32) {
+	if rect.Empty() || obj.Node == nil {
+		return
+	}
+	trackBg := frame.RGB(230, 230, 230)
+	borderColor := frame.RGB(204, 204, 204)
+	b.list.Append(DisplayCmd{
+		Kind:  CmdFill,
+		Rect:  rect,
+		Color: trackBg,
+	})
+	b.list.Append(DisplayCmd{
+		Kind: CmdBorder,
+		Rect: rect,
+		Border: BorderSpec{
+			Top:    SideSpec{Width: 1, Color: borderColor},
+			Right:  SideSpec{Width: 1, Color: borderColor},
+			Bottom: SideSpec{Width: 1, Color: borderColor},
+			Left:   SideSpec{Width: 1, Color: borderColor},
+		},
+	})
+
+	parseF := func(name string, def float64) float64 {
+		s := obj.Node.GetAttribute(name)
+		if s == "" {
+			return def
+		}
+		if v, err := strconv.ParseFloat(s, 64); err == nil {
+			return v
+		}
+		return def
+	}
+	minVal := parseF("min", 0)
+	maxVal := parseF("max", 1)
+	if maxVal <= minVal {
+		maxVal = minVal + 1
+	}
+	val := parseF("value", minVal)
+	if val < minVal {
+		val = minVal
+	}
+	if val > maxVal {
+		val = maxVal
+	}
+	low := parseF("low", minVal)
+	high := parseF("high", maxVal)
+	opt := parseF("optimum", (minVal+maxVal)/2)
+
+	meterColor := frame.RGB(40, 167, 69) // Green
+	if opt >= high {
+		if val < low {
+			meterColor = frame.RGB(220, 53, 69) // Red
+		} else if val < high {
+			meterColor = frame.RGB(255, 193, 7) // Yellow
+		}
+	} else if opt <= low {
+		if val > high {
+			meterColor = frame.RGB(220, 53, 69)
+		} else if val > low {
+			meterColor = frame.RGB(255, 193, 7)
+		}
+	} else {
+		if val < low || val > high {
+			meterColor = frame.RGB(255, 193, 7)
+		}
+	}
+
+	frac := float32((val - minVal) / (maxVal - minVal))
+	if frac > 0 {
+		fillW := int32(float32(rect.W()) * frac)
+		if fillW > rect.W() {
+			fillW = rect.W()
+		}
+		fillRect := frame.Rect4(rect.X0, rect.Y0, rect.X0+fillW, rect.Y1)
+		b.list.Append(DisplayCmd{
+			Kind:  CmdFill,
+			Rect:  fillRect,
+			Color: meterColor,
+		})
 	}
 }

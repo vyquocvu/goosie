@@ -72,6 +72,25 @@ func BlendOver(dst, src Color) Color {
 	return Color(r<<24 | g<<16 | b<<8 | a)
 }
 
+// BlendOverCoverage blends an opaque color c over dst with partial coverage cov in [0..255].
+// It computes (c * cov + dst * (255 - cov) + 127) / 255 directly, avoiding redundant
+// intermediate scaling and rounding divisions.
+func BlendOverCoverage(dst Color, c Color, cov uint8) Color {
+	if cov == 255 {
+		return c
+	}
+	if cov == 0 {
+		return dst
+	}
+	ca := uint32(cov)
+	inv := 255 - ca
+	r := (uint32(c.R())*ca + uint32(dst.R())*inv + 127) / 255
+	g := (uint32(c.G())*ca + uint32(dst.G())*inv + 127) / 255
+	b := (uint32(c.B())*ca + uint32(dst.B())*inv + 127) / 255
+	a := (uint32(c.A())*ca + uint32(dst.A())*inv + 127) / 255
+	return Color(r<<24 | g<<16 | b<<8 | a)
+}
+
 // Bitmap is an owned RGBA buffer with an explicit stride. Stride is a field
 // rather than W*4 so a sub-region or a platform-owned buffer can be wrapped
 // without copying, and so every access path is exercised by the tests.

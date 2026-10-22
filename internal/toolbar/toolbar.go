@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -17,6 +18,22 @@ const (
 	FocusNone Focus = iota
 	FocusAddress
 )
+
+// SuggestionKind distinguishes search suggestions, bookmarks, and history entries.
+type SuggestionKind int
+
+const (
+	SuggestSearch SuggestionKind = iota
+	SuggestBookmark
+	SuggestHistory
+)
+
+// Suggestion is one autocompleted destination displayed in the omnibox dropdown.
+type Suggestion struct {
+	Title string
+	URL   string
+	Kind  SuggestionKind
+}
 
 const textSize = 14
 
@@ -85,10 +102,25 @@ type State struct {
 	OnNavigate    func(string)
 	OnTraverse    func(int)
 	OnReload      func()
+	OnStop        func()
 	OnFindChanged func(string)
 	OnFindNext    func(bool)
 	OnFindClose   func()
 	Clipboard     Clipboard
+
+	Suggestions     []Suggestion
+	SelectedSuggest int
+	OnQuerySuggest  func(string) []Suggestion
+
+	DownloadsCount   int
+	ActiveDownloads  int
+	DownloadProgress float64
+	OnDownloads      func()
+	Incognito        bool
+
+	Zoom           float64
+	ZoomBadgeUntil time.Time
+	OnResetZoom    func()
 
 	fonts *raster.Fonts
 	scale int32
@@ -100,11 +132,13 @@ type State struct {
 
 func NewState(width int32, fonts *raster.Fonts) *State {
 	return &State{
-		History:   NewHistory(),
-		Bounds:    frame.Rect4(0, 0, width, ToolbarHeight),
-		fonts:     fonts,
-		Clipboard: nopClipboardImpl{},
-		scale:     1,
+		History:         NewHistory(),
+		Bounds:          frame.Rect4(0, 0, width, ToolbarHeight),
+		fonts:           fonts,
+		Clipboard:       nopClipboardImpl{},
+		scale:           1,
+		SelectedSuggest: -1,
+		Zoom:            1.0,
 	}
 }
 
@@ -156,7 +190,9 @@ func (s *State) Navigate(url string) {
 	s.Cursor = len([]rune(url))
 	s.SelStart = s.Cursor
 	s.SelEnd = s.Cursor
-	s.History.Push(url)
+	if s.History != nil {
+		s.History.Push(url)
+	}
 	s.Focus = FocusNone
 	s.dragging = false
 }
@@ -167,11 +203,103 @@ func (s *State) SetLoading(loading bool) {
 	s.Loading = loading
 }
 
+// AccessibilitySnapshot returns the current address-bar and navigation state
+// for the native accessibility tree. The history cursor has its own lock, so
+// both availability checks happen while this toolbar snapshot is stable.
+func (s *State) AccessibilitySnapshot() (value string, focused, findActive, loading, canBack, canForward bool, downloads int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value = s.URL
+	if s.Focus == FocusAddress {
+		value = s.Input
+		focused = true
+	}
+	findActive = s.FindActive
+	loading = s.Loading
+	if s.History != nil {
+		canBack = s.History.CanBack()
+		canForward = s.History.CanForward()
+	}
+	downloads = s.ActiveDownloads
+	return
+}
+
+// SetAccessibilityValue applies an AXValue write to the address field without
+// submitting it. Navigation remains an explicit Enter/Go action, matching a
+// person typing into the omnibox.
+func (s *State) SetAccessibilityValue(value string) {
+	s.mu.Lock()
+	var closeFind func()
+	if s.FindActive {
+		s.closeFindLocked()
+		closeFind = s.OnFindClose
+	}
+	s.Focus = FocusAddress
+	s.Input = sanitizePaste(value)
+	s.Cursor = len([]rune(s.Input))
+	s.SelStart = s.Cursor
+	s.SelEnd = s.Cursor
+	s.dragging = false
+	s.closeSuggestionsLocked()
+	s.mu.Unlock()
+	if closeFind != nil {
+		closeFind()
+	}
+}
+
 // SetError records a load error for the address bar to display.
 func (s *State) SetError(err string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Error = err
+}
+
+// SetDownloadStats updates the toolbar download indicators.
+func (s *State) SetDownloadStats(activeCount, totalCount int, progress float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ActiveDownloads = activeCount
+	s.DownloadsCount = totalCount
+	s.DownloadProgress = progress
+}
+
+// SetIncognito updates whether the toolbar draws in private incognito dark mode.
+func (s *State) SetIncognito(incognito bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Incognito = incognito
+}
+
+// SetZoom updates the current zoom level and activates the transient zoom badge.
+func (s *State) SetZoom(z float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Zoom = z
+	s.ZoomBadgeUntil = time.Now().Add(2500 * time.Millisecond)
+}
+
+// ResetZoom resets the zoom to 100%.
+func (s *State) ResetZoom() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Zoom = 1.0
+	s.ZoomBadgeUntil = time.Time{}
+}
+
+func (s *State) zoomBadgeRect(r frame.Rect, sc int32) (frame.Rect, bool) {
+	if s.FindActive || s.Zoom <= 0 || (s.Zoom == 1.0 && time.Now().After(s.ZoomBadgeUntil)) {
+		return frame.Rect{}, false
+	}
+	zoomStr := fmt.Sprintf("%d%%", int(s.Zoom*100+0.5))
+	badgeW := s.measureText(zoomStr) + 12*sc
+	if badgeW < 36*sc {
+		badgeW = 36 * sc
+	}
+	badgeX1 := r.X1 - 8*sc
+	badgeX0 := badgeX1 - badgeW
+	badgeY0 := r.Y0 + 4*sc
+	badgeY1 := r.Y1 - 4*sc
+	return frame.Rect4(badgeX0, badgeY0, badgeX1, badgeY1), true
 }
 
 // GetFocus reports where keyboard input currently goes.
@@ -273,9 +401,14 @@ func (s *State) CursorAt(pos frame.Point) surface.Cursor {
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), lp),
 		rectContains(ButtonRect(ButtonForward, w), lp),
-		rectContains(ButtonRect(ButtonReload, w), lp):
+		rectContains(ButtonRect(ButtonReload, w), lp),
+		rectContains(ButtonRect(ButtonDownloads, w), lp):
 		return surface.CursorPointer
 	case rectContains(AddressBarRect(w), lp):
+		r := frame.Rect4(AddressBarRect(w).X0*sc, AddressBarRect(w).Y0*sc, AddressBarRect(w).X1*sc, AddressBarRect(w).Y1*sc)
+		if zRect, ok := s.zoomBadgeRect(r, sc); ok && rectContains(zRect, pos) {
+			return surface.CursorPointer
+		}
 		return surface.CursorText
 	}
 	return surface.CursorDefault
@@ -303,6 +436,7 @@ func (s *State) HandlePointer(pos frame.Point, button surface.Button, action sur
 func (s *State) blurLocked() {
 	s.Focus = FocusNone
 	s.dragging = false
+	s.closeSuggestionsLocked()
 	if !s.FindActive {
 		s.Input = s.URL
 		s.Cursor = len([]rune(s.Input))
@@ -335,6 +469,10 @@ func (s *State) focusURLLocked() []func() {
 	s.Input = s.URL
 	s.selectAllLocked()
 	s.dragging = false
+	if s.OnQuerySuggest != nil && s.Input != "" {
+		s.Suggestions = s.OnQuerySuggest(s.Input)
+		s.SelectedSuggest = -1
+	}
 	return pending
 }
 
@@ -442,6 +580,10 @@ func (s *State) pressAddressLocked(devX int32, toolbarW int32) {
 		s.selectAllLocked()
 		s.dragging = true
 		s.dragAnchor = s.hitCursorDev(devX, toolbarW)
+		if s.OnQuerySuggest != nil && s.Input != "" {
+			s.Suggestions = s.OnQuerySuggest(s.Input)
+			s.SelectedSuggest = -1
+		}
 		return
 	}
 	at := s.hitCursorDev(devX, toolbarW)
@@ -532,23 +674,44 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 	switch {
 	case rectContains(ButtonRect(ButtonBack, w), lp):
 		s.dragging = false
-		if s.History.CanBack() && s.OnTraverse != nil {
+		if s.History != nil && s.History.CanBack() && s.OnTraverse != nil {
 			cb := s.OnTraverse
 			fire(func() { cb(-1) })
 		}
 	case rectContains(ButtonRect(ButtonForward, w), lp):
 		s.dragging = false
-		if s.History.CanForward() && s.OnTraverse != nil {
+		if s.History != nil && s.History.CanForward() && s.OnTraverse != nil {
 			cb := s.OnTraverse
 			fire(func() { cb(1) })
 		}
 	case rectContains(ButtonRect(ButtonReload, w), lp):
 		s.dragging = false
-		if s.OnReload != nil {
+		if s.Loading {
+			if s.OnStop != nil {
+				cb := s.OnStop
+				fire(func() { cb() })
+			}
+		} else if s.OnReload != nil {
 			cb := s.OnReload
 			fire(func() { cb() })
 		}
+	case rectContains(ButtonRect(ButtonDownloads, w), lp):
+		s.dragging = false
+		if s.OnDownloads != nil {
+			cb := s.OnDownloads
+			fire(func() { cb() })
+		}
 	case rectContains(AddressBarRect(w), lp):
+		r := frame.Rect4(AddressBarRect(w).X0*sc, AddressBarRect(w).Y0*sc, AddressBarRect(w).X1*sc, AddressBarRect(w).Y1*sc)
+		if zRect, ok := s.zoomBadgeRect(r, sc); ok && rectContains(zRect, pos) {
+			s.Zoom = 1.0
+			s.ZoomBadgeUntil = time.Time{}
+			if s.OnResetZoom != nil {
+				cb := s.OnResetZoom
+				fire(func() { cb() })
+			}
+			return pending
+		}
 		s.pressAddressLocked(pos.X, w)
 	default:
 		if s.FindActive {
@@ -603,12 +766,25 @@ func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 		return nil
 	}
 	if key == 0x1b {
-		// Esc reverts an uncommitted edit and leaves the bar, like a normal
-		// input; find mode has its own Esc path above.
+		// Esc closes suggestions dropdown if open, or reverts uncommitted edit.
+		if len(s.Suggestions) > 0 {
+			s.closeSuggestionsLocked()
+			return nil
+		}
 		s.blurLocked()
 		return nil
 	}
-	return s.clipboardPending(s.editKeyLocked(key, mods))
+	beforeInput := s.Input
+	pending := s.clipboardPending(s.editKeyLocked(key, mods))
+	if s.Input != beforeInput {
+		if s.OnQuerySuggest != nil && s.Input != "" {
+			s.Suggestions = s.OnQuerySuggest(s.Input)
+			s.SelectedSuggest = -1
+		} else {
+			s.closeSuggestionsLocked()
+		}
+	}
+	return pending
 }
 
 // clipboardPending wraps deferred clipboard work from an edit into a
@@ -695,8 +871,16 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 			s.moveCursorRight(shift)
 		}
 	case keyUp:
+		if len(s.Suggestions) > 0 {
+			s.selectPrevSuggestLocked()
+			return
+		}
 		s.moveCursorStart(shift)
 	case keyDown:
+		if len(s.Suggestions) > 0 {
+			s.selectNextSuggestLocked()
+			return
+		}
 		s.moveCursorEnd(shift)
 	case keyHome:
 		s.moveCursorStart(shift)
@@ -769,6 +953,10 @@ func (s *State) insertChar(r rune) {
 
 func (s *State) submitInputLocked() []func() {
 	url := s.Input
+	if s.SelectedSuggest >= 0 && s.SelectedSuggest < len(s.Suggestions) {
+		url = s.Suggestions[s.SelectedSuggest].URL
+	}
+	s.closeSuggestionsLocked()
 	if url == "" || s.OnNavigate == nil {
 		return nil
 	}
@@ -838,13 +1026,20 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	barH := int32(ToolbarHeight) * sc
 
 	bg := frame.Rect4(0, oy, int32(backing.W), oy+barH)
-	backing.FillRect(bg, toolbarBg, nil)
+	bgCol := toolbarBg
+	sepCol := separatorColor
+	if s.Incognito {
+		bgCol = frame.RGB(40, 44, 52)
+		sepCol = frame.RGB(32, 35, 42)
+	}
+	backing.FillRect(bg, bgCol, nil)
 
-	backing.FillRect(frame.Rect4(0, oy+barH-1, int32(backing.W), oy+barH), separatorColor, nil)
+	backing.FillRect(frame.Rect4(0, oy+barH-1, int32(backing.W), oy+barH), sepCol, nil)
 
 	s.drawButton(backing, ButtonBack, w, clip, oy)
 	s.drawButton(backing, ButtonForward, w, clip, oy)
 	s.drawButton(backing, ButtonReload, w, clip, oy)
+	s.drawButton(backing, ButtonDownloads, w, clip, oy)
 	s.drawAddressBar(backing, w, clip, oy)
 
 	if s.Loading {
@@ -860,11 +1055,21 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	ox := r.X0 * sc
 	oyd := oy + r.Y0*sc
 	fg := buttonColor
-	if btn == ButtonBack && !s.History.CanBack() {
-		fg = disabledColor
-	}
-	if btn == ButtonForward && !s.History.CanForward() {
-		fg = disabledColor
+	if s.Incognito {
+		fg = frame.RGB(200, 204, 212)
+		if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
+			fg = frame.RGB(90, 94, 102)
+		}
+		if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
+			fg = frame.RGB(90, 94, 102)
+		}
+	} else {
+		if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
+			fg = disabledColor
+		}
+		if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
+			fg = disabledColor
+		}
 	}
 	cx := int32(ButtonSize) / 2
 	cy := int32(ButtonSize) / 2
@@ -874,8 +1079,64 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	case ButtonForward:
 		s.drawArrow(backing, ox, oyd, cx+4, cy, 1, sc, fg, clip)
 	case ButtonReload:
-		s.drawReload(backing, ox, oyd, cx, cy, sc, fg, clip)
+		if s.Loading {
+			s.drawStop(backing, ox, oyd, cx, cy, sc, fg)
+		} else {
+			s.drawReload(backing, ox, oyd, cx, cy, sc, fg, clip)
+		}
+	case ButtonDownloads:
+		s.drawDownloads(backing, ox, oyd, cx, cy, sc, fg, clip)
 	}
+}
+
+func (s *State) drawDownloads(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color, clip frame.Rect) {
+	fcx := float64(ox) + float64(cx)*float64(sc)
+	fcy := float64(oy) + float64(cy)*float64(sc)
+	thick := 1.8 * float64(sc)
+	if thick < 1.5 {
+		thick = 1.5
+	}
+
+	// Tray: bottom horizontal bar and two upturned sides
+	trayHalfW := 6.0 * float64(sc)
+	trayBottomY := fcy + 4.5*float64(sc)
+	trayTopY := fcy + 1.5*float64(sc)
+	drawLineAA(backing, fcx-trayHalfW, trayBottomY, fcx+trayHalfW, trayBottomY, thick, c)
+	drawLineAA(backing, fcx-trayHalfW, trayTopY, fcx-trayHalfW, trayBottomY, thick, c)
+	drawLineAA(backing, fcx+trayHalfW, trayTopY, fcx+trayHalfW, trayBottomY, thick, c)
+
+	// Downward arrow stem
+	stemTopY := fcy - 6.0*float64(sc)
+	stemBottomY := fcy + 1.0*float64(sc)
+	drawLineAA(backing, fcx, stemTopY, fcx, stemBottomY, thick, c)
+
+	// Downward arrow head
+	tipY := fcy + 3.0*float64(sc)
+	baseY := fcy - 0.5*float64(sc)
+	headHalfW := 3.5 * float64(sc)
+	fillTriangleAA(backing, fcx, tipY, fcx-headHalfW, baseY, fcx+headHalfW, baseY, c)
+
+	// Active download progress indicator
+	if s.ActiveDownloads > 0 {
+		activeColor := frame.RGB(0, 120, 215)
+		barY := oy + (int32(ButtonSize)-3)*sc
+		barW := int32(ButtonSize-6) * sc
+		barX := ox + 3*sc
+		backing.FillRect(frame.Rect4(barX, barY, barX+barW, barY+2*sc), frame.RGB(210, 210, 215), nil)
+		p := s.DownloadProgress
+		if p <= 0 {
+			p = 100.0
+		}
+		fillW := int32(float64(barW) * (p / 100.0))
+		if fillW < 2*sc {
+			fillW = 2 * sc
+		}
+		if fillW > barW {
+			fillW = barW
+		}
+		backing.FillRect(frame.Rect4(barX, barY, barX+fillW, barY+2*sc), activeColor, nil)
+	}
+	_ = clip
 }
 
 func (s *State) drawArrow(backing *frame.Bitmap, ox, oy, x, y, dir, sc int32, c frame.Color, clip frame.Rect) {
@@ -897,6 +1158,14 @@ func (s *State) drawArrow(backing *frame.Bitmap, ox, oy, x, y, dir, sc int32, c 
 	x1 := baseX - float64(dir)*stemLen
 	drawLineAA(backing, x0, fy, x1, fy, thick, c)
 	_ = clip
+}
+
+func (s *State) drawStop(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color) {
+	const halfSize = 5
+	x := ox + cx*sc
+	y := oy + cy*sc
+	size := int32(halfSize) * sc
+	backing.FillRect(frame.Rect4(x-size, y-size, x+size, y+size), c, nil)
 }
 
 func (s *State) drawReload(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color, clip frame.Rect) {
@@ -1067,7 +1336,14 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 
 	fill := barBg
 	border := barBorder
-	if s.Focus == FocusAddress {
+	if s.Incognito {
+		fill = frame.RGB(32, 35, 42)
+		border = frame.RGB(60, 64, 72)
+		if s.Focus == FocusAddress {
+			fill = frame.RGB(40, 44, 52)
+			border = frame.RGB(100, 160, 240)
+		}
+	} else if s.Focus == FocusAddress {
 		fill = barFocusBg
 		border = barFocusBorder
 	}
@@ -1082,14 +1358,25 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 		}
 	}
 	textCol := textColor
+	if s.Incognito {
+		textCol = frame.RGB(240, 240, 240)
+	}
 	if s.Focus == FocusNone && s.Error != "" {
 		textCol = frame.RGB(200, 50, 50)
 	} else if text == "" && s.FindActive {
 		text = "Find in page..."
-		textCol = placeholderColor
+		if s.Incognito {
+			textCol = frame.RGB(140, 144, 154)
+		} else {
+			textCol = placeholderColor
+		}
 	} else if text == "" && s.Focus == FocusNone {
 		text = "Enter URL..."
-		textCol = placeholderColor
+		if s.Incognito {
+			textCol = frame.RGB(140, 144, 154)
+		} else {
+			textCol = placeholderColor
+		}
 	}
 
 	textX := r.X0 + (BarPadding+4)*sc
@@ -1134,6 +1421,21 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	}
 
 	s.drawText(backing, text, textX, textY, textCol, clip)
+
+	if zRect, ok := s.zoomBadgeRect(r, sc); ok {
+		zoomStr := fmt.Sprintf("%d%%", int(s.Zoom*100+0.5))
+		badgeBg := frame.RGB(232, 240, 254)
+		badgeFg := frame.RGB(26, 115, 232)
+		if s.Incognito {
+			badgeBg = frame.RGB(50, 54, 62)
+			badgeFg = frame.RGB(138, 180, 248)
+		}
+		s.drawRoundedRect(backing, zRect, zRect.H()/2, badgeBg, badgeBg)
+		textW := s.measureText(zoomStr)
+		tx := zRect.X0 + (zRect.W()-textW)/2
+		ty := textY
+		s.drawText(backing, zoomStr, tx, ty, badgeFg, clip)
+	}
 
 	if s.FindActive {
 		counter := fmt.Sprintf("%d/%d", s.FindIndex+1, s.FindTotal)
@@ -1325,4 +1627,194 @@ func (s *State) CloseFind() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeFindLocked()
+}
+
+func (s *State) selectNextSuggestLocked() {
+	if len(s.Suggestions) == 0 {
+		return
+	}
+	s.SelectedSuggest++
+	if s.SelectedSuggest >= len(s.Suggestions) {
+		s.SelectedSuggest = 0
+	}
+}
+
+func (s *State) selectPrevSuggestLocked() {
+	if len(s.Suggestions) == 0 {
+		return
+	}
+	s.SelectedSuggest--
+	if s.SelectedSuggest < 0 {
+		s.SelectedSuggest = len(s.Suggestions) - 1
+	}
+}
+
+func (s *State) closeSuggestionsLocked() {
+	s.Suggestions = nil
+	s.SelectedSuggest = -1
+}
+
+// CloseSuggestions clears the current suggestions dropdown.
+func (s *State) CloseSuggestions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeSuggestionsLocked()
+}
+
+// HasSuggestions reports whether the suggestions dropdown is currently visible.
+func (s *State) HasSuggestions() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Suggestions) > 0
+}
+
+// SuggestionCount reports how many suggestions are in the dropdown.
+func (s *State) SuggestionCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Suggestions)
+}
+
+// SelectedSuggestion reports the index of the highlighted suggestion, or -1.
+func (s *State) SelectedSuggestion() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SelectedSuggest
+}
+
+// SuggestionsRect returns the bounding rectangle of the suggestions dropdown.
+func (s *State) SuggestionsRect(topOffset int32) frame.Rect {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 {
+		return frame.Rect{}
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	itemH := int32(36) * sc
+	totalH := int32(len(s.Suggestions)) * itemH
+	return frame.Rect4(bar.X0*sc, topOffset, bar.X1*sc, topOffset+totalH)
+}
+
+// HitSuggestion reports which suggestion was clicked, if any, and closes the dropdown.
+func (s *State) HitSuggestion(pos frame.Point, topOffset int32) (Suggestion, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 {
+		return Suggestion{}, false
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	barX0 := bar.X0 * sc
+	barX1 := bar.X1 * sc
+	if pos.X < barX0 || pos.X >= barX1 {
+		return Suggestion{}, false
+	}
+	itemH := int32(36) * sc
+	relY := pos.Y - topOffset
+	if relY < 0 {
+		return Suggestion{}, false
+	}
+	idx := int(relY / itemH)
+	if idx >= 0 && idx < len(s.Suggestions) {
+		sug := s.Suggestions[idx]
+		s.closeSuggestionsLocked()
+		return sug, true
+	}
+	return Suggestion{}, false
+}
+
+// HoverSuggestion updates the highlighted suggestion based on pointer movement.
+func (s *State) HoverSuggestion(pos frame.Point, topOffset int32) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 {
+		return -1
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	barX0 := bar.X0 * sc
+	barX1 := bar.X1 * sc
+	if pos.X < barX0 || pos.X >= barX1 {
+		return -1
+	}
+	itemH := int32(36) * sc
+	relY := pos.Y - topOffset
+	if relY < 0 {
+		return -1
+	}
+	idx := int(relY / itemH)
+	if idx >= 0 && idx < len(s.Suggestions) {
+		s.SelectedSuggest = idx
+		return idx
+	}
+	return -1
+}
+
+// DrawSuggestions renders the autocomplete dropdown box beneath the address bar.
+func (s *State) DrawSuggestions(backing *frame.Bitmap, topOffset int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Suggestions) == 0 || backing == nil {
+		return
+	}
+	sc := s.sc()
+	w := s.Bounds.W() / sc
+	bar := AddressBarRect(w)
+	itemH := int32(36) * sc
+	totalH := int32(len(s.Suggestions)) * itemH
+	box := frame.Rect4(bar.X0*sc, topOffset, bar.X1*sc, topOffset+totalH)
+
+	bgCol := frame.RGB(255, 255, 255)
+	borderCol := frame.RGB(218, 220, 224)
+	s.drawRoundedRect(backing, box, 4*sc, bgCol, borderCol)
+
+	clip := box
+	fontSize := int32(13) * sc
+
+	for i, sug := range s.Suggestions {
+		rowY0 := topOffset + int32(i)*itemH
+		rowY1 := rowY0 + itemH
+		rowRect := frame.Rect4(box.X0, rowY0, box.X1, rowY1)
+
+		if i == s.SelectedSuggest {
+			selectedBg := frame.RGB(232, 240, 254)
+			backing.FillRect(rowRect, selectedBg, nil)
+		} else if i > 0 {
+			sepCol := frame.RGB(241, 243, 244)
+			backing.FillRect(frame.Rect4(box.X0, rowY0, box.X1, rowY0+sc), sepCol, nil)
+		}
+
+		badgeText := "[Search]"
+		badgeCol := frame.RGB(26, 115, 232)
+		switch sug.Kind {
+		case SuggestBookmark:
+			badgeText = "[★ Bookmark]"
+			badgeCol = frame.RGB(227, 116, 0)
+		case SuggestHistory:
+			badgeText = "[History]"
+			badgeCol = frame.RGB(95, 99, 104)
+		}
+
+		textY := s.baselineY(rowRect, fontSize)
+		curX := rowRect.X0 + 12*sc
+		s.drawText(backing, badgeText, curX, textY, badgeCol, clip)
+		curX += s.measureText(badgeText) + 8*sc
+
+		titleText := sug.Title
+		if titleText == "" {
+			titleText = sug.URL
+		}
+		titleCol := frame.RGB(32, 33, 36)
+		s.drawText(backing, titleText, curX, textY, titleCol, clip)
+		curX += s.measureText(titleText) + 12*sc
+
+		if sug.Title != "" && sug.URL != "" && sug.Title != sug.URL {
+			urlCol := frame.RGB(128, 134, 139)
+			s.drawText(backing, sug.URL, curX, textY, urlCol, clip)
+		}
+	}
 }

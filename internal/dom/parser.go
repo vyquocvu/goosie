@@ -548,6 +548,35 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 		tb.ensureBody()
 		tb.insertElement(tag, attrs, false)
 		return
+	case "template":
+		tb.ensureBody()
+		tb.closePifOpen()
+		elem := tb.insertElement(tag, attrs, selfClose)
+		if elem != nil {
+			var mode string
+			for _, a := range attrs {
+				if strings.EqualFold(a.Name, "shadowrootmode") || strings.EqualFold(a.Name, "shadowroot") {
+					mode = strings.ToLower(a.Value)
+					if mode != "closed" {
+						mode = "open"
+					}
+					break
+				}
+			}
+			if mode != "" && elem.Parent != nil {
+				host := elem.Parent
+				if host.ShadowRoot == nil {
+					host.ShadowRoot = &ShadowRoot{
+						Host: host,
+						Mode: mode,
+					}
+				}
+				if selfClose {
+					host.RemoveChild(elem)
+				}
+			}
+		}
+		return
 	case "form", "fieldset", "details", "dialog", "menu":
 		tb.ensureBody()
 		tb.closePifOpen()
@@ -844,6 +873,34 @@ func (tb *treeBuilder) processEndTag(tag string) {
 		return
 	case "textarea":
 		tb.popUntil("textarea")
+		return
+	case "template":
+		for i := len(tb.openStack) - 1; i >= 0; i-- {
+			if tb.openStack[i].Data == "template" {
+				templateElem := tb.openStack[i]
+				tb.popUntil("template")
+				host := templateElem.Parent
+				if host != nil && host.ShadowRoot != nil {
+					isShadowTemplate := false
+					for _, a := range templateElem.Attr {
+						if strings.EqualFold(a.Name, "shadowrootmode") || strings.EqualFold(a.Name, "shadowroot") {
+							isShadowTemplate = true
+							break
+						}
+					}
+					if isShadowTemplate {
+						for child := templateElem.FirstChild; child != nil; {
+							next := child.NextSibling
+							templateElem.RemoveChild(child)
+							host.ShadowRoot.AppendChild(child)
+							child = next
+						}
+						host.RemoveChild(templateElem)
+					}
+				}
+				break
+			}
+		}
 		return
 	case "script", "style":
 		tb.popUntil(tag)
