@@ -284,13 +284,13 @@ func (s *Scheduler) PlanStats() frame.PlanStats { return s.slot.Stats() }
 // here": a headless run, a test, an anchor jump. An empty size leaves the size alone,
 // so a caller that only wants to move can pass an offset. It is safe to call from
 // any goroutine: tab switches and navigation completions move the viewport from
-// drain goroutines while the loop thread is planning frames.
+// drain goroutines while the loop thread is planning frames. Scratch growth is left
+// to BeginFrame, which owns those buffers and runs on the frame thread.
 func (s *Scheduler) SetViewport(vp frame.Viewport) {
 	s.vpMu.Lock()
 	defer s.vpMu.Unlock()
 	if !vp.Size.Empty() {
 		s.size = vp.Size
-		s.reserveScratch(true)
 	}
 	s.scroll = vp.Offset
 }

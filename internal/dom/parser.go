@@ -99,6 +99,9 @@ func (tb *treeBuilder) pop() *Node {
 }
 
 func (tb *treeBuilder) popUntil(tag string) {
+	if !tb.hasOpenTag(tag) {
+		return
+	}
 	for len(tb.openStack) > 0 {
 		top := tb.openStack[len(tb.openStack)-1]
 		tb.pop()
@@ -541,6 +544,10 @@ func (tb *treeBuilder) processStartTag(tag string, attrs []Attribute, selfClose 
 		tb.insertElement(tag, attrs, false)
 		return
 	case "caption":
+		tb.ensureBody()
+		tb.insertElement(tag, attrs, false)
+		return
+	case "section", "article", "aside", "header", "footer", "nav", "main":
 		tb.ensureBody()
 		tb.insertElement(tag, attrs, false)
 		return

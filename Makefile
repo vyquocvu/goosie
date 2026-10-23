@@ -3,7 +3,7 @@ BINARY_NAME=goosie
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*" -not -path "./_v1_old/*")
 
-.PHONY: all build build-small macos-app clean test test-race bench gate wpt wpt-pilot wpt-unit
+.PHONY: all build build-small macos-app clean test test-race e2e bench gate wpt wpt-pilot wpt-unit
 
 all: build
 
@@ -38,6 +38,10 @@ test:
 test-race:
 	@echo "Running tests with race detector..."
 	go test -race ./...
+
+e2e:
+	@echo "Running the headless browser journey suite..."
+	go test -count=1 -run '^TestE2E' ./cmd/goosie
 
 bench:
 	@echo "Running benchmarks..."
