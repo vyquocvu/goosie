@@ -91,10 +91,18 @@ jobs:
         run: go build -o goosie ./cmd/goosie
       - name: Install Playwright Chromium and scoring deps
         run: |
-          pip install "playwright==1.49.*" pillow numpy
+          pip install playwright==1.49.1 pillow numpy
           python -m playwright install chromium --with-deps
       - name: Render both sides fresh and score (fail-closed)
         run: python3 testdata/parity.py --render --render-chromium --binary ./goosie --junit /tmp/parity-junit.xml --json /tmp/parity.json
+      - name: Upload render outputs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-outputs
+          path: |
+            /tmp/goosie-renders
+            /tmp/playwright-renders
       - name: Upload parity report
         if: always()
         uses: actions/upload-artifact@v4
