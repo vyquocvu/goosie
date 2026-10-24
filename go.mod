@@ -1,8 +1,6 @@
 module github.com/vyquocvu/goosie
 
-go 1.26.0
-
-toolchain go1.26.9
+go 1.26.10
 
 require (
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9
