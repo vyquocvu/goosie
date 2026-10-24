@@ -14,11 +14,15 @@ const (
 )
 
 // TabState is one restored tab: where it was, and the back/forward trail.
+// ScrollX/ScrollY carry the viewport offset the tab was left at; they are
+// omitempty so journals written before scroll persistence load as 0.
 type TabState struct {
 	URL          string   `json:"url"`
 	Title        string   `json:"title,omitempty"`
 	History      []string `json:"history,omitempty"`
 	HistoryIndex int      `json:"historyIndex,omitempty"`
+	ScrollX      int      `json:"scrollX,omitempty"`
+	ScrollY      int      `json:"scrollY,omitempty"`
 }
 
 // State is the full session: tabs in order and which one was active.

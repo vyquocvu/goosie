@@ -327,6 +327,9 @@ func (f *framePath) applyNavResult(result navResult) {
 				Offset: frame.Point{},
 				Size:   f.config.devSize(),
 			})
+			// A session restore's own load keeps its saved offset: the reset
+			// above is for user-initiated navigations.
+			f.restoreMarkedScroll(tab)
 
 			// If the URL has a fragment (#anchor), scroll to the element
 			if href := result.url; strings.Contains(href, "#") {
@@ -585,6 +588,7 @@ func (f *framePath) applySessionState(st session.State) {
 	}
 	if active := f.tabMgr.Active(); active != nil && active.URL() != "" {
 		f.restoredActiveURL = active.URL()
+		f.markRestoredScroll(active)
 	}
 }
 
@@ -592,9 +596,40 @@ func applyTabState(t *tabs.Tab, ts session.TabState) {
 	t.SetURL(ts.URL)
 	t.SetTitle(ts.Title)
 	t.SetHistory(toolbar.RestoreHistory(ts.History, ts.HistoryIndex))
+	t.SetScrollY(int32(ts.ScrollY))
 	if t.Title() == "" {
 		t.SetTitle("New Tab")
 	}
+}
+
+// markRestoredScroll records the active restored tab's offset so the load that
+// session restore starts keeps it: a fresh navigation resets the viewport to
+// the top, which would otherwise drop the restored position (Bug C4).
+func (f *framePath) markRestoredScroll(tab *tabs.Tab) {
+	if tab == nil {
+		return
+	}
+	f.restoredScrollTabID = tab.ID()
+	f.restoredScrollY = tab.ScrollY()
+}
+
+// restoreMarkedScroll re-applies the marked restore offset right after a
+// navigation's top-of-page reset, and consumes the intent so any later
+// navigation to the same tab opens at the top as usual.
+func (f *framePath) restoreMarkedScroll(tab *tabs.Tab) {
+	if f.restoredScrollTabID == 0 || f.restoredScrollTabID != tab.ID() {
+		return
+	}
+	f.restoredScrollTabID = 0
+	if f.restoredScrollY == 0 {
+		return
+	}
+	tab.SetScrollY(f.restoredScrollY)
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: f.restoredScrollY},
+		Size:   f.config.devSize(),
+	})
+	f.restoredScrollY = 0
 }
 
 // sessionState snapshots the open tabs for saving.
@@ -615,6 +650,10 @@ func sessionState(f *framePath) session.State {
 			Title:        tab.Title(),
 			History:      entries,
 			HistoryIndex: idx,
+			// ScrollX is persisted for the state format; the engine has no
+			// horizontal scroll yet, so the viewport offset's X is 0.
+			ScrollX: int(f.sched.Viewport().Offset.X),
+			ScrollY: int(tab.ScrollY()),
 		})
 	}
 	st.Active = savedActiveIdx
@@ -670,6 +709,7 @@ func (f *framePath) restoreCrashedSession(st session.State) {
 		}
 	}
 	if active := f.tabMgr.Active(); active != nil && active.URL() != "" && !strings.HasPrefix(strings.ToLower(active.URL()), "goosie://restore") {
+		f.markRestoredScroll(active)
 		f.navigateTab(active.URL())
 	}
 	f.saveActiveSession()
