@@ -274,6 +274,7 @@ func (f *framePath) applyNavResult(result navResult) {
 	// Inspect the result document before publishing it to the active tab. Once
 	// visible, pointer and script events may mutate its DOM on the chrome thread.
 	manifestURL := ""
+	docTitle := documentTitle(result.session)
 	if result.session != nil && result.session.Doc != nil && f.client != nil {
 		manifestURL = findManifestLink(&result.session.Doc.Node, result.url)
 	}
@@ -289,6 +290,10 @@ func (f *framePath) applyNavResult(result navResult) {
 		if title != "" {
 			tabTitle = title
 		}
+	} else if docTitle != "" {
+		// A loaded document with a <title> labels its tab with the title;
+		// the address bar still owns the URL.
+		tabTitle = docTitle
 	}
 	tab.SetTitle(tabTitle)
 	if oldSession != nil && oldSession != result.session {
@@ -307,7 +312,7 @@ func (f *framePath) applyNavResult(result navResult) {
 		}
 	}
 	if !tab.Incognito() && f.history != nil && !strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
-		f.history.Record(result.url, result.url)
+		f.history.Record(result.url, tabTitle)
 	}
 
 	if f.tabMgr.Active() == tab {
@@ -673,6 +678,35 @@ func (f *framePath) restoreCrashedSession(st session.State) {
 		f.navigateTab(active.URL())
 	}
 	f.saveActiveSession()
+}
+
+// maxTabTitleRunes bounds the title a document can hand the chrome. An
+// unbounded <title> would be measured glyph by glyph on every tab-bar frame
+// and written into the saved session verbatim.
+const maxTabTitleRunes = 160
+
+// documentTitle returns the display title of a loaded document: the text of
+// its first <title> with non-empty content, whitespace collapsed to single
+// spaces and capped to maxTabTitleRunes. Returns "" when the document has no
+// usable title, which leaves the tab showing its URL.
+//
+// Called on the navigation drain before the session becomes visible to events,
+// the same window findManifestLink reads the tree in.
+func documentTitle(sess *engine.Session) string {
+	if sess == nil || sess.Doc == nil {
+		return ""
+	}
+	for _, node := range sess.Doc.ElementsByTagName("title") {
+		title := strings.Join(strings.Fields(node.TextContent()), " ")
+		if title == "" {
+			continue
+		}
+		if r := []rune(title); len(r) > maxTabTitleRunes {
+			title = string(r[:maxTabTitleRunes-1]) + "…"
+		}
+		return title
+	}
+	return ""
 }
 
 // findManifestLink searches the DOM tree for a <link rel="manifest" href="..."> tag and resolves its URL.
