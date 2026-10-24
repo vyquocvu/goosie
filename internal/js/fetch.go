@@ -20,7 +20,7 @@ const (
 	MaxConcurrentFetches = 6
 
 	// MaxFetchBodyBytes bounds the request body sent through fetch. The
-	// response body limit (MaxResponseBytes = 8 MiB) lives in the net
+	// response body limit (MaxResponseBytes = 16 MiB) lives in the net
 	// package and is enforced by the HTTP client.
 	MaxFetchBodyBytes = 1 << 20
 
@@ -295,9 +295,13 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	fs.active++
 	fs.mu.Unlock()
 
+	// Capture the shared subresource budget on the VM thread so the request
+	// goroutine never locks r.mu off-thread. nil leaves the fetch ungated.
+	budget := r.subresourceBudget()
+
 	t := r.newThenable()
 
-	go r.runFetch(fs, resolvedURL, opts, t)
+	go r.runFetch(fs, resolvedURL, opts, t, budget)
 
 	return t.obj
 }
@@ -306,8 +310,10 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 // queues exactly one callback (resolve or reject) for DrainFetchCallbacks to
 // invoke on the main goroutine. All goja interaction happens in the drain
 // step, not here. fs is captured from doFetch so this goroutine never calls
-// fetchOf (a vm.Get) off the VM thread.
-func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t *thenableObj) {
+// fetchOf (a vm.Get) off the VM thread. budget is the shared subresource
+// budget captured on the VM thread; the response body is charged to it, and a
+// body that does not fit is rejected so the page cannot pull unbounded bytes.
+func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t *thenableObj, budget SubresourceBudget) {
 	defer func() {
 		fs.mu.Lock()
 		fs.active--
@@ -364,6 +370,16 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 	}
 
 	resp, err := fs.client.Fetch(fetchURL, opts.Method, opts.Headers, []byte(opts.Body))
+
+	// Charge the response body to the document's shared subresource budget.
+	// The client already materialized the body within MaxResponseBytes, so
+	// this is the same accounting CSS/fonts/images use; a body that does not
+	// fit fails the fetch cleanly (rejected promise) rather than silently
+	// succeeding past the cap.
+	if err == nil && budget != nil && !budget.Take(len(resp.Body)) {
+		err = fmt.Errorf("fetch response exceeds the document subresource budget")
+		resp = nil
+	}
 
 	// Check CORS on response for cross-origin requests
 	if err == nil && IsCORSRequest(documentURL, fetchURL) {

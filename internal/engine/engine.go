@@ -149,6 +149,13 @@ type Session struct {
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
 
+	// jsNodeBudget gates script-driven DOM insertions against this document's
+	// admission caps (node count, depth, attributes) before they happen, so a
+	// hostile page cannot grow the tree past the caps and have the overrun
+	// noticed only later by validateArena/walkDocument. nil when the caller did
+	// not supply WithJS.
+	jsNodeBudget *docNodeBudget
+
 	// media owns this document's video playback: one controller per element,
 	// the downloaded files behind them, and the backend that decodes them. nil
 	// when the caller did not supply WithMedia, so a session without a playback
@@ -434,6 +441,14 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// engine's arena references.
 	if s.jsRT != nil {
 		s.jsRT.SetDOM(doc)
+		// Gate every script-driven DOM write against this document's admission
+		// caps and charge fetch/XHR responses to the shared subresource budget.
+		// Both go in before any script runs so a hostile page cannot grow the
+		// tree past the caps, nor pull unbounded bytes through the JS network
+		// APIs, without the overrun being rejected at the boundary.
+		s.jsNodeBudget = newDocNodeBudget(doc)
+		s.jsRT.SetMutationBudget(s.jsNodeBudget)
+		s.jsRT.SetSubresourceBudget(s.sub)
 		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
 		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
 			if focused {
@@ -2257,6 +2272,32 @@ func (s *Session) JSMutationSink() func() {
 			s.inv.Add(DOMMutation, frame.RectF{}, 0)
 		}
 	}
+}
+
+// JSLiveNodeCount reports how many nodes the script admission budget counts as
+// live in this document. It exposes the budget's counter for tests and
+// diagnostics so they can assert a hostile script never pushed the tree past
+// MaxDocumentNodes. It returns 0 when no JS runtime was supplied, since the
+// budget is only built for a scripted session.
+func (s *Session) JSLiveNodeCount() int {
+	if s == nil || s.jsNodeBudget == nil {
+		return 0
+	}
+	return s.jsNodeBudget.liveCount()
+}
+
+// SubresourceBytesUsed reports the raw subresource bytes this document has
+// charged to its shared budget across linked sheets, @imports, fonts, images
+// and JS fetch/XHR responses. It exposes the pool the per-family caps all draw
+// on, so a test can assert a fetch was accounted rather than slipping past the
+// budget. It returns 0 when the session has no budget.
+func (s *Session) SubresourceBytesUsed() int64 {
+	if s == nil || s.sub == nil {
+		return 0
+	}
+	s.sub.mu.Lock()
+	defer s.sub.mu.Unlock()
+	return s.sub.used
 }
 
 // HasPendingDOMMutation reports whether a synchronous script callback has

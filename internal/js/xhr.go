@@ -397,11 +397,22 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 		x.mu.Unlock()
 	}
 
+	// Capture the shared subresource budget on the VM thread so the request
+	// goroutine never locks r.mu off-thread. nil leaves the request ungated.
+	budget := r.subresourceBudget()
+
 	go func() {
 		if IsCORSRequest(r.opts.URL, reqURL) {
 			headers["Origin"] = getOrigin(r.opts.URL)
 		}
 		resp, err := st.client.Fetch(reqURL, method, headers, body)
+		// Charge the response body to the document's shared subresource
+		// budget, mirroring fetch: a body that does not fit fails the request
+		// cleanly (XHR error) rather than succeeding past the cap.
+		if err == nil && budget != nil && !budget.Take(len(resp.Body)) {
+			err = fmt.Errorf("XHR response exceeds the document subresource budget")
+			resp = nil
+		}
 		st.mu.Lock()
 		st.active--
 		st.mu.Unlock()
