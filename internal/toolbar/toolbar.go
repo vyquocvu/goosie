@@ -195,6 +195,7 @@ func (s *State) Navigate(url string) {
 	}
 	s.Focus = FocusNone
 	s.dragging = false
+	s.closeSuggestionsLocked()
 }
 
 func (s *State) SetLoading(loading bool) {
@@ -311,7 +312,9 @@ func (s *State) GetFocus() Focus {
 
 // SyncFromTab copies one tab's display state into the toolbar: URL, loading
 // flag, error, and the history object the buttons read. It replaces the
-// direct field writes the navigation drain used to do racily.
+// direct field writes the navigation drain used to do racily. The dropdown is
+// dropped too: suggestions were produced for the departing tab, and showing
+// them after a switch leaks the old tab's (or an incognito tab's) context.
 func (s *State) SyncFromTab(url string, loading bool, errStr string, h *History) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -324,6 +327,7 @@ func (s *State) SyncFromTab(url string, loading bool, errStr string, h *History)
 	s.Loading = loading
 	s.Error = errStr
 	s.dragging = false
+	s.closeSuggestionsLocked()
 }
 
 // FindCounts reports find-mode state for the host to display.

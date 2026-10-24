@@ -106,6 +106,11 @@ func (f *framePath) navigateTab(rawURL string) {
 		return
 	}
 	f.closeFind()
+	// A navigation start invalidates the dropdown even when it did not come
+	// from an omnibox submit (link click, internal-page action).
+	if f.toolbar != nil {
+		f.toolbar.CloseSuggestions()
+	}
 	u := normalizeAddress(rawURL, f.currentPreferences().SearchURLTemplate)
 
 	tab.Nav.Mu.Lock()
@@ -455,6 +460,9 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 		return
 	}
 	f.closeFind()
+	if f.toolbar != nil {
+		f.toolbar.CloseSuggestions()
+	}
 	u := normalizeAddress(rawURL, f.currentPreferences().SearchURLTemplate)
 
 	tab.Nav.Mu.Lock()

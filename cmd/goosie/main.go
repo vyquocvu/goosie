@@ -542,68 +542,68 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 		}
 	}
 
-	// 2. Bookmarks matching query
-	if f.bookmarks != nil {
-		for _, bm := range f.bookmarks.List() {
-			if strings.Contains(strings.ToLower(bm.URL), lowerQ) || strings.Contains(strings.ToLower(bm.Title), lowerQ) {
-				if !seen[bm.URL] {
-					seen[bm.URL] = true
-					out = append(out, toolbar.Suggestion{
+	// 2. Bookmarks and history visits from the profile. A private tab must
+	// never read either store; the -private run loads no stores at startup,
+	// but the gate holds regardless. Search suggestions and internal pages
+	// above are profile-independent and stay available.
+	if !f.omniboxIsPrivate() {
+		var profile []toolbar.Suggestion
+		if f.bookmarks != nil {
+			for _, bm := range f.bookmarks.List() {
+				if suggestionMatches(lowerQ, bm.URL, bm.Title) {
+					profile = append(profile, toolbar.Suggestion{
 						Title: bm.Title,
 						URL:   bm.URL,
 						Kind:  toolbar.SuggestBookmark,
 					})
-					if len(out) >= 8 {
-						return out
-					}
 				}
 			}
 		}
-	}
-
-	// 3. History visits matching query (newest first)
-	if f.history != nil {
-		entries := f.history.Entries()
-		for i := len(entries) - 1; i >= 0; i-- {
-			h := entries[i]
-			if strings.Contains(strings.ToLower(h.URL), lowerQ) || strings.Contains(strings.ToLower(h.Title), lowerQ) {
-				if !seen[h.URL] {
-					seen[h.URL] = true
-					out = append(out, toolbar.Suggestion{
+		if f.history != nil {
+			entries := f.history.Entries()
+			for i := len(entries) - 1; i >= 0; i-- {
+				h := entries[i]
+				if suggestionMatches(lowerQ, h.URL, h.Title) {
+					profile = append(profile, toolbar.Suggestion{
 						Title: h.Title,
 						URL:   h.URL,
 						Kind:  toolbar.SuggestHistory,
 					})
-					if len(out) >= 8 {
-						return out
-					}
 				}
 			}
 		}
-	}
-
-	// 3. History visits matching query (newest first)
-	if f.history != nil {
-		entries := f.history.Entries()
-		for i := len(entries) - 1; i >= 0; i-- {
-			h := entries[i]
-			if strings.Contains(strings.ToLower(h.URL), lowerQ) || strings.Contains(strings.ToLower(h.Title), lowerQ) {
-				if !seen[h.URL] {
-					seen[h.URL] = true
-					out = append(out, toolbar.Suggestion{
-						Title: h.Title,
-						URL:   h.URL,
-						Kind:  toolbar.SuggestHistory,
-					})
-					if len(out) >= 6 {
-						return out
-					}
+		for _, s := range profile {
+			if !seen[s.URL] {
+				seen[s.URL] = true
+				out = append(out, s)
+				if len(out) >= 8 {
+					return out
 				}
 			}
 		}
 	}
 
 	return out
+}
+
+// omniboxIsPrivate reports whether the omnibox must behave privately: the
+// active tab is incognito, or the whole run started with -private.
+func (f *framePath) omniboxIsPrivate() bool {
+	if f.config.private {
+		return true
+	}
+	if f.tabMgr != nil {
+		if tab := f.tabMgr.Active(); tab != nil && tab.Incognito() {
+			return true
+		}
+	}
+	return false
+}
+
+// suggestionMatches reports whether one profile entry matches the lowered
+// omnibox query by URL or title.
+func suggestionMatches(lowerQ, entryURL, title string) bool {
+	return strings.Contains(strings.ToLower(entryURL), lowerQ) || strings.Contains(strings.ToLower(title), lowerQ)
 }
 
 // openWindow picks the window last, because a backend that cannot open one is a

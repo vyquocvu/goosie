@@ -105,9 +105,19 @@ func subresourceCtx(ctx context.Context, base string) context.Context {
 // normalizeURL normalizes address bar input into either a dialable URL or a search query.
 // It trims surrounding whitespace, normalizes supported schemes (http, https, file),
 // treats queries with whitespace or search/punctuation symbols as web searches,
-// and prefixes bare domains or IPs with https://.
+// prefixes host-shaped values (dotted names, IPs, localhost, ports) with https://,
+// and searches everything else through the profile's engine.
 func normalizeURL(raw string) string {
 	return normalizeAddress(raw, preferences.DefaultSearchURLTemplate)
+}
+
+// searchURLFor builds the profile engine's search URL for a query, falling
+// back to the default engine when the stored template is malformed.
+func searchURLFor(template, query string) string {
+	if result, err := preferences.SearchURL(template, query); err == nil {
+		return result
+	}
+	return "https://www.google.com/search?q=" + url.QueryEscape(query)
 }
 
 // normalizeAddress resolves an address-bar value using the profile's search
@@ -146,26 +156,142 @@ func normalizeAddress(raw, searchTemplate string) string {
 	}
 	// If input contains whitespace (space, tab, newline), it is a search query.
 	if strings.ContainsAny(raw, " \t\r\n") {
-		if result, err := preferences.SearchURL(searchTemplate, raw); err == nil {
-			return result
+		return searchURLFor(searchTemplate, raw)
+	}
+	// Only an unambiguous host shape dials: a single bare word like "golang",
+	// a phrase with punctuation, or Unicode text is a search query.
+	if isHostShaped(raw) {
+		return "https://" + raw
+	}
+	return searchURLFor(searchTemplate, raw)
+}
+
+// isHostShaped reports whether a scheme-less, whitespace-free address-bar
+// value names a dialable host before any path, query, or fragment: localhost,
+// a full IPv4 address, a bracketed IPv6 address, or a dotted DNS name (ASCII
+// or IDN). An optional :port must be numeric and in range. Values that fail
+// the grammar - single labels ("golang"), underscores, empty or oversized
+// ports, stray punctuation, partial IPs like "1.2.3", bare "/path" starts -
+// are search queries, matching mainstream browser behavior.
+func isHostShaped(raw string) bool {
+	authority := raw
+	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
+		authority = raw[:i]
+	}
+	if authority == "" {
+		return false
+	}
+	if strings.HasPrefix(authority, "[") {
+		end := strings.IndexByte(authority, ']')
+		if end <= 0 || !isIPv6Literal(authority[1:end]) {
+			return false
 		}
-		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
+		rest := authority[end+1:]
+		return rest == "" || (strings.HasPrefix(rest, ":") && isPortNumber(rest[1:]))
 	}
-	// If host portion (before any '/') contains symbols invalid in a domain name
-	// (such as '?', '+', '&', '=', '%', '!', '^', '*', '(', ')', '<', '>', ';'),
-	// treat it as a search query.
-	hostPart := raw
-	if slash := strings.IndexByte(raw, '/'); slash >= 0 {
-		hostPart = raw[:slash]
-	}
-	if strings.ContainsAny(hostPart, "?+&=%!^*()<>;\"'") {
-		if result, err := preferences.SearchURL(searchTemplate, raw); err == nil {
-			return result
+	host := authority
+	if j := strings.LastIndexByte(authority, ':'); j >= 0 {
+		host = authority[:j]
+		if !isPortNumber(authority[j+1:]) {
+			return false
 		}
-		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
 	}
-	// Bare domain, IP, or localhost: add https:// prefix
-	return "https://" + raw
+	if strings.EqualFold(host, "localhost") || isIPv4Literal(host) {
+		return true
+	}
+	return isDottedHostName(host)
+}
+
+// isPortNumber accepts 1-5 decimal digits naming a value at most 65535. An
+// empty port ("example.com:") fails, so a dangling colon searches.
+func isPortNumber(s string) bool {
+	if s == "" || len(s) > 5 {
+		return false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n <= 65535
+}
+
+// isIPv4Literal accepts exactly four decimal labels, each at most 255.
+func isIPv4Literal(host string) bool {
+	labels := strings.Split(host, ".")
+	if len(labels) != 4 {
+		return false
+	}
+	for _, l := range labels {
+		if l == "" || len(l) > 3 {
+			return false
+		}
+		n := 0
+		for i := 0; i < len(l); i++ {
+			c := l[i]
+			if c < '0' || c > '9' {
+				return false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 255 {
+			return false
+		}
+	}
+	return true
+}
+
+// isIPv6Literal accepts the hex, colon, dot, and percent-zone characters of a
+// bracketed address and requires at least one colon: enough to recognize
+// [::1]:8080 without full RFC 4291 parsing.
+func isIPv6Literal(s string) bool {
+	if !strings.ContainsRune(s, ':') {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		case r == ':' || r == '.' || r == '%':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isDottedHostName accepts a multi-label DNS name: labels of ASCII letters,
+// digits, hyphens, and non-ASCII (IDN) characters, none empty and none
+// starting or ending with a hyphen. The last label must not be all digits, so
+// partial addresses like "1.2.3" search instead of dialing.
+func isDottedHostName(host string) bool {
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for i, l := range labels {
+		if l == "" || strings.HasPrefix(l, "-") || strings.HasSuffix(l, "-") {
+			return false
+		}
+		allDigits := true
+		for _, r := range l {
+			switch {
+			case r >= '0' && r <= '9':
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '-':
+				allDigits = false
+			case r >= 0x80:
+				allDigits = false
+			default:
+				return false
+			}
+		}
+		if i == len(labels)-1 && allDigits {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveHref turns a clicked link's href into an absolute URL against the
