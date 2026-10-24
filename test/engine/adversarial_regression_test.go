@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -75,7 +74,7 @@ func TestManyQuerySelectorAll(t *testing.T) {
 	// Race instrumentation slows wrapper construction beyond the production
 	// default even though this case's contract is result correctness, not a
 	// five-second performance budget. Keep the larger bound scoped to this test.
-	r, err := js.New(js.Options{Timeout: 15 * time.Second, URL: "https://example.test/", DOM: doc})
+	r, err := js.New(js.Options{Timeout: qsaTimeout, URL: "https://example.test/", DOM: doc})
 	if err != nil {
 		t.Fatal(err)
 	}
