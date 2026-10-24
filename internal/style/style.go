@@ -840,10 +840,13 @@ fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border
 legend { display: block; padding: 0 0.25em; }
 form { display: block; }
 label { display: inline; }
-select { display: inline; }
+select { display: inline-block; }
 progress { display: inline-block; width: 10em; height: 1em; vertical-align: -0.2em; }
 meter { display: inline-block; width: 5em; height: 1em; vertical-align: -0.2em; }
 datalist { display: none; }
+/* A select is a replaced control: its option list is widget data, not content.
+   Without this every option paints into the page's normal flow. */
+option, optgroup { display: none; }
 ruby { display: inline; }
 rt { display: inline-block; font-size: 50%; line-height: 1; vertical-align: super; }
 rp { display: none; }

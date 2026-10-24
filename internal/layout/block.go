@@ -507,6 +507,19 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				// Re-fetch k: inlineInto may have allocated word objects, growing
 				// the arena slice and invalidating the pointer captured above.
 				k = a.Get(kid)
+				// Floats inside a plain block belong to the nearest formatting
+				// context, not to that block. Merge them up so a later sibling's
+				// clear moves below them; a box that establishes its own context
+				// contains its floats instead.
+				if !startsNewFC(a, k) {
+					childTop := k.Y + k.BorderTop + k.PaddingTop - contentY
+					if b := childTop + k.floatBottomL; b > floatBottomL {
+						floatBottomL = b
+					}
+					if b := childTop + k.floatBottomR; b > floatBottomR {
+						floatBottomR = b
+					}
+				}
 				y = (k.Y - contentY) + k.BorderH()
 				prevBottomMargin = carryBottom(a, kid)
 			}
@@ -524,6 +537,8 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// Alloc (via collectInline), growing the arena slice and invalidating
 	// the pointer captured at function entry or after the flex path.
 	obj = a.Get(id)
+	obj.floatBottomL = floatBottomL
+	obj.floatBottomR = floatBottomR
 	// A box with no bottom border or padding hands its last child's bottom margin
 	// to the next sibling instead of growing around it, so the margin only takes
 	// up room inside this box when it has nowhere to carry out to.
@@ -1012,13 +1027,15 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 					// An item with block children was measured at max-content, but
 					// the flex distribution may have grown or shrunk it. Update the
 					// width to reflect the final basis before re-laying out the
-					// block subtree.
+					// block subtree. The basis is a border-box width, and block
+					// layout subtracts the padding itself: handing it the content
+					// width took the padding off twice, nine pixels a side here.
 					w := items[i].basis - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
 					if w < 0 {
 						w = 0
 					}
 					it.W = w
-					containW = w
+					containW = items[i].basis + it.MarginLeft + it.MarginRight
 				}
 				if items[i].blockKids {
 					// The measure pass laid the block subtree out at an effectively
@@ -1074,11 +1091,13 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			if spare := cross - it.BorderH() - mTop - mBottom; spare > 0 {
 				switch normalizeAxis(align) {
 				case "flex-end":
-					it.Y += spare
-					shiftInlineContent(a, items[i].id, 0, spare)
+					// The item was laid out at the line start, so the alignment
+					// delta has to move the whole subtree, not just its inline
+					// content: a block child left behind ends up outside an
+					// overflow:hidden item and disappears.
+					shiftSubtree(a, items[i].id, 0, spare)
 				case "center":
-					it.Y += spare / 2
-					shiftInlineContent(a, items[i].id, 0, spare/2)
+					shiftSubtree(a, items[i].id, 0, spare/2)
 				}
 			}
 		}
@@ -1825,9 +1844,17 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 			// rather than poisoning the measure.
 			inner := walk(kid, trail+run+lead)
 			if inner <= 0 {
-				if own := declaredOuterW(k.Style); own >= 0 {
-					inner = own
-				} else if k.Node != nil && k.Node.Element() {
+				switch {
+				case atomicInlineLevel(k.Style) && k.Style.Width == -1:
+					// An auto-width inline-block shrinks to its content. Its
+					// own probe width can still be zero when the size comes
+					// from a block descendant, so measure the subtree. This
+					// has to precede declaredOuterW: that helper folds auto
+					// into a definite zero, which would hide the box.
+					inner = maxContentW(a, kid, true)
+				case declaredOuterW(k.Style) >= 0:
+					inner = declaredOuterW(k.Style)
+				case k.Node != nil && k.Node.Element():
 					switch k.Node.Data {
 					case "img", "input", "select", "textarea", "video", "audio", "canvas", "svg":
 						inner = k.W
@@ -2055,7 +2082,10 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		}
 		return w, h, true
 	}
-	if obj.Node.Data == "svg" || obj.Node.Data == "video" || obj.Node.Data == "canvas" {
+	if obj.Node.Data == "svg" {
+		return svgContentSize(obj, containingW)
+	}
+	if obj.Node.Data == "video" || obj.Node.Data == "canvas" {
 		w, h = 300, 150
 		if wAttr := obj.Node.GetAttribute("width"); wAttr != "" {
 			if parsedW, err := strconv.ParseFloat(strings.TrimSuffix(wAttr, "px"), 32); err == nil && parsedW > 0 {
@@ -2253,6 +2283,46 @@ func clampReplaced(v, minW, maxW float32) float32 {
 		v = maxW
 	}
 	return v
+}
+
+// svgContentSize resolves a root <svg>'s used size. Without width/height
+// attributes the viewBox supplies the aspect ratio and the root fills its
+// containing block, which is how an unsized icon SVG gets its size.
+func svgContentSize(obj *Object, containingW float32) (w, h float32, ok bool) {
+	w, h = 300, 150
+	attrW := attrPx(obj.Node.GetAttribute("width"))
+	attrH := attrPx(obj.Node.GetAttribute("height"))
+	vbW, vbH := float32(0), float32(0)
+	if f := strings.Fields(obj.Node.GetAttribute("viewBox")); len(f) == 4 {
+		if v, err := strconv.ParseFloat(f[2], 32); err == nil && v > 0 {
+			vbW = float32(v)
+		}
+		if v, err := strconv.ParseFloat(f[3], 32); err == nil && v > 0 {
+			vbH = float32(v)
+		}
+	}
+	ratio := float32(0)
+	if vbW > 0 && vbH > 0 {
+		ratio = vbH / vbW
+	}
+	switch {
+	case attrW > 0 && attrH > 0:
+		w, h = attrW, attrH
+	case attrW > 0:
+		w = attrW
+		if ratio > 0 {
+			h = w * ratio
+		}
+	case attrH > 0:
+		h = attrH
+		if ratio > 0 {
+			w = h / ratio
+		}
+	case ratio > 0 && containingW > 0:
+		w = containingW
+		h = w * ratio
+	}
+	return w, h, true
 }
 
 // attrPx reads a presentational length attribute as CSS pixels. A missing,

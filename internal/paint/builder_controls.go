@@ -316,9 +316,9 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 	arrowCX := rect.X1 - arrowW/2
 	arrowCY := (rect.Y0 + rect.Y1) / 2
 	arrowColor := frame.RGB(80, 80, 80)
-	// Simple downward triangle: 3 rows of increasing width.
+	// Simple downward triangle: 3 rows narrowing from top to bottom.
 	for i := int32(0); i < 3; i++ {
-		halfW := i + 1
+		halfW := 3 - i
 		b.list.Append(DisplayCmd{
 			Kind:    CmdFill,
 			Rect:    frame.Rect4(arrowCX-halfW, arrowCY-1+i, arrowCX+halfW, arrowCY+i),

@@ -64,6 +64,11 @@ type Session struct {
 	natural  map[dom.NodeID]layout.NaturalSize
 	images   map[dom.NodeID]stdimage.Image
 	bgImages map[dom.NodeID]stdimage.Image
+	// pseudoBgImages holds background pixels declared on ::before/::after
+	// styles. A pseudo box is an anonymous layout object, so the image is
+	// keyed by the computed style pointer the layout object carries.
+	pseudoBgImages    map[*style.ComputedStyle]stdimage.Image
+	pseudoBgVectorRef map[*style.ComputedStyle]string
 	// borderImages holds decoded border-image sources by node, attached to
 	// the layout object's BorderImage like backgrounds (never natural).
 	borderImages map[dom.NodeID]stdimage.Image
@@ -756,6 +761,10 @@ type imgRef struct {
 	id  dom.NodeID
 	abs string
 	bg  bool
+	// pseudo is set for a generated ::before/::after background. The host
+	// node ID is not used: the layout object the pixels attach to is the
+	// pseudo box, which is keyed by this style pointer.
+	pseudo *style.ComputedStyle
 	// border marks a border-image source: fetched and budgeted like a
 	// background (no layout natural size), attached to BorderImage.
 	border bool
@@ -787,6 +796,8 @@ func (s *Session) initImageMaps() {
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
+	s.pseudoBgImages = make(map[*style.ComputedStyle]stdimage.Image)
+	s.pseudoBgVectorRef = make(map[*style.ComputedStyle]string)
 	s.borderImages = make(map[dom.NodeID]stdimage.Image)
 	s.masks = make(map[dom.NodeID]stdimage.Image)
 	s.bgVectorSrc = make(map[string][]byte)
@@ -872,6 +883,26 @@ func (s *Session) collectImageRefs() []imgRef {
 				}
 			} else if abs, ok := resolveSubresourceURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
+				if !seen[abs] {
+					seen[abs] = true
+					uniq = append(uniq, abs)
+				}
+			}
+		}
+		for _, pseudo := range []string{"before", "after"} {
+			ps, ok := s.PseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: pseudo}]
+			if !ok || ps.BackgroundImage == "" {
+				continue
+			}
+			bg := ps.BackgroundImage
+			if strings.HasPrefix(bg, "data:") {
+				refs = append(refs, imgRef{abs: bg, bg: true, pseudo: ps})
+				if !seen[bg] {
+					seen[bg] = true
+					uniq = append(uniq, bg)
+				}
+			} else if abs, ok := resolveSubresourceURL(s.imgBase, bg); ok {
+				refs = append(refs, imgRef{abs: abs, bg: true, pseudo: ps})
 				if !seen[abs] {
 					seen[abs] = true
 					uniq = append(uniq, abs)
@@ -1066,7 +1097,11 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 				if r.border {
 					continue
 				}
-				s.bgVectorRef[r.id] = r.abs
+				if r.pseudo != nil {
+					s.pseudoBgVectorRef[r.pseudo] = r.abs
+				} else {
+					s.bgVectorRef[r.id] = r.abs
+				}
 				continue
 			}
 		}
@@ -1079,7 +1114,11 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 			continue
 		}
 		if r.bg {
-			s.bgImages[r.id] = img
+			if r.pseudo != nil {
+				s.pseudoBgImages[r.pseudo] = img
+			} else {
+				s.bgImages[r.id] = img
+			}
 			continue
 		}
 		if b := img.Bounds(); b.Dx() > 0 && b.Dy() > 0 {
@@ -1249,6 +1288,9 @@ func (s *Session) Reflow(viewportW float32) error {
 				if img, ok := s.bgImages[n.ID]; ok {
 					candidate.Objects[i].BgImage = img
 				}
+				if img, ok := s.pseudoBgImages[candidate.Objects[i].Style]; ok {
+					candidate.Objects[i].BgImage = img
+				}
 				if img, ok := s.masks[n.ID]; ok {
 					candidate.Objects[i].MaskImage = img
 				}
@@ -1261,6 +1303,9 @@ func (s *Session) Reflow(viewportW float32) error {
 				// failures) keep no image and paint nothing, like any
 				// missing subresource.
 				if abs, ok := s.bgVectorRef[n.ID]; ok {
+					s.attachVectorBackground(candidate, i, abs)
+				}
+				if abs, ok := s.pseudoBgVectorRef[candidate.Objects[i].Style]; ok {
 					s.attachVectorBackground(candidate, i, abs)
 				}
 			}

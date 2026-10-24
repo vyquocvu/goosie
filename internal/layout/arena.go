@@ -103,6 +103,12 @@ type Object struct {
 	// box specifies neither the relevant inset nor a static-friendly pair.
 	StaticX, StaticY float32
 
+	// floatBottomL/R record the deepest left/right float bottom laid out in
+	// this box's content, relative to its content edge. A parent merges them
+	// when this box does not establish its own formatting context, so clear on
+	// a later sibling sees floats that share that context.
+	floatBottomL, floatBottomR float32
+
 	Baseline float32
 	flags    uint8
 }

@@ -15,6 +15,45 @@ import (
 // violate the import boundary rules.
 const svgNamespace = 1
 
+// svgMapping maps user-space coordinates from a root's viewBox into its CSS
+// viewport under the default preserveAspectRatio="xMidYMid meet". Without a
+// usable viewBox it is the identity at the viewport origin.
+type svgMapping struct {
+	ox, oy float32 // viewport origin, CSS px
+	ux, uy float32 // viewBox min-x, min-y
+	s      float32 // user units to CSS px
+}
+
+func newSVGMapping(viewBox string, x0, y0, w, h float32) svgMapping {
+	m := svgMapping{ox: x0, oy: y0, s: 1}
+	f := strings.Fields(viewBox)
+	if len(f) != 4 {
+		return m
+	}
+	minX, err1 := strconv.ParseFloat(f[0], 32)
+	minY, err2 := strconv.ParseFloat(f[1], 32)
+	vbW, err3 := strconv.ParseFloat(f[2], 32)
+	vbH, err4 := strconv.ParseFloat(f[3], 32)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil || vbW <= 0 || vbH <= 0 {
+		return m
+	}
+	s := w / float32(vbW)
+	if sy := h / float32(vbH); sy < s {
+		s = sy
+	}
+	m.s = s
+	m.ux, m.uy = float32(minX), float32(minY)
+	m.ox = x0 + (w-float32(vbW)*s)/2
+	m.oy = y0 + (h-float32(vbH)*s)/2
+	return m
+}
+
+func (m svgMapping) point(x, y float32) (float32, float32) {
+	return m.ox + (x-m.ux)*m.s, m.oy + (y-m.uy)*m.s
+}
+
+func (m svgMapping) length(v float32) float32 { return v * m.s }
+
 // paintSVGShape draws an SVG shape element (rect, circle, ellipse, line,
 // polygon, polyline, path) using the element's geometry attributes and
 // presentation style. Shapes are rasterized into fill/stroke commands.
@@ -40,25 +79,26 @@ func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
 	}
 	scale := b.scale
 	tag := obj.Node.Data
+	m := newSVGMapping(svgObj.Node.GetAttribute("viewBox"), x0, y0, x1-x0, y1-y0)
 
 	// Parse fill color from style or attribute.
 	fillColor := b.parseSVGPaint(obj, "fill", "black")
 	strokeColor := b.parseSVGPaint(obj, "stroke", "")
-	strokeWidth := b.parseSVGLength(obj, "stroke-width", 1) * scale
+	strokeWidth := b.parseSVGLength(obj, "stroke-width", 1) * m.length(1) * scale
 
 	switch tag {
 	case "rect":
-		b.paintSVGRect(obj, x0, y0, x1, y1, fillColor, strokeColor, strokeWidth, opacity)
+		b.paintSVGRect(obj, m, fillColor, strokeColor, strokeWidth, opacity)
 	case "circle":
-		b.paintSVGCircle(obj, x0, y0, x1, y1, fillColor, strokeColor, strokeWidth, opacity)
+		b.paintSVGCircle(obj, m, fillColor, strokeColor, strokeWidth, opacity)
 	case "ellipse":
-		b.paintSVGEllipse(obj, x0, y0, x1, y1, fillColor, strokeColor, strokeWidth, opacity)
+		b.paintSVGEllipse(obj, m, fillColor, strokeColor, strokeWidth, opacity)
 	case "line":
-		b.paintSVGLine(obj, x0, y0, x1, y1, strokeColor, strokeWidth, opacity)
+		b.paintSVGLine(obj, m, strokeColor, strokeWidth, opacity)
 	case "polygon", "polyline":
-		b.paintSVGPolygon(obj, x0, y0, x1, y1, fillColor, strokeColor, strokeWidth, tag == "polyline", opacity)
+		b.paintSVGPolygon(obj, m, fillColor, strokeColor, strokeWidth, tag == "polyline", opacity)
 	case "path":
-		b.paintSVGPath(obj, x0, y0, x1, y1, fillColor, strokeColor, strokeWidth, opacity)
+		b.paintSVGPath(obj, m, fillColor, strokeColor, strokeWidth, opacity)
 	}
 }
 
@@ -124,16 +164,18 @@ func parseSVGColor(s string) frame.Color {
 	return 0
 }
 
-func (b *Builder) paintSVGRect(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, opacity float32) {
+func (b *Builder) paintSVGRect(obj *layout.Object, m svgMapping, fill, stroke frame.Color, strokeW float32, opacity float32) {
 	x := b.parseSVGLengthAttr(obj, "x", 0)
 	y := b.parseSVGLengthAttr(obj, "y", 0)
-	w := b.parseSVGLengthAttr(obj, "width", bx1-bx0)
-	h := b.parseSVGLengthAttr(obj, "height", by1-by0)
+	w := b.parseSVGLengthAttr(obj, "width", 0)
+	h := b.parseSVGLengthAttr(obj, "height", 0)
 	rx := b.parseSVGLengthAttr(obj, "rx", 0)
 	ry := b.parseSVGLengthAttr(obj, "ry", rx)
 
 	scale := b.scale
-	rect := frame.RectF4(bx0+x, by0+y, bx0+x+w, by0+y+h).ToDevice(scale)
+	x0, y0 := m.point(x, y)
+	x1, y1 := m.point(x+w, y+h)
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(scale)
 	if rect.Empty() {
 		return
 	}
@@ -142,21 +184,22 @@ func (b *Builder) paintSVGRect(obj *layout.Object, bx0, by0, bx1, by1 float32, f
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: fill, Opacity: opacity})
 	}
 	if stroke.A() > 0 && strokeW > 0 {
-		b.paintSVGStrokeRect(rect, stroke, strokeW, rx*scale, ry*scale, opacity)
+		b.paintSVGStrokeRect(rect, stroke, strokeW, m.length(rx)*scale, m.length(ry)*scale, opacity)
 	}
 }
 
-func (b *Builder) paintSVGCircle(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, opacity float32) {
-	cx := b.parseSVGLengthAttr(obj, "cx", (bx1-bx0)/2)
-	cy := b.parseSVGLengthAttr(obj, "cy", (by1-by0)/2)
+func (b *Builder) paintSVGCircle(obj *layout.Object, m svgMapping, fill, stroke frame.Color, strokeW float32, opacity float32) {
+	cx := b.parseSVGLengthAttr(obj, "cx", 0)
+	cy := b.parseSVGLengthAttr(obj, "cy", 0)
 	r := b.parseSVGLengthAttr(obj, "r", 0)
 	if r <= 0 {
 		return
 	}
 	scale := b.scale
-	cxp := (bx0 + cx) * scale
-	cyp := (by0 + cy) * scale
-	rp := r * scale
+	px, py := m.point(cx, cy)
+	cxp := px * scale
+	cyp := py * scale
+	rp := m.length(r) * scale
 
 	if fill.A() > 0 {
 		b.paintSVGFilledCircle(cxp, cyp, rp, fill, opacity)
@@ -166,19 +209,20 @@ func (b *Builder) paintSVGCircle(obj *layout.Object, bx0, by0, bx1, by1 float32,
 	}
 }
 
-func (b *Builder) paintSVGEllipse(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, opacity float32) {
-	cx := b.parseSVGLengthAttr(obj, "cx", (bx1-bx0)/2)
-	cy := b.parseSVGLengthAttr(obj, "cy", (by1-by0)/2)
+func (b *Builder) paintSVGEllipse(obj *layout.Object, m svgMapping, fill, stroke frame.Color, strokeW float32, opacity float32) {
+	cx := b.parseSVGLengthAttr(obj, "cx", 0)
+	cy := b.parseSVGLengthAttr(obj, "cy", 0)
 	rx := b.parseSVGLengthAttr(obj, "rx", 0)
 	ry := b.parseSVGLengthAttr(obj, "ry", 0)
 	if rx <= 0 || ry <= 0 {
 		return
 	}
 	scale := b.scale
-	cxp := (bx0 + cx) * scale
-	cyp := (by0 + cy) * scale
-	rxp := rx * scale
-	ryp := ry * scale
+	px, py := m.point(cx, cy)
+	cxp := px * scale
+	cyp := py * scale
+	rxp := m.length(rx) * scale
+	ryp := m.length(ry) * scale
 
 	if fill.A() > 0 {
 		b.paintSVGFilledEllipse(cxp, cyp, rxp, ryp, fill, opacity)
@@ -188,19 +232,21 @@ func (b *Builder) paintSVGEllipse(obj *layout.Object, bx0, by0, bx1, by1 float32
 	}
 }
 
-func (b *Builder) paintSVGLine(obj *layout.Object, bx0, by0, bx1, by1 float32, stroke frame.Color, strokeW float32, opacity float32) {
+func (b *Builder) paintSVGLine(obj *layout.Object, m svgMapping, stroke frame.Color, strokeW float32, opacity float32) {
 	x1 := b.parseSVGLengthAttr(obj, "x1", 0)
 	y1 := b.parseSVGLengthAttr(obj, "y1", 0)
-	x2 := b.parseSVGLengthAttr(obj, "x2", bx1-bx0)
+	x2 := b.parseSVGLengthAttr(obj, "x2", 0)
 	y2 := b.parseSVGLengthAttr(obj, "y2", 0)
 	if stroke.A() <= 0 || strokeW <= 0 {
 		return
 	}
 	scale := b.scale
-	b.paintSVGLineSegment((bx0+x1)*scale, (by0+y1)*scale, (bx0+x2)*scale, (by0+y2)*scale, stroke, strokeW, opacity)
+	x1, y1 = m.point(x1, y1)
+	x2, y2 = m.point(x2, y2)
+	b.paintSVGLineSegment(x1*scale, y1*scale, x2*scale, y2*scale, stroke, strokeW, opacity)
 }
 
-func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, open bool, opacity float32) {
+func (b *Builder) paintSVGPolygon(obj *layout.Object, m svgMapping, fill, stroke frame.Color, strokeW float32, open bool, opacity float32) {
 	pointsStr := obj.Node.GetAttribute("points")
 	if pointsStr == "" {
 		return
@@ -210,10 +256,11 @@ func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32
 		return
 	}
 	scale := b.scale
-	// Offset points to the SVG box origin and scale to device pixels.
+	// Map user units through the viewBox, then to device pixels.
 	for i := range points {
-		points[i][0] = (bx0 + points[i][0]) * scale
-		points[i][1] = (by0 + points[i][1]) * scale
+		x, y := m.point(points[i][0], points[i][1])
+		points[i][0] = x * scale
+		points[i][1] = y * scale
 	}
 
 	if !open && fill.A() > 0 {
@@ -224,7 +271,7 @@ func (b *Builder) paintSVGPolygon(obj *layout.Object, bx0, by0, bx1, by1 float32
 	}
 }
 
-func (b *Builder) paintSVGPath(obj *layout.Object, bx0, by0, bx1, by1 float32, fill, stroke frame.Color, strokeW float32, opacity float32) {
+func (b *Builder) paintSVGPath(obj *layout.Object, m svgMapping, fill, stroke frame.Color, strokeW float32, opacity float32) {
 	d := obj.Node.GetAttribute("d")
 	if d == "" {
 		return
@@ -234,14 +281,12 @@ func (b *Builder) paintSVGPath(obj *layout.Object, bx0, by0, bx1, by1 float32, f
 		return
 	}
 	scale := b.scale
-	// Offset to SVG box origin and scale to device pixels.
+	// Map user units through the viewBox, then to device pixels.
 	for i := range segments {
-		for j := range segments[i] {
-			if j%2 == 0 {
-				segments[i][j] = (bx0 + segments[i][j]) * scale
-			} else {
-				segments[i][j] = (by0 + segments[i][j]) * scale
-			}
+		for j := 0; j+1 < len(segments[i]); j += 2 {
+			x, y := m.point(segments[i][j], segments[i][j+1])
+			segments[i][j] = x * scale
+			segments[i][j+1] = y * scale
 		}
 	}
 
@@ -468,15 +513,16 @@ func (b *Builder) paintSVGStrokedPolygon(points [][2]float32, color frame.Color,
 }
 
 func (b *Builder) paintSVGFilledPath(segments [][]float32, color frame.Color, opacity float32) {
-	// Flatten path to polygon points and fill.
-	var points [][2]float32
+	// Each subpath is an independent region: joining them into one polygon
+	// would draw connecting edges between shapes that don't touch.
 	for _, seg := range segments {
+		points := make([][2]float32, 0, len(seg)/2)
 		for i := 0; i+1 < len(seg); i += 2 {
 			points = append(points, [2]float32{seg[i], seg[i+1]})
 		}
-	}
-	if len(points) >= 3 {
-		b.paintSVGFilledPolygon(points, color, opacity)
+		if len(points) >= 3 {
+			b.paintSVGFilledPolygon(points, color, opacity)
+		}
 	}
 }
 
@@ -504,135 +550,406 @@ func parseSVGPoints(s string) [][2]float32 {
 	return points
 }
 
-// parseSVGPath parses a simplified SVG path data string into line segments.
-// Supports M, L, H, V, Z commands.
+// parseSVGPath flattens path data into moveto-delimited subpaths of user-space
+// points. Supported commands: M/m L/l H/h V/v Z/z, cubics C/c S/s, quadratics
+// Q/q T/t and elliptical arcs A/a, with implicit command repetition. Curves are
+// subdivided into line segments. The flattening lives here rather than reusing
+// internal/image's path decoder because paint may not import it (see archtest).
 func parseSVGPath(d string) [][]float32 {
-	var segments [][]float32
-	var current []float32
-	var cx, cy float32
+	p := &svgPathScanner{d: d}
+	var out [][]float32
+	var cur, start [2]float32
+	var seg []float32
+	haveSub := false
+	var lastC, lastQ [2]float32
+	haveC, haveQ := false, false
 
-	d = strings.TrimSpace(d)
-	i := 0
-	for i < len(d) {
-		cmd := d[i]
-		i++
-		// Skip whitespace.
-		for i < len(d) && (d[i] == ' ' || d[i] == ',') {
-			i++
+	flush := func() {
+		if len(seg) > 0 {
+			out = append(out, seg)
 		}
+		seg = nil
+		haveSub = false
+	}
+	add := func(pt [2]float32) { seg = append(seg, pt[0], pt[1]) }
 
+	var cmd byte
+	for {
+		p.skipSep()
+		if p.eof() {
+			break
+		}
+		c := p.d[p.i]
+		if isSVGPathCmd(c) {
+			cmd = c
+			p.i++
+			if cmd == 'Z' || cmd == 'z' {
+				if haveSub {
+					add(start)
+					flush()
+					cur = start
+				}
+				haveC, haveQ = false, false
+				cmd = 0
+				continue
+			}
+		} else if cmd == 0 {
+			break
+		}
 		switch cmd {
 		case 'M', 'm':
-			if len(current) > 0 {
-				segments = append(segments, current)
+			x, ok1 := p.number()
+			y, ok2 := p.number()
+			if !ok1 || !ok2 {
+				return out
 			}
-			current = nil
-			// Parse coordinates.
-			coords := parsePathCoords(d, &i)
-			if cmd == 'm' && len(segments) > 0 {
-				// Relative move.
-				prev := segments[len(segments)-1]
-				if len(prev) >= 2 {
-					cx = prev[len(prev)-2]
-					cy = prev[len(prev)-1]
-				}
+			if cmd == 'm' {
+				x += cur[0]
+				y += cur[1]
 			}
-			for j := 0; j+1 < len(coords); j += 2 {
-				x, y := coords[j], coords[j+1]
-				if cmd == 'm' {
-					x += cx
-					y += cy
-				}
-				current = append(current, x, y)
-				cx, cy = x, y
+			flush()
+			cur = [2]float32{x, y}
+			start = cur
+			add(cur)
+			haveSub = true
+			if cmd == 'm' {
+				cmd = 'l'
+			} else {
+				cmd = 'L'
 			}
+			haveC, haveQ = false, false
 		case 'L', 'l':
-			coords := parsePathCoords(d, &i)
-			for j := 0; j+1 < len(coords); j += 2 {
-				x, y := coords[j], coords[j+1]
-				if cmd == 'l' {
-					x += cx
-					y += cy
-				}
-				current = append(current, x, y)
-				cx, cy = x, y
+			x, ok1 := p.number()
+			y, ok2 := p.number()
+			if !ok1 || !ok2 {
+				return out
 			}
+			if cmd == 'l' {
+				x += cur[0]
+				y += cur[1]
+			}
+			cur = [2]float32{x, y}
+			add(cur)
+			haveSub = true
+			haveC, haveQ = false, false
 		case 'H', 'h':
-			for i < len(d) && (d[i] == ' ' || d[i] == ',') {
-				i++
+			x, ok := p.number()
+			if !ok {
+				return out
 			}
-			start := i
-			for i < len(d) && (d[i] >= '0' && d[i] <= '9' || d[i] == '.' || d[i] == '-' || d[i] == 'e' || d[i] == 'E' || d[i] == '+') {
-				i++
+			if cmd == 'h' {
+				x += cur[0]
 			}
-			if i > start {
-				x, err := strconv.ParseFloat(d[start:i], 32)
-				if err == nil {
-					if cmd == 'h' {
-						x += float64(cx)
-					}
-					current = append(current, float32(x), cy)
-					cx = float32(x)
-				}
-			}
+			cur[0] = x
+			add(cur)
+			haveSub = true
+			haveC, haveQ = false, false
 		case 'V', 'v':
-			for i < len(d) && (d[i] == ' ' || d[i] == ',') {
-				i++
+			y, ok := p.number()
+			if !ok {
+				return out
 			}
-			start := i
-			for i < len(d) && (d[i] >= '0' && d[i] <= '9' || d[i] == '.' || d[i] == '-' || d[i] == 'e' || d[i] == 'E' || d[i] == '+') {
-				i++
+			if cmd == 'v' {
+				y += cur[1]
 			}
-			if i > start {
-				y, err := strconv.ParseFloat(d[start:i], 32)
-				if err == nil {
-					if cmd == 'v' {
-						y += float64(cy)
-					}
-					current = append(current, cx, float32(y))
-					cy = float32(y)
+			cur[1] = y
+			add(cur)
+			haveSub = true
+			haveC, haveQ = false, false
+		case 'C', 'c':
+			var v [6]float32
+			for k := range v {
+				n, ok := p.number()
+				if !ok {
+					return out
 				}
+				v[k] = n
 			}
-		case 'Z', 'z':
-			if len(current) >= 2 {
-				current = append(current, current[0], current[1])
+			p1 := [2]float32{v[0], v[1]}
+			p2 := [2]float32{v[2], v[3]}
+			p3 := [2]float32{v[4], v[5]}
+			if cmd == 'c' {
+				p1[0] += cur[0]
+				p1[1] += cur[1]
+				p2[0] += cur[0]
+				p2[1] += cur[1]
+				p3[0] += cur[0]
+				p3[1] += cur[1]
 			}
+			for _, q := range flattenSVGCubic(cur, p1, p2, p3) {
+				add(q)
+			}
+			lastC, haveC, haveQ = p2, true, false
+			cur = p3
+			haveSub = true
+		case 'S', 's':
+			var v [4]float32
+			for k := range v {
+				n, ok := p.number()
+				if !ok {
+					return out
+				}
+				v[k] = n
+			}
+			p1 := cur
+			if haveC {
+				p1 = [2]float32{2*cur[0] - lastC[0], 2*cur[1] - lastC[1]}
+			}
+			p2 := [2]float32{v[0], v[1]}
+			p3 := [2]float32{v[2], v[3]}
+			if cmd == 's' {
+				p2[0] += cur[0]
+				p2[1] += cur[1]
+				p3[0] += cur[0]
+				p3[1] += cur[1]
+			}
+			for _, q := range flattenSVGCubic(cur, p1, p2, p3) {
+				add(q)
+			}
+			lastC, haveC, haveQ = p2, true, false
+			cur = p3
+			haveSub = true
+		case 'Q', 'q':
+			var v [4]float32
+			for k := range v {
+				n, ok := p.number()
+				if !ok {
+					return out
+				}
+				v[k] = n
+			}
+			p1 := [2]float32{v[0], v[1]}
+			p2 := [2]float32{v[2], v[3]}
+			if cmd == 'q' {
+				p1[0] += cur[0]
+				p1[1] += cur[1]
+				p2[0] += cur[0]
+				p2[1] += cur[1]
+			}
+			for _, q := range flattenSVGQuad(cur, p1, p2) {
+				add(q)
+			}
+			lastQ, haveQ, haveC = p1, true, false
+			cur = p2
+			haveSub = true
+		case 'T', 't':
+			x, ok1 := p.number()
+			y, ok2 := p.number()
+			if !ok1 || !ok2 {
+				return out
+			}
+			p1 := cur
+			if haveQ {
+				p1 = [2]float32{2*cur[0] - lastQ[0], 2*cur[1] - lastQ[1]}
+			}
+			p2 := [2]float32{x, y}
+			if cmd == 't' {
+				p2[0] += cur[0]
+				p2[1] += cur[1]
+			}
+			for _, q := range flattenSVGQuad(cur, p1, p2) {
+				add(q)
+			}
+			lastQ, haveQ, haveC = p1, true, false
+			cur = p2
+			haveSub = true
+		case 'A', 'a':
+			var v [7]float32
+			for k := range v {
+				n, ok := p.number()
+				if !ok {
+					return out
+				}
+				v[k] = n
+			}
+			end := [2]float32{v[5], v[6]}
+			if cmd == 'a' {
+				end[0] += cur[0]
+				end[1] += cur[1]
+			}
+			for _, q := range flattenSVGArc(cur, v[0], v[1], v[2], v[3] != 0, v[4] != 0, end) {
+				add(q)
+			}
+			haveC, haveQ = false, false
+			cur = end
+			haveSub = true
+		default:
+			return out
 		}
 	}
-	if len(current) > 0 {
-		segments = append(segments, current)
-	}
-	return segments
+	flush()
+	return out
 }
 
-func parsePathCoords(d string, i *int) []float32 {
-	var coords []float32
-	for *i < len(d) {
-		for *i < len(d) && (d[*i] == ' ' || d[*i] == ',') {
-			*i++
+func isSVGPathCmd(c byte) bool {
+	switch c {
+	case 'M', 'm', 'L', 'l', 'H', 'h', 'V', 'v', 'C', 'c', 'S', 's',
+		'Q', 'q', 'T', 't', 'A', 'a', 'Z', 'z':
+		return true
+	}
+	return false
+}
+
+// svgPathScanner reads path data: whitespace and commas separate values, and a
+// sign or decimal point can start the next number without a separator.
+type svgPathScanner struct {
+	d string
+	i int
+}
+
+func (p *svgPathScanner) eof() bool { return p.i >= len(p.d) }
+
+func (p *svgPathScanner) skipSep() {
+	for p.i < len(p.d) {
+		switch p.d[p.i] {
+		case ' ', '\t', '\n', '\r', ',', '\f':
+			p.i++
+			continue
 		}
-		if *i >= len(d) {
-			break
-		}
-		// Check if next char is a command letter.
-		c := d[*i]
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
-			break
-		}
-		start := *i
-		for *i < len(d) && (d[*i] >= '0' && d[*i] <= '9' || d[*i] == '.' || d[*i] == '-' || d[*i] == 'e' || d[*i] == 'E' || d[*i] == '+') {
-			*i++
-		}
-		if *i > start {
-			f, err := strconv.ParseFloat(d[start:*i], 32)
-			if err == nil {
-				coords = append(coords, float32(f))
-			}
-		} else {
-			*i++
+		break
+	}
+}
+
+func (p *svgPathScanner) number() (float32, bool) {
+	p.skipSep()
+	if p.i >= len(p.d) {
+		return 0, false
+	}
+	start := p.i
+	if p.d[p.i] == '-' || p.d[p.i] == '+' {
+		p.i++
+	}
+	digits := false
+	for p.i < len(p.d) && p.d[p.i] >= '0' && p.d[p.i] <= '9' {
+		p.i++
+		digits = true
+	}
+	if p.i < len(p.d) && p.d[p.i] == '.' {
+		// A second dot starts the next number ("1.5.25" is 1.5 then .25).
+		p.i++
+		for p.i < len(p.d) && p.d[p.i] >= '0' && p.d[p.i] <= '9' {
+			p.i++
+			digits = true
 		}
 	}
-	return coords
+	if !digits {
+		return 0, false
+	}
+	if p.i < len(p.d) && (p.d[p.i] == 'e' || p.d[p.i] == 'E') {
+		j := p.i + 1
+		if j < len(p.d) && (p.d[j] == '-' || p.d[j] == '+') {
+			j++
+		}
+		k := j
+		for k < len(p.d) && p.d[k] >= '0' && p.d[k] <= '9' {
+			k++
+		}
+		if k > j {
+			p.i = k
+		}
+	}
+	v, err := strconv.ParseFloat(p.d[start:p.i], 32)
+	if err != nil {
+		return 0, false
+	}
+	return float32(v), true
+}
+
+// flattenSVGCubic subdivides a cubic Bézier into line segments, excluding the
+// start point and ending exactly on p3.
+func flattenSVGCubic(p0, p1, p2, p3 [2]float32) [][2]float32 {
+	const n = 12
+	out := make([][2]float32, 0, n)
+	for i := 1; i <= n; i++ {
+		t := float32(i) / n
+		mt := 1 - t
+		out = append(out, [2]float32{
+			mt*mt*mt*p0[0] + 3*mt*mt*t*p1[0] + 3*mt*t*t*p2[0] + t*t*t*p3[0],
+			mt*mt*mt*p0[1] + 3*mt*mt*t*p1[1] + 3*mt*t*t*p2[1] + t*t*t*p3[1],
+		})
+	}
+	return out
+}
+
+// flattenSVGQuad subdivides a quadratic Bézier into line segments.
+func flattenSVGQuad(p0, p1, p2 [2]float32) [][2]float32 {
+	const n = 10
+	out := make([][2]float32, 0, n)
+	for i := 1; i <= n; i++ {
+		t := float32(i) / n
+		mt := 1 - t
+		out = append(out, [2]float32{
+			mt*mt*p0[0] + 2*mt*t*p1[0] + t*t*p2[0],
+			mt*mt*p0[1] + 2*mt*t*p1[1] + t*t*p2[1],
+		})
+	}
+	return out
+}
+
+// flattenSVGArc converts an endpoint-parameterized elliptical arc to line
+// segments via center parametrization (SVG 1.1 §8.5, F.6.5 correction).
+func flattenSVGArc(p0 [2]float32, rx, ry, rot float32, large, sweep bool, p1 [2]float32) [][2]float32 {
+	x0, y0 := float64(p0[0]), float64(p0[1])
+	x1, y1 := float64(p1[0]), float64(p1[1])
+	rxf, ryf := math.Abs(float64(rx)), math.Abs(float64(ry))
+	if rxf == 0 || ryf == 0 {
+		return [][2]float32{p1}
+	}
+	phi := float64(rot) * math.Pi / 180
+	dx := (x0 - x1) / 2
+	dy := (y0 - y1) / 2
+	x1p := math.Cos(phi)*dx + math.Sin(phi)*dy
+	y1p := -math.Sin(phi)*dx + math.Cos(phi)*dy
+	lam := x1p*x1p/(rxf*rxf) + y1p*y1p/(ryf*ryf)
+	if lam > 1 {
+		s := math.Sqrt(lam)
+		rxf *= s
+		ryf *= s
+	}
+	num := rxf*rxf*y1p*y1p + ryf*ryf*x1p*x1p
+	fac := 0.0
+	if num > 0 {
+		fac = math.Sqrt(math.Max(0, (rxf*rxf*ryf*ryf-num)/num))
+	}
+	if large == sweep {
+		fac = -fac
+	}
+	cxp := fac * rxf * y1p / ryf
+	cyp := fac * -ryf * x1p / rxf
+	cx := math.Cos(phi)*cxp - math.Sin(phi)*cyp + (x0+x1)/2
+	cy := math.Sin(phi)*cxp + math.Cos(phi)*cyp + (y0+y1)/2
+	angle := func(px, py float64) float64 {
+		return math.Atan2((py-cyp)/ryf, (px-cxp)/rxf)
+	}
+	t1 := angle(x0, y0)
+	dth := angle(x1, y1) - t1
+	for dth > math.Pi {
+		dth -= 2 * math.Pi
+	}
+	for dth < -math.Pi {
+		dth += 2 * math.Pi
+	}
+	if !sweep && dth > 0 {
+		dth -= 2 * math.Pi
+	} else if sweep && dth < 0 {
+		dth += 2 * math.Pi
+	}
+	steps := int(math.Abs(dth) / (math.Pi / 16))
+	if steps < 4 {
+		steps = 4
+	}
+	if steps > 64 {
+		steps = 64
+	}
+	out := make([][2]float32, 0, steps)
+	for i := 1; i <= steps; i++ {
+		a := t1 + dth*float64(i)/float64(steps)
+		out = append(out, [2]float32{
+			float32(cx + rxf*math.Cos(a)*math.Cos(phi) - ryf*math.Sin(a)*math.Sin(phi)),
+			float32(cy + rxf*math.Cos(a)*math.Sin(phi) + ryf*math.Sin(a)*math.Cos(phi)),
+		})
+	}
+	return out
 }
 
 func isSVGShape(tag string) bool {

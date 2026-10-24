@@ -154,3 +154,83 @@ func TestFloatPercentWidthResolvesAgainstContainer(t *testing.T) {
 		t.Errorf("second.X = %v, want %v (beside the first)", divs[1].X, divs[0].W)
 	}
 }
+
+// A float belongs to the nearest formatting context, not to the block that
+// happens to contain it in the DOM. When an earlier row's float sits inside a
+// nested plain block, a later row's clear:both must still move below it.
+// Google's legacy advanced-search rows are exactly this shape: each row is a
+// clear:both block whose label and input are floats, and a flat float context
+// per block stacked every row on top of the first.
+func TestClearSeesFloatsNestedInPreviousSibling(t *testing.T) {
+	arena := sessionSheets(t, `<html><head><style>
+.group{width:600px}
+.row{clear:both}
+.label{float:left;width:160px;height:40px}
+</style></head><body>
+<div class="group">
+  <div class="row" id="r1"><div class="label">L1</div></div>
+  <div class="row" id="r2"><div class="label">L2</div></div>
+</div>
+</body></html>`, 800)
+	r1 := findByID(arena, "r1")
+	r2 := findByID(arena, "r2")
+	if r1 == nil || r2 == nil {
+		t.Fatal("rows not found")
+	}
+	if r2.Y < r1.Y+40 {
+		t.Errorf("r2.Y = %v, want at least %v (below the previous row's float)", r2.Y, r1.Y+40)
+	}
+}
+
+// Cross-axis alignment moves a flex item as a box, not just the words inside
+// it. Shifting only inline content left a centred item's block children at the
+// item's pre-alignment origin; inside an overflow:hidden ancestor that put the
+// Google logo 12px above its clip and made it disappear.
+func TestFlexCentredItemMovesItsBlockChildren(t *testing.T) {
+	arena := session(t, `<html><body style="margin:0">
+<div style="display:flex;align-items:center;height:48px;overflow:hidden">
+  <div id="cell" style="display:flex;align-items:center;height:24px;overflow:hidden">
+    <div id="inner" style="width:74px;height:24px"></div>
+  </div>
+</div>
+</body></html>`, 800)
+	cell := findByID(arena, "cell")
+	inner := findByID(arena, "inner")
+	if cell == nil || inner == nil {
+		t.Fatal("cell or inner not found")
+	}
+	if !almostEqual(cell.Y, 12) {
+		t.Errorf("cell.Y = %v, want 12 (centred in the 48px line)", cell.Y)
+	}
+	if !almostEqual(inner.Y, cell.Y) {
+		t.Errorf("inner.Y = %v, want %v (it moves with its flex item)", inner.Y, cell.Y)
+	}
+}
+
+// An inline-block whose width is auto still contributes its shrink-to-fit size
+// to a flex item's max-content. Dropping it measured Google's account area as
+// the sign-in button alone, so the header wrapped the button under the apps
+// icon and pushed it out of the bar.
+func TestMaxContentCountsAutoWidthInlineBlockInsideInline(t *testing.T) {
+	arena := session(t, `<html><body style="margin:0">
+<div style="display:flex;width:200px">
+  <div id="right" style="display:flex;flex:0 0 auto">
+    <div id="outer">
+      <div style="display:inline"><div style="display:inline-block"><div style="width:40px;height:40px"></div></div></div>
+      <a id="signin" style="display:inline-block;padding:10px 12px;margin:12px 8px 12px 10px">Sign in</a>
+    </div>
+  </div>
+</div>
+</body></html>`, 800)
+	right := findByID(arena, "right")
+	signin := findByID(arena, "signin")
+	if right == nil || signin == nil {
+		t.Fatal("right or signin not found")
+	}
+	if right.W < 120 {
+		t.Errorf("right.W = %v, want the 40px icon and the sign-in button to share the measure", right.W)
+	}
+	if signin.Y > 40 {
+		t.Errorf("signin.Y = %v, want it on the icon's line, not wrapped below it", signin.Y)
+	}
+}

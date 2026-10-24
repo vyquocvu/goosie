@@ -615,7 +615,11 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		return
 	}
 	if isBlock(k) {
-		if atomicInlineLevel(k.Style) && k.Node != nil && k.Node.Element() &&
+		// Pseudo-element boxes are anonymous text nodes, not elements: they
+		// still form an atomic inline-level box of their own, which is how an
+		// inline-block ::before gets a background and a size.
+		if atomicInlineLevel(k.Style) && k.Node != nil &&
+			(k.Node.Element() || k.flags&flagAnonymous != 0) &&
 			k.flags&flagRowPlaced == 0 {
 			atomicInlineBlock(a, nodeID, lines, current, bc)
 		}
