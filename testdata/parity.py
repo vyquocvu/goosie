@@ -92,9 +92,10 @@ def render_goosie(binary: str, width: int = 800, height: int = 600) -> list[str]
     return produced
 
 
-def render_chromium(width: int = 800, height: int = 600) -> list[str]:
+def render_chromium(width: int = 800, height: int = 600) -> tuple[list[str], str | None]:
     """Render every fixture with Playwright/Chromium.  Returns the list of
-    relative PNG paths.  Raises RenderError if playwright is unavailable."""
+    relative PNG paths and the browser version string.
+    Raises RenderError if playwright is unavailable."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -105,10 +106,12 @@ def render_chromium(width: int = 800, height: int = 600) -> list[str]:
 
     produced: list[str] = []
     errors: list[str] = []
+    browser_version: str | None = None
 
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
+            browser_version = browser.version
             page = browser.new_page(viewport={"width": width, "height": height})
 
             for html in sorted(FIXTURES.rglob("*.html")):
@@ -138,7 +141,7 @@ def render_chromium(width: int = 800, height: int = 600) -> list[str]:
             f"first error: {errors[0]}"
         )
 
-    return produced
+    return produced, browser_version
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +344,8 @@ def inspect(name: str, band: int, threshold: int) -> None:
 
 def write_json_report(results: list[FixtureResult], path: Path,
                       threshold: int, pass_at: float,
-                      elapsed: float) -> None:
+                      elapsed: float,
+                      metadata: dict | None = None) -> None:
     """Write a structured JSON report."""
     passing = [r for r in results if r.status == "PASS"]
     failing = [r for r in results if r.status == "FAIL"]
@@ -380,6 +384,7 @@ def write_json_report(results: list[FixtureResult], path: Path,
         }
 
     report = {
+        "metadata": metadata or {},
         "summary": {
             "total": len(results),
             "passing": len(passing),
@@ -561,6 +566,8 @@ def main() -> int:
 
     t0 = time.monotonic()
 
+    browser_version: str | None = None
+
     # Render steps.  Each raises RenderError on total failure.
     if args.render:
         try:
@@ -571,7 +578,7 @@ def main() -> int:
 
     if args.render_chromium:
         try:
-            render_chromium(args.width, args.height)
+            _, browser_version = render_chromium(args.width, args.height)
         except RenderError as exc:
             print(f"ERROR: Chromium render failed: {exc}", file=sys.stderr)
             return 1
@@ -599,9 +606,14 @@ def main() -> int:
             print(f"  wrote {diff_count} diff image(s) to {args.diffs}/")
 
     # Reports.
+    metadata = {
+        "browser_version": browser_version,
+        "python_version": sys.version,
+        "platform": sys.platform,
+    }
     if args.json:
         write_json_report(results, Path(args.json), args.threshold,
-                          args.pass_at, elapsed)
+                          args.pass_at, elapsed, metadata=metadata)
         print(f"  JSON report: {args.json}")
 
     if args.junit:
