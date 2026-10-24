@@ -6,7 +6,9 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
+	"github.com/vyquocvu/goosie/internal/paint"
 )
 
 type findBox struct {
@@ -149,6 +151,59 @@ func TestFindNoMatch(t *testing.T) {
 	}
 	if got := sess.Find(""); len(got) != 0 {
 		t.Fatalf("Find(\"\") = %d matches, want 0", len(got))
+	}
+}
+
+// findHighlightFills returns the fill commands painted exactly over the
+// match's document rect at the given scale.
+func findHighlightFills(list *paint.List, m engine.Match, scale float32) []paint.DisplayCmd {
+	want := frame.RectF4(m.X0, m.Y0, m.X1, m.Y1).ToDevice(scale)
+	var out []paint.DisplayCmd
+	for _, c := range list.All() {
+		if c.Kind == paint.CmdFill && c.Color.A() != 0 && c.Rect == want {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestFindHighlightsPainted(t *testing.T) {
+	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>hello world hello</p></body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	matches := sess.Find("hello")
+	if len(matches) != 2 {
+		t.Fatalf("Find(\"hello\") = %d matches, want 2", len(matches))
+	}
+	sess.SetFindActive(1)
+
+	list, err := sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked: %v", err)
+	}
+	inactive := findHighlightFills(list, matches[0], 1)
+	if len(inactive) != 1 {
+		t.Fatalf("inactive match highlights = %d, want 1", len(inactive))
+	}
+	active := findHighlightFills(list, matches[1], 1)
+	if len(active) != 1 {
+		t.Fatalf("active match highlights = %d, want 1", len(active))
+	}
+	if inactive[0].Color == active[0].Color {
+		t.Fatalf("active highlight color %v equals inactive %v, want a distinct color", active[0].Color, inactive[0].Color)
+	}
+
+	sess.ClearFind()
+	list, err = sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked after ClearFind: %v", err)
+	}
+	for _, m := range matches {
+		if n := len(findHighlightFills(list, m, 1)); n != 0 {
+			t.Fatalf("highlights after ClearFind = %d, want 0", n)
+		}
 	}
 }
 

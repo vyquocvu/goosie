@@ -15,6 +15,7 @@ type Builder struct {
 	metrics   layout.Metrics
 	focus     focusState
 	selection map[*layout.Object]SelSpan
+	find      map[*layout.Object][]FindMark
 }
 
 // focusState groups the input state that influences text and control painting.
@@ -45,6 +46,16 @@ func (b *Builder) SetSelection(spans []SelSpan) {
 	b.selection = make(map[*layout.Object]SelSpan, len(spans))
 	for _, sp := range spans {
 		b.selection[sp.Obj] = sp
+	}
+}
+
+// SetFind marks find-in-page highlight rects to paint under their text boxes.
+// A mark is emitted when the walk reaches its Obj, so the fill lands beneath
+// that run's glyphs rather than on top of the whole layer.
+func (b *Builder) SetFind(marks []FindMark) {
+	b.find = make(map[*layout.Object][]FindMark, len(marks))
+	for _, m := range marks {
+		b.find[m.Obj] = append(b.find[m.Obj], m)
 	}
 }
 

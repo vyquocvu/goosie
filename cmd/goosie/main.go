@@ -385,6 +385,7 @@ func build(c config) (*framePath, error) {
 		}
 		f.toolbar.OnFindClose = func() {
 			f.closeFind()
+			f.clearFindHighlights()
 		}
 		f.toolbar.OnDownloads = func() {
 			f.navigateTab("goosie://downloads")
