@@ -1,6 +1,7 @@
 package net
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
@@ -44,6 +46,69 @@ type HTTP interface {
 	Close() error
 	Jar() *CookieJar
 	NetworkLog() *NetworkLog
+}
+
+// StreamingHTTP is optionally implemented by clients that can return response
+// headers before consuming the body. Navigations use it to save attachments
+// incrementally without buffering an unbounded file in memory.
+type StreamingHTTP interface {
+	GetStream(ctx context.Context, url string) (*StreamResponse, error)
+}
+
+// StreamResponse exposes an HTTP response body as a cancelable stream.
+type StreamResponse struct {
+	StatusCode    int
+	Headers       map[string]string
+	URL           string
+	ContentLength int64
+	Body          io.ReadCloser
+	cancel        context.CancelFunc
+	closeOnce     sync.Once
+	closeErr      error
+}
+
+// Cancel aborts an in-flight response body without closing the caller's
+// navigation context.
+func (r *StreamResponse) Cancel() {
+	if r != nil && r.cancel != nil {
+		r.cancel()
+	}
+}
+
+// Close releases the response body. It is safe to call more than once.
+func (r *StreamResponse) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.closeOnce.Do(func() {
+		r.Cancel()
+		if r.Body != nil {
+			r.closeErr = r.Body.Close()
+		}
+	})
+	return r.closeErr
+}
+
+// ReadBounded consumes a stream as an in-memory response under maxBytes.
+func (r *StreamResponse) ReadBounded(maxBytes int64) ([]byte, error) {
+	if r == nil || r.Body == nil {
+		return nil, errors.New("net: response stream is closed")
+	}
+	defer r.Close()
+	if maxBytes < 0 {
+		return nil, errors.New("net: invalid response limit")
+	}
+	if r.ContentLength > maxBytes {
+		return nil, ErrResponseTooLarge
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, maxBytes+1))
+	if len(data) > int(maxBytes) {
+		return nil, ErrResponseTooLarge
+	}
+	if err != nil {
+		return nil, fmt.Errorf("net: reading body: %w", err)
+	}
+	return data, nil
 }
 
 // RequestTrace represents one recorded HTTP network transaction.
@@ -549,6 +614,136 @@ func (c *httpClient) upgradeHSTS(u *url.URL) {
 
 func (c *httpClient) Get(ctx context.Context, raw string) (*Response, error) {
 	return c.request(ctx, http.MethodGet, raw, "", nil)
+}
+
+// GetStream returns response headers and a live body stream. Cache hits are
+// replayed from their bounded in-memory bodies; live responses remain streamed
+// so downloads need not pass through the document response limit.
+func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse, error) {
+	start := time.Now()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	normalized, err := NormalizeURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, errors.New("net: streaming supports HTTP(S) URLs only")
+	}
+	if c.filter != nil && c.filter.IsEnabled() && !IsShieldsDisabled(ctx) {
+		if blocked, reason := c.filter.ShouldBlock(normalized); blocked {
+			if c.netLog != nil {
+				c.netLog.Record(RequestTrace{URL: normalized, Method: http.MethodGet, Blocked: true, BlockedReason: reason, Timestamp: start})
+			}
+			return nil, fmt.Errorf("%w: %s (%s)", ErrBlockedByFilter, RedactURL(normalized), reason)
+		}
+	}
+	if c.cache != nil {
+		if cached, ok := c.cache.get(normalized, time.Now()); ok {
+			if c.netLog != nil {
+				c.netLog.Record(RequestTrace{
+					URL:         normalized,
+					Method:      http.MethodGet,
+					StatusCode:  304,
+					ContentType: cached.Headers["Content-Type"],
+					Bytes:       len(cached.Body),
+					Timestamp:   start,
+				})
+			}
+			return &StreamResponse{
+				StatusCode:    cached.StatusCode,
+				Headers:       cached.Headers,
+				URL:           cached.URL,
+				ContentLength: int64(len(cached.Body)),
+				Body:          io.NopCloser(bytes.NewReader(cached.Body)),
+			}, nil
+		}
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, normalized, nil)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("net: request %s: %w", RedactURL(normalized), scrubURLError(err))
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	if cookie := c.jar.HeaderFor(u); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("net: fetch %s: %w", RedactURL(normalized), scrubURLError(err))
+	}
+	headers := make(map[string]string, len(resp.Header))
+	for k, values := range resp.Header {
+		if strings.EqualFold(k, "Set-Cookie") {
+			headers[k] = strings.Join(values, "\n")
+			c.jar.Store(resp.Request.URL, values)
+		} else {
+			headers[k] = strings.Join(values, ", ")
+		}
+	}
+	body := &streamLogBody{
+		ReadCloser: resp.Body,
+		log:        c.netLog,
+		trace: RequestTrace{
+			URL:         normalized,
+			Method:      http.MethodGet,
+			StatusCode:  resp.StatusCode,
+			ContentType: resp.Header.Get("Content-Type"),
+			Timestamp:   start,
+		},
+		started: start,
+	}
+	return &StreamResponse{
+		StatusCode:    resp.StatusCode,
+		Headers:       headers,
+		URL:           resp.Request.URL.String(),
+		ContentLength: resp.ContentLength,
+		Body:          body,
+		cancel:        cancel,
+	}, nil
+}
+
+type streamLogBody struct {
+	io.ReadCloser
+	log     *NetworkLog
+	trace   RequestTrace
+	started time.Time
+	bytes   atomic.Int64
+	once    sync.Once
+}
+
+func (b *streamLogBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.bytes.Add(int64(n))
+	if err != nil {
+		b.record()
+	}
+	return n, err
+}
+
+func (b *streamLogBody) Close() error {
+	b.record()
+	return b.ReadCloser.Close()
+}
+
+func (b *streamLogBody) record() {
+	b.once.Do(func() {
+		if b.log != nil {
+			trace := b.trace
+			trace.Bytes = int(b.bytes.Load())
+			trace.Duration = time.Since(b.started)
+			b.log.Record(trace)
+		}
+	})
 }
 
 func (c *httpClient) Post(ctx context.Context, raw, contentType string, body io.Reader) (*Response, error) {

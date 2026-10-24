@@ -106,7 +106,7 @@ func (f *framePath) navigateTab(rawURL string) {
 		return
 	}
 	f.closeFind()
-	u := normalizeURL(rawURL)
+	u := normalizeAddress(rawURL, f.currentPreferences().SearchURLTemplate)
 
 	tab.Nav.Mu.Lock()
 	if tab.Nav.Cancel != nil {
@@ -135,7 +135,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.downloadDirectory(), true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
@@ -172,7 +172,11 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 		}
 	}
 	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
-	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, f.downloads, storage, tabID, appMode, f.userscripts, f.perms, f.mediaBackend)
+	extra := []any{f.downloads, storage, tabID, appMode, f.userscripts, f.perms, f.mediaBackend}
+	if f.currentPreferences().AskDownloadLocation {
+		extra = append(extra, f.window)
+	}
+	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, extra...)
 }
 
 // drainNavResults reads navigation results from the channel and applies them.
@@ -221,6 +225,14 @@ func (f *framePath) applyNavResult(result navResult) {
 		return
 	}
 	if result.err != nil {
+		if errors.Is(result.err, errDownloadSaveCanceled) {
+			tab.SetError("")
+			if f.toolbar != nil && f.tabMgr.Active() == tab {
+				f.toolbar.SetLoading(false)
+				f.toolbar.SetError("")
+			}
+			return
+		}
 		tab.SetError(result.err.Error())
 		if f.toolbar != nil && f.tabMgr.Active() == tab {
 			f.toolbar.SetLoading(false)
@@ -443,7 +455,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 		return
 	}
 	f.closeFind()
-	u := normalizeURL(rawURL)
+	u := normalizeAddress(rawURL, f.currentPreferences().SearchURLTemplate)
 
 	tab.Nav.Mu.Lock()
 	if tab.Nav.Cancel != nil {
@@ -467,7 +479,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.config.downloadDir, true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.downloadDirectory(), true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
 		if finalURL != "" {
 			res.url = finalURL

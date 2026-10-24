@@ -28,6 +28,7 @@ type ruleIndex struct {
 	declCount  int
 	stamp      int
 	properties map[string]dom.PropertyDefinition
+	selectors  []css.Selector
 }
 
 // indexedSelector is one selector of one rule plus the cascade facts derived
@@ -93,6 +94,7 @@ func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
 				}
 			}
 			for _, sel := range rule.Selectors {
+				ix.selectors = append(ix.selectors, sel)
 				a, b, c := sel.Specificity()
 				e := &indexedSelector{
 					rule:       rule,

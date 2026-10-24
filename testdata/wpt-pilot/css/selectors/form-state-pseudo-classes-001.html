@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="match" href="form-state-pseudo-classes-ref.html">
+<title>Form state pseudo-class matching</title>
+<style>
+  html, body { margin: 0; }
+  input { display: none; }
+  .mark { position: absolute; left: 0; width: 120px; height: 24px; background: red; }
+  #checked + .mark { top: 0; }
+  #checked:checked + .mark { background: green; }
+  #enabled + .mark { top: 32px; }
+  #enabled:enabled + .mark { background: green; }
+  #disabled + .mark { top: 64px; }
+  #disabled:disabled + .mark { background: green; }
+  #placeholder + .mark { top: 96px; }
+  #placeholder:placeholder-shown + .mark { background: green; }
+  #legend-exempt + .mark { top: 128px; }
+  #legend-exempt:enabled + .mark { background: green; }
+  #fieldset-disabled + .mark { top: 160px; }
+  #fieldset-disabled:disabled + .mark { background: green; }
+</style>
+<input id="checked" type="checkbox" checked><span class="mark" id="checked-mark"></span>
+<input id="enabled" type="text"><span class="mark" id="enabled-mark"></span>
+<input id="disabled" type="text" disabled><span class="mark" id="disabled-mark"></span>
+<input id="placeholder" type="text" placeholder="Search"><span class="mark" id="placeholder-mark"></span>
+<fieldset disabled>
+  <legend><input id="legend-exempt" type="text"><span class="mark" id="legend-mark"></span></legend>
+  <input id="fieldset-disabled" type="text"><span class="mark" id="fieldset-mark"></span>
+</fieldset>

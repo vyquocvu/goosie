@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="match" href="focus-visible-text-input-ref.html">
+<title>:focus-visible matches a focused text input</title>
+<style>
+  html, body { margin: 0; }
+  #target { position: absolute; left: -1000px; }
+  .mark { width: 120px; height: 24px; background: red; }
+  #target:focus-visible + .mark { background: green; }
+</style>
+<input id="target" type="text"><span class="mark"></span>
+<script>document.getElementById("target").focus();</script>

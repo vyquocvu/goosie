@@ -20,6 +20,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
+	"github.com/vyquocvu/goosie/internal/preferences"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -64,6 +65,58 @@ func TestParsePrivateFlag(t *testing.T) {
 	}
 	if c.private {
 		t.Fatal("default run set config.private")
+	}
+}
+
+func TestDownloadDirectoryPrecedence(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "profile-downloads")
+	cliDir := filepath.Join(t.TempDir(), "cli-downloads")
+	got, err := effectiveDownloadDir("Downloads", false, profileDir)
+	if err != nil || got != profileDir {
+		t.Fatalf("profile directory precedence = %q, %v; want %q", got, err, profileDir)
+	}
+	got, err = effectiveDownloadDir(cliDir, true, profileDir)
+	if err != nil || got != cliDir {
+		t.Fatalf("explicit CLI directory precedence = %q, %v; want %q", got, err, cliDir)
+	}
+	got, err = effectiveDownloadDir("relative-downloads", true, profileDir)
+	if err != nil || !filepath.IsAbs(got) {
+		t.Fatalf("relative CLI directory was not resolved: %q, %v", got, err)
+	}
+
+	c, err := parse([]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.downloadDirExplicit {
+		t.Fatal("default download directory was marked as a CLI override")
+	}
+	c, err = parse([]string{"-download-dir", cliDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.downloadDirExplicit {
+		t.Fatal("explicit -download-dir was not marked as an override")
+	}
+}
+
+func TestShouldRestoreSessionOnStartup(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		private     bool
+		mode        string
+		wantRestore bool
+	}{
+		{name: "default restores", mode: preferences.StartupRestore, wantRestore: true},
+		{name: "new tab setting skips restore", mode: preferences.StartupNewTab},
+		{name: "private never restores", private: true, mode: preferences.StartupRestore},
+		{name: "legacy empty mode restores", mode: "", wantRestore: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRestoreSession(tc.private, tc.mode); got != tc.wantRestore {
+				t.Fatalf("shouldRestoreSession(%t, %q) = %t, want %t", tc.private, tc.mode, got, tc.wantRestore)
+			}
+		})
 	}
 }
 
@@ -289,6 +342,33 @@ func TestContentKeyPageNavigationDoesNotScrollFocusedEditable(t *testing.T) {
 	}
 	if got := sess.FocusedText(); got != "keep" {
 		t.Fatalf("PageDown changed editable value to %q", got)
+	}
+}
+
+func TestContentKeySpaceScrollsWhenLinkHasFocus(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	sess, err := engine.NewSession(`<html><body><a id="link" href="/next">next</a></body></html>`, nil, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab.SetSession(sess)
+	link := sess.Doc.ElementByID("link")
+	if link == nil || !sess.FocusNode(link) {
+		t.Fatal("could not focus link")
+	}
+	if !f.contentKey(' ', 0) {
+		t.Fatal("Space with link focus was not handled")
+	}
+	if got, want := f.sched.Viewport().Offset.Y, int32(230); got != want {
+		t.Fatalf("Space scroll offset = %d, want %d", got, want)
+	}
+	if !f.contentKey(' ', surface.ModShift) {
+		t.Fatal("Shift+Space with link focus was not handled")
+	}
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("Shift+Space scroll offset = %d, want 0", got)
 	}
 }
 

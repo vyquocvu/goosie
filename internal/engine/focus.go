@@ -77,6 +77,41 @@ func (s *Session) FocusControl(x, y float32) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	n := s.controlAt(x, y)
+	return s.setFocusedNodeLocked(n)
+}
+
+// FocusNode handles an element.focus() call from the document's JavaScript
+// runtime. Programmatic focus works for form controls and elements with a
+// valid tabindex, even when they are not editable controls.
+func (s *Session) FocusNode(n *dom.Node) bool {
+	if !programmaticallyFocusable(n) {
+		return false
+	}
+	s.opMu.Lock()
+	changed := s.setFocusedNodeLocked(n)
+	if changed && s.Styles != nil {
+		s.focusStylePending = true
+	}
+	s.opMu.Unlock()
+	return changed
+}
+
+// BlurNode handles HTMLElement.blur() for the currently focused element.
+func (s *Session) BlurNode(n *dom.Node) bool {
+	s.opMu.Lock()
+	if n == nil || s.focus != n {
+		s.opMu.Unlock()
+		return false
+	}
+	changed := s.setFocusedNodeLocked(nil)
+	if changed && s.Styles != nil {
+		s.focusStylePending = true
+	}
+	s.opMu.Unlock()
+	return changed
+}
+
+func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
 	if n == s.focus {
 		return false
 	}
@@ -84,22 +119,101 @@ func (s *Session) FocusControl(x, y float32) bool {
 	// Fire blur and change on the old control.
 	if prev != nil {
 		css.SetFocus(prev, false)
+		css.SetFocusVisible(prev, false)
 		dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
-		if s.controlValue(prev) != s.focusValue {
+		if controlEditable(prev) && s.controlValue(prev) != s.focusValue {
 			dom.DispatchEvent(prev, dom.NewEvent("change", true, true))
 		}
 	}
 	s.focus = n
+	s.focusState.Store(n)
 	s.marked = ""
-	if n != nil {
+	if controlEditable(n) {
 		s.caret = len([]rune(s.controlValue(n)))
 		s.focusValue = s.controlValue(n)
 		css.SetFocus(n, true)
+		css.SetFocusVisible(n, focusVisibleByDefault(n))
 		dom.DispatchEvent(n, dom.NewEvent("focus", false, false))
 	} else {
+		s.caret = 0
 		s.focusValue = ""
+		if n != nil {
+			css.SetFocus(n, true)
+			css.SetFocusVisible(n, focusVisibleByDefault(n))
+			dom.DispatchEvent(n, dom.NewEvent("focus", false, false))
+		}
 	}
 	return true
+}
+
+// focusVisibleByDefault follows the browser heuristic for pointer or
+// programmatic focus: controls that accept text input keep a visible indicator,
+// while buttons and other non-text controls show one after keyboard navigation.
+func focusVisibleByDefault(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	if n.DataAtom == dom.AtomTextarea {
+		return true
+	}
+	if n.DataAtom == dom.AtomInput {
+		switch strings.ToLower(strings.TrimSpace(n.GetAttribute("type"))) {
+		case "button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit":
+			return false
+		default:
+			return true
+		}
+	}
+	if n.HasAttribute("contenteditable") {
+		switch strings.ToLower(strings.TrimSpace(n.GetAttribute("contenteditable"))) {
+		case "", "true", "plaintext-only":
+			return true
+		}
+	}
+	return false
+}
+
+func programmaticallyFocusable(n *dom.Node) bool {
+	if n == nil || !n.Element() || n.HasAttribute("disabled") {
+		return false
+	}
+	if n.HasAttribute("contenteditable") {
+		switch strings.ToLower(strings.TrimSpace(n.GetAttribute("contenteditable"))) {
+		case "", "true", "plaintext-only":
+			return true
+		}
+	}
+	if n.HasAttribute("tabindex") {
+		_, err := strconv.Atoi(strings.TrimSpace(n.GetAttribute("tabindex")))
+		return err == nil
+	}
+	switch n.Data {
+	case "input":
+		return strings.ToLower(n.GetAttribute("type")) != "hidden"
+	case "textarea", "select", "button":
+		return true
+	case "a", "area":
+		return n.HasAttribute("href")
+	case "iframe", "object":
+		return true
+	default:
+		return false
+	}
+}
+
+// clearDetachedFocusLocked drops focus when its node is no longer connected to
+// this document. DOM removal can happen inside a script before the next style
+// pass; retaining that node would leave :focus and :focus-within stale.
+func (s *Session) clearDetachedFocusLocked() bool {
+	if s.focus == nil || s.Doc == nil {
+		return false
+	}
+	for current := s.focus; current != nil; current = current.Parent {
+		if current == &s.Doc.Node {
+			return false
+		}
+	}
+	return s.setFocusedNodeLocked(nil)
 }
 
 // Focused returns the focused control node, or nil.
@@ -212,8 +326,10 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		if s.focus != nil {
 			prev := s.focus
 			s.focus = nil
+			s.focusState.Store(nil)
 			s.marked = ""
 			css.SetFocus(prev, false)
+			css.SetFocusVisible(prev, false)
 			dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
 			return true
 		}
@@ -292,6 +408,7 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		return false
 	case EditEscape:
 		s.focus = nil
+		s.focusState.Store(nil)
 		s.marked = ""
 		return true
 	}
@@ -599,16 +716,19 @@ func (s *Session) FocusNext() {
 	// Fire blur/change on old focus.
 	if s.focus != nil {
 		css.SetFocus(s.focus, false)
+		css.SetFocusVisible(s.focus, false)
 		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
 		if s.controlValue(s.focus) != s.focusValue {
 			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
 		}
 	}
 	s.focus = next
+	s.focusState.Store(next)
 	s.marked = ""
 	s.caret = len([]rune(s.controlValue(next)))
 	s.focusValue = s.controlValue(next)
 	css.SetFocus(next, true)
+	css.SetFocusVisible(next, true)
 	dom.DispatchEvent(next, dom.NewEvent("focus", false, false))
 }
 
@@ -635,16 +755,19 @@ func (s *Session) FocusPrev() {
 	// Fire blur/change on old focus.
 	if s.focus != nil {
 		css.SetFocus(s.focus, false)
+		css.SetFocusVisible(s.focus, false)
 		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
 		if s.controlValue(s.focus) != s.focusValue {
 			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
 		}
 	}
 	s.focus = prev
+	s.focusState.Store(prev)
 	s.marked = ""
 	s.caret = len([]rune(s.controlValue(prev)))
 	s.focusValue = s.controlValue(prev)
 	css.SetFocus(prev, true)
+	css.SetFocusVisible(prev, true)
 	dom.DispatchEvent(prev, dom.NewEvent("focus", false, false))
 }
 
@@ -722,7 +845,9 @@ func (s *Session) SetHover(x, y float32) bool {
 
 	// Unhover the previous element and fire mouseleave.
 	if prev != nil {
-		css.SetHover(prev, false)
+		for current := prev; current != nil && current.Element(); current = current.Parent {
+			css.SetHover(current, false)
+		}
 		dom.DispatchEvent(prev, dom.NewEvent("mouseleave", false, false))
 	}
 
@@ -730,9 +855,49 @@ func (s *Session) SetHover(x, y float32) bool {
 
 	// Hover the new element and fire mouseenter.
 	if hovered != nil {
-		css.SetHover(hovered, true)
+		for current := hovered; current != nil && current.Element(); current = current.Parent {
+			css.SetHover(current, true)
+		}
 		dom.DispatchEvent(hovered, dom.NewEvent("mouseenter", false, false))
 	}
 
+	return true
+}
+
+// SetActiveAt updates the element currently being activated by the primary
+// pointer. Active state follows the hit target while the button is held and is
+// cleared on release; ancestors match as they do for :hover.
+func (s *Session) SetActiveAt(x, y float32, pressed bool) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	var active *dom.Node
+	if pressed && s.Arena != nil {
+		objs := s.Arena.Objects
+		for i := len(objs) - 1; i >= 1; i-- {
+			obj := &objs[i]
+			if obj.Style != nil && obj.Style.PointerEvents == "none" {
+				continue
+			}
+			x0, y0, x1, y1 := obj.BorderRect()
+			if x < x0 || x >= x1 || y < y0 || y >= y1 || obj.Node == nil || !obj.Node.Element() {
+				continue
+			}
+			if obj.Node.HasAttribute("disabled") {
+				break
+			}
+			active = obj.Node
+			break
+		}
+	}
+	if active == s.active {
+		return false
+	}
+	for n := s.active; n != nil && n.Element(); n = n.Parent {
+		css.SetActive(n, false)
+	}
+	s.active = active
+	for n := active; n != nil && n.Element(); n = n.Parent {
+		css.SetActive(n, true)
+	}
 	return true
 }

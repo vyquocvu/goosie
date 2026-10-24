@@ -70,6 +70,13 @@ type Runner interface {
 	Run()
 }
 
+// SavePathPicker is an optional window capability for interactive downloads.
+// A headless window omits it so tests and command-line rendering keep using the
+// configured download directory without opening UI.
+type SavePathPicker interface {
+	ChooseSavePath(directory, filename string) (path string, chosen bool, err error)
+}
+
 // DroppedVsyncer is a window that can say how many pacing ticks it shed because nobody
 // was reading. A frame path that draws slower than the display asks is not an error and
 // is not a slow frame either - it is a skipped one - and a report that cannot tell the

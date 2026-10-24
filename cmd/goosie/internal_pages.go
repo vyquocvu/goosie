@@ -21,6 +21,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/perms"
+	"github.com/vyquocvu/goosie/internal/preferences"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/userscript"
 )
@@ -39,6 +40,7 @@ func internalNavHeader(active string) string {
 		{"inspect", "Inspector", "goosie://inspect"},
 		{"extensions", "Extensions", "goosie://extensions"},
 		{"flags", "Flags", "goosie://flags"},
+		{"settings", "Settings", "goosie://settings"},
 	}
 
 	var b strings.Builder
@@ -626,7 +628,7 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
       </div>
     </div>`)
 
-	dir := f.config.downloadDir
+	dir := f.downloadDirectory()
 	if dir == "" {
 		dir = "~/Downloads"
 	}
@@ -754,6 +756,84 @@ func formatFileSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// buildSettingsPageHTML renders the settings page and handles the deliberately
+// simple GET form used by other Goosie management pages. Settings are profile
+// scoped; private sessions can inspect them but cannot mutate the profile.
+func buildSettingsPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
+	settings := f.currentPreferences()
+	if settings.SearchURLTemplate == "" {
+		settings = preferences.Defaults()
+	}
+	if settings.DownloadDir == "" {
+		settings.DownloadDir = f.downloadDirectory()
+	}
+	notice := ""
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		notice = mgmtNoticeHTML("err", "The settings request could not be parsed.")
+	} else if u.Query().Get("save") == "1" {
+		if f.config.private {
+			notice = mgmtNoticeHTML("err", "Private sessions cannot change profile settings.")
+		} else {
+			candidate := preferences.Settings{
+				SearchURLTemplate:   u.Query().Get("searchURLTemplate"),
+				DownloadDir:         strings.TrimSpace(u.Query().Get("downloadDir")),
+				StartupMode:         u.Query().Get("startupMode"),
+				AskDownloadLocation: u.Query().Get("askDownloadLocation") == "1",
+			}
+			if candidate.DownloadDir == "" {
+				candidate.DownloadDir = settings.DownloadDir
+			}
+			if candidate.StartupMode == "" {
+				candidate.StartupMode = settings.StartupMode
+			}
+			if err := preferences.ValidateSearchURLTemplate(candidate.SearchURLTemplate); err != nil {
+				notice = mgmtNoticeHTML("err", "Search URL was not saved: "+err.Error()+".")
+			} else if err := preferences.ValidateDownloadDir(candidate.DownloadDir); err != nil {
+				notice = mgmtNoticeHTML("err", "Download directory was not saved: "+err.Error()+".")
+			} else if err := preferences.ValidateStartupMode(candidate.StartupMode); err != nil {
+				notice = mgmtNoticeHTML("err", "Startup behavior was not saved: "+err.Error()+".")
+			} else if err := preferences.Save(f.config.preferencesFile, candidate); err != nil {
+				notice = mgmtNoticeHTML("err", "Search URL could not be saved: "+err.Error()+".")
+			} else {
+				settings = candidate
+				f.setPreferences(candidate)
+				notice = mgmtNoticeHTML("ok", "Settings saved for this profile.")
+			}
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="card"><h1>Settings</h1><p>Choose the search URL Goosie uses for address bar queries, where new downloads are saved, and what to open on startup. The URL must use <code>{query}</code> exactly once.</p>`)
+	b.WriteString(notice)
+	if f.config.private {
+		b.WriteString(`<p class="empty-state">Profile settings are read-only in a private session.</p>`)
+	} else {
+		b.WriteString(`<form method="GET" action="goosie://settings" style="max-width:640px;">`)
+		b.WriteString(`<input type="hidden" name="save" value="1">`)
+		b.WriteString(`<div style="margin-bottom:12px;"><label for="search-url" style="display:block;margin-bottom:6px;">Search URL template</label><input id="search-url" name="searchURLTemplate" value="`)
+		b.WriteString(html.EscapeString(settings.SearchURLTemplate))
+		b.WriteString(`" required autocomplete="off" style="display:block;width:100%;padding:8px;border:1px solid #dadce0;border-radius:5px;"></div>`)
+		b.WriteString(`<div style="margin-bottom:12px;"><label for="download-directory" style="display:block;margin-bottom:6px;">Download directory</label><input id="download-directory" name="downloadDir" value="`)
+		b.WriteString(html.EscapeString(settings.DownloadDir))
+		b.WriteString(`" required autocomplete="off" style="display:block;width:100%;padding:8px;border:1px solid #dadce0;border-radius:5px;"></div>`)
+		if settings.AskDownloadLocation {
+			b.WriteString(`<div style="margin-bottom:12px;"><label><input id="ask-download-location" type="checkbox" name="askDownloadLocation" value="1" checked> Ask where to save each download</label></div>`)
+		} else {
+			b.WriteString(`<div style="margin-bottom:12px;"><label><input id="ask-download-location" type="checkbox" name="askDownloadLocation" value="1"> Ask where to save each download</label></div>`)
+		}
+		b.WriteString(`<div style="margin-bottom:12px;"><div style="margin-bottom:6px;">On startup</div>`)
+		if settings.StartupMode == preferences.StartupNewTab {
+			b.WriteString(`<label style="margin-right:16px;"><input id="startup-restore" type="radio" name="startupMode" value="restore"> Continue where you left off</label><label><input id="startup-newtab" type="radio" name="startupMode" value="newtab" checked> Open a new tab</label>`)
+		} else {
+			b.WriteString(`<label style="margin-right:16px;"><input id="startup-restore" type="radio" name="startupMode" value="restore" checked> Continue where you left off</label><label><input id="startup-newtab" type="radio" name="startupMode" value="newtab"> Open a new tab</label>`)
+		}
+		b.WriteString(`</div><button id="save-search" class="btn-action" type="submit">Save</button></form>`)
+	}
+	b.WriteString(`<p style="color:#5f6368;font-size:13px;margin-top:12px;">Example: <code>https://www.google.com/search?q={query}</code></p></div>`)
+	return "Settings", internalPageTemplate("settings", "Settings", b.String())
+}
+
 // buildInternalPageHTML routes goosie:// paths to their respective HTML generators.
 func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent string) {
 	u, err := url.Parse(rawURL)
@@ -787,6 +867,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildExtensionsPageHTML(f, rawURL)
 	case "flags":
 		return buildFlagsPageHTML(f, rawURL)
+	case "settings":
+		return buildSettingsPageHTML(f, rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">
@@ -800,6 +882,7 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
         <li><a class="list-link" href="goosie://inspect">goosie://inspect</a> &mdash; Web Inspector &amp; DOM/CSS Tree Explorer (Cmd+Option+I)</li>
         <li><a class="list-link" href="goosie://extensions">goosie://extensions</a> &mdash; Extensions &amp; User Scripts Manager</li>
         <li><a class="list-link" href="goosie://flags">goosie://flags</a> &mdash; Experiments &amp; Feature Flags</li>
+        <li><a class="list-link" href="goosie://settings">goosie://settings</a> &mdash; Browser preferences</li>
         <li><a class="list-link" href="goosie://reader">goosie://reader</a> &mdash; Distraction-Free Reader Mode (Cmd+Shift+R)</li>
         <li><a class="list-link" href="goosie://restore">goosie://restore</a> &mdash; Session Crash Recovery &amp; Restore Prompt</li>
       </ul>

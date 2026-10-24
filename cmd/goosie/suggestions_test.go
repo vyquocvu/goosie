@@ -8,6 +8,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/bookmarks"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/history"
+	"github.com/vyquocvu/goosie/internal/preferences"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -62,6 +63,21 @@ func TestQuerySuggestions(t *testing.T) {
 	// Empty query returns nil
 	if empty := f.querySuggestions("   "); len(empty) != 0 {
 		t.Errorf("querySuggestions('') = %v, want nil", empty)
+	}
+
+	f.setPreferences(preferences.Settings{SearchURLTemplate: "https://search.example/?q={query}"})
+	settings := f.querySuggestions("settings")
+	if len(settings) < 2 || settings[0].URL != "https://search.example/?q=settings" {
+		t.Fatalf("query suggestion did not use the profile search engine: %+v", settings)
+	}
+	foundSettings := false
+	for _, suggestion := range settings {
+		if suggestion.URL == "goosie://settings" {
+			foundSettings = true
+		}
+	}
+	if !foundSettings {
+		t.Fatalf("settings page not discoverable from omnibox: %+v", settings)
 	}
 }
 

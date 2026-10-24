@@ -159,6 +159,75 @@ func TestFormNavigationOnEnterKey(t *testing.T) {
 	}
 }
 
+func TestAnchorNavigationOnEnterKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, "<!doctype html><title>destination</title><p>destination</p>")
+	}))
+	defer server.Close()
+
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+	f.runCtx, f.runCancel = context.WithCancel(context.Background())
+	defer f.runCancel()
+	f.client = net.DefaultClient()
+	defer f.client.Close()
+	fonts, err := raster.NewFonts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.fonts = fonts
+
+	sess, err := engine.NewSession(`<html><body><a id="next" href="/next">Next page</a></body></html>`, nil, 800, engine.WithMetrics(fonts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab := f.tabMgr.Active()
+	tab.SetURL(server.URL + "/start")
+	tab.SetSession(sess)
+	defer sess.Close()
+	link := sess.Doc.ElementByID("next")
+	if link == nil || !sess.FocusNode(link) {
+		t.Fatal("could not focus destination link")
+	}
+	if !f.contentKey('\r', surface.KeyMod(0)) {
+		t.Fatal("Enter was not handled")
+	}
+	select {
+	case result := <-f.navResults:
+		f.applyNavResult(result)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for anchor navigation")
+	}
+	if got, want := tab.URL(), server.URL+"/next"; got != want {
+		t.Fatalf("URL after Enter = %q, want %q", got, want)
+	}
+}
+
+func TestAnchorEnterPreventDefaultCancelsNavigation(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+	sess, err := engine.NewSession(`<html><body><a id="next" href="https://example.test/next">Next page</a></body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab := f.tabMgr.Active()
+	tab.SetURL("https://example.test/start")
+	tab.SetSession(sess)
+	link := sess.Doc.ElementByID("next")
+	if link == nil || !sess.FocusNode(link) {
+		t.Fatal("could not focus destination link")
+	}
+	dom.AddEventListener(link, "click", func(e *dom.Event) { e.PreventDefault() }, false)
+	if !f.contentKey('\r', surface.KeyMod(0)) {
+		t.Fatal("Enter was not handled")
+	}
+	if tab.URL() != "https://example.test/start" || tab.Nav.Loading {
+		t.Fatalf("prevented Enter changed navigation state: URL=%q loading=%v", tab.URL(), tab.Nav.Loading)
+	}
+}
+
 func TestCheckboxClickToggle(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}

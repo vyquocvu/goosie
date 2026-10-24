@@ -37,19 +37,91 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 			f.handleFormSubmission(tab, sub)
 			return true
 		}
-		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+		sess := tab.Session()
+		if sess.CanDeferControlEditReflow() {
+			f.repaintTab(tab, frame.Rect{})
+			return true
+		}
+		var err error
+		if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") {
+			err = sess.RestyleAndReflow(float32(f.config.width))
+		} else {
+			err = sess.Reflow(float32(f.config.width))
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		}
 		f.repaintTab(tab, frame.Rect{})
 		return true
 	}
 
-	if !tab.Session().FocusControl(dx, dy) {
+	sess := tab.Session()
+	if !sess.FocusControl(dx, dy) {
 		return false
 	}
-	f.setWindowIME(tab.Session().Focused() != nil)
+	f.setWindowIME(sess.Focused() != nil)
+	if !sess.CanDeferControlEditReflow() && (sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-within") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active")) {
+		if err := sess.RestyleAndReflow(float32(f.config.width)); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+		}
+	}
 	f.repaintTab(tab, frame.Rect{})
 	return true
+}
+
+// hoverContent updates page hover state when the pointer changes its topmost
+// element. Re-resolve only when author CSS observes :hover.
+func (f *framePath) hoverContent(contentX, contentY int32) {
+	if f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	sess := tab.Session()
+	dx, dy := f.docPoint(contentX, contentY)
+	if !sess.SetHover(dx, dy) {
+		return
+	}
+	if !sess.HasPseudoClassRule("hover") || sess.CanDeferControlEditReflow() {
+		return
+	}
+	if err := sess.RestyleAndReflow(float32(f.config.width)); err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+	}
+	f.repaintTab(tab, frame.Rect{})
+}
+
+// setContentActive updates :active from primary-pointer input. Restyling is
+// deferred to the click/focus path on press so one interaction performs one
+// style/layout pass when both :active and :focus rules are present.
+func (f *framePath) setContentActive(contentX, contentY int32, pressed bool) bool {
+	if f.tabMgr == nil {
+		return false
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return false
+	}
+	dx, dy := f.docPoint(contentX, contentY)
+	return tab.Session().SetActiveAt(dx, dy, pressed)
+}
+
+// refreshActiveContent applies a pending active-state change after event routing
+// when no focus/control path already included it in its pipeline update.
+func (f *framePath) refreshActiveContent() {
+	if f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil || !tab.Session().HasPseudoClassRule("active") {
+		return
+	}
+	if err := tab.Session().RestyleAndReflow(float32(f.config.width)); err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+	}
+	f.repaintTab(tab, frame.Rect{})
 }
 
 // setWindowIME turns the platform input context on while a document control has
@@ -78,9 +150,7 @@ func (f *framePath) imeEvent(ev surface.Event) bool {
 		return true
 	case surface.IMECommit:
 		if tab.Session().CommitText(ev.Text) {
-			if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
-				fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-			}
+			f.reflowAfterControlEdit(tab)
 		}
 		f.repaintTab(tab, frame.Rect{})
 		return true
@@ -140,9 +210,34 @@ func (f *framePath) copySelection() bool {
 	return true
 }
 
+func (f *framePath) reflowAfterControlEdit(tab *tabs.Tab) {
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	sess := tab.Session()
+	// Edit dispatches input synchronously. If its handler changed the DOM,
+	// PumpJS will re-resolve styles and reflow the final state on the next loop
+	// turn. Reflowing here as well would do a full layout immediately before
+	// that authoritative pass.
+	if sess.CanDeferControlEditReflow() {
+		return
+	}
+	var err error
+	if sess.HasPseudoClassRule("placeholder-shown") {
+		err = sess.RestyleAndReflow(float32(f.config.width))
+	} else if sess.FocusedInputValueDoesNotAffectLayout() {
+		return
+	} else {
+		err = sess.Reflow(float32(f.config.width))
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+	}
+}
+
 // contentKey applies a keyboard edit to the focused control. The event is
 // consumed whenever a control is focused so the address bar is not the only
-// text sink; the tab reflows when the value changed and repaints otherwise.
+// text sink; only edits that can affect layout trigger a reflow.
 func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	if f.tabMgr == nil {
 		return false
@@ -159,8 +254,46 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	if !cmd && f.mediaKey(tab, key) {
 		return true
 	}
+	if !cmd {
+		sess := tab.Session()
+		focused := sess.Focused()
+		enter := key == '\r' || key == '\n'
+		space := key == ' '
+		if focused != nil && (enter && engine.IsActivatable(focused) || space && engine.IsSpaceActivatable(focused)) {
+			keyName := "Enter"
+			if space {
+				keyName = " "
+			}
+			sess.SetMediaActivation(true)
+			activated := sess.PressKey(keyName, mods&surface.ModShift != 0, false, mods&surface.ModOption != 0, false)
+			sess.SetMediaActivation(false)
+			if activated && enter && focused.Data == "a" {
+				if href := focused.GetAttribute("href"); href != "" {
+					f.handleLinkClick(href)
+					return true
+				}
+			}
+			if sub, ok := sess.PopSubmittedForm(); ok {
+				f.handleFormSubmission(tab, sub)
+				return true
+			}
+			if !sess.CanDeferControlEditReflow() {
+				var err error
+				if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") {
+					err = sess.RestyleAndReflow(float32(f.config.width))
+				} else {
+					err = sess.Reflow(float32(f.config.width))
+				}
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+				}
+			}
+			f.repaintTab(tab, frame.Rect{})
+			return true
+		}
+	}
 	if !cmd && !tab.Session().FocusedEditable() {
-		if f.scrollContentKey(tab, key) {
+		if f.scrollContentKey(tab, key, mods&surface.ModShift != 0) {
 			return true
 		}
 	} else if !cmd && (key == keyPageUp || key == keyPageDown) {
@@ -176,10 +309,17 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	if key == '\t' && !cmd {
 		shift := mods&surface.ModShift != 0
 		alt := mods&surface.ModOption != 0
-		tab.Session().PressKey("Tab", shift, false, alt, false)
-		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
-			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-			return true
+		sess := tab.Session()
+		oldFocus := sess.Focused()
+		sess.PressKey("Tab", shift, false, alt, false)
+		focusChanged := sess.Focused() != oldFocus
+		observesFocus := sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-within") || sess.HasPseudoClassRule("focus-visible")
+		if focusChanged && observesFocus && !sess.CanDeferControlEditReflow() {
+			if err := sess.RestyleAndReflow(float32(f.config.width)); err != nil {
+				fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+			}
+		} else {
+			f.reflowAfterControlEdit(tab)
 		}
 		f.repaintTab(tab, frame.Rect{})
 		return true
@@ -203,9 +343,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 					clipText := cb.Read()
 					if clipText != "" {
 						if tab.Session().InsertText(clipText) {
-							if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
-								fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-							}
+							f.reflowAfterControlEdit(tab)
 							f.repaintTab(tab, frame.Rect{})
 							return true
 						}
@@ -273,10 +411,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		if action == engine.EditEscape {
 			f.setWindowIME(false)
 		}
-		if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
-			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-			return true
-		}
+		f.reflowAfterControlEdit(tab)
 	}
 	f.repaintTab(tab, frame.Rect{})
 	return true
@@ -285,7 +420,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 // scrollContentKey handles document navigation keys when an editable control does
 // not own focus. The viewport stores device pixels, so a page step uses its device
 // height and the active layer supplies the legal bottom edge.
-func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune) bool {
+func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune, shift bool) bool {
 	if f.sched == nil || tab == nil || tab.Layer() == nil {
 		return false
 	}
@@ -295,6 +430,11 @@ func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune) bool {
 		page = 1
 	}
 	switch key {
+	case ' ':
+		if shift {
+			return f.scrollContentTo(tab, vp, vp.Offset.Y-page)
+		}
+		return f.scrollContentTo(tab, vp, vp.Offset.Y+page)
 	case keyPageUp:
 		return f.scrollContentTo(tab, vp, vp.Offset.Y-page)
 	case keyPageDown:
@@ -487,7 +627,7 @@ func (f *framePath) printActiveTabToPDF() {
 	if tab == nil || tab.Session() == nil {
 		return
 	}
-	outPath := filepath.Join(f.config.downloadDir, "print.pdf")
+	outPath := filepath.Join(f.downloadDirectory(), "print.pdf")
 	if err := ExportSessionToPDF(tab.Session(), f.fonts, float32(f.config.dpr), outPath); err != nil {
 		fmt.Fprintf(os.Stderr, "goosie: print to PDF error: %v\n", err)
 		return

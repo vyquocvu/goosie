@@ -13,6 +13,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/preferences"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
 )
@@ -98,6 +99,74 @@ func TestBuildInternalPageHTML(t *testing.T) {
 	}
 	if !strings.Contains(htmlContent, "goosie://version") {
 		t.Error("index page missing goosie://version link")
+	}
+
+	title, htmlContent = f.buildInternalPageHTML("goosie://settings")
+	if title != "Settings" || !strings.Contains(htmlContent, "searchURLTemplate") {
+		t.Fatalf("settings page title/content missing: %q", title)
+	}
+}
+
+func TestSettingsPagePersistsSearchEngineAndProtectsPrivateProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	f := newNavTestPath(t)
+	f.config.preferencesFile = path
+	f.config.downloadDir = filepath.Join(t.TempDir(), "downloads")
+	f.setPreferences(preferences.Defaults())
+
+	_, body := f.buildInternalPageHTML("goosie://settings?save=1&searchURLTemplate=https%3A%2F%2Fsearch.example%2F%3Fq%3D%7Bquery%7D")
+	if !strings.Contains(body, "Settings saved") {
+		t.Fatalf("valid search engine was not saved: %s", body)
+	}
+	if got := f.currentPreferences().SearchURLTemplate; got != "https://search.example/?q={query}" {
+		t.Fatalf("active search template = %q", got)
+	}
+	loaded, err := preferences.Load(path)
+	if err != nil || loaded.SearchURLTemplate != f.currentPreferences().SearchURLTemplate {
+		t.Fatalf("persisted preferences = %+v, %v", loaded, err)
+	}
+	if loaded.DownloadDir != f.config.downloadDir {
+		t.Fatalf("saved download directory = %q, want %q", loaded.DownloadDir, f.config.downloadDir)
+	}
+	if loaded.StartupMode != preferences.StartupRestore {
+		t.Fatalf("saved startup mode = %q, want %q", loaded.StartupMode, preferences.StartupRestore)
+	}
+	if loaded.AskDownloadLocation {
+		t.Fatal("save dialog preference should default off")
+	}
+	if got := normalizeAddress("goosie browser", f.currentPreferences().SearchURLTemplate); got != "https://search.example/?q=goosie+browser" {
+		t.Fatalf("configured search destination = %q", got)
+	}
+
+	_, body = f.buildInternalPageHTML("goosie://settings?save=1&searchURLTemplate=https%3A%2F%2Fsearch.example%2F%3Fq%3D%7Bquery%7D&startupMode=newtab&askDownloadLocation=1")
+	if !strings.Contains(body, "Settings saved") {
+		t.Fatalf("new-tab startup setting was not saved: %s", body)
+	}
+	loaded, err = preferences.Load(path)
+	if err != nil || loaded.StartupMode != preferences.StartupNewTab || !loaded.AskDownloadLocation {
+		t.Fatalf("startup setting = %+v, %v; want newtab", loaded, err)
+	}
+	if shouldRestoreSession(false, loaded.StartupMode) {
+		t.Fatal("newtab startup preference still restores the saved session")
+	}
+
+	_, body = f.buildInternalPageHTML("goosie://settings?save=1&searchURLTemplate=javascript%3Aalert%281%29%3Fq%3D%7Bquery%7D")
+	if !strings.Contains(body, "was not saved") {
+		t.Fatalf("invalid scheme was not rejected: %s", body)
+	}
+	loaded, err = preferences.Load(path)
+	if err != nil || loaded.SearchURLTemplate != "https://search.example/?q={query}" || loaded.StartupMode != preferences.StartupNewTab || !loaded.AskDownloadLocation {
+		t.Fatalf("invalid update changed persisted settings: %+v, %v", loaded, err)
+	}
+
+	f.config.private = true
+	_, body = f.buildInternalPageHTML("goosie://settings?save=1&searchURLTemplate=https%3A%2F%2Fevil.example%2F%3Fq%3D%7Bquery%7D")
+	if !strings.Contains(body, "cannot change profile settings") {
+		t.Fatalf("private session did not explain read-only settings: %s", body)
+	}
+	loaded, err = preferences.Load(path)
+	if err != nil || loaded.SearchURLTemplate != "https://search.example/?q={query}" || loaded.StartupMode != preferences.StartupNewTab || !loaded.AskDownloadLocation {
+		t.Fatalf("private update changed persistent settings: %+v, %v", loaded, err)
 	}
 }
 

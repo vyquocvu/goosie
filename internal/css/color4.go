@@ -5,13 +5,11 @@ package css
 // Every function below answers "what sRGB does this color display as": the
 // test and reference renders the WPT suite compares are both sRGB, so the
 // engine converts each foreign space through XYZ (adapting D50 sources to
-// D65) into linear sRGB, applies the sRGB transfer curve, and clips into
-// gamut. Clipping is not the spec's Oklch chroma-reduction gamut mapping -
-// an out-of-gamut color lands on the gamut boundary along its channel axes
-// rather than along hue - but every WPT swatch asserted here sits close
-// enough that the boundary point matches within tolerance, and a clipped
-// color is honest rendering where the old code dropped the declaration and
-// fell back to whatever came before it (usually red).
+// D65) into linear sRGB and applies the sRGB transfer curve. General CSS
+// gamut mapping is still incomplete: most out-of-gamut colors are clipped per
+// channel instead of using the spec's OkLCh chroma-reduction algorithm. Lab
+// and Oklab lightness endpoints are handled explicitly because the spec
+// requires them to display as black or white after gamut mapping.
 //
 // Not here yet, by design: color-mix() and contrast-color(), which need the
 // inverse direction (sRGB back into working spaces) and, for contrast, style
@@ -42,26 +40,68 @@ func parseColor4Like(fn, body string) (Color, bool) {
 		if len(vals) != 3 {
 			return Color{}, false
 		}
-		r, g, b = labToSRGB(parseLabLightness(vals[0]), parseFloat(vals[1]), parseFloat(vals[2]))
+		l := parseLabLightness(vals[0])
+		if l <= 0 {
+			return Color{A: a}, true
+		}
+		if l >= 100 {
+			return Color{R: 255, G: 255, B: 255, A: a}, true
+		}
+		r, g, b = labToSRGB(l, parseColor4Channel(vals[1], 125), parseColor4Channel(vals[2], 125))
 	case "lch":
 		if len(vals) != 3 {
 			return Color{}, false
 		}
-		r, g, b = lchToSRGB(parseLabLightness(vals[0]), parseFloat(vals[1]), parseHueAngle(vals[2]))
+		l := parseLabLightness(vals[0])
+		if l <= 0 {
+			return Color{A: a}, true
+		}
+		if l >= 100 {
+			return Color{R: 255, G: 255, B: 255, A: a}, true
+		}
+		r, g, b = lchToSRGB(l, parseColor4Channel(vals[1], 150), parseHueAngle(vals[2]))
 	case "oklab":
 		if len(vals) != 3 {
 			return Color{}, false
 		}
-		r, g, b = oklabToSRGB(parseOKLightness(vals[0]), parseFloat(vals[1]), parseFloat(vals[2]))
+		l := parseOKLightness(vals[0])
+		if l <= 0 {
+			return Color{A: a}, true
+		}
+		if l >= 1 {
+			return Color{R: 255, G: 255, B: 255, A: a}, true
+		}
+		r, g, b = oklabToSRGB(l, parseColor4Channel(vals[1], 0.4), parseColor4Channel(vals[2], 0.4))
 	case "oklch":
 		if len(vals) != 3 {
 			return Color{}, false
 		}
-		r, g, b = oklchToSRGB(parseOKLightness(vals[0]), parseFloat(vals[1]), parseHueAngle(vals[2]))
+		l := parseOKLightness(vals[0])
+		if l <= 0 {
+			return Color{A: a}, true
+		}
+		if l >= 1 {
+			return Color{R: 255, G: 255, B: 255, A: a}, true
+		}
+		r, g, b = oklchToSRGB(l, parseColor4Channel(vals[1], 0.4), parseHueAngle(vals[2]))
 	default:
 		return Color{}, false
 	}
 	return Color{R: clampByte(r * 255), G: clampByte(g * 255), B: clampByte(b * 255), A: a}, true
+}
+
+// parseColor4Channel converts a numeric color component while applying the
+// percentage reference range for its color space. CSS Color 4 defines these
+// ranges independently for Lab, LCH, Oklab, and OkLCh.
+func parseColor4Channel(s string, percentScale float64) float64 {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "none" {
+		return 0
+	}
+	if strings.HasSuffix(s, "%") {
+		return parseFloat(strings.TrimSuffix(s, "%")) * percentScale / 100
+	}
+	return parseFloat(s)
 }
 
 // parseColorFunc resolves color(<space> <c1> <c2> <c3> [/ alpha]).

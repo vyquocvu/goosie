@@ -277,6 +277,65 @@ func (a *Arena) ForNode(id dom.NodeID) (ObjectID, bool) {
 	return oid, ok
 }
 
+// RefreshComputedStyles replaces per-node style pointers without rebuilding
+// the arena. It is safe only when there are no anonymous boxes: those styles
+// are derived during layout and need the parent context to be rebuilt.
+func (a *Arena) RefreshComputedStyles(styles map[dom.NodeID]*style.ComputedStyle) bool {
+	if a == nil {
+		return false
+	}
+	for i := 1; i < len(a.Objects); i++ {
+		obj := &a.Objects[i]
+		if obj.flags&flagAnonymous != 0 {
+			return false
+		}
+		if obj.Node != nil && obj.Node.ID != 0 {
+			if _, ok := styles[obj.Node.ID]; !ok && obj.Style != nil {
+				return false
+			}
+		}
+	}
+	for i := 1; i < len(a.Objects); i++ {
+		obj := &a.Objects[i]
+		if obj.Node != nil {
+			obj.Style = styles[obj.Node.ID]
+		}
+	}
+	return true
+}
+
+// RefreshComputedStylesForNodes updates styles in a set of existing DOM
+// subtrees without walking unrelated arena objects. It remains unsafe when
+// anonymous boxes exist, because layout-derived anonymous styles need their
+// parent's context rebuilt.
+func (a *Arena) RefreshComputedStylesForNodes(styles map[dom.NodeID]*style.ComputedStyle, nodes []dom.NodeID) bool {
+	if a == nil {
+		return false
+	}
+	for i := 1; i < len(a.Objects); i++ {
+		if a.Objects[i].flags&flagAnonymous != 0 {
+			return false
+		}
+	}
+	if len(nodes) == 0 {
+		return true
+	}
+	wanted := make(map[dom.NodeID]struct{}, len(nodes))
+	for _, id := range nodes {
+		wanted[id] = struct{}{}
+	}
+	for i := 1; i < len(a.Objects); i++ {
+		obj := &a.Objects[i]
+		if obj.Node == nil {
+			continue
+		}
+		if _, ok := wanted[obj.Node.ID]; ok {
+			obj.Style = styles[obj.Node.ID]
+		}
+	}
+	return true
+}
+
 // Link adds kid as the last child of parent. The arena owns the link structure;
 // a pass that reorders children calls Unlink first and then Link in the new
 // order, rather than rewriting the links by hand.

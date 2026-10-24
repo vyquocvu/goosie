@@ -1,6 +1,7 @@
 package js_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -87,6 +88,83 @@ func TestQuerySelectorByTag(t *testing.T) {
 	}
 	if v.Kind != js.KindObject {
 		t.Errorf("el.Kind = %v, want KindObject", v.Kind)
+	}
+}
+
+func TestHTMLElementFocusAndBlurCallbacks(t *testing.T) {
+	doc := testDOM(t)
+	target := doc.NewElement("div")
+	target.SetAttribute("id", "focusable")
+	target.SetAttribute("tabindex", "-1")
+	doc.Body.AppendChild(target)
+	var changes []bool
+	r, err := js.New(js.Options{
+		DOM: doc,
+		OnFocusChange: func(node *dom.Node, focused bool) {
+			if node != target {
+				t.Errorf("focus callback node = %p, want %p", node, target)
+			}
+			changes = append(changes, focused)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	if err := r.Run(`
+		var target = document.getElementById("focusable");
+		target.focus();
+		target.blur();
+	`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(changes) != 2 || !changes[0] || changes[1] {
+		t.Fatalf("focus callbacks = %v, want [true false]", changes)
+	}
+}
+
+func TestElementStyleDeclarationIsLiveAndNotifiesMutation(t *testing.T) {
+	doc := testDOM(t)
+	r := newDOMRuntime(t, doc)
+	mutations := 0
+	r.ChainOnMutation(func() { mutations++ })
+	if err := r.Run(`
+		var el = document.body;
+		var styleBefore = el.style;
+		el.style = "display:inline;background:green";
+		var styleIdentity = styleBefore === el.style;
+		var cssText = el.style.cssText;
+		el.style.backgroundColor = "red";
+		el.style.setProperty("margin-top", "2px", "important");
+		var propertyValue = el.style.getPropertyValue("background-color");
+		var priority = el.style.getPropertyPriority("margin-top");
+		var removed = el.style.removeProperty("background-color");
+	`, "style-declaration"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := doc.Body.GetAttribute("style"); strings.Contains(got, "background-color: red") {
+		t.Errorf("removeProperty did not remove background-color: %q", got)
+	}
+	if got := doc.Body.GetAttribute("style"); !strings.Contains(got, "display: inline") || !strings.Contains(got, "margin-top: 2px !important") {
+		t.Errorf("style writes were not reflected in the style attribute: %q", got)
+	}
+	if identity, ok := r.Global("styleIdentity"); !ok || !identity.Bool {
+		t.Errorf("styleIdentity = %v (present=%v), want true", identity.Bool, ok)
+	}
+	for name, want := range map[string]string{
+		"cssText":       "display:inline;background:green",
+		"propertyValue": "red",
+		"priority":      "important",
+		"removed":       "red",
+	} {
+		value, ok := r.Global(name)
+		if !ok || value.Str != want {
+			t.Errorf("%s = %v (present=%v), want %q", name, value.Str, ok, want)
+		}
+	}
+	if mutations != 4 {
+		t.Errorf("style changes notified mutation %d times, want 4", mutations)
 	}
 }
 

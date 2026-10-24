@@ -40,6 +40,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/perms"
 	"github.com/vyquocvu/goosie/internal/platform"
+	"github.com/vyquocvu/goosie/internal/preferences"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -168,6 +169,8 @@ type framePath struct {
 	userscripts    *userscript.Manager
 	flags          *flags.Manager
 	perms          *perms.Manager
+	preferences    preferences.Settings
+	preferencesMu  sync.RWMutex
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
@@ -175,6 +178,16 @@ type framePath struct {
 func build(c config) (*framePath, error) {
 	dev := c.devSize()
 	scale := float32(c.dpr)
+	profilePreferences, prefErr := preferences.Load(c.preferencesFile)
+	if prefErr != nil {
+		fmt.Fprintf(os.Stderr, "goosie: preferences: %v\n", prefErr)
+	}
+	effectiveDir, err := effectiveDownloadDir(c.downloadDir, c.downloadDirExplicit, profilePreferences.DownloadDir)
+	if err != nil {
+		return nil, fmt.Errorf("goosie: download directory: %w", err)
+	}
+	c.downloadDir = effectiveDir
+	profilePreferences.DownloadDir = c.downloadDir
 
 	fonts, err := raster.NewFonts()
 	if err != nil {
@@ -277,6 +290,7 @@ func build(c config) (*framePath, error) {
 		userscripts:      userscript.NewManager(c.userscriptDir),
 		flags:            flags.NewManager(c.flagsFile),
 		perms:            perms.NewManager(c.permsFile),
+		preferences:      profilePreferences,
 	}
 	if f.theme == "" {
 		f.theme = "system"
@@ -309,10 +323,6 @@ func build(c config) (*framePath, error) {
 				_ = f.window.Close()
 			}
 		})
-		f.tabMgr.OnChange = func() {
-			f.syncTabToToolbar()
-			f.saveActiveSession()
-		}
 		firstTab := f.tabMgr.NewTab()
 		if c.appURL != "" {
 			firstTab.SetStandaloneApp(true)
@@ -331,13 +341,13 @@ func build(c config) (*framePath, error) {
 			}
 		}
 		if c.url != "" {
-			firstTab.SetURL(normalizeURL(c.url))
+			firstTab.SetURL(normalizeAddress(c.url, profilePreferences.SearchURLTemplate))
 			firstTab.SetTitle(firstTab.URL())
 		} else if f.crashedSession != nil {
 			firstTab.SetURL("goosie://restore")
 			firstTab.SetTitle("Restore Session - Goosie")
 			f.restoredActiveURL = "goosie://restore"
-		} else if !c.private {
+		} else if shouldRestoreSession(c.private, profilePreferences.StartupMode) {
 			if st, err := session.Load(c.sessionFile); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
 			} else if len(st.Tabs) > 0 {
@@ -345,6 +355,15 @@ func build(c config) (*framePath, error) {
 			}
 		}
 		f.syncTabToToolbar()
+		// Wire persistence only after startup has inspected and applied the
+		// previous active-session journal. NewTab fires OnChange immediately;
+		// installing the callback first would overwrite the crash journal with
+		// the empty startup tab before it can be read.
+		f.tabMgr.OnChange = func() {
+			f.syncTabToToolbar()
+			f.saveActiveSession()
+		}
+		f.saveActiveSession()
 
 		f.toolbar.OnNavigate = func(rawURL string) {
 			f.navigateTab(rawURL)
@@ -445,6 +464,32 @@ func (f *framePath) setTheme(theme string) {
 	}
 }
 
+func (f *framePath) currentPreferences() preferences.Settings {
+	f.preferencesMu.RLock()
+	defer f.preferencesMu.RUnlock()
+	return f.preferences
+}
+
+func (f *framePath) setPreferences(settings preferences.Settings) {
+	f.preferencesMu.Lock()
+	f.preferences = settings
+	f.preferencesMu.Unlock()
+	if f.downloads != nil {
+		f.downloads.SetDir(settings.DownloadDir)
+	}
+}
+
+func (f *framePath) downloadDirectory() string {
+	if dir := f.currentPreferences().DownloadDir; dir != "" {
+		return dir
+	}
+	return f.config.downloadDir
+}
+
+func shouldRestoreSession(private bool, startupMode string) bool {
+	return !private && startupMode != preferences.StartupNewTab
+}
+
 // querySuggestions searches bookmarks, visit history, and search engine completions for omnibox query.
 func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	q := strings.TrimSpace(query)
@@ -455,10 +500,13 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	var out []toolbar.Suggestion
 	seen := make(map[string]bool)
 
-	// 1. Search Google query suggestion
-	searchURL := "https://www.google.com/search?q=" + url.QueryEscape(q)
+	// 1. Search suggestion using the profile's configured engine.
+	searchURL, err := preferences.SearchURL(f.currentPreferences().SearchURLTemplate, q)
+	if err != nil {
+		searchURL = "https://www.google.com/search?q=" + url.QueryEscape(q)
+	}
 	out = append(out, toolbar.Suggestion{
-		Title: "Search Google for " + q,
+		Title: "Search the web for " + q,
 		URL:   searchURL,
 		Kind:  toolbar.SuggestSearch,
 	})
@@ -473,6 +521,7 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 		{"Bookmarks Manager", "goosie://bookmarks"},
 		{"Browsing History", "goosie://history"},
 		{"Downloads Manager", "goosie://downloads"},
+		{"Browser Settings", "goosie://settings"},
 	}
 	for _, p := range internalPages {
 		pagePath := strings.TrimPrefix(p.URL, "goosie://")
@@ -609,6 +658,9 @@ func (f *framePath) openWindow() error {
 		// the window's event stream).
 		if cw, ok := f.window.(*chromeWindow); ok {
 			cw.setTick(f.config.vsyncPeriod(), f.pumpChrome)
+			cw.onContentHover = f.hoverContent
+			cw.onContentActive = f.setContentActive
+			cw.onActiveStyle = f.refreshActiveContent
 			cw.onMediaControl = f.handleMediaControl
 			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
 			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
@@ -634,9 +686,7 @@ func (f *framePath) openWindow() error {
 				f.setWindowIME(true)
 				valueChanged := tab.Session().SetFocusedText(value)
 				if focusChanged || valueChanged {
-					if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
-						fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-					}
+					f.reflowAfterControlEdit(tab)
 				}
 				f.repaintTab(tab, frame.Rect{})
 				return true

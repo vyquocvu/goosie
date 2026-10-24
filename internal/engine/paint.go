@@ -38,6 +38,7 @@ func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
 // the builder multiplies every CSS-pixel coordinate by it to produce device
 // pixels.
 func (s *Session) Paint(scale float32) *paint.List {
+	s.workCounts.displayListBuilds.Add(1)
 	// Size the slab from the box count so a first paint does not grow it
 	// repeatedly: each growth copies every DisplayCmd published so far, and a
 	// DisplayCmd is a wide value. A box emits a small handful of commands, so

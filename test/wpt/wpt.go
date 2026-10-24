@@ -137,6 +137,9 @@ type Config struct {
 	Commit string `json:"commit"`
 	// Directories lists the WPT subdirectories to test, e.g. ["css/css-color"].
 	Directories []string `json:"directories"`
+	// Include restricts discovery to paths or glob patterns relative to the WPT
+	// root. Empty means the configured directories are used in full.
+	Include []string `json:"include"`
 	// Exclude lists glob patterns for tests to skip.
 	Exclude []string `json:"exclude"`
 	// PassThreshold is the pixel-match percentage required for a reftest to pass.

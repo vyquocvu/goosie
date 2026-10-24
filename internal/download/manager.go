@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -108,13 +109,15 @@ type Manager struct {
 	byID      map[string]*Item
 	seq       int64
 	listeners []func(*Item)
+	cancel    map[string]context.CancelFunc
 }
 
 // NewManager creates a download manager saving by default to dir.
 func NewManager(dir string) *Manager {
 	return &Manager{
-		dir:  dir,
-		byID: make(map[string]*Item),
+		dir:    dir,
+		byID:   make(map[string]*Item),
+		cancel: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -175,9 +178,13 @@ func (m *Manager) Complete(id string, localPath string) {
 	if !ok {
 		return
 	}
+	if item.Status == StatusCanceled || item.Status == StatusFailed {
+		return
+	}
 	item.LocalPath = localPath
 	item.Status = StatusCompleted
 	item.EndTime = time.Now()
+	delete(m.cancel, id)
 	if item.TotalBytes > 0 {
 		item.DownloadedBytes = item.TotalBytes
 	}
@@ -193,8 +200,12 @@ func (m *Manager) Fail(id string, err error) {
 	if !ok {
 		return
 	}
+	if item.Status == StatusCanceled || item.Status == StatusCompleted {
+		return
+	}
 	item.Status = StatusFailed
 	item.EndTime = time.Now()
+	delete(m.cancel, id)
 	if err != nil {
 		item.Error = err.Error()
 	}
@@ -204,17 +215,45 @@ func (m *Manager) Fail(id string, err error) {
 // Cancel terminates and marks an item as canceled.
 func (m *Manager) Cancel(id string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	item, ok := m.byID[id]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
 	if item.Status == StatusActive || item.Status == StatusQueued {
 		item.Status = StatusCanceled
 		item.EndTime = time.Now()
+		cancel := m.cancel[id]
+		delete(m.cancel, id)
 		m.notify(item)
+		m.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		return
 	}
+	m.mu.Unlock()
+}
+
+// SetCancel attaches the operation canceler to an active download. If the
+// item was already canceled, cancel is invoked immediately to close the race
+// between publishing the item and attaching its network request.
+func (m *Manager) SetCancel(id string, cancel context.CancelFunc) {
+	if cancel == nil {
+		return
+	}
+	m.mu.Lock()
+	item, ok := m.byID[id]
+	if !ok || item.Status == StatusCanceled || item.Status == StatusCompleted || item.Status == StatusFailed {
+		m.mu.Unlock()
+		cancel()
+		return
+	}
+	if m.cancel == nil {
+		m.cancel = make(map[string]context.CancelFunc)
+	}
+	m.cancel[id] = cancel
+	m.mu.Unlock()
 }
 
 // Get finds an item by ID.

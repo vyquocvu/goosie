@@ -28,8 +28,13 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 		for _, src := range authorCSS {
 			sheets = append(sheets, css.ParseWithOptions(src, s.mediaOptions()))
 		}
-		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
-		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
+		s.sheets = sheets
+		s.styleResolver = style.NewResolver(sheets)
+		s.workCounts.styleResolves.Add(1)
+		s.Styles = s.styleResolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+		s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
+		s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, s.Styles, s.customFonts)
+		s.workCounts.layoutBuilds.Add(1)
 		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
@@ -46,8 +51,13 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 		for _, src := range authorCSS {
 			sheets = append(sheets, css.ParseWithOptions(src, s.mediaOptions()))
 		}
-		s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
-		s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
+		s.sheets = sheets
+		s.styleResolver = style.NewResolver(sheets)
+		s.workCounts.styleResolves.Add(1)
+		s.Styles = s.styleResolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+		s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
+		s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, s.Styles, s.customFonts)
+		s.workCounts.layoutBuilds.Add(1)
 		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
@@ -73,15 +83,20 @@ func (s *Session) RefreshNode(node *dom.Node, authorCSS []string, viewportW floa
 	for _, src := range authorCSS {
 		sheets = append(sheets, css.ParseWithOptions(src, s.mediaOptions()))
 	}
+	s.sheets = sheets
+	s.styleResolver = style.NewResolver(sheets)
 
 	// Build a parent chain to compute the node's style context.
 	// For now, re-run the full style resolution. A production implementation
 	// would only re-style the affected subtree.
-	s.Styles = style.ResolveViewport(s.Doc, sheets, s.styleViewport(), s.customFonts)
-	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, sheets, s.Styles, s.customFonts)
+	s.workCounts.styleResolves.Add(1)
+	s.Styles = s.styleResolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+	s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
+	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, s.Styles, s.customFonts)
 
 	// Rebuild the arena. A production implementation would only re-layout
 	// the affected subtree.
+	s.workCounts.layoutBuilds.Add(1)
 	s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 	layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 	layout.Inline(s.Arena, layout.ObjectID(1))

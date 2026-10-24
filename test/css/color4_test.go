@@ -26,6 +26,17 @@ func TestColor4SpacesResolveToSRGB(t *testing.T) {
 		{"lab(0% 0 0)", 0, 0, 0},
 		{"oklab(1 0 0)", 255, 255, 255},
 		{"oklab(0 0 0)", 0, 0, 0},
+		// CSS Color 4 percentage reference ranges: 100% of Oklab a/b is
+		// 0.4, and 100% of OkLCh chroma is 0.4. These WPT values encode
+		// sRGB green (#008000).
+		{"oklab(51.975% -35.075% 26.92%)", 0, 128, 0},
+		{"oklch(51.975% 44.215% 142.495)", 0, 128, 0},
+		// At the lightness endpoints, gamut mapping yields achromatic
+		// black/white regardless of the supplied chroma or hue.
+		{"lch(100% 110 60)", 255, 255, 255},
+		{"lch(0% 110 60)", 0, 0, 0},
+		{"oklch(100% 110 60)", 255, 255, 255},
+		{"oklch(0% 1.1 60)", 0, 0, 0},
 	} {
 		got, ok := css.ParseColor(c.src)
 		if !ok {

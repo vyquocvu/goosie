@@ -1435,23 +1435,65 @@ func Resolve(doc *dom.Document, sheets []*css.Stylesheet, fonts *CustomFonts) ma
 	return ResolveViewport(doc, sheets, Viewport{}, fonts)
 }
 
+// Resolver compiles the stylesheet selector index once and reuses it across
+// style and pseudo-element passes. Keep one Resolver per document because
+// selector matching uses scratch marks and registered custom properties are
+// document-scoped.
+type Resolver struct {
+	mu                         sync.Mutex
+	index                      *ruleIndex
+	incrementalInteractiveSafe bool
+	hasSnapshot                bool
+	snapshotViewport           Viewport
+	snapshotInputs             treeInputSnapshot
+	snapshotStates             map[dom.NodeID]interactiveSnapshot
+	snapshotProperties         map[string]dom.PropertyDefinition
+}
+
+// NewResolver compiles sheets for repeated resolution passes. Callers should
+// create a new Resolver when the stylesheet set changes.
+func NewResolver(sheets []*css.Stylesheet) *Resolver {
+	allSheets := make([]*css.Stylesheet, 0, len(sheets)+1)
+	allSheets = append(allSheets, UserAgentStylesheet())
+	allSheets = append(allSheets, sheets...)
+	index := buildRuleIndex(allSheets)
+	interactiveSafe, _ := interactiveSelectorSupport(index.selectors)
+	return &Resolver{index: index, incrementalInteractiveSafe: interactiveSafe}
+}
+
+// ResolveViewport computes styles using the resolver's compiled index.
+func (r *Resolver) ResolveViewport(doc *dom.Document, vp Viewport, fonts *CustomFonts) map[dom.NodeID]*ComputedStyle {
+	if r == nil || r.index == nil || doc == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.index.loadDocumentProperties(doc)
+	result := make(map[dom.NodeID]*ComputedStyle)
+	six := css.NewSiblingIndex()
+	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
+		resolveNode(c, r.index, result, vp, fonts, six)
+	}
+	r.snapshotInteractiveState(doc, vp)
+	return result
+}
+
+// ResolvePseudoElements computes generated pseudo styles using the same
+// compiled index as ResolveViewport.
+func (r *Resolver) ResolvePseudoElements(doc *dom.Document, elementStyles map[dom.NodeID]*ComputedStyle, fonts *CustomFonts) map[PseudoKey]*ComputedStyle {
+	if r == nil || r.index == nil || doc == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return resolvePseudoElements(doc, r.index, elementStyles, fonts)
+}
+
 // ResolveViewport computes the style for every element in a document laid out in
 // the given viewport. fonts is the document's own @font-face table, or nil when
 // it declares none.
 func ResolveViewport(doc *dom.Document, sheets []*css.Stylesheet, vp Viewport, fonts *CustomFonts) map[dom.NodeID]*ComputedStyle {
-	allSheets := []*css.Stylesheet{UserAgentStylesheet()}
-	allSheets = append(allSheets, sheets...)
-
-	index := buildRuleIndex(allSheets)
-	index.loadDocumentProperties(doc)
-	result := make(map[dom.NodeID]*ComputedStyle)
-	// One sibling cache for the whole pass: :nth-child counting would
-	// otherwise walk siblings per tested element (O(siblings²) per parent).
-	six := css.NewSiblingIndex()
-	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
-		resolveNode(c, index, result, vp, fonts, six)
-	}
-	return result
+	return NewResolver(sheets).ResolveViewport(doc, vp, fonts)
 }
 
 func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedStyle, vp Viewport, fonts *CustomFonts, six *css.SiblingIndex) {

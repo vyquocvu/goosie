@@ -55,6 +55,9 @@ type Session struct {
 	// deferred fonts land, styles must be re-resolved against the now-populated
 	// customFonts table so text picks the web faces instead of system fallbacks.
 	sheets []*css.Stylesheet
+	// styleResolver retains the compiled selector index for the current sheet
+	// set, avoiding a stylesheet-wide index rebuild on each interaction pass.
+	styleResolver *style.Resolver
 
 	imgBase  string
 	imgFetch ImageFetcher
@@ -120,12 +123,15 @@ type Session struct {
 	// the caret: painted but not yet the value. focusValue records the
 	// control's value when it gained focus so blur can fire a change event
 	// if the value was modified during the focus session.
-	focus         *dom.Node
-	hovered       *dom.Node
-	caret         int
-	marked        string
-	focusValue    string
-	submittedForm *FormSubmission
+	focus             *dom.Node
+	focusState        atomic.Pointer[dom.Node]
+	hovered           *dom.Node
+	active            *dom.Node
+	caret             int
+	marked            string
+	focusValue        string
+	focusStylePending bool
+	submittedForm     *FormSubmission
 
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
@@ -151,6 +157,11 @@ type Session struct {
 	// Animations tracks active @keyframes animations. nil when no animations
 	// have been started.
 	Animations *AnimationController
+
+	// workCounts are per-session pipeline counters. They are intentionally
+	// monotonic so tests and diagnostics can take before/after snapshots around
+	// user interactions without relying on wall-clock timings.
+	workCounts pipelineWorkCounts
 
 	// inv is the caller's invalidation batch. When non-nil, JSMutationSink
 	// records DOM mutations into it so the pipeline knows to re-style and
@@ -178,6 +189,40 @@ type Session struct {
 	// while it is nonzero and retries next tick, so a pump reflow never
 	// reads a half-attached document.
 	deferredActive int32
+}
+
+// WorkCounts reports how many expensive pipeline stages this session has run.
+// The counters are useful for deterministic performance assertions: tests can
+// compare snapshots around an interaction and catch redundant restyles,
+// relayouts, or display-list builds without timing a machine-dependent path.
+// StyleNodeVisits counts nodes actually given to the style resolver; an
+// incremental interaction can resolve fewer than the full document.
+type WorkCounts struct {
+	StyleResolves     uint64
+	StyleNodeVisits   uint64
+	LayoutBuilds      uint64
+	DisplayListBuilds uint64
+}
+
+type pipelineWorkCounts struct {
+	styleResolves     atomic.Uint64
+	styleNodeVisits   atomic.Uint64
+	layoutBuilds      atomic.Uint64
+	displayListBuilds atomic.Uint64
+}
+
+// WorkCounts returns a concurrency-safe snapshot of this session's pipeline
+// work counters.
+func (s *Session) WorkCounts() WorkCounts {
+	if s == nil {
+		return WorkCounts{}
+	}
+	return WorkCounts{
+		StyleResolves:     s.workCounts.styleResolves.Load(),
+		StyleNodeVisits:   s.workCounts.styleNodeVisits.Load(),
+		LayoutBuilds:      s.workCounts.layoutBuilds.Load(),
+		DisplayListBuilds: s.workCounts.displayListBuilds.Load(),
+	}
 }
 
 // CSSLinker fetches one linked style sheet. base is the document URL the href
@@ -384,6 +429,14 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// engine's arena references.
 	if s.jsRT != nil {
 		s.jsRT.SetDOM(doc)
+		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
+		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
+			if focused {
+				s.FocusNode(node)
+			} else {
+				s.BlurNode(node)
+			}
+		})
 		// The media bridge goes in before any script runs, so a page that reads
 		// video.readyState while parsing sees the same element a later script
 		// does, and so play() cannot be reached before the controller exists.
@@ -399,14 +452,20 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		s.runUserScripts(userscript.RunAtDocumentStart)
 	}
 	s.runScripts()
+	s.opMu.Lock()
+	s.clearDetachedFocusLocked()
+	s.opMu.Unlock()
 	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
 	if err != nil {
 		return nil, err
 	}
 	s.loadFonts(sheets)
 	s.sheets = sheets
-	s.Styles = style.ResolveViewport(doc, sheets, s.styleViewport(), s.customFonts)
-	s.PseudoStyles = style.ResolvePseudoElements(doc, sheets, s.Styles, s.customFonts)
+	s.styleResolver = style.NewResolver(sheets)
+	s.workCounts.styleResolves.Add(1)
+	s.Styles = s.styleResolver.ResolveViewport(doc, s.styleViewport(), s.customFonts)
+	s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
+	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(doc, s.Styles, s.customFonts)
 	s.startAnimations()
 	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
@@ -479,8 +538,13 @@ func (s *Session) RefreshAfterFonts() {
 	if len(s.sheets) == 0 {
 		return
 	}
-	s.Styles = style.ResolveViewport(s.Doc, s.sheets, s.styleViewport(), s.customFonts)
-	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, s.sheets, s.Styles, s.customFonts)
+	s.workCounts.styleResolves.Add(1)
+	if s.styleResolver == nil {
+		s.styleResolver = style.NewResolver(s.sheets)
+	}
+	s.Styles = s.styleResolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+	s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
+	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, s.Styles, s.customFonts)
 }
 
 // applyFontJobs fetches font bytes through a bounded worker pool and registers
@@ -1155,6 +1219,7 @@ func (s *Session) Reflow(viewportW float32) error {
 	if err := s.validateLayoutInput(); err != nil {
 		return err
 	}
+	s.workCounts.layoutBuilds.Add(1)
 	candidate := layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 	candidate.Metrics = s.metrics
 	candidate.NaturalSizes = s.natural
@@ -1954,6 +2019,20 @@ func isClassicScript(n *dom.Node) bool {
 func (s *Session) Close() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	for n := s.active; n != nil && n.Element(); n = n.Parent {
+		css.SetActive(n, false)
+	}
+	for n := s.hovered; n != nil && n.Element(); n = n.Parent {
+		css.SetHover(n, false)
+	}
+	if s.focus != nil {
+		css.SetFocus(s.focus, false)
+		css.SetFocusVisible(s.focus, false)
+	}
+	s.active = nil
+	s.hovered = nil
+	s.focus = nil
+	s.focusState.Store(nil)
 	if s.media != nil {
 		s.media.closeAll()
 	}
@@ -2025,9 +2104,9 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	canvasChanged := canvasBefore != s.jsRT.CanvasVisualStamp()
 	// Mutation state is captured before Reset: it decides between a full
 	// re-resolve and skipping straight to repaint below.
-	mutated := false
+	mutated := s.focusStylePending
 	if s.inv != nil {
-		mutated = !s.inv.Empty()
+		mutated = mutated || !s.inv.Empty()
 		s.inv.Reset()
 	}
 	if !mutated {
@@ -2038,22 +2117,85 @@ func (s *Session) PumpJS(viewportW float32) bool {
 		return canvasChanged
 	}
 	if atomic.LoadInt32(&s.deferredActive) > 0 {
+		s.focusStylePending = true
 		return false
 	}
+	s.focusStylePending = false
 	// Re-resolve before reflowing: scripts may have added nodes or classes
 	// the load-time cascade never saw, and unstyled nodes are skipped by
 	// layout. Stored sheets (linked and imported, in order) resolve exactly
 	// as at load. Reflow takes opMu itself; PumpJS composes locked
 	// primitives and never holds it, so reflow cannot deadlock against a
 	// concurrent Close.
-	s.opMu.Lock()
-	s.Styles = style.ResolveViewport(s.Doc, s.sheets, s.styleViewport(), s.customFonts)
-	s.PseudoStyles = style.ResolvePseudoElements(s.Doc, s.sheets, s.Styles, s.customFonts)
-	s.opMu.Unlock()
-	if err := s.Reflow(viewportW); err != nil {
+	if err := s.RestyleAndReflow(viewportW); err != nil {
 		return false
 	}
 	return true
+}
+
+// RestyleAndReflow resolves the document's current CSS state and rebuilds its
+// layout when a layout input changed. For geometry-neutral style changes it
+// refreshes arena style pointers and leaves the existing layout in place. It is
+// used when an interaction changes selector state such as :checked, :focus, or
+// :placeholder-shown without a script DOM mutation.
+func (s *Session) RestyleAndReflow(viewportW float32) error {
+	if s == nil {
+		return nil
+	}
+	s.opMu.Lock()
+	s.clearDetachedFocusLocked()
+	s.workCounts.styleResolves.Add(1)
+	if s.styleResolver == nil {
+		s.styleResolver = style.NewResolver(s.sheets)
+	}
+	if incremental, ok := s.styleResolver.ResolveInteractiveStates(s.Doc, s.styleViewport(), s.customFonts, s.Styles, s.PseudoStyles); ok {
+		s.workCounts.styleNodeVisits.Add(uint64(incremental.Visited))
+		layoutChanged := interactiveLayoutChanged(incremental, s.Styles, s.PseudoStyles)
+		if !layoutChanged && s.Arena.RefreshComputedStylesForNodes(s.Styles, incremental.Nodes) {
+			s.opMu.Unlock()
+			return nil
+		}
+		s.opMu.Unlock()
+		return s.Reflow(viewportW)
+	}
+	styles := s.styleResolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+	pseudoStyles := s.styleResolver.ResolvePseudoElements(s.Doc, styles, s.customFonts)
+	s.workCounts.styleNodeVisits.Add(uint64(len(styles)))
+	if sameLayoutStyles(s.Styles, styles) && sameLayoutPseudoStyles(s.PseudoStyles, pseudoStyles) && s.Arena.RefreshComputedStyles(styles) {
+		s.Styles = styles
+		s.PseudoStyles = pseudoStyles
+		s.opMu.Unlock()
+		return nil
+	}
+	s.Styles = styles
+	s.PseudoStyles = pseudoStyles
+	s.opMu.Unlock()
+	return s.Reflow(viewportW)
+}
+
+// HasPseudoClassRule reports whether an author stylesheet contains a selector
+// that depends on pseudo. Interaction code uses it to avoid a full document
+// style and layout pass when changing a state that no page rule observes.
+func (s *Session) HasPseudoClassRule(pseudo string) bool {
+	if s == nil || pseudo == "" {
+		return false
+	}
+	needle := ":" + strings.ToLower(strings.TrimSpace(pseudo))
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	for _, sheet := range s.sheets {
+		if sheet == nil {
+			continue
+		}
+		for _, rule := range sheet.Rules {
+			for _, selector := range rule.SelectorStrs {
+				if strings.Contains(strings.ToLower(selector), needle) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // JSMutationSink returns a function suitable for js.Options.OnMutation that
@@ -2070,6 +2212,66 @@ func (s *Session) JSMutationSink() func() {
 			s.inv.Add(DOMMutation, frame.RectF{}, 0)
 		}
 	}
+}
+
+// HasPendingDOMMutation reports whether a synchronous script callback has
+// changed the document since the last PumpJS. Input handlers run inside Edit;
+// when one mutates the DOM, the pump will restyle and reflow the resulting
+// state. The caller can avoid doing a native reflow immediately before that
+// full mutation pass. Invalidation is single-owner and this query must be made
+// on the same thread that dispatches document events and calls PumpJS.
+func (s *Session) HasPendingDOMMutation() bool {
+	return s != nil && s.inv != nil && s.inv.domMutationPending
+}
+
+// CanDeferControlEditReflow reports whether the next PumpJS turn can perform
+// the style and layout work for a synchronous input-handler mutation. While
+// deferred resources are active PumpJS intentionally postpones that work, so
+// the caller must keep its immediate reflow instead of leaving stale geometry
+// on screen.
+func (s *Session) CanDeferControlEditReflow() bool {
+	return s.HasPendingDOMMutation() && atomic.LoadInt32(&s.deferredActive) == 0
+}
+
+// FocusedInputValueDoesNotAffectLayout reports whether the focused control is
+// a single-line text input whose intrinsic box size is independent of its
+// current value. Paint reads that value directly from the DOM node, so a
+// repaint is sufficient unless an input handler queued a DOM mutation (which
+// CanDeferControlEditReflow handles separately). Textareas and button-like
+// inputs are deliberately excluded: their content can participate in layout.
+func (s *Session) FocusedInputValueDoesNotAffectLayout() bool {
+	if s == nil {
+		return false
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.focus == nil || s.focus.DataAtom != dom.AtomInput {
+		return false
+	}
+	switch strings.ToLower(s.focus.GetAttribute("type")) {
+	case "", "text", "password", "email", "tel", "url", "search", "number":
+		return true
+	default:
+		return false
+	}
+}
+
+// ActiveElement returns the focused node without taking the pipeline mutex so
+// scripts can read document.activeElement from inside focus/blur handlers.
+func (s *Session) ActiveElement() *dom.Node {
+	if s == nil {
+		return nil
+	}
+	if n := s.focusState.Load(); n != nil {
+		return n
+	}
+	if s.Doc == nil {
+		return nil
+	}
+	if s.Doc.Body != nil {
+		return s.Doc.Body
+	}
+	return s.Doc.HTML
 }
 
 // TickAnimations advances all active animations to the given time.

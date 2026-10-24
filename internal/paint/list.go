@@ -1,6 +1,8 @@
 package paint
 
 import (
+	"image"
+	"reflect"
 	"slices"
 
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -172,6 +174,72 @@ func (d *LayerDL) At(i int) DisplayCmd { return d.cmds[i] }
 
 // All returns every command in paint order. The slice is shared and read-only.
 func (d *LayerDL) All() []DisplayCmd { return d.cmds }
+
+// ContentDamage includes old and new ink, so reflow cannot leave displaced pixels cached.
+func ContentDamage(before, after frame.Content) frame.Rect {
+	old, oldOK := before.(*LayerDL)
+	next, nextOK := after.(*LayerDL)
+	if !oldOK || !nextOK || old.Version() != next.Version() {
+		var dirty frame.Rect
+		if before != nil {
+			dirty = before.Extent()
+		}
+		if after != nil {
+			dirty = dirty.Union(after.Extent())
+		}
+		return dirty
+	}
+	var dirty frame.Rect
+	add := func(cmd DisplayCmd) {
+		if bounds, ok := cmd.Bounds(); ok {
+			dirty = dirty.Union(bounds)
+		}
+	}
+	if len(old.cmds) == len(next.cmds) {
+		for i, cmd := range old.cmds {
+			if !sameCommand(cmd, next.cmds[i]) {
+				add(cmd)
+				add(next.cmds[i])
+			}
+		}
+		return dirty
+	}
+	start, oldEnd, newEnd := 0, len(old.cmds), len(next.cmds)
+	for start < oldEnd && start < newEnd && sameCommand(old.cmds[start], next.cmds[start]) {
+		start++
+	}
+	for oldEnd > start && newEnd > start && sameCommand(old.cmds[oldEnd-1], next.cmds[newEnd-1]) {
+		oldEnd--
+		newEnd--
+	}
+	for _, cmd := range old.cmds[start:oldEnd] {
+		add(cmd)
+	}
+	for _, cmd := range next.cmds[start:newEnd] {
+		add(cmd)
+	}
+	return dirty
+}
+
+func sameCommand(a, b DisplayCmd) bool {
+	return a.Kind == b.Kind && a.Rect == b.Rect && a.Color == b.Color &&
+		a.Border == b.Border && a.Radius == b.Radius && a.Opacity == b.Opacity &&
+		a.Clip == b.Clip && a.Z == b.Z && a.Filter == b.Filter && a.BackdropFilter == b.BackdropFilter &&
+		a.Text.Color == b.Text.Color && slices.Equal(a.Text.Glyphs, b.Text.Glyphs) &&
+		a.Image.SrcBox == b.Image.SrcBox && sameImage(a.Image.Src, b.Image.Src) && sameImage(a.Mask, b.Mask) &&
+		a.Gradient.Angle == b.Gradient.Angle && slices.Equal(a.Gradient.Stops, b.Gradient.Stops) &&
+		a.RadialGradient.Shape == b.RadialGradient.Shape && a.RadialGradient.Cx == b.RadialGradient.Cx &&
+		a.RadialGradient.Cy == b.RadialGradient.Cy && slices.Equal(a.RadialGradient.Stops, b.RadialGradient.Stops)
+}
+
+// Images are immutable; compare identity without walking decoded pixels or assuming a comparable implementation.
+func sameImage(a, b image.Image) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	typ := reflect.TypeOf(a)
+	return typ == reflect.TypeOf(b) && typ.Comparable() && a == b
+}
 
 // Intersecting returns the tightest contiguous span of the paint order that
 // contains every command touching r.

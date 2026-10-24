@@ -3,7 +3,7 @@
 - Cập nhật: 2026-10-22
 - Đối tượng: bản Goosie cho macOS và đường render headless dùng chung engine.
 - Mục đích: xác nhận các hành trình duyệt cốt lõi, điều tra lỗi render nhấp nháy trên https://about.google/products/, và tạo tiêu chí phát hành có bằng chứng.
-- Bộ case chi tiết: [qa-test-catalog.md](qa-test-catalog.md), gồm 180 case theo tính năng; 15 QA case trong tài liệu này là kịch bản release tổng hợp.
+- Bộ case chi tiết: [qa-test-catalog.md](qa-test-catalog.md), gồm 185 case theo tính năng; 15 QA case trong tài liệu này là kịch bản release tổng hợp.
 - Trạng thái lần chạy: smoke CUA QA-001/QA-002 ngày 2026-10-21; kiểm thử tự động toàn repo và Chromium render parity chạy lại ngày 2026-10-22. Native CUA cho bookmark/history bị BLOCKED vì không có display window khả dụng trong phiên này.
 
 ## 1. Phạm vi
@@ -246,7 +246,7 @@ Nếu thay đổi render/UI, bổ sung visual parity và CUA native cho các TC 
 
 ## 5. Definition of Done — QA sign-off
 
-- [ ] Các case P0/P1 trong [catalog BR-001–BR-180](qa-test-catalog.md) thuộc phạm vi release đã có kết quả và bằng chứng; case DEFERRED có roadmap item/owner và không được tính là PASS.
+- [ ] Các case P0/P1 trong [catalog BR-001–BR-185](qa-test-catalog.md) thuộc phạm vi release đã có kết quả và bằng chứng; case DEFERRED có roadmap item/owner và không được tính là PASS.
 - [ ] Build SHA, OS, viewport, zoom, profile, URL/fixture và trạng thái mạng được ghi cho từng lượt.
 - [ ] QA-001, QA-004, QA-005, QA-006 và QA-014 đạt trên môi trường đại diện; không còn P0 mở.
 - [ ] Lỗi nhấp nháy QA-002 được tái hiện hoặc có bằng chứng không tái hiện được; nếu tái hiện, có fixture regression ổn định trước khi đóng lỗi.

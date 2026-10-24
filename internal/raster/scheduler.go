@@ -205,9 +205,10 @@ func (s *Scheduler) SetPlan(p frame.FramePlan) { s.slot.Publish(p) }
 
 // layerUpdate is one content swap waiting for the frame thread.
 type layerUpdate struct {
-	layer   *frame.Layer
-	content frame.Content
-	dirty   frame.Rect
+	layer      *frame.Layer
+	content    frame.Content
+	dirty      frame.Rect
+	autoDamage bool
 }
 
 // UpdateLayer hands the scheduler new content for a layer it is already drawing,
@@ -224,7 +225,7 @@ type layerUpdate struct {
 //
 // One update is held per scheduler and the newest replaces the oldest, so a
 // producer running faster than the display drops frames rather than queueing
-// them. dirty is in layer content space; an empty rect means the whole extent.
+// them. dirty is in layer content space; an empty rect derives damage from content.
 // The swap is applied at the top of a later BeginFrame, once no rasterization is
 // in flight for a tile it would dirty, so a video frame can land one vsync after
 // it was produced. It reports false when there is nothing to apply it to.
@@ -233,7 +234,12 @@ func (s *Scheduler) UpdateLayer(l *frame.Layer, content frame.Content, dirty fra
 		return false
 	}
 	s.updMu.Lock()
-	s.pending = &layerUpdate{layer: l, content: content, dirty: dirty}
+	u := &layerUpdate{layer: l, content: content, dirty: dirty, autoDamage: dirty.Empty()}
+	if s.pending != nil && s.pending.layer == l {
+		u.dirty = u.dirty.Union(s.pending.dirty)
+		u.autoDamage = u.autoDamage || s.pending.autoDamage
+	}
+	s.pending = u
 	s.updMu.Unlock()
 	return true
 }
@@ -254,8 +260,9 @@ func (s *Scheduler) applyPendingUpdate() {
 		return
 	}
 	dirty := u.dirty
-	if dirty.Empty() {
-		dirty = s.layer.Bounds
+	if u.autoDamage {
+		// Compare with installed content, not a producer's possibly superseded update.
+		dirty = dirty.Union(paint.ContentDamage(s.layer.Content, u.content))
 	}
 	if s.grid.InFlightIn(dirty) != 0 {
 		// Something is still painting a tile this update would stale. Waiting is

@@ -1478,3 +1478,40 @@ void GoosieClipboardWrite(const char *text) {
 	};
 	if ([NSThread isMainThread] || NSApp == nil || ![NSApp isRunning]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
 }
+
+int GoosieChooseSavePath(GoosieWindow *gw, const char *directory,
+	const char *filename, char **path) {
+	if (path) *path = NULL;
+	if (!gw || !directory || !filename || !path) return -1;
+	__block int result = 0;
+	void (^block)(void) = ^{
+		@autoreleasepool {
+			if (!gw->window || gw->quit) {
+				result = -1;
+				return;
+			}
+			NSSavePanel *panel = [NSSavePanel savePanel];
+			[panel setCanCreateDirectories:YES];
+			[panel setNameFieldStringValue:[NSString stringWithUTF8String:filename]];
+			NSString *directoryPath = [NSString stringWithUTF8String:directory];
+			if (directoryPath.length > 0) {
+				[panel setDirectoryURL:[NSURL fileURLWithPath:directoryPath isDirectory:YES]];
+			}
+			if ([panel runModal] != NSModalResponseOK) return;
+			NSURL *url = [panel URL];
+			const char *selected = url ? [url fileSystemRepresentation] : NULL;
+			if (!selected) {
+				result = -1;
+				return;
+			}
+			*path = strdup(selected);
+			result = *path ? 1 : -1;
+		}
+	};
+	if ([NSThread isMainThread]) {
+		block();
+	} else {
+		dispatch_sync(dispatch_get_main_queue(), block);
+	}
+	return result;
+}

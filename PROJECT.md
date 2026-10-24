@@ -20,10 +20,11 @@ The engine pipeline is **Parse → Style → Layout → Paint**, wired in
    `@import` expands to depth 4.
 4. **Fonts** — `@font-face` jobs are fetched and registered before style resolution,
    or deferred for progressive paint (`engine.go:471-483`, `:338-351`).
-5. **Style / cascade** — `style.ResolveViewport` prepends the UA sheet, builds a
-   key-bucketed rule index, and computes per-element style. Cascade entries sort by
-   importance split, then origin, then specificity, then document order
-   (`internal/style/style.go:705-735`). Pseudo-elements resolve separately.
+5. **Style / cascade** — a per-session `style.Resolver` prepends the UA sheet and
+   keeps a key-bucketed rule index compiled for that stylesheet set; style and
+   pseudo-element passes share it across interactions. It computes per-element
+   style on each pass. Cascade entries sort by importance split, then origin,
+   then specificity, then document order (`internal/style/style.go:705-735`).
 6. **Images** — `<img src>` and CSS `background-image` refs are fetched under a worker
    and byte/pixel budget, each passing `image.Probe` admission before decode
    (`engine.go:485-688`).
@@ -36,9 +37,17 @@ The engine pipeline is **Parse → Style → Layout → Paint**, wired in
    rasterizes them, `surface.Composer` damage-blits into the backing store, and
    `surface.Loop` drives BeginFrame → Submit → ComposeInto → Present per vsync.
 
-Post-load JS mutations flow through an invalidation batch; `Session.Refresh` re-styles
-and re-lays-out only the affected subtrees, and a scroll-only plan is a no-op
-(`internal/engine/refresh.go`).
+Post-load JS mutations flow through an invalidation batch; `PumpJS` resolves
+styles for the full document when a script changes the DOM. Geometry-neutral
+style results can reuse the current arena after updating its node style pointers,
+provided it has no anonymous boxes; insertion/removal, layout-affecting style
+changes, and anonymous boxes keep the full layout rebuild fallback. Same-value
+attribute, `checked`, and `value` writes are suppressed so they do not trigger
+that pipeline. `Session.Refresh` and `RefreshNode` still rebuild the full arena
+for local plans today; subtree style/layout is not incremental yet. Scroll-only
+plans remain a no-op (`internal/engine/refresh.go`). Single-line text input
+edits repaint without layout when no synchronous input handler mutates the DOM;
+textarea edits still run layout because their text participates in inline flow.
 
 These are implemented subsets, not complete conformance. `docs/roadmap-v2.md` holds the
 current production-readiness review and the ordered release gates.
@@ -52,16 +61,16 @@ current production-readiness review and the ordered release gates.
 | `archtest` | Mechanically enforces import boundaries, cgo confinement, gofmt, and the no-mutable-globals rule. No shipped binary imports it. |
 | `ax` | Accessibility tree node types derived from a laid-out document. Zero dependencies so engine, surface, and platform share one node type. |
 | `bookmarks` | Profile's starred pages as an ordered JSON list persisted to disk. |
-| `css` | CSS tokenizer and stylesheet parser: selectors, values, `calc()`, `@keyframes`, `@font-face`, transitions, transforms, filters, `@media`/`@supports`, shadow-DOM CSS. |
+| `css` | CSS tokenizer and stylesheet parser: selectors, values, `calc()`, `@keyframes`, `@font-face`, transitions, transforms, filters, `@media`/`@supports`, shadow-DOM CSS, and interactive `:hover`, pointer `:active`, `:focus`, `:focus-visible`, `:focus-within`, and form-state pseudo-classes. |
 | `dom` | HTML parser building the `Document` tree with interned atoms, bounded parsing, and DOM events. |
-| `download` | Decides whether a response must be saved instead of rendered, and writes it collision-free. |
+| `download` | Decides whether a response must be saved instead of rendered; streams it to a temporary file with progress/cancellation, then finalizes it collision-free. |
 | `engine` | Wires the front end into the frame path: `Session`, events, focus, forms, selection, IME, animations, transitions, invalidation, refresh, accessibility, and every admission limit. |
 | `frame` | Geometry, premultiplied bitmaps, tile grid, layers, plans, bitmap pool, frame recorder. The dependency leaf: it imports nothing from the rest of the engine. |
 | `history` | Profile's global visit log, capped and persisted. |
 | `image` | Image decode admission: `Probe` and `Decode` under hard size, dimension, and pixel limits. |
 | `js` | Per-document JavaScript runtime on goja with DOM bindings, fetch/CORS/CSP, WebSocket, workers, storage, Canvas 2D, custom elements, shadow DOM, observers, URL, TextEncoding, FormData, AbortController, crypto, and performance. A `Runtime` belongs to exactly one document; nothing here is process-global. |
 | `layout` | Builds a flat arena of positioned boxes from a styled DOM tree: block, inline, float, flex, grid, table, positioning, anonymous block wrapping. |
-| `net` | HTTP transport, response cache, cookie jar, HTTP/2 config, and a dial-time private-address guard. Policy-free by design — the engine supplies the predicate. |
+| `net` | HTTP transport, bounded document responses, streaming top-level responses, response cache, cookie jar, HTTP/2 config, and a dial-time private-address guard. Policy-free by design — the engine supplies the predicate. |
 | `paint` | The display list: a frozen, flat sequence of drawing commands per compositing layer. Also the synthetic benchmark scene generator. |
 | `platform` | Chooses and constructs the window backend. `platform/headless` is a `surface.Window` with no display; `platform/darwin` is an NSWindow paced by CVDisplayLink and is the only place cgo is allowed. |
 | `raster` | Turns frozen paint lists into tile pixels: glyph atlas, per-tile CPU rasterizer, worker pool, and the `Scheduler` that sequences one frame. |

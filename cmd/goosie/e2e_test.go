@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/platform/headless"
+	"github.com/vyquocvu/goosie/internal/preferences"
+	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -174,6 +177,28 @@ func (b *browserE2E) clickNode(t *testing.T, id string) {
 		t.Fatalf("accessibility node %q is missing; %s", id, b.diagnostics())
 	}
 	b.click(t, int32((node.X0+node.X1)/2), int32((node.Y0+node.Y1)/2))
+}
+
+func (b *browserE2E) clickElementByID(t *testing.T, id string) {
+	t.Helper()
+	tab := b.f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		t.Fatalf("cannot click element %q without an active document", id)
+	}
+	for _, object := range tab.Session().Arena.Objects {
+		if object.Node == nil || object.Node.GetAttribute("id") != id {
+			continue
+		}
+		x0, y0, x1, y1 := object.BorderRect()
+		cw, ok := b.f.window.(*chromeWindow)
+		if !ok {
+			t.Fatalf("window type = %T, want *chromeWindow", b.f.window)
+		}
+		point := frame.Point{X: int32((x0 + x1) / 2), Y: int32((y0+y1)/2) + cw.chromeHeight()}
+		b.click(t, point.X, point.Y)
+		return
+	}
+	t.Fatalf("document element %q was not laid out", id)
 }
 
 func (b *browserE2E) clickToolbarButton(t *testing.T, button toolbar.Button) {
@@ -367,6 +392,187 @@ document.getElementById("greeting").addEventListener("submit", function(event) {
 		t.Errorf("GET /submit count = %d, want 0 because JavaScript prevented native form navigation", got)
 	}
 	assertE2EPresentedPage(t, browser.window, 640, 480+totalChromeHeight)
+}
+
+func TestE2ESearchEngineSettingsJourney(t *testing.T) {
+	var queryMu sync.Mutex
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/download" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", `attachment; filename="chosen-download.txt"`)
+			_, _ = w.Write([]byte("saved from the new profile directory"))
+			return
+		}
+		query := r.URL.Query().Get("q")
+		queryMu.Lock()
+		receivedQuery = query
+		queryMu.Unlock()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, `<!doctype html><html><body><h1 id="result">Search: %s</h1></body></html>`, query)
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	browser.navigateViaAddressBar(t, "goosie://settings")
+	browser.waitFor(t, "search settings field", func() bool {
+		_, input := findAXNode(browser.window.AccessibilityTree(), "search-url")
+		return browser.activeURL() == "goosie://settings" && input
+	})
+
+	input, _ := findAXNode(browser.window.AccessibilityTree(), "search-url")
+	template := server.URL + "/search?q={query}"
+	downloadDir := filepath.Join(t.TempDir(), "chosen-downloads")
+	browser.inject(t, surface.Event{
+		Kind:     surface.EvAXSetValue,
+		AXTarget: surface.AXTargetContent,
+		Pos:      frame.Point{X: int32((input.X0 + input.X1) / 2), Y: int32((input.Y0 + input.Y1) / 2)},
+		Text:     template,
+	})
+	directory, ok := findAXNode(browser.window.AccessibilityTree(), "download-directory")
+	if !ok {
+		t.Fatal("download directory field disappeared after setting the search template")
+	}
+	browser.inject(t, surface.Event{
+		Kind:     surface.EvAXSetValue,
+		AXTarget: surface.AXTargetContent,
+		Pos:      frame.Point{X: int32((directory.X0 + directory.X1) / 2), Y: int32((directory.Y0 + directory.Y1) / 2)},
+		Text:     downloadDir,
+	})
+	browser.clickElementByID(t, "startup-newtab")
+	browser.clickNode(t, "save-search")
+	browser.waitFor(t, "search engine setting saved", func() bool {
+		return axContainsLabel(browser.window.AccessibilityTree(), "Settings saved")
+	})
+
+	saved, err := preferences.Load(browser.f.config.preferencesFile)
+	if err != nil {
+		t.Fatalf("load saved profile preferences: %v", err)
+	}
+	if saved.SearchURLTemplate != template {
+		t.Fatalf("saved search template = %q, want %q", saved.SearchURLTemplate, template)
+	}
+	if saved.DownloadDir != downloadDir {
+		t.Fatalf("saved download directory = %q, want %q", saved.DownloadDir, downloadDir)
+	}
+	if saved.StartupMode != preferences.StartupNewTab {
+		t.Fatalf("saved startup mode = %q, want %q", saved.StartupMode, preferences.StartupNewTab)
+	}
+	if shouldRestoreSession(browser.f.config.private, saved.StartupMode) {
+		t.Fatal("new-tab choice would restore the previous session")
+	}
+
+	browser.navigateViaAddressBar(t, "goosie browser")
+	wantURL := server.URL + "/search?q=goosie+browser"
+	browser.waitFor(t, "configured search result", func() bool {
+		queryMu.Lock()
+		gotQuery := receivedQuery
+		queryMu.Unlock()
+		return browser.activeURL() == wantURL && gotQuery == "goosie browser" && axContainsLabel(browser.window.AccessibilityTree(), "Search: goosie browser")
+	})
+
+	browser.navigateViaAddressBar(t, server.URL+"/download")
+	filePath := filepath.Join(downloadDir, "chosen-download.txt")
+	browser.waitFor(t, "download saved to configured directory", func() bool {
+		_, err := os.Stat(filePath)
+		if err != nil {
+			return false
+		}
+		items := browser.f.downloads.Items()
+		return len(items) == 1 && items[0].LocalPath == filePath && items[0].Status == "completed"
+	})
+}
+
+func TestStartupDoesNotOverwriteCrashJournalBeforeReadingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	c, err := parse([]string{
+		"-backend", platform.Headless,
+		"-width", "640",
+		"-height", "480",
+		"-dpr", "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := session.State{Tabs: []session.TabState{{URL: "https://crashed.example/page", Title: "Crashed page"}}}
+	if err := session.Save(c.sessionActiveFile, want); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := build(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &browserE2E{f: f}
+	t.Cleanup(func() { b.close(t) })
+
+	if f.crashedSession == nil {
+		t.Fatal("startup did not load the active-session crash journal")
+	}
+	if got := f.tabMgr.Active().URL(); got != "goosie://restore" {
+		t.Fatalf("startup URL = %q, want restore prompt", got)
+	}
+	got, err := session.Load(c.sessionActiveFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("crash journal after startup = %+v, want preserved %+v", got, want)
+	}
+}
+
+func TestStartupSessionPreferenceControlsBuild(t *testing.T) {
+	for _, tc := range []struct {
+		mode     string
+		wantURLs []string
+	}{
+		{mode: preferences.StartupRestore, wantURLs: []string{"https://one.example/", "https://two.example/"}},
+		{mode: preferences.StartupNewTab, wantURLs: []string{""}},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			c, err := parse([]string{
+				"-backend", platform.Headless,
+				"-width", "640",
+				"-height", "480",
+				"-dpr", "1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings := preferences.Defaults()
+			settings.StartupMode = tc.mode
+			if err := preferences.Save(c.preferencesFile, settings); err != nil {
+				t.Fatal(err)
+			}
+			previous := session.State{Tabs: []session.TabState{
+				{URL: "https://one.example/"},
+				{URL: "https://two.example/"},
+			}, Active: 1}
+			if err := session.Save(c.sessionFile, previous); err != nil {
+				t.Fatal(err)
+			}
+
+			f, err := build(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := &browserE2E{f: f}
+			t.Cleanup(func() { b.close(t) })
+
+			tabs := f.tabMgr.Tabs()
+			if len(tabs) != len(tc.wantURLs) {
+				t.Fatalf("startup opened %d tabs, want %d", len(tabs), len(tc.wantURLs))
+			}
+			for i, tab := range tabs {
+				if got := tab.URL(); got != tc.wantURLs[i] {
+					t.Errorf("startup tab %d URL = %q, want %q", i, got, tc.wantURLs[i])
+				}
+			}
+		})
+	}
 }
 
 func requestCount(mu *sync.Mutex, requests map[string]int, path string) int {

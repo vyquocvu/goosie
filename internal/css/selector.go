@@ -766,13 +766,16 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
 	case "lang":
 		return matchLang(c.Pseudo, n)
-	case "visited", "active", "focus-within", "focus-visible":
-		// These interaction pseudo-classes require runtime state that the engine
-		// does not track yet. Returning false matches what a browser shows on
-		// a first load, which is the state every reference render is captured
-		// in - treating `a:visited` as `a:link` painted Wikipedia's links in
-		// MediaWiki's visited purple because that rule comes after the link one.
+	case "dir":
+		return matchesDirectionality(n, c.Pseudo)
+	case "visited":
+		// The engine does not retain navigation history for :visited and does
+		// not expose it to selectors, avoiding leakage of unrelated session state.
 		return false
+	case "active":
+		return IsActive(n)
+	case "focus-visible":
+		return IsFocusVisible(n)
 	case "host":
 		if n.ShadowRoot == nil {
 			return false
@@ -800,12 +803,20 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return IsHovered(n)
 	case "focus":
 		return IsFocused(n)
+	case "focus-within":
+		return matchesFocusWithin(n)
 	case "scope":
 		return n.IsScopeRoot
 	case "popover-open":
 		return n.IsPopoverOpen
-	case "checked", "disabled", "enabled", "placeholder-shown":
-		return false
+	case "checked":
+		return matchesChecked(n)
+	case "disabled":
+		return isDisableable(n) && isDisabled(n)
+	case "enabled":
+		return isDisableable(n) && !isDisabled(n)
+	case "placeholder-shown":
+		return placeholderIsShown(n)
 	case "has":
 		// :has() is a relational pseudo-class: it matches if the selector
 		// argument matches at least one element relative to this element.
@@ -837,6 +848,148 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return matchNth("1", n, true, false, ix) && matchNth("1", n, true, true, ix)
 	}
 	return false
+}
+
+// matchesDirectionality implements :dir() for explicit HTML directionality
+// and inherited direction. Whitespace around the argument is insignificant,
+// as required for a CSS function argument. Invalid dir attributes inherit from
+// their parent; documents without an explicit direction default to ltr.
+func matchesDirectionality(n *dom.Node, argument string) bool {
+	want := strings.ToLower(strings.TrimSpace(argument))
+	if want != "ltr" && want != "rtl" {
+		return false
+	}
+	for current := n; current != nil; current = current.Parent {
+		if current.Type != dom.NodeElement || !current.HasAttribute("dir") {
+			continue
+		}
+		dir := strings.ToLower(strings.TrimSpace(current.GetAttribute("dir")))
+		if dir == "ltr" || dir == "rtl" {
+			return dir == want
+		}
+	}
+	return want == "ltr"
+}
+
+func matchesChecked(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	switch n.Data {
+	case "input":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		return (typ == "checkbox" || typ == "radio") && n.HasAttribute("checked")
+	case "option":
+		if n.HasAttribute("selected") {
+			return true
+		}
+		selectNode := n.Parent
+		for selectNode != nil && selectNode.Data != "select" {
+			selectNode = selectNode.Parent
+		}
+		if selectNode == nil || selectNode.HasAttribute("multiple") {
+			return false
+		}
+		var first, selected *dom.Node
+		var walk func(*dom.Node)
+		walk = func(parent *dom.Node) {
+			for c := parent.FirstChild; c != nil; c = c.NextSibling {
+				if c.Element() && c.Data == "option" {
+					if first == nil {
+						first = c
+					}
+					if c.HasAttribute("selected") && selected == nil {
+						selected = c
+					}
+				}
+				walk(c)
+			}
+		}
+		walk(selectNode)
+		return selected == nil && first == n
+	}
+	return false
+}
+
+func matchesFocusWithin(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	if IsFocused(n) {
+		return true
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if matchesFocusWithin(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDisableable(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	switch n.Data {
+	case "button", "fieldset", "input", "optgroup", "option", "select", "textarea":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDisabled(n *dom.Node) bool {
+	if n == nil || !isDisableable(n) {
+		return false
+	}
+	if n.HasAttribute("disabled") {
+		return true
+	}
+	for parent := n.Parent; parent != nil; parent = parent.Parent {
+		if n.Data == "option" && (parent.Data == "optgroup" || parent.Data == "select") && parent.HasAttribute("disabled") {
+			return true
+		}
+		if parent.Data == "fieldset" && parent.HasAttribute("disabled") && !insideFirstLegend(n, parent) {
+			return true
+		}
+	}
+	return false
+}
+
+func insideFirstLegend(n, fieldset *dom.Node) bool {
+	var firstLegend *dom.Node
+	for child := fieldset.FirstChild; child != nil; child = child.NextSibling {
+		if child.Element() && child.Data == "legend" {
+			firstLegend = child
+			break
+		}
+	}
+	for current := n; current != nil && current != fieldset; current = current.Parent {
+		if current == firstLegend {
+			return true
+		}
+	}
+	return false
+}
+
+func placeholderIsShown(n *dom.Node) bool {
+	if n == nil || !n.Element() || n.GetAttribute("placeholder") == "" {
+		return false
+	}
+	switch n.Data {
+	case "input":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		switch typ {
+		case "", "text", "password", "email", "tel", "url", "search", "number":
+			return n.GetAttribute("value") == ""
+		default:
+			return false
+		}
+	case "textarea":
+		return n.TextContent() == ""
+	default:
+		return false
+	}
 }
 
 // matchHas implements the :has() relational pseudo-class. The argument is a

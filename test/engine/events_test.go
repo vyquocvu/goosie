@@ -3,6 +3,7 @@ package engine_test
 import (
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 )
@@ -46,7 +47,7 @@ func TestResizeEvent(t *testing.T) {
 }
 
 func TestSetHover(t *testing.T) {
-	html := `<html><body style="margin: 0;"><div id="target" style="width: 100px; height: 100px;">Content</div></body></html>`
+	html := `<html><body style="margin: 0;"><div id="container" style="width: 100px; height: 100px;"><div id="target" style="width: 100px; height: 100px;">Content</div></div></body></html>`
 	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
@@ -56,6 +57,9 @@ func TestSetHover(t *testing.T) {
 	changed := s.SetHover(50, 50)
 	if !changed {
 		t.Error("SetHover should return true when hover state changes")
+	}
+	if !css.IsHovered(s.Doc.ElementByID("target")) || !css.IsHovered(s.Doc.ElementByID("container")) {
+		t.Error(":hover should match the hit element and its ancestors")
 	}
 
 	// Hover again at the same position - should not change.
@@ -68,6 +72,43 @@ func TestSetHover(t *testing.T) {
 	changed = s.SetHover(700, 500)
 	if !changed {
 		t.Error("SetHover should return true when moving hover outside element")
+	}
+	if css.IsHovered(s.Doc.ElementByID("target")) || css.IsHovered(s.Doc.ElementByID("container")) {
+		t.Error(":hover should be cleared from the old element and its ancestors")
+	}
+}
+
+func TestSetActiveAtTracksPointerAndClearsWhenSessionCloses(t *testing.T) {
+	html := `<html><body><div id="target" style="width: 80px; height: 40px;">Press</div></body></html>`
+	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	target := s.Doc.ElementByID("target")
+	if target == nil {
+		t.Fatal("active target missing")
+	}
+	selector := css.ParseSelector("#target:active")
+	if selector.Matches(target) {
+		t.Fatal(":active matched before pointer press")
+	}
+	var x, y float32
+	for _, obj := range s.Arena.Objects {
+		if obj.Node == target {
+			x0, y0, x1, y1 := obj.BorderRect()
+			x, y = (x0+x1)/2, (y0+y1)/2
+			break
+		}
+	}
+	if !s.SetActiveAt(x, y, true) {
+		t.Fatal("SetActiveAt did not activate the hit target")
+	}
+	if !selector.Matches(target) {
+		t.Fatal(":active did not match the pressed target")
+	}
+	s.Close()
+	if selector.Matches(target) {
+		t.Fatal(":active remained matched after the session closed")
 	}
 }
 

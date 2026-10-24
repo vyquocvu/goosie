@@ -91,6 +91,27 @@ func TestUpdateLayerWaitsForAnInFlightTile(t *testing.T) {
 	}
 }
 
+func TestUpdateLayerAutomaticDamageWaitsForInFlightTile(t *testing.T) {
+	g := newGatedRaster()
+	h := newSchedRaster(t, 2, 2, 8, frame.Viewport{Size: frame.Size{W: 512, H: 512}}, raster.Pref{}, g.fn)
+	h.frame(t, vsync(0))
+	<-g.entered
+	next := flatDL(frame.Rect4(0, 0, 512, 512), frame.RGB(11, 222, 33))
+	h.s.UpdateLayer(h.l, next, frame.Rect{})
+	h.pump()
+	premature := h.l.Content == frame.Content(next)
+	close(g.release)
+	if premature {
+		t.Fatal("automatic damage swapped content underneath an in-flight raster")
+	}
+	h.untilQuiet(t)
+	h.pump()
+	h.untilQuiet(t)
+	if h.l.Content != frame.Content(next) {
+		t.Fatal("automatic damage never applied after the worker completed")
+	}
+}
+
 func TestUpdateLayerKeepsOnlyTheNewest(t *testing.T) {
 	h := newSched(t, 2, 2, 8, frame.Size{W: 512, H: 512}, raster.Pref{})
 	h.untilQuiet(t)
@@ -112,6 +133,22 @@ func TestUpdateLayerKeepsOnlyTheNewest(t *testing.T) {
 	}
 	if h.l.Content == frame.Content(middle) {
 		t.Fatal("the superseded update was applied")
+	}
+}
+
+func TestUpdateLayerCoalescesDamage(t *testing.T) {
+	h := newSched(t, 2, 2, 8, frame.Size{W: 512, H: 512}, raster.Pref{})
+	h.untilQuiet(t)
+	bounds := frame.Rect4(0, 0, 512, 512)
+	h.s.UpdateLayer(h.l, flatDL(bounds, frame.RGB(1, 2, 3)), frame.Rect4(0, 0, 256, 256))
+	last := flatDL(bounds, frame.RGB(4, 5, 6))
+	h.s.UpdateLayer(h.l, last, frame.Rect4(256, 256, 512, 512))
+	h.pump()
+	if h.l.Content != frame.Content(last) {
+		t.Fatal("newest update was not applied")
+	}
+	if !h.l.Needs(frame.TileCoord{Col: 0, Row: 0}) {
+		t.Fatal("coalescing lost damage from the superseded update")
 	}
 }
 

@@ -49,6 +49,49 @@ func TestPumpJSFiresTimers(t *testing.T) {
 	}
 }
 
+func TestPumpJSSameValueDOMWritesSkipPipeline(t *testing.T) {
+	html := `<html><body>
+<div id="same" class="stable">same</div>
+<input id="check" type="checkbox" value="fixed">
+<script>setTimeout(function() {
+  var node = document.getElementById('same');
+  node.setAttribute('class', 'stable');
+  node.classList.remove('absent');
+  var check = document.getElementById('check');
+  check.checked = false;
+  check.value = 'fixed';
+}, 0);</script>
+</body></html>`
+	sess, _, _ := pumpSession(t, html, true)
+	before := sess.WorkCounts()
+	if sess.PumpJS(800) {
+		t.Fatal("PumpJS reported visual work for same-value DOM writes")
+	}
+	if got := sess.WorkCounts(); got != before {
+		t.Fatalf("work counts after no-op mutations = %+v, want unchanged %+v", got, before)
+	}
+}
+
+func TestPumpJSChangedAttributeStillRebuildsStylesAndLayout(t *testing.T) {
+	html := `<html><head><style>.active { color: red; width: 200px; }</style></head><body>
+<p id="target">text</p>
+<script>setTimeout(function() { document.getElementById('target').setAttribute('class', 'active'); }, 0);</script>
+</body></html>`
+	sess, _, _ := pumpSession(t, html, true)
+	before := sess.WorkCounts()
+	if !sess.PumpJS(800) {
+		t.Fatal("PumpJS missed a changed class attribute")
+	}
+	got := sess.WorkCounts()
+	if got.StyleResolves != before.StyleResolves+1 || got.LayoutBuilds != before.LayoutBuilds+1 {
+		t.Fatalf("work counts after changed attribute = %+v, want one style/layout pass after %+v", got, before)
+	}
+	target := sess.Doc.ElementByID("target")
+	if target == nil || sess.Styles[target.ID].Color.R != 255 {
+		t.Fatal("changed class did not update computed style")
+	}
+}
+
 // TestPumpJSRunsRAF pins the animation-frame half of the turn.
 func TestPumpJSRunsRAF(t *testing.T) {
 	html := `<html><body><p id="t">waiting</p><script>requestAnimationFrame(function(){document.getElementById('t').textContent='painted';});</script></body></html>`

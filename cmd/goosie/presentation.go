@@ -8,6 +8,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
@@ -60,7 +61,7 @@ func (f *framePath) pumpJS() {
 // ones, scaled to device pixels: a highlight change damages exactly where
 // ink appeared or disappeared. Either side may be absent (a collapsed caret
 // paints nothing, a cleared highlight leaves nothing); both absent yields an
-// empty rect, which repaintTab reads as full damage.
+// empty rect, which repaintTab resolves by comparing display lists.
 func (f *framePath) selectionDamage(tab *tabs.Tab, oldR frame.Rect, oldOK bool) frame.Rect {
 	scale := float32(f.config.dpr) * float32(f.zoom)
 	var x0, y0, x1, y1 int32
@@ -96,19 +97,9 @@ func (f *framePath) selectionDamage(tab *tabs.Tab, oldR frame.Rect, oldOK bool) 
 	return frame.Rect{X0: x0, Y0: y0, X1: x1, Y1: y1}
 }
 
-// dirtyOrFull resolves a repaint damage rect: an empty rect (callers that
-// cannot know better: navigation-adjacent, focus, IME) falls back to the
-// whole extent, which is always correct and only less optimal.
-func dirtyOrFull(dirty, extent frame.Rect) frame.Rect {
-	if dirty.Empty() {
-		return extent
-	}
-	return dirty
-}
-
 // repaintTab rebuilds the active tab's layer from its session and hands the
 // plan to the scheduler. dirty is the device-pixel damage in layer space;
-// an empty rect means the whole extent.
+// an empty rect derives damage from the old and new display lists.
 //
 // When the tab already holds a layer over the same extent and budget, the
 // layer (and its tile cache and pool) is reused: the new content is
@@ -149,10 +140,9 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 		layerBounds.Y0 = 0
 	}
 
-	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Stats().Budget == budgetBytes {
+	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Budget() == budgetBytes {
 		// Reuse: keep the tile cache and pool. How the new content is attached
 		// depends on whether the frame thread is reading this layer.
-		damage := dirtyOrFull(dirty, layerBounds)
 		if f.tabMgr.Active() == tab {
 			// Handed to the scheduler rather than written here, because this runs
 			// on the chrome pump thread and SetContent/InvalidateRect are
@@ -163,13 +153,16 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 			// by a video frame is that case thirty times a second rather than once
 			// in a while. The scheduler applies the swap on its own thread once no
 			// rasterization is in flight for a tile the damage covers.
-			f.sched.UpdateLayer(lyr, dl, damage)
+			f.sched.UpdateLayer(lyr, dl, dirty)
 		} else {
 			// A background tab's layer is not the one being drawn, so no frame
 			// thread is reading it and attaching directly cannot race. Doing it
 			// here is also what keeps the tab current for when it comes forward.
+			if dirty.Empty() {
+				dirty = paint.ContentDamage(lyr.Content, dl)
+			}
 			lyr.SetContent(dl)
-			lyr.InvalidateRect(damage)
+			lyr.InvalidateRect(dirty)
 		}
 		f.publishAccessibility()
 		return

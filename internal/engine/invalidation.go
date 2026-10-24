@@ -41,10 +41,11 @@ const (
 // Invalidation accumulates change reasons within a single batch. The engine
 // collects invalidations between frames, then resolves them to a minimal plan.
 type Invalidation struct {
-	reasons  Reason
-	rects    []frame.RectF
-	subtrees []uint32
-	fullDoc  bool
+	reasons            Reason
+	rects              []frame.RectF
+	subtrees           []uint32
+	fullDoc            bool
+	domMutationPending bool
 }
 
 // Plan is the resolved output of an invalidation batch. It tells the engine
@@ -82,6 +83,9 @@ type Plan struct {
 // the affected layout object (0 for non-subtree reasons).
 func (inv *Invalidation) Add(reason Reason, rect frame.RectF, objectID uint32) {
 	inv.reasons |= reason
+	if reason == DOMMutation {
+		inv.domMutationPending = true
+	}
 
 	// Full-document reasons short-circuit accumulation.
 	if reason == Resize || reason == StylesheetChange {
@@ -176,6 +180,7 @@ func (inv *Invalidation) Reset() {
 	inv.rects = inv.rects[:0]
 	inv.subtrees = inv.subtrees[:0]
 	inv.fullDoc = false
+	inv.domMutationPending = false
 }
 
 // Empty reports whether the batch holds nothing. PumpJS uses it to skip

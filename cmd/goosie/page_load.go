@@ -11,6 +11,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/net"
+	"github.com/vyquocvu/goosie/internal/preferences"
 	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
@@ -103,15 +104,21 @@ func subresourceCtx(ctx context.Context, base string) context.Context {
 
 // normalizeURL normalizes address bar input into either a dialable URL or a search query.
 // It trims surrounding whitespace, normalizes supported schemes (http, https, file),
-// treats queries with whitespace or search/punctuation symbols as Google search queries,
+// treats queries with whitespace or search/punctuation symbols as web searches,
 // and prefixes bare domains or IPs with https://.
 func normalizeURL(raw string) string {
+	return normalizeAddress(raw, preferences.DefaultSearchURLTemplate)
+}
+
+// normalizeAddress resolves an address-bar value using the profile's search
+// engine when the input is a query rather than a URL.
+func normalizeAddress(raw, searchTemplate string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
 	}
 	if target, isVS := viewsource.IsViewSourceURL(raw); isVS {
-		return viewsource.WrapViewSourceURL(normalizeURL(target))
+		return viewsource.WrapViewSourceURL(normalizeAddress(target, searchTemplate))
 	}
 	// Case-insensitive scheme check for http, https, and file.
 	lower := strings.ToLower(raw)
@@ -139,6 +146,9 @@ func normalizeURL(raw string) string {
 	}
 	// If input contains whitespace (space, tab, newline), it is a search query.
 	if strings.ContainsAny(raw, " \t\r\n") {
+		if result, err := preferences.SearchURL(searchTemplate, raw); err == nil {
+			return result
+		}
 		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
 	}
 	// If host portion (before any '/') contains symbols invalid in a domain name
@@ -149,6 +159,9 @@ func normalizeURL(raw string) string {
 		hostPart = raw[:slash]
 	}
 	if strings.ContainsAny(hostPart, "?+&=%!^*()<>;\"'") {
+		if result, err := preferences.SearchURL(searchTemplate, raw); err == nil {
+			return result
+		}
 		return "https://www.google.com/search?q=" + url.QueryEscape(raw)
 	}
 	// Bare domain, IP, or localhost: add https:// prefix

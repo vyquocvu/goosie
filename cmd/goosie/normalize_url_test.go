@@ -108,6 +108,16 @@ func TestNormalizeURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeAddressUsesProfileSearchEngine(t *testing.T) {
+	got := normalizeAddress("tìm kiếm goosie", "https://search.example/find?term={query}")
+	if got != "https://search.example/find?term=t%C3%ACm+ki%E1%BA%BFm+goosie" {
+		t.Fatalf("normalizeAddress() = %q", got)
+	}
+	if got := normalizeAddress("https://example.com/path?q=x", "https://search.example/?q={query}"); got != "https://example.com/path?q=x" {
+		t.Fatalf("explicit URL changed by search preference: %q", got)
+	}
+}
+
 // TestNormalizeURLSearchQueryToDomainEdgeCases tests edge cases that could be
 // interpreted as either domains or search queries.
 func TestNormalizeURLSearchQueryToDomainEdgeCases(t *testing.T) {

@@ -1,6 +1,7 @@
 package paint_test
 
 import (
+	"image"
 	"testing"
 	"unsafe"
 
@@ -18,6 +19,81 @@ func fill(x0, y0, x1, y1 int32, z uint32) paint.DisplayCmd {
 		Rect:  frame.Rect4(x0, y0, x1, y1),
 		Color: frame.RGB(255, 0, 0),
 		Z:     z,
+	}
+}
+
+func TestContentDamage(t *testing.T) {
+	build := func(cmds ...paint.DisplayCmd) *paint.LayerDL {
+		l := paint.NewList(len(cmds))
+		for _, cmd := range cmds {
+			l.Append(cmd)
+		}
+		return l.Build(1).Publish()
+	}
+	background := fill(0, 0, 768, 768, 0)
+	old := fill(20, 20, 60, 60, 0)
+	moved := fill(20, 300, 60, 350, 0)
+	far := fill(600, 600, 640, 640, 0)
+	text := paint.DisplayCmd{Kind: paint.CmdText, Text: paint.TextRun{Color: frame.RGB(0, 0, 0), Glyphs: []paint.GlyphRun{{Rune: 'a', X: 20, Y: 40, Size: 16}}}}
+	changedText := text
+	changedText.Text.Glyphs = []paint.GlyphRun{{Rune: 'b', X: 20, Y: 40, Size: 16}}
+	imageCmd := paint.DisplayCmd{Kind: paint.CmdImage, Rect: old.Rect, Image: paint.ImageSpec{Src: image.NewRGBA(image.Rect(0, 0, 4, 4))}}
+	changedImage := imageCmd
+	changedImage.Image.Src = image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for _, tc := range []struct {
+		name          string
+		before, after *paint.LayerDL
+		want          frame.Rect
+	}{
+		{"unchanged", build(background, text, imageCmd), build(background, text, imageCmd), frame.Rect{}},
+		{"moved", build(background, old, far), build(background, moved, far), old.Rect.Union(moved.Rect)},
+		{"removed", build(background, old, far), build(background, far), old.Rect},
+		{"inserted", build(background, far), build(background, old, far), old.Rect},
+		{"reordered", build(background, old, far), build(background, far, old), old.Rect.Union(far.Rect)},
+		{"text_and_caret", build(background, text, far, old), build(background, changedText, far, moved), old.Rect.Union(moved.Rect)},
+		{"new_image_identity", build(background, imageCmd, far), build(background, changedImage, far), old.Rect},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := paint.ContentDamage(tc.before, tc.after); got != tc.want {
+				t.Fatalf("damage = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestContentDamageCommandProperties(t *testing.T) {
+	for name, change := range map[string]func(*paint.DisplayCmd){
+		"color":          func(c *paint.DisplayCmd) { c.Color = frame.RGB(0, 255, 0) },
+		"border":         func(c *paint.DisplayCmd) { c.Border.Top.Width = 2 },
+		"opacity":        func(c *paint.DisplayCmd) { c.Opacity = 0.5 },
+		"radius":         func(c *paint.DisplayCmd) { c.Radius.TL.X = 2 },
+		"clip":           func(c *paint.DisplayCmd) { c.Clip = frame.Rect4(20, 20, 30, 30) },
+		"order":          func(c *paint.DisplayCmd) { c.Z = 2 },
+		"filter":         func(c *paint.DisplayCmd) { c.Filter = "blur(2px)" },
+		"backdrop":       func(c *paint.DisplayCmd) { c.BackdropFilter = "blur(2px)" },
+		"text_color":     func(c *paint.DisplayCmd) { c.Text.Color = frame.RGB(0, 255, 0) },
+		"text_glyphs":    func(c *paint.DisplayCmd) { c.Text.Glyphs = []paint.GlyphRun{{Rune: 'a'}} },
+		"image_source":   func(c *paint.DisplayCmd) { c.Image.Src = image.NewRGBA(image.Rect(0, 0, 4, 4)) },
+		"image_crop":     func(c *paint.DisplayCmd) { c.Image.SrcBox = image.Rect(0, 0, 4, 4) },
+		"mask":           func(c *paint.DisplayCmd) { c.Mask = image.NewRGBA(image.Rect(0, 0, 4, 4)) },
+		"gradient_angle": func(c *paint.DisplayCmd) { c.Gradient.Angle = 90 },
+		"gradient_stops": func(c *paint.DisplayCmd) { c.Gradient.Stops = []frame.GradientStop{{At: 0.5}} },
+		"radial_shape":   func(c *paint.DisplayCmd) { c.RadialGradient.Shape = "circle" },
+		"radial_x":       func(c *paint.DisplayCmd) { c.RadialGradient.Cx = 0.5 },
+		"radial_y":       func(c *paint.DisplayCmd) { c.RadialGradient.Cy = 0.5 },
+		"radial_stops":   func(c *paint.DisplayCmd) { c.RadialGradient.Stops = []frame.GradientStop{{At: 0.5}} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := fill(10, 10, 50, 50, 0)
+			before := paint.NewList(1)
+			before.Append(cmd)
+			change(&cmd)
+			after := paint.NewList(1)
+			after.Append(cmd)
+			if got := paint.ContentDamage(before.Build(1), after.Build(1)); got != cmd.Rect {
+				t.Fatalf("damage = %v, want %v", got, cmd.Rect)
+			}
+		})
 	}
 }
 

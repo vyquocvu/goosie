@@ -129,6 +129,11 @@ type Options struct {
 	// this to trigger re-style and re-layout. nil means mutations are
 	// not tracked (e.g., in tests).
 	OnMutation func()
+	// OnFocusChange receives programmatic HTMLElement.focus()/blur() calls.
+	// The engine supplies this after binding the runtime to a Session.
+	OnFocusChange func(*dom.Node, bool)
+	// ActiveElement returns the currently focused element for document.activeElement.
+	ActiveElement func() *dom.Node
 
 	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
 	// When nil, ephemeral in-memory storage is created per runtime.
@@ -215,6 +220,8 @@ type Runtime struct {
 	// requires. Snapshots (tagName/className/type) refresh on reuse, so a
 	// cached wrapper reads exactly what a fresh one would.
 	wrapCache map[*dom.Node]int
+	// styleObjects preserves the per-element CSSStyleDeclaration identity.
+	styleObjects map[*dom.Node]*goja.Object
 
 	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
@@ -451,6 +458,7 @@ func (r *Runtime) setupDOM() {
 	r.nodeWrappers = make(map[int]*goja.Object)
 	r.shadowRoots = make(map[int]*goja.Object)
 	r.wrapCache = make(map[*dom.Node]int)
+	r.styleObjects = make(map[*dom.Node]*goja.Object)
 	r.nextNID = 1
 
 	// Build a shared prototype for element wrapper objects. Each wrapper
@@ -460,6 +468,9 @@ func (r *Runtime) setupDOM() {
 	_ = r.nodeProto.Set("appendChild", func(call goja.FunctionCall) goja.Value {
 		return r.jsAppendChild(call)
 	})
+	_ = r.nodeProto.Set("removeChild", func(call goja.FunctionCall) goja.Value {
+		return r.jsRemoveChild(call)
+	})
 	_ = r.nodeProto.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
 		return r.jsAddEventListener(call)
 	})
@@ -468,6 +479,18 @@ func (r *Runtime) setupDOM() {
 	})
 	_ = r.nodeProto.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value {
 		return r.jsDispatchEvent(call)
+	})
+	_ = r.nodeProto.Set("focus", func(call goja.FunctionCall) goja.Value {
+		if node := r.getNode(call.This); node != nil && r.opts.OnFocusChange != nil {
+			r.opts.OnFocusChange(node, true)
+		}
+		return goja.Undefined()
+	})
+	_ = r.nodeProto.Set("blur", func(call goja.FunctionCall) goja.Value {
+		if node := r.getNode(call.This); node != nil && r.opts.OnFocusChange != nil {
+			r.opts.OnFocusChange(node, false)
+		}
+		return goja.Undefined()
 	})
 	_ = r.nodeProto.Set("getAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetAttribute(call)
@@ -718,10 +741,14 @@ func (r *Runtime) setupDOM() {
 		if node == nil {
 			return goja.Undefined()
 		}
-		if checked {
+		wasChecked := node.HasAttribute("checked")
+		if checked && !wasChecked {
 			node.SetAttribute("checked", "")
-		} else {
+		} else if !checked && wasChecked {
 			node.RemoveAttribute("checked")
+		}
+		if checked != wasChecked {
+			r.notifyMutation()
 		}
 		return goja.Undefined()
 	})
@@ -747,7 +774,11 @@ func (r *Runtime) setupDOM() {
 		if node == nil {
 			return goja.Undefined()
 		}
+		before, hadValue := node.GetAttribute("value"), node.HasAttribute("value")
 		node.SetAttribute("value", v)
+		if !hadValue || before != v {
+			r.notifyMutation()
+		}
 		return goja.Undefined()
 	})
 	_ = doc.Set("__getDialogOpen__", func(call goja.FunctionCall) goja.Value {
@@ -959,6 +990,26 @@ func (r *Runtime) setupDOM() {
 	} else {
 		_ = doc.Set("head", goja.Null())
 	}
+	_ = doc.Set("__getActiveElement__", func(goja.FunctionCall) goja.Value {
+		var active *dom.Node
+		if r.opts.ActiveElement != nil {
+			active = r.opts.ActiveElement()
+		}
+		if active == nil && r.domDoc != nil {
+			active = r.domDoc.Body
+			if active == nil {
+				active = r.domDoc.HTML
+			}
+		}
+		return r.wrapNode(active)
+	})
+	_ = r.vm.Set("__document__", doc)
+	_, _ = r.vm.RunString(`Object.defineProperty(__document__, 'activeElement', {
+		get: function() { return document.__getActiveElement__(); },
+		configurable: true,
+		enumerable: true
+	});`)
+	_ = r.vm.Set("__document__", nil)
 
 	_ = doc.Set("__getShadowRoot__", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetShadowRoot(call)
@@ -1011,6 +1062,7 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		r.defineInnerHTMLAccessor(obj)
 		// Live dataset map, re-defined per instance like the accessors above.
 		r.defineDatasetAccessor(obj)
+		r.defineStyleAccessor(obj, node)
 		// Live element accessors: children, parentElement, firstElementChild, etc.
 		r.defineElementAccessors(obj)
 	}
@@ -1065,10 +1117,16 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 			}
 			existing := node.ClassList()
 			filtered := make([]string, 0, len(existing))
+			found := false
 			for _, c := range existing {
 				if c != cls {
 					filtered = append(filtered, c)
+				} else {
+					found = true
 				}
+			}
+			if !found {
+				return goja.Undefined()
 			}
 			if len(filtered) == 0 {
 				// Remove the attribute entirely if no classes remain.
@@ -1808,6 +1866,21 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	return call.Arguments[0]
 }
 
+// jsRemoveChild implements parent.removeChild(child).
+func (r *Runtime) jsRemoveChild(call goja.FunctionCall) goja.Value {
+	parent := r.getNode(call.This)
+	if parent == nil || len(call.Arguments) == 0 {
+		panic(r.vm.NewTypeError("Failed to execute 'removeChild': a parent and child are required"))
+	}
+	child := r.getNode(call.Arguments[0])
+	if child == nil || child.Parent != parent {
+		panic(r.vm.NewTypeError("Failed to execute 'removeChild': the node is not a child of this node"))
+	}
+	parent.RemoveChild(child)
+	r.notifyMutation()
+	return r.wrapNode(child)
+}
+
 // jsQuerySelector implements document.querySelector(selector).
 func (r *Runtime) jsQuerySelector(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil || len(call.Arguments) < 1 {
@@ -2439,6 +2512,7 @@ func (r *Runtime) SetDOM(doc *dom.Document) {
 		r.nodeWrappers = make(map[int]*goja.Object)
 		r.shadowRoots = make(map[int]*goja.Object)
 		r.wrapCache = make(map[*dom.Node]int)
+		r.styleObjects = make(map[*dom.Node]*goja.Object)
 		r.nextNID = 1
 	}
 	r.mu.Unlock()
@@ -2679,8 +2753,11 @@ func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	}
 	name := call.Arguments[0].String()
 	value := call.Arguments[1].String()
+	before, hadValue := node.GetAttribute(name), node.HasAttribute(name)
 	node.SetAttribute(name, value)
-	r.notifyMutation()
+	if !hadValue || before != value || node.Data == "details" && strings.EqualFold(name, "open") {
+		r.notifyMutation()
+	}
 	return goja.Undefined()
 }
 
@@ -2700,31 +2777,42 @@ func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
 	}
 	name := call.Arguments[1].String()
 	value := call.Arguments[2].String()
+	changed := false
 	if ns == "" {
+		before, hadValue := node.GetAttribute(name), node.HasAttribute(name)
 		node.SetAttribute(name, value)
+		changed = !hadValue || before != value || node.Data == "details" && strings.EqualFold(name, "open")
 	} else if ns == "http://www.w3.org/XML/1998/namespace" {
 		replaced := false
 		for i := range node.Attr {
 			if node.Attr[i].Namespace == dom.NSXML && strings.EqualFold(node.Attr[i].Name, name) {
-				node.Attr[i].Value = value
+				changed = node.Attr[i].Value != value
+				if changed {
+					node.Attr[i].Value = value
+				}
 				replaced = true
 				break
 			}
 		}
 		if !replaced {
 			node.Attr = append(node.Attr, dom.Attribute{Name: name, Namespace: dom.NSXML, Value: value})
+			changed = true
 		}
 		// A namespaced write spells its name the same way GetAttribute
 		// reads it, so an xml "id" would retarget the id index.
-		if node.Doc != nil && strings.EqualFold(name, "id") {
+		if changed && node.Doc != nil && strings.EqualFold(name, "id") {
 			node.Doc.MarkQueryDirty()
 		}
 	} else {
 		// Other namespaces have no engine semantics; keep the qualified
 		// name as a plain attribute rather than dropping the write.
+		before, hadValue := node.GetAttribute(name), node.HasAttribute(name)
 		node.SetAttribute(name, value)
+		changed = !hadValue || before != value || node.Data == "details" && strings.EqualFold(name, "open")
 	}
-	r.notifyMutation()
+	if changed {
+		r.notifyMutation()
+	}
 	return goja.Undefined()
 }
 
@@ -2737,9 +2825,11 @@ func (r *Runtime) jsRemoveAttribute(call goja.FunctionCall) goja.Value {
 	name := call.Arguments[0].String()
 	// Remove the attribute from the node's Attr slice.
 	lower := strings.ToLower(name)
+	changed := false
 	for i := range node.Attr {
 		if strings.ToLower(node.Attr[i].Name) == lower {
 			node.Attr = append(node.Attr[:i], node.Attr[i+1:]...)
+			changed = true
 			// A removed id retargets getElementById: drop the index.
 			if node.Doc != nil && lower == "id" {
 				node.Doc.MarkQueryDirty()
@@ -2747,7 +2837,9 @@ func (r *Runtime) jsRemoveAttribute(call goja.FunctionCall) goja.Value {
 			break
 		}
 	}
-	r.notifyMutation()
+	if changed {
+		r.notifyMutation()
+	}
 	return goja.Undefined()
 }
 
@@ -2929,5 +3021,40 @@ func (r *Runtime) ChainOnMutation(fn func()) {
 		r.opts.OnMutation = func() { prev(); fn() }
 	} else {
 		r.opts.OnMutation = fn
+	}
+}
+
+// ChainOnFocusChange appends fn to the focus callback chain. The engine
+// installs its Session binding after parsing the document but before scripts
+// run, while callers can still supply their own observer in Options.
+func (r *Runtime) ChainOnFocusChange(fn func(*dom.Node, bool)) {
+	if r == nil || fn == nil {
+		return
+	}
+	if prev := r.opts.OnFocusChange; prev != nil {
+		r.opts.OnFocusChange = func(node *dom.Node, focused bool) {
+			prev(node, focused)
+			fn(node, focused)
+		}
+	} else {
+		r.opts.OnFocusChange = fn
+	}
+}
+
+// ChainActiveElementProvider installs a host-owned source of truth for
+// document.activeElement while retaining any caller provider as a fallback.
+func (r *Runtime) ChainActiveElementProvider(fn func() *dom.Node) {
+	if r == nil || fn == nil {
+		return
+	}
+	previous := r.opts.ActiveElement
+	r.opts.ActiveElement = func() *dom.Node {
+		if active := fn(); active != nil {
+			return active
+		}
+		if previous != nil {
+			return previous()
+		}
+		return nil
 	}
 }

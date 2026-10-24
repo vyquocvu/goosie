@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
@@ -15,6 +20,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/pdf"
 	"github.com/vyquocvu/goosie/internal/perms"
+	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/userscript"
 	"github.com/vyquocvu/goosie/internal/viewsource"
@@ -37,9 +43,22 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if isViewSource {
 		fetchURL = targetURL
 	}
-	resp, err := client.Get(ctx, fetchURL)
+	var resp *net.Response
+	var stream *net.StreamResponse
+	var err error
+	if streamer, ok := client.(net.StreamingHTTP); ok && isHTTPURL(fetchURL) {
+		stream, err = streamer.GetStream(ctx, fetchURL)
+		if err == nil {
+			resp = &net.Response{StatusCode: stream.StatusCode, Headers: stream.Headers, URL: stream.URL}
+		}
+	} else {
+		resp, err = client.Get(ctx, fetchURL)
+	}
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(fetchURL), err)
+	}
+	if stream != nil {
+		defer stream.Close()
 	}
 	var mgr *download.Manager
 	var storageReg *js.OriginStorageRegistry
@@ -48,6 +67,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var userscriptMgr *userscript.Manager
 	var permsMgr *perms.Manager
 	var mediaBackend media.Backend
+	var savePathPicker platform.SavePathPicker
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -64,7 +84,16 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			permsMgr = v
 		case media.Backend:
 			mediaBackend = v
+		case platform.SavePathPicker:
+			savePathPicker = v
 		}
+	}
+	if isViewSource && stream != nil {
+		body, readErr := stream.ReadBounded(net.MaxResponseBytes)
+		if readErr != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: read view-source response: %w", readErr)
+		}
+		resp.Body = body
 	}
 
 	if isViewSource {
@@ -99,6 +128,40 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	contentDisposition := resp.Headers["Content-Disposition"]
 	isAttachment := strings.Contains(strings.ToLower(contentDisposition), "attachment")
 
+	var streamBody io.Reader
+	streamIsPDF := false
+	if stream != nil {
+		prefix := make([]byte, 5)
+		n, readErr := io.ReadFull(stream.Body, prefix)
+		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: read response: %w", readErr)
+		}
+		prefix = prefix[:n]
+		streamBody = io.MultiReader(bytes.NewReader(prefix), stream.Body)
+		streamIsPDF = !isAttachment && pdf.IsPDF(prefix, contentType, resp.URL)
+		if download.ShouldDownload(contentType, contentDisposition) && !isAttachment && !streamIsPDF {
+			// Unknown binary content is downloaded directly to a temporary file;
+			// it never passes through the 16 MiB document response buffer.
+			isAttachment = true
+		}
+		if !isAttachment || streamIsPDF {
+			if stream.ContentLength > net.MaxResponseBytes {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", net.ErrResponseTooLarge
+			}
+			body, readErr := io.ReadAll(io.LimitReader(streamBody, net.MaxResponseBytes+1))
+			if int64(len(body)) > net.MaxResponseBytes {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", net.ErrResponseTooLarge
+			}
+			if readErr != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: read response: %w", readErr)
+			}
+			resp.Body = body
+			// The body is now buffered; if PDF parsing declines the response,
+			// the existing bounded Save path must use resp.Body rather than the
+			// already-consumed stream reader.
+			stream = nil
+		}
+	}
 	if !isAttachment && pdf.IsPDF(resp.Body, contentType, resp.URL) {
 		fallbackTitle := download.FileName(contentDisposition, resp.URL)
 		pdfDoc, pdfErr := pdf.Parse(resp.Body, fallbackTitle)
@@ -141,6 +204,74 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 
 	if download.ShouldDownload(contentType, contentDisposition) {
 		name := download.FileName(resp.Headers["Content-Disposition"], resp.URL)
+		if stream != nil {
+			targetPath := ""
+			if savePathPicker != nil {
+				chosenPath, chosen, pickErr := savePathPicker.ChooseSavePath(downloadDir, name)
+				if pickErr != nil {
+					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", pickErr
+				}
+				if ctx.Err() != nil {
+					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
+				}
+				if !chosen {
+					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", errDownloadSaveCanceled
+				}
+				if strings.TrimSpace(chosenPath) == "" {
+					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", errors.New("goosie: save dialog returned an empty path")
+				}
+				targetPath = chosenPath
+				name = filepath.Base(targetPath)
+			}
+			downloadCtx, cancel := context.WithCancel(ctx)
+			var itemID string
+			if mgr != nil {
+				it := mgr.CreateItem(resp.URL, name, stream.ContentLength)
+				itemID = it.ID
+				mgr.SetCancel(itemID, func() {
+					cancel()
+					stream.Cancel()
+				})
+			}
+			lastProgressBytes := int64(0)
+			lastProgressAt := time.Now()
+			progress := func(downloaded int64) {
+				if mgr != nil && itemID != "" && (lastProgressBytes == 0 || downloaded-lastProgressBytes >= 512*1024 || time.Since(lastProgressAt) >= 250*time.Millisecond) {
+					mgr.UpdateProgress(itemID, downloaded)
+					lastProgressBytes = downloaded
+					lastProgressAt = time.Now()
+				}
+			}
+			var savedPath string
+			var downloaded int64
+			var saveErr error
+			if targetPath != "" {
+				downloaded, saveErr = download.SaveStreamTo(downloadCtx, targetPath, streamBody, progress)
+				savedPath, _ = filepath.Abs(targetPath)
+			} else {
+				savedPath, downloaded, saveErr = download.SaveStream(downloadCtx, downloadDir, name, streamBody, progress)
+			}
+			cancel()
+			if saveErr != nil {
+				if mgr != nil && itemID != "" {
+					if saveErr == context.Canceled {
+						mgr.Cancel(itemID)
+					} else if it := mgr.Get(itemID); it != nil && it.Status != download.StatusCanceled {
+						mgr.Fail(itemID, saveErr)
+					}
+				}
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", saveErr
+			}
+			if mgr != nil && itemID != "" {
+				mgr.UpdateProgress(itemID, downloaded)
+				mgr.Complete(itemID, savedPath)
+				if it := mgr.Get(itemID); it == nil || it.Status != download.StatusCompleted {
+					_ = os.Remove(savedPath)
+					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", context.Canceled
+				}
+			}
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
+		}
 		var itemID string
 		if mgr != nil {
 			it := mgr.CreateItem(resp.URL, name, int64(len(resp.Body)))
@@ -322,4 +453,11 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	layer.SetContent(dl)
 	completed = true
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
+}
+
+var errDownloadSaveCanceled = errors.New("goosie: download save dialog canceled")
+
+func isHTTPURL(raw string) bool {
+	lower := strings.ToLower(raw)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }

@@ -63,6 +63,7 @@ var Allowed = map[string][]string{
 	"internal/viewsource":        nil,
 	"internal/flags":             nil,
 	"internal/perms":             nil,
+	"internal/preferences":       nil,
 	"internal/style":             {"internal/css", "internal/dom", "internal/frame"},
 	"internal/layout":            {"internal/dom", "internal/style", "internal/frame"},
 	"internal/engine":            {"internal/ax", "internal/dom", "internal/css", "internal/style", "internal/layout", "internal/paint", "internal/frame", "internal/image", "internal/js", "internal/media", "internal/userscript"},

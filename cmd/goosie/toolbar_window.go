@@ -47,6 +47,9 @@ type chromeWindow struct {
 	onCopy            func() bool
 	hitTestLink       func(contentX, contentY int32) string
 	onHoverCursor     func(contentX, contentY int32) surface.Cursor
+	onContentHover    func(contentX, contentY int32)
+	onContentActive   func(contentX, contentY int32, pressed bool) bool
+	onActiveStyle     func()
 	chromeBitmap      *frame.Bitmap
 	outBitmap         *frame.Bitmap
 	lastChromeH       int32
@@ -580,6 +583,11 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return true
 	case surface.EvPointer:
+		if ev.Action == surface.PointerRelease && ev.Button == surface.ButtonLeft && cw.onContentActive != nil {
+			if cw.onContentActive(0, 0, false) && cw.onActiveStyle != nil {
+				cw.onActiveStyle()
+			}
+		}
 		if cw.contextMenu != nil && cw.contextMenu.Visible {
 			if ev.Action == surface.PointerMotion {
 				cw.contextMenu.UpdateHover(ev.Pos, cw.sc())
@@ -618,6 +626,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		toolH := int32(toolbar.ToolbarHeight) * cw.sc()
 		if ev.Action == surface.PointerMotion && ev.Button == surface.ButtonNone {
 			cw.updateHoverCursor(ev.Pos, cw.chromeHeight())
+			if cw.onContentHover != nil {
+				cw.onContentHover(ev.Pos.X, ev.Pos.Y-cw.chromeHeight())
+			}
 		}
 		if !cw.fullscreen && !cw.isStandalone() {
 			if ev.Action == surface.PointerRelease {
@@ -711,16 +722,34 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		contentX := ev.Pos.X
 		contentY := ev.Pos.Y - cw.chromeHeight()
 		press := ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft
+		activeChanged := false
+		if cw.onContentActive != nil {
+			switch {
+			case press:
+				activeChanged = cw.onContentActive(contentX, contentY, true)
+			case ev.Action == surface.PointerMotion && ev.Button == surface.ButtonLeft:
+				activeChanged = cw.onContentActive(contentX, contentY, true)
+				if activeChanged && cw.onActiveStyle != nil {
+					cw.onActiveStyle()
+				}
+			}
+		}
 		if press {
 			// Media controls come first. A video's painted buttons sit inside the
 			// document, so without this a press on the play button would fall
 			// through to focus and then to the drag selector and start a text
 			// selection over the thing the user was aiming at.
 			if cw.onMediaControl != nil && cw.onMediaControl(contentX, contentY) {
+				if activeChanged && cw.onActiveStyle != nil {
+					cw.onActiveStyle()
+				}
 				return true
 			}
 			if cw.hitTestLink != nil {
 				if href := cw.hitTestLink(contentX, contentY); href != "" {
+					if activeChanged && cw.onActiveStyle != nil {
+						cw.onActiveStyle()
+					}
 					if cw.onLinkClick != nil {
 						cw.onLinkClick(href)
 					}
@@ -729,6 +758,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			}
 			if cw.onFocusClick != nil && cw.onFocusClick(contentX, contentY) {
 				return true
+			}
+			if activeChanged && cw.onActiveStyle != nil {
+				cw.onActiveStyle()
 			}
 		}
 		if cw.onDragSelect != nil && cw.onDragSelect(ev.Action, contentX, contentY) {

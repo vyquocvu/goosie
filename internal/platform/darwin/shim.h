@@ -200,6 +200,12 @@ char *GoosieClipboardRead(void);
 // clears the clipboard. The call is safe from any thread.
 void GoosieClipboardWrite(const char *text);
 
+// GoosieChooseSavePath presents an AppKit save panel on the main thread. It
+// returns 1 and a caller-owned path on selection, 0 on user cancellation, and
+// -1 when the window or panel cannot provide a path.
+int GoosieChooseSavePath(GoosieWindow *gw, const char *directory,
+	const char *filename, char **path);
+
 // GoosieAxRole is a node's kind, mapped onto the AX tree's roles in Go rather
 // than shared numerically, for the same reason the event kinds are.
 enum {

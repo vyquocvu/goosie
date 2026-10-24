@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
@@ -174,7 +176,9 @@ cb.addEventListener('change',function(){ L('change:'+ (cb.checked ? 'true':'fals
 
 	focusCenter(t, sess, "cb")
 
-	sess.PressKey("Enter", false, false, false, false)
+	if !sess.PressKey("Enter", false, false, false, false) {
+		t.Fatal("Enter activation default was not performed")
+	}
 
 	v, _ := rt.Global("__log")
 	// Enter on a checkbox toggles it (default action) between keydown and keyup.
@@ -184,6 +188,120 @@ cb.addEventListener('change',function(){ L('change:'+ (cb.checked ? 'true':'fals
 	if !strings.Contains(v.Str, "change:true") {
 		t.Errorf("__log = %q, want change:true from Enter activation", v.Str)
 	}
+}
+
+func TestKeyboard_ActivationTracksActiveAndDispatchesClick(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<div id="parent"><button id="target">Activate</button></div>
+</body></html>`)
+	target := nodeByID(sess.Doc.Node.FirstChild, "target")
+	parent := nodeByID(sess.Doc.Node.FirstChild, "parent")
+	if target == nil || parent == nil {
+		t.Fatal("activation nodes not found")
+	}
+	if !sess.FocusNode(target) {
+		t.Fatal("could not focus target")
+	}
+	var downActive, clickActive, upActive bool
+	clicks := 0
+	dom.AddEventListener(target, "keydown", func(*dom.Event) {
+		downActive = css.IsActive(target) && css.IsActive(parent)
+	}, false)
+	dom.AddEventListener(target, "click", func(*dom.Event) {
+		clicks++
+		clickActive = css.IsActive(target) && css.IsActive(parent)
+	}, false)
+	dom.AddEventListener(target, "keyup", func(*dom.Event) {
+		upActive = css.IsActive(target) && css.IsActive(parent)
+	}, false)
+
+	sess.PressKey("Enter", false, false, false, false)
+	if !downActive || !clickActive || !upActive {
+		t.Fatalf(":active during key operation: keydown=%v click=%v keyup=%v", downActive, clickActive, upActive)
+	}
+	if clicks != 1 {
+		t.Fatalf("click events = %d, want 1", clicks)
+	}
+	if css.IsActive(target) || css.IsActive(parent) {
+		t.Fatal(":active remained after keyboard activation completed")
+	}
+
+	// Space activates buttons as well; the same transient active state wraps
+	// the complete key operation and the generated click event.
+	downActive, clickActive, upActive = false, false, false
+	if !sess.PressKey(" ", false, false, false, false) {
+		t.Fatal("Space activation default was not performed")
+	}
+	if !downActive || !clickActive || !upActive || clicks != 2 {
+		t.Fatalf("Space activation: keydown=%v click=%v keyup=%v clicks=%d", downActive, clickActive, upActive, clicks)
+	}
+}
+
+func TestKeyboard_PreventDefaultBlocksSpaceActivation(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body><input type="checkbox" id="cb"></body></html>`)
+	if !focusCenter(t, sess, "cb") {
+		t.Fatal("could not focus checkbox")
+	}
+	cb := nodeByID(sess.Doc.Node.FirstChild, "cb")
+	if cb == nil {
+		t.Fatal("checkbox not found")
+	}
+	clicks := 0
+	dom.AddEventListener(cb, "keydown", func(e *dom.Event) { e.PreventDefault() }, false)
+	dom.AddEventListener(cb, "click", func(*dom.Event) { clicks++ }, false)
+	if sess.PressKey(" ", false, false, false, false) {
+		t.Fatal("prevented Space reported an activation")
+	}
+	if clicks != 0 || engine.IsChecked(cb) {
+		t.Fatalf("prevented Space produced clicks=%d checked=%v; want no activation", clicks, engine.IsChecked(cb))
+	}
+	if css.IsActive(cb) {
+		t.Fatal(":active remained after prevented key operation")
+	}
+}
+
+func TestKeyboard_EnterLinkActivationHonorsClickPreventDefault(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body><a id="link" href="/next">next</a></body></html>`)
+	link := nodeByID(sess.Doc.Node.FirstChild, "link")
+	if link == nil || !sess.FocusNode(link) {
+		t.Fatal("could not find and focus link")
+	}
+	clicks := 0
+	prevent := false
+	dom.AddEventListener(link, "click", func(e *dom.Event) {
+		clicks++
+		if prevent {
+			e.PreventDefault()
+		}
+	}, false)
+	if !sess.PressKey("Enter", false, false, false, false) {
+		t.Fatal("uncanceled link click did not report activation")
+	}
+	if clicks != 1 {
+		t.Fatalf("link click events = %d, want 1", clicks)
+	}
+	prevent = true
+	if sess.PressKey("Enter", false, false, false, false) {
+		t.Fatal("canceled link click reported activation")
+	}
+	if clicks != 2 {
+		t.Fatalf("canceled link click events = %d, want 2 dispatched events", clicks)
+	}
+}
+
+func nodeByID(n *dom.Node, id string) *dom.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Element() && n.GetAttribute("id") == id {
+		return n
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if found := nodeByID(child, id); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 // Compile-time guard: engine.EditAction is used elsewhere; ensure import stays.

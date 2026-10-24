@@ -200,7 +200,7 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-167 | P1 | SEC, INT | NOT RUN** — JavaScript chạy quá giới hạn tài nguyên/thời gian → bị dừng/cô lập, browser chrome vẫn thao tác được.
 - **BR-168 | P1 | INT, SEC | NOT RUN** — Mở link/file URL scheme không thuộc allowlist → không thực thi native handler hoặc rò dữ liệu local.
 
-## H. Độ bền, hiệu năng đo bằng counter, parity và release — BR-169–BR-180
+## H. Độ bền, hiệu năng đo bằng counter, parity và release — BR-169–BR-185
 
 - **BR-169 | P1 | CUA, INT | NOT RUN** — Duyệt 20 URL qua 10 tab, chuyển tab và đóng một nửa → app không crash, mỗi tab giữ trạng thái hợp lệ.
 - **BR-170 | P1 | INT | NOT RUN** — Gửi liên tiếp navigation nhanh rồi đóng tab → không có stale paint, panic hay goroutine leak được test harness phát hiện.
@@ -214,6 +214,11 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-178 | P1 | PARITY | NOT RUN** — Chạy interaction parity cho click/focus/key fixtures → thứ tự event và trạng thái cuối so sánh với reference.
 - **BR-179 | P0 | INT | NOT RUN** — Chạy go test ./..., go vet -all ./..., archtest và gate suite trên commit ứng viên → tất cả lệnh exit 0; lưu log/artifact.
 - **BR-180 | P0 | CUA, PARITY | NOT RUN** — Trên build release candidate, chạy lại toàn bộ P0/P1 CUA liên quan và visual parity, gồm Google Products live smoke sau fixture → không còn lỗi P0/P1 mở, evidence đủ và sign-off theo DoD.
+- **BR-181 | P1 | INT | PASS** — Nhấn pointer trên phần tử có `:active` rồi thả → style active xuất hiện khi nhấn, trở lại sau release, mỗi lần chuyển trạng thái chỉ chạy một style/layout/display-list update. Headless chrome-window integration và selector test PASS trong lần chạy 2026-10-24.
+- **BR-182 | P1 | INT | PASS** — Focus checkbox bằng Tab rồi nhấn Space → click/default action chạy, checkbox và `:checked` style đổi với đúng một style/layout/display-list update; keydown preventDefault chặn click/toggle; Enter trên anchor phát click và chỉ báo activation khi click không bị hủy; engine event checks xác nhận `:active` trên target và ancestors trong keydown/click/keyup.
+- **BR-183 | P1 | INT | PASS** — Khi link đang focus, Space cuộn xuống một bước trang và Shift+Space cuộn lên; Enter điều hướng anchor tới đích; click preventDefault giữ nguyên URL và không bắt đầu navigation.
+- **BR-184 | P1 | INT | PASS** — JS ghi lại attribute/checked/value hiện có và xóa token class vắng mặt → PumpJS không báo frame work, style/layout/display-list counters giữ nguyên; khi class thực sự đổi, style/layout chạy đúng một lần và computed style được cập nhật.
+- **BR-185 | P1 | INT | PASS** — Selector change chỉ đổi text color → computed styles và display list cập nhật nhưng arena giữ nguyên, layout counter không tăng; selector đổi width → layout build chạy lại. Các cập nhật có anonymous/pseudo boxes tiếp tục dùng full-layout fallback.
 
 ## Ma trận thực thi theo nhịp phát hành
 

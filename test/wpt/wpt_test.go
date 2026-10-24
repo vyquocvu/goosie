@@ -25,6 +25,7 @@ import (
 //   - WPT_DIR: path to a WPT checkout (skips download)
 //   - WPT_CONFIG: path to wpt-config.json
 //   - WPT_DIRS: comma-separated list of WPT directories to test (overrides config)
+//   - WPT_INCLUDE: comma-separated WPT-relative paths or file-name patterns
 //   - WPT_SKIP_DOWNLOAD: if "1", skip the WPT download (requires WPT_DIR)
 func TestWPTSuite(t *testing.T) {
 	cfg := loadTestConfig(t)
@@ -195,6 +196,7 @@ func TestWPTConfigLoad(t *testing.T) {
 
 	cfgJSON := `{
 		"directories": ["css/css-color"],
+		"include": ["css/selectors/focus-within-001.html", "focus-within-002.html"],
 		"pass_threshold": 90.0,
 		"viewport_width": 1024,
 		"viewport_height": 768,
@@ -211,6 +213,9 @@ func TestWPTConfigLoad(t *testing.T) {
 	if len(cfg.Directories) != 1 || cfg.Directories[0] != "css/css-color" {
 		t.Errorf("Directories = %v, want [css/css-color]", cfg.Directories)
 	}
+	if len(cfg.Include) != 2 || cfg.Include[0] != "css/selectors/focus-within-001.html" || cfg.Include[1] != "focus-within-002.html" {
+		t.Errorf("Include = %v, want the two configured WPT paths", cfg.Include)
+	}
 	if cfg.PassThreshold != 90.0 {
 		t.Errorf("PassThreshold = %f, want 90.0", cfg.PassThreshold)
 	}
@@ -219,6 +224,23 @@ func TestWPTConfigLoad(t *testing.T) {
 	}
 	if cfg.Timeout != 60 {
 		t.Errorf("Timeout = %d, want 60", cfg.Timeout)
+	}
+}
+
+func TestWPTIncludeFilter(t *testing.T) {
+	for _, tc := range []struct {
+		path     string
+		patterns []string
+		want     bool
+	}{
+		{"css/selectors/focus-within-001.html", []string{"css/selectors/focus-within-001.html"}, true},
+		{"css/selectors/focus-within-001.html", []string{"focus-within-00?.html"}, true},
+		{"css/selectors/focus-within-001.html", []string{"focus-within-002.html"}, false},
+		{"css/selectors/focus-within-001.html", nil, true},
+	} {
+		if got := includedTest(tc.path, tc.patterns); got != tc.want {
+			t.Errorf("includedTest(%q, %v) = %v, want %v", tc.path, tc.patterns, got, tc.want)
+		}
 	}
 }
 
@@ -282,6 +304,9 @@ func loadTestConfig(t *testing.T) Config {
 	}
 	if v := os.Getenv("WPT_DIRS"); v != "" {
 		cfg.Directories = splitAndTrim(v)
+	}
+	if v := os.Getenv("WPT_INCLUDE"); v != "" {
+		cfg.Include = splitAndTrim(v)
 	}
 	if v := os.Getenv("WPT_OUTPUT_DIR"); v != "" {
 		cfg.OutputDir = v

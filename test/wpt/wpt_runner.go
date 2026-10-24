@@ -69,7 +69,14 @@ func (r *Runner) Run() (*SuiteResult, error) {
 		for i := range tests {
 			tests[i].FullDir = dir.Path
 		}
-		allTests = append(allTests, tests...)
+		for _, test := range tests {
+			if includedTest(test.Path, r.cfg.Include) {
+				allTests = append(allTests, test)
+			}
+		}
+	}
+	if len(r.cfg.Include) > 0 && len(allTests) == 0 {
+		return nil, fmt.Errorf("wpt: include patterns matched no tests: %s", strings.Join(r.cfg.Include, ", "))
 	}
 
 	result.Total = len(allTests)
@@ -100,6 +107,28 @@ func (r *Runner) Run() (*SuiteResult, error) {
 	}
 
 	return result, nil
+}
+
+// includedTest reports whether a discovered WPT path matches one of the
+// configured allowlist patterns. Patterns may match the full WPT-relative path
+// or just the file name, which keeps focused runs concise.
+func includedTest(path string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	base := filepath.Base(path)
+	for _, pattern := range patterns {
+		if path == pattern || base == pattern {
+			return true
+		}
+		if matched, err := filepath.Match(pattern, path); err == nil && matched {
+			return true
+		}
+		if matched, err := filepath.Match(pattern, base); err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 // runOne executes a single WPT test and returns its result.

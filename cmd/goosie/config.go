@@ -17,33 +17,35 @@ import (
 
 // config is one parsed invocation.
 type config struct {
-	url               string
-	gate              bool
-	bench             bool
-	screenshot        bool
-	printPDF          string
-	backend           string
-	frames            int
-	scene             string
-	sceneSet          bool
-	out               string
-	width             int
-	height            int
-	dpr               float64
-	downloadDir       string
-	private           bool
-	profile           string
-	clearData         bool
-	sessionFile       string
-	sessionActiveFile string
-	cookieFile        string
-	bookmarkFile      string
-	historyFile       string
-	theme             string
-	userscriptDir     string
-	appURL            string
-	flagsFile         string
-	permsFile         string
+	url                 string
+	gate                bool
+	bench               bool
+	screenshot          bool
+	printPDF            string
+	backend             string
+	frames              int
+	scene               string
+	sceneSet            bool
+	out                 string
+	width               int
+	height              int
+	dpr                 float64
+	downloadDir         string
+	downloadDirExplicit bool
+	private             bool
+	profile             string
+	clearData           bool
+	sessionFile         string
+	sessionActiveFile   string
+	cookieFile          string
+	bookmarkFile        string
+	historyFile         string
+	theme               string
+	userscriptDir       string
+	appURL              string
+	flagsFile           string
+	permsFile           string
+	preferencesFile     string
 }
 
 // stateDir is where this invocation keeps persistent state: the default
@@ -58,6 +60,24 @@ func (c config) stateDir() string {
 		return base
 	}
 	return filepath.Join(base, "profiles", c.profile)
+}
+
+// effectiveDownloadDir gives an explicit CLI flag precedence over the profile,
+// then resolves relative values once so persistent settings never depend on a
+// later process working directory.
+func effectiveDownloadDir(cliDir string, explicit bool, profileDir string) (string, error) {
+	dir := cliDir
+	if !explicit && profileDir != "" {
+		dir = profileDir
+	}
+	if dir != "" && !filepath.IsAbs(dir) {
+		absolute, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		dir = absolute
+	}
+	return dir, nil
 }
 
 // devSize is the surface in device pixels: the units the frame path, the scheduler,
@@ -138,6 +158,9 @@ func parse(args []string) (config, error) {
 		if fl.Name == "scene" {
 			c.sceneSet = true
 		}
+		if fl.Name == "download-dir" {
+			c.downloadDirExplicit = true
+		}
 	})
 	if _, err := sceneSpec(c.scene); err != nil {
 		return c, err
@@ -179,6 +202,7 @@ func parse(args []string) (config, error) {
 	c.userscriptDir = filepath.Join(c.stateDir(), "userscripts")
 	c.flagsFile = filepath.Join(c.stateDir(), "flags.json")
 	c.permsFile = filepath.Join(c.stateDir(), "permissions.json")
+	c.preferencesFile = filepath.Join(c.stateDir(), "preferences.json")
 	return c, nil
 }
 

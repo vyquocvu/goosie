@@ -1,5 +1,7 @@
 package frame
 
+import "sync/atomic"
+
 // Grid owns one layer's tiles, their pixel buffers, and the byte budget they fit
 // within. v1 kept the LRU order in a separate TileCache from the tile map, which
 // meant two structures had to agree about which tiles held memory. Here there is
@@ -23,7 +25,7 @@ type Grid struct {
 	free []*Tile
 
 	used   int64
-	budget int64
+	budget atomic.Int64
 	clock  uint64
 
 	pool *BitmapPool
@@ -72,9 +74,9 @@ func NewGrid(extent Rect, tileSize int32, budget int64, pool *BitmapPool) *Grid 
 	g := &Grid{
 		tileSize: tileSize,
 		extent:   extent.Canon(),
-		budget:   budget,
 		pool:     pool,
 	}
+	g.budget.Store(budget)
 	// The map is sized to the record cap rather than left to grow: a map that doubles
 	// halfway down a document allocates during a scroll frame, which is the one frame
 	// invariant 6 is stated about, and the growth is invisible in every other
@@ -106,7 +108,7 @@ func (g *Grid) coordCount() int {
 func (g *Grid) recordCap() int {
 	const budgetMultiple = 4
 	n := g.coordCount()
-	if limit := int(g.budget/(int64(g.tileSize)*int64(g.tileSize)*4)) * budgetMultiple; n > limit {
+	if limit := int(g.budget.Load()/(int64(g.tileSize)*int64(g.tileSize)*4)) * budgetMultiple; n > limit {
 		n = limit
 	}
 	if n < 0 {
@@ -400,7 +402,8 @@ func (g *Grid) Acquire(c TileCoord) (*Bitmap, bool) {
 // being prepared. Because the budget is guaranteed to hold at least one tile and
 // every other holder is a valid victim, the loop always terminates.
 func (g *Grid) evictFor(need int64, keep TileCoord) {
-	if g.used+need <= g.budget {
+	budget := g.budget.Load()
+	if g.used+need <= budget {
 		return
 	}
 	for v := g.tail; v != nil; {
@@ -410,7 +413,7 @@ func (g *Grid) evictFor(need int64, keep TileCoord) {
 			g.evictions++
 		}
 		v = prev
-		if g.used+need <= g.budget {
+		if g.used+need <= budget {
 			return
 		}
 	}
@@ -594,8 +597,8 @@ func (g *Grid) SetBudget(budget int64) {
 	if budget < one {
 		budget = one
 	}
-	g.budget = budget
-	for g.used > g.budget {
+	g.budget.Store(budget)
+	for g.used > budget {
 		v := g.tail
 		if v == nil {
 			break
@@ -605,7 +608,18 @@ func (g *Grid) SetBudget(budget int64) {
 	}
 }
 
-// Stats returns a snapshot of grid state and counters.
+// Budget returns the current byte ceiling. Unlike Stats, it is safe to query
+// from the UI thread while the scheduler owns and mutates the rest of the grid.
+func (g *Grid) Budget() int64 {
+	if g == nil {
+		return 0
+	}
+	return g.budget.Load()
+}
+
+// Stats returns a snapshot of grid state and counters. Grid mutation and Stats
+// reads belong to the scheduler's frame thread; callers on other goroutines
+// should use the narrow atomic accessors instead.
 func (g *Grid) Stats() GridStats {
 	return GridStats{
 		Tiles:         len(g.tiles),
@@ -614,7 +628,7 @@ func (g *Grid) Stats() GridStats {
 		Empty:         g.counts[TileEmpty],
 		Failed:        g.counts[TileFailed],
 		Bytes:         g.used,
-		Budget:        g.budget,
+		Budget:        g.budget.Load(),
 		PaintingBytes: g.painting,
 		Evictions:     g.evictions,
 		Rasterized:    g.rasterized,

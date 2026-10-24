@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -111,6 +112,21 @@ func TestFormatBytesAndSpeed(t *testing.T) {
 	}
 	if s := FormatSpeed(0); s != "--" {
 		t.Errorf("FormatSpeed(0) = %q", s)
+	}
+}
+
+func TestCancelStopsOperationAndCannotBeOverwrittenByCompletion(t *testing.T) {
+	mgr := NewManager(t.TempDir())
+	item := mgr.CreateItem("https://example.com/large.bin", "large.bin", 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr.SetCancel(item.ID, cancel)
+	mgr.Cancel(item.ID)
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("operation context error = %v, want context.Canceled", ctx.Err())
+	}
+	mgr.Complete(item.ID, filepath.Join(t.TempDir(), "large.bin"))
+	if got := mgr.Get(item.ID).Status; got != StatusCanceled {
+		t.Fatalf("status after late completion = %q, want canceled", got)
 	}
 }
 

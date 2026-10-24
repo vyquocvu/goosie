@@ -34,6 +34,7 @@ func TestWPTPilot(t *testing.T) {
 		"css/css-backgrounds",
 		"css/css-flexbox",
 		"css/css-position",
+		"css/selectors",
 		"html/semantics",
 	}
 
@@ -113,6 +114,7 @@ func TestWPTPilotDiscovery(t *testing.T) {
 		"css/css-backgrounds",
 		"css/css-flexbox",
 		"css/css-position",
+		"css/selectors",
 		"html/semantics",
 	}
 

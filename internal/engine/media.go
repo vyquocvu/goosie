@@ -365,6 +365,7 @@ func (s *Session) FocusMediaElement(n *dom.Node) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.focus = n
+	s.focusState.Store(n)
 	return true
 }
 
