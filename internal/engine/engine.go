@@ -145,6 +145,13 @@ type Session struct {
 	selAnchor selPos
 	selHead   selPos
 
+	// Find highlight state. findMarks are the rects from the most recent Find,
+	// each tied to the word box that paints it, and findActive selects the
+	// match painted in the active color. Like the selection, the marks point
+	// into the current arena, so Reflow clears them with it.
+	findMarks  []findMark
+	findActive int
+
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
@@ -1387,6 +1394,9 @@ func (s *Session) Reflow(viewportW float32) error {
 	// Selection ends index the old arena's word list; the rebuild just moved
 	// every word, so the highlight would paint on the wrong boxes.
 	s.selActive = false
+	// Find marks hold old-arena word pointers, for the same reason.
+	s.findMarks = nil
+	s.findActive = 0
 	return nil
 }
 
@@ -1723,13 +1733,25 @@ type Match struct {
 // maxFindMatches bounds the work a hostile page can make Find do.
 const maxFindMatches = 1000
 
+// findMark ties one Match rect to the word box whose paint emits the
+// highlight. match is the index into the Find result, so the active match can
+// switch color without re-running the search.
+type findMark struct {
+	obj   *layout.Object
+	rect  Match
+	match int
+}
+
 // Find returns the rects of every visible occurrence of query, in tree order,
 // case-insensitively. Consecutive word boxes of a run are joined with single
 // spaces, so a query may span word boundaries and line breaks but not element
-// boundaries.
+// boundaries. The matches are also recorded for Paint to underlay with the
+// highlight until ClearFind or the next Find.
 func (s *Session) Find(query string) []Match {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	s.findMarks = nil
+	s.findActive = 0
 	if s.Arena == nil || strings.TrimSpace(query) == "" {
 		return nil
 	}
@@ -1737,6 +1759,7 @@ func (s *Session) Find(query string) []Match {
 
 	objs := s.Arena.Objects
 	var matches []Match
+	var marks []findMark
 	var run []*layout.Object
 
 	flushRun := func() {
@@ -1769,7 +1792,9 @@ func (s *Session) Find(query string) []Match {
 				break
 			}
 			start := at + idx
-			matches = append(matches, matchRect(words, off, start, start+len(q)))
+			rect, first := matchRect(words, off, start, start+len(q))
+			marks = append(marks, findMark{obj: words[first], rect: rect, match: len(matches)})
+			matches = append(matches, rect)
 			at = start + 1
 		}
 	}
@@ -1794,7 +1819,28 @@ func (s *Session) Find(query string) []Match {
 	}
 	walk(1)
 	flushRun()
+	s.findMarks = marks
 	return matches
+}
+
+// SetFindActive selects which match the most recent Find paints in the active
+// color. An out-of-range index leaves every match in the inactive color.
+func (s *Session) SetFindActive(index int) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if index < 0 || index >= len(s.findMarks) {
+		s.findActive = -1
+		return
+	}
+	s.findActive = index
+}
+
+// ClearFind drops the highlight state left by Find.
+func (s *Session) ClearFind() {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.findMarks = nil
+	s.findActive = 0
 }
 
 // SelectionBounds returns the union of selected word boxes in document
@@ -1889,7 +1935,7 @@ func (s *Session) ScrollToID(targetID string) float32 {
 // matchRect maps a match spanning joined-string offsets [start, end) back onto
 // the word boxes it covers. Edges inside a box are interpolated proportionally
 // to character position, which is exact for full-word matches.
-func matchRect(words []*layout.Object, off []int, start, end int) Match {
+func matchRect(words []*layout.Object, off []int, start, end int) (Match, int) {
 	first, last := 0, len(words)-1
 	for i := range words {
 		if off[i] <= start {
@@ -1904,9 +1950,9 @@ func matchRect(words []*layout.Object, off []int, start, end int) Match {
 		if w := len(words[first].Node.DataContent); w > 0 {
 			sx := x0 + (x1-x0)*float32(start-off[first])/float32(w)
 			ex := x0 + (x1-x0)*float32(end-off[first])/float32(w)
-			return Match{X0: sx, Y0: y0, X1: ex, Y1: y1}
+			return Match{X0: sx, Y0: y0, X1: ex, Y1: y1}, first
 		}
-		return Match{X0: x0, Y0: y0, X1: x1, Y1: y1}
+		return Match{X0: x0, Y0: y0, X1: x1, Y1: y1}, first
 	}
 	lx0, ly0, lx1, ly1 := words[last].BorderRect()
 	if w := len(words[first].Node.DataContent); w > 0 {
@@ -1924,7 +1970,7 @@ func matchRect(words []*layout.Object, off []int, start, end int) Match {
 	if ly1 > bot {
 		bot = ly1
 	}
-	return Match{x0, top, x1, bot}
+	return Match{x0, top, x1, bot}, first
 }
 
 func parentObj(objs []layout.Object, o *layout.Object) *layout.Object {

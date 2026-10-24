@@ -700,18 +700,23 @@ func (f *framePath) runFind(query string) {
 	f.findMatches = nil
 	f.findIdx = 0
 	f.toolbar.ResetFindCounts()
-	if strings.TrimSpace(query) == "" {
-		return
-	}
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
 		return
 	}
-	f.findMatches = tab.Session().Find(query)
+	sess := tab.Session()
+	if strings.TrimSpace(query) == "" {
+		sess.ClearFind()
+		f.repaintTab(tab, frame.Rect{})
+		return
+	}
+	f.findMatches = sess.Find(query)
+	sess.SetFindActive(0)
 	f.toolbar.SetFindResult(len(f.findMatches), 0)
 	if len(f.findMatches) > 0 {
 		f.scrollToMatch(0)
 	}
+	f.repaintTab(tab, frame.Rect{})
 }
 
 // findStep moves to the next (or previous) match, wrapping around.
@@ -732,6 +737,10 @@ func (f *framePath) findStep(backward bool) {
 	}
 	f.toolbar.SetFindResult(len(f.findMatches), f.findIdx)
 	f.scrollToMatch(f.findIdx)
+	if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+		tab.Session().SetFindActive(f.findIdx)
+		f.repaintTab(tab, frame.Rect{})
+	}
 }
 
 // scrollToMatch centers the match's line in the upper part of the viewport.
@@ -753,6 +762,11 @@ func (f *framePath) scrollToMatch(idx int) {
 func (f *framePath) closeFind() {
 	f.findMatches = nil
 	f.findIdx = 0
+	if f.tabMgr != nil {
+		if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
+			tab.Session().ClearFind()
+		}
+	}
 	if f.toolbar == nil {
 		return
 	}
@@ -760,6 +774,19 @@ func (f *framePath) closeFind() {
 	if active, _, _ := f.toolbar.FindCounts(); active {
 		f.toolbar.CloseFind()
 	}
+}
+
+// clearFindHighlights repaints the active tab after CloseFind drops the
+// session's match marks, so the yellow and orange boxes disappear at once.
+func (f *framePath) clearFindHighlights() {
+	if f.tabMgr == nil {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	f.repaintTab(tab, frame.Rect{})
 }
 
 // switchTab saves the current tab's scroll and switches to the given tab.

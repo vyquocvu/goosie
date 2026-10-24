@@ -3,7 +3,9 @@ package main
 import (
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/paint"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -66,6 +68,48 @@ func TestFindInPageLifecycle(t *testing.T) {
 	active, _, _ = f.toolbar.FindCounts()
 	if active {
 		t.Fatal("FindActive should be false after close")
+	}
+}
+
+func TestFindRunFindPaintsHighlights(t *testing.T) {
+	f := newNavTestPath(t)
+	f.toolbar = toolbar.NewState(800, nil)
+	f.config.width = 800
+	f.config.height = 600
+	f.config.dpr = 1
+
+	tab := f.tabMgr.Active()
+	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>hello world hello</p></body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	tab.SetSession(sess)
+
+	f.runFind("hello")
+	if len(f.findMatches) != 2 {
+		t.Fatalf("runFind matched %d boxes, want 2", len(f.findMatches))
+	}
+	if tab.Layer() == nil {
+		t.Fatal("runFind did not repaint the tab")
+	}
+
+	list, err := sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked: %v", err)
+	}
+	for _, m := range f.findMatches {
+		want := frame.RectF4(m.X0, m.Y0, m.X1, m.Y1).ToDevice(1)
+		found := false
+		for _, c := range list.All() {
+			if c.Kind == paint.CmdFill && c.Rect == want && c.Color.A() != 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("no highlight fill for match %+v", m)
+		}
 	}
 }
 

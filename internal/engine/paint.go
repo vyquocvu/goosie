@@ -57,6 +57,17 @@ func (s *Session) Paint(scale float32) *paint.List {
 	if spans := s.selectionSpans(); len(spans) > 0 {
 		b.SetSelection(spans)
 	}
+	if len(s.findMarks) > 0 {
+		marks := make([]paint.FindMark, 0, len(s.findMarks))
+		for _, m := range s.findMarks {
+			marks = append(marks, paint.FindMark{
+				Obj:    m.obj,
+				Rect:   frame.RectF4(m.rect.X0, m.rect.Y0, m.rect.X1, m.rect.Y1),
+				Active: m.match == s.findActive,
+			})
+		}
+		b.SetFind(marks)
+	}
 	b.Build(layout.ObjectID(1))
 	return list
 }
