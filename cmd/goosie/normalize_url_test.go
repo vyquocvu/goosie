@@ -32,14 +32,14 @@ func TestNormalizeURL(t *testing.T) {
 			expected: "https://localhost:8080",
 		},
 		{
-			name:     "domain with hyphens",
+			name:     "domain with hyphens - single label, search",
 			input:    "my-site",
-			expected: "https://my-site",
+			expected: "https://www.google.com/search?q=my-site",
 		},
 		{
-			name:     "subdomain with multiple hyphens",
+			name:     "multiple hyphens, no dot - search",
 			input:    "test-domain-name",
-			expected: "https://test-domain-name",
+			expected: "https://www.google.com/search?q=test-domain-name",
 		},
 		{
 			name:     "github.io domain",
@@ -128,22 +128,22 @@ func TestNormalizeURLSearchQueryToDomainEdgeCases(t *testing.T) {
 		desc     string
 	}{
 		{
-			name:     "single word without dot - treated as domain",
+			name:     "single word without dot - search query",
 			input:    "golang",
-			expected: "https://golang",
-			desc:     "Single words are assumed to be domains even without dots",
+			expected: "https://www.google.com/search?q=golang",
+			desc:     "Single labels are not dialable hostnames; browsers search them",
 		},
 		{
-			name:     "word with numbers - treated as domain",
+			name:     "word with numbers, no dot - search query",
 			input:    "example123",
-			expected: "https://example123",
-			desc:     "Words with numbers are still treated as potential domains",
+			expected: "https://www.google.com/search?q=example123",
+			desc:     "Words without a dot are not dialable hostnames",
 		},
 		{
-			name:     "two words joined by hyphen - treated as domain",
+			name:     "two words joined by hyphen - search query",
 			input:    "hello-world",
-			expected: "https://hello-world",
-			desc:     "Hyphenated words are treated as single domains",
+			expected: "https://www.google.com/search?q=hello-world",
+			desc:     "Hyphenated single labels are not dialable hostnames",
 		},
 		{
 			name:     "three words separated by space - search query",
@@ -263,6 +263,72 @@ func TestNormalizeURLEdgeCases(t *testing.T) {
 				t.Errorf("normalizeURL(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestNormalizeAddressAmbiguousInputs pins the host-vs-search decisions for
+// scheme-less address-bar values: only unambiguously host-shaped input
+// (dotted names, IPs, localhost, bracketed IPv6, optional valid ports)
+// navigates; everything else searches through the profile engine.
+func TestNormalizeAddressAmbiguousInputs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"single label word searches", "cats", "https://www.google.com/search?q=cats"},
+		{"dotted host navigates", "example.com", "https://example.com"},
+		{"dotted host with path navigates", "a.b.co/path", "https://a.b.co/path"},
+		{"ipv4 navigates", "192.168.1.1", "https://192.168.1.1"},
+		{"ipv4 with port and path navigates", "127.0.0.1:8000/metrics", "https://127.0.0.1:8000/metrics"},
+		{"localhost navigates", "localhost", "https://localhost"},
+		{"localhost with port navigates", "localhost:8080", "https://localhost:8080"},
+		{"localhost is case insensitive", "LocalHost:3000", "https://LocalHost:3000"},
+		{"bracketed ipv6 with port navigates", "[::1]:8080", "https://[::1]:8080"},
+		{"bare ipv6 without brackets searches", "::1", "https://www.google.com/search?q=%3A%3A1"},
+		// Decision: any whitespace makes the value a search phrase, even when
+		// the head looks like a host:port (matches mainstream browsers).
+		{"host with space in path searches", "example.com:8080/a b", "https://www.google.com/search?q=example.com%3A8080%2Fa+b"},
+		{"host with percent-encoded space in path navigates", "example.com:8080/a%20b", "https://example.com:8080/a%20b"},
+		{"non numeric port searches", "example.com:notaport/x", "https://www.google.com/search?q=example.com%3Anotaport%2Fx"},
+		{"out of range port searches", "example.com:99999", "https://www.google.com/search?q=example.com%3A99999"},
+		{"partial ip searches", "1.2.3", "https://www.google.com/search?q=1.2.3"},
+		{"path without host searches", "/etc/hosts", "https://www.google.com/search?q=%2Fetc%2Fhosts"},
+		{"mailto searches", "mailto:someone@example.com", "https://www.google.com/search?q=mailto%3Asomeone%40example.com"},
+		{"underscore in host searches", "my_domain.com", "https://www.google.com/search?q=my_domain.com"},
+		{"trailing dot searches", "golang.", "https://www.google.com/search?q=golang."},
+		{"leading dot searches", ".golang", "https://www.google.com/search?q=.golang"},
+		{"empty port searches", "example.com:", "https://www.google.com/search?q=example.com%3A"},
+		{"unicode single word searches", "日本語", "https://www.google.com/search?q=%E6%97%A5%E6%9C%AC%E8%AA%9E"},
+		{"ampersand in single token searches", "a&b", "https://www.google.com/search?q=a%26b"},
+		{"question mark in single label searches", "go?lang", "https://www.google.com/search?q=go%3Flang"},
+		{"plus in single label searches", "c++", "https://www.google.com/search?q=c%2B%2B"},
+		{"idn host navigates", "пример.рф", "https://пример.рф"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeURL(tt.input); got != tt.expected {
+				t.Errorf("normalizeURL(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestNormalizeAddressSingleWordUsesProfileTemplate checks that a single-word
+// query is searched through the profile's engine, not just the default one.
+func TestNormalizeAddressSingleWordUsesProfileTemplate(t *testing.T) {
+	template := "https://search.example/find?term={query}"
+	if got := normalizeAddress("golang", template); got != "https://search.example/find?term=golang" {
+		t.Errorf("profile template not used for single word: %q", got)
+	}
+	// A malformed template must still produce a safe default-engine search.
+	if got := normalizeAddress("cats", "not a template"); got != "https://www.google.com/search?q=cats" {
+		t.Errorf("invalid template fallback = %q, want default-engine search", got)
+	}
+	// Host-shaped input must never be routed to the search engine.
+	if got := normalizeAddress("example.com:8080/x", template); got != "https://example.com:8080/x" {
+		t.Errorf("host-shaped input sent to search engine: %q", got)
 	}
 }
 
