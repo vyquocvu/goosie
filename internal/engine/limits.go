@@ -736,6 +736,14 @@ func (b *subBudget) take(n int) bool {
 	return true
 }
 
+// Take charges n bytes against the shared subresource budget, reporting false
+// when they do not fit. It satisfies js.SubresourceBudget so fetch and XHR draw
+// on the same pool as CSS, fonts and images, keeping one source of truth for
+// per-document subresource bytes without internal/js importing internal/engine.
+func (b *subBudget) Take(n int) bool {
+	return b.take(n)
+}
+
 // maxLinkedSheets bounds how many <link rel=stylesheet> fetches one document
 // may trigger. Real pages rarely link more than a dozen.
 const maxLinkedSheets = 32

@@ -243,6 +243,14 @@ type Runtime struct {
 
 	// shadowRoots maps host node IDs to their shadow root JS wrappers.
 	shadowRoots map[int]*goja.Object
+
+	// Admission budgets injected by the engine before any script runs. nil
+	// leaves the corresponding operations ungated (tests, non-engine hosts).
+	// mutBudget gates every script-driven DOM insertion against the document's
+	// node/depth/attribute caps; subBudget is the shared byte pool fetch and XHR
+	// charge their responses to. See admission.go.
+	mutBudget MutationBudget
+	subBudget SubresourceBudget
 }
 
 // New builds a runtime for one document.
@@ -632,13 +640,32 @@ func (r *Runtime) setupDOM() {
 		if node == nil {
 			return goja.Undefined()
 		}
-		for node.FirstChild != nil {
-			node.RemoveChild(node.FirstChild)
-		}
+		// Materialize the replacement text node first and reserve it, so a
+		// rejection leaves the existing children intact rather than cleared.
+		var children []*dom.Node
+		var textNode *dom.Node
 		if text != "" {
-			textNode := node.Doc.NewText(text)
-			node.AppendChild(textNode)
+			textNode = node.Doc.NewText(text)
+			children = append(children, textNode)
 		}
+		// The old children were charged only if node was live; credit them on
+		// the same condition so a detached host's writes never under-count.
+		parentWasLive := r.nodeIsLive(node)
+		r.admitInsert("textContent", node, children, func() {
+			var old []*dom.Node
+			for c := node.FirstChild; c != nil; c = c.NextSibling {
+				old = append(old, c)
+			}
+			for _, c := range old {
+				node.RemoveChild(c)
+			}
+			if parentWasLive {
+				r.releaseNodes(old)
+			}
+			if textNode != nil {
+				node.AppendChild(textNode)
+			}
+		})
 		r.notifyMutation()
 		return goja.Undefined()
 	})
@@ -657,39 +684,53 @@ func (r *Runtime) setupDOM() {
 		if node == nil {
 			return goja.Undefined()
 		}
-		// Clear existing children.
-		for node.FirstChild != nil {
-			node.RemoveChild(node.FirstChild)
-		}
-		// Parse the fragment by wrapping in a <div>.
+		// Parse the fragment FIRST, before touching the live tree, so a parse
+		// failure or an admission rejection leaves the existing children intact
+		// instead of cleared. The per-call ParseLimits bound one call; the
+		// mutation budget reserved below bounds the document in aggregate across
+		// repeated innerHTML writes.
 		wrapped := "<div>" + html + "</div>"
+		var newChildren []*dom.Node
 		parsed, err := dom.ParseBounded(wrapped, dom.ParseLimits{
 			Nodes: 1024, Depth: 32, Attributes: 256, AttributeBytes: 4096,
 		})
 		if err != nil {
-			// Fallback: insert as text node.
+			// Fallback: treat the source as a text node (matches prior behavior).
 			if html != "" {
-				node.AppendChild(node.Doc.NewText(html))
+				newChildren = append(newChildren, node.Doc.NewText(html))
 			}
-			r.notifyMutation()
-			return goja.Undefined()
+		} else {
+			// Find the <div> we wrapped in (it will be inside <html><body>).
+			var divNode *dom.Node
+			if parsed.Body != nil {
+				divNode = parsed.Body.FirstChild
+			}
+			if divNode != nil {
+				for c := divNode.FirstChild; c != nil; c = c.NextSibling {
+					newChildren = append(newChildren, c)
+				}
+			}
 		}
-		// Find the <div> we wrapped in (it will be inside <html><body>).
-		var divNode *dom.Node
-		body := parsed.Body
-		if body != nil {
-			divNode = body.FirstChild
-		}
-		if divNode == nil {
-			r.notifyMutation()
-			return goja.Undefined()
-		}
-		// Move the div's children to the target node.
-		for divNode.FirstChild != nil {
-			child := divNode.FirstChild
-			divNode.RemoveChild(child)
-			node.AppendChild(child)
-		}
+		// The old children were charged only if node was live; credit them on
+		// the same condition so a detached host's writes never under-count.
+		parentWasLive := r.nodeIsLive(node)
+		r.admitInsert("innerHTML", node, newChildren, func() {
+			// Detach and credit the existing children, then move the parsed ones
+			// in. AppendChild adopts each out of the parse tree's document.
+			var old []*dom.Node
+			for c := node.FirstChild; c != nil; c = c.NextSibling {
+				old = append(old, c)
+			}
+			for _, c := range old {
+				node.RemoveChild(c)
+			}
+			if parentWasLive {
+				r.releaseNodes(old)
+			}
+			for _, c := range newChildren {
+				node.AppendChild(c)
+			}
+		})
 		r.notifyMutation()
 		return goja.Undefined()
 	})
@@ -1690,35 +1731,40 @@ func (r *Runtime) jsInsertAdjacentHTML(call goja.FunctionCall) goja.Value {
 		children = append(children, c)
 	}
 
+	// Resolve the insertion parent and per-position inserter first, then reserve
+	// the whole fragment once so a rejection inserts nothing.
+	var parent *dom.Node
+	var insertChild func(child *dom.Node)
 	switch position {
 	case "beforebegin":
 		if node.Parent == nil {
 			return goja.Undefined()
 		}
-		for _, child := range children {
-			divNode.RemoveChild(child)
-			node.Parent.InsertBefore(child, node)
-		}
+		parent = node.Parent
+		insertChild = func(c *dom.Node) { parent.InsertBefore(c, node) }
 	case "afterbegin":
+		parent = node
 		ref := node.FirstChild
-		for _, child := range children {
-			divNode.RemoveChild(child)
-			node.InsertBefore(child, ref)
-		}
+		insertChild = func(c *dom.Node) { parent.InsertBefore(c, ref) }
 	case "beforeend":
-		for _, child := range children {
-			divNode.RemoveChild(child)
-			node.AppendChild(child)
-		}
+		parent = node
+		insertChild = func(c *dom.Node) { parent.AppendChild(c) }
 	case "afterend":
 		if node.Parent == nil {
 			return goja.Undefined()
 		}
+		parent = node.Parent
 		ref := node.NextSibling
-		for _, child := range children {
-			divNode.RemoveChild(child)
-			node.Parent.InsertBefore(child, ref)
-		}
+		insertChild = func(c *dom.Node) { parent.InsertBefore(c, ref) }
+	}
+
+	if insertChild != nil {
+		r.admitInsert("insertAdjacentHTML", parent, children, func() {
+			for _, c := range children {
+				divNode.RemoveChild(c)
+				insertChild(c)
+			}
+		})
 	}
 	r.notifyMutation()
 	return goja.Undefined()
@@ -1734,23 +1780,35 @@ func (r *Runtime) jsPrepend(call goja.FunctionCall) goja.Value {
 	if node == nil {
 		return goja.Undefined()
 	}
+	// Resolve the arguments into an insertion plan BEFORE mutating, so the whole
+	// prepend can be reserved atomically. The ref-advance when a node is already
+	// the first child mirrors the original single-pass behavior.
+	type pending struct {
+		kid    *dom.Node
+		before *dom.Node
+	}
+	var plan []pending
+	var kids []*dom.Node
 	ref := node.FirstChild
 	for _, arg := range call.Arguments {
-		if obj, ok := arg.(*goja.Object); ok {
-			if knidVal := obj.Get("__nid__"); knidVal != nil && !goja.IsUndefined(knidVal) {
-				if kidNode := r.nodeRegistry[int(knidVal.ToInteger())]; kidNode != nil {
-					if kidNode == ref {
-						ref = kidNode.NextSibling
-						continue
-					}
-					node.InsertBefore(kidNode, ref)
-					continue
-				}
+		if kidNode := r.getNode(arg); kidNode != nil {
+			if kidNode == ref {
+				ref = kidNode.NextSibling
+				continue
 			}
+			plan = append(plan, pending{kidNode, ref})
+			kids = append(kids, kidNode)
+			continue
 		}
-		text := arg.String()
-		node.InsertBefore(node.Doc.NewText(text), ref)
+		textNode := node.Doc.NewText(arg.String())
+		plan = append(plan, pending{textNode, ref})
+		kids = append(kids, textNode)
 	}
+	r.admitInsert("prepend", node, kids, func() {
+		for _, p := range plan {
+			node.InsertBefore(p.kid, p.before)
+		}
+	})
 	r.notifyMutation()
 	return goja.Undefined()
 }
@@ -1765,18 +1823,21 @@ func (r *Runtime) jsAppend(call goja.FunctionCall) goja.Value {
 	if node == nil {
 		return goja.Undefined()
 	}
+	// Resolve arguments to nodes first so the whole append can be reserved
+	// atomically; strings become text nodes.
+	var kids []*dom.Node
 	for _, arg := range call.Arguments {
-		if obj, ok := arg.(*goja.Object); ok {
-			if knidVal := obj.Get("__nid__"); knidVal != nil && !goja.IsUndefined(knidVal) {
-				if kidNode := r.nodeRegistry[int(knidVal.ToInteger())]; kidNode != nil {
-					node.AppendChild(kidNode)
-					continue
-				}
-			}
+		if kidNode := r.getNode(arg); kidNode != nil {
+			kids = append(kids, kidNode)
+			continue
 		}
-		text := arg.String()
-		node.AppendChild(node.Doc.NewText(text))
+		kids = append(kids, node.Doc.NewText(arg.String()))
 	}
+	r.admitInsert("append", node, kids, func() {
+		for _, k := range kids {
+			node.AppendChild(k)
+		}
+	})
 	r.notifyMutation()
 	return goja.Undefined()
 }
@@ -1856,7 +1917,12 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	if childNode == nil {
 		return goja.Undefined()
 	}
-	parentNode.AppendChild(childNode)
+	// Gate the insertion through the document's mutation budget: a child that
+	// would breach the node/depth/attribute caps throws a catchable
+	// QuotaExceededError and leaves the tree unchanged.
+	r.admitInsert("appendChild", parentNode, []*dom.Node{childNode}, func() {
+		parentNode.AppendChild(childNode)
+	})
 	r.notifyMutation()
 	// Invoke connectedCallback if child is a custom element
 	if childNode.Type == dom.NodeElement {
@@ -1876,7 +1942,13 @@ func (r *Runtime) jsRemoveChild(call goja.FunctionCall) goja.Value {
 	if child == nil || child.Parent != parent {
 		panic(r.vm.NewTypeError("Failed to execute 'removeChild': the node is not a child of this node"))
 	}
+	// Credit the budget only if child was live before detaching; a child under
+	// a detached parent was never charged, and crediting it would under-count.
+	wasLive := r.nodeIsLive(child)
 	parent.RemoveChild(child)
+	if wasLive {
+		r.releaseNodes([]*dom.Node{child})
+	}
 	r.notifyMutation()
 	return r.wrapNode(child)
 }
@@ -2862,7 +2934,13 @@ func (r *Runtime) jsRemove(call goja.FunctionCall) goja.Value {
 	if node == nil || node.Parent == nil {
 		return goja.Undefined()
 	}
+	// Credit only if node was live before detaching; a node under a detached
+	// parent was never charged, and crediting it would under-count the budget.
+	wasLive := r.nodeIsLive(node)
 	node.Parent.RemoveChild(node)
+	if wasLive {
+		r.releaseNodes([]*dom.Node{node})
+	}
 	r.notifyMutation()
 	// Invoke disconnectedCallback if node is a custom element
 	if node.Type == dom.NodeElement {
