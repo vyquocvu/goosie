@@ -156,9 +156,14 @@ type framePath struct {
 	findIdx           int
 	selDrag           bool
 	restoredActiveURL string
-	storage           *js.OriginStorageRegistry
-	incognitoStorage  *js.OriginStorageRegistry
-	emulationPreset   *DevicePreset
+	// restoredScrollTabID/restoredScrollY carry the offset a session restore
+	// recorded for the active tab, so the restore's own load can re-apply it
+	// after the fresh-navigation top-of-page reset. 0 means no pending intent.
+	restoredScrollTabID uint64
+	restoredScrollY     int32
+	storage             *js.OriginStorageRegistry
+	incognitoStorage    *js.OriginStorageRegistry
+	emulationPreset     *DevicePreset
 	// mediaBackend plays this run's video, and is nil when the window that was
 	// opened has no way to: a headless run, or a platform with no decoder. It
 	// comes from the window rather than from the machine so a headless run on a
