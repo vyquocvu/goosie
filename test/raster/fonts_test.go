@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -161,8 +162,21 @@ func TestGlyphAdvanceFixedIsTheUnroundedAdvance(t *testing.T) {
 // For a rune outside mapped slots ('✔'), FaceForRune must return a face where HasGlyph(face, '✔') == true.
 // For a rune not covered by any face ('😀'), it must return (nil, false) as the missing signal.
 func TestCoverageResolver(t *testing.T) {
-	if _, err := os.Stat("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"); err != nil {
-		t.Skip("skipping host font check: /System/Library/Fonts/Supplemental/Arial Unicode.ttf not present on this host")
+	hasHostFallback := false
+	for _, p := range []string{
+		"/System/Library/Fonts/Apple Symbols.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			hasHostFallback = true
+			break
+		}
+	}
+	if !hasHostFallback {
+		t.Skip("skipping host font check: no candidate fallback font present on this host")
 	}
 	f, err := raster.NewFonts()
 	if err != nil {
@@ -296,4 +310,408 @@ func TestMissingGlyphCounter(t *testing.T) {
 	if got := f.MissingCount(); got <= 0 {
 		t.Fatalf("MissingCount after emoji = %d, want > 0 (mutation iii invariant)", got)
 	}
+}
+
+// TestLazyFallbackHostFonts tests requirement 4 and [R-7]:
+// 1. Files read via hook/counter is 0 before any rune miss.
+// 2. After one rune requiring fallback (e.g. '✔'), at most 1 font is retained.
+// 3. MissingCount and tofu advance remain correct as in §6.
+func TestLazyFallbackHostFonts(t *testing.T) {
+	var hookFiles []string
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	f.SetFallbackHook(func(path string) {
+		hookFiles = append(hookFiles, path)
+	})
+
+	// Before any rune miss, host fallback files read must be 0 and no fallback fonts retained.
+	if got := f.FallbackFilesRead(); got != 0 {
+		t.Fatalf("FallbackFilesRead before any miss = %d, want 0", got)
+	}
+	if len(hookFiles) != 0 {
+		t.Fatalf("fallback hook called %d times before any miss, want 0", len(hookFiles))
+	}
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount before any miss = %d, want 0", got)
+	}
+
+	slot := frame.FontSlot{Family: frame.FontArial}
+	for _, r := range "The quick brown fox jumps over the lazy dog 1234567890" {
+		f.GlyphAdvanceFixed(16, r, slot)
+		f.Glyph(16, r, slot)
+	}
+	if got := f.FallbackFilesRead(); got != 0 {
+		t.Fatalf("FallbackFilesRead after ASCII text = %d, want 0", got)
+	}
+	if len(hookFiles) != 0 {
+		t.Fatalf("fallback hook called %d times after ASCII, want 0", len(hookFiles))
+	}
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount after ASCII text = %d, want 0", got)
+	}
+
+	// Trigger fallback with a rune outside standard slots ('✔')
+	hasHostFallback := false
+	for _, p := range []string{
+		"/System/Library/Fonts/Apple Symbols.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			hasHostFallback = true
+			break
+		}
+	}
+	if !hasHostFallback {
+		t.Skip("skipping host font resolution check: no host fallback font present")
+	}
+
+	g := f.Glyph(16, '✔', slot)
+	if !g.Ok || g.Missing {
+		t.Fatalf("Glyph('✔') failed to resolve from fallback font")
+	}
+
+	// After one rune needing fallback:
+	// - Files read > 0 (verified hook called)
+	// - Number of retained fallback fonts MUST BE <= 1
+	if got := f.FallbackFilesRead(); got == 0 {
+		t.Fatalf("FallbackFilesRead after '✔' = %d, want > 0", got)
+	}
+	if len(hookFiles) == 0 {
+		t.Fatalf("fallback hook not called after '✔', want > 0")
+	}
+	if got := f.FallbackFontsCount(); got > 1 {
+		t.Fatalf("FallbackFontsCount after one rune miss = %d, want <= 1", got)
+	}
+	if got := f.FallbackFontsCount(); got != 1 {
+		t.Fatalf("FallbackFontsCount after '✔' = %d, want exactly 1", got)
+	}
+
+	// Verify MissingCount and tofu advance remain intact
+	f.ResetMissingCount()
+	tofuAdv := f.GlyphAdvance(16, '😀', slot)
+	if tofuAdv <= 0 {
+		t.Fatalf("tofu GlyphAdvance('😀') = %d, want > 0", tofuAdv)
+	}
+	if got := f.MissingCount(); got <= 0 {
+		t.Fatalf("MissingCount after emoji = %d, want > 0", got)
+	}
+}
+
+// TestMissingGlyphBatchDoesNotRepeatedlyReadFile satisfies requirement for Issue 3 and Requirement 2:
+// When candidate paths are probed, a missing candidate file must be stat-ed exactly once
+// and memoized, so subsequent missing glyphs never re-stat candidate files.
+func TestMissingGlyphBatchDoesNotRepeatedlyReadFile(t *testing.T) {
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	const missingPath = "/nonexistent/font/path/font.ttf"
+	f.SetFallbackCandidates([]string{missingPath})
+
+	var hookedPaths []string
+	f.SetFallbackHook(func(path string) {
+		hookedPaths = append(hookedPaths, path)
+	})
+
+	slot := frame.FontSlot{Family: frame.FontArial}
+	missingRunes := []rune("😀😁😂😃😄😅😆😉😊😋😎😍😘😗😙😚☺🙂🤗🤩")
+
+	// Rasterize the first missing rune - this triggers the one-time stat of candidate paths.
+	f.Glyph(16, missingRunes[0], slot)
+	initialReads := f.FallbackFilesRead()
+	initialHooks := len(hookedPaths)
+
+	if initialHooks != 1 {
+		t.Fatalf("initialHooks = %d, want 1", initialHooks)
+	}
+	if initialReads != 0 {
+		t.Fatalf("initialReads = %d, want 0", initialReads)
+	}
+
+	// Rasterize all subsequent missing runes - missing candidate must be memoized.
+	for _, r := range missingRunes[1:] {
+		f.Glyph(16, r, slot)
+	}
+
+	afterReads := f.FallbackFilesRead()
+	afterHooks := len(hookedPaths)
+
+	if afterReads != initialReads {
+		t.Errorf("FallbackFilesRead grew from %d to %d across %d missing runes: candidate files were re-read from disk",
+			initialReads, afterReads, len(missingRunes)-1)
+	}
+	if afterHooks != initialHooks {
+		t.Errorf("fallback hook called %d additional times across missing runes (before %d, after %d): candidates were repeatedly probed",
+			afterHooks-initialHooks, initialHooks, afterHooks)
+	}
+}
+
+// TestFallbackAdmissionCeilingRejectsOversizedFont satisfies Requirement 2:
+// When an oversized font (> MaxFallbackFontBytes, e.g. Arial Unicode at 22 MiB) is placed as
+// the first candidate, it MUST be rejected at stat admission without being read into memory
+// (FallbackFilesRead remains 0).
+func TestFallbackAdmissionCeilingRejectsOversizedFont(t *testing.T) {
+	arialUnicodePath := "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+	fi, err := os.Stat(arialUnicodePath)
+	if err != nil {
+		t.Skip("skipping host font check: Arial Unicode not present on this host")
+	}
+	if fi.Size() <= raster.MaxFallbackFontBytes {
+		t.Fatalf("Arial Unicode size %d is <= MaxFallbackFontBytes %d, test assumption invalid",
+			fi.Size(), raster.MaxFallbackFontBytes)
+	}
+
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	// Configure oversized font as the first candidate via instance seam
+	f.SetFallbackCandidates([]string{arialUnicodePath})
+
+	var hooked []string
+	f.SetFallbackHook(func(path string) {
+		hooked = append(hooked, path)
+	})
+
+	// Query a missing rune; Arial Unicode must be rejected at stat admission due to size > MaxFallbackFontBytes.
+	f.Glyph(16, '😀', frame.FontSlot{Family: frame.FontArial})
+
+	if len(hooked) != 1 || hooked[0] != arialUnicodePath {
+		t.Fatalf("fallback hook called %d times (%v), want 1 call for %s", len(hooked), hooked, arialUnicodePath)
+	}
+	if got := f.FallbackFilesRead(); got != 0 {
+		t.Fatalf("FallbackFilesRead = %d, want 0 (oversized font must be rejected before ReadFile)", got)
+	}
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount = %d, want 0", got)
+	}
+	if got := f.FallbackBytes(); got != 0 {
+		t.Fatalf("FallbackBytes = %d, want 0", got)
+	}
+
+	// Subsequent query for missing rune must not probe disk again
+	f.Glyph(16, '😁', frame.FontSlot{Family: frame.FontArial})
+	if len(hooked) != 1 {
+		t.Fatalf("fallback hook called %d times, want 1 (memoized rejection)", len(hooked))
+	}
+	if got := f.FallbackFilesRead(); got != 0 {
+		t.Fatalf("FallbackFilesRead = %d after second rune miss, want 0", got)
+	}
+}
+
+// TestMissingCandidateWithCoverageDoesNotRetainFace satisfies Requirement 1(a):
+// When host fallback candidates are parsed but do not cover the requested rune,
+// their faces are NOT retained in FallbackFontsCount/FallbackBytes, but their coverage
+// is memoized so subsequent missing runes do NOT re-read the candidate files.
+func TestMissingCandidateWithCoverageDoesNotRetainFace(t *testing.T) {
+	hasHostFallback := false
+	for _, p := range []string{
+		"/System/Library/Fonts/Apple Symbols.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			hasHostFallback = true
+			break
+		}
+	}
+	if !hasHostFallback {
+		t.Skip("skipping host font check: no candidate fallback font present on this host")
+	}
+
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	// Query an emoji rune missing from all host fallback candidates
+	f.Glyph(16, '😀', slot)
+
+	// Candidate files were probed and coverage memoized, but because they don't cover '😀',
+	// FallbackFontsCount must be 0!
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount after missing emoji = %d, want 0 (unhelpful faces must not be retained)", got)
+	}
+	if got := f.FallbackBytes(); got != 0 {
+		t.Fatalf("FallbackBytes after missing emoji = %d, want 0", got)
+	}
+	readsAfterFirstMiss := f.FallbackFilesRead()
+	if readsAfterFirstMiss == 0 {
+		t.Fatalf("FallbackFilesRead after first miss = 0, want > 0")
+	}
+
+	// Query more missing emojis - coverage memo prevents re-reading
+	missingRunes := []rune("😁😂😃😄😅😆😉😊😋")
+	for _, r := range missingRunes {
+		f.Glyph(16, r, slot)
+	}
+	if got := f.FallbackFilesRead(); got != readsAfterFirstMiss {
+		t.Fatalf("FallbackFilesRead grew from %d to %d across %d missing emojis",
+			readsAfterFirstMiss, got, len(missingRunes))
+	}
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount = %d, want 0", got)
+	}
+
+	// Now query a rune that IS covered by a candidate (e.g. '✔')
+	gCheck := f.Glyph(16, '✔', slot)
+	if !gCheck.Ok || gCheck.Missing {
+		t.Fatalf("Glyph('✔') failed to resolve")
+	}
+	if got := f.FallbackFontsCount(); got != 1 {
+		t.Fatalf("FallbackFontsCount after '✔' = %d, want exactly 1 (useful face admitted)", got)
+	}
+	if got := f.FallbackBytes(); got <= 0 {
+		t.Fatalf("FallbackBytes after '✔' = %d, want > 0", got)
+	}
+}
+
+// TestPositiveGlyphOracleByScriptGroup satisfies Requirement 3:
+// For each script group that the host actually supports (Greek, Cyrillic, Hebrew, Arabic,
+// Box Drawing, Arrows, Math Operators, Symbols & Dingbats), asserts that glyphs resolve
+// (Ok && !Missing) with positive advances, and f.MissingCount() does not increase.
+// CJK is explicitly tested and verified as a deliberate known gap on macOS under the 4 MiB admission ceiling.
+func TestPositiveGlyphOracleByScriptGroup(t *testing.T) {
+	hasHostFallback := false
+	for _, p := range []string{
+		"/System/Library/Fonts/Apple Symbols.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			hasHostFallback = true
+			break
+		}
+	}
+	if !hasHostFallback {
+		t.Skip("skipping host font check: no candidate fallback font present on this host")
+	}
+
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	// Full ranges, not 3-rune samples: the integrator probe over these exact
+	// ranges (414 code points) found six code points the host cannot render, so
+	// the gaps are enumerated instead of hidden by a narrow sample.
+	groups := []struct {
+		name     string
+		lo, hi   rune
+		gapRunes []rune
+	}{
+		{"Greek", 0x0391, 0x03C9, []rune{0x03A2}},
+		{"Cyrillic", 0x0410, 0x0441, nil},
+		{"Hebrew", 0x05D0, 0x05EA, nil},
+		{"Arabic", 0x0621, 0x0648, []rune{0x063B, 0x063C, 0x063D, 0x063E, 0x063F}},
+		{"Box Drawing", 0x2500, 0x2527, nil},
+		{"Arrows", 0x2190, 0x21B7, nil},
+		{"Math Operators", 0x2200, 0x2231, nil},
+		{"Symbols & Dingbats", 0x2600, 0x263B, nil},
+	}
+
+	for _, grp := range groups {
+		t.Run(grp.name, func(t *testing.T) {
+			f.ResetMissingCount()
+			declared := map[rune]bool{}
+			for _, r := range grp.gapRunes {
+				declared[r] = true
+			}
+			// Pass 1: resolution. Collect the exact code points that miss, so a
+			// stale gap list fails on identity and not merely on a count.
+			var actual []rune
+			for r := grp.lo; r <= grp.hi; r++ {
+				g := f.Glyph(16, r, slot)
+				switch {
+				case g.Missing:
+					actual = append(actual, r)
+					if !declared[r] {
+						t.Errorf("script %s: rune U+%04X misses but is not a declared gap", grp.name, r)
+					}
+				case !g.Ok:
+					t.Errorf("script %s: rune U+%04X neither resolved nor marked missing (Ok=%v Missing=%v)",
+						grp.name, r, g.Ok, g.Missing)
+				default:
+					if declared[r] {
+						t.Errorf("script %s: declared gap rune U+%04X now resolves (Ok=%v Missing=%v): the gap list is stale",
+							grp.name, r, g.Ok, g.Missing)
+					}
+				}
+			}
+			if len(actual) != len(grp.gapRunes) {
+				t.Errorf("script %s: %d runes miss, want %d declared gaps %v (actual %v)",
+					grp.name, len(actual), len(grp.gapRunes), grp.gapRunes, actual)
+			}
+			if got := f.MissingCount(); got != int64(len(actual)) {
+				t.Errorf("script %s: MissingCount = %d, want %d (one increment per missing Glyph lookup)",
+					grp.name, got, len(actual))
+			}
+
+			// Pass 2: metrics. Every rune, gaps included, must carry a positive
+			// advance so unresolved text still lays out instead of collapsing.
+			f.ResetMissingCount()
+			for r := grp.lo; r <= grp.hi; r++ {
+				if adv := f.GlyphAdvanceFixed(16, r, slot); adv <= 0 {
+					t.Fatalf("script %s: rune U+%04X non-positive advance: %d", grp.name, r, adv)
+				}
+			}
+			if got := f.MissingCount(); got != int64(len(grp.gapRunes)) {
+				t.Errorf("script %s: MissingCount after the advance pass = %d, want %d",
+					grp.name, got, len(grp.gapRunes))
+			}
+		})
+	}
+
+	// Known Gap: CJK on macOS exceeds 4 MiB admission ceiling (Arial Unicode 22.2 MiB, PingFang ~60 MiB, STHeiti ~55 MiB).
+	// Under the 4 MiB ceiling, CJK glyphs predictably miss and produce tofu.
+	t.Run("CJK_KnownGap", func(t *testing.T) {
+		f.ResetMissingCount()
+		cjkRunes := []rune{'中', '文'}
+		for _, r := range cjkRunes {
+			g := f.Glyph(16, r, slot)
+			if !g.Ok || !g.Missing {
+				t.Fatalf("CJK rune %c (U+%04X) expected tofu fallback (Ok=true, Missing=true), got Ok=%v, Missing=%v",
+					r, r, g.Ok, g.Missing)
+			}
+			if g.Advance <= 0 {
+				t.Fatalf("CJK rune %c tofu advance %d <= 0", r, g.Advance)
+			}
+		}
+		if got := f.MissingCount(); got != int64(len(cjkRunes)) {
+			t.Errorf("MissingCount after %d CJK runes = %d, want %d", len(cjkRunes), got, len(cjkRunes))
+		}
+	})
+}
+
+// TestMeasureHotPathLatency measures the latency of the first miss vs subsequent misses for Requirement 4.
+func TestMeasureHotPathLatency(t *testing.T) {
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	slot := frame.FontSlot{Family: frame.FontArial}
+	f.Glyph(16, 'A', slot) // warm up primary face
+
+	startFirst := time.Now()
+	f.Glyph(16, '中', slot) // first miss
+	dFirst := time.Since(startFirst)
+
+	missingRunes := []rune("文語漢字日本語한국어😀😁😂😃😄")
+	startSub := time.Now()
+	for _, r := range missingRunes {
+		f.Glyph(16, r, slot)
+	}
+	dSub := time.Since(startSub)
+	dSubAvg := dSub / time.Duration(len(missingRunes))
+
+	t.Logf("Hot path latency: first miss = %v (%.3f ms), subsequent avg = %v (%.4f ms), total %d runes = %v",
+		dFirst, float64(dFirst.Nanoseconds())/1e6,
+		dSubAvg, float64(dSubAvg.Nanoseconds())/1e6,
+		len(missingRunes), dSub)
 }

@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"encoding/binary"
 	"image"
 	"os"
 	"sort"
@@ -85,6 +86,124 @@ type fallbackKey struct {
 	size int32
 }
 
+type runeRange struct {
+	start rune
+	end   rune
+}
+
+type runeCoverage []runeRange
+
+func (rc runeCoverage) contains(r rune) bool {
+	i := sort.Search(len(rc), func(i int) bool {
+		return rc[i].end >= r
+	})
+	if i < len(rc) && rc[i].start <= r {
+		return true
+	}
+	return false
+}
+
+// parseCmapRanges extracts unicode rune ranges from font bytes (cmap format 4 and format 12).
+// It returns a compact sorted slice of non-overlapping rune ranges.
+func parseCmapRanges(data []byte) runeCoverage {
+	if len(data) < 12 {
+		return nil
+	}
+	numTables := binary.BigEndian.Uint16(data[4:6])
+	if len(data) < int(12+numTables*16) {
+		return nil
+	}
+	var cmapOffset, cmapLen uint32
+	for i := 0; i < int(numTables); i++ {
+		entry := data[12+i*16 : 12+(i+1)*16]
+		if string(entry[:4]) == "cmap" {
+			cmapOffset = binary.BigEndian.Uint32(entry[8:12])
+			cmapLen = binary.BigEndian.Uint32(entry[12:16])
+			break
+		}
+	}
+	if cmapOffset == 0 || int(cmapOffset+cmapLen) > len(data) {
+		return nil
+	}
+
+	cmap := data[cmapOffset : cmapOffset+cmapLen]
+	if len(cmap) < 4 {
+		return nil
+	}
+	subTables := binary.BigEndian.Uint16(cmap[2:4])
+	if len(cmap) < int(4+subTables*8) {
+		return nil
+	}
+
+	var fmt12Offset, fmt4Offset uint32
+	for i := 0; i < int(subTables); i++ {
+		rec := cmap[4+i*8 : 4+(i+1)*8]
+		pid := binary.BigEndian.Uint16(rec[:2])
+		psid := binary.BigEndian.Uint16(rec[2:4])
+		offset := binary.BigEndian.Uint32(rec[4:8])
+		if int(offset+2) > len(cmap) {
+			continue
+		}
+		format := binary.BigEndian.Uint16(cmap[offset : offset+2])
+		if format == 12 && (pid == 0 || (pid == 3 && psid == 10)) {
+			fmt12Offset = offset
+		} else if format == 4 && (pid == 0 || (pid == 3 && psid == 1)) && fmt4Offset == 0 {
+			fmt4Offset = offset
+		}
+	}
+
+	var ranges []runeRange
+	if fmt12Offset > 0 && int(fmt12Offset+16) <= len(cmap) {
+		sub := cmap[fmt12Offset:]
+		numGroups := binary.BigEndian.Uint32(sub[12:16])
+		if int(16+numGroups*12) <= len(sub) {
+			for i := uint32(0); i < numGroups; i++ {
+				g := sub[16+i*12 : 16+(i+1)*12]
+				start := binary.BigEndian.Uint32(g[:4])
+				end := binary.BigEndian.Uint32(g[4:8])
+				ranges = append(ranges, runeRange{start: rune(start), end: rune(end)})
+			}
+		}
+	} else if fmt4Offset > 0 && int(fmt4Offset+14) <= len(cmap) {
+		sub := cmap[fmt4Offset:]
+		segCountX2 := binary.BigEndian.Uint16(sub[6:8])
+		segCount := int(segCountX2 / 2)
+		endCodesOffset := 14
+		startCodesOffset := 14 + segCount*2 + 2
+		if startCodesOffset+segCount*2 <= len(sub) {
+			for i := 0; i < segCount; i++ {
+				end := binary.BigEndian.Uint16(sub[endCodesOffset+i*2 : endCodesOffset+(i+1)*2])
+				start := binary.BigEndian.Uint16(sub[startCodesOffset+i*2 : startCodesOffset+(i+1)*2])
+				if start == 0xFFFF {
+					break
+				}
+				ranges = append(ranges, runeRange{start: rune(start), end: rune(end)})
+			}
+		}
+	}
+
+	if len(ranges) == 0 {
+		return nil
+	}
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].start < ranges[j].start
+	})
+	merged := make([]runeRange, 0, len(ranges))
+	curr := ranges[0]
+	for _, r := range ranges[1:] {
+		if r.start <= curr.end+1 {
+			if r.end > curr.end {
+				curr.end = r.end
+			}
+		} else {
+			merged = append(merged, curr)
+			curr = r
+		}
+	}
+	merged = append(merged, curr)
+	return runeCoverage(merged)
+}
+
 type Fonts struct {
 	mu      sync.RWMutex
 	sources map[frame.FontSlot]*opentype.Font
@@ -92,11 +211,18 @@ type Fonts struct {
 	// fbCache memoizes fallbackLocked's chain per requested (slot, size). It is
 	// only read and written under the write lock, and it is dropped whenever a
 	// new face entry appears, so a cached chain always equals a fresh one.
-	fbCache      map[faceKey][]*faceEntry
-	custom       []*opentype.Font
-	fallbacks    []*opentype.Font
-	fbEntries    map[fallbackKey]*faceEntry
-	missingCount atomic.Int64
+	fbCache               map[faceKey][]*faceEntry
+	custom                []*opentype.Font
+	fallbacks             []*opentype.Font
+	fbEntries             map[fallbackKey]*faceEntry
+	candidateCoverage     map[string]runeCoverage
+	rejectedFallbackPaths map[string]bool
+	retainedFallbackPaths map[string]bool
+	fallbackCandidates    []string
+	fallbackBytes         int64
+	fallbackFilesRead     atomic.Int64
+	fallbackHook          func(path string)
+	missingCount          atomic.Int64
 }
 
 type faceEntry struct {
@@ -112,7 +238,17 @@ type faceEntry struct {
 	advMiss map[rune]struct{}
 }
 
-// systemFontDir holds the families macOS ships for documents.
+// MaxFallbackFontBytes is the upper bound on the file size of a candidate host fallback font
+// admitted for parsing (4 MiB). Candidate files exceeding this size (such as Arial Unicode.ttf
+// at ~22-39 MiB) are rejected at admission via os.Stat before any ReadFile. This protects against
+// runaway memory retention and high synchronous disk I/O under the raster lock, following the engine's
+// untrusted input admission contract (internal/image/decode.go:14-18, internal/engine/limits.go:23-59).
+const MaxFallbackFontBytes = 4 * 1024 * 1024
+
+// MaxParsedFallbackFonts is the upper bound on the number of wide-coverage system
+// fallback fonts that may be lazily loaded and retained in memory.
+const MaxParsedFallbackFonts = 2
+
 const systemFontDir = "/System/Library/Fonts/Supplemental"
 
 // systemFontFiles maps a CSS-resolved slot onto the host file that draws it.
@@ -166,16 +302,16 @@ var systemFontCollections = []struct {
 	{frame.FontSlot{Family: frame.FontHelvetica, Light: true}, "/System/Library/Fonts/HelveticaNeue.ttc", 12},
 }
 
-// systemFallbackFiles lists system font files used as wide-coverage fallbacks
-// when no document family or standard system font carries a glyph.
-// They are appended at the end of the fallback chain so that CSS-specified
-// families and standard system slots always take priority.
+// systemFallbackFiles lists candidate system font files used as wide-coverage
+// fallbacks when no document family or standard system font carries a glyph.
+// They are prioritized by measured coverage: wide-coverage symbol faces (Apple Symbols)
+// are checked before narrow dingbat faces (ZapfDingbats), and large multi-megabyte fonts
+// (Arial Unicode) are queried last only when smaller fonts do not provide the glyph.
 var systemFallbackFiles = []string{
-	// macOS
-	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	// macOS - host fallback faces ordered by measured non-Latin coverage (Apple Symbols: 58.3%, ZapfDingbats: 1.7%)
 	"/System/Library/Fonts/Apple Symbols.ttf",
-	"/Library/Fonts/Arial Unicode.ttf",
-	// Linux
+	"/System/Library/Fonts/ZapfDingbats.ttf",
+	// Linux - small system fonts (< 2 MB)
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
 	"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
@@ -184,11 +320,16 @@ var systemFallbackFiles = []string{
 	"/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
 	"/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
 	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+	// Large fallback fonts - last resort (~22-39 MB)
+	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	"/Library/Fonts/Arial Unicode.ttf",
 }
 
 // NewFonts parses the embedded font and every host font it can read. It is
 // called once at startup; the parse cost is a few hundred microseconds per face
-// and it is the only place the font bytes are read.
+// and it is the only place the font bytes are read. Fallback host fonts are
+// NOT parsed here; they are loaded lazily on demand when a rune misses across
+// all primary faces.
 func NewFonts() (*Fonts, error) {
 	f, err := NewEmbeddedFonts()
 	if err != nil {
@@ -223,17 +364,6 @@ func NewFonts() (*Fonts, error) {
 		}
 		f.sources[sc.slot] = parsed
 	}
-	for _, path := range systemFallbackFiles {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		parsed, err := opentype.Parse(data)
-		if err != nil {
-			continue
-		}
-		f.fallbacks = append(f.fallbacks, parsed)
-	}
 	return f, nil
 }
 
@@ -254,9 +384,12 @@ func NewEmbeddedFonts() (*Fonts, error) {
 			{}:           regular,
 			{Bold: true}: bold,
 		},
-		entries:   map[faceKey]*faceEntry{},
-		fbCache:   map[faceKey][]*faceEntry{},
-		fbEntries: map[fallbackKey]*faceEntry{},
+		entries:               map[faceKey]*faceEntry{},
+		fbCache:               map[faceKey][]*faceEntry{},
+		fbEntries:             map[fallbackKey]*faceEntry{},
+		candidateCoverage:     map[string]runeCoverage{},
+		rejectedFallbackPaths: map[string]bool{},
+		retainedFallbackPaths: map[string]bool{},
 	}, nil
 }
 
@@ -302,6 +435,191 @@ func (f *Fonts) fallbackFaceLocked(idx int, size int32, src *opentype.Font) *fac
 	}
 	f.fbEntries[k] = e
 	return e
+}
+
+// admitAndRetainFallbackLocked parses font bytes, creates the requested face, and retains
+// the font in f.fallbacks if within MaxParsedFallbackFonts and HasGlyph(face, r) is true.
+// Callers hold f.mu for writing.
+func (f *Fonts) admitAndRetainFallbackLocked(path string, data []byte, size int32, r rune) *faceEntry {
+	if len(f.fallbacks) >= MaxParsedFallbackFonts {
+		return nil
+	}
+	parsed, err := opentype.Parse(data)
+	if err != nil {
+		f.rejectedFallbackPaths[path] = true
+		return nil
+	}
+	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
+		Size:    float64(size),
+		DPI:     faceDPI,
+		Hinting: font.HintingNone,
+	})
+	if err != nil {
+		f.rejectedFallbackPaths[path] = true
+		return nil
+	}
+	if !HasGlyph(face, r) {
+		return nil
+	}
+
+	idx := len(f.fallbacks)
+	f.fallbacks = append(f.fallbacks, parsed)
+	f.retainedFallbackPaths[path] = true
+	f.fallbackBytes += int64(len(data))
+
+	e := &faceEntry{
+		face:    face,
+		glyphs:  map[rune]Glyph{},
+		missing: map[rune]struct{}{},
+		adv:     map[rune]int32{},
+		advMiss: map[rune]struct{}{},
+	}
+	if f.fbEntries == nil {
+		f.fbEntries = map[fallbackKey]*faceEntry{}
+	}
+	f.fbEntries[fallbackKey{idx: idx, size: size}] = e
+	f.fbCache = map[faceKey][]*faceEntry{}
+	return e
+}
+
+// lazyFallbackForRuneLocked probes candidate host fallback files in priority order
+// for a rune missing from all currently loaded faces.
+//
+// Candidate files exceeding MaxFallbackFontBytes (such as Arial Unicode.ttf at 22-39 MiB)
+// or missing from disk are rejected at admission via os.Stat before any ReadFile, and
+// memoized in rejectedFallbackPaths so they are never probed again.
+//
+// When an admitted font is read, its rune coverage (cmap ranges) is extracted into candidateCoverage.
+// If the font does NOT cover the requested rune r, the face and parsed font are dropped
+// immediately (letting GC reclaim them), retaining only the compact runeCoverage memo
+// (~hundreds of bytes) so future misses avoid redundant disk I/O.
+//
+// Only candidate fonts that actually cover r are admitted and retained in f.fallbacks,
+// bounded by MaxParsedFallbackFonts (2) and gateFallbackFontBudgetMiB.
+// Callers hold f.mu for writing.
+func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
+	if size <= 0 || systemFontsDisabled() {
+		return nil
+	}
+	if isDefaultIgnorable(r) {
+		return nil
+	}
+	if f.candidateCoverage == nil {
+		f.candidateCoverage = make(map[string]runeCoverage)
+	}
+	if f.rejectedFallbackPaths == nil {
+		f.rejectedFallbackPaths = make(map[string]bool)
+	}
+	if f.retainedFallbackPaths == nil {
+		f.retainedFallbackPaths = make(map[string]bool)
+	}
+
+	candidates := f.fallbackCandidates
+	if len(candidates) == 0 {
+		candidates = systemFallbackFiles
+	}
+
+	for _, path := range candidates {
+		if f.retainedFallbackPaths[path] {
+			continue
+		}
+		if f.rejectedFallbackPaths[path] {
+			continue
+		}
+
+		if cov, ok := f.candidateCoverage[path]; ok {
+			if !cov.contains(r) {
+				continue
+			}
+			if len(f.fallbacks) >= MaxParsedFallbackFonts {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				f.rejectedFallbackPaths[path] = true
+				continue
+			}
+			if e := f.admitAndRetainFallbackLocked(path, data, size, r); e != nil {
+				return e
+			}
+			continue
+		}
+
+		if f.fallbackHook != nil {
+			f.fallbackHook(path)
+		}
+
+		st, err := os.Stat(path)
+		if err != nil {
+			f.rejectedFallbackPaths[path] = true
+			continue
+		}
+		if st.Size() <= 0 || st.Size() > MaxFallbackFontBytes {
+			f.rejectedFallbackPaths[path] = true
+			continue
+		}
+
+		f.fallbackFilesRead.Add(1)
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			f.rejectedFallbackPaths[path] = true
+			continue
+		}
+
+		cov := parseCmapRanges(data)
+		f.candidateCoverage[path] = cov
+
+		if cov != nil && !cov.contains(r) {
+			// Does not cover r: face is NOT retained. GC reclaims data.
+			continue
+		}
+
+		if e := f.admitAndRetainFallbackLocked(path, data, size, r); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// FallbackFilesRead returns the number of host font files read from disk for fallback.
+func (f *Fonts) FallbackFilesRead() int64 {
+	return f.fallbackFilesRead.Load()
+}
+
+// FallbackFontsCount returns the number of fallback fonts currently loaded and retained.
+func (f *Fonts) FallbackFontsCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.fallbacks)
+}
+
+// FallbackBytes returns the total bytes of fallback fonts retained by f.
+func (f *Fonts) FallbackBytes() int64 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.fallbackBytes
+}
+
+// SetFallbackCandidates overrides candidate fallback font paths for this Fonts instance.
+// Passing a non-empty slice forces lazyFallbackForRuneLocked to query exactly these paths.
+// Passing nil or an empty slice restores default system fallback candidates.
+func (f *Fonts) SetFallbackCandidates(paths []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(paths) == 0 {
+		f.fallbackCandidates = nil
+		return
+	}
+	f.fallbackCandidates = append([]string(nil), paths...)
+}
+
+// SetFallbackHook registers an optional callback invoked whenever a host fallback
+// font file is read from disk.
+func (f *Fonts) SetFallbackHook(fn func(path string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fallbackHook = fn
 }
 
 // Register parses a font file's bytes and returns a 1-based index the style
@@ -617,6 +935,11 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 				break
 			}
 		}
+		if !g.Ok {
+			if fb := f.lazyFallbackForRuneLocked(r, size); fb != nil {
+				g = renderGlyph(fb.face, r)
+			}
+		}
 	}
 	if !g.Ok {
 		if isDefaultIgnorable(r) {
@@ -687,6 +1010,11 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 			}
 		}
 		if !ok {
+			if fb := f.lazyFallbackForRuneLocked(r, size); fb != nil {
+				adv, ok = fb.face.GlyphAdvance(r)
+			}
+		}
+		if !ok {
 			if isDefaultIgnorable(r) {
 				e.adv[r] = 0
 				return 0
@@ -739,6 +1067,11 @@ func (f *Fonts) FaceForRune(size int32, r rune, slot frame.FontSlot) (font.Face,
 		return e.face, true
 	}
 	for _, fb := range f.fallbackLocked(size, slot) {
+		if HasGlyph(fb.face, r) {
+			return fb.face, true
+		}
+	}
+	if fb := f.lazyFallbackForRuneLocked(r, size); fb != nil {
 		if HasGlyph(fb.face, r) {
 			return fb.face, true
 		}
