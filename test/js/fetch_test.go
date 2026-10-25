@@ -2,6 +2,7 @@ package js_test
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -372,6 +373,36 @@ func TestFetchCatchOnError(t *testing.T) {
 
 	if v, ok := r.Global("gotCatch"); !ok || !strings.Contains(v.Str, "network down") {
 		t.Errorf("gotCatch = %+v, want it to contain %q", v, "network down")
+	}
+}
+
+// TestFetchCatchAttachedAfterSettlement verifies a fetch rejection is settled
+// before .catch() is attached and delivered when the callback queue drains.
+func TestFetchCatchAttachedAfterSettlement(t *testing.T) {
+	m := &mockFetcher{err: fmt.Errorf("network down")}
+	r := newFetchRuntime(t, m)
+	if err := r.Run(`var lateFetch = fetch('/x'); var lateCatch = '';`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	// PendingFetches is only a barrier proving runFetch has settled and queued
+	// its result; the handler is deliberately attached after that point.
+	deadline := time.Now().Add(2 * time.Second)
+	for r.PendingFetches() > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for fetch settlement")
+		}
+		runtime.Gosched()
+	}
+
+	if err := r.Run(`lateFetch.catch(function(e) { lateCatch = e; });`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := r.Global("lateCatch"); !ok || v.Str != "" {
+		t.Fatalf("lateCatch before drain = %+v, want empty", v)
+	}
+	r.DrainFetchCallbacks()
+	if v, ok := r.Global("lateCatch"); !ok || !strings.Contains(v.Str, "network down") {
+		t.Errorf("lateCatch after drain = %+v, want it to contain %q", v, "network down")
 	}
 }
 

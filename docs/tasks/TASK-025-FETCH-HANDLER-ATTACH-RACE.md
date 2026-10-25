@@ -69,3 +69,31 @@ Ba chỗ khác cùng khuôn: `:342-346`, `:357-361`, `:389-393` (preflight/CORS)
 ## 6. Bối cảnh để không làm lại việc đã xong
 
 `drainFetch` dùng `PendingFetches()` (thêm ở TASK-017) **giữ nguyên** — nó vẫn cần để chờ request hoàn tất. Task này không đảo ngược TASK-017; nó sửa cái mà TASK-017 giả định sai. Ghi vào Status: giả định nào của TASK-017 sai, và vì sao `-count=8` một mình không phát hiện ra (nghiệm thu hồi đó chạy *dưới tải*, còn lần này fail ở `count=30` **không tải** — nghĩa là trước đó mẫu quan sát quá nhỏ).
+
+## Status
+
+TASK-017 đã giả định sai rằng `PendingFetches()==0` đồng nghĩa callback handler sẽ chạy. Điều đó chỉ xác nhận request goroutine hoàn tất và callback đã được queue; nếu queue giữ snapshot handler `nil`, drain vẫn không thể gọi handler được. `-count=8` không phát hiện lỗi vì mẫu chạy nhỏ trước đó được nghiệm thu dưới tải; ở đây lỗi tái hiện trong baseline `-count=100` không tải.
+
+`runFetch` hiện settle `resolved`/`rejected`/`result` trên thenable ở cả ba nhánh CORS và kết quả thường, queue thenable thay vì snapshot handler, rồi `invokeOneCallback` lấy handler hiện tại khi drain. `drainFetch` và `PendingFetches()` không đổi. Regression test khóa ordering settle → attach → drain → assert, đồng thời xác nhận handler chưa chạy trước drain.
+
+| AC | Lệnh | Output |
+|---|---|---|
+| Baseline | `go test -count=100 -run TestFetchCatchOnError ./test/js/` | FAIL: `--- FAIL: TestFetchCatchOnError (0.00s)`; `fetch_test.go:374: gotCatch = {Kind:4 Num:0 Str: Bool:false}, want it to contain "network down"`; `FAIL github.com/vyquocvu/goosie/test/js 0.857s` |
+| AC-01 | `go test -count=100 -run TestFetchCatchOnError ./test/js/` | `ok github.com/vyquocvu/goosie/test/js 0.791s` |
+| AC-02 | `go test -count=1 -run '^TestFetchCatchAttachedAfterSettlement$' ./test/js/` after omitting settlement-state writes | FAIL: `fetch_test.go:403: lateCatch after drain = {Kind:4 Num:0 Str: Bool:false}, want it to contain "network down"`; `FAIL github.com/vyquocvu/goosie/test/js 0.595s` |
+| AC-02 | Same test after retaining the queued nil handler snapshot instead of reading the attached handler | FAIL: `fetch_test.go:403: lateCatch after drain = {Kind:4 Num:0 Str: Bool:false}, want it to contain "network down"`; `FAIL github.com/vyquocvu/goosie/test/js 0.633s` |
+| AC-02 | `go test -count=1 -run 'TestFetchCatch(AttachedAfterSettlement|OnError)$' ./test/js/` restored | `ok github.com/vyquocvu/goosie/test/js 0.639s` |
+| AC-03 | `grep -nE 'fn:[[:space:]]*(catchCB|thenCB)' internal/js/fetch.go` | No matches (exit 1, empty output). The remaining `fetchCallback{fn: ...}` is the pre-existing `makeRejectThenable` path, outside `runFetch`. |
+| AC-04 | `go test -count=10 ./test/js/` | `ok github.com/vyquocvu/goosie/test/js 30.138s` |
+| AC-04 | `go test -race -count=3 ./test/js/` | `ok github.com/vyquocvu/goosie/test/js 19.192s` |
+| AC-06 | `go test -count=30 -run 'TestFetch' ./test/js/` | `ok github.com/vyquocvu/goosie/test/js 13.720s` |
+| AC-04 | `go test -count=1 ./...` | Sandbox run failed because loopback bind and network access are restricted. Rerun outside sandbox passed; all packages, including `test/wpt`, reported `ok` (exit 0). |
+| AC-05 | `go build ./...` | PASS (exit 0, no output). |
+| AC-05 | `go vet -all ./...` | PASS (exit 0, no output). |
+| AC-05 | `go test ./internal/archtest/` | `ok github.com/vyquocvu/goosie/internal/archtest 3.698s` |
+| AC-05 | `go test ./test/qc/` | `ok github.com/vyquocvu/goosie/test/qc 0.442s` |
+| AC-05 | `gofmt -l internal/js/fetch.go test/js/fetch_test.go` | No output (clean). |
+
+Triệu chứng người dùng cuối: khi response về trước lúc `.then()`/`.catch()` được gắn, trang im lặng không nhận dữ liệu, không có lỗi và không có log.
+
+Gap còn lại: lệnh full-suite sandboxed ban đầu bị chặn bởi loopback/network policy, nhưng cùng lệnh đã được chạy ngoài sandbox và PASS; không còn gate nào chưa chạy.
