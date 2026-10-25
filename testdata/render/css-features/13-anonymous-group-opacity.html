@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Anonymous boxes share one fade (GOOSIE-OPACITY-002)</title>
+    <style>
+        /* Group opacity is charged once per ELEMENT, but layout hands out extra
+           boxes that own no element: raw text between block children gets an
+           anonymous block whose style is a verbatim copy of the generating
+           element's (style.AnonymousBlockStyle: `s = *parent`, opacity
+           included), and every text run copies its element's style too
+           (style.inheritStyle: `cs := *parent`).  The first pass of TASK-044
+           multiplied those copies in as well, so raw text inside a faded
+           container faded twice - three times once an anonymous block joined
+           in - while text inside a real child element faded once.
+
+           Chromium, measured on this machine (400x200 viewport, DPR 1, darkest
+           glyph pixel of black on white): a 0.5 container gives min_lum 126.0
+           -> glyph alpha 0.506 for text in a span, in an anonymous block, in an
+           anonymous block next to a div, and under a nested opacity:1 child -
+           all four the same.  `opacity:0.25` gives 190.0 -> 0.255.  Double or
+           triple counting turns those into 0.25 (min_lum ~191) and 0.125
+           (min_lum ~223), which is 60-95 levels off the reference on every
+           glyph body pixel.
+
+           The faded rows below are exactly those shapes, set large on purpose:
+           revert the rule and the pixel change is far more than the 10% the
+           parity harness tolerates, so this fixture stops being a picture and
+           becomes a gate.  Nothing here puts a background on a faded container:
+           raw-text run boxes paint their copied background again, so a
+           translucent one would compare a second, unrelated defect. */
+        html, body { margin: 0; padding: 0; }
+        body { font-family: sans-serif; color: #222; background: #ffffff; }
+        h1 { font-size: 18px; margin: 8px 16px 2px 16px; }
+        p  { font-size: 13px; line-height: 18px; margin: 2px 16px; }
+
+        /* shape "anon": a faded container holding nothing but raw text.  Two
+           boxes carry the element's 0.5 (the div and its text runs). */
+        .raw      { opacity: 0.5; font-size: 52px; font-weight: 700; color: #000; margin: 0 16px; line-height: 58px; }
+        /* shape "anondiv": raw text plus a block sibling, so layout also splices
+           an anonymous block.  Three boxes would carry the same 0.5. */
+        .mixed    { opacity: 0.5; font-size: 46px; font-weight: 700; color: #000; margin: 0 16px; line-height: 52px; }
+        .mixed .kid { font-size: 46px; }
+        /* shape "quarter": the same raw text at 0.25, where the reference is
+           190.0 -> 0.255 and a second multiply lands at 0.0625. */
+        .quarter  { opacity: 0.25; font-size: 52px; font-weight: 700; color: #000; margin: 0 16px; line-height: 58px; }
+        /* shape "nested": a child that reasserts opacity:1 inside a faded parent
+           is still one declaration deep - the control that the old code got
+           right by accident, so it must keep passing. */
+        .outer    { opacity: 0.5; margin: 0 16px; }
+        .inner    { opacity: 1; font-size: 52px; font-weight: 700; color: #000; line-height: 58px; }
+
+        .bars { display: flex; margin: 6px 16px; }
+        .bar  { width: 96px; height: 18px; margin-right: 10px; }
+        .red  { background: #e74c3c; }
+        .green{ background: #27ae60; }
+        .blue { background: #2980b9; }
+    </style>
+</head>
+<body>
+    <h1>raw text inside a faded container is faded once</h1>
+    <p>opacity belongs to the element; the anonymous block and text-run boxes layout
+       invents for it are the same declaration, not extra ones.</p>
+
+    <div class="raw">ANON BLOCK TEXT</div>
+    <div class="raw">ONE FADE ONLY</div>
+
+    <div class="mixed">RAW TEXT THEN A BLOCK<div class="kid">BLOCK CHILD LINE</div>RAW TEXT AGAIN</div>
+
+    <div class="quarter">QUARTER FADE TEXT</div>
+
+    <div class="outer"><div class="inner">NESTED OPACITY ONE</div></div>
+
+    <div class="bars">
+        <div class="bar red"></div>
+        <div class="bar green"></div>
+        <div class="bar blue"></div>
+    </div>
+    <p>below the fold so the document is taller than the viewport: solid ink that
+       neither engine can disagree about, and one more faded row.</p>
+    <div class="raw">SOLID TEXT BELOW</div>
+</body>
+</html>

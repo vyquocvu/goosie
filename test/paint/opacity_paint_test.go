@@ -112,3 +112,108 @@ func TestGroupOpacityAppliesToSubtree(t *testing.T) {
 		t.Errorf("opaque child of an opacity:0.5 parent carried %v, want 0.5 (group opacity applies to the subtree)", child.Opacity)
 	}
 }
+
+// opPaintedOpacity returns the opacity carried by every text and fill command,
+// which is the whole product the rasterizer will apply. A shape whose commands
+// disagree has faded some part of it more than once.
+func opPaintedOpacity(cmds []paint.DisplayCmd) []float32 {
+	var out []float32
+	for _, c := range cmds {
+		if c.Kind == paint.CmdText || c.Kind == paint.CmdFill {
+			out = append(out, c.Opacity)
+		}
+	}
+	return out
+}
+
+// TestGroupOpacityCountedOncePerElement is the regression oracle. Accumulating
+// opacity down the box tree is right, but a box layout synthesized carries a
+// verbatim copy of the generating element's computed style
+// (style.AnonymousBlockStyle and style.inheritStyle both do `s = *parent`), and
+// that element already contributed. Multiplying the copy faded raw text once per
+// generated box: the first pass of this fix measured 0.25 for
+// `opacity:0.5` + raw text and 0.125 for the same text beside a block sibling,
+// where Chromium applies the declaration once no matter how many boxes layout
+// inserts.
+//
+// Every expectation is a Chromium measurement taken with
+// scripts/verify-task044-group-opacity.js on this machine (viewport 400x200,
+// DPR 1, black text on white, darkest glyph pixel): min_lum 126.0 is glyph alpha
+// 0.506 and 190.0 is 0.255, so a declared 0.5 or 0.25 arrives once.
+func TestGroupOpacityCountedOncePerElement(t *testing.T) {
+	shapes := []struct {
+		name     string
+		want     float32
+		chromium string
+		css      string
+		body     string
+	}{
+		{
+			// The control shape: an element child owns its own box, so even the
+			// buggy walk faded it exactly once.
+			name: "span", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
+			body: `<div style="opacity:0.5"><span>anonymous text</span></div>`,
+		},
+		{
+			// Raw text: layout puts it in a box of its own whose style is the
+			// faded div's copy. This is the shape the first pass regressed;
+			// before the whole fix it was right by accident.
+			name: "anon", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
+			body: `<div style="opacity:0.5">anonymous text</div>`,
+		},
+		{
+			// Raw text beside a block sibling adds the anonymous block wrapper
+			// layout invents to stack the run against it, so the copy was
+			// multiplied a third time. The sibling's own fill belongs to an
+			// element and fades once.
+			name: "anondiv", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
+			body: `<div style="opacity:0.5">anonymous text<div style="background:rgb(10,10,120)">bg</div></div>`,
+		},
+		{
+			// A different fraction, so the oracle is not satisfied by a value
+			// that happens to work at one-halves.
+			name: "quarter", want: 0.25, chromium: "min_lum 190.0 -> glyph alpha 0.255",
+			body: `<div style="opacity:0.25">anonymous text</div>`,
+		},
+		{
+			// opacity:1 is a declaration, not an escape: the child still fades
+			// with its ancestor and once.
+			name: "nested", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
+			body: `<div style="opacity:0.5"><div style="opacity:1">anonymous text</div></div>`,
+		},
+		{
+			// The anonymous-table half of the same rule: raw text beside a block
+			// inside a faded cell makes layout splice an anonymous cell whose
+			// style is a copy of that cell's (style.AnonymousTableStyle), so the
+			// declaration was counted once per wrapper.
+			name: "tableAnon", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
+			body: `<table><tbody><tr><td style="opacity:0.5">raw cell text<div>block</div></td></tr></tbody></table>`,
+		},
+		{
+			// Generated content is the exception, not a copy: a ::before box owns
+			// its own cascade result, so its declared opacity must still fade
+			// exactly once. Chromium measured 0.506 for this markup with no other
+			// text on the page, and 1.000 for the same pseudo without the
+			// declaration.
+			name: "pseudoOwn", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
+			css:  `#t::before{content:"gen";opacity:0.5}`,
+			body: `<div id="t"></div>`,
+		},
+	}
+	for _, s := range shapes {
+		t.Run(s.name, func(t *testing.T) {
+			html := `<!DOCTYPE html><html><head><style>html,body{margin:0}body{font:16px serif;color:#000}` +
+				s.css + `</style></head><body>` + s.body + `</body></html>`
+			got := opPaintedOpacity(visDisplayList(t, html))
+			if len(got) == 0 {
+				t.Fatalf("shape painted nothing; want text or fill commands to check")
+			}
+			for i, op := range got {
+				if !opClose(op, s.want) {
+					t.Errorf("command %d carried opacity %v, want %v (Chromium %s: one declaration is counted once, whatever boxes layout inserts)",
+						i, op, s.want, s.chromium)
+				}
+			}
+		})
+	}
+}
