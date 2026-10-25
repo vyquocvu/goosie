@@ -60,6 +60,13 @@ func (m *mockFetcher) lastCall() mockCall {
 	return m.calls[len(m.calls)-1]
 }
 
+type delayedErrorFetcher struct{}
+
+func (delayedErrorFetcher) Fetch(string, string, map[string]string, []byte) (*js.FetchResponse, error) {
+	time.Sleep(300 * time.Millisecond)
+	return nil, fmt.Errorf("delayed network down")
+}
+
 // blockingFetcher blocks on a gate channel inside Fetch, allowing tests to
 // control exactly when requests complete. Used by the concurrent-limit test.
 type blockingFetcher struct {
@@ -96,12 +103,17 @@ func newFetchRuntime(t *testing.T, fetcher js.HTTPFetcher) *js.Runtime {
 	return r
 }
 
-// drainFetch waits briefly for the fetch goroutine to complete, then drains
-// all pending fetch callbacks. The sleep is necessary because doFetch runs
-// the HTTP request on a separate goroutine; without it, DrainFetchCallbacks
-// may find an empty queue and return before the response is queued.
-func drainFetch(r *js.Runtime) {
-	time.Sleep(50 * time.Millisecond)
+// drainFetch waits for in-flight fetches to finish, then invokes their queued
+// callbacks on the runtime goroutine.
+func drainFetch(t *testing.T, r *js.Runtime) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for pending := r.PendingFetches(); pending > 0; pending = r.PendingFetches() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for fetches; pending=%d", pending)
+		}
+		time.Sleep(time.Millisecond)
+	}
 	r.DrainFetchCallbacks()
 }
 
@@ -298,7 +310,7 @@ func TestFetchReturnsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("fetchStatus"); !ok || v.Num != 200 {
 		t.Errorf("fetchStatus = %+v, want 200", v)
@@ -335,7 +347,7 @@ func TestFetchThenCallback(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("gotStatus"); !ok || v.Num != 200 {
 		t.Errorf("gotStatus = %+v, want 200", v)
@@ -356,10 +368,30 @@ func TestFetchCatchOnError(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("gotCatch"); !ok || !strings.Contains(v.Str, "network down") {
 		t.Errorf("gotCatch = %+v, want it to contain %q", v, "network down")
+	}
+}
+
+// TestFetchDrainWaitsForSlowRequest proves drainFetch waits for the request
+// goroutine instead of relying on the former 50 ms timing guess.
+func TestFetchDrainWaitsForSlowRequest(t *testing.T) {
+	r := newFetchRuntime(t, delayedErrorFetcher{})
+
+	if err := r.Run(`
+		var gotCatch = '';
+		fetch('/x').catch(function(e) {
+			gotCatch = e;
+		});
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	drainFetch(t, r)
+
+	if v, ok := r.Global("gotCatch"); !ok || !strings.Contains(v.Str, "delayed network down") {
+		t.Errorf("gotCatch = %+v, want it to contain %q", v, "delayed network down")
 	}
 }
 
@@ -387,7 +419,7 @@ func TestFetchResponseText(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("fetchHasText"); !ok || !v.Bool {
 		t.Errorf("fetchHasText = %+v, want true", v)
@@ -419,7 +451,7 @@ func TestFetchResponseJSON(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("fetchJSONName"); !ok || v.Str != "goosie" {
 		t.Errorf("fetchJSONName = %+v, want %q", v, "goosie")
@@ -457,7 +489,7 @@ func TestFetchResponseOK(t *testing.T) {
 			`, "inline"); err != nil {
 				t.Fatal(err)
 			}
-			drainFetch(r)
+			drainFetch(t, r)
 
 			if v, ok := r.Global("fetchOK"); !ok || v.Bool != tt.ok {
 				t.Errorf("fetchOK = %+v, want %v", v, tt.ok)
@@ -481,7 +513,7 @@ func TestFetchMethodOption(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if got := m.lastCall().Method; got != "POST" {
 		t.Errorf("method = %q, want %q", got, "POST")
@@ -503,7 +535,7 @@ func TestFetchHeadersOption(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if got := m.lastCall().Headers["X-Custom"]; got != "val" {
 		t.Errorf("X-Custom header = %q, want %q", got, "val")
@@ -525,7 +557,7 @@ func TestFetchBodyOption(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if got := string(m.lastCall().Body); got != "data" {
 		t.Errorf("body = %q, want %q", got, "data")
@@ -559,7 +591,7 @@ func TestFetchConcurrentLimit(t *testing.T) {
 
 	// Unblock the 6 fetches.
 	close(bf.gate)
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("fetchConcReject"); !ok || !strings.Contains(v.Str, "too many concurrent fetches") {
 		t.Errorf("fetchConcReject = %+v, want %q", v, "too many concurrent fetches")
@@ -601,7 +633,7 @@ func TestFetchURLResolution(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if got := m.lastCall().URL; got != "https://example.test/api/data" {
 		t.Errorf("URL = %q, want %q", got, "https://example.test/api/data")
@@ -657,7 +689,7 @@ func TestFetchMultipleThenChain(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("fetchA"); !ok || v.Num != 200 {
 		t.Errorf("fetchA = %+v, want 200", v)

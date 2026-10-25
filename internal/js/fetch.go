@@ -694,6 +694,19 @@ func (r *Runtime) DrainFetchCallbacks() {
 	}
 }
 
+// PendingFetches reports the number of fetch requests still running on
+// background goroutines. Hosts and tests use it to wait for in-flight work
+// instead of guessing a sleep duration.
+func (r *Runtime) PendingFetches() int {
+	fs := fetchOf(r)
+	if fs == nil {
+		return 0
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.active
+}
+
 // invokeOneCallback dispatches a single fetch callback. It builds the JS
 // argument from the plain-Go data, calls the function, and propagates the
 // return value to a chained thenable if one exists.
