@@ -69,3 +69,27 @@ Ghi nguyên văn output FAIL + PASS sau revert vào Status. Một assert không 
 
 1. `internal/style` đã expose danh sách shadow cho computed style chưa? Nếu chưa, chọn (a) accessor read-only duy nhất (tiền lệ `js.Runtime.PendingFetches()` ở TASK-017) hay (b) đo qua `PaintChecked` display list (số shadow layer vẽ ra)? Hướng (b) không cần API mới nhưng chứng minh cả đường paint, hướng (a) sắc hơn.
 2. `SetHover` có đường đọc trạng thái hover nào không? Nếu không, assert cho hover chỉ có thể là "hover không làm hỏng layout" — chấp nhận mức đó hay bỏ hover khỏi phạm vi?
+
+
+## 5.1 Quyết định của integrator (2026-10-25) — cả hai câu hỏi mục 5 đã có đáp án bằng code, không cần chọn phương án
+
+**Câu 1 — shadow: không cần accessor mới, và cũng không cần đo qua display list.**
+`internal/style/style.go:237` là `type ComputedStyle struct` (đã export), và chính nó khai báo:
+
+```go
+BoxShadow  []css.BoxShadow   // style.go:507 — nil nghĩa là `none`
+TextShadow []css.TextShadow  // style.go:510
+```
+
+Thư mục test đã đọc hai field này trực tiếp: `test/style/shadow_test.go:14` (`TestBoxShadowResolved`) assert `len(s.BoxShadow)` rồi `OffsetX/OffsetY/Blur/Spread`, qua helper `styleFor(...)` mà `TestShadowPanicsNoPanic` đang gọi rồi **vứt kết quả** (`shadow_test.go:210`: `_ = styleFor(...)`). Vậy hướng (a)/(b) trong mục 5 là giả sai: API tồn tại, chỉ có assert là chưa viết. `TestShadowPanicsNoPanic` phải đổi thành bảng kỳ vọng per-declaration dùng đúng `styleFor` đang có.
+
+Một phân biệt cần giữ: "shadow" trong file này là **CSS box/text-shadow**, không phải DOM shadow tree (`n.ShadowRoot` ở `internal/style/incremental.go:194`). Phạm vi task là CSS shadow; ai muốn phủ shadow root thì mở task khác, vì oracle của nó là cascade/invalidate chứ không phải resolver.
+
+**Câu 2 — hover: KHÔNG bỏ khỏi phạm vi, vì hover đã quan sát được qua DOM event.**
+`Session.hovered` (`internal/engine/engine.go:133`) là field không export và nên giữ nguyên như vậy. Nhưng `SetHover` dispatch **`mouseenter`** tại `internal/engine/focus.go:861` và unhover phần tử cũ qua `mouseleave` ở nhánh prev. Đó là chính thứ người dùng cảm nhận được (link đổi màu, con trỏ đổi shape là hệ quả), nên bất biến phải viết trên event, không trên field:
+
+* `SetHover` trả `true` ⇒ **đúng một** `mouseenter` hoặc `mouseleave` đã fire kể từ lần gọi trước.
+* `SetHover` trả `false` ⇒ **không** event nào fire (`focus.go:840`: `if hovered == s.hovered { return false }` — nhánh đó về sớm trước mọi dispatch), và phần tử đang hover không đổi.
+* Gọi hai điểm trùng nhau rồi gọi `SetHover` ở điểm đó lần thứ hai ⇒ phải trả `false` (đây là case mà một stub "luôn trả true" chết ngay).
+
+Ràng buộc: test đăng ký listener qua DOM API có thật của engine, không thêm hàm đọc vào `internal/**`. Nếu engine không cho gắn `mouseenter` listener từ script/`dom.AddEventListener` sẵn có, **dừng và báo** kèm bằng chứng, đừng tự mở API.
