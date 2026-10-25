@@ -1131,7 +1131,15 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneySelectOptionChange",
+      "test/engine/select_keyboard_test.go:TestClickFocusesSelectButNotDisabledControls",
+      "test/engine/select_keyboard_test.go:TestSelectArrowKeysMoveSelection",
+      "test/engine/select_keyboard_test.go:TestSelectHomeEndGoToTheEdges",
+      "test/engine/select_keyboard_test.go:TestSelectKeysAreConsumedAtTheEnds",
+      "test/engine/select_keyboard_test.go:TestSelectMoveChangesSubmittedValue",
+      "test/engine/select_keyboard_test.go:TestSelectSkipsDisabledOptions"
+    ],
     "enforced": false
   },
   {

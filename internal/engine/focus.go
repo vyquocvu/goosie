@@ -31,9 +31,24 @@ func controlEditable(n *dom.Node) bool {
 		(n.DataAtom == dom.AtomInput || n.DataAtom == dom.AtomTextarea)
 }
 
-// controlAt walks the arena in reverse paint order for the box containing the
-// point, then walks that box's ancestors for a control element.
-func (s *Session) controlAt(x, y float32) *dom.Node {
+// clickFocusable reports whether a click on n should give it focus. It is wider
+// than controlEditable: a <select> has no text to edit, but Tab and
+// element.focus() already reach it, and refusing the click would leave the
+// keyboard selection path unreachable.
+func clickFocusable(n *dom.Node) bool {
+	if n == nil || !n.Element() || n.HasAttribute("disabled") {
+		return false
+	}
+	if controlEditable(n) {
+		return true
+	}
+	return n.DataAtom == dom.AtomSelect
+}
+
+// controlAtMatching walks the arena in reverse paint order for the box
+// containing the point, then walks that box's ancestors for an element the
+// caller's predicate admits.
+func (s *Session) controlAtMatching(x, y float32, admit func(*dom.Node) bool) *dom.Node {
 	if s.Arena == nil {
 		return nil
 	}
@@ -51,12 +66,18 @@ func (s *Session) controlAt(x, y float32) *dom.Node {
 			if cur.Style != nil && cur.Style.PointerEvents == "none" {
 				break
 			}
-			if controlEditable(cur.Node) {
+			if admit(cur.Node) {
 				return cur.Node
 			}
 		}
 	}
 	return nil
+}
+
+// controlAt finds the editable control at a point. Hover uses it to decide
+// where the text cursor belongs, so it stays narrower than click-to-focus.
+func (s *Session) controlAt(x, y float32) *dom.Node {
+	return s.controlAtMatching(x, y, controlEditable)
 }
 
 // HasControlAt reports whether an editable control is laid out at the
@@ -76,7 +97,7 @@ func (s *Session) HasControlAt(x, y float32) bool {
 func (s *Session) FocusControl(x, y float32) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	n := s.controlAt(x, y)
+	n := s.controlAtMatching(x, y, clickFocusable)
 	return s.setFocusedNodeLocked(n)
 }
 
