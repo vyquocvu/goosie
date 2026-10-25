@@ -177,3 +177,34 @@ sign-off khi còn defect P0/P1 mở và khi `docs/qa-signoffs/` không có file 
 **viết** báo cáo (`testdata/live-parity.py:694,711-716`), còn binary thì build ở **đầu** lần chạy
 (`Makefile:68`), nên một sweep chạy ngang qua các merge sẽ tự ghi nhãn sai commit —
 `GOOSIE-LIVE-008`.
+
+### Sweep thật ở `49189713` (integrator, 2026-10-26 — sau TASK-044 + TASK-045 + TASK-046)
+
+Chạy lại toàn bộ bảy bước trên binary build đúng tại HEAD đang đo (`make build` sau khi sweep live
+xong, nên `bin/goosie` sha256 `3fa7a1fc72bf…` khớp fingerprint bước 1). Report:
+`/tmp/goosie-rc-sweep/rc-sweep.json`, log_console `/tmp/rc-sweep-49189713.log`.
+
+| Bước | verdict | Số đo tự chạy trên máy này |
+| --- | --- | --- |
+| fingerprint | PASS | build SHA `49189713506464dad0473b64776829ad2413739a`, macOS-26.6.2-arm64, binary sha256 `3fa7a1fc72bf…` |
+| gate | PASS | `release-gate: PASS (4 commands, failed=0, no_verdict=0)` |
+| parity_render | PASS | **87/87 passing (100.0%)**, average match **96.14%**, known gaps 5 fixtures / 10 bands, drift 9 shifted / 1 truly_blank |
+| parity_interaction | PASS | `ok test/engine 0.588s` (bộ fixture event + `reference-events.json`) |
+| per_case_run | PASS | **181** tagged P0/P1 test names chạy thật (171 ở `dd49490`; +10 từ `test/paint` của BR-195/BR-196) |
+| live_smoke | PASS | offline: 120 frame, `doc_height=21217` |
+| defects_signoff | **FAIL** | 5 defect P0/P1 còn mở — `GOOSIE-RENDER-001`, `GOOSIE-TRACE-001`, `GOOSIE-LIVE-001`, `GOOSIE-CIPARITY-001`, `GOOSIE-LICENSE-001` — và `docs/qa-signoffs.json` **không tồn tại**, nên không có chữ ký người cho build này |
+
+Hai điều đổi giữa hai lần sweep, ghi lại để bảng trên không bị đọc như "mọi thứ như cũ":
+
+- `GOOSIE-VIS-001` đóng nên không còn chặn sign-off; `per_case_run` tăng 10 tên vì paint layer có
+  case riêng (BR-195/BR-196) thay vì chỉ là sửa code không dấu vết.
+- Sweep live #6 (`docs/qa-live-parity/2026-10-25T2212Z-4302e3cb`) là lần đầu tiên báo cáo tự nói tên
+  build nó đo: 95/100 trang scored, `vnexpress` ink 32 → **0** trên trang thật, hàng `UNFLAGGED` vẫn
+  còn 14/43 trang dưới 50% `pct_exact`. Nhưng **tên file vẫn lấy HEAD lúc viết**
+  (`testdata/live-parity.py:1093`) trong khi pixels là `9754fda4` — chính là phần tôi đã tuyên bố
+  đã sửa khi đóng `GOOSIE-LIVE-008`, nên defect đó đã được **mở lại kèm lời rút lại** trong
+  `docs/qa-open-defects.json`. Từ giờ mọi suy diễn theo commit phải đọc `build.source_sha8`, không
+  đọc tên file.
+
+`BR-180` vẫn `NOT RUN`: sáu bước xanh là tự đo, bước tổng hợp cuối cố tình đỏ vì còn defect P0/P1 mở
+và không có ai ký. Không có cách nào làm nó xanh trừ khi thật sự đóng defect hoặc thật sự có sign-off.
