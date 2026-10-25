@@ -287,11 +287,23 @@ func (s *State) ResetZoom() {
 	s.ZoomBadgeUntil = time.Time{}
 }
 
+// ZoomPercent reports the current zoom as a whole-percent label, e.g. "125%".
+func (s *State) ZoomPercent() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return FormatZoomPercent(s.Zoom)
+}
+
+// FormatZoomPercent renders a zoom factor as a whole-percent label.
+func FormatZoomPercent(z float64) string {
+	return fmt.Sprintf("%d%%", int(z*100+0.5))
+}
+
 func (s *State) zoomBadgeRect(r frame.Rect, sc int32) (frame.Rect, bool) {
 	if s.FindActive || s.Zoom <= 0 || (s.Zoom == 1.0 && time.Now().After(s.ZoomBadgeUntil)) {
 		return frame.Rect{}, false
 	}
-	zoomStr := fmt.Sprintf("%d%%", int(s.Zoom*100+0.5))
+	zoomStr := FormatZoomPercent(s.Zoom)
 	badgeW := s.measureText(zoomStr) + 12*sc
 	if badgeW < 36*sc {
 		badgeW = 36 * sc
@@ -1427,7 +1439,7 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	s.drawText(backing, text, textX, textY, textCol, clip)
 
 	if zRect, ok := s.zoomBadgeRect(r, sc); ok {
-		zoomStr := fmt.Sprintf("%d%%", int(s.Zoom*100+0.5))
+		zoomStr := FormatZoomPercent(s.Zoom)
 		badgeBg := frame.RGB(232, 240, 254)
 		badgeFg := frame.RGB(26, 115, 232)
 		if s.Incognito {

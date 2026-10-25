@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
+	"github.com/vyquocvu/goosie/internal/toolbar"
 	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
@@ -635,19 +637,45 @@ func (f *framePath) printActiveTabToPDF() {
 	fmt.Printf("goosie: document printed to PDF at %s\n", outPath)
 }
 
+const (
+	// minZoom and maxZoom bound the page zoom factor; zoomStep is one
+	// Cmd+=/Cmd+- step.
+	minZoom  = 0.25
+	maxZoom  = 5.0
+	zoomStep = 0.1
+)
+
+func clampZoom(z float64) float64 {
+	if z < minZoom {
+		return minZoom
+	}
+	if z > maxZoom {
+		return maxZoom
+	}
+	return z
+}
+
+// ZoomReset restores the page to 100%.
+func (f *framePath) ZoomReset() {
+	f.handleZoom(0)
+}
+
+// ZoomPercent reports the current zoom as a whole-percent label, e.g. "125%".
+func (f *framePath) ZoomPercent() string {
+	return toolbar.FormatZoomPercent(f.zoom)
+}
+
 func (f *framePath) handleZoom(delta float64) {
-	if f.zoom <= 0 {
+	if f.zoom <= 0 || math.IsNaN(f.zoom) || math.IsInf(f.zoom, 0) {
 		f.zoom = 1.0
 	}
-	if delta == 0 {
+	switch {
+	case delta == 0:
 		f.zoom = 1.0
-	} else {
-		f.zoom += delta
-		if f.zoom < 0.25 {
-			f.zoom = 0.25
-		} else if f.zoom > 4.0 {
-			f.zoom = 4.0
-		}
+	case math.IsNaN(delta):
+		// A NaN step has no direction; keep the current level.
+	default:
+		f.zoom = clampZoom(f.zoom + delta)
 	}
 	if f.toolbar != nil {
 		f.toolbar.SetZoom(f.zoom)
