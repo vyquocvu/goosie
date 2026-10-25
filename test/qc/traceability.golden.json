@@ -2125,5 +2125,18 @@
       "test/engine/refresh_test.go:TestRestyleAndReflowReusesArenaForColorOnlyChange"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-187",
+    "priority": "P2",
+    "methods": [
+      "PARITY",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityDriftMetricIsGreen"
+    ],
+    "enforced": false
   }
 ]
