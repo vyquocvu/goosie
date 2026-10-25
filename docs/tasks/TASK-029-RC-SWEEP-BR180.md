@@ -87,3 +87,33 @@ Ratchet cho golden: một `qa-ratchet.json` ghi `{"p0_tagged": <n>, "p0p1_tagged
 * Không tự động hoá CUA, không giả CUA bằng AX tree; `qa-test-plan.md` đã cấm đóng bug render chỉ dựa vào DOM/AX.
 * Không đổi ngưỡng parity (`PASS_AT`, `MIN_INK`, band gap) — RULE cũ của TASK-021/024 vẫn còn có hiệu lực.
 * Không vá `TestNativeEndToEndPlaysARealVideo` (nhạy với tải máy, đã ghi nhận riêng) — nếu bước 2/5 chạm tới nó, ghi hiện tượng vào §Status, đừng tăng timeout.
+
+## Status (2026-10-25)
+
+- **AC-01 — PASS.** `bash -n scripts/rc-sweep.sh`; `go vet -all ./...`; `go test -count=1 ./internal/archtest/` đều exit 0. Các lệnh này cũng chạy lại trong bước `gate` của sweep cuối.
+- **AC-02 — PASS.** `go test -count=1 ./test/gatecheck/` → `ok ... 35.059s`; `go test -race -count=1 ./test/gatecheck/` → `ok ... 36.432s`.
+- **AC-03 — PASS sau rerun.** `go test -count=1 ./...` → tất cả package PASS trong release-gate cuối (`/tmp/rc-sweep/gate/01-go-test-count-1.log`). Một sweep trước có `TestQueueFullIsRefusedNotBlocked` timeout ở `test/surface/loop_test.go:873`; chạy riêng `go test -count=1 ./test/surface/ -run '^TestQueueFullIsRefusedNotBlocked$'` → `ok ... 0.464s`, full-suite rerun → `test/surface PASS ... 2.857s`, sweep cuối → release gate PASS. `TestNativeEndToEndPlaysARealVideo` PASS trong các full-suite run cuối; không sửa test/timeout. `go test -count=1 -run TestTraceability ./test/qc/ -update` → `ok ... 0.685s`; golden chỉ đổi row BR-180: các test `test/gatecheck/rc_sweep_test.go` và `enforced: true`.
+- **AC-04 — RUN, exit 1 có lý do.** Lệnh: `bash scripts/rc-sweep.sh -binary ./bin/goosie -out /tmp/rc-sweep`. Report: `/tmp/rc-sweep/rc-sweep.json`, đủ 7 step. Output cuối: `rc-sweep: fingerprint: PASS - build SHA, OS, and binary SHA-256 recorded`; `rc-sweep: gate: PASS - release gate exited 0`; `rc-sweep: parity_render: PASS - parity render exited 0`; `rc-sweep: parity_interaction: PASS - interaction parity exited 0`; `rc-sweep: per_case_run: PASS - all 71 tagged P0/P1 test names ran`; `rc-sweep: live_smoke: PASS - live page drew 120 frames, doc_height=21217`; `rc-sweep: defects_signoff: FAIL - open P0/P1 defects: GOOSIE-RENDER-001; human sign-off is missing for build 091ce0c76fe5efadcff4256e50c6d4b5096f4413`; `rc-sweep: FAIL (report: /private/tmp/rc-sweep/rc-sweep.json)`. Live smoke tới được `https://about.google/products/`; headless report ghi 120 frame, doc height 21217, failed tile 0, worker panic 0.
+- **AC-05 — PASS; mutation proofs đã chạy, revert và chạy lại.** Mỗi output dưới đây là số test mục tiêu thực thi; hành vi bị tắt cho kết quả `1/1 FAIL`, sau revert là `1/1 PASS`:
+
+  | Invariant | Mutation tắt hành vi | Output sau mutate → revert |
+  | --- | --- | --- |
+  | Report shape | Bỏ ghi các step rows | `1/1 FAIL` → `1/1 PASS` |
+  | Duration field | Bỏ trường `duration_seconds` | `1/1 FAIL` → `1/1 PASS` |
+  | Fingerprint | Bỏ ghi binary SHA-256 | `1/1 FAIL` → `1/1 PASS` |
+  | Fail-closed | Ép exit lỗi command thành 0 | `1/1 FAIL` → `1/1 PASS` |
+  | Tag/run match | Ép kết quả test không match thành pass | `1/1 FAIL` → `1/1 PASS` |
+  | P0 failure | Ép P0 test fail thành pass | `1/1 FAIL` → `1/1 PASS` |
+  | P0 coverage | Bỏ chặn P0 không có tag | `1/1 FAIL` → `1/1 PASS` |
+  | Ratchet | Bỏ so sánh với floor P0/P0-P1 | `1/1 FAIL` → `1/1 PASS` |
+  | Open defect | Bỏ xét defect P1 đang mở | `1/1 FAIL` → `1/1 PASS` |
+  | Missing sign-off | Bỏ xét file sign-off thiếu | `1/1 FAIL` → `1/1 PASS` |
+  | Build SHA sign-off | Bỏ đối chiếu SHA trong sign-off | `1/1 FAIL` → `1/1 PASS` |
+  | Offline live smoke | Ép network preflight unreachable thành pass | `1/1 FAIL` → `1/1 PASS` |
+  | No-cache | Bỏ `-count=1` khỏi per-case command | `1/1 FAIL` → `1/1 PASS` |
+
+  Local contract dùng loopback/`httptest`, không gọi internet thật. Offline case có step live smoke exit 2; khi một step khác fail, report vẫn trả fail có lý do, đồng thời giữ live step ở trạng thái no-verdict.
+- **AC-06 — PASS.** `python3 testdata/parity.py` và render parity trong sweep đều 80/80; average match 96.09%, threshold 90%. Baseline band không đổi.
+- **AC-07 — NOT RUN, giữ BR-180 `NOT RUN`.** `GOOSIE-RENDER-001` vẫn mở vì QA-002 chưa có frame-by-frame pixel evidence; cũng chưa có CUA evidence và chữ ký người thật gắn với build SHA. File trong `docs/qa-signoffs/TEMPLATE.json` được đánh dấu mẫu, không phải sign-off.
+
+Catalog header đã sửa `Tổng: 180 case` thành `Tổng: 185 case`; dòng BR-180 giữ `NOT RUN`.

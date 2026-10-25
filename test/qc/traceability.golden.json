@@ -1966,8 +1966,19 @@
       "PARITY"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepChecksSuppliedBuildSHAAgainstHEAD",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepEnforcesTaggedCaseRatchetFloor",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepFailsWhenAnOpenP0P1DefectExists",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepMapsFailingP0TaggedTestToFailure",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepOfflineLiveSmokeHasNoPassVerdictAndLocalURLIsSupported",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepRejectsTaggedTestWhenRunPatternMatchesNothing",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepRejectsUntaggedP0Case",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepReportContainsSevenEvidenceRowsAndFingerprint",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepRequiresHumanSignoffForExactBuildSHA",
+      "test/gatecheck/rc_sweep_test.go:TestRCSweepUsesFailClosedZeroOneTwoAndRejectsMissingSteps"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-181",
