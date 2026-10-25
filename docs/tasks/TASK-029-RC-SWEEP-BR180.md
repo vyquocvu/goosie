@@ -152,3 +152,28 @@ Catalog header đã sửa `Tổng: 180 case` thành `Tổng: 185 case`; dòng BR
   `docs/qa-test-catalog.md:216`) nên 10 test tagged của nó chính là `+1` P0 — không phải
   `+2` P1 như §3.3 từng đoán. Không bước nào hạ số.
 - Sweep thật sau merge phải chạy lại ở SHA mới; kết quả ghi ở task kế tiếp.
+
+### Sweep thật ở `dd49490` (integrator, 2026-10-26 — `scripts/rc-sweep.sh`, report `/tmp/goosie-rc-sweep/`)
+
+`make build` trước khi chạy (binary cũ build từ `6071b8b`, `bin/goosie` sha256
+`30904fb677399c8cdcbfe51a9ab8405eda355d506a158ab283e1ded7fa8b5da3`, host
+`macOS-26.6.2-arm64-arm-64bit`, sha khai báo khớp `dd49490`). Bảy bước, exit code thật của script: **1**, `status: fail`.
+
+| Bước | Kết quả | Số đo in ra |
+| --- | --- | --- |
+| fingerprint | PASS | build SHA + OS + binary SHA-256 |
+| gate | PASS | release gate exit 0 |
+| parity_render | PASS | `85/85 passing (100.0%)`, average match **96.16%**, known gaps **5 fixture / 10 band**, drift-adjusted 9 shifted / 1 truly_blank |
+| parity_interaction | PASS | exit 0 |
+| per_case_run | PASS | **171** tên test tagged của P0/P1 chạy hết (`-count=1`) |
+| live_smoke | PASS | `about.google/products` vẽ **120 frame**, `doc_height=21217` |
+| defects_signoff | **FAIL** | 6 P0/P1 đang mở: `GOOSIE-RENDER-001`, `TRACE-001`, `LIVE-001`, `CIPARITY-001`, `LICENSE-001`, `VIS-001`; chưa có chữ ký người thật cho `dd49490` |
+
+Sáu bước xanh là trạng thái thật của build này; bước thứ bảy đỏ **đúng thiết kế** — nó từ chối
+sign-off khi còn defect P0/P1 mở và khi `docs/qa-signoffs/` không có file nào gắn với SHA đang
+đo, nên không có cách nào làm nó xanh trừ khi đóng defect hoặc giả chữ ký. `BR-180` vì thế vẫn
+`NOT RUN`: sweep đã chạy và tự khai, chưa đạt. Ghi riêng một giới hạn của lần đo này, vì nó
+ảnh hưởng mọi suy diễn về live parity: `run_id` của báo cáo live lấy `git rev-parse HEAD` lúc
+**viết** báo cáo (`testdata/live-parity.py:694,711-716`), còn binary thì build ở **đầu** lần chạy
+(`Makefile:68`), nên một sweep chạy ngang qua các merge sẽ tự ghi nhãn sai commit —
+`GOOSIE-LIVE-008`.
