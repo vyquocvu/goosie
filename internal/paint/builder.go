@@ -63,5 +63,5 @@ func (b *Builder) SetFind(marks []FindMark) {
 // list. The root object's position is taken as the origin; a page with a
 // scrolled viewport passes the scroll offset as root.X/Y before calling Build.
 func (b *Builder) Build(root layout.ObjectID) {
-	b.paintBox(root, nil, 0)
+	b.paintBox(root, nil, 0, 1)
 }

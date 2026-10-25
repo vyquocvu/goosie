@@ -2370,6 +2370,19 @@ func clampFontSize(f float32) float32 {
 	return f
 }
 
+// clampOpacity folds a resolved opacity into the range CSS admits. The property
+// value clamps to [0,1] rather than erroring, so `opacity: 5` computes to 1 and
+// `opacity: -3` computes to 0, exactly as getComputedStyle reports.
+func clampOpacity(f float64) float32 {
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return float32(f)
+}
+
 func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.Color = parent.Color
 	cs.FontSize = parent.FontSize
@@ -2800,7 +2813,18 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		// Bare names increment by 1.
 		cs.CounterIncrement = ParseCounterDecls(value, 1)
 	case "opacity":
-		cs.Opacity = float32(parsed.Num)
+		// Opacity takes a <number> or <percentage> and clamps to [0,1] exactly
+		// as getComputedStyle does: 5 reads back 1, -3 reads back 0, and a
+		// percentage of 50 is a half, not fifty. A value that is neither a
+		// number nor a percentage leaves the property untouched rather than
+		// silently resolving to 0, since a zero-opacity box now drops its whole
+		// subtree at paint and a typo must not hide an element.
+		switch parsed.Type {
+		case css.ValueNumber:
+			cs.Opacity = clampOpacity(parsed.Num)
+		case css.ValuePercentage:
+			cs.Opacity = clampOpacity(parsed.Num / 100)
+		}
 	case "z-index":
 		if value == "auto" {
 			cs.HasZIndex = false
