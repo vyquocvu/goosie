@@ -178,6 +178,7 @@ func TestLoadURLCtxRejectsInvalidViewport(t *testing.T) {
 	}
 }
 
+// qc:BR-002
 func TestLoadURLCtxValidSmallDocument(t *testing.T) {
 	html := `<!DOCTYPE html><html><body><div style="width:64px;height:64px;background:red"></div></body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1055,6 +1056,7 @@ func TestApplyNavResultTraversalRewritesRedirectedEntry(t *testing.T) {
 // failure half: a TLS server whose certificate the default client does not
 // trust must fail the load with a certificate error, and that error must land
 // in the address bar (red text) with loading cleared — never a silent blank.
+// qc:BR-007
 func TestCertFailureReachesAddressBar(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("<html></html>"))
@@ -1342,6 +1344,7 @@ func TestTabStripChevronClicksScrollByPage(t *testing.T) {
 
 // TestLoadErrorsOmitQuerySecrets: navigation failures surface redacted URLs
 // (diagnostics must omit query secrets by default), keeping the host.
+// qc:BR-012
 func TestLoadErrorsOmitQuerySecrets(t *testing.T) {
 	client := net.DefaultClient()
 	defer client.Close()

@@ -10,6 +10,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
+// qc:BR-036
 func TestIndependentTabNavigation(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	tab1 := mgr.NewTab()
@@ -37,6 +38,7 @@ func TestIndependentTabNavigation(t *testing.T) {
 // landing on top of the one they are waiting for. That only matters inside
 // framePath.applyNavResult, which is where the result reaches the tab, the toolbar, and
 // the scheduler, so it is tested there rather than by assigning the field.
+// qc:BR-014
 func TestStaleNavResultCannotPaintOverTheCurrentOne(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -206,6 +208,7 @@ func TestBackgroundTabResultLeavesTheForegroundAlone(t *testing.T) {
 // under completion reorder: the background tab finishing first must not
 // disturb the foreground, and the foreground finishing later lands exactly
 // once with its own history intact.
+// qc:BR-028
 func TestOutOfOrderResultsLandOnTheirOwnTabs(t *testing.T) {
 	f := newNavTestPath(t)
 	foreground := f.tabMgr.Active()

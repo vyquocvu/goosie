@@ -17,8 +17,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/main_test.go:TestLoadURLCtxValidSmallDocument"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-003",
@@ -28,8 +30,11 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/normalize_url_test.go:TestNormalizeAddressAmbiguousInputs",
+      "cmd/goosie/normalize_url_test.go:TestNormalizeURL"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-004",
@@ -72,8 +77,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/main_test.go:TestCertFailureReachesAddressBar"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-008",
@@ -133,8 +140,11 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/error_page_test.go:TestCategorizeError",
+      "cmd/goosie/main_test.go:TestLoadErrorsOmitQuerySecrets"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-013",
@@ -154,8 +164,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/tab_lifecycle_test.go:TestStaleNavResultCannotPaintOverTheCurrentOne"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-015",
@@ -308,8 +320,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/tab_lifecycle_test.go:TestOutOfOrderResultsLandOnTheirOwnTabs"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-029",
@@ -396,8 +410,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/tab_lifecycle_test.go:TestIndependentTabNavigation"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-037",
@@ -1717,7 +1733,7 @@
     "tests": [
       "test/engine/bounds_test.go:TestSessionRejectsUnboundedInput"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-164",
@@ -1740,8 +1756,11 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "internal/image/decode_test.go:TestProbeAcceptsAtLimit",
+      "internal/image/decode_test.go:TestProbeRejectsEncodedByteLimit"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-166",
@@ -1752,6 +1771,12 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "internal/image/decode_test.go:TestDecodeJPEGRejectsOversized",
+      "internal/image/decode_test.go:TestDecodePNGRejectsOversized",
+      "internal/image/decode_test.go:TestProbeAcceptsAtLimit",
+      "internal/image/decode_test.go:TestProbeRejectsJustOverPixelLimit",
+      "internal/image/decode_test.go:TestProbeRejectsOversizedDimensions",
+      "internal/image/decode_test.go:TestProbeRejectsOversizedWebPDimensions",
       "test/engine/adversarial_test.go:TestOversizedImageHeaderRejectedBeforeDecode"
     ],
     "enforced": true
