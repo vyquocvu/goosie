@@ -38,6 +38,8 @@ func typeName(t css.TokenType) string {
 		return "CDC"
 	case css.TokenFunction:
 		return "Function"
+	case css.TokenLBrace:
+		return "LBrace"
 	}
 	return "Other"
 }
@@ -80,7 +82,7 @@ func TestHyphenTokenKind(t *testing.T) {
 		{"negative percentage", "-25%", []tokSpec{{css.TokenPercentage, "-25", "", -25}}},
 		// A lone hyphen is a delimiter, not the number zero.
 		{"lone hyphen", "-", []tokSpec{{css.TokenDelim, "-", "", 0}}},
-		{"hyphen before brace", "-{", []tokSpec{{css.TokenDelim, "-", "", 0}}},
+		{"hyphen before brace", "-{", []tokSpec{{css.TokenDelim, "-", "", 0}, {css.TokenLBrace, "{", "", 0}}},
 		// Untouched neighbours, recorded so the fix cannot move them.
 		{"hash colour", "#8e8e8e", []tokSpec{{css.TokenHash, "8e8e8e", "", 0}}},
 		{"digit-led dimension", "8e8e8px", []tokSpec{{css.TokenDimension, "8e8", "e8px", 8e8}}},
