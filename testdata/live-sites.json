@@ -1,0 +1,638 @@
+{
+  "contract": {
+    "viewport": {
+      "width": 1280,
+      "height": 1024,
+      "dpr": 1
+    },
+    "chromium": {
+      "wait_until": "load",
+      "timeout_ms": 30000,
+      "animations": "disabled",
+      "full_page": false
+    },
+    "goosie": {
+      "screenshot_floor_frames": 8,
+      "deadline_seconds_hardcoded": 25,
+      "structure_mode": [
+        "-gate",
+        "-frames",
+        "120"
+      ]
+    },
+    "spacing_ms": 150,
+    "note": "viewport-only on both sides: goosie screenshot mode never scrolls (cmd/goosie/drive.go:134)"
+  },
+  "counts": {
+    "news-vn": 18,
+    "news-intl": 14,
+    "docs": 18,
+    "wiki": 14,
+    "commerce": 10,
+    "web-standards": 10,
+    "gov-org": 10,
+    "minimal-legacy": 6
+  },
+  "sites": [
+    {
+      "url": "https://vnexpress.net/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://tuoitre.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://thanhnien.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://vietnamnet.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://dantri.com.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://www.24h.com.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://soha.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://zingnews.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://plo.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://laodong.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://nld.com.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://sggp.org.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://cand.com.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://www.vietnamplus.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://vneconomy.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://vtv.vn/",
+      "category": "news-vn",
+      "expect": "js-revealed",
+      "why": "Vietnamese press: the pages real users open; diacritics, ad slots, JS-revealed layout"
+    },
+    {
+      "url": "https://www.baomoi.com/",
+      "category": "news-vn",
+      "expect": "media-heavy",
+      "why": "aggregator with image carousels"
+    },
+    {
+      "url": "https://cafef.vn/",
+      "category": "news-vn",
+      "expect": "tables",
+      "why": "market data tables inside news"
+    },
+    {
+      "url": "https://www.bbc.com/news",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://apnews.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.nytimes.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.washingtonpost.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://edition.cnn.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.usatoday.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.straitstimes.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.japantimes.co.jp/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.reuters.com/",
+      "category": "news-intl",
+      "expect": "js-revealed",
+      "why": "international wire services and papers"
+    },
+    {
+      "url": "https://www.theguardian.com/international",
+      "category": "news-intl",
+      "expect": "static",
+      "why": "long columned news grids"
+    },
+    {
+      "url": "https://www.aljazeera.com/",
+      "category": "news-intl",
+      "expect": "static",
+      "why": "long columned news grids"
+    },
+    {
+      "url": "https://www.dw.com/en/top-stories/s-9097",
+      "category": "news-intl",
+      "expect": "static",
+      "why": "long columned news grids"
+    },
+    {
+      "url": "https://www.euronews.com/",
+      "category": "news-intl",
+      "expect": "static",
+      "why": "long columned news grids"
+    },
+    {
+      "url": "https://www.france24.com/en/",
+      "category": "news-intl",
+      "expect": "static",
+      "why": "long columned news grids"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Learn",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://docs.python.org/3/",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://docs.python.org/3/library/os.html",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://docs.python.org/3/tutorial/index.html",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://go.dev/doc/effective_go",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://go.dev/ref/spec",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://pkg.go.dev/net/http",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://doc.rust-lang.org/std/",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://man7.org/linux/man-pages/man2/write.2.html",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://docs.kernel.org/latest/",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://doc.rust-lang.org/book/",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://www.php.net/docs.php",
+      "category": "docs",
+      "expect": "static",
+      "why": "reference documentation: nested nav, monospace code blocks, long tables"
+    },
+    {
+      "url": "https://www.typescriptlang.org/docs/handbook/intro.html",
+      "category": "docs",
+      "expect": "js-revealed",
+      "why": "framework docs rendered by their own SPA"
+    },
+    {
+      "url": "https://react.dev/learn",
+      "category": "docs",
+      "expect": "js-revealed",
+      "why": "framework docs rendered by their own SPA"
+    },
+    {
+      "url": "https://vuejs.org/guide/introduction.html",
+      "category": "docs",
+      "expect": "js-revealed",
+      "why": "framework docs rendered by their own SPA"
+    },
+    {
+      "url": "https://getbootstrap.com/docs/5.3/getting-started/introduction/",
+      "category": "docs",
+      "expect": "js-revealed",
+      "why": "framework docs rendered by their own SPA"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Goat",
+      "category": "wiki",
+      "expect": "static",
+      "why": "measured today: coverage 0.872, pct_exact 71.05"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Web_browser",
+      "category": "wiki",
+      "expect": "static",
+      "why": "long article with infobox and images"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Cuneiform",
+      "category": "wiki",
+      "expect": "static",
+      "why": "dense academic layout"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Vietnam",
+      "category": "wiki",
+      "expect": "static",
+      "why": "diacritics in Latin output"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/List_of_Languages_by_Total_Number_of_Speakers",
+      "category": "wiki",
+      "expect": "static",
+      "why": "big numeric table"
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Help:Contents",
+      "category": "wiki",
+      "expect": "static",
+      "why": "form controls and fieldsets"
+    },
+    {
+      "url": "https://vi.wikipedia.org/wiki/Vi%E1%BB%87t_Nam",
+      "category": "wiki",
+      "expect": "static",
+      "why": "Vietnamese diacritics under a real font stack"
+    },
+    {
+      "url": "https://de.wikipedia.org/wiki/Deutschland",
+      "category": "wiki",
+      "expect": "static",
+      "why": "agglutinated long words, no break points"
+    },
+    {
+      "url": "https://fr.wikipedia.org/wiki/France",
+      "category": "wiki",
+      "expect": "static",
+      "why": "accented text"
+    },
+    {
+      "url": "https://ja.wikipedia.org/wiki/%E6%97%A5%E6%9C%AC",
+      "category": "wiki",
+      "expect": "static",
+      "why": "CJK glyphs, no space between words"
+    },
+    {
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD",
+      "category": "wiki",
+      "expect": "static",
+      "why": "CJK glyphs"
+    },
+    {
+      "url": "https://ru.wikipedia.org/wiki/%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0",
+      "category": "wiki",
+      "expect": "static",
+      "why": "Cyrillic"
+    },
+    {
+      "url": "https://en.wiktionary.org/wiki/example",
+      "category": "wiki",
+      "expect": "static",
+      "why": "definition-list heavy"
+    },
+    {
+      "url": "https://simple.wikipedia.org/wiki/United_States",
+      "category": "wiki",
+      "expect": "static",
+      "why": "simplified layout control"
+    },
+    {
+      "url": "https://www.ebay.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.walmart.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.bestbuy.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.etsy.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.newegg.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.target.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.apple.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.nike.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.uniqlo.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.zara.com/",
+      "category": "commerce",
+      "expect": "js-revealed",
+      "why": "grid/product layouts, bot walls, image carousels"
+    },
+    {
+      "url": "https://www.w3.org/Style/CSS/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://www.w3.org/MarkUp/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://www.w3.org/TR/css-syntax-3/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://www.w3.org/TR/selectors-4/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://www.w3.org/TR/css-ui-4/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://css-tricks.com/snippets/css/complete-guide-grid/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://caniuse.com/css-grid",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://htmldog.com/guides/html/beginner/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://validator.w3.org/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://www.csszengarden.com/",
+      "category": "web-standards",
+      "expect": "static",
+      "why": "spec text and hand-written CSS demos: the pages this engine is meant to get right"
+    },
+    {
+      "url": "https://www.gov.uk/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.usa.gov/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.nasa.gov/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.noaa.gov/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.census.gov/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.gov.vn/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.moe.gov.vn/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://www.icann.org/",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://rfc-editor.org/rfc/rfc9110.html",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://datatracker.ietf.org/doc/html/rfc9114",
+      "category": "gov-org",
+      "expect": "static",
+      "why": "government and standards-body portals, RFC prose"
+    },
+    {
+      "url": "https://info.cern.ch/hypertext/WWW/TheProject.html",
+      "category": "minimal-legacy",
+      "expect": "static",
+      "why": "1990s table layout and minimal HTML controls: if these fail, the failure is ours alone"
+    },
+    {
+      "url": "https://www.spacejam.com/1996/",
+      "category": "minimal-legacy",
+      "expect": "static",
+      "why": "1990s table layout and minimal HTML controls: if these fail, the failure is ours alone"
+    },
+    {
+      "url": "https://old.reddit.com/",
+      "category": "minimal-legacy",
+      "expect": "static",
+      "why": "1990s table layout and minimal HTML controls: if these fail, the failure is ours alone"
+    },
+    {
+      "url": "https://whatwg.org/",
+      "category": "minimal-legacy",
+      "expect": "static",
+      "why": "1990s table layout and minimal HTML controls: if these fail, the failure is ours alone"
+    },
+    {
+      "url": "https://commonmark.org/",
+      "category": "minimal-legacy",
+      "expect": "static",
+      "why": "1990s table layout and minimal HTML controls: if these fail, the failure is ours alone"
+    },
+    {
+      "url": "https://example.com/",
+      "category": "minimal-legacy",
+      "expect": "static",
+      "why": "1990s table layout and minimal HTML controls: if these fail, the failure is ours alone"
+    }
+  ]
+}
