@@ -301,3 +301,26 @@ ok  	github.com/vyquocvu/goosie/test/qc	0.493s
 (Golden test/qc/traceability.golden.json cập nhật đủ 11 case BR-097..BR-107 với trường tests không rỗng)
 ```
 
+
+
+## 8. Integrator review (2026-10-25) — landed, và bốn gap engine mà §7 để lộ
+
+**Đã xác nhận bằng lệnh thật, không đọc báo cáo:**
+
+* `go test -count=5` cả 11 journey: `ok cmd/goosie 5.435s` — ổn định, không flake.
+* `go test -race -count=2` trên ba journey chạm state chia sẻ (checkbox/radio/submit-by-button): `ok cmd/goosie 2.814s`.
+* Bảng mutation §7.2 đúng loại `[R-7]`: mỗi phép là **tắt hành vi** (bỏ `uncheckRadioGroup`, bỏ `submitFormLocked`, vô hiệu Space activation, `FocusNext` nhảy cóc hai bước, bỏ `QueryEscape`, `caret--` thành `caret++`), không chỉ trả sai giá trị.
+* Không có `time.Sleep` trong file; 38 `waitFor`, mỗi predicate đọc đúng thứ mà dòng sau assert.
+
+**Một lỗi submissions phải sửa trước khi merge** — và nó là lý do §8 tồn tại: BR-101/BR-105/BR-107 mang `// qc:BR-xxx` trên ba test mà dòng đầu tiên của body là `t.Skip(...)`. Golden vì thế **tuyên bố đã phủ ba case mà không có một assertion nào**. Đã bỏ tag và thêm luật thường trực vào gate (`test/qc/traceability_test.go`): tag đặt lên test skip vô điều kiện ⇒ `t.Errorf`, và luật này tự chứng minh vì đúng ba dòng đó fail ngay khi thêm, không fail oan case nào khác. `t.Skip` **có điều kiện** (thiếu display, thiếu font trên máy chạy) vẫn được tính — đó là case TASK-027 sẽ dùng.
+
+**Bốn gap engine ghi nhận từ §7.3/§7.5, đưa vào `docs/qa-open-defects.json` của TASK-029:**
+
+| Gap | Chỗ chặn | Vì sao đáng sửa |
+| --- | --- | --- |
+| `<select>` không tương tác được | `engine.go:1576 activatableAt` không có `select`; phím mũi tên rơi vào `scrollContentKey`; `builder_controls.go:269 paintSelect` chỉ vẽ nhãn option hiện tại | Người dùng không chọn được option nào bằng UI thật, kể cả khi DOM đã có `selected`. Đây là case P1 bị block, không phải P2. |
+| Không có validation `required`/`type` trước submit | `Session.SubmitForm` dispatch `submit` và gửi request ngay cả khi control bắt buộc còn trống | Form rỗng vẫn bay lên server: hành vi sai ở đường cùng của người dùng. |
+| Submitter name/value bị bỏ | `forms.go:72,88 isSuccessfulControl` return false với button | Hai nút "Save"/"Publish" trong cùng form cho server kết quả **giống hệt nhau**. |
+| AX tree không publish sau khi kích hoạt control | `cmd/goosie/interaction.go:44-58`: nhánh `if activated` gọi `repaintTab` rồi `return true`, **không** gọi `publishAccessibility()` (18 chỗ khác có gọi) | Tree phục vụ assistive tech và chính test journey: trang đổi trạng thái mà cây AX còn nguyên. May là §7.3 đã né đúng chỗ này — agent đếm `change` event qua payload HTTP thay vì đọc AX, nên test không bị thành oracle mù. |
+
+Ba gap đầu cần task engine riêng (chưa có người); gap thứ tư nhỏ và rõ chỗ sửa, có thể ghép vào task chrome bất kỳ.

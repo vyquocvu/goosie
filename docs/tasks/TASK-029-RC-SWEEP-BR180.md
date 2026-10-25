@@ -34,7 +34,7 @@ Bảy bước, mỗi bước ghi log riêng vào `-out`, và ghi `rc-sweep.json`
 | 2 | gate | `scripts/release-gate.sh -out <out>/gate` | gate fail | không chạy được |
 | 3 | parity render | `python3 testdata/parity.py --render --binary <bin> --json <out>/parity.json` | parity fail hoặc band vượt baseline | không có Chromium/fixture |
 | 4 | parity interaction | `go test -count=1 -run TestParity ./test/engine/` | fail | không chạy được |
-| 5 | **per-case run** | với mỗi P0/P1 có tag trong golden: gom theo package, chạy `go test -count=1 -run '^(Test…|Test…)$' <pkg>` | **bất kỳ test nào của P0 fail**, hoặc **số P0/P1 có tag giảm dưới floor** (§3.3) | `-run` không match test nào (test đổi tên ≠ test xanh) |
+| 5 | **per-case run** | với mỗi P0/P1 có tag trong golden: gom theo package, chạy `go test -count=1 -run '^(Test…|Test…)$' <pkg>` | **bất kỳ test nào của P0 fail**, hoặc **test được tag mà báo SKIP** (skip vô điều kiện = không phải bằng chứng; xem `test/qc/traceability_test.go`), hoặc **số P0/P1 có tag giảm dưới floor** (§3.3) | `-run` không match test nào (test đổi tên ≠ test xanh) |
 | 6 | live smoke | `./bin/goosie -backend headless … -url <live-url>` với **network preflight** trước | trang vẽ nhưng report tự chấm fail | host không tới được (offline/CI không có mạng) |
 | 7 | defects + sign-off | đọc `docs/qa-open-defects.json` và file sign-off (§3.4) | còn defect P0/P1 `open`, hoặc thiếu/sai sign-off | file không đọc được |
 
@@ -48,7 +48,12 @@ Contract test cho từng invariant ở bảng trên, mỗi test mang `// qc:BR-1
 
 ### 3.3 `docs/qa-open-defects.json` + ratchet
 
-Registry máy đọc được, seed bằng đúng thứ đã mở thật: `GOOSIE-RENDER-001` (P1, ch. `docs/qa-test-plan.md` nói rõ "chưa có frame-by-frame pixel evidence để đóng"). Trường: `id, priority, status (open|closed|waived), owner, summary, evidence, closed_by`.
+Registry máy đọc được, seed bằng đúng thứ đã mở thật — **bốn defect có bằng chứng, đừng để agent sau phải điều tra lại**:
+`GOOSIE-RENDER-001` (P1, `docs/qa-test-plan.md` §QA-002: chưa có frame-by-frame evidence để đóng phần nhấp nháy), và
+bốn gap engine ghi ở `docs/tasks/TASK-026-FORM-JOURNEYS.md` §8: `<select>` không tương tác được (`engine.go:1576`, `builder_controls.go:269`),
+không validation `required`/`type` trước submit, submitter name/value bị bỏ (`forms.go:72,88`), và
+`cmd/goosie/interaction.go:44-58` không `publishAccessibility` sau khi kích hoạt control.
+ Trường: `id, priority, status (open|closed|waived), owner, summary, evidence, closed_by`.
 Ratchet cho golden: một `qa-ratchet.json` ghi `{"p0_tagged": <n>, "p0p1_tagged": <n>}`. Sweep fail (exit 1) nếu số giảm, hoặc nếu có P0 không tagged. **Nâng số là hợp lệ, hạ số phải kèm lý do trong commit.**
 
 ### 3.4 Sign-off
