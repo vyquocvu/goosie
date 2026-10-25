@@ -1,0 +1,3663 @@
+{
+  "contract": {
+    "chromium": {
+      "animations": "disabled",
+      "full_page": false,
+      "timeout_ms": 30000,
+      "wait_until": "load"
+    },
+    "dpr": 1,
+    "goosie": {
+      "deadline_seconds_hardcoded": 25.0,
+      "screenshot_floor_frames": 8,
+      "scrolls": false,
+      "structure_mode": [
+        "-gate",
+        "-frames",
+        "120"
+      ]
+    },
+    "spacing_ms": 150,
+    "viewport": [
+      1280,
+      1024
+    ]
+  },
+  "corpus": "live-sites.json",
+  "counts": {
+    "ADMISSION_CAPPED": 1,
+    "FETCH_FAILED": 5,
+    "LAYOUT_EMPTY": 8,
+    "LOW_COVERAGE": 17,
+    "MISSING_REGIONS": 24,
+    "OK": 45
+  },
+  "floor_met": true,
+  "noise_floor": {
+    "comparable": 10,
+    "detail": [
+      {
+        "delta_coverage": 0.137,
+        "delta_pct": 17.48,
+        "label_changed": false,
+        "url": "https://vnexpress.net/"
+      },
+      {
+        "delta_coverage": 0.084,
+        "delta_pct": 3.45,
+        "label_changed": false,
+        "url": "https://laodong.vn/"
+      },
+      {
+        "delta_coverage": null,
+        "delta_pct": null,
+        "label_changed": false,
+        "url": "https://www.bbc.com/news"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://www.theguardian.com/international"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://docs.python.org/3/library/os.html"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://www.php.net/docs.php"
+      },
+      {
+        "delta_coverage": 0.05,
+        "delta_pct": 0.39,
+        "label_changed": false,
+        "url": "https://en.wikipedia.org/wiki/List_of_Languages_by_Total_Number_of_Speakers"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://simple.wikipedia.org/wiki/United_States"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.01,
+        "label_changed": false,
+        "url": "https://www.uniqlo.com/"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://htmldog.com/guides/html/beginner/"
+      },
+      {
+        "delta_coverage": null,
+        "delta_pct": null,
+        "label_changed": false,
+        "url": "https://www.moe.gov.vn/"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://example.com/"
+      }
+    ],
+    "labels_that_flipped": 0,
+    "max_abs_delta_coverage": 0.137,
+    "max_abs_delta_pct": 17.48,
+    "sites": 12
+  },
+  "pages_in_corpus": 100,
+  "pages_scored": 94,
+  "rows": [
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.85,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.441,
+      "doc_height": 1625,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.74,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 367800,
+      "ink_goosie": 320348,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 7,
+      "notes": [
+        "coverage 0.441 < 0.6"
+      ],
+      "pct_exact": 64.41,
+      "structure_diag": "",
+      "url": "https://vnexpress.net/",
+      "worst_iou": 0.037
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 2.13,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.443,
+      "doc_height": 1531,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.41,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 765136,
+      "ink_goosie": 1310720,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [],
+      "pct_exact": 1.23,
+      "structure_diag": "",
+      "url": "https://tuoitre.vn/",
+      "worst_iou": 0.627
+    },
+    {
+      "blank_bands": [
+        [
+          0,
+          16
+        ]
+      ],
+      "category": "news-vn",
+      "chromium_secs": 2.78,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.187,
+      "doc_height": 4753,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.15,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 294487,
+      "ink_goosie": 96753,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 6,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 73.6,
+      "structure_diag": "",
+      "url": "https://thanhnien.vn/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 3.65,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.265,
+      "doc_height": 4447,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.98,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 636564,
+      "ink_goosie": 175912,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.265 < 0.6"
+      ],
+      "pct_exact": 50.42,
+      "structure_diag": "",
+      "url": "https://vietnamnet.vn/",
+      "worst_iou": 0.017
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 10.43,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.218,
+      "doc_height": 48961,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.41,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 689879,
+      "ink_goosie": 907833,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [],
+      "pct_exact": 30.29,
+      "structure_diag": "",
+      "url": "https://dantri.com.vn/",
+      "worst_iou": 0.659
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.53,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.397,
+      "doc_height": 15325,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.09,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 623781,
+      "ink_goosie": 248554,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.397 < 0.6"
+      ],
+      "pct_exact": 69.03,
+      "structure_diag": "",
+      "url": "https://www.24h.com.vn/",
+      "worst_iou": 0.034
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 2.23,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.272,
+      "doc_height": 3242,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.06,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 859196,
+      "ink_goosie": 260321,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.272 < 0.6"
+      ],
+      "pct_exact": 39.18,
+      "structure_diag": "",
+      "url": "https://soha.vn/",
+      "worst_iou": 0.053
+    },
+    {
+      "blank_bands": [
+        [
+          287,
+          323
+        ]
+      ],
+      "category": "news-vn",
+      "chromium_secs": 1.56,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.535,
+      "doc_height": 18938,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.88,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 646427,
+      "ink_goosie": 414896,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 6,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 34.66,
+      "structure_diag": "",
+      "url": "https://zingnews.vn/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.13,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.524,
+      "doc_height": 4444,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.37,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 491750,
+      "ink_goosie": 1310720,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [],
+      "pct_exact": 0.57,
+      "structure_diag": "",
+      "url": "https://plo.vn/",
+      "worst_iou": 0.628
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.96,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.383,
+      "doc_height": 20233,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.36,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 632802,
+      "ink_goosie": 310485,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "coverage 0.383 < 0.6"
+      ],
+      "pct_exact": 49.26,
+      "structure_diag": "",
+      "url": "https://laodong.vn/",
+      "worst_iou": 0.047
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.15,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.531,
+      "doc_height": 4444,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.39,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 489550,
+      "ink_goosie": 1310720,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [],
+      "pct_exact": 2.4,
+      "structure_diag": "",
+      "url": "https://nld.com.vn/",
+      "worst_iou": 0.628
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.83,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.471,
+      "doc_height": 16067,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.99,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 619039,
+      "ink_goosie": 377955,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "coverage 0.471 < 0.6"
+      ],
+      "pct_exact": 45.52,
+      "structure_diag": "",
+      "url": "https://sggp.org.vn/",
+      "worst_iou": 0.397
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 0.77,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.597,
+      "doc_height": 6654,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.91,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 700430,
+      "ink_goosie": 1201475,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [],
+      "pct_exact": 13.4,
+      "structure_diag": "",
+      "url": "https://cand.com.vn/",
+      "worst_iou": 0.195
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.55,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.201,
+      "doc_height": 12792,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.22,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 529838,
+      "ink_goosie": 109308,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.201 < 0.6"
+      ],
+      "pct_exact": 60.6,
+      "structure_diag": "",
+      "url": "https://www.vietnamplus.vn/",
+      "worst_iou": 0.07
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 0.58,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.541,
+      "doc_height": 15415,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.23,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 461712,
+      "ink_goosie": 304450,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [
+        "coverage 0.541 < 0.6"
+      ],
+      "pct_exact": 65.15,
+      "structure_diag": "",
+      "url": "https://vneconomy.vn/",
+      "worst_iou": 0.029
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 0.97,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.271,
+      "doc_height": 1963,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.1,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 702063,
+      "ink_goosie": 193871,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.271 < 0.6"
+      ],
+      "pct_exact": 56.43,
+      "structure_diag": "",
+      "url": "https://vtv.vn/",
+      "worst_iou": 0.029
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.66,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.89,
+      "doc_height": 13689,
+      "expect": "media-heavy",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.31,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 769490,
+      "ink_goosie": 754140,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 36.25,
+      "structure_diag": "",
+      "url": "https://www.baomoi.com/",
+      "worst_iou": 0.422
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 2.24,
+      "doc_height": null,
+      "expect": "tables",
+      "fetch_error": "",
+      "goosie_diag": "goosie: goosie: build session: CSS numeric value outside safe geometry range",
+      "goosie_rc": 1,
+      "goosie_secs": 0.56,
+      "label": "ADMISSION_CAPPED",
+      "maybe_partial": false,
+      "notes": [
+        "rc=1",
+        "goosie: goosie: build session: CSS numeric value outside safe geometry range"
+      ],
+      "structure_diag": "goosie: goosie: build session: CSS numeric value outside safe geometry range\n",
+      "url": "https://cafef.vn/"
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.04,
+      "doc_height": null,
+      "expect": "js-revealed",
+      "fetch_error": "Error: Page.goto: net::ERR_CONNECTION_REFUSED at https://www.bbc.com/news\nCall log:\n  - navigating to \"https://www.bbc.com/news\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: goosie: fetch https://www.bbc.com/news: net: fetch https://www.bbc.com/news: Get \"https://www.bbc.com/news\": dial tcp [::1]:443: connect: connection refused",
+      "goosie_rc": 1,
+      "goosie_secs": 0.06,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "notes": [
+        "Error: Page.goto: net::ERR_CONNECTION_REFUSED at https://www.bbc.com/news\nCall log:\n  - navigating to \"https://www.bbc.com/news\", waiting until \"load\"\n"
+      ],
+      "structure_diag": "goosie: goosie: fetch https://www.bbc.com/news: net: fetch https://www.bbc.com/news: Get \"https://www.bbc.com/news\": dial tcp [::1]:443: connect: connection refused\n",
+      "url": "https://www.bbc.com/news"
+    },
+    {
+      "blank_bands": [
+        [
+          142,
+          174
+        ],
+        [
+          192,
+          214
+        ],
+        [
+          229,
+          244
+        ],
+        [
+          253,
+          266
+        ],
+        [
+          976,
+          1005
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 0.57,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.22,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15770,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.89,
+      "structure_diag": "",
+      "url": "https://apnews.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          124,
+          141
+        ],
+        [
+          150,
+          171
+        ],
+        [
+          222,
+          369
+        ],
+        [
+          403,
+          416
+        ],
+        [
+          432,
+          442
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 2.17,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.51,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 68073,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.91,
+      "structure_diag": "",
+      "url": "https://www.nytimes.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.24,
+      "doc_height": 8654,
+      "expect": "js-revealed",
+      "fetch_error": "Error: Page.goto: net::ERR_HTTP2_PROTOCOL_ERROR at https://www.washingtonpost.com/\nCall log:\n  - navigating to \"https://www.washingtonpost.com/\", waiting until \"load\"\n",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.74,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "notes": [
+        "Error: Page.goto: net::ERR_HTTP2_PROTOCOL_ERROR at https://www.washingtonpost.com/\nCall log:\n  - navigating to \"https://www.washingtonpost.com/\", waiting until \"load\"\n"
+      ],
+      "structure_diag": "",
+      "url": "https://www.washingtonpost.com/"
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 30.0,
+      "doc_height": 36503,
+      "expect": "js-revealed",
+      "fetch_error": "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://edition.cnn.com/\", waiting until \"load\"\n",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.22,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "notes": [
+        "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://edition.cnn.com/\", waiting until \"load\"\n"
+      ],
+      "structure_diag": "",
+      "url": "https://edition.cnn.com/"
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.24,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.267,
+      "doc_height": 9433,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.46,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 7031,
+      "ink_goosie": 24689,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "coverage 0.267 < 0.6"
+      ],
+      "pct_exact": 97.87,
+      "structure_diag": "",
+      "url": "https://www.usatoday.com/",
+      "worst_iou": 0.097
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 8.44,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.908,
+      "doc_height": 151903,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 6.52,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 346478,
+      "ink_goosie": 849538,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 28.47,
+      "structure_diag": "",
+      "url": "https://www.straitstimes.com/",
+      "worst_iou": 0.144
+    },
+    {
+      "blank_bands": [
+        [
+          138,
+          174
+        ],
+        [
+          192,
+          214
+        ],
+        [
+          229,
+          244
+        ],
+        [
+          253,
+          266
+        ],
+        [
+          976,
+          1005
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 0.74,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.36,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 17751,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.75,
+      "structure_diag": "",
+      "url": "https://www.japantimes.co.jp/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          138,
+          158
+        ],
+        [
+          447,
+          460
+        ],
+        [
+          477,
+          554
+        ],
+        [
+          577,
+          590
+        ],
+        [
+          607,
+          618
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 1.01,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.47,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 13075,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 99.11,
+      "structure_diag": "",
+      "url": "https://www.reuters.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.67,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.013,
+      "doc_height": 38493,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.25,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 863470,
+      "ink_goosie": 885091,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [],
+      "pct_exact": 67.96,
+      "structure_diag": "",
+      "url": "https://www.theguardian.com/international",
+      "worst_iou": 0.01
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 30.0,
+      "doc_height": 30362,
+      "expect": "static",
+      "fetch_error": "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://www.aljazeera.com/\", waiting until \"load\"\n",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 7.66,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "notes": [
+        "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://www.aljazeera.com/\", waiting until \"load\"\n"
+      ],
+      "structure_diag": "",
+      "url": "https://www.aljazeera.com/"
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 1.1,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.093,
+      "doc_height": 23859,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.45,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1019698,
+      "ink_goosie": 1306662,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 18.84,
+      "structure_diag": "",
+      "url": "https://www.dw.com/en/top-stories/s-9097",
+      "worst_iou": 0.26
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 1.46,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.428,
+      "doc_height": 13132,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.55,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 796288,
+      "ink_goosie": 456177,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "coverage 0.428 < 0.6"
+      ],
+      "pct_exact": 72.5,
+      "structure_diag": "",
+      "url": "https://www.euronews.com/",
+      "worst_iou": 0.233
+    },
+    {
+      "blank_bands": [
+        [
+          94,
+          105
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 3.87,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.282,
+      "doc_height": 14375,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.19,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 337406,
+      "ink_goosie": 519921,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 56.06,
+      "structure_diag": "",
+      "url": "https://www.france24.com/en/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.02,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.218,
+      "doc_height": 4379,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.32,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 317685,
+      "ink_goosie": 74871,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 9,
+      "notes": [
+        "coverage 0.218 < 0.6"
+      ],
+      "pct_exact": 86.41,
+      "structure_diag": "",
+      "url": "https://developer.mozilla.org/en-US/docs/Learn",
+      "worst_iou": 0.117
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.25,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.742,
+      "doc_height": 4179,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.78,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 114540,
+      "ink_goosie": 101203,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 13,
+      "notes": [],
+      "pct_exact": 88.0,
+      "structure_diag": "",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS",
+      "worst_iou": 0.019
+    },
+    {
+      "blank_bands": [
+        [
+          530,
+          550
+        ],
+        [
+          570,
+          586
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.28,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.574,
+      "doc_height": 10897,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.33,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 94591,
+      "ink_goosie": 65663,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 12,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 91.84,
+      "structure_diag": "",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.38,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.856,
+      "doc_height": 1901,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.52,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 371441,
+      "ink_goosie": 318012,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [],
+      "pct_exact": 90.02,
+      "structure_diag": "",
+      "url": "https://docs.python.org/3/",
+      "worst_iou": 0.247
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.34,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.851,
+      "doc_height": 101855,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.99,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 466180,
+      "ink_goosie": 396189,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [],
+      "pct_exact": 82.96,
+      "structure_diag": "",
+      "url": "https://docs.python.org/3/library/os.html",
+      "worst_iou": 0.325
+    },
+    {
+      "blank_bands": [
+        [
+          50,
+          68
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.24,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.848,
+      "doc_height": 4919,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.09,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 454246,
+      "ink_goosie": 385999,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 3,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 80.83,
+      "structure_diag": "",
+      "url": "https://docs.python.org/3/tutorial/index.html",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          199,
+          212
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 1.39,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.804,
+      "doc_height": 43005,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.22,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 198423,
+      "ink_goosie": 621099,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 15,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 46.55,
+      "structure_diag": "",
+      "url": "https://go.dev/doc/effective_go",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          174,
+          187
+        ],
+        [
+          375,
+          386
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 1.04,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.268,
+      "doc_height": 93812,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.7,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 215140,
+      "ink_goosie": 607890,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 15,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 47.06,
+      "structure_diag": "",
+      "url": "https://go.dev/ref/spec",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          540,
+          555
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 2.14,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.36,
+      "doc_height": 335931,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.25,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 192026,
+      "ink_goosie": 86439,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 16,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 87.71,
+      "structure_diag": "",
+      "url": "https://pkg.go.dev/net/http",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.52,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.787,
+      "doc_height": 3662,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.49,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 121692,
+      "ink_goosie": 95814,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 89.57,
+      "structure_diag": "",
+      "url": "https://doc.rust-lang.org/std/",
+      "worst_iou": 0.567
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.7,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.669,
+      "doc_height": 4251,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.0,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 98524,
+      "ink_goosie": 80197,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 17,
+      "notes": [],
+      "pct_exact": 92.99,
+      "structure_diag": "",
+      "url": "https://man7.org/linux/man-pages/man2/write.2.html",
+      "worst_iou": 0.025
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.275,
+      "doc_height": 85,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.23,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 5079,
+      "ink_goosie": 2195,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "coverage 0.275 < 0.6"
+      ],
+      "pct_exact": 99.61,
+      "structure_diag": "",
+      "url": "https://docs.kernel.org/latest/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          204,
+          220
+        ],
+        [
+          558,
+          572
+        ],
+        [
+          587,
+          631
+        ],
+        [
+          646,
+          657
+        ],
+        [
+          676,
+          690
+        ],
+        [
+          705,
+          719
+        ],
+        [
+          734,
+          745
+        ],
+        [
+          764,
+          775
+        ],
+        [
+          785,
+          796
+        ],
+        [
+          814,
+          828
+        ],
+        [
+          844,
+          858
+        ],
+        [
+          873,
+          905
+        ],
+        [
+          923,
+          955
+        ],
+        [
+          974,
+          1009
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.27,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.572,
+      "doc_height": 1024,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.49,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 146074,
+      "ink_goosie": 102826,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 14,
+      "n_reference_bands": 24,
+      "notes": [
+        "14 empty reference band(s)"
+      ],
+      "pct_exact": 91.42,
+      "structure_diag": "",
+      "url": "https://doc.rust-lang.org/book/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.88,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.002,
+      "doc_height": 1026,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.53,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1308264,
+      "ink_goosie": 1310720,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 28.83,
+      "structure_diag": "",
+      "url": "https://www.php.net/docs.php",
+      "worst_iou": 1.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 2.68,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.656,
+      "doc_height": 18393,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.5,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 489146,
+      "ink_goosie": 320878,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 83.37,
+      "structure_diag": "",
+      "url": "https://www.typescriptlang.org/docs/handbook/intro.html",
+      "worst_iou": 0.782
+    },
+    {
+      "blank_bands": [
+        [
+          178,
+          188
+        ],
+        [
+          196,
+          215
+        ],
+        [
+          224,
+          248
+        ],
+        [
+          269,
+          572
+        ],
+        [
+          603,
+          630
+        ],
+        [
+          665,
+          681
+        ],
+        [
+          695,
+          711
+        ],
+        [
+          741,
+          757
+        ],
+        [
+          808,
+          961
+        ],
+        [
+          988,
+          1007
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.78,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.004,
+      "doc_height": 84927,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.15,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 105360,
+      "ink_goosie": 6141,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 10,
+      "n_reference_bands": 12,
+      "notes": [
+        "10 empty reference band(s)"
+      ],
+      "pct_exact": 95.96,
+      "structure_diag": "",
+      "url": "https://react.dev/learn",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.3,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.4,
+      "doc_height": 8500,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.67,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 174222,
+      "ink_goosie": 250034,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [],
+      "pct_exact": 87.87,
+      "structure_diag": "",
+      "url": "https://vuejs.org/guide/introduction.html",
+      "worst_iou": 0.154
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.41,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.487,
+      "doc_height": 4984,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.95,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 180622,
+      "ink_goosie": 96716,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [
+        "coverage 0.487 < 0.6"
+      ],
+      "pct_exact": 82.38,
+      "structure_diag": "",
+      "url": "https://getbootstrap.com/docs/5.3/getting-started/introduction/",
+      "worst_iou": 0.012
+    },
+    {
+      "blank_bands": [
+        [
+          98,
+          119
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 0.77,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.871,
+      "doc_height": 23269,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.96,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 216818,
+      "ink_goosie": 215401,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 71.04,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Goat",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.907,
+      "doc_height": 9330,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.29,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 149077,
+      "ink_goosie": 184391,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 10,
+      "notes": [],
+      "pct_exact": 80.18,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Web_browser",
+      "worst_iou": 0.022
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.37,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.829,
+      "doc_height": 67311,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.37,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 184536,
+      "ink_goosie": 379893,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 66.32,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Cuneiform",
+      "worst_iou": 0.015
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.5,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.547,
+      "doc_height": 62065,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.05,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 185905,
+      "ink_goosie": 316816,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [],
+      "pct_exact": 69.55,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Vietnam",
+      "worst_iou": 0.001
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.88,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.738,
+      "doc_height": 1024,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.01,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 82695,
+      "ink_goosie": 72887,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [],
+      "pct_exact": 90.87,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/List_of_Languages_by_Total_Number_of_Speakers",
+      "worst_iou": 0.021
+    },
+    {
+      "blank_bands": [
+        [
+          682,
+          725
+        ],
+        [
+          897,
+          913
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 0.59,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.423,
+      "doc_height": 6665,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.98,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 108622,
+      "ink_goosie": 97090,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 18,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 86.47,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Help:Contents",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.83,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.921,
+      "doc_height": 62641,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.7,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 180227,
+      "ink_goosie": 404191,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 65.97,
+      "structure_diag": "",
+      "url": "https://vi.wikipedia.org/wiki/Vi%E1%BB%87t_Nam",
+      "worst_iou": 0.01
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.91,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.725,
+      "doc_height": 75818,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.24,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 243074,
+      "ink_goosie": 203185,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [],
+      "pct_exact": 74.21,
+      "structure_diag": "",
+      "url": "https://de.wikipedia.org/wiki/Deutschland",
+      "worst_iou": 0.009
+    },
+    {
+      "blank_bands": [
+        [
+          222,
+          243
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 1.0,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.658,
+      "doc_height": 74829,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 5.11,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 253576,
+      "ink_goosie": 183582,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 6,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 74.91,
+      "structure_diag": "",
+      "url": "https://fr.wikipedia.org/wiki/France",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.59,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.036,
+      "doc_height": 42622,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.39,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 176375,
+      "ink_goosie": 218449,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [],
+      "pct_exact": 75.93,
+      "structure_diag": "",
+      "url": "https://ja.wikipedia.org/wiki/%E6%97%A5%E6%9C%AC",
+      "worst_iou": 0.176
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 1.03,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.369,
+      "doc_height": 34818,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.32,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 252822,
+      "ink_goosie": 388787,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [],
+      "pct_exact": 59.04,
+      "structure_diag": "",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          98,
+          119
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 1.03,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.891,
+      "doc_height": 65870,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.43,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 265915,
+      "ink_goosie": 254043,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 67.45,
+      "structure_diag": "",
+      "url": "https://ru.wikipedia.org/wiki/%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          992,
+          1008
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 0.41,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.496,
+      "doc_height": 12527,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.95,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 86085,
+      "ink_goosie": 85601,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 21,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 89.05,
+      "structure_diag": "",
+      "url": "https://en.wiktionary.org/wiki/example",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.78,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.323,
+      "doc_height": 23460,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.03,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 171987,
+      "ink_goosie": 253850,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 74.7,
+      "structure_diag": "",
+      "url": "https://simple.wikipedia.org/wiki/United_States",
+      "worst_iou": 0.015
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 0.5,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.572,
+      "doc_height": 2233,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.97,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 94817,
+      "ink_goosie": 1228884,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [],
+      "pct_exact": 6.39,
+      "structure_diag": "",
+      "url": "https://www.ebay.com/",
+      "worst_iou": 0.578
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 2.33,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.244,
+      "doc_height": 4368,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.05,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 685597,
+      "ink_goosie": 1094504,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 8,
+      "notes": [],
+      "pct_exact": 49.12,
+      "structure_diag": "",
+      "url": "https://www.walmart.com/",
+      "worst_iou": 0.096
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 28.67,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.013,
+      "doc_height": 1024,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.66,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1281672,
+      "ink_goosie": 1298077,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 93.25,
+      "structure_diag": "",
+      "url": "https://www.bestbuy.com/",
+      "worst_iou": 0.994
+    },
+    {
+      "blank_bands": [
+        [
+          56,
+          128
+        ],
+        [
+          256,
+          276
+        ],
+        [
+          565,
+          578
+        ],
+        [
+          595,
+          672
+        ],
+        [
+          695,
+          708
+        ],
+        [
+          725,
+          736
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 1.34,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.38,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 16500,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 6,
+      "n_reference_bands": 6,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.86,
+      "structure_diag": "",
+      "url": "https://www.etsy.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          138,
+          175
+        ],
+        [
+          192,
+          214
+        ],
+        [
+          229,
+          244
+        ],
+        [
+          253,
+          266
+        ],
+        [
+          976,
+          1005
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.56,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.27,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 17471,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.77,
+      "structure_diag": "",
+      "url": "https://www.newegg.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 4.55,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.61,
+      "doc_height": 9120,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.31,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1141209,
+      "ink_goosie": 696328,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 0.24,
+      "structure_diag": "",
+      "url": "https://www.target.com/",
+      "worst_iou": 0.584
+    },
+    {
+      "blank_bands": [
+        [
+          82,
+          98
+        ],
+        [
+          285,
+          328
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.81,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.705,
+      "doc_height": 19019,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.24,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 450976,
+      "ink_goosie": 502923,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 7,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 75.47,
+      "structure_diag": "",
+      "url": "https://www.apple.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 1.38,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.424,
+      "doc_height": 23989,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.03,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 136670,
+      "ink_goosie": 1217424,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 68.03,
+      "structure_diag": "",
+      "url": "https://www.nike.com/",
+      "worst_iou": 0.142
+    },
+    {
+      "blank_bands": [
+        [
+          102,
+          114
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.3,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.078,
+      "doc_height": 144,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.14,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 9088,
+      "ink_goosie": 8036,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 98.86,
+      "structure_diag": "",
+      "url": "https://www.uniqlo.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          14,
+          37
+        ],
+        [
+          68,
+          83
+        ],
+        [
+          102,
+          114
+        ],
+        [
+          136,
+          151
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.97,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.2,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 9028,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 4,
+      "n_reference_bands": 4,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 99.38,
+      "structure_diag": "",
+      "url": "https://www.zara.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.61,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.834,
+      "doc_height": 1870,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.84,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15188,
+      "ink_goosie": 1307000,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 0.63,
+      "structure_diag": "",
+      "url": "https://www.w3.org/Style/CSS/",
+      "worst_iou": 0.593
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.77,
+      "doc_height": 9438,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.74,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15192,
+      "ink_goosie": 513009,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 60.54,
+      "structure_diag": "",
+      "url": "https://www.w3.org/MarkUp/",
+      "worst_iou": 0.001
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.174,
+      "doc_height": 67861,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.06,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15201,
+      "ink_goosie": 104071,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "coverage 0.174 < 0.6"
+      ],
+      "pct_exact": 91.79,
+      "structure_diag": "",
+      "url": "https://www.w3.org/TR/css-syntax-3/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          253,
+          266
+        ]
+      ],
+      "category": "web-standards",
+      "chromium_secs": 0.3,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.241,
+      "doc_height": 77511,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.16,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15177,
+      "ink_goosie": 97649,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 5,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 92.19,
+      "structure_diag": "",
+      "url": "https://www.w3.org/TR/selectors-4/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          253,
+          266
+        ]
+      ],
+      "category": "web-standards",
+      "chromium_secs": 0.3,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.161,
+      "doc_height": 74060,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.02,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15191,
+      "ink_goosie": 103729,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 5,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 91.74,
+      "structure_diag": "",
+      "url": "https://www.w3.org/TR/css-ui-4/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 3.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.937,
+      "doc_height": 26206,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.73,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 950301,
+      "ink_goosie": 890052,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 32.25,
+      "structure_diag": "",
+      "url": "https://css-tricks.com/snippets/css/complete-guide-grid/",
+      "worst_iou": 0.885
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 2.71,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.998,
+      "doc_height": 2479,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.44,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1306791,
+      "ink_goosie": 1304316,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 48.89,
+      "structure_diag": "",
+      "url": "https://caniuse.com/css-grid",
+      "worst_iou": 1.0
+    },
+    {
+      "blank_bands": [
+        [
+          60,
+          155
+        ],
+        [
+          313,
+          358
+        ]
+      ],
+      "category": "web-standards",
+      "chromium_secs": 1.93,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.866,
+      "doc_height": 2293,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.18,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 98275,
+      "ink_goosie": 88672,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 19,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 93.24,
+      "structure_diag": "",
+      "url": "https://htmldog.com/guides/html/beginner/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.43,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.323,
+      "doc_height": 2101,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.71,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 16287,
+      "ink_goosie": 1132173,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 83.97,
+      "structure_diag": "",
+      "url": "https://validator.w3.org/",
+      "worst_iou": 0.227
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 2.36,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.978,
+      "doc_height": 1783,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.59,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 755020,
+      "ink_goosie": 738632,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 68.36,
+      "structure_diag": "",
+      "url": "https://www.csszengarden.com/",
+      "worst_iou": 0.951
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 0.63,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.397,
+      "doc_height": 6900,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.84,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 952349,
+      "ink_goosie": 383855,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.397 < 0.6"
+      ],
+      "pct_exact": 33.67,
+      "structure_diag": "",
+      "url": "https://www.gov.uk/",
+      "worst_iou": 0.106
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 2.86,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.245,
+      "doc_height": 4689,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 5.25,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 851476,
+      "ink_goosie": 1143350,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [],
+      "pct_exact": 33.62,
+      "structure_diag": "",
+      "url": "https://www.usa.gov/",
+      "worst_iou": 0.186
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 1.91,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.96,
+      "doc_height": 11093,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.84,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1033728,
+      "ink_goosie": 1011164,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [],
+      "pct_exact": 45.1,
+      "structure_diag": "",
+      "url": "https://www.nasa.gov/",
+      "worst_iou": 0.406
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 6.13,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.856,
+      "doc_height": 4844,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 6.65,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 890589,
+      "ink_goosie": 762080,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 49.99,
+      "structure_diag": "",
+      "url": "https://www.noaa.gov/",
+      "worst_iou": 0.884
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 1.18,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.14,
+      "doc_height": 1352,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.23,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 326977,
+      "ink_goosie": 506425,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 10,
+      "notes": [],
+      "pct_exact": 89.59,
+      "structure_diag": "",
+      "url": "https://www.census.gov/",
+      "worst_iou": 0.029
+    },
+    {
+      "blank_bands": [
+        [
+          15,
+          125
+        ],
+        [
+          162,
+          183
+        ],
+        [
+          218,
+          259
+        ],
+        [
+          274,
+          371
+        ],
+        [
+          397,
+          1023
+        ]
+      ],
+      "category": "gov-org",
+      "chromium_secs": 3.01,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.04,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 502786,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 63.35,
+      "structure_diag": "",
+      "url": "https://www.gov.vn/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 0.05,
+      "doc_height": null,
+      "expect": "static",
+      "fetch_error": "Error: Page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.moe.gov.vn/\nCall log:\n  - navigating to \"https://www.moe.gov.vn/\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: goosie: fetch https://www.moe.gov.vn/: net: fetch https://www.moe.gov.vn/: Get \"https://www.moe.gov.vn/\": dial tcp: lookup www.moe.gov.vn: no such host",
+      "goosie_rc": 1,
+      "goosie_secs": 0.08,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "notes": [
+        "Error: Page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.moe.gov.vn/\nCall log:\n  - navigating to \"https://www.moe.gov.vn/\", waiting until \"load\"\n"
+      ],
+      "structure_diag": "goosie: goosie: fetch https://www.moe.gov.vn/: net: fetch https://www.moe.gov.vn/: Get \"https://www.moe.gov.vn/\": dial tcp: lookup www.moe.gov.vn: no such host\n",
+      "url": "https://www.moe.gov.vn/"
+    },
+    {
+      "blank_bands": [
+        [
+          204,
+          218
+        ]
+      ],
+      "category": "gov-org",
+      "chromium_secs": 1.62,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.669,
+      "doc_height": 6133,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.95,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 634123,
+      "ink_goosie": 573217,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 7,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 63.97,
+      "structure_diag": "",
+      "url": "https://www.icann.org/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          958,
+          972
+        ]
+      ],
+      "category": "gov-org",
+      "chromium_secs": 1.34,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.797,
+      "doc_height": 161879,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.58,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 90918,
+      "ink_goosie": 96721,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 25,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 89.21,
+      "structure_diag": "",
+      "url": "https://rfc-editor.org/rfc/rfc9110.html",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 2.2,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.42,
+      "doc_height": 94091,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.99,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 141208,
+      "ink_goosie": 60397,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "coverage 0.42 < 0.6"
+      ],
+      "pct_exact": 87.28,
+      "structure_diag": "",
+      "url": "https://datatracker.ietf.org/doc/html/rfc9114",
+      "worst_iou": 0.192
+    },
+    {
+      "blank_bands": [
+        [
+          68,
+          83
+        ]
+      ],
+      "category": "minimal-legacy",
+      "chromium_secs": 1.11,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.663,
+      "doc_height": 470,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.95,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 38501,
+      "ink_goosie": 35855,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 94.98,
+      "structure_diag": "",
+      "url": "https://info.cern.ch/hypertext/WWW/TheProject.html",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 2.24,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.0,
+      "doc_height": 781,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.43,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1310503,
+      "ink_goosie": 1310714,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 83.6,
+      "structure_diag": "",
+      "url": "https://www.spacejam.com/1996/",
+      "worst_iou": 1.0
+    },
+    {
+      "blank_bands": [
+        [
+          380,
+          403
+        ],
+        [
+          423,
+          456
+        ],
+        [
+          476,
+          515
+        ]
+      ],
+      "category": "minimal-legacy",
+      "chromium_secs": 0.79,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.001,
+      "doc_height": 2033,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.84,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 49083,
+      "ink_goosie": 408,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 3,
+      "n_reference_bands": 4,
+      "notes": [
+        "3 empty reference band(s)"
+      ],
+      "pct_exact": 96.76,
+      "structure_diag": "",
+      "url": "https://old.reddit.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 2.08,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.002,
+      "doc_height": 1024,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.21,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1193862,
+      "ink_goosie": 1196746,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 96.09,
+      "structure_diag": "",
+      "url": "https://whatwg.org/",
+      "worst_iou": 0.999
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 0.94,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.738,
+      "doc_height": 2600,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.05,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 107730,
+      "ink_goosie": 81456,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 27,
+      "notes": [],
+      "pct_exact": 91.89,
+      "structure_diag": "",
+      "url": "https://commonmark.org/",
+      "worst_iou": 0.518
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 0.28,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.0,
+      "doc_height": 873,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.27,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1310720,
+      "ink_goosie": 1310720,
+      "label": "OK",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [],
+      "pct_exact": 96.5,
+      "structure_diag": "",
+      "url": "https://example.com/",
+      "worst_iou": 1.0
+    }
+  ],
+  "run_id": "2026-10-25T1920Z-eef92ae7",
+  "thresholds": {
+    "coverage_ok": 0.6,
+    "max_blank_bands": 0,
+    "min_ink": 200,
+    "min_scored": 75,
+    "pixel_threshold": 30
+  },
+  "tool": "testdata/live-parity.py"
+}
