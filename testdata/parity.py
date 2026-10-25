@@ -54,7 +54,9 @@ PASS_AT = 90.0
 # as a healthy 100%.  test/gatecheck/parity_harness_test.go counts the real HTML
 # files and fails if the count falls below this exact line, so the two cannot
 # drift apart - and adding a fixture must never red that test by itself.
-MIN_SCORED_FIXTURES = 84
+# 85: css-features/11-digit-leading-custom-property.html (TASK-040,
+# GOOSIE-LIVE-002) - a legal --8e8e8e name that used to cost the whole render.
+MIN_SCORED_FIXTURES = 85
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

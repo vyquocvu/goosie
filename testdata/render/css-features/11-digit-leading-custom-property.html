@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Digit-leading custom property names (GOOSIE-LIVE-002)</title>
+    <style>
+        /* The defect this fixture exists to keep dead. A custom property name
+           may begin with digits after the two hyphens, and `--8e8e8e` - a colour
+           spelled as a name, the form cafef.vn writes - is one ident, not a
+           number. Goosie's tokenizer used to hand the engine Dimension("-8e8",
+           unit "e8e") for it, eight hundred million CSS pixels, and the CSS
+           admission guard refused the whole document: rc 1, no render at all.
+           Every bar below is painted from one of those names. If the token comes
+           back as a number, the guard fires, this page never renders, and the
+           parity row disappears - which the harness reports as MISSING, not as
+           a smaller corpus. */
+        :root {
+            --8e8e8e: #8e8e8e;
+            --666666: #666666;
+            --1e9e9: #c0392b;
+            --1e5x: #2e86c1;
+            --5px: #27ae60;
+            --a-8e8e8: #d35400;
+            --abc8e8e8: #8e44ad;
+            --text: #222222;
+        }
+
+        body { margin: 20px; font-family: sans-serif; color: var(--text); }
+        .label { font: 12px monospace; margin: 0 0 2px 0; }
+
+        /* The shape the live page used: a digit-led name referenced through
+           var(), with a fallback that is itself a colour. */
+        .box .time { color: var(--8e8e8e, #8e8e8e); font-size: 12px; }
+
+        .bar { height: 22px; margin: 0 0 10px 0; }
+        .grey { background: var(--8e8e8e); }
+        .darkgrey { background: var(--666666); }
+        .red { background: var(--1e9e9); }
+        .blue { background: var(--1e5x); }
+        .green { background: var(--5px); }
+        .orange { background: var(--a-8e8e8); }
+        .purple { background: var(--abc8e8e8); }
+
+        /* Fallbacks and a name that is never defined: the value after the comma
+           is a hash token, so nothing here is a length either. */
+        .fallback { background: var(--undefined-1e9e9, #16a085); }
+        .row { display: flex; }
+        .cell { flex: 1; height: 22px; }
+        .ink { color: var(--8e8e8e); }
+        .rule { border-top: 2px solid var(--a-8e8e8); margin: 14px 0; }
+    </style>
+</head>
+<body>
+    <p class="label">seven custom property names that begin with a digit, each painted as one bar</p>
+    <div class="bar grey"></div>
+    <div class="bar darkgrey"></div>
+    <div class="bar red"></div>
+    <div class="bar blue"></div>
+    <div class="bar green"></div>
+    <div class="bar orange"></div>
+    <div class="bar purple"></div>
+    <div class="bar fallback"></div>
+
+    <div class="rule"></div>
+    <div class="row">
+        <div class="cell grey"></div>
+        <div class="cell blue"></div>
+        <div class="cell green"></div>
+        <div class="cell orange"></div>
+    </div>
+
+    <div class="box">
+        <p class="time">10:24 &mdash; the live form: colour from var(--8e8e8e, #8e8e8e)</p>
+    </div>
+    <p class="label ink">#8e8e8e written as a name is still text, not geometry</p>
+
+    <div class="rule"></div>
+    <p class="label">below the fold: the sheet has to survive to here for these bars to exist</p>
+    <div class="bar red"></div>
+    <div class="bar purple"></div>
+    <div class="bar darkgrey"></div>
+</body>
+</html>

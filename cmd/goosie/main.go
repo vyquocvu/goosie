@@ -707,13 +707,36 @@ func (f *framePath) openWindow() error {
 	return nil
 }
 
+// programLabel is the prefix this command puts on every line it writes to
+// stderr. The wrappers inside cmd/goosie carry it too, so printing one of them
+// verbatim put it on the line twice: measured on a document whose CSS width is
+// `8e8e8px`, the refusal arrived as
+//
+//	goosie: goosie: build session: CSS numeric value outside safe geometry range
+//
+// which reads like two programs reporting and makes the useful half stop being
+// the start of the line.
+const programLabel = "goosie: "
+
+// programErrorLine returns the line main prints for err: the label exactly once,
+// then whatever context the wrappers hold. Repeated wrapping can stack the label
+// more than once, so it is dropped as often as it appears at the front; a label
+// anywhere else in the message is someone else's context and stays.
+func programErrorLine(err error) string {
+	msg := err.Error()
+	for strings.HasPrefix(msg, programLabel) {
+		msg = strings.TrimPrefix(msg, programLabel)
+	}
+	return programLabel + msg
+}
+
 // main pins this goroutine to the process's main thread before anything can open a
 // window, because AppKit requires the main thread and says so by aborting the process
 // rather than by returning an error.
 func main() {
 	runtime.LockOSThread()
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "goosie:", err)
+		fmt.Fprintln(os.Stderr, programErrorLine(err))
 		if errors.Is(err, errUsage) {
 			os.Exit(2)
 		}
@@ -784,7 +807,7 @@ func run(args []string) error {
 	defer func() { _ = f.pool.Close() }()
 	defer func() {
 		if err := f.client.Close(); err != nil {
-			fmt.Fprintln(os.Stderr, "goosie:", err)
+			fmt.Fprintln(os.Stderr, programErrorLine(err))
 		}
 	}()
 

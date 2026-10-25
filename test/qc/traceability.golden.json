@@ -1020,6 +1020,21 @@
     "enforced": false
   },
   {
+    "id": "BR-192",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/hyphen_ident_test.go:TestHyphenTokenKind",
+      "test/css/hyphen_ident_test.go:TestTokenSpansCoverInputExactly",
+      "test/entrypoints/geometry_refusal_line_test.go:TestGoosieDigitLeadingCustomPropertyIsAdmitted"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
@@ -1478,9 +1493,12 @@
     ],
     "status": "PASS",
     "tests": [
+      "cmd/goosie/error_prefix_test.go:TestProgramErrorLineCarriesOneLabel",
+      "cmd/goosie/error_prefix_test.go:TestRunFailureLineFromTheRealChain",
       "cmd/goosie/script_errors_test.go:TestReportRefusedDocumentNamesTheStatusAndTheBody",
       "cmd/goosie/script_errors_test.go:TestReportScriptErrorsIsSilentOnACleanDocument",
       "cmd/goosie/script_errors_test.go:TestReportScriptErrorsNamesTheFailingScript",
+      "test/entrypoints/geometry_refusal_line_test.go:TestGoosieGeometryRefusalLineIsWellFormed",
       "test/entrypoints/refused_document_report_test.go:TestGoosieScreenshotReportsARefusedDocument",
       "test/entrypoints/refused_document_report_test.go:TestGoosieScreenshotStaysSilentOnAnAcceptedDocument",
       "test/entrypoints/script_error_report_test.go:TestGoosieScreenshotReportsUncaughtScriptErrors",
@@ -1970,6 +1988,23 @@
     ],
     "status": "NOT RUN",
     "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-193",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/css_geometry_admission_test.go:TestDigitLeadingCustomPropertyPaints",
+      "test/engine/css_geometry_admission_test.go:TestDigitLeadingCustomPropertyRefusalMatrix",
+      "test/engine/css_geometry_admission_test.go:TestGeometryRefusalNamesEverything",
+      "test/engine/css_geometry_admission_test.go:TestMaxGeometryIsUnchanged",
+      "test/engine/css_geometry_admission_test.go:TestOversizedAppliedLengthIsRefused"
+    ],
     "enforced": false
   },
   {

@@ -223,12 +223,14 @@ func (b *cssBudget) check(src string, inline bool) error {
 				// Check if this is an overflow error (value too large for float64).
 				// Other parse errors are skipped and left to the CSS parser.
 				if strings.Contains(err.Error(), "out of range") {
-					return fmt.Errorf("CSS numeric value outside safe geometry range")
+					// No parsed value exists to report; NaN says that instead of
+					// inventing a zero the token never held.
+					return geometryRefusal(geometryBranchFloatOverflow, property, t.Value, t.Unit, math.NaN(), t.NumVal)
 				}
 				continue
 			}
 			if !finite(n) || !finite(t.NumVal) {
-				return fmt.Errorf("CSS numeric value outside safe geometry range")
+				return geometryRefusal(geometryBranchNonFinite, property, t.Value, t.Unit, n, t.NumVal)
 			}
 			// The magnitude cap is geometry protection, so it applies to
 			// dimensions and percentages - the things that become box sizes -
@@ -238,7 +240,7 @@ func (b *cssBudget) check(src string, inline bool) error {
 			// blanked the entire page.
 			if t.Type != css.TokenNumber && !isBorderRadiusProperty(property) &&
 				(math.Abs(n) > MaxGeometry || math.Abs(t.NumVal) > MaxGeometry) {
-				return fmt.Errorf("CSS numeric value outside safe geometry range")
+				return geometryRefusal(geometryBranchMagnitude, property, t.Value, t.Unit, n, t.NumVal)
 			}
 		}
 	}
@@ -249,6 +251,43 @@ func (b *cssBudget) check(src string, inline bool) error {
 		return fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
 	}
 	return nil
+}
+
+// The three geometry branches of the CSS admission guard used to answer with
+// one identical, content-free sentence, so a refusal reported from a live page
+// named neither the declaration blamed, nor the value that tripped, nor the
+// bound, nor which check fired - unlike "CSS declaration limit exceeded (%d)"
+// just below. geometryRefusal is the one place that states all four, and the
+// branch names are what a future bug report gets sorted by.
+const (
+	geometryBranchMagnitude     = "magnitude"
+	geometryBranchFloatOverflow = "float64-overflow"
+	geometryBranchNonFinite     = "non-finite"
+	// geometryMessageTokenLen bounds the raw token text the message quotes. The
+	// token comes from untrusted CSS, and the overflow branch fires precisely on
+	// the longest ones, so an unbounded quote would let a 4 MiB stylesheet put a
+	// 4 MiB line on stderr. %q keeps it on one line: control characters, escapes
+	// included, come back quoted rather than raw.
+	geometryMessageTokenLen = 64
+)
+
+// geometryRefusal explains a CSS numeric admission refusal. The leading phrase
+// is load-bearing and stays verbatim: testdata/live-parity.py classifies
+// ADMISSION_CAPPED by matching it.
+func geometryRefusal(branch, property, value, unit string, parsed, numVal float64) error {
+	return fmt.Errorf("CSS numeric value outside safe geometry range: property %q, value %q, unit %q, parsed %g, numval %g, limit %d CSS pixels, branch %s",
+		clipGeometryToken(property), clipGeometryToken(value), clipGeometryToken(unit),
+		parsed, numVal, MaxGeometry, branch)
+}
+
+// clipGeometryToken bounds one quoted fragment of a refusal message. It cuts on
+// bytes, which can split a multi-byte rune; %q then escapes the remainder rather
+// than emitting raw invalid UTF-8, so the line stays a single printable line.
+func clipGeometryToken(s string) string {
+	if len(s) <= geometryMessageTokenLen {
+		return s
+	}
+	return s[:geometryMessageTokenLen] + "..."
 }
 
 func cssPropertyAt(src string, offset int) string {
