@@ -63,6 +63,8 @@ func submittedValue(t *testing.T, s *engine.Session, formID, name string) string
 //	OPTION name=charcoal -> {"textContent":"\n    Charcoal\n  ","value":"Charcoal","label":"Charcoal"}
 //	FORMDATA -> [["charcoal","Charcoal"],...]
 //	ENCODED  -> "charcoal=Charcoal&..."
+//
+// qc:BR-104
 func TestSubmittedOptionValueStripsSurroundingWhitespace(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
 
@@ -91,6 +93,8 @@ func TestSubmittedOptionValueStripsSurroundingWhitespace(t *testing.T) {
 //
 //	OPTION name=vtabinside   -> {"textContent":"a\u000b\u000bb","value":"a\u000b\u000bb"}
 //	OPTION name=nbsp         -> {"textContent":"\u00a0nbsp edge\u00a0","value":"\u00a0nbsp edge\u00a0"}
+//
+// qc:BR-104
 func TestSubmittedOptionValueCollapsesInnerWhitespaceRuns(t *testing.T) {
 	cases := []struct {
 		name, body, want string
@@ -130,6 +134,7 @@ func TestSubmittedOptionValueCollapsesInnerWhitespaceRuns(t *testing.T) {
 // and an indented attribute keeps its indentation. A server that received
 // "pad me" instead of "  pad  me  " would be reading a value the author never
 // wrote.
+// qc:BR-106
 func TestOptionValueAttributeIsSubmittedVerbatim(t *testing.T) {
 	cases := []struct {
 		name, attr, want string
@@ -166,6 +171,7 @@ func TestOptionValueAttributeIsSubmittedVerbatim(t *testing.T) {
 //
 // Goosie submitted "a" here because SelectedOption returned at the first
 // `selected` it saw.
+// qc:BR-101
 func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 	html := `<html><body><form id="f"><select id="s" name="c">` +
 		`<option id="a" value="a" selected>A</option>` +
@@ -208,6 +214,8 @@ func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 //
 //	OPTION name=charcoal -> {"value":"Charcoal","label":"Charcoal"}
 //	INDENTED initial     -> {"selectedIndex":0,"value":"Charcoal","optionLabel":"Charcoal"}
+//
+// qc:BR-139
 func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
 	combo := axCombo(t, s, "s")
@@ -292,6 +300,7 @@ func axCombo(t *testing.T, s *engine.Session, id string) *ax.Node {
 // walks must all agree.
 //
 // INDENTED initial -> {"selectedIndex":0,"value":"Charcoal"}
+// qc:BR-101
 func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
 	sel := s.Doc.ElementByID("s")
@@ -348,6 +357,7 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 // Chromium: CLOSED two-selected after ArrowDown -> {"selectedIndex":1}.)
 // Stepping from the first authored selection would make the first key press
 // look dead, because the control already carries the last one's value.
+// qc:BR-101
 func TestMoveSelectStepsFromTheLastAuthoredSelection(t *testing.T) {
 	html := `<html><body style="margin: 0;"><select id="sel" name="opt">` +
 		`<option id="o1" value="1" selected>One</option>` +
