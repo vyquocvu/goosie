@@ -1126,12 +1126,12 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 		}
 	case key == '=' || key == '+':
 		if cw.onZoom != nil {
-			cw.onZoom(0.1)
+			cw.onZoom(zoomStep)
 			return true
 		}
 	case key == '-':
 		if cw.onZoom != nil {
-			cw.onZoom(-0.1)
+			cw.onZoom(-zoomStep)
 			return true
 		}
 	case key == '0':
