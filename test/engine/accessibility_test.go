@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/ax"
+	"github.com/vyquocvu/goosie/internal/engine"
 )
 
 // axFind returns the first node in the tree with the given role and label.
@@ -218,5 +219,122 @@ func TestProgressBarAndMeterAccessibility(t *testing.T) {
 	}
 	if meterNode.Value != "0.6" {
 		t.Errorf("meterNode.Value = %q, want 0.6", meterNode.Value)
+	}
+}
+
+// qc:BR-139
+func TestAccessibilitySelectComboBoxAndOptions(t *testing.T) {
+	s := newFocusSession(t, `<html><body style="margin: 0;">
+<label for="sel">Choose a value</label>
+<select id="sel" name="choice">
+  <option value="first">First choice</option>
+  <option value="second" selected>Second choice</option>
+  <option>Third choice</option>
+</select></body></html>`)
+	tree := s.AccessibilityTree()
+	combo := axFind(tree, ax.RoleComboBox, "Choose a value")
+	if combo == nil || combo.ID != "sel" {
+		t.Fatalf("select combo box missing or has wrong ID: %+v", combo)
+	}
+	if combo.Value != "second" {
+		t.Fatalf("combo value = %q, want selected form value second", combo.Value)
+	}
+	if len(combo.Children) != 3 {
+		t.Fatalf("combo has %d option children, want 3: %+v", len(combo.Children), combo.Children)
+	}
+	selected := 0
+	for _, label := range []string{"First choice", "Second choice", "Third choice"} {
+		if option := axFind(combo.Children, ax.RoleOption, label); option == nil {
+			t.Errorf("option %q not found in combo children: %+v", label, combo.Children)
+		} else if label == "Second choice" {
+			if option.Value != "second" || !option.Selected {
+				t.Errorf("selected option = %+v, want value=second selected=true", option)
+			}
+		} else if label == "Third choice" && option.Value != "Third choice" {
+			t.Errorf("option without value attribute has value %q, want its text", option.Value)
+		}
+	}
+	for _, option := range combo.Children {
+		if option.Role == ax.RoleOption && option.Selected {
+			selected++
+		}
+	}
+	if selected != 1 {
+		t.Fatalf("selected options = %d, want exactly 1", selected)
+	}
+}
+
+func TestAccessibilitySelectDefaultsToFirstOption(t *testing.T) {
+	s := newFocusSession(t, `<html><body><select id="sel"><option value="alpha">Alpha</option><option value="beta">Beta</option></select></body></html>`)
+	tree := s.AccessibilityTree()
+	combo := axFind(tree, ax.RoleComboBox, "Alpha")
+	if combo == nil {
+		t.Fatalf("select combo box not found: %+v", tree)
+	}
+	if combo.Value != "alpha" {
+		t.Fatalf("combo value = %q, want first option alpha", combo.Value)
+	}
+	first := axFind(combo.Children, ax.RoleOption, "Alpha")
+	second := axFind(combo.Children, ax.RoleOption, "Beta")
+	if first == nil || !first.Selected || second == nil || second.Selected {
+		t.Fatalf("default selected state wrong: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestAccessibilityDisabledSelectAndOption(t *testing.T) {
+	s := newFocusSession(t, `<html><body><select id="sel" disabled><option value="x" disabled>Unavailable</option></select></body></html>`)
+	combo := axFind(s.AccessibilityTree(), ax.RoleComboBox, "Unavailable")
+	if combo == nil || !combo.Disabled {
+		t.Fatalf("disabled select node = %+v, want present and disabled", combo)
+	}
+	option := axFind(combo.Children, ax.RoleOption, "Unavailable")
+	if option == nil || !option.Disabled {
+		t.Fatalf("disabled option node = %+v, want present and disabled", option)
+	}
+}
+
+// qc:BR-139
+func TestAccessibilitySelectTracksMoveSelect(t *testing.T) {
+	s := newFocusSession(t, `<html><body><select id="sel"><option value="one" selected>One</option><option value="two">Two</option><option value="three">Three</option></select></body></html>`)
+	sel := s.Doc.ElementByID("sel")
+	if !s.FocusNode(sel) || !s.MoveSelect(engine.EditDown) {
+		t.Fatal("could not focus select and move to the next option")
+	}
+	combo := axFind(s.AccessibilityTree(), ax.RoleComboBox, "Two")
+	if combo == nil {
+		t.Fatalf("select combo box not found after MoveSelect: %+v", s.AccessibilityTree())
+	}
+	if combo.Value != "two" {
+		t.Fatalf("combo value after MoveSelect = %q, want two", combo.Value)
+	}
+	selected := 0
+	for _, option := range combo.Children {
+		if option.Selected {
+			selected++
+			if option.Label != "Two" || option.Value != "two" {
+				t.Fatalf("selected option after MoveSelect = %+v, want Two/two", option)
+			}
+		}
+	}
+	if selected != 1 {
+		t.Fatalf("selected option count after MoveSelect = %d, want 1", selected)
+	}
+}
+
+func TestAccessibilityEmptySelectHasNoOptions(t *testing.T) {
+	s := newFocusSession(t, `<html><body><select id="sel"></select></body></html>`)
+	flat := axFlatten(s.AccessibilityTree())
+	var combo *ax.Node
+	for i := range flat {
+		if flat[i].Role == ax.RoleComboBox && flat[i].ID == "sel" {
+			combo = &flat[i]
+			break
+		}
+	}
+	if combo == nil {
+		t.Fatal("empty select combo box missing")
+	}
+	if len(combo.Children) != 0 {
+		t.Fatalf("empty select has %d children, want none", len(combo.Children))
 	}
 }

@@ -401,7 +401,7 @@ func TestJourneySelectOptionChange(t *testing.T) {
 		return n != nil && n.Element() && n.Data == "select"
 	}
 
-	browser.clickElementByID(t, "sel")
+	browser.clickNode(t, "sel")
 	browser.waitFor(t, "select owns focus", focusOnSelect)
 
 	scrollAtFocus := browser.f.sched.Viewport().Offset.Y
