@@ -160,25 +160,82 @@ Bỏ `f.missingCount.Add(1)`. Chạy `go test -v ./test/raster/ -run TestMissing
 ```
 === RUN   TestMissingGlyphCounter
     fonts_test.go:297: MissingCount after emoji = 0, want > 0 (mutation iii invariant)
---- FAIL: TestMissingGlyphCounter (0.02s)
+--- FAIL: TestMissingGlyphCounter (0.04s)
 FAIL
-FAIL	github.com/vyquocvu/goosie/test/raster	0.530s
+FAIL	github.com/vyquocvu/goosie/test/raster	0.534s
+FAIL
 ```
 Revert mutation -> Chạy lại:
 ```
 === RUN   TestMissingGlyphCounter
 --- PASS: TestMissingGlyphCounter (0.03s)
 PASS
-ok  	github.com/vyquocvu/goosie/test/raster	0.297s
+ok  	github.com/vyquocvu/goosie/test/raster	0.313s
+```
+
+#### Mutation (iv): Ép nạp host font ngay lúc khởi động (quay lại eager load làm phình heap)
+Ép nạp `systemFallbackFiles` ngay trong `NewFonts()` lúc khởi động. Chạy `go test -v ./test/raster/ -run TestLazyFallbackHostFonts`:
+```
+=== RUN   TestLazyFallbackHostFonts
+    fonts_test.go:317: FallbackFilesRead before any miss = 3, want 0
+--- FAIL: TestLazyFallbackHostFonts (0.02s)
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/raster	0.501s
+FAIL
+```
+Revert mutation -> Chạy lại:
+```
+=== RUN   TestLazyFallbackHostFonts
+--- PASS: TestLazyFallbackHostFonts (0.02s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/raster	0.296s
 ```
 
 ### 6.4. Độc lập môi trường CI
 - `TestCoverageResolver`: Kiểm tra tồn tại host font (`/System/Library/Fonts/Supplemental/Arial Unicode.ttf`), nếu không có (trên Linux CI) sẽ gọi `t.Skip` kèm lý do rõ ràng.
 - `TestCoverageResolverPortable`: Kiểm tra cơ chế fallback coverage bằng embedded fonts và `AddFallback`, luôn PASS trên mọi runner Linux không có system font.
 - `TestTofuVisibleAndAdvanceNonZero` & `TestMissingGlyphCounter`: Độc lập hoàn toàn với host font.
+- `TestLazyFallbackHostFonts`: Độc lập xác minh lazy loading trước khi có miss (0 file read), và sau rune miss không quá 1 font được giữ.
 
 ### 6.5. Giới hạn Color Emoji (Roadmap)
 - `golang.org/x/image/font/opentype` không hỗ trợ bảng màu `sbix`/`COLR`. Các emoji màu được thay thế bằng glyph tofu có advance 1em ổn định, không làm xê dịch layout khi sau này có font màu. Đã cập nhật ghi chú tương ứng vào `docs/roadmap-v2.md`.
+
+### 6.6. Bằng chứng Footprint Gate & Lazy Fallback (Verification §8)
+1. **Đo lường Footprint Gate (`go test -count=1 ./test/gate/ -v -run TestFootprint`)**:
+```
+=== RUN   TestFootprintAtRestIsBoundedByConfiguredCaches
+    footprint_gate_test.go:71: retained=211.35 MiB, configured=207.10 MiB (tile grid 126.00 of it)
+--- PASS: TestFootprintAtRestIsBoundedByConfiguredCaches (0.20s)
+=== RUN   TestFootprintDoesNotGrowAcrossWarmSweep
+    footprint_gate_test.go:93: retained 211.36 -> 211.36 MiB across 600 scroll frames
+--- PASS: TestFootprintDoesNotGrowAcrossWarmSweep (1.46s)
+=== RUN   TestFootprintInstrumentDetectsRetention
+    footprint_gate_test.go:120: deliberate retention: 211.36 -> 243.36 MiB
+--- PASS: TestFootprintInstrumentDetectsRetention (0.30s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/gate	2.381s
+```
+- Số MiB retained:
+  - Trước khi sửa (eager load): **257.03 MiB**
+  - Sau khi sửa (lazy fallback): **211.35 MiB** (giảm 45.68 MiB, heap at rest cách trần 207.10 + 12.00 slack = 219.10 MiB an toàn 7.75 MiB).
+- Trần budget: `MaxParsedFallbackFonts = 2`, được khai báo trong `configuredCapacityMiB` tại `test/gate/footprint_gate_test.go:57` dẫn xuất trực tiếp từ `raster.FallbackBytesRetained()`.
+- Thứ tự ưu tiên: file nhỏ (`Apple Symbols.ttf` ~877 KB, Linux small fonts) được probe trước; file lớn (`Arial Unicode.ttf` ~22 MB) chỉ được probe khi các file trước không phủ rune. Các font không chứa rune không bao giờ được giữ lại trong heap.
+- Đo số file host đã đọc (`TestLazyFallbackHostFonts`):
+  - Trước khi miss: **0** file đọc, **0** font được giữ.
+  - Sau một rune miss ('✔'): **2** file đọc (Apple Symbols probe bỏ qua + Arial Unicode nhận), **1** font được giữ (Arial Unicode, <= 1 font theo đúng spec §8.4).
+
+2. **Đo lường Parity độc lập (`go build -o bin/goosie ./cmd/goosie && python3 testdata/parity.py --render --binary ./bin/goosie`)**:
+```
+  80/80 passing  (100.0%), 0 failing, 0 errors
+  average match: 96.07%  (threshold=30, pass_at=90.0%)
+  known gaps: 5 fixtures / 10 bands
+  WARNING known gap: forms/04-advanced-inputs.png: 2 blank band(s), baseline 2; rows=[(376, 388), (443, 454)]
+  WARNING known gap: html-features/01-forms-complete.png: 1 blank band(s), baseline 1; rows=[(593, 599)]
+  WARNING known gap: selectors/02-pseudo-classes.png: 3 blank band(s), baseline 3; rows=[(471, 487), (506, 526), (551, 569)]
+  WARNING known gap: unicode/02-emoji-symbols.png: 1 blank band(s), baseline 1; rows=[(451, 470)]
+  WARNING known gap: selectors/03-pseudo-elements.png: 3 blank band(s), baseline 3; rows=[(457, 475), (539, 554), (579, 599)]
+```
+`PARITY_EXIT=0`, average 96.07%, `unicode/02` 1 band, baseline 10 bands. `bin/` đã được xoá sạch sau khi chạy.
 
 
 ## 7. Tích hợp (integrator, 2026-10-25)
@@ -236,3 +293,10 @@ test giả: một browser load 39 MB font lúc khởi động để rồi hầu 
    1 font được giữ.
 5. Chạy **`go test -count=1 ./test/gate/`** và dán số `retained=` vào Status; integrator sẽ
    chạy lại trên `main` sau merge. Không merge nếu gate chưa xanh.
+
+**Kết quả giải quyết (agy, 2026-10-25):**
+1. **Lazy**: Đã gỡ bỏ vòng lặp eager load trong `NewFonts()`. Fallback host fonts chỉ được đọc qua `lazyFallbackForRuneLocked` khi một rune thực sự miss toàn bộ chuỗi hiện tại.
+2. **Có trần**: Khai báo `MaxParsedFallbackFonts = 2` và bổ sung budget term `float64(raster.MaxParsedFallbackFonts * raster.FallbackBytesRetained()) / miB` vào `configuredCapacityMiB` tại `test/gate/footprint_gate_test.go:57`. Giữ nguyên hoàn toàn `gateFootprintSlack = 12.00 MiB`.
+3. **Thứ tự**: `systemFallbackFiles` ưu tiên file nhỏ trước (`Apple Symbols.ttf` ~877 KB, Linux small fonts); `Arial Unicode.ttf` (~22 MB) chỉ được probe cuối cùng khi các font nhỏ không phủ rune. Các font không chứa rune không bao giờ được giữ lại trong heap.
+4. **Test mới `TestLazyFallbackHostFonts`**: Đo hook và counter `FallbackFilesRead()`: = 0 file khi chưa có rune miss; = 1 font được giữ sau rune miss ('✔').
+5. **Gate xanh**: `retained=211.35 MiB, configured=207.10 MiB` (giảm 45.68 MiB từ 257.03 MiB). Toàn bộ gate tests và -race pass 100%.

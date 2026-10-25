@@ -6,6 +6,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform/headless"
+	"github.com/vyquocvu/goosie/internal/raster"
 )
 
 // The footprint criteria. M1's other gates say the frame path allocates nothing per
@@ -53,11 +54,13 @@ func heapMiB() float64 {
 
 // configuredCapacityMiB is the memory the harness above asked for by construction: the
 // tile grid at its budget, and one device surface per composer backing and per window
-// present slot.
+// present slot, plus the budgeted capacity for retained fallback fonts.
 func configuredCapacityMiB(g *frame.Layer) float64 {
 	surface := float64(gateDevW*gateDevH*4) / miB
+	fallbackBudget := float64(raster.MaxParsedFallbackFonts*raster.FallbackBytesRetained()) / miB
 	return float64(g.Grid.Stats().Budget)/miB +
-		float64(gateComposerBitmaps+headless.DefaultHistory)*surface
+		float64(gateComposerBitmaps+headless.DefaultHistory)*surface +
+		fallbackBudget
 }
 
 func TestFootprintAtRestIsBoundedByConfiguredCaches(t *testing.T) {

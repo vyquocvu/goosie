@@ -297,3 +297,80 @@ func TestMissingGlyphCounter(t *testing.T) {
 		t.Fatalf("MissingCount after emoji = %d, want > 0 (mutation iii invariant)", got)
 	}
 }
+
+// TestLazyFallbackHostFonts tests requirement 4 and [R-7]:
+// 1. Files read via hook/counter is 0 before any rune miss.
+// 2. After one rune requiring fallback (e.g. '✔'), at most 1 font is retained.
+// 3. MissingCount and tofu advance remain correct as in §6.
+func TestLazyFallbackHostFonts(t *testing.T) {
+	var hookFiles []string
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	f.SetFallbackHook(func(path string) {
+		hookFiles = append(hookFiles, path)
+	})
+
+	// Before any rune miss, host fallback files read must be 0 and no fallback fonts retained.
+	if got := f.FallbackFilesRead(); got != 0 {
+		t.Fatalf("FallbackFilesRead before any miss = %d, want 0", got)
+	}
+	if len(hookFiles) != 0 {
+		t.Fatalf("fallback hook called %d times before any miss, want 0", len(hookFiles))
+	}
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount before any miss = %d, want 0", got)
+	}
+
+	slot := frame.FontSlot{Family: frame.FontArial}
+	for _, r := range "The quick brown fox jumps over the lazy dog 1234567890" {
+		f.GlyphAdvanceFixed(16, r, slot)
+		f.Glyph(16, r, slot)
+	}
+	if got := f.FallbackFilesRead(); got != 0 {
+		t.Fatalf("FallbackFilesRead after ASCII text = %d, want 0", got)
+	}
+	if len(hookFiles) != 0 {
+		t.Fatalf("fallback hook called %d times after ASCII, want 0", len(hookFiles))
+	}
+	if got := f.FallbackFontsCount(); got != 0 {
+		t.Fatalf("FallbackFontsCount after ASCII text = %d, want 0", got)
+	}
+
+	// Trigger fallback with a rune outside standard slots ('✔')
+	if _, err := os.Stat("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"); err != nil {
+		t.Skip("skipping host font resolution check: /System/Library/Fonts/Supplemental/Arial Unicode.ttf not present on this host")
+	}
+
+	g := f.Glyph(16, '✔', slot)
+	if !g.Ok || g.Missing {
+		t.Fatalf("Glyph('✔') failed to resolve from fallback font")
+	}
+
+	// After one rune needing fallback:
+	// - Files read > 0 (verified hook called)
+	// - Number of retained fallback fonts MUST BE <= 1
+	if got := f.FallbackFilesRead(); got == 0 {
+		t.Fatalf("FallbackFilesRead after '✔' = %d, want > 0", got)
+	}
+	if len(hookFiles) == 0 {
+		t.Fatalf("fallback hook not called after '✔', want > 0")
+	}
+	if got := f.FallbackFontsCount(); got > 1 {
+		t.Fatalf("FallbackFontsCount after one rune miss = %d, want <= 1", got)
+	}
+	if got := f.FallbackFontsCount(); got != 1 {
+		t.Fatalf("FallbackFontsCount after '✔' = %d, want exactly 1", got)
+	}
+
+	// Verify MissingCount and tofu advance remain intact
+	f.ResetMissingCount()
+	tofuAdv := f.GlyphAdvance(16, '😀', slot)
+	if tofuAdv <= 0 {
+		t.Fatalf("tofu GlyphAdvance('😀') = %d, want > 0", tofuAdv)
+	}
+	if got := f.MissingCount(); got <= 0 {
+		t.Fatalf("MissingCount after emoji = %d, want > 0", got)
+	}
+}

@@ -92,11 +92,15 @@ type Fonts struct {
 	// fbCache memoizes fallbackLocked's chain per requested (slot, size). It is
 	// only read and written under the write lock, and it is dropped whenever a
 	// new face entry appears, so a cached chain always equals a fresh one.
-	fbCache      map[faceKey][]*faceEntry
-	custom       []*opentype.Font
-	fallbacks    []*opentype.Font
-	fbEntries    map[fallbackKey]*faceEntry
-	missingCount atomic.Int64
+	fbCache             map[faceKey][]*faceEntry
+	custom              []*opentype.Font
+	fallbacks           []*opentype.Font
+	fbEntries           map[fallbackKey]*faceEntry
+	loadedFallbackPaths map[string]bool
+	fallbackBytes       int64
+	fallbackFilesRead   atomic.Int64
+	fallbackHook        func(path string)
+	missingCount        atomic.Int64
 }
 
 type faceEntry struct {
@@ -112,7 +116,18 @@ type faceEntry struct {
 	advMiss map[rune]struct{}
 }
 
-// systemFontDir holds the families macOS ships for documents.
+// MaxParsedFallbackFonts is the upper bound on the number of wide-coverage system
+// fallback fonts that may be lazily loaded and retained in memory.
+const MaxParsedFallbackFonts = 2
+
+var fallbackBytesRetained atomic.Int64
+
+// FallbackBytesRetained returns the total byte size of fallback font files currently
+// retained across all Fonts instances.
+func FallbackBytesRetained() int64 {
+	return fallbackBytesRetained.Load()
+}
+
 const systemFontDir = "/System/Library/Fonts/Supplemental"
 
 // systemFontFiles maps a CSS-resolved slot onto the host file that draws it.
@@ -166,16 +181,15 @@ var systemFontCollections = []struct {
 	{frame.FontSlot{Family: frame.FontHelvetica, Light: true}, "/System/Library/Fonts/HelveticaNeue.ttc", 12},
 }
 
-// systemFallbackFiles lists system font files used as wide-coverage fallbacks
-// when no document family or standard system font carries a glyph.
-// They are appended at the end of the fallback chain so that CSS-specified
-// families and standard system slots always take priority.
+// systemFallbackFiles lists candidate system font files used as wide-coverage
+// fallbacks when no document family or standard system font carries a glyph.
+// They are prioritized by file size: small fonts (Apple Symbols, Noto, DejaVu)
+// are checked first, and large multi-megabyte fonts (Arial Unicode) are queried
+// last only when smaller fonts do not provide the glyph.
 var systemFallbackFiles = []string{
-	// macOS
-	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	// macOS - small host symbols face (~877 KB)
 	"/System/Library/Fonts/Apple Symbols.ttf",
-	"/Library/Fonts/Arial Unicode.ttf",
-	// Linux
+	// Linux - small system fonts (< 2 MB)
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
 	"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
@@ -184,11 +198,16 @@ var systemFallbackFiles = []string{
 	"/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
 	"/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
 	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+	// Large fallback fonts - last resort (~22-39 MB)
+	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	"/Library/Fonts/Arial Unicode.ttf",
 }
 
 // NewFonts parses the embedded font and every host font it can read. It is
 // called once at startup; the parse cost is a few hundred microseconds per face
-// and it is the only place the font bytes are read.
+// and it is the only place the font bytes are read. Fallback host fonts are
+// NOT parsed here; they are loaded lazily on demand when a rune misses across
+// all primary faces.
 func NewFonts() (*Fonts, error) {
 	f, err := NewEmbeddedFonts()
 	if err != nil {
@@ -223,17 +242,6 @@ func NewFonts() (*Fonts, error) {
 		}
 		f.sources[sc.slot] = parsed
 	}
-	for _, path := range systemFallbackFiles {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		parsed, err := opentype.Parse(data)
-		if err != nil {
-			continue
-		}
-		f.fallbacks = append(f.fallbacks, parsed)
-	}
 	return f, nil
 }
 
@@ -254,9 +262,10 @@ func NewEmbeddedFonts() (*Fonts, error) {
 			{}:           regular,
 			{Bold: true}: bold,
 		},
-		entries:   map[faceKey]*faceEntry{},
-		fbCache:   map[faceKey][]*faceEntry{},
-		fbEntries: map[fallbackKey]*faceEntry{},
+		entries:             map[faceKey]*faceEntry{},
+		fbCache:             map[faceKey][]*faceEntry{},
+		fbEntries:           map[fallbackKey]*faceEntry{},
+		loadedFallbackPaths: map[string]bool{},
 	}, nil
 }
 
@@ -302,6 +311,110 @@ func (f *Fonts) fallbackFaceLocked(idx int, size int32, src *opentype.Font) *fac
 	}
 	f.fbEntries[k] = e
 	return e
+}
+
+// lazyFallbackForRuneLocked probes candidate host fallback files in priority order
+// (small files first, large files like Arial Unicode last) for a rune missing from
+// all currently loaded faces. If a candidate file contains a glyph for r, it is
+// parsed, cached, and retained in f.fallbacks up to MaxParsedFallbackFonts.
+// Candidates that do not cover r are immediately discarded to keep heap footprint
+// strictly bounded. Callers hold f.mu for writing.
+func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
+	if size <= 0 || systemFontsDisabled() {
+		return nil
+	}
+	if isDefaultIgnorable(r) {
+		return nil
+	}
+	if len(f.fallbacks) >= MaxParsedFallbackFonts {
+		return nil
+	}
+	if f.loadedFallbackPaths == nil {
+		f.loadedFallbackPaths = make(map[string]bool)
+	}
+
+	for _, path := range systemFallbackFiles {
+		if f.loadedFallbackPaths[path] {
+			continue
+		}
+		if f.fallbackHook != nil {
+			f.fallbackHook(path)
+		}
+		f.fallbackFilesRead.Add(1)
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		parsed, err := opentype.Parse(data)
+		if err != nil {
+			continue
+		}
+		face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
+			Size:    float64(size),
+			DPI:     faceDPI,
+			Hinting: font.HintingNone,
+		})
+		if err != nil {
+			continue
+		}
+		if !HasGlyph(face, r) {
+			// Does not cover r: do not retain it!
+			continue
+		}
+
+		// Font covers r: retain it in fallbacks
+		f.loadedFallbackPaths[path] = true
+		idx := len(f.fallbacks)
+		f.fallbacks = append(f.fallbacks, parsed)
+		fileBytes := int64(len(data))
+		f.fallbackBytes += fileBytes
+		fallbackBytesRetained.Add(fileBytes)
+
+		e := &faceEntry{
+			face:    face,
+			glyphs:  map[rune]Glyph{},
+			missing: map[rune]struct{}{},
+			adv:     map[rune]int32{},
+			advMiss: map[rune]struct{}{},
+		}
+		if f.fbEntries == nil {
+			f.fbEntries = map[fallbackKey]*faceEntry{}
+		}
+		f.fbEntries[fallbackKey{idx: idx, size: size}] = e
+
+		// Invalidate cached fallback chains so the new fallback face is recognized
+		f.fbCache = map[faceKey][]*faceEntry{}
+		return e
+	}
+	return nil
+}
+
+// FallbackFilesRead returns the number of host font files read from disk for fallback.
+func (f *Fonts) FallbackFilesRead() int64 {
+	return f.fallbackFilesRead.Load()
+}
+
+// FallbackFontsCount returns the number of fallback fonts currently loaded and retained.
+func (f *Fonts) FallbackFontsCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.fallbacks)
+}
+
+// FallbackBytes returns the total bytes of fallback fonts retained by f.
+func (f *Fonts) FallbackBytes() int64 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.fallbackBytes
+}
+
+// SetFallbackHook registers an optional callback invoked whenever a host fallback
+// font file is read from disk.
+func (f *Fonts) SetFallbackHook(fn func(path string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fallbackHook = fn
 }
 
 // Register parses a font file's bytes and returns a 1-based index the style
@@ -617,6 +730,11 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 				break
 			}
 		}
+		if !g.Ok {
+			if fb := f.lazyFallbackForRuneLocked(r, size); fb != nil {
+				g = renderGlyph(fb.face, r)
+			}
+		}
 	}
 	if !g.Ok {
 		if isDefaultIgnorable(r) {
@@ -687,6 +805,11 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 			}
 		}
 		if !ok {
+			if fb := f.lazyFallbackForRuneLocked(r, size); fb != nil {
+				adv, ok = fb.face.GlyphAdvance(r)
+			}
+		}
+		if !ok {
 			if isDefaultIgnorable(r) {
 				e.adv[r] = 0
 				return 0
@@ -739,6 +862,11 @@ func (f *Fonts) FaceForRune(size int32, r rune, slot frame.FontSlot) (font.Face,
 		return e.face, true
 	}
 	for _, fb := range f.fallbackLocked(size, slot) {
+		if HasGlyph(fb.face, r) {
+			return fb.face, true
+		}
+	}
+	if fb := f.lazyFallbackForRuneLocked(r, size); fb != nil {
 		if HasGlyph(fb.face, r) {
 			return fb.face, true
 		}
