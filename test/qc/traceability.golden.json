@@ -1525,7 +1525,9 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyBackForwardDisabledStateAndClicks"
+    ],
     "enforced": false
   },
   {
@@ -1535,7 +1537,9 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyStopLoadingAndCompletedStopNoOp"
+    ],
     "enforced": false
   },
   {
@@ -1545,7 +1549,9 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyReloadRestoresReloadLabelAndRequestsExactlyOnce"
+    ],
     "enforced": false
   },
   {
@@ -1555,7 +1561,10 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyZoomInGrowsContentAndDisplaysPercentage",
+      "test/toolbar/zoom_badge_ax_test.go:TestZoomBadgeExposesTheBadgeTheToolbarPaints"
+    ],
     "enforced": false
   },
   {
@@ -1565,7 +1574,9 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyZoomOutClampsAndStillAcceptsPageDown"
+    ],
     "enforced": false
   },
   {
@@ -1575,7 +1586,10 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyCmdZeroResetsZoomAndKeepsAXGeometryValid",
+      "test/toolbar/zoom_badge_ax_test.go:TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted"
+    ],
     "enforced": false
   },
   {
