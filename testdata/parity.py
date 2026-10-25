@@ -58,7 +58,10 @@ PASS_AT = 90.0
 # GOOSIE-LIVE-002) - a legal --8e8e8e name that used to cost the whole render.
 # 87: css-features/13-anonymous-group-opacity.html (TASK-044, GOOSIE-VIS-001)
 # - group opacity charged once per element, not once per generated box.
-MIN_SCORED_FIXTURES = 87
+# 88: css-features/14-inline-background-repaint.html (TASK-048,
+# GOOSIE-INLINEBG-001) - a translucent block background composited a second
+# time inside every word box of the text it carries.
+MIN_SCORED_FIXTURES = 88
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
