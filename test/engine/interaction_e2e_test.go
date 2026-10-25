@@ -555,6 +555,7 @@ func TestFormSubmitOnEnter(t *testing.T) {
 	}
 }
 
+// qc:BR-104
 func TestFormSubmitButtonClick(t *testing.T) {
 	html := `<!DOCTYPE html>
 <html><body>

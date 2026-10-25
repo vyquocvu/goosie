@@ -1189,6 +1189,9 @@
     "status": "NOT RUN",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneySelectOptionChange",
+      "test/engine/option_value_test.go:TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX",
+      "test/engine/option_value_test.go:TestLastAuthoredSelectedOptionWins",
+      "test/engine/option_value_test.go:TestMoveSelectStepsFromTheLastAuthoredSelection",
       "test/engine/select_keyboard_test.go:TestClickFocusesSelectButNotDisabledControls",
       "test/engine/select_keyboard_test.go:TestSelectArrowKeysMoveSelection",
       "test/engine/select_keyboard_test.go:TestSelectHomeEndGoToTheEdges",
@@ -1231,9 +1234,12 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitOnButtonClick"
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitOnButtonClick",
+      "test/engine/interaction_e2e_test.go:TestFormSubmitButtonClick",
+      "test/engine/option_value_test.go:TestSubmittedOptionValueCollapsesInnerWhitespaceRuns",
+      "test/engine/option_value_test.go:TestSubmittedOptionValueStripsSurroundingWhitespace"
     ],
     "enforced": false
   },
@@ -1261,9 +1267,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormMethodAndEncoding"
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormMethodAndEncoding",
+      "test/engine/option_value_test.go:TestOptionValueAttributeIsSubmittedVerbatim"
     ],
     "enforced": false
   },
@@ -1678,7 +1685,8 @@
     "tests": [
       "test/engine/accessibility_test.go:TestAccessibilitySelectComboBoxAndOptions",
       "test/engine/accessibility_test.go:TestAccessibilitySelectTracksMoveSelect",
-      "test/engine/accessibility_test.go:TestAccessibilitySelectValueMatchesSubmittedFormValue"
+      "test/engine/accessibility_test.go:TestAccessibilitySelectValueMatchesSubmittedFormValue",
+      "test/engine/option_value_test.go:TestAccessibilityOptionLabelAndValueShareNormalization"
     ],
     "enforced": false
   },
