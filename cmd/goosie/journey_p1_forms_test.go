@@ -344,7 +344,9 @@ func TestJourneyRadioGroupSelection(t *testing.T) {
 	})
 }
 
-// qc:BR-101
+// BR-101 stays open: engine gap, reproducer in docs/tasks/TASK-026-FORM-JOURNEYS.md
+// section 7.5. Deliberately untagged - the body skips, and a tag on a skipping
+// test is a coverage claim with no assertion behind it.
 func TestJourneySelectOptionChange(t *testing.T) {
 	// Catalog BR-101: "Chọn option trong select bằng chuột/bàn phím → value, focus và paint khớp lựa chọn."
 	// BLOCKED [AC-07]: Engine Goosie hiện tại chưa cài đặt bất kỳ cơ chế tương tác người dùng nào
@@ -594,7 +596,9 @@ func TestJourneyFormSubmitOnButtonClick(t *testing.T) {
 	})
 }
 
-// qc:BR-105
+// BR-105 stays open: engine gap, reproducer in docs/tasks/TASK-026-FORM-JOURNEYS.md
+// section 7.5. Deliberately untagged - the body skips, and a tag on a skipping
+// test is a coverage claim with no assertion behind it.
 func TestJourneyFormValidationRequired(t *testing.T) {
 	// Catalog BR-105: "Submit form thiếu required/value sai type → validation ngăn submit và giữ nội dung nhập."
 	// BLOCKED [AC-07]: Engine Session.SubmitForm không thực hiện kiểm tra tính hợp lệ (required/type)
@@ -687,7 +691,9 @@ func TestJourneyFormMethodAndEncoding(t *testing.T) {
 	})
 }
 
-// qc:BR-107
+// BR-107 stays open: engine gap, reproducer in docs/tasks/TASK-026-FORM-JOURNEYS.md
+// section 7.5. Deliberately untagged - the body skips, and a tag on a skipping
+// test is a coverage claim with no assertion behind it.
 func TestJourneyFormSubmitterData(t *testing.T) {
 	// Catalog BR-107: "Form có button submit phụ với name/value riêng → chỉ submitter kích hoạt được gửi."
 	// BLOCKED [AC-07]: Engine CollectFormData và SubmitForm bỏ qua name/value của submitter button

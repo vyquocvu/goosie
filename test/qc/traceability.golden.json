@@ -1131,9 +1131,7 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": [
-      "cmd/goosie/journey_p1_forms_test.go:TestJourneySelectOptionChange"
-    ],
+    "tests": null,
     "enforced": false
   },
   {
@@ -1182,9 +1180,7 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": [
-      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormValidationRequired"
-    ],
+    "tests": null,
     "enforced": false
   },
   {
@@ -1206,9 +1202,7 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": [
-      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitterData"
-    ],
+    "tests": null,
     "enforced": false
   },
   {

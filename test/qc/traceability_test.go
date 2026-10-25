@@ -31,7 +31,7 @@ func TestTraceability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tests, err := scanTests(root)
+	tests, skipping, err := scanTests(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +62,11 @@ func TestTraceability(t *testing.T) {
 	for _, c := range catalog {
 		refs := append([]string(nil), tests[c.ID]...)
 		sort.Strings(refs)
+		for _, ref := range refs {
+			if why, ok := skipping[ref]; ok {
+				t.Errorf("%s is claimed by %s, which %s: a tag is not evidence", c.ID, ref, why)
+			}
+		}
 		if len(refs) > 0 {
 			covered++
 		} else {
@@ -146,8 +151,9 @@ func repositoryRoot(t *testing.T) string {
 	}
 }
 
-func scanTests(root string) (map[string][]string, error) {
-	refs := make(map[string][]string)
+func scanTests(root string) (refs map[string][]string, skipping map[string]string, err error) {
+	refs = make(map[string][]string)
+	skipping = make(map[string]string)
 	for _, base := range []string{
 		filepath.Join(root, "test"),
 		filepath.Join(root, "internal"),
@@ -173,13 +179,18 @@ func scanTests(root string) (map[string][]string, error) {
 				if !ok || fn.Doc == nil || !(strings.HasPrefix(fn.Name.Name, "Test") || strings.HasPrefix(fn.Name.Name, "Fuzz")) {
 					return true
 				}
+				why := unconditionalSkip(fn)
 				for _, comment := range fn.Doc.List {
 					text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
 					if !strings.HasPrefix(text, "qc:") {
 						continue
 					}
+					ref := fmt.Sprintf("%s:%s", filepath.ToSlash(rel), fn.Name.Name)
 					for _, id := range strings.Fields(strings.TrimPrefix(text, "qc:")) {
-						refs[id] = append(refs[id], fmt.Sprintf("%s:%s", filepath.ToSlash(rel), fn.Name.Name))
+						refs[id] = append(refs[id], ref)
+					}
+					if why != "" {
+						skipping[ref] = why
 					}
 				}
 				return true
@@ -187,10 +198,33 @@ func scanTests(root string) (map[string][]string, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return refs, nil
+	return refs, skipping, nil
+}
+
+func unconditionalSkip(fn *ast.FuncDecl) string {
+	if fn.Body == nil || len(fn.Body.List) == 0 {
+		return ""
+	}
+	expr, ok := fn.Body.List[0].(*ast.ExprStmt)
+	if !ok {
+		return ""
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	if !ok || recv.Name != "t" || (sel.Sel.Name != "Skip" && sel.Sel.Name != "Skipf") {
+		return ""
+	}
+	return "skips unconditionally as its first statement"
 }
 
 func needsTest(methods []string) bool {
