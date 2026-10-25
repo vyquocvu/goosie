@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Translucent block background behind text composites once (GOOSIE-INLINEBG-001)</title>
+    <style>
+        /* A block's background is painted by the block.  Layout also splices a
+           box per word for the text inside it, and every one of those runs
+           carries a verbatim copy of the generating element's computed style,
+           background included (style.inheritStyle: `cs := *parent`).  When the
+           element is inline the copy is the whole story - the element's own box
+           paints nothing and the fragments are the visible background, which is
+           how an inline background is meant to fragment across lines.  When the
+           element is a block, its own box has already filled the padding area,
+           so a run that fills its little rect again composites the element's
+           alpha a second time wherever a word sits.
+
+           Chromium, measured on this machine (800x600 viewport, DPR 1, browser
+           131.0.6778.33) with `background:rgba(200,0,0,.5)` on white: the tint
+           is (227,127,127) uniformly, inside the words and between them alike.
+           Goosie before the fix measured (213,63,63) at (159,148), inside the
+           first callout's first run of words (Chromium lays that run out at
+           (28,121) 134x30) - 64 levels off the reference on the green and blue
+           channels, well past the harness's 30-level tolerance -
+           and it did that across the whole text band of every tinted block.
+           `make parity` scores this fixture at 94.36% with the fix and 78.35%
+           with the mechanism removed, where the pass line is 90%: the tinted
+           blocks are set large and dense on purpose so the fixture stops being
+           a picture and becomes a gate.
+
+           The controls are here for the opposite failure.  The green span is
+           genuinely inline, so its fragments own its background and it is
+           supposed to read darker than the red block it sits in - Chromium
+           measures (123,153,110) where the two overlap, Goosie after the fix
+           (123,152,109).  The blue ramp is the same defect through the
+           translucent gradient layer (Chromium (152,190,220) at the top of the
+           band, (201,173,219) at the bottom).  The narrow block wraps its text
+           onto four lines - Chromium measures ink rows at 5-26, 35-52, 65-86
+           and 95-116 of its 120px content box - so its runs fragment across
+           them while the block's own tint covers all four with one composite,
+           and the fix must keep that true on every line.  Nothing here puts a
+           box-shadow or a border on a tinted box: text runs duplicate those the
+           same way, and that is measured as its own defect. */
+        html, body { margin: 0; padding: 0; }
+        body { font-family: sans-serif; color: #1a1a1a; background: #ffffff; }
+        h1 { font-size: 20px; margin: 12px 16px 4px 16px; }
+        .lede { font-size: 13px; line-height: 18px; margin: 0 16px 10px 16px; }
+
+        /* The failing shape: a translucent block background behind text that
+           spans the full width, so the run boxes cover nearly all of it. */
+        .callout {
+            background: rgba(200, 0, 0, 0.5);
+            margin: 10px 16px;
+            padding: 10px 12px;
+            font-size: 26px;
+            line-height: 34px;
+        }
+
+        /* A tinted block whose text wraps: the element's background must still
+           cover every line, and the tinted area between the words must stay
+           the single-composite colour. */
+        .narrow {
+            background: rgba(200, 0, 0, 0.5);
+            width: 300px;
+            margin: 10px 16px;
+            padding: 8px 10px;
+            font-size: 22px;
+            line-height: 30px;
+        }
+
+        /* Inline fragment inside that block: the span is the generating element
+           of its own runs, so this darker tint is correct and must survive. */
+        .callout .hl { background: rgba(39, 174, 96, 0.55); }
+
+        /* The same defect through a translucent gradient layer. */
+        .ramp {
+            background: linear-gradient(rgba(41, 128, 185, 0.5), rgba(155, 89, 182, 0.5));
+            margin: 10px 16px;
+            padding: 8px 12px;
+            font-size: 24px;
+            line-height: 32px;
+        }
+
+        .label { font-size: 12px; color: #555; margin: 8px 16px 0 16px; }
+        .solid { background: #ecf0f1; margin: 10px 16px; padding: 8px 12px; font-size: 20px; line-height: 26px; }
+    </style>
+</head>
+<body>
+    <h1>one composite per element, not one per word box</h1>
+    <p class="lede">The block below paints its translucent background across its own padding box;
+       the per-word boxes layout invents for its text must not paint that background again.</p>
+
+    <div class="label">rgba(200,0,0,.5) behind text that fills two full-width lines</div>
+    <div class="callout">translucent background behind a run of text composites once per element and never again per word</div>
+
+    <div class="label">the same tint with an inline highlight (control: the span owns its own background)</div>
+    <div class="callout">a <span class="hl">green inline highlight</span> over the red block tint is two declarations, and reads darker</div>
+
+    <div class="label">translucent gradient behind text</div>
+    <div class="ramp">gradient layers are background layers too, so they are owned by this block and painted once by it</div>
+
+    <div class="label">text fragmenting over four lines inside one tinted block (control: still one composite per line)</div>
+    <div class="narrow">a narrow tinted block wraps its text onto several lines and every line keeps one composite</div>
+
+    <div class="solid">below the fold: solid ink neither engine can disagree about</div>
+    <div class="callout">one more tinted row, deliberately past the viewport edge</div>
+</body>
+</html>
