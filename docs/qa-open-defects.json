@@ -20,20 +20,20 @@
   {
     "id": "GOOSIE-VALIDATE-001",
     "priority": "P1",
-    "status": "open",
+    "status": "closed",
     "owner": "docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md",
     "summary": "No constraint validation before submit: a form with an empty required field or a malformed email/number submits and sends the bad value.",
-    "evidence": "BR-105. internal/engine/engine.go:1619 submitFormLocked dispatches submit then collects and sends with zero validation; method=dialog is handled at engine.go:1631-1641 so the check must precede it. Spec: docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md §2.",
-    "closed_by": ""
+    "evidence": "BR-105. Proof of the old state and the fix: docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md §7 (Mutation proof [R-7]); internal/engine/forms.go ValidateForm and the pre-submit check at internal/engine/engine.go:1623-1630. Engine oracles live in test/engine/form_submission_test.go; the browser-level oracle cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid asserts an invalid submit leaves the server at page:1 search:0 with the URL unchanged.",
+    "closed_by": "130bc9a"
   },
   {
     "id": "GOOSIE-SUBMITTER-001",
     "priority": "P1",
-    "status": "open",
+    "status": "closed",
     "owner": "docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md",
     "summary": "The submitter button is dropped: its name/value pair is never added and implicit submit cannot tell which button fired.",
-    "evidence": "BR-107. internal/engine/forms.go:70-72 and :88 isSuccessfulControl skips buttons claiming they are handled separately, but nothing handles them: engine.go:1560-1568 runClickDefault and focus.go:378 Enter-submit both call SubmitForm(form) with no submitter argument.",
-    "closed_by": ""
+    "evidence": "BR-107. Proof of the old state and the fix: internal/engine/forms.go collectFromNode now appends the submitting button's name/value pair and FirstSubmitButton supplies the implicit-submit submitter for the Enter path (internal/engine/focus.go:399). Oracles: test/engine/form_submission_test.go TestFormSubmitterClickAndImplicit, TestFormSubmitterWithoutNameOmitted, TestFormButtonDefaultTypeSubmits.",
+    "closed_by": "130bc9a"
   },
   {
     "id": "GOOSIE-AX-001",
@@ -68,7 +68,43 @@
     "status": "open",
     "owner": "needs a task",
     "summary": "TestNativeEndToEndPlaysARealVideo is load-sensitive: under a busy machine it can time out, which risks a false red in the sweep's gate step.",
-    "evidence": "test/engine/media_native_test.go:264. Observed while running full suites in parallel worktrees; TASK-029 §3 forbids raising the timeout as a fix, so it is recorded here instead.",
+    "evidence": "test/engine/media_native_test.go:264. Observed while running full suites in parallel worktrees; TASK-029 §3 forbids raising the timeout as a fix, so it is recorded here instead. Same class observed on 2026-10-25 at 20:07: TestFootprintAtRestIsBoundedByConfiguredCaches reported retained=257.03 MiB against configured=207.10 MiB while 14 orphaned busy-loop shells from an old stress command held the 1-minute load average near 90; the identical run passed at 2.29s on the same commit (130bc9a) once the load was removed. The at-rest footprint criterion is therefore load-sensitive and must be measured on an idle machine, never in parallel with another suite.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-VALIDATE-002",
+    "priority": "P2",
+    "status": "open",
+    "owner": "needs a task",
+    "summary": "Button-level formnovalidate is not honoured: a submit button carrying formnovalidate still runs constraint validation, so the 'Send without saving' pattern cannot submit an incomplete form.",
+    "evidence": "grep -rn formnovalidate internal/engine returns no matches, while the merged bypass oracle test/engine/form_submission_test.go:TestFormNovalidateBypass only exercises the form-level novalidate attribute. WHATWG HTML 4.10.13.3.6 step 9 collects and honours the submitter's novalidate state; ValidateForm (internal/engine/forms.go) reads only the form attribute.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-TEST-001",
+    "priority": "P2",
+    "status": "open",
+    "owner": "needs a task",
+    "summary": "Browser-level tests read the layout arena from the test goroutine, so the journeys that decide whether a feature works are unsynchronised against the engine's input goroutine.",
+    "evidence": "14 sites in cmd/goosie/*_test.go walk sess.Arena.Objects directly (cmd/goosie/e2e_test.go:188 clickElementByID, clipboard_test.go:36,121, form_nav_test.go:58,130,251, ...). TASK-030's -race run proved the same class of cross-goroutine DOM read is unsafe, and the locking contract requires locked Session accessors. A mutation that rebuilds layout can therefore produce a torn read or an unsynchronised click coordinate instead of a clean failure.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-FLAKE-002",
+    "priority": "P2",
+    "status": "open",
+    "owner": "needs a task",
+    "summary": "The tab scroll-restore journey asserts a cross-tab inequality instead of an exact offset, so it can pass for the wrong reason or fail when both tabs clamp to the same scroll extent.",
+    "evidence": "cmd/goosie/journey_p1_tabs_test.go:96-105 presses PageDown twice in tab 2 and waits for active.ScrollY() > tab1Scroll, comparing one tab's offset against a different tab's; the same test then asserts exact equality (== tab1Scroll, == tab2Scroll) at lines 121 and 132. The inequality oracle depends on page heights and clamp values, and it is the assertion that failed twice under machine load.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-TRACE-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "docs/tasks/TASK-014-QC-TRACEABILITY.md",
+    "summary": "104 of the 161 P0/P1 QA cases still have no tagged test, so most of the manual catalogue remains unverified automatically even though every P0 case is now tagged.",
+    "evidence": "test/qc/traceability.golden.json at 130bc9a: 185 cases, P0 19/19 tagged, P0+P1 161 cases of which 57 tagged. scripts/rc-sweep.sh:117-119 only fails the sweep when a P0 case loses its test or the count drops below docs/qa-ratchet.json, so the untagged majority is invisible to the gate.",
     "closed_by": ""
   }
 ]
