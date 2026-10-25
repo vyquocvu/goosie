@@ -496,7 +496,7 @@ func TestFetchChargesSubresourceBudget(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("st"); !ok || v.Num != 200 {
 		t.Errorf("status = %+v, want 200 (a small fetch within budget must succeed)", v)
@@ -523,7 +523,7 @@ func TestFetchSubresourceBudgetExhaustedRejects(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if v, ok := r.Global("caught"); !ok || v.Str == "" {
 		t.Errorf("caught = %+v, want a non-empty rejection reason (fetch must fail cleanly, not resolve)", v)
@@ -552,7 +552,7 @@ func TestFetchSubresourceBudgetConcurrentIsRaceSafe(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	drainFetch(r)
+	drainFetch(t, r)
 
 	if got := sub.Used(); got <= 0 {
 		t.Errorf("budget used = %d, want > 0 after concurrent fetches", got)
