@@ -95,7 +95,7 @@ The Chromium and Goosie images already present under `/tmp/playwright-renders` a
 | `forms/04-advanced-inputs.png` | 2 | 376–388, 443–454 | Some advanced native controls (date/time, color, range or file) may be absent. |
 | `html-features/01-forms-complete.png` | 1 | 593–599 | The final form row is at the viewport edge; a submit/reset/control or its clipped label may be missing. |
 
-These are visual hypotheses from the fixture source, not root-cause findings. The baseline points to the proposed follow-up `docs/tasks/TASK-023-RENDER-REGION-GAPS.md`; that follow-up task is outside this change.
+These are visual hypotheses from the fixture source, not root-cause findings. The baseline points to the proposed follow-up `docs/tasks/TASK-024-RENDER-REGION-GAPS.md`; that follow-up task is outside this change.
 
 ### Acceptance evidence
 
