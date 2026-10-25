@@ -63,6 +63,7 @@ func TestWideNthChildStripes(t *testing.T) {
 
 // TestManyQuerySelectorAllPins the wrapper cache: 5000 hits used to compile
 // accessors per hit (seconds); the result must still list every node once.
+// qc:BR-164
 func TestManyQuerySelectorAll(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("<html><body><ul>")

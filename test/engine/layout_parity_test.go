@@ -34,6 +34,7 @@ type layoutReference struct {
 // reference (testdata/gen_layout_refs.py regenerates them; never hand-edit).
 // A missing reference fails rather than skips: an unscored fixture is not
 // a passing one.
+// qc:BR-059
 func TestLayoutParityWithChromium(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

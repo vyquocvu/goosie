@@ -16,6 +16,7 @@ import (
 // in one process, so the bound has to be enforced by the engine rather than
 // offered to the page.
 
+// qc:BR-167
 func TestInfiniteLoopIsStoppedByItsTimeout(t *testing.T) {
 	const bound = 100 * time.Millisecond
 	r := newRuntime(t, js.Options{URL: "https://example.test/a", Timeout: bound})

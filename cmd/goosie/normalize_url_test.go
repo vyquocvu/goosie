@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// qc:BR-003
 func TestNormalizeURL(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -270,6 +271,7 @@ func TestNormalizeURLEdgeCases(t *testing.T) {
 // scheme-less address-bar values: only unambiguously host-shaped input
 // (dotted names, IPs, localhost, bracketed IPv6, optional valid ports)
 // navigates; everything else searches through the profile engine.
+// qc:BR-003
 func TestNormalizeAddressAmbiguousInputs(t *testing.T) {
 	tests := []struct {
 		name     string

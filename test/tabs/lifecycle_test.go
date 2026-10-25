@@ -18,6 +18,7 @@ import (
 // index dangling. When the active tab is the last in the list, the
 // selection moves left; otherwise it stays at the same index, which
 // means the next tab slides into focus.
+// qc:BR-030
 func TestCloseActiveTabSelectsNearest(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	t1 := mgr.NewTab()

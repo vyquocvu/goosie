@@ -49,6 +49,7 @@ func TestPumpJSFiresTimers(t *testing.T) {
 	}
 }
 
+// qc:BR-184
 func TestPumpJSSameValueDOMWritesSkipPipeline(t *testing.T) {
 	html := `<html><body>
 <div id="same" class="stable">same</div>

@@ -89,12 +89,14 @@ func TestDecodeSmallValid(t *testing.T) {
 	}
 }
 
+// qc:BR-166
 func TestProbeRejectsOversizedWebPDimensions(t *testing.T) {
 	if _, err := Probe(oversizedWebP(t)); err == nil || !strings.Contains(err.Error(), "dimensions 8193x1") {
 		t.Fatalf("Probe(8193x1 WebP) error = %v, want dimension admission error", err)
 	}
 }
 
+// qc:BR-166
 func TestProbeRejectsOversizedDimensions(t *testing.T) {
 	cfg := image.Config{Width: 8193, Height: 1, ColorModel: nil}
 	var buf bytes.Buffer
@@ -107,6 +109,7 @@ func TestProbeRejectsOversizedDimensions(t *testing.T) {
 	}
 }
 
+// qc:BR-165 BR-166
 func TestProbeAcceptsAtLimit(t *testing.T) {
 	cfg := image.Config{Width: 8192, Height: 2048}
 	if int64(cfg.Width)*int64(cfg.Height) > MaxDecodedImagePixels {
@@ -125,6 +128,7 @@ func TestProbeAcceptsAtLimit(t *testing.T) {
 	}
 }
 
+// qc:BR-166
 func TestProbeRejectsJustOverPixelLimit(t *testing.T) {
 	cfg := image.Config{Width: 8192, Height: 2049}
 	if int64(cfg.Width)*int64(cfg.Height) <= MaxDecodedImagePixels {
@@ -140,6 +144,7 @@ func TestProbeRejectsJustOverPixelLimit(t *testing.T) {
 	}
 }
 
+// qc:BR-165
 func TestProbeRejectsEncodedByteLimit(t *testing.T) {
 	data := make([]byte, MaxEncodedImageBytes+1)
 	copy(data, []byte{0x89, 'P', 'N', 'G'})
@@ -164,6 +169,7 @@ func TestDecodeRejectsTruncated(t *testing.T) {
 	}
 }
 
+// qc:BR-166
 func TestDecodePNGRejectsOversized(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 8193, 1))
 	var buf bytes.Buffer
@@ -176,6 +182,7 @@ func TestDecodePNGRejectsOversized(t *testing.T) {
 	}
 }
 
+// qc:BR-166
 func TestDecodeJPEGRejectsOversized(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 1, 8193))
 	var buf bytes.Buffer

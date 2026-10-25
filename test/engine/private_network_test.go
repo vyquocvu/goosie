@@ -40,6 +40,7 @@ var localAuthorities = []string{
 	"[::ffff:127.0.0.1]",
 }
 
+// qc:BR-159
 func TestPublicPageCannotFetchLocalNetworkImage(t *testing.T) {
 	for _, authority := range localAuthorities {
 		for _, scheme := range []string{"http", "https"} {

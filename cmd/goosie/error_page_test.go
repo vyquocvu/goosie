@@ -8,6 +8,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
+// qc:BR-012
 func TestCategorizeError(t *testing.T) {
 	tests := []struct {
 		err         error

@@ -34,6 +34,7 @@ func TestHistoryPushAndCurrent(t *testing.T) {
 	}
 }
 
+// qc:BR-017
 func TestHistoryBackForward(t *testing.T) {
 	h := toolbar.NewHistory()
 	h.Push("https://a.com")

@@ -190,6 +190,7 @@ cb.addEventListener('change',function(){ L('change:'+ (cb.checked ? 'true':'fals
 	}
 }
 
+// qc:BR-182
 func TestKeyboard_ActivationTracksActiveAndDispatchesClick(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
 <div id="parent"><button id="target">Activate</button></div>

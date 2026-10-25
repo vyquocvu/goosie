@@ -279,6 +279,7 @@ func TestFocusVisiblePseudoClassRequiresFocusedVisibleState(t *testing.T) {
 	}
 }
 
+// qc:BR-181
 func TestActivePseudoClassTracksPointerActivation(t *testing.T) {
 	doc := dom.NewDocument()
 	button := doc.NewElement("button")

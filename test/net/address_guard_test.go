@@ -171,6 +171,7 @@ func TestAddressGuardSkipsABlockedAddressAndDialsTheNextOne(t *testing.T) {
 // TestAddressGuardChecksALiteralAddressWithoutResolving: 127.0.0.1 written into
 // the URL needs no lookup, and a guard that performed one anyway would be
 // reporting a resolution error for a name that is already an address.
+// qc:BR-161
 func TestAddressGuardChecksALiteralAddressWithoutResolving(t *testing.T) {
 	r := newRebindServer(t, "private")
 	lookup, lookups := lookupFor(map[string][]net.IP{})
