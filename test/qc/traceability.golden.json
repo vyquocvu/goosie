@@ -1012,6 +1012,9 @@
       "test/css/bad_string_test.go:TestBadStringInUnterminatedLastDeclaration",
       "test/css/bad_string_test.go:TestBadStringSingleQuoteMatchesDoubleQuote",
       "test/css/bad_string_test.go:TestEmptyStringStillGeneratesABox",
+      "test/css/bad_string_test.go:TestEscapedNewlineContinuesAString",
+      "test/css/bad_string_test.go:TestEscapedNewlineInSelectorString",
+      "test/css/bad_string_test.go:TestEscapedNewlineVersusRawNewline",
       "test/css/bad_string_test.go:TestUnterminatedStringAtEOFStaysLenient"
     ],
     "enforced": false
