@@ -35,8 +35,14 @@ const rootID ObjectID = 1
 // rather than as four rects so a style change to one side of a border does not
 // rewrite the other three.
 type Object struct {
-	Node   *dom.Node
-	Style  *style.ComputedStyle
+	Node  *dom.Node
+	Style *style.ComputedStyle
+
+	// Key is the box's document-lifetime identity; see BoxKey. It is zero on
+	// boxes the builder cannot name from stable inputs, such as word and
+	// anonymous boxes generated during layout.
+	Key BoxKey
+
 	Parent ObjectID
 
 	FirstKid, LastKid        ObjectID
@@ -390,6 +396,7 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 	}
 	// Use the pre-allocated root at index 1 for the document node.
 	a.Objects[rootID].Node = &doc.Node
+	a.Objects[rootID].Key = NewBoxKey(uint32(doc.Node.ID), BoxKindBlock, 0)
 	if s, ok := styles[doc.Node.ID]; ok {
 		a.Objects[rootID].Style = s
 	}
@@ -457,6 +464,9 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 	if s, ok := styles[n.ID]; ok {
 		obj.Style = s
 	}
+	if n.ID != 0 {
+		obj.Key = NewBoxKey(uint32(n.ID), boxKindForStyle(obj.Style), 0)
+	}
 
 	// CSS counters apply in document order: the element's own reset/set
 	// establishes its scope, its increment adjusts the innermost instance,
@@ -470,7 +480,7 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 	// Inject ::before pseudo-element as first child if it has content.
 	if n.Element() && pseudoStyles != nil {
 		if beforeStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "before"}]; ok {
-			beforeID := buildPseudoElement(a, doc, beforeStyle, scope)
+			beforeID := buildPseudoElement(a, doc, n.ID, BoxKindPseudoBefore, beforeStyle, scope)
 			a.Link(id, beforeID)
 		}
 	}
@@ -532,7 +542,7 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 	// Inject ::after pseudo-element as last child if it has content.
 	if n.Element() && pseudoStyles != nil {
 		if afterStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "after"}]; ok {
-			afterID := buildPseudoElement(a, doc, afterStyle, scope)
+			afterID := buildPseudoElement(a, doc, n.ID, BoxKindPseudoAfter, afterStyle, scope)
 			a.Link(id, afterID)
 		}
 	}
@@ -544,10 +554,11 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 // text content. The object is an anonymous text node. Structured counter()
 // content evaluates against the originating element's scope; plain strings
 // pass through exactly as before.
-func buildPseudoElement(a *Arena, doc *dom.Document, pseudoStyle *style.ComputedStyle, scope *style.CounterScope) ObjectID {
+func buildPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeID, kind BoxKind, pseudoStyle *style.ComputedStyle, scope *style.CounterScope) ObjectID {
 	id, obj := a.Alloc()
 	obj.flags |= flagAnonymous
 	obj.Style = pseudoStyle
+	obj.Key = NewBoxKey(uint32(nodeID), kind, 0)
 
 	// Create a synthetic text node with the generated content.
 	text := pseudoStyle.Content
