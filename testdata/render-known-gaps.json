@@ -7,7 +7,7 @@
   "known_gaps": [
     {
       "fixture": "unicode/02-emoji-symbols.png",
-      "blank_regions": 1,
+      "blank_regions": 9,
       "follow_up_task": "docs/tasks/TASK-027-GLYPH-COVERAGE.md"
     },
     {
@@ -18,7 +18,7 @@
     {
       "fixture": "selectors/03-pseudo-elements.png",
       "blank_regions": 3,
-      "follow_up_task": "docs/tasks/TASK-033-FIRST-LETTER-DROP-CAP.md"
+      "follow_up_task": "docs/tasks/TASK-027-GLYPH-COVERAGE.md"
     },
     {
       "fixture": "forms/04-advanced-inputs.png",
