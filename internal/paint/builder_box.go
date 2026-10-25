@@ -19,17 +19,61 @@ type boxPaintContext struct {
 	hidden         bool
 }
 
-func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordinal int) {
+// boxDeclaresOpacity reports whether a box brings an opacity of its own into the
+// group-opacity walk. Layout also hands out boxes that own no element and fills
+// them with a verbatim copy of the generating element's style: anonymous blocks
+// and table wrappers (style.AnonymousBlockStyle: `s = *parent`) and every text
+// run (style.inheritStyle: `cs := *parent`). That element has already
+// contributed, so counting its copy again would fade one declaration once per
+// generated box rather than once per element, which is what Chromium does.
+// Generated content is the exception: a ::before/::after/::first-letter box's
+// style is its own cascade result, and the synthetic text node standing in for it
+// is attached to no parent element.
+func boxDeclaresOpacity(obj *layout.Object) bool {
+	if obj.Style == nil || obj.Node == nil {
+		return false
+	}
+	return obj.Node.Element() || obj.Node.Parent == nil
+}
+
+func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordinal int, inheritedOpacity float32) {
 	obj := b.arena.Get(id)
 	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
 		return
 	}
 
+	// Group opacity: an element's own opacity multiplies the accumulated opacity
+	// of every ancestor, and that product reaches the element's background, border
+	// and text as well as its descendants. A fully transparent box (effective 0)
+	// paints nothing and hides its whole subtree, because opacity does not inherit
+	// but a zero-opacity stacking context clips everything inside it to invisible;
+	// we stop the walk rather than emit a command, since DisplayCmd.Opacity 0 is
+	// reserved to mean "opaque/unset".
+	effective := inheritedOpacity
+	if boxDeclaresOpacity(obj) {
+		o := obj.Style.Opacity
+		if o < 0 {
+			o = 0
+		} else if o > 1 {
+			o = 1
+		}
+		effective *= o
+	}
+	if effective <= 0 {
+		return
+	}
+
+	// visibility:hidden removes only the box's own paint; the box still occupies
+	// layout space (unlike display:none) and a descendant may set visibility
+	// back to visible, so children are walked regardless. "collapse" is treated
+	// as hidden here; table-part collapse is out of scope.
+	visibilityHidden := obj.Style != nil && obj.Style.Visibility != "visible"
+
 	childClip := inheritedClip
 	if obj.Style != nil {
-		box := b.paintContextFor(obj)
+		box := b.paintContextFor(obj, effective)
 		commandStart := b.list.Len()
-		if !box.hidden {
+		if !box.hidden && !visibilityHidden {
 			b.paintBoxDecoration(obj, box, ordinal)
 			b.paintBoxContents(obj, box, inheritedClip)
 		}
@@ -39,10 +83,10 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
 		return
 	}
-	b.paintChildren(obj, childClip)
+	b.paintChildren(obj, childClip, effective)
 }
 
-func (b *Builder) paintContextFor(obj *layout.Object) boxPaintContext {
+func (b *Builder) paintContextFor(obj *layout.Object, opacity float32) boxPaintContext {
 	x0, y0, x1, y1 := obj.BorderRect()
 	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
 	radius := corners(obj.Style, rect, b.scale)
@@ -60,7 +104,7 @@ func (b *Builder) paintContextFor(obj *layout.Object) boxPaintContext {
 		clipRadius: radius.Shrunk(
 			backgroundClip.Y0-rect.Y0, rect.X1-backgroundClip.X1,
 			rect.Y1-backgroundClip.Y1, backgroundClip.X0-rect.X0),
-		opacity: obj.Style.Opacity,
+		opacity: opacity,
 		hidden:  obj.Style.HasClip && (obj.Style.ClipTop >= obj.Style.ClipBottom || obj.Style.ClipLeft >= obj.Style.ClipRight),
 	}
 }
@@ -191,7 +235,7 @@ func (b *Builder) overflowClip(obj *layout.Object, inherited *frame.Rect) *frame
 	return &intersected
 }
 
-func (b *Builder) paintChildren(obj *layout.Object, clip *frame.Rect) {
+func (b *Builder) paintChildren(obj *layout.Object, clip *frame.Rect, opacity float32) {
 	item := 0
 	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
 		ordinal := 0
@@ -200,6 +244,6 @@ func (b *Builder) paintChildren(obj *layout.Object, clip *frame.Rect) {
 			item++
 			ordinal = item
 		}
-		b.paintBox(kid, clip, ordinal)
+		b.paintBox(kid, clip, ordinal, opacity)
 	}
 }
