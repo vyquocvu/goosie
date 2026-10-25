@@ -1035,6 +1035,53 @@
     "enforced": false
   },
   {
+    "id": "BR-195",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/visibility_paint_test.go:TestDisplayNoneStillCollapses",
+      "test/paint/visibility_paint_test.go:TestVisibilityHiddenDropsBoxPaint",
+      "test/paint/visibility_paint_test.go:TestVisibilityHiddenKeepsLayout",
+      "test/paint/visibility_paint_test.go:TestVisibilityHiddenSubtreeInheritsHidden"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-196",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/invisible_box_test.go:TestBoxThatCSSPaintsNothingEmitsNoCommands",
+      "test/paint/opacity_paint_test.go:TestGroupOpacityAppliesToSubtree",
+      "test/paint/opacity_paint_test.go:TestGroupOpacityCountedOncePerElement",
+      "test/paint/opacity_paint_test.go:TestOpacityAboveOnePaintsOpaque",
+      "test/paint/opacity_paint_test.go:TestOpacityFractionReachesCommand",
+      "test/paint/opacity_paint_test.go:TestOpacityZeroDropsBox"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-197",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/style/opacity_visibility_computed_test.go:TestOpacityClampsToUnitRange",
+      "test/style/opacity_visibility_computed_test.go:TestVisibilityInheritsAndRestores"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

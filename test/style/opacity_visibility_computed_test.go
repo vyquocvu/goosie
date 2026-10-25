@@ -14,6 +14,7 @@ import (
 // [0,1]. Before the fix opacity:5 was stored verbatim as 5.0 (only the rasterizer's
 // "0/1 sentinel" hid the fact), and an unparseable value fell through to 0,
 // which now would drop the subtree.
+// qc:BR-197
 func TestOpacityClampsToUnitRange(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 		.a{opacity:0} .b{opacity:0.5} .c{opacity:.5} .d{opacity:5}
@@ -57,6 +58,7 @@ func TestOpacityClampsToUnitRange(t *testing.T) {
 // TestVisibilityInheritsAndRestores pins the inheritance rule measured in
 // section 2.3: visibility inherits, so a hidden parent hides a silent child, but
 // a child that reasserts visible is visible again and passes visible down.
+// qc:BR-197
 func TestVisibilityInheritsAndRestores(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 		.parent{visibility:hidden}

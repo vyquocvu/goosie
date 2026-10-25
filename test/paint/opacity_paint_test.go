@@ -29,6 +29,7 @@ func opClose(a, b float32) bool { return math.Abs(float64(a-b)) < 1e-6 }
 // rasterizer reads 0 as "unset, therefore opaque" (see DisplayCmd.Opacity), so
 // the supposedly-invisible box painted at full strength. Now the box and its
 // subtree are dropped before a command is ever built.
+// qc:BR-196
 func TestOpacityZeroDropsBox(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -50,6 +51,7 @@ func TestOpacityZeroDropsBox(t *testing.T) {
 
 // TestOpacityFractionReachesCommand proves the value survives the whole
 // style->paint trip as an actual fraction, not as the opaque sentinel 0/1.
+// qc:BR-196
 func TestOpacityFractionReachesCommand(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -72,6 +74,7 @@ func TestOpacityFractionReachesCommand(t *testing.T) {
 // TestOpacityAboveOnePaintsOpaque pins the clamp measured in section 2: Chromium
 // reads opacity:5 back as 1. The box is painted, and it carries exactly 1.0, so
 // the out-of-range value must not survive to the rasterizer as 5.
+// qc:BR-196
 func TestOpacityAboveOnePaintsOpaque(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -91,6 +94,7 @@ func TestOpacityAboveOnePaintsOpaque(t *testing.T) {
 // does not inherit, but a translucent ancestor renders its whole subtree inside
 // one faded group, so an opaque child of an opacity:0.5 parent must itself reach
 // the rasterizer at 0.5, not at 1.
+// qc:BR-196
 func TestGroupOpacityAppliesToSubtree(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -140,6 +144,7 @@ func opPaintedOpacity(cmds []paint.DisplayCmd) []float32 {
 // scripts/verify-task044-group-opacity.js on this machine (viewport 400x200,
 // DPR 1, black text on white, darkest glyph pixel): min_lum 126.0 is glyph alpha
 // 0.506 and 190.0 is 0.255, so a declared 0.5 or 0.25 arrives once.
+// qc:BR-196
 func TestGroupOpacityCountedOncePerElement(t *testing.T) {
 	shapes := []struct {
 		name     string

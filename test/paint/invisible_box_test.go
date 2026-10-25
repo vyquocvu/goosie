@@ -50,6 +50,7 @@ func invisibleBoxDoc(decl string) string {
 </body></html>`, decl)
 }
 
+// qc:BR-196
 func TestBoxThatCSSPaintsNothingEmitsNoCommands(t *testing.T) {
 	// corner is what the tile keeps of the shadow's footprint at the origin: the
 	// 4x5 px smudge, nothing more.

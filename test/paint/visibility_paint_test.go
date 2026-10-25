@@ -47,6 +47,7 @@ func visSolidFills(cmds []paint.DisplayCmd, r, g, b uint8) []paint.DisplayCmd {
 // so none of its own paint - background, border, text - may reach the display
 // list. Before the fix the box painted anyway because the builder consulted
 // Visibility only for list markers.
+// qc:BR-195
 func TestVisibilityHiddenDropsBoxPaint(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -78,6 +79,7 @@ func TestVisibilityHiddenDropsBoxPaint(t *testing.T) {
 // subtree (visibility is an inherited property) - a child that says nothing is
 // hidden too - while a child that reasserts visible is painted again. This is
 // the shape Chromium showed when measured (section 2.3).
+// qc:BR-195
 func TestVisibilityHiddenSubtreeInheritsHidden(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -107,6 +109,7 @@ func TestVisibilityHiddenSubtreeInheritsHidden(t *testing.T) {
 // hidden box still reserves its box in flow, so the block after it starts below
 // it. This is the half of the acceptance the fix must not break while dropping
 // the paint.
+// qc:BR-195
 func TestVisibilityHiddenKeepsLayout(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -135,6 +138,7 @@ func TestVisibilityHiddenKeepsLayout(t *testing.T) {
 // TestDisplayNoneStillCollapses is the contrast case that keeps the two
 // mechanisms from being conflated: display:none removes the box from flow, so
 // the next block sits at the top, and it paints nothing.
+// qc:BR-195
 func TestDisplayNoneStillCollapses(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
