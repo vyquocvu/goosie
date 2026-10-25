@@ -1079,7 +1079,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyTextInputEditingAndCaret"
+    ],
     "enforced": false
   },
   {
@@ -1090,7 +1092,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyTextareaMultilineInput"
+    ],
     "enforced": false
   },
   {
@@ -1101,7 +1105,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyCheckboxToggleClickAndSpace"
+    ],
     "enforced": false
   },
   {
@@ -1112,7 +1118,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyRadioGroupSelection"
+    ],
     "enforced": false
   },
   {
@@ -1123,7 +1131,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneySelectOptionChange"
+    ],
     "enforced": false
   },
   {
@@ -1134,7 +1144,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormTabNavigationOrder"
+    ],
     "enforced": false
   },
   {
@@ -1145,7 +1157,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitOnEnterKey"
+    ],
     "enforced": false
   },
   {
@@ -1156,7 +1170,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitOnButtonClick"
+    ],
     "enforced": false
   },
   {
@@ -1166,7 +1182,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormValidationRequired"
+    ],
     "enforced": false
   },
   {
@@ -1176,7 +1194,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormMethodAndEncoding"
+    ],
     "enforced": false
   },
   {
@@ -1186,7 +1206,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitterData"
+    ],
     "enforced": false
   },
   {
