@@ -94,6 +94,17 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 3. Làm thao tác đọc trang dễ dùng: Find có số kết quả và cuộn đến kết quả, chọn/sao chép chính xác, zoom có chỉ báo và đặt lại. Kiểm tra bằng chuột, bàn phím và accessibility tree.
 4. Sửa các sai lệch HTML/CSS/JS và chính sách mạng phát hiện qua ma trận này. Mỗi lỗi có fixture hồi quy và so sánh với Chromium/Playwright khi ảnh hưởng đến hiển thị hoặc tương tác.
 
+**Trạng thái "JS Node/DOM API để thư viện tự boot" (cập nhật 2026-10-25, đo trong TASK-039 §2.4 — nhánh C của `GOOSIE-LIVE-001`):**
+- **Đã có trong mã:** `document.nodeType`, `nodeName` và `nodeType` trên mọi node được wrapper, dùng ordinal của DOM Standard (document 9, element 1, text 3, comment 8, doctype 10, fragment 11) và dịch từ ordinal nội bộ của `internal/dom`. Đây là gate đầu tiên của Sizzle/jQuery (`9 === doc.nodeType && doc.documentElement`).
+- **Đã đo, chưa sửa:** sau gate đó jQuery 3.6 vẫn chết ở call kế tiếp. Verbatim trên www.gov.vn (lỗi đầu trong 21 lỗi chưa bắt được): `TypeError: Object has no member 'createDocumentFragment'`; trên bản lưu file://: `Object has no member 'insertBefore'`. Danh sách tối thiểu để một bản jQuery 3.6 boot hết: `createDocumentFragment`, `insertBefore`, `cloneNode`, `childNodes`/`lastChild`, `ownerDocument`, `defaultView`, `getComputedStyle`, `readyState`, kèm dispatch `DOMContentLoaded`/`load`.
+- **Tiêu chí hoàn thành:** mỗi API một fixture riêng trong `testdata/render/js-dom/` với PNG Chromium đo thật và mutation proof giết đúng oracle của nó; gov.vn chỉ được coi là hết nhánh này khi `doc_height > 0` mà **không** cần pump event loop (tức nhánh còn lại bên dưới vẫn còn nguyên).
+- **Còn thiếu:** chưa đo được bao nhiêu trang chỉ thiếu nhóm API này; mỗi API thêm một đường mutation DOM mới nên phải đi kèm gate giới hạn node/depth của `jsNodeBudget`.
+
+**Trạng thái "Chế độ paced và sự kiện JS theo thời gian" (cập nhật 2026-10-25, đo trong TASK-039 §2.4 — nhánh D của `GOOSIE-LIVE-001`):**
+- **Đúng theo thiết kế hiện tại:** `-screenshot`, `-gate` và `-bench` bỏ toolbar/tabManager, load đồng bộ và **không** cài `chromeWindow.setTick`, nên `pumpJS()`/`PumpJS` không bao giờ chạy và session đã load bị bỏ. Nhờ vậy mọi con số gate/bench/parity hiện hành là "một lượt render đồng bộ".
+- **Hệ quả đo được:** mọi reveal cần thời gian (`$('#form1').fadeIn(200)` của gov.vn là ví dụ đo thật duy nhất hiện có) không có cơ hội chạy trong sweep, kể cả khi binding đã đủ API.
+- **Quyết định ghi ở đây thay vì sửa ngay:** bật pump trong chế độ paced sẽ đổi **toàn bộ** đường chuẩn của các cổng đo đang tham chiếu nhau, nên theo Bước 2 của TASK-039, nhánh này được ghi vào roadmap và **defect để mở**, không hạ mức nghiêm trọng. Chưa đo blast radius; cần một task riêng với số liệu hai lần chạy trước/sau.
+
 **Cổng P2:** các luồng đã công bố chạy lặp lại được trong bộ kiểm thử tự động và qua ứng dụng native. Không dùng tỷ lệ WPT chung để thay cho kết quả hành trình người dùng.
 
 ### P3 — Tiện ích và hoàn thiện sản phẩm
