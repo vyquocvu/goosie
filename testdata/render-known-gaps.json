@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "min_ink": 200,
+  "ink_cutoff": 245,
+  "band_gap_rows": 6,
+  "min_band_height": 6,
+  "known_gaps": [
+    {
+      "fixture": "unicode/02-emoji-symbols.png",
+      "blank_regions": 9,
+      "follow_up_task": "docs/tasks/TASK-023-RENDER-REGION-GAPS.md"
+    },
+    {
+      "fixture": "selectors/02-pseudo-classes.png",
+      "blank_regions": 3,
+      "follow_up_task": "docs/tasks/TASK-023-RENDER-REGION-GAPS.md"
+    },
+    {
+      "fixture": "selectors/03-pseudo-elements.png",
+      "blank_regions": 3,
+      "follow_up_task": "docs/tasks/TASK-023-RENDER-REGION-GAPS.md"
+    },
+    {
+      "fixture": "forms/04-advanced-inputs.png",
+      "blank_regions": 2,
+      "follow_up_task": "docs/tasks/TASK-023-RENDER-REGION-GAPS.md"
+    },
+    {
+      "fixture": "html-features/01-forms-complete.png",
+      "blank_regions": 1,
+      "follow_up_task": "docs/tasks/TASK-023-RENDER-REGION-GAPS.md"
+    }
+  ]
+}
