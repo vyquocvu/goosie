@@ -462,3 +462,29 @@ kèm `MissingCount == số miss` (một lần tăng cho mỗi cú `Glyph` ra tof
 - **Độ trễ các cú miss tiếp theo** (truy vấn binary search trong memo `candidateCoverage`): **~0.018 - 0.025 ms** (~19 µs/rune).
 - **Tổng thời gian rasterize 15 rune miss liên tiếp**: **~280 - 370 µs** (< 0.4 ms).
 
+
+## 11. Verdict của integrator (round 2)
+
+Merge: `git revert --no-edit 8521e1a` trên `main` (=> `b6ecdd1`, khôi phục baseline parity
+round 1: `unicode/02` 9 band -> 1 band), rồi merge `worktree-task-027-glyph-coverage`
+(=> `6074040`). Sau merge, `git diff worktree-task-027-glyph-coverage -- internal/raster/fonts.go
+test/raster/fonts_test.go test/gate/footprint_gate_test.go docs/tasks/TASK-027-GLYPH-COVERAGE.md
+testdata/render-known-gaps.json` **rỗng**, nên thứ đang chạy trên `main` đúng là thứ đã được đo.
+
+Đo lại trên branch trước khi merge (`b0398cb`): `go test -count=1 ./...` rc 0 (0 dòng FAIL),
+`go vet -all ./...` rc 0, `make parity` 80/80 average 96.07%, known gaps giữ nguyên
+5 fixtures / 10 bands — task này không làm tăng band nào, cũng không claim giảm band.
+
+Đo lại trên `main` sau merge (`6074040`): full suite rc 0, parity 80/80, baseline không đổi.
+
+Bằng chứng mutation **integrator tự chạy lại**, không tin báo cáo: M-A (cap = 0) FAIL
+`TestCoverageResolver` + `TestLazyFallbackHostFonts`; M-B (bỏ trần 4 MiB) FAIL
+`FallbackFilesRead = 1, want 0`; M-C (bỏ memo stat-fail) FAIL `fallback hook called 18
+additional times`; M-D (bỏ memo coverage) FAIL `grew from 2 to 20`. §10.5 ban đầu chỉ lấy mẫu
+3 rune/nhóm; đo toàn khoảng tìm ra 6 code point thật sự thiếu (`U+03A2`, `U+063B-U+063F`) nên
+oracle đã viết lại thành hai chiều và **hai mutation mới cũng bị giết**: M-F
+(`tofuAdvanceFixed` trả 0) FAIL `rune U+03A2 non-positive advance: 0`, M-G (tofu báo
+`Missing: false`) FAIL `declared gap rune U+03A2 now resolves ... the gap list is stale`.
+
+Không đóng `GOOSIE-COVERAGE-001`: emoji màu (sbix/COLR) và CJK vẫn tofu; §10.5/§11 ghi rõ
+phần nào là gap có chủ đích.

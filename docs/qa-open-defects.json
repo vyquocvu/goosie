@@ -38,11 +38,11 @@
   {
     "id": "GOOSIE-AX-001",
     "priority": "P1",
-    "status": "open",
+    "status": "closed",
     "owner": "docs/tasks/TASK-032-SELECT-ACCESSIBILITY-NODE.md",
     "summary": "<select> has no node in the accessibility tree, so an assistive user cannot see or operate the control at all - even though TASK-030 made it keyboard-operable.",
-    "evidence": "BR-139. Measured while writing the BR-101 journey: the layout arena carries obj tag=\"select\" id=\"sel\", Session.AccessibilityTree() under the form returns only role=4 id=\"send\"; cmd/goosie clickNode therefore cannot address a select (journey uses clickElementByID). Recorded in docs/tasks/TASK-030-SELECT-INTERACTION.md §9.4.",
-    "closed_by": ""
+    "evidence": "BR-139. Measured while writing the BR-101 journey: the layout arena carries obj tag=\"select\" id=\"sel\", Session.AccessibilityTree() under the form returns only role=4 id=\"send\"; cmd/goosie clickNode therefore cannot address a select (journey uses clickElementByID). Recorded in docs/tasks/TASK-030-SELECT-INTERACTION.md §9.4. Closed on 910c445 (feature 3c16f37). Oracles: test/engine/accessibility_test.go:TestAccessibilitySelectComboBoxAndOptions and :TestAccessibilitySelectTracksMoveSelect, both tagged // qc:BR-139, plus internal/platform/darwin/ax_role_test.go pinning the AppKit role codes. The integrator re-ran all five mutations on the branch and each one turned the feature off, then passed again on revert: emitter removed (combo missing), every option marked selected (\"selected options = 3, want exactly 1\"), combo value read from the select's value attribute (\"combo value = \\\"\\\"\"), selectedness computed by index instead of the attribute (\"Label:One ... want Two/two\" after MoveSelect), and RoleComboBox mapped to GROUP (\"maps to 1, want GOOSIE_AX_COMBO_BOX (12)\"). cmd/goosie/journey_p1_forms_test.go:TestJourneySelectOptionChange now reaches the control through clickNode, i.e. through the accessibility tree, instead of clickElementByID. Disclosed: VoiceOver itself was never exercised - the darwin oracle asserts the role code, not what a screen reader says, so mutation (v) of the task spec has no behavioural test.",
+    "closed_by": "910c445"
   },
   {
     "id": "GOOSIE-PSEUDO-001",
@@ -59,7 +59,7 @@
     "status": "open",
     "owner": "docs/tasks/TASK-027-GLYPH-COVERAGE.md",
     "summary": "Colour emoji still draw as tofu: golang.org/x/image/font/opentype does not read sbix/COLR tables.",
-    "evidence": "TASK-027 killed 8 of the 9 blank bands in unicode/02-emoji-symbols.png; the remaining band at rows (451,470) is Chromium's Apple Color Emoji line box (~26px) versus Goosie's 18px tofu line, i.e. cumulative vertical drift, not a missing glyph. Note added to docs/roadmap-v2.md.",
+    "evidence": "TASK-027 killed 8 of the 9 blank bands in unicode/02-emoji-symbols.png; the remaining band at rows (451,470) is Chromium's Apple Color Emoji line box (~26px) versus Goosie's 18px tofu line, i.e. cumulative vertical drift, not a missing glyph. Note added to docs/roadmap-v2.md. TASK-027 round 2 merged at 6074040: candidates are ordered by measured coverage, a face is admitted only when its cmap covers the rune, coverage is memoized per candidate path, and the 4 MiB ceiling is checked by os.Stat before ReadFile. Measured over whole ranges instead of samples: 364 non-CJK code points across 8 scripts, 358 resolve, and exactly 6 miss - U+03A2 (Greek), U+063B-U+063F (Arabic) - which the oracle now declares as gaps in both directions. CJK stays tofu on this host by admission design: every system CJK face is over the ceiling (Arial Unicode 22.2 MiB, STHeiti 55.7, Songti 66.9, PingFang ~50-80), so colour-emoji and CJK coverage remain the open half of this defect. The 6 Greek/Arabic code points are unrenderable by any admitted host face under the ceiling and are not tracked separately.",
     "closed_by": ""
   },
   {
@@ -103,8 +103,8 @@
     "priority": "P1",
     "status": "open",
     "owner": "docs/tasks/TASK-014-QC-TRACEABILITY.md",
-    "summary": "104 of the 161 P0/P1 QA cases still have no tagged test, so most of the manual catalogue remains unverified automatically even though every P0 case is now tagged.",
-    "evidence": "test/qc/traceability.golden.json at 960b722: 185 cases, P0 19/19 tagged, P0+P1 161 cases of which 57 tagged, so 104 P1 cases have no tagged test. Split by catalog method: 74 carry only machine-checkable methods (INT/PARITY/SEC), 13 pair CUA with a machine method, and 17 are labelled CUA-only - but docs/tasks/TASK-035-CHROME-STATE-ZOOM-AX.md §1 measured that BR-126/127/128/129/130/131 of that last group already ship real app paths (cmd/goosie/toolbar_window.go:286-290 disabled flags and the Stop label swap, cmd/goosie/interaction.go:648-657 clampZoom) and are assertable through the accessibility tree, so CUA-only overstates how much must stay manual. scripts/rc-sweep.sh:117-119 fails only when a P0 case loses its test or the count falls below docs/qa-ratchet.json, so the untagged majority is invisible to the gate.",
+    "summary": "103 of the 161 P0/P1 QA cases still have no tagged test, so most of the manual catalogue remains unverified automatically even though every P0 case is now tagged.",
+    "evidence": "test/qc/traceability.golden.json at 910c445: 185 cases, P0 19/19 tagged, P0+P1 161 cases of which 58 tagged, so 103 P1 cases have no tagged test. Split by catalog method: 73 carry only machine-checkable methods (INT/PARITY/SEC) - BR-139 was one of them until TASK-032 tagged it, 13 pair CUA with a machine method, and 17 are labelled CUA-only - but docs/tasks/TASK-035-CHROME-STATE-ZOOM-AX.md §1 measured that BR-126/127/128/129/130/131 of that last group already ship real app paths (cmd/goosie/toolbar_window.go:286-290 disabled flags and the Stop label swap, cmd/goosie/interaction.go:648-657 clampZoom) and are assertable through the accessibility tree, so CUA-only overstates how much must stay manual. scripts/rc-sweep.sh:117-119 fails only when a P0 case loses its test or the count falls below docs/qa-ratchet.json, so the untagged majority is invisible to the gate.",
     "closed_by": ""
   }
 ]

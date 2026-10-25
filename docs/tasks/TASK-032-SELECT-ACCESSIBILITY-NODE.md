@@ -87,7 +87,7 @@ vào enum không được làm đổi số thứ tự role cũ. Không đổi th
 
 ## 6. Status
 
-Implemented on `worktree-task-032-select-ax` from `960b722`.
+Implemented on `worktree-task-032-select-ax` from `960b722`, merged into `main` at `910c445`.
 
 - Added `RoleComboBox` (12) and `RoleOption` (13) at the end of the role enum; existing
   role numbers remain unchanged.
@@ -215,3 +215,19 @@ ok  	github.com/vyquocvu/goosie/test/qc	0.505s
 `python3 testdata/parity.py`: `80/80 passing (100.0%), 0 failing, 0 errors`; average match
 `96.07%` (threshold 30, pass_at 90.0%). AX additions do not alter pixels; parity was run as
 requested for the VoiceOver-visible output and confirmed the render baseline remains green.
+
+The integrator re-ran all five mutations above on the branch and each produced the quoted
+FAIL, then PASS on revert (verdict recorded in `docs/qa-open-defects.json`, `GOOSIE-AX-001`).
+Two disclosures the agent did not volunteer, found while reviewing the diff:
+
+* Option nodes carry the **select's** bounds, not their own, because a collapsed `<select>`
+  lays its options out nowhere. An AX client that hit-tests option rects will get the combo
+  rect for every option. Not wrong for a collapsed control, but it is a limitation, not a
+  measurement of option geometry.
+* The option value rule (value attribute, else text content) now exists in **three** places:
+  `forms.go:213` `controlValue`, the `Session.controlValue` method (`focus.go:537`) and inline
+  in `accessibility.go`. They agree today because all three delegate selectedness to
+  `SelectedOption`, and `SelectedOption` and `forms.go` both pick the *first* `selected`
+  option while HTML picks the *last*. Neither the duplication nor the first/last difference
+  is covered by a test; unify them (or pin the tie-break with a test) before writing another
+  consumer of this value.
