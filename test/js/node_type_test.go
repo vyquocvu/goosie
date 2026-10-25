@@ -20,6 +20,7 @@ import (
 // reveal of `<form id="form1" style="display:none">` (the entire body, 11,859
 // visible characters) never happen, and Goosie painted 0 ink pixels where
 // Chromium painted 501,735 - with rc 0 and not one line on stderr.
+// qc:BR-188
 func TestNodeTypeUsesDOMStandardOrdinals(t *testing.T) {
 	doc := domtest.Parse(`<html><head><title>t</title></head><body><p id="p">hi</p></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -58,6 +59,7 @@ func TestNodeTypeUsesDOMStandardOrdinals(t *testing.T) {
 // below is the gate and its consequence, written out: pass the gate and the
 // hidden block is revealed, fail it and nothing after the gate runs. This is
 // the shape measured on www.gov.vn, reduced to what can be checked offline.
+// qc:BR-188
 func TestLibrarySetupGatePassesTheDocument(t *testing.T) {
 	doc := domtest.Parse(`<html><head></head><body><div id="gate"></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})

@@ -25,6 +25,7 @@ import (
 // instead of the page, and an accepted answer stays silent so the line keeps
 // meaning something.
 
+// qc:BR-190
 func TestGoosieScreenshotReportsARefusedDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -72,6 +73,7 @@ func TestGoosieScreenshotReportsARefusedDocument(t *testing.T) {
 	}
 }
 
+// qc:BR-190
 func TestGoosieScreenshotStaysSilentOnAnAcceptedDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 

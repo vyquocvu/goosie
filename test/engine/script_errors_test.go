@@ -16,6 +16,7 @@ import (
 // jQuery bundle - and the engine discarded every one of
 // them. Isolation is the behaviour under test first (a broken script must still
 // not take the page down); recording is the new half.
+// qc:BR-189
 func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -79,6 +80,7 @@ func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 // A page controls how often it throws and how long each message is, so neither
 // may grow the session or the report line. This is the cap that keeps the new
 // reporting safe against the input it reports on.
+// qc:BR-189
 func TestScriptErrorWindowAndMessageAreBounded(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -120,6 +122,7 @@ func TestScriptErrorWindowAndMessageAreBounded(t *testing.T) {
 // Silence means silence: a document that does not throw must record nothing and
 // free the caller from printing anything. This is the case that keeps the new
 // line off the stderr of every page that already works.
+// qc:BR-189
 func TestCleanDocumentRecordsNoScriptErrors(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -147,6 +150,7 @@ func TestCleanDocumentRecordsNoScriptErrors(t *testing.T) {
 // way a broken page script does, and must still not stop the userscripts after
 // it. Without this test the userscript half of the recording is unobserved and
 // can be removed without anything failing.
+// qc:BR-189
 func TestUserScriptErrorsAreRecordedAndLaterScriptsStillRun(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {

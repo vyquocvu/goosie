@@ -20,6 +20,7 @@ import (
 // The unit tests in ./cmd/goosie pin what reportScriptErrors writes; only this
 // file can pin that the document load calls it at all.
 
+// qc:BR-190
 func TestGoosieScreenshotReportsUncaughtScriptErrors(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -61,6 +62,7 @@ func TestGoosieScreenshotReportsUncaughtScriptErrors(t *testing.T) {
 	}
 }
 
+// qc:BR-190
 func TestGoosieScreenshotStaysSilentForACleanDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 

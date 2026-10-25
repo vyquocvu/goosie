@@ -1442,6 +1442,53 @@
     "enforced": false
   },
   {
+    "id": "BR-188",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/node_type_test.go:TestLibrarySetupGatePassesTheDocument",
+      "test/js/node_type_test.go:TestNodeTypeUsesDOMStandardOrdinals"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-189",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_errors_test.go:TestCleanDocumentRecordsNoScriptErrors",
+      "test/engine/script_errors_test.go:TestScriptErrorWindowAndMessageAreBounded",
+      "test/engine/script_errors_test.go:TestUncaughtScriptErrorsAreRecordedAndIsolated",
+      "test/engine/script_errors_test.go:TestUserScriptErrorsAreRecordedAndLaterScriptsStillRun"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-190",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/script_errors_test.go:TestReportRefusedDocumentNamesTheStatusAndTheBody",
+      "cmd/goosie/script_errors_test.go:TestReportScriptErrorsIsSilentOnACleanDocument",
+      "cmd/goosie/script_errors_test.go:TestReportScriptErrorsNamesTheFailingScript",
+      "test/entrypoints/refused_document_report_test.go:TestGoosieScreenshotReportsARefusedDocument",
+      "test/entrypoints/refused_document_report_test.go:TestGoosieScreenshotStaysSilentOnAnAcceptedDocument",
+      "test/entrypoints/script_error_report_test.go:TestGoosieScreenshotReportsUncaughtScriptErrors",
+      "test/entrypoints/script_error_report_test.go:TestGoosieScreenshotStaysSilentForACleanDocument"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

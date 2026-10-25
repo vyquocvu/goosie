@@ -15,6 +15,7 @@ import (
 // reportScriptErrors is the place that line gets written, so that is where the
 // contract is pinned: a page that broke names the script, a page that did not
 // breaks the silence of its own stderr.
+// qc:BR-190
 func TestReportScriptErrorsNamesTheFailingScript(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -53,6 +54,7 @@ func TestReportScriptErrorsNamesTheFailingScript(t *testing.T) {
 	}
 }
 
+// qc:BR-190
 func TestReportScriptErrorsIsSilentOnACleanDocument(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -78,6 +80,7 @@ func TestReportScriptErrorsIsSilentOnACleanDocument(t *testing.T) {
 // a small interstitial document, the pipeline renders it as any other page, and
 // the run looks exactly like a page that is genuinely empty. The status is the
 // only fact that tells the two apart, and it was recorded nowhere.
+// qc:BR-190
 func TestReportRefusedDocumentNamesTheStatusAndTheBody(t *testing.T) {
 	var buf bytes.Buffer
 	reportRefusedDocument(&buf, &net.Response{
