@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>SVG - Path Lines</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        h2 { margin: 0 0 10px; }
+        svg { background: #ffffff; display: block; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+    <h2>Absolute M L Z and relative m l h v z</h2>
+    <svg width="380" height="120">
+        <path d="M 10 10 L 110 10 L 110 100 L 10 100 Z" fill="#e67e22" />
+        <path d="M 150 10 h 60 v 60 h -60 z" fill="#27ae60" />
+        <path d="m 250 10 l 50 0 l 0 50 z" fill="#2980b9" />
+    </svg>
+
+    <h2>Open path stroked, closed path filled, implicit lineto repeat</h2>
+    <svg width="380" height="130">
+        <path d="M 10 120 L 60 20 L 110 120" fill="none" stroke="#2c3e50" stroke-width="8" />
+        <path d="M 150 120 L 200 20 L 250 120 Z" fill="#c0392b" />
+        <path d="M 270 20 300 120 330 20 360 120" fill="none" stroke="#8e44ad" stroke-width="8" />
+    </svg>
+</body>
+</html>

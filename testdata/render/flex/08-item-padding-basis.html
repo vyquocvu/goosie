@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Flexbox - Item Padding And Explicit Basis</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; font-size: 14px; line-height: 18px; }
+        h2 { margin: 0 0 8px; }
+        .row {
+            display: flex;
+            background: #ecf0f1;
+            border: 2px solid #34495e;
+            margin: 0 0 18px;
+        }
+        /* box-sizing stays content-box, so the declared width is the content
+           width and the padding sits outside it. The containing width handed
+           to the item's own block layout has to account for that padding
+           exactly once. */
+        .item {
+            width: 140px;
+            padding: 9px;
+            background: #ffffff;
+            border: 2px solid #2ecc71;
+        }
+        .item .pad { background: #f9e79f; }
+        .item p { margin: 0; background: #aed6f1; }
+        .bordered { border-width: 2px 14px; border-style: solid; border-color: #8e44ad; }
+    </style>
+</head>
+<body>
+    <h2>Explicit width plus symmetric padding</h2>
+    <div class="row">
+        <div class="item"><p>alpha beta gamma delta epsilon zeta eta theta</p></div>
+        <div class="item"><div class="pad">alpha beta gamma delta epsilon zeta eta theta</div></div>
+    </div>
+
+    <h2>Explicit width plus padding plus thick horizontal borders</h2>
+    <div class="row">
+        <div class="item bordered"><p>alpha beta gamma delta epsilon zeta eta theta</p></div>
+        <div class="item bordered"><div class="pad">alpha beta gamma delta epsilon zeta eta theta</div></div>
+    </div>
+
+    <h2>Padding with margins, wrap-none distribution</h2>
+    <div class="row">
+        <div class="item" style="margin: 0 12px;"><p>one two three four five six seven eight</p></div>
+        <div class="item" style="margin: 0 12px;"><div class="pad">one two three four five six seven eight</div></div>
+    </div>
+</body>
+</html>

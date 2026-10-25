@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>SVG - Basic Shapes</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        h2 { margin: 0 0 10px; }
+        svg { background: #ffffff; display: block; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+    <h2>Filled shapes</h2>
+    <svg width="380" height="170">
+        <rect x="10" y="10" width="100" height="60" fill="#2ecc71" />
+        <rect x="130" y="10" width="100" height="60" fill="#3498db" stroke="#e74c3c" stroke-width="8" />
+        <circle cx="60" cy="120" r="38" fill="#9b59b6" />
+        <ellipse cx="200" cy="120" rx="55" ry="28" fill="#f39c12" />
+    </svg>
+
+    <h2>Stroked shapes</h2>
+    <svg width="380" height="170">
+        <line x1="10" y1="25" x2="170" y2="25" stroke="#c0392b" stroke-width="8" />
+        <line x1="200" y1="10" x2="200" y2="150" stroke="#2c3e50" stroke-width="10" />
+        <polygon points="240,15 350,15 350,95 240,95" fill="#16a085" />
+        <polyline points="230,150 260,105 290,150 320,105 350,150" fill="none" stroke="#8e44ad" stroke-width="8" />
+    </svg>
+</body>
+</html>

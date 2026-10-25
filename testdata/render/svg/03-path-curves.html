@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>SVG - Path Curves and Arcs</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        h2 { margin: 0 0 10px; }
+        svg { background: #ffffff; display: block; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+    <h2>Cubic C and smooth S, quadratic Q and smooth T</h2>
+    <svg width="380" height="110">
+        <path d="M 10 60 C 60 5 120 105 170 50" fill="none" stroke="#8e44ad" stroke-width="8" />
+        <path d="M 200 60 C 230 10 260 10 290 60 S 350 110 370 60" fill="none" stroke="#2c3e50" stroke-width="8" />
+    </svg>
+    <svg width="380" height="110">
+        <path d="M 10 80 Q 90 5 170 80" fill="none" stroke="#16a085" stroke-width="8" />
+        <path d="M 200 80 Q 245 10 290 80 T 380 80" fill="none" stroke="#d35400" stroke-width="8" />
+    </svg>
+
+    <h2>Arcs A (large-arc and sweep flags)</h2>
+    <svg width="380" height="130">
+        <path d="M 20 100 A 45 45 0 0 1 110 100" fill="none" stroke="#e74c3c" stroke-width="8" />
+        <path d="M 150 100 A 45 45 0 1 1 240 100" fill="none" stroke="#3498db" stroke-width="8" />
+        <path d="M 270 30 A 20 45 0 0 0 270 120" fill="none" stroke="#f39c12" stroke-width="8" />
+    </svg>
+
+    <h2>Filled curve blob</h2>
+    <svg width="380" height="130">
+        <path d="M 30 110 C 30 20 190 20 190 110 C 190 160 30 160 30 110 Z" fill="#f1c40f" />
+        <path d="M 230 110 Q 300 10 370 110 Q 300 170 230 110 Z" fill="#1abc9c" />
+    </svg>
+</body>
+</html>

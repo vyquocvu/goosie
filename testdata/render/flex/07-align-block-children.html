@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Flexbox - Cross Axis Align With Block Children</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; font-size: 14px; }
+        h2 { margin: 0 0 8px; }
+        .row {
+            display: flex;
+            height: 210px;
+            background: #ecf0f1;
+            border: 2px solid #34495e;
+            margin: 0 0 18px;
+        }
+        .end { align-items: flex-end; }
+        .center { align-items: center; }
+        /* The item clips its own content: if cross-axis alignment moves the
+           item box without moving its block subtree, the child is clipped out
+           and the item renders empty. */
+        .item {
+            width: 110px;
+            overflow: hidden;
+            background: #ffffff;
+            border: 2px solid #2ecc71;
+        }
+        .item p { margin: 0; padding: 4px; background: #f1948a; color: #ffffff; }
+        .tall { height: 120px; }
+        .short { height: 46px; }
+    </style>
+</head>
+<body>
+    <h2>align-items: flex-end on items whose content is block-level</h2>
+    <div class="row end">
+        <div class="item tall"><p>A</p><div class="tall"></div></div>
+        <div class="item short"><p>B</p><div class="short"></div></div>
+        <div class="item tall"><p>C</p><div class="tall"></div></div>
+    </div>
+
+    <h2>align-items: center on items whose content is block-level</h2>
+    <div class="row center">
+        <div class="item tall"><p>A</p><div class="tall"></div></div>
+        <div class="item short"><p>B</p><div class="short"></div></div>
+        <div class="item tall"><p>C</p><div class="tall"></div></div>
+    </div>
+
+    <h2>align-items: flex-start (control)</h2>
+    <div class="row">
+        <div class="item tall"><p>A</p><div class="tall"></div></div>
+        <div class="item short"><p>B</p><div class="short"></div></div>
+        <div class="item tall"><p>C</p><div class="tall"></div></div>
+    </div>
+</body>
+</html>

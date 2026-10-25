@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>SVG - viewBox Sizing</title>
+    <style>
+        body { margin: 10px; font-family: sans-serif; }
+        h2 { margin: 0 0 4px; font-size: 14px; }
+        .box { background: #ecf0f1; margin: 0 0 8px; }
+        .full { width: 760px; }
+        .half { width: 380px; }
+        svg { display: block; }
+    </style>
+</head>
+<body>
+    <h2>No width/height: fills the 760px container at the viewBox ratio</h2>
+    <div class="box full">
+        <svg viewBox="0 0 380 90" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="10,80 190,10 370,80" fill="#e74c3c" />
+            <circle cx="190" cy="55" r="22" fill="#ffffff" />
+        </svg>
+    </div>
+
+    <h2>Square viewBox in a 380px container: 380x380</h2>
+    <div class="box half">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="4" width="56" height="56" fill="#2980b9" />
+            <rect x="20" y="20" width="24" height="24" fill="#f1c40f" />
+        </svg>
+    </div>
+
+    <h2>Explicit width only, height from the viewBox ratio</h2>
+    <div class="box full">
+        <svg width="380" viewBox="0 0 380 190" xmlns="http://www.w3.org/2000/svg">
+            <ellipse cx="190" cy="95" rx="180" ry="85" fill="#27ae60" />
+            <polygon points="60,150 190,40 320,150" fill="#ecf0f1" />
+        </svg>
+    </div>
+</body>
+</html>

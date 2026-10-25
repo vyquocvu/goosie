@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Floats - Clear Directions</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; font-size: 14px; line-height: 20px; }
+        h2 { margin: 0 0 8px; }
+        .wrap { background: #ecf0f1; padding: 8px; margin: 0 0 16px; }
+        .f-left { float: left; width: 140px; height: 70px; background: #e74c3c; margin: 0 10px 6px 0; }
+        .f-right { float: right; width: 140px; height: 90px; background: #3498db; margin: 0 0 6px 10px; }
+        .clear-left { clear: left; background: #27ae60; height: 26px; }
+        .clear-right { clear: right; background: #f39c12; height: 26px; }
+        .clear-both { clear: both; background: #8e44ad; height: 26px; }
+        p { margin: 0 0 6px; }
+    </style>
+</head>
+<body>
+    <h2>clear: left after a left float</h2>
+    <div class="wrap">
+        <div class="f-left"></div>
+        <p>Text that must wrap into the space beside the float rather than under it, so the paragraph occupies the column to the right of the red box for as long as the float is alive.</p>
+        <div class="clear-left"></div>
+    </div>
+
+    <h2>clear: right after a right float</h2>
+    <div class="wrap">
+        <div class="f-right"></div>
+        <p>Text beside a right float. The float hangs on the right edge and this paragraph should fill the remaining width on the left before the orange bar clears it.</p>
+        <div class="clear-right"></div>
+    </div>
+
+    <h2>Two opposing floats, then clear: both</h2>
+    <div class="wrap">
+        <div class="f-left"></div>
+        <div class="f-right"></div>
+        <p>Text between a left float and a right float, squeezed into the middle column until the purple bar clears both.</p>
+        <div class="clear-both"></div>
+    </div>
+
+    <h2>clear: left must also pass a taller right float</h2>
+    <div class="wrap">
+        <div class="f-right" style="height: 120px;"></div>
+        <div class="f-left" style="height: 40px;"></div>
+        <div class="clear-left"></div>
+    </div>
+</body>
+</html>
