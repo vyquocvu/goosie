@@ -101,8 +101,8 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 
 	// 2. Open second tab via Cmd+T
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
-	browser.waitFor(t, "second tab created", func() bool {
-		return browser.f.tabMgr.Count() == 2
+	browser.waitFor(t, "second tab created and focused", func() bool {
+		return browser.f.tabMgr.Count() == 2 && browser.f.tabMgr.Active().ID() != tab1ID
 	})
 	tab2ID := browser.f.tabMgr.Active().ID()
 	if tab2ID == tab1ID {
@@ -117,8 +117,9 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 
 	// 3. Open third tab via New Tab button click in AX tree
 	browser.clickNode(t, "goosie.new-tab")
-	browser.waitFor(t, "third tab created", func() bool {
-		return browser.f.tabMgr.Count() == 3
+	browser.waitFor(t, "third tab created and focused", func() bool {
+		id := browser.f.tabMgr.Active().ID()
+		return browser.f.tabMgr.Count() == 3 && id != tab1ID && id != tab2ID
 	})
 	tab3ID := browser.f.tabMgr.Active().ID()
 	if tab3ID == tab1ID || tab3ID == tab2ID {
@@ -200,8 +201,8 @@ func TestJourneyCloseActiveTabSelectsNext(t *testing.T) {
 
 	// Open second tab
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
-	browser.waitFor(t, "second tab created", func() bool {
-		return browser.f.tabMgr.Count() == 2
+	browser.waitFor(t, "second tab created and focused", func() bool {
+		return browser.f.tabMgr.Count() == 2 && browser.f.tabMgr.Active().ID() != firstID
 	})
 	secondID := browser.f.tabMgr.Active().ID()
 	if secondID == firstID {
@@ -217,15 +218,13 @@ func TestJourneyCloseActiveTabSelectsNext(t *testing.T) {
 	// Close the active second tab using Cmd+W
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 'w', Mods: surface.ModCommand})
 
-	// Wait for tab count to drop to 1
-	browser.waitFor(t, "tab count decrements after close", func() bool {
-		return browser.f.tabMgr.Count() == 1
+	// Wait for the close to select the next tab: count drops to 1 and the
+	// remaining tab is the one that was open before.
+	browser.waitFor(t, "closed tab hands focus to the remaining tab", func() bool {
+		active := browser.f.tabMgr.Active()
+		return browser.f.tabMgr.Count() == 1 && active != nil && active.ID() == firstID
 	})
 
-	// Assert post-conditions:
-	// - Remaining tab is active
-	// - Correct URL is restored
-	// - AX tree reflects first-doc and Selected on the remaining tab
 	active := browser.f.tabMgr.Active()
 	if active == nil {
 		t.Fatalf("active tab is nil after closing active tab; %s", browser.diagnostics())
