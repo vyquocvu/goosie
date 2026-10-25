@@ -114,12 +114,13 @@ type fetchCallback struct {
 // so that chaining compiles, and return-value propagation between chained
 // calls is handled by propagateToChain.
 type thenableObj struct {
-	r        *Runtime
-	obj      *goja.Object // the JS object with .then() and .catch()
-	mu       sync.Mutex   // guards resolved, rejected, result, thenCB, catchCB, chain
-	resolved bool
-	rejected bool
-	result   interface{} // goja.Value once settled
+	r               *Runtime
+	obj             *goja.Object // the JS object with .then() and .catch()
+	mu              sync.Mutex   // guards resolved, rejected, result, thenCB, catchCB, chain
+	resolved        bool
+	rejected        bool
+	result          interface{} // goja.Value once settled
+	callbackPending bool        // a queued fetch callback will deliver this settlement
 
 	thenCB  goja.Value
 	catchCB goja.Value
@@ -338,12 +339,9 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 			preflightHeaders := buildPreflightHeaders(origin, opts.Method, opts.Headers)
 			preflightResp, err := fs.client.Fetch(fetchURL, "OPTIONS", preflightHeaders, nil)
 			if err != nil {
-				t.mu.Lock()
-				catchCB := t.catchCB
-				t.mu.Unlock()
+				t.settleFetch(nil, "preflight failed: "+err.Error(), true)
 				fs.mu.Lock()
 				fs.callbacks = append(fs.callbacks, fetchCallback{
-					fn:       catchCB,
 					isReject: true,
 					arg:      "preflight failed: " + err.Error(),
 					chain:    t,
@@ -353,12 +351,9 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 			}
 			// Check preflight response
 			if !CheckPreflightResponse(origin, opts.Method, opts.Headers, preflightResp.Headers, withCredentials) {
-				t.mu.Lock()
-				catchCB := t.catchCB
-				t.mu.Unlock()
+				t.settleFetch(nil, "preflight CORS check failed", true)
 				fs.mu.Lock()
 				fs.callbacks = append(fs.callbacks, fetchCallback{
-					fn:       catchCB,
 					isReject: true,
 					arg:      "preflight CORS check failed",
 					chain:    t,
@@ -385,12 +380,9 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 	if err == nil && IsCORSRequest(documentURL, fetchURL) {
 		origin := getOrigin(documentURL)
 		if !CheckCORSResponse(origin, resp.Headers, withCredentials) {
-			t.mu.Lock()
-			catchCB := t.catchCB
-			t.mu.Unlock()
+			t.settleFetch(nil, "CORS check failed: Access-Control-Allow-Origin header missing or mismatched", true)
 			fs.mu.Lock()
 			fs.callbacks = append(fs.callbacks, fetchCallback{
-				fn:       catchCB,
 				isReject: true,
 				arg:      "CORS check failed: Access-Control-Allow-Origin header missing or mismatched",
 				chain:    t,
@@ -400,17 +392,12 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		}
 	}
 
-	t.mu.Lock()
-	thenCB := t.thenCB
-	catchCB := t.catchCB
-	t.mu.Unlock()
-
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
 	if err != nil {
+		t.settleFetch(nil, err.Error(), true)
 		fs.callbacks = append(fs.callbacks, fetchCallback{
-			fn:       catchCB,
 			isReject: true,
 			arg:      err.Error(),
 			chain:    t,
@@ -420,8 +407,8 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 
 	// Per the Fetch spec, non-OK responses still resolve (not reject); the
 	// caller inspects response.ok / response.status to decide.
+	t.settleFetch(resp, nil, false)
 	fs.callbacks = append(fs.callbacks, fetchCallback{
-		fn:       thenCB,
 		isReject: false,
 		arg:      resp,
 		chain:    t,
@@ -462,9 +449,19 @@ func (r *Runtime) newThenable() *thenableObj {
 		// callback was never queued. Fire it now so late-attached
 		// listeners still see the result.
 		if resolved && onOK != nil {
-			r.invokeResolvedCallback(onOK, false, result, chain)
+			t.mu.Lock()
+			pending := t.callbackPending
+			t.mu.Unlock()
+			if !pending {
+				r.invokeResolvedCallback(onOK, false, result, chain)
+			}
 		} else if rejected && onErr != nil {
-			r.invokeResolvedCallback(onErr, true, result, chain)
+			t.mu.Lock()
+			pending := t.callbackPending
+			t.mu.Unlock()
+			if !pending {
+				r.invokeResolvedCallback(onErr, true, result, chain)
+			}
 		}
 
 		return chain.obj
@@ -486,7 +483,12 @@ func (r *Runtime) newThenable() *thenableObj {
 		t.mu.Unlock()
 
 		if rejected && onErr != nil {
-			r.invokeResolvedCallback(onErr, true, result, chain)
+			t.mu.Lock()
+			pending := t.callbackPending
+			t.mu.Unlock()
+			if !pending {
+				r.invokeResolvedCallback(onErr, true, result, chain)
+			}
 		}
 
 		return chain.obj
@@ -711,7 +713,24 @@ func (r *Runtime) PendingFetches() int {
 // argument from the plain-Go data, calls the function, and propagates the
 // return value to a chained thenable if one exists.
 func (r *Runtime) invokeOneCallback(cb fetchCallback) {
-	if cb.fn == nil || goja.IsUndefined(cb.fn) {
+	fn := cb.fn
+	chain := cb.chain
+	if cb.chain != nil {
+		cb.chain.mu.Lock()
+		settled := cb.chain.resolved || cb.chain.rejected
+		if cb.isReject {
+			fn = cb.chain.catchCB
+		} else {
+			fn = cb.chain.thenCB
+		}
+		chain = cb.chain.chain
+		cb.chain.callbackPending = false
+		cb.chain.mu.Unlock()
+		if !settled {
+			return
+		}
+	}
+	if fn == nil || goja.IsUndefined(fn) {
 		// No callback registered. If there is a chain, propagate the raw
 		// value so the chain does not stall.
 		if cb.chain != nil && !cb.isReject {
@@ -721,7 +740,7 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 		}
 		return
 	}
-	f, ok := goja.AssertFunction(cb.fn)
+	f, ok := goja.AssertFunction(fn)
 	if !ok {
 		return
 	}
@@ -740,7 +759,22 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 		return
 	}
 
-	if cb.chain != nil {
-		r.propagateToChain(ret, cb.chain)
+	if chain != nil {
+		r.propagateToChain(ret, chain)
 	}
+}
+
+// settleFetch records a fetch result without touching goja from its worker
+// goroutine. The queued callback is delivered later on the Runtime goroutine.
+func (t *thenableObj) settleFetch(value interface{}, err interface{}, rejected bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.resolved = !rejected
+	t.rejected = rejected
+	if rejected {
+		t.result = err
+	} else {
+		t.result = value
+	}
+	t.callbackPending = true
 }
