@@ -191,7 +191,7 @@ func TestDialog_FormMethodDialog(t *testing.T) {
 		closeFired = true
 	}, false)
 
-	sess.SubmitForm(form)
+	sess.SubmitForm(form, nil)
 
 	if dlg.HasAttribute("open") || dlg.IsModal {
 		t.Fatal("dialog should be closed after method=dialog submission")

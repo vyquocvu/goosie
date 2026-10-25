@@ -73,7 +73,7 @@ func buildTestForm() *dom.Node {
 
 func TestCollectFormDataText(t *testing.T) {
 	form := buildTestForm()
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	found := false
 	for _, d := range data {
@@ -92,7 +92,7 @@ func TestCollectFormDataText(t *testing.T) {
 
 func TestCollectFormDataHidden(t *testing.T) {
 	form := buildTestForm()
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	found := false
 	for _, d := range data {
@@ -111,7 +111,7 @@ func TestCollectFormDataHidden(t *testing.T) {
 
 func TestCollectFormDataCheckbox(t *testing.T) {
 	form := buildTestForm()
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	// Should find checked checkbox
 	foundChecked := false
@@ -135,7 +135,7 @@ func TestCollectFormDataCheckbox(t *testing.T) {
 
 func TestCollectFormDataTextarea(t *testing.T) {
 	form := buildTestForm()
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	found := false
 	for _, d := range data {
@@ -154,7 +154,7 @@ func TestCollectFormDataTextarea(t *testing.T) {
 
 func TestCollectFormDataSelect(t *testing.T) {
 	form := buildTestForm()
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	found := false
 	for _, d := range data {
@@ -173,7 +173,7 @@ func TestCollectFormDataSelect(t *testing.T) {
 
 func TestCollectFormDataSkipsDisabled(t *testing.T) {
 	form := buildTestForm()
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	for _, d := range data {
 		if d.Name == "disabled_field" {
@@ -199,7 +199,7 @@ func TestCollectFormDataSkipsUnnamed(t *testing.T) {
 	input2.SetAttribute("value", "yes")
 	form.AppendChild(input2)
 
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	if len(data) != 1 {
 		t.Errorf("len(data) = %d, want 1", len(data))
@@ -222,7 +222,7 @@ func TestCollectFormDataMaxControls(t *testing.T) {
 		form.AppendChild(input)
 	}
 
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 
 	if len(data) > engine.MaxFormControls {
 		t.Errorf("len(data) = %d, want <= %d", len(data), engine.MaxFormControls)

@@ -229,7 +229,7 @@ func TestSubmitFormFiresSubmitEvent(t *testing.T) {
 		submitFired = true
 	}, false)
 
-	s.SubmitForm(formNode)
+	s.SubmitForm(formNode, nil)
 	if !submitFired {
 		t.Fatal("submit event was not fired")
 	}

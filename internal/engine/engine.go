@@ -1532,7 +1532,7 @@ func (s *Session) runClickDefault(n *dom.Node) {
 			s.ToggleControl(n)
 		case "submit":
 			if form := FindForm(n); form != nil {
-				s.SubmitForm(form)
+				s.SubmitForm(form, n)
 			}
 		case "reset":
 			if form := FindForm(n); form != nil {
@@ -1561,7 +1561,7 @@ func (s *Session) runClickDefault(n *dom.Node) {
 		switch btnType {
 		case "submit", "":
 			if form := FindForm(n); form != nil {
-				s.SubmitForm(form)
+				s.SubmitForm(form, n)
 			}
 		case "reset":
 			if form := FindForm(n); form != nil {
@@ -1610,21 +1610,29 @@ type FormSubmission struct {
 // SubmitForm fires a cancelable "submit" event on the form, then collects form
 // data and encodes it. The submission details are stored on the session for
 // the host to retrieve via PopSubmittedForm.
-func (s *Session) SubmitForm(form *dom.Node) {
+func (s *Session) SubmitForm(form, submitter *dom.Node) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	s.submitFormLocked(form)
+	s.submitFormLocked(form, submitter)
 }
 
-func (s *Session) submitFormLocked(form *dom.Node) {
+func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	if form == nil {
+		return
+	}
+	invalid := ValidateForm(form)
+	if len(invalid) > 0 {
+		for _, control := range invalid {
+			dom.DispatchEvent(control, dom.NewEvent("invalid", false, false))
+		}
+		s.setFocusedNodeLocked(invalid[0])
 		return
 	}
 	ev := dom.NewEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
-	data := CollectFormData(form)
+	data := CollectFormData(form, submitter)
 	method := FormMethod(form)
 	if strings.EqualFold(method, "dialog") {
 		for cur := form.Parent; cur != nil; cur = cur.Parent {

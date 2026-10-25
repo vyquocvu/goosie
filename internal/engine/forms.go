@@ -2,6 +2,7 @@ package engine
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -23,20 +24,24 @@ type FormData struct {
 // It walks the form's subtree in tree order and collects name/value pairs
 // from input, select, textarea, and button elements.
 // Disabled controls and controls without a name attribute are skipped.
-func CollectFormData(form *dom.Node) []FormData {
+func CollectFormData(form, submitter *dom.Node) []FormData {
 	if form == nil {
 		return nil
 	}
 	var data []FormData
-	collectFromNode(form, form, &data)
+	collectFromNode(form, form, submitter, &data)
 	return data
 }
 
-func collectFromNode(n, form *dom.Node, data *[]FormData) {
+func collectFromNode(n, form, submitter *dom.Node, data *[]FormData) {
 	if len(*data) >= MaxFormControls {
 		return
 	}
-	if n.Element() && isSuccessfulControl(n, form) {
+	if n == submitter {
+		if isSubmitButton(n, form) && n.GetAttribute("name") != "" {
+			*data = append(*data, FormData{Name: n.GetAttribute("name"), Value: controlValue(n)})
+		}
+	} else if n.Element() && isSuccessfulControl(n, form) {
 		name := n.GetAttribute("name")
 		if name != "" {
 			value := controlValue(n)
@@ -44,8 +49,123 @@ func collectFromNode(n, form *dom.Node, data *[]FormData) {
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		collectFromNode(c, form, data)
+		collectFromNode(c, form, submitter, data)
 	}
+}
+
+func isSubmitButton(n, form *dom.Node) bool {
+	if n == nil || !n.Element() || n.HasAttribute("disabled") || FindForm(n) != form {
+		return false
+	}
+	switch n.Data {
+	case "input":
+		return strings.EqualFold(n.GetAttribute("type"), "submit")
+	case "button":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		return typ == "" || typ == "submit"
+	default:
+		return false
+	}
+}
+
+// FirstSubmitButton returns the first enabled submit button in tree order.
+func FirstSubmitButton(form *dom.Node) *dom.Node {
+	if form == nil {
+		return nil
+	}
+	var found *dom.Node
+	var walk func(*dom.Node)
+	walk = func(n *dom.Node) {
+		if n == nil || found != nil {
+			return
+		}
+		if isSubmitButton(n, form) {
+			found = n
+			return
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(form)
+	return found
+}
+
+// ValidateForm returns invalid controls in tree order. This intentionally
+// implements only required, email, and number constraints.
+func ValidateForm(form *dom.Node) []*dom.Node {
+	if form == nil || form.HasAttribute("novalidate") {
+		return nil
+	}
+	var controls, invalid []*dom.Node
+	var walk func(*dom.Node)
+	walk = func(n *dom.Node) {
+		if n == nil {
+			return
+		}
+		if n.Element() && (n.Data == "input" || n.Data == "textarea" || n.Data == "select") &&
+			!n.HasAttribute("disabled") && n.HasAttribute("name") {
+			controls = append(controls, n)
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(form)
+
+	invalidSet := make(map[*dom.Node]bool)
+	radioGroups := make(map[string][]*dom.Node)
+	for _, n := range controls {
+		if n.Data == "input" && strings.EqualFold(n.GetAttribute("type"), "radio") {
+			radioGroups[n.GetAttribute("name")] = append(radioGroups[n.GetAttribute("name")], n)
+		}
+	}
+	for _, n := range controls {
+		value := controlValue(n)
+		typ := ""
+		if n.Data == "input" {
+			typ = strings.ToLower(n.GetAttribute("type"))
+		}
+		if n.HasAttribute("required") {
+			empty := value == ""
+			switch typ {
+			case "checkbox":
+				empty = !n.HasAttribute("checked")
+			case "radio":
+				group := radioGroups[n.GetAttribute("name")]
+				checked := false
+				for _, member := range group {
+					checked = checked || member.HasAttribute("checked")
+				}
+				if !checked && len(group) > 0 {
+					invalidSet[group[0]] = true
+				}
+				empty = false
+			case "":
+				if n.Data == "select" {
+					empty = value == ""
+				}
+			}
+			if empty {
+				invalidSet[n] = true
+			}
+		}
+		if value != "" && typ == "email" && !strings.Contains(value, "@") {
+			invalidSet[n] = true
+		}
+		if value != "" && typ == "number" {
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+			if err != nil || parsed != parsed || parsed > 1.7976931348623157e308 || parsed < -1.7976931348623157e308 {
+				invalidSet[n] = true
+			}
+		}
+	}
+	for _, n := range controls {
+		if invalidSet[n] {
+			invalid = append(invalid, n)
+		}
+	}
+	return invalid
 }
 
 // isSuccessfulControl reports whether n is a successful control per HTML spec.
@@ -68,8 +188,7 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 		typ := strings.ToLower(n.GetAttribute("type"))
 		switch typ {
 		case "submit", "button", "reset":
-			// Only successful if used to submit the form
-			return false // handled separately
+			return false // submitter is added at its tree-order position
 		case "checkbox", "radio":
 			// Only successful if checked
 			return n.HasAttribute("checked")
@@ -85,7 +204,7 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 	case "select":
 		return true // value is the selected option
 	case "button":
-		return false // only successful if used to submit
+		return false // submitter is added at its tree-order position
 	}
 	return false
 }
@@ -94,7 +213,12 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 func controlValue(n *dom.Node) string {
 	switch n.Data {
 	case "input":
-		return n.GetAttribute("value")
+		value := n.GetAttribute("value")
+		typ := strings.ToLower(n.GetAttribute("type"))
+		if value == "" && (typ == "checkbox" || typ == "radio") {
+			return "on"
+		}
+		return value
 	case "textarea":
 		// Value is the text content
 		return n.TextContent()
@@ -120,6 +244,8 @@ func controlValue(n *dom.Node) string {
 			}
 		}
 		return ""
+	case "button":
+		return n.GetAttribute("value")
 	}
 	return ""
 }
