@@ -34,15 +34,24 @@ func resolvePseudoElements(doc *dom.Document, index *ruleIndex, elementStyles ma
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after"} {
+				for _, pseudo := range []string{"before", "after", "first-letter"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
-					// An explicitly set empty string (content:"") is generated
-					// content - an empty box - not no content: float-clearing
-					// clearfixes depend on that box existing. Only the unset
-					// default ("normal", which computes to none on pseudos) and
-					// an explicit none suppress generation.
-					if cs != nil && (len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none")) {
-						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+					if cs == nil {
+						continue
+					}
+					if pseudo == "first-letter" {
+						if cs.Content != "" && cs.Content != "none" {
+							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+						}
+					} else {
+						// An explicitly set empty string (content:"") is generated
+						// content - an empty box - not no content: float-clearing
+						// clearfixes depend on that box existing. Only the unset
+						// default ("normal", which computes to none on pseudos) and
+						// an explicit none suppress generation.
+						if len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none") {
+							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+						}
 					}
 				}
 			}
@@ -79,10 +88,19 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after"} {
+				for _, pseudo := range []string{"before", "after", "first-letter"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
-					if cs != nil && (len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none")) {
-						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+					if cs == nil {
+						continue
+					}
+					if pseudo == "first-letter" {
+						if cs.Content != "" && cs.Content != "none" {
+							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+						}
+					} else {
+						if len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none") {
+							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+						}
 					}
 				}
 			}

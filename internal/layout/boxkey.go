@@ -28,6 +28,7 @@ const (
 	BoxKindTableColumnGroup
 	BoxKindTableCaption
 	BoxKindListItem
+	BoxKindPseudoFirstLetter
 )
 
 const (
