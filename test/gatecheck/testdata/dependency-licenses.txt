@@ -9,10 +9,16 @@
 # permitted set (MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC), and amend
 # this file in the same commit as the go.mod change. Copyleft (GPL/AGPL/LGPL)
 # is never permitted here: it would change what distribution means.
+#
+# This is the union over every GOOS/GOARCH target licenses_test.go audits (the
+# matrix in .github/workflows/release.yml), because what is linked is a property
+# of the target: golang.org/x/sys below is linked on every amd64 target and on no
+# arm64 one, so it belongs here even though a darwin/arm64 build never links it.
 github.com/dlclark/regexp2/v2@v2.5.2 MIT
 github.com/dop251/goja@v0.0.0-20260926152631-39ec2650adc9 MIT
 github.com/go-sourcemap/sourcemap@v2.1.3+incompatible BSD-3-Clause
 github.com/google/pprof@v0.0.0-20230207041349-798e818bf904 Apache-2.0
 golang.org/x/image@v0.45.0 BSD-3-Clause
 golang.org/x/net@v0.60.0 BSD-3-Clause
+golang.org/x/sys@v0.48.0 BSD-3-Clause
 golang.org/x/text@v0.42.0 BSD-3-Clause
