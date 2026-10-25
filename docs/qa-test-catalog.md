@@ -1,9 +1,9 @@
 # Goosie — catalog test case chi tiết
 
-- Cập nhật: 2026-10-22
+- Cập nhật: 2026-10-26
 - Phạm vi: ứng dụng Goosie trên macOS, engine headless, browser chrome và các luồng kiểm soát an toàn đầu vào.
 - Kế hoạch cấp release, DoD và lịch sử smoke: xem [qa-test-plan.md](qa-test-plan.md).
-- Tổng: **185 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
+- Tổng: **186 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
 
 ## Cách đọc và quy tắc ghi kết quả
 
@@ -78,7 +78,10 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-057 | P2 | GAP | DEFERRED** — Mở Private Window từ UI → cửa sổ riêng biệt có affordance rõ và persistence bị tắt.
 - **BR-058 | P2 | GAP | DEFERRED** — Mở Settings/Privacy UI và xóa cookies/history/session → xác nhận phạm vi xóa, dữ liệu mục tiêu mất sau restart.
 
-## D. Render, CSS, layout, ảnh và repaint — BR-059–BR-087
+## D. Render, CSS, layout, ảnh và repaint — BR-059–BR-087, BR-186
+
+Mã BR cấp phát toàn cục theo thứ tự thêm vào catalog, nên case thêm sau có thể mang số ngoài dải số
+của miền nó thuộc về; miền chức năng vẫn do section chứa nó quyết định.
 
 - **BR-059 | P0 | PARITY, INT | NOT RUN** — Render fixture HTML cơ bản có heading, paragraph, list, link → cấu trúc và thứ tự nội dung khớp kỳ vọng/reference.
 - **BR-060 | P1 | PARITY | NOT RUN** — Render block/inline lồng nhau → line box, wrap và thứ tự đọc không chồng lấn.
@@ -109,6 +112,7 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-085 | P1 | CUA, PARITY | NOT RUN** — Mở about.google/products ở viewport cố định, chụp 5 frame idle rồi reload và chụp lại → vùng tĩnh ổn định; mọi vùng thiếu/viền đỏ được lưu bằng chứng, đối chiếu trình duyệt tham chiếu.
 - **BR-086 | P1 | INT, PARITY | NOT RUN** — Trang dài cuộn xuống rồi Back/Forward → scroll restoration theo behavior đã công bố, không nhảy liên tục.
 - **BR-087 | P2 | PARITY | NOT RUN** — Render tiếng Việt/CJK, emoji, RTL và chuỗi dài → ký tự không bị cắt/đảo thứ tự ngoài giới hạn font đã biết.
+- **BR-186 | P1 | INT, PARITY | PASS** — Stylesheet chứa chuỗi chưa đóng (`content: """;` rồi xuống dòng, cả nháy kép lẫn nháy đơn) → declaration chứa nó bị loại, mọi rule phía sau vẫn áp dụng, và không một byte CSS nào được vẽ thành text trên trang; chuỗi chưa đóng kéo tới EOF vẫn được chấp nhận theo đúng đo Chromium. Oracle `test/css/bad_string_test.go` (6 test) và fixture `testdata/render/css-features/08-bad-string-recovery.html`; PASS trong lần chạy 2026-10-26, defect `GOOSIE-CSSSTRING-001`.
 
 ## E. JavaScript, sự kiện, biểu mẫu và thao tác trang — BR-088–BR-124
 

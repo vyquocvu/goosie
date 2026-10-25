@@ -216,7 +216,108 @@ duy nhất nhiễm sẽ được sửa ở §3 Bước 4. Ghi rõ là **còn n�
 
 ## 5. Kết quả
 
-*(điền sau khi chạy)*
+### 5.1 Repro: ba chiều trên **cùng một file**, canvas 1280×1024 dpr 1 (ink ngưỡng <250)
+
+File cố định `/tmp/bs-meas/case-{a,b,c,d}.html`; "pre-fix" = `main` (`91ae77e` + parser chưa sửa),
+"post-fix" = nhánh này, Chromium 131.0.6778.33.
+
+| Case | pre-fix | post-fix | Chromium | Nhận xét |
+| --- | --- | --- | --- | --- |
+| a — newline, còn rule sau | **2,963** | **333** | 544 | rò CSS biến mất |
+| b — `content: """` tới EOF | 443 | 443 | 446 | không đổi, có chủ đích (§2.1) |
+| c — newline, nháy đơn | **2,943** | **333** | 544 | như a, đúng §2.1 |
+| d — `font-family: "x; }` tới EOF | 423 | 423 | 446 | không đổi, có chủ đích |
+
+Bounding box case-a: Chromium rows 19-30 cols 8-113; **pre-fix rows 18-33 cols 9-595** (CSS xuống
+dòng thành text); **post-fix rows 19-29 cols 8-112** — nằm gọn trong box Chromium, tức cùng một dòng
+"Hello world" bằng monospace. Phần chênh 333 vs 544 là **nét chữ chứ không phải nội dung**: ở ngưỡng
+<64 Goosie 17 px còn Chromium 231 px trên cùng box — thuộc miền glyph coverage (TASK-027), không phải
+defect này. §4.1 đạt ở cả tầng parse (`content` không còn là value chứa cả sheet) lẫn tầng vẽ.
+
+### 5.2 Fixture mới: bug này chỉ trở nên **nhìn thấy** khi có fixture đúng chỗ rò
+
+`testdata/render/css-features/08-bad-string-recovery.html` — chuỗi hỏng nằm **trên fold**, các rule
+phụ thuộc (`.mono`, `.bar`, `\201C`/`\201D`, flex cells) trải cả trên lẫn dưới fold 600px.
+
+| Bản | match % | worst_iou | coverage | blank_regions |
+| --- | --- | --- | --- | --- |
+| pre-fix | **85.50 → FAIL** | 0.0 | 0.0746 | **3** [(44,67) (289,304) (419,446)] |
+| post-fix | **96.79 → PASS** | 0.5084 | 0.9537 | **0** |
+
+Case EOF (§2.1 b/d) **không** biểu diễn được bằng fixture: khối `<style>` luôn kết thúc bằng xuống
+dòng trước `</style>`, nên EOF chỉ đo được ở unit oracle. Ghi lại để lần sau không đi tìm fixture
+"thiếu".
+
+`make parity` toàn corpus trên nhánh: **81/81 passing (100%)**, average match **96.09%**, known gaps
+**5 fixtures / 10 bands** — không đổi so với baseline.
+
+### 5.3 Sửa fixture nhiễm: đo **bốn tổ hợp**, known-gaps giữ nguyên vì số đo không đổi
+
+`selectors/03-pseudo-elements.html` :47 → `content: "\201C"`, :53 → `content: "\201D"`.
+
+| Tổ hợp | 800×600: match % / blanks / ink Goosie | 800×2400: ink Goosie (Chromium) |
+| --- | --- | --- |
+| main engine + fixture nhiễm | 90.36 / 3 / 28,719 | **68,830** (59,068) |
+| FIXED engine + fixture nhiễm | 90.36 / 3 / 28,719 | **49,095** (59,068) |
+| main engine + fixture sửa | 90.36 / 3 / 28,719 | 49,294 (59,344) |
+| FIXED engine + fixture sửa | 90.36 / 3 / 28,719 | **49,294** (59,344) |
+
+1. Ở viewport mà gate chấm (800×600), **bốn tổ hợp giống nhau từng byte** — cả ink (28,719) lẫn ba
+   band (457,475)(539,554)(579,599). Đây chính là cơ chế mù ở §1.3, và là lý do fixture 5.2 tồn tại.
+2. ⇒ `testdata/render-known-gaps.json` **không** cần sửa: baseline 3 band vẫn đúng sau cả hai thay
+   đổi — đó là kết quả đo lại, không phải giữ nguyên vì lười.
+3. Dưới fold, sửa engine và sửa fixture **hội tụ** (49,095 → 49,294 khi sửa fixture): hai lỗi cùng phá
+   một phần nội dung, sửa một trong hai là đủ cho trang này. 199 px chênh là cặp `\201C/\201D` giờ mới
+   vẽ được — Chromium cũng tăng 276 px (59,068 → 59,344).
+
+### 5.4 Mutation proof [R-7] — 4 cái, mỗi cái giết đúng một check
+
+Sửa tạm `internal/css/parser.go`, chạy, khôi phục từ backup; sau lần cuối file **giống hệt** bản đã
+đo và `git status` không còn residue:
+
+| Mutation | Test bị giết |
+| --- | --- |
+| (i) `closesStringAt` bỏ nhánh `\n` (quay về `main`) | cả 4 test bad-string |
+| (ii) bỏ `!stmtBadString` ở append `stmt` | `…EndsAtNewline`, `…DropsOneDeclarationNotTheSheet`, `…SingleQuoteMatchesDoubleQuote` |
+| (iii) bỏ `!stmtBadString` ở append `trailing` | `TestBadStringInUnterminatedLastDeclaration` **(duy nhất)** |
+| (iv) `if quote != 0 { stmtBadString = true }` khi hết body (EOF thành bad-string) | `TestUnterminatedStringAtEOFStaysLenient` **(duy nhất)** |
+
+Lần chạy đầu (iii) **giết 0 test**. Không phải check thừa: oracle chưa có input nào đi vào nhánh
+trailing. Test thứ sáu được thêm **sau khi** phát hiện mutation sống — khối
+`.u{font-family:"x;\n serif}` (thiếu `;` cuối block, hình dạng CSS hỏng rất phổ biến), kỳ vọng lấy
+từ Chromium đo trên cùng input (case f: `.u` rơi về `Times`, `.v` vẫn `rgb(0,0,255)`, `.w` vẫn
+monospace). Đây là bằng chứng [R-7] có thật, không phải con số tự công bố.
+
+### 5.5 Oracle và traceability
+
+`test/css/bad_string_test.go`: 6 test — **4 red trước khi sửa, 2 green**. Hai test green ngay từ đầu
+là control (`TestEmptyStringStillGeneratesABox`, `TestUnterminatedStringAtEOFStaysLenient`) để ca sửa
+không được phép đổi hành vi ngoài phạm vi. `mustNotLeakCSS` áp dụng cho **mọi** test: không
+declaration nào được chứa `{`, `}` hoặc newline, tức mọi đường rò CSS thành text đều bị bắt chứ không
+chỉ đường vừa sửa.
+
+Catalog: thêm **BR-186 | P1 | INT, PARITY | PASS** vào miền D; `test/qc/catalog.go`
+`expectedCaseCount` 185 → 186; golden regenerate (BR-186 mang 6 test). Ratchet
+`docs/qa-ratchet.json`: `p0_tagged` 19 giữ nguyên, `p0p1_tagged` **66 → 67**, nâng trong chính nhánh
+thêm tag vì floor chỉ được tăng và nâng trên `main` trước khi merge sẽ làm `rc-sweep` đỏ.
+
+### 5.6 Lệnh đã chạy trên nhánh này
+
+Nhánh `worktree-task-041-css-bad-string`, base `98b6bb9`, macOS/arm64, ngày 2026-10-26:
+
+| Lệnh | Kết quả |
+| --- | --- |
+| `gofmt -l internal/css test/css` | rỗng |
+| `go vet -all ./...` | rc 0, không output |
+| `go test -count=1 ./internal/archtest/` | ok 4.717s |
+| `go test -count=1 ./...` | **rc 0**, 42 package ok, không có dòng FAIL/panic nào |
+| `go test -race -count=1 ./test/css/ ./internal/css/ ./test/style/ ./test/qc/` | ok cả bốn (1.99s / 1.50s / 4.45s / 5.53s), rc 0 |
+| `go test -count=1 ./test/qc/` sau `-update` | ok |
+| `make parity` (= `parity.py --render --render-chromium`) | **81/81 passing**, average 96.09%, known gaps 5/10, rc 0 |
+| `python3 testdata/parity_selftest.py` (chạy trên nhánh TASK-036 để kiểm chứng giao điểm) | green; riêng `selectors/03 measured 3 == declared 3`, xác nhận ca sửa này không làm stale baseline mà quy tắc equality mới của TASK-036 sẽ bắt buộc |
+
+Full suite hết 55s ở lần có exit code, load average 28-38 (máy đang chạy song song worktree khác).
+Không thêm assertion thời gian nào — chỉ ghi số để tái hiện.
 
 ## 6. Ngoài phạm vi
 
