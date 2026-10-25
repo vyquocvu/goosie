@@ -54,6 +54,20 @@ go test -count=1 -run TestGate ./test/gate/
 - Không đổi catalog (`docs/qa-*`), không tự sign-off BR-179. Catalog vẫn `NOT RUN`: script chứng minh *gate tồn tại và chạy được*, còn "QC đã xem log của release candidate" là việc của người. Gate này báo cáo, không ký thay ai.
 - Không chứa parity (`testdata/parity.py`) hay WPT: BR-179 không yêu cầu; nhúng vào sẽ làm gate mất vài tiếng và khiến nó bị bỏ qua.
 
-## 5. Trạng thái
+## 5. Kết quả chạy thật đầu tiên
 
-Script + hợp đồng test đã landed. `make release-gate` chạy full trên `main` để lấy số thật; kết quả và artifact path ghi lại ở đây khi xong.
+`make release-gate` trên `main` (tree của commit `36993cf`, gồm cả test gatecheck mới):
+
+```
+release-gate: FAILED (1) go test -count=1 ./... - see /tmp/goosie-release-gate/01-go-test-count-1.log
+release-gate: ok (2s)  go vet -all ./...
+release-gate: ok (7s)  go test -count=1 ./internal/archtest/
+release-gate: ok (28s) go test -count=1 -run TestGate ./test/gate/
+release-gate: FAIL (report: /tmp/goosie-release-gate/release-gate.json)
+```
+
+Report: `status: fail`, 4 lệnh, một lệnh exit 1 sau 51s. **Lượt chạy đầu tiên của gate đã bắt được một bug thật**: `test/js TestFetchCatchOnError` fail, và log chỉ đúng dòng `fetch_test.go:374: gotCatch = {Kind:4 ...}`. Đó chính là ordering bug mà TASK-017 để lọt — giờ nó là `TASK-025`. Không có gate thì bug này chỉ lộ ra khi ai đó tình cờ chạy đúng seq command dưới tải.
+
+Lưu ý cho người đọc log: khi recipe fail, **make** trả `2` (quy ước của GNU make), không phải exit của script. Script gọi trực tiếp (`scripts/release-gate.sh`) trả đúng `0/1/2` như hợp đồng; gatecheck test gọi script nên không bị lớp `make` che mất.
+
+Artifact: `/tmp/goosie-release-gate/release-gate.json` (per-command exit/seconds/log path) + log từng lệnh. Đây là phần "lưu log/artifact" mà BR-179 yêu cầu và chưa từng tồn tại trước task này.
