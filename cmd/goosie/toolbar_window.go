@@ -272,24 +272,24 @@ func (cw *chromeWindow) accessibilityChrome() []ax.Node {
 
 	value, addressFocused, findActive, loading, canBack, canForward, activeDownloads := cw.toolbar.AccessibilitySnapshot()
 	toolY := int32(tabs.TabBarHeight)
-	toolChildren := make([]ax.Node, 0, 5)
-	appendTool := func(id, label, value string, r frame.Rect, disabled, addressBar bool) {
+	toolChildren := make([]ax.Node, 0, 6)
+	appendTool := func(role ax.Role, id, label, value string, r frame.Rect, disabled, addressBar bool) {
 		r, visible := clip(translateAxRect(r, toolY), width)
 		if !visible {
 			return
 		}
-		node := toNode(ax.RoleButton, id, label, value, r)
+		node := toNode(role, id, label, value, r)
 		node.Disabled = disabled
 		node.AddressBar = addressBar
 		toolChildren = append(toolChildren, node)
 	}
-	appendTool("goosie.back", "Back", "", toolbar.ButtonRect(toolbar.ButtonBack, width), !canBack, false)
-	appendTool("goosie.forward", "Forward", "", toolbar.ButtonRect(toolbar.ButtonForward, width), !canForward, false)
+	appendTool(ax.RoleButton, "goosie.back", "Back", "", toolbar.ButtonRect(toolbar.ButtonBack, width), !canBack, false)
+	appendTool(ax.RoleButton, "goosie.forward", "Forward", "", toolbar.ButtonRect(toolbar.ButtonForward, width), !canForward, false)
 	reloadLabel := "Reload"
 	if loading {
 		reloadLabel = "Stop loading"
 	}
-	appendTool("goosie.reload", reloadLabel, "", toolbar.ButtonRect(toolbar.ButtonReload, width), false, false)
+	appendTool(ax.RoleButton, "goosie.reload", reloadLabel, "", toolbar.ButtonRect(toolbar.ButtonReload, width), false, false)
 	if addressRect, visible := clip(translateAxRect(toolbar.AddressBarRect(width), toolY), width); visible {
 		label := "Address and search"
 		if findActive {
@@ -300,11 +300,17 @@ func (cw *chromeWindow) accessibilityChrome() []ax.Node {
 		address.Focused = addressFocused
 		toolChildren = append(toolChildren, address)
 	}
+	// The transient zoom badge is readable here only because the toolbar hands
+	// back the same rect and label the address bar paints, and reports it hidden
+	// by the same predicate: no node exists unless the pixels show the badge.
+	if zoomValue, badgeRect, shown := cw.toolbar.ZoomBadge(width); shown {
+		appendTool(ax.RoleMeter, "goosie.zoom", "Zoom level", zoomValue, badgeRect, false, false)
+	}
 	downloadValue := ""
 	if activeDownloads > 0 {
 		downloadValue = strconv.Itoa(activeDownloads) + " active"
 	}
-	appendTool("goosie.downloads", "Downloads", downloadValue, toolbar.ButtonRect(toolbar.ButtonDownloads, width), false, false)
+	appendTool(ax.RoleButton, "goosie.downloads", "Downloads", downloadValue, toolbar.ButtonRect(toolbar.ButtonDownloads, width), false, false)
 	roots = append(roots, ax.Node{Role: ax.RoleGroup, ID: "goosie.toolbar", Label: "Browser toolbar",
 		X0: 0, Y0: float32(toolY), X1: float32(width), Y1: float32(toolY + toolbar.ToolbarHeight), Children: toolChildren})
 	return roots

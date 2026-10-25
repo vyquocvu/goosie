@@ -235,8 +235,15 @@ func TestSelectMoveCollapsesMultipleAuthoredSelections(t *testing.T) {
 	if got := selectedCount(s); got != 1 {
 		t.Fatalf("%d options still carry selected after a move, want the document collapsed to 1", got)
 	}
-	if got := selectedID(s); got != "o2" {
-		t.Fatalf("move from a two-selected document landed on %q, want o2", got)
+	// TASK-037: the last authored selection is the selection, so a move steps
+	// forward from o2 to o3. Chromium measures the same pair of facts -
+	// two selected options give selectedIndex 1, and the next ArrowDown gives
+	// selectedIndex 2 (scripts/verify-task037-option-value.js,
+	// "LISTBOX two-selected initial"/"after ArrowDown"). Stepping from o1 would
+	// land on o2, the option that was already winning, and the key would look
+	// dead to the user.
+	if got := selectedID(s); got != "o3" {
+		t.Fatalf("move from a two-selected document landed on %q, want o3: the last authored selection is what a move steps from", got)
 	}
 }
 

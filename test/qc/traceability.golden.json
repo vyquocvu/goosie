@@ -1522,60 +1522,80 @@
     "id": "BR-126",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyBackForwardDisabledStateAndClicks"
+    ],
     "enforced": false
   },
   {
     "id": "BR-127",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyStopLoadingAndCompletedStopNoOp"
+    ],
     "enforced": false
   },
   {
     "id": "BR-128",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyReloadRestoresReloadLabelAndRequestsExactlyOnce"
+    ],
     "enforced": false
   },
   {
     "id": "BR-129",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyZoomInGrowsContentAndDisplaysPercentage",
+      "test/toolbar/zoom_badge_ax_test.go:TestZoomBadgeExposesTheBadgeTheToolbarPaints"
+    ],
     "enforced": false
   },
   {
     "id": "BR-130",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyZoomOutClampsAndStillAcceptsPageDown"
+    ],
     "enforced": false
   },
   {
     "id": "BR-131",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyCmdZeroResetsZoomAndKeepsAXGeometryValid",
+      "test/toolbar/zoom_badge_ax_test.go:TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted"
+    ],
     "enforced": false
   },
   {
@@ -2235,6 +2255,20 @@
       "test/css/escaped_quote_test.go:TestEscapedQuoteInsideSelectorAttributeKeepsFollowingRules",
       "test/css/escaped_quote_test.go:TestOddApostropheCountInURLDoesNotEatTheSheet",
       "test/css/escaped_quote_test.go:TestUnescapedApostropheInURLLosesOnlyItsDeclaration"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-194",
+    "priority": "P0",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/licenses_test.go:TestLinkedDependenciesPinned",
+      "test/gatecheck/licenses_test.go:TestReleaseTargetsMatchTheReleaseMatrix",
+      "test/gatecheck/licenses_test.go:TestTargetResolutionFailsClosed"
     ],
     "enforced": false
   }

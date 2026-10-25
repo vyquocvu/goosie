@@ -169,7 +169,9 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			if !option.Element() || option.DataAtom != dom.AtomOption {
 				continue
 			}
-			optionLabel := strings.TrimSpace(option.TextContent())
+			// The same normalisation the value goes through, so one option node
+			// cannot answer with a cleaned label and a raw value (TASK-037).
+			optionLabel := optionTextValue(option.TextContent())
 			if optionLabel == "" {
 				optionLabel = option.GetAttribute("value")
 			}
@@ -187,7 +189,7 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			selectLabel = strings.TrimSpace(label)
 		}
 		if selectLabel == "" && selected != nil {
-			selectLabel = strings.TrimSpace(selected.TextContent())
+			selectLabel = optionTextValue(selected.TextContent())
 		}
 		combo := emit(ax.RoleComboBox, selectLabel, b.session.controlValue(n), "")
 		combo.Disabled = n.HasAttribute("disabled")
