@@ -245,6 +245,33 @@ func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
 		t.Fatalf("option node is labelled %q and valued %q, want %q for both",
 			got.Label, got.Value, "Hi there")
 	}
+	// The two answers only have to agree where they differ, so the third shape
+	// keeps the value attribute distinct from the displayed text: an AX tree that
+	// recomputed the select's value from the option's text would announce
+	// "Slate blue" here while the form sent "slate-blue".
+	//
+	//	OPTION name=attrpad -> {"value":"  pad  me  ","label":"ignored text"}
+	//	INDENTED initial    -> {"optionLabel":"Charcoal"} (label is text, value is text)
+	mixed := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c">`+
+		`<option selected value="slate-blue">
+   Slate blue
+ </option></select></form></body></html>`)
+	mixedCombo := axCombo(t, mixed, "s")
+	if mixedCombo.Value != "slate-blue" {
+		t.Fatalf("combo box announces value %q, want the value attribute %q it submits",
+			mixedCombo.Value, "slate-blue")
+	}
+	if len(mixedCombo.Children) != 1 {
+		t.Fatalf("combo has %d option nodes, want 1", len(mixedCombo.Children))
+	}
+	if got := mixedCombo.Children[0]; got.Label != "Slate blue" || got.Value != "slate-blue" {
+		t.Fatalf("option node is labelled %q and valued %q, want %q and %q",
+			got.Label, got.Value, "Slate blue", "slate-blue")
+	}
+	if submitted := submittedValue(t, mixed, "f", "c"); submitted != mixedCombo.Value {
+		t.Fatalf("accessibility announces %q but the form submits %q: one control, two answers",
+			mixedCombo.Value, submitted)
+	}
 }
 
 func axCombo(t *testing.T, s *engine.Session, id string) *ax.Node {
