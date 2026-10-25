@@ -76,3 +76,68 @@ Vì vậy `[AC-01]` yêu cầu `-count=5` chứ không phải `-count=1`: một 
 - **Cấm sửa**: `docs/qa-*` (catalog là source của QC, integrator giữ), `internal/**`, `test/**` (agent khác đang sở hữu), `testdata/**`, `.github/**`, `docs/tasks/**` khác TASK-020.
 - Không sửa engine để test pass. Nếu phát hiện bug engine cản hành trình, ghi vào Status kèm reproducer nhỏ, **dừng ở đó**, không vá.
 - Chỉ commit trên branch `worktree-task-020-p1-journeys`. **Không `git push`, không merge vào `main`.**
+
+## 5. Status
+
+### 5.1. Bảng Audit trước khi viết (§2.1)
+
+| Case | Test đã có | Action |
+| --- | --- | --- |
+| BR-004 | Không có | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyURLWithPathQueryFragment`) |
+| BR-008 | Không có (`TestJourneyHTTPNavigationAndRedirect` chỉ test tới đích redirect, không test Back; `TestApplyNavResultTraversalRewritesRedirectedEntry` chỉ test mock unit) | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyRedirectAndBack`) |
+| BR-013 | `cmd/goosie/tab_lifecycle_test.go:TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument` (INT unit test mock context) | `tag mới` trên test đã có + `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneySlowPageStopKeepsDocument`) cho CUA journey |
+| BR-015 | Không có (`TestE2ECoreBrowserJourney` qua nhiều bước nhưng không assert history entries và sync 1 lần) | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyLinkNavigationInSameTab`) |
+| BR-016 | Không có | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyAnchorNavigation`) |
+| BR-020 | Không có | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyReloadPageWithQueryFragment`) |
+| BR-021 | Không có (`TestStaleNavResultCannotPaintOverTheCurrentOne` chỉ test 2 URL khác nhau A/B, không test refresh pending) | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyRefreshWithPendingResponse`) |
+| BR-022 | Không có | `test mới` (`cmd/goosie/journey_p1_nav_test.go:TestJourneyAddressBarFocusTypingDoesNotLeakToDocument`) |
+| BR-024 | `cmd/goosie/journey_p0_tabs_test.go:TestJourneySwitchBetweenThreeTabs` (đã test mở tab mới bằng Cmd+T và nút goosie.new-tab, focus và nhận nhập liệu URL) | `tag mới` (`// qc:BR-024 BR-026`) |
+| BR-027 | `cmd/goosie/tab_lifecycle_test.go:TestBackgroundTabResultLeavesTheForegroundAlone` (assert background hoàn tất không đổi foreground URL/layer/plan) | `tag mới` (`// qc:BR-027`) |
+| BR-034 | Không có (`session_scroll_test.go` chỉ test file snapshot serialize/deserialize; `interaction.go:switchTab` có code lưu/phục hồi scroll nhưng chưa có journey test) | `test mới` (`cmd/goosie/journey_p1_tabs_test.go:TestJourneySwitchTabRestoresScroll`) |
+| BR-035 | Không có | `test mới` (`cmd/goosie/journey_p1_tabs_test.go:TestJourneyTabsIndependentHistory`) |
+
+### 5.2. Self-review [AC-05]
+- `TestJourneyURLWithPathQueryFragment` (BR-004): Test này sẽ FAIL nếu HTTP client gửi URL bị rụng query/path lên server, hoặc URL hiển thị trên thanh địa chỉ/document bị rụng fragment `#anchor`.
+- `TestJourneyRedirectAndBack` (BR-008): Test này sẽ FAIL nếu thanh địa chỉ không cập nhật URL đích sau redirect 302, hoặc khi bấm nút Back bị kẹt vòng lặp redirect thay vì quay về trang khởi đầu.
+- `TestJourneySlowPageStopKeepsDocument` (BR-013): Test này sẽ FAIL nếu bấm nút Stop khi request đang tải dở mà không dừng được network request, hoặc làm xoá mất tài liệu/URL đang hiển thị trước đó.
+- `TestJourneyLinkNavigationInSameTab` (BR-015): Test này sẽ FAIL nếu bấm link trong cùng tab mà URL/tài liệu không cập nhật đồng bộ, hoặc history sinh ra entry rác/entry trùng thay vì đúng 2 mục `[start, dest]`.
+- `TestJourneyAnchorNavigation` (BR-016): Test này sẽ FAIL nếu bấm link anchor (cùng trang hoặc từ trang khác) mà fragment không cập nhật trên URL hoặc viewport không cuộn tới toạ độ của phần tử mục tiêu.
+- `TestJourneyReloadPageWithQueryFragment` (BR-020): Test này sẽ FAIL nếu reload trang làm mất query/fragment trên URL hiện hành, hoặc reload lại đẩy thêm visit mới vào history.
+- `TestJourneyRefreshWithPendingResponse` (BR-021): Test này sẽ FAIL nếu reload/refresh khi request cũ còn pending mà response cũ trả về sau lại ghi đè/áp dụng lên document thay vì response mới nhất.
+- `TestJourneyAddressBarFocusTypingDoesNotLeakToDocument` (BR-022): Test này sẽ FAIL nếu khi thanh địa chỉ đang có focus mà các ký tự gõ từ bàn phím lọt vào input element của document bên dưới.
+- `TestJourneySwitchTabRestoresScroll` (BR-034): Test này sẽ FAIL nếu chuyển qua tab khác rồi quay lại mà scroll offset của tab bị reset về top (0) thay vì khôi phục đúng vị trí cuộn trước đó.
+- `TestJourneyTabsIndependentHistory` (BR-035): Test này sẽ FAIL nếu lịch sử Back/Forward bị dùng chung giữa các tab (ví dụ: Back ở tab này làm ảnh hưởng ngăn xếp navigation của tab kia).
+
+### 5.3. Kết quả nghiệm thu tự chạy
+
+```
+$ go test -count=1 -race -run TestJourney ./cmd/goosie/
+ok  	github.com/vyquocvu/goosie/cmd/goosie	3.384s
+
+$ go test -count=5 -run TestJourney ./cmd/goosie/
+ok  	github.com/vyquocvu/goosie/cmd/goosie	8.447s
+
+$ go test -count=1 ./cmd/goosie/
+ok  	github.com/vyquocvu/goosie/cmd/goosie	10.591s
+
+$ go test -count=1 ./test/qc/
+ok  	github.com/vyquocvu/goosie/test/qc	0.873s
+
+$ go build ./...
+(exit code 0, clean)
+
+$ go vet -all ./...
+(exit code 0, clean)
+
+$ go test ./internal/archtest/
+ok  	github.com/vyquocvu/goosie/internal/archtest	4.222s
+
+$ gofmt -l cmd/goosie
+(clean, no output)
+```
+
+### 5.4. Gap thật còn lại
+Không có case nào trong 12 case bị blocked bởi bug engine/chrome. Cả 12 case đều đã được phủ đầy đủ qua hành trình thực tế hoặc tag trên unit/integration tests hiện hữu:
+- 10 test journey mới được viết (`cmd/goosie/journey_p1_nav_test.go` và `cmd/goosie/journey_p1_tabs_test.go`)
+- 3 case được bổ sung tag (`BR-013`, `BR-024`, `BR-027`) trên các test hiện hữu để tránh nợ kỹ thuật và liên kết đúng traceability
+- `test/qc/traceability.golden.json` được cập nhật sạch sẽ và toàn bộ test pass deterministic.

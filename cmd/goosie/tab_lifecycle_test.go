@@ -116,6 +116,7 @@ func TestCurrentNavResultIsApplied(t *testing.T) {
 	}
 }
 
+// qc:BR-013
 func TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -172,6 +173,7 @@ func TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument(t *testing.
 	}
 }
 
+// qc:BR-027
 // A background tab finishing its load updates itself and nothing on screen, which is what
 // makes tabs independent. The foreground keeps its document and its published plan.
 func TestBackgroundTabResultLeavesTheForegroundAlone(t *testing.T) {

@@ -48,7 +48,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyURLWithPathQueryFragment"
+    ],
     "enforced": false
   },
   {
@@ -95,7 +97,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyRedirectAndBack"
+    ],
     "enforced": false
   },
   {
@@ -160,7 +164,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneySlowPageStopKeepsDocument",
+      "cmd/goosie/tab_lifecycle_test.go:TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument"
+    ],
     "enforced": false
   },
   {
@@ -184,7 +191,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyLinkNavigationInSameTab"
+    ],
     "enforced": false
   },
   {
@@ -195,7 +204,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyAnchorNavigation"
+    ],
     "enforced": false
   },
   {
@@ -240,7 +251,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyReloadPageWithQueryFragment"
+    ],
     "enforced": false
   },
   {
@@ -251,7 +264,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyRefreshWithPendingResponse"
+    ],
     "enforced": false
   },
   {
@@ -261,7 +276,9 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyAddressBarFocusTypingDoesNotLeakToDocument"
+    ],
     "enforced": false
   },
   {
@@ -286,7 +303,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p0_tabs_test.go:TestJourneySwitchBetweenThreeTabs"
+    ],
     "enforced": false
   },
   {
@@ -321,7 +340,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/tab_lifecycle_test.go:TestBackgroundTabResultLeavesTheForegroundAlone"
+    ],
     "enforced": false
   },
   {
@@ -400,7 +421,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_tabs_test.go:TestJourneySwitchTabRestoresScroll"
+    ],
     "enforced": false
   },
   {
@@ -411,7 +434,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_p1_tabs_test.go:TestJourneyTabsIndependentHistory"
+    ],
     "enforced": false
   },
   {
