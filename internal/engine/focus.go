@@ -619,32 +619,95 @@ func IsActivatable(n *dom.Node) bool {
 }
 
 // optionValue is an <option>'s form value: its value attribute when present,
-// otherwise its text content. Submission, the editing path and the
-// accessibility tree all read it here so they cannot drift apart.
+// otherwise its text content normalised the way Chromium reports it.
+// Submission, the editing path and the accessibility tree all read it here so
+// they cannot drift apart.
+//
+// The two branches are deliberately different, and both are measured rather
+// than remembered (scripts/verify-task037-option-value.js, Chromium 1.63 on
+// this host):
+//
+//	<option selected>\n    Charcoal\n  </option>  -> value "Charcoal"
+//	<option selected>  Hi   there </option>       -> value "Hi there"
+//	<option selected value="  pad  me  ">        -> value "  pad  me  "
+//	<option selected value="a\n b\tc">            -> value "a\n b\tc"
+//	<option selected value="">                    -> value ""
+//
+// The value content attribute is used verbatim, including when it is empty (an
+// empty attribute is not the absent one: Chromium submits the empty string, not
+// the text). Only the text-content fallback is normalised.
 func optionValue(n *dom.Node) string {
 	if n.HasAttribute("value") {
 		return n.GetAttribute("value")
 	}
-	return n.TextContent()
+	return optionTextValue(n.TextContent())
+}
+
+// optionTextValue is the normalisation Chromium applies to an option's text
+// content before it becomes a value or a label: leading and trailing ASCII
+// whitespace stripped, every internal run of ASCII whitespace collapsed to a
+// single U+0020. Measured by scripts/verify-task037-option-value.js, which also
+// shows what must NOT be touched - a U+00A0 on either edge survives verbatim,
+// so strings.TrimSpace and unicode.IsSpace are both wrong
+// here. Whitespace is ASCII and cannot occur inside a multi-byte UTF-8
+// sequence, so the byte scan below is safe on any input.
+func optionTextValue(text string) string {
+	var sb strings.Builder
+	sb.Grow(len(text))
+	pendingSpace := false
+	for i := 0; i < len(text); i++ {
+		if isASCIISpace(text[i]) {
+			pendingSpace = true
+			continue
+		}
+		if pendingSpace && sb.Len() > 0 {
+			sb.WriteByte(' ')
+		}
+		pendingSpace = false
+		sb.WriteByte(text[i])
+	}
+	return sb.String()
+}
+
+// isASCIISpace reports the bytes Chromium collapses in an option's text content,
+// measured by scripts/verify-task037-option-value.js: U+0009, U+000A, U+000C,
+// U+000D and U+0020. U+000B (vertical tab) is deliberately absent - the same
+// measurement shows "a\v\vb" keeps its vertical tabs while "a\f\fb" collapses,
+// so this is HTML's ASCII whitespace set and not CSS's or unicode.IsSpace's.
+func isASCIISpace(b byte) bool {
+	switch b {
+	case '\t', '\n', '\f', '\r', ' ':
+		return true
+	}
+	return false
 }
 
 // SelectedOption returns the currently selected <option> node within a <select>.
-// If no option has the "selected" attribute, the first <option> child is returned.
-// Returns nil if selectNode is nil or has no <option> children.
+// When several options carry the "selected" attribute the last one in tree order
+// wins, which is what Chromium reports for the same markup: for
+// `<option value="a" selected><option value="b" selected>` it gives
+// `selectedIndex 1`, `value "b"` and FormData `[["c","b"]] while leaving both
+// content attributes in the DOM (scripts/verify-task037-option-value.js,
+// TIEBREAK). Resolving the tie at read time keeps the serialised document
+// untouched. If no option has the "selected" attribute, the first <option> child
+// is returned. Returns nil if selectNode is nil or has no <option> children.
 func SelectedOption(selectNode *dom.Node) *dom.Node {
 	if selectNode == nil {
 		return nil
 	}
-	var first *dom.Node
+	var first, selected *dom.Node
 	for c := selectNode.FirstChild; c != nil; c = c.NextSibling {
 		if c.Element() && c.Data == "option" {
 			if first == nil {
 				first = c
 			}
 			if c.HasAttribute("selected") {
-				return c
+				selected = c
 			}
 		}
+	}
+	if selected != nil {
+		return selected
 	}
 	return first
 }
