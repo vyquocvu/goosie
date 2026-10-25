@@ -2237,5 +2237,19 @@
       "test/css/escaped_quote_test.go:TestUnescapedApostropheInURLLosesOnlyItsDeclaration"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-194",
+    "priority": "P0",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/licenses_test.go:TestLinkedDependenciesPinned",
+      "test/gatecheck/licenses_test.go:TestReleaseTargetsMatchTheReleaseMatrix",
+      "test/gatecheck/licenses_test.go:TestTargetResolutionFailsClosed"
+    ],
+    "enforced": false
   }
 ]

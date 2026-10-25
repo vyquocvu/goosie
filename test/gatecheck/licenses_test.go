@@ -140,6 +140,7 @@ var linkedModulesByTarget = map[buildTarget][]string{
 // dependency set cannot be computed is reported as a failure, because a gate
 // that shrugs at "couldn't work out what the binary links" is exactly how the
 // old host-pinned version under-checked Linux (TASK-043 §1.1).
+// qc:BR-194
 func TestLinkedDependenciesPinned(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -227,6 +228,7 @@ func TestLinkedDependenciesPinned(t *testing.T) {
 // artifact contract, so a row added there without a licence audit is a new
 // distributed binary nobody pinned, and a row removed there leaves this gate
 // auditing a binary that no longer exists. Both directions are errors.
+// qc:BR-194
 func TestReleaseTargetsMatchTheReleaseMatrix(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -264,6 +266,7 @@ func TestReleaseTargetsMatchTheReleaseMatrix(t *testing.T) {
 // unusable measurement is an error, never an empty list that passes. A package
 // pattern that does not resolve, and a package that links no third-party module,
 // must both come back as errors from linkedModules.
+// qc:BR-194
 func TestTargetResolutionFailsClosed(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
