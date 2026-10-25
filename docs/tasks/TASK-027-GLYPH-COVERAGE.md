@@ -366,3 +366,84 @@ test giả: một browser load 39 MB font lúc khởi động để rồi hầu 
 - `go test -count=1 ./internal/archtest/`: **PASS** (4.5s, `TestInternalHasNoMutableGlobals` và `TestRepoIsGofmtFormatted` sạch).
 - `go vet -all ./...`: **PASS** (clean).
 - `python3 testdata/parity.py --render --binary ./bin/goosie`: **80/80 passing (100.0%)**, average match **96.07%**, known gaps 5 fixtures / 10 bands (giữ nguyên kết quả tối ưu của §7, không phình baseline).
+
+---
+
+## 10. Vòng Redo 2: Khắc phục Oracle Rỗng, Sắp xếp Ứng viên Theo Đo lường, Memo Coverage Rẻ & Instance Seam
+
+### 10.1. Phân tích Nguyên nhân Gốc (Root Cause)
+Ở vòng sửa lỗi trước, các test tồn tại lỗ hổng oracle rỗng (không giết được mutation):
+1. **Lỗi logic admission & retention**: Trong `lazyFallbackForRuneLocked`, khi duyệt danh sách ứng viên, `f.fallbacks = append(f.fallbacks, parsed)` và `f.fallbackBytes += fileBytes` được thực thi **trước** khi kiểm tra `HasGlyph(face, r)`. Trên macOS, `ZapfDingbats.ttf` (156 KB) và `Apple Symbols.ttf` (898 KB) đều < 4 MiB nên cả hai đều bị giữ lại vĩnh viễn dù không chứa rune đang hỏi.
+2. Với `MaxParsedFallbackFonts = 2`, sau cú miss đầu tiên thì `len(f.fallbacks) >= 2` luôn đúng. Kiểm tra ở đầu hàm `if len(f.fallbacks) >= MaxParsedFallbackFonts { return nil }` trả về ngay lập tức:
+   - Các font sau trong danh sách (DejaVu, Noto, FreeSans, Arial Unicode) trở thành **dead entries** trên macOS.
+   - **M-B** (bỏ trần kích thước 4 MiB) sống sót vì trần không bao giờ được chạm tới: `Arial Unicode.ttf` đứng sau 2 slot đã đầy.
+   - **M-C** (bỏ memo ứng viên fail stat) sống sót vì thứ chặn đọc lại không phải `checkedFallbackPaths`, mà là trần `len(f.fallbacks) >= 2`.
+
+### 10.2. Bảng Đo Độ Phủ Thực Tế (Measured Coverage)
+Thực hiện đo trên mẫu **410 rune ngoài Latinh** gồm 9 nhóm script:
+- Greek (50 rune, U+0391..U+03C9)
+- Cyrillic (50 rune, U+0410..U+0441)
+- Hebrew (30 rune, U+05D0..U+05EA)
+- Arabic (40 rune, U+0621..U+0648)
+- Box Drawing (40 rune, U+2500..U+2527)
+- Arrows (40 rune, U+2190..U+21B7)
+- Math Operators (50 rune, U+2200..U+2231)
+- Symbols & Dingbats (60 rune, U+2600..U+263B)
+- CJK Unified Ideographs (50 rune, U+4E00..U+4E31)
+
+Kết quả đo trên host macOS:
+
+| Ứng viên Font | Kích thước | Độ phủ (Rune) | Tỷ lệ (%) | Nhóm phủ chính |
+| :--- | :--- | :--- | :--- | :--- |
+| **Apple Symbols.ttf** | 898 KB (0.86 MiB) | **239 / 410** | **58.3%** | Greek (98%), Box (100%), Arrows (100%), Math (100%), Symbols (100%) |
+| **Geneva.ttf** | 737 KB (0.70 MiB) | **121 / 410** | **29.5%** | Greek (98%), Cyrillic (100%), Math (24%) |
+| **ZapfDingbats.ttf** | 156 KB (0.15 MiB) | **7 / 410** | **1.7%** | Dingbats (6.7%), Arrows (7.5%) |
+| *Arial Unicode.ttf* (Vượt trần) | 22.2 MiB | 395 / 410 | 96.3% | Phủ hầu hết toàn bộ (bị chặn bởi trần 4 MiB) |
+
+**Kết luận sắp xếp**: `ZapfDingbats.ttf` chỉ cover dingbats (1.7%), trong khi `Apple Symbols.ttf` cover tới 58.3%. Do đó, danh sách `systemFallbackFiles` được tái sắp xếp theo độ phủ đo được: `Apple Symbols.ttf` đứng đầu nhóm macOS, `ZapfDingbats.ttf` xếp sau.
+
+### 10.3. Giải pháp Thiết kế: Thả Face Không Khớp & Memo Coverage Rẻ (Cmap Ranges)
+1. **Thả Face (Drop Face)**: Khi parse một ứng viên fallback, trích xuất cấu trúc `runeCoverage` từ bảng `cmap` (hỗ trợ Format 4 và Format 12). Nếu `!cov.contains(r)` hoặc `!HasGlyph(face, r)`, đối tượng face và parsed font **bị thả ngay lập tức** để GC thu hồi.
+2. **Memo Coverage Rẻ (`candidateCoverage map[string]runeCoverage`)**:
+   - `runeCoverage` chỉ lưu các đoạn `[start, end]` hợp nhất (~40-107 đoạn, tốn chỉ **~320 - 856 bytes** cho toàn bộ file).
+   - Kiểm tra `contains(r)` bằng binary search sub-microsecond.
+   - Khi gặp rune miss tiếp theo, nếu candidate đã có trong `candidateCoverage` mà không chứa rune đó, hàm bỏ qua ngay lập tức, không tốn bất kỳ I/O đĩa (`os.Stat` hay `os.ReadFile`).
+3. **Trần `MaxParsedFallbackFonts` (2)**: Chỉ đếm các face **thực sự hữu ích** (thực sự cover rune đang hỏi) được nạp vào `f.fallbacks`.
+4. **Instance Seam `SetFallbackCandidates([]string)`**:
+   - Bổ sung method thread-safe trên `Fonts` cho phép test cấu hình danh sách candidate tùy ý theo từng instance, không vi phạm archtest (không dùng mutable package global).
+
+### 10.4. Bảng Mutation Proof (Bắt buộc Giết được M-B và M-C)
+
+| Mã | Nội dung Mutation | Kết quả Test | Phân tích & Test bắt lỗi |
+| :--- | :--- | :--- | :--- |
+| **M-A** | `MaxParsedFallbackFonts = 0` | **FAIL** | `TestCoverageResolver`, `TestLazyFallbackHostFonts`: Không nạp được font fallback cho '✔'. |
+| **M-B** | Bỏ trần kích thước: `if st.Size() <= 0 {` (bỏ `\|\| > MaxFallbackFontBytes`) | **FAIL** | `TestFallbackAdmissionCeilingRejectsOversizedFont`: Đặt `Arial Unicode.ttf` (22 MiB) làm candidate đầu tiên qua `SetFallbackCandidates`. Khi bỏ trần, file bị đọc vào bộ nhớ khiến `FallbackFilesRead = 1, want 0`. |
+| **M-C** | Bỏ memo ứng viên fail stat: `if err != nil { continue }` (không ghi nhận `rejectedFallbackPaths`) | **FAIL** | `TestMissingGlyphBatchDoesNotRepeatedlyReadFile`: Đặt file thiếu làm candidate đầu tiên qua `SetFallbackCandidates`. Khi bỏ memo, hook bị gọi 19 lần cho 20 rune miss: `fallback hook called 18 additional times, want 0`. |
+| **M-D** | Bỏ memo coverage candidate: `f.candidateCoverage[path] = cov` | **FAIL** | `TestMissingCandidateWithCoverageDoesNotRetainFace`: File tồn tại nhưng không cover rune bị đọc lại đĩa liên tục: `FallbackFilesRead grew from 2 to 20 across 9 missing emojis`. |
+
+### 10.5. Oracle Dương Theo Từng Nhóm Script & Known Gap Có Chủ Đích
+Bổ sung test `TestPositiveGlyphOracleByScriptGroup` xác nhận mọi nhóm script mà host đáp ứng đều resolve thành công (`Ok && !Missing`), advance dương, và `MissingCount == 0`:
+- **Greek**: 'α', 'β', 'Ω' -> **PASS**
+- **Cyrillic**: 'Ж', 'д', 'я' -> **PASS**
+- **Hebrew**: 'א', 'ב', 'ש' -> **PASS**
+- **Arabic**: 'ب', 'ت', 'ج' -> **PASS**
+- **Box Drawing**: '┌', '─', '│', '┼' -> **PASS**
+- **Arrows**: '→', '←', '↑', '↓' -> **PASS**
+- **Math Operators**: '∀', '∑', '√', '∞', '∫' -> **PASS**
+- **Symbols & Dingbats**: '✔', '★', '☎' -> **PASS**
+
+**Known Gap có chủ đích**:
+- **CJK (Chinese, Japanese, Korean)** trên macOS: Mọi font CJK hệ thống đều vượt trần admission 4 MiB:
+  - `STHeiti Light / Medium`: 55.7 MiB
+  - `Songti.ttc`: 66.9 MiB
+  - `Hiragino Sans GB`: 23.5 MiB
+  - `Arial Unicode.ttf`: 22.2 MiB
+  - `PingFang.ttc`: ~50-80 MiB
+- *Lý do*: Theo nguyên tắc untrusted input admission ([R-7] và kiến trúc Goosie), việc admit file 22-66 MiB vào bộ nhớ tiến trình raster sẽ làm bùng nổ heap (vượt budget 8 MiB) và gây trễ 150-250ms đồng bộ dưới raster write lock. Do đó, các ký tự CJK trên macOS thiếu font nhúng sẽ chuyển sang hiển thị tofu có chủ đích. Test `TestPositiveGlyphOracleByScriptGroup/CJK_KnownGap` bảo vệ contract này.
+
+### 10.6. Đo Lường Lại Chi Phí Đường Nóng
+Đo thực tế trên host bằng `TestMeasureHotPathLatency`:
+- **Độ trễ cú miss đầu tiên** (duyệt ứng viên, kiểm tra stat, parse cmap, thả face không khớp): **0.69 - 0.91 ms** (so với §9.4: 0.47 - 1.13 ms; tương đương hoặc nhanh hơn vì bỏ qua việc tạo `opentype.Face` cho các face không cover).
+- **Độ trễ các cú miss tiếp theo** (truy vấn binary search trong memo `candidateCoverage`): **~0.018 - 0.025 ms** (~19 µs/rune).
+- **Tổng thời gian rasterize 15 rune miss liên tiếp**: **~280 - 370 µs** (< 0.4 ms).
+
