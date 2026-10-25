@@ -180,3 +180,25 @@ ok  	github.com/vyquocvu/goosie/test/raster	0.297s
 ### 6.5. Giới hạn Color Emoji (Roadmap)
 - `golang.org/x/image/font/opentype` không hỗ trợ bảng màu `sbix`/`COLR`. Các emoji màu được thay thế bằng glyph tofu có advance 1em ổn định, không làm xê dịch layout khi sau này có font màu. Đã cập nhật ghi chú tương ứng vào `docs/roadmap-v2.md`.
 
+
+## 7. Tích hợp (integrator, 2026-10-25)
+
+Chạy lại độc lập trên worktree này (`go build -o bin/goosie ./cmd/goosie` rồi
+`python3 testdata/parity.py --render --binary ./bin/goosie`):
+
+* `PARITY_EXIT=0`, `average match: 96.07% (threshold=30, pass_at=90.0%)`.
+* Known gaps còn lại, đúng như agy báo, không entry nào phình:
+  `unicode/02-emoji-symbols.png` **1** band `[451,470]` (baseline 1),
+  `selectors/03-pseudo-elements.png` **3** band `[457,475] [539,554] [579,599]` (baseline 3),
+  `selectors/02` 3, `forms/04` 2, `html-features/01` 1.
+* `go test -count=1 ./test/raster/ ./internal/archtest/` → `ok 1.839s` / `ok 5.045s`.
+
+**[AC-03] đạt MỘT PHẦN, và đó là kết quả đúng chứ không phải thất bại lách qua.**
+§3 của task này đòi *xoá cả hai entry*; số đo chỉ ra 4 band còn lại **không** thuộc
+nguyên nhân glyph: `unicode/02` là line metrics của Apple Color Emoji (engine chưa đọc
+`sbix`/`COLR` → tofu advance 1em, lêch ~48px tích luỹ), còn `selectors/03` là
+`::first-letter`/`::first-line` chưa hỗ trợ. Đã ghi thành defect riêng
+(`GOOSIE-COVERAGE-001` P2, `GOOSIE-PSEUDO-001` P1 trong `docs/qa-open-defects.json`) và
+entry `selectors/03` trong baseline nay trỏ `docs/tasks/TASK-033-FIRST-LETTER-DROP-CAP.md`.
+
+Baseline đi từ **18 band xuống 10 band** — 8 band đóng, đúng hướng "chỉ được thu nhỏ".
