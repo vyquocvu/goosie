@@ -308,3 +308,30 @@ changed = [s for s in fx if not np.array_equal(shot(before, s, "b"), shot(after,
 print(f"fixtures={len(fx)} changed={len(changed)}")
 PY
 ```
+
+## 8. Integrator's merge resolution (2026-10-26, main `9754fda`)
+
+The two builder hunks did **not** survive the merge, and this task's oracle did.
+
+TASK-044 landed first and its `paintBox` already does both things: `effective <= 0`
+returns before any command is built (a strict superset of `Style.Opacity == 0`, because
+an ancestor at zero now drops the subtree too), and `visibilityHidden` skips the box's
+own decoration and contents while still walking children. With `internal/paint/builder_box.go`
+taken verbatim from main, `go test ./test/paint -run TestBoxThatCSSPaintsNothingEmitsNoCommands`
+passes — so the merged code suppresses the smudge with one mechanism instead of two.
+
+Re-measured on the merged code, because the task's own mutations pointed at lines that no
+longer exist:
+
+| Mutation (on main's code, not on this branch) | Result |
+| --- | --- |
+| delete `if effective <= 0 { return }` | `opacity_0` red: 2 corner fills `a=51 op=0`, 4 commands total, **rc 1** |
+| `visibilityHidden := false` | `visibility_hidden` red: 2 corner fills `a=51 op=1`/`op=0.5`, 4 commands total, **rc 1** |
+
+Pixel blast radius re-measured with two binaries built on this host (`pre` = `6a44637`,
+`main` = `9754fda`, headless 800x600 DPR 1, `parity.ink_mask`): `bg-op0.html` 1600 -> 0 ink,
+`shadow-op0.html` 20 -> 0, `shadow0.html` (a *visible* shadow) 20 -> 20 unchanged,
+`empty.html` 0 -> 0. `content_bands` on the 4x5 corner shape returns **0 bands** in both
+binaries, which is why no band floor was added: the registry's premise that this smudge was
+counted as a content band does not reproduce. The band claim was true one shape wider —
+`bg-op0.html`'s invisible 40x40 background produced 1 band before the fix and 0 after.
