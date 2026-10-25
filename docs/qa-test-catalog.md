@@ -3,7 +3,7 @@
 - Cập nhật: 2026-10-22
 - Phạm vi: ứng dụng Goosie trên macOS, engine headless, browser chrome và các luồng kiểm soát an toàn đầu vào.
 - Kế hoạch cấp release, DoD và lịch sử smoke: xem [qa-test-plan.md](qa-test-plan.md).
-- Tổng: **180 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
+- Tổng: **185 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
 
 ## Cách đọc và quy tắc ghi kết quả
 

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "GOOSIE-RENDER-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "",
+    "summary": "Google Products flicker is not confirmed or cleared by frame-by-frame pixel evidence (QA-002).",
+    "evidence": "docs/qa-test-plan.md §QA-002: prior PNG hashes changed for both target and static control; controlled pixel comparison is still missing.",
+    "closed_by": ""
+  }
+]

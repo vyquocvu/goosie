@@ -31,4 +31,5 @@ var enforcedCases = []string{
 	"BR-166",
 	"BR-167",
 	"BR-179",
+	"BR-180",
 }
