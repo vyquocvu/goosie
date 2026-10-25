@@ -115,5 +115,14 @@
     "summary": "The parity harness can report success while its own evidence shrinks: --no-strict deletes fixtures from the denominator, and the known-gaps baseline is an upper bound (<=), so inflating it hides blank bands instead of exposing them.",
     "evidence": "BR-176/BR-177. Measured by importing testdata/parity.py (importlib) against a one-fixture temp corpus, leaving the real /tmp render dirs untouched: declared baseline 5 with 0 measured blank bands yields ('a.png', 'PASS', 100.0, [], 5, None); deleting the chromium render under strict=False yields [] - the fixture vanishes from the report, so N/N (100%) and rc 0. strict=True does report MISSING ('chromium render missing') and a missing gaps file raises FileNotFoundError, so the fail-closed half exists; what is missing is any floor on the number of scored fixtures and any check that a declared band baseline still equals what is measured. grep shows no script, Makefile or CI target passes --no-strict, and every entry in testdata/render-known-gaps.json currently matches its measured band count exactly (2/2, 1/1, 3/3, 1/1, 3/3 at 4437f65), so an equality gate is satisfiable today.",
     "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-FORMVALUE-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "docs/tasks/TASK-037-OPTION-VALUE-NORMALIZATION.md",
+    "summary": "A select's submitted value is raw option text content and the first selected option wins, so Goosie sends whitespace the server never sees from Chromium and resolves multi-selected markup to the wrong option.",
+    "evidence": "BR-101/BR-104/BR-106/BR-139. Measured on this host: Goosie submitted name=\"c\" value=\"\\n  Charcoal\\n\" for an option whose text content is '\\n  Charcoal\\n' and encoded it as c=%0A++Charcoal%0A, while Chromium/Playwright normalises the same shape to option.textContent = '  Hi\\n  there\\n' -> option.value === 'Hi there' (strip plus internal whitespace collapse). For a <select> with two selected options Chromium reports selectedIndex 1, value 'b', formdata 'b' (last wins) whereas SelectedOption (internal/engine/focus.go:634) returns the first. The accessibility tree trims option labels (internal/engine/accessibility.go:172) but the combo Value comes from controlValue untrimmed, so one control announces a different string than it submits. All four blocked cases already have tagged tests that pass today (BR-101 7 tests, BR-104/BR-106 one journey each, BR-139 3 tests) - none asserts the normalised value or the tie-break, so this defect hides behind green tests, not behind a missing test. Optgroup is out of scope: internal/engine/select.go:46-48 records that options nested in an optgroup are unreachable.",
+    "closed_by": ""
   }
 ]
