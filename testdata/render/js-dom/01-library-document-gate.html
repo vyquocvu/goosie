@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JS DOM - library document setup gate</title>
+<style>
+  body { margin: 0; padding: 20px; font-family: sans-serif; color: #111; background: #fff; }
+  #always { font-size: 20px; }
+  /* www.gov.vn keeps its entire body inside <form id="form1" style="display:none">
+     and opens it only from a jQuery reveal: $(document).ready(function(){
+     $('#form1').fadeIn(200); }). Same shape, offline. */
+  #gate { display: none; font-size: 18px; }
+  #block { width: 320px; height: 80px; background: #008000; margin: 12px 0; }
+</style>
+</head>
+<body>
+  <div id="always">HEADLINE - PAINTED WITHOUT SCRIPT</div>
+  <div id="gate">
+    <div id="block"></div>
+    <div>REVEALED AFTER THE LIBRARY DOCUMENT GATE</div>
+  </div>
+  <script>
+  // The setup gate jQuery 3.6 / Sizzle run before they configure themselves at
+  // all is `doc.nodeType !== 9 || !doc.documentElement` -> return. Goosie's
+  // binding exposed no nodeType on any node, so the gate returned early, the
+  // library's saved document handle stayed undefined, and every later call
+  // through it died with "Cannot read property 'createElement' of undefined or
+  // null" (measured on www.gov.vn: 21 uncaught throws, the reveal never ran,
+  // Goosie painted 0 ink pixels where Chromium painted 501,735).
+  var lib = (function () {
+    var doc = null;
+    function setDocument(node) {
+      if (node == null || node.nodeType !== 9 || !node.documentElement) return;
+      doc = node;
+    }
+    setDocument(document);
+    return {
+      configured: function () { return doc !== null; },
+      root: function () { return doc.documentElement; }
+    };
+  })();
+  if (lib.configured()) {
+    var gate = document.getElementById("gate");
+    var created = document.createElement("div");
+    created.textContent = "BUILT THROUGH THE LIBRARY HANDLE";
+    gate.appendChild(created);
+    gate.style.display = "block";
+  }
+  </script>
+</body>
+</html>
