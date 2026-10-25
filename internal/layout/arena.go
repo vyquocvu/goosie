@@ -14,6 +14,7 @@ package layout
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -494,6 +495,49 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 		childHead = n.FirstChild
 	}
 
+	// Inject ::first-letter pseudo-element if applicable.
+	var flTextNode *dom.Node
+	var flRemNode *dom.Node
+	if n.Element() && pseudoStyles != nil {
+		if flStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "first-letter"}]; ok {
+			if flStyle.Content != "" && flStyle.Content != "none" {
+				for c := childHead; c != nil; c = c.NextSibling {
+					if !c.Element() && c.Type != dom.NodeText {
+						continue
+					}
+					if c.Element() {
+						// Block with element-only children: no first-letter box
+						break
+					}
+					if c.Type == dom.NodeText {
+						if strings.TrimSpace(c.DataContent) != "" {
+							flTextNode = c
+							break
+						}
+					}
+				}
+				if flTextNode != nil {
+					runes := []rune(flTextNode.DataContent)
+					firstIdx := -1
+					for i, r := range runes {
+						if !unicode.IsSpace(r) {
+							firstIdx = i
+							break
+						}
+					}
+					if firstIdx >= 0 {
+						letter := string(runes[firstIdx])
+						remCopy := *flTextNode
+						remCopy.DataContent = string(runes[firstIdx+1:])
+						flRemNode = &remCopy
+						flID := buildFirstLetterPseudoElement(a, doc, n.ID, letter, flStyle)
+						a.Link(id, flID)
+					}
+				}
+			}
+		}
+	}
+
 	for c := childHead; c != nil; c = c.NextSibling {
 		if !c.Element() && c.Type != dom.NodeText {
 			continue
@@ -536,6 +580,9 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 		}
 
 		kid := buildSubtreeWithHost(a, c, currentHost, doc, styles, pseudoStyles, scope)
+		if c == flTextNode && flRemNode != nil {
+			a.Get(kid).Node = flRemNode
+		}
 		a.Link(id, kid)
 	}
 
@@ -568,6 +615,20 @@ func buildPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeID, kind Box
 	textNode := doc.NewText(text)
 	obj.Node = textNode
 
+	return id
+}
+
+func buildFirstLetterPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeID, letter string, pseudoStyle *style.ComputedStyle) ObjectID {
+	id, obj := a.Alloc()
+	st := pseudoStyle
+	if st.Float != style.FloatNone && st.Display == style.DisplayInline {
+		stCopy := *st
+		stCopy.Display = style.DisplayBlock
+		st = &stCopy
+	}
+	obj.Style = st
+	obj.Key = NewBoxKey(uint32(nodeID), BoxKindPseudoFirstLetter, 0)
+	obj.Node = doc.NewText(letter)
 	return id
 }
 

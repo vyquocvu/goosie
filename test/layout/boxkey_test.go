@@ -29,6 +29,7 @@ func TestBoxKeyIsCollisionFree(t *testing.T) {
 		layout.BoxKindTableColumnGroup,
 		layout.BoxKindTableCaption,
 		layout.BoxKindListItem,
+		layout.BoxKindPseudoFirstLetter,
 	}
 	ordinals := []uint16{0, 1, 0xFFFF}
 

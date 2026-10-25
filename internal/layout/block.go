@@ -558,6 +558,10 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 		if replacedH > obj.H {
 			obj.H = replacedH
 		}
+		if obj.H == 0 && obj.Node != nil && obj.Node.Text() {
+			lineH, _ := runHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
+			obj.H = lineH
+		}
 	}
 	if obj.Style == nil {
 		return obj.BorderH()
@@ -1747,6 +1751,9 @@ func isReplacedElement(obj *Object) bool {
 // as its min-content.
 func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 	obj := a.Get(id)
+	if obj.Node != nil && obj.Node.Text() {
+		return measureWord(obj.Node.DataContent, obj.Style.FontSize, a.Metrics, obj.Style.FontSlot(), obj.Style.LetterSpacing)
+	}
 	if !probed && blockifiesChildren(obj.Style) {
 		return 0
 	}

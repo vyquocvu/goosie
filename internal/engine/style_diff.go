@@ -177,7 +177,7 @@ func interactiveLayoutChanged(resolution style.InteractiveResolution, current ma
 		}
 	}
 	for _, id := range resolution.Nodes {
-		for _, pseudo := range []string{"before", "after"} {
+		for _, pseudo := range []string{"before", "after", "first-letter"} {
 			key := style.PseudoKey{NodeID: id, Pseudo: pseudo}
 			before, hadBefore := resolution.PreviousPseudo[key]
 			after, hasAfter := pseudos[key]

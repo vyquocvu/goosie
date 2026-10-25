@@ -863,7 +863,10 @@
       "PARITY"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "test/layout/first_letter_test.go:TestFirstLetterFloatLeft",
+      "test/layout/first_letter_test.go:TestFirstLetterSplitBox"
+    ],
     "enforced": false
   },
   {

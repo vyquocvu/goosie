@@ -911,7 +911,7 @@ func (s *Session) collectImageRefs() []imgRef {
 				}
 			}
 		}
-		for _, pseudo := range []string{"before", "after"} {
+		for _, pseudo := range []string{"before", "after", "first-letter"} {
 			ps, ok := s.PseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: pseudo}]
 			if !ok || ps.BackgroundImage == "" {
 				continue

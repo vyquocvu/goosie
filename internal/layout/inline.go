@@ -384,7 +384,7 @@ func inlineInto(a *Arena, id ObjectID) {
 	var current lineBox
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
-		if k.Node == nil || k.Style == nil || k.Style.Display == style.DisplayNone {
+		if k.Node == nil || k.Style == nil || k.Style.Display == style.DisplayNone || k.Style.Float != style.FloatNone {
 			continue
 		}
 		if k.Node.Text() {
