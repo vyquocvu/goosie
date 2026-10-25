@@ -15,7 +15,7 @@ import (
 // because the wrappers in this command already begin with "goosie: " and main
 // added it again. Each row is the error string a call chain can hand back; the
 // wanted line is what one reader should see.
-// qc:BR-164
+// qc:BR-190
 func TestProgramErrorLineCarriesOneLabel(t *testing.T) {
 	cases := []struct {
 		name string
@@ -74,7 +74,7 @@ func TestProgramErrorLineCarriesOneLabel(t *testing.T) {
 // doubling: a loader-stage wrapper around a guard error, printed the way main
 // prints it. The chain is built here rather than through a live render because
 // what is being proved is the shape of the line, not the document.
-// qc:BR-164
+// qc:BR-190
 func TestRunFailureLineFromTheRealChain(t *testing.T) {
 	guard := fmt.Errorf("%w", errors.New("CSS numeric value outside safe geometry range: "+
 		`property "width", value "8e8", unit "e8px", parsed 8e+08, numval 8e+08, `+

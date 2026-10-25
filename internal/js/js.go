@@ -352,6 +352,19 @@ func (r *Runtime) setupDocument() {
 	_ = r.vm.Set("document", doc)
 
 	_ = doc.Set("__title__", r.title)
+	// document.nodeType === 9 is the first thing a jQuery/Sizzle boot reads:
+	// Sizzle's setDocument gate is `9 === doc.nodeType && doc.documentElement`,
+	// so an undefined nodeType silently un-configures the whole library and
+	// every `$(document).ready(...)` reveal with it (GOOSIE-LIVE-001, measured
+	// on gov.vn where the entire body sits in a display:none form that only
+	// that reveal opens). This is the DOM Standard ordinal, not Goosie's
+	// internal one - internal/dom numbers its kinds from 0, so the binding
+	// must translate and can never pass the field through. It is the first
+	// gate, not the whole chain: measured after this change gov.vn still paints
+	// blank, because its jQuery bundle now dies one call later on
+	// `createDocumentFragment`, another Node API the binding does not have.
+	_ = doc.Set("nodeType", NodeTypeDocument)
+	_ = doc.Set("nodeName", "#document")
 
 	_, _ = r.vm.RunString(`
 		Object.defineProperty(document, 'title', {
@@ -1087,6 +1100,13 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	obj := r.vm.NewObject()
 	_ = obj.Set("__nid__", nid)
 	r.nodeWrappers[nid] = obj
+	// Every node a page can reach carries its spec ordinal. jQuery tests
+	// `1 === e.nodeType` on each node it walks and `9 === doc.nodeType` on the
+	// document, and reads a missing nodeType as "this is not a node", so one
+	// absent property is enough to make the library do nothing at all. A node's
+	// kind never changes, so this is a data property: no accessor, nothing to
+	// refresh when a cached wrapper is returned.
+	_ = obj.Set("nodeType", domNodeType(node.Type))
 
 	// Copy prototype properties onto the instance. goja does not support
 	// __proto__ assignment on objects created with NewObject, so we copy

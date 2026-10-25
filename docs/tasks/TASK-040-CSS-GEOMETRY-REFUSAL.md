@@ -251,7 +251,7 @@ Không có test nào của TASK-041 (`test/css` bad-string family) red sau fix �
 * **Bước 1** — message `a8266ff`; tiền tố đúp `09d1874`.
 * **Bước 2** — tầng (a), `4278104`.
 * **Bước 3** — cap giữ nguyên: `TestMaxGeometryIsUnchanged` + mutation (ii)/(iii) ở §5.
-* **Bước 4** — `a5e1b77`: `testdata/render/css-features/09-digit-leading-custom-property.html`,
+* **Bước 4** — `a5e1b77`: `testdata/render/css-features/11-digit-leading-custom-property.html`,
   `MIN_SCORED_FIXTURES` 81→82 cùng commit, `render-known-gaps.json` không thêm entry (0 band đo được).
 * **Bước 5** — số thật ở §5; `make live-parity` không nhận arg nên chạy trực tiếp
   `python3 testdata/live-parity.py --binary ./bin/goosie --only cafef`.
@@ -398,7 +398,7 @@ Hai độ lệch so với dự đoán trong §4.4, ghi lại nguyên văn vì ch
 | `go test -count=1 ./...` | **1** | 41 package ok, **1 FAIL: `test/qc`** — `traceability_test.go:112: traceability.golden.json is stale; run go test ./test/qc -update`. Không package nào khác red. |
 | `go vet -all ./...` | 0 | sạch |
 | `go test -count=1 ./internal/archtest/` | 0 | ok, import/arch không đổi |
-| `make parity` (`python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie`) | 0 | **82/82 passing (100%)**, average match **96.12%**, known gaps 5 fixtures / 10 bands, hàng mới: `98.90% PASS css-features/09-digit-leading-custom-property.png worst_region_iou=0.9918 coverage_ratio=0.9916 blank_regions=0/0` |
+| `make parity` (`python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie`) | 0 | **85/85 passing (100%)**, average match **96.16%** (re-measure của integrator sau khi merge main; fixture đổi số 09 → 11), known gaps 5 fixtures / 10 bands, hàng mới: `98.90% PASS css-features/11-digit-leading-custom-property.png worst_region_iou=0.9918 coverage_ratio=0.9916 blank_regions=0/0` |
 | `python3 testdata/live-parity.py --selftest` | 0 | `selftest green` |
 | `python3 testdata/live-parity.py --binary ./bin/goosie --only cafef` | 2 | trang duy nhất `OK` + `rerender OK`; exit 2 vì floor 75 trang (xem 5.2) |
 | `go test -count=1 ./test/qc/` | 1 | stale golden, xem 5.6 |
@@ -452,8 +452,8 @@ sẽ làm `TestTraceability` fail kiểu *unknown QC ID* — catalogue là việ
      ink_goosie 542.415 / ink_chromium 796.443, coverage 0.642, 0 blank band trên 3 reference band.
      Criterion 1: `.a{width:8e8e8px}` vẫn rc 1, message mới nêu `property "width"`, `value "8e8"`,
      `unit "e8px"`, `limit 2097152 CSS pixels`, `branch magnitude`; `MaxGeometry` vẫn `2 << 20`.
-     Oracle: 24 hàng matrix + 18 hàng token + 2 test entrypoints end-to-end xanh; parity 82/82
-     (fixture mới `css-features/09-digit-leading-custom-property.png` 98.90%), 5 mutation giết
+     Oracle: 24 hàng matrix + 18 hàng token + 2 test entrypoints end-to-end xanh; parity 85/85 (re-measure sau merge main, floor 85)
+     (fixture mới `css-features/11-digit-leading-custom-property.png` 98.90%), 5 mutation giết
      đúng 5 check.
      Giới hạn còn lại: `:root{-8e8e8:1}` vẫn là Dimension và vẫn bị từ chối; `+`/`.` vẫn được
      gửi thẳng cho numeric scanner; nhánh `non-finite` chưa input nào tới được qua đường token.

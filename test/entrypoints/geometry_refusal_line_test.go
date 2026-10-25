@@ -18,7 +18,7 @@ import (
 // and the branch that fired, and the program label appears exactly once so the
 // message does not start with the twice-wrapped `goosie: goosie:` that made the
 // useful half of the line stop being its start.
-// qc:BR-164
+// qc:BR-190
 func TestGoosieGeometryRefusalLineIsWellFormed(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -84,7 +84,7 @@ func TestGoosieGeometryRefusalLineIsWellFormed(t *testing.T) {
 // begins with digits (--8e8e8e, a colour name) is an ident, not the dimension
 // -8e8, so the document must open. Before the tokenizer fix this run exited 1
 // and wrote no PNG at all.
-// qc:BR-164
+// qc:BR-192
 func TestGoosieDigitLeadingCustomPropertyIsAdmitted(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 

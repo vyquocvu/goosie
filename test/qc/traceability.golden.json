@@ -1012,7 +1012,25 @@
       "test/css/bad_string_test.go:TestBadStringInUnterminatedLastDeclaration",
       "test/css/bad_string_test.go:TestBadStringSingleQuoteMatchesDoubleQuote",
       "test/css/bad_string_test.go:TestEmptyStringStillGeneratesABox",
+      "test/css/bad_string_test.go:TestEscapedNewlineContinuesAString",
+      "test/css/bad_string_test.go:TestEscapedNewlineInSelectorString",
+      "test/css/bad_string_test.go:TestEscapedNewlineVersusRawNewline",
       "test/css/bad_string_test.go:TestUnterminatedStringAtEOFStaysLenient"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-192",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/hyphen_ident_test.go:TestHyphenTokenKind",
+      "test/css/hyphen_ident_test.go:TestTokenSpansCoverInputExactly",
+      "test/entrypoints/geometry_refusal_line_test.go:TestGoosieDigitLeadingCustomPropertyIsAdmitted"
     ],
     "enforced": false
   },
@@ -1436,6 +1454,56 @@
     ],
     "status": "NOT RUN",
     "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-188",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/node_type_test.go:TestLibrarySetupGatePassesTheDocument",
+      "test/js/node_type_test.go:TestNodeTypeUsesDOMStandardOrdinals"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-189",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_errors_test.go:TestCleanDocumentRecordsNoScriptErrors",
+      "test/engine/script_errors_test.go:TestScriptErrorWindowAndMessageAreBounded",
+      "test/engine/script_errors_test.go:TestUncaughtScriptErrorsAreRecordedAndIsolated",
+      "test/engine/script_errors_test.go:TestUserScriptErrorsAreRecordedAndLaterScriptsStillRun"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-190",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/error_prefix_test.go:TestProgramErrorLineCarriesOneLabel",
+      "cmd/goosie/error_prefix_test.go:TestRunFailureLineFromTheRealChain",
+      "cmd/goosie/script_errors_test.go:TestReportRefusedDocumentNamesTheStatusAndTheBody",
+      "cmd/goosie/script_errors_test.go:TestReportScriptErrorsIsSilentOnACleanDocument",
+      "cmd/goosie/script_errors_test.go:TestReportScriptErrorsNamesTheFailingScript",
+      "test/entrypoints/geometry_refusal_line_test.go:TestGoosieGeometryRefusalLineIsWellFormed",
+      "test/entrypoints/refused_document_report_test.go:TestGoosieScreenshotReportsARefusedDocument",
+      "test/entrypoints/refused_document_report_test.go:TestGoosieScreenshotStaysSilentOnAnAcceptedDocument",
+      "test/entrypoints/script_error_report_test.go:TestGoosieScreenshotReportsUncaughtScriptErrors",
+      "test/entrypoints/script_error_report_test.go:TestGoosieScreenshotStaysSilentForACleanDocument"
+    ],
     "enforced": false
   },
   {
@@ -1923,6 +1991,23 @@
     "enforced": false
   },
   {
+    "id": "BR-193",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/css_geometry_admission_test.go:TestDigitLeadingCustomPropertyPaints",
+      "test/engine/css_geometry_admission_test.go:TestDigitLeadingCustomPropertyRefusalMatrix",
+      "test/engine/css_geometry_admission_test.go:TestGeometryRefusalNamesEverything",
+      "test/engine/css_geometry_admission_test.go:TestMaxGeometryIsUnchanged",
+      "test/engine/css_geometry_admission_test.go:TestOversizedAppliedLengthIsRefused"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-169",
     "priority": "P1",
     "methods": [
@@ -2120,6 +2205,36 @@
     "status": "PASS",
     "tests": [
       "test/engine/refresh_test.go:TestRestyleAndReflowReusesArenaForColorOnlyChange"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-187",
+    "priority": "P2",
+    "methods": [
+      "PARITY",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityDriftMetricIsGreen"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-191",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/escaped_quote_test.go:TestEscapedDoubleQuoteInsideStringContinuesIt",
+      "test/css/escaped_quote_test.go:TestEscapedQuoteInUnquotedURLKeepsEveryRule",
+      "test/css/escaped_quote_test.go:TestEscapedQuoteInsideSelectorAttributeKeepsFollowingRules",
+      "test/css/escaped_quote_test.go:TestOddApostropheCountInURLDoesNotEatTheSheet",
+      "test/css/escaped_quote_test.go:TestUnescapedApostropheInURLLosesOnlyItsDeclaration"
     ],
     "enforced": false
   }

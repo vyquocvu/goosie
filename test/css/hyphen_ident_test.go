@@ -56,7 +56,7 @@ func typeName(t css.TokenType) string {
 // property named after a colour, "--8e8e8e", arrived as Dimension("-8e8", unit
 // "e8e", numval -8e8): eight hundred million CSS pixels, which the engine
 // refuses as geometry and which blanked an entire news site.
-// qc:BR-164
+// qc:BR-192
 func TestHyphenTokenKind(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -125,7 +125,7 @@ func TestHyphenTokenKind(t *testing.T) {
 // consumed. It is not. Every token's span starts exactly where the previous one
 // ended and the last ends at the input length, so the defect is one misdispatched
 // hyphen, not a tokenizer that reads the same bytes twice.
-// qc:BR-164
+// qc:BR-192
 func TestTokenSpansCoverInputExactly(t *testing.T) {
 	for _, in := range []string{"--8e8e8e", "--1e5x", "--5px", "-8e8e8", "1e1e1", "--a-8e8e8", "-webkit-mask"} {
 		tok := css.NewTokenizer(in)

@@ -156,6 +156,18 @@ type Session struct {
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
 
+	// scriptErrs is a bounded window of the document's uncaught script errors
+	// and scriptErrTotal is how many there were. Errors still do not stop the
+	// load - that behaviour is deliberate and unchanged - they are only no
+	// longer thrown away: nine real pages painted nothing with rc 0 and an
+	// empty stderr because the reason lived in errors this function discarded
+	// (GOOSIE-LIVE-001). A page's error text is untrusted input, so both the
+	// number retained and the length of each message are capped; the total
+	// keeps reporting honest when a document throws a thousand times.
+	scriptErrMu    sync.Mutex
+	scriptErrs     []ScriptError
+	scriptErrTotal int
+
 	// jsNodeBudget gates script-driven DOM insertions against this document's
 	// admission caps (node count, depth, attributes) before they happen, so a
 	// hostile page cannot grow the tree past the caps and have the overrun
@@ -1989,9 +2001,11 @@ func parentObj(objs []layout.Object, o *layout.Object) *layout.Object {
 }
 
 // runScripts walks the DOM for <script> elements in document order and
-// executes each one through the JS runtime. Script errors are silently
-// ignored: a page with a broken script still renders, matching browser
-// behavior where one bad ad tag does not take down the page.
+// executes each one through the JS runtime. A script error is isolated, not
+// fatal: a page with a broken script still renders, matching browser behavior
+// where one bad ad tag does not take down the page. Each error is recorded on
+// the session and reads back through ScriptErrors / ScriptErrorCount, so a
+// document that paints nothing can be told apart from one that never loaded.
 func (s *Session) runScripts() {
 	if s.jsRT == nil || s.Doc == nil {
 		return
@@ -2064,10 +2078,15 @@ func (s *Session) runScripts() {
 		if it.text == "" {
 			continue
 		}
-		// Script errors are silently ignored: a page with a broken script
-		// still renders, matching browser behavior where one bad ad tag
-		// does not take down the page.
-		_ = s.jsRT.Run(it.text, it.name)
+		// A script error stays isolated - the rest of the document still runs
+		// and still renders, which is what a browser does with one bad ad tag -
+		// but it is no longer discarded. GOOSIE-LIVE-001's nine blank pages all
+		// had rc 0 and an empty stderr while the reason sat in these errors: 21
+		// of them on www.gov.vn, naming the bundle that never finished
+		// loading.
+		if err := s.jsRT.Run(it.text, it.name); err != nil {
+			s.recordScriptError(err)
+		}
 	}
 	s.runUserScripts(userscript.RunAtDocumentEnd)
 }
@@ -2088,7 +2107,9 @@ func (s *Session) runUserScripts(stage userscript.RunAt) {
 		}
 		if us.Code != "" {
 			name := "userscript:" + us.Name
-			_ = s.jsRT.Run(us.Code, name)
+			if err := s.jsRT.Run(us.Code, name); err != nil {
+				s.recordScriptError(err)
+			}
 		}
 	}
 }

@@ -315,17 +315,137 @@ def case_missing_gaps_file():
         h.close()
 
 
-def selftest() -> int:
+# --- GOOSIE-BLANKMETRIC-001: drift-adjusted blank-band metric --------------
+# These cases drive score_regions_drift directly on synthetic images (no corpus,
+# no browser, no network) and prove the new signal adds a tolerance WITHOUT
+# redefining score_regions.  Every band is one Chromium bar; the goosie bar is
+# moved to each shape the task names: exact, off-by-one-line, off-by-more-than-
+# the-window, and deleted-entirely.  Each case is a *positive* expectation
+# [R-7]: it must be able to kill a specific regression, not merely pass quietly.
+_BAND_TOP = 500
+_BAND_H = 12  # bar is >= MIN_INK (12 rows x 800 cols = 9,600 ink px)
+
+
+def _drift_images(goosie_bar_top=None, band_top=_BAND_TOP, band_h=_BAND_H):
+    """Return (goosie, chromium) RGB arrays with one reference band.
+
+    chromium always has a bar at [band_top, band_top+band_h); goosie has the
+    same bar at goosie_bar_top, or nothing when goosie_bar_top is None.
+    """
+    ch = np.full((_H, _W, 3), 255, dtype=np.uint8)
+    ch[band_top:band_top + band_h, 100:900] = 40
+    go = np.full((_H, _W, 3), 255, dtype=np.uint8)
+    if goosie_bar_top is not None:
+        go[goosie_bar_top:goosie_bar_top + band_h, 100:900] = 40
+    return go, ch
+
+
+def _band_rows(bands):
+    return [(int(y0), int(y1)) for y0, y1 in bands]
+
+
+def case_drift_matched():
+    """Exact match is neither blank nor shifted under either signal."""
+    print("case D1: goosie paints the band exactly -> no blank, no shift")
+    m = load_parity()
+    go, ch = _drift_images(goosie_bar_top=_BAND_TOP)
+    exact_blank = _band_rows(m.score_regions(go, ch)[2])
+    blank_exact, truly, shifted = m.score_regions_drift(go, ch)
+    check("score_regions reports zero blank bands", exact_blank == [], str(exact_blank))
+    check("drift signal reports zero blank/shifted bands",
+          _band_rows(blank_exact) == [] and _band_rows(truly) == []
+          and _band_rows(shifted) == [],
+          f"blank_exact={_band_rows(blank_exact)} truly={_band_rows(truly)} "
+          f"shifted={_band_rows(shifted)}")
+
+
+def case_drift_off_by_one_line():
+    """A line painted one band-height away is a DRIFT, not missing content.
+
+    This is the whole point of GOOSIE-BLANKMETRIC-001: score_regions still (and
+    must) list the band as blank -- the old signal keeps its meaning -- while the
+    new signal explains it as shifted content.  Killing the drift window makes
+    this assertion fail (mutation (i)).
+    """
+    print("case D2: goosie paints it one band-height below -> shifted, old signal still blank")
+    m = load_parity()
+    go, ch = _drift_images(goosie_bar_top=_BAND_TOP + _BAND_H)  # directly below
+    old_blank = _band_rows(m.score_regions(go, ch)[2])
+    blank_exact, truly, shifted = m.score_regions_drift(go, ch)
+    band = (_BAND_TOP, _BAND_TOP + _BAND_H - 1)
+    check("the OLD score_regions still lists the band blank (meaning unchanged)",
+          old_blank == [band], f"old blank={old_blank}")
+    check("drift signal lists it as shifted, not truly blank",
+          _band_rows(shifted) == [band] and _band_rows(truly) == [],
+          f"shifted={_band_rows(shifted)} truly={_band_rows(truly)}")
+    check("drift blank_exact equals the old blank list exactly",
+          _band_rows(blank_exact) == old_blank,
+          f"{_band_rows(blank_exact)} vs {old_blank}")
+
+
+def case_drift_beyond_window():
+    """Content displaced far away is NOT pardoned: it stays truly blank.
+
+    A bar 100 rows below sits outside the +/-band_height window, so the drift
+    window cannot rubber-stamp it.  Widening the window without bound, or
+    counting any band with a stray pixel, is what this kills.
+    """
+    print("case D3: goosie paints it 100 rows away -> stays blank (window is bounded)")
+    m = load_parity()
+    go, ch = _drift_images(goosie_bar_top=_BAND_TOP + 100)
+    blank_exact, truly, shifted = m.score_regions_drift(go, ch)
+    band = (_BAND_TOP, _BAND_TOP + _BAND_H - 1)
+    check("far-away ink is not treated as a shift",
+          _band_rows(shifted) == [] and _band_rows(truly) == [band],
+          f"shifted={_band_rows(shifted)} truly={_band_rows(truly)}")
+
+
+def case_drift_deleted_entirely():
+    """Genuine absence survives the widest drift window (§2.4 / mutation ii).
+
+    With nothing painted, every window is empty, so the band is truly_blank no
+    matter how far the window reaches.  This is the acceptance-2 witness: the
+    new tolerance never forgives a missing element.
+    """
+    print("case D4: goosie paints nothing there at all -> truly blank, never shifted")
+    m = load_parity()
+    go, ch = _drift_images(goosie_bar_top=None)  # element deleted
+    blank_exact, truly, shifted = m.score_regions_drift(go, ch)
+    band = (_BAND_TOP, _BAND_TOP + _BAND_H - 1)
+    check("a deleted band is truly_blank", _band_rows(truly) == [band],
+          f"truly={_band_rows(truly)}")
+    check("a deleted band is never labeled shifted", _band_rows(shifted) == [],
+          f"shifted={_band_rows(shifted)}")
+    check("blank == truly_blank + shifted partitions the old blank list",
+          len(truly) + len(shifted) == len(blank_exact),
+          f"{len(truly)}+{len(shifted)} != {len(blank_exact)}")
+
+
+def run_drift_cases() -> None:
+    print("\ndrift metric (GOOSIE-BLANKMETRIC-001): synthetic, no corpus/browser")
+    case_drift_matched()
+    case_drift_off_by_one_line()
+    case_drift_beyond_window()
+    case_drift_deleted_entirely()
+
+
+def selftest(drift_only: bool = False) -> int:
+    if drift_only:
+        run_drift_cases()
+        print(f"\n{len(FAILURES)} drift selftest failure(s)" if FAILURES
+              else "\ndrift selftest green")
+        return 1 if FAILURES else 0
     print(f"parity selftest: driving {PARITY.name} with synthetic temp corpora")
     case_missing_render()
     case_stale_baseline_fails()
     case_baseline_matches_passes()
     case_corpus_floor()
     case_missing_gaps_file()
+    run_drift_cases()
     print(f"\n{len(FAILURES)} selftest failure(s)" if FAILURES
           else "\nselftest green")
     return 1 if FAILURES else 0
 
 
 if __name__ == "__main__":
-    sys.exit(selftest())
+    sys.exit(selftest(drift_only="--drift" in sys.argv))

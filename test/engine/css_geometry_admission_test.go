@@ -19,7 +19,7 @@ import (
 // The "limit" column is the reason, and it names the cap rather than the token:
 // MaxGeometry exists to stop a length that would explode layout arithmetic, and
 // every row that is not a length has to stay admitted however large its digits.
-// qc:BR-164
+// qc:BR-193
 func TestDigitLeadingCustomPropertyRefusalMatrix(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -95,7 +95,7 @@ func TestDigitLeadingCustomPropertyRefusalMatrix(t *testing.T) {
 // the page asked for. Chromium, measured on the same minimal document, resolves
 // var(--8e8e8e) to the colour it names, so the substituted colour is asserted
 // here and the pixels are scored by the parity fixture.
-// qc:BR-164
+// qc:BR-193
 func TestDigitLeadingCustomPropertyPaints(t *testing.T) {
 	const wantColor = "#8e8e8e"
 	html := `<html><head><style>:root{--8e8e8e:` + wantColor +
@@ -132,7 +132,7 @@ func TestDigitLeadingCustomPropertyPaints(t *testing.T) {
 // the rule wired to an element: a huge number that really becomes a box size is
 // refused even though the admission guard lets a plain number through. The cap
 // is a geometry protection, and this is the geometry it protects.
-// qc:BR-164
+// qc:BR-193
 func TestOversizedAppliedLengthIsRefused(t *testing.T) {
 	for _, cssText := range []string{
 		`.a{width:8e8}`,       // plain number: exempt at admission, huge as a box
@@ -151,7 +151,7 @@ func TestOversizedAppliedLengthIsRefused(t *testing.T) {
 // (TASK-040 §3 B1). Three branches of the guard used to emit one identical,
 // content-free sentence, so a bug report from a live page could not say which
 // declaration was blamed, what it held, or which check fired.
-// qc:BR-164
+// qc:BR-193
 func TestGeometryRefusalNamesEverything(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -204,7 +204,7 @@ func TestGeometryRefusalNamesEverything(t *testing.T) {
 // TestMaxGeometryIsUnchanged pins the threshold itself. TASK-040 §3 B3 warns
 // that every past loosening of this cap added a new failure family, so the
 // release has to come with the number, not with a wider tolerance.
-// qc:BR-164
+// qc:BR-193
 func TestMaxGeometryIsUnchanged(t *testing.T) {
 	if engine.MaxGeometry != 2<<20 {
 		t.Errorf("MaxGeometry = %d, want 2<<20 = %d: TASK-040 fixes a false positive, not the threshold",
