@@ -93,3 +93,40 @@ Một phân biệt cần giữ: "shadow" trong file này là **CSS box/text-shad
 * Gọi hai điểm trùng nhau rồi gọi `SetHover` ở điểm đó lần thứ hai ⇒ phải trả `false` (đây là case mà một stub "luôn trả true" chết ngay).
 
 Ràng buộc: test đăng ký listener qua DOM API có thật của engine, không thêm hàm đọc vào `internal/**`. Nếu engine không cho gắn `mouseenter` listener từ script/`dom.AddEventListener` sẵn có, **dừng và báo** kèm bằng chứng, đừng tự mở API.
+
+
+## 6. Integrator review (2026-10-25) — hai oracle vẫn mù với no-op mutation
+
+Commit `7826dbe` trên branch của task này đã biến 5 target "gọi cho đủ" thành invariant thật, và `test/style/shadow_test.go` tốt lên rõ rệt. Nhưng integrator chạy mutation thật trên một bản detached của `7826dbe` và phát hiện **hai oracle chỉ kiểm tra tính tự nhất quán** (`returned <===> effect`), nên một hàm bị vô hiệu hoá hoàn toàn vẫn thoả mãn cả hai chiều. Đây đúng là lớp lỗi đã giết BR-021 (TASK-020 §6) — nó quay lại ở chỗ khác.
+
+**Bằng chứng nguyên văn**, mỗi mutation chạy một mình rồi revert:
+
+| Mutation | Sửa gì | Kết quả với test như `7826dbe` |
+| --- | --- | --- |
+| A | đầu `Session.Edit`: `if action == EditRune { return false }` — không bao giờ chèn chữ tự | `go test -count=1 -run FuzzEdit ./test/engine/` → **`ok ... 0.745s`** (PASS) |
+| B | đầu `Session.ClickAt`: `return false` — không hit-test, không dispatch | `go test -count=1 -run FuzzClickAt ./test/engine/` → **`ok ... 0.747s`** (PASS) |
+
+Đã loại trừ khả năng "invariant không với tới được": probe trên fixture cho thấy `FocusControl(10,10)` **có** focus input, `FocusedEditable()` **có** true, `FocusedText()` = `"hello"`. Nhánh assert chạy thật, và nó vẫn xanh khi chức năng bị tắt.
+
+**Sửa tối thiểu (integrator áp trước khi merge, đã proof sẵn):**
+
+```go
+// FuzzEdit, trong nhánh if action == engine.EditRune && ... && sess.FocusedEditable() {
+if !changed {
+    t.Fatalf("Edit(EditRune, %q) on a focused editable returned false; text stayed %q", r, before)
+}
+
+// FuzzClickAt, sau cú click thứ hai vào nút submit #s
+if !handled || clicked != 1 {
+    t.Fatalf("ClickAt at the fixture submit button returned %t and dispatched %d click events, want true and 1", handled, clicked)
+}
+```
+
+Chạy lại với hai dòng đó, vẫn trên đúng hai mutation:
+
+* mutation A + `FuzzEdit` đã tăng cường → `--- FAIL: FuzzEdit/seed#0 ... Edit(EditRune, 'a') on a focused editable returned false; text stayed "hello"` → **1/1 FAIL**; revert mutation → `--- PASS: FuzzEdit`.
+* mutation B + `FuzzClickAt` đã tăng cường → `--- FAIL: FuzzClickAt/seed#3 ... returned false and dispatched 0 click events, want true and 1` (cả seed#4) → **FAIL**; revert mutation → **6/6 fuzz target PASS** (`ok test/engine 0.746s`).
+
+**Rule [R-7], áp cho mọi task oracle còn lại (TASK-026/027/028/029):** invariant dạng `returned X <===> effect Y` **không đủ**. Phải có ít nhất một **kỳ vọng dương** — với input tốt đã biết, hàm phải trả đúng giá trị này và để lại đúng trạng thái kia — vì "tắt hẳn chức năng" là mutation dễ giả vượt nhất. Mutation proof nộp kèm phải bao gồm ít nhất một mutation **tắt chức năng**, không chỉ mutation trả sai giá trị.
+
+Nếu §Status của agent đã ghi proof cho "edit-effect": kiểm tra phép mutation đó có **tắt** `Edit` hay chỉ làm nó trả sai; loại sau không tính.
