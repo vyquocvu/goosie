@@ -20,9 +20,10 @@ import (
 // (0,0,300,60) plus one more fill per text run -
 // (0,0,24,18) (23,0,28,18) (27,0,52,18) (51,0,56,18) (55,0,88,18) (87,0,92,18)
 // (91,0,118,18). With `rgba(200,0,0,.5)` those seven extra fills put (213,63,63)
-// over 5,964 device pixels of an 800x240 render against the block's own
-// (227,127,127), where Chromium measures (227,127,127) on 17,300 of its 18,000 CSS
-// pixels and nothing else but glyph ink.
+// on 1,395 pixels of a 400x120 render at DPR 1 against the block's own
+// (227,127,127) on 15,876, where Chromium measures (227,127,127) on 17,300 of the
+// block's 18,000 pixels, nothing doubled, and the remaining 700 are glyph ink and
+// its antialiasing.
 //
 // The cause is the same verbatim style copy that made group opacity double-count
 // (GOOSIE-VIS-001, TASK-044): layout splices a box per word and fills it with the
@@ -149,8 +150,8 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 		},
 		{
 			// A gradient background is the same emission through the gradient
-			// path: the block owns it and the runs must not re-emit it. Seven
-			// words, one gradient.
+			// path: the block owns it and the runs must not re-emit it. Four
+			// words, seven fragments, one gradient layer and no fill at all.
 			name: "gradient background",
 			body: `<div style="width:300px;height:60px;background-image:linear-gradient(rgb(10,120,20),rgb(10,120,20))">one two three four</div>`,
 			wantKinds: map[paint.CmdKind]int{
