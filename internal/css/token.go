@@ -143,9 +143,31 @@ func (t *Tokenizer) Next() Token {
 	case c == '-' && t.pos+2 < len(t.input) && t.input[t.pos+1:t.pos+3] == "->":
 		t.pos += 3
 		return Token{Type: TokenCDC, Value: "-->"}
-	case c == '-' || c == '+' || c == '.' || (c >= '0' && c <= '9'):
+	case c == '-':
+		// A hyphen is three different tokens, and the order is the spec's
+		// (CSS Syntax L3 4.3.7, branch U+002D): it starts a number only when a
+		// digit, or a "." and a digit, follows it (4.3.11); it starts an ident
+		// when the next code point is another hyphen or an ident-start code
+		// point (4.3.10) - which is what makes every "--" custom property name
+		// one ident, digits and all; anything else is a delimiter. Sending the
+		// hyphen to the numeric scanner instead read `--8e8e8e` as
+		// Dimension("-8e8", unit "e8e") - eight hundred million CSS pixels - and
+		// the engine's geometry cap refused the whole page over a colour name
+		// (GOOSIE-LIVE-002, measured on cafef.vn).
+		if t.hyphenStartsNumber() {
+			return t.readNumber()
+		}
+		if t.hyphenStartsIdent() {
+			return t.readIdentOrFunc()
+		}
+		t.pos++
+		return Token{Type: TokenDelim, Value: "-"}
+	case c == '+' || c == '.' || (c >= '0' && c <= '9'):
 		return t.readNumber()
-	case isIdentStart(c) || c == '-' || c == '_':
+	case isIdentStart(c) || c == '_':
+		// The hyphen's share of this branch ("-" followed by an ident-start code
+		// point) now lives in its own case above, which claims every U+002D the
+		// CDC check did not.
 		return t.readIdentOrFunc()
 	default:
 		t.pos++
@@ -298,6 +320,35 @@ func (t *Tokenizer) readNumber() Token {
 	}
 	return Token{Type: TokenNumber, Value: numStr, NumVal: val}
 }
+
+// hyphenStartsNumber is the spec's "check if three code points would start a
+// number" for a U+002D at the read position (CSS Syntax L3 4.3.11): a digit, or
+// a "." followed by a digit. It is the only way a hyphen reaches the numeric
+// scanner, so `-5px` and `-.5em` stay lengths while `--8e8e8e` does not.
+func (t *Tokenizer) hyphenStartsNumber() bool {
+	if t.pos+1 >= len(t.input) {
+		return false
+	}
+	if t.input[t.pos+1] == '.' {
+		return t.pos+2 < len(t.input) && isDigit(t.input[t.pos+2])
+	}
+	return isDigit(t.input[t.pos+1])
+}
+
+// hyphenStartsIdent is the spec's "check if three code points would start an
+// ident sequence" for a U+002D (4.3.10): a second hyphen - the form every custom
+// property name starts with - or an ident-start code point. A valid escape after
+// the hyphen would count too, but this tokenizer does not consume escapes inside
+// ident sequences at all, so that half of the rule is out of scope here.
+func (t *Tokenizer) hyphenStartsIdent() bool {
+	if t.pos+1 >= len(t.input) {
+		return false
+	}
+	next := t.input[t.pos+1]
+	return next == '-' || isIdentStart(next)
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 func isIdentStart(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 0x80
