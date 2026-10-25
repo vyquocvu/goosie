@@ -1522,9 +1522,10 @@
     "id": "BR-126",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyBackForwardDisabledStateAndClicks"
     ],
@@ -1534,9 +1535,10 @@
     "id": "BR-127",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyStopLoadingAndCompletedStopNoOp"
     ],
@@ -1546,9 +1548,10 @@
     "id": "BR-128",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyReloadRestoresReloadLabelAndRequestsExactlyOnce"
     ],
@@ -1558,9 +1561,10 @@
     "id": "BR-129",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyZoomInGrowsContentAndDisplaysPercentage",
       "test/toolbar/zoom_badge_ax_test.go:TestZoomBadgeExposesTheBadgeTheToolbarPaints"
@@ -1571,9 +1575,10 @@
     "id": "BR-130",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyZoomOutClampsAndStillAcceptsPageDown"
     ],
@@ -1583,9 +1588,10 @@
     "id": "BR-131",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_chrome_zoom_ax_test.go:TestJourneyCmdZeroResetsZoomAndKeepsAXGeometryValid",
       "test/toolbar/zoom_badge_ax_test.go:TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted"
