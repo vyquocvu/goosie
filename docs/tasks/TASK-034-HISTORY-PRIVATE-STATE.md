@@ -96,3 +96,63 @@ Bookmark CRUD (BR-046/BR-048) để batch sau — cùng họ state nhưng cần 
 `-clear-data` (BR-053) cần quyết định policy về phạm vi xóa trước khi viết oracle. Cookie
 isolation ở tầng `internal/net` (jar scope) đã có test riêng; task này khoá ở tầng app.
 Không đụng `testdata/render-known-gaps.json`, `PASS_AT`, `MIN_INK`, `gateFootprintSlack`.
+
+## 6. Verdict của integrator (tự chạy lại, không tin báo cáo)
+
+codex giao `d61403d` (branch `worktree-task-034-history-private`, base `4437f65`) với 7 oracle
+và tuyên bố six mutations giết đúng test. Integrator tự chạy lại **từng** mutation trên chính
+worktree đó, rồi merge. Merge chỉ thêm test + golden — **không** sửa production code nào, nên
+không có chuyện pixel/parity ở đây.
+
+Lệnh integrator đã chạy và kết quả:
+
+| Lệnh | Kết quả |
+| --- | --- |
+| `go test -count=1 ./test/tabs/ ./test/history/ ./test/qc/ ./internal/archtest/` | `ok` ×4 |
+| `go vet -all ./...` | rc 0 |
+| `go test -count=1 ./test/qc/ -update` rồi `git diff` | rỗng ⇒ golden idempotent |
+| `go test -count=1 ./...` (full) | `FULL-RC=0`, gồm `test/gate` 33.1s, `test/gatecheck` 28.1s, `cmd/goosie` 11.0s |
+| `go test -count=1 -race ./cmd/goosie/ ./test/tabs/ ./test/history/` | rc 0 (`cmd/goosie` 22.5s) |
+
+Chú giải trung thực: các chạy trên diễn ra trong lúc máy còn tải (agy đang render parity,
+load 1-minute 7–9). Tải cao chỉ có thể làm test **đỏ giả**, không thể làm test đỏ thành xanh;
+không có red nào xuất hiện nên kết luận đứng.
+
+Bảng mutation integrator tự reproduce (tắt chính hành vi, không trả giá trị sai):
+
+| # | Tắt gì | Kết quả |
+| --- | --- | --- |
+| M1 | `history.go:60-62` bỏ guard consecutive-repeat | `FAIL TestHistoryDropsConsecutiveRepeat: Entries() = 2 records, want 1 after a consecutive repeat` |
+| M2 | `toolbar/history.go:21-23` bỏ forward-trail truncation trong `Push` | `FAIL TestHistoryPushAfterBackDiscardsForwardTrail: history after branching = [a b c d]@3, want [a b d]@2` |
+| M3 | `main.go:217` `if !c.private` ⇒ `if true` (private mở profile stores) | `FAIL TestPrivateBuildDoesNotTouchProfileStores: private app stores/client = ...history.json...; want client and no profile stores` |
+| M4 | `navigation.go:681` bỏ `f.config.private` khỏi guard journal | `FAIL TestPrivateRunDoesNotJournalOrRestorePrivateTabs` — hai vế: `private session file .../session_active.json exists after close` và `regular startup found a private crash journal: &{Tabs:[{URL:https://private.example/secret ...}]}` |
+| M5 | `http.go:889` `if c.private` ⇒ không clear jar khi Close | `FAIL TestJourneyRegularPrivateRegularCookieIsolation: private jar after Close = [{Name:Y Value:private ...}], want cleared` |
+| M6 | `navigation.go:276` error path ghi `f.history.Record` trước khi return | `FAIL TestJourneyHistoryRecordsDisplayedVisitsAndOmitsFailedLoad: history after failed load has 4 entries, want 3 successful visits` |
+| M7 | `navigation.go:665` `HistoryIndex: idx` ⇒ mất cursor | `FAIL TestSessionStateRoundTrip` — 5 assertion cùng đỏ (`history = [a b c]@0, want @1`, `first tab URL = "https://a/"`, `forward = "https://b/",true, want https://c/`, ...) |
+
+Mọi mutation đều được revert; `git status --short` của worktree sạch trước và sau khi merge,
+và `grep -rn MUTATION-TEMP` trong toàn cây: **no matches**.
+
+Probe thêm của integrator (không nằm trong batch của codex): tôi nghi ngờ vế *tab-level*
+incognito chưa có oracle, vì các test TASK-034 đều khoá ở mức `-private`. Bỏ guard
+`!tab.Incognito()` ở `navigation.go:319` trên `main` ⇒ `FAIL TestIncognitoHistorySuppression
+(incognito_test.go:96): incognito visit leaked into history!` — vậy vùng đó **đã** bị khoá,
+nghi ngờ của tôi sai, và probe đã revert. Không mở defect nào cho nó.
+
+Hạn chế còn lại, khai rõ chứ không ẩn:
+
+* Mỗi case đúng **một** oracle. Spec §2.1 yêu cầu failure là "server trả 500/ERR"; test dùng
+  `http://127.0.0.1:1` (connection refused) — cùng lớp "load không thành công" nhưng không phải
+  đúng nhánh HTTP-error; chưa có test cho trang 500.
+* `TestHistoryPushAfterBackDiscardsForwardTrail` có dùng hợp đồng `Step(delta, base)`
+  (con trỏ stale) — đây là ràng buộc nội bộ của `toolbar.History`, nó khoá hành vi thật
+  (không commit bước đã peek từ lâu) nhưng khách quan sát được ít trực tiếp hơn phần còn lại.
+* BR-044/BR-045 không có journey app-level **mới**: chúng khoá `toolbar.History`/`history.Store`,
+  còn đường commit bước đã peek (`tab.History().Step(...)` ở `navigation.go:312-316`) do các
+  fixture có sẵn trong `cmd/goosie/main_test.go:837,861,882,947,1052` dẫn `traverse`/
+  `traverseBase`. Nếu ai đó đổi cả hai tầng cùng lúc thì mức báo động vẫn đỏ, nhưng vị trí lỗi
+  sẽ phải dò lại.
+
+Ratchet: 58 → **65** (`docs/qa-ratchet.json`) vì 7 case P1 mới có tag; `p0_tagged` giữ 19 vì
+cả 7 đều P1. Defect ghi nhận dạng đóng: `GOOSIE-HISTORY-001` (bảy P1 chrome/session case từng
+không có oracle nào), `closed_by` là commit của codex.
