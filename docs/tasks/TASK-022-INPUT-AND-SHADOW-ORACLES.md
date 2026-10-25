@@ -93,3 +93,169 @@ Một phân biệt cần giữ: "shadow" trong file này là **CSS box/text-shad
 * Gọi hai điểm trùng nhau rồi gọi `SetHover` ở điểm đó lần thứ hai ⇒ phải trả `false` (đây là case mà một stub "luôn trả true" chết ngay).
 
 Ràng buộc: test đăng ký listener qua DOM API có thật của engine, không thêm hàm đọc vào `internal/**`. Nếu engine không cho gắn `mouseenter` listener từ script/`dom.AddEventListener` sẵn có, **dừng và báo** kèm bằng chứng, đừng tự mở API.
+
+## 6. Status
+
+### Thay đổi
+
+- `TestShadowPanicsNoPanic` được đổi tên thành `TestShadowDeclarationsResolve` và gộp thành bảng kỳ vọng cho đủ 9 khai báo. Bảng kiểm số layer, thứ tự, offset, blur, spread, màu/alpha, `ColorIsCurrent` và `inset`; các trường không áp dụng cho `text-shadow` không bị bịa thêm.
+- Fuzz oracle kiểm tra `ClickAt` false không đổi focus và khớp kết quả activation với listener click; `FocusControl` phản ánh đúng thay đổi focus; `EditRune` kiểm tra text sau thành công/thất bại; hover đăng ký listener `mouseenter`/`mouseleave` qua `dom.AddEventListener`; chuỗi tương tác gọi `PaintChecked(1)` và đòi display list không rỗng.
+- Không thêm tag `qc:BR-xxx`; không cập nhật golden traceability.
+
+### Bằng chứng mutation
+
+`FAIL/PASS` dưới đây là số lần chạy mutant và chạy lại sau revert. Với sáu phép mutation chính, sau revert `git status --short` không in dòng nào; test mục tiêu chạy lại ra `ok` như ghi bên dưới. Các output FAIL là nguyên văn:
+
+| Oracle | Assertion được kiểm | Mutation thật | Kết quả |
+| --- | --- | --- | --- |
+| ClickAt | Kết quả trả về khớp event click trên button đã biết; false giữ nguyên focus | Stub kết quả `ClickAt` thành false tại call site sau click button | 1/1 FAIL, 1/1 PASS |
+| FocusControl | True đổi node focus; false giữ nguyên node; focus input xác định và gọi lặp lại | `setFocusedNodeLocked` cập nhật focus nhưng trả false | 1/1 FAIL, 1/1 PASS |
+| Edit | Rune hợp lệ được ghi; kết quả false không được che thay đổi text | Bỏ `setControlValue` trong nhánh chèn rune; thêm lần thử stub return false sau ghi | 2/2 FAIL, 2/2 PASS |
+| Hover | Chuyển đến cùng target không phát event thừa; điểm target đã nhận `mouseenter` trước lần lặp | Bỏ early return khi target hover không đổi | 1/1 FAIL, 1/1 PASS |
+| PaintChecked | Sau chuỗi input trả list có command | `list.Reset()` ngay sau khi build paint list | 1/1 FAIL, 1/1 PASS |
+| Shadow | Layer count và thứ tự text-shadow | Cắt layer đầu tiên khỏi `TextShadow` sau parse | 1/1 FAIL, 1/1 PASS |
+
+Output mutation ClickAt (stub tại call site):
+
+```text
+--- FAIL: FuzzClickAt (0.00s)
+    --- FAIL: FuzzClickAt/seed#0 (0.00s)
+        fuzz_input_test.go:80: ClickAt returned false after 1 click events, want return to match activation
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.771s
+FAIL
+```
+
+Sau revert, `git status --short` rỗng và `go test -count=1 -run 'FuzzClickAt/seed#0' ./test/engine/`:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/engine	0.534s
+```
+
+Output mutation FocusControl (trả false sau khi đã cập nhật focus):
+
+```text
+--- FAIL: FuzzFocusControl (0.00s)
+    --- FAIL: FuzzFocusControl/seed#0 (0.00s)
+        fuzz_input_test.go:168: FocusControl did not report and establish focus on fixture input
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.762s
+FAIL
+```
+
+Sau revert, `git status --short` rỗng và test mục tiêu PASS:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/engine	0.550s
+```
+
+Output mutation Edit (bỏ thao tác ghi):
+
+```text
+--- FAIL: FuzzEdit (0.01s)
+    --- FAIL: FuzzEdit/seed#0 (0.00s)
+        fuzz_input_test.go:183: Edit returned true but FocusedText "hello" does not contain inserted rune 'a'
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.753s
+FAIL
+```
+
+Output mutation Edit (stub trả false sau khi text đã đổi):
+
+```text
+--- FAIL: FuzzEdit (0.00s)
+    --- FAIL: FuzzEdit/seed#0 (0.00s)
+        fuzz_input_test.go:226: Edit returned false but FocusedText changed from "hello" to "helloa"
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.764s
+FAIL
+```
+
+Sau revert mutation bỏ thao tác ghi, `git status --short` rỗng và test seed chạy lại:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/engine	0.549s
+```
+
+Sau revert mutation stub false, output status/test là:
+
+```text
+?? test/engine/testdata/
+ok  	github.com/vyquocvu/goosie/test/engine	0.545s
+```
+
+Corpus fuzz thất bại trước đó làm status không hoàn toàn sạch ở lần proof thứ hai; phần mutation nguồn đã revert. Xem ghi chú giới hạn dọn corpus ở cuối status này.
+
+Output mutation hover (bỏ guard target không đổi):
+
+```text
+--- FAIL: FuzzSetHover (0.00s)
+    --- FAIL: FuzzSetHover/seed#0 (0.00s)
+        fuzz_input_test.go:128: SetHover at the unchanged fixture target returned true
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.756s
+FAIL
+```
+
+Sau revert, `git status --short` rỗng và test mục tiêu PASS:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/engine	0.547s
+```
+
+Output mutation PaintChecked (xóa display commands sau build):
+
+```text
+--- FAIL: FuzzInteractionSequence (0.00s)
+    --- FAIL: FuzzInteractionSequence/seed#0 (0.00s)
+        fuzz_input_test.go:265: PaintChecked after interaction sequence returned &{[] {0 0 0 0}} display commands
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.755s
+FAIL
+```
+
+Sau revert, `git status --short` rỗng và test mục tiêu PASS:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/engine	0.587s
+```
+
+Output mutation shadow (bỏ layer đầu):
+
+```text
+--- FAIL: TestShadowDeclarationsResolve (0.00s)
+    --- FAIL: TestShadowDeclarationsResolve/text-shadow:_0_0_red,_1px_1px_blue,_2px_2px_green (0.00s)
+        shadow_test.go:235: text-shadow layer count = 2, want 3
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/style	0.638s
+FAIL
+```
+
+Sau revert, `git status --short` rỗng và `go test -count=1 -run TestShadowDeclarationsResolve ./test/style/`:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/style	0.415s
+```
+
+### Assertions điều chỉnh và sai lệch CSS
+
+- Điều kiện `FocusControl == true ⇒ Focused() != nil` không đúng với hợp đồng tại `focus.go:76`: focus vào vùng trống có thể xóa focus và vẫn trả true. Test dùng điều kiện phù hợp: true phải thay đổi node focus (kể cả sang nil), false phải giữ nguyên.
+- Điều kiện hover true ⇒ đúng một event không đúng khi chuyển giữa hai element: nhánh engine có thể phát `mouseleave` và `mouseenter`, tổng cộng hai event. Test cho phép một hoặc hai event khi true; lần gọi lặp lại trên target đã nhận `mouseenter` vẫn phải false và không phát event.
+- `ClickAt` chỉ kích hoạt control, không đặt focus theo API ở `engine.go:1502`; vì vậy bỏ điều kiện true ⇒ `Focused() != nil`. Thay bằng quan hệ return/event click trên button thật và false ⇒ focus không đổi.
+- Rune surrogate không phải Unicode scalar hợp lệ. Oracle Edit chỉ xét `utf8.ValidRune` và ký tự không control.
+- Không có assert nào bị bỏ vì không chứng minh được bằng mutation. Các điều kiện nêu trên được thay vì mâu thuẫn với contract/API hoặc Unicode.
+- Không tìm thấy sai lệch CSS-spec trong 9 khai báo. Ví dụ tối giản `box-shadow: 1px 1px` cho offset `(1,1)`, blur `0`, spread `0`; màu omitted được biểu diễn bằng `ColorIsCurrent`. Khai báo box-shadow hai layer và text-shadow ba layer giữ đúng count, thứ tự, màu, offset và blur. Alpha rgba được byte-quantize theo rounding (0.3 → 77; 0.5 → 128).
+- Tên `TestShadowPanicsNoPanic` được đổi thành `TestShadowDeclarationsResolve`; tính chất no-panic vẫn được bao phủ trong lúc resolve từng khai báo.
+
+### Nghiệm thu
+
+- **AC-01:** `go test -count=1 ./test/engine/ ./test/style/` PASS; `go test -count=1 -run Fuzz -v ./test/engine/` PASS, gồm seed và corpus đã lưu.
+- **AC-02:** `go test -race -count=2 ./test/engine/` PASS (`ok ... 47.279s`).
+- **AC-03:** các lệnh `-fuzz ... -fuzztime=30s` PASS: `FuzzClickAt` 206,282 execs; `FuzzSetHover` 194,657; `FuzzFocusControl` 195,132; `FuzzSelectAtTo` 191,493; `FuzzEdit` 178,459; `FuzzInteractionSequence` 159,670. Lệnh đầu không nâng quyền bị loopback `httptest` chặn; các lần chạy 30 s hoàn tất khi cấp quyền loopback.
+- **AC-05:** `go build ./...`, `go vet -all ./...`, `go test ./internal/archtest/`, `go test ./test/qc/` PASS; `gofmt -l test/engine/fuzz_input_test.go test/style/shadow_test.go` không in file.
+- **AC-06:** không đổi tag QC nên không chạy `-update`; golden không đổi.
+- **AC-07:** các test cùng dạng còn lại (chỉ liệt kê): `test/engine/control_events_test.go` (FocusControl/Edit, khoảng dòng 28–370); `disclosure_test.go:57`; `focus_test.go` (FocusControl/Edit, dòng 67–396); `ime_test.go` (FocusControl/Edit, dòng 29–195); `events_test.go` (SetHover/FocusControl, dòng 123–247); `unicode_test.go:50–62`; `popover_test.go:83–230`; `parity_interaction_test.go:69–182`; `interaction_e2e_test.go:56–623`. Nhiều test trong nhóm này kiểm tra tác dụng phụ ở assertion phía sau dù bỏ qua bool trả về.
+
+### Giới hạn dọn dẹp
+
+Lần fuzz đầu phát hiện hai oracle kỳ vọng quá hẹp và Go đã tạo hai corpus repro ở `test/engine/testdata/fuzz/FuzzSetHover/0e33ac8c36128d91` và `test/engine/testdata/fuzz/FuzzEdit/767b1cc07fe7a7f1`; các corpus này hiện PASS trong seed run. Tôi thử xóa đúng hai thư mục này để giữ phạm vi file, nhưng auto-review chặn lệnh dọn đệ quy vì đường dẫn thuộc `testdata/**` mà task cấm sửa. Không có corpus nào được đưa vào commit; worktree còn `?? test/engine/testdata/` và cần integrator cho phép dọn để trạng thái Git hoàn toàn sạch.
