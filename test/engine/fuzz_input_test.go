@@ -3,8 +3,6 @@ package engine_test
 import (
 	"math"
 	"testing"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
@@ -67,13 +65,9 @@ func FuzzClickAt(f *testing.F) {
 		if !ok {
 			t.Fatal("fuzz fixture submit button has no layout box")
 		}
-		before = sess.Focused()
 		handled = sess.ClickAt(cx, cy)
-		if handled != (clicked == 1) {
-			t.Fatalf("ClickAt returned %t after %d click events, want return to match activation", handled, clicked)
-		}
-		if !handled && sess.Focused() != before {
-			t.Fatal("ClickAt returned false but changed focused control")
+		if !handled || clicked != 1 {
+			t.Fatalf("ClickAt at the fixture submit button returned %t after %d click events, want true and 1", handled, clicked)
 		}
 	})
 }
@@ -124,11 +118,11 @@ func FuzzSetHover(f *testing.F) {
 		enters, leaves = 0, 0
 		handled := sess.SetHover(x, y)
 		events := enters + leaves
-		if handled && (events < 1 || events > 2) {
-			t.Fatalf("SetHover returned true with %d mouseenter/mouseleave events, want 1 or 2", events)
+		if enters > 1 || leaves > 1 {
+			t.Fatalf("SetHover entered %d and left %d nodes, want at most one of each (goosie fires mouseenter/mouseleave on the hit node only)", enters, leaves)
 		}
-		if !handled && events != 0 {
-			t.Fatalf("SetHover returned false with %d mouseenter/mouseleave events, want 0", events)
+		if handled != (events > 0) {
+			t.Fatalf("SetHover returned %t with %d mouseenter/mouseleave events, want handled to agree with an event having fired", handled, events)
 		}
 		enters, leaves = 0, 0
 		if sess.SetHover(x, y) {
@@ -204,13 +198,24 @@ func FuzzEdit(f *testing.F) {
 		before := sess.FocusedText()
 		changed := sess.Edit(action, r)
 		after := sess.FocusedText()
-		if action == engine.EditRune && utf8.ValidRune(r) && !unicode.IsControl(r) && sess.FocusedEditable() {
-			if changed && !containsRune(after, r) {
-				t.Fatalf("Edit returned true but FocusedText %q does not contain inserted rune %q", after, r)
+		if action != engine.EditRune || !sess.FocusedEditable() {
+			return
+		}
+		// focus.go:360 refuses every C0 control: no keyboard path delivers one to a
+		// form field, and CR/LF/TAB must stay out of a single-line value. Anything
+		// else appends at the caret, which sits at the end after focusing, and
+		// string(r) already folds invalid scalars and lone surrogates to U+FFFD.
+		if r < 0x20 {
+			if changed || after != before {
+				t.Fatalf("Edit(EditRune, %q) returned %t and left %q -> %q, want refused and unchanged", r, changed, before, after)
 			}
-			if !changed && after != before {
-				t.Fatalf("Edit returned false but FocusedText changed from %q to %q", before, after)
-			}
+			return
+		}
+		if !changed {
+			t.Fatalf("Edit(EditRune, %q) on a focused editable returned false; text stayed %q", r, before)
+		}
+		if after != before+string(r) {
+			t.Fatalf("Edit(EditRune, %q) produced %q from %q, want %q", r, after, before, before+string(r))
 		}
 	})
 }
@@ -256,15 +261,6 @@ func FuzzInteractionSequence(f *testing.F) {
 			t.Fatalf("PaintChecked after interaction sequence returned %v display commands", list)
 		}
 	})
-}
-
-func containsRune(s string, r rune) bool {
-	for _, got := range s {
-		if got == r {
-			return true
-		}
-	}
-	return false
 }
 
 func centerForNode(sess *engine.Session, node *dom.Node) (float32, float32, bool) {
