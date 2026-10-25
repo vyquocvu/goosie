@@ -78,3 +78,75 @@ Vì vậy, quy tắc cứng cho task này:
 - `unicode/02-emoji-symbols.png` (9 band): font fallback cho emoji.
 - `selectors/02-pseudo-classes.png`, `selectors/03-pseudo-elements.png` (6 band): nội dung `::before`/`::after`.
 - `forms/04-advanced-inputs.png`, `html-features/01-forms-complete.png` (3 band): form controls.
+
+## Status
+
+Implemented in `testdata/parity.py`: row bands use Chromium ink runs (gap ≤6 rows, height ≥6), horizontal bounds are taken from the reference ink, and `MIN_INK=200`. Ink pixels are RGB values with a channel below 245. One-pixel dilation is used for the reported tolerant ink IoU. Only a completely empty Goosie band is a new gate; `worst_region_iou` and `coverage_ratio` are emitted as diagnostics in console, JSON, and JUnit. `PASS_AT=90` is unchanged. The baseline allows each existing fixture up to its recorded count and makes any increase or any blank region on a new fixture fail.
+
+The Chromium and Goosie images already present under `/tmp/playwright-renders` and `/tmp/goosie-renders` were used. No Playwright rerender was needed; `--render-chromium` was not run.
+
+### Existing blank regions and fixture-based hypotheses
+
+| Fixture | Blank bands | Observed row ranges | Hypothesis from fixture HTML |
+| --- | ---: | --- | --- |
+| `unicode/02-emoji-symbols.png` | 9 | 113–132, 155–174, 240–254, 282–301, 368–385, 409–428, 451–470, 496–509, 579–598 | Emoji sequences (faces, gestures, objects, flags and symbols) likely lack a usable emoji font fallback. |
+| `selectors/02-pseudo-classes.png` | 3 | 471–487, 506–526, 551–569 | Later structural selector examples and the `:empty` examples may be missing or not styled/generated as expected. |
+| `selectors/03-pseudo-elements.png` | 3 | 457–475, 539–554, 579–599 | The star/checkmark, quotation mark, generated-content, and list marker examples suggest missing `::before`/`::after` content in later sections. |
+| `forms/04-advanced-inputs.png` | 2 | 376–388, 443–454 | Some advanced native controls (date/time, color, range or file) may be absent. |
+| `html-features/01-forms-complete.png` | 1 | 593–599 | The final form row is at the viewport edge; a submit/reset/control or its clipped label may be missing. |
+
+These are visual hypotheses from the fixture source, not root-cause findings. The baseline points to the proposed follow-up `docs/tasks/TASK-023-RENDER-REGION-GAPS.md`; that follow-up task is outside this change.
+
+### Acceptance evidence
+
+| AC | Command / method | Result |
+| --- | --- | --- |
+| AC-01 | Mutation of existing `unicode/02-emoji-symbols.png` Goosie render at rows 197–216; rerun scorer; restore original bytes and rerun | Mutation FAIL (10/9 bands, exit 1); restored PASS (9/9, exit 0). Exact output below. |
+| AC-02 | `python3 testdata/parity.py` using the pre-rendered images | 80/80 PASS; summary reports 5 fixture / 18 band known gaps. Output below. |
+| AC-03 | Add a temporary synthetic HTML fixture and 800×600 PNG pair with one blank 10×25 reference band; run `python3 testdata/parity.py`; remove the temporary files | Synthetic fixture FAIL at 99.95% pixel match, 1/0 blank bands; process exit 1. Exact scorer lines below. |
+| AC-04 | `python3 -m unittest testdata/test_parity_regions.py` | PASS, 3 tests. |
+| AC-05 | `go test -count=1 ./...`; `go vet -all ./...` | PASS, exit 0 for both. Initial sandbox run of `go test` hit blocked localhost/network operations; rerun with the approved unsandboxed permission completed successfully. No Go files changed. |
+| AC-06 | Limit of the added gate | It detects substantial completely blank content bands; small positional shifts and incorrect glyphs can still pass the full-viewport pixel score. This does not sign off CUA case BR-180. |
+
+#### AC-01 exact output
+
+```text
+mutation blank band: unicode/02-emoji-symbols.png FAIL; blank_regions=10/9; rows=[(113, 132), (155, 174), (197, 216), (240, 254), (282, 301), (368, 385), (409, 428), (451, 470), (496, 509), (579, 598)]; exit=1
+restored image: unicode/02-emoji-symbols.png PASS; blank_regions=9/9; rows=[(113, 132), (155, 174), (240, 254), (282, 301), (368, 385), (409, 428), (451, 470), (496, 509), (579, 598)]; exit=0
+```
+
+#### AC-02 summary output
+
+```text
+  80/80 passing  (100.0%), 0 failing, 0 errors
+  average match: 96.09%  (threshold=30, pass_at=90.0%)
+  known gaps: 5 fixtures / 18 bands
+  WARNING known gap: forms/04-advanced-inputs.png: 2 blank band(s), baseline 2; rows=[(376, 388), (443, 454)]
+  WARNING known gap: html-features/01-forms-complete.png: 1 blank band(s), baseline 1; rows=[(593, 599)]
+  WARNING known gap: selectors/02-pseudo-classes.png: 3 blank band(s), baseline 3; rows=[(471, 487), (506, 526), (551, 569)]
+  WARNING known gap: unicode/02-emoji-symbols.png: 9 blank band(s), baseline 9; rows=[(113, 132), (155, 174), (240, 254), (282, 301), (368, 385), (409, 428), (451, 470), (496, 509), (579, 598)]
+  WARNING known gap: selectors/03-pseudo-elements.png: 3 blank band(s), baseline 3; rows=[(457, 475), (539, 554), (579, 599)]
+```
+
+#### AC-03 exact output
+
+```text
+   99.95%  FAIL  .task021-synthetic/blank.png  worst_region_iou=0.0  coverage_ratio=0.0  blank_regions=1/0  rows=[(100, 109)]
+  80/81 passing  (98.8%), 1 failing, 0 errors
+    .task021-synthetic/blank.png  (99.95%)
+exit=1
+```
+
+#### AC-04 exact output
+
+```text
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK
+```
+
+#### AC-05 output
+
+`go test -count=1 ./...` completed with exit 0 after permission was granted for the suite's localhost and network tests. `go vet -all ./...` completed with exit 0 and no diagnostics.

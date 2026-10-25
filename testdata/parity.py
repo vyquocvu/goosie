@@ -2,7 +2,8 @@
 """Score Goosie's renders against the Playwright (Chromium) reference renders.
 
 A pixel matches when every RGB channel differs by at most THRESHOLD; a fixture
-passes when at least PASS_AT percent of pixels match.
+passes when at least PASS_AT percent of pixels match and it has no new blank
+content regions. Region similarity metrics are reported but are not gates.
 
 Modes:
     --render          Re-render fixtures with the local goosie binary first.
@@ -38,6 +39,11 @@ PASS_AT = 90.0
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
+KNOWN_GAPS = Path("testdata/render-known-gaps.json")
+MIN_INK = 200
+INK_CUTOFF = 245
+BAND_GAP = 6
+MIN_BAND_HEIGHT = 6
 
 
 # ---------------------------------------------------------------------------
@@ -154,19 +160,35 @@ class FixtureResult:
     def __init__(self, name: str, pct: float, status: str,
                  goosie_size: tuple[int, int] | None = None,
                  chromium_size: tuple[int, int] | None = None,
-                 error: str | None = None):
+                 error: str | None = None,
+                 worst_region_iou: float | None = None,
+                 coverage_ratio: float | None = None,
+                 blank_region_rows: list[tuple[int, int]] | None = None,
+                 known_blank_regions: int = 0):
         self.name = name
         self.pct = pct
         self.status = status          # "PASS", "FAIL", "ERROR", "MISSING"
         self.goosie_size = goosie_size
         self.chromium_size = chromium_size
         self.error = error
+        self.worst_region_iou = worst_region_iou
+        self.coverage_ratio = coverage_ratio
+        self.blank_region_rows = blank_region_rows or []
+        self.known_blank_regions = known_blank_regions
+        self.blank_regions = len(self.blank_region_rows)
 
     def to_dict(self) -> dict:
         d: dict = {
             "fixture": self.name,
             "match_pct": round(self.pct, 3),
             "status": self.status,
+            "worst_region_iou": (round(self.worst_region_iou, 4)
+                                 if self.worst_region_iou is not None else None),
+            "coverage_ratio": (round(self.coverage_ratio, 4)
+                               if self.coverage_ratio is not None else None),
+            "blank_regions": self.blank_regions,
+            "blank_region_rows": [list(rows) for rows in self.blank_region_rows],
+            "known_blank_regions": self.known_blank_regions,
         }
         if self.goosie_size:
             d["goosie_size"] = list(self.goosie_size)
@@ -177,6 +199,94 @@ class FixtureResult:
         return d
 
 
+def ink_mask(rgb: np.ndarray) -> np.ndarray:
+    """Count visible pixels away from a near-white page background as ink.
+
+    A modest cutoff includes antialiased glyph edges; MIN_INK filters small
+    marks so the gate stays focused on substantial content regions.
+    """
+    return np.min(rgb, axis=2) < INK_CUTOFF
+
+
+def content_bands(chromium_ink: np.ndarray) -> list[tuple[int, int, int, int, int]]:
+    """Return (y0, y1 inclusive, x0, x1 exclusive, ink count) content bands.
+
+    Adjacent ink rows separated by at most BAND_GAP empty rows form one band.
+    Horizontal bounds follow Chromium's ink extent so blank page margins do
+    not affect region measurements.
+    """
+    occupied = np.flatnonzero(chromium_ink.any(axis=1))
+    if not len(occupied):
+        return []
+    groups: list[tuple[int, int]] = []
+    start = previous = int(occupied[0])
+    for row in occupied[1:]:
+        row = int(row)
+        if row - previous > BAND_GAP + 1:
+            groups.append((start, previous))
+            start = row
+        previous = row
+    groups.append((start, previous))
+
+    bands = []
+    for y0, y1 in groups:
+        if y1 - y0 + 1 < MIN_BAND_HEIGHT:
+            continue
+        xs = np.flatnonzero(chromium_ink[y0:y1 + 1].any(axis=0))
+        x0, x1 = int(xs[0]), int(xs[-1]) + 1
+        count = int(chromium_ink[y0:y1 + 1, x0:x1].sum())
+        if count >= MIN_INK:
+            bands.append((y0, y1, x0, x1, count))
+    return bands
+
+
+def _dilate_one(mask: np.ndarray) -> np.ndarray:
+    padded = np.pad(mask, 1)
+    h, w = mask.shape
+    dilated = np.zeros_like(mask)
+    for dy in range(3):
+        for dx in range(3):
+            dilated |= padded[dy:dy + h, dx:dx + w]
+    return dilated
+
+
+def score_regions(goosie: np.ndarray, chromium: np.ndarray
+                  ) -> tuple[float | None, float | None, list[tuple[int, int]]]:
+    """Measure tolerant ink overlap and identify truly empty reference bands.
+
+    The gate is deliberately only an entirely blank Goosie band: normal glyph
+    rasterization differences make similarity scores noisy across browsers.
+    """
+    gm, cm = ink_mask(goosie), ink_mask(chromium)
+    bands = content_bands(cm)
+    if not bands:
+        return None, None, []
+    ious: list[float] = []
+    chromium_total = goosie_total = 0
+    blanks = []
+    for y0, y1, x0, x1, chromium_count in bands:
+        a, b = cm[y0:y1 + 1, x0:x1], gm[y0:y1 + 1, x0:x1]
+        goosie_count = int(b.sum())
+        chromium_total += chromium_count
+        goosie_total += goosie_count
+        if goosie_count == 0:
+            blanks.append((y0, y1))
+        denominator = chromium_count + goosie_count
+        if denominator:
+            overlap = int(np.logical_and(a, _dilate_one(b)).sum())
+            overlap += int(np.logical_and(b, _dilate_one(a)).sum())
+            ious.append(overlap / denominator)
+    return min(ious) if ious else None, goosie_total / chromium_total, blanks
+
+
+def load_known_gaps(path: Path = KNOWN_GAPS) -> dict[str, int]:
+    """Load fixture -> allowed existing blank band count baseline."""
+    with path.open() as f:
+        data = json.load(f)
+    return {entry["fixture"]: int(entry["blank_regions"])
+            for entry in data["known_gaps"]}
+
+
 def _category(name: str) -> str:
     """Extract the category from a fixture path like 'typography/01-font.png'."""
     parts = Path(name).parts
@@ -184,13 +294,15 @@ def _category(name: str) -> str:
 
 
 def score_fixtures(threshold: int, pass_at: float,
-                   strict: bool = True) -> list[FixtureResult]:
+                   strict: bool = True,
+                   known_gaps: dict[str, int] | None = None) -> list[FixtureResult]:
     """Compare every goosie render to its Chromium counterpart.
 
     When *strict* is True (the default), missing pairs and dimension mismatches
     are reported as errors rather than silently skipped.
     """
     results: list[FixtureResult] = []
+    known_gaps = load_known_gaps() if known_gaps is None else known_gaps
 
     for html in sorted(FIXTURES.rglob("*.html")):
         rel = str(html.relative_to(FIXTURES).with_suffix(".png"))
@@ -236,10 +348,17 @@ def score_fixtures(threshold: int, pass_at: float,
         match_mask = np.all(diff <= threshold, axis=2)
         pct = float(np.mean(match_mask) * 100)
 
+        worst_iou, coverage, blank_rows = score_regions(g, p)
+        allowed_blanks = known_gaps.get(rel, 0)
+        status = "PASS" if pct >= pass_at and len(blank_rows) <= allowed_blanks else "FAIL"
         results.append(FixtureResult(
-            rel, pct, "PASS" if pct >= pass_at else "FAIL",
+            rel, pct, status,
             goosie_size=(g.shape[1], g.shape[0]),
             chromium_size=(p.shape[1], p.shape[0]),
+            worst_region_iou=worst_iou,
+            coverage_ratio=coverage,
+            blank_region_rows=blank_rows,
+            known_blank_regions=allowed_blanks,
         ))
 
     results.sort(key=lambda r: (-r.pct, r.name))
@@ -395,6 +514,10 @@ def write_json_report(results: list[FixtureResult], path: Path,
             "pass_at": pass_at,
             "elapsed_seconds": round(elapsed, 2),
             "all_pass": len(failing) == 0 and len(errors) == 0,
+            "known_gap_fixtures": sum(1 for r in results
+                                       if r.known_blank_regions > 0),
+            "known_gap_bands": sum(r.blank_regions for r in results
+                                    if r.known_blank_regions > 0),
         },
         "categories": cat_summary,
         "fixtures": [r.to_dict() for r in results],
@@ -440,11 +563,26 @@ def write_junit_report(results: list[FixtureResult], path: Path,
                 "name": r.name,
                 "classname": f"parity.{cat}",
             })
+            ET.SubElement(tc, "properties")
+            props = tc.find("properties")
+            assert props is not None
+            for key, value in (
+                ("match_pct", f"{r.pct:.3f}"),
+                ("worst_region_iou", "" if r.worst_region_iou is None
+                 else f"{r.worst_region_iou:.4f}"),
+                ("coverage_ratio", "" if r.coverage_ratio is None
+                 else f"{r.coverage_ratio:.4f}"),
+                ("blank_regions", str(r.blank_regions)),
+                ("blank_region_rows", json.dumps(r.blank_region_rows)),
+                ("known_blank_regions", str(r.known_blank_regions)),
+            ):
+                ET.SubElement(props, "property", {"name": key, "value": value})
             if r.status == "FAIL":
                 total_failures += 1
                 failure = ET.SubElement(tc, "failure", {
-                    "message": f"{r.pct:.2f}% match < {pass_at}% threshold",
-                    "type": "PixelMismatch",
+                    "message": (f"match={r.pct:.2f}% blank_regions="
+                                f"{r.blank_regions} allowed={r.known_blank_regions}"),
+                    "type": "ParityMismatch",
                 })
                 failure.text = (
                     f"Fixture: {r.name}\n"
@@ -452,6 +590,8 @@ def write_junit_report(results: list[FixtureResult], path: Path,
                     f"Threshold: {pass_at}%\n"
                     f"Goosie size: {r.goosie_size}\n"
                     f"Chromium size: {r.chromium_size}\n"
+                    f"Blank regions: {r.blank_regions} at {r.blank_region_rows}\n"
+                    f"Known blank regions allowed: {r.known_blank_regions}\n"
                 )
             elif r.status in ("ERROR", "MISSING"):
                 total_errors += 1
@@ -490,7 +630,11 @@ def print_summary(results: list[FixtureResult], threshold: int,
 
     for r in results:
         if r.status in ("PASS", "FAIL"):
-            print(f"  {r.pct:6.2f}%  {r.status:4s}  {r.name}")
+            print(f"  {r.pct:6.2f}%  {r.status:4s}  {r.name}"
+                  f"  worst_region_iou={r.worst_region_iou if r.worst_region_iou is not None else 'n/a'}"
+                  f"  coverage_ratio={r.coverage_ratio if r.coverage_ratio is not None else 'n/a'}"
+                  f"  blank_regions={r.blank_regions}/{r.known_blank_regions}"
+                  f"  rows={r.blank_region_rows}")
         else:
             print(f"  {'---':>6s}  {r.status:4s}  {r.name}  "
                   f"({r.error})")
@@ -507,6 +651,12 @@ def print_summary(results: list[FixtureResult], threshold: int,
           f"{failing} failing, {errored} errors")
     print(f"  average match: {avg:.2f}%  "
           f"(threshold={threshold}, pass_at={pass_at}%)")
+    known = [r for r in results if r.known_blank_regions > 0]
+    known_bands = sum(r.blank_regions for r in known)
+    print(f"  known gaps: {len(known)} fixtures / {known_bands} bands")
+    for r in known:
+        print(f"  WARNING known gap: {r.name}: {r.blank_regions} blank band(s), "
+              f"baseline {r.known_blank_regions}; rows={r.blank_region_rows}")
 
     if failing > 0:
         print()
