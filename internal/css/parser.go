@@ -1225,6 +1225,14 @@ func (p *parser) skipAtRule() {
 // so only an unescaped newline may close one as bad.
 func closesStringAt(quote, c byte) bool { return c == quote || c == '\n' }
 
+// startsEscape reports whether c opens a CSS escape sequence (CSS Syntax L3
+// 4.3.8). The byte after a backslash belongs to the token whatever it is, so it
+// can neither open nor close a string. Every quote-tracking scan below has to
+// test it in *both* states: honouring escapes only once a string is already open
+// is what let `url(...\'...\')` start a string that never ended, costing every
+// rule after it in the sheet (GOOSIE-CSSSTRING-003).
+func startsEscape(c byte) bool { return c == '\\' }
+
 // stripEscapedNewlines drops `\` + line-break pairs from inside quoted strings.
 // Chromium measured on `url("a\<newline>b")` computes the token value as `ab` -
 // the escape pair contributes no character - so a multi-line quoted data URI
@@ -1262,10 +1270,12 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	var quote byte
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
+		if startsEscape(c) && p.pos+1 < len(p.input) {
+			p.pos += 2 // 4.3.8: the escaped byte belongs to the token in either state
+			continue
+		}
 		if quote != 0 {
-			if c == '\\' && p.pos+1 < len(p.input) {
-				p.pos++ // 4.3.8: the escaped byte belongs to the string, newline included
-			} else if closesStringAt(quote, c) {
+			if closesStringAt(quote, c) {
 				quote = 0
 			}
 		} else if c == '\'' || c == '"' {
@@ -1285,17 +1295,30 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	p.skipWhitespace()
 	declStart := p.pos
 	depth := 0
+	parens := 0
 	quote = 0
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
+		if startsEscape(c) && p.pos+1 < len(p.input) {
+			p.pos += 2 // 4.3.8: the escaped byte belongs to the token in either state
+			continue
+		}
 		if quote != 0 {
-			if c == '\\' && p.pos+1 < len(p.input) {
-				p.pos++ // 4.3.8: the escaped byte belongs to the string, newline included
-			} else if closesStringAt(quote, c) {
+			if closesStringAt(quote, c) {
 				quote = 0
 			}
-		} else if c == '\'' || c == '"' {
+		} else if (c == '\'' || c == '"') && parens == 0 {
+			// 4.3.9: inside `url(...)` a quote is a parse error, not the start of a
+			// string, so it must not put the scan into string state and swallow the
+			// rest of the block with it. `depth` counts braces, so parens are tracked
+			// apart - a declaration body legitimately holds both.
 			quote = c
+		} else if c == '(' {
+			parens++
+		} else if c == ')' {
+			if parens > 0 {
+				parens--
+			}
 		} else if c == '{' {
 			depth++
 		} else if c == '}' {
@@ -1357,6 +1380,10 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			var quote byte
 			for i < n {
 				c := body[i]
+				if startsEscape(c) && i+1 < n {
+					i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+					continue
+				}
 				if quote != 0 {
 					if c == quote {
 						quote = 0
@@ -1382,6 +1409,10 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			quote = 0
 			for i < n && depth > 0 {
 				c := body[i]
+				if startsEscape(c) && i+1 < n {
+					i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+					continue
+				}
 				if quote != 0 {
 					if c == quote {
 						quote = 0
@@ -1416,17 +1447,19 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 		hitPos := -1
 		for i < n {
 			c := body[i]
+			if startsEscape(c) && i+1 < n {
+				i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+				continue
+			}
 			if quote != 0 {
-				if c == '\\' && i+1 < n {
-					i++ // 4.3.8: the escaped byte belongs to the string, newline included
-				} else if c == quote {
+				if c == quote {
 					quote = 0
 				} else if c == '\n' {
 					quote = 0
 					stmtBadString = true
 				}
-			} else if c == '\'' || c == '"' {
-				quote = c
+			} else if (c == '\'' || c == '"') && depth == 0 {
+				quote = c // 4.3.9: a quote inside `url(...)` is not a string
 			} else if c == '(' {
 				depth++
 			} else if c == ')' {
@@ -1457,6 +1490,10 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			quote = 0
 			for i < n && depth > 0 {
 				c := body[i]
+				if startsEscape(c) && i+1 < n {
+					i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+					continue
+				}
 				if quote != 0 {
 					if c == quote {
 						quote = 0
@@ -1719,6 +1756,10 @@ func ExpandSingleNestedSelector(parent, nested string) string {
 	var quote byte
 	for i := 0; i < len(nested); i++ {
 		c := nested[i]
+		if startsEscape(c) && i+1 < len(nested) {
+			i++ // 4.3.8: the escaped byte belongs to the token in either state
+			continue
+		}
 		if quote != 0 {
 			if c == quote {
 				quote = 0
@@ -1736,6 +1777,10 @@ func ExpandSingleNestedSelector(parent, nested string) string {
 		quote = 0
 		for i := 0; i < len(nested); i++ {
 			c := nested[i]
+			if startsEscape(c) && i+1 < len(nested) {
+				i++ // 4.3.8: the escaped byte belongs to the token in either state
+				continue
+			}
 			if quote != 0 {
 				if c == quote {
 					quote = 0
@@ -1830,6 +1875,10 @@ func SplitDeclarations(s string) []string {
 	start := 0
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		if startsEscape(c) && i+1 < len(s) {
+			i++ // 4.3.8: the escaped byte belongs to the token in either state
+			continue
+		}
 		if quote != 0 {
 			if c == quote {
 				quote = 0
@@ -1838,7 +1887,9 @@ func SplitDeclarations(s string) []string {
 		}
 		switch c {
 		case '\'', '"':
-			quote = c
+			if depth == 0 {
+				quote = c // 4.3.9: a quote inside `url(...)` is not a string
+			}
 		case '(':
 			depth++
 		case ')':

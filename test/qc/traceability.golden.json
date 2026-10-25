@@ -2185,5 +2185,22 @@
       "test/gatecheck/parity_harness_test.go:TestParityDriftMetricIsGreen"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-191",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/escaped_quote_test.go:TestEscapedDoubleQuoteInsideStringContinuesIt",
+      "test/css/escaped_quote_test.go:TestEscapedQuoteInUnquotedURLKeepsEveryRule",
+      "test/css/escaped_quote_test.go:TestEscapedQuoteInsideSelectorAttributeKeepsFollowingRules",
+      "test/css/escaped_quote_test.go:TestOddApostropheCountInURLDoesNotEatTheSheet",
+      "test/css/escaped_quote_test.go:TestUnescapedApostropheInURLLosesOnlyItsDeclaration"
+    ],
+    "enforced": false
   }
 ]

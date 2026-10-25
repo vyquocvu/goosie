@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Escaped quote and url-token state (GOOSIE-CSSSTRING-003)</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* CSS Syntax L3 4.3.8 makes a backslash escape the next byte anywhere in
+           the token stream, and 4.3.9 says a quote inside an unquoted url() is a
+           parse error rather than the start of a string. Minified sheets are full
+           of `url(data:...\'26\'...)` for exactly that reason. Goosie honoured the
+           escape only once a string was already open, so the first `\'` still
+           opened one and every rule after it on that line was lost - and the old
+           build survived this sheet only because its quote count happened to be
+           even. The one-line block below is the shape; every rule after the url
+           is what a regression takes away. */
+        .u{background-image:url(data:image/svg+xml;charset=UTF-8,%3csvg\ width=\'26\' height=\'26\' viewBox=\'0 0 26 26\'%3e%3crect width=\'26\' height=\'26\' fill=\'%23A57F0B\'/%3e%3c/svg%3e);width:26px;height:26px}.bar{height:24px;background:#3498db;margin:10px 0}.mono{font:16px monospace}.label{font-size:12px;color:#666;margin-bottom:4px}.grid-row{display:flex;gap:10px}.grid-cell{flex:1;background:#ecf0f1;padding:8px}.rule{border-top:2px solid #2c3e50;margin:16px 0}
+
+        /* An attribute selector keeps the sheet honest about quote state on the
+           selector side too. Its value carries no escape here on purpose: matching
+           an escaped quote inside a selector is a separate measured gap
+           (GOOSIE-CSSSELECT-001), and a fixture must not enshrine it. */
+        .s[data-x="ab"] { background: #8e44ad; height: 24px; }
+
+        /* The control: an *unescaped* apostrophe in an unquoted url is a bad-url,
+           so only that one declaration is dropped - the border and the rules after
+           it must still apply. */
+        .o { background: url(data:x'y); width: 60px; height: 24px; border: 2px solid #e74c3c; }
+        .green { height: 24px; background: #16a085; margin: 10px 0; }
+        .last { height: 24px; background: #f1c40f; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <p class="label">One escaped-quote data URI, then real rules that only exist if the sheet survives it</p>
+    <div class="u"></div>
+    <div class="bar"></div>
+    <p class="mono">The quick brown fox jumps over the lazy dog</p>
+    <div class="rule"></div>
+    <div class="grid-row">
+        <div class="grid-cell mono">cell one</div>
+        <div class="grid-cell mono">cell two</div>
+        <div class="grid-cell mono">cell three</div>
+    </div>
+
+    <div class="s" data-x="ab"></div>
+    <p class="mono">Purple band above must be full width; the red-bordered box below must be empty inside.</p>
+    <div class="o"></div>
+    <div class="green"></div>
+
+    <div class="rule"></div>
+    <p class="label">Below the 600px fold: everything here is lost when the url token puts the scan into string state.</p>
+    <p class="mono">0123456789 abcdefghij KLMNOPQRST</p>
+    <div class="last"></div>
+    <p class="mono">Last paragraph, monospace only if the sheet reached the end.</p>
+</body>
+</html>
