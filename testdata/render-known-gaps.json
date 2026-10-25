@@ -7,7 +7,7 @@
   "known_gaps": [
     {
       "fixture": "unicode/02-emoji-symbols.png",
-      "blank_regions": 9,
+      "blank_regions": 1,
       "follow_up_task": "docs/tasks/TASK-027-GLYPH-COVERAGE.md"
     },
     {

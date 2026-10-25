@@ -106,5 +106,6 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - Mỗi chặng có kiểm thử logic, hành trình qua `platform/headless`, và so sánh trực quan với Chromium/Playwright cho thay đổi UI hoặc trang. Chạy `go test ./...`, `go test -race ./...`, `go vet -all ./...`, `go test ./internal/archtest/` và gate suite trước khi đánh dấu hoàn thành.
 - Ghi nhận kết quả theo hành trình: đầu vào, hành động, ảnh/trạng thái mong đợi, dữ liệu sau khởi động lại và lỗi còn mở. Đánh dấu **đã có trong mã**, **đã kiểm chứng**, **đang làm** riêng biệt.
 - Chính sách origin, cookie, tải xuống và dữ liệu riêng tư đi cùng tính năng dùng chúng. Rủi ro phát hành đã được chủ sản phẩm chấp nhận trong [bản lịch sử](roadmap-v2-history.md); roadmap UX này không tự thay đổi quyết định phát hành đó.
+- Color emoji: font bitmap màu (sbix/COLR như Apple Color Emoji) chưa được thư viện font hiện tại (golang.org/x/image/font/opentype) rasterize; glyph thiếu hiện được thay thế bằng tofu có advance ổn định 1em để giữ layout và không nuốt ký tự.
 
 **Việc bắt đầu tiếp theo:** P0 thanh địa chỉ thông minh và trạng thái điều hướng, sau đó gợi ý và mở lại tab. Đây là chuỗi ngắn nhất để biến nền tảng đã có thành một trải nghiệm mở và quay lại trang hằng ngày.
