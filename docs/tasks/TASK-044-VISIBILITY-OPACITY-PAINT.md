@@ -465,8 +465,9 @@ $ go test -count=1 ./test/paint/ -run TestGroupOpacityCountedOncePerElement   # 
 khi behaviour bật: nó gate **rule**, không gate trùng một bản sửa.
 
 **Fixture pixel.** `testdata/render/css-features/13-anonymous-group-opacity.html`
-(`MIN_SCORED_FIXTURES` 86→87 **cùng commit** thêm fixture): bốn hàng raw text mờ cỡ 52–46px —
-`anon`, `anondiv` (raw text + block child), `quarter` 0.25 và `nested opacity:1` làm control —
+(`MIN_SCORED_FIXTURES` 86→87 **cùng commit** thêm fixture): bốn dòng raw text 52px (shape
+`anon`; dòng cuối nằm sát đáy viewport 600px), một khối 46px gồm raw text + block child + raw text
+(shape `anondiv`, ba dòng), một dòng `quarter` 0.25, một control `nested opacity:1`,
 cộng heading/paragraph/coloured bar để vẫn là một trang thật. Cố ý **không** đặt nền nào
 trong vùng mờ: probe (`bgRawText`) in ra một `FILL rgba=200,0,0` **riêng cho từng word box**
 — text run vẽ lại nền của phần tử sinh, một defect khác đã có từ trước và không liên quan;
