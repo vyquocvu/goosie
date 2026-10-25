@@ -151,6 +151,7 @@ func TestRefreshPartialRebuildsPipeline(t *testing.T) {
 	}
 }
 
+// qc:BR-185
 func TestRestyleAndReflowReusesArenaForColorOnlyChange(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head><style>
 		#target { color: black; }

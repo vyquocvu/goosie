@@ -1,0 +1,1965 @@
+[
+  {
+    "id": "BR-001",
+    "priority": "P0",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-002",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-003",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-004",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-005",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-006",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-007",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-008",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-009",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/net/http_test.go:TestHTTPRedirectValidation"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-010",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/net/http_test.go:TestHTTPRedirectValidation"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-011",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/net/http_test.go:TestHTTPSDowngradeRedirectRejected"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-012",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-013",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-014",
+    "priority": "P0",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-015",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-016",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-017",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/toolbar/toolbar_test.go:TestHistoryBackForward"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-018",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-019",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-020",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-021",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-022",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-023",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/tabs/manager_test.go:TestNewTabHasCorrectInitialState"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-024",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-025",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-026",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-027",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-028",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-029",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-030",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/tabs/lifecycle_test.go:TestCloseActiveTabSelectsNearest"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-031",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-032",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-033",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-034",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-035",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-036",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-037",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-038",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-039",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-040",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-041",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-042",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-043",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-044",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-045",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-046",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-047",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-048",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-049",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-050",
+    "priority": "P2",
+    "methods": [
+      "CUA",
+      "INT",
+      "SEC"
+    ],
+    "status": "BLOCKED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-051",
+    "priority": "P2",
+    "methods": [
+      "CUA",
+      "INT",
+      "SEC"
+    ],
+    "status": "BLOCKED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-052",
+    "priority": "P2",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-053",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-054",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-055",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-056",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-057",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-058",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-059",
+    "priority": "P0",
+    "methods": [
+      "PARITY",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/engine/layout_parity_test.go:TestLayoutParityWithChromium"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-060",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-061",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-062",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-063",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-064",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-065",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-066",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-067",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-068",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-069",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-070",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-071",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-072",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-073",
+    "priority": "P2",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-074",
+    "priority": "P2",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-075",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-076",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-077",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-078",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-079",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-080",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-081",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-082",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-083",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-084",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-085",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-086",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-087",
+    "priority": "P2",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-088",
+    "priority": "P0",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/engine/script_test.go:TestScriptsRunInDocumentOrder"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-089",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-090",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-091",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-092",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-093",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-094",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-095",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-096",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-097",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-098",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-099",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-100",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-101",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-102",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-103",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-104",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-105",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-106",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-107",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-108",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-109",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-110",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-111",
+    "priority": "P2",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-112",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-113",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-114",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-115",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-116",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-117",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-118",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-119",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-120",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-121",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-122",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-123",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-124",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-125",
+    "priority": "P0",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-126",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-127",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-128",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-129",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-130",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-131",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-132",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-133",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-134",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-135",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-136",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-137",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-138",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-139",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-140",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-141",
+    "priority": "P1",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-142",
+    "priority": "P2",
+    "methods": [
+      "CUA"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-143",
+    "priority": "P2",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-144",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-145",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-146",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-147",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-148",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-149",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-150",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-151",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/download/download_test.go:TestFileNameFallbackAndSanitize"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-152",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-153",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-154",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-155",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-156",
+    "priority": "P2",
+    "methods": [
+      "GAP"
+    ],
+    "status": "DEFERRED",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-157",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-158",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-159",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/engine/private_network_test.go:TestPublicPageCannotFetchLocalNetworkImage"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-160",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-161",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/net/address_guard_test.go:TestAddressGuardChecksALiteralAddressWithoutResolving"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-162",
+    "priority": "P0",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/entrypoints/limits_test.go:TestGoosieHeadlessRejectsOversizedInput"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-163",
+    "priority": "P0",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/engine/bounds_test.go:TestSessionRejectsUnboundedInput"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-164",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/engine/adversarial_regression_test.go:TestManyQuerySelectorAll"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-165",
+    "priority": "P0",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-166",
+    "priority": "P0",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/engine/adversarial_test.go:TestOversizedImageHeaderRejectedBeforeDecode"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-167",
+    "priority": "P1",
+    "methods": [
+      "SEC",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": [
+      "test/js/interrupt_test.go:TestInfiniteLoopIsStoppedByItsTimeout"
+    ],
+    "enforced": true
+  },
+  {
+    "id": "BR-168",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-169",
+    "priority": "P1",
+    "methods": [
+      "CUA",
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-170",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-171",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-172",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-173",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-174",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-175",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-176",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-177",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-178",
+    "priority": "P1",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-179",
+    "priority": "P0",
+    "methods": [
+      "INT"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-180",
+    "priority": "P0",
+    "methods": [
+      "CUA",
+      "PARITY"
+    ],
+    "status": "NOT RUN",
+    "tests": null,
+    "enforced": false
+  },
+  {
+    "id": "BR-181",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/interactive_test.go:TestActivePseudoClassTracksPointerActivation"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-182",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/keyboard_test.go:TestKeyboard_ActivationTracksActiveAndDispatchesClick"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-183",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/interaction_e2e_test.go:TestInteraction_ClickPreventDefault"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-184",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/pump_test.go:TestPumpJSSameValueDOMWritesSkipPipeline"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-185",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/refresh_test.go:TestRestyleAndReflowReusesArenaForColorOnlyChange"
+    ],
+    "enforced": false
+  }
+]

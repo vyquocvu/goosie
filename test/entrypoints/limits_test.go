@@ -171,6 +171,7 @@ func TestGoosieScreenshotValidDocument(t *testing.T) {
 
 // TestGoosieHeadlessRejectsOversizedInput verifies that goosie-headless
 // rejects documents that exceed the byte limit.
+// qc:BR-162
 func TestGoosieHeadlessRejectsOversizedInput(t *testing.T) {
 	bin := buildBinary(t, "goosie-headless")
 

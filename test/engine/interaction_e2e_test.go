@@ -126,6 +126,7 @@ document.getElementById('btn').addEventListener('click', function() {
 	}
 }
 
+// qc:BR-183
 func TestInteraction_ClickPreventDefault(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>

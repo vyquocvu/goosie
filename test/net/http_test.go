@@ -354,6 +354,7 @@ func TestGetAcceptsLargeResponseHeadersUnderTheCap(t *testing.T) {
 	}
 }
 
+// qc:BR-009 BR-010
 func TestHTTPRedirectValidation(t *testing.T) {
 	for _, target := range []string{"file:///etc/hosts", "ftp://localhost/file", "http://user@localhost/", "http://localhost:65536", "http://bad-.example/"} {
 		t.Run(target, func(t *testing.T) {
@@ -510,6 +511,7 @@ func TestFilePathTraversal(t *testing.T) {
 	}
 }
 
+// qc:BR-011
 func TestHTTPSDowngradeRedirectRejected(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "downgraded")

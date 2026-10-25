@@ -45,6 +45,7 @@ func TestFileNameFromURLPath(t *testing.T) {
 	}
 }
 
+// qc:BR-151
 func TestFileNameFallbackAndSanitize(t *testing.T) {
 	if got := download.FileName("", "https://x.com/"); got != "download" {
 		t.Fatalf("FileName root URL = %q, want download", got)

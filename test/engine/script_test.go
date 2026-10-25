@@ -32,6 +32,7 @@ func TestScriptExecutionSetsGlobal(t *testing.T) {
 	}
 }
 
+// qc:BR-088
 func TestScriptsRunInDocumentOrder(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {

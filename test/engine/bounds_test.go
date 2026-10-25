@@ -8,6 +8,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
+// qc:BR-163
 func TestSessionRejectsUnboundedInput(t *testing.T) {
 	tests := []struct {
 		name, html string

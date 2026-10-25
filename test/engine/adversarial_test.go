@@ -61,6 +61,7 @@ func TestImageFloodCostsAtMost256Attempts(t *testing.T) {
 // decode. The payload below is IHDR-only (no IDAT, no pixel buffer possible),
 // so a regression that decodes before probing fails loudly here instead of
 // allocating 32 MiB in a test runner.
+// qc:BR-166
 func TestOversizedImageHeaderRejectedBeforeDecode(t *testing.T) {
 	header := []byte{
 		0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,

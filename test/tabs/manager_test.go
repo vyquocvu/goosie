@@ -7,6 +7,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
+// qc:BR-023
 func TestNewTabHasCorrectInitialState(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	tab := mgr.NewTab()
