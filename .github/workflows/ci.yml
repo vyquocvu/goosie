@@ -46,6 +46,43 @@ jobs:
       - name: Run tests with race detector
         run: go test -race ./...
 
+  darwin:
+    name: macOS native path (darwin + cgo)
+    # Every other job is ubuntu-latest, and internal/platform/darwin is behind
+    # `//go:build darwin && cgo`, so before this job the window shim, the clipboard,
+    # the save panel and the AVFoundation backend were only ever compiled at release
+    # tag time - the first build of the shipped macOS binary was the release build.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fail if the cgo path was silently excluded
+        # A build-tag mistake would make this job green while testing the Linux stub
+        # backend. Check the source list, not just the exit status.
+        run: |
+          set -e
+          sources=$(go list -f '{{join .CgoFiles " "}} {{join .MFiles " "}}' ./internal/platform/darwin/)
+          echo "compiled native sources: $sources"
+          for want in window.go media.go clipboard.go dialog.go shim_darwin.m media_darwin.m; do
+            case " $sources " in
+              *" $want "*) ;;
+              *) echo "::error::$want was not compiled on darwin+cgo"; exit 1 ;;
+            esac
+          done
+      - name: Build all packages, including the native backends
+        run: go build ./...
+      - name: go vet (all analyzers)
+        run: go vet -all ./...
+      - name: Native and chrome tests under the race detector
+        # internal/platform/darwin owns the only tests in the repo that prove a real
+        # decode happened; they need no display and no window, so a runner with nobody
+        # logged in can still run them.
+        run: go test -race -count=1 -v ./internal/platform/darwin/ ./test/platform/ ./internal/archtest/ ./cmd/goosie/
+
   audit:
     name: Dependency vulnerability scan
     # Advisory status is a property of go.sum and the OSV database, not of a
