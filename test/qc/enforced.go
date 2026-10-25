@@ -3,6 +3,7 @@ package qc
 // enforcedCases is the transition allowlist. Add IDs here as their coverage
 // and catalog status are brought into agreement.
 var enforcedCases = []string{
+	"BR-001",
 	"BR-002",
 	"BR-003",
 	"BR-007",
@@ -13,11 +14,13 @@ var enforcedCases = []string{
 	"BR-014",
 	"BR-017",
 	"BR-023",
+	"BR-026",
 	"BR-028",
 	"BR-030",
 	"BR-036",
 	"BR-059",
 	"BR-088",
+	"BR-125",
 	"BR-151",
 	"BR-159",
 	"BR-161",

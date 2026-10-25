@@ -6,8 +6,10 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/journey_p0_test.go:TestJourneyHTTPSNavigation"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-002",
@@ -18,6 +20,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_test.go:TestJourneyHTTPNavigationAndRedirect",
       "cmd/goosie/main_test.go:TestLoadURLCtxValidSmallDocument"
     ],
     "enforced": true
@@ -31,6 +34,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_test.go:TestJourneyBareHostnameNormalization",
       "cmd/goosie/normalize_url_test.go:TestNormalizeAddressAmbiguousInputs",
       "cmd/goosie/normalize_url_test.go:TestNormalizeURL"
     ],
@@ -78,6 +82,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_error_test.go:TestJourneyMalformedURLRecoversWithoutRetainingOldDoc",
       "cmd/goosie/main_test.go:TestCertFailureReachesAddressBar"
     ],
     "enforced": true
@@ -142,6 +147,7 @@
     "status": "NOT RUN",
     "tests": [
       "cmd/goosie/error_page_test.go:TestCategorizeError",
+      "cmd/goosie/journey_p0_error_test.go:TestJourneyServerDownShowsRecognizableErrorAndAcceptsNextNav",
       "cmd/goosie/main_test.go:TestLoadErrorsOmitQuerySecrets"
     ],
     "enforced": true
@@ -165,6 +171,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_test.go:TestJourneyStaleNavigationDoesNotOverwriteCurrent",
       "cmd/goosie/tab_lifecycle_test.go:TestStaleNavResultCannotPaintOverTheCurrentOne"
     ],
     "enforced": true
@@ -200,6 +207,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_test.go:TestJourneyBackForwardFiveNavigations",
       "test/toolbar/toolbar_test.go:TestHistoryBackForward"
     ],
     "enforced": true
@@ -265,6 +273,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_tabs_test.go:TestJourneyInitialWindowUsableTab",
       "test/tabs/manager_test.go:TestNewTabHasCorrectInitialState"
     ],
     "enforced": true
@@ -299,8 +308,10 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/journey_p0_tabs_test.go:TestJourneySwitchBetweenThreeTabs"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-027",
@@ -345,6 +356,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p0_tabs_test.go:TestJourneyCloseActiveTabSelectsNext",
       "test/tabs/lifecycle_test.go:TestCloseActiveTabSelectsNearest"
     ],
     "enforced": true
@@ -1334,8 +1346,10 @@
       "CUA"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "cmd/goosie/journey_p0_test.go:TestJourneyCmdLFocusesAddressBar"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-126",
