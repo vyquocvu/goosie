@@ -338,3 +338,46 @@ func TestAccessibilityEmptySelectHasNoOptions(t *testing.T) {
 		t.Fatalf("empty select has %d children, want none", len(combo.Children))
 	}
 }
+
+// qc:BR-139
+func TestAccessibilitySelectValueMatchesSubmittedFormValue(t *testing.T) {
+	cases := []struct{ name, options, want string }{
+		{"value attribute", `<option value="red">Red</option>
+<option value="blue" selected>Blue</option>
+<option>Charcoal</option>`, "blue"},
+		{"text content fallback", `<option>Scarlet</option>
+<option selected>Cobalt</option>
+<option value="ink">Ink</option>`, "Cobalt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newFocusSession(t, `<html><body><form id="f"><select id="sel" name="color">
+`+tc.options+`
+</select></form></body></html>`)
+			flat := axFlatten(s.AccessibilityTree())
+			var combo *ax.Node
+			for i := range flat {
+				if flat[i].Role == ax.RoleComboBox && flat[i].ID == "sel" {
+					combo = &flat[i]
+					break
+				}
+			}
+			if combo == nil {
+				t.Fatal("select combo box missing from the accessibility tree")
+			}
+			submitted := ""
+			for _, d := range engine.CollectFormData(s.Doc.ElementByID("f"), nil) {
+				if d.Name == "color" {
+					submitted = d.Value
+				}
+			}
+			if submitted != combo.Value {
+				t.Fatalf("accessibility announces %q but the form submits %q: one control, two answers",
+					combo.Value, submitted)
+			}
+			if submitted != tc.want {
+				t.Errorf("submitted value = %q, want %q", submitted, tc.want)
+			}
+		})
+	}
+}

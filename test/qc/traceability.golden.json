@@ -1551,7 +1551,8 @@
     "status": "NOT RUN",
     "tests": [
       "test/engine/accessibility_test.go:TestAccessibilitySelectComboBoxAndOptions",
-      "test/engine/accessibility_test.go:TestAccessibilitySelectTracksMoveSelect"
+      "test/engine/accessibility_test.go:TestAccessibilitySelectTracksMoveSelect",
+      "test/engine/accessibility_test.go:TestAccessibilitySelectValueMatchesSubmittedFormValue"
     ],
     "enforced": false
   },

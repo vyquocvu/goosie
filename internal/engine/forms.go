@@ -223,25 +223,10 @@ func controlValue(n *dom.Node) string {
 		// Value is the text content
 		return n.TextContent()
 	case "select":
-		// Value is the selected option's value (or text content)
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if c.Element() && c.Data == "option" {
-				if c.HasAttribute("selected") {
-					if c.HasAttribute("value") {
-						return c.GetAttribute("value")
-					}
-					return c.TextContent()
-				}
-			}
-		}
-		// Default: first option
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if c.Element() && c.Data == "option" {
-				if c.HasAttribute("value") {
-					return c.GetAttribute("value")
-				}
-				return c.TextContent()
-			}
+		// The same rule the keyboard and the accessibility tree use, so a
+		// submitted value and an announced value cannot diverge.
+		if option := SelectedOption(n); option != nil {
+			return optionValue(option)
 		}
 		return ""
 	case "button":

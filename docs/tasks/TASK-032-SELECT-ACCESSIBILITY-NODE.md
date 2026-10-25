@@ -224,10 +224,14 @@ Two disclosures the agent did not volunteer, found while reviewing the diff:
   lays its options out nowhere. An AX client that hit-tests option rects will get the combo
   rect for every option. Not wrong for a collapsed control, but it is a limitation, not a
   measurement of option geometry.
-* The option value rule (value attribute, else text content) now exists in **three** places:
-  `forms.go:213` `controlValue`, the `Session.controlValue` method (`focus.go:537`) and inline
-  in `accessibility.go`. They agree today because all three delegate selectedness to
-  `SelectedOption`, and `SelectedOption` and `forms.go` both pick the *first* `selected`
-  option while HTML picks the *last*. Neither the duplication nor the first/last difference
-  is covered by a test; unify them (or pin the tie-break with a test) before writing another
-  consumer of this value.
+* The option value rule (value attribute, else text content) used to exist in **three**
+  places: `forms.go:213` `controlValue`, the `Session.controlValue` method (`focus.go:537`)
+  and inline in `accessibility.go`. It now exists in one place, `optionValue`
+  (`focus.go:624`), which all three call, so a submitted value and an announced value cannot
+  drift apart unnoticed: `TestAccessibilitySelectValueMatchesSubmittedFormValue`
+  (`test/engine/accessibility_test.go:343`, qc:BR-139) compares the two directly, over both an
+  option with a `value` attribute and one that falls back to text content, and it fails on a
+  re-diverged rule. Still open: `SelectedOption` and the old `forms.go` scan both pick the
+  *first* `selected` option while HTML picks the *last*, and option text is not stripped or
+  whitespace-collapsed the way Chromium normalises it. That is
+  `GOOSIE-FORMVALUE-001` / `docs/tasks/TASK-037-OPTION-VALUE-NORMALIZATION.md`.

@@ -536,20 +536,13 @@ func (s *Session) SelectAllControl() bool {
 // controlValue reads the current form value for a control.
 func (s *Session) controlValue(n *dom.Node) string {
 	if n.DataAtom == dom.AtomSelect {
-		option := SelectedOption(n)
-		if option == nil {
-			return ""
+		if option := SelectedOption(n); option != nil {
+			return optionValue(option)
 		}
-		if option.HasAttribute("value") {
-			return option.GetAttribute("value")
-		}
-		return option.TextContent()
+		return ""
 	}
 	if n.DataAtom == dom.AtomOption {
-		if n.HasAttribute("value") {
-			return n.GetAttribute("value")
-		}
-		return n.TextContent()
+		return optionValue(n)
 	}
 	if n.DataAtom == dom.AtomTextarea {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -623,6 +616,16 @@ func IsActivatable(n *dom.Node) bool {
 		}
 	}
 	return false
+}
+
+// optionValue is an <option>'s form value: its value attribute when present,
+// otherwise its text content. Submission, the editing path and the
+// accessibility tree all read it here so they cannot drift apart.
+func optionValue(n *dom.Node) string {
+	if n.HasAttribute("value") {
+		return n.GetAttribute("value")
+	}
+	return n.TextContent()
 }
 
 // SelectedOption returns the currently selected <option> node within a <select>.
