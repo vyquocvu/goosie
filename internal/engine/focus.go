@@ -533,9 +533,24 @@ func (s *Session) SelectAllControl() bool {
 	return true
 }
 
-// controlValue reads the editable value: the value attribute for input, the
-// first text child for textarea.
+// controlValue reads the current form value for a control.
 func (s *Session) controlValue(n *dom.Node) string {
+	if n.DataAtom == dom.AtomSelect {
+		option := SelectedOption(n)
+		if option == nil {
+			return ""
+		}
+		if option.HasAttribute("value") {
+			return option.GetAttribute("value")
+		}
+		return option.TextContent()
+	}
+	if n.DataAtom == dom.AtomOption {
+		if n.HasAttribute("value") {
+			return n.GetAttribute("value")
+		}
+		return n.TextContent()
+	}
 	if n.DataAtom == dom.AtomTextarea {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			if c.Text() {

@@ -159,6 +159,40 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		node := emit(ax.RoleTextField, n.GetAttribute("placeholder"), b.session.controlValue(n), "")
 		node.Children = nil
 		return node, axBubble{}
+	case dom.AtomSelect:
+		if !visible {
+			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+		}
+		selected := SelectedOption(n)
+		options := make([]ax.Node, 0)
+		for option := n.FirstChild; option != nil; option = option.NextSibling {
+			if !option.Element() || option.DataAtom != dom.AtomOption {
+				continue
+			}
+			optionLabel := strings.TrimSpace(option.TextContent())
+			if optionLabel == "" {
+				optionLabel = option.GetAttribute("value")
+			}
+			options = append(options, ax.Node{
+				Role: ax.RoleOption, Label: optionLabel, Value: b.session.controlValue(option),
+				Selected: option == selected, Disabled: option.HasAttribute("disabled"),
+				X0: x0, Y0: y0, X1: x1, Y1: y1,
+			})
+		}
+		selectLabel := strings.TrimSpace(n.GetAttribute("aria-label"))
+		if selectLabel == "" {
+			selectLabel = b.associatedLabel(n)
+		}
+		if selectLabel == "" {
+			selectLabel = strings.TrimSpace(label)
+		}
+		if selectLabel == "" && selected != nil {
+			selectLabel = strings.TrimSpace(selected.TextContent())
+		}
+		combo := emit(ax.RoleComboBox, selectLabel, b.session.controlValue(n), "")
+		combo.Disabled = n.HasAttribute("disabled")
+		combo.Children = options
+		return combo, axBubble{}
 	}
 
 	// Generic element: an inline text bearer's words join the nearest block
@@ -178,6 +212,38 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		return nil, axBubble{}
 	}
 	return emit(ax.RoleGroup, "", "", ""), axBubble{}
+}
+
+func (b *axBuilder) associatedLabel(n *dom.Node) string {
+	if n == nil {
+		return ""
+	}
+	if id := n.GetAttribute("id"); id != "" {
+		var find func(*dom.Node) string
+		find = func(current *dom.Node) string {
+			if current == nil {
+				return ""
+			}
+			if current.DataAtom == dom.AtomLabel && current.GetAttribute("for") == id {
+				return strings.TrimSpace(current.TextContent())
+			}
+			for child := current.FirstChild; child != nil; child = child.NextSibling {
+				if label := find(child); label != "" {
+					return label
+				}
+			}
+			return ""
+		}
+		if label := find(&b.session.Doc.Node); label != "" {
+			return label
+		}
+	}
+	for parent := n.Parent; parent != nil; parent = parent.Parent {
+		if parent.DataAtom == dom.AtomLabel {
+			return strings.TrimSpace(parent.TextContent())
+		}
+	}
+	return ""
 }
 
 // collect walks obj's children in document order and returns the accessible

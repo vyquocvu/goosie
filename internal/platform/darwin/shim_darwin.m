@@ -108,6 +108,8 @@ static NSString *axRoleName(int role) {
 		case GOOSIE_AX_METER: return NSAccessibilityLevelIndicatorRole;
 		case GOOSIE_AX_TAB_GROUP: return NSAccessibilityTabGroupRole;
 		case GOOSIE_AX_TAB: return NSAccessibilityRadioButtonRole;
+		case GOOSIE_AX_COMBO_BOX: return NSAccessibilityPopUpButtonRole;
+		case GOOSIE_AX_OPTION: return NSAccessibilityMenuItemRole;
 		default: return NSAccessibilityUnknownRole;
 	}
 }

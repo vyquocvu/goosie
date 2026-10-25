@@ -455,6 +455,10 @@ func axRoleCode(role ax.Role) C.int {
 		return C.GOOSIE_AX_TAB_GROUP
 	case ax.RoleTab:
 		return C.GOOSIE_AX_TAB
+	case ax.RoleComboBox:
+		return C.GOOSIE_AX_COMBO_BOX
+	case ax.RoleOption:
+		return C.GOOSIE_AX_OPTION
 	default:
 		return C.GOOSIE_AX_GROUP
 	}

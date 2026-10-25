@@ -20,6 +20,8 @@ const (
 	RoleMeter
 	RoleTabGroup
 	RoleTab
+	RoleComboBox
+	RoleOption
 )
 
 // Node is one accessible object. Document bounds are document coordinates in

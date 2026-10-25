@@ -84,3 +84,134 @@ Không `git push`, không merge `main`, không tạo worktree con. Test chạy t
 display** (`platform/headless`); phần cgo chỉ được kiểm bằng `go vet`/build, không assert
 kết quả VoiceOver. `go test ./internal/archtest/` và `go vet -all ./...` phải xanh; thêm role
 vào enum không được làm đổi số thứ tự role cũ. Không đổi threshold parity.
+
+## 6. Status
+
+Implemented on `worktree-task-032-select-ax` from `960b722`.
+
+- Added `RoleComboBox` (12) and `RoleOption` (13) at the end of the role enum; existing
+  role numbers remain unchanged.
+- `<select>` now emits a combo box with form value, associated accessible label, disabled
+  and focused state, and one option node per direct option. Option values use form-value
+  semantics, including text fallback when the `value` attribute is absent. Selected state
+  follows `SelectedOption` and therefore the `selected` attribute, with first-option fallback.
+- Added the AppKit mappings `AXPopUpButton` and `AXMenuItem`. A running Swift/AppKit probe
+  printed `popup=AXPopUpButton, menuItem=AXMenuItem, comboBox=AXComboBox,
+  staticText=AXStaticText`. The Darwin role-code oracle ran on this macOS host and kills the
+  missing Go mapping mutation; native VoiceOver interaction was not exercised.
+- BR-101 now focuses `sel` through `clickNode`. QC golden changes only the `BR-139` test list.
+- No new engine gap was found during this task. `docs/qa-open-defects.json` was not edited;
+  the suggested closing row is in the completion report.
+
+### Mutation proof [R-7]
+
+| Mutation | Target test | Mutated rc → reverted rc |
+| --- | --- | --- |
+| Remove the `AtomSelect` accessibility emitter | `TestAccessibilitySelectComboBoxAndOptions` | 1 → 0 |
+| Mark every option selected | `TestAccessibilitySelectComboBoxAndOptions` | 1 → 0 |
+| Read combo value from the `<select value>` attribute | `TestAccessibilitySelectComboBoxAndOptions` | 1 → 0 |
+| Report the first option index as selected after `MoveSelect` | `TestAccessibilitySelectTracksMoveSelect` | 1 → 0 |
+| Remove `RoleComboBox` from `axRoleCode` (Darwin) | `TestAXRoleCodeSelectRoles` | 1 → 0 |
+
+### Required verification output
+
+`go test -count=1 ./...`:
+
+```text
+?   	github.com/vyquocvu/goosie/cmd/debug-layout	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-fonts	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-layout	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-paint	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-url	[no test files]
+ok  	github.com/vyquocvu/goosie/cmd/goosie	12.573s
+?   	github.com/vyquocvu/goosie/cmd/goosie-headless	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/test_colors	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/wpt-runner	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/archtest	3.972s
+?   	github.com/vyquocvu/goosie/internal/ax	[no test files]
+?   	github.com/vyquocvu/goosie/internal/bookmarks	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/css	1.744s
+ok  	github.com/vyquocvu/goosie/internal/dom	0.456s
+ok  	github.com/vyquocvu/goosie/internal/download	1.390s
+ok  	github.com/vyquocvu/goosie/internal/engine	1.012s
+?   	github.com/vyquocvu/goosie/internal/flags	[no test files]
+?   	github.com/vyquocvu/goosie/internal/frame	[no test files]
+?   	github.com/vyquocvu/goosie/internal/history	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/image	0.720s
+?   	github.com/vyquocvu/goosie/internal/js	[no test files]
+?   	github.com/vyquocvu/goosie/internal/layout	[no test files]
+?   	github.com/vyquocvu/goosie/internal/manifest	[no test files]
+?   	github.com/vyquocvu/goosie/internal/media	[no test files]
+?   	github.com/vyquocvu/goosie/internal/net	[no test files]
+?   	github.com/vyquocvu/goosie/internal/paint	[no test files]
+?   	github.com/vyquocvu/goosie/internal/pdf	[no test files]
+?   	github.com/vyquocvu/goosie/internal/perms	[no test files]
+?   	github.com/vyquocvu/goosie/internal/platform	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/platform/darwin	2.947s
+?   	github.com/vyquocvu/goosie/internal/platform/headless	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/preferences	1.553s
+?   	github.com/vyquocvu/goosie/internal/raster	[no test files]
+?   	github.com/vyquocvu/goosie/internal/session	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/style	1.990s
+?   	github.com/vyquocvu/goosie/internal/surface	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/tabs	2.921s
+ok  	github.com/vyquocvu/goosie/internal/toolbar	2.822s
+?   	github.com/vyquocvu/goosie/internal/userscript	[no test files]
+?   	github.com/vyquocvu/goosie/internal/viewsource	[no test files]
+ok  	github.com/vyquocvu/goosie/test/bookmarks	2.715s
+ok  	github.com/vyquocvu/goosie/test/css	2.537s
+ok  	github.com/vyquocvu/goosie/test/dom	2.733s
+ok  	github.com/vyquocvu/goosie/test/domtest	2.990s
+ok  	github.com/vyquocvu/goosie/test/download	2.878s
+ok  	github.com/vyquocvu/goosie/test/engine	6.928s
+ok  	github.com/vyquocvu/goosie/test/entrypoints	20.394s
+ok  	github.com/vyquocvu/goosie/test/flags	2.106s
+ok  	github.com/vyquocvu/goosie/test/frame	2.134s
+ok  	github.com/vyquocvu/goosie/test/gate	31.189s
+ok  	github.com/vyquocvu/goosie/test/gatecheck	23.050s
+ok  	github.com/vyquocvu/goosie/test/history	2.536s
+ok  	github.com/vyquocvu/goosie/test/js	5.135s
+ok  	github.com/vyquocvu/goosie/test/layout	2.840s
+ok  	github.com/vyquocvu/goosie/test/manifest	2.176s
+ok  	github.com/vyquocvu/goosie/test/net	4.532s
+ok  	github.com/vyquocvu/goosie/test/paint	2.484s
+ok  	github.com/vyquocvu/goosie/test/pdf	1.696s
+ok  	github.com/vyquocvu/goosie/test/perms	1.790s
+ok  	github.com/vyquocvu/goosie/test/platform	0.644s
+ok  	github.com/vyquocvu/goosie/test/qc	1.112s
+ok  	github.com/vyquocvu/goosie/test/raster	1.971s
+ok  	github.com/vyquocvu/goosie/test/session	1.273s
+ok  	github.com/vyquocvu/goosie/test/style	2.102s
+ok  	github.com/vyquocvu/goosie/test/surface	2.200s
+ok  	github.com/vyquocvu/goosie/test/tabs	2.951s
+ok  	github.com/vyquocvu/goosie/test/toolbar	3.011s
+ok  	github.com/vyquocvu/goosie/test/userscript	2.607s
+ok  	github.com/vyquocvu/goosie/test/viewsource	2.421s
+ok  	github.com/vyquocvu/goosie/test/wpt	9.447s
+```
+
+`go test -count=1 -race ./test/engine/ ./cmd/goosie/ ./internal/platform/darwin/`:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/engine	20.938s
+ok  	github.com/vyquocvu/goosie/cmd/goosie	22.743s
+ok  	github.com/vyquocvu/goosie/internal/platform/darwin	2.573s
+```
+
+`go test -count=1 ./internal/archtest/`:
+
+```text
+ok  	github.com/vyquocvu/goosie/internal/archtest	2.956s
+```
+
+`go test -count=1 ./test/qc/`:
+
+```text
+ok  	github.com/vyquocvu/goosie/test/qc	0.505s
+```
+
+`go vet -all ./...`: no output; exit code 0.
+
+`python3 testdata/parity.py`: `80/80 passing (100.0%), 0 failing, 0 errors`; average match
+`96.07%` (threshold 30, pass_at 90.0%). AX additions do not alter pixels; parity was run as
+requested for the VoiceOver-visible output and confirmed the render baseline remains green.
