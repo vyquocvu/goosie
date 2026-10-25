@@ -26,6 +26,7 @@ lúc viết test phát hiện hành vi sai, **dừng lại và báo cáo**, khô
 | Private: không restore session | `cmd/goosie/main.go:495-497` | `shouldRestoreSession(private, mode) = !private && mode != StartupNewTab` |
 | Private: profile management read-only | `cmd/goosie/internal_pages.go:775,809` | "Private sessions cannot change profile settings." |
 | Tab trail được lưu/restore | `internal/session/session.go:16` (`TabState` "where it was, and the back/forward trail"), `:34` (ghi atomic) | `RestoreHistory(entries, index)` ở `internal/toolbar/history.go:153` |
+| Cookie chỉ ghi disk khi có persistPath; private xóa jar lúc Close | `internal/net/http.go:455-467` (`DefaultPrivateClient`, comment "nothing a private-mode session learns survives it"), `:882-891` (`Close`) | `if c.persistPath != "" { c.jar.Save(...) }` rồi `if c.private { c.jar.Clear() }` — hai điều kiện **độc lập**, nên oracle BR-055 phải kiểm cả hai: không Save file profile **và** jar bị xóa khi thoát |
 
 ## 2. Test phải có — mỗi case một oracle, không gộp
 
