@@ -452,6 +452,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
 	completed = true
+	if resp.StatusCode >= 400 {
+		reportRefusedDocument(os.Stderr, resp)
+	}
 	reportScriptErrors(os.Stderr, resp.URL, sess)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
 }
@@ -477,6 +480,27 @@ func reportScriptErrors(w io.Writer, rawURL string, sess *engine.Session) {
 	}
 	fmt.Fprintf(w, "goosie: %d uncaught script error(s) in %s; first: %s\n",
 		total, rawURL, errs[0])
+}
+
+// reportRefusedDocument writes one line naming the status the source answered
+// with and how many bytes of that refusal Goosie rendered instead of a page.
+//
+// A 401/403 body is an ordinary document to the pipeline: it parses, it lays
+// out, and it paints nothing, because a bot-management interstitial shows its
+// text only after its own script runs. Nothing else separates "the server
+// refused us and we rendered the refusal" from "this page is genuinely empty",
+// so both end up rc 0 with an empty stderr and the same sweep label. Six of the
+// eight zero-output pages of GOOSIE-LIVE-001 are this branch, measured with the
+// client the browser itself uses: 403 / 5,581 B apnews.com, 403 / 771 B
+// nytimes.com, 403 / 5,613 B japantimes.co.jp, 401 / 774 B reuters.com,
+// 403 / 779 B etsy.com, 403 / 5,607 B newegg.com. The media path already
+// refuses a non-200 answer (internal/engine/media_download.go); the document
+// path renders it, so the status is the one fact that makes the two cases
+// tellable apart. Like the line above it, this is a report written after the
+// paint - it changes nothing about what is rendered.
+func reportRefusedDocument(w io.Writer, resp *net.Response) {
+	fmt.Fprintf(w, "goosie: the source refused %s with HTTP %d; rendered %d bytes of that refusal, not the page\n",
+		resp.URL, resp.StatusCode, len(resp.Body))
 }
 
 var errDownloadSaveCanceled = errors.New("goosie: download save dialog canceled")

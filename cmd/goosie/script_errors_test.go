@@ -7,6 +7,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/internal/net"
 )
 
 // The sweep's report has one field for "what the engine said" and for nine real
@@ -72,3 +73,33 @@ func TestReportScriptErrorsIsSilentOnACleanDocument(t *testing.T) {
 		t.Fatalf("a clean document wrote %q to stderr; every working page would start reporting", buf.String())
 	}
 }
+
+// The other half of the silence: a server that refuses the request answers with
+// a small interstitial document, the pipeline renders it as any other page, and
+// the run looks exactly like a page that is genuinely empty. The status is the
+// only fact that tells the two apart, and it was recorded nowhere.
+func TestReportRefusedDocumentNamesTheStatusAndTheBody(t *testing.T) {
+	var buf bytes.Buffer
+	reportRefusedDocument(&buf, &net.Response{
+		StatusCode: 403,
+		URL:        "https://apnews.com/",
+		Body:       []byte(strings.Repeat("x", 5581)),
+	})
+	got := buf.String()
+	if got == "" {
+		t.Fatal("a 403 answer reported nothing: this is the silence GOOSIE-LIVE-001 is filed against")
+	}
+	if strings.Count(got, "\n") != 1 {
+		t.Fatalf("report = %q, want exactly one line", got)
+	}
+	for _, want := range []string{"goosie: ", "https://apnews.com/", "HTTP 403", "5581 bytes"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("report line = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// A 200 answer is not a refusal. The ">= 400" decision lives at the call site
+// in loadURLCtx, not in the helper, so it is pinned end to end in
+// ./test/entrypoints against a server that answers both ways; re-implementing
+// the threshold here would only test the test.
