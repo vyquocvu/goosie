@@ -1,13 +1,18 @@
 package engine_test
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/layout"
 )
 
 // TestImageFloodCostsAtMost256Attempts pins the attempt ceiling, not a success
@@ -57,28 +62,63 @@ func TestImageFloodCostsAtMost256Attempts(t *testing.T) {
 }
 
 // TestOversizedImageHeaderRejectedBeforeDecode pins pre-decode admission at
-// the engine boundary: a header claiming 8193x1 pixels must never reach full
-// decode. The payload below is IHDR-only (no IDAT, no pixel buffer possible),
-// so a regression that decodes before probing fails loudly here instead of
-// allocating 32 MiB in a test runner.
+// the engine boundary: a valid PNG claiming 8193x1 pixels must never reach
+// full decode, while a valid 1x1 PNG must be attached to its layout object.
 // qc:BR-166
 func TestOversizedImageHeaderRejectedBeforeDecode(t *testing.T) {
-	header := []byte{
-		0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
-		0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
-		0x00, 0x00, 0x20, 0x01, // width 8193: one over the 8192 admission limit
-		0x00, 0x00, 0x00, 0x01, // height 1
-		0x08, 0x02, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, // placeholder CRC
+	for _, tc := range []struct {
+		name      string
+		width     int
+		wantImage bool
+	}{
+		{name: "within admission limit", width: 1, wantImage: true},
+		{name: "over dimension limit", width: 8193, wantImage: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded := encodePNG(t, tc.width, 1)
+			fetcher := func(base, url string) ([]byte, error) { return encoded, nil }
+			html := `<img src="https://cdn.example.com/wide.png">`
+			sess, err := engine.NewSession(html, nil, 400,
+				engine.WithImages("https://example.com/page", fetcher))
+			if err != nil {
+				t.Fatalf("NewSession with image %dx1: %v (image failures must degrade, not fail)", tc.width, err)
+			}
+			if sess == nil {
+				t.Fatal("session is nil")
+			}
+			defer sess.Close()
+
+			img := imageObject(sess)
+			if img == nil {
+				t.Fatal("image element has no layout object")
+			}
+			if got := img.Image != nil; got != tc.wantImage {
+				t.Fatalf("decoded image attached = %t, want %t", got, tc.wantImage)
+			}
+		})
 	}
-	fetcher := func(base, url string) ([]byte, error) { return header, nil }
-	html := `<img src="https://cdn.example.com/wide.png">`
-	sess, err := engine.NewSession(html, nil, 400,
-		engine.WithImages("https://example.com/page", fetcher))
-	if err != nil {
-		t.Fatalf("NewSession with over-limit image: %v (must degrade, not fail)", err)
+}
+
+func encodePNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	img.Set(0, 0, color.RGBA{R: 0xff, A: 0xff})
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, img); err != nil {
+		t.Fatalf("encode %dx%d PNG: %v", width, height, err)
 	}
-	if sess == nil {
-		t.Fatal("session is nil")
+	return encoded.Bytes()
+}
+
+func imageObject(sess *engine.Session) *layout.Object {
+	if sess == nil || sess.Arena == nil {
+		return nil
 	}
+	for i := range sess.Arena.Objects {
+		obj := &sess.Arena.Objects[i]
+		if obj.Node != nil && obj.Node.Data == "img" {
+			return obj
+		}
+	}
+	return nil
 }
