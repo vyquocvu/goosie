@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
@@ -34,6 +35,7 @@ type Glyph struct {
 	Bounds  frame.Rect
 	Advance int32
 	Ok      bool
+	Missing bool
 }
 
 // Bytes returns the mask's allocation, which is what the atlas budgets against.
@@ -78,6 +80,11 @@ type faceKey struct {
 // glyph or advance memo only takes the read lock, while driving a face (a miss)
 // takes the write lock. The per-face memos are only ever touched under this
 // lock, so no per-face lock is needed.
+type fallbackKey struct {
+	idx  int
+	size int32
+}
+
 type Fonts struct {
 	mu      sync.RWMutex
 	sources map[frame.FontSlot]*opentype.Font
@@ -85,8 +92,11 @@ type Fonts struct {
 	// fbCache memoizes fallbackLocked's chain per requested (slot, size). It is
 	// only read and written under the write lock, and it is dropped whenever a
 	// new face entry appears, so a cached chain always equals a fresh one.
-	fbCache map[faceKey][]*faceEntry
-	custom  []*opentype.Font
+	fbCache      map[faceKey][]*faceEntry
+	custom       []*opentype.Font
+	fallbacks    []*opentype.Font
+	fbEntries    map[fallbackKey]*faceEntry
+	missingCount atomic.Int64
 }
 
 type faceEntry struct {
@@ -156,6 +166,26 @@ var systemFontCollections = []struct {
 	{frame.FontSlot{Family: frame.FontHelvetica, Light: true}, "/System/Library/Fonts/HelveticaNeue.ttc", 12},
 }
 
+// systemFallbackFiles lists system font files used as wide-coverage fallbacks
+// when no document family or standard system font carries a glyph.
+// They are appended at the end of the fallback chain so that CSS-specified
+// families and standard system slots always take priority.
+var systemFallbackFiles = []string{
+	// macOS
+	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	"/System/Library/Fonts/Apple Symbols.ttf",
+	"/Library/Fonts/Arial Unicode.ttf",
+	// Linux
+	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+	"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+	"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+	"/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
+	"/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
+	"/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
+	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+}
+
 // NewFonts parses the embedded font and every host font it can read. It is
 // called once at startup; the parse cost is a few hundred microseconds per face
 // and it is the only place the font bytes are read.
@@ -193,6 +223,17 @@ func NewFonts() (*Fonts, error) {
 		}
 		f.sources[sc.slot] = parsed
 	}
+	for _, path := range systemFallbackFiles {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		parsed, err := opentype.Parse(data)
+		if err != nil {
+			continue
+		}
+		f.fallbacks = append(f.fallbacks, parsed)
+	}
 	return f, nil
 }
 
@@ -213,9 +254,54 @@ func NewEmbeddedFonts() (*Fonts, error) {
 			{}:           regular,
 			{Bold: true}: bold,
 		},
-		entries: map[faceKey]*faceEntry{},
-		fbCache: map[faceKey][]*faceEntry{},
+		entries:   map[faceKey]*faceEntry{},
+		fbCache:   map[faceKey][]*faceEntry{},
+		fbEntries: map[fallbackKey]*faceEntry{},
 	}, nil
+}
+
+// AddFallback appends an opentype.Font to the wide-coverage fallback chain.
+// It is thread-safe and invalidates any cached fallback chains.
+func (f *Fonts) AddFallback(font *opentype.Font) {
+	if font == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fallbacks = append(f.fallbacks, font)
+	f.fbCache = map[faceKey][]*faceEntry{}
+}
+
+// fallbackFaceLocked returns the cached faceEntry for a fallback font at the given size.
+// Callers hold f.mu (read or write).
+func (f *Fonts) fallbackFaceLocked(idx int, size int32, src *opentype.Font) *faceEntry {
+	if size <= 0 || src == nil {
+		return nil
+	}
+	k := fallbackKey{idx: idx, size: size}
+	if e, ok := f.fbEntries[k]; ok {
+		return e
+	}
+	face, err := opentype.NewFace(src, &opentype.FaceOptions{
+		Size:    float64(size),
+		DPI:     faceDPI,
+		Hinting: font.HintingNone,
+	})
+	if err != nil {
+		return nil
+	}
+	e := &faceEntry{
+		face:    face,
+		glyphs:  map[rune]Glyph{},
+		missing: map[rune]struct{}{},
+		adv:     map[rune]int32{},
+		advMiss: map[rune]struct{}{},
+	}
+	if f.fbEntries == nil {
+		f.fbEntries = map[fallbackKey]*faceEntry{}
+	}
+	f.fbEntries[k] = e
+	return e
 }
 
 // Register parses a font file's bytes and returns a 1-based index the style
@@ -399,25 +485,111 @@ func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
 			out = append(out, fb)
 		}
 	}
+	for i, fbSrc := range f.fallbacks {
+		fb := f.fallbackFaceLocked(i, size, fbSrc)
+		if fb == nil {
+			continue
+		}
+		seen := false
+		for _, e := range out {
+			if e == fb {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, fb)
+		}
+	}
 	f.fbCache[k] = out
 	return out
 }
 
+// isDefaultIgnorable reports whether r is a default-ignorable code point
+// per Unicode (such as variation selectors and zero-width spaces/joiners)
+// which should produce no visible glyph and zero advance when unhandled by font tables.
+func isDefaultIgnorable(r rune) bool {
+	return (r >= 0xFE00 && r <= 0xFE0F) ||
+		(r >= 0xE0100 && r <= 0xE01EF) ||
+		r == 0x200B || r == 0x200C || r == 0x200D || r == 0xFEFF
+}
+
+// tofuAdvanceFixed returns the advance of a missing glyph in 26.6 fixed-point units.
+// The advance is stable and non-zero (1 em = size pixels), matching the standard
+// square geometry of emoji and .notdef glyphs so layout does not shift when
+// a real emoji face is provided.
+func tofuAdvanceFixed(size int32) int32 {
+	if size <= 0 {
+		return 0
+	}
+	return size << 6
+}
+
+// tofuGlyph generates a visible missing glyph (tofu): a bordered rectangle
+// with non-zero ink and a stable advance width.
+func tofuGlyph(size int32) Glyph {
+	if size <= 0 {
+		return Glyph{}
+	}
+	adv := size
+	w := (size * 3) / 4
+	if w < 2 {
+		w = 2
+	}
+	pad := (adv - w) / 2
+	top := -size
+	if top >= 0 {
+		top = -1
+	}
+	bottom := size / 8
+	if bottom <= 0 {
+		bottom = 1
+	}
+	h := bottom - top
+	if h < 2 {
+		h = 2
+	}
+	bounds := frame.Rect4(pad, top, pad+w, bottom)
+	m := image.NewAlpha(image.Rect(0, 0, int(w), int(h)))
+	stroke := int32(1)
+	if size >= 32 {
+		stroke = size / 16
+	}
+	for y := 0; y < int(h); y++ {
+		row := m.Pix[y*m.Stride : y*m.Stride+int(w)]
+		for x := 0; x < int(w); x++ {
+			if x < int(stroke) || x >= int(w)-int(stroke) || y < int(stroke) || y >= int(h)-int(stroke) {
+				row[x] = 0xFF
+			}
+		}
+	}
+	return Glyph{
+		Mask:    m,
+		Bounds:  bounds,
+		Advance: adv,
+		Ok:      true,
+		Missing: true,
+	}
+}
+
 // Glyph rasterizes r in a slot at a device-pixel size, returning a mask the
-// caller owns (and may keep in a cache). The zero Glyph, with Ok false, means
-// no face has such a glyph, which the text path treats as whitespace rather
-// than an error.
+// caller owns (and may keep in a cache). If no face in the fallback chain has
+// such a glyph, it returns a visible tofu glyph (a bordered box) with a stable
+// non-zero advance and sets Missing=true, rather than treating missing text as
+// whitespace.
 func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
-	// Fast path: a cached hit (or a memoized miss) needs no face and no writer.
+	if size <= 0 {
+		return Glyph{}
+	}
+	// Fast path: a cached hit needs no face and no writer.
 	f.mu.RLock()
 	if e := f.lookupLocked(size, slot); e != nil {
 		if g, ok := e.glyphs[r]; ok {
+			if g.Missing {
+				f.missingCount.Add(1)
+			}
 			f.mu.RUnlock()
 			return g
-		}
-		if _, bad := e.missing[r]; bad {
-			f.mu.RUnlock()
-			return Glyph{}
 		}
 	}
 	f.mu.RUnlock()
@@ -428,10 +600,10 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 		return Glyph{}
 	}
 	if g, ok := e.glyphs[r]; ok {
+		if g.Missing {
+			f.missingCount.Add(1)
+		}
 		return g
-	}
-	if _, bad := e.missing[r]; bad {
-		return Glyph{}
 	}
 	g := renderGlyph(e.face, r)
 	if !g.Ok {
@@ -447,8 +619,16 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 		}
 	}
 	if !g.Ok {
+		if isDefaultIgnorable(r) {
+			ignorable := Glyph{Ok: true}
+			e.glyphs[r] = ignorable
+			return ignorable
+		}
 		e.missing[r] = struct{}{}
-		return Glyph{}
+		f.missingCount.Add(1)
+		tofu := tofuGlyph(size)
+		e.glyphs[r] = tofu
+		return tofu
 	}
 	e.glyphs[r] = g
 	return g
@@ -469,17 +649,19 @@ func (f *Fonts) GlyphAdvance(size int32, r rune, slot frame.FontSlot) int32 {
 // place or measure more than one glyph must accumulate these, not the rounded
 // GlyphAdvance values.
 func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32 {
-	// Fast path: a memoized advance (or miss) is the value a fresh call would
+	if size <= 0 {
+		return 0
+	}
+	// Fast path: a memoized advance is the value a fresh call would
 	// compute, with no face involved, so readers share the lock.
 	f.mu.RLock()
 	if e := f.lookupLocked(size, slot); e != nil {
 		if adv, ok := e.adv[r]; ok {
+			if _, bad := e.advMiss[r]; bad {
+				f.missingCount.Add(1)
+			}
 			f.mu.RUnlock()
 			return adv
-		}
-		if _, bad := e.advMiss[r]; bad {
-			f.mu.RUnlock()
-			return 0
 		}
 	}
 	f.mu.RUnlock()
@@ -490,10 +672,10 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 		return 0
 	}
 	if adv, ok := e.adv[r]; ok {
+		if _, bad := e.advMiss[r]; bad {
+			f.missingCount.Add(1)
+		}
 		return adv
-	}
-	if _, bad := e.advMiss[r]; bad {
-		return 0
 	}
 	adv, ok := e.face.GlyphAdvance(r)
 	if !ok {
@@ -505,13 +687,63 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 			}
 		}
 		if !ok {
+			if isDefaultIgnorable(r) {
+				e.adv[r] = 0
+				return 0
+			}
+			f.missingCount.Add(1)
+			fixedAdv := tofuAdvanceFixed(size)
 			e.advMiss[r] = struct{}{}
-			return 0
+			e.adv[r] = fixedAdv
+			return fixedAdv
 		}
 	}
 	v := int32(adv)
 	e.adv[r] = v
 	return v
+}
+
+// MissingCount returns the total number of missing glyph lookups that fell back to tofu.
+func (f *Fonts) MissingCount() int64 {
+	return f.missingCount.Load()
+}
+
+// ResetMissingCount resets the missing glyph counter to zero.
+func (f *Fonts) ResetMissingCount() {
+	f.missingCount.Store(0)
+}
+
+// HasGlyph reports whether face contains a rendered glyph for rune r.
+func HasGlyph(face font.Face, r rune) bool {
+	if face == nil {
+		return false
+	}
+	_, _, _, _, ok := face.Glyph(fixed.Point26_6{}, r)
+	return ok
+}
+
+// FaceForRune returns the font face that covers r for the given size and slot,
+// following the fallback chain. If no face in the chain covers r, it returns
+// (nil, false), indicating that the rune is missing across all faces.
+func (f *Fonts) FaceForRune(size int32, r rune, slot frame.FontSlot) (font.Face, bool) {
+	if size <= 0 {
+		return nil, false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e := f.faceLocked(size, slot)
+	if e == nil {
+		return nil, false
+	}
+	if HasGlyph(e.face, r) {
+		return e.face, true
+	}
+	for _, fb := range f.fallbackLocked(size, slot) {
+		if HasGlyph(fb.face, r) {
+			return fb.face, true
+		}
+	}
+	return nil, false
 }
 
 // LineMetrics reports a face's ascent, descent and normal line height in device

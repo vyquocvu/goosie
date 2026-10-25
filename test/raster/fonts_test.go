@@ -2,6 +2,7 @@ package raster
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -153,5 +154,146 @@ func TestGlyphAdvanceFixedIsTheUnroundedAdvance(t *testing.T) {
 		if got, want := f.GlyphAdvance(size, 'e', slot), (fixed+32)>>6; got != want {
 			t.Errorf("slot %+v: GlyphAdvance = %d, want %d (fixed %d rounded once)", slot, got, want, fixed)
 		}
+	}
+}
+
+// TestCoverageResolver verifies AC-04:
+// For a rune outside mapped slots ('✔'), FaceForRune must return a face where HasGlyph(face, '✔') == true.
+// For a rune not covered by any face ('😀'), it must return (nil, false) as the missing signal.
+func TestCoverageResolver(t *testing.T) {
+	if _, err := os.Stat("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"); err != nil {
+		t.Skip("skipping host font check: /System/Library/Fonts/Supplemental/Arial Unicode.ttf not present on this host")
+	}
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	// 1. ASCII rune should be served by the requested face.
+	faceA, okA := f.FaceForRune(16, 'A', slot)
+	if !okA || faceA == nil || !raster.HasGlyph(faceA, 'A') {
+		t.Errorf("FaceForRune('A') failed to return a face with HasGlyph == true")
+	}
+
+	// 2. Rune '✔' (U+2714) outside standard Arial/Times slots must resolve to a fallback face (e.g. Arial Unicode)
+	// that actually has the glyph.
+	faceCheck, okCheck := f.FaceForRune(16, '✔', slot)
+	if !okCheck || faceCheck == nil {
+		t.Fatalf("FaceForRune('✔') = (nil, false), want face from wide-coverage fallback")
+	}
+	if !raster.HasGlyph(faceCheck, '✔') {
+		t.Errorf("FaceForRune('✔') returned face without glyph: HasGlyph == false")
+	}
+
+	// 3. Emoji rune '😀' (U+1F600) covered by no face must return (nil, false) as missing signal,
+	// rather than a face that cannot draw it.
+	faceEmoji, okEmoji := f.FaceForRune(16, '😀', slot)
+	if okEmoji || faceEmoji != nil {
+		t.Errorf("FaceForRune('😀') = (%v, %v), want (nil, false) indicating missing", faceEmoji, okEmoji)
+	}
+}
+
+// TestCoverageResolverPortable ensures that even on a host without system fonts (like Linux CI),
+// wide-coverage fallback chaining via AddFallback functions correctly.
+func TestCoverageResolverPortable(t *testing.T) {
+	f, err := raster.NewEmbeddedFonts()
+	if err != nil {
+		t.Fatalf("NewEmbeddedFonts: %v", err)
+	}
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	// Embedded face has arrows ('→').
+	faceArrow, okArrow := f.FaceForRune(16, '→', slot)
+	if !okArrow || faceArrow == nil || !raster.HasGlyph(faceArrow, '→') {
+		t.Errorf("embedded fallback failed to cover '→'")
+	}
+
+	// Emoji has no coverage across embedded faces -> must report missing.
+	faceMissing, okMissing := f.FaceForRune(16, '😀', slot)
+	if okMissing || faceMissing != nil {
+		t.Errorf("FaceForRune('😀') = (%v, %v), want (nil, false)", faceMissing, okMissing)
+	}
+}
+
+// TestTofuVisibleAndAdvanceNonZero tests AC-04 and requirement (ii):
+// A missing glyph must produce visible tofu (bordered rectangle mask) with stable non-zero advance.
+func TestTofuVisibleAndAdvanceNonZero(t *testing.T) {
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	const size = int32(16)
+	slot := frame.FontSlot{Family: frame.FontTimes}
+
+	// Glyph check
+	g := f.Glyph(size, '😀', slot)
+	if !g.Ok {
+		t.Fatalf("Glyph('😀').Ok = false, want true for tofu")
+	}
+	if !g.Missing {
+		t.Fatalf("Glyph('😀').Missing = false, want true")
+	}
+	if g.Mask == nil || g.Mask.Bounds().Empty() {
+		t.Fatalf("Glyph('😀').Mask is nil or empty, want visible tofu box")
+	}
+	if g.Advance <= 0 {
+		t.Fatalf("Glyph('😀').Advance = %d, want > 0", g.Advance)
+	}
+
+	// Mask must have ink (non-zero alpha)
+	hasInk := false
+	for _, pix := range g.Mask.Pix {
+		if pix > 0 {
+			hasInk = true
+			break
+		}
+	}
+	if !hasInk {
+		t.Fatalf("Glyph('😀').Mask has no ink pixels, want bordered box")
+	}
+
+	// Advance checks
+	adv := f.GlyphAdvance(size, '😀', slot)
+	if adv <= 0 {
+		t.Fatalf("GlyphAdvance(size, '😀') = %d, want > 0 (mutation ii invariant)", adv)
+	}
+	fixed := f.GlyphAdvanceFixed(size, '😀', slot)
+	if fixed <= 0 {
+		t.Fatalf("GlyphAdvanceFixed(size, '😀') = %d, want > 0 (mutation ii invariant)", fixed)
+	}
+	if got, want := adv, (fixed+32)>>6; got != want {
+		t.Errorf("advance mismatch: GlyphAdvance=%d, fixed rounded=%d", got, want)
+	}
+}
+
+// TestMissingGlyphCounter tests requirement (iii):
+// A controlled counter tracks missing glyphs that fall back to tofu.
+func TestMissingGlyphCounter(t *testing.T) {
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	f.ResetMissingCount()
+	if got := f.MissingCount(); got != 0 {
+		t.Fatalf("MissingCount after reset = %d, want 0", got)
+	}
+
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	// Measuring / rasterizing ASCII must produce ZERO missing glyphs.
+	for _, r := range "Hello World 123" {
+		f.GlyphAdvanceFixed(16, r, slot)
+		f.Glyph(16, r, slot)
+	}
+	if got := f.MissingCount(); got != 0 {
+		t.Fatalf("MissingCount after ASCII = %d, want 0", got)
+	}
+
+	// Measuring / rasterizing missing runes (e.g. emoji) must increment counter.
+	f.GlyphAdvanceFixed(16, '😀', slot)
+	f.Glyph(16, '🎉', slot)
+	if got := f.MissingCount(); got <= 0 {
+		t.Fatalf("MissingCount after emoji = %d, want > 0 (mutation iii invariant)", got)
 	}
 }
