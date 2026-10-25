@@ -14,10 +14,20 @@ Modes:
     --pass-at N       Pass percentage (default 90.0).
     --inspect NAME    Print per-band mismatch for one fixture.
 
+This oracle is deliberately impossible to fool (GOOSIE-PARITYGATE-001):
+    * A missing goosie/chromium render is ALWAYS reported as MISSING; there is
+      no --no-strict escape hatch that shrinks the denominator. --strict is
+      still accepted for call-site compatibility but enables nothing.
+    * A fixture passes its known-gaps baseline only when the measured blank
+      band count EQUALS the declared count, so inflating the baseline fails.
+    * A corpus that has shrunk below MIN_SCORED_FIXTURES is treated as broken,
+      not as a clean run.
+
 Exit codes:
-    0  All scored fixtures passed the threshold.
+    0  All scored fixtures passed the threshold and the corpus is at full size.
     1  One or more fixtures failed, or a render step failed (fail-closed).
-    2  Bad invocation (missing binary, missing fixtures, etc.).
+    2  Bad invocation (missing binary, missing fixtures, corpus below the
+       MIN_SCORED_FIXTURES floor, etc.).
 """
 
 from __future__ import annotations
@@ -36,6 +46,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 THRESHOLD = 30
 PASS_AT = 90.0
+# Floor on the number of scored fixtures.  Equals the count of
+# testdata/render/**/*.html as of the last time the corpus grew; it may only
+# rise, and raising it by 1 in the same change that adds a fixture is how that
+# gain gets locked in.  A scored corpus below this number means fixtures
+# silently disappeared, so the run is reported as broken (exit 2) rather than
+# as a healthy 100%.  test/gatecheck/parity_harness_test.go counts the real HTML
+# files and fails if the count falls below this exact line, so the two cannot
+# drift apart - and adding a fixture must never red that test by itself.
+MIN_SCORED_FIXTURES = 81
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
@@ -294,12 +313,13 @@ def _category(name: str) -> str:
 
 
 def score_fixtures(threshold: int, pass_at: float,
-                   strict: bool = True,
                    known_gaps: dict[str, int] | None = None) -> list[FixtureResult]:
     """Compare every goosie render to its Chromium counterpart.
 
-    When *strict* is True (the default), missing pairs and dimension mismatches
-    are reported as errors rather than silently skipped.
+    Strictness is not optional: a missing render, a dimension mismatch, and a
+    known-gaps baseline that no longer matches the measured blank band count
+    each produce a row and a non-PASS status, so the harness can never report
+    success on shrinking evidence.
     """
     results: list[FixtureResult] = []
     known_gaps = load_known_gaps() if known_gaps is None else known_gaps
@@ -310,24 +330,21 @@ def score_fixtures(threshold: int, pass_at: float,
         pp = CHROMIUM / rel
 
         if not gp.exists() and not pp.exists():
-            if strict:
-                results.append(FixtureResult(
-                    rel, 0.0, "MISSING",
-                    error="neither goosie nor chromium render exists"))
+            results.append(FixtureResult(
+                rel, 0.0, "MISSING",
+                error="neither goosie nor chromium render exists"))
             continue
 
         if not gp.exists():
-            if strict:
-                results.append(FixtureResult(
-                    rel, 0.0, "MISSING",
-                    error="goosie render missing"))
+            results.append(FixtureResult(
+                rel, 0.0, "MISSING",
+                error="goosie render missing"))
             continue
 
         if not pp.exists():
-            if strict:
-                results.append(FixtureResult(
-                    rel, 0.0, "MISSING",
-                    error="chromium render missing"))
+            results.append(FixtureResult(
+                rel, 0.0, "MISSING",
+                error="chromium render missing"))
             continue
 
         g_img = Image.open(gp).convert("RGB")
@@ -350,11 +367,23 @@ def score_fixtures(threshold: int, pass_at: float,
 
         worst_iou, coverage, blank_rows = score_regions(g, p)
         allowed_blanks = known_gaps.get(rel, 0)
-        status = "PASS" if pct >= pass_at and len(blank_rows) <= allowed_blanks else "FAIL"
+        error = None
+        if pct < pass_at:
+            status = "FAIL"
+        elif len(blank_rows) != allowed_blanks:
+            # The known-gaps baseline is an exact ratchet, not an upper bound:
+            # inflating it to hide a band, or fixing a band without shrinking
+            # the baseline file, both land here.
+            status = "FAIL"
+            error = (f"known-gap baseline is stale: declared {allowed_blanks}, "
+                     f"measured {len(blank_rows)}")
+        else:
+            status = "PASS"
         results.append(FixtureResult(
             rel, pct, status,
             goosie_size=(g.shape[1], g.shape[0]),
             chromium_size=(p.shape[1], p.shape[0]),
+            error=error,
             worst_region_iou=worst_iou,
             coverage_ratio=coverage,
             blank_region_rows=blank_rows,
@@ -693,10 +722,9 @@ def main() -> int:
     ap.add_argument("--pass-at", type=float, default=PASS_AT,
                     help=f"pass percentage (default {PASS_AT})")
     ap.add_argument("--strict", action="store_true", default=True,
-                    help="fail on missing pairs and dimension mismatches "
-                         "(default: True)")
-    ap.add_argument("--no-strict", action="store_false", dest="strict",
-                    help="skip missing pairs instead of reporting errors")
+                    help="accepted for compatibility, strictness is not "
+                         "optional: missing renders and dimension mismatches "
+                         "are always reported (this flag enables nothing)")
     ap.add_argument("--json", metavar="FILE",
                     help="write JSON report to FILE")
     ap.add_argument("--junit", metavar="FILE",
@@ -734,13 +762,14 @@ def main() -> int:
             return 1
 
     # Score.
-    results = score_fixtures(args.threshold, args.pass_at,
-                             strict=args.strict)
+    results = score_fixtures(args.threshold, args.pass_at)
     elapsed = time.monotonic() - t0
 
-    if not results:
-        print("no renders found -- run with --render and/or "
-              "--render-chromium first", file=sys.stderr)
+    if len(results) < MIN_SCORED_FIXTURES:
+        print(f"parity: only {len(results)} fixture(s) scored — floor is "
+              f"{MIN_SCORED_FIXTURES}. The render corpus shrank or fixtures "
+              f"are missing, so this run cannot be trusted; re-run with "
+              f"--render and/or --render-chromium.", file=sys.stderr)
         return 2
 
     # Diff images.

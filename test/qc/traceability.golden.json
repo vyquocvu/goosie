@@ -1999,8 +1999,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityFixtureFloorMatchesCorpus"
+    ],
     "enforced": false
   },
   {
@@ -2009,8 +2011,11 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityRejectsNoStrictFlag",
+      "test/gatecheck/parity_harness_test.go:TestParitySelftestIsGreen"
+    ],
     "enforced": false
   },
   {
