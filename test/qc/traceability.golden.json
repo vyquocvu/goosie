@@ -864,7 +864,10 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "test/layout/first_letter_test.go:TestFirstLetterEmptyAndElementOnly",
+      "test/layout/first_letter_test.go:TestFirstLetterEmptyContent",
       "test/layout/first_letter_test.go:TestFirstLetterFloatLeft",
+      "test/layout/first_letter_test.go:TestFirstLetterLeadingWhitespace",
       "test/layout/first_letter_test.go:TestFirstLetterSplitBox"
     ],
     "enforced": false

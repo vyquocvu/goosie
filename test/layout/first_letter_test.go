@@ -88,6 +88,7 @@ p::first-letter { font-size: 48px; }
 	}
 }
 
+// qc:BR-075
 func TestFirstLetterLeadingWhitespace(t *testing.T) {
 	html := `<html><head><style>
 p::first-letter { font-size: 48px; }
@@ -178,6 +179,7 @@ p::first-letter { font-size: 48px; float: left; margin-right: 15px; }
 	}
 }
 
+// qc:BR-075
 func TestFirstLetterEmptyContent(t *testing.T) {
 	html := `<html><head><style>
 p::first-letter { content: ""; font-size: 48px; }
@@ -212,6 +214,7 @@ p::first-letter { content: ""; font-size: 48px; }
 	}
 }
 
+// qc:BR-075
 func TestFirstLetterEmptyAndElementOnly(t *testing.T) {
 	cases := []string{
 		`<p id="target"></p>`,
@@ -243,6 +246,7 @@ p::first-letter { font-size: 48px; }
 	}
 }
 
+// Untagged on purpose: it proves a rebuild happened, never what the rebuilt ::first-letter was - GOOSIE-PSEUDO-002.
 func TestFirstLetterIncremental(t *testing.T) {
 	css.ClearInteractiveState()
 	t.Cleanup(css.ClearInteractiveState)
