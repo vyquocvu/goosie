@@ -439,15 +439,19 @@ func TestApplySessionStateRebuildsTabs(t *testing.T) {
 	}
 }
 
+// qc:BR-049
 func TestSessionStateRoundTrip(t *testing.T) {
 	src := newNavTestPath(t)
 	t1 := src.tabMgr.Active()
 	t1.SetURL("https://b/")
 	t1.History().Push("https://a/")
 	t1.History().Push("https://b/")
+	t1.History().Push("https://c/")
+	t1.History().Back()
 	t2 := src.tabMgr.NewTab()
-	t2.SetURL("https://c/")
+	t2.SetURL("https://d/")
 	t2.History().Push("https://c/")
+	t2.History().Push("https://d/")
 
 	path := filepath.Join(t.TempDir(), "session.json")
 	if err := session.Save(path, sessionState(src)); err != nil {
@@ -464,15 +468,21 @@ func TestSessionStateRoundTrip(t *testing.T) {
 		t.Fatalf("restored %d tabs, want 2", dst.tabMgr.Count())
 	}
 	first := dst.tabMgr.Tabs()[0]
-	if entries, _ := first.History().Entries(); !reflect.DeepEqual(entries, []string{"https://a/", "https://b/"}) {
-		t.Errorf("first tab history = %v", entries)
+	if entries, index := first.History().Entries(); !reflect.DeepEqual(entries, []string{"https://a/", "https://b/", "https://c/"}) || index != 1 {
+		t.Errorf("first tab history = %v@%d, want [a,b,c]@1", entries, index)
 	}
 	if first.URL() != "https://b/" {
 		t.Errorf("first tab URL = %q, want https://b/", first.URL())
 	}
+	if got, ok := first.History().Forward(); !ok || got != "https://c/" {
+		t.Errorf("first tab forward = %q,%t, want https://c/", got, ok)
+	}
 	second := dst.tabMgr.Tabs()[1]
-	if second.URL() != "https://c/" {
-		t.Errorf("second tab URL = %q, want https://c/", second.URL())
+	if entries, index := second.History().Entries(); !reflect.DeepEqual(entries, []string{"https://c/", "https://d/"}) || index != 1 {
+		t.Errorf("second tab history = %v@%d, want [c,d]@1", entries, index)
+	}
+	if second.URL() != "https://d/" || second.History().Current() != second.URL() {
+		t.Errorf("second tab URL/history current = %q/%q, want https://d/", second.URL(), second.History().Current())
 	}
 	if dst.tabMgr.ActiveIndex() != 0 {
 		t.Errorf("active index = %d, want 0", dst.tabMgr.ActiveIndex())

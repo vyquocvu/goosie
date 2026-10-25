@@ -38,7 +38,8 @@ func TestHistoryRecordAndPersist(t *testing.T) {
 }
 
 func TestHistoryDropsConsecutiveRepeat(t *testing.T) {
-	s, err := history.Load(filepath.Join(t.TempDir(), "history.json"))
+	path := filepath.Join(t.TempDir(), "history.json")
+	s, err := history.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +47,16 @@ func TestHistoryDropsConsecutiveRepeat(t *testing.T) {
 	s.Record("https://example.com", "Example")
 	if got := s.Entries(); len(got) != 1 {
 		t.Fatalf("Entries() = %d records, want 1 after a consecutive repeat", len(got))
+	}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := history.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.Entries(); len(got) != 1 || got[0].URL != "https://example.com" {
+		t.Fatalf("reloaded consecutive visits = %+v, want one example.com visit", got)
 	}
 }
 

@@ -520,7 +520,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_history_private_test.go:TestJourneyHistoryRecordsDisplayedVisitsAndOmitsFailedLoad"
+    ],
     "enforced": false
   },
   {
@@ -530,7 +532,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "test/tabs/toolbar_history_test.go:TestHistoryPushAfterBackDiscardsForwardTrail"
+    ],
     "enforced": false
   },
   {
@@ -540,7 +544,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_history_private_test.go:TestJourneyReloadDoesNotAddHistoryVisits"
+    ],
     "enforced": false
   },
   {
@@ -581,7 +587,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/main_test.go:TestSessionStateRoundTrip"
+    ],
     "enforced": false
   },
   {
@@ -636,7 +644,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_history_private_test.go:TestPrivateBuildDoesNotTouchProfileStores"
+    ],
     "enforced": false
   },
   {
@@ -646,7 +656,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_history_private_test.go:TestJourneyRegularPrivateRegularCookieIsolation"
+    ],
     "enforced": false
   },
   {
@@ -656,7 +668,9 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "cmd/goosie/journey_history_private_test.go:TestPrivateRunDoesNotJournalOrRestorePrivateTabs"
+    ],
     "enforced": false
   },
   {
