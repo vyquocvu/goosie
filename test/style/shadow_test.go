@@ -2,8 +2,6 @@ package style_test
 
 import (
 	"testing"
-
-	"github.com/vyquocvu/goosie/internal/style"
 )
 
 // TestBoxShadowResolved verifies that box-shadow declarations resolve through
@@ -190,29 +188,72 @@ func TestBoxShadowHexColor(t *testing.T) {
 	}
 }
 
-// TestShadowPanicsNoPanic verifies that various shadow declarations do not
-// panic the resolver.
-func TestShadowPanicsNoPanic(t *testing.T) {
-	decls := []string{
-		"box-shadow: none",
-		"box-shadow: 0 0 0 black",
-		"box-shadow: 1px 1px",
-		"box-shadow: inset 0 0 10px white",
-		"box-shadow: 2px 2px 4px 2px rgba(0,0,0,0.3), 0 0 8px rgba(255,0,0,0.5)",
-		"text-shadow: none",
-		"text-shadow: 1px 1px 2px black",
-		"text-shadow: 0 0 red, 1px 1px blue, 2px 2px green",
-		"text-shadow: -1px -1px 0 white",
+// TestShadowDeclarationsResolve verifies each declaration against its CSS
+// meaning, including layer order and all exposed shadow components.
+func TestShadowDeclarationsResolve(t *testing.T) {
+	tests := []struct {
+		decl string
+		box  []wantBoxShadow
+		text []wantTextShadow
+	}{
+		{decl: "box-shadow: none"},
+		{decl: "box-shadow: 0 0 0 black", box: []wantBoxShadow{{color: [4]uint8{0, 0, 0, 255}}}},
+		{decl: "box-shadow: 1px 1px", box: []wantBoxShadow{{x: 1, y: 1, current: true}}},
+		{decl: "box-shadow: inset 0 0 10px white", box: []wantBoxShadow{{blur: 10, color: [4]uint8{255, 255, 255, 255}, inset: true}}},
+		{decl: "box-shadow: 2px 2px 4px 2px rgba(0,0,0,0.3), 0 0 8px rgba(255,0,0,0.5)", box: []wantBoxShadow{
+			{x: 2, y: 2, blur: 4, spread: 2, color: [4]uint8{0, 0, 0, 77}},
+			{blur: 8, color: [4]uint8{255, 0, 0, 128}},
+		}},
+		{decl: "text-shadow: none"},
+		{decl: "text-shadow: 1px 1px 2px black", text: []wantTextShadow{{x: 1, y: 1, blur: 2, color: [4]uint8{0, 0, 0, 255}}}},
+		{decl: "text-shadow: 0 0 red, 1px 1px blue, 2px 2px green", text: []wantTextShadow{
+			{color: [4]uint8{255, 0, 0, 255}},
+			{x: 1, y: 1, color: [4]uint8{0, 0, 255, 255}},
+			{x: 2, y: 2, color: [4]uint8{0, 128, 0, 255}},
+		}},
+		{decl: "text-shadow: -1px -1px 0 white", text: []wantTextShadow{{x: -1, y: -1, color: [4]uint8{255, 255, 255, 255}}}},
 	}
-	for _, decl := range decls {
-		t.Run(decl, func(t *testing.T) {
-			// Must not panic.
-			_ = styleFor(t,
+	for _, tt := range tests {
+		t.Run(tt.decl, func(t *testing.T) {
+			s := styleFor(t,
 				`<html><body><div class="x">x</div></body></html>`,
-				`.x { `+decl+` }`,
+				`.x { `+tt.decl+` }`,
 				"div")
+			if len(s.BoxShadow) != len(tt.box) {
+				t.Fatalf("box-shadow layer count = %d, want %d", len(s.BoxShadow), len(tt.box))
+			}
+			for i, want := range tt.box {
+				got := s.BoxShadow[i]
+				if got.OffsetX != want.x || got.OffsetY != want.y || got.Blur != want.blur || got.Spread != want.spread || got.Inset != want.inset {
+					t.Errorf("box-shadow[%d] geometry/inset = (%v,%v,%v,%v,%t), want (%v,%v,%v,%v,%t)", i, got.OffsetX, got.OffsetY, got.Blur, got.Spread, got.Inset, want.x, want.y, want.blur, want.spread, want.inset)
+				}
+				if got.Color.R != want.color[0] || got.Color.G != want.color[1] || got.Color.B != want.color[2] || got.Color.A != want.color[3] || got.ColorIsCurrent != want.current {
+					t.Errorf("box-shadow[%d] color/current = (%d,%d,%d,%d)/%t, want (%d,%d,%d,%d)/current=%t", i, got.Color.R, got.Color.G, got.Color.B, got.Color.A, got.ColorIsCurrent, want.color[0], want.color[1], want.color[2], want.color[3], want.current)
+				}
+			}
+			if len(s.TextShadow) != len(tt.text) {
+				t.Fatalf("text-shadow layer count = %d, want %d", len(s.TextShadow), len(tt.text))
+			}
+			for i, want := range tt.text {
+				got := s.TextShadow[i]
+				if got.OffsetX != want.x || got.OffsetY != want.y || got.Blur != want.blur {
+					t.Errorf("text-shadow[%d] geometry = (%v,%v,%v), want (%v,%v,%v)", i, got.OffsetX, got.OffsetY, got.Blur, want.x, want.y, want.blur)
+				}
+				if got.Color.R != want.color[0] || got.Color.G != want.color[1] || got.Color.B != want.color[2] || got.Color.A != want.color[3] {
+					t.Errorf("text-shadow[%d] color = (%d,%d,%d,%d), want (%d,%d,%d,%d)", i, got.Color.R, got.Color.G, got.Color.B, got.Color.A, want.color[0], want.color[1], want.color[2], want.color[3])
+				}
+			}
 		})
 	}
-	// Suppress unused import.
-	_ = style.DisplayNone
+}
+
+type wantBoxShadow struct {
+	x, y, blur, spread float32
+	color              [4]uint8
+	inset, current     bool
+}
+
+type wantTextShadow struct {
+	x, y, blur float32
+	color      [4]uint8
 }

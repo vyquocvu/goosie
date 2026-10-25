@@ -3,17 +3,18 @@ package engine_test
 import (
 	"math"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
 // ---------------------------------------------------------------------------
 // Fuzz tests for the input path.
 //
-// These exercise ClickAt, SetHover, FocusControl, SelectAt, SelectTo, Edit,
-// FireScrollEvent, and FireResizeEvent with arbitrary inputs to catch panics,
-// crashes, and deadlocks. The goal is not correctness of results but stability
-// of the engine under adversarial input.
+// These exercise input operations with arbitrary values and check observable
+// invariants as well as stability under adversarial input.
 // ---------------------------------------------------------------------------
 
 const fuzzHTML = `<!DOCTYPE html>
@@ -50,8 +51,30 @@ func FuzzClickAt(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, x, y float32) {
 		sess := newFuzzSession(t)
-		// Must not panic or deadlock.
-		sess.ClickAt(x, y)
+		before := sess.Focused()
+		handled := sess.ClickAt(x, y)
+		after := sess.Focused()
+		if !handled && after != before {
+			t.Fatal("ClickAt returned false but changed focused control")
+		}
+		button := sess.Doc.ElementByID("s")
+		if button == nil {
+			t.Fatal("fuzz fixture submit button not found")
+		}
+		clicked := 0
+		dom.AddEventListener(button, "click", func(*dom.Event) { clicked++ }, false)
+		cx, cy, ok := centerForNode(sess, button)
+		if !ok {
+			t.Fatal("fuzz fixture submit button has no layout box")
+		}
+		before = sess.Focused()
+		handled = sess.ClickAt(cx, cy)
+		if handled != (clicked == 1) {
+			t.Fatalf("ClickAt returned %t after %d click events, want return to match activation", handled, clicked)
+		}
+		if !handled && sess.Focused() != before {
+			t.Fatal("ClickAt returned false but changed focused control")
+		}
 	})
 }
 
@@ -63,7 +86,57 @@ func FuzzSetHover(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, x, y float32) {
 		sess := newFuzzSession(t)
-		sess.SetHover(x, y)
+		var enters, leaves int
+		var listen func(*dom.Node)
+		listen = func(n *dom.Node) {
+			if n == nil {
+				return
+			}
+			if n.Element() {
+				dom.AddEventListener(n, "mouseenter", func(*dom.Event) { enters++ }, false)
+				dom.AddEventListener(n, "mouseleave", func(*dom.Event) { leaves++ }, false)
+			}
+			for child := n.FirstChild; child != nil; child = child.NextSibling {
+				listen(child)
+			}
+		}
+		listen(&sess.Doc.Node)
+		target := sess.Doc.ElementByID("box")
+		if target == nil {
+			t.Fatal("fuzz fixture hover target not found")
+		}
+		tx, ty, ok := centerForNode(sess, target)
+		if !ok {
+			t.Fatal("fuzz fixture hover target has no layout box")
+		}
+		sess.SetHover(float32(math.MaxFloat32), float32(math.MaxFloat32))
+		enters, leaves = 0, 0
+		if !sess.SetHover(tx, ty) || enters+leaves != 1 {
+			t.Fatalf("SetHover on fixture target returned without exactly one enter/leave event (enters=%d leaves=%d)", enters, leaves)
+		}
+		enters, leaves = 0, 0
+		if sess.SetHover(tx, ty) {
+			t.Fatal("SetHover at the unchanged fixture target returned true")
+		}
+		if enters+leaves != 0 {
+			t.Fatalf("SetHover at the unchanged fixture target fired %d events", enters+leaves)
+		}
+		enters, leaves = 0, 0
+		handled := sess.SetHover(x, y)
+		events := enters + leaves
+		if handled && (events < 1 || events > 2) {
+			t.Fatalf("SetHover returned true with %d mouseenter/mouseleave events, want 1 or 2", events)
+		}
+		if !handled && events != 0 {
+			t.Fatalf("SetHover returned false with %d mouseenter/mouseleave events, want 0", events)
+		}
+		enters, leaves = 0, 0
+		if sess.SetHover(x, y) {
+			t.Fatal("SetHover at the same point returned true")
+		}
+		if enters+leaves != 0 {
+			t.Fatalf("repeated SetHover fired %d mouseenter/mouseleave events", enters+leaves)
+		}
 	})
 }
 
@@ -74,7 +147,29 @@ func FuzzFocusControl(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, x, y float32) {
 		sess := newFuzzSession(t)
-		sess.FocusControl(x, y)
+		input := sess.Doc.ElementByID("t")
+		if input == nil {
+			t.Fatal("fuzz fixture text input not found")
+		}
+		cx, cy, ok := centerForNode(sess, input)
+		if !ok {
+			t.Fatal("fuzz fixture text input has no layout box")
+		}
+		if !sess.FocusControl(cx, cy) || sess.Focused() != input {
+			t.Fatal("FocusControl did not report and establish focus on fixture input")
+		}
+		if sess.FocusControl(cx, cy) || sess.Focused() != input {
+			t.Fatal("FocusControl at unchanged fixture input did not report stable focus")
+		}
+		before := sess.Focused()
+		changed := sess.FocusControl(x, y)
+		after := sess.Focused()
+		if changed && after == before {
+			t.Fatal("FocusControl returned true but focused control did not change")
+		}
+		if !changed && after != before {
+			t.Fatal("FocusControl returned false but changed focused control")
+		}
 	})
 }
 
@@ -106,7 +201,17 @@ func FuzzEdit(f *testing.F) {
 		// Focus a text input first so Edit has something to work on.
 		sess.FocusControl(10, 10)
 		action := engine.EditAction(actionByte)
-		sess.Edit(action, r)
+		before := sess.FocusedText()
+		changed := sess.Edit(action, r)
+		after := sess.FocusedText()
+		if action == engine.EditRune && utf8.ValidRune(r) && !unicode.IsControl(r) && sess.FocusedEditable() {
+			if changed && !containsRune(after, r) {
+				t.Fatalf("Edit returned true but FocusedText %q does not contain inserted rune %q", after, r)
+			}
+			if !changed && after != before {
+				t.Fatalf("Edit returned false but FocusedText changed from %q to %q", before, after)
+			}
+		}
 	})
 }
 
@@ -143,5 +248,31 @@ func FuzzInteractionSequence(f *testing.F) {
 			sess.Edit(engine.EditRune, 'x')
 			sess.ClickAt(x2, y2)
 		}
+		list, err := sess.PaintChecked(1)
+		if err != nil {
+			t.Fatalf("PaintChecked after interaction sequence: %v", err)
+		}
+		if list == nil || list.Len() == 0 {
+			t.Fatalf("PaintChecked after interaction sequence returned %v display commands", list)
+		}
 	})
+}
+
+func containsRune(s string, r rune) bool {
+	for _, got := range s {
+		if got == r {
+			return true
+		}
+	}
+	return false
+}
+
+func centerForNode(sess *engine.Session, node *dom.Node) (float32, float32, bool) {
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node == node {
+			x0, y0, x1, y1 := obj.BorderRect()
+			return (x0 + x1) / 2, (y0 + y1) / 2, x0 < x1 && y0 < y1
+		}
+	}
+	return 0, 0, false
 }
