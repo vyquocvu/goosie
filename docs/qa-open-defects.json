@@ -3,9 +3,72 @@
     "id": "GOOSIE-RENDER-001",
     "priority": "P1",
     "status": "open",
-    "owner": "",
+    "owner": "docs/tasks/TASK-029-RC-SWEEP-BR180.md",
     "summary": "Google Products flicker is not confirmed or cleared by frame-by-frame pixel evidence (QA-002).",
     "evidence": "docs/qa-test-plan.md §QA-002: prior PNG hashes changed for both target and static control; controlled pixel comparison is still missing.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-SELECT-001",
+    "priority": "P1",
+    "status": "closed",
+    "owner": "docs/tasks/TASK-030-SELECT-INTERACTION.md",
+    "summary": "<select> was focusable but immovable: arrow/Home/End scrolled the page instead of changing the option, so no form with a select was usable by keyboard.",
+    "evidence": "BR-101. Proof of the old state and the fix: docs/tasks/TASK-030-SELECT-INTERACTION.md §2 (internal/engine/focus.go:573-590 had no select, cmd/goosie/interaction.go fell through to scrollContentKey) and §9.3 (six behaviour-off mutations, each killing a test).",
+    "closed_by": "531ea00"
+  },
+  {
+    "id": "GOOSIE-VALIDATE-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md",
+    "summary": "No constraint validation before submit: a form with an empty required field or a malformed email/number submits and sends the bad value.",
+    "evidence": "BR-105. internal/engine/engine.go:1619 submitFormLocked dispatches submit then collects and sends with zero validation; method=dialog is handled at engine.go:1631-1641 so the check must precede it. Spec: docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md §2.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-SUBMITTER-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md",
+    "summary": "The submitter button is dropped: its name/value pair is never added and implicit submit cannot tell which button fired.",
+    "evidence": "BR-107. internal/engine/forms.go:70-72 and :88 isSuccessfulControl skips buttons claiming they are handled separately, but nothing handles them: engine.go:1560-1568 runClickDefault and focus.go:378 Enter-submit both call SubmitForm(form) with no submitter argument.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-AX-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "needs a task (BR-139)",
+    "summary": "<select> has no node in the accessibility tree, so an assistive user cannot see or operate the control at all - even though TASK-030 made it keyboard-operable.",
+    "evidence": "BR-139. Measured while writing the BR-101 journey: the layout arena carries obj tag=\"select\" id=\"sel\", Session.AccessibilityTree() under the form returns only role=4 id=\"send\"; cmd/goosie clickNode therefore cannot address a select (journey uses clickElementByID). Recorded in docs/tasks/TASK-030-SELECT-INTERACTION.md §9.4.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-PSEUDO-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "needs a task (BR-075)",
+    "summary": "::first-letter and ::first-line are not supported, so a drop cap collapses to normal text and the paragraphs below shift up.",
+    "evidence": "BR-075. Found by TASK-027: three blank bands remain in testdata/render/parity selectors/03-pseudo-elements.png at rows (457,475) (539,554) (579,599); ::before/::after content in the same fixture renders, so the residual is the missing first-letter/first-line support, not glyph coverage. docs/tasks/TASK-027-GLYPH-COVERAGE.md §6.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-COVERAGE-001",
+    "priority": "P2",
+    "status": "open",
+    "owner": "docs/tasks/TASK-027-GLYPH-COVERAGE.md",
+    "summary": "Colour emoji still draw as tofu: golang.org/x/image/font/opentype does not read sbix/COLR tables.",
+    "evidence": "TASK-027 killed 8 of the 9 blank bands in unicode/02-emoji-symbols.png; the remaining band at rows (451,470) is Chromium's Apple Color Emoji line box (~26px) versus Goosie's 18px tofu line, i.e. cumulative vertical drift, not a missing glyph. Note added to docs/roadmap-v2.md.",
+    "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-FLAKE-001",
+    "priority": "P2",
+    "status": "open",
+    "owner": "needs a task",
+    "summary": "TestNativeEndToEndPlaysARealVideo is load-sensitive: under a busy machine it can time out, which risks a false red in the sweep's gate step.",
+    "evidence": "test/engine/media_native_test.go:264. Observed while running full suites in parallel worktrees; TASK-029 §3 forbids raising the timeout as a fix, so it is recorded here instead.",
     "closed_by": ""
   }
 ]

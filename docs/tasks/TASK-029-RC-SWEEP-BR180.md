@@ -130,3 +130,25 @@ Ratchet cho golden: một `qa-ratchet.json` ghi `{"p0_tagged": <n>, "p0p1_tagged
 - **AC-07 — NOT RUN, giữ BR-180 `NOT RUN`.** `GOOSIE-RENDER-001` vẫn mở vì QA-002 chưa có frame-by-frame pixel evidence; cũng chưa có CUA evidence và chữ ký người thật gắn với build SHA. File trong `docs/qa-signoffs/TEMPLATE.json` được đánh dấu mẫu, không phải sign-off.
 
 Catalog header đã sửa `Tổng: 180 case` thành `Tổng: 185 case`; dòng BR-180 giữ `NOT RUN`.
+
+### Tích hợp (integrator, 2026-10-25 — chạy lại độc lập, không copy số của codex)
+
+- **Chạy lại:** `bash -n scripts/rc-sweep.sh` → ok; `go test -count=1 ./test/gatecheck/
+  -run TestRCSweep -v` → **10/10 PASS, không test nào skip** (13.3s); sau merge:
+  `./test/qc/`, `./internal/archtest/`, `./test/gatecheck/` đều `ok` trên `main`.
+- **Tự tay mutate lại 6 trong 13 proof**, chọn đúng những cái chặn release: open-defect block,
+  ratchet floor, missing sign-off, sign-off SHA compare, untagged-P0 block, P0-failure
+  mapping. Cả **6 đều `rc=1`** — mỗi cái giết đúng test của nó; script restore **byte-identical**
+  (`diff -q` sạch). Không proof nào survive.
+- `docs/qa-open-defects.json` **đối chiếu lại theo §3.3**: 1 entry → 8. Bốn defect §3.3 yêu
+  cầu seed (`RENDER-001`, `VALIDATE-001`, `SUBMITTER-001`, `SELECT-001` — cái cuối ghi
+  `status: closed`, `closed_by: 531ea00` vì TASK-030 đã merge), cộng ba defect chỉ thấy khi
+  *chạy*: `AX-001` (`<select>` không có node AX — BR-139, do TASK-030 §9.4 đo),
+  `PSEUDO-001` (`::first-letter`/`::first-line` — BR-075, do TASK-027 để lại 3 band),
+  `COVERAGE-001` (emoji màu ra tofu, P2). Thêm `FLAKE-001` (P2) cho
+  `TestNativeEndToEndPlaysARealVideo`, ghi ở registry vì §3 cấm lấy timeout làm cách sửa.
+- Ratchet nâng `18/45` → **`19/55`**, có số đo từng ref: `e7e5c73` 18/53 → `531ea00`
+  (BR-101 được tag) 18/54 → sau merge TASK-029 **19/55**. **BR-180 là P0** (catalog
+  `docs/qa-test-catalog.md:216`) nên 10 test tagged của nó chính là `+1` P0 — không phải
+  `+2` P1 như §3.3 từng đoán. Không bước nào hạ số.
+- Sweep thật sau merge phải chạy lại ở SHA mới; kết quả ghi ở task kế tiếp.
