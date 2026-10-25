@@ -98,7 +98,7 @@ của miền nó thuộc về; miền chức năng vẫn do section chứa nó q
 - **BR-071 | P1 | PARITY | NOT RUN** — Render stacking context/z-index → thứ tự phủ đúng trong trường hợp engine công bố hỗ trợ.
 - **BR-072 | P1 | PARITY | NOT RUN** — Render overflow hidden/scroll và nội dung vượt khung → clipping/scroll vùng đúng, không vẽ ra ngoài.
 - **BR-073 | P2 | PARITY | NOT RUN** — Render border radius, outline và box shadow → hiệu ứng không làm sai bounds/hit testing.
-- **BR-074 | P2 | PARITY | NOT RUN** — Render màu, opacity và gradient đơn giản → màu không nhấp nháy khi idle hoặc scroll.
+- **BR-074 | P2 | PARITY | NOT RUN** — Render màu, opacity và gradient đơn giản → màu không nhấp nháy khi idle hoặc scroll. Ghi đo được 2026-10-26 (máy integrator, `cmd/dump-paint` + đếm pixel): **opacity trên box và `visibility:hidden` không vào display list** — bốn box `.ov{opacity:0;visibility:hidden}` / `.vx{visibility:hidden}` / `.op{opacity:0}` / `.dp{display:none}` chỉ loại đúng `display:none`, ba box kia vẫn emit FILL và ảnh 400×300 giữ 79.509 px `#f7f7f7` ở cả bốn biến thể; đây là nguyên nhân trực tiếp làm vnexpress thành trang xám một màu sau khi GOOSIE-CSSSTRING-003 được sửa (ghi GOOSIE-VIS-001). Row vẫn `NOT RUN` vì phần nhấp nháy khi idle/scroll chưa đo.
 - **BR-075 | P1 | PARITY | NOT RUN** — Render pseudo-elements ::before/::after và pseudo-state được hỗ trợ → generated content và style chỉ xuất hiện đúng điều kiện.
 - **BR-076 | P1 | PARITY | NOT RUN** — Cập nhật CSS class/style qua DOM sau load → style và layout mới được paint, không giữ pixel cũ.
 - **BR-077 | P1 | PARITY | NOT RUN** — Resize viewport rộng→hẹp→rộng → layout reflow, không để lại dải pixel của kích thước trước.
