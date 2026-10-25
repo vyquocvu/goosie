@@ -315,6 +315,31 @@ func (s *State) zoomBadgeRect(r frame.Rect, sc int32) (frame.Rect, bool) {
 	return frame.Rect4(badgeX0, badgeY0, badgeX1, badgeY1), true
 }
 
+// ZoomBadge reports the transient zoom indicator the address bar paints: its
+// whole-percent label and its rect in logical toolbar-row coordinates, the same
+// space AddressBarRect uses, so a caller translates it into the window exactly
+// as it translates every other chrome control.
+//
+// shown is false precisely when zoomBadgeRect hides the badge - find mode open,
+// a non-positive zoom factor, or 100% once the badge's grace has run out -
+// because this reads the very predicate the paint path reads. The accessibility
+// tree therefore cannot publish a node the pixels do not show, nor hide one the
+// pixels do.
+func (s *State) ZoomBadge(toolbarW int32) (label string, r frame.Rect, shown bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sc := s.sc()
+	lr := AddressBarRect(toolbarW)
+	// zoomBadgeRect works in device pixels, as the paint path does: build the
+	// device rect from the same logical address bar, then scale the answer back
+	// down. Integer division can shift an edge by at most one logical pixel.
+	br, ok := s.zoomBadgeRect(frame.Rect4(lr.X0*sc, lr.Y0*sc, lr.X1*sc, lr.Y1*sc), sc)
+	if !ok {
+		return "", frame.Rect{}, false
+	}
+	return FormatZoomPercent(s.Zoom), frame.Rect4(br.X0/sc, br.Y0/sc, br.X1/sc, br.Y1/sc), true
+}
+
 // GetFocus reports where keyboard input currently goes.
 func (s *State) GetFocus() Focus {
 	s.mu.Lock()
