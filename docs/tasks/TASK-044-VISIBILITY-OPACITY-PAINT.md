@@ -118,7 +118,235 @@ Phía user-visible thiếu là semantics ẩn, tức task này.
 
 ## 5. Kết quả — agent điền
 
-(chưa chạy; điền theo mục 1–6 của §4, kèm lệnh + exit code + số đo.)
+Tất cả số đo dưới đây lấy trên máy này (arm64, go1.26.10), HEAD base `6071b8b`,
+nhánh `worktree-task-044-visibility-opacity`. Mỗi mục có lệnh + exit code + output thật.
+
+### 5.0 Opacity hỏng ở tầng nào — xác định bằng đo, không đoán từ đọc code
+
+Đo tại seam style→paint (dựng document thật, chạy `Session.PaintChecked(1.0)` →
+`dl.Build(1)` → đọc `paint.DisplayCmd.Opacity/Color`, và `style.ResolveViewport` →
+`ComputedStyle.Opacity`). Kết luận: **cả hai tầng đều hỏng, và hỏng khác nhau**.
+
+- Tầng `style`: `opacity:5` được lưu nguyên vẹn thành `5.0` (không clamp), và
+  giá trị parse lỗi rơi về `0` — sau khi tầng paint bỏ hộp khi opacity 0, một typo
+  sẽ làm biến mất cả phần tử. (Oracle `TestOpacityClampsToUnitRange` chốt lại.)
+- Tầng `paint`/`raster`: `opacity:0` đi vào display list với `DisplayCmd.Opacity==0`,
+  mà raster đọc `0` là sentinel "unset → opaque" (`cmd.go`, `raster/tile.go:applyOpacity`),
+  nên hộp "trong suốt" vẽ nguyên đậm (alpha 255, thấy ở §5.1); và opacity của cha
+  không nhân xuống con nên subtree không bị mờ.
+
+Sửa đúng cả hai tầng: clamp + giữ nguyên giá trị lỗi ở `style`; tích luỹ opacity hiệu
+hiệu theo cây, bỏ hộp khi hiệu ≤ 0, và bỏ vẽ chính hộp khi `Visibility != "visible"`
+(vẫn đi tiếp con) ở `paint`.
+
+### 5.1 Bốn hộp — trước và sau, bằng `cmd/dump-paint` trên probe của riêng tôi
+
+Probe `/tmp/vis-probe044.html`: `.ov{opacity:0;visibility:hidden;background:#f7f7f7;
+position:absolute;width:100%;height:200px}`, `.vx{visibility:hidden;background:blue}`,
+`.op{opacity:0;background:green}`, `.dp{display:none;background:red}` (màu named:
+`green` = `#008000`).
+
+TRƯỚC (binary HEAD pristine, dựng bằng `git stash push -u` rồi `go build`):
+
+```
+$ /tmp/dumppaint-before /tmp/vis-probe044.html   # exit 0
+EXTENT Rect(8,8 800x200)
+FILL rect=(8,8,808,208) color=4160223231
+FILL rect=(8,8,108,58) color=65535
+FILL rect=(8,58,108,108) color=8388863
+```
+
+Định dạng màu là `0xRRGGBBAA`: `4160223231=0xF7F7F7FF` (xám opacity 0, alpha 255),
+`65535=0x0000FFFF` (xanh dương visibility:hidden, alpha 255), `8388863=0x008000FF`
+(xanh lá opacity:0, alpha 255). Ba hộp `.ov/.vx/.op` **đều vẽ**, chỉ `.dp` (display:none)
+biến mất — khớp kết luận §1.1 (số nguyên màu khác bản doc vì tôi dùng named color và
+viewport của tôi có lề 8px, nhưng hiện tượng giống hệt: opacity:0 vào lệnh vẽ với alpha đầy đủ).
+
+SAU (binary đã sửa):
+
+```
+$ /tmp/dumppaint-after /tmp/vis-probe044.html    # exit 0
+EXTENT Rect(0,0 0x0)
+```
+
+Không còn FILL nào — cả bốn hộp đúng: `.ov`/`.op` bị bỏ vì opacity hiệu dụng 0, `.vx`
+bị bỏ vì visibility hidden, `.dp` vẫn collapse.
+
+### 5.2 Oracle opacity cấp `style` — Chromium là chuẩn (đo, không nhớ)
+
+`node ./tmp-chromium-oracle.js` (Playwright `getComputedStyle(...).opacity`) exit 0:
+
+```
+a(opacity:0)=0  b(0.5)=0.5  c(.5)=0.5  d(5)=1  e(-3)=0
+f(0%)=0  g(50%)=0.5  h(100%)=1  bad(opacity:oops)=1
+```
+
+Goosie sau sửa khớp từng giá trị một (`TestOpacityClampsToUnitRange` xanh): `5`→`1`,
+`-3`→`0`, `0%`→`0`, `50%`→`0.5`, và **giá trị lỗi phải ra `1`** chứ không được rơi về `0`
+(vì `0` giờ bỏ cả subtree).
+
+### 5.3 Oracle visibility kế thừa/trả lại — cùng document với §5.2
+
+Cũng từ `tmp-chromium-oracle.js` exit 0:
+
+```
+.p{visibility:hidden} -> p=hidden  silent(inherit)=hidden
+.shown{visibility:visible} -> shown=visible  grand=visible
+```
+
+Goosie sau sửa khớp (`TestVisibilityInheritsAndRestores` xanh): hidden kế xuống con,
+con khai `visible` hiện lại và truyền `visible` xuống cháu.
+
+### 5.4 Điểm parity TRƯỚC khi sửa (§2.4) và SAU khi sửa (§4.3)
+
+- TRƯỚC: `python3 testdata/parity.py --render --binary /tmp/goosie-before` (exit 1 vì
+  chính fixture mới chưa qua), toàn corpus 86 fixture avg **96.03%**. Trong 85 fixture
+  cũ (không tính fixture mới của tôi) mức trung bình ≈ **96.17%**.
+- SAU: `python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie`
+  exit 0:
+
+```
+  86/86 passing  (100.0%), 0 failing, 0 errors
+  average match: 96.19%  (threshold=30, pass_at=90.0%)
+  known gaps: 5 fixtures / 10 bands
+   98.07%  PASS  css-features/12-hidden-and-transparent.png  worst_region_iou=0.99796...  coverage_ratio=0.98954...  blank_regions=0/0  shifted=0
+```
+
+Diff điểm **từng fixture** giữ nguyên so với binary trước (85 fixture chung chỉ 3 cái
+dịch, tất cả vẫn PASS, biên độ ≤0.18đ): `colors/03-opacity.png 99.29→99.47` (chính
+fix opacity làm fixture opacity sẵn có **tốt lên**), `layout-features/04-positioning
+97.76→97.83`, `semantic/02-article-section 95.8→95.76`. Average toàn corpus **tăng**
+96.03→96.19 (nhờ fixture mới 84.42→98.07); **không giảm quá 0.2đ** so với baseline —
+giảm 0,00 trên tập 85 cũ. **known gaps không dịch: vẫn 5 fixtures / 10 bands** (file
+integrator; tôi không đụng và không re-baseline).
+
+### 5.5 Ba phép mutation tự chứng minh (output verbatim)
+
+(i) Builder bỏ qua `Visibility` (hard-code `visibilityHidden := false`):
+
+```
+$ go test -count=1 ./test/paint/ -run Visibility   # exit 1
+--- FAIL: TestVisibilityHiddenDropsBoxPaint (0.00s)
+    visibility_paint_test.go:60: visibility:hidden background painted 4 fill(s); want 0
+    visibility_paint_test.go:64: visibility:hidden box emitted a border command at Rect(0,0 128x68); want none
+    visibility_paint_test.go:69: visibility:hidden box painted its text; want none
+--- FAIL: TestVisibilityHiddenSubtreeInheritsHidden (0.00s)
+    visibility_paint_test.go:96: hidden parent background painted 1 fill(s); want 0
+    visibility_paint_test.go:99: child that inherits hidden painted 1 fill(s); want 0
+--- FAIL: TestVisibilityHiddenKeepsLayout (0.00s)
+    visibility_paint_test.go:124: hidden box emitted 1 fill(s); want 0
+FAIL
+```
+
+(ii) Hard-code `opacity: 1` trong `boxPaintContext`:
+
+```
+$ go test -count=1 ./test/paint/ -run Opacity   # exit 1
+--- FAIL: TestOpacityFractionReachesCommand (0.00s)
+    opacity_paint_test.go:65: opacity:0.5 carried 1 in the display command, want 0.5
+    opacity_paint_test.go:68: opacity:.5 carried 1 in the display command, want 0.5
+--- FAIL: TestGroupOpacityAppliesToSubtree (0.00s)
+    opacity_paint_test.go:109: opacity:0.5 parent carried 1, want 0.5
+    opacity_paint_test.go:112: opaque child of an opacity:0.5 parent carried 1, want 0.5 (group opacity applies to the subtree)
+FAIL
+```
+
+(iii) Fixture-level, revert **một** cơ chế (opacity), render lại fixture bằng binary đó và chấm:
+
+```
+$ /tmp/goosie-mut3 -backend headless -url file:///.../12-hidden-and-transparent.html -screenshot ...   # exit 0
+$ python3 testdata/parity.py --binary ./bin/goosie   # exit 1
+   84.42%  FAIL  css-features/12-hidden-and-transparent.png  worst_region_iou=0.0  coverage_ratio=0.0  blank_regions=8/0  rows=[(13, 32), (43, 56), (69, 108), (119, 154), (193, 260), (307, 320), (333, 372), (387, 400)]  shifted=0
+  85/86 passing  (98.8%), 1 failing, 0 errors
+```
+
+Revert opacity làm tấm `opacity:0` phủ toàn viewport, coverage_ratio=0.0 (mất hết ink),
+exit 1. Revert visibility cũng vậy (tấm `visibility:hidden`). **Mỗi cơ chế một mình là
+gate thật** — nếu fixture vẫn PASS sau revert thì nó không chặn được gì, và ở đây nó FAIL.
+
+### 5.6 vnexpress trước/sau trên một bản lưu (không cải thiện được vì nhiều nguyên nhân)
+
+Bản lưu giữ ngoài repo: `/tmp/vn-task044.html` (`curl -sL --compressed -A 'Mozilla/5.0
+… Goosie/2.0' https://vnexpress.net/ -o /tmp/vn.html`, snapshot offline). Render bằng
+`/tmp/goosie-before` (HEAD) và `bin/goosie` (sau sửa):
+
+```
+$ goosie-before -bench -frames 3 -url file:///tmp/vn-task044.html -width 800 -height 600 -dpr 1 -out /tmp/vn-before-rep.json   # exit 0 → report.doc_height
+$ goosie        -bench -frames 3 -url file:///tmp/vn-task044.html -width 800 -height 600 -dpr 1 -out /tmp/vn-after-rep.json    # exit 0
+before doc_height=706
+after  doc_height=526
+```
+
+Đếm ink trên PNG 800×1600 (`-screenshot`, PIL, ink = kênh < 245):
+
+```
+before: 800x1600 ink=0 #f7f7f7=216000 white=1064000
+after : 800x1600 ink=0 #f7f7f7=216000 white=1064000
+```
+
+**Trung thực:** trên snapshot offline này, task này **không** làm vnexpress hết trắng.
+- `doc_height` giảm 706→526 vì tấm overlay `opacity:0` (position:absolute, cao) vốn bị
+  vẽ trước đây giờ không còn góp vào paint extent — đúng cơ chế, nhưng không đủ để hiện nội dung.
+- `ink` vẫn 0 ở **cả hai**: vùng `#f7f7f7` 216.000px = 800×270 đúng bằng header hợp lệ
+  `min-height:270px` (không phải overlay opacity:0), còn lại trắng. Nội dung bài viết
+  không vẽ vì **nguyên nhân khác ngoài visibility/opacity** (ảnh không có mạng, script
+  offline, layout phức tạp) — đúng như cảnh báo "nhiều nguyên nhân chồng lên" ở §4.5.
+- Vì vậy **không khẳng định** vnexpress đã xanh; sweep live tiếp theo mới kết luận, và
+  sweep đó do tiến trình khác chạy (tôi **không** chạy `testdata/live-parity.py`).
+
+### 5.7 Bộ kiểm định xanh (trên máy này, SAU khi `git merge main`)
+
+```
+go build -o bin/goosie ./cmd/goosie          # exit 0
+gofmt -l <touch packages>                    # exit 0 (rỗng)
+go vet -all ./...                            # exit 0
+go test -count=1 ./...                       # exit 0
+go test -count=1 ./internal/archtest/        # exit 0
+make gate                                    # exit 0  (failed=0 refused=0 deferred=0 panics=0 evictions=0)
+python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie   # exit 0  (86/86, avg 96.19%)
+```
+
+`git merge main` (đầu vào là các commit docs/QA + TASK-037 option-normalization) không
+xung đột, không đụng `testdata/parity.py` (`MIN_SCORED_FIXTURES` vẫn 86 của tôi) và không
+thêm fixture scored nào; gate + parity chạy lại cho kết quả y như trước merge (§5.4/§5.7).
+
+### 5.8 Đề nghị BR id + danh sách oracle (integrator tag `// qc:BR-xxx` rồi `-update`)
+
+BR cao nhất hiện có trong `test/qc/traceability.golden.json` là **BR-194**; tôi đề nghị
+tiếp quản **BR-195/196/197**:
+
+- **BR-195** — `visibility:hidden` bỏ vẽ chính hộp (bg/border/text), vẫn giữ layout,
+  kế thừa xuống subtree, con khai `visible` hiện lại; phân biệt với `display:none`.
+  Oracles (PARITY-adjacent, biên style→paint):
+  - `test/paint/visibility_paint_test.go`: `TestVisibilityHiddenDropsBoxPaint`,
+    `TestVisibilityHiddenSubtreeInheritsHidden`, `TestVisibilityHiddenKeepsLayout`,
+    `TestDisplayNoneStillCollapses`.
+- **BR-196** — `opacity` xuống tới display list: `0` bỏ cả subtree, phân số thật đi tới
+  lệnh vẽ, opacity của tổ tích luỹ xuống cả nhóm (group opacity).
+  - `test/paint/opacity_paint_test.go`: `TestOpacityZeroDropsBox`,
+    `TestOpacityFractionReachesCommand`, `TestOpacityAboveOnePaintsOpaque`,
+    `TestGroupOpacityAppliesToSubtree`.
+- **BR-197** — tầng `style`: `opacity` clamp `[0,1]`, `<percentage>` = fraction/100,
+  giá trị lỗi để nguyên (→1); `visibility` cascade.
+  - `test/style/opacity_visibility_computed_test.go`: `TestOpacityClampsToUnitRange`,
+    `TestVisibilityInheritsAndRestores`.
+- Fixture PARITY cho cả ba: `testdata/render/css-features/12-hidden-and-transparent.html`
+  (`MIN_SCORED_FIXTURES` 85→86 cùng commit thêm fixture).
+
+### 5.9 Còn chưa làm / giới hạn phải khai báo
+
+- `visibility:collapse` (table) **không** xử lý riêng — tôi gộp collapse như `hidden`
+  (bỏ vẽ), chưa làm semantics "row tự sập khi mọi cell collapse". Ghi rõ ngoài phạm vi.
+- **Group compositing thật**: tile raster nhân alpha **per-command**, không offscreen
+  composite cả nhóm. Vì vậy các **sibling chồng nhau trong cùng một `opacity` group** sẽ
+  **sẫm kép** (double-darken) khác Chromium (nhóm chỉ mờ một lần). Với các hộp không chồng
+  nhau (đa số fixture và vnexpress) thì giống hệt; khác biệt chỉ lộ khi hai phần tử opaque
+  đè nhau **trong** một nhóm mờ. Đây là giới hạn đã đo, không giấu.
+- `ContentVisibility` (`style.go`, field có mà chưa có consumer): **để nguyên**, không bật
+  "tiện tay"; vẫn giữ nhánh `ContentVisibility=="hidden"` đã tồn tại trong builder, chưa mở rộng.
+- vnexpress offline: **0 ink → 0 ink**; chỉ `doc_height` đổi (706→526). Task này sửa phần
+  overlay `opacity:0;visibility:hidden` lọt vào paint, **không** dựng lại được bài viết —
+  còn script/ảnh/layout (đa nguyên nhân), phải đo bằng sweep live.
 
 ## 6. Ngoài phạm vi
 
