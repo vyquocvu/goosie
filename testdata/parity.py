@@ -56,7 +56,7 @@ PASS_AT = 90.0
 # drift apart - and adding a fixture must never red that test by itself.
 # 85: css-features/11-digit-leading-custom-property.html (TASK-040,
 # GOOSIE-LIVE-002) - a legal --8e8e8e name that used to cost the whole render.
-MIN_SCORED_FIXTURES = 85
+MIN_SCORED_FIXTURES = 86
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hidden and transparent boxes (GOOSIE-VIS-001)</title>
+    <style>
+        /* Two mechanisms Goosie used to conflate into "just paint it".
+           visibility:hidden hides a box's OWN paint but keeps its layout and
+           cascades to the subtree unless a descendant reasserts visible.
+           opacity fades a box and its whole subtree, clamps to [0,1], and at
+           opacity:0 paints nothing at all. Both values already reached the
+           display list - the builder simply ignored Visibility for non-markers
+           and read opacity 0 through a sentinel meaning opaque.
+
+           The measured symptom on vnexpress (docs/qa-live-parity) was an
+           `.wrap-all-menu{opacity:0;visibility:hidden}` plate painting #f7f7f7
+           over the whole page and dropping it from LOW_COVERAGE to
+           BLANK_OUTPUT. The two full-viewport plates below reproduce that on
+           each mechanism separately: revert one fix and its plate reappears and
+           blanks the ink, which is what makes this fixture a real gate. */
+        html, body { margin: 0; padding: 0; }
+        body { font-family: sans-serif; color: #222; background: #ffffff; }
+        h1 { font-size: 20px; margin: 10px 16px 4px 16px; }
+        p  { font-size: 14px; line-height: 20px; margin: 6px 16px; }
+
+        /* Real content above the fold: coloured bars and text are ink Chromium
+           and a fixed Goosie both paint. */
+        .bars { display: flex; margin: 10px 16px; }
+        .bar { width: 110px; height: 40px; margin-right: 12px; }
+        .red   { background: #e74c3c; }
+        .green { background: #27ae60; }
+        .blue  { background: #2980b9; }
+        .orange{ background: #e67e22; }
+
+        /* visibility:hidden on a box: its own red background must vanish, a
+           child that declares visibility:visible paints again, and the hidden
+           box still reserves its 60px of layout. */
+        .hidden-parent { visibility: hidden; width: 320px; height: 60px; background: #c0392b; margin: 8px 16px; }
+        .visible-child { visibility: visible; width: 200px; height: 36px; background: #16a085; }
+
+        /* opacity:0.5 over text: a real half-faded veil, so the paragraph under
+           it still shows through. Hard-coding opacity to 1 paints solid orange
+           and swallows the text. */
+        .stage { position: relative; margin: 10px 16px; width: 440px; height: 84px; background: #ffffff; }
+        .veil { opacity: 0.5; position: absolute; left: 20px; top: 10px; width: 320px; height: 62px; background: #d35400; }
+
+        .rule { border-top: 2px solid #333; margin: 14px 16px; }
+
+        /* GATE PLATES - full viewport, painted last so a broken engine lays
+           them over every ink pixel. Exactly one declaration each so each fix
+           is independently load-bearing. */
+        .hidden-plate, .transparent-plate {
+            position: absolute; left: 0; top: 0; width: 800px; height: 600px;
+            background: #f7f7f7;
+        }
+        .hidden-plate { visibility: hidden; }        /* dropped by the visibility fix */
+        .transparent-plate { opacity: 0; }           /* dropped by the opacity fix   */
+    </style>
+</head>
+<body>
+    <h1>visibility &amp; opacity reach the display list</h1>
+    <p>real content above the fold: the bars and this paragraph must be visible.</p>
+
+    <div class="bars">
+        <div class="bar red"></div>
+        <div class="bar green"></div>
+        <div class="bar blue"></div>
+        <div class="bar orange"></div>
+    </div>
+
+    <div class="hidden-parent">
+        <div class="visible-child"></div>
+    </div>
+
+    <div class="stage">
+        <p>Text under a half-transparent veil; it stays legible because the orange is only at 0.5.</p>
+        <div class="veil"></div>
+    </div>
+
+    <div class="rule"></div>
+    <p>below the fold, more real ink so the document is taller than the viewport.</p>
+    <div class="bars">
+        <div class="bar blue"></div>
+        <div class="bar orange"></div>
+        <div class="bar green"></div>
+        <div class="bar red"></div>
+    </div>
+    <p>A hidden box keeps its space; a transparent one vanishes; the two are never the same thing.</p>
+
+    <!-- painted last: with both fixes these never appear; revert one and its
+         plate covers the whole page -->
+    <div class="transparent-plate"></div>
+    <div class="hidden-plate"></div>
+</body>
+</html>
