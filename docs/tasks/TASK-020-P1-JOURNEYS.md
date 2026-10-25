@@ -49,6 +49,16 @@ Mỗi test: tạo fixture qua `httptest.NewServer`, thao tác như người dùn
 
 Đặt tên file `cmd/goosie/journey_p1_nav_test.go` và `cmd/goosie/journey_p1_tabs_test.go`. **Chỉ tạo file mới trong `cmd/goosie/`**; sửa file có sẵn chỉ theo nghĩa thêm dòng tag.
 
+**Quy tắc bắt buộc về `waitFor` (rút từ failure thật sau merge của TASK-015, xem `docs/tasks/TASK-015-P0-JOURNEY-SUITE.md` §8):** điều kiện chờ phải bao gồm **đúng thứ dòng code kế tiếp đọc**. Sai là kiểu: chờ `tabMgr.Count() == 2` rồi ngay sau đó đọc `tabMgr.Active().ID()` — số tab và selection đổi ở hai iteration khác nhau, nên test xanh khi chạy một mình và fail dưới tải full suite (`second tab ID = 1 must be distinct from first tab ID = 1`). Đúng là đưa cả hai về một predicate:
+
+```go
+browser.waitFor(t, "second tab created and focused", func() bool {
+    return browser.f.tabMgr.Count() == 2 && browser.f.tabMgr.Active().ID() != firstID
+})
+```
+
+Vì vậy `[AC-01]` yêu cầu `-count=5` chứ không phải `-count=1`: một predicate thiếu điều kiện thường vẫn qua ở lượt đầu.
+
 Đầu mỗi test function, thêm dòng tag trên cùng của doc comment: `// qc:BR-0xx` (một function có thể tag nhiều case).
 
 ## 3. Tiêu chí nghiệm thu

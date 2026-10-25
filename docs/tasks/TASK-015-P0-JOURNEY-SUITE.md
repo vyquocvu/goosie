@@ -87,3 +87,25 @@ func TestJourneyBackForwardFiveNavigations(t *testing.T) {
 - **Đừng tạo worktree con hay branch phụ** từ trong phiên của bạn; commit thẳng lên branch hiện tại.
 - Test phải chạy được trên máy **không có display** (đây là hợp đồng của repo: mọi test pass headless).
 - Nếu `cmd/goosie` trở nên quá chậm để lặp, dùng `-run` theo tên test của bạn khi dev, nhưng AC-03 phải chạy full.
+
+## 8. Resolution của integrator (2026-10-25)
+
+Sau merge, `go test -count=1 ./...` trên `main` **FAIL** ở `TestJourneyCloseActiveTabSelectsNext`:
+
+```
+journey_p0_tabs_test.go:208: second tab ID = 1 must be distinct from first tab ID = 1
+```
+
+Nguyên nhân là bug thật trong test, không phải flake của engine: `waitFor` chỉ chốt `tabMgr.Count() == 2` rồi dòng ngay sau đó đọc `tabMgr.Active().ID()`. Số tab đổi trước khi selection đổi (hai việc rời nhau trong loop), nên dưới tải của full suite, `Active()` vẫn trả về tab 1. Xảy ra ở 4 chỗ (`tab2ID`, `tab3ID`, `secondID`, và `active` sau `Cmd+W`).
+
+**Bài học cho mọi hành trình kế tiếp — điều kiện chờ phải bao gồm đúng thứ dòng kế tiếp đọc.** Integrator đã sửa thành:
+
+```go
+browser.waitFor(t, "second tab created and focused", func() bool {
+    return browser.f.tabMgr.Count() == 2 && browser.f.tabMgr.Active().ID() != firstID
+})
+```
+
+Riêng `Cmd+W`, post-condition của BR-030 chính là *tab còn lại được chọn*, nên chờ `Count() == 1 && Active().ID() == firstID` thay vì chỉ đếm.
+
+Nghiệm thu: `go test -count=5 -run TestJourney ./cmd/goosie/` PASS dưới tải (một agent khác đang compile song song), và `go test -count=1 ./...` PASS toàn suite (exit 0, không FAIL/panic). Commit `95c427f`. Quy tắc này chuyển nguyên văn sang TASK-020.
