@@ -1220,8 +1220,40 @@ func (p *parser) skipAtRule() {
 // CSS Syntax L3 4.3.7 makes an unterminated string a bad-string at the line
 // break - so one stray quote costs a declaration instead of the rest of the
 // sheet. Chromium behaves this way; running to end of input made Goosie paint
-// the swallowed CSS as generated content.
+// the swallowed CSS as generated content. Callers must first skip the byte a
+// backslash escapes: 4.3.8 makes `\` + newline a valid escape *inside* a string,
+// so only an unescaped newline may close one as bad.
 func closesStringAt(quote, c byte) bool { return c == quote || c == '\n' }
+
+// stripEscapedNewlines drops `\` + line-break pairs from inside quoted strings.
+// Chromium measured on `url("a\<newline>b")` computes the token value as `ab` -
+// the escape pair contributes no character - so a multi-line quoted data URI
+// both survives parsing and resolves (TASK-041 §7, 2026-10-26). Every other
+// backslash is left exactly as written: `content:"\2014"`, `"\A"`, and Windows
+// paths in `url()` must not be reinterpreted here.
+func stripEscapedNewlines(s string) string {
+	var b []byte
+	quote := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == '\\' && i+1 < len(s) && (s[i+1] == '\n' || s[i+1] == '\r') {
+				i++
+				if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+					i++
+				}
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+		} else if c == '\'' || c == '"' {
+			quote = c
+		}
+		b = append(b, c)
+	}
+	return string(b)
+}
 
 func (p *parser) parseRule() (Rule, []Rule) {
 	var rule Rule
@@ -1231,7 +1263,9 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if quote != 0 {
-			if closesStringAt(quote, c) {
+			if c == '\\' && p.pos+1 < len(p.input) {
+				p.pos++ // 4.3.8: the escaped byte belongs to the string, newline included
+			} else if closesStringAt(quote, c) {
 				quote = 0
 			}
 		} else if c == '\'' || c == '"' {
@@ -1255,7 +1289,9 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if quote != 0 {
-			if closesStringAt(quote, c) {
+			if c == '\\' && p.pos+1 < len(p.input) {
+				p.pos++ // 4.3.8: the escaped byte belongs to the string, newline included
+			} else if closesStringAt(quote, c) {
 				quote = 0
 			}
 		} else if c == '\'' || c == '"' {
@@ -1381,7 +1417,9 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 		for i < n {
 			c := body[i]
 			if quote != 0 {
-				if c == quote {
+				if c == '\\' && i+1 < n {
+					i++ // 4.3.8: the escaped byte belongs to the string, newline included
+				} else if c == quote {
 					quote = 0
 				} else if c == '\n' {
 					quote = 0
@@ -1759,6 +1797,7 @@ func parseDeclarations(s string) []Declaration {
 		}
 		prop := strings.TrimSpace(part[:colonIdx])
 		val := strings.TrimSpace(part[colonIdx+1:])
+		val = stripEscapedNewlines(val)
 
 		important := false
 		if idx := strings.Index(strings.ToLower(val), "!important"); idx >= 0 {

@@ -332,3 +332,84 @@ Không thêm assertion thời gian nào — chỉ ghi số để tái hiện.
   `stripComments` (`parser.go:124`) và `readString` (`token.go:201`, nuôi trần admission của
   `TASK-040`). §2.2 đã đo để chứng minh chúng **không** phải cơ chế gây rò; nếu muốn siết thì phải
   là defect riêng với oracle riêng, không phải sửa kèm ở đây.
+
+## 7. Hồi quy do chính task này gây ra — đo lại, sửa, và đóng lỗ mù (2026-10-26)
+
+§5 nửa đầu chỉ thêm quy tắc 4.3.7 ("newline thô đóng chuỗi"). `closesStringAt` được nối vào ba
+scanner **mà không xử lý backslash**, nên `\` + newline — escape hợp lệ theo 4.3.8, chuỗi *được phép*
+nối sang dòng — cũng bị cắt như bad-string. Trên CSS thật, hình dạng này phổ biến (rustdoc tách một
+`url("data:image/svg+xml,…")` dài qua hai dòng), và hậu quả nặng hơn chính bug mà task này sửa:
+declaration chứa nó **và toàn bộ phần còn lại của sheet** bị rơi.
+
+### 7.1 Bốn tổ hợp input, đo trên Chromium cùng host (`/tmp/strprobe.py`, Playwright 131.x)
+
+| Input | Chromium (chuẩn) | Goosie `da68c5b` (sau khi ship TASK-041) | Goosie sau khi sửa |
+| --- | --- | --- | --- |
+| `.a{background:url("…%3Csvg\<NL> xmlns='a'…"); color:#0f0}` + `.b` | 2 rule; `#a` = `rgb(0,255,0)`; `background-image` = `url("data:image/svg+xml,%3Csvg xmlns='a'%3E%3C/svg%3E")`; **ảnh load** | `.a` còn **0** declaration | 2 declaration, cặp escape bị xoá khỏi value |
+| `.a{font-family:"Goosie\<NL>Serif"; color:#0f0}` | computed `GoosieSerif`, màu áp dụng | 0 declaration | 2 declaration, value `GoosieSerif` |
+| `.a{font-family:"Goosie<NL>Serif"; color:#0f0}` (**newline thô**) | **1 rule `.a`, 0 declaration**, computed đen | 0 declaration — **đã đúng** | không đổi (control) |
+| `a[title="x\<NL>y"]{color:#0f0}` + `.z` | 2 rule; selectorText `a[title="xy"]`; `.z` áp dụng | **1 rule**: prelude ăn luôn `{`, hai rule dính một | 2 rule, `.z` giữ declaration |
+
+### 7.2 Trang thật, cùng canvas, cùng metric (`parity.ink_mask`)
+
+`https://doc.rust-lang.org/std/`, 1280×1024 dpr 1:
+
+| Bản | ink px | content bands |
+| --- | --- | --- |
+| `4de0fca` (trước TASK-041) | 95,783 | 23 |
+| `da68c5b` (TASK-041 đã merge) | **53,215** | **16** |
+| bản sửa | **95,814** | **23** |
+
+Probe tối giản `/tmp/escprobe/escaped-newline.html` (800×600): `4de0fca` green 40,000 / red 40,000;
+`da68c5b` green 0 / red 0 / ink 445; **PNG của bản sửa trùng md5 với `4de0fca`** (`c47c831b…`) — tức
+hành vi hồi về đúng bản gốc, không phải "tốt hơn bản gốc".
+
+Số báo cáo ban đầu (58,438 → 40,449) đo ở canvas khác của live sweep; cùng chiều, không phải cùng
+phép đo, nên bảng trên dùng một phép đo duy nhất cho cả ba bản.
+
+**Bản chất vì sao phát hiện được:** bản HTML đã lưu của cùng trang (`/tmp/rustab/index.html`) vẽ
+**giống hệt** trên cả hai binary (ink 51,939 / 17 bands) — CSS escaped-newline chỉ vào được trang khi
+tải lại từ mạng. A/B offline từng xanh nên không nghi ngờ gì; chỉ sweep 100 trang sống thấy.
+
+### 7.3 Vì sao không một gate nào chặn được
+
+Corpus `testdata/render/` **không có fixture nào chứa escaped newline**, nên `make parity` báo
+81/81, average **96.09%** — cùng một con số — trước và sau khi hồi quy ship. Unit oracle `test/css/`
+mô tả đúng 4 tổ hợp bad-string newline thô (§5.4) và không tổ hợp nào có backslash. Đây là lỗ mù thật
+của "auto test", không phải lỗi chạy lệch.
+
+### 7.4 Sửa
+
+1. `parseRule` selector loop, `parseRule` declaration-body loop, và stmt loop của
+   `parseBlockWithRules`: khi đang mở chuỗi, gặp `\` thì bỏ qua byte kế tiếp (tăng `pos`/`i` một lần,
+   vòng lặp tự tăng lần hai). `\` + newline vì thế không còn là bad-string; newline thô vẫn là.
+2. `stripEscapedNewlines` (mới, `parser.go`) áp cho value trong `parseDeclarations`: chỉ xoá cặp
+   `\` + line-break **bên trong** chuỗi, nên `\2014`, `\A`, và đường dẫn Windows trong `url()` giữ
+   nguyên. `Parsed` tính trên value đã xoá, khớp điều Chromium computed.
+
+### 7.5 Oracle mới và bằng chứng [R-7]
+
+`test/css/bad_string_test.go`: +3 test (BR-186 mang 9 test; golden regenerate, delta đúng 3 dòng).
+Fixture mới `testdata/render/css-features/09-escaped-newline-string.html`; `MIN_SCORED_FIXTURES` 81→82.
+
+| Đột biến | Kết quả đo |
+| --- | --- |
+| M1: revert nguyên `internal/css/parser.go` về `da68c5b` | fixture 09 **84.87% FAIL**, `blank_regions 2/0`, rows `[(295,310) (425,452)]`; 81/82 passing; parity exit 1 — hole đã đóng ở tầng parity |
+| M2: bỏ riêng lời gọi `stripEscapedNewlines` | **một** assertion đỏ (`background value still carries the escape pair`); fixture 09 **vẫn 96.24% PASS** ⇒ nửa value-unescape chỉ unit oracle giữ, **parity không giữ** |
+| M3 (control): newline thô | `TestEscapedNewlineVersusRawNewline` red ở nhánh escaped và green ở nhánh raw ngay từ lần chạy đầu, vẫn green sau khi sửa — sửa không nới bad-string |
+
+Chạy lại để xác nhận: `gofmt -l internal/css test/css` (rỗng), `go vet -all ./...` (rc 0),
+`go test -count=1 ./internal/archtest/`, `go test -count=1 ./test/css/ ./test/gatecheck/ ./test/qc/`,
+`python3 testdata/parity_selftest.py`, `make live-parity-selftest`,
+`python3 testdata/parity.py --render --binary ./bin/goosie` → **82/82**, average 96.09%, known gaps
+5/10 không đổi.
+
+### 7.6 Nợ còn lại, ghi rõ để lần sau không đoán
+
+* Escaped **quote** (`content:"a\"b"`) vẫn đóng chuỗi ở các scanner không thuộc ba điểm trên
+  (`:1321`, `:1346`, `:1419`, `:1681`, `:1784` và `SplitDeclarations`): chúng bỏ qua backslash. Cùng
+  nợ đã ghi ở §6 về `stripComments`/`readString`.
+* Selector value giữ nguyên cặp escape: Goosie lưu `a[title="x\<NL>y"]`, Chromium serialize
+  `a[title="xy"]`. Chưa sửa vì chưa có trang nào trong corpus/sweep cần; oracle chỉ buộc **rule sau
+  nó sống sót** (`TestEscapedNewlineInSelectorString`).
+* Unescape HTML-entity-style (`\A`, `\2014`) trong value: cố ý không đụng.

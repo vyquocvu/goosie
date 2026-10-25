@@ -148,3 +148,66 @@ func TestUnterminatedStringAtEOFStaysLenient(t *testing.T) {
 		t.Fatalf("EOF string changed %d declaration(s), want the one it declares: %+v", len(u), u)
 	}
 }
+
+// qc:BR-186
+func TestEscapedNewlineContinuesAString(t *testing.T) {
+	// CSS Syntax L3 4.3.8: `\` + newline is a valid escape *inside* a string, so
+	// the token keeps going and the declaration is fine. Chromium measured on
+	// this exact shape keeps both declarations and computes the URL as
+	// `data:image/svg+xml,%3Csvg xmlns='a'%3E%3C/svg%3E` - the escape pair
+	// contributes no character - and the image loads. Goosie treated the escaped
+	// break as the line break that ends a bad-string and threw the declaration
+	// away, which is how every multi-line quoted data URI stopped painting.
+	sheet := css.Parse(".a{background:url(\"data:image/svg+xml,%3Csvg\\\n xmlns='a'%3E%3C/svg%3E\"); color:#0f0;}\n.b{color:#00f;}")
+
+	a := declarationsFor(t, sheet, ".a")
+	if len(a) != 2 {
+		t.Fatalf("escaped newline left %d declaration(s) in .a, want 2 (background, color): %+v", len(a), a)
+	}
+	if a[0].Property != "background" || !strings.Contains(a[0].Value, "%3Csvg") {
+		t.Errorf("background parsed as %q: %q, want the data URI the escape held together", a[0].Property, a[0].Value)
+	}
+	if strings.Contains(a[0].Value, "\\\n") || strings.Contains(a[0].Value, "\\\r") {
+		t.Errorf("background value still carries the escape pair: %q, want it removed as Chromium computes it", a[0].Value)
+	}
+	if a[1].Property != "color" || a[1].Value != "#0f0" {
+		t.Errorf("declaration after the escaped newline is %q: %q, want color: #0f0", a[1].Property, a[1].Value)
+	}
+	b := declarationsFor(t, sheet, ".b")
+	if len(b) != 1 || b[0].Value != "#00f" {
+		t.Errorf("rule after the escaped string parsed as %+v, want the one declaration color: #00f", b)
+	}
+}
+
+// qc:BR-186
+func TestEscapedNewlineVersusRawNewline(t *testing.T) {
+	// The pair that makes the test above an oracle rather than a loosening: the
+	// same sheet with the backslash removed must still lose the declarations.
+	// Chromium measured on the raw form keeps the *rule* (selectorText `.a`, one
+	// cssRule) and nothing inside it, so the block still cannot leak CSS bytes.
+	escaped := css.Parse(".a{font-family:\"Goosie\\\nSerif\"; color:#0f0;}")
+	raw := css.Parse(".a{font-family:\"Goosie\nSerif\"; color:#0f0;}")
+
+	if got := declarationsFor(t, escaped, ".a"); len(got) != 2 {
+		t.Errorf("\\ + newline kept %d declaration(s), want 2: %+v", len(got), got)
+	}
+	if got := declarationsFor(t, raw, ".a"); len(got) != 0 {
+		t.Errorf("raw newline kept %d declaration(s), want 0 as Chromium computes it: %+v", len(got), got)
+	}
+	mustNotLeakCSS(t, raw)
+}
+
+// qc:BR-186
+func TestEscapedNewlineInSelectorString(t *testing.T) {
+	// The selector scanner reads the same escape rule, so an attribute value with
+	// an escaped line break must not make the prelude run past the `{`: Chromium
+	// measured 2 rules and the following `.z` still applying its colour.
+	sheet := css.Parse("a[title=\"x\\\ny\"]{color:#0f0;}\n.z{color:#00f;}")
+
+	if len(sheet.Rules) < 2 {
+		t.Fatalf("escaped newline in the selector collapsed the sheet to %d rule(s), want 2: %+v", len(sheet.Rules), sheet.Rules)
+	}
+	if got := declarationsFor(t, sheet, ".z"); len(got) != 1 || got[0].Value != "#00f" {
+		t.Errorf("rule after the escaped selector string parsed as %+v, want the one declaration color: #00f", got)
+	}
+}
