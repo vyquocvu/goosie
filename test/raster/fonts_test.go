@@ -598,39 +598,74 @@ func TestPositiveGlyphOracleByScriptGroup(t *testing.T) {
 	}
 	slot := frame.FontSlot{Family: frame.FontArial}
 
+	// Full ranges, not 3-rune samples: the integrator probe over these exact
+	// ranges (414 code points) found six code points the host cannot render, so
+	// the gaps are enumerated instead of hidden by a narrow sample.
 	groups := []struct {
-		name  string
-		runes []rune
+		name     string
+		lo, hi   rune
+		gapRunes []rune
 	}{
-		{"Greek", []rune{'α', 'β', 'Ω'}},
-		{"Cyrillic", []rune{'Ж', 'д', 'я'}},
-		{"Hebrew", []rune{'א', 'ב', 'ש'}},
-		{"Arabic", []rune{'ب', 'ت', 'ج'}},
-		{"Box Drawing", []rune{'┌', '─', '│', '┼'}},
-		{"Arrows", []rune{'→', '←', '↑', '↓'}},
-		{"Math Operators", []rune{'∀', '∑', '√', '∞', '∫'}},
-		{"Symbols & Dingbats", []rune{'✔', '★', '☎'}},
+		{"Greek", 0x0391, 0x03C9, []rune{0x03A2}},
+		{"Cyrillic", 0x0410, 0x0441, nil},
+		{"Hebrew", 0x05D0, 0x05EA, nil},
+		{"Arabic", 0x0621, 0x0648, []rune{0x063B, 0x063C, 0x063D, 0x063E, 0x063F}},
+		{"Box Drawing", 0x2500, 0x2527, nil},
+		{"Arrows", 0x2190, 0x21B7, nil},
+		{"Math Operators", 0x2200, 0x2231, nil},
+		{"Symbols & Dingbats", 0x2600, 0x263B, nil},
 	}
 
-	f.ResetMissingCount()
 	for _, grp := range groups {
 		t.Run(grp.name, func(t *testing.T) {
-			for _, r := range grp.runes {
+			f.ResetMissingCount()
+			declared := map[rune]bool{}
+			for _, r := range grp.gapRunes {
+				declared[r] = true
+			}
+			// Pass 1: resolution. Collect the exact code points that miss, so a
+			// stale gap list fails on identity and not merely on a count.
+			var actual []rune
+			for r := grp.lo; r <= grp.hi; r++ {
 				g := f.Glyph(16, r, slot)
-				if !g.Ok || g.Missing {
-					t.Fatalf("script %s: rune %c (U+%04X) failed to resolve: Ok=%v, Missing=%v",
-						grp.name, r, r, g.Ok, g.Missing)
-				}
-				adv := f.GlyphAdvanceFixed(16, r, slot)
-				if adv <= 0 {
-					t.Fatalf("script %s: rune %c (U+%04X) non-positive advance: %d", grp.name, r, r, adv)
+				switch {
+				case g.Missing:
+					actual = append(actual, r)
+					if !declared[r] {
+						t.Errorf("script %s: rune U+%04X misses but is not a declared gap", grp.name, r)
+					}
+				case !g.Ok:
+					t.Errorf("script %s: rune U+%04X neither resolved nor marked missing (Ok=%v Missing=%v)",
+						grp.name, r, g.Ok, g.Missing)
+				default:
+					if declared[r] {
+						t.Errorf("script %s: declared gap rune U+%04X now resolves (Ok=%v Missing=%v): the gap list is stale",
+							grp.name, r, g.Ok, g.Missing)
+					}
 				}
 			}
-		})
-	}
+			if len(actual) != len(grp.gapRunes) {
+				t.Errorf("script %s: %d runes miss, want %d declared gaps %v (actual %v)",
+					grp.name, len(actual), len(grp.gapRunes), grp.gapRunes, actual)
+			}
+			if got := f.MissingCount(); got != int64(len(actual)) {
+				t.Errorf("script %s: MissingCount = %d, want %d (one increment per missing Glyph lookup)",
+					grp.name, got, len(actual))
+			}
 
-	if got := f.MissingCount(); got != 0 {
-		t.Errorf("MissingCount across supported script groups = %d, want 0", got)
+			// Pass 2: metrics. Every rune, gaps included, must carry a positive
+			// advance so unresolved text still lays out instead of collapsing.
+			f.ResetMissingCount()
+			for r := grp.lo; r <= grp.hi; r++ {
+				if adv := f.GlyphAdvanceFixed(16, r, slot); adv <= 0 {
+					t.Fatalf("script %s: rune U+%04X non-positive advance: %d", grp.name, r, adv)
+				}
+			}
+			if got := f.MissingCount(); got != int64(len(grp.gapRunes)) {
+				t.Errorf("script %s: MissingCount after the advance pass = %d, want %d",
+					grp.name, got, len(grp.gapRunes))
+			}
+		})
 	}
 
 	// Known Gap: CJK on macOS exceeds 4 MiB admission ceiling (Arial Unicode 22.2 MiB, PingFang ~60 MiB, STHeiti ~55 MiB).

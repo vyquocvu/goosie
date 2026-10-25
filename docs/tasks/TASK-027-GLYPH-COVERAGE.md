@@ -420,17 +420,32 @@ Kết quả đo trên host macOS:
 | **M-B** | Bỏ trần kích thước: `if st.Size() <= 0 {` (bỏ `\|\| > MaxFallbackFontBytes`) | **FAIL** | `TestFallbackAdmissionCeilingRejectsOversizedFont`: Đặt `Arial Unicode.ttf` (22 MiB) làm candidate đầu tiên qua `SetFallbackCandidates`. Khi bỏ trần, file bị đọc vào bộ nhớ khiến `FallbackFilesRead = 1, want 0`. |
 | **M-C** | Bỏ memo ứng viên fail stat: `if err != nil { continue }` (không ghi nhận `rejectedFallbackPaths`) | **FAIL** | `TestMissingGlyphBatchDoesNotRepeatedlyReadFile`: Đặt file thiếu làm candidate đầu tiên qua `SetFallbackCandidates`. Khi bỏ memo, hook bị gọi 19 lần cho 20 rune miss: `fallback hook called 18 additional times, want 0`. |
 | **M-D** | Bỏ memo coverage candidate: `f.candidateCoverage[path] = cov` | **FAIL** | `TestMissingCandidateWithCoverageDoesNotRetainFace`: File tồn tại nhưng không cover rune bị đọc lại đĩa liên tục: `FallbackFilesRead grew from 2 to 20 across 9 missing emojis`. |
+| **M-F** | `tofuAdvanceFixed` trả `0` thay vì `size << 6` | **FAIL** | `TestPositiveGlyphOracleByScriptGroup/Greek`: `rune U+03A2 non-positive advance: 0` và `/Arabic`: `rune U+063B non-positive advance: 0` — pass 2 đo advance trên **toàn bộ** khoảng, nên tofu không có width bị bắt ngay. |
+| **M-G** | Tofu glyph báo `Missing: false` | **FAIL** | `TestPositiveGlyphOracleByScriptGroup/Greek`: `declared gap rune U+03A2 now resolves (Ok=true Missing=false): the gap list is stale` + `MissingCount = 1, want 0`; `/Arabic` báo cùng lỗi cho cả 5 rune; `CJK_KnownGap` cũng FAIL. |
 
 ### 10.5. Oracle Dương Theo Từng Nhóm Script & Known Gap Có Chủ Đích
-Bổ sung test `TestPositiveGlyphOracleByScriptGroup` xác nhận mọi nhóm script mà host đáp ứng đều resolve thành công (`Ok && !Missing`), advance dương, và `MissingCount == 0`:
-- **Greek**: 'α', 'β', 'Ω' -> **PASS**
-- **Cyrillic**: 'Ж', 'д', 'я' -> **PASS**
-- **Hebrew**: 'א', 'ב', 'ש' -> **PASS**
-- **Arabic**: 'ب', 'ت', 'ج' -> **PASS**
-- **Box Drawing**: '┌', '─', '│', '┼' -> **PASS**
-- **Arrows**: '→', '←', '↑', '↓' -> **PASS**
-- **Math Operators**: '∀', '∑', '√', '∞', '∫' -> **PASS**
-- **Symbols & Dingbats**: '✔', '★', '☎' -> **PASS**
+`TestPositiveGlyphOracleByScriptGroup` **quét toàn bộ khoảng code point**, không lấy mẫu
+vài rune. Tích hợp trước đó chỉ kiểm 3 rune/nhóm và công bố "mọi nhóm PASS"; đo lại trên
+toàn khoảng cho thấy **6 code point thật sự không render được** mà mẫu hẹp đã che đi.
+Oracle hiện tại assertion hai chiều: rune miss **không** có trong danh sách gap ⇒ FAIL;
+rune trong danh sách gap mà lại resolve ⇒ FAIL (danh sách gap cũ/hỏng không được im lặng).
+
+Hai pass cho mỗi nhóm: (1) `Glyph` — phân giải và đối chiếu tập miss với `gapRunes`,
+kèm `MissingCount == số miss` (một lần tăng cho mỗi cú `Glyph` ra tofu); (2)
+`GlyphAdvanceFixed` — **mọi** code point, kể cả gap, phải có advance dương, kèm
+`MissingCount` bằng đúng số gap (cả hai API đều tính miss, nên hai pass độc lập).
+
+| Nhóm | Khoảng | Số code point | Resolve | Gap đã khai báo |
+| :--- | :--- | ---: | ---: | :--- |
+| Greek | `U+0391–U+03C9` | 57 | 56 | `U+03A2` |
+| Cyrillic | `U+0410–U+0441` | 50 | 50 | — |
+| Hebrew | `U+05D0–U+05EA` | 27 | 27 | — |
+| Arabic | `U+0621–U+0648` | 40 | 35 | `U+063B U+063C U+063D U+063E U+063F` |
+| Box Drawing | `U+2500–U+2527` | 40 | 40 | — |
+| Arrows | `U+2190–U+21B7` | 40 | 40 | — |
+| Math Operators | `U+2200–U+2231` | 50 | 50 | — |
+| Symbols & Dingbats | `U+2600–U+263B` | 60 | 60 | — |
+| **Tổng (trên CJK)** | | **364** | **358** | **6** |
 
 **Known Gap có chủ đích**:
 - **CJK (Chinese, Japanese, Korean)** trên macOS: Mọi font CJK hệ thống đều vượt trần admission 4 MiB:
