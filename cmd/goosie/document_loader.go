@@ -452,7 +452,31 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
 	completed = true
+	reportScriptErrors(os.Stderr, resp.URL, sess)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
+}
+
+// reportScriptErrors writes one line naming the document's uncaught script
+// errors, and nothing at all when there are none.
+//
+// It exists because the engine used to throw these errors away, so every page
+// of GOOSIE-LIVE-001 - nine real sites, 0 ink pixels - reported rc 0 with an
+// empty stderr: no reason for the sweep to record, the operator to read, or the
+// bug to cite. The reason was there all along (21 uncaught script errors on
+// www.gov.vn, the first one naming the page's jQuery bundle); it was just
+// discarded one layer down. The session bounds how many are kept and how
+// long each message can be, so a hostile document cannot grow this line.
+// Nothing here changes what is rendered: it is a report, after the paint. The
+// destination is a parameter so a test can read the line without taking over
+// the process's stderr.
+func reportScriptErrors(w io.Writer, rawURL string, sess *engine.Session) {
+	total := sess.ScriptErrorCount()
+	errs := sess.ScriptErrors()
+	if total == 0 || len(errs) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "goosie: %d uncaught script error(s) in %s; first: %s\n",
+		total, rawURL, errs[0])
 }
 
 var errDownloadSaveCanceled = errors.New("goosie: download save dialog canceled")
