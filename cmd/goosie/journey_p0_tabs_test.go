@@ -67,7 +67,7 @@ func TestJourneyInitialWindowUsableTab(t *testing.T) {
 	})
 }
 
-// qc:BR-026
+// qc:BR-024 BR-026
 func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
