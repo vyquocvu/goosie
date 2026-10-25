@@ -141,3 +141,26 @@ Không có case nào trong 12 case bị blocked bởi bug engine/chrome. Cả 12
 - 10 test journey mới được viết (`cmd/goosie/journey_p1_nav_test.go` và `cmd/goosie/journey_p1_tabs_test.go`)
 - 3 case được bổ sung tag (`BR-013`, `BR-024`, `BR-027`) trên các test hiện hữu để tránh nợ kỹ thuật và liên kết đúng traceability
 - `test/qc/traceability.golden.json` được cập nhật sạch sẽ và toàn bộ test pass deterministic.
+
+
+## 6. Kiểm toán mutation của integrator (2026-10-25)
+
+§5.2 của agent ghi 12 câu dạng *"test này sẽ FAIL nếu X hỏng"*. Đó là **tuyên bố, không phải bằng chứng**. Integrator tự chạy mutation trên `main` sau khi merge, đánh vào 3 case. Kết quả: 2 tuyên bố đúng, **1 tuyên bố sai**, và case sai là case mà chính người viết ra nó tin nhất.
+
+Phép mutation thứ tư (xoá `cur.SetScrollY(vp.Offset.Y)` trong `switchTab` để test BR-034) **PASS 3/3 và bị loại là mutation không hợp lệ**: scroll của tab vốn đã được cập nhật liên tục ở `navigation.go:640` nên hành động lưu lúc rời tab là dư thừa, xoá nó không thay đổi hành vi. Đây là bẫy thường gặp nhất của mutation testing: một phép biến đổi không làm program đổi behaviour thì không chứng minh được gì, và kết quả "test vẫn xanh" lúc đó không có nghĩa oracle hỏng.
+
+| Case | Phép mutation | Kết quả trước khi sửa | Phán quyết |
+| --- | --- | --- | --- |
+| BR-020 | `reloadTab` gọi `navigateTab` thay vì `navigateTabNoHistory` (reload Push thêm entry history) | 4/4 FAIL | Oracle nhạy, tuyên bố đúng. |
+| BR-034 | `switchTab` đặt `Offset: frame.Point{}` thay vì `Y: newTab.ScrollY()` | 3/3 FAIL | Oracle nhạy, tuyên bố đúng. |
+| BR-021 | Xoá **cả** `tab.Nav.Cancel()` ở `navigation.go:117` **và** guard `tab.Nav.Serial != result.serial` ở `navigation.go:209` — tức stale document thật sự được áp dụng | **6/6 PASS** | **Oracle không có giá trị.** Test không phát hiện gì cả. |
+
+`TestJourneyRefreshWithPendingResponse` đọc AX tree ngay sau `doRelease()`. Tại thời điểm đó request stale chưa thể về, chưa nói gì đến việc goroutine load gửi kết quả và loop kịp áp dụng. Nên điều kiện `resp1` vắng mặt đúng **trong mọi trường hợp**, kể cả khi engine áp stale response lên document mới.
+
+Lần mutation đầu tiên của integrator (chỉ tắt guard serial) là **mutation không hợp lệ** và bản thân nó là một phát hiện: `navigateTab` huỷ navigation trước của cùng tab (`navigation.go:117`), nên request stale chết vì `context.Canceled` và đi vào nhánh return sớm ở `navigation.go:230-241` — guard serial không phải cơ chế mà hành trình này thử nghiệm. Muốn thử nghiệm cơ chế supersede thật, phải bỏ cả hai.
+
+Sửa: handler stale nay đóng `req1Served` sau khi ghi xong body; test chờ kênh đó, rồi chờ chrome vẽ thêm hai frame (`window.Stats().Presents`) trước khi assertion. Buffer của `navResults` (kích thước 16, `main.go:289`) là lý do một send hoàn tất không chứng minh điều gì: send trả lời "kết quả đã được xếp hàng", còn assertion cần "kết quả đã được đọc và từ chối".
+
+Nghiệm thu sau sửa: sạch máy → 8/8 PASS; chạy lại đúng mutation M2 → **6/6 FAIL** với message `stale response 1 was applied over newer response 2`; revert → PASS.
+
+**Ràng buộc mới cho mọi task test kế tiếp:** một tuyên bố dạng "test sẽ FAIL nếu X" chỉ được chấp nhận kèm output của phép mutation đã thực hiện. Với assertion phủ định kiểu *"Y không bao giờ xuất hiện"*, bắt buộc chứng minh được **Y đã có cơ hội xuất hiện**: chờ phía server sinh ra Y, rồi chờ loop tiêu thụ hết hàng đợi đang chờ. Nếu không, test chỉ đang quay phim một đường đua mà nó vừa khởi động.

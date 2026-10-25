@@ -364,6 +364,7 @@ func TestJourneyReloadPageWithQueryFragment(t *testing.T) {
 func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 	req1Started := make(chan struct{}, 1)
 	req1Release := make(chan struct{})
+	req1Served := make(chan struct{})
 	var releaseOnce sync.Once
 	doRelease := func() {
 		releaseOnce.Do(func() {
@@ -392,6 +393,7 @@ func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 			case <-req1Release:
 			}
 			fmt.Fprint(w, `<!doctype html><html><body><h1 id="resp1">First Stale Response</h1></body></html>`)
+			close(req1Served)
 			return
 		}
 		fmt.Fprint(w, `<!doctype html><html><body><h1 id="resp2">Second Fresh Response</h1></body></html>`)
@@ -431,6 +433,27 @@ func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 
 	// Release request 1 so its goroutine completes
 	doRelease()
+	browser.waitFor(t, "stale response fully served", func() bool {
+		select {
+		case <-req1Served:
+			return true
+		default:
+			return false
+		}
+	})
+
+	// navResults is buffered, so a completed send says nothing about the chrome
+	// having read the result, and the load's goroutine has only just woken.
+	// Asserting here would grade a race the test started rather than a decision
+	// the chrome made: deleting both the previous-navigation cancel
+	// (navigation.go:117) and the serial guard (navigation.go:209) - so the stale
+	// document really was applied - left the version without this settle passing
+	// 6/6. Waiting for frames the chrome draws after the stale result was served
+	// is what makes the assertion below mean "rejected", not "had not arrived".
+	settled := browser.window.Stats().Presents
+	browser.waitFor(t, "two frames drawn after the stale response was served", func() bool {
+		return browser.window.Stats().Presents >= settled+2
+	})
 
 	// Post-condition: stale response 1 must never be applied
 	if _, ok := findAXNode(browser.window.AccessibilityTree(), "resp1"); ok {
