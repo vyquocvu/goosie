@@ -322,16 +322,19 @@ tiếp quản **BR-195/196/197**:
     `TestVisibilityHiddenSubtreeInheritsHidden`, `TestVisibilityHiddenKeepsLayout`,
     `TestDisplayNoneStillCollapses`.
 - **BR-196** — `opacity` xuống tới display list: `0` bỏ cả subtree, phân số thật đi tới
-  lệnh vẽ, opacity của tổ tích luỹ xuống cả nhóm (group opacity).
+  lệnh vẽ, opacity của tổ tích luỹ xuống cả nhóm (group opacity), và **một khai báo chỉ bị
+  tính một lần** dù layout chèn anonymous block/text run (pass 2, §5.10).
   - `test/paint/opacity_paint_test.go`: `TestOpacityZeroDropsBox`,
     `TestOpacityFractionReachesCommand`, `TestOpacityAboveOnePaintsOpaque`,
-    `TestGroupOpacityAppliesToSubtree`.
+    `TestGroupOpacityAppliesToSubtree`, `TestGroupOpacityCountedOncePerElement`.
 - **BR-197** — tầng `style`: `opacity` clamp `[0,1]`, `<percentage>` = fraction/100,
   giá trị lỗi để nguyên (→1); `visibility` cascade.
   - `test/style/opacity_visibility_computed_test.go`: `TestOpacityClampsToUnitRange`,
     `TestVisibilityInheritsAndRestores`.
 - Fixture PARITY cho cả ba: `testdata/render/css-features/12-hidden-and-transparent.html`
-  (`MIN_SCORED_FIXTURES` 85→86 cùng commit thêm fixture).
+  (`MIN_SCORED_FIXTURES` 85→86 cùng commit thêm fixture). Pass 2 thêm
+  `testdata/render/css-features/13-anonymous-group-opacity.html` cho rule "một khai báo, một
+  lần nhân" (`MIN_SCORED_FIXTURES` 86→87 cùng commit).
 
 ### 5.9 Còn chưa làm / giới hạn phải khai báo
 
@@ -347,6 +350,160 @@ tiếp quản **BR-195/196/197**:
 - vnexpress offline: **0 ink → 0 ink**; chỉ `doc_height` đổi (706→526). Task này sửa phần
   overlay `opacity:0;visibility:hidden` lọt vào paint, **không** dựng lại được bài viết —
   còn script/ảnh/layout (đa nguyên nhân), phải đo bằng sweep live.
+
+### 5.10 Pass 2 — một khai báo bị nhân hai và ba lần: chính pass 1 đã regression shape phổ biến nhất
+
+Integrator đo trên nhánh và báo số liệu. Tôi **đo lại trước khi tin** — probe scratch
+`test/paint/scratch_groupopacity_probe_test.go` in `Opacity` của **mọi** `CmdText`/`CmdFill`
+sau `Session.PaintChecked(1.0)` → `dl.Build(1)`; probe đã bị xoá trước khi commit, nên số
+liệu chốt ở đây được giữ sống bằng oracle vĩnh cửu dưới. Kết luận: đúng, và phạm vi rộng
+hơn báo cáo một chút — **bốn** shape, không phải ba.
+
+**Cơ chế.** `style.AnonymousBlockStyle` và `style.AnonymousTableStyle` copy nguyên
+`ComputedStyle` của phần tử sinh (`s = *parent`, `internal/style/style.go:593-611`, `:619+`)
+và **không** xoá `Opacity`; `style.inheritStyle` cũng copy cho mọi text node
+(`cs := *parent`, `:1613-1625`). Walk của pass 1 (`internal/paint/builder_box.go:29-42` tại
+`8eb00bc`) nhân `obj.Style.Opacity` vào `effective` cho **mọi** box, vô danh hay không.
+Chromium tính một khai báo đúng **một lần trên phần tử khai báo nó**, vô luận layout chèn
+bao nhiêu box.
+
+**Bốn trạng thái trên cùng một probe** — opacity mà lệnh vẽ của **raw text** mang:
+
+| shape | markup | `6071b8b` (trước nhánh) | `8eb00bc` (pass 1) | pass 2 | Chromium |
+| --- | --- | --- | --- | --- | --- |
+| `span` | `<div style=opacity:.5><span>text</span></div>` | **1** (mất fade) | 0.5 | 0.5 | 0.506 |
+| `anon` | `<div style=opacity:.5>text</div>` | 0.5 (đúng do may) | **0.25** | 0.5 | 0.506 |
+| `anondiv` | raw text + một `<div>` block sibling | 0.5, nhưng nền **và** text của con = **1** | **0.125** | 0.5 | 0.506 |
+| `quarter` | `<div style=opacity:.25>text</div>` | 0.25 | **0.0625** | 0.25 | 0.255 |
+| `nested` | cha `.5`, con khai `opacity:1`, raw text | **1** | 0.5 | 0.5 | 0.506 |
+| `tableAnon` | `<td style=opacity:.5>` + raw text + block | không đo | **0.25** | 0.5 | 0.506 |
+| `pseudoOwn` | `#t::before{content:"gen";opacity:.5}` | 0.5 | 0.5 | 0.5 | 0.506 |
+
+Cột `6071b8b` đo thật: `git checkout 6071b8b -- internal/paint/`, chạy lại probe (exit 0),
+rồi restore. Đọc cả bảng: pass 1 sửa được `span`/`nested` nhưng **làm hỏng
+`anon`/`anondiv`/`quarter` — raw text nằm trong hộp mờ, tức shape có mặt ở mọi trang**,
+kể cả cái mà trước nhánh vẫn đúng. `pseudoOwn` đứng ở bảng để phạt mọi sửa quá tay:
+`::before` tự khai opacity thì phải được tính.
+
+**Anchor Chromium, đo trên máy này.** `scripts/verify-task044-group-opacity.js` (Playwright,
+viewport 400×200, DPR 1, `#t{font:16px 'Times New Roman';color:#000}` trên nền trắng;
+worktree không có `node_modules` nên phải trỏ lên repo cha):
+
+```
+$ NODE_PATH=../../node_modules node scripts/verify-task044-group-opacity.js   # exit 0
+SHOT span /tmp/t044-span.png … SHOT nested /tmp/t044-nested.png
+$ python3 (PIL, min luminance trên /tmp/t044-*.png, alpha = 1 - lum/255)
+span     min_lum=126.0  glyph alpha=0.506  ink_px=543
+anon     min_lum=126.0  glyph alpha=0.506  ink_px=543
+anondiv  min_lum=126.0  glyph alpha=0.506  ink_px=7743
+quarter  min_lum=190.0  glyph alpha=0.255  ink_px=489
+nested   min_lum=126.0  glyph alpha=0.506  ink_px=543
+```
+
+Bốn shape 0.5 cho **cùng một pixel tối nhất**: anonymous box và text run không tăng thêm bất
+kỳ độ mờ nào. `anondiv` có `ink_px` lớn hơn vì nó vẽ thêm nền `rgb(10,10,120)` của đứa con.
+
+**Điểm tôi làm khác brief — có đo, không phải ý kiến.** Brief ghi guard là
+`obj.Style != nil && obj.Node != nil`. Lắp nguyên văn biến thể đó, chạy oracle:
+
+```
+$ go test -count=1 ./test/paint/ -run TestGroupOpacityCountedOncePerElement   # exit 1
+--- FAIL: TestGroupOpacityCountedOncePerElement/anon       ... carried opacity 0.25,   want 0.5
+--- FAIL: TestGroupOpacityCountedOncePerElement/anondiv    ... carried opacity 0.25,   want 0.5
+--- FAIL: TestGroupOpacityCountedOncePerElement/quarter    ... carried opacity 0.0625, want 0.25
+--- FAIL: TestGroupOpacityCountedOncePerElement/tableAnon  ... carried opacity 0.25,   want 0.5
+```
+
+Lý do: **multiplier thứ hai không phải anonymous block, mà là text run — và text run có
+`Node`** (node text thật, `style.inheritStyle`). Guard kiểu đó bỏ được một trong hai lần
+nhân: `anondiv` đi từ 0.125 lên 0.25, vẫn sai. Hai biến thể khác cũng đã đo thật:
+`obj.Node.Element()` làm xanh cả bảy shape nhưng **giết** `::before{opacity:.5}` (0.5 → 1) —
+`layout.buildPseudoElement`/`buildFirstLetterPseudoElement` (`internal/layout/arena.go:604-633`)
+cho hộp pseudo một `doc.NewText` **không cha**, còn `style.computePseudoStyle`
+(`internal/style/pseudo.go:124-159`) là kết quả cascade riêng, không copy `Opacity` của
+parent; và biến thể nhận diện pseudo bằng `obj.Key.Kind()` hỏng vì tách word ở
+`internal/layout/inline.go:724-768` dùng `nodeCopy := *k.Node`, để `Key` bằng 0 và **set
+`Node` của hộp nguồn về nil**.
+
+Luật chốt — `boxDeclaresOpacity`, `internal/paint/builder_box.go:22-37`: một box chỉ mang
+opacity của riêng nó khi node của nó **là phần tử** hoặc **không thuộc phần tử nào**
+(generated content). Clamp `[0,1]`, nhánh bỏ hộp khi `effective <= 0`, và cách xử lý
+`visibility` giữ nguyên như pass 1. **Không** sửa `AnonymousBlockStyle`/`AnonymousTableStyle`:
+nhiều consumer khác đọc bản copy đó (font, nền, border), và "mượn style của phần tử sinh" là
+contract đúng — chỗ sai duy nhất là paint đem bản copy đó nhân thêm.
+
+**Oracle vĩnh cửu.** `test/paint/opacity_paint_test.go::TestGroupOpacityCountedOncePerElement`
+— bảy shape đúng bằng bảng trên; mỗi subtest so `Opacity` của **mọi** `CmdText`/`CmdFill` với
+con số Chromium đã đo, và message trích luôn `min_lum` để sau này không ai phải đoán lại neo.
+
+**Ba chứng minh.** (a) đỏ trên `8eb00bc`:
+
+```
+$ git stash push -- internal/paint/builder_box.go
+$ go test -count=1 ./test/paint/          # exit 1
+--- FAIL: TestGroupOpacityCountedOncePerElement (0.00s)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/anon (0.00s)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/anondiv (0.00s)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/quarter (0.00s)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/tableAnon (0.00s)
+FAIL	github.com/vyquocvu/goosie/test/paint	0.652s
+```
+
+Bốn shape đỏ khớp đúng cột `8eb00bc`; `span`/`nested`/`pseudoOwn` xanh. (b) behaviour-off —
+xoá guard, tức dựng lại chính walk của pass 1:
+
+```
+$ # boxDeclaresOpacity() -> `return obj.Style != nil`
+$ go test -count=1 ./test/paint/ -run TestGroupOpacityCountedOncePerElement   # exit 1
+    --- FAIL: TestGroupOpacityCountedOncePerElement/anon        (0.25)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/anondiv     (0.125)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/quarter     (0.0625)
+    --- FAIL: TestGroupOpacityCountedOncePerElement/tableAnon   (0.25)
+```
+
+(c) restore → cả package xanh. Tập oracle đỏ trên commit đã hỏng, đỏ khi behaviour tắt, xanh
+khi behaviour bật: nó gate **rule**, không gate trùng một bản sửa.
+
+**Fixture pixel.** `testdata/render/css-features/13-anonymous-group-opacity.html`
+(`MIN_SCORED_FIXTURES` 86→87 **cùng commit** thêm fixture): bốn hàng raw text mờ cỡ 52–46px —
+`anon`, `anondiv` (raw text + block child), `quarter` 0.25 và `nested opacity:1` làm control —
+cộng heading/paragraph/coloured bar để vẫn là một trang thật. Cố ý **không** đặt nền nào
+trong vùng mờ: probe (`bgRawText`) in ra một `FILL rgba=200,0,0` **riêng cho từng word box**
+— text run vẽ lại nền của phần tử sinh, một defect khác đã có từ trước và không liên quan;
+nền translucent sẽ buộc fixture so sánh hai lỗi cùng lúc.
+
+```
+$ python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie \
+    --json /tmp/parity-t044-baseline.json          # exit 1 — binary pass 1 (guard đang stash)
+   85.45%  FAIL  css-features/13-anonymous-group-opacity.png  blank_regions=0/0
+  86/87 passing  (98.9%), 1 failing, 0 errors
+  average match: 96.06%
+
+$ make parity                                      # exit 0 — pass 2
+  87/87 passing  (100.0%), 0 failing, 0 errors
+  average match: 96.14%
+```
+
+Diff **từng** fixture giữa hai binary: chỉ fixture mới dịch quá 0,2đ — `+7,22đ`
+(85.45 → 92.67), đúng là khoảng cách "một lần vs hai-ba lần" trên ảnh 800×600. Ba fixture cũ
+dịch ≤0,18đ và **chính là ba fixture đã ghi ở §5.4**, theo chiều ngược lại:
+`colors/03-opacity` 99.29 (trước nhánh) → 99.47 (pass 1) → **99.29** (pass 2);
+`layout-features/04-positioning` 97.76 → 97.83 → **97.76**;
+`semantic/02-article-section` 95.8 → 95.76 → **95.79**. Tức pass 2 không regression mà còn
+trả ba fixture về đúng điểm trước khi nhánh tồn tại. **Known gaps không đổi: vẫn 5 fixtures /
+10 bands**, và parity **không** đòi sửa `testdata/render-known-gaps.json` (fixture mới
+`blank_regions=0/0`, exit 0) — file đó vẫn không bị đụng tới.
+
+**Còn nguyên, không giấu.**
+
+- Group compositing của §5.9 vẫn đúng: raster nhân alpha per-command, không offscreen, nên
+  sibling chồng nhau **trong** một nhóm mờ vẫn sẫm kép khác Chromium. Pass 2 sửa thừa số của
+  walk, không sửa cách hợp nhất — không tốt hơn, không tệ hơn.
+- `::first-letter` mờ: rule mới áp dụng cho nó bằng cùng nhánh "node không cha", nhưng tôi
+  **chưa đo pixel** cho shape đó và không có oracle riêng — ghi là chưa chứng minh.
+- Text run vẽ lại nền của phần tử sinh (`bgRawText` ở trên) là defect **khác, có trước**,
+  liên quan tới `paintsInlineFragments` ở `internal/paint/builder_box.go:112-131`; để nguyên,
+  khai báo ở đây vì nó là lý do fixture 13 tránh nền translucent.
 
 ## 6. Ngoài phạm vi
 
