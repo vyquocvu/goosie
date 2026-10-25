@@ -52,15 +52,20 @@ func heapMiB() float64 {
 	return float64(m.HeapAlloc) / miB
 }
 
+// gateFallbackFontBudgetMiB is the documented capacity ceiling for lazily loaded fallback fonts.
+// Derived from engine admission limits: raster.MaxParsedFallbackFonts (2) * raster.MaxFallbackFontBytes (4 MiB) = 8.0 MiB.
+// This is a fixed capacity constant, NOT a dynamic measurement of live retained bytes.
+// It is strictly bounded so that massive font files like Arial Unicode.ttf (~22-39 MiB) cannot slip in.
+const gateFallbackFontBudgetMiB = float64(raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes) / miB
+
 // configuredCapacityMiB is the memory the harness above asked for by construction: the
 // tile grid at its budget, and one device surface per composer backing and per window
 // present slot, plus the budgeted capacity for retained fallback fonts.
 func configuredCapacityMiB(g *frame.Layer) float64 {
 	surface := float64(gateDevW*gateDevH*4) / miB
-	fallbackBudget := float64(raster.MaxParsedFallbackFonts*raster.FallbackBytesRetained()) / miB
 	return float64(g.Grid.Stats().Budget)/miB +
 		float64(gateComposerBitmaps+headless.DefaultHistory)*surface +
-		fallbackBudget
+		gateFallbackFontBudgetMiB
 }
 
 func TestFootprintAtRestIsBoundedByConfiguredCaches(t *testing.T) {
@@ -124,4 +129,46 @@ func TestFootprintInstrumentDetectsRetention(t *testing.T) {
 	}
 	// Keep the slices alive past the measurement so the compiler cannot drop them early.
 	runtime.KeepAlive(held)
+}
+
+// TestFootprintAtRestInstrumentDetectsRetention is the at-rest analog of
+// TestFootprintInstrumentDetectsRetention. It proves that the at-rest criterion
+// (TestFootprintAtRestIsBoundedByConfiguredCaches) actually detects retention.
+// When retained memory is within the documented budget (gateFallbackFontBudgetMiB),
+// the at-rest ceiling holds. When an unbudgeted retention equivalent to Arial Unicode.ttf
+// (~39 MiB) is held, it exceeds configuredCapacityMiB + gateFootprintSlack and fails.
+func TestFootprintAtRestInstrumentDetectsRetention(t *testing.T) {
+	h := newWarmScene(t)
+	capacity := configuredCapacityMiB(h.l)
+	ceiling := capacity + gateFootprintSlack
+
+	// 1. Within budget: holding bytes within gateFallbackFontBudgetMiB must stay under the ceiling.
+	withinBytes := int(gateFallbackFontBudgetMiB * miB)
+	heldWithin := make([]byte, withinBytes)
+	for i := range heldWithin {
+		heldWithin[i] = byte(i)
+	}
+	restWithin := heapMiB()
+	if restWithin > ceiling {
+		t.Errorf("within-budget retention (%.2f MiB) gave rest=%.2f MiB, want <= ceiling %.2f MiB",
+			gateFallbackFontBudgetMiB, restWithin, ceiling)
+	}
+	runtime.KeepAlive(heldWithin)
+
+	// 2. Deliberate excess: simulate holding an oversized font like Arial Unicode.ttf (~39 MiB).
+	// The instrument must see this excess and exceed the ceiling. If it does not, the at-rest
+	// criterion is vacuous.
+	excessBytes := 39 * miB
+	heldExcess := make([]byte, excessBytes)
+	for i := range heldExcess {
+		heldExcess[i] = byte(i)
+	}
+	restExcess := heapMiB()
+	t.Logf("at-rest instrument: baseline configured=%.2f MiB, ceiling=%.2f MiB, within(%.2f MiB)=%.2f MiB, excess(39 MiB)=%.2f MiB",
+		capacity, ceiling, gateFallbackFontBudgetMiB, restWithin, restExcess)
+	if restExcess <= ceiling {
+		t.Errorf("deliberate retention of 39 MiB font gave rest=%.2f MiB <= ceiling %.2f MiB: at-rest criterion cannot see font retention",
+			restExcess, ceiling)
+	}
+	runtime.KeepAlive(heldExcess)
 }

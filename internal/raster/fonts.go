@@ -92,15 +92,15 @@ type Fonts struct {
 	// fbCache memoizes fallbackLocked's chain per requested (slot, size). It is
 	// only read and written under the write lock, and it is dropped whenever a
 	// new face entry appears, so a cached chain always equals a fresh one.
-	fbCache             map[faceKey][]*faceEntry
-	custom              []*opentype.Font
-	fallbacks           []*opentype.Font
-	fbEntries           map[fallbackKey]*faceEntry
-	loadedFallbackPaths map[string]bool
-	fallbackBytes       int64
-	fallbackFilesRead   atomic.Int64
-	fallbackHook        func(path string)
-	missingCount        atomic.Int64
+	fbCache              map[faceKey][]*faceEntry
+	custom               []*opentype.Font
+	fallbacks            []*opentype.Font
+	fbEntries            map[fallbackKey]*faceEntry
+	checkedFallbackPaths map[string]bool
+	fallbackBytes        int64
+	fallbackFilesRead    atomic.Int64
+	fallbackHook         func(path string)
+	missingCount         atomic.Int64
 }
 
 type faceEntry struct {
@@ -116,17 +116,16 @@ type faceEntry struct {
 	advMiss map[rune]struct{}
 }
 
+// MaxFallbackFontBytes is the upper bound on the file size of a candidate host fallback font
+// admitted for parsing (4 MiB). Candidate files exceeding this size (such as Arial Unicode.ttf
+// at ~22-39 MiB) are rejected at admission via os.Stat before any ReadFile. This protects against
+// runaway memory retention and high synchronous disk I/O under the raster lock, following the engine's
+// untrusted input admission contract (internal/image/decode.go:14-18, internal/engine/limits.go:23-59).
+const MaxFallbackFontBytes = 4 * 1024 * 1024
+
 // MaxParsedFallbackFonts is the upper bound on the number of wide-coverage system
 // fallback fonts that may be lazily loaded and retained in memory.
 const MaxParsedFallbackFonts = 2
-
-var fallbackBytesRetained atomic.Int64
-
-// FallbackBytesRetained returns the total byte size of fallback font files currently
-// retained across all Fonts instances.
-func FallbackBytesRetained() int64 {
-	return fallbackBytesRetained.Load()
-}
 
 const systemFontDir = "/System/Library/Fonts/Supplemental"
 
@@ -187,7 +186,8 @@ var systemFontCollections = []struct {
 // are checked first, and large multi-megabyte fonts (Arial Unicode) are queried
 // last only when smaller fonts do not provide the glyph.
 var systemFallbackFiles = []string{
-	// macOS - small host symbols face (~877 KB)
+	// macOS - small host symbol and dingbat faces (< 1 MB)
+	"/System/Library/Fonts/ZapfDingbats.ttf",
 	"/System/Library/Fonts/Apple Symbols.ttf",
 	// Linux - small system fonts (< 2 MB)
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -262,10 +262,10 @@ func NewEmbeddedFonts() (*Fonts, error) {
 			{}:           regular,
 			{Bold: true}: bold,
 		},
-		entries:             map[faceKey]*faceEntry{},
-		fbCache:             map[faceKey][]*faceEntry{},
-		fbEntries:           map[fallbackKey]*faceEntry{},
-		loadedFallbackPaths: map[string]bool{},
+		entries:              map[faceKey]*faceEntry{},
+		fbCache:              map[faceKey][]*faceEntry{},
+		fbEntries:            map[fallbackKey]*faceEntry{},
+		checkedFallbackPaths: map[string]bool{},
 	}, nil
 }
 
@@ -314,11 +314,13 @@ func (f *Fonts) fallbackFaceLocked(idx int, size int32, src *opentype.Font) *fac
 }
 
 // lazyFallbackForRuneLocked probes candidate host fallback files in priority order
-// (small files first, large files like Arial Unicode last) for a rune missing from
-// all currently loaded faces. If a candidate file contains a glyph for r, it is
-// parsed, cached, and retained in f.fallbacks up to MaxParsedFallbackFonts.
-// Candidates that do not cover r are immediately discarded to keep heap footprint
-// strictly bounded. Callers hold f.mu for writing.
+// (small files first, large files last) for a rune missing from all currently loaded faces.
+// Each candidate path is examined at most once per Fonts instance. Candidates exceeding
+// MaxFallbackFontBytes (such as Arial Unicode.ttf at 22-39 MiB) or missing from disk are
+// rejected at admission via os.Stat before any ReadFile.
+// Admitted fonts (<= MaxFallbackFontBytes) are read, parsed, and retained in f.fallbacks up
+// to MaxParsedFallbackFonts, bounding heap retention to gateFallbackFontBudgetMiB.
+// Callers hold f.mu for writing.
 func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 	if size <= 0 || systemFontsDisabled() {
 		return nil
@@ -329,18 +331,31 @@ func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 	if len(f.fallbacks) >= MaxParsedFallbackFonts {
 		return nil
 	}
-	if f.loadedFallbackPaths == nil {
-		f.loadedFallbackPaths = make(map[string]bool)
+	if f.checkedFallbackPaths == nil {
+		f.checkedFallbackPaths = make(map[string]bool)
 	}
 
 	for _, path := range systemFallbackFiles {
-		if f.loadedFallbackPaths[path] {
+		if f.checkedFallbackPaths[path] {
 			continue
 		}
 		if f.fallbackHook != nil {
 			f.fallbackHook(path)
 		}
+
+		st, err := os.Stat(path)
+		if err != nil {
+			f.checkedFallbackPaths[path] = true
+			continue
+		}
+		if st.Size() <= 0 || st.Size() > MaxFallbackFontBytes {
+			// Exceeds admission ceiling or empty: reject and memoize so it is never checked again
+			f.checkedFallbackPaths[path] = true
+			continue
+		}
+
 		f.fallbackFilesRead.Add(1)
+		f.checkedFallbackPaths[path] = true
 
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -358,18 +373,11 @@ func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 		if err != nil {
 			continue
 		}
-		if !HasGlyph(face, r) {
-			// Does not cover r: do not retain it!
-			continue
-		}
 
-		// Font covers r: retain it in fallbacks
-		f.loadedFallbackPaths[path] = true
 		idx := len(f.fallbacks)
 		f.fallbacks = append(f.fallbacks, parsed)
 		fileBytes := int64(len(data))
 		f.fallbackBytes += fileBytes
-		fallbackBytesRetained.Add(fileBytes)
 
 		e := &faceEntry{
 			face:    face,
@@ -385,7 +393,13 @@ func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 
 		// Invalidate cached fallback chains so the new fallback face is recognized
 		f.fbCache = map[faceKey][]*faceEntry{}
-		return e
+
+		if HasGlyph(face, r) {
+			return e
+		}
+		if len(f.fallbacks) >= MaxParsedFallbackFonts {
+			return nil
+		}
 	}
 	return nil
 }

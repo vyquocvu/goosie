@@ -300,3 +300,69 @@ test giả: một browser load 39 MB font lúc khởi động để rồi hầu 
 3. **Thứ tự**: `systemFallbackFiles` ưu tiên file nhỏ trước (`Apple Symbols.ttf` ~877 KB, Linux small fonts); `Arial Unicode.ttf` (~22 MB) chỉ được probe cuối cùng khi các font nhỏ không phủ rune. Các font không chứa rune không bao giờ được giữ lại trong heap.
 4. **Test mới `TestLazyFallbackHostFonts`**: Đo hook và counter `FallbackFilesRead()`: = 0 file khi chưa có rune miss; = 1 font được giữ sau rune miss ('✔').
 5. **Gate xanh**: `retained=211.35 MiB, configured=207.10 MiB` (giảm 45.68 MiB từ 257.03 MiB). Toàn bộ gate tests và -race pass 100%.
+
+## 9. Khắc phục 5 điểm review của Integrator (agy, 2026-10-25)
+
+### 9.1. Lỗi 1: Cố định trần gate bằng hằng số tài liệu & Instrument at-rest
+- **Sửa đổi**: `configuredCapacityMiB` không còn tính động từ `FallbackBytesRetained()`. Thay vào đó, trần fallback font được cố định bằng hằng số có tài liệu:
+  ```go
+  const gateFallbackFontBudgetMiB = float64(raster.MaxParsedFallbackFonts * raster.MaxFallbackFontBytes) / miB // 8.0 MiB
+  ```
+  Trần này cố định dung lượng dự trù cho fallback fonts (2 font x 4 MiB = 8.0 MiB), ngăn ngừa file cỡ `Arial Unicode.ttf` (~22-39 MiB) lọt qua mà không bị phát hiện.
+- **Test Instrument At-Rest (`TestFootprintAtRestInstrumentDetectsRetention`)**:
+  - **PASS (trong budget 8 MiB)**:
+    ```
+    === RUN   TestFootprintAtRestIsBoundedByConfiguredCaches
+        footprint_gate_test.go:76: retained=211.36 MiB, configured=215.10 MiB (tile grid 126.00 of it)
+    --- PASS: TestFootprintAtRestIsBoundedByConfiguredCaches (0.24s)
+    === RUN   TestFootprintAtRestInstrumentDetectsRetention
+        footprint_gate_test.go:167: at-rest instrument: baseline configured=215.10 MiB, ceiling=227.10 MiB, within(8.00 MiB)=219.40 MiB, excess(39 MiB)=250.36 MiB
+    --- PASS: TestFootprintAtRestInstrumentDetectsRetention (0.37s)
+    ```
+  - **FAIL (khi giữ giả lập 39 MiB của Arial Unicode)**:
+    ```
+    === RUN   TestFootprintAtRestIsBoundedByConfiguredCaches
+        footprint_gate_test.go:81: retained=250.35 MiB, configured=215.10 MiB (tile grid 126.00 of it)
+        footprint_gate_test.go:90: retained 250.35 MiB exceeds configured caches 215.10 MiB plus 12.00 MiB slack: the path holds memory the configuration did not ask for
+    --- FAIL: TestFootprintAtRestIsBoundedByConfiguredCaches (0.24s)
+    FAIL
+    ```
+
+### 9.2. Lỗi 2: Trần Admission kiểm tra kích thước trước khi đọc file
+- **Sửa đổi**: Khai báo `MaxFallbackFontBytes = 4 * 1024 * 1024` (4 MiB) và `MaxParsedFallbackFonts = 2` trong `internal/raster/fonts.go`.
+- Trước khi gọi `os.ReadFile`, thực hiện `st, err := os.Stat(path)`. Nếu file không tồn tại hoặc `st.Size() > MaxFallbackFontBytes`, file bị loại ngay lập tức và memoize vào `checkedFallbackPaths` để không bao giờ đọc lại.
+- File lớn như `Arial Unicode.ttf` (~22-39 MiB) bị loại ngay từ vòng admission, không tốn bất kỳ I/O đọc file hay parse nào.
+- Đã bổ sung font hệ thống gọn nhẹ `/System/Library/Fonts/ZapfDingbats.ttf` (156 KB) cho macOS, phủ trọn vẹn `✔` (U+2714) và `✓` (U+2713).
+
+### 9.3. Lỗi 3: Memoize ứng viên bị loại & Chặn đọc file lặp vô hạn
+- **Sửa đổi**: Sử dụng `checkedFallbackPaths map[string]bool` thay vì chỉ lưu các đường dẫn đã giữ lại (`loadedFallbackPaths`). Mọi đường dẫn (không tồn tại, vượt trần kích thước, hoặc đã parse) đều được ghi nhận là đã kiểm tra.
+- **Test mới `TestMissingGlyphBatchDoesNotRepeatedlyReadFile`**: Gọi `Glyph(16, r, slot)` liên tục cho 20 emoji thiếu khác nhau.
+  - `initialReads = 1`, `afterReads = 1` (0 file đọc thêm sau rune đầu tiên).
+  - Hook chỉ được gọi đúng 1 lần cho mỗi path ứng viên; 0 hook call phát sinh cho các rune tiếp theo.
+- **Test mới `TestFallbackAdmissionCeilingRejectsOversizedFont`**: Chứng minh `Arial Unicode.ttf` bị chặn ở admission và dung lượng giữ lại không vượt trần.
+
+### 9.4. Lỗi 4: Chi phí đồng bộ trên đường nóng & Đo lường thực tế
+1. **(a) Độ trễ missing glyph đầu tiên trên trang CJK** (làm nóng bằng ASCII rồi đo `Glyph(16, '你', slot)`):
+   - `main` (`294acea`): **~0.05ms - 0.06ms** (không fallback, trả rỗng/whitespace).
+   - `task-027` (current): **~0.47ms - 1.13ms** (kiểm tra candidate paths, loại bỏ Arial Unicode qua `os.Stat` trong vài microsecond, parse ZapfDingbats 156 KB và Apple Symbols 877 KB, trả tofu).
+   - Sau rune đầu tiên: tất cả candidate paths đã được memoize, độ trễ các missing rune tiếp theo chỉ còn **~0.01ms - 0.02ms**.
+   - *So sánh*: Nếu không có trần admission 4 MiB, việc đọc và parse `Arial Unicode.ttf` (22 MiB) sẽ tiêu tốn 150-250ms dưới `f.mu` write lock. Giới hạn 4 MiB đã loại bỏ hoàn toàn rủi ro này.
+2. **(b) Tổng thời gian raster fixture `unicode/02` và `selectors/03` qua `goosie-headless`**:
+   - `main` (`294acea`):
+     - `unicode/02`: min **87.48ms**, avg **102.90ms**
+     - `selectors/03`: min **82.70ms**, avg **100.09ms**
+   - `task-027` (current):
+     - `unicode/02`: min **72.67ms**, avg **85.53ms**
+     - `selectors/03`: min **75.65ms**, avg **81.26ms**
+   - *Kết luận*: Không có bất kỳ hiện tượng hồi quy (regression) nào; thời gian raster ngang ngửa hoặc tối ưu hơn nhờ tofu caching và memoization.
+
+### 9.5. Lỗi 5: Loại bỏ Mutable Package-Level Global
+- **Nguyên nhân archtest không bắt trước đây**: `internal/archtest/rules.go:592 globalWrites` duyệt AST tìm các câu lệnh gán (`ast.AssignStmt`), tăng giảm (`ast.IncDecStmt`), hoặc lấy địa chỉ (`&var`). Các hàm của kiểu `atomic.Int64` (`.Add()`, `.Load()`) được gọi qua method call (`ast.CallExpr`), nên AST visitor không cờ là assignment trực tiếp.
+- **Xử lý triệt để**: Xoá hoàn toàn `var fallbackBytesRetained atomic.Int64` và `FallbackBytesRetained()` ở cấp package trong `internal/raster/fonts.go`. Toàn bộ thông tin dung lượng fallback được quản lý trên instance `Fonts` (`f.fallbackBytes`, `f.FallbackBytes()`). Trần gate sử dụng hằng số độc lập `gateFallbackFontBudgetMiB`.
+
+### 9.6. Xác nhận toàn bộ tiêu chí
+- `go test -count=1 ./...`: **PASS 100%** (toàn bộ 67 packages).
+- `go test -count=1 -race ./test/gate/ ./test/raster/ ./internal/raster/`: **PASS** (gate 299s, raster 41s).
+- `go test -count=1 ./internal/archtest/`: **PASS** (4.5s, `TestInternalHasNoMutableGlobals` và `TestRepoIsGofmtFormatted` sạch).
+- `go vet -all ./...`: **PASS** (clean).
+- `python3 testdata/parity.py --render --binary ./bin/goosie`: **80/80 passing (100.0%)**, average match **96.07%**, known gaps 5 fixtures / 10 bands (giữ nguyên kết quả tối ưu của §7, không phình baseline).

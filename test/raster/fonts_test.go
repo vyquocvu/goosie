@@ -161,8 +161,21 @@ func TestGlyphAdvanceFixedIsTheUnroundedAdvance(t *testing.T) {
 // For a rune outside mapped slots ('✔'), FaceForRune must return a face where HasGlyph(face, '✔') == true.
 // For a rune not covered by any face ('😀'), it must return (nil, false) as the missing signal.
 func TestCoverageResolver(t *testing.T) {
-	if _, err := os.Stat("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"); err != nil {
-		t.Skip("skipping host font check: /System/Library/Fonts/Supplemental/Arial Unicode.ttf not present on this host")
+	hasHostFallback := false
+	for _, p := range []string{
+		"/System/Library/Fonts/Apple Symbols.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			hasHostFallback = true
+			break
+		}
+	}
+	if !hasHostFallback {
+		t.Skip("skipping host font check: no candidate fallback font present on this host")
 	}
 	f, err := raster.NewFonts()
 	if err != nil {
@@ -339,8 +352,21 @@ func TestLazyFallbackHostFonts(t *testing.T) {
 	}
 
 	// Trigger fallback with a rune outside standard slots ('✔')
-	if _, err := os.Stat("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"); err != nil {
-		t.Skip("skipping host font resolution check: /System/Library/Fonts/Supplemental/Arial Unicode.ttf not present on this host")
+	hasHostFallback := false
+	for _, p := range []string{
+		"/System/Library/Fonts/Apple Symbols.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+		"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			hasHostFallback = true
+			break
+		}
+	}
+	if !hasHostFallback {
+		t.Skip("skipping host font resolution check: no host fallback font present")
 	}
 
 	g := f.Glyph(16, '✔', slot)
@@ -372,5 +398,76 @@ func TestLazyFallbackHostFonts(t *testing.T) {
 	}
 	if got := f.MissingCount(); got <= 0 {
 		t.Fatalf("MissingCount after emoji = %d, want > 0", got)
+	}
+}
+
+// TestMissingGlyphBatchDoesNotRepeatedlyReadFile satisfies requirement for Issue 3:
+// When rasterizing a batch of missing glyphs (none covered by any fallback),
+// candidate files must NOT be repeatedly stat-ed or read on each missing glyph.
+// Both file reads and candidate probes must remain strictly bounded across all runes.
+func TestMissingGlyphBatchDoesNotRepeatedlyReadFile(t *testing.T) {
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	var hookedPaths []string
+	f.SetFallbackHook(func(path string) {
+		hookedPaths = append(hookedPaths, path)
+	})
+
+	slot := frame.FontSlot{Family: frame.FontArial}
+	// A series of distinct missing emoji runes
+	missingRunes := []rune("😀😁😂😃😄😅😆😉😊😋😎😍😘😗😙😚☺🙂🤗🤩")
+
+	// Rasterize the first missing rune - this triggers the one-time probe of candidate paths.
+	f.Glyph(16, missingRunes[0], slot)
+	initialReads := f.FallbackFilesRead()
+	initialHooks := len(hookedPaths)
+
+	// Rasterize all subsequent missing runes - all candidates are already memoized.
+	for _, r := range missingRunes[1:] {
+		f.Glyph(16, r, slot)
+	}
+
+	afterReads := f.FallbackFilesRead()
+	afterHooks := len(hookedPaths)
+
+	if afterReads != initialReads {
+		t.Errorf("FallbackFilesRead grew from %d to %d across %d missing runes: candidate files were re-read from disk",
+			initialReads, afterReads, len(missingRunes)-1)
+	}
+	if afterHooks != initialHooks {
+		t.Errorf("fallback hook called %d additional times across missing runes (before %d, after %d): candidates were repeatedly probed",
+			afterHooks-initialHooks, initialHooks, afterHooks)
+	}
+}
+
+// TestFallbackAdmissionCeilingRejectsOversizedFont satisfies requirement for Issue 2:
+// Files exceeding raster.MaxFallbackFontBytes (such as Arial Unicode.ttf at 22-39 MiB)
+// must be rejected at admission and never read into memory.
+func TestFallbackAdmissionCeilingRejectsOversizedFont(t *testing.T) {
+	arialUnicodePath := "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+	fi, err := os.Stat(arialUnicodePath)
+	if err != nil {
+		t.Skip("skipping host font check: Arial Unicode not present on this host")
+	}
+	if fi.Size() <= raster.MaxFallbackFontBytes {
+		t.Fatalf("Arial Unicode size %d is <= MaxFallbackFontBytes %d, test assumption invalid",
+			fi.Size(), raster.MaxFallbackFontBytes)
+	}
+
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	// Query a missing rune; Arial Unicode must be rejected due to size > MaxFallbackFontBytes.
+	f.Glyph(16, '😀', frame.FontSlot{Family: frame.FontArial})
+
+	// Retained bytes must be strictly within admission budget and well below Arial Unicode.
+	if retained := f.FallbackBytes(); retained >= fi.Size() {
+		t.Errorf("f.FallbackBytes() = %d retained oversized font (%d bytes)", retained, fi.Size())
+	}
+	if f.FallbackBytes() > int64(raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes) {
+		t.Errorf("f.FallbackBytes() = %d exceeds configured fallback budget", f.FallbackBytes())
 	}
 }
