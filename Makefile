@@ -3,7 +3,7 @@ BINARY_NAME=goosie
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*" -not -path "./_v1_old/*")
 
-.PHONY: all build build-small macos-app clean test test-race e2e bench gate release-gate wpt wpt-pilot wpt-unit
+.PHONY: all build build-small macos-app clean test test-race e2e bench gate release-gate wpt wpt-pilot wpt-unit parity live-parity live-parity-selftest
 
 all: build
 
@@ -62,6 +62,17 @@ wpt-pilot: build
 parity: build
 	@echo "Scoring render parity vs Chromium (fail-closed)..."
 	python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie
+
+# Opt-in, never a CI gate: it needs the network and the web changes daily. The
+# report is the product; the exit code says whether every page compared OK.
+live-parity: build
+	@echo "Scoring live websites against Chromium (~20 min, needs network)..."
+	python3 testdata/live-parity.py --binary ./bin/goosie
+
+# The sweep's own classifier, driven by stub renderers: no network, no browser.
+live-parity-selftest:
+	@echo "Self-testing testdata/live-parity.py..."
+	python3 testdata/live-parity.py --selftest
 
 release-gate:
 	@echo "Running the release gate (suite, vet, archtest, gate suite)..."
