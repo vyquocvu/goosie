@@ -65,10 +65,10 @@ func selectOptionNodes(sel *dom.Node) []*dom.Node {
 // move, so the shell must not fall through to page scrolling.
 //
 // A move clears "selected" from every option before setting it on the target,
-// so a document that authored two selected options collapses to the single
-// selection the rest of the engine assumes. Disabled options are skipped, and
-// the selection stops at the ends instead of wrapping, matching a
-// single-select control.
+// so a document that authored two selected options collapses to one selection -
+// the last of them, which is what SelectedOption already reports. Disabled
+// options are skipped, and the selection stops at the ends instead of wrapping,
+// matching a single-select control.
 func (s *Session) MoveSelect(action EditAction) bool {
 	switch action {
 	case EditUp, EditDown, EditHome, EditEnd:
@@ -90,9 +90,14 @@ func (s *Session) MoveSelect(action EditAction) bool {
 	}
 	cur := -1
 	for i, o := range opts {
+		// The last authored selection wins, which is the tie-break SelectedOption
+		// reports and the one Chromium measures (scripts/verify-task037-
+		// option-value.js: two selected options give selectedIndex 1, and ArrowDown
+		// from that document steps to index 2). Stepping from the first would make
+		// the first key press look like a no-op, because the value the control
+		// already carries is the last one.
 		if o.HasAttribute("selected") {
 			cur = i
-			break
 		}
 	}
 	if cur < 0 {
