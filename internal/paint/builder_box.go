@@ -19,6 +19,23 @@ type boxPaintContext struct {
 	hidden         bool
 }
 
+// boxDeclaresOpacity reports whether a box brings an opacity of its own into the
+// group-opacity walk. Layout also hands out boxes that own no element and fills
+// them with a verbatim copy of the generating element's style: anonymous blocks
+// and table wrappers (style.AnonymousBlockStyle: `s = *parent`) and every text
+// run (style.inheritStyle: `cs := *parent`). That element has already
+// contributed, so counting its copy again would fade one declaration once per
+// generated box rather than once per element, which is what Chromium does.
+// Generated content is the exception: a ::before/::after/::first-letter box's
+// style is its own cascade result, and the synthetic text node standing in for it
+// is attached to no parent element.
+func boxDeclaresOpacity(obj *layout.Object) bool {
+	if obj.Style == nil || obj.Node == nil {
+		return false
+	}
+	return obj.Node.Element() || obj.Node.Parent == nil
+}
+
 func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordinal int, inheritedOpacity float32) {
 	obj := b.arena.Get(id)
 	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
@@ -33,7 +50,7 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	// we stop the walk rather than emit a command, since DisplayCmd.Opacity 0 is
 	// reserved to mean "opaque/unset".
 	effective := inheritedOpacity
-	if obj.Style != nil {
+	if boxDeclaresOpacity(obj) {
 		o := obj.Style.Opacity
 		if o < 0 {
 			o = 0
