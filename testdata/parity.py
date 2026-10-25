@@ -183,7 +183,9 @@ class FixtureResult:
                  worst_region_iou: float | None = None,
                  coverage_ratio: float | None = None,
                  blank_region_rows: list[tuple[int, int]] | None = None,
-                 known_blank_regions: int = 0):
+                 known_blank_regions: int = 0,
+                 truly_blank_region_rows: list[tuple[int, int]] | None = None,
+                 shifted_region_rows: list[tuple[int, int]] | None = None):
         self.name = name
         self.pct = pct
         self.status = status          # "PASS", "FAIL", "ERROR", "MISSING"
@@ -195,6 +197,13 @@ class FixtureResult:
         self.blank_region_rows = blank_region_rows or []
         self.known_blank_regions = known_blank_regions
         self.blank_regions = len(self.blank_region_rows)
+        # GOOSIE-BLANKMETRIC-001 drift report ONLY: a further split of the
+        # unchanged blank_region_rows above.  These never feed the gate or the
+        # match %; blank_regions/known_blank_regions keep their old meaning.
+        self.truly_blank_region_rows = truly_blank_region_rows or []
+        self.shifted_region_rows = shifted_region_rows or []
+        self.truly_blank_regions = len(self.truly_blank_region_rows)
+        self.shifted_regions = len(self.shifted_region_rows)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -208,6 +217,9 @@ class FixtureResult:
             "blank_regions": self.blank_regions,
             "blank_region_rows": [list(rows) for rows in self.blank_region_rows],
             "known_blank_regions": self.known_blank_regions,
+            "truly_blank_regions": self.truly_blank_regions,
+            "shifted_regions": self.shifted_regions,
+            "shifted_region_rows": [list(rows) for rows in self.shifted_region_rows],
         }
         if self.goosie_size:
             d["goosie_size"] = list(self.goosie_size)
@@ -298,6 +310,62 @@ def score_regions(goosie: np.ndarray, chromium: np.ndarray
     return min(ious) if ious else None, goosie_total / chromium_total, blanks
 
 
+def score_regions_drift(goosie: np.ndarray, chromium: np.ndarray
+                        ) -> tuple[list[tuple[int, int]],
+                                   list[tuple[int, int]],
+                                   list[tuple[int, int]]]:
+    """Drift-adjusted second view of the SAME blank-band test (GOOSIE-BLANKMETRIC-001).
+
+    score_regions calls a reference band blank when Goosie has zero ink inside
+    Chromium's exact rows, with no vertical tolerance -- while its IoU sibling
+    dilates by one row.  A line painted a few rows away therefore reads as
+    "missing content".  This function adds the missing tolerance WITHOUT
+    touching score_regions' meaning; nothing here is a gate, it is a report.
+
+    For every band score_regions would already have flagged blank, a drift
+    window grows by the band's OWN height on each side over the band's own
+    columns and the band is classified as:
+
+      shifted     -- no ink in Chromium's exact rows, but at least MIN_INK ink
+                     inside the +/-band_height window (content is present, only
+                     displaced), or
+      truly_blank -- no ink in the exact rows AND nothing substantial in the
+                     drift window (the content is genuinely missing).
+
+    Design constraints (docs/tasks/TASK-042-BLANK-BAND-DRIFT.md §2.3): the
+    window half-width is ``y1 - y0 + 1``, the band height content_bands already
+    returns, so it scales to each region's own size instead of a new tuned
+    constant; the substantiality bar is the existing MIN_INK, which is what this
+    harness already uses to decide "this is real content" (see ink_mask's
+    docstring).  No threshold -- PASS_AT, THRESHOLD, MIN_INK,
+    MIN_SCORED_FIXTURES, LIVE_COVERAGE_OK -- is moved.
+
+    The two returned drift sets partition score_regions' blank list exactly and
+    disjointly: ``blank_exact == truly_blank + shifted``.  blank_exact is
+    returned as the first element -- byte-identical to score_regions' third
+    value -- so a caller can prove the old signal was never redefined.
+    """
+    gm, cm = ink_mask(goosie), ink_mask(chromium)
+    bands = content_bands(cm)
+    blank_exact: list[tuple[int, int]] = []
+    truly_blank: list[tuple[int, int]] = []
+    shifted: list[tuple[int, int]] = []
+    height = gm.shape[0]
+    for y0, y1, x0, x1, _ in bands:
+        if int(gm[y0:y1 + 1, x0:x1].sum()) != 0:
+            continue  # ink present in Chromium's exact rows: not blank at all
+        blank_exact.append((y0, y1))
+        band_height = y1 - y0 + 1
+        lo = max(0, y0 - band_height)
+        hi = min(height - 1, y1 + band_height)
+        window_ink = int(gm[lo:hi + 1, x0:x1].sum())
+        if window_ink >= MIN_INK:
+            shifted.append((y0, y1))
+        else:
+            truly_blank.append((y0, y1))
+    return blank_exact, truly_blank, shifted
+
+
 def load_known_gaps(path: Path = KNOWN_GAPS) -> dict[str, int]:
     """Load fixture -> allowed existing blank band count baseline."""
     with path.open() as f:
@@ -366,6 +434,7 @@ def score_fixtures(threshold: int, pass_at: float,
         pct = float(np.mean(match_mask) * 100)
 
         worst_iou, coverage, blank_rows = score_regions(g, p)
+        _, truly_blank_rows, shifted_rows = score_regions_drift(g, p)
         allowed_blanks = known_gaps.get(rel, 0)
         error = None
         if pct < pass_at:
@@ -388,6 +457,8 @@ def score_fixtures(threshold: int, pass_at: float,
             coverage_ratio=coverage,
             blank_region_rows=blank_rows,
             known_blank_regions=allowed_blanks,
+            truly_blank_region_rows=truly_blank_rows,
+            shifted_region_rows=shifted_rows,
         ))
 
     results.sort(key=lambda r: (-r.pct, r.name))
@@ -604,6 +675,8 @@ def write_junit_report(results: list[FixtureResult], path: Path,
                 ("blank_regions", str(r.blank_regions)),
                 ("blank_region_rows", json.dumps(r.blank_region_rows)),
                 ("known_blank_regions", str(r.known_blank_regions)),
+                ("truly_blank_regions", str(r.truly_blank_regions)),
+                ("shifted_regions", str(r.shifted_regions)),
             ):
                 ET.SubElement(props, "property", {"name": key, "value": value})
             if r.status == "FAIL":
@@ -663,7 +736,8 @@ def print_summary(results: list[FixtureResult], threshold: int,
                   f"  worst_region_iou={r.worst_region_iou if r.worst_region_iou is not None else 'n/a'}"
                   f"  coverage_ratio={r.coverage_ratio if r.coverage_ratio is not None else 'n/a'}"
                   f"  blank_regions={r.blank_regions}/{r.known_blank_regions}"
-                  f"  rows={r.blank_region_rows}")
+                  f"  rows={r.blank_region_rows}"
+                  f"  shifted={r.shifted_regions}")
         else:
             print(f"  {'---':>6s}  {r.status:4s}  {r.name}  "
                   f"({r.error})")
@@ -683,9 +757,17 @@ def print_summary(results: list[FixtureResult], threshold: int,
     known = [r for r in results if r.known_blank_regions > 0]
     known_bands = sum(r.blank_regions for r in known)
     print(f"  known gaps: {len(known)} fixtures / {known_bands} bands")
+    drift_shifted = sum(r.shifted_regions for r in known)
+    drift_blank = sum(r.truly_blank_regions for r in known)
+    print(f"  drift-adjusted (GOOSIE-BLANKMETRIC-001): "
+          f"of those {known_bands} blank bands, {drift_shifted} have ink in a "
+          f"+/-band-height window (shifted) and {drift_blank} stay blank "
+          f"(truly missing)")
     for r in known:
         print(f"  WARNING known gap: {r.name}: {r.blank_regions} blank band(s), "
-              f"baseline {r.known_blank_regions}; rows={r.blank_region_rows}")
+              f"baseline {r.known_blank_regions}; rows={r.blank_region_rows}"
+              f" [truly_blank={r.truly_blank_regions} "
+              f"shifted={r.shifted_regions} shifted_rows={r.shifted_region_rows}]")
 
     if failing > 0:
         print()
