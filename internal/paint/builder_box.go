@@ -36,6 +36,44 @@ func boxDeclaresOpacity(obj *layout.Object) bool {
 	return obj.Node.Element() || obj.Node.Parent == nil
 }
 
+// fragmentOwnsBackground reports whether a box may emit the background its
+// computed style carries.
+//
+// The same verbatim style copies that made group opacity double-count own this
+// defect (GOOSIE-INLINEBG-001). Layout splices a box per word for every text
+// node and fills it with the generating element's computed style, background
+// included (style.inheritStyle: `cs := *parent`). When that element is inline the
+// copy is the whole story: the element's own box paints no background at all -
+// paintBoxDecoration's paintsInlineFragments test leaves it to the fragments -
+// and each fragment carries one piece of it, which is how an inline background is
+// meant to fragment across lines.
+//
+// When the generating element is not inline, its own box already fills that
+// background across the whole padding area, so a fragment that fills it again
+// composites the element's alpha a second time wherever a word sits: measured on
+// a 300x60 block with `background:rgba(200,0,0,.5)` holding `one two three four`,
+// the run fills rendered (213,63,63) against the block's own (227,127,127), where
+// Chromium renders (227,127,127) uniformly.
+//
+// The generating element is looked up by node rather than by walking up the arena
+// parents, because layout reparents runs into the anonymous blocks and line boxes
+// it splices: the box a run hangs off is frequently anonymous, while the element
+// that owns the copied style is the text node's DOM parent. Generated content is
+// the exception, exactly as it is for group opacity above: a
+// ::before/::after/::first-letter box's synthetic text node has no parent
+// element, that box *is* the pseudo-element's box, and it owns its background.
+func (b *Builder) fragmentOwnsBackground(obj *layout.Object) bool {
+	if obj.Node == nil || !obj.Node.Text() || obj.Node.Parent == nil {
+		return true
+	}
+	generator, ok := b.arena.ForNode(obj.Node.Parent.ID)
+	if !ok {
+		return true
+	}
+	st := b.arena.Get(generator).Style
+	return st == nil || st.Display == style.DisplayInline
+}
+
 func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordinal int, inheritedOpacity float32) {
 	obj := b.arena.Get(id)
 	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
@@ -115,19 +153,17 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 	if paintsInlineFragments {
 		// Inline boxes span multiple lines; their text fragments own the visible
 		// per-line backgrounds, while the union box would fill the gaps.
+		//
+		// The shadow is left gated only on paintsInlineFragments: text runs
+		// duplicate it the same way they duplicated the background, but that is
+		// measured and registered as its own defect, not silently folded into
+		// this one.
 		if len(computed.BoxShadow) > 0 {
 			b.paintBoxShadow(obj, paint.rect, paint.radius, paint.opacity)
 		}
-		if computed.BackgroundColor.A > 0 && !paint.backgroundClip.Empty() {
-			b.appendBgFill(obj, paint.backgroundClip, paint.clipRadius, convertColor(computed.BackgroundColor), paint.opacity)
+		if b.fragmentOwnsBackground(obj) {
+			b.paintBoxBackground(obj, paint)
 		}
-		if g := gradient(computed.BackgroundGradient, paint.opacity); !g.Empty() {
-			b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, g, false, frame.RadialGradient{})
-		}
-		if rg := radialGradient(computed.BackgroundRadialGradient, paint.opacity); !rg.Empty() {
-			b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, frame.LinearGradient{}, true, rg)
-		}
-		b.paintBackground(obj, paint.opacity)
 	}
 	if computed.Display != style.DisplayInline && computed.Display != style.DisplayNone {
 		b.paintBorders(obj, paint.rect, paint.radius, paint.opacity)
@@ -135,6 +171,22 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 	if computed.Display == style.DisplayListItem {
 		b.paintMarker(obj, ordinal)
 	}
+}
+
+// paintBoxBackground emits a box's four background layers in paint order: the
+// colour, then the linear and radial gradient layers, then any background-image.
+func (b *Builder) paintBoxBackground(obj *layout.Object, paint boxPaintContext) {
+	computed := obj.Style
+	if computed.BackgroundColor.A > 0 && !paint.backgroundClip.Empty() {
+		b.appendBgFill(obj, paint.backgroundClip, paint.clipRadius, convertColor(computed.BackgroundColor), paint.opacity)
+	}
+	if g := gradient(computed.BackgroundGradient, paint.opacity); !g.Empty() {
+		b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, g, false, frame.RadialGradient{})
+	}
+	if rg := radialGradient(computed.BackgroundRadialGradient, paint.opacity); !rg.Empty() {
+		b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, frame.LinearGradient{}, true, rg)
+	}
+	b.paintBackground(obj, paint.opacity)
 }
 
 func (b *Builder) paintBoxContents(obj *layout.Object, box boxPaintContext, clip *frame.Rect) {
