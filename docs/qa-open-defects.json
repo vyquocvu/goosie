@@ -106,5 +106,14 @@
     "summary": "103 of the 161 P0/P1 QA cases still have no tagged test, so most of the manual catalogue remains unverified automatically even though every P0 case is now tagged.",
     "evidence": "test/qc/traceability.golden.json at 910c445: 185 cases, P0 19/19 tagged, P0+P1 161 cases of which 58 tagged, so 103 P1 cases have no tagged test. Split by catalog method: 73 carry only machine-checkable methods (INT/PARITY/SEC) - BR-139 was one of them until TASK-032 tagged it, 13 pair CUA with a machine method, and 17 are labelled CUA-only - but docs/tasks/TASK-035-CHROME-STATE-ZOOM-AX.md §1 measured that BR-126/127/128/129/130/131 of that last group already ship real app paths (cmd/goosie/toolbar_window.go:286-290 disabled flags and the Stop label swap, cmd/goosie/interaction.go:648-657 clampZoom) and are assertable through the accessibility tree, so CUA-only overstates how much must stay manual. scripts/rc-sweep.sh:117-119 fails only when a P0 case loses its test or the count falls below docs/qa-ratchet.json, so the untagged majority is invisible to the gate.",
     "closed_by": ""
+  },
+  {
+    "id": "GOOSIE-PARITYGATE-001",
+    "priority": "P1",
+    "status": "open",
+    "owner": "docs/tasks/TASK-036-PARITY-HARNESS-FAIL-CLOSED.md",
+    "summary": "The parity harness can report success while its own evidence shrinks: --no-strict deletes fixtures from the denominator, and the known-gaps baseline is an upper bound (<=), so inflating it hides blank bands instead of exposing them.",
+    "evidence": "BR-176/BR-177. Measured by importing testdata/parity.py (importlib) against a one-fixture temp corpus, leaving the real /tmp render dirs untouched: declared baseline 5 with 0 measured blank bands yields ('a.png', 'PASS', 100.0, [], 5, None); deleting the chromium render under strict=False yields [] - the fixture vanishes from the report, so N/N (100%) and rc 0. strict=True does report MISSING ('chromium render missing') and a missing gaps file raises FileNotFoundError, so the fail-closed half exists; what is missing is any floor on the number of scored fixtures and any check that a declared band baseline still equals what is measured. grep shows no script, Makefile or CI target passes --no-strict, and every entry in testdata/render-known-gaps.json currently matches its measured band count exactly (2/2, 1/1, 3/3, 1/1, 3/3 at 4437f65), so an equality gate is satisfiable today.",
+    "closed_by": ""
   }
 ]
