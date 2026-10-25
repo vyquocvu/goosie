@@ -14,10 +14,20 @@ Modes:
     --pass-at N       Pass percentage (default 90.0).
     --inspect NAME    Print per-band mismatch for one fixture.
 
+This oracle is deliberately impossible to fool (GOOSIE-PARITYGATE-001):
+    * A missing goosie/chromium render is ALWAYS reported as MISSING; there is
+      no --no-strict escape hatch that shrinks the denominator. --strict is
+      still accepted for call-site compatibility but enables nothing.
+    * A fixture passes its known-gaps baseline only when the measured blank
+      band count EQUALS the declared count, so inflating the baseline fails.
+    * A corpus that has shrunk below MIN_SCORED_FIXTURES is treated as broken,
+      not as a clean run.
+
 Exit codes:
-    0  All scored fixtures passed the threshold.
+    0  All scored fixtures passed the threshold and the corpus is at full size.
     1  One or more fixtures failed, or a render step failed (fail-closed).
-    2  Bad invocation (missing binary, missing fixtures, etc.).
+    2  Bad invocation (missing binary, missing fixtures, corpus below the
+       MIN_SCORED_FIXTURES floor, etc.).
 """
 
 from __future__ import annotations
@@ -36,6 +46,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 THRESHOLD = 30
 PASS_AT = 90.0
+# Floor on the number of scored fixtures.  Equals the count of
+# testdata/render/**/*.html as of the last time the corpus grew; it may only
+# rise, and raising it by 1 in the same change that adds a fixture is how that
+# gain gets locked in.  A scored corpus below this number means fixtures
+# silently disappeared, so the run is reported as broken (exit 2) rather than
+# as a healthy 100%.  test/gatecheck/parity_harness_test.go counts the real HTML
+# files and fails if the count falls below this exact line, so the two cannot
+# drift apart - and adding a fixture must never red that test by itself.
+MIN_SCORED_FIXTURES = 82
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
@@ -164,7 +183,9 @@ class FixtureResult:
                  worst_region_iou: float | None = None,
                  coverage_ratio: float | None = None,
                  blank_region_rows: list[tuple[int, int]] | None = None,
-                 known_blank_regions: int = 0):
+                 known_blank_regions: int = 0,
+                 truly_blank_region_rows: list[tuple[int, int]] | None = None,
+                 shifted_region_rows: list[tuple[int, int]] | None = None):
         self.name = name
         self.pct = pct
         self.status = status          # "PASS", "FAIL", "ERROR", "MISSING"
@@ -176,6 +197,13 @@ class FixtureResult:
         self.blank_region_rows = blank_region_rows or []
         self.known_blank_regions = known_blank_regions
         self.blank_regions = len(self.blank_region_rows)
+        # GOOSIE-BLANKMETRIC-001 drift report ONLY: a further split of the
+        # unchanged blank_region_rows above.  These never feed the gate or the
+        # match %; blank_regions/known_blank_regions keep their old meaning.
+        self.truly_blank_region_rows = truly_blank_region_rows or []
+        self.shifted_region_rows = shifted_region_rows or []
+        self.truly_blank_regions = len(self.truly_blank_region_rows)
+        self.shifted_regions = len(self.shifted_region_rows)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -189,6 +217,9 @@ class FixtureResult:
             "blank_regions": self.blank_regions,
             "blank_region_rows": [list(rows) for rows in self.blank_region_rows],
             "known_blank_regions": self.known_blank_regions,
+            "truly_blank_regions": self.truly_blank_regions,
+            "shifted_regions": self.shifted_regions,
+            "shifted_region_rows": [list(rows) for rows in self.shifted_region_rows],
         }
         if self.goosie_size:
             d["goosie_size"] = list(self.goosie_size)
@@ -279,6 +310,62 @@ def score_regions(goosie: np.ndarray, chromium: np.ndarray
     return min(ious) if ious else None, goosie_total / chromium_total, blanks
 
 
+def score_regions_drift(goosie: np.ndarray, chromium: np.ndarray
+                        ) -> tuple[list[tuple[int, int]],
+                                   list[tuple[int, int]],
+                                   list[tuple[int, int]]]:
+    """Drift-adjusted second view of the SAME blank-band test (GOOSIE-BLANKMETRIC-001).
+
+    score_regions calls a reference band blank when Goosie has zero ink inside
+    Chromium's exact rows, with no vertical tolerance -- while its IoU sibling
+    dilates by one row.  A line painted a few rows away therefore reads as
+    "missing content".  This function adds the missing tolerance WITHOUT
+    touching score_regions' meaning; nothing here is a gate, it is a report.
+
+    For every band score_regions would already have flagged blank, a drift
+    window grows by the band's OWN height on each side over the band's own
+    columns and the band is classified as:
+
+      shifted     -- no ink in Chromium's exact rows, but at least MIN_INK ink
+                     inside the +/-band_height window (content is present, only
+                     displaced), or
+      truly_blank -- no ink in the exact rows AND nothing substantial in the
+                     drift window (the content is genuinely missing).
+
+    Design constraints (docs/tasks/TASK-042-BLANK-BAND-DRIFT.md §2.3): the
+    window half-width is ``y1 - y0 + 1``, the band height content_bands already
+    returns, so it scales to each region's own size instead of a new tuned
+    constant; the substantiality bar is the existing MIN_INK, which is what this
+    harness already uses to decide "this is real content" (see ink_mask's
+    docstring).  No threshold -- PASS_AT, THRESHOLD, MIN_INK,
+    MIN_SCORED_FIXTURES, LIVE_COVERAGE_OK -- is moved.
+
+    The two returned drift sets partition score_regions' blank list exactly and
+    disjointly: ``blank_exact == truly_blank + shifted``.  blank_exact is
+    returned as the first element -- byte-identical to score_regions' third
+    value -- so a caller can prove the old signal was never redefined.
+    """
+    gm, cm = ink_mask(goosie), ink_mask(chromium)
+    bands = content_bands(cm)
+    blank_exact: list[tuple[int, int]] = []
+    truly_blank: list[tuple[int, int]] = []
+    shifted: list[tuple[int, int]] = []
+    height = gm.shape[0]
+    for y0, y1, x0, x1, _ in bands:
+        if int(gm[y0:y1 + 1, x0:x1].sum()) != 0:
+            continue  # ink present in Chromium's exact rows: not blank at all
+        blank_exact.append((y0, y1))
+        band_height = y1 - y0 + 1
+        lo = max(0, y0 - band_height)
+        hi = min(height - 1, y1 + band_height)
+        window_ink = int(gm[lo:hi + 1, x0:x1].sum())
+        if window_ink >= MIN_INK:
+            shifted.append((y0, y1))
+        else:
+            truly_blank.append((y0, y1))
+    return blank_exact, truly_blank, shifted
+
+
 def load_known_gaps(path: Path = KNOWN_GAPS) -> dict[str, int]:
     """Load fixture -> allowed existing blank band count baseline."""
     with path.open() as f:
@@ -294,12 +381,13 @@ def _category(name: str) -> str:
 
 
 def score_fixtures(threshold: int, pass_at: float,
-                   strict: bool = True,
                    known_gaps: dict[str, int] | None = None) -> list[FixtureResult]:
     """Compare every goosie render to its Chromium counterpart.
 
-    When *strict* is True (the default), missing pairs and dimension mismatches
-    are reported as errors rather than silently skipped.
+    Strictness is not optional: a missing render, a dimension mismatch, and a
+    known-gaps baseline that no longer matches the measured blank band count
+    each produce a row and a non-PASS status, so the harness can never report
+    success on shrinking evidence.
     """
     results: list[FixtureResult] = []
     known_gaps = load_known_gaps() if known_gaps is None else known_gaps
@@ -310,24 +398,21 @@ def score_fixtures(threshold: int, pass_at: float,
         pp = CHROMIUM / rel
 
         if not gp.exists() and not pp.exists():
-            if strict:
-                results.append(FixtureResult(
-                    rel, 0.0, "MISSING",
-                    error="neither goosie nor chromium render exists"))
+            results.append(FixtureResult(
+                rel, 0.0, "MISSING",
+                error="neither goosie nor chromium render exists"))
             continue
 
         if not gp.exists():
-            if strict:
-                results.append(FixtureResult(
-                    rel, 0.0, "MISSING",
-                    error="goosie render missing"))
+            results.append(FixtureResult(
+                rel, 0.0, "MISSING",
+                error="goosie render missing"))
             continue
 
         if not pp.exists():
-            if strict:
-                results.append(FixtureResult(
-                    rel, 0.0, "MISSING",
-                    error="chromium render missing"))
+            results.append(FixtureResult(
+                rel, 0.0, "MISSING",
+                error="chromium render missing"))
             continue
 
         g_img = Image.open(gp).convert("RGB")
@@ -349,16 +434,31 @@ def score_fixtures(threshold: int, pass_at: float,
         pct = float(np.mean(match_mask) * 100)
 
         worst_iou, coverage, blank_rows = score_regions(g, p)
+        _, truly_blank_rows, shifted_rows = score_regions_drift(g, p)
         allowed_blanks = known_gaps.get(rel, 0)
-        status = "PASS" if pct >= pass_at and len(blank_rows) <= allowed_blanks else "FAIL"
+        error = None
+        if pct < pass_at:
+            status = "FAIL"
+        elif len(blank_rows) != allowed_blanks:
+            # The known-gaps baseline is an exact ratchet, not an upper bound:
+            # inflating it to hide a band, or fixing a band without shrinking
+            # the baseline file, both land here.
+            status = "FAIL"
+            error = (f"known-gap baseline is stale: declared {allowed_blanks}, "
+                     f"measured {len(blank_rows)}")
+        else:
+            status = "PASS"
         results.append(FixtureResult(
             rel, pct, status,
             goosie_size=(g.shape[1], g.shape[0]),
             chromium_size=(p.shape[1], p.shape[0]),
+            error=error,
             worst_region_iou=worst_iou,
             coverage_ratio=coverage,
             blank_region_rows=blank_rows,
             known_blank_regions=allowed_blanks,
+            truly_blank_region_rows=truly_blank_rows,
+            shifted_region_rows=shifted_rows,
         ))
 
     results.sort(key=lambda r: (-r.pct, r.name))
@@ -575,6 +675,8 @@ def write_junit_report(results: list[FixtureResult], path: Path,
                 ("blank_regions", str(r.blank_regions)),
                 ("blank_region_rows", json.dumps(r.blank_region_rows)),
                 ("known_blank_regions", str(r.known_blank_regions)),
+                ("truly_blank_regions", str(r.truly_blank_regions)),
+                ("shifted_regions", str(r.shifted_regions)),
             ):
                 ET.SubElement(props, "property", {"name": key, "value": value})
             if r.status == "FAIL":
@@ -634,7 +736,8 @@ def print_summary(results: list[FixtureResult], threshold: int,
                   f"  worst_region_iou={r.worst_region_iou if r.worst_region_iou is not None else 'n/a'}"
                   f"  coverage_ratio={r.coverage_ratio if r.coverage_ratio is not None else 'n/a'}"
                   f"  blank_regions={r.blank_regions}/{r.known_blank_regions}"
-                  f"  rows={r.blank_region_rows}")
+                  f"  rows={r.blank_region_rows}"
+                  f"  shifted={r.shifted_regions}")
         else:
             print(f"  {'---':>6s}  {r.status:4s}  {r.name}  "
                   f"({r.error})")
@@ -654,9 +757,17 @@ def print_summary(results: list[FixtureResult], threshold: int,
     known = [r for r in results if r.known_blank_regions > 0]
     known_bands = sum(r.blank_regions for r in known)
     print(f"  known gaps: {len(known)} fixtures / {known_bands} bands")
+    drift_shifted = sum(r.shifted_regions for r in known)
+    drift_blank = sum(r.truly_blank_regions for r in known)
+    print(f"  drift-adjusted (GOOSIE-BLANKMETRIC-001): "
+          f"of those {known_bands} blank bands, {drift_shifted} have ink in a "
+          f"+/-band-height window (shifted) and {drift_blank} stay blank "
+          f"(truly missing)")
     for r in known:
         print(f"  WARNING known gap: {r.name}: {r.blank_regions} blank band(s), "
-              f"baseline {r.known_blank_regions}; rows={r.blank_region_rows}")
+              f"baseline {r.known_blank_regions}; rows={r.blank_region_rows}"
+              f" [truly_blank={r.truly_blank_regions} "
+              f"shifted={r.shifted_regions} shifted_rows={r.shifted_region_rows}]")
 
     if failing > 0:
         print()
@@ -693,10 +804,9 @@ def main() -> int:
     ap.add_argument("--pass-at", type=float, default=PASS_AT,
                     help=f"pass percentage (default {PASS_AT})")
     ap.add_argument("--strict", action="store_true", default=True,
-                    help="fail on missing pairs and dimension mismatches "
-                         "(default: True)")
-    ap.add_argument("--no-strict", action="store_false", dest="strict",
-                    help="skip missing pairs instead of reporting errors")
+                    help="accepted for compatibility, strictness is not "
+                         "optional: missing renders and dimension mismatches "
+                         "are always reported (this flag enables nothing)")
     ap.add_argument("--json", metavar="FILE",
                     help="write JSON report to FILE")
     ap.add_argument("--junit", metavar="FILE",
@@ -734,13 +844,14 @@ def main() -> int:
             return 1
 
     # Score.
-    results = score_fixtures(args.threshold, args.pass_at,
-                             strict=args.strict)
+    results = score_fixtures(args.threshold, args.pass_at)
     elapsed = time.monotonic() - t0
 
-    if not results:
-        print("no renders found -- run with --render and/or "
-              "--render-chromium first", file=sys.stderr)
+    if len(results) < MIN_SCORED_FIXTURES:
+        print(f"parity: only {len(results)} fixture(s) scored — floor is "
+              f"{MIN_SCORED_FIXTURES}. The render corpus shrank or fixtures "
+              f"are missing, so this run cannot be trusted; re-run with "
+              f"--render and/or --render-chromium.", file=sys.stderr)
         return 2
 
     # Diff images.

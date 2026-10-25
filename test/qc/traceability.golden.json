@@ -999,6 +999,27 @@
     "enforced": false
   },
   {
+    "id": "BR-186",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/bad_string_test.go:TestBadStringDropsOneDeclarationNotTheSheet",
+      "test/css/bad_string_test.go:TestBadStringEndsAtNewline",
+      "test/css/bad_string_test.go:TestBadStringInUnterminatedLastDeclaration",
+      "test/css/bad_string_test.go:TestBadStringSingleQuoteMatchesDoubleQuote",
+      "test/css/bad_string_test.go:TestEmptyStringStillGeneratesABox",
+      "test/css/bad_string_test.go:TestEscapedNewlineContinuesAString",
+      "test/css/bad_string_test.go:TestEscapedNewlineInSelectorString",
+      "test/css/bad_string_test.go:TestEscapedNewlineVersusRawNewline",
+      "test/css/bad_string_test.go:TestUnterminatedStringAtEOFStaysLenient"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
@@ -1981,8 +2002,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityFixtureFloorMatchesCorpus"
+    ],
     "enforced": false
   },
   {
@@ -1991,8 +2014,11 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityRejectsNoStrictFlag",
+      "test/gatecheck/parity_harness_test.go:TestParitySelftestIsGreen"
+    ],
     "enforced": false
   },
   {
@@ -2097,6 +2123,19 @@
     "status": "PASS",
     "tests": [
       "test/engine/refresh_test.go:TestRestyleAndReflowReusesArenaForColorOnlyChange"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-187",
+    "priority": "P2",
+    "methods": [
+      "PARITY",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityDriftMetricIsGreen"
     ],
     "enforced": false
   }

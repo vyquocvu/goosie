@@ -1,9 +1,9 @@
 # Goosie — catalog test case chi tiết
 
-- Cập nhật: 2026-10-22
+- Cập nhật: 2026-10-26
 - Phạm vi: ứng dụng Goosie trên macOS, engine headless, browser chrome và các luồng kiểm soát an toàn đầu vào.
 - Kế hoạch cấp release, DoD và lịch sử smoke: xem [qa-test-plan.md](qa-test-plan.md).
-- Tổng: **185 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
+- Tổng: **186 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
 
 ## Cách đọc và quy tắc ghi kết quả
 
@@ -78,7 +78,10 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-057 | P2 | GAP | DEFERRED** — Mở Private Window từ UI → cửa sổ riêng biệt có affordance rõ và persistence bị tắt.
 - **BR-058 | P2 | GAP | DEFERRED** — Mở Settings/Privacy UI và xóa cookies/history/session → xác nhận phạm vi xóa, dữ liệu mục tiêu mất sau restart.
 
-## D. Render, CSS, layout, ảnh và repaint — BR-059–BR-087
+## D. Render, CSS, layout, ảnh và repaint — BR-059–BR-087, BR-186
+
+Mã BR cấp phát toàn cục theo thứ tự thêm vào catalog, nên case thêm sau có thể mang số ngoài dải số
+của miền nó thuộc về; miền chức năng vẫn do section chứa nó quyết định.
 
 - **BR-059 | P0 | PARITY, INT | NOT RUN** — Render fixture HTML cơ bản có heading, paragraph, list, link → cấu trúc và thứ tự nội dung khớp kỳ vọng/reference.
 - **BR-060 | P1 | PARITY | NOT RUN** — Render block/inline lồng nhau → line box, wrap và thứ tự đọc không chồng lấn.
@@ -109,6 +112,7 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-085 | P1 | CUA, PARITY | NOT RUN** — Mở about.google/products ở viewport cố định, chụp 5 frame idle rồi reload và chụp lại → vùng tĩnh ổn định; mọi vùng thiếu/viền đỏ được lưu bằng chứng, đối chiếu trình duyệt tham chiếu.
 - **BR-086 | P1 | INT, PARITY | NOT RUN** — Trang dài cuộn xuống rồi Back/Forward → scroll restoration theo behavior đã công bố, không nhảy liên tục.
 - **BR-087 | P2 | PARITY | NOT RUN** — Render tiếng Việt/CJK, emoji, RTL và chuỗi dài → ký tự không bị cắt/đảo thứ tự ngoài giới hạn font đã biết.
+- **BR-186 | P1 | INT, PARITY | PASS** — Stylesheet chứa chuỗi chưa đóng (`content: """;` rồi xuống dòng, cả nháy kép lẫn nháy đơn) → declaration chứa nó bị loại, mọi rule phía sau vẫn áp dụng, và không một byte CSS nào được vẽ thành text trên trang; chuỗi chưa đóng kéo tới EOF vẫn được chấp nhận theo đúng đo Chromium. Chuỗi **nối dòng bằng escape** (`\` + newline, CSS Syntax L3 4.3.8 — rustdoc tách một `url("data:image/svg+xml,…")` qua hai dòng) phải **sống**: token tiếp tục, cặp escape không đóng góp ký tự nào vào value (Chromium computed `GoosieSerif`, `url("…%3Csvg xmlns='a'…")`, ảnh load), và newline thô vẫn cắt như bad-string. oracle đo trên **trang thật**: `https://doc.rust-lang.org/std/` 1280×1024 ink 95,783→53,215 khi hồi quy→**95,814** sau khi sửa; probe 800×600 PNG trùng md5 với bản trước hồi quy. `test/css/bad_string_test.go` (9 test), fixture `testdata/render/css-features/08-bad-string-recovery.html` + `09-escaped-newline-string.html`, `MIN_SCORED_FIXTURES` 82; PASS trong lần chạy 2026-10-26, defects `GOOSIE-CSSSTRING-001` (đóng) và `GOOSIE-CSSSTRING-002` (hồi quy do chính bản sửa 001 gây ra).
 
 ## E. JavaScript, sự kiện, biểu mẫu và thao tác trang — BR-088–BR-124
 
@@ -200,7 +204,7 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-167 | P1 | SEC, INT | NOT RUN** — JavaScript chạy quá giới hạn tài nguyên/thời gian → bị dừng/cô lập, browser chrome vẫn thao tác được.
 - **BR-168 | P1 | INT, SEC | NOT RUN** — Mở link/file URL scheme không thuộc allowlist → không thực thi native handler hoặc rò dữ liệu local.
 
-## H. Độ bền, hiệu năng đo bằng counter, parity và release — BR-169–BR-185
+## H. Độ bền, hiệu năng đo bằng counter, parity và release — BR-169–BR-185, BR-187
 
 - **BR-169 | P1 | CUA, INT | NOT RUN** — Duyệt 20 URL qua 10 tab, chuyển tab và đóng một nửa → app không crash, mỗi tab giữ trạng thái hợp lệ.
 - **BR-170 | P1 | INT | NOT RUN** — Gửi liên tiếp navigation nhanh rồi đóng tab → không có stale paint, panic hay goroutine leak được test harness phát hiện.
@@ -209,8 +213,8 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-173 | P1 | INT | NOT RUN** — Chạy gate trên trang tĩnh không đổi → style/layout/paint/tile counters không tăng lặp vô ích sau khi settle.
 - **BR-174 | P1 | INT | NOT RUN** — Scroll qua trang có tile cache → tile expose mới được rasterize, tile còn hợp lệ được reuse đúng.
 - **BR-175 | P1 | INT | NOT RUN** — Chạy headless trên máy không có display → loop/scheduler/composer/Present chạy bằng headless backend.
-- **BR-176 | P1 | PARITY | NOT RUN** — Chạy render parity corpus → mọi fixture có reference cho kết quả; diff được xuất để xem và không âm thầm bỏ fixture fail.
-- **BR-177 | P1 | PARITY | NOT RUN** — Thiếu Chromium/reference artifact rồi chạy parity → lệnh fail-closed hoặc báo BLOCKED, không báo PASS giả.
+- **BR-176 | P1 | PARITY | PASS** — Chạy render parity corpus → mọi fixture có reference cho kết quả; diff được xuất để xem và không âm thầm bỏ fixture fail. `make parity` chấm **82/82** fixture (average 96.088%) tại `a9f6218`; `TestParityFixtureFloorMatchesCorpus` đếm 82 file HTML và so với `MIN_SCORED_FIXTURES = 82`, tạm đặt floor 999 thì test red nên floor thật sự chặn; floor là ratchet một chiều — corpus tụt thì red, corpus tăng thì nâng floor trong chính commit thêm fixture. Chạy 2026-10-26.
+- **BR-177 | P1 | PARITY | PASS** — Thiếu Chromium/reference artifact rồi chạy parity → lệnh fail-closed hoặc báo BLOCKED, không báo PASS giả. Render bị thiếu luôn báo MISSING, corpus dưới floor thoát 2, known-gaps baseline phải khớp đúng số band đo được; `TestParitySelftestIsGreen` (5 case selftest) và `TestParityRejectsNoStrictFlag` (`--no-strict` không còn được nhận, rc khác 0) xanh trong `test/gatecheck`. Chạy 2026-10-26.
 - **BR-178 | P1 | PARITY | NOT RUN** — Chạy interaction parity cho click/focus/key fixtures → thứ tự event và trạng thái cuối so sánh với reference.
 - **BR-179 | P0 | INT | NOT RUN** — Chạy go test ./..., go vet -all ./..., archtest và gate suite trên commit ứng viên → tất cả lệnh exit 0; lưu log/artifact.
 - **BR-180 | P0 | CUA, PARITY | NOT RUN** — Trên build release candidate, chạy lại toàn bộ P0/P1 CUA liên quan và visual parity, gồm Google Products live smoke sau fixture → không còn lỗi P0/P1 mở, evidence đủ và sign-off theo DoD.
@@ -219,6 +223,7 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-183 | P1 | INT | PASS** — Khi link đang focus, Space cuộn xuống một bước trang và Shift+Space cuộn lên; Enter điều hướng anchor tới đích; click preventDefault giữ nguyên URL và không bắt đầu navigation.
 - **BR-184 | P1 | INT | PASS** — JS ghi lại attribute/checked/value hiện có và xóa token class vắng mặt → PumpJS không báo frame work, style/layout/display-list counters giữ nguyên; khi class thực sự đổi, style/layout chạy đúng một lần và computed style được cập nhật.
 - **BR-185 | P1 | INT | PASS** — Selector change chỉ đổi text color → computed styles và display list cập nhật nhưng arena giữ nguyên, layout counter không tăng; selector đổi width → layout build chạy lại. Các cập nhật có anonymous/pseudo boxes tiếp tục dùng full-layout fallback.
+- **BR-187 | P2 | PARITY, INT | PASS** — `blank_regions` có thể chỉ là một dòng lệch vài dòng: với mỗi band parity báo trống, `score_regions_drift` phân loại lại bằng cửa **±chiều cao chính band** (cùng cột x0:x1) và thanh `MIN_INK` đã có sẵn của harness — `shifted` (có ink trong cửa, nội dung thật chỉ bị displacement) hoặc `truly_blank` (mất thật). Tín hiệu cũ **giữ nguyên từng byte**: chấm cùng 82 ảnh render trên main và trên nhánh, diff per-fixture rỗng trên cả 82 dòng (match %, status, blank_regions, rows, coverage, worst_iou), average 96.088%, known gaps 5/10 không đổi. Số đo thật trên corpus: **10 band khai báo → 9 shifted, 1 truly_blank** (`html-features/01-forms-complete.png` rows 593-599: 0 ink trong cửa ±7, ink gần nhất cách 8 dòng). Cửa trôi là **bắt buộc chứ không phải hằng số chỉnh cho đẹp**: mutation cửa = 0 làm case selftest shifted FAIL, cửa ×40 làm case D3 (ink cách 100 dòng) FAIL, và đổi nghĩa `score_regions` thay vì thêm tín hiệu phụ làm `make parity` exit 1 vì known-gaps equality. `testdata/render-known-gaps.json` cố ý **không** re-baseline: `blank_regions` vẫn mang nghĩa cũ nên khai 1 band sẽ là nới gate trá hình. Oracle `test/gatecheck/parity_harness_test.go:TestParityDriftMetricIsGreen` + `parity_selftest.py` case D1-D4 (`python3 testdata/parity_selftest.py`, `make live-parity-selftest` xanh). Defect `GOOSIE-BLANKMETRIC-001` mở, phần chưa đo: cột drift cho 22 dòng `MISSING_REGIONS` của live sweep, vì sweep không giữ ảnh sau khi chấm. Chạy 2026-10-26.
 
 ## Ma trận thực thi theo nhịp phát hành
 

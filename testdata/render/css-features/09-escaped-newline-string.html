@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Escaped newline inside a string (GOOSIE-CSSSTRING-002)</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* CSS Syntax L3 4.3.8: a backslash escapes the next byte, so `\` + a
+           line break inside a quoted string is a valid escape and contributes no
+           character - the token keeps going. Real stylesheets rely on this to
+           split long quoted values over two lines, which is how a rustdoc sheet
+           lost 42k ink pixels when Goosie read the escaped break as the line
+           break that ends a bad-string (4.3.7). Every rule below is what a
+           regression takes away. */
+        .dash::after { content: "ab\
+cd"; color: #d35400; font-size: 32px; }
+
+        /* Still above the fold, then below it: all invisible to Goosie if the
+           escaped break is treated as a bad-string. */
+        .mono { font: 16px monospace; }
+        .bar { height: 24px; background: #3498db; margin: 10px 0; }
+        .green { height: 24px; background: #16a085; margin: 10px 0; }
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .grid-row { display: flex; gap: 10px; }
+        .grid-cell { flex: 1; background: #ecf0f1; padding: 8px; }
+        .rule { border-top: 2px solid #2c3e50; margin: 16px 0; }
+    </style>
+</head>
+<body>
+    <p class="label">One string split across two lines by an escaped break, real rules after it</p>
+    <p class="dash">Generated text above must read exactly <b>abcd</b>, one word, no break.</p>
+    <div class="bar"></div>
+    <p class="mono">The quick brown fox jumps over the lazy dog</p>
+    <div class="rule"></div>
+    <div class="grid-row">
+        <div class="grid-cell mono">cell one</div>
+        <div class="grid-cell mono">cell two</div>
+        <div class="grid-cell mono">cell three</div>
+    </div>
+
+    <div class="rule"></div>
+    <p class="label">Below the 600px fold: a gate that only sees the viewport still
+        loses every rule above if the escaped break ends the string</p>
+    <p class="mono">0123456789 abcdefghij KLMNOPQRST</p>
+    <div class="green"></div>
+    <p class="mono">Second paragraph after the fold, monospace only if the sheet survives.</p>
+    <div class="rule"></div>
+    <p class="dash">A second escaped-break passage below the fold.</p>
+</body>
+</html>

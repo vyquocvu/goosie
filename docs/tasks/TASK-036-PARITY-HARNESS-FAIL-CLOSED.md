@@ -112,3 +112,206 @@ kế sai.
 `BR-178` (interaction parity: thứ tự event so với `reference-events.json` — harness khác,
 task riêng); `--inspect` output; việc fixture nào *đạt* gì (đó là đất của TASK-027/033/035);
 mọi thay đổi trong `internal/`.
+
+## 7. Kết quả (branch `worktree-task-036-parity-fail-closed`)
+
+Máy đo: macOS, `python3` 3.9.6 + numpy 1.26.4 + PIL 11.3.0. Uptime trước khi làm
+`0:48 up 5 days, load 5.37`; sau khi chạy `go test ./internal/archtest/` +
+`go vet -all ./...`: `1:09 up 5 days, load 51.96` (hai job khác đang chạy song song —
+độ trễ do họ, không phải do lệnh này).
+
+### 7.1 Đã đổi gì (chỉ chạm công cụ đo, không đụng ngưỡng)
+
+`testdata/parity.py` (55+, 27-):
+- `MIN_SCORED_FIXTURES = 80` đặt cạnh `THRESHOLD`/`PASS_AT` (dòng 56) — sàn số fixture;
+  Go test đọc đúng dòng này bằng regex nên không lệch được.
+- `score_fixtures(threshold, pass_at, known_gaps=None)` (dòng 314): **bỏ tham số
+  `strict`**; ba nhánh missing luôn `append` `FixtureResult`.
+- Điều kiện pass (dòng 372): `elif len(blank_rows) != allowed_blanks:` → FAIL với
+  `error="known-gap baseline is stale: declared N, measured M"` (đệm `!=`, không còn `<=`).
+- argparse (dòng 723): **xoá `--no-strict`**; giữ `--strict` (`action="store_true"`) như
+  no-op với help "accepted for compatibility, strictness is not optional".
+- main (dòng 767): `if len(results) < MIN_SCORED_FIXTURES: return 2` thay cho `if not results`.
+
+Không đổi `THRESHOLD`, `PASS_AT`, `MIN_INK`, `BAND_GAP`, `INK_CUTOFF`.
+Không đổi `testdata/render-known-gaps.json` (chỉ sửa tạm cho proof (iv) rồi `git checkout`).
+
+Test mới: `testdata/parity_selftest.py` (5 case, corpus tạm trong `tempfile.mkdtemp`,
+không mạng/không browser, không ghi `/tmp/{goosie,playwright}-renders`) và
+`test/gatecheck/parity_harness_test.go` (3 test, skip khi thiếu python3/numpy/PIL).
+
+### 7.2 Lệnh và output nguyên văn (trạng thái sau fix)
+
+```
+$ python3 testdata/parity.py            # corpus thật, đã có render ở /tmp
+  80/80 passing  (100.0%), 0 failing, 0 errors
+  average match: 96.08%  (threshold=30, pass_at=90.0%)
+  known gaps: 5 fixtures / 10 bands
+  (forms/04 2/2, html-features/01 1/1, selectors/02 3/3, unicode/02 1/1, selectors/03 3/3)
+  rc=0
+```
+Spec §3 dự kiến 96.07%; đo thực tế **96.08%** (làm tròn, 80 fixture vẫn PASS, baseline vẫn
+bằng nhau — không đổi ngưỡng). Selftest và Go gate:
+
+```
+$ python3 testdata/parity_selftest.py    -> "selftest green", rc=0   (5/5 case PASS)
+$ go test ./test/gatecheck/ -run TestParity
+--- PASS: TestParitySelftestIsGreen      (BR-177)
+--- PASS: TestParityFixtureFloorMatchesCorpus (BR-176)
+--- PASS: TestParityRejectsNoStrictFlag  (BR-177)
+$ python3 testdata/parity.py --no-strict  -> rc=2, "parity.py: error: unrecognized arguments: --no-strict"
+$ python3 testdata/parity.py --strict     -> rc=0 (accepted, no-op)
+$ go test ./internal/archtest/            -> ok (gofmt + import + cgo + globals rules)
+$ go vet -all ./...                        -> rc=0 (silent)
+```
+
+### 7.3 Năm mutation proof (§4) — mỗi cái: tắt hành vi → FAIL → revert → PASS
+
+Backup `parity.py` đã-fix ra `/tmp` rồi `cp` lại khi revert; `render-known-gaps.json` revert
+bằng `git checkout`. Sau tất cả, `diff` bản revert = bản fix (không còn residue) và xoá backup.
+
+**(i) `!=` → `>` (phục hồi `<=`).** test 2 FAIL, reproducing đúng row B của §1:
+```
+case 2: declared 5 bands against 0 measured is FAIL, not PASS (BR-176)
+    measured: ('a.png', 'PASS', 100.0, [], 5, None)
+  FAIL  status is FAIL (was PASS before the fix)  -- PASS
+  FAIL  error names a stale baseline  -- None
+selftest rc=1 ; go TestParitySelftestIsGreen FAIL (case 3 vẫn PASS vì measured==declared)
+```
+Revert (`!=`): `('a.png', 'FAIL', 100.0, [], 5, 'known-gap baseline is stale: declared 5, measured 0')`,
+selftest rc=0, go rc=0.
+
+**(ii) phục hồi `strict` param + `if strict:` branch + `--no-strict` + main `strict=`.** test 1 và
+test 8 FAIL:
+```
+case 1:
+  FAIL  score_fixtures no longer takes a 'strict' parameter -- params=['threshold','pass_at','strict','known_gaps']
+  FAIL  calling score_fixtures(strict=False) raises TypeError ...
+$ python3 testdata/parity.py --no-strict  -> rc=0 (hatch sống lại, âm thầm chạy)
+go TestParityRejectsNoStrictFlag FAIL (chấp nhận --no-strict, in "known gaps" đầy đủ)
+```
+Revert: `--no-strict` rc=2 unrecognized; selftest rc=0, go rc=0.
+
+**(iii) `MIN_SCORED_FIXTURES = 0`.** test 4 và test 7 FAIL:
+```
+case 4: main() với 1 fixture in "1/1 passing (100.0%)" và rc=0 (đáng lẽ 2)
+  FAIL  main() returns 2 for 1 fixture (floor 0)  -- rc=0
+go TestParityFixtureFloorMatchesCorpus FAIL:
+  "testdata/render has 80 HTML fixtures but MIN_SCORED_FIXTURES is 0; ..."
+```
+Revert (`= 80`): selftest rc=0, go rc=0.
+
+**(iv) `render-known-gaps.json` forms/04 `2 → 3`** (đây là mutation §4 ghi là *không test nào
+hiện nay bắt được* — giờ đã bị bắt). `python3 testdata/parity.py` (corpus thật) và test 3 FAIL:
+```
+$ python3 testdata/parity.py
+   96.63%  FAIL  forms/04-advanced-inputs.png ... blank_regions=2/3 rows=[(376,388),(443,454)]
+  79/80 passing  (98.8%), 1 failing, 0 errors
+  rc=1
+case 3: FAIL  forms/04-advanced-inputs.png: measured 2 == declared 3 -> PASS -- FAIL measured=2 declared=3
+```
+Revert (`git checkout`): forms/04 về `blank_regions: 2`; real rc=0, selftest rc=0, go rc=0.
+`git status --porcelain testdata/render-known-gaps.json` sạch.
+
+**(v) xoá `--strict` khỏi argparse.** ĐO, không đoán:
+```
+$ python3 testdata/parity.py --strict  -> rc=2, "parity.py: error: unrecognized arguments: --strict"
+```
+`scripts/run-parity.sh:146` truyền `--strict`, và `:188 exit $PARITY_EXIT` → run-parity.sh sẽ rc 2
+(fail-closed ầm ĩ, không im lặng). **KHAI BÁO: proof (v) KHÔNG giết test Go/selftest nào** —
+chúng không bao giờ truyền `--strict` (selftest rc=0, go rc=0 vẫn xanh dưới mutation này). Nó
+được phòng thủ bởi chính call site: vì thế thiết kế **giữ** `--strict`; không call-site nào cần
+sửa trong commit này.
+
+### 7.4 Hệ quả phụ traceability (integrator xử lý, mình không đụng golden)
+
+`go test ./test/qc/` sau khi gắn tag:
+```
+traceability_test.go:112: traceability.golden.json is stale; run go test ./test/qc -update
+  (BR-176/BR-177 now point at test/gatecheck/parity_harness_test.go, golden still tests:null)
+```
+Đây là **bước ghi registry của integrator**: `go test ./test/qc -update` (re-sync golden) +
+chuyển BR-176/BR-177 sang RUN trong `docs/qa-test-catalog.md`. Mình bị cấm sửa
+`traceability.golden.json`/catalog nên để nguyên; `archtest` và `vet` không liên quan, vẫn xanh.
+rc-sweep (BR-180) đọc bản golden đã commit (chưa đổi) → không bị ảnh hưởng.
+
+### 7.5 Đề xuất dòng registry (integrator ghi, không phải mình)
+
+- `GOOSIE-PARITYGATE-001` → `closed_by`:
+  `test/gatecheck/parity_harness_test.go:TestParitySelftestIsGreen`,
+  `:TestParityFixtureFloorMatchesCorpus`, `:TestParityRejectsNoStrictFlag`
+  (backing Python: `testdata/parity_selftest.py` cases 1–5).
+- BR-177 (thiếu artifact → fail-closed, không báo PASS): selftest case 1 + case 5;
+  Go `TestParitySelftestIsGreen`, `TestParityRejectsNoStrictFlag` (tag `// qc:BR-177`).
+- BR-176 (mọi fixture có reference cho kết quả, không bỏ qua âm thầm, baseline trung thực):
+  selftest case 2 + case 3 + case 4; Go `TestParityFixtureFloorMatchesCorpus` (tag `// qc:BR-176`).
+
+### 7.6 Chưa chứng minh được / còn mở
+
+- Không chạy `make parity --render-chromium` (cần browser, agent khác đang dùng). Đã dùng
+  `python3 testdata/parity.py` trên render thật có sẵn ở `/tmp` cho proof (iv) — đủ để bắt
+  inflation. Nếu `/tmp` trống, proof (iv) vẫn chạy qua selftest case 3 (corpus tạm).
+- `go test ./test/qc/` đỏ do golden stale — **có chủ đích**, integrator `-update`.
+- `--inspect` output: ngoài phạm vi (§6), không đổi.
+
+## 8. Integration (integrator làm sau khi nhận branch)
+
+Nhận branch ở `62fd38c`, merge `main` (TASK-041 đã landing) vào thành `bcc4c83`, rồi xử lý
+ba hệ quả mà §7 không thể biết trước:
+
+**8.1 `MIN_SCORED_FIXTURES` và cái ghim `==`.** §7 đặt sàn 80 và Go test assert
+`count == floor`. TASK-041 thêm `css-features/08-bad-string-recovery.html` → corpus thành 81,
+nên `TestParityFixtureFloorMatchesCorpus` **đỏ trên main ngay khi TASK-041 landing** — đỏ vì
+corpus *tăng*, tức gate tự phạt một cải thiện. Đã đổi semantic sang ratchet một chiều:
+`count < floor` mới fail (`parity_harness_test.go:121`), comment ghi rõ "adding a fixture must
+never red that test by itself; locking the gain = raising the floor in the same change", và
+`MIN_SCORED_FIXTURES` 80 → 81. Proof sàn vẫn chặn: tạm đặt floor 999 ⇒
+`testdata/render has 81 HTML fixtures, below MIN_SCORED_FIXTURES 999` → FAIL, rồi khôi phục.
+`len(results) < MIN_SCORED_FIXTURES` trong `parity.py:main()` giữ nguyên, vẫn thoát 2.
+
+**8.2 Traceability.** `go test ./test/qc/ -run Traceability -update` đã re-sync golden:
+BR-176 → 1 test, BR-177 → 2 tests (`test/gatecheck/parity_harness_test.go`). Catalog:
+BR-176/BR-177 `NOT RUN` → `PASS` kèm số đo thật (81/81 fixture, selftest 5 case,
+`--no-strict` rc khác 0), vì `traceability_test.go:78` cấm một row PASS mà không có tag.
+`docs/qa-ratchet.json`: `p0_tagged` 19 giữ nguyên, `p0p1_tagged` **67 → 69** (đo từ golden sau
+khi regenerate, nâng trên chính nhánh thêm tag theo quy tắc floor-chỉ-tăng).
+
+**8.3 Điều §7 chưa biết và vẫn còn mở: parity được đo trên một host.** Bằng chứng CI gần nhất
+(run 40107385303, `c8cd80b` 2026-10-24, ubuntu-latest, playwright 1.49.1) chấm
+**66/80 PASS, avg 93.638%, 14 fixture FAIL trong dải 80.33–89.90%** — mọi fixture đều sát ngay
+dưới `PASS_AT = 90.0`, trong khi cũng corpus đó trên máy macOS này cho 81/81. Báo cáo JSON của
+run đó không có field vùng nào (`score_regions`/`blank_regions` chưa tồn tại ở `c8cd80b`, đã
+`grep -c blank_regions = 0`), nên **không suy ra được** CI sẽ ra sao với điều kiện
+`len(blank_rows) != allowed_blanks` mới: con số band trên Linux chưa từng được đo. Hệ quả thật
+sự của ratchet đẳng thức: `render-known-gaps.json` bây giờ là *per-host baseline*; trên host
+khác, một band lệch đi sẽ FAIL với "known-gap baseline is stale" thay vì âm thầm đạt. Đó là
+hành vi fail-closed đúng ý §2, nhưng nó có nghĩa là "make parity xanh trên máy tôi" không còn
+là bằng chứng "parity xanh" — đã ghi thành defect riêng trong `docs/qa-open-defects.json`,
+không giấu vào §7.
+
+**8.4 Lệnh integrator đã chạy trên nhánh sau khi hợp main (`bcc4c83` + các sửa đổi 8.1–8.3).**
+
+```
+$ go test -count=1 ./...          -> rc 0, 42 packages ok
+$ go vet -all ./...               -> rc 0 (silent)
+$ go test -count=1 ./internal/archtest/
+  ok  github.com/vyquocvu/goosie/internal/archtest   3.456s
+$ go test -count=1 ./test/qc/ ./test/gatecheck/
+  ok  github.com/vyquocvu/goosie/test/qc          0.530s
+  ok  github.com/vyquocvu/goosie/test/gatecheck  25.807s
+$ python3 testdata/parity.py      -> rc 0
+  81/81 passing (100.0%), 0 failing, 0 errors
+  average match: 96.09%  (threshold=30, pass_at=90.0%)
+  known gaps: 5 fixtures / 10 bands  (mỗi fixture đo == declared: forms/04 2/2,
+  html-features/01 1/1, selectors/02 3/3, unicode/02 1/1, selectors/03 3/3)
+```
+
+Lần chạy full suite **đầu tiên** sau khi sửa catalog đã red đúng một package:
+`test/qc — traceability.golden.json is stale`, vì golden lưu cả `status` của row, nên
+flip `NOT RUN → PASS` làm nó lệch lần hai. Re-sync lại golden sau khi sửa catalog là thứ tự
+đúng (`-update` phải chạy *sau* chỉnh catalog, không phải trước). `p0p1_tagged` đo lại từ
+bản golden cuối: 19 / 69, khớp `docs/qa-ratchet.json`.
+
+Ràng buộc §7 nêu và integrator xác nhận bằng chính phép đo CI ở 8.3: `make parity` xanh trên
+một host là bằng chứng *của host đó*. Trước khi gate này được dùng làm bằng chứng phát hành,
+cần một lần chạy trên ubuntu-latest (defect `GOOSIE-CIPARITY-001`).
