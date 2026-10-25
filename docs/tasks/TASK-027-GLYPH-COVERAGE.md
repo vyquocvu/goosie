@@ -202,3 +202,37 @@ nguyên nhân glyph: `unicode/02` là line metrics của Apple Color Emoji (engi
 entry `selectors/03` trong baseline nay trỏ `docs/tasks/TASK-033-FIRST-LETTER-DROP-CAP.md`.
 
 Baseline đi từ **18 band xuống 10 band** — 8 band đóng, đúng hướng "chỉ được thu nhỏ".
+
+## 8. MERG ĐÃ BỊ REVERT — footprint gate nói "không" (integrator, 2026-10-25)
+
+Merge `f55c7d1` bị revert bằng `8521e1a` trên `main` vì **`go test -count=1 ./...` trên
+main đỏ**:
+
+```
+--- FAIL: TestFootprintAtRestIsBoundedByConfiguredCaches (0.19s)
+    footprint_gate_test.go:68: retained=257.03 MiB, configured=207.10 MiB (tile grid 126.00 of it)
+    footprint_gate_test.go:77: retained 257.03 MiB exceeds configured caches 207.10 MiB plus 12.00 MiB slack
+```
+
+Nguyên nhân, chỉ đúng vào code của task này: vòng lặp `for _, path := range
+systemFallbackFiles { os.ReadFile(path) … opentype.Parse(data) }` **nạp hết mọi font host
+ngay lúc dựng `Fonts`** — trên máy này gồm `Arial Unicode.ttf` (~39 MB) và
+`Apple Symbols.ttf`. `opentype.Parse` giữ tham chiếu vào slice `data`, nên byte của file
+sống mãi trong heap: **+38 MiB retained**, vượt `gateFootprintSlack` 12 MiB. Đây không phải
+test giả: một browser load 39 MB font lúc khởi động để rồi hầu như không dùng là bug thật.
+
+**Yêu cầu để merge được (giữ nguyên §7 — 8 band đóng là thật, đừng bỏ):**
+
+1. Fallback host font phải **lazy**: chỉ đọc file khi một rune thực sự miss ở chain hiện tại.
+   Trang không có emoji thì heap không đổi.
+2. Phải **có trần**: số font host đã parse và/hoặc tổng byte giữ lại có budget rõ ràng, và
+   budget đó nằm trong `configuredCapacityMiB` (`test/gate/footprint_gate_test.go:57`) chứ
+   không phải tăng `gateFootprintSlack`. Nới slack để qua gate là phạm luật cũ của
+   TASK-021/024 ("không đổi threshold để qua gate").
+3. Ưu tiên file **nhỏ** trước (Apple Symbols/Noto/DejaVu) rồi mới tới Arial Unicode — thứ tự
+   hiện tại nạp cái to nhất vô điều kiện.
+4. Test mới trong `test/raster/`: dựng `Fonts` rồi đo **số file host đã đọc** (đếm qua hook,
+   không đếm bằng mắt) ⇒ phải bằng 0 khi chưa có rune miss; và sau một rune miss ⇒ không quá
+   1 font được giữ.
+5. Chạy **`go test -count=1 ./test/gate/`** và dán số `retained=` vào Status; integrator sẽ
+   chạy lại trên `main` sau merge. Không merge nếu gate chưa xanh.
