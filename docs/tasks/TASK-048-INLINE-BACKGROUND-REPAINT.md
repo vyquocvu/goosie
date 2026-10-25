@@ -559,3 +559,50 @@ would cover:
    and the next live sweep decides whether real pages improve by more than the three fixtures suggest.
 6. **`display:contents` tint disappearing** (§7.1) matches Chromium but is a visible behaviour change for anyone who
    relied on the old emission; it belongs in the release note, not in a silent commit message.
+
+## 10. Integrator's verification and registration (2026-10-26, main `fe4928c` → merge `271238a`)
+
+Every number below was produced on this host, not read from this document.
+
+| check | result here |
+| --- | --- |
+| `go test -count=1 ./test/paint/ ./test/style/ ./test/layout/ ./internal/archtest/` | ok (0.903 / 0.800 / 1.585 / 3.548s) |
+| `go test -count=1 -race ./...` | clean, 42 packages ok, no FAIL/panic line |
+| mutation A (`return true`) | rc **1**, 12 `--- FAIL` headers, 26 assertion lines — matches §5.1 |
+| mutation B (`return false`) | rc **1**, 5 headers, 4 lines, dies on exactly the two inline controls — matches §5.2 |
+| mutation C (`!=` inverted) | rc **1**, 15 headers, 29 lines — matches §5.3 |
+| TASK-044/046 oracles under mutation A | rc **0**, 9 `--- PASS` — matches §5.1's "cannot be mistaken for a TASK-044 regression" |
+| `builder_box.go` after every mutation | md5 `2445e6804d6107523fb5c32b970c7ed5`, `git status` clean |
+| `make parity` | **88/88 (100.0%)**, average **96.17%**, fixture 14 **94.19% PASS** `worst_region_iou=0.9986 coverage_ratio=0.9943 blank_regions=0/0`, known gaps 5 fixtures / 10 bands unchanged, floor 88 |
+
+Independent re-measurement of the defect itself, with my own documents (`/tmp/t48-check/anon-bg.html`, 400×120 DPR 1):
+`cmd/dump-paint` on main emits **8** fills of `1677721728` (the block's own `(0,0,300,56)` plus seven per-word run
+fills) and the branch emits **1**. Pixel counts over the block area: Chromium 11,519 px (227,127,127) and no doubled
+colour; main 10,366 px (227,127,127) + **1,152 px (213,63,63)**; branch 11,552 px (227,127,127) and **0 px** doubled.
+My earlier reading of this probe was wrong in one place worth recording: I sampled (5,8) as "the text-line pixel", but
+that pixel is a glyph antialiasing edge in all three builds — the doubled flat colour, not the sample point, is the
+signal.
+
+**What this task does not close, and I found while checking its widest branch.** §5's predicate returns `true` at
+`obj.Node == nil`, which is exactly the branch an anonymous block takes, so I probed that shape. For a solid colour the
+path is unreachable — `style.AnonymousBlockStyle` already zeroes `BackgroundColor` (`internal/style/style.go:610`) and
+`cmd/dump-layout` confirms the anonymous boxes exist here (ID=11 `(0,0,300,18)`, ID=12 `(0,38,300,18)`) yet emit no
+background fill in either build. For a **gradient** it is live: `AnonymousTableStyle` zeroes all four background layers
+(:635-642) and `AnonymousBlockStyle` zeroes only the colour, so `/tmp/t48-check/anon-grad.html` (same DOM,
+`linear-gradient(rgba(200,0,0,.5),rgba(200,0,0,.5))`) still holds **10,026 px of (213,63,63)** after this fix, against
+Chromium's 13,370 px of (227,127,127) and zero doubled pixels. Registered as **GOOSIE-ANONBG-001** (P2, style layer,
+needs a task). §6.1 and §6.2's two residuals reproduce on my own documents too, with my own coordinates:
+64 shadow fills for one declaration on both main and the branch (`/tmp/t48-res/shadow.html`; first contaminated pixel
+(32,10) = (85,47,172) where Chromium reads (227,127,127)) → **GOOSIE-SHADOWRUN-001**; and **0** `BORDER` commands for
+an inline `span` border (`/tmp/t48-res/inlineborder.html`) where Chromium paints 198 px of (113,63,163) →
+**GOOSIE-INLINEBORDER-001**.
+
+Registration: §8's split is adopted — **BR-198** (`P2 | INT`, display list, 2 tests / 14 sub-cases) and **BR-199**
+(`P2 | INT, PARITY`, pixel oracle + fixture 14). `expectedCaseCount` 197 → **199**, golden regenerated (199 rows),
+ratchet re-checked from the golden: `p0_tagged 20 / p0p1_tagged 84`, unchanged because both cases are P2.
+GOOSIE-INLINEBG-001 is closed with one correction to my own registry text: its evidence listed **six** duplicate run
+fills; the true number is **seven**, `(91,0,118,18)` was missing from my transcription.
+
+Not re-measured by me, and recorded as such: §7.2's **78.18%** for fixture 14 with the fix reverted. Scoring that again
+needs a second worktree plus a full Chromium re-render of the corpus, and §5's three mutations are the accepted evidence
+for this merge. The `display:contents` behaviour change (§7.1) is listed for the release note.
