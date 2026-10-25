@@ -24,6 +24,15 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
 		return
 	}
+	if obj.Style != nil && obj.Style.Opacity == 0 {
+		// A computed opacity of 0 rounds the element and its whole subtree to
+		// zero alpha, so nothing under it may reach a display list. It cannot be
+		// carried down as a command opacity either: DisplayCmd.Opacity 0 means
+		// "unset, draw opaque" (paint/cmd.go), which is exactly how an invisible
+		// box ended up painting its box-shadow at full strength. Dropping it here
+		// is what that convention documents.
+		return
+	}
 
 	childClip := inheritedClip
 	if obj.Style != nil {
@@ -61,7 +70,14 @@ func (b *Builder) paintContextFor(obj *layout.Object) boxPaintContext {
 			backgroundClip.Y0-rect.Y0, rect.X1-backgroundClip.X1,
 			rect.Y1-backgroundClip.Y1, backgroundClip.X0-rect.X0),
 		opacity: obj.Style.Opacity,
-		hidden:  obj.Style.HasClip && (obj.Style.ClipTop >= obj.Style.ClipBottom || obj.Style.ClipLeft >= obj.Style.ClipRight),
+		// box.hidden is the "this box paints nothing itself" gate: its decoration
+		// and contents are skipped while descendants are still walked, which is
+		// the semantics of both a degenerate clip rectangle and CSS
+		// `visibility: hidden` (an element that paints nothing but still lays out,
+		// and whose subtree can override it back to visible). The marker path in
+		// builder_controls.go already tests visibility the same way.
+		hidden: (obj.Style.HasClip && (obj.Style.ClipTop >= obj.Style.ClipBottom ||
+			obj.Style.ClipLeft >= obj.Style.ClipRight)) || obj.Style.Visibility != "visible",
 	}
 }
 
