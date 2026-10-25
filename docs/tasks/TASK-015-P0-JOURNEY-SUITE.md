@@ -109,3 +109,39 @@ browser.waitFor(t, "second tab created and focused", func() bool {
 Riêng `Cmd+W`, post-condition của BR-030 chính là *tab còn lại được chọn*, nên chờ `Count() == 1 && Active().ID() == firstID` thay vì chỉ đếm.
 
 Nghiệm thu: `go test -count=5 -run TestJourney ./cmd/goosie/` PASS dưới tải (một agent khác đang compile song song), và `go test -count=1 ./...` PASS toàn suite (exit 0, không FAIL/panic). Commit `95c427f`. Quy tắc này chuyển nguyên văn sang TASK-020.
+
+
+## 9. Lặp lại lần hai, ở một file khác (2026-10-25)
+
+`go test -race -count=30 -run TestJourney ./cmd/goosie/` FAIL **6/30** ở `TestJourneyServerDownShowsRecognizableErrorAndAcceptsNextNav` (BR-012, P0):
+
+```
+journey_p0_error_test.go:106: tab title for dead server = "New Tab", want 'Problem loading page'
+```
+
+Vẫn là lớp lỗi ở §8, nhưng nặng hơn một bậc. Điều kiện chờ là:
+
+```go
+return axContainsLabel(tree, deadAddr) || ...
+```
+
+`deadAddr` chính là cái URL mà test vừa gõ vào thanh địa chỉ, nên nó **đã là một label trong AX tree trước khi trang lỗi tồn tại**. Điều kiện chờ vì vậy thoả ngay khi `active.Error()` vừa được set tại `navigation.go:242`, trong khi `tab.SetTitle("Problem loading page")` phải đến dòng 256 mới chạy. Dòng 105 đọc `Title()` mà chưa chờ nó lần nào.
+
+`TestJourneyMalformedURLRecoversWithoutRetainingOldDoc` (BR-007) cùng kiểu đọc nhưng **0/30 fail**, chỉ vì điều kiện của nó có `!initialStillPresent` — tài liệu cũ biến mất nghĩa là `publishAccessibility` ở dòng 270 đã chạy, mà dòng đó nằm sau `SetTitle`. Đây là độ an toàn *mượn* từ thứ tự publish của engine, không phải thứ test tự đảm bảo.
+
+Sửa cả hai chỗ theo đúng một hình: **điều kiện chờ phải tự nó bao hàm post-condition mà dòng kế tiếp đọc**, không được mượn từ thứ tự nội bộ.
+
+```go
+return active.Title() == "Problem loading page" &&
+    (axContainsLabel(tree, "Unable to Connect") ||
+        axContainsLabel(tree, "ERR_CONNECTION_REFUSED"))
+```
+
+`deadAddr` bị bỏ khỏi điều kiện chờ vì nó không chứng nhận gì cả; `axContainsLabel(tree, "Problem loading page")` ở BR-007 cũng bị bỏ vì cùng lý do — nó đọc title từ tree thay vì đọc title thật.
+
+Nghiệm thu:
+
+* `-race -count=30 -run TestJourney` → **0 FAIL** (trước: 6 FAIL).
+* Proof định hướng oracle — xoá `tab.SetTitle("Problem loading page")` khỏi `cmd/goosie/navigation.go`: **cả 4/4 run FAIL**, và FAIL đúng kiểu `timed out waiting for error page...` chứ không phải pass giả. Gõ lại dòng đó → PASS. Tức là điều kiện chờ mới thực sự *đòi* hành vi, không chỉ tình cờ thấy nó.
+
+Bài học rút ra cho các suite sau: một điều kiện chờ chỉ mạnh bằng **label mà chỉ trang đích mới có**. Host/URL mà test tự gõ không bao giờ là nhãn chứng nhận, vì chrome hiển thị nó suốt.

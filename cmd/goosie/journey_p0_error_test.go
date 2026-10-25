@@ -50,14 +50,10 @@ func TestJourneyMalformedURLRecoversWithoutRetainingOldDoc(t *testing.T) {
 		_, initialStillPresent := findAXNode(tree, "initial-doc")
 		active := browser.f.tabMgr.Active()
 		return !initialStillPresent && active != nil && active.Error() != "" &&
-			(axContainsLabel(tree, "Problem loading page") ||
-				axContainsLabel(tree, "Try Again") ||
+			active.Title() == "Problem loading page" &&
+			(axContainsLabel(tree, "Try Again") ||
 				axContainsLabel(tree, "This Site Can’t Be Reached"))
 	})
-
-	if tab := browser.f.tabMgr.Active(); tab.Title() != "Problem loading page" {
-		t.Errorf("tab title after malformed URL = %q, want 'Problem loading page'", tab.Title())
-	}
 
 	// 4. Recover: navigate to a subsequent valid URL
 	browser.navigateViaAddressBar(t, recoveredURL)
@@ -96,15 +92,14 @@ func TestJourneyServerDownShowsRecognizableErrorAndAcceptsNextNav(t *testing.T) 
 		if active == nil || active.Error() == "" {
 			return false
 		}
-		// Error page HTML embeds the URL/host and error heading/code
-		return axContainsLabel(tree, deadAddr) ||
-			axContainsLabel(tree, "Unable to Connect") ||
-			axContainsLabel(tree, "ERR_CONNECTION_REFUSED")
+		// The dead host is itself a label in the address bar, because it is the
+		// URL that was just typed, so matching it can pass before any error page
+		// exists. Require a label only the error page body carries, plus the
+		// title the next lines read.
+		return active.Title() == "Problem loading page" &&
+			(axContainsLabel(tree, "Unable to Connect") ||
+				axContainsLabel(tree, "ERR_CONNECTION_REFUSED"))
 	})
-
-	if tab := browser.f.tabMgr.Active(); tab.Title() != "Problem loading page" {
-		t.Errorf("tab title for dead server = %q, want 'Problem loading page'", tab.Title())
-	}
 
 	// 3. Verify app is fully responsive and accepts the next navigation
 	liveServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
