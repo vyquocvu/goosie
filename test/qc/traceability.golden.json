@@ -1927,8 +1927,11 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
-    "enforced": false
+    "tests": [
+      "test/gatecheck/release_gate_test.go:TestReleaseGateDefaultListIsTheQCGate",
+      "test/gatecheck/release_gate_test.go:TestReleaseGateFailsWhenOneCommandFails"
+    ],
+    "enforced": true
   },
   {
     "id": "BR-180",

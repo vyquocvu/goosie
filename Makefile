@@ -3,7 +3,7 @@ BINARY_NAME=goosie
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*" -not -path "./_v1_old/*")
 
-.PHONY: all build build-small macos-app clean test test-race e2e bench gate wpt wpt-pilot wpt-unit
+.PHONY: all build build-small macos-app clean test test-race e2e bench gate release-gate wpt wpt-pilot wpt-unit
 
 all: build
 
@@ -62,6 +62,10 @@ wpt-pilot: build
 parity: build
 	@echo "Scoring render parity vs Chromium (fail-closed)..."
 	python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie
+
+release-gate:
+	@echo "Running the release gate (suite, vet, archtest, gate suite)..."
+	@scripts/release-gate.sh
 
 wpt: build
 	@echo "Running WPT suite..."
