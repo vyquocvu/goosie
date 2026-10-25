@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Unterminated string recovery (GOOSIE-CSSSTRING-001)</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+
+        /* The defect: an unterminated string must end at the newline (CSS Syntax
+           L3 4.3.7), so only THIS declaration is dropped. Everything below it in
+           the sheet has to keep applying. Pre-fix Goosie swallowed the rest of
+           the sheet into content and painted the CSS as page text instead. */
+        .leak::before {
+            content: """;
+        }
+
+        /* Below-fold rules: each one is invisible to Goosie if the sheet is lost. */
+        .mono { font: 16px monospace; }
+        .bar { height: 24px; background: #3498db; margin: 10px 0; }
+        .quote::before { content: "\201C"; color: #d35400; font-size: 32px; }
+        .quote::after { content: "\201D"; color: #d35400; font-size: 32px; }
+        .single::before { content: ''; }
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .grid-row { display: flex; gap: 10px; }
+        .grid-cell { flex: 1; background: #ecf0f1; padding: 8px; }
+        .rule { border-top: 2px solid #2c3e50; margin: 16px 0; }
+    </style>
+</head>
+<body>
+    <p class="label">Unterminated string above the fold, real rules below it</p>
+    <div class="bar"></div>
+    <p class="mono">The quick brown fox jumps over the lazy dog</p>
+    <div class="rule"></div>
+    <p class="quote">Quoted passage rendered with escaped curly quotes.</p>
+    <div class="grid-row">
+        <div class="grid-cell mono">cell one</div>
+        <div class="grid-cell mono">cell two</div>
+        <div class="grid-cell mono">cell three</div>
+    </div>
+
+    <div class="rule"></div>
+    <p class="label">Below the 600px fold: a gate that only sees the viewport still
+        loses every rule above if the sheet is dropped</p>
+    <p class="mono">0123456789 abcdefghij KLMNOPQRST</p>
+    <div class="bar"></div>
+    <p class="mono">Second paragraph after the fold, monospace only if the sheet survives.</p>
+    <div class="rule"></div>
+    <p class="quote">A second quoted passage, below the fold.</p>
+</body>
+</html>

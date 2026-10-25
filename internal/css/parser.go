@@ -1216,6 +1216,13 @@ func (p *parser) skipAtRule() {
 	}
 }
 
+// closesStringAt reports whether an open string ends at c. A newline ends it -
+// CSS Syntax L3 4.3.7 makes an unterminated string a bad-string at the line
+// break - so one stray quote costs a declaration instead of the rest of the
+// sheet. Chromium behaves this way; running to end of input made Goosie paint
+// the swallowed CSS as generated content.
+func closesStringAt(quote, c byte) bool { return c == quote || c == '\n' }
+
 func (p *parser) parseRule() (Rule, []Rule) {
 	var rule Rule
 
@@ -1224,7 +1231,7 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if quote != 0 {
-			if c == quote {
+			if closesStringAt(quote, c) {
 				quote = 0
 			}
 		} else if c == '\'' || c == '"' {
@@ -1248,7 +1255,7 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if quote != 0 {
-			if c == quote {
+			if closesStringAt(quote, c) {
 				quote = 0
 			}
 		} else if c == '\'' || c == '"' {
@@ -1368,6 +1375,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 		stmtStart := i
 		var quote byte
 		depth := 0
+		stmtBadString := false
 		hitChar := byte(0)
 		hitPos := -1
 		for i < n {
@@ -1375,6 +1383,9 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			if quote != 0 {
 				if c == quote {
 					quote = 0
+				} else if c == '\n' {
+					quote = 0
+					stmtBadString = true
 				}
 			} else if c == '\'' || c == '"' {
 				quote = c
@@ -1397,7 +1408,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 		if hitChar == ';' {
 			stmt := strings.TrimSpace(body[stmtStart:hitPos])
 			i = hitPos + 1
-			if stmt != "" {
+			if stmt != "" && !stmtBadString {
 				decls = append(decls, parseDeclarations(stmt)...)
 			}
 		} else if hitChar == '{' {
@@ -1435,7 +1446,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			}
 		} else {
 			trailing := strings.TrimSpace(body[stmtStart:])
-			if trailing != "" && strings.Contains(trailing, ":") {
+			if trailing != "" && strings.Contains(trailing, ":") && !stmtBadString {
 				decls = append(decls, parseDeclarations(trailing)...)
 			}
 			break
