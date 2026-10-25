@@ -39,7 +39,7 @@
     "id": "GOOSIE-AX-001",
     "priority": "P1",
     "status": "open",
-    "owner": "needs a task (BR-139)",
+    "owner": "docs/tasks/TASK-032-SELECT-ACCESSIBILITY-NODE.md",
     "summary": "<select> has no node in the accessibility tree, so an assistive user cannot see or operate the control at all - even though TASK-030 made it keyboard-operable.",
     "evidence": "BR-139. Measured while writing the BR-101 journey: the layout arena carries obj tag=\"select\" id=\"sel\", Session.AccessibilityTree() under the form returns only role=4 id=\"send\"; cmd/goosie clickNode therefore cannot address a select (journey uses clickElementByID). Recorded in docs/tasks/TASK-030-SELECT-INTERACTION.md §9.4.",
     "closed_by": ""
@@ -48,7 +48,7 @@
     "id": "GOOSIE-PSEUDO-001",
     "priority": "P1",
     "status": "open",
-    "owner": "needs a task (BR-075)",
+    "owner": "docs/tasks/TASK-033-FIRST-LETTER-DROP-CAP.md",
     "summary": "::first-letter and ::first-line are not supported, so a drop cap collapses to normal text and the paragraphs below shift up.",
     "evidence": "BR-075. Found by TASK-027: three blank bands remain in testdata/render/parity selectors/03-pseudo-elements.png at rows (457,475) (539,554) (579,599); ::before/::after content in the same fixture renders, so the residual is the missing first-letter/first-line support, not glyph coverage. docs/tasks/TASK-027-GLYPH-COVERAGE.md §6.",
     "closed_by": ""
