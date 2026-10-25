@@ -64,7 +64,11 @@ parity: build
 	python3 testdata/parity.py --render --render-chromium --binary ./bin/goosie
 
 # Opt-in, never a CI gate: it needs the network and the web changes daily. The
-# report is the product; the exit code says whether every page compared OK.
+# report is the product; the exit code says whether every compared page reached
+# the ladder's terminal rung (`UNFLAGGED`), which is not a claim that the pixels
+# agree — the report prints pct_exact and worst_iou beside it. `build` is a
+# prerequisite because the run hashes ./bin/goosie at its start and records that
+# SHA-256 as the build whose pixels are in the tables.
 live-parity: build
 	@echo "Scoring live websites against Chromium (~20 min, needs network)..."
 	python3 testdata/live-parity.py --binary ./bin/goosie
