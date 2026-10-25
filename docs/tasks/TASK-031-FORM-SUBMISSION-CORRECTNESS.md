@@ -397,4 +397,39 @@ ok  	github.com/vyquocvu/goosie/test/engine	0.554s
 - Validation có chủ đích chỉ xử lý tập con task yêu cầu; `email` được kiểm tra bằng điều kiện có `@`, không phải kiểm tra đầy đủ cú pháp địa chỉ email.
 - Engine ghi submission vào `FormSubmission`; kiểm tra không có mục chờ xác nhận engine sẽ không giao submission cho host. HTTP dispatch thực tế thuộc lớp host.
 
+### Bổ sung journey BR-105
+
+`cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid` chạy qua browser headless và thao tác pointer/keyboard, với trang được tải từ `httptest.Server`. Sau click submit khi `q` rỗng, server chỉ thấy **1 request** (GET `/form`), không thấy request search; URL vẫn là `/form` và control `q` được focus. Sau khi gõ `ready` rồi click lại, server thấy **1 request mới** (tổng: page 1, search 1), `GET /search`, payload `q=ready&other=intact&intent=send`; submitter `intent=send` có mặt.
+
+**Mutation proof [R-7] cho browser journey — mỗi lần FAIL → revert → PASS:**
+
+1. Bỏ toàn bộ khối `ValidateForm` trong `submitFormLocked`. Journey FAIL: sau click invalid, URL chuyển sang `/search?q=&other=intact&intent=send` thay vì focus `q`; request invalid đã tới host và điều hướng. Hoàn tác mutation, journey PASS.
+2. Trong `focusClick`, bỏ điều kiện `ok` của `PopSubmittedForm` và dispatch submission GET tới URL hiện tại kể cả khi engine trả nil. Journey FAIL tại bộ đếm: `requests after invalid submit = page:2 search:0, want page:1 search:0`. Điều này xác nhận phép đo đi qua host dispatch thật. Hoàn tác mutation, journey PASS.
+
+**Verification** (đã chạy; `GOCACHE` trỏ vào thư mục tạm do cache mặc định ngoài vùng ghi được):
+
+```text
+$ go test -count=1 -v ./cmd/goosie/ -run 'TestJourneyFormValidationBlocksRequestUntilValid'
+=== RUN   TestJourneyFormValidationBlocksRequestUntilValid
+--- PASS: TestJourneyFormValidationBlocksRequestUntilValid (0.06s)
+PASS
+ok  github.com/vyquocvu/goosie/cmd/goosie  0.802s
+
+$ go test -count=2 -race ./cmd/goosie/
+ok  github.com/vyquocvu/goosie/cmd/goosie  54.740s
+
+$ go test -count=1 ./test/qc/ ./internal/archtest/ ./test/engine/
+ok  github.com/vyquocvu/goosie/test/qc  0.804s
+ok  github.com/vyquocvu/goosie/internal/archtest  4.055s
+ok  github.com/vyquocvu/goosie/test/engine  5.985s
+
+$ go vet -all ./...
+# PASS (exit code 0, no diagnostics)
+
+$ go test -count=1 ./...
+# PASS (all packages; cmd/goosie 10.742s, test/gate 40.135s, test/gatecheck 33.727s)
+```
+
+QC golden chỉ thêm `cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid` vào BR-105.
+
 Đã revert tất cả mutation; không còn mutation trong source. Sau khi ghi status này, commit được tạo và `git status` được kiểm tra sạch.

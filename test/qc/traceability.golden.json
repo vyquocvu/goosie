@@ -1189,6 +1189,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid",
       "test/engine/form_submission_test.go:TestFormCheckboxRequiredValidation",
       "test/engine/form_submission_test.go:TestFormNovalidateBypass",
       "test/engine/form_submission_test.go:TestFormRadioRequiredValidation",
