@@ -50,9 +50,17 @@ Contract test cho từng invariant ở bảng trên, mỗi test mang `// qc:BR-1
 
 Registry máy đọc được, seed bằng đúng thứ đã mở thật — **bốn defect có bằng chứng, đừng để agent sau phải điều tra lại**:
 `GOOSIE-RENDER-001` (P1, `docs/qa-test-plan.md` §QA-002: chưa có frame-by-frame evidence để đóng phần nhấp nháy), và
-bốn gap engine ghi ở `docs/tasks/TASK-026-FORM-JOURNEYS.md` §8: `<select>` không tương tác được (`engine.go:1576`, `builder_controls.go:269`),
-không validation `required`/`type` trước submit, submitter name/value bị bỏ (`forms.go:72,88`), và
-`cmd/goosie/interaction.go:44-58` không `publishAccessibility` sau khi kích hoạt control.
+ba gap engine ghi ở `docs/tasks/TASK-026-FORM-JOURNEYS.md` §8 (bản đã xác minh lại 2026-10-25):
+
+* `GOOSIE-SELECT-001` (P1) — `<select>` focus được nhưng không đổi được value: `internal/engine/focus.go:573-590 IsActivatable` không có `select`, `internal/engine/events.go:75 keyDefaultAction` không có nhánh Arrow/Home/End nên phím rơi vào `cmd/goosie/interaction.go:425 scrollContentKey`. Spec fix: `docs/tasks/TASK-030-SELECT-INTERACTION.md` (BR-101).
+* `GOOSIE-VALIDATE-001` (P1) — `internal/engine/engine.go:1619 submitFormLocked` dispatch `submit` rồi collect và gửi ngay, không đọc `required`/`type`. Spec fix: `docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-105).
+* `GOOSIE-SUBMITTER-001` (P1) — `internal/engine/forms.go:70-72,88 isSuccessfulControl` loại button khỏi form data và `internal/engine/engine.go:1560-1568 runClickDefault` gọi `SubmitForm(form)` không truyền submitter. Spec fix: `docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-107).
+
+**Không seed defect AX-publish nào.** §8 bản đầu nghi `cmd/goosie/interaction.go:44-58` không
+publish accessibility sau khi kích hoạt; đã bác bỏ: `repaintTab` (`cmd/goosie/presentation.go:116`)
+kết thúc bằng `publishAccessibility()` ở cả hai nhánh (`:167`, `:185`), và
+`cmd/goosie/journey_p1_forms_test.go:46-49` chứng minh `node.Focused` đổi trong AX tree ngay sau
+`clickNode`. Defect chỉ được ghi vào registry khi đã **đo**, không phải khi đọc thấy có vẻ thiếu.
  Trường: `id, priority, status (open|closed|waived), owner, summary, evidence, closed_by`.
 Ratchet cho golden: một `qa-ratchet.json` ghi `{"p0_tagged": <n>, "p0p1_tagged": <n>}`. Sweep fail (exit 1) nếu số giảm, hoặc nếu có P0 không tagged. **Nâng số là hợp lệ, hạ số phải kèm lý do trong commit.**
 

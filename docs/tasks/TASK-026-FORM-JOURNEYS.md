@@ -303,7 +303,7 @@ ok  	github.com/vyquocvu/goosie/test/qc	0.493s
 
 
 
-## 8. Integrator review (2026-10-25) — landed, và bốn gap engine mà §7 để lộ
+## 8. Integrator review (2026-10-25) — landed, ba gap engine thật + một claim của chính integrator đã bị bác bỏ
 
 **Đã xác nhận bằng lệnh thật, không đọc báo cáo:**
 
@@ -314,13 +314,19 @@ ok  	github.com/vyquocvu/goosie/test/qc	0.493s
 
 **Một lỗi submissions phải sửa trước khi merge** — và nó là lý do §8 tồn tại: BR-101/BR-105/BR-107 mang `// qc:BR-xxx` trên ba test mà dòng đầu tiên của body là `t.Skip(...)`. Golden vì thế **tuyên bố đã phủ ba case mà không có một assertion nào**. Đã bỏ tag và thêm luật thường trực vào gate (`test/qc/traceability_test.go`): tag đặt lên test skip vô điều kiện ⇒ `t.Errorf`, và luật này tự chứng minh vì đúng ba dòng đó fail ngay khi thêm, không fail oan case nào khác. `t.Skip` **có điều kiện** (thiếu display, thiếu font trên máy chạy) vẫn được tính — đó là case TASK-027 sẽ dùng.
 
-**Bốn gap engine ghi nhận từ §7.3/§7.5, đưa vào `docs/qa-open-defects.json` của TASK-029:**
+**Ba gap engine ghi nhận từ §7.3/§7.5 (bốn nghi vấn, một đã bị bác bỏ ở dòng cuối bảng), đưa vào
+`docs/qa-open-defects.json` của TASK-029:**
 
 | Gap | Chỗ chặn | Vì sao đáng sửa |
 | --- | --- | --- |
-| `<select>` không tương tác được | `engine.go:1576 activatableAt` không có `select`; phím mũi tên rơi vào `scrollContentKey`; `builder_controls.go:269 paintSelect` chỉ vẽ nhãn option hiện tại | Người dùng không chọn được option nào bằng UI thật, kể cả khi DOM đã có `selected`. Đây là case P1 bị block, không phải P2. |
+| `<select>` không tương tác được | `internal/engine/focus.go:573-590 IsActivatable` không có `select` (`engine.go:1576 activatableAt` chỉ là hit-test gọi nó); `select` **có** focusable (`focus.go:193, :807`) nhưng `events.go:75 keyDefaultAction` không có nhánh Arrow/Home/End nên phím rơi về `cmd/goosie/interaction.go:298` → `:425 scrollContentKey` và cuộn trang; `internal/paint/builder_controls.go:269 paintSelect` chỉ vẽ nhãn option hiện tại | Người dùng không chọn được option nào bằng UI thật, kể cả khi DOM đã có `selected`. Đây là case P1 bị block, không phải P2. Spec fix: `docs/tasks/TASK-030-SELECT-INTERACTION.md`. |
 | Không có validation `required`/`type` trước submit | `Session.SubmitForm` dispatch `submit` và gửi request ngay cả khi control bắt buộc còn trống | Form rỗng vẫn bay lên server: hành vi sai ở đường cùng của người dùng. |
 | Submitter name/value bị bỏ | `forms.go:72,88 isSuccessfulControl` return false với button | Hai nút "Save"/"Publish" trong cùng form cho server kết quả **giống hệt nhau**. |
-| AX tree không publish sau khi kích hoạt control | `cmd/goosie/interaction.go:44-58`: nhánh `if activated` gọi `repaintTab` rồi `return true`, **không** gọi `publishAccessibility()` (18 chỗ khác có gọi) | Tree phục vụ assistive tech và chính test journey: trang đổi trạng thái mà cây AX còn nguyên. May là §7.3 đã né đúng chỗ này — agent đếm `change` event qua payload HTTP thay vì đọc AX, nên test không bị thành oracle mù. |
+| ~~AX tree không publish sau khi kích hoạt control~~ — **claim của §8, đã bác bỏ** | `cmd/goosie/repaintTab` **có** publish: `presentation.go:116` mở đầu hàm và kết thúc bằng `f.publishAccessibility()` ở `:167` **và** `:185` (cả hai nhánh). Journey `cmd/goosie/journey_p1_forms_test.go:46-49` là bằng chứng thực nghiệm: `clickNode(t, "txtinput")` xong `node.Focused == true` đọc được từ `AccessibilityTree()`. Nhánh duy nhất return mà không publish là `PopSubmittedForm` (`interaction.go:43-46`) - và navigation sẽ publish ngay sau đó, nên cũng không phải gap. | Ghi lại vì nó **là** lỗi: §8 ban đầu assert từ đọc `interaction.go` rồi kết luận gap, không mở body `repaintTab`. Bài học cho cả agent lẫn integrator: "hàm X không gọi Y" chỉ được kết luận khi đã đọc thân hàm X. |
 
-Ba gap đầu cần task engine riêng (chưa có người); gap thứ tư nhỏ và rõ chỗ sửa, có thể ghép vào task chrome bất kỳ.
+**Trạng thái sau khi sửa §8:** còn **ba** gap engine thật (không phải bốn), và cả ba đã có
+spec: `docs/tasks/TASK-030-SELECT-INTERACTION.md` (BR-101) và
+`docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-105 validation + BR-107
+submitter, đi chung vì cùng nằm trên `submitFormLocked` → `CollectFormData`). Chưa gán
+người cho hai task đó. Gap thứ tư đã bị bác bỏ ở trên — nó là lỗi của chính integrator,
+không phải của engine.
