@@ -344,15 +344,130 @@ func TestJourneyRadioGroupSelection(t *testing.T) {
 	})
 }
 
-// BR-101 stays open: engine gap, reproducer in docs/tasks/TASK-026-FORM-JOURNEYS.md
-// section 7.5. Deliberately untagged - the body skips, and a tag on a skipping
-// test is a coverage claim with no assertion behind it.
+// qc:BR-101
 func TestJourneySelectOptionChange(t *testing.T) {
-	// Catalog BR-101: "Chọn option trong select bằng chuột/bàn phím → value, focus và paint khớp lựa chọn."
-	// BLOCKED [AC-07]: Engine Goosie hiện tại chưa cài đặt bất kỳ cơ chế tương tác người dùng nào
-	// (chuột click mở popup hay bàn phím Arrow Up/Down) trên phần tử <select> để chuyển đổi <option>.
-	// Xem chi tiết reproducer tối giản trong docs/tasks/TASK-026-FORM-JOURNEYS.md §Status.
-	t.Skip("BLOCKED by engine: engine lacks keyboard/mouse option selection interaction on <select>")
+	// Catalog BR-101: "Chọn option trong select bằng bàn phím → value, focus và
+	// paint khớp lựa chọn."
+	var reqMu sync.Mutex
+	var submits int
+	var received url.Values
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/picked" {
+			reqMu.Lock()
+			submits++
+			received = r.URL.Query()
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Picked</h1></body></html>`)
+			return
+		}
+		// Tall filler below the form so the page has a real scroll range: a key
+		// misrouted to the scroller becomes observable.
+		fmt.Fprint(w, `<!doctype html><html><body style="margin: 0;">`+
+			`<form id="f" action="/picked" method="GET">`+
+			`<select id="sel" name="opt">`+
+			`<option value="1">One</option>`+
+			`<option value="2">Two</option>`+
+			`<option value="3">Three</option>`+
+			`</select>`+
+			`<input type="submit" id="send" value="Send">`+
+			`</form>`+
+			`<div style="height: 1200px;"></div>`+
+			`</body></html>`)
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/pick.html"
+	browser.navigateViaAddressBar(t, pageURL)
+
+	browser.waitFor(t, "page loaded and the form is in the accessibility tree", func() bool {
+		if browser.activeURL() != pageURL {
+			return false
+		}
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "send")
+		return ok
+	})
+
+	focusOnSelect := func() bool {
+		tab := browser.f.tabMgr.Active()
+		if tab == nil || tab.Session() == nil {
+			return false
+		}
+		n := tab.Session().Focused()
+		return n != nil && n.Element() && n.Data == "select"
+	}
+
+	browser.clickElementByID(t, "sel")
+	browser.waitFor(t, "select owns focus", focusOnSelect)
+
+	scrollAtFocus := browser.f.sched.Viewport().Offset.Y
+	rasterAtFocus := browser.f.loop.Stats().Rasterize
+	sess := browser.f.tabMgr.Active().Session()
+	// Read the selection through the engine, not the DOM: the chrome pump
+	// rewrites the option "selected" attributes on its own goroutine, so
+	// walking nodes from here is a data race. -race caught exactly that.
+	selectedValue := sess.FocusedSelectValue
+
+	// record presses one platform key and requires the selection to follow it,
+	// the focus to stay on the select, and the viewport not to move.
+	// 0xF700/0xF701 are the private-use runes the platform delivers for Up and
+	// Down; 0xF704/0xF705 are Home and End, the interesting ones because they
+	// are page-scroll keys for every other focused element.
+	record := func(key rune, name, want string) {
+		browser.pressKey(t, key)
+		browser.waitFor(t, name+" moves the selection to "+want+" without scrolling the page", func() bool {
+			return selectedValue() == want &&
+				browser.f.sched.Viewport().Offset.Y == scrollAtFocus &&
+				focusOnSelect()
+		})
+	}
+
+	// Nothing authored selected, so the first option is the current one.
+	if got := selectedValue(); got != "1" {
+		t.Fatalf("before any key the select reports value %q, want 1", got)
+	}
+	record(0xF701, "ArrowDown", "2")
+	record(0xF704, "Home", "1")
+	record(0xF705, "End", "3")
+
+	browser.clickNode(t, "send")
+
+	browser.waitFor(t, "the moved option reaches the server", func() bool {
+		reqMu.Lock()
+		defer reqMu.Unlock()
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
+		return ok && submits == 1 && received.Get("opt") != ""
+	})
+
+	reqMu.Lock()
+	count := submits
+	params := received
+	reqMu.Unlock()
+
+	if count != 1 {
+		t.Fatalf("the server saw %d submissions, want exactly 1", count)
+	}
+	// Down -> Two, Home -> One, End -> Three.
+	if got := params.Get("opt"); got != "3" {
+		t.Fatalf("ArrowDown, Home, End then submit sent opt=%q, want opt=3: the last selection the user made must be the value sent", got)
+	}
+	if len(params) != 1 {
+		t.Fatalf("submission carried %d parameters (%v), want only opt", len(params), params)
+	}
+	if got := browser.f.sched.Viewport().Offset.Y; got != scrollAtFocus {
+		t.Fatalf("the select keys moved the viewport from %d to %d device px", scrollAtFocus, got)
+	}
+	// Paint must follow the selection. The tile cache only rasterizes a tile
+	// whose content it has not seen before, so moving back to an earlier label
+	// counts as reuse; the requirement is therefore at least one new
+	// rasterization across the three changes, not one per change.
+	if got := browser.f.loop.Stats().Rasterize; got == rasterAtFocus {
+		t.Fatalf("no tile was rasterized across three selection changes (counter stayed at %d); the painted label cannot have followed the selection", got)
+	}
 }
 
 // qc:BR-102

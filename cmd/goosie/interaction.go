@@ -294,7 +294,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			return true
 		}
 	}
-	if !cmd && !tab.Session().FocusedEditable() {
+	if !cmd && !tab.Session().FocusedEditable() && tab.Session().FocusedSelect() == nil {
 		if f.scrollContentKey(tab, key, mods&surface.ModShift != 0) {
 			return true
 		}
@@ -402,6 +402,13 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		action = engine.EditRune
 	default:
 		return false
+	}
+
+	sess := tab.Session()
+	if sess.FocusedSelect() != nil && sess.MoveSelect(action) {
+		f.reflowAfterControlEdit(tab)
+		f.repaintTab(tab, frame.Rect{})
+		return true
 	}
 
 	changed := tab.Session().Edit(action, key)
