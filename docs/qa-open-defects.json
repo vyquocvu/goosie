@@ -104,7 +104,7 @@
     "status": "open",
     "owner": "docs/tasks/TASK-014-QC-TRACEABILITY.md",
     "summary": "104 of the 161 P0/P1 QA cases still have no tagged test, so most of the manual catalogue remains unverified automatically even though every P0 case is now tagged.",
-    "evidence": "test/qc/traceability.golden.json at 130bc9a: 185 cases, P0 19/19 tagged, P0+P1 161 cases of which 57 tagged. scripts/rc-sweep.sh:117-119 only fails the sweep when a P0 case loses its test or the count drops below docs/qa-ratchet.json, so the untagged majority is invisible to the gate.",
+    "evidence": "test/qc/traceability.golden.json at 960b722: 185 cases, P0 19/19 tagged, P0+P1 161 cases of which 57 tagged, so 104 P1 cases have no tagged test. Split by catalog method: 74 carry only machine-checkable methods (INT/PARITY/SEC), 13 pair CUA with a machine method, and 17 are labelled CUA-only - but docs/tasks/TASK-035-CHROME-STATE-ZOOM-AX.md §1 measured that BR-126/127/128/129/130/131 of that last group already ship real app paths (cmd/goosie/toolbar_window.go:286-290 disabled flags and the Stop label swap, cmd/goosie/interaction.go:648-657 clampZoom) and are assertable through the accessibility tree, so CUA-only overstates how much must stay manual. scripts/rc-sweep.sh:117-119 fails only when a P0 case loses its test or the count falls below docs/qa-ratchet.json, so the untagged majority is invisible to the gate.",
     "closed_by": ""
   }
 ]
