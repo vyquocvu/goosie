@@ -213,8 +213,8 @@ của miền nó thuộc về; miền chức năng vẫn do section chứa nó q
 - **BR-173 | P1 | INT | NOT RUN** — Chạy gate trên trang tĩnh không đổi → style/layout/paint/tile counters không tăng lặp vô ích sau khi settle.
 - **BR-174 | P1 | INT | NOT RUN** — Scroll qua trang có tile cache → tile expose mới được rasterize, tile còn hợp lệ được reuse đúng.
 - **BR-175 | P1 | INT | NOT RUN** — Chạy headless trên máy không có display → loop/scheduler/composer/Present chạy bằng headless backend.
-- **BR-176 | P1 | PARITY | NOT RUN** — Chạy render parity corpus → mọi fixture có reference cho kết quả; diff được xuất để xem và không âm thầm bỏ fixture fail.
-- **BR-177 | P1 | PARITY | NOT RUN** — Thiếu Chromium/reference artifact rồi chạy parity → lệnh fail-closed hoặc báo BLOCKED, không báo PASS giả.
+- **BR-176 | P1 | PARITY | PASS** — Chạy render parity corpus → mọi fixture có reference cho kết quả; diff được xuất để xem và không âm thầm bỏ fixture fail. `make parity` chấm 81/81 fixture trên nhánh này; `TestParityFixtureFloorMatchesCorpus` đếm 81 file HTML và so với `MIN_SCORED_FIXTURES`, tạm đặt floor 999 thì test red nên floor thật sự chặn. Chạy 2026-10-26.
+- **BR-177 | P1 | PARITY | PASS** — Thiếu Chromium/reference artifact rồi chạy parity → lệnh fail-closed hoặc báo BLOCKED, không báo PASS giả. Render bị thiếu luôn báo MISSING, corpus dưới floor thoát 2, known-gaps baseline phải khớp đúng số band đo được; `TestParitySelftestIsGreen` (5 case selftest) và `TestParityRejectsNoStrictFlag` (`--no-strict` không còn được nhận, rc khác 0) xanh trong `test/gatecheck`. Chạy 2026-10-26.
 - **BR-178 | P1 | PARITY | NOT RUN** — Chạy interaction parity cho click/focus/key fixtures → thứ tự event và trạng thái cuối so sánh với reference.
 - **BR-179 | P0 | INT | NOT RUN** — Chạy go test ./..., go vet -all ./..., archtest và gate suite trên commit ứng viên → tất cả lệnh exit 0; lưu log/artifact.
 - **BR-180 | P0 | CUA, PARITY | NOT RUN** — Trên build release candidate, chạy lại toàn bộ P0/P1 CUA liên quan và visual parity, gồm Google Products live smoke sau fixture → không còn lỗi P0/P1 mở, evidence đủ và sign-off theo DoD.

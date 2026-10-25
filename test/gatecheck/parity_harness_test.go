@@ -78,9 +78,12 @@ func TestParitySelftestIsGreen(t *testing.T) {
 }
 
 // TestParityFixtureFloorMatchesCorpus reads MIN_SCORED_FIXTURES straight out of
-// testdata/parity.py and asserts it equals the real count of HTML fixtures.
-// Neither number may be hard-coded twice, so shrinking the corpus (deleting a
-// fixture) is caught here the same way parity.py's main() catches it at runtime.
+// testdata/parity.py and asserts the real count of HTML fixtures is at least
+// that floor. Neither number may be hard-coded twice, so shrinking the corpus
+// (deleting fixtures so the denominator falls) is caught here the same way
+// parity.py's main() catches it at runtime. The floor only polices downward
+// movement: adding a fixture must not fail this test, and locking the gain is
+// done by raising MIN_SCORED_FIXTURES to the new count in the same change.
 // qc:BR-176
 func TestParityFixtureFloorMatchesCorpus(t *testing.T) {
 	root := parityRepoRoot(t)
@@ -115,9 +118,10 @@ func TestParityFixtureFloorMatchesCorpus(t *testing.T) {
 	if count == 0 {
 		t.Fatal("no HTML fixtures found under testdata/render")
 	}
-	if count != floor {
-		t.Errorf("testdata/render has %d HTML fixtures but MIN_SCORED_FIXTURES is %d; "+
-			"the corpus shrank or the floor drifted (add a fixture -> bump both, delete -> this must stay equal)",
+	if count < floor {
+		t.Errorf("testdata/render has %d HTML fixtures, below MIN_SCORED_FIXTURES %d; "+
+			"the render corpus shrank, so the parity denominator is no longer honest "+
+			"(raising the floor to the new count is how an added fixture locks in)",
 			count, floor)
 	}
 }

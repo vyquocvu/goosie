@@ -47,13 +47,14 @@ from PIL import Image, ImageDraw, ImageFont
 THRESHOLD = 30
 PASS_AT = 90.0
 # Floor on the number of scored fixtures.  Equals the count of
-# testdata/render/**/*.html at the time this gate was written; raise it by 1
-# only when a new fixture is added.  A scored corpus below this number means
-# fixtures silently disappeared, so the run is reported as broken (exit 2)
-# rather than as a healthy 100%.  test/gatecheck/parity_harness_test.go counts
-# the real HTML files and compares against this exact line, so the two cannot
-# drift apart.
-MIN_SCORED_FIXTURES = 80
+# testdata/render/**/*.html as of the last time the corpus grew; it may only
+# rise, and raising it by 1 in the same change that adds a fixture is how that
+# gain gets locked in.  A scored corpus below this number means fixtures
+# silently disappeared, so the run is reported as broken (exit 2) rather than
+# as a healthy 100%.  test/gatecheck/parity_harness_test.go counts the real HTML
+# files and fails if the count falls below this exact line, so the two cannot
+# drift apart - and adding a fixture must never red that test by itself.
+MIN_SCORED_FIXTURES = 81
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

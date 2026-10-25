@@ -253,3 +253,65 @@ rc-sweep (BR-180) đọc bản golden đã commit (chưa đổi) → không bị
   inflation. Nếu `/tmp` trống, proof (iv) vẫn chạy qua selftest case 3 (corpus tạm).
 - `go test ./test/qc/` đỏ do golden stale — **có chủ đích**, integrator `-update`.
 - `--inspect` output: ngoài phạm vi (§6), không đổi.
+
+## 8. Integration (integrator làm sau khi nhận branch)
+
+Nhận branch ở `62fd38c`, merge `main` (TASK-041 đã landing) vào thành `bcc4c83`, rồi xử lý
+ba hệ quả mà §7 không thể biết trước:
+
+**8.1 `MIN_SCORED_FIXTURES` và cái ghim `==`.** §7 đặt sàn 80 và Go test assert
+`count == floor`. TASK-041 thêm `css-features/08-bad-string-recovery.html` → corpus thành 81,
+nên `TestParityFixtureFloorMatchesCorpus` **đỏ trên main ngay khi TASK-041 landing** — đỏ vì
+corpus *tăng*, tức gate tự phạt một cải thiện. Đã đổi semantic sang ratchet một chiều:
+`count < floor` mới fail (`parity_harness_test.go:121`), comment ghi rõ "adding a fixture must
+never red that test by itself; locking the gain = raising the floor in the same change", và
+`MIN_SCORED_FIXTURES` 80 → 81. Proof sàn vẫn chặn: tạm đặt floor 999 ⇒
+`testdata/render has 81 HTML fixtures, below MIN_SCORED_FIXTURES 999` → FAIL, rồi khôi phục.
+`len(results) < MIN_SCORED_FIXTURES` trong `parity.py:main()` giữ nguyên, vẫn thoát 2.
+
+**8.2 Traceability.** `go test ./test/qc/ -run Traceability -update` đã re-sync golden:
+BR-176 → 1 test, BR-177 → 2 tests (`test/gatecheck/parity_harness_test.go`). Catalog:
+BR-176/BR-177 `NOT RUN` → `PASS` kèm số đo thật (81/81 fixture, selftest 5 case,
+`--no-strict` rc khác 0), vì `traceability_test.go:78` cấm một row PASS mà không có tag.
+`docs/qa-ratchet.json`: `p0_tagged` 19 giữ nguyên, `p0p1_tagged` **67 → 69** (đo từ golden sau
+khi regenerate, nâng trên chính nhánh thêm tag theo quy tắc floor-chỉ-tăng).
+
+**8.3 Điều §7 chưa biết và vẫn còn mở: parity được đo trên một host.** Bằng chứng CI gần nhất
+(run 40107385303, `c8cd80b` 2026-10-24, ubuntu-latest, playwright 1.49.1) chấm
+**66/80 PASS, avg 93.638%, 14 fixture FAIL trong dải 80.33–89.90%** — mọi fixture đều sát ngay
+dưới `PASS_AT = 90.0`, trong khi cũng corpus đó trên máy macOS này cho 81/81. Báo cáo JSON của
+run đó không có field vùng nào (`score_regions`/`blank_regions` chưa tồn tại ở `c8cd80b`, đã
+`grep -c blank_regions = 0`), nên **không suy ra được** CI sẽ ra sao với điều kiện
+`len(blank_rows) != allowed_blanks` mới: con số band trên Linux chưa từng được đo. Hệ quả thật
+sự của ratchet đẳng thức: `render-known-gaps.json` bây giờ là *per-host baseline*; trên host
+khác, một band lệch đi sẽ FAIL với "known-gap baseline is stale" thay vì âm thầm đạt. Đó là
+hành vi fail-closed đúng ý §2, nhưng nó có nghĩa là "make parity xanh trên máy tôi" không còn
+là bằng chứng "parity xanh" — đã ghi thành defect riêng trong `docs/qa-open-defects.json`,
+không giấu vào §7.
+
+**8.4 Lệnh integrator đã chạy trên nhánh sau khi hợp main (`bcc4c83` + các sửa đổi 8.1–8.3).**
+
+```
+$ go test -count=1 ./...          -> rc 0, 42 packages ok
+$ go vet -all ./...               -> rc 0 (silent)
+$ go test -count=1 ./internal/archtest/
+  ok  github.com/vyquocvu/goosie/internal/archtest   3.456s
+$ go test -count=1 ./test/qc/ ./test/gatecheck/
+  ok  github.com/vyquocvu/goosie/test/qc          0.530s
+  ok  github.com/vyquocvu/goosie/test/gatecheck  25.807s
+$ python3 testdata/parity.py      -> rc 0
+  81/81 passing (100.0%), 0 failing, 0 errors
+  average match: 96.09%  (threshold=30, pass_at=90.0%)
+  known gaps: 5 fixtures / 10 bands  (mỗi fixture đo == declared: forms/04 2/2,
+  html-features/01 1/1, selectors/02 3/3, unicode/02 1/1, selectors/03 3/3)
+```
+
+Lần chạy full suite **đầu tiên** sau khi sửa catalog đã red đúng một package:
+`test/qc — traceability.golden.json is stale`, vì golden lưu cả `status` của row, nên
+flip `NOT RUN → PASS` làm nó lệch lần hai. Re-sync lại golden sau khi sửa catalog là thứ tự
+đúng (`-update` phải chạy *sau* chỉnh catalog, không phải trước). `p0p1_tagged` đo lại từ
+bản golden cuối: 19 / 69, khớp `docs/qa-ratchet.json`.
+
+Ràng buộc §7 nêu và integrator xác nhận bằng chính phép đo CI ở 8.3: `make parity` xanh trên
+một host là bằng chứng *của host đó*. Trước khi gate này được dùng làm bằng chứng phát hành,
+cần một lần chạy trên ubuntu-latest (defect `GOOSIE-CIPARITY-001`).
