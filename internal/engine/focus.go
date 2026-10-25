@@ -396,7 +396,7 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 		}
 		if s.focus.DataAtom == dom.AtomInput {
 			if form := FindForm(s.focus); form != nil {
-				s.submitFormLocked(form)
+				s.submitFormLocked(form, FirstSubmitButton(form))
 				return true
 			}
 		}

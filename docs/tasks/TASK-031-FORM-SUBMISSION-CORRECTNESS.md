@@ -105,4 +105,296 @@ phải xanh. Không nới limit trong `internal/engine/limits.go` để sửa bu
 
 ## 7. Status
 
-Chưa bắt đầu.
+Hoàn tất phần implementation và verification trên branch `worktree-task-031-form-submission`.
+
+### Thay đổi
+
+- Đổi API thành `SubmitForm(form, submitter)` và `CollectFormData(form, submitter)`, không giữ overload cũ. Click truyền đúng button; Enter truyền submit button đầu tiên theo tree order. Submitter được thu đúng một lần, tại vị trí tree order của nó; button không có `type` được xem là submit.
+- Thêm validation subset `required`, `email`, `number`; `novalidate` bỏ qua validation. Invalid event fire theo thứ tự tree trên từng control invalid, focus chuyển tới control invalid đầu tiên, và submission không được xếp hàng. Validation diễn ra trước submit event và `method="dialog"`.
+- Bổ sung giá trị mặc định `on` cho checkbox/radio và đọc `button[value]` khi serialize form.
+- Có 9 test function mới (15 case/subtest), tagged `// qc:BR-105` và `// qc:BR-107`; cập nhật traceability bằng `go test ./test/qc -update`.
+- Các test engine xác nhận không có `FormSubmission` đang chờ khi invalid. Session engine xếp hàng `FormSubmission` cho host; nó không tự phát HTTP request trong `SubmitForm`.
+
+### Hiệu chỉnh bằng chứng §1
+
+Đã xác nhận các dòng evidence còn lại trong bảng trên nhánh này. Hai trích dẫn sau không khớp source hiện tại, ghi lại để không âm thầm dựa vào chúng:
+
+- `internal/engine/focus.go:378` không phải call site Enter; đó là dòng cuối của helper `insert`. Call site `s.submitFormLocked(form)` nằm ở `internal/engine/focus.go:399` trước sửa. Nay truyền `FirstSubmitButton(form)` tại dòng 399.
+- `internal/css/selector.go:887,934` không phải `:required` selector. Dòng 887–909 thuộc kiểm tra option `:checked`; 934 thuộc danh sách phần tử `:disabled`. `rg -n required internal/css/selector.go` chỉ tìm thấy comment không liên quan ở dòng 855. Kết luận không có required validation ở submit path vẫn đúng; không tìm thấy checker `required` trong selector file.
+
+### Verification nguyên văn
+
+Mỗi test function mới được chạy riêng với `-count=1`. Tất cả đều PASS:
+
+```text
+$ go test -count=1 ./test/engine/ -v -run '^TestFormRequiredValidation$'
+=== RUN   TestFormRequiredValidation
+--- PASS: TestFormRequiredValidation (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.757s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormCheckboxRequiredValidation$'
+=== RUN   TestFormCheckboxRequiredValidation
+--- PASS: TestFormCheckboxRequiredValidation (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.536s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormRadioRequiredValidation$'
+=== RUN   TestFormRadioRequiredValidation
+--- PASS: TestFormRadioRequiredValidation (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.558s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormValidationTypes$'
+=== RUN   TestFormValidationTypes
+=== RUN   TestFormValidationTypes/email
+=== RUN   TestFormValidationTypes/number
+--- PASS: TestFormValidationTypes (0.00s)
+    --- PASS: TestFormValidationTypes/email (0.00s)
+    --- PASS: TestFormValidationTypes/number (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.552s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormNovalidateBypass$'
+=== RUN   TestFormNovalidateBypass
+--- PASS: TestFormNovalidateBypass (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.542s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormSubmitterClickAndImplicit$'
+=== RUN   TestFormSubmitterClickAndImplicit
+=== RUN   TestFormSubmitterClickAndImplicit/clicked_submitter
+=== RUN   TestFormSubmitterClickAndImplicit/implicit_submitter
+--- PASS: TestFormSubmitterClickAndImplicit (0.00s)
+    --- PASS: TestFormSubmitterClickAndImplicit/clicked_submitter (0.00s)
+    --- PASS: TestFormSubmitterClickAndImplicit/implicit_submitter (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.553s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormSubmitterWithoutNameOmitted$'
+=== RUN   TestFormSubmitterWithoutNameOmitted
+--- PASS: TestFormSubmitterWithoutNameOmitted (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.541s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormButtonDefaultTypeSubmits$'
+=== RUN   TestFormButtonDefaultTypeSubmits
+--- PASS: TestFormButtonDefaultTypeSubmits (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.549s
+
+$ go test -count=1 ./test/engine/ -v -run '^TestFormTextareaSelectAndDialogValidation$'
+=== RUN   TestFormTextareaSelectAndDialogValidation
+=== RUN   TestFormTextareaSelectAndDialogValidation/textarea_and_select
+=== RUN   TestFormTextareaSelectAndDialogValidation/method_dialog
+--- PASS: TestFormTextareaSelectAndDialogValidation (0.00s)
+    --- PASS: TestFormTextareaSelectAndDialogValidation/textarea_and_select (0.00s)
+    --- PASS: TestFormTextareaSelectAndDialogValidation/method_dialog (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.550s
+
+$ go test -count=5 ./test/engine/ -run 'TestForm(RequiredValidation|CheckboxRequiredValidation|RadioRequiredValidation|ValidationTypes|NovalidateBypass|SubmitterClickAndImplicit|SubmitterWithoutNameOmitted|ButtonDefaultTypeSubmits|TextareaSelectAndDialogValidation)$'
+ok  	github.com/vyquocvu/goosie/test/engine	0.545s
+
+$ go test -count=1 -race ./test/engine/ ./cmd/goosie/ ./internal/engine/
+ok  	github.com/vyquocvu/goosie/test/engine	24.569s
+ok  	github.com/vyquocvu/goosie/cmd/goosie	27.340s
+ok  	github.com/vyquocvu/goosie/internal/engine	2.275s
+
+$ go test -count=1 ./...
+?   	github.com/vyquocvu/goosie/cmd/debug-layout	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-fonts	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-layout	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-paint	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/dump-url	[no test files]
+ok  	github.com/vyquocvu/goosie/cmd/goosie	12.501s
+?   	github.com/vyquocvu/goosie/cmd/goosie-headless	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/test_colors	[no test files]
+?   	github.com/vyquocvu/goosie/cmd/wpt-runner	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/archtest	3.896s
+?   	github.com/vyquocvu/goosie/internal/ax	[no test files]
+?   	github.com/vyquocvu/goosie/internal/bookmarks	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/css	1.766s
+ok  	github.com/vyquocvu/goosie/internal/dom	1.350s
+ok  	github.com/vyquocvu/goosie/internal/download	2.783s
+ok  	github.com/vyquocvu/goosie/internal/engine	1.000s
+?   	github.com/vyquocvu/goosie/internal/flags	[no test files]
+?   	github.com/vyquocvu/goosie/internal/frame	[no test files]
+?   	github.com/vyquocvu/goosie/internal/history	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/image	3.662s
+?   	github.com/vyquocvu/goosie/internal/js	[no test files]
+?   	github.com/vyquocvu/goosie/internal/layout	[no test files]
+?   	github.com/vyquocvu/goosie/internal/manifest	[no test files]
+?   	github.com/vyquocvu/goosie/internal/media	[no test files]
+?   	github.com/vyquocvu/goosie/internal/net	[no test files]
+?   	github.com/vyquocvu/goosie/internal/paint	[no test files]
+?   	github.com/vyquocvu/goosie/internal/pdf	[no test files]
+?   	github.com/vyquocvu/goosie/internal/perms	[no test files]
+?   	github.com/vyquocvu/goosie/internal/platform	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/platform/darwin	3.767s
+?   	github.com/vyquocvu/goosie/internal/platform/headless	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/preferences	1.776s
+?   	github.com/vyquocvu/goosie/internal/raster	[no test files]
+?   	github.com/vyquocvu/goosie/internal/session	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/style	2.617s
+?   	github.com/vyquocvu/goosie/internal/surface	[no test files]
+ok  	github.com/vyquocvu/goosie/internal/tabs	4.046s
+ok  	github.com/vyquocvu/goosie/internal/toolbar	2.259s
+?   	github.com/vyquocvu/goosie/internal/userscript	[no test files]
+?   	github.com/vyquocvu/goosie/internal/viewsource	[no test files]
+ok  	github.com/vyquocvu/goosie/test/bookmarks	3.439s
+ok  	github.com/vyquocvu/goosie/test/css	3.431s
+ok  	github.com/vyquocvu/goosie/test/dom	3.237s
+ok  	github.com/vyquocvu/goosie/test/domtest	3.557s
+ok  	github.com/vyquocvu/goosie/test/download	3.672s
+ok  	github.com/vyquocvu/goosie/test/engine	9.121s
+ok  	github.com/vyquocvu/goosie/test/entrypoints	26.628s
+ok  	github.com/vyquocvu/goosie/test/flags	3.513s
+ok  	github.com/vyquocvu/goosie/test/frame	3.621s
+ok  	github.com/vyquocvu/goosie/test/gate	36.939s
+ok  	github.com/vyquocvu/goosie/test/gatecheck	34.753s
+ok  	github.com/vyquocvu/goosie/test/history	3.735s
+ok  	github.com/vyquocvu/goosie/test/js	6.773s
+ok  	github.com/vyquocvu/goosie/test/layout	4.089s
+ok  	github.com/vyquocvu/goosie/test/manifest	3.212s
+ok  	github.com/vyquocvu/goosie/test/net	5.654s
+ok  	github.com/vyquocvu/goosie/test/paint	3.069s
+ok  	github.com/vyquocvu/goosie/test/pdf	2.244s
+ok  	github.com/vyquocvu/goosie/test/perms	2.345s
+ok  	github.com/vyquocvu/goosie/test/platform	2.400s
+ok  	github.com/vyquocvu/goosie/test/qc	1.967s
+ok  	github.com/vyquocvu/goosie/test/raster	2.514s
+ok  	github.com/vyquocvu/goosie/test/session	1.927s
+ok  	github.com/vyquocvu/goosie/test/style	2.461s
+ok  	github.com/vyquocvu/goosie/test/surface	3.481s
+ok  	github.com/vyquocvu/goosie/test/tabs	3.341s
+ok  	github.com/vyquocvu/goosie/test/toolbar	3.681s
+?   	github.com/vyquocvu/goosie/test/userscript	[no test files]
+ok  	github.com/vyquocvu/goosie/test/viewsource	3.571s
+ok  	github.com/vyquocvu/goosie/test/wpt	10.423s
+
+$ go vet -all ./...
+
+$ go test -count=1 ./internal/archtest/
+ok  	github.com/vyquocvu/goosie/internal/archtest	4.062s
+
+$ go test -count=1 ./test/qc/
+ok  	github.com/vyquocvu/goosie/test/qc	0.502s
+
+$ gofmt -l internal cmd test
+
+```
+
+`TestJourneySelectOptionChange` và các test BR-101 trong `test/engine/select_keyboard_test.go` được chạy trong full `go test ./...` và đều xanh. `TestNativeEndToEndPlaysARealVideo` không fail; không phải chạy lại.
+
+### Mutation proof [R-7]
+
+**(i) Tắt hẳn validation — FAIL → revert → PASS**
+
+```text
+$ go test -count=1 ./test/engine/ -run '^(TestFormRequiredValidation|TestFormCheckboxRequiredValidation|TestFormRadioRequiredValidation|TestFormValidationTypes|TestFormTextareaSelectAndDialogValidation)$'
+--- FAIL: TestFormRequiredValidation (0.01s)
+    form_submission_test.go:43: invalid form queued submission: &engine.FormSubmission{Action:"/send", Method:"GET", Data:[]engine.FormData{engine.FormData{Name:"q", Value:""}, engine.FormData{Name:"other", Value:"intact"}}, Encoded:"q=&other=intact"}
+--- FAIL: TestFormCheckboxRequiredValidation (0.00s)
+    form_submission_test.go:71: invalid form queued submission: &engine.FormSubmission{Action:"", Method:"GET", Data:[]engine.FormData(nil), Encoded:""}
+--- FAIL: TestFormRadioRequiredValidation (0.00s)
+    form_submission_test.go:90: invalid form queued submission: &engine.FormSubmission{Action:"", Method:"GET", Data:[]engine.FormData(nil), Encoded:""}
+--- FAIL: TestFormValidationTypes (0.00s)
+    --- FAIL: TestFormValidationTypes/email (0.00s)
+        form_submission_test.go:107: invalid form queued submission: &engine.FormSubmission{Action:"", Method:"GET", Data:[]engine.FormData{engine.FormData{Name:"email", Value:"abc"}}, Encoded:"email=abc"}
+    --- FAIL: TestFormValidationTypes/number (0.00s)
+        form_submission_test.go:121: invalid form queued submission: &engine.FormSubmission{Action:"", Method:"GET", Data:[]engine.FormData{engine.FormData{Name:"n", Value:"not-a-number"}}, Encoded:"n=not-a-number"}
+--- FAIL: TestFormTextareaSelectAndDialogValidation (0.00s)
+    --- FAIL: TestFormTextareaSelectAndDialogValidation/textarea_and_select (0.00s)
+        form_submission_test.go:205: invalid form queued submission: &engine.FormSubmission{Action:"", Method:"GET", Data:[]engine.FormData{engine.FormData{Name:"ta", Value:""}, engine.FormData{Name:"sel", Value:""}}, Encoded:"ta=&sel="}
+    --- FAIL: TestFormTextareaSelectAndDialogValidation/method_dialog (0.00s)
+        form_submission_test.go:218: dialog open=false close events=1; want open and no close
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	1.154s
+FAIL
+
+revert:
+$ go test -count=1 ./test/engine/ -run '^(TestFormRequiredValidation|TestFormCheckboxRequiredValidation|TestFormRadioRequiredValidation|TestFormValidationTypes|TestFormTextareaSelectAndDialogValidation)$'
+ok  	github.com/vyquocvu/goosie/test/engine	0.546s
+```
+
+**(ii) Validate rồi vẫn tiếp tục submit — FAIL → revert → PASS**
+
+```text
+$ go test -count=1 ./test/engine/ -run '^TestFormRequiredValidation$'
+--- FAIL: TestFormRequiredValidation (0.00s)
+    form_submission_test.go:43: invalid form queued submission: &engine.FormSubmission{Action:"/send", Method:"GET", Data:[]engine.FormData{engine.FormData{Name:"q", Value:""}, engine.FormData{Name:"other", Value:"intact"}}, Encoded:"q=&other=intact"}
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.742s
+FAIL
+
+revert:
+$ go test -count=1 ./test/engine/ -run '^TestFormRequiredValidation$'
+ok  	github.com/vyquocvu/goosie/test/engine	0.536s
+```
+
+**(iii-a) Bỏ submitter — FAIL → revert → PASS**
+
+```text
+$ go test -count=1 ./test/engine/ -run '^TestFormSubmitterClickAndImplicit$'
+--- FAIL: TestFormSubmitterClickAndImplicit (0.00s)
+    --- FAIL: TestFormSubmitterClickAndImplicit/clicked_submitter (0.00s)
+        form_submission_test.go:158: click save payload="q=x&tail=end", want "q=x&action=save&tail=end"
+    --- FAIL: TestFormSubmitterClickAndImplicit/implicit_submitter (0.00s)
+        form_submission_test.go:169: implicit payload="q=x", want q=x&action=first
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.785s
+FAIL
+
+revert:
+$ go test -count=1 ./test/engine/ -run '^TestFormSubmitterClickAndImplicit$'
+ok  	github.com/vyquocvu/goosie/test/engine	0.557s
+```
+
+**(iii-b) Thêm submitter hai lần — FAIL → revert → PASS**
+
+```text
+$ go test -count=1 ./test/engine/ -run '^TestFormSubmitterClickAndImplicit$'
+--- FAIL: TestFormSubmitterClickAndImplicit (0.00s)
+    --- FAIL: TestFormSubmitterClickAndImplicit/clicked_submitter (0.00s)
+        form_submission_test.go:158: click save payload="q=x&action=save&action=save&tail=end", want "q=x&action=save&tail=end"
+    --- FAIL: TestFormSubmitterClickAndImplicit/implicit_submitter (0.00s)
+        form_submission_test.go:169: implicit payload="q=x&action=first&action=first", want q=x&action=first
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.749s
+FAIL
+
+revert:
+$ go test -count=1 ./test/engine/ -run '^TestFormSubmitterClickAndImplicit$'
+ok  	github.com/vyquocvu/goosie/test/engine	0.554s
+```
+
+**(iv) Novalidate luôn bỏ qua validation — required FAIL, novalidate PASS → revert → cả hai PASS**
+
+```text
+$ go test -count=1 ./test/engine/ -v -run '^(TestFormRequiredValidation|TestFormNovalidateBypass)$'
+=== RUN   TestFormRequiredValidation
+    form_submission_test.go:43: invalid form queued submission: &engine.FormSubmission{Action:"/send", Method:"GET", Data:[]engine.FormData{engine.FormData{Name:"q", Value:""}, engine.FormData{Name:"other", Value:"intact"}}, Encoded:"q=&other=intact"}
+--- FAIL: TestFormRequiredValidation (0.01s)
+=== RUN   TestFormNovalidateBypass
+--- PASS: TestFormNovalidateBypass (0.00s)
+FAIL
+FAIL	github.com/vyquocvu/goosie/test/engine	0.750s
+FAIL
+
+revert:
+$ go test -count=1 ./test/engine/ -v -run '^(TestFormRequiredValidation|TestFormNovalidateBypass)$'
+=== RUN   TestFormRequiredValidation
+--- PASS: TestFormRequiredValidation (0.00s)
+=== RUN   TestFormNovalidateBypass
+--- PASS: TestFormNovalidateBypass (0.00s)
+PASS
+ok  	github.com/vyquocvu/goosie/test/engine	0.554s
+```
+
+### Chưa chắc chắn
+
+- Validation có chủ đích chỉ xử lý tập con task yêu cầu; `email` được kiểm tra bằng điều kiện có `@`, không phải kiểm tra đầy đủ cú pháp địa chỉ email.
+- Engine ghi submission vào `FormSubmission`; kiểm tra không có mục chờ xác nhận engine sẽ không giao submission cho host. HTTP dispatch thực tế thuộc lớp host.
+
+Đã revert tất cả mutation; không còn mutation trong source. Sau khi ghi status này, commit được tạo và `git status` được kiểm tra sạch.

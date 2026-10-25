@@ -1188,7 +1188,14 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "test/engine/form_submission_test.go:TestFormCheckboxRequiredValidation",
+      "test/engine/form_submission_test.go:TestFormNovalidateBypass",
+      "test/engine/form_submission_test.go:TestFormRadioRequiredValidation",
+      "test/engine/form_submission_test.go:TestFormRequiredValidation",
+      "test/engine/form_submission_test.go:TestFormTextareaSelectAndDialogValidation",
+      "test/engine/form_submission_test.go:TestFormValidationTypes"
+    ],
     "enforced": false
   },
   {
@@ -1210,7 +1217,11 @@
       "INT"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "test/engine/form_submission_test.go:TestFormButtonDefaultTypeSubmits",
+      "test/engine/form_submission_test.go:TestFormSubmitterClickAndImplicit",
+      "test/engine/form_submission_test.go:TestFormSubmitterWithoutNameOmitted"
+    ],
     "enforced": false
   },
   {

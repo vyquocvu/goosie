@@ -203,7 +203,7 @@ func TestSelectMoveChangesSubmittedValue(t *testing.T) {
 		t.Fatalf("FocusedSelectValue before any key is %q, want 1: the shell reads the label through this accessor", got)
 	}
 	s.MoveSelect(engine.EditDown) // o1 -> o2
-	data := engine.CollectFormData(form)
+	data := engine.CollectFormData(form, nil)
 	got := ""
 	for _, p := range data {
 		if p.Name == "opt" {
