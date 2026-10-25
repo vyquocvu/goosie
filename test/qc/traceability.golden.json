@@ -999,6 +999,24 @@
     "enforced": false
   },
   {
+    "id": "BR-186",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/bad_string_test.go:TestBadStringDropsOneDeclarationNotTheSheet",
+      "test/css/bad_string_test.go:TestBadStringEndsAtNewline",
+      "test/css/bad_string_test.go:TestBadStringInUnterminatedLastDeclaration",
+      "test/css/bad_string_test.go:TestBadStringSingleQuoteMatchesDoubleQuote",
+      "test/css/bad_string_test.go:TestEmptyStringStillGeneratesABox",
+      "test/css/bad_string_test.go:TestUnterminatedStringAtEOFStaysLenient"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
