@@ -77,6 +77,29 @@ func TestParitySelftestIsGreen(t *testing.T) {
 	}
 }
 
+// TestParityDriftMetricIsGreen guards GOOSIE-BLANKMETRIC-001.  score_regions
+// calls a band blank on Chromium's exact rows with no vertical tolerance, so a
+// line painted a few rows away is reported as missing content.  The new
+// score_regions_drift adds a drift-adjusted second signal WITHOUT redefining
+// the old one.  This drives the synthetic drift cases
+// (testdata/parity_selftest.py --drift): exact match, off-by-one-line (must be
+// shifted while the old signal still calls it blank), off-by-more-than-the-window
+// and element-deleted (both must stay truly blank).  No browser, no network.
+// qc:BR-187
+func TestParityDriftMetricIsGreen(t *testing.T) {
+	py := parityPython(t)
+	root := parityRepoRoot(t)
+	cmd := exec.Command(py, paritySelftestScript(root), "--drift")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("parity_selftest.py --drift failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "drift selftest green") {
+		t.Fatalf("parity_selftest.py --drift did not print its green marker:\n%s", out)
+	}
+}
+
 // TestParityFixtureFloorMatchesCorpus reads MIN_SCORED_FIXTURES straight out of
 // testdata/parity.py and asserts the real count of HTML fixtures is at least
 // that floor. Neither number may be hard-coded twice, so shrinking the corpus
