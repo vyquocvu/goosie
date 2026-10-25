@@ -109,7 +109,7 @@ Quét bằng `go/parser` + `go/ast` trên `test/**` và `cmd/goosie/**`, lấy `
 1. **Missing-test**: case có method `INT`, `PARITY` hoặc `SEC` mà **không** có test tagged → FAIL.Case chỉ `CUA` và/hoặc `GAP` được miễn.
 2. **Unknown-ID**: tag trỏ tới ID không có trong catalog → FAIL.
 3. **Fake-PASS**: case trạng thái `PASS` mà không có test tagged → FAIL. (Cơ giới hoá đúng quy tắc dòng 234 của catalog.)
-4. **Awaiting sign-off** (report-only, không fail): case trạng thái `NOT RUN` nhưng đã có test tagged → `t.Logf` nêu tên test. Coverage và sign-off là hai thứ khác nhau: có test được tag chưa có nghĩa là con người đã xác nhận testAssert đúng expected result. Buộc đổi trạng thái mới tạo áp lực ghi `PASS` giả.
+4. **Awaiting sign-off** (report-only, không fail): case trạng thái `NOT RUN` nhưng đã có test tagged → `t.Logf` nêu tên test. Coverage và sign-off là hai thứ khác nhau: có test được tag chưa có nghĩa là con người đã xác nhận test đó assert đúng expected result. Buộc đổi trạng thái mới tạo áp lực ghi `PASS` giả.
 
 ### 3.4. Chế độ chuyển tiếp (để gate xanh ngay khi merge)
 Giai đoạn 1 chỉ enforce các case đã thực sự có oracle tự động đo được (codex xác định 15 case), không enforce theo toàn bộ P0/SEC trên giấy.
@@ -143,7 +143,7 @@ Catalog đòi "lệnh, exit code và artifact". Thêm `-race` an toàn và ghi `
 
 ## 7. Resolution của integrator (2026-10-25)
 
-Ba điểm yếu của đặc tắc ban đầu đã được sửa theo đúng phát hiện của codex:
+Ba điểm yếu của spec ban đầu đã được sửa theo đúng phát hiện của codex:
 
 1. **Rule 4 không còn fail build.** `NOT RUN` + đã có test tagged là trạng thái hợp lệ của giai đoạn chuyển tiếp; gate chỉ `t.Logf`. Lý do: buộc đổi trạng thái mới chính là cơ chế tạo ra `PASS` giả mà catalog cấm (dòng 236). Ba rule còn lại vẫn fail cứng: thiếu test cho case enforced, ID lạ, và `PASS` không có test.
 2. **`scanTests` bổ sung `internal/`.** Bằng chứng thật cho BR-165/BR-166 nằm ở `internal/image/decode_test.go` (`TestProbeRejectsEncodedByteLimit`, `TestProbeRejectsOversizedDimensions`, `TestProbeRejectsJustOverPixelLimit`, `TestProbeAcceptsAtLimit`) — trước đây scanner không nhìn thấy nên không thể tag.
@@ -153,13 +153,13 @@ Integrator đã tag phần `cmd/goosie` và `internal/image` mà codex bị ràn
 
 Khoảng trống còn mở, ghi nhận trung thực:
 - **BR-166 yếu ở tầng engine**: `test/engine/adversarial_test.go:TestOversizedImageHeaderRejectedBeforeDecode` chỉ Assert session không chết, không Assert ảnh bị từ chối — nó sẽ vẫn xanh nếu engine giải mã bừa. Oracle thật hiện nằm ở `internal/image`. Cần siết test engine hoặc gỡ tag engine khi có bằng chứng trực tiếp.
-- **BR-001, BR-026, BR-125** thuộc `cmd/goosie` journey: chờ TASK-015 (agy) tag hành trình thật, chưa enforce.
-- **BR-179, BR-180** không có oracle tự động;BR-180 là release sign-off thủ công, giữ nguyên khoảng trống.
+- **BR-001, BR-026, BR-125** đã được TASK-015 (agy) phủ bằng hành trình thật trong `cmd/goosie/journey_p0*.go` và đã vào allowlist.
+- **BR-179, BR-180** không có oracle tự động. BR-180 là release sign-off thủ công, giữ nguyên khoảng trống.
 
 ### Verify lại sau khi sửa
 
 | Lệnh | Kết quả |
 | --- | --- |
-| `go test -count=1 ./test/qc/` | PASS; trace: 29 tagged / 156 chưa tag / 32 CUA-GAP-only / 24 chờ sign-off |
+| `go test -count=1 ./test/qc/` | PASS; trace sau khi merge TASK-015: 32 tagged / 153 chưa tag / 32 CUA-GAP-only / 27 chờ sign-off; 17/19 P0 case đã có automation |
 | `go test -count=1 ./internal/archtest/ ./internal/image/ ./cmd/goosie/` | PASS |
 | `go build ./...`, `go vet -all ./test/qc ./internal/image ./cmd/goosie`, `gofmt -l` | sạch |
