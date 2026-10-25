@@ -47,3 +47,18 @@ Mỗi defect nên là một task riêng, tự tái hiện bằng `--inspect`, v�
 ## 5. Trạng thái
 
 Intake này được tạo khi TASK-021 landed (`bdbddb4`). Chưa có defect nào ở trên được sửa. Chưa có dòng nào được sign-off CUA: người xem vẫn cần mở ảnh diff — oracle mới chỉ chứng minh "có nội dung biến mất", chưa chứng minh "vì sao".
+
+
+## 6. Phân loại đã xác nhận bằng probe (integrator, 2026-10-25)
+
+Cột "nghi vấn" ở §1 là **đoán từ HTML**, và có một dòng đoán sai. Tất cả đã được kiểm lại bằng render tối giản (`/tmp/probe/`) và ảnh crop side-by-side (`/tmp/blankbands/`). 18 band quy về **3 nguyên nhân + 1 artifact**:
+
+| Nguyên nhân | Band | Probe chứng minh | Task |
+| --- | --- | --- | --- |
+| **A. Glyph coverage thiếu, và glyph mất bị biến thành khoảng trắng** | **12** (9 `unicode/02` + 3 `selectors/03`) | `/tmp/probe/b.png`: `→` (U+2192) và `∑` (U+2211) vẽ bình thường, nhưng `✔` (U+2714), `✓` (U+2713) và emoji U+1F000+ **mất hẳn**, để lại đúng một khoảng trắng. Doc comment `internal/raster/fonts.go:406-409` nhận: *"no face has such a glyph, which the text path treats as whitespace rather than an error"*. Chuỗi fallback (`fonts.go:357`) chỉ gồm các slot Times/Arial/Courier/Georgia/Verdana/Helvetica — không face nào phủ Dingbats hay emoji. | `TASK-027-GLYPH-COVERAGE.md` |
+| **B. Form control UA appearance** | **5** (2 `forms/04` + 3 `selectors/02`, trong đó 1 band chưa chắc chắn) | `/tmp/probe/d.png`: `color`, `range`, `date`, `month`, `week` **không vẽ gì cả**; `text`/`number` vẽ giá trị nhưng không có border; checkbox/radio có đường vẽ riêng. Chỗ chặn: `internal/paint/builder_controls.go:87` special-case 5 type, `builder_box.go:119` chỉ vẽ checkbox/radio — các type còn lại rơi vào cả hai nhánh đều không ai vẽ. Lệch nghiêm trọng: `internal/engine/accessibility.go:149-150` **có** biết đủ các type, tức AX tree báo "có control" khi màn hình trống. | `TASK-028-FORM-CONTROL-APPEARANCE.md` |
+| **C. Artifact của fold** | **1** (`html-features/01`, rows 593-599, cao 7px sát mép viewport 600) | Chromium để lộ đúng đường viền trên của một box khi hết khung hình; không có nội dung nào biến mất. | **Không mở task engine.** Giữ nguyên trong baseline, kèm lý do. |
+
+**Sai lầm trong §1 cần ghi lại để đừng lặp lại**: `selectors/03-pseudo-elements.png` bị nghi là `::before`/`::after` không hoạt động. Probe `/tmp/probe/a.png` chứng minh generated content vẽ đúng (`BEFORE MIDDLE AFTER`, `PLAIN AFTER`). Ba band của fixture đó thực chất là `content:"✔"` — **cùng nguyên nhân A**, không phải cascade. Nếu không probe mà đã đi viết task cho `::before`, sẽ có một engine task hoàn toàn vô nghĩa và một font bug vẫn còn nguyên.
+
+Hệ quả cho baseline: sau khi TASK-027 landed, `unicode/02` và `selectors/03` phải **xoá khỏi** `render-known-gaps.json` (12 band); sau TASK-028, `forms/04` xoá, `selectors/02` giảm còn tối đa 2; `html-features/01` ở lại với 1 band và lý do ở dòng C.
