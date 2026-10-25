@@ -1082,6 +1082,32 @@
     "enforced": false
   },
   {
+    "id": "BR-198",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/inline_background_repaint_test.go:TestBlockBackgroundIsEmittedOnceNotPerTextRun",
+      "test/paint/inline_background_repaint_test.go:TestInlineFragmentsStillCarryTheirOwnBackground"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-199",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/inline_background_repaint_test.go:TestTranslucentBlockBackgroundCompositesOnce"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

@@ -78,6 +78,7 @@ type ibFill struct {
 	wantRects []string
 }
 
+// qc:BR-198
 func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -205,6 +206,7 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 // and its own background, and is inline-level, so it fragments too. A mechanism
 // that drops a copied background whenever a box is not an element fails every
 // case here.
+// qc:BR-198
 func TestInlineFragmentsStillCarryTheirOwnBackground(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -263,6 +265,7 @@ func TestInlineFragmentsStillCarryTheirOwnBackground(t *testing.T) {
 // (227,127,127) on every non-ink pixel of the block - measured on this host from
 // a 400x120 screenshot at DPR 1: 17,300 of 18,000 pixels, the remaining 700 being
 // glyph ink and its antialiasing.
+// qc:BR-199
 func TestTranslucentBlockBackgroundCompositesOnce(t *testing.T) {
 	html := `<!doctype html><html><head><style>html,body{margin:0;font:16px serif}` +
 		`div{width:300px;height:60px;background:rgba(200,0,0,0.5)}</style></head>` +
