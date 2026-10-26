@@ -2268,6 +2268,42 @@
     "enforced": false
   },
   {
+    "id": "BR-250",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_image_paint_test.go:TestLazyImagePaintAfterLoadAssignment"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-251",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_image_paint_test.go:TestLazyImageLayoutBuildsOncePerTurn"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-252",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_image_paint_test.go:TestLazyImageStalePixelsStopPainting"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
@@ -3035,14 +3071,38 @@
     "enforced": false
   },
   {
-    "id": "BR-258",
-    "priority": "P2",
+    "id": "BR-253",
+    "priority": "P1",
     "methods": [
       "INT"
     ],
     "status": "PASS",
     "tests": [
-      "test/gatecheck/live_parity_test.go:TestLiveParitySelftestIsGreen"
+      "test/entrypoints/paced_event_loop_test.go:TestPacedScreenshotRunsAZeroDelayTimer"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-254",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/entrypoints/paced_event_loop_test.go:TestPacedScreenshotScriptImageLoadOutlivesTheLoadCall"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-255",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/entrypoints/paced_event_loop_test.go:TestPacedScreenshotRepaintsATimerMutation"
     ],
     "enforced": false
   }

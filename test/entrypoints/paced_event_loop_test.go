@@ -110,6 +110,8 @@ func assertPixel(t *testing.T, img image.Image, x, y int, want color.RGBA, what 
 // The sample point is the middle of the viewport, which no box covers: it shows
 // the plan's canvas colour, so this also measures that a scripted background
 // change republished the plan rather than only re-rasterizing tiles.
+//
+// qc:BR-253
 func TestPacedScreenshotRunsAZeroDelayTimer(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -140,6 +142,8 @@ func TestPacedScreenshotRunsAZeroDelayTimer(t *testing.T) {
 // r.Context().Err(), which is how the server sees the client cancel. The page
 // paints green from onload and red from onerror, so a failed dispatch is not
 // mistaken for a missing repaint.
+//
+// qc:BR-254
 func TestPacedScreenshotScriptImageLoadOutlivesTheLoadCall(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -210,6 +214,8 @@ i.src = '/x.png';
 // The page starts white and a setTimeout(...,0) callback appends a 120x80 green
 // block at the top-left. The settled PNG must show the block; the control page
 // must not.
+//
+// qc:BR-255
 func TestPacedScreenshotRepaintsATimerMutation(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
