@@ -164,6 +164,14 @@ type framePath struct {
 	storage             *js.OriginStorageRegistry
 	incognitoStorage    *js.OriginStorageRegistry
 	emulationPreset     *DevicePreset
+	// pacedSession is the document a screenshot or gate run loaded
+	// synchronously, and pacedBG the canvas colour its plan was published with.
+	// Both are set once before the loop starts and afterwards touched only by
+	// the driver's pump goroutine (see pumpPaced), which is the same single
+	// thread that ticks the JS runtime. The interactive path keeps its
+	// documents in tabMgr instead.
+	pacedSession *engine.Session
+	pacedBG      frame.Color
 	// mediaBackend plays this run's video, and is nil when the window that was
 	// opened has no way to: a headless run, or a platform with no decoder. It
 	// comes from the window rather than from the machine so a headless run on a
@@ -824,13 +832,20 @@ func run(args []string) error {
 	// page it was asked for.
 	if c.url != "" {
 		if c.paced() {
-			layer, docSpec, bgColor, _, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
+			layer, docSpec, bgColor, sess, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
 			if err != nil {
 				return err
 			}
 			// The driver's scroll range comes from f.layer, so a paced document run that
 			// swapped the plan but not this field would scroll a one-viewport page.
 			f.layer = layer
+			// The session is kept, not discarded: a paced run has no chrome window to
+			// tick the page's event loop, so the driver pumps this session once per
+			// vsync (see the watchVsync wiring below). The colour is what the plan was
+			// published with, which pumpPaced compares against to notice a script that
+			// changed the page background.
+			f.pacedSession = sess
+			f.pacedBG = bgColor
 			f.sched.SetPlan(frame.FramePlan{
 				Serial:     1,
 				Layers:     []*frame.Layer{layer},
@@ -852,10 +867,20 @@ func run(args []string) error {
 	if c.gate || c.bench {
 		d = newDriver(f, c.frames)
 		f.loop = surface.NewLoop(d, f.sched, f.composer, f.rec)
+		// A paced run builds no chrome window, so the tick that pumps the page's
+		// event loop in an interactive run (chromeWindow.setTick -> pumpChrome)
+		// has no counterpart here. The driver's pump is that counterpart: one
+		// event-loop turn per vsync, on its single goroutine. Attached before
+		// Run so no measured frame sees an unpumped page.
+		d.watchVsync(f.pumpJS)
 		finish = d.done
 	} else if c.screenshot {
 		sd := newSteadyDriver(f, steadyFloorFrames)
 		f.loop = surface.NewLoop(sd, f.sched, f.composer, f.rec)
+		// Same seam as the gate driver: every vsync pumps the page before the run
+		// asks whether it may settle, so a timer or image completion that lands
+		// mid-run is drawn rather than truncated.
+		sd.watchVsync(f.pumpJS)
 		sd.watchIdle(func() bool {
 			// Idle is not "nothing needed": a frame can want no tiles while the
 			// tiles it is waiting on are still on order at a worker. Both halves

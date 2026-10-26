@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,3 +87,51 @@ func TestSteadyIdleStillExits(t *testing.T) {
 		t.Fatal("idle run did not exit")
 	}
 }
+
+// The per-vsync hook must run before the settle decision, on every vsync, and a
+// hook that publishes work must restart that decision: the idle count is read
+// from the loop's last frame, so without the reset a screenshot could exit on a
+// vsync whose pump had just changed the page - the frame it settles on must be
+// the frame that shows the change (BR-253, BR-255).
+func TestSteadyVsyncHookRunsBeforeReadyAndRestartsSettling(t *testing.T) {
+	win := &stubWindow{events: make(chan surface.Event)}
+	d := newSteadyDriver(&framePath{window: win}, 8)
+	d.watchIdle(func() bool { return true })
+	d.watchProgress(func() (int64, int64) { return 0, 0 })
+
+	var calls int32
+	// The ninth vsync is the one that would settle an idle run (floor 8 plus
+	// two idle frames needs a tenth, so publish on the ninth to observe it).
+	d.watchVsync(func() bool {
+		n := atomic.AddInt32(&calls, 1)
+		return n == 9
+	})
+
+	acked := make(chan struct{})
+	go func() {
+		for range d.out {
+			acked <- struct{}{}
+		}
+	}()
+
+	for i := 0; i < 9; i++ {
+		win.events <- surface.Event{Kind: surface.EvVsync}
+		<-acked
+	}
+	if got := atomic.LoadInt32(&calls); got != 9 {
+		t.Fatalf("vsync hook ran %d time(s), want once per vsync (9)", got)
+	}
+	d.mu.Lock()
+	settled, sent := d.settled, d.sent
+	d.mu.Unlock()
+	if settled != 1 {
+		t.Fatalf("settle count = %d after the hook published work on frame %d, want 1: the change must restart the settle wait", settled, sent)
+	}
+	select {
+	case <-d.done:
+		t.Fatal("run settled on the vsync whose pump had just changed the page")
+	default:
+	}
+	close(win.events)
+}
+

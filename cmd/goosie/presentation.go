@@ -38,23 +38,99 @@ func (f *framePath) handleResize(contentW, contentH int) {
 
 // pumpJS runs one event-loop turn for the active tab and repaints on change.
 // Background tabs stay frozen (and cheap) until shown. It runs on the chrome
-// pump thread like every input callback; see the wiring at openWindow.
-func (f *framePath) pumpJS() {
+// pump thread like every input callback; see the wiring at openWindow. It
+// reports whether it published a repaint, which the paced drivers use to tell
+// a run that is settling from one a page callback just woke up.
+//
+// A paced run has no tab manager and no chrome window, so the tab path above
+// would return without pumping anything; its one document is pumped instead.
+func (f *framePath) pumpJS() bool {
 	if f.tabMgr == nil {
-		return
+		return f.pumpPaced()
 	}
 	tab := f.tabMgr.Active()
 	if tab == nil {
-		return
+		return false
 	}
 	sess := tab.Session()
 	if sess == nil {
-		return
+		return false
 	}
 	if !sess.PumpJS(float32(f.config.width)) {
-		return
+		return false
 	}
 	f.repaintTab(tab, frame.Rect{})
+	return true
+}
+
+// pumpPaced is pumpJS for a paced run: one synchronously loaded document, no
+// tabs, no chrome window. It runs on the driver's pump goroutine, the same
+// single thread that ticks the session, so it has the same one-thread
+// discipline as the interactive tick.
+func (f *framePath) pumpPaced() bool {
+	sess := f.pacedSession
+	if sess == nil {
+		return false
+	}
+	if !sess.PumpJS(float32(f.config.width)) {
+		return false
+	}
+	return f.repaintPaced(sess)
+}
+
+// repaintPaced rebuilds the paced document's layer and publishes it, and
+// reports whether it did. It is the tab-less twin of repaintTab, with one
+// addition the tab path gets from navigation: the plan's Background is what
+// the composer fills uncovered surface with and what every tile rasterizes
+// over, so a page callback that only changes the canvas colour (a timer or an
+// image onload setting body background) is invisible unless the plan is
+// republished with the new colour. A background change therefore republishes
+// the plan; the scheduler treats that as a full redraw. A geometry change
+// needs a fresh layer for the same reason a tab does.
+func (f *framePath) repaintPaced(sess *engine.Session) bool {
+	list, err := sess.PaintChecked(f.effectiveScale())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: paint:", err)
+		return false
+	}
+	dl := list.Build(1)
+	extent := dl.Extent()
+	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: budget:", err)
+		return false
+	}
+	layerBounds := extent.Canon()
+	if layerBounds.X0 < 0 {
+		layerBounds.X0 = 0
+	}
+	if layerBounds.Y0 < 0 {
+		layerBounds.Y0 = 0
+	}
+	bg := sess.BackgroundColor()
+	if lyr := f.layer; lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Budget() == budgetBytes {
+		f.sched.UpdateLayer(lyr, dl, frame.Rect{})
+		if bg != f.pacedBG {
+			f.pacedBG = bg
+			f.sched.SetPlan(frame.FramePlan{
+				Serial:     1,
+				Layers:     []*frame.Layer{lyr},
+				Background: bg,
+			})
+		}
+		return true
+	}
+	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
+	layer := frame.NewLayer(1, extent, budgetBytes, pool)
+	layer.SetContent(dl)
+	f.layer = layer
+	f.pacedBG = bg
+	f.sched.SetPlan(frame.FramePlan{
+		Serial:     1,
+		Layers:     []*frame.Layer{layer},
+		Background: bg,
+	})
+	return true
 }
 
 // selectionDamage unions the previous selection bounds with the current

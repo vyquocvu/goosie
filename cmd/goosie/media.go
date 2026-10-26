@@ -227,11 +227,17 @@ func (f *framePath) pauseMedia(tab *tabs.Tab) {
 	}
 }
 
-// closeAllSessions releases every document the tab manager still holds. Close is
+// closeAllSessions releases every document the frame path still holds. Close is
 // idempotent, so a tab that was already closed on the way out costs nothing here,
 // and a tab that was not is the reason this exists: without it the only thing
-// stopping a background tab's audio at exit would be the process dying.
+// stopping a background tab's audio at exit would be the process dying. A paced
+// run keeps its one document outside the tab manager so the driver can pump it;
+// the field is not cleared because the pump goroutine may still be reading it,
+// and Close is idempotent.
 func (f *framePath) closeAllSessions() {
+	if f.pacedSession != nil {
+		f.pacedSession.Close()
+	}
 	if f.tabMgr == nil {
 		return
 	}

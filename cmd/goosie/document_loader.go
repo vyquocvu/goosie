@@ -301,9 +301,18 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	defer cssCancel()
 	imgCtx := ctx
 	if !deferImages {
+		// Deliberately not deferred. A parsed <img> fetches and decodes inside
+		// this call, but a page that runs script can create an image after it
+		// has returned (`new Image(); img.src = ...`), and the loader starts
+		// that fetch on its own goroutine as soon as the script assigns src.
+		// Canceling on return aborted every one of those before the request
+		// reached the network (GOOSIE-PUMP-001). The lifetime is instead the
+		// engine's ImageFetchBudget deadline below - the same window the
+		// parse-time image pool gets - and the parent navigation context, which
+		// tab close and shutdown cancel. Do not widen that budget.
 		var imgCancel context.CancelFunc
 		imgCtx, imgCancel = context.WithTimeout(ctx, engine.ImageFetchBudget)
-		defer imgCancel()
+		_ = imgCancel
 	}
 	fontCtx := ctx
 	if !deferFonts {

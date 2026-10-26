@@ -38,6 +38,9 @@ type driver struct {
 	mu   sync.Mutex
 	sent int
 	once sync.Once
+	// vsyncFn is one event-loop turn the pump runs for every vsync before the
+	// frame count is consulted. See watchVsync.
+	vsyncFn func() bool
 }
 
 // newDriver starts a driver over f's window. The window has to exist first: dropping
@@ -61,6 +64,45 @@ func newDriver(f *framePath, frames int) *driver {
 	return d
 }
 
+// watchVsync tells the driver what to run once per vsync, before it stamps the
+// frame and before anything asks whether the run may end. It exists because a
+// paced run builds no chrome window, so the tick that pumps the page's event
+// loop in an interactive run (chromeWindow.setTick -> pumpChrome) has no
+// counterpart here: a gate run that measured frames of a page whose timers
+// never fired would be measuring a page no browser shows.
+//
+// The hook reports whether it changed anything. The gate driver does not use
+// that answer - it has no settle decision - but the screenshot driver does, and
+// one hook type keeps the two paced drivers wired the same way. The hook runs
+// on the pump's own goroutine, the one that consumes the display's ticks, so
+// the JS runtime still has exactly one Run/Tick thread. Attached after
+// construction because the loop is built from the driver.
+func (d *driver) watchVsync(pump func() bool) {
+	d.mu.Lock()
+	d.vsyncFn = pump
+	d.mu.Unlock()
+}
+
+// turn runs the registered per-vsync hook, if any, outside the driver's lock:
+// the hook repaints and publishes plans, and a driver that held its own lock
+// across that would make the frame path wait on the producer that feeds it.
+// After finish the shutdown may already be closing the session, and a tick that
+// lands then has nothing left to pump.
+func (d *driver) turn() bool {
+	d.mu.Lock()
+	pump := d.vsyncFn
+	d.mu.Unlock()
+	select {
+	case <-d.done:
+		return false
+	default:
+	}
+	if pump == nil {
+		return false
+	}
+	return pump()
+}
+
 // Events implements surface.Window, replacing the wrapped window's channel with the
 // transformed one. surface.Loop calls it exactly once, which is why the pump is
 // started here rather than lazily.
@@ -79,6 +121,11 @@ func (d *driver) pump() {
 	for ev := range d.Window.Events() {
 		measured := false
 		if ev.Kind == surface.EvVsync {
+			// One event-loop turn per vsync, before this tick is stamped:
+			// whatever the page's timers, RAF callbacks or image completions do
+			// here is already published when the loop draws the frame this
+			// event carries.
+			d.turn()
 			d.mu.Lock()
 			if d.sent < d.n {
 				ev.Delta.Y += d.next()
@@ -156,6 +203,10 @@ type steadyDriver struct {
 	lastProgress int64
 	lastMove     time.Time
 
+	// vsyncFn is one event-loop turn the pump runs for every vsync before
+	// readiness is decided. See watchVsync.
+	vsyncFn func() bool
+
 	mu   sync.Mutex
 	sent int
 }
@@ -192,12 +243,48 @@ func (d *steadyDriver) watchIdle(idle func() bool) {
 	d.mu.Unlock()
 }
 
+// watchVsync attaches one event-loop turn to the driver. Like watchIdle it can
+// only be attached after the loop is built, and it runs on the pump's single
+// goroutine: whatever it publishes to the session is therefore already visible
+// to the loop when the loop handles the same vsync. The hook reports whether it
+// changed anything; a change resets the settle decision in pump, because the
+// frame about to be drawn is not the quiet frame that decision measured.
+func (d *steadyDriver) watchVsync(pump func() bool) {
+	d.mu.Lock()
+	d.vsyncFn = pump
+	d.mu.Unlock()
+}
+
+func (d *steadyDriver) turn() bool {
+	d.mu.Lock()
+	pump := d.vsyncFn
+	d.mu.Unlock()
+	if pump == nil {
+		return false
+	}
+	return pump()
+}
+
 func (d *steadyDriver) Events() <-chan surface.Event { return d.out }
 
 func (d *steadyDriver) pump() {
 	defer close(d.out)
 	started := time.Now()
 	for ev := range d.Window.Events() {
+		if ev.Kind == surface.EvVsync {
+			// One event-loop turn per vsync, before readiness is consulted: a
+			// page whose timer or image completion only fires after the first
+			// few frames must still get the chance to run, and whatever that
+			// turn changes is visible to the loop when it draws this frame.
+			if d.turn() {
+				d.mu.Lock()
+				// The idle count is read from the loop's last frame, so a
+				// repaint published now would otherwise still be measured on
+				// the quiet frames before it; restart the settle wait.
+				d.settled = 0
+				d.mu.Unlock()
+			}
+		}
 		d.mu.Lock()
 		if ev.Kind == surface.EvVsync {
 			d.sent++
