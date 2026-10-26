@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -251,6 +252,37 @@ type Runtime struct {
 	// charge their responses to. See admission.go.
 	mutBudget MutationBudget
 	subBudget SubresourceBudget
+
+	// computedStyle reads the engine's cascade result for one node. Installed
+	// by the engine before any script runs; nil leaves getComputedStyle to the
+	// element's own declarations (see computed_style.go).
+	computedStyle ComputedStyleFunc
+
+	// Window event target. window is not a *dom.Node, so its listeners live on
+	// the runtime instead of internal/dom's node registry; the DOM Standard's
+	// window step of the propagation path is appended around the node dispatch
+	// (see window_events.go).
+	winMu        sync.Mutex
+	winListeners []*windowListener
+	// ready is document.readyState: "loading" while the document's own scripts
+	// run, "interactive" at DOMContentLoaded, "complete" at load.
+	ready string
+	// lifecycleFired makes the document lifecycle a once-per-document event, as
+	// the standard requires: a re-flowed or re-pumped session must not run
+	// ready handlers twice.
+	lifecycleFired bool
+	// mutations counts DOM writes user code made, so FireDocumentLifecycle can
+	// tell its caller "a ready handler changed the tree" without an
+	// invalidation batch being installed.
+	mutations int64
+	// locRaw/locURL are the document's current URL, the state window.location's
+	// accessors read (see location.go). locURL is nil when the host gave a
+	// string Go's parser rejects; href then reads the raw string.
+	locRaw string
+	locURL *url.URL
+	// locObj is the location object the window.location and document.location
+	// accessors both return: one object, two names, as the standard has them.
+	locObj *goja.Object
 }
 
 // New builds a runtime for one document.
@@ -377,9 +409,6 @@ func (r *Runtime) setupDocument() {
 }
 
 func (r *Runtime) setupWindow() {
-	loc := r.vm.NewObject()
-	_ = loc.Set("href", r.opts.URL)
-
 	// The window object IS the global scope (HTML spec: Window is the
 	// global object). An earlier stub installed window as a separate
 	// object, so `window.google = ns` followed by bare `google` died with
@@ -388,7 +417,9 @@ func (r *Runtime) setupWindow() {
 	// direction are visible in the other, and the later dual-installs
 	// (global + window) below degenerate to the same store.
 	win := r.vm.GlobalObject()
-	_ = win.Set("location", loc)
+	// window.location, with every part pages read, is installed below by
+	// setupLocationParts (see location.go) together with its document.location
+	// alias; this used to be an href-only stub.
 	_ = win.Set("window", win)
 	_ = win.Set("self", win)
 	_ = win.Set("globalThis", win)
@@ -456,6 +487,28 @@ func (r *Runtime) setupWindow() {
 		_ = mql.Set("addEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		_ = mql.Set("removeEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		return mql
+	})
+	// window is an EventTarget and the document lifecycle is a real event, not
+	// a page's imagination: four `window.addEventListener('DOMContentLoaded')`
+	// registrations on the saved vnexpress boot each threw "Object has no
+	// member 'addEventListener'", and jQuery's ready path needs both the window
+	// listener and a readyState that still reads "loading" while its own script
+	// runs. See window_events.go.
+	r.setupWindowEvents()
+	r.setupLocationParts(win)
+	// The window handles a library reaches for on the way to a computed style:
+	// document.defaultView (the window itself, so it carries getComputedStyle
+	// and addEventListener), window.top/parent (=== window in a top-level
+	// browsing context, which is what makes Sizzle's `n.top !== n` test end the
+	// way it does in a browser instead of taking the frame branch), and
+	// window.opener (null, so jQuery's `t && t.opener || (t = C)` falls back to
+	// the window it already has).
+	r.jsDefaultView()
+	_ = win.Set("top", win)
+	_ = win.Set("parent", win)
+	_ = win.Set("opener", goja.Null())
+	_ = win.Set("getComputedStyle", func(call goja.FunctionCall) goja.Value {
+		return r.jsGetComputedStyle(call)
 	})
 }
 
@@ -555,6 +608,11 @@ func (r *Runtime) setupDOM() {
 	_ = r.nodeProto.Set("append", func(call goja.FunctionCall) goja.Value {
 		return r.jsAppend(call)
 	})
+	// The child-list mutation and traversal API (insertBefore, replaceChild,
+	// cloneNode, contains, hasChildNodes) lives in node_api.go and goes on the
+	// same prototype, so a document fragment created by
+	// document.createDocumentFragment() answers them like any other node.
+	r.installNodeTreeMethods()
 	// Set the prototype as a temporary global so RunString can reference it.
 	_ = r.vm.Set("__nodeProto__", r.nodeProto)
 	_, _ = r.vm.RunString(`
@@ -618,6 +676,16 @@ func (r *Runtime) setupDOM() {
 	_ = doc.Set("createTextNode", func(call goja.FunctionCall) goja.Value {
 		return r.jsCreateTextNode(call)
 	})
+	_ = doc.Set("createDocumentFragment", r.jsCreateDocumentFragment)
+	// The document is a Node, so it carries the Node API too. jQuery never
+	// appends to a document directly, but Sizzle's support tests call
+	// `document.contains(node)` and `document.cloneNode`, and a missing method
+	// there reads to the library as "this document is not a DOM document".
+	for _, name := range []string{"appendChild", "insertBefore", "replaceChild", "cloneNode", "contains", "hasChildNodes"} {
+		if v := r.nodeProto.Get(name); v != nil {
+			_ = doc.Set(name, v)
+		}
+	}
 
 	// Register the document node so document.addEventListener / dispatchEvent
 	// operate on the same *dom.Node the engine dispatches events on.
@@ -626,6 +694,22 @@ func (r *Runtime) setupDOM() {
 	r.nodeRegistry[docNID] = &r.domDoc.Node
 	_ = doc.Set("__nid__", docNID)
 	r.nodeWrappers[docNID] = doc
+	// The document node is registered here rather than through wrapNode, so the
+	// wrap cache has to be pointed at it by hand. Without this line
+	// wrapNode(&doc.Node) mints a second wrapper for the same node, and then
+	// `el.ownerDocument` is an object that is *not* `document`: Sizzle's
+	// setDocument compares `r != C` against window.document, would adopt the
+	// look-alike as its document cache, and die on the first property only the
+	// real one carries (defaultView, readyState, getElementById). Identity, not
+	// shape, is what the library checks.
+	r.wrapCache[&r.domDoc.Node] = docNID
+	// The document is a Node, so the child-list reads work on it too:
+	// `document.childNodes`, `document.firstChild` (the doctype on a real page)
+	// and `document.ownerDocument`, which is null per the standard.
+	r.defineNodeAccessors(doc, &r.domDoc.Node)
+	// document.implementation.createHTMLDocument: jQuery's load-time support
+	// probe calls it, so without it the library never finishes installing itself.
+	r.setupDocumentImplementation()
 
 	_ = doc.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
 		return r.jsAddEventListener(call)
@@ -774,6 +858,21 @@ func (r *Runtime) setupDOM() {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
 		if node == nil || node.Parent == nil || !node.Parent.Element() {
+			return goja.Null()
+		}
+		return r.wrapNode(node.Parent)
+	})
+	// __getParentNode__ is parentNode, which is not parentElement: the DOM
+	// Standard's parentNode reaches the *document* node too, so
+	// `document.documentElement.parentNode === document` and a text node under
+	// <html> has a parent at all. Binding parentNode to parentElement (as this
+	// file used to) silently made the root of the tree look detached, and
+	// jQuery's `while ((elem = elem[dir]) && elem.nodeType === 1)` ancestor
+	// walks stopped one level early.
+	_ = doc.Set("__getParentNode__", func(call goja.FunctionCall) goja.Value {
+		nid := int(call.Arguments[0].ToInteger())
+		node := r.nodeRegistry[nid]
+		if node == nil {
 			return goja.Null()
 		}
 		return r.wrapNode(node.Parent)
@@ -1126,6 +1225,19 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 		r.defineStyleAccessor(obj, node)
 		// Live element accessors: children, parentElement, firstElementChild, etc.
 		r.defineElementAccessors(obj)
+		// Live node accessors: childNodes, firstChild, lastChild, siblings,
+		// ownerDocument, nodeValue, isConnected.
+		r.defineNodeAccessors(obj, node)
+	}
+
+	// The non-element types have a spec name too - "#text", "#comment",
+	// "#document-fragment", "#doctype" - and the element branch below overwrites
+	// this with the uppercase tag. A leaf node answering undefined for nodeName
+	// reads to a selector engine as "not a node I recognise", which is a wrong
+	// result rather than a missing feature: Sizzle lowercases nodeName on every
+	// node it walks, and jQuery 3.6.0 reads it 27 times in the shipped bundle.
+	if !node.Element() {
+		_ = obj.Set("nodeName", nodeStaticName(node))
 	}
 
 	// Element-specific properties.
@@ -1692,7 +1804,9 @@ func (r *Runtime) defineElementAccessors(obj *goja.Object) {
 			},
 			parentNode: {
 				get: function() {
-					return this.parentElement;
+					var nid = this.__nid__;
+					if (nid === undefined) return null;
+					return document.__getParentNode__(nid);
 				},
 				configurable: true,
 				enumerable: true
@@ -1939,15 +2053,16 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	}
 	// Gate the insertion through the document's mutation budget: a child that
 	// would breach the node/depth/attribute caps throws a catchable
-	// QuotaExceededError and leaves the tree unchanged.
-	r.admitInsert("appendChild", parentNode, []*dom.Node{childNode}, func() {
-		parentNode.AppendChild(childNode)
+	// QuotaExceededError and leaves the tree unchanged. A DocumentFragment is
+	// charged as its children, because those are what actually land, and
+	// InsertNode moves them and empties the fragment - the step every
+	// `parent.appendChild(buildFragment(...))` in the wild depends on.
+	r.admitInsert("appendChild", parentNode, insertCharge(childNode), func() {
+		parentNode.InsertNode(childNode, nil)
 	})
 	r.notifyMutation()
-	// Invoke connectedCallback if child is a custom element
-	if childNode.Type == dom.NodeElement {
-		r.invokeLifecycleCallback(childNode, "connectedCallback")
-	}
+	// Invoke connectedCallback for each node that landed.
+	r.notifyConnected(childNode)
 	// Return the child, matching the DOM spec.
 	return call.Arguments[0]
 }
@@ -2047,7 +2162,8 @@ func (r *Runtime) querySelector(root *dom.Node, sel string) *dom.Node {
 // subtree where a deeper duplicate may still match). Results equal the walk:
 // indexes enumerate in document order and containment+exclusion mirror it.
 func (r *Runtime) querySelectorIndexed(root *dom.Node, sel string) (*dom.Node, bool) {
-	if root == nil || r.domDoc == nil || sel == "" {
+	doc := r.indexDocFor(root)
+	if root == nil || doc == nil || sel == "" {
 		if sel == "" {
 			return nil, true
 		}
@@ -2057,7 +2173,7 @@ func (r *Runtime) querySelectorIndexed(root *dom.Node, sel string) (*dom.Node, b
 	case len(sel) > 1 && sel[0] == '#':
 		return r.querySelectorID(root, sel)
 	case len(sel) > 1 && sel[0] == '.':
-		for _, n := range r.domDoc.ElementsByClassName(sel[1:]) {
+		for _, n := range doc.ElementsByClassName(sel[1:]) {
 			if containedStrict(root, n) {
 				return n, true
 			}
@@ -2069,13 +2185,32 @@ func (r *Runtime) querySelectorIndexed(root *dom.Node, sel string) (*dom.Node, b
 		if sel[0] == '#' || !isLowerTag(sel) {
 			return nil, false
 		}
-		for _, n := range r.domDoc.ElementsByTagName(sel) {
+		for _, n := range doc.ElementsByTagName(sel) {
 			if containedStrict(root, n) {
 				return n, true
 			}
 		}
 		return nil, true
 	}
+}
+
+// indexDocFor returns the document whose id/tag/class indexes answer a query
+// rooted at root.
+//
+// r.domDoc is the answer for every node of the live tree, which is all a page
+// could ask for before this. document.implementation.createHTMLDocument puts a
+// second, detached document inside the same runtime, and reading the *live*
+// document's index for a query rooted in that foreign tree yields the live
+// matches filtered by "is this node a descendant of that root" - always none,
+// and reported as `ok`, so the walk never runs. The page cannot tell that
+// apart from "the element is not here", which is a wrong answer rather than an
+// unsupported one: jQuery's Sizzle support probes and its parseHTML context
+// both query a detached document.
+func (r *Runtime) indexDocFor(root *dom.Node) *dom.Document {
+	if root != nil && root.Doc != nil {
+		return root.Doc
+	}
+	return r.domDoc
 }
 
 // containedStrict reports whether n is a proper descendant of root.
@@ -2113,10 +2248,11 @@ func isLowerTag(sel string) bool {
 // miss answers nil directly: no element carries that id, so the walk could
 // only return nil too.
 func (r *Runtime) querySelectorID(root *dom.Node, sel string) (node *dom.Node, ok bool) {
-	if root == nil || r.domDoc == nil || len(sel) < 2 || sel[0] != '#' {
+	doc := r.indexDocFor(root)
+	if root == nil || doc == nil || len(sel) < 2 || sel[0] != '#' {
 		return nil, false
 	}
-	node = r.domDoc.ElementByID(sel[1:])
+	node = doc.ElementByID(sel[1:])
 	if node == nil {
 		return nil, true
 	}
@@ -2145,7 +2281,8 @@ func (r *Runtime) querySelectorAll(root *dom.Node, sel string) []*dom.Node {
 // indexes, filtering to the rooted subtree. Same ordering and membership as
 // the walk; ok==false falls back to it.
 func (r *Runtime) querySelectorAllIndexed(root *dom.Node, sel string) ([]*dom.Node, bool) {
-	if root == nil || r.domDoc == nil || sel == "" {
+	doc := r.indexDocFor(root)
+	if root == nil || doc == nil || sel == "" {
 		if sel == "" {
 			return nil, true
 		}
@@ -2154,9 +2291,9 @@ func (r *Runtime) querySelectorAllIndexed(root *dom.Node, sel string) ([]*dom.No
 	var all []*dom.Node
 	switch {
 	case len(sel) > 1 && sel[0] == '.':
-		all = r.domDoc.ElementsByClassName(sel[1:])
+		all = doc.ElementsByClassName(sel[1:])
 	case isLowerTag(sel) && sel[0] != '#':
-		all = r.domDoc.ElementsByTagName(sel)
+		all = doc.ElementsByTagName(sel)
 	default:
 		return nil, false
 	}
@@ -2669,7 +2806,10 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 		typ = t.String()
 	}
 	event := dom.NewEvent(typ, true, true)
-	result := dom.DispatchEvent(node, event)
+	// The window step is part of the path, not an extra: an event a page
+	// dispatches on an element still reaches window listeners when it bubbles,
+	// and one dispatched on the document reaches them last.
+	result := r.dispatchWithWindowStep(node, event)
 	return r.vm.ToValue(result)
 }
 
@@ -3100,6 +3240,9 @@ func escapeAttr(s string) string {
 // invoked after every DOM mutation from JS so the engine can re-style and
 // re-layout.
 func (r *Runtime) notifyMutation() {
+	r.mu.Lock()
+	r.mutations++
+	r.mu.Unlock()
 	if r.opts.OnMutation != nil {
 		r.opts.OnMutation()
 	}

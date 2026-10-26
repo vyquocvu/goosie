@@ -202,15 +202,10 @@ func (h *historyObj) goTo(delta int) {
 	}
 }
 
-// updateLocation updates window.location.href.
+// updateLocation moves the document's URL after a history walk. location's
+// parts are accessors over one parsed URL (see location.go), so updating the
+// runtime state is the whole job - and the only way to keep pathname, search and
+// hostname consistent with the href a page reads next.
 func (r *Runtime) updateLocation(url string) {
-	if win := r.vm.Get("window"); win != nil {
-		if winObj, ok := win.(*goja.Object); ok {
-			if loc := winObj.Get("location"); loc != nil {
-				if locObj, ok := loc.(*goja.Object); ok {
-					_ = locObj.Set("href", url)
-				}
-			}
-		}
-	}
+	r.setLocation(url)
 }
