@@ -125,12 +125,14 @@ A throwaway engine-level test (deleted; `raster.RasterizeTile` over a 70x90 box,
 - during-parse control: **6,300** blue pixels;
 - after-load assignment (`setTimeout`, then `PumpJS` until `onload`): **6,300** blue pixels.
 
-The real `-screenshot` path is **not measurable**: TASK-056 has not landed on this branch (no `watchVsync` hook in `steadyDriver`/`driver`; `framePath.pumpJS` is only reached from the interactive chrome tick and the media path, so a paced/screenshot run never calls `Session.PumpJS`, and TASK-056 §1.2's fetch-context cancellation still applies to network sources). A measured confirmation of that limitation, with the built CLI (`go build -o /tmp/task057/goosie ./cmd/goosie`, rc 0):
+Before the merge with TASK-056, the real `-screenshot` path was **not measurable** on this branch (no `watchVsync` hook in `steadyDriver`/`driver`; `framePath.pumpJS` is only reached from the interactive chrome tick and the media path, so a paced/screenshot run never calls `Session.PumpJS`, and TASK-056 §1.2's fetch-context cancellation still applies to network sources). A measured confirmation of that limitation, with the built CLI (`go build -o /tmp/task057/goosie ./cmd/goosie`, rc 0):
 
 - `./goosie -backend headless -screenshot -dpr 1 -url file:///tmp/task057/control.html -out /tmp/task057/control-dpr1.png` - rc 0; the PNG contains **6,300** blue pixels (25,200 at the default `-dpr 2`, i.e. the same 70x90 CSS box at 2x).
 - `./goosie -backend headless -screenshot -dpr 1 -url file:///tmp/task057/after.html -out /tmp/task057/after-dpr1.png` - rc 0; the PNG contains **0** blue pixels (0 at `-dpr 2` as well). The engine-level probe above shows the same document paints 6,300 once the loop is pumped.
 
+**Re-measured after TASK-056 landed (integrator, 2026-10-26, combined tree `c4463f2` = main `174a14a` + TASK-057):** the same two pages through the combined CLI (built from that tree) render **6,300** blue pixels each at `-dpr 1` — `control.html` 6,300, `after.html` 6,300 — against the 0 the after-load page measured before the merge. The paced pump and the script-image reconciliation compose: the timer runs, the retained image attaches, the pixel sink delivers the decode, and the next vsync repaints. Both runs rc 0; the count was reproduced on a second run before this note was written.
+
 ### 7.6 Not measured
 
-- The end-to-end `-screenshot` after-load probe, for the reason above; it becomes measurable once TASK-056's paced pump lands.
+- The end-to-end `-screenshot` after-load probe is no longer unmeasured once both tasks are merged (see §7.5): 6,300 blue pixels. On TASK-057 alone, without TASK-056's paced pump, it remains 0.
 - `srcset`/`<picture>`, CSS background images and canvas `drawImage` assigned by script are out of scope (§3.4) and were not measured. The stale-pixel case for a parse-time `<img>` replaced by a script `src` change was not widened or measured; the reconciliation only owns script-retained entries.
