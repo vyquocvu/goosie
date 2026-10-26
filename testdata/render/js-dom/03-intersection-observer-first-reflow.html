@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JS DOM - IntersectionObserver registration during parse</title>
+<style>
+  /* The page shape that hung every live site: an IntersectionObserver created and
+     observe()d from inline script while the document is parsing.  Before
+     TASK-054 this fixture never produced a PNG at all - the load did not return,
+     because CheckIntersections called Export() on the node wrapper while holding
+     the runtime mutex and the wrapper's enumerable shadowRoot getter re-entered
+     that same non-reentrant lock.  parity.py reports such a fixture as MISSING,
+     so the corpus gate here is "the document finishes loading", not a pixel
+     difference.  getbootstrap.com and vietnamnet.vn are the live shapes.
+
+     Pixels deliberately do not depend on *when* the first callback lands.
+     Chromium delivers IntersectionObserver callbacks in the rendering steps that
+     follow the layout the entries describe, so a reveal written from the callback
+     can land one frame after the screenshot - a race, not a defect, and a
+     fixture must not score a race.  The callback therefore records its entries on
+     document.title and the painted report line is written synchronously; what
+     this fixture proves is that registering an observer does not wedge the load,
+     and that the surrounding DOM/JS API set still paints around it. */
+  body { margin: 0; padding: 20px; font-family: sans-serif; color: #111; background: #fff; }
+  .row { height: 36px; margin: 0 0 6px 0; font-size: 18px; line-height: 36px; }
+  .report { font-size: 15px; line-height: 18px; margin: 0 0 6px 0; }
+  .blue { background: #0000ff; }
+  .red { background: #ff0000; }
+  .green { background: #008000; }
+  .grey { background: #808080; }
+</style>
+</head>
+<body>
+  <div class="row grey">PAINTED WITHOUT SCRIPT</div>
+  <div id="sentinel"></div>
+  <div id="stats"></div>
+  <div class="row green">OBSERVER REGISTERED DURING PARSE</div>
+  <div class="row blue">DOCUMENT STILL REACHED ITS FIRST FRAME</div>
+  <div class="row red">NO EXPORT UNDER THE RUNTIME MUTEX</div>
+  <div id="report"></div>
+<script>
+  var report = document.getElementById("report");
+  function say(text) {
+    var row = document.createElement("div");
+    row.setAttribute("class", "report");
+    row.appendChild(document.createTextNode(text));
+    report.appendChild(row);
+  }
+
+  function mkStats(label, id) {
+    var el = document.createElement("div");
+    el.setAttribute("class", "row grey");
+    el.setAttribute("id", id);
+    el.appendChild(document.createTextNode(label));
+    return el;
+  }
+
+  // Two elements registered on one observer, the way a page observes a sentinel
+  // and a section at once: one inside the viewport, one far below the fold, so
+  // the callback has to distinguish them by target identity rather than by
+  // position.
+  var sentinel = document.getElementById("sentinel");
+  sentinel.appendChild(mkStats("SENTINEL AT THE TOP OF THE DOCUMENT", "top"));
+  var far = document.createElement("div");
+  far.setAttribute("class", "row grey");
+  far.appendChild(document.createTextNode("SENTINEL FAR BELOW THE FOLD"));
+  var stats = document.getElementById("stats");
+  stats.appendChild(far);
+
+  var fired = 0;
+  var observer = new IntersectionObserver(function (entries) {
+    fired = fired + 1;
+    var seen = 0;
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].target === sentinel) seen = seen + 1;
+    }
+    document.title = "IO ENTRIES " + entries.length + " SENTINEL " + seen +
+      " CALLS " + fired;
+  });
+  observer.observe(sentinel);
+  observer.observe(far);
+
+  say("CONSTRUCTED " + (typeof IntersectionObserver));
+  say("OBSERVED 2 TARGETS");
+  say("METHODS " + (typeof observer.observe) + " " + (typeof observer.unobserve) + " " +
+    (typeof observer.disconnect));
+
+  // Disconnect is exercised after the session reflows, so the callback still has
+  // to be live while the document is being laid out.  Chromium runs a task here
+  // and Goosie runs it before the pixels are taken, which is why the painted
+  // lines above cannot depend on the callback having landed yet: the report line
+  // below says only that load fired, never how many calls were in.
+  window.addEventListener("load", function () {
+    say("LOADED WITH 2 TARGETS OBSERVED");
+    observer.disconnect();
+  });
+</script>
+</body>
+</html>
