@@ -338,9 +338,11 @@ Predictions of mine that measurement disproved, corrected in the tests:
 - `internal/archtest/rules.go`: `internal/js` is now allowed to import `internal/css` alongside `internal/dom`
   and `internal/media`. No other rule moved. `css` imports `dom` and nothing else, so `js → css → dom` adds no
   cycle. `go test ./internal/archtest/` rc 0 (§8.3).
-- `PROJECT.md`: **not edited.** It mentions `internal/js` only in prose ("a per-document JS runtime bound to
-  `internal/dom`"); it carries no per-package import inventory line, so there was no clause to change. The
-  paragraph still reads true.
+- `PROJECT.md`: **not edited.** It names `internal/js` in two places only: the pipeline prose at line 16
+  ("through the goja runtime in `internal/js`") and the package-responsibility table row `js`, which lists
+  features (goja runtime, DOM bindings, fetch/CORS/CSP, …), not imports. The Import Rules section delegates
+  the table itself to `internal/archtest/rules.go`, so no clause names the packages `internal/js` may import
+  and there was nothing to change. Both statements still read true.
 - The seven integrator-owned files were not touched: `docs/qa-test-catalog.md`,
   `docs/qa-open-defects.json`, `docs/qa-ratchet.json`, `test/qc/catalog.go`,
   `test/qc/traceability.golden.json`, `testdata/render-known-gaps.json`, `testdata/parity.py`.
