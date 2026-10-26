@@ -134,4 +134,3 @@ func TestSteadyVsyncHookRunsBeforeReadyAndRestartsSettling(t *testing.T) {
 	}
 	close(win.events)
 }
-
