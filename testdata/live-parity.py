@@ -415,7 +415,7 @@ def _git_rev(abbrev: int = 0) -> str:
 def _parse_go_version_m(text: str) -> dict:
     """Read the VCS stamp `go version -m` prints.
 
-    GOOSIE-LIVE-009. `source_sha` is `git rev-parse HEAD`, which is true of a
+    GOOSIE-LIVE-010. `source_sha` is `git rev-parse HEAD`, which is true of a
     clean tree and a lie about the compiled content of a dirty one. Go already
     records the difference (`vcs.modified=true`, and `+dirty` on the module
     line), so the report can say which tree produced the bytes instead of
@@ -460,7 +460,7 @@ def capture_build(binary: str) -> dict:
     of the bytes that will produce every PNG. The binary hash is the load-bearing
     one -- it identifies the artifact even when the tree moved underneath it.
 
-    GOOSIE-LIVE-009. A binary built from a dirty tree carries HEAD's revision
+    GOOSIE-LIVE-010. A binary built from a dirty tree carries HEAD's revision
     plus `vcs.modified=true`. The revision alone then names a commit that was
     never compiled, so the report must carry the flag or a reader will attribute
     in-progress edits to a released SHA.
@@ -620,12 +620,12 @@ def build_header_lines(payload: dict) -> list[str]:
                 + (f" (Go stamped `{vcs_rev[:8]}`)" if vcs_rev else "")
                 + ". Labels in this report are not attributable to that commit; "
                 "rebuild from a clean tree before comparing this sweep with another "
-                "(GOOSIE-LIVE-009).")
+                "(GOOSIE-LIVE-010).")
         elif vcs_rev and b.get("source_sha") and vcs_rev != b["source_sha"]:
             lines.append(
                 f"**WARNING — the binary was built from a different commit than the "
                 f"tree's HEAD:** Go stamped `{vcs_rev[:8]}`, HEAD is `{src8}`. The "
-                "labels below describe the binary, not this tree (GOOSIE-LIVE-009).")
+                "labels below describe the binary, not this tree (GOOSIE-LIVE-010).")
         if run8 and src8 and run8 != src8:
             lines.append(f"**WARNING — the filename names a different commit than these "
                          f"pixels:** `{payload['run_id']}` ends in `{run8}`, the HEAD when "
@@ -1135,7 +1135,7 @@ def selftest() -> int:
               "so in-progress edits are never scored as a released SHA",
               "uncommitted changes" in dirty_md
               and "not attributable" in dirty_md
-              and "GOOSIE-LIVE-009" in dirty_md, dirty_md[:500])
+              and "GOOSIE-LIVE-010" in dirty_md, dirty_md[:500])
 
         print(f"\n{len(failures)} selftest failure(s)" if failures else "\nselftest green")
         return 1 if failures else 0
@@ -1186,7 +1186,7 @@ def main() -> int:
     if build.get("vcs_modified"):
         print(f"live-parity: WARNING {build['binary_path']} was built from a dirty "
               "tree; the report will not attribute these labels to its commit "
-              "(GOOSIE-LIVE-009)", file=sys.stderr)
+              "(GOOSIE-LIVE-010)", file=sys.stderr)
 
     keep = bool(args.artifacts)
     artifacts = Path(args.artifacts or tempfile.mkdtemp(prefix="goosie-live-"))
