@@ -146,8 +146,13 @@ func TestGetComputedStyleMergesInlineOverCascade(t *testing.T) {
 	}
 }
 
-// Engine values only. A property this engine does not model reads as the empty
-// string, the same way it does for a name that is not a property at all, and
+// Engine values only, in the two shapes "no value" actually has here.
+// getPropertyValue answers the empty string for a name the engine does not
+// carry, while the accessor for that same name is absent, so it reads
+// `undefined` - which is why the third element below is a `typeof`: a plain
+// `[..].join("|")` renders undefined as an empty cell and would not tell the
+// two apart. CSSOM would answer "" for both; the deviation is recorded as
+// GOOSIE-CSSOMTASK-001 in docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
 // getPropertyPriority has no important flags to report. Inventing "initial"
 // values would make a missing cascade look like a resolved one.
 func TestGetComputedStyleOnlyReportsEngineValues(t *testing.T) {
@@ -157,14 +162,14 @@ func TestGetComputedStyleOnlyReportsEngineValues(t *testing.T) {
 		var out = [
 			cs.getPropertyValue("line-height"),
 			cs.getPropertyValue("not-a-property"),
-			cs.zIndex,
+			typeof cs.zIndex,
 			cs.getPropertyPriority("display")
 		].join("|");
 		var undef = typeof cs.lineheight;`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	if got := evalString(t, rt, `out`); got != "|||" {
-		t.Fatalf("unmodelled properties = %q, want %q (four empty strings)", got, "|||")
+	if got := evalString(t, rt, `out`); got != "||undefined|" {
+		t.Fatalf("unmodelled properties = %q, want %q (two empty getPropertyValue reads, an absent accessor, no priority)", got, "||undefined|")
 	}
 	// Undefined reads stay undefined rather than becoming the string "initial".
 	if got := evalString(t, rt, `undef`); got != "undefined" {
