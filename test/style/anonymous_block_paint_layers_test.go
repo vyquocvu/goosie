@@ -50,6 +50,7 @@ import (
 // TestAnonymousBlockStyleCarriesNoElementDecoration is the per-property collapse:
 // the element that declared the decoration keeps all of it, the anonymous block box
 // carries none of the four non-inherited groups.
+// qc:BR-229
 func TestAnonymousBlockStyleCarriesNoElementDecoration(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -186,6 +187,7 @@ func TestAnonymousBlockStyleCarriesNoElementDecoration(t *testing.T) {
 // the text inside the box would compute anyway, and Chromium paints it exactly
 // there (655 px with the declaration, 648 with the anonymous boxes present, all of
 // them inside the bands). A blanket "clear what the parent had" would drop it.
+// qc:BR-230
 func TestAnonymousBlockStyleKeepsInheritedTextShadow(t *testing.T) {
 	doc, styles := abCascade(t, `div{text-shadow:2px 2px 2px rgb(0,0,255),0 0 3px rgb(0,0,0)}`)
 	parent := abStyle(t, doc, styles)
@@ -208,6 +210,7 @@ func TestAnonymousBlockStyleKeepsInheritedTextShadow(t *testing.T) {
 // builders hand out no shadow, no radius, no mask and no border-image. Before this
 // change the table builder cleared six groups and the block builder none, so a
 // declaration reached an anonymous block box that a table wrapper never got.
+// qc:BR-229
 func TestAnonymousBlockAndTableStyleCollapseShadowsAlike(t *testing.T) {
 	doc, styles := abCascade(t, `div{box-shadow:0 0 10px 6px rgba(200,0,0,0.5);border-radius:8px;`+
 		`mask-image:url(/m.svg);mask-repeat:no-repeat;mask-size:50% 50%;mask-position:center;`+

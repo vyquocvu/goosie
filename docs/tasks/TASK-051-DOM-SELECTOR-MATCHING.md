@@ -159,8 +159,9 @@ Every case must die when its mechanism is restored. Minimum:
 (`grep -c -- '^- \*\*BR-' docs/qa-test-catalog.md` → `212`), and the highest allocated id is **BR-212**
 (`grep -o 'BR-[0-9]*' docs/qa-test-catalog.md | sort -t- -k2 -n | tail -1` → `BR-212`). The ids below
 therefore continue from the *actual* maximum, not from the header, so nothing collides: **BR-213 … BR-228**.
-This branch adds no `// qc:BR-` markers, because none of these ids is in the catalog yet; the integrator tags
-and `-update`s.
+**Integrator note (2026-10-26):** registered verbatim as **BR-213 … BR-228**; the sixteen named tests now
+carry `// qc:BR-` markers, `expectedCaseCount` is 233 (including TASK-053's five rows), and
+`traceability.golden.json` was regenerated in the same change.
 
 ### 8.1 Behaviour → exact test
 

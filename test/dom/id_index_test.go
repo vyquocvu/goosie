@@ -188,6 +188,7 @@ func TestQueryIndexDuplicateClassOnce(t *testing.T) {
 	}
 }
 
+// qc:BR-228
 func TestJSQueryContainment(t *testing.T) {
 	doc := buildIDDoc(t, `<div id="outer"><p class="x">1</p><div id="inner"><p class="x">2</p><span id="s">3</span></div></div><p class="x">4</p>`)
 	r, err := newJSRT(doc)

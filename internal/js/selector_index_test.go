@@ -32,6 +32,7 @@ func newSelectorRuntime(t *testing.T) (*Runtime, *dom.Document) {
 // condition. Everything else must decline so the general walk runs. This is
 // package js (white-box) because indexKind and querySelectorAllIndexed are
 // unexported; the doc names this package.
+// qc:BR-225
 func TestSelectorFastPathPredicate(t *testing.T) {
 	cases := []struct {
 		sel  string
@@ -78,6 +79,7 @@ func TestSelectorFastPathPredicate(t *testing.T) {
 // requirement: a complex selector is declined by querySelectorAllIndexed and
 // still answered, by the walk. Results are compared to the measured Chromium
 // counts.
+// qc:BR-226
 func TestSelectorComplexSelectorDeclinesIndex(t *testing.T) {
 	r, doc := newSelectorRuntime(t)
 	root := &doc.Node
@@ -132,6 +134,7 @@ func TestSelectorComplexSelectorDeclinesIndex(t *testing.T) {
 // TestSelectorPlanCacheReusesAndBounds pins the two counter-shaped cache
 // properties M05 and §3.2's "cache compiled selectors per document" require:
 // the same string compiles once, and the cache never grows past its cap.
+// qc:BR-227
 func TestSelectorPlanCacheReusesAndBounds(t *testing.T) {
 	r, _ := newSelectorRuntime(t)
 

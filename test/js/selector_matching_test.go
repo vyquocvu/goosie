@@ -88,6 +88,7 @@ func runSelectorScript(t *testing.T, body string) string {
 // the fourteenth so the id fast path has a row of its own. The §1 Goosie
 // column reproduced exactly on main (13 rows: p, div and .a hit; the other ten
 // answered null/0) and matches/closest did not exist at all.
+// qc:BR-213
 func TestSelectorMatchingSection1Forms(t *testing.T) {
 	cases := []struct {
 		sel       string
@@ -145,6 +146,7 @@ out = [
 // lists, document order, and de-duplication. Measured on the fixture with
 // Chromium 153.0.8010.12 (/tmp/t51/measure10.js, rc 0): the values in each
 // case are the count/order Chromium reported.
+// qc:BR-214
 func TestSelectorMatchingCombinatorsAndLists(t *testing.T) {
 	cases := []struct{ sel, want string }{
 		{"div > p", "p.a"},                   // child combinator, measured 1
@@ -177,6 +179,7 @@ func TestSelectorMatchingCombinatorsAndLists(t *testing.T) {
 // (/tmp/t51/measure9.js and measure10.js, rc 0); [data-x="y"] is the quoted
 // form the pre-fix code could not match, while element_query_test.go keeps the
 // unquoted [jsname=sIJmDf] form alive.
+// qc:BR-215
 func TestSelectorMatchingAttributes(t *testing.T) {
 	cases := []struct{ sel, want string }{
 		{"[data-x]", "div#o"},     // presence, measured 1
@@ -212,6 +215,7 @@ func TestSelectorMatchingAttributes(t *testing.T) {
 // supports, including a list argument to :not() (Selectors 4; the cascade
 // matcher already evaluates it as a list). Measured with Chromium 153.0.8010.12
 // (/tmp/t51/measure10.js and measure12.js, rc 0).
+// qc:BR-216
 func TestSelectorMatchingPseudoClasses(t *testing.T) {
 	cases := []struct{ sel, want string }{
 		{"p:first-child", "p.a,p.b"},                // measured 2
@@ -261,6 +265,8 @@ func TestSelectorMatchingPseudoClasses(t *testing.T) {
 //	a.closest(":scope"), b.closest(":scope")-> the element itself
 //	b.closest(":scope > span")              -> null (its own children only)
 //	document.querySelector(":scope :scope") -> null
+//
+// qc:BR-217
 func TestSelectorMatchingScopeSemantics(t *testing.T) {
 	body := `
 var a = document.querySelector(".a"), b = document.querySelector(".b");
@@ -291,6 +297,7 @@ out = [
 // matches tests the element itself and its ancestors, never its descendants;
 // closest starts at the element and stops at the first match. Measured with
 // Chromium 153.0.8010.12 (/tmp/t51/measure1.js and measure8.js, rc 0).
+// qc:BR-218
 func TestSelectorMatchingMatchesAndClosest(t *testing.T) {
 	body := `
 var a = document.querySelector(".a"), b = document.querySelector(".b"), c = document.querySelector(".c");
@@ -326,6 +333,7 @@ out = [
 // (/tmp/t51/measure8.js, rc 0). The white-box test
 // TestSelectorFastPathPredicate keeps the uppercase tag name off the index
 // path, which is isLowerTag's original purpose.
+// qc:BR-219
 func TestSelectorMatchingCaseRules(t *testing.T) {
 	cases := []struct{ sel, want string }{
 		{"DIV", "div#o"},        // tag name folds, measured 1
@@ -352,6 +360,7 @@ func TestSelectorMatchingCaseRules(t *testing.T) {
 // result. Measured with Chromium 153.0.8010.12 (/tmp/t51/measure8.js and
 // measure9.js, rc 0): every selector in wantInvalid throws a DOMException
 // whose .name is "SyntaxError" on Document and on Element queries.
+// qc:BR-220
 func TestSelectorMatchingSyntaxErrors(t *testing.T) {
 	invalid := []string{
 		"p:not()",
@@ -401,6 +410,7 @@ out = [
 // Measured with Chromium 153.0.8010.12: ":is()" and ":where()" match nothing
 // (measure12.js), "::before", "p::before" and "p:has(> figure)" match nothing
 // (/tmp/t51/measure8.js, measure13.js, rc 0).
+// qc:BR-221
 func TestSelectorMatchingValidButEmptySelectors(t *testing.T) {
 	valid := []string{":is()", ":where()", "::before", "p::before", "p:empty", "p:has(> figure)"}
 	for _, sel := range valid {
@@ -429,6 +439,7 @@ out = [
 // answers 0. That is the cascade's bug, reported as GOOSIE-CSSATTR-EMPTY-001
 // in §8 and out of scope here per §6, so this case asserts only that the query
 // API accepts the selector and that the missing-value form throws.
+// qc:BR-222
 func TestSelectorMatchingEmptyQuotedAttributeIsAccepted(t *testing.T) {
 	body := `
 out = [
@@ -457,6 +468,8 @@ out = [
 //	  Failed to execute 'matches' on 'Element': 'p:not()' is not a valid selector.
 //	a.closest("p:not()") ->
 //	  Failed to execute 'closest' on 'Element': 'p:not()' is not a valid selector.
+//
+// qc:BR-223
 func TestSelectorMatchingSyntaxErrorMessages(t *testing.T) {
 	body := `
 var a = document.querySelector(".a");
@@ -484,6 +497,7 @@ out = [
 // String(v), so undefined/null become type selectors matching nothing and an
 // array's own toString is used; a missing argument is a TypeError with
 // Chromium's wording.
+// qc:BR-224
 func TestSelectorMatchingArgumentCoercion(t *testing.T) {
 	body := `
 out = [

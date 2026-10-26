@@ -1147,6 +1147,68 @@
     "enforced": false
   },
   {
+    "id": "BR-229",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/style/anonymous_block_paint_layers_test.go:TestAnonymousBlockAndTableStyleCollapseShadowsAlike",
+      "test/style/anonymous_block_paint_layers_test.go:TestAnonymousBlockStyleCarriesNoElementDecoration"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-230",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/style/anonymous_block_paint_layers_test.go:TestAnonymousBlockStyleKeepsInheritedTextShadow"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-231",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/anonymous_block_paint_layers_test.go:TestAnonymousBlockEmitsNoBoxShadowCommands"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-232",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/anonymous_block_paint_layers_test.go:TestAnonymousBlockBoxShadowPaintIsShapeInvariant"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-233",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/anonymous_block_paint_layers_test.go:TestAnonymousBlockTextKeepsItsShadow"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
@@ -1812,6 +1874,198 @@
       "test/style/url_paren_test.go:TestBackgroundImageURLParenRegression",
       "test/style/url_paren_test.go:TestBackgroundShorthandURLParen",
       "test/style/url_paren_test.go:TestMaskImageURLParen"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-213",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingSection1Forms"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-214",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingCombinatorsAndLists"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-215",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingAttributes"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-216",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingPseudoClasses"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-217",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingScopeSemantics"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-218",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingMatchesAndClosest"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-219",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingCaseRules"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-220",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingSyntaxErrors"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-221",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingValidButEmptySelectors"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-222",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingEmptyQuotedAttributeIsAccepted"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-223",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingSyntaxErrorMessages"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-224",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/selector_matching_test.go:TestSelectorMatchingArgumentCoercion"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-225",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/js/selector_index_test.go:TestSelectorFastPathPredicate"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-226",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/js/selector_index_test.go:TestSelectorComplexSelectorDeclinesIndex"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-227",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/js/selector_index_test.go:TestSelectorPlanCacheReusesAndBounds"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-228",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/dom/id_index_test.go:TestJSQueryContainment"
     ],
     "enforced": false
   },

@@ -123,6 +123,7 @@ const (
 // box-shadow declaration adds are the element's own, and their number and geometry
 // do not change when layout has to generate one or two anonymous blocks around the
 // content. N fills per declaring element, zero per generated box.
+// qc:BR-231
 func TestAnonymousBlockEmitsNoBoxShadowCommands(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -271,6 +272,7 @@ func apChanged(a, b *frame.Bitmap) map[[2]int]struct{} {
 // collapse, and the extra pixels were the two 300x18 rings the wrappers painted,
 // 3600 of them inside the block's own box between the text and its right edge where
 // Chromium and Goosie-without-wrappers are white.
+// qc:BR-232
 func TestAnonymousBlockBoxShadowPaintIsShapeInvariant(t *testing.T) {
 	plain := apChanged(apRaster(t, apOneLayer, apNoBands), apRaster(t, apBoxShape, apNoBands))
 	anon := apChanged(apRaster(t, apOneLayer, apTwoBands), apRaster(t, apBoxShape, apTwoBands))
@@ -347,6 +349,7 @@ func TestAnonymousBlockBoxShadowPaintIsShapeInvariant(t *testing.T) {
 // the run's own style - which is why the cascade assertion lives in test/style/
 // (TestAnonymousBlockStyleKeepsInheritedTextShadow). What this test kills is the
 // other mistake: gating the run's text-shadow along with the box's.
+// qc:BR-233
 func TestAnonymousBlockTextKeepsItsShadow(t *testing.T) {
 	const ts = `.box{width:300px;height:76px;margin:20px;text-shadow:2px 2px 0 rgb(0,0,255)}`
 	const tsNone = `.box{width:300px;height:76px;margin:20px}`

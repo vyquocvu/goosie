@@ -202,20 +202,19 @@ per-text-run multiplier this task does not own), the corpus is **92/92 at 96.21%
 
 ## 8. Proposed BR rows, exact test names, gates (implementer)
 
-Catalog state read at `b46d4d5`: `docs/qa-test-catalog.md` ends at **BR-212**, so the next free id is **BR-213**
-and the five rows below take **BR-213…BR-217**. No QA-owned file was touched (§0) and **no `// qc:BR-…` marker
-was added to the new tests**: until the rows land, a marker would name an id the catalog does not know. Add the
-markers and the rows in the same change, and renumber if TASK-05x took these ids meanwhile.
+**Integrator note (2026-10-26):** TASK-051 merged first and took BR-213…BR-228, so the five rows are
+registered as **BR-229…BR-233** (renumbered, no statement or oracle changed). The six tests now carry
+`// qc:BR-` markers, the parity floor was raised 91 → 92, and `traceability.golden.json` was regenerated.
 
 ### 8.1 The rows
 
 | id | statement | oracle |
 |---|---|---|
-| **BR-213** | `style.AnonymousBlockStyle` hands out none of the generating element's non-inherited box decoration — `BoxShadow`, `BorderRadius`, the four `Mask*` longhands and `BorderImage` are zeroed on the copy, while its typography and `DisplayBlock` survive (css-backgrounds-3 §4/§6.2/§7.1, css-masking-1 §5.3) — and the two anonymous builders now agree. | `test/style/anonymous_block_paint_layers_test.go`: `TestAnonymousBlockStyleCarriesNoElementDecoration` (subtests `box-shadow longhand`, `box-shadow list of two layers`, `border-radius`, `mask longhands`, `border-image`, `all of them at once`), `TestAnonymousBlockAndTableStyleCollapseShadowsAlike` |
-| **BR-214** | The anonymous copy **keeps** `TextShadow`: `text-shadow` inherits (css-text-decor-3 §3), so the text inside a generated box computes it anyway and a blanket collapse would be a content regression. | `TestAnonymousBlockStyleKeepsInheritedTextShadow` |
-| **BR-215** | A generated (anonymous) block box emits **no** `box-shadow` command on the display list: the fills a declaration adds number N per declared layer and are rect-identical whether layout generates zero, one or two anonymous boxes inside the element. | `test/paint/anonymous_block_paint_layers_test.go`: `TestAnonymousBlockEmitsNoBoxShadowCommands` (6 subtests: `one layer, no inline content`, `one layer, two anonymous bands`, `one layer, inline content with no block sibling`, `two layers, two anonymous bands`, `two layers, no inline content`, `no declaration`, plus a rect-set equality sweep over two shapes) |
-| **BR-216** | A generated block box paints **no part** of the element's `box-shadow`: the rasterised change set of the declaration is identical in the split and unsplit documents, no shadow pixel lands in the element's interior or in a sibling band, and the element's own ring survives. Parity fixture: `testdata/render/css-features/17-anonymous-block-shadow-once.html`. | `TestAnonymousBlockBoxShadowPaintIsShapeInvariant` |
-| **BR-217** | `text-shadow` still reaches the glyphs inside a generated block box (the fix for BR-213/216 must not be widened to the inherited layer): the rasterised change set lands inside the anonymous bands and is blue-tinted there, and a no-declaration control has no blue at all. | `TestAnonymousBlockTextKeepsItsShadow` |
+| **BR-229** | `style.AnonymousBlockStyle` hands out none of the generating element's non-inherited box decoration — `BoxShadow`, `BorderRadius`, the four `Mask*` longhands and `BorderImage` are zeroed on the copy, while its typography and `DisplayBlock` survive (css-backgrounds-3 §4/§6.2/§7.1, css-masking-1 §5.3) — and the two anonymous builders now agree. | `test/style/anonymous_block_paint_layers_test.go`: `TestAnonymousBlockStyleCarriesNoElementDecoration` (subtests `box-shadow longhand`, `box-shadow list of two layers`, `border-radius`, `mask longhands`, `border-image`, `all of them at once`), `TestAnonymousBlockAndTableStyleCollapseShadowsAlike` |
+| **BR-230** | The anonymous copy **keeps** `TextShadow`: `text-shadow` inherits (css-text-decor-3 §3), so the text inside a generated box computes it anyway and a blanket collapse would be a content regression. | `TestAnonymousBlockStyleKeepsInheritedTextShadow` |
+| **BR-231** | A generated (anonymous) block box emits **no** `box-shadow` command on the display list: the fills a declaration adds number N per declared layer and are rect-identical whether layout generates zero, one or two anonymous boxes inside the element. | `test/paint/anonymous_block_paint_layers_test.go`: `TestAnonymousBlockEmitsNoBoxShadowCommands` (6 subtests: `one layer, no inline content`, `one layer, two anonymous bands`, `one layer, inline content with no block sibling`, `two layers, two anonymous bands`, `two layers, no inline content`, `no declaration`, plus a rect-set equality sweep over two shapes) |
+| **BR-232** | A generated block box paints **no part** of the element's `box-shadow`: the rasterised change set of the declaration is identical in the split and unsplit documents, no shadow pixel lands in the element's interior or in a sibling band, and the element's own ring survives. Parity fixture: `testdata/render/css-features/17-anonymous-block-shadow-once.html`. | `TestAnonymousBlockBoxShadowPaintIsShapeInvariant` |
+| **BR-233** | `text-shadow` still reaches the glyphs inside a generated block box (the fix for BR-213/216 must not be widened to the inherited layer): the rasterised change set lands inside the anonymous bands and is blue-tinted there, and a no-declaration control has no blue at all. | `TestAnonymousBlockTextKeepsItsShadow` |
 
 Both files are new: `test/style/anonymous_block_paint_layers_test.go` (three tests) and
 `test/paint/anonymous_block_paint_layers_test.go` (three tests). They live beside TASK-049's

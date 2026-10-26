@@ -68,7 +68,9 @@ PASS_AT = 90.0
 # tree and window lifecycle, the bootstrap DOM the engine could not answer before.
 # 91: css-features/16-url-paren-data-image.html (TASK-050, GOOSIE-CSSURLPAREN-001)
 # - a quoted url() payload containing ')' survives whole at all six readers.
-MIN_SCORED_FIXTURES = 91
+# 92: css-features/17-anonymous-block-shadow-once.html (TASK-053, GOOSIE-SHADOWRUN-001) - the ring belonged
+# to the element, not to the two anonymous bands it generated.
+MIN_SCORED_FIXTURES = 92
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
