@@ -605,9 +605,20 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
 	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
-	// The parent's background already covers this area; painting it twice would
-	// double the alpha of a translucent box.
+	// An anonymous box owns no background layer. The generating element has
+	// already painted all four across the area this box sits in, so handing out a
+	// copy composites a translucent layer a second time behind every run layout
+	// had to wrap: measured on a 300x76 block with
+	// `background:linear-gradient(rgba(200,0,0,.5),rgba(200,0,0,.5))` and two
+	// anonymous boxes, each added 300x18 px of (213,63,63), the twice-composited
+	// value, where Chromium has none. css-backgrounds-3 §4 attaches a background
+	// to the element's own boxes and css-cascade-4 §6.4 makes it non-inherited, so
+	// a box that is not the element's carries none. Same collapse as
+	// AnonymousTableStyle below, which already cleared all four.
 	s.BackgroundColor = css.Color{}
+	s.BackgroundImage = ""
+	s.BackgroundGradient = Gradient{}
+	s.BackgroundRadialGradient = RadialGradient{}
 	return &s
 }
 
