@@ -182,12 +182,16 @@ def _load_rgb(path: Path) -> np.ndarray:
     return np.array(Image.open(path).convert("RGB"))
 
 
-def _diag(stderr: str, pattern: re.Pattern | None = None) -> str:
+def _diag(stderr: str, pattern: re.Pattern | None = None, fallback: bool = False) -> str:
     """The line that explains a run, or "" when there is nothing to explain.
 
     Only ever a refusal or a fatal: a clean run's stderr is the frame report's
     counters and timings, which differ every run and would make two sweeps of
-    the same page produce different reports.
+    the same page produce different reports. A crash row passes fallback=True
+    so the reason survives even when it matches none of the patterns: on sweep
+    10 target.com answered with something goosie downloaded instead of
+    rendered, and the only explanatory line, "goosie: downloaded to ...", was
+    dropped, leaving GOOSIE_CRASH with rc=1 and an empty note.
     """
     lines = [l.strip() for l in stderr.splitlines() if l.strip()]
     for pat in (pattern, FATAL_RE):
@@ -196,6 +200,8 @@ def _diag(stderr: str, pattern: re.Pattern | None = None) -> str:
         hits = [l for l in lines if pat.search(l)]
         if hits:
             return hits[0][:220]
+    if fallback and lines:
+        return lines[0][:220]
     return ""
 
 
@@ -229,7 +235,7 @@ def classify(caps: dict, m: dict) -> tuple[str, list[str]]:
     if CAP_RE.search(stderr):
         return "ADMISSION_CAPPED", [f"rc={caps.get('goosie_rc')}", _diag(stderr, CAP_RE)]
     if caps.get("goosie_rc") not in (0, None):
-        return "GOOSIE_CRASH", [f"rc={caps['goosie_rc']}", _diag(stderr)]
+        return "GOOSIE_CRASH", [f"rc={caps['goosie_rc']}", _diag(stderr, fallback=True)]
     if not caps.get("goosie_png"):
         return "GOOSIE_RENDER_MISSING", ["exit 0 but no PNG"]
     if caps.get("doc_height") is None:
@@ -297,6 +303,9 @@ def measure_site(entry: dict, renderers, artifacts: Path, tag: str) -> dict:
     if goosie_png.exists():
         caps["goosie_png"] = str(goosie_png)
     label, notes = classify(caps, m)
+    diag = _diag(stderr, CAP_RE) or _diag(stderr)
+    if not diag and caps["goosie_rc"] not in (0, None):
+        diag = _diag(stderr, fallback=True)  # a crash's reason may match nothing
     row = {
         "url": url, "category": entry.get("category", ""),
         "expect": entry.get("expect", ""), "label": label, "notes": notes,
@@ -304,7 +313,7 @@ def measure_site(entry: dict, renderers, artifacts: Path, tag: str) -> dict:
         "goosie_secs": caps["goosie_secs"],
         "doc_height": caps["doc_height"],
         "goosie_rc": caps["goosie_rc"],
-        "goosie_diag": _diag(stderr, CAP_RE) or _diag(stderr),
+        "goosie_diag": diag,
         "structure_diag": gate_error,
         "maybe_partial": label == "NOT_SETTLED",
     }
@@ -331,10 +340,17 @@ class LiveRenderers:
                                             device_scale_factor=DPR)
         self.binary = binary
         self.last_chromium_secs = 0.0
+        # When a site answers with a download (target.com did on sweep 10; a
+        # local Content-Disposition: attachment repro shows the shape), goosie
+        # saves the body instead of rendering it. Without a private directory,
+        # a sweep drops that body into ~/Downloads (six copies found) and the
+        # run exits 1 under a note that said nothing about why.
+        self._download_dir = Path(tempfile.mkdtemp(prefix="live-parity-dl-"))
 
     def close(self) -> None:
         self._browser.close()
         self._pw.stop()
+        shutil.rmtree(self._download_dir, ignore_errors=True)
 
     def chromium(self, url: str, path: Path) -> str:
         t0 = time.monotonic()
@@ -360,6 +376,7 @@ class LiveRenderers:
         rc, secs, stderr, timed_out = self._run([
             self.binary, "-backend", "headless", "-width", str(VIEWPORT_W),
             "-height", str(VIEWPORT_H), "-dpr", str(DPR),
+            "-download-dir", str(self._download_dir),
             "-screenshot", "-url", url, "-out", str(path)])
         return rc, secs, stderr, timed_out
 
@@ -849,6 +866,15 @@ def selftest() -> int:
               "image decode failed" in by["crash"]["goosie_diag"], by["crash"]["goosie_diag"])
         check("a clean run records no diagnostic (timings would break reproducibility)",
               by["clean"]["goosie_diag"] == "", by["clean"]["goosie_diag"])
+        # 2026-10-26 target.com: a download response makes goosie save the body
+        # and exit 1 with one line, "goosie: downloaded to ...", which matches no
+        # fatal pattern. The line is the whole explanation.
+        attachment = {"goosie_rc": 1,
+                      "goosie_stderr": "goosie: downloaded to /tmp/dl/download\n"}
+        a_label, a_notes = classify(attachment, {})
+        check("a crash whose only line matches no fatal pattern still reports it",
+              a_label == "GOOSIE_CRASH" and "downloaded to" in a_notes[-1],
+              f"{a_label}: {a_notes}")
         check("doc_height=0 against a painted page is not blamed on layout",
               by["disagrees"]["label"] == "STRUCTURE_DISAGREES"
               and "doc_height<=0" not in by["disagrees"]["notes"][0])
