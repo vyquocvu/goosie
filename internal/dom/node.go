@@ -237,6 +237,16 @@ func (n *Node) InsertBefore(newChild, refChild *Node) {
 		n.AppendChild(newChild)
 		return
 	}
+	// Inserting a node before itself is a no-op everywhere else in the tree,
+	// and letting it through would splice the node's own pointers into a
+	// cycle: PrevSibling/NextSibling would point back at the node and every
+	// later walk (style, layout, serialization) would loop forever. Script
+	// callers reach this with `el.insertBefore(el.firstChild, el.firstChild)`
+	// and worse, so the guard belongs in the primitive, not only at the
+	// binding.
+	if newChild == refChild {
+		return
+	}
 	if newChild.Parent != nil {
 		newChild.Parent.RemoveChild(newChild)
 	}
@@ -261,6 +271,110 @@ func (n *Node) InsertBefore(newChild, refChild *Node) {
 	if oldDoc != nil && oldDoc != n.Doc {
 		oldDoc.MarkQueryDirty()
 	}
+}
+
+// InsertNode runs the DOM Standard's "pre-insert" steps: insert newChild before
+// refChild, where a DocumentFragment contributes its own children in order and
+// is left empty afterwards, so the same fragment can be filled and inserted
+// again. refChild nil appends, as InsertBefore already does.
+//
+// InsertBefore keeps its single-node behaviour on purpose: the HTML parser,
+// layout and every internal caller already passes a real element, and making
+// the primitive move fragment children would silently change the node count
+// those paths reason about. Only the script-facing mutation APIs need the
+// fragment rule, because only they can be handed a fragment by a page.
+func (n *Node) InsertNode(newChild, refChild *Node) {
+	if newChild == nil {
+		return
+	}
+	if newChild.DocumentFragment() {
+		// Snapshot the children first: each move unlinks the node from the
+		// fragment, so walking NextSibling would skip every other child.
+		var kids []*Node
+		for c := newChild.FirstChild; c != nil; c = c.NextSibling {
+			kids = append(kids, c)
+		}
+		for _, c := range kids {
+			n.InsertBefore(c, refChild)
+		}
+		return
+	}
+	n.InsertBefore(newChild, refChild)
+}
+
+// ReplaceNode runs the DOM Standard's "replace one" steps: newNode goes where
+// oldChild was and oldChild is detached. A DocumentFragment newNode inserts all
+// of its children and removes oldChild once, matching browsers.
+func (n *Node) ReplaceNode(newChild, oldChild *Node) {
+	if newChild == nil || oldChild == nil {
+		return
+	}
+	if newChild == oldChild {
+		return
+	}
+	if newChild.DocumentFragment() {
+		var kids []*Node
+		for c := newChild.FirstChild; c != nil; c = c.NextSibling {
+			kids = append(kids, c)
+		}
+		if len(kids) == 0 {
+			n.RemoveChild(oldChild)
+			return
+		}
+		ref := oldChild.NextSibling
+		for _, c := range kids {
+			n.InsertBefore(c, ref)
+		}
+		n.RemoveChild(oldChild)
+		return
+	}
+	if oldChild.Parent != n {
+		return
+	}
+	next := oldChild.NextSibling
+	n.InsertBefore(newChild, next)
+	n.RemoveChild(oldChild)
+}
+
+// ChildNodes returns n's children in document order as a snapshot slice. The
+// binding hands pages a plain array rather than a live NodeList: see
+// internal/js/node_api.go for the recorded consequence of that choice.
+func (n *Node) ChildNodes() []*Node {
+	var out []*Node
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		out = append(out, c)
+	}
+	return out
+}
+
+// Contains reports whether other is n itself or a descendant of it, which is
+// the DOM Standard's Node.contains rule. jQuery's `:has` and `$.contains` both
+// walk up Parent instead of down, so this only serves the API itself.
+func (n *Node) Contains(other *Node) bool {
+	if n == nil || other == nil {
+		return false
+	}
+	for o := other; o != nil; o = o.Parent {
+		if o == n {
+			return true
+		}
+	}
+	return false
+}
+
+// IsConnected reports whether the node is attached to its document, the DOM
+// Standard's isConnected. It stops at the document node so a node whose Parent
+// chain dangles on a detached subtree reads false.
+func (n *Node) IsConnected() bool {
+	if n == nil {
+		return false
+	}
+	for cur := n; cur != nil; cur = cur.Parent {
+		if cur.Type == NodeDocument {
+			return true
+		}
+	}
+	return false
 }
 
 // AppendChild adds c as the last child of the shadow root.
@@ -558,6 +672,16 @@ func (d *Document) NewText(data string) *Node {
 		Type:        NodeText,
 		DataContent: data,
 		Doc:         d,
+	}
+}
+
+// NewDocumentFragment creates an empty document fragment owned by d. Scripts
+// reach it through document.createDocumentFragment().
+func (d *Document) NewDocumentFragment() *Node {
+	return &Node{
+		ID:   d.allocID(),
+		Type: NodeDocumentFragment,
+		Doc:  d,
 	}
 }
 

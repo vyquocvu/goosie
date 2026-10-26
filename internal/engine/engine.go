@@ -467,6 +467,12 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		// APIs, without the overrun being rejected at the boundary.
 		s.jsNodeBudget = newDocNodeBudget(doc)
 		s.jsRT.SetMutationBudget(s.jsNodeBudget)
+		// getComputedStyle answers from this session's own cascade map, so the
+		// reader goes in before any script runs: jQuery's `.css()` reaches it on
+		// the first styled element it measures, and an uninstalled provider would
+		// make every read fall back to the element's inline declarations and
+		// report an author-styled element as unstyled.
+		s.jsRT.SetComputedStyleProvider(s.computedStyleValues)
 		s.jsRT.SetSubresourceBudget(s.sub)
 		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
 		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
@@ -509,6 +515,24 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
 		return nil, err
+	}
+	// The document is parsed, styled and laid out, so now run the lifecycle
+	// events a page's own boot registered on: DOMContentLoaded on the document
+	// (whose propagation path ends at window, where four of vnexpress's
+	// listeners sit) and then load on the window, with readyState moved to
+	// "interactive" and "complete" in between.
+	//
+	// Firing here rather than at the end of the parse is a deliberate deviation
+	// from browser timing, and the reason is measurable: Goosie runs every
+	// script after the whole document exists, and a ready handler that reads a
+	// computed style or measures a box must see the load cascade, not an empty
+	// style map. The cost is that the handler's writes arrive after the first
+	// layout pass, so a mutation re-runs style and layout here - exactly what
+	// the pump does for a later timer callback.
+	if s.jsRT != nil && s.jsRT.FireDocumentLifecycle() {
+		if err := s.RestyleAndReflow(viewportW); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
