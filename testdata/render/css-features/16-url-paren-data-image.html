@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>A url() payload containing ')' reaches the background whole (GOOSIE-CSSURLPAREN-001)</title>
+    <style>
+        /* A quoted CSS url() token ends at the ')' that follows the closing quote
+           (CSS Syntax L3 4.3.9), so the payload may contain '(' , ')' and ';'.
+           The second-pass readers in this engine used strings.IndexByte(rest, ')')
+           anyway, so an SVG data URI whose fill is written rgb(0,0,255) was cut
+           there and the truncated image decoded to nothing: the band stayed white.
+
+           Chromium, measured on this machine (800x600 viewport, DPR 1), paints
+           every band below solid (0,0,255): 720x40 = 28,800 blue pixels each,
+           230,400 over the eight bands.  Goosie before the fix painted k0, k1, k4
+           and the control only (115,200).  The discriminator is the parenthesis in
+           the payload, not the ;utf8 mediatype: k0/k1 are the parenthesis-free
+           pair that differs only in the mediatype, and k2/k3 repeat that pair with
+           rgb().
+
+           k4 is written unquoted with every delimiter percent-encoded, because a
+           literal quote or '(' inside an unquoted url() is a bad-url in Chromium
+           (measured: getComputedStyle().backgroundImage reports "none" for the
+           literal form).  Goosie is deliberately more lenient there, and that
+           leniency is pinned by unit tests rather than by this parity fixture.
+
+           k5 carries '(' and ')' in a transform with a parenthesis-free colour,
+           so a cut inside the transform also shows up.  k6 is the same failing
+           payload inside the background shorthand. */
+        html, body { margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #ffffff; color: #1a1a1a; }
+        h1 { font-size: 15px; margin: 8px 16px 3px 16px; }
+        p { font-size: 11px; margin: 0 16px 2px 16px; }
+        .band { width: 720px; height: 40px; margin: 0 16px 4px 16px; }
+
+        /* k0: quoted, ;utf8 mediatype, parenthesis-free. */
+        .k0 { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='40'><rect width='720' height='40' fill='%230000ff'/></svg>"); }
+        /* k1: quoted, no mediatype, parenthesis-free. */
+        .k1 { background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='40'><rect width='720' height='40' fill='%230000ff'/></svg>"); }
+        /* k2: quoted, ;utf8, the failing shape — ')' inside the payload. */
+        .k2 { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='40'><rect width='720' height='40' fill='rgb(0,0,255)'/></svg>"); }
+        /* k3: quoted, no mediatype, the failing shape. */
+        .k3 { background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='40'><rect width='720' height='40' fill='rgb(0,0,255)'/></svg>"); }
+        /* k4: unquoted, percent-encoded, parenthesis-free. */
+        .k4 { background-image: url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%27720%27%20height=%2740%27%3E%3Crect%20width=%27720%27%20height=%2740%27%20fill=%27%230000ff%27/%3E%3C/svg%3E); }
+        /* k5: '(' and ')' inside a quoted payload, colour parenthesis-free. */
+        .k5 { background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='40'><rect width='720' height='40' fill='%230000ff' transform='translate(0,0)'/></svg>"); }
+        /* k6: the same failing payload in the background shorthand. */
+        .k6 { background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='720' height='40'><rect width='720' height='40' fill='rgb(0,0,255)'/></svg>") no-repeat; }
+
+        /* Control: a plain CSS colour, so a fully blank render cannot be read as
+           "the parser dropped every background". */
+        .control { background-color: #0000ff; }
+    </style>
+</head>
+<body>
+    <h1>url() payloads containing ')'</h1>
+    <p>k0 quoted, ;utf8, parenthesis-free &mdash; must stay blue</p>
+    <div class="band k0"></div>
+    <p>k1 quoted, no mediatype, parenthesis-free &mdash; must stay blue</p>
+    <div class="band k1"></div>
+    <p>k2 quoted, ;utf8, fill rgb(0,0,255) &mdash; the defect</p>
+    <div class="band k2"></div>
+    <p>k3 quoted, no mediatype, fill rgb(0,0,255)</p>
+    <div class="band k3"></div>
+    <p>k4 unquoted, percent-encoded, parenthesis-free</p>
+    <div class="band k4"></div>
+    <p>k5 quoted, '(' and ')' in a transform</p>
+    <div class="band k5"></div>
+    <p>k6 the same payload in the background shorthand</p>
+    <div class="band k6"></div>
+    <p>control: background-color</p>
+    <div class="band control"></div>
+</body>
+</html>

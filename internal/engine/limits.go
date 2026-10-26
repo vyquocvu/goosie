@@ -998,45 +998,41 @@ func decodeDataImageURL(u string) ([]byte, error) {
 // the page lives at a different path. data: URIs, fragments and already-
 // absolute references are left untouched.
 func absolutizeCSSURLs(sheet, sheetURL string) string {
-	lower := strings.ToLower(sheet)
 	var b strings.Builder
 	i := 0
-	for {
-		j := strings.Index(lower[i:], "url(")
+	for i < len(sheet) {
+		j := css.IndexURL(sheet[i:])
 		if j < 0 {
 			b.WriteString(sheet[i:])
 			return b.String()
 		}
-		j += i
-		b.WriteString(sheet[i : j+len("url(")])
-		rest := sheet[j+len("url("):]
-		end := strings.IndexByte(rest, ')')
-		if end < 0 {
-			b.WriteString(rest)
+		t, ok := css.ScanURLAt(sheet, i+j)
+		if !ok {
+			// Malformed token: everything from here on is emitted verbatim, as
+			// before, and no further reference is rewritten.
+			b.WriteString(sheet[i:])
 			return b.String()
 		}
-		inner := rest[:end]
-		trimmed := strings.TrimSpace(inner)
-		var quote byte
-		if len(trimmed) > 0 && (trimmed[0] == '"' || trimmed[0] == '\'') {
-			quote = trimmed[0]
-			trimmed = strings.Trim(trimmed[1:], string(quote))
-		}
-		ref := strings.TrimSpace(trimmed)
-		if out, ok := rewriteURLRef(sheetURL, ref); ok {
-			if quote != 0 {
-				b.WriteByte(quote)
+		b.WriteString(sheet[i:t.AfterOpen])
+		inner := sheet[t.AfterOpen:t.Close]
+		if out, ok := rewriteURLRef(sheetURL, t.Payload); ok {
+			if t.Quote != 0 {
+				b.WriteByte(t.Quote)
 			}
 			b.WriteString(out)
-			if quote != 0 {
-				b.WriteByte(quote)
+			if t.Quote != 0 {
+				b.WriteByte(t.Quote)
 			}
 		} else {
+			// data: URIs, fragments and already-absolute references are left
+			// alone: re-emit the raw inner bytes, quotes included, so a quoted
+			// payload containing ')' round-trips byte for byte.
 			b.WriteString(inner)
 		}
 		b.WriteByte(')')
-		i = j + len("url(") + end + 1
+		i = t.End
 	}
+	return b.String()
 }
 
 // rewriteURLRef resolves one url() target against the sheet URL, leaving data

@@ -1774,6 +1774,48 @@
     "enforced": false
   },
   {
+    "id": "BR-211",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/css/url_test.go:TestIndexURL",
+      "internal/css/url_test.go:TestScanURLBalancedParensBigPayload",
+      "internal/css/url_test.go:TestScanURLBigPayload",
+      "internal/css/url_test.go:TestScanURLOffsets",
+      "internal/css/url_test.go:TestScanURLPayload"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-212",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/engine/url_paren_test.go:TestAbsolutizeCSSURLsKeepsParenPayload",
+      "internal/engine/url_paren_test.go:TestAbsolutizeCSSURLsNoTailGarbage",
+      "internal/engine/url_paren_test.go:TestCollectFontJobsParenPayload",
+      "internal/engine/url_paren_test.go:TestExpandCSSImportsURLKeepsParenPayload",
+      "internal/engine/url_paren_test.go:TestExtractFontURLKeepsParenPayload",
+      "internal/engine/url_paren_test.go:TestImportRefURLParen",
+      "test/css/url_paren_test.go:TestBorderImageShorthandURLParen",
+      "test/css/url_paren_test.go:TestParseBorderImageSourceURLParen",
+      "test/engine/url_paren_test.go:TestBackgroundDataURLParenAttaches",
+      "test/engine/url_paren_test.go:TestStyleSheetImportDataURLParenAttaches",
+      "test/style/url_paren_test.go:TestBackgroundImageURLParenDataImage",
+      "test/style/url_paren_test.go:TestBackgroundImageURLParenRegression",
+      "test/style/url_paren_test.go:TestBackgroundShorthandURLParen",
+      "test/style/url_paren_test.go:TestMaskImageURLParen"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

@@ -66,7 +66,9 @@ PASS_AT = 90.0
 # re-composited its generating element's gradient ramp across both bands it splits.
 # 90: js-dom/02-tree-mutation-and-lifecycle.html (TASK-047) - a jQuery page's node
 # tree and window lifecycle, the bootstrap DOM the engine could not answer before.
-MIN_SCORED_FIXTURES = 90
+# 91: css-features/16-url-paren-data-image.html (TASK-050, GOOSIE-CSSURLPAREN-001)
+# - a quoted url() payload containing ')' survives whole at all six readers.
+MIN_SCORED_FIXTURES = 91
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
