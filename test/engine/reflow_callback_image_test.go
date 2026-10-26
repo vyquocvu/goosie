@@ -24,6 +24,7 @@ import (
 // RestyleAndReflow -> CheckIntersections) runs exactly as on a live page.
 const reflowCallbackWatchdog = 10 * time.Second
 
+// qc:BR-256
 func TestIntersectionCallbackMayStartAnImageLoad(t *testing.T) {
 	png := pngDataURL(palettedPNG(t, 4, 4))
 	html := `<!DOCTYPE html><html><body style="margin:0">

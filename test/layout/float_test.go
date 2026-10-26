@@ -81,6 +81,7 @@ func TestSameSideFloatsSitSideBySide(t *testing.T) {
 // at X=0 and X=container width, and every later block was pushed one viewport
 // further right: vnexpress.net builds its whole body from width:100% floats, so
 // all of it rendered off-screen and the page came out blank.
+// qc:BR-257
 func TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">

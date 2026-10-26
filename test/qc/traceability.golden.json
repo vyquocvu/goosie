@@ -1209,6 +1209,19 @@
     "enforced": false
   },
   {
+    "id": "BR-257",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/float_test.go:TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
@@ -2300,6 +2313,18 @@
     "status": "PASS",
     "tests": [
       "test/engine/script_image_paint_test.go:TestLazyImageStalePixelsStopPainting"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-256",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/reflow_callback_image_test.go:TestIntersectionCallbackMayStartAnImageLoad"
     ],
     "enforced": false
   },
