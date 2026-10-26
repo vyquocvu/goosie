@@ -1,6 +1,8 @@
 package css
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -71,6 +73,11 @@ type Condition struct {
 	// apply (a hand-built Condition, or a pseudo without selector args), and
 	// match falls back to parsing live.
 	compiled *pseudoCompiled
+	// scope is the node :scope stands for when this condition came from
+	// Selector.WithScope, i.e. from a DOM query whose scoping root is not a
+	// style pass. nil keeps the cascade meaning: the shadow-host marker on
+	// dom.Node.IsScopeRoot.
+	scope *dom.Node
 }
 
 // pseudoCompiled holds selector arguments parsed once.
@@ -274,16 +281,60 @@ func CompareSpecificity(a1, b1, c1, a2, b2, c2 int) int {
 	return 0
 }
 
-// ParseSelector parses a CSS selector string.
+// ParseSelector parses a CSS selector string. Malformed input yields whatever
+// the lenient grammar could recover from it, because a stylesheet drops an
+// unparsable selector instead of failing the sheet. Callers that must reject
+// bad input, such as the DOM query API, use ParseSelectorList.
 func ParseSelector(s string) Selector {
+	sel, _ := parseSelector(s)
+	return sel
+}
+
+// ParseSelectorList parses a comma-separated selector list for the DOM query
+// API, which is specified to raise a SyntaxError for a selector it cannot
+// parse instead of silently matching nothing. The selectors it returns are the
+// same values ParseSelector produces, in source order.
+//
+// A list is rejected when it is empty, when an alternative is empty (a
+// trailing or doubled comma), when a combinator has no compound selector on
+// one side, when an id/class/attribute name or an attribute value is missing,
+// when a functional pseudo-class argument is invalid, and when a pseudo-class
+// or pseudo-element name is not one the engine can match. Recovery follows
+// CSS error recovery where the grammar has it: an unclosed '[' or '(' is
+// closed at end of input, exactly as ParseSelector and the cascade do.
+func ParseSelectorList(s string) ([]Selector, error) {
+	if s == "" {
+		return nil, errors.New("css: the provided selector is empty")
+	}
+	alts, ok := splitSelectorListExact(s)
+	if !ok || len(alts) == 0 {
+		return nil, fmt.Errorf("css: %q is not a valid selector list", s)
+	}
+	out := make([]Selector, 0, len(alts))
+	for _, alt := range alts {
+		sel, ok := parseSelector(alt)
+		if !ok {
+			return nil, fmt.Errorf("css: %q is not a valid selector", s)
+		}
+		out = append(out, sel)
+	}
+	return out, nil
+}
+
+// parseSelector is ParseSelector plus the verdict ParseSelectorList needs: ok
+// is false for input the CSS grammar cannot express. It reports ok without
+// changing the Selector it returns, so a lenient caller sees exactly what it
+// saw before the verdict existed.
+func parseSelector(s string) (Selector, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return Selector{}
+		return Selector{}, false
 	}
 
 	var parts []SelectorPart
 	var current SelectorPart
 	i := 0
+	ok := true
 
 	for i < len(s) {
 		skipSpace := false
@@ -303,25 +354,26 @@ func ParseSelector(s string) Selector {
 
 		if i < len(s) {
 			switch s[i] {
-			case '>':
-				combinator = '>'
-				i++
-				for i < len(s) && s[i] == ' ' {
-					i++
+			case '>', '+', '~':
+				// A combinator relates two compound selectors. One without a
+				// left-hand compound ("&gt; div", "div > > p") cannot be matched,
+				// so it is not a valid selector even though the loop below can
+				// still recover a Selector from it.
+				if len(current.Conditions) == 0 {
+					ok = false
 				}
-			case '+':
-				combinator = '+'
-				i++
-				for i < len(s) && s[i] == ' ' {
-					i++
-				}
-			case '~':
-				combinator = '~'
+				combinator = s[i]
 				i++
 				for i < len(s) && s[i] == ' ' {
 					i++
 				}
 			}
+		}
+
+		if i >= len(s) {
+			// A dangling combinator ("div >") has no right-hand compound.
+			ok = false
+			break
 		}
 
 		if combinator != 0 && len(current.Conditions) > 0 {
@@ -332,11 +384,16 @@ func ParseSelector(s string) Selector {
 			current = SelectorPart{Combinator: combinator}
 		}
 
+		condStart := i
 		cond, newI := parseCondition(s, i)
 		if newI == i {
+			ok = false
 			break
 		}
 		i = newI
+		if !validCondition(cond, s[condStart:newI]) {
+			ok = false
+		}
 		current.Conditions = append(current.Conditions, cond)
 	}
 
@@ -344,7 +401,213 @@ func ParseSelector(s string) Selector {
 		parts = append(parts, current)
 	}
 
-	return Selector{Parts: parts}
+	return Selector{Parts: parts}, ok
+}
+
+// validCondition reports whether one parsed condition is a selector a browser
+// would accept. raw is the condition's own source text, which is the only
+// place two spellings that parse alike can be told apart: "[a=]" and `[a=""]`
+// both arrive as Op "=" with an empty Value.
+func validCondition(c Condition, raw string) bool {
+	switch c.Type {
+	case CondUniversal:
+		return true
+	case CondType, CondID, CondClass:
+		return validIdent(c.Value)
+	case CondAttr:
+		return validAttrCondition(c, raw)
+	case CondPseudoClass:
+		return validPseudoClass(c)
+	case CondPseudoElement:
+		return validPseudoElement(c)
+	}
+	return true
+}
+
+// validIdent reports whether s is an identifier the CSS grammar accepts as a
+// tag, id, class, or attribute name. The lexer has no escape handling, so the
+// shapes it can produce that a browser rejects are the ones that do not start
+// like an identifier: "#1a", ".1", "[1a]", "[.]", "[*]". Chromium throws a
+// SyntaxError for all of them, so the query API must too.
+func validIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '-' {
+		// "-" alone is not an identifier, nor is "-1"; "--" and "-a" are.
+		if len(s) < 2 || (s[1] != '-' && !isIdentStart(s[1])) {
+			return false
+		}
+	} else if !isIdentStart(s[0]) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if !isIdentChar(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// validAttrCondition reports whether one attribute selector is well formed.
+// raw is the condition's own source text, which is the only place two
+// spellings that parse alike can be told apart: "[a=]" and `[a=""]` both
+// arrive as Op "=" with an empty Value.
+func validAttrCondition(c Condition, raw string) bool {
+	if !validIdent(c.Attr) {
+		return false
+	}
+	if c.Op == "" {
+		return true
+	}
+	inner := strings.TrimSpace(raw)
+	inner = strings.TrimPrefix(inner, "[")
+	inner = strings.TrimSuffix(inner, "]")
+	eq := strings.IndexByte(inner, '=')
+	if eq < 0 || eq+1 >= len(inner) {
+		// "[a=]" has no value at all.
+		return false
+	}
+	val := strings.TrimSpace(inner[eq+1:])
+	if n := len(val); n >= 2 && (val[n-2] == ' ' || val[n-2] == '\t') &&
+		(val[n-1] == 'i' || val[n-1] == 'I' || val[n-1] == 's' || val[n-1] == 'S') {
+		// The i flag is accepted; Chromium rejects the s flag outright.
+		if val[n-1] == 's' || val[n-1] == 'S' {
+			return false
+		}
+		val = strings.TrimSpace(val[:n-1])
+	}
+	if val == "" {
+		return false
+	}
+	if val[0] == '"' || val[0] == '\'' {
+		// An empty quoted value is legal and matches a present, empty
+		// attribute; a quoted value is never checked further.
+		return true
+	}
+	// An unquoted value is an identifier: "[a=1]" is a syntax error.
+	return validIdent(val)
+}
+
+// validPseudoClass reports whether c is a pseudo-class the engine knows and,
+// for the functional ones, whether its argument parses. The name list is the
+// set the query API accepts: pseudo-classes the cascade matches plus the ones
+// Chromium 153 accepts syntactically. A name outside it is a syntax error in
+// every browser, so it must not silently match nothing.
+func validPseudoClass(c Condition) bool {
+	switch strings.ToLower(c.Value) {
+	case "first-child", "last-child", "only-child", "first-of-type",
+		"last-of-type", "only-of-type", "root", "empty",
+		"link", "any-link", "visited", "active", "focus-visible",
+		"hover", "focus", "focus-within", "scope", "popover-open",
+		"checked", "disabled", "enabled", "placeholder-shown",
+		"modal", "defined", "target", "valid", "invalid", "required",
+		"optional", "read-only", "read-write", "default", "indeterminate",
+		"in-range", "out-of-range", "open", "picture-in-picture",
+		"fullscreen", "autofill", "user-invalid", "user-valid", "current",
+		"past", "future", "active-view-transition", "host":
+		return true
+	case "lang", "dir", "state", "host-context", "active-view-transition-type":
+		return strings.TrimSpace(c.Pseudo) != ""
+	case "not":
+		// Selectors 4 lets :not() take a selector list ("p:not(.a, .c)"),
+		// which the cascade matcher already evaluates as a list; a
+		// pseudo-element argument is invalid, as is an empty one.
+		return validSelectorList(c.Pseudo, false)
+	case "is", "where":
+		if strings.TrimSpace(c.Pseudo) == "" {
+			return true
+		}
+		return validSelectorList(c.Pseudo, false)
+	case "has":
+		return validSelectorList(c.Pseudo, true)
+	case "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type":
+		expr, of := splitNthOf(c.Pseudo)
+		if _, _, ok := parseNth(strings.TrimSpace(expr)); !ok {
+			return false
+		}
+		if len(of) == 0 {
+			// "nth-child(2 of )" splits to no filters, which is not the same
+			// as having no "of" clause at all.
+			return !nthHasOfClause(c.Pseudo)
+		}
+		return validSelectorList(strings.Join(of, ","), false)
+	}
+	return false
+}
+
+// validPseudoElement reports whether c is a pseudo-element the query API can
+// accept. Pseudo-elements never match an element, so a known name yields an
+// empty result rather than an error, which is what a browser does.
+func validPseudoElement(c Condition) bool {
+	switch strings.ToLower(c.Value) {
+	case "before", "after", "first-line", "first-letter", "marker",
+		"placeholder", "backdrop", "file-selector-button", "cue",
+		"grammar-error", "spelling-error", "target-text", "view-transition",
+		"selection":
+		return c.Pseudo == ""
+	case "part", "slotted", "highlight":
+		return strings.TrimSpace(c.Pseudo) != ""
+	}
+	return false
+}
+
+// validSelectorList reports whether s is a comma-separated selector list. A
+// relative list (the :has() argument) may start an alternative with a
+// combinator; an ordinary one may not.
+func validSelectorList(s string, relative bool) bool {
+	alts, ok := splitSelectorListExact(s)
+	if !ok || len(alts) == 0 {
+		return false
+	}
+	for _, alt := range alts {
+		if alt == "" {
+			return false
+		}
+		if relative {
+			alt = strings.TrimSpace(strings.TrimLeft(alt, ">+~"))
+			if alt == "" {
+				return false
+			}
+		}
+		if sel, ok := parseSelector(alt); !ok || hasPseudoElement(sel) {
+			return false
+		}
+	}
+	return true
+}
+
+// hasPseudoElement reports whether sel carries a pseudo-element condition.
+func hasPseudoElement(sel Selector) bool {
+	for _, part := range sel.Parts {
+		for _, c := range part.Conditions {
+			if c.Type == CondPseudoElement {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// nthHasOfClause reports whether an An+B argument carries an "of S" clause,
+// even one whose selector list is empty. splitNthOf answers the filters, which
+// loses that distinction.
+func nthHasOfClause(arg string) bool {
+	for i := 0; i+4 <= len(arg); i++ {
+		if arg[i] != ' ' && arg[i] != '\t' && arg[i] != '\n' {
+			continue
+		}
+		j := i + 1
+		for j < len(arg) && (arg[j] == ' ' || arg[j] == '\t' || arg[j] == '\n') {
+			j++
+		}
+		if j+2 <= len(arg) && strings.EqualFold(arg[j:j+2], "of") {
+			if j+2 == len(arg) || arg[j+2] == ' ' || arg[j+2] == '\t' || arg[j+2] == '\n' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func parseCondition(s string, i int) (Condition, int) {
@@ -489,6 +752,94 @@ func parseCondition(s string, i int) (Condition, int) {
 // Matches reports whether the selector matches the given node.
 func (s Selector) Matches(n *dom.Node) bool {
 	return s.MatchesIndexed(n, nil)
+}
+
+// WithScope returns a copy of s in which :scope stands for root instead of the
+// shadow-host marker the cascade uses. The DOM query API scopes a selector to
+// the node it was called on, which is not necessarily a shadow host, so it
+// matches through this copy rather than a second matcher.
+//
+// The copy is deep where it has to be: functional pseudo-class arguments are
+// scoped too, so :not(:scope) and :has(:scope > p) mean the same thing there.
+func (s Selector) WithScope(root *dom.Node) Selector {
+	out := Selector{Parts: make([]SelectorPart, len(s.Parts))}
+	for i, part := range s.Parts {
+		p := SelectorPart{Combinator: part.Combinator, Conditions: make([]Condition, len(part.Conditions))}
+		for j, c := range part.Conditions {
+			c.scope = root
+			c.compiled = scopeCompiled(c.compiled, root)
+			p.Conditions[j] = c
+		}
+		out.Parts[i] = p
+	}
+	return out
+}
+
+// scopeCompiled applies WithScope to the selector arguments of one
+// pseudo-class, copying rather than mutating: compiled is shared by every copy
+// of its Condition and by every element the cascade tests.
+func scopeCompiled(pc *pseudoCompiled, root *dom.Node) *pseudoCompiled {
+	if pc == nil {
+		return nil
+	}
+	out := &pseudoCompiled{nthExpr: pc.nthExpr, hasNth: pc.hasNth}
+	for _, sel := range pc.sels {
+		out.sels = append(out.sels, sel.WithScope(root))
+	}
+	for _, arg := range pc.has {
+		out.has = append(out.has, hasArg{combinator: arg.combinator, sel: arg.sel.WithScope(root)})
+	}
+	for _, sel := range pc.of {
+		out.of = append(out.of, sel.WithScope(root))
+	}
+	return out
+}
+
+// UsesScope reports whether s mentions :scope anywhere, including inside the
+// selector arguments of :not/:is/:where/:has and the "of S" list of an nth-
+// pseudo-class. The DOM query API scopes a selector list to the node the query
+// was called on, and only a list that mentions :scope needs the per-call copy
+// WithScope makes; everything else can match the cached selector directly.
+func (s Selector) UsesScope() bool {
+	for _, part := range s.Parts {
+		for _, c := range part.Conditions {
+			if c.Type != CondPseudoClass {
+				continue
+			}
+			if c.Value == "scope" {
+				return true
+			}
+			if c.compiled == nil {
+				continue
+			}
+			for _, sub := range c.compiled.sels {
+				if sub.UsesScope() {
+					return true
+				}
+			}
+			for _, arg := range c.compiled.has {
+				if arg.sel.UsesScope() {
+					return true
+				}
+			}
+			for _, sub := range c.compiled.of {
+				if sub.UsesScope() {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// SelectorsUseScope reports whether any selector in sels mentions :scope.
+func SelectorsUseScope(sels []Selector) bool {
+	for _, sel := range sels {
+		if sel.UsesScope() {
+			return true
+		}
+	}
+	return false
 }
 
 // MatchesIndexed is Matches with a per-pass sibling cache. A style
@@ -806,6 +1157,11 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	case "focus-within":
 		return matchesFocusWithin(n)
 	case "scope":
+		// A DOM query scopes :scope to the node the query was rooted at; the
+		// cascade scopes it to the shadow host being styled.
+		if c.scope != nil {
+			return n == c.scope
+		}
 		return n.IsScopeRoot
 	case "popover-open":
 		return n.IsPopoverOpen
@@ -1536,9 +1892,26 @@ func isLastElementChild(n *dom.Node) bool {
 // splitSelectorList splits a comma-separated selector list into individual selectors.
 // Handles nested parentheses (e.g., :is(.a, .b:not(.c))).
 func splitSelectorList(s string) []string {
+	all, _ := splitSelectorListExact(s)
+	result := make([]string, 0, len(all))
+	for _, sel := range all {
+		if sel != "" {
+			result = append(result, sel)
+		}
+	}
+	return result
+}
+
+// splitSelectorListExact is splitSelectorList without the recovery: it keeps
+// empty alternatives, which are a syntax error at the top level of a query
+// selector but are simply skipped by the cascade, and reports ok=false when a
+// ')' closes a parenthesis that was never opened. An unclosed '(' is not an
+// error: CSS error recovery closes it at end of input.
+func splitSelectorListExact(s string) ([]string, bool) {
 	var result []string
 	var current strings.Builder
 	depth := 0
+	ok := true
 
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
@@ -1548,14 +1921,14 @@ func splitSelectorList(s string) []string {
 			current.WriteByte(ch)
 		case ')':
 			depth--
+			if depth < 0 {
+				ok = false
+			}
 			current.WriteByte(ch)
 		case ',':
 			if depth == 0 {
 				// End of one selector.
-				sel := strings.TrimSpace(current.String())
-				if sel != "" {
-					result = append(result, sel)
-				}
+				result = append(result, strings.TrimSpace(current.String()))
 				current.Reset()
 			} else {
 				current.WriteByte(ch)
@@ -1565,13 +1938,8 @@ func splitSelectorList(s string) []string {
 		}
 	}
 
-	// Last selector.
-	sel := strings.TrimSpace(current.String())
-	if sel != "" {
-		result = append(result, sel)
-	}
-
-	return result
+	result = append(result, strings.TrimSpace(current.String()))
+	return result, ok
 }
 
 // SplitSelectorList is the exported version of splitSelectorList for testing.
