@@ -619,6 +619,50 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	s.BackgroundImage = ""
 	s.BackgroundGradient = Gradient{}
 	s.BackgroundRadialGradient = RadialGradient{}
+	// The rest of the element's decoration is dropped for the same reason, and
+	// the drop is per property because the measurement is per property. On a
+	// 300x76 block whose 300-wide text was split into two anonymous boxes
+	// ((0,0,300,18) and (0,38,300,18), confirmed with cmd/dump-layout) compared
+	// against Chromium 131.0.6778.33:
+	//
+	//   box-shadow      Chromium changes 7780 px with the property, the same 7780
+	//                   with and without anonymous boxes, and none inside the
+	//                   bands. Goosie changed 6272 px with no anonymous box and
+	//                   17072 px with two. The extra 10800 px are not glyph
+	//                   antialiasing: 6000 of them sit in the 20px spacer row the
+	//                   div occupies (y 18..37) and 4800 below the second band
+	//                   (y 56+), because each box drew the element's ring around
+	//                   itself, and paintBoxShadow has no owner test. Pixel
+	//                   probe: (250,28) in the spacer is white in Chromium and in
+	//                   Goosie without anonymous boxes, (202,13,13) in Goosie with
+	//                   them. css-backgrounds-3 §7.1: box-shadow does not inherit.
+	//   border-radius   Chromium changes the identical 412 px with and without an
+	//                   anonymous box; Goosie 385/385. Already inert at paint
+	//                   (paintBoxDecoration wants Display != inline, and the copy
+	//                   is DisplayBlock) so this one is a rule/cascade fix only.
+	//   mask-*          Chromium 110/119 px, identical in both shapes; Goosie
+	//                   22773/22773 for mask-image and 0 for a mask gradient. Inert
+	//                   at paint because engine.go attaches MaskImage pixels only
+	//                   when the box has a Node and anonymous boxes have none.
+	//   border-image    Chromium 7920/7920, 3260 px of it inside the bands; Goosie
+	//                   7920/7920. Inert at paint: the border widths are already
+	//                   zero and BorderImage pixels are Node-gated too.
+	//
+	// TextShadow is deliberately kept. It is inherited (css-text-decor-3 §3), so
+	// the copy is what the text inside the box would compute anyway, and Chromium
+	// changes 655/648 px with it, all of them inside the two bands: the glyphs are
+	// exactly where the property is supposed to land. Zeroing it would trade one
+	// phantom for a real content regression, which is how TASK-049 nearly shipped
+	// a text-shadow bug in the blanket version of this function. The same shape
+	// that measured the box-shadow duplicate measured this: gating TextShadow too
+	// is mutation D in docs/tasks/TASK-053-ANON-BOX-PAINT-LAYERS.md.
+	s.BoxShadow = nil
+	s.BorderRadius = [4][2]float32{}
+	s.MaskImage = ""
+	s.MaskRepeat = ""
+	s.MaskSize = ""
+	s.MaskPosition = ""
+	s.BorderImage = css.BorderImage{}
 	return &s
 }
 
