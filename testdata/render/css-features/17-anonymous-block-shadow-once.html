@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>An anonymous block paints none of its element's box-shadow (GOOSIE-SHADOWRUN-001)</title>
+    <style>
+        /* A box-shadow belongs to the element that declared it.  When inline
+           content shares a block container with a block-level child, layout
+           splices an anonymous block box around each run of that content
+           (internal/layout/anonymous.go, style.AnonymousBlockStyle: `s = *parent`),
+           and the copy used to keep the element's BoxShadow.  paintBoxShadow
+           (internal/paint/builder_effects.go) is not gated on box anonymity, so
+           every band painted the whole ring again: the second layer darkening the
+           first one wherever the two overlap, which is everywhere, because both
+           rings are drawn around the same content box.
+
+           Chromium's rule, measured on this machine (800x600 viewport, DPR 1,
+           browser 131.0.6778.33): one ring per element, no matter how many
+           anonymous boxes layout generates inside it.  The content boxes here are
+           720x78 at (16,100), (16,219), (16,338) and (16,457), so the spread-only
+           ring is the 16,360-pixel band between 740x98 and 720x78.  Counting
+           mid-grey pixels (each channel 120..140, i.e. one layer of
+           rgba(0,0,0,0.5) over white) *inside* those four content boxes -
+           territory the element's own ring never covers, so anything there is a
+           second copy - Chromium reads 183, 194, 119 and 102 of them, all of it
+           glyph antialiasing on the words; the control box with no anonymous box
+           inside it reads 102.  Goosie before the fix reads 19,645, 12,774,
+           19,631 and 40: three duplicated rings, 52,090 pixels inside boxes that
+           should hold 598.  At (400,124) - inside the first box, below its first
+           band, far from any glyph - Chromium paints white, Goosie painted
+           (127,127,127), and it paints white again after the fix.  The doubling
+           shows outside the element too, because a band's ring is larger than the
+           box it belongs to: at (400,95), 5px above the first box, Chromium paints
+           one layer (127,127,127) and Goosie painted two (63,63,63), 64 levels
+           down; it reads (127,127,127) after the fix.  Over the whole 800x600
+           page mid-grey goes 58,653 (Chromium) / 87,760 (Goosie before) / 59,170
+           (after), and pixels past the harness's 30-level tolerance 90,002 before
+           against 16,385 after, out of 480,000.
+
+           `make parity` (testdata/parity.py --render --render-chromium at 800x600)
+           scores this fixture at 96.65% with the fix and 81.31% with the
+           style-layer zeroing removed, against a pass line of 90%, so the corpus
+           is 92/92 with the fix and 91/92 without it. The region metric sees the
+           duplication too - worst_region_iou 0.99950 with the fix against 0.71492
+           without - and coverage_ratio goes 0.97455 with the fix to 1.62413
+           without, because the defect paints too much, not too little, which is
+           why the rings are set large and dark on purpose. blank_regions stays
+           0/0 either way.
+
+           Two deliberate choices about the shape, both measured:
+           - The inline content is wrapped in <span> instead of left as raw text.
+             Raw text directly inside a shadowed block still emits a shadow per
+             text run - the other, still-open multiplier of GOOSIE-SHADOWRUN-001 -
+             and a <span> declares no box-shadow while box-shadow does not inherit,
+             so spans isolate the anonymous-box multiplier this fixture is about.
+             A raw-text fixture cannot be written until the per-run multiplier is
+             fixed; today it would fail after the fix as well.
+           - Every shadow here is hard-edged (blur 0).  Goosie's blur model differs
+             from Chromium's independently of this defect - on the same shape a
+             10px-blur ring pixel reads (213,59,59) in Goosie against Chromium's
+             (250,231,231) - so a blurred fixture would be scoring that difference,
+             not this defect.  With blur 0 the ring geometry is exact: an
+             anonymous-band-only probe of a 6px-offset 50% shadow differs from
+             Chromium by 473 pixels out of 80,000. */
+        html, body { margin: 0; padding: 0; }
+        body { font-family: sans-serif; color: #1a1a1a; background: #ffffff; }
+        h1 { font-size: 18px; margin: 10px 16px 2px 16px; }
+        .lede { font-size: 12px; line-height: 16px; margin: 0 16px 8px 16px; }
+        .label { font-size: 11px; color: #555; margin: 4px 16px 0 16px; }
+
+        /* The failing shape: one spread-only ring, with a block-level child that
+           splits the inline content into exactly two anonymous bands. */
+        .box {
+            width: 720px;
+            height: 78px;
+            margin: 14px 16px;
+            background: #ffffff;
+            box-shadow: 0 0 0 10px rgba(0, 0, 0, 0.5);
+            font-size: 16px;
+            line-height: 24px;
+        }
+
+        /* The child that splits the spans into bands.  It declares no shadow of
+           its own, so the ring around the element is the parent's, painted once. */
+        .box > .child { height: 22px; font-size: 11px; line-height: 22px; color: #444; }
+
+        /* Same defect through a hard offset shadow, whose ring is two disjoint
+           strips rather than a frame - a per-band copy duplicates those strips
+           along different rows. */
+        .offset { box-shadow: 10px 10px 0 0 rgba(0, 0, 0, 0.5); }
+
+        /* Control, the opposite failure: a declaring element with no block-level
+           child generates no anonymous box at all, so its single ring is the
+           element's own paint.  An over-collapse that drops the element's shadow
+           along with the wrapper's loses this frame entirely. */
+        .plain { box-shadow: 0 0 0 10px rgba(0, 0, 0, 0.5); }
+    </style>
+</head>
+<body>
+    <h1>one ring per element, not one per anonymous band</h1>
+    <p class="lede">Each block below holds inline content split by a block-level child, so layout splices two
+       anonymous boxes inside it. The element paints its ring; those boxes must paint none of it.</p>
+
+    <div class="label">spread-only ring around spans split by a block child (the defect: two anonymous bands)</div>
+    <div class="box"><span>text before the child</span><div class="child">a block child forces anonymous wrapping</div><span>text after the child</span></div>
+
+    <div class="label">the same shape through a hard offset shadow</div>
+    <div class="box offset"><span>text above the child</span><div class="child">a block child forces anonymous wrapping</div><span>text below the child</span></div>
+
+    <div class="label">second spread ring, so the defect covers half the page</div>
+    <div class="box"><span>alpha</span><div class="child">a block child forces anonymous wrapping</div><span>omega</span></div>
+
+    <div class="label">control: no block child, so no anonymous box - this element's one ring must survive any collapse</div>
+    <div class="box plain"><span>control with no wrapping to invent</span></div>
+</body>
+</html>
