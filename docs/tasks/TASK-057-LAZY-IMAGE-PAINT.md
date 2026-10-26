@@ -75,3 +75,62 @@ Fixtures use `engine.WithJS(rt)`, `engine.WithImages("https://example.test/page"
 - `go test ./...` rc 0; `go test -race ./internal/engine ./internal/js ./test/engine` rc 0; `go vet -all ./...` rc 0; `go test ./internal/archtest/` rc 0; gofmt clean.
 - Re-measure the two §1 probes on the branch: during-parse control still paints 6,300 blue pixels; after-load assignment now paints the same. If TASK-056 has landed by then, repeat through the real `-screenshot` path and report the command; otherwise state that it was not measurable and why.
 - Worktree branch, commit(s) naming the defect, and a results section appended to this file: exact commands, rc, counts, mutation outcomes, and anything not measured. Do not register catalog rows; the integrator does that after re-measuring on `main`.
+
+## 7. Results (GOOSIE-LAZYIMG-001)
+
+Branch `worktree-agent-general-purpose-8ca4bfa1`, based on `main` at `ac7539a`. Implementation commit `35bf98f` contains all code and tests; this results section is a follow-up commit on the same branch. Nothing was pushed.
+
+### 7.1 Files changed
+
+- `internal/js/js.go`: `Options.ImagePixelSink` and its contract.
+- `internal/js/element_interfaces.go`: `LoadedImage.Pixels any`; `SetImagePixelSink`; the sink call in `applyImageResult`'s success branch after the state update and before the `load` event (never on the error branch). No import of `internal/image` or `internal/engine`; the value is passed through untouched.
+- `internal/engine/script_image.go`: `Pixels: img` on a successful decode; `scriptImagePixels`, `retainScriptImage` (the sink), `scriptImageCurrent`, `drainScriptImages` (attach + reconciliation + layout-pending), `clearScriptImgsLayoutPending`. The reinsertion rule and the no-refund rule are stated in `drainScriptImages`' comment.
+- `internal/engine/engine.go`: session tables `scriptImgs` / `pendingScriptImgs` / `scriptImgsLayoutPending` under `imgMu`, created in `initImageMaps`; `SetImagePixelSink(s.retainScriptImage)` next to `SetImageLoader`; `PumpJS` drains after `Tick`/`TickRAF`, keeps the pending bit across the `deferredActive` skip, and forces exactly one `Reflow` when the restyle path did not already build layout (probe: `WorkCounts().LayoutBuilds` snapshot).
+- `internal/engine/script_image_retention_test.go`: `TestDetachedScriptImageIsNeverRetained` (the required detached-retention test) and `TestScriptImageDropKeepsPixelReservation` (pins §3.3's no-refund-on-drop rule so M04 can be rejected).
+- `test/engine/script_image_paint_test.go`: BR-250, BR-251, BR-252.
+
+### 7.2 Oracles
+
+Command: `go test ./test/engine -run TestLazyImage -v -count=1` - rc 0. `TestLazyImagePaintAfterLoadAssignment` (both subtests), `TestLazyImageLayoutBuildsOncePerTurn` and `TestLazyImageStalePixelsStopPainting` all PASS (0.01 s and less).
+
+Command: `go test ./internal/engine -run 'TestDetachedScriptImageIsNeverRetained|TestScriptImageDropKeepsPixelReservation' -v -count=1` - rc 0, both PASS.
+
+- BR-250 (`TestLazyImagePaintAfterLoadAssignment`): the fetcher signals it was entered and then blocks; the test releases a 7x9 blue PNG after `NewSession` returned, pumps until `window.done === 'yes'`, and measures `Object.Image`'s pixel and the box: `rgba(0,0,255,65535)` and 7x9. The `during-parse control` subtest writes the same source synchronously and measures the same pixel and box with no pump.
+- BR-251 (`TestLazyImageLayoutBuildsOncePerTurn`): after the first attach, a second assignment loads a 10x4 green PNG. The pump turn that reports its `onload` measures box 10x4, `Object.Image` pixel green, and `LayoutBuilds` delta exactly 1.
+- BR-252 (`TestLazyImageStalePixelsStopPainting`): after a 7x9 attach, a rejected URL measures `Object.Image == nil`, box 0x0 and 0 image commands in the pump turn that reports `onerror`; a later successful 10x4 assignment paints again; `src = ''` then measures `Object.Image == nil`, box 0x0 and 0 image commands.
+- Detached retention: a `new Image()` inside a page script measures `naturalWidth x naturalHeight = 7x9` while `retained/pending/painted = 0/0/0` after one pump, and the decoded-pixel reservation stays 63 (charged, not refunded).
+
+### 7.3 Acceptance
+
+- `go test ./...` - **rc 1**, 42 packages `ok`, 1 package FAIL: `github.com/vyquocvu/goosie/test/qc`. `TestTraceability` reports exactly: `unknown QC ID BR-252 referenced by test/engine/script_image_paint_test.go:TestLazyImageStalePixelsStopPainting`, `unknown QC ID BR-251 ... TestLazyImageLayoutBuildsOncePerTurn`, `unknown QC ID BR-250 ... TestLazyImagePaintAfterLoadAssignment`. This is the expected state of the instruction "do not register catalog rows": `test/qc/catalog.go` and `test/qc/traceability.golden.json` are integrator-owned, and the traceability test rejects any tag whose ID is not yet in the catalog. Prior art: TASK-052's tests landed in `cdfd434` and their BR-236..BR-249 rows were registered later in `80a2f61`. **This contradicts §6's "`go test ./...` rc 0"**; it cannot be satisfied without touching the files §0 forbids. All non-`test/qc` packages are green (next line).
+- `go list ./... | grep -v '/test/qc$' | xargs go test` - rc 0, 42 packages `ok`, 0 FAIL.
+- `go test -race ./internal/engine ./internal/js ./test/engine` - rc 0: `ok internal/engine 1.742s`, `ok internal/js 2.048s`, `ok test/engine 17.655s`.
+- `go vet -all ./...` - rc 0, no output.
+- `go test ./internal/archtest/ -count=1 -v` - rc 0, 14 tests run, PASS, 2.771 s.
+- gofmt: `gofmt -l` over the six changed files and over `git ls-files '*.go'` prints nothing; rc 0.
+
+### 7.4 Mutation outcomes
+
+Every mutation was applied to `internal/engine`, run, then restored; after each restore the affected tests were green again.
+
+- **M01** (sink is a no-op): BR-250 failed with `after-load assignment: Object.Image = <nil>, want the decoded fixture pixels`; BR-251 failed at setup (`the first assignment did not attach`); BR-252 also failed at setup. Restored green.
+- **M02** (retain and attach but do not mark/force layout; step 3 dropped): BR-250 failed on the turn its `onload` fires with `Object.Image = <nil>` (the arena was never rebuilt); BR-251 and BR-252 failed at their setup attach. Restored green.
+- **M03** (skip the connected/src-identity checks): BR-252 failed with `failed assignment: Object.Image = *image.RGBA, want nil`, `box = 7x9, want 0x0`, `painted 1 image commands, want 0`, and the same three at `src=''` (box 10x4); the detached test failed with `retained=1 pending=0 painted=1, want 0/0/0`. Restored green.
+- **M04** (probe: refund the reservation on a drop): the budget test `TestScriptImagesChargeTheDocumentPixelBudget` (BR-249) stayed **green** - it never pumps, so no drop path runs. The new internal `TestScriptImageDropKeepsPixelReservation` rejected the mutation with `after removal: decoded-pixel reservation = 0, want 63 (a drop must not refund the charge)`. Restored green.
+
+### 7.5 §1 probes re-measured on the branch
+
+A throwaway engine-level test (deleted; `raster.RasterizeTile` over a 70x90 box, `frame.RGB(255,255,255)` background, counted `frame.RGB(0,0,255)` pixels) measured:
+
+- during-parse control: **6,300** blue pixels;
+- after-load assignment (`setTimeout`, then `PumpJS` until `onload`): **6,300** blue pixels.
+
+The real `-screenshot` path is **not measurable**: TASK-056 has not landed on this branch (no `watchVsync` hook in `steadyDriver`/`driver`; `framePath.pumpJS` is only reached from the interactive chrome tick and the media path, so a paced/screenshot run never calls `Session.PumpJS`, and TASK-056 §1.2's fetch-context cancellation still applies to network sources). A measured confirmation of that limitation, with the built CLI (`go build -o /tmp/task057/goosie ./cmd/goosie`, rc 0):
+
+- `./goosie -backend headless -screenshot -dpr 1 -url file:///tmp/task057/control.html -out /tmp/task057/control-dpr1.png` - rc 0; the PNG contains **6,300** blue pixels (25,200 at the default `-dpr 2`, i.e. the same 70x90 CSS box at 2x).
+- `./goosie -backend headless -screenshot -dpr 1 -url file:///tmp/task057/after.html -out /tmp/task057/after-dpr1.png` - rc 0; the PNG contains **0** blue pixels (0 at `-dpr 2` as well). The engine-level probe above shows the same document paints 6,300 once the loop is pumped.
+
+### 7.6 Not measured
+
+- The end-to-end `-screenshot` after-load probe, for the reason above; it becomes measurable once TASK-056's paced pump lands.
+- `srcset`/`<picture>`, CSS background images and canvas `drawImage` assigned by script are out of scope (§3.4) and were not measured. The stale-pixel case for a parse-time `<img>` replaced by a script `src` change was not widened or measured; the reconciliation only owns script-retained entries.
