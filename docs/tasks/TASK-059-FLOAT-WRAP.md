@@ -48,6 +48,8 @@ allowed (`>` not `>=`). No other layout path changes.
 | `go vet -all ./...` | rc 0 |
 | `make parity` | 93/93 PASS, 0 failing, average 96.23%, known gaps 5 fixtures / 10 bands unchanged |
 | vnexpress A/B, stamped clean builds, 1280x1024 dpr 1, `-screenshot` | `main 59be346`: rc 0, PNG 6,120 B, **345,600** non-white pixels of 1,310,720 (exactly the 1280x270 ad band). `fix/float-wrap d71e004`: rc 0, PNG 342,793 B, **621,938** non-white pixels |
+| vnexpress.net in sweep #14 (stamped `1b3dff93`, 100 sites) | `MISSING_REGIONS`, ink 264,173 against Chromium 618,679 (coverage 0.386, pct_exact 50.42); sweep #13 at `7f71648c` was `BLANK_OUTPUT` with ink 0 |
+| controlled A/B/A on this host, same minutes | `7f71648c` ink **0**, `1b3dff93` ink **268,005**, `7f71648c` ink **0** again; the Chromium reference itself moved 358,996 -> 618,679 -> 274,875, so the claim rests on ink_goosie leaving 0, not on a pct |
 
 The 345,600 figure is the same number every run of the pre-fix build produced; the only painted region
 is the first, non-floated ad band, which is what makes the blankness a layout displacement rather than a
@@ -68,6 +70,7 @@ decode or fetch failure.
 
 - Landing on `main` (blocked while another agent holds `internal/layout/block.go` uncommitted); registry
   updated only after the merge.
-- Sweep #14 runs from the stamped combined build `1b3dff9` in a clean clone to measure the live effect
-  across all 100 sites. At 13/100 vnexpress.net had moved from `BLANK_OUTPUT` to `MISSING_REGIONS`
-  (row 1 of the log); the full report lands when the sweep finishes.
+- Sweep #14 finished from the stamped combined build `1b3dff9` in a clean clone: vnexpress.net is
+  `MISSING_REGIONS` (ink 264,173 against 618,679, coverage 0.386, pct 50.42), and the controlled A/B/A
+  above reproduces ink 0 -> 268,005 -> 0. The page is no longer blank but still not the reference. The
+  report is committed on `main` as `docs/qa-live-parity/2026-10-26T0755Z-1b3dff93`.

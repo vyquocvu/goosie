@@ -75,6 +75,8 @@ No other `imgMu` section dispatches page code: `applyImages` (engine.go:1151) an
 | `go test -race ./test/engine -run 'TestIntersectionCallback...|TestIntersectionObserver|TestScriptImage'` | rc 0 |
 | `gofmt -l` on changed files; `go vet` on engine + test/engine | no output / rc 0 |
 | vneconomy.vn through a binary built from `8654797` | rc 0, PNG 90,027 B, 62,272 sampled non-white pixels of 327,680 (every second row/column) |
+| vneconomy.vn in sweep #14 (stamped `1b3dff93`, 100 sites) | `LOW_COVERAGE`, rc 0, **2.3 s**, ink 280,924; sweep #13 at `7f71648c` was `GOOSIE_TIMEOUT`, rc 124, 120.01 s with no pixels |
+| controlled A/B/B on this host, same minutes | `7f71648c`: `GOOSIE_TIMEOUT` 120.01 s rc 124, no ink. `1b3dff93`: rc 0 in 2.87 s and 1.9 s, ink 281,371 and 280,700, while the Chromium reference held at 591,765 and 591,901 ink |
 
 The pre-fix vneconomy run never produced a PNG; the post-fix one paints the page (19% sampled ink), so
 the fix does not merely return early from the load.
@@ -94,5 +96,7 @@ the fix does not merely return early from the load.
 
 - Landing on `main` — the combined tree is fully green, but `main` is blocked while another agent holds
   `internal/engine/engine.go` uncommitted. The defect registry is updated only after the merge.
-- Sweep #14 is running from the stamped combined build `1b3dff9` (clean clone, `vcs.modified=false`) to
-  re-measure the sites sweep #13 lost to this deadlock; the report lands after it finishes.
+- Sweep #14 finished from the stamped combined build `1b3dff9` (clean clone, `vcs.modified=false`):
+  vneconomy.vn is no longer a timeout - `LOW_COVERAGE` in 2.3 s with ink 280,924 - and the controlled
+  A/B/B above reproduces both sides. The report is committed on `main` as
+  `docs/qa-live-parity/2026-10-26T0755Z-1b3dff93`.
