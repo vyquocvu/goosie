@@ -75,23 +75,16 @@ func ParseBorderImageSource(value string) string {
 	return ""
 }
 
-// borderImageURL returns the payload of the first url() in v.
+// borderImageURL returns the payload of the first url() in v. It defers to the
+// shared ScanURL so a border-image-source whose payload contains a ')' — an SVG
+// data URI like url("…fill='rgb(0,0,255)'…") — is kept whole rather than cut at
+// the first parenthesis.
 func borderImageURL(v string) (string, bool) {
-	lower := strings.ToLower(v)
-	i := strings.Index(lower, "url(")
-	if i < 0 {
+	t, ok := ScanURL(v)
+	if !ok || t.Payload == "" {
 		return "", false
 	}
-	rest := v[i+len("url("):]
-	end := strings.IndexByte(rest, ')')
-	if end < 0 {
-		return "", false
-	}
-	target := strings.Trim(strings.TrimSpace(rest[:end]), "\"'")
-	if target == "" {
-		return "", false
-	}
-	return target, true
+	return t.Payload, true
 }
 
 // ParseBorderImageSlice reads border-image-slice: 1-4 numbers/percentages
@@ -312,19 +305,24 @@ func ParseBorderImageShorthand(value string) (source, slice, width, outset, repe
 	if srcIdx < 0 {
 		return "", "", "", "", "", false
 	}
-	// A url() payload may itself contain spaces; rejoin from the url( token
-	// through its closing paren.
-	srcEnd := srcIdx
-	if strings.HasPrefix(strings.ToLower(toks[srcIdx]), "url(") && !strings.Contains(toks[srcIdx], ")") {
-		for srcEnd < len(toks) && !strings.Contains(toks[srcEnd], ")") {
-			srcEnd++
-		}
-		if srcEnd >= len(toks) {
+	// A url() payload may itself contain spaces and ')'; let the shared scanner
+	// find the token's end rather than stopping at the first token that contains
+	// a ')' — a quoted payload like `url("…rgb(0,0,255) …")` has one in the
+	// middle, and splitting there would truncate the source and misread the rest
+	// as slice values.
+	source = toks[srcIdx]
+	rest := append([]string{}, toks[:srcIdx]...)
+	if strings.HasPrefix(strings.ToLower(source), "url(") {
+		joined := strings.Join(toks[srcIdx:], " ")
+		t, ok := ScanURL(joined)
+		if !ok {
 			return "", "", "", "", "", false
 		}
+		source = joined[:t.End]
+		rest = append(rest, strings.Fields(joined[t.End:])...)
+	} else {
+		rest = append(rest, toks[srcIdx+1:]...)
 	}
-	source = strings.Join(toks[srcIdx:srcEnd+1], " ")
-	rest := append(append([]string{}, toks[:srcIdx]...), toks[srcEnd+1:]...)
 	slice = strings.Join(rest, " ")
 	if len(parts) > 1 {
 		width = strings.TrimSpace(parts[1])

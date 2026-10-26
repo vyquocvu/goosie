@@ -714,24 +714,11 @@ func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 // value. The src property can carry multiple fallback formats; the engine only
 // serves TrueType and OpenType, so the first url() is the one to try.
 func extractFontURL(v string) string {
-	idx := strings.Index(v, "url(")
-	if idx < 0 {
+	t, ok := css.ScanURL(v)
+	if !ok {
 		return ""
 	}
-	rest := strings.TrimSpace(v[idx+4:])
-	if len(rest) > 0 && (rest[0] == '\'' || rest[0] == '"') {
-		quote := rest[0]
-		end := strings.IndexByte(rest[1:], quote)
-		if end < 0 {
-			return ""
-		}
-		return rest[1 : end+1]
-	}
-	end := strings.IndexByte(rest, ')')
-	if end < 0 {
-		return ""
-	}
-	return strings.TrimSpace(rest[:end])
+	return t.Payload
 }
 
 // maxFontRequests caps how many @font-face sources one document may fetch so a

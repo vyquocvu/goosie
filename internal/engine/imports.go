@@ -1,6 +1,10 @@
 package engine
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/vyquocvu/goosie/internal/css"
+)
 
 // maxImportDepth bounds one sheet's @import chain. Real themes nest one or two
 // deep; a deeper chain is a cycle or an attack, and dropping the rest of it
@@ -119,12 +123,12 @@ func importRef(stmt string) (string, bool) {
 	rest = strings.TrimRight(rest, ";")
 	ref, remainder := "", rest
 	if strings.HasPrefix(strings.ToLower(rest), "url(") {
-		close := strings.IndexByte(rest, ')')
-		if close < 0 {
+		t, ok := css.ScanURL(rest)
+		if !ok {
 			return "", false
 		}
-		ref = unquote(strings.TrimSpace(rest[4:close]))
-		remainder = strings.TrimSpace(rest[close+1:])
+		ref = t.Payload
+		remainder = strings.TrimSpace(rest[t.End:])
 	} else if len(rest) > 0 && (rest[0] == '"' || rest[0] == '\'') {
 		end := stringEnd(rest, 0)
 		ref = unquote(rest[:end])
