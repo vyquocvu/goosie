@@ -11,7 +11,20 @@ import (
 
 // IntersectionEntry represents one observed target element.
 type IntersectionEntry struct {
-	target     *goja.Object
+	// target is the wrapper the page passed to observe(). It is kept only so the
+	// callback payload carries the same object the page is holding; reading any
+	// property off it would re-enter the runtime (see targetID).
+	target *goja.Object
+	// targetID is the wrapper's __nid__, captured at observe() time. Every
+	// geometry lookup goes through this number, because the alternative - reading
+	// __nid__ back off `target` when the observer is checked - cannot be done
+	// safely: Goosie's node wrappers carry enumerable parentNode/shadowRoot
+	// getters, so any export or property walk over a wrapper calls back into the
+	// runtime, and the check runs while the runtime lock is held. Go mutexes are
+	// not reentrant, so that path deadlocked the whole document load
+	// (GOOSIE-IOEXPORT-001). targetID is -1 when the observe() argument was not a
+	// node wrapper, which can never produce geometry and so never fires.
+	targetID   int
 	callback   goja.Value
 	lastState  bool       // last known intersection state
 	rootMargin [4]float32 // top, right, bottom, left
@@ -228,8 +241,21 @@ func (r *Runtime) intersectionObserve(call goja.FunctionCall, obs *IntersectionO
 
 	entry := &IntersectionEntry{
 		target:     target,
+		targetID:   -1,
 		rootMargin: obs.rootMargin,
 		threshold:  obs.threshold,
+	}
+
+	// Record the wrapper's registry key now, while this is an ordinary script
+	// call: reading a property off a node wrapper can run page getters, and the
+	// check phase cannot afford that (see IntersectionEntry.targetID). Mutation
+	// and Resize observers take the same reading at the same point in their
+	// observe(); unlike them, this observer does not throw on a non-node
+	// argument, because observe(plainObject) has always been a no-op here and
+	// turning it into a TypeError would break pages that observe a stub object
+	// before the element exists.
+	if nidVal := target.Get("__nid__"); nidVal != nil && !goja.IsUndefined(nidVal) {
+		entry.targetID = int(nidVal.ToInteger())
 	}
 
 	obs.mu.Lock()
@@ -303,27 +329,16 @@ func (r *Runtime) CheckIntersections() {
 
 		var changed []*IntersectionEntry
 		for _, entry := range entries {
-			// Get element rect
-			r.mu.Lock()
-			var nodeID int
-			for id := range r.nodeRegistry {
-				// Find the node ID for this target
-				if targetObj, ok := entry.target.Export().(*goja.Object); ok {
-					if nidVal := targetObj.Get("__nid__"); nidVal != nil {
-						if id == int(nidVal.ToInteger()) {
-							nodeID = id
-							break
-						}
-					}
-				}
-			}
-			r.mu.Unlock()
-
-			if nodeID == 0 {
-				continue
-			}
-
-			elemRect, ok := elementRects[nodeID]
+			// Resolve the observed wrapper to the node it stands for. The runtime
+			// lock covers a map read and nothing else: no goja property access and
+			// no Export() may happen here, because node wrappers expose enumerable
+			// parentNode/shadowRoot getters that call back into the runtime, and
+			// re-entering this mutex without the lock is what hung every document
+			// that registered an observer (GOOSIE-IOEXPORT-001). The rect map is
+			// already a private copy taken above, so it needs no lock, but its keys
+			// are dom.Node IDs rather than wrapper IDs - the two allocators are
+			// separate - so the node is what translates one into the other.
+			elemRect, ok := r.intersectionRectOf(entry.targetID, elementRects)
 			if !ok {
 				continue
 			}
@@ -356,6 +371,36 @@ func (r *Runtime) CheckIntersections() {
 			r.fireIntersectionCallback(callback, changed, viewportRect)
 		}
 	}
+}
+
+// intersectionRectOf resolves an observed wrapper's __nid__ to the rect the
+// engine recorded for the node behind it. rects is the caller's private snapshot
+// of intersectionState.elementRects, keyed by dom.Node ID, so the wrapper ID has
+// to be translated through nodeRegistry: the two allocators (goja wrapper keys and
+// dom.Document node IDs) count separately, and a document's first wrapper ID is
+// already off by one from the matching node's ID. The runtime lock guards the
+// registry read only; nothing here touches the JS heap, which is the property
+// that keeps CheckIntersections out of the deadlock GOOSIE-IOEXPORT-001 describes.
+func (r *Runtime) intersectionRectOf(wrapperID int, rects map[int][4]float32) ([4]float32, bool) {
+	// -1 is the "not a node wrapper" sentinel from intersectionObserve. Wrapper ID 0
+	// is a real registration and must not be confused with it.
+	if wrapperID < 0 {
+		return [4]float32{}, false
+	}
+
+	r.mu.Lock()
+	node := r.nodeRegistry[wrapperID]
+	var nodeID int
+	if node != nil {
+		nodeID = int(node.ID)
+	}
+	r.mu.Unlock()
+
+	if node == nil {
+		return [4]float32{}, false
+	}
+	rect, ok := rects[nodeID]
+	return rect, ok
 }
 
 // rectsIntersect checks if two rects [x, y, w, h] intersect.
