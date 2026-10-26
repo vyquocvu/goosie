@@ -161,6 +161,17 @@ STABLE_ROW_KEYS = ("url", "label", "notes", "doc_height") + MEASURED_KEYS
 # cut for a pass mark, so the heading itself says what the table is not.
 DECADE_SECTION_TITLE = ("Terminal-labelled pages by pct_exact decade — "
                         "a distribution, not a gate")
+# A 4xx that reached Goosie's renderer is not a layout result: the pixels are the
+# refusal body. The section that names those rows is why the label table alone
+# must not be read as "the engine failed on N sites".
+REFUSAL_SECTION_TITLE = "Pages that are not engine measurements"
+REFUSAL_DIAG = re.compile(r"goosie: the source (?:refused|returned) .* with HTTP (\d{3})")
+
+
+def refused_status(row: dict) -> int | None:
+    """The HTTP status behind a refusal row, or None when Goosie saw the page."""
+    m = REFUSAL_DIAG.search(row.get("goosie_diag") or "")
+    return int(m.group(1)) if m else None
 
 
 def load_corpus(path: Path) -> list[dict]:
@@ -677,6 +688,29 @@ def render_markdown(payload: dict) -> str:
     for label in LADDER:
         if payload["counts"].get(label):
             lines.append(f"| `{label}` | {payload['counts'][label]} |")
+    refused = [r for r in rows if refused_status(r)]
+    goosie_fetch_failed = [
+        r for r in rows
+        if (r.get("goosie_diag") or "").startswith("goosie: fetch ")
+        and not refused_status(r)
+    ]
+    if refused or goosie_fetch_failed:
+        lines += ["", f"## {REFUSAL_SECTION_TITLE}", "",
+                  "These rows are in the corpus, but their Goosie pixels are not a rendering "
+                  "of the site: the server answered with a 4xx (Goosie draws the refusal body) "
+                  "or the fetch did not complete. Chromium reached the real page, so the label "
+                  "says nothing about the engine's layout of that site — including the rows "
+                  "that happen to land on the terminal rung. They stay in the corpus and in "
+                  "the label table; dropping them would understate how much of the live "
+                  "corpus is currently unmeasurable.", "",
+                  "| url | label | why |", "| --- | --- | --- |"]
+        for r in refused:
+            lines.append(f"| {r['url']} | `{r['label']}` | source answered HTTP "
+                         f"{refused_status(r)}; Goosie rendered the refusal |")
+        for r in goosie_fetch_failed:
+            why = (r.get("goosie_diag") or "").splitlines()[0]
+            lines.append(f"| {r['url']} | `{r['label']}` | Goosie fetch did not complete: "
+                         f"`{why}` |")
     lines += ["", "## By category", "",
               f"| category | {TERMINAL_LABEL} | other labels |",
               "| --- | --- | --- |"]
@@ -1086,6 +1120,41 @@ def selftest() -> int:
               and "**This is a distribution, not a gate**" in same.read_text()
               and f"| `{TERMINAL_LABEL}` |" in same.read_text(),
               same.read_text()[:200])
+        # A 403 does not become a layout result by being labelled: sweep 13 had
+        # seven LAYOUT_EMPTY rows that were all HTTP 401/403, and two UNFLAGGED
+        # rows that were refusals too. The report must name them.
+        def _row(url: str, label: str, diag: str) -> dict:
+            return {"url": url, "label": label, "category": "selftest",
+                    "goosie_diag": diag, "pct_exact": 99.0, "coverage": 1.0,
+                    "worst_iou": 0.9}
+
+        refusal_md = render_markdown({
+            "run_id": "2026-10-26T0900Z-00000000", "corpus": "selftest.json",
+            "build": dict(build), "pages_in_corpus": 3, "pages_scored": 3,
+            "floor_met": True, "counts": {"UNFLAGGED": 2, "FETCH_FAILED": 1},
+            "thresholds": {"min_scored": 75},
+            "noise_floor": {"sites": 0, "comparable": 0, "max_abs_delta_pct": 0,
+                            "max_abs_delta_coverage": 0, "labels_that_flipped": 0},
+            "rows": [
+                _row("https://refused.test/", "UNFLAGGED",
+                     "goosie: the source refused https://refused.test/ with HTTP 403; "
+                     "rendered 12 bytes of that refusal, not the page"),
+                _row("https://nofetch.test/", "FETCH_FAILED",
+                     "goosie: fetch https://nofetch.test/: dial tcp: no such host"),
+                _row("https://clean.test/", "UNFLAGGED", ""),
+            ],
+        })
+        start = refusal_md.find(f"## {REFUSAL_SECTION_TITLE}")
+        section = refusal_md[start:refusal_md.find("## By category")] if start >= 0 else ""
+        check("a refusal is named as not-a-measurement even when its label is the "
+              "terminal rung, a failed fetch is named too, and clean rows stay out of "
+              "that section (they still belong to the per-page table)",
+              bool(section)
+              and "https://refused.test/" in section
+              and "HTTP 403" in section
+              and "https://nofetch.test/" in section
+              and "https://clean.test/" not in section,
+              section or refusal_md[:400])
         # The checks above all read the literal fixture, so none of them could see
         # the two functions that fill it in. A real sweep did: `rev-parse --short=8`
         # without a revision prints nothing, and the report came out named
