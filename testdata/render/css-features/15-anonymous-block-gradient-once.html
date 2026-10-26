@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>An anonymous block composites its element's gradient once, not once per band (GOOSIE-ANONBG-001)</title>
+    <style>
+        /* A background belongs to the element that declared it.  When raw text
+           shares a block container with a block-level child, layout splices an
+           anonymous block box around each run of that text
+           (internal/layout/anonymous.go, style.AnonymousBlockStyle: `s = *parent`),
+           and the copy used to keep the element's gradient and image layers while
+           dropping only its colour.  The builder emits those layers for every box
+           whose display is not inline, and an anonymous block is DisplayBlock, so
+           each band re-composited the ramp its own parent had already painted.
+
+           Chromium, measured on this machine (800x600 viewport, DPR 1, browser
+           131.0.6778.33): one composite only.  For the red ramp
+           `background:linear-gradient(rgba(200,0,0,.5),rgba(200,0,0,.5))` on
+           white that is 0.5*200+0.5*255 = (227,127,127) - 51,054 pixels of the
+           reference render, plus 32,491 of the (228,127,127) rounding of it -
+           inside the words and between them alike, and exactly 0 pixels of
+           (213,63,63), the value a second composite of the same layer produces.
+           Goosie before the fix measured 55,228 pixels of (213,63,63) and only
+           29,030 of (227,127,127).  At (400,110) and (400,180) - the middle of
+           each anonymous band of `.ramp`, far from any glyph - Chromium reads
+           (227,127,127), Goosie read (213,63,63), 64 levels off green and blue,
+           and after the fix Goosie reads (227,127,127) exactly.  `.radial` is
+           the same mechanism, larger: at (400,250) Chromium reads (174,182,219),
+           Goosie read (96,157,200) - 78 levels off red - and it now reads
+           (152,189,218), inside tolerance but not equal, because Goosie's
+           radial interpolation differs from Chromium's independently of this
+           defect.  Counted over the
+           four band rects the fix changes - rows 95-134, 161-200, 236-275 and
+           302-341 of columns 26-773, which is exactly the content box of the two
+           elements - pixels past the 30-level tolerance go 114,291 to 4,380.
+
+           `make parity` scores this fixture at 95.879% with the fix and 72.980%
+           with the mechanism removed, where the pass line is 90%.  The region
+           metric sees the bands too: the harness's ink_mask counts a translucent
+           tint as ink because its channels sit under INK_CUTOFF 245, so the ramp
+           is one content region of rows 73-206 and the radial another of rows
+           214-347, and those two regions carried 60,020 and 59,479 mismatched
+           pixels before the fix against 4,700 and 4,888 after it - the residue
+           being ordinary glyph rasterization.  blank_regions stays 0 and
+           coverage_ratio 0.9931 either way, because the defect paints too much,
+           not too little: match_pct is the signal here, which is why the tinted
+           blocks are set large and dense on purpose. */
+        html, body { margin: 0; padding: 0; }
+        body { font-family: sans-serif; color: #1a1a1a; background: #ffffff; }
+        h1 { font-size: 19px; margin: 10px 16px 2px 16px; }
+        .lede { font-size: 12px; line-height: 16px; margin: 0 16px 6px 16px; }
+        .label { font-size: 11px; color: #555; margin: 6px 16px 0 16px; }
+
+        /* The failing shape: raw text, a block-level child, then more raw text, so
+           layout invents exactly two anonymous blocks under this element. */
+        .ramp {
+            background: linear-gradient(rgba(200, 0, 0, 0.5), rgba(200, 0, 0, 0.5));
+            margin: 4px 16px;
+            padding: 6px 10px;
+            font-size: 30px;
+            line-height: 40px;
+        }
+
+        /* Same defect through the radial layer, which is the other field
+           AnonymousBlockStyle used to hand out. */
+        .radial {
+            background: radial-gradient(rgba(41, 128, 185, 0.5), rgba(155, 89, 182, 0.5));
+            margin: 4px 16px;
+            padding: 6px 10px;
+            font-size: 30px;
+            line-height: 40px;
+        }
+
+        /* The child that splits the text into runs.  It declares no background of
+           its own, so the tint across it is the parent's, composited once. */
+        .ramp > .child, .radial > .child {
+            height: 26px;
+            font-size: 16px;
+            line-height: 26px;
+        }
+
+        /* Control, the opposite failure: a declaring element with no block-level
+           child generates no anonymous box at all, so its single composite is the
+           element's own paint.  An over-collapse that drops the element's background
+           along with the wrapper's loses this band entirely. */
+        .plain {
+            background: linear-gradient(rgba(39, 174, 96, 0.5), rgba(39, 174, 96, 0.5));
+            margin: 4px 16px;
+            padding: 6px 10px;
+            font-size: 30px;
+            line-height: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h1>one composite per element, not one per anonymous band</h1>
+    <p class="lede">Each block below holds raw text, a block-level child, then more raw text, so layout splices two
+       anonymous boxes inside it. The element paints its translucent gradient; those boxes must paint none of it.</p>
+
+    <div class="label">linear-gradient at 50% alpha behind raw text split by a block child (the defect: two anonymous bands)</div>
+    <div class="ramp">text before the child
+        <div class="child">a block child forces anonymous wrapping</div>
+text after the child</div>
+
+    <div class="label">the same shape through radial-gradient (the other layer the copy carried)</div>
+    <div class="radial">text above the ramp
+        <div class="child">a block child forces anonymous wrapping</div>
+text below the ramp</div>
+
+    <div class="label">control: no block child, so no anonymous box - this element's one composite must survive any collapse</div>
+    <div class="plain">green ramp with no wrapping to invent</div>
+</body>
+</html>
