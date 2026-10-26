@@ -104,11 +104,37 @@ Three separate gaps in `internal/layout/block.go`:
   the comparison above used one saved copy for geometry and live runs for the score, both at the same
   minute. The page reported noise floor 0.0 across its two renders.
 
-## 7. Still owed
+## 7. Sweep 15: 100 live pages on the final branch build
 
-- Land on `main` together with TASK-058/059 and the other agent's WIP; then register
-  `GOOSIE-FLOATCLEAR-001` as closed in `docs/qa-open-defects.json` and re-run the 100-site sweep from a
-  stamped clean clone of the merged tree.
+Run from a clean clone of `test/all-fixes` at `5be91b3`, binary SHA-256 `410274bd…`,
+`vcs.modified=false`, 1280x1024 dpr 1. Report `docs/qa-live-parity/2026-10-26T0851Z-5be91b3c`:
+100 pages, 94 two-sided (floor 75 met), no `GOOSIE_TIMEOUT` and no `BLANK_OUTPUT`. Sweep 14
+(`1b3dff93`) is the same tree before TASK-060; each row below was compared against the page's own
+rerender delta (global noise pct 16.49, coverage 0.389).
+
+| page | sweep 14 -> 15 | attribution |
+|------|----------------|-------------|
+| csszengarden.com | pct 58.74 -> **85.95**, ink 1,000,392 -> 749,081, coverage 1.325 -> 0.992 | TASK-060 fix; matches §4 exactly |
+| rfc-editor.org/rfc/rfc9110.html | ink **99,217 -> 82,260** (-16,957), pct 89.08 -> 89.85, blank bands 1 -> 0 | TASK-060 fix: the old build overlaid the RFC header metadata on itself. Reproduced A/B/A/B today: `1b3dff93` gives 99,217 ink in both runs, `5be91b3` 82,260 in both; the new build stacks RFC number, date and authors as a browser does |
+| zh.wikipedia.org/wiki/中国 | ink 307,406 -> 266,070, coverage 1.121 -> 0.972, pct 64.33 -> **65.79** | TASK-060 fix; matches §4 (65.82 / 0.974) |
+| vnexpress.net | ink 264,173 -> 267,822, pct 50.76 -> 67.10 | engine ink stable; Chromium moved 618,429 -> 363,680, so the pct change is reference drift (TASK-059; still `MISSING_REGIONS`) |
+| zingnews.vn | `MISSING_REGIONS` -> `LOW_COVERAGE`, pct 52.93 -> 37.65 | engine ink unchanged (337,440 -> 337,526); Chromium painted 430,556 -> 646,013 and one more reference band, so coverage fell 0.622 -> 0.428 on the reference side |
+| noaa.gov | `LOW_COVERAGE` -> `UNFLAGGED`, ink 189,444 -> 762,080 | the WAF challenge that blocked both binaries during §4 did not fire; 762,080 is the earlier same-day value on both branches, Chromium's ink identical (890,589) |
+| vi.wikipedia / de.wikipedia | label flips with pct and coverage unchanged (66.72 -> 66.42 / 1.911 -> 1.871; 74.92 -> 74.96 / 0.719 -> 0.715) | band placement, no ink movement |
+| en.wikipedia Cuneiform / Goat | Goosie ink identical or -1.6%; Chromium moved -29%..+34% | reference-side live content |
+| target.com | `UNFLAGGED` -> `GOOSIE_CRASH`, rc 1 in 0.24 s, diag "downloaded to .../download" | the origin answered that one request as a download; both binaries render it identically today (rc 0, PNG 758,405 B, two runs each) |
+| bestbuy.com | `FETCH_FAILED` in both runs | network |
+
+No row shows engine-side loss of content or a new failure attributable to TASK-059/060; the two label
+flips with an unchanged engine ink count are band/reference effects. The report is committed on
+`test/all-fixes`.
+
+## 8. Still owed
+
+- Land on `main` together with TASK-058/059 and the other agent's WIP; the three closed entries
+  (`GOOSIE-IMGLOAD-001`, `GOOSIE-FLOATWRAP-001`, `GOOSIE-FLOATCLEAR-001`) are already in
+  `docs/qa-open-defects.json` on this branch, and the 100-site sweep above is from this branch — after
+  the merge the sweep must be repeated from a stamped clean clone of the merged tree.
 - `make parity` on the merged tree. It was run on `test/all-fixes` at `656fcc2` (93/93, see §4); the
   merge brings in unrelated layout changes (`internal/layout/inline.go` and neighbours), so it has to be
   re-run from the merged tree before landing.

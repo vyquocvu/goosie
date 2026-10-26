@@ -100,3 +100,6 @@ the fix does not merely return early from the load.
   vneconomy.vn is no longer a timeout - `LOW_COVERAGE` in 2.3 s with ink 280,924 - and the controlled
   A/B/B above reproduces both sides. The report is committed on `main` as
   `docs/qa-live-parity/2026-10-26T0755Z-1b3dff93`.
+- Sweep #15 (clean `test/all-fixes` build `5be91b3`, report
+  `docs/qa-live-parity/2026-10-26T0851Z-5be91b3c`) has no `GOOSIE_TIMEOUT` row and no render above
+  7.57 s; vneconomy.vn is `LOW_COVERAGE`, rc 0 in **1.83 s**, ink 312,497 against Chromium 602,072.

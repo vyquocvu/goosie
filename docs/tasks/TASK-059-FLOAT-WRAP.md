@@ -74,6 +74,10 @@ decode or fetch failure.
   `MISSING_REGIONS` (ink 264,173 against 618,679, coverage 0.386, pct 50.42), and the controlled A/B/A
   above reproduces ink 0 -> 268,005 -> 0. The page is no longer blank but still not the reference. The
   report is committed on `main` as `docs/qa-live-parity/2026-10-26T0755Z-1b3dff93`.
+- Sweep #15 (clean `test/all-fixes` build `5be91b3`, report
+  `docs/qa-live-parity/2026-10-26T0851Z-5be91b3c`) keeps vnexpress.net at `MISSING_REGIONS` with ink
+  **267,822** against 264,173 in sweep #14 — the wrap does not regress the page — and the corpus has no
+  `BLANK_OUTPUT` and no timeout row.
 
 ## 7. Follow-up: the wrap exposed a missing `clear` (TASK-060)
 
