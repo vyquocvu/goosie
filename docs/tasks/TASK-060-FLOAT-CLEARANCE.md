@@ -138,3 +138,9 @@ flips with an unchanged engine ink count are band/reference effects. The report 
 - `make parity` on the merged tree. It was run on `test/all-fixes` at `656fcc2` (93/93, see §4); the
   merge brings in unrelated layout changes (`internal/layout/inline.go` and neighbours), so it has to be
   re-run from the merged tree before landing.
+- The merge itself was rehearsed on a scratch clone at `test/all-fixes` `24b96b1` over main's committed
+  head `8c39709`: only `docs/qa-test-catalog.md`, `test/qc/catalog.go` and
+  `test/qc/traceability.golden.json` conflict. Resolution is the union of BR rows (BR-253..255 and
+  BR-258 in section H), `expectedCaseCount = 260` (249 + 1 from main + 10 from this branch), and a
+  regenerated golden. The rehearsed tree runs `go vet -all ./...` rc 0 and `go test -count=1 ./...`
+  rc 0 with 43 packages ok.
