@@ -39,11 +39,10 @@ import (
 // Names a page does not reach are deliberately absent and listed in
 // docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
 
-// installNodeTreeMethods adds the child-list mutation API to the shared node
-// prototype, so every wrapped node - element, text, comment and document
-// fragment alike - answers them. Called from setupDOM, next to the prototype's
-// other methods, because goja cannot see a __proto__ chain: wrapNode copies
-// these keys onto each instance.
+// installNodeTreeMethods adds the child-list mutation API to Node.prototype,
+// so every wrapped node - element, text, comment and document fragment alike -
+// answers them. Called from setupDOM, next to the prototype's other methods;
+// wrappers inherit these through [[Prototype]] (see element_interfaces.go).
 func (r *Runtime) installNodeTreeMethods() {
 	_ = r.nodeProto.Set("insertBefore", func(call goja.FunctionCall) goja.Value {
 		return r.jsInsertBefore(call)
@@ -216,88 +215,6 @@ func (r *Runtime) jsCreateDocumentFragment(goja.FunctionCall) goja.Value {
 		return goja.Null()
 	}
 	return r.wrapNode(r.domDoc.NewDocumentFragment())
-}
-
-// defineNodeAccessors installs the child-list and tree-traversal reads a Node
-// exposes, as live accessors on one wrapper.
-//
-// `childNodes` returns a fresh snapshot array rather than a live NodeList, and
-// that is a decision, not an oversight: a live object needs an invalidation hook
-// per mutation and a NodeList identity the spec promises, and internal/js has
-// neither. Snapshot reads stay correct for the patterns the measured pages use -
-// `for (var i = 0; i < el.childNodes.length; i++) el.removeChild(el.childNodes[i])`
-// reads the array once per iteration, which is the loop jQuery's `cleanData`
-// runs, and its `while (el.firstChild) el.removeChild(el.firstChild)` form
-// re-reads every step, which is what a snapshot gives for free. Anything that
-// genuinely needs a live list (MutationObserver's `previousSibling` records) is
-// already served by the mutation recorder, not by this property.
-func (r *Runtime) defineNodeAccessors(obj *goja.Object, node *dom.Node) {
-	// childNodes: every node type, document order.
-	_ = obj.DefineAccessorProperty("childNodes", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		kids := node.ChildNodes()
-		list := make([]goja.Value, 0, len(kids))
-		for _, c := range kids {
-			list = append(list, r.wrapNode(c))
-		}
-		return r.vm.ToValue(list)
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	_ = obj.DefineAccessorProperty("firstChild", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.wrapNode(node.FirstChild)
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	_ = obj.DefineAccessorProperty("lastChild", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.wrapNode(node.LastChild)
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	_ = obj.DefineAccessorProperty("nextSibling", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.wrapNode(node.NextSibling)
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	_ = obj.DefineAccessorProperty("previousSibling", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.wrapNode(node.PrevSibling)
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	// ownerDocument is the document object itself, not a second wrapper for
-	// the same node: jQuery's Sizzle `setDocument` compares
-	// `r != C` against window.document and re-points its whole internal
-	// document cache at whatever it gets back, so a look-alike wrapper would
-	// be adopted as the document and then fail on the first property only the
-	// real one has. wrapNode(&doc.Node) returns the global document object for
-	// exactly this reason, and the document's own ownerDocument is null.
-	_ = obj.DefineAccessorProperty("ownerDocument", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		if node.Doc == nil || node.Type == dom.NodeDocument {
-			return goja.Null()
-		}
-		return r.wrapNode(&node.Doc.Node)
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	// nodeValue: text and comment data for the leaf types, null for the types
-	// that have no value (element, document, fragment), per the standard.
-	_ = obj.DefineAccessorProperty("nodeValue", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		switch node.Type {
-		case dom.NodeText, dom.NodeComment:
-			return r.vm.ToValue(node.DataContent)
-		default:
-			return goja.Null()
-		}
-	}), r.vm.ToValue(func(setCall goja.FunctionCall) goja.Value {
-		if node.Type != dom.NodeText && node.Type != dom.NodeComment {
-			return goja.Undefined()
-		}
-		if len(setCall.Arguments) > 0 && !goja.IsNull(setCall.Arguments[0]) && !goja.IsUndefined(setCall.Arguments[0]) {
-			node.DataContent = setCall.Arguments[0].String()
-			if node.Doc != nil {
-				node.Doc.MarkQueryDirty()
-			}
-			r.notifyMutation()
-		}
-		return goja.Undefined()
-	}), goja.FLAG_TRUE, goja.FLAG_FALSE)
-
-	_ = obj.DefineAccessorProperty("isConnected", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(node.IsConnected())
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 }
 
 // nodeStaticName is the DOM Standard's fixed nodeName for the node types that

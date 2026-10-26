@@ -238,7 +238,9 @@ func (s *inlineStyleDeclaration) replaceProperty(name, value, priority string, r
 		}
 		parts = append(parts, part)
 	}
-	s.runtime.setInlineStyleText(s.node, strings.Join(parts, "; "))
+	// Chromium serialises the style attribute with a trailing semicolon
+	// (`style.color = 'red'` leaves "color: red;", measured in probe5).
+	s.runtime.setInlineStyleText(s.node, strings.Join(parts, "; ")+";")
 }
 
 func parseInlineStyle(text string) []inlineDeclaration {
