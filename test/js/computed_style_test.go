@@ -86,6 +86,7 @@ var computedCascade = map[string]map[string]string{
 // Both spellings of a property name are the same answer. jQuery reads
 // `styles.fontSize` first and only then `getPropertyValue("font-size")`, and a
 // page that finds neither reads "" and gives up.
+// qc:BR-205
 func TestGetComputedStyleAnswersKebabAndCamelNames(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	if err := rt.Run(`
@@ -111,6 +112,7 @@ func TestGetComputedStyleAnswersKebabAndCamelNames(t *testing.T) {
 
 // getPropertyValue also takes the camelCase spelling, because that is what
 // jQuery's `.css()` passes after running the name through its own cache.
+// qc:BR-205
 func TestGetComputedStylePropertyValueAcceptsCamelCase(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	if got := evalString(t, rt, `
@@ -124,6 +126,7 @@ func TestGetComputedStylePropertyValueAcceptsCamelCase(t *testing.T) {
 // provider has no answer for still reports its inline declarations: a script
 // that writes `el.style.display = "none"` and reads it back in the same run is
 // asking about a declaration the engine holds.
+// qc:BR-205
 func TestGetComputedStyleMergesInlineOverCascade(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	if got := evalString(t, rt, `getComputedStyle(document.getElementById("art")).color`); got != "rgb(1, 2, 3)" {
@@ -155,6 +158,7 @@ func TestGetComputedStyleMergesInlineOverCascade(t *testing.T) {
 // GOOSIE-CSSOMTASK-001 in docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
 // getPropertyPriority has no important flags to report. Inventing "initial"
 // values would make a missing cascade look like a resolved one.
+// qc:BR-205
 func TestGetComputedStyleOnlyReportsEngineValues(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	if err := rt.Run(`
@@ -180,6 +184,7 @@ func TestGetComputedStyleOnlyReportsEngineValues(t *testing.T) {
 // A runtime with no provider at all - a host that never wired the engine's
 // cascade - still answers with the element's inline declarations and an empty
 // string for everything else, instead of throwing.
+// qc:BR-205
 func TestGetComputedStyleWithoutProviderFallsBackToInline(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, nil)
 	if got := evalString(t, rt, `
@@ -193,6 +198,7 @@ func TestGetComputedStyleWithoutProviderFallsBackToInline(t *testing.T) {
 // element. This is the test that says the four names fit together: a binding
 // that works when called directly but not through ownerDocument.defaultView is
 // the failure the page actually sees.
+// qc:BR-205
 func TestJQueryCssLookupChainResolves(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	src := `
@@ -239,6 +245,7 @@ func TestJQueryCssLookupChainResolves(t *testing.T) {
 // ends at the same place it does in a browser instead of taking the
 // iframe/opener branch. addEventListener on that object is what the next task
 // cluster pins.
+// qc:BR-205
 func TestDefaultViewIsTheWindowItself(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	if err := rt.Run(`
@@ -262,6 +269,7 @@ func TestDefaultViewIsTheWindowItself(t *testing.T) {
 // A missing or wrong-typed argument is a TypeError naming the parameter, the
 // same shape the browser gives, so a page that guards with try/catch learns
 // what failed instead of receiving an empty style object it will trust.
+// qc:BR-205
 func TestGetComputedStyleRejectsNonElementArguments(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	for _, src := range []string{

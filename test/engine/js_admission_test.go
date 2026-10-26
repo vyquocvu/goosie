@@ -27,6 +27,7 @@ func (f *jsFetchFetcher) Fetch(url, method string, headers map[string]string, bo
 // throws, the tree stays within the cap, and NewSession still succeeds. Without
 // admission the flood is only caught later by walkDocument, which fails the
 // whole document after the nodes are already allocated.
+// qc:BR-210
 func TestEngineJSDeepNestingStoppedAtBoundary(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -69,6 +70,7 @@ func TestEngineJSDeepNestingStoppedAtBoundary(t *testing.T) {
 // TestEngineJSFetchChargesSharedBudget proves the engine wires the JS network
 // APIs onto the same subresource pool CSS, fonts and images use. A small fetch
 // must succeed and charge its response body to Session.SubresourceBytesUsed.
+// qc:BR-210
 func TestEngineJSFetchChargesSharedBudget(t *testing.T) {
 	body := []byte("0123456789abcde") // 15 bytes
 	rt, err := js.New(js.Options{
@@ -146,6 +148,7 @@ func jsAdmissionTreeDepth(doc *dom.Document) int {
 // 140-deep copy into the live tree and the failure would surface later as
 // walkDocument rejecting the document - after the allocation, which is exactly
 // what the admission design in internal/engine/jsadmission.go refuses to allow.
+// qc:BR-210
 func TestEngineJSCloneOfDeepDetachedSubtreeIsCheckedAtInsertion(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {

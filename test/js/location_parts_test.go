@@ -41,6 +41,7 @@ func locationRuntime(t *testing.T, url string) *js.Runtime {
 // Every part of a full URL, with the spellings the URL Standard uses: protocol
 // and hash and search carry their own punctuation, port is the empty string
 // when the URL does not write one, and origin is scheme://host with no path.
+// qc:BR-207
 func TestLocationPartsOfAFullURL(t *testing.T) {
 	rt := locationRuntime(t, "https://news.example.test:8443/muc-duc/tin-moi.html?tag=1&lang=vi#top")
 	if err := rt.Run(`
@@ -63,6 +64,7 @@ func TestLocationPartsOfAFullURL(t *testing.T) {
 // serializer produces and pages build URLs by concatenating location.pathname
 // with a route: an empty string here would turn "https://host" + "login" into
 // "https://hostlogin". A port the URL does not write reads as "".
+// qc:BR-207
 func TestLocationPartsOfAnOriginOnlyURL(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test")
 	if err := rt.Run(`
@@ -81,6 +83,7 @@ func TestLocationPartsOfAnOriginOnlyURL(t *testing.T) {
 // The exact read that threw on the real page: a method call on hostname. A
 // location whose hostname is undefined fails here as a TypeError the page
 // cannot catch its way out of.
+// qc:BR-207
 func TestLocationHostnameSupportsARealPagePattern(t *testing.T) {
 	rt := locationRuntime(t, "https://vnexpress.net/tin-tuc-24h?utm_source=rss")
 	if err := rt.Run(`
@@ -104,6 +107,7 @@ func TestLocationHostnameSupportsARealPagePattern(t *testing.T) {
 
 // location is the same object as a string: coercing it gives href, which is
 // what `window.location + ""` and `String(location)` do in a page.
+// qc:BR-207
 func TestLocationCoercesToHref(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/a/b?c=d#e")
 	if got := evalString(t, rt, `String(location)`); got != "https://example.test/a/b?c=d#e" {
@@ -125,6 +129,7 @@ func TestLocationCoercesToHref(t *testing.T) {
 //
 // and with no document.location the whole statement was that page's first
 // surviving error, `Cannot read property 'protocol' of undefined`.
+// qc:BR-207
 func TestDocumentLocationIsTheSameObjectAsWindowLocation(t *testing.T) {
 	rt := locationRuntime(t, "https://vietnamnet.vn/vn/thoi-su?a=1")
 	if err := rt.Run(`
@@ -152,6 +157,7 @@ func TestDocumentLocationIsTheSameObjectAsWindowLocation(t *testing.T) {
 // accessors over that URL, so a route change is visible in every part
 // afterwards - including a relative argument, which the standard resolves
 // against the document's own URL rather than storing as-is.
+// qc:BR-207
 func TestLocationPartsFollowHistory(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/start?old=1")
 	if err := rt.Run(`
@@ -178,6 +184,7 @@ func TestLocationPartsFollowHistory(t *testing.T) {
 // writing a location part means navigation and this engine has none. A page
 // that does `location.hash = "#x"` outside a try/catch must keep executing, and
 // must not be told its URL moved when nothing did.
+// qc:BR-207
 func TestLocationWritesAreIgnoredNotNavigating(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page?a=1")
 	if err := rt.Run(`
@@ -208,6 +215,7 @@ func TestLocationWritesAreIgnoredNotNavigating(t *testing.T) {
 // constructor is the error the page actually stops on (see the task doc), so
 // reload is not reached offline. A no-op reload would also be the one API here
 // that could turn a snapshot render into a loop.
+// qc:BR-207
 func TestLocationNavigationMembersAreAbsent(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page")
 	if err := rt.Run(`
@@ -231,6 +239,7 @@ func TestLocationNavigationMembersAreAbsent(t *testing.T) {
 // A URL this host gave that Go cannot parse still yields an object: href reads
 // back exactly what the host passed, and the derived parts are empty strings
 // rather than a partial parse. This is the file://-and-scheme-less-host case.
+// qc:BR-207
 func TestLocationOfAnUnparseableURL(t *testing.T) {
 	rt := locationRuntime(t, "://not-a-url")
 	if err := rt.Run(`

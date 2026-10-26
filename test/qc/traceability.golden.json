@@ -1626,6 +1626,154 @@
     "enforced": false
   },
   {
+    "id": "BR-203",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/node_tree_test.go:TestAppendChildMovesFragmentChildrenAndEmptiesFragment",
+      "test/js/node_tree_test.go:TestChildListReadsCoverEveryNodeType",
+      "test/js/node_tree_test.go:TestCloneNodeShallowAndDeep",
+      "test/js/node_tree_test.go:TestClonedFormControlKeepsCheckedState",
+      "test/js/node_tree_test.go:TestCreateDocumentFragmentIsANodeThatTakesChildren",
+      "test/js/node_tree_test.go:TestInsertBeforeMovesFragmentChildrenToPosition",
+      "test/js/node_tree_test.go:TestInsertBeforePositionsAndRejectsForeignReference",
+      "test/js/node_tree_test.go:TestInsertBeforeWithNullReferenceAppends",
+      "test/js/node_tree_test.go:TestIsConnectedFollowsRemoval",
+      "test/js/node_tree_test.go:TestNodeValueIsOnlyForLeaves",
+      "test/js/node_tree_test.go:TestOwnerDocumentAndParentNodeAreTheDocumentObject",
+      "test/js/node_tree_test.go:TestReplaceChildSwapsInPlace"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-204",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/window_lifecycle_test.go:TestBubblingEventReachesWindowUnlessPropagationStops",
+      "test/js/window_lifecycle_test.go:TestDOMContentLoadedReachesWindowAfterDocument",
+      "test/js/window_lifecycle_test.go:TestFireDocumentLifecycleReportsDomMutation",
+      "test/js/window_lifecycle_test.go:TestLoadEventFiresOnWindowOnly",
+      "test/js/window_lifecycle_test.go:TestReadyStateGuardRunsHandlerAfterLoad",
+      "test/js/window_lifecycle_test.go:TestReadyStateTracksTheLifecycle",
+      "test/js/window_lifecycle_test.go:TestWindowDispatchEventDoesNotReachDocument",
+      "test/js/window_lifecycle_test.go:TestWindowListenerDedupAndRemoval",
+      "test/js/window_lifecycle_test.go:TestWindowRemoveEventListenerBeforeDispatch"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-205",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/computed_style_test.go:TestDefaultViewIsTheWindowItself",
+      "test/js/computed_style_test.go:TestGetComputedStyleAnswersKebabAndCamelNames",
+      "test/js/computed_style_test.go:TestGetComputedStyleMergesInlineOverCascade",
+      "test/js/computed_style_test.go:TestGetComputedStyleOnlyReportsEngineValues",
+      "test/js/computed_style_test.go:TestGetComputedStylePropertyValueAcceptsCamelCase",
+      "test/js/computed_style_test.go:TestGetComputedStyleRejectsNonElementArguments",
+      "test/js/computed_style_test.go:TestGetComputedStyleWithoutProviderFallsBackToInline",
+      "test/js/computed_style_test.go:TestJQueryCssLookupChainResolves"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-206",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/computed_style_render_test.go:TestGetComputedStyleForANodeTheSessionNeverResolved",
+      "test/engine/computed_style_render_test.go:TestGetComputedStyleReportsTheSessionsOwnResolve",
+      "test/engine/computed_style_render_test.go:TestLifecycleHideRemovesFromTheRender",
+      "test/engine/computed_style_render_test.go:TestLifecycleReResolvesOnlyWhenTheHandlerMutated",
+      "test/engine/computed_style_render_test.go:TestLifecycleRevealRepaintsTheDocument"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-207",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/location_parts_test.go:TestDocumentLocationIsTheSameObjectAsWindowLocation",
+      "test/js/location_parts_test.go:TestLocationCoercesToHref",
+      "test/js/location_parts_test.go:TestLocationHostnameSupportsARealPagePattern",
+      "test/js/location_parts_test.go:TestLocationNavigationMembersAreAbsent",
+      "test/js/location_parts_test.go:TestLocationOfAnUnparseableURL",
+      "test/js/location_parts_test.go:TestLocationPartsFollowHistory",
+      "test/js/location_parts_test.go:TestLocationPartsOfAFullURL",
+      "test/js/location_parts_test.go:TestLocationPartsOfAnOriginOnlyURL",
+      "test/js/location_parts_test.go:TestLocationWritesAreIgnoredNotNavigating"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-208",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/document_implementation_test.go:TestCreateElementOnTheLiveDocumentStillUsesTheLiveTree",
+      "test/js/document_implementation_test.go:TestCreateHTMLDocumentBuildsTheStandardSkeleton",
+      "test/js/document_implementation_test.go:TestDetachedDocumentConstructors",
+      "test/js/document_implementation_test.go:TestDetachedDocumentIsIsolatedButIdentityStable",
+      "test/js/document_implementation_test.go:TestDetachedDocumentTitleIsTextAndIsWritable",
+      "test/js/document_implementation_test.go:TestDocumentImplementationOmitsUnimplementedMembers",
+      "test/js/document_implementation_test.go:TestJQueryCreateHTMLDocumentProbeIsTheExactExpression",
+      "test/js/document_implementation_test.go:TestParseHTMLBaseHrefBranchRunsAgainstTheDetachedHead"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-209",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/jquery_dom_boot_test.go:TestJQueryBuildFragmentWrapAndUnwindPath",
+      "test/js/jquery_dom_boot_test.go:TestJQueryReadyBranchPicksTheListenerPathAndBothRegistrationsStick",
+      "test/js/jquery_dom_boot_test.go:TestJQuerySlicePushTrickOnDocumentChildNodes",
+      "test/js/jquery_dom_boot_test.go:TestJQuerySupportBlockRunsAndSetsItsFlags"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-210",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "SEC"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/js_admission_test.go:TestEngineJSCloneOfDeepDetachedSubtreeIsCheckedAtInsertion",
+      "test/engine/js_admission_test.go:TestEngineJSDeepNestingStoppedAtBoundary",
+      "test/engine/js_admission_test.go:TestEngineJSFetchChargesSharedBudget"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

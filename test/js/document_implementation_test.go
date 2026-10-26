@@ -51,6 +51,7 @@ func detachedRuntime(t *testing.T, html string) *js.Runtime {
 // doctype plus html > (head > title) and an empty body. The assertions are that
 // shape, the HTML casing browsers use for nodeName, and the fact that the live
 // document is untouched by it.
+// qc:BR-208
 func TestCreateHTMLDocumentBuildsTheStandardSkeleton(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body><p id="a">main text</p></body></html>`)
 	cases := []struct{ name, script, want string }{
@@ -83,6 +84,7 @@ func TestCreateHTMLDocumentBuildsTheStandardSkeleton(t *testing.T) {
 // detached document must take innerHTML, the two forms must arrive as two child
 // nodes, and the comparison must be exactly true - that boolean is stored in
 // y.createHTMLDocument and branched on by every later innerHTML/parseHTML path.
+// qc:BR-208
 func TestJQueryCreateHTMLDocumentProbeIsTheExactExpression(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body><p>main</p></body></html>`)
 	got := evalString(t, rt, `(function(){
@@ -133,6 +135,7 @@ func TestJQueryCreateHTMLDocumentProbeIsTheExactExpression(t *testing.T) {
 // base only matters to a browser's URL resolution, and this engine never
 // resolves a relative URL through a detached scratch document - and it is listed
 // in docs/tasks/TASK-047-DOM-JQUERY-APIS.md with the other named omissions.
+// qc:BR-208
 func TestParseHTMLBaseHrefBranchRunsAgainstTheDetachedHead(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body></body></html>`)
 	got := evalString(t, rt, `(function(){
@@ -162,6 +165,7 @@ func TestParseHTMLBaseHrefBranchRunsAgainstTheDetachedHead(t *testing.T) {
 // indexes filtered by "is this node under that root", which is always none and
 // is reported as a handled miss - a silent "not present" for content that is
 // present. See indexDocFor in internal/js/js.go.
+// qc:BR-208
 func TestDetachedDocumentIsIsolatedButIdentityStable(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body><div id="live">x</div></body></html>`)
 	got := evalString(t, rt, `(function(){
@@ -211,6 +215,7 @@ func TestDetachedDocumentIsIsolatedButIdentityStable(t *testing.T) {
 // S.parseHTML and jQuery's clean/clone helpers call them on whatever document is
 // in hand rather than on the live one. Node types are the standard's 3/8/11, and
 // a fragment still means "its children move, it stays empty".
+// qc:BR-208
 func TestDetachedDocumentConstructors(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head></head><body></body></html>`)
 	got := evalString(t, rt, `(function(){
@@ -244,6 +249,7 @@ func TestDetachedDocumentConstructors(t *testing.T) {
 // title is the head's title element, read and written, and a title argument
 // containing markup stays text: the skeleton is built by parsing, so an
 // unescaped "<" in the argument would otherwise arrive as an element.
+// qc:BR-208
 func TestDetachedDocumentTitleIsTextAndIsWritable(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head></head><body></body></html>`)
 	got := evalString(t, rt, `(function(){
@@ -273,6 +279,7 @@ func TestDetachedDocumentTitleIsTextAndIsWritable(t *testing.T) {
 // title element would fight that host path, and the sweep found one read of it
 // across the five saved pages, inside a third-party snippet and not on a boot
 // path, so it stays as it is - named in the task doc.
+// qc:BR-208
 func TestDocumentImplementationOmitsUnimplementedMembers(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body></body></html>`)
 	got := evalString(t, rt, `[
@@ -291,6 +298,7 @@ func TestDocumentImplementationOmitsUnimplementedMembers(t *testing.T) {
 // createElement on the live document still allocates into the live tree, which
 // is what the live id/tag indexes search, and a node made in a scratch document
 // is not reachable from it. The two documents coexist without merging.
+// qc:BR-208
 func TestCreateElementOnTheLiveDocumentStillUsesTheLiveTree(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head></head><body></body></html>`)
 	got := evalString(t, rt, `(function(){

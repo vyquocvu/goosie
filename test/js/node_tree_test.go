@@ -39,6 +39,7 @@ func nodeTreeRuntime(t *testing.T, html string) *js.Runtime {
 // detail - `var ce = E.createDocumentFragment().appendChild(E.createElement("div"))`
 // - so an appendChild that returned undefined would leave `ce` undefined and
 // the next statement would throw inside the library's own setup.
+// qc:BR-203
 func TestCreateDocumentFragmentIsANodeThatTakesChildren(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><p>hi</p></body></html>`)
 	out := evalString(t, rt, `
@@ -64,6 +65,7 @@ func TestCreateDocumentFragmentIsANodeThatTakesChildren(t *testing.T) {
 // The alternative - inserting the fragment node itself - would put a
 // #document-fragment into the body, where no selector can reach it and paint
 // cannot see any of its content.
+// qc:BR-203
 func TestAppendChildMovesFragmentChildrenAndEmptiesFragment(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
 	out := evalString(t, rt, `
@@ -85,6 +87,7 @@ func TestAppendChildMovesFragmentChildrenAndEmptiesFragment(t *testing.T) {
 // argument as a variable that is null on a fresh page, so a binding that read
 // null as "no reference given, do nothing" would silently drop the injected
 // markup instead of appending it.
+// qc:BR-203
 func TestInsertBeforeWithNullReferenceAppends(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><span>a</span></div></body></html>`)
 	out := evalString(t, rt, `
@@ -103,6 +106,7 @@ func TestInsertBeforeWithNullReferenceAppends(t *testing.T) {
 // not a child of this node throws NotFoundError like a browser does. The throw
 // matters: silently appending would put the node at the end of the wrong parent
 // and the page would render content in the wrong order with no signal at all.
+// qc:BR-203
 func TestInsertBeforePositionsAndRejectsForeignReference(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="a"><b></b><i></i></div><div id="b"><em></em></div></body></html>`)
 	out := evalString(t, rt, `
@@ -124,6 +128,7 @@ func TestInsertBeforePositionsAndRejectsForeignReference(t *testing.T) {
 // the reference position. jQuery's `before`/`after` helpers call
 // `target.insertBefore(node, target.firstChild)` with whatever buildFragment
 // produced.
+// qc:BR-203
 func TestInsertBeforeMovesFragmentChildrenToPosition(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><span>keep</span></div></body></html>`)
 	out := evalString(t, rt, `
@@ -148,6 +153,7 @@ func TestInsertBeforeMovesFragmentChildrenToPosition(t *testing.T) {
 // - so a deep clone must carry children, and the clone's own children must be
 // clones rather than the same nodes moved out of the original (which would
 // empty `ce` and break every later statement that reads it).
+// qc:BR-203
 func TestCloneNodeShallowAndDeep(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="src" class="c"><b>x</b><i>y</i></div></body></html>`)
 	out := evalString(t, rt, `
@@ -173,6 +179,7 @@ func TestCloneNodeShallowAndDeep(t *testing.T) {
 // of the last child's `checked`. If any link in that chain is missing, the
 // library's checkClone flag comes out false and it takes a different code path
 // for every node it ever clones.
+// qc:BR-203
 func TestClonedFormControlKeepsCheckedState(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body></body></html>`)
 	out := evalString(t, rt, `
@@ -190,6 +197,7 @@ func TestClonedFormControlKeepsCheckedState(t *testing.T) {
 
 // replaceChild puts the new node exactly where the old one was and detaches the
 // old one. jQuery's replaceWith is `t.replaceChild(e, this)`.
+// qc:BR-203
 func TestReplaceChildSwapsInPlace(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><b>1</b><i>2</i></div></body></html>`)
 	out := evalString(t, rt, `
@@ -207,6 +215,7 @@ func TestReplaceChildSwapsInPlace(t *testing.T) {
 // childNodes is every node (text and comments included) while children stays
 // element-only, and the position reads agree with the tree. jQuery reads
 // childNodes 11 times and firstChild 12, and its `.text()` walks nodeValue.
+// qc:BR-203
 func TestChildListReadsCoverEveryNodeType(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box">a<b>B</b><!--c-->d</div></body></html>`)
 	out := evalString(t, rt, `
@@ -235,6 +244,7 @@ func TestChildListReadsCoverEveryNodeType(t *testing.T) {
 // wrapper for the same node would be adopted as "the document" and then fail on
 // the first property only the real one has. That is an identity check, which no
 // amount of extra properties on the wrapper can satisfy.
+// qc:BR-203
 func TestOwnerDocumentAndParentNodeAreTheDocumentObject(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<!doctype html><html><head></head><body><p id="p">t</p></body></html>`)
 	out := evalString(t, rt, `
@@ -256,6 +266,7 @@ func TestOwnerDocumentAndParentNodeAreTheDocumentObject(t *testing.T) {
 
 // isConnected separates a node still in the document from one a script removed,
 // which is how a page decides whether to measure a box at all.
+// qc:BR-203
 func TestIsConnectedFollowsRemoval(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><span>x</span></div></body></html>`)
 	out := evalString(t, rt, `
@@ -280,6 +291,7 @@ func TestIsConnectedFollowsRemoval(t *testing.T) {
 // nodeValue is the leaf data for text and comment nodes and null for the types
 // that have none, and writing it only changes the leaf types. jQuery's `.text()`
 // is a nodeValue read on every text node it walks.
+// qc:BR-203
 func TestNodeValueIsOnlyForLeaves(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box">keep</div></body></html>`)
 	out := evalString(t, rt, `

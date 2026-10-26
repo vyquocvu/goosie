@@ -1473,3 +1473,102 @@ cuối là `document_implementation_test.go:54`, `:294` và
 3. §10.4: hai câu trong §5.5/§6 quy hết reveal bất đồng bộ cho "headless không pump". Số của reproB
    cho thấy **cả khi pump**, reveal vẫn hỏng vì một defect khác. Đề nghị sửa §5.5 thành hai nguyên
    nhân khi lượt doc kia được cập nhật — tôi không tự sửa chữ của họ.
+
+---
+
+## 12. Integrator — merge, đo lại, đăng ký (2026-10-26)
+
+Phần này do integrator viết sau khi merge; §0–§11 giữ nguyên. Branch
+`worktree-task-047-dom-jquery-apis` tip `41d7048`, merge-base `fe4928c`, merge vào main
+`8925452`, commit nâng floor `ad7ebc0`. Không push.
+
+### 12.1 Fixture và floor — chỗ hai bên lệch nhau
+
+Branch tự báo `88/88` với `MIN_SCORED_FIXTURES = 87`; main lúc merge có **89** fixture với floor
+**89**. Chênh không phải mất fixture: merge-base `fe4928c` predates hai fixture của TASK-048/049
+(`css-features/14-inline-background-repaint.html`, `css-features/15-anonymous-block-gradient-once.html`),
+nên branch **chỉ thêm** `js-dom/02-tree-mutation-and-lifecycle.html` và không hề xoá gì
+(`comm -13` chỉ ra đúng một file). Sau merge corpus là **90**, floor nâng **89 → 90** trong
+`ad7ebc0` với comment liệt kê đúng fixture mới; `test/gatecheck` `TestParityFixtureFloorMatchesCorpus`
+xanh.
+
+Đo lại toàn corpus bằng binary dựng từ cây merge (không dùng binary của branch):
+
+```
+python3 testdata/parity.py --render --render-chromium --binary /tmp/t47chk/goosie-merged
+ 96.79%  PASS  js-dom/02-tree-mutation-and-lifecycle.png
+                worst_region_iou=0.9585814476644171 coverage_ratio=0.9977858407662968
+                blank_regions=0/0 rows=[] shifted=0
+ 90/90 passing (100.0%), 0 failing, 0 errors
+ known gaps: 5 fixtures / 10 bands        (9 shifted / 1 truly blank, không đổi)
+ average match: 96.18%
+```
+
+Không fixture nào mất, không band known-gap nào mới, không ngưỡng nào bị nới.
+
+### 12.2 Gates trên cây merge
+
+| Lệnh | Kết quả |
+| --- | --- |
+| `go test -count=1 ./...` | rc 0, **42** package `ok`, không `FAIL` |
+| `go vet -all ./...` | rc 0 |
+| `go test ./internal/archtest/` | `ok internal/archtest 4.782s` |
+| `gofmt -l .` | rỗng |
+| `go test ./test/gatecheck/ -run Parity` | 4 test PASS (gồm `TestParityFixtureFloorMatchesCorpus`) |
+| `go test -count=1 ./test/js/ ./test/engine/` | `ok test/js 3.541s`, `ok test/engine 5.408s` |
+
+Một lần đỏ duy nhất trong quá trình kiểm branch: `TestWarmScrollRasterizesNoTiles`
+(`Reused = 92 after 24 tile-aligned frames, want 96`) khi full suite chạy cạnh build của agent
+khác. Test xanh 3/3 trên main, 5/5 khi chạy riêng branch, 3/3 cả package `test/surface`, và full
+rerun rc 0 trên cả hai cây — ghi vào `GOOSIE-FLAKE-001` như instance thứ ba, không phải regression
+của TASK-047.
+
+### 12.3 Đăng ký BR — và vì sao không dùng BR-198…BR-206 như §8 đề nghị
+
+§8 mint từ quan sát "golden max = BR-197"; giữa lúc viết và lúc merge, TASK-048 đã lấy
+BR-198/199 và TASK-049 lấy BR-200/201/202. Mint lại BR-198…206 sẽ cho **hai id cho cùng một
+test**. Integrator đánh số tiếp từ max thật (**BR-202**), tag 58 test bằng marker `// qc:BR-…`
+ngay trên `func Test…`, và ghi 8 row vào mục E:
+
+| BR | Nội dung | Oracle | Số test |
+| --- | --- | --- | --- |
+| BR-203 | Node child-list API | `test/js/node_tree_test.go` | 12 |
+| BR-204 | window EventTarget + document lifecycle | `test/js/window_lifecycle_test.go` | 9 |
+| BR-205 | `window.getComputedStyle` trong realm | `test/js/computed_style_test.go` | 8 |
+| BR-206 | Session provider + lifecycle re-resolve | `test/engine/computed_style_render_test.go` | 5 |
+| BR-207 | `location` parts | `test/js/location_parts_test.go` | 9 |
+| BR-208 | `document.implementation.createHTMLDocument` | `test/js/document_implementation_test.go` | 8 |
+| BR-209 | Bốn biểu thức boot nguyên văn của jQuery + fixture PARITY | `test/js/jquery_dom_boot_test.go` + `js-dom/02` | 4 |
+| BR-210 | Admission của clone | `test/engine/js_admission_test.go` | 3 |
+
+Đối chiếu doc→id: BR-198→**BR-203**, 199→**BR-204**, 200→**BR-205**, 201→**BR-206**,
+202→**BR-207**, 203→**BR-208**, 204→**BR-209**, 205→**BR-210**; BR-206 của doc (fixture
+parity) không thành row riêng vì traceability đòi row `PASS` phải có test được tag — bằng chứng
+fixture nằm trong BR-209. `expectedCaseCount` 202 → **210**, golden regenerate bằng
+`go test ./test/qc -args -update`, golden max = **BR-210**. Ratchet nâng **20/84 → 20/92**
+(`docs/qa-ratchet.json`): 8 row mới đều P1 và đều có test, không row nào thêm mà thiếu oracle.
+
+### 12.4 Defect — đo lại trước khi đăng ký
+
+Bốn defect §11.2 chưa có trong registry; integrator tự đo lại từng cái trên cây merge bằng probe
+`test/js`/`test/engine` chạy một lần rồi xoá, trước khi ghi:
+
+| Defect | Số đo integrator (2026-10-26, merge `8925452`) |
+| --- | --- |
+| `GOOSIE-CSSOMTASK-001` (P1) | Node vừa `appendChild` trong cùng task: `typeof cs.display = undefined`, `cs.getPropertyValue("display") = ""`, `typeof cs.length = undefined`; cùng node sau re-resolve: `string\|block\|"block"` |
+| `GOOSIE-OUTERHTML-001` (P1) | `typeof el.outerHTML = undefined`; gán không throw; cây không đổi (`tag=DIV, children=1, querySelectorAll("p")=0`); sau gán `typeof` thành `string` — own property bị nuốt |
+| `GOOSIE-DOCTYPE-001` (P2) | `!!document.doctype = false`, `doctype.name = null`, `childNodes` ordinals `1,10` (html trước, doctype **cuối**) |
+| `GOOSIE-IFRAME-001` (P2) | `typeof iframe.contentWindow = undefined`, `typeof iframe.contentDocument = undefined` |
+
+`GOOSIE-SELQUERY-001` mà §11.2 đề nghị đã được integrator đăng ký trước merge dưới tên
+`GOOSIE-DOMQUERYSEL-001` (14-form Chromium table), và `GOOSIE-IMAGE-001`/`GOOSIE-IDLREFLECT-001`
+cũng đã có entry riêng — ba đề nghị còn lại (§11.2) được đăng ký trong lượt này. Không defect nào
+được đóng bởi task này.
+
+### 12.5 Điều integrator **không** đo lại
+
+Ba con số mutant của fixture ở §3.3 (61.93% / 42.97% / 42.97%) là của branch; tôi chỉ đo lại
+điểm của **cây sạch** (96.79%) và đọc các dòng mutation M01–M21 từ log của branch. Vì vậy row
+BR-203…BR-210 dẫn số mutation kèm nguồn "branch §3.2/§3.3", không nhận là số integrator tự chạy
+lại từng mutation. Phần tôi tự chạy lại: full suite, vet, archtest, gofmt, gatecheck, parity 90
+fixture, và bốn probe defect ở §12.4.

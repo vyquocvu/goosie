@@ -50,6 +50,7 @@ const bootDoc = `<!DOCTYPE html><html><head><title>T</title></head><body><p>text
 // the block throws and `jQuery` never finishes installing - which is exactly the
 // failure www.gov.vn shows today, where the shipped bundle's first statement is
 // `E.createDocumentFragment().appendChild(E.createElement("div"))`.
+// qc:BR-209
 func TestJQuerySupportBlockRunsAndSetsItsFlags(t *testing.T) {
 	rt := bootRuntime(t, bootDoc)
 	out := evalString(t, rt, `(function(){
@@ -98,6 +99,7 @@ func TestJQuerySupportBlockRunsAndSetsItsFlags(t *testing.T) {
 // by walking lastChild `u[0]` times). The assertions are the three things that
 // make it work: appendChild returns the created div, lastChild walks down the
 // wrapper chain to the row, and textContent = "" empties without removing.
+// qc:BR-209
 func TestJQueryBuildFragmentWrapAndUnwindPath(t *testing.T) {
 	rt := bootRuntime(t, bootDoc)
 	out := evalString(t, rt, `(function(){
@@ -141,6 +143,7 @@ func TestJQueryBuildFragmentWrapAndUnwindPath(t *testing.T) {
 // makeArray, which is slower but not wrong, so what is actually being pinned is
 // that childNodes is an indexed, length-carrying sequence of node objects - the
 // same contract the Sizzle context tests rely on.
+// qc:BR-209
 func TestJQuerySlicePushTrickOnDocumentChildNodes(t *testing.T) {
 	rt := bootRuntime(t, bootDoc)
 	out := evalString(t, rt, `(function(){
@@ -177,6 +180,7 @@ func TestJQuerySlicePushTrickOnDocumentChildNodes(t *testing.T) {
 // `window.addEventListener`, the latter being the member that did not exist at
 // all before this task, so the branch threw on its second call and lost the
 // DOMContentLoaded handler with it.
+// qc:BR-209
 func TestJQueryReadyBranchPicksTheListenerPathAndBothRegistrationsStick(t *testing.T) {
 	rt := bootRuntime(t, bootDoc)
 	branch := evalString(t, rt, `(function(){

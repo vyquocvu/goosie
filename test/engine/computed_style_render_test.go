@@ -50,6 +50,7 @@ const computedPage = `<!DOCTYPE html><html><head>
 <div id="bare">bare</div>
 </body></html>`
 
+// qc:BR-206
 func TestGetComputedStyleReportsTheSessionsOwnResolve(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/page"})
 	if err != nil {
@@ -110,6 +111,7 @@ func TestGetComputedStyleReportsTheSessionsOwnResolve(t *testing.T) {
 // empty string through getPropertyValue and absence through property access. An
 // invented initial value would make an unresolved node look resolved, which is
 // the failure a page cannot detect.
+// qc:BR-206
 func TestGetComputedStyleForANodeTheSessionNeverResolved(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/page"})
 	if err != nil {
@@ -178,6 +180,7 @@ func visiblePaintText(t *testing.T, sess *engine.Session) string {
 // (no dispatch at all), it runs but the session does not re-resolve (the paint
 // list keeps the pre-reveal tree), or it re-resolves but readyState is wrong, so
 // a handler that checks document.readyState first bails out.
+// qc:BR-206
 func TestLifecycleRevealRepaintsTheDocument(t *testing.T) {
 	html := `<!DOCTYPE html><html><head></head><body>
 <div id="server">SERVER TEXT</div>
@@ -227,6 +230,7 @@ window.addEventListener("load", function(){ window.__loadState = document.readyS
 // out of the render. Without the mutation-triggered re-resolve the page keeps
 // painting text its own script removed from view, which shows up as "the engine
 // renders things a browser does not".
+// qc:BR-206
 func TestLifecycleHideRemovesFromTheRender(t *testing.T) {
 	html := `<!DOCTYPE html><html><head></head><body>
 <div id="ad">AD CONTENT</div>
@@ -264,6 +268,7 @@ document.addEventListener("DOMContentLoaded", function(){
 // writes nothing resolves exactly as many times as a page with no handler at
 // all, and a page whose handler reveals content resolves once more, not once per
 // mutation.
+// qc:BR-206
 func TestLifecycleReResolvesOnlyWhenTheHandlerMutated(t *testing.T) {
 	const noHandler = "<!DOCTYPE html><html><head></head><body><div id=\"s\">STATIC CONTENT</div></body></html>"
 	const inertHandler = "<!DOCTYPE html><html><head></head><body><div id=\"s\">STATIC CONTENT</div>" +

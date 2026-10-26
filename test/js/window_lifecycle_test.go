@@ -38,6 +38,7 @@ func lifecycleRuntime(t *testing.T, html string) *js.Runtime {
 // document's own next, window's bubble listeners last. The order is what a page
 // that puts a listener on both objects observes, and it is the order pinned
 // here.
+// qc:BR-204
 func TestDOMContentLoadedReachesWindowAfterDocument(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	if err := rt.Run(`
@@ -66,6 +67,7 @@ func TestDOMContentLoadedReachesWindowAfterDocument(t *testing.T) {
 // resolves ready inline, before the listeners it registers on the next line
 // exist. Then "interactive" before DOMContentLoaded and "complete" before load,
 // which is the order a page's handler sees when it reads it from inside.
+// qc:BR-204
 func TestReadyStateTracksTheLifecycle(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	if got := evalString(t, rt, `document.readyState`); got != "loading" {
@@ -98,6 +100,8 @@ func TestReadyStateTracksTheLifecycle(t *testing.T) {
 //
 //	if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", h);
 //	else h();
+//
+// qc:BR-204
 func TestReadyStateGuardRunsHandlerAfterLoad(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
 	src := `
@@ -124,6 +128,7 @@ func TestReadyStateGuardRunsHandlerAfterLoad(t *testing.T) {
 // load is fired on the window with the window as its target, so a document
 // listener for "load" does not hear it - the same shape a browser has, and the
 // reason a page that only listens on document for load never fires.
+// qc:BR-204
 func TestLoadEventFiresOnWindowOnly(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	if err := rt.Run(`
@@ -143,6 +148,7 @@ func TestLoadEventFiresOnWindowOnly(t *testing.T) {
 // removeEventListener that does not find its entry is a listener that fires on
 // every later load, and one that does not dedup is a handler that runs twice for
 // one event.
+// qc:BR-204
 func TestWindowListenerDedupAndRemoval(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	if err := rt.Run(`
@@ -178,6 +184,7 @@ func TestWindowListenerDedupAndRemoval(t *testing.T) {
 // not run. This is the one EventTarget method the element binding still cannot
 // do (its Go closure wrapper has no stable identity), which is why window keeps
 // its own registry and can promise this.
+// qc:BR-204
 func TestWindowRemoveEventListenerBeforeDispatch(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	// This realm has no Event constructor (not in scope for this task, and no
@@ -209,6 +216,7 @@ func TestWindowRemoveEventListenerBeforeDispatch(t *testing.T) {
 // window.dispatchEvent is a dispatch, not a hint: the document is not in the
 // path of an event whose target is the window, so a document listener must not
 // hear it.
+// qc:BR-204
 func TestWindowDispatchEventDoesNotReachDocument(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	if err := rt.Run(`
@@ -227,6 +235,7 @@ func TestWindowDispatchEventDoesNotReachDocument(t *testing.T) {
 // An event an element dispatches and lets bubble reaches window last; a listener
 // that stops propagation at the document keeps it from reaching window at all.
 // Both are what a page that puts one global listener on window depends on.
+// qc:BR-204
 func TestBubblingEventReachesWindowUnlessPropagationStops(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
 	src := `
@@ -260,6 +269,7 @@ func TestBubblingEventReachesWindowUnlessPropagationStops(t *testing.T) {
 // because a reveal that changed nothing would leave the painted page blank - and
 // a reveal the caller was not told about leaves the arena laid out for the
 // hidden version.
+// qc:BR-204
 func TestFireDocumentLifecycleReportsDomMutation(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body><div id="hidden" style="display:none">body</div></body></html>`)
 	if err := rt.Run(`
