@@ -86,10 +86,13 @@ the fix does not merely return early from the load.
   returns, and the image decodes. Oracle `TestIntersectionCallbackMayStartAnImageLoad`; mutation:
   restoring the old lock scope fails it at the 10 s watchdog.
 - Defect `GOOSIE-IMGLOAD-001`, owner this doc, closed by the fix commit once merged.
+- Registered as BR-256 in `docs/qa-test-catalog.md`, `test/qc/traceability.golden.json`, and the
+  `// qc:BR-256` marker on the oracle (commit `669c94c` on the combined tree; case count 257,
+  p0/p1 tagged 132).
 
 ## 6. Still owed
 
-- Full gate (`go test ./...`, race, vet, archtest, gofmt) and landing on `main`; this doc records the
-  branch measurement, and the registry is updated only after the merge.
-- Re-run the sites that sweep #13 lost to this deadlock after landing (sweep #14), and compare their
-  labels against sweep #13.
+- Landing on `main` — the combined tree is fully green, but `main` is blocked while another agent holds
+  `internal/engine/engine.go` uncommitted. The defect registry is updated only after the merge.
+- Sweep #14 is running from the stamped combined build `1b3dff9` (clean clone, `vcs.modified=false`) to
+  re-measure the sites sweep #13 lost to this deadlock; the report lands after it finishes.

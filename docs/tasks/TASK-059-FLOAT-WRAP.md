@@ -60,10 +60,14 @@ decode or fetch failure.
   Oracle `TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge`; mutation fails both the second and third
   float assertions.
 - Defect `GOOSIE-FLOATWRAP-001`, owner this doc, closed by the fix commit once merged.
+- Registered as BR-257 in `docs/qa-test-catalog.md`, `test/qc/traceability.golden.json`, and the
+  `// qc:BR-257` marker on the oracle (commit `669c94c` on the combined tree; case count 257,
+  p0/p1 tagged 132).
 
 ## 6. Still owed
 
 - Landing on `main` (blocked while another agent holds `internal/layout/block.go` uncommitted); registry
   updated only after the merge.
-- Sweep #14 runs the combined tree (`d71e004`) to measure the live effect across all 100 sites; this doc
-  records only the controlled vnexpress pair and the corpus parity.
+- Sweep #14 runs from the stamped combined build `1b3dff9` in a clean clone to measure the live effect
+  across all 100 sites. At 13/100 vnexpress.net had moved from `BLANK_OUTPUT` to `MISSING_REGIONS`
+  (row 1 of the log); the full report lands when the sweep finishes.
