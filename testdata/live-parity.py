@@ -412,6 +412,41 @@ def _git_rev(abbrev: int = 0) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
+def _parse_go_version_m(text: str) -> dict:
+    """Read the VCS stamp `go version -m` prints.
+
+    GOOSIE-LIVE-009. `source_sha` is `git rev-parse HEAD`, which is true of a
+    clean tree and a lie about the compiled content of a dirty one. Go already
+    records the difference (`vcs.modified=true`, and `+dirty` on the module
+    line), so the report can say which tree produced the bytes instead of
+    assuming HEAD did. Missing stamps stay missing: this never invents one.
+    """
+    info = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        m = re.match(r"build\s+vcs\.(revision|time|modified)=(.+)$", line)
+        if m:
+            key, value = m.group(1), m.group(2).strip()
+            if key == "modified":
+                info["vcs_modified"] = value.lower() == "true"
+            else:
+                info["vcs_" + key] = value
+        if re.match(r"mod\s", line) and line.endswith("+dirty"):
+            info.setdefault("vcs_modified", True)
+    return info
+
+
+def _go_build_info(path: Path) -> dict:
+    try:
+        proc = subprocess.run(["go", "version", "-m", str(path)],
+                              capture_output=True, text=True)
+    except Exception:
+        return {}
+    if proc.returncode != 0:
+        return {}
+    return _parse_go_version_m(proc.stdout)
+
+
 def capture_build(binary: str) -> dict:
     """Identify the artifact whose pixels this sweep is about to measure.
 
@@ -424,6 +459,11 @@ def capture_build(binary: str) -> dict:
     is fetched: the source SHA the tree points at, the binary path, and the hash
     of the bytes that will produce every PNG. The binary hash is the load-bearing
     one -- it identifies the artifact even when the tree moved underneath it.
+
+    GOOSIE-LIVE-009. A binary built from a dirty tree carries HEAD's revision
+    plus `vcs.modified=true`. The revision alone then names a commit that was
+    never compiled, so the report must carry the flag or a reader will attribute
+    in-progress edits to a released SHA.
     """
     path = Path(binary)
     if not path.is_file():
@@ -434,8 +474,11 @@ def capture_build(binary: str) -> dict:
         digest = hashlib.sha256(path.resolve().read_bytes()).hexdigest()
     except OSError:
         digest = ""
+    info = _go_build_info(path)
     return {"source_sha": _git_rev(), "source_sha8": _git_rev(8),
-            "binary_path": str(path), "binary_sha256": digest}
+            "binary_path": str(path), "binary_sha256": digest,
+            "vcs_revision": info.get("vcs_revision", ""),
+            "vcs_modified": info.get("vcs_modified")}
 
 
 def run_id_sha8(run_id: str) -> str:
@@ -567,15 +610,31 @@ def build_header_lines(payload: dict) -> list[str]:
         lines.append(f"**WARNING — this run cannot identify its own build:** `build` "
                      f"field(s) {', '.join(missing)} are empty, so every label below "
                      "comes from an unnamed binary.")
-    elif run8 and src8 and run8 != src8:
-        lines.append(f"**WARNING — the filename names a different commit than these "
-                     f"pixels:** `{payload['run_id']}` ends in `{run8}`, the HEAD when "
-                     f"the report was WRITTEN, while the rows were measured with the "
-                     f"build of `{src8}`. Do not attribute a label change in this file "
-                     f"to `{run8}` (GOOSIE-LIVE-008).")
-    elif not run8 and src8:
-        lines.append(f"*Note:* the report name `{payload['run_id']}` carries no build "
-                     f"SHA; the build that produced these pixels is `{src8}`.")
+    else:
+        vcs_rev = b.get("vcs_revision") or ""
+        if b.get("vcs_modified") is True:
+            lines.append(
+                f"**WARNING — the binary was built from a tree with uncommitted "
+                f"changes:** `vcs.modified=true`, so `{src8 or 'the source SHA'}` names "
+                "the commit the tree pointed at, not the compiled content"
+                + (f" (Go stamped `{vcs_rev[:8]}`)" if vcs_rev else "")
+                + ". Labels in this report are not attributable to that commit; "
+                "rebuild from a clean tree before comparing this sweep with another "
+                "(GOOSIE-LIVE-009).")
+        elif vcs_rev and b.get("source_sha") and vcs_rev != b["source_sha"]:
+            lines.append(
+                f"**WARNING — the binary was built from a different commit than the "
+                f"tree's HEAD:** Go stamped `{vcs_rev[:8]}`, HEAD is `{src8}`. The "
+                "labels below describe the binary, not this tree (GOOSIE-LIVE-009).")
+        if run8 and src8 and run8 != src8:
+            lines.append(f"**WARNING — the filename names a different commit than these "
+                         f"pixels:** `{payload['run_id']}` ends in `{run8}`, the HEAD when "
+                         f"the report was WRITTEN, while the rows were measured with the "
+                         f"build of `{src8}`. Do not attribute a label change in this file "
+                         f"to `{run8}` (GOOSIE-LIVE-008).")
+        elif not run8 and src8:
+            lines.append(f"*Note:* the report name `{payload['run_id']}` carries no build "
+                         f"SHA; the build that produced these pixels is `{src8}`.")
     return lines
 
 
@@ -1052,6 +1111,31 @@ def selftest() -> int:
         check("a binary that cannot be read is recorded as unhashed, never as a guess",
               unreadable["binary_sha256"] == ""
               and unreadable["binary_path"] != "", json.dumps(unreadable))
+        info = _parse_go_version_m(
+            "\tpath\tgithub.com/vyquocvu/goosie/cmd/goosie\n"
+            "\tmod\tgithub.com/vyquocvu/goosie\tv0.0.0-20261026054651-80a2f617b70f+dirty\n"
+            "\tbuild\tvcs=git\n"
+            "\tbuild\tvcs.revision=80a2f617b70f55657b884aa9de33d41e1859ccc5\n"
+            "\tbuild\tvcs.modified=true\n")
+        clean_info = _parse_go_version_m(
+            "\tmod\texample.test/x\tv1.0.0\n"
+            "\tbuild\tvcs.revision=80a2f617b70f55657b884aa9de33d41e1859ccc5\n"
+            "\tbuild\tvcs.modified=false\n")
+        check("Go's own VCS stamp distinguishes a dirty build from a clean one, and a "
+              "binary with no stamp is unknown rather than assumed clean",
+              info.get("vcs_modified") is True
+              and clean_info.get("vcs_modified") is False
+              and _parse_go_version_m("\tpath\tx\n").get("vcs_modified") is None,
+              json.dumps([info, clean_info]))
+        dirty_build = dict(build, vcs_modified=True,
+                           vcs_revision=build["source_sha"])
+        dirty_md = write_reports(r1, c1, scored, "2026-10-26T0901Z-00000000", {},
+                                 named, "selftest.json", dirty_build)[1].read_text()
+        check("a dirty-tree build is called out as not attributable to its commit, "
+              "so in-progress edits are never scored as a released SHA",
+              "uncommitted changes" in dirty_md
+              and "not attributable" in dirty_md
+              and "GOOSIE-LIVE-009" in dirty_md, dirty_md[:500])
 
         print(f"\n{len(failures)} selftest failure(s)" if failures else "\nselftest green")
         return 1 if failures else 0
@@ -1099,6 +1183,10 @@ def main() -> int:
     if not build["binary_sha256"]:
         print(f"live-parity: WARNING cannot read {build['binary_path']} to hash it; "
               "the report will say the build is unidentified", file=sys.stderr)
+    if build.get("vcs_modified"):
+        print(f"live-parity: WARNING {build['binary_path']} was built from a dirty "
+              "tree; the report will not attribute these labels to its commit "
+              "(GOOSIE-LIVE-009)", file=sys.stderr)
 
     keep = bool(args.artifacts)
     artifacts = Path(args.artifacts or tempfile.mkdtemp(prefix="goosie-live-"))
