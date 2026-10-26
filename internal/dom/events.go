@@ -93,6 +93,13 @@ func (e *Event) Cancelable() bool { return e.cancelable }
 // DefaultPrevented reports whether PreventDefault was called.
 func (e *Event) DefaultPrevented() bool { return e.defaultPrevented }
 
+// PropagationStopped reports whether a listener called stopPropagation (or
+// stopImmediatePropagation) part-way through dispatch. The binding needs it to
+// decide whether the window step of the path still runs: `window` is not a
+// *dom.Node, so dom.DispatchEvent stops at the document and the caller appends
+// the window step itself - and must not append it when propagation stopped.
+func (e *Event) PropagationStopped() bool { return e.stopped }
+
 // TimeStamp returns the time at which the event was created.
 func (e *Event) TimeStamp() time.Time { return e.timeStamp }
 
