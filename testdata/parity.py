@@ -64,7 +64,9 @@ PASS_AT = 90.0
 # 89: css-features/15-anonymous-block-gradient-once.html (TASK-049,
 # GOOSIE-ANONBG-001) - the same double composite one layer up: an anonymous block
 # re-composited its generating element's gradient ramp across both bands it splits.
-MIN_SCORED_FIXTURES = 89
+# 90: js-dom/02-tree-mutation-and-lifecycle.html (TASK-047) - a jQuery page's node
+# tree and window lifecycle, the bootstrap DOM the engine could not answer before.
+MIN_SCORED_FIXTURES = 90
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
