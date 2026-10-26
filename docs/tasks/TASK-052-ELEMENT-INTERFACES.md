@@ -165,8 +165,19 @@ back is mechanical. Everything else in the catalog/ratchet stays untouched.
 | BR-246 | `TestScriptImageLoopStopsAtTheAttemptCap` | §3.4 “an unbounded script loop … which cap stops it”: 1,000 × `new Image()` with a `data:` source yields exactly 256 load events and 744 error events, and all 744 rejected `decode()` promises name the attempt limit. The cap is `maxLoadedImages = 256` attempts, not successes. |
 | BR-247 | `TestScriptImagesChargeTheDocumentPixelBudget` | §3.4 `imgReservation`: three 4096×4096 `data:` images (16,777,216 pixels each) — two decode and report 4096×4096 natural size, the third is refused with `engine: script image exceeds the document decoded-pixel budget`, because `MaxDocumentDecodedPixels = 33,554,432` is exactly two images. M04's killer. |
 
-The `test/js` file has 11 test functions and 292 leaf cases (measured with `go test -v` → 292 `--- PASS`
-lines below the 11 parents); the engine file has 3 tests with per-assertion failure messages.
+The `test/js` file has 11 test functions and 293 leaf cases (measured on merged `main` with `go test -v` →
+293 `--- PASS` lines below the 11 parents, 304 in total); the engine file has 3 tests with per-assertion
+failure messages.
+
+**Registered (integrator, 2026-10-26).** The catalog held 233 rows at this branch's base `5920d98`; by
+merge time it held 235, because TASK-054 had registered BR-234/235 for the IntersectionObserver deadlock.
+The fourteen rows above are therefore registered as **BR-236 … BR-249** in the table's order (proposed
+BR-234→236, 235→237, … 247→249). The `// Proposed BR-NNN` comments in both test files are now
+`// qc:BR-NNN` markers against the new ids; `docs/qa-test-catalog.md` reads 249 rows,
+`test/qc/catalog.go`'s `expectedCaseCount` is 249, `test/qc/traceability.golden.json` was regenerated with
+`-update`, and `docs/qa-ratchet.json` moved `p0p1_tagged` **111 → 125** (`p0_tagged` stays 20 — all
+fourteen new rows are P1). Post-merge gates on the integrator's machine: `go test ./...` rc 0 (including
+`test/qc`), `go vet -all ./...` rc 0, `go test ./internal/archtest/` rc 0, `gofmt` clean.
 
 ### 8.2 Gates (run from the worktree, after the last restore)
 

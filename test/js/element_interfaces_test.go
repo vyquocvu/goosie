@@ -63,7 +63,7 @@ func runJSCases(t *testing.T, rt *js.Runtime, cases []jsCase) {
 	}
 }
 
-// Proposed BR-234 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-236
 func TestElementPrototypeChainIsInherited(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -121,7 +121,7 @@ func TestElementPrototypeChainIsInherited(t *testing.T) {
 	})
 }
 
-// Proposed BR-235 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-237
 func TestStringAttributesReflectBothDirections(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -158,7 +158,7 @@ func TestStringAttributesReflectBothDirections(t *testing.T) {
 	})
 }
 
-// Proposed BR-236 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-238
 func TestBooleanAttributesReflectPresence(t *testing.T) {
 	rt := interfacesRuntime(t)
 	cases := []struct{ tag, prop, attr string }{
@@ -185,7 +185,7 @@ func TestBooleanAttributesReflectPresence(t *testing.T) {
 	}
 }
 
-// Proposed BR-237 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-239
 func TestUnsignedLongAttributesReflectWithTheirDefaults(t *testing.T) {
 	rt := interfacesRuntime(t)
 	type longCase struct{ tag, prop, attr, def string }
@@ -230,7 +230,7 @@ func TestUnsignedLongAttributesReflectWithTheirDefaults(t *testing.T) {
 	})
 }
 
-// Proposed BR-238 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-240
 func TestEnumeratedAttributesReflectOnlyKnownValues(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -261,7 +261,7 @@ func TestEnumeratedAttributesReflectOnlyKnownValues(t *testing.T) {
 	})
 }
 
-// Proposed BR-239 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-241
 func TestClassListAttributesAndStyleAreLive(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -289,7 +289,7 @@ func TestClassListAttributesAndStyleAreLive(t *testing.T) {
 	})
 }
 
-// Proposed BR-240 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-242
 func TestAnchorURLReflectionResolvesAgainstTheDocumentBase(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -334,7 +334,7 @@ func TestAnchorURLReflectionResolvesAgainstTheDocumentBase(t *testing.T) {
 	})
 }
 
-// Proposed BR-241 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-243
 func TestInputValueStaysLiveAndDefaultValueReflectsTheAttribute(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -354,7 +354,7 @@ func TestInputValueStaysLiveAndDefaultValueReflectsTheAttribute(t *testing.T) {
 	})
 }
 
-// Proposed BR-242 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-244
 func TestImageConstructorCreatesADetachedHTMLImageElement(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -382,7 +382,7 @@ func TestImageConstructorCreatesADetachedHTMLImageElement(t *testing.T) {
 	})
 }
 
-// Proposed BR-243 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-245
 func TestImageLoadStateAndEventsForADataSource(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{
@@ -435,7 +435,7 @@ func TestImageLoadStateAndEventsForADataSource(t *testing.T) {
 	})
 }
 
-// Proposed BR-244 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-246
 func TestImageReflectionsBeyondTheSource(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{

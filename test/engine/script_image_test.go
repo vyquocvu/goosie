@@ -71,7 +71,7 @@ func scriptSession(t *testing.T, body string) (*engine.Session, *js.Runtime) {
 	return sess, rt
 }
 
-// Proposed BR-245 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-247
 func TestScriptClassNameReachesTheCascade(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/page"})
 	if err != nil {
@@ -105,7 +105,7 @@ func TestScriptClassNameReachesTheCascade(t *testing.T) {
 	}
 }
 
-// Proposed BR-246 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-248
 func TestScriptImageLoopStopsAtTheAttemptCap(t *testing.T) {
 	_, rt := scriptSession(t, `
 var loaded = 0, failed = 0, capped = 0, other = 0;
@@ -131,7 +131,7 @@ for (var i = 0; i < 1000; i++) {
 	}
 }
 
-// Proposed BR-247 (TASK-052 §8; the catalog is owned by QC).
+// qc:BR-249
 func TestScriptImagesChargeTheDocumentPixelBudget(t *testing.T) {
 	// 4096 * 4096 = 16,777,216 pixels, exactly MaxDecodedImagePixels.
 	// MaxDocumentDecodedPixels is 33,554,432, so two images fit exactly and the

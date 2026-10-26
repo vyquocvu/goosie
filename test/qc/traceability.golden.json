@@ -2098,6 +2098,176 @@
     "enforced": false
   },
   {
+    "id": "BR-236",
+    "priority": "P1",
+    "methods": [
+      "UNIT",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestElementPrototypeChainIsInherited"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-237",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestStringAttributesReflectBothDirections"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-238",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestBooleanAttributesReflectPresence"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-239",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestUnsignedLongAttributesReflectWithTheirDefaults"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-240",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestEnumeratedAttributesReflectOnlyKnownValues"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-241",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestClassListAttributesAndStyleAreLive"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-242",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestAnchorURLReflectionResolvesAgainstTheDocumentBase"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-243",
+    "priority": "P1",
+    "methods": [
+      "UNIT",
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestInputValueStaysLiveAndDefaultValueReflectsTheAttribute"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-244",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestImageConstructorCreatesADetachedHTMLImageElement"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-245",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestImageLoadStateAndEventsForADataSource"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-246",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestImageReflectionsBeyondTheSource"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-247",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_image_test.go:TestScriptClassNameReachesTheCascade"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-248",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_image_test.go:TestScriptImageLoopStopsAtTheAttemptCap"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-249",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_image_test.go:TestScriptImagesChargeTheDocumentPixelBudget"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
