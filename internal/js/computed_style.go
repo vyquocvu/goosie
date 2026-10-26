@@ -28,15 +28,23 @@ import (
 //
 // What the object answers is limited to what this engine can name. It reports
 // the cascade result the session resolved for that node, plus the used width and
-// height layout produced for its box. It never derives a value: an
-// unresolvable property reads back as the empty string, and a property the
-// engine does not model is absent. That is the difference between a computed
-// style and a guess, and it is the rule the task set for this API.
+// height layout produced for its box. It never derives a value, and "no value"
+// has two shapes here, measured rather than assumed: a name the engine does not
+// carry is simply not set on the object, so `styles.display` reads back as
+// `undefined`, while `getPropertyValue("display")` - the one member that is
+// always present - answers the empty string. CSSOM would answer "" for both, so
+// the difference is visible to a page that feature-detects with `in` or
+// `hasOwnProperty`; it is recorded as GOOSIE-CSSOMTASK-001 in
+// docs/tasks/TASK-047-DOM-JQUERY-APIS.md rather than quietly called close
+// enough. Either way the object holds no invented initial: that is the
+// difference between a computed style and a guess, and it is the rule this task
+// set for this API.
 
 // ComputedStyleFunc renders one node's cascade result as CSS declaration
 // values keyed by property name (kebab-case, exactly as CSS spells them). nil
-// values and nil map mean "this engine has no answer for this node", which the
-// binding reports as empty strings rather than inventing initials.
+// values and nil map mean "this engine has no answer for this node": the
+// binding drops those names instead of inventing initials, so the accessor for
+// that name is absent (undefined) while getPropertyValue answers "" for it.
 //
 // The contract lives in internal/js because the import graph forbids this
 // package from reaching internal/style or internal/engine; the engine supplies
@@ -114,8 +122,16 @@ func (r *Runtime) jsGetComputedStyle(call goja.FunctionCall) goja.Value {
 // computedStyleObject builds the CSSStyleDeclaration-shaped result: every
 // resolved name as both its CSS spelling and its camelCase one, plus
 // getPropertyValue. Both spellings are not decoration - jQuery tries
-// `styles[camelCase]` first and only then `getPropertyValue`, and a page that
-// finds neither reads "" and concludes the property is unset.
+// `styles[camelCase]` first and only then `getPropertyValue`, and its real
+// lookup is `n.getPropertyValue(t) || n[t]`. For a name the engine does not
+// carry those two reads differ in kind (the method answers "", the accessor is
+// `undefined` because no key was set) and agree in effect: both are falsy, so
+// jQuery still concludes the property is unset. A page that asks with `in` or
+// `hasOwnProperty` sees the difference, which is why the shape is listed as a
+// gap rather than smoothed over. Also measured and still missing: `length`,
+// `item()` and `parentRule`, so `Array.prototype.slice.call(getComputedStyle(el))`
+// is `[]` here - see GOOSIE-CSSOMTASK-001 in
+// docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
 func (r *Runtime) computedStyleObject(values map[string]string) *goja.Object {
 	obj := r.vm.NewObject()
 	for name, value := range values {

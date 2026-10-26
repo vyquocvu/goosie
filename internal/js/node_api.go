@@ -19,14 +19,17 @@ import (
 //	           `return jQuery` export, so it died before this file existed and
 //	           `jQuery` was never defined at all on that page.
 //	vnexpress (page copy 201,234 bytes): `window.addEventListener(...)` 6 sites,
-//	           and 9 `parentNode.insertBefore(node, reference)` sites - the
-//	           `<script>`/`<link>` loader idiom - every one of them with a real
-//	           reference, so nothing on that page proves the null form. jQuery
-//	           does, twice: `prepend` passes `t.firstChild`, which is null for an
-//	           empty parent (offset 50,065), and `after` passes
-//	           `this.nextSibling`, which is null for a last child (50,297). Both
-//	           are the standard's append case and both are load-bearing for a
-//	           reveal, so `insertBefore(x, null)` appends here too.
+//	           and 9 `parentNode.insertBefore(...)` sites - the
+//	           `<script>`/`<link>` loader idiom. None passes a literal null, but
+//	           two hand over `x.nextSibling` (offsets 113,261 and 195,744),
+//	           which is null exactly when the node lands after the last child, so
+//	           the append case is reachable on the page. jQuery proves it three
+//	           ways: `prepend` passes `t.firstChild`, null for an empty parent
+//	           (50,065); `after` passes `this.nextSibling`, null for a last child
+//	           (50,297); and `wrapAll`'s path calls `t.insertBefore(this[0])`
+//	           with the second argument absent (80,979). All three are the
+//	           standard's append case and all are load-bearing for a reveal, so
+//	           `insertBefore(x, null)` appends here too.
 //
 // Every name below was counted in that shipped jquery-3.6.0.min.js (89,501
 // bytes, sha1 b82d238d…): createDocumentFragment 2, insertBefore 5 (4 call
@@ -79,9 +82,11 @@ func insertCharge(newChild *dom.Node) []*dom.Node {
 // jsInsertBefore implements `parent.insertBefore(newNode, referenceNode)`.
 //
 // Semantics pinned here, each because a measured page depends on it:
-//   - referenceNode null/undefined/absent appends. vnexpress calls
-//     `insertBefore(node, null)` twice; this is the DOM Standard's step 1 and
-//     the reason the second argument may even be missing.
+//   - referenceNode null/undefined/absent appends. vnexpress reaches it by
+//     passing `a.nextSibling` (113,261, 195,744) and jQuery by passing
+//     `t.firstChild`, `this.nextSibling` or nothing at all (50,065, 50,297,
+//     80,979); this is the DOM Standard's step 1 and the reason the second
+//     argument may even be missing.
 //   - a DocumentFragment argument moves its children in order and is left
 //     empty, so the same fragment can be refilled. jQuery's buildFragment
 //     returns one and hands it to appendChild/insertBefore.
@@ -168,10 +173,15 @@ func (r *Runtime) requireChild(parent, child *dom.Node, op string) {
 // The clone is detached, so it is deliberately not charged against the
 // document's node budget: that is exactly how document.createElement already
 // behaves, and the eventual append charges the whole subtree through
-// measureSubtree. Deviations worth naming: form-control state (value,
-// checkedness) is not copied because internal/dom keeps it as an attribute, and
-// a cloned <script> keeps no listener registrations - the realm's listeners are
-// keyed by *dom.Node, and the clone is a new one.
+// measureSubtree. Deviations worth naming: internal/dom keeps form-control state
+// in attributes (js.go's __getChecked__/__setValue__ read and write them), and
+// CloneNode copies the attribute slice, so `checked` and a script-set `value`
+// both come across - which is what makes jQuery's checkClone chain answer true.
+// The cost is that there is no dirty-value flag: in a browser a script-set value
+// clones as the *default* value, here it clones as the value, and `defaultValue`
+// therefore has nothing to distinguish it. A cloned <script> keeps no listener
+// registrations - the realm's listeners are keyed by *dom.Node, and the clone is
+// a new one.
 func (r *Runtime) jsCloneNode(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil {

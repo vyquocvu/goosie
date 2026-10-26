@@ -13,16 +13,19 @@ import (
 //
 // These are not "APIs that look standard". Each one is pinned to a call a
 // measured page makes. On the saved vnexpress home page (201,234-byte copy) the
-// inline boot has 9 `parentNode.insertBefore(node, reference)` sites and the
-// pre-change engine threw `Object has no member 'insertBefore'` at 2 of them;
-// the append-on-null form is not on that page but is jQuery's own daily bread -
-// `prepend` passes `t.firstChild` (null for an empty parent, offset 50,065 of
-// jquery-3.6.0.min.js) and `after` passes `this.nextSibling` (null for a last
-// child, 50,297). On www.gov.vn the shipped jQuery bundle's first DOM statement
-// is `E.createDocumentFragment().appendChild(E.createElement("div"))` at offset
-// 37,880, which threw and stopped the library there. The assertions below are
-// the shapes those call patterns need, and every one of them fails when the
-// mechanism is deleted (the mutation table in
+// inline boot has 9 `parentNode.insertBefore(...)` sites and the pre-change
+// engine threw `Object has no member 'insertBefore'` at 2 of them; none passes a
+// literal null, but two pass `x.nextSibling` (offsets 113,261, 195,744), which is
+// null when the reference is the last child. jQuery makes the append form
+// unconditional: `prepend` passes `t.firstChild` (50,065), `after` passes
+// `this.nextSibling` (50,297) and `wrapAll` omits the argument (80,979). On
+// www.gov.vn the release sweep's own row quotes the library's first DOM
+// statement - `E.createDocumentFragment().appendChild(E.createElement("div"))`,
+// offset 37,880 of the 89,501-byte jquery-3.6.0.min.js - as
+// `.../scripts/jquery-3.6.0.min.js?v=1:1: TypeError: Object has no member
+// 'createDocumentFragment'`, 21 uncaught errors, doc_height 0. The assertions
+// below are the shapes those call patterns need, and every one of them fails
+// when the mechanism is deleted (the mutation table in
 // docs/tasks/TASK-047-DOM-JQUERY-APIS.md carries the captured output).
 
 func nodeTreeRuntime(t *testing.T, html string) *js.Runtime {
