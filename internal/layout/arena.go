@@ -115,6 +115,19 @@ type Object struct {
 	// when this box does not establish its own formatting context, so clear on
 	// a later sibling sees floats that share that context.
 	floatBottomL, floatBottomR float32
+	// floatSeedL/R carry a parent's merged float bottoms into this box's
+	// content coordinates before layout. Without them, clearance inside a
+	// plain block could not see floats held by an earlier sibling's subtree,
+	// even though both boxes share one formatting context. The seed is consumed
+	// once, on entry, so a re-layout never inherits a stale value.
+	floatSeedL, floatSeedR float32
+	// floatTop is the highest margin-box top among the floats laid out here,
+	// and floatSeedTop/floatSeedHas hand it to a child in the same formatting
+	// context. CSS 2.1 §9.5.1 keeps a later float from rising above an earlier
+	// one, and that constraint crosses sibling subtrees just as clearance does.
+	floatTop     float32
+	floatSeedTop float32
+	floatSeedHas bool
 
 	Baseline float32
 	flags    uint8

@@ -1222,6 +1222,33 @@
     "enforced": false
   },
   {
+    "id": "BR-259",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/clear_float_test.go:TestClearedFloatInsideBlockifiedInlineSeesSiblingFloat",
+      "test/layout/clear_float_test.go:TestClearedFloatSeesFloatsInAnEarlierSiblingSubtree",
+      "test/layout/clear_float_test.go:TestClearedFloatStacksBelowEarlierFloat"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-260",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/clear_float_test.go:TestFloatAfterAClearedFloatStartsNoHigher"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

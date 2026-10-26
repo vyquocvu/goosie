@@ -205,9 +205,22 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	// current flow height, and the deepest one reserves the container's height
 	// only when that container establishes a formatting context.
 	var floatLead, floatTrail, floatBottom float32
+	// floatTop is the highest margin-box top already assigned to a float in
+	// this container and in the sibling subtrees merged into it. CSS 2.1
+	// §9.5.1 puts a later float no higher than that, which is what stops a
+	// float from jumping back to the top of the page after a clear:left pushed
+	// an earlier one down. A negative value means no float has been placed.
+	floatTop := float32(-1)
+	if obj.floatSeedHas {
+		floatTop = obj.floatSeedTop
+	}
+	obj.floatSeedHas = false
 	// Per-side bottoms feed clearance: clear:left cares only about left
-	// floats. floatBottom stays the max for container-height purposes.
-	var floatBottomL, floatBottomR float32
+	// floats. floatBottom stays the max for container-height purposes. The seed
+	// a parent handed in covers floats from earlier sibling subtrees that share
+	// this formatting context; consume it so a re-layout starts clean.
+	floatBottomL, floatBottomR := obj.floatSeedL, obj.floatSeedR
+	obj.floatSeedL, obj.floatSeedR = 0, 0
 	var rowKids []ObjectID
 	closeRow := func() {
 		if !rowActive {
@@ -325,11 +338,32 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					// width:100% floats are placed side by side and every later
 					// block is pushed one viewport further right, off the document.
 					floatY := y
+					// clear on a float drops its top below the floats already
+					// placed on that side, in this container and in the sibling
+					// subtrees merged into it. On the new line no left float is
+					// in the way, so the side's lead resets; the other side may
+					// still hold a float deeper than the cleared one, and its
+					// width is all this model keeps.
+					if f := clearanceFloor(k.Style, floatBottomL, floatBottomR); f > floatY {
+						floatY = f
+						if f >= floatBottomL {
+							floatLead = 0
+						}
+						if f >= floatBottomR {
+							floatTrail = 0
+						}
+					}
 					if floatLead+outer+floatTrail > contentW {
 						if floatBottom > floatY {
 							floatY = floatBottom
 						}
 						floatLead, floatTrail = 0, 0
+					}
+					if floatTop > floatY {
+						floatY = floatTop
+					}
+					if floatY > floatTop {
+						floatTop = floatY
 					}
 					if k.Style.Float == style.FloatLeft {
 						k.X = contentX + floatLead + k.MarginLeft
@@ -508,6 +542,32 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				}
 				k.X = contentX + k.MarginLeft + centerBlockChildLead(obj, k, contentW)
 				k.Y = contentY + y + topMargin
+				// A plain block shares this formatting context, so the floats
+				// merged here must be visible to clearance inside it too. Hand
+				// them over in the child's own content coordinates; a box that
+				// establishes a new context contains its floats and gets none.
+				// An inline box holding block content is split into anonymous
+				// block boxes that belong to this context, so it takes a seed
+				// even though its computed display is not block-level.
+				blockifiedInline := k.Style.Display == style.DisplayInline && holdsBlockContent(a, kid)
+				if !startsNewFC(a, k) || blockifiedInline {
+					childTop := k.Y + k.BorderTop + k.PaddingTop - contentY
+					k.floatSeedL = floatBottomL - childTop
+					if k.floatSeedL < 0 {
+						k.floatSeedL = 0
+					}
+					k.floatSeedR = floatBottomR - childTop
+					if k.floatSeedR < 0 {
+						k.floatSeedR = 0
+					}
+					if floatTop >= 0 {
+						k.floatSeedHas = true
+						k.floatSeedTop = floatTop - childTop
+						if k.floatSeedTop < 0 {
+							k.floatSeedTop = 0
+						}
+					}
+				}
 				blockInto(a, kid, contentW)
 				// Run inline layout immediately so the element's height is known
 				// before positioning the next sibling. A flex or grid container
@@ -523,13 +583,18 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				// context, not to that block. Merge them up so a later sibling's
 				// clear moves below them; a box that establishes its own context
 				// contains its floats instead.
-				if !startsNewFC(a, k) {
+				if !startsNewFC(a, k) || blockifiedInline {
 					childTop := k.Y + k.BorderTop + k.PaddingTop - contentY
 					if b := childTop + k.floatBottomL; b > floatBottomL {
 						floatBottomL = b
 					}
 					if b := childTop + k.floatBottomR; b > floatBottomR {
 						floatBottomR = b
+					}
+					if k.floatTop >= 0 {
+						if b := childTop + k.floatTop; floatTop < 0 || b > floatTop {
+							floatTop = b
+						}
 					}
 				}
 				y = (k.Y - contentY) + k.BorderH()
@@ -551,6 +616,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	obj = a.Get(id)
 	obj.floatBottomL = floatBottomL
 	obj.floatBottomR = floatBottomR
+	obj.floatTop = floatTop
 	// A box with no bottom border or padding hands its last child's bottom margin
 	// to the next sibling instead of growing around it, so the margin only takes
 	// up room inside this box when it has nowhere to carry out to.
