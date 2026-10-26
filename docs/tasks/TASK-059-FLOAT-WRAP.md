@@ -74,3 +74,18 @@ decode or fetch failure.
   `MISSING_REGIONS` (ink 264,173 against 618,679, coverage 0.386, pct 50.42), and the controlled A/B/A
   above reproduces ink 0 -> 268,005 -> 0. The page is no longer blank but still not the reference. The
   report is committed on `main` as `docs/qa-live-parity/2026-10-26T0755Z-1b3dff93`.
+
+## 7. Follow-up: the wrap exposed a missing `clear` (TASK-060)
+
+Attributing sweep #14 pixel by pixel found one genuinely code-caused regression: `csszengarden.com`
+went from ink 738,632 / pct 68.49 (pre-fix) to ink 1,000,392 / pct 58.74 with this wrap fix. The cause
+was not the wrap. Once this fix moved `.preamble` back into the document at X=0, it overlapped
+`.explanation`, because the engine never honoured `clear` on a float. Chromium stacks the three
+`float:left;clear:left` articles at (0,310), (0,498) and (0,823); the engine had `.preamble` at (0,499)
+and `.explanation` at (0,310).
+
+TASK-060 (`656fcc2`) adds clearance to the float path, seeds the shared formatting-context state into
+child subtrees (including blockified inline boxes), and applies §9.5.1 rule 4 to float tops. On the
+final combined build the same page scores ink **749,081** / pct **85.95** / coverage **0.992** (noise
+floor 0.0), with `.preamble` at (0,499) and `.explanation` at (0,823) — Chromium (0,498)/(0,823). The
+wrap fix is not over-eager: it was correct, and it uncovered GOOSIE-FLOATCLEAR-001.
