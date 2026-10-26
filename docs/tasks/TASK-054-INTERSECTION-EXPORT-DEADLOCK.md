@@ -307,10 +307,11 @@ with Goosie 0.20 s / 32,254-byte PNG and Chromium 131.0.6778.33 as the reference
 by the M01 binary produces no PNG (cap 20 s), which is the pre-fix behaviour this fixture exists to keep out
 of the corpus.
 
-Corpus arithmetic: `testdata/render` now holds **92** HTML fixtures against `MIN_SCORED_FIXTURES = 91`.
-`test/gatecheck/parity_harness_test.go` only fails downward (`count < floor`) and its own comment says adding
-a fixture must not fail it, so the gates stay green; per §4 the floor was **not** changed here. The integrator
-raises `MIN_SCORED_FIXTURES` 91 → 92 in their own commit to lock the gain.
+**Integrator note (2026-10-26):** on the merged tree this fixture sits beside TASK-053's, so the corpus is
+**93** and `MIN_SCORED_FIXTURES` went **92 → 93** in the registration commit; the fixture itself scores
+**97.56% PASS** (`worst_region_iou=0.984375`, `coverage_ratio=0.9966953658407048`) in the full run, corpus
+93/93 average 96.23%. Registered as **BR-234** (liveness/geometry, four oracles) and **BR-235** (integration +
+this fixture).
 
 ### 8.9 What I did not measure
 

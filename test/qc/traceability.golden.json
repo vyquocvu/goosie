@@ -2070,6 +2070,34 @@
     "enforced": false
   },
   {
+    "id": "BR-234",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/intersection_observer_test.go:TestIntersectionObserverCheckReturns",
+      "test/js/intersection_observer_test.go:TestIntersectionObserverDoesNotFireForOffscreenTarget",
+      "test/js/intersection_observer_test.go:TestIntersectionObserverObserveOfPlainObjectNeverFires",
+      "test/js/intersection_observer_test.go:TestNewSessionWithIntersectionObserverReturns"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-235",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/intersection_observer_test.go:TestNewSessionWithIntersectionObserverReturns"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

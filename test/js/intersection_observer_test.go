@@ -115,6 +115,7 @@ func runUnderWatchdog(t *testing.T, what string, fn func() (string, error)) stri
 // after the fix it returns in microseconds and the log below is exact. A second
 // check must not fire again - the entry's state did not change - which also
 // stops the test from passing on a build that fires unconditionally.
+// qc:BR-234
 func TestIntersectionObserverCheckReturns(t *testing.T) {
 	out := runUnderWatchdog(t, "CheckIntersections on a page with one observer", func() (string, error) {
 		doc := domtest.Parse(ioPage)
@@ -162,6 +163,7 @@ func TestIntersectionObserverCheckReturns(t *testing.T) {
 // an element with a real box below the fold must not fire. Without this, an
 // implementation that fired every observed entry on every check would satisfy
 // the positive test above and pass.
+// qc:BR-234
 func TestIntersectionObserverDoesNotFireForOffscreenTarget(t *testing.T) {
 	out := runUnderWatchdog(t, "CheckIntersections on an off-screen target", func() (string, error) {
 		doc := domtest.Parse(ioPage)
@@ -209,6 +211,7 @@ func TestIntersectionObserverDoesNotFireForOffscreenTarget(t *testing.T) {
 // and test/js/observer_raf_test.go asserts that shape ("Should not throw"), so
 // the fix records "no node id" instead of throwing. The callback must still
 // never run - there is no geometry to intersect.
+// qc:BR-234
 func TestIntersectionObserverObserveOfPlainObjectNeverFires(t *testing.T) {
 	out := runUnderWatchdog(t, "CheckIntersections after observe(plainObject)", func() (string, error) {
 		rt, err := js.New(js.Options{URL: "https://example.test/io"})
@@ -254,6 +257,7 @@ func TestIntersectionObserverObserveOfPlainObjectNeverFires(t *testing.T) {
 // goroutine 1 in js.(*Runtime).jsGetShadowRoot under Object.Export under
 // CheckIntersections under engine.(*Session).Reflow under engine.NewSession).
 // After the fix it returns and the page's title is the one the callback set.
+// qc:BR-234 BR-235
 func TestNewSessionWithIntersectionObserverReturns(t *testing.T) {
 	out := runUnderWatchdog(t, "engine.NewSession with an IntersectionObserver", func() (string, error) {
 		rt, err := js.New(js.Options{URL: "https://example.test/io", Title: "io"})

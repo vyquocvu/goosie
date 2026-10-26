@@ -70,7 +70,9 @@ PASS_AT = 90.0
 # - a quoted url() payload containing ')' survives whole at all six readers.
 # 92: css-features/17-anonymous-block-shadow-once.html (TASK-053, GOOSIE-SHADOWRUN-001) - the ring belonged
 # to the element, not to the two anonymous bands it generated.
-MIN_SCORED_FIXTURES = 92
+# 93: js-dom/03-intersection-observer-first-reflow.html (TASK-054, GOOSIE-IOEXPORT-001)
+# - registering an IntersectionObserver used to wedge the load; the gate is reaching a first frame.
+MIN_SCORED_FIXTURES = 93
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
