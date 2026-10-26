@@ -1,0 +1,3951 @@
+{
+  "build": {
+    "binary_path": "bin/goosie",
+    "binary_sha256": "135945c6285db3388fe061e9a8542a826758f181119db7eaaa961ff9918a0037",
+    "report_names_measured_build": true,
+    "report_sha8": "741fdd37",
+    "source_sha": "741fdd37ee38a56370cbf1918bc606fa32603042",
+    "source_sha8": "741fdd37"
+  },
+  "contract": {
+    "chromium": {
+      "animations": "disabled",
+      "full_page": false,
+      "timeout_ms": 30000,
+      "wait_until": "load"
+    },
+    "dpr": 1,
+    "goosie": {
+      "deadline_seconds_hardcoded": 25.0,
+      "screenshot_floor_frames": 8,
+      "scrolls": false,
+      "structure_mode": [
+        "-gate",
+        "-frames",
+        "120"
+      ]
+    },
+    "spacing_ms": 150,
+    "viewport": [
+      1280,
+      1024
+    ]
+  },
+  "corpus": "live-sites.json",
+  "counts": {
+    "BLANK_OUTPUT": 1,
+    "FETCH_FAILED": 6,
+    "LAYOUT_EMPTY": 8,
+    "LOW_COVERAGE": 19,
+    "MISSING_REGIONS": 28,
+    "UNFLAGGED": 38
+  },
+  "floor_met": true,
+  "noise_floor": {
+    "comparable": 10,
+    "detail": [
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.09,
+        "label_changed": false,
+        "url": "https://vnexpress.net/"
+      },
+      {
+        "delta_coverage": 0.016,
+        "delta_pct": 0.27,
+        "label_changed": false,
+        "url": "https://laodong.vn/"
+      },
+      {
+        "delta_coverage": null,
+        "delta_pct": null,
+        "label_changed": false,
+        "url": "https://www.bbc.com/news"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://www.theguardian.com/international"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://docs.python.org/3/library/os.html"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://www.php.net/docs.php"
+      },
+      {
+        "delta_coverage": 0.077,
+        "delta_pct": 0.67,
+        "label_changed": false,
+        "url": "https://en.wikipedia.org/wiki/List_of_Languages_by_Total_Number_of_Speakers"
+      },
+      {
+        "delta_coverage": 0.011,
+        "delta_pct": 0.03,
+        "label_changed": false,
+        "url": "https://simple.wikipedia.org/wiki/United_States"
+      },
+      {
+        "delta_coverage": 0.001,
+        "delta_pct": 0.01,
+        "label_changed": false,
+        "url": "https://www.uniqlo.com/"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://htmldog.com/guides/html/beginner/"
+      },
+      {
+        "delta_coverage": null,
+        "delta_pct": null,
+        "label_changed": false,
+        "url": "https://www.moe.gov.vn/"
+      },
+      {
+        "delta_coverage": 0.0,
+        "delta_pct": 0.0,
+        "label_changed": false,
+        "url": "https://example.com/"
+      }
+    ],
+    "labels_that_flipped": 0,
+    "max_abs_delta_coverage": 0.077,
+    "max_abs_delta_pct": 0.67,
+    "sites": 12
+  },
+  "pages_in_corpus": 100,
+  "pages_scored": 94,
+  "rows": [
+    {
+      "blank_bands": [
+        [
+          277,
+          322
+        ],
+        [
+          344,
+          367
+        ],
+        [
+          402,
+          713
+        ],
+        [
+          759,
+          774
+        ],
+        [
+          784,
+          799
+        ],
+        [
+          809,
+          1023
+        ]
+      ],
+      "category": "news-vn",
+      "chromium_secs": 2.01,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 752,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 6 uncaught script error(s) in https://vnexpress.net/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:1:8689(41) at inline:1:9007(681)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.3,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 284839,
+      "ink_goosie": 0,
+      "label": "BLANK_OUTPUT",
+      "maybe_partial": false,
+      "n_blank_bands": 6,
+      "n_reference_bands": 6,
+      "notes": [
+        "ink 0 of 284839"
+      ],
+      "pct_exact": 79.4,
+      "structure_diag": "",
+      "url": "https://vnexpress.net/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.33,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.449,
+      "doc_height": 1555,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 4 uncaught script error(s) in https://tuoitre.vn/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:9:90(60) at inline:10:11(11)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.47,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 299960,
+      "ink_goosie": 171083,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.449 < 0.6"
+      ],
+      "pct_exact": 83.16,
+      "structure_diag": "",
+      "url": "https://tuoitre.vn/",
+      "worst_iou": 0.054
+    },
+    {
+      "blank_bands": [
+        [
+          319,
+          376
+        ]
+      ],
+      "category": "news-vn",
+      "chromium_secs": 2.92,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.1,
+      "doc_height": 4785,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 16 uncaught script error(s) in https://thanhnien.vn/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:13:34(67) at inline:14:7(30)",
+      "goosie_rc": 0,
+      "goosie_secs": 0.86,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 544292,
+      "ink_goosie": 66056,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 6,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 59.79,
+      "structure_diag": "",
+      "url": "https://thanhnien.vn/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 2.65,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.308,
+      "doc_height": 4307,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 6 uncaught script error(s) in https://vietnamnet.vn/; first: inline:1: TypeError: Cannot read property 'protocol' of undefined at inline:7:57(16) at inline:9:15(24)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.92,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 626712,
+      "ink_goosie": 207810,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.308 < 0.6"
+      ],
+      "pct_exact": 58.93,
+      "structure_diag": "",
+      "url": "https://vietnamnet.vn/",
+      "worst_iou": 0.017
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 3.87,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.193,
+      "doc_height": 48844,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://dantri.com.vn/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:1:303(60) at inline:1:311(14)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.48,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 695888,
+      "ink_goosie": 890809,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 30.13% of pixels match within 30/channel, worst_iou 0.67 is the weakest reference-band overlap",
+        "coverage 1.193 is ink mass (goosie/chromium), not position, and 0 of 3 reference bands are empty"
+      ],
+      "pct_exact": 30.13,
+      "structure_diag": "",
+      "url": "https://dantri.com.vn/",
+      "worst_iou": 0.67
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.53,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.426,
+      "doc_height": 15323,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 37 uncaught script error(s) in https://www.24h.com.vn/; first: inline:1: ReferenceError: btoa is not defined at compressData (inline:1:462(7)) at setStorageWithExpiry (inline:1:844(61)) at inline:1:12476(132)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.44,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 628362,
+      "ink_goosie": 269480,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.426 < 0.6"
+      ],
+      "pct_exact": 68.62,
+      "structure_diag": "",
+      "url": "https://www.24h.com.vn/",
+      "worst_iou": 0.053
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 2.07,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.144,
+      "doc_height": 3472,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://soha.vn/; first: inline:1: ReferenceError: Image is not defined at inline:4:27(1) at inline:9:11(6)",
+      "goosie_rc": 0,
+      "goosie_secs": 0.88,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 891053,
+      "ink_goosie": 128532,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.144 < 0.6"
+      ],
+      "pct_exact": 39.58,
+      "structure_diag": "",
+      "url": "https://soha.vn/",
+      "worst_iou": 0.043
+    },
+    {
+      "blank_bands": [
+        [
+          287,
+          323
+        ]
+      ],
+      "category": "news-vn",
+      "chromium_secs": 1.53,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.98,
+      "doc_height": 19264,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 13 uncaught script error(s) in https://znews.vn/; first: inline:1: TypeError: Cannot read property 'includes' of undefined or null at 11 (inline:2:1204(34)) at call (native) at n (inline:2:118(31)) at 92 (inline:",
+      "goosie_rc": 0,
+      "goosie_secs": 4.95,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 642484,
+      "ink_goosie": 700260,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 6,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 26.52,
+      "structure_diag": "",
+      "url": "https://zingnews.vn/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.27,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.256,
+      "doc_height": 4402,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 4 uncaught script error(s) in https://tuoitre.vn/tto-plo.htm; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:9:90(60) at inline:10:11(11)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.27,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 487183,
+      "ink_goosie": 252911,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "coverage 0.256 < 0.6"
+      ],
+      "pct_exact": 62.63,
+      "structure_diag": "",
+      "url": "https://plo.vn/",
+      "worst_iou": 0.072
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.47,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.423,
+      "doc_height": 20483,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 21 uncaught script error(s) in https://laodong.vn/; first: script:0: js: script source exceeds the limit",
+      "goosie_rc": 0,
+      "goosie_secs": 2.43,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 652519,
+      "ink_goosie": 288906,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "coverage 0.423 < 0.6"
+      ],
+      "pct_exact": 52.52,
+      "structure_diag": "",
+      "url": "https://laodong.vn/",
+      "worst_iou": 0.01
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.02,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.261,
+      "doc_height": 4402,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 4 uncaught script error(s) in https://tuoitre.vn/tto-nld.htm; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:9:90(60) at inline:10:11(11)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.24,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 477251,
+      "ink_goosie": 252918,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "coverage 0.261 < 0.6"
+      ],
+      "pct_exact": 64.1,
+      "structure_diag": "",
+      "url": "https://nld.com.vn/",
+      "worst_iou": 0.057
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.86,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.508,
+      "doc_height": 15959,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 34 uncaught script error(s) in https://www.sggp.org.vn/; first: inline:1: TypeError: Cannot read property 'indexOf' of undefined or null at inline:1:360(33)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.8,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 618616,
+      "ink_goosie": 399587,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "coverage 0.508 < 0.6"
+      ],
+      "pct_exact": 44.09,
+      "structure_diag": "",
+      "url": "https://sggp.org.vn/",
+      "worst_iou": 0.397
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 0.74,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.617,
+      "doc_height": 6654,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://cand.vn/; first: https://common.mcms.one/assets/js/web/common.min-0.1.76.js:1: SyntaxError: Identifier 'b' has already been declared at https://common.mcms.one/assets/js/web/",
+      "goosie_rc": 0,
+      "goosie_secs": 2.3,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 700176,
+      "ink_goosie": 440583,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 63.6% of pixels match within 30/channel, worst_iou 0.195 is the weakest reference-band overlap",
+        "coverage 0.617 is ink mass (goosie/chromium), not position, and 0 of 4 reference bands are empty"
+      ],
+      "pct_exact": 63.6,
+      "structure_diag": "",
+      "url": "https://cand.com.vn/",
+      "worst_iou": 0.195
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.38,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.202,
+      "doc_height": 12841,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://www.vietnamplus.vn/; first: https://jsc.mgid.com/site/948646.js:1: TypeError: Object has no member 'getComputedStyle' at autoPlaceWidget (https://jsc.mgid.com/site/948646.js:",
+      "goosie_rc": 0,
+      "goosie_secs": 2.05,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 530474,
+      "ink_goosie": 108529,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.202 < 0.6"
+      ],
+      "pct_exact": 61.28,
+      "structure_diag": "",
+      "url": "https://www.vietnamplus.vn/",
+      "worst_iou": 0.073
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 0.84,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.368,
+      "doc_height": 15439,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 7 uncaught script error(s) in https://vneconomy.vn/; first: https://static.amcdn.vn/tka/cdn.js:1: ReferenceError: Image is not defined at https://static.amcdn.vn/tka/cdn.js:4:407(89) at https://static.amcdn.vn/tk",
+      "goosie_rc": 0,
+      "goosie_secs": 1.04,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 461712,
+      "ink_goosie": 174860,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [
+        "coverage 0.368 < 0.6"
+      ],
+      "pct_exact": 81.99,
+      "structure_diag": "",
+      "url": "https://vneconomy.vn/",
+      "worst_iou": 0.073
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.09,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.271,
+      "doc_height": 1963,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://vtv.vn/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:6:85(51) at inline:7:11(11)",
+      "goosie_rc": 0,
+      "goosie_secs": 0.95,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 700987,
+      "ink_goosie": 193357,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.271 < 0.6"
+      ],
+      "pct_exact": 56.52,
+      "structure_diag": "",
+      "url": "https://vtv.vn/",
+      "worst_iou": 0.03
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 1.69,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.081,
+      "doc_height": 314246,
+      "expect": "media-heavy",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://baomoi.com/; first: inline:1: TypeError: Cannot read property 'indexOf' of undefined or null at inline:11:49(25)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.45,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 756838,
+      "ink_goosie": 921568,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 22.57% of pixels match within 30/channel, worst_iou 0.32 is the weakest reference-band overlap",
+        "coverage 1.081 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 22.57,
+      "structure_diag": "",
+      "url": "https://www.baomoi.com/",
+      "worst_iou": 0.32
+    },
+    {
+      "blank_bands": [],
+      "category": "news-vn",
+      "chromium_secs": 2.44,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.637,
+      "doc_height": 5338,
+      "expect": "tables",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://cafef.vn/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:15:38(51) at inline:16:11(20)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.85,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 801896,
+      "ink_goosie": 542415,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 45.82% of pixels match within 30/channel, worst_iou 0.359 is the weakest reference-band overlap",
+        "coverage 0.637 is ink mass (goosie/chromium), not position, and 0 of 3 reference bands are empty"
+      ],
+      "pct_exact": 45.82,
+      "structure_diag": "",
+      "url": "https://cafef.vn/",
+      "worst_iou": 0.359
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.05,
+      "chromium_shape": null,
+      "coverage": null,
+      "doc_height": null,
+      "expect": "js-revealed",
+      "fetch_error": "Error: Page.goto: net::ERR_CONNECTION_REFUSED at https://www.bbc.com/news\nCall log:\n  - navigating to \"https://www.bbc.com/news\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: fetch https://www.bbc.com/news: net: fetch https://www.bbc.com/news: Get \"https://www.bbc.com/news\": dial tcp [::1]:443: connect: connection refused",
+      "goosie_rc": 1,
+      "goosie_secs": 0.07,
+      "goosie_shape": null,
+      "ink_chromium": null,
+      "ink_goosie": null,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "n_blank_bands": null,
+      "n_reference_bands": null,
+      "notes": [
+        "Error: Page.goto: net::ERR_CONNECTION_REFUSED at https://www.bbc.com/news\nCall log:\n  - navigating to \"https://www.bbc.com/news\", waiting until \"load\"\n"
+      ],
+      "pct_exact": null,
+      "structure_diag": "goosie: fetch https://www.bbc.com/news: net: fetch https://www.bbc.com/news: Get \"https://www.bbc.com/news\": dial tcp [::1]:443: connect: connection refused\n",
+      "url": "https://www.bbc.com/news",
+      "worst_iou": null
+    },
+    {
+      "blank_bands": [
+        [
+          142,
+          174
+        ],
+        [
+          192,
+          214
+        ],
+        [
+          229,
+          244
+        ],
+        [
+          253,
+          266
+        ],
+        [
+          976,
+          1005
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 1.37,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://apnews.com/ with HTTP 403; rendered 5581 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.25,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15819,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.89,
+      "structure_diag": "",
+      "url": "https://apnews.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          124,
+          141
+        ],
+        [
+          150,
+          171
+        ],
+        [
+          222,
+          369
+        ],
+        [
+          403,
+          416
+        ],
+        [
+          432,
+          442
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 1.12,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.nytimes.com/ with HTTP 403; rendered 774 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.57,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 68214,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.9,
+      "structure_diag": "",
+      "url": "https://www.nytimes.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.29,
+      "chromium_shape": null,
+      "coverage": null,
+      "doc_height": 8561,
+      "expect": "js-revealed",
+      "fetch_error": "Error: Page.goto: net::ERR_HTTP2_PROTOCOL_ERROR at https://www.washingtonpost.com/\nCall log:\n  - navigating to \"https://www.washingtonpost.com/\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://www.washingtonpost.com/; first: inline:1: ReferenceError: HTMLElement is not defined at inline:2:2161(169) at inline:26:3(2)",
+      "goosie_rc": 0,
+      "goosie_secs": 3.86,
+      "goosie_shape": null,
+      "ink_chromium": null,
+      "ink_goosie": null,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "n_blank_bands": null,
+      "n_reference_bands": null,
+      "notes": [
+        "Error: Page.goto: net::ERR_HTTP2_PROTOCOL_ERROR at https://www.washingtonpost.com/\nCall log:\n  - navigating to \"https://www.washingtonpost.com/\", waiting until \"load\"\n"
+      ],
+      "pct_exact": null,
+      "structure_diag": "",
+      "url": "https://www.washingtonpost.com/",
+      "worst_iou": null
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 30.0,
+      "chromium_shape": null,
+      "coverage": null,
+      "doc_height": 36503,
+      "expect": "js-revealed",
+      "fetch_error": "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://edition.cnn.com/\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: 6 uncaught script error(s) in https://edition.cnn.com/; first: inline:1: ReferenceError: addEventListener is not defined at inline:15:21(12) at inline:18:5(2)",
+      "goosie_rc": 0,
+      "goosie_secs": 3.51,
+      "goosie_shape": null,
+      "ink_chromium": null,
+      "ink_goosie": null,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "n_blank_bands": null,
+      "n_reference_bands": null,
+      "notes": [
+        "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://edition.cnn.com/\", waiting until \"load\"\n"
+      ],
+      "pct_exact": null,
+      "structure_diag": "",
+      "url": "https://edition.cnn.com/",
+      "worst_iou": null
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.25,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.267,
+      "doc_height": 9433,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.usatoday.com/; first: inline:1: ReferenceError: EventTarget is not defined at inline:3:106(45)",
+      "goosie_rc": 0,
+      "goosie_secs": 0.71,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 7031,
+      "ink_goosie": 24461,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "coverage 0.267 < 0.6"
+      ],
+      "pct_exact": 97.88,
+      "structure_diag": "",
+      "url": "https://www.usatoday.com/",
+      "worst_iou": 0.097
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 30.0,
+      "chromium_shape": null,
+      "coverage": null,
+      "doc_height": 152765,
+      "expect": "js-revealed",
+      "fetch_error": "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://www.straitstimes.com/\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: 24 uncaught script error(s) in https://www.straitstimes.com/global; first: https://cdn.sphlabs.com/suid/suid.min.js:1: [object Object] at github.com/vyquocvu/goosie/internal/js.(*Runtime).constructXHR.func11 (nat",
+      "goosie_rc": 0,
+      "goosie_secs": 5.53,
+      "goosie_shape": null,
+      "ink_chromium": null,
+      "ink_goosie": null,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "n_blank_bands": null,
+      "n_reference_bands": null,
+      "notes": [
+        "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://www.straitstimes.com/\", waiting until \"load\"\n"
+      ],
+      "pct_exact": null,
+      "structure_diag": "",
+      "url": "https://www.straitstimes.com/",
+      "worst_iou": null
+    },
+    {
+      "blank_bands": [
+        [
+          138,
+          174
+        ],
+        [
+          192,
+          214
+        ],
+        [
+          229,
+          244
+        ],
+        [
+          253,
+          266
+        ],
+        [
+          976,
+          1005
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 1.55,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.japantimes.co.jp/ with HTTP 403; rendered 5613 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.35,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 17753,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.75,
+      "structure_diag": "",
+      "url": "https://www.japantimes.co.jp/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          138,
+          158
+        ],
+        [
+          447,
+          460
+        ],
+        [
+          477,
+          554
+        ],
+        [
+          577,
+          590
+        ],
+        [
+          607,
+          618
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 0.79,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.reuters.com/ with HTTP 401; rendered 774 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 1.4,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 13192,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 99.1,
+      "structure_diag": "",
+      "url": "https://www.reuters.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 0.79,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.016,
+      "doc_height": 37637,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.theguardian.com/international; first: inline:1: TypeError: Object has no member 'addEventListener' at inline:4:44(8)",
+      "goosie_rc": 0,
+      "goosie_secs": 2.21,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 860458,
+      "ink_goosie": 885182,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 60.17% of pixels match within 30/channel, worst_iou 0.01 is the weakest reference-band overlap",
+        "coverage 1.016 is ink mass (goosie/chromium), not position, and 0 of 4 reference bands are empty"
+      ],
+      "pct_exact": 60.17,
+      "structure_diag": "",
+      "url": "https://www.theguardian.com/international",
+      "worst_iou": 0.01
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 1.6,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.408,
+      "doc_height": 30331,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://www.aljazeera.com/; first: inline:1: TypeError: Cannot read property 'indexOf' of undefined or null at inline:1:149(22) at inline:1:458(2)",
+      "goosie_rc": 0,
+      "goosie_secs": 4.31,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 895989,
+      "ink_goosie": 1310720,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 1.05% of pixels match within 30/channel, worst_iou 0.825 is the weakest reference-band overlap",
+        "coverage 1.408 is ink mass (goosie/chromium), not position, and 0 of 2 reference bands are empty"
+      ],
+      "pct_exact": 1.05,
+      "structure_diag": "",
+      "url": "https://www.aljazeera.com/",
+      "worst_iou": 0.825
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 1.29,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.094,
+      "doc_height": 23859,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://www.dw.com/en/top-stories/s-9097; first: inline:1: ReferenceError: Event is not defined at setupDefaultTheme (inline:10:29(48)) at inline:13:19(5)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.73,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1019774,
+      "ink_goosie": 1307570,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 16.46% of pixels match within 30/channel, worst_iou 0.257 is the weakest reference-band overlap",
+        "coverage 1.094 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 16.46,
+      "structure_diag": "",
+      "url": "https://www.dw.com/en/top-stories/s-9097",
+      "worst_iou": 0.257
+    },
+    {
+      "blank_bands": [],
+      "category": "news-intl",
+      "chromium_secs": 1.63,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.432,
+      "doc_height": 13189,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://www.euronews.com/; first: https://fat.caringcoyote.com/vendor2/1DF_pzwE.js:1: ReferenceError: Node is not defined at https://fat.caringcoyote.com/vendor2/1DF_pzwE.js:2:57210(",
+      "goosie_rc": 0,
+      "goosie_secs": 1.98,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 792564,
+      "ink_goosie": 455638,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "coverage 0.432 < 0.6"
+      ],
+      "pct_exact": 72.99,
+      "structure_diag": "",
+      "url": "https://www.euronews.com/",
+      "worst_iou": 0.25
+    },
+    {
+      "blank_bands": [
+        [
+          94,
+          105
+        ],
+        [
+          229,
+          318
+        ]
+      ],
+      "category": "news-intl",
+      "chromium_secs": 3.93,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.616,
+      "doc_height": 14390,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.france24.com/en/; first: inline:1: TypeError: Object has no member 'attachEvent' at e (inline:8:149(37)) at inline:8:168(11) at inline:8:252(17)",
+      "goosie_rc": 0,
+      "goosie_secs": 4.32,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 315192,
+      "ink_goosie": 558142,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 4,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 53.78,
+      "structure_diag": "",
+      "url": "https://www.france24.com/en/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.29,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.217,
+      "doc_height": 4379,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.13,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 318367,
+      "ink_goosie": 74691,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 9,
+      "notes": [
+        "coverage 0.217 < 0.6"
+      ],
+      "pct_exact": 90.49,
+      "structure_diag": "",
+      "url": "https://developer.mozilla.org/en-US/docs/Learn",
+      "worst_iou": 0.117
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.19,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.741,
+      "doc_height": 4179,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.34,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 114540,
+      "ink_goosie": 101020,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 13,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 88.01% of pixels match within 30/channel, worst_iou 0.019 is the weakest reference-band overlap",
+        "coverage 0.741 is ink mass (goosie/chromium), not position, and 0 of 13 reference bands are empty"
+      ],
+      "pct_exact": 88.01,
+      "structure_diag": "",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS",
+      "worst_iou": 0.019
+    },
+    {
+      "blank_bands": [
+        [
+          530,
+          550
+        ],
+        [
+          570,
+          586
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.2,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.573,
+      "doc_height": 10897,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.57,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 94591,
+      "ink_goosie": 65307,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 12,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 91.87,
+      "structure_diag": "",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.77,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.856,
+      "doc_height": 1901,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://docs.python.org/3/; first: https://analytics.python.org/js/script.file-downloads.outbound-links.js:1: TypeError: Cannot read property 'getAttribute' of undefined or null at t",
+      "goosie_rc": 0,
+      "goosie_secs": 0.71,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 371441,
+      "ink_goosie": 318012,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 90.02% of pixels match within 30/channel, worst_iou 0.247 is the weakest reference-band overlap",
+        "coverage 0.856 is ink mass (goosie/chromium), not position, and 0 of 2 reference bands are empty"
+      ],
+      "pct_exact": 90.02,
+      "structure_diag": "",
+      "url": "https://docs.python.org/3/",
+      "worst_iou": 0.247
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.52,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.851,
+      "doc_height": 101855,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://docs.python.org/3/library/os.html; first: https://analytics.python.org/js/script.file-downloads.outbound-links.js:1: TypeError: Cannot read property 'getAttribute' of undefin",
+      "goosie_rc": 0,
+      "goosie_secs": 0.9,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 466180,
+      "ink_goosie": 395915,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 82.98% of pixels match within 30/channel, worst_iou 0.325 is the weakest reference-band overlap",
+        "coverage 0.851 is ink mass (goosie/chromium), not position, and 0 of 3 reference bands are empty"
+      ],
+      "pct_exact": 82.98,
+      "structure_diag": "",
+      "url": "https://docs.python.org/3/library/os.html",
+      "worst_iou": 0.325
+    },
+    {
+      "blank_bands": [
+        [
+          50,
+          68
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.35,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.848,
+      "doc_height": 4919,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://docs.python.org/3/tutorial/index.html; first: https://analytics.python.org/js/script.file-downloads.outbound-links.js:1: TypeError: Cannot read property 'getAttribute' of und",
+      "goosie_rc": 0,
+      "goosie_secs": 0.5,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 454246,
+      "ink_goosie": 385815,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 3,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 80.83,
+      "structure_diag": "",
+      "url": "https://docs.python.org/3/tutorial/index.html",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          199,
+          212
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 1.27,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.804,
+      "doc_height": 43005,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://go.dev/doc/effective_go; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:4:79(60) at inline:5:5(7)",
+      "goosie_rc": 0,
+      "goosie_secs": 3.85,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 198423,
+      "ink_goosie": 621131,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 15,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 46.55,
+      "structure_diag": "",
+      "url": "https://go.dev/doc/effective_go",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          174,
+          187
+        ],
+        [
+          375,
+          386
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 1.0,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.268,
+      "doc_height": 93812,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://go.dev/ref/spec; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:4:79(60) at inline:5:5(7)",
+      "goosie_rc": 0,
+      "goosie_secs": 4.27,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 215140,
+      "ink_goosie": 607891,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 15,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 47.06,
+      "structure_diag": "",
+      "url": "https://go.dev/ref/spec",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          540,
+          555
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 1.76,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.358,
+      "doc_height": 335931,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://pkg.go.dev/net/http; first: inline:1: TypeError: Object has no member 'addEventListener' at inline:2:30(6)",
+      "goosie_rc": 0,
+      "goosie_secs": 4.35,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 192026,
+      "ink_goosie": 85494,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 16,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 87.78,
+      "structure_diag": "",
+      "url": "https://pkg.go.dev/net/http",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.47,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.787,
+      "doc_height": 3662,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://doc.rust-lang.org/std/; first: https://doc.rust-lang.org/static.files/storage-41dd4d93.js:1: ReferenceError: HTMLLinkElement is not defined at https://doc.rust-lang.org/stati",
+      "goosie_rc": 0,
+      "goosie_secs": 1.39,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 121692,
+      "ink_goosie": 95814,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 89.57% of pixels match within 30/channel, worst_iou 0.567 is the weakest reference-band overlap",
+        "coverage 0.787 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 89.57,
+      "structure_diag": "",
+      "url": "https://doc.rust-lang.org/std/",
+      "worst_iou": 0.567
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.5,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.669,
+      "doc_height": 4251,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://man7.org/linux/man-pages/man2/write.2.html; first: https://www.statcounter.com/counter/counter.js:1: TypeError: Cannot read property 'record_pageview' of undefined or null at",
+      "goosie_rc": 0,
+      "goosie_secs": 1.87,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 98524,
+      "ink_goosie": 80197,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 17,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 92.99% of pixels match within 30/channel, worst_iou 0.025 is the weakest reference-band overlap",
+        "coverage 0.669 is ink mass (goosie/chromium), not position, and 0 of 17 reference bands are empty"
+      ],
+      "pct_exact": 92.99,
+      "structure_diag": "",
+      "url": "https://man7.org/linux/man-pages/man2/write.2.html",
+      "worst_iou": 0.025
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.28,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.275,
+      "doc_height": 85,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://docs.kernel.org/latest/ with HTTP 404; rendered 548 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.25,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 5079,
+      "ink_goosie": 2195,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "coverage 0.275 < 0.6"
+      ],
+      "pct_exact": 99.61,
+      "structure_diag": "",
+      "url": "https://docs.kernel.org/latest/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          204,
+          220
+        ],
+        [
+          558,
+          572
+        ],
+        [
+          587,
+          631
+        ],
+        [
+          646,
+          657
+        ],
+        [
+          676,
+          690
+        ],
+        [
+          705,
+          719
+        ],
+        [
+          734,
+          745
+        ],
+        [
+          764,
+          775
+        ],
+        [
+          785,
+          796
+        ],
+        [
+          814,
+          828
+        ],
+        [
+          844,
+          858
+        ],
+        [
+          873,
+          905
+        ],
+        [
+          923,
+          955
+        ],
+        [
+          974,
+          1009
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.27,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.572,
+      "doc_height": 1024,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://doc.rust-lang.org/book/; first: https://doc.rust-lang.org/book/toc-0e4ce700.js:1: ReferenceError: HTMLElement is not defined at https://doc.rust-lang.org/book/toc-0e4ce700.js",
+      "goosie_rc": 0,
+      "goosie_secs": 0.41,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 146074,
+      "ink_goosie": 102826,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 14,
+      "n_reference_bands": 24,
+      "notes": [
+        "14 empty reference band(s)"
+      ],
+      "pct_exact": 91.42,
+      "structure_diag": "",
+      "url": "https://doc.rust-lang.org/book/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 1.77,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.0,
+      "doc_height": 928,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 4 uncaught script error(s) in https://www.php.net/docs.php; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:13:69(50) at inline:14:7(41)",
+      "goosie_rc": 0,
+      "goosie_secs": 0.51,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1308264,
+      "ink_goosie": 1308051,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 87.52% of pixels match within 30/channel, worst_iou 0.999 is the weakest reference-band overlap",
+        "coverage 1.0 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 87.52,
+      "structure_diag": "",
+      "url": "https://www.php.net/docs.php",
+      "worst_iou": 0.999
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 2.1,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.655,
+      "doc_height": 18393,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://www.typescriptlang.org/docs/handbook/intro.html; first: https://www.typescriptlang.org/app-9b3a6007d51cd726e84d.js:1: TypeError: Object has no member 'addEventListener' at 29",
+      "goosie_rc": 0,
+      "goosie_secs": 1.64,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 489146,
+      "ink_goosie": 320616,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 83.38% of pixels match within 30/channel, worst_iou 0.782 is the weakest reference-band overlap",
+        "coverage 0.655 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 83.38,
+      "structure_diag": "",
+      "url": "https://www.typescriptlang.org/docs/handbook/intro.html",
+      "worst_iou": 0.782
+    },
+    {
+      "blank_bands": [
+        [
+          178,
+          188
+        ],
+        [
+          196,
+          215
+        ],
+        [
+          224,
+          248
+        ],
+        [
+          269,
+          572
+        ],
+        [
+          603,
+          630
+        ],
+        [
+          665,
+          681
+        ],
+        [
+          695,
+          711
+        ],
+        [
+          741,
+          757
+        ],
+        [
+          808,
+          961
+        ],
+        [
+          988,
+          1007
+        ]
+      ],
+      "category": "docs",
+      "chromium_secs": 0.74,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.004,
+      "doc_height": 78575,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://react.dev/learn; first: inline:1: TypeError: Cannot read property 'includes' of undefined or null at inline:42:40(51) at inline:46:19(2)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.29,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 105360,
+      "ink_goosie": 6141,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 10,
+      "n_reference_bands": 12,
+      "notes": [
+        "10 empty reference band(s)"
+      ],
+      "pct_exact": 95.96,
+      "structure_diag": "",
+      "url": "https://react.dev/learn",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 2.46,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.823,
+      "doc_height": 8500,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://vuejs.org/guide/introduction.html; first: inline:1: TypeError: Cannot read property 'includes' of undefined or null at inline:1:10(2)",
+      "goosie_rc": 0,
+      "goosie_secs": 4.43,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 221224,
+      "ink_goosie": 182785,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 90.58% of pixels match within 30/channel, worst_iou 0.206 is the weakest reference-band overlap",
+        "coverage 0.823 is ink mass (goosie/chromium), not position, and 0 of 2 reference bands are empty"
+      ],
+      "pct_exact": 90.58,
+      "structure_diag": "",
+      "url": "https://vuejs.org/guide/introduction.html",
+      "worst_iou": 0.206
+    },
+    {
+      "blank_bands": [],
+      "category": "docs",
+      "chromium_secs": 0.62,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.486,
+      "doc_height": 4984,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 4 uncaught script error(s) in https://getbootstrap.com/docs/5.3/getting-started/introduction/; first: https://getbootstrap.com/docs/5.3/assets/js/color-modes.js:1: TypeError: Object has no member 'addEventListene",
+      "goosie_rc": 0,
+      "goosie_secs": 2.23,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 180622,
+      "ink_goosie": 96488,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [
+        "coverage 0.486 < 0.6"
+      ],
+      "pct_exact": 82.45,
+      "structure_diag": "",
+      "url": "https://getbootstrap.com/docs/5.3/getting-started/introduction/",
+      "worst_iou": 0.012
+    },
+    {
+      "blank_bands": [
+        [
+          98,
+          119
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 0.81,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.877,
+      "doc_height": 23295,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.85,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 218435,
+      "ink_goosie": 216097,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 70.92,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Goat",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.29,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.893,
+      "doc_height": 9330,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.27,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 149077,
+      "ink_goosie": 167935,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 10,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 81.26% of pixels match within 30/channel, worst_iou 0.022 is the weakest reference-band overlap",
+        "coverage 0.893 is ink mass (goosie/chromium), not position, and 0 of 10 reference bands are empty"
+      ],
+      "pct_exact": 81.26,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Web_browser",
+      "worst_iou": 0.022
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.35,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.819,
+      "doc_height": 67311,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.29,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 184536,
+      "ink_goosie": 366264,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 67.23% of pixels match within 30/channel, worst_iou 0.015 is the weakest reference-band overlap",
+        "coverage 1.819 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 67.23,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Cuneiform",
+      "worst_iou": 0.015
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.49,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.535,
+      "doc_height": 62065,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.13,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 185905,
+      "ink_goosie": 302846,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 70.47% of pixels match within 30/channel, worst_iou 0.001 is the weakest reference-band overlap",
+        "coverage 1.535 is ink mass (goosie/chromium), not position, and 0 of 4 reference bands are empty"
+      ],
+      "pct_exact": 70.47,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Vietnam",
+      "worst_iou": 0.001
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 1.21,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.727,
+      "doc_height": 1024,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://en.wikipedia.org/wiki/List_of_Languages_by_Total_Number_of_Speakers with HTTP 404; rendered 52029 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.88,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 78177,
+      "ink_goosie": 68966,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 6,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 91.39% of pixels match within 30/channel, worst_iou 0.004 is the weakest reference-band overlap",
+        "coverage 0.727 is ink mass (goosie/chromium), not position, and 0 of 6 reference bands are empty"
+      ],
+      "pct_exact": 91.39,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/List_of_Languages_by_Total_Number_of_Speakers",
+      "worst_iou": 0.004
+    },
+    {
+      "blank_bands": [
+        [
+          682,
+          725
+        ],
+        [
+          897,
+          913
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 0.55,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.369,
+      "doc_height": 1967,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.06,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 108041,
+      "ink_goosie": 78213,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 18,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 87.72,
+      "structure_diag": "",
+      "url": "https://en.wikipedia.org/wiki/Help:Contents",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.9,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.863,
+      "doc_height": 62641,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.31,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 184925,
+      "ink_goosie": 393168,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 66.37% of pixels match within 30/channel, worst_iou 0.0 is the weakest reference-band overlap",
+        "coverage 1.863 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 66.37,
+      "structure_diag": "",
+      "url": "https://vi.wikipedia.org/wiki/Vi%E1%BB%87t_Nam",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          197,
+          243
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 1.03,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.484,
+      "doc_height": 75818,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.93,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 345384,
+      "ink_goosie": 192389,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 5,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 68.84,
+      "structure_diag": "",
+      "url": "https://de.wikipedia.org/wiki/Deutschland",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          98,
+          119
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 1.21,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.053,
+      "doc_height": 74829,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.8,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 159630,
+      "ink_goosie": 169922,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 5,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 81.78,
+      "structure_diag": "",
+      "url": "https://fr.wikipedia.org/wiki/France",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.67,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.044,
+      "doc_height": 42622,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 3.25,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 176375,
+      "ink_goosie": 215887,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 76.12% of pixels match within 30/channel, worst_iou 0.226 is the weakest reference-band overlap",
+        "coverage 1.044 is ink mass (goosie/chromium), not position, and 0 of 3 reference bands are empty"
+      ],
+      "pct_exact": 76.12,
+      "structure_diag": "",
+      "url": "https://ja.wikipedia.org/wiki/%E6%97%A5%E6%9C%AC",
+      "worst_iou": 0.226
+    },
+    {
+      "blank_bands": [
+        [
+          98,
+          112
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 1.07,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.363,
+      "doc_height": 34818,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.64,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 252938,
+      "ink_goosie": 377435,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 6,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 59.79,
+      "structure_diag": "",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          98,
+          119
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 1.06,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.883,
+      "doc_height": 65870,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 4.15,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 265915,
+      "ink_goosie": 238114,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 68.51,
+      "structure_diag": "",
+      "url": "https://ru.wikipedia.org/wiki/%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          992,
+          1008
+        ]
+      ],
+      "category": "wiki",
+      "chromium_secs": 0.48,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.476,
+      "doc_height": 12527,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.61,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 86085,
+      "ink_goosie": 71450,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 21,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 89.98,
+      "structure_diag": "",
+      "url": "https://en.wiktionary.org/wiki/example",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "wiki",
+      "chromium_secs": 0.8,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.31,
+      "doc_height": 23460,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.69,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 171987,
+      "ink_goosie": 240238,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 75.61% of pixels match within 30/channel, worst_iou 0.015 is the weakest reference-band overlap",
+        "coverage 1.31 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 75.61,
+      "structure_diag": "",
+      "url": "https://simple.wikipedia.org/wiki/United_States",
+      "worst_iou": 0.015
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 0.5,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.573,
+      "doc_height": 1877,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 10 uncaught script error(s) in https://www.ebay.com/; first: inline:1: SyntaxError: inline: Line 1:502 Unexpected reserved word (and 3 more errors)",
+      "goosie_rc": 0,
+      "goosie_secs": 6.04,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 94802,
+      "ink_goosie": 1228884,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 2,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 6.37% of pixels match within 30/channel, worst_iou 0.578 is the weakest reference-band overlap",
+        "coverage 2.573 is ink mass (goosie/chromium), not position, and 0 of 2 reference bands are empty"
+      ],
+      "pct_exact": 6.37,
+      "structure_diag": "",
+      "url": "https://www.ebay.com/",
+      "worst_iou": 0.578
+    },
+    {
+      "blank_bands": [
+        [
+          92,
+          123
+        ],
+        [
+          772,
+          790
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 2.81,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.566,
+      "doc_height": 34795,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://www.walmart.com/; first: https://www.walmart.com/px/PXu6b0qd2S/init.js:1: ReferenceError: Image is not defined at https://www.walmart.com/px/PXu6b0qd2S/init.js:6:18849(2304) ",
+      "goosie_rc": 0,
+      "goosie_secs": 1.97,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 862425,
+      "ink_goosie": 519333,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 5,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 38.42,
+      "structure_diag": "",
+      "url": "https://www.walmart.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 30.01,
+      "chromium_shape": null,
+      "coverage": null,
+      "doc_height": 1024,
+      "expect": "js-revealed",
+      "fetch_error": "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://www.bestbuy.com/\", waiting until \"load\"\n",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.bestbuy.com/; first: https://www.bestbuy.com/~assets/bby/_intl/landing_page/js/zepto.min.js:1: ReferenceError: getComputedStyle is not defined at https://www.bestbuy.com/",
+      "goosie_rc": 0,
+      "goosie_secs": 4.56,
+      "goosie_shape": null,
+      "ink_chromium": null,
+      "ink_goosie": null,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "n_blank_bands": null,
+      "n_reference_bands": null,
+      "notes": [
+        "TimeoutError: Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"https://www.bestbuy.com/\", waiting until \"load\"\n"
+      ],
+      "pct_exact": null,
+      "structure_diag": "",
+      "url": "https://www.bestbuy.com/",
+      "worst_iou": null
+    },
+    {
+      "blank_bands": [
+        [
+          56,
+          128
+        ],
+        [
+          256,
+          276
+        ],
+        [
+          565,
+          578
+        ],
+        [
+          595,
+          672
+        ],
+        [
+          695,
+          708
+        ],
+        [
+          725,
+          736
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 1.15,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.etsy.com/ with HTTP 403; rendered 779 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.4,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 16527,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 6,
+      "n_reference_bands": 6,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.86,
+      "structure_diag": "",
+      "url": "https://www.etsy.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          138,
+          175
+        ],
+        [
+          192,
+          214
+        ],
+        [
+          229,
+          244
+        ],
+        [
+          253,
+          266
+        ],
+        [
+          976,
+          1005
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.56,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.newegg.com/ with HTTP 403; rendered 5607 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 0.27,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 17473,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 98.77,
+      "structure_diag": "",
+      "url": "https://www.newegg.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "commerce",
+      "chromium_secs": 4.78,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.61,
+      "doc_height": 9120,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 5 uncaught script error(s) in https://www.target.com/; first: https://assets.targetimg1.com/ssx/ssx.mod.js?async:1: ReferenceError: addEventListener is not defined at https://assets.targetimg1.com/ssx/ssx.mod.js?",
+      "goosie_rc": 0,
+      "goosie_secs": 3.34,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1141194,
+      "ink_goosie": 696328,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 0.24% of pixels match within 30/channel, worst_iou 0.584 is the weakest reference-band overlap",
+        "coverage 0.61 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 0.24,
+      "structure_diag": "",
+      "url": "https://www.target.com/",
+      "worst_iou": 0.584
+    },
+    {
+      "blank_bands": [
+        [
+          82,
+          98
+        ],
+        [
+          285,
+          328
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.9,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.704,
+      "doc_height": 19019,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://www.apple.com/; first: https://www.apple.com/v/homepage/a/scripts/head.built.js:1: TypeError: Cannot read property 'indexOf' of undefined or null at test (https://www.apple.c",
+      "goosie_rc": 0,
+      "goosie_secs": 2.09,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 450976,
+      "ink_goosie": 502913,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 7,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 75.46,
+      "structure_diag": "",
+      "url": "https://www.apple.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          106,
+          122
+        ],
+        [
+          132,
+          142
+        ],
+        [
+          865,
+          883
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 5.43,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.842,
+      "doc_height": 23989,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 11 uncaught script error(s) in https://www.nike.com/vn/; first: https://www.nike.com/static/privacy-core/public/privacy-core.js:1: TypeError: Object has no member 'addEventListener' at 501 (https://www.nike.com/s",
+      "goosie_rc": 0,
+      "goosie_secs": 2.41,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 902673,
+      "ink_goosie": 800680,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 3,
+      "n_reference_bands": 7,
+      "notes": [
+        "3 empty reference band(s)"
+      ],
+      "pct_exact": 46.32,
+      "structure_diag": "",
+      "url": "https://www.nike.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          102,
+          114
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.38,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.078,
+      "doc_height": 144,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.uniqlo.com/us/ with HTTP 403; rendered 524 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 3.23,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 9029,
+      "ink_goosie": 8052,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 98.87,
+      "structure_diag": "",
+      "url": "https://www.uniqlo.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          14,
+          37
+        ],
+        [
+          68,
+          83
+        ],
+        [
+          102,
+          114
+        ],
+        [
+          136,
+          151
+        ]
+      ],
+      "category": "commerce",
+      "chromium_secs": 0.26,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "js-revealed",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://www.zara.com/; first: inline:1: [object Object] at github.com/vyquocvu/goosie/internal/js.(*Runtime).constructXHR.func11 (native) at triggerInterstitialChallenge (inline:1:58",
+      "goosie_rc": 0,
+      "goosie_secs": 0.36,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 8751,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 4,
+      "n_reference_bands": 4,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 99.4,
+      "structure_diag": "",
+      "url": "https://www.zara.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.54,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.832,
+      "doc_height": 1870,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 1.76,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15199,
+      "ink_goosie": 1307000,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 0.63% of pixels match within 30/channel, worst_iou 0.597 is the weakest reference-band overlap",
+        "coverage 2.832 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 0.63,
+      "structure_diag": "",
+      "url": "https://www.w3.org/Style/CSS/",
+      "worst_iou": 0.597
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.29,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.769,
+      "doc_height": 9438,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.72,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15209,
+      "ink_goosie": 513009,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 60.54% of pixels match within 30/channel, worst_iou 0.001 is the weakest reference-band overlap",
+        "coverage 0.769 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 60.54,
+      "structure_diag": "",
+      "url": "https://www.w3.org/MarkUp/",
+      "worst_iou": 0.001
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.28,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.174,
+      "doc_height": 67861,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.w3.org/TR/css-syntax-3/; first: https://www.w3.org/scripts/TR/2021/fixup.js:1: TypeError: Object has no member 'insertBefore' at createSidebarToggle (https://www.w3.org/s",
+      "goosie_rc": 0,
+      "goosie_secs": 1.04,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15219,
+      "ink_goosie": 104071,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "coverage 0.174 < 0.6"
+      ],
+      "pct_exact": 91.79,
+      "structure_diag": "",
+      "url": "https://www.w3.org/TR/css-syntax-3/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          253,
+          266
+        ]
+      ],
+      "category": "web-standards",
+      "chromium_secs": 0.28,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.241,
+      "doc_height": 77511,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.w3.org/TR/selectors-4/; first: https://www.w3.org/scripts/TR/2021/fixup.js:1: TypeError: Object has no member 'insertBefore' at createSidebarToggle (https://www.w3.org/sc",
+      "goosie_rc": 0,
+      "goosie_secs": 1.18,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15213,
+      "ink_goosie": 97649,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 5,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 92.18,
+      "structure_diag": "",
+      "url": "https://www.w3.org/TR/selectors-4/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          253,
+          266
+        ]
+      ],
+      "category": "web-standards",
+      "chromium_secs": 0.3,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.161,
+      "doc_height": 74060,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.w3.org/TR/css-ui-4/; first: https://www.w3.org/scripts/TR/2021/fixup.js:1: TypeError: Object has no member 'insertBefore' at createSidebarToggle (https://www.w3.org/scrip",
+      "goosie_rc": 0,
+      "goosie_secs": 1.02,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 15213,
+      "ink_goosie": 103729,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 5,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 91.74,
+      "structure_diag": "",
+      "url": "https://www.w3.org/TR/css-ui-4/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 3.77,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.937,
+      "doc_height": 26206,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 19 uncaught script error(s) in https://css-tricks.com/complete-guide-css-grid-layout/; first: https://c0.wp.com/p/jetpack/16.3.1/_inc/build/related-posts/related-posts.min.js:1: TypeError: Cannot read property 's",
+      "goosie_rc": 0,
+      "goosie_secs": 5.64,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 950301,
+      "ink_goosie": 890884,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 32.26% of pixels match within 30/channel, worst_iou 0.886 is the weakest reference-band overlap",
+        "coverage 0.937 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 32.26,
+      "structure_diag": "",
+      "url": "https://css-tricks.com/snippets/css/complete-guide-grid/",
+      "worst_iou": 0.886
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 2.79,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.998,
+      "doc_height": 2479,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 2 uncaught script error(s) in https://caniuse.com/css-grid; first: inline:1: TypeError: Object has no member 'write' at inline:2:17(3)",
+      "goosie_rc": 0,
+      "goosie_secs": 3.65,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1306791,
+      "ink_goosie": 1303970,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 48.95% of pixels match within 30/channel, worst_iou 1.0 is the weakest reference-band overlap",
+        "coverage 0.998 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 48.95,
+      "structure_diag": "",
+      "url": "https://caniuse.com/css-grid",
+      "worst_iou": 1.0
+    },
+    {
+      "blank_bands": [
+        [
+          60,
+          155
+        ],
+        [
+          313,
+          358
+        ]
+      ],
+      "category": "web-standards",
+      "chromium_secs": 2.02,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.865,
+      "doc_height": 2293,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://htmldog.com/guides/html/beginner/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:4:77(43) at inline:5:5(7)",
+      "goosie_rc": 0,
+      "goosie_secs": 2.39,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 98275,
+      "ink_goosie": 88610,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 2,
+      "n_reference_bands": 19,
+      "notes": [
+        "2 empty reference band(s)"
+      ],
+      "pct_exact": 93.25,
+      "structure_diag": "",
+      "url": "https://htmldog.com/guides/html/beginner/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 0.74,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 2.319,
+      "doc_height": 2101,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://validator.w3.org/; first: https://validator.w3.org/scripts/combined:1: TypeError: Cannot read property 'match' of undefined or null at https://validator.w3.org/scripts/combin",
+      "goosie_rc": 0,
+      "goosie_secs": 1.97,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 16312,
+      "ink_goosie": 1132173,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 83.96% of pixels match within 30/channel, worst_iou 0.227 is the weakest reference-band overlap",
+        "coverage 2.319 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 83.96,
+      "structure_diag": "",
+      "url": "https://validator.w3.org/",
+      "worst_iou": 0.227
+    },
+    {
+      "blank_bands": [],
+      "category": "web-standards",
+      "chromium_secs": 2.7,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.978,
+      "doc_height": 1783,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 2.59,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 755020,
+      "ink_goosie": 738632,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 68.49% of pixels match within 30/channel, worst_iou 0.951 is the weakest reference-band overlap",
+        "coverage 0.978 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 68.49,
+      "structure_diag": "",
+      "url": "https://www.csszengarden.com/",
+      "worst_iou": 0.951
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 0.8,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.397,
+      "doc_height": 6900,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://www.gov.uk/; first: https://www.gov.uk/assets/frontend/govuk_publishing_components/vendor/lux/lux-measurer-d66192b1b665d415e1874e49a48138b7ae339548aa6cdb8687c7f9933e72b969.js",
+      "goosie_rc": 0,
+      "goosie_secs": 0.82,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 952349,
+      "ink_goosie": 383683,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 4,
+      "notes": [
+        "coverage 0.397 < 0.6"
+      ],
+      "pct_exact": 33.68,
+      "structure_diag": "",
+      "url": "https://www.gov.uk/",
+      "worst_iou": 0.106
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 3.32,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.676,
+      "doc_height": 4689,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 7 uncaught script error(s) in https://www.usa.gov/; first: inline:1: TypeError: Object has no member 'insertBefore' at inline:4:79(60) at inline:5:5(7)",
+      "goosie_rc": 0,
+      "goosie_secs": 2.68,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 851476,
+      "ink_goosie": 659674,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 5,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 47.0% of pixels match within 30/channel, worst_iou 0.186 is the weakest reference-band overlap",
+        "coverage 0.676 is ink mass (goosie/chromium), not position, and 0 of 5 reference bands are empty"
+      ],
+      "pct_exact": 47.0,
+      "structure_diag": "",
+      "url": "https://www.usa.gov/",
+      "worst_iou": 0.186
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 2.11,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.961,
+      "doc_height": 11093,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 16 uncaught script error(s) in https://www.nasa.gov/; first: inline:1: TypeError: Object has no member 'addEventListener' at inline:2:228(19)",
+      "goosie_rc": 0,
+      "goosie_secs": 4.64,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1033728,
+      "ink_goosie": 1011452,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 3,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 43.91% of pixels match within 30/channel, worst_iou 0.406 is the weakest reference-band overlap",
+        "coverage 0.961 is ink mass (goosie/chromium), not position, and 0 of 3 reference bands are empty"
+      ],
+      "pct_exact": 43.91,
+      "structure_diag": "",
+      "url": "https://www.nasa.gov/",
+      "worst_iou": 0.406
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 6.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.856,
+      "doc_height": 4844,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 14 uncaught script error(s) in https://www.noaa.gov/; first: https://www.noaa.gov/core/assets/vendor/jquery/jquery.min.js?v=3.7.1:1: TypeError: Object has no member 'createDocumentFragment' at https://www.noaa.go",
+      "goosie_rc": 0,
+      "goosie_secs": 7.17,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 890589,
+      "ink_goosie": 762080,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 49.99% of pixels match within 30/channel, worst_iou 0.884 is the weakest reference-band overlap",
+        "coverage 0.856 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 49.99,
+      "structure_diag": "",
+      "url": "https://www.noaa.gov/",
+      "worst_iou": 0.884
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 2.25,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.141,
+      "doc_height": 1352,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: the source refused https://www.census.gov/ with HTTP 403; rendered 5850 bytes of that refusal, not the page",
+      "goosie_rc": 0,
+      "goosie_secs": 1.14,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 326949,
+      "ink_goosie": 506425,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 10,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 89.59% of pixels match within 30/channel, worst_iou 0.029 is the weakest reference-band overlap",
+        "coverage 1.141 is ink mass (goosie/chromium), not position, and 0 of 10 reference bands are empty"
+      ],
+      "pct_exact": 89.59,
+      "structure_diag": "",
+      "url": "https://www.census.gov/",
+      "worst_iou": 0.029
+    },
+    {
+      "blank_bands": [
+        [
+          15,
+          125
+        ],
+        [
+          162,
+          183
+        ],
+        [
+          218,
+          259
+        ],
+        [
+          295,
+          371
+        ],
+        [
+          397,
+          1023
+        ]
+      ],
+      "category": "gov-org",
+      "chromium_secs": 1.99,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.0,
+      "doc_height": 0,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 23 uncaught script error(s) in https://chinhphu.vn/; first: https://chinhphu.vn/scripts/jquery-3.6.0.min.js?v=1:1: TypeError: Object has no member 'createDocumentFragment' at https://chinhphu.vn/scripts/jquery-3.",
+      "goosie_rc": 0,
+      "goosie_secs": 2.85,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 501778,
+      "ink_goosie": 0,
+      "label": "LAYOUT_EMPTY",
+      "maybe_partial": false,
+      "n_blank_bands": 5,
+      "n_reference_bands": 5,
+      "notes": [
+        "doc_height<=0",
+        "ink 0"
+      ],
+      "pct_exact": 63.42,
+      "structure_diag": "",
+      "url": "https://www.gov.vn/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 0.06,
+      "chromium_shape": null,
+      "coverage": null,
+      "doc_height": null,
+      "expect": "static",
+      "fetch_error": "Error: Page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.moe.gov.vn/\nCall log:\n  - navigating to \"https://www.moe.gov.vn/\", waiting until \"load\"\n",
+      "goosie_diag": "",
+      "goosie_rc": 1,
+      "goosie_secs": 0.05,
+      "goosie_shape": null,
+      "ink_chromium": null,
+      "ink_goosie": null,
+      "label": "FETCH_FAILED",
+      "maybe_partial": false,
+      "n_blank_bands": null,
+      "n_reference_bands": null,
+      "notes": [
+        "Error: Page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.moe.gov.vn/\nCall log:\n  - navigating to \"https://www.moe.gov.vn/\", waiting until \"load\"\n"
+      ],
+      "pct_exact": null,
+      "structure_diag": "goosie: fetch https://www.moe.gov.vn/: net: fetch https://www.moe.gov.vn/: Get \"https://www.moe.gov.vn/\": dial tcp: lookup www.moe.gov.vn: no such host\n",
+      "url": "https://www.moe.gov.vn/",
+      "worst_iou": null
+    },
+    {
+      "blank_bands": [
+        [
+          204,
+          218
+        ]
+      ],
+      "category": "gov-org",
+      "chromium_secs": 3.24,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.669,
+      "doc_height": 6133,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://www.icann.org/; first: https://cdn.cookielaw.org/scripttemplates/otSDKStub.js:1: TypeError: Cannot read property 'prototype' of undefined at https://cdn.cookielaw.org/scriptt",
+      "goosie_rc": 0,
+      "goosie_secs": 5.59,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 634123,
+      "ink_goosie": 573217,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 7,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 63.97,
+      "structure_diag": "",
+      "url": "https://www.icann.org/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [
+        [
+          958,
+          972
+        ]
+      ],
+      "category": "gov-org",
+      "chromium_secs": 1.47,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.793,
+      "doc_height": 161879,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://www.rfc-editor.org/rfc/rfc9110.html; first: https://www.rfc-editor.org/js/metadata.min.js:1: TypeError: Object has no member 'removeEventListener' at https://www.rfc-editor.o",
+      "goosie_rc": 0,
+      "goosie_secs": 1.74,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 90918,
+      "ink_goosie": 96259,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 25,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 89.24,
+      "structure_diag": "",
+      "url": "https://rfc-editor.org/rfc/rfc9110.html",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "gov-org",
+      "chromium_secs": 1.87,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.42,
+      "doc_height": 94091,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 3 uncaught script error(s) in https://datatracker.ietf.org/doc/html/rfc9114; first: https://static.ietf.org/dt/12.82.1/ietf/js/document_html.js:1: TypeError: Object has no member 'addEventListener' at R (https://",
+      "goosie_rc": 0,
+      "goosie_secs": 1.61,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 141208,
+      "ink_goosie": 60397,
+      "label": "LOW_COVERAGE",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "coverage 0.42 < 0.6"
+      ],
+      "pct_exact": 87.28,
+      "structure_diag": "",
+      "url": "https://datatracker.ietf.org/doc/html/rfc9114",
+      "worst_iou": 0.192
+    },
+    {
+      "blank_bands": [
+        [
+          68,
+          83
+        ]
+      ],
+      "category": "minimal-legacy",
+      "chromium_secs": 2.18,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.663,
+      "doc_height": 470,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.98,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 38501,
+      "ink_goosie": 35855,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 1,
+      "n_reference_bands": 4,
+      "notes": [
+        "1 empty reference band(s)"
+      ],
+      "pct_exact": 94.98,
+      "structure_diag": "",
+      "url": "https://info.cern.ch/hypertext/WWW/TheProject.html",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 3.02,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.0,
+      "doc_height": 781,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 1 uncaught script error(s) in https://www.spacejam.com/1996/; first: https://policies.warnerbros.com/js/wbPolicyUpdatedNotice.js:1: ReferenceError: alert is not defined at https://policies.warnerbros.com/js/wbPol",
+      "goosie_rc": 0,
+      "goosie_secs": 2.39,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1310503,
+      "ink_goosie": 1310714,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 83.6% of pixels match within 30/channel, worst_iou 1.0 is the weakest reference-band overlap",
+        "coverage 1.0 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 83.6,
+      "structure_diag": "",
+      "url": "https://www.spacejam.com/1996/",
+      "worst_iou": 1.0
+    },
+    {
+      "blank_bands": [
+        [
+          380,
+          403
+        ],
+        [
+          423,
+          456
+        ],
+        [
+          476,
+          515
+        ]
+      ],
+      "category": "minimal-legacy",
+      "chromium_secs": 0.73,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.001,
+      "doc_height": 988,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "goosie: 7 uncaught script error(s) in https://old.reddit.com/login/?reason=lor2&dest=https%3A%2F%2Fold.reddit.com%2F; first: inline:1: TypeError: Object has no member 'addEventListener' at inline:2:24(5) at inline:3:3(2)",
+      "goosie_rc": 0,
+      "goosie_secs": 1.92,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 49083,
+      "ink_goosie": 407,
+      "label": "MISSING_REGIONS",
+      "maybe_partial": false,
+      "n_blank_bands": 3,
+      "n_reference_bands": 4,
+      "notes": [
+        "3 empty reference band(s)"
+      ],
+      "pct_exact": 96.76,
+      "structure_diag": "",
+      "url": "https://old.reddit.com/",
+      "worst_iou": 0.0
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 2.35,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.002,
+      "doc_height": 1024,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 6.48,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1193862,
+      "ink_goosie": 1196746,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 96.09% of pixels match within 30/channel, worst_iou 0.999 is the weakest reference-band overlap",
+        "coverage 1.002 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 96.09,
+      "structure_diag": "",
+      "url": "https://whatwg.org/",
+      "worst_iou": 0.999
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 1.19,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 0.738,
+      "doc_height": 2600,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.88,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 107730,
+      "ink_goosie": 81461,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 27,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 91.77% of pixels match within 30/channel, worst_iou 0.518 is the weakest reference-band overlap",
+        "coverage 0.738 is ink mass (goosie/chromium), not position, and 0 of 27 reference bands are empty"
+      ],
+      "pct_exact": 91.77,
+      "structure_diag": "",
+      "url": "https://commonmark.org/",
+      "worst_iou": 0.518
+    },
+    {
+      "blank_bands": [],
+      "category": "minimal-legacy",
+      "chromium_secs": 0.31,
+      "chromium_shape": [
+        1024,
+        1280
+      ],
+      "coverage": 1.0,
+      "doc_height": 873,
+      "expect": "static",
+      "fetch_error": "",
+      "goosie_diag": "",
+      "goosie_rc": 0,
+      "goosie_secs": 0.24,
+      "goosie_shape": [
+        1024,
+        1280
+      ],
+      "ink_chromium": 1310720,
+      "ink_goosie": 1310720,
+      "label": "UNFLAGGED",
+      "maybe_partial": false,
+      "n_blank_bands": 0,
+      "n_reference_bands": 1,
+      "notes": [
+        "no rung above fired; this is not a claim that the render agrees",
+        "pct_exact 96.5% of pixels match within 30/channel, worst_iou 1.0 is the weakest reference-band overlap",
+        "coverage 1.0 is ink mass (goosie/chromium), not position, and 0 of 1 reference bands are empty"
+      ],
+      "pct_exact": 96.5,
+      "structure_diag": "",
+      "url": "https://example.com/",
+      "worst_iou": 1.0
+    }
+  ],
+  "run_id": "2026-10-26T0011Z-741fdd37",
+  "thresholds": {
+    "coverage_ok": 0.6,
+    "max_blank_bands": 0,
+    "min_ink": 200,
+    "min_scored": 75,
+    "pixel_threshold": 30
+  },
+  "tool": "testdata/live-parity.py"
+}
