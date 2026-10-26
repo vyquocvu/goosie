@@ -65,10 +65,15 @@ type URLToken struct {
 //     stripped. That is exactly what the per-site scanners did before this
 //     helper existed, so this leniency is preserved rather than newly granted.
 //   - Fail-closed on a malformed token: an unterminated quoted payload
-//     (`url("abc`) and an escaped quote inside a quoted payload (`url("a\"b")`,
-//     a bad string per §4.3.9) return ok=false with an empty payload rather than
-//     handing back half a URI — the same recovery stance TASK-041 took for bad
-//     strings.
+//     (`url("abc`) and any backslash inside a quoted payload return ok=false
+//     with an empty payload rather than handing back half a URI — the same
+//     recovery stance TASK-041 took for bad strings. The backslash case is a
+//     deliberate narrowing, not spec: §4.3.9 makes a backslash an escape, and
+//     Chromium renders `url("…\"…")` (measured 2026-10-26: 800 blue px against
+//     Goosie's 0, before and after this scanner). The old readers also failed on
+//     it, and unescaping a URL payload is a separate task
+//     (GOOSIE-CSSURLESCAPE-001), so the scanner drops the declaration instead of
+//     guessing.
 //   - A payload-free `url()` is well-formed but empty: ok=true, Payload="".
 //   - Only the first url() in a value is returned; a `none` keyword carries no
 //     "url(" and so is never a match.

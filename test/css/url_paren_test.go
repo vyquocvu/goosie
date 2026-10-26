@@ -13,6 +13,7 @@ import (
 // payload containing ')' must reach BorderImage.Source whole, the
 // parenthesis-free and unquoted forms must keep working, and the malformed forms
 // must fail closed.
+// qc:BR-212
 func TestParseBorderImageSourceURLParen(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><rect fill='rgb(0,0,255)'/></svg>`
 	const svgHash = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><rect fill='%230000ff'/></svg>`
@@ -58,6 +59,7 @@ func TestParseBorderImageSourceURLParen(t *testing.T) {
 // payload shapes matter: with the inner ')' glued to the url close, and with a
 // space after it — the second one used to end the source at the interior ')'
 // and pour the rest of the URI into the slice section.
+// qc:BR-212
 func TestBorderImageShorthandURLParen(t *testing.T) {
 	cases := []struct{ name, svg string }{
 		{"inner ')' glued to the url close", `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><rect fill='rgb(0,0,255)'/></svg>`},

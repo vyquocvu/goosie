@@ -14,6 +14,7 @@ import (
 // Style.BackgroundImage whole and nothing attached in the arena. These rows
 // assert the EXACT payload that reaches the computed style through the real
 // cascade entry (css.Parse + style.Resolve), not merely that something painted.
+// qc:BR-212
 func TestBackgroundImageURLParenDataImage(t *testing.T) {
 	const svgHash = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='%230000ff'/></svg>`
 	const svgRGB = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='rgb(0,0,255)'/></svg>`
@@ -54,6 +55,7 @@ func TestBackgroundImageURLParenDataImage(t *testing.T) {
 // background shorthand splitter: the url() layer stays whole, the trailing
 // keywords still land in their own fields, and no color is invented out of the
 // payload's leftovers.
+// qc:BR-212
 func TestBackgroundShorthandURLParen(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='rgb(0,0,255)'/></svg>`
 	sheet := `.x { background: url("` + svgRGB + `") no-repeat center / contain rgb(1,2,3) }`
@@ -71,6 +73,7 @@ func TestBackgroundShorthandURLParen(t *testing.T) {
 
 // TestMaskImageURLParen covers the second consumer of extractBackgroundURL:
 // mask-image and -webkit-mask-image store the same payload in Style.MaskImage.
+// qc:BR-212
 func TestMaskImageURLParen(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='rgb(0,0,255)'/></svg>`
 	cases := []struct{ name, prop, want string }{
@@ -93,6 +96,7 @@ func TestMaskImageURLParen(t *testing.T) {
 // the parenthesis-free forms that painted on main must behave exactly as they did
 // before the shared scanner landed. A regression here is a blocker, not a
 // footnote.
+// qc:BR-212
 func TestBackgroundImageURLParenRegression(t *testing.T) {
 	cases := []struct{ name, value, want string }{
 		{"empty url()", `url()`, ""},

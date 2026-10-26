@@ -21,16 +21,16 @@
 ## 1. Reproduction, measured by the integrator on `main` before this task was written
 
 Two hosts, one page, four declarations. The page (`/tmp/bgimg-probe/variants5.html`) is four 100×20 divs,
-each with a solid-blue SVG data URI as `background-image`, differing only in two axes: whether the value is
-quoted, and whether the paint colour is written `%230000ff` (percent-encoded, no parentheses) or
-`rgb(0,0,255)` (contains a `)`):
+each with a solid-blue SVG data URI as `background-image`, differing in two axes: whether the data URI
+carries a `;utf8` mediatype, and whether the paint colour is written `%230000ff` (percent-encoded, no
+parentheses) or `rgb(0,0,255)` (contains a `)`). All four values are quoted; see the correction below.
 
 | id  | declaration shape                                   | Chromium non-blue-band px | Goosie non-blue-band px |
 |-----|-----------------------------------------------------|---------------------------|-------------------------|
-| k0  | quoted, `%230000ff`                                 | 2000                      | 2000                    |
-| k1  | unquoted, `%230000ff`                               | 2000                      | 2000                    |
-| k2  | quoted, `rgb(0,0,255)` — payload contains `)`       | 2000                      | **0**                   |
-| k3  | unquoted, `rgb(0,0,255)` — payload contains `)`     | 2000                      | **0**                   |
+| k0  | quoted, `;utf8`, `%230000ff`                        | 2000                      | 2000                    |
+| k1  | quoted, no mediatype, `%230000ff`                   | 2000                      | 2000                    |
+| k2  | quoted, `;utf8`, `rgb(0,0,255)` — payload has `)`   | 2000                      | **0**                   |
+| k3  | quoted, no mediatype, `rgb(0,0,255)` — payload has `)` | 2000                   | **0**                   |
 
 - Chromium, measured 2026-10-26: `NODE_PATH=<repo>/node_modules node /tmp/t50/v5chrom.js` against
   `viewport 120×90, deviceScaleFactor 1` → `blue px per band k0..k3 = [2000, 2000, 2000, 2000]`, and the
@@ -38,8 +38,17 @@ quoted, and whether the paint colour is written `%230000ff` (percent-encoded, no
   `url("data:image/svg+xml;utf8,<svg … fill='rgb(0,0,255)'/></svg>")`.
 - Goosie, same page and same geometry on `main` (`/tmp/t50/hl -in … -out … -width 120 -height 90 -dpr 1`,
   exit 0, `presents=2`) → `[2000, 2000, 0, 0]`.
-- So the discriminator is **a `)` inside the payload**, not `;utf8`, not quoting: k1 proves unquoted works,
-  k3 fails only because of the parenthesis, k2 fails even though it is quoted.
+- So the discriminator is **a `)` inside the payload**, not the mediatype: k1 proves `;utf8` is
+  irrelevant, and k3 fails only because of the parenthesis.
+- **Correction, 2026-10-26 (integrator, finishing pass).** The first version of the table above labelled
+  k0/k2 as "quoted" and k1/k3 as "unquoted". Re-running the same file showed all four are quoted and the
+  varied axis is the `;utf8` mediatype; the pixel counts and computed lengths are unchanged. Quoting was
+  measured separately (`/tmp/t50/variants6.html`, same geometry): Chromium paints `[2000, 0, 2000, 0]` for
+  (quoted `%23`, unquoted `%23` with literal quotes, quoted `rgb`, unquoted `rgb` with literal quotes).
+  A literal quote or `(` inside an unquoted `url()` is a bad-url in Chromium
+  (`getComputedStyle().backgroundImage` reads `none`), so those two forms are a Goosie leniency, not a
+  reference behaviour; Goosie paints `[2000, 2000, 2000, 2000]` there after the fix. The leniency is pinned
+  by unit tests, not by the parity fixture.
 
 Corpus context, so nobody "fixes" this by pointing at a blank page: `testdata/render/css-features/`
 already contains fixtures whose background colour paints (`colors/03-opacity`), and `data:` URI backgrounds
@@ -86,6 +95,14 @@ Search: `strings.IndexByte(<x>, ')')` over `internal/`. Do **not** fix only the 
 | `internal/engine/limits.go:1013` | `absolutizeCSSURLs` | **same shape, unproven, and worse** | it cuts at the first `)` *then* re-emits the tail as new text, so a fetched stylesheet's quoted data URI is both truncated **and** rewritten; needs a `file://` `<link>`-stylesheet case measured end to end |
 | `internal/engine/imports.go:122` | `importRef` | quote-naive: `unquote(rest[4:close])` | `@import url("…)")` behaviour; low blast radius, must be stated not assumed |
 | `internal/engine/engine.go:706` | font URL extraction | **already quote-aware**: `:698-705` handles a leading quote before falling back to `)` | use as the reference for what the shared helper must do, and prove with a test that the font path keeps a `)` payload |
+
+**Sixth reader, found in the finishing pass.** `ParseBorderImageShorthand`
+(`internal/css/border_image.go`) splits the value on whitespace and then re-joins the source token with a
+quote-blind `strings.Contains(tok, ")")`. A quoted payload with a space after an interior `)` was cut there
+too — measured: `url("…fill='rgb(0,0,255)' /></svg>") 7 fill` parsed the source as
+`…fill='rgb(0,0,255)'` and the slice as `/></svg>") 7 fill`. The branch's own shorthand oracle passed only
+because its payload glued the interior `)` to the url close. Fixed with the same scanner; both shapes are
+pinned by `TestBorderImageShorthandURLParen`.
 
 ## 3. The fix
 
@@ -160,10 +177,74 @@ rc 0 afterwards. At minimum:
    each case pins.
 6. §9 states, plainly, what you did **not** measure.
 
-## 8. Proposed BR ids and oracle list
+## 8. BR ids and oracle list (filled by the integrator, finishing pass 2026-10-26)
 
-(to be filled by the implementer)
+BR-200..202 belong to TASK-049 and BR-203..210 to TASK-047, so this task lands on **BR-211** and **BR-212**.
+Catalog total goes 210 → 212; ratchet P0+P1 tagged 92 → 94.
 
-## 9. Unresolved / limits, stated plainly
+### BR-211 (P1, UNIT) — the shared scanner
 
-(to be filled by the implementer)
+`internal/css/url.go`: `ScanURL`, `ScanURLAt`, `IndexURL`.
+
+Oracles in `internal/css/url_test.go`:
+- `TestScanURLPayload` — 28 sub-cases covering §3 rules 1–5 (quoted/unquoted, `)`/`(`/`;`/`,`/space,
+  stray quotes, unterminated, backslash, empty `url()`, `none`, first-of-many, uppercase).
+- `TestScanURLOffsets` — Start/AfterOpen/Close/End map back into the original string.
+- `TestIndexURL` — case-insensitive without a byte-length-changing lowering.
+- `TestScanURLBigPayload`, `TestScanURLBalancedParensBigPayload` — 256 KiB inputs.
+- `BenchmarkScanURLDataURI`, `BenchmarkIndexURLSheetOccurrences`.
+
+### BR-212 (P1, INT + PARITY) — every reader, end to end
+
+| §2.3 row | site | oracle |
+|----------|------|--------|
+| style | `extractBackgroundURL` | `test/style/url_paren_test.go`: `TestBackgroundImageURLParenDataImage` (k0–k7), `TestBackgroundShorthandURLParen`, `TestMaskImageURLParen`, `TestBackgroundImageURLParenRegression` |
+| border-image longhand | `borderImageURL` | `test/css/url_paren_test.go`: `TestParseBorderImageSourceURLParen` (18 sub-cases) |
+| border-image shorthand (sixth) | `ParseBorderImageShorthand` | `TestBorderImageShorthandURLParen` (2 payload shapes) |
+| absolutize | `absolutizeCSSURLs` | `internal/engine/url_paren_test.go`: `TestAbsolutizeCSSURLsKeepsParenPayload` (10 sub-cases), `TestAbsolutizeCSSURLsNoTailGarbage`, `TestExpandCSSImportsURLKeepsParenPayload` |
+| @import | `importRef` | `TestImportRefURLParen` (11 sub-cases) |
+| font | `extractFontURL` | `TestExtractFontURLKeepsParenPayload` (11 sub-cases), `TestCollectFontJobsParenPayload` |
+| pipeline | style → decode → arena attach | `test/engine/url_paren_test.go`: `TestBackgroundDataURLParenAttaches` (6 sub-cases), `TestStyleSheetImportDataURLParenAttaches` |
+| parity | fixture 16 | `testdata/render/css-features/16-url-paren-data-image.html` |
+
+### Measurements (2026-10-26, this host, Chromium 153.0.8010.12)
+
+- Four bands, 120×90 DPR 1, exact `(0,0,255)` px per band: Goosie before `[2000,2000,0,0]`, after
+  `[2000,2000,2000,2000]`; Chromium `[2000,2000,2000,2000]` on the doc's page.
+- Fixture 16 (eight bands, 230,400 `(0,0,255)` px in the reference): after **98.69% PASS** (IoU 1.0,
+  coverage 0.9972950782093334, blank 0/0); before **74.69% FAIL** (IoU 0.6835312636497746, coverage
+  0.517161040790554, blank 0/0). Blue pixels: Chromium 230,400, after 230,400, before 115,200 — only k0, k1,
+  k4 and the control band painted.
+- Corpus with the same regenerated references: after **91/91 (100.0%)**, average **96.21%**, known gaps
+  **5 fixtures / 10 bands** unchanged, rc **0**; before **90/91 (98.9%)**, average **95.95%**, rc **1**.
+- Gates on this tree: `go test -count=1 ./...` rc 0; `go test ./internal/archtest/` rc 0;
+  `go vet -all ./...` rc 0; `gofmt -l` empty on every touched file.
+- Mutations, all applied and restored by the integrator here (each mutant rc 1, restored rc 0):
+  M01 revert `extractBackgroundURL` — 5 tests; M02 quote-blind scanner — 8; M03 paren-blind scanner — 6;
+  M04 fail-open unterminated quote — 7; M05 border-image longhand — 2; M06 `absolutizeCSSURLs` — 1;
+  M07 `importRef` — 1; M08 font — 1.
+
+## 9. Unresolved / limits, stated plainly (filled by the integrator, finishing pass 2026-10-26)
+
+1. **A backslash inside a quoted payload still drops the declaration.** `url("data:…\"…")` renders in
+   Chromium and not in Goosie. Measured with `/tmp/t50/esc.html` (40×20 div, DPR 1, exact `(0,0,255)`):
+   Chromium 800 px; Goosie **0 before and 0 after** this change. The old readers also failed on the form, so
+   this is a pre-existing gap, not a regression, and the branch's scanner comment that called it "a bad
+   string per §4.3.9" was wrong — §4.3.9 makes the backslash an escape. Corrected in `internal/css/url.go`
+   and registered as **GOOSIE-CSSURLESCAPE-001 (P2, open)**. Unescaping a URL payload is a separate task.
+2. **Unquoted payloads with a literal quote or `(` are lenient beyond Chromium.** Measured: Chromium reports
+   `background-image: none` for `url(data:…<svg … fill='rgb(0,0,255)'/>…)`; Goosie paints it. This is the
+   engine's existing first-paint behaviour, kept deliberately and pinned by unit tests; the parity fixture
+   uses only Chromium-valid forms.
+3. **The `file://` premise in §2.3 row 3 is not reachable on main.** `resolveSubresourceURL`
+   (`internal/engine/limits.go:829`) accepts only http/https for a subresource, and both callers of
+   `absolutizeCSSURLs` are linked-sheet fetches. The branch's file:// test therefore never exercised the
+   function; it was rewritten to drive an https sheet with a fake linker
+   (`TestExpandCSSImportsURLKeepsParenPayload`), and the author-sheet pipeline is covered separately by
+   `TestStyleSheetImportDataURLParenAttaches`.
+4. **One extra reader was fixed beyond §2.3's five** (the border-image shorthand, §2.3). Its branch oracle
+   passed by fixture luck; the spaced shape now fails without the fix.
+5. **Not measured here:** network-loaded images (headless installs no image fetcher, so every pixel count
+   above uses `data:` URIs); a live-site sweep for this defect (sweep #9 runs separately after merge); the
+   branch's own mutants (it produced none before it stopped — M01–M08 above were written and run by the
+   integrator on this tree).

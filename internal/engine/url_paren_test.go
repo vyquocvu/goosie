@@ -18,6 +18,7 @@ const svgParen = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><re
 // text, so a quoted data URI whose payload contains a ')' was BOTH truncated AND
 // rewritten. A data: URI must now round-trip byte for byte, while relative
 // references still resolve against the sheet URL.
+// qc:BR-212
 func TestAbsolutizeCSSURLsKeepsParenPayload(t *testing.T) {
 	const sheetURL = `https://e/x/s.css`
 	cases := []struct {
@@ -51,6 +52,7 @@ func TestAbsolutizeCSSURLsKeepsParenPayload(t *testing.T) {
 // the old scan advanced past the FIRST ')' inside the payload, so everything from
 // the cut point to the real ')' leaked back into the sheet as stray text. The
 // ')' count and the intact rgb(...) marker prove the tail is not re-emitted.
+// qc:BR-212
 func TestAbsolutizeCSSURLsNoTailGarbage(t *testing.T) {
 	in := `.a{background:url("` + svgParen + `");color:red}`
 	out := absolutizeCSSURLs(in, `https://e/x/s.css`)
@@ -69,6 +71,7 @@ func TestAbsolutizeCSSURLsNoTailGarbage(t *testing.T) {
 // importRef (§2.3 row 4): @import url("...") payloads containing a ')' must not be
 // truncated, and media conditions after the url() must still be honoured. Low
 // blast radius, stated by measurement rather than assumed.
+// qc:BR-212
 func TestImportRefURLParen(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -107,6 +110,7 @@ func TestImportRefURLParen(t *testing.T) {
 // css.ScanURL must keep that behaviour AND fix two things it did not do: a
 // stray-quote payload (the vector-background shape) and an unquoted payload with
 // balanced parentheses.
+// qc:BR-212
 func TestExtractFontURLKeepsParenPayload(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"quoted payload with ')'", `url("a)b.woff2") format("woff2")`, "a)b.woff2"},
@@ -134,6 +138,7 @@ func TestExtractFontURLKeepsParenPayload(t *testing.T) {
 // an @font-face rule parsed from a sheet, collected by collectFontJobs and
 // resolved against the sheet base. A '(' in an unquoted src payload used to cut
 // the URL at the wrong place and drop the job outright.
+// qc:BR-212
 func TestCollectFontJobsParenPayload(t *testing.T) {
 	sheet := css.Parse(`@font-face{font-family:"Paren";src:url("a)b.woff2") format("woff2");}`)
 	jobs := collectFontJobs([]*css.Stylesheet{sheet}, "https://e/x/s.css")
@@ -155,6 +160,7 @@ func TestCollectFontJobsParenPayload(t *testing.T) {
 // resolveSubresourceURL deliberately refuses any other scheme for a subresource
 // (limits.go), so a file:// base would test the security rule instead of the
 // scanner.
+// qc:BR-212
 func TestExpandCSSImportsURLKeepsParenPayload(t *testing.T) {
 	linker := func(base, href string) (string, error) {
 		if href == "https://e/p/inner.css" {

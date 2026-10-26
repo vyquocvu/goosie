@@ -10,6 +10,7 @@ import (
 // payload, balanced '(' ')/' pairs in an unquoted payload, and the malformed
 // forms that must fail closed rather than emit half a URI. Each row maps to a
 // behaviour rule in docs/tasks/TASK-050-CSS-URL-PAREN.md §3.
+// qc:BR-211
 func TestScanURLPayload(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -85,6 +86,7 @@ func TestScanURLPayload(t *testing.T) {
 // TestScanURLOffsets pins the token indices so callers that slice the original
 // declaration (absolutizeCSSURLs re-emits the untouched payload; importRef takes
 // the remainder after the url()) can do it without re-scanning.
+// qc:BR-211
 func TestScanURLOffsets(t *testing.T) {
 	for _, in := range []string{
 		`x: url("a)b") screen`,
@@ -124,6 +126,7 @@ func TestScanURLOffsets(t *testing.T) {
 
 // TestIndexURL pins the allocation-free occurrence search that
 // absolutizeCSSURLs iterates with.
+// qc:BR-211
 func TestIndexURL(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -147,6 +150,7 @@ func TestIndexURL(t *testing.T) {
 // TestScanURLBigPayload guards the cap rule of §3: the scanner adds no second
 // size limit and returns a huge payload whole rather than truncating or
 // growing work beyond a linear pass.
+// qc:BR-211
 func TestScanURLBigPayload(t *testing.T) {
 	body := strings.Repeat("a", 200_000)
 	tok, ok := ScanURL(`url("` + body + `")`)
@@ -160,6 +164,7 @@ func TestScanURLBigPayload(t *testing.T) {
 
 // TestScanURLBalancedParensBigPayload checks a pathological unquoted value with
 // many nested parens still terminates in one pass.
+// qc:BR-211
 func TestScanURLBalancedParensBigPayload(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("url(")

@@ -14,6 +14,7 @@ import (
 // truncated payload failed to decode and the box attached no background at all.
 // The parenthesis-free forms are in the same table because a regression there is
 // a blocker, not a footnote.
+// qc:BR-212
 func TestBackgroundDataURLParenAttaches(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='rgb(0,0,255)'/%3E%3C/svg%3E`
 	const svgHash = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='%230000ff'/%3E%3C/svg%3E`
@@ -69,6 +70,7 @@ func first80(s string) string {
 // <link> stylesheet body: the fetched sheet's quoted data URI keeps its payload
 // through absolutizeCSSURLs and the background still attaches. The sheet is fed
 // as an author stylesheet so the test needs no network fetcher.
+// qc:BR-212
 func TestStyleSheetImportDataURLParenAttaches(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='rgb(0,0,255)'/%3E%3C/svg%3E`
 	sheet := `.box{background-image:url("` + svgRGB + `");width:100px;height:20px;}`
