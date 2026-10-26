@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JS DOM - tree mutation and document lifecycle</title>
+<style>
+  /* One fixture, the TASK-047 API set, nothing else.  Every block painted here
+     is placed by a DOM-tree call Goosie lacked: createDocumentFragment,
+     insertBefore in both of its forms, cloneNode shallow and deep, childNodes
+     / lastChild / ownerDocument reads, getComputedStyle as the input to a
+     decision, and reveals driven by DOMContentLoaded and by load.  If any of
+     them returns nothing, a band Chromium paints stays blank here and the
+     fixture scores down.  Classes are set with setAttribute, not className:
+     TASK-047 measured that assigning className updates the JS string only and
+     never reaches the class attribute, so it cannot select here.
+
+     Two layout facts are load-bearing, both measured on the renders:
+     - the scored viewport is 800x600, and the first draft of this fixture put
+       #panel after thirteen script-built rows, so the document ran past the
+       fold (last painted row 599, zero #008000 pixels in the image).  Removing
+       the computed-style provider then changed not one pixel inside the
+       viewport - the two renders were byte-identical (md5 32607afa...) and the
+       score stayed 96.70%, so the fixture gated nothing there.  The
+       lifecycle-revealed block is therefore placed first, given three rows,
+       and its absence now costs a band Chromium paints: 25,359 green pixels
+       at rows 62-97 in this render, 25,205 in the Chromium reference.
+     - rows are 36px + 6px so everything down to the report line stays inside
+       600px and is actually compared. */
+  body { margin: 0; padding: 20px; font-family: sans-serif; color: #111; background: #fff; }
+  .row { height: 36px; margin: 0 0 6px 0; font-size: 18px; line-height: 36px; }
+  .report { font-size: 15px; line-height: 18px; margin: 0 0 6px 0; }
+  .blue { background: #0000ff; }
+  .red { background: #ff0000; }
+  .green { background: #008000; }
+  .grey { background: #808080; }
+  /* Held back by script the way a library hides a panel before opening it: the
+     rule is authored, the script reads the computed value back, and only then
+     writes the inline style that reveals three rows at once. */
+  #panel { display: none; }
+</style>
+</head>
+<body>
+  <div class="row grey">PAINTED WITHOUT SCRIPT</div>
+  <div id="panel">
+    <div class="row green">PANEL ROW ONE OPENED BY THE LIFECYCLE</div>
+    <div class="row blue">PANEL ROW TWO</div>
+    <div class="row red">PANEL ROW THREE</div>
+  </div>
+  <div id="tail"></div>
+  <div id="fragment"></div>
+  <div id="inserts"></div>
+  <div id="clones"></div>
+  <div id="original"></div>
+<script>
+  function mkDiv(cls, text) {
+    var el = document.createElement("div");
+    if (cls) el.setAttribute("class", cls);
+    el.appendChild(document.createTextNode(text));
+    return el;
+  }
+
+  // (1) createDocumentFragment.  Three rows built and appended in one flush;
+  // the fragment is empty afterwards and still reports nodeType 11, while the
+  // host now holds the three children - both facts go into the report line.
+  var frag = document.createDocumentFragment();
+  for (var i = 0; i < 3; i++) {
+    frag.appendChild(mkDiv(i === 1 ? "row blue" : i === 2 ? "row red" : "row", "FRAGMENT ROW " + i));
+  }
+  var fragHost = document.getElementById("fragment");
+  fragHost.appendChild(frag);
+  var fragReport = frag.childNodes.length + "/" + frag.nodeType + "/" + fragHost.childNodes.length;
+
+  // (2) insertBefore, both forms.  Alpha and omega arrive against null (append
+  // onto an empty host, then onto the end), and mid lands positionally before
+  // omega.  The painted order blue, grey, red is decided by these three calls
+  // alone, so sending a null reference to the front moves text into the wrong
+  // band.
+  var host = document.getElementById("inserts");
+  var alpha = mkDiv("row blue", "AGAINST NULL FIRST");
+  host.insertBefore(alpha, null);
+  var omega = mkDiv("row red", "AGAINST NULL LAST");
+  host.insertBefore(omega, null);
+  var mid = mkDiv("row grey", "BEFORE OMEGA");
+  host.insertBefore(mid, omega);
+  var insertReport = host.firstChild.firstChild.nodeValue.length + "/" + host.childNodes.length;
+
+  // (3) cloneNode, deep then shallow, over a subtree whose originals are painted
+  // too.  The clone's rows are renamed through childNodes/lastChild/nodeValue
+  // and the original keeps its own text, which is only true of a real copy and
+  // not of an aliased one.
+  var original = document.createElement("div");
+  original.appendChild(mkDiv("row blue", "ORIGINAL ROW A"));
+  original.appendChild(mkDiv("row red", "ORIGINAL ROW B"));
+  document.getElementById("original").appendChild(original);
+
+  var deep = original.cloneNode(true);
+  deep.childNodes[0].firstChild.nodeValue = "CLONED DEEP ROW A";
+  deep.lastChild.firstChild.nodeValue = "CLONED DEEP ROW B";
+  var shallow = original.cloneNode(false);
+  shallow.appendChild(document.createTextNode("SHALLOW CLONE ADDED ONE CHILD"));
+  var clones = document.getElementById("clones");
+  clones.appendChild(deep);
+  clones.appendChild(shallow);
+  var cloneReport = original.childNodes.length + "/" + deep.childNodes.length + "/" + shallow.childNodes.length;
+
+  // (4) getComputedStyle as the input to a decision, read the way jQuery's
+  // show/hide reads it - from inside a ready handler, not from body script.
+  // That placement is measured, not stylistic: Goosie runs every script before
+  // the first cascade, so an inline read came back as undefined ("INLINE CS=
+  // [undefined]" in the probe dump) and the gate never closed the loop.  Inside
+  // DOMContentLoaded the value is the authored "none", the comparison is true,
+  // and opening the panel is a mutation the session has to re-resolve before
+  // the pixels are taken.  If the provider answers nothing, or the lifecycle
+  // never fires, the three panel rows stay hidden while Chromium paints them.
+  var panel = document.getElementById("panel");
+  var hidden = "unread";
+  document.addEventListener("DOMContentLoaded", function () {
+    hidden = window.getComputedStyle(panel).display === "none";
+    if (hidden) panel.style.display = "block";
+  });
+
+  // (5) ownerDocument identity and the readyState the body script sees, both
+  // reported by a load listener - and the tree that listener mutates is still
+  // reflowed before the pixels are taken, which is the other half of the
+  // lifecycle contract.
+  var tail = document.getElementById("tail");
+  var tailRow = document.createElement("div");
+  tailRow.setAttribute("class", "report");
+  tail.appendChild(tailRow);
+  var loadingState = document.readyState;
+  window.addEventListener("load", function () {
+    tailRow.appendChild(document.createTextNode(
+      "FRAG " + fragReport + " INSERT " + insertReport + " CLONE " + cloneReport +
+      " READY " + loadingState + " THEN " + document.readyState +
+      " OWNER " + (tail.ownerDocument === document) + " HIDDEN " + hidden));
+  });
+</script>
+</body>
+</html>
