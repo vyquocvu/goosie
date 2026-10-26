@@ -206,9 +206,13 @@ func TestJSQueryContainment(t *testing.T) {
 		}
 		return v.Str
 	}
-	// Whole-document indexed queries.
-	if got := run(`var out = document.querySelectorAll("p.x").length + "/" + document.querySelectorAll("p").length;`); got != "0/3" {
-		t.Fatalf("qsa = %q, want 0/3 (compound unsupported, tag count 3)", got)
+	// Whole-document indexed queries. p.x is 3, measured in Chromium
+	// 153.0.8010.12 on this fixture (2 under #inner, 1 after #outer). This
+	// line used to expect 0/3 and pin the "compound unsupported" answer;
+	// TASK-051 routes compounds through css.Selector, so the measured answer
+	// is the right one.
+	if got := run(`var out = document.querySelectorAll("p.x").length + "/" + document.querySelectorAll("p").length;`); got != "3/3" {
+		t.Fatalf("qsa = %q, want 3/3 (compound p.x and tag p both 3)", got)
 	}
 	if got := run(`var out = document.querySelector("#s").tagName;`); got != "SPAN" {
 		t.Fatalf("qs #s = %q", got)

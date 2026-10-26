@@ -223,6 +223,13 @@ type Runtime struct {
 	wrapCache map[*dom.Node]int
 	// styleObjects preserves the per-element CSSStyleDeclaration identity.
 	styleObjects map[*dom.Node]*goja.Object
+	// selectorPlans caches query selectors compiled from the strings pages
+	// pass to querySelector/querySelectorAll/matches/closest. The general
+	// matcher tests one selector against every candidate node, so parsing it
+	// per node would make the walk O(nodes x selector length); a runtime sees
+	// the same handful of strings over and over, and the plan is a pure
+	// function of the string. Bounded by selectorCacheCap (see selector.go).
+	selectorPlans map[string]*selectorPlan
 
 	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
@@ -598,6 +605,16 @@ func (r *Runtime) setupDOM() {
 	})
 	_ = r.nodeProto.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelectorAll(call)
+	})
+	// Element.matches/closest are the other two selector entry points. They
+	// sit on the same prototype as the query roots because all of them share
+	// one compiled-selector path in selector.go: same :scope binding, same
+	// argument coercion, same SyntaxError for an invalid selector.
+	_ = r.nodeProto.Set("matches", func(call goja.FunctionCall) goja.Value {
+		return r.jsMatches(call)
+	})
+	_ = r.nodeProto.Set("closest", func(call goja.FunctionCall) goja.Value {
+		return r.jsClosest(call)
 	})
 	_ = r.nodeProto.Set("insertAdjacentHTML", func(call goja.FunctionCall) goja.Value {
 		return r.jsInsertAdjacentHTML(call)
@@ -2088,297 +2105,6 @@ func (r *Runtime) jsRemoveChild(call goja.FunctionCall) goja.Value {
 	return r.wrapNode(child)
 }
 
-// jsQuerySelector implements document.querySelector(selector).
-func (r *Runtime) jsQuerySelector(call goja.FunctionCall) goja.Value {
-	if r.domDoc == nil || len(call.Arguments) < 1 {
-		return goja.Null()
-	}
-	sel := call.Arguments[0].String()
-
-	// Determine the search root: if called on an element wrapper, search
-	// its subtree; otherwise search the whole document.
-	root := &r.domDoc.Node
-	if r.getNode(call.This) != nil {
-		root = r.getNode(call.This)
-	}
-
-	node := r.querySelector(root, sel)
-	if node == nil {
-		return goja.Null()
-	}
-	return r.wrapNode(node)
-}
-
-// jsQuerySelectorAll implements document.querySelectorAll(selector).
-func (r *Runtime) jsQuerySelectorAll(call goja.FunctionCall) goja.Value {
-	if r.domDoc == nil || len(call.Arguments) < 1 {
-		return newJSArray(r.vm, nil)
-	}
-	sel := call.Arguments[0].String()
-
-	root := &r.domDoc.Node
-	if r.getNode(call.This) != nil {
-		root = r.getNode(call.This)
-	}
-
-	nodes := r.querySelectorAll(root, sel)
-	wrapped := make([]goja.Value, len(nodes))
-	for i, n := range nodes {
-		wrapped[i] = r.wrapNode(n)
-	}
-	return newJSArray(r.vm, wrapped)
-}
-
-// jsCreateElement implements document.createElement(tag).
-func (r *Runtime) jsCreateElement(call goja.FunctionCall) goja.Value {
-	if r.domDoc == nil || len(call.Arguments) < 1 {
-		return goja.Null()
-	}
-	tag := call.Arguments[0].String()
-	node := r.domDoc.NewElement(tag)
-	return r.wrapNode(node)
-}
-
-// querySelector returns the first descendant of root (depth-first, excluding
-// root itself) that matches sel, or nil.
-func (r *Runtime) querySelector(root *dom.Node, sel string) *dom.Node {
-	if node, ok := r.querySelectorIndexed(root, sel); ok {
-		return node
-	}
-	for c := root.FirstChild; c != nil; c = c.NextSibling {
-		if r.matchSelector(c, sel) {
-			return c
-		}
-		if found := r.querySelector(c, sel); found != nil {
-			return found
-		}
-	}
-	return nil
-}
-
-// querySelectorIndexed answers simple selectors from the document indexes:
-// O(matches) instead of O(subtree). Reports ok==false when the walk must
-// still run (compound/unknown shapes, or an #id resolving outside the
-// subtree where a deeper duplicate may still match). Results equal the walk:
-// indexes enumerate in document order and containment+exclusion mirror it.
-func (r *Runtime) querySelectorIndexed(root *dom.Node, sel string) (*dom.Node, bool) {
-	doc := r.indexDocFor(root)
-	if root == nil || doc == nil || sel == "" {
-		if sel == "" {
-			return nil, true
-		}
-		return nil, false
-	}
-	switch {
-	case len(sel) > 1 && sel[0] == '#':
-		return r.querySelectorID(root, sel)
-	case len(sel) > 1 && sel[0] == '.':
-		for _, n := range doc.ElementsByClassName(sel[1:]) {
-			if containedStrict(root, n) {
-				return n, true
-			}
-		}
-		return nil, true
-	default:
-		// A lone "#" is an empty-id lookup, not a tag: the walk matches
-		// elements without ids there, so it must run.
-		if sel[0] == '#' || !isLowerTag(sel) {
-			return nil, false
-		}
-		for _, n := range doc.ElementsByTagName(sel) {
-			if containedStrict(root, n) {
-				return n, true
-			}
-		}
-		return nil, true
-	}
-}
-
-// indexDocFor returns the document whose id/tag/class indexes answer a query
-// rooted at root.
-//
-// r.domDoc is the answer for every node of the live tree, which is all a page
-// could ask for before this. document.implementation.createHTMLDocument puts a
-// second, detached document inside the same runtime, and reading the *live*
-// document's index for a query rooted in that foreign tree yields the live
-// matches filtered by "is this node a descendant of that root" - always none,
-// and reported as `ok`, so the walk never runs. The page cannot tell that
-// apart from "the element is not here", which is a wrong answer rather than an
-// unsupported one: jQuery's Sizzle support probes and its parseHTML context
-// both query a detached document.
-func (r *Runtime) indexDocFor(root *dom.Node) *dom.Document {
-	if root != nil && root.Doc != nil {
-		return root.Doc
-	}
-	return r.domDoc
-}
-
-// containedStrict reports whether n is a proper descendant of root.
-func containedStrict(root, n *dom.Node) bool {
-	if n == nil || n == root {
-		return false
-	}
-	for p := n.Parent; p != nil; p = p.Parent {
-		if p == root {
-			return true
-		}
-	}
-	return false
-}
-
-// isLowerTag reports whether sel is already lowercase ASCII: only then does
-// the atom-indexed tag lookup answer exactly what the case-insensitive walk
-// would (parsed documents always carry lowercase tags).
-func isLowerTag(sel string) bool {
-	if sel == "" {
-		return false
-	}
-	for i := 0; i < len(sel); i++ {
-		if c := sel[i]; c >= 'A' && c <= 'Z' {
-			return false
-		}
-	}
-	return true
-}
-
-// querySelectorID answers a bare #id query from the document index: O(depth)
-// instead of O(subtree). It reports ok==false when the walk must still run:
-// a hit on root itself (the walk never tests root, but a deeper duplicate
-// still matches) or a hit outside an element-rooted subtree. A document-wide
-// miss answers nil directly: no element carries that id, so the walk could
-// only return nil too.
-func (r *Runtime) querySelectorID(root *dom.Node, sel string) (node *dom.Node, ok bool) {
-	doc := r.indexDocFor(root)
-	if root == nil || doc == nil || len(sel) < 2 || sel[0] != '#' {
-		return nil, false
-	}
-	node = doc.ElementByID(sel[1:])
-	if node == nil {
-		return nil, true
-	}
-	if node == root {
-		return nil, false
-	}
-	for p := node.Parent; p != nil; p = p.Parent {
-		if p == root {
-			return node, true
-		}
-	}
-	return nil, false
-}
-
-// querySelectorAll returns every descendant of root that matches sel.
-func (r *Runtime) querySelectorAll(root *dom.Node, sel string) []*dom.Node {
-	if nodes, ok := r.querySelectorAllIndexed(root, sel); ok {
-		return nodes
-	}
-	var result []*dom.Node
-	r.collectMatching(root, sel, &result)
-	return result
-}
-
-// querySelectorAllIndexed answers simple selectors from the document
-// indexes, filtering to the rooted subtree. Same ordering and membership as
-// the walk; ok==false falls back to it.
-func (r *Runtime) querySelectorAllIndexed(root *dom.Node, sel string) ([]*dom.Node, bool) {
-	doc := r.indexDocFor(root)
-	if root == nil || doc == nil || sel == "" {
-		if sel == "" {
-			return nil, true
-		}
-		return nil, false
-	}
-	var all []*dom.Node
-	switch {
-	case len(sel) > 1 && sel[0] == '.':
-		all = doc.ElementsByClassName(sel[1:])
-	case isLowerTag(sel) && sel[0] != '#':
-		all = doc.ElementsByTagName(sel)
-	default:
-		return nil, false
-	}
-	if root == &r.domDoc.Node {
-		return all, true
-	}
-	var out []*dom.Node
-	for _, n := range all {
-		if containedStrict(root, n) {
-			out = append(out, n)
-		}
-	}
-	return out, true
-}
-
-func (r *Runtime) collectMatching(n *dom.Node, sel string, result *[]*dom.Node) {
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if r.matchSelector(c, sel) {
-			*result = append(*result, c)
-		}
-		r.collectMatching(c, sel, result)
-	}
-}
-
-// matchSelector reports whether n matches a simple CSS selector. Supported
-// forms are tag name ("p"), ID ("#main"), and class (".active").
-func (r *Runtime) matchSelector(n *dom.Node, sel string) bool {
-	if !n.Element() {
-		return false
-	}
-	if sel == "" {
-		return false
-	}
-
-	switch {
-	case strings.HasPrefix(sel, "#"):
-		return n.GetAttribute("id") == sel[1:]
-	case strings.HasPrefix(sel, "."):
-		class := sel[1:]
-		for _, c := range n.ClassList() {
-			if c == class {
-				return true
-			}
-		}
-		return false
-	case len(sel) > 2 && sel[0] == '[' && sel[len(sel)-1] == ']':
-		// Bare attribute selector: [name] or [name=value] with an
-		// optionally quoted value. Compounds (tag[attr], [a][b]) stay
-		// unsupported and report no match, as pinned by the query tests.
-		return matchAttrSelector(n, sel[1:len(sel)-1])
-	default:
-		return strings.EqualFold(n.Data, sel)
-	}
-}
-
-// matchAttrSelector matches one [name] or [name=value] selector against an
-// element. Attribute names compare case-insensitively (HTML); values compare
-// exactly after stripping one layer of matching quotes.
-func matchAttrSelector(n *dom.Node, inner string) bool {
-	name, value, hasValue := inner, "", false
-	if i := strings.IndexByte(inner, '='); i >= 0 {
-		name, value, hasValue = inner[:i], inner[i+1:], true
-	}
-	name = strings.TrimSpace(name)
-	if name == "" || strings.ContainsAny(name, " \t\n\"'[]") {
-		return false
-	}
-	actual, present := "", false
-	for _, a := range n.Attr {
-		if strings.EqualFold(a.Name, name) {
-			actual, present = a.Value, true
-			break
-		}
-	}
-	if !hasValue {
-		return present
-	}
-	value = strings.TrimSpace(value)
-	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
-		(value[0] == '\'' && value[len(value)-1] == '\'')) {
-		value = value[1 : len(value)-1]
-	}
-	return present && actual == value
-}
-
 // newJSArray builds a JS Array from a slice of goja values.
 func newJSArray(vm *goja.Runtime, vals []goja.Value) *goja.Object {
 	arr := vm.NewArray()
@@ -3148,6 +2874,16 @@ func (r *Runtime) jsGetElementsByTagName(call goja.FunctionCall) goja.Value {
 		wrapped[i] = r.wrapNode(n)
 	}
 	return newJSArray(r.vm, wrapped)
+}
+
+// jsCreateElement implements document.createElement(tag).
+func (r *Runtime) jsCreateElement(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil || len(call.Arguments) < 1 {
+		return goja.Null()
+	}
+	tag := call.Arguments[0].String()
+	node := r.domDoc.NewElement(tag)
+	return r.wrapNode(node)
 }
 
 // jsCreateTextNode implements document.createTextNode(text).
