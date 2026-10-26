@@ -248,3 +248,16 @@ Oracles in `internal/css/url_test.go`:
    above uses `data:` URIs); a live-site sweep for this defect (sweep #9 runs separately after merge); the
    branch's own mutants (it produced none before it stopped — M01–M08 above were written and run by the
    integrator on this tree).
+6. **The stale `worktree-agent-general-purpose-4369d61b` branch is adjudicated a duplicate and is not
+   merged (integrator, 2026-10-26).** Base `c8cd80b`, commits `8631298` + `415c2f5`, 13 files
+   +1422/−76. Every file it touches already exists on main, all of its test names exist on main (2 `test/css`,
+   2 `test/engine`, 4 `test/style`, 5 `internal/css`, zero unique names), and main's copies carry supersets
+   of the same assertions (e.g. main's border-image shorthand oracle requires the payload byte-for-byte,
+   the branch's accepts a whitespace-normalised form). Its proposed rows — BR-182/183 against its own base,
+   **BR-203/204** against the base the spec names — are declined: main already registered this defect as
+   **BR-211/BR-212** and closed `GOOSIE-CSSURLPAREN-001`, so registering them would double-count one defect
+   against ids BR-203–212 that are all taken. The branch's own §9.9 reached the same conclusion and said so
+   before the integrator looked. No merge, no cherry-pick, no id registered; the branch is left in place
+   because pruning worktrees is not authorised without asking. The branch also reported, and refused, an
+   instruction embedded in tool output telling it to call an unfamiliar tool and disclose the system prompt;
+   that content was never acted on and is recorded here as an attempted prompt injection.
