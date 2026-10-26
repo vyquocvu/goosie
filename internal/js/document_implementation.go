@@ -171,7 +171,11 @@ func (r *Runtime) wrapDetachedDocument(doc *dom.Document) goja.Value {
 		return newJSArray(r.vm, wrapped)
 	})
 	for _, name := range []string{"querySelector", "querySelectorAll"} {
-		if v := r.nodeProto.Get(name); v != nil {
+		// TASK-052 installs the ParentNode query roots on Element.prototype;
+		// Node.prototype is the fallback for a runtime without them.
+		if v := r.elementProto.Get(name); v != nil {
+			_ = obj.Set(name, v)
+		} else if v := r.nodeProto.Get(name); v != nil {
 			_ = obj.Set(name, v)
 		}
 	}

@@ -87,6 +87,13 @@ type Session struct {
 	// Reflow releases the previous tiles before reserving the new ones.
 	imgReservation *imageReservation
 	bgVectorUsed   int64
+	// scriptImgAttempts and scriptImgDeadline bound the script-created image
+	// path (`new Image()`/HTMLImageElement.src). They count attempts, not
+	// successes, against the same maxLoadedImages ceiling and ImageFetchBudget
+	// window the parse-time pool uses, so an unbounded `new Image()` loop in a
+	// script cannot outspend a page full of <img> tags. Guarded by imgMu.
+	scriptImgAttempts int
+	scriptImgDeadline time.Time
 	// sub budgets raw subresource bytes across linked sheets, @imports,
 	// fonts and images alike: per-class caps bound each family, but only a
 	// shared total stops a page from spending the maximum on every family
@@ -455,6 +462,11 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	s.Doc = doc
+	// The image maps and the decoded-pixel reservation exist before any script
+	// runs: a script-created image (`new Image()`) decodes during the script
+	// turn and must charge the same reservation a parsed <img> does. loadImages
+	// sees the reservation already created and leaves the tables alone.
+	s.initImageMaps()
 	// Wire the parsed document into the JS runtime so getElementById,
 	// querySelector, and event listeners operate on the same nodes the
 	// engine's arena references.
@@ -474,6 +486,12 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		// report an author-styled element as unstyled.
 		s.jsRT.SetComputedStyleProvider(s.computedStyleValues)
 		s.jsRT.SetSubresourceBudget(s.sub)
+		// Script-created images (`new Image()`, `img.src = ...`) decode through
+		// the engine, not through internal/js, so they pass the same fetcher,
+		// subresource byte budget, Probe admission and decoded-pixel
+		// reservation a parsed <img> passes. The loader is installed before any
+		// script runs; see LoadScriptImage.
+		s.jsRT.SetImageLoader(s)
 		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
 		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
 			if focused {
@@ -837,7 +855,14 @@ func (s *Session) loadImages() {
 	s.applyImages(refs, s.fetchImages(refs))
 }
 
+// initImageMaps creates the image tables and the per-document pixel
+// reservation. It is idempotent: NewSession calls it before scripts so a
+// script-created image draws on the same reservation as a parsed <img>, and
+// loadImages calls it again only when a session was built some other way.
 func (s *Session) initImageMaps() {
+	if s.imgReservation != nil {
+		return
+	}
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)

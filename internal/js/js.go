@@ -148,6 +148,15 @@ type Options struct {
 
 	// HighContrast indicates whether the host environment prefers increased contrast.
 	HighContrast bool
+
+	// ImageLoader resolves the source a script assigned to an
+	// HTMLImageElement (the `Image` constructor path). The engine installs its
+	// own loader so a script-created image passes the same encoded-size,
+	// dimension and decoded-pixel caps a parsed <img> passes. When nil, an
+	// image that is given a source settles as an error instead of decoding:
+	// the binding never decodes bytes itself, because internal/js may not
+	// import internal/image (see internal/archtest/rules.go).
+	ImageLoader ImageLoader
 }
 
 // Kind is the JS type of a Value read back out of a runtime.
@@ -213,6 +222,29 @@ type Runtime struct {
 	nodeRegistry map[int]*dom.Node
 	nextNID      int
 	nodeProto    *goja.Object
+	// eventTargetProto/elementProto/htmlElementProto/documentProto are the
+	// shared WebIDL interfaces every wrapper inherits through [[Prototype]]:
+	// EventTarget > Node > Element > HTMLElement > per-tag interface. tagProtos
+	// caches one prototype per HTML tag lazily; ifaceCtors caches the
+	// constructors that answer `instanceof`. See element_interfaces.go.
+	eventTargetProto *goja.Object
+	elementProto     *goja.Object
+	htmlElementProto *goja.Object
+	documentProto    *goja.Object
+	tagProtos        map[string]*goja.Object
+	ifaceCtors       map[string]*goja.Object
+	// classListObjects and attributesObjects preserve per-element identity of
+	// the live DOMTokenList and NamedNodeMap, as browsers do.
+	classListObjects  map[*dom.Node]*goja.Object
+	attributesObjects map[*dom.Node]*goja.Object
+	// imageStates holds the load state a script-created HTMLImageElement
+	// reflects (complete/naturalWidth/naturalHeight/currentSrc and the
+	// decode() waiters). parsed <img> elements have no entry.
+	imageStates map[*dom.Node]*imageLoadState
+	// onHandlers holds the onload/onerror handler registered by assignment,
+	// which is wired as a real DOM listener so dispatch order matches
+	// addEventListener.
+	onHandlers map[*dom.Node]map[string]*jsEventHandler
 	// wrapCache maps a DOM node to its single wrapper nid, so repeated
 	// queries over the same nodes reuse one wrapper instead of compiling
 	// accessors and closures per hit. Wrapping the same node twice used to
@@ -540,12 +572,17 @@ func (r *Runtime) setupDOM() {
 	r.shadowRoots = make(map[int]*goja.Object)
 	r.wrapCache = make(map[*dom.Node]int)
 	r.styleObjects = make(map[*dom.Node]*goja.Object)
+	r.classListObjects = make(map[*dom.Node]*goja.Object)
+	r.attributesObjects = make(map[*dom.Node]*goja.Object)
+	r.imageStates = make(map[*dom.Node]*imageLoadState)
+	r.onHandlers = make(map[*dom.Node]map[string]*jsEventHandler)
 	r.nextNID = 1
 
-	// Build a shared prototype for element wrapper objects. Each wrapper
-	// stores a __nid__ (registry key) that the prototype methods use to
-	// look up the real *dom.Node.
-	r.nodeProto = r.vm.NewObject()
+	// Build the shared WebIDL interface chain once: EventTarget > Node >
+	// Element > HTMLElement > per-tag interface. Each wrapper stores a __nid__
+	// (registry key) that inherited accessors use to look up the real
+	// *dom.Node; nothing per-node is installed beyond that key and nodeType.
+	r.setupProtoChain()
 	_ = r.nodeProto.Set("appendChild", func(call goja.FunctionCall) goja.Value {
 		return r.jsAppendChild(call)
 	})
@@ -561,68 +598,65 @@ func (r *Runtime) setupDOM() {
 	_ = r.nodeProto.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value {
 		return r.jsDispatchEvent(call)
 	})
-	_ = r.nodeProto.Set("focus", func(call goja.FunctionCall) goja.Value {
+	_ = r.htmlElementProto.Set("focus", func(call goja.FunctionCall) goja.Value {
 		if node := r.getNode(call.This); node != nil && r.opts.OnFocusChange != nil {
 			r.opts.OnFocusChange(node, true)
 		}
 		return goja.Undefined()
 	})
-	_ = r.nodeProto.Set("blur", func(call goja.FunctionCall) goja.Value {
+	_ = r.htmlElementProto.Set("blur", func(call goja.FunctionCall) goja.Value {
 		if node := r.getNode(call.This); node != nil && r.opts.OnFocusChange != nil {
 			r.opts.OnFocusChange(node, false)
 		}
 		return goja.Undefined()
 	})
-	_ = r.nodeProto.Set("getAttribute", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("getAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetAttribute(call)
 	})
-	_ = r.nodeProto.Set("setAttribute", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("setAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsSetAttribute(call)
 	})
-	_ = r.nodeProto.Set("setAttributeNS", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("setAttributeNS", func(call goja.FunctionCall) goja.Value {
 		return r.jsSetAttributeNS(call)
 	})
-	_ = r.nodeProto.Set("removeAttribute", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("removeAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsRemoveAttribute(call)
 	})
-	_ = r.nodeProto.Set("hasAttribute", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("hasAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsHasAttribute(call)
 	})
-	_ = r.nodeProto.Set("remove", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("remove", func(call goja.FunctionCall) goja.Value {
 		return r.jsRemove(call)
 	})
-	_ = r.nodeProto.Set("createElement", func(call goja.FunctionCall) goja.Value {
-		return r.jsCreateElement(call)
-	})
-	_ = r.nodeProto.Set("getContext", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("getContext", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetContext(call)
 	})
 	// ParentNode query roots: jsQuerySelector(All) already resolve the root
 	// from call.This, so the same handlers serve document and elements with
 	// document-order, subtree-scoped results.
-	_ = r.nodeProto.Set("querySelector", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("querySelector", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelector(call)
 	})
-	_ = r.nodeProto.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelectorAll(call)
 	})
 	// Element.matches/closest are the other two selector entry points. They
 	// sit on the same prototype as the query roots because all of them share
 	// one compiled-selector path in selector.go: same :scope binding, same
 	// argument coercion, same SyntaxError for an invalid selector.
-	_ = r.nodeProto.Set("matches", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("matches", func(call goja.FunctionCall) goja.Value {
 		return r.jsMatches(call)
 	})
-	_ = r.nodeProto.Set("closest", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("closest", func(call goja.FunctionCall) goja.Value {
 		return r.jsClosest(call)
 	})
-	_ = r.nodeProto.Set("insertAdjacentHTML", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("insertAdjacentHTML", func(call goja.FunctionCall) goja.Value {
 		return r.jsInsertAdjacentHTML(call)
 	})
-	_ = r.nodeProto.Set("prepend", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("prepend", func(call goja.FunctionCall) goja.Value {
 		return r.jsPrepend(call)
 	})
-	_ = r.nodeProto.Set("append", func(call goja.FunctionCall) goja.Value {
+	_ = r.elementProto.Set("append", func(call goja.FunctionCall) goja.Value {
 		return r.jsAppend(call)
 	})
 	// The child-list mutation and traversal API (insertBefore, replaceChild,
@@ -630,47 +664,24 @@ func (r *Runtime) setupDOM() {
 	// same prototype, so a document fragment created by
 	// document.createDocumentFragment() answers them like any other node.
 	r.installNodeTreeMethods()
-	// Set the prototype as a temporary global so RunString can reference it.
-	_ = r.vm.Set("__nodeProto__", r.nodeProto)
-	_, _ = r.vm.RunString(`
-		Object.defineProperty(__nodeProto__, 'textContent', {
-			get: function() {
-				var nid = this.__nid__;
-				if (nid === undefined) return '';
-				return document.__getTextContent__(nid);
-			},
-			set: function(v) {
-				var nid = this.__nid__;
-				if (nid === undefined) return;
-				document.__setTextContent__(nid, String(v));
-			},
-			configurable: true,
-			enumerable: true
-		});
-	`)
-	_ = r.vm.Set("__nodeProto__", nil)
-
-	// innerHTML getter/setter on nodeProto.
-	_ = r.vm.Set("__nodeProto__", r.nodeProto)
-	_, _ = r.vm.RunString(`
-		Object.defineProperty(__nodeProto__, 'innerHTML', {
-			get: function() {
-				var nid = this.__nid__;
-				if (nid === undefined) return '';
-				return document.__getInnerHTML__(nid);
-			},
-			set: function(v) {
-				var nid = this.__nid__;
-				if (nid === undefined) return;
-				document.__setInnerHTML__(nid, String(v));
-			},
-			configurable: true,
-			enumerable: true
-		});
-	`)
-	_ = r.vm.Set("__nodeProto__", nil)
+	// document.createElement belongs to Document, but the pre-TASK-052 binding
+	// exposed it on every node and a measured www.gov.vn setup gate calls
+	// `document.documentElement.createElement('fieldset')` (see
+	// TestLibrarySetupGatePassesTheDocument). Keep the permissive receiver so
+	// that gate keeps passing; Document installs its own copy below.
+	_ = r.nodeProto.Set("createElement", func(call goja.FunctionCall) goja.Value {
+		return r.jsCreateElement(call)
+	})
+	// textContent (Node) and innerHTML (Element) are inherited accessors, not
+	// per-node copies. See element_interfaces.go.
+	r.installNodeAccessors()
+	r.installElementAccessors()
 
 	doc := r.vm.Get("document").(*goja.Object)
+	// The document is a Node and a Document, so it inherits the tree API from
+	// Node.prototype and answers `document instanceof Node`/`Document`. Its own
+	// methods below shadow the inherited ones where the behaviour differs.
+	_ = doc.SetPrototype(r.documentProto)
 
 	_ = doc.Set("querySelector", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelector(call)
@@ -722,8 +733,8 @@ func (r *Runtime) setupDOM() {
 	r.wrapCache[&r.domDoc.Node] = docNID
 	// The document is a Node, so the child-list reads work on it too:
 	// `document.childNodes`, `document.firstChild` (the doctype on a real page)
-	// and `document.ownerDocument`, which is null per the standard.
-	r.defineNodeAccessors(doc, &r.domDoc.Node)
+	// and `document.ownerDocument`, which is null per the standard. Those are
+	// inherited from Node.prototype through the Document prototype set above.
 	// document.implementation.createHTMLDocument: jQuery's load-time support
 	// probe calls it, so without it the library never finishes installing itself.
 	r.setupDocumentImplementation()
@@ -1204,7 +1215,9 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	}
 	if nid, ok := r.wrapCache[node]; ok {
 		if obj := r.nodeWrappers[nid]; obj != nil {
-			r.refreshWrapSnapshots(obj, node)
+			// No snapshot refresh: every reflected property is an accessor on
+			// the interface prototype and reads the live node, so a cached
+			// wrapper answers exactly what a fresh one would.
 			return obj
 		}
 	}
@@ -1224,167 +1237,17 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	// refresh when a cached wrapper is returned.
 	_ = obj.Set("nodeType", domNodeType(node.Type))
 
-	// Copy prototype properties onto the instance. goja does not support
-	// __proto__ assignment on objects created with NewObject, so we copy
-	// the methods directly.
-	if r.nodeProto != nil {
-		for _, key := range r.nodeProto.Keys() {
-			_ = obj.Set(key, r.nodeProto.Get(key))
-		}
-		// Re-define textContent as an accessor on this instance, since
-		// the copy above only copies the data descriptor, not the
-		// getter/setter.
-		r.defineTextContentAccessor(obj)
-		// Re-define innerHTML as an accessor on this instance.
-		r.defineInnerHTMLAccessor(obj)
-		// Live dataset map, re-defined per instance like the accessors above.
-		r.defineDatasetAccessor(obj)
-		r.defineStyleAccessor(obj, node)
-		// Live element accessors: children, parentElement, firstElementChild, etc.
-		r.defineElementAccessors(obj)
-		// Live node accessors: childNodes, firstChild, lastChild, siblings,
-		// ownerDocument, nodeValue, isConnected.
-		r.defineNodeAccessors(obj, node)
-	}
+	// The wrapper's [[Prototype]] is the element's interface prototype, so
+	// methods and reflected accessors are inherited once per runtime rather
+	// than copied per node. nodeType stays an own data property because it is
+	// read on every tree walk and never changes.
+	_ = obj.SetPrototype(r.protoForNode(node))
 
-	// The non-element types have a spec name too - "#text", "#comment",
-	// "#document-fragment", "#doctype" - and the element branch below overwrites
-	// this with the uppercase tag. A leaf node answering undefined for nodeName
-	// reads to a selector engine as "not a node I recognise", which is a wrong
-	// result rather than a missing feature: Sizzle lowercases nodeName on every
-	// node it walks, and jQuery 3.6.0 reads it 27 times in the shipped bundle.
-	if !node.Element() {
-		_ = obj.Set("nodeName", nodeStaticName(node))
-	}
-
-	// Element-specific properties.
+	// Per-instance methods that are not inheritable because they capture the
+	// node (media controllers, dialog state, popover state) still belong to
+	// this wrapper. Input checked/value, video accessors, dialog methods and
+	// popover methods are installed here only for the tags that answer them.
 	if node.Element() {
-		_ = obj.Set("tagName", strings.ToUpper(node.Data))
-		_ = obj.Set("nodeName", strings.ToUpper(node.Data))
-		r.defineIdAccessor(obj)
-		_ = obj.Set("className", node.GetAttribute("class"))
-		_ = obj.Set("lang", node.GetAttribute("lang"))
-		_ = obj.Set("dir", node.GetAttribute("dir"))
-		if node.Data == "input" {
-			typ := strings.ToLower(node.GetAttribute("type"))
-			if typ == "" {
-				typ = "text"
-			}
-			_ = obj.Set("type", typ)
-		}
-
-		// classList with add/remove/toggle/contains methods.
-		// The closures capture `node` directly because call.This inside
-		// classList methods refers to the classList object, not the element
-		// wrapper, so r.getNode(call.This) would return nil.
-		classList := r.vm.NewObject()
-		_ = classList.Set("add", func(call goja.FunctionCall) goja.Value {
-			if len(call.Arguments) < 1 {
-				return goja.Undefined()
-			}
-			cls := call.Arguments[0].String()
-			if cls == "" {
-				return goja.Undefined()
-			}
-			existing := node.ClassList()
-			for _, c := range existing {
-				if c == cls {
-					return goja.Undefined()
-				}
-			}
-			existing = append(existing, cls)
-			node.SetAttribute("class", strings.Join(existing, " "))
-			r.notifyMutation()
-			return goja.Undefined()
-		})
-		_ = classList.Set("remove", func(call goja.FunctionCall) goja.Value {
-			if len(call.Arguments) < 1 {
-				return goja.Undefined()
-			}
-			cls := call.Arguments[0].String()
-			if cls == "" {
-				return goja.Undefined()
-			}
-			existing := node.ClassList()
-			filtered := make([]string, 0, len(existing))
-			found := false
-			for _, c := range existing {
-				if c != cls {
-					filtered = append(filtered, c)
-				} else {
-					found = true
-				}
-			}
-			if !found {
-				return goja.Undefined()
-			}
-			if len(filtered) == 0 {
-				// Remove the attribute entirely if no classes remain.
-				for i := range node.Attr {
-					if strings.ToLower(node.Attr[i].Name) == "class" {
-						node.Attr = append(node.Attr[:i], node.Attr[i+1:]...)
-						if node.Doc != nil {
-							node.Doc.MarkQueryDirty()
-						}
-						break
-					}
-				}
-			} else {
-				node.SetAttribute("class", strings.Join(filtered, " "))
-			}
-			r.notifyMutation()
-			return goja.Undefined()
-		})
-		_ = classList.Set("toggle", func(call goja.FunctionCall) goja.Value {
-			if len(call.Arguments) < 1 {
-				return goja.Undefined()
-			}
-			cls := call.Arguments[0].String()
-			if cls == "" {
-				return goja.Undefined()
-			}
-			existing := node.ClassList()
-			for i, c := range existing {
-				if c == cls {
-					// Remove it.
-					rest := append(existing[:i], existing[i+1:]...)
-					if len(rest) == 0 {
-						for j := range node.Attr {
-							if strings.ToLower(node.Attr[j].Name) == "class" {
-								node.Attr = append(node.Attr[:j], node.Attr[j+1:]...)
-								if node.Doc != nil {
-									node.Doc.MarkQueryDirty()
-								}
-								break
-							}
-						}
-					} else {
-						node.SetAttribute("class", strings.Join(rest, " "))
-					}
-					r.notifyMutation()
-					return r.vm.ToValue(false)
-				}
-			}
-			// Add it.
-			existing = append(existing, cls)
-			node.SetAttribute("class", strings.Join(existing, " "))
-			r.notifyMutation()
-			return r.vm.ToValue(true)
-		})
-		_ = classList.Set("contains", func(call goja.FunctionCall) goja.Value {
-			if len(call.Arguments) < 1 {
-				return r.vm.ToValue(false)
-			}
-			cls := call.Arguments[0].String()
-			for _, c := range node.ClassList() {
-				if c == cls {
-					return r.vm.ToValue(true)
-				}
-			}
-			return r.vm.ToValue(false)
-		})
-		_ = obj.Set("classList", classList)
-
 		if node.Data == "input" {
 			r.defineCheckedAccessor(obj)
 			r.defineValueAccessor(obj)
@@ -1399,75 +1262,6 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	}
 
 	return obj
-}
-
-// refreshWrapSnapshots rewrites the data properties a fresh wrapNode would
-// set, so a reused wrapper reads exactly what a new one would. Accessors
-// (textContent/innerHTML/id/value/checked) and the classList closures are
-// already installed and stay live against the same node.
-func (r *Runtime) refreshWrapSnapshots(obj *goja.Object, node *dom.Node) {
-	if !node.Element() {
-		return
-	}
-	_ = obj.Set("tagName", strings.ToUpper(node.Data))
-	_ = obj.Set("nodeName", strings.ToUpper(node.Data))
-	_ = obj.Set("className", node.GetAttribute("class"))
-	_ = obj.Set("lang", node.GetAttribute("lang"))
-	_ = obj.Set("dir", node.GetAttribute("dir"))
-	if node.Data == "input" {
-		typ := strings.ToLower(node.GetAttribute("type"))
-		if typ == "" {
-			typ = "text"
-		}
-		_ = obj.Set("type", typ)
-	}
-}
-
-// defineTextContentAccessor installs the textContent getter/setter on obj
-// using Object.defineProperty via a RunString helper.
-func (r *Runtime) defineTextContentAccessor(obj *goja.Object) {
-	// We use a temporary global to pass the object to RunString.
-	_ = r.vm.Set("__tcTarget__", obj)
-	_, _ = r.vm.RunString(`
-		Object.defineProperty(__tcTarget__, 'textContent', {
-			get: function() {
-				var nid = this.__nid__;
-				if (nid === undefined) return '';
-				return document.__getTextContent__(nid);
-			},
-			set: function(v) {
-				var nid = this.__nid__;
-				if (nid === undefined) return;
-				document.__setTextContent__(nid, String(v));
-			},
-			configurable: true,
-			enumerable: true
-		});
-	`)
-	_ = r.vm.Set("__tcTarget__", nil)
-}
-
-// defineInnerHTMLAccessor installs the innerHTML getter/setter on obj
-// using Object.defineProperty via a RunString helper.
-func (r *Runtime) defineInnerHTMLAccessor(obj *goja.Object) {
-	_ = r.vm.Set("__ihTarget__", obj)
-	_, _ = r.vm.RunString(`
-		Object.defineProperty(__ihTarget__, 'innerHTML', {
-			get: function() {
-				var nid = this.__nid__;
-				if (nid === undefined) return '';
-				return document.__getInnerHTML__(nid);
-			},
-			set: function(v) {
-				var nid = this.__nid__;
-				if (nid === undefined) return;
-				document.__setInnerHTML__(nid, String(v));
-			},
-			configurable: true,
-			enumerable: true
-		});
-	`)
-	_ = r.vm.Set("__ihTarget__", nil)
 }
 
 func (r *Runtime) defineCheckedAccessor(obj *goja.Object) {
@@ -1714,132 +1508,6 @@ func (r *Runtime) closeOpenAutoPopovers(except *dom.Node) {
 		}
 	}
 	walk(&r.domDoc.Node)
-}
-
-// defineIdAccessor installs a live id getter/setter on obj: reading reflects
-// the current attribute (not the wrap-time snapshot) and writing sets it, so
-// `div.id = "g"` retargets getElementById and #g selectors.
-func (r *Runtime) defineIdAccessor(obj *goja.Object) {
-	_ = r.vm.Set("__idTarget__", obj)
-	_, _ = r.vm.RunString(`
-		Object.defineProperty(__idTarget__, 'id', {
-			get: function() {
-				var nid = this.__nid__;
-				if (nid === undefined) return '';
-				return document.__getId__(nid);
-			},
-			set: function(v) {
-				var nid = this.__nid__;
-				if (nid === undefined) return;
-				document.__setId__(nid, String(v));
-			},
-			configurable: true,
-			enumerable: true
-		});
-	`)
-	_ = r.vm.Set("__idTarget__", nil)
-}
-
-// defineDatasetAccessor installs a live dataset (DOMStringMap) getter on obj.
-// Each access builds a fresh map object for the element's current data-*
-// attributes, wrapped in a Proxy so brand-new keys assign straight through
-// to setAttribute instead of dying as dead JS properties. Reads of unknown
-// keys stay undefined, as in browsers.
-func (r *Runtime) defineDatasetAccessor(obj *goja.Object) {
-	_ = r.vm.Set("__dsTarget__", obj)
-	_, _ = r.vm.RunString(`
-		Object.defineProperty(__dsTarget__, 'dataset', {
-			get: function() {
-				var nid = this.__nid__;
-				if (nid === undefined) return {};
-				var map = document.__getDataset__(nid);
-				var toAttr = function(k) {
-					return 'data-' + String(k).replace(/[A-Z]/g, function(c) {
-						return '-' + c.toLowerCase();
-					});
-				};
-				return new Proxy(map, {
-					get: function(t, k) {
-						if (typeof k !== 'string') return t[k];
-						var cur = t[k];
-						if (cur !== undefined) return cur;
-						if (k === '__nid__') return nid;
-						var v = document.__getDatasetAttr__(nid, toAttr(k));
-						return v === null ? undefined : v;
-					},
-					set: function(t, k, v) {
-						if (typeof k !== 'string' || k === '__nid__') return true;
-						document.__setDatasetAttr__(map, nid, toAttr(k), String(v));
-						return true;
-					}
-				});
-			},
-			configurable: true,
-			enumerable: true
-		});
-	`)
-	_ = r.vm.Set("__dsTarget__", nil)
-}
-
-func (r *Runtime) defineElementAccessors(obj *goja.Object) {
-	_ = r.vm.Set("__elTarget__", obj)
-	_, _ = r.vm.RunString(`
-		Object.defineProperties(__elTarget__, {
-			children: {
-				get: function() {
-					var nid = this.__nid__;
-					if (nid === undefined) return [];
-					return document.__getChildren__(nid);
-				},
-				configurable: true,
-				enumerable: true
-			},
-			firstElementChild: {
-				get: function() {
-					var ch = this.children;
-					return (ch && ch.length > 0) ? ch[0] : null;
-				},
-				configurable: true,
-				enumerable: true
-			},
-			lastElementChild: {
-				get: function() {
-					var ch = this.children;
-					return (ch && ch.length > 0) ? ch[ch.length - 1] : null;
-				},
-				configurable: true,
-				enumerable: true
-			},
-			parentElement: {
-				get: function() {
-					var nid = this.__nid__;
-					if (nid === undefined) return null;
-					return document.__getParentElement__(nid);
-				},
-				configurable: true,
-				enumerable: true
-			},
-			parentNode: {
-				get: function() {
-					var nid = this.__nid__;
-					if (nid === undefined) return null;
-					return document.__getParentNode__(nid);
-				},
-				configurable: true,
-				enumerable: true
-			},
-			shadowRoot: {
-				get: function() {
-					var nid = this.__nid__;
-					if (nid === undefined) return null;
-					return document.__getShadowRoot__(nid);
-				},
-				configurable: true,
-				enumerable: true
-			}
-		});
-	`)
-	_ = r.vm.Set("__elTarget__", nil)
 }
 
 func (r *Runtime) jsInsertAdjacentHTML(call goja.FunctionCall) goja.Value {
