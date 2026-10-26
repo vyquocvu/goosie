@@ -67,6 +67,21 @@ gov.vn, bundle nằm ngoài (`grep` cho 22 thẻ `<script src>`, không có `jQu
 `createDocumentFragment` chỉ đo được trên trang inline, còn trên bản lưu thì chỉ đo được
 hậu quả (`$ is not defined`).
 
+Log và script của từng thí nghiệm (tất cả ngoài repo, giữ nguyên để đối chiếu dòng nào tới từ đâu):
+
+| Artifact | Là gì | Chứng minh cho |
+| --- | --- | --- |
+| `base-src/` | bản export của `fe4928c` (không có `.git`) | mọi phép so sánh "trước change"; vì không có git nên ba test `test/gatecheck` RCSweep ở đó đỏ **do môi trường**, khai rõ ở §7.1 |
+| `goosie-base`, `goosie-mutant`, `goosie-muc`, `goosie-mud` | binary HEAD / mutant `insertBefore(x,nil)` / mutant bỏ provider / mutant bỏ `DOMContentLoaded` | §3.3 — bốn con số 36.03 / 61.93 / 42.97 / 42.97% |
+| `headless-base`, `headless-after`, `probe-base`, `probe-after` | `cmd/goosie-headless` và bản probe hai phía | §1.2, §4.2, §4.3, §4.4 |
+| `mutation-recheck.log`, `mutation-recheck2.log` | hai round chạy lại mutation trên cây cuối | §3.2 (M08/M16/M21/MU-A và M02/M05/M06/M11) |
+| `fixture-oracle.log`, `fixture-oracle.sh` | lệnh harness + điểm `parity.py` + đếm màu cho từng binary | §3.3 |
+| `determinism.sh`, `det/run1..6.png` | sáu render độc lập một fixture, md5 bằng nhau | nghi án "render không xác định" mà thực chất là lẫn artifact mutant |
+| `bandcolors.py`, `bandink.py` | đếm px theo dải dòng, import **chính** `ink_mask` của harness | §3.3 (25,359 px xanh của ta / 25,205 của reference) |
+| `load-race.sh`, `load-race.log`, `lr-*.log` | thí nghiệm tải branch-vs-base cho `cmd/goosie` | §7.1 |
+| `final-gates.log`, `final-gates2.log`, `final-gates3.log`, `gate-*.log`, `race-*.log` | các battery gate, gồm cả những lần đỏ | §7 |
+| `evidence-probe-base.log`, `evidence-probe-after.log`, `check-*.txt` | runtime reads của từng trang | §4.3, §4.4, §5 |
+
 Lệnh đếm (chạy lại được):
 
 ```bash
@@ -77,7 +92,7 @@ print(len(open('/tmp/t047/_b2.html','rb').read()), hashlib.sha1(open('/tmp/t047/
 print("insertBefore total", len(re.findall(r'insertBefore\(', src)))
 print("literal null ref   ", len(re.findall(r'insertBefore\([^()]*,\s*(?:null|void 0|undefined)\s*\)', src)))
 print("parentNode.ib      ", len(re.findall(r'parentNode\.insertBefore\(', src)))
-print("window listeners   ", len(re.findall(r'window\.addEventListener\(', src))
+print("window listeners   ", len(re.findall(r'window\.addEventListener\(', src)))
 PY
 ```
 
@@ -437,8 +452,8 @@ không còn xác mutant. Bảng đầy đủ (exit code là của `go test`, kh�
 | M02 `setupWindowEvents()` bị xoá | `internal/js/js.go` | 1 | `computed_style_test.go:258: defaultView shape = "true\|true\|true\|null\|undefined\|function\|true", want "true\|true\|true\|nu…` |
 | M03 location parts không được cài | `internal/js/js.go` | 1 | `location_parts_test.go:101: page pattern result = "THREW:Cannot read property 'hostname' of undefined", want the matched…` |
 | M04 `document.implementation` không cài | `internal/js/js.go` | 1 | `document_implementation_test.go:68: Evaluate(typeof document.implementation.createHTMLDocument): eval:1: TypeError: Cann…` |
-| M05 `document.defaultView` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:225: defaultView identity = "false,false", want "true,true"` |
-| M06 `window.getComputedStyle` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:253: defaultView shape = "true\|true\|true\|null\|function\|undefined\|true", want "true\|true\|true\|nu…` |
+| M05 `document.defaultView` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:230: defaultView identity = "false,false", want "true,true"` |
+| M06 `window.getComputedStyle` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:103: inline:1: TypeError: Object has no member 'getComputedStyle'` (4 test chết: `:103`, `:116 Evaluate(`, `:129 …ReferenceError: getComputedStyle is not defined`, `:169 …`) |
 | M07 accessor `childNodes` bị xoá | `internal/js/node_api.go` | 1 | `document_implementation_test.go:68: Evaluate((function(){var d=document.implementation.createHTMLDocument("Scratch");ret…` |
 | M08 accessor `lastChild` bị xoá | `internal/js/node_api.go` | 1 | `document_implementation_test.go:68: Evaluate((function(){var d=document.implementation.createHTMLDocument("Scratch");return […]})()): eval:1: TypeError: Cannot read property 'nodeType' of undefined` (8 test chết; anchor của chính cluster là `node_tree_test.go:119: insertBefore = "B\|I\|U/NotFoundError/3", want "B\|U\|I/NotFoundError/3"`) |
 | M09 accessor `ownerDocument` bị xoá | `internal/js/node_api.go` | 1 | `document_implementation_test.go:69: own documentElement identity: got "false,false" want "true,true"` |
@@ -462,11 +477,16 @@ Hai anchor đầu tiên của M14 và M17 bị script mutate bỏ (`SKIP-ANCHOR 
 `occurrences: 2`) — cả hai được chạy lại ở round sau và đều chết (bảng trên là kết quả chạy
 lại, không phải lần định chạy).
 
-Bốn dòng **M08 / M16 / M21 / MU-A** được chạy lại lần nữa trên cây cuối, vì các edit comment
-(`internal/js/node_api.go`, `test/js/node_tree_test.go`) làm **số dòng trong file test đổi** —
-`node_tree_test.go:113 → :119`, `:161 → :167` — và một dòng (M21) được mô tả lại đúng biến thể
-đã đo. Chạy lại gồm cả baseline và lần chạy sau khi restore, cả hai `exit=0`
-(`test/js 3.581s`, `test/engine 5.417s`), log: `/tmp/t047/mutation-recheck.log`.
+Tám dòng **M02 / M05 / M06 / M08 / M11 / M16 / M21 / MU-A** được chạy lại trên cây cuối, thành
+hai round, vì các edit comment (`internal/js/node_api.go`, `internal/js/computed_style.go`) và
+thêm assertion (`test/js/computed_style_test.go`) làm **số dòng trong file test đổi** —
+`node_tree_test.go:113 → :119`, `:161 → :167`. Round 1 (`/tmp/t047/mutation-recheck.log`) chạy
+M08/M16/M21/MU-A; round 2 (`/tmp/t047/mutation-recheck2.log`) chạy M02/M05/M06/M11. Kết quả
+round 2: M02 vẫn là `computed_style_test.go:258`, M05 vẫn là `:230`, M11 vẫn là `:130` — ba dòng
+đó đúng nguyên văn như bảng trên — nhưng **M06 đổi chỗ đỏ đầu tiên**: không còn là assertion
+`defaultView shape` (dòng cũ tôi dẫn là `:253`), mà là `:103: TypeError: Object has no member
+'getComputedStyle'`, vì chính test đó chạy trước trong package. Mỗi round đều có một lần baseline
+và một lần sau khi restore, cả hai `exit=0` (`test/js 3.397s`, `test/engine 5.497s`).
 
 MU-A, verbatim (cả hai oracle cùng đỏ):
 
@@ -673,6 +693,7 @@ nạp được offline, không phải DOM API thiếu.
 | `document.implementation.createDocument`, `hasFeature`, `createCSSStyleSheet` | `hasFeature` 0 occurrence trong bundle; `createDocument` không trang nào gọi; stub chúng chỉ để `typeof` hết là `undefined` sẽ là phỏng đoán. |
 | Selector univers `*` trong query index | Không nằm trong cluster này và không phải thứ các trang đo chết; để riêng. |
 | Argument thứ hai của `getComputedStyle` (pseudo-element) | Layout tree không mang box pseudo → không có gì trung thực để báo; nhận và bỏ qua, có comment. |
+| Shape đầy đủ của `CSSStyleDeclaration` | Đo ở §10.5: accessor của tên engine không mang **không tồn tại** trên object (`typeof` → `undefined`) trong khi `getPropertyValue` trả `""`; `length`/`item()`/`parentRule` đều `undefined` nên `Array.prototype.slice.call(getComputedStyle(el))` ra `[]`. CSSOM chốt cả hai read đều là chuỗi. Không làm ở đây vì nó cần mixin thuộc tính theo danh sách property của engine, không phải thiếu một binding; đã đề nghị `GOOSIE-CSSOMTASK-001` (§11.2). Hành vi hiện tại **đã được neo** bằng test: `test/js/computed_style_test.go` assert `typeof cs.zIndex === "undefined"` bên cạnh `getPropertyValue("line-height") === ""`, nên ai đổi shape sẽ bị đỏ thay vì im lặng. |
 | Màu/norm hoá giá trị trả về | `internal/js` không được import `internal/css` (archtest), nên inline colour về đúng dạng authored (`#ee0000`). Đổi chỗ này cần đổi provider sang `internal/engine`. |
 | Cross-document graft (WrongDocumentError) | `adopt()` hợp lệ; browser throw. Không trang đo nào graft, throw sẽ đổi lỗi cũ (`insertBefore`) thành lỗi mới trên cùng một trang. |
 | Exception từ listener bị nuốt | `fireWindowListeners` gọi `l.fn(...)` và bỏ cả `Value` lẫn `error` (`_, _ =`), nên handler throw không tới bộ đếm script error. Hành vi cũ của browser là report ra console, không phải halt script; task này giữ nguyên để không đổi số `script_errors` của sweep. |
@@ -686,41 +707,152 @@ Và một cap **không** thêm: xem §2.11.
 
 ## 7. Gates
 
-Tất cả chạy trên worktree này, output verbatim, exit code lấy trực tiếp.
+Chạy một mạch trên **cây cuối** (bốn commit code/test đã đóng gói + fixture + doc), worktree này,
+không có job nào khác của tôi chạy song song.  Exit code lấy trực tiếp từ lệnh
+(`… > log 2>&1; echo exit=$?`), không bao giờ từ pipeline.  Log: `/tmp/t047/final-gates3.log`
+(mở đầu bằng `git status --short` của chính cây đó, nên bảng trên là những gì đã được chấm).
 
 ```
-### gofmt -l touched files      → (empty)
-### gofmt -l .                  → (empty)
-### go vet -all ./...           → vet exit=0
+### gofmt -l over every file this task touched
+gofmt-touched exit=0 output-bytes=0
+
+### gofmt -l .
+gofmt-all exit=0 output-lines=0
+
+### go vet -all ./...
+vet exit=0 output-bytes=0
+
 ### go test -count=1 ./internal/archtest/
-ok  	github.com/vyquocvu/goosie/internal/archtest	3.055s
 archtest exit=0
-### go test -count=1 ./...      → test exit=0 (42 packages ok)
+ok  	github.com/vyquocvu/goosie/internal/archtest	3.190s
+
+### go test -count=1 ./...
+test exit=0
+ok-packages=42
+
+### go test -race -count=1 ./...  (load at start: { 9.35 21.81 18.44 })
+race exit=0
+ok-packages=42
+
+### make gate
+make-gate exit=0
+go run ./cmd/goosie -gate -scene checkerboard -frames 600 -out /tmp/gate.json
+goosie: run backend=darwin requested="auto" interactive=true frames=600 stamped=600 elapsed_s=5.01 fps=119.9 scene=checkerboard size=2880x1800 window=2880x1654 dpr=2 startup_ms=144.136
+goosie: timings mean_ms=1.515 p50_ms=1.580 p99_ms=2.210 max_ms=10.239 present_mean_ms=0.262 present_p99_ms=0.684 zero_work_frames=362
+goosie: counters rasterized=2976 reused=53461 failed=0 refused=0 deferred=0 panics=0 writes=359141632 bytes=780140544 budget=785383424 evictions=0 miss_pct=5.27 presents=600 idle=0 dropped_vsyncs=0 plans_published=1 plans_superseded=0
+goosie: env goos=darwin goarch=arm64 go=go1.26.10 cpu=10 workers=4
+goosie: present queued=306 dropped=294 committed=305
+
+### make parity
+make-parity exit=0
+   96.79%  PASS  js-dom/02-tree-mutation-and-lifecycle.png  worst_region_iou=0.9585814476644171
+  coverage_ratio=0.9977858407662968  blank_regions=0/0  rows=[]  shifted=0
+  88/88 passing  (100.0%), 0 failing, 0 errors
+  average match: 96.15%  (threshold=30, pass_at=90.0%)
 ```
 
-Race — lần đầu **đỏ vì một flake không liên quan**, và tôi không che:
+`load at start` của bước race vẫn còn cao (`9.35`) vì đó là đuôi suy giảm của chính bước
+`go test ./...` chạy ngay trước nó; lúc đó không còn process nào ngoài battery.  Trung bình match
+**tăng** so với trước khi có fixture (96.14% → 96.15%, §3.3), và `MIN_SCORED_FIXTURES` nâng
+87 → 88 trong cùng commit với fixture.
+
+### 7.1 Race: hai lần đỏ trong năm lần, và nguyên nhân là tải — đo trên cả hai phía
+
+Lần đầu tôi định viết "đỏ vì một flake không liên quan".  Câu đó đúng kết luận nhưng **sai về
+phương pháp**: nó là suy luận, không phải số đo.  Dưới đây là toàn bộ số đo, kể cả những lần đỏ.
+
+Năm lần `go test -race -count=1 ./...` trên branch (mtime của log):
+
+| Lần | Kết quả `cmd/goosie` |
+| --- | --- |
+| 07:16:34 `gate-race.log` | `ok 28.518s` |
+| 07:46:09 `final-gates.log` | **FAIL 33.180s** — `TestJourneySwitchTabRestoresScroll (8.10s)` |
+| 07:52:35 `race-full-2.log` | `ok 27.034s` (full-race exit=0) |
+| 08:27:13 `final-race2.log` | **FAIL 40.394s** — cùng một assertion, `presents=475 injected=10` |
+| 09:01:36 `final-gates3.log` | `ok` (race exit=0, 42 packages) — cây cuối, máy yên |
+
+Cả hai lần đỏ là đúng một dòng, `cmd/goosie/journey_p1_tabs_test.go:102`, và hai trang của journey
+đó **không có script nào** — không có đường nào từ change tới test.  Nhưng "không có đường" vẫn
+chỉ là lập luận.  Thí nghiệm trực tiếp (`/tmp/t047/load-race.sh`, branch vs bản export của
+`fe4928c` đặt ở `/tmp/t047/base-src`, cùng lệnh, cùng `-race`, xen kẽ branch/base để drift của
+máy không nghiêng về một phía):
 
 ```
-### go test -race -count=1 ./...
---- FAIL: TestJourneySwitchTabRestoresScroll (8.10s)
-    journey_p1_tabs_test.go:102: timed out waiting for tab 2 scrolled to distinct offset;
-    url="http://127.0.0.1:59782/tab2" loading=false error="" …presents=479 injected=10
-FAIL	github.com/vyquocvu/goosie/cmd/goosie	33.180s
-race exit=1
+### host: 10 cpus, load { 1.93 3.84 4.78 }
+
+### PHASE A - targeted journey test, IDLE machine (branch 5x, base 5x, interleaved)
+A-branch-1 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	2.098s
+A-base-1 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	2.067s
+A-branch-2 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.810s
+A-base-2 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.788s
+A-branch-3 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.760s
+A-base-3 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.854s
+A-branch-4 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.828s
+A-base-4 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.851s
+A-branch-5 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.875s
+A-base-5 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.817s
+
+### PHASE B - targeted journey test under 12 burners
+burners alive: 0 (tracked 12)
+B-branch-1 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	2.322s
+B-base-1 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.854s
+B-branch-2 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.808s
+B-base-2 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.888s
+B-branch-3 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.926s
+B-base-3 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	1.810s
+B-branch-4 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	4.821s
+B-base-4 exit=1 journey_fails=1 pkg=FAIL	github.com/vyquocvu/goosie/cmd/goosie	11.027s
+B-branch-5 exit=1 journey_fails=1 pkg=FAIL	github.com/vyquocvu/goosie/cmd/goosie	8.683s
+B-base-5 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	2.203s
+
+### PHASE C - whole cmd/goosie package under the same 12 burners (3x each)
+C-branch-1 exit=1 journey_fails=0 pkg=FAIL	github.com/vyquocvu/goosie/cmd/goosie	35.009s
+C-base-1 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	33.329s
+C-branch-2 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	32.176s
+C-base-2 exit=1 journey_fails=0 pkg=FAIL	github.com/vyquocvu/goosie/cmd/goosie	33.340s
+C-branch-3 exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	32.442s
+C-base-3 exit=1 journey_fails=0 pkg=FAIL	github.com/vyquocvu/goosie/cmd/goosie	32.113s
+
+### PHASE D - full -race ./... for both trees at once, burners still running
+D-branch-full exit=0 journey_fails=0 pkg=ok  	github.com/vyquocvu/goosie/cmd/goosie	33.775s
+D-base exit=0 journey_fails=0
+
+### DONE (burners killed; any left die at alarm 1200)
 ```
 
-Chẩn đoán bằng đo, không bằng đọc code: (a) hai document của journey đó **không có script nào**,
-nên không đường nào từ change tới test; (b) chạy riêng test đó, `go test -race -count=1
-./cmd/goosie/ -run '^TestJourneySwitchTabRestoresScroll$'`, ba lần trên branch và ba lần trên
-bản copy của `fe4928c` — **cả sáu lần exit=0, hết trong 1.7–2.0 s**; (c) cùng lúc đó máy đang
-chạy song song `make gate` (600 frame, backend darwin) và hai agent khác build ở worktree
-khác. Chạy lại full race khi máy đỡ tải:
+`journey_fails` là số lần `--- FAIL: TestJourneySwitchTabRestoresScroll` xuất hiện trong log của
+chạy đó; `exit` là exit code thật của `go test`, lấy trực tiếp.  Hai chỗ phải đọc kèm, vì script
+của tôi tự ghi sai nhãn: dòng `burners alive: 0` là **lỗi counter của script** (xem dưới), và nhãn
+"PHASE D - full -race ./... for both trees at once" **nói quá** những gì nó chạy — Phase D thật ra
+chạy `./cmd/goosie/ ./test/gate` trên base đồng thời với `./cmd/goosie/` trên branch, vẫn là hai
+cây cùng chịu một tải, nhưng không phải full suite.
 
-```
-### go test -race -count=1 ./...      → 42 packages ok, full-race exit=0
-```
+Bốn điều đo được, không điều nào đến từ việc đọc code:
 
-`make gate` và `make parity`: (điền số cuối ở dưới)
+1. **Base cũng đỏ, cùng một dòng.** `B-base-4` fail đúng `journey_p1_tabs_test.go:102`, hết
+   11.027 s, `presents=473` — `B-branch-5` fail cùng assertion, hết 8.683 s, `presents=470`.
+   Tải đủ lớn thì test đó timeout **trên cả hai phía**, nên đỏ không phải bằng chứng cho change.
+2. **Cả họ journey đều nhạy tải, cả trước change.** Khi chạy nguyên package dưới 12 burner, base
+   fail 2/3 lần và branch fail 1/3 lần, toàn bộ là
+   `TestJourneyZoomInGrowsContentAndDisplaysPercentage` — một test journey khác, không liên quan
+   DOM API.  (Branch không hề tệ hơn base ở đây.)
+3. **Idle thì cả hai phía xanh.** Phase A: 5/5 branch + 5/5 base, 1.76–2.10 s.  Hai full-suite
+   control trên base (`race-base-full.log` 08:34, `race-base-full2.log` 08:40) đều
+   `ok cmd/goosie` (34.401 s, 26.264 s); overall exit của chúng là 1 vì ba test
+   `test/gatecheck` RCSweep cần một repo git thật mà bản export không có — khai rõ để không ai
+   đọc nhầm đó là red flag của change.
+4. **Hai lần đỏ của tôi trùng lúc máy đang bị chia.** 07:46 và 08:22 là khi chính tôi chạy song
+   song `make parity` (Chromium render 88 fixture) và các build mutant; 09:01 là lần duy nhất
+   battery chạy mà không có gì khác — và đó là lần được trích ở bảng trên.
+
+Còn hai điều tôi không giấu: (a) con số `burners alive: 0` trong log Phase B là **lỗi của chính
+script đo** (`pgrep -P 1 -U … -f 'alarm 1200'` không bắt được process vì chúng không phải con của
+PID 1); tôi xác minh lại bằng `pgrep -f "alarm 1200"` → đúng 12 process và `vm.loadavg` tăng, nên
+kết luận Phase B/C vẫn dựa trên tải thật, nhưng ai đọc log thô phải biết dòng đó vô nghĩa; (b)
+flake này **tôi không sửa**, vì nó nằm trong `cmd/goosie/journey_p1_tabs_test.go` — vừa ngoài
+phạm vi TASK-047, vừa là thứ chỉ sửa đúng khi đo lại budget timeout của cả họ journey, và làm vậy
+trong cùng commit DOM API sẽ che mất cả hai thay đổi.  Gate `go test -race -count=1 ./...` trên
+cây cuối, máy yên: **exit=0**.
 
 ---
 
