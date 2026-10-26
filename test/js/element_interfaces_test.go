@@ -90,7 +90,13 @@ func TestElementPrototypeChainIsInherited(t *testing.T) {
 			return out.join('>');
 		})()`, "HTMLInputElement>HTMLElement>Element>Node>EventTarget>Object"},
 		{"created and parsed share one prototype", `Object.getPrototypeOf(document.createElement('div')) === Object.getPrototypeOf(document.getElementById('d'))`, "true"},
-		{"unknown tag answers HTMLElement", `document.createElement('foo').constructor === HTMLElement`, "true"},
+		// Chromium mints HTMLUnknownElement for a tag it does not know (measured
+		// 2026-10-26: constructor.name "HTMLUnknownElement", still instanceof
+		// HTMLElement). Goosie has no HTMLUnknownElement interface and answers
+		// HTMLElement; §9.2 records that absence, so this pins only the part
+		// both engines agree on.
+		{"unknown tag inherits HTMLElement", `document.createElement('foo') instanceof HTMLElement`, "true"},
+		{"standard tag outside the interface table answers HTMLElement", `document.createElement('section').constructor === HTMLElement`, "true"},
 		{"div is HTMLElement", `document.getElementById('d') instanceof HTMLElement`, "true"},
 		{"div is Element", `document.getElementById('d') instanceof Element`, "true"},
 		{"div is Node", `document.getElementById('d') instanceof Node`, "true"},

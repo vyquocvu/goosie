@@ -245,6 +245,10 @@ errors from 1,000 attempts); the document budget is the second wall (two 4096² 
 
 ### 9.2 Interfaces still absent
 
+- `HTMLUnknownElement`: a genuinely unknown tag (`document.createElement('foo')`) inherits `HTMLElement`
+  and answers `constructor === HTMLElement`; Chromium mints `HTMLUnknownElement` (measured by the integrator
+  2026-10-26: `constructor.name` "HTMLUnknownElement", `instanceof HTMLElement` true). A standard tag outside
+  the interface table (`section`) answers `HTMLElement` in both. The oracle pins only the shared part.
 - SVG interfaces: `document.createElementNS`/`<svg>` elements answer `HTMLElement`, not `SVGSVGElement`
   (or any `SVGElement`), so `instanceof SVGSVGElement` cannot hold.
 - `textarea.value`, `select.selectedIndex` and the rest of §3.3's live-value family: TASK-030/031/037's
