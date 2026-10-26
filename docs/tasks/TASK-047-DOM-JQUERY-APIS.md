@@ -434,7 +434,7 @@ không còn xác mutant. Bảng đầy đủ (exit code là của `go test`, kh�
 | Mutation | File | Exit | Dòng đỏ đầu tiên (verbatim, cắt 80 ký tự) |
 | --- | --- | --- | --- |
 | M01 `installNodeTreeMethods()` bị xoá | `internal/js/js.go` | 1 | `document_implementation_test.go:107: Evaluate((function(){` |
-| M02 `setupWindowEvents()` bị xoá | `internal/js/js.go` | 1 | `computed_style_test.go:253: defaultView shape = "true\|true\|true\|null\|undefined\|function\|true", want "true\|true\|true\|nu…` |
+| M02 `setupWindowEvents()` bị xoá | `internal/js/js.go` | 1 | `computed_style_test.go:258: defaultView shape = "true\|true\|true\|null\|undefined\|function\|true", want "true\|true\|true\|nu…` |
 | M03 location parts không được cài | `internal/js/js.go` | 1 | `location_parts_test.go:101: page pattern result = "THREW:Cannot read property 'hostname' of undefined", want the matched…` |
 | M04 `document.implementation` không cài | `internal/js/js.go` | 1 | `document_implementation_test.go:68: Evaluate(typeof document.implementation.createHTMLDocument): eval:1: TypeError: Cann…` |
 | M05 `document.defaultView` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:225: defaultView identity = "false,false", want "true,true"` |
@@ -847,6 +847,12 @@ trước, bản 747 dòng của agent kia đè lên sau. Xóa một trong hai l�
 tôi không ghi đè nữa: §0–§9 giữ nguyên của họ, phần của tôi append ở §10–§11 và tự chịu phạm vi
 chứng nhận của mình.
 
+**Mọi `file:line` trong §10–§11 tính theo commit `24ee057`**, đã kiểm lại từng dòng bằng
+`git show 24ee057:<file>`. Lý do phải neo: worktree này đang có người sửa song song nên số dòng
+trong working tree trôi đi trong lúc tôi viết — `internal/js/computed_style.go` ví dụ, comment
+block của `computedStyleObject` dài thêm từ 5 lên 21 dòng và bản thân function decl nhảy từ
+`119` xuống `135` giữa hai lần tôi đọc file.
+
 ### 10.1 Artifact: commit → export → binary
 
 Hai binary cho mỗi mốc, dựng bằng `git archive` để mọi con số truy về đúng một commit có tên:
@@ -980,7 +986,8 @@ Chuỗi nguyên nhân, mỗi mắt xích một số đo, không có mắt xích 
 3. Đo `u`: `jQuery(document.createElement("form")).appendTo(document.body).css("display")` →
    **`undefined`**; `div` và `p` cũng vậy. Lý do ở engine:
    `internal/engine/computed_style.go:26` trả `nil` khi node chưa có trong `s.Styles[n.ID]`, và
-   `internal/js/computed_style.go:117` chỉ `Set` những tên có giá trị ⇒ node vừa được cài **không
+   `internal/js/computed_style.go:119`/`:121` (`computedStyleObject`, vòng `Set` chạy trên
+   chính map đó) chỉ `Set` những tên có giá trị ⇒ node vừa được cài **không
    có box đã resolve trong chính task đó**.
 4. `u === undefined` → phép gán `elemdisplay[nodeName] = undefined` → `values[i]` giữ
    `undefined` → guard `values[i] != null` của jQuery **bỏ qua nốt lệnh ghi style**. Đó là lý do đo
