@@ -3033,5 +3033,17 @@
       "test/gatecheck/licenses_test.go:TestTargetResolutionFailsClosed"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-258",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/live_parity_test.go:TestLiveParitySelftestIsGreen"
+    ],
+    "enforced": false
   }
 ]
