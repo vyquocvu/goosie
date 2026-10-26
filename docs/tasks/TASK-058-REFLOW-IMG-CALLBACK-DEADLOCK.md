@@ -81,7 +81,7 @@ the fix does not merely return early from the load.
 
 ## 5. Registry proposal
 
-- `BR-250 | P1 | INT | PASS` — a Reflow must not dispatch page JS while holding a lock reachable from
+- `BR-256 | P1 | INT | PASS` — the next free id: BR-250..255 are claimed by the TASK-056/057 integration. A Reflow must not dispatch page JS while holding a lock reachable from
   that JS: an `IntersectionObserver` callback that assigns `img.src` during the load-path Reflow
   returns, and the image decodes. Oracle `TestIntersectionCallbackMayStartAnImageLoad`; mutation:
   restoring the old lock scope fails it at the 10 s watchdog.
