@@ -3,7 +3,7 @@
 - Cập nhật: 2026-10-22
 - Đối tượng: bản Goosie cho macOS và đường render headless dùng chung engine.
 - Mục đích: xác nhận các hành trình duyệt cốt lõi, điều tra lỗi render nhấp nháy trên https://about.google/products/, và tạo tiêu chí phát hành có bằng chứng.
-- Bộ case chi tiết: [qa-test-catalog.md](qa-test-catalog.md), gồm 185 case theo tính năng; 15 QA case trong tài liệu này là kịch bản release tổng hợp.
+- Bộ case chi tiết: [qa-test-catalog.md](qa-test-catalog.md), gồm 202 case theo tính năng; 15 QA case trong tài liệu này là kịch bản release tổng hợp.
 - Trạng thái lần chạy: smoke CUA QA-001/QA-002 ngày 2026-10-21; kiểm thử tự động toàn repo và Chromium render parity chạy lại ngày 2026-10-22. Native CUA cho bookmark/history bị BLOCKED vì không có display window khả dụng trong phiên này.
 
 ## 1. Phạm vi

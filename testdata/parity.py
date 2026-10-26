@@ -61,7 +61,10 @@ PASS_AT = 90.0
 # 88: css-features/14-inline-background-repaint.html (TASK-048,
 # GOOSIE-INLINEBG-001) - a translucent block background composited a second
 # time inside every word box of the text it carries.
-MIN_SCORED_FIXTURES = 88
+# 89: css-features/15-anonymous-block-gradient-once.html (TASK-049,
+# GOOSIE-ANONBG-001) - the same double composite one layer up: an anonymous block
+# re-composited its generating element's gradient ramp across both bands it splits.
+MIN_SCORED_FIXTURES = 89
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

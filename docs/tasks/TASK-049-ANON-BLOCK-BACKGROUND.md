@@ -540,3 +540,63 @@ mapping is exact — each id below names whole test functions, nothing else:
    races, and 260.173s of its 280s was `test/gate` — the fix itself was under race detection for the ~6s of
    `test/style` + `test/paint`. The mutation evidence in §5 was collected with plain `-count=1` runs, not under
    `-race`, because each mutation had to be patched, run and reverted in seconds.
+
+## 10. Integrator verification, 2026-10-26, on main `1f0ba78`
+
+Everything below was re-run on the integrator host after the merge; nothing here is taken from this branch's logs.
+
+**Confirmed as written.** Fixture `css-features/15-anonymous-block-gradient-once.html` scores **95.88% PASS**
+(`worst_region_iou=0.9994`, `coverage_ratio=0.9931`, `blank_regions=0/0`), the corpus is **89/89 (100.0%)** with average
+match **96.17%** and known gaps unchanged at 5 fixtures / 10 bands. Reverting the fix by rendering the same corpus with
+this branch's pre-fix binary (`python3 testdata/parity.py --render --binary /tmp/t049-work/goosie-pre`) gives fixture 15
+at **72.98% FAIL**, corpus 88/89, average 95.91%, **rc 1** — so §7.2's number reproduces exactly. On the block's 300x76
+area (`/tmp/t48-check/anon-grad.html`, `cmd/goosie-headless` 400x120 DPR 1) the merged build reads **0 px of (213,63,63)**
+and 22,026 px of (227,127,127), against Chromium's 21,965 (13,370 exact + 8,595 of its rounding). Mutation **A** re-run:
+rc 1, 13 `--- FAIL` headers / 17 lines. Mutation **C** re-run: rc 1 with **only** `test/style` red (6 headers / 5 lines),
+`test/paint` still `ok` — the branch's own reading of what C proves stands. Mutation **B** was not re-run by me; the
+12/21 + 8/10 counts in §5.2 are the branch's measurement, and the acceptance rests on A and C.
+
+**Withdrawn claim, corrected in the registry rather than left standing.** §6.1 states that the url() half of the
+collapse "cannot be proven headlessly, because **Goosie never paints background-image**". The observable half is real but
+the mechanism is wrong, and the blanket form of the claim is false. Measured on `/tmp/bgimg-probe/variants5.html` and
+`/tmp/bgimg-probe/variants.html` (100x20 bands, 120x90 / 400x120 DPR 1, exact-colour counts):
+
+| background declaration | Chromium | Goosie |
+| --- | --- | --- |
+| `url("data:image/svg+xml;utf8,<svg…fill='%230000ff'…>")` | 2,000 px (0,0,255) | **2,000 px** |
+| `url("data:image/svg+xml,<svg…fill='%230000ff'…>")` | 2,000 px | **2,000 px** |
+| `url("data:image/svg+xml;utf8,<svg…fill='rgb(0,0,255)'…>")` | 2,000 px | **0 px** |
+| `url("data:image/svg+xml,<svg…fill='rgb(0,0,255)'…>")` | 2,000 px | **0 px** |
+| `url("data:image/svg+xml;base64,…")` | 1,455 px | **1,493 px** |
+| `url("data:image/png;base64,…")` | 1,392 px | **1,458 px** |
+
+Goosie paints `data:` SVG **and** PNG backgrounds; the corpus already depends on it (`colors/03-opacity.html` carries an
+inline-SVG background written with `%23ccc` and paints 27,314 px in Goosie against Chromium's 28,502). The failing axis is
+a `)` inside the payload: a throwaway cascade probe printed `ComputedStyle.BackgroundImage` as the full 140-char URI for
+the working form and as `…fill='rgb(0,0,255` — 133 chars, cut at the first `)` — for the broken one. So the loss is in the
+CSS **tokenizer/parser** (`url("…")` is a quoted string per CSS Syntax L3 4.3.9; the closing paren is data, not a
+delimiter), `internal/engine/limits.go:944` then unescapes a URI that is no longer XML, `DecodeSVGAt` fails at
+`internal/engine/engine.go:1245`, and `obj.BgImage` is never set at `:1251`. The paint layer is not the gap:
+`internal/paint/builder_background.go:92` does read `obj.BgImage`. Registered as **GOOSIE-CSSURLPAREN-001 (P1)**; it adds
+a sixth open P0/P1 entry, which the rc-sweep gate reads.
+
+**§6.2's shadow evidence, re-measured.** Same-shape documents (`/tmp/t49-shadow/p.html` vs `/tmp/t49-shadow/a.html`, one
+20px block sibling added, nothing else different) on the merged build: **21,363 px differ, 15,289 by more than 30 levels**,
+rows 0..101, cols 0..345 — reproducing §6.2. Two numbers §6.2 did not carry make the case sharper: Chromium's same pair
+differs by only 1,001 px / 813 over 30 (all of it the text moving — it reads (254,251,251) at (180,14) in both documents),
+and inside the element's own 300x76 box Goosie's non-white px go **7,343 → 14,531** when the anonymous bands exist, with
+(211,52,52) going 613 → 3,446 and point (180,90) turning from white to (211,52,52) — Chromium keeps the interior at ~1,200
+non-white px (glyph ink) in both shapes. `GOOSIE-SHADOWRUN-001` is therefore re-titled in the registry as carrying **two**
+multipliers: per text run (64 fills) and per anonymous band (15,289 px).
+
+**Registry written by the integrator.** Cases **BR-200** (style layer, both `test/style` oracles), **BR-201** (display
+list, the gradient and image-list oracles) and **BR-202** (pixels + fixture, PARITY) tagged with `// qc:` markers, rows in
+catalog section D, `expectedCaseCount` 199 → **202**, `traceability.golden.json` regenerated to 202 rows; the rc-sweep
+ratchet floor stays **20 / 84** because all three cases are P2 and the floor counts P0 and P0/P1 tagged rows.
+`MIN_SCORED_FIXTURES` 88 → **89** with the fixture-15 comment line. Two stale totals were corrected in passing: the
+catalog header said 194 cases and `qa-test-plan.md` said 185, both against a parsed count of 202. BR-201's own caveat was
+tightened the same day: "url() pixels are unreachable headlessly" is true only for **network** urls (no fetcher in
+`cmd/goosie-headless`), which is why the sub-case uses `url(/tile.png)` and stays a command-level assertion.
+
+**Gates on the integrator host after the merge:** `ok test/style 0.803s`, `ok test/paint 1.809s`,
+`ok test/gatecheck 49.221s`, `ok internal/archtest 7.422s`, `ok test/qc 0.569s`.

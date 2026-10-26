@@ -66,6 +66,7 @@ func abKindCount(cmds []paint.DisplayCmd, k paint.CmdKind) int {
 // TestAnonymousBlockGradientIsEmittedOncePerElement pins the display list: exactly one
 // gradient per declaring element box, and nothing contributed by the anonymous boxes
 // layout splices around raw text.
+// qc:BR-201
 func TestAnonymousBlockGradientIsEmittedOncePerElement(t *testing.T) {
 	linear := `background-image:linear-gradient(rgb(10,120,20),rgb(10,120,20))`
 	radial := `background-image:radial-gradient(rgb(10,120,20),rgb(10,120,20))`
@@ -154,6 +155,7 @@ func TestAnonymousBlockGradientIsEmittedOncePerElement(t *testing.T) {
 // asserted here as a command that must not appear for either box, and the style-layer
 // collapse of the url string itself is pinned in test/style/. Stated plainly rather than
 // dressed up as a pixel oracle: a url() double-composite is not reachable headlessly.
+// qc:BR-201
 func TestAnonymousBlockImageLayerIsNotEmittedPerWrapper(t *testing.T) {
 	body := `<div style="width:300px;height:76px;background-image:url(/tile.png)">one two<div style="height:20px"></div>three four</div>`
 	cmds := ibDisplayList(t, "", body, 800)
@@ -176,6 +178,7 @@ func TestAnonymousBlockImageLayerIsNotEmittedPerWrapper(t *testing.T) {
 // so the defect is counted in pixels rather than in commands. The expectation is
 // Chromium's own measurement of the same document - the twice-composited (213,63,63)
 // appears nowhere in its render of the block.
+// qc:BR-202
 func TestTranslucentAnonymousBlockGradientCompositesOnce(t *testing.T) {
 	html := `<!doctype html><html><head><style>html,body{margin:0;font:16px serif}</style></head>` +
 		`<body><div style="width:300px;height:76px;` +

@@ -1108,6 +1108,45 @@
     "enforced": false
   },
   {
+    "id": "BR-200",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/style/anonymous_block_background_test.go:TestAnonymousBlockAndTableStyleCollapseBackgroundsAlike",
+      "test/style/anonymous_block_background_test.go:TestAnonymousBlockStyleCarriesNoBackgroundLayers"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-201",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/anonymous_block_background_test.go:TestAnonymousBlockGradientIsEmittedOncePerElement",
+      "test/paint/anonymous_block_background_test.go:TestAnonymousBlockImageLayerIsNotEmittedPerWrapper"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-202",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/anonymous_block_background_test.go:TestTranslucentAnonymousBlockGradientCompositesOnce"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

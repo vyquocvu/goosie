@@ -66,6 +66,7 @@ func abStyle(t *testing.T, doc *dom.Document, styles map[dom.NodeID]*style.Compu
 	return cs
 }
 
+// qc:BR-200
 func TestAnonymousBlockStyleCarriesNoBackgroundLayers(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -165,6 +166,7 @@ func TestAnonymousBlockStyleCarriesNoBackgroundLayers(t *testing.T) {
 // absence was the defect: both anonymous style builders hand out no background layer.
 // Before this fix the table builder cleared four layers and the block builder cleared
 // one, so a gradient reached an anonymous block box that a table wrapper never got.
+// qc:BR-200
 func TestAnonymousBlockAndTableStyleCollapseBackgroundsAlike(t *testing.T) {
 	doc, styles := abCascade(t, `div{background:rgba(200,0,0,0.5) linear-gradient(rgba(0,0,200,0.5),rgba(0,200,0,0.5))}`)
 	parent := abStyle(t, doc, styles)
