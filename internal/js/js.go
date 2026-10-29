@@ -611,6 +611,12 @@ type Runtime struct {
 	scrollPositions map[scrollKey]float64
 	windowScrollX   float64
 	windowScrollY   float64
+	// scrollQueued holds the elements that scrolled during this turn and are
+	// owed a scroll event, and scrollQueue keeps them in first-scrolled order.
+	// One element is owed one event however many axes moved, and an element that
+	// scrolls again before the flush is still owed only one.
+	scrollQueued map[*dom.Node]bool
+	scrollQueue  []*dom.Node
 
 	// Window event target. window is not a *dom.Node, so its listeners live on
 	// the runtime instead of internal/dom's node registry; the DOM Standard's

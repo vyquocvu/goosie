@@ -23,6 +23,9 @@ type LayoutBoxInfo struct {
 	MarginTop, MarginRight, MarginBottom, MarginLeft float64
 	// Scrollable content size (CSS pixels). Zero means "same as border box".
 	ScrollWidth, ScrollHeight float64
+	// ScrollContainer reports that the box clips or scrolls its content, which
+	// is what decides whether a scrollTop/scrollLeft write takes effect at all.
+	ScrollContainer bool
 }
 
 // LayoutGeometryProvider returns the layout box info for one DOM node. It
@@ -285,6 +288,99 @@ func (r *Runtime) installElementGeometryMethods() {
 	}
 }
 
+// setElementScrollOffset applies one scrollTop or scrollLeft write. A box that
+// neither clips nor scrolls has nothing to scroll, so the write is ignored; an
+// offset may not travel past the scrollable area minus the client box, so 1000
+// on a 200-into-100 container lands on 100. Only a write that moves the offset
+// queues a scroll event, and it queues one per element per turn rather than one
+// per axis.
+//
+// The bounds are omitted when layout has no box for the node: a runtime that
+// cannot see an extent cannot bound the write, so the offset is taken on trust
+// and the event still queues.
+func (r *Runtime) setElementScrollOffset(node *dom.Node, prop string, value float64) {
+	max, scrollable, bounded := r.elementScrollBounds(node, prop)
+	if bounded && !scrollable {
+		return
+	}
+	if value < 0 {
+		value = 0
+	}
+	if bounded && value > max {
+		value = max
+	}
+	r.scrollMu.Lock()
+	if r.scrollPositions == nil {
+		r.scrollPositions = make(map[scrollKey]float64)
+	}
+	key := scrollKey{node: node, prop: prop}
+	changed := r.scrollPositions[key] != value
+	r.scrollPositions[key] = value
+	if changed {
+		if r.scrollQueued == nil {
+			r.scrollQueued = make(map[*dom.Node]bool)
+		}
+		if !r.scrollQueued[node] {
+			r.scrollQueued[node] = true
+			r.scrollQueue = append(r.scrollQueue, node)
+		}
+	}
+	r.scrollMu.Unlock()
+}
+
+// elementScrollBounds reports how far one element may be scrolled along prop and
+// whether it is the kind of box that scrolls at all: the extent minus the client
+// box, and a scroll container only when its computed overflow is not visible.
+func (r *Runtime) elementScrollBounds(node *dom.Node, prop string) (max float64, scrollable, bounded bool) {
+	provider := r.layoutGeometryProvider()
+	if provider == nil {
+		return 0, false, false
+	}
+	info, ok := provider(node)
+	if !ok {
+		return 0, false, false
+	}
+	extent, client := info.ScrollHeight, info.Height-info.BorderTop-info.BorderBottom
+	if prop == "scrollLeft" {
+		extent, client = info.ScrollWidth, info.Width-info.BorderLeft-info.BorderRight
+	}
+	if extent <= 0 {
+		extent = info.Height
+		if prop == "scrollLeft" {
+			extent = info.Width
+		}
+	}
+	if client < 0 {
+		client = 0
+	}
+	max = extent - client
+	if max < 0 {
+		max = 0
+	}
+	return max, info.ScrollContainer, true
+}
+
+// FlushScrollEvents delivers the scroll events the turns since the last flush
+// queued. The engine calls it once per frame, before animation frame callbacks,
+// which is where a page that set an offset and then asked for a frame sees the
+// event; a write made by a listener here is owed an event on the next frame.
+func (r *Runtime) FlushScrollEvents() {
+	if r == nil {
+		return
+	}
+	r.scrollMu.Lock()
+	due := r.scrollQueue
+	r.scrollQueue = nil
+	r.scrollQueued = make(map[*dom.Node]bool)
+	r.scrollMu.Unlock()
+	for _, node := range due {
+		if node == nil {
+			continue
+		}
+		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scroll", false, false))
+	}
+}
+
 // installElementScrollMethods installs scrollTop, scrollLeft, scrollWidth,
 // scrollHeight, and scrollIntoView on HTMLElement.prototype.
 func (r *Runtime) installElementScrollMethods() {
@@ -332,12 +428,7 @@ func (r *Runtime) installElementScrollMethods() {
 				}
 				return goja.Undefined()
 			}
-			r.scrollMu.Lock()
-			if r.scrollPositions == nil {
-				r.scrollPositions = make(map[scrollKey]float64)
-			}
-			r.scrollPositions[scrollKey{node: node, prop: prop}] = v
-			r.scrollMu.Unlock()
+			r.setElementScrollOffset(node, prop, v)
 			return goja.Undefined()
 		}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
@@ -427,7 +518,11 @@ func (r *Runtime) installElementScrollMethods() {
 }
 
 // handleElementScroll processes element.scroll(), element.scrollTo(), and
-// element.scrollBy() calls.
+// element.scrollBy() calls. Both forms end in the same scroll as the property
+// setters, so they run through setElementScrollOffset and inherit its bounds and
+// its queued event. A `behavior: 'smooth'` option is taken as an instant scroll:
+// goosie has no scroll animation, and an offset that lands where the page asked
+// is closer than one that crawls there over frames.
 func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.FunctionCall) {
 	var dx, dy float64
 	if len(call.Arguments) > 0 {
@@ -443,7 +538,7 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 					dx = v.ToFloat()
 				}
 			} else {
-				// Numeric arguments: scroll(x, y)
+				// Numeric arguments: scroll(left, top)
 				dx = arg.ToFloat()
 				if len(call.Arguments) > 1 {
 					dy = call.Arguments[1].ToFloat()
@@ -452,26 +547,39 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 		}
 	}
 
-	r.scrollMu.Lock()
-	if r.scrollPositions == nil {
-		r.scrollPositions = make(map[scrollKey]float64)
+	if r.isDocumentScrollingElement(node) {
+		if method == "scrollBy" {
+			dy += r.WindowScrollY()
+			r.scrollMu.Lock()
+			dx += r.windowScrollX
+			r.scrollMu.Unlock()
+		}
+		if dy < 0 {
+			dy = 0
+		}
+		if dx < 0 {
+			dx = 0
+		}
+		r.SetWindowScrollY(dy)
+		r.scrollMu.Lock()
+		r.windowScrollX = dx
+		r.scrollMu.Unlock()
+		return
 	}
 	if method == "scrollBy" {
-		r.scrollPositions[scrollKey{node: node, prop: "scrollLeft"}] += dx
-		r.scrollPositions[scrollKey{node: node, prop: "scrollTop"}] += dy
-	} else {
-		// scrollTo / scroll: set absolute position
-		r.scrollPositions[scrollKey{node: node, prop: "scrollLeft"}] = dx
-		r.scrollPositions[scrollKey{node: node, prop: "scrollTop"}] = dy
+		dx += r.elementScrollOffset(node, "scrollLeft")
+		dy += r.elementScrollOffset(node, "scrollTop")
 	}
-	// Clamp to non-negative
-	if v := r.scrollPositions[scrollKey{node: node, prop: "scrollLeft"}]; v < 0 {
-		r.scrollPositions[scrollKey{node: node, prop: "scrollLeft"}] = 0
-	}
-	if v := r.scrollPositions[scrollKey{node: node, prop: "scrollTop"}]; v < 0 {
-		r.scrollPositions[scrollKey{node: node, prop: "scrollTop"}] = 0
-	}
-	r.scrollMu.Unlock()
+	r.setElementScrollOffset(node, "scrollLeft", dx)
+	r.setElementScrollOffset(node, "scrollTop", dy)
+}
+
+// elementScrollOffset reads one stored element scroll offset without applying any
+// bounds; the setter path clamps what this returns.
+func (r *Runtime) elementScrollOffset(node *dom.Node, prop string) float64 {
+	r.scrollMu.Lock()
+	defer r.scrollMu.Unlock()
+	return r.scrollPositions[scrollKey{node: node, prop: prop}]
 }
 
 // installWindowScrollMethods installs window.scroll(), window.scrollBy(),

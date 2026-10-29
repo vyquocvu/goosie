@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"math"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -79,11 +80,67 @@ func (s *Session) layoutBoxInfo(n *dom.Node) (js.LayoutBoxInfo, bool) {
 		MarginBottom:  float64(obj.MarginBottom),
 		MarginLeft:    float64(obj.MarginLeft),
 	}
-	// Scrollable area: without a real overflow/scroll implementation the
-	// scrollable extent equals the border-box extent.
-	info.ScrollWidth = info.Width
-	info.ScrollHeight = info.Height
+	// Scrollable area: the content box extended by whatever overflows it, plus
+	// the container's own trailing padding, and the scrollability the page may
+	// write an offset against.
+	info.ScrollWidth, info.ScrollHeight = scrollableOverflow(arena, obj)
+	info.ScrollContainer = computed != nil &&
+		(computed.OverflowX != style.OverflowVisible || computed.OverflowY != style.OverflowVisible)
 	return info, true
+}
+
+// scrollableOverflow measures the area one laid-out box can scroll to. It starts
+// at the content box, extends to the furthest margin edge of any descendant, and
+// adds the box's own trailing padding. Two kinds of descendant stop contributing
+// at their own border box: one that clips or scrolls, because its content belongs
+// to that box's scrollable area and not this one's, and a fixed-position box,
+// because it is positioned against the viewport rather than this container.
+//
+// Measured against Chromium with test/wpt/resources/element_scroll_probe.py:
+// a 100x100 scroller over a 200x200 child is 200, the same child with 60px of
+// right and bottom margin is 160, trailing padding of 40/60 makes it 240x260, an
+// absolutely positioned child counts, a fixed one does not, and a nested
+// scroller leaves the outer box at 100.
+func scrollableOverflow(arena *layout.Arena, root *layout.Object) (float64, float64) {
+	contentX, contentY, contentX1, contentY1 := root.ContentRect()
+	extentX, extentY := contentX1-contentX, contentY1-contentY
+	var walk func(layout.ObjectID)
+	walk = func(id layout.ObjectID) {
+		for child := id; child != 0; {
+			obj := arena.Get(child)
+			if obj == nil {
+				break
+			}
+			next := obj.NextSibling
+			if obj.Style != nil && obj.Style.Position == style.PositionFixed {
+				child = next
+				continue
+			}
+			// Only the trailing edges can extend the area: content that sticks out
+			// to the left or above the content box is not scrollable to.
+			_, _, x1, y1 := obj.BorderRect()
+			if x1+obj.MarginRight-contentX > extentX {
+				extentX = x1 + obj.MarginRight - contentX
+			}
+			if y1+obj.MarginBottom-contentY > extentY {
+				extentY = y1 + obj.MarginBottom - contentY
+			}
+			if obj.Style == nil || (obj.Style.OverflowX == style.OverflowVisible && obj.Style.OverflowY == style.OverflowVisible) {
+				walk(obj.FirstKid)
+			}
+			child = next
+		}
+	}
+	walk(root.FirstKid)
+	if extentX < 0 {
+		extentX = 0
+	}
+	if extentY < 0 {
+		extentY = 0
+	}
+	// The scrollable area is rounded up, and a box cannot scroll into its own
+	// leading padding, so only trailing padding extends it.
+	return math.Ceil(float64(extentX + root.PaddingRight)), math.Ceil(float64(extentY + root.PaddingBottom))
 }
 
 func hasRenderedText(root *dom.Node) bool {

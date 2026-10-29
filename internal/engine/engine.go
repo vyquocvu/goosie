@@ -2956,6 +2956,10 @@ func (s *Session) PumpJS(viewportW float32) bool {
 		return false
 	}
 	canvasBefore := s.jsRT.CanvasVisualStamp()
+	// A scroll offset written during the previous frame is delivered here, before
+	// any animation frame callback of this one, which is the point a page that
+	// scrolled and then asked for a frame sees its scroll event.
+	s.jsRT.FlushScrollEvents()
 	s.jsRT.Tick()
 	if s.jsRT.HasPendingRAF() {
 		s.jsRT.TickRAF(time.Now())

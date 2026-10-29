@@ -66,7 +66,7 @@ var layoutGeometry = map[string]js.LayoutBoxInfo{
 		BorderTop: 1, BorderRight: 1, BorderBottom: 1, BorderLeft: 1,
 		PaddingTop: 5, PaddingRight: 5, PaddingBottom: 5, PaddingLeft: 5,
 		MarginTop: 10, MarginRight: 10, MarginBottom: 10, MarginLeft: 10,
-		ScrollWidth: 100, ScrollHeight: 50,
+		ScrollWidth: 200, ScrollHeight: 200, ScrollContainer: true,
 	},
 	"para": {
 		X: 10, Y: 90, Width: 200, Height: 30,
@@ -397,8 +397,44 @@ func TestScrollWidthHeight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result != "100,50" {
-		t.Errorf("scrollWidth/Height: got %q, want %q", result, "100,50")
+	if result != "200,200" {
+		t.Errorf("scrollWidth/Height: got %q, want %q", result, "200,200")
+	}
+}
+
+// The travel an element accepts is its scrollable area minus its client box, so
+// the fixture's 200x200 extent over a 98x48 client box stops at 102 and 152.
+func TestScrollTopClampsToScrollableArea(t *testing.T) {
+	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
+	result, err := rt.Evaluate(`
+		var el = document.getElementById('box');
+		el.scrollTop = 1000;
+		el.scrollLeft = 1000;
+		el.scrollTop + ',' + el.scrollLeft;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "152,102" {
+		t.Errorf("clamped offsets: got %q, want %q", result, "152,102")
+	}
+}
+
+// A box whose content is not clipped or scrolled has nothing to scroll, so the
+// write is ignored even where its extent is larger than its client box.
+func TestScrollTopIgnoredOnNonScrollContainer(t *testing.T) {
+	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
+	result, err := rt.Evaluate(`
+		var el = document.getElementById('para');
+		el.scrollTop = 50;
+		el.scrollLeft = 50;
+		el.scrollTop + ',' + el.scrollLeft + ',' + el.scrollHeight;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "0,0,30" {
+		t.Errorf("offsets on a non-scroll container: got %q, want %q", result, "0,0,30")
 	}
 }
 
