@@ -1251,6 +1251,15 @@ const wptTestDriverInputShim = `(function () {
         }
         if (source.type === "pointer") {
           const id = source.id;
+          // A touch pointer source drives the host's trusted touch sequence in
+          // addition to the pointer and mouse events its action produces;
+          // resources/touching.js only ever registers a "touch" source.
+          const isTouch = !!(source.parameters && source.parameters.pointerType === "touch");
+          const routeTouch = (phase, point) => {
+            if (isTouch && typeof window.__goosieTestDriverTouch === "function") {
+              window.__goosieTestDriverTouch(id, phase, point.x, point.y);
+            }
+          };
           if (action.type === "pointerMove") {
             let target = action.origin && typeof action.origin.dispatchEvent === "function" ? action.origin : null;
             if (!target && action.origin === "pointer") target = pointerPositions.get(id);
@@ -1269,6 +1278,7 @@ const wptTestDriverInputShim = `(function () {
             pointerPositions.set(id, target);
             const point = actionPoint(action, target, id);
             pointerCoordinates.set(id, point);
+            routeTouch("move", point);
             dispatchPointer(target, "pointerMove", 0, id);
             if (heldPointer) updatePointerTextSelection(target, "extend");
             const wasDragging = activePointers.get(id) && activePointers.get(id).dragging;
@@ -1290,6 +1300,7 @@ const wptTestDriverInputShim = `(function () {
             heldPointer = {target, activeTarget};
             activePointers.set(id, heldPointer);
             setActive(activeTarget, true);
+            routeTouch("down", point);
             dispatchPointer(target, "pointerDown", action.button, id);
             if (typeof window.__goosiePointerDown === "function") window.__goosiePointerDown(target, id, action.button);
             routePointerAction("down", point, action.button);
@@ -1312,6 +1323,7 @@ const wptTestDriverInputShim = `(function () {
             // Popover light dismiss is a pointer default action that runs
             // after mousedown and before pointerup/mouseup are dispatched.
             if (typeof window.__goosiePointerUp === "function") window.__goosiePointerUp(target, id, action.button);
+            routeTouch("up", point);
             const dragFinished = routePointerAction("up", point, action.button);
             dispatchPointer(target, "pointerUp", action.button, id);
             if (action.button === 2) {

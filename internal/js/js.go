@@ -188,6 +188,12 @@ type Options struct {
 	// script cannot reach it; the host owns dispatching the wheel events and the
 	// scroll they produce.
 	OnTestDriverWheel func(x, y float32, deltaX, deltaY float64)
+	// OnTestDriverTouch advances one WPT testdriver touch pointer through a
+	// gesture phase - "down", "move" or "up" - at a viewport position. The host
+	// owns the held-contact set and the trusted touch events each phase raises,
+	// for the same reason it owns the pointer and wheel hooks: page script must not
+	// be able to forge a trusted gesture.
+	OnTestDriverTouch func(id, phase string, x, y float32)
 
 	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
 	// When nil, ephemeral in-memory storage is created per runtime.
@@ -707,6 +713,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupDOMException()
 	r.setupDOM()
 	r.installInputEventConstructors()
+	r.installTouchEvents()
 	r.queueInitialDetailsToggleEvents()
 	r.refreshDocumentPatternMismatches()
 	r.setupDocumentWrite()
@@ -1153,6 +1160,18 @@ func (r *Runtime) EnableTestUserActivationHook() {
 		)
 		return goja.Undefined()
 	})
+	_ = r.vm.Set("__goosieTestDriverTouch", func(call goja.FunctionCall) goja.Value {
+		if r.opts.OnTestDriverTouch == nil || len(call.Arguments) < 4 {
+			return goja.Undefined()
+		}
+		r.opts.OnTestDriverTouch(
+			call.Argument(0).String(),
+			call.Argument(1).String(),
+			float32(call.Argument(2).ToFloat()),
+			float32(call.Argument(3).ToFloat()),
+		)
+		return goja.Undefined()
+	})
 	_ = r.vm.Set("__goosiePointerUp", func(call goja.FunctionCall) goja.Value {
 		target := r.getNode(call.Argument(0))
 		if target == nil {
@@ -1209,6 +1228,22 @@ func (r *Runtime) ChainOnTestDriverWheel(fn func(x, y float32, deltaX, deltaY fl
 	r.opts.OnTestDriverWheel = func(x, y float32, deltaX, deltaY float64) {
 		fn(x, y, deltaX, deltaY)
 		previous(x, y, deltaX, deltaY)
+	}
+}
+
+// ChainOnTestDriverTouch installs the headless WPT touch-action default.
+func (r *Runtime) ChainOnTestDriverTouch(fn func(id, phase string, x, y float32)) {
+	if r == nil || fn == nil {
+		return
+	}
+	previous := r.opts.OnTestDriverTouch
+	if previous == nil {
+		r.opts.OnTestDriverTouch = fn
+		return
+	}
+	r.opts.OnTestDriverTouch = func(id, phase string, x, y float32) {
+		fn(id, phase, x, y)
+		previous(id, phase, x, y)
 	}
 }
 
@@ -4551,6 +4586,18 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("deltaX", we.DeltaX)
 		_ = obj.Set("deltaY", we.DeltaY)
 		_ = obj.Set("deltaZ", we.DeltaZ)
+	}
+
+	// TouchEvent lists. A generated gesture owns its held and changed contacts,
+	// so the page reads the same three lists off it as off one it constructed.
+	if te := e.AsTouch(); te != nil {
+		_ = obj.Set("touches", r.newTouchList(te.Touches))
+		_ = obj.Set("targetTouches", r.newTouchList(te.TargetTouches))
+		_ = obj.Set("changedTouches", r.newTouchList(te.ChangedTouches))
+		_ = obj.Set("altKey", false)
+		_ = obj.Set("ctrlKey", false)
+		_ = obj.Set("shiftKey", false)
+		_ = obj.Set("metaKey", false)
 	}
 
 	// KeyboardEvent fields.

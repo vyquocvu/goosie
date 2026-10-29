@@ -208,6 +208,14 @@ type Session struct {
 	drag           *dragState
 	testDriverDrag *testDriverDragCandidate
 
+	// touches holds the contacts a WPT testdriver touch sequence has put down and
+	// not yet lifted, keyed by the input source's id so parallel touch pointers
+	// keep separate contacts. Owned by TestDriverTouchAction in touch.go and
+	// guarded by opMu like the rest of the interaction state. touchSeq numbers the
+	// contacts so each keeps the identifier it was raised with.
+	touches  map[string]*dom.Touch
+	touchSeq int
+
 	// scriptErrs is a bounded window of the document's uncaught script errors
 	// and scriptErrTotal is how many there were. Errors still do not stop the
 	// load - that behaviour is deliberate and unchanged - they are only no
@@ -885,6 +893,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		})
 		s.jsRT.ChainOnTestDriverPointer(s.TestDriverPointerAction)
 		s.jsRT.ChainOnTestDriverWheel(s.TestDriverWheelAction)
+		s.jsRT.ChainOnTestDriverTouch(s.TestDriverTouchAction)
 		s.jsRT.ChainOnEscapeKey(func() bool {
 			return s.CancelTestDriverDrag() || s.CloseTopmostAutoPopover()
 		})

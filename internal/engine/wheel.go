@@ -14,17 +14,18 @@ func (s *Session) TestDriverWheelAction(x, y float32, deltaX, deltaY float64) {
 	if rt == nil {
 		return
 	}
-	target := s.wheelTargetAt(x, y)
+	target := s.gestureTargetAt(x, y)
 	if rt.DispatchTrustedWheel(target, x, y, deltaX, deltaY) {
 		rt.ScrollWindowBy(deltaX, deltaY)
 	}
 }
 
-// wheelTargetAt resolves the node a generated gesture targets at a document
+// gestureTargetAt resolves the node a generated gesture targets at a document
 // point. Hit testing finds the innermost box, whose element ancestor is the
 // event target; a point outside every box still belongs to the page, so the
-// gesture falls back to the viewport's scrolling element.
-func (s *Session) wheelTargetAt(x, y float32) *dom.Node {
+// gesture falls back to the viewport's scrolling element. Wheel and touch
+// gestures both enter this way.
+func (s *Session) gestureTargetAt(x, y float32) *dom.Node {
 	target := s.nodeAt(x, y)
 	for target != nil && !target.Element() {
 		target = target.Parent

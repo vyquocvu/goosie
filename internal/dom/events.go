@@ -254,6 +254,53 @@ func NewTrustedWheelEvent(typ string, deltaX, deltaY, clientX, clientY float64) 
 	return e
 }
 
+// Touch is one contact point of a touch gesture. Target is the node the contact
+// is aimed at: TouchEvent's targetTouches list is the held set limited to
+// contacts aimed at the event's own target.
+type Touch struct {
+	Identifier int
+	ClientX    float64
+	ClientY    float64
+	Target     *Node
+}
+
+// TouchEvent is the event a touch gesture produces. The three lists are the
+// gesture state as the host saw it when it raised the event: Touches is every
+// contact still held down, ChangedTouches is the contact or contacts this action
+// added or released, and TargetTouches is Touches limited to the event target.
+// Touches deliberately excludes the released contact on touchend and touchcancel,
+// which is what a page distinguishes the two by.
+type TouchEvent struct {
+	Event
+	Touches        []*Touch
+	TargetTouches  []*Touch
+	ChangedTouches []*Touch
+}
+
+// NewTrustedTouchEvent builds the event one action of a touch sequence raises.
+// typ is "touchstart", "touchmove", "touchend" or "touchcancel". touches is every
+// contact still held after this action, so a touchend is built with the released
+// contact already dropped, and changed is the contact this action added or
+// released. As with a wheel gesture, whether touchstart and touchmove can be
+// prevented depends on the listeners the dispatch reaches, so the caller answers
+// that with SetScrollCancelableByListener before dispatch begins.
+func NewTrustedTouchEvent(typ string, target *Node, touches, changed []*Touch) *Event {
+	te := &TouchEvent{
+		Event:          *NewTrustedEvent(typ, true, true),
+		Touches:        touches,
+		ChangedTouches: changed,
+	}
+	for _, touch := range touches {
+		if touch != nil && touch.Target == target && target != nil {
+			te.TargetTouches = append(te.TargetTouches, touch)
+		}
+	}
+	e := &te.Event
+	e.interfaceName = "TouchEvent"
+	e.payload = te
+	return e
+}
+
 // ErrorEvent carries the script-error fields exposed to event listeners and
 // the special Window.onerror callback signature.
 type ErrorEvent struct {
@@ -610,6 +657,13 @@ func (e *Event) AsMouse() *MouseEvent {
 func (e *Event) AsWheel() *WheelEvent {
 	we, _ := e.payload.(*WheelEvent)
 	return we
+}
+
+// AsTouch returns the concrete *TouchEvent behind this event, or nil when the
+// event carries no touch payload.
+func (e *Event) AsTouch() *TouchEvent {
+	te, _ := e.payload.(*TouchEvent)
+	return te
 }
 
 // AsError returns the ErrorEvent payload, if this is an ErrorEvent.
