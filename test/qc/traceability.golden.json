@@ -1737,7 +1737,7 @@
     "tests": [
       "test/js/node_tree_test.go:TestAppendChildMovesFragmentChildrenAndEmptiesFragment",
       "test/js/node_tree_test.go:TestChildListReadsCoverEveryNodeType",
-      "test/js/node_tree_test.go:TestCloneNodeShallowAndDeep",
+      "test/js/node_tree_test.go:TestChildNodeReplaceWithNoArgumentsRemovesReceiver",
       "test/js/node_tree_test.go:TestClonedFormControlKeepsCheckedState",
       "test/js/node_tree_test.go:TestCreateDocumentFragmentIsANodeThatTakesChildren",
       "test/js/node_tree_test.go:TestInsertBeforeMovesFragmentChildrenToPosition",
@@ -1761,7 +1761,7 @@
       "test/js/window_lifecycle_test.go:TestBubblingEventReachesWindowUnlessPropagationStops",
       "test/js/window_lifecycle_test.go:TestDOMContentLoadedReachesWindowAfterDocument",
       "test/js/window_lifecycle_test.go:TestFireDocumentLifecycleReportsDomMutation",
-      "test/js/window_lifecycle_test.go:TestLoadEventFiresOnWindowOnly",
+      "test/js/window_lifecycle_test.go:TestLoadEventTargetsDocumentAndReachesWindow",
       "test/js/window_lifecycle_test.go:TestReadyStateGuardRunsHandlerAfterLoad",
       "test/js/window_lifecycle_test.go:TestReadyStateTracksTheLifecycle",
       "test/js/window_lifecycle_test.go:TestWindowDispatchEventDoesNotReachDocument",
@@ -1815,13 +1815,13 @@
     "tests": [
       "test/js/location_parts_test.go:TestDocumentLocationIsTheSameObjectAsWindowLocation",
       "test/js/location_parts_test.go:TestLocationCoercesToHref",
+      "test/js/location_parts_test.go:TestLocationHashWriteUpdatesSameDocumentURL",
       "test/js/location_parts_test.go:TestLocationHostnameSupportsARealPagePattern",
       "test/js/location_parts_test.go:TestLocationNavigationMembersAreAbsent",
       "test/js/location_parts_test.go:TestLocationOfAnUnparseableURL",
       "test/js/location_parts_test.go:TestLocationPartsFollowHistory",
       "test/js/location_parts_test.go:TestLocationPartsOfAFullURL",
-      "test/js/location_parts_test.go:TestLocationPartsOfAnOriginOnlyURL",
-      "test/js/location_parts_test.go:TestLocationWritesAreIgnoredNotNavigating"
+      "test/js/location_parts_test.go:TestLocationPartsOfAnOriginOnlyURL"
     ],
     "enforced": false
   },
@@ -2231,7 +2231,7 @@
     ],
     "status": "PASS",
     "tests": [
-      "test/js/element_interfaces_test.go:TestInputValueStaysLiveAndDefaultValueReflectsTheAttribute"
+      "test/js/element_interfaces_test.go:TestInputValueAndDefaultValueUseSeparateLiveAndAttributeState"
     ],
     "enforced": false
   },
@@ -3119,6 +3119,18 @@
       "test/gatecheck/licenses_test.go:TestLinkedDependenciesPinned",
       "test/gatecheck/licenses_test.go:TestReleaseTargetsMatchTheReleaseMatrix",
       "test/gatecheck/licenses_test.go:TestTargetResolutionFailsClosed"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-258",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/live_parity_test.go:TestLiveParitySelftestIsGreen"
     ],
     "enforced": false
   },
