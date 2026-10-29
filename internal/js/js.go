@@ -4257,6 +4257,12 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 	_ = object.DefineAccessorProperty("defaultPrevented", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(event.DefaultPrevented())
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	// Same live read for cancelable: the scroll-blocking types report false to a
+	// passive listener and their true flag everywhere else, so the value a page
+	// reads depends on which listener is running.
+	_ = object.DefineAccessorProperty("cancelable", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(event.Cancelable())
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	r.activeEventObjects[event] = eventObj
 	defer delete(r.activeEventObjects, event)
 	var result bool
@@ -4348,7 +4354,12 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 	}
 	_ = obj.Set("type", e.Type)
 	_ = obj.Set("bubbles", e.Bubbles())
-	_ = obj.Set("cancelable", e.Cancelable())
+	// cancelable is read per listener invocation: the scroll-blocking types
+	// report false while a passive listener runs. The wrapper object is reused
+	// across listeners for one dispatch, so a snapshot taken here would be stale.
+	_ = obj.DefineAccessorProperty("cancelable", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(e.Cancelable())
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = obj.Set("isTrusted", e.IsTrusted())
 	_ = obj.Set("__goosieEvent", true)
 	_ = obj.Set("__initialized", true)

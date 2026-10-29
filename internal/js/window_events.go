@@ -292,12 +292,7 @@ func windowListenerOptions(vm *goja.Runtime, args []goja.Value, defaultPassive b
 }
 
 func defaultPassiveEventType(typ string) bool {
-	switch typ {
-	case "touchstart", "touchmove", "wheel", "mousewheel":
-		return true
-	default:
-		return false
-	}
+	return dom.IsScrollBlockingEventType(typ)
 }
 
 func defaultPassiveNodeTarget(node *dom.Node) bool {

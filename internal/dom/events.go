@@ -136,7 +136,26 @@ func (e *Event) Phase() EventPhase { return e.phase }
 func (e *Event) Bubbles() bool { return e.bubbles }
 
 // Cancelable reports whether the event's default action can be prevented.
-func (e *Event) Cancelable() bool { return e.cancelable }
+//
+// The scroll-blocking types report false while a passive listener runs, even
+// though their cancelable flag stays set for the rest of dispatch: a passive
+// listener can never prevent a scroll, so Chromium hides the capability rather
+// than the flag. Any other type keeps its flag.
+func (e *Event) Cancelable() bool {
+	return e.cancelable && !(IsScrollBlockingEventType(e.Type) && e.inPassiveListener)
+}
+
+// IsScrollBlockingEventType reports whether type names an event whose default
+// action is a scroll. These are the types the DOM's default passive value is
+// true for on a Window, Document, body or documentElement, and the only types
+// whose cancelable flag a passive listener hides.
+func IsScrollBlockingEventType(typ string) bool {
+	switch typ {
+	case "wheel", "mousewheel", "touchstart", "touchmove":
+		return true
+	}
+	return false
+}
 
 // DefaultPrevented reports whether PreventDefault was called.
 func (e *Event) DefaultPrevented() bool { return e.defaultPrevented }
