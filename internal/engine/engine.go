@@ -884,6 +884,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 			}
 		})
 		s.jsRT.ChainOnTestDriverPointer(s.TestDriverPointerAction)
+		s.jsRT.ChainOnTestDriverWheel(s.TestDriverWheelAction)
 		s.jsRT.ChainOnEscapeKey(func() bool {
 			return s.CancelTestDriverDrag() || s.CloseTopmostAutoPopover()
 		})

@@ -1334,6 +1334,14 @@ const wptTestDriverInputShim = `(function () {
           }
           continue;
         }
+        if (source.type === "wheel") {
+          if (action.type !== "scroll") throw new Error("Goosie testdriver action_sequence does not support wheel action " + action.type);
+          const point = actionPoint(action, document.body, source.id);
+          if (typeof window.__goosieTestDriverWheel === "function") {
+            window.__goosieTestDriverWheel(point.x, point.y, Number(action.deltaX) || 0, Number(action.deltaY) || 0);
+          }
+          continue;
+        }
         throw new Error("Goosie testdriver action_sequence does not support source " + source.type);
       }
     }

@@ -543,26 +543,40 @@ func (r *Runtime) handleWindowScroll(method string, call goja.FunctionCall) {
 		}
 	}
 
+	r.setWindowScroll(dx, dy, method == "scrollBy")
+}
+
+// setWindowScroll commits a document viewport position, either absolute or
+// relative to the current offset, and dispatches scroll only when it moved.
+func (r *Runtime) setWindowScroll(x, y float64, relative bool) {
+	if r == nil {
+		return
+	}
 	r.scrollMu.Lock()
 	oldX, oldY := r.windowScrollX, r.windowScrollY
-	if method == "scrollBy" {
-		r.windowScrollX += dx
-		r.windowScrollY += dy
-	} else {
-		r.windowScrollX = dx
-		r.windowScrollY = dy
+	if relative {
+		x += oldX
+		y += oldY
 	}
-	if r.windowScrollX < 0 {
-		r.windowScrollX = 0
+	if x < 0 {
+		x = 0
 	}
-	if r.windowScrollY < 0 {
-		r.windowScrollY = 0
+	if y < 0 {
+		y = 0
 	}
-	newX, newY := r.windowScrollX, r.windowScrollY
+	r.windowScrollX, r.windowScrollY = x, y
 	r.scrollMu.Unlock()
-	if newX != oldX || newY != oldY {
+	if x != oldX || y != oldY {
 		r.dispatchWindowScrollEvent()
 	}
+}
+
+// ScrollWindowBy moves the document viewport by a wheel gesture's deltas. This is
+// the default action a wheel event carries: the host calls it only when the page
+// did not cancel the gesture. Clamping and the scroll event match the script-facing
+// window.scrollBy(), which shares this path.
+func (r *Runtime) ScrollWindowBy(dx, dy float64) {
+	r.setWindowScroll(dx, dy, true)
 }
 
 // newDOMRectList builds a DOMRectList-shaped array-like object from a slice of

@@ -4,80 +4,50 @@ import (
 	"testing"
 )
 
-// The WPT dom/events/non-cancelable-when-passive corpus asserts what a listener
-// sees on event.cancelable: a scroll-blocking type reports false for a passive
-// listener and true for a non-passive one, a type that is not scroll-blocking
-// reports true for a passive listener, and the default-passive targets (window,
-// document, body, documentElement) report false without an explicit option.
-func TestScrollBlockingCancelableSeenByListeners(t *testing.T) {
+// An event a page constructed keeps the cancelable flag it was given, even where
+// the listener cannot use it: Chromium reports cancelable=true to a passive
+// listener on a scroll-blocking type and simply ignores preventDefault(). Only
+// browser-generated scroll-blocking events hide the flag, and that is measured in
+// test/wpt where the engine can synthesize one.
+func TestSyntheticScrollCancelableStaysVisibleToPassiveListeners(t *testing.T) {
 	r := newEventRuntime(t, eventDOM())
 	script := `
 		var report = [];
 		function probe(target, label, options, type) {
 			var merged = Object.assign({ once: true }, options);
 			target.addEventListener(type, function (event) {
-				report.push(label + "=" + event.cancelable);
+				event.preventDefault();
+				report.push(label + "=" + event.cancelable + "," + event.defaultPrevented);
 			}, merged);
-			target.dispatchEvent(new Event(type, { cancelable: true }));
+			report.push(label + "!ret=" + target.dispatchEvent(new Event(type, { cancelable: true })));
 		}
 		var div = document.getElementById('target');
 		for (const type of ["wheel", "mousewheel", "touchstart", "touchmove"]) {
 			probe(div, "div-passive-" + type, { passive: true }, type);
 			probe(div, "div-active-" + type, { passive: false }, type);
-			probe(div, "div-plain-" + type, {}, type);
 			probe(window, "window-default-" + type, {}, type);
 		}
 		probe(div, "div-passive-test", { passive: true }, "test");
 		probe(window, "window-default-touchend", {}, "touchend");
 	`
-	if err := r.Run(script, "scroll-blocking-cancelable"); err != nil {
+	if err := r.Run(script, "synthetic-scroll-cancelable"); err != nil {
 		t.Fatal(err)
 	}
-	report, err := r.Evaluate(`report.join(",")`)
+	report, err := r.Evaluate(`report.join("|")`)
 	if err != nil {
 		t.Fatalf("read report: %v", err)
 	}
-	want := []string{
-		"div-passive-wheel=false",
-		"div-active-wheel=true",
-		"div-plain-wheel=true",
-		"window-default-wheel=false",
-		"div-passive-mousewheel=false",
-		"div-active-mousewheel=true",
-		"div-plain-mousewheel=true",
-		"window-default-mousewheel=false",
-		"div-passive-touchstart=false",
-		"div-active-touchstart=true",
-		"div-plain-touchstart=true",
-		"window-default-touchstart=false",
-		"div-passive-touchmove=false",
-		"div-active-touchmove=true",
-		"div-plain-touchmove=true",
-		"window-default-touchmove=false",
-		"div-passive-test=true",
-		"window-default-touchend=true",
+	want := ""
+	for _, typ := range []string{"wheel", "mousewheel", "touchstart", "touchmove"} {
+		// A passive listener sees the flag but cannot use it, so the dispatch was
+		// not canceled and dispatchEvent() returns true.
+		want += "div-passive-" + typ + "=true,false|div-passive-" + typ + "!ret=true|"
+		want += "div-active-" + typ + "=true,true|div-active-" + typ + "!ret=false|"
+		want += "window-default-" + typ + "=true,false|window-default-" + typ + "!ret=true|"
 	}
-	got := splitReport(report)
-	if len(got) != len(want) {
-		t.Fatalf("report has %d probes, want %d: %v", len(got), len(want), report)
+	want += "div-passive-test=true,false|div-passive-test!ret=true|"
+	want += "window-default-touchend=true,true|window-default-touchend!ret=false"
+	if report != want {
+		t.Errorf("report =\n  %s\nwant\n  %s", report, want)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("probe %d = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func splitReport(report string) []string {
-	var out []string
-	start := 0
-	for i := 0; i <= len(report); i++ {
-		if i == len(report) || report[i] == ',' {
-			if i > start {
-				out = append(out, report[start:i])
-			}
-			start = i + 1
-		}
-	}
-	return out
 }

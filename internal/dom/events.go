@@ -38,9 +38,12 @@ type Event struct {
 	persisted         bool
 	defaultPrevented  bool
 	inPassiveListener bool
-	stopped           bool // stopPropagation called
-	immediateStopped  bool // stopImmediatePropagation called
-	timeStamp         time.Time
+	// scrollCancelableByListener is the dispatch-time answer Cancelable() gives
+	// for a generated scroll-blocking event. See SetScrollCancelableByListener.
+	scrollCancelableByListener bool
+	stopped                    bool // stopPropagation called
+	immediateStopped           bool // stopImmediatePropagation called
+	timeStamp                  time.Time
 
 	// payload points at the concrete subtype (e.g. *KeyboardEvent) that embeds
 	// this Event. Listeners and dispatch only ever pass *Event, so a type
@@ -137,18 +140,33 @@ func (e *Event) Bubbles() bool { return e.bubbles }
 
 // Cancelable reports whether the event's default action can be prevented.
 //
-// The scroll-blocking types report false while a passive listener runs, even
-// though their cancelable flag stays set for the rest of dispatch: a passive
-// listener can never prevent a scroll, so Chromium hides the capability rather
-// than the flag. Any other type keeps its flag.
+// A generated scroll-blocking event reports false while no listener this
+// dispatch can reach may still cancel it: Chromium creates wheel and touch input
+// with the cancelable flag derived from the page's listeners, and the answer is
+// one value per dispatch that every listener sees. An event a page constructed
+// keeps its own flag, and a type that blocks no scroll is never affected.
 func (e *Event) Cancelable() bool {
-	return e.cancelable && !(IsScrollBlockingEventType(e.Type) && e.inPassiveListener)
+	if !e.cancelable {
+		return false
+	}
+	if e.isTrusted && IsScrollBlockingEventType(e.Type) {
+		return e.scrollCancelableByListener
+	}
+	return true
+}
+
+// SetScrollCancelableByListener records whether this generated scroll-blocking
+// dispatch can reach a listener registered non-passively. Callers that hand a
+// browser-generated wheel or touch gesture to the page must set it before any
+// listener runs; it has no effect on other events.
+func (e *Event) SetScrollCancelableByListener(present bool) {
+	e.scrollCancelableByListener = present
 }
 
 // IsScrollBlockingEventType reports whether type names an event whose default
 // action is a scroll. These are the types the DOM's default passive value is
 // true for on a Window, Document, body or documentElement, and the only types
-// whose cancelable flag a passive listener hides.
+// whose cancelable flag a dispatch derives from its listeners.
 func IsScrollBlockingEventType(typ string) bool {
 	switch typ {
 	case "wheel", "mousewheel", "touchstart", "touchmove":
@@ -190,6 +208,50 @@ type MouseEvent struct {
 	CtrlKey       bool
 	ShiftKey      bool
 	MetaKey       bool
+}
+
+// WheelEvent is the event a wheel gesture produces. The legacy "mousewheel" type
+// is a WheelEvent too, which is what WPT's synthetic-events-cancelable map
+// asserts.
+type WheelEvent struct {
+	MouseEvent
+	DeltaX float64
+	DeltaY float64
+	DeltaZ float64
+}
+
+// mouseEventPayload is what AsMouse accepts: a plain MouseEvent or any interface
+// that derives from it. Listeners only ever receive the *Event, so the concrete
+// payload type cannot be asserted on directly.
+type mouseEventPayload interface {
+	mouseEvent() *MouseEvent
+}
+
+func (e *MouseEvent) mouseEvent() *MouseEvent { return e }
+
+func (e *WheelEvent) mouseEvent() *MouseEvent { return &e.MouseEvent }
+
+// NewTrustedWheelEvent builds the event one wheel gesture produces. typ is
+// "wheel" or the legacy "mousewheel". Whether this gesture can be prevented is
+// a property of the listeners its dispatch reaches, not of the gesture, so the
+// caller must answer that with SetScrollCancelableByListener before dispatch
+// begins; until it does the event reports non-cancelable.
+func NewTrustedWheelEvent(typ string, deltaX, deltaY, clientX, clientY float64) *Event {
+	we := &WheelEvent{
+		MouseEvent: MouseEvent{
+			Event:   *NewTrustedEvent(typ, true, true),
+			ClientX: int32(clientX),
+			ClientY: int32(clientY),
+			ScreenX: int32(clientX),
+			ScreenY: int32(clientY),
+		},
+		DeltaX: deltaX,
+		DeltaY: deltaY,
+	}
+	e := &we.Event
+	e.interfaceName = "WheelEvent"
+	e.payload = we
+	return e
 }
 
 // ErrorEvent carries the script-error fields exposed to event listeners and
@@ -533,10 +595,21 @@ func (e *Event) AsKeyboard() *KeyboardEvent {
 }
 
 // AsMouse returns the concrete *MouseEvent behind this event, or nil when the
-// event is not a mouse event.
+// event is not a mouse event. Events that derive from MouseEvent in the IDL -
+// DragEvent and WheelEvent - return their embedded base.
 func (e *Event) AsMouse() *MouseEvent {
-	me, _ := e.payload.(*MouseEvent)
-	return me
+	me, _ := e.payload.(mouseEventPayload)
+	if me == nil {
+		return nil
+	}
+	return me.mouseEvent()
+}
+
+// AsWheel returns the concrete *WheelEvent behind this event, or nil when the
+// event carries no wheel deltas.
+func (e *Event) AsWheel() *WheelEvent {
+	we, _ := e.payload.(*WheelEvent)
+	return we
 }
 
 // AsError returns the ErrorEvent payload, if this is an ErrorEvent.

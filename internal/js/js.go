@@ -183,6 +183,11 @@ type Options struct {
 	// OnTestDriverPointer feeds WPT adapter pointer actions into the host
 	// interaction model. It is not exposed to page-authored pointer events.
 	OnTestDriverPointer func(action string, x, y float32, button int) bool
+	// OnTestDriverWheel feeds one WPT testdriver scroll gesture into the host
+	// interaction model at a viewport position. Like the pointer hook, page
+	// script cannot reach it; the host owns dispatching the wheel events and the
+	// scroll they produce.
+	OnTestDriverWheel func(x, y float32, deltaX, deltaY float64)
 
 	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
 	// When nil, ephemeral in-memory storage is created per runtime.
@@ -1136,6 +1141,18 @@ func (r *Runtime) EnableTestUserActivationHook() {
 			int(call.Argument(3).ToInteger()),
 		))
 	})
+	_ = r.vm.Set("__goosieTestDriverWheel", func(call goja.FunctionCall) goja.Value {
+		if r.opts.OnTestDriverWheel == nil || len(call.Arguments) < 4 {
+			return goja.Undefined()
+		}
+		r.opts.OnTestDriverWheel(
+			float32(call.Argument(0).ToFloat()),
+			float32(call.Argument(1).ToFloat()),
+			call.Argument(2).ToFloat(),
+			call.Argument(3).ToFloat(),
+		)
+		return goja.Undefined()
+	})
 	_ = r.vm.Set("__goosiePointerUp", func(call goja.FunctionCall) goja.Value {
 		target := r.getNode(call.Argument(0))
 		if target == nil {
@@ -1176,6 +1193,22 @@ func (r *Runtime) ChainOnTestDriverPointer(fn func(action string, x, y float32, 
 	}
 	r.opts.OnTestDriverPointer = func(action string, x, y float32, button int) bool {
 		return fn(action, x, y, button) || previous(action, x, y, button)
+	}
+}
+
+// ChainOnTestDriverWheel installs the headless WPT scroll-action default.
+func (r *Runtime) ChainOnTestDriverWheel(fn func(x, y float32, deltaX, deltaY float64)) {
+	if r == nil || fn == nil {
+		return
+	}
+	previous := r.opts.OnTestDriverWheel
+	if previous == nil {
+		r.opts.OnTestDriverWheel = fn
+		return
+	}
+	r.opts.OnTestDriverWheel = func(x, y float32, deltaX, deltaY float64) {
+		fn(x, y, deltaX, deltaY)
+		previous(x, y, deltaX, deltaY)
 	}
 }
 
@@ -4257,12 +4290,6 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 	_ = object.DefineAccessorProperty("defaultPrevented", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(event.DefaultPrevented())
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	// Same live read for cancelable: the scroll-blocking types report false to a
-	// passive listener and their true flag everywhere else, so the value a page
-	// reads depends on which listener is running.
-	_ = object.DefineAccessorProperty("cancelable", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(event.Cancelable())
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	r.activeEventObjects[event] = eventObj
 	defer delete(r.activeEventObjects, event)
 	var result bool
@@ -4516,6 +4543,14 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("ctrlKey", me.CtrlKey)
 		_ = obj.Set("shiftKey", me.ShiftKey)
 		_ = obj.Set("metaKey", me.MetaKey)
+	}
+
+	// WheelEvent deltas. The mouse coordinates above arrive through the embedded
+	// MouseEvent, which AsMouse resolves for every interface deriving from it.
+	if we := e.AsWheel(); we != nil {
+		_ = obj.Set("deltaX", we.DeltaX)
+		_ = obj.Set("deltaY", we.DeltaY)
+		_ = obj.Set("deltaZ", we.DeltaZ)
 	}
 
 	// KeyboardEvent fields.

@@ -1485,3 +1485,60 @@ func (r *Runtime) installInputEventConstructors() {
 		});
 	`)
 }
+
+// WheelListenerState reports two things about the listeners a wheel gesture
+// starting at target would reach: whether a wheel listener exists at all, and
+// whether any wheel or legacy mousewheel listener may prevent the gesture.
+//
+// Chromium derives a generated scroll event's cancelable flag from the second -
+// one value, shared by every listener of that dispatch - and gives the page the
+// legacy mousewheel event only when the first is false: a page that listens for
+// wheel has opted into the modern event, so it does not also receive the legacy
+// one. The stored passive flag already carries the default-passive rule for a
+// Document, body or documentElement, so this reads it directly; the window step
+// of the path is the runtime's own list rather than a node's.
+func (r *Runtime) WheelListenerState(target *dom.Node) (hasWheel, cancelableByListener bool) {
+	matches := func(typ string, passive bool) {
+		switch typ {
+		case "wheel":
+			hasWheel = true
+			if !passive {
+				cancelableByListener = true
+			}
+		case "mousewheel":
+			if !passive {
+				cancelableByListener = true
+			}
+		}
+	}
+	for node := target; node != nil; node = node.Parent {
+		for _, listener := range dom.GetNodeListeners(node) {
+			matches(listener.Type, listener.Passive)
+		}
+	}
+	r.winMu.Lock()
+	defer r.winMu.Unlock()
+	for _, listener := range r.winListeners {
+		matches(listener.typ, listener.passive)
+	}
+	return hasWheel, cancelableByListener
+}
+
+// DispatchTrustedWheel hands one browser-generated wheel gesture to the page at
+// target. The legacy mousewheel event is dispatched only when the path has no
+// wheel listener, then the wheel event; both report the same cancelable flag,
+// derived from the listeners this dispatch reached. The answer is whether the
+// gesture survived them: only then may the host scroll.
+func (r *Runtime) DispatchTrustedWheel(target *dom.Node, x, y float32, deltaX, deltaY float64) bool {
+	hasWheel, cancelable := r.WheelListenerState(target)
+	if !hasWheel {
+		mousewheel := dom.NewTrustedWheelEvent("mousewheel", deltaX, deltaY, float64(x), float64(y))
+		mousewheel.SetScrollCancelableByListener(cancelable)
+		if !r.dispatchWithWindowStep(target, mousewheel) {
+			return false
+		}
+	}
+	wheel := dom.NewTrustedWheelEvent("wheel", deltaX, deltaY, float64(x), float64(y))
+	wheel.SetScrollCancelableByListener(cancelable)
+	return r.dispatchWithWindowStep(target, wheel)
+}
