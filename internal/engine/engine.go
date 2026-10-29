@@ -70,7 +70,17 @@ type Session struct {
 	imgFetch ImageFetcher
 	natural  map[dom.NodeID]layout.NaturalSize
 	images   map[dom.NodeID]stdimage.Image
-	bgImages map[dom.NodeID]stdimage.Image
+	// scriptImgs holds the pixels a script successfully assigned to an
+	// in-document <img>, keyed by node, and pendingScriptImgs holds this
+	// turn's results awaiting reconciliation. scriptImgsLayoutPending records
+	// that attached or dropped pixels still owe the arena a rebuild; PumpJS
+	// forces exactly one Reflow and then clears it. All three are guarded by
+	// imgMu: the pixel sink runs on the JS goroutine while deferred loads and
+	// their reflows can move the same tables. See script_image.go.
+	scriptImgs              map[dom.NodeID]scriptImagePixels
+	pendingScriptImgs       map[dom.NodeID]scriptImagePixels
+	scriptImgsLayoutPending bool
+	bgImages                map[dom.NodeID]stdimage.Image
 	// pseudoBgImages holds background pixels declared on ::before/::after
 	// styles. A pseudo box is an anonymous layout object, so the image is
 	// keyed by the computed style pointer the layout object carries.
@@ -781,6 +791,12 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		s.installLayoutProviders()
 		s.jsRT.SetSubresourceBudget(s.sub)
 		s.jsRT.SetImageLoader(s)
+		// The pixels a successful script load produced come back through this
+		// sink. It only records them; PumpJS attaches them after the turn and
+		// forces the layout that makes an in-document <img> paint (see
+		// script_image.go). Installed next to the loader, before any script
+		// runs, so a synchronous during-parse assignment is recorded too.
+		s.jsRT.SetImagePixelSink(s.retainScriptImage)
 		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
 		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
 		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
@@ -1285,6 +1301,8 @@ func (s *Session) initImageMaps() {
 	}
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
+	s.scriptImgs = make(map[dom.NodeID]scriptImagePixels)
+	s.pendingScriptImgs = make(map[dom.NodeID]scriptImagePixels)
 	s.bgImages = make(map[dom.NodeID]stdimage.Image)
 	s.pseudoBgImages = make(map[*style.ComputedStyle]stdimage.Image)
 	s.pseudoBgVectorRef = make(map[*style.ComputedStyle]string)
@@ -1736,8 +1754,16 @@ func (s *Session) Viewport() (w, h float32) {
 func (s *Session) Reflow(viewportW float32) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	// imgMu comes off before intersection dispatch below. An error return
+	// earlier in the function still ends with it held, so the unlock is
+	// conditional rather than a second defer.
 	s.imgMu.Lock()
-	defer s.imgMu.Unlock()
+	imgLocked := true
+	defer func() {
+		if imgLocked {
+			s.imgMu.Unlock()
+		}
+	}()
 	if err := validateWidth(viewportW); err != nil {
 		return err
 	}
@@ -1853,7 +1879,16 @@ func (s *Session) Reflow(viewportW float32) error {
 		}
 	}
 	// Update intersection observer geometry and check intersections.
+	//
+	// CheckIntersections runs the page's callbacks on this goroutine, and a
+	// callback that assigns img.src re-enters the loader (LoadScriptImage ->
+	// beginScriptImage), which takes imgMu. Go mutexes are not reentrant, so
+	// the lock ends here: holding it across the dispatch deadlocked every page
+	// whose observer loaded an image, and vneconomy.vn hung to its 120 s sweep
+	// deadline with beginScriptImage parked in Lock.
 	if s.jsRT != nil {
+		s.imgMu.Unlock()
+		imgLocked = false
 		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil {
@@ -2922,6 +2957,11 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	s.jsRT.FlushIFrameLoads()
 	s.fixupDisabledFocus()
 	canvasChanged := canvasBefore != s.jsRT.CanvasVisualStamp()
+	// Script image results recorded by the pixel sink during Tick are
+	// reconciled after every callback of the turn has run, so the last src
+	// write wins. A turn that still owes a layout from an earlier postponed
+	// turn reports layoutPending even when nothing changed this turn.
+	layoutPending := s.drainScriptImages()
 	// Mutation state is captured before Reset: it decides between a full
 	// re-resolve and skipping straight to repaint below.
 	mutated := s.focusStylePending
@@ -2929,7 +2969,7 @@ func (s *Session) PumpJS(viewportW float32) bool {
 		mutated = mutated || !s.inv.Empty()
 		s.inv.Reset()
 	}
-	if !mutated {
+	if !mutated && !layoutPending {
 		// Timers/RAF can contain state-only work and even a continuously
 		// rescheduled no-op animation loop. Every DOM write notifies the sink;
 		// canvas operations are the other observable output in this runtime.
@@ -2938,6 +2978,8 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	}
 	if atomic.LoadInt32(&s.deferredActive) > 0 {
 		s.focusStylePending = true
+		// The layout-pending bit stays set: the next tick must still realize
+		// the attached pixels once the deferred tables have settled.
 		return false
 	}
 	s.focusStylePending = false
@@ -2947,8 +2989,21 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	// as at load. Reflow takes opMu itself; PumpJS composes locked
 	// primitives and never holds it, so reflow cannot deadlock against a
 	// concurrent Close.
+	layouts := s.workCounts.layoutBuilds.Load()
 	if err := s.RestyleAndReflow(viewportW); err != nil {
 		return false
+	}
+	if layoutPending && s.workCounts.layoutBuilds.Load() == layouts {
+		// RestyleAndReflow can refresh computed styles without rebuilding the
+		// arena when the cascade is unchanged. That is not enough here: the
+		// attached pixels changed s.natural, which only a real layout reads.
+		// Build once because the restyle path did not.
+		if err := s.Reflow(viewportW); err != nil {
+			return false
+		}
+	}
+	if layoutPending {
+		s.clearScriptImgsLayoutPending()
 	}
 	return true
 }

@@ -210,6 +210,14 @@ type Options struct {
 	// the binding never decodes bytes itself, because internal/js may not
 	// import internal/image (see internal/archtest/rules.go).
 	ImageLoader ImageLoader
+
+	// ImagePixelSink receives the decoded pixels of a successful script image
+	// load, together with the node that asked and the raw attribute value the
+	// result belongs to. It runs on the JS goroutine before the load event is
+	// dispatched and is never called on a failed load. The value is opaque to
+	// internal/js; only the embedder interprets it (or, as with internal/engine,
+	// converts it into paint state without importing it here).
+	ImagePixelSink func(node *dom.Node, rawSrc string, pixels any)
 }
 
 // Kind is the JS type of a Value read back out of a runtime.

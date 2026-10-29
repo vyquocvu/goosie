@@ -320,6 +320,17 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						boxW = contentW
 					}
 					outer := k.MarginLeft + boxW + k.MarginRight
+					// A float that does not fit beside the floats already on this
+					// line starts a new one below all of them. Without this, two
+					// width:100% floats are placed side by side and every later
+					// block is pushed one viewport further right, off the document.
+					floatY := y
+					if floatLead+outer+floatTrail > contentW {
+						if floatBottom > floatY {
+							floatY = floatBottom
+						}
+						floatLead, floatTrail = 0, 0
+					}
 					if k.Style.Float == style.FloatLeft {
 						k.X = contentX + floatLead + k.MarginLeft
 						floatLead += outer
@@ -327,7 +338,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						k.X = contentX + contentW - floatTrail - k.MarginRight - boxW
 						floatTrail += outer
 					}
-					k.Y = contentY + y + k.MarginTop
+					k.Y = contentY + floatY + k.MarginTop
 					// Sized against the containing block above; the settled
 					// width here is the box itself, which would answer
 					// percentages against the wrong base.
@@ -338,7 +349,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					// Re-read the box: laying its content out may have grown the
 					// arena and left the captured pointer pointing at the old slice.
 					placed := a.Get(kid)
-					bottom := y + placed.MarginTop + placed.BorderH() + placed.MarginBottom
+					bottom := floatY + placed.MarginTop + placed.BorderH() + placed.MarginBottom
 					if bottom > floatBottom {
 						floatBottom = bottom
 					}

@@ -39,11 +39,14 @@ type ImageLoader interface {
 // LoadedImage is the outcome of one script-image load. Width and Height are
 // the intrinsic dimensions of the decoded image; Src is the absolute source
 // that answered (or the raw source a failed load named); Err reports why a
-// load did not produce pixels.
+// load did not produce pixels. Pixels is the decoded image, carried opaquely
+// so the binding can hand it back to the embedder without importing the
+// packages that know how to paint it.
 type LoadedImage struct {
 	Width, Height int
 	Src           string
 	Err           error
+	Pixels        any
 }
 
 // SetImageLoader installs the script-image load path. The engine calls it
@@ -51,6 +54,18 @@ type LoadedImage struct {
 func (r *Runtime) SetImageLoader(l ImageLoader) {
 	r.mu.Lock()
 	r.opts.ImageLoader = l
+	r.mu.Unlock()
+}
+
+// SetImagePixelSink installs the receiver for the pixels a successful script
+// image load produced. It is called from applyImageResult after the element's
+// load state is updated and before the load event is dispatched, so a load
+// handler already observes the settled state. The binding never inspects the
+// value; only the embedder knows what it is. The engine installs its sink
+// next to SetImageLoader, before any script runs.
+func (r *Runtime) SetImagePixelSink(sink func(node *dom.Node, rawSrc string, pixels any)) {
+	r.mu.Lock()
+	r.opts.ImagePixelSink = sink
 	r.mu.Unlock()
 }
 
@@ -4083,6 +4098,17 @@ func (r *Runtime) applyImageResult(node *dom.Node, st *imageLoadState, res Loade
 		r.resolvePromise(p, goja.Undefined())
 	}
 	st.waiters = nil
+	// Hand the pixels to the embedder after the element state is settled and
+	// before the load event, so a load handler observes a state the engine has
+	// already been told about. st.src is the raw attribute value this result
+	// belongs to; the engine reconciles it against the live attribute rather
+	// than re-resolving a URL against a possibly different base.
+	r.mu.Lock()
+	sink := r.opts.ImagePixelSink
+	r.mu.Unlock()
+	if sink != nil {
+		sink(node, st.src, res.Pixels)
+	}
 	dom.DispatchEvent(node, dom.NewEvent("load", false, false))
 }
 

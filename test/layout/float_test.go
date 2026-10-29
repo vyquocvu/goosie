@@ -76,6 +76,37 @@ func TestSameSideFloatsSitSideBySide(t *testing.T) {
 	}
 }
 
+// A float that does not fit beside the floats already on its line starts a new
+// line below them. Before this, two width:100% floats were placed side by side
+// at X=0 and X=container width, and every later block was pushed one viewport
+// further right: vnexpress.net builds its whole body from width:100% floats, so
+// all of it rendered off-screen and the page came out blank.
+func TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge(t *testing.T) {
+	arena := session(t, `<html><body style="margin: 0;">
+<section style="width: 400px;">
+<aside style="float: left; width: 100%; height: 50px;"></aside>
+<nav style="float: left; width: 100%; height: 70px;"></nav>
+<div style="float: right; width: 100%; height: 30px;"></div>
+</section>
+</body></html>`, 800)
+
+	first := findByTag(arena, "aside")
+	second := findByTag(arena, "nav")
+	third := findByTag(arena, "div")
+	if first == nil || second == nil || third == nil {
+		t.Fatal("floats not found")
+	}
+	if !almostEqual(first.X, 0) || !almostEqual(first.Y, 0) {
+		t.Errorf("first float at (%v,%v), want (0,0)", first.X, first.Y)
+	}
+	if !almostEqual(second.X, 0) || !almostEqual(second.Y, 50) {
+		t.Errorf("second float at (%v,%v), want (0,50): it cannot fit beside the first", second.X, second.Y)
+	}
+	if !almostEqual(third.X, 0) || !almostEqual(third.Y, 120) {
+		t.Errorf("right float at (%v,%v), want (0,120): it starts below both", third.X, third.Y)
+	}
+}
+
 // A container that establishes a formatting context - here by clipping - grows
 // around the floats it holds. A plain block box collapses past them instead,
 // which is the behaviour a clearfix works around.
