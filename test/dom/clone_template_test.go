@@ -61,7 +61,7 @@ func TestCloneNodeDeep(t *testing.T) {
 	}
 }
 
-func TestTemplateContent(t *testing.T) {
+func TestTemplateContentDoesNotStealTemplateElementChildren(t *testing.T) {
 	doc := dom.NewDocument()
 	tmpl := doc.NewElement("template")
 	p := doc.NewElement("p")
@@ -75,11 +75,39 @@ func TestTemplateContent(t *testing.T) {
 	if !frag.DocumentFragment() {
 		t.Fatalf("expected DocumentFragment type, got %v", frag.Type)
 	}
-	if frag.FirstChild == nil || frag.FirstChild.Data != "p" {
-		t.Fatalf("expected cloned p child in fragment, got %v", frag.FirstChild)
+	if frag.FirstChild != nil {
+		t.Fatalf("template.content unexpectedly acquired ordinary template children: %v", frag.FirstChild)
 	}
-	if frag.FirstChild.FirstChild == nil || frag.FirstChild.FirstChild.DataContent != "Template Child" {
-		t.Fatalf("expected text in cloned p, got %v", frag.FirstChild.FirstChild)
+	if tmpl.FirstChild != p || p.Parent != tmpl || p.FirstChild == nil || p.FirstChild.DataContent != "Template Child" {
+		t.Fatalf("template.appendChild-style insertion should stay in the template element: parent=%v child=%v", p.Parent, tmpl.FirstChild)
+	}
+}
+
+func TestTemplateContentUsesInertOwnerDocument(t *testing.T) {
+	doc := dom.NewDocument()
+	first := doc.NewElement("template")
+	second := doc.NewElement("template")
+	firstContent := first.TemplateContent()
+	secondContent := second.TemplateContent()
+	if firstContent.Doc == nil || firstContent.Doc == doc {
+		t.Fatal("template contents must use a separate inert owner document")
+	}
+	if secondContent.Doc != firstContent.Doc {
+		t.Fatal("templates from one document must share their inert contents owner document")
+	}
+	child := doc.NewElement("div")
+	firstContent.AppendChild(child)
+	if child.Doc != firstContent.Doc {
+		t.Fatal("inserted template contents child must be adopted into the inert owner document")
+	}
+
+	otherDoc := dom.NewDocument()
+	first.AdoptInto(otherDoc)
+	if first.TemplateContent().Doc != otherDoc.TemplateContentsOwnerDocument() {
+		t.Fatal("adopting the template must move its contents to the destination document's inert owner document")
+	}
+	if child.Doc != first.TemplateContent().Doc {
+		t.Fatal("adopting the template must update template content descendants' owner document")
 	}
 }
 

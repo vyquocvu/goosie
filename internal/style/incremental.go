@@ -13,6 +13,7 @@ const (
 	stateFocus
 	stateFocusVisible
 	stateActive
+	statePlaceholderShown
 )
 
 // InteractiveResolution keeps the old immutable style pointers for the nodes
@@ -26,7 +27,7 @@ type InteractiveResolution struct {
 }
 
 type interactiveSnapshot struct {
-	hover, focus, focusVisible, active bool
+	hover, focus, focusVisible, active, placeholderShown bool
 }
 
 type nodeStyleInput struct {
@@ -201,6 +202,7 @@ func captureInteractiveState(doc *dom.Document) (map[dom.NodeID]*dom.Node, treeI
 		states[n.ID] = interactiveSnapshot{
 			hover: css.IsHovered(n), focus: css.IsFocused(n),
 			focusVisible: css.IsFocusVisible(n), active: css.IsActive(n),
+			placeholderShown: css.IsPlaceholderShown(n),
 		}
 		if n.ShadowRoot != nil {
 			for c := n.ShadowRoot.FirstChild; c != nil; c = c.NextSibling {
@@ -316,6 +318,8 @@ func interactiveStateBit(name string) uint8 {
 		return stateFocusVisible
 	case "active":
 		return stateActive
+	case "placeholder-shown":
+		return statePlaceholderShown
 	default:
 		return 0
 	}
@@ -334,6 +338,9 @@ func interactiveStateDelta(before, after interactiveSnapshot) uint8 {
 	}
 	if before.active != after.active {
 		delta |= stateActive
+	}
+	if before.placeholderShown != after.placeholderShown {
+		delta |= statePlaceholderShown
 	}
 	return delta
 }

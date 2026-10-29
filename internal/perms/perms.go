@@ -21,6 +21,10 @@ const (
 	PermissionImages Permission = "images"
 	// PermissionCookies controls persistent cookie storage for an origin.
 	PermissionCookies Permission = "cookies"
+	// PermissionClipboardRead controls script access to clipboard contents.
+	PermissionClipboardRead Permission = "clipboard-read"
+	// PermissionClipboardWrite controls script writes to the system clipboard.
+	PermissionClipboardWrite Permission = "clipboard-write"
 )
 
 // PermissionState defines whether a permission is allowed, blocked, or using default.

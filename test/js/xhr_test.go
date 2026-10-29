@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
 
 // XMLHttpRequest is the transport dynamic pages still use for beacons and
@@ -52,6 +53,48 @@ var out = "sent:" + xhr.readyState;`
 	}
 	if v, ok := r.Global("result"); !ok || v.Str != "200/hello/1,2,3,4,load,loadend" {
 		t.Fatalf("xhr flow = %+v, want 200/hello/1,2,3,4,load,loadend", v)
+	}
+}
+
+func TestXHRResponseXMLHTMLDocument(t *testing.T) {
+	fetcher := &mockFetcher{responses: map[string]*js.FetchResponse{
+		"https://example.test/fragment": {
+			Status: 200, StatusText: "OK",
+			Headers: map[string]string{"Content-Type": "text/html; charset=utf-8"},
+			Body:    []byte(`<!doctype html><html><head><title>XHR</title></head><body><p id="inside">ok</p></body></html>`),
+		},
+	}}
+	r, err := js.New(js.Options{
+		URL: "https://example.test/", DOM: domtest.Parse(`<!doctype html><html><head></head><body></body></html>`), HTTPClient: fetcher,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	if err := r.Run(`
+		class XHRElement extends HTMLElement { connectedCallback() { window.xhrConnected = true; } }
+		customElements.define('x-xhr-element', XHRElement);
+		var xhr = new XMLHttpRequest();
+		xhr.open('GET', '/fragment');
+		xhr.send();
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	r.Tick()
+	if err := r.Run(`
+		var xhrDocument = xhr.responseXML;
+		var result = xhrDocument.contentType + '/' + xhrDocument.querySelector('#inside').textContent + '/' +
+			(xhr.responseXML === xhrDocument) + '/' + (typeof xhrDocument.adoptNode);
+		var unresolved = xhrDocument.createElement('x-xhr-element');
+		xhrDocument.adoptNode(unresolved);
+		document.body.appendChild(unresolved);
+		result += '/' + (unresolved instanceof XHRElement) + '/' + window.xhrConnected;
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := r.Global("result"); !ok || v.Str != "text/html/ok/true/function/true/true" {
+		t.Fatalf("XHR responseXML = %+v", v)
 	}
 }
 

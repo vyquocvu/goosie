@@ -252,6 +252,10 @@ type Arena struct {
 
 	// QuoteDepth tracks the current nested quotation mark depth in document order.
 	QuoteDepth int
+
+	// FirstLineStyles holds the computed ::first-line style for each element
+	// that has one. Inline layout reads it to override the first line's runs.
+	FirstLineStyles map[dom.NodeID]*style.ComputedStyle
 }
 
 // NaturalSize is the intrinsic width and height of a replaced element.
@@ -402,6 +406,16 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 		a.Objects[rootID].Style = s
 	}
 	a.byNode[doc.Node.ID] = rootID
+	// Extract ::first-line styles from pseudoStyles so inline layout can apply
+	// them to the first formatted line of each block container.
+	for key, cs := range pseudoStyles {
+		if key.Pseudo == "first-line" {
+			if a.FirstLineStyles == nil {
+				a.FirstLineStyles = make(map[dom.NodeID]*style.ComputedStyle)
+			}
+			a.FirstLineStyles[key.NodeID] = cs
+		}
+	}
 	// Build the subtree under the document. Counter scopes thread through
 	// the walk in document order from an empty root.
 	rootScope := &style.CounterScope{}
@@ -494,6 +508,25 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 	} else {
 		childHead = n.FirstChild
 	}
+	textareaText := (*dom.Node)(nil)
+	if n.Data == "textarea" {
+		for c := childHead; c != nil; c = c.NextSibling {
+			if c.Text() {
+				textareaText = c
+				break
+			}
+		}
+		if n.InputValueInitialized && textareaText == nil && n.InputControlValue() != "" {
+			virtualText := &dom.Node{Type: dom.NodeText, DataContent: n.InputControlValue(), Parent: n, Doc: doc}
+			kid := buildSubtreeWithHost(a, virtualText, nil, doc, styles, pseudoStyles, scope)
+			if obj.Style != nil {
+				textStyle := *obj.Style
+				textStyle.Display = style.DisplayInline
+				a.Get(kid).Style = &textStyle
+			}
+			a.Link(id, kid)
+		}
+	}
 
 	// Inject ::first-letter pseudo-element if applicable.
 	var flTextNode *dom.Node
@@ -579,7 +612,17 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 			continue
 		}
 
-		kid := buildSubtreeWithHost(a, c, currentHost, doc, styles, pseudoStyles, scope)
+		layoutChild := c
+		if n.Data == "textarea" && n.InputValueInitialized && c.Text() {
+			textCopy := *c
+			if c == textareaText {
+				textCopy.DataContent = n.InputControlValue()
+			} else {
+				textCopy.DataContent = ""
+			}
+			layoutChild = &textCopy
+		}
+		kid := buildSubtreeWithHost(a, layoutChild, currentHost, doc, styles, pseudoStyles, scope)
 		if c == flTextNode && flRemNode != nil {
 			a.Get(kid).Node = flRemNode
 		}

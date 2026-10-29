@@ -152,6 +152,27 @@ func TestCollectFormDataTextarea(t *testing.T) {
 	}
 }
 
+func TestCollectFormDataTextareaHardWrap(t *testing.T) {
+	doc := dom.NewDocument()
+	form := doc.NewElement("form")
+	textarea := doc.NewElement("textarea")
+	textarea.SetAttribute("name", "bio")
+	textarea.SetAttribute("cols", "4")
+	textarea.SetAttribute("wrap", "hard")
+	textarea.SetInputControlValue("abcdefghij\nxyz", true)
+	form.AppendChild(textarea)
+	data := engine.CollectFormData(form, nil)
+	if len(data) != 1 || data[0].Value != "abcd\nefgh\nij\nxyz" {
+		t.Fatalf("hard-wrapped form data = %#v, want one textarea entry with four-character lines", data)
+	}
+	if got := textarea.InputControlValue(); got != "abcdefghij\nxyz" {
+		t.Fatalf("hard-wrap changed live API value to %q", got)
+	}
+	if got := engine.EncodeFormURLEncoded(data); got != "bio=abcd%0D%0Aefgh%0D%0Aij%0D%0Axyz" {
+		t.Fatalf("hard-wrap URL encoding = %q", got)
+	}
+}
+
 func TestCollectFormDataSelect(t *testing.T) {
 	form := buildTestForm()
 	data := engine.CollectFormData(form, nil)

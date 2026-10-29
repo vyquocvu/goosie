@@ -1467,14 +1467,42 @@ char *GoosieClipboardRead(void) {
 	return result;
 }
 
+char *GoosieClipboardReadHTML(void) {
+	__block char *result = NULL;
+	void (^block)(void) = ^{
+		@autoreleasepool {
+			NSPasteboard *pb = [NSPasteboard generalPasteboard];
+			NSString *html = [pb stringForType:NSPasteboardTypeHTML];
+			if (html) {
+				const char *utf8 = [html UTF8String];
+				if (utf8) result = strdup(utf8);
+			}
+		}
+	};
+	if ([NSThread isMainThread] || NSApp == nil || ![NSApp isRunning]) { block(); } else { dispatch_sync(dispatch_get_main_queue(), block); }
+	return result;
+}
+
 void GoosieClipboardWrite(const char *text) {
+	GoosieClipboardWriteRich(text, NULL);
+}
+
+void GoosieClipboardWriteRich(const char *text, const char *html) {
 	void (^block)(void) = ^{
 		@autoreleasepool {
 			NSPasteboard *pb = [NSPasteboard generalPasteboard];
 			[pb clearContents];
+			NSMutableArray<NSPasteboardType> *types = [NSMutableArray array];
+			if (text) [types addObject:NSPasteboardTypeString];
+			if (html && html[0] != '\0') [types addObject:NSPasteboardTypeHTML];
+			if (types.count > 0) [pb declareTypes:types owner:nil];
 			if (text) {
 				[pb setString:[NSString stringWithUTF8String:text]
 				       forType:NSPasteboardTypeString];
+			}
+			if (html && html[0] != '\0') {
+				[pb setString:[NSString stringWithUTF8String:html]
+				       forType:NSPasteboardTypeHTML];
 			}
 		}
 	};

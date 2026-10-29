@@ -27,18 +27,32 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	if s == nil || n == nil {
 		return nil
 	}
-	s.opMu.Lock()
-	cs := s.Styles[n.ID]
+	var cs *style.ComputedStyle
 	var boxW, boxH float32
 	hasBox := false
-	if s.Arena != nil && cs != nil {
-		if id, ok := s.Arena.ForNode(n.ID); ok {
-			if o := s.Arena.Get(id); o != nil {
-				boxW, boxH, hasBox = o.W, o.H, true
+	if n.Doc == s.Doc {
+		s.refreshStylesForCSSOMRead()
+		s.opMu.Lock()
+		cs = s.Styles[n.ID]
+		if s.Arena != nil && cs != nil {
+			if id, ok := s.Arena.ForNode(n.ID); ok {
+				if o := s.Arena.Get(id); o != nil {
+					boxW, boxH, hasBox = o.W, o.H, true
+				}
 			}
 		}
+		s.opMu.Unlock()
+	} else if n.Doc != nil {
+		// Iframe documents share the runtime's getComputedStyle binding, but
+		// keep their own DOM and cascade. Resolve their author sheets against
+		// that document so defaultView.getComputedStyle observes iframe rules
+		// and live states such as :defined.
+		sheets, err := checkedSheets(n.Doc, nil, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+		if err != nil {
+			return nil
+		}
+		cs = style.NewResolver(sheets).ResolveViewport(n.Doc, s.styleViewport(), s.customFonts)[n.ID]
 	}
-	s.opMu.Unlock()
 	if cs == nil {
 		return nil
 	}
@@ -123,6 +137,9 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	put("border-bottom-width", px(cs.BorderBottomWidth))
 	put("border-left-width", px(cs.BorderLeftWidth))
 	put("border-top-style", cs.BorderTopStyle)
+	if cs.BorderTopStyle == cs.BorderRightStyle && cs.BorderTopStyle == cs.BorderBottomStyle && cs.BorderTopStyle == cs.BorderLeftStyle {
+		put("border-style", cs.BorderTopStyle)
+	}
 	put("border-right-style", cs.BorderRightStyle)
 	put("border-bottom-style", cs.BorderBottomStyle)
 	put("border-left-style", cs.BorderLeftStyle)
@@ -138,6 +155,47 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 		put(name, value)
 	}
 	return out
+}
+
+// pseudoStyleValues exposes the resolved declarations used by text APIs that
+// account for pseudo-element styling. Keep this boundary in engine so
+// internal/js does not depend on internal/style.
+func (s *Session) pseudoStyleValues(n *dom.Node, pseudo string) map[string]string {
+	if s == nil || n == nil || n.Doc != s.Doc {
+		return nil
+	}
+	s.refreshStylesForCSSOMRead()
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	cs := s.PseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: pseudo}]
+	if cs == nil {
+		return nil
+	}
+	values := map[string]string{}
+	if cs.TextTransform != "" {
+		values["text-transform"] = cs.TextTransform
+	}
+	return values
+}
+
+// refreshStylesForCSSOMRead implements the synchronous style flush required by
+// getComputedStyle. Script mutations mark the session dirty; resolving here
+// makes a following CSSOM read observe the updated attributes and tree before
+// the asynchronous paint loop runs.
+func (s *Session) refreshStylesForCSSOMRead() {
+	if s == nil || !s.styleDirty.Swap(false) {
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.styleResolver == nil || s.Doc == nil {
+		return
+	}
+	styles := s.styleResolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+	s.Styles = styles
+	s.workCounts.styleResolves.Add(1)
+	s.workCounts.styleNodeVisits.Add(uint64(len(styles)))
+	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, styles, s.customFonts)
 }
 
 // px renders a CSS pixel length the way a browser's computed style spells it:
@@ -196,6 +254,8 @@ func displayKeyword(d style.Display) string {
 		return "list-item"
 	case style.DisplayTable:
 		return "table"
+	case style.DisplayInlineTable:
+		return "inline-table"
 	case style.DisplayTableRow:
 		return "table-row"
 	case style.DisplayTableCell:

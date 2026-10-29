@@ -51,10 +51,13 @@ func TestResponseTextWindows1252Decodes(t *testing.T) {
 		Headers: map[string]string{"Content-Type": "text/html; charset=windows-1252"},
 		Body:    body,
 	}
-	got := r.Text()
+	got, label, certain := r.TextWithEncoding()
 	want := "\u20AC\u201Chi\u201D"
 	if got != want {
 		t.Errorf("Text() = %q, want %q (euro + smart quotes around 'hi')", got, want)
+	}
+	if label != "windows-1252" || !certain {
+		t.Errorf("selected encoding = %q (certain %v), want windows-1252 (certain)", label, certain)
 	}
 }
 
@@ -140,6 +143,51 @@ func TestResponseTextHighBytesLatin1(t *testing.T) {
 	got := r.Text()
 	if got != "\u00A0\u00FF" {
 		t.Errorf("Text() = %q, want U+00A0 U+00FF", got)
+	}
+}
+
+func TestResponseTextBOMOverridesTransportCharset(t *testing.T) {
+	// UTF-8 BOM and UTF-8 payload must take precedence over the conflicting
+	// windows-1252 transport label, and the BOM itself is not document text.
+	body := append([]byte{0xEF, 0xBB, 0xBF}, []byte("<p>€</p>")...)
+	r := &net.Response{
+		Headers: map[string]string{"Content-Type": "text/html; charset=windows-1252"},
+		Body:    body,
+	}
+	got, label, certain := r.TextWithEncoding()
+	if want := "<p>€</p>"; got != want {
+		t.Errorf("Text() = %q, want %q", got, want)
+	}
+	if label != "utf-8" || !certain {
+		t.Errorf("selected encoding = %q (certain %v), want utf-8 (certain)", label, certain)
+	}
+}
+
+func TestResponseTextUTF16BOM(t *testing.T) {
+	r := &net.Response{
+		Headers: map[string]string{"Content-Type": "text/html; charset=windows-1252"},
+		Body:    []byte{0xFF, 0xFE, '<', 0, 'p', 0, '>', 0, 0xAC, 0x20, '<', 0, '/', 0, 'p', 0, '>', 0},
+	}
+	got, label, certain := r.TextWithEncoding()
+	if want := "<p>€</p>"; got != want {
+		t.Errorf("Text() = %q, want %q", got, want)
+	}
+	if label != "utf-16le" || !certain {
+		t.Errorf("selected encoding = %q (certain %v), want utf-16le (certain)", label, certain)
+	}
+}
+
+func TestResponseTextMetaSniffUsesHTMLPrescanWindow(t *testing.T) {
+	meta := `<meta charset="windows-1252">`
+	body := append([]byte(meta+"<p>"), 0x80)
+	body = append(body, []byte("</p>")...)
+	r := &net.Response{Headers: map[string]string{"Content-Type": "text/html"}, Body: body}
+	got, label, certain := r.TextWithEncoding()
+	if want := meta + "<p>€</p>"; got != want {
+		t.Errorf("Text() = %q, want %q", got, want)
+	}
+	if label != "windows-1252" || certain {
+		t.Errorf("selected encoding = %q (certain %v), want windows-1252 (tentative)", label, certain)
 	}
 }
 

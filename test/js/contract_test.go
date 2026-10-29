@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
@@ -29,6 +30,111 @@ func newRuntime(t *testing.T, opts js.Options) *js.Runtime {
 		}
 	})
 	return r
+}
+
+func TestDynamicClassicScriptRunsThenFiresLoad(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	body := doc.NewElement("body")
+	doc.Node.AppendChild(html)
+	doc.HTML = html
+	html.AppendChild(body)
+	r := newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
+	fetchCount := 0
+	r.SetDynamicScriptFetcher(func(base, src string) ([]byte, error) {
+		fetchCount++
+		if base != "https://example.test/page" || src != "/dynamic.js" {
+			t.Fatalf("dynamic fetch (%q, %q), want page URL and /dynamic.js", base, src)
+		}
+		return []byte(`window.dynamicRan = true`), nil
+	})
+	if err := r.Run(`
+		window.dynamicRan = false;
+		window.dynamicLoaded = false;
+		var script = document.createElement('script');
+		script.src = '/dynamic.js';
+		script.addEventListener('load', function() {
+			window.dynamicLoaded = window.dynamicRan;
+		});
+		document.body.appendChild(script);
+		window.dynamicConnected = script.isConnected;
+	`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if fetchCount != 0 {
+		t.Fatalf("dynamic fetch happened synchronously during Run (count %d)", fetchCount)
+	}
+	r.Tick()
+	for _, key := range []string{"dynamicRan", "dynamicLoaded", "dynamicConnected"} {
+		value, ok := r.Global(key)
+		if !ok || value.Kind != js.KindBool || !value.Bool {
+			t.Errorf("%s = %+v (present %v), want true (fetch count %d)", key, value, ok, fetchCount)
+		}
+	}
+}
+
+func TestDynamicInlineClassicScriptRunsOnConnection(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	body := doc.NewElement("body")
+	doc.Node.AppendChild(html)
+	doc.HTML = html
+	doc.Body = body
+	html.AppendChild(body)
+	r := newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
+	if err := r.Run(`
+		window.inlineScriptRan = false;
+		var script = document.createElement("script");
+		script.textContent = "window.inlineScriptRan = true;";
+		document.body.appendChild(script);
+		if (!window.inlineScriptRan) throw new Error("connected inline script did not run synchronously");
+	`, "inline-inserted-script.js"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+func TestDynamicClassicScriptLimitIsBoundedPerRuntime(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	body := doc.NewElement("body")
+	doc.Node.AppendChild(html)
+	doc.HTML = html
+	doc.Body = body
+	html.AppendChild(body)
+	r := newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
+	r.SetDynamicScriptLimit(1)
+	fetchCount := 0
+	r.SetDynamicScriptFetcher(func(_, _ string) ([]byte, error) {
+		fetchCount++
+		return []byte(`window.firstScriptRan = true`), nil
+	})
+	if err := r.Run(`
+		window.firstScriptRan = false;
+		window.loadCount = 0;
+		window.errorCount = 0;
+		var first = document.createElement('script');
+		first.src = '/first.js';
+		first.onload = function() { window.loadCount++; };
+		var second = document.createElement('script');
+		second.src = '/second.js';
+		second.onerror = function() { window.errorCount++; };
+		document.body.append(first, second);
+	`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r.Tick()
+	r.Tick()
+	for key, want := range map[string]string{
+		"firstScriptRan": "true", "loadCount": "1", "errorCount": "1",
+	} {
+		value, err := r.Evaluate(key)
+		if err != nil || value != want {
+			t.Errorf("%s = %q, err=%v, want %q", key, value, err, want)
+		}
+	}
+	if fetchCount != 1 {
+		t.Fatalf("fetch count = %d, want one admitted external script", fetchCount)
+	}
 }
 
 // A negative timeout is a host that believes it configured a bound and did

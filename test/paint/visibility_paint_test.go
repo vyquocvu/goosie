@@ -161,3 +161,19 @@ func TestDisplayNoneStillCollapses(t *testing.T) {
 		t.Errorf("visible box top is %d, want 0: display:none must not occupy layout space", after[0].Rect.Y0)
 	}
 }
+
+func TestClosedDetailsContentKeepsBoxWithoutPainting(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><style>body{margin:0}</style></head><body>
+	<details><summary>closed</summary>
+		<div style="width:100px;height:100px;background:rgb(211,37,91)">hidden</div>
+	</details>
+	<div style="width:20px;height:20px;background:rgb(17,83,149)"></div>
+	</body></html>`
+	cmds := visDisplayList(t, html)
+	if got := visSolidFills(cmds, 211, 37, 91); len(got) != 0 {
+		t.Errorf("closed details content painted %d background fill(s); want none", len(got))
+	}
+	if got := visSolidFills(cmds, 17, 83, 149); len(got) != 1 {
+		t.Errorf("visible content after details produced %d fills; want one", len(got))
+	}
+}

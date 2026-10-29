@@ -7,6 +7,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
+func (s *Session) applyImplicitPopoverAnchors(a *layout.Arena) {
+	if a == nil {
+		return
+	}
+	for i := range a.Objects {
+		obj := &a.Objects[i]
+		if obj.Node == nil || obj.Style == nil || !obj.Node.HasAttribute("popover") {
+			continue
+		}
+		obj.Style.PositionAnchorNodeID = 0
+		if s.jsRT != nil {
+			if source := s.jsRT.PopoverInvoker(obj.Node); source != nil {
+				obj.Style.PositionAnchorNodeID = source.ID
+			}
+		}
+	}
+}
+
 // Refresh applies an invalidation plan to the session, re-styling and
 // re-layout only the affected subtrees. Scroll-only plans are a no-op, which
 // is how invariant 1 holds: a scroll frame runs no style and no layout.
@@ -38,7 +56,9 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
+		s.applyImplicitPopoverAnchors(s.Arena)
 		layout.Positioning(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
+		s.layoutDirty.Store(false)
 		return true
 	}
 
@@ -61,7 +81,9 @@ func (s *Session) Refresh(plan Plan, authorCSS []string, viewportW float32) bool
 		s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 		layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 		layout.Inline(s.Arena, layout.ObjectID(1))
+		s.applyImplicitPopoverAnchors(s.Arena)
 		layout.Positioning(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
+		s.layoutDirty.Store(false)
 		return true
 	}
 
@@ -100,5 +122,7 @@ func (s *Session) RefreshNode(node *dom.Node, authorCSS []string, viewportW floa
 	s.Arena = layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 	layout.Block(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
 	layout.Inline(s.Arena, layout.ObjectID(1))
+	s.applyImplicitPopoverAnchors(s.Arena)
 	layout.Positioning(s.Arena, layout.ObjectID(1), viewportW, s.viewportH)
+	s.layoutDirty.Store(false)
 }

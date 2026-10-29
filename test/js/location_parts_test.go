@@ -180,12 +180,10 @@ func TestLocationPartsFollowHistory(t *testing.T) {
 	}
 }
 
-// Read-only parts: an assignment is ignored rather than throwing, because
-// writing a location part means navigation and this engine has none. A page
-// that does `location.hash = "#x"` outside a try/catch must keep executing, and
-// must not be told its URL moved when nothing did.
+// Fragment writes perform same-document navigation while other URL component
+// writes remain unsupported because they require a full document navigation.
 // qc:BR-207
-func TestLocationWritesAreIgnoredNotNavigating(t *testing.T) {
+func TestLocationHashWriteUpdatesSameDocumentURL(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page?a=1")
 	if err := rt.Run(`
 		var before = location.href;
@@ -197,13 +195,13 @@ func TestLocationWritesAreIgnoredNotNavigating(t *testing.T) {
 		var stayed = String(before === after);`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	if got := evalString(t, rt, `stayed`); got != "true" {
-		t.Fatalf("location.href changed without navigation: %q", got)
+	if got := evalString(t, rt, `stayed`); got != "false" {
+		t.Fatalf("location.hash did not update the URL: %q", got)
 	}
-	if got := evalString(t, rt, `parts`); got != "|/page" {
-		t.Fatalf("parts after writes = %q, want the original values", got)
+	if got := evalString(t, rt, `parts`); got != "#fragment|/page" {
+		t.Fatalf("parts after writes = %q, want hash update and unchanged pathname", got)
 	}
-	if got := evalString(t, rt, `String(location)`); got != "https://example.test/page?a=1" {
+	if got := evalString(t, rt, `String(location)`); got != "https://example.test/page?a=1#fragment" {
 		t.Fatalf("href after writes = %q", got)
 	}
 }

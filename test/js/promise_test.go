@@ -28,6 +28,84 @@ func TestPromiseConstructor(t *testing.T) {
 	}
 }
 
+func TestPromiseExecutorThrowPreservesThrownValue(t *testing.T) {
+	r, err := js.New(js.Options{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer r.Close()
+
+	err = r.Run(`
+		var thrown = new DOMException('clone failed', 'DataCloneError');
+		var executorCalled = false;
+		var catchCalled = false;
+		var rejection = null;
+		var preserved = false;
+		var rejectionString = '';
+		var rejectionName = '';
+		var thrownPromise = new Promise(function() { executorCalled = true; throw thrown; });
+		var rejectionState = thrownPromise.__promise__.state;
+		thrownPromise.catch(function(reason) {
+			catchCalled = true;
+			rejection = reason;
+			preserved = rejection === thrown && rejection instanceof DOMException && rejection.name === 'DataCloneError';
+			rejectionString = String(rejection);
+			rejectionName = rejection && rejection.name;
+		});
+	`, "test.js")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	value, ok := r.Global("preserved")
+	if !ok || !value.Bool {
+		reason, _ := r.Global("rejectionString")
+		name, _ := r.Global("rejectionName")
+		state, _ := r.Global("rejectionState")
+		called, _ := r.Global("executorCalled")
+		catchCalled, _ := r.Global("catchCalled")
+		t.Fatalf("Promise rejection identity/type = %+v, called=%+v catchCalled=%+v state=%q string=%q name=%q, want exact DOMException", value, called, catchCalled, state.Str, reason.Str, name.Str)
+	}
+}
+
+func TestPromiseWithResolvers(t *testing.T) {
+	r, err := js.New(js.Options{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer r.Close()
+
+	err = r.Run(`
+		var capability = Promise.withResolvers();
+		var resolvedValue = null;
+		var rejectedValue = null;
+		capability.promise.then(function(value) { resolvedValue = value; });
+		capability.resolve(42);
+		var rejected = Promise.withResolvers();
+		rejected.promise.catch(function(reason) { rejectedValue = reason; });
+		rejected.reject('nope');
+		class SubPromise extends Promise {}
+		var subclassCapability = SubPromise.withResolvers();
+		var withResolversDescriptor = Object.getOwnPropertyDescriptor(Promise, 'withResolvers');
+		if (!(capability.promise instanceof Promise)) throw new Error('result must be a Promise');
+		if (!(subclassCapability.promise instanceof SubPromise)) throw new Error('must use the receiver constructor');
+		if (withResolversDescriptor.enumerable || withResolversDescriptor.writable !== true) throw new Error('wrong method descriptor');
+		if (Object.keys(Promise).indexOf('withResolvers') !== -1) throw new Error('withResolvers must be non-enumerable');
+		if (Promise.withResolvers.length !== 0) throw new Error('withResolvers.length must be 0');
+		if (Promise.withResolvers.name !== 'withResolvers') throw new Error('withResolvers.name must be withResolvers');
+	`, "test.js")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	resolved, ok := r.Global("resolvedValue")
+	if !ok || resolved.Num != 42 {
+		t.Fatalf("resolved value = %v, want 42", resolved)
+	}
+	rejected, ok := r.Global("rejectedValue")
+	if !ok || rejected.Str != "nope" {
+		t.Fatalf("rejected value = %v, want nope", rejected)
+	}
+}
+
 func TestPromiseResolve(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second})
 	if err != nil {

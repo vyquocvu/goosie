@@ -11,52 +11,19 @@ func (r *Runtime) setupAbortController() {
 	// AbortController constructor.
 	controllerCtor := func(call goja.ConstructorCall) *goja.Object {
 		obj := r.vm.NewObject()
-
-		// Create the signal object.
-		signalObj := r.vm.NewObject()
-		_ = signalObj.Set("aborted", false)
-		_ = signalObj.Set("reason", goja.Undefined())
-		_ = signalObj.Set("onabort", goja.Null())
-
-		_ = signalObj.Set("throwIfAborted", func(call goja.FunctionCall) goja.Value {
-			aborted := signalObj.Get("aborted")
-			if aborted != nil && aborted.ToBoolean() {
-				reason := signalObj.Get("reason")
-				if reason == nil || goja.IsUndefined(reason) {
-					panic(r.vm.ToValue("AbortError"))
-				}
-				panic(reason)
-			}
-			return goja.Undefined()
-		})
+		signalObj := r.newAbortSignal(false, goja.Undefined())
 
 		_ = obj.Set("signal", signalObj)
 
 		// abort(reason) method.
 		_ = obj.Set("abort", func(call goja.FunctionCall) goja.Value {
-			aborted := signalObj.Get("aborted")
-			if aborted != nil && aborted.ToBoolean() {
-				return goja.Undefined()
-			}
-
-			_ = signalObj.Set("aborted", true)
-
+			reason := goja.Value(r.vm.ToValue("AbortError"))
 			if len(call.Arguments) >= 1 {
-				_ = signalObj.Set("reason", call.Arguments[0])
-			} else {
-				_ = signalObj.Set("reason", r.vm.ToValue("AbortError"))
+				reason = call.Arguments[0]
 			}
-
-			// Fire onabort handler.
-			handler := signalObj.Get("onabort")
-			if handler != nil && !goja.IsNull(handler) && !goja.IsUndefined(handler) {
-				if fn, ok := goja.AssertFunction(handler); ok {
-					eventObj := r.vm.NewObject()
-					_ = eventObj.Set("type", "abort")
-					_, _ = fn(signalObj, eventObj)
-				}
+			if fn, ok := goja.AssertFunction(signalObj.Get("__abort__")); ok {
+				_, _ = fn(signalObj, reason)
 			}
-
 			return goja.Undefined()
 		})
 
@@ -77,24 +44,18 @@ func (r *Runtime) setupAbortController() {
 
 	// AbortSignal.abort(reason) static method.
 	_ = signalObj.Set("abort", func(call goja.FunctionCall) goja.Value {
-		sig := r.vm.NewObject()
-		_ = sig.Set("aborted", true)
+		var reason goja.Value
 		if len(call.Arguments) >= 1 {
-			_ = sig.Set("reason", call.Arguments[0])
+			reason = call.Arguments[0]
 		} else {
-			_ = sig.Set("reason", r.vm.ToValue("AbortError"))
+			reason = r.vm.ToValue("AbortError")
 		}
-		_ = sig.Set("onabort", goja.Null())
-		return sig
+		return r.newAbortSignal(true, reason)
 	})
 
 	// AbortSignal.timeout(ms) static method.
 	_ = signalObj.Set("timeout", func(call goja.FunctionCall) goja.Value {
-		sig := r.vm.NewObject()
-		_ = sig.Set("aborted", false)
-		_ = sig.Set("reason", r.vm.ToValue("TimeoutError"))
-		_ = sig.Set("onabort", goja.Null())
-		return sig
+		return r.newAbortSignal(false, r.vm.ToValue("TimeoutError"))
 	})
 
 	_ = r.vm.Set("AbortSignal", signalObj)
@@ -102,5 +63,75 @@ func (r *Runtime) setupAbortController() {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("AbortSignal", signalObj)
 		}
+	}
+}
+
+func (r *Runtime) newAbortSignal(aborted bool, reason goja.Value) *goja.Object {
+	signal := r.vm.NewObject()
+	r.initializeGenericEventTarget(signal)
+	stateAborted, stateReason := aborted, reason
+	_ = signal.DefineAccessorProperty("aborted", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(stateAborted)
+	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+	_ = signal.DefineAccessorProperty("reason", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return stateReason
+	}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+	_ = signal.Set("onabort", goja.Null())
+	algorithms := make([]goja.Value, 0)
+	_ = signal.Set("__registerAbortAlgorithm__", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Undefined()
+		}
+		if signal.Get("aborted").ToBoolean() {
+			if fn, ok := goja.AssertFunction(call.Arguments[0]); ok {
+				_, _ = fn(signal, goja.Undefined())
+			}
+			return goja.Undefined()
+		}
+		algorithms = append(algorithms, call.Arguments[0])
+		return goja.Undefined()
+	})
+	_ = signal.Set("throwIfAborted", func(call goja.FunctionCall) goja.Value {
+		if stateAborted {
+			panic(stateReason)
+		}
+		return goja.Undefined()
+	})
+	_ = signal.Set("__abort__", func(call goja.FunctionCall) goja.Value {
+		if stateAborted {
+			return goja.Undefined()
+		}
+		stateAborted = true
+		if len(call.Arguments) != 0 {
+			stateReason = call.Arguments[0]
+		}
+		r.runAbortAlgorithms(signal)
+		handler := signal.Get("onabort")
+		if fn, ok := goja.AssertFunction(handler); ok {
+			eventObj := r.vm.NewObject()
+			_ = eventObj.Set("type", "abort")
+			_, _ = fn(signal, eventObj)
+		}
+		return goja.Undefined()
+	})
+	_ = signal.Set("__runAbortAlgorithms__", func(call goja.FunctionCall) goja.Value {
+		pending := algorithms
+		algorithms = nil
+		for _, algorithm := range pending {
+			if fn, ok := goja.AssertFunction(algorithm); ok {
+				_, _ = fn(signal, goja.Undefined())
+			}
+		}
+		return goja.Undefined()
+	})
+	return signal
+}
+
+func (r *Runtime) runAbortAlgorithms(signal *goja.Object) {
+	if signal == nil {
+		return
+	}
+	if fn, ok := goja.AssertFunction(signal.Get("__runAbortAlgorithms__")); ok {
+		_, _ = fn(signal, goja.Undefined())
 	}
 }

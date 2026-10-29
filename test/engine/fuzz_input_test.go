@@ -192,8 +192,9 @@ func FuzzEdit(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, actionByte byte, r rune) {
 		sess := newFuzzSession(t)
-		// Focus a text input first so Edit has something to work on.
-		sess.FocusControl(10, 10)
+		// Programmatic focus starts at the end; pointer focus places the caret
+		// under the click and is covered by the interaction regressions.
+		sess.FocusNode(sess.Doc.ElementByID("t"))
 		action := engine.EditAction(actionByte)
 		before := sess.FocusedText()
 		changed := sess.Edit(action, r)

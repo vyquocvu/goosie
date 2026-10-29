@@ -76,7 +76,7 @@ func (b *Builder) fragmentOwnsBackground(obj *layout.Object) bool {
 
 func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordinal int, inheritedOpacity float32) {
 	obj := b.arena.Get(id)
-	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
+	if obj.Style != nil && (obj.Style.Display == style.DisplayNone || obj.Style.ContentVisibility == "hidden") {
 		return
 	}
 
@@ -117,9 +117,6 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 		}
 		b.applyBoxEffects(obj, box, commandStart)
 		childClip = b.overflowClip(obj, childClip)
-	}
-	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
-		return
 	}
 	b.paintChildren(obj, childClip, effective)
 }
@@ -216,6 +213,8 @@ func (b *Builder) paintInput(obj *layout.Object, box boxPaintContext, clip *fram
 		b.paintCheckbox(obj, box.rect, box.opacity)
 	case "radio":
 		b.paintRadio(obj, box.rect, box.opacity)
+	case "range":
+		b.paintRange(obj, box.opacity, clip)
 	case "submit", "reset", "button":
 		b.paintButtonLabel(obj, box.opacity, clip)
 	default:

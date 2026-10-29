@@ -24,6 +24,41 @@ const (
 	RoleOption
 )
 
+func (r Role) String() string {
+	switch r {
+	case RoleDocument:
+		return "document"
+	case RoleGroup:
+		return "group"
+	case RoleStaticText:
+		return "text"
+	case RoleLink:
+		return "link"
+	case RoleButton:
+		return "button"
+	case RoleImage:
+		return "image"
+	case RoleTextField:
+		return "textbox"
+	case RoleSearch:
+		return "search"
+	case RoleProgressBar:
+		return "progressbar"
+	case RoleMeter:
+		return "meter"
+	case RoleTabGroup:
+		return "tablist"
+	case RoleTab:
+		return "tab"
+	case RoleComboBox:
+		return "combobox"
+	case RoleOption:
+		return "option"
+	default:
+		return "generic"
+	}
+}
+
 // Node is one accessible object. Document bounds are document coordinates in
 // CSS pixels; native chrome bounds are logical points from the window's top left.
 //
@@ -33,6 +68,8 @@ const (
 // in accessibility order.
 type Node struct {
 	Role       Role
+	RoleName   string
+	DOMNodeID  uint64
 	ID         string
 	Label      string
 	Value      string

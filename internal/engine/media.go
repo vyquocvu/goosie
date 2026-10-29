@@ -107,16 +107,21 @@ type mediaRegistry struct {
 	ops *atomic.Uint64
 }
 
-// SetMediaActivation records whether a trusted user gesture is in progress.
-// The host sets it around its own pointer and key dispatch and clears it
-// afterwards: activation is what separates a click on the painted play button
-// from a script calling play() on a timer, and only the host can tell those
-// apart.
-func (s *Session) SetMediaActivation(on bool) {
+// SetUserActivation records a host-identified trusted input activation. Media
+// activation follows the event dispatch bracket; DOM transient activation
+// remains available until a gated API consumes it or its bounded lifetime ends.
+func (s *Session) SetUserActivation(on bool) {
 	if s.media != nil {
 		s.media.activation.Store(on)
 	}
+	if on && s.jsRT != nil {
+		s.jsRT.SetTransientUserActivation(true)
+	}
 }
+
+// SetMediaActivation is retained for callers that only manipulate media
+// activation. New host input paths should use SetUserActivation.
+func (s *Session) SetMediaActivation(on bool) { s.SetUserActivation(on) }
 
 // MediaController returns the controller bound to a media element, creating it
 // the first time something asks. It returns nil when the session has no backend

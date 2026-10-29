@@ -5,6 +5,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/js"
 )
 
 func newFormSession(t *testing.T, html string) *engine.Session {
@@ -29,6 +30,31 @@ func assertNoForm(t *testing.T, s *engine.Session) {
 	t.Helper()
 	if sub, ok := s.PopSubmittedForm(); ok || sub != nil {
 		t.Fatalf("invalid form queued submission: %#v", sub)
+	}
+}
+
+func TestCollectFormDataIncludesEveryEnabledSelectedOption(t *testing.T) {
+	s := newFormSession(t, `<form id="f" action="/send"><select name="color" multiple>
+		<option value="red" selected>Red</option>
+		<option selected>Blue Sky</option>
+		<option value="disabled" selected disabled>Disabled</option>
+		<optgroup disabled><option value="group-disabled" selected>Unavailable</option></optgroup>
+		<option value="green">Green</option>
+	</select></form>`)
+	form := s.Doc.ElementByID("f")
+	got := engine.CollectFormData(form, nil)
+	want := []engine.FormData{{Name: "color", Value: "red"}, {Name: "color", Value: "Blue Sky"}}
+	if len(got) != len(want) {
+		t.Fatalf("FormData entries = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("FormData entry %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	s.SubmitForm(form, nil)
+	if submission := popForm(t, s); submission.Encoded != "color=red&color=Blue+Sky" {
+		t.Fatalf("encoded submitted data = %q, want color=red&color=Blue+Sky", submission.Encoded)
 	}
 }
 
@@ -58,6 +84,34 @@ func TestFormRequiredValidation(t *testing.T) {
 	}
 	if sub.Encoded != "q=ready&other=intact" {
 		t.Fatalf("payload=%q, want q=ready&other=intact", sub.Encoded)
+	}
+}
+
+func TestFormSubmissionUsesLiveInputValueAndPreservesDefaultAttribute(t *testing.T) {
+	rt, err := js.New(js.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := engine.NewSession(`<form id="f"><input id="q" name="q" value="default"></form>`, nil, 800, engine.WithJS(rt))
+	if err != nil {
+		_ = rt.Close()
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	form, input := s.Doc.ElementByID("f"), s.Doc.ElementByID("q")
+	if _, err := s.EvaluateJS(`document.getElementById("q").value="live"`); err != nil {
+		t.Fatalf("set live value: %v", err)
+	}
+	if got := input.InputControlValue(); got != "live" {
+		t.Fatalf("live value=%q, want live", got)
+	}
+	if got := input.GetAttribute("value"); got != "default" {
+		t.Fatalf("default value attribute=%q, want default", got)
+	}
+	s.SubmitForm(form, nil)
+	submission := popForm(t, s)
+	if submission.Encoded != "q=live" {
+		t.Fatalf("submitted data=%q, want q=live", submission.Encoded)
 	}
 }
 
@@ -218,4 +272,47 @@ func TestFormTextareaSelectAndDialogValidation(t *testing.T) {
 			t.Fatalf("dialog open=%v close events=%d; want open and no close", dialog.HasAttribute("open"), closeCount)
 		}
 	})
+}
+
+func TestRequiredSelectValidationUsesPlaceholderOptionRules(t *testing.T) {
+	cases := []struct {
+		name    string
+		html    string
+		missing bool
+	}{
+		{"selected placeholder label option", `<select id="s" name="s" required><option value="" selected>Choose</option><option value="x">X</option></select>`, true},
+		{"unnamed placeholder still validates", `<select id="s" required><option value="" selected>Choose</option></select>`, true},
+		{"other selected empty value", `<select id="s" name="s" required><option value="">Choose</option><option value="" selected>Empty value</option></select>`, false},
+		{"multiple selected empty value", `<select id="s" name="s" required multiple><option value="" selected>Empty value</option></select>`, false},
+		{"empty option under optgroup is not placeholder", `<select id="s" name="s" required><optgroup><option value="" selected>Grouped empty</option></optgroup></select>`, false},
+		{"no selected option", `<select id="s" name="s" required><option value="x">X</option></select>`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newFormSession(t, `<form id="f">`+tc.html+`</form>`)
+			selectNode := s.Doc.ElementByID("s")
+			if tc.name == "no selected option" {
+				selectNode.SelectNoSelection = true
+				for _, option := range dom.SelectOptions(selectNode) {
+					option.SetOptionSelected(false, false)
+				}
+			}
+			invalid := engine.ValidateForm(s.Doc.ElementByID("f"))
+			if tc.missing && len(invalid) != 1 || !tc.missing && len(invalid) != 0 {
+				t.Fatalf("invalid controls = %v, want missing=%v", invalid, tc.missing)
+			}
+		})
+	}
+}
+
+func TestDisabledFieldsetFormDataKeepsOnlyFirstLegendControls(t *testing.T) {
+	s := newFormSession(t, `<form id="f"><fieldset disabled>
+		<legend><input name="legend" value="kept"></legend>
+		<input name="disabled" value="skip">
+		<fieldset disabled><legend><input name="nestedLegend" value="skip"></legend><input name="nestedDisabled" value="skip"></fieldset>
+	</fieldset></form>`)
+	got := engine.CollectFormData(s.Doc.ElementByID("f"), nil)
+	if len(got) != 1 || got[0] != (engine.FormData{Name: "legend", Value: "kept"}) {
+		t.Fatalf("disabled-fieldset form data = %+v, want only first legend control", got)
+	}
 }

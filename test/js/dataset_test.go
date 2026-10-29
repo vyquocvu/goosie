@@ -54,3 +54,76 @@ var out = d1.a + "/" + b.dataset.a + "/" + Object.keys(b.dataset).length;`
 		t.Fatalf("dataset liveness = %+v, want 2/2/1", v)
 	}
 }
+
+func TestDatasetOwnPropertyNamesHideRegistryKey(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div id="b" data-first="1" data-second-value="2"></div></body></html>`)
+	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
+	out := evalString(t, r, `
+		var dataset = document.getElementById("b").dataset;
+		[
+			Object.getOwnPropertyNames(dataset).sort().join(","),
+			Object.keys(dataset).sort().join(","),
+			dataset.first + "/" + dataset.secondValue,
+			"__nid__" in dataset
+		].join("|");
+	`)
+	if out != "first,secondValue|first,secondValue|1/2|true" {
+		t.Fatalf("dataset own property names = %q", out)
+	}
+}
+
+func TestDatasetDeleteUsesDOMStringMapNames(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div id="b" data-foo="1" data--="2" data--foo="3" data---foo="4" data-="5"></div></body></html>`)
+	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
+	src := `var b = document.getElementById("b");
+delete b.dataset.foo;
+delete b.dataset["-"];
+delete b.dataset.Foo;
+delete b.dataset["-Foo"];
+delete b.dataset[""];
+var out = [
+  b.hasAttribute("data-foo"), b.hasAttribute("data--"),
+  b.hasAttribute("data--foo"), b.hasAttribute("data---foo"),
+  b.hasAttribute("data-")
+].join("/");`
+	if err := r.Run(src, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := r.Global("out"); !ok || v.Str != "false/false/false/false/false" {
+		t.Fatalf("dataset delete/mapping = %+v, want all mapped data-* attributes removed", v)
+	}
+}
+
+func TestDatasetUnmappableNameDoesNotAliasAttribute(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div id="b" data--foo="value"></div></body></html>`)
+	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
+	src := `var b = document.getElementById("b");
+var value = String(b.dataset["-foo"]);
+var present = "-foo" in b.dataset;
+delete b.dataset["-foo"];
+var out = value + "/" + present + "/" + b.getAttribute("data--foo");`
+	if err := r.Run(src, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := r.Global("out"); !ok || v.Str != "undefined/false/value" {
+		t.Fatalf("noncanonical dataset name = %+v, want undefined/false/value", v)
+	}
+}
+
+func TestHTMLElementTranslateAttributeAndInheritance(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div id="parent" translate="NO"><span id="inherited"></span><span id="enabled" translate="YeS"></span><span id="invalid" translate="yeſ"></span></div></body></html>`)
+	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
+	src := `var parent = document.getElementById("parent");
+var inherited = document.getElementById("inherited");
+var enabled = document.getElementById("enabled");
+var invalid = document.getElementById("invalid");
+var before = [inherited.translate, enabled.translate, invalid.translate].join("/");
+enabled.translate = false;
+var out = before + "/" + enabled.getAttribute("translate") + "/" + parent.translate;`
+	if err := r.Run(src, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := r.Global("out"); !ok || v.Str != "false/true/false/no/false" {
+		t.Fatalf("translate reflection = %+v, want false/true/false/no/false", v)
+	}
+}

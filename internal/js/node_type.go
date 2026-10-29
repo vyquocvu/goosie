@@ -28,8 +28,12 @@ func domNodeType(t dom.NodeType) int {
 		return NodeTypeElement
 	case dom.NodeText:
 		return NodeTypeText
+	case dom.NodeCDATASection:
+		return 4
 	case dom.NodeComment:
 		return NodeTypeComment
+	case dom.NodeProcessingInstruction:
+		return 7
 	case dom.NodeDocument:
 		return NodeTypeDocument
 	case dom.NodeDoctype:

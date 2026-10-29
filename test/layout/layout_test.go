@@ -578,11 +578,9 @@ func TestMarginAutoWithRoomToSpareStaysAtTheStart(t *testing.T) {
 	}
 }
 
-// A closed <details> discloses nothing but its summary. The hiding is the
-// widget's own, not the author's, so it belongs to the UA sheet: lobste.rs hangs
-// a dropdown menu off every story row that way, and leaving it in the flow added
-// a line box per row.
-func TestDetailsHidesContentUntilOpen(t *testing.T) {
+// Closed details content keeps layout boxes for CSSOM geometry but is hidden by
+// the UA rule and the paint path.
+func TestDetailsClosedContentKeepsHiddenLayoutBoxes(t *testing.T) {
 	hidden := session(t, `<html><body style="margin:0">
 <details><summary>more</summary><ul><li>a</li></ul></details>
 </body></html>`, 400)
@@ -590,17 +588,14 @@ func TestDetailsHidesContentUntilOpen(t *testing.T) {
 	if ul == nil {
 		t.Fatal("ul not found")
 	}
-	if ul.Style.Display != style.DisplayNone {
-		t.Errorf("closed details: ul display = %v, want none", ul.Style.Display)
-	}
-	if li := findByTag(hidden, "li"); li.Style.Display == style.DisplayNone {
-		t.Error("closed details hid the summary's own marker list")
+	if ul.Style.Display == style.DisplayNone || ul.Style.ContentVisibility != "hidden" {
+		t.Errorf("closed details: ul style = display:%v content-visibility:%q, want a laid-out hidden box", ul.Style.Display, ul.Style.ContentVisibility)
 	}
 
 	opened := session(t, `<html><body style="margin:0">
 <details open><summary>more</summary><ul><li>a</li></ul></details>
 </body></html>`, 400)
-	if ul := findByTag(opened, "ul"); ul.Style.Display == style.DisplayNone {
+	if ul := findByTag(opened, "ul"); ul.Style.Display == style.DisplayNone || ul.Style.ContentVisibility == "hidden" {
 		t.Error("an open details still hides its content")
 	}
 }

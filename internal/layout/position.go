@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
@@ -30,16 +31,20 @@ type containingBlock struct {
 func Positioning(a *Arena, root ObjectID, viewportW, viewportH float32) {
 	icb := containingBlock{w: viewportW, h: viewportH}
 	anchors := map[string]ObjectID{}
+	anchorNodes := map[dom.NodeID]ObjectID{}
 	for i := range a.Objects {
 		obj := &a.Objects[i]
+		if obj.Node != nil && obj.Style != nil {
+			anchorNodes[obj.Node.ID] = ObjectID(i)
+		}
 		if obj.Node != nil && obj.Node.Element() && obj.Style != nil && obj.Style.AnchorName != "" {
 			anchors[obj.Style.AnchorName] = ObjectID(i)
 		}
 	}
-	positionSubtree(a, root, icb, icb, anchors)
+	positionSubtree(a, root, icb, icb, anchors, anchorNodes)
 }
 
-func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map[string]ObjectID) {
+func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map[string]ObjectID, anchorNodes map[dom.NodeID]ObjectID) {
 	obj := a.Get(id)
 	s := obj.Style
 	if s != nil && s.Display == style.DisplayNone {
@@ -108,10 +113,10 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 				obj = a.Get(id)
 			}
 		case style.PositionAbsolute:
-			placeOutOfFlow(a, id, cb, anchors)
+			placeOutOfFlow(a, id, cb, anchors, anchorNodes)
 			obj = a.Get(id)
 		case style.PositionFixed:
-			placeOutOfFlow(a, id, icb, anchors)
+			placeOutOfFlow(a, id, icb, anchors, anchorNodes)
 			obj = a.Get(id)
 		}
 		if s.OffsetPath != "" && s.OffsetPath != "none" && s.OffsetDistance != 0 {
@@ -133,7 +138,7 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 		}
 	}
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
-		positionSubtree(a, kid, childCB, icb, anchors)
+		positionSubtree(a, kid, childCB, icb, anchors, anchorNodes)
 	}
 }
 
@@ -142,7 +147,7 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 // leaves out-of-flow children to this pass so they take no part in the flow. The
 // caller hands over the containing block, which is the parent's for an absolute
 // box and the viewport's for a fixed one.
-func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[string]ObjectID) {
+func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[string]ObjectID, anchorNodes map[dom.NodeID]ObjectID) {
 	obj := a.Get(id)
 	s := obj.Style
 	// The box's own layout is this pass's job: clear the mark block layout left
@@ -174,6 +179,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 	// turned it into a concrete content width on obj.W (box-sizing included), so
 	// testing `s.Width < 0` here threw `width:50%` away as if it were auto.
 	shrinkW := resolvePctLength(s.Width, cb.w) < 0
+	centerX := normalizeAxis(s.JustifySelf) == "center" && s.HasLeft && s.HasRight
 	// stretched marks the one auto width that is not content-driven: both insets
 	// pinned, so the box takes whatever the two leave between them.
 	stretched := false
@@ -184,7 +190,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 		case s.HasRight:
 			x = cb.x0 + cb.w - obj.MarginRight - insetR - (w + extra)
 		}
-	} else if s.HasLeft && s.HasRight {
+	} else if s.HasLeft && s.HasRight && !centerX {
 		w = cb.w - insetL - insetR - extra - obj.MarginLeft - obj.MarginRight
 		if w < 0 {
 			w = 0
@@ -204,6 +210,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 	y := obj.StaticY
 	h := obj.H
 	explicitH := resolvePctLength(s.Height, sizeH) >= 0
+	centerY := normalizeAxis(s.AlignSelf) == "center" && s.HasTop && s.HasBottom
 	if explicitH {
 		switch {
 		case s.HasTop:
@@ -211,7 +218,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 		case s.HasBottom:
 			y = cb.y0 + cb.h - obj.MarginBottom - insetB - (h + vExtra)
 		}
-	} else if s.HasTop && s.HasBottom {
+	} else if s.HasTop && s.HasBottom && !centerY {
 		h = cb.h - insetT - insetB - vExtra - obj.MarginTop - obj.MarginBottom
 		if h < 0 {
 			h = 0
@@ -363,8 +370,87 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 		shiftSubtree(a, id, 0, cb.y0+cb.h-obj.MarginBottom-insetB-obj.BorderH()-obj.Y)
 		obj = a.Get(id)
 	}
+	if centerX {
+		left := cb.x0 + insetL + obj.MarginLeft
+		right := cb.x0 + cb.w - insetR - obj.MarginRight
+		x := left + (right-left-obj.BorderW())/2
+		shiftSubtree(a, id, x-obj.X, 0)
+		obj = a.Get(id)
+	}
+	if centerY {
+		top := cb.y0 + insetT + obj.MarginTop
+		bottom := cb.y0 + cb.h - insetB - obj.MarginBottom
+		y := top + (bottom-top-obj.BorderH())/2
+		shiftSubtree(a, id, 0, y-obj.Y)
+		obj = a.Get(id)
+	}
+	// A popover's UA rule leaves all four insets auto so its auto dimensions
+	// can shrink to its contents. Open popovers with no authored inset then
+	// occupy the viewport center as their default top-layer placement.
+	if obj.Node != nil && obj.Node.Element() && obj.Node.IsPopoverOpen && obj.Node.HasAttribute("popover") &&
+		s.Position == style.PositionFixed && !s.HasTop && !s.HasRight && !s.HasBottom && !s.HasLeft {
+		x := cb.x0 + (cb.w-obj.BorderW())/2
+		y := cb.y0 + (cb.h-obj.BorderH())/2
+		shiftSubtree(a, id, x-obj.X, y-obj.Y)
+		obj = a.Get(id)
+	}
+	if s.PositionArea != "" {
+		var anchorID ObjectID
+		if s.PositionAnchorNodeID != 0 {
+			anchorID = anchorNodes[s.PositionAnchorNodeID]
+		} else if s.PositionAnchor != "" && s.PositionAnchor != "auto" {
+			anchorID = anchors[s.PositionAnchor]
+		}
+		if anchor := a.Get(anchorID); anchor != nil {
+			area := strings.Fields(s.PositionArea)
+			if dx, dy, ok := positionAreaOffset(area, obj, anchor); ok {
+				shiftSubtree(a, id, dx, dy)
+			}
+		}
+	}
 	// The children blockInto positioned sit relative to this box's origin, which
 	// was final before the layout calls above, so nothing further is needed.
+}
+
+// positionAreaOffset places an auto-sized positioned box in the named physical
+// side area of its anchor. `span-all` centers the box on the anchor in the
+// perpendicular axis, as required by the 3x3 position-area grid.
+func positionAreaOffset(tokens []string, obj, anchor *Object) (float32, float32, bool) {
+	if len(tokens) == 0 || obj == nil || anchor == nil {
+		return 0, 0, false
+	}
+	side := ""
+	spanAll := false
+	for _, token := range tokens {
+		switch strings.ToLower(token) {
+		case "left", "right", "top", "bottom", "center":
+			side = strings.ToLower(token)
+		case "span-all":
+			spanAll = true
+		}
+	}
+	if !spanAll && len(tokens) > 1 {
+		return 0, 0, false
+	}
+	switch side {
+	case "left":
+		return anchor.X - obj.BorderW() - obj.X,
+			anchor.Y + (anchor.BorderH()-obj.BorderH())/2 - obj.Y, true
+	case "right":
+		return anchor.X + anchor.BorderW() - obj.X,
+			anchor.Y + (anchor.BorderH()-obj.BorderH())/2 - obj.Y, true
+	case "top":
+		return anchor.X + (anchor.BorderW()-obj.BorderW())/2 - obj.X,
+			anchor.Y - obj.BorderH() - obj.Y, true
+	case "bottom":
+		return anchor.X + (anchor.BorderW()-obj.BorderW())/2 - obj.X,
+			anchor.Y + anchor.BorderH() - obj.Y, true
+	case "center":
+		return anchor.X + (anchor.BorderW()-obj.BorderW())/2 - obj.X,
+			anchor.Y + (anchor.BorderH()-obj.BorderH())/2 - obj.Y, true
+	default:
+		return 0, 0, false
+	}
 }
 
 // absposContentW measures the max-content width of an abspos box's subtree,

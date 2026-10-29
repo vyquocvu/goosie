@@ -9,10 +9,13 @@
 package engine
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	stdimage "image"
 	"math"
+	"mime"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,8 +51,12 @@ type Session struct {
 	linkBase  string
 	linker    CSSLinker
 
-	scriptBase  string
-	scriptFetch ScriptFetcher
+	scriptBase       string
+	scriptFetch      ScriptFetcher
+	contentLanguage  string
+	documentEncoding string
+	iframeLoader     IFrameDocumentLoader
+	iframeFormSubmit IFrameFormSubmitter
 
 	// sheets are the parsed stylesheets kept for RefreshAfterFonts: when
 	// deferred fonts land, styles must be re-resolved against the now-populated
@@ -131,19 +138,31 @@ type Session struct {
 
 	// Focus state for form editing. focus survives Reflow because reflow
 	// rebuilds only the layout arena, not the DOM; a new session per
-	// navigation starts unfocused. marked is the IME composition preview at
-	// the caret: painted but not yet the value. focusValue records the
-	// control's value when it gained focus so blur can fire a change event
-	// if the value was modified during the focus session.
-	focus             *dom.Node
-	focusState        atomic.Pointer[dom.Node]
-	hovered           *dom.Node
-	active            *dom.Node
-	caret             int
-	marked            string
-	focusValue        string
-	focusStylePending bool
-	submittedForm     *FormSubmission
+	// navigation starts unfocused. marked tracks the active IME text; input and
+	// textarea values and contenteditable Text nodes include it during
+	// composition when their editing caret is representable. focusValue records
+	// the value when a control gained focus; focusUserChanged records whether a
+	// user edit happened during that focus period, independently of script writes.
+	focus                  *dom.Node
+	focusState             atomic.Pointer[dom.Node]
+	hovered                *dom.Node
+	active                 *dom.Node
+	keyboardActive         *dom.Node
+	keyboardActiveMarked   []*dom.Node
+	caret                  int
+	controlSelectionAnchor int
+	controlSelectionActive bool
+	marked                 string
+	markedNode             dom.NodeID
+	markedHasNode          bool
+	markedOffset           int
+	imeComposing           bool
+	focusValue             string
+	focusUserChanged       bool
+	focusStylePending      bool
+	submittedForm          *FormSubmission
+	rangePointerNode       *dom.Node
+	rangePointerMoved      bool
 
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
@@ -162,6 +181,22 @@ type Session struct {
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
+	// providedDoc is a bounded document tree from a non-HTML parser. It is used
+	// by MIME-aware loaders for XML/XHTML, which must not pass through the HTML
+	// tokenizer.
+	providedDoc *dom.Document
+	// parserExecutedScripts prevents the post-parse fallback pass from running
+	// inline or blocking external scripts that already ran at their parser pause.
+	parserExecutedScripts map[*dom.Node]bool
+	parserExternalCount   int
+	runtimeBound          bool
+	documentStartRan      bool
+
+	// drag is the in-flight drag-and-drop operation, or nil when nothing is
+	// being dragged. Owned by StartDrag/DragTo/EndDrag in drag.go and
+	// guarded by opMu like the rest of the interaction state.
+	drag           *dragState
+	testDriverDrag *testDriverDragCandidate
 
 	// scriptErrs is a bounded window of the document's uncaught script errors
 	// and scriptErrTotal is how many there were. Errors still do not stop the
@@ -200,6 +235,12 @@ type Session struct {
 	// monotonic so tests and diagnostics can take before/after snapshots around
 	// user interactions without relying on wall-clock timings.
 	workCounts pipelineWorkCounts
+	// styleDirty marks DOM mutations since the last style resolve. CSSOM reads
+	// synchronously refresh the cascade when a script asks for computed values.
+	styleDirty atomic.Bool
+	// layoutDirty marks document work not reflected in the layout arena yet.
+	// CSSOM View geometry reads synchronously flush this work.
+	layoutDirty atomic.Bool
 
 	// inv is the caller's invalidation batch. When non-nil, JSMutationSink
 	// records DOM mutations into it so the pipeline knows to re-style and
@@ -270,6 +311,16 @@ func (s *Session) WorkCounts() WorkCounts {
 // linker may be called from several goroutines at once.
 type CSSLinker func(base, href string) (string, error)
 
+// IFrameDocumentLoader fetches and parses a child HTML document for an iframe.
+// The embedding layer owns network policy and byte decoding; engine supplies
+// the parent URL and the iframe's source attribute.
+type IFrameDocumentLoader func(base, src string) (*dom.Document, error)
+
+// IFrameFormSubmitter posts an encoded form body to a child browsing context
+// and returns its bounded parsed response document. The caller owns transport
+// and origin policy.
+type IFrameFormSubmitter func(base, target, contentType string, body []byte) (*dom.Document, error)
+
 // ImageFetcher fetches one image subresource's raw bytes. base is the document
 // URL the src resolves against; the returned bytes are the encoded image. A
 // fetcher that fails leaves that image undecoded, and the box keeps the layout
@@ -318,6 +369,43 @@ func WithViewportH(h float32) Option {
 			s.viewportH = h
 		}
 	}
+}
+
+func validateDocumentTreeLimits(doc *dom.Document, limits dom.ParseLimits) error {
+	if doc == nil {
+		return fmt.Errorf("pre-parsed document is nil")
+	}
+	nodes, attributes, attributeBytes := 0, 0, 0
+	var visit func(*dom.Node, int) error
+	visit = func(node *dom.Node, depth int) error {
+		if node == nil {
+			return nil
+		}
+		nodes++
+		if nodes > limits.Nodes {
+			return fmt.Errorf("document node limit exceeded (%d)", limits.Nodes)
+		}
+		if depth > limits.Depth {
+			return fmt.Errorf("document tree depth limit exceeded (%d)", limits.Depth)
+		}
+		attributes += len(node.Attr)
+		for _, attr := range node.Attr {
+			attributeBytes += len(attr.Name) + len(attr.Value)
+		}
+		if attributes > limits.Attributes {
+			return fmt.Errorf("document attribute limit exceeded (%d)", limits.Attributes)
+		}
+		if attributeBytes > limits.AttributeBytes {
+			return fmt.Errorf("document attribute byte limit exceeded (%d)", limits.AttributeBytes)
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if err := visit(child, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return visit(&doc.Node, 0)
 }
 
 // WithLinkedCSS lets the session resolve and fetch <link rel=stylesheet>
@@ -393,6 +481,42 @@ func WithScripts(base string, fetch ScriptFetcher) Option {
 	}
 }
 
+// WithIFrameDocumentLoader supplies the child-document loader used by iframe
+// browsing contexts.
+func WithIFrameDocumentLoader(loader IFrameDocumentLoader) Option {
+	return func(s *Session) { s.iframeLoader = loader }
+}
+
+// WithIFrameFormSubmitter supplies the host transport for POST forms whose
+// target names a child browsing context.
+func WithIFrameFormSubmitter(submit IFrameFormSubmitter) Option {
+	return func(s *Session) { s.iframeFormSubmit = submit }
+}
+
+// WithContentLanguage supplies the response's Content-Language value to the
+// document language algorithm used by selectors when no element declares one.
+func WithContentLanguage(value string) Option {
+	return func(s *Session) { s.contentLanguage = value }
+}
+
+// WithDocumentEncoding supplies the encoding already selected while decoding
+// a network response. The parser receives Unicode text, so its meta scan must
+// not replace the byte decoder's result (especially when a BOM or transport
+// charset took precedence).
+func WithDocumentEncoding(label string) Option {
+	return func(s *Session) { s.documentEncoding = documentEncodingLabel(label) }
+}
+
+func documentEncodingLabel(label string) string {
+	if strings.EqualFold(label, "utf-8") {
+		return "UTF-8"
+	}
+	if strings.HasPrefix(strings.ToLower(label), "iso-8859-") {
+		return strings.ToUpper(label)
+	}
+	return label
+}
+
 // WithJS supplies a JavaScript runtime for executing the document's classic
 // scripts. The engine walks <script> elements in document order after the DOM
 // is built and runs each one through the runtime. Script errors are recorded
@@ -400,6 +524,14 @@ func WithScripts(base string, fetch ScriptFetcher) Option {
 // console receives the runtime's console output; pass nil to discard it.
 func WithJS(rt *js.Runtime) Option {
 	return func(s *Session) { s.jsRT = rt }
+}
+
+// WithDocumentTree supplies a document already parsed by a MIME-aware parser.
+// The session still applies its tree admission limits before styling or script
+// execution. The raw source should also be passed as NewSession's first
+// argument so the document byte limit is enforced.
+func WithDocumentTree(doc *dom.Document) Option {
+	return func(s *Session) { s.providedDoc = doc }
 }
 
 // WithInvalidation supplies the invalidation batch that JSMutationSink records
@@ -454,73 +586,84 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if len(html) > MaxDocumentBytes {
 		return nil, fmt.Errorf("HTML byte limit exceeded (%d)", MaxDocumentBytes)
 	}
-	doc, err := dom.ParseBounded(html, dom.ParseLimits{
+	parseLimits := dom.ParseLimits{
 		Nodes: MaxDocumentNodes, Depth: MaxDocumentDepth,
 		Attributes: MaxAttributes, AttributeBytes: MaxAttributeBytes,
-	})
+	}
+	var doc *dom.Document
+	var err error
+	if s.providedDoc != nil {
+		doc = s.providedDoc
+		if err = validateDocumentTreeLimits(doc, parseLimits); err != nil {
+			return nil, err
+		}
+	} else if s.jsRT != nil {
+		doc, err = dom.ParseBoundedWithParserCallbacks(html, parseLimits,
+			func(node *dom.Node, attrs []dom.Attribute) *dom.Node {
+				if s.runtimeBound && s.jsRT != nil {
+					return s.jsRT.UpgradeParserElementWithAttributes(node, attrs)
+				}
+				return node
+			},
+			func(node *dom.Node, attr dom.Attribute) {
+				if s.runtimeBound && s.jsRT != nil {
+					s.jsRT.ParserElementAttributeChanged(node, attr)
+				}
+			},
+			func(node *dom.Node) {
+				if s.runtimeBound && s.jsRT != nil {
+					s.jsRT.ParserNodeInserted(node)
+				}
+			},
+			func(doc *dom.Document, node *dom.Node) {
+				if s.documentEncoding != "" {
+					doc.CharacterSet = s.documentEncoding
+				}
+				doc.ContentLanguage = s.contentLanguage
+				s.runParserScript(doc, node, authorCSS)
+			},
+		)
+	} else {
+		doc, err = dom.ParseBounded(html, parseLimits)
+	}
 	if err != nil {
 		return nil, err
 	}
-	s.Doc = doc
-	// The image maps and the decoded-pixel reservation exist before any script
-	// runs: a script-created image (`new Image()`) decodes during the script
-	// turn and must charge the same reservation a parsed <img> does. loadImages
-	// sees the reservation already created and leaves the tables alone.
-	s.initImageMaps()
-	// Wire the parsed document into the JS runtime so getElementById,
-	// querySelector, and event listeners operate on the same nodes the
-	// engine's arena references.
-	if s.jsRT != nil {
-		s.jsRT.SetDOM(doc)
-		// Gate every script-driven DOM write against this document's admission
-		// caps and charge fetch/XHR responses to the shared subresource budget.
-		// Both go in before any script runs so a hostile page cannot grow the
-		// tree past the caps, nor pull unbounded bytes through the JS network
-		// APIs, without the overrun being rejected at the boundary.
-		s.jsNodeBudget = newDocNodeBudget(doc)
-		s.jsRT.SetMutationBudget(s.jsNodeBudget)
-		// getComputedStyle answers from this session's own cascade map, so the
-		// reader goes in before any script runs: jQuery's `.css()` reaches it on
-		// the first styled element it measures, and an uninstalled provider would
-		// make every read fall back to the element's inline declarations and
-		// report an author-styled element as unstyled.
-		s.jsRT.SetComputedStyleProvider(s.computedStyleValues)
-		s.jsRT.SetSubresourceBudget(s.sub)
-		// Script-created images (`new Image()`, `img.src = ...`) decode through
-		// the engine, not through internal/js, so they pass the same fetcher,
-		// subresource byte budget, Probe admission and decoded-pixel
-		// reservation a parsed <img> passes. The loader is installed before any
-		// script runs; see LoadScriptImage.
-		s.jsRT.SetImageLoader(s)
-		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
-		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
-			if focused {
-				s.FocusNode(node)
-			} else {
-				s.BlurNode(node)
-			}
-		})
-		// The media bridge goes in before any script runs, so a page that reads
-		// video.readyState while parsing sees the same element a later script
-		// does, and so play() cannot be reached before the controller exists.
-		if s.media != nil {
-			s.jsRT.SetMediaProvider(s.MediaController)
-		}
-		// Observe DOM writes for the pump: without this, PumpJS cannot tell
-		// a mutation tick from a canvas-only one and must re-resolve on
-		// every fired timer/RAF. Chained, never replacing a caller callback.
-		if s.inv != nil {
-			s.jsRT.ChainOnMutation(s.JSMutationSink())
-		}
-		s.runUserScripts(userscript.RunAtDocumentStart)
+	if s.documentEncoding != "" {
+		doc.CharacterSet = s.documentEncoding
 	}
+	s.Doc = doc
+	doc.ContentLanguage = s.contentLanguage
+	// Bind the completed document as well, so iframes and other DOM objects
+	// created after the last parser script are visible to the runtime.
+	s.bindJSRuntime(doc)
+	// The image maps and decoded-pixel reservation exist before deferred scripts
+	// or image loading; parser-time scripts used the same reservation from the
+	// first parser pause.
+	s.initImageMaps()
+	// Inline scripts can synchronously read getComputedStyle. Collect the
+	// stylesheets before running page scripts, then lazily resolve the cascade on
+	// the first CSSOM read. The normal final style phase resolves it once for
+	// documents that do not query computed style during script execution.
+	preScriptSheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+	if err != nil {
+		return nil, err
+	}
+	preScriptStyleSignature := stylesheetDOMSignature(doc)
+	s.sheets = preScriptSheets
+	s.styleResolver = style.NewResolver(preScriptSheets)
+	s.styleDirty.Store(true)
+	s.layoutDirty.Store(true)
 	s.runScripts()
 	s.opMu.Lock()
 	s.clearDetachedFocusLocked()
 	s.opMu.Unlock()
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
-	if err != nil {
-		return nil, err
+	sheets := preScriptSheets
+	if stylesheetDOMSignature(doc) != preScriptStyleSignature {
+		sheets, err = checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.loadFonts(sheets)
 	s.sheets = sheets
@@ -529,6 +672,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.Styles = s.styleResolver.ResolveViewport(doc, s.styleViewport(), s.customFonts)
 	s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
 	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(doc, s.Styles, s.customFonts)
+	s.styleDirty.Store(false)
 	s.startAnimations()
 	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
@@ -547,12 +691,288 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// style map. The cost is that the handler's writes arrive after the first
 	// layout pass, so a mutation re-runs style and layout here - exactly what
 	// the pump does for a later timer callback.
-	if s.jsRT != nil && s.jsRT.FireDocumentLifecycle() {
+	startupTaskRan := s.jsRT != nil && s.jsRT.TickDeferredTimer()
+	lifecycleMutated := false
+	if s.jsRT != nil {
+		s.jsRT.AutofocusDocument()
+		lifecycleMutated = s.jsRT.FireDocumentDOMContentLoaded()
+		// HTML's load event waits for child navigables. Resolve parser-discovered
+		// iframe documents after DOMContentLoaded and before firing document load.
+		s.jsRT.FlushIFrameLoads()
+		lifecycleMutated = s.jsRT.FireDocumentLoad() || lifecycleMutated
+	}
+	if startupTaskRan || lifecycleMutated {
 		if err := s.RestyleAndReflow(viewportW); err != nil {
 			return nil, err
 		}
 	}
 	return s, nil
+}
+
+func stylesheetDOMSignature(doc *dom.Document) string {
+	if doc == nil {
+		return ""
+	}
+	var signature strings.Builder
+	appendField := func(value string) {
+		fmt.Fprintf(&signature, "%d:%s", len(value), value)
+	}
+	doc.Node.Walk(func(node *dom.Node) bool {
+		if !node.Element() {
+			return true
+		}
+		switch node.Data {
+		case "style":
+			appendField("style")
+			appendField(node.GetAttribute("type"))
+			appendField(node.GetAttribute("media"))
+			appendField(node.TextContent())
+		case "link":
+			appendField("link")
+			appendField(node.GetAttribute("rel"))
+			appendField(node.GetAttribute("href"))
+			appendField(node.GetAttribute("media"))
+		}
+		return true
+	})
+	return signature.String()
+}
+
+// bindJSRuntime connects the live parser document to its realm. The first call
+// installs document-scoped providers; later calls refresh the DOM wrapper and
+// mutation-budget baseline after parser construction has added more nodes.
+func (s *Session) bindJSRuntime(doc *dom.Document) {
+	s.Doc = doc
+	s.initImageMaps()
+	if s.jsRT == nil || doc == nil {
+		return
+	}
+	firstBind := !s.runtimeBound
+	if firstBind {
+		if s.iframeLoader != nil {
+			s.jsRT.SetIFrameLoaderWithBase(s.iframeLoader)
+		}
+		if s.iframeFormSubmit != nil {
+			s.jsRT.SetIFrameFormSubmitter(s.iframeFormSubmit)
+		}
+		if s.scriptFetch != nil {
+			s.jsRT.SetIFrameScriptFetcher(s.scriptFetch)
+			s.jsRT.SetDynamicScriptLimit(maxExternalScripts)
+			s.jsRT.SetDynamicScriptFetcher(func(base, src string) ([]byte, error) {
+				abs, ok := resolveSubresourceURL(base, src)
+				if !ok || !s.jsRT.AllowsScriptURL(abs, base) {
+					return nil, errors.New("external script blocked")
+				}
+				return s.scriptFetch(base, abs)
+			})
+		}
+		s.jsRT.SetIFrameModuleRunner(func(runtime *js.Runtime, childDoc *dom.Document, documentURL string) {
+			if childDoc == nil {
+				return
+			}
+			root := childDoc.HTML
+			if root == nil {
+				root = &childDoc.Node
+			}
+			s.runModuleScripts(runtime, root, documentURL, maxExternalScripts, time.Now().Add(ScriptFetchBudget))
+		})
+		s.jsRT.SetComputedStyleProvider(s.computedStyleValues)
+		s.jsRT.SetPseudoStyleProvider(s.pseudoStyleValues)
+		s.installLayoutProviders()
+		s.jsRT.SetSubresourceBudget(s.sub)
+		s.jsRT.SetImageLoader(s)
+		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
+		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
+		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
+			if focused {
+				s.FocusNode(node)
+			} else {
+				s.BlurNode(node)
+			}
+		})
+		s.jsRT.ChainOnFocusRestore(func(node *dom.Node) {
+			s.RestoreFocusNode(node)
+		})
+		var testDriverClipboardText, testDriverClipboardHTML string
+		s.jsRT.ChainOnTestDriverKeyDefault(func(key string, shift, ctrl, alt, meta bool) {
+			if meta && !ctrl && !alt && key == "Delete" && s.FocusedEditable() {
+				s.deleteContentEditableSoftLineForward()
+				return
+			}
+			if alt && (key == "Backspace" || key == "Delete") {
+				s.deleteContentEditableByWord(key == "Delete")
+				return
+			}
+			if (ctrl || meta) && !alt {
+				switch strings.ToLower(key) {
+				case "backspace":
+					s.deleteContentEditableByWord(false)
+				case "delete":
+					s.deleteContentEditableByWord(true)
+				case "a":
+					if s.FocusedEditable() {
+						if !s.SelectAllControl() && s.jsRT != nil {
+							_, _ = s.jsRT.Evaluate(`(function(){var h=document.activeElement,sel=getSelection();if(h&&h.isContentEditable&&sel)sel.selectAllChildren(h)})()`)
+						}
+					} else {
+						s.SelectAll()
+					}
+				case "c":
+					testDriverClipboardText, testDriverClipboardHTML = s.CopySelectionData()
+				case "x":
+					testDriverClipboardText, testDriverClipboardHTML, _ = s.CutSelectionData()
+				case "v":
+					s.PasteData(testDriverClipboardText, testDriverClipboardHTML)
+				case "z":
+					if host := s.Focused(); s.FocusedEditable() && host != nil && s.jsRT != nil {
+						inputType := "historyUndo"
+						if shift {
+							inputType = "historyRedo"
+						}
+						if s.jsRT.DispatchTrustedInputEvent(host, nil, inputType) {
+							s.jsRT.DispatchTrustedInput(host, nil, inputType, false)
+						}
+					}
+				case "b":
+					if host := s.Focused(); s.FocusedEditable() && host != nil && s.jsRT != nil {
+						if s.jsRT.DispatchTrustedInputEvent(host, nil, "formatBold") {
+							_, _ = s.jsRT.EvaluateUserInput(`document.execCommand("bold")`, "formatBold")
+						}
+					}
+				}
+				return
+			}
+			if shift && !ctrl && !alt && !meta && key == "Enter" {
+				s.EditWithShift(EditEnter, 0, true)
+				return
+			}
+			if ctrl || alt || meta {
+				return
+			}
+			switch key {
+			case "Backspace":
+				s.Edit(EditBackspace, 0)
+			case "Delete":
+				s.Edit(EditDelete, 0)
+			case "ArrowLeft":
+				s.Edit(EditLeft, 0)
+			case "ArrowRight":
+				s.Edit(EditRight, 0)
+			case "Enter":
+				s.Edit(EditEnter, '\n')
+			default:
+				runes := []rune(key)
+				if len(runes) == 1 && runes[0] >= 0x20 {
+					s.Edit(EditRune, runes[0])
+				}
+			}
+		})
+		s.jsRT.ChainOnTestDriverPointer(s.TestDriverPointerAction)
+		s.jsRT.ChainOnEscapeKey(func() bool {
+			return s.CancelTestDriverDrag() || s.CloseTopmostAutoPopover()
+		})
+		s.jsRT.ChainOnUserInput(s.MarkUserInput)
+		if s.media != nil {
+			s.jsRT.SetMediaProvider(s.MediaController)
+		}
+		s.jsRT.ChainOnMutation(s.JSMutationSink())
+		s.jsRT.ChainOnMutation(func() {
+			s.styleDirty.Store(true)
+			s.layoutDirty.Store(true)
+		})
+	}
+	if firstBind {
+		s.jsRT.SetDOM(doc)
+		s.runtimeBound = true
+	} else {
+		// The same document is being appended by the tree builder. Rebinding it
+		// would discard live wrapper, image-load, and iframe state caches.
+		s.jsRT.QueueExistingIFrames()
+	}
+	s.jsRT.RefreshDocumentTreeReferences()
+	s.jsNodeBudget = newDocNodeBudget(doc)
+	s.jsRT.SetMutationBudget(s.jsNodeBudget)
+	if !s.documentStartRan {
+		s.runUserScripts(userscript.RunAtDocumentStart)
+		s.documentStartRan = true
+	}
+}
+
+// runParserScript is called by the tree builder at each parser pause. It
+// executes parser-inserted classic inline scripts and blocking external scripts
+// against the partially constructed live document before the next token.
+func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS []string) {
+	if s.jsRT == nil || doc == nil || node == nil || !node.Element() || node.Data != "script" || !isClassicScript(node) {
+		return
+	}
+	if node.Namespace != dom.NSHTML && (node.Namespace != dom.NSSVG || !node.SVGScriptReady) {
+		return
+	}
+	if s.parserExecutedScripts == nil {
+		s.parserExecutedScripts = make(map[*dom.Node]bool)
+	}
+	if s.parserExecutedScripts[node] {
+		return
+	}
+	s.bindJSRuntime(doc)
+	src := scriptSrc(node)
+	if src != "" {
+		if s.parserExternalCount >= maxExternalScripts {
+			s.parserExecutedScripts[node] = true
+			return
+		}
+		s.parserExternalCount++
+	}
+	if src != "" && (node.HasAttribute("async") || node.HasAttribute("defer")) {
+		return
+	}
+	source, name := node.TextContent(), "inline"
+	if src != "" {
+		name = src
+		if strings.HasPrefix(strings.ToLower(src), "data:") {
+			var ok bool
+			source, ok = decodeDataScriptURL(src)
+			if !ok {
+				s.parserExecutedScripts[node] = true
+				return
+			}
+		} else {
+			if s.scriptFetch == nil {
+				s.parserExecutedScripts[node] = true
+				return
+			}
+			abs, ok := resolveSubresourceURL(s.scriptBase, src)
+			if !ok {
+				s.parserExecutedScripts[node] = true
+				return
+			}
+			name = abs
+			data, err := s.scriptFetch(s.scriptBase, abs)
+			if err != nil {
+				s.parserExecutedScripts[node] = true
+				return
+			}
+			source = string(data)
+		}
+	}
+	s.parserExecutedScripts[node] = true
+	if source == "" {
+		return
+	}
+	// Stylesheets preceding this script are already in the live tree. Install
+	// their current cascade so synchronous CSSOM reads in the script see them.
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+	if err != nil {
+		s.recordScriptError(err)
+	} else {
+		s.sheets = sheets
+		s.styleResolver = style.NewResolver(sheets)
+		s.styleDirty.Store(true)
+		s.layoutDirty.Store(true)
+	}
+	if err := s.jsRT.RunParserScript(source, name); err != nil {
+		s.recordScriptError(err)
+	}
 }
 
 // loadFonts extracts @font-face rules from every stylesheet, fetches the font
@@ -1337,6 +1757,7 @@ func (s *Session) Reflow(viewportW float32) error {
 		return err
 	}
 	layout.Inline(candidate, layout.ObjectID(1))
+	s.applyImplicitPopoverAnchors(candidate)
 	layout.Positioning(candidate, layout.ObjectID(1), viewportW, s.viewportH)
 	if err := validateArena(candidate); err != nil {
 		return err
@@ -1423,6 +1844,9 @@ func (s *Session) Reflow(viewportW float32) error {
 						}
 						frame.ReplayCanvasOps(b, frameOps, w, h)
 						candidate.Objects[i].Image = b.AsRGBA()
+						// Store the rendered pixels on the JS context so
+						// getImageData can read actual pixel values.
+						s.jsRT.SetCanvasBitmap(int(n.ID), b.RGBA, w, h)
 					}
 				}
 			}
@@ -1439,6 +1863,7 @@ func (s *Session) Reflow(viewportW float32) error {
 		s.jsRT.CheckIntersections()
 	}
 	s.Arena = candidate
+	s.layoutDirty.Store(false)
 	// Selection ends index the old arena's word list; the rebuild just moved
 	// every word, so the highlight would paint on the wrong boxes.
 	s.selActive = false
@@ -1550,17 +1975,79 @@ func isSupportedImageType(typ string) bool {
 func (s *Session) ClickAt(x, y float32) bool {
 	hitNode := s.nodeAt(x, y)
 	dismissed := s.dismissAutoPopoversExcept(hitNode)
+	if hitNode != nil && !hitNode.Element() {
+		for hitNode != nil && !hitNode.Element() {
+			hitNode = hitNode.Parent
+		}
+	}
+	if isRangeInput(hitNode) && !dom.IsFormControlDisabled(hitNode) {
+		if s.jsRT != nil {
+			s.jsRT.SetTransientUserActivation(true)
+		}
+		click := dom.NewTrustedEvent("click", true, true)
+		if !dom.DispatchEvent(hitNode, click) {
+			return true
+		}
+		s.opMu.Lock()
+		changed := s.setRangeValueAtLocked(hitNode, x)
+		rt := s.jsRT
+		s.opMu.Unlock()
+		if changed {
+			if rt != nil {
+				rt.DispatchTrustedInput(hitNode, nil, "", false)
+			} else {
+				event := dom.NewTrustedInputEvent("input", true, false, nil, "", false)
+				dom.DispatchEvent(hitNode, &event.Event)
+			}
+			dom.DispatchEvent(hitNode, dom.NewTrustedEvent("change", true, false))
+		}
+		return true
+	}
 
 	n := s.activatableAt(x, y)
 	if n == nil {
+		if hitNode != nil {
+			if s.jsRT != nil {
+				s.jsRT.SetTransientUserActivation(true)
+			}
+			dom.DispatchEvent(hitNode, dom.NewTrustedEvent("click", true, true))
+		}
 		return dismissed
 	}
-	ev := dom.NewEvent("click", true, true)
+	if s.jsRT != nil {
+		s.jsRT.SetTransientUserActivation(true)
+	}
+	ev := dom.NewTrustedEvent("click", true, true)
 	if !dom.DispatchEvent(n, ev) {
 		return true // preventDefault was called
 	}
 	s.runClickDefault(n)
 	return true
+}
+
+// toggleDetailsWithoutRuntime flips a details open state and dispatches the
+// toggle transitions the script runtime would otherwise own, including closing
+// the element's named group peers.
+func (s *Session) toggleDetailsWithoutRuntime(n *dom.Node) {
+	wasOpen := n.HasAttribute("open")
+	if wasOpen {
+		n.RemoveAttribute("open")
+	} else {
+		n.SetAttribute("open", "")
+	}
+	oldState, newState := "closed", "open"
+	if wasOpen {
+		oldState, newState = "open", "closed"
+	}
+	event := dom.NewTrustedToggleEvent("toggle", false, false, oldState, newState)
+	dom.DispatchEvent(n, &event.Event)
+	if wasOpen {
+		return
+	}
+	for _, peer := range dom.CloseOtherNamedDetails(n) {
+		peerEvent := dom.NewTrustedToggleEvent("toggle", false, false, "open", "closed")
+		dom.DispatchEvent(peer, &peerEvent.Event)
+	}
 }
 
 // runClickDefault performs the default action for an activated control:
@@ -1590,16 +2077,66 @@ func (s *Session) runClickDefault(n *dom.Node) {
 	case "summary":
 		for p := n.Parent; p != nil; p = p.Parent {
 			if p.Element() && p.Data == "details" {
-				if p.HasAttribute("open") {
-					p.RemoveAttribute("open")
+				if s.jsRT != nil {
+					s.jsRT.SetDetailsOpen(p, !p.HasAttribute("open"), nil)
 				} else {
-					p.SetAttribute("open", "")
+					s.toggleDetailsWithoutRuntime(p)
 				}
-				dom.DispatchEvent(p, dom.NewEvent("toggle", false, false))
 				break
 			}
 		}
+	case "details":
+		hasSummary := false
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			if child.Element() && child.Data == "summary" {
+				hasSummary = true
+				break
+			}
+		}
+		if !hasSummary {
+			if s.jsRT != nil {
+				s.jsRT.SetDetailsOpen(n, !n.HasAttribute("open"), nil)
+			} else {
+				s.toggleDetailsWithoutRuntime(n)
+			}
+		}
 	case "button":
+		if targetID := n.GetAttribute("commandfor"); targetID != "" {
+			action := strings.ToLower(strings.TrimSpace(n.GetAttribute("command")))
+			if action == "toggle" && s.Doc != nil {
+				if target := s.Doc.ElementByID(targetID); target != nil && target.Data == "details" {
+					if s.jsRT != nil {
+						s.jsRT.SetDetailsOpen(target, !target.HasAttribute("open"), n)
+					} else {
+						wasOpen := target.HasAttribute("open")
+						if wasOpen {
+							target.RemoveAttribute("open")
+						} else {
+							target.SetAttribute("open", "")
+						}
+						oldState, newState := "closed", "open"
+						if wasOpen {
+							oldState, newState = "open", "closed"
+						}
+						event := dom.NewTrustedToggleEvent("toggle", false, false, oldState, newState)
+						event.Source = n
+						dom.DispatchEvent(target, &event.Event)
+					}
+					return
+				}
+			}
+			switch action {
+			case "show-popover":
+				s.handlePopoverTarget(targetID, "show")
+				return
+			case "hide-popover":
+				s.handlePopoverTarget(targetID, "hide")
+				return
+			case "toggle-popover":
+				s.handlePopoverTarget(targetID, "toggle")
+				return
+			}
+		}
 		if targetID := n.GetAttribute("popovertarget"); targetID != "" {
 			action := strings.ToLower(n.GetAttribute("popovertargetaction"))
 			s.handlePopoverTarget(targetID, action)
@@ -1664,6 +2201,19 @@ func (s *Session) SubmitForm(form, submitter *dom.Node) {
 	s.submitFormLocked(form, submitter)
 }
 
+func (s *Session) queueDialogClose(node *dom.Node) {
+	if node == nil {
+		return
+	}
+	if s.jsRT == nil {
+		dom.DispatchEvent(node, dom.NewTrustedEvent("close", false, false))
+		return
+	}
+	s.jsRT.QueueTask(func() {
+		dom.DispatchEvent(node, dom.NewTrustedEvent("close", false, false))
+	})
+}
+
 func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	if form == nil {
 		return
@@ -1687,7 +2237,10 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 			if cur.Element() && cur.Data == "dialog" {
 				cur.RemoveAttribute("open")
 				cur.IsModal = false
-				dom.DispatchEvent(cur, dom.NewEvent("close", false, false))
+				if s.jsRT != nil {
+					s.restoreDialogFocusLocked(cur)
+				}
+				s.queueDialogClose(cur)
 				return
 			}
 		}
@@ -1721,7 +2274,7 @@ func (s *Session) ResetForm(form *dom.Node) {
 	if form == nil {
 		return
 	}
-	ev := dom.NewEvent("reset", true, true)
+	ev := dom.NewTrustedEvent("reset", false, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
@@ -1737,40 +2290,40 @@ func (s *Session) ResetForm(form *dom.Node) {
 				typ := strings.ToLower(n.GetAttribute("type"))
 				switch typ {
 				case "checkbox", "radio":
-					if n.HasAttribute("data-default-checked") {
-						if n.GetAttribute("data-default-checked") == "true" {
-							n.SetAttribute("checked", "")
-						} else {
-							n.RemoveAttribute("checked")
-						}
-					} else if n.HasAttribute("checked") {
-						n.SetAttribute("checked", "")
-					} else {
-						n.RemoveAttribute("checked")
+					n.ResetInputChecked()
+					if typ == "radio" && n.InputChecked() {
+						reconcileFormRadioGroups(form)
 					}
 				case "submit", "reset", "button", "image":
 					// No-op
 				default:
-					defVal := ""
-					if n.HasAttribute("data-default-value") {
-						defVal = n.GetAttribute("data-default-value")
-					} else if n.HasAttribute("defaultValue") {
-						defVal = n.GetAttribute("defaultValue")
-					} else {
-						defVal = n.GetAttribute("value")
+					n.ResetInputControlValue()
+					if s.jsRT != nil {
+						s.jsRT.RefreshInputPatternMismatch(n)
 					}
-					n.SetAttribute("value", defVal)
 				}
 			case "textarea":
-				defVal := ""
-				if n.HasAttribute("data-default-value") {
-					defVal = n.GetAttribute("data-default-value")
-				} else if n.HasAttribute("defaultValue") {
-					defVal = n.GetAttribute("defaultValue")
-				} else {
-					defVal = n.TextContent()
+				n.ResetInputControlValue()
+			case "select":
+				n.SelectNoSelection = false
+				for _, option := range dom.SelectOptions(n) {
+					option.ResetOptionSelectedness()
 				}
-				s.setControlValue(n, defVal)
+				dom.NormalizeSelectSelectedness(n)
+			case "output":
+				if s.jsRT != nil {
+					s.jsRT.ResetOutputElement(n)
+				} else {
+					value := n.ResetOutputControlValue()
+					for child := n.FirstChild; child != nil; {
+						next := child.NextSibling
+						n.RemoveChild(child)
+						child = next
+					}
+					if value != "" && n.Doc != nil {
+						n.AppendChild(n.Doc.NewText(value))
+					}
+				}
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -1778,6 +2331,27 @@ func (s *Session) ResetForm(form *dom.Node) {
 		}
 	}
 	resetNode(form)
+}
+
+func reconcileFormRadioGroups(form *dom.Node) {
+	if form == nil {
+		return
+	}
+	checked := make(map[string]*dom.Node)
+	form.Walk(func(node *dom.Node) bool {
+		if !node.Element() || node.Data != "input" || !strings.EqualFold(node.GetAttribute("type"), "radio") || !node.InputChecked() {
+			return true
+		}
+		name := node.GetAttribute("name")
+		if name == "" {
+			return true
+		}
+		if earlier := checked[name]; earlier != nil {
+			earlier.SetInputChecked(false, true)
+		}
+		checked[name] = node
+		return true
+	})
 }
 
 // Match is one find result: the document-space rect of an occurrence of the
@@ -2052,32 +2626,39 @@ func (s *Session) runScripts() {
 	}
 	// Collect scripts in document order. Inline sources run from the tree;
 	// external bundles reserve a slot, fetch concurrently below, and run
-	// from their slot so execution order matches document order even
-	// though the bytes arrive out of order. async/defer refine this in a
-	// later change; v1 runs every classic script in document order.
+	// from their slot so execution order matches document order even though
+	// the bytes arrive out of order. External classic defer scripts run after
+	// parser-inserted classic scripts.
 	type scriptItem struct {
-		text string // inline source, or fetched bundle once filled
-		ext  string // absolute bundle URL when external, else ""
-		name string // sourceURL reported in stack traces
+		text        string // inline source, or fetched bundle once filled
+		ext         string // absolute bundle URL when external, else ""
+		name        string // sourceURL reported in stack traces
+		deferScript bool
+		node        *dom.Node
 	}
 	var items []scriptItem
-	extLeft := maxExternalScripts
+	extLeft := maxExternalScripts - s.parserExternalCount
 	var collect func(n *dom.Node)
 	collect = func(n *dom.Node) {
 		if n == nil {
 			return
 		}
-		if n.Element() && n.Data == "script" && isClassicScript(n) {
+		if n.Element() && n.Data == "script" && isClassicScript(n) && !s.parserExecutedScripts[n] &&
+			(n.Namespace != dom.NSSVG || n.SVGScriptReady) {
 			if src := scriptSrc(n); src != "" {
 				// A src tag's inline text is ignored, per HTML.
-				if s.scriptFetch != nil && extLeft > 0 {
+				if strings.HasPrefix(strings.ToLower(src), "data:") {
+					if text, ok := decodeDataScriptURL(src); ok {
+						items = append(items, scriptItem{text: text, name: src, deferScript: n.HasAttribute("defer") && !n.HasAttribute("async"), node: n})
+					}
+				} else if s.scriptFetch != nil && extLeft > 0 {
 					if abs, ok := resolveSubresourceURL(s.scriptBase, src); ok {
 						extLeft--
-						items = append(items, scriptItem{ext: abs, name: abs})
+						items = append(items, scriptItem{ext: abs, name: abs, deferScript: n.HasAttribute("defer") && !n.HasAttribute("async"), node: n})
 					}
 				}
 			} else if text := n.TextContent(); text != "" {
-				items = append(items, scriptItem{text: text, name: "inline"})
+				items = append(items, scriptItem{text: text, name: "inline", node: n})
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -2110,21 +2691,77 @@ func (s *Session) runScripts() {
 	}
 	wg.Wait()
 
-	for _, it := range items {
-		if it.text == "" {
-			continue
-		}
-		// A script error stays isolated - the rest of the document still runs
-		// and still renders, which is what a browser does with one bad ad tag -
-		// but it is no longer discarded. GOOSIE-LIVE-001's nine blank pages all
-		// had rc 0 and an empty stderr while the reason sat in these errors: 21
-		// of them on www.gov.vn, naming the bundle that never finished
-		// loading.
-		if err := s.jsRT.Run(it.text, it.name); err != nil {
-			s.recordScriptError(err)
+	for _, deferred := range []bool{false, true} {
+		for _, it := range items {
+			if it.text == "" || it.deferScript != deferred {
+				continue
+			}
+			// A script error stays isolated - the rest of the document still runs
+			// and still renders, which is what a browser does with one bad ad tag -
+			// but it is no longer discarded.
+			var err error
+			if it.deferScript {
+				err = s.jsRT.RunParserDeferScript(it.text, it.name)
+			} else {
+				err = s.jsRT.RunParserScript(it.text, it.name)
+			}
+			if err != nil {
+				s.recordScriptError(err)
+			}
 		}
 	}
+	s.runModuleScripts(s.jsRT, root, s.scriptBase, extLeft, deadline)
 	s.runUserScripts(userscript.RunAtDocumentEnd)
+}
+
+// decodeDataScriptURL decodes a bounded data: URL for a classic external
+// script. The URL is size-checked before percent or base64 decoding, then the
+// decoded source is checked against the normal per-script admission limit.
+func decodeDataScriptURL(raw string) (string, bool) {
+	if len(raw) > js.MaxScriptBytes*3+8192 {
+		return "", false
+	}
+	scheme, _, ok := strings.Cut(raw, ":")
+	if !ok || !strings.EqualFold(scheme, "data") {
+		return "", false
+	}
+	metadata, payload, ok := strings.Cut(raw[len(scheme)+1:], ",")
+	if !ok || len(metadata) > 1024 {
+		return "", false
+	}
+	base64Encoded := strings.HasSuffix(strings.ToLower(metadata), ";base64")
+	if base64Encoded {
+		metadata = metadata[:len(metadata)-len(";base64")]
+	}
+	mediaType := "text/plain"
+	if metadata != "" {
+		parsedType, _, err := mime.ParseMediaType(metadata)
+		if err != nil {
+			return "", false
+		}
+		mediaType = strings.ToLower(parsedType)
+	}
+	switch mediaType {
+	case "application/ecmascript", "application/javascript", "application/x-ecmascript", "application/x-javascript",
+		"text/ecmascript", "text/javascript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5", "text/jscript", "text/livescript":
+	default:
+		return "", false
+	}
+	decodedPayload, err := url.PathUnescape(payload)
+	if err != nil {
+		return "", false
+	}
+	source := []byte(decodedPayload)
+	if base64Encoded {
+		source, err = base64.StdEncoding.DecodeString(decodedPayload)
+		if err != nil {
+			return "", false
+		}
+	}
+	if len(source) > js.MaxScriptBytes {
+		return "", false
+	}
+	return string(source), true
 }
 
 // runUserScripts runs any configured user scripts matching the target lifecycle stage.
@@ -2156,6 +2793,12 @@ func scriptSrc(n *dom.Node) string {
 		if strings.EqualFold(a.Name, "src") {
 			return strings.TrimSpace(a.Value)
 		}
+	}
+	if n.Namespace == dom.NSSVG {
+		if href := strings.TrimSpace(n.GetAttribute("href")); href != "" {
+			return href
+		}
+		return strings.TrimSpace(n.GetAttribute("xlink:href"))
 	}
 	return ""
 }
@@ -2272,6 +2915,12 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	if s.jsRT.HasPendingRAF() {
 		s.jsRT.TickRAF(time.Now())
 	}
+	// Attribute changes made by timer or message callbacks can queue new
+	// iframe navigations after the document's initial load. Process those
+	// navigations as part of the event-loop pump so their child scripts and
+	// load events can run instead of waiting forever for startup lifecycle.
+	s.jsRT.FlushIFrameLoads()
+	s.fixupDisabledFocus()
 	canvasChanged := canvasBefore != s.jsRT.CanvasVisualStamp()
 	// Mutation state is captured before Reset: it decides between a full
 	// re-resolve and skipping straight to repaint below.

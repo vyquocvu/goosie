@@ -261,7 +261,7 @@ func TestCheckboxClickToggle(t *testing.T) {
 		t.Fatal("checkbox node not found")
 	}
 
-	if chkNode.HasAttribute("checked") {
+	if chkNode.InputChecked() {
 		t.Fatal("checkbox should be initially unchecked")
 	}
 
@@ -269,7 +269,7 @@ func TestCheckboxClickToggle(t *testing.T) {
 	if !f.focusClick(chkX, chkY) {
 		t.Fatal("focusClick failed to handle checkbox")
 	}
-	if !chkNode.HasAttribute("checked") {
+	if !chkNode.InputChecked() {
 		t.Errorf("checkbox should be checked after click")
 	}
 
@@ -277,7 +277,7 @@ func TestCheckboxClickToggle(t *testing.T) {
 	if !f.focusClick(chkX, chkY) {
 		t.Fatal("focusClick failed to handle second checkbox click")
 	}
-	if chkNode.HasAttribute("checked") {
+	if chkNode.InputChecked() {
 		t.Errorf("checkbox should be unchecked after second click")
 	}
 }

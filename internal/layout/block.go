@@ -245,7 +245,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 			obj.H = obj.Style.ContainIntrinsicHeight
 			y = obj.H
 		}
-	} else if obj.Style != nil && obj.Style.Display == style.DisplayTable {
+	} else if obj.Style != nil && (obj.Style.Display == style.DisplayTable || obj.Style.Display == style.DisplayInlineTable) {
 		y = layoutTable(a, id, containingW)
 	} else if obj.Style != nil && (obj.Style.Display == style.DisplayGrid || obj.Style.Display == style.DisplayInlineGrid) {
 		y = layoutGrid(a, id, containingW)
@@ -375,7 +375,8 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					// The measure is the extent the words take at the container's
 					// own width, read back off the placed words rather than off the
 					// box, because a text-align would otherwise be baked into it.
-					shrink := resolveBoxWidth(a, k.Style, contentW) < 0
+					intrinsicTextarea := k.Node != nil && k.Node.Data == "textarea"
+					shrink := resolveBoxWidth(a, k.Style, contentW) < 0 && !intrinsicTextarea
 					var srcX, measureX, measureY, contentExtent float32
 					measured, shrank := false, false
 					if shrink {
@@ -932,6 +933,79 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 	// decides where it goes.
 	justify := a.Get(id).Style.JustifyContent
 
+	// Ensure every item has been measured at least once so that BorderH reflects
+	// the item's natural cross size. Items with a declared basis (explicit width
+	// or flex-basis) skipped the measurement pass above and still carry H=0.
+	for i := range items {
+		it := a.Get(items[i].id)
+		if it.BorderH() > 0 {
+			continue
+		}
+		it.X, it.Y = contentX, contentY
+		blockInto(a, items[i].id, contentW)
+		it = a.Get(items[i].id)
+		if !blockifiesChildren(it.Style) {
+			inlineInto(a, items[i].id)
+		}
+	}
+
+	// Pre-compute each line's natural cross size (the tallest item's margin box)
+	// and then distribute any remaining cross-axis space according to
+	// align-content. A single line fills the container so the packing is a no-op.
+	lineCross := make([]float32, lineCount)
+	for l := 0; l < lineCount; l++ {
+		if lineCount == 1 && contentH > 0 {
+			lineCross[l] = contentH
+			continue
+		}
+		for i := range items {
+			if lineOf[i] != l {
+				continue
+			}
+			it := a.Get(items[i].id)
+			h := flexMargin(it.Style.MarginTop) + flexMargin(it.Style.MarginBottom) + it.BorderH()
+			if h > lineCross[l] {
+				lineCross[l] = h
+			}
+		}
+	}
+	// align-content: stretch (the default for an unset value) divides the cross
+	// axis evenly among the lines; any other keyword packs content-sized lines.
+	if lineCount > 1 && contentH > 0 {
+		if ac := normalizeAxis(obj.Style.AlignContent); ac == "" {
+			for l := range lineCross {
+				lineCross[l] = contentH / float32(lineCount)
+			}
+		}
+	}
+	crossUsed := float32(0)
+	for _, h := range lineCross {
+		crossUsed += h
+	}
+	if lineCount > 1 {
+		crossUsed += gap * float32(lineCount-1)
+	}
+	crossRemaining := contentH - crossUsed
+	if crossRemaining < 0 {
+		crossRemaining = 0
+	}
+	wrapReverse := wrap == style.FlexWrapReverse
+	crossLead, crossTrackGap := distributeFlex(obj.Style.AlignContent, wrapReverse, crossRemaining, gap, lineCount)
+	// Compute each line's visual Y offset. Visual order reverses under
+	// wrap-reverse, but the gap and lead still flow from the cross start.
+	lineY := make([]float32, lineCount)
+	{
+		y := contentY + crossLead
+		for order := 0; order < lineCount; order++ {
+			l := order
+			if wrapReverse {
+				l = lineCount - 1 - order
+			}
+			lineY[l] = y
+			y += lineCross[l] + crossTrackGap
+		}
+	}
+
 	// Second pass: place every line, and inside it every item. An item measured
 	// above still holds its inline content at the measurement origin, so that
 	// content travels with it; re-running the inline pass instead would allocate a
@@ -939,7 +1013,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 	//
 	// A line's cross size is only known once its items have been laid out, so each
 	// line places its items first and aligns them afterwards.
-	lineTop := float32(0)
 	maxBottom := float32(0)
 	for order := 0; order < lineCount; order++ {
 		l := order
@@ -979,7 +1052,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				it.W = w
 			}
 			it.X = finalX
-			it.Y = contentY + lineTop + mTop
+			it.Y = lineY[l] + mTop
 			if items[i].measured {
 				// Only an item shrunk below its max-content width needs its
 				// words re-wrapped; one that fits keeps the shift path so
@@ -1011,7 +1084,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 							extra = spare
 						}
 					}
-					shiftInlineContent(a, items[i].id, finalX+it.BorderLeft+it.PaddingLeft+extra-items[i].srcX, lineTop+mTop)
+					shiftInlineContent(a, items[i].id, finalX+it.BorderLeft+it.PaddingLeft+extra-items[i].srcX, lineY[l]+mTop)
 				}
 			} else {
 				containW := it.W
@@ -1056,20 +1129,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			cursor += flexMargin(it.Style.MarginLeft) + items[i].basis + flexMargin(it.Style.MarginRight) + trackGap
 		}
 
-		// The line is as tall as its tallest margin box, unless the container has
-		// a height of its own to hold a single line to.
-		cross := float32(0)
-		if contentH > 0 && lineCount == 1 {
-			cross = contentH
-		} else {
-			for _, i := range line {
-				it := a.Get(items[i].id)
-				h := flexMargin(it.Style.MarginTop) + flexMargin(it.Style.MarginBottom) + it.BorderH()
-				if h > cross {
-					cross = h
-				}
-			}
-		}
+		cross := lineCross[l]
 		for _, i := range line {
 			it := a.Get(items[i].id)
 			mTop := flexMargin(it.Style.MarginTop)
@@ -1105,10 +1165,9 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				}
 			}
 		}
-		if bottom := lineTop + cross; bottom > maxBottom {
+		if bottom := lineY[l] - contentY + cross; bottom > maxBottom {
 			maxBottom = bottom
 		}
-		lineTop += cross
 	}
 	return maxBottom
 }
@@ -2127,18 +2186,37 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		return 0, 0, false
 	}
 	if obj.Node.Data == "textarea" {
-		w, h = 154, 16
+		fontSize := int32(s.FontSize)
+		if fontSize <= 0 {
+			fontSize = 16
+		}
+		advance := fontSize / 2 * 64
+		if a.Metrics != nil {
+			advance = a.Metrics.GlyphAdvanceFixed(fontSize, '0', s.FontSlot())
+		}
+		if advance <= 0 {
+			advance = fontSize / 2 * 64
+		}
+		w = float32(obj.Node.TextareaCols()) * float32(advance) / 64
 		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
 			h = lh
+		} else {
+			h = float32(fontSize)
 		}
-		if rows, err := strconv.Atoi(obj.Node.GetAttribute("rows")); err == nil && rows > 1 {
-			h *= float32(rows)
+		h *= float32(obj.Node.TextareaRows())
+		if w > 16384 {
+			w = 16384
+		}
+		if h > 16384 {
+			h = 16384
 		}
 		return w, h, true
 	}
 	switch strings.ToLower(obj.Node.GetAttribute("type")) {
 	case "checkbox", "radio":
 		return 13, 13, true
+	case "range":
+		return 129, 16, true
 	case "submit", "reset", "button":
 		// Button-like inputs shrink-wrap their value label with a minimum of 80px.
 		var text string
@@ -2580,7 +2658,7 @@ func atomicInlineLevel(s *style.ComputedStyle) bool {
 		return false
 	}
 	switch s.Display {
-	case style.DisplayInlineBlock, style.DisplayInlineFlex, style.DisplayInlineGrid:
+	case style.DisplayInlineBlock, style.DisplayInlineFlex, style.DisplayInlineGrid, style.DisplayInlineTable:
 		return true
 	}
 	return false
@@ -2591,7 +2669,7 @@ func isBlock(obj *Object) bool {
 		return false
 	}
 	switch obj.Style.Display {
-	case style.DisplayBlock, style.DisplayListItem, style.DisplayTable,
+	case style.DisplayBlock, style.DisplayListItem, style.DisplayTable, style.DisplayInlineTable,
 		style.DisplayFlex, style.DisplayInlineFlex, style.DisplayInlineBlock,
 		style.DisplayGrid, style.DisplayInlineGrid,
 		style.DisplayTableRow, style.DisplayTableCell, style.DisplayTableCaption,

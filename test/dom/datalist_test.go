@@ -35,3 +35,28 @@ func TestDatalistAssociationAndOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestDatalistSuggestionsExcludeDisabledAndEmptyOptions(t *testing.T) {
+	doc := domtest.Parse(`<input id="range" type="range" list="choices">
+<datalist id="choices">
+	<option value="10">
+	<option disabled value="20">
+	<option value="">
+	<option> 30 </option>
+	<optgroup disabled><option value="40"></option></optgroup>
+</datalist>`)
+	input := doc.ElementByID("range")
+	if input == nil {
+		t.Fatal("range input not found")
+	}
+	options := input.DatalistOptions()
+	want := []string{"10", "30"}
+	if len(options) != len(want) {
+		t.Fatalf("datalist suggestions = %v, want %v", options, want)
+	}
+	for i, value := range want {
+		if options[i] != value {
+			t.Errorf("suggestion[%d] = %q, want %q", i, options[i], value)
+		}
+	}
+}

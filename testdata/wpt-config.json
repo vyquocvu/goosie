@@ -10,7 +10,14 @@
     "css/css-tables",
     "css/css-lists",
     "html/semantics/text-level-semantics",
-    "html/dom/elements/global-attributes"
+    "html/dom/elements/global-attributes",
+    "html/semantics/forms/the-form-element",
+    "html/semantics/forms/form-submission-0",
+    "html/semantics/forms/the-fieldset-element",
+    "FileAPI/blob",
+    "FileAPI/file",
+    "webmessaging/message-channels",
+    "custom-elements"
   ],
   "exclude": [
     "*animation*",
@@ -35,5 +42,26 @@
   "goosie_binary": "./goosie",
   "output_dir": "/tmp/wpt-results",
   "reference_dir": "/tmp/wpt-references",
-  "generate_references": false
+  "generate_references": false,
+  "test_variants": {
+    "input-events/input-events-get-target-ranges-deleting-in-list-items.tentative.html": [
+      "?Backspace,ul",
+      "?Backspace,ol",
+      "?Delete,ul",
+      "?Delete,ol"
+    ],
+    "input-events/input-events-get-target-ranges-joining-dl-element-and-another-list.tentative.html": [
+      "?Backspace",
+      "?Delete"
+    ],
+    "input-events/input-events-get-target-ranges-joining-dl-elements.tentative.html": [
+      "?Backspace",
+      "?Delete"
+    ],
+    "input-events/input-events-get-target-ranges-non-collapsed-selection.tentative.html": [
+      "?Backspace",
+      "?Delete",
+      "?TypingA"
+    ]
+  }
 }

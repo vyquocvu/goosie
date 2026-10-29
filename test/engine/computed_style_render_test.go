@@ -105,12 +105,9 @@ func TestGetComputedStyleReportsTheSessionsOwnResolve(t *testing.T) {
 	}
 }
 
-// getComputedStyle answers only for nodes the session can name. A div a script
-// created after the last resolve has no cascade entry, so every read is either
-// the node's own declaration or nothing at all - and "nothing" is spelled the
-// empty string through getPropertyValue and absence through property access. An
-// invented initial value would make an unresolved node look resolved, which is
-// the failure a page cannot detect.
+// getComputedStyle performs a synchronous style refresh for script-created and
+// script-mutated nodes, so CSSOM reads observe the current tree before the next
+// paint pump runs.
 // qc:BR-206
 func TestGetComputedStyleForANodeTheSessionNeverResolved(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/page"})
@@ -139,11 +136,11 @@ func TestGetComputedStyleForANodeTheSessionNeverResolved(t *testing.T) {
 		return [empty, after.getPropertyValue("display"), after.getPropertyValue("width"), after.color, typeof after.fontSize].join(" / ")
 	})()`)
 	want := strings.Join([]string{
-		"||undefined|undefined", // nothing known, in both spellings
-		"block",                 // the declarations the page wrote are known at once
+		"block|16px|string|string", // resolved UA display and inherited font size
+		"block",                    // the declarations the page wrote are known at once
 		"120px",
 		"#0f0",
-		"undefined", // and a property no source carries stays absent, not "16px"
+		"string", // inherited font size remains resolved after the mutation
 	}, " / ")
 	if got != want {
 		t.Errorf("unresolved node computed style: got %q want %q", got, want)

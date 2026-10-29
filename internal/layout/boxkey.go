@@ -70,7 +70,7 @@ func boxKindForStyle(s *style.ComputedStyle) BoxKind {
 		return BoxKindInline
 	case style.DisplayListItem:
 		return BoxKindListItem
-	case style.DisplayTable:
+	case style.DisplayTable, style.DisplayInlineTable:
 		return BoxKindTable
 	case style.DisplayTableRow:
 		return BoxKindTableRow

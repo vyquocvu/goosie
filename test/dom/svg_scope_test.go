@@ -80,3 +80,24 @@ func TestSVGNestingIntact(t *testing.T) {
 		t.Fatal("normal svg nesting broke")
 	}
 }
+
+func TestSVGScriptExecutionRequiresEndTagOrSelfClosingFlag(t *testing.T) {
+	doc := domtest.Parse(`<svg><script id="closed">ranClosed=true;</script><script id="unfinished">ranUnfinished=true;</svg><svg><script id="self" href="support.js"/></svg><svg><script id="breakout">ranBreakout=true;<s></script></svg>`)
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{
+		{id: "closed", want: true},
+		{id: "unfinished", want: false},
+		{id: "self", want: true},
+		{id: "breakout", want: false},
+	} {
+		n := svgFindByID(doc, tc.id)
+		if n == nil {
+			t.Fatalf("SVG script %q missing", tc.id)
+		}
+		if n.SVGScriptReady != tc.want {
+			t.Errorf("SVG script %q ready = %t, want %t", tc.id, n.SVGScriptReady, tc.want)
+		}
+	}
+}

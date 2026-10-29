@@ -384,10 +384,10 @@ func TestMoveSelectStepsFromTheLastAuthoredSelection(t *testing.T) {
 	if got := s.FocusedSelectValue(); got != "2" {
 		t.Fatalf("value after EditUp = %q, want 2", got)
 	}
-	// The move collapses the document to one selection, as it always has.
+	// The move updates live selectedness without rewriting authored defaults.
 	n := 0
 	for _, id := range []string{"o1", "o2", "o3"} {
-		if o := s.Doc.ElementByID(id); o != nil && o.HasAttribute("selected") {
+		if o := s.Doc.ElementByID(id); o != nil && o.OptionSelected() {
 			n++
 		}
 	}

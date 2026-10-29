@@ -29,12 +29,10 @@ import (
 // never gets further than the server HTML. TestJQueryCreateHTMLDocumentProbeIs
 // TheExactExpression pins that statement; the rest pin the semantics it needs.
 //
-// Deliberate omissions, each named in docs/tasks/TASK-047-DOM-JQUERY-APIS.md:
-// implementation.createDocument and implementation.hasFeature stay absent (neither
-// jQuery nor any of the five saved pages calls them, and a stub would advertise a
-// document-type path this engine cannot run), and the returned document is a
-// scratch tree only - never styled, laid out or painted, and never the runtime's
-// `document`.
+// `implementation.createDocument` was absent when this test file was first
+// written and has since been implemented under TASK-055. `hasFeature` remains
+// absent. The createHTMLDocument result is still a detached scratch tree: it is
+// not the runtime's `document` and is not styled, laid out, or painted.
 //
 // Every assertion reads through String(...)/explicit comparisons, because Array
 // join turns null and undefined into empty slots and would hide exactly the
@@ -58,7 +56,7 @@ func TestCreateHTMLDocumentBuildsTheStandardSkeleton(t *testing.T) {
 		{"member exists", `typeof document.implementation.createHTMLDocument`, "function"},
 		{"is a document node", `String(document.implementation.createHTMLDocument("Scratch").nodeType)`, "9"},
 		{"two root children", `(function(){var d=document.implementation.createHTMLDocument("Scratch");return String(d.childNodes.length)})()`, "2"},
-		{"html first, doctype present", `(function(){var d=document.implementation.createHTMLDocument("Scratch");return [d.firstChild.nodeType,d.firstChild.nodeName,d.lastChild.nodeType,d.lastChild.nodeName].join(",")})()`, "1,HTML,10,#doctype"},
+		{"doctype precedes html", `(function(){var d=document.implementation.createHTMLDocument("Scratch");return [d.firstChild.nodeType,d.firstChild.name,d.lastChild.nodeType,d.lastChild.nodeName].join(",")})()`, "10,html,1,HTML"},
 		{"head and body under html", `(function(){var d=document.implementation.createHTMLDocument("Scratch");return [d.head.nodeName,d.body.nodeName,String(d.head.parentNode===d.documentElement),String(d.body.parentNode===d.documentElement)].join(",")})()`, "HEAD,BODY,true,true"},
 		{"title is the argument", `String(document.implementation.createHTMLDocument("Scratch").title)`, "Scratch"},
 		{"empty title is empty", `(function(){var d=document.implementation.createHTMLDocument("");return [String(d.title===""),String(d.body.firstChild===null),String(d.body.childNodes.length)].join(",")})()`, "true,true,0"},
@@ -70,12 +68,49 @@ func TestCreateHTMLDocumentBuildsTheStandardSkeleton(t *testing.T) {
 			t.Errorf("%s: got %q want %q", c.name, got, c.want)
 		}
 	}
-	// The doctype-after-html child order is this parser's, not a choice made
-	// here: a live document parsed from the same source shows the same two
-	// children in the same order, so a detached document is the tree the engine
-	// already builds rather than a second shape to keep in sync.
-	if got := evalString(t, rt, `(function(){return [document.firstChild.nodeType,document.lastChild.nodeType,document.lastChild.nodeName].join(",")})()`); got != "1,10,#doctype" {
-		t.Errorf("live document child order differs from the detached document's: got %q want %q - one of the two parse paths changed", got, "1,10,#doctype")
+	if got := evalString(t, rt, `(function(){return [document.firstChild.nodeType,document.firstChild.name,document.lastChild.nodeType,document.lastChild.nodeName].join(",")})()`); got != "10,html,1,HTML" {
+		t.Errorf("live document doctype/html order: got %q want %q", got, "10,html,1,HTML")
+	}
+}
+
+func TestCreateCDATASectionOnXMLDocument(t *testing.T) {
+	rt := detachedRuntime(t, `<!DOCTYPE html><html><body></body></html>`)
+	got := evalString(t, rt, `
+		var xml = new Document();
+		var section = xml.createCDATASection('value');
+		var htmlThrows = false;
+	var dataThrows = false;
+		try { document.createCDATASection('value'); } catch (e) { htmlThrows = e.name === 'NotSupportedError'; }
+		try { xml.createCDATASection('bad]]>value'); } catch (e) { dataThrows = e.name === 'InvalidCharacterError'; }
+		[section.nodeType, section.data, String(section.ownerDocument === xml), String(htmlThrows), String(dataThrows)].join(',');
+	`)
+	want := "4,value,true,true,true"
+	if got != want {
+		t.Fatalf("createCDATASection result = %q, want %q", got, want)
+	}
+}
+
+func TestDOMElementNameValidationUsesDOMRules(t *testing.T) {
+	rt := detachedRuntime(t, `<!DOCTYPE html><html><body></body></html>`)
+	cases := []struct {
+		name string
+		js   string
+		want string
+	}{
+		{"DOMImplementation accepts parser-compatible punctuation", `document.implementation.createDocument(null, 'f}oo').documentElement.localName`, "f}oo"},
+		{"DOMImplementation accepts U+FFFF in an element name", `document.implementation.createDocument(null, '\uFFFFfoo').documentElement.localName`, "\uFFFFfoo"},
+		{"DOMImplementation accepts a less-than sign after an ASCII start", `document.implementation.createDocument(null, 'f<oo').documentElement.localName`, "f<oo"},
+		{"createElementNS shares the DOM name rules", `document.createElementNS(null, 'f}oo').localName`, "f}oo"},
+		{"namespace and local name are extracted", `document.createElementNS('urn:test', 'pre:local').localName`, "local"},
+		{"invalid trailing greater-than throws", `(function(){try{document.implementation.createDocument(null,'foo>');return 'no error'}catch(e){return e.name}})()`, "InvalidCharacterError"},
+		{"missing prefix namespace throws", `(function(){try{document.createElementNS(null,'pre:local');return 'no error'}catch(e){return e.name}})()`, "NamespaceError"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evalString(t, rt, tc.js); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -266,19 +301,12 @@ func TestDetachedDocumentTitleIsTextAndIsWritable(t *testing.T) {
 	}
 }
 
-// createDocument and hasFeature are named absent members: an implementation that
-// answered them would advertise a document-type/feature path this engine does not
-// implement, and a page branching on hasFeature would take that branch in
-// silence. Pinning the absence means adding a stub later is a decision with a
-// failing assertion behind it rather than a quiet change of behaviour.
+// hasFeature remains absent because the engine does not implement feature
+// reporting. createDocument is present and constructs the XML documents used by
+// DOM consumers such as the Range WPT fixtures.
 //
-// The last case records the asymmetry the detached document's `title` accessor
-// creates on purpose: the live document's `document.title` is the host-seeded
-// string (js.Options.Title, read back by Runtime.Title for the browser chrome),
-// so it answers "" for a page whose <head> has a <title>. Deriving it from the
-// title element would fight that host path, and the sweep found one read of it
-// across the five saved pages, inside a third-party snippet and not on a boot
-// path, so it stays as it is - named in the task doc.
+// The live document title reflects its title element when one exists; the host
+// seed remains the fallback for an empty or not-yet-bound document.
 // qc:BR-208
 func TestDocumentImplementationOmitsUnimplementedMembers(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body></body></html>`)
@@ -289,7 +317,7 @@ func TestDocumentImplementationOmitsUnimplementedMembers(t *testing.T) {
 		typeof document.implementation.createHTMLDocument,
 		String(typeof document.title) + "," + String(document.title)
 	].join("|")`)
-	want := "createHTMLDocument|undefined|undefined|function|string,"
+	want := "createHTMLDocument,createDocumentType,createDocument|function|undefined|function|string,Main"
 	if got != want {
 		t.Errorf("implementation members: got %q want %q", got, want)
 	}

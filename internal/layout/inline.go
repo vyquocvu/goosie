@@ -463,6 +463,16 @@ func inlineInto(a *Arena, id ObjectID) {
 		}
 		lines = lines[:clamp]
 	}
+	// Apply ::first-line style overrides to the first formatted line. The
+	// pseudo-element is matched on the block container's originating element;
+	// if present, every run on lines[0] gets its font, color, background,
+	// text-decoration, text-transform, letter-spacing, word-spacing, and
+	// line-height replaced by the first-line values.
+	if obj.Node != nil && obj.Node.Element() && len(lines) > 0 {
+		if flStyle, ok := a.FirstLineStyles[obj.Node.ID]; ok && flStyle != nil {
+			applyFirstLineRuns(a, &lines[0], flStyle, obj.Style)
+		}
+	}
 	// Re-fetch obj: the Alloc calls in the text path may have reallocated the
 	// arena slice, so the pointer captured at function entry is stale.
 	obj = a.Get(id)
@@ -497,9 +507,16 @@ func inlineInto(a *Arena, id ObjectID) {
 			}
 		}
 		isRTL := obj.Style != nil && obj.Style.Direction == "rtl"
+		lineRuns := line.runs
+		if isRTL {
+			// Bidi reordering decides both the walk order and whether the
+			// line still flows right-to-left at all: unicode-bidi:plaintext
+			// can resolve an RTL-declared element's line to LTR.
+			lineRuns, isRTL = bidiLineRuns(obj.Style, line.runs)
+		}
 		if isRTL {
 			x := baseX + alignW
-			for _, run := range line.runs {
+			for _, run := range lineRuns {
 				runObj := a.Get(run.obj)
 				if run.atomic {
 					k := a.Get(run.obj)
@@ -876,7 +893,8 @@ func atomicInlineBlock(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox
 	// of inline-blocks. Filling the line would give the box the whole row and push
 	// every sibling onto a line of its own, which is what turned a title followed
 	// by its tag pills into two lines.
-	if k.Style != nil && resolveBoxWidth(a, k.Style, bc.contentW) < 0 {
+	intrinsicTextarea := k.Node != nil && k.Node.Data == "textarea"
+	if k.Style != nil && !intrinsicTextarea && resolveBoxWidth(a, k.Style, bc.contentW) < 0 {
 		if w := itemMaxContentW(a, id); w > 0 && w < k.W {
 			k.W = w
 			k = a.Get(id)
@@ -1311,4 +1329,99 @@ func applyTextTransform(text string, transform string) string {
 	default:
 		return text
 	}
+}
+
+// applyFirstLineRuns overrides the style of every run on the first formatted
+// line with the ::first-line pseudo-element style. Font properties, color,
+// background, text-decoration, text-transform, letter-spacing, word-spacing,
+// and line-height are replaced; the run is then remeasured so placement uses
+// the new metrics.
+func applyFirstLineRuns(a *Arena, line *lineBox, flStyle, containerStyle *style.ComputedStyle) {
+	if line == nil || flStyle == nil {
+		return
+	}
+	newW := float32(0)
+	newH := line.h
+	for i := range line.runs {
+		run := &line.runs[i]
+		runObj := a.Get(run.obj)
+		if run.atomic {
+			// Atomic inline boxes (replaced content, inline-block) keep their
+			// own geometry; only non-atomic text runs participate in first-line.
+			newW += run.w
+			continue
+		}
+		// Build an overridden style: start from the run's own style and apply
+		// the first-line font/color properties on top.
+		base := runObj.Style
+		if base == nil {
+			base = containerStyle
+		}
+		if base == nil {
+			continue
+		}
+		overridden := *base
+		// Font properties.
+		overridden.FontFamily = flStyle.FontFamily
+		overridden.CustomFamily = flStyle.CustomFamily
+		overridden.CustomFontIdx = flStyle.CustomFontIdx
+		overridden.FontSize = flStyle.FontSize
+		overridden.FontWeight = flStyle.FontWeight
+		overridden.FontStyle = flStyle.FontStyle
+		// Color and background.
+		overridden.Color = flStyle.Color
+		overridden.BackgroundColor = flStyle.BackgroundColor
+		overridden.BackgroundGradient = flStyle.BackgroundGradient
+		overridden.BackgroundRadialGradient = flStyle.BackgroundRadialGradient
+		overridden.BackgroundImage = flStyle.BackgroundImage
+		overridden.BackgroundRepeat = flStyle.BackgroundRepeat
+		overridden.BackgroundRepeatY = flStyle.BackgroundRepeatY
+		overridden.BackgroundSize = flStyle.BackgroundSize
+		overridden.BackgroundOrigin = flStyle.BackgroundOrigin
+		overridden.BackgroundClip = flStyle.BackgroundClip
+		overridden.BgSizeW = flStyle.BgSizeW
+		overridden.BgSizeH = flStyle.BgSizeH
+		overridden.BgSizeWPct = flStyle.BgSizeWPct
+		overridden.BgSizeHPct = flStyle.BgSizeHPct
+		overridden.BackgroundPosXMode = flStyle.BackgroundPosXMode
+		overridden.BackgroundPosYMode = flStyle.BackgroundPosYMode
+		overridden.BackgroundPosX = flStyle.BackgroundPosX
+		overridden.BackgroundPosY = flStyle.BackgroundPosY
+		overridden.BgPosXPct = flStyle.BgPosXPct
+		overridden.BgPosYPct = flStyle.BgPosYPct
+		// Text properties.
+		overridden.TextDecoration = flStyle.TextDecoration
+		overridden.TextTransform = flStyle.TextTransform
+		overridden.LetterSpacing = flStyle.LetterSpacing
+		overridden.WordSpacing = flStyle.WordSpacing
+		// Line-height: use the first-line value when it was explicitly set.
+		if flStyle.LineHeight > 0 {
+			overridden.LineHeight = flStyle.LineHeight
+		}
+		runObj.Style = &overridden
+
+		// Remeasure the run with the new font.
+		newSize := overridden.FontSize
+		newSlot := overridden.FontSlot()
+		newLetterSpacing := overridden.LetterSpacing
+		newWordSpacing := overridden.WordSpacing
+		lineH, contentH := runHeights(a.Metrics, newSize, newSlot, overridden.LineHeight)
+		wordW := measureWord(run.text, newSize, a.Metrics, newSlot, newLetterSpacing)
+		if run.text == " " {
+			wordW += newWordSpacing
+		}
+		run.size = newSize
+		run.slot = newSlot
+		run.lineH = lineH
+		run.contentH = contentH
+		run.w = wordW
+		runObj.W = wordW
+		runObj.H = contentH
+		newW += wordW
+		if lineH > newH {
+			newH = lineH
+		}
+	}
+	line.w = newW
+	line.h = newH
 }

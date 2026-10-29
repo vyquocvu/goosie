@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 16px Arial, sans-serif; margin: 24px; }
+    label { display: block; margin-bottom: 8px; }
+    input { display: inline-block; margin-bottom: 18px; width: 280px; }
+    output { display: block; }
+  </style>
+</head>
+<body>
+  <label for="slider">Range value with step 20</label>
+  <input id="slider" type="range" min="0" max="100" step="20" value="50">
+  <output id="value"></output>
+  <script>
+    const slider = document.getElementById("slider");
+    slider.value = "50";
+    document.getElementById("value").textContent = "Sanitized value: " + slider.value;
+  </script>
+</body>
+</html>

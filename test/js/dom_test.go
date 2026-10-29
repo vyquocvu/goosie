@@ -153,7 +153,7 @@ func TestElementStyleDeclarationIsLiveAndNotifiesMutation(t *testing.T) {
 		t.Errorf("styleIdentity = %v (present=%v), want true", identity.Bool, ok)
 	}
 	for name, want := range map[string]string{
-		"cssText":       "display:inline;background:green",
+		"cssText":       "display: inline; background: green;",
 		"propertyValue": "red",
 		"priority":      "important",
 		"removed":       "red",
@@ -521,6 +521,45 @@ func TestInsertAdjacentHTMLAndChildren(t *testing.T) {
 	}
 	if v, _ := r.Global("newCount"); v.Num != 4 {
 		t.Errorf("newCount = %v, want 4", v.Num)
+	}
+}
+
+func TestTemplateContentGetElementByID(t *testing.T) {
+	d := testDOM(t)
+	r := newDOMRuntime(t, d)
+	if err := r.Run(`
+		const template = document.createElement("template");
+		template.innerHTML = "<form id='inside-template'><input></form>";
+		const found = template.content.getElementById("inside-template");
+		window.templateLookupFound = found !== null && found === template.content.firstChild;
+		window.templateLookupMiss = template.content.getElementById("missing") === null;
+	`, "template-fragment-get-element-by-id"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("templateLookupFound"); !v.Bool {
+		t.Error("template content getElementById did not return the matching descendant")
+	}
+	if v, _ := r.Global("templateLookupMiss"); !v.Bool {
+		t.Error("template content getElementById should return null when no descendant matches")
+	}
+}
+
+func TestNoscriptTextInTemplateContentIsEscapedByInnerHTML(t *testing.T) {
+	d := testDOM(t)
+	r := newDOMRuntime(t, d)
+	if err := r.Run(`
+		const template = document.createElement("template");
+		template.innerHTML = "<noscript><div></div></noscript>";
+		window.noscriptText = template.content.querySelector("noscript").textContent;
+		window.noscriptHTML = template.content.querySelector("noscript").innerHTML;
+	`, "noscript-template-serialization"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v, _ := r.Global("noscriptText"); v.Str != "<div></div>" {
+		t.Errorf("noscript textContent = %q, want literal markup", v.Str)
+	}
+	if v, _ := r.Global("noscriptHTML"); v.Str != "&lt;div&gt;&lt;/div&gt;" {
+		t.Errorf("noscript innerHTML = %q, want escaped text", v.Str)
 	}
 }
 

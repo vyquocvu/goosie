@@ -20,9 +20,11 @@ type Builder struct {
 
 // focusState groups the input state that influences text and control painting.
 type focusState struct {
-	object *layout.Object
-	caret  int
-	marked string
+	object            *layout.Object
+	caret             int
+	marked            string
+	compositionNode   uint32
+	compositionOffset int
 }
 
 // NewBuilder returns a builder that will emit commands into list. metrics is
@@ -37,6 +39,13 @@ func NewBuilder(list *List, arena *layout.Arena, scale float32, metrics layout.M
 // shown spliced into the value at the caret.
 func (b *Builder) SetFocus(obj *layout.Object, caret int, marked string) {
 	b.focus = focusState{object: obj, caret: caret, marked: marked}
+}
+
+// SetCompositionCaret locates a contenteditable IME preview in its source Text
+// node using the Selection's UTF-16 offset.
+func (b *Builder) SetCompositionCaret(nodeID uint32, offset int) {
+	b.focus.compositionNode = nodeID
+	b.focus.compositionOffset = offset
 }
 
 // SetSelection marks word boxes to paint with the selection highlight. The

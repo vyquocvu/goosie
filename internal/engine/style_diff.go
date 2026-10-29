@@ -20,6 +20,8 @@ type layoutStyleKey struct {
 	Visibility, ContentVisibility                 string
 	ContainIntrinsicWidth, ContainIntrinsicHeight float32
 	AnchorName, PositionAnchor                    string
+	PositionAnchorNodeID                          dom.NodeID
+	PositionArea                                  string
 	TopAnchor, RightAnchor                        string
 	BottomAnchor, LeftAnchor                      string
 	WidthAnchor, HeightAnchor                     string
@@ -100,7 +102,8 @@ func makeLayoutStyleKey(s *style.ComputedStyle) layoutStyleKey {
 		Overflow: uint8(s.Overflow), OverflowX: uint8(s.OverflowX), OverflowY: uint8(s.OverflowY), BoxSizing: uint8(s.BoxSizing),
 		Visibility: s.Visibility, ContentVisibility: s.ContentVisibility,
 		ContainIntrinsicWidth: s.ContainIntrinsicWidth, ContainIntrinsicHeight: s.ContainIntrinsicHeight,
-		AnchorName: s.AnchorName, PositionAnchor: s.PositionAnchor, TopAnchor: s.TopAnchor, RightAnchor: s.RightAnchor,
+		AnchorName: s.AnchorName, PositionAnchor: s.PositionAnchor, PositionAnchorNodeID: s.PositionAnchorNodeID, PositionArea: s.PositionArea,
+		TopAnchor: s.TopAnchor, RightAnchor: s.RightAnchor,
 		BottomAnchor: s.BottomAnchor, LeftAnchor: s.LeftAnchor, WidthAnchor: s.WidthAnchor, HeightAnchor: s.HeightAnchor,
 		TextWrap: s.TextWrap, ViewTransitionName: s.ViewTransitionName, ShapeOutside: s.ShapeOutside,
 		LineClamp: s.LineClamp, ShapeMargin: s.ShapeMargin,

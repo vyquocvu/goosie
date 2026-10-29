@@ -312,6 +312,28 @@ func TestMissingGlyphCounter(t *testing.T) {
 	}
 }
 
+func TestMacCJKCollectionFallbackDrawsKana(t *testing.T) {
+	path := "/System/Library/Fonts/CJKSymbolsFallback.ttc"
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Skip("macOS CJK fallback collection is not installed")
+	}
+	if info.Size() > raster.MaxFallbackFontBytes {
+		t.Fatalf("CJK fallback collection size %d exceeds admission limit %d", info.Size(), raster.MaxFallbackFontBytes)
+	}
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	glyph := f.Glyph(16, 'か', frame.FontSlot{Family: frame.FontArial})
+	if glyph.Mask == nil || !glyph.Ok || glyph.Missing {
+		t.Fatalf("kana glyph = %+v, want a covered, non-tofu glyph", glyph)
+	}
+	if f.FallbackFontsCount() == 0 || f.FallbackBytes() > raster.MaxFallbackFontBytes {
+		t.Fatalf("fallback count/bytes = %d/%d, want a retained bounded CJK face", f.FallbackFontsCount(), f.FallbackBytes())
+	}
+}
+
 // TestLazyFallbackHostFonts tests requirement 4 and [R-7]:
 // 1. Files read via hook/counter is 0 before any rune miss.
 // 2. After one rune requiring fallback (e.g. '✔'), at most 1 font is retained.

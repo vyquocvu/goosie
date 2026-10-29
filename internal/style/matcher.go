@@ -23,6 +23,7 @@ type ruleIndex struct {
 	// unkeyed holds selectors whose key compound tests none of id, class or tag —
 	// `*`, `[type=text]`, `:hover` — which every element must still try.
 	unkeyed []*indexedSelector
+	part    []*indexedSelector
 	// declCount is the total declaration slots across all sheets, used to rank
 	// inline styles after every authored declaration.
 	declCount  int
@@ -106,10 +107,24 @@ func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
 				}
 				ix.declCount += len(rule.Declarations)
 				ix.insert(e)
+				if selectorHasPart(e.sel) {
+					ix.part = append(ix.part, e)
+				}
 			}
 		}
 	}
 	return ix
+}
+
+func selectorHasPart(sel css.Selector) bool {
+	for _, part := range sel.Parts {
+		for _, cond := range part.Conditions {
+			if cond.Type == css.CondPseudoElement && cond.Value == "part" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // insert files a selector under the tests its key compound requires. An id is
@@ -174,6 +189,7 @@ func (ix *ruleIndex) candidates(n *dom.Node) []*indexedSelector {
 	}
 	collect(ix.byTag[n.Data])
 	collect(ix.unkeyed)
+	collect(ix.part)
 	// Each bucket is already in rank order (buildRuleIndex appends in sheet
 	// order), so the merged slice is nearly sorted and almost always tiny:
 	// skip the sort for 0-1 candidates and insertion-sort the common small

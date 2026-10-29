@@ -1,6 +1,7 @@
 package css
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -88,7 +89,17 @@ func IsFocusVisible(n *dom.Node) bool {
 		return false
 	}
 	v, ok := focusVisibleState.Load(n)
-	return ok && v.(bool)
+	if ok && v.(bool) {
+		return true
+	}
+	// The focus-visible heuristic depends on the control's current state, not
+	// only the type it had when focus was first established. In particular,
+	// changing a focused input from a button-like state to a text-entry state
+	// makes its focus indicator visible even when focus began by pointer/script.
+	if n.Element() && n.Data == "input" {
+		return !strings.EqualFold(strings.TrimSpace(n.GetAttribute("type")), "hidden")
+	}
+	return false
 }
 
 // SetActive marks a node as currently being activated by pointer input.

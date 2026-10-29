@@ -2,6 +2,7 @@ package wpt
 
 import (
 	"bufio"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,8 +32,20 @@ type FeatureSupport struct {
 	CSSSelectors bool
 	// HTML tables.
 	HTMLTables bool
-	// HTML forms (visual rendering only, no interaction).
+	// HTML form rendering and the currently implemented form DOM surface.
 	HTMLForms bool
+	// HTML dialog elements and their lifecycle/interaction APIs.
+	HTMLDialogs bool
+	// HTML popover state and invoker interactions.
+	HTMLPopovers bool
+	// HTML contenteditable attribute parsing and reflected DOM properties.
+	HTMLContentEditable bool
+	// HTML draggable attribute reflection and browser pointer-driven drag start.
+	HTMLDragAndDrop bool
+	// DOM Range and Selection boundary behavior.
+	DOMRanges bool
+	// DOM Node tree methods and document construction.
+	DOMNodes bool
 	// HTML lists (ol, ul, dl).
 	HTMLLists bool
 	// Canvas API.
@@ -63,26 +76,32 @@ type FeatureSupport struct {
 // updated as the engine grows; the curator reads it to decide what to include.
 func GoosieSupport() FeatureSupport {
 	return FeatureSupport{
-		HTMLBasic:         true,
-		CSSBasic:          true,
-		CSSFlexbox:        true,
-		CSSGrid:           false, // not yet implemented
-		CSSPositioning:    true,
-		CSSSelectors:      true,
-		HTMLTables:        true,
-		HTMLForms:         true,
-		HTMLLists:         true,
-		Canvas:            false,
-		SVG:               false,
-		WebGL:             false,
-		JSDOM:             false,
-		CSSAnimations:     false,
-		MediaQueries:      true,
-		CSSVariables:      true,
-		CSSCalc:           true,
-		CSSGradients:      false,
-		CSSPseudoClasses:  true,
-		CSSPseudoElements: false,
+		HTMLBasic:           true,
+		CSSBasic:            true,
+		CSSFlexbox:          true,
+		CSSGrid:             true,
+		CSSPositioning:      true,
+		CSSSelectors:        true,
+		HTMLTables:          true,
+		HTMLForms:           true,
+		HTMLDialogs:         true,
+		HTMLPopovers:        true,
+		HTMLContentEditable: true,
+		HTMLDragAndDrop:     true,
+		DOMRanges:           true,
+		DOMNodes:            true,
+		HTMLLists:           true,
+		Canvas:              false,
+		SVG:                 false,
+		WebGL:               false,
+		JSDOM:               false,
+		CSSAnimations:       true,
+		MediaQueries:        true,
+		CSSVariables:        true,
+		CSSCalc:             true,
+		CSSGradients:        true,
+		CSSPseudoClasses:    true,
+		CSSPseudoElements:   true,
 	}
 }
 
@@ -94,9 +113,19 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 
 	if support.HTMLBasic {
 		dirs = append(dirs, CuratedDir{
+			Path:        "dom/events",
+			Description: "DOM EventTarget propagation, listener options, and dispatch behavior",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
 			Path:        "html/semantics/text-level-semantics",
 			Description: "HTML text-level semantics (a, em, strong, etc.)",
 			Type:        RefTest,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/links/links-created-by-a-and-area-elements",
+			Description: "HTML anchor and area URL reflection and hyperlink attributes",
+			Type:        TestHarness,
 		})
 		dirs = append(dirs, CuratedDir{
 			Path:        "html/semantics/document-metadata/the-title-element",
@@ -107,6 +136,133 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 			Path:        "html/dom/elements/global-attributes",
 			Description: "HTML global attributes (class, id, dir)",
 			Type:        RefTest,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/syntax/parsing",
+			Description: "HTML tokenizer and tree-construction parsing behavior",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "domparsing",
+			Description: "DOMParser and XMLSerializer parsing and serialization behavior",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/webappapis/scripting/events",
+			Description: "HTML event handler IDL attributes and processing",
+			Type:        TestHarness,
+		})
+		// Custom elements have a partial implementation. Keep the upstream
+		// registry/lifecycle suite discoverable so unsupported behavior is
+		// measured as failures instead of being hidden by the feature filter.
+		dirs = append(dirs, CuratedDir{
+			Path:        "custom-elements",
+			Description: "Custom element registry, upgrade, and lifecycle behavior",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.HTMLForms {
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/forms/the-input-element",
+			Description: "HTML input state, value sanitization, selection, and radio behavior",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/forms/the-select-element",
+			Description: "HTML select state, option selection, and picker behavior",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/forms/the-fieldset-element",
+			Description: "HTML fieldset disabledness, legend exceptions, and constraint validation",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/forms/the-form-element",
+			Description: "HTMLFormElement collections, reflected attributes, and form ownership",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/forms/form-submission-0",
+			Description: "HTML form submission algorithms and constructed form data sets",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.HTMLDialogs {
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/interactive-elements/the-dialog-element",
+			Description: "HTML dialog element state, focus, close, and modal behavior",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.HTMLBasic {
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/interactive-elements/the-details-element",
+			Description: "HTML details open state, summary activation, toggle events, and exclusive groups",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.HTMLPopovers {
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/semantics/popovers",
+			Description: "HTML popover state, invokers, dismissal, and event behavior",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.HTMLContentEditable {
+		dirs = append(dirs, CuratedDir{
+			Path:        "editing/run",
+			Description: "HTML editing command conformance tests",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/editing/editing-0/contenteditable",
+			Description: "contenteditable enumerated attribute and DOM reflection",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/editing/editing-0/making-entire-documents-editable-the-designmode-idl-attribute",
+			Description: "designMode state and contenteditable interaction",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.HTMLDragAndDrop {
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/editing/dnd/the-draggable-attribute",
+			Description: "HTML draggable attribute reflection and enumerated values",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/editing/dnd/events",
+			Description: "HTML drag-and-drop event ordering and pointer suppression",
+			Type:        TestHarness,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "html/editing/dnd/datastore",
+			Description: "HTML drag data store and DataTransferItemList APIs",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.DOMRanges {
+		dirs = append(dirs, CuratedDir{
+			Path:        "dom/ranges",
+			Description: "DOM Range boundary, mutation, and selection behavior",
+			Type:        TestHarness,
+		})
+	}
+
+	if support.DOMNodes {
+		dirs = append(dirs, CuratedDir{
+			Path:        "dom/nodes",
+			Description: "DOM Node tree operations, document construction, and node position behavior",
+			Type:        TestHarness,
 		})
 	}
 
@@ -144,6 +300,35 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 		})
 	}
 
+	if support.CSSAnimations {
+		dirs = append(dirs, CuratedDir{
+			Path:        "css/css-animations",
+			Description: "CSS @keyframes animations",
+			Type:        RefTest,
+		})
+		dirs = append(dirs, CuratedDir{
+			Path:        "css/css-transitions",
+			Description: "CSS transitions",
+			Type:        RefTest,
+		})
+	}
+
+	if support.CSSGradients {
+		dirs = append(dirs, CuratedDir{
+			Path:        "css/css-images",
+			Description: "CSS images and gradients",
+			Type:        RefTest,
+		})
+	}
+
+	if support.CSSPseudoElements {
+		dirs = append(dirs, CuratedDir{
+			Path:        "css/css-pseudo",
+			Description: "CSS pseudo-elements",
+			Type:        RefTest,
+		})
+	}
+
 	if support.CSSPositioning {
 		dirs = append(dirs, CuratedDir{
 			Path:        "css/css-position",
@@ -176,6 +361,15 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 		})
 	}
 
+	// FileAPI is a dependency of HTML file inputs, form submission, workers,
+	// fetch, and other browser APIs. Keep its constructor suites measurable even
+	// while the implementation is incomplete.
+	dirs = append(dirs,
+		CuratedDir{Path: "FileAPI/blob", Description: "Blob construction, slicing, and byte access", Type: TestHarness},
+		CuratedDir{Path: "FileAPI/file", Description: "File construction and metadata", Type: TestHarness},
+		CuratedDir{Path: "webmessaging/message-channels", Description: "MessageChannel and MessagePort delivery, startup, closure, and transfer", Type: TestHarness},
+	)
+
 	return dirs
 }
 
@@ -189,9 +383,9 @@ type CuratedDir struct {
 	Type TestType
 }
 
-// DiscoverTests walks a WPT directory and returns the test files it contains,
-// classified by type. Only reftests and testharness tests are returned; manual
-// tests are always excluded.
+// DiscoverTests walks a WPT directory and returns candidate test files,
+// classified by type. Manual and unclassified pages remain in the result so
+// the runner can report them as explicit skips instead of hiding them.
 func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, error) {
 	absDir := filepath.Join(wptRoot, dir)
 	info, err := os.Stat(absDir)
@@ -208,15 +402,22 @@ func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, er
 			return nil // skip errors
 		}
 		if info.IsDir() {
+			if path != absDir && strings.EqualFold(info.Name(), "resources") {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		ext := filepath.Ext(path)
-		if ext != ".html" && ext != ".htm" && ext != ".xhtml" && ext != ".svg" {
+		anyTest := strings.HasSuffix(strings.ToLower(path), ".any.js")
+		if ext != ".html" && ext != ".htm" && ext != ".xhtml" && ext != ".svg" && !anyTest {
 			return nil
 		}
 
 		relPath, err := filepath.Rel(wptRoot, path)
 		if err != nil {
+			return nil
+		}
+		if isReferenceSupportFile(filepath.Base(path)) {
 			return nil
 		}
 
@@ -234,10 +435,9 @@ func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, er
 		}
 
 		testType := classifyTest(path)
-		if testType == ManualTest {
-			return nil
+		if testType == UnclassifiedTest && referencedBySiblingForm(path) {
+			testType = SupportFile
 		}
-
 		dt := DiscoveredTest{
 			Path:    relPath,
 			AbsPath: path,
@@ -256,6 +456,16 @@ func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, er
 		return nil
 	})
 	return tests, err
+}
+
+func isReferenceSupportFile(base string) bool {
+	base = strings.ToLower(base)
+	for _, suffix := range []string{"-ref.html", "_ref.html", ".ref.html", "-notref.html", "_notref.html", ".notref.html", "-reference.html"} {
+		if strings.HasSuffix(base, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // DiscoveredTest is a WPT test file found during directory traversal.
@@ -277,6 +487,13 @@ type DiscoveredTest struct {
 // classifyTest determines the test type by reading the HTML file's content.
 // The classification is heuristic based on markers in the file.
 func classifyTest(path string) TestType {
+	if strings.HasSuffix(strings.ToLower(path), ".any.js") {
+		return TestHarness
+	}
+	base := strings.ToLower(filepath.Base(path))
+	if strings.Contains(base, "-manual.") || strings.Contains(base, ".manual.") || strings.HasPrefix(base, "manual-") {
+		return ManualTest
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return ManualTest
@@ -296,33 +513,96 @@ func classifyTest(path string) TestType {
 		}
 
 		lower := strings.ToLower(line)
-
-		// Reftest markers: <link rel="match" ...> or <link rel="mismatch" ...>
-		if strings.Contains(lower, `rel="match"`) || strings.Contains(lower, `rel='match'`) {
-			return RefTest
-		}
-		if strings.Contains(lower, `rel="mismatch"`) || strings.Contains(lower, `rel='mismatch'`) {
-			return RefTest
+		if strings.Contains(lower, "<meta") && strings.Contains(lower, "flags") && (strings.Contains(lower, "interact") || strings.Contains(lower, "manual")) {
+			return ManualTest
 		}
 
-		// Testharness marker: inclusion of testharness.js
-		if strings.Contains(lower, "testharness.js") {
-			return TestHarness
+		// HTML permits unquoted attribute values too; WPT commonly writes
+		// reftest links as <link rel=match href=...>.
+		if refLinkRe.MatchString(line) || refHrefFirstRe.MatchString(line) {
+			return RefTest
 		}
 
 		// Manual test marker
 		if strings.Contains(lower, "manual") && strings.Contains(lower, `rel="help"`) {
 			return ManualTest
 		}
+
+		// Testharness marker: inclusion of testharness.js
+		if strings.Contains(lower, "testharness.js") {
+			return TestHarness
+		}
 	}
 
-	// Default: if we can't classify it, skip it rather than misreport.
-	return ManualTest
+	// WPT crash regressions intentionally have no assertion harness; their
+	// oracle is process survival during a real document render.
+	if strings.Contains(base, "-crash.") {
+		return SmokeTest
+	}
+	// Default: keep unknown pages visible rather than silently dropping them.
+	return UnclassifiedTest
+}
+
+var formActionAttrRe = regexp.MustCompile(`(?is)<form\b[^>]*\baction\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+
+// referencedBySiblingForm reports whether an unmarked HTML document is the
+// local form-action endpoint of a sibling testharness page. Such endpoints
+// participate in the parent test but are not standalone WPT cases.
+func referencedBySiblingForm(candidate string) bool {
+	dir := filepath.Dir(candidate)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == filepath.Base(candidate) {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext != ".html" && ext != ".htm" && ext != ".xhtml" {
+			continue
+		}
+		parent := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(parent)
+		if err != nil || len(data) > 1<<20 {
+			continue
+		}
+		lower := strings.ToLower(string(data))
+		if !strings.Contains(lower, "testharness.js") {
+			continue
+		}
+		for _, attrs := range formActionAttrRe.FindAllSubmatch(data, -1) {
+			action := ""
+			for _, group := range attrs[1:] {
+				if len(group) != 0 {
+					action = string(group)
+					break
+				}
+			}
+			parsed, err := url.Parse(action)
+			if err != nil || parsed.IsAbs() || parsed.Host != "" {
+				continue
+			}
+			target := parsed.Path
+			if target == "" {
+				continue
+			}
+			targetAbs, err := filepath.Abs(filepath.Join(dir, filepath.FromSlash(target)))
+			if err == nil && targetAbs == candidateAbs {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // refLinkRe matches <link rel="match" href="..."> and <link rel="mismatch" href="...">.
-var refLinkRe = regexp.MustCompile(`<link[^>]+rel=["'](match|mismatch)["'][^>]+href=["']([^"']+)["']`)
-var refHrefFirstRe = regexp.MustCompile(`<link[^>]+href=["']([^"']+)["'][^>]+rel=["'](match|mismatch)["']`)
+var refLinkRe = regexp.MustCompile(`(?i)<link\b[^>]*\brel\s*=\s*["']?(match|mismatch)["']?[^>]*\bhref\s*=\s*["']?([^\s"'<>]+)`)
+var refHrefFirstRe = regexp.MustCompile(`(?i)<link\b[^>]*\bhref\s*=\s*["']?([^\s"'<>]+)["']?[^>]*\brel\s*=\s*["']?(match|mismatch)["']?`)
 
 // findReference locates the reference file for a reftest. It reads the test
 // file's <link rel="match" href="..."> or <link rel="mismatch" href="..."> to
@@ -368,9 +648,13 @@ func resolveRefPath(testPath, href, wptRoot string) string {
 // ShouldSkip returns true if a discovered test requires features goosie
 // does not support. The reason string explains why.
 func ShouldSkip(dt DiscoveredTest, support FeatureSupport) (bool, string) {
-	// testharness.js tests need JS DOM, which goosie lacks.
-	if dt.Type == TestHarness {
-		return true, "testharness.js requires JS DOM"
+	switch dt.Type {
+	case ManualTest:
+		return true, "requires human interaction and is not run automatically"
+	case SupportFile:
+		return true, "referenced form-action helper; exercised by its parent test"
+	case UnclassifiedTest:
+		return true, "no automated WPT marker found; classification review required"
 	}
 
 	// Check for unsupported features by directory name.

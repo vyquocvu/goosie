@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -66,6 +69,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var appMode appearanceMode
 	var userscriptMgr *userscript.Manager
 	var permsMgr *perms.Manager
+	var broadcastHub *js.BroadcastHub
+	var clipboardProvider js.ClipboardProvider
 	var mediaBackend media.Backend
 	var savePathPicker platform.SavePathPicker
 	for _, ex := range extra {
@@ -82,6 +87,10 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			userscriptMgr = v
 		case *perms.Manager:
 			permsMgr = v
+		case *js.BroadcastHub:
+			broadcastHub = v
+		case js.ClipboardProvider:
+			clipboardProvider = v
 		case media.Backend:
 			mediaBackend = v
 		case platform.SavePathPicker:
@@ -371,6 +380,108 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return resp.Body, nil
 	}
+	iframeFetcher := func(base, source string) (*dom.Document, error) {
+		if client == nil {
+			return nil, fmt.Errorf("goosie: iframe transport unavailable")
+		}
+		baseURL, err := url.Parse(base)
+		if err != nil {
+			return nil, err
+		}
+		reference, err := url.Parse(source)
+		if err != nil {
+			return nil, err
+		}
+		frameURL := baseURL.ResolveReference(reference)
+		if frameURL.Scheme != "http" && frameURL.Scheme != "https" {
+			return nil, fmt.Errorf("iframe source must use HTTP(S)")
+		}
+		if perms.NormalizeOrigin(frameURL.String()) != perms.NormalizeOrigin(base) {
+			return nil, fmt.Errorf("goosie: cross-origin iframe document access is not available")
+		}
+		frameResponse, err := client.Get(subresourceCtx(ctx, base), frameURL.String())
+		if err != nil {
+			return nil, err
+		}
+		if frameResponse.StatusCode < 200 || frameResponse.StatusCode >= 400 {
+			return nil, fmt.Errorf("iframe response status %d", frameResponse.StatusCode)
+		}
+		text, encoding, _ := frameResponse.TextWithEncoding()
+		if len(text) > engine.MaxDocumentBytes {
+			return nil, fmt.Errorf("iframe document exceeds the engine byte limit after decoding")
+		}
+		frameDoc, err := dom.ParseBounded(text, dom.ParseLimits{
+			Nodes: engine.MaxDocumentNodes, Depth: engine.MaxDocumentDepth,
+			Attributes: engine.MaxAttributes, AttributeBytes: engine.MaxAttributeBytes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if strings.EqualFold(encoding, "utf-8") {
+			encoding = "UTF-8"
+		} else if strings.HasPrefix(strings.ToLower(encoding), "iso-8859-") {
+			encoding = strings.ToUpper(encoding)
+		}
+		frameDoc.CharacterSet = encoding
+		if frameResponse.Headers != nil {
+			frameDoc.ContentLanguage = frameResponse.Headers["Content-Language"]
+		}
+		return frameDoc, nil
+	}
+	iframeFormSubmitter := func(base, target, contentType string, body []byte) (*dom.Document, error) {
+		if client == nil {
+			return nil, fmt.Errorf("goosie: iframe form transport unavailable")
+		}
+		baseURL, err := url.Parse(base)
+		if err != nil {
+			return nil, err
+		}
+		reference, err := url.Parse(target)
+		if err != nil {
+			return nil, err
+		}
+		formURL := baseURL.ResolveReference(reference)
+		if (formURL.Scheme != "http" && formURL.Scheme != "https") || perms.NormalizeOrigin(formURL.String()) != perms.NormalizeOrigin(base) {
+			return nil, fmt.Errorf("goosie: cross-origin iframe form submission is not available")
+		}
+		formResponse, err := client.Post(subresourceCtx(ctx, base), formURL.String(), contentType, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		if formResponse.StatusCode < 200 || formResponse.StatusCode >= 400 {
+			return nil, fmt.Errorf("iframe form response status %d", formResponse.StatusCode)
+		}
+		if formResponse.URL != "" && perms.NormalizeOrigin(formResponse.URL) != perms.NormalizeOrigin(base) {
+			return nil, fmt.Errorf("goosie: iframe form redirect is outside the local origin")
+		}
+		text, encoding, _ := formResponse.TextWithEncoding()
+		if len(text) > engine.MaxDocumentBytes {
+			return nil, fmt.Errorf("iframe form response exceeds the engine byte limit after decoding")
+		}
+		responseType, _, _ := mime.ParseMediaType(formResponse.Headers["Content-Type"])
+		var frameDoc *dom.Document
+		if responseType == "text/plain" {
+			frameDoc = makeTextDocument(text)
+		} else {
+			frameDoc, err = dom.ParseBounded(text, dom.ParseLimits{
+				Nodes: engine.MaxDocumentNodes, Depth: engine.MaxDocumentDepth,
+				Attributes: engine.MaxAttributes, AttributeBytes: engine.MaxAttributeBytes,
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+		if strings.EqualFold(encoding, "utf-8") {
+			encoding = "UTF-8"
+		} else if strings.HasPrefix(strings.ToLower(encoding), "iso-8859-") {
+			encoding = strings.ToUpper(encoding)
+		}
+		frameDoc.CharacterSet = encoding
+		if formResponse.Headers != nil {
+			frameDoc.ContentLanguage = formResponse.Headers["Content-Language"]
+		}
+		return frameDoc, nil
+	}
 	// @font-face resources use the same client. The fetcher is the same shape
 	// as the image fetcher, plus the response headers the engine's font CORS
 	// check reads; the engine resolves src URLs before calling.
@@ -394,17 +505,43 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if client != nil && cookiesAllowed {
 		cookieStore = client.Jar()
 	}
+	var clipboardPermissionState func(documentURL, name string) string
+	if permsMgr != nil {
+		clipboardPermissionState = func(documentURL, name string) string {
+			permissionOrigin := perms.NormalizeOrigin(documentURL)
+			var permission perms.Permission
+			switch name {
+			case "clipboard-read":
+				permission = perms.PermissionClipboardRead
+			case "clipboard-write":
+				permission = perms.PermissionClipboardWrite
+			default:
+				return "prompt"
+			}
+			switch permsMgr.State(permissionOrigin, permission) {
+			case perms.StateAllow:
+				return "granted"
+			case perms.StateBlock:
+				return "denied"
+			default:
+				return "prompt"
+			}
+		}
+	}
 	var rt *js.Runtime
 	if jsAllowed {
 		var rtErr error
 		rt, rtErr = js.New(js.Options{
-			URL:          resp.URL,
-			HTTPClient:   jsFetch,
-			Cookies:      cookieStore,
-			Storage:      storageReg,
-			SessionID:    sessionID,
-			DarkMode:     appMode.dark,
-			HighContrast: appMode.highContrast,
+			URL:                      resp.URL,
+			BroadcastHub:             broadcastHub,
+			HTTPClient:               jsFetch,
+			Cookies:                  cookieStore,
+			Storage:                  storageReg,
+			ClipboardProvider:        clipboardProvider,
+			ClipboardPermissionState: clipboardPermissionState,
+			SessionID:                sessionID,
+			DarkMode:                 appMode.dark,
+			HighContrast:             appMode.highContrast,
 		})
 		if rtErr != nil {
 			fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
@@ -422,6 +559,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithViewportH(float32(viewportH)),
 		engine.WithLinkedCSS(resp.URL, linker),
 		engine.WithScripts(resp.URL, scriptFetcher),
+		engine.WithIFrameDocumentLoader(iframeFetcher),
+		engine.WithIFrameFormSubmitter(iframeFormSubmitter),
 		engine.WithJS(rt),
 		engine.WithDarkMode(appMode.dark),
 		engine.WithHighContrast(appMode.highContrast),
@@ -443,7 +582,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if opt := mediaOption(mediaBackend, client, resp.URL); opt != nil {
 		sessOpts = append(sessOpts, opt)
 	}
-	sess, err := engine.NewSession(resp.Text(), nil, float32(viewportW), sessOpts...)
+	documentText, documentEncoding, _ := resp.TextWithEncoding()
+	sessOpts = append(sessOpts, engine.WithDocumentEncoding(documentEncoding))
+	sess, err := engine.NewSession(documentText, nil, float32(viewportW), sessOpts...)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: build session: %w", err)
 	}
@@ -466,6 +607,24 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	}
 	reportScriptErrors(os.Stderr, resp.URL, sess)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
+}
+
+func makeTextDocument(text string) *dom.Document {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	head := doc.NewElement("head")
+	body := doc.NewElement("body")
+	pre := doc.NewElement("pre")
+	pre.AppendChild(doc.NewText(text))
+	body.AppendChild(pre)
+	html.AppendChild(head)
+	html.AppendChild(body)
+	doc.Node.AppendChild(html)
+	doc.HTML, doc.Head, doc.Body = html, head, body
+	doc.ContentType = "text/plain"
+	return doc
 }
 
 // reportScriptErrors writes one line naming the document's uncaught script

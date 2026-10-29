@@ -25,8 +25,23 @@ func (c *Clipboard) Read() string {
 	return C.GoString(cs)
 }
 
-func (c *Clipboard) Write(s string) {
-	cs := C.CString(s)
+func (c *Clipboard) ReadHTML() string {
+	cs := C.GoosieClipboardReadHTML()
+	if cs == nil {
+		return ""
+	}
 	defer C.free(unsafe.Pointer(cs))
-	C.GoosieClipboardWrite(cs)
+	return C.GoString(cs)
+}
+
+func (c *Clipboard) Write(s string) {
+	c.WriteRich(s, "")
+}
+
+func (c *Clipboard) WriteRich(text, html string) {
+	textValue := C.CString(text)
+	defer C.free(unsafe.Pointer(textValue))
+	htmlValue := C.CString(html)
+	defer C.free(unsafe.Pointer(htmlValue))
+	C.GoosieClipboardWriteRich(textValue, htmlValue)
 }

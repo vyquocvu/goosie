@@ -191,6 +191,9 @@ func ParseColorWithScheme(s, colorScheme string) (Color, bool) {
 	}
 	s = strings.TrimSpace(s)
 	lower := strings.ToLower(s)
+	if system, ok := parseSystemColor(lower, colorScheme); ok {
+		return system, true
+	}
 
 	if named, ok := namedColors[lower]; ok {
 		return named, true
@@ -258,6 +261,66 @@ func ParseColorWithScheme(s, colorScheme string) (Color, bool) {
 	return Color{}, false
 }
 
+// parseSystemColor supplies the browser's default light and dark system-color
+// palette. Platform-backed UI themes may replace these values at the browser
+// boundary; CSS color consumers still need a deterministic UA palette when no
+// native theme provider is available.
+func parseSystemColor(name, colorScheme string) (Color, bool) {
+	dark := strings.EqualFold(colorScheme, "dark")
+	switch name {
+	case "accentcolor", "highlight", "selecteditem":
+		if dark {
+			return Color{R: 96, G: 205, B: 255, A: 255}, true
+		}
+		return Color{R: 0, G: 103, B: 192, A: 255}, true
+	case "accentcolortext", "highlighttext", "selecteditemtext", "buttontext", "canvastext", "fieldtext", "menutext", "windowtext", "infotext":
+		if dark {
+			return Color{R: 255, G: 255, B: 255, A: 255}, true
+		}
+		return Color{A: 255}, true
+	case "activeborder", "buttonborder", "inactiveborder", "windowframe", "threedarkshadow", "threelightshadow", "threedshadow", "buttonshadow":
+		if dark {
+			return Color{R: 118, G: 118, B: 118, A: 255}, true
+		}
+		return Color{R: 118, G: 118, B: 118, A: 255}, true
+	case "buttonface", "threedface", "threedhighlight":
+		if dark {
+			return Color{R: 59, G: 59, B: 59, A: 255}, true
+		}
+		return Color{R: 240, G: 240, B: 240, A: 255}, true
+	case "canvas", "field", "menu", "window", "infobackground", "background", "appworkspace", "scrollbar":
+		if dark {
+			return Color{R: 28, G: 28, B: 28, A: 255}, true
+		}
+		return Color{R: 255, G: 255, B: 255, A: 255}, true
+	case "graytext", "inactivecaptiontext":
+		if dark {
+			return Color{R: 153, G: 153, B: 153, A: 255}, true
+		}
+		return Color{R: 109, G: 109, B: 109, A: 255}, true
+	case "linktext":
+		return Color{R: 0, G: 0, B: 238, A: 255}, true
+	case "activetext":
+		return Color{R: 238, G: 0, B: 0, A: 255}, true
+	case "mark":
+		return Color{R: 255, G: 255, B: 0, A: 255}, true
+	case "marktext":
+		return Color{A: 255}, true
+	case "activecaption", "captiontext":
+		if dark {
+			return Color{R: 255, G: 255, B: 255, A: 255}, true
+		}
+		return Color{A: 255}, true
+	case "inactivecaption":
+		if dark {
+			return Color{R: 59, G: 59, B: 59, A: 255}, true
+		}
+		return Color{R: 240, G: 240, B: 240, A: 255}, true
+	default:
+		return Color{}, false
+	}
+}
+
 // colorFunctionArgs returns the argument list of a color function named by any
 // of the given prefixes. rgb()/hsl() take an alpha argument in CSS Color 4, so
 // rgba()/hsla() are aliases rather than separate syntaxes.
@@ -318,8 +381,17 @@ func parseHSLLike(body string) (Color, bool) {
 	if !ok {
 		return Color{}, false
 	}
-	r, g, b := hslToRGB(parseHueAngle(vals[0]), parsePercent(vals[1]), parsePercent(vals[2]))
+	r, g, b := hslToRGB(parseHueAngle(vals[0]), parseHSLPercent(vals[1]), parseHSLPercent(vals[2]))
 	return Color{R: r, G: g, B: b, A: alphaComponent(alpha, hasAlpha)}, true
+}
+
+func parseHSLPercent(value string) float64 {
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(value, "%") {
+		value = strings.TrimSpace(strings.TrimSuffix(value, "%"))
+	}
+	percentage := parseFloat(value) / 100
+	return math.Max(0, math.Min(1, percentage))
 }
 
 // parseHueAngle accepts a bare number, which CSS Color 4 reads as degrees, as

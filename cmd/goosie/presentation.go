@@ -304,8 +304,19 @@ func shiftAx(nodes []ax.Node, dx, dy float32) []ax.Node {
 // docPoint converts a content-area point to document coordinates through the
 // active zoom and scroll offset.
 func (f *framePath) docPoint(contentX, contentY int32) (float32, float32) {
-	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
-	vp := f.sched.Viewport()
-	return float32(contentX)/effectiveDPR + float32(vp.Offset.X)/effectiveDPR,
-		float32(contentY)/effectiveDPR + float32(vp.Offset.Y)/effectiveDPR
+	dpr := float32(f.config.dpr)
+	if dpr <= 0 {
+		dpr = 1
+	}
+	zoom := float32(f.zoom)
+	if zoom <= 0 {
+		zoom = 1
+	}
+	effectiveDPR := dpr * zoom
+	var offset frame.Point
+	if f.sched != nil {
+		offset = f.sched.Viewport().Offset
+	}
+	return float32(contentX+offset.X) / effectiveDPR,
+		float32(contentY+offset.Y) / effectiveDPR
 }

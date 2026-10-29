@@ -29,7 +29,7 @@ func TestUnicodeInsertion(t *testing.T) {
 			t.Fatalf("Edit(%q) declined", r)
 		}
 	}
-	if got := s.Focused().GetAttribute("value"); got != "é中😀" {
+	if got := s.Focused().InputControlValue(); got != "é中😀" {
 		t.Fatalf("value = %q, want %q", got, "é中😀")
 	}
 }
@@ -39,7 +39,7 @@ func TestUnicodeBackspaceWholeRune(t *testing.T) {
 	if !s.Edit(engine.EditBackspace, 0) || !s.Edit(engine.EditBackspace, 0) {
 		t.Fatal("backspace declined")
 	}
-	if got := s.Focused().GetAttribute("value"); got != "" {
+	if got := s.Focused().InputControlValue(); got != "" {
 		t.Fatalf("value = %q, want empty; backspace must delete whole runes", got)
 	}
 }
@@ -51,7 +51,7 @@ func TestUnicodeCaretByRune(t *testing.T) {
 	}
 	s.Edit(engine.EditRight, 0)
 	s.Edit(engine.EditRune, 'x')
-	if got := s.Focused().GetAttribute("value"); got != "ax中b" {
+	if got := s.Focused().InputControlValue(); got != "ax中b" {
 		t.Fatalf("value = %q, want %q", got, "ax中b")
 	}
 }

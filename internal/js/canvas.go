@@ -1,6 +1,7 @@
 package js
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,99 @@ type canvasContext2D struct {
 	miterLimit               float64
 	ops                      []canvasDrawOp
 	nodeID                   int // DOM node ID of the canvas element, 0 if unbound
+	// bitmap holds the most recently rendered pixel data for this canvas.
+	// The engine writes it via SetCanvasBitmap after replaying ops; getImageData
+	// reads from it to return actual pixel values instead of zeros.
+	bitmap  []byte
+	bitmapW int
+	bitmapH int
+}
+
+const maxImageDataBytes = 64 << 20
+
+func (r *Runtime) setupImageData() {
+	prototype := r.vm.NewObject()
+	constructor := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+		if len(call.Arguments) == 0 {
+			panic(r.vm.NewTypeError("Failed to construct 'ImageData': 1 argument required"))
+		}
+		clampedArrayCtor, hasClampedArrayCtor := r.vm.Get("Uint8ClampedArray").(*goja.Object)
+		if source, ok := call.Arguments[0].(*goja.Object); ok && hasClampedArrayCtor && r.vm.InstanceOf(source, clampedArrayCtor) {
+			if len(call.Arguments) < 2 {
+				panic(r.vm.NewTypeError("Failed to construct 'ImageData': width is required"))
+			}
+			width := int(call.Arguments[1].ToInteger())
+			if width <= 0 {
+				panic(r.domError("IndexSizeError", "ImageData width must be positive"))
+			}
+			length := int(source.Get("length").ToInteger())
+			if length <= 0 || length%(width*4) != 0 {
+				panic(r.domError("IndexSizeError", "ImageData data length does not match its dimensions"))
+			}
+			height := length / (width * 4)
+			if len(call.Arguments) > 2 && !goja.IsUndefined(call.Arguments[2]) && int(call.Arguments[2].ToInteger()) != height {
+				panic(r.domError("IndexSizeError", "ImageData data length does not match its dimensions"))
+			}
+			return r.newImageData(width, height, source)
+		}
+		width := int(call.Arguments[0].ToInteger())
+		height := 1
+		if len(call.Arguments) > 1 && !goja.IsUndefined(call.Arguments[1]) {
+			height = int(call.Arguments[1].ToInteger())
+		}
+		if width <= 0 || height <= 0 {
+			panic(r.domError("IndexSizeError", "ImageData dimensions must be positive"))
+		}
+		if width > math.MaxInt/4 || height > maxImageDataBytes/(width*4) {
+			panic(r.vm.NewTypeError("ImageData dimensions exceed the implementation limit"))
+		}
+		data := r.newUint8ClampedArray(width * height * 4)
+		return r.newImageData(width, height, data)
+	}).(*goja.Object)
+	_ = constructor.Set("prototype", prototype)
+	_ = prototype.Set("constructor", constructor)
+	r.defineInterfaceToStringTag("ImageData", prototype)
+	r.imageDataProto = prototype
+	_ = r.vm.Set("ImageData", constructor)
+	if window, ok := r.vm.Get("window").(*goja.Object); ok {
+		_ = window.Set("ImageData", constructor)
+	}
+}
+
+func (r *Runtime) newUint8ClampedArray(length int) *goja.Object {
+	if length < 0 || length > maxImageDataBytes {
+		panic(r.vm.NewTypeError("ImageData data exceeds the implementation limit"))
+	}
+	constructor, ok := goja.AssertConstructor(r.vm.Get("Uint8ClampedArray"))
+	if !ok {
+		panic(r.vm.NewTypeError("Uint8ClampedArray is unavailable"))
+	}
+	array, err := constructor(nil, r.vm.ToValue(length))
+	if err != nil {
+		panic(err)
+	}
+	return array
+}
+
+func (r *Runtime) newImageData(width, height int, data *goja.Object) *goja.Object {
+	if width <= 0 || height <= 0 || width > math.MaxInt/4 || height > maxImageDataBytes/(width*4) {
+		panic(r.domError("IndexSizeError", "ImageData dimensions are invalid or exceed the implementation limit"))
+	}
+	if data == nil {
+		data = r.newUint8ClampedArray(width * height * 4)
+	}
+	obj := r.vm.NewObject()
+	if r.imageDataProto != nil {
+		_ = obj.SetPrototype(r.imageDataProto)
+	}
+	_ = obj.DefineDataProperty("width", r.vm.ToValue(width), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+	_ = obj.DefineDataProperty("height", r.vm.ToValue(height), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+	_ = obj.DefineDataProperty("data", data, goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+	if r.imageDataObjects == nil {
+		r.imageDataObjects = make(map[*goja.Object]struct{})
+	}
+	r.imageDataObjects[obj] = struct{}{}
+	return obj
 }
 
 // CanvasOp is one recorded canvas drawing operation, exposed to the engine
@@ -129,6 +223,28 @@ func (r *Runtime) BindCanvasContext(nodeID int, ctx *canvasContext2D) {
 	}
 	ctx.nodeID = nodeID
 	r.canvasContexts[nodeID] = ctx
+}
+
+// SetCanvasBitmap stores rendered pixel data on the canvas context bound to
+// nodeID. The engine calls this after replaying canvas ops into a bitmap so
+// that getImageData can read actual pixel values. The rgba slice is copied;
+// the caller retains ownership of the original.
+func (r *Runtime) SetCanvasBitmap(nodeID int, rgba []byte, w, h int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.canvasContexts == nil {
+		return
+	}
+	ctx, ok := r.canvasContexts[nodeID]
+	if !ok || ctx == nil {
+		return
+	}
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.bitmap = make([]byte, len(rgba))
+	copy(ctx.bitmap, rgba)
+	ctx.bitmapW = w
+	ctx.bitmapH = h
 }
 
 // jsGetContext implements getContext(contextType) on DOM elements. For canvas
@@ -751,12 +867,7 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		if h <= 0 {
 			h = 1
 		}
-		imgData := r.vm.NewObject()
-		_ = imgData.Set("width", w)
-		_ = imgData.Set("height", h)
-		data := make([]int, w*h*4)
-		_ = imgData.Set("data", data)
-		return imgData
+		return r.newImageData(w, h, nil)
 	})
 
 	_ = obj.Set("getImageData", func(call goja.FunctionCall) goja.Value {
@@ -768,13 +879,52 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		if h <= 0 {
 			h = 1
 		}
-		imgData := r.vm.NewObject()
-		_ = imgData.Set("width", w)
-		_ = imgData.Set("height", h)
 		data := make([]int, w*h*4)
-		_ = imgData.Set("data", data)
-		_ = imgData.Set("x", x)
-		_ = imgData.Set("y", y)
+
+		// Read from the rendered bitmap if available.
+		ctx.mu.Lock()
+		bm, bmW, bmH := ctx.bitmap, ctx.bitmapW, ctx.bitmapH
+		ctx.mu.Unlock()
+
+		if bm != nil && bmW > 0 && bmH > 0 {
+			for py := 0; py < h; py++ {
+				srcY := y + py
+				if srcY < 0 || srcY >= bmH {
+					continue
+				}
+				for px := 0; px < w; px++ {
+					srcX := x + px
+					if srcX < 0 || srcX >= bmW {
+						continue
+					}
+					offset := (srcY*bmW + srcX) * 4
+					if offset+3 >= len(bm) {
+						continue
+					}
+					// Bitmap stores premultiplied RGBA; unpremultiply for getImageData.
+					a := int(bm[offset+3])
+					red := int(bm[offset])
+					green := int(bm[offset+1])
+					blue := int(bm[offset+2])
+					if a > 0 && a < 255 {
+						red = red * 255 / a
+						green = green * 255 / a
+						blue = blue * 255 / a
+					}
+					dstIdx := (py*w + px) * 4
+					data[dstIdx] = red
+					data[dstIdx+1] = green
+					data[dstIdx+2] = blue
+					data[dstIdx+3] = a
+				}
+			}
+		}
+
+		imgData := r.newImageData(w, h, nil)
+		pixels := imgData.Get("data").ToObject(r.vm)
+		for index, value := range data {
+			_ = pixels.Set(strconv.Itoa(index), value)
+		}
 		return imgData
 	})
 
@@ -788,6 +938,7 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 
 // setupCanvas installs the Canvas 2D API.
 func (r *Runtime) setupCanvas() {
+	r.setupImageData()
 	constructor := func(call goja.ConstructorCall) *goja.Object {
 		width := 300
 		height := 150
@@ -1192,24 +1343,63 @@ func (r *Runtime) setupCanvas() {
 			if len(call.Arguments) >= 2 {
 				h = int(call.Arguments[1].ToInteger())
 			}
-			imgData := r.vm.NewObject()
-			_ = imgData.Set("width", w)
-			_ = imgData.Set("height", h)
-			data := make([]int, w*h*4)
-			_ = imgData.Set("data", data)
-			return imgData
+			return r.newImageData(w, h, nil)
 		})
 
 		_ = obj.Set("getImageData", func(call goja.FunctionCall) goja.Value {
 			args := parseIntArgs(call, 0, 0, 0, 0)
 			x, y, w, h := args[0], args[1], args[2], args[3]
-			imgData := r.vm.NewObject()
-			_ = imgData.Set("width", w)
-			_ = imgData.Set("height", h)
+			if w <= 0 {
+				w = 1
+			}
+			if h <= 0 {
+				h = 1
+			}
 			data := make([]int, w*h*4)
-			_ = imgData.Set("data", data)
-			_ = imgData.Set("x", x)
-			_ = imgData.Set("y", y)
+
+			// Read from the rendered bitmap if available.
+			ctx.mu.Lock()
+			bm, bmW, bmH := ctx.bitmap, ctx.bitmapW, ctx.bitmapH
+			ctx.mu.Unlock()
+
+			if bm != nil && bmW > 0 && bmH > 0 {
+				for py := 0; py < h; py++ {
+					srcY := y + py
+					if srcY < 0 || srcY >= bmH {
+						continue
+					}
+					for px := 0; px < w; px++ {
+						srcX := x + px
+						if srcX < 0 || srcX >= bmW {
+							continue
+						}
+						offset := (srcY*bmW + srcX) * 4
+						if offset+3 >= len(bm) {
+							continue
+						}
+						a := int(bm[offset+3])
+						red := int(bm[offset])
+						green := int(bm[offset+1])
+						blue := int(bm[offset+2])
+						if a > 0 && a < 255 {
+							red = red * 255 / a
+							green = green * 255 / a
+							blue = blue * 255 / a
+						}
+						dstIdx := (py*w + px) * 4
+						data[dstIdx] = red
+						data[dstIdx+1] = green
+						data[dstIdx+2] = blue
+						data[dstIdx+3] = a
+					}
+				}
+			}
+
+			imgData := r.newImageData(w, h, nil)
+			pixels := imgData.Get("data").ToObject(r.vm)
+			for index, value := range data {
+				_ = pixels.Set(strconv.Itoa(index), value)
+			}
 			return imgData
 		})
 

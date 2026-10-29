@@ -46,6 +46,12 @@ func (p *CSPPolicy) AllowsScript(src string, documentURL string) bool {
 	return p.allows("script-src", src, documentURL)
 }
 
+// AllowsScriptURL reports whether the runtime's document policy permits an
+// external script URL. Hosts use it when admitting dynamically inserted tags.
+func (r *Runtime) AllowsScriptURL(src, documentURL string) bool {
+	return r != nil && r.opts.CSP.AllowsScript(src, documentURL)
+}
+
 // AllowsScriptWithNonce returns true if the script is allowed by source or by nonce.
 func (p *CSPPolicy) AllowsScriptWithNonce(src, nonce, documentURL string) bool {
 	if p == nil {

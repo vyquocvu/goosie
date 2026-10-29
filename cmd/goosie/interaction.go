@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
@@ -25,15 +26,21 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 		return false
 	}
 	dx, dy := f.docPoint(contentX, contentY)
+	if tab.Session().BeginRangePointerDragAt(dx, dy) {
+		f.setWindowIME(false)
+		f.reflowAfterControlEdit(tab)
+		f.repaintTab(tab, frame.Rect{})
+		return true
+	}
 
 	// Check if click hit an activatable control (checkbox, radio, submit button, reset button)
 	// The click is a trusted gesture, and marking it as one around the dispatch is
 	// what lets a page's own click handler start playback: the engine refuses a
 	// play() that arrives from a timer or a synthetic event, and only the host can
 	// tell the difference.
-	tab.Session().SetMediaActivation(true)
+	tab.Session().SetUserActivation(true)
 	activated := tab.Session().ClickAt(dx, dy)
-	tab.Session().SetMediaActivation(false)
+	tab.Session().SetUserActivation(false)
 	if activated {
 		if sub, ok := tab.Session().PopSubmittedForm(); ok {
 			f.handleFormSubmission(tab, sub)
@@ -69,6 +76,122 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	}
 	f.repaintTab(tab, frame.Rect{})
 	return true
+}
+
+type contentDragGesture struct {
+	source       *dom.Node
+	tab          *tabs.Tab
+	session      *engine.Session
+	startX       int32
+	startY       int32
+	started      bool
+	startAttempt bool
+}
+
+// pointerDrag routes a content-area pointer gesture into the engine's HTML
+// drag-and-drop state machine. A gesture becomes a drag only after five CSS
+// pixels of movement; an un-dragged gesture on the original element falls
+// back to the normal click path on release.
+func (f *framePath) pointerDrag(action surface.PointerAction, contentX, contentY int32) bool {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		f.contentDrag = nil
+		return false
+	}
+	sess := tab.Session()
+	if g := f.contentDrag; g != nil && action != surface.PointerPress {
+		tab, sess = g.tab, g.session
+		if tab == nil || sess == nil {
+			f.contentDrag = nil
+			return false
+		}
+	}
+	switch action {
+	case surface.PointerPress:
+		f.contentDrag = nil
+		dx, dy := f.docPoint(contentX, contentY)
+		source := sess.DraggableElementAt(dx, dy)
+		if source == nil {
+			return false
+		}
+		f.contentDrag = &contentDragGesture{source: source, tab: tab, session: sess, startX: contentX, startY: contentY}
+		return true
+	case surface.PointerMotion:
+		g := f.contentDrag
+		if g == nil {
+			return false
+		}
+		dx := float64(contentX - g.startX)
+		dy := float64(contentY - g.startY)
+		if !g.started && dx*dx+dy*dy < 25 {
+			return true
+		}
+		if !g.started && !g.startAttempt {
+			g.startAttempt = true
+			startX, startY := f.docPoint(g.startX, g.startY)
+			if sess.DraggableElementAt(startX, startY) == g.source {
+				sess.SetUserActivation(true)
+				g.started = sess.StartDrag(startX, startY)
+				sess.SetUserActivation(false)
+			}
+			if g.started {
+				f.repaintDrag(tab)
+			}
+		}
+		if g.started {
+			docX, docY := f.docPoint(contentX, contentY)
+			sess.DragTo(docX, docY)
+			f.repaintDrag(tab)
+		}
+		return true
+	case surface.PointerRelease:
+		g := f.contentDrag
+		if g == nil {
+			return false
+		}
+		f.contentDrag = nil
+		if g.started {
+			docX, docY := f.docPoint(contentX, contentY)
+			sess.EndDrag(docX, docY)
+			f.repaintDrag(tab)
+			return true
+		}
+		releaseX, releaseY := f.docPoint(contentX, contentY)
+		if sess.DraggableElementAt(releaseX, releaseY) == g.source {
+			if href := f.hitTestLink(g.startX, g.startY); href != "" {
+				f.handleLinkClick(href)
+			} else {
+				f.focusClick(g.startX, g.startY)
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// cancelPointerDrag implements Escape cancellation for an active drag. A
+// merely pending pointer gesture is discarded without synthesizing a click.
+func (f *framePath) cancelPointerDrag() bool {
+	g := f.contentDrag
+	if g == nil {
+		return false
+	}
+	f.contentDrag = nil
+	if !g.started {
+		return true
+	}
+	if g.session == nil || g.tab == nil {
+		return true
+	}
+	g.session.CancelDrag()
+	f.repaintDrag(g.tab)
+	return true
+}
+
+func (f *framePath) repaintDrag(tab *tabs.Tab) {
+	if f.sched != nil && tab != nil {
+		f.repaintTab(tab, frame.Rect{})
+	}
 }
 
 // hoverContent updates page hover state when the pointer changes its topmost
@@ -136,9 +259,10 @@ func (f *framePath) setWindowIME(on bool) {
 }
 
 // imeEvent routes a platform composition event to the active tab's session. A
-// marked update repaints the preview; a commit reflows the value. Both are
-// consumed whether or not the session was waiting, because the platform input
-// context is only ever on for the active tab's control.
+// marked update synchronizes the active composition passage and reflows text
+// controls as needed; a commit replaces it with final text. Both are consumed
+// whether or not the session was waiting, because the platform input context
+// is only ever on for the active tab's control.
 func (f *framePath) imeEvent(ev surface.Event) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -147,6 +271,7 @@ func (f *framePath) imeEvent(ev surface.Event) bool {
 	switch ev.IME {
 	case surface.IMEMarked:
 		if tab.Session().SetMarked(ev.Text) {
+			f.reflowAfterControlEdit(tab)
 			f.repaintTab(tab, frame.Rect{})
 		}
 		return true
@@ -182,10 +307,15 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 		}
 		return true
 	case surface.PointerMotion:
+		dx, dy := f.docPoint(contentX, contentY)
+		if tab.Session().MoveRangePointerDragAt(dx, dy) {
+			f.reflowAfterControlEdit(tab)
+			f.repaintTab(tab, frame.Rect{})
+			return true
+		}
 		if !f.selDrag {
 			return false
 		}
-		dx, dy := f.docPoint(contentX, contentY)
 		oldR, oldOK := tab.Session().SelectionBounds()
 		if !tab.Session().SelectTo(dx, dy) {
 			return true
@@ -193,6 +323,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 		f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
 		return true
 	case surface.PointerRelease:
+		dx, dy := f.docPoint(contentX, contentY)
+		if tab.Session().EndRangePointerDragAt(dx, dy) {
+			f.repaintTab(tab, frame.Rect{})
+			return true
+		}
 		wasDragging := f.selDrag
 		f.selDrag = false
 		return wasDragging
@@ -266,9 +401,9 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			if space {
 				keyName = " "
 			}
-			sess.SetMediaActivation(true)
+			sess.SetUserActivation(true)
 			activated := sess.PressKey(keyName, mods&surface.ModShift != 0, false, mods&surface.ModOption != 0, false)
-			sess.SetMediaActivation(false)
+			sess.SetUserActivation(false)
 			if activated && enter && focused.Data == "a" {
 				if href := focused.GetAttribute("href"); href != "" {
 					f.handleLinkClick(href)
@@ -299,9 +434,12 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			return true
 		}
 	} else if !cmd && (key == keyPageUp || key == keyPageDown) {
-		// Page keys must never be treated as printable private-use characters by
-		// an editable control. Textarea-specific paging is not implemented yet.
-		return true
+		focused := tab.Session().Focused()
+		if focused == nil || focused.Data != "input" || !strings.EqualFold(focused.GetAttribute("type"), "range") {
+			// Page keys must never be treated as printable private-use characters
+			// by text controls. Range controls consume them as larger value steps.
+			return true
+		}
 	}
 
 	// Bare Tab drives the full key-event path (keydown → focus-move → keyup).
@@ -343,8 +481,12 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			if tab.Session().FocusedEditable() {
 				if cb := platform.NewClipboard(); cb != nil {
 					clipText := cb.Read()
-					if clipText != "" {
-						if tab.Session().InsertText(clipText) {
+					clipHTML := ""
+					if rich, ok := cb.(interface{ ReadHTML() string }); ok {
+						clipHTML = rich.ReadHTML()
+					}
+					if clipText != "" || clipHTML != "" {
+						if tab.Session().PasteData(clipText, clipHTML) {
 							f.reflowAfterControlEdit(tab)
 							f.repaintTab(tab, frame.Rect{})
 							return true
@@ -365,13 +507,31 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 				}
 			}
 		case 'c', 'C':
-			if tab.Session().FocusedEditable() {
-				txt := tab.Session().FocusedText()
-				if txt != "" {
-					if cb := platform.NewClipboard(); cb != nil {
+			if cb := platform.NewClipboard(); cb != nil {
+				if txt, html := tab.Session().CopySelectionData(); txt != "" || html != "" {
+					if rich, ok := cb.(interface{ WriteRich(string, string) }); ok {
+						rich.WriteRich(txt, html)
+					} else {
 						cb.Write(txt)
-						return true
 					}
+					return true
+				}
+			}
+		case 'x', 'X':
+			if cb := platform.NewClipboard(); cb != nil {
+				if txt, html, changed := tab.Session().CutSelectionData(); txt != "" || html != "" || changed {
+					if txt != "" || html != "" {
+						if rich, ok := cb.(interface{ WriteRich(string, string) }); ok {
+							rich.WriteRich(txt, html)
+						} else {
+							cb.Write(txt)
+						}
+					}
+					if changed {
+						f.reflowAfterControlEdit(tab)
+					}
+					f.repaintTab(tab, frame.Rect{})
+					return true
 				}
 			}
 		}
@@ -392,8 +552,14 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		action = engine.EditHome
 	case key == 0xF705:
 		action = engine.EditEnd
+	case key == keyPageUp:
+		action = engine.EditPageUp
+	case key == keyPageDown:
+		action = engine.EditPageDown
 	case key == 0x7f || key == '\b':
 		action = engine.EditBackspace
+	case key == 0xF728:
+		action = engine.EditDelete
 	case key == '\r' || key == '\n':
 		action = engine.EditEnter
 	case key == 0x1b:
@@ -411,7 +577,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		return true
 	}
 
-	changed := tab.Session().Edit(action, key)
+	changed := tab.Session().EditWithShift(action, key, mods&surface.ModShift != 0)
 	if sub, ok := tab.Session().PopSubmittedForm(); ok {
 		f.handleFormSubmission(tab, sub)
 		return true

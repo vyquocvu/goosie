@@ -128,3 +128,114 @@ func TestAspectRatioLayoutResolution(t *testing.T) {
 		t.Errorf("square width = %v, want 100", squareObj.W)
 	}
 }
+
+// TestAspectRatioAcceptanceValues verifies the exact acceptance criteria:
+// aspect-ratio: 16/9 with width: 320px → height: 180px.
+func TestAspectRatioAcceptanceValues(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+<html>
+<head>
+<style>
+#wide {
+	width: 320px;
+	aspect-ratio: 16 / 9;
+}
+#square2 {
+	width: 100px;
+	aspect-ratio: 1 / 1;
+}
+</style>
+</head>
+<body>
+<div id="wide">Wide</div>
+<div id="square2">Square</div>
+</body>
+</html>`
+
+	sess, err := engine.NewSession(htmlStr, nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	arena := sess.Arena
+	doc := sess.Doc
+
+	wideNode := doc.ElementByID("wide")
+	if wideNode == nil {
+		t.Fatal("wide node not found")
+	}
+	wideID, ok := arena.ForNode(wideNode.ID)
+	if !ok {
+		t.Fatal("wide layout object not found")
+	}
+	wideObj := arena.Get(wideID)
+	if wideObj.W != 320 {
+		t.Errorf("wide width = %v, want 320", wideObj.W)
+	}
+	// 320 / (16/9) = 180
+	if wideObj.H != 180 {
+		t.Errorf("wide height = %v, want 180", wideObj.H)
+	}
+
+	sqNode := doc.ElementByID("square2")
+	if sqNode == nil {
+		t.Fatal("square2 node not found")
+	}
+	sqID, ok := arena.ForNode(sqNode.ID)
+	if !ok {
+		t.Fatal("square2 layout object not found")
+	}
+	sqObj := arena.Get(sqID)
+	if sqObj.W != 100 {
+		t.Errorf("square2 width = %v, want 100", sqObj.W)
+	}
+	// 100 / (1/1) = 100
+	if sqObj.H != 100 {
+		t.Errorf("square2 height = %v, want 100", sqObj.H)
+	}
+}
+
+// TestAspectRatioIgnoredWhenBothDimensionsSet verifies that when both width
+// and height are explicitly specified, aspect-ratio has no effect.
+func TestAspectRatioIgnoredWhenBothDimensionsSet(t *testing.T) {
+	htmlStr := `<!DOCTYPE html>
+<html>
+<head>
+<style>
+#box {
+	width: 200px;
+	height: 50px;
+	aspect-ratio: 1 / 1;
+}
+</style>
+</head>
+<body>
+<div id="box">Box</div>
+</body>
+</html>`
+
+	sess, err := engine.NewSession(htmlStr, nil, 800)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	arena := sess.Arena
+	doc := sess.Doc
+
+	boxNode := doc.ElementByID("box")
+	if boxNode == nil {
+		t.Fatal("box node not found")
+	}
+	boxID, ok := arena.ForNode(boxNode.ID)
+	if !ok {
+		t.Fatal("box layout object not found")
+	}
+	boxObj := arena.Get(boxID)
+	// Both width and height are explicit: aspect-ratio: 1/1 must NOT override.
+	if boxObj.W != 200 {
+		t.Errorf("box width = %v, want 200", boxObj.W)
+	}
+	if boxObj.H != 50 {
+		t.Errorf("box height = %v, want 50 (aspect-ratio should be ignored when both dims are set)", boxObj.H)
+	}
+}

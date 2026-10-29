@@ -53,7 +53,7 @@ func optionIDs(s *engine.Session) []string {
 
 func selectedID(s *engine.Session) string {
 	for _, id := range []string{"o1", "o2", "o3"} {
-		if n := s.Doc.ElementByID(id); n != nil && n.HasAttribute("selected") {
+		if n := s.Doc.ElementByID(id); n != nil && n.OptionSelected() {
 			return id
 		}
 	}
@@ -66,7 +66,7 @@ func selectedID(s *engine.Session) string {
 func selectedCount(s *engine.Session) int {
 	n := 0
 	for _, id := range []string{"o1", "o2", "o3"} {
-		if o := s.Doc.ElementByID(id); o != nil && o.HasAttribute("selected") {
+		if o := s.Doc.ElementByID(id); o != nil && o.OptionSelected() {
 			n++
 		}
 	}
@@ -96,8 +96,8 @@ func TestSelectArrowKeysMoveSelection(t *testing.T) {
 	if got := engine.SelectedOption(sel); got == nil || got.GetAttribute("id") != "o1" {
 		t.Fatalf("a select with no authored selected attribute reports %v, want o1: selectedIndex starts at 0", got)
 	}
-	if got := selectedCount(s); got != 0 {
-		t.Fatalf("%d options carry the selected attribute before any key, want 0", got)
+	if got := selectedCount(s); got != 1 {
+		t.Fatalf("%d options are currently selected before any key, want 1", got)
 	}
 	if !s.MoveSelect(engine.EditDown) {
 		t.Fatal("MoveSelect(EditDown) on a focused select returned false; the key was not consumed")
@@ -160,8 +160,8 @@ func TestSelectSkipsDisabledOptions(t *testing.T) {
 	if got := selectedID(s); got != "o3" {
 		t.Fatalf("EditDown with o2 disabled landed on %q, want o3: disabled options must be skipped", got)
 	}
-	if o := s.Doc.ElementByID("o2"); o != nil && o.HasAttribute("selected") {
-		t.Fatal("the disabled option carries the selected attribute")
+	if o := s.Doc.ElementByID("o2"); o != nil && o.OptionSelected() {
+		t.Fatal("the disabled option became selected")
 	}
 	if !s.MoveSelect(engine.EditUp) {
 		t.Fatal("MoveSelect(EditUp) returned false")
@@ -254,8 +254,8 @@ func TestSelectKeysIgnoreOtherActions(t *testing.T) {
 			t.Fatalf("MoveSelect(%v) returned true on a focused select; only up/down/home/end belong to it", a)
 		}
 	}
-	if got := selectedCount(s); got != 0 {
-		t.Fatalf("%d options carry selected after unrelated keys, want 0", got)
+	if got := selectedCount(s); got != 1 {
+		t.Fatalf("%d options remain selected after unrelated keys, want the default selection", got)
 	}
 }
 
@@ -276,8 +276,8 @@ func TestDisabledSelectDoesNotConsumeKeys(t *testing.T) {
 	if s.MoveSelect(engine.EditDown) {
 		t.Fatal("MoveSelect consumed a key with no select focused")
 	}
-	if got := selectedCount(s); got != 0 {
-		t.Fatalf("%d options carry selected, want 0", got)
+	if got := selectedCount(s); got != 1 {
+		t.Fatalf("%d options remain selected on a disabled select, want its default selection", got)
 	}
 }
 

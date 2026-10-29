@@ -148,8 +148,8 @@ func TestClearIntervalStopsRepetition(t *testing.T) {
 	}
 }
 
-// TestMultipleTimersCoexist verifies that several independent timers all
-// fire on the same Tick without interfering with each other.
+// TestMultipleTimersCoexist verifies that several independent ready timers
+// each run in their own event-loop turn without interfering with each other.
 func TestMultipleTimersCoexist(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -163,6 +163,8 @@ func TestMultipleTimersCoexist(t *testing.T) {
 	}
 
 	time.Sleep(5 * time.Millisecond)
+	r.Tick()
+	r.Tick()
 	r.Tick()
 
 	for _, tc := range []struct {
@@ -181,6 +183,37 @@ func TestMultipleTimersCoexist(t *testing.T) {
 		if v.Num != tc.want {
 			t.Errorf("%s = %v, want %v", tc.name, v.Num, tc.want)
 		}
+	}
+}
+
+func TestTickDefersNestedZeroDelayTimerToNextTurn(t *testing.T) {
+	r := newRuntime(t, js.Options{URL: "https://example.test/"})
+	if err := r.Run(`
+		var order = [];
+		setTimeout(function() {
+			order.push("first");
+			setTimeout(function() { order.push("nested"); }, 0);
+		}, 0);
+	`, "inline"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	r.Tick()
+	got, err := r.Evaluate(`order.join(",")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "first" {
+		t.Fatalf("after first event-loop turn order = %q, want first", got)
+	}
+	time.Sleep(5 * time.Millisecond)
+	r.Tick()
+	got, err = r.Evaluate(`order.join(",")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "first,nested" {
+		t.Fatalf("after second event-loop turn order = %q, want first,nested", got)
 	}
 }
 

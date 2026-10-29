@@ -12,6 +12,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
@@ -144,6 +145,168 @@ document.getElementById('btn').addEventListener('click', function(event) {
 	v, ok := rt.Global("__prevented")
 	if !ok || !v.Bool {
 		t.Error("preventDefault was not observed by JS listener")
+	}
+}
+
+func TestInteraction_RangePointerClickUpdatesValueAndDispatchesEvents(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><head><style>input { display:inline-block; width:280px; height:20px; }</style></head><body>
+<input id="range" type="range" min="0" max="100" step="20" value="20">
+<script>
+window.rangeEvents=[];
+var range=document.getElementById("range");
+range.addEventListener("click",function(e){rangeEvents.push("click:"+e.isTrusted)});
+range.addEventListener("input",function(e){rangeEvents.push("input:"+e.isTrusted)});
+range.addEventListener("change",function(e){rangeEvents.push("change:"+e.isTrusted)});
+</script></body></html>`)
+	if !clickCenter(t, sess, "range") {
+		t.Fatal("range input not found in arena")
+	}
+	if got, err := sess.EvaluateJS(`document.getElementById("range").value+"|"+rangeEvents.join(",")`); err != nil || got != "60|click:true,input:true,change:true" {
+		t.Fatalf("range after pointer click = %q, %v; want committed midpoint and trusted click/input/change", got, err)
+	}
+	if _, err := sess.EvaluateJS(`document.getElementById("range").addEventListener("click",function(e){e.preventDefault()})`); err != nil {
+		t.Fatalf("install click cancellation handler: %v", err)
+	}
+	var x, y float32
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node != nil && obj.Node.GetAttribute("id") == "range" {
+			_, y0, x1, y1 := obj.BorderRect()
+			x, y = x1-3, (y0+y1)/2
+			break
+		}
+	}
+	if !sess.ClickAt(x, y) {
+		t.Fatal("canceled range click should still be handled")
+	}
+	if got, err := sess.EvaluateJS(`document.getElementById("range").value`); err != nil || got != "60" {
+		t.Fatalf("prevented range click changed value to %q, %v; want 60", got, err)
+	}
+}
+
+func TestInteraction_RangePointerDragUpdatesDuringGesture(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><head><style>input { display:inline-block; width:280px; height:20px; }</style></head><body>
+<input id="range" type="range" min="0" max="100" step="20" value="20">
+<script>
+window.rangeEvents=[];
+var range=document.getElementById("range");
+range.addEventListener("input",function(e){rangeEvents.push("input:"+e.isTrusted+":"+range.value)});
+range.addEventListener("click",function(e){rangeEvents.push("click:"+e.isTrusted)});
+range.addEventListener("change",function(e){rangeEvents.push("change:"+e.isTrusted)});
+</script></body></html>`)
+	var left, right, y float32
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node != nil && obj.Node.GetAttribute("id") == "range" {
+			x0, y0, x1, y1 := obj.BorderRect()
+			left, right, y = x0+12, x1-12, (y0+y1)/2
+			break
+		}
+	}
+	if left == 0 || right <= left {
+		t.Fatal("range input not found in arena")
+	}
+	if !sess.BeginRangePointerDragAt(left, y) {
+		t.Fatal("range pointer press was not handled")
+	}
+	if !sess.MoveRangePointerDragAt(right, y) {
+		t.Fatal("range pointer movement was not handled")
+	}
+	if got := sess.Focused().InputControlValue(); got != "100" {
+		t.Fatalf("drag value before release = %q, want 100", got)
+	}
+	if !sess.EndRangePointerDragAt(right, y) {
+		t.Fatal("range pointer release was not handled")
+	}
+	if got, err := sess.EvaluateJS(`document.getElementById("range").value+"|"+rangeEvents.join(",")`); err != nil || got != "100|input:true:0,input:true:100,click:true,change:true" {
+		t.Fatalf("after range drag = %q, %v; want live trusted input events then click/change on release", got, err)
+	}
+}
+
+func TestTextareaLiveValueDefaultValueAndReset(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><body><form id="form"><textarea id="memo" name="memo">default</textarea></form></body></html>`)
+	if _, err := sess.EvaluateJS(`document.getElementById("memo").value="live\rvalue"`); err != nil {
+		t.Fatalf("set textarea value: %v", err)
+	}
+	textarea := findElement(sess.Doc.Body, "textarea")
+	if textarea == nil {
+		t.Fatal("textarea missing from document")
+	}
+	if got := textarea.InputControlValue(); got != "livevalue" {
+		t.Fatalf("live textarea value = %q, want livevalue", got)
+	}
+	if got := textarea.TextContent(); got != "default" {
+		t.Fatalf("textarea default text = %q, want default", got)
+	}
+	data := engine.CollectFormData(findElement(sess.Doc.Body, "form"), nil)
+	if len(data) != 1 || data[0].Name != "memo" || data[0].Value != "livevalue" {
+		t.Fatalf("textarea form data = %#v, want livevalue", data)
+	}
+	form := findElement(sess.Doc.Body, "form")
+	sess.ResetForm(form)
+	if got := textarea.InputControlValue(); got != "default" {
+		t.Fatalf("textarea value after reset = %q, want default", got)
+	}
+	if textarea.InputValueDirty {
+		t.Fatal("textarea dirty-value flag should clear on reset")
+	}
+}
+
+func TestTextareaLiveValuePaintsWithoutChangingDefaultText(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><body><textarea id="memo">default</textarea></body></html>`)
+	if _, err := sess.EvaluateJS(`document.getElementById("memo").value="live text"`); err != nil {
+		t.Fatalf("set textarea value: %v", err)
+	}
+	if err := sess.Reflow(800); err != nil {
+		t.Fatalf("Reflow: %v", err)
+	}
+	dl := sess.Paint(1).Build(1)
+	if got := string(textRunesIn(t, dl, frame.RGB(0, 0, 0))); got != "live text" {
+		t.Fatalf("painted textarea value = %q, want live text", got)
+	}
+	textarea := findElement(sess.Doc.Body, "textarea")
+	if got := textarea.TextContent(); got != "default" {
+		t.Fatalf("textarea default text = %q, want default", got)
+	}
+}
+
+func TestOutputResetRestoresDefaultValueOverrideThroughEngine(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><body><form id="f"><output id="result">initial</output></form></body></html>`)
+	if _, err := sess.EvaluateJS(`(function(){var f=document.getElementById("f"),o=document.getElementById("result");o.value="live";o.defaultValue="reset value";window.__resetEvent="";f.addEventListener("reset",function(e){window.__resetEvent=[e.isTrusted,e.cancelable,e.bubbles].join("|")})})()`); err != nil {
+		t.Fatalf("prepare output and reset listener: %v", err)
+	}
+	sess.ResetForm(sess.Doc.ElementByID("f"))
+	got, err := sess.EvaluateJS(`(function(){var o=document.getElementById("result");return [o.value,o.defaultValue,window.__resetEvent].join("|")})()`)
+	if err != nil {
+		t.Fatalf("read reset output state: %v", err)
+	}
+	if got != "reset value|reset value|true|true|false" {
+		t.Fatalf("output state after engine reset = %q", got)
+	}
+}
+
+func TestSelectResetRestoresOptionSelectednessThroughEngine(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><body><form id="f"><select id="s" name="choice"><option id="a" value="a" selected>A</option><option id="b" value="b">B</option></select></form></body></html>`)
+	if _, err := sess.EvaluateJS(`document.getElementById("b").selected=true`); err != nil {
+		t.Fatalf("select option: %v", err)
+	}
+	a, b := sess.Doc.ElementByID("a"), sess.Doc.ElementByID("b")
+	if a.OptionSelected() || !b.OptionSelected() || !a.HasAttribute("selected") || b.HasAttribute("selected") {
+		t.Fatalf("live/default selectedness before reset = %v|%v / %v|%v, want false|true / true|false", a.OptionSelected(), b.OptionSelected(), a.HasAttribute("selected"), b.HasAttribute("selected"))
+	}
+	sess.ResetForm(sess.Doc.ElementByID("f"))
+	if !a.OptionSelected() || b.OptionSelected() {
+		t.Fatalf("option selectedness after engine reset = %v|%v, want true|false", a.OptionSelected(), b.OptionSelected())
+	}
+}
+
+func TestRadioGroupResetPreservesExclusivityThroughEngine(t *testing.T) {
+	sess, _ := newJSSession(t, `<!doctype html><html><body><form id="f"><input id="a" type="radio" name="g" checked><input id="b" type="radio" name="g" checked></form></body></html>`)
+	a, b := sess.Doc.ElementByID("a"), sess.Doc.ElementByID("b")
+	if a == nil || b == nil {
+		t.Fatal("radio controls missing from document")
+	}
+	sess.ResetForm(sess.Doc.ElementByID("f"))
+	if engine.IsChecked(a) || !engine.IsChecked(b) {
+		t.Fatalf("radio states after engine reset = %v|%v, want false|true", engine.IsChecked(a), engine.IsChecked(b))
 	}
 }
 
@@ -626,10 +789,10 @@ func TestFormReset(t *testing.T) {
 	// Click checkbox to toggle off
 	clickCenter(t, sess, "chk")
 
-	if inpNode.GetAttribute("value") == "Initial" {
+	if inpNode.InputControlValue() == "Initial" {
 		t.Errorf("expected input value to be modified before reset")
 	}
-	if chkNode.HasAttribute("checked") {
+	if engine.IsChecked(chkNode) {
 		t.Errorf("expected checkbox to be unchecked before reset")
 	}
 
@@ -637,11 +800,11 @@ func TestFormReset(t *testing.T) {
 	sess.ResetForm(formNode)
 
 	// Inp should be restored to Initial
-	if inpNode.GetAttribute("value") != "Initial" {
-		t.Errorf("expected input to reset to 'Initial', got %q", inpNode.GetAttribute("value"))
+	if inpNode.InputControlValue() != "Initial" {
+		t.Errorf("expected input to reset to 'Initial', got %q", inpNode.InputControlValue())
 	}
 	// Chk should be restored to checked
-	if !chkNode.HasAttribute("checked") {
+	if !engine.IsChecked(chkNode) {
 		t.Errorf("expected checkbox to reset to checked")
 	}
 }

@@ -135,5 +135,16 @@ func (s *Session) decodeScriptImage(src string, done func(js.LoadedImage)) {
 		fail(errScriptImageDecode)
 		return
 	}
-	done(js.LoadedImage{Src: src, Width: b.Dx(), Height: b.Dy()})
+	w, h := b.Dx(), b.Dy()
+	// For a standalone SVG with a viewBox ratio but no absolute dimensions,
+	// HTML's default object sizing algorithm completes the ratio against the
+	// default 300x150 object size. The SVG raster viewport can instead reflect
+	// the viewBox units (for example 600x200), which are not intrinsic pixels.
+	if hasDims, hasRatio := imgdec.SVGIntrinsicKind(data); !hasDims && hasRatio {
+		if rw, rh, ok := imgdec.SVGRatio(data); ok && rw > 0 && rh > 0 {
+			scale := min(300/rw, 150/rh)
+			w, h = int(rw*scale+0.5), int(rh*scale+0.5)
+		}
+	}
+	done(js.LoadedImage{Src: src, Width: w, Height: h})
 }

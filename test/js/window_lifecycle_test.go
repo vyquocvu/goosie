@@ -125,11 +125,11 @@ func TestReadyStateGuardRunsHandlerAfterLoad(t *testing.T) {
 	}
 }
 
-// load is fired on the window with the window as its target, so a document
-// listener for "load" does not hear it - the same shape a browser has, and the
-// reason a page that only listens on document for load never fires.
+// The HTML load event is targeted at the Document and includes Window in its
+// event path even though it does not bubble. Both document and window listeners
+// observe it with Document as the target.
 // qc:BR-204
-func TestLoadEventFiresOnWindowOnly(t *testing.T) {
+func TestLoadEventTargetsDocumentAndReachesWindow(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
 	if err := rt.Run(`
 	var hits = [];
@@ -138,8 +138,118 @@ func TestLoadEventFiresOnWindowOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.FireDocumentLifecycle()
-	if got := evalString(t, rt, `hits.join(",")`); got != "window" {
-		t.Fatalf("load listeners = %q, want %q", got, "window")
+	if got := evalString(t, rt, `hits.join(",")`); got != "document,window" {
+		t.Fatalf("load listeners = %q, want %q", got, "document,window")
+	}
+}
+
+func TestDocumentLifecycleEventsExposeTrustedTargetsAndInterfaces(t *testing.T) {
+	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
+	if err := rt.Run(`
+	window.lifecycleResults = [];
+	document.addEventListener("DOMContentLoaded", function(e) {
+		lifecycleResults.push([e.type, e.target === document, e.isTrusted, e.bubbles, e.cancelable, Object.prototype.toString.call(e)].join("|"));
+	});
+	window.addEventListener("load", function(e) {
+		lifecycleResults.push([e.type, e.target === document, e.isTrusted, e.bubbles, e.cancelable, Object.prototype.toString.call(e)].join("|"));
+	});
+	window.addEventListener("pageshow", function(e) {
+		lifecycleResults.push([e.type, e.target === document, e.isTrusted, e.bubbles, e.cancelable, e.persisted, Object.prototype.toString.call(e)].join("|"));
+	});`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	rt.FireDocumentLifecycle()
+	want := `DOMContentLoaded|true|true|true|false|[object Event],load|true|true|false|false|[object Event],pageshow|true|true|true|true|false|[object PageTransitionEvent]`
+	if got := evalString(t, rt, `lifecycleResults.join(",")`); got != want {
+		t.Fatalf("lifecycle events = %q, want %q", got, want)
+	}
+}
+
+func TestWindowEventHandlerIDLAttribute(t *testing.T) {
+	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
+	if err := rt.Run(`
+var seen = [];
+window.addEventListener("load", function (e) {
+  seen.push("listener:" + (this === window) + ":" + (e.currentTarget === window));
+});
+window.onload = function (e) {
+  seen.push("handler:" + (this === window) + ":" + (e.currentTarget === window));
+};
+window.onload = window.onload;
+`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	rt.FireDocumentLifecycle()
+	if got, want := evalString(t, rt, `seen.join(",")`), "listener:true:true,handler:true:true"; got != want {
+		t.Fatalf("window load handlers = %q, want %q", got, want)
+	}
+}
+
+func TestGlobalEventHandlerIDLAttributesAndReactivationOrder(t *testing.T) {
+	rt := lifecycleRuntime(t, `<html><head></head><body><button id="target"></button></body></html>`)
+	if err := rt.Run(`
+var target = document.getElementById("target");
+var order = [];
+var firstHandler = function (event) {
+  order.push("handler:" + (this === target) + ":" + (event.currentTarget === target));
+};
+var svgTarget = document.createElementNS("http://www.w3.org/2000/svg", "g");
+var elementIDL = "onclick" in target && "onbeforeinput" in target && target.onclick === null;
+var documentIDL = "onclick" in document && "onvisibilitychange" in document && document.onclick === null;
+var windowIDL = "onclick" in window && "onpagehide" in window && window.onclick === null;
+var prototypeIDL = HTMLElement.prototype.hasOwnProperty("onclick") &&
+  SVGElement.prototype.hasOwnProperty("onclick") &&
+  Document.prototype.hasOwnProperty("onclick") &&
+  window.hasOwnProperty("onclick") && !Element.prototype.hasOwnProperty("onclick") &&
+  svgTarget instanceof SVGElement && svgTarget.onclick === null;
+target.addEventListener("click", function () { order.push("first"); });
+target.onclick = firstHandler;
+target.addEventListener("click", function () { order.push("second"); });
+target.onclick = null;
+target.addEventListener("click", function () { order.push("third"); });
+target.onclick = firstHandler;
+target.addEventListener("click", function () { order.push("fourth"); });
+var dispatchSucceeds = target.dispatchEvent(new Event("click", {bubbles: true, cancelable: true}));
+target.onclick = function () { return false; };
+var canceledByHandler = target.dispatchEvent(new Event("click", {cancelable: true}));`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"elementIDL", "documentIDL", "windowIDL", "prototypeIDL"} {
+		if got, ok := rt.Global(name); !ok || !got.Bool {
+			t.Errorf("%s = %v (present %v), want true", name, got.Bool, ok)
+		}
+	}
+	if err := rt.Run(`
+var windowOrder = [];
+window.addEventListener("pageshow", function () { windowOrder.push("first"); });
+window.onpageshow = function () { windowOrder.push("handler"); };
+window.addEventListener("pageshow", function () { windowOrder.push("second"); });
+window.onpageshow = null;
+window.addEventListener("pageshow", function () { windowOrder.push("third"); });
+window.onpageshow = function () { windowOrder.push("handler"); };
+window.addEventListener("pageshow", function () { windowOrder.push("fourth"); });
+window.oncontextmenu = function () { return false; };
+var windowDispatchSucceeds = window.dispatchEvent(new Event("contextmenu", {cancelable: true}));
+window.onerror = function () { return true; };
+var errorDispatchSucceeds = window.dispatchEvent(new Event("error", {cancelable: true}));`, "window-handler-order"); err != nil {
+		t.Fatal(err)
+	}
+	rt.FireDocumentLifecycle()
+	if got, want := evalString(t, rt, `windowOrder.join(",")`), "first,second,third,handler,fourth"; got != want {
+		t.Fatalf("window handler reactivation order = %q, want %q", got, want)
+	}
+	for name, want := range map[string]bool{"windowDispatchSucceeds": false, "errorDispatchSucceeds": false} {
+		if got, ok := rt.Global(name); !ok || got.Bool != want {
+			t.Errorf("%s = %v (present %v), want %v", name, got.Bool, ok, want)
+		}
+	}
+	if got := evalString(t, rt, `order.join(",")`); got != "first,second,third,handler:true:true,fourth,first,second,third,fourth" {
+		t.Fatalf("event handler order = %q, want first,second,third,handler:true:true,fourth,first,second,third,fourth", got)
+	}
+	for name, want := range map[string]bool{"dispatchSucceeds": true, "canceledByHandler": false} {
+		if got, ok := rt.Global(name); !ok || got.Bool != want {
+			t.Errorf("%s = %v (present %v), want %v", name, got.Bool, ok, want)
+		}
 	}
 }
 

@@ -85,10 +85,17 @@ func (c *Checkout) download(destDir string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("wpt: download %s: HTTP %d", url, resp.StatusCode)
 	}
+	if err := extractWPTTarball(resp.Body, destDir); err != nil {
+		return fmt.Errorf("wpt: extract %s: %w", url, err)
+	}
+	fmt.Fprintf(os.Stderr, "wpt: extracted to %s\n", destDir)
+	return nil
+}
 
-	gz, err := gzip.NewReader(resp.Body)
+func extractWPTTarball(source io.Reader, destDir string) error {
+	gz, err := gzip.NewReader(source)
 	if err != nil {
-		return fmt.Errorf("wpt: gunzip: %w", err)
+		return fmt.Errorf("gunzip: %w", err)
 	}
 	defer gz.Close()
 
@@ -96,6 +103,7 @@ func (c *Checkout) download(destDir string) error {
 	// GitHub tarballs have a top-level directory like "wpt-<commit>/".
 	// We strip it so files land directly in destDir.
 	var prefix string
+	extractedFiles := 0
 
 	for {
 		header, err := tr.Next()
@@ -103,15 +111,23 @@ func (c *Checkout) download(destDir string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("wpt: tar read: %w", err)
+			return fmt.Errorf("tar read: %w", err)
 		}
 
-		// Determine the prefix from the first entry.
+		// A GitHub archive can start with a PAX global header whose name has
+		// no path separator. It is metadata, not the archive's root prefix.
+		if header.Typeflag == tar.TypeXGlobalHeader || header.Typeflag == tar.TypeXHeader {
+			continue
+		}
+
+		// Determine the prefix from the first path-bearing entry rather than
+		// the first tar header, which may be PAX metadata.
 		if prefix == "" {
 			parts := strings.SplitN(header.Name, "/", 2)
-			if len(parts) > 0 {
-				prefix = parts[0] + "/"
+			if len(parts) < 2 {
+				continue
 			}
+			prefix = parts[0] + "/"
 		}
 
 		// Strip the top-level directory.
@@ -126,17 +142,19 @@ func (c *Checkout) download(destDir string) error {
 
 		target := filepath.Join(destDir, relPath)
 
-		// Verify the target stays within destDir.
+		// Verify the target stays within destDir. filepath.Rel avoids the
+		// sibling-prefix escape that a plain strings.HasPrefix check permits.
 		absTarget, err := filepath.Abs(target)
 		if err != nil {
-			continue
+			return fmt.Errorf("resolve archive path %q: %w", header.Name, err)
 		}
 		absDest, err := filepath.Abs(destDir)
 		if err != nil {
-			continue
+			return fmt.Errorf("resolve destination %q: %w", destDir, err)
 		}
-		if !strings.HasPrefix(absTarget, absDest) {
-			continue
+		relative, err := filepath.Rel(absDest, absTarget)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || filepath.IsAbs(relative) {
+			return fmt.Errorf("archive path %q escapes extraction directory", header.Name)
 		}
 
 		switch header.Typeflag {
@@ -145,22 +163,28 @@ func (c *Checkout) download(destDir string) error {
 				return fmt.Errorf("wpt: mkdir %s: %w", target, err)
 			}
 		case tar.TypeReg:
+			fallthrough
+		case tar.TypeRegA:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return fmt.Errorf("wpt: mkdir %s: %w", filepath.Dir(target), err)
+				return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 			}
 			f, err := os.Create(target)
 			if err != nil {
-				return fmt.Errorf("wpt: create %s: %w", target, err)
+				return fmt.Errorf("create %s: %w", target, err)
 			}
 			if _, err := io.Copy(f, tr); err != nil {
 				f.Close()
-				return fmt.Errorf("wpt: write %s: %w", target, err)
+				return fmt.Errorf("write %s: %w", target, err)
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				return fmt.Errorf("close %s: %w", target, err)
+			}
+			extractedFiles++
 		}
 	}
-
-	fmt.Fprintf(os.Stderr, "wpt: extracted to %s\n", destDir)
+	if extractedFiles == 0 {
+		return fmt.Errorf("archive contained no regular files")
+	}
 	return nil
 }
 

@@ -1,12 +1,19 @@
 package js
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/dop251/goja"
+)
+
+const (
+	maxObjectURLCount = 256
+	maxObjectURLBytes = 64 << 20
 )
 
 // URL and URLSearchParams API implementation.
@@ -33,6 +40,9 @@ func (r *Runtime) setupURLAPI() {
 			arg := call.Arguments[0]
 			switch v := arg.Export().(type) {
 			case string:
+				// URLSearchParams string input is form-url-encoded data with one
+				// optional leading question mark removed.
+				v = strings.TrimPrefix(v, "?")
 				if parsed, err := url.ParseQuery(v); err == nil {
 					// ParseQuery returns a map, so we lose original order.
 					// Sort keys for deterministic output.
@@ -301,9 +311,54 @@ func (r *Runtime) setupURLAPI() {
 
 	urlVal := r.vm.ToValue(urlCtor)
 	_ = r.vm.Set("URL", urlVal)
+	if urlObject, ok := urlVal.(*goja.Object); ok {
+		_ = urlObject.Set("createObjectURL", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				panic(r.vm.NewTypeError("URL.createObjectURL requires a Blob"))
+			}
+			blob, ok := call.Argument(0).(*goja.Object)
+			if !ok || r.fileValues[blob] == nil {
+				panic(r.vm.NewTypeError("URL.createObjectURL requires a Blob"))
+			}
+			id := make([]byte, 16)
+			if _, err := rand.Read(id); err != nil {
+				panic(r.vm.NewGoError(err))
+			}
+			objectURL := "blob:" + r.windowOrigin() + "/" + hex.EncodeToString(id)
+			r.objectURLMu.Lock()
+			blobData := r.fileValues[blob].data
+			if len(r.objectURLs) >= maxObjectURLCount || int64(len(blobData))+r.objectURLBytes > maxObjectURLBytes {
+				r.objectURLMu.Unlock()
+				panic(r.newRangeError("Blob object URL storage limit exceeded"))
+			}
+			r.objectURLs[objectURL] = append([]byte(nil), blobData...)
+			r.objectURLBytes += int64(len(blobData))
+			r.objectURLMu.Unlock()
+			return r.vm.ToValue(objectURL)
+		})
+		_ = urlObject.Set("revokeObjectURL", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) != 0 {
+				r.objectURLMu.Lock()
+				objectURL := call.Argument(0).String()
+				if data, ok := r.objectURLs[objectURL]; ok {
+					r.objectURLBytes -= int64(len(data))
+					delete(r.objectURLs, objectURL)
+				}
+				r.objectURLMu.Unlock()
+			}
+			return goja.Undefined()
+		})
+	}
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("URL", urlVal)
 		}
 	}
+}
+
+func (r *Runtime) objectURLSource(objectURL string) ([]byte, bool) {
+	r.objectURLMu.Lock()
+	defer r.objectURLMu.Unlock()
+	source, ok := r.objectURLs[objectURL]
+	return append([]byte(nil), source...), ok
 }

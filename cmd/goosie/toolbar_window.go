@@ -43,6 +43,8 @@ type chromeWindow struct {
 	onFocusClick      func(contentX, contentY int32) bool
 	onContentKey      func(key rune, mods surface.KeyMod) bool
 	onDragSelect      func(action surface.PointerAction, contentX, contentY int32) bool
+	onContentDrag     func(action surface.PointerAction, contentX, contentY int32) bool
+	onCancelDrag      func() bool
 	onIME             func(ev surface.Event) bool
 	onCopy            func() bool
 	hitTestLink       func(contentX, contentY int32) string
@@ -727,6 +729,10 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		// to the drag selector, which decides per action whether to consume it.
 		contentX := ev.Pos.X
 		contentY := ev.Pos.Y - cw.chromeHeight()
+		if cw.onContentDrag != nil && ev.Button == surface.ButtonLeft &&
+			cw.onContentDrag(ev.Action, contentX, contentY) {
+			return true
+		}
 		press := ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft
 		activeChanged := false
 		if cw.onContentActive != nil {
@@ -774,6 +780,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvKey:
+		if ev.Key == 0x1B && cw.onCancelDrag != nil && cw.onCancelDrag() {
+			return true
+		}
 		if cw.contextMenu != nil && cw.contextMenu.Visible {
 			if ev.Key == 0x1B { // Escape
 				cw.contextMenu.Hide()

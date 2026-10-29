@@ -1,22 +1,20 @@
-// Package wpt runs curated Web Platform Tests against goosie's headless renderer.
+// Package wpt runs curated Web Platform Tests against Goosie's engine.
 //
 // WPT is the canonical spec-compliance suite for the web platform. It contains
 // three kinds of tests: testharness.js (JavaScript assertions), reftests (pixel
 // comparison against a reference), and manual tests (human-driven). This harness
-// drives goosie in headless screenshot mode and scores pixels, so it only runs
-// reftests and parse-only tests: it never collects the testharness.js
-// result-reporting protocol those assertions publish through. This package
-// curates a subset of WPT directories that exercise HTML parsing and CSS
-// rendering and measures how many of those tests produce pixel-identical output
-// to a reference browser.
+// executes testharness.js assertions in Goosie's DOM/JS engine and runs reftests
+// through the headless renderer. Manual tests remain human-driven. The configured
+// directories are a partial conformance set; reports include test counts and
+// skip reasons.
 //
 // The runner works by:
 //  1. Downloading (or reusing) a pinned WPT checkout
 //  2. Serving the test files over HTTP (WPT requires a server for resource paths)
-//  3. Rendering each test page with goosie's headless screenshot mode
+//  3. Executing testharness pages in Goosie's engine or rendering reftests
 //  4. Comparing the render to a reference image (from Chromium via Playwright, or
 //     a pre-generated golden)
-//  5. Reporting pass/fail/skip as JSON and an HTML dashboard
+//  5. Reporting pass/fail/skip/error/timeout as JSON and an HTML dashboard
 package wpt
 
 import (
@@ -38,8 +36,7 @@ type TestType string
 
 const (
 	// TestHarness is a testharness.js test: JavaScript assertions that report
-	// pass/fail through the testharness API. Running them means collecting that
-	// reporting protocol, which this screenshot-based harness does not do.
+	// pass/fail through the testharness API.
 	TestHarness TestType = "testharness"
 
 	// RefTest is a reftest: the test page is rendered and compared pixel-by-pixel
@@ -48,6 +45,19 @@ const (
 
 	// ManualTest requires human interaction and is never automated.
 	ManualTest TestType = "manual"
+
+	// SmokeTest is a crash-regression page whose oracle is that a bounded
+	// headless document load completes without crashing the engine process.
+	SmokeTest TestType = "smoke"
+
+	// SupportFile is an unmarked helper document referenced by an automated
+	// test, rather than an independent WPT case.
+	SupportFile TestType = "support"
+
+	// UnclassifiedTest is a discovered page without an automated test marker.
+	// Keep it visible in reports until it is explicitly classified as a test or
+	// documented as non-test content.
+	UnclassifiedTest TestType = "unclassified"
 
 	// VisualTest is a screenshot-only test with no automated pass/fail.
 	VisualTest TestType = "visual"
@@ -71,6 +81,16 @@ type TestResult struct {
 	RefPath string `json:"ref_path,omitempty"`
 	// RefRelation is "match" or "mismatch".
 	RefRelation string `json:"ref_relation,omitempty"`
+	// Variants records each configured testharness query variant.
+	Variants []TestVariantResult `json:"variants,omitempty"`
+}
+
+// TestVariantResult records one query-selected testharness execution.
+type TestVariantResult struct {
+	Query      string `json:"query"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
 // SuiteResult is the aggregate outcome of a WPT test run.
@@ -140,6 +160,9 @@ type Config struct {
 	// Include restricts discovery to paths or glob patterns relative to the WPT
 	// root. Empty means the configured directories are used in full.
 	Include []string `json:"include"`
+	// TestVariants selects query-string variants for parameterized testharness
+	// files, keyed by WPT-relative path.
+	TestVariants map[string][]string `json:"test_variants"`
 	// Exclude lists glob patterns for tests to skip.
 	Exclude []string `json:"exclude"`
 	// PassThreshold is the pixel-match percentage required for a reftest to pass.

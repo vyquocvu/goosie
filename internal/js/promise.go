@@ -44,6 +44,13 @@ func (r *Runtime) setupPromise() {
 	}
 
 	promiseCtorObj := r.vm.ToValue(promiseConstructor).(*goja.Object)
+	if prototype, ok := promiseCtorObj.Get("prototype").(*goja.Object); ok {
+		r.promiseProto = prototype
+		_ = prototype.Set("constructor", promiseCtorObj)
+		_ = r.vm.Set("__promiseConstructor__", promiseCtorObj)
+		_, _ = r.vm.RunString(`Object.defineProperty(__promiseConstructor__, "name", { value: "Promise", configurable: true })`)
+		_ = r.vm.Set("__promiseConstructor__", nil)
+	}
 
 	_ = promiseCtorObj.Set("resolve", func(call goja.FunctionCall) goja.Value {
 		return r.promiseResolveValue(call)
@@ -61,7 +68,69 @@ func (r *Runtime) setupPromise() {
 		return r.promiseRace(call)
 	})
 
+	_ = promiseCtorObj.Set("withResolvers", func(call goja.FunctionCall) goja.Value {
+		return r.promiseWithResolvers(call)
+	})
+	_ = r.vm.Set("__promiseConstructorWithResolvers__", promiseCtorObj)
+	_ = r.vm.Set("__promiseWithResolversMethod__", promiseCtorObj.Get("withResolvers"))
+	_, _ = r.vm.RunString(`
+		Object.defineProperty(__promiseWithResolversMethod__, "name", {
+			value: "withResolvers",
+			configurable: true
+		});
+		Object.defineProperty(__promiseConstructorWithResolvers__, "withResolvers", {
+			enumerable: false,
+			configurable: true,
+			writable: true
+		});
+	`)
+	_ = r.vm.Set("__promiseWithResolversMethod__", nil)
+	_ = r.vm.Set("__promiseConstructorWithResolvers__", nil)
+
 	_ = r.vm.Set("Promise", promiseCtorObj)
+}
+
+// promiseWithResolvers implements Promise.withResolvers with the generic
+// constructor receiver required by NewPromiseCapability.
+func (r *Runtime) promiseWithResolvers(call goja.FunctionCall) goja.Value {
+	constructor, ok := goja.AssertConstructor(call.This)
+	if !ok {
+		panic(r.vm.NewTypeError("Promise.withResolvers called on a non-constructor"))
+	}
+	var resolve, reject goja.Value
+	called := false
+	var executorErr error
+	executor := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		if called {
+			executorErr = errors.New("Promise capability executor called more than once")
+			panic(r.vm.NewTypeError(executorErr.Error()))
+		}
+		called = true
+		resolve = call.Argument(0)
+		reject = call.Argument(1)
+		return goja.Undefined()
+	})
+	promise, err := constructor(nil, executor)
+	if executorErr != nil {
+		panic(r.vm.NewTypeError(executorErr.Error()))
+	}
+	if err != nil {
+		panic(err)
+	}
+	if !called {
+		panic(r.vm.NewTypeError("Promise constructor did not initialize its capability"))
+	}
+	if _, ok := goja.AssertFunction(resolve); !ok {
+		panic(r.vm.NewTypeError("Promise capability resolve is not callable"))
+	}
+	if _, ok := goja.AssertFunction(reject); !ok {
+		panic(r.vm.NewTypeError("Promise capability reject is not callable"))
+	}
+	result := r.vm.NewObject()
+	_ = result.Set("promise", promise)
+	_ = result.Set("resolve", resolve)
+	_ = result.Set("reject", reject)
+	return result
 }
 
 // constructPromise implements the Promise(executor) constructor.
@@ -109,7 +178,15 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 		if errors.As(err, &ie) {
 			panic(err)
 		}
-		r.rejectPromise(p, r.vm.ToValue(err.Error()))
+		// Promise(executor) rejects with the exact value thrown by the
+		// executor. Preserve JS exceptions such as DOMException instead of
+		// flattening them to their diagnostic string.
+		var rejected goja.Value = r.vm.ToValue(err.Error())
+		var exception *goja.Exception
+		if errors.As(err, &exception) {
+			rejected = exception.Value()
+		}
+		r.rejectPromise(p, rejected)
 	}
 
 	return obj
@@ -280,7 +357,13 @@ func (r *Runtime) runReaction(reaction promiseReaction, isRejected bool, val goj
 		return nil
 	}
 
-	ret, err := f(nil, val)
+	r.scriptExecutionDepth++
+	var ret goja.Value
+	var err error
+	func() {
+		defer func() { r.scriptExecutionDepth-- }()
+		ret, err = f(nil, val)
+	}()
 	if err != nil {
 		var ie *goja.InterruptedError
 		if errors.As(err, &ie) {
@@ -402,6 +485,9 @@ func (r *Runtime) newPromiseObj() *promiseObj {
 	}
 
 	obj := r.vm.NewObject()
+	if r.promiseProto != nil {
+		obj.SetPrototype(r.promiseProto)
+	}
 	p.obj = obj
 	_ = obj.Set(promiseInternalKey, p)
 

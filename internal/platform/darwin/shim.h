@@ -195,10 +195,16 @@ void GoosieClose(GoosieWindow *gw);
 // free, or NULL if the clipboard is empty or has no string content. The call is
 // safe from any thread; it dispatches to the main queue internally.
 char *GoosieClipboardRead(void);
+// GoosieClipboardReadHTML returns the clipboard's HTML flavor as a C string,
+// or NULL when the pasteboard does not contain HTML data.
+char *GoosieClipboardReadHTML(void);
 
 // GoosieClipboardWrite replaces the clipboard contents with text. A NULL text
 // clears the clipboard. The call is safe from any thread.
 void GoosieClipboardWrite(const char *text);
+// GoosieClipboardWriteRich replaces the clipboard with plain text and optional
+// HTML flavors. The call is safe from any thread.
+void GoosieClipboardWriteRich(const char *text, const char *html);
 
 // GoosieChooseSavePath presents an AppKit save panel on the main thread. It
 // returns 1 and a caller-owned path on selection, 0 on user cancellation, and

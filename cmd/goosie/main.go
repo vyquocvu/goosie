@@ -155,15 +155,18 @@ type framePath struct {
 	findMatches       []engine.Match
 	findIdx           int
 	selDrag           bool
+	contentDrag       *contentDragGesture
 	restoredActiveURL string
 	// restoredScrollTabID/restoredScrollY carry the offset a session restore
 	// recorded for the active tab, so the restore's own load can re-apply it
 	// after the fresh-navigation top-of-page reset. 0 means no pending intent.
-	restoredScrollTabID uint64
-	restoredScrollY     int32
-	storage             *js.OriginStorageRegistry
-	incognitoStorage    *js.OriginStorageRegistry
-	emulationPreset     *DevicePreset
+	restoredScrollTabID   uint64
+	restoredScrollY       int32
+	storage               *js.OriginStorageRegistry
+	incognitoStorage      *js.OriginStorageRegistry
+	broadcastHub          *js.BroadcastHub
+	incognitoBroadcastHub *js.BroadcastHub
+	emulationPreset       *DevicePreset
 	// pacedSession is the document a screenshot or gate run loaded
 	// synchronously, and pacedBG the canvas colour its plan was published with.
 	// Both are set once before the loop starts and afterwards touched only by
@@ -280,30 +283,32 @@ func build(c config) (*framePath, error) {
 	// and the one fact it cannot observe is when the process began.
 	rec.SetStartupReference(processStart)
 	f := &framePath{
-		sched:            raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
-		pool:             wp,
-		composer:         surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
-		layer:            layer,
-		docHeight:        spec.DocHeight,
-		rec:              rec,
-		spec:             spec,
-		config:           c,
-		client:           client,
-		privateClient:    net.DefaultPrivateClient(),
-		fonts:            fonts,
-		bookmarks:        bookmarkStore,
-		history:          historyStore,
-		downloads:        download.NewManager(c.downloadDir),
-		navResults:       make(chan navResult, 16),
-		imgResults:       make(chan imgResult, 16),
-		zoom:             1.0,
-		storage:          js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
-		incognitoStorage: js.NewOriginStorageRegistry("", true),
-		theme:            c.theme,
-		userscripts:      userscript.NewManager(c.userscriptDir),
-		flags:            flags.NewManager(c.flagsFile),
-		perms:            perms.NewManager(c.permsFile),
-		preferences:      profilePreferences,
+		sched:                 raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
+		pool:                  wp,
+		composer:              surface.NewComposer(dev, frame.NewBitmapPool(dev, 2)),
+		layer:                 layer,
+		docHeight:             spec.DocHeight,
+		rec:                   rec,
+		spec:                  spec,
+		config:                c,
+		client:                client,
+		privateClient:         net.DefaultPrivateClient(),
+		fonts:                 fonts,
+		bookmarks:             bookmarkStore,
+		history:               historyStore,
+		downloads:             download.NewManager(c.downloadDir),
+		navResults:            make(chan navResult, 16),
+		imgResults:            make(chan imgResult, 16),
+		zoom:                  1.0,
+		storage:               js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
+		incognitoStorage:      js.NewOriginStorageRegistry("", true),
+		broadcastHub:          js.NewBroadcastHub(),
+		incognitoBroadcastHub: js.NewBroadcastHub(),
+		theme:                 c.theme,
+		userscripts:           userscript.NewManager(c.userscriptDir),
+		flags:                 flags.NewManager(c.flagsFile),
+		perms:                 perms.NewManager(c.permsFile),
+		preferences:           profilePreferences,
 	}
 	if f.theme == "" {
 		f.theme = "system"
@@ -645,7 +650,7 @@ func (f *framePath) openWindow() error {
 	// would report a position no frame ever followed.
 	f.mediaBackend = platform.MediaBackend(w)
 	if f.toolbar != nil && f.tabMgr != nil {
-		f.window = newChromeWindow(w, f.toolbar, f.tabMgr,
+		cw := newChromeWindow(w, f.toolbar, f.tabMgr,
 			func(id uint64) { f.switchTab(id) },
 			func() { f.newTab() },
 			func(id uint64) { f.closeTab(id) },
@@ -664,6 +669,9 @@ func (f *framePath) openWindow() error {
 			f.fonts,
 			int32(f.config.dpr+0.5),
 		)
+		cw.onContentDrag = f.pointerDrag
+		cw.onCancelDrag = f.cancelPointerDrag
+		f.window = cw
 		// The JS pump rides the chrome event thread at display cadence: one
 		// event-loop turn per tick for the active tab, so timers, fetch
 		// completions and RAF callbacks fire in a living browser instead of

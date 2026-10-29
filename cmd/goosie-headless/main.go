@@ -22,6 +22,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/platform/headless"
 	"github.com/vyquocvu/goosie/internal/raster"
 	"github.com/vyquocvu/goosie/internal/surface"
@@ -132,7 +133,8 @@ func run(args []string) error {
 		return fmt.Errorf("init fonts: %w", err)
 	}
 
-	sess, err := engine.NewSession(string(html), nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)), engine.WithJS(mustJSRuntime(c.in)))
+	documentText, documentEncoding, _ := net.DecodeHTML(html, "")
+	sess, err := engine.NewSession(documentText, nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)), engine.WithDocumentEncoding(documentEncoding), engine.WithJS(mustJSRuntime(c.in)))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)
 	}

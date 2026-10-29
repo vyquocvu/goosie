@@ -373,7 +373,7 @@ func isTableStructure(s *style.ComputedStyle) bool {
 		return false
 	}
 	switch s.Display {
-	case style.DisplayTable, style.DisplayTableRow, style.DisplayTableCell,
+	case style.DisplayTable, style.DisplayInlineTable, style.DisplayTableRow, style.DisplayTableCell,
 		style.DisplayTableRowGroup, style.DisplayTableHeaderGroup,
 		style.DisplayTableFooterGroup, style.DisplayTableColumn,
 		style.DisplayTableColumnGroup, style.DisplayTableCaption:

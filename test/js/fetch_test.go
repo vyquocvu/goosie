@@ -104,6 +104,83 @@ func newFetchRuntime(t *testing.T, fetcher js.HTTPFetcher) *js.Runtime {
 	return r
 }
 
+func TestResponseConstructorConsumesBlobAndBufferBodies(t *testing.T) {
+	r, err := js.New(js.Options{URL: "https://example.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	if err := r.Run(`
+		var responseCtorWorks = false;
+		var responseBlobText = '';
+		var responseBufferText = '';
+		var responseBodyWasUsed = false;
+		var responseFromBlob = new Response(new Blob(['hello'], {type: 'text/x-test'}));
+		responseCtorWorks = responseFromBlob instanceof Response && responseFromBlob.status === 200 && responseFromBlob.ok;
+		responseFromBlob.blob().then(function(blob) {
+			blob.text().then(function(text) { responseBlobText = text; });
+		});
+		responseBodyWasUsed = responseFromBlob.bodyUsed;
+		new Response(new Uint8Array([65, 66])).arrayBuffer().then(function(buffer) {
+			responseBufferText = String.fromCharCode.apply(null, new Uint8Array(buffer));
+		});
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := r.Global("responseCtorWorks"); !ok || !value.Bool {
+		t.Fatalf("Response constructor state = %+v, want true", value)
+	}
+	if value, ok := r.Global("responseBlobText"); !ok || value.Str != "hello" {
+		t.Fatalf("Response blob text = %+v, want hello", value)
+	}
+	if value, ok := r.Global("responseBufferText"); !ok || value.Str != "AB" {
+		t.Fatalf("Response arrayBuffer text = %+v, want AB", value)
+	}
+	if value, ok := r.Global("responseBodyWasUsed"); !ok || !value.Bool {
+		t.Fatalf("Response bodyUsed = %+v, want true", value)
+	}
+}
+
+func TestResponseIsNotStructuredCloneable(t *testing.T) {
+	r, err := js.New(js.Options{URL: "https://example.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	if err := r.Run(`
+		var responseCloneError = '';
+		var responseCloneErrorIsDOMException = false;
+		var responseClonePromiseError = '';
+		var responseClonePromiseErrorIsDOMException = false;
+	try {
+			new MessageChannel().port1.postMessage(new Response('body'));
+		} catch (error) {
+			responseCloneError = error.name;
+			responseCloneErrorIsDOMException = error instanceof DOMException;
+		}
+		new Promise(function() {
+			new MessageChannel().port1.postMessage(new Response('body'));
+		}).catch(function(error) {
+			responseClonePromiseError = error.name || String(error);
+			responseClonePromiseErrorIsDOMException = error instanceof DOMException;
+		});
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := r.Global("responseCloneError"); !ok || value.Str != "DataCloneError" {
+		t.Fatalf("postMessage(Response) error = %+v, want DataCloneError", value)
+	}
+	if value, ok := r.Global("responseCloneErrorIsDOMException"); !ok || !value.Bool {
+		t.Fatalf("postMessage(Response) thrown value = %+v, want DOMException", value)
+	}
+	if value, ok := r.Global("responseClonePromiseError"); !ok || value.Str != "DataCloneError" {
+		t.Fatalf("promise rejection from postMessage(Response) = %+v, want DataCloneError", value)
+	}
+	if value, ok := r.Global("responseClonePromiseErrorIsDOMException"); !ok || !value.Bool {
+		t.Fatalf("promise rejection type = %+v, want DOMException", value)
+	}
+}
+
 // drainFetch waits for in-flight fetches to finish, then invokes their queued
 // callbacks on the runtime goroutine.
 func drainFetch(t *testing.T, r *js.Runtime) {
@@ -245,6 +322,54 @@ func TestMockFetcherRecordsCalls(t *testing.T) {
 	if last.URL != "https://example.test/b" {
 		t.Errorf("last call URL = %q, want %q", last.URL, "https://example.test/b")
 	}
+}
+
+func TestWorkerFetchUsesCreatorHTTPClient(t *testing.T) {
+	fetcher := &mockFetcher{responses: map[string]*js.FetchResponse{
+		"https://example.test/data": {
+			Status: 200, StatusText: "OK", Body: []byte("worker-fetched"),
+			URL: "https://example.test/data", OK: true,
+		},
+	}}
+	sources := map[string]string{
+		"https://example.test/worker.js": `fetch('/data').then(function(response) { return response.text(); }).then(function(text) { postMessage(text); });`,
+	}
+	r, err := js.New(js.Options{
+		URL:        "https://example.test/page.html",
+		HTTPClient: fetcher,
+		WorkerScriptFetcher: func(scriptURL string) ([]byte, error) {
+			source, ok := sources[scriptURL]
+			if !ok {
+				return nil, fmt.Errorf("unexpected worker script URL %q", scriptURL)
+			}
+			return []byte(source), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer r.Close()
+	if err := r.Run(`
+		var workerFetchResult = '';
+		var worker = new Worker('/worker.js');
+		worker.onmessage = function(event) { workerFetchResult = event.data; };
+		worker.postMessage('start');
+	`, "worker-fetch.html"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r.Tick()
+		if result, ok := r.Global("workerFetchResult"); ok && result.Str == "worker-fetched" {
+			if fetcher.callCount() != 1 {
+				t.Fatalf("worker fetch calls = %d, want 1", fetcher.callCount())
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	result, _ := r.Global("workerFetchResult")
+	t.Fatalf("worker fetch did not resolve; result=%+v calls=%d", result, fetcher.callCount())
 }
 
 // TestFetchConstants verifies the exported resource-limit constants have the
@@ -592,6 +717,39 @@ func TestFetchBodyOption(t *testing.T) {
 
 	if got := string(m.lastCall().Body); got != "data" {
 		t.Errorf("body = %q, want %q", got, "data")
+	}
+}
+
+func TestFetchFormDataEncodesMultipartFieldsAndFiles(t *testing.T) {
+	m := &mockFetcher{responses: map[string]*js.FetchResponse{"https://example.test/upload": {Status: 200, OK: true}}}
+	r := newFetchRuntime(t, m)
+	if err := r.Run(`
+		var body = new FormData();
+		body.append('line\n"name', 'first\nsecond');
+		body.append('upload', new File(['file-bytes'], 'quoted"name.txt', {type: 'text/plain'}));
+		fetch('/upload', {method: 'POST', body: body}).then(function() {});
+	`, "fetch-formdata-multipart"); err != nil {
+		t.Fatal(err)
+	}
+	drainFetch(t, r)
+	call := m.lastCall()
+	contentType := js.GetHeader(call.Headers, "Content-Type")
+	if !strings.HasPrefix(contentType, "multipart/form-data; boundary=----GoosieFormBoundary") {
+		t.Fatalf("multipart Content-Type = %q", contentType)
+	}
+	boundary := strings.TrimPrefix(contentType, "multipart/form-data; boundary=")
+	body := string(call.Body)
+	for _, want := range []string{
+		"--" + boundary + "\r\n",
+		`name="line%0D%0A%22name"`,
+		"first\r\nsecond",
+		`filename="quoted%22name.txt"`,
+		"Content-Type: text/plain\r\n\r\nfile-bytes\r\n",
+		"--" + boundary + "--\r\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("multipart body missing %q: %q", want, body)
+		}
 	}
 }
 

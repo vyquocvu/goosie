@@ -137,8 +137,8 @@ func (f *framePath) handleMediaControl(contentX, contentY int32) bool {
 	// controls in reach afterwards. A video is not a form control, so this press
 	// is the only way it can ever hold focus.
 	sess.FocusMediaElement(hit.Node)
-	sess.SetMediaActivation(true)
-	defer sess.SetMediaActivation(false)
+	sess.SetUserActivation(true)
+	defer sess.SetUserActivation(false)
 
 	switch hit.Part {
 	case paint.VideoControlPlay:
@@ -188,8 +188,8 @@ func (f *framePath) mediaKey(tab *tabs.Tab, key rune) bool {
 		return false
 	}
 
-	sess.SetMediaActivation(true)
-	defer sess.SetMediaActivation(false)
+	sess.SetUserActivation(true)
+	defer sess.SetUserActivation(false)
 
 	snap := c.Snapshot()
 	switch key {

@@ -33,6 +33,9 @@ func TestEventCreation(t *testing.T) {
 	if e.DefaultPrevented() {
 		t.Error("DefaultPrevented() = true, want false")
 	}
+	if e.IsTrusted() {
+		t.Error("script-created event is trusted, want false")
+	}
 	if e.Target() != nil {
 		t.Error("Target() should be nil before dispatch")
 	}
@@ -44,6 +47,17 @@ func TestEventCreation(t *testing.T) {
 	}
 	if e.TimeStamp().IsZero() {
 		t.Error("TimeStamp() should not be zero")
+	}
+}
+
+func TestUserAgentEventTrustAndPageTransitionInterface(t *testing.T) {
+	trusted := dom.NewTrustedEvent("DOMContentLoaded", true, false)
+	if !trusted.IsTrusted() || trusted.InterfaceName() != "Event" {
+		t.Fatalf("trusted event state = (%t, %q), want (true, Event)", trusted.IsTrusted(), trusted.InterfaceName())
+	}
+	page := dom.NewPageTransitionEvent("pageshow", true, true, false)
+	if !page.IsTrusted() || page.InterfaceName() != "PageTransitionEvent" || page.Persisted() {
+		t.Fatalf("pageshow state = (%t, %q, %t), want (true, PageTransitionEvent, false)", page.IsTrusted(), page.InterfaceName(), page.Persisted())
 	}
 }
 
@@ -60,6 +74,55 @@ func TestAddAndDispatchEvent(t *testing.T) {
 
 	if !called {
 		t.Error("listener was not called")
+	}
+}
+
+func TestDispatchListenerMutationUsesInvocationSnapshot(t *testing.T) {
+	_, _, _, target := buildTree(t)
+	var calls []string
+	added := func(*dom.Event) { calls = append(calls, "added") }
+	var once func(*dom.Event)
+	once = func(*dom.Event) {
+		calls = append(calls, "once")
+		dom.RemoveEventListenerByKey(target, "click", "once", false)
+		dom.AddEventListenerWithKey(target, "click", added, false, "added")
+	}
+	dom.AddEventListener(target, "click", func(*dom.Event) { calls = append(calls, "capture") }, true)
+	dom.AddEventListenerWithKey(target, "click", once, false, "once")
+
+	dom.DispatchEvent(target, dom.NewEvent("click", true, false))
+	if len(calls) != 2 || calls[0] != "capture" || calls[1] != "once" {
+		t.Fatalf("first dispatch calls = %v, want [capture once]", calls)
+	}
+	calls = nil
+	dom.DispatchEvent(target, dom.NewEvent("click", true, false))
+	if len(calls) != 2 || calls[0] != "capture" || calls[1] != "added" {
+		t.Fatalf("second dispatch calls = %v, want [capture added]", calls)
+	}
+}
+
+func TestDispatchSkipsListenerRemovedFromActiveSnapshot(t *testing.T) {
+	_, _, _, target := buildTree(t)
+	var calls []string
+	listener2 := func(*dom.Event) { calls = append(calls, "listener2") }
+	listener3 := func(*dom.Event) { calls = append(calls, "listener3") }
+	listener1 := func(*dom.Event) {
+		calls = append(calls, "listener1")
+		dom.RemoveEventListenerByKey(target, "change", "listener1", false)
+		dom.RemoveEventListenerByKey(target, "change", "listener2", false)
+		dom.AddEventListenerWithKey(target, "change", listener3, false, "listener3")
+	}
+	dom.AddEventListenerWithKey(target, "change", listener1, false, "listener1")
+	dom.AddEventListenerWithKey(target, "change", listener2, false, "listener2")
+
+	dom.DispatchEvent(target, dom.NewEvent("change", false, false))
+	if len(calls) != 1 || calls[0] != "listener1" {
+		t.Fatalf("first dispatch calls = %v, want [listener1]", calls)
+	}
+	calls = nil
+	dom.DispatchEvent(target, dom.NewEvent("change", false, false))
+	if len(calls) != 1 || calls[0] != "listener3" {
+		t.Fatalf("second dispatch calls = %v, want [listener3]", calls)
 	}
 }
 
@@ -127,6 +190,26 @@ func TestStopPropagation(t *testing.T) {
 
 	if bodyCalled {
 		t.Error("body listener should not have been called after stopPropagation")
+	}
+}
+
+func TestStopPropagationAtTargetCaptureSkipsTargetBubbleGroup(t *testing.T) {
+	_, _, _, target := buildTree(t)
+	var order []string
+	dom.AddEventListener(target, "click", func(e *dom.Event) {
+		order = append(order, "capture-stop")
+		e.StopPropagation()
+	}, true)
+	dom.AddEventListener(target, "click", func(*dom.Event) {
+		order = append(order, "capture-sibling")
+	}, true)
+	dom.AddEventListener(target, "click", func(*dom.Event) {
+		order = append(order, "bubble")
+	}, false)
+
+	dom.DispatchEvent(target, dom.NewEvent("click", true, false))
+	if len(order) != 2 || order[0] != "capture-stop" || order[1] != "capture-sibling" {
+		t.Fatalf("target listener order = %v, want [capture-stop capture-sibling]", order)
 	}
 }
 
@@ -516,5 +599,71 @@ func TestRemoveNonexistentListenerIsNoop(t *testing.T) {
 	listeners := dom.GetNodeListeners(div)
 	if len(listeners) != 1 {
 		t.Errorf("removing nonexistent listener changed count: got %d, want 1", len(listeners))
+	}
+}
+
+func TestRemoveEventListenerByKey(t *testing.T) {
+	_, _, _, div := buildTree(t)
+
+	called := false
+	cb := func(e *dom.Event) { called = true }
+	key := "test-key-1"
+	dom.AddEventListenerWithKey(div, "click", cb, false, key)
+	dom.RemoveEventListenerByKey(div, "click", key, false)
+
+	event := dom.NewEvent("click", true, false)
+	dom.DispatchEvent(div, event)
+
+	if called {
+		t.Error("removed listener should not fire")
+	}
+}
+
+func TestRemoveEventListenerByKeyCaptureMismatch(t *testing.T) {
+	_, _, _, div := buildTree(t)
+
+	called := false
+	cb := func(e *dom.Event) { called = true }
+	key := "test-key-capture"
+	dom.AddEventListenerWithKey(div, "click", cb, true, key)
+	dom.RemoveEventListenerByKey(div, "click", key, false) // capture mismatch
+
+	event := dom.NewEvent("click", true, false)
+	dom.DispatchEvent(div, event)
+
+	if !called {
+		t.Error("listener should still fire: capture flag does not match")
+	}
+}
+
+func TestRemoveEventListenerByKeyPreservesOthers(t *testing.T) {
+	_, _, _, div := buildTree(t)
+
+	var order []int
+	cb1 := func(e *dom.Event) { order = append(order, 1) }
+	cb2 := func(e *dom.Event) { order = append(order, 2) }
+	dom.AddEventListenerWithKey(div, "click", cb1, false, "key1")
+	dom.AddEventListenerWithKey(div, "click", cb2, false, "key2")
+
+	dom.RemoveEventListenerByKey(div, "click", "key1", false)
+
+	event := dom.NewEvent("click", true, false)
+	dom.DispatchEvent(div, event)
+
+	if len(order) != 1 || order[0] != 2 {
+		t.Errorf("order = %v, want [2] (only second listener should fire)", order)
+	}
+}
+
+func TestDataTransferGetDataURLAliasesAndURIListParameters(t *testing.T) {
+	dt := dom.NewDataTransfer()
+	uriList := "# comment\nhttps://a.example/1\nhttps://b.example/2"
+	dt.SetData("text/uri-list", uriList)
+
+	if got := dt.GetData(" url "); got != "https://a.example/1" {
+		t.Errorf(`GetData(" url ") = %q, want first URI-list URL`, got)
+	}
+	if got := dt.GetData("text/uri-list;charset=utf-8"); got != uriList {
+		t.Errorf("GetData with MIME parameter = %q, want original URI-list payload", got)
 	}
 }

@@ -129,6 +129,10 @@ func main() {
 	}
 
 	// Exit with non-zero if there were failures.
+	if result.Total == 0 {
+		fmt.Fprintln(os.Stderr, "wpt-runner: no tests discovered; check -wpt-dir or pass -download")
+		os.Exit(1)
+	}
 	if result.Failed > 0 || result.Errored > 0 {
 		os.Exit(1)
 	}

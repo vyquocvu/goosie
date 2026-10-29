@@ -73,6 +73,31 @@ func (s *Session) PressKey(key string, shift, ctrl, alt, meta bool) bool {
 // keyDefaultAction performs the default action of a key that was not
 // preventDefault-ed. It reports whether the key performed an activation.
 func (s *Session) keyDefaultAction(key string, shift bool) bool {
+	if isRangeInput(s.focus) {
+		var action EditAction
+		switch key {
+		case "ArrowLeft", "ArrowDown":
+			action = EditLeft
+		case "ArrowRight", "ArrowUp":
+			action = EditRight
+		case "Home":
+			action = EditHome
+		case "End":
+			action = EditEnd
+		case "PageUp":
+			action = EditPageUp
+		case "PageDown":
+			action = EditPageDown
+		default:
+			action = EditRune
+		}
+		if action != EditRune {
+			s.opMu.Lock()
+			changed := s.adjustRangeLocked(s.focus, action)
+			s.opMu.Unlock()
+			return changed
+		}
+	}
 	switch key {
 	case "Tab":
 		if shift {
@@ -99,7 +124,7 @@ func (s *Session) keyDefaultAction(key string, shift bool) bool {
 // keyup so event handlers observe :active throughout the key operation.
 func (s *Session) keyboardActivationTarget(key string) *dom.Node {
 	n := s.focus
-	if n == nil || n.HasAttribute("disabled") {
+	if n == nil || dom.IsFormControlDisabled(n) {
 		return nil
 	}
 	if key == "Enter" && IsActivatable(n) || key == " " && IsSpaceActivatable(n) {
@@ -112,7 +137,7 @@ func (s *Session) keyboardActivationTarget(key string) *dom.Node {
 // activation behavior. Links are intentionally excluded because Space remains
 // a page-scroll key when a link has focus.
 func IsSpaceActivatable(n *dom.Node) bool {
-	if n == nil || !n.Element() || n.HasAttribute("disabled") {
+	if n == nil || !n.Element() || dom.IsFormControlDisabled(n) {
 		return false
 	}
 	switch n.Data {
@@ -139,6 +164,43 @@ func markKeyboardActive(n *dom.Node) []*dom.Node {
 		}
 	}
 	return marked
+}
+
+// SetKeyboardActive tracks the :active state of a control while a host input
+// adapter holds Space. It preserves active state already owned by pointer
+// input, matching the overlap behavior used by PressKey.
+func (s *Session) SetKeyboardActive(n *dom.Node, active bool) {
+	if s == nil {
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if active {
+		if n == nil || !n.Element() || s.keyboardActive == n {
+			return
+		}
+		s.clearKeyboardActiveLocked()
+		s.keyboardActive = n
+		for cur := n; cur != nil && cur.Element(); cur = cur.Parent {
+			if !css.IsActive(cur) {
+				css.SetActive(cur, true)
+				s.keyboardActiveMarked = append(s.keyboardActiveMarked, cur)
+			}
+		}
+		return
+	}
+	if n != nil && s.keyboardActive != n {
+		return
+	}
+	s.clearKeyboardActiveLocked()
+}
+
+func (s *Session) clearKeyboardActiveLocked() {
+	for _, node := range s.keyboardActiveMarked {
+		css.SetActive(node, false)
+	}
+	s.keyboardActive = nil
+	s.keyboardActiveMarked = nil
 }
 
 func (s *Session) activateKeyboardTarget(n *dom.Node) bool {

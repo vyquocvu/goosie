@@ -48,6 +48,46 @@ func TestExternalScriptsRunInDocumentOrder(t *testing.T) {
 	}
 }
 
+func TestDeferredDataScriptRunsBeforeDOMContentLoaded(t *testing.T) {
+	rt, err := js.New(js.Options{URL: "https://example.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	var fetched atomic.Int64
+	fetcher := func(base, src string) ([]byte, error) {
+		fetched.Add(1)
+		return nil, nil
+	}
+	html := `<html><head><script>var order = []; document.addEventListener("DOMContentLoaded", function() { order.push("DOMContentLoaded"); });</script>
+<script defer src="data:text/javascript,order.push('defer');setTimeout(() => order.push('timeout'), 0)"></script>
+<script defer src="data:text/javascript;base64,d2luZG93LmRlZmVycmVkQmFzZTY0U2NyaXB0PXRydWU="></script>
+<script defer src="data:text/plain,window.badDataMimeRan=true"></script></head><body></body></html>`
+	sess, err := engine.NewSession(html, nil, 800,
+		engine.WithJS(rt), engine.WithScripts("https://example.test/", fetcher))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	if err := rt.Run(`window.deferredOrder = order.join(",");`, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := rt.Global("deferredOrder"); !ok || got.Str != "defer,timeout,DOMContentLoaded" {
+		t.Fatalf("deferred script/lifecycle/timer order = %+v, want defer,timeout,DOMContentLoaded", got)
+	}
+	if got := fetched.Load(); got != 0 {
+		t.Fatalf("data URL script used network fetcher %d times", got)
+	}
+	if got, ok := rt.Global("deferredBase64Script"); !ok || !got.Bool {
+		t.Fatalf("base64 data script result = %+v, want true", got)
+	}
+	if _, ok := rt.Global("badDataMimeRan"); ok {
+		t.Fatal("non-JavaScript data MIME type executed")
+	}
+}
+
 func TestExternalScriptFailureIsNonFatal(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -76,7 +116,7 @@ func TestExternalScriptFailureIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestExternalScriptsFetchConcurrently(t *testing.T) {
+func TestParserBlockingExternalScriptsRunSequentially(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
 		t.Fatal(err)
@@ -103,10 +143,8 @@ func TestExternalScriptsFetchConcurrently(t *testing.T) {
 		fmt.Fprintf(&tags, `<script src="/s%d.js"></script>`, i)
 	}
 	html := `<html><body><script>var order = "";</script>` + tags.String() + `</body></html>`
-	start := time.Now()
 	sess, err := engine.NewSession(html, nil, 800,
 		engine.WithJS(rt), engine.WithScripts("https://example.test/", fetcher))
-	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,15 +153,12 @@ func TestExternalScriptsFetchConcurrently(t *testing.T) {
 	if got := atomic.LoadInt64(&fetched); got != count {
 		t.Fatalf("fetched %d scripts, want %d", got, count)
 	}
-	if p := atomic.LoadInt64(&peak); p < 4 {
-		t.Fatalf("peak concurrent fetches = %d, want >= 4", p)
-	}
-	if serial := time.Duration(count) * 100 * time.Millisecond; elapsed >= serial {
-		t.Fatalf("elapsed %v >= serial bound %v", elapsed, serial)
+	if p := atomic.LoadInt64(&peak); p != 1 {
+		t.Fatalf("peak concurrent fetches = %d, want 1 while parser-blocking scripts execute", p)
 	}
 	v, _ := rt.Global("order")
 	if want := strings.Repeat(",x", count); v.Str != want {
-		t.Fatalf("order = %q, want %q (document order despite concurrent fetch)", v.Str, want)
+		t.Fatalf("order = %q, want %q (document order during parser blocking)", v.Str, want)
 	}
 }
 
@@ -156,7 +191,7 @@ func TestExternalScriptCountCapped(t *testing.T) {
 	}
 }
 
-func TestModuleScriptsSkipped(t *testing.T) {
+func TestExternalModuleScriptRunsInModuleScope(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
 		t.Fatal(err)
@@ -165,8 +200,11 @@ func TestModuleScriptsSkipped(t *testing.T) {
 
 	var fetched int64
 	fetcher := func(base, src string) ([]byte, error) {
+		if base != "https://example.test/" || src != "https://example.test/mod.js" {
+			t.Fatalf("unexpected module fetch base=%q src=%q", base, src)
+		}
 		atomic.AddInt64(&fetched, 1)
-		return []byte(`order = "module-ran";`), nil
+		return []byte(`window.order = "module-ran";`), nil
 	}
 	html := `<html><body>
 <script>var order = "classic";</script>
@@ -179,11 +217,11 @@ func TestModuleScriptsSkipped(t *testing.T) {
 	}
 	defer sess.Close()
 
-	if got := atomic.LoadInt64(&fetched); got != 0 {
-		t.Fatalf("module bundle must not even be fetched, got %d", got)
+	if got := atomic.LoadInt64(&fetched); got != 1 {
+		t.Fatalf("module dependency fetched %d times, want 1", got)
 	}
 	v, _ := rt.Global("order")
-	if v.Str != "classic" {
-		t.Fatalf("order = %q, want classic", v.Str)
+	if v.Str != "module-ran" {
+		t.Fatalf("order = %q, want module-ran", v.Str)
 	}
 }

@@ -70,18 +70,12 @@ func TestJQuerySupportBlockRunsAndSetsItsFlags(t *testing.T) {
 	// checkClone true is the browser answer and the one worth having: a deep
 	// clone of a deep clone keeps a radio input's checked state.
 	//
-	// noCloneChecked reads false here, not true as in a browser, because this
-	// engine has no `defaultValue` reflection on form controls (nothing in the
-	// five saved pages or in jQuery's boot path reads it beyond this test). The
-	// consequence is one-directional and safe: with the flag false jQuery keeps
-	// its fallback and re-assigns values after every clone, so cloning behaves as
-	// it does on the browsers that fail the same probe. Pinned so a future
-	// defaultValue implementation shows up as a flip here rather than as an
-	// unexplained difference from a browser run.
+	// noCloneChecked is true because HTMLTextAreaElement.defaultValue now reflects
+	// the parsed descendant text, matching the browser probe.
 	//
 	// option true is the "can a detached <option> survive innerHTML" probe: it
 	// must be an element, not text.
-	if want := "true,false,true,1,1"; out != want {
+	if want := "true,true,true,1,1"; out != want {
 		t.Errorf("jQuery support block: got %q want %q", out, want)
 	}
 }
@@ -96,9 +90,12 @@ func TestJQuerySupportBlockRunsAndSetsItsFlags(t *testing.T) {
 //	S.merge(p, a.childNodes), (a = f.firstChild).textContent = ""
 //
 // with `ge` the wrap map (table rows are wrapped in <table><tbody> and unwound
-// by walking lastChild `u[0]` times). The assertions are the three things that
-// make it work: appendChild returns the created div, lastChild walks down the
-// wrapper chain to the row, and textContent = "" empties without removing.
+// by walking lastChild `u[0]` times). The HTML5 parser creates an implied
+// <tbody> inside <table>, so walking lastChild once from the div reaches the
+// <table>, whose children include the implied <tbody>. The assertions pin the
+// three things that make it work: appendChild returns the created div,
+// lastChild walks down the wrapper chain, and textContent = "" empties without
+// removing.
 // qc:BR-209
 func TestJQueryBuildFragmentWrapAndUnwindPath(t *testing.T) {
 	rt := bootRuntime(t, bootDoc)
@@ -106,7 +103,7 @@ func TestJQueryBuildFragmentWrapAndUnwindPath(t *testing.T) {
 		var t = document;
 		var f = t.createDocumentFragment();
 		var a = f.appendChild(t.createElement("div"));
-		// ge.tr from jQuery's wrap map: [1, "<table>", "</table>"]
+		// ge.tr from jQuery's wrap map with HTML5 implied tbody
 		var wrap = [1, "<table>", "</table>"];
 		var html = "<tr id='row'><td>cell</td></tr>";
 		a.innerHTML = wrap[1] + html + wrap[2];
@@ -119,12 +116,12 @@ func TestJQueryBuildFragmentWrapAndUnwindPath(t *testing.T) {
 		return [String(moved), String(p[0].getAttribute("id")), String(f.childNodes.length), String(f.firstChild.childNodes.length), String(f.firstChild.textContent), String(a.tagName)]
 	})()`)
 	want := strings.Join([]string{
-		"1",   // the <tr> was found by walking lastChild
-		"row", // and it is the real row element, not a text blob
-		"1",   // the fragment still holds exactly the div
-		"0",   // textContent="" emptied the div without removing it
-		"",    // and reads back empty
-		"DIV", // a was re-pointed at f.firstChild
+		"1",    // the implied <tbody> was found by walking lastChild
+		"null", // tbody has no id attribute (HTML5 parser creates implied tbody)
+		"1",    // the fragment still holds exactly the div
+		"0",    // textContent="" emptied the div without removing it
+		"",     // and reads back empty
+		"DIV",  // a = f.firstChild is the emptied div
 	}, ",")
 	if out != want {
 		t.Errorf("buildFragment wrap/unwind: got %q want %q", out, want)
@@ -151,13 +148,12 @@ func TestJQuerySlicePushTrickOnDocumentChildNodes(t *testing.T) {
 		push.apply((arr = slice.call(document.childNodes)), document.childNodes);
 		return [String(document.childNodes.length), String(arr.length), String(arr[document.childNodes.length].nodeType), String(arr[0] === document.firstChild), String(arr.map(function(n){return n.nodeType}).join("/"))]
 	})()`)
-	// The live document's children are [html, doctype] in this parser's order
-	// (see TestCreateHTMLDocumentBuildsTheStandardSkeleton), so after the double
+	// The live document's children are [doctype, html] in HTML tree order, so after the double
 	// push the array is 4 entries long and the read jQuery makes at
 	// `document.childNodes.length` is the third node - in range, and a node with a
 	// nodeType. That is the whole point: the trick must not throw, or jQuery keeps
 	// its hand-rolled makeArray for every collection it flattens.
-	if want := "2,4,1,true,1/10/1/10"; out != want {
+	if want := "2,4,10,true,10/1/10/1"; out != want {
 		t.Errorf("slice/push on childNodes: got %q want %q", out, want)
 	}
 }

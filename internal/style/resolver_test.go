@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/css"
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
@@ -22,6 +23,33 @@ func TestResolverReusesCompiledIndexAcrossStyleAndPseudoPasses(t *testing.T) {
 	resolver.ResolveViewport(doc, Viewport{W: 800, H: 600}, nil)
 	if resolver.index != compiledIndex {
 		t.Fatal("style resolution replaced the compiled selector index")
+	}
+}
+
+func TestResolverAppliesDocumentPartRulesToShadowPartElements(t *testing.T) {
+	doc := domtest.Parse(`<html><body><div id="host"></div></body></html>`)
+	host := doc.ElementByID("host")
+	host.ShadowRoot = &dom.ShadowRoot{Host: host, Mode: "open"}
+	part := doc.NewElement("span")
+	part.SetAttribute("part", "inner")
+	part.CustomStates = map[string]bool{"innerFoo": true}
+	host.ShadowRoot.AppendChild(part)
+
+	sheet := css.Parse(`#host::part(inner) { opacity: 0 } #host::part(inner):state(innerFoo) { opacity: 0.5 } #host:state(outerFoo)::part(inner) { opacity: 0.25 }`)
+	resolver := NewResolver([]*css.Stylesheet{sheet})
+	styles := resolver.ResolveViewport(doc, Viewport{W: 800, H: 600}, nil)
+	if got := styles[part.ID].Opacity; got != 0.5 {
+		t.Fatalf("part opacity with part state = %v, want 0.5", got)
+	}
+	part.CustomStates = nil
+	styles = resolver.ResolveViewport(doc, Viewport{W: 800, H: 600}, nil)
+	if got := styles[part.ID].Opacity; got != 0 {
+		t.Fatalf("part opacity without part state = %v, want 0", got)
+	}
+	host.CustomStates = map[string]bool{"outerFoo": true}
+	styles = resolver.ResolveViewport(doc, Viewport{W: 800, H: 600}, nil)
+	if got := styles[part.ID].Opacity; got != 0.25 {
+		t.Fatalf("part opacity with host state = %v, want 0.25", got)
 	}
 }
 

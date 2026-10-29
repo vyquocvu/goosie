@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Textarea live and default values</title>
+<style>
+  body { margin: 0; padding: 12px; font: 16px Arial, sans-serif; }
+  textarea { display: block; width: 320px; height: 72px; margin-top: 8px; }
+</style></head><body>
+  <label for="memo">Live value</label>
+  <textarea id="memo" rows="3">default value</textarea>
+  <script>document.getElementById('memo').value = 'live value\nsecond line';</script>
+</body></html>

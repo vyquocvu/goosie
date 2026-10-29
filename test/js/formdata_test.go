@@ -5,7 +5,84 @@ import (
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/js"
+	"github.com/vyquocvu/goosie/test/domtest"
 )
+
+func TestFormDataTextareaHardWrap(t *testing.T) {
+	doc := domtest.Parse(`<!doctype html><form id="f"><textarea name="bio" cols="4" wrap="hard"></textarea></form>`)
+	r := newDOMRuntime(t, doc)
+	if _, err := r.Evaluate(`document.querySelector('textarea').value='abcdefghij\nxyz'`); err != nil {
+		t.Fatalf("set textarea value: %v", err)
+	}
+	got, err := r.Evaluate(`(function(){var e=document.querySelector('textarea'),fd=new FormData(e.form);return [e.value,fd.get('bio')].join('|')})()`)
+	if err != nil {
+		t.Fatalf("read FormData: %v", err)
+	}
+	if got != "abcdefghij\nxyz|abcd\nefgh\nij\nxyz" {
+		t.Fatalf("textarea FormData = %q, want unchanged API value and hard-wrapped entry", got)
+	}
+}
+
+func TestFormDataSelectMultipleCreatesOneEntryPerEnabledSelectedOption(t *testing.T) {
+	doc := domtest.Parse(`<form id="f"><select name="color" multiple>
+		<option value="red" selected>Red</option><option selected>Blue Sky</option>
+		<option value="disabled" selected disabled>Disabled</option>
+		<optgroup disabled><option value="group-disabled" selected>Unavailable</option></optgroup>
+		<option value="green">Green</option>
+	</select></form>`)
+	r := newDOMRuntime(t, doc)
+	got, err := r.Evaluate(`(function(){var fd=new FormData(document.getElementById('f'));return fd.getAll('color').join(',')})()`)
+	if err != nil {
+		t.Fatalf("construct FormData: %v", err)
+	}
+	if got != "red,Blue Sky" {
+		t.Fatalf("selected option entries = %q, want red,Blue Sky", got)
+	}
+}
+
+func TestFormDataCharsetKeywordUsesASCIICaseOnHiddenControls(t *testing.T) {
+	doc := domtest.Parse(`<form id="f">
+		<input type="hidden" name="_charset_" value="lower">
+		<input type="hidden" name="_CHARSET_" value="upper">
+		<input type="hidden" name="_ChArSeT_" value="mixed">
+		<input type="hidden" name="_charſet_" value="unicode">
+		<input type="text" name="_charset_" value="text">
+	</form>`)
+	r := newDOMRuntime(t, doc)
+	got, err := r.Evaluate(`(function(){var d=new FormData(document.getElementById('f'));return [d.getAll('_charset_').join(','),d.get('_CHARSET_'),d.get('_ChArSeT_'),d.get('_charſet_')].join('|')})()`)
+	if err != nil {
+		t.Fatalf("construct FormData: %v", err)
+	}
+	if got != "UTF-8,text|UTF-8|UTF-8|unicode" {
+		t.Fatalf("charset keyword entries = %q, want UTF-8,text|UTF-8|UTF-8|unicode", got)
+	}
+}
+
+func TestFormDataConstructionGuardPreventsRecursiveFormSubmission(t *testing.T) {
+	doc := domtest.Parse(`<iframe name="target"></iframe><form id="f" target="target"><input name="value" value="x"></form>`)
+	r := newDOMRuntime(t, doc)
+	got, err := r.Evaluate(`(function() {
+		const form = document.getElementById('f');
+		let events = 0;
+		let submits = 0;
+		form.addEventListener('submit', () => submits++);
+		form.addEventListener('formdata', () => {
+			events++;
+			form.requestSubmit();
+			form.submit();
+		});
+		form.submit();
+		const afterSubmission = events;
+		new FormData(form);
+		return afterSubmission + ',' + events + ',' + submits;
+	})()`)
+	if err != nil {
+		t.Fatalf("construct and submit FormData: %v", err)
+	}
+	if got != "1,2,0" {
+		t.Fatalf("formdata and submit events after nested submission = %q, want 1,2,0", got)
+	}
+}
 
 func TestFormDataAppend(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})

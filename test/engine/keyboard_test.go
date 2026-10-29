@@ -195,8 +195,8 @@ func TestKeyboard_ActivationTracksActiveAndDispatchesClick(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
 <div id="parent"><button id="target">Activate</button></div>
 </body></html>`)
-	target := nodeByID(sess.Doc.Node.FirstChild, "target")
-	parent := nodeByID(sess.Doc.Node.FirstChild, "parent")
+	target := nodeByID(&sess.Doc.Node, "target")
+	parent := nodeByID(&sess.Doc.Node, "parent")
 	if target == nil || parent == nil {
 		t.Fatal("activation nodes not found")
 	}
@@ -243,7 +243,7 @@ func TestKeyboard_PreventDefaultBlocksSpaceActivation(t *testing.T) {
 	if !focusCenter(t, sess, "cb") {
 		t.Fatal("could not focus checkbox")
 	}
-	cb := nodeByID(sess.Doc.Node.FirstChild, "cb")
+	cb := nodeByID(&sess.Doc.Node, "cb")
 	if cb == nil {
 		t.Fatal("checkbox not found")
 	}
@@ -261,9 +261,69 @@ func TestKeyboard_PreventDefaultBlocksSpaceActivation(t *testing.T) {
 	}
 }
 
+func TestKeyboard_HeldSpaceActiveStateClearsOnSequentialFocusChange(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<input type="checkbox" id="cb"><input id="next">
+</body></html>`)
+	cb := nodeByID(&sess.Doc.Node, "cb")
+	if cb == nil || !sess.FocusNode(cb) {
+		t.Fatal("could not find and focus checkbox")
+	}
+	sess.SetKeyboardActive(cb, true)
+	if !css.IsActive(cb) {
+		t.Fatal("held Space did not mark checkbox :active")
+	}
+	sess.FocusNext()
+	if f := sess.Focused(); f == nil || f.GetAttribute("id") != "next" {
+		t.Fatalf("Tab focus target = %v, want next input", f)
+	}
+	if css.IsActive(cb) {
+		t.Fatal(":active remained after sequential focus moved away")
+	}
+}
+
+func TestKeyboard_RadioGroupHasOneSequentialFocusStop(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<input id="start">
+<form>
+  <input type="radio" name="group" id="a">
+  <button id="middle">middle</button>
+  <input type="radio" name="group" id="b" checked>
+  <input type="radio" name="group" id="c">
+</form>
+<input id="end">
+</body></html>`)
+	start := nodeByID(&sess.Doc.Node, "start")
+	if start == nil || !sess.FocusNode(start) {
+		t.Fatal("could not focus start input")
+	}
+	sess.FocusNext()
+	if f := sess.Focused(); f == nil || f.GetAttribute("id") != "middle" {
+		t.Fatalf("first Tab target = %v, want the control before the checked radio", f)
+	}
+	sess.FocusNext()
+	if f := sess.Focused(); f == nil || f.GetAttribute("id") != "b" {
+		t.Fatalf("second Tab target = %v, want checked radio b", f)
+	}
+	sess.FocusNext()
+	if f := sess.Focused(); f == nil || f.GetAttribute("id") != "end" {
+		t.Fatalf("third Tab target = %v, want end input", f)
+	}
+	// A programmatically focused non-selected member moves to the group's
+	// sequential stop when Tab is pressed.
+	a := nodeByID(&sess.Doc.Node, "a")
+	if a == nil || !sess.FocusNode(a) {
+		t.Fatal("could not programmatically focus radio a")
+	}
+	sess.FocusNext()
+	if f := sess.Focused(); f == nil || f.GetAttribute("id") != "b" {
+		t.Fatalf("Tab after programmatic radio focus = %v, want checked member b", f)
+	}
+}
+
 func TestKeyboard_EnterLinkActivationHonorsClickPreventDefault(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body><a id="link" href="/next">next</a></body></html>`)
-	link := nodeByID(sess.Doc.Node.FirstChild, "link")
+	link := nodeByID(&sess.Doc.Node, "link")
 	if link == nil || !sess.FocusNode(link) {
 		t.Fatal("could not find and focus link")
 	}

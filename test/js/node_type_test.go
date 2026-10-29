@@ -78,9 +78,11 @@ func TestLibrarySetupGatePassesTheDocument(t *testing.T) {
 	})();
 	var reached = 0;
 	if (lib.configured()) {
-		// The call that threw "Cannot read property 'createElement' of
-		// undefined or null" 21 times on www.gov.vn.
-		lib.root().createElement("fieldset");
+		// Create through the Document interface; Node and Element do not expose
+		// Document-only factories such as createElement().
+		var root = lib.root();
+		if (!root || root.nodeType !== 1) throw new Error("documentElement unavailable");
+		document.createElement("fieldset");
 		reached = 1;
 	}
 	var shown = 0;

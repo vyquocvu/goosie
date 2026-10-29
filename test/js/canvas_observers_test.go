@@ -8,6 +8,17 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
+func observerTestDocument() *dom.Document {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	body := doc.NewElement("body")
+	doc.HTML = html
+	doc.Body = body
+	doc.Node.AppendChild(html)
+	html.AppendChild(body)
+	return doc
+}
+
 // Canvas 2D tests
 
 func TestCanvasConstructor(t *testing.T) {
@@ -207,10 +218,7 @@ func TestMutationObserverConstructor(t *testing.T) {
 }
 
 func TestMutationObserverObserve(t *testing.T) {
-	doc := dom.NewDocument()
-	body := doc.NewElement("body")
-	doc.Body = body
-	doc.Node.AppendChild(body)
+	doc := observerTestDocument()
 
 	r, err := js.New(js.Options{
 		Timeout: 5 * time.Second,
@@ -232,10 +240,7 @@ func TestMutationObserverObserve(t *testing.T) {
 }
 
 func TestMutationObserverDisconnect(t *testing.T) {
-	doc := dom.NewDocument()
-	body := doc.NewElement("body")
-	doc.Body = body
-	doc.Node.AppendChild(body)
+	doc := observerTestDocument()
 
 	r, err := js.New(js.Options{
 		Timeout: 5 * time.Second,
@@ -333,10 +338,7 @@ func TestResizeObserverConstructor(t *testing.T) {
 }
 
 func TestResizeObserverObserve(t *testing.T) {
-	doc := dom.NewDocument()
-	body := doc.NewElement("body")
-	doc.Body = body
-	doc.Node.AppendChild(body)
+	doc := observerTestDocument()
 
 	r, err := js.New(js.Options{
 		Timeout: 5 * time.Second,
@@ -358,10 +360,7 @@ func TestResizeObserverObserve(t *testing.T) {
 }
 
 func TestResizeObserverUnobserve(t *testing.T) {
-	doc := dom.NewDocument()
-	body := doc.NewElement("body")
-	doc.Body = body
-	doc.Node.AppendChild(body)
+	doc := observerTestDocument()
 
 	r, err := js.New(js.Options{
 		Timeout: 5 * time.Second,
@@ -384,10 +383,7 @@ func TestResizeObserverUnobserve(t *testing.T) {
 }
 
 func TestResizeObserverDisconnect(t *testing.T) {
-	doc := dom.NewDocument()
-	body := doc.NewElement("body")
-	doc.Body = body
-	doc.Node.AppendChild(body)
+	doc := observerTestDocument()
 
 	r, err := js.New(js.Options{
 		Timeout: 5 * time.Second,

@@ -117,7 +117,7 @@ func TestVoidEndTagsIgnored(t *testing.T) {
 	if table != 1 || colCount != 2 {
 		t.Errorf("table=%d cols=%d, want 1 table holding both cols", table, colCount)
 	}
-	// The td must nest inside the table, not beside it.
+	// The td must nest inside the table structure (table > tbody > tr > td).
 	var findTdParent func(n *dom.Node) string
 	findTdParent = func(n *dom.Node) string {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -132,7 +132,7 @@ func TestVoidEndTagsIgnored(t *testing.T) {
 		}
 		return ""
 	}
-	if got := findTdParent(&doc.Node); got != "table" {
-		t.Errorf("td parent = %q, want table", got)
+	if got := findTdParent(&doc.Node); got != "tr" {
+		t.Errorf("td parent = %q, want tr (inside implied tbody)", got)
 	}
 }

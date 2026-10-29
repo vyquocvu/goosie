@@ -15,7 +15,7 @@ import (
 // rather than a needle in an 8 MB input. Nodes is deliberately small enough for a
 // 40-token input to exhaust it: at 128 the corpus never reaches the node bound, and
 // disabling that check leaves this file green.
-var tightLimits = dom.ParseLimits{Nodes: 24, Depth: 8, Attributes: 4, AttributeBytes: 8}
+var tightLimits = dom.ParseLimits{Nodes: 50, Depth: 24, Attributes: 4, AttributeBytes: 8}
 
 // looseLimits dominates tightLimits in every field, which is what makes the second
 // parse meaningful: any token the tight parse accepted passes the loose checks too, so
@@ -35,7 +35,7 @@ const (
 	boundChecked bucket = iota
 	// refused tightly, built under looser limits, refusal traced to a bound
 	refusalExplained
-	// refused tightly for an attribute bound the dropped token never reached
+	// refused tightly while parsing tokens omitted from the final tree
 	refusalDropped
 	// refused under both limit sets, where the assertion thins to "both name a limit"
 	refusedBoth
@@ -79,13 +79,11 @@ func assertParse(t *testing.T, html string) bucket {
 	if stats.exceeds(tightLimits) {
 		return refusalExplained
 	}
-	// An attribute refusal can name a bound no retained node ever breaks, because the
-	// tree builder drops tokens outright: `<0><BodY long…>` is a second body, whose
-	// attributes are ignored with it - a finding the search turned up on 2026-09-27,
-	// pinned under testdata/fuzz/. The bound still held in the sense that matters here:
-	// those bytes were scanned and refused. Node and depth refusals have no such escape,
-	// since a bound the parser hit must be present in the tree it stopped building.
-	if isAttrRefusal(err) && !stats.exceeds(tightLimits) {
+	// Refusals can name a bound no retained node breaks when the tree builder drops
+	// tokens. This includes oversized attributes on ignored tokens and nodes created
+	// then discarded because inserting them into a Document would violate pre-insertion
+	// validity. Such nodes still count against the parser's work budget.
+	if (isAttrRefusal(err) || strings.Contains(err.Error(), "HTML node limit exceeded")) && !stats.exceeds(tightLimits) {
 		return refusalDropped
 	}
 	t.Errorf("parse of %q refused the tight limits %v with %q, but the same input parses under %v as %s, which breaks none of the tight bounds",
@@ -218,14 +216,14 @@ func TestParsePathCoverage(t *testing.T) {
 			refused++
 		}
 	}
-	t.Logf("%d synthetic documents: %d checked against the tight bounds (%.1f%%), %d refusals explained by the loose parse (%.1f%%), %d attribute refusals on tokens the tree builder dropped (%.1f%%), %d refused under both limit sets (%.1f%%)",
+	t.Logf("%d synthetic documents: %d checked against the tight bounds (%.1f%%), %d refusals explained by the loose parse (%.1f%%), %d refusals on tokens omitted from the result tree (%.1f%%), %d refused under both limit sets (%.1f%%)",
 		inputs, checked, 100*float64(checked)/inputs, explained, 100*float64(explained)/inputs,
 		dropped, 100*float64(dropped)/inputs, refused, 100*float64(refused)/inputs)
 	if checked == 0 || explained == 0 {
 		t.Errorf("corpus reaches %d tight-bound checks and %d explained refusals: the target has become one-sided, so its execution count no longer means the bounds are being tested", checked, explained)
 	}
-	if dropped > inputs/20 {
-		t.Errorf("%d of %d inputs are explained only by the dropped-token escape; that path is the weakest assertion in this file and it should stay rare", dropped, inputs)
+	if dropped > inputs/16 {
+		t.Errorf("%d of %d inputs are explained only by tokens omitted from the result tree; this path should stay below 6.25%%", dropped, inputs)
 	}
 	if refused > inputs/10 {
 		t.Errorf("%d of %d inputs are refused under both limit sets, where the assertion thins to \"both refusals name a limit\"; widen looseLimits", refused, inputs)

@@ -39,13 +39,24 @@ func collectFromNode(n, form, submitter *dom.Node, data *[]FormData) {
 	}
 	if n == submitter {
 		if isSubmitButton(n, form) && n.GetAttribute("name") != "" {
-			*data = append(*data, FormData{Name: n.GetAttribute("name"), Value: controlValue(n)})
+			*data = append(*data, FormData{Name: n.GetAttribute("name"), Value: controlSubmissionValue(n)})
 		}
 	} else if n.Element() && isSuccessfulControl(n, form) {
 		name := n.GetAttribute("name")
 		if name != "" {
-			value := controlValue(n)
-			*data = append(*data, FormData{Name: name, Value: value})
+			if n.Data == "select" {
+				for _, option := range dom.SelectOptions(n) {
+					if len(*data) >= MaxFormControls {
+						break
+					}
+					if option.OptionSelected() && !option.OptionDisabled() {
+						*data = append(*data, FormData{Name: name, Value: optionValue(option)})
+					}
+				}
+			} else {
+				value := controlSubmissionValue(n)
+				*data = append(*data, FormData{Name: name, Value: value})
+			}
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -54,7 +65,7 @@ func collectFromNode(n, form, submitter *dom.Node, data *[]FormData) {
 }
 
 func isSubmitButton(n, form *dom.Node) bool {
-	if n == nil || !n.Element() || n.HasAttribute("disabled") || FindForm(n) != form {
+	if n == nil || !n.Element() || dom.IsFormControlDisabled(n) || FindForm(n) != form {
 		return false
 	}
 	switch n.Data {
@@ -104,7 +115,7 @@ func ValidateForm(form *dom.Node) []*dom.Node {
 			return
 		}
 		if n.Element() && (n.Data == "input" || n.Data == "textarea" || n.Data == "select") &&
-			!n.HasAttribute("disabled") && n.HasAttribute("name") {
+			!dom.IsFormControlDisabled(n) {
 			controls = append(controls, n)
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -130,12 +141,12 @@ func ValidateForm(form *dom.Node) []*dom.Node {
 			empty := value == ""
 			switch typ {
 			case "checkbox":
-				empty = !n.HasAttribute("checked")
+				empty = !n.InputChecked()
 			case "radio":
 				group := radioGroups[n.GetAttribute("name")]
 				checked := false
 				for _, member := range group {
-					checked = checked || member.HasAttribute("checked")
+					checked = checked || member.InputChecked()
 				}
 				if !checked && len(group) > 0 {
 					invalidSet[group[0]] = true
@@ -143,7 +154,7 @@ func ValidateForm(form *dom.Node) []*dom.Node {
 				empty = false
 			case "":
 				if n.Data == "select" {
-					empty = value == ""
+					empty = dom.SelectValueMissing(n)
 				}
 			}
 			if empty {
@@ -175,7 +186,7 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 		return false
 	}
 	// Check disabled
-	if n.HasAttribute("disabled") {
+	if dom.IsFormControlDisabled(n) {
 		return false
 	}
 	// Check name exists
@@ -191,7 +202,7 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 			return false // submitter is added at its tree-order position
 		case "checkbox", "radio":
 			// Only successful if checked
-			return n.HasAttribute("checked")
+			return n.InputChecked()
 		case "file":
 			return false // not supported yet
 		case "image":
@@ -213,15 +224,9 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 func controlValue(n *dom.Node) string {
 	switch n.Data {
 	case "input":
-		value := n.GetAttribute("value")
-		typ := strings.ToLower(n.GetAttribute("type"))
-		if value == "" && (typ == "checkbox" || typ == "radio") {
-			return "on"
-		}
-		return value
+		return n.InputControlValue()
 	case "textarea":
-		// Value is the text content
-		return n.TextContent()
+		return n.InputControlValue()
 	case "select":
 		// The same rule the keyboard and the accessibility tree use, so a
 		// submitted value and an announced value cannot diverge.
@@ -235,6 +240,13 @@ func controlValue(n *dom.Node) string {
 	return ""
 }
 
+func controlSubmissionValue(n *dom.Node) string {
+	if n != nil && n.Data == "textarea" {
+		return n.TextareaSubmissionValue()
+	}
+	return controlValue(n)
+}
+
 // EncodeFormURLEncoded encodes form data as application/x-www-form-urlencoded.
 func EncodeFormURLEncoded(data []FormData) string {
 	var buf strings.Builder
@@ -242,14 +254,20 @@ func EncodeFormURLEncoded(data []FormData) string {
 		if i > 0 {
 			buf.WriteByte('&')
 		}
-		buf.WriteString(url.QueryEscape(d.Name))
+		buf.WriteString(url.QueryEscape(normalizeFormLineBreaks(d.Name)))
 		buf.WriteByte('=')
-		buf.WriteString(url.QueryEscape(d.Value))
+		buf.WriteString(url.QueryEscape(normalizeFormLineBreaks(d.Value)))
 		if buf.Len() > MaxFormDataBytes {
 			break
 		}
 	}
 	return buf.String()
+}
+
+func normalizeFormLineBreaks(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.ReplaceAll(value, "\n", "\r\n")
 }
 
 // FormMethod returns the HTTP method for a form (GET, POST, or dialog).

@@ -4,10 +4,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// Keyboard selection for <select>. The DOM stays the single source of truth:
-// the chosen <option> carries the "selected" attribute, which is what
-// controlValue, SelectedOption, paintSelect and the form collection already
-// read. Nothing here keeps a parallel selection index that could drift.
+// Keyboard selection for <select>. The DOM option nodes store live selectedness
+// separately from their selected content attributes.
 
 // FocusedSelect returns the focused <select> element, or nil when focus is
 // elsewhere, on a disabled select, or on nothing at all.
@@ -37,26 +35,15 @@ func (s *Session) FocusedSelectValue() string {
 // already holds opMu and must not re-enter the non-reentrant mutex.
 func (s *Session) focusedSelectLocked() *dom.Node {
 	n := s.focus
-	if n == nil || !n.Element() || n.Data != "select" || n.HasAttribute("disabled") {
+	if n == nil || !n.Element() || n.Data != "select" || dom.IsFormControlDisabled(n) {
 		return nil
 	}
 	return n
 }
 
-// selectOptionNodes returns the option children of a select in tree order.
-// Options nested inside an <optgroup> are not reached: the engine has no
-// optgroup support yet, so a keyboard user cannot land on those options.
+// selectOptionNodes returns the options in a select's options list.
 func selectOptionNodes(sel *dom.Node) []*dom.Node {
-	var opts []*dom.Node
-	if sel == nil {
-		return opts
-	}
-	for c := sel.FirstChild; c != nil; c = c.NextSibling {
-		if c.Element() && c.Data == "option" {
-			opts = append(opts, c)
-		}
-	}
-	return opts
+	return dom.SelectOptions(sel)
 }
 
 // MoveSelect shifts the selected option of the focused select. It reports
@@ -89,6 +76,7 @@ func (s *Session) MoveSelect(action EditAction) bool {
 		return true
 	}
 	cur := -1
+	dom.NormalizeSelectSelectedness(sel)
 	for i, o := range opts {
 		// The last authored selection wins, which is the tie-break SelectedOption
 		// reports and the one Chromium measures (scripts/verify-task037-
@@ -96,13 +84,13 @@ func (s *Session) MoveSelect(action EditAction) bool {
 		// from that document steps to index 2). Stepping from the first would make
 		// the first key press look like a no-op, because the value the control
 		// already carries is the last one.
-		if o.HasAttribute("selected") {
+		if o.OptionSelected() {
 			cur = i
 		}
 	}
 	if cur < 0 {
 		for i, o := range opts {
-			if !o.HasAttribute("disabled") {
+			if !o.OptionDisabled() {
 				cur = i
 				break
 			}
@@ -137,7 +125,7 @@ func (s *Session) MoveSelect(action EditAction) bool {
 
 func nextEnabledOption(opts []*dom.Node, from int) int {
 	for i := from + 1; i < len(opts); i++ {
-		if !opts[i].HasAttribute("disabled") {
+		if !opts[i].OptionDisabled() {
 			return i
 		}
 	}
@@ -146,7 +134,7 @@ func nextEnabledOption(opts []*dom.Node, from int) int {
 
 func prevEnabledOption(opts []*dom.Node, from int) int {
 	for i := from - 1; i >= 0; i-- {
-		if !opts[i].HasAttribute("disabled") {
+		if !opts[i].OptionDisabled() {
 			return i
 		}
 	}
@@ -155,7 +143,7 @@ func prevEnabledOption(opts []*dom.Node, from int) int {
 
 func firstEnabledOption(opts []*dom.Node) int {
 	for i, o := range opts {
-		if !o.HasAttribute("disabled") {
+		if !o.OptionDisabled() {
 			return i
 		}
 	}
@@ -164,7 +152,7 @@ func firstEnabledOption(opts []*dom.Node) int {
 
 func lastEnabledOption(opts []*dom.Node) int {
 	for i := len(opts) - 1; i >= 0; i-- {
-		if !opts[i].HasAttribute("disabled") {
+		if !opts[i].OptionDisabled() {
 			return i
 		}
 	}
@@ -175,8 +163,7 @@ func lastEnabledOption(opts []*dom.Node) int {
 // attribute from every sibling, so the serialized DOM cannot end up with two
 // selected options for a single-select control.
 func setSelectedOption(opts []*dom.Node, target int) {
-	for _, o := range opts {
-		o.RemoveAttribute("selected")
+	for i, o := range opts {
+		o.SetOptionSelected(i == target, true)
 	}
-	opts[target].SetAttribute("selected", "")
 }

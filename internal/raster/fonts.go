@@ -109,13 +109,61 @@ func parseCmapRanges(data []byte) runeCoverage {
 	if len(data) < 12 {
 		return nil
 	}
-	numTables := binary.BigEndian.Uint16(data[4:6])
-	if len(data) < int(12+numTables*16) {
+	offsets := []int{0}
+	if string(data[:4]) == "ttcf" {
+		if len(data) < 12 {
+			return nil
+		}
+		count := binary.BigEndian.Uint32(data[8:12])
+		if count == 0 || count > 64 || uint64(12)+uint64(count)*4 > uint64(len(data)) {
+			return nil
+		}
+		offsets = make([]int, 0, count)
+		for i := uint32(0); i < count; i++ {
+			offset := binary.BigEndian.Uint32(data[12+i*4 : 16+i*4])
+			if uint64(offset)+12 <= uint64(len(data)) {
+				offsets = append(offsets, int(offset))
+			}
+		}
+	}
+	var ranges []runeRange
+	for _, offset := range offsets {
+		ranges = append(ranges, parseSFNTCmapRangesAt(data, offset)...)
+	}
+	if len(ranges) == 0 {
+		return nil
+	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start < ranges[j].start })
+	merged := make([]runeRange, 0, len(ranges))
+	curr := ranges[0]
+	for _, next := range ranges[1:] {
+		if next.start <= curr.end+1 {
+			if next.end > curr.end {
+				curr.end = next.end
+			}
+		} else {
+			merged = append(merged, curr)
+			curr = next
+		}
+	}
+	merged = append(merged, curr)
+	return runeCoverage(merged)
+}
+
+// parseSFNTCmapRangesAt parses a face directory at offset. Table offsets in a
+// TrueType collection remain relative to the collection start, so data itself
+// is not sliced before following the cmap table pointer.
+func parseSFNTCmapRangesAt(data []byte, offset int) []runeRange {
+	if offset < 0 || offset+12 > len(data) {
+		return nil
+	}
+	numTables := binary.BigEndian.Uint16(data[offset+4 : offset+6])
+	if offset+12+int(numTables)*16 > len(data) {
 		return nil
 	}
 	var cmapOffset, cmapLen uint32
 	for i := 0; i < int(numTables); i++ {
-		entry := data[12+i*16 : 12+(i+1)*16]
+		entry := data[offset+12+i*16 : offset+12+(i+1)*16]
 		if string(entry[:4]) == "cmap" {
 			cmapOffset = binary.BigEndian.Uint32(entry[8:12])
 			cmapLen = binary.BigEndian.Uint32(entry[12:16])
@@ -185,23 +233,7 @@ func parseCmapRanges(data []byte) runeCoverage {
 	if len(ranges) == 0 {
 		return nil
 	}
-	sort.Slice(ranges, func(i, j int) bool {
-		return ranges[i].start < ranges[j].start
-	})
-	merged := make([]runeRange, 0, len(ranges))
-	curr := ranges[0]
-	for _, r := range ranges[1:] {
-		if r.start <= curr.end+1 {
-			if r.end > curr.end {
-				curr.end = r.end
-			}
-		} else {
-			merged = append(merged, curr)
-			curr = r
-		}
-	}
-	merged = append(merged, curr)
-	return runeCoverage(merged)
+	return ranges
 }
 
 type Fonts struct {
@@ -308,7 +340,9 @@ var systemFontCollections = []struct {
 // are checked before narrow dingbat faces (ZapfDingbats), and large multi-megabyte fonts
 // (Arial Unicode) are queried last only when smaller fonts do not provide the glyph.
 var systemFallbackFiles = []string{
-	// macOS - host fallback faces ordered by measured non-Latin coverage (Apple Symbols: 58.3%, ZapfDingbats: 1.7%)
+	// CJKSymbolsFallback is a small macOS collection containing kana and CJK symbols.
+	"/System/Library/Fonts/CJKSymbolsFallback.ttc",
+	// Other macOS and Linux fallback faces are ordered by measured non-Latin coverage.
 	"/System/Library/Fonts/Apple Symbols.ttf",
 	"/System/Library/Fonts/ZapfDingbats.ttf",
 	// Linux - small system fonts (< 2 MB)
@@ -444,21 +478,42 @@ func (f *Fonts) admitAndRetainFallbackLocked(path string, data []byte, size int3
 	if len(f.fallbacks) >= MaxParsedFallbackFonts {
 		return nil
 	}
-	parsed, err := opentype.Parse(data)
-	if err != nil {
-		f.rejectedFallbackPaths[path] = true
-		return nil
+	var parsed *opentype.Font
+	var face font.Face
+	if len(data) >= 4 && string(data[:4]) == "ttcf" {
+		collection, err := opentype.ParseCollection(data)
+		if err != nil {
+			f.rejectedFallbackPaths[path] = true
+			return nil
+		}
+		for i := 0; i < collection.NumFonts(); i++ {
+			candidate, err := collection.Font(i)
+			if err != nil {
+				continue
+			}
+			candidateFace, err := opentype.NewFace(candidate, &opentype.FaceOptions{
+				Size: float64(size), DPI: faceDPI, Hinting: font.HintingNone,
+			})
+			if err == nil && HasGlyph(candidateFace, r) {
+				parsed, face = candidate, candidateFace
+				break
+			}
+		}
+	} else {
+		candidate, err := opentype.Parse(data)
+		if err != nil {
+			f.rejectedFallbackPaths[path] = true
+			return nil
+		}
+		candidateFace, err := opentype.NewFace(candidate, &opentype.FaceOptions{
+			Size: float64(size), DPI: faceDPI, Hinting: font.HintingNone,
+		})
+		if err == nil && HasGlyph(candidateFace, r) {
+			parsed, face = candidate, candidateFace
+		}
 	}
-	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
-		Size:    float64(size),
-		DPI:     faceDPI,
-		Hinting: font.HintingNone,
-	})
-	if err != nil {
+	if parsed == nil || face == nil {
 		f.rejectedFallbackPaths[path] = true
-		return nil
-	}
-	if !HasGlyph(face, r) {
 		return nil
 	}
 

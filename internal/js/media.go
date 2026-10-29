@@ -223,20 +223,14 @@ func (r *Runtime) mediaSet(nid int, name string, v goja.Value) {
 	}
 	switch name {
 	case "controls":
-		if v != nil && v.ToBoolean() {
-			node.SetAttribute("controls", "")
-		} else {
-			node.RemoveAttribute("controls")
-		}
-		r.notifyMutation()
+		r.setReflectedAttribute(node, "controls", "", v != nil && v.ToBoolean())
 		return
 	case "src":
 		url := ""
 		if v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
 			url = v.String()
 		}
-		node.SetAttribute("src", url)
-		r.notifyMutation()
+		r.setReflectedAttribute(node, "src", url, true)
 		// Assigning src runs the load algorithm, so the fetch starts here rather
 		// than waiting for play(). Clearing it does the opposite: it stops
 		// whatever was loading.

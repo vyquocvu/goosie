@@ -95,6 +95,99 @@ func TestAccessibilityTextFieldValue(t *testing.T) {
 	}
 }
 
+func TestAccessibilityElementInternalsRoleAndLabelledByElements(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body><span id="label">Open details</span><span id="other-label">Host label</span><x-control id="control" style="display:block;width:100px;height:20px">Visible fallback</x-control><div id="shadow-host"></div><x-shadow-control id="shadow-control" style="display:block;width:100px;height:20px"></x-shadow-control><script>
+		class XControl extends HTMLElement {
+			constructor() {
+				super();
+				const internals = this.attachInternals();
+				internals.role = "button";
+				internals.ariaLabelledByElements = [document.getElementById("label")];
+			}
+		}
+		customElements.define("x-control", XControl);
+		const root = document.getElementById("shadow-host").attachShadow({mode: "open"});
+		root.innerHTML = '<span id="shadow-label">Invalid cross-root name</span>';
+		const shadowLabel = root.getElementById("shadow-label");
+		customElements.define("x-shadow-control", class extends HTMLElement {
+			constructor() {
+				super();
+				const internals = this.attachInternals();
+				internals.role = "button";
+				internals.ariaLabelledByElements = [shadowLabel];
+			}
+		});
+	</script></body></html>`)
+	control := axFind(s.AccessibilityTree(), ax.RoleButton, "Open details")
+	if control == nil || control.ID != "control" {
+		state, err := s.EvaluateJS(`document.getElementById("control").constructor.name + "|" + document.getElementById("control").getAttribute("style")`)
+		t.Fatalf("ElementInternals button node not found: state=%q err=%v tree=%+v", state, err, s.AccessibilityTree())
+	}
+	if _, err := s.EvaluateJS(`document.getElementById("control").ariaLabelledByElements = [document.getElementById("other-label")]`); err != nil {
+		t.Fatalf("set host ariaLabelledByElements: %v", err)
+	}
+	if control := axFind(s.AccessibilityTree(), ax.RoleButton, "Host label"); control == nil {
+		t.Fatalf("host ariaLabelledByElements did not override internals: %+v", s.AccessibilityTree())
+	}
+	if _, err := s.EvaluateJS(`document.getElementById("control").setAttribute("aria-labelledby", "missing-reference")`); err != nil {
+		t.Fatalf("set invalid host aria-labelledby: %v", err)
+	}
+	if control := axFind(s.AccessibilityTree(), ax.RoleButton, ""); control == nil {
+		t.Fatalf("invalid host aria-labelledby did not suppress internals name: %+v", s.AccessibilityTree())
+	}
+	for _, node := range axFlatten(s.AccessibilityTree()) {
+		if node.ID == "shadow-control" {
+			if node.Role != ax.RoleButton || node.Label != "" {
+				t.Fatalf("cross-root ElementInternals reference resolved as a name: %+v", node)
+			}
+			return
+		}
+	}
+	t.Fatalf("cross-root ElementInternals control not found: %+v", s.AccessibilityTree())
+}
+
+func TestAccessibilityEmptyCustomElementWithoutLayout(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body><x-empty id="empty"></x-empty><script>
+		customElements.define("x-empty", class extends HTMLElement {
+			constructor() {
+				super();
+				const internals = this.attachInternals();
+				internals.role = "button";
+				internals.ariaLabel = "Empty action";
+			}
+		});
+	</script></body></html>`)
+	for _, node := range axFlatten(s.AccessibilityTree()) {
+		if node.DOMNodeID == 0 || node.ID != "empty" {
+			continue
+		}
+		if node.RoleName != "button" || node.Label != "Empty action" {
+			t.Fatalf("empty custom element accessibility info = %+v", node)
+		}
+		if node.X0 != node.X1 || node.Y0 != node.Y1 {
+			t.Fatalf("empty custom element unexpectedly has layout bounds: %+v", node)
+		}
+		return
+	}
+	t.Fatalf("empty custom element missing from accessibility tree: %+v", s.AccessibilityTree())
+}
+
+func TestAccessibilityContentRoleTokensAndARIAName(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body>
+		<span id="name">Referenced name</span>
+		<button id="override" role="unsupported link" aria-labelledby="name">Native name</button>
+		<button id="aria-label" aria-label="Explicit name">Fallback name</button>
+	</body></html>`)
+	link := axFind(s.AccessibilityTree(), ax.RoleLink, "Referenced name")
+	if link == nil || link.ID != "override" {
+		t.Fatalf("content role or aria-labelledby not applied: %+v", s.AccessibilityTree())
+	}
+	button := axFind(s.AccessibilityTree(), ax.RoleButton, "Explicit name")
+	if button == nil || button.ID != "aria-label" {
+		t.Fatalf("aria-label did not override native button text: %+v", s.AccessibilityTree())
+	}
+}
+
 func TestAccessibilityTextareaValue(t *testing.T) {
 	s := newFocusSession(t, axRichHTML)
 	for _, n := range axFlatten(s.AccessibilityTree()) {

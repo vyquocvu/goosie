@@ -2,9 +2,29 @@ package js
 
 import (
 	"net/url"
+	"strings"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/dom"
 )
+
+// locationForDocument returns the Location associated with an active document
+// or iframe document. Detached documents have no browsing context and return
+// null.
+func (r *Runtime) locationForDocument(doc *dom.Document) goja.Value {
+	if doc == nil {
+		return goja.Null()
+	}
+	if doc == r.domDoc && r.locObj != nil {
+		return r.locObj
+	}
+	if frame := r.iframeFrameForDocument(&doc.Node); frame != nil {
+		if window, ok := r.iframeWindow(frame).(*goja.Object); ok {
+			return window.Get("location")
+		}
+	}
+	return goja.Null()
+}
 
 // window.location, as the parts pages actually read.
 //
@@ -97,12 +117,20 @@ func (r *Runtime) setupLocationParts(win *goja.Object) {
 		}
 		return "?" + u.RawQuery
 	})
-	get("hash", func(u *url.URL, _ string) string {
+	_ = loc.DefineAccessorProperty("hash", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		_, u := r.locationState()
 		if u == nil || u.Fragment == "" {
-			return ""
+			return r.vm.ToValue("")
 		}
-		return "#" + u.Fragment
-	})
+		return r.vm.ToValue("#" + u.Fragment)
+	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		fragment := ""
+		if value := call.Argument(0); value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) {
+			fragment = strings.TrimPrefix(value.String(), "#")
+		}
+		r.activateLinkFragment("#" + fragment)
+		return goja.Undefined()
+	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	get("origin", func(u *url.URL, _ string) string {
 		if u == nil || u.Scheme == "" || u.Host == "" {
 			return "null"

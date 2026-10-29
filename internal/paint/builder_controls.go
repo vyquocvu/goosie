@@ -1,6 +1,7 @@
 package paint
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -18,7 +19,7 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 		return
 	}
 	text := obj.Node.GetAttribute("placeholder")
-	if text == "" || obj.Node.GetAttribute("value") != "" {
+	if text == "" || controlText(obj) != "" {
 		return
 	}
 	// A composition preview takes the placeholder's place on an empty control.
@@ -76,7 +77,7 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 	if s == nil || obj.Node == nil || !obj.Node.Element() {
 		return
 	}
-	text := b.composeControlText(obj, obj.Node.GetAttribute("value"))
+	text := b.composeControlText(obj, obj.Node.InputControlValue())
 	if text == "" {
 		return
 	}
@@ -129,7 +130,7 @@ func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity flo
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-1, rect.Y0, rect.X1, rect.Y1), Color: borderColor, Opacity: opacity})
 
 	// If checked, draw a checkmark.
-	if obj.Node != nil && obj.Node.HasAttribute("checked") {
+	if obj.Node != nil && obj.Node.InputChecked() {
 		checkColor := frame.RGB(0, 0, 0)
 		// Apply accent-color if set and has alpha > 0
 		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
@@ -186,7 +187,7 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 	}
 
 	// If checked, draw a filled dot in the center.
-	if obj.Node != nil && obj.Node.HasAttribute("checked") {
+	if obj.Node != nil && obj.Node.InputChecked() {
 		dotColor := frame.RGB(0, 0, 0)
 		// Apply accent-color if set and has alpha > 0
 		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
@@ -209,6 +210,110 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 			}
 		}
 	}
+}
+
+// paintRange draws the current value of a range input as a track, filled
+// segment, and thumb. The range input's value has already passed the HTML
+// value-sanitization algorithm before it reaches this paint stage.
+func (b *Builder) paintRange(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	if obj == nil || obj.Node == nil || obj.Style == nil || b.scale <= 0 {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	diameter := int32(math.Round(float64(14 * b.scale)))
+	if diameter < 6 {
+		diameter = 6
+	}
+	left := int32(math.Round(float64(x0*b.scale))) + diameter/2
+	right := int32(math.Round(float64(x1*b.scale))) - diameter/2
+	centerY := int32(math.Round(float64((y0 + y1) / 2 * b.scale)))
+	if right < left {
+		left, right = int32(math.Round(float64(x0*b.scale))), int32(math.Round(float64(x1*b.scale)))
+	}
+	minimum, hasMin := parseControlNumber(obj.Node.GetAttribute("min"))
+	if !hasMin {
+		minimum = 0
+	}
+	maximum, hasMax := parseControlNumber(obj.Node.GetAttribute("max"))
+	if !hasMax {
+		maximum = 100
+	}
+	if maximum < minimum {
+		maximum = minimum
+	}
+	value, valid := parseControlNumber(obj.Node.InputControlValue())
+	if !valid {
+		value = minimum + (maximum-minimum)/2
+	}
+	fraction := float64(0.5)
+	if maximum > minimum {
+		fraction = (value - minimum) / (maximum - minimum)
+	}
+	if fraction < 0 {
+		fraction = 0
+	} else if fraction > 1 {
+		fraction = 1
+	}
+	if obj.Style.Direction == "rtl" {
+		fraction = 1 - fraction
+	}
+	thumbX := left + int32(math.Round(float64(right-left)*fraction))
+	trackHalf := int32(math.Max(1, math.Round(float64(2*b.scale))))
+	base := frame.RGB(191, 191, 191)
+	active := frame.RGB(10, 132, 255)
+	if obj.Style.AccentColor.A > 0 {
+		active = frame.RGB(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B)
+	}
+	track := frame.Rect4(left, centerY-trackHalf, right+1, centerY+trackHalf+1)
+	b.appendRangeFill(track, base, opacity, clip)
+	b.appendRangeFill(frame.Rect4(min(left, thumbX), centerY-trackHalf, max(left, thumbX)+1, centerY+trackHalf+1), active, opacity, clip)
+	// Datalist suggestions that fall inside the range are shown as tick marks.
+	// Draw them after the track fill and before the thumb so a tick under the
+	// thumb is naturally occluded.
+	tickColor := frame.RGB(16, 16, 16)
+	tickHeight := int32(math.Max(2, math.Round(float64(4*b.scale))))
+	radius := diameter / 2
+	tickStart := left + int32(math.Round(float64(3*b.scale)))
+	tickSpan := right - tickStart
+	seenTicks := make(map[int32]struct{})
+	for _, suggested := range obj.Node.DatalistOptions() {
+		tickValue, ok := parseControlNumber(suggested)
+		if !ok || tickValue < minimum || tickValue > maximum || maximum <= minimum {
+			continue
+		}
+		tickFraction := (tickValue - minimum) / (maximum - minimum)
+		if obj.Style.Direction == "rtl" {
+			tickFraction = 1 - tickFraction
+		}
+		tickX := tickStart + int32(float64(tickSpan)*tickFraction)
+		if _, duplicate := seenTicks[tickX]; duplicate {
+			continue
+		}
+		seenTicks[tickX] = struct{}{}
+		tickTop := centerY + radius + int32(math.Round(float64(5*b.scale)))
+		b.appendRangeFill(frame.Rect4(tickX, tickTop, tickX+1, tickTop+tickHeight), tickColor, opacity, clip)
+	}
+	// Build the circular thumb from horizontal spans so the rasterizer only
+	// receives solid rectangles, like the existing radio-control painter.
+	for dy := -radius; dy <= radius; dy++ {
+		half := int32(math.Sqrt(float64(radius*radius - dy*dy)))
+		b.appendRangeFill(frame.Rect4(thumbX-half, centerY+dy, thumbX+half+1, centerY+dy+1), active, opacity, clip)
+	}
+}
+
+func parseControlNumber(value string) (float64, bool) {
+	number, err := strconv.ParseFloat(value, 64)
+	return number, err == nil && !math.IsInf(number, 0) && !math.IsNaN(number)
+}
+
+func (b *Builder) appendRangeFill(rect frame.Rect, color frame.Color, opacity float32, clip *frame.Rect) {
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+	}
+	if rect.Empty() {
+		return
+	}
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity})
 }
 
 // paintButtonLabel draws the value text of a button-like input (submit, reset,
@@ -276,18 +381,19 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 	// Find the selected option.
 	var text string
 	var firstOption string
-	for c := obj.Node.FirstChild; c != nil; c = c.NextSibling {
-		if c.Element() && c.Data == "option" {
-			optText := c.TextContent()
-			if firstOption == "" {
-				firstOption = optText
-			}
-			if c.HasAttribute("selected") {
-				text = optText
-			}
+	for option := obj.Node.FirstChild; option != nil; option = option.NextSibling {
+		if option.Data != "option" {
+			continue
+		}
+		if firstOption == "" && !option.OptionDisabled() {
+			firstOption = option.TextContent()
+		}
+		if option.OptionSelected() {
+			text = option.TextContent()
+			break
 		}
 	}
-	if text == "" {
+	if text == "" && !obj.Node.SelectNoSelection && !obj.Node.HasAttribute("multiple") && obj.Node.GetAttribute("size") == "" {
 		text = firstOption
 	}
 	if text == "" {
@@ -345,7 +451,7 @@ func controlText(obj *layout.Object) string {
 		return ""
 	}
 	if obj.Node.Data == "input" {
-		return obj.Node.GetAttribute("value")
+		return obj.Node.InputControlValue()
 	}
 	for c := obj.Node.FirstChild; c != nil; c = c.NextSibling {
 		if c.Text() {
@@ -557,7 +663,7 @@ func (b *Builder) paintProgress(obj *layout.Object, rect frame.Rect, opacity flo
 			Left:   SideSpec{Width: 1, Color: borderColor},
 		},
 	})
-	valStr := obj.Node.GetAttribute("value")
+	valStr := obj.Node.InputControlValue()
 	if valStr == "" {
 		return
 	}

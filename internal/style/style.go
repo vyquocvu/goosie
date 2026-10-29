@@ -36,6 +36,7 @@ const (
 	DisplayGrid
 	DisplayInlineGrid
 	DisplayContents
+	DisplayInlineTable
 )
 
 // Position is the CSS position property value.
@@ -258,6 +259,8 @@ type ComputedStyle struct {
 	ContainIntrinsicHeight float32
 	AnchorName             string
 	PositionAnchor         string
+	PositionAnchorNodeID   dom.NodeID
+	PositionArea           string
 	TopAnchor              string
 	RightAnchor            string
 	BottomAnchor           string
@@ -425,8 +428,13 @@ type ComputedStyle struct {
 	// declared after the line-height, or in a rule that wins later in the
 	// cascade. Like a length it never inherits - a child takes the resolved
 	// px value - so it is left out of the inherit pass. Zero means none.
-	LineHeightEm   float32
-	Direction      string // "ltr" or "rtl"
+	LineHeightEm float32
+	Direction    string // "ltr" or "rtl"
+	// UnicodeBidi is the CSS unicode-bidi property: "" (the initial
+	// "normal"), "embed", "isolate", "bidi-override", or "plaintext". It
+	// controls how layout resolves the paragraph level of the text, not
+	// anything the cascade inherits, so it stays out of inheritFromParent.
+	UnicodeBidi    string
 	TextAlign      TextAlign
 	TextIndent     float32
 	TextTransform  string
@@ -442,6 +450,7 @@ type ComputedStyle struct {
 	FlexDirection  FlexDirection
 	FlexWrap       FlexWrap
 	JustifyContent string
+	JustifySelf    string
 	AlignItems     string
 	AlignSelf      string
 	FlexGrow       float32
@@ -834,6 +843,7 @@ input, button, select, textarea, table {
 html { display: block; }
 head { display: none; }
 style, script, title, meta, link, template, noscript { display: none; }
+[hidden] { display: none; }
 body { display: block; margin: 8px; }
 div { display: block; }
 center { display: block; text-align: center; }
@@ -853,6 +863,7 @@ a { color: #0000ee; text-decoration: underline; }
 table { display: table; border-collapse: separate; border-spacing: 2px; }
 thead { display: table-header-group; }
 tbody { display: table-row-group; }
+tfoot { display: table-footer-group; }
 tr { display: table-row; }
 td { display: table-cell; padding: 1px; }
 th { display: table-cell; padding: 1px; font-weight: 700; }
@@ -882,14 +893,12 @@ figure { display: block; margin: 1em 40px; }
 figcaption { display: block; }
 details { display: block; }
 summary { display: block; }
-/* A closed <details> discloses nothing but its summary: the rest of its children
-   are hidden by the widget, not by the author, so the rule belongs to the UA
-   sheet. Every story row on lobste.rs carries a dropdown menu this left in the
-   flow, adding a line box per row. */
-details:not([open]) > *:not(summary) { display: none; }
+/* A closed <details> hides its remaining content without removing its layout
+   boxes: CSSOM geometry APIs must still report the closed subtree's box sizes. */
+details:not([open]) > *:not(summary) { content-visibility: hidden; }
 dialog { display: none; position: absolute; left: 0; right: 0; margin: auto; border: solid 1px; padding: 1em; background: white; color: black; }
 dialog[open] { display: block; }
-[popover] { display: none; position: fixed; inset: 0; margin: auto; border: solid 1px; padding: 0.5em; background: white; color: black; }
+[popover] { display: none; position: fixed; inset: auto; margin: auto; border: solid 1px; padding: 0.25em; background: white; color: black; }
 [popover]:popover-open { display: block; }
 fieldset { display: block; margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove; }
 legend { display: block; padding: 0 0.25em; }
@@ -919,11 +928,11 @@ msqrt { display: inline-block; }
    types shrink to a label the engine does not read out of an attribute, or draw
    a widget it cannot reproduce, so they stay inline and take no box. */
 input { display: inline-block; background-color: #ffffff; }
-textarea { display: inline-block; background-color: #ffffff; }
+textarea { display: inline-block; background-color: #ffffff; font-family: monospace; font-size: 13.333px; white-space: pre-wrap; }
+textarea[wrap="off" i] { white-space: pre; }
 input[type=image],
 input[type=file], input[type=date], input[type=time], input[type=datetime-local],
-input[type=datetime], input[type=month], input[type=week], input[type=color],
-input[type=range] { display: inline; }
+input[type=datetime], input[type=month], input[type=week], input[type=color] { display: inline; }
 /* Chrome lays button-like inputs out as inline-level boxes that shrink-wrap
    their value label. display:inline would send them down the generic inline
    descent with no children to measure, collapsing every submit button to 0x0,
@@ -1572,6 +1581,23 @@ func resolveNode(n *dom.Node, index *ruleIndex, result map[dom.NodeID]*ComputedS
 	if n.ShadowRoot != nil {
 		var shadowSheets []*css.Stylesheet
 		collectShadowStyleSheets(n.ShadowRoot.FirstChild, &shadowSheets)
+		// Document rules normally do not cross a shadow boundary. The ::part()
+		// pseudo-element is the explicit exception, so carry only those rules
+		// into the shadow tree's index for host-to-part matching.
+		partSheet := &css.Stylesheet{}
+		for _, indexed := range index.part {
+			rule := *indexed.rule
+			rule.Selectors = []css.Selector{indexed.sel}
+			partSheet.Rules = append(partSheet.Rules, rule)
+		}
+		if len(partSheet.Rules) > 0 {
+			shadowSheets = append(shadowSheets, partSheet)
+		}
+		for _, text := range n.ShadowRoot.AdoptedStyleSheetTexts {
+			if strings.TrimSpace(text) != "" {
+				shadowSheets = append(shadowSheets, css.Parse(text))
+			}
+		}
 		shadowIndex := index
 		if len(shadowSheets) > 0 {
 			allShadowSheets := []*css.Stylesheet{UserAgentStylesheet()}
@@ -1657,6 +1683,11 @@ func applyHostStyles(n *dom.Node, shadowSheets []*css.Stylesheet, cs *ComputedSt
 }
 
 func findParentStyle(n *dom.Node, result map[dom.NodeID]*ComputedStyle) *ComputedStyle {
+	if slot := n.AssignedSlot(); slot != nil {
+		if cs, ok := result[slot.ID]; ok {
+			return cs
+		}
+	}
 	for p := n.Parent; p != nil; p = p.Parent {
 		if cs, ok := result[p.ID]; ok {
 			return cs
@@ -1824,7 +1855,16 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 				continue
 			}
 		} else {
-			if !cand.sel.MatchesIndexed(n, six) {
+			matchedSelector := cand.sel.MatchesIndexed(n, six)
+			if !matchedSelector && selectorHasPart(cand.sel) {
+				for host := n.Parent; host != nil; host = host.Parent {
+					if host.ShadowRoot != nil && isShadowDescendant(host, n) && cand.sel.MatchesPart(host, n) {
+						matchedSelector = true
+						break
+					}
+				}
+			}
+			if !matchedSelector {
 				continue
 			}
 		}
@@ -1989,6 +2029,21 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	return &cs
 }
 
+func isShadowDescendant(host, n *dom.Node) bool {
+	for child := n; child != nil; child = child.Parent {
+		if child.Parent != host {
+			continue
+		}
+		for rootChild := host.ShadowRoot.FirstChild; rootChild != nil; rootChild = rootChild.NextSibling {
+			if rootChild == child {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 func computeScopeDist(n *dom.Node, scopeRoot string) int {
 	if scopeRoot == "" || n == nil {
 		return 0
@@ -2137,6 +2192,13 @@ func presentationalHints(n *dom.Node) []css.Declaration {
 	}
 	add("background-color", n.GetAttribute("bgcolor"))
 	add("color", n.GetAttribute("color"))
+	dir := strings.ToLower(strings.TrimSpace(n.GetAttribute("dir")))
+	if dir == "auto" || n.Data == "bdi" && dir == "" {
+		dir = n.Directionality()
+	}
+	if dir == "ltr" || dir == "rtl" {
+		out = append(out, css.Declaration{Property: "direction", Value: dir, Parsed: css.ParseValue(dir)})
+	}
 	addLen("width", n.GetAttribute("width"))
 	addLen("height", n.GetAttribute("height"))
 	addLen("border-spacing", n.GetAttribute("cellspacing"))
@@ -2678,6 +2740,8 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.AnchorName = strings.TrimSpace(value)
 	case "position-anchor":
 		cs.PositionAnchor = strings.TrimSpace(value)
+	case "position-area":
+		cs.PositionArea = strings.ToLower(strings.TrimSpace(value))
 	case "text-wrap", "text-wrap-mode", "text-wrap-style":
 		val := strings.ToLower(strings.TrimSpace(value))
 		if val == "wrap" || val == "nowrap" || val == "balance" || val == "pretty" {
@@ -3483,6 +3547,12 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		if v == "rtl" || v == "ltr" {
 			cs.Direction = v
 		}
+	case "unicode-bidi":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "normal", "embed", "isolate", "bidi-override", "plaintext":
+			cs.UnicodeBidi = v
+		}
 	case "text-align":
 		cs.TextAlign = parseTextAlign(value, cs.Direction)
 	case "text-indent":
@@ -3645,10 +3715,21 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		parseFlexFlow(cs, value)
 	case "justify-content":
 		cs.JustifyContent = value
+	case "justify-self":
+		cs.JustifySelf = value
 	case "align-items":
 		cs.AlignItems = value
 	case "align-self":
 		cs.AlignSelf = value
+	case "place-self":
+		parts := splitTopLevelSpace(value)
+		if len(parts) > 0 {
+			cs.AlignSelf = parts[0]
+			cs.JustifySelf = parts[0]
+		}
+		if len(parts) > 1 {
+			cs.JustifySelf = parts[1]
+		}
 	case "flex-grow":
 		cs.FlexGrow = float32(parsed.Num)
 	case "flex-shrink":
@@ -4169,6 +4250,8 @@ func parseDisplay(v string) Display {
 		return DisplayListItem
 	case "table":
 		return DisplayTable
+	case "inline-table":
+		return DisplayInlineTable
 	case "table-row":
 		return DisplayTableRow
 	case "table-cell":

@@ -88,7 +88,7 @@ func TestURLSearchParams(t *testing.T) {
 	defer r.Close()
 
 	err = r.Run(`
-		var sp = new URLSearchParams('a=1&b=2&a=3');
+		var sp = new URLSearchParams('?a=1&b=2&a=3');
 		var a = sp.get('a');
 		var b = sp.get('b');
 		var c = sp.get('c');

@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
@@ -50,16 +51,19 @@ func (r *Runtime) setInlineStyleText(node *dom.Node, value string) {
 	if node == nil || !node.Element() {
 		return
 	}
+	value = serializeInlineStyle(value)
 	before, had := node.GetAttribute("style"), node.HasAttribute("style")
 	if value == "" {
 		if had {
 			node.RemoveAttribute("style")
+			r.notifyCustomElementAttributeChanged(node, "style", before, true, "", false, "")
 			r.notifyMutation()
 		}
 		return
 	}
 	if !had || before != value {
 		node.SetAttribute("style", value)
+		r.notifyCustomElementAttributeChanged(node, "style", before, had, value, true, "")
 		r.notifyMutation()
 	}
 }
@@ -75,7 +79,7 @@ func (s *inlineStyleDeclaration) Get(key string) goja.Value {
 	}
 	switch key {
 	case "cssText":
-		return s.runtime.vm.ToValue(s.node.GetAttribute("style"))
+		return s.runtime.vm.ToValue(serializeInlineStyle(s.node.GetAttribute("style")))
 	case "length":
 		return s.runtime.vm.ToValue(len(parseInlineStyle(s.node.GetAttribute("style"))))
 	case "item":
@@ -260,9 +264,39 @@ func parseInlineStyle(text string) []inlineDeclaration {
 			value = strings.TrimSpace(value[:i])
 			priority = "important"
 		}
+		if !validInlineStyleValue(name, value) {
+			continue
+		}
 		decls = append(decls, inlineDeclaration{name: name, value: value, priority: priority})
 	}
 	return decls
+}
+
+func validInlineStyleValue(name, value string) bool {
+	if value == "" || strings.HasPrefix(value, ":") {
+		return false
+	}
+	if strings.HasPrefix(name, "--") {
+		return true
+	}
+	if name == "color" || strings.HasSuffix(name, "-color") {
+		_, ok := css.ParseColor(value)
+		return ok
+	}
+	return true
+}
+
+func serializeInlineStyle(text string) string {
+	decls := parseInlineStyle(text)
+	parts := make([]string, 0, len(decls))
+	for _, decl := range decls {
+		part := decl.name + ": " + decl.value
+		if decl.priority != "" {
+			part += " !important"
+		}
+		parts = append(parts, part+";")
+	}
+	return strings.Join(parts, " ")
 }
 
 func splitInlineDeclarations(text string) []string {

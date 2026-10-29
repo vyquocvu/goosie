@@ -135,18 +135,33 @@ func (r *Runtime) TickRAF(timestamp time.Time) {
 			}
 		}
 	}
+
+	// Advance Web Animations API animations each frame.
+	r.TickAnimations()
 }
 
-// HasPendingRAF reports whether there are any pending requestAnimationFrame callbacks.
+// HasPendingRAF reports whether there are any pending requestAnimationFrame
+// callbacks or active Web Animations that need frame updates.
 func (r *Runtime) HasPendingRAF() bool {
 	fs := rafOf(r)
-	if fs == nil {
-		return false
+	if fs != nil {
+		fs.mu.Lock()
+		has := len(fs.callbacks) > 0
+		fs.mu.Unlock()
+		if has {
+			return true
+		}
 	}
 
-	fs.mu.Lock()
-	has := len(fs.callbacks) > 0
-	fs.mu.Unlock()
+	// Also report active if any Web Animation is running or paused.
+	reg := getAnimRegistry(r)
+	if reg != nil {
+		for _, anim := range reg.anims {
+			if anim.playState == "running" || anim.playState == "paused" {
+				return true
+			}
+		}
+	}
 
-	return has
+	return false
 }

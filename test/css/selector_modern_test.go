@@ -79,6 +79,54 @@ func TestModernSelectorSpecificity(t *testing.T) {
 	}
 }
 
+func TestIsAndWhereUseForgivingSelectorLists(t *testing.T) {
+	selectors, err := css.ParseSelectorList(`div:is(:not-a-real-pseudo, .good)`)
+	if err != nil {
+		t.Fatalf("ParseSelectorList with one invalid :is() member: %v", err)
+	}
+	good := &dom.Node{Type: dom.NodeElement, Data: "div"}
+	good.SetAttribute("class", "good")
+	if !selectors[0].Matches(good) {
+		t.Fatal("valid :is() member did not match after invalid member was discarded")
+	}
+	if !css.ParseSelector(`div:where(:not-a-real-pseudo, .good)`).Matches(good) {
+		t.Fatal("single-selector parsing did not preserve the valid :where() member")
+	}
+	other := &dom.Node{Type: dom.NodeElement, Data: "div"}
+	other.SetAttribute("class", "other")
+	if selectors[0].Matches(other) {
+		t.Fatal(":is() matched when none of its valid members matched")
+	}
+
+	// Invalid alternatives do not contribute specificity. The remaining ID
+	// selector still supplies :is()'s maximum specificity.
+	isSelector := css.ParseSelector(`div:is(#winner, :not-a-real-pseudo, .good)`)
+	a, b, c := isSelector.Specificity()
+	if a != 1 || b != 0 || c != 1 {
+		t.Fatalf(":is() specificity = (%d, %d, %d), want (1, 0, 1)", a, b, c)
+	}
+
+	whereSelector := css.ParseSelector(`div:where(#winner, :not-a-real-pseudo, .good)`)
+	a, b, c = whereSelector.Specificity()
+	if a != 0 || b != 0 || c != 1 {
+		t.Fatalf(":where() specificity = (%d, %d, %d), want (0, 0, 1)", a, b, c)
+	}
+
+	for _, empty := range []string{
+		`div:is(:not-a-real-pseudo, ::before)`,
+		`div:where()`,
+	} {
+		parsed, err := css.ParseSelectorList(empty)
+		if err != nil {
+			t.Errorf("ParseSelectorList(%q): %v; empty forgiving list is valid", empty, err)
+			continue
+		}
+		if parsed[0].Matches(good) {
+			t.Errorf("%q matched despite its forgiving list having no valid members", empty)
+		}
+	}
+}
+
 func TestAttributeCaseInsensitiveModifier(t *testing.T) {
 	selInsensitive := css.ParseSelector(`[data-target="HelloWorld" i]`)
 	selSensitive := css.ParseSelector(`[data-target="HelloWorld" s]`)

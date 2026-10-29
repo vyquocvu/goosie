@@ -223,6 +223,14 @@ func TestFormStatePseudoClasses(t *testing.T) {
 	if css.ParseSelector("input:placeholder-shown").Matches(placeholder) {
 		t.Error("non-empty input should not match :placeholder-shown")
 	}
+	placeholder.SetInputControlValue("", true)
+	if !css.ParseSelector("input:placeholder-shown").Matches(placeholder) {
+		t.Error("dirty empty live input should match :placeholder-shown even when its default value is non-empty")
+	}
+	placeholder.SetInputControlValue("typed", true)
+	if css.ParseSelector("input:placeholder-shown").Matches(placeholder) {
+		t.Error("non-empty live input should not match :placeholder-shown when its default value is non-empty")
+	}
 	textarea := doc.NewElement("textarea")
 	textarea.SetAttribute("placeholder", "Notes")
 	form.AppendChild(textarea)
@@ -232,6 +240,61 @@ func TestFormStatePseudoClasses(t *testing.T) {
 	textarea.AppendChild(doc.NewText("saved"))
 	if css.ParseSelector("textarea:placeholder-shown").Matches(textarea) {
 		t.Error("textarea with text should not match :placeholder-shown")
+	}
+	textarea.SetInputControlValue("", true)
+	if !css.ParseSelector("textarea:placeholder-shown").Matches(textarea) {
+		t.Error("dirty empty textarea value should match :placeholder-shown when default text remains non-empty")
+	}
+	textarea.SetInputControlValue("edited", true)
+	if css.ParseSelector("textarea:placeholder-shown").Matches(textarea) {
+		t.Error("non-empty live textarea value should not match :placeholder-shown")
+	}
+}
+
+func TestReadOnlyAndReadWritePseudoClassesFollowHTMLMutability(t *testing.T) {
+	doc := dom.NewDocument()
+	fieldset := doc.NewElement("fieldset")
+	fieldset.SetAttribute("disabled", "")
+	doc.Node.AppendChild(fieldset)
+	input := doc.NewElement("input")
+	fieldset.AppendChild(input)
+	readonly := doc.NewElement("input")
+	readonly.SetAttribute("readonly", "")
+	doc.Node.AppendChild(readonly)
+	checkbox := doc.NewElement("input")
+	checkbox.SetAttribute("type", "checkbox")
+	checkbox.SetAttribute("readonly", "") // readonly does not apply to checkbox state.
+	doc.Node.AppendChild(checkbox)
+	textarea := doc.NewElement("textarea")
+	doc.Node.AppendChild(textarea)
+	editable := doc.NewElement("div")
+	editable.SetAttribute("contenteditable", "true")
+	doc.Node.AppendChild(editable)
+	plain := doc.NewElement("div")
+	doc.Node.AppendChild(plain)
+
+	for _, tc := range []struct {
+		selector string
+		node     *dom.Node
+		want     bool
+	}{
+		{"input:read-only", input, true},
+		{"input:read-write", input, false},
+		{"input:read-write", readonly, false},
+		{"input:read-write", checkbox, false},
+		{"textarea:read-write", textarea, true},
+		{"div:read-write", editable, true},
+		{"div:read-only", editable, false},
+		{"div:read-only", plain, true},
+	} {
+		if got := css.ParseSelector(tc.selector).Matches(tc.node); got != tc.want {
+			t.Errorf("%s match = %v, want %v", tc.selector, got, tc.want)
+		}
+	}
+
+	fieldset.RemoveAttribute("disabled")
+	if !css.ParseSelector("input:read-write").Matches(input) {
+		t.Error("input stopped matching :read-write after disabled fieldset was enabled")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 )
@@ -107,7 +108,15 @@ func (c *Condition) precompile() {
 		return
 	}
 	switch c.Value {
-	case "not", "is", "where", "host":
+	case "is", "where":
+		var sels []Selector
+		for _, selStr := range splitSelectorList(c.Pseudo) {
+			if sel, ok := parseSelector(selStr); ok && !hasPseudoElement(sel) {
+				sels = append(sels, sel)
+			}
+		}
+		c.compiled = &pseudoCompiled{sels: sels}
+	case "not", "host":
 		var sels []Selector
 		for _, selStr := range splitSelectorList(c.Pseudo) {
 			sels = append(sels, ParseSelector(selStr))
@@ -190,7 +199,7 @@ func (s Selector) Specificity() (a, b, c int) {
 						b++ // :host itself contributes 1 pseudo-class
 					}
 					var sels []Selector
-					if cond.compiled != nil && len(cond.compiled.sels) > 0 {
+					if cond.compiled != nil {
 						sels = cond.compiled.sels
 					} else if cond.Pseudo != "" {
 						for _, selStr := range splitSelectorList(cond.Pseudo) {
@@ -412,8 +421,13 @@ func validCondition(c Condition, raw string) bool {
 	switch c.Type {
 	case CondUniversal:
 		return true
-	case CondType, CondID, CondClass:
-		return validIdent(c.Value)
+	case CondType:
+		return validIdent(raw)
+	case CondID, CondClass:
+		if len(raw) < 2 {
+			return false
+		}
+		return validIdent(raw[1:])
 	case CondAttr:
 		return validAttrCondition(c, raw)
 	case CondPseudoClass:
@@ -434,19 +448,73 @@ func validIdent(s string) bool {
 		return false
 	}
 	if s[0] == '-' {
-		// "-" alone is not an identifier, nor is "-1"; "--" and "-a" are.
-		if len(s) < 2 || (s[1] != '-' && !isIdentStart(s[1])) {
+		// "-" alone is not an identifier, nor is "-1"; "--", "-a", and
+		// an escaped second code point are.
+		if len(s) < 2 || (s[1] != '-' && !isIdentStart(s[1]) && !isValidCSSEscapeAt(s, 1)) {
 			return false
 		}
-	} else if !isIdentStart(s[0]) {
+	} else if !isIdentStart(s[0]) && !isValidCSSEscapeAt(s, 0) {
 		return false
 	}
-	for i := 1; i < len(s); i++ {
-		if !isIdentChar(s[i]) {
-			return false
+	_, end, ok := consumeCSSIdent(s, 0)
+	return ok && end == len(s)
+}
+
+func isValidCSSEscapeAt(s string, i int) bool {
+	return i+1 < len(s) && s[i] == '\\' && s[i+1] != '\n' && s[i+1] != '\r' && s[i+1] != '\f'
+}
+
+// consumeCSSIdent reads a CSS identifier and decodes its escapes. It returns
+// the decoded value, the byte after the identifier, and false for a trailing
+// backslash or an escaped newline.
+func consumeCSSIdent(s string, start int) (string, int, bool) {
+	var out strings.Builder
+	i := start
+	for i < len(s) {
+		if isIdentChar(s[i]) {
+			out.WriteByte(s[i])
+			i++
+			continue
 		}
+		if s[i] != '\\' {
+			break
+		}
+		if !isValidCSSEscapeAt(s, i) {
+			return out.String(), i, false
+		}
+		i++
+		if isCSSHex(s[i]) {
+			begin := i
+			for i < len(s) && i-begin < 6 && isCSSHex(s[i]) {
+				i++
+			}
+			value, _ := strconv.ParseUint(s[begin:i], 16, 32)
+			r := rune(value)
+			if r == 0 || r > utf8.MaxRune || (r >= 0xD800 && r <= 0xDFFF) {
+				r = utf8.RuneError
+			}
+			out.WriteRune(r)
+			if i < len(s) && isCSSWhitespace(s[i]) {
+				if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+					i++
+				}
+				i++
+			}
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		out.WriteRune(r)
+		i += size
 	}
-	return true
+	return out.String(), i, true
+}
+
+func isCSSHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func isCSSWhitespace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }
 
 // validAttrCondition reports whether one attribute selector is well formed.
@@ -507,18 +575,17 @@ func validPseudoClass(c Condition) bool {
 		"fullscreen", "autofill", "user-invalid", "user-valid", "current",
 		"past", "future", "active-view-transition", "host":
 		return true
-	case "lang", "dir", "state", "host-context", "active-view-transition-type":
+	case "lang", "dir", "host-context", "active-view-transition-type":
 		return strings.TrimSpace(c.Pseudo) != ""
+	case "state":
+		return validIdent(strings.TrimSpace(c.Pseudo))
 	case "not":
 		// Selectors 4 lets :not() take a selector list ("p:not(.a, .c)"),
 		// which the cascade matcher already evaluates as a list; a
 		// pseudo-element argument is invalid, as is an empty one.
 		return validSelectorList(c.Pseudo, false)
 	case "is", "where":
-		if strings.TrimSpace(c.Pseudo) == "" {
-			return true
-		}
-		return validSelectorList(c.Pseudo, false)
+		return validForgivingSelectorList(c.Pseudo)
 	case "has":
 		return validSelectorList(c.Pseudo, true)
 	case "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type":
@@ -577,6 +644,15 @@ func validSelectorList(s string, relative bool) bool {
 	return true
 }
 
+// validForgivingSelectorList implements the selector filtering used by :is()
+// and :where(): invalid alternatives and pseudo-element selectors are ignored.
+// The resulting list may be empty, in which case the pseudo-class is valid and
+// matches nothing.
+func validForgivingSelectorList(s string) bool {
+	_, splitOK := splitSelectorListExact(s)
+	return splitOK
+}
+
 // hasPseudoElement reports whether sel carries a pseudo-element condition.
 func hasPseudoElement(sel Selector) bool {
 	for _, part := range sel.Parts {
@@ -618,19 +694,13 @@ func parseCondition(s string, i int) (Condition, int) {
 	switch s[i] {
 	case '#':
 		i++
-		start := i
-		for i < len(s) && isIdentChar(s[i]) {
-			i++
-		}
-		return Condition{Type: CondID, Value: s[start:i]}, i
+		value, end, _ := consumeCSSIdent(s, i)
+		return Condition{Type: CondID, Value: value}, end
 
 	case '.':
 		i++
-		start := i
-		for i < len(s) && isIdentChar(s[i]) {
-			i++
-		}
-		return Condition{Type: CondClass, Value: s[start:i]}, i
+		value, end, _ := consumeCSSIdent(s, i)
+		return Condition{Type: CondClass, Value: value}, end
 
 	case '[':
 		i++
@@ -714,7 +784,7 @@ func parseCondition(s string, i int) (Condition, int) {
 					i++
 				}
 			}
-			arg := s[argStart:i]
+			arg := strings.TrimSpace(s[argStart:i])
 			if i < len(s) {
 				i++
 			}
@@ -737,12 +807,9 @@ func parseCondition(s string, i int) (Condition, int) {
 		return Condition{Type: CondUniversal}, i
 
 	default:
-		if isIdentStart(s[i]) || s[i] == '-' {
-			start := i
-			for i < len(s) && isIdentChar(s[i]) {
-				i++
-			}
-			return Condition{Type: CondType, Value: strings.ToLower(s[start:i])}, i
+		if isIdentStart(s[i]) || s[i] == '-' || s[i] == '\\' {
+			value, end, _ := consumeCSSIdent(s, i)
+			return Condition{Type: CondType, Value: strings.ToLower(value)}, end
 		}
 	}
 
@@ -752,6 +819,47 @@ func parseCondition(s string, i int) (Condition, int) {
 // Matches reports whether the selector matches the given node.
 func (s Selector) Matches(n *dom.Node) bool {
 	return s.MatchesIndexed(n, nil)
+}
+
+// MatchesPart applies a selector containing ::part() to a part element using
+// host conditions before ::part and part conditions after it.
+func (s Selector) MatchesPart(host, target *dom.Node) bool {
+	if host == nil || target == nil || len(s.Parts) == 0 {
+		return false
+	}
+	partName := ""
+	partPart, partCond := -1, -1
+	for i, part := range s.Parts {
+		for j, cond := range part.Conditions {
+			if cond.Type == CondPseudoElement && cond.Value == "part" {
+				partPart, partCond, partName = i, j, cond.Pseudo
+				break
+			}
+		}
+	}
+	if partPart < 0 || partName == "" {
+		return false
+	}
+	found := false
+	for _, name := range strings.Fields(target.GetAttribute("part")) {
+		if name == partName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	before := Selector{Parts: make([]SelectorPart, partPart+1)}
+	copy(before.Parts, s.Parts[:partPart+1])
+	before.Parts[partPart].Conditions = append([]Condition(nil), s.Parts[partPart].Conditions[:partCond]...)
+	if len(before.Parts[partPart].Conditions) == 0 {
+		before.Parts[partPart].Conditions = []Condition{{Type: CondUniversal}}
+	}
+	if !before.MatchesIndexed(host, nil) {
+		return false
+	}
+	return matchConditions(s.Parts[partPart].Conditions[partCond+1:], target, nil)
 }
 
 // WithScope returns a copy of s in which :scope stands for root instead of the
@@ -1066,6 +1174,8 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return n.Parent != nil && n.Parent.Type == dom.NodeDocument
 	case "empty":
 		return n.FirstChild == nil
+	case "defined":
+		return n.Namespace != dom.NSHTML || !n.CustomElementUndefined
 	case "not":
 		if c.Pseudo == "" {
 			return true
@@ -1119,6 +1229,8 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return matchLang(c.Pseudo, n)
 	case "dir":
 		return matchesDirectionality(n, c.Pseudo)
+	case "state":
+		return n.CustomStates != nil && n.CustomStates[c.Pseudo]
 	case "visited":
 		// The engine does not retain navigation history for :visited and does
 		// not expose it to selectors, avoiding leakage of unrelated session state.
@@ -1165,12 +1277,36 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		return n.IsScopeRoot
 	case "popover-open":
 		return n.IsPopoverOpen
+	case "modal":
+		return n.Data == "dialog" && n.IsModal && n.HasAttribute("open")
 	case "checked":
 		return matchesChecked(n)
+	case "required":
+		return isConstraintControl(n) && n.HasAttribute("required")
+	case "optional":
+		return isConstraintControl(n) && !n.HasAttribute("required")
+	case "invalid":
+		if n.Data == "form" || n.Data == "fieldset" {
+			return formHasInvalidControl(n)
+		}
+		return isConstraintControl(n) && constraintControlInvalid(n)
+	case "valid":
+		if n.Data == "form" || n.Data == "fieldset" {
+			return !formHasInvalidControl(n)
+		}
+		return isConstraintControl(n) && !constraintControlInvalid(n)
+	case "in-range":
+		return constraintControlInRange(n, false)
+	case "out-of-range":
+		return constraintControlInRange(n, true)
 	case "disabled":
 		return isDisableable(n) && isDisabled(n)
 	case "enabled":
 		return isDisableable(n) && !isDisabled(n)
+	case "read-write":
+		return matchesReadWrite(n)
+	case "read-only":
+		return n != nil && n.Element() && !matchesReadWrite(n)
 	case "placeholder-shown":
 		return placeholderIsShown(n)
 	case "has":
@@ -1206,6 +1342,162 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	return false
 }
 
+func matchesReadWrite(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	if n.Namespace == dom.NSHTML && n.Data == "input" {
+		if isDisabled(n) || n.HasAttribute("readonly") {
+			return false
+		}
+		switch strings.ToLower(n.GetAttribute("type")) {
+		case "", "text", "search", "url", "tel", "email", "password", "date", "month", "week", "time", "datetime-local", "number":
+			return true
+		default:
+			return false
+		}
+	}
+	if n.Namespace == dom.NSHTML && n.Data == "textarea" {
+		return !isDisabled(n) && !n.HasAttribute("readonly")
+	}
+	return dom.IsContentEditable(n)
+}
+
+func isConstraintControl(n *dom.Node) bool {
+	if n == nil || n.Namespace != dom.NSHTML {
+		return false
+	}
+	if n.FormAssociatedCustomElement {
+		return true
+	}
+	switch n.Data {
+	case "textarea", "select":
+		return true
+	case "input":
+		switch strings.ToLower(n.GetAttribute("type")) {
+		case "hidden", "button", "reset", "submit", "image":
+			return false
+		default:
+			return true
+		}
+	default:
+		return false
+	}
+}
+
+func constraintControlInvalid(n *dom.Node) bool {
+	if n.FormAssociatedCustomElement {
+		return !n.CustomElementValid
+	}
+	if n.HasAttribute("disabled") || n.HasAttribute("readonly") {
+		return false
+	}
+	if n.CustomValidityMessage != "" || n.PatternMismatch || n.TypeMismatch || n.RangeUnderflow || n.RangeOverflow || n.StepMismatch || dom.IsTooLong(n) || dom.IsTooShort(n) {
+		return true
+	}
+	if !n.HasAttribute("required") {
+		return false
+	}
+	if n.Data == "input" {
+		switch strings.ToLower(n.GetAttribute("type")) {
+		case "checkbox":
+			return !n.InputChecked()
+		case "radio":
+			name := n.GetAttribute("name")
+			root := n
+			for root.Parent != nil {
+				root = root.Parent
+			}
+			checked := false
+			_ = root.Walk(func(candidate *dom.Node) bool {
+				if candidate.Data == "input" && strings.EqualFold(candidate.GetAttribute("type"), "radio") && candidate.GetAttribute("name") == name && candidate.InputChecked() {
+					checked = true
+					return false
+				}
+				return true
+			})
+			return !checked
+		}
+	}
+	value := n.GetAttribute("value")
+	if n.Data == "textarea" {
+		value = n.TextContent()
+	}
+	if n.Data == "select" {
+		value = ""
+		for _, option := range dom.SelectOptions(n) {
+			if option.OptionSelected() {
+				value = option.GetAttribute("value")
+				if value == "" {
+					value = strings.TrimSpace(option.TextContent())
+				}
+				break
+			}
+		}
+	}
+	return value == ""
+}
+
+func constraintControlInRange(n *dom.Node, outOfRange bool) bool {
+	if n == nil {
+		return false
+	}
+	typ := strings.ToLower(n.GetAttribute("type"))
+	if !isConstraintControl(n) || isDisabled(n) || n.HasAttribute("readonly") || n.Data != "input" || !isRangeLimitedInputType(typ) || !n.RangeLimited {
+		return false
+	}
+	out := n.RangeUnderflow || n.RangeOverflow
+	if outOfRange {
+		return out
+	}
+	return !out
+}
+
+func isRangeLimitedInputType(typ string) bool {
+	switch typ {
+	case "number", "date", "month", "week", "time", "datetime-local":
+		return true
+	default:
+		return false
+	}
+}
+
+func formHasInvalidControl(form *dom.Node) bool {
+	if form == nil {
+		return false
+	}
+	invalid := false
+	var walk func(*dom.Node)
+	walk = func(parent *dom.Node) {
+		for child := parent.FirstChild; child != nil && !invalid; child = child.NextSibling {
+			if isConstraintControl(child) && constraintControlInvalid(child) {
+				if form.Data == "fieldset" {
+					invalid = true
+					return
+				}
+				owner := child
+				if id, hasForm := child.GetAttributeNS("", "form"); hasForm && id != "" && child.Doc != nil {
+					owner = child.Doc.ElementByID(id)
+				} else {
+					for ancestor := child.Parent; ancestor != nil; ancestor = ancestor.Parent {
+						if ancestor.Data == "form" {
+							owner = ancestor
+							break
+						}
+					}
+				}
+				if owner == form {
+					invalid = true
+					return
+				}
+			}
+			walk(child)
+		}
+	}
+	walk(form)
+	return invalid
+}
+
 // matchesDirectionality implements :dir() for explicit HTML directionality
 // and inherited direction. Whitespace around the argument is insignificant,
 // as required for a CSS function argument. Invalid dir attributes inherit from
@@ -1215,16 +1507,7 @@ func matchesDirectionality(n *dom.Node, argument string) bool {
 	if want != "ltr" && want != "rtl" {
 		return false
 	}
-	for current := n; current != nil; current = current.Parent {
-		if current.Type != dom.NodeElement || !current.HasAttribute("dir") {
-			continue
-		}
-		dir := strings.ToLower(strings.TrimSpace(current.GetAttribute("dir")))
-		if dir == "ltr" || dir == "rtl" {
-			return dir == want
-		}
-	}
-	return want == "ltr"
+	return n != nil && n.Directionality() == want
 }
 
 func matchesChecked(n *dom.Node) bool {
@@ -1234,35 +1517,12 @@ func matchesChecked(n *dom.Node) bool {
 	switch n.Data {
 	case "input":
 		typ := strings.ToLower(n.GetAttribute("type"))
-		return (typ == "checkbox" || typ == "radio") && n.HasAttribute("checked")
+		return (typ == "checkbox" || typ == "radio") && n.InputChecked()
 	case "option":
-		if n.HasAttribute("selected") {
-			return true
+		if selectNode := dom.NearestSelect(n); selectNode != nil {
+			dom.NormalizeSelectSelectedness(selectNode)
 		}
-		selectNode := n.Parent
-		for selectNode != nil && selectNode.Data != "select" {
-			selectNode = selectNode.Parent
-		}
-		if selectNode == nil || selectNode.HasAttribute("multiple") {
-			return false
-		}
-		var first, selected *dom.Node
-		var walk func(*dom.Node)
-		walk = func(parent *dom.Node) {
-			for c := parent.FirstChild; c != nil; c = c.NextSibling {
-				if c.Element() && c.Data == "option" {
-					if first == nil {
-						first = c
-					}
-					if c.HasAttribute("selected") && selected == nil {
-						selected = c
-					}
-				}
-				walk(c)
-			}
-		}
-		walk(selectNode)
-		return selected == nil && first == n
+		return n.OptionSelected()
 	}
 	return false
 }
@@ -1290,7 +1550,7 @@ func isDisableable(n *dom.Node) bool {
 	case "button", "fieldset", "input", "optgroup", "option", "select", "textarea":
 		return true
 	default:
-		return false
+		return n.FormAssociatedCustomElement
 	}
 }
 
@@ -1301,27 +1561,11 @@ func isDisabled(n *dom.Node) bool {
 	if n.HasAttribute("disabled") {
 		return true
 	}
+	if dom.IsDisabledByFieldset(n) {
+		return true
+	}
 	for parent := n.Parent; parent != nil; parent = parent.Parent {
 		if n.Data == "option" && (parent.Data == "optgroup" || parent.Data == "select") && parent.HasAttribute("disabled") {
-			return true
-		}
-		if parent.Data == "fieldset" && parent.HasAttribute("disabled") && !insideFirstLegend(n, parent) {
-			return true
-		}
-	}
-	return false
-}
-
-func insideFirstLegend(n, fieldset *dom.Node) bool {
-	var firstLegend *dom.Node
-	for child := fieldset.FirstChild; child != nil; child = child.NextSibling {
-		if child.Element() && child.Data == "legend" {
-			firstLegend = child
-			break
-		}
-	}
-	for current := n; current != nil && current != fieldset; current = current.Parent {
-		if current == firstLegend {
 			return true
 		}
 	}
@@ -1337,16 +1581,20 @@ func placeholderIsShown(n *dom.Node) bool {
 		typ := strings.ToLower(n.GetAttribute("type"))
 		switch typ {
 		case "", "text", "password", "email", "tel", "url", "search", "number":
-			return n.GetAttribute("value") == ""
+			return n.InputControlValue() == ""
 		default:
 			return false
 		}
 	case "textarea":
-		return n.TextContent() == ""
+		return n.InputControlValue() == ""
 	default:
 		return false
 	}
 }
+
+// IsPlaceholderShown reports whether an input or textarea currently presents
+// its placeholder text, using the live control value for input elements.
+func IsPlaceholderShown(n *dom.Node) bool { return placeholderIsShown(n) }
 
 // matchHas implements the :has() relational pseudo-class. The argument is a
 // selector list that may start with a combinator to specify the relationship:
@@ -1580,25 +1828,55 @@ func matchOneLang(lang string, n *dom.Node) bool {
 		if !el.Element() {
 			continue
 		}
-		if v := xmlLangOf(el); v != "" {
-			return langMatches(v, lang)
+		if v, present := xmlLangOf(el); present {
+			return v != "" && langMatches(v, lang)
 		}
-		if v := el.GetAttribute("lang"); v != "" {
-			return langMatches(v, lang)
+		if el.HasAttribute("lang") {
+			v := el.GetAttribute("lang")
+			return v != "" && langMatches(v, lang)
 		}
 	}
-	return false
+	if n == nil || n.Doc == nil {
+		return false
+	}
+	if value, present := documentContentLanguage(n.Doc); present {
+		return value != "" && langMatches(value, lang)
+	}
+	return n.Doc.ContentLanguage != "" && langMatches(firstLanguageTag(n.Doc.ContentLanguage), lang)
 }
 
 // xmlLangOf reads the XML-namespaced xml:lang only; a parser-produced
 // literal of the same spelling does not count.
-func xmlLangOf(el *dom.Node) string {
+func xmlLangOf(el *dom.Node) (string, bool) {
 	for _, a := range el.Attr {
 		if a.Namespace == dom.NSXML && strings.EqualFold(a.Name, "xml:lang") {
-			return a.Value
+			return a.Value, true
 		}
 	}
-	return ""
+	return "", false
+}
+
+func documentContentLanguage(doc *dom.Document) (string, bool) {
+	if doc == nil || doc.Head == nil {
+		return "", false
+	}
+	var language string
+	doc.Head.Walk(func(n *dom.Node) bool {
+		if !n.Element() || n.Data != "meta" || !strings.EqualFold(strings.TrimSpace(n.GetAttribute("http-equiv")), "content-language") {
+			return true
+		}
+		language = firstLanguageTag(n.GetAttribute("content"))
+		return false
+	})
+	return language, language != ""
+}
+
+func firstLanguageTag(value string) string {
+	value = strings.TrimSpace(value)
+	if i := strings.IndexByte(value, ','); i >= 0 {
+		value = value[:i]
+	}
+	return strings.TrimSpace(value)
 }
 
 // langMatches reports BCP47 prefix equality: en covers en-US but not
@@ -1915,6 +2193,12 @@ func splitSelectorListExact(s string) ([]string, bool) {
 
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
+		if ch == '\\' && i+1 < len(s) {
+			current.WriteByte(ch)
+			i++
+			current.WriteByte(s[i])
+			continue
+		}
 		switch ch {
 		case '(':
 			depth++

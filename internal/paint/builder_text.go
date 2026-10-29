@@ -1,6 +1,8 @@
 package paint
 
 import (
+	"unicode/utf16"
+
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -10,6 +12,8 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	text := obj.Node.DataContent
 	if b.composingTextareaText(obj) {
 		text = b.composeControlText(obj, text)
+	} else if b.composingEditableText(obj) {
+		text = b.composeTextAtUTF16Offset(text)
 	}
 	if text == "" {
 		return
@@ -41,12 +45,38 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	b.appendRun(text, rect, s, convertColor(s.Color), opacity)
 }
 
+func (b *Builder) composingEditableText(obj *layout.Object) bool {
+	return b.focus.object != nil && b.focus.marked != "" && b.focus.compositionNode != 0 && obj != nil && obj.Node != nil && uint32(obj.Node.ID) == b.focus.compositionNode
+}
+
+func (b *Builder) composeTextAtUTF16Offset(text string) string {
+	runes := []rune(text)
+	index, units := 0, 0
+	for index < len(runes) && units < b.focus.compositionOffset {
+		length := utf16.RuneLen(runes[index])
+		if length < 0 {
+			length = 1
+		}
+		units += length
+		index++
+	}
+	marked := []rune(b.focus.marked)
+	out := make([]rune, 0, len(runes)+len(marked))
+	out = append(out, runes[:index]...)
+	out = append(out, marked...)
+	out = append(out, runes[index:]...)
+	return string(out)
+}
+
 // composingTextareaText reports whether obj paints the first text child of the
 // focused textarea, the one text node a composition preview can splice into.
 // The inline pass paints word copies of the node (same NodeID, new pointer), so
 // match by ID rather than pointer identity.
 func (b *Builder) composingTextareaText(obj *layout.Object) bool {
 	if b.focus.object == nil || b.focus.marked == "" || obj.Node == nil || b.focus.object.Node == nil {
+		return false
+	}
+	if b.focus.object.Node.Data != "textarea" {
 		return false
 	}
 	if obj.Node.Parent != b.focus.object.Node || !obj.Node.Text() {

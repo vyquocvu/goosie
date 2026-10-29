@@ -116,6 +116,7 @@ func (r *Runtime) setupCSS() {
 			winObj.Set("CSS", cssObj)
 		}
 	}
+	r.setupStyleSheetInterfaces()
 }
 
 // escapeCSSIdent escapes a string for use as a CSS identifier per CSSOM View §3.1.

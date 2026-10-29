@@ -122,7 +122,7 @@ func (r *Runtime) selectorArgument(call goja.FunctionCall, method string, root *
 // selector it cannot parse. Returning an empty result instead would read to
 // page code as "no match", the wrong answer this API must never give.
 func (r *Runtime) throwSelectorSyntaxError(method string, root *dom.Node, p *selectorPlan) {
-	panic(namedError(r, "SyntaxError", "Failed to execute '"+method+"' on '"+
+	panic(r.domError("SyntaxError", "Failed to execute '"+method+"' on '"+
 		selectorContextName(root)+"': "+p.syntaxErr))
 }
 
@@ -196,14 +196,30 @@ func matchesAny(sels []css.Selector, n *dom.Node, ix *css.SiblingIndex) bool {
 	return false
 }
 
+func (r *Runtime) selectorRootInShadowTree(root *dom.Node) bool {
+	for current := root; current != nil; current = current.Parent {
+		parent := current.Parent
+		if parent != nil && parent.ShadowRoot != nil && shadowRootContains(parent.ShadowRoot, root) {
+			return true
+		}
+	}
+	return false
+}
+
 // querySelectorPlan returns the first descendant of root (in tree order,
 // excluding root itself) matching one of the plan's selectors, or nil.
 func (r *Runtime) querySelectorPlan(root *dom.Node, p *selectorPlan) *dom.Node {
 	if root == nil {
 		return nil
 	}
-	if node, ok := r.querySelectorIndexed(root, p); ok {
-		return node
+	// The document's indexes contain the live document tree, not arbitrary
+	// disconnected elements that happen to share its ownerDocument. Walking a
+	// detached subtree directly avoids reporting an indexed miss before those
+	// descendants can be visited.
+	if root.Type == dom.NodeDocument || root.IsConnected() && !r.selectorRootInShadowTree(root) {
+		if node, ok := r.querySelectorIndexed(root, p); ok {
+			return node
+		}
 	}
 	sels := scopedSelectors(p, root)
 	ix := css.NewSiblingIndex()
@@ -237,8 +253,10 @@ func (r *Runtime) querySelectorAllPlan(root *dom.Node, p *selectorPlan) []*dom.N
 	if root == nil {
 		return nil
 	}
-	if nodes, ok := r.querySelectorAllIndexed(root, p); ok {
-		return nodes
+	if !root.DocumentFragment() && (root.Type == dom.NodeDocument || root.IsConnected() && !r.selectorRootInShadowTree(root)) {
+		if nodes, ok := r.querySelectorAllIndexed(root, p); ok {
+			return nodes
+		}
 	}
 	sels := scopedSelectors(p, root)
 	ix := css.NewSiblingIndex()

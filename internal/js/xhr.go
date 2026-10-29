@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/dom"
 )
 
 // XHR readyState constants per the spec.
@@ -59,24 +60,26 @@ type xhrObject struct {
 	r   *Runtime
 	obj *goja.Object
 
-	mu           sync.Mutex
-	method       string
-	url          string
-	reqHeaders   map[string]string
-	opened       bool
-	sent         bool
-	settled      bool // completion/abort/timeout claimed; late arrivals no-op
-	aborted      bool
-	timedOut     bool
-	state        int
-	status       int
-	statusText   string
-	respHeaders  map[string]string
-	body         []byte
-	responseType string
-	timeoutMS    int64
-	listeners    map[string][]goja.Value
-	timer        *time.Timer
+	mu             sync.Mutex
+	method         string
+	url            string
+	reqHeaders     map[string]string
+	opened         bool
+	sent           bool
+	settled        bool // completion/abort/timeout claimed; late arrivals no-op
+	aborted        bool
+	timedOut       bool
+	state          int
+	status         int
+	statusText     string
+	respHeaders    map[string]string
+	body           []byte
+	responseType   string
+	responseDoc    *dom.Document
+	responseParsed bool
+	timeoutMS      int64
+	listeners      map[string][]goja.Value
+	timer          *time.Timer
 }
 
 // setupXHR installs the XMLHttpRequest constructor. The transport reuses the
@@ -150,6 +153,9 @@ func (r *Runtime) constructXHR(call goja.ConstructorCall) *goja.Object {
 			defer x.mu.Unlock()
 			return r.vm.ToValue(string(x.body))
 		}), goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
+	_ = obj.DefineAccessorProperty("responseXML",
+		r.vm.ToValue(func(goja.FunctionCall) goja.Value { return r.xhrResponseXML(x) }),
+		goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
 	_ = obj.DefineAccessorProperty("response",
 		r.vm.ToValue(func(goja.FunctionCall) goja.Value { return r.xhrResponse(x) }),
 		goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
@@ -196,6 +202,7 @@ func (r *Runtime) constructXHR(call goja.ConstructorCall) *goja.Object {
 	_ = obj.Set("overrideMimeType", func(call goja.FunctionCall) goja.Value { return goja.Undefined() })
 	_ = obj.Set("addEventListener", func(call goja.FunctionCall) goja.Value { return r.xhrAddListener(x, call) })
 	_ = obj.Set("removeEventListener", func(call goja.FunctionCall) goja.Value { return r.xhrRemoveListener(x, call) })
+	_ = obj.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value { return r.xhrDispatchEvent(x, call) })
 
 	// responseType validates the enum on write; anything else is ignored.
 	_ = obj.DefineAccessorProperty("responseType",
@@ -207,7 +214,7 @@ func (r *Runtime) constructXHR(call goja.ConstructorCall) *goja.Object {
 		r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) > 0 {
 				switch call.Arguments[0].String() {
-				case "", "text", "json":
+				case "", "text", "json", "document":
 					x.mu.Lock()
 					x.responseType = call.Arguments[0].String()
 					x.mu.Unlock()
@@ -226,8 +233,42 @@ func (r *Runtime) constructXHR(call goja.ConstructorCall) *goja.Object {
 	return obj
 }
 
-// xhrResponse implements the response getter: text for ""/"text", parsed
-// JSON (or null) for "json".
+func (r *Runtime) xhrDispatchEvent(x *xhrObject, call goja.FunctionCall) goja.Value {
+	if len(call.Arguments) == 0 {
+		panic(r.vm.NewTypeError("Failed to execute 'dispatchEvent': 1 argument required"))
+	}
+	event, ok := call.Arguments[0].(*goja.Object)
+	if !ok {
+		panic(r.vm.NewTypeError("parameter 1 is not of type 'Event'"))
+	}
+	typ := event.Get("type")
+	if typ == nil || goja.IsUndefined(typ) || typ.String() == "" {
+		panic(r.vm.NewTypeError("parameter 1 is not of type 'Event'"))
+	}
+	_ = event.Set("target", x.obj)
+	_ = event.Set("currentTarget", x.obj)
+	_ = event.Set("eventPhase", 2)
+	r.withCurrentEvent(event, func() {
+		if handler := x.obj.Get("on" + typ.String()); handler != nil {
+			if fn, ok := goja.AssertFunction(handler); ok {
+				_, _ = fn(x.obj, event)
+			}
+		}
+		x.mu.Lock()
+		listeners := append([]goja.Value(nil), x.listeners[typ.String()]...)
+		x.mu.Unlock()
+		for _, listener := range listeners {
+			if fn, ok := goja.AssertFunction(listener); ok {
+				_, _ = fn(x.obj, event)
+			}
+		}
+	})
+	_ = event.Set("currentTarget", goja.Null())
+	_ = event.Set("eventPhase", 0)
+	return r.vm.ToValue(!event.Get("defaultPrevented").ToBoolean())
+}
+
+// xhrResponse implements text, JSON, and document response extraction.
 func (r *Runtime) xhrResponse(x *xhrObject) goja.Value {
 	x.mu.Lock()
 	rt, body := x.responseType, append([]byte(nil), x.body...)
@@ -246,9 +287,46 @@ func (r *Runtime) xhrResponse(x *xhrObject) goja.Value {
 			}
 		}
 		return goja.Null()
+	case "document":
+		return r.xhrResponseXML(x)
 	default:
 		return r.vm.ToValue(string(body))
 	}
+}
+
+func (r *Runtime) xhrResponseXML(x *xhrObject) goja.Value {
+	x.mu.Lock()
+	if x.state != xhrDone || x.responseType != "" && x.responseType != "document" {
+		x.mu.Unlock()
+		return goja.Null()
+	}
+	if x.responseParsed {
+		doc := x.responseDoc
+		x.mu.Unlock()
+		if doc == nil {
+			return goja.Null()
+		}
+		return r.wrapDetachedDocument(doc)
+	}
+	body := append([]byte(nil), x.body...)
+	contentType := x.respHeaders["content-type"]
+	x.responseParsed = true
+	x.mu.Unlock()
+	mimeType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if len(body) > 16<<20 || mimeType != "text/html" {
+		return goja.Null()
+	}
+	doc, err := dom.ParseBounded(string(body), dom.ParseLimits{
+		Nodes: 1_000_000, Depth: 128, Attributes: 1024, AttributeBytes: 1 << 20,
+	})
+	if err != nil {
+		return goja.Null()
+	}
+	doc.ContentType = "text/html"
+	x.mu.Lock()
+	x.responseDoc = doc
+	x.mu.Unlock()
+	return r.wrapDetachedDocument(doc)
 }
 
 func xhrInvalidState(r *Runtime, what string) goja.Value {
@@ -288,6 +366,8 @@ func (r *Runtime) xhrOpen(x *xhrObject, call goja.FunctionCall) goja.Value {
 	x.statusText = ""
 	x.respHeaders = make(map[string]string)
 	x.body = nil
+	x.responseDoc = nil
+	x.responseParsed = false
 	if x.timer != nil {
 		x.timer.Stop()
 		x.timer = nil
@@ -532,20 +612,21 @@ func (r *Runtime) fireXHR(x *xhrObject, typ string, loaded, total int64) {
 	_ = ev.Set("loaded", loaded)
 	_ = ev.Set("total", total)
 	_ = ev.Set("lengthComputable", total > 0)
-
-	if handler := x.obj.Get("on" + typ); handler != nil {
-		if fn, ok := goja.AssertFunction(handler); ok {
-			_, _ = r.callBounded(func() (goja.Value, error) { return fn(x.obj, ev) })
+	r.withCurrentEvent(ev, func() {
+		if handler := x.obj.Get("on" + typ); handler != nil {
+			if fn, ok := goja.AssertFunction(handler); ok {
+				_, _ = r.callBounded(func() (goja.Value, error) { return fn(x.obj, ev) })
+			}
 		}
-	}
-	x.mu.Lock()
-	listeners := append([]goja.Value(nil), x.listeners[typ]...)
-	x.mu.Unlock()
-	for _, l := range listeners {
-		if fn, ok := goja.AssertFunction(l); ok {
-			_, _ = r.callBounded(func() (goja.Value, error) { return fn(x.obj, ev) })
+		x.mu.Lock()
+		listeners := append([]goja.Value(nil), x.listeners[typ]...)
+		x.mu.Unlock()
+		for _, l := range listeners {
+			if fn, ok := goja.AssertFunction(l); ok {
+				_, _ = r.callBounded(func() (goja.Value, error) { return fn(x.obj, ev) })
+			}
 		}
-	}
+	})
 }
 
 func (r *Runtime) xhrAddListener(x *xhrObject, call goja.FunctionCall) goja.Value {

@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	htmlcharset "golang.org/x/net/html/charset"
 )
 
 // MaxResponseBytes bounds each decoded HTTP response or local file.
@@ -199,96 +201,39 @@ func StyleSheetRefused(contentType string) bool {
 	return false
 }
 
-// Text returns the body as UTF-8 text, decoded from whatever single-byte
-// charset the response declares. The parser downstream assumes UTF-8, and the
-// web's remaining non-UTF-8 pages are nearly all Latin-1/Windows-1252;
-// anything else passes through byte-for-byte, which is what UTF-8 source
-// wants and what unknown legacy bytes degrade to.
+// Text returns the response body decoded to UTF-8 using HTML encoding
+// sniffing. Call TextWithEncoding when the selected encoding label is also
+// needed by the Document that consumes this text.
 func (r *Response) Text() string {
-	charset := ""
-	if ct := r.Headers["Content-Type"]; ct != "" {
-		if _, params, err := mime.ParseMediaType(ct); err == nil {
-			charset = normalizeCharset(params["charset"])
-		}
-	}
-	if !isLegacy8Bit(charset) {
-		charset = sniffCharset(r.Body)
-	}
-	if isLegacy8Bit(charset) {
-		return decodeCP1252(r.Body)
-	}
-	return string(r.Body)
+	text, _, _ := r.TextWithEncoding()
+	return text
 }
 
-func normalizeCharset(s string) string {
-	s = strings.ToLower(strings.Trim(strings.TrimSpace(s), `"'`))
-	s = strings.ReplaceAll(s, "_", "-")
-	switch s {
-	case "latin1", "iso8859-1", "iso-8859", "8859-1":
-		return "iso-8859-1"
-	case "cp1252", "windows1252", "1252":
-		return "windows-1252"
-	case "ascii", "us":
-		return "us-ascii"
+// TextWithEncoding decodes the response body to UTF-8 and returns the HTML
+// encoding label selected from its BOM, Content-Type, or in-document
+// declaration. certain is true when a BOM or transport charset determined the
+// encoding; otherwise it came from the prescan or fallback.
+func (r *Response) TextWithEncoding() (text, label string, certain bool) {
+	contentType := ""
+	if r.Headers != nil {
+		contentType = r.Headers["Content-Type"]
 	}
-	return s
+	return DecodeHTML(r.Body, contentType)
 }
 
-func isLegacy8Bit(charset string) bool {
-	switch charset {
-	case "iso-8859-1", "windows-1252", "us-ascii":
-		return true
+// DecodeHTML converts an HTML byte stream to UTF-8 and returns the selected
+// encoding label and confidence. contentType may be empty for local files.
+func DecodeHTML(body []byte, contentType string) (text, label string, certain bool) {
+	_, label, certain = htmlcharset.DetermineEncoding(body, contentType)
+	reader, err := htmlcharset.NewReader(bytes.NewReader(body), contentType)
+	if err != nil {
+		return string(body), label, certain
 	}
-	return false
-}
-
-// sniffCharset implements the practical half of the HTML encoding sniffing:
-// a charset= declaration in the first 2 KiB of markup.
-func sniffCharset(body []byte) string {
-	head := body
-	if len(head) > 2048 {
-		head = head[:2048]
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		return string(body), label, certain
 	}
-	lower := strings.ToLower(string(head))
-	i := strings.Index(lower, "charset=")
-	if i < 0 {
-		return ""
-	}
-	rest := lower[i+len("charset="):]
-	end := len(rest)
-	for j, c := range rest {
-		if c == '"' || c == '\'' || c == ' ' || c == ';' || c == '>' || c == '/' {
-			end = j
-			break
-		}
-	}
-	return normalizeCharset(rest[:end])
-}
-
-// cp1252High maps the 0x80-0x9F range, where Windows-1252 diverges from
-// Latin-1 with printables. Latin-1's identity mapping covers 0xA0 and above,
-// so one table serves both.
-var cp1252High = [32]rune{
-	0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-	0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
-	0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-	0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
-}
-
-func decodeCP1252(body []byte) string {
-	var b strings.Builder
-	b.Grow(len(body) + len(body)/8)
-	for _, c := range body {
-		switch {
-		case c < 0x80:
-			b.WriteByte(c)
-		case c < 0xA0:
-			b.WriteRune(cp1252High[c-0x80])
-		default:
-			b.WriteRune(rune(c))
-		}
-	}
-	return b.String()
+	return strings.TrimPrefix(string(decoded), "\uFEFF"), label, certain
 }
 
 // NormalizeURL validates explicit HTTP(S) and local file URLs, and gives bare

@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/paint"
@@ -51,7 +52,13 @@ func (s *Session) Paint(scale float32) *paint.List {
 	b := paint.NewBuilder(list, s.Arena, scale, s.metrics)
 	if s.focus != nil {
 		if obj := s.objectFor(s.focus); obj != nil {
-			b.SetFocus(obj, s.caret, s.marked)
+			marked := s.marked
+			if controlEditable(s.focus) || (dom.IsContentEditable(s.focus) && s.markedHasNode) {
+				// Text controls and live contenteditable ranges already include the
+				// active IME text in the value or Text node.
+				marked = ""
+			}
+			b.SetFocus(obj, s.caret, marked)
 		}
 	}
 	if spans := s.selectionSpans(); len(spans) > 0 {

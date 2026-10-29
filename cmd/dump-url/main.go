@@ -50,9 +50,11 @@ func main() {
 		}
 		return r.Body, nil
 	}
-	sess, err := engine.NewSession(resp.Text(), nil, float32(*w),
+	documentText, documentEncoding, _ := resp.TextWithEncoding()
+	sess, err := engine.NewSession(documentText, nil, float32(*w),
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(*h)),
+		engine.WithDocumentEncoding(documentEncoding),
 		engine.WithLinkedCSS(resp.URL, linker),
 		engine.WithImages(resp.URL, imageFetcher))
 	if err != nil {

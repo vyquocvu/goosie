@@ -15,6 +15,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/media"
 )
 
@@ -350,6 +351,34 @@ func TestMediaPlayRequiresActivation(t *testing.T) {
 	}
 	if rejected.Code != media.CodeNotAllowed {
 		t.Fatalf("rejection code = %v, want CodeNotAllowed", rejected.Code)
+	}
+}
+
+func TestTrustedGestureRetainsDOMTransientActivationAfterDispatch(t *testing.T) {
+	rt, err := js.New(js.Options{URL: "https://example.test/page"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := engine.NewSession(`<!doctype html><html><body><input id="picker" type="date"></body></html>`, nil, 800, engine.WithJS(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetUserActivation(true)
+	sess.SetUserActivation(false)
+	got, err := sess.EvaluateJS(`navigator.userActivation.isActive+'|'+navigator.userActivation.hasBeenActive`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "true|true" {
+		t.Fatalf("activation after host event dispatch = %q, want true|true", got)
+	}
+	got, err = sess.EvaluateJS(`document.getElementById('picker').showPicker();navigator.userActivation.isActive+'|'+navigator.userActivation.hasBeenActive`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "false|true" {
+		t.Fatalf("activation after showPicker = %q, want false|true", got)
 	}
 }
 

@@ -87,6 +87,18 @@ func (r *Runtime) SetViewportRect(x, y, width, height float32) {
 	is.mu.Unlock()
 }
 
+// ViewportSize reports the configured viewport dimensions shared with layout.
+func (r *Runtime) ViewportSize() (width, height float32) {
+	is := intersectionOf(r)
+	if is == nil {
+		return 0, 0
+	}
+	is.mu.Lock()
+	width, height = is.viewportRect[2], is.viewportRect[3]
+	is.mu.Unlock()
+	return width, height
+}
+
 // SetElementRect updates the bounding rect for an element.
 // Called by the engine after layout.
 func (r *Runtime) SetElementRect(elementID int, x, y, width, height float32) {
@@ -429,20 +441,6 @@ func intersectionRatio(a, b [4]float32) float32 {
 		return 0
 	}
 	return intersectArea / elemArea
-}
-
-func max(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b float32) float32 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // fireIntersectionCallback calls the observer callback with intersection entries.

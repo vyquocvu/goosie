@@ -70,6 +70,105 @@ func TestDialog_TopmostModalClosing(t *testing.T) {
 	}
 }
 
+func TestDialog_ShowModalInitialFocus(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		html string
+		want string
+	}{
+		{
+			name: "autofocus target takes precedence",
+			html: `<dialog id="dlg"><button id="first">first</button><button id="target" tabindex="-1" autofocus>target</button></dialog>`,
+			want: "target",
+		},
+		{
+			name: "first keyboard-focusable descendant",
+			html: `<dialog id="dlg"><div id="not-focusable">text</div><button id="target">target</button></dialog>`,
+			want: "target",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, runtime := newJSSession(t, `<!doctype html><html><body><input id="before">`+tc.html+`</body></html>`)
+			if _, err := runtime.Evaluate(`document.getElementById('before').focus(); document.getElementById('dlg').showModal()`); err != nil {
+				t.Fatalf("showModal: %v", err)
+			}
+			active, err := runtime.Evaluate(`document.activeElement.id`)
+			if err != nil || active != tc.want {
+				t.Fatalf("active element after showModal = %v (err %v), want %q", active, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDialog_CloseRestoresPreModalFocus(t *testing.T) {
+	_, runtime := newJSSession(t, `<!doctype html><html><body><input id="before"><dialog id="dlg"><button id="inside">inside</button></dialog></body></html>`)
+	if _, err := runtime.Evaluate(`document.getElementById('before').focus(); document.getElementById('dlg').showModal();`); err != nil {
+		t.Fatalf("showModal: %v", err)
+	}
+	if active, err := runtime.Evaluate(`document.activeElement.id`); err != nil || active != "inside" {
+		t.Fatalf("active element while modal = %v (err %v), want inside", active, err)
+	}
+	if _, err := runtime.Evaluate(`document.getElementById('dlg').close()`); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if active, err := runtime.Evaluate(`document.activeElement.id`); err != nil || active != "before" {
+		t.Fatalf("active element after close = %v (err %v), want before", active, err)
+	}
+	if _, err := runtime.Evaluate(`document.getElementById('dlg').show(); document.getElementById('dlg').close();`); err != nil {
+		t.Fatalf("show/close: %v", err)
+	}
+	if active, err := runtime.Evaluate(`document.activeElement.id`); err != nil || active != "before" {
+		t.Fatalf("active element after nonmodal close = %v (err %v), want before", active, err)
+	}
+}
+
+func TestDialog_CloseRestoresShadowTreeFocus(t *testing.T) {
+	_, runtime := newJSSession(t, `<!doctype html><html><body><input id="moving"><div id="host"></div><dialog id="dlg"><button>inside</button></dialog></body></html>`)
+	if _, err := runtime.Evaluate(`
+		var host = document.getElementById('host');
+		var root = host.attachShadow({mode: 'open'});
+		var input = document.getElementById('moving');
+		input.focus();
+		document.getElementById('dlg').showModal();
+		root.appendChild(input);
+		document.getElementById('dlg').close();
+	`); err != nil {
+		t.Fatalf("shadow focus restore setup: %v", err)
+	}
+	if active, err := runtime.Evaluate(`document.activeElement === document.getElementById('host') && document.getElementById('host').shadowRoot.activeElement.tagName === 'INPUT'`); err != nil || active != "true" {
+		t.Fatalf("active element after close = %v (err %v), want shadow host and inner input", active, err)
+	}
+}
+
+func TestDialog_RemovedReturnFocusFallsBackToBody(t *testing.T) {
+	_, runtime := newJSSession(t, `<!doctype html><html><body><input id="before"><dialog id="dlg"><button>inside</button></dialog></body></html>`)
+	if _, err := runtime.Evaluate(`var before = document.getElementById('before'); before.focus(); var dlg = document.getElementById('dlg'); dlg.showModal(); dlg.close(); before.remove();`); err != nil {
+		t.Fatalf("removed focus restore setup: %v", err)
+	}
+	if active, err := runtime.Evaluate(`document.activeElement === document.body`); err != nil || active != "true" {
+		t.Fatalf("active element after removing return target = %v (err %v), want body", active, err)
+	}
+}
+
+func TestDialog_ModalTabNavigationStaysInside(t *testing.T) {
+	session, runtime := newJSSession(t, `<!doctype html><html><body><button id="outside">outside</button><dialog id="dlg"><button id="first">first</button><button id="second">second</button></dialog><button id="after">after</button></body></html>`)
+	if _, err := runtime.Evaluate(`document.getElementById('dlg').showModal()`); err != nil {
+		t.Fatalf("showModal: %v", err)
+	}
+	for _, want := range []string{"second", "first"} {
+		session.FocusNext()
+		if active, err := runtime.Evaluate(`document.activeElement.id`); err != nil || active != want {
+			t.Fatalf("active element during modal Tab = %v (err %v), want %q", active, err, want)
+		}
+	}
+	if _, err := runtime.Evaluate(`document.getElementById('outside').focus()`); err != nil {
+		t.Fatalf("focus outside modal: %v", err)
+	}
+	if active, err := runtime.Evaluate(`document.activeElement.id`); err != nil || active != "first" {
+		t.Fatalf("programmatic outside focus changed modal focus to %v (err %v)", active, err)
+	}
+}
+
 func TestDialog_EscapeKeyInteraction(t *testing.T) {
 	html := `<!DOCTYPE html>
 <html>
@@ -94,6 +193,9 @@ func TestDialog_EscapeKeyInteraction(t *testing.T) {
 	if !dlg.HasAttribute("open") || !dlg.IsModal {
 		t.Fatal("modal should be open")
 	}
+	if active, err := rt.Evaluate(`document.activeElement === dlg`); err != nil || active != "true" {
+		t.Fatalf("active element after showModal = %v (err %v), want dialog", active, err)
+	}
 
 	// Press Escape
 	sess.PressKey("Escape", false, false, false, false)
@@ -101,13 +203,26 @@ func TestDialog_EscapeKeyInteraction(t *testing.T) {
 	if dlg.HasAttribute("open") || dlg.IsModal {
 		t.Fatal("modal should be closed after Escape key")
 	}
+	if active, err := rt.Evaluate(`document.activeElement === document.body`); err != nil || active != "true" {
+		t.Fatalf("active element after Escape = %v (err %v), want body", active, err)
+	}
 
 	evs, err := rt.Evaluate("window.events.join(',')")
 	if err != nil {
 		t.Fatalf("Evaluate events: %v", err)
 	}
+	if evs != "cancel" {
+		t.Fatalf("expected only cancel before queued close task, got %q", evs)
+	}
+	if !rt.Tick() {
+		t.Fatal("queued dialog close event did not run")
+	}
+	evs, err = rt.Evaluate("window.events.join(',')")
+	if err != nil {
+		t.Fatalf("Evaluate queued events: %v", err)
+	}
 	if evs != "cancel,close" {
-		t.Fatalf("expected events 'cancel,close', got %q", evs)
+		t.Fatalf("expected events 'cancel,close' after task, got %q", evs)
 	}
 }
 
@@ -196,8 +311,19 @@ func TestDialog_FormMethodDialog(t *testing.T) {
 	if dlg.HasAttribute("open") || dlg.IsModal {
 		t.Fatal("dialog should be closed after method=dialog submission")
 	}
+	if active, err := rt.Evaluate(`document.activeElement === document.body`); err != nil || active != "true" {
+		t.Fatalf("active element after method=dialog = %v (err %v), want body", active, err)
+	}
+	if closeFired {
+		t.Fatal("close event must be queued rather than dispatched during dialog submission")
+	}
+	for i := 0; i < 4 && !closeFired; i++ {
+		if !rt.Tick() {
+			break
+		}
+	}
 	if !closeFired {
-		t.Fatal("expected close event to fire on dialog")
+		t.Fatal("expected queued close event to fire on dialog")
 	}
 	if sub, ok := sess.PopSubmittedForm(); ok || sub != nil {
 		t.Fatalf("expected no submittedForm for method=dialog, got %v", sub)

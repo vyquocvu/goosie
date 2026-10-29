@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/ax"
@@ -29,16 +30,156 @@ func (s *Session) AccessibilityTree() []ax.Node {
 			X0: bubble.x0, Y0: bubble.y0, X1: bubble.x1, Y1: bubble.y1}
 	}
 	doc := ax.Node{
-		Role: ax.RoleDocument,
-		ID:   "goosie.document",
-		X0:   root.X0, Y0: root.Y0, X1: root.X1, Y1: root.Y1,
+		Role: ax.RoleDocument, RoleName: ax.RoleDocument.String(),
+		ID: "goosie.document", DOMNodeID: uint64(s.Doc.Node.ID),
+		X0: root.X0, Y0: root.Y0, X1: root.X1, Y1: root.Y1,
 	}
 	if root.Role == ax.RoleStaticText {
 		doc.Children = append(doc.Children, *root)
 	} else {
 		doc.Children = append(doc.Children, root.Children...)
 	}
+	s.appendAccessibilityNodesWithoutLayout(&doc)
 	return []ax.Node{doc}
+}
+
+func (s *Session) appendAccessibilityNodesWithoutLayout(root *ax.Node) {
+	if s == nil || root == nil || s.Doc == nil || s.jsRT == nil {
+		return
+	}
+	known := make(map[uint64]bool)
+	var index func([]ax.Node)
+	index = func(nodes []ax.Node) {
+		for i := range nodes {
+			node := &nodes[i]
+			if node.DOMNodeID != 0 {
+				known[node.DOMNodeID] = true
+			}
+			index(node.Children)
+		}
+	}
+	index([]ax.Node{*root})
+	order := make(map[dom.NodeID]int)
+	ordinal := 0
+	var walk func(*dom.Node)
+	walk = func(node *dom.Node) {
+		if node == nil {
+			return
+		}
+		order[node.ID] = ordinal
+		ordinal++
+		if node.ShadowRoot != nil {
+			for child := node.ShadowRoot.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(&s.Doc.Node)
+
+	walk = func(node *dom.Node) {
+		if node == nil {
+			return
+		}
+		if node.Element() && !known[uint64(node.ID)] && node.GetAttribute("aria-hidden") != "true" {
+			roleValue := s.jsRT.ElementInternalsARIA(node, "role")
+			if strings.TrimSpace(roleValue) == "" {
+				roleValue = node.GetAttribute("role")
+			}
+			role, standardName, hasRole := elementInternalsAXRole(roleValue)
+			name, hasName := s.jsRT.ElementInternalsAccessibleName(node)
+			if hasRole || hasName {
+				computed := s.Styles[node.ID]
+				if computed == nil || computed.Display != style.DisplayNone && computed.Visibility == "visible" {
+					if !hasRole {
+						role, standardName = ax.RoleGroup, "generic"
+					}
+					item := ax.Node{
+						Role: role, RoleName: standardName, DOMNodeID: uint64(node.ID),
+						ID: node.GetAttribute("id"), Label: name,
+					}
+					parentAX := root
+					for parent := node.Parent; parent != nil; parent = parent.Parent {
+						if found := findAccessibilityNode(root, uint64(parent.ID)); found != nil {
+							parentAX = found
+							break
+						}
+					}
+					parentAX.Children = append(parentAX.Children, item)
+					known[uint64(node.ID)] = true
+				}
+			}
+		}
+		if node.ShadowRoot != nil {
+			for child := node.ShadowRoot.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(&s.Doc.Node)
+	var sortChildren func([]ax.Node)
+	sortChildren = func(nodes []ax.Node) {
+		sort.SliceStable(nodes, func(i, j int) bool {
+			left, leftOK := order[dom.NodeID(nodes[i].DOMNodeID)]
+			right, rightOK := order[dom.NodeID(nodes[j].DOMNodeID)]
+			if leftOK && rightOK {
+				return left < right
+			}
+			return leftOK
+		})
+		for i := range nodes {
+			sortChildren(nodes[i].Children)
+		}
+	}
+	sortChildren(root.Children)
+}
+
+func findAccessibilityNode(root *ax.Node, id uint64) *ax.Node {
+	if root == nil {
+		return nil
+	}
+	if root.DOMNodeID == id {
+		return root
+	}
+	for i := range root.Children {
+		if found := findAccessibilityNode(&root.Children[i], id); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// AccessibilityInfoForNode returns the current tree role/name for a DOM node.
+// The node identifier is carried by AX nodes so automation clients can query
+// dynamically created elements without relying on author-provided IDs.
+func (s *Session) AccessibilityInfoForNode(node *dom.Node) (role, label string, ok bool) {
+	if s == nil || node == nil {
+		return "", "", false
+	}
+	var find func([]ax.Node) bool
+	find = func(nodes []ax.Node) bool {
+		for _, current := range nodes {
+			if current.DOMNodeID == uint64(node.ID) {
+				role, label = current.RoleName, current.Label
+				if role == "" {
+					role = current.Role.String()
+				}
+				ok = true
+				return true
+			}
+			if find(current.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	find(s.AccessibilityTree())
+	return role, label, ok
 }
 
 type axBuilder struct {
@@ -89,12 +230,36 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 	x0, y0, x1, y1 := b.bounds(obj, kids)
 	visible := x0 < x1 && y0 < y1
 	emit := func(role ax.Role, lab, val, href string) *ax.Node {
-		return &ax.Node{Role: role, ID: obj.Node.GetAttribute("id"), Label: lab, Value: val, Href: href,
+		if b.session.jsRT != nil {
+			if authorName, set := b.session.jsRT.ElementInternalsAccessibleName(obj.Node); set {
+				lab = authorName
+			}
+		}
+		return &ax.Node{Role: role, RoleName: role.String(), DOMNodeID: uint64(obj.Node.ID),
+			ID: obj.Node.GetAttribute("id"), Label: lab, Value: val, Href: href,
 			Focused: obj.Node == b.focused,
 			X0:      x0, Y0: y0, X1: x1, Y1: y1, Children: kids}
 	}
 
 	n := obj.Node
+	if b.session.jsRT != nil {
+		roleName := b.session.jsRT.ElementInternalsARIA(n, "role")
+		if strings.TrimSpace(roleName) == "" {
+			roleName = n.GetAttribute("role")
+		}
+		if role, standardName, ok := elementInternalsAXRole(roleName); ok {
+			name, authorName := b.session.jsRT.ElementInternalsAccessibleName(n)
+			if !authorName {
+				name = label
+			}
+			if n.GetAttribute("aria-hidden") == "true" || obj.Style != nil && obj.Style.Visibility != "visible" || !visible && !authorName {
+				return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+			}
+			accessible := emit(role, name, "", "")
+			accessible.RoleName = standardName
+			return accessible, axBubble{}
+		}
+	}
 	if n.GetAttribute("role") == "search" {
 		if !visible {
 			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
@@ -145,12 +310,12 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		}
 		switch typ {
 		case "button", "submit", "reset":
-			return emit(ax.RoleButton, n.GetAttribute("value"), "", ""), axBubble{}
+			return emit(ax.RoleButton, n.InputControlValue(), "", ""), axBubble{}
 		case "checkbox", "radio", "range", "file", "color",
 			"date", "time", "datetime-local", "month", "week":
 			return nil, axBubble{}
 		default:
-			return emit(ax.RoleTextField, n.GetAttribute("placeholder"), n.GetAttribute("value"), ""), axBubble{}
+			return emit(ax.RoleTextField, n.GetAttribute("placeholder"), n.InputControlValue(), ""), axBubble{}
 		}
 	case dom.AtomTextarea:
 		if !visible {
@@ -176,8 +341,9 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 				optionLabel = option.GetAttribute("value")
 			}
 			options = append(options, ax.Node{
-				Role: ax.RoleOption, Label: optionLabel, Value: b.session.controlValue(option),
-				Selected: option == selected, Disabled: option.HasAttribute("disabled"),
+				Role: ax.RoleOption, RoleName: ax.RoleOption.String(), DOMNodeID: uint64(option.ID),
+				Label: optionLabel, Value: b.session.controlValue(option),
+				Selected: option == selected, Disabled: option.OptionDisabled(),
 				X0: x0, Y0: y0, X1: x1, Y1: y1,
 			})
 		}
@@ -191,8 +357,14 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		if selectLabel == "" && selected != nil {
 			selectLabel = optionTextValue(selected.TextContent())
 		}
+		if selectLabel == "" {
+			optionsInSelect := dom.SelectOptions(n)
+			if len(optionsInSelect) > 0 {
+				selectLabel = optionTextValue(optionsInSelect[0].TextContent())
+			}
+		}
 		combo := emit(ax.RoleComboBox, selectLabel, b.session.controlValue(n), "")
-		combo.Disabled = n.HasAttribute("disabled")
+		combo.Disabled = dom.IsFormControlDisabled(n)
 		combo.Children = options
 		return combo, axBubble{}
 	}
@@ -214,6 +386,42 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		return nil, axBubble{}
 	}
 	return emit(ax.RoleGroup, "", "", ""), axBubble{}
+}
+
+func elementInternalsAXRole(role string) (ax.Role, string, bool) {
+	for _, token := range strings.Fields(strings.ToLower(role)) {
+		switch token {
+		case "group":
+			return ax.RoleGroup, token, true
+		case "region":
+			return ax.RoleGroup, token, true
+		case "link":
+			return ax.RoleLink, token, true
+		case "button":
+			return ax.RoleButton, token, true
+		case "img":
+			return ax.RoleImage, "image", true
+		case "image":
+			return ax.RoleImage, token, true
+		case "textbox":
+			return ax.RoleTextField, token, true
+		case "search":
+			return ax.RoleSearch, token, true
+		case "progressbar":
+			return ax.RoleProgressBar, token, true
+		case "meter":
+			return ax.RoleMeter, token, true
+		case "combobox":
+			return ax.RoleComboBox, token, true
+		case "option":
+			return ax.RoleOption, token, true
+		case "directory":
+			return ax.RoleGroup, "list", true
+		case "alert", "alertdialog", "application", "article", "banner", "blockquote", "caption", "cell", "checkbox", "code", "columnheader", "complementary", "contentinfo", "definition", "deletion", "dialog", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "heading", "insertion", "list", "listbox", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "navigation", "none", "note", "presentation", "paragraph", "radio", "radiogroup", "range", "row", "rowgroup", "rowheader", "scrollbar", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem", "window":
+			return ax.RoleGroup, token, true
+		}
+	}
+	return 0, "", false
 }
 
 func (b *axBuilder) associatedLabel(n *dom.Node) string {

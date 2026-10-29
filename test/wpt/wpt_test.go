@@ -5,15 +5,17 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// TestWPTSuite runs the curated WPT tests against goosie. This is the main
-// entry point for CI integration. It discovers tests, renders them, compares
-// to references, and reports results.
+// TestWPTSuite runs the configured WPT directories against goosie. With the
+// default config this is the curated set; a full conformance config can select
+// broader roots. It discovers tests, renders them, compares references, and
+// reports results.
 //
 // The test requires:
 //   - A built goosie binary (at ./goosie or configured via WPT_GOOSIE_BINARY)
@@ -92,6 +94,24 @@ func TestWPTCurator(t *testing.T) {
 	}
 
 	// Verify each curated directory has a description.
+	parserTestsCurated := false
+	domParsingCurated := false
+	customElementsCurated := false
+	blobAPICurated := false
+	fileAPICurated := false
+	messageChannelsCurated := false
+	inputElementCurated := false
+	fieldsetTestsCurated := false
+	dialogTestsCurated := false
+	detailsTestsCurated := false
+	contentEditableCurated := false
+	dragAndDropCurated := false
+	dragEventsCurated := false
+	dragDataStoreCurated := false
+	domRangesCurated := false
+	domNodesCurated := false
+	domEventsCurated := false
+	anchorLinksCurated := false
 	for _, d := range dirs {
 		if d.Path == "" {
 			t.Error("curated dir has empty path")
@@ -99,6 +119,111 @@ func TestWPTCurator(t *testing.T) {
 		if d.Description == "" {
 			t.Errorf("curated dir %q has empty description", d.Path)
 		}
+		if d.Path == "html/syntax/parsing" {
+			parserTestsCurated = true
+		}
+		if d.Path == "domparsing" && d.Type == TestHarness {
+			domParsingCurated = true
+		}
+		if d.Path == "html/semantics/interactive-elements/the-dialog-element" && d.Type == TestHarness {
+			dialogTestsCurated = true
+		}
+		if d.Path == "html/semantics/interactive-elements/the-details-element" && d.Type == TestHarness {
+			detailsTestsCurated = true
+		}
+		if d.Path == "html/semantics/forms/the-fieldset-element" && d.Type == TestHarness {
+			fieldsetTestsCurated = true
+		}
+		if d.Path == "html/semantics/forms/the-input-element" && d.Type == TestHarness {
+			inputElementCurated = true
+		}
+		if d.Path == "html/editing/editing-0/contenteditable" && d.Type == TestHarness {
+			contentEditableCurated = true
+		}
+		if d.Path == "html/editing/dnd/the-draggable-attribute" && d.Type == TestHarness {
+			dragAndDropCurated = true
+		}
+		if d.Path == "html/editing/dnd/events" && d.Type == TestHarness {
+			dragEventsCurated = true
+		}
+		if d.Path == "html/editing/dnd/datastore" && d.Type == TestHarness {
+			dragDataStoreCurated = true
+		}
+		if d.Path == "dom/ranges" && d.Type == TestHarness {
+			domRangesCurated = true
+		}
+		if d.Path == "dom/nodes" && d.Type == TestHarness {
+			domNodesCurated = true
+		}
+		if d.Path == "dom/events" && d.Type == TestHarness {
+			domEventsCurated = true
+		}
+		if d.Path == "html/semantics/links/links-created-by-a-and-area-elements" && d.Type == TestHarness {
+			anchorLinksCurated = true
+		}
+		if d.Path == "custom-elements" && d.Type == TestHarness {
+			customElementsCurated = true
+		}
+		if d.Path == "FileAPI/blob" && d.Type == TestHarness {
+			blobAPICurated = true
+		}
+		if d.Path == "FileAPI/file" && d.Type == TestHarness {
+			fileAPICurated = true
+		}
+		if d.Path == "webmessaging/message-channels" && d.Type == TestHarness {
+			messageChannelsCurated = true
+		}
+	}
+	if !parserTestsCurated {
+		t.Error("HTML syntax parsing WPTs should be available to the conformance runner")
+	}
+	if !domParsingCurated {
+		t.Error("DOM Parsing WPTs should be discoverable for DOMParser/XMLSerializer conformance work")
+	}
+	if !dialogTestsCurated {
+		t.Error("HTML dialog WPTs should be discoverable while dialog behavior remains partial")
+	}
+	if !detailsTestsCurated {
+		t.Error("HTML details WPTs should be discoverable while details behavior remains partial")
+	}
+	if !fieldsetTestsCurated {
+		t.Error("HTML fieldset WPTs should be discoverable while disabledness behavior remains partial")
+	}
+	if !inputElementCurated {
+		t.Error("HTML input element WPTs should be discoverable while value and checkedness behavior remains partial")
+	}
+	if !contentEditableCurated {
+		t.Error("contenteditable WPTs should be discoverable while editing behavior remains partial")
+	}
+	if !dragAndDropCurated {
+		t.Error("draggable attribute WPTs should be discoverable while drag-and-drop behavior remains partial")
+	}
+	if !dragEventsCurated {
+		t.Error("drag event WPTs should be discoverable while drag-and-drop behavior remains partial")
+	}
+	if !dragDataStoreCurated {
+		t.Error("drag data store WPTs should be discoverable while drag-and-drop behavior remains partial")
+	}
+	if !domRangesCurated {
+		t.Error("DOM Range WPTs should be discoverable while Range behavior remains partial")
+	}
+	if !domNodesCurated {
+		t.Error("DOM Node WPTs should be discoverable while Node behavior remains partial")
+	}
+	if !domEventsCurated {
+		t.Error("DOM EventTarget WPTs should be discoverable while event behavior remains partial")
+	}
+	if !anchorLinksCurated {
+		t.Error("HTML anchor and area WPTs should be discoverable while link behavior remains partial")
+	}
+	if !customElementsCurated {
+		t.Error("custom element WPTs should be discoverable while implementation gaps remain")
+	}
+	if !blobAPICurated || !fileAPICurated {
+		t.Errorf("File API WPT directories should be discoverable; Blob=%v File=%v", blobAPICurated, fileAPICurated)
+	}
+	if !messageChannelsCurated {
+		t.Error("MessageChannel/MessagePort WPTs should be discoverable while implementation gaps remain")
 	}
 
 	// Verify the support flags are consistent.
@@ -124,6 +249,9 @@ func TestWPTServer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmpDir, "test.html"), []byte(testHTML), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.html.headers"), []byte("Content-Language: ko\nContent-Language: ja\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	srv := NewServer(tmpDir)
 	if err := srv.Start(); err != nil {
@@ -137,6 +265,32 @@ func TestWPTServer(t *testing.T) {
 	}
 	if srv.Port() == 0 {
 		t.Fatal("server port is 0")
+	}
+	response, err := http.Get(url + "/test.html")
+	if err != nil {
+		t.Fatalf("GET test file: %v", err)
+	}
+	defer response.Body.Close()
+	values := response.Header.Values("Content-Language")
+	if len(values) != 2 || values[0] != "ko" || values[1] != "ja" {
+		t.Errorf("Content-Language headers = %v, want [ko ja]", values)
+	}
+	if got, want := response.Header.Get("Content-Type"), "text/html"; got != want {
+		t.Errorf("default HTML Content-Type = %q, want %q without an invented charset", got, want)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "encoded.html"), []byte(testHTML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "encoded.html.headers"), []byte("Content-Type: text/html; charset=windows-1252\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	encodedResponse, err := http.Get(url + "/encoded.html")
+	if err != nil {
+		t.Fatalf("GET encoded test file: %v", err)
+	}
+	defer encodedResponse.Body.Close()
+	if got, want := encodedResponse.Header.Get("Content-Type"), "text/html; charset=windows-1252"; got != want {
+		t.Errorf(".headers Content-Type = %q, want %q", got, want)
 	}
 }
 
@@ -197,6 +351,7 @@ func TestWPTConfigLoad(t *testing.T) {
 	cfgJSON := `{
 		"directories": ["css/css-color"],
 		"include": ["css/selectors/focus-within-001.html", "focus-within-002.html"],
+		"test_variants": {"editing/run/delete.html": ["?1-10", "?11-20"]},
 		"pass_threshold": 90.0,
 		"viewport_width": 1024,
 		"viewport_height": 768,
@@ -216,6 +371,9 @@ func TestWPTConfigLoad(t *testing.T) {
 	if len(cfg.Include) != 2 || cfg.Include[0] != "css/selectors/focus-within-001.html" || cfg.Include[1] != "focus-within-002.html" {
 		t.Errorf("Include = %v, want the two configured WPT paths", cfg.Include)
 	}
+	if got := cfg.TestVariants["editing/run/delete.html"]; len(got) != 2 || got[0] != "?1-10" || got[1] != "?11-20" {
+		t.Errorf("TestVariants = %v, want the two editing test query variants", cfg.TestVariants)
+	}
 	if cfg.PassThreshold != 90.0 {
 		t.Errorf("PassThreshold = %f, want 90.0", cfg.PassThreshold)
 	}
@@ -224,6 +382,50 @@ func TestWPTConfigLoad(t *testing.T) {
 	}
 	if cfg.Timeout != 60 {
 		t.Errorf("Timeout = %d, want 60", cfg.Timeout)
+	}
+}
+
+func TestWPTLoadTestConfigMergesConfiguredVariants(t *testing.T) {
+	t.Setenv("WPT_CONFIG", "")
+	cfg := loadTestConfig(t)
+	want := []string{"?Backspace,ul", "?Backspace,ol", "?Delete,ul", "?Delete,ol"}
+	got := cfg.TestVariants["input-events/input-events-get-target-ranges-deleting-in-list-items.tentative.html"]
+	if len(got) != len(want) {
+		t.Fatalf("configured input-events variants = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("configured input-events variants = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestWPTTestVariantURL(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  string
+		bad   bool
+	}{
+		{name: "no variant", want: "http://wpt.invalid/editing/run/delete.html"},
+		{name: "subset query", query: "?1-10", want: "http://wpt.invalid/editing/run/delete.html?1-10"},
+		{name: "ordinary query", query: "?locale=en-US", want: "http://wpt.invalid/editing/run/delete.html?locale=en-US"},
+		{name: "reject empty variant", query: "?", bad: true},
+		{name: "reject fragment", query: "?1-10#x", bad: true},
+		{name: "reject malformed escape", query: "?x=%zz", bad: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := testVariantURL("http://wpt.invalid/editing/run/delete.html", tc.query)
+			if tc.bad {
+				if err == nil {
+					t.Fatalf("testVariantURL accepted invalid query %q", tc.query)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("testVariantURL(%q) = %q, %v; want %q", tc.query, got, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -262,11 +464,27 @@ func TestShouldSkip(t *testing.T) {
 		},
 		{
 			dt:       DiscoveredTest{Path: "css/css-grid/test.html", Type: RefTest, FullDir: "css/css-grid"},
-			wantSkip: true,
+			wantSkip: false,
 		},
 		{
 			dt:       DiscoveredTest{Path: "css/test.html", Type: TestHarness, FullDir: "css"},
+			wantSkip: false,
+		},
+		{
+			dt:       DiscoveredTest{Path: "html/forms/manual.html", Type: ManualTest, FullDir: "html/forms"},
 			wantSkip: true,
+		},
+		{
+			dt:       DiscoveredTest{Path: "html/forms/unknown.html", Type: UnclassifiedTest, FullDir: "html/forms"},
+			wantSkip: true,
+		},
+		{
+			dt:       DiscoveredTest{Path: "html/forms/helper-child.html", Type: SupportFile, FullDir: "html/forms"},
+			wantSkip: true,
+		},
+		{
+			dt:       DiscoveredTest{Path: "html/forms/no-crash.html", Type: SmokeTest, FullDir: "html/forms"},
+			wantSkip: false,
 		},
 	}
 
@@ -274,6 +492,86 @@ func TestShouldSkip(t *testing.T) {
 		skip, reason := ShouldSkip(tt.dt, support)
 		if skip != tt.wantSkip {
 			t.Errorf("ShouldSkip(%s) = %v, %v; want %v", tt.dt.Path, skip, reason, tt.wantSkip)
+		}
+	}
+}
+
+func TestDiscoverTestsKeepsManualAndUnclassifiedPagesVisible(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "html", "forms")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixtures := map[string]string{
+		"interactive.html":        `<meta name="flags" content="interact"><script src="testharness.js"></script>`,
+		"file-manual.html":        `<script src="testharness.js"></script>`,
+		"automated.html":          `<script src="testharness.js"></script><form action=helper-child.html></form>`,
+		"unmarked.html":           `<p>content without a WPT marker</p>`,
+		"range-reftest.html":      `<link rel=match href=range-ref.html>`,
+		"href-first-reftest.html": `<link href='other-ref.html' rel='mismatch'>`,
+		"no-crash.html":           `<p>must not crash</p>`,
+		"helper-child.html":       `<script>parent.postMessage(location.href, '*')</script>`,
+	}
+	for name, source := range fixtures {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "resources"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, source := range map[string]string{
+		"reference-ref.html":                      `<p>reference image</p>`,
+		"range-ref.html":                          `<p>reference image</p>`,
+		"other-ref.html":                          `<p>reference image</p>`,
+		filepath.Join("resources", "helper.html"): `<script src="testharness.js"></script>`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests, err := DiscoverTests(root, filepath.Join("html", "forms"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tests) != len(fixtures) {
+		t.Fatalf("discovered %d candidates, want %d", len(tests), len(fixtures))
+	}
+	types := make(map[string]TestType, len(tests))
+	for _, test := range tests {
+		types[filepath.Base(test.Path)] = test.Type
+	}
+	want := map[string]TestType{
+		"interactive.html":  ManualTest,
+		"file-manual.html":  ManualTest,
+		"automated.html":    TestHarness,
+		"unmarked.html":     UnclassifiedTest,
+		"no-crash.html":     SmokeTest,
+		"helper-child.html": SupportFile,
+	}
+	for name, expected := range want {
+		if types[name] != expected {
+			t.Errorf("%s classified as %q, want %q", name, types[name], expected)
+		}
+	}
+	for _, test := range tests {
+		if test.Path == filepath.Join("html", "forms", "range-reftest.html") {
+			if test.Type != RefTest || test.RefRelation != "match" || test.RefPath != filepath.Join(dir, "range-ref.html") {
+				t.Errorf("unquoted reftest discovery = type %q, relation %q, path %q", test.Type, test.RefRelation, test.RefPath)
+			}
+		}
+		if test.Path == filepath.Join("html", "forms", "href-first-reftest.html") {
+			if test.Type != RefTest || test.RefRelation != "mismatch" || test.RefPath != filepath.Join(dir, "other-ref.html") {
+				t.Errorf("href-first reftest discovery = type %q, relation %q, path %q", test.Type, test.RefRelation, test.RefPath)
+			}
+		}
+		if test.Type != ManualTest && test.Type != SupportFile && test.Type != UnclassifiedTest {
+			continue
+		}
+		skipped, reason := ShouldSkip(test, GoosieSupport())
+		if !skipped || reason == "" {
+			t.Errorf("%s must produce an explicit skip reason, got skipped=%v reason=%q", test.Path, skipped, reason)
 		}
 	}
 }
@@ -332,6 +630,9 @@ func loadTestConfig(t *testing.T) Config {
 					}
 					if fileCfg.PassThreshold > 0 && cfg.PassThreshold == 95.0 {
 						cfg.PassThreshold = fileCfg.PassThreshold
+					}
+					if len(fileCfg.TestVariants) > 0 && len(cfg.TestVariants) == 0 {
+						cfg.TestVariants = fileCfg.TestVariants
 					}
 				}
 				break

@@ -76,6 +76,64 @@ func TestBlurFiresChangeEventWhenValueModified(t *testing.T) {
 	}
 }
 
+func TestBlurChangeRequiresUserEditAndChangedFinalValue(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body><input id="field" value="a"></body></html>`)
+	if _, err := s.EvaluateJS(`(function(){
+		var e=document.getElementById('field'), oldValue=e.value;
+		window.changeCount=0;
+		e.addEventListener('input',function(){
+			var newValue=e.value;
+			e.value=oldValue;
+			e.value=newValue;
+			oldValue=newValue;
+		});
+		e.addEventListener('change',function(){window.changeCount++});
+	})()`); err != nil {
+		t.Fatalf("install value event handlers: %v", err)
+	}
+	field := s.Doc.ElementByID("field")
+	if !s.FocusNode(field) {
+		t.Fatal("FocusNode rejected text input")
+	}
+	if _, err := s.EvaluateJS(`document.getElementById('field').value='script'`); err != nil {
+		t.Fatalf("set value from script: %v", err)
+	}
+	if !s.BlurNode(field) {
+		t.Fatal("BlurNode did not blur script-mutated field")
+	}
+	if got, err := s.EvaluateJS(`changeCount`); err != nil || got != "0" {
+		t.Fatalf("script-only value change emitted change: %q, %v", got, err)
+	}
+	if _, err := s.EvaluateJS(`document.getElementById('field').value='a'`); err != nil {
+		t.Fatalf("restore initial value before user edit cases: %v", err)
+	}
+
+	if !s.FocusNode(field) {
+		t.Fatal("FocusNode rejected refocused text input")
+	}
+	for _, r := range []rune{'b', 'a'} {
+		if !s.SelectAllControl() || !s.Edit(engine.EditRune, r) {
+			t.Fatalf("failed to apply user edit %q", r)
+		}
+	}
+	if !s.BlurNode(field) {
+		t.Fatal("BlurNode did not blur restored field")
+	}
+	if got, err := s.EvaluateJS(`changeCount`); err != nil || got != "0" {
+		t.Fatalf("restoring focused value emitted change: %q, %v", got, err)
+	}
+
+	if !s.FocusNode(field) || !s.SelectAllControl() || !s.Edit(engine.EditRune, 'b') {
+		t.Fatal("failed to apply final user edit")
+	}
+	if !s.BlurNode(field) {
+		t.Fatal("BlurNode did not blur changed field")
+	}
+	if got, err := s.EvaluateJS(`changeCount`); err != nil || got != "1" {
+		t.Fatalf("final user edit change count = %q, %v; want 1", got, err)
+	}
+}
+
 func TestBlurNoChangeEventWhenValueUnmodified(t *testing.T) {
 	html := `<html><body style="margin: 0;"><input id="a" value="hi"></body></html>`
 	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
@@ -165,8 +223,15 @@ func TestTextInputFiresInputEvent(t *testing.T) {
 		t.Fatal("input#a not found")
 	}
 	inputFired := false
+	beforeInputFired := false
+	inputWasTrustedInputEvent := false
+	dom.AddEventListener(input, "beforeinput", func(e *dom.Event) {
+		payload := e.AsInput()
+		beforeInputFired = payload != nil && payload.InputType == "insertText" && payload.Data != nil && *payload.Data == "x" && e.IsTrusted() && e.Cancelable()
+	}, false)
 	dom.AddEventListener(input, "input", func(e *dom.Event) {
 		inputFired = true
+		inputWasTrustedInputEvent = e.AsInput() != nil && e.AsInput().InputType == "insertText" && e.IsTrusted() && !e.Cancelable()
 	}, false)
 
 	x, y := clickPoint(t, s, "a")
@@ -175,6 +240,9 @@ func TestTextInputFiresInputEvent(t *testing.T) {
 
 	if !inputFired {
 		t.Fatal("input event was not fired on text edit")
+	}
+	if !beforeInputFired || !inputWasTrustedInputEvent {
+		t.Fatalf("text edit events: beforeinput=%v input=%v, want trusted InputEvents with correct cancelability", beforeInputFired, inputWasTrustedInputEvent)
 	}
 }
 

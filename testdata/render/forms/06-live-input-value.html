@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 16px Arial, sans-serif; margin: 24px; }
+    label { display: block; margin-bottom: 8px; }
+    input { font: inherit; padding: 6px; width: 240px; }
+  </style>
+</head>
+<body>
+  <label for="field">Live input value</label>
+  <input id="field" value="default value">
+  <script>
+    document.getElementById("field").value = "edited live value";
+  </script>
+</body>
+</html>

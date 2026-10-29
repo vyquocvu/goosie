@@ -30,6 +30,7 @@ type serviceWorkerRegistration struct {
 	waiting      *serviceWorkerObj
 	obj          *goja.Object
 	r            *Runtime
+	runner       *localWorkerRunner
 }
 
 // serviceWorkerObj holds the internal state of one ServiceWorker object.
@@ -46,6 +47,7 @@ const swStateKey = "__swState__"
 type swState struct {
 	mu            sync.Mutex
 	registrations map[string]*serviceWorkerRegistration
+	runners       []*localWorkerRunner
 	// pending activations queued by background goroutines; drained on the
 	// VM thread where goja objects may be touched.
 	pending []swActivation
@@ -105,7 +107,7 @@ func (r *Runtime) setupServiceWorker() {
 			panic(r.vm.NewTypeError("register requires a script URL argument"))
 		}
 
-		scriptURL := call.Arguments[0].String()
+		scriptURL := r.resolveURLString(call.Arguments[0].String())
 		scope := "/"
 		if len(call.Arguments) >= 2 {
 			opts := call.Arguments[1]
@@ -124,9 +126,25 @@ func (r *Runtime) setupServiceWorker() {
 			state:     SWParsed,
 			r:         r,
 		}
+		var runner *localWorkerRunner
+		if r.opts.WorkerScriptFetcher != nil {
+			runner = &localWorkerRunner{parent: r, scriptURL: scriptURL}
+			var startErr error
+			if err := runner.Run(scriptURL, nil, func(err error) { startErr = err }); err != nil {
+				startErr = err
+			}
+			if startErr != nil {
+				_ = runner.Terminate()
+				panic(r.vm.NewGoError(startErr))
+			}
+		}
+		reg.runner = runner
 
 		state.mu.Lock()
 		state.registrations[scope] = reg
+		if runner != nil {
+			state.runners = append(state.runners, runner)
+		}
 		state.mu.Unlock()
 
 		// Create registration JS object.
@@ -141,8 +159,19 @@ func (r *Runtime) setupServiceWorker() {
 		_ = regObj.Set("unregister", func(call goja.FunctionCall) goja.Value {
 			state.mu.Lock()
 			delete(state.registrations, scope)
+			for i, current := range state.runners {
+				if current == runner {
+					state.runners = append(state.runners[:i], state.runners[i+1:]...)
+					break
+				}
+			}
 			state.mu.Unlock()
-			return r.vm.ToValue(true)
+			if runner != nil {
+				_ = runner.Terminate()
+			}
+			promise := r.newPromiseObj()
+			r.resolvePromise(promise, r.vm.ToValue(true))
+			return promise.obj
 		})
 
 		// update()
@@ -269,7 +298,11 @@ func (r *Runtime) DrainServiceWorkerEvents() {
 	pending := make([]swActivation, len(state.pending))
 	copy(pending, state.pending)
 	state.pending = state.pending[:0]
+	runners := append([]*localWorkerRunner(nil), state.runners...)
 	state.mu.Unlock()
+	for _, runner := range runners {
+		runner.DrainTasks()
+	}
 
 	for _, act := range pending {
 		if act.swObj != nil {

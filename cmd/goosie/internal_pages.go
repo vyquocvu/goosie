@@ -1350,6 +1350,8 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		{perms.PermissionJavaScript, "JavaScript Execution"},
 		{perms.PermissionImages, "Image Loading"},
 		{perms.PermissionCookies, "Cookie Storage"},
+		{perms.PermissionClipboardRead, "Clipboard Read"},
+		{perms.PermissionClipboardWrite, "Clipboard Write"},
 	}
 
 	for _, cap := range capabilities {
@@ -1374,7 +1376,11 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			btnLabel = "Block"
 			btnClass = "btn-action danger"
 		default:
-			statusLabel = `<span style="color:#137333;">Allowed (Default)</span>`
+			if cap.perm == perms.PermissionClipboardRead || cap.perm == perms.PermissionClipboardWrite {
+				statusLabel = `<span style="color:#8a5a00;">Prompt on user activation (Default)</span>`
+			} else {
+				statusLabel = `<span style="color:#137333;">Allowed (Default)</span>`
+			}
 			nextState = perms.StateBlock
 			btnLabel = "Block"
 			btnClass = "btn-action danger"
@@ -1386,6 +1392,11 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			url.QueryEscape(origin), url.QueryEscape(string(cap.perm)), url.QueryEscape(string(perms.StateDefault)), targetTab.ID())
 
 		actionsHTML := fmt.Sprintf(`<a class="%s" style="padding:2px 8px;font-size:11px;" href="%s">%s</a>`, btnClass, toggleURL, btnLabel)
+		if currState == perms.StateDefault && (cap.perm == perms.PermissionClipboardRead || cap.perm == perms.PermissionClipboardWrite) {
+			allowURL := fmt.Sprintf(`goosie://inspect?action=perm_set&origin=%s&perm=%s&state=%s&tab=%d`,
+				url.QueryEscape(origin), url.QueryEscape(string(cap.perm)), url.QueryEscape(string(perms.StateAllow)), targetTab.ID())
+			actionsHTML = fmt.Sprintf(`<a class="btn-action secondary" style="padding:2px 8px;font-size:11px;" href="%s">Allow</a> %s`, allowURL, actionsHTML)
+		}
 		if currState != perms.StateDefault {
 			actionsHTML += fmt.Sprintf(` <a class="btn-action secondary" style="padding:2px 8px;font-size:11px;" href="%s">Reset</a>`, resetURL)
 		}

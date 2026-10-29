@@ -34,12 +34,19 @@ func resolvePseudoElements(doc *dom.Document, index *ruleIndex, elementStyles ma
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after", "first-letter"} {
+				for _, pseudo := range []string{"before", "after", "first-letter", "first-line"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
 					if cs == nil {
 						continue
 					}
-					if pseudo == "first-letter" {
+					if pseudo == "first-line" {
+						// ::first-line does not require content; it styles the
+						// first formatted line of the block. Filter out properties
+						// the spec does not allow on ::first-line (margin, padding,
+						// border, etc.) before storing.
+						filterFirstLineProperties(cs)
+						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+					} else if pseudo == "first-letter" {
 						if cs.Content != "" && cs.Content != "none" {
 							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 						}
@@ -88,12 +95,15 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after", "first-letter"} {
+				for _, pseudo := range []string{"before", "after", "first-letter", "first-line"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
 					if cs == nil {
 						continue
 					}
-					if pseudo == "first-letter" {
+					if pseudo == "first-line" {
+						filterFirstLineProperties(cs)
+						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+					} else if pseudo == "first-letter" {
 						if cs.Content != "" && cs.Content != "none" {
 							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 						}

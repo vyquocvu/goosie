@@ -60,6 +60,20 @@ func (r *Runtime) setupPerformance() {
 	startTime := time.Now()
 
 	perfObj := r.vm.NewObject()
+	r.initializeGenericEventTarget(perfObj)
+	// Keep the EventTarget surface directly on Performance as this object is
+	// also exposed through the Window global's host object wrapper.
+	_ = perfObj.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
+		r.addGenericEventListener(call)
+		return goja.Undefined()
+	})
+	_ = perfObj.Set("removeEventListener", func(call goja.FunctionCall) goja.Value {
+		r.jsRemoveGenericEventListener(call)
+		return goja.Undefined()
+	})
+	_ = perfObj.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value {
+		return r.dispatchGenericEvent(call)
+	})
 
 	_ = perfObj.Set("now", func(call goja.FunctionCall) goja.Value {
 		elapsed := time.Since(startTime)

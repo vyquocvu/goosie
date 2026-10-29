@@ -110,6 +110,44 @@ func TestTextareaValueEditStillReflows(t *testing.T) {
 	}
 }
 
+func TestRangePointerDragRoutesThroughBrowserInteraction(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+	sess, err := engine.NewSession(`<html><head><style>input { display:inline-block; width:280px; height:20px; }</style></head><body><input id="range" type="range" min="0" max="100" step="10" value="20"></body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	tab := f.tabMgr.Active()
+	tab.SetSession(sess)
+	var left, right, y int32
+	for _, obj := range sess.Arena.Objects {
+		if obj.Node != nil && obj.Node.GetAttribute("id") == "range" {
+			x0, y0, x1, y1 := obj.BorderRect()
+			left, right, y = int32(x0+12), int32(x1-12), int32((y0+y1)/2)
+			break
+		}
+	}
+	if left == 0 || right <= left {
+		t.Fatal("range input was not laid out")
+	}
+	if !f.focusClick(left, y) {
+		t.Fatal("range pointer press was not handled")
+	}
+	if got := sess.Focused().InputControlValue(); got != "0" {
+		t.Fatalf("range value after press = %q, want 0", got)
+	}
+	if !f.dragSelect(surface.PointerMotion, right, y) {
+		t.Fatal("range pointer movement was not handled")
+	}
+	if got := sess.Focused().InputControlValue(); got != "100" {
+		t.Fatalf("range value during drag = %q, want 100", got)
+	}
+	if !f.dragSelect(surface.PointerRelease, right, y) {
+		t.Fatal("range pointer release was not handled")
+	}
+}
+
 func TestCheckedPseudoClassUpdatesAfterClick(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
@@ -377,6 +415,44 @@ func TestHoverPseudoClassUpdatesAfterPointerMove(t *testing.T) {
 	}
 	if got := sess.Styles[node.ID].BackgroundColor; got != (css.Color{B: 255, A: 255}) {
 		t.Fatalf("cleared hover background = %+v, want blue", got)
+	}
+}
+
+func TestTextareaPlaceholderShownTracksLiveValueOnEdit(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+	sess, err := engine.NewSession(`<html><head><style>
+		textarea { background-color: blue }
+		textarea:placeholder-shown { background-color: red }
+	</style></head><body><textarea id="memo" placeholder="Notes">saved</textarea></body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	tab := f.tabMgr.Active()
+	tab.SetSession(sess)
+	node, x, y := inputNodeAndCenter(t, sess, "memo")
+	blue := css.Color{B: 255, A: 255}
+	red := css.Color{R: 255, A: 255}
+	if got := sess.Styles[node.ID].BackgroundColor; got != blue {
+		t.Fatalf("nonempty textarea background = %+v, want blue", got)
+	}
+	if !f.focusClick(x, y) {
+		t.Fatal("focusClick did not focus the textarea")
+	}
+	for range 5 {
+		if !f.contentKey('\b', surface.KeyMod(0)) {
+			t.Fatal("Backspace did not edit the textarea")
+		}
+	}
+	if got := node.InputControlValue(); got != "" {
+		t.Fatalf("textarea live value = %q, want empty", got)
+	}
+	if got := sess.Styles[node.ID].BackgroundColor; got != red {
+		t.Fatalf("empty live textarea background = %+v, want red", got)
+	}
+	if got := node.TextContent(); got != "saved" {
+		t.Fatalf("textarea default text = %q, want saved", got)
 	}
 }
 

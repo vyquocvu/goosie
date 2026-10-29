@@ -13,9 +13,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/manifest"
 	"github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/paint"
+	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/session"
 	"github.com/vyquocvu/goosie/internal/tabs"
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -170,6 +172,7 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 	if client == f.privateClient {
 		storage = f.incognitoStorage
 	}
+	broadcastHub := f.broadcastHubFor(client)
 	tabID := ""
 	if f.tabMgr != nil {
 		if active := f.tabMgr.Active(); active != nil {
@@ -177,11 +180,21 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 		}
 	}
 	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
-	extra := []any{f.downloads, storage, tabID, appMode, f.userscripts, f.perms, f.mediaBackend}
+	extra := []any{f.downloads, storage, tabID, appMode, f.userscripts, f.perms, broadcastHub, f.mediaBackend}
+	if clipboard := platform.NewClipboard(); clipboard != nil {
+		extra = append(extra, clipboard)
+	}
 	if f.currentPreferences().AskDownloadLocation {
 		extra = append(extra, f.window)
 	}
 	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, extra...)
+}
+
+func (f *framePath) broadcastHubFor(client net.HTTP) *js.BroadcastHub {
+	if client == f.privateClient {
+		return f.incognitoBroadcastHub
+	}
+	return f.broadcastHub
 }
 
 // drainNavResults reads navigation results from the channel and applies them.

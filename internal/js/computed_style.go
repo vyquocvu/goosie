@@ -52,6 +52,10 @@ import (
 // sheet is what comes back out.
 type ComputedStyleFunc func(node *dom.Node) map[string]string
 
+// PseudoStyleFunc reads resolved computed values for a pseudo-element attached
+// to an element. Values use kebab-case CSS property names, like ComputedStyleFunc.
+type PseudoStyleFunc func(node *dom.Node, pseudo string) map[string]string
+
 // SetComputedStyleProvider installs the engine's cascade reader. The engine
 // calls it right after SetMutationBudget, before any script runs, so a document
 // that reads a computed style in its first inline script gets the load-time
@@ -67,6 +71,20 @@ func (r *Runtime) computedStyleProvider() ComputedStyleFunc {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.computedStyle
+}
+
+// SetPseudoStyleProvider installs the engine's pseudo-element style reader.
+// The engine calls it alongside SetComputedStyleProvider before page scripts run.
+func (r *Runtime) SetPseudoStyleProvider(fn PseudoStyleFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pseudoStyle = fn
+}
+
+func (r *Runtime) pseudoStyleProvider() PseudoStyleFunc {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pseudoStyle
 }
 
 // computedValues is the value set getComputedStyle reports for one node: the

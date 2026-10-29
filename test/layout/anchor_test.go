@@ -68,3 +68,20 @@ func TestCSSAnchorPositioningExplicitAnchorAndCenter(t *testing.T) {
 		t.Errorf("popped = {X:%v Y:%v}, want {300, 150}", popped.X, popped.Y)
 	}
 }
+
+func TestPositionAreaLeftSpanAllUsesAnchorEdges(t *testing.T) {
+	arena := positionedSession(t, `<html><body style="margin: 0;">
+<div style="anchor-name: --anchor; width: 120px; height: 40px; margin: 50px 0 0 100px;"></div>
+<div style="position: absolute; position-anchor: --anchor; position-area: left span-all; width: 20px; height: 10px;"></div>
+</body></html>`, 800)
+	divs := findAllByTag(arena, "div")
+	if len(divs) != 2 {
+		t.Fatalf("found %d divs, want 2", len(divs))
+	}
+	anchor, positioned := divs[0], divs[1]
+	if !almostEqual(positioned.X, anchor.X-positioned.BorderW()) ||
+		!almostEqual(positioned.Y, anchor.Y+(anchor.BorderH()-positioned.BorderH())/2) {
+		t.Errorf("position-area box = {X:%v Y:%v}, want left-adjacent and vertically centered on anchor at {X:%v Y:%v}",
+			positioned.X, positioned.Y, anchor.X-positioned.BorderW(), anchor.Y+(anchor.BorderH()-positioned.BorderH())/2)
+	}
+}

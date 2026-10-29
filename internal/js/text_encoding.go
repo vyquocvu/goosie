@@ -25,11 +25,7 @@ func (r *Runtime) setupTextEncoding() {
 				input = call.Arguments[0].String()
 			}
 			bytes := []byte(input)
-			arr := r.vm.NewArray()
-			for i, b := range bytes {
-				_ = arr.Set(fmt.Sprintf("%d", i), int(b))
-			}
-			return arr
+			return r.newUint8Array(bytes)
 		})
 
 		_ = obj.Set("encodeInto", func(call goja.FunctionCall) goja.Value {

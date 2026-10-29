@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -15,9 +16,8 @@ import (
 	"time"
 )
 
-// Runner executes WPT tests against goosie's headless renderer and collects
-// results. It drives the goosie binary in screenshot mode for each test,
-// then compares the output to a reference image.
+// Runner executes WPT tests against Goosie's document engine or headless
+// renderer and collects assertion or pixel-comparison results.
 type Runner struct {
 	cfg     Config
 	server  *Server
@@ -32,7 +32,8 @@ func NewRunner(cfg Config) *Runner {
 	}
 }
 
-// Run executes all curated WPT tests and returns the aggregate results.
+// Run executes the configured WPT directories, or the default curated set
+// when no explicit directory list is supplied, and returns aggregate results.
 func (r *Runner) Run() (*SuiteResult, error) {
 	startTime := time.Now()
 	result := &SuiteResult{
@@ -53,27 +54,16 @@ func (r *Runner) Run() (*SuiteResult, error) {
 	}
 	defer r.server.Stop()
 
-	// Discover tests across all curated directories.
-	curation := CuratedDirs(r.support)
-	var allTests []DiscoveredTest
-	for _, dir := range curation {
-		// If the config specifies directories, only include those.
-		if len(r.cfg.Directories) > 0 && !containsDir(r.cfg.Directories, dir.Path) {
-			continue
-		}
-		tests, err := DiscoverTests(wptDir, dir.Path, r.cfg.Exclude)
-		if err != nil {
-			// Directory might not exist in this WPT checkout; skip silently.
-			continue
-		}
-		for i := range tests {
-			tests[i].FullDir = dir.Path
-		}
-		for _, test := range tests {
-			if includedTest(test.Path, r.cfg.Include) {
-				allTests = append(allTests, test)
-			}
-		}
+	// Discover tests across the selected directories. An explicit directory
+	// list is an override, so full-suite runs can name WPT roots that are not
+	// part of the default curated catalog (for example, html and dom).
+	curation, err := selectedWPTDirectories(r.cfg.Directories, r.support)
+	if err != nil {
+		return nil, err
+	}
+	allTests, err := discoverWPTTests(wptDir, curation, r.cfg.Exclude, r.cfg.Include, len(r.cfg.Directories) > 0)
+	if err != nil {
+		return nil, err
 	}
 	if len(r.cfg.Include) > 0 && len(allTests) == 0 {
 		return nil, fmt.Errorf("wpt: include patterns matched no tests: %s", strings.Join(r.cfg.Include, ", "))
@@ -143,6 +133,13 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 		tr.Status = "skip"
 		tr.Message = reason
 		return tr
+	}
+
+	if dt.Type == TestHarness {
+		return r.runTestHarness(dt)
+	}
+	if dt.Type == SmokeTest {
+		return r.runSmokeTest(dt)
 	}
 
 	// Only reftests are runnable.
@@ -227,29 +224,60 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 	tr.RefPath = dt.RefPath
 	tr.RefRelation = dt.RefRelation
 
-	// Determine pass/fail based on the relation type and threshold.
-	isMatch := dt.RefRelation == "match" || dt.RefRelation == ""
-	if isMatch {
-		if score >= r.cfg.PassThreshold {
-			tr.Status = "pass"
-		} else if maxDiff, totalAllowed, ok := readFuzzyMeta(dt.AbsPath); ok && fuzzyPasses(testPNG, refPNG, maxDiff, totalAllowed) {
-			tr.Status = "pass"
-			tr.Message = fmt.Sprintf("fuzzy maxDifference=%d totalPixels=%d", maxDiff, totalAllowed)
-		} else {
-			tr.Status = "fail"
-			tr.Message = fmt.Sprintf("pixel match %.1f%% < threshold %.1f%%", score, r.cfg.PassThreshold)
-		}
+	// A match relation uses the configured similarity threshold. A mismatch
+	// relation only requires that the two images differ after per-pixel
+	// tolerance; the match threshold is not a minimum-difference requirement.
+	if reftestRelationPasses(score, dt.RefRelation, r.cfg.PassThreshold) {
+		tr.Status = "pass"
+	} else if dt.RefRelation == "mismatch" {
+		tr.Status = "fail"
+		tr.Message = fmt.Sprintf("pixel match %.1f%% (expected mismatch)", score)
+	} else if maxDiff, totalAllowed, ok := readFuzzyMeta(dt.AbsPath); ok && fuzzyPasses(testPNG, refPNG, maxDiff, totalAllowed) {
+		tr.Status = "pass"
+		tr.Message = fmt.Sprintf("fuzzy maxDifference=%d totalPixels=%d", maxDiff, totalAllowed)
 	} else {
-		// mismatch: the test should NOT look the same.
-		if score < r.cfg.PassThreshold {
-			tr.Status = "pass"
-		} else {
-			tr.Status = "fail"
-			tr.Message = fmt.Sprintf("pixel match %.1f%% >= threshold %.1f%% (expected mismatch)", score, r.cfg.PassThreshold)
-		}
+		tr.Status = "fail"
+		tr.Message = fmt.Sprintf("pixel match %.1f%% < threshold %.1f%%", score, r.cfg.PassThreshold)
 	}
 
 	return tr
+}
+
+// runSmokeTest executes a WPT crash regression through the configured headless
+// renderer. These pages do not contain an assertion harness; process exit from
+// the bounded render is the documented no-crash oracle.
+func (r *Runner) runSmokeTest(dt DiscoveredTest) TestResult {
+	tr := TestResult{Path: dt.Path, Type: dt.Type}
+	if r.server == nil {
+		tr.Status = "error"
+		tr.Message = "WPT server is not running"
+		return tr
+	}
+	testURL := r.server.URL() + "/" + strings.ReplaceAll(dt.Path, string(os.PathSeparator), "/")
+	outPath := filepath.Join(r.cfg.OutputDir, "smoke", dt.Path)
+	outPath = strings.TrimSuffix(outPath, ".html") + ".png"
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		tr.Status = "error"
+		tr.Message = "create smoke output directory: " + err.Error()
+		return tr
+	}
+	started := time.Now()
+	if err := r.renderPage(testURL, outPath); err != nil {
+		tr.Status = "error"
+		tr.Message = "crash-regression render failed: " + err.Error()
+		return tr
+	}
+	tr.Status = "pass"
+	tr.DurationMS = time.Since(started).Milliseconds()
+	tr.Message = "bounded headless render completed; no-crash smoke oracle"
+	return tr
+}
+
+func reftestRelationPasses(score float64, relation string, threshold float64) bool {
+	if relation == "mismatch" {
+		return score < 100
+	}
+	return score >= threshold
 }
 
 // renderPage uses the goosie binary in screenshot mode to render a URL to PNG.
@@ -461,14 +489,46 @@ func min(a, b int) int {
 	return b
 }
 
-// containsDir checks if a directory list contains the given path.
-func containsDir(dirs []string, path string) bool {
-	for _, d := range dirs {
-		if d == path || strings.HasPrefix(path, d+"/") {
-			return true
+func selectedWPTDirectories(configured []string, support FeatureSupport) ([]CuratedDir, error) {
+	if len(configured) == 0 {
+		return CuratedDirs(support), nil
+	}
+	selected := make([]CuratedDir, 0, len(configured))
+	seen := make(map[string]struct{}, len(configured))
+	for _, directory := range configured {
+		directory = path.Clean(strings.TrimSpace(directory))
+		if directory == "." || directory == "" || path.IsAbs(directory) || directory == ".." || strings.HasPrefix(directory, "../") {
+			return nil, fmt.Errorf("wpt: invalid configured directory %q", directory)
+		}
+		if _, duplicate := seen[directory]; duplicate {
+			continue
+		}
+		seen[directory] = struct{}{}
+		selected = append(selected, CuratedDir{Path: directory, Description: directory})
+	}
+	return selected, nil
+}
+
+func discoverWPTTests(wptRoot string, directories []CuratedDir, excludes, includes []string, strictDirectories bool) ([]DiscoveredTest, error) {
+	var allTests []DiscoveredTest
+	for _, directory := range directories {
+		tests, err := DiscoverTests(wptRoot, directory.Path, excludes)
+		if err != nil {
+			if strictDirectories {
+				return nil, fmt.Errorf("wpt: discover configured directory %q: %w", directory.Path, err)
+			}
+			continue
+		}
+		for i := range tests {
+			tests[i].FullDir = directory.Path
+		}
+		for _, test := range tests {
+			if includedTest(test.Path, includes) {
+				allTests = append(allTests, test)
+			}
 		}
 	}
-	return false
+	return allTests, nil
 }
 
 // RenderPage is the exported wrapper for rendering a single page. It is used
