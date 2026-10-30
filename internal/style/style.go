@@ -924,15 +924,17 @@ msup, msub { display: inline; font-size: 0.8em; }
 msqrt { display: inline-block; }
 
 /* A text or tick control is a replaced box: Chrome gives it a box of its own
-   whose size comes from the control rather than from content. The other input
-   types shrink to a label the engine does not read out of an attribute, or draw
-   a widget it cannot reproduce, so they stay inline and take no box. */
+   whose size comes from the control rather than from content. The date, time
+   and colour controls are replaced boxes too even though the engine has no
+   picker behind them: keeping them inline collapsed each one to 0x0, so the
+   border and padding a page sets on it painted nothing and the row it sat in
+   lost its height (five blank bands in forms/04-advanced-inputs). Only
+   input[type=image] still stays inline: it is sized from its src image, which
+   this stylesheet cannot read. */
 input { display: inline-block; background-color: #ffffff; }
 textarea { display: inline-block; background-color: #ffffff; font-family: monospace; font-size: 13.333px; white-space: pre-wrap; }
 textarea[wrap="off" i] { white-space: pre; }
-input[type=image],
-input[type=file], input[type=date], input[type=time], input[type=datetime-local],
-input[type=datetime], input[type=month], input[type=week], input[type=color] { display: inline; }
+input[type=image] { display: inline; }
 /* Chrome lays button-like inputs out as inline-level boxes that shrink-wrap
    their value label. display:inline would send them down the generic inline
    descent with no children to measure, collapsing every submit button to 0x0,

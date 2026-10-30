@@ -2361,6 +2361,37 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		h += s.PaddingTop + s.PaddingBottom + ubw[0] + ubw[2]
 		return w, h, true
 	case "", "text", "password", "email", "tel", "url", "search", "number":
+	case "date", "time", "datetime-local", "datetime", "month", "week", "color", "file":
+		// Replaced controls the engine has no picker UI for still occupy a box:
+		// the page's border and padding on them must paint, and the row they
+		// sit in must not collapse to nothing, which is what left five bands
+		// blank in testdata/render/forms/04-advanced-inputs.html. Widths are
+		// Chromium's intrinsic ones for the value formats it renders, measured
+		// on that fixture at 800x600 DPR 1 as a border box minus the page's 8px
+		// padding and 1px border: date 123, time 73, datetime-local 186,
+		// month 155, week 146, colour swatch 32, and the file control's
+		// "Choose File" button 214.
+		switch strings.ToLower(obj.Node.GetAttribute("type")) {
+		case "date":
+			w = 123
+		case "time":
+			w = 73
+		case "datetime-local", "datetime":
+			w = 186
+		case "month":
+			w = 155
+		case "week":
+			w = 146
+		case "color":
+			w = 32
+		case "file":
+			w = 214
+		}
+		h = 16
+		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
+			h = lh
+		}
+		return w, h, true
 	default:
 		return 0, 0, false
 	}
