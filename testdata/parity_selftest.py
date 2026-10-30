@@ -216,9 +216,8 @@ def case_stale_baseline_fails():
 # measurement.  If a real render changes one of these counts, the parity run
 # itself goes red and both sides are re-measured together.
 MEASURED = {
-    "forms/04-advanced-inputs.png": 2,
+    "forms/04-advanced-inputs.png": 1,
     "html-features/01-forms-complete.png": 1,
-    "selectors/02-pseudo-classes.png": 3,
     "selectors/03-pseudo-elements.png": 3,
     "unicode/02-emoji-symbols.png": 1,
 }
@@ -232,7 +231,7 @@ def case_baseline_matches_passes():
     h = Harness()
     try:
         kg = h.mod.load_known_gaps(REAL_GAPS)
-        check("real baseline loaded (expected 5 entries)", len(kg) == 5,
+        check("real baseline loaded (expected 4 entries)", len(kg) == 4,
               f"{len(kg)} entries: {kg}")
         check("baseline and measured cover the same fixtures", set(kg) == set(MEASURED),
               f"declared={sorted(kg)} measured={sorted(MEASURED)}")

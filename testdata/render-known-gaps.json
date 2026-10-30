@@ -11,18 +11,13 @@
       "follow_up_task": "docs/tasks/TASK-027-GLYPH-COVERAGE.md"
     },
     {
-      "fixture": "selectors/02-pseudo-classes.png",
-      "blank_regions": 3,
-      "follow_up_task": "docs/tasks/TASK-028-FORM-CONTROL-APPEARANCE.md"
-    },
-    {
       "fixture": "selectors/03-pseudo-elements.png",
       "blank_regions": 3,
       "follow_up_task": "docs/tasks/TASK-033-FIRST-LETTER-DROP-CAP.md"
     },
     {
       "fixture": "forms/04-advanced-inputs.png",
-      "blank_regions": 2,
+      "blank_regions": 1,
       "follow_up_task": "docs/tasks/TASK-028-FORM-CONTROL-APPEARANCE.md"
     },
     {
