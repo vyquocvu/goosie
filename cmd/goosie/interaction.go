@@ -640,6 +640,10 @@ func (f *framePath) scrollContentTo(tab *tabs.Tab, vp frame.Viewport, y int32) b
 		vp.Offset.Y = y
 		f.sched.SetViewport(vp)
 		tab.SetScrollY(y)
+		// Sync the JS runtime so window.scrollY reflects the painted position.
+		if sess := tab.Session(); sess != nil {
+			sess.SyncViewportScroll(float64(vp.Offset.X), float64(y))
+		}
 		f.publishAccessibility()
 	}
 	return true

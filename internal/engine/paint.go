@@ -50,6 +50,14 @@ func (s *Session) Paint(scale float32) *paint.List {
 	}
 	list := paint.NewList(n)
 	b := paint.NewBuilder(list, s.Arena, scale, s.metrics)
+	if s.jsRT != nil {
+		b.SetScrollOffsetProvider(func(obj *layout.Object, prop string) float64 {
+			if obj == nil || obj.Node == nil {
+				return 0
+			}
+			return s.jsRT.ElementScrollOffset(obj.Node, prop)
+		})
+	}
 	if s.focus != nil {
 		if obj := s.objectFor(s.focus); obj != nil {
 			marked := s.marked

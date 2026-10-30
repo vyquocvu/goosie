@@ -200,7 +200,11 @@ type Session struct {
 	parserExecutedScripts map[*dom.Node]bool
 	parserExternalCount   int
 	runtimeBound          bool
-	documentStartRan      bool
+	// onViewportScroll is called when the JS runtime's viewport scroll offset
+	// changes (window.scrollTo, scrollTop on the scrolling element). The host
+	// sets this to bridge the value into the raster scheduler.
+	onViewportScroll func(x, y float64)
+	documentStartRan bool
 
 	// drag is the in-flight drag-and-drop operation, or nil when nothing is
 	// being dragged. Owned by StartDrag/DragTo/EndDrag in drag.go and
@@ -905,6 +909,11 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		s.jsRT.ChainOnMutation(func() {
 			s.styleDirty.Store(true)
 			s.layoutDirty.Store(true)
+		})
+		s.jsRT.ChainOnViewportScroll(func(x, y float64) {
+			if s.onViewportScroll != nil {
+				s.onViewportScroll(x, y)
+			}
 		})
 	}
 	if firstBind {
@@ -1931,7 +1940,9 @@ func (s *Session) HitTestLink(x, y float32) string {
 			continue
 		}
 		x0, y0, x1, y1 := obj.BorderRect()
-		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+		adjX, adjY := s.ancestorScrollOffset(obj)
+		tx, ty := x+adjX, y+adjY
+		if tx < x0 || tx >= x1 || ty < y0 || ty >= y1 {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
@@ -1960,7 +1971,9 @@ func (s *Session) HitTestImage(x, y float32) string {
 			continue
 		}
 		x0, y0, x1, y1 := obj.BorderRect()
-		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+		adjX, adjY := s.ancestorScrollOffset(obj)
+		tx, ty := x+adjX, y+adjY
+		if tx < x0 || tx >= x1 || ty < y0 || ty >= y1 {
 			continue
 		}
 		if obj.Node != nil && obj.Node.DataAtom == dom.AtomImg {
@@ -3340,6 +3353,27 @@ func (s *Session) SetHighContrast(enabled bool) {
 	s.opMu.Lock()
 	s.highContrast = enabled
 	s.opMu.Unlock()
+}
+
+// SetViewportScrollCallback installs a function the session calls when the JS
+// runtime's viewport scroll offset changes (window.scrollTo, scrollTop on the
+// scrolling element). The host uses this to bridge the value into the raster
+// scheduler so painted tiles follow the JS offset.
+func (s *Session) SetViewportScrollCallback(fn func(x, y float64)) {
+	s.opMu.Lock()
+	s.onViewportScroll = fn
+	s.opMu.Unlock()
+}
+
+// SyncViewportScroll pushes a viewport scroll offset from the host into the JS
+// runtime. The host calls this after scrolling the raster scheduler (e.g. from
+// a wheel or keyboard gesture) so window.scrollY reflects the painted position.
+func (s *Session) SyncViewportScroll(x, y float64) {
+	if s.jsRT == nil {
+		return
+	}
+	s.jsRT.SetWindowScrollX(x)
+	s.jsRT.SetWindowScrollY(y)
 }
 
 func (s *Session) mediaOptions() css.MediaOptions {

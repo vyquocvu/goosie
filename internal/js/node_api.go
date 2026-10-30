@@ -309,6 +309,62 @@ func (r *Runtime) installNodeTreeMethods() {
 		}
 		return r.vm.ToValue(r.compareDocumentPosition(this, other))
 	})
+	_ = r.nodeProto.Set("getRootNode", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil {
+			return goja.Null()
+		}
+		composed := false
+		if len(call.Arguments) > 0 {
+			if obj, ok := call.Arguments[0].(*goja.Object); ok {
+				if v := obj.Get("composed"); v != nil {
+					composed = v.ToBoolean()
+				}
+			}
+		}
+		root := r.getRootNode(node, composed)
+		return r.wrapNode(root)
+	})
+	_ = r.nodeProto.Set("lookupNamespaceURI", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil || len(call.Arguments) == 0 {
+			return goja.Null()
+		}
+		prefix := ""
+		if v := call.Arguments[0]; !goja.IsUndefined(v) && !goja.IsNull(v) {
+			prefix = v.String()
+		}
+		if ns := lookupNamespaceURI(node, prefix); ns != "" {
+			return r.vm.ToValue(ns)
+		}
+		return goja.Null()
+	})
+	_ = r.nodeProto.Set("lookupPrefix", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil || len(call.Arguments) == 0 {
+			return goja.Null()
+		}
+		ns := call.Arguments[0].String()
+		if ns == "" {
+			return goja.Null()
+		}
+		if prefix := lookupPrefix(node, ns); prefix != "" {
+			return r.vm.ToValue(prefix)
+		}
+		return goja.Null()
+	})
+	_ = r.nodeProto.Set("isDefaultNamespace", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil || len(call.Arguments) == 0 {
+			return r.vm.ToValue(false)
+		}
+		ns := ""
+		if v := call.Arguments[0]; !goja.IsUndefined(v) && !goja.IsNull(v) {
+			ns = v.String()
+		}
+		defaultNS := lookupNamespaceURI(node, "")
+		return r.vm.ToValue(defaultNS == ns)
+	})
 }
 
 func (r *Runtime) compareDocumentPosition(node, other *dom.Node) int {
@@ -350,6 +406,67 @@ func (r *Runtime) compareDocumentPosition(node, other *dom.Node) int {
 		return 4
 	}
 	return 2
+}
+
+// getRootNode returns the root of node's tree. When composed is true, shadow
+// root boundaries are crossed. Since this implementation links shadow children
+// to their host via Parent, the parent chain already crosses shadow boundaries,
+// so both modes return the same root.
+func (r *Runtime) getRootNode(node *dom.Node, composed bool) *dom.Node {
+	current := node
+	for current != nil && current.Parent != nil {
+		current = current.Parent
+	}
+	if current != nil {
+		return current
+	}
+	return node
+}
+
+// lookupNamespaceURI walks up the ancestor chain to find the namespace URI
+// bound to the given prefix. An empty prefix looks for the default namespace.
+func lookupNamespaceURI(node *dom.Node, prefix string) string {
+	for n := node; n != nil; n = n.Parent {
+		if !n.Element() {
+			continue
+		}
+		if prefix == "" {
+			if ns := n.GetAttribute("xmlns"); ns != "" {
+				return ns
+			}
+			if n.NamespaceURI != "" && n.Prefix == "" {
+				return n.NamespaceURI
+			}
+		} else {
+			attr := "xmlns:" + prefix
+			if ns := n.GetAttribute(attr); ns != "" {
+				return ns
+			}
+			if n.Prefix == prefix && n.NamespaceURI != "" {
+				return n.NamespaceURI
+			}
+		}
+	}
+	return ""
+}
+
+// lookupPrefix walks up the ancestor chain to find the first prefix bound to
+// the given namespace URI.
+func lookupPrefix(node *dom.Node, namespace string) string {
+	for n := node; n != nil; n = n.Parent {
+		if !n.Element() {
+			continue
+		}
+		if n.NamespaceURI == namespace && n.Prefix != "" {
+			return n.Prefix
+		}
+		for _, attr := range n.Attr {
+			if strings.HasPrefix(attr.Name, "xmlns:") && attr.Value == namespace {
+				return attr.Name[len("xmlns:"):]
+			}
+		}
+	}
+	return ""
 }
 
 // jsMoveBefore implements ParentNode.moveBefore for elements. It preserves

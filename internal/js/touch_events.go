@@ -36,7 +36,7 @@ func (r *Runtime) installTouchEvents() {
 		return value.ToFloat()
 	}
 
-	_ = r.vm.Set("Touch", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	_ = r.vm.Set("Touch", r.nameConstructor("Touch", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		if len(call.Arguments) == 0 || call.Arguments[0] == nil || goja.IsUndefined(call.Arguments[0]) || goja.IsNull(call.Arguments[0]) {
 			panic(r.vm.NewTypeError("Failed to construct 'Touch': 1 argument required"))
 		}
@@ -48,9 +48,9 @@ func (r *Runtime) installTouchEvents() {
 		r.writeTouchFields(call.This, int(readNumber(init, "identifier")),
 			readNumber(init, "clientX"), readNumber(init, "clientY"), target)
 		return call.This
-	}))
+	})))
 
-	_ = r.vm.Set("TouchList", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	_ = r.vm.Set("TouchList", r.nameConstructor("TouchList", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		items := make([]*goja.Object, 0, len(call.Arguments))
 		for _, argument := range call.Arguments {
 			if argument == nil || goja.IsUndefined(argument) || goja.IsNull(argument) {
@@ -60,9 +60,9 @@ func (r *Runtime) installTouchEvents() {
 		}
 		r.writeTouchListFields(call.This, items)
 		return call.This
-	}))
+	})))
 
-	_ = r.vm.Set("TouchEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	_ = r.vm.Set("TouchEvent", r.nameConstructor("TouchEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		if len(call.Arguments) == 0 || call.Arguments[0] == nil {
 			panic(r.vm.NewTypeError("Failed to construct 'TouchEvent': 1 argument required"))
 		}
@@ -110,7 +110,7 @@ func (r *Runtime) installTouchEvents() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
+	})))
 
 	// TouchEvent derives from UIEvent which derives from Event; Touch and
 	// TouchList stand on their own. The toStringTag brands are what

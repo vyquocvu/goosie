@@ -194,6 +194,11 @@ type Options struct {
 	// for the same reason it owns the pointer and wheel hooks: page script must not
 	// be able to forge a trusted gesture.
 	OnTestDriverTouch func(id, phase string, x, y float32)
+	// OnViewportScroll notifies the host that the document viewport scroll
+	// offset changed through a CSSOM View write (window.scrollTo, scrollTop on
+	// the scrolling element). The host bridges the value into the raster
+	// scheduler so the painted tiles follow the JS offset.
+	OnViewportScroll func(x, y float64)
 
 	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
 	// When nil, ephemeral in-memory storage is created per runtime.
@@ -1491,6 +1496,24 @@ func (r *Runtime) setupDOM() {
 	})
 	_ = r.elementProto.Set("hasAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsHasAttribute(call)
+	})
+	_ = r.elementProto.Set("hasAttributeNS", func(call goja.FunctionCall) goja.Value {
+		return r.jsHasAttributeNS(call)
+	})
+	_ = r.elementProto.Set("hasAttributes", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		return r.vm.ToValue(node != nil && len(node.Attr) > 0)
+	})
+	_ = r.elementProto.Set("getAttributeNames", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil {
+			return r.vm.NewArray()
+		}
+		names := make([]interface{}, len(node.Attr))
+		for i, a := range node.Attr {
+			names[i] = a.Name
+		}
+		return r.vm.NewArray(names...)
 	})
 	_ = r.elementProto.Set("remove", func(call goja.FunctionCall) goja.Value {
 		return r.jsRemove(call)
@@ -4429,6 +4452,7 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		return r.vm.ToValue(e.Cancelable())
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = obj.Set("isTrusted", e.IsTrusted())
+	_ = obj.Set("timeStamp", float64(e.TimeStamp().UnixMilli()))
 	_ = obj.Set("__goosieEvent", true)
 	_ = obj.Set("__initialized", true)
 	_ = obj.Set("__dispatching", e.CurrentTarget() != nil)
@@ -5514,6 +5538,25 @@ func (r *Runtime) jsHasAttribute(call goja.FunctionCall) goja.Value {
 	return r.vm.ToValue(node.HasAttribute(call.Arguments[0].String()))
 }
 
+// jsHasAttributeNS implements element.hasAttributeNS(namespace, localName).
+func (r *Runtime) jsHasAttributeNS(call goja.FunctionCall) goja.Value {
+	node := r.getNode(call.This)
+	if node == nil || len(call.Arguments) < 2 {
+		panic(r.vm.NewTypeError("Failed to execute 'hasAttributeNS': 2 arguments required"))
+	}
+	namespace := ""
+	if value := call.Arguments[0]; value != nil && !goja.IsNull(value) && !goja.IsUndefined(value) {
+		namespace = value.String()
+	}
+	localName := call.Arguments[1].String()
+	for _, attr := range node.Attr {
+		if attr.NamespaceURI == namespace && domAttributeLocalName(attr.Name) == localName {
+			return r.vm.ToValue(true)
+		}
+	}
+	return r.vm.ToValue(false)
+}
+
 func (r *Runtime) currentDocumentElement() *dom.Node {
 	return documentElementOf(r.domDoc)
 }
@@ -6002,6 +6045,23 @@ func (r *Runtime) ChainOnFocusChange(fn func(*dom.Node, bool)) {
 		}
 	} else {
 		r.opts.OnFocusChange = fn
+	}
+}
+
+// ChainOnViewportScroll appends fn to the viewport scroll callback chain. The
+// engine installs its scheduler bridge here so CSSOM View writes propagate to
+// the raster viewport.
+func (r *Runtime) ChainOnViewportScroll(fn func(x, y float64)) {
+	if r == nil || fn == nil {
+		return
+	}
+	if prev := r.opts.OnViewportScroll; prev != nil {
+		r.opts.OnViewportScroll = func(x, y float64) {
+			prev(x, y)
+			fn(x, y)
+		}
+	} else {
+		r.opts.OnViewportScroll = fn
 	}
 }
 

@@ -1,6 +1,8 @@
 package paint
 
-import "github.com/vyquocvu/goosie/internal/layout"
+import (
+	"github.com/vyquocvu/goosie/internal/layout"
+)
 
 // Builder walks a layout arena and emits display commands into a List.
 //
@@ -16,6 +18,9 @@ type Builder struct {
 	focus     focusState
 	selection map[*layout.Object]SelSpan
 	find      map[*layout.Object][]FindMark
+	// scrollOffset queries the JS runtime for an element's current scroll
+	// offset along one axis. nil means no element scrolling is active.
+	scrollOffset func(obj *layout.Object, prop string) float64
 }
 
 // focusState groups the input state that influences text and control painting.
@@ -66,6 +71,13 @@ func (b *Builder) SetFind(marks []FindMark) {
 	for _, m := range marks {
 		b.find[m.Obj] = append(b.find[m.Obj], m)
 	}
+}
+
+// SetScrollOffsetProvider supplies a function that returns an element's current
+// scroll offset along a given axis ("scrollTop" or "scrollLeft"). The builder
+// uses this to translate children of scroll containers during paint.
+func (b *Builder) SetScrollOffsetProvider(fn func(obj *layout.Object, prop string) float64) {
+	b.scrollOffset = fn
 }
 
 // Build walks the arena starting at root and appends display commands to the

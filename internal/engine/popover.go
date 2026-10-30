@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/layout"
+	"github.com/vyquocvu/goosie/internal/style"
 )
 
 // ShowPopover opens a popover element if it is not already open.
@@ -227,7 +229,11 @@ func (s *Session) nodeAt(x, y float32) *dom.Node {
 			continue
 		}
 		x0, y0, x1, y1 := obj.BorderRect()
-		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+		// Adjust the test point by the cumulative scroll offset of ancestor
+		// scroll containers, so hit-testing matches the painted position.
+		adjX, adjY := s.ancestorScrollOffset(obj)
+		tx, ty := x+adjX, y+adjY
+		if tx < x0 || tx >= x1 || ty < y0 || ty >= y1 {
 			continue
 		}
 		if obj.Node != nil {
@@ -235,6 +241,32 @@ func (s *Session) nodeAt(x, y float32) *dom.Node {
 		}
 	}
 	return nil
+}
+
+// ancestorScrollOffset returns the cumulative scroll offset applied by ancestor
+// scroll containers. The paint builder shifts children by (-scrollLeft, -scrollTop),
+// so hit-testing must add those offsets back to the test point.
+func (s *Session) ancestorScrollOffset(obj *layout.Object) (float32, float32) {
+	if s.jsRT == nil || obj.Node == nil {
+		return 0, 0
+	}
+	var dx, dy float32
+	for parent := obj.Parent; parent != 0; parent = s.Arena.Get(parent).Parent {
+		p := s.Arena.Get(parent)
+		if p.Node == nil || p.Style == nil {
+			continue
+		}
+		ps := p.Style
+		isScrollContainer := ps.Overflow == style.OverflowScroll || ps.Overflow == style.OverflowAuto ||
+			ps.OverflowX == style.OverflowScroll || ps.OverflowX == style.OverflowAuto ||
+			ps.OverflowY == style.OverflowScroll || ps.OverflowY == style.OverflowAuto
+		if !isScrollContainer {
+			continue
+		}
+		dx += float32(s.jsRT.ElementScrollOffset(p.Node, "scrollLeft"))
+		dy += float32(s.jsRT.ElementScrollOffset(p.Node, "scrollTop"))
+	}
+	return dx, dy
 }
 
 func isDescendantOrSelf(n, ancestor *dom.Node) bool {

@@ -561,7 +561,7 @@ func (r *Runtime) installInputEventConstructors() {
 				_ = event.Set("__initialized", true)
 				return goja.Undefined()
 			})
-			customCtor := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+			customCtor := r.nameConstructor("CustomEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 				typ := ""
 				if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 					typ = call.Arguments[0].String()
@@ -623,7 +623,7 @@ func (r *Runtime) installInputEventConstructors() {
 				})
 				_ = obj.Set("__composedPath", r.vm.NewArray())
 				return obj
-			}).(*goja.Object)
+			})).(*goja.Object)
 			_ = customCtor.Set("prototype", customProto)
 			_ = customProto.Set("constructor", customCtor)
 			_ = r.vm.Set("CustomEvent", customCtor)
@@ -650,7 +650,7 @@ func (r *Runtime) installInputEventConstructors() {
 			})
 		}
 	}
-	_ = r.vm.Set("InputEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	_ = r.vm.Set("InputEvent", r.nameConstructor("InputEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -776,8 +776,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("ClipboardEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("ClipboardEvent", r.nameConstructor("ClipboardEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -818,8 +818,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("CompositionEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("CompositionEvent", r.nameConstructor("CompositionEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -862,8 +862,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("MouseEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("MouseEvent", r.nameConstructor("MouseEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -917,8 +917,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("PointerEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("PointerEvent", r.nameConstructor("PointerEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -965,7 +965,7 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
+	})))
 	if pointer, ok := r.vm.Get("PointerEvent").(*goja.Object); ok {
 		if pointerProto, ok := pointer.Get("prototype").(*goja.Object); ok {
 			if mouse, ok := r.vm.Get("MouseEvent").(*goja.Object); ok {
@@ -975,7 +975,7 @@ func (r *Runtime) installInputEventConstructors() {
 			}
 		}
 	}
-	_ = r.vm.Set("ProgressEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	_ = r.vm.Set("ProgressEvent", r.nameConstructor("ProgressEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1009,7 +1009,7 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
+	})))
 	if ctor, ok := r.vm.Get("MouseEvent").(*goja.Object); ok {
 		if proto, ok := ctor.Get("prototype").(*goja.Object); ok {
 			_ = proto.Set("initMouseEvent", func(call goja.FunctionCall) goja.Value {
@@ -1030,7 +1030,7 @@ func (r *Runtime) installInputEventConstructors() {
 			})
 		}
 	}
-	uiEventCtor := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	uiEventCtor := r.nameConstructor("UIEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 {
 			typ = call.Arguments[0].String()
@@ -1076,7 +1076,7 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	})
+	}))
 	_ = r.vm.Set("UIEvent", uiEventCtor)
 	if ctor, ok := uiEventCtor.(*goja.Object); ok {
 		if proto, ok := ctor.Get("prototype").(*goja.Object); ok {
@@ -1098,7 +1098,7 @@ func (r *Runtime) installInputEventConstructors() {
 			})
 		}
 	}
-	_ = r.vm.Set("FocusEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	_ = r.vm.Set("FocusEvent", r.nameConstructor("FocusEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1156,8 +1156,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("WheelEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("WheelEvent", r.nameConstructor("WheelEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1229,8 +1229,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("ErrorEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("ErrorEvent", r.nameConstructor("ErrorEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1272,8 +1272,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("SubmitEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("SubmitEvent", r.nameConstructor("SubmitEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1300,8 +1300,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("ToggleEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("ToggleEvent", r.nameConstructor("ToggleEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		if len(call.Arguments) == 0 {
 			panic(r.vm.NewTypeError("Failed to construct 'ToggleEvent': 1 argument required"))
 		}
@@ -1344,8 +1344,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("FormDataEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("FormDataEvent", r.nameConstructor("FormDataEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1372,8 +1372,8 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("stopPropagation", func() {})
 		_ = obj.Set("stopImmediatePropagation", func() {})
 		return obj
-	}))
-	_ = r.vm.Set("MessageEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+	})))
+	_ = r.vm.Set("MessageEvent", r.nameConstructor("MessageEvent", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 		typ := ""
 		if len(call.Arguments) > 0 && call.Arguments[0] != nil {
 			typ = call.Arguments[0].String()
@@ -1449,7 +1449,7 @@ func (r *Runtime) installInputEventConstructors() {
 			_ = obj.Set("__immediateStopped", true)
 		})
 		return obj
-	}))
+	})))
 	// Event subclasses share the Event prototype so constructor-created and
 	// dispatch-time wrapper objects retain the standard instanceof chain.
 	_, _ = r.vm.RunString(`
@@ -1541,4 +1541,28 @@ func (r *Runtime) DispatchTrustedWheel(target *dom.Node, x, y float32, deltaX, d
 	wheel := dom.NewTrustedWheelEvent("wheel", deltaX, deltaY, float64(x), float64(y))
 	wheel.SetScrollCancelableByListener(cancelable)
 	return r.dispatchWithWindowStep(target, wheel)
+}
+
+// nameConstructor wraps a native constructor with a named JavaScript wrapper
+// so Function.prototype.name returns the interface name, not a Go symbol path.
+func (r *Runtime) nameConstructor(name string, native goja.Value) goja.Value {
+	functionCtor := r.vm.Get("Function")
+	createWrapper, ok := goja.AssertFunction(functionCtor)
+	if !ok {
+		return native
+	}
+	body := fmt.Sprintf("return function %s() { return Reflect.construct(native, arguments, %s); }", name, name)
+	factoryValue, err := createWrapper(functionCtor, r.vm.ToValue("native"), r.vm.ToValue(body))
+	if err != nil {
+		return native
+	}
+	factory, ok := goja.AssertFunction(factoryValue)
+	if !ok {
+		return native
+	}
+	wrapped, err := factory(goja.Undefined(), native)
+	if err != nil {
+		return native
+	}
+	return wrapped
 }

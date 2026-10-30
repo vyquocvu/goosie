@@ -70,6 +70,17 @@ func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 		end := dom.NewTrustedTouchEvent("touchend", target, s.heldTouchesLocked(), []*dom.Touch{touch})
 		s.opMu.Unlock()
 		rt.DispatchTrustedTouch(target, end)
+	case "cancel":
+		if touch == nil {
+			s.opMu.Unlock()
+			return
+		}
+		// touchcancel ends the contact: the cancelled touch point leaves the
+		// active set and touches reports what remains.
+		delete(s.touches, id)
+		cancel := dom.NewTrustedTouchEvent("touchcancel", target, s.heldTouchesLocked(), []*dom.Touch{touch})
+		s.opMu.Unlock()
+		rt.DispatchTrustedTouch(target, cancel)
 	default:
 		s.opMu.Unlock()
 	}

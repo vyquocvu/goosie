@@ -117,7 +117,8 @@ var globalEventHandlerTypes = []string{
 	"mouseout", "mouseover", "mouseup", "paste", "pause", "play", "playing", "progress",
 	"ratechange", "reset", "resize", "scroll", "scrollend", "securitypolicyviolation",
 	"seeked", "seeking", "select", "slotchange", "stalled", "submit", "suspend",
-	"timeupdate", "toggle", "volumechange", "waiting", "webkitanimationend",
+	"timeupdate", "toggle", "touchcancel", "touchend", "touchmove", "touchstart",
+	"volumechange", "waiting", "webkitanimationend",
 	"webkitanimationiteration", "webkitanimationstart", "webkittransitionend", "wheel",
 }
 

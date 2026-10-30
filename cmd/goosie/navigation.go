@@ -365,6 +365,13 @@ func (f *framePath) applyNavResult(result navResult) {
 	// The first frame is out with the document and CSS only; fonts and images
 	// arrive on their own goroutines and repaint when they land.
 	if sess := result.session; sess != nil {
+		// Bridge JS viewport scrolls to the raster scheduler so window.scrollTo()
+		// moves visible pixels, not just the JS runtime's internal offset.
+		sess.SetViewportScrollCallback(func(x, y float64) {
+			vp := f.sched.Viewport()
+			vp.Offset = frame.Point{X: int32(x), Y: int32(y)}
+			f.sched.SetViewport(vp)
+		})
 		tabID, serial := result.tabID, result.serial
 		if sess.DeferredFontsPending() > 0 {
 			go sess.LoadDeferredFonts(func(loaded int) {

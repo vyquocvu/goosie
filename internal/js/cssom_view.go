@@ -64,6 +64,27 @@ func (r *Runtime) WindowScrollY() float64 {
 	return y
 }
 
+// SetWindowScrollX updates the document viewport's horizontal scroll offset.
+func (r *Runtime) SetWindowScrollX(x float64) {
+	if r == nil {
+		return
+	}
+	if x < 0 {
+		x = 0
+	}
+	r.scrollMu.Lock()
+	oldX := r.windowScrollX
+	r.windowScrollX = x
+	moved := x != oldX
+	r.scrollMu.Unlock()
+	if moved {
+		r.QueueViewportScroll()
+		if r.opts.OnViewportScroll != nil {
+			r.opts.OnViewportScroll(x, r.windowScrollY)
+		}
+	}
+}
+
 // SetWindowScrollY updates the document viewport's vertical scroll offset.
 func (r *Runtime) SetWindowScrollY(y float64) {
 	if r == nil {
@@ -79,6 +100,9 @@ func (r *Runtime) SetWindowScrollY(y float64) {
 	r.scrollMu.Unlock()
 	if moved {
 		r.QueueViewportScroll()
+		if r.opts.OnViewportScroll != nil {
+			r.opts.OnViewportScroll(r.windowScrollX, y)
+		}
 	}
 }
 
@@ -136,6 +160,35 @@ func (r *Runtime) isDocumentScrollingElement(node *dom.Node) bool {
 		return node == documentBodyOf(r.domDoc)
 	}
 	return node == documentElementOf(r.domDoc)
+}
+
+// ancestorScrollOffset returns the cumulative scroll offset applied by ancestor
+// scroll containers. getBoundingClientRect must subtract this from the layout
+// position to return the visually-correct viewport-relative rect.
+func (r *Runtime) ancestorScrollOffset(node *dom.Node) (float64, float64) {
+	if r == nil || node == nil {
+		return 0, 0
+	}
+	var dx, dy float64
+	styleFn := r.computedStyleProvider()
+	for parent := node.Parent; parent != nil; parent = parent.Parent {
+		if !parent.Element() || styleFn == nil {
+			continue
+		}
+		style := styleFn(parent)
+		if style == nil {
+			continue
+		}
+		isScrollContainer := style["overflow"] == "scroll" || style["overflow"] == "auto" ||
+			style["overflow-x"] == "scroll" || style["overflow-x"] == "auto" ||
+			style["overflow-y"] == "scroll" || style["overflow-y"] == "auto"
+		if !isScrollContainer {
+			continue
+		}
+		dx += r.ElementScrollOffset(parent, "scrollLeft")
+		dy += r.ElementScrollOffset(parent, "scrollTop")
+	}
+	return dx, dy
 }
 
 func (r *Runtime) layoutGeometryProvider() LayoutGeometryProvider {
@@ -229,7 +282,8 @@ func (r *Runtime) installElementGeometryMethods() {
 		if !ok {
 			return r.newDOMRect(0, 0, 0, 0)
 		}
-		return r.newDOMRect(info.X, info.Y, info.Width, info.Height)
+		adjX, adjY := r.ancestorScrollOffset(node)
+		return r.newDOMRect(info.X-adjX, info.Y-adjY, info.Width, info.Height)
 	})
 
 	// getClientRects()
@@ -246,7 +300,8 @@ func (r *Runtime) installElementGeometryMethods() {
 		if !ok {
 			return r.newDOMRectList(nil)
 		}
-		rect := r.newDOMRect(info.X, info.Y, info.Width, info.Height)
+		adjX, adjY := r.ancestorScrollOffset(node)
+		rect := r.newDOMRect(info.X-adjX, info.Y-adjY, info.Width, info.Height)
 		return r.newDOMRectList([]*goja.Object{rect})
 	})
 
@@ -362,6 +417,18 @@ func (r *Runtime) setElementScrollOffset(node *dom.Node, prop string, value floa
 	r.scrollMu.Unlock()
 }
 
+// ElementScrollOffset returns the current scroll offset for node along prop
+// ("scrollTop" or "scrollLeft"). Thread-safe; returns 0 when no offset is stored.
+func (r *Runtime) ElementScrollOffset(node *dom.Node, prop string) float64 {
+	if r == nil || node == nil {
+		return 0
+	}
+	r.scrollMu.Lock()
+	v := r.scrollPositions[scrollKey{node: node, prop: prop}]
+	r.scrollMu.Unlock()
+	return v
+}
+
 // elementScrollBounds reports how far one element may be scrolled along prop and
 // whether it is the kind of box that scrolls at all: the extent minus the client
 // box, and a scroll container only when its computed overflow is not visible.
@@ -415,6 +482,9 @@ func (r *Runtime) FlushScrollEvents() {
 		// to the window; an element scroll bubbles to nothing.
 		viewport := r.domDoc != nil && node == &r.domDoc.Node
 		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scroll", viewport, false))
+		// scrollend fires after the scroll settles. Since goosie treats all
+		// scrolls as instant, it fires immediately after scroll.
+		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scrollend", viewport, false))
 	}
 }
 
@@ -530,11 +600,14 @@ func (r *Runtime) installElementScrollMethods() {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
-	// scrollIntoView() — accepted but no-op visually (no scroll container
-	// implementation yet). Must not throw.
+	// scrollIntoView() — scroll the element into the visible area of the
+	// viewport and any scrollable ancestors.
 	_ = p.Set("scrollIntoView", func(call goja.FunctionCall) goja.Value {
-		// Accept any arguments (alignToTop, scrollIntoViewOptions) and do
-		// nothing. The method exists so pages that call it do not throw.
+		node := r.getNode(call.This)
+		if node == nil {
+			return goja.Undefined()
+		}
+		r.scrollElementIntoView(node, call)
 		return goja.Undefined()
 	})
 
@@ -599,6 +672,137 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 	}
 	r.setElementScrollOffset(node, "scrollLeft", dx)
 	r.setElementScrollOffset(node, "scrollTop", dy)
+}
+
+// scrollElementIntoView implements element.scrollIntoView(). It walks up the
+// ancestor chain, scrolling each scrollable container that clips the element,
+// then adjusts the viewport scroll as a final step.
+func (r *Runtime) scrollElementIntoView(node *dom.Node, call goja.FunctionCall) {
+	block, inline := "start", "nearest"
+	if len(call.Arguments) > 0 {
+		arg := call.Arguments[0]
+		if !goja.IsUndefined(arg) && !goja.IsNull(arg) {
+			if obj, ok := arg.(*goja.Object); ok {
+				if v := obj.Get("block"); v != nil && !goja.IsUndefined(v) {
+					block = v.String()
+				}
+				if v := obj.Get("inline"); v != nil && !goja.IsUndefined(v) {
+					inline = v.String()
+				}
+			} else if arg.ToBoolean() {
+				block = "start"
+				inline = "nearest"
+			} else {
+				block = "end"
+				inline = "nearest"
+			}
+		}
+	}
+
+	provider := r.layoutGeometryProvider()
+	if provider == nil {
+		return
+	}
+
+	// Scroll each scrollable ancestor that clips the target.
+	for ancestor := node.Parent; ancestor != nil; ancestor = ancestor.Parent {
+		info, ok := provider(ancestor)
+		if !ok || !info.ScrollContainer {
+			continue
+		}
+		r.scrollAncestorToReveal(ancestor, node, provider, block, inline)
+	}
+
+	// Finally, scroll the viewport.
+	r.scrollViewportToReveal(node, provider, block, inline)
+}
+
+// scrollAncestorToReveal adjusts one scrollable ancestor's scrollTop/scrollLeft
+// so that the target element's box falls within the ancestor's content area.
+func (r *Runtime) scrollAncestorToReveal(ancestor, target *dom.Node, provider LayoutGeometryProvider, block, inline string) {
+	aInfo, ok := provider(ancestor)
+	if !ok {
+		return
+	}
+	tInfo, ok := provider(target)
+	if !ok {
+		return
+	}
+
+	curTop := r.elementScrollOffset(ancestor, "scrollTop")
+	curLeft := r.elementScrollOffset(ancestor, "scrollLeft")
+
+	relY := tInfo.Y - aInfo.Y + curTop
+	relX := tInfo.X - aInfo.X + curLeft
+
+	contentTop := aInfo.BorderTop
+	contentLeft := aInfo.BorderLeft
+	clientH := aInfo.Height - aInfo.BorderTop - aInfo.BorderBottom
+	clientW := aInfo.Width - aInfo.BorderLeft - aInfo.BorderRight
+
+	newTop := scrollAxisOffset(relY, tInfo.Height, contentTop, clientH, block)
+	newLeft := scrollAxisOffset(relX, tInfo.Width, contentLeft, clientW, inline)
+
+	if newTop != curTop {
+		r.setElementScrollOffset(ancestor, "scrollTop", newTop)
+	}
+	if newLeft != curLeft {
+		r.setElementScrollOffset(ancestor, "scrollLeft", newLeft)
+	}
+}
+
+// scrollViewportToReveal adjusts the document viewport scroll so the target
+// element is visible.
+func (r *Runtime) scrollViewportToReveal(target *dom.Node, provider LayoutGeometryProvider, block, inline string) {
+	tInfo, ok := provider(target)
+	if !ok {
+		return
+	}
+	vw, vh := r.ViewportSize()
+	curY := r.WindowScrollY()
+	r.scrollMu.Lock()
+	curX := r.windowScrollX
+	r.scrollMu.Unlock()
+
+	absY := tInfo.Y + curY
+	absX := tInfo.X + curX
+
+	newY := scrollAxisOffset(absY, tInfo.Height, 0, float64(vh), block)
+	newX := scrollAxisOffset(absX, tInfo.Width, 0, float64(vw), inline)
+
+	if newY != curY {
+		r.SetWindowScrollY(newY)
+	}
+	if newX != curX {
+		r.setWindowScrollX(newX)
+	}
+}
+
+// scrollAxisOffset computes the scroll position needed to bring an element
+// into a viewport along one axis, given the element's position relative to
+// the scroll content origin, its size, the content offset, and the client size.
+func scrollAxisOffset(elPos, elSize, contentOffset, clientSize float64, alignment string) float64 {
+	viewStart := contentOffset
+	viewEnd := contentOffset + clientSize
+	elStart := elPos
+	elEnd := elPos + elSize
+
+	switch alignment {
+	case "start":
+		return elStart - viewStart
+	case "center":
+		return elStart - viewStart - (clientSize-elSize)/2
+	case "end":
+		return elEnd - viewEnd
+	default: // "nearest"
+		if elStart >= viewStart && elEnd <= viewEnd {
+			return 0
+		}
+		if elStart < viewStart {
+			return elStart - viewStart
+		}
+		return elEnd - viewEnd
+	}
 }
 
 // elementScrollOffset reads one stored element scroll offset without applying any
@@ -704,6 +908,9 @@ func (r *Runtime) setWindowScroll(x, y float64, relative bool) {
 	r.scrollMu.Unlock()
 	if moved {
 		r.QueueViewportScroll()
+		if r.opts.OnViewportScroll != nil {
+			r.opts.OnViewportScroll(x, y)
+		}
 	}
 }
 

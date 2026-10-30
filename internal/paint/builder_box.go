@@ -274,7 +274,18 @@ func (b *Builder) applyBoxEffects(obj *layout.Object, box boxPaintContext, comma
 
 func (b *Builder) overflowClip(obj *layout.Object, inherited *frame.Rect) *frame.Rect {
 	computed := obj.Style
-	if computed.Overflow != style.OverflowHidden && computed.OverflowX != style.OverflowHidden && computed.OverflowY != style.OverflowHidden {
+	// Clip for hidden, scroll, and auto overflow — all three establish a scroll
+	// container whose children must not paint outside the content box.
+	hasClip := computed.Overflow == style.OverflowHidden ||
+		computed.Overflow == style.OverflowScroll ||
+		computed.Overflow == style.OverflowAuto ||
+		computed.OverflowX == style.OverflowHidden ||
+		computed.OverflowX == style.OverflowScroll ||
+		computed.OverflowX == style.OverflowAuto ||
+		computed.OverflowY == style.OverflowHidden ||
+		computed.OverflowY == style.OverflowScroll ||
+		computed.OverflowY == style.OverflowAuto
+	if !hasClip {
 		return inherited
 	}
 	x0, y0, x1, y1 := obj.ContentRect()
@@ -287,6 +298,20 @@ func (b *Builder) overflowClip(obj *layout.Object, inherited *frame.Rect) *frame
 }
 
 func (b *Builder) paintChildren(obj *layout.Object, clip *frame.Rect, opacity float32) {
+	var scrollDX, scrollDY int32
+	if b.scrollOffset != nil && obj.Style != nil {
+		s := obj.Style
+		isScrollContainer := s.Overflow == style.OverflowScroll || s.Overflow == style.OverflowAuto ||
+			s.OverflowX == style.OverflowScroll || s.OverflowX == style.OverflowAuto ||
+			s.OverflowY == style.OverflowScroll || s.OverflowY == style.OverflowAuto
+		if isScrollContainer {
+			scrollX := b.scrollOffset(obj, "scrollLeft")
+			scrollY := b.scrollOffset(obj, "scrollTop")
+			scrollDX = int32(-scrollX * float64(b.scale))
+			scrollDY = int32(-scrollY * float64(b.scale))
+		}
+	}
+	cmdStart := b.list.Len()
 	item := 0
 	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
 		ordinal := 0
@@ -296,5 +321,14 @@ func (b *Builder) paintChildren(obj *layout.Object, clip *frame.Rect, opacity fl
 			ordinal = item
 		}
 		b.paintBox(kid, clip, ordinal, opacity)
+	}
+	if scrollDX != 0 || scrollDY != 0 {
+		cmds := b.list.All()
+		for i := cmdStart; i < len(cmds); i++ {
+			cmds[i].Rect.X0 += scrollDX
+			cmds[i].Rect.X1 += scrollDX
+			cmds[i].Rect.Y0 += scrollDY
+			cmds[i].Rect.Y1 += scrollDY
+		}
 	}
 }
