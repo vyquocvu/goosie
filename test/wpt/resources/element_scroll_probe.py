@@ -31,6 +31,7 @@ PAGE = """<!doctype html><html><head><style>
   <div id="abspos" style="overflow:scroll;scrollbar-width:none;position:relative;width:100px;height:100px"><div style="position:absolute;left:0;top:0;width:200px;height:200px"></div></div>
   <div id="fixedkid" style="overflow:scroll;scrollbar-width:none;position:relative;width:100px;height:100px"><div style="position:fixed;left:0;top:0;width:300px;height:300px"></div></div>
   <div id="tallpage" style="height:2000px"></div>
+  <div id="widepage" style="width:1200px;height:10px"></div>
 </body></html>"""
 
 PROBE = r"""
@@ -111,6 +112,71 @@ return {
     return { inline, afterTask, afterFrame: events.length, scrollTop: document.documentElement.scrollTop,
              scrollY: window.scrollY, sample: events[0] || null,
              scrollHeight: document.scrollingElement.scrollHeight, clientHeight: document.documentElement.clientHeight };
+  })(),
+  // Viewport scrolls reach which targets, and how many times per turn. The
+  // listener is replaced for each case so one case cannot see another's events.
+  viewportTargets: await (async () => {
+    const reset = () => { window.scrollTo(0, 0); };
+    async function once(where, write, opts) {
+      const o = opts || {};
+      if (!o.keepPosition) reset();
+      const seen = [];
+      const handler = (e) => seen.push(e.target === document ? 'document' : String(e.target.nodeName));
+      const node = where === 'window' ? window : where === 'documentElement' ? document.documentElement : document;
+      node.addEventListener('scroll', handler);
+      write();
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      node.removeEventListener('scroll', handler);
+      return { seen, scrollX: window.scrollX, scrollY: window.scrollY };
+    }
+    const setTop = (y) => () => { document.documentElement.scrollTop = y; };
+    return {
+      onDocument: await once('document', setTop(300)),
+      onWindow: await once('window', setTop(600)),
+      onDocumentElement: await once('documentElement', setTop(900)),
+      twoWritesOneTurn: await once('document', () => { document.documentElement.scrollTop = 100; document.documentElement.scrollTop = 200; }),
+      noChange: await once('document', () => { document.documentElement.scrollTop = 200; }, { keepPosition: true }),
+      windowScrollTo: await once('document', () => { window.scrollTo(0, 400); }),
+      // The horizontal axis: does a viewport scrollLeft write fire the event,
+      // and do both axes in one turn coalesce into one delivery?
+      xAxis: await once('document', () => { document.documentElement.scrollLeft = 40; }),
+      bothAxesOneTurn: await once('document', () => {
+        document.documentElement.scrollTop = 150;
+        document.documentElement.scrollLeft = 80;
+      }),
+      windowScrollBy: await once('document', () => { window.scrollBy(20, 20); }),
+      scrollingElementScrollTo: await once('document', () => { document.scrollingElement.scrollTo({ top: 500, left: 100 }); }),
+      elementWindowPhase: await (async () => {
+        // A non-bubbling element scroll must not reach a bubble-phase window
+        // listener, but the window is on the propagation path, so a capture
+        // listener there does see it.
+        async function phase(capture) {
+          const el = document.getElementById('scroller');
+          let seen = 0;
+          const h = () => { seen++; };
+          window.addEventListener('scroll', h, capture);
+          el.scrollTop = capture ? 25 : 10;
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          await new Promise((r) => requestAnimationFrame(() => r()));
+          window.removeEventListener('scroll', h, capture);
+          return seen;
+        }
+        return { bubble: await phase(false), capture: await phase(true) };
+      })(),
+      twoFrames: await (async () => {
+        reset();
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        const seen = [];
+        document.addEventListener('scroll', () => seen.push([window.scrollX, window.scrollY]));
+        document.documentElement.scrollTop = 100;
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        document.documentElement.scrollTop = 300;
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        return { seen };
+      })(),
+    };
   })(),
 };
 })()

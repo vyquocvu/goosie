@@ -273,7 +273,8 @@ btn.addEventListener('click', function() { __order += 'C'; });
 }
 
 // TestParity_ScrollEventFiresOnDocument verifies that scroll events dispatched
-// by the engine reach document-level listeners.
+// by the engine reach document-level listeners. Chromium coalesces the moves of
+// one turn into a single queued event, so five signals deliver one.
 func TestParity_ScrollEventFiresOnDocument(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -287,13 +288,14 @@ document.addEventListener('scroll', function() { __scrolls++; });
 	for i := 0; i < 5; i++ {
 		sess.FireScrollEvent()
 	}
+	sess.PumpJS(800)
 
 	v, ok := rt.Global("__scrolls")
 	if !ok {
 		t.Fatal("__scrolls not set")
 	}
-	if v.Num != 5 {
-		t.Errorf("__scrolls = %v, want 5", v.Num)
+	if v.Num != 1 {
+		t.Errorf("__scrolls = %v, want 1", v.Num)
 	}
 }
 

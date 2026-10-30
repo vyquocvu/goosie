@@ -75,17 +75,57 @@ func (r *Runtime) SetWindowScrollY(y float64) {
 	r.scrollMu.Lock()
 	oldY := r.windowScrollY
 	r.windowScrollY = y
+	moved := y != oldY
 	r.scrollMu.Unlock()
-	if y != oldY {
-		r.dispatchWindowScrollEvent()
+	if moved {
+		r.QueueViewportScroll()
 	}
 }
 
-func (r *Runtime) dispatchWindowScrollEvent() {
+// QueueViewportScroll records that the document viewport moved during this turn.
+// The event is delivered by FlushScrollEvents, where it is targeted at the
+// document and bubbles to the window.
+func (r *Runtime) QueueViewportScroll() {
 	if r == nil || r.domDoc == nil {
 		return
 	}
-	r.dispatchWithWindowStep(&r.domDoc.Node, dom.NewTrustedEvent("scroll", false, false))
+	r.scrollMu.Lock()
+	defer r.scrollMu.Unlock()
+	r.queueScrollTarget(&r.domDoc.Node)
+}
+
+// queueScrollTarget adds one node to the pending scroll queue, once per turn
+// however many writes reach it. The caller holds scrollMu.
+func (r *Runtime) queueScrollTarget(node *dom.Node) {
+	if node == nil {
+		return
+	}
+	if r.scrollQueued == nil {
+		r.scrollQueued = make(map[*dom.Node]bool)
+	}
+	if !r.scrollQueued[node] {
+		r.scrollQueued[node] = true
+		r.scrollQueue = append(r.scrollQueue, node)
+	}
+}
+
+// setWindowScrollX commits the horizontal viewport offset and queues the scroll
+// event when it moved, the way a vertical scroll does.
+func (r *Runtime) setWindowScrollX(x float64) {
+	if r == nil {
+		return
+	}
+	if x < 0 {
+		x = 0
+	}
+	r.scrollMu.Lock()
+	old := r.windowScrollX
+	r.windowScrollX = x
+	moved := x != old
+	r.scrollMu.Unlock()
+	if moved {
+		r.QueueViewportScroll()
+	}
 }
 
 func (r *Runtime) isDocumentScrollingElement(node *dom.Node) bool {
@@ -317,13 +357,7 @@ func (r *Runtime) setElementScrollOffset(node *dom.Node, prop string, value floa
 	changed := r.scrollPositions[key] != value
 	r.scrollPositions[key] = value
 	if changed {
-		if r.scrollQueued == nil {
-			r.scrollQueued = make(map[*dom.Node]bool)
-		}
-		if !r.scrollQueued[node] {
-			r.scrollQueued[node] = true
-			r.scrollQueue = append(r.scrollQueue, node)
-		}
+		r.queueScrollTarget(node)
 	}
 	r.scrollMu.Unlock()
 }
@@ -377,7 +411,10 @@ func (r *Runtime) FlushScrollEvents() {
 		if node == nil {
 			continue
 		}
-		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scroll", false, false))
+		// A viewport scroll is targeted at the document and bubbles from there
+		// to the window; an element scroll bubbles to nothing.
+		viewport := r.domDoc != nil && node == &r.domDoc.Node
+		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scroll", viewport, false))
 	}
 }
 
@@ -422,9 +459,7 @@ func (r *Runtime) installElementScrollMethods() {
 				if prop == "scrollTop" {
 					r.SetWindowScrollY(v)
 				} else {
-					r.scrollMu.Lock()
-					r.windowScrollX = v
-					r.scrollMu.Unlock()
+					r.setWindowScrollX(v)
 				}
 				return goja.Undefined()
 			}
@@ -554,16 +589,8 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 			dx += r.windowScrollX
 			r.scrollMu.Unlock()
 		}
-		if dy < 0 {
-			dy = 0
-		}
-		if dx < 0 {
-			dx = 0
-		}
 		r.SetWindowScrollY(dy)
-		r.scrollMu.Lock()
-		r.windowScrollX = dx
-		r.scrollMu.Unlock()
+		r.setWindowScrollX(dx)
 		return
 	}
 	if method == "scrollBy" {
@@ -655,7 +682,7 @@ func (r *Runtime) handleWindowScroll(method string, call goja.FunctionCall) {
 }
 
 // setWindowScroll commits a document viewport position, either absolute or
-// relative to the current offset, and dispatches scroll only when it moved.
+// relative to the current offset, and queues the scroll event only when it moved.
 func (r *Runtime) setWindowScroll(x, y float64, relative bool) {
 	if r == nil {
 		return
@@ -673,9 +700,10 @@ func (r *Runtime) setWindowScroll(x, y float64, relative bool) {
 		y = 0
 	}
 	r.windowScrollX, r.windowScrollY = x, y
+	moved := x != oldX || y != oldY
 	r.scrollMu.Unlock()
-	if x != oldX || y != oldY {
-		r.dispatchWindowScrollEvent()
+	if moved {
+		r.QueueViewportScroll()
 	}
 }
 

@@ -7,15 +7,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// FireScrollEvent dispatches a "scroll" event on the document.
-// This should be called when the viewport scroll position changes.
+// FireScrollEvent tells the page that the document viewport moved. The runtime
+// queues one event per turn for the viewport, delivered at the next frame flush
+// the way a script-initiated scroll is, so several viewport moves in one turn
+// reach the page as a single event.
 func (s *Session) FireScrollEvent() {
 	if s.Doc == nil {
 		return
 	}
-	// Scroll events fire on the document and bubble to window.
-	// They do not have a specific target element.
-	ev := dom.NewEvent("scroll", false, false)
+	s.opMu.Lock()
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if rt != nil {
+		rt.QueueViewportScroll()
+		return
+	}
+	// Without a script runtime there is no frame flush to drain the queue, so
+	// the document's own listeners are served the event directly.
+	ev := dom.NewTrustedEvent("scroll", true, false)
 	dom.DispatchEvent(&s.Doc.Node, ev)
 }
 

@@ -395,6 +395,9 @@ document.getElementById('cb').addEventListener('change', function(event) {
 // Scroll → JS listener
 // ---------------------------------------------------------------------------
 
+// The viewport scroll event is queued and coalesced, the way Chromium delivers
+// it: several moves in one turn reach the page as a single event at the frame
+// flush, not once per move.
 func TestInteraction_ScrollFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -411,12 +414,20 @@ document.addEventListener('scroll', function() {
 	sess.FireScrollEvent()
 	sess.FireScrollEvent()
 
+	if v, ok := rt.Global("__scrollCount"); !ok {
+		t.Fatal("__scrollCount not set")
+	} else if v.Num != 0 {
+		t.Fatalf("__scrollCount before the flush = %v, want 0", v.Num)
+	}
+
+	sess.PumpJS(800)
+
 	v, ok := rt.Global("__scrollCount")
 	if !ok {
 		t.Fatal("__scrollCount not set")
 	}
-	if v.Num != 3 {
-		t.Errorf("__scrollCount = %v, want 3", v.Num)
+	if v.Num != 1 {
+		t.Errorf("__scrollCount = %v, want 1", v.Num)
 	}
 }
 
