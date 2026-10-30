@@ -1121,6 +1121,9 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			it := a.Get(items[i].id)
 			mTop := flexMargin(it.Style.MarginTop)
 			finalX := cursor + flexMargin(it.Style.MarginLeft)
+			// Where the measurement pass left the item: the shift path below and
+			// the declared-basis path need the delta to the final origin.
+			prevX, prevY := it.X, it.Y
 			if items[i].basis >= 0 && it.Style.Width < 0 {
 				w := items[i].basis - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
 				if w < 0 {
@@ -1197,9 +1200,34 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 					// inline pass would be a no-op. Clear it down to the nested
 					// containers so the subtree re-wraps into the width it earned.
 					clearInlineLaidOut(a, items[i].id)
+					blockInto(a, items[i].id, containW)
+					it = a.Get(items[i].id)
+				} else {
+					// A declared-basis item skips the auto-measure loop, so
+					// blockKids was never set for it even when it holds block
+					// children: the "measured at least once" pass laid that subtree
+					// out at the container's origin instead. Block children carry
+					// content heights derived from those stale fragments, so the
+					// whole subtree has to be laid out again at the final origin;
+					// inline-only content only moved, and shifting its fragments
+					// costs no allocation.
+					prevW := it.W
+					if hasBlockChild(a, items[i].id) {
+						clearInlineLaidOut(a, items[i].id)
+						blockInto(a, items[i].id, containW)
+						it = a.Get(items[i].id)
+					} else {
+						blockInto(a, items[i].id, containW)
+						it = a.Get(items[i].id)
+						if it.W != prevW {
+							clearInlineLaidOut(a, items[i].id)
+							blockInto(a, items[i].id, containW)
+							it = a.Get(items[i].id)
+						} else {
+							shiftInlineContent(a, items[i].id, finalX-prevX, lineY[l]+mTop-prevY)
+						}
+					}
 				}
-				blockInto(a, items[i].id, containW)
-				it = a.Get(items[i].id)
 				inlineInto(a, items[i].id)
 				it = a.Get(items[i].id)
 			}
@@ -2083,6 +2111,19 @@ func rowFlexMaxContent(a *Arena, id ObjectID) float32 {
 		n++
 	}
 	return run
+}
+
+// hasBlockChild reports whether any direct child of id is block level. Flex
+// items with a declared basis never enter the auto-measure loop, so the flag
+// blockKids does not describe them; this answers the same question at the point
+// their subtree is re-laid out.
+func hasBlockChild(a *Arena, id ObjectID) bool {
+	for kid := a.Get(id).FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		if k := a.Get(kid); isBlock(k) {
+			return true
+		}
+	}
+	return false
 }
 
 // clearInlineLaidOut drops the inline-laid-out flag down an item's subtree so a
