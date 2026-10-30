@@ -341,6 +341,16 @@ type ComputedStyle struct {
 	BorderBottomColor css.Color
 	BorderLeftColor   css.Color
 
+	// Outline is the ring drawn around the border box. It takes no layout
+	// space, so it never has a box of its own and can overlap neighbours; a
+	// style of none (the initial value) or a zero width paints nothing.
+	// OutlineOffset moves the ring out (positive) or in (negative) without
+	// changing where the box sits.
+	OutlineWidth  float32
+	OutlineStyle  string
+	OutlineColor  css.Color
+	OutlineOffset float32
+
 	// BorderImage carries the parsed border-image longhands. Source empty
 	// means no image (none/unparseable) and normal borders paint. The engine
 	// resolves Source against the document base and fetches it like a
@@ -614,6 +624,13 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
 	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
+	// The outline ring belongs to the element's own box for the same reason:
+	// an anonymous block is block level, so it passes the paint gate that keeps
+	// inline fragments from drawing the ring, and a copy would draw a second
+	// ring around every run the element's text was wrapped into.
+	s.OutlineWidth, s.OutlineOffset = 0, 0
+	s.OutlineStyle = ""
+	s.OutlineColor = css.Color{}
 	// An anonymous box owns no background layer. The generating element has
 	// already painted all four across the area this box sits in, so handing out a
 	// copy composites a translucent layer a second time behind every run layout
@@ -696,6 +713,9 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
 	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
 	s.BorderRadius = [4][2]float32{}
+	s.OutlineWidth, s.OutlineOffset = 0, 0
+	s.OutlineStyle = ""
+	s.OutlineColor = css.Color{}
 	s.BackgroundColor = css.Color{}
 	s.BackgroundImage = ""
 	s.MaskImage = ""
@@ -942,8 +962,10 @@ input[type=image] { display: inline; }
 input[type=submit], input[type=reset], input[type=button] { display: inline-block; }
 input[type=hidden] { display: none; }
 /* Chrome lays a button out as an inline-level box that shrinks to its label, so
-   a row of buttons sits side by side. */
-button { display: inline-block; text-align: center; }
+   a row of buttons sits side by side, and gives it the platform chrome instead
+   of letting it look like its own label: the control font rather than the
+   inherited one, 6px side padding, and a 2px outset border on the button face. */
+button { display: inline-block; text-align: center; padding: 1px 6px; border: 2px outset #767676; background-color: #efefef; font: 400 13.333px Arial; font-style: normal; }
 dl { display: block; margin-top: 1em; margin-bottom: 1em; }
 dt { display: block; font-weight: 700; }
 dd { display: block; margin-left: 40px; }
@@ -3239,6 +3261,21 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.BorderRightColor = c
 		cs.BorderBottomColor = c
 		cs.BorderLeftColor = c
+	case "outline":
+		// The outline shorthand carries the same three parts as border and in
+		// the same any-order form; `outline: none` clears the ring.
+		w, s, c := parseBorderShorthand(value)
+		cs.OutlineWidth = w
+		cs.OutlineStyle = s
+		cs.OutlineColor = c
+	case "outline-width":
+		cs.OutlineWidth = resolveLength(parsed, 0)
+	case "outline-style":
+		cs.OutlineStyle = strings.ToLower(value)
+	case "outline-color":
+		cs.OutlineColor = parseColorValueWithScheme(value, cs.scheme())
+	case "outline-offset":
+		cs.OutlineOffset = resolveLength(parsed, 0)
 	case "border-width":
 		t, r, b, l := parseBoxShorthand(value)
 		cs.BorderTopWidth = t

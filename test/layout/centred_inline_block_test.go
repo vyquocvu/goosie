@@ -1,7 +1,6 @@
 package layout_test
 
 import (
-	"math"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/layout"
@@ -35,7 +34,12 @@ func TestCentredInlineBlockShrinkWrapsItsLabel(t *testing.T) {
 	if right.X <= btn.X+btn.W {
 		t.Errorf("the glyph after the button starts at %g, inside the button ending at %g", right.X, btn.X+btn.W)
 	}
-	if math.Abs(float64(right.Y-label.Y)) > 1 {
-		t.Errorf("the glyph after the button wrapped: Y=%g against the label at Y=%g", right.Y, label.Y)
+	// All three stay on the heading's line. The button carries the control
+	// font (13.333px) rather than inheriting the heading's 40px, which is what
+	// Chromium's UA sheet does to every button, so the two glyphs' tops differ
+	// while their baselines share the line; overlapping vertical spans prove
+	// they were not wrapped apart.
+	if right.Y >= label.Y+label.H || label.Y >= right.Y+right.H {
+		t.Errorf("the glyph after the button wrapped: Y=%g H=%g against the label at Y=%g H=%g", right.Y, right.H, label.Y, label.H)
 	}
 }

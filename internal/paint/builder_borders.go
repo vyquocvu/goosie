@@ -61,6 +61,48 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 	}
 }
 
+// paintOutline draws the outline ring around the border box as four strips
+// between the offset rect and the same rect grown by the outline width. The
+// ring takes no layout space, so a positive offset pushes it out over whatever
+// the box neighbours and a negative one pulls it inside; a style of none or a
+// zero width paints nothing, which is the initial state of every box.
+func (b *Builder) paintOutline(s *style.ComputedStyle, rect frame.Rect, opacity float32) {
+	if s == nil || s.OutlineWidth <= 0 {
+		return
+	}
+	if s.OutlineStyle == "" || s.OutlineStyle == "none" || s.OutlineStyle == "hidden" {
+		return
+	}
+	thick := int32(s.OutlineWidth * b.scale)
+	if thick <= 0 {
+		thick = 1
+	}
+	off := int32(s.OutlineOffset * b.scale)
+	outer := frame.Rect4(rect.X0-off-thick, rect.Y0-off-thick, rect.X1+off+thick, rect.Y1+off+thick)
+	inner := frame.Rect4(rect.X0-off, rect.Y0-off, rect.X1+off, rect.Y1+off)
+	if outer.Empty() || inner.Empty() {
+		return
+	}
+	// An unset colour falls back to currentColor, which is what the shorthand
+	// leaves behind when it carries no colour token.
+	c := s.OutlineColor
+	if c.A == 0 {
+		c = s.Color
+	}
+	color := convertColor(c)
+	strip := func(x0, y0, x1, y1 int32) {
+		r := frame.Rect4(x0, y0, x1, y1)
+		if r.Empty() {
+			return
+		}
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: r, Color: color, Opacity: opacity})
+	}
+	strip(outer.X0, outer.Y0, outer.X1, inner.Y0)
+	strip(outer.X0, inner.Y1, outer.X1, outer.Y1)
+	strip(outer.X0, inner.Y0, inner.X0, inner.Y1)
+	strip(inner.X1, inner.Y0, outer.X1, inner.Y1)
+}
+
 // paintBorderImage nine-slices a decoded border-image source over the
 // border area. It reports whether it painted: without a source, a slice, or
 // decoded pixels the caller falls back to normal borders.

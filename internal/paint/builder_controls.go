@@ -111,15 +111,29 @@ func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity flo
 	if rect.Empty() {
 		return
 	}
-	// White background fill.
+	checked := obj.Node != nil && obj.Node.InputChecked()
+	// An unchecked box is white with a grey frame. A checked one takes the
+	// accent colour - the author's accent-color, or Chrome's default blue -
+	// and draws a white tick on it, which is what makes the state readable at
+	// a glance instead of only by the tick itself.
+	fillColor := frame.RGB(255, 255, 255)
+	borderColor := frame.RGB(117, 117, 117)
+	checkColor := frame.RGB(0, 0, 0)
+	if checked {
+		fillColor = frame.RGB(0, 117, 255)
+		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
+			fillColor = convertColor(obj.Style.AccentColor)
+		}
+		borderColor = fillColor
+		checkColor = frame.RGB(255, 255, 255)
+	}
 	b.list.Append(DisplayCmd{
 		Kind:    CmdFill,
 		Rect:    rect,
-		Color:   frame.RGB(255, 255, 255),
+		Color:   fillColor,
 		Opacity: opacity,
 	})
 	// 1px border.
-	borderColor := frame.RGB(117, 117, 117)
 	// Top
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+1), Color: borderColor, Opacity: opacity})
 	// Bottom
@@ -130,12 +144,7 @@ func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity flo
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-1, rect.Y0, rect.X1, rect.Y1), Color: borderColor, Opacity: opacity})
 
 	// If checked, draw a checkmark.
-	if obj.Node != nil && obj.Node.InputChecked() {
-		checkColor := frame.RGB(0, 0, 0)
-		// Apply accent-color if set and has alpha > 0
-		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
-			checkColor = frame.RGBA(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B, 255)
-		}
+	if checked {
 		// Simple checkmark: a small V shape drawn as filled pixels.
 		cx := (rect.X0 + rect.X1) / 2
 		cy := (rect.Y0 + rect.Y1) / 2

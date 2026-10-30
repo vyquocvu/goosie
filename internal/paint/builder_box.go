@@ -164,6 +164,7 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 	}
 	if computed.Display != style.DisplayInline && computed.Display != style.DisplayNone {
 		b.paintBorders(obj, paint.rect, paint.radius, paint.opacity)
+		b.paintOutline(computed, paint.rect, paint.opacity)
 	}
 	if computed.Display == style.DisplayListItem {
 		b.paintMarker(obj, ordinal)
