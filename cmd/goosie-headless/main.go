@@ -66,6 +66,21 @@ func main() {
 	}
 }
 
+// frameOutcome reports whether a headless render has finished, or failed. A
+// frame that wants nothing, has nothing on order, and was refused nothing is
+// settled. A visible tile that failed rasterization is terminal instead: the
+// scheduler will not retry it for this content, so the PNG would have a hole
+// that no later frame repairs and waiting would only run to renderTimeout.
+func frameOutcome(stats surface.LoopStats) (bool, error) {
+	if stats.Presents == 0 {
+		return false, nil
+	}
+	if stats.Last.Failed > 0 {
+		return false, fmt.Errorf("%d visible tile(s) failed rasterization", stats.Last.Failed)
+	}
+	return stats.Last.Needed == 0 && stats.Last.PaintingBytes == 0 && stats.Last.Refused == 0, nil
+}
+
 // mustJSRuntime builds the per-document runtime for classic scripts, or nil
 // when construction fails so the render degrades to no scripting instead of
 // failing. The session owns it afterwards via Close.
@@ -187,7 +202,11 @@ func run(args []string) error {
 	for {
 		select {
 		case <-time.After(10 * time.Millisecond):
-			if win.Stats().Presents >= 2 {
+			done, err := frameOutcome(loop.Stats())
+			if err != nil {
+				return err
+			}
+			if done {
 				cancel()
 				<-loopDone
 				if err := win.WritePNG(c.out); err != nil {

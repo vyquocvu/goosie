@@ -511,6 +511,83 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	}
 }
 
+// FrameWork.Failed is the headless guard's input. A tile the scheduler has given
+// up on must be reported on the frame that still shows it, because the only other
+// outcome is a PNG with a silent hole in it.
+func TestVisibleFailedTileIsReportedInFrameWork(t *testing.T) {
+	const (
+		cols, rows = 2, 8
+		vp         = 2 * frame.TileSize
+	)
+	bad := frame.TileCoord{Col: 1, Row: 1}
+	draw := func(j raster.Job) error {
+		if j.Coord == bad {
+			return errors.New("test: this tile cannot be drawn")
+		}
+		return schedRaster(j)
+	}
+	h := newSchedRaster(t, cols, rows, 32, frame.Viewport{Size: frame.Size{W: vp, H: vp}}, raster.Pref{PrefetchRows: raster.PrefetchOff}, draw)
+
+	for i := 0; i < frame.MaxTileAttempts*8 && h.s.Stats().Failed == 0; i++ {
+		h.frame(t, vsync(0))
+		h.drain(t)
+	}
+	if !h.l.Grid.Failed(bad) {
+		t.Fatalf("tile %v was never given up on", bad)
+	}
+
+	w := h.frame(t, vsync(0))
+	h.drain(t)
+	if w.Failed != 1 {
+		t.Fatalf("FrameWork.Failed = %d, want 1 for the one visible failed tile", w.Failed)
+	}
+	if w.Needed != 0 {
+		t.Fatalf("FrameWork.Needed = %d after the visible set settled, want 0", w.Needed)
+	}
+}
+
+// The counter is visible tiles only. A failure above the viewport is still a hole
+// in the document, but it is not a hole in this frame and must not abort a render
+// that can finish.
+func TestFailedTileOutsideViewportIsNotReportedInFrameWork(t *testing.T) {
+	const (
+		cols, rows = 2, 8
+		vp         = 2 * frame.TileSize
+	)
+	bad := frame.TileCoord{Col: 0, Row: 0}
+	draw := func(j raster.Job) error {
+		if j.Coord == bad {
+			return errors.New("test: this tile cannot be drawn")
+		}
+		return schedRaster(j)
+	}
+	h := newSchedRaster(t, cols, rows, 32, frame.Viewport{Size: frame.Size{W: vp, H: vp}}, raster.Pref{PrefetchRows: raster.PrefetchOff}, draw)
+
+	for i := 0; i < frame.MaxTileAttempts*8 && h.s.Stats().Failed == 0; i++ {
+		h.frame(t, vsync(0))
+		h.drain(t)
+	}
+	if !h.l.Grid.Failed(bad) {
+		t.Fatalf("tile %v was never given up on", bad)
+	}
+	if w := h.frame(t, vsync(0)); w.Failed != 1 {
+		t.Fatalf("FrameWork.Failed = %d while the failed tile is visible, want 1", w.Failed)
+	}
+	h.drain(t)
+
+	// Scroll the failure out of the viewport; the document still has the hole, so
+	// the scheduler's own counter stays non-zero.
+	h.setOffset(t, 6*frame.TileSize)
+	w := h.frame(t, vsync(0))
+	h.drain(t)
+	if got := h.s.Stats().Failed; got == 0 {
+		t.Fatal("Stats().Failed = 0, want the out-of-view failure retained")
+	}
+	if w.Failed != 0 {
+		t.Fatalf("FrameWork.Failed = %d for an off-screen failure, want 0", w.Failed)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // damage, versions, and geometry ownership
 // ---------------------------------------------------------------------------

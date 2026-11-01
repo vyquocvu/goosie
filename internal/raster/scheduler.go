@@ -87,8 +87,9 @@ type Scheduler struct {
 	doneScale  float32
 	doneBg     frame.Color
 
-	reused      int
-	reusedTotal int64
+	reused        int
+	failedVisible int
+	reusedTotal   int64
 
 	scratch    int64
 	frames     int64
@@ -379,6 +380,7 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 
 	s.vis, s.need, s.pref = s.vis[:0], s.need[:0], s.pref[:0]
 	s.reused = 0
+	s.failedVisible = 0
 
 	p, ok := s.slot.Take()
 	if !ok {
@@ -438,7 +440,11 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 		}
 		// A tile with a buffer already on order is being painted right now, and a
 		// failed tile is a decision not to paint it again until content changes.
-		if s.grid.InFlight(c) || s.grid.Failed(c) {
+		if s.grid.InFlight(c) {
+			continue
+		}
+		if s.grid.Failed(c) {
+			s.failedVisible++
 			continue
 		}
 		s.need = append(s.need, c)
@@ -463,7 +469,7 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 // still fit is what keeps used <= budget true across the whole frame path, which is the
 // plateau the memory criterion is stated as.
 func (s *Scheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
-	w := surface.FrameWork{Needed: len(needed), Reused: s.reused}
+	w := surface.FrameWork{Needed: len(needed), Reused: s.reused, Failed: s.failedVisible}
 	if s.grid == nil || s.pool == nil || s.layer == nil {
 		return w
 	}
