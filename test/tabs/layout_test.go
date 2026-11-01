@@ -99,6 +99,9 @@ func TestTabStripShrinksToFit(t *testing.T) {
 // Shrinking has a floor: tabs must stay wide enough for an ellipsis and the
 // close affordance instead of collapsing to slivers.
 func TestTabStripMinWidthClamp(t *testing.T) {
+	if tabs.MinTabWidth < 80 {
+		t.Fatalf("MinTabWidth = %d, want at least the 80px minimum clickable width", tabs.MinTabWidth)
+	}
 	const tabCount, width = 40, 1000
 	for i := 0; i < tabCount; i++ {
 		if got := tabs.TabRect(i, 0, tabCount, width).W(); got != int32(tabs.MinTabWidth) {
@@ -116,10 +119,11 @@ func TestStripMaxOffset(t *testing.T) {
 	if got := tabs.StripMaxOffset(10, 1000); got != 0 {
 		t.Fatalf("StripMaxOffset(10, 1000) = %d, want 0 (shrinks to fit)", got)
 	}
-	// 40 tabs at MinTabWidth 72: 8 + 40*73 + 32 - (1000-56) = 2016. The max
-	// leaves the new-tab button visible left of the chevron zone.
-	if got := tabs.StripMaxOffset(40, 1000); got != 2016 {
-		t.Fatalf("StripMaxOffset(40, 1000) = %d, want 2016", got)
+	// 40 tabs at MinTabWidth: 8 + 40*(MinTabWidth+1) + 32 - (1000-56) = 2336.
+	// The max leaves the new-tab button visible left of the chevron zone.
+	wantMax := int32(8 + 40*(tabs.MinTabWidth+1) + 32 - (1000 - 56))
+	if got := tabs.StripMaxOffset(40, 1000); got != wantMax {
+		t.Fatalf("StripMaxOffset(40, 1000) = %d, want %d", got, wantMax)
 	}
 }
 
@@ -128,8 +132,9 @@ func TestStripMaxOffset(t *testing.T) {
 // leaves the offset alone.
 func TestEnsureTabVisible(t *testing.T) {
 	const tabCount, width = 40, 1000
-	if got := tabs.EnsureTabVisible(39, tabCount, width, 0); got != 2016 {
-		t.Fatalf("EnsureTabVisible(last) = %d, want 2016 (scroll to end)", got)
+	wantMax := int32(8 + tabCount*(tabs.MinTabWidth+1) + 32 - (width - 56))
+	if got := tabs.EnsureTabVisible(39, tabCount, width, 0); got != wantMax {
+		t.Fatalf("EnsureTabVisible(last) = %d, want %d (scroll to end)", got, wantMax)
 	}
 	if got := tabs.EnsureTabVisible(0, tabCount, width, 1960); got != 0 {
 		t.Fatalf("EnsureTabVisible(first) = %d, want 0", got)
@@ -168,9 +173,10 @@ func TestChevronRects(t *testing.T) {
 // A chevron page keeps one tab of context: visible strip minus one tab,
 // floored at one tab so a narrow strip still moves.
 func TestTabScrollPage(t *testing.T) {
-	// 40 tabs at 1000: visible 1000-8-56, minus one 72px tab.
-	if got := tabs.TabScrollPage(40, 1000); got != 864 {
-		t.Fatalf("TabScrollPage(40, 1000) = %d, want 864", got)
+	// 40 tabs at 1000: visible 1000-8-56, minus one MinTabWidth tab.
+	want := int32(1000 - 8 - 56 - tabs.MinTabWidth)
+	if got := tabs.TabScrollPage(40, 1000); got != want {
+		t.Fatalf("TabScrollPage(40, 1000) = %d, want %d", got, want)
 	}
 }
 
@@ -190,8 +196,10 @@ func TestDropIndexAt(t *testing.T) {
 	if got := tabs.DropIndexAt(5000, 4, 1000, 0); got != 3 {
 		t.Fatalf("DropIndexAt(5000) = %d, want 3 (clamped)", got)
 	}
-	// Scrolled strips measure in content coordinates.
-	if got := tabs.DropIndexAt(600, 40, 1000, 1000); got != 21 {
-		t.Fatalf("DropIndexAt(600, off 1000) = %d, want 21", got)
+	// Scrolled strips measure in content coordinates, at the clamped width.
+	pitch := int32(tabs.MinTabWidth + tabs.TabGap)
+	want := int((600 - int32(tabs.LeftMargin) + 1000) / pitch)
+	if got := tabs.DropIndexAt(600, 40, 1000, 1000); got != want {
+		t.Fatalf("DropIndexAt(600, off 1000) = %d, want %d", got, want)
 	}
 }

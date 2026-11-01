@@ -11,9 +11,10 @@ const (
 	CloseBtnSize   = 16
 	CloseBtnMargin = 8
 	// MinTabWidth is the narrowest a tab shrinks under strip pressure: wide
-	// enough for an ellipsis plus the close affordance. Beyond it the strip
-	// scrolls under the chevron controls; every tab stays reachable.
-	MinTabWidth = 72
+	// enough for an ellipsis plus the close affordance, and never below the
+	// 80px minimum clickable width. Beyond it the strip scrolls under the
+	// chevron controls; every tab stays reachable.
+	MinTabWidth = 80
 	// ChevronReserve is the strip's right end kept for the two scroll
 	// chevrons once tabs overflow: two 24px buttons, a 4px gap between them,
 	// and a 4px right margin.

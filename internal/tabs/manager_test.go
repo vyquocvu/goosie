@@ -33,9 +33,10 @@ func TestTabScrollClampsToStripRange(t *testing.T) {
 		mgr.NewTab()
 	}
 	n := int32(mgr.Count())
+	wantMax := int32(LeftMargin) + n*(int32(MinTabWidth)+int32(TabGap)) + int32(NewTabBtnSize) - (1000 - int32(ChevronReserve))
 	mgr.SetTabScroll(99999, n, 1000)
-	if got := mgr.TabScroll(); got != 2016 {
-		t.Fatalf("TabScroll() = %d, want 2016 (clamped to max)", got)
+	if got := mgr.TabScroll(); got != wantMax {
+		t.Fatalf("TabScroll() = %d, want %d (clamped to max)", got, wantMax)
 	}
 	mgr.SetTabScroll(-5, n, 1000)
 	if got := mgr.TabScroll(); got != 0 {

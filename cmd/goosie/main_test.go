@@ -1161,16 +1161,17 @@ func TestTabStripWheelScrollsWhenOverflowing(t *testing.T) {
 	if !cw.intercept(huge) {
 		t.Fatal("over-scroll not consumed")
 	}
-	if got := mgr.TabScroll(); got != 2016 {
-		t.Fatalf("TabScroll() = %d, want 2016 (clamped to max)", got)
+	wantMax := int32(tabs.LeftMargin) + int32(mgr.Count())*(int32(tabs.MinTabWidth)+int32(tabs.TabGap)) + int32(tabs.NewTabBtnSize) - (1000 - int32(tabs.ChevronReserve))
+	if got := mgr.TabScroll(); got != wantMax {
+		t.Fatalf("TabScroll() = %d, want %d (clamped to max)", got, wantMax)
 	}
 	// Over the document the same wheel must reach the loop, not the strip.
 	content := surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 120}, Pos: frame.Point{X: 500, Y: 200}}
 	if cw.intercept(content) {
 		t.Fatal("wheel over document consumed by tab strip")
 	}
-	if got := mgr.TabScroll(); got != 2016 {
-		t.Fatalf("TabScroll() = %d, want 2016 (content scroll must not move strip)", got)
+	if got := mgr.TabScroll(); got != wantMax {
+		t.Fatalf("TabScroll() = %d, want %d (content scroll must not move strip)", got, wantMax)
 	}
 }
 
@@ -1204,8 +1205,9 @@ func TestSwitchTabScrollsActiveIntoView(t *testing.T) {
 	}
 	last := f.tabMgr.Tabs()[39]
 	f.switchTab(last.ID())
-	if got := f.tabMgr.TabScroll(); got != 2016 {
-		t.Fatalf("TabScroll() = %d, want 2016 (last tab scrolled into view)", got)
+	wantMax := int32(tabs.LeftMargin) + int32(f.tabMgr.Count())*(int32(tabs.MinTabWidth)+int32(tabs.TabGap)) + int32(tabs.NewTabBtnSize) - (1000 - int32(tabs.ChevronReserve))
+	if got := f.tabMgr.TabScroll(); got != wantMax {
+		t.Fatalf("TabScroll() = %d, want %d (last tab scrolled into view)", got, wantMax)
 	}
 	first := f.tabMgr.Tabs()[0]
 	f.switchTab(first.ID())
