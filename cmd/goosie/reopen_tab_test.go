@@ -7,6 +7,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
+// qc:BR-039
 func TestReopenTabShortcut(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	mgr.NewTab()
@@ -47,6 +48,7 @@ func TestReopenTabShortcut(t *testing.T) {
 	}
 }
 
+// qc:BR-039
 func TestFramePathReopenTab(t *testing.T) {
 	f := newNavTestPath(t)
 	// Create a second tab so we can close one without emptying the manager

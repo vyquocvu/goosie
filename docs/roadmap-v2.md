@@ -1,6 +1,6 @@
 # Goosie — roadmap trải nghiệm trình duyệt hằng ngày
 
-- Cập nhật: 2026-10-14
+- Cập nhật: 2026-11-02
 - Phạm vi: ứng dụng macOS ARM64 với engine Go hiện tại; bản headless tiếp tục dùng chung engine.
 - Mục tiêu: mở, đọc, tương tác và quay lại các trang web được Goosie hỗ trợ qua giao diện thông thường.
 
@@ -14,7 +14,7 @@ Roadmap này ưu tiên **hành trình sử dụng** thay vì số lượng API h
 
 | Đã có nền tảng | Phần trải nghiệm còn thiếu hoặc cần hoàn thiện |
 | --- | --- |
-| Nhập URL, liên kết/anchor, Back/Forward/reload, tab độc lập, tab mới/đóng/chuyển/sắp xếp, tab tràn, khôi phục phiên | Tìm kiếm bằng từ khóa trong thanh địa chỉ, gợi ý, trạng thái điều hướng rõ ràng, mở lại tab vừa đóng và thao tác tab bằng menu |
+| Nhập URL, liên kết/anchor, Back/Forward/reload, tab độc lập, tab mới/đóng/chuyển/sắp xếp, tab tràn, khôi phục phiên; tìm kiếm bằng từ khóa, gợi ý frecency và mở lại tab vừa đóng | Trạng thái điều hướng rõ ràng (đang tải/lỗi/redirect) trong chrome, favicon và thao tác tab bằng menu |
 | Tìm trong trang, chọn/sao chép văn bản, zoom bằng phím tắt, resize/reflow | Hiển thị mức zoom, thao tác bằng chuột và phím nhất quán, thông báo khi trang tải chậm/lỗi |
 | Kho bookmark/history/session/cookie; `Cmd+D` lưu bookmark; `-private` và `-clear-data` | Giao diện xem/sửa/xóa bookmark và history, mở cửa sổ riêng tư, điều khiển dữ liệu duyệt web trong ứng dụng |
 | Tự lưu phản hồi cần tải xuống vào thư mục cấu hình | Danh sách tiến độ/kết quả, hủy tải, chọn nơi lưu và mở tệp trong Finder |
@@ -34,6 +34,11 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 | Gợi ý khi nhập | Gợi ý từ history/bookmark và lựa chọn tìm kiếm; thao tác chuột, phím mũi tên, Enter, Escape | Kết quả đúng tab/profile; không lộ dữ liệu riêng tư sang phiên thường; gõ nhanh hoặc chuyển tab không để gợi ý cũ xuất hiện |
 | Trạng thái điều hướng | Nút Back/Forward vô hiệu khi không đi được; reload/stop, đang tải, URL cuối sau redirect, lỗi/cert rõ ràng | Mỗi trạng thái khớp tài liệu đang hiển thị, kể cả điều hướng lỗi, redirect, hủy tải và chuyển tab khi trang còn đang tải |
 | Trạng thái tab | Hiển thị tiêu đề/favicon hoặc biểu tượng dự phòng; mở lại tab vừa đóng (`Cmd+Shift+T`) | Tab mới, tab nền, tab đóng và phiên khôi phục có nhãn đúng; mở lại giữ URL và lịch sử của tab trong phạm vi hỗ trợ |
+
+**Trạng thái "Thanh địa chỉ thông minh, gợi ý và mở lại tab" (cập nhật 2026-11-02):**
+- **Đã có trong mã:** `normalizeAddress` phân biệt URL/hostname với cụm từ, dùng template `{query}` của profile và fallback về công cụ mặc định khi template hỏng. Gợi ý omnibox gộp trang nội bộ, bookmark và history thành một danh sách xếp hạng frecency (visit × recency bucket; bookmark baseline 1.0), giữ lựa chọn tìm kiếm ở đầu, giới hạn 8 dòng và không đọc bookmark/history trong tab private hoặc phiên `-private`. Gõ phím debounce 50ms và được chạy từ `pumpChrome`; focus/click vẫn truy vấn ngay. Reopen Closed Tab (`Cmd+Shift+T`) khôi phục tab, URL, title, scroll và thứ tự stack.
+- **Kiểm thử tự động:** `cmd/goosie/normalize_url_test.go`, `cmd/goosie/suggestions_test.go`, `internal/toolbar/toolbar_test.go`, `cmd/goosie/reopen_tab_test.go`, `internal/history/history_test.go` bao phủ Unicode, ký tự đặc biệt, thứ hạng frecency, giới hạn 8 dòng, debounce, chọn bằng mũi tên/Enter/Esc, rò dữ liệu private và khôi phục tab.
+- **Còn thiếu:** native CUA trên app macOS (phiên không có display); trạng thái điều hướng (đang tải/lỗi/redirect) trong chrome; menu thao tác tab; favicon.
 
 **Cổng P0:** chạy trọn hành trình trên trang kiểm thử cục bộ và tập trang thực tế đã chọn; kiểm tra bằng native macOS và headless/Playwright ở phần có thể so sánh. Lỗi điều hướng phải hiện trong giao diện, không chỉ in ra stderr.
 
@@ -119,4 +124,4 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - Chính sách origin, cookie, tải xuống và dữ liệu riêng tư đi cùng tính năng dùng chúng. Rủi ro phát hành đã được chủ sản phẩm chấp nhận trong [bản lịch sử](roadmap-v2-history.md); roadmap UX này không tự thay đổi quyết định phát hành đó.
 - Color emoji: font bitmap màu (sbix/COLR như Apple Color Emoji) chưa được thư viện font hiện tại (golang.org/x/image/font/opentype) rasterize; glyph thiếu hiện được thay thế bằng tofu có advance ổn định 1em để giữ layout và không nuốt ký tự.
 
-**Việc bắt đầu tiếp theo:** P0 thanh địa chỉ thông minh và trạng thái điều hướng, sau đó gợi ý và mở lại tab. Đây là chuỗi ngắn nhất để biến nền tảng đã có thành một trải nghiệm mở và quay lại trang hằng ngày.
+**Việc bắt đầu tiếp theo:** P0 trạng thái điều hướng rõ ràng trong chrome và thao tác tab bằng menu, sau đó là favicon/biểu tượng dự phòng. Đây là phần còn lại của chuỗi mở và quay lại trang hằng ngày.

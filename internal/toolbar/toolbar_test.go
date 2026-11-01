@@ -315,6 +315,7 @@ func TestToolbarNilHistorySafe(t *testing.T) {
 	state.Draw(buf, 0)
 }
 
+// qc:BR-019
 func TestToolbarSuggestionsLifecycle(t *testing.T) {
 	state := NewState(800, nil)
 	var navigatedURL string

@@ -1,6 +1,6 @@
 # Goosie — catalog test case chi tiết
 
-- Cập nhật: 2026-10-26
+- Cập nhật: 2026-11-02
 - Phạm vi: ứng dụng Goosie trên macOS, engine headless, browser chrome và các luồng kiểm soát an toàn đầu vào.
 - Kế hoạch cấp release, DoD và lịch sử smoke: xem [qa-test-plan.md](qa-test-plan.md).
 - Tổng: **255 case**, chia theo 8 miền chức năng. Đây là catalog kiểm thử, chưa đồng nghĩa đã thực thi hoặc đạt.
@@ -30,8 +30,8 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-015 | P1 | CUA, INT | NOT RUN** — Bấm link thường trong cùng tab → URL, tài liệu và history đồng bộ.
 - **BR-016 | P1 | CUA, INT | NOT RUN** — Bấm anchor cùng trang và anchor từ trang khác → fragment đúng và viewport tới đúng mục.
 - **BR-017 | P0 | CUA, INT | NOT RUN** — Dùng Back/Forward qua ít nhất 5 navigation → mỗi bước khôi phục đúng entry, URL và tài liệu.
-- **BR-018 | P2 | GAP | DEFERRED** — Nhập cụm từ không phải URL vào thanh địa chỉ → chạy tìm kiếm theo search provider đã cấu hình; không báo lỗi URL thô.
-- **BR-019 | P2 | GAP | DEFERRED** — Gõ từng phần URL/từ khóa vào thanh địa chỉ → gợi ý lịch sử/bookmark/tìm kiếm xuất hiện, chọn bằng bàn phím được.
+- **BR-018 | P2 | CUA, INT | BLOCKED** — Nhập cụm từ không phải URL vào thanh địa chỉ → chạy tìm kiếm theo search provider đã cấu hình; không báo lỗi URL thô. **Automated INT PASS** (`cmd/goosie/normalize_url_test.go`: phân biệt host/tìm kiếm, dùng template `{query}` của profile, fallback an toàn khi template hỏng); native CUA nhập liệu trên app thật bị BLOCKED do phiên không có display khả dụng.
+- **BR-019 | P2 | CUA, INT | BLOCKED** — Gõ từng phần URL/từ khóa vào thanh địa chỉ → gợi ý lịch sử/bookmark/tìm kiếm xuất hiện, chọn bằng bàn phím được. **Automated INT PASS** (`cmd/goosie/suggestions_test.go`: gộp history/bookmark/search, xếp hạng frecency, giới hạn 8 dòng, không lộ dữ liệu profile trong tab private; `internal/toolbar/toolbar_test.go`: debounce 50ms, mũi tên lên/xuống, Enter chọn, Esc đóng); native CUA bị BLOCKED do phiên không có display khả dụng.
 - **BR-020 | P1 | CUA, INT | NOT RUN** — Reload trang có query/fragment → tải lại URL hiện hành, không thêm entry history giả.
 - **BR-021 | P1 | CUA, INT | NOT RUN** — Refresh khi response cũ còn pending → chỉ kết quả navigation mới nhất được áp dụng.
 - **BR-022 | P1 | CUA | NOT RUN** — Focus thanh địa chỉ, chọn toàn URL, thay URL bằng bàn phím → không nhập ký tự vào document phía sau.
@@ -54,7 +54,7 @@ Mỗi case ghi mã, ưu tiên, phương pháp, trạng thái ban đầu, bước
 - **BR-036 | P1 | CUA, INT | NOT RUN** — Dừng navigation tab A khi tab B đang tải → chỉ A bị dừng.
 - **BR-037 | P1 | INT | NOT RUN** — Hủy/đóng tab khi request đang chạy → callback đến muộn không dereference tab đã dispose hoặc làm crash.
 - **BR-038 | P1 | INT | NOT RUN** — Tạo/đóng nhiều tab liên tục → số tab, tài liệu sống và tài nguyên được giải phóng nhất quán.
-- **BR-039 | P2 | GAP | DEFERRED** — Đóng tab có nội dung rồi dùng Reopen Closed Tab → tab, URL và history gần nhất được khôi phục.
+- **BR-039 | P2 | CUA, INT | BLOCKED** — Đóng tab có nội dung rồi dùng Reopen Closed Tab → tab, URL và history gần nhất được khôi phục. **Automated INT PASS** (`cmd/goosie/reopen_tab_test.go`: Cmd+Shift+T gọi reopen, tab/URL/title/scroll và thứ tự stack được khôi phục); native CUA bị BLOCKED do phiên không có display khả dụng.
 - **BR-040 | P2 | GAP | DEFERRED** — Mở menu ngữ cảnh tab → các hành động được công bố có label, thao tác được và chỉ tác động đúng tab.
 - **BR-041 | P2 | GAP | DEFERRED** — Mở nhiều cửa sổ browser → mỗi cửa sổ quản lý tab, active state và đóng độc lập.
 - **BR-042 | P1 | INT, CUA | NOT RUN** — Phục hồi session có nhiều tab theo thứ tự đã lưu → tab và URL phục hồi đúng, không phục hồi response cũ đang dang dở.

@@ -227,20 +227,27 @@
     "id": "BR-018",
     "priority": "P2",
     "methods": [
-      "GAP"
+      "CUA",
+      "INT"
     ],
-    "status": "DEFERRED",
-    "tests": null,
+    "status": "BLOCKED",
+    "tests": [
+      "cmd/goosie/normalize_url_test.go:TestNormalizeAddressUsesProfileSearchEngine"
+    ],
     "enforced": false
   },
   {
     "id": "BR-019",
     "priority": "P2",
     "methods": [
-      "GAP"
+      "CUA",
+      "INT"
     ],
-    "status": "DEFERRED",
-    "tests": null,
+    "status": "BLOCKED",
+    "tests": [
+      "cmd/goosie/suggestions_test.go:TestQuerySuggestions",
+      "internal/toolbar/toolbar_test.go:TestToolbarSuggestionsLifecycle"
+    ],
     "enforced": false
   },
   {
@@ -476,10 +483,14 @@
     "id": "BR-039",
     "priority": "P2",
     "methods": [
-      "GAP"
+      "CUA",
+      "INT"
     ],
-    "status": "DEFERRED",
-    "tests": null,
+    "status": "BLOCKED",
+    "tests": [
+      "cmd/goosie/reopen_tab_test.go:TestFramePathReopenTab",
+      "cmd/goosie/reopen_tab_test.go:TestReopenTabShortcut"
+    ],
     "enforced": false
   },
   {
@@ -3123,18 +3134,6 @@
     "enforced": false
   },
   {
-    "id": "BR-258",
-    "priority": "P2",
-    "methods": [
-      "INT"
-    ],
-    "status": "PASS",
-    "tests": [
-      "test/gatecheck/live_parity_test.go:TestLiveParitySelftestIsGreen"
-    ],
-    "enforced": false
-  },
-  {
     "id": "BR-253",
     "priority": "P1",
     "methods": [
@@ -3167,6 +3166,18 @@
     "status": "PASS",
     "tests": [
       "test/entrypoints/paced_event_loop_test.go:TestPacedScreenshotRepaintsATimerMutation"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-258",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/live_parity_test.go:TestLiveParitySelftestIsGreen"
     ],
     "enforced": false
   }

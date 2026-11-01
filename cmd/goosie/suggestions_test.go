@@ -184,6 +184,7 @@ func TestSuggestionsClearedOnNavigationStart(t *testing.T) {
 	}
 }
 
+// qc:BR-019
 func TestQuerySuggestions(t *testing.T) {
 	tmpDir := t.TempDir()
 	bmStore := bookmarks.NewStore(filepath.Join(tmpDir, "bookmarks.json"))

@@ -109,6 +109,7 @@ func TestNormalizeURL(t *testing.T) {
 	}
 }
 
+// qc:BR-018
 func TestNormalizeAddressUsesProfileSearchEngine(t *testing.T) {
 	got := normalizeAddress("tìm kiếm goosie", "https://search.example/find?term={query}")
 	if got != "https://search.example/find?term=t%C3%ACm+ki%E1%BA%BFm+goosie" {
