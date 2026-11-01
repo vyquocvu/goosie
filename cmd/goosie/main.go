@@ -147,6 +147,10 @@ type framePath struct {
 	runCtx    context.Context
 	runCancel context.CancelFunc
 	navWg     sync.WaitGroup
+	// sessionSnapshotEvery overrides the crash-journal cadence; zero means the
+	// production interval.
+	sessionSnapshotEvery time.Duration
+	crashedMu            sync.RWMutex
 	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
 	// scene, and its laid-out height in device pixels. Both go into the artifact, which
 	// otherwise carries timings with no statement of what they were taken on.
@@ -354,14 +358,14 @@ func build(c config) (*framePath, error) {
 		if !c.private && !c.paced() && c.sessionActiveFile != "" {
 			if info, err := os.Stat(c.sessionActiveFile); err == nil && !info.IsDir() {
 				if st, err := session.Load(c.sessionActiveFile); err == nil && len(st.Tabs) > 0 {
-					f.crashedSession = &st
+					f.setCrashedSession(&st)
 				}
 			}
 		}
 		if c.url != "" {
 			firstTab.SetURL(normalizeAddress(c.url, profilePreferences.SearchURLTemplate))
 			firstTab.SetTitle(firstTab.URL())
-		} else if f.crashedSession != nil {
+		} else if f.crashedSessionState() != nil {
 			firstTab.SetURL("goosie://restore")
 			firstTab.SetTitle("Restore Session - Goosie")
 			f.restoredActiveURL = "goosie://restore"
@@ -924,6 +928,9 @@ func run(args []string) error {
 	// torn-down frame path.
 	f.runCtx, f.runCancel = context.WithCancel(context.Background())
 	defer f.runCancel()
+	// A crash journal on a fixed cadence bounds what an abrupt kill can lose;
+	// navigation completions still write it immediately.
+	go f.runSessionSnapshots(f.runCtx)
 
 	loopErr := make(chan error, 1)
 	stopped := make(chan struct{})

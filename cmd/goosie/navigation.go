@@ -706,6 +706,49 @@ func sessionState(f *framePath) session.State {
 	return st
 }
 
+// defaultSessionSnapshotEvery is the crash-journal cadence: an abrupt kill
+// loses at most this much tab state.
+const defaultSessionSnapshotEvery = 30 * time.Second
+
+// crashedSessionState returns the journal awaiting a restore decision.
+func (f *framePath) crashedSessionState() *session.State {
+	if f == nil {
+		return nil
+	}
+	f.crashedMu.RLock()
+	defer f.crashedMu.RUnlock()
+	return f.crashedSession
+}
+
+func (f *framePath) setCrashedSession(st *session.State) {
+	f.crashedMu.Lock()
+	defer f.crashedMu.Unlock()
+	f.crashedSession = st
+}
+
+// runSessionSnapshots journals the open tabs until ctx is cancelled, so a
+// crash loses at most one interval rather than everything since the last
+// navigation. Private and paced runs never write the journal.
+func (f *framePath) runSessionSnapshots(ctx context.Context) {
+	if f == nil || ctx == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" {
+		return
+	}
+	every := f.sessionSnapshotEvery
+	if every <= 0 {
+		every = defaultSessionSnapshotEvery
+	}
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			f.saveActiveSession()
+		}
+	}
+}
+
 // saveActiveSession persists the current open tab state to sessionActiveFile.
 // This acts as a crash recovery journal: on clean exit the file is deleted. If the
 // process crashes or is killed, the file survives so the session can be
@@ -714,7 +757,7 @@ func (f *framePath) saveActiveSession() {
 	if f == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" {
 		return
 	}
-	if f.crashedSession != nil {
+	if f.crashedSessionState() != nil {
 		// Do not overwrite the crashed journal while the restore prompt is active.
 		return
 	}

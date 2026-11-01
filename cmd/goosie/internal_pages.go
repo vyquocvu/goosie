@@ -1462,10 +1462,11 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		action = u.Query().Get("action")
 	}
 
+	crashedSession := f.crashedSessionState()
 	if action == "restore" {
-		if f.crashedSession != nil && len(f.crashedSession.Tabs) > 0 {
-			crashed := *f.crashedSession
-			f.crashedSession = nil
+		if crashedSession != nil && len(crashedSession.Tabs) > 0 {
+			crashed := *crashedSession
+			f.setCrashedSession(nil)
 			if f.config.sessionActiveFile != "" {
 				_ = os.Remove(f.config.sessionActiveFile)
 			}
@@ -1478,7 +1479,7 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			return "Session Restored - Goosie", internalPageTemplate("restore", "Session Restored - Goosie", body)
 		}
 	} else if action == "dismiss" {
-		f.crashedSession = nil
+		f.setCrashedSession(nil)
 		if f.config.sessionActiveFile != "" {
 			_ = os.Remove(f.config.sessionActiveFile)
 		}
@@ -1490,7 +1491,7 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		return "Session Dismissed - Goosie", internalPageTemplate("restore", "Session Dismissed - Goosie", body)
 	}
 
-	if f.crashedSession == nil || len(f.crashedSession.Tabs) == 0 {
+	if crashedSession == nil || len(crashedSession.Tabs) == 0 {
 		body := `<div class="card">
       <h1>Session Restore</h1>
       <p style="color: #5f6368; font-size: 15px;">No crashed session was detected. All tabs were closed normally.</p>
@@ -1511,9 +1512,9 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
       </div>
     </div>
     <div class="card">
-      <h2>Tabs to restore (%d):</h2>`, len(f.crashedSession.Tabs), len(f.crashedSession.Tabs)))
+      <h2>Tabs to restore (%d):</h2>`, len(crashedSession.Tabs), len(crashedSession.Tabs)))
 
-	for i, t := range f.crashedSession.Tabs {
+	for i, t := range crashedSession.Tabs {
 		titleText := t.Title
 		if titleText == "" {
 			titleText = t.URL
@@ -1522,7 +1523,7 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
 			titleText = "Untitled Tab"
 		}
 		activeBadge := ""
-		if i == f.crashedSession.Active {
+		if i == crashedSession.Active {
 			activeBadge = ` <span class="badge badge-active" style="margin-left: 6px;">Active</span>`
 		}
 		b.WriteString(fmt.Sprintf(`
