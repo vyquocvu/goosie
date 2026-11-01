@@ -849,6 +849,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 	}
 
 	switch page {
+	case "blank":
+		return "", `<!DOCTYPE html><html><head><meta charset="utf-8"><title></title></head><body></body></html>`
 	case "version", "about":
 		return buildVersionPageHTML(f)
 	case "bookmarks":

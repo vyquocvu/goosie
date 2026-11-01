@@ -31,6 +31,11 @@ func TestNormalizeURLInternalPages(t *testing.T) {
 		{"about:version", "goosie://version"},
 		{"ABOUT:HISTORY", "goosie://history"},
 		{"about:", "goosie://version"},
+		{"about:blank", "goosie://blank"},
+		{"ABOUT:BLANK", "goosie://blank"},
+		{"about:settings", "goosie://settings"},
+		{"about:bookmarks", "goosie://bookmarks"},
+		{"about:downloads", "goosie://downloads"},
 	}
 
 	for _, tt := range tests {
@@ -38,6 +43,23 @@ func TestNormalizeURLInternalPages(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("normalizeURL(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+// TestAboutBlankIsAnEmptyDocument pins about:blank to an empty page rather
+// than the internal index that an unknown goosie:// host falls back to.
+func TestAboutBlankIsAnEmptyDocument(t *testing.T) {
+	f := newNavTestPath(t)
+	title, htmlContent := f.buildInternalPageHTML("goosie://blank")
+	if title != "" {
+		t.Errorf("blank page title = %q, want empty", title)
+	}
+	lower := strings.ToLower(htmlContent)
+	if strings.Contains(lower, "<h1") || strings.Contains(lower, "internal pages") {
+		t.Errorf("blank page rendered content: %q", htmlContent)
+	}
+	if !strings.Contains(lower, "<body") {
+		t.Errorf("blank page is not a document: %q", htmlContent)
 	}
 }
 
