@@ -13,6 +13,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/manifest"
 	"github.com/vyquocvu/goosie/internal/net"
@@ -39,6 +40,8 @@ type navResult struct {
 	// where it was instead of stranding it on a page that never loaded.
 	traverse     int
 	traverseBase int
+	// transition labels the visit this navigation records in global history.
+	transition history.Transition
 }
 
 // downloadDone reports a completed download instead of a rendered document;
@@ -101,8 +104,14 @@ func (f *framePath) navContext() context.Context {
 	return context.Background()
 }
 
-// navigateTab loads a URL on the active tab.
+// navigateTab loads a URL on the active tab. Omnibox submissions and
+// programmatic navigations default to the typed transition.
 func (f *framePath) navigateTab(rawURL string) {
+	f.navigateTabTransition(rawURL, history.TransitionTyped)
+}
+
+// navigateTabTransition loads a URL and labels the visit it records.
+func (f *framePath) navigateTabTransition(rawURL string, transition history.Transition) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
@@ -143,7 +152,7 @@ func (f *framePath) navigateTab(rawURL string) {
 	go func() {
 		defer f.navWg.Done()
 		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.downloadDirectory(), true, true)
-		res := navResult{tabID: tab.ID(), serial: serial, url: u}
+		res := navResult{tabID: tab.ID(), serial: serial, url: u, transition: transition}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
 			// history record what displayed, not what was typed.
@@ -330,7 +339,11 @@ func (f *framePath) applyNavResult(result navResult) {
 		}
 	}
 	if !tab.Incognito() && f.history != nil && !strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
-		f.history.Record(result.url, tabTitle)
+		transition := result.transition
+		if transition == "" {
+			transition = history.TransitionOther
+		}
+		f.history.RecordVisit(result.url, tabTitle, transition)
 	}
 
 	if f.tabMgr.Active() == tab {
@@ -472,17 +485,17 @@ func (f *framePath) traverseTab(delta int) {
 	if !ok || url == "" {
 		return
 	}
-	f.navigateTabNoHistoryTraverse(url, delta, base)
+	f.navigateTabNoHistoryTraverse(url, delta, base, history.TransitionOther)
 }
 
 // navigateTabNoHistory loads a URL without pushing to history.
 func (f *framePath) navigateTabNoHistory(rawURL string) {
-	f.navigateTabNoHistoryTraverse(rawURL, 0, 0)
+	f.navigateTabNoHistoryTraverse(rawURL, 0, 0, history.TransitionOther)
 }
 
 // navigateTabNoHistoryTraverse is navigateTabNoHistory carrying a traversal
 // commit: on success the history cursor steps by delta from base.
-func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int) {
+func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int, transition history.Transition) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
@@ -516,7 +529,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int)
 	go func() {
 		defer f.navWg.Done()
 		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.downloadDirectory(), true, true)
-		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base}
+		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base, transition: transition}
 		if finalURL != "" {
 			res.url = finalURL
 		}
@@ -537,7 +550,7 @@ func (f *framePath) reloadTab() {
 	if tab == nil || tab.URL() == "" {
 		return
 	}
-	f.navigateTabNoHistory(tab.URL())
+	f.navigateTabNoHistoryTraverse(tab.URL(), 0, 0, history.TransitionReload)
 }
 
 // stopTab cancels only the active tab's in-flight navigation. Advancing the

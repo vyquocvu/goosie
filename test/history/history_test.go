@@ -231,6 +231,128 @@ func TestHistoryClearAndPersist(t *testing.T) {
 	}
 }
 
+// FR-DAT-02: a recorded visit carries its transition type and the running
+// visit count for its URL, and both survive persistence.
+func TestHistoryRecordsTransitionAndVisitCount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.json")
+	s, err := history.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RecordVisit("https://a.example", "A", history.TransitionTyped)
+	s.RecordVisit("https://b.example", "B", history.TransitionLink)
+	s.RecordVisit("https://a.example", "A again", history.TransitionLink)
+	s.RecordVisit("https://a.example", "A reload", history.TransitionReload)
+
+	// The final reload labels the visit already at the head rather than
+	// appending a fourth entry (BR-045).
+	want := []struct {
+		url        string
+		transition history.Transition
+		visits     int
+	}{
+		{"https://a.example", history.TransitionTyped, 1},
+		{"https://b.example", history.TransitionLink, 1},
+		{"https://a.example", history.TransitionReload, 2},
+	}
+	assertVisits := func(entries []history.Entry) {
+		t.Helper()
+		if len(entries) != len(want) {
+			t.Fatalf("Entries() = %d records, want %d", len(entries), len(want))
+		}
+		for i, w := range want {
+			if entries[i].URL != w.url || entries[i].Transition != w.transition || entries[i].Visits != w.visits {
+				t.Fatalf("Entries()[%d] = %+v, want %+v", i, entries[i], w)
+			}
+		}
+	}
+	assertVisits(s.Entries())
+
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := history.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertVisits(reloaded.Entries())
+}
+
+// A reload of the page already at the head labels that visit instead of
+// appending a duplicate (BR-045): reloading must not grow the visit log.
+func TestHistoryReloadLabelsHeadVisitWithoutGrowingLog(t *testing.T) {
+	s, err := history.Load(filepath.Join(t.TempDir(), "history.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Record("https://a.example", "A")
+	s.RecordVisit("https://a.example", "A", history.TransitionReload)
+	entries := s.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("Entries() = %d records, want 1 after a reload", len(entries))
+	}
+	if entries[0].Transition != history.TransitionReload || entries[0].Visits != 1 {
+		t.Fatalf("head visit = %+v, want transition reload and unchanged visit count", entries[0])
+	}
+}
+
+// FR-DAT-02: deletion is granular - the last hour, today, or all time.
+func TestHistoryDeleteLastHourAndToday(t *testing.T) {
+	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.Local)
+	legacy := []map[string]any{
+		{"url": "https://ancient.example", "title": "Ancient", "at": now.Add(-48 * time.Hour)},
+		{"url": "https://yesterday.example", "title": "Yesterday", "at": now.Add(-26 * time.Hour)},
+		{"url": "https://today.example", "title": "Today", "at": now.Add(-2 * time.Hour)},
+		{"url": "https://boundary.example", "title": "Boundary", "at": now.Add(-time.Hour)},
+		{"url": "https://recent.example", "title": "Recent", "at": now.Add(-10 * time.Minute)},
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "history.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := history.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if removed := s.DeleteLastHour(now); removed != 2 {
+		t.Fatalf("DeleteLastHour removed %d, want 2 (boundary is inclusive)", removed)
+	}
+	assertURLs := func(want ...string) {
+		t.Helper()
+		entries := s.Entries()
+		if len(entries) != len(want) {
+			t.Fatalf("Entries() = %d records, want %d", len(entries), len(want))
+		}
+		for i, url := range want {
+			if entries[i].URL != url {
+				t.Fatalf("Entries()[%d] = %q, want %q", i, entries[i].URL, url)
+			}
+		}
+	}
+	assertURLs("https://ancient.example", "https://yesterday.example", "https://today.example")
+
+	if removed := s.DeleteToday(now); removed != 1 {
+		t.Fatalf("DeleteToday removed %d, want 1", removed)
+	}
+	assertURLs("https://ancient.example", "https://yesterday.example")
+
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := history.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(reloaded.Entries()); got != 2 {
+		t.Fatalf("reloaded entries = %d, want the two surviving visits", got)
+	}
+}
+
 func TestHistorySearch(t *testing.T) {
 	s, err := history.Load(filepath.Join(t.TempDir(), "history.json"))
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/surface"
 	"github.com/vyquocvu/goosie/internal/tabs"
@@ -667,9 +668,9 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 				targetURL = targetURL + "?" + sub.Encoded
 			}
 		}
-		f.navigateTab(targetURL)
+		f.navigateTabTransition(targetURL, history.TransitionLink)
 	} else if method == "POST" {
-		f.navigateTab(targetURL)
+		f.navigateTabTransition(targetURL, history.TransitionLink)
 	}
 }
 
@@ -865,7 +866,7 @@ func (f *framePath) handleLinkClick(href string) {
 	if tab == nil {
 		return
 	}
-	f.navigateTab(resolveHref(tab.URL(), href))
+	f.navigateTabTransition(resolveHref(tab.URL(), href), history.TransitionLink)
 }
 
 func (f *framePath) hitTestLink(contentX, contentY int32) string {
