@@ -277,7 +277,13 @@ type timer struct {
 	nextFire  time.Time
 	repeat    bool // true for setInterval, false for setTimeout
 	fromDefer bool
+	nesting   int
 }
+
+const (
+	maxTimerNestingLevel  = 5
+	nestedTimerMinDelayMS = 4
+)
 
 // Runtime executes scripts for one document.
 type Runtime struct {
@@ -299,6 +305,7 @@ type Runtime struct {
 	timers                   map[int]*timer
 	nextTimerID              int
 	inDeferScript            bool
+	timerNesting             int
 	scriptExecutionDepth     int
 	testDriverTrustedClick   bool
 
@@ -3468,6 +3475,10 @@ func (r *Runtime) setupTimers() {
 		if ms < 0 {
 			ms = 0
 		}
+		nesting := r.timerNesting + 1
+		if nesting > maxTimerNestingLevel && ms < nestedTimerMinDelayMS {
+			ms = nestedTimerMinDelayMS
+		}
 		r.nextTimerID++
 		id := r.nextTimerID
 		r.timers[id] = &timer{
@@ -3477,6 +3488,7 @@ func (r *Runtime) setupTimers() {
 			nextFire:  time.Now().Add(time.Duration(ms) * time.Millisecond),
 			repeat:    false,
 			fromDefer: r.inDeferScript,
+			nesting:   nesting,
 		}
 		return id
 	}
@@ -3489,6 +3501,10 @@ func (r *Runtime) setupTimers() {
 		if ms < 1 {
 			ms = 1 // setInterval with 0 would spin; clamp to 1ms
 		}
+		nesting := r.timerNesting + 1
+		if nesting > maxTimerNestingLevel && ms < nestedTimerMinDelayMS {
+			ms = nestedTimerMinDelayMS
+		}
 		r.nextTimerID++
 		id := r.nextTimerID
 		r.timers[id] = &timer{
@@ -3498,6 +3514,7 @@ func (r *Runtime) setupTimers() {
 			nextFire:  time.Now().Add(time.Duration(ms) * time.Millisecond),
 			repeat:    true,
 			fromDefer: r.inDeferScript,
+			nesting:   nesting,
 		}
 		return id
 	}
@@ -3544,6 +3561,19 @@ func (r *Runtime) QueueTask(callback func()) int {
 	return id
 }
 
+// runTimerCallback invokes one timer callback with its nesting level set, so
+// timers scheduled inside it inherit the next level (FR-JS-04).
+func (r *Runtime) runTimerCallback(next *timer) error {
+	previous := r.timerNesting
+	r.timerNesting = next.nesting
+	defer func() { r.timerNesting = previous }()
+	if fn, ok := goja.AssertFunction(next.callback); ok {
+		_, err := r.callBounded(func() (goja.Value, error) { return fn(nil) })
+		return err
+	}
+	return nil
+}
+
 func (r *Runtime) TickDeferredTimer() bool {
 	var next *timer
 	for _, candidate := range r.timers {
@@ -3564,10 +3594,8 @@ func (r *Runtime) TickDeferredTimer() bool {
 	} else {
 		delete(r.timers, next.id)
 	}
-	if fn, ok := goja.AssertFunction(next.callback); ok {
-		if _, err := r.callBounded(func() (goja.Value, error) { return fn(nil) }); err != nil {
-			return true
-		}
+	if err := r.runTimerCallback(next); err != nil {
+		return true
 	}
 	_ = r.drainMicrotasks()
 	return true
@@ -3625,10 +3653,8 @@ func (r *Runtime) Tick() bool {
 	} else {
 		delete(r.timers, next.id)
 	}
-	if fn, ok := goja.AssertFunction(next.callback); ok {
-		if _, err := r.callBounded(func() (goja.Value, error) { return fn(nil) }); err != nil {
-			return true
-		}
+	if err := r.runTimerCallback(next); err != nil {
+		return true
 	}
 	// A microtask checkpoint follows each task before the next event-loop turn.
 	if err := r.drainMicrotasks(); err != nil {
