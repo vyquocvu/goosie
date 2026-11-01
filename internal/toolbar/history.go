@@ -15,6 +15,10 @@ func NewHistory() *History {
 	return &History{entries: []string{}, index: -1}
 }
 
+// MaxHistoryEntries caps one tab's back/forward trail. A session that visits
+// more pages drops its oldest visits; the newest stay reachable.
+const MaxHistoryEntries = 50
+
 func (h *History) Push(url string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -23,6 +27,11 @@ func (h *History) Push(url string) {
 	}
 	h.entries = append(h.entries, url)
 	h.index = len(h.entries) - 1
+	if drop := len(h.entries) - MaxHistoryEntries; drop > 0 {
+		copy(h.entries, h.entries[drop:])
+		h.entries = h.entries[:MaxHistoryEntries]
+		h.index -= drop
+	}
 }
 
 func (h *History) Back() (string, bool) {
