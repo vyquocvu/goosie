@@ -13,7 +13,7 @@ func TestSaveStreamHandlesFilesLargerThanDocumentLimit(t *testing.T) {
 	dir := t.TempDir()
 	body := bytes.Repeat([]byte("d"), (16<<20)+4096)
 	var lastProgress int64
-	path, written, err := SaveStream(context.Background(), dir, "large.bin", bytes.NewReader(body), func(n int64) {
+	path, written, _, err := SaveStream(context.Background(), dir, "large.bin", bytes.NewReader(body), func(n int64) {
 		lastProgress = n
 	})
 	if err != nil {
@@ -36,7 +36,7 @@ func TestSaveStreamCancellationRemovesPartialFile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	body := bytes.NewReader(bytes.Repeat([]byte("x"), 256*1024))
-	path, _, err := SaveStream(ctx, dir, "partial.bin", body, func(int64) { cancel() })
+	path, _, _, err := SaveStream(ctx, dir, "partial.bin", body, func(int64) { cancel() })
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("SaveStream error = %v, want context.Canceled", err)
 	}
@@ -60,7 +60,7 @@ func TestSaveStreamToReplacesDestinationOnlyAfterCompleteStream(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	written, err := SaveStreamTo(ctx, target, bytes.NewReader(bytes.Repeat([]byte("x"), 256*1024)), func(int64) { cancel() })
+	written, _, err := SaveStreamTo(ctx, target, bytes.NewReader(bytes.Repeat([]byte("x"), 256*1024)), func(int64) { cancel() })
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled SaveStreamTo error = %v, want context.Canceled", err)
 	}
@@ -79,7 +79,7 @@ func TestSaveStreamToReplacesDestinationOnlyAfterCompleteStream(t *testing.T) {
 		t.Fatalf("canceled stream left temporary files: %+v", entries)
 	}
 
-	written, err = SaveStreamTo(context.Background(), target, bytes.NewReader([]byte("new contents")), nil)
+	written, _, err = SaveStreamTo(context.Background(), target, bytes.NewReader([]byte("new contents")), nil)
 	if err != nil || written != int64(len("new contents")) {
 		t.Fatalf("completed SaveStreamTo = %d, %v", written, err)
 	}

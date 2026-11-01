@@ -28,6 +28,7 @@ type Item struct {
 	URL             string     `json:"url"`
 	Filename        string     `json:"filename"`
 	LocalPath       string     `json:"local_path"`
+	SHA256          string     `json:"sha256,omitempty"`
 	TotalBytes      int64      `json:"total_bytes"`
 	DownloadedBytes int64      `json:"downloaded_bytes"`
 	Status          ItemStatus `json:"status"`
@@ -171,6 +172,12 @@ func (m *Manager) UpdateProgress(id string, downloaded int64) {
 
 // Complete marks an item as successfully completed.
 func (m *Manager) Complete(id string, localPath string) {
+	m.CompleteWithDigest(id, localPath, "")
+}
+
+// CompleteWithDigest marks an item as completed and records the SHA-256 of the
+// bytes that were written, so the saved file can be verified later.
+func (m *Manager) CompleteWithDigest(id, localPath, sha256 string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -182,6 +189,7 @@ func (m *Manager) Complete(id string, localPath string) {
 		return
 	}
 	item.LocalPath = localPath
+	item.SHA256 = sha256
 	item.Status = StatusCompleted
 	item.EndTime = time.Now()
 	delete(m.cancel, id)

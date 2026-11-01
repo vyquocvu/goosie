@@ -160,6 +160,10 @@ func (h *History) Entries() ([]string, int) {
 // RestoreHistory rebuilds a history from saved entries, clamping an
 // out-of-range index instead of trusting the state file.
 func RestoreHistory(entries []string, index int) *History {
+	if drop := len(entries) - MaxHistoryEntries; drop > 0 {
+		entries = entries[drop:]
+		index -= drop
+	}
 	h := &History{entries: make([]string, len(entries)), index: index}
 	copy(h.entries, entries)
 	if h.index < -1 {

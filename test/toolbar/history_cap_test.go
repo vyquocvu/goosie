@@ -41,6 +41,29 @@ func TestHistoryCapsTrailAtFiftyEntries(t *testing.T) {
 	}
 }
 
+// A restored trail is also subject to the cap: saved state from an older
+// build (or a hand-edited file) must not smuggle in more than fifty entries.
+func TestRestoreHistoryClampsToCap(t *testing.T) {
+	saved := make([]string, toolbar.MaxHistoryEntries+20)
+	for i := range saved {
+		saved[i] = fmt.Sprintf("https://example.com/%d", i+1)
+	}
+	h := toolbar.RestoreHistory(saved, len(saved)-1)
+	entries, index := h.Entries()
+	if len(entries) != toolbar.MaxHistoryEntries {
+		t.Fatalf("restored entry count = %d, want %d", len(entries), toolbar.MaxHistoryEntries)
+	}
+	if index != toolbar.MaxHistoryEntries-1 {
+		t.Fatalf("restored cursor = %d, want %d", index, toolbar.MaxHistoryEntries-1)
+	}
+	if entries[index] != saved[len(saved)-1] {
+		t.Fatalf("restored current = %q, want the newest saved visit", entries[index])
+	}
+	if entries[0] != saved[len(saved)-toolbar.MaxHistoryEntries] {
+		t.Fatalf("restored oldest = %q, want %q", entries[0], saved[len(saved)-toolbar.MaxHistoryEntries])
+	}
+}
+
 // The cap must not resurrect truncated forward entries: a back-then-push
 // discards the forward trail first, and the trimmed trail keeps its cursor on
 // the newly pushed visit.

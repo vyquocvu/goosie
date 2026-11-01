@@ -4,6 +4,8 @@ package download
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +15,20 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+// Digest is the SHA-256 of a download's bytes. It is computed as the stream is
+// written, so verification needs no second pass over the file.
+type Digest [sha256.Size]byte
+
+// String returns the lowercase hexadecimal form used in download metadata.
+func (d Digest) String() string {
+	return hex.EncodeToString(d[:])
+}
+
+// Sum returns the SHA-256 digest of an already-buffered response body.
+func Sum(body []byte) Digest {
+	return Digest(sha256.Sum256(body))
+}
 
 // ShouldDownload reports whether a main-document response must be saved to
 // disk instead of rendered: an attachment disposition always downloads, and
@@ -110,17 +126,17 @@ func Save(dir, name string, body []byte) (string, error) {
 // byte progress as chunks arrive. The completed file is linked into place only
 // after the stream succeeds, so cancellation and network errors leave no
 // partial download visible in the destination directory.
-func SaveStream(ctx context.Context, dir, name string, src io.Reader, progress func(downloaded int64)) (string, int64, error) {
+func SaveStream(ctx context.Context, dir, name string, src io.Reader, progress func(downloaded int64)) (string, int64, Digest, error) {
 	if src == nil {
-		return "", 0, errors.New("goosie: download: missing response body")
+		return "", 0, Digest{}, errors.New("goosie: download: missing response body")
 	}
 	name = sanitize(name)
 	if name == "" {
 		name = "download"
 	}
-	tmpName, total, err := writeStreamTemp(ctx, dir, src, progress)
+	tmpName, total, sum, err := writeStreamTemp(ctx, dir, src, progress)
 	if err != nil {
-		return "", total, err
+		return "", total, Digest{}, err
 	}
 	defer os.Remove(tmpName)
 	base, ext := name, filepath.Ext(name)
@@ -134,54 +150,54 @@ func SaveStream(ctx context.Context, dir, name string, src io.Reader, progress f
 		}
 		fullPath := filepath.Join(dir, candidate)
 		if err := os.Link(tmpName, fullPath); err == nil {
-			return fullPath, total, nil
+			return fullPath, total, sum, nil
 		} else if !os.IsExist(err) {
-			return "", total, fmt.Errorf("goosie: finalize download: %w", err)
+			return "", total, Digest{}, fmt.Errorf("goosie: finalize download: %w", err)
 		}
 	}
-	return "", total, fmt.Errorf("goosie: download: no free name for %q in %q", name, dir)
+	return "", total, Digest{}, fmt.Errorf("goosie: download: no free name for %q in %q", name, dir)
 }
 
 // SaveStreamTo writes a stream to an explicitly selected path. The temporary
 // file is placed beside the destination, then renamed into place after the
 // stream succeeds. Callers should only use this after obtaining overwrite
 // confirmation from the user's save dialog.
-func SaveStreamTo(ctx context.Context, target string, src io.Reader, progress func(downloaded int64)) (int64, error) {
+func SaveStreamTo(ctx context.Context, target string, src io.Reader, progress func(downloaded int64)) (int64, Digest, error) {
 	if src == nil {
-		return 0, errors.New("goosie: download: missing response body")
+		return 0, Digest{}, errors.New("goosie: download: missing response body")
 	}
 	if strings.TrimSpace(target) == "" {
-		return 0, errors.New("goosie: download: missing destination path")
+		return 0, Digest{}, errors.New("goosie: download: missing destination path")
 	}
 	absTarget, err := filepath.Abs(target)
 	if err != nil {
-		return 0, fmt.Errorf("goosie: download destination: %w", err)
+		return 0, Digest{}, fmt.Errorf("goosie: download destination: %w", err)
 	}
 	base := filepath.Base(absTarget)
 	if base == "." || base == string(filepath.Separator) || base == "" {
-		return 0, errors.New("goosie: download: destination must name a file")
+		return 0, Digest{}, errors.New("goosie: download: destination must name a file")
 	}
-	tmpName, total, err := writeStreamTemp(ctx, filepath.Dir(absTarget), src, progress)
+	tmpName, total, sum, err := writeStreamTemp(ctx, filepath.Dir(absTarget), src, progress)
 	if err != nil {
-		return total, err
+		return total, Digest{}, err
 	}
 	defer os.Remove(tmpName)
 	if err := ctx.Err(); err != nil {
-		return total, err
+		return total, Digest{}, err
 	}
 	if err := os.Rename(tmpName, absTarget); err != nil {
-		return total, fmt.Errorf("goosie: finalize download: %w", err)
+		return total, Digest{}, fmt.Errorf("goosie: finalize download: %w", err)
 	}
-	return total, nil
+	return total, sum, nil
 }
 
-func writeStreamTemp(ctx context.Context, dir string, src io.Reader, progress func(downloaded int64)) (string, int64, error) {
+func writeStreamTemp(ctx context.Context, dir string, src io.Reader, progress func(downloaded int64)) (string, int64, Digest, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", 0, fmt.Errorf("goosie: download dir: %w", err)
+		return "", 0, Digest{}, fmt.Errorf("goosie: download dir: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".goosie-download-*")
 	if err != nil {
-		return "", 0, fmt.Errorf("goosie: download temp file: %w", err)
+		return "", 0, Digest{}, fmt.Errorf("goosie: download temp file: %w", err)
 	}
 	tmpName := tmp.Name()
 	keep := false
@@ -191,11 +207,12 @@ func writeStreamTemp(ctx context.Context, dir string, src io.Reader, progress fu
 		}
 	}()
 	buf := make([]byte, 64*1024)
+	hasher := sha256.New()
 	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
 			_ = tmp.Close()
-			return "", total, err
+			return "", total, Digest{}, err
 		}
 		n, readErr := src.Read(buf)
 		if n > 0 {
@@ -203,12 +220,13 @@ func writeStreamTemp(ctx context.Context, dir string, src io.Reader, progress fu
 			total += int64(written)
 			if writeErr != nil {
 				_ = tmp.Close()
-				return "", total, fmt.Errorf("goosie: write download: %w", writeErr)
+				return "", total, Digest{}, fmt.Errorf("goosie: write download: %w", writeErr)
 			}
 			if written != n {
 				_ = tmp.Close()
-				return "", total, io.ErrShortWrite
+				return "", total, Digest{}, io.ErrShortWrite
 			}
+			_, _ = hasher.Write(buf[:n])
 			if progress != nil {
 				progress(total)
 			}
@@ -218,24 +236,26 @@ func writeStreamTemp(ctx context.Context, dir string, src io.Reader, progress fu
 				break
 			}
 			_ = tmp.Close()
-			return "", total, readErr
+			return "", total, Digest{}, readErr
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		_ = tmp.Close()
-		return "", total, err
+		return "", total, Digest{}, err
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return "", total, fmt.Errorf("goosie: sync download: %w", err)
+		return "", total, Digest{}, fmt.Errorf("goosie: sync download: %w", err)
 	}
 	if err := tmp.Chmod(0o644); err != nil {
 		_ = tmp.Close()
-		return "", total, fmt.Errorf("goosie: set download permissions: %w", err)
+		return "", total, Digest{}, fmt.Errorf("goosie: set download permissions: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return "", total, fmt.Errorf("goosie: close download: %w", err)
+		return "", total, Digest{}, fmt.Errorf("goosie: close download: %w", err)
 	}
 	keep = true
-	return tmpName, total, nil
+	var sum Digest
+	copy(sum[:], hasher.Sum(nil))
+	return tmpName, total, sum, nil
 }

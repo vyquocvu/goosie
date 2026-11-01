@@ -253,12 +253,13 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			}
 			var savedPath string
 			var downloaded int64
+			var digest download.Digest
 			var saveErr error
 			if targetPath != "" {
-				downloaded, saveErr = download.SaveStreamTo(downloadCtx, targetPath, streamBody, progress)
+				downloaded, digest, saveErr = download.SaveStreamTo(downloadCtx, targetPath, streamBody, progress)
 				savedPath, _ = filepath.Abs(targetPath)
 			} else {
-				savedPath, downloaded, saveErr = download.SaveStream(downloadCtx, downloadDir, name, streamBody, progress)
+				savedPath, downloaded, digest, saveErr = download.SaveStream(downloadCtx, downloadDir, name, streamBody, progress)
 			}
 			cancel()
 			if saveErr != nil {
@@ -273,7 +274,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			}
 			if mgr != nil && itemID != "" {
 				mgr.UpdateProgress(itemID, downloaded)
-				mgr.Complete(itemID, savedPath)
+				mgr.CompleteWithDigest(itemID, savedPath, digest.String())
 				if it := mgr.Get(itemID); it == nil || it.Status != download.StatusCompleted {
 					_ = os.Remove(savedPath)
 					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", context.Canceled
@@ -294,7 +295,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", saveErr
 		}
 		if mgr != nil && itemID != "" {
-			mgr.Complete(itemID, savedPath)
+			mgr.CompleteWithDigest(itemID, savedPath, download.Sum(resp.Body).String())
 		}
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
 	}
