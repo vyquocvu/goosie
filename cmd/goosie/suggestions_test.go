@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/bookmarks"
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -288,5 +291,81 @@ func TestChromeWindowSuggestionClickIntercept(t *testing.T) {
 	}
 	if tb.HasSuggestions() {
 		t.Error("suggestions should be closed after clicking a suggestion")
+	}
+}
+
+// TestQuerySuggestionsRankByFrecency pins FR-NAV-04's ranking: frequent and
+// recent visits outrank a stale one-off, and a bookmark with no visits ranks
+// between them because saving it is one deliberate act of interest.
+func TestQuerySuggestionsRankByFrecency(t *testing.T) {
+	now := time.Now()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "history.json")
+	entries := []history.Entry{
+		{URL: "https://stale.example/", Title: "Stale Go", At: now.Add(-60 * 24 * time.Hour), Visits: 1},
+		{URL: "https://frequent.example/", Title: "Frequent Go", At: now.Add(-14 * 24 * time.Hour), Visits: 6},
+		{URL: "https://recent.example/", Title: "Recent Go", At: now.Add(-10 * time.Minute), Visits: 1},
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	histStore, err := history.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bmStore := bookmarks.NewStore(filepath.Join(tmpDir, "bookmarks.json"))
+	bmStore.Toggle("https://bookmarked.example/", "Bookmarked Go")
+
+	f := newNavTestPath(t)
+	f.history = histStore
+	f.bookmarks = bmStore
+
+	sugs := f.querySuggestions("go")
+	position := func(url string) int {
+		for i, s := range sugs {
+			if s.URL == url {
+				return i
+			}
+		}
+		return -1
+	}
+	recent := position("https://recent.example/")
+	frequent := position("https://frequent.example/")
+	bookmarked := position("https://bookmarked.example/")
+	stale := position("https://stale.example/")
+	if recent < 0 || frequent < 0 || bookmarked < 0 || stale < 0 {
+		t.Fatalf("missing ranked matches: recent=%d frequent=%d bookmarked=%d stale=%d in %+v",
+			recent, frequent, bookmarked, stale, sugs)
+	}
+	if !(recent < frequent && frequent < bookmarked && bookmarked < stale) {
+		t.Fatalf("frecency order = recent %d, frequent %d, bookmarked %d, stale %d; want that ascending", recent, frequent, bookmarked, stale)
+	}
+}
+
+// TestQuerySuggestionsCapAtEight covers the dropdown bound, including when
+// more than eight profile URLs match.
+func TestQuerySuggestionsCapAtEight(t *testing.T) {
+	tmpDir := t.TempDir()
+	histStore, err := history.Load(filepath.Join(tmpDir, "history.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		histStore.Record(fmt.Sprintf("https://go%d.example/", i), fmt.Sprintf("Go %d", i))
+	}
+	f := newNavTestPath(t)
+	f.history = histStore
+
+	sugs := f.querySuggestions("go")
+	if len(sugs) != 8 {
+		t.Fatalf("suggestions = %d, want the 8-entry cap", len(sugs))
+	}
+	if sugs[0].Kind != toolbar.SuggestSearch {
+		t.Fatalf("sugs[0] = %+v, want the search suggestion first", sugs[0])
 	}
 }

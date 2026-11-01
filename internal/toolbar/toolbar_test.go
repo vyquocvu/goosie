@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -333,6 +334,7 @@ func TestToolbarSuggestionsLifecycle(t *testing.T) {
 	state.FocusURL()
 	state.HandleKeyEvent('g', 0)
 	state.HandleKeyEvent('o', 0)
+	state.RefreshSuggestions(time.Now().Add(SuggestDebounce))
 
 	if !state.HasSuggestions() {
 		t.Fatal("suggestions should be active after typing 'go'")
@@ -374,6 +376,7 @@ func TestToolbarSuggestionsLifecycle(t *testing.T) {
 	// Test Esc dismisses suggestions
 	state.HandleKeyEvent('g', 0)
 	state.HandleKeyEvent('o', 0)
+	state.RefreshSuggestions(time.Now().Add(SuggestDebounce))
 	if !state.HasSuggestions() {
 		t.Fatal("suggestions should be active again")
 	}
@@ -454,5 +457,49 @@ func TestToolbarDownloadsButton(t *testing.T) {
 	}
 	if !hasBluePixel {
 		t.Error("expected blue active download progress bar in downloads button")
+	}
+}
+
+// TestSuggestionsDebounceFiresOnceAfterIdle pins FR-NAV-04's 50ms debounce:
+// keystrokes only schedule the query, and the host's per-frame Refresh runs it
+// once the user has been idle for the window.
+func TestSuggestionsDebounceFiresOnceAfterIdle(t *testing.T) {
+	state := NewState(800, nil)
+	var queries []string
+	state.OnQuerySuggest = func(q string) []Suggestion {
+		queries = append(queries, q)
+		return []Suggestion{{Title: q, URL: "https://example.test/" + q}}
+	}
+	state.FocusURL()
+	state.HandleKeyEvent('g', 0)
+	state.HandleKeyEvent('o', 0)
+
+	if len(queries) != 0 {
+		t.Fatalf("OnQuerySuggest ran during typing: %v", queries)
+	}
+	if state.HasSuggestions() {
+		t.Fatal("dropdown shown before the debounce elapsed")
+	}
+	if state.RefreshSuggestions(time.Now().Add(SuggestDebounce - 10*time.Millisecond)) {
+		t.Fatal("RefreshSuggestions fired before the debounce elapsed")
+	}
+	if len(queries) != 0 {
+		t.Fatalf("OnQuerySuggest ran early: %v", queries)
+	}
+
+	if !state.RefreshSuggestions(time.Now().Add(SuggestDebounce + 10*time.Millisecond)) {
+		t.Fatal("RefreshSuggestions did not run the pending query after the debounce")
+	}
+	if len(queries) != 1 || queries[0] != "go" {
+		t.Fatalf("queries = %v, want exactly [go]", queries)
+	}
+	if !state.HasSuggestions() || state.SuggestionCount() != 1 {
+		t.Fatalf("dropdown count = %d, want 1", state.SuggestionCount())
+	}
+
+	// A later refresh must not replay the query.
+	state.RefreshSuggestions(time.Now().Add(time.Second))
+	if len(queries) != 1 {
+		t.Fatalf("queries = %v, want no replay", queries)
 	}
 }

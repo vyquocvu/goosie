@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -546,67 +547,128 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 		{"Downloads Manager", "goosie://downloads"},
 		{"Browser Settings", "goosie://settings"},
 	}
+	now := time.Now()
+	candidates := make(map[string]*suggestionCandidate)
+	order := 0
 	for _, p := range internalPages {
 		pagePath := strings.TrimPrefix(p.URL, "goosie://")
 		matchScheme := strings.HasPrefix(lowerQ, "goosie") || strings.HasPrefix(lowerQ, "about")
 		matchContent := strings.Contains(strings.ToLower(p.Title), lowerQ) || strings.Contains(pagePath, lowerQ)
 		if matchScheme || matchContent {
-			if !seen[p.URL] {
-				seen[p.URL] = true
-				out = append(out, toolbar.Suggestion{
-					Title: p.Title,
-					URL:   p.URL,
-					Kind:  toolbar.SuggestBookmark,
-				})
-				if len(out) >= 8 {
-					return out
-				}
-			}
+			addSuggestionCandidate(candidates, toolbar.Suggestion{
+				Title: p.Title,
+				URL:   p.URL,
+				Kind:  toolbar.SuggestBookmark,
+			}, bookmarkFrecency, time.Time{}, &order)
 		}
 	}
 
-	// 2. Bookmarks and history visits from the profile. A private tab must
-	// never read either store; the -private run loads no stores at startup,
-	// but the gate holds regardless. Search suggestions and internal pages
-	// above are profile-independent and stay available.
+	// 2. Bookmarks and history visits from the profile ranked by Frecency. A
+	// private tab must never read either store; the -private run loads no
+	// stores at startup, but the gate holds regardless. Search suggestions and
+	// internal pages are profile-independent and stay available.
 	if !f.omniboxIsPrivate() {
-		var profile []toolbar.Suggestion
 		if f.bookmarks != nil {
 			for _, bm := range f.bookmarks.List() {
 				if suggestionMatches(lowerQ, bm.URL, bm.Title) {
-					profile = append(profile, toolbar.Suggestion{
+					addSuggestionCandidate(candidates, toolbar.Suggestion{
 						Title: bm.Title,
 						URL:   bm.URL,
 						Kind:  toolbar.SuggestBookmark,
-					})
+					}, bookmarkFrecency, time.Time{}, &order)
 				}
 			}
 		}
 		if f.history != nil {
 			entries := f.history.Entries()
-			for i := len(entries) - 1; i >= 0; i-- {
-				h := entries[i]
-				if suggestionMatches(lowerQ, h.URL, h.Title) {
-					profile = append(profile, toolbar.Suggestion{
-						Title: h.Title,
-						URL:   h.URL,
-						Kind:  toolbar.SuggestHistory,
-					})
-				}
+			// Older stores recorded no per-entry Visits; the number of entries
+			// sharing a URL is the same frequency.
+			counts := make(map[string]int, len(entries))
+			for _, h := range entries {
+				counts[h.URL]++
 			}
-		}
-		for _, s := range profile {
-			if !seen[s.URL] {
-				seen[s.URL] = true
-				out = append(out, s)
-				if len(out) >= 8 {
-					return out
+			for _, h := range entries {
+				if !suggestionMatches(lowerQ, h.URL, h.Title) {
+					continue
 				}
+				visits := h.Visits
+				if visits <= 0 {
+					visits = counts[h.URL]
+				}
+				addSuggestionCandidate(candidates, toolbar.Suggestion{
+					Title: h.Title,
+					URL:   h.URL,
+					Kind:  toolbar.SuggestHistory,
+				}, history.FrecencyScore(visits, h.At, now), h.At, &order)
 			}
 		}
 	}
 
+	ranked := make([]*suggestionCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		ranked = append(ranked, c)
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score > ranked[j].score
+		}
+		if !ranked[i].recent.Equal(ranked[j].recent) {
+			return ranked[i].recent.After(ranked[j].recent)
+		}
+		return ranked[i].order < ranked[j].order
+	})
+	for _, c := range ranked {
+		if seen[c.suggestion.URL] {
+			continue
+		}
+		seen[c.suggestion.URL] = true
+		out = append(out, c.suggestion)
+		if len(out) >= 8 {
+			return out
+		}
+	}
+
 	return out
+}
+
+// bookmarkFrecency is the score a saved page earns without any visit: the
+// same as one visit from the last week, so a deliberate save still outranks a
+// stale one-off but yields to a page the user actually returns to.
+const bookmarkFrecency = 1.0
+
+// suggestionCandidate is one URL in the omnibox ranking before the dropdown
+// trims to its eight rows.
+type suggestionCandidate struct {
+	suggestion toolbar.Suggestion
+	score      float64
+	recent     time.Time
+	order      int
+}
+
+// addSuggestionCandidate merges one match into the ranked pool. A URL seen as
+// both a bookmark and a visit keeps the bookmark's label and kind—saving it is
+// the stronger signal—while earning the higher of the two scores.
+func addSuggestionCandidate(pool map[string]*suggestionCandidate, s toolbar.Suggestion, score float64, recent time.Time, order *int) {
+	if c, ok := pool[s.URL]; ok {
+		if score > c.score {
+			c.score = score
+		}
+		if recent.After(c.recent) {
+			c.recent = recent
+		}
+		if c.suggestion.Kind == toolbar.SuggestHistory && s.Kind == toolbar.SuggestBookmark {
+			c.suggestion.Title = s.Title
+			c.suggestion.Kind = toolbar.SuggestBookmark
+		}
+		return
+	}
+	*order++
+	pool[s.URL] = &suggestionCandidate{
+		suggestion: s,
+		score:      score,
+		recent:     recent,
+		order:      *order,
+	}
 }
 
 // omniboxIsPrivate reports whether the omnibox must behave privately: the

@@ -384,3 +384,32 @@ func TestHistorySearch(t *testing.T) {
 		t.Fatalf("Search(example) order = %+v, want oldest first", got)
 	}
 }
+
+// TestHistoryFrecencyScore pins the ranking shared by the omnibox: frequency
+// multiplies a recency bucket, so a busy page can outrank a fresher one and a
+// stale one-off cannot float to the top.
+func TestHistoryFrecencyScore(t *testing.T) {
+	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name   string
+		visits int
+		last   time.Time
+		want   float64
+	}{
+		{"last hour", 1, now.Add(-30 * time.Minute), 4},
+		{"last day", 1, now.Add(-2 * time.Hour), 2},
+		{"last week", 1, now.Add(-3 * 24 * time.Hour), 1},
+		{"last month", 1, now.Add(-14 * 24 * time.Hour), 0.5},
+		{"older", 1, now.Add(-60 * 24 * time.Hour), 0.25},
+		{"frequency multiplies", 3, now.Add(-2 * time.Hour), 6},
+		{"future visit clamps to fresh", 2, now.Add(time.Hour), 8},
+		{"no visits", 0, now, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := history.FrecencyScore(tc.visits, tc.last, now); got != tc.want {
+				t.Fatalf("FrecencyScore(%d, %v) = %v, want %v", tc.visits, tc.last, got, tc.want)
+			}
+		})
+	}
+}

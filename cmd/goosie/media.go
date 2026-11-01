@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"math"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -52,6 +53,9 @@ func mediaOption(backend media.Backend, client net.HTTP, docURL string) engine.O
 func (f *framePath) pumpChrome() {
 	f.pumpJS()
 	f.pumpMedia()
+	if f.toolbar != nil {
+		f.toolbar.RefreshSuggestions(time.Now())
+	}
 }
 
 // pumpMedia advances the active tab's video elements and repaints what changed.

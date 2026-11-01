@@ -112,6 +112,32 @@ func (s *Store) RecordVisit(url, title string, transition Transition) {
 	}
 }
 
+// FrecencyScore ranks one URL for the omnibox: visit frequency multiplied by
+// a recency bucket. A visit from the last hour counts four times a last-week
+// visit and sixteen times one older than a month, so a page that is merely
+// recent but never revisited cannot outrank a habit.
+func FrecencyScore(visits int, lastVisit, now time.Time) float64 {
+	if visits <= 0 {
+		return 0
+	}
+	age := now.Sub(lastVisit)
+	if age < 0 {
+		age = 0
+	}
+	weight := 0.25
+	switch {
+	case age <= time.Hour:
+		weight = 4
+	case age <= 24*time.Hour:
+		weight = 2
+	case age <= 7*24*time.Hour:
+		weight = 1
+	case age <= 28*24*time.Hour:
+		weight = 0.5
+	}
+	return float64(visits) * weight
+}
+
 // Entries returns a copy of the log, oldest first.
 func (s *Store) Entries() []Entry {
 	s.mu.Lock()

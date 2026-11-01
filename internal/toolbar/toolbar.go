@@ -37,6 +37,10 @@ type Suggestion struct {
 
 const textSize = 14
 
+// SuggestDebounce is how long typing must pause before the omnibox queries the
+// profile for suggestions (FR-NAV-04).
+const SuggestDebounce = 50 * time.Millisecond
+
 // Special key codes matching the darwin shim's GOOSIE_KEY_* constants.
 const (
 	keyUp    = 0xF700
@@ -111,6 +115,8 @@ type State struct {
 	Suggestions     []Suggestion
 	SelectedSuggest int
 	OnQuerySuggest  func(string) []Suggestion
+	suggestPending  string
+	suggestDue      time.Time
 
 	DownloadsCount   int
 	ActiveDownloads  int
@@ -510,10 +516,7 @@ func (s *State) focusURLLocked() []func() {
 	s.Input = s.URL
 	s.selectAllLocked()
 	s.dragging = false
-	if s.OnQuerySuggest != nil && s.Input != "" {
-		s.Suggestions = s.OnQuerySuggest(s.Input)
-		s.SelectedSuggest = -1
-	}
+	s.runSuggestionsLocked()
 	return pending
 }
 
@@ -621,10 +624,7 @@ func (s *State) pressAddressLocked(devX int32, toolbarW int32) {
 		s.selectAllLocked()
 		s.dragging = true
 		s.dragAnchor = s.hitCursorDev(devX, toolbarW)
-		if s.OnQuerySuggest != nil && s.Input != "" {
-			s.Suggestions = s.OnQuerySuggest(s.Input)
-			s.SelectedSuggest = -1
-		}
+		s.runSuggestionsLocked()
 		return
 	}
 	at := s.hitCursorDev(devX, toolbarW)
@@ -818,12 +818,7 @@ func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 	beforeInput := s.Input
 	pending := s.clipboardPending(s.editKeyLocked(key, mods))
 	if s.Input != beforeInput {
-		if s.OnQuerySuggest != nil && s.Input != "" {
-			s.Suggestions = s.OnQuerySuggest(s.Input)
-			s.SelectedSuggest = -1
-		} else {
-			s.closeSuggestionsLocked()
-		}
+		s.queueSuggestionsLocked()
 	}
 	return pending
 }
@@ -1693,6 +1688,50 @@ func (s *State) selectPrevSuggestLocked() {
 func (s *State) closeSuggestionsLocked() {
 	s.Suggestions = nil
 	s.SelectedSuggest = -1
+	s.suggestPending = ""
+	s.suggestDue = time.Time{}
+}
+
+// runSuggestionsLocked queries the host immediately. Focus and pointer presses
+// use this path because the user has not typed; keystrokes go through
+// queueSuggestionsLocked so they can be debounced.
+func (s *State) runSuggestionsLocked() {
+	if s.OnQuerySuggest != nil && s.Input != "" {
+		s.Suggestions = s.OnQuerySuggest(s.Input)
+		s.SelectedSuggest = -1
+	}
+	s.suggestPending = ""
+	s.suggestDue = time.Time{}
+}
+
+// queueSuggestionsLocked records the latest input and restarts the debounce
+// window. The previous dropdown stays visible until the new query runs.
+func (s *State) queueSuggestionsLocked() {
+	if s.OnQuerySuggest == nil || s.Input == "" {
+		s.closeSuggestionsLocked()
+		return
+	}
+	s.suggestPending = s.Input
+	s.suggestDue = time.Now().Add(SuggestDebounce)
+}
+
+// RefreshSuggestions runs the pending omnibox query once the 50ms debounce has
+// elapsed. Hosts call it each frame; it reports whether the dropdown changed.
+func (s *State) RefreshSuggestions(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.suggestPending == "" || now.Before(s.suggestDue) {
+		return false
+	}
+	query := s.suggestPending
+	s.suggestPending = ""
+	s.suggestDue = time.Time{}
+	if s.Focus != FocusAddress || s.Input != query || s.OnQuerySuggest == nil || s.Input == "" {
+		return false
+	}
+	s.Suggestions = s.OnQuerySuggest(s.Input)
+	s.SelectedSuggest = -1
+	return true
 }
 
 // CloseSuggestions clears the current suggestions dropdown.
