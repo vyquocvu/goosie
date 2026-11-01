@@ -24,7 +24,7 @@ const maxImportDepth = 4
 // expansion (the seen set doubles as the counter) and every fetched payload
 // charges the shared subresource budget; over either, the statement imports
 // nothing rather than failing the document.
-func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]bool, sub *subBudget, depth int) string {
+func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]bool, sub *subBudget, depth int, onMixed func(MixedContentKind, string)) string {
 	if linker == nil || depth > maxImportDepth {
 		return text
 	}
@@ -54,10 +54,14 @@ func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]b
 						if abs, ok := resolveSubresourceURL(sheetURL, ref); ok && !seen[abs] && len(seen) < maxCSSImports {
 							seen[abs] = true
 							if sheet, err := linker(sheetURL, abs); err == nil && sub.take(len(sheet)) {
-								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, sub, depth+1)
+								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, sub, depth+1, onMixed)
 								if importUsable(inner) {
 									b.WriteString(inner)
 								}
+							}
+						} else if !ok && onMixed != nil {
+							if bad, mixed := mixedContentURL(sheetURL, ref); mixed {
+								onMixed(MixedContentStylesheet, bad)
 							}
 						}
 					}

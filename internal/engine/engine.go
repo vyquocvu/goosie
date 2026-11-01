@@ -50,6 +50,9 @@ type Session struct {
 	viewportH float32
 	linkBase  string
 	linker    CSSLinker
+	// documentURL is the final document URL every resource base shares. It is
+	// the scheme the mixed-content policy compares subresources against.
+	documentURL string
 
 	scriptBase       string
 	scriptFetch      ScriptFetcher
@@ -121,6 +124,12 @@ type Session struct {
 	// the caller's goroutine and writes these maps while the session owner
 	// keeps reflowing, so every read and write crosses here.
 	imgMu sync.Mutex
+
+	// mixedMu guards the bounded mixed-content report list. Script, font and
+	// image goroutines can all name a downgraded URL during one session.
+	mixedMu      sync.Mutex
+	mixedReports []MixedContentReport
+	mixedSeen    map[string]struct{}
 
 	// Progressive paint state. WithDeferredImages collects the document's
 	// image references without fetching them, so the first frame goes out
@@ -439,6 +448,9 @@ func WithLinkedCSS(base string, fetch CSSLinker) Option {
 	return func(s *Session) {
 		s.linkBase = base
 		s.linker = fetch
+		if base != "" {
+			s.documentURL = base
+		}
 	}
 }
 
@@ -450,6 +462,9 @@ func WithImages(base string, fetch ImageFetcher) Option {
 	return func(s *Session) {
 		s.imgBase = base
 		s.imgFetch = fetch
+		if base != "" {
+			s.documentURL = base
+		}
 	}
 }
 
@@ -462,6 +477,9 @@ func WithDeferredImages(base string, fetch ImageFetcher) Option {
 		s.imgBase = base
 		s.imgFetch = fetch
 		s.deferImages = true
+		if base != "" {
+			s.documentURL = base
+		}
 	}
 }
 
@@ -474,6 +492,9 @@ func WithCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Opt
 		s.fontBase = base
 		s.fontFetch = fetch
 		s.fontReg = reg
+		if base != "" {
+			s.documentURL = base
+		}
 	}
 }
 
@@ -488,6 +509,9 @@ func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegis
 		s.fontFetch = fetch
 		s.fontReg = reg
 		s.deferFonts = true
+		if base != "" {
+			s.documentURL = base
+		}
 	}
 }
 
@@ -500,13 +524,30 @@ func WithScripts(base string, fetch ScriptFetcher) Option {
 	return func(s *Session) {
 		s.scriptBase = base
 		s.scriptFetch = fetch
+		if base != "" {
+			s.documentURL = base
+		}
 	}
 }
 
 // WithIFrameDocumentLoader supplies the child-document loader used by iframe
-// browsing contexts.
+// browsing contexts. The engine refuses a plaintext child document under an
+// HTTPS parent before the loader runs, because an iframe is active mixed
+// content.
 func WithIFrameDocumentLoader(loader IFrameDocumentLoader) Option {
-	return func(s *Session) { s.iframeLoader = loader }
+	return func(s *Session) {
+		if loader == nil {
+			s.iframeLoader = nil
+			return
+		}
+		s.iframeLoader = func(base, src string) (*dom.Document, error) {
+			if abs, mixed := mixedContentURL(base, src); mixed {
+				s.reportMixed(MixedContentIFrame, abs)
+				return nil, errMixedContentBlocked
+			}
+			return loader(base, src)
+		}
+	}
 }
 
 // WithIFrameFormSubmitter supplies the host transport for POST forms whose
@@ -667,7 +708,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// stylesheets before running page scripts, then lazily resolve the cascade on
 	// the first CSSOM read. The normal final style phase resolves it once for
 	// documents that do not query computed style during script execution.
-	preScriptSheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+	preScriptSheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +723,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.opMu.Unlock()
 	sheets := preScriptSheets
 	if stylesheetDOMSignature(doc) != preScriptStyleSignature {
-		sheets, err = checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+		sheets, err = checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
 		if err != nil {
 			return nil, err
 		}
@@ -781,7 +822,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 			s.jsRT.SetIFrameScriptFetcher(s.scriptFetch)
 			s.jsRT.SetDynamicScriptLimit(maxExternalScripts)
 			s.jsRT.SetDynamicScriptFetcher(func(base, src string) ([]byte, error) {
-				abs, ok := resolveSubresourceURL(base, src)
+				abs, ok := s.resolveScriptURL(base, src)
 				if !ok || !s.jsRT.AllowsScriptURL(abs, base) {
 					return nil, errors.New("external script blocked")
 				}
@@ -976,7 +1017,7 @@ func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS [
 				s.parserExecutedScripts[node] = true
 				return
 			}
-			abs, ok := resolveSubresourceURL(s.scriptBase, src)
+			abs, ok := s.resolveScriptURL(s.scriptBase, src)
 			if !ok {
 				s.parserExecutedScripts[node] = true
 				return
@@ -996,7 +1037,7 @@ func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS [
 	}
 	// Stylesheets preceding this script are already in the live tree. Install
 	// their current cascade so synchronous CSSOM reads in the script see them.
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub)
+	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
 	if err != nil {
 		s.recordScriptError(err)
 	} else {
@@ -1391,7 +1432,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					}
 					return nil
 				}
-				if abs, ok := resolveSubresourceURL(s.imgBase, src); ok {
+				if abs, ok := s.resolveImageURL(s.imgBase, src); ok {
 					refs = append(refs, imgRef{id: n.ID, abs: abs})
 					if !seen[abs] {
 						seen[abs] = true
@@ -1408,7 +1449,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[bg] = true
 					uniq = append(uniq, bg)
 				}
-			} else if abs, ok := resolveSubresourceURL(s.imgBase, bg); ok {
+			} else if abs, ok := s.resolveImageURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -1428,7 +1469,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[bg] = true
 					uniq = append(uniq, bg)
 				}
-			} else if abs, ok := resolveSubresourceURL(s.imgBase, bg); ok {
+			} else if abs, ok := s.resolveImageURL(s.imgBase, bg); ok {
 				refs = append(refs, imgRef{abs: abs, bg: true, pseudo: ps})
 				if !seen[abs] {
 					seen[abs] = true
@@ -1444,7 +1485,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[m] = true
 					uniq = append(uniq, m)
 				}
-			} else if abs, ok := resolveSubresourceURL(s.imgBase, m); ok {
+			} else if abs, ok := s.resolveImageURL(s.imgBase, m); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, mask: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -1460,7 +1501,7 @@ func (s *Session) collectImageRefs() []imgRef {
 					seen[src] = true
 					uniq = append(uniq, src)
 				}
-			} else if abs, ok := resolveSubresourceURL(s.imgBase, src); ok {
+			} else if abs, ok := s.resolveImageURL(s.imgBase, src); ok {
 				refs = append(refs, imgRef{id: n.ID, abs: abs, bg: true, border: true})
 				if !seen[abs] {
 					seen[abs] = true
@@ -1483,6 +1524,10 @@ func (s *Session) fetchImageBytes(u string) ([]byte, error) {
 	}
 	if s.imgFetch == nil {
 		return nil, fmt.Errorf("engine: no image fetcher for %q", u)
+	}
+	if bad, mixed := mixedContentURL(s.documentBase(), u); mixed {
+		s.reportMixed(MixedContentImage, bad)
+		return nil, errMixedContentBlocked
 	}
 	return s.imgFetch(s.imgBase, u)
 }
@@ -2710,7 +2755,7 @@ func (s *Session) runScripts() {
 						items = append(items, scriptItem{text: text, name: src, deferScript: n.HasAttribute("defer") && !n.HasAttribute("async"), node: n})
 					}
 				} else if s.scriptFetch != nil && extLeft > 0 {
-					if abs, ok := resolveSubresourceURL(s.scriptBase, src); ok {
+					if abs, ok := s.resolveScriptURL(s.scriptBase, src); ok {
 						extLeft--
 						items = append(items, scriptItem{ext: abs, name: abs, deferScript: n.HasAttribute("defer") && !n.HasAttribute("async"), node: n})
 					}

@@ -93,7 +93,7 @@ func (s *Session) moduleScriptSource(n *dom.Node, baseURL string, externalLeft i
 	if externalLeft <= 0 || s.scriptFetch == nil {
 		return "", "", "", false
 	}
-	abs, valid := resolveSubresourceURL(baseURL, src)
+	abs, valid := s.resolveScriptURL(baseURL, src)
 	if !valid {
 		return "", "", "", false
 	}
@@ -118,7 +118,7 @@ func (s *Session) executeDefaultImportModule(runtime *js.Runtime, source, baseUR
 		if time.Now().After(deadline) {
 			return errors.New("module graph fetch budget exhausted")
 		}
-		abs, ok := resolveSubresourceURL(baseURL, match[3])
+		abs, ok := s.resolveScriptURL(baseURL, match[3])
 		if !ok || s.scriptFetch == nil {
 			return fmt.Errorf("cannot resolve module import %q", match[3])
 		}
@@ -168,7 +168,7 @@ func (s *Session) moduleDefaultJSON(runtime *js.Runtime, source, baseURL string,
 		if time.Now().After(deadline) {
 			return "", errors.New("module graph fetch budget exhausted")
 		}
-		abs, ok := resolveSubresourceURL(baseURL, match[3])
+		abs, ok := s.resolveScriptURL(baseURL, match[3])
 		if !ok || seen[abs] || s.scriptFetch == nil {
 			return "", fmt.Errorf("cyclic or unresolved module import %q", match[3])
 		}

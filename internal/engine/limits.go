@@ -590,7 +590,7 @@ type cssSource struct {
 	remote bool
 }
 
-func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, mediaOpts css.MediaOptions, sub *subBudget) ([]*css.Stylesheet, error) {
+func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, mediaOpts css.MediaOptions, sub *subBudget, onMixed func(MixedContentKind, string)) ([]*css.Stylesheet, error) {
 	budget := &cssBudget{}
 	all := make([]cssSource, 0, len(sources)+8)
 	for _, src := range sources {
@@ -620,6 +620,10 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 						linksLeft--
 						all = append(all, cssSource{})
 						pending = append(pending, pendingLink{slot: len(all) - 1, abs: abs})
+					} else if !ok && onMixed != nil {
+						if bad, mixed := mixedContentURL(base, href); mixed {
+							onMixed(MixedContentStylesheet, bad)
+						}
 					}
 				}
 			}
@@ -666,7 +670,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				continue
 			}
 			text := absolutizeCSSURLs(*texts[i], p.abs)
-			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, sub, 1), remote: true}
+			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, sub, 1, onMixed), remote: true}
 		}
 	}
 	if err != nil {
