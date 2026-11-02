@@ -45,10 +45,20 @@ func TestJourneyTwentyURLsAcrossTenTabsSwitchAndCloseHalf(t *testing.T) {
 	states := make([]durableTab, 0, tabCount)
 	for i := 0; i < tabCount; i++ {
 		if i > 0 {
+			// NewTab publishes the new count before SwitchTo activates it, and this
+			// test observes the manager from outside the loop. Waiting only on the
+			// count can capture the tab that was active a moment earlier, and then
+			// every assertion below is aimed at the wrong tab.
+			previous := b.f.tabMgr.Active()
+			previousID := uint64(0)
+			if previous != nil {
+				previousID = previous.ID()
+			}
 			b.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
 			want := i + 1
-			b.waitFor(t, fmt.Sprintf("tab %d created", want), func() bool {
-				return b.f.tabMgr.Count() == want
+			b.waitFor(t, fmt.Sprintf("tab %d created and active", want), func() bool {
+				active := b.f.tabMgr.Active()
+				return b.f.tabMgr.Count() == want && active != nil && active.ID() != previousID
 			})
 		}
 		tab := b.f.tabMgr.Active()
