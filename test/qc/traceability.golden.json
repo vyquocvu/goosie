@@ -300,7 +300,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_tabs_test.go:TestJourneyInitialWindowUsableTab",
       "test/tabs/manager_test.go:TestNewTabHasCorrectInitialState"
@@ -314,7 +314,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_tabs_test.go:TestJourneySwitchBetweenThreeTabs"
     ],
@@ -340,7 +340,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_tabs_test.go:TestJourneySwitchBetweenThreeTabs"
     ],
@@ -391,7 +391,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_tabs_test.go:TestJourneyCloseActiveTabSelectsNext",
       "test/tabs/lifecycle_test.go:TestCloseActiveTabSelectsNearest"
