@@ -162,15 +162,158 @@ func TestPumpJSMutationReachesDOMAccessibilityTreeAndPaint(t *testing.T) {
 	}
 }
 
-// TestPumpJSRunsRAF pins the animation-frame half of the turn.
+// A one-shot requestAnimationFrame callback runs exactly once per frame turn,
+// and its DOM write must reach the frozen display list rather than stopping at
+// the DOM.
+// qc:BR-113
 func TestPumpJSRunsRAF(t *testing.T) {
-	html := `<html><body><p id="t">waiting</p><script>requestAnimationFrame(function(){document.getElementById('t').textContent='painted';});</script></body></html>`
-	sess, _, _ := pumpSession(t, html, true)
+	html := `<html><body><p id="t">waiting</p><script>
+window.__frames = 0;
+requestAnimationFrame(function(){
+  window.__frames++;
+  document.getElementById('t').textContent = 'painted';
+});
+</script></body></html>`
+	sess, rt, _ := pumpSession(t, html, true)
 	if !sess.PumpJS(800) {
 		t.Fatal("PumpJS reported no work for a pending RAF callback")
 	}
 	if got := sess.Find("painted"); len(got) == 0 {
 		t.Fatal("RAF mutation not visible after PumpJS")
+	}
+	list, err := sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked after RAF: %v", err)
+	}
+	if got := paintedText(list); !strings.Contains(got, "painted") {
+		t.Fatalf("painted text after RAF = %q, want the callback's write", got)
+	}
+	if v, ok := rt.Global("__frames"); !ok || v.Num != 1 {
+		t.Fatalf("frame callbacks = %+v, want exactly 1", v)
+	}
+	if sess.PumpJS(800) {
+		t.Fatal("a one-shot RAF callback ran again on the next turn")
+	}
+	if v, _ := rt.Global("__frames"); v.Num != 1 {
+		t.Fatalf("frame callbacks after a second turn = %v, want 1", v.Num)
+	}
+}
+
+// Cancelled timers and animation frames must not touch the document: no
+// callback runs, PumpJS reports no visual work, and the painted text keeps its
+// load-time value.
+// qc:BR-114
+func TestPumpJSCancelledTimersAndFramesDoNotTouchTheDocument(t *testing.T) {
+	html := `<html><body style="margin: 0;"><p id="t">still</p><script>
+var timer = setTimeout(function(){
+  window.__timerRan = true;
+  document.getElementById('t').textContent = 'timer';
+}, 0);
+clearTimeout(timer);
+var frame = requestAnimationFrame(function(){
+  window.__frameRan = true;
+  document.getElementById('t').textContent = 'frame';
+});
+cancelAnimationFrame(frame);
+</script></body></html>`
+	sess, rt, _ := pumpSession(t, html, true)
+	if sess.PumpJS(800) {
+		t.Fatal("PumpJS reported work for a cancelled timer and frame")
+	}
+	for _, name := range []string{"__timerRan", "__frameRan"} {
+		if v, ok := rt.Global(name); ok && v.Bool {
+			t.Fatalf("cancelled callback set %s", name)
+		}
+	}
+	if got := sess.Find("timer"); len(got) != 0 {
+		t.Fatal("cancelled timer mutated the document")
+	}
+	if got := sess.Find("frame"); len(got) != 0 {
+		t.Fatal("cancelled animation frame mutated the document")
+	}
+	list, err := sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked: %v", err)
+	}
+	if got := paintedText(list); !strings.Contains(got, "still") {
+		t.Fatalf("painted text = %q, want the unchanged load-time text", got)
+	}
+}
+
+// Removing a node must drop it from the layout arena, hit testing and the
+// accessibility tree, and a node appended in the same turn must appear in all
+// three. This is the engine-level stale-reference contract.
+// qc:BR-112
+func TestPumpJSDOMNodeReplacementDropsStaleReferences(t *testing.T) {
+	html := `<html><body style="margin: 0;">
+<div style="height: 40px"><a id="gone" href="/gone" style="display:block;height:40px">gone</a></div>
+<div id="slot" style="height: 80px"><a id="stay" href="/stay" style="display:block;height:20px;width:200px">stay</a></div>
+<script>setTimeout(function() {
+  var gone = document.getElementById('gone');
+  gone.parentNode.removeChild(gone);
+  var added = document.createElement('a');
+  added.id = 'added';
+  added.setAttribute('href', '/added');
+  added.setAttribute('style', 'display:block;height:20px;width:200px');
+  added.textContent = 'added';
+  document.getElementById('slot').appendChild(added);
+}, 0);</script>
+</body></html>`
+	sess, _, _ := pumpSession(t, html, true)
+	removed := sess.Doc.ElementByID("gone")
+	if removed == nil {
+		t.Fatal("fixture did not parse the node that is about to be removed")
+	}
+	if href := sess.HitTestLink(10, 20); href != "/gone" {
+		t.Fatalf("load-time hit test = %q, want /gone", href)
+	}
+	if axFind(sess.AccessibilityTree(), ax.RoleLink, "gone") == nil {
+		t.Fatal("load-time accessibility tree lacks the removable link")
+	}
+
+	if !sess.PumpJS(800) {
+		t.Fatal("PumpJS missed the node replacement")
+	}
+
+	if sess.Doc.ElementByID("gone") != nil {
+		t.Fatal("removed node is still reachable from the document")
+	}
+	for i := range sess.Arena.Objects {
+		if obj := &sess.Arena.Objects[i]; obj.Node == removed {
+			t.Fatalf("layout arena still holds a box for the removed node at index %d", i)
+		}
+	}
+	if href := sess.HitTestLink(10, 20); href != "" {
+		t.Fatalf("hit test at the removed link's old box = %q, want no link", href)
+	}
+	if axFind(sess.AccessibilityTree(), ax.RoleLink, "gone") != nil {
+		t.Fatal("accessibility tree still exposes the removed link")
+	}
+
+	added := sess.Doc.ElementByID("added")
+	if added == nil {
+		t.Fatal("appended node is missing from the document")
+	}
+	var addedRect [4]float32
+	found := false
+	for i := range sess.Arena.Objects {
+		obj := &sess.Arena.Objects[i]
+		if obj.Node == added {
+			x0, y0, x1, y1 := obj.BorderRect()
+			addedRect = [4]float32{x0, y0, x1, y1}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("appended node has no layout box")
+	}
+	cx, cy := (addedRect[0]+addedRect[2])/2, (addedRect[1]+addedRect[3])/2
+	if href := sess.HitTestLink(cx, cy); href != "/added" {
+		t.Fatalf("hit test on the appended link = %q, want /added", href)
+	}
+	if link := axFind(sess.AccessibilityTree(), ax.RoleLink, "added"); link == nil || link.Href != "/added" {
+		t.Fatalf("appended link node = %+v, want href /added", link)
 	}
 }
 
