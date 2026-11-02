@@ -3115,8 +3115,10 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "cmd/goosie/journey_p0_error_test.go:TestJourneyOversizedDocumentShowsErrorAndRecovers",
+      "test/engine/bounds_test.go:TestSessionRejectsOversizedHTMLBeforeParsing",
       "test/entrypoints/limits_test.go:TestGoosieHeadlessRejectsOversizedInput"
     ],
     "enforced": true

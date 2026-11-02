@@ -177,8 +177,10 @@ func TestGoosieHeadlessRejectsOversizedInput(t *testing.T) {
 
 	tmp := t.TempDir()
 	html := filepath.Join(tmp, "huge.html")
-	// Create a file just over 16 MiB.
-	hugeContent := strings.Repeat("x", 16<<20+1)
+	// Whitespace just over the cap parses cheaply if the guard is ever skipped,
+	// so the test fails on the missing rejection rather than on a later text
+	// layout limit.
+	hugeContent := strings.Repeat(" ", 16<<20+1)
 	if err := os.WriteFile(html, []byte(hugeContent), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -191,5 +193,8 @@ func TestGoosieHeadlessRejectsOversizedInput(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "document exceeds") {
 		t.Errorf("error %q does not mention document size limit", string(out))
+	}
+	if _, err := os.Stat(png); !os.IsNotExist(err) {
+		t.Errorf("oversized input produced %s; rejection must happen before rendering", png)
 	}
 }

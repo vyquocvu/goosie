@@ -44,6 +44,27 @@ func TestSessionRejectsUnboundedInput(t *testing.T) {
 	}
 }
 
+// qc:BR-162
+func TestSessionRejectsOversizedHTMLBeforeParsing(t *testing.T) {
+	// The payload is also millions of nodes and far past the depth limit, so a
+	// parser-first path would report one of those limits instead. Only a byte
+	// check that runs before the tree builder can answer with the byte cap.
+	html := strings.Repeat("<div>", engine.MaxDocumentBytes/5+1)
+	if len(html) <= engine.MaxDocumentBytes {
+		t.Fatalf("fixture = %d bytes, want > %d", len(html), engine.MaxDocumentBytes)
+	}
+	_, err := engine.NewSession(html, nil, 400)
+	if err == nil {
+		t.Fatal("oversized document accepted")
+	}
+	if !strings.Contains(err.Error(), "HTML byte limit exceeded") {
+		t.Fatalf("error = %q, want the document byte cap", err)
+	}
+	if strings.Contains(err.Error(), "node") || strings.Contains(err.Error(), "depth") {
+		t.Fatalf("error = %q, byte cap was not checked before the tree limits", err)
+	}
+}
+
 func TestSessionAcceptsRepeatedTextAndRawHTML(t *testing.T) {
 	for _, html := range []string{
 		`<p>` + strings.Repeat("normal repeated text ", 1000) + `</p>`,

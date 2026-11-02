@@ -5,7 +5,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/vyquocvu/goosie/internal/engine"
 )
 
 // qc:BR-007
@@ -59,6 +62,49 @@ func TestJourneyMalformedURLRecoversWithoutRetainingOldDoc(t *testing.T) {
 	browser.navigateViaAddressBar(t, recoveredURL)
 	browser.waitFor(t, "recovered page loaded successfully", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "recovered-doc")
+		active := browser.f.tabMgr.Active()
+		return ok && browser.activeURL() == recoveredURL && active != nil && active.Error() == ""
+	})
+}
+
+// qc:BR-162
+func TestJourneyOversizedDocumentShowsErrorAndRecovers(t *testing.T) {
+	// The body is also millions of nodes, so an accepted document would fail
+	// during parse and never reach the page. The app's transport bound rejects
+	// such a response before the engine sees it; the engine's own byte cap is
+	// pinned separately by TestSessionRejectsOversizedHTMLBeforeParsing.
+	oversized := strings.Repeat("<p>", engine.MaxDocumentBytes/3+1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/huge":
+			fmt.Fprint(w, oversized)
+		case "/recovered":
+			fmt.Fprint(w, `<!doctype html><html><head><title>Recovered</title></head><body><h1 id="recovered-after-oversize">Recovered Content</h1></body></html>`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	hugeURL := server.URL + "/huge"
+	browser.navigateViaAddressBar(t, hugeURL)
+	browser.waitFor(t, "error page for oversized document", func() bool {
+		tree := browser.window.AccessibilityTree()
+		active := browser.f.tabMgr.Active()
+		byteCap := axContainsLabel(tree, "response exceeds 16 MiB") ||
+			axContainsLabel(tree, "HTML byte limit exceeded")
+		return active != nil && active.Error() != "" &&
+			active.Title() == "Problem loading page" && byteCap
+	})
+
+	recoveredURL := server.URL + "/recovered"
+	browser.navigateViaAddressBar(t, recoveredURL)
+	browser.waitFor(t, "navigation after oversized document", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "recovered-after-oversize")
 		active := browser.f.tabMgr.Active()
 		return ok && browser.activeURL() == recoveredURL && active != nil && active.Error() == ""
 	})
