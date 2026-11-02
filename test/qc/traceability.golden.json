@@ -1871,8 +1871,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/fetch_abort_test.go:TestFetchAbortCustomReasonRejectsWithReason",
+      "test/js/fetch_abort_test.go:TestFetchAbortPreAbortedSignalSkipsRequest",
+      "test/js/fetch_abort_test.go:TestFetchAbortSignalRejectsAndDropsLateResponse"
+    ],
     "enforced": false
   },
   {

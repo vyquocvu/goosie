@@ -142,6 +142,39 @@ type fetchState struct {
 	callbacks []fetchCallback
 }
 
+// fetchAbort is the plain-Go mirror of an AbortSignal. It is created on the
+// VM goroutine and awaited by the request goroutine, so the signal itself is
+// never touched off-thread: the abort algorithm converts the reason to a
+// string while it still runs on the VM goroutine.
+type fetchAbort struct {
+	mu      sync.Mutex
+	aborted bool
+	reason  string
+	done    chan struct{}
+}
+
+func newFetchAbort() *fetchAbort {
+	return &fetchAbort{done: make(chan struct{})}
+}
+
+func (a *fetchAbort) fire(reason string) {
+	a.mu.Lock()
+	if a.aborted {
+		a.mu.Unlock()
+		return
+	}
+	a.aborted = true
+	a.reason = reason
+	a.mu.Unlock()
+	close(a.done)
+}
+
+func (a *fetchAbort) fired() (bool, string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.aborted, a.reason
+}
+
 // ---------------------------------------------------------------------------
 // Setup.
 // ---------------------------------------------------------------------------
@@ -280,6 +313,60 @@ func (r *Runtime) resolveFetchURL(raw string) string {
 	return resolved.String()
 }
 
+// followFetchSignal reads RequestInit.signal on the VM goroutine and returns a
+// plain-Go abort control that the request goroutine can wait on. It returns
+// nil when no signal was supplied; values that are not AbortSignals are
+// ignored rather than rejected so a stub does not disable fetch entirely.
+func (r *Runtime) followFetchSignal(init goja.Value) *fetchAbort {
+	if init == nil || goja.IsUndefined(init) || goja.IsNull(init) {
+		return nil
+	}
+	initObj, ok := init.(*goja.Object)
+	if !ok {
+		return nil
+	}
+	val := initObj.Get("signal")
+	if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
+		return nil
+	}
+	signal, ok := val.(*goja.Object)
+	if !ok {
+		return nil
+	}
+
+	control := newFetchAbort()
+	reason := func() string { return abortReasonString(signal.Get("reason")) }
+	if aborted := signal.Get("aborted"); aborted != nil && aborted.ToBoolean() {
+		control.fire(reason())
+		return control
+	}
+
+	register, ok := goja.AssertFunction(signal.Get("__registerAbortAlgorithm__"))
+	if !ok {
+		return nil
+	}
+	// The algorithm runs synchronously on the VM goroutine, either now (if the
+	// signal is already aborted) or inside AbortController.abort().
+	_, _ = register(signal, r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		control.fire(reason())
+		return goja.Undefined()
+	}))
+	return control
+}
+
+// abortReasonString normalizes an AbortSignal reason to the string the fetch
+// promise rejects with. The default reason installed by AbortController is
+// already the string "AbortError"; a custom reason is stringified.
+func abortReasonString(v goja.Value) string {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return "AbortError"
+	}
+	if s := v.String(); s != "" {
+		return s
+	}
+	return "AbortError"
+}
+
 // ---------------------------------------------------------------------------
 // Fetch execution.
 // ---------------------------------------------------------------------------
@@ -303,12 +390,14 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	// fetch(url) with no init still issues a GET; parseFetchOpts also defaults
 	// the method, but it is only called when an init object is present.
 	opts := FetchOptions{Method: "GET"}
+	var abort *fetchAbort
 	if len(call.Arguments) >= 2 {
 		var err error
 		opts, err = r.parseFetchOpts(call.Arguments[1])
 		if err != nil {
 			return r.makeRejectThenable(err.Error())
 		}
+		abort = r.followFetchSignal(call.Arguments[1])
 	}
 
 	// Enforce request body limit before handing bytes to the network.
@@ -318,6 +407,14 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	}
 	if bodyLen > MaxFetchBodyBytes {
 		return r.makeRejectThenable("request body exceeds limit")
+	}
+
+	// An already-aborted signal rejects without starting the request. This
+	// also keeps the concurrent-fetch slot free for a request that can run.
+	if abort != nil {
+		if fired, reason := abort.fired(); fired {
+			return r.makeRejectThenable(reason)
+		}
 	}
 
 	fs.mu.Lock()
@@ -334,7 +431,7 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 
 	t := r.newThenable()
 
-	go r.runFetch(fs, resolvedURL, opts, t, budget)
+	go r.runFetch(fs, resolvedURL, opts, t, budget, abort)
 
 	return t.obj
 }
@@ -346,7 +443,9 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 // fetchOf (a vm.Get) off the VM thread. budget is the shared subresource
 // budget captured on the VM thread; the response body is charged to it, and a
 // body that does not fit is rejected so the page cannot pull unbounded bytes.
-func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t *thenableObj, budget SubresourceBudget) {
+// abort, when non-nil, lets the promise reject before the client returns; the
+// eventual response is then dropped rather than applied.
+func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t *thenableObj, budget SubresourceBudget, abort *fetchAbort) {
 	defer func() {
 		fs.mu.Lock()
 		fs.active--
@@ -369,28 +468,20 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		if NeedsPreflight(opts.Method, opts.Headers) {
 			// Send preflight OPTIONS request
 			preflightHeaders := buildPreflightHeaders(origin, opts.Method, opts.Headers)
-			preflightResp, err := fs.client.Fetch(fetchURL, "OPTIONS", preflightHeaders, nil)
+			preflightResp, err, aborted := callFetcher(abort, func() (*FetchResponse, error) {
+				return fs.client.Fetch(fetchURL, "OPTIONS", preflightHeaders, nil)
+			})
+			if aborted {
+				fs.rejectFetch(t, abortReasonOf(abort))
+				return
+			}
 			if err != nil {
-				t.settleFetch(nil, "preflight failed: "+err.Error(), true)
-				fs.mu.Lock()
-				fs.callbacks = append(fs.callbacks, fetchCallback{
-					isReject: true,
-					arg:      "preflight failed: " + err.Error(),
-					chain:    t,
-				})
-				fs.mu.Unlock()
+				fs.rejectFetch(t, "preflight failed: "+err.Error())
 				return
 			}
 			// Check preflight response
 			if !CheckPreflightResponse(origin, opts.Method, opts.Headers, preflightResp.Headers, withCredentials) {
-				t.settleFetch(nil, "preflight CORS check failed", true)
-				fs.mu.Lock()
-				fs.callbacks = append(fs.callbacks, fetchCallback{
-					isReject: true,
-					arg:      "preflight CORS check failed",
-					chain:    t,
-				})
-				fs.mu.Unlock()
+				fs.rejectFetch(t, "preflight CORS check failed")
 				return
 			}
 		}
@@ -400,7 +491,13 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 	if opts.HasBodyBytes {
 		body = opts.BodyBytes
 	}
-	resp, err := fs.client.Fetch(fetchURL, opts.Method, opts.Headers, body)
+	resp, err, aborted := callFetcher(abort, func() (*FetchResponse, error) {
+		return fs.client.Fetch(fetchURL, opts.Method, opts.Headers, body)
+	})
+	if aborted {
+		fs.rejectFetch(t, abortReasonOf(abort))
+		return
+	}
 
 	// Charge the response body to the document's shared subresource budget.
 	// The client already materialized the body within MaxResponseBytes, so
@@ -416,39 +513,86 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 	if err == nil && IsCORSRequest(documentURL, fetchURL) {
 		origin := getOrigin(documentURL)
 		if !CheckCORSResponse(origin, resp.Headers, withCredentials) {
-			t.settleFetch(nil, "CORS check failed: Access-Control-Allow-Origin header missing or mismatched", true)
-			fs.mu.Lock()
-			fs.callbacks = append(fs.callbacks, fetchCallback{
-				isReject: true,
-				arg:      "CORS check failed: Access-Control-Allow-Origin header missing or mismatched",
-				chain:    t,
-			})
-			fs.mu.Unlock()
+			fs.rejectFetch(t, "CORS check failed: Access-Control-Allow-Origin header missing or mismatched")
 			return
 		}
 	}
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	if err != nil {
-		t.settleFetch(nil, err.Error(), true)
-		fs.callbacks = append(fs.callbacks, fetchCallback{
-			isReject: true,
-			arg:      err.Error(),
-			chain:    t,
-		})
+		fs.rejectFetch(t, err.Error())
 		return
 	}
 
 	// Per the Fetch spec, non-OK responses still resolve (not reject); the
 	// caller inspects response.ok / response.status to decide.
+	fs.resolveFetch(t, resp)
+}
+
+// callFetcher runs one HTTPFetcher call and waits for either its result or an
+// abort. The injected HTTPFetcher has no cancellation hook, so an aborted
+// request keeps running in the background; its eventual response is dropped.
+// When an abort and a result are both ready, abort wins, matching the Fetch
+// spec's preference for rejecting a request that has not settled yet.
+func callFetcher(abort *fetchAbort, fn func() (*FetchResponse, error)) (resp *FetchResponse, err error, aborted bool) {
+	if abort == nil {
+		resp, err = fn()
+		return resp, err, false
+	}
+	type result struct {
+		resp *FetchResponse
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		resp, err := fn()
+		ch <- result{resp: resp, err: err}
+	}()
+	select {
+	case <-abort.done:
+		return nil, nil, true
+	case res := <-ch:
+		if fired, _ := abort.fired(); fired {
+			return nil, nil, true
+		}
+		return res.resp, res.err, false
+	}
+}
+
+// abortReasonOf returns the string a request rejected by abort settles with.
+func abortReasonOf(a *fetchAbort) string {
+	if a == nil {
+		return "AbortError"
+	}
+	if _, reason := a.fired(); reason != "" {
+		return reason
+	}
+	return "AbortError"
+}
+
+// rejectFetch settles a thenable as rejected and queues exactly one callback
+// for the VM drain. The worker goroutine never touches goja.
+func (fs *fetchState) rejectFetch(t *thenableObj, msg string) {
+	t.settleFetch(nil, msg, true)
+	fs.mu.Lock()
+	fs.callbacks = append(fs.callbacks, fetchCallback{
+		isReject: true,
+		arg:      msg,
+		chain:    t,
+	})
+	fs.mu.Unlock()
+}
+
+// resolveFetch settles a thenable as fulfilled and queues exactly one callback
+// for the VM drain.
+func (fs *fetchState) resolveFetch(t *thenableObj, resp *FetchResponse) {
 	t.settleFetch(resp, nil, false)
+	fs.mu.Lock()
 	fs.callbacks = append(fs.callbacks, fetchCallback{
 		isReject: false,
 		arg:      resp,
 		chain:    t,
 	})
+	fs.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------
