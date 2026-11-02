@@ -766,7 +766,7 @@
       "PARITY",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "test/engine/layout_parity_test.go:TestLayoutParityWithChromium"
     ],
