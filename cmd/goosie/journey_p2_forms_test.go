@@ -942,3 +942,72 @@ func TestJourneyMultipartFormCarriesSelectedFile(t *testing.T) {
 		t.Fatalf("file bytes = %q, want hello world", got.fileData)
 	}
 }
+
+// TestJourneyFormTargetBlankOpensNewTab submits a GET form with target="_blank":
+// the result must land in a fresh tab and leave the originating document where
+// it was. Treating _blank as _self silently replaces the page the user is
+// reading with the response they asked to open beside it.
+//
+// qc:BR-106
+func TestJourneyFormTargetBlankOpensNewTab(t *testing.T) {
+	var reqMu sync.Mutex
+	var received url.Values
+	var hits int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/result" {
+			reqMu.Lock()
+			hits++
+			received = r.URL.Query()
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Submitted</h1></body></html>`)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><html><body><h1 id="form-page">Form</h1>
+<form id="f" action="/result" method="GET" target="_blank">
+  <input type="text" id="q" name="q" value="goosie">
+  <button type="submit" id="send">Search</button>
+</form>
+</body></html>`)
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "the form page is available", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "form-page")
+		return ok && browser.activeURL() == pageURL
+	})
+	originID := browser.f.tabMgr.Active().ID()
+
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "the _blank submission opens a second tab", func() bool {
+		active := browser.f.tabMgr.Active()
+		return browser.f.tabMgr.Count() == 2 && active != nil && active.ID() != originID &&
+			strings.HasPrefix(browser.activeURL(), server.URL+"/result")
+	})
+	browser.waitFor(t, "the new tab paints the result", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
+		return ok
+	})
+
+	reqMu.Lock()
+	got, count := received, hits
+	reqMu.Unlock()
+	if count != 1 {
+		t.Fatalf("result endpoint hit %d times, want 1", count)
+	}
+	if got.Get("q") != "goosie" {
+		t.Fatalf("q = %q, want goosie", got.Get("q"))
+	}
+
+	browser.f.switchTab(originID)
+	browser.waitFor(t, "the originating tab keeps its document", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "form-page")
+		return ok && browser.activeURL() == pageURL
+	})
+}

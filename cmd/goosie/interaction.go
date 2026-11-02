@@ -661,6 +661,13 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 		targetURL = tab.URL()
 	}
 	method := strings.ToUpper(sub.Method)
+	// target="_blank" submits into a new browsing context. _self, _top,
+	// _parent and the empty target all resolve to this tab at the top level.
+	// A named frame target has no host-side transport yet, so it stays here
+	// rather than silently opening the wrong context.
+	if strings.EqualFold(strings.TrimSpace(sub.Target), "_blank") {
+		f.newTab()
+	}
 	if method == "" || method == "GET" {
 		if sub.Encoded != "" {
 			if strings.Contains(targetURL, "?") {

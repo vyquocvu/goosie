@@ -478,6 +478,21 @@ func FormAction(form *dom.Node) string {
 	return form.GetAttribute("action")
 }
 
+// FormTarget returns the browsing context name a form submits into. The empty
+// string means the form's own context, like _self.
+func FormTarget(form *dom.Node) string {
+	return strings.TrimSpace(form.GetAttribute("target"))
+}
+
+// FormTargetFor resolves the target with the submitter's formtarget override.
+// Like formaction and formmethod, the attribute only applies to a submit button.
+func FormTargetFor(form, submitter *dom.Node) string {
+	if value, ok := submitterAttr(submitter, "formtarget"); ok {
+		return strings.TrimSpace(value)
+	}
+	return FormTarget(form)
+}
+
 // FormActionFor resolves the action of a submission. A submit button's
 // formaction wins over the form's action, including an explicitly empty value,
 // which the host resolves to the current document URL.

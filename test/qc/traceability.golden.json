@@ -1501,6 +1501,7 @@
     "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormMethodAndEncoding",
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneyFormTargetBlankOpensNewTab",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyMultipartFormCarriesSelectedFile",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyPostFormCarriesBody",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyPostRedirectBecomesGet",
@@ -1524,6 +1525,8 @@
       "test/engine/form_multipart_test.go:TestSubmitMultipartFormPreservesControlOrder",
       "test/engine/form_multipart_test.go:TestSubmitterFormenctypeChoosesMultipart",
       "test/engine/form_submitter_override_test.go:TestSubmitterOverridesFormDestination",
+      "test/engine/form_target_test.go:TestFormTargetResolvesSubmitterOverride",
+      "test/engine/form_target_test.go:TestSubmitFormSubmissionCarriesTarget",
       "test/engine/option_value_test.go:TestOptionValueAttributeIsSubmittedVerbatim"
     ],
     "enforced": false

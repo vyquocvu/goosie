@@ -2308,6 +2308,7 @@ type FormSubmission struct {
 	Action  string
 	Method  string
 	Enctype string
+	Target  string
 	Data    []FormData
 	Encoded string
 }
@@ -2402,6 +2403,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 		Action:  action,
 		Method:  method,
 		Enctype: enctype,
+		Target:  FormTargetFor(form, submitter),
 		Data:    data,
 		Encoded: encoded,
 	}
