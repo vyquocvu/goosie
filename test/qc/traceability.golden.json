@@ -5,7 +5,7 @@
     "methods": [
       "CUA"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_test.go:TestJourneyHTTPSNavigation"
     ],
@@ -18,7 +18,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_test.go:TestJourneyHTTPNavigationAndRedirect",
       "cmd/goosie/main_test.go:TestLoadURLCtxValidSmallDocument"
@@ -32,7 +32,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_test.go:TestJourneyBareHostnameNormalization",
       "cmd/goosie/normalize_url_test.go:TestNormalizeAddressAmbiguousInputs",
@@ -87,7 +87,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_error_test.go:TestJourneyMalformedURLRecoversWithoutRetainingOldDoc",
       "cmd/goosie/main_test.go:TestCertFailureReachesAddressBar"
@@ -153,7 +153,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/error_page_test.go:TestCategorizeError",
       "cmd/goosie/journey_p0_error_test.go:TestJourneyServerDownShowsRecognizableErrorAndAcceptsNextNav",
