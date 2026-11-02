@@ -168,6 +168,7 @@ type Session struct {
 	active                 *dom.Node
 	keyboardActive         *dom.Node
 	keyboardActiveMarked   []*dom.Node
+	pendingKey             *heldKey
 	caret                  int
 	controlSelectionAnchor int
 	controlSelectionActive bool

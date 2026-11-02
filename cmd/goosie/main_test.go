@@ -555,7 +555,7 @@ func TestInterceptContentKeyConsumedWhenFocused(t *testing.T) {
 	}
 
 	consumed := false
-	cw.onContentKey = func(k rune, m surface.KeyMod) bool { consumed = true; return true }
+	cw.onContentKey = func(k rune, m surface.KeyMod, a surface.KeyAction) bool { consumed = true; return true }
 	if !cw.intercept(key) {
 		t.Fatal("key not consumed when onContentKey handled it")
 	}
@@ -563,7 +563,7 @@ func TestInterceptContentKeyConsumedWhenFocused(t *testing.T) {
 		t.Fatal("onContentKey not called")
 	}
 
-	cw.onContentKey = func(k rune, m surface.KeyMod) bool { return false }
+	cw.onContentKey = func(k rune, m surface.KeyMod, a surface.KeyAction) bool { return false }
 	if cw.intercept(key) {
 		t.Fatal("key consumed when onContentKey declined")
 	}
@@ -580,7 +580,7 @@ func TestInterceptBareTabReachesContentKey(t *testing.T) {
 	var gotKey rune
 	var gotMods surface.KeyMod
 	called := false
-	cw.onContentKey = func(k rune, m surface.KeyMod) bool {
+	cw.onContentKey = func(k rune, m surface.KeyMod, a surface.KeyAction) bool {
 		gotKey, gotMods, called = k, m, true
 		return true
 	}

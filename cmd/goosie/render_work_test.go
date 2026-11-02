@@ -328,6 +328,9 @@ func TestKeyboardSpaceActivationUpdatesCheckedStyle(t *testing.T) {
 	if !f.contentKey(' ', surface.KeyMod(0)) {
 		t.Fatal("Space was not handled")
 	}
+	if !f.releaseContentKey(' ', surface.KeyMod(0)) {
+		t.Fatal("Space release was not handled")
+	}
 	assertWorkDelta(t, "keyboard checkbox activation", sess.WorkCounts(), before, engine.WorkCounts{
 		StyleResolves:     1,
 		DisplayListBuilds: 1,
@@ -665,7 +668,7 @@ func newInputTileHarness(t *testing.T, dpr int) *inputTileHarness {
 	f.tabMgr.Active().SetSession(sess)
 	f.repaintTab(f.tabMgr.Active(), frame.Rect{})
 	h := &inputTileHarness{f: f, w: w, rt: rt, composer: surface.NewComposer(size, frame.NewBitmapPool(size, 1))}
-	h.cw = &chromeWindow{Window: w, toolbar: toolbar.NewState(size.W, nil), scale: int32(dpr), onFocusClick: f.focusClick, onContentKey: f.contentKey}
+	h.cw = &chromeWindow{Window: w, toolbar: toolbar.NewState(size.W, nil), scale: int32(dpr), onFocusClick: f.focusClick, onContentKey: f.contentKeyAction}
 	h.settle(t)
 	return h
 }

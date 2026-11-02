@@ -710,12 +710,13 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 - (void)otherMouseUp:(NSEvent *)e { [self sendPointer:e action:GOOSIE_POINTER_RELEASE]; }
 - (void)mouseMoved:(NSEvent *)e { [self sendPointer:e action:GOOSIE_POINTER_MOTION]; }
 
-- (void)keyDown:(NSEvent *)e {
+- (void)sendKey:(NSEvent *)e action:(int)action {
 	GoosieWindow *gw = (GoosieWindow *)[self goosieOwner];
 	if (!gw) return;
 	GoosieEvent ev;
 	memset(&ev, 0, sizeof(ev));
 	ev.kind = GOOSIE_EV_KEY;
+	ev.action = action;
 	ev.scale = viewScale(self);
 	ev.at_ns = nowNs();
 	ev.mods = (int)e.modifierFlags;
@@ -730,10 +731,12 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 		case 116: ev.key = GOOSIE_KEY_PAGE_UP; push(gw, ev); return;
 		case 121: ev.key = GOOSIE_KEY_PAGE_DOWN; push(gw, ev); return;
 	}
-	// With the input context on, printable keys go through NSTextInputClient first so
-	// an IME can compose them. handleEvent returns NO for keys it does not want -
-	// those fall through to the raw path below, unchanged.
-	if (_imeEnabled && !(e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) {
+	// With the input context on, printable presses go through NSTextInputClient
+	// first so an IME can compose them. handleEvent returns NO for keys it does
+	// not want - those fall through to the raw path below, unchanged. Releases
+	// never go through the input context: the IME saw the press already and
+	// must not receive the same key twice.
+	if (action == GOOSIE_KEY_PRESS && _imeEnabled && !(e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) {
 		if ([[self inputContext] handleEvent:e]) return;
 	}
 	// charactersIgnoringModifiers strips Cmd/Ctrl but keeps Option (dead keys,
@@ -760,6 +763,9 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 	}
 	push(gw, ev);
 }
+
+- (void)keyDown:(NSEvent *)e { [self sendKey:e action:GOOSIE_KEY_PRESS]; }
+- (void)keyUp:(NSEvent *)e { [self sendKey:e action:GOOSIE_KEY_RELEASE]; }
 
 // NSTextInputClient is the input method's view of this window. It carries no text
 // state of its own: insertions and marked-text updates are pushed to Go as EvIME

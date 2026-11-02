@@ -3108,7 +3108,15 @@
     ],
     "status": "PASS",
     "tests": [
-      "test/engine/keyboard_test.go:TestKeyboard_ActivationTracksActiveAndDispatchesClick"
+      "cmd/goosie/held_key_test.go:TestContentKeyHoldsButtonActiveUntilEnterRelease",
+      "cmd/goosie/held_key_test.go:TestContentKeyHoldsButtonActiveUntilSpaceRelease",
+      "cmd/goosie/held_key_test.go:TestContentKeyReleaseForTypingIsNotConsumed",
+      "test/engine/keyboard_test.go:TestKeyboard_ActivationTracksActiveAndDispatchesClick",
+      "test/engine/keyboard_test.go:TestKeyboard_HeldEnterKeepsActiveUntilRelease",
+      "test/engine/keyboard_test.go:TestKeyboard_HeldSpaceKeepsActiveUntilRelease",
+      "test/engine/keyboard_test.go:TestKeyboard_PreventedHeldSpaceDoesNotActivateOnRelease",
+      "test/engine/keyboard_test.go:TestKeyboard_ReleaseAfterFocusMoveDoesNotActivate",
+      "test/engine/keyboard_test.go:TestKeyboard_ReleaseWithoutPressIsInert"
     ],
     "enforced": false
   },

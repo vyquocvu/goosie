@@ -238,6 +238,173 @@ func TestKeyboard_ActivationTracksActiveAndDispatchesClick(t *testing.T) {
 	}
 }
 
+// qc:BR-182
+func TestKeyboard_HeldEnterKeepsActiveUntilRelease(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<div id="parent"><button id="target">Activate</button></div>
+</body></html>`)
+	target := nodeByID(&sess.Doc.Node, "target")
+	parent := nodeByID(&sess.Doc.Node, "parent")
+	if target == nil || parent == nil || !sess.FocusNode(target) {
+		t.Fatal("could not focus target")
+	}
+	var downActive, upActive, clickActive bool
+	clicks := 0
+	dom.AddEventListener(target, "keydown", func(*dom.Event) {
+		downActive = css.IsActive(target) && css.IsActive(parent)
+	}, false)
+	dom.AddEventListener(target, "keyup", func(*dom.Event) {
+		upActive = css.IsActive(target) && css.IsActive(parent)
+	}, false)
+	dom.AddEventListener(target, "click", func(*dom.Event) {
+		clicks++
+		clickActive = css.IsActive(target) && css.IsActive(parent)
+	}, false)
+
+	if sess.KeyDown("Enter", false, false, false, false) {
+		t.Fatal("KeyDown reported an activation that must wait for release")
+	}
+	if !sess.HasHeldKey("Enter") {
+		t.Fatal("KeyDown did not hold the Enter activation for release")
+	}
+	if !css.IsActive(target) || !css.IsActive(parent) {
+		t.Fatal(":active is not held while Enter is down")
+	}
+	if clicks != 0 {
+		t.Fatalf("click dispatched while Enter was still down")
+	}
+	if !sess.KeyUp("Enter", false, false, false, false) {
+		t.Fatal("KeyUp did not activate the focused button")
+	}
+	if clicks != 1 {
+		t.Fatalf("click events = %d, want 1 on release", clicks)
+	}
+	if !downActive || !upActive || !clickActive {
+		t.Fatalf(":active during hold: keydown=%v keyup=%v click=%v", downActive, upActive, clickActive)
+	}
+	if css.IsActive(target) || css.IsActive(parent) {
+		t.Fatal(":active remained after the held key was released")
+	}
+}
+
+// qc:BR-182
+func TestKeyboard_HeldSpaceKeepsActiveUntilRelease(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<button id="target">Activate</button>
+</body></html>`)
+	target := nodeByID(&sess.Doc.Node, "target")
+	if target == nil || !sess.FocusNode(target) {
+		t.Fatal("could not focus target")
+	}
+	clicks := 0
+	dom.AddEventListener(target, "click", func(*dom.Event) { clicks++ }, false)
+
+	if sess.KeyDown(" ", false, false, false, false) {
+		t.Fatal("KeyDown reported an activation that must wait for release")
+	}
+	if !sess.HasHeldKey(" ") {
+		t.Fatal("KeyDown did not hold the Space activation for release")
+	}
+	if !css.IsActive(target) {
+		t.Fatal(":active is not held while Space is down")
+	}
+	if clicks != 0 {
+		t.Fatal("Space activated the button before release")
+	}
+	if !sess.KeyUp(" ", false, false, false, false) {
+		t.Fatal("Space release did not activate the button")
+	}
+	if clicks != 1 || css.IsActive(target) {
+		t.Fatalf("after release: clicks=%d active=%v, want 1/false", clicks, css.IsActive(target))
+	}
+}
+
+// qc:BR-182
+func TestKeyboard_PreventedHeldSpaceDoesNotActivateOnRelease(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<button id="target">Activate</button>
+</body></html>`)
+	target := nodeByID(&sess.Doc.Node, "target")
+	if target == nil || !sess.FocusNode(target) {
+		t.Fatal("could not focus target")
+	}
+	clicks := 0
+	keyups := 0
+	dom.AddEventListener(target, "keydown", func(e *dom.Event) { e.PreventDefault() }, false)
+	dom.AddEventListener(target, "keyup", func(*dom.Event) { keyups++ }, false)
+	dom.AddEventListener(target, "click", func(*dom.Event) { clicks++ }, false)
+
+	if sess.KeyDown(" ", false, false, false, false) {
+		t.Fatal("prevented keydown claimed a default action")
+	}
+	if !sess.HasHeldKey(" ") {
+		t.Fatal("prevented keydown did not leave a keyup owed")
+	}
+	if !sess.HeldKeyPrevented(" ") {
+		t.Fatal("cancelled press was not recorded as prevented")
+	}
+	if css.IsActive(target) {
+		t.Fatal(":active remained after a prevented keydown")
+	}
+	if sess.KeyUp(" ", false, false, false, false) {
+		t.Fatal("release activated a control whose keydown was prevented")
+	}
+	if keyups != 1 {
+		t.Fatalf("keyup after a prevented press = %d, want 1", keyups)
+	}
+	if sess.HasHeldKey(" ") || sess.HeldKeyPrevented(" ") {
+		t.Fatal("release cleared the prevented press")
+	}
+	if clicks != 0 || css.IsActive(target) {
+		t.Fatalf("clicks=%d active=%v, want 0/false", clicks, css.IsActive(target))
+	}
+}
+
+// qc:BR-182
+func TestKeyboard_ReleaseWithoutPressIsInert(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<button id="target">Activate</button>
+</body></html>`)
+	target := nodeByID(&sess.Doc.Node, "target")
+	if target == nil || !sess.FocusNode(target) {
+		t.Fatal("could not focus target")
+	}
+	clicks := 0
+	dom.AddEventListener(target, "click", func(*dom.Event) { clicks++ }, false)
+
+	if sess.KeyUp(" ", false, false, false, false) {
+		t.Fatal("a release with no press activated the control")
+	}
+	if clicks != 0 {
+		t.Fatalf("click events = %d, want 0", clicks)
+	}
+}
+
+// qc:BR-182
+func TestKeyboard_ReleaseAfterFocusMoveDoesNotActivate(t *testing.T) {
+	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
+<button id="target">Activate</button><input id="next">
+</body></html>`)
+	target := nodeByID(&sess.Doc.Node, "target")
+	if target == nil || !sess.FocusNode(target) {
+		t.Fatal("could not focus target")
+	}
+	clicks := 0
+	dom.AddEventListener(target, "click", func(*dom.Event) { clicks++ }, false)
+
+	sess.KeyDown(" ", false, false, false, false)
+	sess.FocusNext()
+	if css.IsActive(target) {
+		t.Fatal("focus move did not clear the held :active state")
+	}
+	if sess.KeyUp(" ", false, false, false, false) {
+		t.Fatal("release activated a control that had already lost focus")
+	}
+	if clicks != 0 {
+		t.Fatalf("click events = %d, want 0", clicks)
+	}
+}
+
 func TestKeyboard_PreventDefaultBlocksSpaceActivation(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body><input type="checkbox" id="cb"></body></html>`)
 	if !focusCenter(t, sess, "cb") {

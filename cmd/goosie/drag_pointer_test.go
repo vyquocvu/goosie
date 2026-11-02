@@ -186,7 +186,7 @@ func TestEscapeIsOfferedToContentDragBeforePageKeys(t *testing.T) {
 	cancelled := false
 	pageKey := false
 	cw.onCancelDrag = func() bool { cancelled = true; return true }
-	cw.onContentKey = func(rune, surface.KeyMod) bool { pageKey = true; return true }
+	cw.onContentKey = func(rune, surface.KeyMod, surface.KeyAction) bool { pageKey = true; return true }
 	if !cw.intercept(surface.Event{Kind: surface.EvKey, Key: 0x1B}) {
 		t.Fatal("Escape was not consumed by drag cancellation")
 	}

@@ -193,6 +193,9 @@ func TestAnchorNavigationOnEnterKey(t *testing.T) {
 	if !f.contentKey('\r', surface.KeyMod(0)) {
 		t.Fatal("Enter was not handled")
 	}
+	if !f.releaseContentKey('\r', surface.KeyMod(0)) {
+		t.Fatal("Enter release was not handled")
+	}
 	select {
 	case result := <-f.navResults:
 		f.applyNavResult(result)
@@ -223,6 +226,9 @@ func TestAnchorEnterPreventDefaultCancelsNavigation(t *testing.T) {
 	if !f.contentKey('\r', surface.KeyMod(0)) {
 		t.Fatal("Enter was not handled")
 	}
+	// The release completes the key operation but the cancelled click keeps
+	// the activation from navigating.
+	f.releaseContentKey('\r', surface.KeyMod(0))
 	if tab.URL() != "https://example.test/start" || tab.Nav.Loading {
 		t.Fatalf("prevented Enter changed navigation state: URL=%q loading=%v", tab.URL(), tab.Nav.Loading)
 	}

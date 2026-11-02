@@ -41,6 +41,90 @@ func (s *Session) FireResizeEvent() {
 	dom.DispatchEvent(&s.Doc.Node, ev)
 }
 
+// heldKey is a Space or Enter press whose activation waits for keyup. It keeps
+// the node captured at keydown so a release after focus moved does not click
+// whatever happens to be focused then.
+type heldKey struct {
+	key       string
+	node      *dom.Node
+	prevented bool
+}
+
+// KeyDown dispatches keydown and starts the key's default action. Focus, range
+// and escape actions run immediately because they have no release phase. Space
+// and Enter on an activatable control only mark it :active and remember the
+// activation, which KeyUp performs, so the pressed styling stays painted for
+// the whole time the key is held. A keydown listener that calls preventDefault
+// cancels both the active state and the activation.
+//
+// KeyDown reports whether the key's default action ran during the press. A
+// deferred Space/Enter activation returns false here and true from KeyUp;
+// HasHeldKey tells a host that a release is owed.
+func (s *Session) KeyDown(key string, shift, ctrl, alt, meta bool) bool {
+	if s.Doc == nil {
+		return false
+	}
+	s.pendingKey = nil
+	s.clearKeyboardActiveLocked()
+	active := s.keyboardActivationTarget(key)
+	if active != nil {
+		s.keyboardActive = active
+		s.keyboardActiveMarked = markKeyboardActive(active)
+	}
+
+	down := dom.NewKeyboardEvent("keydown", true, true, key, "")
+	down.ShiftKey, down.CtrlKey, down.AltKey, down.MetaKey = shift, ctrl, alt, meta
+	prevented := !dom.DispatchEvent(s.keyTarget(), &down.Event)
+	if active != nil {
+		// Keep the outstanding press even when cancelled: keyup still fires,
+		// it just must not activate anything.
+		s.pendingKey = &heldKey{key: key, node: active, prevented: prevented}
+	}
+	if prevented {
+		s.clearKeyboardActiveLocked()
+		return false
+	}
+	if active != nil {
+		return false
+	}
+	return s.keyDefaultAction(key, shift)
+}
+
+// KeyUp dispatches keyup and, when it releases a held Space or Enter activation
+// whose control still has focus, performs the activation. The :active state
+// stays set through the keyup and the generated click and is cleared after
+// them. KeyUp reports whether it activated a control.
+func (s *Session) KeyUp(key string, shift, ctrl, alt, meta bool) bool {
+	if s.Doc == nil {
+		return false
+	}
+	pending := s.pendingKey
+	s.pendingKey = nil
+
+	up := dom.NewKeyboardEvent("keyup", true, true, key, "")
+	up.ShiftKey, up.CtrlKey, up.AltKey, up.MetaKey = shift, ctrl, alt, meta
+	dom.DispatchEvent(s.keyTarget(), &up.Event)
+
+	activated := pending != nil && pending.key == key && !pending.prevented &&
+		pending.node == s.focus && s.activateKeyboardTarget(pending.node)
+	s.clearKeyboardActiveLocked()
+	return activated
+}
+
+// HasHeldKey reports whether KeyDown is waiting for the release of key. It is
+// true even when the keydown was cancelled, because the page still owes that
+// key its keyup; KeyUp performs no activation for a cancelled press.
+func (s *Session) HasHeldKey(key string) bool {
+	return s != nil && s.pendingKey != nil && s.pendingKey.key == key
+}
+
+// HeldKeyPrevented reports whether the pending press for key was cancelled at
+// keydown. The release is still dispatched, but no activation follows, so a
+// host can skip restyling for a pressed state that was never painted.
+func (s *Session) HeldKeyPrevented(key string) bool {
+	return s != nil && s.pendingKey != nil && s.pendingKey.key == key && s.pendingKey.prevented
+}
+
 // PressKey dispatches a keydown, runs the key's default action unless a
 // listener called preventDefault, then dispatches keyup. The keyup target is
 // re-read after the default action so that a focus move (Tab) lands keyup on
@@ -53,30 +137,9 @@ func (s *Session) FireResizeEvent() {
 // result lets the browser shell apply defaults such as following an anchor
 // after DOM click listeners had the chance to cancel it.
 func (s *Session) PressKey(key string, shift, ctrl, alt, meta bool) bool {
-	if s.Doc == nil {
-		return false
-	}
-	active := s.keyboardActivationTarget(key)
-	markedActive := markKeyboardActive(active)
-	defer func() {
-		for _, n := range markedActive {
-			css.SetActive(n, false)
-		}
-	}()
-
-	down := dom.NewKeyboardEvent("keydown", true, true, key, "")
-	down.ShiftKey, down.CtrlKey, down.AltKey, down.MetaKey = shift, ctrl, alt, meta
-	prevented := !dom.DispatchEvent(s.keyTarget(), &down.Event)
-
-	activated := false
-	if !prevented {
-		activated = s.keyDefaultAction(key, shift)
-	}
-
-	up := dom.NewKeyboardEvent("keyup", true, true, key, "")
-	up.ShiftKey, up.CtrlKey, up.AltKey, up.MetaKey = shift, ctrl, alt, meta
-	dom.DispatchEvent(s.keyTarget(), &up.Event)
-	return activated
+	down := s.KeyDown(key, shift, ctrl, alt, meta)
+	up := s.KeyUp(key, shift, ctrl, alt, meta)
+	return down || up
 }
 
 // keyDefaultAction performs the default action of a key that was not

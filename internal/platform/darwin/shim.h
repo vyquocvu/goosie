@@ -55,6 +55,12 @@ enum {
 	GOOSIE_POINTER_MOTION = 2
 };
 
+// GoosieKeyAction separates the two phases an EvKey carries.
+enum {
+	GOOSIE_KEY_PRESS = 0,
+	GOOSIE_KEY_RELEASE = 1
+};
+
 // GoosieCursor is the pointer shape, mirroring surface.Cursor's four cases.
 enum {
 	GOOSIE_CURSOR_DEFAULT = 0,
@@ -102,7 +108,7 @@ typedef struct GoosieEvent {
 	int kind;
 	int dx, dy;     // GOOSIE_EV_SCROLL, device pixels
 	int px, py;     // GOOSIE_EV_POINTER position, GOOSIE_EV_SCROLL gesture location
-	int action;     // GOOSIE_POINTER_*
+	int action;     // GOOSIE_POINTER_* for pointer events, GOOSIE_KEY_* for keys
 	int button;     // 1 left, 2 right, 3 middle, 0 none
 	int ax_target;  // GOOSIE_AX_TARGET_* for GOOSIE_EV_AX_SET_VALUE
 	int key;        // GOOSIE_EV_KEY: the typed rune, 0 for a control key

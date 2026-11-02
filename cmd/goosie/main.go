@@ -754,7 +754,7 @@ func (f *framePath) openWindow() error {
 			f.handleLinkClick,
 			f.toggleBookmark,
 			f.focusClick,
-			f.contentKey,
+			f.contentKeyAction,
 			f.dragSelect,
 			f.imeEvent,
 			f.copySelection,

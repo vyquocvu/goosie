@@ -363,6 +363,16 @@ func (f *framePath) reflowAfterControlEdit(tab *tabs.Tab) {
 	}
 }
 
+// contentKeyAction routes a key phase to the content path. Presses keep the
+// historical editing and scrolling behavior; releases only finish a held
+// Space/Enter activation, so a release can never type or scroll.
+func (f *framePath) contentKeyAction(key rune, mods surface.KeyMod, action surface.KeyAction) bool {
+	if action == surface.KeyRelease {
+		return f.releaseContentKey(key, mods)
+	}
+	return f.contentKey(key, mods)
+}
+
 // contentKey applies a keyboard edit to the focused control. The event is
 // consumed whenever a control is focused so the address bar is not the only
 // text sink; only edits that can affect layout trigger a reflow.
@@ -393,22 +403,14 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 				keyName = " "
 			}
 			sess.SetUserActivation(true)
-			activated := sess.PressKey(keyName, mods&surface.ModShift != 0, false, mods&surface.ModOption != 0, false)
+			sess.KeyDown(keyName, mods&surface.ModShift != 0, false, mods&surface.ModOption != 0, false)
 			sess.SetUserActivation(false)
-			if activated && enter && focused.Data == "a" {
-				if href := focused.GetAttribute("href"); href != "" {
-					f.handleLinkClick(href)
-					return true
-				}
+			// The activation itself waits for release, so the control stays
+			// painted :active for as long as the key is physically held. A
+			// cancelled keydown painted nothing and needs no style pass.
+			if sess.HasHeldKey(keyName) && !sess.HeldKeyPrevented(keyName) {
+				f.refreshActiveContent()
 			}
-			if f.serviceFilePicker(tab) {
-				return true
-			}
-			if sub, ok := sess.PopSubmittedForm(); ok {
-				f.handleFormSubmission(tab, sub)
-				return true
-			}
-			f.reflowAfterControlChange(tab)
 			return true
 		}
 	}
@@ -572,6 +574,75 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		f.reflowAfterControlEdit(tab)
 	}
 	f.repaintTab(tab, frame.Rect{})
+	return true
+}
+
+// releaseContentKey applies the key-up phase of a held Space or Enter. The
+// press deferred activation to this point so the control could stay :active
+// while the key was down; the release now runs the click and its browser
+// defaults. A release for any other key, or for a key whose press the page
+// cancelled, is not ours to consume.
+func (f *framePath) releaseContentKey(key rune, mods surface.KeyMod) bool {
+	if f.tabMgr == nil {
+		return false
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return false
+	}
+	if mods&surface.ModCommand != 0 || mods&surface.ModControl != 0 {
+		return false
+	}
+	enter := key == '\r' || key == '\n'
+	space := key == ' '
+	if !enter && !space {
+		return false
+	}
+	keyName := "Enter"
+	if space {
+		keyName = " "
+	}
+	sess := tab.Session()
+	if !sess.HasHeldKey(keyName) {
+		return false
+	}
+	prevented := sess.HeldKeyPrevented(keyName)
+	focused := sess.Focused()
+	sess.SetUserActivation(true)
+	activated := sess.KeyUp(keyName, mods&surface.ModShift != 0, false, mods&surface.ModOption != 0, false)
+	sess.SetUserActivation(false)
+	if !activated {
+		if !prevented {
+			f.refreshActiveContent()
+		}
+		return true
+	}
+	return f.finishKeyActivation(tab, focused, enter)
+}
+
+// finishKeyActivation applies the browser defaults that follow a keyboard
+// activation: an anchor follows its href, a queued file picker opens, a
+// submitted form is handed to the navigation path, and anything else restyles
+// for the states the click changed.
+func (f *framePath) finishKeyActivation(tab *tabs.Tab, focused *dom.Node, enter bool) bool {
+	sess := tab.Session()
+	if sess == nil {
+		return false
+	}
+	if enter && focused != nil && focused.Data == "a" {
+		if href := focused.GetAttribute("href"); href != "" {
+			f.handleLinkClick(href)
+			return true
+		}
+	}
+	if f.serviceFilePicker(tab) {
+		return true
+	}
+	if sub, ok := sess.PopSubmittedForm(); ok {
+		f.handleFormSubmission(tab, sub)
+		return true
+	}
+	f.reflowAfterControlChange(tab)
 	return true
 }
 

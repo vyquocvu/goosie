@@ -91,6 +91,16 @@ const (
 	PointerMotion
 )
 
+// KeyAction tells which key phase an EvKey event carries. The zero value is
+// Press, so producers that synthesize a single key event - tests and automation
+// - need no field and keep the old press-then-release behavior.
+type KeyAction uint8
+
+const (
+	KeyPress KeyAction = iota
+	KeyRelease
+)
+
 // Cursor is the platform pointer shape. It is an enum rather than a platform
 // handle so the engine can ask for a cursor without knowing what the toolkit
 // calls one, which is the whole point of the window contract being an interface.
@@ -118,19 +128,20 @@ const (
 // no handler needs the scale factor to interpret an event, and a DPR change
 // cannot silently rescale a queued scroll.
 type Event struct {
-	Kind     EventKind
-	Delta    frame.Point   // EvScroll
-	Pos      frame.Point   // EvPointer position; EvScroll gesture location
-	Button   Button        // EvPointer
-	Action   PointerAction // EvPointer: press, release, or motion
-	Key      rune          // EvKey
-	Mods     KeyMod        // EvKey: modifier flags
-	Text     string        // EvIME: UTF-8 composition text
-	IME      IMEAction     // EvIME: marked update or commit
-	AXTarget AXTarget      // EvAXSetValue: content field or address bar
-	Size     frame.Size    // EvResize
-	Scale    float32       // current device pixel ratio
-	At       time.Time
+	Kind      EventKind
+	Delta     frame.Point   // EvScroll
+	Pos       frame.Point   // EvPointer position; EvScroll gesture location
+	Button    Button        // EvPointer
+	Action    PointerAction // EvPointer: press, release, or motion
+	Key       rune          // EvKey
+	Mods      KeyMod        // EvKey: modifier flags
+	KeyAction KeyAction     // EvKey: press or release
+	Text      string        // EvIME: UTF-8 composition text
+	IME       IMEAction     // EvIME: marked update or commit
+	AXTarget  AXTarget      // EvAXSetValue: content field or address bar
+	Size      frame.Size    // EvResize
+	Scale     float32       // current device pixel ratio
+	At        time.Time
 }
 
 // Window is what a platform must provide. Present takes the composed backing

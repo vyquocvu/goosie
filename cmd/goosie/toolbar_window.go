@@ -42,7 +42,7 @@ type chromeWindow struct {
 	onDuplicateTab    func()
 	onReaderMode      func()
 	onFocusClick      func(contentX, contentY int32) bool
-	onContentKey      func(key rune, mods surface.KeyMod) bool
+	onContentKey      func(key rune, mods surface.KeyMod, action surface.KeyAction) bool
 	onDragSelect      func(action surface.PointerAction, contentX, contentY int32) bool
 	onContentDrag     func(action surface.PointerAction, contentX, contentY int32) bool
 	onCancelDrag      func() bool
@@ -132,7 +132,7 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 	onResize func(contentW, contentH int), onZoom func(delta float64),
 	onLinkClick func(href string), onBookmark func(),
 	onFocusClick func(contentX, contentY int32) bool,
-	onContentKey func(key rune, mods surface.KeyMod) bool,
+	onContentKey func(key rune, mods surface.KeyMod, action surface.KeyAction) bool,
 	onDragSelect func(action surface.PointerAction, contentX, contentY int32) bool,
 	onIME func(ev surface.Event) bool,
 	onCopy func() bool,
@@ -810,6 +810,12 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvKey:
+		// A release only completes a held Space/Enter activation in the page.
+		// Shortcuts and address-bar editing belong to the press; routing a
+		// release through them would re-run a command or insert text.
+		if ev.KeyAction == surface.KeyRelease {
+			return cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods, ev.KeyAction)
+		}
 		if ev.Key == 0x1B && cw.onCancelDrag != nil && cw.onCancelDrag() {
 			return true
 		}
@@ -843,7 +849,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			cw.notifyAccessibilityChanged()
 			return true
 		}
-		if cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods) {
+		if cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods, ev.KeyAction) {
 			return true
 		}
 		return false
