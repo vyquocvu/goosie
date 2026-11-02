@@ -270,6 +270,23 @@ func normalizeFormLineBreaks(value string) string {
 	return strings.ReplaceAll(value, "\n", "\r\n")
 }
 
+// EncodeFormPlainText encodes form data as text/plain: each entry is written as
+// name=value followed by CRLF, with line breaks normalized and nothing escaped.
+// A value containing "=" or "&" is therefore deliberately lossy, as HTML defines.
+func EncodeFormPlainText(data []FormData) string {
+	var buf strings.Builder
+	for _, d := range data {
+		buf.WriteString(normalizeFormLineBreaks(d.Name))
+		buf.WriteByte('=')
+		buf.WriteString(normalizeFormLineBreaks(d.Value))
+		buf.WriteString("\r\n")
+		if buf.Len() > MaxFormDataBytes {
+			break
+		}
+	}
+	return buf.String()
+}
+
 // FormMethod returns the HTTP method for a form (GET, POST, or dialog).
 func FormMethod(form *dom.Node) string {
 	method := form.GetAttribute("method")
@@ -358,6 +375,19 @@ func FormEnctype(form *dom.Node) string {
 	default:
 		return "application/x-www-form-urlencoded"
 	}
+}
+
+// FormEnctypeFor resolves the encoding of a submission. A submit button's
+// formenctype wins over the form's enctype when it names one of the three
+// supported encodings; otherwise the form's enctype applies.
+func FormEnctypeFor(form, submitter *dom.Node) string {
+	if value, ok := submitterAttr(submitter, "formenctype"); ok {
+		switch strings.ToLower(value) {
+		case "application/x-www-form-urlencoded", "multipart/form-data", "text/plain":
+			return strings.ToLower(value)
+		}
+	}
+	return FormEnctype(form)
 }
 
 // FindForm returns the ancestor form element for a control, or nil.

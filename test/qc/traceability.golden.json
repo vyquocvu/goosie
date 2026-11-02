@@ -1500,6 +1500,13 @@
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyPostFormCarriesBody",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyPostRedirectBecomesGet",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneySubmitterOverridesDestination",
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneyTextPlainEncoderReachesServer",
+      "test/engine/form_enctype_test.go:TestEncodeFormPlainText",
+      "test/engine/form_enctype_test.go:TestFormEnctypeForSubmitter",
+      "test/engine/form_enctype_test.go:TestSubmitFormGetIgnoresTextPlainEnctype",
+      "test/engine/form_enctype_test.go:TestSubmitFormTextPlainEncodesBodyAndEnctype",
+      "test/engine/form_enctype_test.go:TestSubmitterFormenctypeChoosesBodyEncoding",
+      "test/engine/form_enctype_test.go:TestUnsuppportedMultipartFallsBackToURLEncoded",
       "test/engine/form_submitter_override_test.go:TestSubmitterOverridesFormDestination",
       "test/engine/option_value_test.go:TestOptionValueAttributeIsSubmittedVerbatim"
     ],

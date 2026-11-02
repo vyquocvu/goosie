@@ -659,3 +659,76 @@ func TestJourneySubmitterNoValidateSkipsValidation(t *testing.T) {
 		t.Errorf("draft q = %q, want the empty required value", got)
 	}
 }
+
+// qc:BR-106
+// TestJourneyTextPlainEncoderReachesServer submits a text/plain form through the
+// real browser path: the server must receive text/plain and the literal
+// name=value lines, with no percent-encoding and CRLF line endings.
+func TestJourneyTextPlainEncoderReachesServer(t *testing.T) {
+	var reqMu sync.Mutex
+	var posted bool
+	var method, contentType, rawBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/draft" {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read body", http.StatusBadRequest)
+				return
+			}
+			reqMu.Lock()
+			posted = true
+			method = r.Method
+			contentType = r.Header.Get("Content-Type")
+			rawBody = string(body)
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Draft saved</h1></body></html>`)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><html><body>
+<form id="f" action="/draft" method="POST" enctype="text/plain">
+  <input type="text" id="who" name="who" value="Ada Lovelace">
+  <textarea id="note" name="note">line1
+line2</textarea>
+  <button type="submit" id="send" name="go" value="1">Save draft</button>
+</form>
+</body></html>`)
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "text/plain form available in AX tree", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "send")
+		return ok && browser.activeURL() == pageURL
+	})
+
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "the draft response replaces the form", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
+		return ok && browser.activeURL() == server.URL+"/draft"
+	})
+
+	reqMu.Lock()
+	gotPosted := posted
+	gotMethod, gotContentType, gotBody := method, contentType, rawBody
+	reqMu.Unlock()
+
+	if !gotPosted {
+		t.Fatal("the server never received the submitted form")
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("submission method = %q, want POST", gotMethod)
+	}
+	if gotContentType != "text/plain" {
+		t.Errorf("submission Content-Type = %q, want text/plain", gotContentType)
+	}
+	want := "who=Ada Lovelace\r\nnote=line1\r\nline2\r\ngo=1\r\n"
+	if gotBody != want {
+		t.Errorf("submission body = %q, want %q", gotBody, want)
+	}
+}

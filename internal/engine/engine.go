@@ -2305,6 +2305,7 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 type FormSubmission struct {
 	Action  string
 	Method  string
+	Enctype string
 	Data    []FormData
 	Encoded string
 }
@@ -2366,11 +2367,25 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 		return
 	}
 	action := FormActionFor(form, submitter)
-	encoded := EncodeFormURLEncoded(data)
+	// GET always uses URL encoding, whatever enctype or formenctype says. A
+	// POST honours text/plain; multipart/form-data has no encoder yet (file
+	// controls are not collected), so it degrades to URL encoding rather than
+	// claiming a body shape the request does not have.
+	enctype := "application/x-www-form-urlencoded"
+	var encoded string
+	if strings.EqualFold(method, "GET") {
+		encoded = EncodeFormURLEncoded(data)
+	} else if FormEnctypeFor(form, submitter) == "text/plain" {
+		enctype = "text/plain"
+		encoded = EncodeFormPlainText(data)
+	} else {
+		encoded = EncodeFormURLEncoded(data)
+	}
 
 	s.submittedForm = &FormSubmission{
 		Action:  action,
 		Method:  method,
+		Enctype: enctype,
 		Data:    data,
 		Encoded: encoded,
 	}

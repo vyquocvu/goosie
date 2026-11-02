@@ -671,9 +671,13 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 		}
 		f.navigateTabTransition(targetURL, history.TransitionLink)
 	} else if method == "POST" {
+		contentType := sub.Enctype
+		if contentType == "" {
+			contentType = "application/x-www-form-urlencoded"
+		}
 		f.navigateTabRequest(targetURL, history.TransitionLink, navRequest{
 			Method:      "POST",
-			ContentType: "application/x-www-form-urlencoded",
+			ContentType: contentType,
 			Body:        sub.Encoded,
 		})
 	}
