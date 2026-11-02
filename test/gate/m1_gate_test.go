@@ -51,6 +51,7 @@ func gateTileColor(c frame.TileCoord) frame.Color {
 // for. That is also why this one does not need the allocating raster func above: during
 // a warm scroll no worker runs at all, so every allocation in the window is the frame
 // path's.
+// qc:BR-174
 func TestGate_WarmScrollZeroAllocsZeroTiles(t *testing.T) {
 	h := newWarmScene(t)
 	if got := h.dl.Len(); got < 1000 {

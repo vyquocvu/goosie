@@ -712,6 +712,7 @@ func TestLateTileNeverBlocksPresent(t *testing.T) {
 	}
 }
 
+// qc:BR-171
 func TestPresentUsesLatestPlanAndDropsSuperseded(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 256, H: 256}}
 	slot := &frame.Plan{}

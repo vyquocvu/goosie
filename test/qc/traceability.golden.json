@@ -3123,8 +3123,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_durability_test.go:TestJourneyTwentyURLsAcrossTenTabsSwitchAndCloseHalf"
+    ],
     "enforced": false
   },
   {
@@ -3133,8 +3135,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/internal_pages_test.go:TestApplyNavResultForClosedTabDoesNotResurrect",
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyRefreshWithPendingResponse",
+      "cmd/goosie/tab_lifecycle_test.go:TestStaleNavErrorDoesNotSurface",
+      "cmd/goosie/tab_lifecycle_test.go:TestStaleNavResultCannotPaintOverTheCurrentOne"
+    ],
     "enforced": false
   },
   {
@@ -3143,8 +3150,14 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/tab_lifecycle_test.go:TestOutOfOrderResultsLandOnTheirOwnTabs",
+      "test/engine/script_image_paint_test.go:TestLazyImageStalePixelsStopPainting",
+      "test/raster/lifecycle_test.go:TestNavigationReturnsLateTileToItsOriginalGrid",
+      "test/raster/media_update_test.go:TestUpdateLayerForAnotherLayerIsDropped",
+      "test/surface/loop_test.go:TestPresentUsesLatestPlanAndDropsSuperseded"
+    ],
     "enforced": false
   },
   {
@@ -3153,8 +3166,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/raster/pool_test.go:TestFailedTileIsRetriedOnceThenMarkedFailed",
+      "test/raster/pool_test.go:TestPanickingJobIsRecoveredAndPoolKeepsServing",
+      "test/raster/scheduler_test.go:TestFailedTileRendersBlankWithCounter",
+      "test/raster/scheduler_test.go:TestVisibleFailedTileIsReportedInFrameWork"
+    ],
     "enforced": false
   },
   {
@@ -3163,8 +3181,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/render_work_test.go:TestStaticPageIdleFramesDoNoPipelineOrTileWork"
+    ],
     "enforced": false
   },
   {
@@ -3173,8 +3193,14 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/gate/m1_gate_test.go:TestGate_WarmScrollZeroAllocsZeroTiles",
+      "test/gate/scroll_gate_test.go:TestM3_TileMissRate",
+      "test/raster/scheduler_test.go:TestEvictedTileIsRequeued",
+      "test/raster/scheduler_test.go:TestSameLayerContentUpdateReusesTiles",
+      "test/raster/scheduler_test.go:TestScrollDamagesOnlyTheExposedBand"
+    ],
     "enforced": false
   },
   {
@@ -3183,8 +3209,21 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/platform/headless_test.go:TestCloseIsIdempotentAndStopsTheClock",
+      "test/platform/headless_test.go:TestPresentWritesPNG",
+      "test/platform/headless_test.go:TestScrollEventsDelivered",
+      "test/platform/headless_test.go:TestVsyncTicksAtRequestedRate",
+      "test/surface/headless_integration_test.go:TestHeadless_MixedEventsCoalesceIntoOneFrame",
+      "test/surface/headless_integration_test.go:TestHeadless_MultipleVsyncsDrawMultipleFrames",
+      "test/surface/headless_integration_test.go:TestHeadless_PointerEventsCoalesceIntoOneFrame",
+      "test/surface/headless_integration_test.go:TestHeadless_ResizePropagates",
+      "test/surface/headless_integration_test.go:TestHeadless_ScrollAccumulatesAcrossVsyncs",
+      "test/surface/headless_integration_test.go:TestHeadless_ScrollInjectReachesScheduler",
+      "test/surface/headless_integration_test.go:TestHeadless_VsyncInjectIsRejected",
+      "test/surface/headless_integration_test.go:TestHeadless_WindowStatsReflectInjection"
+    ],
     "enforced": false
   },
   {

@@ -738,6 +738,77 @@ func (h *inputTileHarness) settle(t *testing.T) {
 	settleInputTiles(t, h.f.sched, h.f.tabMgr.Active().Layer(), h.composer, h.w)
 }
 
+// qc:BR-173
+//
+// A static page that has already settled must not restyle, relayout, rebuild a
+// display list, or rasterize a tile just because vsyncs keep arriving. The
+// counters are what a gate can assert without timing anything.
+func TestStaticPageIdleFramesDoNoPipelineOrTileWork(t *testing.T) {
+	h := newInputTileHarness(t, 1)
+	tab := h.f.tabMgr.Active()
+	sess := tab.Session()
+	layer := tab.Layer()
+	if sess == nil || layer == nil {
+		t.Fatal("fixture has no settled document to be idle on")
+	}
+
+	baseWork := sess.WorkCounts()
+	base := h.f.sched.Stats()
+	baseVersion := layer.ContentVersion
+
+	const idleFrames = 30
+	for i := 0; i < idleFrames; i++ {
+		if h.f.pumpJS() {
+			t.Fatalf("idle frame %d published a repaint for an unchanged document", i)
+		}
+		plan, needed := h.f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+		if plan == nil {
+			t.Fatalf("idle frame %d produced no plan", i)
+		}
+		if len(needed) != 0 {
+			t.Fatalf("idle frame %d asked for %d tiles, want 0", i, len(needed))
+		}
+		work := h.f.sched.Submit(needed)
+		if work.Submitted != 0 || work.Needed != 0 {
+			t.Fatalf("idle frame %d submitted %d jobs for %d needed tiles", i, work.Submitted, work.Needed)
+		}
+		damage := h.f.sched.ComposeInto(h.composer.Backing, h.composer, plan, needed)
+		if err := h.w.Present(h.composer.Backing, damage); err != nil {
+			t.Fatalf("idle frame %d present: %v", i, err)
+		}
+	}
+
+	if got := sess.WorkCounts(); got != baseWork {
+		t.Fatalf("idle frames changed pipeline work from %+v to %+v", baseWork, got)
+	}
+	after := h.f.sched.Stats()
+	for _, counter := range []struct {
+		name string
+		got  int64
+		was  int64
+	}{
+		{"Rasterized", after.Rasterized, base.Rasterized},
+		{"Submitted", after.Submitted, base.Submitted},
+		{"Refused", after.Refused, base.Refused},
+		{"Deferred", after.Deferred, base.Deferred},
+		{"Prefetched", after.Prefetched, base.Prefetched},
+		{"Failed", after.Failed, base.Failed},
+	} {
+		if counter.got != counter.was {
+			t.Errorf("%s grew from %d to %d across %d idle frames", counter.name, counter.was, counter.got, idleFrames)
+		}
+	}
+	if got := after.Frames - base.Frames; got != idleFrames {
+		t.Errorf("scheduler drew %d idle frames, want %d", got, idleFrames)
+	}
+	if got := layer.ContentVersion; got != baseVersion {
+		t.Errorf("idle frames bumped the content version from %d to %d", baseVersion, got)
+	}
+	if tab.Layer() != layer {
+		t.Error("idle frames replaced the settled layer")
+	}
+}
+
 func (h *inputTileHarness) assertColdPixels(t *testing.T) {
 	t.Helper()
 	list, err := h.f.tabMgr.Active().Session().PaintChecked(float32(h.f.config.dpr))

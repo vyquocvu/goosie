@@ -152,6 +152,7 @@ func TestUpdateLayerCoalescesDamage(t *testing.T) {
 	}
 }
 
+// qc:BR-171
 func TestUpdateLayerForAnotherLayerIsDropped(t *testing.T) {
 	h := newSched(t, 2, 2, 8, frame.Size{W: 512, H: 512}, raster.Pref{})
 	h.untilQuiet(t)

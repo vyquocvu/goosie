@@ -90,6 +90,7 @@ func (h *headlessHarness) tick(t *testing.T) {
 	waitPending(t, h.clk)
 }
 
+// qc:BR-175
 func TestHeadless_ScrollInjectReachesScheduler(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
 	h := newHeadlessHarness(t, vp)
@@ -114,6 +115,7 @@ func TestHeadless_ScrollInjectReachesScheduler(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_PointerEventsCoalesceIntoOneFrame(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 256, H: 256}}
 	h := newHeadlessHarness(t, vp)
@@ -139,6 +141,7 @@ func TestHeadless_PointerEventsCoalesceIntoOneFrame(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_MixedEventsCoalesceIntoOneFrame(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
 	h := newHeadlessHarness(t, vp)
@@ -167,6 +170,7 @@ func TestHeadless_MixedEventsCoalesceIntoOneFrame(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_ResizePropagates(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 256, H: 256}}
 	h := newHeadlessHarness(t, vp)
@@ -191,6 +195,7 @@ func TestHeadless_ResizePropagates(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_VsyncInjectIsRejected(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 256, H: 256}}
 	h := newHeadlessHarness(t, vp)
@@ -202,6 +207,7 @@ func TestHeadless_VsyncInjectIsRejected(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_MultipleVsyncsDrawMultipleFrames(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
 	h := newHeadlessHarness(t, vp)
@@ -220,6 +226,7 @@ func TestHeadless_MultipleVsyncsDrawMultipleFrames(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_ScrollAccumulatesAcrossVsyncs(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
 	h := newHeadlessHarness(t, vp)
@@ -243,6 +250,7 @@ func TestHeadless_ScrollAccumulatesAcrossVsyncs(t *testing.T) {
 	}
 }
 
+// qc:BR-175
 func TestHeadless_WindowStatsReflectInjection(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 256, H: 256}}
 	h := newHeadlessHarness(t, vp)

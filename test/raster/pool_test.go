@@ -189,6 +189,7 @@ func TestJobsRunConcurrentlyAcrossWorkers(t *testing.T) {
 	}
 }
 
+// qc:BR-172
 func TestPanickingJobIsRecoveredAndPoolKeepsServing(t *testing.T) {
 	boom := frame.TileCoord{Col: 3, Row: 4}
 	var calls int64
@@ -268,6 +269,7 @@ func TestPanickingJobIsRecoveredAndPoolKeepsServing(t *testing.T) {
 // again, the second exhausts MaxTileAttempts, and only then does the tile become
 // a blank one with a counter. The pool supplies the distinction and the grid owns
 // the bookkeeping, which is why neither can retire a tile alone.
+// qc:BR-172
 func TestFailedTileIsRetriedOnceThenMarkedFailed(t *testing.T) {
 	c := frame.TileCoord{Col: 1, Row: 1}
 	l, dl := newLayer(t, 2, 2)

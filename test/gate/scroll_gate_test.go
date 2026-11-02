@@ -146,6 +146,7 @@ func TestM3_ScrollOnlyNoContentWork(t *testing.T) {
 // miss is a frame that needed a tile and did not get it (had to rasterize it). The warm
 // cache should have every tile the sweep reaches, so the miss rate should be zero or
 // close to it.
+// qc:BR-174
 func TestM3_TileMissRate(t *testing.T) {
 	spec := m3SceneSpec()
 	spec.BudgetTiles = m3BudgetTiles

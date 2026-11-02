@@ -273,7 +273,7 @@ setTimeout(function(){
 	}
 }
 
-// qc:BR-252
+// qc:BR-252 BR-171
 func TestLazyImageStalePixelsStopPainting(t *testing.T) {
 	blue := color.RGBA{B: 255, A: 255}
 	green := color.RGBA{G: 255, A: 255}

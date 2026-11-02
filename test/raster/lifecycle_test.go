@@ -9,6 +9,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
+// qc:BR-171
 func TestNavigationReturnsLateTileToItsOriginalGrid(t *testing.T) {
 	bounds := frame.Rect4(0, 0, frame.TileSize, frame.TileSize)
 	bp := frame.NewBitmapPool(bounds.Size(), 1)

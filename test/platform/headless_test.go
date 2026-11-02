@@ -89,6 +89,7 @@ func expectNoEvent(t *testing.T, w *headless.Window, within time.Duration) {
 // per period, and no tick before the period is up. The second half matters as much
 // as the first - a window that emits vsyncs as fast as the loop drains them turns
 // every timing measurement in the project into a measurement of nothing.
+// qc:BR-175
 func TestVsyncTicksAtRequestedRate(t *testing.T) {
 	const period = 16 * time.Millisecond
 	w, clk := newWindow(t, headless.Config{Scale: 1, VsyncPeriod: period})
@@ -128,6 +129,7 @@ func TestVsyncTicksAtRequestedRate(t *testing.T) {
 
 // TestScrollEventsDelivered is the input half of the window contract: what a driver
 // injects is what the loop reads, in order, with nothing invented in between.
+// qc:BR-175
 func TestScrollEventsDelivered(t *testing.T) {
 	w, _ := newWindow(t, headless.Config{Scale: 1})
 	deltas := []int32{100, -40, 7}
@@ -157,6 +159,7 @@ func TestScrollEventsDelivered(t *testing.T) {
 // TestPresentWritesPNG checks the headless backend end to end, because a frame that
 // never leaves the process proves nothing: the pixels are decoded back out of the
 // file the run wrote.
+// qc:BR-175
 func TestPresentWritesPNG(t *testing.T) {
 	const (
 		w0, h0 = 8, 6
@@ -248,6 +251,7 @@ func TestScaleFactorHonored(t *testing.T) {
 // TestCloseIsIdempotentAndStopsTheClock is the shutdown half of the contract. A
 // vsync goroutine that survives Close keeps sending into a channel nobody reads,
 // which turns a clean exit into a blocked sender.
+// qc:BR-175
 func TestCloseIsIdempotentAndStopsTheClock(t *testing.T) {
 	w, clk := newWindow(t, headless.Config{Scale: 1, VsyncPeriod: time.Millisecond})
 	waitPending(t, clk)

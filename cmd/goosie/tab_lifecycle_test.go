@@ -38,7 +38,7 @@ func TestIndependentTabNavigation(t *testing.T) {
 // landing on top of the one they are waiting for. That only matters inside
 // framePath.applyNavResult, which is where the result reaches the tab, the toolbar, and
 // the scheduler, so it is tested there rather than by assigning the field.
-// qc:BR-014
+// qc:BR-014 BR-170
 func TestStaleNavResultCannotPaintOverTheCurrentOne(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -69,6 +69,7 @@ func TestStaleNavResultCannotPaintOverTheCurrentOne(t *testing.T) {
 
 // An error from a navigation the user already replaced is not an error the user should
 // see: they moved on, and the load they are waiting on may still succeed.
+// qc:BR-170
 func TestStaleNavErrorDoesNotSurface(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -210,7 +211,7 @@ func TestBackgroundTabResultLeavesTheForegroundAlone(t *testing.T) {
 // under completion reorder: the background tab finishing first must not
 // disturb the foreground, and the foreground finishing later lands exactly
 // once with its own history intact.
-// qc:BR-028
+// qc:BR-028 BR-171
 func TestOutOfOrderResultsLandOnTheirOwnTabs(t *testing.T) {
 	f := newNavTestPath(t)
 	foreground := f.tabMgr.Active()

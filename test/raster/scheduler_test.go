@@ -387,6 +387,7 @@ func TestBudgetPlateaus(t *testing.T) {
 // Eviction is only a win if the tile comes back. A user scrolling up must find
 // content re-requested rather than permanently blank, which is the difference
 // between a cache that shrinks and a cache that loses the page.
+// qc:BR-174
 func TestEvictedTileIsRequeued(t *testing.T) {
 	const (
 		cols, rows = 2, 16
@@ -439,6 +440,7 @@ func TestEvictedTileIsRequeued(t *testing.T) {
 
 // A tile that cannot be drawn is a blank rectangle with a counter - not a crash, and
 // not a job the scheduler re-asks for every vsync for the rest of the session.
+// qc:BR-172
 func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -514,6 +516,7 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 // FrameWork.Failed is the headless guard's input. A tile the scheduler has given
 // up on must be reported on the frame that still shows it, because the only other
 // outcome is a PNG with a silent hole in it.
+// qc:BR-172
 func TestVisibleFailedTileIsReportedInFrameWork(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -595,6 +598,7 @@ func TestFailedTileOutsideViewportIsNotReportedInFrameWork(t *testing.T) {
 // A scroll must cost the exposed band and nothing else. This is the claim behind
 // "damage keeps a frame near the budget instead of a full recompose", stated as a
 // pixel count so that it does not depend on a machine.
+// qc:BR-174
 func TestScrollDamagesOnlyTheExposedBand(t *testing.T) {
 	const (
 		cols, rows = 4, 12
@@ -926,6 +930,7 @@ func containsCoord(list []frame.TileCoord, c frame.TileCoord) bool {
 // selection repaint relies on: after a version bump with a small dirty rect,
 // the next frame re-rasterizes (about) the dirty tiles and reuses the rest,
 // instead of the whole visible set.
+// qc:BR-174
 func TestSameLayerContentUpdateReusesTiles(t *testing.T) {
 	h := newSched(t, 4, 4, 32, frame.Size{W: 512, H: 512}, raster.Pref{PrefetchRows: 0})
 	h.warm(t)

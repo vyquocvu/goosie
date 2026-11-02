@@ -360,7 +360,7 @@ func TestJourneyReloadPageWithQueryFragment(t *testing.T) {
 	})
 }
 
-// qc:BR-021
+// qc:BR-021 BR-170
 func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 	req1Started := make(chan struct{}, 1)
 	req1Release := make(chan struct{})

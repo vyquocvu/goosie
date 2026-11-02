@@ -589,7 +589,7 @@ func TestToggleBookmarkPersistsActivePage(t *testing.T) {
 // finishes after its tab was closed is dropped: the closed tab is not put
 // back, the active tab keeps its identity and document, and a stale serial
 // for a live tab cannot replace what the user is reading.
-// qc:BR-037
+// qc:BR-037 BR-170
 func TestApplyNavResultForClosedTabDoesNotResurrect(t *testing.T) {
 	f := newNavTestPath(t)
 	keep := f.tabMgr.Active()
