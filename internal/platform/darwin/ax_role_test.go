@@ -15,4 +15,7 @@ func TestAXRoleCodeSelectRoles(t *testing.T) {
 	if got := axRoleCode(ax.RoleOption); got != 13 {
 		t.Fatalf("RoleOption maps to %d, want GOOSIE_AX_OPTION (13)", got)
 	}
+	if got := axRoleCode(ax.RoleHeading); got != 14 {
+		t.Fatalf("RoleHeading maps to %d, want GOOSIE_AX_HEADING (14)", got)
+	}
 }

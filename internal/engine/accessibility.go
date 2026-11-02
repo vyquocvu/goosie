@@ -318,6 +318,16 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		}
 		val := n.GetAttribute("value")
 		return emit(ax.RoleMeter, label, val, ""), axBubble{}
+	case dom.AtomH1, dom.AtomH2, dom.AtomH3, dom.AtomH4, dom.AtomH5, dom.AtomH6:
+		if !visible {
+			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
+		}
+		// A heading names its whole subtree, including text inside links and
+		// spans that emit their own nodes.
+		if text := optionTextValue(n.TextContent()); text != "" {
+			label = text
+		}
+		return emit(ax.RoleHeading, label, "", ""), axBubble{}
 	case dom.AtomA:
 		if href := n.GetAttribute("href"); href != "" && visible {
 			return emit(ax.RoleLink, label, "", href), axBubble{}
@@ -445,9 +455,11 @@ func elementInternalsAXRole(role string) (ax.Role, string, bool) {
 			return ax.RoleComboBox, token, true
 		case "option":
 			return ax.RoleOption, token, true
+		case "heading":
+			return ax.RoleHeading, token, true
 		case "directory":
 			return ax.RoleGroup, "list", true
-		case "alert", "alertdialog", "application", "article", "banner", "blockquote", "caption", "cell", "checkbox", "code", "columnheader", "complementary", "contentinfo", "definition", "deletion", "dialog", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "heading", "insertion", "list", "listbox", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "navigation", "none", "note", "presentation", "paragraph", "radio", "radiogroup", "range", "row", "rowgroup", "rowheader", "scrollbar", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem", "window":
+		case "alert", "alertdialog", "application", "article", "banner", "blockquote", "caption", "cell", "checkbox", "code", "columnheader", "complementary", "contentinfo", "definition", "deletion", "dialog", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "insertion", "list", "listbox", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "navigation", "none", "note", "presentation", "paragraph", "radio", "radiogroup", "range", "row", "rowgroup", "rowheader", "scrollbar", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem", "window":
 			return ax.RoleGroup, token, true
 		}
 	}

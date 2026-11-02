@@ -2825,14 +2825,22 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "test/engine/accessibility_test.go:TestAccessibilityButtonLabel",
+      "test/engine/accessibility_test.go:TestAccessibilityContentRoleTokensAndARIAName",
+      "test/engine/accessibility_test.go:TestAccessibilityDocumentRoot",
+      "test/engine/accessibility_test.go:TestAccessibilityHeadingRolesAndLabels",
+      "test/engine/accessibility_test.go:TestAccessibilityImageAlt",
+      "test/engine/accessibility_test.go:TestAccessibilityLinkRoleAndHref",
       "test/engine/accessibility_test.go:TestAccessibilitySelectComboBoxAndOptions",
       "test/engine/accessibility_test.go:TestAccessibilitySelectTracksMoveSelect",
       "test/engine/accessibility_test.go:TestAccessibilitySelectValueMatchesSubmittedFormValue",
+      "test/engine/accessibility_test.go:TestAccessibilityTextFieldValue",
+      "test/engine/accessibility_test.go:TestAccessibilityTextareaValue",
       "test/engine/option_value_test.go:TestAccessibilityOptionLabelAndValueShareNormalization"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-140",

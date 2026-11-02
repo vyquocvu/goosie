@@ -22,6 +22,7 @@ const (
 	RoleTab
 	RoleComboBox
 	RoleOption
+	RoleHeading
 )
 
 func (r Role) String() string {
@@ -54,6 +55,8 @@ func (r Role) String() string {
 		return "combobox"
 	case RoleOption:
 		return "option"
+	case RoleHeading:
+		return "heading"
 	default:
 		return "generic"
 	}

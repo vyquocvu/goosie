@@ -29,6 +29,7 @@ func axFlatten(nodes []ax.Node) []ax.Node {
 	return out
 }
 
+// qc:BR-139
 func TestAccessibilityDocumentRoot(t *testing.T) {
 	s := newFocusSession(t, `<html><body><p>hi</p></body></html>`)
 	tree := s.AccessibilityTree()
@@ -51,6 +52,7 @@ const axRichHTML = `<html><body style="margin: 0;">` +
 	`<textarea id="area">line one</textarea>` +
 	`</body></html>`
 
+// qc:BR-139
 func TestAccessibilityLinkRoleAndHref(t *testing.T) {
 	s := newFocusSession(t, axRichHTML)
 	link := axFind(s.AccessibilityTree(), ax.RoleLink, "goosie docs")
@@ -65,6 +67,7 @@ func TestAccessibilityLinkRoleAndHref(t *testing.T) {
 	}
 }
 
+// qc:BR-139
 func TestAccessibilityImageAlt(t *testing.T) {
 	s := newFocusSession(t, axRichHTML)
 	img := axFind(s.AccessibilityTree(), ax.RoleImage, "Go logo")
@@ -76,6 +79,7 @@ func TestAccessibilityImageAlt(t *testing.T) {
 	}
 }
 
+// qc:BR-139
 func TestAccessibilityButtonLabel(t *testing.T) {
 	s := newFocusSession(t, axRichHTML)
 	btn := axFind(s.AccessibilityTree(), ax.RoleButton, "Click me")
@@ -84,6 +88,7 @@ func TestAccessibilityButtonLabel(t *testing.T) {
 	}
 }
 
+// qc:BR-139
 func TestAccessibilityTextFieldValue(t *testing.T) {
 	s := newFocusSession(t, axRichHTML)
 	field := axFind(s.AccessibilityTree(), ax.RoleTextField, "Your name")
@@ -172,6 +177,7 @@ func TestAccessibilityEmptyCustomElementWithoutLayout(t *testing.T) {
 	t.Fatalf("empty custom element missing from accessibility tree: %+v", s.AccessibilityTree())
 }
 
+// qc:BR-139
 func TestAccessibilityContentRoleTokensAndARIAName(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body>
 		<span id="name">Referenced name</span>
@@ -188,6 +194,7 @@ func TestAccessibilityContentRoleTokensAndARIAName(t *testing.T) {
 	}
 }
 
+// qc:BR-139
 func TestAccessibilityTextareaValue(t *testing.T) {
 	s := newFocusSession(t, axRichHTML)
 	for _, n := range axFlatten(s.AccessibilityTree()) {
@@ -196,6 +203,45 @@ func TestAccessibilityTextareaValue(t *testing.T) {
 		}
 	}
 	t.Fatalf("textarea node with value %q not found", "line one")
+}
+
+// qc:BR-139
+func TestAccessibilityHeadingRolesAndLabels(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body style="margin: 0;">
+<h1 id="h1">Main title</h1>
+<h2 id="h2">Section <a href="/details">details</a></h2>
+<h3 id="h3" aria-label="Custom heading">Ignored text</h3>
+<div id="h4" role="heading" aria-level="4">ARIA heading</div>
+</body></html>`)
+	tree := s.AccessibilityTree()
+	main := axFind(tree, ax.RoleHeading, "Main title")
+	if main == nil || main.ID != "h1" || main.RoleName != "heading" {
+		t.Fatalf("h1 heading missing: %+v", axFlatten(tree))
+	}
+	section := axFind(tree, ax.RoleHeading, "Section details")
+	if section == nil || section.ID != "h2" {
+		t.Fatalf("h2 heading missing: %+v", axFlatten(tree))
+	}
+	if link := axFind(section.Children, ax.RoleLink, "details"); link == nil || link.Href != "/details" {
+		t.Fatalf("heading link child = %+v, want details -> /details", section.Children)
+	}
+	custom := axFind(tree, ax.RoleHeading, "Custom heading")
+	if custom == nil || custom.ID != "h3" {
+		t.Fatalf("aria-label did not rename the heading: %+v", axFlatten(tree))
+	}
+	aria := axFind(tree, ax.RoleHeading, "ARIA heading")
+	if aria == nil || aria.ID != "h4" {
+		t.Fatalf("role=heading element missing: %+v", axFlatten(tree))
+	}
+	headings := 0
+	for _, n := range axFlatten(tree) {
+		if n.Role == ax.RoleHeading {
+			headings++
+		}
+	}
+	if headings != 4 {
+		t.Fatalf("heading nodes = %d, want 4: %+v", headings, axFlatten(tree))
+	}
 }
 
 func TestAccessibilityStaticTextParagraphs(t *testing.T) {
