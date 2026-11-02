@@ -12,6 +12,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
+// qc:BR-017
 // TestJourneyPostHistoryAsksBeforeResubmitting follows the browser rule for a
 // POST result: going back to it, forward to it, or reloading it must ask first,
 // because repeating the request can repeat a purchase or a message. Cancel has

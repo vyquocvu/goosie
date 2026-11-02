@@ -221,9 +221,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_test.go:TestJourneyBackForwardFiveNavigations",
+      "cmd/goosie/journey_post_history_test.go:TestJourneyPostHistoryAsksBeforeResubmitting",
       "test/toolbar/toolbar_test.go:TestHistoryBackForward"
     ],
     "enforced": true
