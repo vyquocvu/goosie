@@ -47,7 +47,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyURLWithPathQueryFragment"
     ],
@@ -101,7 +101,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyRedirectAndBack"
     ],
@@ -208,7 +208,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyAnchorNavigation"
     ],
@@ -275,7 +275,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyRefreshWithPendingResponse"
     ],
