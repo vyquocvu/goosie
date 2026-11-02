@@ -171,6 +171,23 @@ func (r *Runtime) setupShadowDOM() {
 	}
 }
 
+// isValidShadowHost reports whether attachShadow is allowed on node. The HTML
+// Standard restricts hosts to a fixed element list plus valid custom element
+// names; anything else must fail with NotSupportedError rather than leave a
+// half-attached root that querySelector and closed-mode checks disagree about.
+func isValidShadowHost(node *dom.Node) bool {
+	if node == nil || !node.Element() || node.Namespace != dom.NSHTML {
+		return false
+	}
+	switch node.Data {
+	case "article", "aside", "blockquote", "body", "div", "footer",
+		"h1", "h2", "h3", "h4", "h5", "h6", "header", "main", "nav", "p",
+		"section", "span":
+		return true
+	}
+	return dom.IsValidCustomElementName(node.Data)
+}
+
 // jsAttachShadow implements element.attachShadow(options).
 func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
@@ -178,40 +195,64 @@ func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 		return goja.Null()
 	}
 
+	if !isValidShadowHost(node) {
+		panic(r.domError("NotSupportedError", "Element does not support shadow roots"))
+	}
+
 	// Check if already has shadow root
 	if node.ShadowRoot != nil {
 		panic(r.domError("NotSupportedError", "Shadow root already exists"))
 	}
 
-	// Parse options
-	mode := "open"
+	// Parse options. mode is a required member, so omitting it is a TypeError.
+	var opts *goja.Object
+	if len(call.Arguments) >= 1 {
+		if value := call.Arguments[0]; !goja.IsUndefined(value) && !goja.IsNull(value) {
+			obj, ok := value.(*goja.Object)
+			if !ok {
+				panic(r.vm.NewTypeError("The options argument is not an object"))
+			}
+			opts = obj
+		}
+	}
+	if opts == nil {
+		panic(r.vm.NewTypeError("attachShadow requires an options argument"))
+	}
+
+	mode := ""
 	slotAssignment := "named"
 	clonable, delegatesFocus := false, false
 	var registry *CustomElementRegistry
 	registrySpecified := false
-	if len(call.Arguments) >= 1 {
-		if opts, ok := call.Argument(0).(*goja.Object); ok {
-			if value := opts.Get("mode"); value != nil && !goja.IsUndefined(value) {
-				mode = value.String()
+	{
+		modeValue := opts.Get("mode")
+		if modeValue == nil || goja.IsUndefined(modeValue) || goja.IsNull(modeValue) {
+			panic(r.vm.NewTypeError("attachShadow requires a mode"))
+		}
+		mode = modeValue.String()
+		if mode != "open" && mode != "closed" {
+			panic(r.vm.NewTypeError(`attachShadow mode must be "open" or "closed"`))
+		}
+		if value := opts.Get("slotAssignment"); value != nil && !goja.IsUndefined(value) {
+			slotAssignment = value.String()
+			if slotAssignment != "named" && slotAssignment != "manual" {
+				panic(r.vm.NewTypeError(`slotAssignment must be "named" or "manual"`))
 			}
-			if value := opts.Get("slotAssignment"); value != nil && !goja.IsUndefined(value) && value.String() == "manual" {
-				slotAssignment = "manual"
-			}
-			if value := opts.Get("clonable"); value != nil && !goja.IsUndefined(value) {
-				clonable = value.ToBoolean()
-			}
-			if value := opts.Get("delegatesFocus"); value != nil && !goja.IsUndefined(value) {
-				delegatesFocus = value.ToBoolean()
-			}
-			if value := opts.Get("customElementRegistry"); value != nil && !goja.IsUndefined(value) {
-				registrySpecified = true
-				if !goja.IsNull(value) {
-					registryObject, ok := value.(*goja.Object)
-					if !ok || r.customElementRegistryObjects[registryObject] == nil {
-						panic(r.vm.NewTypeError("The customElementRegistry option is not a CustomElementRegistry"))
-					}
-					registry = r.customElementRegistryObjects[registryObject]
+		}
+		if value := opts.Get("clonable"); value != nil && !goja.IsUndefined(value) {
+			clonable = value.ToBoolean()
+		}
+		if value := opts.Get("delegatesFocus"); value != nil && !goja.IsUndefined(value) {
+			delegatesFocus = value.ToBoolean()
+		}
+		if value := opts.Get("customElementRegistry"); value != nil && !goja.IsUndefined(value) {
+			registrySpecified = true
+			if !goja.IsNull(value) {
+				registryObject, ok := value.(*goja.Object)
+				if !ok || r.customElementRegistryObjects[registryObject] == nil {
+					panic(r.vm.NewTypeError("The customElementRegistry option is not a CustomElementRegistry"))
 				}
+				registry = r.customElementRegistryObjects[registryObject]
 			}
 		}
 	}

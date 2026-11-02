@@ -1820,8 +1820,11 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/shadow_dom_test.go:TestShadowDOMAndCustomElementLifecycleStayScoped",
+      "test/js/shadow_dom_validation_test.go:TestAttachShadowValidatesHostAndOptions"
+    ],
     "enforced": false
   },
   {
