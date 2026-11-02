@@ -14,13 +14,15 @@ import (
 
 // clearDataRequest is the set of browsing-data scopes the settings page asked
 // to clear. History has a time range because the store already supports one;
-// cookies, the response cache, and the saved session are all-or-nothing.
+// cookies, local storage, the response cache, and the saved session are all
+// all-or-nothing.
 type clearDataRequest struct {
 	History      bool
 	HistoryScope string
 	Cookies      bool
 	Cache        bool
 	Session      bool
+	Storage      bool
 }
 
 func clearDataRequestFromValues(values url.Values) clearDataRequest {
@@ -30,6 +32,7 @@ func clearDataRequestFromValues(values url.Values) clearDataRequest {
 		Cookies:      values.Get("cookies") == "1",
 		Cache:        values.Get("cache") == "1",
 		Session:      values.Get("session") == "1",
+		Storage:      values.Get("storage") == "1",
 	}
 	switch req.HistoryScope {
 	case "hour", "today", "all":
@@ -40,7 +43,7 @@ func clearDataRequestFromValues(values url.Values) clearDataRequest {
 }
 
 func (r clearDataRequest) any() bool {
-	return r.History || r.Cookies || r.Cache || r.Session
+	return r.History || r.Cookies || r.Cache || r.Session || r.Storage
 }
 
 func (r clearDataRequest) historyScopeLabel() string {
@@ -61,6 +64,9 @@ func (r clearDataRequest) labels() []string {
 	}
 	if r.Cookies {
 		labels = append(labels, "cookies for all sites")
+	}
+	if r.Storage {
+		labels = append(labels, "local storage for all sites")
 	}
 	if r.Cache {
 		labels = append(labels, "cached page resources")
@@ -139,6 +145,7 @@ func (f *framePath) buildPrivacySettingsCard(values url.Values) string {
         </select>
       </div>
       <div style="margin-bottom:12px;"><label for="clear-cookies"><input id="clear-cookies" type="checkbox" name="cookies" value="1"> Cookies for all sites</label></div>
+      <div style="margin-bottom:12px;"><label for="clear-storage"><input id="clear-storage" type="checkbox" name="storage" value="1"> Local storage for all sites</label></div>
       <div style="margin-bottom:12px;"><label for="clear-cache"><input id="clear-cache" type="checkbox" name="cache" value="1"> Cached page resources</label></div>
       <div style="margin-bottom:12px;"><label for="clear-session"><input id="clear-session" type="checkbox" name="session" value="1"> Saved tabs and the crash-recovery journal</label></div>
       <p style="color:#5f6368;font-size:13px;">Selected data is removed from memory and from this profile's files. Bookmarks and settings are kept.</p>
@@ -266,6 +273,9 @@ func privacyConfirmHTML(req clearDataRequest) string {
 	if req.Cookies {
 		b.WriteString(`<input type="hidden" name="cookies" value="1">`)
 	}
+	if req.Storage {
+		b.WriteString(`<input type="hidden" name="storage" value="1">`)
+	}
 	if req.Cache {
 		b.WriteString(`<input type="hidden" name="cache" value="1">`)
 	}
@@ -319,6 +329,22 @@ func (f *framePath) clearProfileData(req clearDataRequest) (removed, problems []
 				}
 			} else {
 				removed = append(removed, "cookies")
+			}
+		}
+	}
+
+	if req.Storage {
+		switch {
+		case f.config.private:
+			problems = append(problems, "private sessions do not store profile site data")
+		case f.storage == nil:
+			problems = append(problems, "local storage is unavailable in this session")
+		default:
+			origins, files, err := f.storage.ClearAllLocalStorage()
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("local storage was cleared in memory but some profile files could not be removed (%v)", err))
+			} else {
+				removed = append(removed, fmt.Sprintf("local storage (%d origins, %d files)", origins, files))
 			}
 		}
 	}

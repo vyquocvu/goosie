@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/history"
+	"github.com/vyquocvu/goosie/internal/js"
 	gonet "github.com/vyquocvu/goosie/internal/net"
 	"github.com/vyquocvu/goosie/internal/session"
 )
@@ -31,6 +32,7 @@ func newPrivacyTestPath(t *testing.T) (*framePath, string) {
 	}
 	f.client = gonet.DefaultClient()
 	t.Cleanup(func() { _ = f.client.Close() })
+	f.storage = js.NewOriginStorageRegistry(filepath.Join(dir, "storage"), false)
 	return f, dir
 }
 
@@ -58,8 +60,10 @@ func TestSettingsPrivacyCardListsSupportedScopes(t *testing.T) {
 		"Cookies for all sites",
 		"Cached page resources",
 		"Saved tabs and the crash-recovery journal",
+		"Local storage for all sites",
 		"Bookmarks and settings are kept",
 		`name="action" value="clear-data"`,
+		`name="storage" value="1"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("settings page missing %q", want)
@@ -85,6 +89,97 @@ func TestSettingsClearDataWaitsForConfirmation(t *testing.T) {
 	}
 	if got := len(f.history.Entries()); got != 1 {
 		t.Fatalf("history entries after unconfirmed clear = %d, want 1", got)
+	}
+}
+
+// qc:BR-058
+func TestSettingsClearLocalStorageWaitsForConfirmation(t *testing.T) {
+	f, dir := newPrivacyTestPath(t)
+	origin := "https://site.example:443"
+	f.storage.SetLocalStorageItem(origin, "token", "secret")
+
+	_, body := f.buildInternalPageHTML("goosie://settings?action=clear-data&storage=1")
+	if !strings.Contains(body, "Clear selected browsing data?") {
+		t.Fatalf("localStorage clear did not ask for confirmation:\n%s", body)
+	}
+	if !strings.Contains(body, "local storage for all sites") {
+		t.Fatalf("confirmation does not name localStorage as a scope:\n%s", body)
+	}
+	if !strings.Contains(body, `name="storage" value="1"`) {
+		t.Fatalf("confirmation does not carry the storage scope into the second request:\n%s", body)
+	}
+	if got := len(f.storage.DumpLocalStorage(origin)); got != 1 {
+		t.Fatalf("localStorage entries after unconfirmed clear = %d, want 1", got)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "storage", "*.json")); len(files) != 1 {
+		t.Fatalf("profile storage files after unconfirmed clear = %v, want 1", files)
+	}
+}
+
+// qc:BR-058
+func TestSettingsClearDataRemovesLocalStorage(t *testing.T) {
+	f, dir := newPrivacyTestPath(t)
+	origins := []string{"https://a.example:443", "https://b.example:443"}
+	for i, origin := range origins {
+		f.storage.SetLocalStorageItem(origin, "key", []string{"one", "two"}[i])
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "storage", "*.json")); len(files) != 2 {
+		t.Fatalf("profile storage files before clear = %v, want 2", files)
+	}
+	cookieURL, _ := url.Parse("https://cookie.example/")
+	f.client.Jar().Store(cookieURL, []string{"sid=abc; Path=/; Max-Age=3600"})
+
+	_, body := f.buildInternalPageHTML("goosie://settings?action=clear-data&confirm=1&storage=1")
+	if !strings.Contains(body, "Cleared:") || !strings.Contains(body, "local storage") {
+		t.Fatalf("clear did not report localStorage as cleared:\n%s", body)
+	}
+
+	for _, origin := range origins {
+		if got := f.storage.DumpLocalStorage(origin); len(got) != 0 {
+			t.Fatalf("localStorage for %s after clear = %+v, want empty", origin, got)
+		}
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "storage", "*.json")); len(files) != 0 {
+		t.Fatalf("profile storage files remain after clear: %v", files)
+	}
+	fresh := js.NewOriginStorageRegistry(filepath.Join(dir, "storage"), false)
+	for _, origin := range origins {
+		if got := fresh.DumpLocalStorage(origin); len(got) != 0 {
+			t.Fatalf("a restarted profile still sees %+v for %s", got, origin)
+		}
+	}
+	if got := f.client.Jar().AllCookies(); len(got) != 1 {
+		t.Fatalf("cookies after a localStorage-only clear = %+v, want the untouched cookie", got)
+	}
+}
+
+// qc:BR-058
+func TestSettingsClearStorageLeavesPrivateProfileAlone(t *testing.T) {
+	f, dir := newPrivacyTestPath(t)
+	origin := "https://private.example:443"
+	f.storage.SetLocalStorageItem(origin, "token", "secret")
+	f.config.private = true
+
+	_, body := f.buildInternalPageHTML("goosie://settings?action=clear-data&confirm=1&storage=1")
+	if strings.Contains(body, "Cleared:") {
+		t.Fatalf("private settings page performed a clear:\n%s", body)
+	}
+	if !strings.Contains(body, "Private sessions keep browsing data in memory only") {
+		t.Fatalf("private settings page did not explain that nothing is stored:\n%s", body)
+	}
+
+	removed, problems := f.clearProfileData(clearDataRequest{Storage: true})
+	if len(removed) != 0 {
+		t.Fatalf("private clear reported removed = %v, want none", removed)
+	}
+	if len(problems) == 0 || !strings.Contains(strings.Join(problems, " "), "private") {
+		t.Fatalf("private clear problems = %v, want a private-session refusal", problems)
+	}
+	if got := len(f.storage.DumpLocalStorage(origin)); got != 1 {
+		t.Fatalf("localStorage entries after private clear = %d, want 1", got)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "storage", "*.json")); len(files) != 1 {
+		t.Fatalf("profile storage files after private clear = %v, want 1", files)
 	}
 }
 

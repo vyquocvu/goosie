@@ -2,6 +2,7 @@ package js
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -425,6 +426,59 @@ func (r *OriginStorageRegistry) ClearLocalStorage(origin string) {
 	if onChange != nil {
 		onChange()
 	}
+}
+
+// ClearAllLocalStorage drops every origin's localStorage. It clears the
+// in-memory stores and removes the profile's JSON files, including files for
+// origins this session never loaded, and returns how many stores and files it
+// erased. The stores stay live with their persistence hook attached, so a write
+// after the clear is saved again. An incognito registry never touches baseDir.
+func (r *OriginStorageRegistry) ClearAllLocalStorage() (origins, files int, err error) {
+	if r == nil {
+		return 0, 0, nil
+	}
+	r.mu.Lock()
+	stores := make([]*storageObj, 0, len(r.localStores))
+	for _, s := range r.localStores {
+		stores = append(stores, s)
+	}
+	baseDir := r.baseDir
+	incognito := r.incognito
+	r.mu.Unlock()
+
+	for _, s := range stores {
+		s.mu.Lock()
+		s.data = make(map[string]string)
+		s.order = nil
+		s.used = 0
+		s.mu.Unlock()
+	}
+	origins = len(stores)
+
+	if baseDir == "" || incognito {
+		return origins, 0, nil
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return origins, 0, nil
+		}
+		return origins, 0, err
+	}
+	var problems []error
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		if rmErr := os.Remove(filepath.Join(baseDir, e.Name())); rmErr != nil {
+			if !os.IsNotExist(rmErr) {
+				problems = append(problems, rmErr)
+			}
+			continue
+		}
+		files++
+	}
+	return origins, files, errors.Join(problems...)
 }
 
 // SetLocalStorageItem sets a key-value pair in localStorage for an origin.

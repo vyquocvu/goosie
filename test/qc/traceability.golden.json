@@ -703,12 +703,18 @@
     "status": "PASS",
     "tests": [
       "cmd/goosie/journey_privacy_test.go:TestJourneyClearCookiesForOneSite",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearDataRemovesLocalStorage",
       "cmd/goosie/privacy_settings_test.go:TestSettingsClearDataRemovesSelectedDataOnly",
       "cmd/goosie/privacy_settings_test.go:TestSettingsClearDataWaitsForConfirmation",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearLocalStorageWaitsForConfirmation",
       "cmd/goosie/privacy_settings_test.go:TestSettingsClearSiteCookiesRejectsUnknownSite",
       "cmd/goosie/privacy_settings_test.go:TestSettingsClearSiteCookiesRemovesOnlyThatSite",
       "cmd/goosie/privacy_settings_test.go:TestSettingsClearSiteCookiesWaitsForConfirmation",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearStorageLeavesPrivateProfileAlone",
       "cmd/goosie/privacy_settings_test.go:TestSettingsPrivacyCardListsCookiesBySite",
+      "test/js/storage_clear_all_test.go:TestClearAllLocalStorageClearsMemoryAndDisk",
+      "test/js/storage_clear_all_test.go:TestClearAllLocalStorageIncognitoLeavesProfileFiles",
+      "test/js/storage_clear_all_test.go:TestClearAllLocalStorageMissingDirectoryIsIdempotent",
       "test/net/cookie_inspector_test.go:TestCookieJarRemoveForDomainDeletesOnlyThatSite"
     ],
     "enforced": false
