@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -437,7 +438,9 @@ func TestHTTPRedirectValidation(t *testing.T) {
 	}
 	for _, count := range []int{10, 11} {
 		t.Run(fmt.Sprintf("hops=%d", count), func(t *testing.T) {
+			var hits atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
 				n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/"))
 				if n < count {
 					http.Redirect(w, r, fmt.Sprintf("/%d", n+1), http.StatusFound)
@@ -450,23 +453,49 @@ func TestHTTPRedirectValidation(t *testing.T) {
 			defer client.Close()
 			resp, err := client.Get(context.Background(), server.URL+"/0")
 			if count == 10 {
-				if err != nil || resp.URL != server.URL+"/10" {
+				if err != nil {
 					t.Fatalf("ten redirects should succeed: %v", err)
 				}
-			} else if err == nil {
-				t.Fatal("followed more than ten redirects")
+				if resp.URL != server.URL+"/10" {
+					t.Fatalf("final URL = %q, want %q", resp.URL, server.URL+"/10")
+				}
+				if string(resp.Body) != "done" {
+					t.Fatalf("final body = %q, want the last hop's body", resp.Body)
+				}
+				if got := hits.Load(); got != 11 {
+					t.Fatalf("server saw %d requests, want 11 (initial + ten redirects)", got)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("followed more than ten redirects")
+				}
+				if !strings.Contains(err.Error(), "too many redirects") {
+					t.Fatalf("error = %v, want the redirect limit", err)
+				}
+				if got := hits.Load(); got != 11 {
+					t.Fatalf("server saw %d requests, want the eleven before the limit stops the chain", got)
+				}
 			}
 		})
 	}
 	t.Run("loop", func(t *testing.T) {
+		var hits atomic.Int64
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
 			http.Redirect(w, r, "/loop", http.StatusFound)
 		}))
 		defer server.Close()
 		client := transport.DefaultClient()
 		defer client.Close()
-		if _, err := client.Get(context.Background(), server.URL); err == nil {
+		_, err := client.Get(context.Background(), server.URL)
+		if err == nil {
 			t.Fatal("redirect loop succeeded")
+		}
+		if !strings.Contains(err.Error(), "too many redirects") {
+			t.Fatalf("error = %v, want the redirect limit", err)
+		}
+		if got := hits.Load(); got != 11 {
+			t.Fatalf("loop server saw %d requests, want the chain bounded at 11", got)
 		}
 	})
 }
@@ -579,11 +608,14 @@ func TestFilePathTraversal(t *testing.T) {
 
 // qc:BR-011
 func TestHTTPSDowngradeRedirectRejected(t *testing.T) {
+	var plainHits, tlsHits atomic.Int64
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plainHits.Add(1)
 		_, _ = io.WriteString(w, "downgraded")
 	}))
 	defer plain.Close()
 	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tlsHits.Add(1)
 		http.Redirect(w, r, plain.URL, http.StatusFound)
 	}))
 	defer tlsSrv.Close()
@@ -597,6 +629,12 @@ func TestHTTPSDowngradeRedirectRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "refusing HTTPS-to-HTTP downgrade") {
 		t.Errorf("error = %v, want 'refusing HTTPS-to-HTTP downgrade'", err)
+	}
+	if got := tlsHits.Load(); got != 1 {
+		t.Fatalf("secure origin saw %d requests, want its one redirecting response", got)
+	}
+	if got := plainHits.Load(); got != 0 {
+		t.Fatalf("downgrade target saw %d requests, want none: the policy must stop before connecting", got)
 	}
 }
 
