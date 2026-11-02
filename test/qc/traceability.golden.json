@@ -3382,7 +3382,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "test/gatecheck/release_gate_test.go:TestReleaseGateDefaultListIsTheQCGate",
       "test/gatecheck/release_gate_test.go:TestReleaseGateFailsWhenOneCommandFails",
