@@ -10,6 +10,21 @@ function sha256File(p) {
   return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
 
+// Final observable state, evaluated identically on the Go side. It records the
+// focused element, which checkbox/radio controls are checked, and the URL
+// fragment so preventDefault navigation is visible as a state, not just a log.
+const STATE_FN = `(function(){
+  var a = document.activeElement;
+  var ids = ['cb1','cb2','r1','r2','r3'];
+  var checked = [];
+  for (var i = 0; i < ids.length; i++) {
+    var e = document.getElementById(ids[i]);
+    if (e && e.checked) checked.push(ids[i]);
+  }
+  var active = a ? (a.id ? a.id : a.tagName.toLowerCase()) : 'null';
+  return 'active=' + active + ';checked=' + checked.join('+') + ';hash=' + location.hash;
+})()`;
+
 async function main() {
   const launchConfig = { viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 };
 
@@ -33,6 +48,7 @@ async function main() {
   };
 
   const results = {};
+  const states = {};
 
   // 01-event-order: click the button
   {
@@ -40,6 +56,7 @@ async function main() {
     await page.goto('file://' + path.join(FIXTURES_DIR, '01-event-order.html'));
     await page.click('#btn');
     results['01-event-order'] = await page.evaluate(() => __log);
+    states['01-event-order'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
@@ -49,6 +66,7 @@ async function main() {
     await page.goto('file://' + path.join(FIXTURES_DIR, '02-stop-propagation.html'));
     await page.click('#btn');
     results['02-stop-propagation'] = await page.evaluate(() => __log);
+    states['02-stop-propagation'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
@@ -58,6 +76,7 @@ async function main() {
     await page.goto('file://' + path.join(FIXTURES_DIR, '03-multiple-listeners.html'));
     await page.click('#btn');
     results['03-multiple-listeners'] = await page.evaluate(() => __log);
+    states['03-multiple-listeners'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
@@ -70,6 +89,7 @@ async function main() {
     await page.click('#r1');
     await page.click('#r3');
     results['04-checkbox-radio'] = await page.evaluate(() => __log);
+    states['04-checkbox-radio'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
@@ -82,6 +102,7 @@ async function main() {
     await page.keyboard.press('Tab');
     await page.keyboard.press('Tab');
     results['05-focus-tab'] = await page.evaluate(() => __log);
+    states['05-focus-tab'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
@@ -92,6 +113,7 @@ async function main() {
     await page.click('#btn');
     await page.click('#link');
     results['06-prevent-default'] = await page.evaluate(() => __log);
+    states['06-prevent-default'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
@@ -105,14 +127,17 @@ async function main() {
     await page.keyboard.press('Tab');
     await page.keyboard.press('Tab');
     results['07-keyboard'] = await page.evaluate(() => __log);
+    states['07-keyboard'] = await page.evaluate(STATE_FN);
     await page.close();
   }
 
   await browser.close();
 
   fs.writeFileSync(path.join(OUTPUT_DIR, 'reference-events.json'), JSON.stringify(results, null, 2) + '\n');
+  fs.writeFileSync(path.join(OUTPUT_DIR, 'reference-state.json'), JSON.stringify(states, null, 2) + '\n');
   fs.writeFileSync(path.join(OUTPUT_DIR, 'reference-meta.json'), JSON.stringify(meta, null, 2) + '\n');
   console.log('Reference events written to', path.join(OUTPUT_DIR, 'reference-events.json'));
+  console.log('Reference state written to', path.join(OUTPUT_DIR, 'reference-state.json'));
   console.log('Reference meta written to', path.join(OUTPUT_DIR, 'reference-meta.json'));
   console.log(JSON.stringify(meta, null, 2));
   console.log(JSON.stringify(results, null, 2));

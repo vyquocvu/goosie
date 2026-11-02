@@ -1,0 +1,9 @@
+{
+  "01-event-order": "active=btn;checked=;hash=",
+  "02-stop-propagation": "active=btn;checked=;hash=",
+  "03-multiple-listeners": "active=btn;checked=;hash=",
+  "04-checkbox-radio": "active=r3;checked=cb1+r3;hash=",
+  "05-focus-tab": "active=d;checked=;hash=",
+  "06-prevent-default": "active=link;checked=;hash=",
+  "07-keyboard": "active=c;checked=;hash="
+}

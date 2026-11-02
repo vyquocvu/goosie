@@ -3333,8 +3333,16 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/parity_reference_test.go:TestParityRef_CheckboxRadio",
+      "test/engine/parity_reference_test.go:TestParityRef_EventOrder",
+      "test/engine/parity_reference_test.go:TestParityRef_FocusTab",
+      "test/engine/parity_reference_test.go:TestParityRef_Keyboard",
+      "test/engine/parity_reference_test.go:TestParityRef_MultipleListeners",
+      "test/engine/parity_reference_test.go:TestParityRef_PreventDefault",
+      "test/engine/parity_reference_test.go:TestParityRef_StopPropagation"
+    ],
     "enforced": false
   },
   {

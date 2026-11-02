@@ -56,21 +56,17 @@ func textSelectableControl(n *dom.Node) bool {
 	}
 }
 
-// clickFocusable reports whether a click on n should give it focus. It is wider
-// than controlEditable: a <select> has no text to edit, but Tab and
-// element.focus() already reach it, and refusing the click would leave the
-// keyboard selection path unreachable.
+// clickFocusable reports whether a click on n should give it focus. Pointer
+// focus follows the same focusable-area rules as element.focus(): text
+// controls, selects, contenteditable, and elements focusable by tabindex or by
+// their element type (buttons, links, summaries). Chromium focuses these on
+// mousedown, so refusing the click would leave the focus state — and the
+// interaction-parity final state — divergent.
 func clickFocusable(n *dom.Node) bool {
 	if n == nil || !n.Element() || dom.IsFormControlDisabled(n) {
 		return false
 	}
-	if dom.IsContentEditable(n) {
-		return true
-	}
-	if controlEditable(n) {
-		return true
-	}
-	return n.DataAtom == dom.AtomSelect
+	return programmaticallyFocusable(n)
 }
 
 // controlAtMatching walks the arena in reverse paint order for the box
