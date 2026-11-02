@@ -2339,7 +2339,11 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	if !SubmitterNoValidate(submitter) {
 		invalid := ValidateForm(form)
 		if len(invalid) > 0 {
+			// A blocked submission is the user interaction that promotes
+			// :invalid into :user-invalid for the offending controls.
+			form.UserInteracted = true
 			for _, control := range invalid {
+				control.UserInteracted = true
 				dom.DispatchEvent(control, dom.NewEvent("invalid", false, false))
 			}
 			s.setFocusedNodeLocked(invalid[0])
@@ -3185,11 +3189,13 @@ func (s *Session) HasPseudoClassRule(pseudo string) bool {
 	return false
 }
 
-// HasValidityClassRules reports whether an author sheet styles :valid or
-// :invalid. Those states follow a control's value without changing its box, so
-// a value edit must re-resolve styles even where layout is known to be stable.
+// HasValidityClassRules reports whether an author sheet styles a validity
+// pseudo-class. Those states follow a control's value and interaction history
+// without changing its box, so a value edit or a blocked submission must
+// re-resolve styles even where layout is known to be stable.
 func (s *Session) HasValidityClassRules() bool {
-	return s.HasPseudoClassRule("valid") || s.HasPseudoClassRule("invalid")
+	return s.HasPseudoClassRule("valid") || s.HasPseudoClassRule("invalid") ||
+		s.HasPseudoClassRule("user-valid") || s.HasPseudoClassRule("user-invalid")
 }
 
 // JSMutationSink returns a function suitable for js.Options.OnMutation that

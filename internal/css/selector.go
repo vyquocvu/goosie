@@ -1295,6 +1295,16 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 			return !formHasInvalidControl(n)
 		}
 		return isConstraintControl(n) && !constraintControlInvalid(n)
+	case "user-invalid":
+		if n.Data == "form" || n.Data == "fieldset" {
+			return n.UserInteracted && formHasInvalidControl(n)
+		}
+		return isConstraintControl(n) && n.UserInteracted && constraintControlInvalid(n)
+	case "user-valid":
+		if n.Data == "form" || n.Data == "fieldset" {
+			return n.UserInteracted && !formHasInvalidControl(n)
+		}
+		return isConstraintControl(n) && n.UserInteracted && !constraintControlInvalid(n)
 	case "in-range":
 		return constraintControlInRange(n, false)
 	case "out-of-range":
@@ -1419,10 +1429,9 @@ func constraintControlInvalid(n *dom.Node) bool {
 			return !checked
 		}
 	}
-	value := n.GetAttribute("value")
-	if n.Data == "textarea" {
-		value = n.TextContent()
-	}
+	// The constraint is about what the control currently holds, not the value
+	// content attribute, which is only the default after the user edits it.
+	value := n.InputControlValue()
 	if n.Data == "select" {
 		value = ""
 		for _, option := range dom.SelectOptions(n) {

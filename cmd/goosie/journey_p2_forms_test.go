@@ -732,3 +732,110 @@ line2</textarea>
 		t.Errorf("submission body = %q, want %q", gotBody, want)
 	}
 }
+
+// qc:BR-105
+// TestJourneyUserInvalidFollowsBlockedSubmit covers the user-facing validation
+// state: :invalid paints immediately, a blocked submission promotes the field
+// to :user-invalid, and correcting it flips the same field to :user-valid. The
+// pixels prove the host re-resolved styles at each transition rather than
+// reusing the previous computed style.
+func TestJourneyUserInvalidFollowsBlockedSubmit(t *testing.T) {
+	var reqMu sync.Mutex
+	var submitted int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/never" {
+			reqMu.Lock()
+			submitted++
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Sent</h1></body></html>`)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><html><head><style>
+input { width: 220px; height: 24px; padding: 0; border: 0; background-color: rgb(0, 0, 255); }
+input:invalid { background-color: rgb(255, 0, 0); }
+input:user-invalid { background-color: rgb(255, 165, 0); }
+input:user-valid { background-color: rgb(0, 128, 0); }
+</style></head><body>
+<form id="f" action="/never" method="GET">
+  <input type="email" id="mail" name="mail" required>
+  <button type="submit" id="send">Send</button>
+</form>
+</body></html>`)
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "required email control available in AX tree", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "mail")
+		return ok && browser.activeURL() == pageURL
+	})
+
+	snapshotPath := filepath.Join(t.TempDir(), "frame.png")
+	sample := func() (color.RGBA, bool) {
+		node, ok := findAXNode(browser.window.AccessibilityTree(), "mail")
+		if !ok {
+			return color.RGBA{}, false
+		}
+		if err := browser.window.WritePNG(snapshotPath); err != nil {
+			return color.RGBA{}, false
+		}
+		f, err := os.Open(snapshotPath)
+		if err != nil {
+			return color.RGBA{}, false
+		}
+		defer f.Close()
+		img, err := png.Decode(f)
+		if err != nil {
+			return color.RGBA{}, false
+		}
+		x := int(node.X1) - 6
+		y := int((node.Y0 + node.Y1) / 2)
+		r, g, b, a := img.At(x, y).RGBA()
+		return color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}, true
+	}
+	red := func(c color.RGBA) bool { return c.R >= 200 && c.G < 80 && c.B < 80 }
+	orange := func(c color.RGBA) bool { return c.R >= 200 && c.G >= 100 && c.G < 200 && c.B < 80 }
+	green := func(c color.RGBA) bool { return c.R < 80 && c.G >= 100 && c.B < 80 }
+
+	browser.waitFor(t, "the empty required field starts as :invalid", func() bool {
+		c, ok := sample()
+		return ok && red(c)
+	})
+
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "a blocked submit promotes the field to :user-invalid", func() bool {
+		c, ok := sample()
+		return ok && orange(c)
+	})
+	reqMu.Lock()
+	gotSubmitted := submitted
+	reqMu.Unlock()
+	if gotSubmitted != 0 {
+		t.Fatalf("the server received %d request(s) for an invalid form, want 0", gotSubmitted)
+	}
+	if got := browser.activeURL(); got != pageURL {
+		t.Fatalf("blocked submit navigated to %q, want to stay on %q", got, pageURL)
+	}
+
+	browser.clickNode(t, "mail")
+	for _, ch := range "a@b.co" {
+		browser.pressKey(t, ch)
+	}
+	browser.waitFor(t, "correcting the field flips it to :user-valid", func() bool {
+		c, ok := sample()
+		return ok && green(c)
+	})
+
+	// The form is now submittable, so the same button must navigate.
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "the corrected form submits", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
+		return ok && strings.HasPrefix(browser.activeURL(), server.URL+"/never")
+	})
+}

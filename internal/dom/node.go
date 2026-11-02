@@ -154,6 +154,11 @@ type Node struct {
 	OutputDefaultValueOverrideSet bool
 	// CustomValidityMessage stores the native form control custom error string.
 	CustomValidityMessage string
+	// UserInteracted records that the user has attempted to use this control or
+	// the form that owns it, which is what separates :user-invalid/:user-valid
+	// from :invalid/:valid. It travels with the document rather than in a
+	// process-wide registry.
+	UserInteracted bool
 	// PatternMismatch caches the latest native input pattern check for CSS
 	// constraint pseudo-classes, which depend on the same form-control state.
 	PatternMismatch bool
