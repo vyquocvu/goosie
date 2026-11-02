@@ -226,6 +226,59 @@ func validateForm(form *dom.Node, files FileSource) []*dom.Node {
 	return invalid
 }
 
+// constraintValidationMessage names the constraint that made n invalid, using
+// the strings browsers show in their validation bubble. The caller only passes
+// controls validateForm already rejected, so the fallback covers a required
+// control with no more specific wording.
+func constraintValidationMessage(n *dom.Node) string {
+	if n == nil || !n.Element() {
+		return ""
+	}
+	typ := ""
+	if n.DataAtom == dom.AtomInput {
+		typ = strings.ToLower(n.GetAttribute("type"))
+	}
+	if n.HasAttribute("required") {
+		missing := controlValue(n) == ""
+		switch typ {
+		case "checkbox":
+			missing = !n.InputChecked()
+		case "radio":
+			missing = !n.InputChecked()
+		case "file":
+			missing = true
+		case "":
+			if n.DataAtom == dom.AtomSelect {
+				missing = dom.SelectValueMissing(n)
+			}
+		}
+		if missing {
+			switch typ {
+			case "checkbox":
+				return "Please check this box if you want to proceed."
+			case "radio":
+				return "Please select one of these options."
+			case "file":
+				return "Please select a file."
+			}
+			if n.DataAtom == dom.AtomSelect {
+				return "Please select an item in the list."
+			}
+			return "Please fill out this field."
+		}
+	}
+	value := controlValue(n)
+	if typ == "email" && value != "" && !strings.Contains(value, "@") {
+		return "Please include an '@' in the email address."
+	}
+	if typ == "number" && value != "" {
+		if _, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err != nil {
+			return "Please enter a number."
+		}
+	}
+	return "Please fill out this field."
+}
+
 // isSuccessfulControl reports whether n is a successful control per HTML spec.
 // A successful control is one that is not disabled and has a name attribute.
 func isSuccessfulControl(n, form *dom.Node) bool {

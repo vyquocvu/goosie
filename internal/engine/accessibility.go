@@ -50,7 +50,27 @@ func (s *Session) accessibilityTreeLocked() []ax.Node {
 		doc.Children = append(doc.Children, root.Children...)
 	}
 	s.appendAccessibilityNodesWithoutLayout(&doc)
+	s.appendValidationBubbleAX(&doc)
 	return []ax.Node{doc}
+}
+
+// appendValidationBubbleAX exposes the blocked-submission message as static
+// text anchored to the offending control, so assistive technology and
+// automation can read the same constraint error the bubble paints.
+func (s *Session) appendValidationBubbleAX(doc *ax.Node) {
+	if s.validationAnchor == nil || s.validationMessage == "" {
+		return
+	}
+	node := ax.Node{
+		Role: ax.RoleStaticText, RoleName: ax.RoleStaticText.String(),
+		ID: "goosie.validation-message", DOMNodeID: uint64(s.validationAnchor.ID),
+		Label: s.validationMessage,
+	}
+	if obj := s.objectFor(s.validationAnchor); obj != nil {
+		x0, y0, x1, y1 := obj.BorderRect()
+		node.X0, node.Y0, node.X1, node.Y1 = x0, y0, x1, y1
+	}
+	doc.Children = append(doc.Children, node)
 }
 
 func (s *Session) appendAccessibilityNodesWithoutLayout(root *ax.Node) {

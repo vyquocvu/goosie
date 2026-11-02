@@ -202,6 +202,12 @@ type Session struct {
 	findMarks  []findMark
 	findActive int
 
+	// validationAnchor and validationMessage hold the constraint message a
+	// blocked submission is showing beside its first invalid control. The next
+	// user edit, click or successful submission dismisses it.
+	validationAnchor  *dom.Node
+	validationMessage string
+
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
@@ -2095,6 +2101,7 @@ func isSupportedImageType(typ string) bool {
 //
 // Returns true if an activatable control was found at the point.
 func (s *Session) ClickAt(x, y float32) bool {
+	s.dismissValidationBubble()
 	hitNode := s.nodeAt(x, y)
 	dismissed := s.dismissAutoPopoversExcept(hitNode)
 	if hitNode != nil && !hitNode.Element() {
@@ -2348,6 +2355,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	if form == nil {
 		return
 	}
+	s.clearValidationBubbleLocked()
 	if !SubmitterNoValidate(submitter) {
 		invalid := s.validateForm(form)
 		if len(invalid) > 0 {
@@ -2359,6 +2367,8 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 				dom.DispatchEvent(control, dom.NewEvent("invalid", false, false))
 			}
 			s.setFocusedNodeLocked(invalid[0])
+			s.validationAnchor = invalid[0]
+			s.validationMessage = constraintValidationMessage(invalid[0])
 			return
 		}
 	}
@@ -2632,6 +2642,19 @@ func (s *Session) ClearFind() {
 	defer s.opMu.Unlock()
 	s.findMarks = nil
 	s.findActive = 0
+}
+
+func (s *Session) clearValidationBubbleLocked() {
+	s.validationAnchor = nil
+	s.validationMessage = ""
+}
+
+// dismissValidationBubble clears the message on an early interaction path that
+// does not already hold opMu.
+func (s *Session) dismissValidationBubble() {
+	s.opMu.Lock()
+	s.clearValidationBubbleLocked()
+	s.opMu.Unlock()
 }
 
 // SelectionBounds returns the union of selected word boxes in document

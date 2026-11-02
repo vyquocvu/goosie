@@ -18,6 +18,8 @@ type Builder struct {
 	focus     focusState
 	selection map[*layout.Object]SelSpan
 	find      map[*layout.Object][]FindMark
+	// validation is the constraint message a blocked submission is showing.
+	validation *ValidationBubble
 	// scrollOffset queries the JS runtime for an element's current scroll
 	// offset along one axis. nil means no element scrolling is active.
 	scrollOffset func(obj *layout.Object, prop string) float64
@@ -85,4 +87,5 @@ func (b *Builder) SetScrollOffsetProvider(fn func(obj *layout.Object, prop strin
 // scrolled viewport passes the scroll offset as root.X/Y before calling Build.
 func (b *Builder) Build(root layout.ObjectID) {
 	b.paintBox(root, nil, 0, 1)
+	b.paintValidationBubble()
 }

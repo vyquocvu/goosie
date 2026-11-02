@@ -1151,6 +1151,12 @@ func (s *Session) Edit(action EditAction, r rune) bool {
 // EditWithShift applies a keyboard edit while preserving or extending the
 // focused text control's selection when Shift is held.
 func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
+	switch action {
+	case EditRune, EditEnter, EditBackspace, EditDelete, EditEscape:
+		// Any edit or the Escape dismissal is user intent that retires the
+		// validation bubble; a blocked submission may set a fresh one.
+		s.dismissValidationBubble()
+	}
 	if action == EditRune || action == EditEnter || action == EditBackspace || action == EditDelete || action == EditLeft || action == EditRight || action == EditHome || action == EditEnd {
 		// Contenteditable uses the document Selection rather than the form
 		// control caret maintained below. Run its insertion command outside the
@@ -2444,6 +2450,7 @@ func utf16Length(value string) int {
 // position, respecting maxlength and firing an "input" event.
 func (s *Session) InsertText(text string) bool {
 	s.opMu.Lock()
+	s.clearValidationBubbleLocked()
 	if dom.IsContentEditable(s.focus) {
 		s.opMu.Unlock()
 		return s.insertContentEditableText(text)
@@ -2829,6 +2836,7 @@ func SelectedOption(selectNode *dom.Node) *dom.Node {
 func (s *Session) ToggleControl(n *dom.Node) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	s.clearValidationBubbleLocked()
 	if n == nil || !n.Element() {
 		return false
 	}
