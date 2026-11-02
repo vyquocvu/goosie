@@ -1129,11 +1129,15 @@ func (r *Runtime) dispatchClickActivation(node *dom.Node, event *dom.Event) bool
 
 	allowed := r.dispatchWithWindowStep(node, event)
 	if allowed && node.Data == "input" && r.HasTransientUserActivation() {
-		switch strings.ToLower(strings.TrimSpace(node.GetAttribute("type"))) {
+		typ := strings.ToLower(strings.TrimSpace(node.GetAttribute("type")))
+		switch typ {
 		case "color", "date", "datetime-local", "file", "month", "time", "week":
 			// Activating a control with a picker consumes the current transient
 			// activation, even when this runtime has no native picker UI to open.
 			r.SetTransientUserActivation(false)
+		}
+		if typ == "file" {
+			r.requestFilePicker(node)
 		}
 	}
 	if !allowed {

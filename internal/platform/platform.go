@@ -77,6 +77,14 @@ type SavePathPicker interface {
 	ChooseSavePath(directory, filename string) (path string, chosen bool, err error)
 }
 
+// FilePicker is an optional window capability for <input type="file">. The
+// accept string is the control's accept attribute verbatim and multiple is its
+// multiple state. A headless window omits it, so rendering runs never block on
+// UI; the host then consumes the request without opening anything.
+type FilePicker interface {
+	ChooseFiles(accept string, multiple bool) (paths []string, chosen bool, err error)
+}
+
 // DroppedVsyncer is a window that can say how many pacing ticks it shed because nobody
 // was reading. A frame path that draws slower than the display asks is not an error and
 // is not a slow frame either - it is a skipped one - and a report that cannot tell the

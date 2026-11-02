@@ -44,25 +44,14 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	activated := tab.Session().ClickAt(dx, dy)
 	tab.Session().SetUserActivation(false)
 	if activated {
+		if f.serviceFilePicker(tab) {
+			return true
+		}
 		if sub, ok := tab.Session().PopSubmittedForm(); ok {
 			f.handleFormSubmission(tab, sub)
 			return true
 		}
-		sess := tab.Session()
-		if sess.CanDeferControlEditReflow() {
-			f.repaintTab(tab, frame.Rect{})
-			return true
-		}
-		var err error
-		if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") || sess.HasValidityClassRules() {
-			err = sess.RestyleAndReflow(float32(f.contentWidth()))
-		} else {
-			err = sess.Reflow(float32(f.contentWidth()))
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-		}
-		f.repaintTab(tab, frame.Rect{})
+		f.reflowAfterControlChange(tab)
 		return true
 	}
 
@@ -412,22 +401,14 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 					return true
 				}
 			}
+			if f.serviceFilePicker(tab) {
+				return true
+			}
 			if sub, ok := sess.PopSubmittedForm(); ok {
 				f.handleFormSubmission(tab, sub)
 				return true
 			}
-			if !sess.CanDeferControlEditReflow() {
-				var err error
-				if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") || sess.HasValidityClassRules() {
-					err = sess.RestyleAndReflow(float32(f.contentWidth()))
-				} else {
-					err = sess.Reflow(float32(f.contentWidth()))
-				}
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
-				}
-			}
-			f.repaintTab(tab, frame.Rect{})
+			f.reflowAfterControlChange(tab)
 			return true
 		}
 	}

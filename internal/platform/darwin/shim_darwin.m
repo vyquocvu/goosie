@@ -1545,3 +1545,73 @@ int GoosieChooseSavePath(GoosieWindow *gw, const char *directory,
 	}
 	return result;
 }
+
+int GoosieChooseFiles(GoosieWindow *gw, const char *accept, int multiple,
+	char **paths, int *count) {
+	if (paths) *paths = NULL;
+	if (count) *count = 0;
+	if (!gw || !paths || !count) return -1;
+	__block int result = 0;
+	void (^block)(void) = ^{
+		@autoreleasepool {
+			if (!gw->window || gw->quit) {
+				result = -1;
+				return;
+			}
+			NSOpenPanel *panel = [NSOpenPanel openPanel];
+			[panel setCanChooseFiles:YES];
+			[panel setCanChooseDirectories:NO];
+			[panel setAllowsMultipleSelection:(multiple != 0)];
+			if (accept && accept[0] != '\0') {
+				NSMutableArray<NSString *> *types = [NSMutableArray array];
+				NSString *value = [NSString stringWithUTF8String:accept];
+				for (NSString *token in [value componentsSeparatedByString:@","]) {
+					NSString *trimmed = [[token stringByTrimmingCharactersInSet:
+						[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+					if (trimmed.length == 0) continue;
+					// A MIME type is not an extension. Skipping it leaves the panel
+					// unfiltered rather than hiding files the page meant to allow.
+					if ([trimmed containsString:@"/"]) continue;
+					if ([trimmed hasPrefix:@"."]) trimmed = [trimmed substringFromIndex:1];
+					if (trimmed.length > 0) [types addObject:trimmed];
+				}
+				if (types.count > 0) [panel setAllowedFileTypes:types];
+			}
+			if ([panel runModal] != NSModalResponseOK) return;
+			NSArray<NSURL *> *urls = [panel URLs];
+			if (urls.count == 0) return;
+			size_t bytes = 0;
+			for (NSURL *url in urls) {
+				const char *path = [url fileSystemRepresentation];
+				if (path) bytes += strlen(path) + 1;
+			}
+			if (bytes == 0) {
+				result = -1;
+				return;
+			}
+			char *buffer = malloc(bytes);
+			if (!buffer) {
+				result = -1;
+				return;
+			}
+			char *cursor = buffer;
+			for (NSURL *url in urls) {
+				const char *path = [url fileSystemRepresentation];
+				if (!path) continue;
+				size_t length = strlen(path);
+				memcpy(cursor, path, length);
+				cursor[length] = '\0';
+				cursor += length + 1;
+			}
+			*paths = buffer;
+			*count = (int)urls.count;
+			result = 1;
+		}
+	};
+	if ([NSThread isMainThread]) {
+		block();
+	} else {
+		dispatch_sync(dispatch_get_main_queue(), block);
+	}
+	return result;
+}

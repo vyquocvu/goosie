@@ -98,6 +98,11 @@ type chromeWindow struct {
 	// click on a video's painted controls reaches the player instead of starting a
 	// text selection over it. It reports whether it handled the press.
 	onMediaControl func(contentX, contentY int32) bool
+
+	// filePicker overrides the platform window's picker. Tests install a fake
+	// here; production leaves it nil and the embedded window's capability is
+	// used when it has one.
+	filePicker platform.FilePicker
 }
 
 // setTick installs the host's per-vsync hook. It is safe after construction,
@@ -171,6 +176,20 @@ func (cw *chromeWindow) sc() int32 {
 		return 1
 	}
 	return cw.scale
+}
+
+// ChooseFiles forwards the optional file-picker capability of the platform
+// window. chromeWindow embeds surface.Window, and an interface method is not
+// promoted from the dynamic value, so the capability has to be forwarded by
+// name for framePath's type assertion to see it.
+func (cw *chromeWindow) ChooseFiles(accept string, multiple bool) ([]string, bool, error) {
+	if cw.filePicker != nil {
+		return cw.filePicker.ChooseFiles(accept, multiple)
+	}
+	if picker, ok := cw.Window.(platform.FilePicker); ok {
+		return picker.ChooseFiles(accept, multiple)
+	}
+	return nil, false, nil
 }
 
 // SetAccessibility preserves the document tree while adding the browser's

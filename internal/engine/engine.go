@@ -183,6 +183,11 @@ type Session struct {
 	rangePointerNode       *dom.Node
 	rangePointerMoved      bool
 
+	// pendingFilePicker is the file control whose native picker the host
+	// should open. The host drains it after the input that activated the
+	// control has been handled.
+	pendingFilePicker *dom.Node
+
 	// Text selection state. selActive and the two ends index the current
 	// arena's word list, so Reflow clears them the same rebuild that moves
 	// every word; a new session starts with nothing selected.
@@ -2182,6 +2187,10 @@ func (s *Session) runClickDefault(n *dom.Node) {
 		switch typ {
 		case "checkbox", "radio":
 			s.ToggleControl(n)
+		case "file":
+			if !dom.IsFormControlDisabled(n) {
+				s.queueFilePicker(n)
+			}
 		case "submit":
 			if form := FindForm(n); form != nil {
 				s.SubmitForm(form, n)

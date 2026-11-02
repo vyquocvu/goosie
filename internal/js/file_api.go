@@ -82,6 +82,56 @@ func (r *Runtime) SelectedFiles(node *dom.Node) []FileSelection {
 	return files
 }
 
+// SetSelectedFiles replaces the FileList of a file input with files chosen by
+// the host's picker. It reports whether node is a file control.
+func (r *Runtime) SetSelectedFiles(node *dom.Node, selections []FileSelection) bool {
+	if node == nil || node.Data != "input" || !strings.EqualFold(node.GetAttribute("type"), "file") {
+		return false
+	}
+	for _, selection := range selections {
+		if len(selection.Data) > maxFileBytes {
+			return false
+		}
+	}
+	files := make([]*goja.Object, 0, len(selections))
+	for _, selection := range selections {
+		files = append(files, r.makeBlob(nil, selection.Data,
+			normalizeMIMEType(selection.ContentType), true,
+			sanitizeFileName(selection.Name), timeNowMillis()))
+	}
+	if list := r.inputFileLists[node]; list != nil {
+		r.setFileListFiles(list, files)
+		return true
+	}
+	list := r.newFileList(files)
+	r.inputFileLists[node] = list
+	r.inputFiles[node] = append([]*goja.Object(nil), files...)
+	r.syncInputFileCount(node)
+	return true
+}
+
+// requestFilePicker records that script asked the host to open the picker for
+// this control. Only one request is kept: a picker is modal, so a newer request
+// replaces one that has not been serviced yet.
+func (r *Runtime) requestFilePicker(node *dom.Node) {
+	if node == nil {
+		return
+	}
+	r.filePickerMu.Lock()
+	r.filePickerRequest = node
+	r.filePickerMu.Unlock()
+}
+
+// TakeFilePickerRequest returns and clears the control whose picker script
+// asked the host to open.
+func (r *Runtime) TakeFilePickerRequest() (*dom.Node, bool) {
+	r.filePickerMu.Lock()
+	node := r.filePickerRequest
+	r.filePickerRequest = nil
+	r.filePickerMu.Unlock()
+	return node, node != nil
+}
+
 type fileReaderState struct {
 	reader      *goja.Object
 	readyState  int

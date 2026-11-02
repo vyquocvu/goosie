@@ -4531,8 +4531,12 @@ func (r *Runtime) showPicker(node *dom.Node, isSelect bool) {
 	if isSelect && !r.nodeIsRendered(node) {
 		panic(r.domError("NotSupportedError", "The select element is not being rendered"))
 	}
-	// The current host has no picker UI callback. These are the API preconditions
-	// and activation steps; native picker delivery remains unsupported.
+	// The host owns the picker UI. A file control hands it a request; every
+	// other picker type still has no host implementation, but the activation
+	// preconditions and the activation step are the same.
+	if !isSelect && inputType(node) == "file" {
+		r.requestFilePicker(node)
+	}
 	r.SetTransientUserActivation(false)
 }
 

@@ -86,7 +86,12 @@ func (f *framePath) pumpJS() bool {
 	if sess == nil {
 		return false
 	}
-	if !sess.PumpJS(float32(f.contentWidth())) {
+	changed := sess.PumpJS(float32(f.contentWidth()))
+	// showPicker() and HTMLElement.click() on a file control ask the host for a
+	// picker from inside a script turn, so the request is drained here rather
+	// than only on the input paths.
+	changed = f.serviceFilePicker(tab) || changed
+	if !changed {
 		return false
 	}
 	// A callback that ran past the deadline was stopped by the engine. Replace

@@ -678,6 +678,11 @@ type Runtime struct {
 	// accessors both return: one object, two names, as the standard has them.
 	locObj          *goja.Object
 	collectionProto *goja.Object
+
+	// filePickerRequest is the file control whose picker script asked the host
+	// to open. The host drains it after the turn that ran the script.
+	filePickerMu      sync.Mutex
+	filePickerRequest *dom.Node
 }
 
 type dataTransferItemRef struct {

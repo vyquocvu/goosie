@@ -154,7 +154,7 @@ func IsSpaceActivatable(n *dom.Node) bool {
 		return true
 	case "input":
 		switch strings.ToLower(n.GetAttribute("type")) {
-		case "button", "submit", "reset", "checkbox", "radio", "image":
+		case "button", "submit", "reset", "checkbox", "radio", "image", "file":
 			return true
 		}
 	}

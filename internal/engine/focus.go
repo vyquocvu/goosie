@@ -2730,7 +2730,7 @@ func IsActivatable(n *dom.Node) bool {
 	case "input":
 		typ := strings.ToLower(n.GetAttribute("type"))
 		switch typ {
-		case "submit", "reset", "button", "image", "checkbox", "radio":
+		case "submit", "reset", "button", "image", "checkbox", "radio", "file":
 			return true
 		}
 	}
