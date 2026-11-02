@@ -2829,10 +2829,17 @@
     "id": "BR-141",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "UNIT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/theme_test.go:TestThemeChromeSurfacesStayInSync",
+      "internal/tabs/theme_test.go:TestTabStripThemeDefaultsToLight",
+      "internal/tabs/theme_test.go:TestTabStripThemePaintsMatchingChrome",
+      "internal/toolbar/theme_test.go:TestToolbarThemeDefaultsToLight",
+      "internal/toolbar/theme_test.go:TestToolbarThemePaintsDarkAndHighContrastChrome"
+    ],
     "enforced": false
   },
   {

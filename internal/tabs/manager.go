@@ -1,6 +1,7 @@
 package tabs
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/vyquocvu/goosie/internal/toolbar"
@@ -35,6 +36,31 @@ type TabManager struct {
 	dragID uint64
 	dragX  int32
 	dragOn bool
+	// theme is the appearance palette the strip paints with; empty is light.
+	theme string
+}
+
+// SetTheme selects the tab strip's appearance palette. Unknown names fall back
+// to light, matching the toolbar and content theme resolvers.
+func (m *TabManager) SetTheme(theme string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "dark", "high-contrast":
+		m.theme = strings.ToLower(strings.TrimSpace(theme))
+	default:
+		m.theme = "light"
+	}
+}
+
+// Theme reports the active appearance palette name.
+func (m *TabManager) Theme() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.theme == "" {
+		return "light"
+	}
+	return m.theme
 }
 
 func NewManager(onCloseLast func()) *TabManager {

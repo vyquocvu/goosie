@@ -2,6 +2,7 @@ package tabs
 
 import (
 	"math"
+	"strings"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -27,6 +28,60 @@ var (
 	tabTextGap   = int32(6)
 )
 
+// tabPalette is the color set one appearance theme paints the strip with. The
+// active tab background deliberately matches the toolbar background so the two
+// chrome surfaces read as one.
+type tabPalette struct {
+	barBg      frame.Color
+	activeBg   frame.Color
+	hairline   frame.Color
+	text       frame.Color
+	textActive frame.Color
+	newTab     frame.Color
+	close      frame.Color
+}
+
+var lightTabPalette = tabPalette{
+	barBg:      tabBarBg,
+	activeBg:   activeTabBg,
+	hairline:   tabHairline,
+	text:       tabTextColor,
+	textActive: tabTextActive,
+	newTab:     newTabBtnColor,
+	close:      closeBtnColor,
+}
+
+var darkTabPalette = tabPalette{
+	barBg:      frame.RGB(32, 32, 33),
+	activeBg:   frame.RGB(24, 24, 24),
+	hairline:   frame.RGB(51, 51, 55),
+	text:       frame.RGB(176, 176, 176),
+	textActive: frame.RGB(240, 240, 240),
+	newTab:     frame.RGB(192, 192, 192),
+	close:      frame.RGB(160, 160, 160),
+}
+
+var highContrastTabPalette = tabPalette{
+	barBg:      frame.RGB(0, 0, 0),
+	activeBg:   frame.RGB(0, 0, 0),
+	hairline:   frame.RGB(255, 255, 255),
+	text:       frame.RGB(255, 255, 255),
+	textActive: frame.RGB(255, 255, 255),
+	newTab:     frame.RGB(255, 255, 255),
+	close:      frame.RGB(255, 255, 255),
+}
+
+func tabPaletteFor(theme string) tabPalette {
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "dark":
+		return darkTabPalette
+	case "high-contrast":
+		return highContrastTabPalette
+	default:
+		return lightTabPalette
+	}
+}
+
 // DrawTabBar renders the tab bar onto the top of buf. Layout is computed in
 // logical pixels and multiplied by scale, so a HiDPI window gets a chrome of
 // the same physical size a 1x window shows, not a shrunken one.
@@ -39,8 +94,9 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 	}
 	w := int32(buf.W) / scale
 	barH := int32(TabBarHeight) * scale
-	buf.FillRect(frame.Rect4(0, 0, int32(buf.W), barH), tabBarBg, nil)
-	buf.FillRect(frame.Rect4(0, barH-scale, int32(buf.W), barH), tabHairline, nil)
+	p := tabPaletteFor(mgr.Theme())
+	buf.FillRect(frame.Rect4(0, 0, int32(buf.W), barH), p.barBg, nil)
+	buf.FillRect(frame.Rect4(0, barH-scale, int32(buf.W), barH), p.hairline, nil)
 
 	tabsList := mgr.Tabs()
 	activeIdx := mgr.ActiveIndex()
@@ -58,7 +114,7 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 		if r.X1 <= 0 || r.X0 >= int32(buf.W) {
 			continue
 		}
-		drawTabBody(buf, tab, lr, r, i == activeIdx, fonts, scale)
+		drawTabBody(buf, tab, lr, r, i == activeIdx, fonts, scale, p)
 	}
 
 	// The dragged tab follows the pointer, clamped to the strip, with an
@@ -75,21 +131,21 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 		idx := DropIndexAt(dx, n, w, scrollOffset)
 		bx := int32(LeftMargin) + int32(idx)*(tw+int32(TabGap)) - scrollOffset
 		lx := bx * scale
-		buf.FillRect(frame.Rect4(lx-1*scale, 0, lx+1*scale, int32(TabBarHeight)*scale), tabTextActive, nil)
+		buf.FillRect(frame.Rect4(lx-1*scale, 0, lx+1*scale, int32(TabBarHeight)*scale), p.textActive, nil)
 		for _, tab := range tabsList {
 			if tab.ID() != dragID {
 				continue
 			}
 			lr := frame.Rect4(dx-tw/2, 0, dx+tw-tw/2, TabBarHeight)
 			r := scaleRect(lr, scale)
-			drawTabBody(buf, tab, lr, r, true, fonts, scale)
+			drawTabBody(buf, tab, lr, r, true, fonts, scale, p)
 		}
 	}
 
 	if len(tabsList) > 0 {
 		btnR := scaleRect(NewTabButtonRect(int32(len(tabsList)), scrollOffset, w), scale)
 		if btnR.X0 < int32(buf.W) {
-			drawNewTabButton(buf, btnR, newTabBtnColor, scale)
+			drawNewTabButton(buf, btnR, p.newTab, scale)
 		}
 	}
 
@@ -98,26 +154,26 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 	// not bleed through the controls.
 	if left, right, ok := ChevronRects(int32(len(tabsList)), w); ok {
 		lr := scaleRect(frame.Rect4(left.X0, 0, right.X1, TabBarHeight), scale)
-		buf.FillRect(frame.Rect4(lr.X0, 0, lr.X1, int32(TabBarHeight)*scale), tabBarBg, nil)
-		drawChevron(buf, scaleRect(left, scale), -1, newTabBtnColor, scale)
-		drawChevron(buf, scaleRect(right, scale), 1, newTabBtnColor, scale)
+		buf.FillRect(frame.Rect4(lr.X0, 0, lr.X1, int32(TabBarHeight)*scale), p.barBg, nil)
+		drawChevron(buf, scaleRect(left, scale), -1, p.newTab, scale)
+		drawChevron(buf, scaleRect(right, scale), 1, p.newTab, scale)
 	}
 }
 
 // drawTabBody paints one tab: background, title text and close button.
 // lr is the logical rect (for text layout and the close button), r is the
 // scaled device rect.
-func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fonts *raster.Fonts, scale int32) {
-	textColor := tabTextColor
+func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fonts *raster.Fonts, scale int32, p tabPalette) {
+	textColor := p.text
 	isIncognito := tab.Incognito()
 
 	if active {
-		bg := activeTabBg
+		bg := p.activeBg
 		if isIncognito {
 			bg = frame.RGB(40, 44, 52)
 			textColor = frame.RGB(240, 240, 240)
 		} else {
-			textColor = tabTextActive
+			textColor = p.textActive
 		}
 		fillRoundedTop(buf, r, tabRadius*scale, bg)
 	} else if isIncognito {
@@ -138,7 +194,7 @@ func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fon
 	drawTabText(buf, title, r, textColor, fonts, scale)
 
 	if !tab.Pinned() {
-		btnColor := closeBtnColor
+		btnColor := p.close
 		if isIncognito {
 			btnColor = frame.RGB(190, 194, 202)
 		}

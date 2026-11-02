@@ -366,21 +366,19 @@ func build(c config) (*framePath, error) {
 	if !c.paced() {
 		f.toolbar = toolbar.NewState(dev.W, fonts)
 		f.toolbar.SetScale(int32(c.dpr + 0.5))
+		f.toolbar.SetTheme(f.theme)
 		f.tabMgr = tabs.NewManager(func() {
 			if f.window != nil {
 				_ = f.window.Close()
 			}
 		})
+		f.tabMgr.SetTheme(f.theme)
 		firstTab := f.tabMgr.NewTab()
 		if c.appURL != "" {
 			firstTab.SetStandaloneApp(true)
 		}
 		firstTab.SetLayer(layer)
-		if f.isDarkMode() {
-			firstTab.SetBGColor(frame.RGB(24, 24, 24))
-		} else {
-			firstTab.SetBGColor(frame.RGB(255, 255, 255))
-		}
+		firstTab.SetBGColor(f.chromeTabBG())
 		if !c.private && !c.paced() && c.sessionActiveFile != "" {
 			if info, err := os.Stat(c.sessionActiveFile); err == nil && !info.IsDir() {
 				if st, err := session.Load(c.sessionActiveFile); err == nil && len(st.Tabs) > 0 {
@@ -490,20 +488,36 @@ func (f *framePath) isHighContrast() bool {
 	return strings.ToLower(f.theme) == "high-contrast"
 }
 
+// chromeTabBG is the page background a non-incognito tab paints for the
+// active appearance theme. It matches the toolbar background so the tab and
+// the chrome below it read as one surface.
+func (f *framePath) chromeTabBG() frame.Color {
+	switch {
+	case f.isDarkMode():
+		return frame.RGB(24, 24, 24)
+	case f.isHighContrast():
+		return frame.RGB(0, 0, 0)
+	default:
+		return frame.RGB(255, 255, 255)
+	}
+}
+
 // setTheme updates the browser appearance theme.
 func (f *framePath) setTheme(theme string) {
 	if f == nil {
 		return
 	}
 	f.theme = strings.ToLower(strings.TrimSpace(theme))
+	if f.toolbar != nil {
+		f.toolbar.SetTheme(f.theme)
+	}
 	if f.tabMgr != nil {
+		f.tabMgr.SetTheme(f.theme)
 		for _, tab := range f.tabMgr.Tabs() {
 			if tab.Incognito() {
 				tab.SetBGColor(frame.RGB(40, 44, 52))
-			} else if f.isDarkMode() {
-				tab.SetBGColor(frame.RGB(24, 24, 24))
 			} else {
-				tab.SetBGColor(frame.RGB(255, 255, 255))
+				tab.SetBGColor(f.chromeTabBG())
 			}
 			if s := tab.Session(); s != nil {
 				s.SetDarkMode(f.isDarkMode())

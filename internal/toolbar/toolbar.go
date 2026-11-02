@@ -69,6 +69,135 @@ var (
 	secureColor = frame.RGB(30, 130, 70)
 )
 
+// chromePalette is the color set one appearance theme paints the toolbar with.
+// Every draw path reads State.palette so a theme switch changes pixels, not
+// just a stored flag.
+type chromePalette struct {
+	button           frame.Color
+	barBg            frame.Color
+	barBorder        frame.Color
+	barFocusBg       frame.Color
+	barFocusBorder   frame.Color
+	toolbarBg        frame.Color
+	text             frame.Color
+	placeholder      frame.Color
+	cursor           frame.Color
+	disabled         frame.Color
+	selection        frame.Color
+	separator        frame.Color
+	secure           frame.Color
+	progress         frame.Color
+	errorText        frame.Color
+	zoomBg           frame.Color
+	zoomFg           frame.Color
+	suggestBg        frame.Color
+	suggestBorder    frame.Color
+	suggestSelected  frame.Color
+	suggestSeparator frame.Color
+	suggestTitle     frame.Color
+	suggestURL       frame.Color
+}
+
+var lightPalette = chromePalette{
+	button:           buttonColor,
+	barBg:            barBg,
+	barBorder:        barBorder,
+	barFocusBg:       barFocusBg,
+	barFocusBorder:   barFocusBorder,
+	toolbarBg:        toolbarBg,
+	text:             textColor,
+	placeholder:      placeholderColor,
+	cursor:           cursorColor,
+	disabled:         disabledColor,
+	selection:        selectionColor,
+	separator:        separatorColor,
+	secure:           secureColor,
+	progress:         frame.RGB(70, 140, 220),
+	errorText:        frame.RGB(200, 50, 50),
+	zoomBg:           frame.RGB(232, 240, 254),
+	zoomFg:           frame.RGB(26, 115, 232),
+	suggestBg:        frame.RGB(255, 255, 255),
+	suggestBorder:    frame.RGB(218, 220, 224),
+	suggestSelected:  frame.RGB(232, 240, 254),
+	suggestSeparator: frame.RGB(241, 243, 244),
+	suggestTitle:     frame.RGB(32, 33, 36),
+	suggestURL:       frame.RGB(128, 134, 139),
+}
+
+// The dark toolbar background is #181818, the same value setTheme gives the
+// active tab, so the tab and the chrome below it read as one surface.
+var darkPalette = chromePalette{
+	button:           frame.RGB(208, 208, 208),
+	barBg:            frame.RGB(45, 45, 48),
+	barBorder:        frame.RGB(63, 63, 70),
+	barFocusBg:       frame.RGB(51, 51, 55),
+	barFocusBorder:   frame.RGB(77, 163, 255),
+	toolbarBg:        frame.RGB(24, 24, 24),
+	text:             frame.RGB(232, 232, 232),
+	placeholder:      frame.RGB(154, 154, 154),
+	cursor:           frame.RGB(77, 163, 255),
+	disabled:         frame.RGB(106, 106, 106),
+	selection:        frame.RGB(47, 93, 143),
+	separator:        frame.RGB(51, 51, 55),
+	secure:           frame.RGB(76, 195, 138),
+	progress:         frame.RGB(110, 168, 255),
+	errorText:        frame.RGB(255, 107, 107),
+	zoomBg:           frame.RGB(50, 54, 62),
+	zoomFg:           frame.RGB(138, 180, 248),
+	suggestBg:        frame.RGB(37, 37, 38),
+	suggestBorder:    frame.RGB(63, 63, 70),
+	suggestSelected:  frame.RGB(47, 58, 79),
+	suggestSeparator: frame.RGB(45, 45, 48),
+	suggestTitle:     frame.RGB(232, 232, 232),
+	suggestURL:       frame.RGB(154, 154, 154),
+}
+
+var highContrastPalette = chromePalette{
+	button:           frame.RGB(255, 255, 255),
+	barBg:            frame.RGB(0, 0, 0),
+	barBorder:        frame.RGB(255, 255, 255),
+	barFocusBg:       frame.RGB(0, 0, 0),
+	barFocusBorder:   frame.RGB(255, 255, 0),
+	toolbarBg:        frame.RGB(0, 0, 0),
+	text:             frame.RGB(255, 255, 255),
+	placeholder:      frame.RGB(192, 192, 192),
+	cursor:           frame.RGB(255, 255, 0),
+	disabled:         frame.RGB(128, 128, 128),
+	selection:        frame.RGB(0, 87, 153),
+	separator:        frame.RGB(255, 255, 255),
+	secure:           frame.RGB(0, 255, 0),
+	progress:         frame.RGB(0, 255, 0),
+	errorText:        frame.RGB(255, 0, 0),
+	zoomBg:           frame.RGB(0, 0, 0),
+	zoomFg:           frame.RGB(255, 255, 0),
+	suggestBg:        frame.RGB(0, 0, 0),
+	suggestBorder:    frame.RGB(255, 255, 255),
+	suggestSelected:  frame.RGB(0, 87, 153),
+	suggestSeparator: frame.RGB(255, 255, 255),
+	suggestTitle:     frame.RGB(255, 255, 255),
+	suggestURL:       frame.RGB(192, 192, 192),
+}
+
+func paletteFor(theme string) chromePalette {
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "dark":
+		return darkPalette
+	case "high-contrast":
+		return highContrastPalette
+	default:
+		return lightPalette
+	}
+}
+
+// pal returns the active palette, falling back to light for a zero-value State
+// (used by hosts and tests that build the struct literally).
+func (s *State) pal() chromePalette {
+	if s.palette == (chromePalette{}) {
+		return lightPalette
+	}
+	return s.palette
+}
+
 // Clipboard is the platform clipboard interface. The darwin package provides
 // the real implementation; tests use nopClipboard.
 type Clipboard interface {
@@ -133,6 +262,8 @@ type State struct {
 
 	fonts *raster.Fonts
 	scale int32
+	// palette is the appearance theme's color set; zero means light.
+	palette chromePalette
 	// dragging tracks an in-progress address-bar drag selection: press sets
 	// dragAnchor, motion extends to the cursor, release ends it.
 	dragging   bool
@@ -144,11 +275,20 @@ func NewState(width int32, fonts *raster.Fonts) *State {
 		History:         NewHistory(),
 		Bounds:          frame.Rect4(0, 0, width, ToolbarHeight),
 		fonts:           fonts,
+		palette:         lightPalette,
 		Clipboard:       nopClipboardImpl{},
 		scale:           1,
 		SelectedSuggest: -1,
 		Zoom:            1.0,
 	}
+}
+
+// SetTheme selects the appearance palette the toolbar paints with. Unknown
+// names fall back to light, matching the content theme resolver.
+func (s *State) SetTheme(theme string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.palette = paletteFor(theme)
 }
 
 // SetScale sets the device pixels per logical pixel the chrome draws at.
@@ -1100,8 +1240,9 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	barH := int32(ToolbarHeight) * sc
 
 	bg := frame.Rect4(0, oy, int32(backing.W), oy+barH)
-	bgCol := toolbarBg
-	sepCol := separatorColor
+	p := s.pal()
+	bgCol := p.toolbarBg
+	sepCol := p.separator
 	if s.Incognito {
 		bgCol = frame.RGB(40, 44, 52)
 		sepCol = frame.RGB(32, 35, 42)
@@ -1117,7 +1258,7 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 	s.drawAddressBar(backing, w, clip, oy)
 
 	if s.Loading {
-		progressColor := frame.RGB(70, 140, 220)
+		progressColor := p.progress
 		lineY := oy + barH - 3*sc
 		backing.FillRect(frame.Rect4(0, lineY, int32(backing.W), lineY+2*sc), progressColor, nil)
 	}
@@ -1128,7 +1269,8 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 	r := ButtonRect(btn, toolbarW)
 	ox := r.X0 * sc
 	oyd := oy + r.Y0*sc
-	fg := buttonColor
+	p := s.pal()
+	fg := p.button
 	if s.Incognito {
 		fg = frame.RGB(200, 204, 212)
 		if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
@@ -1139,10 +1281,10 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 		}
 	} else {
 		if btn == ButtonBack && (s.History == nil || !s.History.CanBack()) {
-			fg = disabledColor
+			fg = p.disabled
 		}
 		if btn == ButtonForward && (s.History == nil || !s.History.CanForward()) {
-			fg = disabledColor
+			fg = p.disabled
 		}
 	}
 	cx := int32(ButtonSize) / 2
@@ -1192,11 +1334,12 @@ func (s *State) drawDownloads(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c
 
 	// Active download progress indicator
 	if s.ActiveDownloads > 0 {
-		activeColor := frame.RGB(0, 120, 215)
+		colors := s.pal()
+		activeColor := colors.barFocusBorder
 		barY := oy + (int32(ButtonSize)-3)*sc
 		barW := int32(ButtonSize-6) * sc
 		barX := ox + 3*sc
-		backing.FillRect(frame.Rect4(barX, barY, barX+barW, barY+2*sc), frame.RGB(210, 210, 215), nil)
+		backing.FillRect(frame.Rect4(barX, barY, barX+barW, barY+2*sc), colors.separator, nil)
 		p := s.DownloadProgress
 		if p <= 0 {
 			p = 100.0
@@ -1405,11 +1548,12 @@ func atan2F(y, x float64) float64 { return math.Atan2(y, x) }
 
 func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame.Rect, oy int32) {
 	sc := s.sc()
+	p := s.pal()
 	lr := AddressBarRect(toolbarW)
 	r := frame.Rect4(lr.X0*sc, oy+lr.Y0*sc, lr.X1*sc, oy+lr.Y1*sc)
 
-	fill := barBg
-	border := barBorder
+	fill := p.barBg
+	border := p.barBorder
 	if s.Incognito {
 		fill = frame.RGB(32, 35, 42)
 		border = frame.RGB(60, 64, 72)
@@ -1418,8 +1562,8 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 			border = frame.RGB(100, 160, 240)
 		}
 	} else if s.Focus == FocusAddress {
-		fill = barFocusBg
-		border = barFocusBorder
+		fill = p.barFocusBg
+		border = p.barFocusBorder
 	}
 	s.drawRoundedRect(backing, r, r.H()/2, fill, border)
 
@@ -1431,25 +1575,25 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 			text = s.URL
 		}
 	}
-	textCol := textColor
+	textCol := p.text
 	if s.Incognito {
 		textCol = frame.RGB(240, 240, 240)
 	}
 	if s.Focus == FocusNone && s.Error != "" {
-		textCol = frame.RGB(200, 50, 50)
+		textCol = p.errorText
 	} else if text == "" && s.FindActive {
 		text = "Find in page..."
 		if s.Incognito {
 			textCol = frame.RGB(140, 144, 154)
 		} else {
-			textCol = placeholderColor
+			textCol = p.placeholder
 		}
 	} else if text == "" && s.Focus == FocusNone {
 		text = "Enter URL..."
 		if s.Incognito {
 			textCol = frame.RGB(140, 144, 154)
 		} else {
-			textCol = placeholderColor
+			textCol = p.placeholder
 		}
 	}
 
@@ -1464,12 +1608,12 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 		case isSecureScheme(s.URL):
 			fcx := float64(r.X0) + 11*float64(sc)
 			fcy := float64(r.Y0+r.Y1)/2 - 1.5*float64(sc)
-			s.drawPadlock(backing, fcx, fcy, sc, secureColor, false)
+			s.drawPadlock(backing, fcx, fcy, sc, p.secure, false)
 			textX = r.X0 + 22*sc
 		case isInsecureScheme(s.URL):
 			fcx := float64(r.X0) + 11*float64(sc)
 			fcy := float64(r.Y0+r.Y1)/2 - 1.5*float64(sc)
-			s.drawPadlock(backing, fcx, fcy, sc, buttonColor, true)
+			s.drawPadlock(backing, fcx, fcy, sc, p.button, true)
 			textX = r.X0 + 22*sc
 		}
 	}
@@ -1490,7 +1634,7 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 			selText := string(runes[sMin:sMax])
 			selX0 := textX + s.measureText(string(runes[:sMin]))
 			selX1 := selX0 + s.measureText(selText)
-			backing.FillRect(frame.Rect4(selX0, r.Y0+3*sc, selX1, r.Y1-3*sc), selectionColor, nil)
+			backing.FillRect(frame.Rect4(selX0, r.Y0+3*sc, selX1, r.Y1-3*sc), p.selection, nil)
 		}
 	}
 
@@ -1498,8 +1642,8 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 
 	if zRect, ok := s.zoomBadgeRect(r, sc); ok {
 		zoomStr := FormatZoomPercent(s.Zoom)
-		badgeBg := frame.RGB(232, 240, 254)
-		badgeFg := frame.RGB(26, 115, 232)
+		badgeBg := p.zoomBg
+		badgeFg := p.zoomFg
 		if s.Incognito {
 			badgeBg = frame.RGB(50, 54, 62)
 			badgeFg = frame.RGB(138, 180, 248)
@@ -1522,14 +1666,14 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 		if counter != "" {
 			cx := r.X1 - (BarPadding+4)*sc - s.measureText(counter)
 			if cx > textX+s.measureText(text)+8*sc {
-				s.drawText(backing, counter, cx, textY, placeholderColor, clip)
+				s.drawText(backing, counter, cx, textY, p.placeholder, clip)
 			}
 		}
 	}
 
 	if s.Focus == FocusAddress {
 		cursorX := textX + s.measureText(text[:s.cursorByte()])
-		backing.FillRect(frame.Rect4(cursorX, r.Y0+5*sc, cursorX+sc, r.Y1-5*sc), cursorColor, nil)
+		backing.FillRect(frame.Rect4(cursorX, r.Y0+5*sc, cursorX+sc, r.Y1-5*sc), p.cursor, nil)
 	}
 }
 
@@ -1886,8 +2030,9 @@ func (s *State) DrawSuggestions(backing *frame.Bitmap, topOffset int32) {
 	totalH := int32(len(s.Suggestions)) * itemH
 	box := frame.Rect4(bar.X0*sc, topOffset, bar.X1*sc, topOffset+totalH)
 
-	bgCol := frame.RGB(255, 255, 255)
-	borderCol := frame.RGB(218, 220, 224)
+	p := s.pal()
+	bgCol := p.suggestBg
+	borderCol := p.suggestBorder
 	s.drawRoundedRect(backing, box, 4*sc, bgCol, borderCol)
 
 	clip := box
@@ -1899,22 +2044,22 @@ func (s *State) DrawSuggestions(backing *frame.Bitmap, topOffset int32) {
 		rowRect := frame.Rect4(box.X0, rowY0, box.X1, rowY1)
 
 		if i == s.SelectedSuggest {
-			selectedBg := frame.RGB(232, 240, 254)
+			selectedBg := p.suggestSelected
 			backing.FillRect(rowRect, selectedBg, nil)
 		} else if i > 0 {
-			sepCol := frame.RGB(241, 243, 244)
+			sepCol := p.suggestSeparator
 			backing.FillRect(frame.Rect4(box.X0, rowY0, box.X1, rowY0+sc), sepCol, nil)
 		}
 
 		badgeText := "[Search]"
-		badgeCol := frame.RGB(26, 115, 232)
+		badgeCol := p.zoomFg
 		switch sug.Kind {
 		case SuggestBookmark:
 			badgeText = "[★ Bookmark]"
 			badgeCol = frame.RGB(227, 116, 0)
 		case SuggestHistory:
 			badgeText = "[History]"
-			badgeCol = frame.RGB(95, 99, 104)
+			badgeCol = p.placeholder
 		}
 
 		textY := s.baselineY(rowRect, fontSize)
@@ -1926,12 +2071,12 @@ func (s *State) DrawSuggestions(backing *frame.Bitmap, topOffset int32) {
 		if titleText == "" {
 			titleText = sug.URL
 		}
-		titleCol := frame.RGB(32, 33, 36)
+		titleCol := p.suggestTitle
 		s.drawText(backing, titleText, curX, textY, titleCol, clip)
 		curX += s.measureText(titleText) + 12*sc
 
 		if sug.Title != "" && sug.URL != "" && sug.Title != sug.URL {
-			urlCol := frame.RGB(128, 134, 139)
+			urlCol := p.suggestURL
 			s.drawText(backing, sug.URL, curX, textY, urlCol, clip)
 		}
 	}
