@@ -139,6 +139,29 @@ func TestDownloadsPageShowsPauseAndResumeActions(t *testing.T) {
 	}
 }
 
+func TestDownloadsPageMarksUnknownSizeAsIndeterminate(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config.downloadDir = t.TempDir()
+	f.downloads = download.NewManager(f.config.downloadDir)
+
+	unknown := f.downloads.CreateItem("https://example.com/live.bin", "live.bin", -1)
+	f.downloads.UpdateProgress(unknown.ID, 4096)
+
+	_, page := f.buildInternalPageHTML("goosie://downloads")
+	if strings.Contains(page, "width: 100.0%") {
+		t.Fatalf("unknown-size download renders a full progress bar: %s", page)
+	}
+	if !strings.Contains(page, "progress-track indeterminate") {
+		t.Errorf("unknown-size download does not render an indeterminate bar: %s", page)
+	}
+	if !strings.Contains(page, "4.0 KB") {
+		t.Errorf("unknown-size download does not show received bytes: %s", page)
+	}
+	if !strings.Contains(page, "size unknown") {
+		t.Errorf("unknown-size download does not label the missing total: %s", page)
+	}
+}
+
 func TestToolbarDownloadsClickNavigates(t *testing.T) {
 	tabMgr := tabs.NewManager(nil)
 	tab := tabMgr.NewTab()

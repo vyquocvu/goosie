@@ -215,6 +215,14 @@ td.val {
   background-color: #1a73e8;
   height: 100%%;
 }
+.progress-track.indeterminate .progress-bar {
+  width: 35%%;
+  animation: goosie-progress 1.2s linear infinite;
+}
+@keyframes goosie-progress {
+  from { margin-left: -35%%; }
+  to { margin-left: 100%%; }
+}
 @media (prefers-color-scheme: dark) {
   body { background-color: #121212; color: #e8eaed; }
   .header { background-color: #1e1e1e; border-bottom: 1px solid #333333; }
@@ -704,6 +712,8 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 				}
 				if pct := it.Percent(); pct >= 0 {
 					meta += fmt.Sprintf(" &bull; %.0f%%", pct)
+				} else {
+					meta += " &bull; size unknown"
 				}
 			} else if !it.EndTime.IsZero() {
 				meta += fmt.Sprintf(" &bull; %s", it.EndTime.Format("Jan 02, 2006 15:04"))
@@ -713,13 +723,16 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			}
 			b.WriteString(fmt.Sprintf(`<div class="list-meta">%s</div>`, meta))
 
-			// Progress bar for in-flight downloads, paused ones included.
+			// Progress bar for in-flight downloads, paused ones included. A
+			// transfer without Content-Length has no percentage; it reports
+			// its byte count and a visibly indeterminate bar instead of a
+			// full one that would read as complete.
 			if it.Status == download.StatusActive || it.Status == download.StatusPaused {
-				pct := it.Percent()
-				if pct < 0 {
-					pct = 100 // indeterminate
+				if pct := it.Percent(); pct < 0 {
+					b.WriteString(`<div class="progress-track indeterminate"><div class="progress-bar"></div></div>`)
+				} else {
+					b.WriteString(fmt.Sprintf(`<div class="progress-track"><div class="progress-bar" style="width: %.1f%%;"></div></div>`, pct))
 				}
-				b.WriteString(fmt.Sprintf(`<div class="progress-track"><div class="progress-bar" style="width: %.1f%%;"></div></div>`, pct))
 			}
 			b.WriteString(`</div>`)
 		}

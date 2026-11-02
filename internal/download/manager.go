@@ -385,6 +385,23 @@ func (m *Manager) SetTemp(id, path string, downloaded int64) {
 	m.notify(item)
 }
 
+// Restart resets an item that must begin again from byte zero, such as a
+// resume whose Range request the server answered with the whole entity. The
+// abandoned partial file is not referenced any more; the caller removes it.
+func (m *Manager) Restart(id string, totalBytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item, ok := m.byID[id]
+	if !ok || item.Status == StatusCanceled || item.Status == StatusCompleted || item.Status == StatusFailed {
+		return
+	}
+	item.TempPath = ""
+	item.DownloadedBytes = 0
+	item.TotalBytes = totalBytes
+	item.StartTime = time.Now()
+	m.notify(item)
+}
+
 // Pausable reports whether an item has a registered pause handler.
 func (m *Manager) Pausable(id string) bool {
 	m.mu.RLock()

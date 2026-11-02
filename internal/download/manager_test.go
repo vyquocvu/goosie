@@ -273,6 +273,37 @@ func TestCompletionClearsTemporaryFileReference(t *testing.T) {
 	}
 }
 
+func TestRestartResetsItemForAWholeEntityTransfer(t *testing.T) {
+	dir := t.TempDir()
+	mgr := NewManager(dir)
+	item := mgr.CreateItem("https://example.com/big.iso", "big.iso", 1000)
+	temp := filepath.Join(dir, ".goosie-download-part")
+	mgr.SetTemp(item.ID, temp, 400)
+
+	mgr.Restart(item.ID, 2000)
+	got := mgr.Get(item.ID)
+	if got.Status != StatusActive {
+		t.Fatalf("status after restart = %q, want active", got.Status)
+	}
+	if got.DownloadedBytes != 0 || got.TotalBytes != 2000 || got.TempPath != "" {
+		t.Fatalf("restarted item = %+v, want 0/2000 bytes and no temp path", got)
+	}
+	if pct := got.Percent(); pct != 0 {
+		t.Fatalf("restarted Percent = %f, want 0", pct)
+	}
+}
+
+func TestRestartIgnoresFinishedItems(t *testing.T) {
+	mgr := NewManager(t.TempDir())
+	item := mgr.CreateItem("https://example.com/a.bin", "a.bin", 100)
+	mgr.Cancel(item.ID)
+	mgr.Restart(item.ID, 500)
+	got := mgr.Get(item.ID)
+	if got.Status != StatusCanceled || got.TotalBytes != 100 {
+		t.Fatalf("canceled item after restart = %+v, want unchanged", got)
+	}
+}
+
 func TestSubscribe(t *testing.T) {
 	mgr := NewManager(t.TempDir())
 	ch := make(chan *Item, 5)

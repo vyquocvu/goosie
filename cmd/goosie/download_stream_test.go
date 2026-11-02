@@ -216,6 +216,167 @@ func TestStreamingDownloadPausesAndResumesWithRange(t *testing.T) {
 	}
 }
 
+func TestResumeRestartsWhenServerIgnoresRange(t *testing.T) {
+	payload := bytes.Repeat([]byte("0123456789abcdef"), 25000)
+	split := 120000
+	var rangeHeader atomic.Value
+	firstStarted := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="restart.bin"`)
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		if rh := r.Header.Get("Range"); rh != "" {
+			rangeHeader.Store(rh)
+			// Ignore the range and send the whole entity: the client must
+			// restart from byte zero instead of appending a second copy.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(payload)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload[:split])
+		w.(http.Flusher).Flush()
+		select {
+		case firstStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	client := transport.DefaultClient()
+	defer client.Close()
+	mgr := download.NewManager(t.TempDir())
+	result := make(chan error, 1)
+	go func() {
+		_, _, _, _, _, err := loadURLCtx(context.Background(), client, nil, server.URL, 800, 600, 1, mgr.Dir(), false, false, mgr)
+		result <- err
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("download response body did not start")
+	}
+	item := waitForDownload(t, mgr)
+	if !mgr.Pause(item.ID) {
+		t.Fatal("pause was not accepted for a streaming download")
+	}
+	select {
+	case err := <-result:
+		var paused downloadPaused
+		if !errors.As(err, &paused) {
+			t.Fatalf("loadURLCtx error = %v, want downloadPaused", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("pause did not stop the streaming navigation")
+	}
+	paused := mgr.Get(item.ID)
+	if !mgr.Resume(item.ID) {
+		t.Fatal("resume was not accepted")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got := mgr.Get(item.ID)
+		if got.Status == download.StatusCompleted {
+			break
+		}
+		if got.Status == download.StatusFailed {
+			t.Fatalf("resume failed instead of restarting: %s", got.Error)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	done := mgr.Get(item.ID)
+	if done.Status != download.StatusCompleted {
+		t.Fatalf("status after 200 resume = %q, want completed", done.Status)
+	}
+	if got, _ := rangeHeader.Load().(string); got != fmt.Sprintf("bytes=%d-", paused.DownloadedBytes) {
+		t.Fatalf("resume Range header = %q, want bytes=%d-", got, paused.DownloadedBytes)
+	}
+	contents, err := os.ReadFile(done.LocalPath)
+	if err != nil || !bytes.Equal(contents, payload) {
+		t.Fatalf("restarted file mismatch (err=%v, len=%d, want %d)", err, len(contents), len(payload))
+	}
+	sum := sha256.Sum256(payload)
+	if done.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("SHA256 = %q, want %q", done.SHA256, hex.EncodeToString(sum[:]))
+	}
+	entries, err := os.ReadDir(mgr.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "restart.bin" {
+		t.Fatalf("download directory after restart = %+v", entries)
+	}
+}
+
+func TestStreamingDownloadWithoutContentLengthReportsBytes(t *testing.T) {
+	payload := bytes.Repeat([]byte("chunk"), 40000)
+	split := 80000
+	firstChunk := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="unknown.bin"`)
+		w.WriteHeader(http.StatusOK)
+		// Committing headers without Content-Length makes the body chunked.
+		w.(http.Flusher).Flush()
+		_, _ = w.Write(payload[:split])
+		w.(http.Flusher).Flush()
+		select {
+		case firstChunk <- struct{}{}:
+		default:
+		}
+		<-release
+		_, _ = w.Write(payload[split:])
+	}))
+	defer server.Close()
+
+	client := transport.DefaultClient()
+	defer client.Close()
+	mgr := download.NewManager(t.TempDir())
+	result := make(chan error, 1)
+	go func() {
+		_, _, _, _, _, err := loadURLCtx(context.Background(), client, nil, server.URL, 800, 600, 1, mgr.Dir(), false, false, mgr)
+		result <- err
+	}()
+
+	select {
+	case <-firstChunk:
+	case <-time.After(3 * time.Second):
+		t.Fatal("download response body did not start")
+	}
+	item := waitForDownload(t, mgr)
+	if item.TotalBytes > 0 {
+		t.Fatalf("TotalBytes = %d, want unknown without Content-Length", item.TotalBytes)
+	}
+	if pct := item.Percent(); pct >= 0 {
+		t.Fatalf("Percent = %f, want an unknown total", pct)
+	}
+	if size := item.FormattedSize(); strings.Contains(size, " / ") || size != download.FormatBytes(item.DownloadedBytes) {
+		t.Fatalf("FormattedSize = %q, want just the received bytes", size)
+	}
+	close(release)
+	select {
+	case err := <-result:
+		var done downloadDone
+		if !errors.As(err, &done) {
+			t.Fatalf("loadURLCtx error = %v, want downloadDone", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("download without Content-Length did not finish")
+	}
+	done := mgr.Get(item.ID)
+	if done.Status != download.StatusCompleted || done.DownloadedBytes != int64(len(payload)) {
+		t.Fatalf("completed item = %+v, want %d bytes", done, len(payload))
+	}
+	contents, err := os.ReadFile(done.LocalPath)
+	if err != nil || !bytes.Equal(contents, payload) {
+		t.Fatalf("unknown-length file mismatch (err=%v, len=%d)", err, len(contents))
+	}
+}
+
 func TestPausedDownloadCancelRemovesPartialFile(t *testing.T) {
 	payload := bytes.Repeat([]byte("z"), 300000)
 	firstStarted := make(chan struct{}, 1)

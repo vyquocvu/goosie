@@ -80,6 +80,12 @@ func (p *resumeDownloadPlan) run() {
 		}
 		p.finish(p.received, sum)
 		return
+	case http.StatusOK:
+		// The server ignored the Range request and is sending the whole
+		// entity. Discard the prefix and write this response from zero
+		// rather than appending a second copy to it.
+		p.restart(ctx, cancel, res)
+		return
 	default:
 		p.mgr.Fail(p.itemID, fmt.Errorf("goosie: resume %s: server returned %d instead of 206", net.RedactURL(p.url), res.StatusCode))
 		return
@@ -105,6 +111,48 @@ func (p *resumeDownloadPlan) run() {
 		return
 	}
 	p.finish(total, sum)
+}
+
+// restart consumes a 200 response as a fresh transfer. It drops the abandoned
+// prefix, resets the item's counters, and keeps pause/cancel working for the
+// new stream just as they did for the original one.
+func (p *resumeDownloadPlan) restart(ctx context.Context, cancel context.CancelCauseFunc, res *net.StreamResponse) {
+	_ = os.Remove(p.tempPath)
+	p.tempPath = ""
+	p.received = 0
+	p.mgr.Restart(p.itemID, res.ContentLength)
+
+	p.mgr.SetCancel(p.itemID, func() {
+		cancel(errDownloadCanceled)
+		res.Cancel()
+	})
+	p.mgr.SetPause(p.itemID, func() {
+		cancel(download.ErrPaused)
+		res.Cancel()
+	})
+
+	var result download.StreamResult
+	var err error
+	if p.targetPath != "" {
+		result, err = download.SaveStreamToPausable(ctx, p.targetPath, res.Body, p.progressReporter())
+	} else {
+		result, err = download.SaveStreamPausable(ctx, p.dir, p.name, res.Body, p.progressReporter())
+	}
+	if errors.Is(err, download.ErrPaused) {
+		p.tempPath = result.TempPath
+		p.received = result.Bytes
+		p.register()
+		return
+	}
+	if err != nil {
+		p.mgr.Fail(p.itemID, err)
+		return
+	}
+	p.mgr.UpdateProgress(p.itemID, result.Bytes)
+	p.mgr.CompleteWithDigest(p.itemID, result.Path, result.Digest.String())
+	if it := p.mgr.Get(p.itemID); it == nil || it.Status != download.StatusCompleted {
+		_ = os.Remove(result.Path)
+	}
 }
 
 func (p *resumeDownloadPlan) progressReporter() func(int64) {
