@@ -1,8 +1,10 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/js"
 )
@@ -73,6 +75,10 @@ func TestPumpJSSameValueDOMWritesSkipPipeline(t *testing.T) {
 	}
 }
 
+// A class written by a timer callback must be resolved and re-laid-out in the
+// same pump turn: the computed colour and the box width both change without a
+// reload, and exactly one style/layout pass is charged for it.
+// qc:BR-090
 func TestPumpJSChangedAttributeStillRebuildsStylesAndLayout(t *testing.T) {
 	html := `<html><head><style>.active { color: red; width: 200px; }</style></head><body>
 <p id="target">text</p>
@@ -90,6 +96,69 @@ func TestPumpJSChangedAttributeStillRebuildsStylesAndLayout(t *testing.T) {
 	target := sess.Doc.ElementByID("target")
 	if target == nil || sess.Styles[target.ID].Color.R != 255 {
 		t.Fatal("changed class did not update computed style")
+	}
+	var width float32
+	for i := range sess.Arena.Objects {
+		obj := &sess.Arena.Objects[i]
+		if obj.Node == target {
+			x0, _, x1, _ := obj.BorderRect()
+			width = x1 - x0
+		}
+	}
+	if width != 200 {
+		t.Fatalf("laid-out width after the class change = %v, want 200", width)
+	}
+}
+
+// A timer that rewrites a text node and an attribute must update all three
+// consumers of the document in the same pump turn: the DOM, the accessibility
+// tree (text label and link target), and the painted display list.
+// qc:BR-089
+func TestPumpJSMutationReachesDOMAccessibilityTreeAndPaint(t *testing.T) {
+	html := `<html><body style="margin: 0;">
+<p id="msg">before</p>
+<a id="link" href="/one">docs</a>
+<script>setTimeout(function() {
+  document.getElementById('msg').textContent = 'after';
+  document.getElementById('link').setAttribute('href', '/two');
+}, 0);</script>
+</body></html>`
+	sess, _, _ := pumpSession(t, html, true)
+
+	initial, err := sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked before pump: %v", err)
+	}
+	if got := paintedText(initial); !strings.Contains(got, "before") {
+		t.Fatalf("load-time paint text = %q, want it to draw the initial text", got)
+	}
+	if axFind(sess.AccessibilityTree(), ax.RoleStaticText, "before") == nil {
+		t.Fatal("load-time accessibility tree lacks the initial text")
+	}
+	if link := axFind(sess.AccessibilityTree(), ax.RoleLink, "docs"); link == nil || link.Href != "/one" {
+		t.Fatalf("load-time link node = %+v, want href /one", link)
+	}
+
+	if !sess.PumpJS(800) {
+		t.Fatal("PumpJS missed the text and attribute mutations")
+	}
+
+	node := sess.Doc.ElementByID("msg")
+	if node == nil || strings.TrimSpace(node.TextContent()) != "after" {
+		t.Fatalf("DOM text after pump = %q, want after", node.TextContent())
+	}
+	if axFind(sess.AccessibilityTree(), ax.RoleStaticText, "after") == nil {
+		t.Fatal("accessibility tree still shows the pre-mutation text")
+	}
+	if link := axFind(sess.AccessibilityTree(), ax.RoleLink, "docs"); link == nil || link.Href != "/two" {
+		t.Fatalf("link node after pump = %+v, want href /two", link)
+	}
+	list, err := sess.PaintChecked(1)
+	if err != nil {
+		t.Fatalf("PaintChecked after pump: %v", err)
+	}
+	if got := paintedText(list); !strings.Contains(got, "after") || strings.Contains(got, "before") {
+		t.Fatalf("painted text after pump = %q, want the mutated text only", got)
 	}
 }
 

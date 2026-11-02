@@ -558,6 +558,10 @@ document.getElementById('btn').addEventListener('click', function(event) {
 // Stop propagation
 // ---------------------------------------------------------------------------
 
+// A stopPropagation() in the clicked descendant must let the listener that
+// called it run while suppressing the ancestor listener, through the engine's
+// real click path rather than a bare DOM dispatch.
+// qc:BR-095
 func TestInteraction_StopPropagation(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>

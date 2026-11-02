@@ -16,7 +16,7 @@ import (
 // jQuery bundle - and the engine discarded every one of
 // them. Isolation is the behaviour under test first (a broken script must still
 // not take the page down); recording is the new half.
-// qc:BR-189
+// qc:BR-189 BR-091
 func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -187,5 +187,34 @@ func TestUserScriptErrorsAreRecordedAndLaterScriptsStillRun(t *testing.T) {
 	}
 	if !strings.Contains(errs[0].Message, "createElement") {
 		t.Errorf("message = %q, want it to name the property the userscript reached for", errs[0].Message)
+	}
+}
+
+// An invalid DOM call on a node the page already removed must be confined to
+// the throwing script: the error is recorded, later scripts load, and the
+// event loop still runs timers that mutate the live document.
+// qc:BR-092
+func TestScriptErrorFromRemovedNodeKeepsTheRuntimeAlive(t *testing.T) {
+	html := `<html><body>
+<div id="host"><span id="child">x</span></div>
+<script>
+var host = document.getElementById('host');
+var child = document.getElementById('child');
+host.removeChild(child);
+child.bogusMethod();
+</script>
+<script>
+setTimeout(function() { document.getElementById('host').textContent = 'alive'; }, 0);
+</script>
+</body></html>`
+	sess, _, _ := pumpSession(t, html, true)
+	if n := sess.ScriptErrorCount(); n != 1 {
+		t.Fatalf("ScriptErrorCount() = %d, want 1 (the invalid call on the removed node)", n)
+	}
+	if !sess.PumpJS(800) {
+		t.Fatal("PumpJS reported no work after a recovered script error")
+	}
+	if got := sess.Find("alive"); len(got) == 0 {
+		t.Fatal("timer after the throwing script did not mutate the live document")
 	}
 }

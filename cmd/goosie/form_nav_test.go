@@ -207,6 +207,11 @@ func TestAnchorNavigationOnEnterKey(t *testing.T) {
 	}
 }
 
+// The negative half of the link default-action contract: a click listener that
+// calls preventDefault() leaves the tab URL and loading state untouched. The
+// positive half (no preventDefault navigates) is
+// TestJourneyLinkNavigationInSameTab.
+// qc:BR-094
 func TestAnchorEnterPreventDefaultCancelsNavigation(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}

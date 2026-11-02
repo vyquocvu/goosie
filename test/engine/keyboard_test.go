@@ -488,6 +488,9 @@ func TestKeyboard_RadioGroupHasOneSequentialFocusStop(t *testing.T) {
 	}
 }
 
+// The click event is still dispatched on a focused link even when a listener
+// prevents its default; activation, not propagation, is what gets cancelled.
+// qc:BR-094
 func TestKeyboard_EnterLinkActivationHonorsClickPreventDefault(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body><a id="link" href="/next">next</a></body></html>`)
 	link := nodeByID(&sess.Doc.Node, "link")

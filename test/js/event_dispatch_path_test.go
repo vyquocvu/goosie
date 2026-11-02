@@ -7,6 +7,11 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
+// The listener path is snapshotted at dispatch start, not re-read per hop: a
+// window capture listener that moves the target must not truncate the capture
+// chain, and the at-target pair must still run afterwards. The eventPhase
+// sequence is the oracle.
+// qc:BR-093
 func TestEventPropagationPathSnapshottedBeforeWindowCapture(t *testing.T) {
 	doc := domtest.Parse(`<html><body><table><tbody id="body"><tr id="original"><td id="target">text</td></tr><tr id="destination"></tr></tbody></table></body></html>`)
 	rt, err := js.New(js.Options{URL: "https://example.test", DOM: doc})

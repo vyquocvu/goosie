@@ -1292,8 +1292,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/pump_test.go:TestPumpJSMutationReachesDOMAccessibilityTreeAndPaint"
+    ],
     "enforced": false
   },
   {
@@ -1302,8 +1304,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/pump_test.go:TestPumpJSChangedAttributeStillRebuildsStylesAndLayout"
+    ],
     "enforced": false
   },
   {
@@ -1312,8 +1316,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_errors_test.go:TestUncaughtScriptErrorsAreRecordedAndIsolated"
+    ],
     "enforced": false
   },
   {
@@ -1322,8 +1328,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/script_errors_test.go:TestScriptErrorFromRemovedNodeKeepsTheRuntimeAlive"
+    ],
     "enforced": false
   },
   {
@@ -1332,8 +1340,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/event_dispatch_path_test.go:TestEventPropagationPathSnapshottedBeforeWindowCapture"
+    ],
     "enforced": false
   },
   {
@@ -1343,8 +1353,12 @@
       "INT",
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/form_nav_test.go:TestAnchorEnterPreventDefaultCancelsNavigation",
+      "cmd/goosie/journey_p1_nav_test.go:TestJourneyLinkNavigationInSameTab",
+      "test/engine/keyboard_test.go:TestKeyboard_EnterLinkActivationHonorsClickPreventDefault"
+    ],
     "enforced": false
   },
   {
@@ -1353,8 +1367,11 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/interaction_e2e_test.go:TestInteraction_StopPropagation",
+      "test/js/events_test.go:TestStopPropagationFromJS"
+    ],
     "enforced": false
   },
   {
@@ -1363,8 +1380,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/events_test.go:TestAddEventListenerDuplicateRegistrationFiresOnce",
+      "test/js/events_test.go:TestRemoveEventListenerBasic",
+      "test/js/events_test.go:TestRemoveEventListenerCaptureMismatch",
+      "test/js/events_test.go:TestRemoveEventListenerPreservesOthers"
+    ],
     "enforced": false
   },
   {

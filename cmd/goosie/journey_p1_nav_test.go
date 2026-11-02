@@ -194,7 +194,7 @@ func TestJourneySlowPageStopKeepsDocument(t *testing.T) {
 	})
 }
 
-// qc:BR-015
+// qc:BR-015 BR-094
 func TestJourneyLinkNavigationInSameTab(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

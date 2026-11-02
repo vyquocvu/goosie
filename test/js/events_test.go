@@ -1048,6 +1048,7 @@ func TestEventBubblesInJS(t *testing.T) {
 
 // TestStopPropagationFromJS verifies that event.stopPropagation() prevents
 // the event from reaching ancestor listeners.
+// qc:BR-095
 func TestStopPropagationFromJS(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1155,6 +1156,7 @@ func TestDispatchEventFromJS(t *testing.T) {
 
 // TestRemoveEventListenerBasic verifies that removeEventListener with a named
 // function reference prevents the listener from firing.
+// qc:BR-096
 func TestRemoveEventListenerBasic(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1180,6 +1182,7 @@ func TestRemoveEventListenerBasic(t *testing.T) {
 
 // TestRemoveEventListenerCaptureMismatch verifies that removing with a
 // different capture flag than was used to add does NOT remove the listener.
+// qc:BR-096
 func TestRemoveEventListenerCaptureMismatch(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1205,6 +1208,7 @@ func TestRemoveEventListenerCaptureMismatch(t *testing.T) {
 
 // TestRemoveEventListenerPreservesOthers verifies that removing one listener
 // does not affect other listeners on the same element.
+// qc:BR-096
 func TestRemoveEventListenerPreservesOthers(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1227,5 +1231,43 @@ func TestRemoveEventListenerPreservesOthers(t *testing.T) {
 
 	if v, ok := r.Global("count"); !ok || int64(v.Num) != 10 {
 		t.Errorf("count = %+v, want 10 (only handler2 should fire)", v)
+	}
+}
+
+// Registering the same function twice for the same type and capture flag is a
+// no-op in the event model, so a doubled add must not double-fire; removing the
+// one registration must then silence it entirely.
+// qc:BR-096
+func TestAddEventListenerDuplicateRegistrationFiresOnce(t *testing.T) {
+	doc := eventDOM()
+	r := newEventRuntime(t, doc)
+
+	if err := r.Run(`
+		var count = 0;
+		var el = document.getElementById('target');
+		function handler(e) { count += 1; }
+		el.addEventListener('click', handler);
+		el.addEventListener('click', handler);
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+
+	div := doc.ElementByID("target")
+	dom.DispatchEvent(div, dom.NewEvent("click", true, true))
+
+	if v, ok := r.Global("count"); !ok || int64(v.Num) != 1 {
+		t.Fatalf("count after duplicate add = %+v, want 1 (same listener registered twice must fire once)", v)
+	}
+
+	if err := r.Run(`
+		el.removeEventListener('click', handler);
+		el.removeEventListener('click', handler);
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	dom.DispatchEvent(div, dom.NewEvent("click", true, true))
+
+	if v, ok := r.Global("count"); !ok || int64(v.Num) != 1 {
+		t.Errorf("count after duplicate remove = %+v, want 1 (removed handler must not fire)", v)
 	}
 }
