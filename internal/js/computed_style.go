@@ -1,6 +1,9 @@
 package js
 
 import (
+	"sort"
+	"strconv"
+
 	"github.com/dop251/goja"
 	"github.com/vyquocvu/goosie/internal/dom"
 )
@@ -34,11 +37,10 @@ import (
 // `undefined`, while `getPropertyValue("display")` - the one member that is
 // always present - answers the empty string. CSSOM would answer "" for both, so
 // the difference is visible to a page that feature-detects with `in` or
-// `hasOwnProperty`; it is recorded as GOOSIE-CSSOMTASK-001 in
-// docs/tasks/TASK-047-DOM-JQUERY-APIS.md rather than quietly called close
-// enough. Either way the object holds no invented initial: that is the
-// difference between a computed style and a guess, and it is the rule this task
-// set for this API.
+// `hasOwnProperty`; only that accessor-shape deviation remains recorded as
+// GOOSIE-CSSOMTASK-001 in docs/tasks/TASK-047-DOM-JQUERY-APIS.md. Either way
+// the object holds no invented initial: that is the difference between a
+// computed style and a guess, and it is the rule this task set for this API.
 
 // ComputedStyleFunc renders one node's cascade result as CSS declaration
 // values keyed by property name (kebab-case, exactly as CSS spells them). nil
@@ -146,18 +148,45 @@ func (r *Runtime) jsGetComputedStyle(call goja.FunctionCall) goja.Value {
 // `undefined` because no key was set) and agree in effect: both are falsy, so
 // jQuery still concludes the property is unset. A page that asks with `in` or
 // `hasOwnProperty` sees the difference, which is why the shape is listed as a
-// gap rather than smoothed over. Also measured and still missing: `length`,
-// `item()` and `parentRule`, so `Array.prototype.slice.call(getComputedStyle(el))`
-// is `[]` here - see GOOSIE-CSSOMTASK-001 in
-// docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
+// gap rather than smoothed over.
+//
+// The declaration is also a list, as CSSOM requires: `length` counts the
+// resolved names, numeric indices and `item()` address them in sorted order,
+// and `parentRule` is null because a computed declaration has no owning rule.
+// Only names with a non-empty value are declarations; the camelCase aliases are
+// accessors, not separate entries, so iterating the list yields each property
+// once.
 func (r *Runtime) computedStyleObject(values map[string]string) *goja.Object {
 	obj := r.vm.NewObject()
+	names := make([]string, 0, len(values))
 	for name, value := range values {
+		if value != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		value := values[name]
 		_ = obj.Set(name, value)
 		if camel := camelCSSName(name); camel != "" && camel != name {
 			_ = obj.Set(camel, value)
 		}
 	}
+	for i, name := range names {
+		_ = obj.Set(strconv.Itoa(i), name)
+	}
+	_ = obj.Set("length", len(names))
+	_ = obj.Set("item", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) < 1 {
+			return r.vm.ToValue("")
+		}
+		i := int(call.Argument(0).ToInteger())
+		if i < 0 || i >= len(names) {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(names[i])
+	})
+	_ = obj.Set("parentRule", goja.Null())
 	_ = obj.Set("getPropertyValue", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return r.vm.ToValue("")

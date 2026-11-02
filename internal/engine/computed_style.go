@@ -19,10 +19,11 @@ import (
 // holds. A property the engine does not model is left out of the map, so the
 // binding reads it back as the empty string instead of inventing an initial.
 //
-// It returns nil when the node has no entry in the document's style map: a node
-// a script created after the last resolve has no cascade result to name yet, and
-// "I have not resolved this node" is information the caller can use, while an
-// empty map would look like "this node resolved to nothing".
+// It returns nil when the node has no entry in the document's style map even
+// after the synchronous CSSOM refresh: a detached node, or a node whose
+// document is not this session's, has no cascade result to name, and "I have
+// not resolved this node" is information the caller can use, while an empty map
+// would look like "this node resolved to nothing".
 func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	if s == nil || n == nil {
 		return nil

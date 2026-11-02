@@ -1845,6 +1845,8 @@
     ],
     "status": "PASS",
     "tests": [
+      "test/js/computed_style_declaration_test.go:TestComputedStyleDeclarationExposesItsPropertyList",
+      "test/js/computed_style_declaration_test.go:TestComputedStyleDeclarationListsOnlyResolvedNames",
       "test/js/computed_style_test.go:TestDefaultViewIsTheWindowItself",
       "test/js/computed_style_test.go:TestGetComputedStyleAnswersKebabAndCamelNames",
       "test/js/computed_style_test.go:TestGetComputedStyleMergesInlineOverCascade",
@@ -1865,6 +1867,7 @@
     "status": "PASS",
     "tests": [
       "test/engine/computed_style_render_test.go:TestGetComputedStyleForANodeTheSessionNeverResolved",
+      "test/engine/computed_style_render_test.go:TestGetComputedStyleListsTheNamesOfANodeInsertedThisTask",
       "test/engine/computed_style_render_test.go:TestGetComputedStyleReportsTheSessionsOwnResolve",
       "test/engine/computed_style_render_test.go:TestLifecycleHideRemovesFromTheRender",
       "test/engine/computed_style_render_test.go:TestLifecycleReResolvesOnlyWhenTheHandlerMutated",

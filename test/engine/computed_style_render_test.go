@@ -310,3 +310,42 @@ func TestLifecycleReResolvesOnlyWhenTheHandlerMutated(t *testing.T) {
 		t.Errorf("a revealing handler ran %d layout builds, want exactly %d", got, want)
 	}
 }
+
+// A node a script creates and inserts is resolved synchronously on the next
+// CSSOM read, and that declaration is a list with the same names it answers by.
+// This is the shape jQuery's defaultDisplay probe walks: it needs the UA display
+// of a node that did not exist at load time, in the same task that inserted it.
+// qc:BR-206
+func TestGetComputedStyleListsTheNamesOfANodeInsertedThisTask(t *testing.T) {
+	rt, err := js.New(js.Options{URL: "https://example.test/page"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	sess, err := engine.NewSession(computedPage, nil, 800, engine.WithJS(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	got := engineComputed(t, rt, `(function(){
+		var d = document.createElement("div");
+		document.body.appendChild(d);
+		var cs = getComputedStyle(d);
+		var names = Array.prototype.slice.call(cs);
+		var readable = names.length === cs.length && cs.item(0) === cs[0];
+		for (var i = 0; i < names.length; i++) {
+			if (cs[names[i]] !== cs.getPropertyValue(names[i])) { readable = false; }
+		}
+		return [
+			cs.getPropertyValue("display"),
+			String(names.indexOf("display") >= 0),
+			String(cs.parentRule === null),
+			String(readable)
+		].join("|");
+	})()`)
+	want := "block|true|true|true"
+	if got != want {
+		t.Errorf("same-task declaration list: got %q want %q", got, want)
+	}
+}
