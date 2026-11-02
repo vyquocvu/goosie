@@ -1491,11 +1491,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyTextInputEditingAndCaret"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-098",
@@ -1504,11 +1504,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyTextareaMultilineInput"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-099",
@@ -1517,11 +1517,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyCheckboxToggleClickAndSpace"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-100",

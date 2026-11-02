@@ -80,7 +80,15 @@ func TestJourneyTextInputEditingAndCaret(t *testing.T) {
 		return ok && node.Value == "ZabcXd"
 	})
 
-	// 6. Select-all and replace via accessibility / programmatic edit
+	// 6. Select all inside the focused control with Cmd+A, then replace it
+	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 'a', Mods: surface.ModCommand})
+	browser.pressKey(t, 'Q')
+	browser.waitFor(t, "select-all and typing replaced the whole value", func() bool {
+		node, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
+		return ok && node.Value == "Q"
+	})
+
+	// 7. Replace via accessibility / programmatic edit
 	inpNode, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
 	if !ok {
 		t.Fatal("txtinput AXNode missing")
