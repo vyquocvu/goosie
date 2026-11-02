@@ -498,10 +498,12 @@ func TestVsyncFrameCountEqualsPresentCount(t *testing.T) {
 		w.vsync(t)
 		waitFor(t, "a present", func() bool { return w.count() == i+1 })
 	}
-	got := loop.Stats()
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	// Read the counters after joining the loop: Present happens before draw
+	// commits its tally, so Stats may still be one frame behind the window.
+	got := loop.Stats()
 	if got.Frames != ticks || got.Presents != ticks {
 		t.Fatalf("frames/presents = %d/%d, want %d/%d: a vsync that does not present is a dropped frame",
 			got.Frames, got.Presents, ticks, ticks)

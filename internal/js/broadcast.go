@@ -287,8 +287,6 @@ func (h *BroadcastHub) broadcast(sender *bcObj, dataJSON string) {
 	h.mu.Unlock()
 }
 
-const broadcastStateKey = "__broadcastState__"
-
 type broadcastState struct {
 	mu       sync.Mutex
 	hub      *BroadcastHub
@@ -318,19 +316,18 @@ func broadcastContextRoot(r *Runtime) *Runtime {
 }
 
 func setBroadcastState(r *Runtime, s *broadcastState) {
-	_ = r.vm.Set(broadcastStateKey, s)
+	r.broadcastStateMu.Lock()
+	r.broadcastState = s
+	r.broadcastStateMu.Unlock()
 }
 
 func broadcastStateOf(r *Runtime) *broadcastState {
-	v := r.vm.Get(broadcastStateKey)
-	if v == nil || goja.IsUndefined(v) {
+	if r == nil {
 		return nil
 	}
-	s, ok := v.Export().(*broadcastState)
-	if !ok {
-		return nil
-	}
-	return s
+	r.broadcastStateMu.Lock()
+	defer r.broadcastStateMu.Unlock()
+	return r.broadcastState
 }
 
 func broadcastContextActive(r *Runtime) bool {

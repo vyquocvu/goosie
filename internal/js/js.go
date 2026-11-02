@@ -309,6 +309,11 @@ type Runtime struct {
 	scriptExecutionDepth     int
 	testDriverTrustedClick   bool
 
+	// broadcastState lives here rather than in the goja global because worker
+	// goroutines read it while the parent runtime may be executing user code.
+	broadcastStateMu sync.Mutex
+	broadcastState   *broadcastState
+
 	// microtasks is the FIFO promise-reaction queue. Producers on any
 	// goroutine only ever append (queueMicrotask); only the Run/Tick
 	// goroutine drains (drainMicrotasks), so user callbacks always run on
