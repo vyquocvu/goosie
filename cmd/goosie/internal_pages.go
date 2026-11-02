@@ -200,6 +200,7 @@ td.val {
   text-transform: uppercase;
 }
 .badge-active { background: #e8f0fe; color: #1a73e8; }
+.badge-paused { background: #fef7e0; color: #b06000; }
 .badge-completed { background: #e6f4ea; color: #137333; }
 .badge-failed { background: #fce8e6; color: #c5221f; }
 .badge-canceled { background: #f1f3f4; color: #5f6368; }
@@ -231,6 +232,7 @@ td.val {
   .list-meta { color: #9aa0a6; }
   .empty-state { color: #9aa0a6; }
   .btn-action.secondary { background-color: #2d2e30; color: #e8eaed; border: 1px solid #3c4043; }
+  .badge-paused { background: #3d2e00; color: #fdd663; }
   .badge-completed { background: #0d381e; color: #81c995; }
   .badge-failed { background: #441210; color: #f28b82; }
   .badge-canceled { background: #2d2e30; color: #9aa0a6; }
@@ -616,6 +618,16 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			if f.downloads != nil && id != "" {
 				f.downloads.Cancel(id)
 			}
+		case "pause":
+			id := u.Query().Get("id")
+			if f.downloads != nil && id != "" {
+				f.downloads.Pause(id)
+			}
+		case "resume":
+			id := u.Query().Get("id")
+			if f.downloads != nil && id != "" {
+				f.downloads.Resume(id)
+			}
 		}
 	}
 
@@ -651,6 +663,8 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			switch it.Status {
 			case download.StatusActive:
 				badgeClass = "badge-active"
+			case download.StatusPaused:
+				badgeClass = "badge-paused"
 			case download.StatusFailed:
 				badgeClass = "badge-failed"
 			case download.StatusCanceled:
@@ -667,6 +681,14 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			// Action buttons on the right
 			b.WriteString(`<div>`)
 			if it.Status == download.StatusActive {
+				if f.downloads.Pausable(it.ID) {
+					b.WriteString(fmt.Sprintf(`<a class="btn-action secondary" href="goosie://downloads?action=pause&id=%s">Pause</a>`, html.EscapeString(it.ID)))
+				}
+				b.WriteString(fmt.Sprintf(`<a class="btn-action danger" href="goosie://downloads?action=cancel&id=%s">Cancel</a>`, html.EscapeString(it.ID)))
+			} else if it.Status == download.StatusPaused {
+				if f.downloads.Resumable(it.ID) {
+					b.WriteString(fmt.Sprintf(`<a class="btn-action" href="goosie://downloads?action=resume&id=%s">Resume</a>`, html.EscapeString(it.ID)))
+				}
 				b.WriteString(fmt.Sprintf(`<a class="btn-action danger" href="goosie://downloads?action=cancel&id=%s">Cancel</a>`, html.EscapeString(it.ID)))
 			} else if it.Status == download.StatusCompleted && it.LocalPath != "" {
 				b.WriteString(fmt.Sprintf(`<a class="btn-action" href="goosie://downloads?action=open&path=%s">Open</a>`, url.QueryEscape(it.LocalPath)))
@@ -676,7 +698,7 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 
 			// Meta info
 			meta := it.FormattedSize()
-			if it.Status == download.StatusActive {
+			if it.Status == download.StatusActive || it.Status == download.StatusPaused {
 				if it.Speed() > 0 {
 					meta += fmt.Sprintf(" &bull; %s", it.FormattedSpeed())
 				}
@@ -691,8 +713,8 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			}
 			b.WriteString(fmt.Sprintf(`<div class="list-meta">%s</div>`, meta))
 
-			// Progress bar for active downloads
-			if it.Status == download.StatusActive {
+			// Progress bar for in-flight downloads, paused ones included.
+			if it.Status == download.StatusActive || it.Status == download.StatusPaused {
 				pct := it.Percent()
 				if pct < 0 {
 					pct = 100 // indeterminate
@@ -706,7 +728,7 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 	// 2. Discover preexisting files on disk in the download directory
 	files, _ := os.ReadDir(dir)
 	for _, fi := range files {
-		if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
+		if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") || strings.Contains(fi.Name(), ".goosie-download") {
 			continue
 		}
 		fullPath := filepath.Join(dir, fi.Name())

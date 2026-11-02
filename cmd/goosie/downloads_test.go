@@ -103,6 +103,42 @@ func TestDownloadsPageRenderingAndActions(t *testing.T) {
 	}
 }
 
+func TestDownloadsPageShowsPauseAndResumeActions(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config.downloadDir = t.TempDir()
+	f.downloads = download.NewManager(f.config.downloadDir)
+
+	active := f.downloads.CreateItem("https://example.com/large.iso", "large.iso", 1000)
+	f.downloads.UpdateProgress(active.ID, 250)
+	// SetPause is the loader's contract; register one so the page offers Pause.
+	f.downloads.SetPause(active.ID, func() {})
+	if !f.downloads.Pausable(active.ID) {
+		t.Fatal("pause handler was not registered")
+	}
+
+	_, page := f.buildInternalPageHTML("goosie://downloads")
+	if !strings.Contains(page, "action=pause&id="+active.ID) {
+		t.Errorf("active download has no Pause action: %s", page)
+	}
+
+	f.downloads.SetResume(active.ID, func() {})
+	if !f.downloads.Pause(active.ID) {
+		t.Fatal("pause was not accepted")
+	}
+	_, page = f.buildInternalPageHTML("goosie://downloads")
+	if !strings.Contains(page, "paused") {
+		t.Errorf("paused badge missing: %s", page)
+	}
+	if !strings.Contains(page, "action=resume&id="+active.ID) {
+		t.Errorf("paused download has no Resume action: %s", page)
+	}
+
+	_, _ = f.buildInternalPageHTML("goosie://downloads?action=resume&id=" + active.ID)
+	if got := f.downloads.Get(active.ID).Status; got != download.StatusActive {
+		t.Errorf("status after resume action = %q, want active", got)
+	}
+}
+
 func TestToolbarDownloadsClickNavigates(t *testing.T) {
 	tabMgr := tabs.NewManager(nil)
 	tab := tabMgr.NewTab()

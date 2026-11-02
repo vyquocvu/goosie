@@ -232,13 +232,17 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 				targetPath = chosenPath
 				name = filepath.Base(targetPath)
 			}
-			downloadCtx, cancel := context.WithCancel(ctx)
+			downloadCtx, cancel := context.WithCancelCause(ctx)
 			var itemID string
 			if mgr != nil {
 				it := mgr.CreateItem(resp.URL, name, stream.ContentLength)
 				itemID = it.ID
 				mgr.SetCancel(itemID, func() {
-					cancel()
+					cancel(errDownloadCanceled)
+					stream.Cancel()
+				})
+				mgr.SetPause(itemID, func() {
+					cancel(download.ErrPaused)
 					stream.Cancel()
 				})
 			}
@@ -251,20 +255,37 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 					lastProgressAt = time.Now()
 				}
 			}
-			var savedPath string
-			var downloaded int64
-			var digest download.Digest
+			var result download.StreamResult
 			var saveErr error
 			if targetPath != "" {
-				downloaded, digest, saveErr = download.SaveStreamTo(downloadCtx, targetPath, streamBody, progress)
-				savedPath, _ = filepath.Abs(targetPath)
+				result, saveErr = download.SaveStreamToPausable(downloadCtx, targetPath, streamBody, progress)
 			} else {
-				savedPath, downloaded, digest, saveErr = download.SaveStream(downloadCtx, downloadDir, name, streamBody, progress)
+				result, saveErr = download.SaveStreamPausable(downloadCtx, downloadDir, name, streamBody, progress)
 			}
-			cancel()
+			cancel(nil)
+			if errors.Is(saveErr, download.ErrPaused) {
+				if mgr != nil && itemID != "" {
+					plan := &resumeDownloadPlan{
+						mgr:        mgr,
+						client:     client,
+						itemID:     itemID,
+						url:        resp.URL,
+						tempPath:   result.TempPath,
+						received:   result.Bytes,
+						targetPath: targetPath,
+						dir:        downloadDir,
+						name:       name,
+					}
+					plan.register()
+				}
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadPaused{id: itemID}
+			}
+			savedPath := result.Path
+			downloaded := result.Bytes
+			digest := result.Digest
 			if saveErr != nil {
 				if mgr != nil && itemID != "" {
-					if saveErr == context.Canceled {
+					if errors.Is(saveErr, context.Canceled) {
 						mgr.Cancel(itemID)
 					} else if it := mgr.Get(itemID); it != nil && it.Status != download.StatusCanceled {
 						mgr.Fail(itemID, saveErr)

@@ -57,6 +57,13 @@ type StreamingHTTP interface {
 	GetStream(ctx context.Context, url string) (*StreamResponse, error)
 }
 
+// RangeStreamingHTTP is optionally implemented by clients that can continue a
+// partial transfer. start is the first byte to request, sent as
+// "Range: bytes=start-"; a resumable server answers 206 Partial Content.
+type RangeStreamingHTTP interface {
+	GetStreamRange(ctx context.Context, url string, start int64) (*StreamResponse, error)
+}
+
 // StreamResponse exposes an HTTP response body as a cancelable stream.
 type StreamResponse struct {
 	StatusCode    int
@@ -565,7 +572,20 @@ func (c *httpClient) Get(ctx context.Context, raw string) (*Response, error) {
 // replayed from their bounded in-memory bodies; live responses remain streamed
 // so downloads need not pass through the document response limit.
 func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse, error) {
-	start := time.Now()
+	return c.getStream(ctx, raw, 0)
+}
+
+// GetStreamRange requests a live stream starting at byte offset start. Range
+// requests bypass the response cache, which holds whole bodies keyed by URL.
+func (c *httpClient) GetStreamRange(ctx context.Context, raw string, start int64) (*StreamResponse, error) {
+	if start < 0 {
+		return nil, errors.New("net: invalid range offset")
+	}
+	return c.getStream(ctx, raw, start)
+}
+
+func (c *httpClient) getStream(ctx context.Context, raw string, start int64) (*StreamResponse, error) {
+	startedAt := time.Now()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -583,12 +603,12 @@ func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse
 	if c.filter != nil && c.filter.IsEnabled() && !IsShieldsDisabled(ctx) {
 		if blocked, reason := c.filter.ShouldBlock(normalized); blocked {
 			if c.netLog != nil {
-				c.netLog.Record(RequestTrace{URL: normalized, Method: http.MethodGet, Blocked: true, BlockedReason: reason, Timestamp: start})
+				c.netLog.Record(RequestTrace{URL: normalized, Method: http.MethodGet, Blocked: true, BlockedReason: reason, Timestamp: startedAt})
 			}
 			return nil, fmt.Errorf("%w: %s (%s)", ErrBlockedByFilter, RedactURL(normalized), reason)
 		}
 	}
-	if c.cache != nil {
+	if start == 0 && c.cache != nil {
 		if cached, ok := c.cache.get(normalized, time.Now()); ok {
 			if c.netLog != nil {
 				c.netLog.Record(RequestTrace{
@@ -597,7 +617,7 @@ func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse
 					StatusCode:  304,
 					ContentType: cached.Headers["Content-Type"],
 					Bytes:       len(cached.Body),
-					Timestamp:   start,
+					Timestamp:   startedAt,
 				})
 			}
 			return &StreamResponse{
@@ -621,6 +641,9 @@ func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse
 	if cookie := c.jar.HeaderFor(u); cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
+	if start > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", start))
+	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		cancel()
@@ -643,9 +666,9 @@ func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse
 			Method:      http.MethodGet,
 			StatusCode:  resp.StatusCode,
 			ContentType: resp.Header.Get("Content-Type"),
-			Timestamp:   start,
+			Timestamp:   startedAt,
 		},
-		started: start,
+		started: startedAt,
 	}
 	return &StreamResponse{
 		StatusCode:    resp.StatusCode,

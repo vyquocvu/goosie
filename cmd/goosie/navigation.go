@@ -26,15 +26,16 @@ import (
 
 // navResult is the outcome of a per-tab navigation, delivered on navResults.
 type navResult struct {
-	tabID        uint64
-	serial       uint64
-	layer        *frame.Layer
-	bgColor      frame.Color
-	session      *engine.Session
-	err          error
-	url          string
-	downloadPath string
-	noHistory    bool
+	tabID          uint64
+	serial         uint64
+	layer          *frame.Layer
+	bgColor        frame.Color
+	session        *engine.Session
+	err            error
+	url            string
+	downloadPath   string
+	downloadPaused bool
+	noHistory      bool
 	// traverse commits a back/forward step on success: the delta (-1/+1) and
 	// the cursor index the peek saw. A failed traversal leaves the cursor
 	// where it was instead of stranding it on a page that never loaded.
@@ -49,6 +50,13 @@ type navResult struct {
 type downloadDone struct{ path string }
 
 func (e downloadDone) Error() string { return "downloaded to " + e.path }
+
+// downloadPaused reports a download stopped by the user with its partial file
+// kept on disk. The navigation ends quietly; the download stays resumable from
+// the downloads page.
+type downloadPaused struct{ id string }
+
+func (downloadPaused) Error() string { return "download paused" }
 
 // imgResult reports that a session's deferred images have landed; the drain
 // goroutine reflows and repaints the owning tab if it is still showing the
@@ -159,8 +167,11 @@ func (f *framePath) navigateTabTransition(rawURL string, transition history.Tran
 			res.url = finalURL
 		}
 		var dd downloadDone
+		var dp downloadPaused
 		if errors.As(err, &dd) {
 			res.downloadPath = dd.path
+		} else if errors.As(err, &dp) {
+			res.downloadPaused = true
 		} else {
 			res.err = err
 		}
@@ -246,6 +257,15 @@ func (f *framePath) applyNavResult(result navResult) {
 			f.toolbar.SetLoading(false)
 		}
 		fmt.Fprintf(os.Stderr, "goosie: saved %s\n", result.downloadPath)
+		if f.toolbar != nil && f.downloads != nil {
+			f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
+		}
+		return
+	}
+	if result.downloadPaused {
+		if f.toolbar != nil && f.tabMgr.Active() == tab {
+			f.toolbar.SetLoading(false)
+		}
 		if f.toolbar != nil && f.downloads != nil {
 			f.toolbar.SetDownloadStats(f.downloads.ActiveCount(), f.downloads.TotalCount(), f.downloads.OverallProgress())
 		}
@@ -544,8 +564,11 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int,
 			res.url = finalURL
 		}
 		var dd downloadDone
+		var dp downloadPaused
 		if errors.As(err, &dd) {
 			res.downloadPath = dd.path
+		} else if errors.As(err, &dp) {
+			res.downloadPaused = true
 		} else {
 			res.err = err
 		}

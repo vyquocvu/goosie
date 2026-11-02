@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,7 @@ type ItemStatus string
 const (
 	StatusQueued    ItemStatus = "queued"
 	StatusActive    ItemStatus = "active"
+	StatusPaused    ItemStatus = "paused"
 	StatusCompleted ItemStatus = "completed"
 	StatusFailed    ItemStatus = "failed"
 	StatusCanceled  ItemStatus = "canceled"
@@ -28,6 +30,7 @@ type Item struct {
 	URL             string     `json:"url"`
 	Filename        string     `json:"filename"`
 	LocalPath       string     `json:"local_path"`
+	TempPath        string     `json:"temp_path,omitempty"`
 	SHA256          string     `json:"sha256,omitempty"`
 	TotalBytes      int64      `json:"total_bytes"`
 	DownloadedBytes int64      `json:"downloaded_bytes"`
@@ -111,6 +114,8 @@ type Manager struct {
 	seq       int64
 	listeners []func(*Item)
 	cancel    map[string]context.CancelFunc
+	pause     map[string]context.CancelFunc
+	resume    map[string]func()
 }
 
 // NewManager creates a download manager saving by default to dir.
@@ -119,6 +124,8 @@ func NewManager(dir string) *Manager {
 		dir:    dir,
 		byID:   make(map[string]*Item),
 		cancel: make(map[string]context.CancelFunc),
+		pause:  make(map[string]context.CancelFunc),
+		resume: make(map[string]func()),
 	}
 }
 
@@ -189,10 +196,13 @@ func (m *Manager) CompleteWithDigest(id, localPath, sha256 string) {
 		return
 	}
 	item.LocalPath = localPath
+	item.TempPath = ""
 	item.SHA256 = sha256
 	item.Status = StatusCompleted
 	item.EndTime = time.Now()
 	delete(m.cancel, id)
+	delete(m.pause, id)
+	delete(m.resume, id)
 	if item.TotalBytes > 0 {
 		item.DownloadedBytes = item.TotalBytes
 	}
@@ -202,22 +212,30 @@ func (m *Manager) CompleteWithDigest(id, localPath, sha256 string) {
 // Fail marks an item as failed with an error message.
 func (m *Manager) Fail(id string, err error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	item, ok := m.byID[id]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
 	if item.Status == StatusCanceled || item.Status == StatusCompleted {
+		m.mu.Unlock()
 		return
 	}
+	tempPath := item.TempPath
+	item.TempPath = ""
 	item.Status = StatusFailed
 	item.EndTime = time.Now()
 	delete(m.cancel, id)
+	delete(m.pause, id)
+	delete(m.resume, id)
 	if err != nil {
 		item.Error = err.Error()
 	}
 	m.notify(item)
+	m.mu.Unlock()
+	if tempPath != "" {
+		_ = os.Remove(tempPath)
+	}
 }
 
 // Cancel terminates and marks an item as canceled.
@@ -228,15 +246,22 @@ func (m *Manager) Cancel(id string) {
 		m.mu.Unlock()
 		return
 	}
-	if item.Status == StatusActive || item.Status == StatusQueued {
+	if item.Status == StatusActive || item.Status == StatusQueued || item.Status == StatusPaused {
+		tempPath := item.TempPath
+		item.TempPath = ""
 		item.Status = StatusCanceled
 		item.EndTime = time.Now()
 		cancel := m.cancel[id]
 		delete(m.cancel, id)
+		delete(m.pause, id)
+		delete(m.resume, id)
 		m.notify(item)
 		m.mu.Unlock()
 		if cancel != nil {
 			cancel()
+		}
+		if tempPath != "" {
+			_ = os.Remove(tempPath)
 		}
 		return
 	}
@@ -262,6 +287,119 @@ func (m *Manager) SetCancel(id string, cancel context.CancelFunc) {
 	}
 	m.cancel[id] = cancel
 	m.mu.Unlock()
+}
+
+// SetPause attaches the operation that stops an active transfer while keeping
+// its partial file. Pausing is only offered for items whose transfer registered
+// a pause handler, so a buffered download is never left in a state it cannot
+// leave.
+func (m *Manager) SetPause(id string, pause context.CancelFunc) {
+	if pause == nil {
+		return
+	}
+	m.mu.Lock()
+	item, ok := m.byID[id]
+	if !ok || (item.Status != StatusActive && item.Status != StatusQueued) {
+		m.mu.Unlock()
+		pause()
+		return
+	}
+	m.pause[id] = pause
+	m.mu.Unlock()
+}
+
+// Pause stops an active transfer and marks the item resumable. The partial file
+// is preserved on disk. It reports whether the item changed state.
+func (m *Manager) Pause(id string) bool {
+	m.mu.Lock()
+	item, ok := m.byID[id]
+	if !ok {
+		m.mu.Unlock()
+		return false
+	}
+	pause, pausable := m.pause[id]
+	if !pausable || item.Status != StatusActive && item.Status != StatusQueued {
+		m.mu.Unlock()
+		return false
+	}
+	item.Status = StatusPaused
+	item.EndTime = time.Time{}
+	delete(m.cancel, id)
+	delete(m.pause, id)
+	m.notify(item)
+	m.mu.Unlock()
+	if pause != nil {
+		pause()
+	}
+	return true
+}
+
+// SetResume attaches the operation that continues a paused transfer.
+func (m *Manager) SetResume(id string, resume func()) {
+	if resume == nil {
+		return
+	}
+	m.mu.Lock()
+	item, ok := m.byID[id]
+	if ok && item.Status != StatusCanceled && item.Status != StatusCompleted && item.Status != StatusFailed {
+		m.resume[id] = resume
+	}
+	m.mu.Unlock()
+}
+
+// Resume restarts a paused transfer from its preserved partial file. It reports
+// whether the item changed state.
+func (m *Manager) Resume(id string) bool {
+	m.mu.Lock()
+	item, ok := m.byID[id]
+	if !ok || item.Status != StatusPaused {
+		m.mu.Unlock()
+		return false
+	}
+	resume, ok := m.resume[id]
+	if !ok || resume == nil {
+		m.mu.Unlock()
+		return false
+	}
+	item.Status = StatusActive
+	item.EndTime = time.Time{}
+	item.StartTime = time.Now()
+	delete(m.resume, id)
+	m.notify(item)
+	m.mu.Unlock()
+	go resume()
+	return true
+}
+
+// SetTemp records the partial file a paused transfer must keep and the bytes it
+// already holds.
+func (m *Manager) SetTemp(id, path string, downloaded int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item, ok := m.byID[id]
+	if !ok || item.Status == StatusCanceled || item.Status == StatusCompleted || item.Status == StatusFailed {
+		return
+	}
+	item.TempPath = path
+	item.DownloadedBytes = downloaded
+	m.notify(item)
+}
+
+// Pausable reports whether an item has a registered pause handler.
+func (m *Manager) Pausable(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.pause[id]
+	return ok
+}
+
+// Resumable reports whether a paused item can be resumed.
+func (m *Manager) Resumable(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	item, ok := m.byID[id]
+	_, hasResume := m.resume[id]
+	return ok && item.Status == StatusPaused && hasResume
 }
 
 // Get finds an item by ID.
@@ -295,7 +433,7 @@ func (m *Manager) ActiveItems() []*Item {
 
 	var res []*Item
 	for _, it := range m.items {
-		if it.Status == StatusActive || it.Status == StatusQueued {
+		if it.Status == StatusActive || it.Status == StatusQueued || it.Status == StatusPaused {
 			cp := *it
 			res = append(res, &cp)
 		}
@@ -303,14 +441,15 @@ func (m *Manager) ActiveItems() []*Item {
 	return res
 }
 
-// ActiveCount returns the number of in-flight downloads.
+// ActiveCount returns the number of in-flight downloads, including paused ones
+// that still own a partial file.
 func (m *Manager) ActiveCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	count := 0
 	for _, it := range m.items {
-		if it.Status == StatusActive || it.Status == StatusQueued {
+		if it.Status == StatusActive || it.Status == StatusQueued || it.Status == StatusPaused {
 			count++
 		}
 	}
@@ -332,7 +471,7 @@ func (m *Manager) OverallProgress() float64 {
 	var total, downloaded int64
 	active := 0
 	for _, it := range m.items {
-		if it.Status == StatusActive && it.TotalBytes > 0 {
+		if (it.Status == StatusActive || it.Status == StatusPaused) && it.TotalBytes > 0 {
 			active++
 			total += it.TotalBytes
 			downloaded += it.DownloadedBytes
@@ -356,7 +495,7 @@ func (m *Manager) ClearCompleted() {
 	var retained []*Item
 	newByID := make(map[string]*Item)
 	for _, it := range m.items {
-		if it.Status == StatusActive || it.Status == StatusQueued {
+		if it.Status == StatusActive || it.Status == StatusQueued || it.Status == StatusPaused {
 			retained = append(retained, it)
 			newByID[it.ID] = it
 		}

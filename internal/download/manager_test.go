@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -155,6 +156,120 @@ func TestConcurrentManager(t *testing.T) {
 	}
 	if mgr.TotalCount() != 20 {
 		t.Errorf("TotalCount = %d, want 20", mgr.TotalCount())
+	}
+}
+
+func TestPausePreservesItemForResume(t *testing.T) {
+	dir := t.TempDir()
+	mgr := NewManager(dir)
+	item := mgr.CreateItem("https://example.com/big.iso", "big.iso", 1000)
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	mgr.SetPause(item.ID, func() { cancel(ErrPaused) })
+	temp := filepath.Join(dir, ".goosie-download-part")
+	mgr.SetTemp(item.ID, temp, 400)
+
+	mgr.Pause(item.ID)
+	if !errors.Is(context.Cause(ctx), ErrPaused) {
+		t.Fatalf("pause cause = %v, want ErrPaused", context.Cause(ctx))
+	}
+	got := mgr.Get(item.ID)
+	if got.Status != StatusPaused {
+		t.Fatalf("status after pause = %q, want paused", got.Status)
+	}
+	if got.DownloadedBytes != 400 || got.TempPath != temp {
+		t.Fatalf("paused item = %+v, want 400 bytes at %q", got, temp)
+	}
+	if mgr.ActiveCount() != 1 {
+		t.Fatalf("ActiveCount with a paused item = %d, want 1", mgr.ActiveCount())
+	}
+	if pct := got.Percent(); pct < 39.9 || pct > 40.1 {
+		t.Fatalf("paused Percent = %f, want 40", pct)
+	}
+
+	resumed := make(chan struct{})
+	mgr.SetResume(item.ID, func() { close(resumed) })
+	mgr.Resume(item.ID)
+	select {
+	case <-resumed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume callback did not run")
+	}
+	if got := mgr.Get(item.ID); got.Status != StatusActive {
+		t.Fatalf("status after resume = %q, want active", got.Status)
+	}
+}
+
+func TestPauseWithoutHandlerIsIgnored(t *testing.T) {
+	mgr := NewManager(t.TempDir())
+	item := mgr.CreateItem("https://example.com/a.bin", "a.bin", 10)
+	mgr.Pause(item.ID)
+	if got := mgr.Get(item.ID).Status; got != StatusActive {
+		t.Fatalf("status after pause without handler = %q, want active", got)
+	}
+}
+
+func TestResumeWithoutHandlerKeepsItemPaused(t *testing.T) {
+	mgr := NewManager(t.TempDir())
+	item := mgr.CreateItem("https://example.com/a.bin", "a.bin", 10)
+	mgr.SetPause(item.ID, func() {})
+	mgr.Pause(item.ID)
+	mgr.Resume(item.ID)
+	if got := mgr.Get(item.ID).Status; got != StatusPaused {
+		t.Fatalf("status after unresumable resume = %q, want paused", got)
+	}
+}
+
+func TestCancelRemovesTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	temp := filepath.Join(dir, ".goosie-download-part")
+	if err := os.WriteFile(temp, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(dir)
+	item := mgr.CreateItem("https://example.com/a.bin", "a.bin", 100)
+	mgr.SetTemp(item.ID, temp, 7)
+	mgr.Cancel(item.ID)
+	if _, err := os.Stat(temp); !os.IsNotExist(err) {
+		t.Fatalf("cancel left partial file behind: %v", err)
+	}
+	if got := mgr.Get(item.ID); got.TempPath != "" {
+		t.Fatalf("canceled item still names temp path %q", got.TempPath)
+	}
+}
+
+func TestFailRemovesTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	temp := filepath.Join(dir, ".goosie-download-part")
+	if err := os.WriteFile(temp, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(dir)
+	item := mgr.CreateItem("https://example.com/a.bin", "a.bin", 100)
+	mgr.SetTemp(item.ID, temp, 7)
+	mgr.Fail(item.ID, errors.New("connection reset"))
+	if _, err := os.Stat(temp); !os.IsNotExist(err) {
+		t.Fatalf("failure left partial file behind: %v", err)
+	}
+}
+
+func TestCompletionClearsTemporaryFileReference(t *testing.T) {
+	dir := t.TempDir()
+	temp := filepath.Join(dir, ".goosie-download-part")
+	if err := os.WriteFile(temp, []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(dir)
+	item := mgr.CreateItem("https://example.com/a.bin", "a.bin", 4)
+	mgr.SetTemp(item.ID, temp, 4)
+	final := filepath.Join(dir, "a.bin")
+	mgr.CompleteWithDigest(item.ID, final, "abc")
+	got := mgr.Get(item.ID)
+	if got.TempPath != "" {
+		t.Fatalf("completed item still names temp path %q", got.TempPath)
+	}
+	if got.LocalPath != final || got.SHA256 != "abc" {
+		t.Fatalf("completed item = %+v", got)
 	}
 }
 

@@ -1,0 +1,140 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/vyquocvu/goosie/internal/download"
+	"github.com/vyquocvu/goosie/internal/net"
+)
+
+// errDownloadCanceled is the context cause for a canceled transfer. Pausing
+// uses download.ErrPaused instead so the writer knows to keep the partial file.
+var errDownloadCanceled = errors.New("goosie: download canceled")
+
+// resumeDownloadPlan continues a paused transfer after the navigation that
+// started it has returned. It owns the pieces the navigation context carried:
+// the client (private for incognito), the partial file, and the destination
+// rule used by the first attempt.
+type resumeDownloadPlan struct {
+	mgr        *download.Manager
+	client     net.HTTP
+	itemID     string
+	url        string
+	tempPath   string
+	received   int64
+	targetPath string
+	dir        string
+	name       string
+}
+
+// register publishes the partial file and the resume operation to the manager.
+func (p *resumeDownloadPlan) register() {
+	if p == nil || p.mgr == nil {
+		return
+	}
+	p.mgr.SetTemp(p.itemID, p.tempPath, p.received)
+	p.mgr.SetResume(p.itemID, p.run)
+}
+
+func (p *resumeDownloadPlan) run() {
+	item := p.mgr.Get(p.itemID)
+	// Resume flips the item to active before invoking this callback, so both
+	// states are legitimate; canceled or finished items must not restart.
+	if item == nil || (item.Status != download.StatusPaused && item.Status != download.StatusActive) {
+		return
+	}
+	if item.TempPath != "" {
+		p.tempPath = item.TempPath
+	}
+	if item.DownloadedBytes > 0 {
+		p.received = item.DownloadedBytes
+	}
+	ranged, ok := p.client.(net.RangeStreamingHTTP)
+	if !ok {
+		p.mgr.Fail(p.itemID, errors.New("goosie: download client cannot continue a partial transfer"))
+		return
+	}
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	res, err := ranged.GetStreamRange(ctx, p.url, p.received)
+	if err != nil {
+		p.mgr.Fail(p.itemID, err)
+		return
+	}
+	defer res.Close()
+
+	switch res.StatusCode {
+	case http.StatusPartialContent:
+	case http.StatusRequestedRangeNotSatisfiable:
+		// The partial file already holds every byte the server has.
+		sum, hashErr := download.HashFile(p.tempPath)
+		if hashErr != nil {
+			p.mgr.Fail(p.itemID, hashErr)
+			return
+		}
+		p.finish(p.received, sum)
+		return
+	default:
+		p.mgr.Fail(p.itemID, fmt.Errorf("goosie: resume %s: server returned %d instead of 206", net.RedactURL(p.url), res.StatusCode))
+		return
+	}
+
+	p.mgr.SetCancel(p.itemID, func() {
+		cancel(errDownloadCanceled)
+		res.Cancel()
+	})
+	p.mgr.SetPause(p.itemID, func() {
+		cancel(download.ErrPaused)
+		res.Cancel()
+	})
+
+	total, sum, err := download.AppendToTemp(ctx, p.tempPath, res.Body, p.progressReporter())
+	if errors.Is(err, download.ErrPaused) {
+		p.received = total
+		p.register()
+		return
+	}
+	if err != nil {
+		p.mgr.Fail(p.itemID, err)
+		return
+	}
+	p.finish(total, sum)
+}
+
+func (p *resumeDownloadPlan) progressReporter() func(int64) {
+	lastBytes := p.received
+	lastAt := time.Now()
+	return func(downloaded int64) {
+		if downloaded-lastBytes >= 512*1024 || time.Since(lastAt) >= 250*time.Millisecond {
+			p.mgr.UpdateProgress(p.itemID, downloaded)
+			lastBytes = downloaded
+			lastAt = time.Now()
+		}
+	}
+}
+
+func (p *resumeDownloadPlan) finish(total int64, sum download.Digest) {
+	var finalPath string
+	var err error
+	if p.targetPath != "" {
+		err = download.FinalizeTempTo(p.tempPath, p.targetPath)
+		finalPath = p.targetPath
+	} else {
+		finalPath, err = download.FinalizeTemp(p.tempPath, p.dir, p.name)
+	}
+	if err != nil {
+		p.mgr.Fail(p.itemID, err)
+		return
+	}
+	p.mgr.UpdateProgress(p.itemID, total)
+	p.mgr.CompleteWithDigest(p.itemID, finalPath, sum.String())
+	if it := p.mgr.Get(p.itemID); it == nil || it.Status != download.StatusCompleted {
+		_ = os.Remove(finalPath)
+	}
+}
