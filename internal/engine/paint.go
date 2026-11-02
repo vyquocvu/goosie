@@ -89,6 +89,10 @@ func (s *Session) Paint(scale float32) *paint.List {
 		}
 	}
 	b.Build(layout.ObjectID(1))
+	// z-index is resolved into DisplayCmd.Z by the builder; sorting once per
+	// content version keeps that out of the frame path, and the stable sort
+	// leaves the all-zero flow in document order.
+	list.SortStable()
 	return list
 }
 

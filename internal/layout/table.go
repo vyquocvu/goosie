@@ -186,7 +186,17 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 				// to the content box, which is where the collapsed model puts it.
 				cellW += cell.Style.UsedBorderWidths()[1]
 			}
-			blockInto(a, cid, cellW)
+			// A cell's declared width feeds column sizing only; once the column
+			// is dealt, every cell in it takes that width. Resolving a cell
+			// against its own declaration left a width:100px header at 100 while
+			// the cells beneath it filled the 228px column, so the two rows of
+			// one column disagreed on where it ended.
+			resolveBoxSizes(a, cell, cellW, definiteH(a, cell.Parent))
+			cell.W = cellW - (cell.BorderLeft + cell.PaddingLeft + cell.PaddingRight + cell.BorderRight)
+			if cell.W < 0 {
+				cell.W = 0
+			}
+			blockIntoSized(a, cid, cellW)
 			inlineInto(a, cid)
 			cell = a.Get(cid)
 			c.usedH = cell.H

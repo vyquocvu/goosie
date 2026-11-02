@@ -108,17 +108,55 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	visibilityHidden := obj.Style != nil && obj.Style.Visibility != "visible"
 
 	childClip := inheritedClip
+	commandStart := b.list.Len()
 	if obj.Style != nil {
 		box := b.paintContextFor(obj, effective)
-		commandStart := b.list.Len()
+		start := b.list.Len()
 		if !box.hidden && !visibilityHidden {
 			b.paintBoxDecoration(obj, box, ordinal)
 			b.paintBoxContents(obj, box, inheritedClip)
 		}
-		b.applyBoxEffects(obj, box, commandStart)
+		b.applyBoxEffects(obj, box, start)
+		if inheritedClip != nil {
+			clipCommands(b.list, start, *inheritedClip)
+		}
 		childClip = b.overflowClip(obj, childClip)
 	}
 	b.paintChildren(obj, childClip, effective)
+	if z, ok := zIndexOf(obj.Style); ok {
+		commands := b.list.All()
+		for i := commandStart; i < len(commands); i++ {
+			if commands[i].Z == 0 {
+				commands[i].Z = z
+			}
+		}
+	}
+}
+
+// zIndexOf maps a positioned box's non-negative z-index onto the display list's
+// ordering field. The engine publishes stacking support for positioned boxes
+// only: a positive value lifts the box and its subtree above the Z=0 flow, and
+// later commands at the same value keep document order through the stable sort.
+func zIndexOf(s *style.ComputedStyle) (uint32, bool) {
+	if s == nil || !s.HasZIndex || s.ZIndex <= 0 || s.Position == style.PositionStatic {
+		return 0, false
+	}
+	return uint32(s.ZIndex), true
+}
+
+// clipCommands intersects an ancestor's overflow clip into every command a box
+// emitted. Only text and media consulted the inherited clip before, so a
+// descendant's background and borders escaped an overflow:hidden scrollport
+// even though the text inside it was cut.
+func clipCommands(list *List, start int, clip frame.Rect) {
+	commands := list.All()
+	for i := start; i < len(commands); i++ {
+		if commands[i].Clip.Empty() {
+			commands[i].Clip = clip
+		} else {
+			commands[i].Clip = commands[i].Clip.Intersection(clip)
+		}
+	}
 }
 
 func (b *Builder) paintContextFor(obj *layout.Object, opacity float32) boxPaintContext {

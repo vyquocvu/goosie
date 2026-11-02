@@ -778,8 +778,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestNestedBlocksAndInlinesKeepLineOrderWithoutOverlap"
+    ],
     "enforced": false
   },
   {
@@ -788,8 +790,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/style/qa_cascade_acceptance_test.go:TestCompoundTypeClassIDSelectorsReachOnlyTheirNode"
+    ],
     "enforced": false
   },
   {
@@ -798,8 +802,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/style/qa_cascade_acceptance_test.go:TestSpecificityOutranksSourceOrderAndEqualSpecificityUsesIt"
+    ],
     "enforced": false
   },
   {
@@ -808,8 +814,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/style/qa_cascade_acceptance_test.go:TestInheritedFontColorAndLineHeightReachDescendants"
+    ],
     "enforced": false
   },
   {
@@ -818,8 +826,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestBoxModelSizesContentAndBorderBoxes"
+    ],
     "enforced": false
   },
   {
@@ -828,8 +838,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestFontSizeWeightAndLineHeightDriveWrappingAndHeight"
+    ],
     "enforced": false
   },
   {
@@ -838,8 +850,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestFlexRowColumnGapAlignAndWrap"
+    ],
     "enforced": false
   },
   {
@@ -848,8 +862,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestGridTracksAndGapsPlaceItemsInTheirCells"
+    ],
     "enforced": false
   },
   {
@@ -858,8 +874,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestTableColumnsRowsAndBordersStayAligned"
+    ],
     "enforced": false
   },
   {
@@ -868,8 +886,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestFloatTakesSpaceAndClearsAfterItsBlock"
+    ],
     "enforced": false
   },
   {
@@ -878,8 +898,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/layout/qa_layout_acceptance_test.go:TestRelativeAbsoluteAndFixedUseTheirDeclaredContainingBlocks"
+    ],
     "enforced": false
   },
   {
@@ -888,8 +910,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/paint/qa_overflow_zindex_test.go:TestZIndexOrdersPositionedSiblingsByTheirDeclaredLayer"
+    ],
     "enforced": false
   },
   {
@@ -898,8 +922,11 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/paint/qa_overflow_zindex_test.go:TestOverflowHiddenClipsEveryCommandInTheSubtree",
+      "test/paint/qa_overflow_zindex_test.go:TestOverflowScrollMovesAndClipsDescendantPaint"
+    ],
     "enforced": false
   },
   {
