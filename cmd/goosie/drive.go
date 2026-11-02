@@ -46,7 +46,7 @@ type driver struct {
 // newDriver starts a driver over f's window. The window has to exist first: dropping
 // frames the display never produced would be a gate that measured nothing.
 func newDriver(f *framePath, frames int) *driver {
-	dev := f.config.devSize()
+	dev := f.devSize()
 	d := &driver{
 		Window: f.window,
 		s:      f.sched,

@@ -91,11 +91,11 @@ func buildUnresponsivePageHTML(rawURL string) (title, htmlContent string) {
 // error page is built so the tab is never left blank or showing obsolete
 // content.
 func (f *framePath) buildUnresponsivePage(target string, count int) (*frame.Layer, *engine.Session, frame.Color) {
-	if f.fonts == nil || f.config.width <= 0 {
+	if f.fonts == nil || f.contentWidth() <= 0 {
 		return nil, nil, frame.RGB(255, 255, 255)
 	}
-	w := f.config.width
-	h := f.config.height
+	w := f.contentWidth()
+	h := f.contentHeight()
 	if w <= 0 {
 		w = 800
 	}
@@ -166,7 +166,7 @@ func (f *framePath) installUnresponsivePrompt(tab *tabs.Tab, target string, coun
 		})
 		f.sched.SetViewport(frame.Viewport{
 			Offset: frame.Point{},
-			Size:   f.config.devSize(),
+			Size:   f.devSize(),
 		})
 		f.publishAccessibility()
 	}

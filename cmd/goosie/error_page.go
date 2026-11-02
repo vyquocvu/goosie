@@ -134,11 +134,11 @@ ul {
 
 // buildErrorPage renders the error HTML page into a frame Layer for in-viewport display.
 func (f *framePath) buildErrorPage(rawURL string, err error) (*frame.Layer, *engine.Session, frame.Color) {
-	if f.fonts == nil || f.config.width <= 0 {
+	if f.fonts == nil || f.contentWidth() <= 0 {
 		return nil, nil, frame.RGB(255, 255, 255)
 	}
-	w := f.config.width
-	h := f.config.height
+	w := f.contentWidth()
+	h := f.contentHeight()
 	if w <= 0 {
 		w = 800
 	}

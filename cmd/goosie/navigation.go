@@ -95,7 +95,7 @@ func (f *framePath) clientForTab(tab *tabs.Tab) net.HTTP {
 // newIncognitoTab opens a new private incognito tab.
 func (f *framePath) newIncognitoTab() *tabs.Tab {
 	tab := f.tabMgr.NewIncognitoTab()
-	dev := frame.Size{W: int32(f.config.width), H: int32(f.config.height)}
+	dev := frame.Size{W: int32(f.contentWidth()), H: int32(f.contentHeight())}
 	_, layer := blankLayer(dev)
 	tab.SetLayer(layer)
 	tab.SetBGColor(frame.RGB(40, 44, 52))
@@ -159,7 +159,7 @@ func (f *framePath) navigateTabTransition(rawURL string, transition history.Tran
 	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.downloadDirectory(), true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, transition: transition}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
@@ -316,7 +316,7 @@ func (f *framePath) applyNavResult(result navResult) {
 					})
 					f.sched.SetViewport(frame.Viewport{
 						Offset: frame.Point{},
-						Size:   f.config.devSize(),
+						Size:   f.devSize(),
 					})
 					f.publishAccessibility()
 				}
@@ -404,7 +404,7 @@ func (f *framePath) applyNavResult(result navResult) {
 			tab.SetScrollY(0)
 			f.sched.SetViewport(frame.Viewport{
 				Offset: frame.Point{},
-				Size:   f.config.devSize(),
+				Size:   f.devSize(),
 			})
 			// A session restore's own load keeps its saved offset: the reset
 			// above is for user-initiated navigations.
@@ -492,7 +492,7 @@ func (f *framePath) applyImageResult(res imgResult) {
 	if cur != res.serial {
 		return
 	}
-	if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+	if err := tab.Session().Reflow(float32(f.contentWidth())); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow after images:", err)
 		return
 	}
@@ -574,7 +574,7 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int,
 	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.config.width, f.config.height, float32(f.config.dpr), f.downloadDirectory(), true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base, transition: transition}
 		if finalURL != "" {
 			res.url = finalURL
@@ -659,7 +659,7 @@ func (f *framePath) scrollToAnchor(tab *tabs.Tab, href string) {
 		tab.SetScrollY(int32(targetY))
 		f.sched.SetViewport(frame.Viewport{
 			Offset: frame.Point{X: 0, Y: int32(targetY)},
-			Size:   f.config.devSize(),
+			Size:   f.devSize(),
 		})
 	}
 }
@@ -722,7 +722,7 @@ func (f *framePath) restoreMarkedScroll(tab *tabs.Tab) {
 	tab.SetScrollY(f.restoredScrollY)
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: f.restoredScrollY},
-		Size:   f.config.devSize(),
+		Size:   f.devSize(),
 	})
 	f.restoredScrollY = 0
 }

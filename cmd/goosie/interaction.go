@@ -55,9 +55,9 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 		}
 		var err error
 		if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") {
-			err = sess.RestyleAndReflow(float32(f.config.width))
+			err = sess.RestyleAndReflow(float32(f.contentWidth()))
 		} else {
-			err = sess.Reflow(float32(f.config.width))
+			err = sess.Reflow(float32(f.contentWidth()))
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
@@ -72,7 +72,7 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	}
 	f.setWindowIME(sess.Focused() != nil)
 	if !sess.CanDeferControlEditReflow() && (sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-within") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active")) {
-		if err := sess.RestyleAndReflow(float32(f.config.width)); err != nil {
+		if err := sess.RestyleAndReflow(float32(f.contentWidth())); err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		}
 	}
@@ -214,7 +214,7 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 	if !sess.HasPseudoClassRule("hover") || sess.CanDeferControlEditReflow() {
 		return
 	}
-	if err := sess.RestyleAndReflow(float32(f.config.width)); err != nil {
+	if err := sess.RestyleAndReflow(float32(f.contentWidth())); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 	}
 	f.repaintTab(tab, frame.Rect{})
@@ -245,7 +245,7 @@ func (f *framePath) refreshActiveContent() {
 	if tab == nil || tab.Session() == nil || !tab.Session().HasPseudoClassRule("active") {
 		return
 	}
-	if err := tab.Session().RestyleAndReflow(float32(f.config.width)); err != nil {
+	if err := tab.Session().RestyleAndReflow(float32(f.contentWidth())); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 	}
 	f.repaintTab(tab, frame.Rect{})
@@ -363,11 +363,11 @@ func (f *framePath) reflowAfterControlEdit(tab *tabs.Tab) {
 	}
 	var err error
 	if sess.HasPseudoClassRule("placeholder-shown") {
-		err = sess.RestyleAndReflow(float32(f.config.width))
+		err = sess.RestyleAndReflow(float32(f.contentWidth()))
 	} else if sess.FocusedInputValueDoesNotAffectLayout() {
 		return
 	} else {
-		err = sess.Reflow(float32(f.config.width))
+		err = sess.Reflow(float32(f.contentWidth()))
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
@@ -419,9 +419,9 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			if !sess.CanDeferControlEditReflow() {
 				var err error
 				if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") {
-					err = sess.RestyleAndReflow(float32(f.config.width))
+					err = sess.RestyleAndReflow(float32(f.contentWidth()))
 				} else {
-					err = sess.Reflow(float32(f.config.width))
+					err = sess.Reflow(float32(f.contentWidth()))
 				}
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
@@ -457,7 +457,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		focusChanged := sess.Focused() != oldFocus
 		observesFocus := sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-within") || sess.HasPseudoClassRule("focus-visible")
 		if focusChanged && observesFocus && !sess.CanDeferControlEditReflow() {
-			if err := sess.RestyleAndReflow(float32(f.config.width)); err != nil {
+			if err := sess.RestyleAndReflow(float32(f.contentWidth())); err != nil {
 				fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 			}
 		} else {
@@ -701,8 +701,8 @@ func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
 	_, _, canForward := tab.History().PeekForward()
 
 	items := BuildContextMenuItems(linkURL, imageURL, selText, focusedText, isEditable, canBack, canForward)
-	winW := int32(f.config.width) * cw.sc()
-	winH := int32(f.config.height) * cw.sc()
+	winW := int32(f.contentWidth()) * cw.sc()
+	winH := int32(f.contentHeight()) * cw.sc()
 	if cw.chromeBitmap != nil {
 		winW = int32(cw.chromeBitmap.W)
 	}
@@ -752,7 +752,7 @@ func (f *framePath) handleContextMenuAction(action, data string) {
 			if text := cb.Read(); text != "" {
 				if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
 					if tab.Session().InsertText(text) {
-						if err := tab.Session().Reflow(float32(f.config.width)); err != nil {
+						if err := tab.Session().Reflow(float32(f.contentWidth())); err != nil {
 							fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 						}
 					}
@@ -859,7 +859,7 @@ func (f *framePath) handleZoom(delta float64) {
 	if f.toolbar != nil {
 		f.toolbar.SetZoom(f.zoom)
 	}
-	f.handleResize(f.config.width, f.config.height)
+	f.handleResize(f.contentWidth(), f.contentHeight())
 }
 
 func (f *framePath) handleLinkClick(href string) {
@@ -957,7 +957,7 @@ func (f *framePath) scrollToMatch(idx int) {
 	}
 	m := f.findMatches[idx]
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
-	size := f.config.devSize()
+	size := f.devSize()
 	offsetY := int32(m.Y0*effectiveDPR) - size.H/4
 	if offsetY < 0 {
 		offsetY = 0
@@ -1025,7 +1025,7 @@ func (f *framePath) switchTab(id uint64) {
 	}
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: newTab.ScrollY()},
-		Size:   f.config.devSize(),
+		Size:   f.devSize(),
 	})
 	f.publishAccessibility()
 }
@@ -1045,7 +1045,7 @@ func (f *framePath) newTab() {
 	f.tabMgr.SwitchTo(tab.ID())
 	f.ensureActiveTabVisible()
 	f.syncTabToToolbar()
-	_, layer := blankLayer(f.config.devSize())
+	_, layer := blankLayer(f.devSize())
 	tab.SetLayer(layer)
 	tab.SetBGColor(frame.RGB(255, 255, 255))
 	f.sched.SetPlan(frame.FramePlan{
@@ -1055,7 +1055,7 @@ func (f *framePath) newTab() {
 	})
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: 0},
-		Size:   f.config.devSize(),
+		Size:   f.devSize(),
 	})
 	f.publishAccessibility()
 }
@@ -1068,7 +1068,7 @@ func (f *framePath) ensureActiveTabVisible() {
 		return
 	}
 	n := int32(f.tabMgr.Count())
-	w := int32(f.config.width)
+	w := int32(f.contentWidth())
 	idx := f.tabMgr.ActiveIndex()
 	f.tabMgr.SetTabScroll(tabs.EnsureTabVisible(idx, n, w, f.tabMgr.TabScroll()), n, w)
 }
@@ -1177,7 +1177,7 @@ func (f *framePath) showActiveTabAfterBatch() {
 	}
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: tab.ScrollY()},
-		Size:   f.config.devSize(),
+		Size:   f.devSize(),
 	})
 	f.publishAccessibility()
 }
@@ -1236,7 +1236,7 @@ func (f *framePath) reopenTab() {
 	}
 	f.ensureActiveTabVisible()
 	f.syncTabToToolbar()
-	_, layer := blankLayer(f.config.devSize())
+	_, layer := blankLayer(f.devSize())
 	tab.SetLayer(layer)
 	tab.SetBGColor(frame.RGB(255, 255, 255))
 	f.sched.SetPlan(frame.FramePlan{
@@ -1246,7 +1246,7 @@ func (f *framePath) reopenTab() {
 	})
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: tab.ScrollY()},
-		Size:   f.config.devSize(),
+		Size:   f.devSize(),
 	})
 	f.publishAccessibility()
 	if u := tab.URL(); u != "" {
@@ -1273,7 +1273,7 @@ func (f *framePath) duplicateTab() {
 	}
 	f.ensureActiveTabVisible()
 	f.syncTabToToolbar()
-	_, layer := blankLayer(f.config.devSize())
+	_, layer := blankLayer(f.devSize())
 	tab.SetLayer(layer)
 	tab.SetBGColor(frame.RGB(255, 255, 255))
 	f.sched.SetPlan(frame.FramePlan{
@@ -1283,7 +1283,7 @@ func (f *framePath) duplicateTab() {
 	})
 	f.sched.SetViewport(frame.Viewport{
 		Offset: frame.Point{Y: tab.ScrollY()},
-		Size:   f.config.devSize(),
+		Size:   f.devSize(),
 	})
 	f.publishAccessibility()
 	if u := tab.URL(); u != "" {

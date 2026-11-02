@@ -74,7 +74,7 @@ func (f *framePath) SetDeviceEmulation(preset *DevicePreset) {
 	if tab == nil || tab.Session() == nil {
 		return
 	}
-	reflowW := float32(f.config.width)
+	reflowW := float32(f.contentWidth())
 	if preset != nil {
 		reflowW = float32(preset.Width)
 	}

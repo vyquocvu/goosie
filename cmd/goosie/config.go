@@ -99,8 +99,9 @@ func (c config) vsyncPeriod() time.Duration {
 }
 
 // paced reports whether this run is driven by a fixed frame count rather than by a
-// person closing the window.
-func (c config) paced() bool { return c.gate || c.bench || c.screenshot }
+// person closing the window. It takes a pointer so the session-journal goroutine
+// does not copy the whole config, whose viewport fields the chrome pump resizes.
+func (c *config) paced() bool { return c.gate || c.bench || c.screenshot }
 
 // parse turns os.Args into a config, and rejects the combinations that would draw
 // something other than what was asked for.

@@ -13,10 +13,40 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
+// contentWidth and contentHeight are the live content viewport in CSS pixels.
+// The chrome pump writes it on resize, so readers on other goroutines take the
+// lock rather than touch config directly.
+func (f *framePath) contentWidth() int {
+	f.sizeMu.RLock()
+	defer f.sizeMu.RUnlock()
+	return f.config.width
+}
+
+func (f *framePath) contentHeight() int {
+	f.sizeMu.RLock()
+	defer f.sizeMu.RUnlock()
+	return f.config.height
+}
+
+// devSize is the current viewport in device pixels.
+func (f *framePath) devSize() frame.Size {
+	f.sizeMu.RLock()
+	defer f.sizeMu.RUnlock()
+	return f.config.devSize()
+}
+
+// setContentSize records a new live viewport. Callers hold no other lock; the
+// chrome pump is the only writer.
+func (f *framePath) setContentSize(w, h int) {
+	f.sizeMu.Lock()
+	f.config.width = w
+	f.config.height = h
+	f.sizeMu.Unlock()
+}
+
 // handleResize reflows and repaints the active tab after the window is resized.
 func (f *framePath) handleResize(contentW, contentH int) {
-	f.config.width = contentW
-	f.config.height = contentH
+	f.setContentSize(contentW, contentH)
 
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -56,7 +86,7 @@ func (f *framePath) pumpJS() bool {
 	if sess == nil {
 		return false
 	}
-	if !sess.PumpJS(float32(f.config.width)) {
+	if !sess.PumpJS(float32(f.contentWidth())) {
 		return false
 	}
 	// A callback that ran past the deadline was stopped by the engine. Replace
@@ -83,7 +113,7 @@ func (f *framePath) pumpPaced() bool {
 	if sess == nil {
 		return false
 	}
-	if !sess.PumpJS(float32(f.config.width)) {
+	if !sess.PumpJS(float32(f.contentWidth())) {
 		return false
 	}
 	return f.repaintPaced(sess)

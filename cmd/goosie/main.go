@@ -120,15 +120,19 @@ func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
 // framePath is the assembled pipeline: everything between a vsync and a Present, with
 // the pieces a report has to name kept reachable.
 type framePath struct {
-	window        surface.Window
-	loop          *surface.Loop
-	sched         *raster.Scheduler
-	pool          *raster.Pool
-	composer      *surface.Composer
-	layer         *frame.Layer
-	rec           *frame.FrameRecorder
-	spec          paint.SceneSpec
-	config        config
+	window   surface.Window
+	loop     *surface.Loop
+	sched    *raster.Scheduler
+	pool     *raster.Pool
+	composer *surface.Composer
+	layer    *frame.Layer
+	rec      *frame.FrameRecorder
+	spec     paint.SceneSpec
+	config   config
+	// sizeMu guards config.width/height, the live content viewport. The chrome
+	// pump writes them on resize and zoom while navigation and prompt goroutines
+	// read them to size a load, so both sides go through the accessors.
+	sizeMu        sync.RWMutex
 	toolbar       *toolbar.State
 	tabMgr        *tabs.TabManager
 	client        net.HTTP
@@ -707,7 +711,7 @@ func (f *framePath) openWindow() error {
 	// The surface is the whole window: the content viewport plus the chrome the
 	// chromeWindow composites on top of it. config.devSize is the content size
 	// alone, so the chrome band is added back here.
-	size := f.config.devSize()
+	size := f.devSize()
 	if f.toolbar != nil && f.tabMgr != nil {
 		size.H += int32(totalChromeHeight) * int32(f.config.dpr+0.5)
 	}

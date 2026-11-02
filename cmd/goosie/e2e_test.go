@@ -203,7 +203,7 @@ func (b *browserE2E) clickElementByID(t *testing.T, id string) {
 
 func (b *browserE2E) clickToolbarButton(t *testing.T, button toolbar.Button) {
 	t.Helper()
-	width := int32(b.f.config.devSize().W)
+	width := int32(b.f.devSize().W)
 	r := toolbar.ButtonRect(button, width)
 	x := (r.X0 + r.X1) / 2
 	y := int32(tabs.TabBarHeight) + (r.Y0+r.Y1)/2
