@@ -23,6 +23,7 @@ type resizeObserver struct {
 	mu           sync.Mutex
 	callback     goja.Callable
 	targets      map[*dom.Node]bool
+	lastSizes    map[*dom.Node][2]float64
 	entries      []resizeEntry
 	r            *Runtime
 	disconnected bool
@@ -35,6 +36,7 @@ type resizeState struct {
 	mu        sync.Mutex
 	observers []*resizeObserver
 	rects     map[*dom.Node][2]float64 // width, height
+	watched   map[*dom.Node]int        // refcount of observers per target
 }
 
 func setResizeState(r *Runtime, s *resizeState) {
@@ -56,7 +58,8 @@ func resizeStateOf(r *Runtime) *resizeState {
 // setupResizeObserver installs the ResizeObserver constructor.
 func (r *Runtime) setupResizeObserver() {
 	state := &resizeState{
-		rects: make(map[*dom.Node][2]float64),
+		rects:   make(map[*dom.Node][2]float64),
+		watched: make(map[*dom.Node]int),
 	}
 	setResizeState(r, state)
 
@@ -71,9 +74,10 @@ func (r *Runtime) setupResizeObserver() {
 		}
 
 		obs := &resizeObserver{
-			callback: callback,
-			targets:  make(map[*dom.Node]bool),
-			r:        r,
+			callback:  callback,
+			targets:   make(map[*dom.Node]bool),
+			lastSizes: make(map[*dom.Node][2]float64),
+			r:         r,
 		}
 
 		obj := call.This
@@ -107,10 +111,15 @@ func (r *Runtime) setupResizeObserver() {
 			}
 
 			obs.mu.Lock()
+			alreadyObserved := obs.targets[node]
 			obs.targets[node] = true
+			obs.disconnected = false
 			obs.mu.Unlock()
 
 			state.mu.Lock()
+			if !alreadyObserved {
+				state.watched[node]++
+			}
 			found := false
 			for _, o := range state.observers {
 				if o == obs {
@@ -154,8 +163,14 @@ func (r *Runtime) setupResizeObserver() {
 			}
 
 			obs.mu.Lock()
+			removed := obs.targets[node]
 			delete(obs.targets, node)
+			delete(obs.lastSizes, node)
 			obs.mu.Unlock()
+
+			if removed {
+				releaseResizeTarget(state, node)
+			}
 
 			return goja.Undefined()
 		})
@@ -164,9 +179,23 @@ func (r *Runtime) setupResizeObserver() {
 		_ = obj.Set("disconnect", func(call goja.FunctionCall) goja.Value {
 			obs.mu.Lock()
 			obs.disconnected = true
+			targets := obs.targets
 			obs.targets = make(map[*dom.Node]bool)
+			obs.lastSizes = make(map[*dom.Node][2]float64)
 			obs.entries = nil
 			obs.mu.Unlock()
+
+			state.mu.Lock()
+			for target := range targets {
+				decrementResizeTargetLocked(state, target)
+			}
+			for i, registered := range state.observers {
+				if registered == obs {
+					state.observers = append(state.observers[:i], state.observers[i+1:]...)
+					break
+				}
+			}
+			state.mu.Unlock()
 			return goja.Undefined()
 		})
 
@@ -183,6 +212,22 @@ func (r *Runtime) setupResizeObserver() {
 	}
 }
 
+func decrementResizeTargetLocked(state *resizeState, node *dom.Node) {
+	count := state.watched[node] - 1
+	if count > 0 {
+		state.watched[node] = count
+		return
+	}
+	delete(state.watched, node)
+	delete(state.rects, node)
+}
+
+func releaseResizeTarget(state *resizeState, node *dom.Node) {
+	state.mu.Lock()
+	decrementResizeTargetLocked(state, node)
+	state.mu.Unlock()
+}
+
 // SetElementSize records an element's current size for ResizeObserver.
 func (r *Runtime) SetElementSize(node *dom.Node, width, height float64) {
 	state := resizeStateOf(r)
@@ -191,11 +236,14 @@ func (r *Runtime) SetElementSize(node *dom.Node, width, height float64) {
 	}
 
 	state.mu.Lock()
-	state.rects[node] = [2]float64{width, height}
+	if state.watched[node] > 0 {
+		state.rects[node] = [2]float64{width, height}
+	}
 	state.mu.Unlock()
 }
 
-// DrainResizeObservers checks for size changes and fires callbacks.
+// DrainResizeObservers fires callbacks for targets whose size changed since the
+// last delivery. An unobserved target is never reported.
 func (r *Runtime) DrainResizeObservers() {
 	state := resizeStateOf(r)
 	if state == nil {
@@ -205,7 +253,7 @@ func (r *Runtime) DrainResizeObservers() {
 	state.mu.Lock()
 	observers := make([]*resizeObserver, len(state.observers))
 	copy(observers, state.observers)
-	rects := make(map[*dom.Node][2]float64)
+	rects := make(map[*dom.Node][2]float64, len(state.rects))
 	for k, v := range state.rects {
 		rects[k] = v
 	}
@@ -224,6 +272,10 @@ func (r *Runtime) DrainResizeObservers() {
 			if !ok {
 				continue
 			}
+			if last, seen := obs.lastSizes[target]; seen && last == size {
+				continue
+			}
+			obs.lastSizes[target] = size
 			entries = append(entries, resizeEntry{
 				target: target,
 				width:  size[0],
@@ -253,7 +305,7 @@ func (r *Runtime) DrainResizeObservers() {
 			jsEntry := r.wrapResizeEntry(entry)
 			_ = arr.Set(fmt.Sprintf("%d", i), jsEntry)
 		}
-		_, _ = callback(goja.Undefined(), arr, obs.obj)
+		_, _ = callback(obs.obj, arr, obs.obj)
 	}
 }
 

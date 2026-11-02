@@ -1977,9 +1977,11 @@ func (s *Session) Reflow(viewportW float32) error {
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil {
 				s.jsRT.SetElementRect(int(n.ID), candidate.Objects[i].X, candidate.Objects[i].Y, candidate.Objects[i].W, candidate.Objects[i].H)
+				s.jsRT.SetElementSize(n, float64(candidate.Objects[i].W), float64(candidate.Objects[i].H))
 			}
 		}
 		s.jsRT.CheckIntersections()
+		s.jsRT.DrainResizeObservers()
 	}
 	s.Arena = candidate
 	s.layoutDirty.Store(false)

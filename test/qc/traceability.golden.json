@@ -1805,8 +1805,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/resize_observer_test.go:TestResizeObserverFollowsLayoutChanges",
+      "test/js/resize_observer_test.go:TestMutationObserverBatchesEachTurnIntoOneCallback",
+      "test/js/resize_observer_test.go:TestResizeObserverDeliversEachChangeOnce",
+      "test/js/resize_observer_test.go:TestResizeObserverUnobserveAndDisconnectStopDelivery"
+    ],
     "enforced": false
   },
   {
