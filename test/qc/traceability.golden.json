@@ -3158,10 +3158,11 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "internal/image/decode_test.go:TestProbeAcceptsAtLimit",
-      "internal/image/decode_test.go:TestProbeRejectsEncodedByteLimit"
+      "internal/image/decode_test.go:TestProbeRejectsEncodedByteLimit",
+      "test/engine/adversarial_test.go:TestOversizedEncodedImageRejectedBeforeDecode"
     ],
     "enforced": true
   },
@@ -3172,7 +3173,7 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "internal/image/decode_test.go:TestDecodeJPEGRejectsOversized",
       "internal/image/decode_test.go:TestDecodePNGRejectsOversized",
@@ -3180,6 +3181,7 @@
       "internal/image/decode_test.go:TestProbeRejectsJustOverPixelLimit",
       "internal/image/decode_test.go:TestProbeRejectsOversizedDimensions",
       "internal/image/decode_test.go:TestProbeRejectsOversizedWebPDimensions",
+      "internal/image/decode_test.go:TestProbeRejectsPixelBombFromHeaderOnlyPNG",
       "test/engine/adversarial_test.go:TestOversizedImageHeaderRejectedBeforeDecode"
     ],
     "enforced": true

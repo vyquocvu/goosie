@@ -3,6 +3,8 @@ package image
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -146,12 +148,54 @@ func TestProbeRejectsJustOverPixelLimit(t *testing.T) {
 
 // qc:BR-165
 func TestProbeRejectsEncodedByteLimit(t *testing.T) {
-	data := make([]byte, MaxEncodedImageBytes+1)
-	copy(data, []byte{0x89, 'P', 'N', 'G'})
+	// A valid 4x4 PNG padded past the cap: the config probe would accept it, so
+	// only a length check that runs before metadata decoding rejects it.
+	data := append(smallPNG(t), make([]byte, MaxEncodedImageBytes)...)
 	_, err := Probe(data)
-	if err == nil {
-		t.Fatal("Probe accepted oversized encoded data")
+	if err == nil || !strings.Contains(err.Error(), "encoded size") {
+		t.Fatalf("Probe(%d bytes) = %v, want the encoded-size cap", len(data), err)
 	}
+}
+
+// qc:BR-166
+func TestProbeRejectsPixelBombFromHeaderOnlyPNG(t *testing.T) {
+	// 4096x8192 RGBA would need 128 MiB decoded, but the file is only an IHDR.
+	data := headerOnlyPNG(t, 4096, 8192)
+	if len(data) > 128 {
+		t.Fatalf("header-only fixture = %d bytes, want a small file", len(data))
+	}
+	_, err := Probe(data)
+	if err == nil || !strings.Contains(err.Error(), "pixel count") {
+		t.Fatalf("Probe(%d bytes declaring 4096x8192) = %v, want pixel-count admission", len(data), err)
+	}
+}
+
+func headerOnlyPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], uint32(width))
+	binary.BigEndian.PutUint32(ihdr[4:], uint32(height))
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 6 // color type RGBA
+	writePNGChunk(&buf, "IHDR", ihdr)
+	writePNGChunk(&buf, "IEND", nil)
+	return buf.Bytes()
+}
+
+func writePNGChunk(buf *bytes.Buffer, typ string, data []byte) {
+	var length [4]byte
+	binary.BigEndian.PutUint32(length[:], uint32(len(data)))
+	buf.Write(length[:])
+	buf.WriteString(typ)
+	buf.Write(data)
+	crc := crc32.NewIEEE()
+	crc.Write([]byte(typ))
+	crc.Write(data)
+	var sum [4]byte
+	binary.BigEndian.PutUint32(sum[:], crc.Sum32())
+	buf.Write(sum[:])
 }
 
 func TestDecodeRejectsMalformed(t *testing.T) {

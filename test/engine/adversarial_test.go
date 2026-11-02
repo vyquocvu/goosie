@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/engine"
+	imgdec "github.com/vyquocvu/goosie/internal/image"
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
@@ -96,6 +97,32 @@ func TestOversizedImageHeaderRejectedBeforeDecode(t *testing.T) {
 				t.Fatalf("decoded image attached = %t, want %t", got, tc.wantImage)
 			}
 		})
+	}
+}
+
+// qc:BR-165
+func TestOversizedEncodedImageRejectedBeforeDecode(t *testing.T) {
+	// A valid 1x1 PNG padded past the encoded cap: metadata decoding and full
+	// decode would both succeed, so only the length check before either can
+	// keep the pixels off the layout object.
+	encoded := append(encodePNG(t, 1, 1), make([]byte, imgdec.MaxEncodedImageBytes)...)
+	fetcher := func(base, url string) ([]byte, error) { return encoded, nil }
+	sess, err := engine.NewSession(`<img src="https://cdn.example.com/padded.png">`, nil, 400,
+		engine.WithImages("https://example.com/page", fetcher))
+	if err != nil {
+		t.Fatalf("NewSession with oversized image: %v (image failures must degrade, not fail)", err)
+	}
+	if sess == nil {
+		t.Fatal("session is nil")
+	}
+	defer sess.Close()
+
+	img := imageObject(sess)
+	if img == nil {
+		t.Fatal("image element has no layout object")
+	}
+	if img.Image != nil {
+		t.Fatalf("decoded %d-byte image attached, want rejection before decode", len(encoded))
 	}
 }
 
