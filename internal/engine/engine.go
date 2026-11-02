@@ -1946,7 +1946,7 @@ func (s *Session) Reflow(viewportW float32) error {
 				ops := s.jsRT.CanvasOps(int(n.ID))
 				if len(ops) > 0 {
 					w, h := s.jsRT.CanvasDimensions(int(n.ID))
-					if w > 0 && h > 0 {
+					if canvasBitmapFits(w, h) {
 						b := frame.NewBitmap(w, h)
 						frameOps := make([]frame.CanvasOp, len(ops))
 						for j, op := range ops {

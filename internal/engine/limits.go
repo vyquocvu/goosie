@@ -56,9 +56,23 @@ const (
 	MaxDPR             = 8
 	MaxDeviceDimension = 16384
 	MaxDevicePixels    = 16 * 1024 * 1024
+	// Canvas backing stores reuse the device bounds: width/height come from
+	// page-controlled attributes, and the replay allocates one bitmap of that
+	// size before paint.
+	MaxCanvasDimension = MaxDeviceDimension
+	MaxCanvasPixels    = MaxDevicePixels
 	MaxDocumentTiles   = 524288
 	MaxTileCacheBytes  = 64 << 20
 )
+
+// canvasBitmapFits reports whether a canvas may be rasterized within the device
+// bounds. A declared size outside them is left unpainted rather than allocated.
+func canvasBitmapFits(w, h int) bool {
+	if w <= 0 || h <= 0 || w > MaxCanvasDimension || h > MaxCanvasDimension {
+		return false
+	}
+	return int64(w)*int64(h) <= MaxCanvasPixels
+}
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 

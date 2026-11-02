@@ -267,7 +267,7 @@ func (b *Builder) paintReplacedElement(obj *layout.Object, opacity float32, clip
 		return
 	}
 	switch obj.Node.Data {
-	case "img":
+	case "img", "canvas":
 		b.paintImage(obj, opacity, clip)
 	case "video":
 		b.paintVideo(obj, opacity, clip)

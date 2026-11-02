@@ -48,6 +48,10 @@ type canvasContext2D struct {
 	bitmap  []byte
 	bitmapW int
 	bitmapH int
+	// obj is the JS wrapper carrying the drawing methods. getContext returns it
+	// on every call, so a page that asks for the context twice gets the same
+	// object instead of a bare Go struct with no methods.
+	obj *goja.Object
 }
 
 const maxImageDataBytes = 64 << 20
@@ -116,10 +120,18 @@ func (r *Runtime) newUint8ClampedArray(length int) *goja.Object {
 	return array
 }
 
-func (r *Runtime) newImageData(width, height int, data *goja.Object) *goja.Object {
+// validateImageDataRegion rejects an ImageData region that would exceed the
+// byte limit. Callers run it before allocating the pixel buffer, so an
+// oversized getImageData throws instead of reserving hundreds of megabytes
+// only for newImageData to reject the same dimensions afterwards.
+func (r *Runtime) validateImageDataRegion(width, height int) {
 	if width <= 0 || height <= 0 || width > math.MaxInt/4 || height > maxImageDataBytes/(width*4) {
 		panic(r.domError("IndexSizeError", "ImageData dimensions are invalid or exceed the implementation limit"))
 	}
+}
+
+func (r *Runtime) newImageData(width, height int, data *goja.Object) *goja.Object {
+	r.validateImageDataRegion(width, height)
 	if data == nil {
 		data = r.newUint8ClampedArray(width * height * 4)
 	}
@@ -280,14 +292,21 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	// Check if we already have a context for this canvas
 	r.mu.Lock()
 	if ctx, exists := r.canvasContexts[nodeID]; exists {
+		obj := ctx.obj
 		r.mu.Unlock()
-		// Return the existing context wrapper
-		return r.vm.ToValue(ctx)
+		if obj != nil {
+			return obj
+		}
+		return goja.Null()
 	}
 	if node.ID != 0 {
 		if ctx, exists := r.canvasContexts[int(node.ID)]; exists {
+			obj := ctx.obj
 			r.mu.Unlock()
-			return r.vm.ToValue(ctx)
+			if obj != nil {
+				return obj
+			}
+			return goja.Null()
 		}
 	}
 	r.mu.Unlock()
@@ -317,13 +336,9 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 		textBaseline: "alphabetic",
 	}
 
-	r.BindCanvasContext(nodeID, ctx)
-	if node.ID != 0 && int(node.ID) != nodeID {
-		r.BindCanvasContext(int(node.ID), ctx)
-	}
-
 	// Create the JS wrapper object
 	obj := r.vm.NewObject()
+	ctx.obj = obj
 	_ = obj.Set("canvas", call.This)
 	_ = obj.Set("fillStyle", ctx.fillStyle)
 	_ = obj.Set("strokeStyle", ctx.strokeStyle)
@@ -334,6 +349,11 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 
 	// Add all the drawing methods
 	r.setupCanvasContextMethods(obj, ctx)
+
+	r.BindCanvasContext(nodeID, ctx)
+	if node.ID != 0 && int(node.ID) != nodeID {
+		r.BindCanvasContext(int(node.ID), ctx)
+	}
 
 	return obj
 }
@@ -879,7 +899,8 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		if h <= 0 {
 			h = 1
 		}
-		data := make([]int, w*h*4)
+		r.validateImageDataRegion(w, h)
+		data := make([]byte, w*h*4)
 
 		// Read from the rendered bitmap if available.
 		ctx.mu.Lock()
@@ -912,10 +933,10 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 						blue = blue * 255 / a
 					}
 					dstIdx := (py*w + px) * 4
-					data[dstIdx] = red
-					data[dstIdx+1] = green
-					data[dstIdx+2] = blue
-					data[dstIdx+3] = a
+					data[dstIdx] = byte(red)
+					data[dstIdx+1] = byte(green)
+					data[dstIdx+2] = byte(blue)
+					data[dstIdx+3] = byte(a)
 				}
 			}
 		}
@@ -1355,7 +1376,8 @@ func (r *Runtime) setupCanvas() {
 			if h <= 0 {
 				h = 1
 			}
-			data := make([]int, w*h*4)
+			r.validateImageDataRegion(w, h)
+			data := make([]byte, w*h*4)
 
 			// Read from the rendered bitmap if available.
 			ctx.mu.Lock()
@@ -1387,10 +1409,10 @@ func (r *Runtime) setupCanvas() {
 							blue = blue * 255 / a
 						}
 						dstIdx := (py*w + px) * 4
-						data[dstIdx] = red
-						data[dstIdx+1] = green
-						data[dstIdx+2] = blue
-						data[dstIdx+3] = a
+						data[dstIdx] = byte(red)
+						data[dstIdx+1] = byte(green)
+						data[dstIdx+2] = byte(blue)
+						data[dstIdx+3] = byte(a)
 					}
 				}
 			}

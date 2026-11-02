@@ -1774,8 +1774,14 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/canvas_primitives_test.go:TestCanvasOversizedDimensionIsNotRasterized",
+      "test/engine/canvas_primitives_test.go:TestCanvasOversizedPixelAreaIsNotRasterized",
+      "test/engine/canvas_primitives_test.go:TestCanvasPrimitivesRasterizeAtDeclaredSize",
+      "test/js/canvas_getimagedata_limit_test.go:TestCanvasGetImageDataKeepsSmallRegionsWorking",
+      "test/js/canvas_getimagedata_limit_test.go:TestCanvasGetImageDataRejectsOversizedRegionBeforeAllocating"
+    ],
     "enforced": false
   },
   {
