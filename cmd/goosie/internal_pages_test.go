@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/bookmarks"
+	"github.com/vyquocvu/goosie/internal/download"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/history"
 	"github.com/vyquocvu/goosie/internal/js"
@@ -63,6 +64,7 @@ func TestAboutBlankIsAnEmptyDocument(t *testing.T) {
 	}
 }
 
+// qc:BR-138
 func TestBuildInternalPageHTML(t *testing.T) {
 	tmpDir := t.TempDir()
 	bmStore := bookmarks.NewStore(filepath.Join(tmpDir, "bookmarks.json"))
@@ -220,6 +222,7 @@ func TestRenderInternalPage(t *testing.T) {
 	}
 }
 
+// qc:BR-138
 func TestNavigateToInternalPage(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
@@ -248,6 +251,59 @@ func TestNavigateToInternalPage(t *testing.T) {
 	}
 	if tab.Error() != "" {
 		t.Errorf("tab.Error() = %q, want empty", tab.Error())
+	}
+}
+
+// TestNavigateToManagementInternalPagesByURL opens each management page the
+// way the address bar does and checks it lands as a real document with the
+// expected title and an intact rendered layer, so the action links on the page
+// have something to act on.
+// qc:BR-138
+func TestNavigateToManagementInternalPagesByURL(t *testing.T) {
+	dir := t.TempDir()
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+	f.bookmarks = bookmarks.NewStore(filepath.Join(dir, "bookmarks.json"))
+	f.bookmarks.Toggle("https://golang.org", "Go Language")
+	hist, err := history.Load(filepath.Join(dir, "history.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.history = hist
+	f.history.Record("https://example.com", "Example Domain")
+	f.downloads = download.NewManager(filepath.Join(dir, "downloads"))
+
+	for _, tc := range []struct{ url, title string }{
+		{"goosie://downloads", "Downloads"},
+		{"goosie://history", "Browsing History"},
+		{"goosie://bookmarks", "Bookmarks"},
+	} {
+		f.navigateTab(tc.url)
+		res := <-f.navResults
+		if res.err != nil {
+			t.Fatalf("%s navigation error: %v", tc.url, res.err)
+		}
+		if res.layer == nil || res.session == nil {
+			t.Fatalf("%s produced no document or layer", tc.url)
+		}
+		f.applyNavResult(res)
+
+		tab := f.tabMgr.Active()
+		if tab == nil || tab.Session() == nil {
+			t.Fatalf("%s left the active tab without a session", tc.url)
+		}
+		if got := tab.URL(); got != tc.url {
+			t.Fatalf("tab.URL() = %q, want %q", got, tc.url)
+		}
+		if got := tab.Title(); got != tc.title {
+			t.Fatalf("tab.Title() = %q, want %q", got, tc.title)
+		}
+		if tab.Layer() == nil {
+			t.Fatalf("%s rendered no layer", tc.url)
+		}
+		if got := tab.Error(); got != "" {
+			t.Fatalf("%s reported error %q", tc.url, got)
+		}
 	}
 }
 

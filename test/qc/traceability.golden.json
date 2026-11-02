@@ -2632,30 +2632,42 @@
     "id": "BR-132",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/find_and_zoom_test.go:TestZoomScopeIsWindowWideAcrossTabs"
+    ],
     "enforced": false
   },
   {
     "id": "BR-133",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/find_and_zoom_test.go:TestFindRunFindPaintsHighlights",
+      "cmd/goosie/journey_find_test.go:TestJourneyFindInPageCountsStepsScrollsAndEscape",
+      "test/engine/find_test.go:TestFindHighlightsPainted"
+    ],
     "enforced": false
   },
   {
     "id": "BR-134",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_find_test.go:TestJourneyFindZeroMatchLeavesPageIntact",
+      "test/engine/find_test.go:TestFindNoMatch"
+    ],
     "enforced": false
   },
   {
@@ -2675,30 +2687,44 @@
     "id": "BR-136",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "UNIT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/find_test.go:TestFindCaseInsensitive",
+      "test/engine/find_test.go:TestFindUnicodeCaseInsensitive"
+    ],
     "enforced": false
   },
   {
     "id": "BR-137",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_find_test.go:TestJourneyFindInPageCountsStepsScrollsAndEscape"
+    ],
     "enforced": false
   },
   {
     "id": "BR-138",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/downloads_test.go:TestDownloadsPageRenderingAndActions",
+      "cmd/goosie/internal_pages_test.go:TestBuildInternalPageHTML",
+      "cmd/goosie/internal_pages_test.go:TestNavigateToInternalPage",
+      "cmd/goosie/internal_pages_test.go:TestNavigateToManagementInternalPagesByURL",
+      "cmd/goosie/mgmt_pages_test.go:TestMgmtPagesRoutedThroughInternalPageHTML"
+    ],
     "enforced": false
   },
   {
@@ -2721,10 +2747,15 @@
     "priority": "P1",
     "methods": [
       "CUA",
-      "INT"
+      "UNIT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/keyboard_test.go:TestKeyboard_EnterActivates",
+      "test/engine/keyboard_test.go:TestKeyboard_RadioGroupHasOneSequentialFocusStop",
+      "test/engine/keyboard_test.go:TestKeyboard_ShiftTabMovesBack",
+      "test/engine/keyboard_test.go:TestKeyboard_TabMovesFocusWithKeyOrder"
+    ],
     "enforced": false
   },
   {

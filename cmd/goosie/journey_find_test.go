@@ -14,6 +14,7 @@ import (
 // journey through the real window wiring: a count appears without another
 // keystroke on reopen, Enter moves to the next hit and scrolls the document,
 // Escape closes find mode from wherever focus sits.
+// qc:BR-133 BR-137
 func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 	var page strings.Builder
 	page.WriteString("<!doctype html><html><body style=\"margin:0;font-size:16px;\">")
@@ -62,12 +63,16 @@ func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 		return b.f.tabMgr.Active().ScrollY() > 0
 	})
 
-	// Escape closes find mode and drops the highlights.
+	// Escape closes find mode, drops the highlights, and hands focus back to
+	// the page instead of leaving the address-bar field focused.
 	b.pressKey(t, 0x1b)
 	b.waitFor(t, "Escape closes find", func() bool {
 		active, _, _ := b.f.toolbar.FindCounts()
 		return !active
 	})
+	if focus := b.f.toolbar.GetFocus(); focus != toolbar.FocusNone {
+		t.Fatalf("focus after Escape = %v, want FocusNone so keys reach the page", focus)
+	}
 
 	// Reopening restores the query and its count without another keystroke.
 	b.inject(t, surface.Event{Kind: surface.EvKey, Key: 'f', Mods: surface.ModCommand})
@@ -78,6 +83,47 @@ func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 	if focus := b.f.toolbar.GetFocus(); focus != toolbar.FocusAddress {
 		t.Fatalf("reopened find focus = %v, want FocusAddress", focus)
 	}
+}
+
+// TestJourneyFindZeroMatchLeavesPageIntact drives the miss path through the
+// real window: a query with no hits reports a zero count, leaves the document
+// and its rendered layer untouched, and still closes on Escape.
+// qc:BR-134
+func TestJourneyFindZeroMatchLeavesPageIntact(t *testing.T) {
+	srvURL := findJourneyPage(t, `<p id="keep">alpha beta gamma</p>`, "")
+
+	b := newBrowserE2E(t)
+	b.navigateViaAddressBar(t, srvURL)
+	b.waitFor(t, "page loaded", func() bool {
+		tab := b.f.tabMgr.Active()
+		return b.activeURL() == srvURL && tab != nil && tab.Session() != nil
+	})
+
+	openFindWithQuery(t, b, "xyzzy")
+	b.waitFor(t, "zero matches reported", func() bool {
+		active, total, idx := b.f.toolbar.FindCounts()
+		return active && total == 0 && idx == 0
+	})
+
+	tab := b.f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		t.Fatal("zero-match find lost the active document")
+	}
+	if got := tab.URL(); got != srvURL {
+		t.Fatalf("zero-match find navigated to %q, want the page %q", got, srvURL)
+	}
+	if body := tab.Session().Doc.Node.TextContent(); !strings.Contains(body, "alpha beta gamma") {
+		t.Fatalf("zero-match find changed the document text: %q", body)
+	}
+	if tab.Layer() == nil {
+		t.Fatal("zero-match find cleared the rendered layer")
+	}
+
+	b.pressKey(t, 0x1b)
+	b.waitFor(t, "Escape closes find after a miss", func() bool {
+		active, _, _ := b.f.toolbar.FindCounts()
+		return !active
+	})
 }
 
 func findJourneyPage(t *testing.T, body, script string) string {

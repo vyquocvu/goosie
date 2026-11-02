@@ -73,6 +73,7 @@ func TestFindFindsWord(t *testing.T) {
 	}
 }
 
+// qc:BR-136
 func TestFindCaseInsensitive(t *testing.T) {
 	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>hello world hello</p></body></html>`, nil, 800)
 	if err != nil {
@@ -97,6 +98,33 @@ func TestFindCaseInsensitive(t *testing.T) {
 		if !rectsNear(got[i], b.x0, b.y0, b.x1, b.y1) {
 			t.Fatalf("Find(\"HELLO\")[%d] = %+v, want %+v", i, got[i], b)
 		}
+	}
+}
+
+// TestFindUnicodeCaseInsensitive pins that finding folds Vietnamese text by
+// rune rather than byte: an uppercase accented query matches its lowercase
+// source, and the match span covers both words.
+// qc:BR-136
+func TestFindUnicodeCaseInsensitive(t *testing.T) {
+	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>Tiếng Việt đất nước</p></body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := sess.Find("TIẾNG VIỆT"); len(got) != 1 {
+		t.Fatalf("Find(\"TIẾNG VIỆT\") = %d matches, want 1", len(got))
+	}
+	if got := sess.Find("việt"); len(got) != 1 {
+		t.Fatalf("Find(\"việt\") = %d matches, want 1", len(got))
+	}
+	if got := sess.Find("ĐẤT"); len(got) != 1 {
+		t.Fatalf("Find(\"ĐẤT\") = %d matches, want 1", len(got))
+	}
+	if got := sess.Find("tiếng"); len(got) != 1 {
+		t.Fatalf("Find(\"tiếng\") = %d matches, want 1", len(got))
+	}
+	if got := sess.Find("tieng viet"); len(got) != 0 {
+		t.Fatalf("Find without diacritics = %d matches, want 0 (no accent folding)", len(got))
 	}
 }
 
@@ -141,6 +169,7 @@ func TestFindAcrossParagraphs(t *testing.T) {
 	}
 }
 
+// qc:BR-134
 func TestFindNoMatch(t *testing.T) {
 	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>hello world</p></body></html>`, nil, 800)
 	if err != nil {
@@ -167,6 +196,7 @@ func findHighlightFills(list *paint.List, m engine.Match, scale float32) []paint
 	return out
 }
 
+// qc:BR-133
 func TestFindHighlightsPainted(t *testing.T) {
 	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>hello world hello</p></body></html>`, nil, 800)
 	if err != nil {

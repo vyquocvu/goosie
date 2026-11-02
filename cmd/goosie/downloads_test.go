@@ -59,6 +59,7 @@ func TestDownloadsManagerIntegration(t *testing.T) {
 	}
 }
 
+// qc:BR-138
 func TestDownloadsPageRenderingAndActions(t *testing.T) {
 	dlDir := t.TempDir()
 	testFile := filepath.Join(dlDir, "document.pdf")

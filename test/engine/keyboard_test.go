@@ -42,6 +42,7 @@ document.getElementById('a').addEventListener('keyup', function(e){ __keys += 'u
 
 // TestKeyboard_TabMovesFocusWithKeyOrder asserts the full ordering: keydown on
 // the source, then blur/focus, then keyup on the destination.
+// qc:BR-140
 func TestKeyboard_TabMovesFocusWithKeyOrder(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -101,6 +102,7 @@ function L(s){ if(__log) __log += ','; __log += s; }
 
 // TestKeyboard_ShiftTabMovesBack asserts Shift+Tab moves to the previous
 // control and fires blur on the source before focus on the destination.
+// qc:BR-140
 func TestKeyboard_ShiftTabMovesBack(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -160,6 +162,7 @@ document.getElementById('b').addEventListener('focus',function(){ L('b:focus'); 
 
 // TestKeyboard_EnterActivates asserts Enter on a focused checkbox toggles it
 // via the shared click default action, and the keydown/keyup both fire.
+// qc:BR-140
 func TestKeyboard_EnterActivates(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -449,6 +452,7 @@ func TestKeyboard_HeldSpaceActiveStateClearsOnSequentialFocusChange(t *testing.T
 	}
 }
 
+// qc:BR-140
 func TestKeyboard_RadioGroupHasOneSequentialFocusStop(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body>
 <input id="start">

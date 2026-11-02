@@ -279,6 +279,7 @@ func TestMgmtPagesSaveErrorFeedback(t *testing.T) {
 
 // TestMgmtPagesRoutedThroughInternalPageHTML checks the pages are reachable
 // through the shared goosie:// router with their query strings intact.
+// qc:BR-138
 func TestMgmtPagesRoutedThroughInternalPageHTML(t *testing.T) {
 	dir := t.TempDir()
 	bmPath := filepath.Join(dir, "bookmarks.json")

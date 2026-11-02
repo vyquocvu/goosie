@@ -98,6 +98,7 @@ func TestFindCmdGStepsWithoutEditingQuery(t *testing.T) {
 	}
 }
 
+// qc:BR-133
 func TestFindRunFindPaintsHighlights(t *testing.T) {
 	f := newNavTestPath(t)
 	f.toolbar = toolbar.NewState(800, nil)
@@ -302,6 +303,47 @@ func TestZoomKeyboardShortcuts(t *testing.T) {
 	cw.handleTabShortcut('0', surface.ModCommand)
 	if !zoomCalled || zoomDelta != 0 {
 		t.Errorf("Cmd+0 failed: called=%v, delta=%f", zoomCalled, zoomDelta)
+	}
+}
+
+// TestZoomScopeIsWindowWideAcrossTabs documents the zoom policy: zoom is a
+// paint scale for the window, not state owned by a tab. Switching tabs keeps
+// the same factor, the same effective device scale, and the same toolbar badge
+// instead of restoring a different per-tab zoom.
+// qc:BR-132
+func TestZoomScopeIsWindowWideAcrossTabs(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config.width, f.config.height, f.config.dpr = 800, 600, 1
+	f.toolbar = toolbar.NewState(800, nil)
+
+	first := f.tabMgr.Active()
+	second := f.tabMgr.NewTab()
+
+	f.handleZoom(0.2)
+	if f.zoom < 1.19 || f.zoom > 1.21 {
+		t.Fatalf("f.zoom = %f, want ~1.2", f.zoom)
+	}
+	zoomedScale := f.effectiveScale()
+	if f.toolbar.Zoom < 1.19 || f.toolbar.Zoom > 1.21 {
+		t.Fatalf("toolbar zoom = %f, want ~1.2", f.toolbar.Zoom)
+	}
+
+	for _, tab := range []*tabs.Tab{second, first} {
+		f.switchTab(tab.ID())
+		if f.zoom < 1.19 || f.zoom > 1.21 {
+			t.Fatalf("zoom after switching to tab %d = %f, want the window factor ~1.2", tab.ID(), f.zoom)
+		}
+		if got := f.effectiveScale(); got != zoomedScale {
+			t.Fatalf("effective scale after switching to tab %d = %f, want %f", tab.ID(), got, zoomedScale)
+		}
+		if got := f.toolbar.Zoom; got < 1.19 || got > 1.21 {
+			t.Fatalf("toolbar zoom after switching to tab %d = %f, want ~1.2", tab.ID(), got)
+		}
+	}
+
+	f.handleZoom(0)
+	if f.zoom != 1.0 || f.toolbar.Zoom != 1.0 {
+		t.Fatalf("reset zoom = (%f, toolbar %f), want (1, 1)", f.zoom, f.toolbar.Zoom)
 	}
 }
 
