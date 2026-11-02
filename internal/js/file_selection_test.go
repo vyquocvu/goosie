@@ -123,3 +123,74 @@ func TestClickOnFileInputWithoutActivationRecordsNothing(t *testing.T) {
 		t.Fatalf("click without user activation recorded a picker request for %v", node)
 	}
 }
+
+// HTML applies its "not being rendered" check to select pickers only. File
+// inputs are exempt, so a display:none upload control still opens the picker
+// when transient activation allows it - the same behavior Chromium exposes for
+// the common hidden-input-plus-styled-label pattern.
+func TestHiddenFileInputPickerRequestFollowsActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hide func(*dom.Node)
+	}{
+		{"self", func(input *dom.Node) { input.SetAttribute("style", "display:none") }},
+		{"ancestor", func(input *dom.Node) { input.Parent.SetAttribute("style", "display:none") }},
+	} {
+		t.Run(tc.name+" with activation", func(t *testing.T) {
+			runtime, _, input := newFileSelectionRuntime(t)
+			tc.hide(input)
+			runtime.SetTransientUserActivation(true)
+			got, err := runtime.Evaluate(`(function() {
+				document.getElementById('upload').showPicker();
+				return navigator.userActivation.isActive;
+			})()`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != "false" {
+				t.Fatalf("hidden showPicker left transient activation active: %q", got)
+			}
+			node, ok := runtime.TakeFilePickerRequest()
+			if !ok || node != input {
+				t.Fatalf("TakeFilePickerRequest = (%v, %v), want the upload input", node, ok)
+			}
+		})
+
+		t.Run(tc.name+" without activation", func(t *testing.T) {
+			runtime, _, input := newFileSelectionRuntime(t)
+			tc.hide(input)
+			got, err := runtime.Evaluate(`(function() {
+				try { document.getElementById('upload').showPicker(); return 'none' }
+				catch (e) { return e.name }
+			})()`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != "NotAllowedError" {
+				t.Fatalf("hidden showPicker without activation = %q, want NotAllowedError", got)
+			}
+			if node, ok := runtime.TakeFilePickerRequest(); ok {
+				t.Fatalf("hidden showPicker without activation recorded a request for %v", node)
+			}
+		})
+	}
+}
+
+func TestHiddenSelectShowPickerThrowsNotSupported(t *testing.T) {
+	runtime, doc, _ := newFileSelectionRuntime(t)
+	selectNode := doc.NewElement("select")
+	selectNode.SetAttribute("id", "choice")
+	selectNode.SetAttribute("style", "display:none")
+	doc.Body.AppendChild(selectNode)
+	runtime.SetTransientUserActivation(true)
+	got, err := runtime.Evaluate(`(function() {
+		try { document.getElementById('choice').showPicker(); return 'none' }
+		catch (e) { return e.name + '|' + navigator.userActivation.isActive }
+	})()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "NotSupportedError|true" {
+		t.Fatalf("hidden select showPicker = %q, want NotSupportedError|true", got)
+	}
+}
