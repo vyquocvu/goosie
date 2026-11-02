@@ -3250,5 +3250,19 @@
       "test/gatecheck/live_parity_test.go:TestLiveParitySelftestIsGreen"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-261",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie-headless/main_test.go:TestPumpRejectsOutOfRangeBudget",
+      "cmd/goosie-headless/main_test.go:TestPumpRunsTimersBeforePainting",
+      "cmd/goosie-headless/main_test.go:TestWithoutPumpTimersDoNotRun"
+    ],
+    "enforced": false
   }
 ]

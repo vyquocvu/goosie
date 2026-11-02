@@ -9,6 +9,12 @@
 //
 //	goosie-headless -in page.html -out page.png
 //	goosie-headless -in page.html -out page.png -width 1440 -height 900 -dpr 2
+//	goosie-headless -in page.html -out page.png -pump 500ms
+//
+// By default the document is painted after one synchronous parse/style/layout
+// pass, so timer and animation-frame callbacks never run. -pump opts into a
+// wall-clock budget of event-loop turns before the paint, for pages whose final
+// state is reached from setTimeout.
 package main
 
 import (
@@ -40,6 +46,10 @@ const (
 	// render should complete in milliseconds, but a slow machine or large page
 	// might need more.
 	renderTimeout = 10 * time.Second
+	// pumpStep is how long one event-loop turn sleeps before the next. Timer
+	// resolution is what a page's reveal is written against, so a turn every
+	// 10ms keeps a 100ms setTimeout honest without spinning the CPU.
+	pumpStep = 10 * time.Millisecond
 )
 
 // config is one parsed invocation.
@@ -49,6 +59,7 @@ type config struct {
 	width  int
 	height int
 	dpr    float64
+	pump   time.Duration
 }
 
 // devSize is the surface in device pixels.
@@ -93,6 +104,30 @@ func mustJSRuntime(docURL string) *js.Runtime {
 	return rt
 }
 
+// pumpJSFor spends a wall-clock budget on the document's event loop before the
+// display list is built, so a reveal written against setTimeout has a chance to
+// run and reflow. A render is otherwise one synchronous pass - the shape every
+// existing gate, bench and parity number measures - so this is opt-in and the
+// default path is untouched.
+func pumpJSFor(sess *engine.Session, viewportW float32, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	for {
+		sess.PumpJS(viewportW)
+		if sess.HasScriptTimeout() {
+			return fmt.Errorf("script timed out during -pump after %d interrupt(s)", sess.ScriptTimeoutCount())
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil
+		}
+		wait := pumpStep
+		if remaining < wait {
+			wait = remaining
+		}
+		time.Sleep(wait)
+	}
+}
+
 func run(args []string) error {
 	var c config
 	fs := flag.NewFlagSet("goosie-headless", flag.ContinueOnError)
@@ -101,6 +136,7 @@ func run(args []string) error {
 	fs.IntVar(&c.width, "width", 1440, "viewport width in CSS pixels")
 	fs.IntVar(&c.height, "height", 900, "viewport height in CSS pixels")
 	fs.Float64Var(&c.dpr, "dpr", 2, "device pixel ratio")
+	fs.DurationVar(&c.pump, "pump", 0, "run the JS event loop for this long before painting (e.g. 500ms); 0 paints once, without timers")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: goosie-headless -in page.html -out page.png [flags]")
 		fmt.Fprintln(fs.Output(), "")
@@ -121,6 +157,9 @@ func run(args []string) error {
 	}
 	if c.dpr <= 0 || c.dpr > 8 {
 		return fmt.Errorf("-dpr must be in (0, 8]")
+	}
+	if c.pump < 0 || c.pump > renderTimeout {
+		return fmt.Errorf("-pump must be in [0, %v]", renderTimeout)
 	}
 	if err := engine.ValidateViewport(c.width, c.height, c.dpr); err != nil {
 		return fmt.Errorf("viewport: %w", err)
@@ -149,11 +188,20 @@ func run(args []string) error {
 	}
 
 	documentText, documentEncoding, _ := net.DecodeHTML(html, "")
-	sess, err := engine.NewSession(documentText, nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)), engine.WithDocumentEncoding(documentEncoding), engine.WithJS(mustJSRuntime(c.in)))
+	// The invalidation batch is what lets PumpJS see a script's DOM writes. A
+	// one-shot render never asks, but -pump does, and without it a timer that
+	// changes style leaves the paint list on the load-time cascade.
+	sess, err := engine.NewSession(documentText, nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)), engine.WithDocumentEncoding(documentEncoding), engine.WithJS(mustJSRuntime(c.in)), engine.WithInvalidation(&engine.Invalidation{}))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)
 	}
 	defer sess.Close()
+
+	if c.pump > 0 {
+		if err := pumpJSFor(sess, float32(c.width), c.pump); err != nil {
+			return err
+		}
+	}
 
 	list, err := sess.PaintChecked(scale)
 	if err != nil {

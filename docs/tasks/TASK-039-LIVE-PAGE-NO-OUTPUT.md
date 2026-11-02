@@ -354,9 +354,15 @@ Không có hai sweep song song; sweep live chạy riêng từng họ với `--ou
 
 1. **Nhánh C** — chưa đo được bao nhiêu trang chỉ cần `createDocumentFragment` + `insertBefore` là
    mở khoá; cần một task riêng với fixture cho từng API, vì mỗi API thêm một đường mutation DOM mới.
-2. **Nhánh D** — chưa đo blast radius của việc pump JS trong chế độ paced: mọi con số gate/bench/
-   screenshot hiện tại đều là "một lượt render đồng bộ"; bật pump sẽ đổi **toàn bộ** đường chuẩn,
-   nên nó không được làm ở đây.
+2. **Nhánh D** — **đã đo 2026-11-02 (BR-261), vẫn opt-in.** Chế độ paced (`-screenshot`, `-gate`,
+   `-bench`) đã pump mỗi vsync từ `fa198e4` (GOOSIE-PUMP-001); `cmd/goosie-headless` nay có
+   `-pump <duration>` chạy event loop trước khi dựng display list, và session được cấp invalidation
+   batch để timer thấy mutation. Blast radius trên 104 fixture `testdata/render`: PNG trước/sau
+   **byte-identical 104/104** khi pump off; corpus 13.587 ms không pump so với 68.269 ms với
+   `-pump 500ms` (+500 ms/fixture). Baseline mặc định sau thay đổi: gate 600 frame 5,00 s / 119,9 fps /
+   startup 148 ms / p99 2,019 ms / miss 5,27 %; bench 2000 frame 3,49 s / 573,8 fps / startup 22 ms /
+   p99 238 ms / miss 1,53 %; parity 104/104 (100 %), trung bình 96,34 %, known gaps 4 fixture / 6 band.
+   Chưa bật mặc định vì sẽ đổi nghĩa toàn bộ đường chuẩn; số trang live được cứu bởi pump chưa đo.
 3. **Nhánh A** — engine không vượt được bot management vì fingerprint TLS/H2 của Go (đo ở 5.1).
    Chưa biết chi phí/độ an toàn của việc bắt chước Chrome TLS (`crypto/tls` vs `utls`), và đây là
    quyết định chính sách chứ không phải bug sửa một dòng.

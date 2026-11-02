@@ -157,7 +157,7 @@ func scanTests(root string) (refs map[string][]string, skipping map[string]strin
 	for _, base := range []string{
 		filepath.Join(root, "test"),
 		filepath.Join(root, "internal"),
-		filepath.Join(root, "cmd", "goosie"),
+		filepath.Join(root, "cmd"),
 	} {
 		err := filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
