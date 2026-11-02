@@ -181,7 +181,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_test.go:TestJourneyStaleNavigationDoesNotOverwriteCurrent",
       "cmd/goosie/tab_lifecycle_test.go:TestStaleNavResultCannotPaintOverTheCurrentOne"
