@@ -2392,6 +2392,13 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 		}
 		return
 	}
+	// A target that names a live iframe navigates that browsing context, not the
+	// tab the form lives in. The runtime owns the frame load and reports whether
+	// the name matched; unmatched or reserved targets stay with the host below.
+	if s.jsRT != nil && (strings.EqualFold(method, "GET") || strings.EqualFold(method, "POST")) &&
+		s.jsRT.NavigateFormTargetToFrame(form, submitter) {
+		return
+	}
 	action := FormActionFor(form, submitter)
 	// GET always uses URL encoding, whatever enctype or formenctype says. A
 	// POST honours text/plain and multipart/form-data; anything else, including

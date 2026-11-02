@@ -332,6 +332,37 @@ func (r *Runtime) navigateFormTarget(form, submitter *dom.Node) {
 	r.navigateFormTargetWithTarget(form, submitter, "", false)
 }
 
+// NavigateFormTargetToFrame submits form into the named iframe it targets and
+// reports whether that browsing context exists. The host calls this after its
+// own validation and submit event, so the frame owns the navigation instead of
+// the host navigating the top-level tab. Targets that do not name a connected
+// iframe in the form's document, including _self and _blank, stay with the host.
+func (r *Runtime) NavigateFormTargetToFrame(form, submitter *dom.Node) bool {
+	if form == nil || form.Doc == nil || (r.domDoc != nil && r.domDoc != form.Doc) {
+		return false
+	}
+	target := strings.TrimSpace(form.GetAttribute("target"))
+	if isSubmitButton(submitter) && submitter.HasAttribute("formtarget") {
+		target = strings.TrimSpace(submitter.GetAttribute("formtarget"))
+	}
+	if target == "" || strings.HasPrefix(target, "_") {
+		return false
+	}
+	found := false
+	form.Doc.Node.Walk(func(node *dom.Node) bool {
+		if node.Element() && node.Data == "iframe" && node.GetAttribute("name") == target {
+			found = true
+			return false
+		}
+		return true
+	})
+	if !found {
+		return false
+	}
+	r.navigateFormTargetWithTarget(form, submitter, target, true)
+	return true
+}
+
 func (r *Runtime) navigateFormTargetWithTarget(form, submitter *dom.Node, targetOverride string, hasTargetOverride bool) {
 	if form == nil || r.constructingFormEntryList[form] {
 		return
