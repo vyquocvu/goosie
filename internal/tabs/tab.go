@@ -2,6 +2,7 @@ package tabs
 
 import (
 	"context"
+	"image"
 	"sync"
 
 	"github.com/vyquocvu/goosie/internal/engine"
@@ -44,6 +45,7 @@ type Tab struct {
 	blockedTrackers int
 	manifest        *manifest.Manifest
 	standaloneApp   bool
+	favicon         image.Image
 
 	Nav NavController
 }
@@ -256,4 +258,20 @@ func (t *Tab) SetStandaloneApp(standalone bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.standaloneApp = standalone
+}
+
+// Favicon returns the tab's decoded site icon, or nil when the site supplied
+// none (or it is still loading). The image is immutable once stored, so the
+// draw path may resample it without holding the tab lock.
+func (t *Tab) Favicon() image.Image {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.favicon
+}
+
+// SetFavicon stores the tab's decoded site icon; nil restores the placeholder.
+func (t *Tab) SetFavicon(icon image.Image) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.favicon = icon
 }

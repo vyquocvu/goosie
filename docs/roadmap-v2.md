@@ -38,7 +38,12 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 **Trạng thái "Thanh địa chỉ thông minh, gợi ý và mở lại tab" (cập nhật 2026-11-02):**
 - **Đã có trong mã:** `normalizeAddress` phân biệt URL/hostname với cụm từ, dùng template `{query}` của profile và fallback về công cụ mặc định khi template hỏng. Gợi ý omnibox gộp trang nội bộ, bookmark và history thành một danh sách xếp hạng frecency (visit × recency bucket; bookmark baseline 1.0), giữ lựa chọn tìm kiếm ở đầu, giới hạn 8 dòng và không đọc bookmark/history trong tab private hoặc phiên `-private`. Gõ phím debounce 50ms và được chạy từ `pumpChrome`; focus/click vẫn truy vấn ngay. Reopen Closed Tab (`Cmd+Shift+T`) khôi phục tab, URL, title, scroll và thứ tự stack.
 - **Kiểm thử tự động:** `cmd/goosie/normalize_url_test.go`, `cmd/goosie/suggestions_test.go`, `internal/toolbar/toolbar_test.go`, `cmd/goosie/reopen_tab_test.go`, `internal/history/history_test.go` bao phủ Unicode, ký tự đặc biệt, thứ hạng frecency, giới hạn 8 dòng, debounce, chọn bằng mũi tên/Enter/Esc, rò dữ liệu private và khôi phục tab.
-- **Còn thiếu:** native CUA trên app macOS (phiên không có display); trạng thái điều hướng (đang tải/lỗi/redirect) trong chrome; menu thao tác tab; favicon.
+- **Còn thiếu:** native CUA trên app macOS (phiên không có display).
+
+**Trạng thái "Menu thao tác tab và favicon" (cập nhật 2026-11-02):**
+- **Đã có trong mã:** chuột phải trên tab mở menu ngữ cảnh nhắm đúng tab đó (New Tab, Reload, Duplicate, Pin/Unpin, Close Tab, Close Other Tabs, Close Tabs to the Right, Reopen Closed Tab); đóng hàng loạt giải phóng session và navigation của từng tab trước khi gỡ. Tab strip dành cột icon 16px: favicon khai báo bằng `<link rel="icon">`, `shortcut icon` hoặc `apple-touch-icon` được tải bất đồng bộ qua client của tab (private client cho incognito), giải mã qua giới hạn `internal/image`, và chỉ áp dụng nếu navigation serial còn hiện hành. Tab không có icon vẽ glyph dự phòng; trình duyệt không tự gọi `/favicon.ico` để tránh request ẩn tới mọi origin.
+- **Kiểm thử tự động:** `cmd/goosie/favicon_test.go` (trích xuất link, decode ảnh hỏng, serial cũ, private client), `cmd/goosie/tab_menu_test.go`, `internal/tabs/favicon_test.go` (favicon và glyph dự phòng); archtest, `go vet`, race suite và gate suite PASS ngày 2026-11-02.
+- **Còn thiếu:** native CUA trên macOS (BLOCKED: phiên không có display); visual parity riêng cho chrome tab.
 
 **Cổng P0:** chạy trọn hành trình trên trang kiểm thử cục bộ và tập trang thực tế đã chọn; kiểm tra bằng native macOS và headless/Playwright ở phần có thể so sánh. Lỗi điều hướng phải hiện trong giao diện, không chỉ in ra stderr.
 
@@ -124,4 +129,4 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - Chính sách origin, cookie, tải xuống và dữ liệu riêng tư đi cùng tính năng dùng chúng. Rủi ro phát hành đã được chủ sản phẩm chấp nhận trong [bản lịch sử](roadmap-v2-history.md); roadmap UX này không tự thay đổi quyết định phát hành đó.
 - Color emoji: font bitmap màu (sbix/COLR như Apple Color Emoji) chưa được thư viện font hiện tại (golang.org/x/image/font/opentype) rasterize; glyph thiếu hiện được thay thế bằng tofu có advance ổn định 1em để giữ layout và không nuốt ký tự.
 
-**Việc bắt đầu tiếp theo:** P0 trạng thái điều hướng rõ ràng trong chrome và thao tác tab bằng menu, sau đó là favicon/biểu tượng dự phòng. Đây là phần còn lại của chuỗi mở và quay lại trang hằng ngày.
+**Việc bắt đầu tiếp theo:** P1 quyền riêng tư trong Settings (xóa history/cookie/cache/phiên theo phạm vi) và kiểm chứng CUA khi có phiên macOS có display.

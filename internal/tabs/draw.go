@@ -19,6 +19,12 @@ var (
 	// the same white, so the open tab reads as connected to the page chrome.
 	tabRadius = int32(8)
 	titleSize = int32(14)
+	// The icon column is reserved on every tab so titles start at the same x
+	// whether or not the site supplied an icon: a placeholder is drawn in the
+	// slot rather than collapsing the layout.
+	tabIconSize  = int32(16)
+	tabIconInset = int32(8)
+	tabTextGap   = int32(6)
 )
 
 // DrawTabBar renders the tab bar onto the top of buf. Layout is computed in
@@ -128,6 +134,7 @@ func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fon
 			title = "New Tab"
 		}
 	}
+	drawTabFavicon(buf, tab, lr, textColor, scale)
 	drawTabText(buf, title, r, textColor, fonts, scale)
 
 	if !tab.Pinned() {
@@ -141,6 +148,51 @@ func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fon
 
 func scaleRect(r frame.Rect, scale int32) frame.Rect {
 	return frame.Rect4(r.X0*scale, r.Y0*scale, r.X1*scale, r.Y1*scale)
+}
+
+// drawTabFavicon paints the site icon into the reserved icon column, resampling
+// it to 16 logical pixels. A tab without one shows the placeholder instead, so
+// the strip never has a ragged title edge.
+func drawTabFavicon(buf *frame.Bitmap, tab *Tab, lr frame.Rect, fallback frame.Color, scale int32) {
+	size := tabIconSize * scale
+	x := lr.X0 + tabIconInset*scale
+	y := lr.Y0 + (lr.H()-size)/2
+	dst := frame.Rect4(x, y, x+size, y+size)
+	if src := tab.Favicon(); src != nil {
+		b := src.Bounds()
+		if b.Dx() > 0 && b.Dy() > 0 {
+			srcRect := frame.Rect4(int32(b.Min.X), int32(b.Min.Y), int32(b.Max.X), int32(b.Max.Y))
+			buf.ScaleOver(src, srcRect, dst, buf.Bounds(), 255, nil)
+			return
+		}
+	}
+	drawTabPlaceholderIcon(buf, dst, fallback, scale)
+}
+
+// drawTabPlaceholderIcon strokes a page glyph with two text rules: a neutral
+// mark that reads as "document" at 16px on both light and dark tabs.
+func drawTabPlaceholderIcon(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32) {
+	if r.W() < 8*scale || r.H() < 8*scale {
+		return
+	}
+	thick := float64(scale) * 1.2
+	if thick < 1 {
+		thick = 1
+	}
+	insetX := float64(3 * scale)
+	insetY := 1.5 * float64(scale)
+	x0 := float64(r.X0) + insetX
+	y0 := float64(r.Y0) + insetY
+	x1 := float64(r.X1) - insetX
+	y1 := float64(r.Y1) - insetY
+	drawLineAA(buf, x0, y0, x1, y0, thick, c)
+	drawLineAA(buf, x0, y0, x0, y1, thick, c)
+	drawLineAA(buf, x0, y1, x1, y1, thick, c)
+	drawLineAA(buf, x1, y0, x1, y1, thick, c)
+	mid := (y0 + y1) / 2
+	step := float64(scale) * 2
+	drawLineAA(buf, x0+3*float64(scale), mid-step, x1-2*float64(scale), mid-step, thick, c)
+	drawLineAA(buf, x0+3*float64(scale), mid+step, x1-2*float64(scale), mid+step, thick, c)
 }
 
 // fillRoundedTop fills r with its two top corners rounded, leaving the bottom
@@ -174,9 +226,9 @@ func drawTabText(buf *frame.Bitmap, text string, tabRect frame.Rect, color frame
 		return
 	}
 	size := titleSize * scale
-	textX := tabRect.X0 + 12*scale
+	textX := tabRect.X0 + (tabIconInset+tabIconSize+tabTextGap)*scale
 	baseline := tabBaseline(tabRect, size, fonts)
-	maxW := tabRect.W() - (CloseBtnSize+CloseBtnMargin)*scale - 24*scale
+	maxW := tabRect.W() - (CloseBtnSize+CloseBtnMargin)*scale - (tabIconInset+tabIconSize+tabTextGap+12)*scale
 	if maxW < 0 {
 		maxW = 0
 	}

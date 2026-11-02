@@ -301,15 +301,22 @@ func (f *framePath) applyNavResult(result navResult) {
 	// Inspect the result document before publishing it to the active tab. Once
 	// visible, pointer and script events may mutate its DOM on the chrome thread.
 	manifestURL := ""
+	faviconURL := ""
 	docTitle := documentTitle(result.session)
-	if result.session != nil && result.session.Doc != nil && f.client != nil {
-		manifestURL = findManifestLink(&result.session.Doc.Node, result.url)
+	if result.session != nil && result.session.Doc != nil {
+		faviconURL = faviconURLFor(&result.session.Doc.Node, result.url)
+		if f.client != nil {
+			manifestURL = findManifestLink(&result.session.Doc.Node, result.url)
+		}
 	}
 
 	oldSession := tab.Session()
 	tab.SetLayer(result.layer)
 	tab.SetSession(result.session)
 	tab.SetBGColor(result.bgColor)
+	// A new document owns the icon column: the previous site's icon must not
+	// label it while the new one is still in flight.
+	tab.SetFavicon(nil)
 	tab.SetURL(result.url)
 	tabTitle := result.url
 	if strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
@@ -420,6 +427,9 @@ func (f *framePath) applyNavResult(result navResult) {
 					t.SetTitle(m.EffectiveName())
 				}
 			}(manifestURL, tab)
+		}
+		if faviconURL != "" {
+			go f.loadFavicon(tab, result.serial, faviconURL)
 		}
 	}
 	f.saveActiveSession()
